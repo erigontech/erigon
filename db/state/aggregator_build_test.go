@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -32,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // Fixture construction chooses individual steps without recovery planning.
@@ -127,13 +129,22 @@ func TestAggregatorBuildRecoversUnindexedFiles(t *testing.T) {
 			if test.accessorDir {
 				folder = dirs.SnapAccessors
 			}
-			require.Len(t, removeSnapshotFiles(t, filepath.Join(folder, test.pattern)), 2)
+			paths := removeSnapshotFiles(t, filepath.Join(folder, test.pattern))
+			require.Len(t, paths, 2)
+			// One accessor is missing and the other has an incomplete header.
+			var header []byte
+			if filepath.Ext(paths[1]) == ".kvei" {
+				// A zero-length existence filter is valid for a small data file.
+				header = []byte{1}
+			}
+			require.NoError(t, os.WriteFile(paths[1], header, 0o600))
 			agg = NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
 			t.Cleanup(agg.Close)
 			require.NoError(t, agg.OpenFolder(db))
 			agg.ForbidVisibilityLowering()
 
 			existing := snapshotFileIdentities(t, dirs)
+			delete(existing, paths[1])
 			finished, started := agg.buildFilesInBackground(asTemporalRoDB(db), lastTxNum, false, unboundedFinalityCtx)
 			require.True(t, started)
 			<-finished
@@ -141,6 +152,222 @@ func TestAggregatorBuildRecoversUnindexedFiles(t *testing.T) {
 			requireSnapshotFilesUnchanged(t, existing)
 		})
 	}
+}
+
+func buildSnapshotRecoveryStep(t *testing.T, db kv.RwDB, agg *Aggregator, key, firstValue []byte) {
+	t.Helper()
+	ctx := t.Context()
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		w := at.d[kv.ReceiptDomain].NewWriter(db)
+		defer w.Close()
+		require.NoError(t, w.PutWithPrev(key, firstValue, 1, nil))
+		require.NoError(t, w.PutWithPrev(key, []byte{8}, 2, firstValue))
+		require.NoError(t, w.Flush(ctx, tx))
+		iw := at.searchII(kv.LogAddrIdx).newWriter(db, agg.dirs.Tmp, false)
+		defer iw.close()
+		require.NoError(t, iw.Add(key, 1))
+		return iw.Flush(ctx, tx)
+	}))
+	require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), 0, unboundedFinalityCtx, nil))
+}
+
+func nextMinorSnapshotPath(t *testing.T, path string) string {
+	t.Helper()
+	base := filepath.Base(path)
+	current, err := version.ParseVersion(base)
+	require.NoError(t, err)
+	return filepath.Join(filepath.Dir(path), version.ReplaceVersion(base, current, current.BumpMinor()))
+}
+
+func TestAggregatorRepairsUnreadableHistoryAccessor(t *testing.T) {
+	const stepSize = uint64(10)
+	for _, build := range []string{"index", "step"} {
+		for _, variant := range []string{"current", "newer_minor"} {
+			t.Run(build+"/"+variant, func(t *testing.T) {
+				ctx := t.Context()
+				db, agg := testDbAndAggregatorv3(t, stepSize)
+				key, value := []byte{1}, []byte{7}
+				buildSnapshotRecoveryStep(t, db, agg, key, value)
+				dirs := agg.Dirs()
+				accessor := agg.d[kv.ReceiptDomain].History.vAccessorNewFilePath(0, 1)
+				agg.Close()
+				damaged := accessor
+				if variant == "newer_minor" {
+					damaged = nextMinorSnapshotPath(t, accessor)
+					require.NoError(t, os.Rename(accessor, damaged))
+				}
+				require.NoError(t, os.Truncate(damaged, 0))
+				agg = NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
+				t.Cleanup(agg.Close)
+				require.NoError(t, agg.OpenFolder(db))
+				existing := snapshotFileIdentities(t, dirs)
+				delete(existing, damaged)
+				if build == "index" {
+					require.NoError(t, agg.BuildMissedAccessors(ctx, db, 1))
+				} else {
+					require.NoError(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), 0, 1, unboundedFinalityCtx, false))
+					agg.background.Wait()
+				}
+				requireSnapshotFilesUnchanged(t, existing)
+				agg.CloseFilesNoReopen()
+				require.NoError(t, agg.OpenFolder(db))
+				at := agg.BeginFilesRo()
+				defer at.Close()
+				prev, found, err := at.d[kv.ReceiptDomain].ht.historySeekInFiles(key, 2)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.Equal(t, value, prev)
+			})
+		}
+	}
+}
+
+func TestAggregatorBuildRepairsUnreadableStepData(t *testing.T) {
+	const stepSize = uint64(10)
+	for _, ext := range []string{"kv", "v", "ef", "standalone_ef"} {
+		for _, pruned := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/pruned_%t", ext, pruned), func(t *testing.T) {
+				ctx := t.Context()
+				db, agg := testDbAndAggregatorv3(t, stepSize)
+				key, value := []byte{1}, []byte{7}
+				buildSnapshotRecoveryStep(t, db, agg, key, value)
+				d := agg.d[kv.ReceiptDomain]
+				path := map[string]string{
+					"kv":            d.kvNewFilePath(0, 1),
+					"v":             d.vNewFilePath(0, 1),
+					"ef":            d.efNewFilePath(0, 1),
+					"standalone_ef": agg.searchII(kv.LogAddrIdx).efNewFilePath(0, 1),
+				}[ext]
+				original, readErr := os.ReadFile(path)
+				require.NoError(t, readErr)
+				if pruned {
+					require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+						at := agg.BeginFilesRo()
+						defer at.Close()
+						if _, err := at.prune(ctx, tx, 0, true, nil); err != nil {
+							return err
+						}
+						// A prune pass can leave some rows from this step behind.
+						w := at.d[kv.ReceiptDomain].NewWriter(db)
+						defer w.Close()
+						require.NoError(t, w.PutWithPrev([]byte{9}, value, 3, nil))
+						require.NoError(t, w.Flush(ctx, tx))
+						iw := at.searchII(kv.LogAddrIdx).newWriter(db, agg.dirs.Tmp, false)
+						defer iw.close()
+						require.NoError(t, iw.Add([]byte{9}, 3))
+						return iw.Flush(ctx, tx)
+					}))
+				}
+				dirs := agg.Dirs()
+				agg.Close()
+				require.NoError(t, os.Truncate(path, 1))
+				agg = NewTest(dirs).StepSize(stepSize).SkipFilesDBGapCheck().MustOpen(ctx)
+				t.Cleanup(agg.Close)
+				require.NoError(t, agg.OpenFolder(db))
+				buildErr := agg.BuildFiles2(ctx, asTemporalRoDB(db), 0, 1, unboundedFinalityCtx, false)
+				agg.background.Wait()
+				if pruned {
+					require.ErrorContains(t, buildErr, "restore")
+					require.ErrorContains(t, buildErr, filepath.Base(path))
+					data, err := os.ReadFile(path)
+					require.NoError(t, err)
+					require.Len(t, data, 1)
+					require.NoError(t, dir.RemoveFile(path))
+					require.ErrorContains(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), 0, 1, unboundedFinalityCtx, false), filepath.Base(path))
+					require.NoFileExists(t, path)
+					return
+				}
+				require.NoError(t, buildErr)
+				data, err := os.ReadFile(path)
+				require.NoError(t, err)
+				require.Equal(t, original, data)
+				at := agg.BeginFilesRo()
+				defer at.Close()
+				prev, found, err := at.d[kv.ReceiptDomain].ht.historySeekInFiles(key, 2)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.Equal(t, value, prev)
+			})
+		}
+	}
+}
+
+func TestBuildPreservesUnreadableSnapshot(t *testing.T) {
+	const stepSize = uint64(10)
+	for _, variant := range []string{"published_data", "published_accessor", "newer_minor", "merged_range"} {
+		t.Run(variant, func(t *testing.T) {
+			ctx := t.Context()
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			buildSnapshotRecoveryStep(t, db, agg, []byte{1}, []byte{7})
+			dirs := agg.Dirs()
+			currentPath := agg.d[kv.ReceiptDomain].kvNewFilePath(0, 1)
+			btPath := agg.d[kv.ReceiptDomain].kvBtAccessorNewFilePath(0, 1)
+			mergedPath := agg.d[kv.ReceiptDomain].kvNewFilePath(0, 2)
+			agg.Close()
+			damaged := currentPath
+			switch variant {
+			case "newer_minor":
+				damaged = nextMinorSnapshotPath(t, currentPath)
+				require.NoError(t, os.Rename(currentPath, damaged))
+			case "merged_range":
+				damaged = mergedPath
+				require.NoError(t, os.Rename(currentPath, damaged))
+			case "published_data":
+				require.NoError(t, os.WriteFile(damaged+".torrent", nil, 0o600))
+			case "published_accessor":
+				require.NoError(t, os.WriteFile(btPath+".torrent", nil, 0o600))
+			}
+			require.NoError(t, os.Truncate(damaged, 1))
+			agg = NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
+			t.Cleanup(agg.Close)
+			require.NoError(t, agg.OpenFolder(db))
+			err := agg.BuildFiles2(ctx, asTemporalRoDB(db), 0, 1, unboundedFinalityCtx, false)
+			agg.background.Wait()
+			require.ErrorContains(t, err, "restore")
+			require.ErrorContains(t, err, filepath.Base(damaged))
+			info, err := os.Stat(damaged)
+			require.NoError(t, err)
+			require.EqualValues(t, 1, info.Size())
+			if damaged != currentPath {
+				require.NoFileExists(t, currentPath)
+			}
+		})
+	}
+}
+
+func TestUnreadableFirstFileRespectsBuildFloor(t *testing.T) {
+	const stepSize = uint64(10)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 3}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 3}})
+	path := agg.d[kv.ReceiptDomain].kvNewFilePath(0, 1)
+	require.NoError(t, os.WriteFile(path, []byte{1}, 0o600))
+	require.NoError(t, agg.OpenFolder(db))
+
+	plan, err := agg.readFileBuildPlan(t.Context(), db)
+	require.NoError(t, err)
+	require.Equal(t, kv.Step(3), plan.firstStep, "a first file ending below the shared ceiling cannot be published")
+	require.NoError(t, agg.BuildFiles2(t.Context(), asTemporalRoDB(db), 0, 1, unboundedFinalityCtx, false))
+	agg.background.Wait()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, []byte{1}, data)
+}
+
+func TestStepDataRepairRemovesOnlyDependentAccessors(t *testing.T) {
+	folder := t.TempDir()
+	touchFiles(t, folder, "v2.0-receipt.0-1.bt", "v2.1-receipt.0-1.bt", "backup-receipt.0-1.bt", "v2.0-receipt.1-2.bt")
+	accessorDir := filepath.Join(folder, "v3.0-receipt.0-1.bt")
+	require.NoError(t, os.Mkdir(accessorDir, 0o700))
+
+	require.NoError(t, removeStepAccessors(filepath.Join(folder, "v3.0-receipt.0-1.kv"), folder, []string{".bt"}))
+	require.NoFileExists(t, filepath.Join(folder, "v2.0-receipt.0-1.bt"))
+	require.NoFileExists(t, filepath.Join(folder, "v2.1-receipt.0-1.bt"))
+	require.FileExists(t, filepath.Join(folder, "backup-receipt.0-1.bt"))
+	require.FileExists(t, filepath.Join(folder, "v2.0-receipt.1-2.bt"))
+	require.DirExists(t, accessorDir)
 }
 
 func TestAggregatorBuildResumesCommitmentBehindState(t *testing.T) {

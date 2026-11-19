@@ -509,6 +509,9 @@ func openBtreeIndex(indexPath string, kvGetter *seg.Reader, inMem bool) (bt *BtI
 		return nil, err
 	}
 	if idx.size == 0 {
+		if kvGetter.Count() != 0 {
+			return nil, fmt.Errorf("btindex: empty index %s for a nonempty data file", indexPath)
+		}
 		return idx, nil
 	}
 

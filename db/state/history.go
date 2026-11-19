@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -189,12 +188,8 @@ func (h *History) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*F
 	if !h.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissedAccessors(source, h.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.MatchVersionedFile(h.vAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
-		if err != nil {
-			panic(err)
-		}
-		return []string{fPath}
+	return fileItemsWithMissedAccessors(source, h.stepSize, statecfg.AccessorHashMap, func(fromStep, toStep kv.Step) bool {
+		return dl[h.vAccessorFileNameMask(fromStep, toStep)]
 	})
 }
 
@@ -524,11 +519,13 @@ func (w *historyBufferedWriter) valsCollector() *etl.Collector {
 }
 
 type HistoryCollation struct {
-	historyComp   *seg.PagedWriter
-	efHistoryComp *seg.Writer
-	historyPath   string
-	efHistoryPath string
-	efBaseTxNum   uint64
+	historyComp     *seg.PagedWriter
+	efHistoryComp   *seg.Writer
+	historyPath     string
+	efHistoryPath   string
+	efBaseTxNum     uint64
+	historyRecovery stepDataRecovery
+	indexRecovery   stepDataRecovery
 }
 
 func (c HistoryCollation) Close() {
@@ -738,15 +735,25 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if err = historyWriter.Flush(); err != nil {
 		return HistoryCollation{}, fmt.Errorf("add %s history val: %w", h.FilenameBase, err)
 	}
+	historyRecovery, err := h.dirtyFiles.stepDataRecovery(roTx, h.ValuesTable, historyPath, txFrom, txTo, cnt)
+	if err != nil {
+		return HistoryCollation{}, err
+	}
+	indexRecovery, err := h.InvertedIndex.dirtyFiles.stepDataRecovery(roTx, h.ValuesTable, efHistoryPath, txFrom, txTo, cnt)
+	if err != nil {
+		return HistoryCollation{}, err
+	}
 	closeComp = false
 	mxCollationSizeHist.SetUint64(uint64(historyWriter.Count()))
 
 	return HistoryCollation{
-		efHistoryComp: invIndexWriter,
-		efHistoryPath: efHistoryPath,
-		efBaseTxNum:   uint64(step) * h.stepSize,
-		historyPath:   historyPath,
-		historyComp:   historyWriter,
+		efHistoryComp:   invIndexWriter,
+		efHistoryPath:   efHistoryPath,
+		efBaseTxNum:     uint64(step) * h.stepSize,
+		historyPath:     historyPath,
+		historyComp:     historyWriter,
+		historyRecovery: historyRecovery,
+		indexRecovery:   indexRecovery,
 	}, nil
 }
 
@@ -900,48 +907,30 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 		collation.efHistoryComp.DisableFsync()
 	}
 
-	{
-		if err = buildMissingFile(collation.efHistoryPath, collation.efHistoryComp.Compress); err != nil {
-			return HistoryFiles{}, fmt.Errorf("compress %s .ef history: %w", h.FilenameBase, err)
-		}
+	efHistoryDecomp, err = openOrBuildStepData(collation.efHistoryPath, collation.efHistoryComp.Compress, collation.indexRecovery, h.dirs.SnapAccessors, ".efi")
+	if err != nil {
+		return HistoryFiles{}, fmt.Errorf("build %s history index: %w", h.FilenameBase, err)
 	}
-	{
-		if err = buildMissingFile(collation.historyPath, collation.historyComp.Compress); err != nil {
-			return HistoryFiles{}, fmt.Errorf("compress %s .v history: %w", h.FilenameBase, err)
-		}
+	historyDecomp, err = openOrBuildStepData(collation.historyPath, collation.historyComp.Compress, collation.historyRecovery, h.dirs.SnapAccessors, ".vi")
+	if err != nil {
+		return HistoryFiles{}, fmt.Errorf("build %s history: %w", h.FilenameBase, err)
 	}
 	collation.Close()
-
-	efHistoryDecomp, err = seg.NewDecompressor(collation.efHistoryPath)
-	if err != nil {
-		return HistoryFiles{}, fmt.Errorf("open %s .ef history decompressor: %w", h.FilenameBase, err)
-	}
 	{
-		if err := buildMissingFile(h.InvertedIndex.efAccessorNewFilePath(step, step+1), func() error {
+		efHistoryIdx, err = openOrBuildAccessor(h.InvertedIndex.efAccessorNewFilePath(step, step+1), h.InvertedIndex.openHashMapAccessor, func() error {
 			return h.InvertedIndex.buildMapAccessor(ctx, step, step+1, efHistoryDecomp, ps)
-		}); err != nil {
-			return HistoryFiles{}, fmt.Errorf("build %s .ef history idx: %w", h.FilenameBase, err)
+		})
+		if err != nil {
+			return HistoryFiles{}, fmt.Errorf("open or build %s .ef history idx: %w", h.FilenameBase, err)
 		}
-		if efHistoryIdx, err = h.InvertedIndex.openHashMapAccessor(h.InvertedIndex.efAccessorNewFilePath(step, step+1)); err != nil {
-			return HistoryFiles{}, err
-		}
-	}
-
-	historyDecomp, err = seg.NewDecompressor(collation.historyPath)
-	if err != nil {
-		return HistoryFiles{}, fmt.Errorf("open %s v history decompressor: %w", h.FilenameBase, err)
 	}
 
 	historyIdxPath := h.vAccessorNewFilePath(step, step+1)
-	err = buildMissingFile(historyIdxPath, func() error {
+	historyIdx, err = openOrBuildAccessor(historyIdxPath, posidx.Open, func() error {
 		return h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
 	})
 	if err != nil {
-		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.FilenameBase, err)
-	}
-
-	if historyIdx, err = posidx.Open(historyIdxPath); err != nil {
-		return HistoryFiles{}, fmt.Errorf("open idx: %w", err)
+		return HistoryFiles{}, fmt.Errorf("open or build %s .vi: %w", h.FilenameBase, err)
 	}
 	closeComp = false
 	return HistoryFiles{
