@@ -566,7 +566,7 @@ mid-run crash discards any in-progress work in snap/rebuild/domain/ and
 Phase 1 restarts from scratch. --continue is mutually exclusive with
 --restore.
 
-For --v3, --no-domain skips domain files and --no-history skips history files; a split run converts history (--no-domain) first.
+For --v3, history is converted when snapshots/history holds commitment .v files; --no-domain skips domain files and --no-history skips history files; a split run converts history (--no-domain) first. --no-domain with no commitment .v files, or --no-history with no commitment .kv files, is an error.
 
 Examples:
   integration commitment convert --datadir /path/to/datadir --chain mainnet
@@ -643,6 +643,15 @@ func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, o
 	}
 	if err := dbstate.MatchCommitmentSchemaToFiles(dirs); err != nil {
 		return err
+	}
+	if opts.TargetV3 && !opts.NoHistory {
+		hasHistory, err := dbstate.HasCommitmentHistoryFiles(dirs)
+		if err != nil {
+			return err
+		}
+		if hasHistory {
+			statecfg.EnableHistoricalCommitment()
+		}
 	}
 	settings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {

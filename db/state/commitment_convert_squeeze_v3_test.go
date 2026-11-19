@@ -74,7 +74,7 @@ func TestConvertCommitmentFiles_SqueezedLegacyToV3Folds(t *testing.T) {
 	require.Positive(t, squeezed)
 	require.NoError(t, dir.RemoveAll(filepath.Join(agg.Dirs().Snap, "backup")))
 
-	db, agg = reopenForConvert(t, db, agg, legacySchema)
+	db, agg = reopenForConvert(t, db, agg, &legacySchema)
 	oldBatch := state.SetCommitmentV3BatchForTest(16)
 	t.Cleanup(func() { state.SetCommitmentV3BatchForTest(oldBatch) })
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})

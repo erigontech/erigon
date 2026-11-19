@@ -80,12 +80,18 @@ func fillAccountState(t *testing.T, db kv.TemporalRwDB, txs uint64) (*state.Aggr
 	tx, domains := temporaltest.NewTestTxSD(t, db)
 	roots := make([]common.Hash, txs)
 	for txNum := range txs {
-		addr := make([]byte, 20)
-		binary.BigEndian.PutUint64(addr[12:], txNum%5+1)
-		acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
-		prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, addr)
-		require.NoError(t, err)
-		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, prev))
+		writes := uint64(1)
+		if txNum == 0 {
+			writes = 2
+		}
+		for i := range writes {
+			addr := make([]byte, 20)
+			binary.BigEndian.PutUint64(addr[12:], (txNum+i)%5+1)
+			acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
+			prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, addr)
+			require.NoError(t, err)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, prev))
+		}
 		root, err := domains.ComputeCommitment(t.Context(), tx, true, txNum, txNum, "", nil)
 		require.NoError(t, err)
 		roots[txNum] = common.Hash(root)

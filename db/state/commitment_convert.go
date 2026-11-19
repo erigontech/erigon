@@ -630,6 +630,9 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 			}
 		}
 	}
+	if err := requireV3SideFiles(at.Dirs(), opts); err != nil {
+		return err
+	}
 	allFiles := at.Files(kv.CommitmentDomain)
 	files := make(VisibleFiles, 0, len(allFiles))
 	if convertDomain {
@@ -1027,6 +1030,46 @@ func refuseV3CommitmentFiles(dirs datadir.Dirs) error {
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func HasCommitmentHistoryFiles(d datadir.Dirs) (bool, error) {
+	return hasCommitmentDataFile(d.SnapHistory, ".v")
+}
+
+func hasCommitmentDataFile(dirPath, ext string) (bool, error) {
+	found := false
+	err := forEachCommitmentDataFile(dirPath, func(name string, _ uint64) error {
+		found = found || filepath.Ext(name) == ext
+		return nil
+	})
+	return found, err
+}
+
+func requireV3SideFiles(dirs datadir.Dirs, opts ConvertOpts) error {
+	if !opts.TargetV3 {
+		return nil
+	}
+	if opts.NoDomain {
+		return requireCommitmentFiles(dirs.SnapHistory, ".v", "history", "--no-domain")
+	}
+	if opts.NoHistory {
+		if err := preflightBackupDir(filepath.Join(dirs.Snap, "backup", "domains")); err != nil {
+			return err
+		}
+		return requireCommitmentFiles(dirs.SnapDomain, ".kv", "domain", "--no-history")
+	}
+	return nil
+}
+
+func requireCommitmentFiles(dirPath, ext, kind, flag string) error {
+	found, err := hasCommitmentDataFile(dirPath, ext)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("[commitment_convert] no commitment %s files in snapshots/%s; %s leaves nothing to convert", kind, kind, flag)
 	}
 	return nil
 }
