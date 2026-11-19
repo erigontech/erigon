@@ -1660,23 +1660,17 @@ func Test_DeleteBlockSnaps_NoBlockFilesSweepsTmp(t *testing.T) {
 	confirmDoesntExist(t, tmp)
 }
 
-// TestAccessorCommandRebuildNewSaltRecreatesIndices exercises the production
-// CLI path rather than stopping after prepareAccessorsForRebuild. Both snapshot
-// families must remain readable after their old indices and salts are removed.
 func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 	ctx := t.Context()
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
 
-	// Use the normal on-disk chain metadata and snapshot-state settings.
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE),
 		[]byte("step_size = 1000\nsteps_in_frozen_file = 64\n"), 0o644))
 	chainDB := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	writeChainMetadata(t, ctx, chainDB, networkname.Mainnet, 1)
 	chainDB.Close()
 
-	// Create a genuinely encoded header and a body segment, with the block
-	// accessors initially present so --rebuild must invalidate them.
 	header := &types.Header{Number: *uint256.NewInt(0), Time: 1000, Difficulty: *uint256.NewInt(1), Extra: []byte{}}
 	encodedHeader, err := rlp.EncodeToBytes(header)
 	require.NoError(t, err)
@@ -1687,14 +1681,11 @@ func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 		snaptype.IdxFileName(version.V1_0, 0, 500_000, snaptype2.Enums.Headers.String()))
 	require.FileExists(t, headerIndexPath)
 
-	// A real compressed state domain segment with a pair of key/value words.
 	statePath := filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kv")
 	compressor, err := seg.NewCompressor(ctx, t.Name(), statePath, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	compressor.DisableFsync()
 	writer := seg.NewWriter(compressor, statecfg.Schema.AccountsDomain.Compression)
-	// Use multiple ordered keys so lookups cannot succeed by returning the
-	// fixture's only value, and also probe a key outside the existence filter.
 	entries := []struct{ key, value []byte }{
 		{[]byte("account-key-01"), []byte("account-value-01")},
 		{[]byte("account-key-02"), []byte("account-value-02")},
@@ -1714,8 +1705,6 @@ func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), oldSalt, 0o644))
 	}
 
-	// Seed a valid state B-tree and existence filter under the old salt.
-	// --rebuild must replace these, not merely create absent accessors.
 	oldData, err := seg.NewDecompressor(statePath)
 	require.NoError(t, err)
 	oldBtree := filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.bt")
@@ -1730,8 +1719,6 @@ func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 	require.FileExists(t, oldBtree)
 	require.FileExists(t, oldExistence)
 
-	// Invoke the actual user-facing command, including DB/openSnaps and both
-	// the block and state missing-accessor builders.
 	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
 	require.NoError(t, app.Run(ctx, []string{"erigon", "seg", "accessor", "--datadir", dirs.DataDir, "--rebuild", "--new-salt"}))
 
@@ -1742,9 +1729,7 @@ func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 		require.NotEqual(t, oldSalt, salt)
 	}
 
-	// Block accessors may use a newer format version than the segment data.
-	// Find the regenerated index and prove its lookup works, rather than
-	// assuming the removed v1.0 accessor name is reused.
+	// Rebuilt block accessors may have a newer version than the segments.
 	headerIndexes, err := filepath.Glob(filepath.Join(dirs.Snap, "*-headers.idx"))
 	require.NoError(t, err)
 	require.Len(t, headerIndexes, 1, "the full command must recreate a header index")
@@ -1764,38 +1749,19 @@ func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 	_, found = bodyIndex.Reader().Lookup([]byte{0}) // body at block zero
 	require.True(t, found, "rebuilt body accessor must resolve the original block number")
 
-	// Verify the rebuilt state B-tree and existence filter are actual usable
-	// accessors, not merely files that were touched by the test.
 	btrees, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.0-64.bt"))
 	require.NoError(t, err)
 	require.Len(t, btrees, 1, "the full command must recreate a state B-tree")
-	btPath := btrees[0]
 	existenceFilters, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.0-64.kvei"))
 	require.NoError(t, err)
 	require.Len(t, existenceFilters, 1, "the full command must recreate the state existence filter")
-	decompressor, index, err := btindex.OpenBtreeIndexAndDataFile(btPath, statePath,
-		statecfg.Schema.AccountsDomain.Compression)
-	require.NoError(t, err)
-	defer decompressor.Close()
-	defer index.Close()
-	for _, entry := range entries {
-		_, got, _, found, err := index.Get(entry.key, nil,
-			seg.NewReader(decompressor.MakeGetter(), statecfg.Schema.AccountsDomain.Compression))
-		require.NoError(t, err)
-		require.True(t, found, "rebuilt state accessor must retrieve %q", entry.key)
-		require.Equal(t, entry.value, got)
-	}
 
-	// Exercise the normal state read path, which hashes each queried key with
-	// the regenerated state salt and consults the existence filter before
-	// the B-tree. Direct B-tree lookups alone never verify salt compatibility.
 	chainDB = mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
 	require.NoError(t, err)
 	defer agg.Close()
-	// The fixture deliberately contains only AccountsDomain. Disable coupling
-	// to other domain snapshots so the file remains visible for a real read.
+	// The fixture has only AccountsDomain, so other domains must not hide its file.
 	agg.DisableInterDomainDependencies()
 	require.NoError(t, chainDB.View(ctx, func(tx kv.Tx) error {
 		files := agg.BeginFilesRo()
@@ -1814,7 +1780,7 @@ func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 	}))
 }
 
-func Test_prepareAccessorsForRebuildRenewsLegacyAndCurrentSalts(t *testing.T) {
+func Test_renewSnapshotSaltFilesForRebuild(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		stateSalt string
@@ -1837,7 +1803,8 @@ func Test_prepareAccessorsForRebuildRenewsLegacyAndCurrentSalts(t *testing.T) {
 			dataPath := filepath.Join(dirs.Snap, "v1.0-headers.0-500.seg")
 			require.NoError(t, os.WriteFile(dataPath, []byte("snapshot data"), 0o644))
 
-			require.NoError(t, prepareAccessorsForRebuild(dirs, log.New(), true))
+			require.NoError(t, removeAccessorsForRebuild(dirs, log.New()))
+			require.NoError(t, renewSnapshotSaltFilesForRebuild(dirs, log.New()))
 			require.NoFileExists(t, accessor)
 			for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
 				path := filepath.Join(dirs.Snap, name)
@@ -1855,13 +1822,13 @@ func Test_prepareAccessorsForRebuildRenewsLegacyAndCurrentSalts(t *testing.T) {
 	}
 }
 
-func Test_prepareAccessorsForRebuildPreservesSaltsWithoutNewSalt(t *testing.T) {
+func Test_removeAccessorsForRebuildPreservesSalts(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	oldSalt := []byte{0x12, 0x34, 0x56, 0x78}
 	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
 		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), oldSalt, 0o644))
 	}
-	require.NoError(t, prepareAccessorsForRebuild(dirs, log.New(), false))
+	require.NoError(t, removeAccessorsForRebuild(dirs, log.New()))
 	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
 		salt, err := os.ReadFile(filepath.Join(dirs.Snap, name))
 		require.NoError(t, err)

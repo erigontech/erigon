@@ -2702,9 +2702,7 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 	return nil
 }
 
-// renewSnapshotSaltFilesForRebuild replaces both snapshot salt families. Call it
-// only after removing accessors: retained accessors must never be opened with a
-// newly generated salt. The ordinary rebuild path keeps the original salts.
+// renewSnapshotSaltFilesForRebuild must run after removeAccessorsForRebuild: an accessor built with the old salt must never be opened with the new one.
 func renewSnapshotSaltFilesForRebuild(dirs datadir.Dirs, logger log.Logger) error {
 	for _, name := range []string{
 		"salt-state.txt", "salt-state.txt.torrent",
@@ -2716,8 +2714,6 @@ func renewSnapshotSaltFilesForRebuild(dirs datadir.Dirs, logger log.Logger) erro
 			return fmt.Errorf("rebuild: remove %s: %w", path, err)
 		}
 	}
-	// The accessor builder may open snapshot salts before the downloader has
-	// a chance to recover them. Generate both here before rebuilding indices.
 	if _, err := snaptype.LoadSalt(dirs.Snap, true, logger); err != nil {
 		return fmt.Errorf("rebuild: generate block salt: %w", err)
 	}
@@ -2995,20 +2991,6 @@ func removeAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger) error {
 	return nil
 }
 
-// prepareAccessorsForRebuild performs the pre-openSnaps phase of the accessor
-// command. The order matters: first invalidate every accessor that was built
-// with the old salt, then (optionally) renew the salts before index builders
-// open the snapshot files.
-func prepareAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger, newSalt bool) error {
-	if err := removeAccessorsForRebuild(dirs, logger); err != nil {
-		return err
-	}
-	if newSalt {
-		return renewSnapshotSaltFilesForRebuild(dirs, logger)
-	}
-	return nil
-}
-
 // indexAggOpts skip the startup gap check: `snapshots index` rebuilds the accessors whose absence makes it refuse.
 var indexAggOpts = []func(state.AggOpts) state.AggOpts{state.AggOpts.SkipFilesDBGapCheck}
 
@@ -3025,8 +3007,13 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	defer chainDB.Close()
 
 	if rebuild {
-		if err := prepareAccessorsForRebuild(dirs, logger, newSalt); err != nil {
+		if err := removeAccessorsForRebuild(dirs, logger); err != nil {
 			return err
+		}
+		if newSalt {
+			if err := renewSnapshotSaltFilesForRebuild(dirs, logger); err != nil {
+				return err
+			}
 		}
 	}
 
