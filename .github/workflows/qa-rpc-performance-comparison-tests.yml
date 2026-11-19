@@ -754,6 +754,11 @@ jobs:
         if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_classes')
         continue-on-error: true
         timeout-minutes: ${{ needs.setup.outputs.rpc_test == 'eth_subscribe_classes' && 30 || 20 }}
+        env:
+          # On 4 cores rpc_perf reads a burst of heads more slowly than the clients write it, so the fan-out
+          # measured the tool. It gets cores 8-15 here and shares 8-11 with the client, which serves these
+          # subscriptions with a fraction of one core.
+          RPC_PERF_CPUS: 8-15,24-31
         run: |
           sequence=500:120
           if [ "$RPC_TEST" = "eth_subscribe_classes" ]; then sequence=500:300; fi
