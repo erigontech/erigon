@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"testing"
+	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
@@ -29,7 +30,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -264,4 +267,44 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 
 	require.Len(t, out, 1)
 	require.ErrorIs(t, (<-out).err, v3.ErrRecordFormat, "compute-ahead must read commitment records through the prefetch map")
+}
+
+func TestBranchPrefetcherDrainSortedOutlastsChunksInFlight(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	p := newBranchPrefetcher(context.Background(), db)
+	defer p.close()
+	p.gate.RLock()
+	for i := range 600 {
+		p.add(prefetchItem{account: [32]byte{0: byte(i), 1: byte(i >> 8)}})
+	}
+	done := make(chan struct{})
+	go func() {
+		p.drainSorted()
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("drainSorted returned with a chunk in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+	p.gate.RUnlock()
+	<-done
+	require.Empty(t, p.work)
+}
+
+func TestBranchPrefetcherFollowsPreExecTouchesUntilStopped(t *testing.T) {
+	p := newPrefetchRecords()
+	p.work = make(chan prefetchItem, 64)
+	p.blockNum, p.parentHash = 7, common.Hash{1}
+	touches := &commitmentdb.PreExecTouches{BlockNum: 7, ParentHash: common.Hash{1}, C: make(chan []commitmentdb.PathTouch, 2)}
+	commitmentdb.PublishPreExecTouches(touches)
+	p.follow()
+	touches.C <- []commitmentdb.PathTouch{{Account: [32]byte{1}}, {Account: [32]byte{2}, Slot: [32]byte{3}, Storage: true}}
+	require.Eventually(t, func() bool { return len(p.work) == 2 }, time.Second, time.Millisecond)
+	require.Equal(t, prefetchItem{account: [32]byte{1}}, <-p.work)
+	require.Equal(t, prefetchItem{account: [32]byte{2}, slot: [32]byte{3}, storage: true}, <-p.work)
+	p.stopFollow()
+	touches.C <- []commitmentdb.PathTouch{{Account: [32]byte{4}}}
+	time.Sleep(5 * time.Millisecond)
+	require.Empty(t, p.work)
 }

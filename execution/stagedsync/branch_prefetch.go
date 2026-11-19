@@ -20,16 +20,25 @@ import (
 	"bytes"
 	"context"
 	"hash/maphash"
+	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
+var prefetchDrain = dbg.EnvBool("V3_PREFETCH_DRAIN", false)
+
 const (
 	branchPrefetchWorkers  = 8
+	branchPrefetchBurst    = 8
 	branchPrefetchQueue    = 1 << 16
 	branchPrefetchPerTx    = 256
 	branchPrefetchShards   = 64
@@ -40,6 +49,10 @@ type prefetchItem struct {
 	account [32]byte
 	slot    [32]byte
 	storage bool
+}
+
+func comparePrefetchItems(a, b prefetchItem) int {
+	return commitmentdb.ComparePathTouch(commitmentdb.PathTouch{Account: a.account, Slot: a.slot, Storage: a.storage}, commitmentdb.PathTouch{Account: b.account, Slot: b.slot, Storage: b.storage})
 }
 
 type prefetchedRecord struct {
@@ -71,20 +84,28 @@ type branchPrefetcher struct {
 
 	pausing          atomic.Bool
 	dropped, drained atomic.Uint64
+
+	ctx        context.Context
+	db         kv.TemporalRoDB
+	blockNum   uint64
+	parentHash common.Hash
+	stop       chan struct{}
+	stopOnce   sync.Once
+	feed       sync.WaitGroup
 }
 
 func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB) *branchPrefetcher {
 	p := newPrefetchRecords()
 	p.work = make(chan prefetchItem, branchPrefetchQueue)
-	ctx = kv.WithNonBlockingAcquire(ctx)
+	p.ctx, p.db = kv.WithNonBlockingAcquire(ctx), db
 	for range branchPrefetchWorkers {
-		p.wg.Go(func() { p.run(ctx, db) })
+		p.wg.Go(p.run)
 	}
 	return p
 }
 
 func newPrefetchRecords() *branchPrefetcher {
-	p := &branchPrefetcher{seed: maphash.MakeSeed()}
+	p := &branchPrefetcher{seed: maphash.MakeSeed(), stop: make(chan struct{})}
 	for i := range p.shards {
 		p.shards[i].records = make(map[string]prefetchedRecord)
 	}
@@ -127,6 +148,7 @@ func (p *branchPrefetcher) resume() {
 }
 
 func (p *branchPrefetcher) close() {
+	p.stopFollow()
 	p.drain()
 	close(p.work)
 	p.wg.Wait()
@@ -175,27 +197,103 @@ func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
 	return data
 }
 
-func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
+func (p *branchPrefetcher) run() {
 	for it := range p.work {
-		p.gate.RLock()
-		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+		p.chunk(it)
+	}
+}
+
+func (p *branchPrefetcher) chunk(it prefetchItem) {
+	p.gate.RLock()
+	defer p.gate.RUnlock()
+	tx, err := p.db.BeginTemporalRo(p.ctx) //nolint:gocritic
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+	p.walkChunk(it, func(key []byte) []byte {
+		if data, _, ok := p.get(key); ok {
+			return data
+		}
+		data, step, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
 		if err != nil {
-			p.gate.RUnlock()
-			continue
+			return nil
 		}
-		read := func(key []byte) []byte {
-			if data, _, ok := p.get(key); ok {
-				return data
+		return p.put(key, data, step)
+	})
+}
+
+func (p *branchPrefetcher) follow() {
+	p.feed.Go(func() {
+		for {
+			var batches chan []commitmentdb.PathTouch
+			var retry <-chan time.Time
+			if t := commitmentdb.PreExecTouchesFor(p.blockNum, p.parentHash); t != nil {
+				batches = t.C
+			} else {
+				retry = time.After(time.Millisecond)
 			}
-			data, step, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
-			if err != nil {
-				return nil
+			select {
+			case batch := <-batches:
+				for _, it := range batch {
+					p.add(prefetchItem{account: it.Account, slot: it.Slot, storage: it.Storage})
+				}
+			case <-retry:
+			case <-p.stop:
+				return
 			}
-			return p.put(key, data, step)
 		}
-		p.walkChunk(it, read)
-		tx.Rollback()
-		p.gate.RUnlock()
+	})
+}
+
+func (p *branchPrefetcher) stopFollow() {
+	p.stopOnce.Do(func() { close(p.stop) })
+	p.feed.Wait()
+}
+
+func (p *branchPrefetcher) drainSorted() {
+	backlog := make([]prefetchItem, 0, len(p.work))
+collect:
+	for len(backlog) < cap(backlog) {
+		select {
+		case it, ok := <-p.work:
+			if !ok {
+				break collect
+			}
+			backlog = append(backlog, it)
+		default:
+			break collect
+		}
+	}
+	slices.SortFunc(backlog, comparePrefetchItems)
+	for _, it := range backlog {
+		p.add(it)
+	}
+	for range branchPrefetchBurst {
+		p.wg.Go(func() {
+			for {
+				select {
+				case it, ok := <-p.work:
+					if !ok {
+						return
+					}
+					p.chunk(it)
+				default:
+					return
+				}
+			}
+		})
+	}
+	for {
+		if len(p.work) == 0 {
+			p.gate.Lock()
+			queued := len(p.work)
+			p.gate.Unlock()
+			if queued == 0 {
+				return
+			}
+		}
+		runtime.Gosched()
 	}
 }
 

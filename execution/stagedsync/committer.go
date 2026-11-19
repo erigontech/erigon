@@ -295,7 +295,11 @@ func newCommitmentCalculator(
 			}
 		}
 		cc.branchPrefetch = newBranchPrefetcher(workCtx, db)
+		cc.branchPrefetch.blockNum, cc.branchPrefetch.parentHash = cc.readAtNum+1, cc.readAtHash
 		asOfReader.prefetched = cc.branchPrefetch
+		if exec.PreExecQueueOn() {
+			cc.branchPrefetch.follow()
+		}
 	}
 	if dbg.BALCommitmentWarmupReaders() > 0 {
 		cc.prefetchFn = func(plainKey []byte) {
@@ -765,6 +769,12 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // buffer rather than compute()'s shared one.
 func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
 	cc.finishPrefetch()
+	if cc.branchPrefetch != nil {
+		cc.branchPrefetch.stopFollow()
+		if prefetchDrain {
+			cc.branchPrefetch.drainSorted()
+		}
+	}
 	cc.branchPrefetch.pause()
 	defer cc.branchPrefetch.resume()
 	sdCtx := cc.doms.GetCommitmentContext()

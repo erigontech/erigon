@@ -19,6 +19,7 @@ package exec
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -45,10 +47,16 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-var preExecOn = dbg.EnvBool("V3_PREEXEC", false)
+var (
+	preExecOn    = dbg.EnvBool("V3_PREEXEC", false)
+	preExecQueue = dbg.EnvBool("V3_PREEXEC_QUEUE", false)
+)
+
+func PreExecQueueOn() bool { return preExecOn && preExecQueue }
 
 const (
 	preExecWorkers  = 4
+	preExecBatch    = 8
 	preExecTxGas    = 1 << 24
 	preExecBlockGas = 1 << 28
 )
@@ -74,6 +82,11 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 	signer := types.MakeSigner(pe.config, header.Number.Uint64(), header.Time)
 	var next, paths, gasLeft atomic.Int64
 	gasLeft.Store(preExecBlockGas)
+	var touches chan []commitmentdb.PathTouch
+	if preExecQueue {
+		touches = make(chan []commitmentdb.PathTouch, 1024)
+		commitmentdb.PublishPreExecTouches(&commitmentdb.PreExecTouches{BlockNum: header.Number.Uint64(), ParentHash: header.ParentHash, C: touches})
+	}
 	wg, ctx := errgroup.WithContext(ctx)
 	for w := range min(preExecWorkers, secp256k1.NumOfContexts(), len(txns)) {
 		cryptoContext := secp256k1.ContextForThread(w)
@@ -94,14 +107,17 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 			}
 			blockCtx := protocol.NewEVMBlockContext(header, blockHash, pe.engine, accounts.NilAddress, pe.config)
 			chainRules := blockCtx.Rules(pe.config)
-			toucher := &commitmentToucher{ctx: ctx, read: func(key []byte) []byte {
+			toucher := &commitmentToucher{ctx: ctx, out: touches, read: func(key []byte) []byte {
 				v, _, err := ttx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
 				if err != nil {
 					return nil
 				}
 				return v
 			}}
-			defer func() { paths.Add(int64(toucher.paths)) }()
+			defer func() {
+				toucher.flush()
+				paths.Add(int64(toucher.paths))
+			}()
 			for i := int(next.Add(1)) - 1; i < len(txns); i = int(next.Add(1)) - 1 {
 				if err := ctx.Err(); err != nil {
 					return err
@@ -164,14 +180,38 @@ type commitmentToucher struct {
 	ctx   context.Context
 	read  func(key []byte) []byte
 	paths int
+	out   chan<- []commitmentdb.PathTouch
+	batch []commitmentdb.PathTouch
+}
+
+func (t *commitmentToucher) flush() {
+	if len(t.batch) == 0 {
+		return
+	}
+	slices.SortFunc(t.batch, commitmentdb.ComparePathTouch)
+	select {
+	case t.out <- t.batch:
+	default:
+	}
+	t.batch = nil
 }
 
 func (t *commitmentToucher) touch(addrHash, slotHash []byte) {
 	if t.ctx.Err() != nil {
 		return
 	}
-	v3.PrefetchPath(t.read, addrHash, slotHash)
 	t.paths++
+	if t.out == nil {
+		v3.PrefetchPath(t.read, addrHash, slotHash)
+		return
+	}
+	it := commitmentdb.PathTouch{Account: [32]byte(addrHash)}
+	if slotHash != nil {
+		it.Slot, it.Storage = [32]byte(slotHash), true
+	}
+	if t.batch = append(t.batch, it); len(t.batch) == preExecBatch {
+		t.flush()
+	}
 }
 
 func (t *commitmentToucher) UpdateAccountData(a accounts.Address, _, _ *accounts.Account) error {

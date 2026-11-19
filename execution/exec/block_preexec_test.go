@@ -17,8 +17,10 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"slices"
 	"testing"
 	"time"
 
@@ -38,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -273,4 +276,18 @@ func TestBlockReadAheaderPreExecWalksStoragePathOfTxWrite(t *testing.T) {
 
 	contractHash := keccak.Sum256(f.contract[:])
 	require.Contains(t, reads, string(v3.StorageNodeKey(contractHash, nil, nil)), "the tx's SSTORE must walk the contract's storage path")
+}
+
+func TestCommitmentToucherQueuesSortedBatches(t *testing.T) {
+	out := make(chan []commitmentdb.PathTouch, 4)
+	toucher := &commitmentToucher{ctx: context.Background(), out: out}
+	for i := range preExecBatch + 1 {
+		toucher.touch(bytes.Repeat([]byte{byte(250 - i)}, 32), nil)
+	}
+	batch := <-out
+	require.Len(t, batch, preExecBatch)
+	require.True(t, slices.IsSortedFunc(batch, commitmentdb.ComparePathTouch))
+	toucher.flush()
+	require.Equal(t, []commitmentdb.PathTouch{{Account: [32]byte(bytes.Repeat([]byte{byte(250 - preExecBatch)}, 32))}}, <-out)
+	require.Equal(t, preExecBatch+1, toucher.paths)
 }
