@@ -97,17 +97,15 @@ func TestAggregatorBuildKeepsBackfilledReceiptVisible(t *testing.T) {
 			require.True(t, started)
 			<-done
 			requireReceipts()
-			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
-				at := agg.BeginFilesRo()
-				defer at.Close()
-				if tc.mustBuild {
-					require.Equal(t, buildEnd, at.d[tc.domain].files.EndTxNum(), "all receipt data fits in the new snapshot")
-				}
-				require.Equal(t, buildEnd, at.d[kv.AccountsDomain].files.EndTxNum())
-				_, err := at.prune(ctx, tx, 0, true, nil)
-				return err
-			}))
+			testAggregatorPrune(t, db, agg)
 			requireReceipts()
+
+			at := agg.BeginFilesRo()
+			defer at.Close()
+			require.Equal(t, buildEnd, at.d[kv.AccountsDomain].files.EndTxNum())
+			if tc.mustBuild {
+				require.Equal(t, buildEnd, at.d[tc.domain].files.EndTxNum(), "all receipt data fits in the new snapshot")
+			}
 		})
 	}
 }
