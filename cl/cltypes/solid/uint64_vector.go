@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -31,7 +32,7 @@ func NewUint64VectorSSZ(size int) Uint64VectorSSZ {
 	o := &byteBasedUint64Slice{
 		c: size,
 		l: size,
-		u: make([]byte, size*8),
+		u: make([]byte, ((size+3)/4)*length.Hash),
 	}
 	return &uint64VectorSSZ{
 		u: o,
