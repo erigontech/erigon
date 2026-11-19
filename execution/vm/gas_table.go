@@ -354,18 +354,22 @@ func initCodeGas(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, m
 	if op == CREATE2 {
 		gasPerWord = params.Keccak256WordGas
 	}
+	// EnableEIP can install the EIP-3860 gas handler before Shanghai.
 	if eip3860 {
 		if err := CheckMaxInitCodeSize(size, true, evm.chainRules.IsAmsterdam); err != nil {
 			return mdgas.MdGasCost{}, err
 		}
 		gasPerWord += params.InitCodeWordGas
 	}
-	// A uint64 byte length needs at most 2^59 words, at up to 8 gas each.
+	// A uint64 byte length rounds up to at most 2^59 words of 32 bytes. Even
+	// at 8 gas per word (CREATE2 with EIP-3860), the product fits in uint64.
 	wordGas := ToWordSize(size) * gasPerWord
 	gas.Execution, overflow = math.SafeAdd(gas.Execution, wordGas)
 	if overflow {
 		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
+	// Preparing the target can add it to the block access list. First check
+	// that execution gas covers memory expansion and the per-word charge.
 	if evm.chainRules.IsAmsterdam && availableGas.Execution >= gas.Execution {
 		gas.State = gasCreateAccount(evm, callContext, op, size)
 	}
@@ -380,6 +384,8 @@ type createGasPreparation struct {
 	err         error
 }
 
+// gasCreateAccount returns the state gas charge. The opcode reads the prepared
+// target and any preparation error from the call context when it executes.
 func gasCreateAccount(evm *EVM, callContext *CallContext, op OpCode, size uint64) int64 {
 	prepared := &callContext.create
 	*prepared = createGasPreparation{}
@@ -387,6 +393,8 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, op OpCode, size uint64
 	if op == CREATE2 {
 		offset := callContext.Stack.back(1).Uint64()
 		if size > 0 {
+			// The CREATE2 address depends on the full initcode, including zero
+			// padding for any part beyond the current end of memory.
 			prepared.initCode = make([]byte, size)
 			memory := callContext.Memory.Data()
 			copy(prepared.initCode, memory[min(offset, uint64(len(memory))):])

@@ -71,7 +71,7 @@ func getData(data []byte, start uint64, size uint64) []byte {
 	return common.RightPadBytes(data[start:end], int(size))
 }
 
-// ToWordSize returns the ceiled word size required for memory expansion.
+// ToWordSize returns the number of 32-byte words needed to hold size bytes.
 func ToWordSize(size uint64) uint64 {
 	if size > math.MaxUint64-31 {
 		return math.MaxUint64/32 + 1
