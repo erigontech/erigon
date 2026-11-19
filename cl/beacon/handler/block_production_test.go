@@ -470,13 +470,13 @@ func TestStoreDataColumnSidecarsWritesNothingWhenALaterSidecarIsInvalid(t *testi
 var errInjectedColumnFsFailure = errors.New("injected column filesystem failure")
 
 // faultyColumnFs fails the failRenameAt-th Rename once, and every Create of a path ending in
-// failCreateSuffix.
+// one of failCreateSuffixes.
 type faultyColumnFs struct {
 	afero.Fs
-	renames          atomic.Int32
-	createFailures   atomic.Int32
-	failRenameAt     int32
-	failCreateSuffix string
+	renames            atomic.Int32
+	createFailures     atomic.Int32
+	failRenameAt       int32
+	failCreateSuffixes []string
 }
 
 func (f *faultyColumnFs) Rename(oldname, newname string) error {
@@ -487,7 +487,7 @@ func (f *faultyColumnFs) Rename(oldname, newname string) error {
 }
 
 func (f *faultyColumnFs) Create(name string) (afero.File, error) {
-	if f.failCreateSuffix != "" && strings.HasSuffix(name, f.failCreateSuffix) {
+	if slices.ContainsFunc(f.failCreateSuffixes, func(suffix string) bool { return strings.HasSuffix(name, suffix) }) {
 		return nil, fmt.Errorf("%w: create failure %d", errInjectedColumnFsFailure, f.createFailures.Add(1))
 	}
 	return f.Fs.Create(name)
@@ -546,7 +546,7 @@ func testColumnSidecars(slot uint64, count uint64) []*cltypes.DataColumnSidecar 
 func TestStoreDataColumnSidecarsKeepsEveryColumnWhenTheBatchRenameFailsOnce(t *testing.T) {
 	const slot, columns = 1000, 8
 	root := common.Hash{1}
-	f := newRealColumnStoreFixture(t, &faultyColumnFs{Fs: afero.NewMemMapFs(), failRenameAt: columns / 2})
+	f := newRealColumnStoreFixture(t, &faultyColumnFs{Fs: afero.NewMemMapFs(), failRenameAt: 1})
 
 	require.NoError(t, f.handler.storeDataColumnSidecars(t.Context(), slot, root, testColumnSidecars(slot, columns)))
 
@@ -569,7 +569,7 @@ func TestStoreDataColumnSidecarsKeepsEveryColumnWhenTheBatchRenameFailsOnce(t *t
 func TestStoreDataColumnSidecarsReturnsTheWriteErrorAfterTheStoredPrefix(t *testing.T) {
 	const slot, columns, failingColumn = 1000, 8, 5
 	root := common.Hash{1}
-	f := newRealColumnStoreFixture(t, &faultyColumnFs{Fs: afero.NewMemMapFs(), failCreateSuffix: fmt.Sprintf("_%d.tmp", failingColumn)})
+	f := newRealColumnStoreFixture(t, &faultyColumnFs{Fs: afero.NewMemMapFs(), failCreateSuffixes: []string{".pack.tmp", fmt.Sprintf("_%d.tmp", failingColumn)}})
 
 	err := f.handler.storeDataColumnSidecars(t.Context(), slot, root, testColumnSidecars(slot, columns))
 

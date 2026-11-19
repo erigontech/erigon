@@ -71,6 +71,29 @@ func (a *Aggregator) StepAlignedEnd(stepSize uint64) (uint64, error) {
 			}
 		}
 	}
+	// a gap cuts every visible list, and a rebase deletes the files past the cut
+	visibleEnd := uint64(math.MaxUint64)
+	lowest := func(files []*FilesItem, visible visibleFiles) {
+		if len(files) > 0 {
+			visibleEnd = min(visibleEnd, visible.EndTxNum())
+		}
+	}
+	for i, d := range dirty.domain {
+		lowest(d.files, at.d[i].files)
+		lowest(d.history.files, at.d[i].ht.files)
+		lowest(d.history.ii.files, at.d[i].ht.iit.files)
+	}
+	for i, ii := range dirty.ii {
+		if ii != nil {
+			lowest(ii.files, at.iis[i].files)
+		}
+	}
+	a.dirtyFilesLock.Lock()
+	filesEnd := a.dirtyFilesEndTxNumMinimax()
+	a.dirtyFilesLock.Unlock()
+	if visibleEnd < filesEnd {
+		return 0, fmt.Errorf("files are not readable past txNum %d, a gap before their end %d: a rebase would delete them; repair the files first", visibleEnd, filesEnd)
+	}
 	return at.stepAlignedEnd(stepSize)
 }
 

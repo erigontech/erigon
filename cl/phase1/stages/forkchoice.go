@@ -504,7 +504,7 @@ func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot 
 	if !headEventEmitted || !gloasHeadStatePublished(cfg, headSlot, headRoot) {
 		// Retrieve the head state.
 		var err error
-		if headState, err = cfg.forkChoice.GetOwnedStateAtBlockRoot(headRoot); err != nil {
+		if headState, err = cfg.forkChoice.GetOwnedStateAtBlockRoot(headRoot, cfg.syncedData.TakeSpareHeadState()); err != nil {
 			return fmt.Errorf("failed to get state at block root: %w", err)
 		}
 		// fail-safe check§

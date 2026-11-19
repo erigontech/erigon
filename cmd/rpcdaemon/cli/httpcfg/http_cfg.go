@@ -98,7 +98,6 @@ type HttpCfg struct {
 	GetLogsMaxResults                 int
 	LogQueryLimit                     int
 	Feecap                            float64
-	MaxTraces                         uint64
 	WebsocketPort                     int
 	WebsocketEnabled                  bool
 	WebsocketCompression              bool

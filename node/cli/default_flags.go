@@ -120,7 +120,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.AllowUnprotectedTxs,
 	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
-	&utils.TraceMaxtracesFlag,
 	&utils.AlwaysGenerateChangesetsFlag,
 
 	&HTTPReadTimeoutFlag,
