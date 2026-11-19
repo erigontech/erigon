@@ -22,6 +22,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"path/filepath"
 
 	"github.com/c2h5oh/datasize"
@@ -39,23 +40,41 @@ import (
 // table maps a block number to the block's hash and its announcement.
 const table = "EezAnnouncement"
 
+// Window bounds the distance between the blocks of any two announcements the
+// store keeps: a put drops those of the blocks more than Window from its own,
+// so that the store holds at most Window+1 however long settlement stalls.
+// App. E.2 sets no retention bound.
+const Window = 1 << 19
+
 // Store keeps announcements by block number, the block hash checked on read.
 type Store struct {
-	db kv.RwDB
+	db     kv.RwDB
+	window uint64
 }
 
 // Open opens the store in dir/announcements.
 func Open(ctx context.Context, dir string, logger log.Logger) (*Store, error) {
-	// About a million announcements; the default 2 TB map exhausts the race
-	// detector's address space.
+	return OpenWindow(ctx, dir, Window, logger)
+}
+
+// OpenWindow opens the store in dir/announcements with a window of window
+// blocks.
+func OpenWindow(ctx context.Context, dir string, window uint64, logger log.Logger) (*Store, error) {
+	// The map holds about 1.5 million announcements, nearly three times
+	// Window+1; the default 2 TB map exhausts the race detector's address
+	// space.
+	return open(ctx, dir, 256*datasize.MB, window, logger)
+}
+
+func open(ctx context.Context, dir string, size datasize.ByteSize, window uint64, logger log.Logger) (*Store, error) {
 	db, err := mdbx.New(dbcfg.TemporaryDB, logger).Path(filepath.Join(dir, "announcements")).
-		GrowthStep(datasize.MB).MapSize(256 * datasize.MB).
+		GrowthStep(datasize.MB).MapSize(size).
 		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.TableCfg{table: {}} }).
 		Open(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("open announcement store: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, window: window}, nil
 }
 
 // Close closes the store.
@@ -63,10 +82,18 @@ func (s *Store) Close() { s.db.Close() }
 
 func key(number uint64) []byte { return binary.BigEndian.AppendUint64(nil, number) }
 
+// Floor is the lowest block whose announcement a put of that of block number
+// keeps.
+func (s *Store) Floor(number uint64) uint64 { return number - min(number, s.window) }
+
 // Put keeps the announcement env of block number with hash, replacing that
-// of another block at that number.
+// of another block at that number, and drops those of the blocks more than
+// the window from number.
 func (s *Store) Put(ctx context.Context, number uint64, hash common.Hash, env []byte) error {
 	return s.db.Update(ctx, func(tx kv.RwTx) error {
+		if err := drop(tx, s.Floor(number), number+min(s.window, math.MaxUint64-number)); err != nil {
+			return err
+		}
 		return tx.Put(table, key(number), append(hash[:], env...))
 	})
 }
@@ -88,24 +115,38 @@ func (s *Store) Get(ctx context.Context, number uint64, hash common.Hash) ([]byt
 
 // Prune drops the announcements of the blocks below number.
 func (s *Store) Prune(ctx context.Context, number uint64) error {
-	return s.db.Update(ctx, func(tx kv.RwTx) error {
-		c, err := tx.RwCursor(table)
+	return s.db.Update(ctx, func(tx kv.RwTx) error { return drop(tx, number, math.MaxUint64) })
+}
+
+// drop deletes the announcements of the blocks below lo and above hi.
+func drop(tx kv.RwTx, lo, hi uint64) error {
+	c, err := tx.RwCursor(table)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for k, _, err := c.First(); ; k, _, err = c.Next() {
 		if err != nil {
 			return err
 		}
-		defer c.Close()
-		for k, _, err := c.First(); ; k, _, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			if k == nil || binary.BigEndian.Uint64(k) >= number {
-				return nil
-			}
-			if err := c.DeleteCurrent(); err != nil {
-				return err
-			}
+		if k == nil || binary.BigEndian.Uint64(k) >= lo {
+			break
 		}
-	})
+		if err := c.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+	if hi == math.MaxUint64 {
+		return nil
+	}
+	for k, _, err := c.Seek(key(hi + 1)); ; k, _, err = c.Next() {
+		if err != nil || k == nil {
+			return err
+		}
+		if err := c.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
 }
 
 // keeper keeps announcements by block number.
@@ -113,6 +154,7 @@ type keeper interface {
 	Put(ctx context.Context, number uint64, hash common.Hash, env []byte) error
 	Get(ctx context.Context, number uint64, hash common.Hash) ([]byte, error)
 	Prune(ctx context.Context, number uint64) error
+	Floor(number uint64) uint64
 }
 
 // Chain is the chain whose blocks a Signer announces.
@@ -124,7 +166,7 @@ type Chain interface {
 }
 
 // Signer signs the blocks a sequencer produces into a Store, keeping the
-// announcements L1 finality does not cover yet.
+// announcements L1 finality does not cover yet, within the store's window.
 type Signer struct {
 	key     *ecdsa.PrivateKey
 	chainID *uint256.Int
@@ -155,8 +197,8 @@ func (s *Signer) Announce(ctx context.Context, h *types.Header) error {
 
 // Record drops the announcements L1 finality passes, then signs and keeps
 // that of block h and those of the canonical blocks between the settled one
-// and h that lack one. Only h's failure is returned. Record must have one
-// caller at a time.
+// and h, within the store's window, that lack one. Only h's failure is
+// returned. Record must have one caller at a time.
 func (s *Signer) Record(ctx context.Context, h *types.Header) error {
 	if err := s.store.Prune(ctx, s.finalized()); err != nil {
 		s.logger.Warn("[eez] finalized announcements not pruned", "event", "eez.sequencer.announcement.prune_failed", "err", err)
@@ -188,9 +230,10 @@ func (s *Signer) sign(ctx context.Context, number uint64, hash common.Hash) erro
 }
 
 // backfill signs the canonical blocks above the settled one and below number
-// that lack an announcement; derivation writes none of them.
+// that lack an announcement; derivation writes none of them. It starts at the
+// store's floor for number, as a put below it would drop number's.
 func (s *Signer) backfill(ctx context.Context, number uint64) error {
-	for n := s.chain.Settled() + 1; n < number; n++ {
+	for n := max(s.chain.Settled()+1, s.store.Floor(number)); n < number; n++ {
 		hash, ok, err := s.chain.CanonicalHash(ctx, n)
 		if err != nil {
 			return err

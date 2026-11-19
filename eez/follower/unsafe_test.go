@@ -671,6 +671,85 @@ func TestUnsafeHeadAnnouncementRestart(t *testing.T) {
 	}
 }
 
+// TestUnsafeHeadAnnouncementWindow: after a restart, the announcements of the
+// unsettled blocks are read again from the store's floor of the head up
+// only, so that the head's kept stays.
+func TestUnsafeHeadAnnouncementWindow(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	unsettled := c.Compose(nil,
+		derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}},
+		derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}},
+		derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}},
+		derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}},
+	)
+	chainID := derivertest.Config().ChainID
+	sign := signer(t)
+	envs := make([][]byte, len(unsettled.Blocks))
+	for i, b := range unsettled.Blocks {
+		envs[i] = sign(chainID, b.Hash())
+	}
+	_, chain := derivertest.NewL2(t)
+	st, err := announce.OpenWindow(t.Context(), t.TempDir(), 1, log.New())
+	require.NoError(t, err)
+	t.Cleanup(st.Close)
+	require.NoError(t, st.Put(t.Context(), 4, unsettled.Blocks[3].Hash(), envs[3]))
+	seq := &announcing{Sequencer: sequencer(t, c.L2), envs: map[uint64][]byte{1: envs[0], 2: envs[1], 3: envs[2]}}
+	f := restarted(t, c, chain, unsettled.Blocks, seq, st)
+
+	reads := seq.reads.Load()
+	require.NoError(t, f.StepOverlay(t.Context()))
+	require.Equal(t, reads+1, seq.reads.Load(), "block 3 alone")
+	for i, b := range unsettled.Blocks {
+		kept, err := st.Get(t.Context(), uint64(i+1), b.Hash())
+		require.NoError(t, err)
+		if i < 2 {
+			require.Nil(t, kept, "block %d", i+1)
+			continue
+		}
+		require.Equal(t, envs[i], kept, "block %d", i+1)
+	}
+}
+
+var errHead = errors.New("head unread")
+
+// headFails is a chain whose head cannot be read while fail is set.
+type headFails struct {
+	*deriver.ExecChain
+	fail atomic.Bool
+}
+
+func (c *headFails) Head(ctx context.Context) (*types.Header, error) {
+	if c.fail.Load() {
+		return nil, errHead
+	}
+	return c.ExecChain.Head(ctx)
+}
+
+// TestUnsafeHeadAnnouncementHeadUnread: announcements are not read again
+// while the local head cannot be read, and are once it can.
+func TestUnsafeHeadAnnouncementHeadUnread(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	unsettled := c.Compose(nil, derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}})
+	hash := unsettled.Blocks[0].Hash()
+	env := signer(t)(derivertest.Config().ChainID, hash)
+	_, exec := derivertest.NewL2(t)
+	chain := &headFails{ExecChain: exec}
+	st := openAnnouncements(t)
+	seq := &announcing{Sequencer: sequencer(t, c.L2), envs: map[uint64][]byte{1: env}}
+	f := restarted(t, c, chain, unsettled.Blocks, seq, st)
+
+	chain.fail.Store(true)
+	reads := seq.reads.Load()
+	require.ErrorIs(t, f.StepOverlay(t.Context()), errHead, "the step's own read")
+	require.Equal(t, reads, seq.reads.Load(), "not read")
+	chain.fail.Store(false)
+	require.NoError(t, f.StepOverlay(t.Context()))
+	require.Equal(t, reads+1, seq.reads.Load(), "read once the head is")
+	kept, err := st.Get(t.Context(), 1, hash)
+	require.NoError(t, err)
+	require.Equal(t, env, kept)
+}
+
 // TestUnsafeHeadAnnouncedRejected: the valid announcement of a block that
 // fails execution is not kept.
 func TestUnsafeHeadAnnouncedRejected(t *testing.T) {

@@ -133,7 +133,8 @@ type Announcements interface {
 	// about to become the head.
 	Announce(ctx context.Context, h *types.Header) error
 	// Record signs and keeps the announcement of block h, the head, and those
-	// of the unsettled blocks below it that lack one.
+	// of the unsettled blocks below it that lack one, as far back as it keeps
+	// announcements.
 	Record(ctx context.Context, h *types.Header) error
 }
 

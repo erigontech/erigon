@@ -16,7 +16,29 @@
 
 package announce
 
-import "github.com/erigontech/erigon/db/kv"
+import (
+	"context"
+
+	"github.com/c2h5oh/datasize"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+)
+
+// OpenSized opens a store in dir/announcements with a map of size and a
+// window of window blocks.
+func OpenSized(ctx context.Context, dir string, size datasize.ByteSize, window uint64, logger log.Logger) (*Store, error) {
+	return open(ctx, dir, size, window, logger)
+}
+
+// Len returns the number of announcements s keeps.
+func (s *Store) Len(ctx context.Context) (n uint64, err error) {
+	err = s.db.View(ctx, func(tx kv.Tx) error {
+		n, err = tx.Count(table)
+		return err
+	})
+	return n, err
+}
 
 // WrapDB makes s use wrap(db) in place of its database db.
 func (s *Store) WrapDB(wrap func(kv.RwDB) kv.RwDB) { s.db = wrap(s.db) }

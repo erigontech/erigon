@@ -17,13 +17,16 @@
 package announce_test
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/ecdsa"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/stretchr/testify/require"
@@ -444,6 +447,107 @@ func TestRecordPrunedOnFailure(t *testing.T) {
 	require.Equal(t, n.signed(2), n.announced(2))
 }
 
+// putSpy records the blocks it is put the announcements of.
+type putSpy struct {
+	*announce.Store
+	puts []uint64
+}
+
+func (k *putSpy) Put(ctx context.Context, number uint64, hash common.Hash, env []byte) error {
+	k.puts = append(k.puts, number)
+	return k.Store.Put(ctx, number, hash, env)
+}
+
+// TestRecordBackfillWindow: the unsettled blocks a previous run left
+// unannounced are announced with the next block from the store's floor of it
+// up, which keeps the block's own; the block after signs no more.
+func TestRecordBackfillWindow(t *testing.T) {
+	n := newNode(t)
+	st, err := announce.OpenWindow(t.Context(), t.TempDir(), 2, log.New())
+	require.NoError(t, err)
+	t.Cleanup(st.Close)
+	n.store = st
+	unsigned := n.sequencer(sequencer.Config{}, n.follower)
+	for range 6 {
+		n.tick(unsigned)
+	}
+	signer := n.signer()
+	k := &putSpy{Store: st}
+	signer.SetKeeper(k)
+	s := n.sequencer(sequencer.Config{Announcements: signer}, n.follower)
+	n.tick(s)
+	require.Equal(t, uint64(7), n.head().Number.Uint64())
+	require.Equal(t, []uint64{7, 5, 6}, k.puts)
+	for i := uint64(1); i <= 7; i++ {
+		if i < 5 {
+			require.Nil(t, n.announced(i), "block %d", i)
+			continue
+		}
+		require.Equal(t, n.signed(i), n.announced(i), "block %d", i)
+	}
+	n.tick(s)
+	require.Equal(t, []uint64{7, 5, 6, 8}, k.puts)
+	require.Equal(t, n.signed(8), n.announced(8))
+}
+
+// TestPutWindow: a put drops the announcements of the blocks more than the
+// window from its own, below it and above it.
+func TestPutWindow(t *testing.T) {
+	st, err := announce.OpenWindow(t.Context(), t.TempDir(), 4, log.New())
+	require.NoError(t, err)
+	t.Cleanup(st.Close)
+	put := func(number uint64) {
+		require.NoError(t, st.Put(t.Context(), number, common.Hash{byte(number)}, []byte{byte(number)}))
+	}
+	kept := func() []uint64 {
+		var out []uint64
+		for number := uint64(0); number <= 12; number++ {
+			env, err := st.Get(t.Context(), number, common.Hash{byte(number)})
+			require.NoError(t, err)
+			if env != nil {
+				out = append(out, number)
+			}
+		}
+		return out
+	}
+	for number := uint64(1); number <= 10; number++ {
+		put(number)
+	}
+	require.Equal(t, uint64(6), st.Floor(10))
+	require.Equal(t, uint64(0), st.Floor(3))
+	require.Equal(t, []uint64{6, 7, 8, 9, 10}, kept(), "below")
+	put(6)
+	require.Equal(t, []uint64{6, 7, 8, 9, 10}, kept(), "at the floor")
+	put(5)
+	require.Equal(t, []uint64{5, 6, 7, 8, 9}, kept(), "above")
+	put(1)
+	require.Equal(t, []uint64{1, 5}, kept(), "a rewind past the window")
+}
+
+// TestPutWindowFits: a store whose map holds 5,500 to 6,100 announcements, by
+// page size, takes 30,000, climbing and rewinding past the window, never
+// holding more than the window and one.
+func TestPutWindowFits(t *testing.T) {
+	const window = 512
+	st, err := announce.OpenSized(t.Context(), t.TempDir(), datasize.MB, window, log.New())
+	require.NoError(t, err)
+	t.Cleanup(st.Close)
+	env := bytes.Repeat([]byte{1}, 107)
+	var number uint64
+	for puts := range 30_000 {
+		if puts%(3*window) == 0 {
+			number -= min(number, 2*window)
+		}
+		number++
+		require.NoError(t, st.Put(t.Context(), number, common.Hash{byte(number)}, env), "put %d, block %d", puts, number)
+		if puts%100 == 0 {
+			kept, err := st.Len(t.Context())
+			require.NoError(t, err)
+			require.LessOrEqual(t, kept, uint64(window+1), "put %d", puts)
+		}
+	}
+}
+
 var errCursor = errors.New("cursor failed")
 
 // cursorFails is a database whose write transactions open cursors that fail
@@ -490,5 +594,45 @@ func TestPruneCursorFailed(t *testing.T) {
 		require.NoError(t, st.Put(t.Context(), 1, common.Hash{1}, []byte{1}))
 		st.WrapDB(func(db kv.RwDB) kv.RwDB { return cursorFails{db, next} })
 		require.ErrorIs(t, st.Prune(t.Context(), 2), errCursor, "next %t", next)
+	}
+}
+
+// TestPutCursorFailed: a cursor that fails to position fails the put, which
+// keeps and drops nothing.
+func TestPutCursorFailed(t *testing.T) {
+	for _, next := range []bool{false, true} {
+		st, err := announce.OpenWindow(t.Context(), t.TempDir(), 1, log.New())
+		require.NoError(t, err)
+		t.Cleanup(st.Close)
+		require.NoError(t, st.Put(t.Context(), 5, common.Hash{5}, []byte{5}))
+		st.WrapDB(func(db kv.RwDB) kv.RwDB { return cursorFails{db, next} })
+		require.ErrorIs(t, st.Put(t.Context(), 1, common.Hash{1}, []byte{1}), errCursor, "next %t", next)
+		env, err := st.Get(t.Context(), 1, common.Hash{1})
+		require.NoError(t, err)
+		require.Nil(t, env, "next %t", next)
+		env, err = st.Get(t.Context(), 5, common.Hash{5})
+		require.NoError(t, err)
+		require.Equal(t, []byte{5}, env, "next %t", next)
+	}
+}
+
+// TestPutWindowSaturates: the window's upper end saturates at the highest
+// block number.
+func TestPutWindowSaturates(t *testing.T) {
+	for _, tc := range []struct{ window, first, second uint64 }{
+		{math.MaxUint64, 2, 1},
+		{4, math.MaxUint64 - 1, math.MaxUint64},
+	} {
+		st, err := announce.OpenWindow(t.Context(), t.TempDir(), tc.window, log.New())
+		require.NoError(t, err)
+		t.Cleanup(st.Close)
+		for _, number := range []uint64{tc.first, tc.second} {
+			require.NoError(t, st.Put(t.Context(), number, common.Hash{1}, []byte{1}))
+		}
+		for _, number := range []uint64{tc.first, tc.second} {
+			env, err := st.Get(t.Context(), number, common.Hash{1})
+			require.NoError(t, err)
+			require.NotNil(t, env, "window %d, block %d", tc.window, number)
+		}
 	}
 }

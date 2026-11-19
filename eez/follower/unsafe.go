@@ -169,7 +169,8 @@ func (o *overlay) step(ctx context.Context) error {
 			return err
 		}
 		if envs[i] == nil {
-			// The sequencer may announce it after it became the head: the
+			// The sequencer may announce it after it became the head, or
+			// keep it no longer, more than its window below its head: the
 			// next step reads it again.
 			o.logger.Debug("[eez] sequencer block not announced", "event", "eez.node.follower.head.unannounced", "number", b.NumberU64(), "hash", b.Hash())
 			return nil
@@ -232,13 +233,22 @@ func (o *overlay) missing(number uint64) {
 }
 
 // reread reads again, from gap up, the announcements of the blocks taken
-// without one kept while L1 has not settled them. It keeps those served
-// valid and stops at the first it cannot keep.
+// without one kept while L1 has not settled them, within the store's window
+// of the head. It keeps those served valid and stops at the first it cannot
+// keep, one the sequencer no longer serves included, until L1 settles it.
 func (o *overlay) reread(ctx context.Context) {
 	if o.gap == 0 {
 		return
 	}
-	for n := max(o.gap, o.deriver.Safe()+1); ; n++ {
+	head, err := o.chain.Head(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			o.logger.Debug("[eez] sequencer announcement still not kept", "event", "eez.node.follower.announcement.missing", "number", o.gap, "err", err)
+		}
+		return
+	}
+	// A put below the floor would drop the announcements of the latest blocks.
+	for n := max(o.gap, o.deriver.Safe()+1, o.store.Floor(head.Number.Uint64())); ; n++ {
 		hash, ok, err := o.chain.CanonicalHash(ctx, n)
 		if err == nil && !ok {
 			o.gap = 0

@@ -90,8 +90,8 @@ type Config struct {
 	HeadRetry, HeadRequest time.Duration
 	// Announcements, when set, has the overlay take only the blocks the
 	// sequencer serves a valid App. D.6 announcement for, and keeps those
-	// announcements until L1 finality passes their blocks, for the node to
-	// serve.
+	// announcements, within the store's window, until L1 finality passes
+	// their blocks, for the node to serve.
 	Announcements *announce.Store
 	// Blobs serves the blobs of blob-backed batches; without it the
 	// follower cannot derive them.
