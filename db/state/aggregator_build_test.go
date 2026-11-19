@@ -55,7 +55,6 @@ func TestAggregatorBuildKeepsBackfilledReceiptVisible(t *testing.T) {
 			db, agg := testDbAndAggregatorv3(t, stepSize)
 			tdb := asTemporalRoDB(db)
 			agg.d[tc.domain].Enabled = false
-			require.NoError(t, agg.OpenFolder(db))
 			require.NoError(t, agg.buildFiles(ctx, tdb, 0, unboundedFinalityCtx, nil))
 			agg.EnableDomain(tc.domain)
 			require.Equal(t, stepSize, agg.EndTxNumMinimax())
