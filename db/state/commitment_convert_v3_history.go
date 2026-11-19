@@ -453,7 +453,7 @@ func convertCommitmentHistoryV3(ctx context.Context, at *AggregatorRoTx, stage c
 		}
 	}
 	started := time.Now()
-	ranges := make([]commitmentHistoryRange, 0, len(vs))
+	ranges := make([]commitmentHistoryRange, 0, len(at.d[kv.CommitmentDomain].ht.files))
 	for i := range vs {
 		r, err := convertCommitmentHistoryFileV3(ctx, at, vs[i], efs[i], stage, i+1, len(vs), logger)
 		if err != nil {
@@ -1013,7 +1013,7 @@ func visibleCommitmentHistoryRanges(a *Aggregator) []commitmentHistoryRange {
 	at := a.BeginFilesRo()
 	defer at.Close()
 	stepSize := at.StepSize()
-	var ranges []commitmentHistoryRange
+	ranges := make([]commitmentHistoryRange, 0, len(at.d[kv.CommitmentDomain].ht.files))
 	for _, v := range at.d[kv.CommitmentDomain].ht.files {
 		ranges = append(ranges, commitmentHistoryRange{fromStep: kv.Step(v.startTxNum / stepSize), toStep: kv.Step(v.endTxNum / stepSize)})
 	}

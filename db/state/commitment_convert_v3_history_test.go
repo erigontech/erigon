@@ -40,6 +40,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
@@ -230,7 +232,7 @@ func TestConvertCommitmentFiles_V3SplitPassesReopen(t *testing.T) {
 	dirs := agg.Dirs()
 	reopen := func() {
 		t.Helper()
-		db, agg = reopenForConvert(t, db, agg, legacySchema)
+		db, agg = reopenForConvert(t, db, agg, &legacySchema)
 	}
 	requireCommitmentMajor := func(dir, glob, prefix string) {
 		t.Helper()
@@ -270,7 +272,7 @@ func TestConvertCommitmentFiles_V3HistoryAfterDomainsRefused(t *testing.T) {
 	dirs := agg.Dirs()
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true})
-	db, _ = reopenForConvert(t, db, agg, legacySchema)
+	db, _ = reopenForConvert(t, db, agg, &legacySchema)
 
 	require.ErrorContains(t, convertErr(t, db, state.ConvertOpts{TargetV3: true, NoDomain: true}), "converts only before the domain files")
 	history, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "v2.*-commitment.*.v"))
@@ -765,12 +767,19 @@ func TestConvertCommitmentFiles_HistoryBackupFailureNamesRestore(t *testing.T) {
 	require.NotEmpty(t, files)
 }
 
-func reopenForConvert(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, schema statecfg.SchemaGen) (kv.TemporalRwDB, *state.Aggregator) {
+func reopenForConvert(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, schema *statecfg.SchemaGen) (kv.TemporalRwDB, *state.Aggregator) {
 	t.Helper()
-	statecfg.Schema = schema
+	dirs := agg.Dirs()
+	agg.Close()
+	db.Close()
+	statecfg.Schema = *schema
 	statecfg.EnableHistoricalCommitment()
-	require.NoError(t, state.MatchCommitmentSchemaToFiles(agg.Dirs()))
-	db, agg = reopenAggregator(t, db, agg, 10)
+	require.NoError(t, state.MatchCommitmentSchemaToFiles(dirs))
+	rawDB := mdbxtest.NewChainDB(t, dirs.Chaindata)
+	t.Cleanup(rawDB.Close)
+	agg = testAgg(t, dirs, 10, log.New())
+	db, err := temporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
 	require.NoError(t, agg.OpenFolder(db))
 	return db, agg
 }
@@ -798,6 +807,8 @@ func TestConvertCommitmentFiles_V3HistoryRetryRefusesPendingBackup(t *testing.T)
 	legacySchema := statecfg.Schema
 	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 4)
 	dirs := agg.Dirs()
+	agg.Close()
+	db.Close()
 	for _, pair := range [][2]string{{dirs.SnapHistory, "history"}, {dirs.SnapIdx, "idx"}, {dirs.SnapAccessors, "accessor"}} {
 		files, err := filepath.Glob(filepath.Join(pair[0], "*-commitment.*"))
 		require.NoError(t, err)
@@ -808,7 +819,7 @@ func TestConvertCommitmentFiles_V3HistoryRetryRefusesPendingBackup(t *testing.T)
 			require.NoError(t, os.Rename(f, filepath.Join(backup, filepath.Base(f))))
 		}
 	}
-	db, _ = reopenForConvert(t, db, agg, legacySchema)
+	db, _ = reopenForConvert(t, db, agg, &legacySchema)
 
 	require.ErrorContains(t, convertErr(t, db, state.ConvertOpts{TargetV3: true, NoDomain: true}), "backup dir")
 }
@@ -821,11 +832,15 @@ func TestConvertCommitmentFiles_V3DomainsPassVerifiesConvertedHistory(t *testing
 	files, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "v2.*-commitment.*.v"))
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
+	agg.Close()
+	db.Close()
 	for _, f := range files {
 		name := filepath.Base(f)
-		require.NoError(t, os.Rename(f, filepath.Join(dirs.SnapHistory, "v3.0"+name[strings.Index(name, "-"):])))
+		_, suffix, found := strings.Cut(name, "-")
+		require.True(t, found)
+		require.NoError(t, os.Rename(f, filepath.Join(dirs.SnapHistory, "v3.0-"+suffix)))
 	}
-	db, _ = reopenForConvert(t, db, agg, legacySchema)
+	db, _ = reopenForConvert(t, db, agg, &legacySchema)
 
 	require.ErrorContains(t, convertErr(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true}), "v3 history verification")
 }
