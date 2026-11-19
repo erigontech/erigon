@@ -346,7 +346,9 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 	}
 	validation := time.Since(start)
 	fv.timingsCache.Add(hash, BlockTimings{validation, 0})
+	npMetricsStart := time.Now()
 	fv.recordBlockMetrics(sd, header, body, hash, &beforeIO, len(headersChain), validation, fv.executor.lastValidationExecStageTiming())
+	log.Info("[np-phase] forkval", "npValidate", validation, "npMetrics", time.Since(npMetricsStart))
 
 	latestValidHash = hash
 	fv.extendingForkHeadHash = hash
