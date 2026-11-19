@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -26,52 +26,89 @@ import (
 
 func TestAggregatorBuildKeepsBackfilledReceiptVisible(t *testing.T) {
 	const stepSize = uint64(10)
-	db, agg := testDbAndAggregatorv3(t, stepSize)
-	ctx := t.Context()
-	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 3}})
-	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 3}})
-	require.NoError(t, agg.OpenFolder(db))
-
-	key, value := []byte{1}, []byte{7}
-	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
-		at := agg.BeginFilesRo()
-		defer at.Close()
-		write := func(domain kv.Domain, txNums ...uint64) {
-			w := at.d[domain].NewWriter(db)
-			defer w.Close()
-			for _, txNum := range txNums {
-				require.NoError(t, w.PutWithPrev([]byte{byte(txNum)}, value, txNum, nil))
-			}
-			require.NoError(t, w.Flush(ctx, tx))
-		}
-		write(kv.ReceiptDomain, 1)
-		write(kv.AccountsDomain, 3*stepSize, 4*stepSize)
-		return nil
-	}))
-	requireReceipt := func() {
-		t.Helper()
-		require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
-			at := agg.BeginFilesRo()
-			defer at.Close()
-			got, _, found, err := at.d[kv.ReceiptDomain].GetLatest(key, tx)
-			require.NoError(t, err)
-			require.True(t, found, "the backfilled receipt must remain readable")
-			require.Equal(t, value, got)
-			return nil
-		}))
+	const buildEnd = 2 * stepSize
+	type entry struct {
+		key   byte
+		txNum uint64
 	}
+	for _, tc := range []struct {
+		name      string
+		domain    kv.Domain
+		receipts  []entry
+		mustBuild bool
+	}{
+		{
+			name: "older_receipt_sorts_after_newer_key", domain: kv.ReceiptDomain,
+			receipts: []entry{{key: 2, txNum: 1}, {key: 1, txNum: stepSize}},
+		},
+		{
+			name: "backfilled_receipt_cache", domain: kv.RCacheDomain,
+			receipts: []entry{{key: 0, txNum: 1}},
+		},
+		{
+			name: "receipt_at_start_of_build_step", domain: kv.ReceiptDomain,
+			receipts: []entry{{key: 1, txNum: stepSize}}, mustBuild: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			tdb := asTemporalRoDB(db)
+			agg.d[tc.domain].Enabled = false
+			require.NoError(t, agg.OpenFolder(db))
+			require.NoError(t, agg.buildFiles(ctx, tdb, 0, unboundedFinalityCtx, nil))
+			agg.EnableDomain(tc.domain)
+			require.Equal(t, stepSize, agg.EndTxNumMinimax())
 
-	requireReceipt()
-	done, started := agg.buildFilesInBackground(asTemporalRoDB(db), 4*stepSize, false, unboundedFinalityCtx)
-	require.True(t, started)
-	<-done
-	requireReceipt()
-	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
-		at := agg.BeginFilesRo()
-		defer at.Close()
-		require.Equal(t, 4*stepSize, at.d[kv.AccountsDomain].files.EndTxNum())
-		_, err := at.prune(ctx, tx, 0, true, nil)
-		return err
-	}))
-	requireReceipt()
+			value := []byte("receipt data")
+			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+				at := agg.BeginFilesRo()
+				defer at.Close()
+				require.Empty(t, at.d[tc.domain].files)
+				write := func(domain kv.Domain, entries ...entry) {
+					w := at.d[domain].NewWriter(db)
+					defer w.Close()
+					for _, e := range entries {
+						require.NoError(t, w.PutWithPrev([]byte{e.key}, value, e.txNum, nil))
+					}
+					require.NoError(t, w.Flush(ctx, tx))
+				}
+				write(tc.domain, tc.receipts...)
+				write(kv.AccountsDomain, entry{key: 1, txNum: stepSize}, entry{key: 2, txNum: buildEnd})
+				return nil
+			}))
+
+			requireReceipts := func() {
+				t.Helper()
+				require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+					at := agg.BeginFilesRo()
+					defer at.Close()
+					for _, e := range tc.receipts {
+						got, _, found, err := at.d[tc.domain].GetLatest([]byte{e.key}, tx)
+						require.NoError(t, err)
+						require.Truef(t, found, "receipt at txNum %d must remain readable", e.txNum)
+						require.Equal(t, value, got)
+					}
+					return nil
+				}))
+			}
+
+			requireReceipts()
+			done, started := agg.buildFilesInBackground(tdb, buildEnd, false, unboundedFinalityCtx)
+			require.True(t, started)
+			<-done
+			requireReceipts()
+			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+				at := agg.BeginFilesRo()
+				defer at.Close()
+				if tc.mustBuild {
+					require.Equal(t, buildEnd, at.d[tc.domain].files.EndTxNum(), "all receipt data fits in the new snapshot")
+				}
+				require.Equal(t, buildEnd, at.d[kv.AccountsDomain].files.EndTxNum())
+				_, err := at.prune(ctx, tx, 0, true, nil)
+				return err
+			}))
+			requireReceipts()
+		})
+	}
 }
