@@ -47,6 +47,39 @@ func (publishingJSONSpaces) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func TestPublishedBlockSSZBodyLimit(t *testing.T) {
+	h := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
+	for _, tc := range []struct {
+		name    string
+		blinded bool
+		handler beaconhttp.EndpointHandlerFunc[*beaconhttp.BeaconResponse]
+	}{
+		{"v1/full", false, h.PostEthV1BeaconBlocks},
+		{"v2/full", false, h.PostEthV2BeaconBlocks},
+		{"v1/blinded", true, h.PostEthV1BlindedBlocks},
+		{"v2/blinded", true, h.PostEthV2BlindedBlocks},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			limit, err := h.publishedBlockBodyLimit(clparams.FuluVersion, tc.blinded)
+			require.NoError(t, err)
+			for _, contentLength := range []int64{-1, 1} {
+				body := &io.LimitedReader{R: publishingJSONSpaces{}, N: limit + 4096}
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", body)
+				req.ContentLength = contentLength
+				req.Header.Set("Content-Type", "application/octet-stream")
+				req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+
+				_, err := tc.handler(httptest.NewRecorder(), req)
+				var endpointErr *beaconhttp.EndpointError
+				require.ErrorAs(t, err, &endpointErr)
+				require.Equal(t, http.StatusBadRequest, endpointErr.Code)
+				require.ErrorContains(t, err, "request body exceeds")
+				require.EqualValues(t, 4095, body.N)
+			}
+		})
+	}
+}
+
 func TestPublishedBlockJSONBodyLimit(t *testing.T) {
 	for _, blinded := range []bool{false, true} {
 		versions := []clparams.StateVersion{clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion}
@@ -60,7 +93,7 @@ func TestPublishedBlockJSONBodyLimit(t *testing.T) {
 			}
 			t.Run(route+"/"+version.String(), func(t *testing.T) {
 				h := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
-				limit, err := h.publishedBlockJSONLimit(version, blinded)
+				limit, err := h.publishedBlockBodyLimit(version, blinded)
 				require.NoError(t, err)
 				var block any
 				if blinded {
@@ -116,7 +149,7 @@ func TestPublishedBlockJSONBodyLimit(t *testing.T) {
 	}
 }
 
-func TestPublishedBlockJSONAdmitsContents(t *testing.T) {
+func TestPublishedBlockAdmitsContents(t *testing.T) {
 	for _, version := range []clparams.StateVersion{clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			cfg := clparams.MainnetBeaconConfig
@@ -139,10 +172,10 @@ func TestPublishedBlockJSONAdmitsContents(t *testing.T) {
 			}
 			body, err := json.Marshal(block)
 			require.NoError(t, err)
-			limit, err := h.publishedBlockJSONLimit(version, false)
+			limit, err := h.publishedBlockBodyLimit(version, false)
 			require.NoError(t, err)
 			require.Less(t, int64(len(body)), limit)
-			blindedLimit, err := h.publishedBlockJSONLimit(version, true)
+			blindedLimit, err := h.publishedBlockBodyLimit(version, true)
 			require.NoError(t, err)
 			blobsJSON, err := json.Marshal(block.Blobs)
 			require.NoError(t, err)
@@ -153,13 +186,19 @@ func TestPublishedBlockJSONAdmitsContents(t *testing.T) {
 				// The scheduled contents need their own budget beyond the block.
 				require.Greater(t, int64(len(body)), blindedLimit)
 			}
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
-			decoded, err := h.parseRequestBeaconBlock(version, req)
-			require.NoError(t, err)
-			require.EqualValues(t, blobs, decoded.Blobs.Len())
-			require.EqualValues(t, blobs*proofsPerBlob, decoded.KZGProofs.Len())
-			require.Len(t, decoded.SignedBlock.Block.Body.ExecutionPayload.Transactions.UnderlyngReference()[0], 12<<20)
+			for _, contentType := range []string{"application/json", "application/octet-stream"} {
+				if contentType == "application/octet-stream" {
+					body, err = block.EncodeSSZ(nil)
+					require.NoError(t, err)
+				}
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(body))
+				req.Header.Set("Content-Type", contentType)
+				decoded, err := h.parseRequestBeaconBlock(version, req)
+				require.NoError(t, err)
+				require.EqualValues(t, blobs, decoded.Blobs.Len())
+				require.EqualValues(t, blobs*proofsPerBlob, decoded.KZGProofs.Len())
+				require.Len(t, decoded.SignedBlock.Block.Body.ExecutionPayload.Transactions.UnderlyngReference()[0], 12<<20)
+			}
 		})
 	}
 }
@@ -192,7 +231,7 @@ func TestPublishedBlockJSONLimitRejectsOverflow(t *testing.T) {
 		cfg := clparams.MainnetBeaconConfig
 		h := &ApiHandler{beaconChainCfg: &cfg}
 		mutate(h)
-		_, err := h.publishedBlockJSONLimit(clparams.FuluVersion, false)
+		_, err := h.publishedBlockBodyLimit(clparams.FuluVersion, false)
 		require.Error(t, err)
 	}
 }

@@ -2682,16 +2682,11 @@ func (a *ApiHandler) publishBlindedBlocks(r *http.Request, apiVersion int) (*bea
 
 	signedBlindedBlock := cltypes.NewSignedBlindedBeaconBlock(a.beaconChainCfg, version)
 	signedBlindedBlock.Block.SetVersion(version)
-	var b []byte
-	if isJSON {
-		limit, limitErr := a.publishedBlockJSONLimit(version, true)
-		if limitErr != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, limitErr)
-		}
-		b, err = readBoundedBody(r.Body, limit)
-	} else {
-		b, err = io.ReadAll(r.Body)
+	limit, err := a.publishedBlockBodyLimit(version, true)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
+	b, err := readBoundedBody(r.Body, limit)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
@@ -2855,38 +2850,33 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 	if block == nil {
 		return nil, errors.New("failed to create block")
 	}
-	// check content type
-	switch r.Header.Get("Content-Type") {
-	case "application/json":
-		limit, err := a.publishedBlockJSONLimit(version, false)
-		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
-		}
-		body, err := readBoundedBody(r.Body, limit)
-		if err != nil {
-			return nil, err
-		}
-		if err := json.NewDecoder(bytes.NewReader(body)).Decode(block); err != nil {
-			return nil, err
-		}
-		return block, nil
-	case "application/octet-stream":
-		octect, err := io.ReadAll(r.Body)
-		if err != nil {
-			return nil, err
-		}
-		if err := block.DecodeSSZ(octect, int(version)); err != nil {
-			return nil, err
-		}
-		return block, nil
+	contentType := r.Header.Get("Content-Type")
+	if contentType != "application/json" && contentType != "application/octet-stream" {
+		return nil, errors.New("invalid content type")
 	}
-	return nil, errors.New("invalid content type")
+	limit, err := a.publishedBlockBodyLimit(version, false)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+	}
+	body, err := readBoundedBody(r.Body, limit)
+	if err != nil {
+		return nil, err
+	}
+	if contentType == "application/json" {
+		err = json.NewDecoder(bytes.NewReader(body)).Decode(block)
+	} else {
+		err = block.DecodeSSZ(body, int(version))
+	}
+	if err != nil {
+		return nil, err
+	}
+	return block, nil
 }
 
-// publishedBlockJSONLimit budgets four JSON bytes per SSZ byte of a gossip block.
+// publishedBlockBodyLimit uses the larger JSON budget for JSON and SSZ bodies.
 // Hex bytes need twice the space and quoted uint64s less than three times;
 // the rest covers keys and formatting. Blob contents have a separate budget.
-func (a *ApiHandler) publishedBlockJSONLimit(version clparams.StateVersion, blinded bool) (int64, error) {
+func (a *ApiHandler) publishedBlockBodyLimit(version clparams.StateVersion, blinded bool) (int64, error) {
 	blockSize := clparams.MaxChunkSize
 	if a.netConfig != nil {
 		blockSize = max(blockSize, a.netConfig.GossipMaxSize, a.netConfig.GossipMaxSizeBellatrix)
