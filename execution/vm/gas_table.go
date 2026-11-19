@@ -404,12 +404,12 @@ func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 }
 
 type createGasPreparation struct {
-	initCode    []byte
-	address     accounts.Address
-	codeHash    accounts.CodeHash
-	preparation createPreparation
-	err         error
-	overridden  bool
+	initCode        []byte
+	address         accounts.Address
+	codeHash        accounts.CodeHash
+	preparation     createPreparation
+	err             error
+	overridePending bool
 }
 
 func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, gas mdgas.MdGasCost, create2 bool) (mdgas.MdGasCost, error) {
@@ -418,7 +418,7 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 		return gas, nil
 	}
 	prepared := &callContext.create
-	*prepared = createGasPreparation{overridden: override != nil}
+	*prepared = createGasPreparation{overridePending: override != nil}
 	caller := callContext.Contract.Address()
 	if create2 || override != nil {
 		offset := callContext.Stack.back(1).Uint64()

@@ -43,12 +43,18 @@ func (ct *OverlayCreateTracer) Tracer() *tracers.Tracer {
 	}
 }
 
-func (ct *OverlayCreateTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
-	if ct.isCapturing || ct.created {
-		return
-	}
+func (ct *OverlayCreateTracer) canCapture(target accounts.Address) bool {
+	return target == ct.contractAddress && !ct.isCapturing && !ct.created
+}
 
-	if (vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2) && to == ct.contractAddress {
+func (ct *OverlayCreateTracer) onInitCodeOverrideError(target accounts.Address, err error) {
+	if ct.canCapture(target) {
+		ct.err = err
+	}
+}
+
+func (ct *OverlayCreateTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
+	if (vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2) && ct.canCapture(to) {
 		ct.isCapturing = true
 		ct.depth = depth
 	}

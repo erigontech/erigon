@@ -263,6 +263,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 			}
 			return initCode
 		},
+		OnInitCodeOverrideError: ct.onInitCodeOverrideError,
 	})
 
 	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())

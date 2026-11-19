@@ -726,6 +726,60 @@ func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 	}
 }
 
+func TestCallConstructorNestedInitCodeErrors(t *testing.T) {
+	entry, factory := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
+	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+	for _, op := range []vm.OpCode{vm.CREATE, vm.CREATE2} {
+		t.Run(op.String(), func(t *testing.T) {
+			create := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE)
+			target := types.CreateAddress(factory, 0)
+			if op == vm.CREATE2 {
+				create = program.New().Create2(initCode, 0)
+				target = types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+			}
+			// The entry contract ignores a failed factory call. Its gas allowance
+			// covers the original initcode and leaves little room for a replacement.
+			call := program.New().Call(uint256.NewInt(params.CreateGas+700), factory, 0, 0, 0, 0, 0).Op(vm.POP, vm.STOP)
+			factoryCode := testutil.AssertStackWord(create.Op(vm.ISZERO), 0).Op(vm.STOP)
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: chain.TestChainOsakaConfig.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+				Alloc: types.GenesisAlloc{
+					testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+					entry:    {Code: call.Bytes()},
+					factory:  {Code: factoryCode.Bytes()},
+				},
+			}), execmoduletester.WithKey(testKey))
+			txn, err := types.SignTx(types.NewTransaction(0, entry, new(uint256.Int), 500_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
+			require.NoError(t, err)
+			pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(pack))
+			base := newBaseApiForTest(m)
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+			result, err := api.CallConstructor(m.Ctx, target, initCode)
+			require.NoError(t, err)
+			want := hexutil.Bytes{byte(vm.STOP)}
+			require.Equal(t, &CreationCode{Code: &want}, result)
+
+			for _, tc := range []struct {
+				name        string
+				replacement []byte
+				wantErr     error
+			}{
+				{"size limit", common.RightPadBytes(initCode, params.MaxInitCodeSize+1), vm.ErrMaxInitCodeSizeExceeded},
+				{"analysis gas", common.RightPadBytes(initCode, 32*1024), vm.ErrOutOfGas},
+				{"constructor fault before factory failure", []byte{byte(vm.INVALID)}, &vm.ErrInvalidOpCode{}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					result, err := api.CallConstructor(m.Ctx, target, tc.replacement)
+					require.Nil(t, result)
+					require.ErrorIs(t, err, tc.wantErr)
+				})
+			}
+		})
+	}
+}
+
 func TestCallConstructorSelfdestruct(t *testing.T) {
 	factory, destroyer := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
 	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
