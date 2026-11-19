@@ -185,6 +185,8 @@ func TestComputeAheadFeedRootMatchesHexPatricia(t *testing.T) {
 }
 
 func computeAheadRoot(t *testing.T, wantFeed bool) []byte {
+	defer func(v bool) { prefetchNoPause = v }(prefetchNoPause)
+	prefetchNoPause = false
 	ctx := context.Background()
 	db, tx, doms := setupStepTest(t)
 	in := make(chan applyResult, 64)

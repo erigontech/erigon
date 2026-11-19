@@ -306,5 +306,6 @@ func TestComputeLeavesQueuedPrefetchToWorkersWithoutPause(t *testing.T) {
 	})
 
 	require.Len(t, out, 1, "the block's round ran")
+	require.ErrorIs(t, (<-out).err, ErrWrongTrieRoot, "the round reached the fold")
 	require.Len(t, p.work, 1, "the round leaves the queued account walk to the workers instead of discarding it")
 }
