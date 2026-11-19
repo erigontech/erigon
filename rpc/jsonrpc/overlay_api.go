@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -266,7 +267,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
 	if err != nil {
-		return nil, err
+		return nil, cmp.Or(ct.err, err)
 	}
 	runtimeCode, err := statedb.GetCode(ct.contractAddress)
 	if err != nil {

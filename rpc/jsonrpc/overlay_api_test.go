@@ -784,6 +784,45 @@ func TestFrameCallConstructor(t *testing.T) {
 	}
 }
 
+func TestFrameCallConstructorPaymentApprovalError(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender := common.HexToAddress("0x1000")
+	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+	create := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.EXTCODESIZE)
+	approval := testutil.AssertStackWord(create, 1).Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{sender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: approval.Bytes()}},
+	}))
+	frameTx := &types.FrameTransaction{
+		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		Frames: []types.Frame{
+			{Mode: types.FrameDefault, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 500_000, State: 1_000_000}},
+		},
+	}
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+	target := types.CreateAddress(sender, 0)
+	for _, tc := range []struct {
+		op      vm.OpCode
+		wantErr string
+	}{
+		{vm.INVALID, "invalid opcode: INVALID"},
+		{vm.STOP, "frame transaction without payment approval"},
+	} {
+		t.Run(tc.op.String(), func(t *testing.T) {
+			result, err := api.CallConstructor(m.Ctx, target, hexutil.Bytes{byte(tc.op)})
+			require.EqualError(t, err, tc.wantErr)
+			require.Nil(t, result)
+		})
+	}
+}
+
 func TestFrameCallConstructorFeeAccounting(t *testing.T) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
