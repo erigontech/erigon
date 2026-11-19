@@ -271,6 +271,17 @@ func TestRangeDupSort(t *testing.T) {
 	})
 }
 
+func TestRangeDupSortDescFromPrefixWithoutSuccessor(t *testing.T) {
+	_, tx, _ := BaseCase(t)
+	for _, from := range [][]byte{{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, {}} {
+		it, err := tx.RangeDupSort("Table", []byte("key1"), from, nil, order.Desc, -1)
+		require.NoError(t, err)
+		_, vals, err := stream.ToArrayKV(it)
+		require.NoError(t, err)
+		require.Equal(t, [][]byte{[]byte("value1.3"), []byte("value1.1")}, vals, "from=%x", from)
+	}
+}
+
 // TestRangeRwTxInterleavedWrite verifies that Range iterators remain correct
 // when writes are interleaved with Next() calls on a read-write transaction.
 // Without cursor.Current()-based iteration, the stored raw MDBX nextK pointer
