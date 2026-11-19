@@ -569,7 +569,8 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 		if !isSegmentPresent {
 			// check if it is in the header
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
-			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
+			// The anchor's state is dumped at construction, whatever its slot.
+			if ok && (bHeader.Slot%dumpSlotFrequency == 0 || currentIteratorRoot == f.anchorRoot) {
 				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 				if err != nil {
 					log.Warn("[forkgraph] state walk-back: disk read failed", "root", currentIteratorRoot, "slot", bHeader.Slot, "wanted", blockRoot, "err", err)

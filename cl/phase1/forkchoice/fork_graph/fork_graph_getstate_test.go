@@ -54,3 +54,23 @@ func TestGetState_InfiniteLoopOnMissingStateFile(t *testing.T) {
 		t.Fatal("getState did not return within 3s — infinite loop detected")
 	}
 }
+
+// An anchor off a dump slot is still found: the graph wrote its state at construction.
+func TestGetState_FindsAnAnchorOffADumpSlot(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	header := anchorState.LatestBlockHeader()
+	header.Slot = dumpSlotFrequency*100 + 1
+	anchorState.SetLatestBlockHeader(&header)
+	anchorState.SetSlot(header.Slot)
+
+	fg := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, beaconevents.NewEventEmitter())
+	graph := fg.(*forkGraphDisk)
+	anchorRoot := graph.AnchorRoot()
+	graph.currentState, graph.currentStateBlockRoot = nil, common.Hash{}
+
+	got, err := graph.GetState(anchorRoot, true)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, header.Slot, got.Slot())
+}
