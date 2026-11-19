@@ -229,6 +229,8 @@ func TestRevertedSelfdestructKeepsCreatedContract(t *testing.T) {
 			snap := ibs.PushSnapshot()
 			_, err := ibs.Selfdestruct(x, false)
 			require.NoError(t, err)
+			_, err = ibs.GetState(x, k5)
+			require.NoError(t, err)
 			ibs.RevertToSnapshot(snap, nil)
 			current, err := ibs.GetState(x, k5)
 			require.NoError(t, err)
