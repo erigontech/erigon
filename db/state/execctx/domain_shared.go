@@ -23,12 +23,14 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -265,15 +267,15 @@ type SharedDomains struct {
 	cacheApplier     cache.Applier
 	cacheUnwind      cacheUnwindState
 	localCacheUnwind bool
+	commitmentV3     bool
 
 	// Backing frontiers stay fixed while writes and staged unwinds remain in
 	// mem; both reach the transaction during flush, which resets the memo.
 	visibleEnds domainVisibleEndMemo
 
-	// changesetMu serializes the exec loop's install of a block's changeset
-	// accumulator against the calculator's swap of the commitment writer's
-	// diff. Writers other than commitment are never redirected, so DomainPut
-	// and DomainDel do not take it — see SwapCommitmentDiffLocked.
+	// changesetMu guards the live changeset accumulator and the live commitment
+	// diff: the exec loop's installs and binds, and every swap of or write into
+	// the live commitment diff. DomainPut and DomainDel do not take it.
 	changesetMu sync.Mutex
 
 	// branchCache is the aggregator-scoped commitment cache consulted after local
@@ -319,10 +321,10 @@ type cacheUnwindState struct {
 // entry points instead of leaving Variant unset and relying on an implicit
 // fallback inside the trie constructor.
 func PickTrieVariant() commitment.TrieVariant {
-	if statecfg.ExperimentalParallelCommitment {
-		return commitment.VariantParallelHexPatricia
+	if statecfg.ExperimentalCommitmentV3 {
+		return commitment.VariantCommitmentV3
 	}
-	return commitment.VariantHexPatriciaTrie
+	return commitment.VariantParallelHexPatricia
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...SharedDomainOption) (*SharedDomains, error) {
@@ -333,6 +335,9 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	o.trieCfg.Variant = PickTrieVariant()
 	for _, opt := range opts {
 		opt(&o)
+	}
+	if o.trieCfg.Variant == commitment.VariantCommitmentV3 {
+		o.useSharedBranchCache = false
 	}
 	trieCfg := o.trieCfg
 
@@ -353,6 +358,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		baseTxWritable:   kv.UnderlyingTxIsWritable(generationTx),
 		baseStateVersion: stateVersion,
 		localCacheUnwind: o.localCacheUnwind,
+		commitmentV3:     trieCfg.Variant == commitment.VariantCommitmentV3,
 	}
 
 	if o.mem != nil {
@@ -487,20 +493,15 @@ func (sd *SharedDomains) ResetPendingUpdates() {
 }
 
 // FlushPendingUpdates applies the pending deferred commitment update.
-// It sets the corresponding block's changeset as the accumulator
-// so writes go directly to the correct changeset.
-//
-// The inner swap mutates the commitment writer's diff, which the exec loop
-// also rewrites via SetChangesetAccumulator — hence changesetMu, taken here
-// unless lockHeld says the caller already holds it.
+// When the update's block has a saved changeset, the writes go straight into
+// that changeset's commitment diff and need no lock; otherwise they go to the
+// live diff under changesetMu, taken here unless the caller already holds it.
 func (sd *SharedDomains) FlushPendingUpdates(tx kv.TemporalTx) error {
 	return sd.flushPendingUpdates(tx, false)
 }
 
 // FlushPendingUpdatesLocked is the variant for callers that already hold
-// changesetMu via LockChangesetAccumulator (the parallel calculator's
-// per-block compute window). The public FlushPendingUpdates above
-// acquires the lock itself.
+// changesetMu via LockChangesetAccumulator.
 func (sd *SharedDomains) FlushPendingUpdatesLocked(tx kv.TemporalTx) error {
 	return sd.flushPendingUpdates(tx, true)
 }
@@ -516,11 +517,32 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 		return nil
 	}
 	defer upd.Clear()
+	return sd.applyPendingUpdate(tx, upd, nil)
+}
+
+func (sd *SharedDomains) applyPendingUpdate(tx kv.TemporalTx, upd *commitment.PendingCommitmentUpdate, diff *kv.DomainDiff) error {
+	if upd.Deltas != nil {
+		return sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, diff)
+	}
 	putBranch := func(prefix, data, prevData []byte) error {
-		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, nil)
+		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, diff)
 	}
 	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
 	return err
+}
+
+func (sd *SharedDomains) PutCommitmentBranches(roTx kv.TemporalTx, parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
+	if batch, ok := sd.mem.(commitmentBranchBatchWriter); ok {
+		return batch.PutOwnedCommitmentBranches(parts, txNum, diff)
+	}
+	for _, part := range parts {
+		for i := range part {
+			if err := sd.DomainPutCommitmentDiff(roTx, part[i].Key, part[i].Data, txNum, part[i].Prev, diff); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) error {
@@ -530,52 +552,32 @@ func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) er
 	}
 	defer upd.Clear()
 
-	putBranch := func(prefix, data, prevData []byte) error {
-		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
+	if switcher, ok := sd.mem.(changesetSwitcher); ok {
+		// Hash-aware lookup when the pending update carries a BlockHash. This
+		// disambiguates pastChangesAccumulator entries when multiple changesets
+		// exist for the same block number (canonical + fork during a reorg-bounce).
+		// Falls back to the legacy number-only lookup if the hash isn't set
+		// (zero hash) — preserves behavior for callers that don't yet thread
+		// the hash through.
+		var cs *changeset.StateChangeSet
+		if upd.BlockHash != (common.Hash{}) {
+			cs = switcher.GetChangesetByHash(upd.BlockNum, upd.BlockHash)
+		} else {
+			_, cs = switcher.GetChangesetByBlockNum(upd.BlockNum)
+		}
+		if cs != nil {
+			// Writing into the changeset's own diff leaves the commitment writer's
+			// diff alone, so the apply fold's changeset binds do not wait on the flush.
+			return sd.applyPendingUpdate(tx, upd, &cs.Diffs[kv.CommitmentDomain])
+		}
 	}
 
+	// No saved changeset: write into the live diff, which the exec loop also rewrites.
 	if !lockHeld {
 		sd.changesetMu.Lock()
 		defer sd.changesetMu.Unlock()
 	}
-
-	switcher, ok := sd.mem.(changesetSwitcher)
-	if !ok {
-		_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
-		return err
-	}
-
-	// Hash-aware lookup when the pending update carries a BlockHash. This
-	// disambiguates pastChangesAccumulator entries when multiple changesets
-	// exist for the same block number (canonical + fork during a reorg-bounce).
-	// Falls back to the legacy number-only lookup if the hash isn't set
-	// (zero hash) — preserves behavior for callers that don't yet thread
-	// the hash through.
-	var blockHash common.Hash
-	var cs *changeset.StateChangeSet
-	if upd.BlockHash != (common.Hash{}) {
-		blockHash = upd.BlockHash
-		cs = switcher.GetChangesetByHash(upd.BlockNum, blockHash)
-	} else {
-		blockHash, cs = switcher.GetChangesetByBlockNum(upd.BlockNum)
-	}
-	if cs != nil {
-		// Apply deferred branch writes under the pending update's block
-		// changeset, then save it back. All accesses under changesetMu —
-		// see concurrency contract on the wrappers above.
-		defer sd.SwapCommitmentDiffLocked(cs)()
-
-		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics); err != nil {
-			return err
-		}
-
-		switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
-		return nil
-	}
-
-	// No past changeset found — write into whatever is current.
-	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
-	return err
+	return sd.applyPendingUpdate(tx, upd, sd.mem.(commitmentDiffSwapper).CommitmentDiff())
 }
 
 // AsStateGetter returns an execution-aware getter with optimized code reads.
@@ -646,15 +648,9 @@ func (sd *SharedDomains) flushRequestMetrics() {
 	sd.reqMetrics = nil
 }
 
-// LockChangesetAccumulator and UnlockChangesetAccumulator bracket
-// FlushPendingUpdatesLocked's hash-aware swap+use+restore of the commitment
-// writer's diff when flushing a previous block's deferred update. It
-// serializes against the exec loop's per-block SetChangesetAccumulator;
-// apply-side DomainPut/DomainDel no longer take it, because the swap leaves
-// their writers alone (see SwapCommitmentDiffLocked). The calculator's own
-// per-block compute (ComputeCommitmentWithDiff) does not run inside this
-// lock — it routes its own writes through an explicit diff instead (see
-// DomainPutCommitmentDiff), so only the brief flush step needs it.
+// LockChangesetAccumulator and UnlockChangesetAccumulator hold changesetMu
+// across several *Locked calls, such as a swap of the live accumulator, a
+// flush into it and the restore.
 //
 // Inside the locked window callers must use the *Locked variants
 // (SwapCommitmentDiffLocked) — the public Set/Get acquire the same Mutex
@@ -726,6 +722,10 @@ func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte
 	return sd.mem.(commitmentBranchDiffWriter).PutCommitmentBranchDiff(ks, v, txNum, prevVal, diff)
 }
 
+type commitmentBranchBatchWriter interface {
+	PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error
+}
+
 // commitmentDiffPutDel implements kv.TemporalPutDel, routing commitment-domain
 // writes through an explicit diff (DomainPutCommitmentDiff) instead of the
 // shared, lockable target SetChangesetAccumulator installs. Non-commitment
@@ -776,8 +776,8 @@ type commitmentDiffSwapper interface {
 // SwapCommitmentDiffLocked points the commitment writer's diff at acc and
 // returns a func restoring the previous one. Every other domain writer is left
 // alone, so apply-side writes need no lock. Callers must hold changesetMu.
-// Used only by flushPendingUpdates's hash-aware routing — a call with a known
-// target diff should use DomainPutCommitmentDiff instead, which needs no lock.
+// A write with a known target diff should use DomainPutCommitmentDiff
+// instead, which needs no lock.
 func (sd *SharedDomains) SwapCommitmentDiffLocked(acc *changeset.StateChangeSet) (restore func()) {
 	h := sd.mem.(commitmentDiffSwapper)
 	prev := h.CommitmentDiff()
@@ -833,10 +833,41 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 // Unwind drops [txNumUnwindTo, ∞)
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
+	sd.unwindCollectedTouches(changeset)
 	if !sd.localCacheUnwind {
 		sd.invalidateCaches(txNumUnwindTo)
 	}
 	sd.stageCacheUnwind(txNumUnwindTo)
+}
+
+func (sd *SharedDomains) unwindCollectedTouches(diffs *[kv.DomainLen][]kv.DomainEntryDiff) {
+	updates := sd.sdCtx.GetUpdates()
+	if updates.Mode() != commitment.ModeCollect {
+		return
+	}
+	retouch := func(key string) {
+		domain := kv.StorageDomain
+		if len(key) == length.Addr {
+			domain = kv.AccountsDomain
+		}
+		if v, _, _, ok := sd.latestFromMem(domain, []byte(key)); ok {
+			sd.sdCtx.TouchKey(domain, key, v)
+		}
+	}
+	if diffs == nil {
+		for _, key := range updates.UntouchAll() {
+			retouch(key)
+		}
+		return
+	}
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		for _, diff := range diffs[d] {
+			key := diff.Key[:len(diff.Key)-8]
+			if updates.Untouch(key) {
+				retouch(strings.Clone(key))
+			}
+		}
+	}
 }
 
 func (sd *SharedDomains) invalidateCaches(txNum uint64) {
@@ -1463,6 +1494,9 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
+	if domain == kv.CommitmentDomain && sd.commitmentV3 {
+		v = bytes.Clone(v)
+	}
 
 	// A bounded read observes a staged unwind, not stable committed state.
 	if willFill {
@@ -1999,7 +2033,6 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 }
 
 // ComputeCommitment evaluates commitment for gathered updates.
-// If trieWarmup toggle was enabled via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
 	// Flush any pending deferred commitment updates from the previous block
 	// into the CORRECT block's changeset (via the hash-aware lookup in
@@ -2009,12 +2042,6 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 		return nil, err
 	}
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
-}
-
-// EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
-// It requires a DB to be enabled via EnableParaTrieDB.
-func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
-	sd.sdCtx.EnableTrieWarmup(trieWarmup)
 }
 
 func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
@@ -2029,6 +2056,10 @@ func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 // instead of being applied inline, and must be flushed later via FlushPendingUpdates.
 func (sd *SharedDomains) SetDeferCommitmentUpdates(defer_ bool) {
 	sd.sdCtx.SetDeferCommitmentUpdates(defer_)
+}
+
+func (sd *SharedDomains) SetStorageFanOutMin(n int) {
+	sd.sdCtx.SetStorageFanOutMin(n)
 }
 
 // TouchChangedKeysFromHistory touches the changed keys in the commitment trie by reading the historical updates.
@@ -2055,14 +2086,23 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 		return changes, err
 	}
 	defer it.Close()
-	var k []byte
+	var k, prev []byte
 	for it.HasNext() {
 		k, _, err = it.Next()
 		if err != nil {
 			return changes, err
 		}
+		if sd.commitmentV3 {
+			if bytes.Equal(k, prev) {
+				changes++
+				continue
+			}
+			prev = append(prev[:0], k...)
+		}
 		if !sd.disableInlineTouchKey {
-			sd.GetCommitmentContext().TouchKey(d, string(k), nil)
+			if err := sd.GetCommitmentContext().TouchKeyFromState(tx, k); err != nil {
+				return changes, err
+			}
 		}
 		changes++
 	}

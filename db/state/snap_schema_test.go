@@ -21,7 +21,7 @@ func TestE2SnapSchema(t *testing.T) {
 	t.Parallel()
 	dirs := setup(t)
 	e2version := NewE2SnapSchemaVersion(version.V1_0_standart, version.V1_0_standart)
-	p := NewE2SnapSchema(dirs, "bodies", e2version)
+	p := NewE2SnapSchemaWithStepAndDir(dirs.Snap, "bodies", []string{"bodies"}, 1000, e2version)
 
 	info, ok := p.Parse("v1.0-000100-000500-bodies.seg")
 	require.True(t, ok)
@@ -49,7 +49,7 @@ func TestE2SnapSchema(t *testing.T) {
 	require.False(t, ok)
 
 	// for transactions
-	p = NewE2SnapSchemaWithIndexTag(dirs, "transactions", []string{"transactions", "transactions-to-block"}, e2version)
+	p = NewE2SnapSchemaWithStepAndDir(dirs.Snap, "transactions", []string{"transactions", "transactions-to-block"}, 1000, e2version)
 	_, ok = p.Parse("v1.0-000100-000500-transactions.seg")
 	require.True(t, ok)
 

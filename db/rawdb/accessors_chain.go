@@ -1341,9 +1341,7 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, 
 	return res, true, nil
 }
 
-func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
-	blockHash := block.Hash()
-	blockNum := block.NumberU64()
+func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (types.Receipts, error) {
 	transactions := block.Transactions()
 	// Hashing the transactions overlaps with reading the receipts.
 	hashed := make(chan struct{})
@@ -1355,55 +1353,65 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	}()
 	defer func() { <-hashed }()
 
-	minTxNum, err := txNumReader.Min(context.Background(), tx, blockNum)
+	res, err := ReadBlockReceiptsCacheV2(context.Background(), tx, block.NumberU64(), txNumReader)
 	if err != nil {
-		return
-	}
-	maxTxNum, err := txNumReader.Max(context.Background(), tx, blockNum)
-	if err != nil {
-		return
-	}
-
-	receiptIdx := 0
-	for txNum := minTxNum; txNum < maxTxNum+1; txNum++ {
-		v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, txNum+1)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-		if len(v) == 0 {
-			continue
-		}
-
-		// Convert the receipts from their storage form to their internal representation
-		receipt := &types.ReceiptForStorage{}
-		if err := rlp.DecodeBytes(v, receipt); err != nil {
-			return nil, fmt.Errorf("ReadReceiptsCacheV2: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
-		}
-		x := (*types.Receipt)(receipt)
-		txnIdx := int(receipt.TransactionIndex)
-		if txnIdx < 0 || txnIdx != receiptIdx || txnIdx >= len(transactions) {
-			// RCacheV2 is read in txNum order. The stored transaction index must
-			// match the next receipt position, otherwise derive the block instead.
-			return nil, nil
-		}
-		res = append(res, x)
-		receiptIdx++
-	}
-	if receiptIdx != len(transactions) {
-		// Block receipt RPCs require the full ordered receipt set.
-		return nil, nil
+		return nil, err
 	}
 	<-hashed
-	for i, x := range res {
-		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, transactions[i].Hash(), true)
+	return DeriveCachedBlockReceipts(block, res), nil
+}
+
+// DeriveCachedBlockReceipts completes the RCacheV2 receipts of block with the block fields.
+// It returns nil when res does not hold one receipt per transaction: block receipt RPCs require the full set.
+func DeriveCachedBlockReceipts(block *types.Block, res types.Receipts) types.Receipts {
+	transactions := block.Transactions()
+	if len(res) != len(transactions) {
+		return nil
 	}
-	return res, nil
+	blockHash, blockNum := block.Hash(), block.NumberU64()
+	for i, x := range res {
+		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, transactions[i].Hash(), false)
+	}
+	return res
 }
 
 func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
 	var w rawtemporaldb.ReceiptWriter
 	return w.Append(tx, receipt, txNum)
+}
+
+// ReadBlockReceiptsCacheV2 reads and decodes the RCacheV2 receipts of blockNum, with their blooms,
+// without the block. A gap returns nil, and a missing tail returns a shorter list.
+func ReadBlockReceiptsCacheV2(ctx context.Context, tx kv.TemporalTx, blockNum uint64, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
+	minTxNum, err := txNumReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	maxTxNum, err := txNumReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	for txNum := minTxNum; txNum < maxTxNum+1; txNum++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, txNum+1)
+		if err != nil {
+			return nil, err
+		}
+		if !ok || len(v) == 0 {
+			continue
+		}
+		receipt := &types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(v, receipt); err != nil {
+			return nil, fmt.Errorf("ReadBlockReceiptsCacheV2: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
+		}
+		x := (*types.Receipt)(receipt)
+		if int(x.TransactionIndex) != len(res) {
+			return nil, nil
+		}
+		x.Bloom = types.CreateBloom(types.Receipts{x})
+		res = append(res, x)
+	}
+	return res, nil
 }

@@ -916,6 +916,10 @@ func (ibs *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		return size, nil
 	}
 
+	if ibs.codeAccess != nil {
+		code, err := ibs.getCode(addr)
+		return code.Len(), err
+	}
 	size, source, _, err := readCodeSize(ibs, addr)
 
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
@@ -930,6 +934,7 @@ func (ibs *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 // EIP-7702 delegation). No-op when the reader doesn't implement it.
 type codeAccessTracker interface {
 	OnCodeAccess(accounts.Address, []byte)
+	OnCodeChange(accounts.CodeHash) func()
 }
 
 func (ibs *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
@@ -1017,15 +1022,12 @@ func (ibs *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 	// it may not result in an actual gas recorded access - if it
 	// is it will be marked via a direct call
 	if ibs.versionMap != nil {
-		// Read through the version-aware CodePath so validation can reject a
-		// speculative execution that raced a prior tx's CodePath publish. readCode
-		// (not getCode) avoids reporting a BAL code access for non-delegated code.
 		code, _, _, err := readCode(ibs, addr)
 		if err != nil {
 			return accounts.ZeroAddress, false, err
 		}
+		ibs.callCodeAccessHook(addr, code.Bytes)
 		if delegation, ok := types.ParseDelegation(code.Bytes); ok {
-			ibs.callCodeAccessHook(addr, code.Bytes)
 			return delegation, true, nil
 		}
 		return accounts.ZeroAddress, false, nil
@@ -1039,8 +1041,8 @@ func (ibs *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 		if err != nil {
 			return accounts.ZeroAddress, false, err
 		}
+		ibs.callCodeAccessHook(addr, code)
 		if delegation, ok := types.ParseDelegation(code); ok {
-			ibs.callCodeAccessHook(addr, code)
 			return delegation, true, nil
 		}
 	}
@@ -1072,8 +1074,9 @@ func (ibs *IntraBlockState) GetCommittedState(addr accounts.Address, key account
 }
 
 func (ibs *IntraBlockState) HasSelfdestructed(addr accounts.Address) (bool, error) {
-	destructed, _, _, err := readSelfDestruct(ibs, addr)
-	return destructed, err
+	destructed, source, _, err := readSelfDestruct(ibs, addr)
+	// A destruct read from the version map is an earlier transaction's, not this one's.
+	return destructed && source != MapRead, err
 }
 
 func (ibs *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) ReadResult {
@@ -1755,7 +1758,15 @@ func (ibs *IntraBlockState) writeCode(addr accounts.Address, code accounts.Code,
 
 // journalCodeChange journals a code change and calls the tracing hooks.
 func (ibs *IntraBlockState) journalCodeChange(addr accounts.Address, prevHash accounts.CodeHash, prevCode []byte, code accounts.Code, wasCommited bool, reason tracing.CodeChangeReason) {
-	ibs.journal.codeChange(addr, prevCode, prevHash, wasCommited)
+	entry := ibs.journal.codeChange(addr, prevCode, prevHash, wasCommited)
+	if ibs.codeAccess != nil {
+		if undo := ibs.codeAccess.OnCodeChange(code.Hash); undo != nil {
+			if entry.extra == nil {
+				entry.extra = &journalExtra{prevhash: accounts.EmptyCodeHash}
+			}
+			entry.extra.undoCodeChange = undo
+		}
+	}
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnCodeChangeV2 != nil {
 		ibs.tracingHooks.OnCodeChangeV2(addr, prevHash, prevCode, code.Hash, code.Bytes, reason)
 	} else if ibs.tracingHooks != nil && ibs.tracingHooks.OnCodeChange != nil {
