@@ -50,7 +50,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 // EthBackendAPIVersion
@@ -571,9 +570,9 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	} else {
 		reader = state.NewHistoryReaderV3(tx, maxTxNum+1)
 	}
-	ibs := state.New(reader)
+	ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
+	ibs.SetNoConflictDetection()
 	// The validation hook rejects BLOCKHASH but does not stop the opcode from calling GetHash, where
 	// an error would be taken for the node's failure, not for an invalid transaction.
 	noBlockHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
