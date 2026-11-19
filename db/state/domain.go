@@ -466,6 +466,40 @@ func (d *Domain) minStepInDB(tx kv.Tx) uint64 {
 	return uint64(first)
 }
 
+// firstStepToBuild returns the earliest pending step, clamped to filesEndStep.
+// A result below minResumeStep need not be the earliest: it already proves that
+// the build must be deferred, so the values scan can stop early.
+func (d *Domain) firstStepToBuild(tx kv.Tx, filesEndStep, minResumeStep kv.Step) (kv.Step, bool, error) {
+	if !d.HistoryDisabled && !d.SnapshotsDisabled {
+		first, found, err := d.InvertedIndex.firstStepInDB(tx)
+		return max(filesEndStep, first), found, err
+	}
+	// History can be absent or pruned independently of the pending values.
+	cursor, err := tx.Cursor(d.ValuesTable)
+	if err != nil {
+		return 0, false, err
+	}
+	defer cursor.Close()
+	first := kv.Step(math.MaxUint64)
+	for key, value, err := cursor.First(); ; key, value, err = cursor.Next() {
+		if err != nil {
+			return 0, false, err
+		}
+		if key == nil {
+			break
+		}
+		if d.LargeValues {
+			first = min(first, kv.Step(^binary.BigEndian.Uint64(key[len(key)-8:])))
+		} else {
+			first = min(first, kv.Step(^binary.BigEndian.Uint64(value[:8])))
+		}
+		if first <= filesEndStep || first < minResumeStep {
+			break
+		}
+	}
+	return max(filesEndStep, first), first != kv.Step(math.MaxUint64), nil
+}
+
 // A first snapshot must cover any older MDBX values before its end can be used
 // as the boundary for reads and pruning. This check runs only for a late first file.
 func (d *Domain) hasValuesBeforeStep(tx kv.Tx, step kv.Step) (bool, error) {
@@ -551,8 +585,7 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 		files = calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum)
 	}
 	dv := newDomainVisible(d.Name, files, d.Enabled)
-	// History and index files can reach disk before the values for the same range.
-	// Keep them hidden beyond the end of the last readable values file.
+	// Incomplete history stays dirty until its domain values become readable.
 	hv, hiv := d.History.calcVisibleFiles(dv.files.EndTxNum())
 	return dv, hv, hiv
 }

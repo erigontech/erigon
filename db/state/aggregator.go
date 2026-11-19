@@ -38,6 +38,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -107,6 +108,9 @@ type Aggregator struct {
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
 
+	deferredDomainWarnings [kv.DomainLen]rate.Sometimes
+	deferredIndexWarnings  [kv.StandaloneIdxLen]rate.Sometimes
+
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
@@ -159,6 +163,12 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*
 		workers:            workersCfg{merge: dbg.MergeWorkers, collateAndBuild: dbg.CollateWorkers},
 
 		produce: true,
+	}
+	for id := range a.deferredDomainWarnings {
+		a.deferredDomainWarnings[id].Interval = time.Minute
+	}
+	for id := range a.deferredIndexWarnings {
+		a.deferredIndexWarnings[id].Interval = time.Minute
 	}
 	empty := &aggregatorVisible{}
 	a.visible.Store(empty)
@@ -1059,7 +1069,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 
 var errStepNotReady = errors.New("step not ready")
 
-func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}) error {
+func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}, plan fileBuildPlan) error {
 	// Pin worker counts while collation and building read compressor settings.
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
@@ -1101,22 +1111,22 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 
 	ac := a.BeginFilesRo()
 	defer ac.Close()
-	skipDomains, skipIndices := a.filelessEntitiesBelowCeiling(txTo)
 	for id, d := range a.d {
-		if !ac.d[id].visible.enabled || skipDomains[id] {
+		if !ac.d[id].visible.enabled || plan.deferredDomains[id] {
 			continue
 		}
 
-		firstStepNotInFiles := ac.d[id].FirstStepNotInFiles()
-		if step < firstStepNotInFiles {
+		firstStep := max(ac.d[id].FirstStepNotInFiles(), plan.domainFirstStep[id])
+		if step < firstStep {
 			continue
 		}
 
+		firstFileAfterStepZero := step > 0 && ac.d[id].FirstStepNotInFiles() == 0
 		g.Go(func() error {
 			var collation Collation
 			var skip bool
 			if err := db.View(workerCtx, func(tx kv.Tx) (err error) {
-				if firstStepNotInFiles == 0 && step > 0 {
+				if firstFileAfterStepZero {
 					skip, err = d.hasValuesBeforeStep(tx, step)
 					if err != nil || skip {
 						return err
@@ -1147,12 +1157,12 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	}
 	// indices are built concurrently
 	for iikey, ii := range a.standaloneIIs() {
-		if !ac.iis[iikey].visible.enabled || skipIndices[iikey] {
+		if !ac.iis[iikey].visible.enabled || plan.deferredIndices[iikey] {
 			continue
 		}
 
-		firstStepNotInFiles := ac.iis[iikey].FirstStepNotInFiles()
-		if step < firstStepNotInFiles {
+		firstStep := max(ac.iis[iikey].FirstStepNotInFiles(), plan.indexFirstStep[iikey])
+		if step < firstStep {
 			continue
 		}
 
@@ -1188,22 +1198,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt), "workers", a.workers.getCollateAndBuild())
 
 	return nil
-}
-
-// An aligned entity starts limiting every reader as soon as it has a file.
-// Its first file must reach the current ceiling, even during an older rebuild.
-func (a *Aggregator) filelessEntitiesBelowCeiling(txTo uint64) (domains [kv.DomainLen]bool, indices [kv.StandaloneIdxLen]bool) {
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	if txTo < a.dirtyFilesEndTxNumMinimax() {
-		for id, d := range a.d {
-			domains[id] = d != nil && !a.unalignedDomain[id] && d.dirtyFiles.Len() == 0
-		}
-		for id, ii := range a.standaloneIIs() {
-			indices[id] = ii != nil && !a.unalignedIdx[id] && ii.dirtyFiles.Len() == 0
-		}
-	}
-	return domains, indices
 }
 
 func (a *Aggregator) readyForCollation(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
@@ -1265,42 +1259,11 @@ Loop:
 	return nil
 }
 
-// Check the state files against MDBX before a build can publish an empty range over missing history.
-func (a *Aggregator) checkStateFilesBuildGap(ctx context.Context, db kv.RoDB) error {
-	return db.View(ctx, func(tx kv.Tx) error {
-		at := a.BeginFilesRo()
-		defer at.Close()
-		// Commitment rebuilds read existing state files, so a lower commitment file
-		// end does not imply missing account, storage or code history.
-		domains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
-		nextStateStep := kv.Step(at.TxNumsInFiles(domains...) / at.StepSize())
-		if nextStateStep == 0 {
-			return nil
-		}
-		var firstInDB kv.Step
-		foundHistory := false
-		for _, domain := range domains {
-			first, found, err := at.d[domain].d.InvertedIndex.firstStepInDB(tx)
-			if err != nil {
-				return err
-			}
-			if found && (!foundHistory || first < firstInDB) {
-				firstInDB = first
-				foundHistory = true
-			}
-		}
-		if firstInDB > nextStateStep {
-			return fmt.Errorf("gap between state snapshots and MDBX: files end at step %d, history starts at step %d; refusing to build files. "+
-				"For a clean reset, stop Erigon, remove both state snapshots and the chaindata directory, then re-sync. "+
-				"Removing only snapshots may leave values previously read from corrupt files in chaindata",
-				nextStateStep, firstInDB)
-		}
-		return nil
-	})
-}
-
-// BuildFiles2 checks the state history gap before scheduling the requested range.
+// BuildFiles2 schedules a background build for [fromStep, toStep), including
+// earlier steps with pending data when needed. It returns planning errors directly.
+// A nil result can also mean a build is already running or the aggregator is closing.
 func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
+	// Close must wait for synchronous planning as well as the background build.
 	if !a.background.TryAdd() {
 		return nil
 	}
@@ -1308,19 +1271,23 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
+	var plan fileBuildPlan
 	if toStep > fromStep {
-		if err := a.checkStateFilesBuildGap(ctx, db); err != nil {
+		var err error
+		plan, err = a.readFileBuildPlan(ctx, db)
+		if err != nil {
 			a.buildingFiles.Store(false)
 			return err
 		}
+		// Include pending steps before the requested range so later pruning
+		// cannot delete data that this build would otherwise skip.
+		fromStep = min(fromStep, plan.firstStep)
+		log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
 	}
 	started := a.background.TryGo(func() {
 		defer a.buildingFiles.Store(false)
-		if toStep > fromStep {
-			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
-		}
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(ctx, db, step, finalityCtx, nil); err != nil {
+			if err := a.buildFilesWithPlan(ctx, db, step, finalityCtx, nil, plan); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
@@ -2362,6 +2329,156 @@ func (a *Aggregator) BuildFilesInBackground(db kv.TemporalRoDB, txNum uint64, fi
 	return finished
 }
 
+type fileBuildPlan struct {
+	firstStep kv.Step
+
+	// A job may start earlier for another entity, but even an empty file must
+	// respect its entity's lower bound to avoid lowering the shared ceiling.
+	// Unaligned rebuilds can include requested empty steps before pending data.
+	domainFirstStep [kv.DomainLen]kv.Step
+	indexFirstStep  [kv.StandaloneIdxLen]kv.Step
+
+	// Defer unsafe backfills and entities disabled when planning. A later enable
+	// must not bypass the check of pending MDBX data.
+	deferredDomains [kv.DomainLen]bool
+	deferredIndices [kv.StandaloneIdxLen]bool
+}
+
+func (a *Aggregator) readFileBuildPlan(ctx context.Context, db kv.RoDB) (plan fileBuildPlan, err error) {
+	err = db.View(ctx, func(tx kv.Tx) (err error) {
+		plan, err = a.planFileBuild(tx)
+		return err
+	})
+	return plan, err
+}
+
+func (a *Aggregator) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
+	a.dirtyFilesLock.Lock()
+	at := a.BeginFilesRo()
+	ceilingStep := kv.Step(a.dirtyFilesEndTxNumMinimax() / at.StepSize())
+	// A fileless entity's first published step must reach the shared ceiling.
+	// Existing files already contribute to that ceiling, even without accessors.
+	var minResumeStep kv.Step
+	if ceilingStep > 0 {
+		minResumeStep = ceilingStep - 1
+	}
+	unalignedDomains, unalignedIndices := a.unalignedDomain, a.unalignedIdx
+	var domainMinResumeStep [kv.DomainLen]kv.Step
+	var indexMinResumeStep [kv.StandaloneIdxLen]kv.Step
+	for id, d := range a.d {
+		if d != nil && !unalignedDomains[id] && d.dirtyFiles.Len() == 0 {
+			domainMinResumeStep[id] = minResumeStep
+		}
+	}
+	for id, ii := range a.standaloneIIs() {
+		if ii != nil && !unalignedIndices[id] && ii.dirtyFiles.Len() == 0 {
+			indexMinResumeStep[id] = minResumeStep
+		}
+	}
+	a.dirtyFilesLock.Unlock()
+	defer at.Close()
+
+	if err := at.checkStateFilesBuildGap(tx); err != nil {
+		return fileBuildPlan{}, err
+	}
+	plan := fileBuildPlan{firstStep: kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())}
+	for id, d := range at.d {
+		if d == nil || !d.visible.enabled {
+			plan.deferredDomains[id] = true
+			continue
+		}
+		filesEndStep := d.FirstStepNotInFiles()
+		plan.domainFirstStep[id] = filesEndStep
+		if filesEndStep >= ceilingStep {
+			continue
+		}
+		plan.domainFirstStep[id] = max(filesEndStep, domainMinResumeStep[id])
+		first, found, err := d.d.firstStepToBuild(tx, filesEndStep, domainMinResumeStep[id])
+		if err != nil {
+			return plan, err
+		}
+		if !found {
+			continue
+		}
+		if first < domainMinResumeStep[id] {
+			plan.deferredDomains[id] = true
+			a.deferredDomainWarnings[id].Do(func() {
+				a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume",
+					"entity", d.d.Name, "pendingStep", first,
+					"ceilingStep", ceilingStep, "retainedIn", "MDBX")
+			})
+			continue
+		}
+		if !unalignedDomains[id] {
+			plan.domainFirstStep[id] = first
+		}
+		plan.firstStep = min(plan.firstStep, first)
+	}
+	for id, ii := range at.standaloneIIs() {
+		if ii == nil || !ii.visible.enabled {
+			plan.deferredIndices[id] = true
+			continue
+		}
+		filesEndStep := ii.FirstStepNotInFiles()
+		plan.indexFirstStep[id] = filesEndStep
+		if filesEndStep >= ceilingStep {
+			continue
+		}
+		plan.indexFirstStep[id] = max(filesEndStep, indexMinResumeStep[id])
+		first, found, err := ii.ii.firstStepInDB(tx)
+		if err != nil {
+			return plan, err
+		}
+		if !found {
+			continue
+		}
+		first = max(filesEndStep, first)
+		if first < indexMinResumeStep[id] {
+			plan.deferredIndices[id] = true
+			a.deferredIndexWarnings[id].Do(func() {
+				a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume",
+					"entity", ii.ii.Name, "pendingStep", first,
+					"ceilingStep", ceilingStep, "retainedIn", "MDBX")
+			})
+			continue
+		}
+		if !unalignedIndices[id] {
+			plan.indexFirstStep[id] = first
+		}
+		plan.firstStep = min(plan.firstStep, first)
+	}
+	return plan, nil
+}
+
+func (at *AggregatorRoTx) checkStateFilesBuildGap(tx kv.Tx) error {
+	// Commitment rebuilds read existing state files, so a lower commitment file
+	// end does not imply missing account, storage or code history.
+	domains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+	nextStateStep := kv.Step(at.TxNumsInFiles(domains...) / at.StepSize())
+	if nextStateStep == 0 {
+		return nil
+	}
+	var firstInDB kv.Step
+	foundHistory := false
+	for _, domain := range domains {
+		first, found, err := at.d[domain].d.InvertedIndex.firstStepInDB(tx)
+		if err != nil {
+			return err
+		}
+		if found && (!foundHistory || first < firstInDB) {
+			firstInDB = first
+			foundHistory = true
+		}
+	}
+	if firstInDB > nextStateStep {
+		return fmt.Errorf("gap between state snapshots and MDBX: files end at step %d, history starts at step %d; refusing to build files. "+
+			"For a clean reset, stop Erigon, remove both state snapshots and the chaindata directory, then re-sync. "+
+			"Removing only snapshots may leave values previously read from corrupt files in chaindata",
+			nextStateStep, firstInDB)
+	}
+	return nil
+}
+
 // Returns a channel which is closed when aggregation is done and whether it started.
 func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, doMerge bool, finalityCtx kv.FinalityContext) (chan struct{}, bool) {
 	fin := make(chan struct{})
@@ -2390,8 +2507,6 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		return fin, false
 	}
 
-	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
-
 	started := a.background.TryGo(func() {
 		defer a.buildingFiles.Store(false)
 
@@ -2407,6 +2522,16 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			defer a.snapshotBuildSema.Release(1)
 		}
 
+		plan, err := a.readFileBuildPlan(a.ctx, db)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
+				a.logger.Warn("[snapshots] first step to build", "err", err)
+			}
+			close(fin)
+			return
+		}
+
+		step := plan.firstStep
 		lastInDB := max(
 			lastIdInDB(db, a.d[kv.AccountsDomain]),
 			lastIdInDB(db, a.d[kv.CodeDomain]),
@@ -2445,22 +2570,10 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			return
 		}
 
-		if step > 0 {
-			if err := a.checkStateFilesBuildGap(a.ctx, db); err != nil {
-				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
-					a.logger.Error("[snapshots] refusing to build files", "err", err)
-				}
-				close(fin)
-				return
-			}
-		}
-
-		// trying to create as much small-step-files as possible:
-		// - to reduce amount of small merges
-		// - to remove old data from db as early as possible
-		// - during files build, may happen commit of new data. on each loop step getting latest id in db
-		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(a.ctx, db, step, finalityCtx, fin); err != nil {
+		// Build complete steps below the sampled lastInDB before starting merges.
+		// Newly completed steps are handled by a later build job.
+		for ; step < lastInDB; step++ {
+			if err := a.buildFilesWithPlan(a.ctx, db, step, finalityCtx, fin, plan); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
