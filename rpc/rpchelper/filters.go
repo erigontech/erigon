@@ -1031,12 +1031,20 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 		go func(n uint64, tsec uint64) {
 			time.Sleep(time.Second)
 			wakes, writes := rpc.SimProbeReset()
+			hw, hd := rpc.SimProbeHeadReset()
+			slices.Sort(hw)
+			slices.Sort(hd)
 			if len(wakes) == 0 || len(writes) == 0 {
 				return
 			}
 			slices.Sort(wakes)
 			slices.Sort(writes)
 			q := func(v []int64, p float64) float64 { return float64(v[min(len(v)-1, int(float64(len(v))*p))]-t0) / 1e6 }
+			if len(hw) > 0 && len(hd) > 0 {
+				ff.logger.Info("[fanout-probe-heads]", "block", n, "heads", len(hw),
+					"wake_p50", q(hw, .5), "wake_p90", q(hw, .9), "wake_p99", q(hw, .99), "wake_last", q(hw, 1),
+					"done_p50", q(hd, .5), "done_p90", q(hd, .9), "done_p99", q(hd, .99), "done_last", q(hd, 1))
+			}
 			ff.logger.Info("[fanout-probe]", "block", n, "gcIn1s", gcCycles()-gc0, "sinceBlockTime_ms", t0/1e6-int64(tsec)*1000, "sendLoop_ms", float64(t1-t0)/1e6,
 				"wake_p50", q(wakes, .5), "wake_p99", q(wakes, .99), "wake_last", q(wakes, 1), "wakes", len(wakes),
 				"write_p50", q(writes, .5), "write_p99", q(writes, .99), "write_last", q(writes, 1), "writes", len(writes))

@@ -192,12 +192,19 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 					log.Warn(closedWarn)
 					return
 				}
+				head := closedWarn == "[rpc] new heads channel was closed"
+				if head {
+					rpc.SimProbeHeadWake()
+				}
 				err := rpc.CoalesceNotifications(notifier, func() {
 					notify(emit, item)
 					for range len(ch) {
 						notify(emit, <-ch)
 					}
 				})
+				if head {
+					rpc.SimProbeHeadDone()
+				}
 				if err != nil {
 					log.Warn("[rpc] notification batch write failed, connection closed", "err", err)
 				}
