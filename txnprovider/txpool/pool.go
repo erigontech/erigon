@@ -2165,7 +2165,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	for _, changesList := range stateChanges.ChangeBatch {
 		for _, change := range changesList.Changes {
 			switch change.Action {
-			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE, remoteproto.Action_REMOVE:
+			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE, remoteproto.Action_CODE, remoteproto.Action_REMOVE:
 				if change.Incarnation > 0 {
 					continue
 				}

@@ -292,10 +292,11 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 			case remoteproto.Action_REMOVE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				c.add(addr[:], nil, r, id)
-				c.addCode(addr[:], nil, r, id)
 			case remoteproto.Action_STORAGE:
 				// skip, will check later
 			case remoteproto.Action_CODE:
+				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
+				c.evictKey(addr[:], r)
 				k := crypto.Keccak256Hash(sc.Changes[i].Code)
 				c.addCode(k[:], sc.Changes[i].Code, r, id)
 			default:
@@ -409,9 +410,8 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 		if err != nil {
 			return nil, err
 		}
-		if hash := accounts.DeserialiseV3CodeHash(account); hash != nil {
-			cacheKey = hash
-		} else if len(account) != 0 {
+		cacheKey = accounts.DeserialiseV3CodeHash(account)
+		if cacheKey == nil {
 			return nil, nil
 		}
 	}

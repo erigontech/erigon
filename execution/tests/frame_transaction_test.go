@@ -296,14 +296,16 @@ func TestFrameValidationAtBogotaActivation(t *testing.T) {
 	cfg := chain.TestChainOsakaConfig.Copy()
 	now := uint64(time.Now().Unix())
 	cfg.AmsterdamTime, cfg.BogotaTime = common.NewUint64(0), common.NewUint64(now-1)
-	sender := common.HexToAddress("0x1000")
+	sender, proxy := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
+	senderCode := program.New().Push(proxy).Op(vm.EXTCODESIZE, vm.POP).Push(3).Push0().Push0().Op(vm.APPROVE).Bytes()
 	genesis := &types.Genesis{Config: cfg, Timestamp: now - 2*cfg.SecondsPerSlot(), GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
-		sender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}},
+		sender: {Balance: big.NewInt(common.Ether), Code: senderCode},
+		proxy:  {Code: program.New().Op(vm.STOP, vm.DELEGATECALL).Bytes()},
 	}}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
 	frame := &types.FrameTransaction{
 		NonceKeys: nil, ChainID: *cfg.ChainID, SenderAddress: sender,
-		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
+		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 20_000}}},
 		Fees:   types.FrameFees{MaxFee: *uint256.NewInt(10_000_000_000)},
 	}
 	frame.Fees.MaxFee.Mul(&frame.Fees.MaxFee, uint256.NewInt(frame.GetGasLimit()))
@@ -313,6 +315,8 @@ func TestFrameValidationAtBogotaActivation(t *testing.T) {
 	result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{Transaction: encoded.Bytes()})
 	require.NoError(t, err)
 	require.True(t, result.Valid, "admission must use active fork rules before the first post-fork block")
+	require.Len(t, result.ProxyDependencies, 1)
+	require.Equal(t, gointerfaces.ConvertAddressToH160(proxy), result.ProxyDependencies[0])
 }
 
 func TestFrameValidationExpectedHead(t *testing.T) {

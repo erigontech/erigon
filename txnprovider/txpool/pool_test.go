@@ -430,6 +430,12 @@ func TestBogotaSenderCodeUnavailable(t *testing.T) {
 }
 
 func TestBogotaEvictsTransactionsFromAdoptedSender(t *testing.T) {
+	for _, action := range []remoteproto.Action{remoteproto.Action_UPSERT_CODE, remoteproto.Action_CODE} {
+		t.Run(action.String(), func(t *testing.T) { testBogotaEvictsAdoptedSender(t, action) })
+	}
+}
+
+func testBogotaEvictsAdoptedSender(t *testing.T, action remoteproto.Action) {
 	config := *chain.AllProtocolChanges
 	config.BogotaTime = common.NewUint64(0)
 	ctx, pool, _, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, &config)
@@ -444,11 +450,14 @@ func TestBogotaEvictsTransactionsFromAdoptedSender(t *testing.T) {
 		account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.NewCode(code).Hash}
 		data := accounts.SerialiseV3(&account)
 		writeTestSenderState(t, ctx, coreDB, log.New(), sender, data, height)
+		if action == remoteproto.Action_CODE {
+			data = nil
+		}
 		change := &remoteproto.StateChangeBatch{
 			StateVersionId: height, PendingBlockBaseFee: 1, BlockGasLimit: 1_000_000,
 			ChangeBatch: []*remoteproto.StateChange{{
 				BlockHeight: height, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{byte(height)}),
-				Changes: []*remoteproto.AccountChange{{Action: remoteproto.Action_UPSERT_CODE, Address: gointerfaces.ConvertAddressToH160(sender), Data: data, Code: code}},
+				Changes: []*remoteproto.AccountChange{{Action: action, Address: gointerfaces.ConvertAddressToH160(sender), Data: data, Code: code}},
 			}},
 		}
 		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))

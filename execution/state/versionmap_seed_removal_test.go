@@ -840,6 +840,27 @@ func TestResolveBALCodeAdoptions(t *testing.T) {
 			size, _, ok := vm.ReadCodeSize(addr, 2)
 			require.True(t, ok)
 			require.Equal(t, code.Len(), size)
+
+			speculative := accounts.NewCode([]byte{0})
+			version := Version{TxIndex: 1}
+			vm.WriteCode(addr, version, speculative, false)
+			vm.WriteCodeHash(addr, version, speculative.Hash, false)
+			vm.WriteCodeSize(addr, version, speculative.Len(), false)
+			for _, path := range []AccountPath{CodePath, CodeHashPath, CodeSizePath} {
+				vm.DropWrite(addr, path, accounts.NilKey, Version{TxIndex: 1, Incarnation: 1})
+			}
+			restored, res, ok := vm.ReadCode(addr, 2)
+			require.True(t, ok)
+			require.Equal(t, MVReadResultDone, res.Status())
+			require.Equal(t, code, restored)
+			hash, res, ok := vm.ReadCodeHash(addr, 2)
+			require.True(t, ok)
+			require.Equal(t, MVReadResultDone, res.Status())
+			require.Equal(t, code.Hash, hash)
+			size, res, ok = vm.ReadCodeSize(addr, 2)
+			require.True(t, ok)
+			require.Equal(t, MVReadResultDone, res.Status())
+			require.Equal(t, code.Len(), size)
 		})
 	}
 }

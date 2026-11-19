@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/erigontech/erigon/execution/tracing"
@@ -389,4 +390,30 @@ func TestAdoptionTracesPrecedingTransactionCode(t *testing.T) {
 	}})
 	require.NoError(t, ibs.AdoptCode(addr, accounts.NewCode([]byte{3})))
 	require.Equal(t, preceding, previous)
+}
+
+func TestRevertOfAdoptionBackToOriginalCode(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{1})
+	original, adopted := accounts.NewCode([]byte{1}), accounts.NewCode([]byte{2})
+	account := accounts.NewAccount()
+	account.CodeHash = original.Hash
+	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &account, code: original.Bytes}, NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetTxContext(1, 0)
+
+	require.NoError(t, ibs.AdoptCode(addr, adopted))
+	snapshot := ibs.PushSnapshot()
+	require.NoError(t, ibs.AdoptCode(addr, original))
+	_, written := ibs.versionedWrites.GetCode(addr)
+	require.False(t, written)
+	ibs.RevertToSnapshot(snapshot, errors.New("revert"))
+	ibs.PopSnapshot(snapshot)
+
+	hash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, adopted.Hash, hash)
+	write, written := ibs.versionedWrites.GetCode(addr)
+	require.True(t, written)
+	require.Equal(t, adopted, write.Val)
+	require.Equal(t, tracing.CodeChangeAdoption, write.CodeReason)
 }

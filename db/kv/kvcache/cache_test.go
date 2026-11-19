@@ -614,6 +614,16 @@ func TestCode(t *testing.T) {
 	account := accounts.NewAccount()
 	account.CodeHash = accounts.NewCode(code).Hash
 
+	c.OnNewBlock(&remoteproto.StateChangeBatch{})
+	require.NoError(db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		view, err := c.View(ctx, tx)
+		require.NoError(err)
+		v, err := view.GetCode(k1[:])
+		require.NoError(err)
+		require.Empty(v)
+		return nil
+	}))
+
 	require.NoError(db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		d, err := execctx.NewSharedDomains(ctx, tx, log.New())
 		if err != nil {
@@ -648,6 +658,16 @@ func TestCode(t *testing.T) {
 		check, err := c.ValidateCurrentRoot(ctx, tx)
 		require.NoError(err)
 		require.Empty(check.CodeKeysOutOfSync)
+
+		addr := gointerfaces.ConvertAddressToH160(k1)
+		c.OnNewBlock(&remoteproto.StateChangeBatch{StateVersionId: version, ChangeBatch: []*remoteproto.StateChange{
+			{Changes: []*remoteproto.AccountChange{{Address: addr, Action: remoteproto.Action_REMOVE}}},
+			{Changes: []*remoteproto.AccountChange{{Address: addr, Action: remoteproto.Action_UPSERT_CODE, Data: accounts.SerialiseV3(&account), Code: code}}},
+		}})
+		check, err = c.ValidateCurrentRoot(ctx, tx)
+		require.NoError(err)
+		require.Empty(check.CodeKeysOutOfSync)
+		require.Empty(check.StateKeysOutOfSync)
 		return nil
 	}))
 }

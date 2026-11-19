@@ -292,7 +292,7 @@ func (v *frameValidationTracer) checkTarget(address accounts.Address, top bool) 
 		}
 		return
 	}
-	if _, delegated := types.ParseDelegation(code.Bytes); delegated {
+	if _, delegated := types.ParseDelegation(code.Bytes); delegated || directSender {
 		return
 	}
 	kind, known := v.codeKinds[code.Hash]
@@ -300,7 +300,7 @@ func (v *frameValidationTracer) checkTarget(address accounts.Address, top bool) 
 		kind = classifyValidationCode(code.Bytes)
 		v.codeKinds[code.Hash] = kind
 	}
-	if kind == mutableValidationCode && !directSender {
+	if kind == mutableValidationCode {
 		v.fail(errors.New("mutable validation target"))
 	} else if kind == proxyValidationCode && !slices.Contains(v.ProxyDependencies, address.Value()) {
 		v.ProxyDependencies = append(v.ProxyDependencies, address.Value())
@@ -327,7 +327,10 @@ func classifyValidationCode(code []byte) validationCodeKind {
 		case op.IsPushWithImmediateArgs():
 			pc += int(op-vm.PUSH1) + 1
 		case op == vm.DUPN || op == vm.SWAPN || op == vm.EXCHANGE:
-			pc++
+			// A PUSH is not a valid immediate, and the jump analysis reads it as an instruction.
+			if pc+1 < len(code) && !vm.OpCode(code[pc+1]).IsPushWithImmediateArgs() {
+				pc++
+			}
 		}
 	}
 	return kind
