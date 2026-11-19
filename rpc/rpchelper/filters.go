@@ -1060,14 +1060,9 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 			rif, ril := rel("rpcReceiptIn")
 			lif, lil := rel("rpcLogIn")
 			_, lol := rel("rpcLogOut")
-			ssf, ssl := rel("srvLogSend")
-			wef, wel := rel("wsLogEmit")
 			ff.logger.Info("[fanout-probe-logs]", "block", n, "dispatchStart", pDs, "headersDone", pHd, "cacheDone", pCd,
 				"receiptsDone", pRd, "logsDone", pLd, "rpcReceiptFirst", rif, "rpcReceiptLast", ril,
-				"rpcLogFirst", lif, "rpcLogLast", lil, "rpcLogDistributed", lol,
-				"srvLogSendFirst", ssf, "srvLogSendLast", ssl, "srvLogCount", dbg.ProbeTakeSum("srvLogCount", n),
-				"rpcLogBusy", float64(dbg.ProbeTakeSum("rpcLogBusy", n))/1e6,
-				"wsLogEmitFirst", wef, "wsLogEmitLast", wel, "wsLogEmits", dbg.ProbeTakeSum("wsLogEmits", n))
+				"rpcLogFirst", lif, "rpcLogLast", lil, "rpcLogDistributed", lol)
 			ff.logger.Info("[fanout-probe]", "block", n, "gcIn1s", gcCycles()-gc0, "sinceBlockTime_ms", t0/1e6-int64(tsec)*1000, "sendLoop_ms", float64(t1-t0)/1e6,
 				"wake_p50", q(wakes, .5), "wake_p99", q(wakes, .99), "wake_last", q(wakes, 1), "wakes", len(wakes),
 				"write_p50", q(writes, .5), "write_p99", q(writes, .99), "write_last", q(writes, 1), "writes", len(writes))
@@ -1121,9 +1116,7 @@ func (ff *Filters) OnNewTx(reply *txpoolproto.OnAddReply) {
 // OnNewLogs handles a new log event from the remote and processes it.
 func (ff *Filters) OnNewLogs(reply *remoteproto.SubscribeLogsReply) {
 	dbg.ProbeMark("rpcLogIn", reply.GetBlockNumber())
-	start := time.Now()
 	ff.logsSubs.distributeLog(reply)
-	dbg.ProbeAdd("rpcLogBusy", reply.GetBlockNumber(), int64(time.Since(start)))
 	dbg.ProbeMark("rpcLogOut", reply.GetBlockNumber())
 }
 

@@ -323,8 +323,6 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 		func(emit func(payload any), h *types.Log) {
 			if h != nil {
 				emit(h)
-				dbg.ProbeMark("wsLogEmit", uint64(h.BlockNumber))
-				dbg.ProbeAdd("wsLogEmits", uint64(h.BlockNumber), 1)
 			}
 		},
 		"[rpc] log channel was closed")

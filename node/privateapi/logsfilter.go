@@ -23,7 +23,6 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -212,8 +211,6 @@ func (a *LogsFilterAggregator) distributeLogs(logs []*notifications.LogNotificat
 				filtersToDelete[filterId] = filter
 				continue
 			}
-			dbg.ProbeMark("srvLogSend", uint64(lg.BlockNumber))
-			dbg.ProbeAdd("srvLogCount", uint64(lg.BlockNumber), 1)
 		}
 	}
 	// remove malfunctioned filters
