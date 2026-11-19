@@ -215,8 +215,10 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (_ Eon, _ bool,
 	}()
 
 	callOpts := &bind.CallOpts{BlockNumber: uint256.NewInt(blockNum)}
-	beforeCurrentActivation := et.currentEon != nil && blockNum < et.currentEon.ActivationBlock
-	if et.currentEon == nil || beforeCurrentActivation {
+	if et.currentEon != nil && blockNum < et.currentEon.ActivationBlock {
+		et.resetEonCache()
+	}
+	if et.currentEon == nil {
 		var numKeyperSets uint64
 		numKeyperSets, err = et.ksmContract.GetNumKeyperSets(callOpts)
 		if err != nil {
@@ -225,9 +227,6 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (_ Eon, _ bool,
 		// wait until we have at least one keyper set added and past activation block
 		// to avoid execution reverts for GetKeyperSetIndexByBlock
 		if numKeyperSets == 0 {
-			if beforeCurrentActivation {
-				et.resetEonCache()
-			}
 			et.logger.Warn("no keyper sets found", "blockNum", blockNum)
 			return Eon{}, false, nil
 		}
@@ -238,9 +237,6 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (_ Eon, _ bool,
 			return Eon{}, false, fmt.Errorf("initial get keyper set activation block: %w", err)
 		}
 		if blockNum < activationBlock {
-			if beforeCurrentActivation {
-				et.resetEonCache()
-			}
 			et.logger.Warn("initial keyper set not yet activated", "blockNum", blockNum, "activationAt", activationBlock)
 			return Eon{}, false, nil
 		}

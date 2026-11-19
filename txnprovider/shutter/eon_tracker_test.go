@@ -168,3 +168,69 @@ func TestEonTrackerRecoversBeforeFirstKeyperSetActivation(t *testing.T) {
 		require.Equal(t, replacement.Eon(), eon)
 	})
 }
+
+func TestEonTrackerReloadsKeyAfterReorgAcrossActivation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		logger := log.New()
+		backend := NewMockContractBackend(gomock.NewController(t), logger)
+		backend.PrepareMocks()
+		config := shuttercfg.ConfigByChainName(networkname.Chiado)
+		batches := make(chan *remoteproto.StateChangeBatch)
+		listener := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(ctx, batches))
+		tracker := shutter.NewKsmEonTracker(logger, config, listener, backend)
+		eg, runCtx := errgroup.WithContext(ctx)
+		eg.Go(func() error { return listener.Run(runCtx) })
+		eg.Go(func() error { return tracker.Run(runCtx) })
+		defer func() {
+			cancel()
+			require.ErrorIs(t, eg.Wait(), context.Canceled)
+		}()
+		synctest.Wait()
+
+		handle := PoolTestHandle{config: config, contractBackend: backend}
+		manager := common.HexToAddress(config.KeyperSetManagerContractAddress)
+		earlier, err := testhelpers.MockEonKeyGeneration(1, 1, 2, 10)
+		require.NoError(t, err)
+		handle.SimulateCallResult(manager, uint256.NewInt(3).PaddedBytes(32))
+		handle.SimulateCallResult(manager, uint256.NewInt(5).PaddedBytes(32))
+		handle.SimulateNewEonRead(t, earlier)
+		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 10}}}
+		synctest.Wait()
+		eon, ok := tracker.CurrentEon()
+		require.True(t, ok)
+		require.Equal(t, earlier.Eon(), eon)
+
+		initial, err := testhelpers.MockEonKeyGeneration(2, 1, 2, 20)
+		require.NoError(t, err)
+		handle.SimulateNewEonRead(t, initial)
+		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 20}}}
+		synctest.Wait()
+		eon, ok = tracker.CurrentEon()
+		require.True(t, ok)
+		require.Equal(t, initial.Eon(), eon)
+
+		handle.SimulateCallResult(manager, uint256.NewInt(3).PaddedBytes(32))
+		handle.SimulateCallResult(manager, uint256.NewInt(5).PaddedBytes(32))
+		handle.SimulateNewEonRead(t, earlier)
+		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: 19,
+			Direction:   remoteproto.Direction_UNWIND,
+		}}}
+		synctest.Wait()
+		eon, ok = tracker.CurrentEon()
+		require.True(t, ok)
+		require.Equal(t, earlier.Eon(), eon)
+		_, ok = tracker.RecentEon(initial.EonIndex)
+		require.False(t, ok, "the future eon must not remain cached after a reorg")
+
+		replacement, err := testhelpers.MockEonKeyGeneration(2, 1, 2, 20)
+		require.NoError(t, err)
+		handle.SimulateNewEonRead(t, replacement)
+		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 20}}}
+		synctest.Wait()
+		eon, ok = tracker.CurrentEon()
+		require.True(t, ok)
+		require.Equal(t, replacement.Eon(), eon)
+	})
+}
