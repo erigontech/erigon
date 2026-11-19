@@ -176,6 +176,10 @@ func (f *ForkChoiceStore) getAncestor(node ForkChoiceNode, slot uint64) ForkChoi
 	}
 
 	for {
+		// The anchor stands in for all history below it: the graph holds none of its ancestors.
+		if node.Root == f.forkGraph.AnchorRoot() {
+			return node
+		}
 		block, hasBlock := f.forkGraph.GetBlock(node.Root)
 		if !hasBlock || block == nil {
 			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}

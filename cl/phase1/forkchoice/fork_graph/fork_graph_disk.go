@@ -210,6 +210,8 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	}
 	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(common.Hash(anchorRoot), &anchorHeader)
+	f.currentJustifiedCheckpoints.Store(common.Hash(anchorRoot), anchorState.CurrentJustifiedCheckpoint())
+	f.finalizedCheckpoints.Store(common.Hash(anchorRoot), anchorState.FinalizedCheckpoint())
 	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
 
 	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
