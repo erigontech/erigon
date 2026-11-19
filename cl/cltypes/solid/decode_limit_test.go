@@ -63,3 +63,16 @@ func TestUint64ListDecodeSSZAcceptsLimit(t *testing.T) {
 	require.NoError(t, list.DecodeSSZ(make([]byte, 2*8), 0))
 	require.Equal(t, 2, list.Length())
 }
+
+func TestParticipationBitListDecodeSSZRejectsOverLimit(t *testing.T) {
+	list := solid.NewParticipationBitList(1, 2)
+	list.Set(0, 7)
+	require.Error(t, list.DecodeSSZ(make([]byte, 3), 0))
+	require.Equal(t, []byte{7}, list.Bytes())
+}
+
+func TestParticipationBitListDecodeSSZAcceptsLimit(t *testing.T) {
+	list := solid.NewParticipationBitList(0, 2)
+	require.NoError(t, list.DecodeSSZ([]byte{1, 2}, 0))
+	require.Equal(t, []byte{1, 2}, list.Bytes())
+}
