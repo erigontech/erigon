@@ -1092,8 +1092,9 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 
 	ac := a.BeginFilesRo()
 	defer ac.Close()
+	skipDomains, skipIndices := a.filelessEntitiesBelowCeiling(txTo)
 	for id, d := range a.d {
-		if !d.Enabled {
+		if !d.Enabled || skipDomains[id] {
 			continue
 		}
 
@@ -1127,7 +1128,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	}
 	// indices are built concurrently
 	for iikey, ii := range a.standaloneIIs() {
-		if !ii.Enabled {
+		if !ii.Enabled || skipIndices[iikey] {
 			continue
 		}
 
@@ -1168,6 +1169,22 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt), "workers", a.workers.getCollateAndBuild())
 
 	return nil
+}
+
+// An aligned entity starts limiting every reader as soon as it has a file.
+// Its first file must reach the current ceiling, even during an older rebuild.
+func (a *Aggregator) filelessEntitiesBelowCeiling(txTo uint64) (domains [kv.DomainLen]bool, indices [kv.StandaloneIdxLen]bool) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	if txTo < a.dirtyFilesEndTxNumMinimax() {
+		for id, d := range a.d {
+			domains[id] = d != nil && !a.unalignedDomain[id] && d.dirtyFiles.Len() == 0
+		}
+		for id, ii := range a.standaloneIIs() {
+			indices[id] = ii != nil && !a.unalignedIdx[id] && ii.dirtyFiles.Len() == 0
+		}
+	}
+	return domains, indices
 }
 
 func (a *Aggregator) readyForCollation(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
