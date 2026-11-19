@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
-	"github.com/erigontech/erigon/execution/vm/testutil"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -63,8 +62,7 @@ func newMixedFrameReplayChain(t *testing.T, ordinaryReverts bool) (*execmodulete
 		Push(32).Push0().Op(vm.LOG0).Bytes()
 	// Revert if the preceding transaction's fee debit is missing from the prestate.
 	assertionCode := program.New().Push0().Push(5).Op(vm.TXTRACE).
-		Push(mixedFrameReplayBalance).Op(vm.EQ)
-	testutil.AssertStackWord(assertionCode, 0).Op(vm.STOP)
+		Push(mixedFrameReplayBalance).Op(vm.EQ).AssertEq(0).Op(vm.STOP)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
 		Alloc: types.GenesisAlloc{
@@ -177,8 +175,7 @@ func TestAssertReplayPreservesFeeAccounting(t *testing.T) {
 	// With no value transfers, the payer's balance delta must equal the pre-charge.
 	code := program.New().Push0().Push(0x19).Op(vm.TXTRACE).
 		Push0().Push(6).Op(vm.TXTRACE).
-		Push0().Push(5).Op(vm.TXTRACE, vm.SUB, vm.EQ)
-	testutil.AssertStackWord(code, 1).Op(vm.STOP)
+		Push0().Push(5).Op(vm.TXTRACE, vm.SUB, vm.EQ).AssertEq(1).Op(vm.STOP)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
 		Alloc: types.GenesisAlloc{
