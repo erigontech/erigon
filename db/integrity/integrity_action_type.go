@@ -19,6 +19,7 @@ package integrity
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -209,14 +210,11 @@ func RunChecks(ctx context.Context, checks []Check, budget time.Duration, run fu
 		if parentErr := ctx.Err(); parentErr != nil {
 			return parentErr
 		}
-		if err != nil && !BudgetExhausted(err) {
-			if runCtx.Err() != nil {
-				return fmt.Errorf("%s: %w; integrity budget %s exhausted, not run: %v", chk, err, budget, checks[i+1:])
-			}
-			return fmt.Errorf("%s: %w", chk, err)
+		if runCtx.Err() != nil {
+			return errors.Join(err, fmt.Errorf("integrity budget %s exhausted: %s cut after %s, not run: %v", budget, chk, elapsed.Round(time.Millisecond), checks[i+1:]))
 		}
-		if err != nil || runCtx.Err() != nil {
-			return fmt.Errorf("integrity budget %s exhausted: %s cut after %s, not run: %v", budget, chk, elapsed.Round(time.Millisecond), checks[i+1:])
+		if err != nil {
+			return fmt.Errorf("%s: %w", chk, err)
 		}
 		logger.Info("[integrity] done", "check", chk, "elapsed", elapsed)
 	}

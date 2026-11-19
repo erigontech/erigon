@@ -19,6 +19,7 @@ package integrity
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -132,13 +133,18 @@ func TestParallelChunkCheckKeepsTheTallyWhenAChunkErrors(t *testing.T) {
 	require.Contains(t, err.Error(), "TestCheck", "and the problems already found must not be lost")
 }
 
-func TestBudgetExhaustedKeepsTheVerdict(t *testing.T) {
-	var probs problems
-	require.NoError(t, probs.report(false, errChunk))
+func TestRunChecksReportsACheckOwnDeadline(t *testing.T) {
+	run := func(ctx context.Context, chk Check) error {
+		if chk == HeaderNoGaps {
+			return fmt.Errorf("download: %w", context.DeadlineExceeded)
+		}
+		return nil
+	}
 
-	require.True(t, BudgetExhausted(context.DeadlineExceeded))
-	require.False(t, BudgetExhausted(errors.Join(context.DeadlineExceeded, probs.verdict("check"))))
-	require.False(t, BudgetExhausted(errChunk))
+	err := RunChecks(t.Context(), []Check{HeaderNoGaps, CommitmentRoot}, 0, run, log.New())
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorContains(t, err, string(HeaderNoGaps)+": download")
+	require.NotContains(t, err.Error(), "budget")
 }
 
 func TestRunChecksFailsWhenTheBudgetCutsACheck(t *testing.T) {
