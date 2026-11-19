@@ -153,6 +153,10 @@ func (s *Service) anchorClockToHead(ctx context.Context) {
 		s.logger.Info("[dev-validator] beacon has no head block; anchoring the clock to genesis", "err", err)
 		headSlot = 0
 	}
+	if headSlot > 0 {
+		// A resumed chain proposes at the wall-clock slot; the slots it was down for stay empty.
+		return
+	}
 	now := uint64(time.Now().Unix())
 	if now < s.genesisTime {
 		return

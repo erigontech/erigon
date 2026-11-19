@@ -120,3 +120,22 @@ func TestAnchorClockToHead_LeavesClockAloneWhileBeaconStarting(t *testing.T) {
 
 	require.Equal(t, original, s.genesisTime, "a transient beacon error must not re-anchor the clock")
 }
+
+// A resumed chain proposes at the wall-clock slot and leaves the slots it was down for empty.
+func TestAnchorClockToHead_LeavesClockAloneForAResumedChain(t *testing.T) {
+	srv := headSlotServer(t, "12")
+	defer srv.Close()
+
+	cfg := &clparams.BeaconChainConfig{SecondsPerSlot: 2}
+	original := uint64(time.Now().Unix()) - 800 // wall-clock slot 400, head slot 12
+	s := &Service{
+		client:      NewBeaconClient(srv.URL),
+		cfg:         cfg,
+		genesisTime: original,
+		logger:      log.New(),
+	}
+
+	s.anchorClockToHead(context.Background())
+
+	require.Equal(t, original, s.genesisTime, "a resumed chain must keep the wall clock")
+}
