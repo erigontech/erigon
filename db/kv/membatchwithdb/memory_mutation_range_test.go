@@ -509,3 +509,29 @@ func TestRangeDupSortFiltersDbOnlyUnderTombstone(t *testing.T) {
 	require.True(t, filtered)
 	require.Equal(t, []string{"value3.3"}, vals)
 }
+
+func TestRangeDescBoundsMatchDb(t *testing.T) {
+	batch := newBatchOverDbNonDupSort(t)
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("CABA"), []byte("mem1")))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("CBBA"), []byte("mem2")))
+
+	it, err := batch.Range(kv.HeaderNumber, []byte("CCAA"), []byte("CAAA"), order.Desc, kv.Unlim)
+	require.NoError(t, err)
+	keys, _ := collectStream(t, it)
+	require.Equal(t, []string{"CCAA", "CBBA", "CBAA", "CABA"}, keys)
+
+	it, err = batch.Range(kv.HeaderNumber, []byte("CB"), []byte("CA"), order.Desc, kv.Unlim)
+	require.NoError(t, err)
+	keys, _ = collectStream(t, it)
+	require.Equal(t, []string{"CBBA", "CBAA", "CABA", "CAAA"}, keys)
+}
+
+func TestRangeDupSortDescBoundsMatchDb(t *testing.T) {
+	batch := newBatchOverDbDupSort(t)
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.2")))
+
+	it, err := batch.RangeDupSort(kv.TblAccountVals, []byte("key1"), []byte("value1.3"), []byte("value1.1"), order.Desc, kv.Unlim)
+	require.NoError(t, err)
+	_, values := collectStream(t, it)
+	require.Equal(t, []string{"value1.3", "value1.2"}, values)
+}

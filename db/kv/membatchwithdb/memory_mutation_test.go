@@ -1622,3 +1622,37 @@ func TestPutNilAfterDeleteHidesBackingRow(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, v)
 }
+
+func TestDupSortPointReadsSeeOverlayOnlyValue(t *testing.T) {
+	batch := newBatchOverDbDupSort(t)
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("key2"), []byte("value2.1")))
+
+	v, err := batch.GetOne(kv.TblAccountVals, []byte("key2"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("value2.1"), v)
+	has, err := batch.Has(kv.TblAccountVals, []byte("key2"))
+	require.NoError(t, err)
+	require.True(t, has)
+}
+
+func TestDupSortPointReadsSkipDeletedDbValue(t *testing.T) {
+	batch := newBatchOverDbDupSort(t)
+	c, err := batch.RwCursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer c.Close()
+	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1")))
+
+	v, err := batch.GetOne(kv.TblAccountVals, []byte("key1"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("value1.3"), v)
+
+	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.3")))
+	has, err := batch.Has(kv.TblAccountVals, []byte("key1"))
+	require.NoError(t, err)
+	require.False(t, has)
+
+	require.NoError(t, batch.Delete(kv.TblAccountVals, []byte("key3")))
+	v, err = batch.GetOne(kv.TblAccountVals, []byte("key3"))
+	require.NoError(t, err)
+	require.Nil(t, v)
+}

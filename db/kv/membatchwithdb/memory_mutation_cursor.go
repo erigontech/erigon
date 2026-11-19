@@ -91,46 +91,25 @@ func (m *memoryMutationCursor) First() ([]byte, []byte, error) {
 	return m.resolveCursorPriority(mem, dbKey, dbValue, Normal)
 }
 
-func (m *memoryMutationCursor) getNextOnDb(t NextType) (key []byte, value []byte, err error) {
+func (m *memoryMutationCursor) getNextOnDb(t NextType) ([]byte, []byte, error) {
+	first, next := m.cursor.Next, m.cursor.Next
 	switch t {
 	case Normal:
-		key, value, err = m.cursor.Next()
-		if err != nil {
-			return
-		}
 	case Dup:
-		key, value, err = m.cursor.NextDup()
-		if err != nil {
-			return
-		}
+		first, next = m.cursor.NextDup, m.cursor.NextDup
 	case NoDup:
-		key, value, err = m.cursor.NextNoDup()
-		if err != nil {
-			return
-		}
+		first = m.cursor.NextNoDup // past the old key, a hidden pair hides only itself
 	default:
-		err = errors.New("invalid next type")
-		return
+		return nil, nil, errors.New("invalid next type")
 	}
-
-	for key != nil && value != nil && m.isEntryDeleted(key, value) {
-		switch t {
-		case Normal, NoDup: // NoDup has left the old key: a hidden pair hides only itself
-			key, value, err = m.cursor.Next()
-			if err != nil {
-				return
-			}
-		case Dup:
-			key, value, err = m.cursor.NextDup()
-			if err != nil {
-				return
-			}
-		default:
-			err = errors.New("invalid next type")
-			return
-		}
+	key, value, err := first()
+	for err == nil && key != nil && value != nil && m.isEntryDeleted(key, value) {
+		key, value, err = next()
 	}
-	return
+	if err != nil {
+		return nil, nil, err
+	}
+	return key, value, nil
 }
 
 // Current return the current key and values the cursor is on.

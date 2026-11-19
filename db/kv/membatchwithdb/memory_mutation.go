@@ -208,8 +208,7 @@ func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
 	defer m.mu.RUnlock()
 
 	if m.readTx != nil && memTableIsDupSort(table) {
-		_, v, err := m.firstDup(table, key)
-		return v, err
+		return m.firstDup(table, key)
 	}
 	v, err := m.memTx.GetOne(table, key)
 	if err != nil || v != nil {
@@ -228,8 +227,8 @@ func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
 	defer m.mu.RUnlock()
 
 	if m.readTx != nil && memTableIsDupSort(table) {
-		k, _, err := m.firstDup(table, key)
-		return k != nil, err
+		v, err := m.firstDup(table, key)
+		return v != nil, err
 	}
 	has, err := m.memTx.Has(table, key)
 	if err != nil || has {
@@ -242,13 +241,14 @@ func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
 }
 
 // firstDup returns the smallest visible value of key across both layers, like GetOne on an MDBX DupSort table.
-func (m *MemoryMutation) firstDup(table string, key []byte) ([]byte, []byte, error) {
+// SeekBothRange keeps both sides inside the key, so hidden rows of later keys are never read.
+func (m *MemoryMutation) firstDup(table string, key []byte) ([]byte, error) {
 	c, err := m.makeCursor(table)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer c.Close()
-	return c.SeekExact(key)
+	return c.SeekBothRange(key, nil)
 }
 
 func (m *MemoryMutation) Put(table string, k, v []byte) error {
