@@ -33,6 +33,11 @@ func (cc *commitmentCalculator) emit(view *state.VersionMapView, updates *commit
 }
 
 func (cc *commitmentCalculator) prefetchWrites(writes state.WriteSetView) {
+	var items []prefetchItem
+	queue := cc.queueBranch
+	if prefetchSeqSteps > 0 {
+		queue = func(account, slot []byte) { items = append(items, newPrefetchItem(account, slot)) }
+	}
 	seen := map[accounts.Address][]byte{}
 	account := func(a accounts.Address) []byte {
 		hash, ok := seen[a]
@@ -40,7 +45,7 @@ func (cc *commitmentCalculator) prefetchWrites(writes state.WriteSetView) {
 			address := a.Value()
 			hash = cc.touchHash(address[:])
 			seen[a] = hash
-			cc.queueBranch(hash, nil)
+			queue(hash, nil)
 		}
 		return hash
 	}
@@ -52,8 +57,12 @@ func (cc *commitmentCalculator) prefetchWrites(writes state.WriteSetView) {
 		address := a.Value()
 		for k := range slots {
 			slot := k.Value()
-			cc.queueBranch(hash, cc.touchHash(slices.Concat(address[:], slot[:])))
+			queue(hash, cc.touchHash(slices.Concat(address[:], slot[:])))
 		}
+	}
+	slices.SortFunc(items, comparePrefetchItems)
+	for _, it := range items {
+		cc.branchPrefetch.add(it)
 	}
 }
 

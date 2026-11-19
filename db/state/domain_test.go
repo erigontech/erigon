@@ -4514,3 +4514,31 @@ func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
 	maxStepInFiles := kv.Step(dt.files.EndTxNum() / dt.stepSize)
 	return maxStepInFiles < dt.d.maxStepInDB(dbtx)
 }
+
+func TestDomain_GetLatestSeqLookup(t *testing.T) {
+	t.Parallel()
+	db, d, txs := filledDomain(t, log.New())
+	require.NoError(t, db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
+		collateAndMerge(t, tx, d, txs)
+		return nil
+	}))
+	plain := d.beginForTests()
+	defer plain.Close()
+	seq := d.beginForTests()
+	defer seq.Close()
+	seq.setSeqLookup(4)
+
+	for keyNum := uint64(1); keyNum <= 40; keyNum++ {
+		var key [8]byte
+		binary.BigEndian.PutUint64(key[:], keyNum)
+		want, wantFound, wantStart, wantEnd, err := plain.debugGetLatestFromFiles(key[:], 0)
+		require.NoError(t, err)
+		got, found, start, end, err := seq.debugGetLatestFromFiles(key[:], 0)
+		require.NoError(t, err)
+		require.Equal(t, wantFound, found, keyNum)
+		require.Equal(t, want, got, keyNum)
+		require.Equal(t, [2]uint64{wantStart, wantEnd}, [2]uint64{start, end}, keyNum)
+	}
+	nexts, _ := seq.seqLookupStats()
+	require.Positive(t, nexts)
+}

@@ -919,3 +919,51 @@ func Test_BtreeIndex_OrdinalLookupAfterNext(t *testing.T) {
 	require.Equal(t, v, cur.Value())
 	cur.Close()
 }
+
+func Test_BtreeIndex_GetSeq(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	logger := log.New()
+	compressFlags := seg.CompressKeys | seg.CompressVals
+	dataPath := generateKV(t, tmp, 52, 180, 500, logger, compressFlags)
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(t, err)
+	indexPath := filepath.Join(tmp, "seq.bt")
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+
+	check := func(h *SeqHint, key []byte) {
+		t.Helper()
+		_, want, _, wantOK, err := bt.Get(key, nil, getter)
+		require.NoError(t, err)
+		got, ok, err := bt.GetSeq(h, key, nil, getter, 4)
+		require.NoError(t, err)
+		require.Equalf(t, wantOK, ok, "%x", key)
+		require.Equalf(t, want, got, "%x", key)
+	}
+
+	var fwd SeqHint
+	for i := 0; i < len(keys); i += 2 {
+		check(&fwd, keys[i])
+		check(&fwd, append(slices.Clone(keys[i]), 0))
+	}
+	check(&fwd, bytes.Repeat([]byte{0xff}, 60))
+	require.EqualValues(t, 2, fwd.Seeks)
+	require.EqualValues(t, len(keys)-1, fwd.Nexts)
+
+	var back SeqHint
+	for i := len(keys) - 1; i >= 0; i -= 3 {
+		check(&back, keys[i])
+	}
+	require.Zero(t, back.Nexts)
+
+	var far SeqHint
+	for i := 0; i < len(keys); i += 50 {
+		check(&far, keys[i])
+	}
+	require.Zero(t, far.Nexts)
+}

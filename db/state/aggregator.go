@@ -2890,6 +2890,14 @@ func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {
 	return 0, false
 }
 
+func (at *AggregatorRoTx) SetSeqLookup(domain kv.Domain, steps int) {
+	at.d[domain].setSeqLookup(steps)
+}
+
+func (at *AggregatorRoTx) SeqLookupStats(domain kv.Domain) (nexts, seeks uint64) {
+	return at.d[domain].seqLookupStats()
+}
+
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts kv.GetLatestOptions) (v []byte, step kv.Step, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
 		return at.d[domain].getLatest(k, tx, opts)

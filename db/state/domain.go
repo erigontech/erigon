@@ -759,6 +759,7 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 // DomainRoTx allows accesing the same domain from multiple go-routines
 type DomainRoTx struct {
 	probe    *mmap.Probe // set only while PrefetchLatest plans its page batches
+	seq      *seqLookup
 	files    visibleFiles
 	visible  *domainVisible
 	name     kv.Domain
@@ -785,6 +786,26 @@ func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 	return mxsKVGet[name][level]
 }
 
+type seqLookup struct {
+	steps int
+	hints []btindex.SeqHint
+}
+
+func (dt *DomainRoTx) setSeqLookup(steps int) {
+	dt.seq = &seqLookup{steps: steps, hints: make([]btindex.SeqHint, len(dt.files))}
+}
+
+func (dt *DomainRoTx) seqLookupStats() (nexts, seeks uint64) {
+	if dt.seq == nil {
+		return 0, 0
+	}
+	for i := range dt.seq.hints {
+		nexts += dt.seq.hints[i].Nexts
+		seeks += dt.seq.hints[i].Seeks
+	}
+	return nexts, seeks
+}
+
 func (dt *DomainRoTx) getLatestFromFile(i int, filekey, buf []byte, hi, lo uint64) (v []byte, ok bool, offset uint64, err error) {
 	if dbg.KVFileReadSummaries {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
@@ -793,6 +814,10 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey, buf []byte, hi, lo uint6
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		g := dt.reusableReader(i)
 		g.SetProbe(dt.probe)
+		if dt.seq != nil {
+			v, ok, err = dt.statelessBtree(i).GetSeq(&dt.seq.hints[i], filekey, buf, g, dt.seq.steps)
+			return v, ok, 0, err
+		}
 		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, buf, g)
 		if err != nil || !ok {
 			return nil, false, 0, err
