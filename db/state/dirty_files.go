@@ -69,6 +69,20 @@ func (df *DirtyFiles) copy() *DirtyFiles {
 	return &DirtyFiles{*df.BTreeG.Copy()}
 }
 
+// Replaced files must be retired with the outgoing visible generation, without
+// deleting the paths now owned by their replacements.
+func (df *DirtyFiles) replace(item *FilesItem) retiredFiles {
+	if item == nil {
+		return nil
+	}
+	previous, replaced := df.Set(item)
+	if !replaced || previous == item {
+		return nil
+	}
+	previous.canDelete.Store(false)
+	return retiredFiles{previous}
+}
+
 func (df *DirtyFiles) CloseItems(items []*FilesItem) {
 	for _, item := range items {
 		df.Delete(item)
@@ -368,10 +382,9 @@ func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext str
 	return res
 }
 
-// retire removes outs from dirtyFiles; the caller still owns outs and must attach it
-// to the outgoing visible generation itself. Physical reclaim happens once the last
-// reader of that generation closes — so readers still pinning these files are never
-// surprised.
+// retire detaches matching entries from dirtyFiles. The caller must attach the
+// returned files to the outgoing visible generation; reclaim waits until readers
+// of that generation and all earlier generations finish.
 func retire(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) (detached []*FilesItem) {
 	// canDelete decides whether reclaim also deletes the file from disk, or only closes it.
 	var canDelete bool
