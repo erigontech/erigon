@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -454,8 +455,31 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		}
 		vm.s.Store(m)
 	}
-	vm.WriteChanges(changes)
+	if balChunkWorkers(len(changes)) <= 1 {
+		vm.WriteChanges(changes)
+	} else {
+		forBALChunks(len(changes), vm.writeBALRange)
+	}
 	return vm
+}
+
+// writeBALRange writes vm.bal[from:to] like WriteChanges, keeping the once-interned addresses.
+func (vm *VersionMap) writeBALRange(from, to int) {
+	vm.writeChangesAt(vm.bal, from, to)
+}
+
+func balChunkWorkers(n int) int { return min(runtime.GOMAXPROCS(-1), n/256, 8) }
+
+// forBALChunks runs fn over disjoint account ranges of a BAL with n accounts on several goroutines.
+// Accounts own their version-map entries, so the ranges never share a cell.
+func forBALChunks(n int, fn func(from, to int)) {
+	workers := balChunkWorkers(n)
+	var wg sync.WaitGroup
+	step := (n + workers - 1) / workers
+	for from := 0; from < n; from += step {
+		wg.Go(func() { fn(from, min(from+step, n)) })
+	}
+	wg.Wait()
 }
 
 // balAddr is the interned address of ac, taken from balAddrs when ac is vm.bal[i].
@@ -570,7 +594,11 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 // per-path change through the typed Write primitive so the value type is enforced at
 // compile time.
 func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
-	for i := range changes {
+	vm.writeChangesAt(changes, 0, len(changes))
+}
+
+func (vm *VersionMap) writeChangesAt(changes types.BlockAccessList, from, to int) {
+	for i := from; i < to; i++ {
 		accountChanges := &changes[i]
 		if dbg.TraceBALFeed {
 			fmt.Printf(
