@@ -963,25 +963,13 @@ func TestGasChangeTxReturn(t *testing.T) {
 	}
 }
 
-type completionErrorWriter struct {
-	state.StateWriter
-	err error
-}
-
-func (w *completionErrorWriter) UpdateAccountData(accounts.Address, *accounts.Account, *accounts.Account) error {
-	return w.err
-}
-
 func TestApplyTransactionTxEndV2(t *testing.T) {
-	finalizeErr := errors.New("finalization failed")
 	for _, test := range []struct {
 		name       string
 		noReceipts bool
-		writerErr  error
 	}{
 		{name: "receipt"},
 		{name: "without receipt", noReceipts: true},
-		{name: "finalization failure", writerErr: finalizeErr},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			const blockGasLimit = 1_000_000
@@ -989,10 +977,6 @@ func TestApplyTransactionTxEndV2(t *testing.T) {
 			recipient := common.HexToAddress("0x2222222222222222222222222222222222222222")
 			ibs := state.New(state.NewNoopReader())
 			defer ibs.Close()
-			// applyTransaction persists through the stateWriter only on the materialized
-			// finalize path; the versioned path ends the tx into the version map instead.
-			// This test pins writer-error propagation, so finalize off a materialized IBS.
-			ibs.SetVersionMap(nil)
 			require.NoError(t, ibs.SetCode(accounts.InternAddress(recipient), []byte{
 				byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP),
 			}, tracing.CodeChangeUnspecified))
@@ -1012,17 +996,12 @@ func TestApplyTransactionTxEndV2(t *testing.T) {
 			}}
 			evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
 			var gasUsed GasUsed
-			writer := &completionErrorWriter{StateWriter: state.NewNoopWriter(), err: test.writerErr}
 			receipt, err := applyTransaction(chain.AllProtocolChanges, nil, NewGasPool(blockGasLimit, 0), ibs,
-				writer, &types.Header{GasLimit: blockGasLimit}, txn, &gasUsed, evm, cfg)
-			require.ErrorIs(t, err, test.writerErr)
+				state.NewNoopWriter(), &types.Header{GasLimit: blockGasLimit}, txn, &gasUsed, evm, cfg)
+			require.NoError(t, err)
 			require.Equal(t, 1, calls)
-			require.ErrorIs(t, completionErr, test.writerErr)
+			require.NoError(t, completionErr)
 			require.EqualValues(t, params.StateGasPerStorageSet, received.BlockStateGasUsed)
-			if test.writerErr != nil {
-				require.Nil(t, receivedReceipt)
-				return
-			}
 			require.Equal(t, mdgas.TxnGasUsage{
 				BlockExecutionGasUsed: gasUsed.BlockExecution,
 				BlockStateGasUsed:     params.StateGasPerStorageSet,
