@@ -331,8 +331,7 @@ func (t *StateTest) RunNoVerify(sd *execctx.SharedDomains, tx kv.TemporalRwTx, s
 	// Read through sd.AsStateGetter so execution sees never-Flushed pre-state held in sd.mem.
 	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	w := rpchelper.NewLatestStateWriter(tx, sd, (*freezeblocks.BlockReader)(nil), writeBlockNr)
-	statedb = state.New(r)
-	statedb.SetVersionMap(state.NewVersionMap(nil))
+	statedb = state.NewWithVersionMap(r, state.NewVersionMap(nil))
 	statedb.SetTxContext(0, 0)
 
 	var baseFee *uint256.Int
