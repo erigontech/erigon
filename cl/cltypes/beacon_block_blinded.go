@@ -311,6 +311,13 @@ func (b *BlindedBeaconBody) SetVersion(version clparams.StateVersion) *BlindedBe
 	} else {
 		b.ExecutionPayload.SetVersion(version)
 	}
+	if b.AttesterSlashings != nil {
+		b.AttesterSlashings.Range(func(index int, slashing *AttesterSlashing, _ int) bool {
+			slashing.SetVersionWithConfig(version, b.beaconCfg)
+			b.AttesterSlashings.Set(index, slashing)
+			return true
+		})
+	}
 	return b
 }
 
@@ -403,21 +410,17 @@ func (b *BlindedBeaconBody) DecodeSSZ(buf []byte, version int) error {
 
 	b.ExecutionPayload = NewEth1Header(b.Version)
 
-	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...); err != nil {
+	if err := ssz2.UnmarshalSSZ(buf, version, slashingDecodeSchema(b.getSchema(false), b.beaconCfg)...); err != nil {
 		return err
 	}
 
-	// Post-decode fixup: propagate preset-aware limits to decoded attestations and slashings.
+	// Post-decode fixup: propagate preset-aware limits to decoded attestations.
 	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
 		if err := solid.RangeErr(b.Attestations, func(_ int, att *solid.Attestation, _ int) error {
 			return att.ValidateForConfig(b.beaconCfg, b.Version)
 		}); err != nil {
 			return err
 		}
-		b.AttesterSlashings.Range(func(_ int, as *AttesterSlashing, _ int) bool {
-			as.SetVersionWithConfig(b.Version, b.beaconCfg)
-			return true
-		})
 	}
 	return nil
 }

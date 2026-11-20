@@ -84,6 +84,7 @@ func (*forwardSyncTipSentinel) SetStatus(context.Context, *sentinelproto.Status,
 
 type forwardSyncTipFixture struct {
 	cfg         *Cfg
+	graph       *chainTipBatchForkGraph
 	tip         *cltypes.SignedBeaconBlock
 	tipRoot     common.Hash
 	envelope    *cltypes.SignedExecutionPayloadEnvelope
@@ -118,7 +119,7 @@ func newForwardSyncTipFixtureWithBlob(t *testing.T, slotsAfterTip uint64, tipInF
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg.beaconCfg)
 	digest, err := clock.ComputeForkDigest(tip.Block.Slot / cfg.beaconCfg.SlotsPerEpoch)
 	require.NoError(t, err)
-	f := &forwardSyncTipFixture{cfg: cfg, tip: tip, tipRoot: tipRoot, envelope: envelope, successor: successor, emptyChild: emptyChild, currentSlot: currentSlot, digest: digest}
+	f := &forwardSyncTipFixture{cfg: cfg, graph: graph, tip: tip, tipRoot: tipRoot, envelope: envelope, successor: successor, emptyChild: emptyChild, currentSlot: currentSlot, digest: digest}
 	anchorEnvelope := *envelope
 	anchorMessage := *envelope.Message
 	anchorMessage.BeaconBlockRoot = cfg.forkChoice.AnchorRoot()

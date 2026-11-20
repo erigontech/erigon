@@ -62,6 +62,12 @@ var computedAheadCount atomic.Int64
 // (stage/exec/commit/overlap/gap/residual) for perf attribution.
 var logNpPhases = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
 
+// commitmentIntraBlockTxs > 0 enables mid-block commitment checkpoints every N
+// txs for non-BAL blocks, overlapping the fold with execution (0 = off). It
+// reuses the step-edge mid-block checkpoint path: fold the touches accumulated
+// so far, leaving the block open so its block-end fold covers only the residual.
+var commitmentIntraBlockTxs = dbg.EnvInt("COMMITMENT_INTRABLOCK_TXS", 0)
+
 // ComputedAheadCountForTest reports the number of BAL compute-ahead computations
 // performed so far; ResetComputedAheadForTest zeroes it. Test-only observability.
 func ComputedAheadCountForTest() int64 { return computedAheadCount.Load() }
@@ -104,6 +110,10 @@ type commitmentCalculator struct {
 	prefetch   *commitment.Warmuper
 	balBlock   bool
 	hashAtFold bool
+
+	// txsSinceCheckpoint counts txResults folded since the last mid-block
+	// commitment checkpoint; drives commitmentIntraBlockTxs. Reset per block.
+	txsSinceCheckpoint int
 
 	// balUpdates is the per-block BAL fold buffer, Reset and reused across blocks
 	// to avoid reallocating a fresh prefix-trie arena each block.
@@ -431,6 +441,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			if !cc.computedAhead[r.blockNum] || dbg.BALShadowCompute {
 				cc.accumulateTouched(r.writes, base)
 			}
+			cc.txsSinceCheckpoint++
 		}
 
 		// A computed-ahead block already emitted its interior step checkpoints from
@@ -439,11 +450,23 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// commitment .kv inconsistent. If a late-consumed blockRequest leaves
 		// computedAhead[n] unset and both paths checkpoint the same edge, that is
 		// benign — both emit identical values at the same txNum.
-		if !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
-			// Checkpoint commitment at a mid-block step edge without advancing
+		stepEdge := cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum)
+		// Intra-block checkpoint: for a non-BAL per-block block, fold every
+		// commitmentIntraBlockTxs txs so the commitment hash overlaps execution
+		// rather than running wholly at block end. The block-end fold then covers
+		// only the residual, exactly as the step-edge checkpoint does.
+		intraBlock := commitmentIntraBlockTxs > 0 && perBlock && !cc.balBlock &&
+			cc.txsSinceCheckpoint >= commitmentIntraBlockTxs
+		if !cc.computedAhead[r.blockNum] && (stepEdge || intraBlock) {
+			// Checkpoint commitment at a mid-block edge without advancing
 			// lastComputedBlock or resetting block flags; the block-end fold then
 			// covers only the keys touched after the edge.
-			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: "step-boundary ", midBlock: true})
+			label := "step-boundary "
+			if intraBlock && !stepEdge {
+				label = "intra-block "
+			}
+			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: label, midBlock: true})
+			cc.txsSinceCheckpoint = 0
 		}
 
 	case *blockResult:
@@ -466,6 +489,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		cc.lastBlockResult = r
 		cc.lastBlockResultSeen = r.BlockNum
 		cc.hasSeenBlockResult = true
+		cc.txsSinceCheckpoint = 0
 
 		commitStart := time.Now()
 		switch {
@@ -1048,13 +1072,8 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	}()
 
 	// Flush block N-1's own pending update (hash-routed to N-1's saved changeset,
-	// independent of N's diff below) — the one remaining changesetMu window, brief
-	// rather than spanning the fold that follows.
-	if err := func() error {
-		cc.doms.LockChangesetAccumulator()
-		defer cc.doms.UnlockChangesetAccumulator()
-		return cc.doms.FlushPendingUpdatesLocked(cc.roTx)
-	}(); err != nil {
+	// independent of N's diff below).
+	if err := cc.doms.FlushPendingUpdates(cc.roTx); err != nil {
 		return nil, err
 	}
 

@@ -2014,71 +2014,13 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		return &updated, nil
 	}
 
-	// Check version map for AddressPath — handles accounts created by
-	// prior transactions in the same block that aren't in the read set.
-	if vr.versionMap != nil {
-		// A prior tx may have self-destructed this account. Honor the destruct
-		// only if no subsequent write at a strictly higher TxIndex re-creates it,
-		// so a later tip to a pruned coinbase surfaces the re-created account.
-		if vr.versionMap.IsNetAbsent(address, vr.txIndex) {
-			// A self-destruct stamps its balance write ValueDeleted when it burns the
-			// account; a balance-preserving destruct (EIP-8246) leaves a non-deleting
-			// balance. Reconstruct the balance-only EOA only in the latter case — the
-			// delete/preserve decision rides the write, so no fork flag is needed. A
-			// net-absent account with a non-zero kept balance surfaces (an empty one is
-			// EIP-161-removed).
-			if _, res, ok := vr.versionMap.ReadBalance(address, vr.txIndex); ok && res.ValStatus() != ValueDeleted {
-				var synth accounts.Account
-				if updated := vr.applyVersionedUpdates(address, synth); !updated.Balance.IsZero() {
-					return &updated, nil
-				}
-			}
+	if vr.versionMap == nil {
+		if vr.stateReader == nil {
 			return nil, nil
 		}
-		if acc, ok := versionedUpdateAddress(vr.versionMap, address, vr.txIndex); ok && acc != nil {
-			updated := vr.applyVersionedUpdates(address, *acc)
-			return &updated, nil
-		}
+		return vr.stateReader.ReadAccountData(address)
 	}
-
-	// A BAL-marked AddressPath defers to the stored origin, so the fee calculation's per-tx reads
-	// stay in memory. An origin seeded at validation may hold in-block writes below its txIndex; it
-	// is seeded only after every lower tx is validated, so its readers read at or after that index.
-	if vr.versionMap != nil {
-		if base, ok := vr.versionMap.LoadOriginAccount(address); ok && base != nil {
-			updated := vr.applyVersionedUpdates(address, *base)
-			return &updated, nil
-		}
-	}
-
-	if vr.stateReader != nil {
-		account, err := vr.stateReader.ReadAccountData(address)
-		if err != nil {
-			return nil, err
-		}
-
-		if account != nil {
-			updated := vr.applyVersionedUpdates(address, *account)
-			return &updated, nil
-		}
-	}
-
-	// No stateReader account and no AddressPath entry. The BAL pre-population
-	// writes only field paths (not AddressPath), so an account created mid-block
-	// purely by tip credits has post-tx balances in the versionMap that
-	// ReadAccountData would otherwise miss. Synthesize an empty account and let
-	// applyVersionedUpdates apply the BAL-preloaded fields.
-	if vr.versionMap != nil {
-		var synth accounts.Account
-		updated := vr.applyVersionedUpdates(address, synth)
-		// Only return it if at least one field was applied; else this address has
-		// no versionMap entries and must stay absent.
-		if updated != synth {
-			return &updated, nil
-		}
-	}
-
-	return nil, nil
+	return vr.versionMap.ApplyView(vr.txIndex, vr.stateReader).ReadAccountData(address)
 }
 
 func (vr *versionedStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
@@ -2094,17 +2036,6 @@ func (vr *versionedStateReader) HasAccount(address common.Address) (bool, error)
 // (Estimate) write exists at txIndex — a Dependency cell holds the same latest
 // in-block write a Done cell does, and finalize reconstruction must consume it
 // rather than fall back to the pre-block DB value — else zero value and ok=false.
-
-func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) (*accounts.Account, bool) {
-	val, res, ok := vm.ReadAddress(addr, txIndex)
-	if ok && res.Status() != MVReadResultNone {
-		if res.accSource() == AccountFromBAL {
-			return nil, false
-		}
-		return val, true
-	}
-	return nil, false
-}
 
 func versionedUpdateBalance(vm *VersionMap, addr accounts.Address, txIndex int) (uint256.Int, bool) {
 	val, res, ok := vm.ReadBalance(addr, txIndex)
@@ -2160,14 +2091,6 @@ func versionedUpdateCodeHash(vm *VersionMap, addr accounts.Address, txIndex int)
 	return accounts.CodeHash{}, false
 }
 
-func versionedUpdateStorage(vm *VersionMap, addr accounts.Address, key accounts.StorageKey, txIndex int) (uint256.Int, bool) {
-	val, res, ok := liveStorageValue(vm, addr, key, txIndex)
-	if ok && res.Status() != MVReadResultNone {
-		return val, true
-	}
-	return uint256.Int{}, false
-}
-
 // applyVersionedUpdates overlays versionMap field cells onto account, so field-only updates from prior txs are not missed when only a subset of fields was read.
 func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, account accounts.Account) accounts.Account {
 	vr.versionMap.applySubFieldWrites(address, vr.txIndex, &account)
@@ -2203,25 +2126,8 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 
 	// Check version map for storage written by prior transactions.
 	if vr.versionMap != nil {
-		if state, _, destroyedAt, _ := vr.versionMap.AccountLifecycleAt(address, vr.txIndex); state != LifecycleLive {
-			// Self-destructed in-block: a slot cell at or below the destruct is
-			// wiped to zero; only a write above it survives.
-			if val, res, ok := vr.versionMap.ReadStorage(address, key, vr.txIndex); ok &&
-				res.resolved() && res.DepIdx() > destroyedAt {
-				return val, true, nil
-			}
-			return uint256.Int{}, false, nil
-		}
-		// A creation clears the slots of the prior incarnation without writing them, and a
-		// seeded origin can hold their old values.
-		if created, res, ok := vr.versionMap.ReadCreateContract(address, vr.txIndex); ok && created && res.resolved() {
-			if val, slot, ok := liveStorageValue(vr.versionMap, address, key, vr.txIndex); ok && slot.Status() != MVReadResultNone && slot.DepIdx() >= res.DepIdx() {
-				return val, true, nil
-			}
-			return uint256.Int{}, false, nil
-		}
-		if val, ok := versionedUpdateStorage(vr.versionMap, address, key, vr.txIndex); ok {
-			return val, true, nil
+		if val, res, ok, wipe := liveStorageValue(vr.versionMap, address, key, vr.txIndex); ok && res.Status() != MVReadResultNone {
+			return val, wipe == wipeNone, nil
 		}
 	}
 

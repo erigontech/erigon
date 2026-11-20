@@ -20,6 +20,8 @@ import (
 	"errors"
 	"fmt"
 
+	lru "github.com/hashicorp/golang-lru/v2"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/transition"
@@ -261,33 +263,67 @@ func (f *ForkChoiceStore) getAncestor(node ForkChoiceNode, slot uint64) ForkChoi
 		return node
 	}
 
+	// Walk the headers: only the returned ancestor's payload status counts, and it needs its child's block.
+	childRoot := node.Root
 	for {
-		block, hasBlock := f.forkGraph.GetBlock(node.Root)
-		if !hasBlock || block == nil {
-			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
-		}
-		parent := ForkChoiceNode{
-			Root:          block.Block.ParentRoot,
-			PayloadStatus: f.getParentPayloadStatus(block.Block),
-		}
-		parentHeader, hasParent := f.forkGraph.GetHeader(parent.Root)
+		parentRoot := header.ParentRoot
+		parentHeader, hasParent := f.forkGraph.GetHeader(parentRoot)
 		if !hasParent {
 			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 		}
 		if parentHeader.Slot <= slot {
-			return parent
+			child, hasChild := f.forkGraph.GetBlock(childRoot)
+			if !hasChild || child == nil {
+				return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
+			}
+			status := f.getParentPayloadStatus(child.Block)
+			// Prune runs outside f.mu: re-read the header so a prune between the reads gives its own result, not a mix.
+			if _, stillStored := f.forkGraph.GetHeader(parentRoot); !stillStored {
+				return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
+			}
+			return ForkChoiceNode{Root: parentRoot, PayloadStatus: status}
 		}
-		node = parent
+		childRoot, header = parentRoot, parentHeader
 	}
 }
 
-// Ancestor returns the ancestor to the given root.
-// [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
+type ancestorKey struct {
+	root common.Hash
+	slot uint64
+}
+
+// ancestorCacheSize covers the heads and target slots that gossip attestations name at the same time.
+const ancestorCacheSize = 1024
+
+func newAncestorCache() *lru.Cache[ancestorKey, ForkChoiceNode] {
+	cache, err := lru.New[ancestorKey, ForkChoiceNode](ancestorCacheSize)
+	if err != nil {
+		panic(err)
+	}
+	return cache
+}
+
+// Ancestor returns the ancestor of root at slot with its payload status (Gloas:EIP7732). Found ancestors are cached
+// by root and slot: blocks never change and pruning removes the oldest slots first, so while the cached ancestor is
+// stored, the walk would return it again. The anchor is not cached: it has no block, so pruning keeps its header.
 func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode {
-	return f.getAncestor(ForkChoiceNode{
+	key := ancestorKey{root: root, slot: slot}
+	if f.ancestors != nil {
+		if node, ok := f.ancestors.Get(key); ok {
+			if _, stored := f.forkGraph.GetHeader(node.Root); stored {
+				return node
+			}
+			f.ancestors.Remove(key)
+		}
+	}
+	node := f.getAncestor(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusPending,
 	}, slot)
+	if f.ancestors != nil && node.Root != (common.Hash{}) && node.Root != f.forkGraph.AnchorRoot() {
+		f.ancestors.Add(key, node)
+	}
+	return node
 }
 
 // getCheckpointState computes and caches checkpoint states.
@@ -310,7 +346,7 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 				cached = cs.(*checkpointState)
 				return
 			}
-			baseState, current, err = f.copyCurrentStateLocked(checkpoint.Root)
+			baseState, current, err = f.copyCurrentStateLocked(checkpoint.Root, nil)
 		}()
 		if cached != nil || err != nil {
 			return cached, err
@@ -329,7 +365,7 @@ func (f *ForkChoiceStore) getCheckpointStateLocked(checkpoint solid.Checkpoint) 
 	if f.forkGraph == nil {
 		return nil, errors.New("getCheckpointState: forkGraph not initialized")
 	}
-	baseState, current, err := f.copyCurrentStateLocked(checkpoint.Root)
+	baseState, current, err := f.copyCurrentStateLocked(checkpoint.Root, nil)
 	if err != nil {
 		return nil, err
 	}

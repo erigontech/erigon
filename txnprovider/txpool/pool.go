@@ -549,7 +549,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	}
 	unwindTxns, unwindFrames := p.splitRestoredTxns(unwindTxns)
 
-	_, unwindTxns, cells, err := p.validateTxns(&unwindTxns, cacheView, nil, nil, nil)
+	_, unwindTxns, cells, err := p.validateTxns(&unwindTxns, cacheView, nil, nil, nil, true)
 	if err != nil {
 		return frames, err
 	}
@@ -1297,10 +1297,10 @@ func newBatchUsage() *batchUsage {
 }
 
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) (txpoolcfg.DiscardReason, error) {
-	return p.validateTxWithCells(txn, isLocal, stateCache, nil, nil)
+	return p.validateTxWithCells(txn, isLocal, stateCache, nil, nil, false)
 }
 
-func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView, cells blobCells, batch *batchUsage) (txpoolcfg.DiscardReason, error) {
+func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView, cells blobCells, batch *batchUsage, unwinding bool) (txpoolcfg.DiscardReason, error) {
 	isEIP3860 := p.isShanghai()
 	isPrague := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
@@ -1423,7 +1423,10 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 			slots++ // a new nonce takes a slot; a replacement keeps the pooled txn's
 		}
 	}
-	if !isLocal && uint64(slots) > p.cfg.AccountSlots {
+	// An unwind can return a transaction when the sender is already above its
+	// per-account slot limit. Rejecting it as spam can evict some higher-nonce
+	// transactions and leave others queued behind the missing nonce.
+	if !unwinding && !isLocal && uint64(slots) > p.cfg.AccountSlots {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, slots, p.cfg.AccountSlots))
 		}
@@ -1806,7 +1809,7 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 	var goodTxns TxnSlots
 	err := p.withLockedState(ctx, &prechecked, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var err error
-		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil, newBatchUsage())
+		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil, newBatchUsage(), false)
 		if err != nil || p.cfg.MaxNonceGap == 0 || hasFrames {
 			return err
 		}
@@ -1912,7 +1915,7 @@ func addedBlobs(txn *TxnSlot, replaced *metaTxn) uint64 {
 // it skips all later remote txns. Skipped txns keep NotSet and are not returned.
 // Non-nil sources must be index-aligned with txns.
 // A nil batch counts nothing, not even the txn's own slot, for txns that were already in a block.
-func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason, sources []remoteSource, batch *batchUsage) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, cells blobCells, err error) {
+func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason, sources []remoteSource, batch *batchUsage, unwinding bool) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, cells blobCells, err error) {
 	// Keep precheck failures; NotSet entries still need validation.
 	if reasons == nil {
 		reasons = make([]txpoolcfg.DiscardReason, len(txns.Txns))
@@ -1932,7 +1935,7 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 			continue
 		}
 		replaced := p.pooledTxnReplacedBy(txn)
-		reason, err := p.validateTxWithCells(txn, txns.IsLocal[i], stateCache, cells, batch)
+		reason, err := p.validateTxWithCells(txn, txns.IsLocal[i], stateCache, cells, batch, unwinding)
 		if err != nil {
 			if reason == txpoolcfg.ErrGetSenderInfo {
 				p.logger.Warn("[txpool] validateTxns: sender info", "err", err)
@@ -2074,7 +2077,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 				return err
 			}
 			reasons = preparedReasons
-			validatedReasons, goodTxns, cells, err := p.validateTxns(&newTxns, cacheView, reasons, sources, newBatchUsage())
+			validatedReasons, goodTxns, cells, err := p.validateTxns(&newTxns, cacheView, reasons, sources, newBatchUsage(), false)
 			if err != nil {
 				return err
 			}
@@ -3033,7 +3036,9 @@ func (p *TxPool) Run(ctx context.Context) error {
 	defer dormancySweep.Stop()
 
 	if err := p.start(ctx); err != nil {
-		p.logger.Error("[txpool] Failed to start", "err", err)
+		if !errors.Is(err, context.Canceled) {
+			p.logger.Error("[txpool] Failed to start", "err", err)
+		}
 		return err
 	}
 	frameCtx, cancelFrames := context.WithCancel(ctx)
@@ -3447,7 +3452,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		isLocalTx := immediate.IsLocal[i]
 		txn.SenderID, txn.Traced = p.senders.getOrCreateID(addr, p.logger)
 
-		reason, err := p.validateTxWithCells(txn, isLocalTx, cacheView, cells, nil)
+		reason, err := p.validateTxWithCells(txn, isLocalTx, cacheView, cells, nil, false)
 		if err != nil {
 			return err
 		}

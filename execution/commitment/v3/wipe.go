@@ -17,6 +17,7 @@
 package v3
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/bits"
@@ -26,26 +27,29 @@ import (
 
 var errWipeRecord = errors.New("commitment v3: invalid wipe record")
 
-func enumerateStorageRecords(ctx commitment.PatriciaContext, addrHash [32]byte) ([]recordDelta, error) {
+func enumerateStorageRecords(runCtx context.Context, ctx commitment.PatriciaContext, addrHash [32]byte) ([]recordDelta, error) {
 	rootKey := StorageNodeKey(addrHash, nil, nil)
 	data, _, err := branchOwned(ctx, rootKey)
 	if err != nil || len(data) == 0 {
 		return nil, err
 	}
 	records := []recordDelta{{Key: rootKey, Data: []byte{}, Prev: data}}
-	if err := enumerateRecordChildren(ctx, addrHash, nil, records[0].Prev, 0, &records); err != nil {
+	if err := enumerateRecordChildren(runCtx, ctx, addrHash, nil, records[0].Prev, 0, &records); err != nil {
 		return nil, err
 	}
 	return records, nil
 }
 
-func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, path, data []byte, depth int, records *[]recordDelta) error {
+func enumerateRecordChildren(runCtx context.Context, ctx commitment.PatriciaContext, addrHash [32]byte, path, data []byte, depth int, records *[]recordDelta) error {
 	if err := Validate(data, depth); err != nil {
 		return err
 	}
 	record := Record{data: data, depth: depth}
 	l := record.layout()
 	for m := l.child &^ l.leaf; m != 0; m &= m - 1 {
+		if err := runCtx.Err(); err != nil {
+			return err
+		}
 		nib := bits.TrailingZeros16(m)
 		childPath := childRecordPath(record, l, path, nib)
 		key := StorageNodeKey(addrHash, childPath, nil)
@@ -57,7 +61,7 @@ func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, 
 			return fmt.Errorf("%w: missing child at depth %d", errWipeRecord, len(childPath))
 		}
 		*records = append(*records, recordDelta{Key: key, Data: []byte{}, Prev: childData})
-		if err := enumerateRecordChildren(ctx, addrHash, childPath, childData, len(childPath), records); err != nil {
+		if err := enumerateRecordChildren(runCtx, ctx, addrHash, childPath, childData, len(childPath), records); err != nil {
 			return err
 		}
 	}

@@ -28,7 +28,9 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -39,16 +41,19 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 // fakeStateReader is a minimal state.StateReader backed by an in-memory account
 // map, used to exercise RecordingState predicates without a database.
 type fakeStateReader struct {
 	accounts map[common.Address]*accounts.Account
+	codes    map[common.Address][]byte
 }
 
 func (r *fakeStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
@@ -72,9 +77,13 @@ func (r *fakeStateReader) ReadAccountStorage(address accounts.Address, key accou
 	return uint256.Int{}, false, nil
 }
 
-func (r *fakeStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) { return nil, nil }
+func (r *fakeStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	return r.codes[address.Value()], nil
+}
 
-func (r *fakeStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) { return 0, nil }
+func (r *fakeStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	return len(r.codes[address.Value()]), nil
+}
 
 func (r *fakeStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
 	return 0, nil
@@ -231,6 +240,49 @@ func TestCollectAccessedState_Legacy7702Designator(t *testing.T) {
 	}
 	if !sawDesignator {
 		t.Fatal("legacy witness codes missing the EIP-7702 designator (present only in PreStateCode)")
+	}
+}
+
+func TestRecordingStateCodeReadAfterRevertedWrite(t *testing.T) {
+	for _, operation := range []string{"code", "size", "delegation"} {
+		t.Run(operation, func(t *testing.T) {
+			writer := accounts.InternAddress(common.HexToAddress("0x11"))
+			reader := accounts.InternAddress(common.HexToAddress("0x22"))
+			code := []byte{0x60, 0x01, 0x00}
+			codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+			inner := &fakeStateReader{
+				accounts: map[common.Address]*accounts.Account{
+					writer.Value(): {Nonce: 1, Root: empty.RootHash, CodeHash: accounts.EmptyCodeHash},
+					reader.Value(): {Nonce: 1, Root: empty.RootHash, CodeHash: codeHash},
+				},
+				codes: map[common.Address][]byte{reader.Value(): code},
+			}
+			recorded := NewRecordingState(inner)
+			ibs := state.New(recorded)
+			defer ibs.Close()
+			transactions.VersionedBlockState(ibs)
+			ibs.SetTxContext(1, 0)
+			read := func() error {
+				switch operation {
+				case "size":
+					_, err := ibs.GetCodeSize(reader)
+					return err
+				case "delegation":
+					_, _, err := ibs.GetDelegatedDesignation(reader)
+					return err
+				default:
+					_, err := ibs.GetCode(reader)
+					return err
+				}
+			}
+			snapshot := ibs.PushSnapshot()
+			require.NoError(t, ibs.SetCode(writer, code, tracing.CodeChangeContractCreation))
+			require.NoError(t, read())
+			require.Empty(t, collectAccessedState(recorded, witnessModeCanonical).SortedCodes)
+			ibs.RevertToSnapshot(snapshot, nil)
+			require.NoError(t, read())
+			require.Equal(t, []hexutil.Bytes{code}, collectAccessedState(recorded, witnessModeCanonical).SortedCodes)
+		})
 	}
 }
 

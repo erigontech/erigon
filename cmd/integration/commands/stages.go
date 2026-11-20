@@ -611,7 +611,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		}
 
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber, true, false)
-		if err := stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
+		if err := stagedsync.UnwindSendersStage(u, tx, cfg); err != nil {
 			return err
 		}
 	default:

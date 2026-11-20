@@ -445,7 +445,7 @@ var snapshotCommand = cli.Command{
 				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (speeds up repeated runs)"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0); slow checks use 1/10000 of it", Value: 1.0},
-				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; each check gets (remaining / remaining_checks). 0 (default) means no limit"},
+				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; the run fails if it ends before every check has finished. 0 (default) means no limit"},
 			}),
 		},
 		{
@@ -937,9 +937,9 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			removeLatest = false // --step has higher priority
 		}
 
-		promptExit := func(s string) (exitNow bool) {
+		promptExit := func(s string) (bool, error) {
 			if !promptUserBeforeDelete {
-				return false
+				return false, nil
 			}
 
 		AllowPruneSteps:
@@ -947,14 +947,13 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			var ans uint8
 			_, err := fmt.Scanf("%d\n", &ans)
 			if err != nil {
-				fmt.Printf("err: %v\n", err)
-				return true
+				return false, fmt.Errorf("read snapshot deletion confirmation: %w", err)
 			}
 			switch ans {
 			case 1:
-				return false
+				return false, nil
 			case 4:
-				return true
+				return true, nil
 			default:
 				fmt.Printf("invalid input: %d; Just a number 1 or 4 expected.\n", ans)
 				goto AllowPruneSteps
@@ -1049,7 +1048,9 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 		if hasStateTrie == 0 && len(commitmentFilesWithState) > 0 {
 			fmt.Printf("\nthis will remove ALL commitment files with state trie\n")
 			q := "Do that anyway?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
-			if promptExit(q) {
+			if exitNow, err := promptExit(q); err != nil {
+				return err
+			} else if exitNow {
 				os.Exit(0)
 			}
 		}
@@ -1057,7 +1058,9 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 		// Prompt with file count and estimated deletion size
 		q := fmt.Sprintf("\nremove %d files (~%s)?\n1) RemoveFile\n4) Exit\n (pick number): ",
 			len(toRemove), common.ByteCount(removeSize))
-		if promptExit(q) {
+		if exitNow, err := promptExit(q); err != nil {
+			return err
+		} else if exitNow {
 			os.Exit(0)
 		}
 	} else {
@@ -1732,53 +1735,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		}
 	}
 
-	var deadline time.Time
-	if budget := cliCtx.Duration("integrity.budget"); budget > 0 {
-		requestedChecks = integrity.SortChecksByCost(requestedChecks)
-		deadline = time.Now().Add(budget)
-		logger.Info("[integrity] budget", "total", budget, "perCheck", budget/time.Duration(len(requestedChecks)))
-	}
-
-	for i, chk := range requestedChecks {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		checkCtx := ctx
-		var cancel context.CancelFunc
-		if !deadline.IsZero() {
-			remaining := time.Until(deadline)
-			if remaining <= 0 {
-				logger.Info("[integrity] budget exhausted, skipping remaining", "skipped", len(requestedChecks)-i)
-				break
-			}
-			slice := remaining / time.Duration(len(requestedChecks)-i)
-			checkCtx, cancel = context.WithTimeout(ctx, slice)
-		}
-
-		logger.Info("[integrity] starting", "check", chk)
-		start := time.Now()
-		err := runCheck(checkCtx, chk)
-		elapsed := time.Since(start)
-		if cancel != nil {
-			cancel()
-		}
-
-		if err == nil {
-			logger.Info("[integrity] done", "check", chk, "elapsed", elapsed)
-			continue
-		}
-		if parentErr := ctx.Err(); parentErr != nil {
-			return parentErr
-		}
-		if integrity.BudgetExhausted(err) {
-			logger.Info("[integrity] budget exhausted, moving on", "check", chk, "elapsed", elapsed)
-			continue
-		}
-		return fmt.Errorf("%s: %w", chk, err)
-	}
-
-	return nil
+	return integrity.RunChecks(ctx, requestedChecks, cliCtx.Duration("integrity.budget"), runCheck, logger)
 }
 
 // stateFilesProgress returns the latest block fully covered by state-history files.
@@ -2131,8 +2088,37 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool, beaconCo
 }
 
 func checkIfBlockSnapshotsPublishable(snapDir string) error {
-	if err := checkNoDuplicateFileVersions(snapDir); err != nil {
+	files, err := version.GroupByMaskedName(filepath.Join(snapDir, "*"))
+	if err != nil {
 		return err
+	}
+	if err := duplicateFileVersions(files, snapDir); err != nil {
+		return err
+	}
+	byUnversionedName := map[string][]version.VersionedFile{}
+	for _, group := range files {
+		for _, f := range group {
+			name := unversionedName(f.Name)
+			byUnversionedName[name] = append(byUnversionedName[name], f)
+		}
+	}
+	newest := func(name string) (best version.VersionedFile, ok bool) {
+		for _, f := range byUnversionedName[unversionedName(name)] {
+			if !ok || f.Version.Greater(best.Version) {
+				best, ok = f, true
+			}
+		}
+		return best, ok
+	}
+	checkIdx := func(idxName string, minSup version.Version) error {
+		idx, ok := newest(idxName)
+		if !ok {
+			return fmt.Errorf("index file %s: file not found", unversionedName(idxName))
+		}
+		if idx.Version.Less(minSup) {
+			return fmt.Errorf("index file %s: version %s is less than supported version %s", idx.Name, idx.Version, minSup)
+		}
+		return nil
 	}
 
 	var sum uint64
@@ -2185,40 +2171,19 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 		// check that all files exist
 		for _, snapType := range []string{"headers", "transactions", "bodies"} {
 			segName := strings.Replace(headerSegName, "headers", snapType, 1)
-			segVer := verMap[snapType]["seg"].Current
-			segName = strings.Replace(segName, headerSegVer.String(), segVer.String(), 1)
-			segNameMasked, err := version.ReplaceVersionWithMask(segName)
-			if err != nil {
-				return err
-			}
-			segName, ver, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(snapDir, segNameMasked))
-			if err != nil {
-				return fmt.Errorf("finding %s: %w", segNameMasked, err)
-			}
+			seg, ok := newest(segName)
 			if !ok {
-				return fmt.Errorf("missing file-%s", segNameMasked)
+				return fmt.Errorf("missing file-%s", unversionedName(segName))
 			}
-			if !verMap[snapType]["seg"].Supports(ver) {
-				return fmt.Errorf("expected version %s, filename: %s", verMap[snapType]["seg"].Current.String(), segName)
+			if !verMap[snapType]["seg"].Supports(seg.Version) {
+				return fmt.Errorf("expected version %s, filename: %s", verMap[snapType]["seg"].Current.String(), seg.Name)
 			}
-			// check that the index file exist
-			idxName := strings.Replace(segName, ".seg", ".idx", 1)
-			idxNameMasked, err := version.ReplaceVersionWithMask(idxName)
-			if err != nil {
+			if err := checkIdx(strings.Replace(seg.Name, ".seg", ".idx", 1), verMap[snapType]["idx"].MinSupported); err != nil {
 				return err
-			}
-			if err := version.CheckIsThereFileWithSupportedVersion(idxNameMasked, verMap[snapType]["idx"].MinSupported); err != nil {
-				return fmt.Errorf("index file %s: %w", idxName, err)
 			}
 			if snapType == "transactions" {
-				// check that the tx index file exist
-				txIdxName := strings.Replace(segName, "transactions.seg", "transactions-to-block.idx", 1)
-				txIdxNameMasked, err := version.ReplaceVersionWithMask(txIdxName)
-				if err != nil {
+				if err := checkIdx(strings.Replace(seg.Name, "transactions.seg", "transactions-to-block.idx", 1), verMap["transactions-to-block"]["idx"].MinSupported); err != nil {
 					return err
-				}
-				if err := version.CheckIsThereFileWithSupportedVersion(txIdxNameMasked, verMap["transactions-to-block"]["idx"].MinSupported); err != nil {
-					return fmt.Errorf("index file %s: %w", txIdxName, err)
 				}
 			}
 		}
@@ -2256,9 +2221,9 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	return nil
 }
 
-func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error {
+func checkIfStateSnapshotsPublishable(ctx context.Context, dirs datadir.Dirs, chainDB kv.RoDB) error {
 	var persistReceiptCache, commitmentHistory bool
-	if err := chainDB.View(context.Background(), func(tx kv.Tx) error {
+	if err := chainDB.View(ctx, func(tx kv.Tx) error {
 		var err error
 		persistReceiptCache, err = kvcfg.PersistReceipts.Enabled(tx)
 		if err != nil {
@@ -2304,15 +2269,22 @@ func checkNoDuplicateFileVersions(dirPaths ...string) error {
 		if err != nil {
 			return err
 		}
-		for _, g := range groups {
-			if len(g) < 2 {
-				continue
-			}
-			if !snaptype.IsSeedableExtension(g[0].Name) && !strings.HasSuffix(g[0].Name, ".torrent") {
-				continue // not an erigon snapshot file
-			}
-			return fmt.Errorf("%w: %s and %s in %s", ErrSnapDuplicateVersions, g[0].Name, g[1].Name, dirPath)
+		if err := duplicateFileVersions(groups, dirPath); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func duplicateFileVersions(groups map[string][]version.VersionedFile, dirPath string) error {
+	for _, g := range groups {
+		if len(g) < 2 {
+			continue
+		}
+		if !snaptype.IsSeedableExtension(g[0].Name) && !strings.HasSuffix(g[0].Name, ".torrent") {
+			continue // not an erigon snapshot file
+		}
+		return fmt.Errorf("%w: %s and %s in %s", ErrSnapDuplicateVersions, g[0].Name, g[1].Name, dirPath)
 	}
 	return nil
 }
@@ -2616,12 +2588,18 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 		defer chainDB.Close()
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Iterate over all fies in dat.Snap
-	if err := checkIfStateSnapshotsPublishable(dat, chainDB); err != nil {
+	if err := checkIfStateSnapshotsPublishable(ctx, dat, chainDB); err != nil {
 		return err
 	}
 	var chainName string
@@ -2654,6 +2632,9 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := checkIfCaplinSnapshotsPublishable(dat, true, beaconConfig); err != nil {
 		return err
 	}

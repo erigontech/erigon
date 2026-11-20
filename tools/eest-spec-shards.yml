@@ -45,7 +45,7 @@
   commitment-parallel: true
 - shard: statetests-devnet-parallel
   workers: 12
-  max-allowed-failures: 274 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
+  max-allowed-failures: 0
   commitment-parallel: true
 - shard: transactiontests-stable-race
   workers: 12
@@ -88,7 +88,7 @@
   commitment-parallel: true
 - shard: blocktests-devnet-parallel
   workers: 12
-  max-allowed-failures: 279 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
+  max-allowed-failures: 0
   commitment-parallel: true
 - shard: blocktests-legacy-consensus-parallel
   workers: 12
@@ -217,7 +217,7 @@
   commitment-parallel: true
 - shard: enginextests-devnet-parallel
   workers: 8
-  max-allowed-failures: 279 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
+  max-allowed-failures: 0
   commitment-parallel: true
 - shard: enginextests-benchmark-1m-parallel
   workers: 1
@@ -258,13 +258,13 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: true
-  expected-tests: 26687
+  expected-tests: 26853
 - shard: zkevm-witness-v3
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: false
   commitment-v3: true
-  expected-tests: 26687
+  expected-tests: 26853
 - shard: blocktests-stable-race-pre-cancun-parallel
   workers: 12
   max-allowed-failures: 0
@@ -299,4 +299,4 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: true
-  expected-tests: 26687
+  expected-tests: 26853

@@ -182,6 +182,34 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash, confi
 	return ctx, pool, poolDB, coreDB, sender
 }
 
+func TestUnwindRestoresTransactionsAboveAccountLimit(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	block := func(height byte, nonce uint64, direction remoteproto.Direction) *remoteproto.StateChangeBatch {
+		change := newBlockChangeForAccounts(common.Hash{height}, nonce, sender)
+		change.ChangeBatch[0].BlockHeight = uint64(height)
+		change.ChangeBatch[0].Direction = direction
+		return change
+	}
+
+	var first, rest TxnSlots
+	first.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	for nonce := uint64(1); nonce <= pool.cfg.AccountSlots+1; nonce++ {
+		rest.Append(newTestSenderTxnSlot(sender, nonce), sender[:], false)
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, block(1, 1, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, first))
+	require.NoError(t, pool.OnNewBlock(ctx, block(2, pool.cfg.AccountSlots+2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, rest))
+
+	// The first unwind restores the higher nonces and puts the sender above the
+	// admission limit. The second rewinds the account nonce to 0, so those
+	// transactions can stay pending only if the pool also restores nonce 0.
+	require.NoError(t, pool.OnNewBlock(ctx, block(1, 1, remoteproto.Direction_UNWIND), rest, TxnSlots{}, TxnSlots{}))
+	require.EqualValues(t, pool.cfg.AccountSlots+1, pool.pending.Len())
+
+	require.NoError(t, pool.OnNewBlock(ctx, block(0, 0, remoteproto.Direction_UNWIND), first, TxnSlots{}, TxnSlots{}))
+	require.EqualValues(t, pool.cfg.AccountSlots+2, pool.pending.Len(), "the missing lowest nonce must make the whole chain pending")
+	require.Zero(t, pool.queued.Len())
+}
+
 func TestIdHashKnownDiscardReasons(t *testing.T) {
 	ctx, pool, poolDB, _, _ := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	hash := common.Hash{1}

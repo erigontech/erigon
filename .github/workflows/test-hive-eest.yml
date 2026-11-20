@@ -146,7 +146,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 280 # EIP-7906
+              max-failures: 0
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -341,7 +341,10 @@ jobs:
             # image-build/registry/clone failure); a completed run is judged on its first result.
             local attempt=1 max_attempts=3
             while true; do
-              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=${{ matrix.runner == 'ubuntu-latest' && 4 || 12 }} --client erigon --docker.nocache=true --sim.limit.exact=false "${eels_args[@]}" ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
+              # -docker.buildoutput keeps docker build logs in the job log but stops relaying
+              # erigon container logs there (the workspace-logs artifact keeps them), which
+              # otherwise streams hundreds of MB per run on high-test-count shards.
+              ./hive -docker.buildoutput -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=${{ matrix.runner == 'ubuntu-latest' && 4 || 12 }} --client erigon --docker.nocache=true --sim.limit.exact=false "${eels_args[@]}" ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
               status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
               suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
               if [ -z "$suites" ]; then

@@ -125,6 +125,7 @@ type Aggregator struct {
 	maintenanceObserver atomic.Pointer[MaintenanceObserver]
 	observerCtx         context.Context
 	observerCancel      context.CancelFunc
+	closed              atomic.Bool
 
 	// next fields are set only if agg.doTraceCtx is true. can enable by env: TRACE_AGG=true
 	leakDetector *dbg.LeakDetector
@@ -475,7 +476,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 	a.checker.AddDependency(FromDomain(dependency), &DependentInfo{
 		entity:      FromDomain(dependent),
 		filesGetter: func() *DirtyFiles { return dd.dirtyFiles },
-		accessors:   dd.Accessors,
+		accessors:   &dd.Accessors,
 	})
 	a.d[dependency].SetChecker(a.checker)
 }
@@ -499,7 +500,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 		filesGetter: func() *DirtyFiles {
 			return h.dirtyFiles
 		},
-		accessors: h.Accessors,
+		accessors: &h.Accessors,
 	})
 	h.InvertedIndex.SetChecker(a.checker)
 }
@@ -733,16 +734,22 @@ func (a *Aggregator) WaitForFiles() {
 	}
 }
 
-func (a *Aggregator) Close() {
+// StopMaintenance refuses new background work and waits for the running work,
+// which may still use the database. Files stay open for live readers.
+func (a *Aggregator) StopMaintenance() {
 	a.observerCancel()
 	a.dirtyFilesLock.Lock()
 	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
 	a.dirtyFilesLock.Unlock()
-	// Every caller must wait for maintenance before it can safely close the database.
 	// Keep the aggregator context alive until that work finishes.
-	firstClose := a.background.BeginClose()
+	a.background.BeginClose()
 	a.background.Wait()
-	if !firstClose {
+}
+
+// Close unmaps the files: every reader must be gone, so close the database first.
+func (a *Aggregator) Close() {
+	a.StopMaintenance()
+	if !a.closed.CompareAndSwap(false, true) {
 		return
 	}
 	a.ctxCancel()
@@ -1866,19 +1873,64 @@ type aggregatorVisible struct {
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
-	toTxNum := a.dirtyFilesEndTxNumMinimax()
-	next := &aggregatorVisible{}
-	for id, d := range a.d {
-		if d == nil {
-			continue
+	// buildVisible builds every list up to toTxNum and returns the lowest end among the lists that have files.
+	buildVisible := func(toTxNum uint64) (next *aggregatorVisible, lowestEnd uint64) {
+		next, lowestEnd = &aggregatorVisible{}, toTxNum
+		lower := func(dirty *DirtyFiles, visible visibleFiles) {
+			if dirty.Len() > 0 {
+				lowestEnd = min(lowestEnd, contiguousEnd(visible))
+			}
 		}
-		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
+		// values files are never retired, so a values list must start at its first file on disk
+		lowerToFirstFile := func(dirty *DirtyFiles, visible visibleFiles) {
+			firstStart := uint64(math.MaxUint64)
+			dirty.Scan(func(f *FilesItem) bool {
+				if !f.canDelete.Load() {
+					firstStart = min(firstStart, f.startTxNum)
+				}
+				return true
+			})
+			if len(visible) > 0 && visible[0].startTxNum > firstStart {
+				lowestEnd = min(lowestEnd, firstStart)
+			}
+		}
+		for id, d := range a.d {
+			if d == nil {
+				continue
+			}
+			next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
+			if !d.Enabled || a.unalignedDomain[id] {
+				continue
+			}
+			lower(d.dirtyFiles, next.d[id].files)
+			lowerToFirstFile(d.dirtyFiles, next.d[id].files)
+			if !d.HistCfg.SnapshotsDisabled && !d.HistCfg.HistoryDisabled {
+				lower(d.History.dirtyFiles, next.dh[id])
+				lower(d.InvertedIndex.dirtyFiles, next.dhii[id].files)
+			}
+		}
+		for id, ii := range a.standaloneIIs() {
+			if ii == nil {
+				continue
+			}
+			next.iis[id] = ii.calcVisibleFiles(toTxNum)
+			if ii.Enabled && !a.unalignedIdx[id] {
+				lower(ii.dirtyFiles, next.iis[id].files)
+			}
+		}
+		return next, lowestEnd
 	}
-	for id, ii := range a.standaloneIIs() {
-		if ii == nil {
-			continue
-		}
-		next.iis[id] = ii.calcVisibleFiles(toTxNum)
+
+	dirtyEnd := a.dirtyFilesEndTxNumMinimax()
+	toTxNum := dirtyEnd
+	next, end := buildVisible(toTxNum)
+	// A list that stops early stops every list there; cutting there can drop a merged file that crosses it, so repeat.
+	for end < toTxNum {
+		toTxNum = end
+		next, end = buildVisible(toTxNum)
+	}
+	if toTxNum < dirtyEnd {
+		a.logger.Warn("[agg] a gap in files: every list stops at the first one that stops", "visibleEnd", toTxNum, "filesEnd", dirtyEnd)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
 
