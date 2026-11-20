@@ -10,7 +10,8 @@ The fan-out measures of eth_subscribe (how long the node takes to send one notif
 to every connection) and its vs newHeads measures (how long after the head a log or receipt
 of the block reaches the same connection) also get overview rows, one per client class when
 the pattern has them, since the latency of the test itself is mostly the block import time,
-the same for all clients.
+the same for all clients. The receipts measures of a client that sends the receipts of a block one
+notification each, instead of one list per block, are marked with !.
 A test whose pattern splits the connections into client classes gets, after the overviews,
 a legend of the classes and the measures and a table with the measures of each class.
 p50, p90 and p95 are the median over the repetitions, max is the worst one.
@@ -123,7 +124,15 @@ def measure_step(step, name):
     measure = {k: api[k] for k in ("p50", "p90", "p95", "max") if k in api}
     measure["success"] = 1
     measure["rpc_success"] = 1 - api["errors"] / max(api["requests"], 1)
+    if is_per_receipt(step, name):
+        measure["per_receipt"] = True
     return measure
+
+
+def is_per_receipt(step, measure):
+    """Report whether measure is of the receipts of a client that sends them one notification each."""
+    return (measure.startswith("transactionReceipts ")
+            and any(n.startswith("transactionReceipts per receipt") for n in step.get("apis", {})))
 
 
 MEASURE_LEGEND = [
@@ -135,8 +144,10 @@ MEASURE_LEGEND = [
     "- **vs newHeads**: arrival of a log or receipt minus the arrival of the head of the same block on the same "
     "connection, the filtering and encoding of the logs and receipts after the head.",
 ]
-PER_RECEIPT_LEGEND = ("- **per receipt**: a client that sends the receipts of a block one notification each: "
-                      "the arrival of the last one minus the first.")
+PER_RECEIPT_LEGEND = ("- **per receipt**: a client that sends the receipts of a block one notification each, "
+                      "marked with !: the arrival of the last one minus the first.")
+PER_RECEIPT_MARK = ("! sends the receipts of a block one notification each, not one list per block: "
+                    "its receipts measures take the arrival of the last one.")
 TYPE_ORDER = ["newHeads", "logs", "transactionReceipts"]
 MEASURE_ORDER = ["latency", "fan-out", "vs newHeads", "per receipt"]
 
@@ -221,7 +232,8 @@ def render_classes(results, patterns):
                     rows = {c: a.get(f"{measure} {cls}") for c, a in apis.items()}
                     best = min((r["p50"] for r in rows.values() if r), default=None)
                     cells = [steps[c]["failed"] if is_failed(steps[c]) else
-                             f"{r['p50']:.2f}{'*' if r['p50'] == best else ''} / {r['p95']:.2f}" if r else "-"
+                             f"{r['p50']:.2f}{'*' if r['p50'] == best else ''}"
+                             f"{'!' if is_per_receipt(steps[c], measure) else ''} / {r['p95']:.2f}" if r else "-"
                              for c, r in rows.items()]
                     lines.append(f"| {cls} | {measure} | " + " | ".join(cells) + " |")
         lines.append("")
@@ -266,7 +278,8 @@ def latency_cell(step, best, best_rpc, percentile):
         return step["failed"] + " "
     if not all_succeeded(step, best_rpc):
         return "err "
-    return f"{step[percentile]:.2f}" + ("*" if step[percentile] == best else " ")
+    return (f"{step[percentile]:.2f}" + ("*" if step[percentile] == best else " ")
+            + ("!" if step.get("per_receipt") else ""))
 
 
 def render_overview(results, percentile):
@@ -277,9 +290,11 @@ def render_overview(results, percentile):
     """
     clients = sorted({c for label in results for c in results[label]}, key=lambda c: (client_rank(c), c))
     rows = []
+    marked = False
     for label in sorted(results):
         for qps in sorted({q for c in results[label] for q in results[label][c]}, key=float):
             steps = {c: results[label][c].get(qps) for c in clients if c in results[label]}
+            marked = marked or any(s and s.get("per_receipt") for s in steps.values())
             alive = {c: s for c, s in steps.items() if s and not is_failed(s)}
             best_rpc = max((s["rpc_success"] for s in alive.values()), default=1)
             ok = {c: s[percentile] for c, s in alive.items() if all_succeeded(s, best_rpc)}
@@ -300,6 +315,7 @@ def render_overview(results, percentile):
              "excluded left out at a barrier, lost no results from the client's job.",
              f"Erigon status on {percentile}, at the end of the row: 🟢🟢 fastest by >= 1.3x, 🟢 fastest,",
              "🟡 < 1.3x the fastest, 🔴 >= 1.3x, errors or no Erigon result.",
+             *([PER_RECEIPT_MARK] if marked else []),
              "",
              line(header)]
     lines += [f"{line(cells)} {status}" for status, cells in rows]
