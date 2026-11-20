@@ -213,9 +213,19 @@ def run(enclave):
     check_state(after)
     for tx_hash in before[branch_b_node-1]["transactions"]:
         receipt = retry(f"receipt for {tx_hash}", lambda: rpc(execution[witness-1], "eth_getTransactionReceipt", tx_hash))
-        if receipt:
-            canonical = retry("receipt's canonical block", lambda: block(witness, receipt["blockNumber"]))
-            assert receipt["blockHash"] == canonical["hash"], f"stale receipt for {tx_hash}"
+        if receipt is None:
+            continue
+        receipt_hash = receipt.get("transactionHash")
+        assert receipt_hash == tx_hash, f"receipt for {tx_hash} names {receipt_hash}"
+        canonical = retry("receipt's canonical block", lambda: block(witness, receipt["blockNumber"]))
+        assert (receipt["blockHash"], receipt["blockNumber"]) == (canonical["hash"], canonical["number"]), (
+            f"stale receipt for {tx_hash}"
+        )
+        index = int(receipt["transactionIndex"], 16)
+        transactions = canonical["transactions"]
+        assert 0 <= index < len(transactions) and transactions[index] == tx_hash, (
+            f"receipt for {tx_hash} points to index {index} in block {canonical['hash']}"
+        )
 
     service = f"el-{witness}-erigon-{clients[witness-1]}"
     cli("service", "stop", enclave, service)

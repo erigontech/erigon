@@ -87,11 +87,12 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 		opInvalidPayload: "invalid_payload",
 	}
 	type scheduleCase struct {
-		name     string
-		schedule []byte
+		name         string
+		schedule     []byte
+		wantRequeued []*engineapitester.MockClPayload
 	}
 	cases := []scheduleCase{
-		{"bounce_restart", []byte{
+		{name: "bounce_restart", schedule: []byte{
 			opExtend, 23,
 			opSelectBranch, 47,
 			opBounce, 7,
@@ -102,7 +103,7 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 			opRestart, 0,
 			opExtend, 19,
 		}},
-		{"prune_invalid", []byte{
+		{name: "prune_invalid", schedule: []byte{
 			opPrune, 0,
 			opSelectBranch, 71,
 			opInvalidPayload, 0,
@@ -112,22 +113,18 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 			opPrune, 0,
 			opSelectBranch, 24,
 		}},
-		{"repeated_unwind", []byte{
+		{name: "repeated_unwind", schedule: []byte{
 			opSelectBranch, 98,
 			opExtend, 89,
 			opSelectBranch, 179,
 			opBounce, 16,
 		}},
-		{"restored_versions", generatedReorgSchedule(3)},
-		{"sparse_restores", []byte{
+		{name: "restored_versions", schedule: generatedReorgSchedule(3)},
+		{name: "sparse_restores", schedule: []byte{
 			opSelectBranch, 113,
 			opExtend, 202,
 			opSelectBranch, 197,
 			opBounce, 114,
-		}},
-		{"requeued_transactions", []byte{
-			opExtend, 23,
-			opSelectBranch, 2,
 		}},
 	}
 	if value, ok := os.LookupEnv("ERIGON_REORG_SEED"); ok {
@@ -141,7 +138,7 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 		}
 		for i := range count {
 			caseSeed := seed + uint64(i)
-			cases = append(cases, scheduleCase{fmt.Sprintf("seed_%d", caseSeed), generatedReorgSchedule(caseSeed)})
+			cases = append(cases, scheduleCase{name: fmt.Sprintf("seed_%d", caseSeed), schedule: generatedReorgSchedule(caseSeed)})
 		}
 	}
 	var branches []reorgReference
@@ -194,6 +191,13 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 		require.NoError(t, eat.Close())
 		branches = append(branches, ref)
 	}
+	// Rewinding to the common ancestor leaves every discarded transaction eligible
+	// for inclusion again because the new head has no competing transactions.
+	cases = append(cases, scheduleCase{
+		name:         "requeued_transactions",
+		schedule:     []byte{opExtend, suffixPokes - 1, opSelectBranch, 2},
+		wantRequeued: branches[0].payloads[forkIndex+1:],
+	})
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			schedule := test.schedule
@@ -308,9 +312,27 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 			}
 			churn, err := contracts.NewStateChurn(address, eat.ContractBackend)
 			require.NoError(t, err)
-			churnAndAssert(ctx, t, eat, churn, 3, func(k int) int64 { return int64(9_000 + k) })
+			continuation, _ := churnAndAssert(ctx, t, eat, churn, 3, func(k int) int64 { return int64(9_000 + k) })
+			if test.wantRequeued != nil {
+				discarded := payloadTransactionHashes(t, test.wantRequeued)
+				require.NotEmpty(t, discarded, "the discarded branch must contain transactions")
+				require.Subset(t, payloadTransactionHashes(t, continuation), discarded, "every discarded transaction must be mined again")
+			}
 		})
 	}
+}
+
+func payloadTransactionHashes(t *testing.T, payloads []*engineapitester.MockClPayload) []common.Hash {
+	t.Helper()
+	var hashes []common.Hash
+	for _, payload := range payloads {
+		for _, raw := range payload.ExecutionPayload.Transactions {
+			txn, err := types.DecodeTransaction(raw)
+			require.NoError(t, err)
+			hashes = append(hashes, txn.Hash())
+		}
+	}
+	return hashes
 }
 
 // Apply the stream without DB fallbacks, so a missing update cannot be hidden by

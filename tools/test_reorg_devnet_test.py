@@ -53,13 +53,28 @@ class ReorgRecoveryTests(unittest.TestCase):
         running_beacons = set(range(1, 7))
         votes_ready = False
         restarted_at = None
+        # One transaction from B's split block returns at another height and index on A.
+        split_height = 28
+        remined_height = split_height + 1
+        remined_tx = f"tx-A-{remined_height}-1"
 
         def block_at(node, height):
             block_hash = f"{branches[node]}-{height}"
+            transactions = [f"tx-{block_hash}-0", f"tx-{block_hash}-1"]
+            if branches[node] == "B" and height == split_height:
+                transactions[0] = remined_tx
             return {
                 "number": hex(height), "hash": block_hash, "stateRoot": STATE_ROOT,
-                "transactions": [f"tx-{block_hash}-0", f"tx-{block_hash}-1"], "gasUsed": "0x1",
+                "transactions": transactions, "gasUsed": "0x1",
             }
+
+        def receipts_at(node, height):
+            block = block_at(node, height)
+            return [{
+                "blockHash": block["hash"], "blockNumber": block["number"],
+                "transactionHash": tx, "transactionIndex": hex(i),
+                "from": ACCOUNT_PROOF["address"], "to": ACCOUNT_PROOF["address"], "contractAddress": None,
+            } for i, tx in enumerate(block["transactions"])]
 
         def cli(command, **kwargs):
             nonlocal restarted, restarted_at
@@ -108,7 +123,7 @@ class ReorgRecoveryTests(unittest.TestCase):
             node = int(url.split("-")[1]) - 1
             if url.endswith("/debug/fork_choice"):
                 return {"fork_choice_nodes": [{
-                    "execution_block_hash": f"{branches[node]}-28",
+                    "execution_block_hash": f"{branches[node]}-{split_height}",
                     "weight": "3" if node == 0 and votes_ready else "2" if node == 4 else "1",
                 }]}
             if url.endswith("/finality_checkpoints"):
@@ -120,7 +135,7 @@ class ReorgRecoveryTests(unittest.TestCase):
 
             method, params = data["method"], data["params"]
             if method == "eth_getBlockByNumber":
-                latest = 110 if healed else 30 if partitioned else 20
+                latest = 110 if healed else split_height + 2 if partitioned else 20
                 if restarted:
                     # The witness first lags its peers; only later reads can show new production.
                     latest = next_heads[node] if elapsed > restarted_at else (100 if node == 4 else 110)
@@ -130,16 +145,11 @@ class ReorgRecoveryTests(unittest.TestCase):
                 height = int(params[0], 16)
                 if restarted:
                     checked_heights.append(height)
-                block = block_at(node, height)
-                result = [{
-                    "blockHash": block["hash"], "blockNumber": block["number"],
-                    "transactionHash": tx, "transactionIndex": hex(i),
-                    "from": ACCOUNT_PROOF["address"], "to": ACCOUNT_PROOF["address"], "contractAddress": None,
-                } for i, tx in enumerate(block["transactions"])]
+                result = receipts_at(node, height)
             elif method == "eth_getProof":
                 result = ACCOUNT_PROOF
             elif method == "eth_getTransactionReceipt":
-                result = None
+                result = receipts_at(node, remined_height)[1] if params[0] == remined_tx else None
             else:
                 self.fail(f"unexpected RPC method: {method}")
             if rpc_overrides and method in rpc_overrides:
@@ -181,6 +191,19 @@ class ReorgRecoveryTests(unittest.TestCase):
         }.items():
             with self.subTest(name=name), self.assertRaisesRegex(AssertionError, "receipt"):
                 self.run_recovery([114] * 6, rpc_overrides={"eth_getBlockReceipts": change})
+
+    def test_recovery_rejects_wrong_receipt_for_discarded_transaction(self):
+        for name, fields in {
+            "another transaction": {"transactionHash": "some-other-tx"},
+            "another transaction's index": {"transactionIndex": "0x0"},
+            "index past end of block": {"transactionIndex": "0x2"},
+            "negative index": {"transactionIndex": "-0x1"},
+            "discarded block": {"blockHash": "discarded"},
+        }.items():
+            with self.subTest(name=name), self.assertRaisesRegex(AssertionError, "receipt"):
+                self.run_recovery([114] * 6, rpc_overrides={
+                    "eth_getTransactionReceipt": lambda row: dict(row, **fields) if row is not None else None,
+                })
 
     def test_recovery_rejects_proofs_that_do_not_match_the_block(self):
         for name, method, change in [
