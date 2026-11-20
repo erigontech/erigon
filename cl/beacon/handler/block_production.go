@@ -1364,7 +1364,7 @@ func (a *ApiHandler) processProducedBlock(
 	block *cltypes.BlindOrExecutionBeaconBlock,
 	selectedCandidates ...*gloasBidCandidate,
 ) (*state.CachingBeaconState, *eth2.Impl, error) {
-	return a.processProducedBlockWithProcessor(baseState, block, processBlockForProduction, selectedCandidates...)
+	return a.processProducedBlockWithProcessor(baseState, block, a.processBlockWithConsensusEngine, selectedCandidates...)
 }
 
 func (a *ApiHandler) processProducedBlockWithProcessor(
@@ -1490,6 +1490,15 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 		"evicted", bidEvicted,
 		"err", candidateErr)
 	return baseState, selfBuildMachine, nil
+}
+
+func (a *ApiHandler) processBlockWithConsensusEngine(productionState *state.CachingBeaconState, block *cltypes.BlindOrExecutionBeaconBlock) (*eth2.Impl, error) {
+	if a.forkchoiceStore == nil {
+		return processBlockForProduction(productionState, block)
+	}
+	rewards := &eth2.BlockRewardsCollector{}
+	blockMachine := a.forkchoiceStore.ConsensusEngine().Machine(false, rewards)
+	return &eth2.Impl{BlockRewardsCollector: rewards}, machine.ProcessBlock(blockMachine, productionState, block.ToGeneric())
 }
 
 func processBlockForProduction(productionState *state.CachingBeaconState, block *cltypes.BlindOrExecutionBeaconBlock) (*eth2.Impl, error) {
