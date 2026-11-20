@@ -184,38 +184,29 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash, confi
 
 func TestUnwindRestoresTransactionsAboveAccountLimit(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	require.NoError(t, pool.start(ctx))
-	makeSlots := func(nonce uint64) TxnSlots {
-		txn := newTestTxnSlot(nonce, 0, 2, 2, 21_000)
-		txn.IDHash[0] = byte(nonce + 1)
-		var slots TxnSlots
-		slots.Append(txn, sender[:], false)
-		return slots
+	block := func(height byte, nonce uint64, direction remoteproto.Direction) *remoteproto.StateChangeBatch {
+		change := newBlockChangeForAccounts(common.Hash{height}, nonce, sender)
+		change.ChangeBatch[0].BlockHeight = uint64(height)
+		change.ChangeBatch[0].Direction = direction
+		return change
 	}
-	change := func(nonce, height uint64, direction remoteproto.Direction) *remoteproto.StateChangeBatch {
-		account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
-		return &remoteproto.StateChangeBatch{
-			PendingBlockBaseFee: 1,
-			BlockGasLimit:       1_000_000,
-			ChangeBatch: []*remoteproto.StateChange{{
-				BlockHeight: height,
-				BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{byte(height)}),
-				Direction:   direction,
-				Changes: []*remoteproto.AccountChange{{
-					Action: remoteproto.Action_UPSERT, Address: gointerfaces.ConvertAddressToH160(sender), Data: accounts.SerialiseV3(&account),
-				}},
-			}},
-		}
-	}
-	require.NoError(t, pool.OnNewBlock(ctx, change(1, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	var first, rest TxnSlots
+	first.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
 	for nonce := uint64(1); nonce <= pool.cfg.AccountSlots+1; nonce++ {
-		pool.AddRemoteTxns(ctx, makeSlots(nonce), nil, nil)
-		require.NoError(t, pool.processRemoteTxns(ctx))
+		rest.Append(newTestSenderTxnSlot(sender, nonce), sender[:], false)
 	}
+	require.NoError(t, pool.OnNewBlock(ctx, block(1, 1, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, first))
+	require.NoError(t, pool.OnNewBlock(ctx, block(2, pool.cfg.AccountSlots+2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, rest))
+
+	// The first unwind restores the higher nonces and puts the sender above the
+	// admission limit. The second rewinds the account nonce to 0, so those
+	// transactions can stay pending only if the pool also restores nonce 0.
+	require.NoError(t, pool.OnNewBlock(ctx, block(1, 1, remoteproto.Direction_UNWIND), rest, TxnSlots{}, TxnSlots{}))
 	require.EqualValues(t, pool.cfg.AccountSlots+1, pool.pending.Len())
 
-	require.NoError(t, pool.OnNewBlock(ctx, change(0, 1, remoteproto.Direction_UNWIND), makeSlots(0), TxnSlots{}, TxnSlots{}))
-	require.EqualValues(t, pool.cfg.AccountSlots+2, pool.pending.Len(), "restoring the lowest nonce must not punish the sender or leave a gap")
+	require.NoError(t, pool.OnNewBlock(ctx, block(0, 0, remoteproto.Direction_UNWIND), first, TxnSlots{}, TxnSlots{}))
+	require.EqualValues(t, pool.cfg.AccountSlots+2, pool.pending.Len(), "the missing lowest nonce must make the whole chain pending")
 	require.Zero(t, pool.queued.Len())
 }
 

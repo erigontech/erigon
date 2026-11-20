@@ -79,24 +79,32 @@ Blocks containing a frame transaction preserve the original gas budgets and norm
 
 ### `overlay_callConstructor`
 
-Replays the **constructor transaction** of an existing contract using a different bytecode and returns the effective creation code that would have been stored.
-
-This is useful for understanding what a contract would have initialised to if it had been deployed with different logic, without redeploying anything.
+Replays the transaction that deployed a contract using replacement initcode at the original address, including for `CREATE2`. It returns the runtime bytecode left at that address when the transaction finishes.
 
 **Parameters**
 
 | # | Name | Type | Description |
 |---|------|------|-------------|
 | 1 | `address` | `Address` | The address of the already-deployed contract |
-| 2 | `code` | `Bytes` | The replacement bytecode to use instead of the original deployment bytecode |
+| 2 | `code` | `Bytes` | The replacement initcode to run at deployment |
 
 **Returns**
 
 ```json
-{ "code": "0x<effective_creation_code>" }
+{ "code": "0x<runtime_bytecode>" }
 ```
 
-`null` if the replacement constructor runs without an error but leaves no code at the address.
+A successful deployment returns `null` if its runtime code is empty, the factory reverts it, or `SELFDESTRUCT` deletes it in the same transaction. A failed `POST_TX` assertion also returns `null` for deployments it rolls back in the transaction body. Deployments from the payment-approval frame survive that rollback.
+
+If an accepted transaction never reaches the target creation during replay, the RPC returns `null`. For example, the factory may run out of gas before it executes `CREATE` or `CREATE2`.
+
+If the factory retries a rolled-back creation, the RPC returns the retry's result. A constructor failure is reported as an RPC error when no code remains.
+
+**Gas**
+
+Ordinary transactions use the RPC gas allowance for the top-level replay. Frame transactions keep their signed gas budgets. A factory deployment uses the gas forwarded by `CREATE` or `CREATE2`. Under EIP-150, the factory keeps 1/64 of its remaining execution gas after creation costs, rounded down. A factory called with an explicit gas limit can run out of gas storing a larger runtime even when the RPC gas cap is higher.
+
+From Shanghai onward, both the factory's input to `CREATE` or `CREATE2` and the replacement must fit the fork's initcode size limit. An oversized factory input fails before the VM applies the replacement. The per-word analysis charge uses the replacement size. Memory expansion uses the original memory range, and `CREATE2` uses the original input for its address and hashing charge.
 
 **Example**
 
@@ -108,18 +116,10 @@ curl -X POST http://localhost:8545 \
     "method": "overlay_callConstructor",
     "params": [
       "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-      "0x<your_replacement_bytecode>"
+      "0x<replacement_initcode>"
     ],
     "id": 1
   }'
 ```
 
-Internally, this method:
-1. Looks up the contract's creation transaction via the Otterscan API
-2. Replays all transactions in that block up to (but not including) the creation tx
-3. Executes the creation tx using the provided bytecode instead of the original
-4. Returns the effective code that would have been stored at the contract address, or `null` if no code would have been stored
-
-:::info
-`overlay_callConstructor` requires the Otterscan API (`--http.api=...,ots,overlay`) to resolve the contract creation transaction.
-:::
+Erigon uses its internal Otterscan service to find the deployment transaction. It replays the preceding transactions in the block to restore the state at deployment.

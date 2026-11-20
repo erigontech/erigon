@@ -226,7 +226,7 @@ func computeAheadRoot(t *testing.T, wantFeed bool) []byte {
 	require.NoError(t, err)
 	require.Equal(t, wantFeed, cc.feed.Keys > 0, "v3 compute-ahead folds through the feed")
 	if wantFeed {
-		require.Equal(t, uint64(queued), cc.branchPrefetch.drained.Load(), "compute-ahead pauses the prefetcher like a block compute, and queues nothing the BAL request already queued")
+		require.Len(t, cc.branchPrefetch.work, queued, "compute-ahead leaves queued walks to the workers like a block compute, and queues nothing the BAL request already queued")
 	}
 	return rh
 }

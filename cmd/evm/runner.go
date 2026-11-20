@@ -55,7 +55,6 @@ import (
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/runtime"
 )
 
@@ -210,13 +209,8 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	}
 	defer sd.Close()
 	stateReader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-	statedb = state.New(stateReader)
-	// The dump commits the state, which the versioned path does not materialize.
-	if !ctx.Bool(DumpFlag.Name) {
-		statedb.SetVersionMap(state.NewVersionMap(nil))
-		statedb.SetTxContext(0, 0)
-		statedb.SetNoConflictDetection()
-	}
+	statedb = state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+	statedb.SetNoConflictDetection()
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))
 	}
@@ -343,17 +337,6 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	output, stats, err := timedExec(bench, execFunc)
 
 	if ctx.Bool(DumpFlag.Name) {
-		rules := &chain.Rules{}
-		if chainConfig != nil {
-			blockContext := evmtypes.BlockContext{
-				BlockNumber: runtimeConfig.BlockNumber,
-				Time:        runtimeConfig.Time,
-			}
-			rules = blockContext.Rules(chainConfig)
-		}
-		if err = statedb.CommitBlock(rules, state.NewNoopWriter()); err != nil {
-			return fmt.Errorf("could not commit state: %w", err)
-		}
 		fmt.Println(string(state.NewDumper(tx, rawdbv3.TxNums, 0).DefaultDump()))
 	}
 

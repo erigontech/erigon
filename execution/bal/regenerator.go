@@ -188,9 +188,8 @@ func (g *Regenerator) historyStartTxNum(ctx context.Context, tx kv.TemporalTx, b
 // the txNum of its init system call, and returns the I/O its access list is
 // built from.
 func RederiveFromHistory(ctx context.Context, cfg *chain.Config, engine rules.Engine, blockReader dbservices.FullBlockReader, tx kv.TemporalTx, block *types.Block, blockStartTxNum uint64, logger log.Logger) (*state.VersionedIO, error) {
-	ibs := state.New(state.NewHistoryReaderV3(tx, blockStartTxNum))
+	ibs := state.NewWithVersionMap(state.NewHistoryReaderV3(tx, blockStartTxNum), state.NewVersionMap(nil))
 	defer ibs.Close()
-	ibs.SetVersionMap(state.NewVersionMap(nil))
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		return blockReader.Header(ctx, tx, hash, number)
 	}

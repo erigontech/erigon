@@ -55,6 +55,7 @@ linters:
     gomoddirectives:
       replace-allow-list:
         - github.com/holiman/bloomfilter/v2
+        - github.com/libp2p/go-libp2p-pubsub
     revive:
       rules:
         - name: atomic

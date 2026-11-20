@@ -271,6 +271,17 @@ func TestRangeDupSort(t *testing.T) {
 	})
 }
 
+func TestRangeDupSortDescFromPrefixWithoutSuccessor(t *testing.T) {
+	_, tx, _ := BaseCase(t)
+	for _, from := range [][]byte{{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, {}} {
+		it, err := tx.RangeDupSort("Table", []byte("key1"), from, nil, order.Desc, -1)
+		require.NoError(t, err)
+		_, vals, err := stream.ToArrayKV(it)
+		require.NoError(t, err)
+		require.Equal(t, [][]byte{[]byte("value1.3"), []byte("value1.1")}, vals, "from=%x", from)
+	}
+}
+
 // TestRangeRwTxInterleavedWrite verifies that Range iterators remain correct
 // when writes are interleaved with Next() calls on a read-write transaction.
 // Without cursor.Current()-based iteration, the stored raw MDBX nextK pointer
@@ -1498,4 +1509,32 @@ func TestCursorUnknownTable(t *testing.T) {
 	defer tx.Rollback()
 	_, err = tx.Cursor("NoSuchTable")
 	require.Error(t, err)
+}
+
+func TestClearTableUnknownNameKeepsGC(t *testing.T) {
+	db := BaseCaseDB(t)
+	ctx := t.Context()
+	val := make([]byte, 1024)
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		for i := range uint64(1000) {
+			if err := tx.Put(kv.Sequence, binary.BigEndian.AppendUint64(nil, i), val); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error { return tx.ClearTable(kv.Sequence) }))
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	gcBefore, err := tx.(*mdbx.MdbxTx).BucketStat("gc")
+	require.NoError(t, err)
+	require.NotZero(t, gcBefore.Entries)
+
+	require.ErrorContains(t, tx.ClearTable("NoSuchTable"), "table NoSuchTable not found")
+
+	gcAfter, err := tx.(*mdbx.MdbxTx).BucketStat("gc")
+	require.NoError(t, err)
+	require.Equal(t, gcBefore.Entries, gcAfter.Entries)
 }
