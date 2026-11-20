@@ -36,6 +36,7 @@ const (
 // so the encoding runs once however many subscribers there are.
 type Shared[T any] struct {
 	Value T
+	heads *blockHeads
 	once  sync.Once
 	enc   []byte
 	err   error
@@ -46,6 +47,9 @@ func (s *Shared[T]) Encode(encode func(T) ([]byte, error)) ([]byte, error) {
 	s.once.Do(func() { s.enc, s.err = encode(s.Value) })
 	return s.enc, s.err
 }
+
+// Written tells that the event was written to one websocket subscriber.
+func (s *Shared[T]) Written() { s.heads.Written() }
 
 // a simple interface for subscriptions for rpc helper
 type Sub[T any] interface {

@@ -105,6 +105,7 @@ type Filters struct {
 	pendingReceiptsUpdate atomic.Bool
 	onNewSnapshot         func()
 
+	heads              headBarrier
 	logsStores         *concurrent.SyncMap[LogsSubID, types.Logs]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
@@ -1021,8 +1022,13 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 
 	ff.invalidateStalePendingBlock(&header)
 
-	ev := &Shared[*types.Header]{Value: &header}
+	bh := ff.heads.get(header.Number.Uint64())
+	defer bh.Written()
+	ev := &Shared[*types.Header]{Value: &header, heads: bh}
 	return ff.headsSubs.Range(func(k HeadsSubID, v Sub[*Shared[*types.Header]]) error {
+		if v.Protocol() == ProtocolWS {
+			bh.pending.Add(1)
+		}
 		v.Send(ev)
 		return nil
 	})
@@ -1084,6 +1090,9 @@ func (ff *Filters) consumeInProcessLogs(ctx context.Context, ch <-chan []*notifi
 		case <-ctx.Done():
 			return
 		case logs := <-ch:
+			if len(logs) > 0 {
+				ff.heads.wait(ctx, uint64(logs[0].BlockNumber))
+			}
 			for _, n := range logs {
 				ff.logsSubs.distributeNativeLog(inProcessLog(n))
 			}

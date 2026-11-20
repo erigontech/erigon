@@ -185,6 +185,7 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 				log.Warn("[rpc] error while notifying subscription", "err", err)
 			}
 		}
+		var written []T
 		for {
 			select {
 			case item, ok := <-ch:
@@ -192,12 +193,21 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 					log.Warn(closedWarn)
 					return
 				}
+				written = written[:0]
 				err := rpc.CoalesceNotifications(notifier, func() {
+					written = append(written, item)
 					notify(emit, item)
 					for range len(ch) {
-						notify(emit, <-ch)
+						next := <-ch
+						written = append(written, next)
+						notify(emit, next)
 					}
 				})
+				for _, w := range written {
+					if w, ok := any(w).(interface{ Written() }); ok {
+						w.Written()
+					}
+				}
 				if err != nil {
 					log.Warn("[rpc] notification batch write failed, connection closed", "err", err)
 				}
