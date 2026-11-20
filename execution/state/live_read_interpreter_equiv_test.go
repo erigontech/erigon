@@ -76,6 +76,10 @@ func TestLiveReadMatchesInterpreter(t *testing.T) {
 			vm.WriteNonce(addr, Version{TxIndex: 1}, 1, true)
 			writeFor(vm, addr, CodeHashPath, accounts.NilKey, Version{TxIndex: 1}, code, true)
 		}},
+		{"self-destruct over a balance credited below it", func() *accountStateReader { return newAccountStateReader() }, func(vm *VersionMap, addr accounts.Address) {
+			vm.WriteBalance(addr, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+			vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+		}},
 		{"bare self-destruct over a committed account", func() *accountStateReader {
 			r := newAccountStateReader()
 			a := accounts.NewAccount()

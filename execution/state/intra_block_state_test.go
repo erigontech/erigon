@@ -1873,14 +1873,10 @@ func TestWriteFlushedToMatchesFinalizeTxPreservedBalance(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(50), got.accounts[c].Balance)
 }
 
-// createClearingWriter records CreateContract and clears the account's storage, as Writer does.
-type createClearingWriter struct {
-	*finalStateWriter
-	created map[accounts.Address]bool
-}
+// createClearingWriter clears the account's storage on CreateContract, as Writer does.
+type createClearingWriter struct{ *finalStateWriter }
 
 func (w createClearingWriter) CreateContract(address accounts.Address) error {
-	w.created[address] = true
 	delete(w.storage, address)
 	return nil
 }
@@ -1889,12 +1885,18 @@ func (w createClearingWriter) CreateContract(address accounts.Address) error {
 func TestWriteFlushedToMatchesFinalizeTxPreservedBalanceClearsStorage(t *testing.T) {
 	t.Parallel()
 	c := accounts.InternAddress(common.Address{3})
+	slot := accounts.InternKey(common.Hash{1})
 	withCode := acctBal(50)
 	withCode.CodeHash = accounts.InternCodeHash(common.Hash{9})
-	reader := &fakeBaseReader{accts: map[accounts.Address]*accounts.Account{c: withCode}}
+	reader := &fakeBaseReader{
+		accts:   map[accounts.Address]*accounts.Account{c: withCode},
+		storage: map[accounts.Address]map[accounts.StorageKey]uint256.Int{c: {slot: *uint256.NewInt(7)}},
+	}
 	rules := &chain.Rules{IsSpuriousDragon: true, IsByzantium: true, IsAmsterdam: true}
 	newWriter := func() createClearingWriter {
-		return createClearingWriter{finalStateWriter: newFinalStateWriter(), created: map[accounts.Address]bool{}}
+		w := createClearingWriter{newFinalStateWriter()}
+		w.storage[c] = map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(7)} // the slot the tx never touches
+		return w
 	}
 
 	materialized := New(reader)
@@ -1916,8 +1918,8 @@ func TestWriteFlushedToMatchesFinalizeTxPreservedBalanceClearsStorage(t *testing
 	got := newWriter()
 	require.NoError(t, versioned.WriteFlushedTo(writes, got))
 
-	require.True(t, want.created[c], "FinalizeTx clears the destroyed storage")
-	require.Equal(t, want.created, got.created)
+	require.NotContains(t, want.storage, c, "FinalizeTx clears the untouched slot")
+	require.Equal(t, want.storage, got.storage)
 	require.Equal(t, want.accounts, got.accounts)
 }
 
