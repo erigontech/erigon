@@ -168,7 +168,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, ibs, err1 := GenesisToBlock(genesis, dirs, logger)
+		block, ibs, err1 := GenesisToBlock(genesis)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -339,7 +339,7 @@ func headTimestamp(tx kv.Tx, hash common.Hash, number uint64, chainName string, 
 }
 
 func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, error) {
-	block, statedb, err := GenesisToBlock(g, dirs, logger)
+	block, statedb, err := GenesisToBlock(g)
 	if err != nil {
 		return nil, err
 	}
@@ -425,10 +425,7 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 // GenesisToBlock creates the genesis block from a genesis specification, computing its
 // state root from the genesis allocation alone — block 0 has no prior state, so the
 // root follows from the version map with no database.
-func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
-	if dirs.SnapDomain == "" {
-		panic("empty `dirs` variable")
-	}
+func GenesisToBlock(g *types.Genesis) (*types.Block, *state.IntraBlockState, error) {
 	_ = g.Alloc //nil-check
 
 	head, withdrawals := GenesisWithoutStateToBlock(g)
@@ -509,8 +506,12 @@ func GenesisState(g *types.Genesis, head *types.Header) (*state.IntraBlockState,
 		if err != nil {
 			return nil, nil, err
 		}
+		storage := account.Storage
+		if len(account.Constructor) > 0 {
+			storage = nil // the constructor's CreateAccount wipes the alloc storage
+		}
 		var slotVal uint256.Int
-		for key, value := range account.Storage {
+		for key, value := range storage {
 			slotVal.SetBytes(value[:])
 			err = statedb.SetState(address, accounts.InternKey(key), slotVal)
 			if err != nil {

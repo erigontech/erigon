@@ -88,7 +88,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	block, ibs, err := genesiswrite.GenesisToBlock(chainspec.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, ibs, err := genesiswrite.GenesisToBlock(chainspec.MainnetGenesisBlock())
 	require.NoError(err)
 	ibs.Close()
 
@@ -104,7 +104,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 		require.NoError(err)
 		require.False(spec.IsEmpty())
 
-		block, ibs, err = genesiswrite.GenesisToBlock(spec.Genesis, datadir.New(t.TempDir()), log.Root())
+		block, ibs, err = genesiswrite.GenesisToBlock(spec.Genesis)
 		require.NoError(err)
 		ibs.Close()
 
@@ -825,7 +825,7 @@ func TestGenesisAllocWithoutBalanceUsesZero(t *testing.T) {
 		},
 	}
 
-	_, ibs, err := genesiswrite.GenesisToBlock(genSpec, datadir.New(t.TempDir()), log.Root())
+	_, ibs, err := genesiswrite.GenesisToBlock(genSpec)
 	require.NoError(t, err)
 	defer ibs.Close()
 
@@ -1098,7 +1098,7 @@ func TestGenesisRootMatchesAppliedCommitment(t *testing.T) {
 			Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x0b")},
 		}},
 	}
-	want, ibs, err := genesiswrite.GenesisToBlock(genSpec, datadir.New(t.TempDir()), logger)
+	want, ibs, err := genesiswrite.GenesisToBlock(genSpec)
 	require.NoError(t, err)
 	ibs.Close()
 
@@ -1118,4 +1118,26 @@ func TestGenesisRootMatchesAppliedCommitment(t *testing.T) {
 	root, err := sd.ComputeCommitment(ctx, tx, true, 0, 1, "genesis", nil)
 	require.NoError(t, err)
 	require.Equal(t, want.Root(), common.BytesToHash(root))
+}
+
+// A constructor deploys over a fresh account, so storage listed next to it in the alloc
+// does not reach the genesis state.
+func TestGenesisConstructorDropsAllocStorage(t *testing.T) {
+	t.Parallel()
+	addr := common.HexToAddress("0x00000000000000000000000000000000c0ffee03")
+	root := func(storage map[common.Hash]common.Hash) common.Hash {
+		genSpec := &types.Genesis{
+			Config: chain.AllProtocolChanges,
+			Alloc: types.GenesisAlloc{addr: {
+				Balance:     big.NewInt(5),
+				Constructor: []byte{0x00}, // STOP
+				Storage:     storage,
+			}},
+		}
+		block, ibs, err := genesiswrite.GenesisToBlock(genSpec)
+		require.NoError(t, err)
+		ibs.Close()
+		return block.Root()
+	}
+	require.Equal(t, root(nil), root(map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x0b")}))
 }
