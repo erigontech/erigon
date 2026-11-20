@@ -318,14 +318,21 @@ func decodeFixtures(fname string, fn func(name string, raw json.RawMessage) erro
 	}
 	defer f.Close()
 	dec := json.NewDecoder(f)
-	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+	if tok, err := dec.Token(); err != nil {
+		return err
+	} else if tok != json.Delim('{') {
 		return errors.New("not a JSON object of fixtures")
 	}
+	seen := make(map[string]struct{})
 	for dec.More() {
 		tok, err := dec.Token()
 		if err != nil {
 			return err
 		}
+		if _, ok := seen[tok.(string)]; ok {
+			return fmt.Errorf("duplicate fixture %s", tok)
+		}
+		seen[tok.(string)] = struct{}{}
 		var raw json.RawMessage
 		if err := dec.Decode(&raw); err != nil {
 			return err
