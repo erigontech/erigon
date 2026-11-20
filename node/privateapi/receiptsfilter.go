@@ -282,14 +282,15 @@ func (a *ReceiptsFilterAggregator) receiptNotificationToProto(rn *notifications.
 
 	// The RPC side has neither the transaction nor the chain config the fees are derived from.
 	if rn.Tx != nil && rn.Header != nil {
-		blobPrice := a.blobGasPrice(rn.Tx, rn.Header)
-		protoReceipt.EffectiveGasPrice = gointerfaces.ConvertUint256IntToH256(ethutils.ReceiptGasPrice(rn.Tx, rn.Receipt.GasUsed, rn.Header.BaseFee, blobPrice))
+		var blobPrice *uint256.Int
 		if numBlobs := len(rn.Tx.GetBlobHashes()); numBlobs > 0 {
+			blobPrice = a.blobGasPrice(rn.Tx, rn.Header)
 			protoReceipt.BlobGasUsed = misc.GetBlobGasUsed(numBlobs)
 			if blobPrice != nil {
 				protoReceipt.BlobGasPrice = gointerfaces.ConvertUint256IntToH256(blobPrice)
 			}
 		}
+		protoReceipt.EffectiveGasPrice = gointerfaces.ConvertUint256IntToH256(ethutils.ReceiptGasPrice(rn.Tx, receipt.GasUsed, rn.Header.BaseFee, blobPrice))
 	}
 
 	return protoReceipt
