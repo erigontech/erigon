@@ -523,6 +523,16 @@ func GenesisState(g *types.Genesis, head *types.Header) (*state.IntraBlockState,
 			if _, err := protocol.SysCreate(address, account.Constructor, g.Config, statedb, head); err != nil {
 				return nil, nil, err
 			}
+			// Genesis finalizes without EIP-8246, so a constructor's SELFDESTRUCT deletes the account.
+			destructed, err := statedb.HasSelfdestructed(address)
+			if err != nil {
+				return nil, nil, err
+			}
+			if destructed {
+				if _, err := statedb.Selfdestruct(address, false); err != nil {
+					return nil, nil, err
+				}
+			}
 		}
 
 		if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
