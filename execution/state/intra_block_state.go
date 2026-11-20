@@ -461,7 +461,10 @@ func (ibs *IntraBlockState) resetForPool() bool {
 // nor a block access list is built from, such as eth_call. CreateAccount's
 // balance read serves both, so skipping it needs both to be absent. Reset
 // clears it.
-func (ibs *IntraBlockState) SetNoConflictDetection() { ibs.noConflictDetection = true }
+func (ibs *IntraBlockState) SetNoConflictDetection() {
+	ibs.noConflictDetection = true
+	ibs.versionedReads.noRecord = true
+}
 
 func (ibs *IntraBlockState) SetCodeByHash(c CodeByHash) { ibs.codeByHash = c }
 
@@ -3825,6 +3828,7 @@ func (ibs *IntraBlockState) VersionedReads() ReadSet {
 
 func (ibs *IntraBlockState) ResetVersionedIO() {
 	ibs.versionedReads = ReadSet{}
+	ibs.versionedReads.noRecord = ibs.noConflictDetection
 	ibs.versionedWrites.recycle()
 	ibs.dep = UnknownDep
 	ibs.recordAccess = false
@@ -3834,6 +3838,7 @@ func (ibs *IntraBlockState) ResetVersionedIO() {
 // ResetVersionedReads clears tracked versioned reads without affecting writes.
 func (ibs *IntraBlockState) ResetVersionedReads() {
 	ibs.versionedReads = ReadSet{}
+	ibs.versionedReads.noRecord = ibs.noConflictDetection
 }
 
 // VersionedWrites returns a frozen typed snapshot of this tx's recorded writes.

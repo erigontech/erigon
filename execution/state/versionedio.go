@@ -129,6 +129,8 @@ type ReadSet struct {
 	// non-revertable "real EVM access" bit) on the read side, so the access set
 	// travels with the read-set rather than as a separate IntraBlockState cache.
 	access AccessSet
+
+	noRecord bool // a single call: no validation reads this set
 }
 
 func (s *ReadSet) entries() int {
@@ -194,42 +196,72 @@ func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.A
 }
 
 func (s *ReadSet) SetAddress(addr accounts.Address, tr VersionedRead[AccountView]) {
+	if s.noRecord {
+		return
+	}
 	readSetPut(&s.address, addr, tr)
 }
 
 func (s *ReadSet) SetBalance(addr accounts.Address, tr VersionedRead[uint256.Int]) {
+	if s.noRecord {
+		return
+	}
 	readSetPut(&s.balance, addr, tr)
 }
 
 func (s *ReadSet) SetNonce(addr accounts.Address, tr VersionedRead[uint64]) {
+	if s.noRecord {
+		return
+	}
 	readSetPut(&s.nonce, addr, tr)
 }
 
 func (s *ReadSet) SetIncarnation(addr accounts.Address, tr VersionedRead[uint64]) {
+	if s.noRecord {
+		return
+	}
 	readSetPut(&s.incarnation, addr, tr)
 }
 
 func (s *ReadSet) SetSelfDestruct(addr accounts.Address, tr VersionedRead[bool]) {
+	if s.noRecord {
+		return
+	}
 	readSetPut(&s.selfDestruct, addr, tr)
 }
 
 func (s *ReadSet) SetCreateContract(addr accounts.Address, tr VersionedRead[bool]) {
+	if s.noRecord {
+		return
+	}
 	readSetPut(&s.createContract, addr, tr)
 }
 
 func (s *ReadSet) SetCode(addr accounts.Address, tr VersionedRead[accounts.Code]) {
+	if s.noRecord {
+		return
+	}
 	readSetPut(&s.code, addr, tr)
 }
 
 func (s *ReadSet) SetCodeHash(addr accounts.Address, tr VersionedRead[accounts.CodeHash]) {
+	if s.noRecord {
+		return
+	}
 	readSetPut(&s.codeHash, addr, tr)
 }
 
 func (s *ReadSet) SetCodeSize(addr accounts.Address, tr VersionedRead[int]) {
+	if s.noRecord {
+		return
+	}
 	readSetPut(&s.codeSize, addr, tr)
 }
 
 func (s *ReadSet) SetStorage(addr accounts.Address, key accounts.StorageKey, tr VersionedRead[uint256.Int]) {
+	if s.noRecord {
+		return
+	}
 	if s.storage == nil {
 		s.storage = make(map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int])
 	}
