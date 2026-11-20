@@ -25,10 +25,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -310,26 +310,17 @@ type fixture interface {
 // newTest. Its error names a fixture that cannot be decoded, which also gets a
 // failed result, or the file itself.
 func runFixtures(ctx *cli.Command, fname string, filter testFilter, reportPath func(ethconfig.BlockExecutionPath), newTest func() (fixture, *testutil.BlockTest)) ([]testResult, error) {
-	src, err := os.ReadFile(fname)
-	if err != nil {
-		return nil, err
-	}
-	names, fixtures, err := splitFixtures(src)
-	if err != nil {
-		return nil, err
-	}
-
-	results := make([]testResult, 0, len(names))
+	var results []testResult
 	var unreadable []error
-	for _, name := range names {
+	err := decodeFixtures(fname, func(name string, raw json.RawMessage, _ int64) error {
 		if !filter.includeCase(fname, name) {
-			continue
+			return nil
 		}
 		test, bt := newTest()
-		if err := json.Unmarshal(fixtures[name], test); err != nil {
+		if err := json.Unmarshal(raw, test); err != nil {
 			results = append(results, unreadableFixture(name, err))
 			unreadable = append(unreadable, fmt.Errorf("fixture %s: %w", name, err))
-			continue
+			return nil
 		}
 		if ctx.Bool(BALSequentialFlag.Name) {
 			bt.ExecWorkers = 1
@@ -343,22 +334,13 @@ func runFixtures(ctx *cli.Command, fname string, filter testFilter, reportPath f
 		}
 		result.Rejections = bt.Rejections
 		results = append(results, result)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-
+	slices.SortFunc(results, func(a, b testResult) int { return strings.Compare(a.Name, b.Name) })
 	return results, errors.Join(unreadable...)
-}
-
-// splitFixtures splits a fixture file into its fixtures and their sorted
-// names, so a fixture that cannot be decoded fails alone.
-func splitFixtures(src []byte) ([]string, map[string]json.RawMessage, error) {
-	var fixtures map[string]json.RawMessage
-	if err := json.Unmarshal(src, &fixtures); err != nil {
-		return nil, nil, err
-	}
-	if fixtures == nil {
-		return nil, nil, errors.New("not a JSON object of fixtures")
-	}
-	return slices.Sorted(maps.Keys(fixtures)), fixtures, nil
 }
 
 func unreadableFixture(name string, err error) testResult {
