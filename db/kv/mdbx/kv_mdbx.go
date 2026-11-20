@@ -2405,7 +2405,7 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 	// to find LAST dup with given prefix (descending):
 	nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
 	if !ok {
-		_, firstV, err = s.c.PrevDup()
+		firstV, err = s.c.LastDup()
 		if err != nil {
 			return err
 		}
