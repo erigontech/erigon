@@ -77,23 +77,23 @@ func TestTracingRejectsPendingTag(t *testing.T) {
 	})
 
 	t.Run("trace_block", func(t *testing.T) {
-		_, err := traceAPI.Block(ctx, rpc.PendingBlockNumber, nil, nil)
+		_, err := traceAPI.Block(ctx, rpc.PendingBlockNumber, nil)
 		requirePendingRejected(t, err)
 	})
 
 	t.Run("trace_replayBlockTransactions", func(t *testing.T) {
-		_, err := traceAPI.ReplayBlockTransactions(ctx, pendingNrOrHash, []string{TraceTypeTrace}, nil, nil)
+		_, err := traceAPI.ReplayBlockTransactions(ctx, pendingNrOrHash, []string{TraceTypeTrace}, nil)
 		requirePendingRejected(t, err)
 	})
 
 	pending := rpc.PendingBlockNumber
 	t.Run("trace_filter fromBlock", func(t *testing.T) {
-		err := traceAPI.Filter(ctx, TraceFilterRequest{FromBlock: &pending}, nil, nil, jsonstream.New(io.Discard))
+		err := traceAPI.Filter(ctx, TraceFilterRequest{FromBlock: &pending}, nil, jsonstream.New(io.Discard))
 		requirePendingRejected(t, err)
 	})
 
 	t.Run("trace_filter toBlock", func(t *testing.T) {
-		err := traceAPI.Filter(ctx, TraceFilterRequest{ToBlock: &pending}, nil, nil, jsonstream.New(io.Discard))
+		err := traceAPI.Filter(ctx, TraceFilterRequest{ToBlock: &pending}, nil, jsonstream.New(io.Discard))
 		requirePendingRejected(t, err)
 	})
 }

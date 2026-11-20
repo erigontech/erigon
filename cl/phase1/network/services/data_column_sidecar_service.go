@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	gossipmgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
+	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -32,10 +33,14 @@ const (
 	pendingGloasSidecarTick = 500 * time.Millisecond
 	// maxPendingGloasSidecars caps the number of sidecars queued for later processing
 	maxPendingGloasSidecars = 4096
+	// maxPendingGloasVerificationsPerPass bounds the KZG work of one retry pass: the columns of one mainnet block.
+	maxPendingGloasVerificationsPerPass = 128
 )
 
 var (
 	errGloasSidecarBlockUnavailable = fmt.Errorf("%w: data column sidecar block unavailable", ErrIgnore)
+	errInvalidGloasSidecar          = errors.New("data column sidecar proven invalid against its block")
+	errGloasVerificationBudget      = errors.New("pending data column sidecar verification budget exhausted")
 
 	verifyDataColumnSidecarInclusionProof           = das.VerifyDataColumnSidecarInclusionProof
 	verifyDataColumnSidecarKZGProofs                = das.VerifyDataColumnSidecarKZGProofs
@@ -44,6 +49,52 @@ var (
 	verifyDataColumnSidecarKZGProofsWithCommitments = das.VerifyDataColumnSidecarKZGProofsWithCommitments
 	computeSubnetForDataColumnSidecar               = das.ComputeSubnetForDataColumnSidecar
 )
+
+// pendingGloasSidecar is a queued candidate and the peer that forwarded it. An empty peer is exempt from the quota.
+type pendingGloasSidecar struct {
+	sidecar *cltypes.DataColumnSidecar
+	source  pendingSidecarSource
+}
+
+type pendingSidecarSource struct {
+	peer   peer.ID
+	subnet uint64
+}
+
+func (s pendingSidecarSource) known() bool { return s.peer != "" }
+
+type pendingSidecarQuota struct {
+	mu    sync.Mutex
+	limit int
+	used  map[pendingSidecarSource]int
+}
+
+func (q *pendingSidecarQuota) acquire(source pendingSidecarSource) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.used[source] >= q.limit {
+		return false
+	}
+	q.used[source]++
+	return true
+}
+
+func (q *pendingSidecarQuota) release(source pendingSidecarSource) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.used[source] <= 1 {
+		delete(q.used, source)
+		return
+	}
+	q.used[source]--
+}
+
+// pendingGloasSidecarQuota is the number of slots a candidate can stay queued, plus one for a candidate that arrives
+// as the previous one of the same source expires.
+func pendingGloasSidecarQuota(cfg *clparams.BeaconChainConfig) int {
+	slot := time.Duration(max(cfg.SecondsPerSlot, 1)) * time.Second
+	return int((pendingGloasSidecarExpiry+slot-1)/slot) + 1
+}
 
 type dataColumnSidecarService struct {
 	cfg                  *clparams.BeaconChainConfig
@@ -59,7 +110,11 @@ type dataColumnSidecarService struct {
 
 	// Key by the full sidecar root so an unverified candidate cannot suppress
 	// another candidate for the same block and column.
-	pendingGloasSidecars *pendingJobQueue[common.Hash, *cltypes.DataColumnSidecar]
+	pendingGloasSidecars *pendingJobQueue[common.Hash, pendingGloasSidecar]
+	pendingQuota         pendingSidecarQuota
+	// verificationsLeft and bannedInPass are only used by the queue's processing goroutine.
+	verificationsLeft int
+	bannedInPass      map[peer.ID]struct{}
 }
 
 // seenSidecarKey is used for Fulu (pre-GLOAS) seen tracking
@@ -142,13 +197,18 @@ func NewDataColumnSidecarService(
 		columnSidecarStorage: columnSidecarStorage,
 		emitters:             emitters,
 		gossipManager:        gossipManager,
+		pendingQuota: pendingSidecarQuota{
+			limit: pendingGloasSidecarQuota(cfg),
+			used:  make(map[pendingSidecarSource]int),
+		},
+		bannedInPass: make(map[peer.ID]struct{}),
 	}
 	s.expectedProposer = newExpectedProposers(ctx, cfg, forkChoice, syncDataManager).get
 	s.pendingGloasSidecars = s.newPendingGloasSidecarQueue(ctx)
 	return s
 }
 
-func (s *dataColumnSidecarService) newPendingGloasSidecarQueue(ctx context.Context) *pendingJobQueue[common.Hash, *cltypes.DataColumnSidecar] {
+func (s *dataColumnSidecarService) newPendingGloasSidecarQueue(ctx context.Context) *pendingJobQueue[common.Hash, pendingGloasSidecar] {
 	return newPendingJobQueue(ctx, pendingJobQueueOptions{
 		name:          "gloas_data_column_sidecar",
 		capacity:      maxPendingGloasSidecars,
@@ -157,9 +217,21 @@ func (s *dataColumnSidecarService) newPendingGloasSidecarQueue(ctx context.Conte
 	},
 		s.tryProcessPendingGloasSidecar,
 		nil,
-		func(_ common.Hash, sidecar *cltypes.DataColumnSidecar) {
+		func(_ common.Hash, pending pendingGloasSidecar) {
+			sidecar := pending.sidecar
 			log.Debug("[dataColumnSidecarService] expired pending GLOAS sidecar",
 				"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
+		},
+		func(q *pendingJobQueue[common.Hash, pendingGloasSidecar]) {
+			q.beforePass = func() {
+				s.verificationsLeft = maxPendingGloasVerificationsPerPass
+				clear(s.bannedInPass)
+			}
+			q.onRemoved = func(_ common.Hash, pending pendingGloasSidecar) {
+				if pending.source.known() {
+					s.pendingQuota.release(pending.source)
+				}
+			}
 		})
 }
 
@@ -190,9 +262,9 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 
 	// Version-aware processing
 	if msg.Version() >= clparams.GloasVersion {
-		err := s.processGloasMessage(ctx, subnet, msg)
+		err := s.processGloasMessage(ctx, subnet, msg, false)
 		if errors.Is(err, errGloasSidecarBlockUnavailable) {
-			s.scheduleSidecarForLaterProcessing(msg)
+			s.scheduleSidecarForLaterProcessing(ctx, msg)
 		}
 		return err
 	}
@@ -429,7 +501,7 @@ func (s *dataColumnSidecarService) claimSeen(sidecar *cltypes.DataColumnSidecar)
 
 // processGloasMessage handles GLOAS data column sidecar validation
 // Reference: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/p2p-interface.md
-func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subnet *uint64, msg *cltypes.DataColumnSidecar) error {
+func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subnet *uint64, msg *cltypes.DataColumnSidecar, deferred bool) error {
 	slot := msg.Slot
 	if msg.Version() != s.cfg.GetCurrentStateVersion(slot/s.cfg.SlotsPerEpoch) {
 		return fmt.Errorf("%w: data column sidecar schema does not match slot", ErrIgnore)
@@ -466,6 +538,10 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	// Only checks recent blocks in forkChoice memory - older blocks don't need sidecar validation.
 	block, ok, notImportable := s.lookupBlock(slot, blockRoot)
 	if !ok {
+		// [REJECT] The block for the sidecar passes validation.
+		if s.forkChoice.IsBlockInvalid(blockRoot) {
+			return fmt.Errorf("%w: block %v failed validation", errInvalidGloasSidecar, blockRoot)
+		}
 		if !store || notImportable {
 			return ErrIgnore
 		}
@@ -474,7 +550,7 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 
 	// [REJECT] The sidecar's slot matches the slot of the block
 	if slot != block.Block.Slot {
-		return fmt.Errorf("sidecar slot %d does not match block slot %d", slot, block.Block.Slot)
+		return fmt.Errorf("%w: sidecar slot %d does not match block slot %d", errInvalidGloasSidecar, slot, block.Block.Slot)
 	}
 
 	// Get kzg_commitments from bid = block.body.signed_execution_payload_bid.message
@@ -487,17 +563,24 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	blobParameters := s.cfg.GetBlobParameters(slot / s.cfg.SlotsPerEpoch)
 	if msg.Column.Len() > int(blobParameters.MaxBlobsPerBlock) {
 		log.Warn("invalid column sidecar length", "blockRoot", blockRoot, "columnIndex", msg.Index, "columnLen", msg.Column.Len())
-		return errors.New("invalid column sidecar length")
+		return fmt.Errorf("%w: invalid column sidecar length", errInvalidGloasSidecar)
 	}
 
 	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar, bid.blob_kzg_commitments)
 	if !verifyDataColumnSidecarWithCommitments(msg, kzgCommitments) {
-		return errors.New("invalid data column sidecar")
+		return fmt.Errorf("%w: invalid data column sidecar", errInvalidGloasSidecar)
+	}
+
+	if deferred {
+		if s.verificationsLeft <= 0 {
+			return errGloasVerificationBudget
+		}
+		s.verificationsLeft--
 	}
 
 	// [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar, bid.blob_kzg_commitments)
 	if !verifyDataColumnSidecarKZGProofsWithCommitments(msg, kzgCommitments) {
-		return errors.New("invalid kzg proofs for data column sidecar")
+		return fmt.Errorf("%w: invalid kzg proofs for data column sidecar", errInvalidGloasSidecar)
 	}
 
 	// Another writer may have claimed the key during validation.
@@ -589,14 +672,29 @@ func (s *dataColumnSidecarService) blockNotImportable(slot uint64) bool {
 }
 
 // scheduleSidecarForLaterProcessing queues a GLOAS sidecar until its block arrives.
-func (s *dataColumnSidecarService) scheduleSidecarForLaterProcessing(sidecar *cltypes.DataColumnSidecar) {
+func (s *dataColumnSidecarService) scheduleSidecarForLaterProcessing(ctx context.Context, sidecar *cltypes.DataColumnSidecar) {
 	// Bound hashing and retained data before the block's commitments are available.
 	// Failed admission keeps the missing-block IGNORE verdict from gossip validation.
 	blobParameters := s.cfg.GetBlobParameters(sidecar.Slot / s.cfg.SlotsPerEpoch)
 	if !verifyDataColumnSidecar(sidecar) || sidecar.Column.Len() > int(blobParameters.MaxBlobsPerBlock) {
 		return
 	}
-	err := s.pendingGloasSidecars.enqueueLazy(sidecar, func() (common.Hash, error) { return sidecar.HashSSZ() })
+	pending := pendingGloasSidecar{sidecar: sidecar}
+	if forwarder, ok := serviceinterface.GossipPeer(ctx); ok {
+		pending.source = pendingSidecarSource{peer: forwarder, subnet: computeSubnetForDataColumnSidecar(sidecar.Index)}
+		if !s.pendingQuota.acquire(pending.source) {
+			log.Trace("[dataColumnSidecarService] pending GLOAS sidecar peer quota reached, dropping",
+				"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index, "peer", forwarder)
+			return
+		}
+	}
+	inserted := false
+	defer func() {
+		if !inserted && pending.source.known() {
+			s.pendingQuota.release(pending.source)
+		}
+	}()
+	inserted, err := s.pendingGloasSidecars.enqueueLazy(pending, func() (common.Hash, error) { return sidecar.HashSSZ() })
 	if errors.Is(err, errPendingJobQueueFull) {
 		log.Trace("[dataColumnSidecarService] pending GLOAS sidecars at capacity, dropping",
 			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
@@ -609,9 +707,10 @@ func (s *dataColumnSidecarService) scheduleSidecarForLaterProcessing(sidecar *cl
 func (s *dataColumnSidecarService) tryProcessPendingGloasSidecar(
 	ctx context.Context,
 	_ common.Hash,
-	sidecar *cltypes.DataColumnSidecar,
+	pending pendingGloasSidecar,
 ) pendingJobDecision {
-	if _, ok, notImportable := s.lookupBlock(sidecar.Slot, sidecar.BeaconBlockRoot); !ok {
+	sidecar := pending.sidecar
+	if _, ok, notImportable := s.lookupBlock(sidecar.Slot, sidecar.BeaconBlockRoot); !ok && !s.forkChoice.IsBlockInvalid(sidecar.BeaconBlockRoot) {
 		if notImportable {
 			log.Debug("[dataColumnSidecarService] pending GLOAS sidecar's block can no longer be imported",
 				"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
@@ -620,9 +719,18 @@ func (s *dataColumnSidecarService) tryProcessPendingGloasSidecar(
 		return pendingJobKeep
 	}
 	// Subnet validation already ran before queue admission.
-	if err := s.processGloasMessage(ctx, nil, sidecar); err != nil {
-		if errors.Is(err, errGloasSidecarBlockUnavailable) {
+	if err := s.processGloasMessage(ctx, nil, sidecar, true); err != nil {
+		if errors.Is(err, errGloasSidecarBlockUnavailable) || errors.Is(err, errGloasVerificationBudget) {
 			return pendingJobKeep
+		}
+		if errors.Is(err, errInvalidGloasSidecar) && pending.source.known() {
+			if _, banned := s.bannedInPass[pending.source.peer]; !banned {
+				s.bannedInPass[pending.source.peer] = struct{}{}
+				s.gossipManager.BanPeer(pending.source.peer)
+				log.Debug("[dataColumnSidecarService] banned peer for an invalid pending GLOAS sidecar",
+					"peer", pending.source.peer, "slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index, "err", err)
+			}
+			return pendingJobRemove
 		}
 		if !errors.Is(err, ErrIgnore) {
 			log.Trace("[dataColumnSidecarService] failed to process pending GLOAS sidecar",

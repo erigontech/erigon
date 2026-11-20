@@ -25,8 +25,9 @@ import (
 )
 
 // FrameContext shares transaction-wide approvals and gas accounting across frames
-// and their nested calls. Approvals and state-gas charges follow the state journal:
-// call, frame and atomic-batch rollbacks undo them, while execution gas remains charged.
+// and nested calls. State rollback, including POST_TX body rollback, restores
+// journaled approvals and state-gas charges to the chosen snapshot. Execution gas
+// remains charged.
 type FrameContext struct {
 	Transaction    *types.FrameTransaction
 	Receipts       []types.FrameReceipt
@@ -35,10 +36,12 @@ type FrameContext struct {
 	SenderApproved bool
 	MaxCost        uint256.Int
 	LegacyNonce    uint64 // Sender's account nonce before any frame executes, for TXPARAM.
-	GasBailout     bool
 	journal        *journal
 	undo           journalExtra
 	storageOwners  map[frameStorageSlot]uint8 // Charging frame index plus one; zero means no outstanding charge.
+	journalStart   int
+	logStart       int
+	trace          *TransactionTrace
 
 	// Transaction data is fixed during execution, so hash caches survive frame reverts.
 	signingHash      common.Hash
@@ -56,6 +59,7 @@ func (ibs *IntraBlockState) NewFrameContext(tx *types.FrameTransaction, maxCost 
 	ctx := &FrameContext{Transaction: tx, Receipts: make([]types.FrameReceipt, len(tx.Frames)), MaxCost: maxCost, journal: ibs.journal}
 	ctx.undo.frame = ctx
 	ctx.storageOwners = make(map[frameStorageSlot]uint8)
+	ctx.journalStart, ctx.logStart = len(ibs.journal.entries), ibs.LogCount()
 	return ctx
 }
 
@@ -81,7 +85,7 @@ func (ibs *IntraBlockState) ResetFrameTransientStorage() {
 	if len(ibs.transientStorage) == 0 {
 		return
 	}
-	ibs.journal.entries = append(ibs.journal.entries, journalEntry{kind: kindFrameTransient, extra: &journalExtra{prevTransient: ibs.transientStorage}})
+	ibs.journal.push(journalEntry{kind: kindFrameTransient, extra: &journalExtra{prevTransient: ibs.transientStorage}})
 	ibs.transientStorage = newTransientStorage()
 }
 
@@ -94,7 +98,7 @@ func (ctx *FrameContext) ChargeStateGas(amount uint64) bool {
 		return false
 	}
 	used := &ctx.Receipts[ctx.Index].GasUsed.State
-	ctx.journal.entries = append(ctx.journal.entries, journalEntry{kind: kindFrameStateGas, flags: uint8(ctx.Index), aux: *used, extra: &ctx.undo})
+	ctx.journal.push(journalEntry{kind: kindFrameStateGas, flags: uint8(ctx.Index), aux: *used, extra: &ctx.undo})
 	*used += amount
 	return true
 }
@@ -104,7 +108,7 @@ func (ctx *FrameContext) SetApproval(senderApproved bool, payer accounts.Address
 	if ctx.SenderApproved {
 		flags = 1
 	}
-	ctx.journal.entries = append(ctx.journal.entries, journalEntry{kind: kindFrameApproval, account: ctx.Payer, flags: flags, extra: &ctx.undo})
+	ctx.journal.push(journalEntry{kind: kindFrameApproval, account: ctx.Payer, flags: flags, extra: &ctx.undo})
 	ctx.SenderApproved, ctx.Payer = senderApproved, payer
 }
 
@@ -114,7 +118,7 @@ func (ctx *FrameContext) RecordStorageCharge(address accounts.Address, key accou
 
 func (ctx *FrameContext) setStorageOwner(address accounts.Address, key accounts.StorageKey, owner uint8) {
 	slot := frameStorageSlot{address, key}
-	ctx.journal.entries = append(ctx.journal.entries, journalEntry{kind: kindFrameStorageOwner, account: address, key: key, flags: ctx.storageOwners[slot], extra: &ctx.undo})
+	ctx.journal.push(journalEntry{kind: kindFrameStorageOwner, account: address, key: key, flags: ctx.storageOwners[slot], extra: &ctx.undo})
 	if owner == 0 {
 		delete(ctx.storageOwners, slot)
 	} else {
@@ -140,6 +144,6 @@ func (ctx *FrameContext) refillStateGas(index int, amount uint64) {
 	if *used < amount {
 		panic("frame state gas refill exceeds charge")
 	}
-	ctx.journal.entries = append(ctx.journal.entries, journalEntry{kind: kindFrameStateGas, flags: uint8(index), aux: *used, extra: &ctx.undo})
+	ctx.journal.push(journalEntry{kind: kindFrameStateGas, flags: uint8(index), aux: *used, extra: &ctx.undo})
 	*used -= amount
 }

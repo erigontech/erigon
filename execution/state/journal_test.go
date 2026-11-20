@@ -20,6 +20,22 @@ func TestJournalEntrySize(t *testing.T) {
 	}
 }
 
+// TestJournalGrowsByDoubling pins the growth policy: a TSTORE loop journals one
+// entry per store, and growing by append's ~1.25x would copy the entries many times.
+func TestJournalGrowsByDoubling(t *testing.T) {
+	j := &journal{dirties: make(map[accounts.Address]int)}
+	grows, last := 0, cap(j.entries)
+	for i := range 1 << 17 {
+		j.transientStorageChange(accounts.NilAddress, i, uint256.Int{})
+		if c := cap(j.entries); c != last {
+			grows, last = grows+1, c
+		}
+	}
+	if grows > 20 {
+		t.Fatalf("journal grew %d times for %d entries, want <= 20", grows, 1<<17)
+	}
+}
+
 // TestJournalDirtySymmetry pins every constructor's dirties accounting against
 // dirtied(), which revert uses to undo it. A kind the two disagree about leaves
 // the dirties refcount unbalanced — under-dirtying drops a modified account and
@@ -36,7 +52,7 @@ func TestJournalDirtySymmetry(t *testing.T) {
 	}{
 		{"createObjectChange", kindCreateObject, func(j *journal) { j.createObjectChange(addr) }},
 		{"resetObjectChange", kindResetObject, func(j *journal) { j.resetObjectChange(addr, nil, nil) }},
-		{"selfdestructChange", kindSelfdestruct, func(j *journal) { j.selfdestructChange(addr, false, val, false) }},
+		{"selfdestructChange", kindSelfdestruct, func(j *journal) { j.selfdestructChange(addr, false, false, val, false) }},
 		{"selfdestructChangeVersioned", kindSelfdestruct, func(j *journal) {
 			j.selfdestructChangeVersioned(addr, false, val, false, false, 0, false, val, false)
 		}},
@@ -53,6 +69,7 @@ func TestJournalDirtySymmetry(t *testing.T) {
 		{"touchAccount", kindTouch, func(j *journal) { j.touchAccount(addr, false, val) }},
 		{"accessListAddAccountChange", kindAccessListAddAccount, func(j *journal) { j.accessListAddAccountChange(addr) }},
 		{"accessListAddSlotChange", kindAccessListAddSlot, func(j *journal) { j.accessListAddSlotChange(addr, key) }},
+		{"accessListAddSlotOnlyChange", kindAccessListAddSlot, func(j *journal) { j.accessListAddSlotOnlyChange(addr, key) }},
 		{"transientStorageChange", kindTransientStorage, func(j *journal) { j.transientStorageChange(addr, 0, val) }},
 		{"frameApproval", kindFrameApproval, func(j *journal) {
 			ctx := (&IntraBlockState{journal: j}).NewFrameContext(&types.FrameTransaction{}, uint256.Int{})

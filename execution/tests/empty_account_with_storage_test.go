@@ -230,3 +230,46 @@ func TestCreate2OverStorageOnlyAccountInitCodeReadsOldSlotAsZero(t *testing.T) {
 		})
 	}
 }
+
+// A CREATE2 to an account with storage and a balance writes a slot that the account holds and
+// destroys the new contract in its init code. Under EIP-8246 the account keeps its balance and the
+// creation replaces its storage; before it, the destruct burns the balance and removes the account.
+// A later tx of the block reads the balance and the code hash, which tells an existing account from
+// an absent one.
+func TestCreate2DestructOverAnAccountWithStorageKeepsOnlyTheBalance(t *testing.T) {
+	keys, senders := eip161TouchKeys(t, 1)
+	initCode := program.New().Sstore(1, 7).Op(vm.ADDRESS, vm.SELFDESTRUCT).Bytes()
+	factory := common.HexToAddress("0xfac7")
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	probe := common.HexToAddress("0x9b0e")
+	probeCode := program.New().Push(target).Op(vm.BALANCE).Push(0).Op(vm.SSTORE).Push(target).Op(vm.EXTCODEHASH).Push(1).Op(vm.SSTORE).Op(vm.STOP).Bytes()
+	for _, fork := range eip161TouchForks {
+		t.Run(fork.name, func(t *testing.T) {
+			gspec := &types.Genesis{Config: fork.config, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+				senders[0]: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+				factory:    {Code: program.New().Create2(initCode, 0).Op(vm.STOP).Bytes()},
+				probe:      {Code: probeCode},
+				target:     {Balance: big.NewInt(5), Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x09")}},
+			}}
+			chainPack := generateEIP161TouchBlock(t, gspec, keys[0], func(b *blockgen.BlockGen) {
+				for _, to := range []common.Address{factory, probe} {
+					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), to, uint256.NewInt(0), 1_000_000, uint256.NewInt(10_000_000_000), nil), *types.LatestSignerForChainID(fork.config.ChainID), keys[0])
+					require.NoError(t, err)
+					b.AddTx(txn)
+				}
+			})
+			requireGeneratedBlock(t, chainPack)
+			kept := fork.config.AmsterdamTime != nil
+			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				require.Equal(t, uint256.Int{}, storageAt(t, st, target, 1), "the old slot is gone")
+				wantBalance, wantCodeHash := uint256.Int{}, uint256.Int{}
+				if kept {
+					wantBalance = *uint256.NewInt(5)
+					wantCodeHash.SetBytes(crypto.Keccak256(nil))
+				}
+				require.Equal(t, wantBalance, storageAt(t, st, probe, 0), "balance read by a later tx")
+				require.Equal(t, wantCodeHash, storageAt(t, st, probe, 1), "code hash read by a later tx")
+			})
+		})
+	}
+}
