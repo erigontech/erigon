@@ -293,9 +293,14 @@
   run: 'fork_(Amsterdam|BPO2ToAmsterdam)'
 - shard: blocktests-devnet-race-amsterdam-parallel
   workers: 12
+  max-allowed-failures: 0
+  commitment-parallel: true
+  run: 'fork_Amsterdam(-|BPO|ToBPO)'
+- shard: blocktests-devnet-race-amsterdam-to-bogota-parallel
+  workers: 12
   max-allowed-failures: 69 # Bogota transitions need EIPs 4758, 8151, 8253, 8298: https://github.com/erigontech/erigon/issues/25241
   commitment-parallel: true
-  run: 'fork_Amsterdam'
+  run: 'fork_AmsterdamToBogota'
 - shard: zkevm-witness-race
   workers: 8
   max-allowed-failures: 0
