@@ -20,6 +20,7 @@ import (
 	"context"
 	"math/rand/v2"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -73,7 +74,12 @@ func TestReceiptPipelineCancelledGivesNoDigest(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	p := newReceiptPipeline(ctx, 2)
-	cancel()
 	p.feed(genReceipts(1, 1)[0])
+	cancel()
+	select {
+	case <-p.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("pipeline goroutine still running after its context was cancelled")
+	}
 	require.Nil(t, p.join())
 }

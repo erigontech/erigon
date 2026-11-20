@@ -3507,7 +3507,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					receiptsComplete = true
 				}
 			}
-			// The post-exec validator fills receipt blooms for full blocks but skips
+			// The receipt pipeline fills receipt blooms for full blocks but skips
 			// partial ones — do it here (the suffix receipts still need blooms).
 			receipts.DeriveFields(blockReceipts, be.blockHash)
 
