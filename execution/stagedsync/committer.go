@@ -414,8 +414,8 @@ func (cc *commitmentCalculator) ownsChangeset(n uint64) bool {
 // message in the stream.
 
 type probeTxTimes struct {
-	n                          int
-	handle, touch, edge, ahead time.Duration
+	n, accounts                            int
+	handle, touch, edge, ahead, hash, base time.Duration
 }
 
 var probeTx probeTxTimes
@@ -508,7 +508,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 
 		commitStart := time.Now()
 		if logNpPhases {
-			cc.logger.Info("[np-phase] committx", "blk", r.BlockNum, "txs", probeTx.n, "npTxHandle", probeTx.handle, "npTouch", probeTx.touch, "npEdge", probeTx.edge, "npAhead", probeTx.ahead, "npQueue", time.Since(r.execEndedAt))
+			cc.logger.Info("[np-phase] committx", "blk", r.BlockNum, "txs", probeTx.n, "npTxHandle", probeTx.handle, "npTouch", probeTx.touch, "npEdge", probeTx.edge, "npAhead", probeTx.ahead, "npHash", probeTx.hash, "npBase", probeTx.base, "accounts", probeTx.accounts, "npQueue", time.Since(r.execEndedAt))
 		}
 		probeTx = probeTxTimes{}
 		switch {

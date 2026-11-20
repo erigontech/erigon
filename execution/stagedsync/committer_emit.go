@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"slices"
+	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
 
@@ -119,8 +120,13 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 		return
 	}
 	address := a.Value()
+	hashT0 := time.Now()
 	cc.touchedAccounts[a] = cc.touchHash(address[:])
+	probeTx.hash += time.Since(hashT0)
+	probeTx.accounts++
 	if base != nil {
+		baseT0 := time.Now()
+		defer func() { probeTx.base += time.Since(baseT0) }()
 		if acc, err := base.ReadAccountData(a); err == nil {
 			cc.baseAccounts[a] = acc
 		} else if cc.baseErr == nil {
