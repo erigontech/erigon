@@ -751,6 +751,37 @@ func TestCreateGas(t *testing.T) {
 	}
 }
 
+// Amsterdam raises the initcode limit, and a CREATE within it charges state gas for the new account.
+func TestCreateInitCodeLimitAmsterdam(t *testing.T) {
+	t.Parallel()
+	factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
+	create := func(t *testing.T, op vm.OpCode, size int) (mdgas.MdGas, error) {
+		code := program.New()
+		if op == vm.CREATE2 {
+			code.Push(0) // salt
+		}
+		code.Push(size).Push(0).Push(0).Op(op)
+		statedb := state.New(state.NewNoopReader())
+		defer statedb.Close()
+		require.NoError(t, statedb.SetCode(factory, code.Bytes(), tracing.CodeChangeUnspecified))
+		_, left, err := runtime.Call(factory, nil, &runtime.Config{
+			ChainConfig: chain.AllProtocolChanges,
+			GasLimit:    100_000_000,
+			State:       statedb,
+		})
+		return left, err
+	}
+	for _, op := range []vm.OpCode{vm.CREATE, vm.CREATE2} {
+		t.Run(op.String(), func(t *testing.T) {
+			created, err := create(t, op, params.MaxInitCodeSizeAmsterdam)
+			require.NoError(t, err)
+			refused, err := create(t, op, params.MaxInitCodeSizeAmsterdam+1)
+			require.ErrorIs(t, err, vm.ErrMaxInitCodeSizeExceeded)
+			require.Equal(t, uint64(params.StateGasNewAccount), refused.State-created.State)
+		})
+	}
+}
+
 // TestSystemCallZeroValueSkipsTransferChecks verifies that zero-value system
 // calls do not invoke CanTransfer or Transfer.
 func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {

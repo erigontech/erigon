@@ -927,16 +927,20 @@ run:
 			callContext.gas -= cost.Execution
 		}
 
-		// Every opcode that can expand memory has a dynamic gas cost.
+		// All ops with a dynamic memory usage also has a dynamic gas cost.
 		var memorySize uint64
 		if operation.dynamicGas != nil {
+			// calculate the new memory size and expand the memory to fit
+			// the operation
+			// Memory check needs to be done prior to evaluating the dynamic gas portion,
+			// to detect calculation overflows
 			if operation.memorySize != nil {
-				// Check for overflow and round the size up to a multiple of 32 bytes
-				// before calculating dynamic gas. Memory expands after the charge succeeds.
 				memSize, overflow := operation.memorySize(callContext)
 				if overflow {
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
 				}
+				// memory is expanded in words of 32 bytes. Gas
+				// is also calculated in words.
 				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
 				}
