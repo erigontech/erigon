@@ -36,7 +36,7 @@ import (
 
 // Fixture construction chooses individual steps without recovery planning.
 func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}) error {
-	return a.buildFilesWithPlan(ctx, db, step, finalityCtx, filesDone, fileBuildPlan{})
+	return a.buildFilesWithPlan(ctx, db, step, finalityCtx, filesDone, &fileBuildPlan{})
 }
 
 func snapshotFileIdentities(t *testing.T, dirs datadir.Dirs) map[string]os.FileInfo {
@@ -212,7 +212,7 @@ func TestAggregatorBuildDefersNewlyEnabledDomain(t *testing.T) {
 	}
 	t.Run("before_build", assertPendingData)
 	for step := plan.firstStep; step < 5; step++ {
-		require.NoError(t, agg.buildFilesWithPlan(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil, plan))
+		require.NoError(t, agg.buildFilesWithPlan(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil, &plan))
 	}
 	require.Equal(t, 5*stepSize, agg.EndTxNumMinimax(), "healthy state files must keep advancing")
 	t.Run("after_build", assertPendingData)
@@ -438,6 +438,159 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestAggregatorBuildPreservesRetainedHistory(t *testing.T) {
+	const stepSize = uint64(10)
+	stateRanges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	overlapping := []testFileRange{{0, 1}, {0, 4}}
+	for _, pending := range []bool{true, false} {
+		name := "empty_mdbx"
+		if pending {
+			name = "pending_step_2"
+		}
+		for _, test := range []struct {
+			name           string
+			history, index []testFileRange
+			deferred       bool
+		}{
+			{name: "history_only", history: stateRanges[:1], deferred: true},
+			{name: "history_gap", history: stateRanges[:1], index: stateRanges, deferred: true},
+			{name: "index_gap", history: stateRanges, index: stateRanges[:1], deferred: true},
+			{name: "both_gaps", history: stateRanges[:1], index: stateRanges[:1], deferred: true},
+			{name: "different_partitions", history: []testFileRange{{0, 2}, {2, 3}}, index: stateRanges, deferred: true},
+			{name: "step_2_completes_index", history: stateRanges, index: stateRanges[:2], deferred: !pending},
+			{name: "later_step_would_skip_pending_values", history: overlapping, index: overlapping, deferred: pending},
+			{name: "continuous", history: stateRanges, index: stateRanges},
+		} {
+			t.Run(test.name+"/"+name, func(t *testing.T) {
+				db, agg := testDbAndAggregatorv3(t, stepSize)
+				dirs := agg.Dirs()
+				generateStateFiles(t, dirs, stateRanges)
+				generateCommitmentFile(t, dirs, stateRanges)
+				generateStandaloneIIFiles(t, dirs, stateRanges)
+				receipt := agg.d[kv.ReceiptDomain]
+				populateFiles2(t, dirs, NewHistorySnapSchema(receipt.HistCfg, stepSize, dirs), stepSize, test.history)
+				populateFiles2(t, dirs, NewIISnapSchema(receipt.InvertedIndex.InvIdxCfg, stepSize, dirs), stepSize, test.index)
+				require.NoError(t, agg.OpenFolder(db))
+				require.Equal(t, len(test.history), receipt.History.dirtyFiles.Len())
+				require.Equal(t, len(test.index), receipt.InvertedIndex.dirtyFiles.Len())
+				requireVisibleEnd(t, agg, 3*stepSize)
+				agg.ForbidVisibilityLowering()
+				key, value := []byte{1}, []byte{7}
+				if pending {
+					require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+						at := agg.BeginFilesRo()
+						defer at.Close()
+						writer := at.d[kv.ReceiptDomain].NewWriter(db)
+						defer writer.Close()
+						require.NoError(t, writer.PutWithPrev(key, value, 2*stepSize+1, nil))
+						return writer.Flush(t.Context(), tx)
+					}))
+				}
+				existing := snapshotFileIdentities(t, dirs)
+				require.NoError(t, agg.BuildFiles2(t.Context(), asTemporalRoDB(db), 3, 4, unboundedFinalityCtx, false))
+				agg.background.Wait()
+				require.NoError(t, agg.OpenFolder(db))
+				requireVisibleEnd(t, agg, 4*stepSize)
+				requireSnapshotFilesUnchanged(t, existing)
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					at := agg.BeginFilesRo()
+					defer at.Close()
+					_, err := at.prune(t.Context(), tx, 0, true, nil)
+					return err
+				}))
+				require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+					at := agg.BeginFilesRo()
+					defer at.Close()
+					if pending {
+						got, _, found, err := at.d[kv.ReceiptDomain].GetLatest(key, tx)
+						require.NoError(t, err)
+						require.True(t, found, "the pending receipt must survive pruning")
+						require.Equal(t, value, got)
+					}
+					if test.deferred {
+						require.Empty(t, at.d[kv.ReceiptDomain].files)
+					} else {
+						require.Equal(t, 4*stepSize, at.d[kv.ReceiptDomain].files.EndTxNum())
+					}
+					return nil
+				}))
+			})
+		}
+	}
+}
+
+func TestAggregatorBuildKeepsReceiptHistoryReadable(t *testing.T) {
+	const stepSize = uint64(10)
+	for _, test := range []struct {
+		name            string
+		hasEarlierFiles bool
+		unaligned       bool
+	}{
+		{name: "first_values_file"},
+		{name: "later_values_file", hasEarlierFiles: true},
+		{name: "unaligned_rebuild", unaligned: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := t.Context()
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			key, previous := []byte{1}, []byte{7}
+			const updateTx = 3*stepSize + 2
+			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+				at := agg.BeginFilesRo()
+				defer at.Close()
+				w := at.d[kv.ReceiptDomain].NewWriter(db)
+				defer w.Close()
+				require.NoError(t, w.PutWithPrev(key, previous, updateTx-1, nil))
+				require.NoError(t, w.PutWithPrev(key, []byte{8}, updateTx, previous))
+				return w.Flush(ctx, tx)
+			}))
+			require.NoError(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), 0, 4, unboundedFinalityCtx, true))
+			agg.background.Wait()
+			agg.CloseFilesNoReopen()
+			dirs, d := agg.Dirs(), agg.d[kv.ReceiptDomain]
+			removeSnapshotFiles(t, filepath.Join(dirs.SnapDomain, "*-receipt.*.kv"))
+			require.NoError(t, dir.RemoveFile(d.efAccessorNewFilePath(0, 4)))
+			if test.hasEarlierFiles {
+				prefix := []testFileRange{{0, 2}, {2, 3}}
+				generateStateFiles(t, dirs, prefix)
+				generateCommitmentFile(t, dirs, prefix)
+				generateStandaloneIIFiles(t, dirs, prefix)
+				generateDomainFiles(t, kv.ReceiptDomain.String(), dirs, prefix)
+			}
+			require.NoError(t, agg.OpenFolder(db))
+			if test.unaligned {
+				defer agg.Unalign(kv.ReceiptDomain)()
+			}
+			before := agg.BeginFilesRo()
+			hasEarlierFiles := before.TxNumsInFiles(kv.ReceiptDomain) > 0
+			before.Close()
+			require.Equal(t, test.hasEarlierFiles, hasEarlierFiles)
+
+			buildAndRead := func() {
+				t.Helper()
+				require.NoError(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), 3, 4, unboundedFinalityCtx, false))
+				agg.background.Wait()
+				require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+					at := agg.BeginFilesRo()
+					defer at.Close()
+					_, err := at.prune(ctx, tx, 0, true, nil)
+					require.NoError(t, err)
+					got, found, err := at.HistorySeek(kv.ReceiptDomain, key, updateTx, tx)
+					require.NoError(t, err)
+					require.True(t, found)
+					require.Equal(t, previous, got)
+					return nil
+				}))
+			}
+			buildAndRead()
+			require.NoFileExists(t, d.kvNewFilePath(3, 4))
+			require.NoError(t, agg.BuildMissedAccessors(ctx, db, 1))
+			buildAndRead()
+			require.FileExists(t, d.kvNewFilePath(3, 4))
+		})
 	}
 }
 

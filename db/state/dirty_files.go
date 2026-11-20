@@ -614,6 +614,10 @@ func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 
+func (i visibleFile) sameRange(other visibleFile) bool {
+	return i.startTxNum == other.startTxNum && i.endTxNum == other.endTxNum
+}
+
 func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems visibleFiles) {
 	newVisibleFiles := make(visibleFiles, 0, files.Len())
 	// trace = true

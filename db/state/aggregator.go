@@ -1069,7 +1069,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 
 var errStepNotReady = errors.New("step not ready")
 
-func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}, plan fileBuildPlan) error {
+func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}, plan *fileBuildPlan) error {
 	// Pin worker counts while collation and building read compressor settings.
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
@@ -1120,6 +1120,16 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 		if step < firstStep {
 			continue
 		}
+		if !a.canPublishDomainStep(kv.Domain(id), txFrom, txTo) {
+			// Publishing a later step would let pruning delete pending MDBX values from this one.
+			plan.deferredDomains[id] = true
+			a.deferredDomainWarnings[id].Do(func() {
+				a.logger.Warn("[snapshots] file build deferred; rebuild missing history snapshots to resume",
+					"entity", d.Name, "step", step, "retainedIn", "MDBX")
+			})
+			continue
+		}
+
 		firstFileAfterStepZero := step > 0 && ac.d[id].FirstStepNotInFiles() == 0
 		g.Go(func() error {
 			var collation Collation
@@ -1193,6 +1203,32 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt), "workers", a.workers.getCollateAndBuild())
 
 	return nil
+}
+
+func (a *Aggregator) canPublishDomainStep(id kv.Domain, txFrom, txTo uint64) bool {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	d := a.d[id]
+	if d.HistoryDisabled || d.SnapshotsDisabled {
+		return true
+	}
+	// A normal append adds one matched pair and exposes no retained files.
+	if a.visible.Load().d[id].files.EndTxNum() == txFrom &&
+		max(d.History.dirtyFiles.EndTxNumMax(), d.InvertedIndex.dirtyFiles.EndTxNumMax()) <= txFrom {
+		return true
+	}
+	// A retained merged file ending at txTo hides the new single-step file.
+	// Index positions are valid only in the history file with the same range.
+	withNewStep := func(files visibleFiles) visibleFiles {
+		if files.EndTxNum() == txTo {
+			return files
+		}
+		return append(files, visibleFile{startTxNum: txFrom, endTxNum: txTo})
+	}
+	history, index := d.History.calcVisibleFiles(txTo)
+	history = withNewStep(history)
+	return (a.unalignedDomain[id] || contiguousEnd(history) == txTo) &&
+		slices.EqualFunc(history, withNewStep(index.files), visibleFile.sameRange)
 }
 
 func (a *Aggregator) readyForCollation(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
@@ -1282,7 +1318,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 	started := a.background.TryGo(func() {
 		defer a.buildingFiles.Store(false)
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFilesWithPlan(ctx, db, step, finalityCtx, nil, plan); err != nil {
+			if err := a.buildFilesWithPlan(ctx, db, step, finalityCtx, nil, &plan); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
@@ -2568,7 +2604,7 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		// Build complete steps below the sampled lastInDB before starting merges.
 		// Newly completed steps are handled by a later build job.
 		for ; step < lastInDB; step++ {
-			if err := a.buildFilesWithPlan(a.ctx, db, step, finalityCtx, fin, plan); err != nil {
+			if err := a.buildFilesWithPlan(a.ctx, db, step, finalityCtx, fin, &plan); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}

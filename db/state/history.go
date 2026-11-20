@@ -1222,7 +1222,7 @@ func (ht *HistoryRoTx) Close() {
 // is addressed by position in that .ef, so no other file can resolve it.
 func (ht *HistoryRoTx) pairedFile(efItem visibleFile) (it visibleFile, ok bool) {
 	for i := range ht.files {
-		if ht.files[i].startTxNum == efItem.startTxNum && ht.files[i].endTxNum == efItem.endTxNum {
+		if ht.files[i].sameRange(efItem) {
 			return ht.files[i], true
 		}
 	}
