@@ -375,7 +375,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		if err != nil {
 			return nil, err
 		}
-		transactions.VersionedBlockState(genEnv.ibs)
 
 		minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
@@ -420,7 +419,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		if err != nil {
 			return nil, err
 		}
-		transactions.VersionedCallState(genEnv.ibs)
+		genEnv.ibs.SetNoConflictDetection()
 		stateWriter = genEnv.noopWriter
 	}
 
@@ -580,7 +579,6 @@ func (g *Generator) GetReceiptsPrefetched(ctx context.Context, cfg *chain.Config
 	if !calculatePostState {
 		// Fast path (post-Byzantium): use the shared derivation package.
 		// DeriveBlockReceipts sets BlockHash and FirstLogIndexWithinBlock.
-		transactions.VersionedBlockState(genEnv.ibs)
 		receipts, err = sharedreceipts.DeriveBlockReceipts(ctx, cfg, g.engine, block.HeaderNoCopy(), block.Transactions(), genEnv.ibs, genEnv.gp, genEnv.getHeader)
 		if err != nil {
 			return nil, err
@@ -628,7 +626,6 @@ func (g *Generator) GetReceiptsPrefetched(ctx context.Context, cfg *chain.Config
 			stateWriter = genEnv.noopWriter
 		}
 
-		transactions.VersionedBlockState(genEnv.ibs)
 		for i, txn := range block.Transactions() {
 			select {
 			case <-ctx.Done():

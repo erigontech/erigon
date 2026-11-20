@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/common"
 )
 
@@ -26,4 +28,6 @@ type Gossip interface {
 	// at admission and again just before the actual publish.
 	PublishBackground(name string, data []byte, expiry time.Time, logCtx ...any) error
 	SubscribeWithExpiry(name string, expiry time.Time) error
+	// BanPeer queues a ban of pid without blocking.
+	BanPeer(pid peer.ID)
 }

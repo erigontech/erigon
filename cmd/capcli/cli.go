@@ -286,12 +286,13 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 	if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, currentBlock, true); err != nil {
 		return err
 	}
-	if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock); err != nil {
+	if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock, nil); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	child := currentBlock
 	previousLogBlock := currentBlock.Block.Slot
 
 	logInterval := time.NewTicker(30 * time.Second)
@@ -318,9 +319,10 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, currentBlock, true); err != nil {
 			return false, err
 		}
-		if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock); err != nil {
+		if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock, child); err != nil {
 			return false, err
 		}
+		child = currentBlock
 
 		currentRoot = currentBlock.Block.ParentRoot
 		currentSlot := currentBlock.Block.Slot
@@ -349,17 +351,16 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 
 				// Look the blobs up under the walked root: before Gloas the stored body has no execution
 				// transactions or withdrawals, so its own hash is not the block root.
-				kzgCommitments := 0
-				if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
-					kzgCommitments = c.Len()
+				if n := expectedBlobsForChild(block, child); n > 0 {
+					stored, err := blob_storage.BlobsStored(ctx, blobDB, *slot, currentRoot, n)
+					if err != nil {
+						return false, err
+					}
+					if !stored {
+						break
+					}
 				}
-				stored, err := blob_storage.BlobsStored(ctx, blobDB, *slot, currentRoot, kzgCommitments)
-				if err != nil {
-					return false, err
-				}
-				if !stored {
-					break
-				}
+				child = block
 			}
 			currentRoot, err = beacon_indicies.ReadParentBlockRoot(tx, currentRoot)
 			if err != nil {

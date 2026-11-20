@@ -125,6 +125,7 @@ type Aggregator struct {
 	maintenanceObserver atomic.Pointer[MaintenanceObserver]
 	observerCtx         context.Context
 	observerCancel      context.CancelFunc
+	closed              atomic.Bool
 
 	// next fields are set only if agg.doTraceCtx is true. can enable by env: TRACE_AGG=true
 	leakDetector *dbg.LeakDetector
@@ -733,16 +734,22 @@ func (a *Aggregator) WaitForFiles() {
 	}
 }
 
-func (a *Aggregator) Close() {
+// StopMaintenance refuses new background work and waits for the running work,
+// which may still use the database. Files stay open for live readers.
+func (a *Aggregator) StopMaintenance() {
 	a.observerCancel()
 	a.dirtyFilesLock.Lock()
 	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
 	a.dirtyFilesLock.Unlock()
-	// Every caller must wait for maintenance before it can safely close the database.
 	// Keep the aggregator context alive until that work finishes.
-	firstClose := a.background.BeginClose()
+	a.background.BeginClose()
 	a.background.Wait()
-	if !firstClose {
+}
+
+// Close unmaps the files: every reader must be gone, so close the database first.
+func (a *Aggregator) Close() {
+	a.StopMaintenance()
+	if !a.closed.CompareAndSwap(false, true) {
 		return
 	}
 	a.ctxCancel()
