@@ -1740,9 +1740,6 @@ func (at *AggregatorRoTx) MinStepInDb(tx kv.Tx, domain kv.Domain) (lstInDb uint6
 
 func (a *Aggregator) EndTxNumMinimax() uint64 { return a.visible.Load().minimaxTxNum }
 
-// DirtyFilesEndTxNum is where the files on disk end; visible files stop below it at a gap.
-func (a *Aggregator) DirtyFilesEndTxNum() uint64 { return a.dirtyFilesEndTxNumMinimax() }
-
 // stepsInDB returns the number of steps of data currently in MDBX
 // (not yet collated to snapshot files).
 func (a *Aggregator) StepsInDB(ctx context.Context, db kv.RoDB) (float64, error) {
@@ -1847,6 +1844,30 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 		return 0
 	}
 	return ceiling
+}
+
+// FilesGap reports a gap in the files on disk: visible files then stop before the files end.
+func (at *AggregatorRoTx) FilesGap() error {
+	a := at.a
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	filesEnd := a.dirtyFilesEndTxNumMinimax()
+	v := a.visible.Load()
+	var visibleEnd uint64
+	for id, d := range a.d {
+		if d != nil && d.Enabled && !a.unalignedDomain[id] && v.d[id] != nil {
+			visibleEnd = max(visibleEnd, v.d[id].files.EndTxNum())
+		}
+	}
+	for id, ii := range a.standaloneIIs() {
+		if ii != nil && ii.Enabled && !a.unalignedIdx[id] && v.iis[id] != nil {
+			visibleEnd = max(visibleEnd, v.iis[id].files.EndTxNum())
+		}
+	}
+	if visibleEnd < filesEnd {
+		return fmt.Errorf("a gap in files: visible files end at txNum %d, files reach %d", visibleEnd, filesEnd)
+	}
+	return nil
 }
 
 // aggregatorVisible immutable visible-for-application files (no gaps, no overlaps, indexed)
