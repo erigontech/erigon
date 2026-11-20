@@ -43,7 +43,7 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 		return pc, nil, ErrFrameParameter
 	}
 	selector, entryIndex := param.Uint64(), index.Uint64()
-	if (selector <= 3 || selector == 0x11 || selector >= 0x19) && entryIndex != 0 {
+	if (selector <= 0x03 || selector == 0x11 || selector >= 0x19) && entryIndex != 0 {
 		return pc, nil, ErrFrameParameter
 	}
 	ctx := evm.FrameContext
@@ -61,95 +61,95 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 		return pc, nil, evm.assertionReadError(err)
 	}
 	switch selector {
-	case 0:
+	case 0x00:
 		index.SetUint64(uint64(len(trace.Balances)))
-	case 1:
+	case 0x01:
 		index.SetUint64(uint64(len(trace.Slots)))
-	case 2:
+	case 0x02:
 		index.SetUint64(uint64(len(trace.Codes)))
-	case 3:
+	case 0x03:
 		index.SetUint64(uint64(len(trace.Nonces)))
-	case 4, 5, 6:
+	case 0x04, 0x05, 0x06:
 		if entryIndex >= uint64(len(trace.Balances)) {
 			return pc, nil, ErrFrameParameter
 		}
 		entry := &trace.Balances[entryIndex]
 		switch selector {
-		case 4:
+		case 0x04:
 			address := entry.Address.Value()
 			index.SetBytes(address[:])
-		case 5:
+		case 0x05:
 			index.Set(&entry.Before)
-		case 6:
+		case 0x06:
 			index.Set(&entry.After)
 		}
-	case 7, 8, 9, 10:
+	case 0x07, 0x08, 0x09, 0x0a:
 		if entryIndex >= uint64(len(trace.Slots)) {
 			return pc, nil, ErrFrameParameter
 		}
 		entry := &trace.Slots[entryIndex]
 		switch selector {
-		case 7:
+		case 0x07:
 			address := entry.Address.Value()
 			index.SetBytes(address[:])
-		case 8:
+		case 0x08:
 			index.Set(&entry.Before)
-		case 9:
+		case 0x09:
 			index.Set(&entry.After)
-		case 10:
+		case 0x0a:
 			key := entry.Key.Value()
 			index.SetBytes(key[:])
 		}
-	case 11, 12, 13:
+	case 0x0b, 0x0c, 0x0d:
 		if entryIndex >= uint64(len(trace.Codes)) {
 			return pc, nil, ErrFrameParameter
 		}
 		entry := &trace.Codes[entryIndex]
 		switch selector {
-		case 11:
+		case 0x0b:
 			address := entry.Address.Value()
 			index.SetBytes(address[:])
-		case 12:
+		case 0x0c:
 			hash := entry.Before.Value()
 			index.SetBytes(hash[:])
-		case 13:
+		case 0x0d:
 			hash := entry.After.Value()
 			index.SetBytes(hash[:])
 		}
-	case 14, 15, 16:
+	case 0x0e, 0x0f, 0x10:
 		if entryIndex >= uint64(len(trace.Nonces)) {
 			return pc, nil, ErrFrameParameter
 		}
 		entry := &trace.Nonces[entryIndex]
 		switch selector {
-		case 14:
+		case 0x0e:
 			address := entry.Address.Value()
 			index.SetBytes(address[:])
-		case 15:
+		case 0x0f:
 			index.SetUint64(entry.Before)
-		case 16:
+		case 0x10:
 			index.SetUint64(entry.After)
 		}
-	case 17:
+	case 0x11:
 		index.SetUint64(uint64(len(trace.Events)))
-	default:
+	case 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18:
 		if entryIndex >= uint64(len(trace.Events)) {
 			return pc, nil, ErrFrameParameter
 		}
 		event := trace.Events[entryIndex]
 		switch selector {
-		case 18:
+		case 0x12:
 			index.SetBytes(event.Address[:])
-		case 19:
+		case 0x13:
 			index.SetUint64(uint64(len(event.Topics)))
-		case 24:
-			index.SetUint64(uint64(len(event.Data)))
-		default:
-			topic := selector - 20
+		case 0x14, 0x15, 0x16, 0x17:
+			topic := selector - 0x14
 			if topic >= uint64(len(event.Topics)) {
 				return pc, nil, ErrFrameParameter
 			}
 			index.SetBytes(event.Topics[topic][:])
+		case 0x18:
+			index.SetUint64(uint64(len(event.Data)))
 		}
 	}
 	return pc, nil, nil

@@ -615,6 +615,10 @@ func (p *TxPool) nonceConsumed(txn *TxnSlot, view kvcache.CacheView) (bool, erro
 		return nonce > txn.Nonce, err
 	}
 	frame := txn.Txn.(*types.FrameTransaction)
+	maxUnconsumedSequence := frame.Nonce
+	if frame.UsesSingleUseNonce() {
+		maxUnconsumedSequence = 0
+	}
 	var storageKey [length.Addr + length.Hash]byte
 	copy(storageKey[:length.Addr], types.FrameNonceManager[:])
 	for _, key := range frame.NonceKeys {
@@ -626,8 +630,7 @@ func (p *TxPool) nonceConsumed(txn *TxnSlot, view kvcache.CacheView) (bool, erro
 		}
 		var sequence uint256.Int
 		sequence.SetBytes(value)
-		// Any nonzero sequence consumes a single-use key.
-		if txn.Nonce == math.MaxUint64 && !sequence.IsZero() || sequence.GtUint64(txn.Nonce) {
+		if sequence.GtUint64(maxUnconsumedSequence) {
 			return true, nil
 		}
 	}

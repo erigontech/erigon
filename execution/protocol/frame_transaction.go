@@ -81,7 +81,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			if err != nil {
 				return nil, err
 			}
-			if tx.Nonce == math.MaxUint64 {
+			if tx.UsesSingleUseNonce() {
 				if !sequence.IsZero() {
 					return nil, fmt.Errorf("%w: single-use key %s is already used", ErrNonceTooLow, key.String())
 				}

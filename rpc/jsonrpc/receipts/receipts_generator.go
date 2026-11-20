@@ -864,29 +864,7 @@ func (r *receiptGasReader) read(g *Generator, tx kv.TemporalTx, header *types.He
 	}
 	if firstRead < r.historyStart {
 		// A cached or persisted receipt can still supply the exact gas used.
-		hash := header.Hash()
-		if receipt, ok := g.TryGetCachedReceipt(hash, txNum, index); ok {
-			return receipt, nil
-		}
-		if !PersistedReceiptsServed() {
-			return nil, nil
-		}
-		// Each cache write records the previous receipt. A seek past the
-		// following transaction could return a receipt from a later block.
-		afterTx := txNum + 1
-		start, err := tx.Debug().HistoryStartFrom(kv.RCacheDomain)
-		if err != nil || afterTx < start {
-			return nil, err
-		}
-		next, err := firstHistoryChange(tx, kv.RCacheHistoryIdx, rawtemporaldb.ReceiptCacheKey, afterTx)
-		if err != nil || next != afterTx {
-			return nil, err
-		}
-		receipt, ok, err := readPersistedReceipt(tx, header.Number.Uint64(), hash, txn.Hash(), txNum)
-		if err != nil || !ok || receipt.TransactionIndex != uint(index) {
-			return nil, err
-		}
-		return receipt, nil
+		return g.readRetainedReceipt(tx, header, txn, txNum, index)
 	}
 	previous := r.cumulative
 	if index > 0 && r.lastTxNum+1 != txNum {
@@ -902,6 +880,32 @@ func (r *receiptGasReader) read(g *Generator, tx kv.TemporalTx, header *types.He
 	}
 	r.lastTxNum, r.cumulative = txNum, cumulative
 	return &types.Receipt{GasUsed: cumulative - previous}, nil
+}
+
+func (g *Generator) readRetainedReceipt(tx kv.TemporalTx, header *types.Header, txn types.Transaction, txNum uint64, index int) (*types.Receipt, error) {
+	hash := header.Hash()
+	if receipt, ok := g.TryGetCachedReceipt(hash, txNum, index); ok {
+		return receipt, nil
+	}
+	if !PersistedReceiptsServed() {
+		return nil, nil
+	}
+	// Each cache write records the previous receipt. A seek past the
+	// following transaction could return a receipt from a later block.
+	afterTx := txNum + 1
+	start, err := tx.Debug().HistoryStartFrom(kv.RCacheDomain)
+	if err != nil || afterTx < start {
+		return nil, err
+	}
+	next, err := firstHistoryChange(tx, kv.RCacheHistoryIdx, rawtemporaldb.ReceiptCacheKey, afterTx)
+	if err != nil || next != afterTx {
+		return nil, err
+	}
+	receipt, ok, err := readPersistedReceipt(tx, header.Number.Uint64(), hash, txn.Hash(), txNum)
+	if err != nil || !ok || receipt.TransactionIndex != uint(index) {
+		return nil, err
+	}
+	return receipt, nil
 }
 
 type loaderMutex[K comparable] struct {
