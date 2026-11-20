@@ -262,11 +262,20 @@ func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockSta
 	return ibs
 }
 
-// NewForSequentialCommitment builds a versioned IBS that keeps the stateObject cache on; only genesis needs both.
-func NewForSequentialCommitment(stateReader StateReader) *IntraBlockState {
-	ibs := New(stateReader)
-	ibs.versionMap = NewVersionMap(nil)
-	ibs.noMaterialize = false
+// NewVersionedBlock returns a state that reads through the version-map view, for
+// re-executing a block's txs in order (a later tx may re-create an account an
+// earlier one destroyed, so conflict detection stays on).
+func NewVersionedBlock(stateReader StateReader) *IntraBlockState {
+	ibs := NewWithVersionMap(stateReader, NewVersionMap(nil))
+	ibs.SetTxContext(0, 0)
+	return ibs
+}
+
+// NewVersionedCall is NewVersionedBlock for a single call, with cross-tx conflict
+// detection off.
+func NewVersionedCall(stateReader StateReader) *IntraBlockState {
+	ibs := NewVersionedBlock(stateReader)
+	ibs.SetNoConflictDetection()
 	return ibs
 }
 
@@ -2093,6 +2102,17 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 }
 
 var zeroBalance uint256.Int
+
+// ContractCreatedInTx reports whether the current transaction created a contract at addr.
+// The marker survives SELFDESTRUCT and is cleared if the creation is rolled back.
+func (ibs *IntraBlockState) ContractCreatedInTx(addr accounts.Address) bool {
+	if ibs.versionMap != nil {
+		created, _ := ibs.versionedWriteCreateContract(addr)
+		return created
+	}
+	so := ibs.stateObjects[addr]
+	return so != nil && so.newlyCreated && (so.createdContract || so.destructedCreated)
+}
 
 // Used for EIP-6780
 func (ibs *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {

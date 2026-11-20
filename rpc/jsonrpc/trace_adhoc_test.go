@@ -2654,7 +2654,8 @@ func TestOeTracerMcopyMemory(t *testing.T) {
 			_, _, err := runtime.Execute(common.FromHex(tc.code), nil, &runtime.Config{
 				GasLimit:  1000000,
 				EVMConfig: vm.Config{Tracer: tracer.Tracer().Hooks},
-			}, t.TempDir())
+			})
+
 			require.NoError(t, err)
 			var found bool
 			for _, op := range result.VmTrace.Ops {

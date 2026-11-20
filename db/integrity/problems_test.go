@@ -237,3 +237,31 @@ func TestRunChecksLetsAHeavyCheckUseTheWholeBudget(t *testing.T) {
 
 	require.NoError(t, RunChecks(t.Context(), []Check{HeaderNoGaps, Blocks, CommitmentRoot}, time.Second, run, log.New()))
 }
+
+func TestRunChecksReportsASkippedCheckApartFromADoneOne(t *testing.T) {
+	run := func(_ context.Context, chk Check) error {
+		if chk == StateVerify {
+			return fmt.Errorf("%w: legacy only", ErrSkipped)
+		}
+		return nil
+	}
+	var done, skipped []string
+	logger := log.New()
+	logger.SetHandler(log.FilterHandler(func(r *log.Record) bool {
+		for i := 0; i+1 < len(r.Ctx); i += 2 {
+			if r.Ctx[i] == "check" {
+				switch r.Msg {
+				case "[integrity] done":
+					done = append(done, fmt.Sprint(r.Ctx[i+1]))
+				case "[integrity] skipped":
+					skipped = append(skipped, fmt.Sprint(r.Ctx[i+1]))
+				}
+			}
+		}
+		return false
+	}, log.StreamHandler(io.Discard, log.LogfmtFormat())))
+
+	require.NoError(t, RunChecks(t.Context(), []Check{HeaderNoGaps, StateVerify}, 0, run, logger))
+	require.Equal(t, []string{string(HeaderNoGaps)}, done)
+	require.Equal(t, []string{string(StateVerify)}, skipped)
+}

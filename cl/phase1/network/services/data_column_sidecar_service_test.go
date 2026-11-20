@@ -98,6 +98,7 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 		FuluForkEpoch:           0,
 		GloasForkEpoch:          100000,
 		MaxBlobsPerBlockElectra: 9,
+		SecondsPerSlot:          12,
 	}
 
 	t.emitters = beaconevents.NewEventEmitter()
@@ -1070,7 +1071,7 @@ func (f *importingWhileFinalizing) FinalizedCheckpoint() solid.Checkpoint {
 func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueProcessesSidecarWhenBlockIsImportedAsFinalityMoves() {
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
-	service.scheduleSidecarForLaterProcessing(sidecar)
+	service.scheduleSidecarForLaterProcessing(t.T().Context(), sidecar)
 	t.Require().Equal(int32(1), service.pendingGloasSidecars.count.Load())
 	t.finalizeGloasEpochAfterTestSlot()
 	t.expectGloasSidecarStored(testSlot, 0)
@@ -1146,11 +1147,11 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueCap() {
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	t.Equal(int32(maxPendingGloasSidecars), service.pendingGloasSidecars.capacity)
 	service.pendingGloasSidecars.capacity = 1
-	service.scheduleSidecarForLaterProcessing(createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot))
+	service.scheduleSidecarForLaterProcessing(t.T().Context(), createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot))
 	t.Require().Equal(int32(1), service.pendingGloasSidecars.count.Load())
 
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot)
-	service.scheduleSidecarForLaterProcessing(sidecar)
+	service.scheduleSidecarForLaterProcessing(t.T().Context(), sidecar)
 
 	t.Equal(int32(1), service.pendingGloasSidecars.count.Load())
 	root, err := sidecar.HashSSZ()
@@ -1181,8 +1182,8 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDeduplicates() {
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 
-	service.scheduleSidecarForLaterProcessing(sidecar)
-	service.scheduleSidecarForLaterProcessing(sidecar)
+	service.scheduleSidecarForLaterProcessing(t.T().Context(), sidecar)
+	service.scheduleSidecarForLaterProcessing(t.T().Context(), sidecar)
 
 	t.Equal(int32(1), service.pendingGloasSidecars.count.Load())
 }
@@ -1209,8 +1210,8 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueKeepsDistinctContentFo
 	differentProof[0] = 0xff
 	second.KzgProofs.Set(0, differentProof)
 
-	service.scheduleSidecarForLaterProcessing(first)
-	service.scheduleSidecarForLaterProcessing(second)
+	service.scheduleSidecarForLaterProcessing(t.T().Context(), first)
+	service.scheduleSidecarForLaterProcessing(t.T().Context(), second)
 
 	t.Equal(int32(2), service.pendingGloasSidecars.count.Load())
 }
@@ -1238,7 +1239,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueKeepsOriginalAgeWhenBl
 	t.Require().NoError(err)
 	service.pendingGloasSidecars.capacity = 1
 	createdAt := time.Now().Add(-pendingGloasSidecarExpiry / 2)
-	original := storePendingJob(t.T(), service.pendingGloasSidecars, common.Hash(root), sidecar, createdAt)
+	original := storePendingJob(t.T(), service.pendingGloasSidecars, common.Hash(root), pendingGloasSidecar{sidecar: sidecar}, createdAt)
 	rejectionsBeforeRetry := service.pendingGloasSidecars.fullCounter.GetValueUint64()
 
 	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
@@ -1249,7 +1250,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueKeepsOriginalAgeWhenBl
 	stored, exists := service.pendingGloasSidecars.jobs.Load(common.Hash(root))
 	t.Require().True(exists)
 	t.Same(original, stored)
-	t.Equal(createdAt, stored.(*pendingJob[*cltypes.DataColumnSidecar]).creationTime)
+	t.Equal(createdAt, stored.(*pendingJob[pendingGloasSidecar]).creationTime)
 	t.Equal(int32(1), service.pendingGloasSidecars.count.Load())
 	t.Equal(rejectionsBeforeRetry, service.pendingGloasSidecars.fullCounter.GetValueUint64())
 }
@@ -1257,7 +1258,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueKeepsOriginalAgeWhenBl
 func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDropsSidecarWhoseBlockCannotBeImported() {
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
-	service.scheduleSidecarForLaterProcessing(sidecar)
+	service.scheduleSidecarForLaterProcessing(t.T().Context(), sidecar)
 	t.Require().Equal(int32(1), service.pendingGloasSidecars.count.Load())
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{Epoch: testEpoch + 1}
 
@@ -1269,7 +1270,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDropsSidecarWhoseBlock
 func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueProcessesFinalizedSidecarWhenBlockArrives() {
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
-	service.scheduleSidecarForLaterProcessing(sidecar)
+	service.scheduleSidecarForLaterProcessing(t.T().Context(), sidecar)
 	t.Require().Equal(int32(1), service.pendingGloasSidecars.count.Load())
 	t.finalizeGloasEpochAfterTestSlot()
 	t.expectGloasSidecarStored(testSlot, 0)
@@ -1284,7 +1285,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDropsSeenSidecar() {
 	t.activateGloas()
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
-	service.scheduleSidecarForLaterProcessing(sidecar)
+	service.scheduleSidecarForLaterProcessing(t.T().Context(), sidecar)
 	t.Require().Equal(int32(1), service.pendingGloasSidecars.count.Load())
 	service.seenGloas.claim(seenGloasSidecarKey{testBlockRoot, sidecar.Index})
 	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
@@ -1299,7 +1300,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueExpiryLogsSlot() {
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	root, err := sidecar.HashSSZ()
 	t.Require().NoError(err)
-	storePendingJob(t.T(), service.pendingGloasSidecars, common.Hash(root), sidecar, time.Now().Add(-(pendingGloasSidecarExpiry + time.Second)))
+	storePendingJob(t.T(), service.pendingGloasSidecars, common.Hash(root), pendingGloasSidecar{sidecar: sidecar}, time.Now().Add(-(pendingGloasSidecarExpiry + time.Second)))
 	output := captureServiceLogs(t.T())
 
 	service.pendingGloasSidecars.processPending(t.T().Context())
@@ -1588,7 +1589,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenInvalidSidecarO
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot))
 
-	t.EqualError(err, "invalid kzg proofs for data column sidecar")
+	t.EqualError(err, "data column sidecar proven invalid against its block: invalid kzg proofs for data column sidecar")
 	seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloas.contains(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 1})
 	t.False(seen)
 	t.Empty(events)
@@ -1631,7 +1632,7 @@ func (t *dataColumnSidecarTestSuite) assertGloasArchiveSidecar(blobsRecovered, k
 		t.True(seen)
 		return
 	}
-	t.EqualError(err, "invalid kzg proofs for data column sidecar")
+	t.EqualError(err, "data column sidecar proven invalid against its block: invalid kzg proofs for data column sidecar")
 	t.False(seen)
 }
 

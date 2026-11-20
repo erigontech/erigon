@@ -4,6 +4,8 @@ go 1.26.8
 
 replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 
+replace github.com/libp2p/go-libp2p-pubsub => github.com/domiwei/go-libp2p-pubsub v0.0.0-20261119062000-9d96f54458a3
+
 require (
 	github.com/erigontech/evmone_precompiles v0.0.0-20261020072006-fc5972e25a08
 	github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268

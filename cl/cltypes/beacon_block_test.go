@@ -670,6 +670,23 @@ func TestBeaconBodyGloasJSONRejectsNullRequiredFields(t *testing.T) {
 	}
 }
 
+func TestBeaconBodyJSONRejectsNullOperationLists(t *testing.T) {
+	for _, tc := range []struct {
+		version clparams.StateVersion
+		input   string
+	}{
+		{clparams.DenebVersion, `{"attester_slashings":null}`},
+		{clparams.ElectraVersion, `{"attester_slashings":null}`},
+		{clparams.ElectraVersion, `{"attestations":null}`},
+		{clparams.FuluVersion, `{"attestations":null}`},
+	} {
+		t.Run(tc.version.String()+"/"+tc.input, func(t *testing.T) {
+			body := NewBeaconBody(&clparams.MainnetBeaconConfig, tc.version)
+			require.Error(t, json.Unmarshal([]byte(tc.input), body))
+		})
+	}
+}
+
 func TestBeaconBodyGloasProgressiveLimitsUseConfig(t *testing.T) {
 	for _, limit := range []uint64{32, math.MaxUint64} {
 		cfg := clparams.MainnetBeaconConfig

@@ -1952,11 +1952,10 @@ func (result *execResult) finalizeSystemTx(
 	// writes). result.TxIn may be stale if the system TX ran speculatively before the
 	// regular TXs completed, returning pre-block values instead of the post-block
 	// state syscalls (withdrawal/consolidation) need.
-	ibs := state.New(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader))
+	ibs := state.NewWithVersionMap(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader), vm)
 	defer ibs.Close()
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
-	ibs.SetVersionMap(vm)
 	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
 		return nil, state.ReadSet{}, nil, err
 	}
@@ -3543,10 +3542,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 			pe.RUnlock()
 
-			ibs := state.New(reader)
+			ibs := state.NewWithVersionMap(reader, be.versionMap)
 			defer ibs.Close()
 			ibs.SetVersion(finalVersion.Incarnation)
-			ibs.SetVersionMap(be.versionMap)
 			ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
 			ibs.StartAccessRecording()
 
