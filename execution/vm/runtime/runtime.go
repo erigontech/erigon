@@ -115,7 +115,9 @@ func Execute(code, input []byte, cfg *Config) ([]byte, *state.IntraBlockState, e
 	}
 	setDefaults(cfg)
 
-	prepareState(cfg)
+	if cfg.State == nil || cfg.State == cfg.ownState { // every Execute starts from empty accounts, as with the non-versioned state
+		ownState(cfg)
+	}
 	var (
 		address = contractAsAddress
 		vmenv   = NewEnv(cfg)
@@ -154,7 +156,9 @@ func Create(input []byte, cfg *Config) ([]byte, common.Address, mdgas.MdGas, err
 	}
 	setDefaults(cfg)
 
-	prepareState(cfg)
+	if cfg.State == nil {
+		ownState(cfg)
+	}
 	var (
 		vmenv  = NewEnv(cfg)
 		sender = cfg.Origin
@@ -253,13 +257,9 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	return ret, leftOverGas, err
 }
 
-// prepareState gives a run without a caller state a new versioned state over an empty base. A state it built for
-// an earlier run is replaced too, so every run starts from empty accounts, as the non-versioned state did.
-func prepareState(cfg *Config) {
-	if cfg.State != nil && cfg.State != cfg.ownState {
-		return
-	}
-	cfg.State.Close()
+// ownState gives a run without a caller state a versioned state over an empty base, and remembers it as the
+// runtime's own. The caller keeps the states it was returned.
+func ownState(cfg *Config) {
 	cfg.State = state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
 	cfg.State.SetNoConflictDetection()
 	cfg.ownState = cfg.State

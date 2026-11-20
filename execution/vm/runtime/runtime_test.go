@@ -1262,8 +1262,38 @@ func TestStateReadableAfterExecuteReturns(t *testing.T) {
 	val, err := cfg.State.GetState(absent, accounts.StorageKey{})
 	require.NoError(t, err)
 	require.True(t, val.IsZero())
+	untouched := accounts.InternAddress(common.HexToAddress("0xcc"))
+	val, err = cfg.State.GetState(untouched, accounts.StorageKey{})
+	require.NoError(t, err)
+	require.True(t, val.IsZero(), "an address the run never read is read after return too")
 	_, err = cfg.State.FinalizedWrites(NewEnv(cfg).ChainRules())
 	require.NoError(t, err)
+}
+
+func TestCreateOnReusedConfigDeploysAtTheNextNonce(t *testing.T) {
+	cfg := &Config{}
+	initCode := program.New().Push(0x2a).Push(0).Op(vm.MSTORE8).Return(0, 1).Bytes()
+	_, first, _, err := Create(initCode, cfg)
+	require.NoError(t, err)
+	_, second, _, err := Create(initCode, cfg)
+	require.NoError(t, err)
+	require.NotEqual(t, first, second)
+	for _, addr := range []common.Address{first, second} {
+		code, err := cfg.State.GetCode(accounts.InternAddress(addr))
+		require.NoError(t, err)
+		require.Equal(t, []byte{0x2a}, code)
+	}
+}
+
+func TestExecuteLeavesThePreviousStateUsable(t *testing.T) {
+	cfg := &Config{}
+	_, first, err := Execute(program.New().Push(0).Push(0).Op(vm.LOG0).Bytes(), nil, cfg)
+	require.NoError(t, err)
+	defer first.Close()
+	_, _, err = Execute(nil, nil, cfg)
+	require.NoError(t, err)
+	defer cfg.State.Close()
+	require.Len(t, first.GetRawLogs(first.TxnIndex()), 1)
 }
 
 func TestStateReadableAfterCreateReturns(t *testing.T) {
