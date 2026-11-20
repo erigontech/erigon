@@ -195,9 +195,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return nil, err
 	}
 
-	st := state.New(stateReader)
+	st := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
 	defer st.Close()
-	transactions.VersionedCallState(st)
+	st.SetNoConflictDetection()
 
 	header := block.HeaderNoCopy()
 

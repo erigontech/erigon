@@ -565,15 +565,15 @@ func (b *BeaconBody) decodeSSZ(buf []byte, version int, strict bool) error {
 	}
 	var err error
 	if strict {
-		err = ssz2.UnmarshalSSZStrict(buf, version, b.getSchema(false)...)
+		err = ssz2.UnmarshalSSZStrict(buf, version, slashingDecodeSchema(b.getSchema(false), b.beaconCfg)...)
 	} else {
-		err = ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
+		err = ssz2.UnmarshalSSZ(buf, version, slashingDecodeSchema(b.getSchema(false), b.beaconCfg)...)
 	}
 	if err != nil {
 		return err
 	}
 
-	// Post-decode fixup: propagate preset-aware limits to decoded attestations and slashings.
+	// Post-decode fixup: propagate preset-aware limits to decoded attestations.
 	// DecodeDynamicList calls DecodeSSZ on each element with hardcoded mainnet limits.
 	// We must override those limits for minimal preset compatibility.
 	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
@@ -582,10 +582,6 @@ func (b *BeaconBody) decodeSSZ(buf []byte, version int, strict bool) error {
 		}); err != nil {
 			return err
 		}
-		b.AttesterSlashings.Range(func(_ int, as *AttesterSlashing, _ int) bool {
-			as.SetVersionWithConfig(b.Version, b.beaconCfg)
-			return true
-		})
 	}
 	return nil
 }

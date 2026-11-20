@@ -59,9 +59,9 @@ func (api *DebugAPIImpl) traceBlockParallel(ctx context.Context, tx kv.TemporalT
 			if err != nil {
 				return err
 			}
-			ibs := state.New(state.NewHistoryReaderV3(workerTx, txNum))
+			ibs := state.NewWithVersionMap(state.NewHistoryReaderV3(workerTx, txNum), state.NewVersionMap(nil))
 			defer ibs.Close()
-			transactions.VersionedCallState(ibs)
+			ibs.SetNoConflictDetection()
 			api.shareCodeByHash(ibs)
 			ibs.ResumeLogIndexAt(firstLogIndex)
 			ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
