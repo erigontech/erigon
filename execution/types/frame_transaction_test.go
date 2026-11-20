@@ -697,7 +697,17 @@ func TestFrameTransactionJSONRequiresNonceKeys(t *testing.T) {
 	require.NoError(t, err)
 	var fields map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(encoded, &fields))
+	require.JSONEq(t, "[]", string(fields["nonceKeys"]))
+	var decoded FrameTransaction
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	require.True(t, decoded.UsesLegacyNonce())
+
 	delete(fields, "nonceKeys")
+	encoded, err = json.Marshal(fields)
+	require.NoError(t, err)
+	require.ErrorContains(t, json.Unmarshal(encoded, new(FrameTransaction)), "missing required frame transaction field")
+
+	fields["nonceKeys"] = json.RawMessage("null")
 	encoded, err = json.Marshal(fields)
 	require.NoError(t, err)
 	require.ErrorContains(t, json.Unmarshal(encoded, new(FrameTransaction)), "missing required frame transaction field")
