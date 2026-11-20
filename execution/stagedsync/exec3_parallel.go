@@ -3003,7 +3003,6 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
 				}
 			}
-			var ownedWrites *state.WriteSet
 			if chainTx, ok := txTask.(*exec.TxTask); ok && chainTx.ChargesSenderAtValidation(int(txVersion.Incarnation)) {
 				senderWrites, charged, err := chargeSenderAtValidation(chainTx, txResult, txVersion, be.versionMap, *stateReader)
 				if err != nil {
@@ -3023,12 +3022,11 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				}
 				be.blockIO.RecordReads(txVersion, reads)
 				be.versionMap.FlushVersionedWrites(senderWrites, false)
-				ownedWrites = be.extendWrites(txVersion, senderWrites)
 				be.markReadersDirty(tx, senderWrites, nil)
 				// A charge-at-validation sender's gas debit is not in the worker's TxOut, so
 				// calcFees' coinbase/burnt override (which reads TxOut) would miss it and credit
 				// the fee onto the stale pre-charge balance when the sender is the fee recipient.
-				txResult.TxOut = ownedWrites
+				txResult.TxOut = be.extendWrites(txVersion, senderWrites)
 			}
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
 			if err != nil {
@@ -3038,11 +3036,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				// Flush the tip as an Estimate; the whole tx is promoted to Done at the
 				// seal point below.
 				be.versionMap.FlushVersionedWrites(tipWrites, false)
-				if ownedWrites != nil {
-					ownedWrites.MergeFrom(tipWrites)
-				} else {
-					be.extendWrites(txVersion, tipWrites)
-				}
+				be.extendWrites(txVersion, tipWrites)
 				be.markReadersDirty(tx, tipWrites, nil)
 			}
 		}
