@@ -4685,6 +4685,57 @@ func TestPostExecutionPayloadEnvelopeRejectsOversizedEncodingBeforeAdmission(t *
 	}
 }
 
+func TestPostExecutionPayloadEnvelopeBoundsEncodingByGossipLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	envelope := validTestSignedExecutionPayloadEnvelope(&cfg)
+	jsonBody, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	sszBody, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	size := uint64(len(sszBody))
+	require.LessOrEqual(t, size, clparams.MaxChunkSize)
+
+	for _, tc := range []struct {
+		contentType string
+		body        []byte
+	}{
+		{"application/json", jsonBody},
+		{"application/octet-stream", sszBody},
+	} {
+		for _, canonical := range []bool{true, false} {
+			for _, gossipMaxSize := range []uint64{size - 1, size} {
+				name := fmt.Sprintf("%s/canonical=%t/gossipMaxSize=%d", tc.contentType, canonical, gossipMaxSize)
+				t.Run(name, func(t *testing.T) {
+					_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+					handler.netConfig = &clparams.NetworkConfig{GossipMaxSize: gossipMaxSize}
+					require.Equal(t, gossipMaxSize, gossip.MaxUncompressedSize(gossip.TopicNameExecutionPayload, handler.beaconChainCfg, handler.netConfig))
+					var claims atomic.Int32
+					fcu.ClaimExecutionPayloadEnvelopeForGossipFunc = func(context.Context, common.Hash, uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+						claims.Add(1)
+						return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, errors.New("admission reached")
+					}
+					request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(tc.body))
+					request.Header.Set("Content-Type", tc.contentType)
+					request.Header.Set("Eth-Blob-Data-Included", "false")
+					request.Header.Set("Eth-Consensus-Version", "gloas")
+					recorder := httptest.NewRecorder()
+					handler.postEthV1BeaconExecutionPayloadEnvelope(recorder, request, canonical)
+
+					if gossipMaxSize < size {
+						require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+						require.Contains(t, recorder.Body.String(), "exceeds gossip max")
+						require.Zero(t, claims.Load())
+					} else {
+						require.NotContains(t, recorder.Body.String(), "exceeds gossip max")
+						require.Equal(t, int32(1), claims.Load())
+					}
+					require.False(t, fcu.ValidateExecutionPayloadEnvelopeForGossipCalled)
+				})
+			}
+		}
+	}
+}
+
 func validTestSignedExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *cltypes.SignedExecutionPayloadEnvelope {
 	message := cltypes.NewExecutionPayloadEnvelope(cfg)
 	message.Payload.Extra = solid.NewExtraData()
