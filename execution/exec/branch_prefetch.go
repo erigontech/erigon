@@ -20,10 +20,8 @@ import (
 	"bytes"
 	"context"
 	"hash/maphash"
-	"slices"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -33,11 +31,9 @@ import (
 )
 
 const (
-	branchPrefetchWorkers  = 8
-	BranchPrefetchTxs      = 16
+	BranchPrefetchTxs      = 8
 	branchPrefetchBatch    = 8
 	branchPrefetchBacklog  = 1 << 16
-	branchPrefetchDrainMax = 100 * time.Millisecond
 	branchPrefetchShards   = 64
 	branchPrefetchMaxBytes = 1 << 30
 )
@@ -80,11 +76,9 @@ type prefetchedShard struct {
 }
 
 type BranchPrefetchStats struct {
-	Bytes                    int64
-	Queued, Dropped, Backlog int
-	FoldHits, FoldMisses     uint64
-	DrainWait                time.Duration
-	DrainTimeouts            int
+	Bytes                int64
+	Queued, Dropped      int
+	FoldHits, FoldMisses uint64
 }
 
 type BranchPrefetcher struct {
@@ -96,20 +90,17 @@ type BranchPrefetcher struct {
 
 	workers errgroup.Group
 	mu      sync.Mutex
-	idle    *sync.Cond
 	txs     []kv.TemporalTx
 	backlog []PathTouch
 	head    int
 	running int
 	closed  bool
 
-	queued, dropped, drainBacklog, drainTimeouts int
-	drainWait                                    time.Duration
+	queued, dropped int
 }
 
 func NewBranchPrefetcher(ctx context.Context, db kv.RoDB) *BranchPrefetcher {
 	p := &BranchPrefetcher{seed: maphash.MakeSeed()}
-	p.idle = sync.NewCond(&p.mu)
 	for i := range p.shards {
 		p.shards[i].records = make(map[string]prefetchedRecord)
 	}
@@ -147,11 +138,11 @@ func (p *BranchPrefetcher) Add(items ...PathTouch) {
 	}
 	p.backlog = append(p.backlog, items...)
 	p.queued += len(items)
-	p.spawn(branchPrefetchWorkers)
+	p.spawn()
 }
 
-func (p *BranchPrefetcher) spawn(limit int) {
-	for p.running < limit && p.running*branchPrefetchBatch < len(p.backlog)-p.head && len(p.txs) > 0 {
+func (p *BranchPrefetcher) spawn() {
+	for p.running*branchPrefetchBatch < len(p.backlog)-p.head && len(p.txs) > 0 {
 		tx := p.txs[len(p.txs)-1]
 		p.txs = p.txs[:len(p.txs)-1]
 		p.running++
@@ -198,40 +189,9 @@ func (p *BranchPrefetcher) take(tx kv.TemporalTx, batch []PathTouch) int {
 			tx.Rollback()
 		} else {
 			p.txs = append(p.txs, tx)
-			p.idle.Broadcast()
 		}
 	}
 	return n
-}
-
-func (p *BranchPrefetcher) Drain(ctx context.Context) {
-	if p == nil {
-		return
-	}
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(ctx, branchPrefetchDrainMax)
-	defer cancel()
-	defer context.AfterFunc(ctx, func() {
-		p.mu.Lock()
-		p.idle.Broadcast()
-		p.mu.Unlock()
-	})()
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	rest := p.backlog[p.head:]
-	slices.SortFunc(rest, ComparePathTouch)
-	p.backlog = p.backlog[:p.head+len(slices.Compact(rest))]
-	p.drainBacklog += len(p.backlog) - p.head
-	for !p.closed && ctx.Err() == nil && (p.head < len(p.backlog) || p.running > 0) {
-		p.spawn(BranchPrefetchTxs)
-		p.idle.Wait()
-	}
-	if ctx.Err() != nil && p.head < len(p.backlog) {
-		p.dropped += len(p.backlog) - p.head
-		p.backlog, p.head = p.backlog[:0], 0
-		p.drainTimeouts++
-	}
-	p.drainWait += time.Since(start)
 }
 
 func (p *BranchPrefetcher) Close() {
@@ -246,7 +206,6 @@ func (p *BranchPrefetcher) Close() {
 			tx.Rollback()
 		}
 		p.txs = nil
-		p.idle.Broadcast()
 	}
 	p.mu.Unlock()
 	_ = p.workers.Wait()
@@ -256,8 +215,8 @@ func (p *BranchPrefetcher) Stats() BranchPrefetchStats {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return BranchPrefetchStats{
-		Bytes: p.bytes.Load(), Queued: p.queued, Dropped: p.dropped, Backlog: p.drainBacklog,
-		FoldHits: p.foldHits.Load(), FoldMisses: p.foldMisses.Load(), DrainWait: p.drainWait, DrainTimeouts: p.drainTimeouts,
+		Bytes: p.bytes.Load(), Queued: p.queued, Dropped: p.dropped,
+		FoldHits: p.foldHits.Load(), FoldMisses: p.foldMisses.Load(),
 	}
 }
 
@@ -305,7 +264,8 @@ func (p *BranchPrefetcher) Put(key, data []byte, step kv.Step) []byte {
 	s := p.shard(key)
 	s.mu.Lock()
 	if old, ok := s.records[string(key)]; ok {
-		p.bytes.Add(-old.size(string(key)))
+		s.mu.Unlock()
+		return old.data
 	}
 	r := prefetchedRecord{data: data, step: step, refs: refs}
 	s.records[string(key)] = r

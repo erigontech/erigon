@@ -91,7 +91,8 @@ func storePendingJob[K comparable, M any](
 }
 
 func enqueueTestPendingJob[K comparable, M any](queue *pendingJobQueue[K, M], key K, msg M) error {
-	return queue.enqueueLazy(msg, func() (K, error) { return key, nil })
+	_, err := queue.enqueueLazy(msg, func() (K, error) { return key, nil })
+	return err
 }
 
 func newTestPendingJobQueueWithOptions(ctx context.Context, options pendingJobQueueOptions) *pendingJobQueue[int, string] {
@@ -211,7 +212,7 @@ func TestPendingJobQueueLoopRetriesKeptJob(t *testing.T) {
 			func(int, string) {},
 		)
 
-		err := queue.enqueueLazy("message", func() (int, error) {
+		_, err := queue.enqueueLazy("message", func() (int, error) {
 			return 1, nil
 		})
 		require.NoError(t, err)
@@ -435,7 +436,7 @@ func TestPendingJobQueueEnqueueSkipsKeyBuildAtCapacity(t *testing.T) {
 	queue.count.Store(queue.capacity)
 
 	keyBuilt := false
-	err := queue.enqueueLazy("message", func() (int, error) {
+	_, err := queue.enqueueLazy("message", func() (int, error) {
 		keyBuilt = true
 		return 1, nil
 	})
@@ -449,7 +450,7 @@ func TestPendingJobQueueEnqueueReleasesReservationOnKeyBuildPanic(t *testing.T) 
 	queue := newTestPendingJobQueue(t)
 
 	require.Panics(t, func() {
-		_ = queue.enqueueLazy("message", func() (int, error) {
+		_, _ = queue.enqueueLazy("message", func() (int, error) {
 			panic("key build failed")
 		})
 	})
@@ -460,7 +461,7 @@ func TestPendingJobQueueEnqueueReleasesReservationOnKeyBuildError(t *testing.T) 
 	queue := newTestPendingJobQueue(t)
 	wantErr := errors.New("key build failed")
 
-	err := queue.enqueueLazy("message", func() (int, error) {
+	_, err := queue.enqueueLazy("message", func() (int, error) {
 		return 0, wantErr
 	})
 
@@ -603,4 +604,106 @@ func TestPendingJobQueueAfterRemoveCanEnqueueSameKey(t *testing.T) {
 	stored, exists := queue.jobs.Load(1)
 	require.True(t, exists)
 	require.Equal(t, "replacement", stored.(*pendingJob[string]).msg)
+}
+
+func TestPendingJobQueueProcessesOldestFirst(t *testing.T) {
+	const jobs, passes = 64, 20
+	var processed []int
+	queue := newPendingJobQueue(
+		canceledPendingQueueContext(t),
+		pendingJobQueueOptions{name: t.Name(), capacity: jobs, expiry: time.Hour, checkInterval: time.Millisecond},
+		func(_ context.Context, key int, _ string) pendingJobDecision {
+			processed = append(processed, key)
+			return pendingJobKeep
+		},
+		nil,
+		func(int, string) {},
+	)
+	// Key i is the i-th oldest; multiplying by a unit modulo jobs scrambles the insertion order.
+	base := time.Now()
+	for i := range jobs {
+		key := (i * 37) % jobs
+		storePendingJob(t, queue, key, "message", base.Add(time.Duration(key)*time.Second))
+	}
+
+	for range passes {
+		processed = processed[:0]
+		queue.processPending(t.Context())
+		require.Len(t, processed, jobs)
+		require.IsIncreasing(t, processed)
+	}
+}
+
+func TestPendingJobQueueEnqueueReportsInsertion(t *testing.T) {
+	queue := newTestPendingJobQueueWithOptions(canceledPendingQueueContext(t), pendingJobQueueOptions{
+		name: t.Name(), capacity: 2, expiry: time.Minute, checkInterval: time.Millisecond,
+	})
+	buildKey := func() (int, error) { return 1, nil }
+
+	inserted, err := queue.enqueueLazy("first", buildKey)
+	require.NoError(t, err)
+	require.True(t, inserted)
+
+	inserted, err = queue.enqueueLazy("second", buildKey)
+	require.NoError(t, err)
+	require.False(t, inserted)
+	require.Equal(t, int32(1), queue.count.Load())
+
+	inserted, err = queue.enqueueLazy("failing", func() (int, error) { return 0, errors.New("no key") })
+	require.Error(t, err)
+	require.False(t, inserted)
+	require.Equal(t, int32(1), queue.count.Load())
+}
+
+func TestPendingJobQueueCallsOnRemovedOncePerRemovedJob(t *testing.T) {
+	removed := map[int]int{}
+	decisions := map[int]pendingJobDecision{
+		1: pendingJobKeep,
+		2: pendingJobRemove,
+		3: pendingJobRemoveThenProcess,
+	}
+	queue := newPendingJobQueue(
+		canceledPendingQueueContext(t),
+		pendingJobQueueOptions{name: t.Name(), capacity: 8, expiry: time.Minute, checkInterval: time.Millisecond},
+		func(_ context.Context, key int, _ string) pendingJobDecision { return decisions[key] },
+		func(context.Context, int, string) {},
+		func(int, string) {},
+		func(q *pendingJobQueue[int, string]) {
+			q.onRemoved = func(key int, _ string) { removed[key]++ }
+		},
+	)
+	now := time.Now()
+	for key := 1; key <= 3; key++ {
+		storePendingJob(t, queue, key, "message", now)
+	}
+	storePendingJob(t, queue, 4, "expired", now.Add(-2*time.Minute))
+
+	queue.processPending(t.Context())
+
+	require.Equal(t, map[int]int{2: 1, 3: 1, 4: 1}, removed)
+	require.Equal(t, int32(1), queue.count.Load())
+}
+
+func TestPendingJobQueueCallsBeforePassOncePerPass(t *testing.T) {
+	var events []string
+	queue := newPendingJobQueue(
+		canceledPendingQueueContext(t),
+		pendingJobQueueOptions{name: t.Name(), capacity: 2, expiry: time.Minute, checkInterval: time.Millisecond},
+		func(context.Context, int, string) pendingJobDecision {
+			events = append(events, "job")
+			return pendingJobKeep
+		},
+		nil,
+		func(int, string) {},
+		func(q *pendingJobQueue[int, string]) {
+			q.beforePass = func() { events = append(events, "pass") }
+		},
+	)
+	storePendingJob(t, queue, 1, "message", time.Now())
+	storePendingJob(t, queue, 2, "message", time.Now())
+
+	queue.processPending(t.Context())
+	queue.processPending(t.Context())
+
+	require.Equal(t, []string{"pass", "job", "job", "pass", "job", "job"}, events)
 }

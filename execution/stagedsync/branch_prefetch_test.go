@@ -23,6 +23,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
@@ -173,10 +174,10 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 
 	cc.handleBlockRequest(context.Background(), &blockRequest{blockNum: 5, bal: bal})
 
-	p.Drain(t.Context())
 	require.Equal(t, 4, p.Stats().Queued)
 	hash := keccak.Sum256
-	require.Contains(t, db.recorded(), string(v3.StorageNodeKey(hash(storageOnly[:]), nil, nil)))
+	want := string(v3.StorageNodeKey(hash(storageOnly[:]), nil, nil))
+	require.Eventually(t, func() bool { return slices.Contains(db.recorded(), want) }, 10*time.Second, time.Millisecond)
 }
 
 func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
@@ -268,6 +269,5 @@ func TestCalculatorQueuesAWriteSetAsOneSortedBatch(t *testing.T) {
 	cc.flushBranches()
 	require.Empty(t, cc.touchBatch)
 	require.True(t, slices.IsSortedFunc(cc.touchBatch[:3], exec.ComparePathTouch), "the batch is sorted before it is handed over")
-	p.Drain(t.Context())
 	require.Equal(t, 3, p.Stats().Queued)
 }

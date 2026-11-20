@@ -113,20 +113,6 @@ func storageTouch(n int) PathTouch {
 
 func firstKey(t PathTouch) []byte { return v3.StorageNodeKey(t.Account, nil, nil) }
 
-func returnsWithin(d time.Duration, f func()) bool {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		f()
-	}()
-	select {
-	case <-done:
-		return true
-	case <-time.After(d):
-		return false
-	}
-}
-
 func TestBranchPrefetcherOpensItsReadTxsOnce(t *testing.T) {
 	db := newFakeDB(-1)
 	p := NewBranchPrefetcher(t.Context(), db)
@@ -136,7 +122,7 @@ func TestBranchPrefetcherOpensItsReadTxsOnce(t *testing.T) {
 		touches[i] = storageTouch(i)
 	}
 	p.Add(touches...)
-	p.Drain(t.Context())
+	require.Eventually(t, func() bool { return len(db.readKeys()) == len(touches) }, 10*time.Second, time.Millisecond)
 	require.Equal(t, BranchPrefetchTxs, db.beginCount())
 	got := db.readKeys()
 	require.Len(t, got, len(touches))
@@ -151,75 +137,10 @@ func TestBranchPrefetcherOpensItsReadTxsOnce(t *testing.T) {
 	}
 }
 
-func TestBranchPrefetcherDrainWalksSortedUniqueBacklog(t *testing.T) {
-	db := newFakeDB(1)
-	entered, release := make(chan struct{}), make(chan struct{})
-	var once sync.Once
-	db.onRead = func([]byte) {
-		once.Do(func() { close(entered) })
-		<-release
-	}
-	p := NewBranchPrefetcher(t.Context(), db)
-	defer p.Close()
-	p.Add(storageTouch(200))
-	<-entered
-	touches := []PathTouch{storageTouch(9), storageTouch(3), storageTouch(7), storageTouch(3), storageTouch(1)}
-	p.Add(touches...)
-	drained := make(chan struct{})
-	go func() {
-		p.Drain(t.Context())
-		close(drained)
-	}()
-	unique := slices.CompactFunc(slices.SortedFunc(slices.Values(touches), ComparePathTouch), func(a, b PathTouch) bool { return a == b })
-	require.Eventually(t, func() bool { return p.Stats().Backlog == len(unique) }, 10*time.Second, time.Millisecond)
-	close(release)
-	<-drained
-
-	want := [][]byte{firstKey(storageTouch(200))}
-	for _, touch := range unique {
-		want = append(want, firstKey(touch))
-	}
-	require.Equal(t, want, db.readKeys())
-}
-
-func TestBranchPrefetcherDrainWaitsForRunningWorker(t *testing.T) {
-	db := newFakeDB(-1)
-	entered, release := make(chan struct{}), make(chan struct{})
-	var once sync.Once
-	db.onRead = func([]byte) {
-		once.Do(func() { close(entered) })
-		<-release
-	}
-	p := NewBranchPrefetcher(t.Context(), db)
-	defer p.Close()
-	p.Add(storageTouch(1))
-	<-entered
-
-	drained := make(chan struct{})
-	go func() {
-		p.Drain(t.Context())
-		close(drained)
-	}()
-	select {
-	case <-drained:
-		t.Fatal("Drain returned while a worker was still reading")
-	case <-time.After(50 * time.Millisecond):
-	}
-	close(release)
-	select {
-	case <-drained:
-	case <-time.After(10 * time.Second):
-		t.Fatal("Drain did not return after the worker finished")
-	}
-}
-
 func TestBranchPrefetcherWithoutReadTxsQueuesNothing(t *testing.T) {
 	for name, db := range map[string]kv.RoDB{"nil db": nil, "failing BeginRo": newFakeDB(0)} {
 		p := NewBranchPrefetcher(t.Context(), db)
-		require.True(t, returnsWithin(time.Second, func() {
-			p.Add(storageTouch(1))
-			p.Drain(t.Context())
-		}), name)
+		p.Add(storageTouch(1))
 		require.Zero(t, p.Stats().Queued, name)
 		p.Close()
 	}
@@ -235,6 +156,19 @@ func TestBranchPrefetcherStopsStoringAtByteCap(t *testing.T) {
 	data, _, ok := p.Get([]byte("kept"))
 	require.True(t, ok)
 	require.Equal(t, []byte("value"), data)
+}
+
+func TestBranchPrefetcherKeepsTheFirstRecordOfAKey(t *testing.T) {
+	p := NewBranchPrefetcher(t.Context(), nil)
+	key := []byte{0x42, 0x00}
+	first := p.Put(key, []byte{1, 2, 3}, 4)
+	size := p.bytes.Load()
+	second := p.Put(key, []byte{1, 2, 3}, 4)
+	require.Same(t, &first[0], &second[0], "a second read of a key must not replace the record a fold may already hold")
+	got, _, ok := p.Get(key)
+	require.True(t, ok)
+	require.Same(t, &first[0], &got[0])
+	require.Equal(t, size, p.bytes.Load())
 }
 
 func TestBranchPrefetcherLeafRefsOnlyForTheStoredRecord(t *testing.T) {
@@ -289,49 +223,6 @@ func TestBranchPrefetcherCloseStopsARunningWorkerAtItsBatch(t *testing.T) {
 	<-closed
 	require.Len(t, db.readKeys(), 1, "a closed prefetcher reads nothing past the batch a worker holds")
 	require.Equal(t, []int{1}, db.rollbackCounts())
-}
-
-func TestBranchPrefetcherDrainGivesUpAfterItsBound(t *testing.T) {
-	db := newFakeDB(1)
-	entered, release := make(chan struct{}), make(chan struct{})
-	var once sync.Once
-	db.onRead = func([]byte) {
-		once.Do(func() { close(entered) })
-		<-release
-	}
-	p := NewBranchPrefetcher(t.Context(), db)
-	defer p.Close()
-	defer close(release)
-	p.Add(storageTouch(1))
-	<-entered
-	for i := range 2 * branchPrefetchBatch {
-		p.Add(storageTouch(i + 2))
-	}
-	start := time.Now()
-	p.Drain(t.Context())
-	require.GreaterOrEqual(t, time.Since(start), branchPrefetchDrainMax)
-	st := p.Stats()
-	require.Equal(t, 1, st.DrainTimeouts)
-	require.Equal(t, 2*branchPrefetchBatch, st.Dropped, "the fold reads what the drain left; the backlog is dropped")
-}
-
-func TestBranchPrefetcherDrainReturnsWhenItsContextEnds(t *testing.T) {
-	db := newFakeDB(1)
-	entered, release := make(chan struct{}), make(chan struct{})
-	db.onRead = func([]byte) {
-		close(entered)
-		<-release
-	}
-	p := NewBranchPrefetcher(t.Context(), db)
-	defer p.Close()
-	defer close(release)
-	p.Add(storageTouch(1))
-	<-entered
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	start := time.Now()
-	p.Drain(ctx)
-	require.Less(t, time.Since(start), branchPrefetchDrainMax)
 }
 
 func TestBranchPrefetcherBoundsItsBacklog(t *testing.T) {

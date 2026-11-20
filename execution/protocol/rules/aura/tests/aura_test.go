@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -156,14 +155,17 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	db := temporaltest.NewTestDB(t, dirs)
 	tx, domains := temporaltest.NewTestTxSD(t, db)
 
-	// Replay genesis block the same way exec3 does (see txtask.go):
-	// GenesisToBlock populates an IntraBlockState with the alloc,
-	// then MakeWriteSet writes it into the real shared domains.
+	// Replay genesis block the same way exec3 does for a versioned IBS (see txtask.go):
+	// GenesisState builds the alloc into a versioned IntraBlockState, then ApplyWrites
+	// publishes its write set into the real shared domains.
 	genesisBlock, genesisIbs, err := genesiswrite.GenesisToBlock(genesis, dirs, logger)
 	require.NoError(err)
-	defer genesisIbs.Close()
-	domainWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
-	err = genesisIbs.MakeWriteSet(&chain.Rules{}, domainWriter)
+	genesisIbs.Close()
+	genesisHead, _ := genesiswrite.GenesisWithoutStateToBlock(genesis)
+	stateIbs, genesisWrites, err := genesiswrite.GenesisState(genesis, genesisHead)
+	require.NoError(err)
+	stateIbs.Close()
+	err = state.ApplyWrites(genesisWrites, domains, tx, 0, 1, false)
 	require.NoError(err)
 
 	// Write block headers so ChainReader can look up the genesis header.
