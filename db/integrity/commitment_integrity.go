@@ -75,7 +75,7 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.
 	}
 	logger.Info("[integrity] CommitmentRoot files discovered", "total", len(allFiles), "kvFiles", len(files), "onlyCheckLastFile", onlyCheckLastFile, "onlyRecomputeLastFile", onlyRecomputeLastFile)
 	if len(files) == 0 {
-		if err := aggTx.FilesGap(); err != nil {
+		if err := aggTx.AssertFilesGap(); err != nil {
 			return fmt.Errorf("%w: CommitmentRoot: no commitment .kv file is visible: %w", ErrIntegrity, err)
 		}
 		logger.Warn("[integrity] CommitmentRoot: no commitment .kv files found, nothing to check")

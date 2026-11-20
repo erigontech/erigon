@@ -60,6 +60,7 @@ func TestCheckCommitmentRootFailsWithoutVisibleCommitmentFile(t *testing.T) {
 	require.NoError(t, tx.Commit())
 	require.NoError(t, agg.BuildFiles(db, 2*stepSize, unboundedFinalityCtx))
 
+	agg.CloseFilesNoReopen()
 	entries, err := os.ReadDir(dirs.SnapDomain)
 	require.NoError(t, err)
 	for _, e := range entries {
@@ -67,7 +68,7 @@ func TestCheckCommitmentRootFailsWithoutVisibleCommitmentFile(t *testing.T) {
 			require.NoError(t, dir.RemoveFile(filepath.Join(dirs.SnapDomain, e.Name())))
 		}
 	}
-	require.NoError(t, agg.OpenFolder(db))
+	require.NoError(t, agg.ReloadFiles())
 
 	require.ErrorIs(t, integrity.CheckCommitmentRoot(ctx, db, nil, true, logger), integrity.ErrIntegrity)
 }

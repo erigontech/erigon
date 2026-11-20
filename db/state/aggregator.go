@@ -1846,8 +1846,8 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return ceiling
 }
 
-// FilesGap reports a gap in the files on disk: visible files then stop before the files end.
-func (at *AggregatorRoTx) FilesGap() error {
+// AssertFilesGap reports a gap in the files on disk: visible files then stop before the files end.
+func (at *AggregatorRoTx) AssertFilesGap() error {
 	a := at.a
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
