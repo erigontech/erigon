@@ -271,7 +271,7 @@ func TestCodeChangeUnspecifiedOnSetup(t *testing.T) {
 	cfg := newTestIBS(t, tracer)
 	defer cfg.State.Close()
 
-	_, _, err := Execute(code, nil, cfg, t.TempDir())
+	_, _, err := Execute(code, nil, cfg)
 	require.NoError(t, err)
 
 	// The setup SetCode in runtime.Execute must produce CodeChangeUnspecified.

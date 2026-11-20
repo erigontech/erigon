@@ -46,7 +46,9 @@ func TestSetCodeRevertRestoresCodeHash(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// A materialized object needs the non-arena state; it still carries a version map.
-			ibs := NewForSequentialCommitment(NewNoopReader())
+			ibs := New(NewNoopReader())
+			ibs.versionMap = NewVersionMap(nil)
+			ibs.noMaterialize = false
 			defer ibs.Close()
 			ibs.VersionMap().WriteCode(addr, Version{TxIndex: 0}, tc.code, true)
 			ibs.SetTxContext(1, 1)

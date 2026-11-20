@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
@@ -368,12 +369,10 @@ func initCodeGas(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, m
 	if overflow {
 		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
-	// Preparing the target can add it to the block access list. First check
-	// that execution gas covers memory expansion and the per-word charge.
-	if evm.chainRules.IsAmsterdam && availableGas.Execution >= gas.Execution {
-		gas.State = gasCreateAccount(evm, callContext, op, size)
+	if !eip3860 {
+		return gas, nil
 	}
-	return gas, nil
+	return gasCreateAccount(evm, callContext, availableGas, gas, op, size)
 }
 
 type createGasPreparation struct {
@@ -382,39 +381,121 @@ type createGasPreparation struct {
 	codeHash    accounts.CodeHash
 	preparation createPreparation
 	err         error
+	ready       bool
+	overridden  bool
 }
 
-// gasCreateAccount returns the state gas charge. The opcode reads the prepared
-// target and any preparation error from the call context when it executes.
-func gasCreateAccount(evm *EVM, callContext *CallContext, op OpCode, size uint64) int64 {
+// Create2InitCode records the original CREATE2 input and its hash. New EVM
+// memory is zero-filled, so the full length and the prefix through the last
+// nonzero byte identify the input without expanding memory during replay.
+type Create2InitCode struct {
+	size   uint64
+	prefix []byte
+	hash   accounts.CodeHash
+}
+
+func NewCreate2InitCode(input []byte) *Create2InitCode {
+	return &Create2InitCode{
+		size:   uint64(len(input)),
+		prefix: bytes.Clone(common.TrimRightZeroes(input)),
+		hash:   accounts.NewCode(input).Hash,
+	}
+}
+
+func (original *Create2InitCode) matches(scope *CallContext) bool {
+	size := scope.Stack.back(2)
+	if size.CmpUint64(original.size) != 0 {
+		return false
+	}
+	memory := scope.Memory.Data()
+	offset, overflow := scope.Stack.back(1).Uint64WithOverflow()
+	if overflow || offset >= uint64(len(memory)) {
+		return len(original.prefix) == 0
+	}
+	available := memory[offset:]
+	input := available[:min(original.size, uint64(len(available)))]
+	return bytes.Equal(common.TrimRightZeroes(input), original.prefix)
+}
+
+func (evm *EVM) reportCreateError(scope *CallContext, err error) {
+	report := evm.config.OnInitCodeOverrideError
+	if scope.create.ready {
+		report(scope.create.address, err)
+		return
+	}
+	if !errors.Is(err, ErrOutOfGas) && !errors.Is(err, ErrGasUintOverflow) {
+		return
+	}
+	caller := scope.Contract.Address()
+	// Failed gas checks reach the jump-table path, where savedPC identifies the failing opcode.
+	switch scope.Contract.GetOp(scope.savedPC) {
+	case CREATE:
+		if nonce, readErr := evm.intraBlockState.GetNonce(caller); readErr == nil {
+			report(accounts.InternAddress(types.CreateAddress(caller.Value(), nonce)), err)
+		}
+	case CREATE2:
+		original := evm.config.OriginalCreate2InitCode
+		if original != nil && original.matches(scope) {
+			address := types.CreateAddress2(caller.Value(), scope.Stack.back(3).Bytes32(), original.hash)
+			report(accounts.InternAddress(address), err)
+		}
+	}
+}
+
+// gasCreateAccount prepares the target in the call context, where the opcode
+// reads it and any preparation error when it executes.
+func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, gas mdgas.MdGasCost, op OpCode, size uint64) (mdgas.MdGasCost, error) {
+	override := evm.config.OverrideInitCode
+	if override == nil && (!evm.chainRules.IsAmsterdam || availableGas.Execution < gas.Execution) {
+		return gas, nil
+	}
 	prepared := &callContext.create
-	*prepared = createGasPreparation{}
+	*prepared = createGasPreparation{ready: true}
 	caller := callContext.Contract.Address()
 	if op == CREATE2 {
 		offset := callContext.Stack.back(1).Uint64()
 		if size > 0 {
-			// The CREATE2 address depends on the full initcode, including zero
-			// padding for any part beyond the current end of memory.
-			prepared.initCode = make([]byte, size)
-			memory := callContext.Memory.Data()
-			copy(prepared.initCode, memory[min(offset, uint64(len(memory))):])
+			prepared.initCode = getData(callContext.Memory.Data(), offset, size)
 		}
-		input := codeAndHash{code: prepared.initCode}
-		prepared.codeHash = input.Hash()
+		prepared.codeHash = accounts.NewCode(prepared.initCode).Hash
 		prepared.address = accounts.InternAddress(types.CreateAddress2(caller.Value(), callContext.Stack.back(3).Bytes32(), prepared.codeHash))
 	} else {
 		nonce, err := evm.intraBlockState.GetNonce(caller)
 		if err != nil {
 			prepared.err = fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-			return 0
+			return gas, nil
 		}
 		prepared.address = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
 	}
+	var replacement []byte
+	if override != nil {
+		replacement, prepared.overridden = override(prepared.address)
+	}
+	if prepared.overridden {
+		prepared.initCode = replacement
+		prepared.codeHash = accounts.NilCodeHash
+		if err := CheckMaxInitCodeSize(uint64(len(replacement)), true, evm.chainRules.IsAmsterdam); err != nil {
+			return mdgas.MdGasCost{}, err
+		}
+		// Memory expansion and CREATE2 hashing use the original input.
+		// The EIP-3860 analysis charge uses the replacement's length.
+		gas.Execution -= params.InitCodeWordGas * ToWordSize(size)
+		var overflow bool
+		gas.Execution, overflow = math.SafeAdd(gas.Execution, params.InitCodeWordGas*ToWordSize(uint64(len(replacement))))
+		if overflow {
+			return mdgas.MdGasCost{}, ErrGasUintOverflow
+		}
+	}
+	// Preparing the target can add it to the block access list. First check
+	// that execution gas covers memory expansion and the per-word charge.
+	if !evm.chainRules.IsAmsterdam || availableGas.Execution < gas.Execution {
+		return gas, nil
+	}
 	prepared.preparation, prepared.err = evm.prepareCreate(caller, prepared.address, *callContext.Stack.peek(), true, false, true)
 	if prepared.err == nil && prepared.preparation.chargeNewAccount {
-		return params.StateGasNewAccount
+		gas.State = params.StateGasNewAccount
 	}
-	return 0
+	return gas, nil
 }
 
 func gasExpFrontier(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
