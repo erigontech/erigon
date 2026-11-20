@@ -2604,6 +2604,9 @@ func TestCapabilitiesRenderAWindowThatHasNotStarted(t *testing.T) {
 	require.Equal(t, uint64(pruneGatingReceiptsUnstarted), uint64(caps.Receipts.DeleteStrategy.RetentionBlocks))
 }
 
+// TestCheckTxFee checks the maximum fee in wei against the RPC cap in ether.
+// Ordinary transactions use gas limit times fee cap per gas, and frame
+// transactions use their signed MaxFee. A zero cap disables the check.
 func TestCheckTxFee(t *testing.T) {
 	t.Parallel()
 
