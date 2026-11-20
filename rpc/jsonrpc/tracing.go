@@ -414,9 +414,8 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 		return err
 	}
 	header := prepared.header
-	ibs := state.NewWithVersionMap(prepared.reader, state.NewVersionMap(nil))
+	ibs := state.NewVersionedCall(prepared.reader)
 	defer ibs.Close()
-	ibs.SetNoConflictDetection()
 
 	baseFee := overrideBaseFee(config, header.BaseFee)
 
@@ -500,9 +499,8 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 	header := prepared.header
-	ibs := state.NewWithVersionMap(prepared.reader, state.NewVersionMap(nil))
+	ibs := state.NewVersionedCall(prepared.reader)
 	defer ibs.Close()
-	ibs.SetNoConflictDetection()
 
 	getHash := transactions.MakeBlockHashProvider(ctx, tx, canonicalViewReader{api._blockReader}, overrideBlockHash)
 

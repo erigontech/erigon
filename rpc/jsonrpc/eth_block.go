@@ -108,9 +108,8 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 	}
-	ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+	ibs := state.NewVersionedCall(stateReader)
 	defer ibs.Close()
-	ibs.SetNoConflictDetection()
 
 	parent, err := api.headerByHashAndNumber(ctx, tx, hash, stateBlockNumber)
 	if err != nil {
