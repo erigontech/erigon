@@ -399,15 +399,18 @@ type statePool interface {
 
 var ibsPool statePool = &sync.Pool{}
 
-// NewPooled is New over an IntraBlockState reused from an earlier call, whose
-// maps keep their capacity. Release it with ReleasePooled.
+// NewPooled is NewVersionedCall over an IntraBlockState reused from an earlier
+// call, whose maps keep their capacity. Release it with ReleasePooled.
 func NewPooled(stateReader StateReader) *IntraBlockState {
 	ibs, ok := ibsPool.Get().(*IntraBlockState)
 	if !ok {
-		return New(stateReader)
+		return NewVersionedCall(stateReader)
 	}
 	ibs.stateReader = stateReader
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
+	ibs.SetVersionMap(NewVersionMap(nil))
+	ibs.SetTxContext(0, 0)
+	ibs.SetNoConflictDetection()
 	return ibs
 }
 
