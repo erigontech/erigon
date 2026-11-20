@@ -176,6 +176,13 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 
 	require.Equal(t, 4, p.Stats().Queued)
 	hash := keccak.Sum256
+	sa, sb := slotA.Value(), slotB.Value()
+	require.ElementsMatch(t, []exec.PathTouch{
+		{Account: hash(balanceOnly[:])},
+		{Account: hash(storageOnly[:])},
+		{Account: hash(storageOnly[:]), Slot: hash(sa[:]), Storage: true},
+		{Account: hash(storageOnly[:]), Slot: hash(sb[:]), Storage: true},
+	}, cc.touchBatch[:4], "BAL writes queue their account and slot walks at the request; storage-only accounts get the account walk too")
 	want := string(v3.StorageNodeKey(hash(storageOnly[:]), nil, nil))
 	require.Eventually(t, func() bool { return slices.Contains(db.recorded(), want) }, 10*time.Second, time.Millisecond)
 }
