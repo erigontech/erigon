@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -143,5 +144,23 @@ func TestListHashStreamMatchesTrie(t *testing.T) {
 		if got, want := s.Hash(), legacyDeriveSha(list); got != want {
 			t.Fatalf("n=%d: stream %x, trie %x", n, got, want)
 		}
+	}
+}
+
+func TestListHashStreamHashIsRepeatable(t *testing.T) {
+	t.Parallel()
+	all := genTransactions(300)
+	for _, n := range []int{1, 2, 127, 128, 129, 300} {
+		list := all[:n]
+		s := NewListHashStream()
+		for i := range list {
+			s.Update(list[:i+1])
+		}
+		want := legacyDeriveSha(list)
+		require.Equal(t, want, s.Hash(), "n=%d", n)
+		var again common.Hash
+		require.NotPanics(t, func() { again = s.Hash() }, "n=%d", n)
+		require.Equal(t, want, again, "n=%d", n)
+		require.Panics(t, func() { s.Update(all[:n+1]) }, "n=%d", n)
 	}
 }
