@@ -2841,24 +2841,6 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 	return nil
 }
 
-func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateObject *stateObject, isDirty bool) {
-	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
-	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
-		fmt.Printf("delete: %x\n", addr)
-	}
-	if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
-		// Write any contract code associated with the state object
-		if stateObject.code.Bytes != nil && stateObject.dirtyCode {
-			fmt.Printf("UpdateCode: %x,%x\n", addr, stateObject.data.CodeHash)
-		}
-		if stateObject.createdContract {
-			fmt.Printf("CreateContract: %x\n", addr)
-		}
-		stateObject.printTrie()
-		fmt.Printf("UpdateAccountData: %x, balance=%s, nonce=%d\n", addr, stateObject.data.Balance.String(), stateObject.data.Nonce)
-	}
-}
-
 // FinalizeTx should be called after every transaction.
 func (ibs *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
 	for addr, bi := range ibs.balanceInc {
@@ -2907,90 +2889,6 @@ func (ibs *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 		so.newlyCreated = false
 		ibs.stateObjectsDirty[addr] = struct{}{}
 	}
-	// Invalidate journal because reverting across transactions is not allowed.
-	ibs.clearJournalAndRefund()
-	return nil
-}
-
-func (ibs *IntraBlockState) SoftFinalise() {
-	for addr := range ibs.journal.dirties {
-		// On the parallel path a write can be recorded without materializing a
-		// stateObject, so dirtiness comes from the journal, not object existence.
-		// The serial path keeps the object gate: a touched-but-reverted address
-		// lingers in journal.dirties without a stateObject.
-		if _, exist := ibs.stateObjects[addr]; !exist && ibs.versionMap == nil {
-			continue
-		}
-		ibs.stateObjectsDirty[addr] = struct{}{}
-	}
-	// Invalidate journal because reverting across transactions is not allowed.
-	ibs.clearJournalAndRefund()
-}
-
-// CommitBlock finalizes the state by removing the self destructed objects
-// and clears the journal as well as the refunds.
-func (ibs *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter StateWriter) error {
-	for addr, bi := range ibs.balanceInc {
-		if !bi.transferred {
-			if _, err := ibs.getStateObject(addr, true); err != nil {
-				return err
-			}
-		}
-	}
-	return ibs.MakeWriteSet(chainRules, stateWriter)
-}
-
-func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter StateWriter) error {
-	for addr := range ibs.journal.dirties {
-		ibs.stateObjectsDirty[addr] = struct{}{}
-	}
-	for addr, stateObject := range ibs.stateObjects {
-		_, isDirty := ibs.stateObjectsDirty[addr]
-		if dbg.TraceAccount(addr.Handle()) {
-			var updated *uint256.Int
-			if w, ok := ibs.versionedWrites.GetBalance(addr); ok {
-				val := w.Val
-				updated = &val
-			}
-			var dirty string
-			if isDirty {
-				dirty = " (dirty)"
-			}
-			if updated != nil {
-				fmt.Printf("%d (%d.%d) Updated Balance: %x%s: %s (%d)\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, dirty, stateObject.data.Balance.String(), updated)
-			} else {
-				fmt.Printf("%d (%d.%d) Updated Balance: %x%s: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, dirty, stateObject.data.Balance.String())
-			}
-		}
-		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-			fmt.Printf("%d (%d.%d) Update Account %x\n", ibs.blockNum, ibs.txIndex, ibs.version, addr)
-		}
-		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, stateObject, isDirty, ibs.trace, ibs.tracingHooks, true, chainRules.IsAmsterdam); err != nil {
-			return err
-		}
-		// EIP-6780 + EIP-7928: SELFDESTRUCT of a same-tx created contract clears
-		// storage at end-of-tx, so the BAL records dirty slots as reads. Zero the
-		// storage writes so AsBlockAccessList folds them away.
-		if ibs.versionMap != nil && stateObject.selfdestructed && stateObject.newlyCreated {
-			for key := range stateObject.dirtyStorage {
-				ibs.recordWriteStorage(addr, key, uint256.Int{}, uint256.Int{})
-			}
-		}
-	}
-
-	var reverted []accounts.Address
-
-	ibs.versionedWrites.forEachAddr(func(addr accounts.Address) {
-		if _, isDirty := ibs.stateObjectsDirty[addr]; !isDirty {
-			reverted = append(reverted, addr)
-		}
-	})
-
-	for _, addr := range reverted {
-		ibs.versionMap.DeleteAll(addr, ibs.txIndex)
-		ibs.versionedWrites.deleteAddr(addr)
-	}
-
 	// Invalidate journal because reverting across transactions is not allowed.
 	ibs.clearJournalAndRefund()
 	return nil
@@ -3273,15 +3171,6 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 	return nil
 }
 
-func (ibs *IntraBlockState) Print(chainRules chain.Rules, all bool) {
-	for addr, stateObject := range ibs.stateObjects {
-		_, isDirty := ibs.stateObjectsDirty[addr]
-		_, isDirty2 := ibs.journal.dirties[addr]
-
-		printAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr, stateObject, all || isDirty || isDirty2)
-	}
-}
-
 // SetTxContext sets the current transaction index which
 // used when the EVM emits new state logs. It should be invoked before
 // transaction execution.
@@ -3315,12 +3204,10 @@ func (ibs *IntraBlockState) ResetLogs() {
 	ibs.logs.reset()
 }
 
-// no not lock
 // EndTransaction is the versioned per-transaction boundary: it clears the
 // journal and refund so a later transaction cannot revert this one's changes.
 // Writes already live in the version map (taken via FinalizedWrites); no
-// StateWriter is involved. It replaces the writer-taking FinalizeTx/SoftFinalise
-// on the versioned path.
+// StateWriter is involved.
 func (ibs *IntraBlockState) EndTransaction() {
 	ibs.clearJournalAndRefund()
 }

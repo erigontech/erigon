@@ -67,7 +67,7 @@ func TestTxBoundaryRewindsArenaWithoutReset(t *testing.T) {
 	first := ibs.allocStateObject()
 	require.True(t, first.arena)
 
-	ibs.SoftFinalise() // a transaction boundary, without Reset
+	ibs.EndTransaction() // a transaction boundary, without Reset
 
 	require.Same(t, first, ibs.allocStateObject(), "the transaction boundary must free the slot")
 }

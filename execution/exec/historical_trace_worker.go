@@ -228,8 +228,8 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 				return err
 			} else {
 				result.ExecutionResult = *applyRes
-				// Update the state with pending changes
-				ibs.SoftFinalise()
+				// End the tx, clearing the journal for the next one.
+				ibs.EndTransaction()
 
 				result.Logs = ibs.GetRawLogs(txTask.TxIndex)
 				result.TraceFroms = tracer.Froms()

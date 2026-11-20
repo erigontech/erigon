@@ -109,8 +109,9 @@ func TestNull(t *testing.T) {
 	err = state.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	err = state.CommitBlock(&chain.Rules{}, w)
+	writes, err := state.FinalizedWrites(&chain.Rules{})
 	require.NoError(t, err)
+	require.NoError(t, ApplyWrites(writes, domains, tx, 1, txNum, false))
 
 	value, err = state.GetCommittedState(address, accounts.ZeroKey)
 	require.NoError(t, err)
@@ -139,8 +140,9 @@ func TestTouchDelete(t *testing.T) {
 	err = state.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	err = state.CommitBlock(&chain.Rules{}, w)
+	writes, err := state.FinalizedWrites(&chain.Rules{})
 	require.NoError(t, err)
+	require.NoError(t, ApplyWrites(writes, domains, tx, 1, txNum, false))
 
 	state.Reset()
 

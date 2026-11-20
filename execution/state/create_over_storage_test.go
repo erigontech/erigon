@@ -311,7 +311,8 @@ func TestRevertedSelfdestructUndoesWriteToZero(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, current.IsZero())
 	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
-	w := newFinalStateWriter()
-	require.NoError(t, ibs.CommitBlock(rules, w))
-	require.NotContains(t, w.storage[x], k5)
+	writes, err := ibs.FinalizedWrites(rules)
+	require.NoError(t, err)
+	_, ok := writes.GetStorage(x, k5)
+	require.False(t, ok)
 }

@@ -791,10 +791,10 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	t.Parallel()
 
 	tx, sd := testTemporalTxSD(t)
-	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+	_, _, err := sd.SeekCommitment(t.Context(), tx)
 	require.NoError(t, err)
 
-	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	s := state.New(r)
 	defer s.Close()
 
@@ -815,7 +815,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 			return transferErr
 		},
 	}
-	_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), w)
+	_, _ = s.FinalizedWrites(vmctx.Rules(chain.TestChainBerlinConfig))
 
 	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, vm.Config{})
 	_, _, _, err = vmenv.Call(params.SystemAddress, address, nil, mdgas.MdGas{Execution: math.MaxUint64}, uint256.Int{}, false /* bailout */)
