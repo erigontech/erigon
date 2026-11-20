@@ -2912,11 +2912,6 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 func (p *TxPool) Run(ctx context.Context) error {
 	defer p.logger.Info("[txpool] stopped")
 	defer p.poolDB.Close()
-	defer func() {
-		p.lock.Lock()
-		defer p.lock.Unlock()
-		p.stateChanged.Broadcast()
-	}()
 	p.p2pFetcher.ConnectCore()
 	p.p2pFetcher.ConnectSentries()
 	defer p.p2pFetcher.Wait()

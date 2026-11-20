@@ -56,10 +56,10 @@ func TestProvideTxnsInterruptsParentBlockWaitWhilePoolIsLocked(t *testing.T) {
 		{"stop parent wait", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, p, _, _ := newTestPool(t)
 			// A waiter stuck on a mutex cannot advance synctest's clock.
 			timeout := time.After(5 * time.Second)
 			synctest.Test(t, func(t *testing.T) {
+				_, p, _, _ := newTestPool(t)
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				stop := make(chan struct{})
@@ -93,8 +93,8 @@ func TestProvideTxnsInterruptsParentBlockWaitWhilePoolIsLocked(t *testing.T) {
 }
 
 func TestPeekBestWakesAtRequestedBlock(t *testing.T) {
-	_, pool, _, _ := newTestPool(t)
 	synctest.Test(t, func(t *testing.T) {
+		_, pool, _, _ := newTestPool(t)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		type result struct {
