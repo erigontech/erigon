@@ -530,7 +530,7 @@ func (b *BlobHistoryDownloader) run() {
 		case <-b.ctx.Done():
 			return
 		case <-downloadTimer.C:
-			b.warnBackfillIfDue()
+			b.warnBackfillIncomplete()
 			if err := b.downloadOnce(false); err != nil {
 				b.logger.Error("[BlobHistoryDownloader] Error downloading blobs", "err", err)
 			}
@@ -539,15 +539,10 @@ func (b *BlobHistoryDownloader) run() {
 	}
 }
 
-func (b *BlobHistoryDownloader) warnBackfillIfDue() {
+func (b *BlobHistoryDownloader) warnBackfillIncomplete() {
 	if b.backfillCompleted.Load() || time.Now().Before(b.nextBackfillWarning) {
 		return
 	}
-	b.warnBackfillIncomplete()
-	b.nextBackfillWarning = time.Now().Add(blobBackfillWarningInterval)
-}
-
-func (b *BlobHistoryDownloader) warnBackfillIncomplete() {
 	logCtx := []any{
 		"currentSlot", b.headSlot.Load(), "highestBackfilled", b.highestBackfilledSlot.Load(),
 		"frozenBlobsTo", b.sn.FrozenBlobs(), "frozenBlocksTo", b.sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum()),
@@ -561,6 +556,7 @@ func (b *BlobHistoryDownloader) warnBackfillIncomplete() {
 			"lowestUnresolved", b.retryRanges[0].start, "highestUnresolved", b.retryRanges[len(b.retryRanges)-1].end)
 	}
 	b.logger.Warn("[BlobHistoryDownloader] Blob backfilling is not finished, some blobs might be unavailable", logCtx...)
+	b.nextBackfillWarning = time.Now().Add(blobBackfillWarningInterval)
 }
 
 // downloadOnce performs a single download pass
@@ -605,7 +601,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	}
 
 	for currentSlot >= targetSlot {
-		b.warnBackfillIfDue()
+		b.warnBackfillIncomplete()
 		firstUnfrozenSlot := max(targetSlot, b.sn.FrozenBlobs())
 		if currentSlot < firstUnfrozenSlot {
 			break
