@@ -3664,7 +3664,7 @@ free -h
 swapon --show
 ```
 
-Erigon logs host-wide swap usage as informational context at startup. This number can include unrelated processes and pages that were swapped out before Erigon started; it does not prove that Erigon itself is swapping or losing throughput. For a dedicated, well-provisioned node, aim for enough physical memory that active swapping is unnecessary. To disable swap temporarily *after verifying sufficient available RAM*:
+Erigon emits a warning at startup when host-wide swap usage is non-zero. This one-time sample can include unrelated processes and pages that were swapped out before Erigon started, so it does not prove that Erigon itself is swapping or that its throughput is reduced. For a dedicated, well-provisioned node, aim for enough physical memory that active swapping is unnecessary. To disable swap temporarily *after verifying sufficient available RAM*:
 
 ```bash
 sudo swapoff -a

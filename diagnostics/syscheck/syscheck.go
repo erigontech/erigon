@@ -95,13 +95,13 @@ func CheckKernelAllocationHints(ctx context.Context, log log.Logger) {
 	if vmStat, err := mem.VirtualMemoryWithContext(ctx); err == nil {
 		swapStat, _ := mem.SwapMemoryWithContext(ctx)
 
-		// SwapMemory is a host-wide snapshot, not an indication that Erigon's
-		// own pages are swapped. Report it as context, not a performance warning.
+		// SwapMemory is host-wide and may include unrelated processes or old pages.
+		// Keep the warning explicit about its scope; it does not prove Erigon is swapping.
 		if swapStat != nil && swapStat.Used > 0 {
-			log.Info(
-				"Host swap usage detected (not necessarily caused by Erigon)",
-				"host_swap_used_bytes", swapStat.Used,
-				"host_swap_total_bytes", swapStat.Total,
+			log.Warn(
+				"Host swap is in use (may include unrelated processes or previously swapped pages)",
+				"swap_used", swapStat.Used,
+				"swap_total", swapStat.Total,
 			)
 		}
 
