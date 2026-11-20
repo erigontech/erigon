@@ -479,7 +479,12 @@ func (vm *VersionMap) balAddr(i int, ac *types.AccountChanges) accounts.Address 
 // balChunkAccounts is the account count below which a BAL is seeded on one goroutine.
 const balChunkAccounts = 256
 
-func balChunkWorkers(n int) int { return min(runtime.GOMAXPROCS(-1), n/balChunkAccounts, 8) }
+func balChunkWorkers(n int) int {
+	if n < 2*balChunkAccounts {
+		return 1 // no GOMAXPROCS read: it takes the scheduler lock, and every IntraBlockState builds an empty map
+	}
+	return min(runtime.GOMAXPROCS(-1), n/balChunkAccounts, 8)
+}
 
 // forBALChunks runs fn over disjoint account ranges of a BAL with n accounts, on several goroutines
 // for a large BAL. Accounts own their version-map entries, so the ranges never share a cell.
