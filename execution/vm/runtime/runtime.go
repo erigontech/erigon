@@ -115,7 +115,7 @@ func Execute(code, input []byte, cfg *Config) ([]byte, *state.IntraBlockState, e
 	}
 	setDefaults(cfg)
 
-	if cfg.State == nil || cfg.State == cfg.ownState { // every Execute starts from empty accounts, as with the non-versioned state
+	if cfg.State == nil || cfg.State == cfg.ownState { // the versioned CreateAccount keeps earlier storage, so only a new state gives an empty contract
 		ownState(cfg)
 	}
 	var (
