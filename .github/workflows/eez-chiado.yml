@@ -3,8 +3,8 @@ name: EEZ Chiado
 # Follow eez-chiado (eez.dev), a live rollupX network, from its genesis with
 # Erigon and require the derived blocks to be eez.dev's
 # (eez/tools/chiado/follow.sh): as a follower reading the public Chiado L1
-# over RPC and, on a runner named by the caller, as an all-in-one node that
-# syncs Chiado itself, which a hosted runner has no disk for.
+# over RPC and as an all-in-one node that syncs Chiado itself, about 40 GB and
+# half an hour on a hosted runner.
 #
 # eez-ci-gate.yml calls it: on pushes to <prefix>/eez and on request on any
 # branch.
@@ -12,6 +12,10 @@ name: EEZ Chiado
 on:
   workflow_call:
     inputs:
+      remote:
+        description: "Run the follower reading L1 over RPC"
+        type: boolean
+        default: true
       all-in-one-runner:
         description: "Runner label for the all-in-one run (archive Chiado, about 40 GB); empty skips it"
         type: string
@@ -22,6 +26,7 @@ permissions: {}
 jobs:
   follow:
     name: chiado (${{ matrix.mode }})
+    if: inputs.remote || inputs.all-in-one-runner != ''
     runs-on: ${{ matrix.mode == 'remote' && 'ubuntu-latest' || inputs.all-in-one-runner }}
     timeout-minutes: ${{ matrix.mode == 'remote' && 150 || 330 }}
     permissions:
@@ -29,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: ${{ fromJSON(inputs.all-in-one-runner != '' && '["remote","all-in-one"]' || '["remote"]') }}
+        mode: ${{ fromJSON(inputs.remote && (inputs.all-in-one-runner != '' && '["remote","all-in-one"]' || '["remote"]') || '["all-in-one"]') }}
     steps:
       - name: Check out Erigon
         uses: actions/checkout@v7

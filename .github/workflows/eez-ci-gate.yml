@@ -27,7 +27,7 @@ on:
           - full
         default: short
       followers:
-        description: "Also follow the devnet and Chiado, remote L1 and all-in-one (pushes to <prefix>/eez always do)"
+        description: "Also follow the devnet and Chiado, remote L1 and all-in-one (pushes to <prefix>/eez always do, Chiado all-in-one only)"
         type: boolean
         default: false
       drift:
@@ -37,7 +37,7 @@ on:
       chiado-runner:
         description: "With followers: runner label for the all-in-one Chiado run (about 40 GB); empty skips it"
         type: string
-        default: ""
+        default: "ubuntu-latest"
 
 # Per event, so a push does not cancel a dispatched follower run.
 concurrency:
@@ -191,7 +191,10 @@ jobs:
     if: needs.tier.outputs.followers == 'true'
     uses: ./.github/workflows/eez-chiado.yml
     with:
-      all-in-one-runner: ${{ inputs.chiado-runner || '' }}
+      # Pushes skip the remote follower: eez.dev's L1 RPC serves Chiado from
+      # block 24000000, above eez-chiado's L1 anchor 23731489.
+      remote: ${{ github.event_name == 'workflow_dispatch' }}
+      all-in-one-runner: ${{ github.event_name == 'push' && 'ubuntu-latest' || inputs.chiado-runner }}
     permissions:
       contents: read
 
