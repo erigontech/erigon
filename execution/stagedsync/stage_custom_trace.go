@@ -521,11 +521,9 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 	if err := backup.ClearTables(ctx, db, tx, tables...); err != nil {
 		return err
 	}
-	// Clearing the data tables alone is not enough: the prune-progress bookmark in
-	// TblPruningValsProg survives and would make the post-rebuild prune short-circuit
-	// (prs.TxTo >= txTo && Done), so the re-written history never gets pruned.
+	// The rebuilt tables need a fresh snapshot start and fresh pruning bookmarks.
 	for _, table := range tables {
-		if err := dbstate.InvalidatePruneProgress(tx, table); err != nil {
+		if err := dbstate.ResetSnapshotProgress(tx, table); err != nil {
 			return err
 		}
 	}

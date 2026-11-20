@@ -468,30 +468,6 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	return binary.BigEndian.Uint64(lstIdx) / d.stepSize
 }
 
-// Reads and pruning treat all steps before the end of a domain's visible snapshots
-// as covered. If the first snapshot starts after an MDBX row's step, reads skip
-// that row and pruning can delete it. Rows are grouped by key, so an older step
-// can appear later in the scan.
-func (d *Domain) hasValuesBeforeStep(tx kv.Tx, step kv.Step) (bool, error) {
-	c, err := tx.Cursor(d.ValuesTable)
-	if err != nil {
-		return false, err
-	}
-	defer c.Close()
-	for k, v, err := c.First(); ; k, v, err = c.Next() {
-		if err != nil || k == nil {
-			return false, err
-		}
-		stepBytes := v
-		if d.LargeValues {
-			stepBytes = k[len(k)-8:]
-		}
-		if kv.Step(^binary.BigEndian.Uint64(stepBytes)) < step {
-			return true, nil
-		}
-	}
-}
-
 func (dt *DomainRoTx) NewWriter(db kv.RoDB) *DomainBufferedWriter {
 	return dt.newWriter(db, dt.d.dirs.Tmp, !dt.d.Enabled)
 }
@@ -648,6 +624,13 @@ func (dt *DomainRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *Domain
 		name:      dt.d.Name,
 		h:         dt.ht.newWriter(db, tmpdir, discardHistory),
 	}
+	// A fileless writer can outlive the first publication and must check MDBX at flush.
+	// Once a late first file is visible, its start supplies the same bound.
+	if len(dt.files) == 0 {
+		w.checkWritesBefore = kv.NoStepBound
+	} else if dt.files[0].startTxNum != 0 {
+		w.checkWritesBefore = kv.Step(dt.files[0].startTxNum/dt.stepSize) + 1
+	}
 	return w
 }
 
@@ -655,7 +638,9 @@ type DomainBufferedWriter struct {
 	values *etl.Collector
 	name   kv.Domain
 
-	discard bool
+	discard           bool
+	checkWritesBefore kv.Step
+	minWriteStep      kv.Step
 
 	valsTable string
 	largeVals bool
@@ -701,6 +686,15 @@ func (w *DomainBufferedWriter) flushValues(ctx context.Context, tx kv.RwTx) erro
 		return nil
 	}
 
+	if w.minWriteStep < w.checkWritesBefore {
+		if w.checkWritesBefore != kv.NoStepBound {
+			return fmt.Errorf("cannot write %s step %d: first snapshot starts at step %d", w.name, w.minWriteStep, w.checkWritesBefore-1)
+		}
+		if err := w.recordSnapshotStart(tx); err != nil {
+			return err
+		}
+	}
+
 	if w.largeVals {
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
@@ -741,6 +735,9 @@ func (w *DomainBufferedWriter) valsCollector() *etl.Collector {
 func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 	if w.discard {
 		return nil
+	}
+	if w.checkWritesBefore != 0 && (w.values == nil || step < w.minWriteStep) {
+		w.minWriteStep = step
 	}
 	binary.BigEndian.PutUint64(w.stepBytes[:], ^uint64(step))
 
