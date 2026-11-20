@@ -17,4 +17,6 @@ type P2PManager interface {
 	UDPv5Listener() *discover.UDPv5
 	SetENRAttSubnets(subnets []uint64)
 	UpdateENRSyncNets(subnetIndex int, on bool)
+	// LostDuplicateRecently reports whether pid just lost a connection while another one stayed open.
+	LostDuplicateRecently(pid peer.ID) bool
 }

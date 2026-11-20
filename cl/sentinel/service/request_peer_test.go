@@ -93,16 +93,30 @@ func (b *blockingResponseBody) Close() error {
 var _ io.ReadCloser = (*blockingResponseBody)(nil)
 
 type peerRequestBackendStub struct {
-	handler http.Handler
+	handler       http.Handler
+	active        int
+	lostDuplicate bool
 }
 
-func (p peerRequestBackendStub) GetPeersCount() (int, int, int) { return 0, 0, 0 }
+func (p peerRequestBackendStub) GetPeersCount() (int, int, int)       { return p.active, 0, 0 }
+func (p peerRequestBackendStub) LostDuplicateConnection(peer.ID) bool { return p.lostDuplicate }
 func (p peerRequestBackendStub) Config() *sentinel.SentinelConfig {
 	config := &sentinel.SentinelConfig{}
 	config.MaxPeerCount = 1
 	return config
 }
 func (p peerRequestBackendStub) ReqRespHandler() http.Handler { return p.handler }
+
+// A request cut by a duplicate connection closing is not the peer's fault, and dropping the peer
+// would close the connection it still has.
+func TestFailedRequestKeepsAPeerThatJustLostADuplicateConnection(t *testing.T) {
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{active: 1}}
+	require.True(t, server.dropOnFailure(peer.ID("peer")))
+	server.peerRequestBackend = peerRequestBackendStub{active: 1, lostDuplicate: true}
+	require.False(t, server.dropOnFailure(peer.ID("peer")))
+	server.peerRequestBackend = peerRequestBackendStub{active: 0}
+	require.False(t, server.dropOnFailure(peer.ID("peer")), "below the peer limit failures never drop")
+}
 
 func receivePeerRequestTestValue[T any](t *testing.T, values <-chan T) T {
 	t.Helper()

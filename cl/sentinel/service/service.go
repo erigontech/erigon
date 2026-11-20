@@ -119,6 +119,7 @@ func responseBodyWeight(topic string, maxBytes uint64) int64 {
 
 type peerRequestBackend interface {
 	GetPeersCount() (active int, connected int, disconnected int)
+	LostDuplicateConnection(pid peer.ID) bool
 	Config() *sentinel.SentinelConfig
 	ReqRespHandler() http.Handler
 }
@@ -173,6 +174,13 @@ func (s *SentinelServer) BanPeerForInvalidData(_ context.Context, p *sentinelpro
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
+// dropOnFailure reports whether a failed request drops pid: only at the peer limit, and not right
+// after one of its duplicate connections closed, which can cut the request.
+func (s *SentinelServer) dropOnFailure(pid peer.ID) bool {
+	activePeers, _, _ := s.peerRequestBackend.GetPeersCount()
+	return activePeers >= int(s.peerRequestBackend.Config().MaxPeerCount) && !s.peerRequestBackend.LostDuplicateConnection(pid)
+}
+
 func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
 	protocolID, _, _ := strings.Cut(req.Topic, ",")
 	requestType := strings.TrimSpace(protocolID)
@@ -197,9 +205,7 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		return nil, err
 	}
 
-	activePeers, _, _ := s.peerRequestBackend.GetPeersCount()
-
-	shouldBanOnFail := activePeers >= int(s.peerRequestBackend.Config().MaxPeerCount)
+	shouldBanOnFail := s.dropOnFailure(pid)
 	// set the peer and topic we are requesting
 	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
 	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)

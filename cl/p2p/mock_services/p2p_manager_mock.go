@@ -72,6 +72,20 @@ func (mr *MockP2PManagerMockRecorder) Host() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Host", reflect.TypeOf((*MockP2PManager)(nil).Host))
 }
 
+// LostDuplicateRecently mocks base method.
+func (m *MockP2PManager) LostDuplicateRecently(pid peer.ID) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LostDuplicateRecently", pid)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// LostDuplicateRecently indicates an expected call of LostDuplicateRecently.
+func (mr *MockP2PManagerMockRecorder) LostDuplicateRecently(pid any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LostDuplicateRecently", reflect.TypeOf((*MockP2PManager)(nil).LostDuplicateRecently), pid)
+}
+
 // Pubsub mocks base method.
 func (m *MockP2PManager) Pubsub() *pubsub.PubSub {
 	m.ctrl.T.Helper()
