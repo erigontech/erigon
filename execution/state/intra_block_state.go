@@ -633,14 +633,6 @@ func (ibs *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error
 			fmt.Printf("%d (%d.%d) Exists %x: %v\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, exists)
 		}()
 	}
-	if ibs.versionMap == nil {
-		s, err := ibs.getStateObject(addr, true)
-		if err != nil {
-			return false, err
-		}
-		return s != nil && !s.deleted, nil
-	}
-
 	// Existence needs only the base record + self-destruct gate, not the
 	// per-field overlay. A same-tx self-destruct is still alive (EIP-6780); a
 	// cross-tx one makes versionedAccountBase return nil.
@@ -2187,14 +2179,7 @@ func (ibs *IntraBlockState) ContractCreatedInTx(addr accounts.Address) bool {
 
 // Used for EIP-6780
 func (ibs *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
-	stateObject, err := ibs.getStateObject(addr, true)
-	if err != nil {
-		return false, err
-	}
-	if stateObject == nil {
-		return false, nil
-	}
-	if !stateObject.newlyCreated {
+	if !ibs.createdThisTx(addr) {
 		return false, nil
 	}
 	code, err := ibs.GetCode(addr)
@@ -2203,6 +2188,18 @@ func (ibs *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
 	}
 	_, delegated := types.ParseDelegation(code)
 	return !delegated, nil
+}
+
+// createdThisTx reports whether this transaction created the account: createObject
+// is the only writer of an AddressPath cell, and reverting a creation drops or
+// restores that write, so an own address write under a journal-dirty address is
+// exactly the newly-created signal.
+func (ibs *IntraBlockState) createdThisTx(addr accounts.Address) bool {
+	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+		return false
+	}
+	_, ok := ibs.versionedWrites.GetAddress(addr)
+	return ok
 }
 
 // SetTransientState sets transient storage for a given account. It
