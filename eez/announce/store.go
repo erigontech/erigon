@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -157,6 +158,11 @@ type keeper interface {
 	Floor(number uint64) uint64
 }
 
+// backfillLimit bounds the blocks below its own one Record checks for a
+// missing announcement: Record runs in the commit of each block, which
+// derivation and the next block wait for.
+const backfillLimit = 512
+
 // Chain is the chain whose blocks a Signer announces.
 type Chain interface {
 	// CanonicalHash returns the hash of the canonical block number.
@@ -175,15 +181,19 @@ type Signer struct {
 	// finalized returns the finalized block.
 	finalized func() uint64
 	logger    log.Logger
-	// gap is set while an unsettled block may lack its announcement: from
-	// start, as a previous run may have left some, and after a failure.
-	gap bool
+	// gap, zero for none, is the lowest block from which the unsettled blocks
+	// may lack their announcement: 1 from start, as a previous run may have
+	// left some, then the block backfill resumes at, or the lowest whose
+	// announcement failed.
+	gap uint64
+	// limit bounds the blocks below its own one Record checks.
+	limit uint64
 }
 
 // NewSigner returns a signer of chain's blocks, on chain id chainID, with key
 // into store.
 func NewSigner(key *ecdsa.PrivateKey, chainID *uint256.Int, store *Store, chain Chain, finalized func() uint64, logger log.Logger) *Signer {
-	return &Signer{key: key, chainID: chainID, store: store, chain: chain, finalized: finalized, logger: logger, gap: true}
+	return &Signer{key: key, chainID: chainID, store: store, chain: chain, finalized: finalized, logger: logger, gap: 1, limit: backfillLimit}
 }
 
 // Address is the producer identity the signer's announcements recover to.
@@ -197,21 +207,23 @@ func (s *Signer) Announce(ctx context.Context, h *types.Header) error {
 
 // Record drops the announcements L1 finality passes, then signs and keeps
 // that of block h and those of the canonical blocks between the settled one
-// and h, within the store's window, that lack one. Only h's failure is
-// returned. Record must have one caller at a time.
+// and h, within the store's window, that lack one, checking backfillLimit
+// blocks at most, those announced included, and leaving the rest to the next
+// call. Only h's failure is returned. Record must have one caller at a time.
 func (s *Signer) Record(ctx context.Context, h *types.Header) error {
 	if err := s.store.Prune(ctx, s.finalized()); err != nil {
 		s.logger.Warn("[eez] finalized announcements not pruned", "event", "eez.sequencer.announcement.prune_failed", "err", err)
 	}
-	if err := s.sign(ctx, h.Number.Uint64(), h.Hash()); err != nil {
-		s.gap = true
+	number := h.Number.Uint64()
+	if err := s.sign(ctx, number, h.Hash()); err != nil {
+		if s.gap == 0 || number < s.gap {
+			s.gap = number
+		}
 		return err
 	}
-	if s.gap {
-		if err := s.backfill(ctx, h.Number.Uint64()); err != nil {
+	if s.gap != 0 {
+		if err := s.backfill(ctx, number); err != nil {
 			s.logger.Error("[eez] unsettled blocks left without an announcement", "event", "eez.sequencer.announcement.backfill_failed", "err", err)
-		} else {
-			s.gap = false
 		}
 	}
 	return nil
@@ -230,20 +242,28 @@ func (s *Signer) sign(ctx context.Context, number uint64, hash common.Hash) erro
 }
 
 // backfill signs the canonical blocks above the settled one and below number
-// that lack an announcement; derivation writes none of them. It starts at the
-// store's floor for number, as a put below it would drop number's.
+// that lack an announcement, from gap up, checking limit blocks at most, those
+// announced included; derivation writes none of them. It starts at the
+// store's floor for number at the lowest, as a put below it would drop
+// number's, and leaves gap at the block to resume at.
 func (s *Signer) backfill(ctx context.Context, number uint64) error {
-	for n := max(s.chain.Settled()+1, s.store.Floor(number)); n < number; n++ {
+	n := max(s.gap, s.chain.Settled()+1, s.store.Floor(number))
+	for i := uint64(0); i < s.limit && n < number; i, n = i+1, n+1 {
 		hash, ok, err := s.chain.CanonicalHash(ctx, n)
+		if err == nil && !ok {
+			err = errors.New("no canonical block")
+		}
+		if err == nil {
+			err = s.sign(ctx, n, hash)
+		}
 		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("no canonical block %d", n)
-		}
-		if err := s.sign(ctx, n, hash); err != nil {
+			s.gap = n
 			return fmt.Errorf("block %d: %w", n, err)
 		}
+	}
+	s.gap = n
+	if n >= number {
+		s.gap = 0
 	}
 	return nil
 }

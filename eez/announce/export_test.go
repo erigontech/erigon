@@ -48,3 +48,10 @@ type Keeper = keeper
 
 // SetKeeper makes s keep its announcements in k.
 func (s *Signer) SetKeeper(k Keeper) { s.store = k }
+
+// SetBackfillLimit sets the blocks below its own one Record of s checks.
+func (s *Signer) SetBackfillLimit(limit uint64) { s.limit = limit }
+
+// Gap is the lowest block from which the unsettled blocks may lack their
+// announcement for s, zero for none.
+func (s *Signer) Gap() uint64 { return s.gap }

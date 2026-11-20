@@ -490,6 +490,138 @@ func TestRecordBackfillWindow(t *testing.T) {
 	require.Equal(t, n.signed(8), n.announced(8))
 }
 
+// TestRecordBackfillBounded: the unsettled blocks a previous run left
+// unannounced are announced the backfill limit of them a block, those
+// announced already included, each block resuming past the last; once past
+// the head the next block signs no more.
+func TestRecordBackfillBounded(t *testing.T) {
+	n := newNode(t)
+	unsigned := n.sequencer(sequencer.Config{}, n.follower)
+	for range 5 {
+		n.tick(unsigned)
+	}
+	signer := n.signer()
+	signer.SetBackfillLimit(2)
+	k := &putSpy{Store: n.store}
+	signer.SetKeeper(k)
+	s := n.sequencer(sequencer.Config{Announcements: signer}, n.follower)
+	for _, step := range []struct {
+		puts []uint64
+		gap  uint64
+	}{{[]uint64{6, 1, 2}, 3}, {[]uint64{7, 3, 4}, 5}, {[]uint64{8, 5}, 7}, {[]uint64{9}, 0}, {[]uint64{10}, 0}} {
+		k.puts = nil
+		n.tick(s)
+		head := n.head().Number.Uint64()
+		require.Equal(t, step.puts, k.puts, "block %d", head)
+		require.Equal(t, step.gap, signer.Gap(), "block %d", head)
+	}
+	for i := uint64(1); i <= 10; i++ {
+		require.Equal(t, n.signed(i), n.announced(i), "block %d", i)
+	}
+}
+
+// TestRecordBackfillBoundedFailed: a backfill that fails resumes at the block
+// that failed, and a block whose announcement failed while a backfill is
+// pending is announced after the blocks pending below it.
+func TestRecordBackfillBoundedFailed(t *testing.T) {
+	n := newNode(t)
+	unsigned := n.sequencer(sequencer.Config{}, n.follower)
+	for range 5 {
+		n.tick(unsigned)
+	}
+	signer := n.signer()
+	signer.SetBackfillLimit(2)
+	signer.SetKeeper(&faulty{Store: n.store, puts: map[uint64]bool{2: true, 8: true}})
+	s := n.sequencer(sequencer.Config{Announcements: signer}, n.follower)
+	before := failures()
+	for _, gap := range []uint64{2, 4, 4, 6, 8, 10, 0} {
+		n.tick(s)
+		require.Equal(t, gap, signer.Gap(), "block %d", n.head().Number.Uint64())
+	}
+	require.Equal(t, before+1, failures(), "block 8's own")
+	for i := uint64(1); i <= 12; i++ {
+		require.Equal(t, n.signed(i), n.announced(i), "block %d", i)
+	}
+}
+
+// TestRecordBackfillBoundedSettled: a backfill pending below blocks L1
+// settles since resumes above them.
+func TestRecordBackfillBoundedSettled(t *testing.T) {
+	n := newNode(t)
+	unsigned := n.sequencer(sequencer.Config{}, n.follower)
+	for range 5 {
+		n.tick(unsigned)
+	}
+	signer := n.signer()
+	signer.SetBackfillLimit(2)
+	k := &putSpy{Store: n.store}
+	signer.SetKeeper(k)
+	s := n.sequencer(sequencer.Config{Announcements: signer}, n.follower)
+	n.tick(s)
+	require.Equal(t, []uint64{6, 1, 2}, k.puts)
+	require.Equal(t, uint64(3), signer.Gap())
+	n.settle(4)
+	k.puts = nil
+	n.tick(s)
+	require.Equal(t, []uint64{7, 5}, k.puts)
+	require.Zero(t, signer.Gap())
+	for i := uint64(3); i <= 4; i++ {
+		require.Nil(t, n.announced(i), "settled block %d", i)
+	}
+}
+
+// TestRecordBackfillBoundedFloor: a backfill pending below the store's floor
+// of the next block resumes at the floor, which keeps the block's own.
+func TestRecordBackfillBoundedFloor(t *testing.T) {
+	n := newNode(t)
+	st, err := announce.OpenWindow(t.Context(), t.TempDir(), 2, log.New())
+	require.NoError(t, err)
+	t.Cleanup(st.Close)
+	n.store = st
+	unsigned := n.sequencer(sequencer.Config{}, n.follower)
+	for range 5 {
+		n.tick(unsigned)
+	}
+	signer := n.signer()
+	signer.SetBackfillLimit(2)
+	signer.SetKeeper(&faulty{Store: st, puts: map[uint64]bool{4: true}})
+	s := n.sequencer(sequencer.Config{Announcements: signer}, n.follower)
+	n.tick(s)
+	require.Equal(t, uint64(4), signer.Gap())
+	n.tick(s)
+	require.Zero(t, signer.Gap())
+	require.Nil(t, n.announced(4), "below the floor of block 7")
+	for i := uint64(5); i <= 7; i++ {
+		require.Equal(t, n.signed(i), n.announced(i), "block %d", i)
+	}
+}
+
+// TestRecordBackfillBoundedRewind: a backfill pending above a head that
+// derivation rewinds below it ends with the next block: the blocks below the
+// head were checked, and those after it are signed as they are produced.
+func TestRecordBackfillBoundedRewind(t *testing.T) {
+	n := newNode(t)
+	unsigned := n.sequencer(sequencer.Config{}, n.follower)
+	for range 5 {
+		n.tick(unsigned)
+	}
+	signer := n.signer()
+	signer.SetBackfillLimit(2)
+	s := n.sequencer(sequencer.Config{Announcements: signer}, n.follower)
+	n.tick(s)
+	n.tick(s)
+	require.Equal(t, uint64(5), signer.Gap())
+	require.NoError(t, n.follower.HeadTo(t.Context(), n.hash(1)))
+	require.Equal(t, uint64(1), n.head().Number.Uint64())
+	for range 5 {
+		n.tick(s)
+		require.Zero(t, signer.Gap(), "block %d", n.head().Number.Uint64())
+	}
+	for i := uint64(1); i <= 6; i++ {
+		require.Equal(t, n.signed(i), n.announced(i), "block %d", i)
+	}
+}
+
 // TestPutWindow: a put drops the announcements of the blocks more than the
 // window from its own, below it and above it.
 func TestPutWindow(t *testing.T) {

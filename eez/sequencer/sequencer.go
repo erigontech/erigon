@@ -134,7 +134,7 @@ type Announcements interface {
 	Announce(ctx context.Context, h *types.Header) error
 	// Record signs and keeps the announcement of block h, the head, and those
 	// of the unsettled blocks below it that lack one, as far back as it keeps
-	// announcements.
+	// announcements, a bounded number per call.
 	Record(ctx context.Context, h *types.Header) error
 }
 

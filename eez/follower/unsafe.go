@@ -170,7 +170,8 @@ func (o *overlay) step(ctx context.Context) error {
 			return err
 		}
 		if envs[i] == nil {
-			// The sequencer may announce it after it became the head, or
+			// The sequencer may announce it after it became the head, sign
+			// it with the blocks that follow if it was left unsigned, or
 			// keep it no longer, more than its window below its head: the
 			// next step reads it again.
 			o.logger.Debug("[eez] sequencer block not announced", "event", "eez.node.follower.head.unannounced", "number", b.NumberU64(), "hash", b.Hash())
