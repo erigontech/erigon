@@ -75,6 +75,9 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.
 	}
 	logger.Info("[integrity] CommitmentRoot files discovered", "total", len(allFiles), "kvFiles", len(files), "onlyCheckLastFile", onlyCheckLastFile, "onlyRecomputeLastFile", onlyRecomputeLastFile)
 	if len(files) == 0 {
+		if filesEnd := aggTx.Agg().DirtyFilesEndTxNum(); filesEnd > 0 {
+			return fmt.Errorf("%w: CommitmentRoot: files on disk reach txNum %d, but no commitment .kv file is visible", ErrIntegrity, filesEnd)
+		}
 		logger.Warn("[integrity] CommitmentRoot: no commitment .kv files found, nothing to check")
 		return nil
 	}

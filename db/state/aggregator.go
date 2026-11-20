@@ -1740,6 +1740,9 @@ func (at *AggregatorRoTx) MinStepInDb(tx kv.Tx, domain kv.Domain) (lstInDb uint6
 
 func (a *Aggregator) EndTxNumMinimax() uint64 { return a.visible.Load().minimaxTxNum }
 
+// DirtyFilesEndTxNum is where the files on disk end; visible files stop below it at a gap.
+func (a *Aggregator) DirtyFilesEndTxNum() uint64 { return a.dirtyFilesEndTxNumMinimax() }
+
 // stepsInDB returns the number of steps of data currently in MDBX
 // (not yet collated to snapshot files).
 func (a *Aggregator) StepsInDB(ctx context.Context, db kv.RoDB) (float64, error) {
