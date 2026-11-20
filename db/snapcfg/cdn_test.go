@@ -62,4 +62,11 @@ func TestWebseedsFollowTheManifestBranch(t *testing.T) {
 	got, ok = webseedsFrom(t.Context(), "release/3.10", networkname.Mainnet, failing)
 	require.True(t, ok)
 	require.Equal(t, EmbeddedWebseeds[networkname.Mainnet], got, "a branch without a webseed file falls back to the embedded list")
+
+	unknownFormat := func(context.Context, string, string) ([]byte, error) {
+		return []byte(`"e3-v2-pub" = "v2:https://erigon310-v2-snapshots-mainnet.erigon.network"`), nil
+	}
+	got, ok = webseedsFrom(t.Context(), "release/3.10", networkname.Mainnet, unknownFormat)
+	require.True(t, ok)
+	require.Equal(t, EmbeddedWebseeds[networkname.Mainnet], got, "a webseed this version cannot parse falls back to the embedded list")
 }

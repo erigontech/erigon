@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
@@ -557,9 +558,14 @@ func GetEmbeddedWebseeds(chain string) ([]string, bool) {
 // Webseeds returns the webseeds of the snapshot branch the manifest comes from (SNAPS_GIT_BRANCH).
 func Webseeds(ctx context.Context, chain string) ([]string, bool) {
 	return webseedsFrom(ctx, snapshotGitBranch, chain, func(ctx context.Context, branch, chain string) ([]byte, error) {
+		ctx, cancel := context.WithTimeout(ctx, webseedsFetchTimeout)
+		defer cancel()
 		return FetchTomlFromURL(ctx, WebseedTomlGitHubURL(branch, chain))
 	})
 }
+
+// webseedsFetchTimeout bounds the fetch: it runs on every startup, even when preverified.toml makes the manifest fetch unnecessary.
+const webseedsFetchTimeout = 10 * time.Second
 
 func webseedsFrom(ctx context.Context, branch, chain string, fetch func(ctx context.Context, branch, chain string) ([]byte, error)) ([]string, bool) {
 	embedded, ok := GetEmbeddedWebseeds(chain)
@@ -570,11 +576,22 @@ func webseedsFrom(ctx context.Context, branch, chain string, fetch func(ctx cont
 	if err == nil {
 		var named map[string]string
 		if err = toml.Unmarshal(b, &named); err == nil && len(named) > 0 {
-			return slices.Sorted(maps.Values(named)), true
+			if err = validWebseeds(named); err == nil {
+				return slices.Sorted(maps.Values(named)), true
+			}
 		}
 	}
 	log.Warn("[snapshots] no webseed list on the snapshot branch, using the embedded one", "branch", branch, "chain", chain, "err", err)
 	return embedded, ok
+}
+
+func validWebseeds(named map[string]string) error {
+	for _, w := range named {
+		if _, err := WebseedToUrl(w); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
