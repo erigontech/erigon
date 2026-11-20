@@ -19,6 +19,7 @@ package integrity
 import (
 	"cmp"
 	"context"
+	"crypto/sha1"
 	"errors"
 	"fmt"
 	"math"
@@ -110,20 +111,25 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 		fps      []fileFingerprint
 	}
 	var ranges []blobRange
-	for _, segment := range view.BlobSidecars() {
-		from, to := segment.Src().GetRange()
-		var fps []fileFingerprint
-		if cache != nil {
-			var err error
-			if fps, err = caplinBlobFingerprints(segment, view.BeaconBlocks()); err != nil {
-				return err
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		for _, segment := range view.BlobSidecars() {
+			from, to := segment.Src().GetRange()
+			var fps []fileFingerprint
+			if cache != nil {
+				var err error
+				if fps, err = caplinBlobFingerprints(tx, segment, view.BeaconBlocks()); err != nil {
+					return err
+				}
+				if cache.has(string(CaplinBlobSidecars), fps) {
+					logger.Info("[integrity] CaplinBlobSidecars skipping (cache hit)", "from", from, "to", to)
+					continue
+				}
 			}
-			if cache.has(string(CaplinBlobSidecars), fps) {
-				logger.Info("[integrity] CaplinBlobSidecars skipping (cache hit)", "from", from, "to", to)
-				continue
-			}
+			ranges = append(ranges, blobRange{from, to, fps})
 		}
-		ranges = append(ranges, blobRange{from, to, fps})
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	reader := freezeblocks.NewBeaconSnapshotReader(snapshots, nil, beaconCfg)
@@ -166,7 +172,7 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 	return cmp.Or(waitErr, ctx.Err(), firstErr, cmp.Or(rangeErrs...))
 }
 
-func caplinBlobFingerprints(blob *snapshotsync.VisibleSegment, beacon []*snapshotsync.VisibleSegment) ([]fileFingerprint, error) {
+func caplinBlobFingerprints(tx kv.Tx, blob *snapshotsync.VisibleSegment, beacon []*snapshotsync.VisibleSegment) ([]fileFingerprint, error) {
 	from, to := blob.Src().GetRange()
 	paths := []string{blob.Src().FilePath()}
 	for _, segment := range beacon {
@@ -175,7 +181,19 @@ func caplinBlobFingerprints(blob *snapshotsync.VisibleSegment, beacon []*snapsho
 			paths = append(paths, segment.Src().FilePath())
 		}
 	}
-	return fingerprintsOf(paths...)
+	fps, err := fingerprintsOf(paths...)
+	if err != nil {
+		return nil, err
+	}
+	roots := sha1.New()
+	for slot := from; slot < to; slot++ {
+		var root common.Hash
+		if root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, slot); err != nil {
+			return nil, err
+		}
+		roots.Write(root[:])
+	}
+	return append(fps, fileFingerprint{basename: "canonical-roots", hash: [20]byte(roots.Sum(nil))}), nil
 }
 
 func checkCaplinBlobSnapshotLayout(ctx context.Context, view *freezeblocks.CaplinView) error {
@@ -187,6 +205,7 @@ func checkCaplinBlobSnapshotLayout(ctx context.Context, view *freezeblocks.Capli
 	}
 
 	beaconSegments := view.BeaconBlocks()
+	walked := make(map[*snapshotsync.VisibleSegment]bool, len(beaconSegments))
 	for _, blobSegment := range blobSegments {
 		from, to := blobSegment.Src().GetRange()
 		next := from
@@ -198,8 +217,11 @@ func checkCaplinBlobSnapshotLayout(ctx context.Context, view *freezeblocks.Capli
 			if beaconFrom > next {
 				return fmt.Errorf("beacon snapshot coverage missing %d-%d for blob range %d-%d", next, beaconFrom, from, to)
 			}
-			if err := checkCaplinSnapshotSegment(ctx, "beacon", beaconSegment); err != nil {
-				return err
+			if !walked[beaconSegment] {
+				if err := checkCaplinSnapshotSegment(ctx, "beacon", beaconSegment); err != nil {
+					return err
+				}
+				walked[beaconSegment] = true
 			}
 			next = min(to, beaconTo)
 			if next == to {

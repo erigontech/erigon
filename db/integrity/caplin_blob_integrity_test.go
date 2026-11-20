@@ -15,6 +15,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
@@ -848,9 +849,27 @@ func TestCheckCaplinBlobSidecarsSkipsASegmentTheCacheHasPassed(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, bed.check(t, true, cache))
 
-	bed.markCanonical(t, limit+1, common.Hash{1})
+	var hits atomic.Int32
+	logger := log.New()
+	logger.SetHandler(log.FilterHandler(func(r *log.Record) bool {
+		if r.Msg == "[integrity] CaplinBlobSidecars skipping (cache hit)" {
+			hits.Add(1)
+		}
+		return false
+	}, log.DiscardHandler()))
+	require.NoError(t, CheckCaplinBlobSidecars(t.Context(), bed.db, bed.snapshots, &bed.cfg, 0, true, cache, logger))
+	require.EqualValues(t, 2, hits.Load())
+}
+
+func TestCheckCaplinBlobSidecarsRechecksASegmentWhoseCanonicalRootChanged(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	bed := newBlobIntegrityBed(t, 2)
+	cache, err := LoadIntegrityCache(filepath.Join(t.TempDir(), "integrity.cache"))
+	require.NoError(t, err)
 	require.NoError(t, bed.check(t, true, cache))
-	require.ErrorContains(t, bed.check(t, true, nil), "does not match canonical root")
+
+	bed.markCanonical(t, limit+1, common.Hash{1})
+	require.ErrorContains(t, bed.check(t, true, cache), "does not match canonical root")
 }
 
 func TestCheckCaplinBlobSidecarsDoesNotCacheABrokenSegment(t *testing.T) {
@@ -868,8 +887,11 @@ func TestCaplinBlobFingerprintsCoverTheOverlappingBeaconSegment(t *testing.T) {
 	bed := newBlobIntegrityBed(t, 2)
 	view := bed.snapshots.View()
 	defer view.Close()
-	fps, err := caplinBlobFingerprints(view.BlobSidecars()[1], view.BeaconBlocks())
-	require.NoError(t, err)
+	var fps []fileFingerprint
+	require.NoError(t, bed.db.View(t.Context(), func(tx kv.Tx) (err error) {
+		fps, err = caplinBlobFingerprints(tx, view.BlobSidecars()[1], view.BeaconBlocks())
+		return err
+	}))
 	names := make([]string, 0, len(fps))
 	for _, fp := range fps {
 		names = append(names, fp.basename)
@@ -877,6 +899,7 @@ func TestCaplinBlobFingerprintsCoverTheOverlappingBeaconSegment(t *testing.T) {
 	require.Equal(t, []string{
 		snaptype.BlobSidecars.FileName(version.ZeroVersion, limit, 2*limit),
 		snaptype.BeaconBlocks.FileName(version.ZeroVersion, limit, 2*limit),
+		"canonical-roots",
 	}, names)
 }
 
