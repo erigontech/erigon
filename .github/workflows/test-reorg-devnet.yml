@@ -45,6 +45,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false
       - name: Test devnet driver
         run: make test-reorg-devnet-driver
       - name: Bounce, heal and restart
