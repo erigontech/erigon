@@ -466,62 +466,64 @@ func buildLegacyShapeTable(ctx context.Context, at *AggregatorRoTx, efFile visib
 		return id
 	}
 	g, gctx := errgroup.WithContext(ctx)
-	goWorkers(g, workers, func() error {
-		wat := at.a.BeginFilesRo()
-		defer wat.Close()
-		ht := wat.d[kv.CommitmentDomain].ht
-		fileIdx := slices.IndexFunc(ht.iit.files, func(f visibleFile) bool {
-			return f.startTxNum == efFile.startTxNum && f.endTxNum == efFile.endTxNum
+	for range workers {
+		g.Go(func() error {
+			wat := at.a.BeginFilesRo()
+			defer wat.Close()
+			ht := wat.d[kv.CommitmentDomain].ht
+			fileIdx := slices.IndexFunc(ht.iit.files, func(f visibleFile) bool {
+				return f.startTxNum == efFile.startTxNum && f.endTxNum == efFile.endTxNum
+			})
+			if fileIdx < 0 {
+				return fmt.Errorf("%s is not visible", efFile.Fullpath())
+			}
+			er := seg.NewReader(efFile.src.decompressor.MakeGetter(), ii.Compression)
+			var seq multiencseq.SequenceReader
+			var it multiencseq.SequenceIterator
+			var seqBuf, shape, last []byte
+			var runs []legacyShapeRun
+			for {
+				i := next.Add(1) - 1
+				if i >= int64(len(hot)) || size.Load() >= legacyShapeTableBytes {
+					return nil
+				}
+				if err := gctx.Err(); err != nil {
+					return err
+				}
+				h := hot[i]
+				er.Reset(h.offset)
+				if er.MatchCmp(h.key) != 0 {
+					return fmt.Errorf("%s holds no key %x at offset %d", efFile.Fullpath(), h.key, h.offset)
+				}
+				seqBuf, _ = er.Next(seqBuf[:0])
+				seq.Reset(efFile.startTxNum, seqBuf)
+				it.Reset(&seq, 0)
+				runs = runs[:0]
+				for rank := uint64(0); it.HasNext(); rank++ {
+					txNum, err := it.Next()
+					if err != nil {
+						return err
+					}
+					v, _, err := ht.historyValueAt(h.key, iiSeekResult{txNum: txNum, keyOrdinal: h.ordinal, rank: rank, fileIdx: fileIdx}, txNum)
+					if err != nil {
+						return err
+					}
+					shape = legacyBranchShape(shape, v)
+					if len(runs) > 0 && bytes.Equal(shape, last) {
+						runs[len(runs)-1].lastTxNum = txNum
+						continue
+					}
+					last = append(last[:0], shape...)
+					runs = append(runs, legacyShapeRun{lastTxNum: txNum, shape: intern(shape)})
+				}
+				mu.Lock()
+				table.runs[string(h.key)] = slices.Clone(runs)
+				mu.Unlock()
+				runsTotal.Add(int64(len(runs)))
+				size.Add(int64(len(h.key) + 16*len(runs) + 64))
+			}
 		})
-		if fileIdx < 0 {
-			return fmt.Errorf("%s is not visible", efFile.Fullpath())
-		}
-		er := seg.NewReader(efFile.src.decompressor.MakeGetter(), ii.Compression)
-		var seq multiencseq.SequenceReader
-		var it multiencseq.SequenceIterator
-		var seqBuf, shape, last []byte
-		var runs []legacyShapeRun
-		for {
-			i := next.Add(1) - 1
-			if i >= int64(len(hot)) || size.Load() >= legacyShapeTableBytes {
-				return nil
-			}
-			if err := gctx.Err(); err != nil {
-				return err
-			}
-			h := hot[i]
-			er.Reset(h.offset)
-			if er.MatchCmp(h.key) != 0 {
-				return fmt.Errorf("%s holds no key %x at offset %d", efFile.Fullpath(), h.key, h.offset)
-			}
-			seqBuf, _ = er.Next(seqBuf[:0])
-			seq.Reset(efFile.startTxNum, seqBuf)
-			it.Reset(&seq, 0)
-			runs = runs[:0]
-			for rank := uint64(0); it.HasNext(); rank++ {
-				txNum, err := it.Next()
-				if err != nil {
-					return err
-				}
-				v, _, err := ht.historyValueAt(h.key, iiSeekResult{txNum: txNum, keyOrdinal: h.ordinal, rank: rank, fileIdx: fileIdx}, txNum)
-				if err != nil {
-					return err
-				}
-				shape = legacyBranchShape(shape, v)
-				if len(runs) > 0 && bytes.Equal(shape, last) {
-					runs[len(runs)-1].lastTxNum = txNum
-					continue
-				}
-				last = append(last[:0], shape...)
-				runs = append(runs, legacyShapeRun{lastTxNum: txNum, shape: intern(shape)})
-			}
-			mu.Lock()
-			table.runs[string(h.key)] = slices.Clone(runs)
-			mu.Unlock()
-			runsTotal.Add(int64(len(runs)))
-			size.Add(int64(len(h.key) + 16*len(runs) + 64))
-		}
-	}, func() {})
+	}
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
