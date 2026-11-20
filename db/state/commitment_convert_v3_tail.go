@@ -36,11 +36,11 @@ type tailFold struct {
 	cur, prev map[string][]byte
 }
 
-func foldCommitmentTails(ctx context.Context, at *AggregatorRoTx, files VisibleFiles, db kv.TemporalRoDB, logger log.Logger) (map[string]tailFold, error) {
+func foldCommitmentTails(ctx context.Context, at *AggregatorRoTx, files VisibleFiles, opts ConvertOpts, logger log.Logger) (map[string]tailFold, error) {
 	folds := make(map[string]tailFold, len(files))
 	var prev map[string][]byte
 	for _, f := range files {
-		cur, err := foldCommitmentTail(ctx, at, f, db, logger)
+		cur, err := foldCommitmentTail(ctx, at, f, opts, logger)
 		if err != nil {
 			return nil, fmt.Errorf("[commitment_convert] %s: %w", filepath.Base(f.Fullpath()), err)
 		}
@@ -50,7 +50,7 @@ func foldCommitmentTails(ctx context.Context, at *AggregatorRoTx, files VisibleF
 	return folds, nil
 }
 
-func foldCommitmentTail(ctx context.Context, at *AggregatorRoTx, f VisibleFile, db kv.TemporalRoDB, logger log.Logger) (map[string][]byte, error) {
+func foldCommitmentTail(ctx context.Context, at *AggregatorRoTx, f VisibleFile, opts ConvertOpts, logger log.Logger) (map[string][]byte, error) {
 	dt := at.d[kv.CommitmentDomain]
 	end := f.EndRootNum()
 	state, found, _, fileEnd, err := dt.getLatestFromFiles(commitment.KeyCommitmentState, nil, kv.Step(end/at.StepSize())-1)
@@ -77,11 +77,11 @@ func foldCommitmentTail(ctx context.Context, at *AggregatorRoTx, f VisibleFile, 
 			return nil, fmt.Errorf("%w; folding the tail needs %s history from txNum %d, it starts at %d", differs, d, stateTxNum+1, from)
 		}
 	}
-	if db == nil {
-		return nil, fmt.Errorf("%w; folding the tail needs the database", differs)
+	if opts.DB == nil || opts.TxNums == (rawdbv3.TxNumsReader{}) {
+		return nil, fmt.Errorf("%w; folding the tail needs the database and its block reader", differs)
 	}
 
-	tx, err := db.BeginTemporalRo(ctx)
+	tx, err := opts.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func foldCommitmentTail(ctx context.Context, at *AggregatorRoTx, f VisibleFile, 
 	if _, _, err = sd.TouchChangedKeysFromHistory(tx, stateTxNum+1, end); err != nil {
 		return nil, err
 	}
-	blockNum, ok, err := rawdbv3.TxNums.FindBlockNum(ctx, tx, end-1)
+	blockNum, ok, err := opts.TxNums.FindBlockNum(ctx, tx, end-1)
 	if err != nil {
 		return nil, err
 	}

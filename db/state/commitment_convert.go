@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -62,6 +63,7 @@ type ConvertOpts struct {
 	Continue   bool
 	BeforeSwap func() error
 	DB         kv.TemporalRoDB
+	TxNums     rawdbv3.TxNumsReader
 }
 
 const (
@@ -648,7 +650,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		if err := checkCommitmentHistoryV3Start(at.d[kv.CommitmentDomain], at.StepSize()); err != nil {
 			return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3NoHistoryAdvice)
 		}
-		if folds, err = foldCommitmentTails(ctx, at, files, opts.DB, logger); err != nil {
+		if folds, err = foldCommitmentTails(ctx, at, files, opts, logger); err != nil {
 			return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3Advice)
 		}
 	}

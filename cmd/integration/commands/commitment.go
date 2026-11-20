@@ -608,6 +608,10 @@ Examples:
 			Continue:        convertContinue,
 			TargetV3:        convertV3,
 		}
+		if convertV3 {
+			br, _ := blocksIO(db, logger)
+			opts.DB, opts.TxNums = db, br.TxnumReader()
+		}
 		return commitmentConvert(db, cmd.Context(), logger, opts)
 	},
 }
@@ -634,7 +638,6 @@ func commitmentRestore(ctx context.Context, logger log.Logger) error {
 func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
 	if opts.TargetV3 {
 		opts.BeforeSwap = func() error { return rawdbreset.ResetExec(ctx, db) }
-		opts.DB = db
 	}
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	agg.PresetOfflineMerge()

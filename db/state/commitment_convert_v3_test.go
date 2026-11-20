@@ -18,6 +18,7 @@ package state_test
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"maps"
@@ -808,11 +809,27 @@ func TestConvertCommitmentFiles_V3FoldsTheTailAfterTheStoredState(t *testing.T) 
 	}
 	_, _, rootAt := writeBlocks(t, write, true)
 	db, agg, _ := writeBlocks(t, write, false)
+	maxTxNums := make(maxTxNumByBlock, 29)
+	for block := range maxTxNums {
+		maxTxNums[block] = uint64(block)*3 + 2
+	}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for block := range uint64(26) {
+			if block == 0 {
+				continue
+			}
+			if err := tx.Delete(kv.MaxTxNum, binary.BigEndian.AppendUint64(nil, block)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
 
 	func() {
 		at := agg.BeginFilesRo()
 		defer at.Close()
-		require.NoError(t, state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{TargetV3: true, DB: db}, log.New()))
+		opts := state.ConvertOpts{TargetV3: true, DB: db, TxNums: rawdbv3.TxNums.WithCustomReadTxNumFunc(maxTxNums)}
+		require.NoError(t, state.ConvertCommitmentFiles(t.Context(), at, opts, log.New()))
 	}()
 
 	func() {
@@ -824,14 +841,29 @@ func TestConvertCommitmentFiles_V3FoldsTheTailAfterTheStoredState(t *testing.T) 
 			require.NoError(t, err)
 			require.True(t, found)
 			require.Equal(t, end, fileEnd)
-			_, txNum, root, err := commitment.DecodeCommitmentV3State(v)
+			blockNum, txNum, root, err := commitment.DecodeCommitmentV3State(v)
 			require.NoError(t, err)
 			require.Equal(t, end-1, txNum)
+			require.Equal(t, (end-1)/3, blockNum, "file ending at %d", end)
 			require.Equal(t, rootAt[end-1], common.Hash(root), "file ending at %d", end)
 		}
 	}()
 
 	testPrefixFoldMatchesStateRecord(t, func(*testing.T, string) (kv.TemporalRwDB, *state.Aggregator) { return db, agg }, "converted")
+}
+
+type maxTxNumByBlock []uint64
+
+func (m maxTxNumByBlock) MaxTxNum(_ context.Context, _ kv.Tx, _ kv.Cursor, block uint64) (uint64, bool, error) {
+	if block >= uint64(len(m)) {
+		return 0, false, nil
+	}
+	return m[block], true, nil
+}
+
+func (m maxTxNumByBlock) BlockNumber(_ context.Context, _ kv.Tx, txNum uint64) (uint64, bool, error) {
+	block, _ := slices.BinarySearch(m, txNum)
+	return uint64(block), block < len(m), nil
 }
 
 func testAccount(seed uint64) []byte {
