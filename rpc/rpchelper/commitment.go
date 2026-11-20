@@ -34,7 +34,6 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 )
 
@@ -101,21 +100,19 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	}
 	defer tsd.Close()
 
-	// Seed the genesis state as the replay base: block 0 has no history to reconstruct from.
+	// We must compute genesis commitment from scratch because there's no history for block 0
 	genesis, err := rawdb.ReadGenesis(tx)
 	if err != nil {
 		return nil, err
 	}
 	genesisHeader, _ := genesiswrite.GenesisWithoutStateToBlock(genesis)
-	ibs, genesisWrites, err := genesiswrite.GenesisState(genesis, genesisHeader)
+	_, ibs, err := genesiswrite.ComputeGenesisCommitment(ctx, genesis, ttx, tsd, genesisHeader)
 	if err != nil {
 		return nil, err
 	}
 	ibs.Close()
-	if err := state.ApplyWrites(genesisWrites, tsd, ttx, 0, 1, false); err != nil {
-		return nil, err
-	}
-	genesisRoot, err := tsd.ComputeCommitment(ctx, ttx, true, 0, 1, "genesis", nil)
+
+	genesisRoot, err := tsd.GetCommitmentCtx().Trie().RootHash()
 	if err != nil {
 		return nil, err
 	}

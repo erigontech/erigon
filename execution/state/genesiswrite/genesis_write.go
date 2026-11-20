@@ -24,9 +24,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
 	"strings"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -34,15 +36,19 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
@@ -168,7 +174,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, ibs, err1 := GenesisToBlock(genesis)
+		block, ibs, err1 := GenesisToBlock(genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -339,7 +345,7 @@ func headTimestamp(tx kv.Tx, hash common.Hash, number uint64, chainName string, 
 }
 
 func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, error) {
-	block, statedb, err := GenesisToBlock(g)
+	block, statedb, err := GenesisToBlock(g, dirs, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -422,49 +428,82 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 	return rawdb.WriteChainConfig(tx, block.Hash(), config)
 }
 
-// GenesisToBlock creates the genesis block from a genesis specification, computing its
-// state root from the genesis allocation alone — block 0 has no prior state, so the
-// root follows from the version map with no database.
-func GenesisToBlock(g *types.Genesis) (*types.Block, *state.IntraBlockState, error) {
+// GenesisToBlock creates the genesis block and writes state of a genesis specification
+// to the given database (or discards it if nil).
+func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+	if dirs.SnapDomain == "" {
+		panic("empty `dirs` variable")
+	}
 	_ = g.Alloc //nil-check
 
 	head, withdrawals := GenesisWithoutStateToBlock(g)
 
-	statedb, writes, err := GenesisState(g, head)
+	ctx := context.Background()
+
+	// some users creating > 1Gb custom genesis by `erigon init`.
+	// On Windows, MDBX file-mappings are backed by the paging file for their
+	// full map size, so a large reservation immediately exhausts the pagefile
+	// when parallel goroutines open multiple databases. On Linux/macOS the
+	// reservation is sparse, but each open env still eats from the process's
+	// finite virtual address space (~128 TB on x86-64) — enough to matter
+	// when many EngineApiTester instances are alive in one process. 16 GB
+	// keeps headroom for outsized custom genesis allocations while letting
+	// 100+ testers coexist. 1 GB on Windows because the pagefile minimum is
+	// 8 GB.
+	genesisMapSize := 16 * datasize.GB
+	if runtime.GOOS == "windows" {
+		genesisMapSize = 1 * datasize.GB
+	}
+	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(dirs.Tmp).MapSize(genesisMapSize).GrowthStep(1 * datasize.MB).MustOpen()
+	defer genesisTmpDB.Close()
+
+	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).DisableBranchCache().Open(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer agg.Close()
+
+	tdb, err := temporal.New(genesisTmpDB, agg, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tdb.Close()
+
+	tx, err := tdb.BeginTemporalRw(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+
+	// Genesis is a one-shot commitment over an empty DB; the parallel trie has no
+	// context factory wired here, so use the sequential trie (identical root).
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
+	if err != nil {
+		return nil, nil, err
+	}
+	defer sd.Close()
+
+	rh, ibs, err := ComputeGenesisCommitment(ctx, g, tx, sd, head)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	rh, err := genesisStateRoot(writes, statedb.VersionMap())
-	if err != nil {
-		return nil, nil, err
-	}
 	head.Root = common.BytesToHash(rh)
 
-	return types.NewBlock(head, nil, nil, nil, withdrawals, nil), statedb, nil
+	return types.NewBlock(head, nil, nil, nil, withdrawals, nil), ibs, nil
 }
 
-// genesisStateRoot computes block 0's state root from the version map via the block
-// committer's read-as-of emit over an in-memory trie — the same mechanism every later
-// block's root uses, with no database behind it.
-func genesisStateRoot(writes *state.WriteSet, vm *state.VersionMap) ([]byte, error) {
-	view := vm.View(1, state.NewNoopReader())
-	updates := commitment.NewUpdates(commitment.ModeUpdate, "", commitment.KeyToHexNibbleHash)
-	defer updates.Close()
-	if err := state.EmitTouchedAsOf(writes, view, updates); err != nil {
-		return nil, err
-	}
-	hph := commitment.NewHexPatriciaHashed(20, commitment.NewMemoryContext(), commitment.DefaultTrieConfig())
-	defer hph.Release()
-	return hph.Process(context.Background(), updates, "genesis", nil, commitment.WarmupConfig{})
-}
+func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.TemporalTx, sd *execctx.SharedDomains, head *types.Header) ([]byte, *state.IntraBlockState, error) {
+	blockNum := uint64(0)
+	txNum := uint64(1) // 2 system txs in begin/end of block. Attribute state-writes to first, consensus state-changes to second
 
-// GenesisState builds the state the genesis allocation commits to into a fresh versioned
-// IntraBlockState, returning it with the finalized write set already published to the
-// state's version map.
-func GenesisState(g *types.Genesis, head *types.Header) (*state.IntraBlockState, *state.WriteSet, error) {
-	statedb := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
-	statedb.SetTxContext(0, 0)
+	r, w := state.NewNoopReader(), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+
+	statedb := state.NewForSequentialCommitment(r)
 	statedb.SetTrace(false)
 
 	hasConstructorAllocation := false
@@ -506,12 +545,8 @@ func GenesisState(g *types.Genesis, head *types.Header) (*state.IntraBlockState,
 		if err != nil {
 			return nil, nil, err
 		}
-		storage := account.Storage
-		if len(account.Constructor) > 0 {
-			storage = nil // the constructor's CreateAccount wipes the alloc storage
-		}
 		var slotVal uint256.Int
-		for key, value := range storage {
+		for key, value := range account.Storage {
 			slotVal.SetBytes(value[:])
 			err = statedb.SetState(address, accounts.InternKey(key), slotVal)
 			if err != nil {
@@ -532,12 +567,16 @@ func GenesisState(g *types.Genesis, head *types.Header) (*state.IntraBlockState,
 			}
 		}
 	}
-	writes, err := statedb.FinalizedWrites(&chain.Rules{})
+	if err := statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
+		return nil, nil, err
+	}
+
+	rh, err := sd.ComputeCommitment(ctx, tx, true, blockNum, txNum, "genesis", nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	statedb.FlushWritesToVersionMap(writes)
-	return statedb, writes, nil
+
+	return rh, statedb, nil
 }
 
 // GenesisWithoutStateToBlock creates the genesis block, assuming an empty state.

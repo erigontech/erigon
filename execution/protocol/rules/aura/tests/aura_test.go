@@ -56,7 +56,7 @@ import (
 func TestEmptyBlock(t *testing.T) {
 	require := require.New(t)
 	genesis := chainspec.GnosisGenesisBlock()
-	genesisBlock, ibs, err := genesiswrite.GenesisToBlock(genesis)
+	genesisBlock, ibs, err := genesiswrite.GenesisToBlock(genesis, datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 	defer ibs.Close()
 
@@ -156,13 +156,14 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	db := temporaltest.NewTestDB(t, dirs)
 	tx, domains := temporaltest.NewTestTxSD(t, db)
 
-	// Apply genesis the way exec3 does: the write set of the genesis IBS goes into the shared domains.
-	genesisBlock, genesisIbs, err := genesiswrite.GenesisToBlock(genesis)
+	// Replay genesis block the same way exec3 does (see txtask.go):
+	// GenesisToBlock populates an IntraBlockState with the alloc,
+	// then MakeWriteSet writes it into the real shared domains.
+	genesisBlock, genesisIbs, err := genesiswrite.GenesisToBlock(genesis, dirs, logger)
 	require.NoError(err)
 	defer genesisIbs.Close()
-	genesisWrites, err := genesisIbs.FinalizedWrites(&chain.Rules{})
-	require.NoError(err)
-	err = state.ApplyWrites(genesisWrites, domains, tx, 0, 1, false)
+	domainWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
+	err = genesisIbs.MakeWriteSet(&chain.Rules{}, domainWriter)
 	require.NoError(err)
 
 	// Write block headers so ChainReader can look up the genesis header.

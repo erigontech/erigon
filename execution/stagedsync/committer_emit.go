@@ -21,6 +21,7 @@ import (
 
 	keccak "github.com/erigontech/fastkeccak"
 
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
@@ -162,7 +163,16 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 		address := addr.Value()
 		for slot, hashed := range slots {
 			slotVal := slot.Value()
-			u := view.StorageUpdate(addr, slot)
+			var u commitment.Update
+			val, ok := view.GetStorage(addr, slot)
+			if ok && !val.IsZero() {
+				vBytes := val.Bytes()
+				u.Flags = commitment.StorageUpdate
+				u.StorageLen = int8(len(vBytes))
+				copy(u.Storage[:], vBytes)
+			} else {
+				u.Flags = commitment.DeleteUpdate
+			}
 			updates.TouchPlainKeyDirectHashed(string(address[:])+string(slotVal[:]), hashed, &u)
 		}
 	}
@@ -170,7 +180,19 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 }
 
 func (cc *commitmentCalculator) accountUpdate(view *state.VersionMapView, addr accounts.Address) commitment.Update {
-	u, wasDeleted := view.AccountUpdate(addr)
+	u := commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash, DeleteStorageSubtree: true}
+	acc, ok, wasDeleted := view.GetAccount(addr)
+	if ok {
+		u = commitment.Update{
+			Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
+			Balance:  acc.Balance,
+			Nonce:    acc.Nonce,
+			CodeHash: acc.CodeHash.Value(),
+		}
+		if acc.CodeHash.IsEmpty() {
+			u.CodeHash = empty.CodeHash
+		}
+	}
 	if _, ok := cc.storageReset[addr]; ok {
 		u.DeleteStorageSubtree = true
 	}

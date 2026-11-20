@@ -23,6 +23,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -44,7 +46,7 @@ func TestSoleAccountRootAfterDeleteCollapse(t *testing.T) {
 	final, _, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: gspec.Config, Alloc: types.GenesisAlloc{
 		survivor: {Balance: big.NewInt(1)},
 		newcomer: {Balance: big.NewInt(1e9)},
-	}})
+	}}, datadir.New(t.TempDir()), log.New())
 	require.NoError(t, err)
 
 	t.Run("parallelCommitment", func(t *testing.T) {

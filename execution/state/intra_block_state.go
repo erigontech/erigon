@@ -279,6 +279,14 @@ func NewVersionedCall(stateReader StateReader) *IntraBlockState {
 	return ibs
 }
 
+// NewForSequentialCommitment builds a versioned IBS that keeps the stateObject cache on; only genesis needs both.
+func NewForSequentialCommitment(stateReader StateReader) *IntraBlockState {
+	ibs := New(stateReader)
+	ibs.versionMap = NewVersionMap(nil)
+	ibs.noMaterialize = false
+	return ibs
+}
+
 func (ibs *IntraBlockState) ReadDuration() time.Duration {
 	return ibs.accountReadDuration + ibs.storageReadDuration + ibs.codeReadDuration
 }
