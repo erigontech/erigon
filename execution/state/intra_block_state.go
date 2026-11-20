@@ -3311,6 +3311,15 @@ func (ibs *IntraBlockState) ResetLogs() {
 }
 
 // no not lock
+// EndTransaction is the versioned per-transaction boundary: it clears the
+// journal and refund so a later transaction cannot revert this one's changes.
+// Writes already live in the version map (taken via FinalizedWrites); no
+// StateWriter is involved. It replaces the writer-taking FinalizeTx/SoftFinalise
+// on the versioned path.
+func (ibs *IntraBlockState) EndTransaction() {
+	ibs.clearJournalAndRefund()
+}
+
 func (ibs *IntraBlockState) clearJournalAndRefund() {
 	ibs.journal.Reset()
 	ibs.revisions.reset()

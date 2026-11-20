@@ -132,10 +132,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 			cfg.Tracer.EmitTxEnd(receipt, result.TxnGasUsage, nil)
 			txEnded = true
 		}
-		err = ibs.FinalizeTx(rules, stateWriter)
-		if err != nil {
-			return nil, err
-		}
+		ibs.EndTransaction()
 	}
 
 	return receipt, err

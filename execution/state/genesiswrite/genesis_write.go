@@ -345,14 +345,9 @@ func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 	}
 	defer statedb.Close()
 
-	stateWriter := state.NewNoopWriter()
-
 	blockNum := block.Number()
 	if !blockNum.IsZero() {
 		return nil, errors.New("can't commit genesis block with number > 0")
-	}
-	if err := statedb.CommitBlock(&chain.Rules{}, stateWriter); err != nil {
-		return nil, fmt.Errorf("cannot write state: %w", err)
 	}
 
 	return block, nil
