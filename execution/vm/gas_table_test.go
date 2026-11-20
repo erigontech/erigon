@@ -126,6 +126,7 @@ func TestEIP2200(t *testing.T) {
 
 			r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
+			s.SetVersionMap(nil)
 			defer s.Close()
 
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
@@ -228,6 +229,7 @@ func TestEIP8038SStore(t *testing.T) {
 			require.NoError(t, err)
 			r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
+			s.SetVersionMap(nil)
 			defer s.Close()
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 			require.NoError(t, s.CreateAccount(address, true))
@@ -383,6 +385,7 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 			require.NoError(t, err)
 			r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
+			s.SetVersionMap(nil)
 			defer s.Close()
 			caller := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 			require.NoError(t, s.CreateAccount(caller, true))
@@ -415,6 +418,7 @@ func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
 	require.NoError(t, err)
 	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	s := state.New(r)
+	s.SetVersionMap(nil)
 	defer s.Close()
 	initCode := program.New().Push(0).Push(400_000).Op(vm.MSTORE).Return(0, 0).Bytes()
 	salt := uint256.NewInt(0)
@@ -484,6 +488,7 @@ func TestCreate2OntoStorageOnlyAccountChargesNewAccountAndClearsStorage(t *testi
 			r := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 			w := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
+			s.SetVersionMap(nil)
 			defer s.Close()
 
 			initCode := []byte{byte(vm.STOP)}
@@ -553,6 +558,7 @@ func TestCreateTraceOnEarlyFailure(t *testing.T) {
 				require.NoError(t, err)
 				r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
+				s.SetVersionMap(nil)
 				defer s.Close()
 				initCode := program.New().Push(0).Return(0, 0).Bytes()
 				salt := uint256.NewInt(0)
@@ -648,6 +654,7 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 				require.NoError(t, err)
 				r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
+				s.SetVersionMap(nil)
 				defer s.Close()
 				initCode := program.New().Push(0xaa).Push(0).Op(vm.MSTORE8).Return(0, 1).Bytes()
 				salt := uint256.NewInt(0)
@@ -729,6 +736,8 @@ func TestCreateGas(t *testing.T) {
 			stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
 
 			s := state.New(stateReader)
+
+			s.SetVersionMap(nil)
 			defer s.Close()
 			require.NoError(t, s.CreateAccount(address, true))
 			require.NoError(t, s.SetCode(address, hexutil.MustDecode(tt.code), tracing.CodeChangeUnspecified))

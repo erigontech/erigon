@@ -87,6 +87,7 @@ func frameTestEnv(t testing.TB) (*vm.EVM, *types.FrameTransaction) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
 	ibs := state.New(state.NewNoopReader())
+	ibs.SetVersionMap(nil)
 	t.Cleanup(ibs.Close)
 	evm := newTestEVM(ibs, cfg, 30_000_000)
 	sender := common.HexToAddress("0x1000")

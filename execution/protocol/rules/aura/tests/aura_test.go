@@ -195,6 +195,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	writer := state.NewVersionedWriteCollector(rs)
 	ibs := state.New(reader)
+	ibs.SetVersionMap(nil)
 	defer ibs.Close()
 	err = protocol.InitializeBlockExecution(engine, chainRdr, header, config, ibs, writer, logger, nil)
 	require.NoError(err)

@@ -1497,6 +1497,7 @@ func TestVersionedRead_CodeSizeServedBySharedStore(t *testing.T) {
 func TestVersionedRead_MaterializedObjectFailsTheRead(t *testing.T) {
 	t.Parallel()
 	ibs := New(NewNoopReader())
+	ibs.SetVersionMap(nil)
 	addr := accounts.InternAddress(common.HexToAddress("0xab"))
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	ibs.SetVersionMap(NewVersionMap(nil))

@@ -84,6 +84,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 	r, tsw := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	intraBlockState := state.New(r)
+	intraBlockState.SetVersionMap(nil)
 	defer intraBlockState.Close()
 	// Start the 1st transaction
 	require.NoError(t, intraBlockState.CreateAccount(contract, true))
@@ -128,6 +129,8 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	intraBlockState := state.New(r)
+
+	intraBlockState.SetVersionMap(nil)
 	defer intraBlockState.Close()
 	// Start the 1st transaction
 	require.NoError(t, intraBlockState.CreateAccount(contract, true))
@@ -164,6 +167,8 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	intraBlockState := state.New(r)
+
+	intraBlockState.SetVersionMap(nil)
 	defer intraBlockState.Close()
 	// Start the 1st transaction
 	require.NoError(t, intraBlockState.CreateAccount(contract, true))
