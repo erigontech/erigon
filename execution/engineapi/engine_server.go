@@ -364,6 +364,13 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	onValid func(blockHash common.Hash, witness *jsonrpc.ExecutionWitnessResult),
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
+	npT0 := time.Now()
+	var npBAL, npDecode, npTxHash, npToBlock time.Duration
+	defer func() {
+		total := time.Since(npT0)
+		e.logger.Info("[np-phase] engine", "npEngBAL", npBAL, "npEngDecode", npDecode, "npEngTxHash", npTxHash, "npEngToBlock", npToBlock,
+			"npEngRest", total-npBAL-npDecode-npTxHash-npToBlock, "npEngTotal", total)
+	}()
 	if req == nil {
 		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
 	}
@@ -475,7 +482,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
 		balBytes := *req.BlockAccessList
+		balT0 := time.Now()
 		blockAccessList, blockAccessListErr = types.DecodeBlockAccessListSidecarForBlock(balBytes, header.GasLimit, len(req.Transactions))
+		npBAL = time.Since(balT0)
 		if blockAccessListErr != nil && !errors.Is(blockAccessListErr, types.ErrInvalidBlockAccessList) {
 			e.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", blockAccessListErr, "raw", hex.EncodeToString(balBytes))
 			return &engine_types.PayloadStatus{
@@ -537,15 +546,19 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if deriveBlobHashes {
 		expectedBlobHashes = make([]common.Hash, 0, e.config.GetMaxBlobsPerBlock(header.Time))
 	}
+	decT0 := time.Now()
 	txs, transactions, expectedBlobHashes, invalidTransactionStatus := e.decodePayloadTransactions(req.Transactions, uint64(req.GasLimit), e.config.IsAmsterdam(uint64(req.Timestamp)), deriveBlobHashes, expectedBlobHashes)
 
 	var sendersRecovery *exec.SendersRecovery
 	if headerErr == nil && invalidTransactionStatus == nil && len(transactions) > 0 {
 		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
 	}
+	npDecode = time.Since(decT0)
+	hashT0 := time.Now()
 	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
 
 	blockHash := req.BlockHash
+	npTxHash = time.Since(hashT0)
 	if header.Hash() != blockHash {
 		e.logger.Error(
 			"[NewPayload] invalid block hash",
@@ -630,7 +643,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// inside InsertBlocks doesn't re-encode every tx
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
+	blkT0 := time.Now()
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
+	npToBlock = time.Since(blkT0)
 	if possibleStatus != nil {
 		// Decided without the lock: a forkchoice update or another payload may have changed the validated state since.
 		if possibleStatus, err = e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, parent, true, defaultReadinessWait); err != nil {
