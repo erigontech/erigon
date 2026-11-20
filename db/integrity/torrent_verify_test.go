@@ -37,7 +37,14 @@ func writeTorrentPair(t *testing.T, dir, name string, corrupt bool) {
 	dataPath := filepath.Join(dir, name)
 	require.NoError(t, os.MkdirAll(filepath.Dir(dataPath), 0o755))
 	require.NoError(t, os.WriteFile(dataPath, bytes.Repeat([]byte{0xAA}, 1024), 0o644))
+	writeTorrentFile(t, dataPath)
+	if corrupt {
+		require.NoError(t, os.WriteFile(dataPath, bytes.Repeat([]byte{0xBB}, 1024), 0o644))
+	}
+}
 
+func writeTorrentFile(t *testing.T, dataPath string) {
+	t.Helper()
 	info := metainfo.Info{PieceLength: 16 * 1024}
 	require.NoError(t, info.BuildFromFilePath(dataPath))
 	infoBytes, err := bencode.Marshal(info)
@@ -47,10 +54,6 @@ func writeTorrentPair(t *testing.T, dir, name string, corrupt bool) {
 	require.NoError(t, err)
 	defer f.Close()
 	require.NoError(t, (&metainfo.MetaInfo{InfoBytes: infoBytes}).Write(f))
-
-	if corrupt {
-		require.NoError(t, os.WriteFile(dataPath, bytes.Repeat([]byte{0xBB}, 1024), 0o644))
-	}
 }
 
 // A corrupt pair in a subdir must fail verification — proving the scan

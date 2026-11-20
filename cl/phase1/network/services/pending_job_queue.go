@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -65,6 +66,11 @@ type pendingJobQueue[K comparable, M any] struct {
 	tryProcess         func(ctx context.Context, key K, msg M) pendingJobDecision
 	processAfterRemove func(ctx context.Context, key K, msg M)
 	onExpired          func(key K, msg M)
+	// onRemoved runs once for every stored job removed, after the removal and
+	// before onExpired or processAfterRemove. It is optional.
+	onRemoved func(key K, msg M)
+	// beforePass runs at the start of every processPending call. It is optional.
+	beforePass func()
 
 	jobs sync.Map // K -> *pendingJob[M]
 	// count includes stored jobs and reservations held by in-flight enqueues. It
@@ -84,6 +90,7 @@ func newPendingJobQueue[K comparable, M any](
 	tryProcess func(ctx context.Context, key K, msg M) pendingJobDecision,
 	processAfterRemove func(ctx context.Context, key K, msg M),
 	onExpired func(key K, msg M),
+	opts ...func(*pendingJobQueue[K, M]),
 ) *pendingJobQueue[K, M] {
 	if options.capacity <= 0 {
 		panic("pending job queue capacity must be positive")
@@ -113,6 +120,9 @@ func newPendingJobQueue[K comparable, M any](
 		cancelLoop:             cancelLoop,
 		fullCounter:            pendingJobQueueRejectedCounter.WithLabelValues(options.name),
 	}
+	for _, opt := range opts {
+		opt(q)
+	}
 	q.loopWG.Go(func() {
 		q.loop(loopCtx)
 	})
@@ -123,10 +133,10 @@ func newPendingJobQueue[K comparable, M any](
 // potentially expensive work. A duplicate arriving at capacity is therefore
 // reported as full because detecting it would require building the key. Storage
 // keeps or releases the reservation; deferred cleanup handles key-construction
-// errors and panics.
-func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) error {
+// errors and panics. It reports whether msg was stored: a duplicate key is not.
+func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) (inserted bool, err error) {
 	if !q.reserve() {
-		return errPendingJobQueueFull
+		return false, errPendingJobQueueFull
 	}
 
 	reservationOwned := true
@@ -138,11 +148,11 @@ func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) e
 
 	key, err := buildKey()
 	if err != nil {
-		return err
+		return false, err
 	}
-	q.storeReserved(key, msg)
+	inserted = q.storeReserved(key, msg)
 	reservationOwned = false
-	return nil
+	return inserted, nil
 }
 
 func (q *pendingJobQueue[K, M]) reserve() bool {
@@ -160,20 +170,21 @@ func (q *pendingJobQueue[K, M]) reserve() bool {
 
 // storeReserved transfers the caller's reservation to a new job, or releases
 // it if the key is already present.
-func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) {
+func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) bool {
 	candidate := &pendingJob[M]{
 		msg:          msg,
 		creationTime: time.Now(),
 	}
 	if _, loaded := q.jobs.LoadOrStore(key, candidate); loaded {
 		q.count.Add(-1)
-		return
+		return false
 	}
 	// Wake notifications may coalesce; count determines whether work remains.
 	select {
 	case q.wakeLoop <- struct{}{}:
 	default:
 	}
+	return true
 }
 
 func (q *pendingJobQueue[K, M]) remove(key K, job *pendingJob[M]) bool {
@@ -181,6 +192,9 @@ func (q *pendingJobQueue[K, M]) remove(key K, job *pendingJob[M]) bool {
 		return false
 	}
 	q.count.Add(-1)
+	if q.onRemoved != nil {
+		q.onRemoved(key, job.msg)
+	}
 	return true
 }
 
@@ -218,27 +232,43 @@ func (q *pendingJobQueue[K, M]) loop(ctx context.Context) {
 	}
 }
 
-// processPending runs callbacks sequentially. Once it observes cancellation, it
-// stops before the next job; an already-started callback may finish. It must not
-// be called concurrently.
+// processPending runs callbacks sequentially, oldest job first. Once it observes
+// cancellation, it stops before the next job; an already-started callback may
+// finish. It must not be called concurrently.
 func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
+	if q.beforePass != nil {
+		q.beforePass()
+	}
+	type entry struct {
+		key K
+		job *pendingJob[M]
+	}
+	entries := make([]entry, 0, max(q.count.Load(), 0))
 	q.jobs.Range(func(key, value any) bool {
+		entries = append(entries, entry{key.(K), value.(*pendingJob[M])})
+		return true
+	})
+	slices.SortFunc(entries, func(a, b entry) int { return a.job.creationTime.Compare(b.job.creationTime) })
+
+	for _, e := range entries {
 		if ctx.Err() != nil {
-			return false
+			return
 		}
-		k := key.(K)
-		job := value.(*pendingJob[M])
+		k, job := e.key, e.job
+		if current, ok := q.jobs.Load(k); !ok || current != job {
+			continue
+		}
 		if time.Since(job.creationTime) > q.expiry {
 			if q.remove(k, job) {
 				q.onExpired(k, job.msg)
 			}
-			return true
+			continue
 		}
 
 		decision := q.tryProcess(ctx, k, job.msg)
 		switch decision {
 		case pendingJobKeep:
-			return true
+			continue
 		case pendingJobRemove:
 		case pendingJobRemoveThenProcess:
 			if q.processAfterRemove == nil {
@@ -252,6 +282,5 @@ func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 		if removed && decision == pendingJobRemoveThenProcess {
 			q.processAfterRemove(ctx, k, job.msg)
 		}
-		return true
-	})
+	}
 }

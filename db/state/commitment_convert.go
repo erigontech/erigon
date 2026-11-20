@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -62,6 +63,8 @@ type ConvertOpts struct {
 	// for passing the same TargetSqueeze / TargetNibblesV2 values used in
 	// the original run; a mismatch produces mixed-encoding output silently.
 	Continue bool
+	DB       kv.TemporalRoDB
+	TxNums   rawdbv3.TxNumsReader
 }
 
 const (
@@ -675,6 +678,13 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 			return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3NoHistoryAdvice)
 		}
 	}
+	var folds map[string]tailFold
+	if opts.TargetV3 {
+		var err error
+		if folds, err = foldCommitmentTails(ctx, at, files, opts, logger); err != nil {
+			return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3Advice)
+		}
+	}
 
 	// Output .kv version encodes the squeeze target for the version-gated reader (v2.1 squeezed,
 	// v2.2 plain); set once for the run so phase 1 writes and phase 2 discovery agree, then restore.
@@ -721,7 +731,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	var processedFiles, priorCompleteCount int
 	if convertDomain {
 		var err error
-		if convertedFiles, processedFiles, priorCompleteCount, err = convertDomainFiles(ctx, at, files, rebuildDir, requiredAccessors, opts, logger); err != nil {
+		if convertedFiles, processedFiles, priorCompleteCount, err = convertDomainFiles(ctx, at, files, rebuildDir, requiredAccessors, opts, folds, logger); err != nil {
 			return err
 		}
 	}
@@ -820,7 +830,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 
 // convertDomainFiles runs phases 1 and 2 for the commitment .kv files: it writes the
 // converted files into rebuildDir and checks them; snapshots/domain/ is not touched.
-func convertDomainFiles(ctx context.Context, at *AggregatorRoTx, files VisibleFiles, rebuildDir string, requiredAccessors []string, opts ConvertOpts, logger log.Logger) (converted VisibleFiles, processedFiles, priorCompleteCount int, err error) {
+func convertDomainFiles(ctx context.Context, at *AggregatorRoTx, files VisibleFiles, rebuildDir string, requiredAccessors []string, opts ConvertOpts, folds map[string]tailFold, logger log.Logger) (converted VisibleFiles, processedFiles, priorCompleteCount int, err error) {
 	// requiredAccessors mirrors the set Phase 2 verifies post-conversion;
 	// preflightResume reuses it to classify shards from prior interrupted runs.
 	// pendingFiles is the suffix of `files` that still needs Phase 1 work.
@@ -854,7 +864,7 @@ func convertDomainFiles(ctx context.Context, at *AggregatorRoTx, files VisibleFi
 
 	// Phase 1: convert all.
 	phaseStart := time.Now()
-	processedFiles, skippedFiles, totalSizeDelta, processedKeys, err := convertPhase1(ctx, at, pendingFiles, rebuildDir, opts, grandTotalKeys, logger)
+	processedFiles, skippedFiles, totalSizeDelta, processedKeys, err := convertPhase1(ctx, at, pendingFiles, rebuildDir, opts, folds, grandTotalKeys, logger)
 	if err != nil && opts.TargetV3 {
 		return nil, 0, 0, fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3Advice)
 	}
@@ -1737,6 +1747,7 @@ func convertPhase1(
 	files VisibleFiles,
 	rebuildDir string,
 	opts ConvertOpts,
+	folds map[string]tailFold,
 	grandTotalKeys uint64,
 	logger log.Logger,
 ) (processedFiles, skippedFiles int, totalSizeDelta int64, processedKeys uint64, err error) {
@@ -1749,7 +1760,7 @@ func convertPhase1(
 		var ki uint64
 		var convErr error
 		if opts.TargetV3 {
-			delta, ki, convErr = convertCommitmentFileV3(ctx, at, f, rebuildDir, i+1, N, grandTotalKeys, processedKeys, logger)
+			delta, ki, convErr = convertCommitmentFileV3(ctx, at, f, folds[f.Fullpath()], rebuildDir, i+1, N, grandTotalKeys, processedKeys, logger)
 		} else {
 			delta, _, ki, convErr = convertCommitmentFile(ctx, at, f, rebuildDir, opts, i+1, N, grandTotalKeys, processedKeys, logger)
 		}

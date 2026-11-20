@@ -154,3 +154,23 @@ func TestBlindedBeaconBodyEncodingSizeTracksEncoding(t *testing.T) {
 		})
 	}
 }
+
+func TestBlindedBeaconBodyJSONRejectsNullExecutionRequests(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			body := NewBlindedBeaconBody(&clparams.MainnetBeaconConfig, version)
+			require.Error(t, json.Unmarshal([]byte(`{"execution_requests":null}`), body))
+		})
+	}
+}
+
+func TestBlindedBeaconBodyJSONRejectsNullOperationLists(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.BellatrixVersion, clparams.CapellaVersion, clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion} {
+		for _, input := range []string{`{"attestations":null}`, `{"attester_slashings":null}`} {
+			t.Run(version.String()+"/"+input, func(t *testing.T) {
+				body := NewBlindedBeaconBody(&clparams.MainnetBeaconConfig, version)
+				require.Error(t, json.Unmarshal([]byte(input), body))
+			})
+		}
+	}
+}
