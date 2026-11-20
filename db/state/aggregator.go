@@ -1116,7 +1116,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 			if !canBuild {
 				a.deferredDomainWarnings[id].Do(func() {
 					a.logger.Warn("[snapshots] domain snapshot deferred", "domain", d.Name,
-						"filesEndStep", firstStepNotInFiles, "buildStep", step, "action", "backfill the missing steps from the domain's start")
+						"filesEndStep", firstStepNotInFiles, "buildStep", step, "action", "finish backfilling the domain through this step")
 				})
 				return nil
 			}

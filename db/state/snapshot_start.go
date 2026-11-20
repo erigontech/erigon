@@ -27,20 +27,26 @@ import (
 
 // Reads and pruning treat everything below the file end as frozen. A fileless
 // domain tracks its earliest write in firstTxNum. Writers can lower that start
-// until the builder reserves its first file by setting the exclusive frozenEnd.
+// until the builder reserves its first file. frozenEnd is the exclusive end
+// of the reserved range, including receipt files still being built.
 type snapshotStart struct {
 	firstTxNum, frozenEnd uint64
 }
 
 func snapshotStartKey(table string) []byte { return []byte(table + "snapshotStart") }
 
-func readSnapshotStart(tx kv.Tx, table string) (s snapshotStart, found bool, err error) {
-	v, err := tx.GetOne(kv.TblPruningValsProg, snapshotStartKey(table))
+func readSnapshotRange(tx kv.Getter, key []byte) (from, to uint64, found bool, err error) {
+	v, err := tx.GetOne(kv.TblPruningValsProg, key)
 	if err != nil || v == nil {
-		return s, false, err
+		return 0, 0, false, err
 	}
-	s.firstTxNum, s.frozenEnd, err = decodeRange(v)
-	return s, true, err
+	from, to, err = decodeRange(v)
+	return from, to, true, err
+}
+
+func readSnapshotStart(tx kv.Tx, table string) (s snapshotStart, found bool, err error) {
+	s.firstTxNum, s.frozenEnd, found, err = readSnapshotRange(tx, snapshotStartKey(table))
+	return s, found, err
 }
 
 // ResetSnapshotProgress clears the snapshot start and pruning bookmarks when a table is emptied.
@@ -61,8 +67,8 @@ func (w *DomainBufferedWriter) recordSnapshotStart(tx kv.RwTx) error {
 		return err
 	}
 	first := w.minWriteStep.ToTxNum(w.h.ii.stepSize)
-	if first < s.frozenEnd {
-		return fmt.Errorf("cannot write %s step %d: first snapshot already covers txNums below %d", w.name, w.minWriteStep, s.frozenEnd)
+	if end := max(s.frozenEnd, w.visibleEnd); first < end {
+		return fmt.Errorf("cannot write %s step %d: snapshot already covers txNums below %d", w.name, w.minWriteStep, end)
 	}
 	if found && first >= s.firstTxNum {
 		return nil
@@ -88,7 +94,7 @@ func (w *DomainBufferedWriter) recordSnapshotStart(tx kv.RwTx) error {
 // metadata uses three keys and the receipt cache uses one, so finding the oldest
 // step needs a bounded number of seeks even when millions of receipts are in MDBX.
 func legacySnapshotStart(tx kv.Tx, name kv.Domain, table string, largeValues bool) (kv.Step, error) {
-	if name != kv.ReceiptDomain && name != kv.RCacheDomain {
+	if !isReceiptDomain(name) {
 		return 0, nil // A late start cannot be proven without scanning these tables.
 	}
 	if largeValues {
@@ -130,12 +136,12 @@ func legacySnapshotStart(tx kv.Tx, name kv.Domain, table string, largeValues boo
 	}
 }
 
-// The builder and writers use the same MDBX writer lock to agree on the first
-// step. An earlier batch either commits before this reservation or fails in its
-// own transaction. No lock is held while snapshot files are built.
+// Reserve before collation so a writer either commits in time to be included or
+// sees the reservation at flush. The files themselves are built outside the lock.
 func (d *Domain) prepareSnapshotStep(ctx context.Context, db kv.TemporalRoDB, next, step kv.Step) (bool, error) {
-	if next != 0 {
-		return step == next, nil // A domain with files must extend its visible prefix.
+	receipt := isReceiptDomain(d.Name)
+	if next != 0 && (step != next || !receipt) {
+		return step == next, nil
 	}
 	var start snapshotStart
 	var ready, reserved bool
@@ -144,38 +150,46 @@ func (d *Domain) prepareSnapshotStep(ctx context.Context, db kv.TemporalRoDB, ne
 		if err != nil {
 			return err
 		}
-		if step == 0 {
+		switch {
+		case next != 0:
+			start = s
+			ready, reserved = true, s.frozenEnd >= (step+1).ToTxNum(d.stepSize)
+		case step == 0:
 			// An explicit backfill can start at zero until a late start is reserved.
 			ready = s.frozenEnd == 0 || s.firstTxNum < d.stepSize
-			reserved = found && s.firstTxNum == 0
+			reserved = found && s.firstTxNum == 0 && (!receipt || s.frozenEnd >= d.stepSize)
 			start = snapshotStart{frozenEnd: s.frozenEnd}
-			return nil
-		}
-		if !found {
-			first, err := legacySnapshotStart(tx, d.Name, d.ValuesTable, d.LargeValues)
-			if err != nil || first == kv.NoStepBound {
-				ready = false
-				return err
+		default:
+			if !found {
+				var first kv.Step
+				first, err = legacySnapshotStart(tx, d.Name, d.ValuesTable, d.LargeValues)
+				if err != nil || first == kv.NoStepBound {
+					ready = false
+					return err
+				}
+				s.firstTxNum = first.ToTxNum(d.stepSize)
 			}
-			s.firstTxNum = first.ToTxNum(d.stepSize)
+			start = s
+			ready = kv.Step(s.firstTxNum/d.stepSize) == step
+			reserved = s.frozenEnd >= (step + 1).ToTxNum(d.stepSize)
 		}
-		start = s
-		ready = kv.Step(s.firstTxNum/d.stepSize) == step
-		reserved = s.frozenEnd >= (step + 1).ToTxNum(d.stepSize)
-		return nil
+		if ready && !reserved && receipt {
+			ready, err = d.receiptStepComplete(tx, step)
+		}
+		return err
 	}
 	if err := db.View(ctx, check); err != nil || !ready || reserved {
 		return ready, err
 	}
 	writer, ok := db.(kv.RwDB)
 	if !ok || writer.ReadOnly() {
-		return step == 0, nil // Starting at zero skips no MDBX steps.
+		return step == 0 && !receipt, nil
 	}
 	err := writer.Update(ctx, func(tx kv.RwTx) error {
 		if err := check(tx); err != nil || !ready || reserved {
 			return err
 		}
-		if step != 0 {
+		if step != 0 || receipt {
 			start.frozenEnd = (step + 1).ToTxNum(d.stepSize)
 		}
 		return start.save(tx, d.ValuesTable)

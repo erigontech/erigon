@@ -624,11 +624,15 @@ func (dt *DomainRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *Domain
 		name:      dt.d.Name,
 		h:         dt.ht.newWriter(db, tmpdir, discardHistory),
 	}
-	// A fileless writer can outlive the first publication and must check MDBX at flush.
-	// Once a late first file is visible, its start supplies the same bound.
-	if len(dt.files) == 0 {
+	// Receipt backfill can run behind execution. Even a writer that saw files
+	// must check for a newer reservation in its write transaction.
+	switch {
+	case isReceiptDomain(w.name):
 		w.checkWritesBefore = kv.NoStepBound
-	} else if dt.files[0].startTxNum != 0 {
+		w.visibleEnd = dt.files.EndTxNum()
+	case len(dt.files) == 0:
+		w.checkWritesBefore = kv.NoStepBound
+	case dt.files[0].startTxNum != 0:
 		w.checkWritesBefore = kv.Step(dt.files[0].startTxNum/dt.stepSize) + 1
 	}
 	return w
@@ -641,6 +645,7 @@ type DomainBufferedWriter struct {
 	discard           bool
 	checkWritesBefore kv.Step
 	minWriteStep      kv.Step
+	visibleEnd        uint64
 
 	valsTable string
 	largeVals bool
@@ -1577,6 +1582,11 @@ func (dt *DomainRoTx) unwind(
 ) error {
 	d := dt.d
 	step := txNumUnwindTo / dt.stepSize
+	if isReceiptDomain(d.Name) {
+		if err := unwindReceiptBackfill(rwTx, d.Name, txNumUnwindTo); err != nil {
+			return err
+		}
+	}
 
 	sf := time.Now()
 	defer mxUnwindTook.ObserveDuration(sf)

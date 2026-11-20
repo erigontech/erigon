@@ -63,6 +63,17 @@ type Produce struct {
 	TraceTo       bool
 }
 
+func (p Produce) receiptDomains() []kv.Domain {
+	var domains []kv.Domain
+	if p.ReceiptDomain {
+		domains = append(domains, kv.ReceiptDomain)
+	}
+	if p.RCacheDomain {
+		domains = append(domains, kv.RCacheDomain)
+	}
+	return domains
+}
+
 func NewProduce(produceList []string) Produce {
 	var produce Produce
 	for _, p := range produceList {
@@ -156,38 +167,52 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 
 	// 1. Require stage_exec > 0: means don't need handle "half-block execution case here"
 	// 2. Require stage_exec > 0: means has enough state-history
-	var execProgress uint64
 	var startBlock, endBlock uint64
-	if err := cfg.db.ViewTemporal(ctx, func(tx kv.TemporalTx) (err error) {
-		execProgress, err = stages.GetStageProgress(tx, stages.Execution)
+	if err := cfg.db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) (err error) {
+		endBlock, err = stages.GetStageProgress(tx, stages.Execution)
 		if err != nil {
 			return err
 		}
-		if execProgress == 0 {
+		if endBlock == 0 {
 			return errors.New("stage_exec progress is 0. please run `integration stage_exec --batchSize=1m` for couple minutes")
 		}
 
-		fromTxNum := progressOfDomains(tx, cfg.Produce)
+		last, err := txNumsReader.Max(ctx, tx, endBlock)
+		if err != nil {
+			return err
+		}
+		targetTxNum := last + 1
+		fromTxNum := progressOfIndexes(tx, cfg.Produce)
+		for _, domain := range cfg.Produce.receiptDomains() {
+			next, err := dbstate.AggTx(tx).BeginReceiptBackfill(tx, domain, targetTxNum)
+			if err != nil {
+				return err
+			}
+			fromTxNum = min(fromTxNum, next)
+		}
+		if fromTxNum >= targetTxNum {
+			startBlock = endBlock + 1
+			return nil
+		}
 		var ok bool
 		startBlock, ok, err = txNumsReader.FindBlockNum(ctx, tx, fromTxNum)
 		if err != nil {
 			return fmt.Errorf("getting last executed block: %w", err)
 		}
 		if !ok {
-			panic(ok)
+			return fmt.Errorf("no block contains the next backfill transaction %d", fromTxNum)
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
-	endBlock = execProgress
 
 	defer cfg.ExecArgs.BlockReader.Snapshots().(*blocksnapshots.RoSnapshots).MadvNormal().DisableReadAhead()
 	//defer tx.(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).MadvNormal().DisableReadAhead()
 
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
 	batchSize := uint64(50_000)
-	for startBlock < endBlock {
+	for startBlock <= endBlock {
 		to := min(endBlock+1, startBlock+batchSize)
 		if err := customTraceBatchProduce(ctx, cfg.Produce, cfg.ExecArgs, cfg.db, cfg.maxReorgDepth, startBlock, to, "custom_trace", logger); err != nil {
 			return err
@@ -252,7 +277,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 	}); err != nil {
 		return err
 	}
-	var lastTxNum uint64
+	var endTxNum uint64
 	{
 		tx, err := db.BeginTemporalRw(ctx)
 		if err != nil {
@@ -266,13 +291,11 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 		}
 		defer doms.Close()
 
-		if err := customTraceBatch(ctx, produce, cfg, tx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
+		endTxNum, err = customTraceBatch(ctx, produce, cfg, tx, doms, fromBlock, toBlock, logPrefix, logger)
+		if err != nil {
 			return err
 		}
 
-		// Commit runs the validate hook after flush, before the commit, so the
-		// asserts + SeekCommitment see the flushed state on tx exactly as the
-		// prior Flush-then-commit shape did.
 		if err := doms.Commit(ctx, tx, func(tx kv.RwTx) error {
 			if produce.ReceiptDomain {
 				return AssertReceipts(ctx, cfg, db, fromBlock, toBlock)
@@ -285,7 +308,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 	}
 
 	stepSize := db.StepSize()
-	var fromStep, toStep kv.Step
+	var fromStep kv.Step
 	var finalityCtx kv.FinalityContext
 	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		var err error
@@ -294,21 +317,11 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 			return err
 		}
 		fromStep = firstStepNotInFiles(tx, produce)
-		// toStep must reflect what this batch actually re-derived, not the commitment
-		// frontier: when rebuilding a subset of domains, commitment can be ahead, which
-		// would build empty files past the domain's data and desync pruning.
-		lastTxNum, err = cfg.BlockReader.TxnumReader().Max(ctx, tx, toBlock-1)
-		if err != nil {
-			return err
-		}
-		if lastTxNum/stepSize > 0 {
-			toStep = kv.Step(lastTxNum / stepSize)
-		}
 		return nil
 	}); err != nil {
 		return err
 	}
-	if err := db.BuildFiles2(ctx, fromStep, toStep, finalityCtx, true); err != nil {
+	if err := db.BuildFiles2(ctx, fromStep, kv.Step(endTxNum/stepSize), finalityCtx, true); err != nil {
 		return err
 	}
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -330,7 +343,7 @@ func AssertReceipts(ctx context.Context, cfg *exec.ExecArgs, db kv.TemporalRoDB,
 	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, db, cfg.BlockReader, true)
 }
 
-func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, tx kv.TemporalRwTx, doms *execctx.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, tx kv.TemporalRwTx, doms *execctx.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) (uint64, error) {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()
@@ -340,7 +353,22 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 	var receipts rawtemporaldb.ReceiptWriter
 
 	txNumsReader := cfg.BlockReader.TxnumReader()
-	fromTxNum, _ := txNumsReader.Min(ctx, tx, fromBlock)
+	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
+	if err != nil {
+		return 0, err
+	}
+	last, err := txNumsReader.Max(ctx, tx, toBlock-1)
+	if err != nil {
+		return 0, err
+	}
+	endTxNum := last + 1
+	var resume [kv.DomainLen]uint64
+	for _, domain := range produce.receiptDomains() {
+		resume[domain], err = dbstate.AdvanceReceiptBackfill(tx, domain, fromTxNum, endTxNum)
+		if err != nil {
+			return 0, err
+		}
+	}
 	prevTxNumLog := fromTxNum
 
 	var m runtime.MemStats
@@ -357,7 +385,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 
 			putter := doms.AsPutDel(tx)
 
-			if produce.ReceiptDomain {
+			if produce.ReceiptDomain && txTask.TxNum >= resume[kv.ReceiptDomain] {
 				var logIndexAfterTx uint32
 				var cumGasUsed uint64
 
@@ -374,13 +402,12 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 				if err := receipts.AppendMetadata(putter, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
-
-				if txTask.IsBlockEnd() { // block changed
-					cumulativeBlobGasUsedInBlock = 0
-				}
+			}
+			if txTask.IsBlockEnd() {
+				cumulativeBlobGasUsedInBlock = 0
 			}
 
-			if produce.RCacheDomain {
+			if produce.RCacheDomain && txTask.TxNum >= resume[kv.RCacheDomain] {
 				var receipt *types.Receipt
 				if !txTask.IsBlockEnd() {
 					receipt = result.Receipt
@@ -436,22 +463,16 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 			return nil
 		},
 	), tx, cfg, logger); err != nil {
-		return err
+		return 0, err
 	}
 
-	return nil
+	return endTxNum, nil
 }
 
-func progressOfDomains(tx kv.TemporalTx, produce Produce) uint64 {
+func progressOfIndexes(tx kv.TemporalTx, produce Produce) uint64 {
 	// TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
 	dbg := tx.Debug()
 	txNum := uint64(math.MaxUint64)
-	if produce.ReceiptDomain {
-		txNum = min(txNum, dbg.DomainProgress(kv.ReceiptDomain))
-	}
-	if produce.RCacheDomain {
-		txNum = min(txNum, dbg.DomainProgress(kv.RCacheDomain))
-	}
 	if produce.LogAddr {
 		txNum = min(txNum, dbg.IIProgress(kv.LogAddrIdx))
 	}
@@ -524,6 +545,11 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 	// The rebuilt tables need a fresh snapshot start and fresh pruning bookmarks.
 	for _, table := range tables {
 		if err := dbstate.ResetSnapshotProgress(tx, table); err != nil {
+			return err
+		}
+	}
+	for _, domain := range produce.receiptDomains() {
+		if err := dbstate.ResetReceiptBackfill(tx, domain); err != nil {
 			return err
 		}
 	}

@@ -485,12 +485,23 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	// when present, else the live post-exec applyTx (parallel exec may have rolled
 	// the passed-in rwTx via Flush/CommitAndBegin).
 	if savesExecProgress(execErr, out) && out.applyTx != nil {
-		if overlay := doms.BlockOverlay(); overlay != nil {
-			if err := s.Update(overlay, out.lastCommittedBlockNum); err != nil {
+		target := executionProgressTx(doms, out.applyTx)
+		if err := s.Update(target, out.lastCommittedBlockNum); err != nil {
+			return err
+		}
+		if out.lastCommittedBlockNum >= blockNum {
+			from, end := max(initialTxNum+1, inputTxNum), out.lastCommittedTxNum+1
+			if blockNum <= 1 {
+				from = 0 // Genesis has no receipts.
+			}
+			if err := state.RecordReceiptExecution(target, kv.ReceiptDomain, from, end); err != nil {
 				return err
 			}
-		} else if err := s.Update(out.applyTx, out.lastCommittedBlockNum); err != nil {
-			return err
+			if cfg.syncCfg.PersistReceiptsCacheV2 {
+				if err := state.RecordReceiptExecution(target, kv.RCacheDomain, from, end); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -503,6 +514,13 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 // unexecuted or bad block.
 func savesExecProgress(execErr error, out execV3Outcome) bool {
 	return execErr == nil && out.verdict == nil
+}
+
+func executionProgressTx(doms *execctx.SharedDomains, tx kv.TemporalRwTx) kv.GetPut {
+	if overlay := doms.BlockOverlay(); overlay != nil {
+		return overlay
+	}
+	return tx
 }
 
 // renderExecOutcome converts the parallel executor's typed outcome back to the
@@ -545,6 +563,9 @@ func unwindDomsToBlock(ctx context.Context, rwTx kv.TemporalRwTx, br dbservices.
 	dropStateFromBlockNum := unwindToBlock + 1
 	txNum, err := br.TxnumReader().Min(ctx, rwTx, dropStateFromBlockNum)
 	if err != nil {
+		return 0, err
+	}
+	if err := state.UnwindReceiptExecution(executionProgressTx(doms, rwTx), txNum); err != nil {
 		return 0, err
 	}
 	doms.Unwind(txNum, changeset) // drops [txNum, ∞)
