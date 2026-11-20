@@ -23,7 +23,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -204,4 +206,86 @@ func TestJournalRevert_Selfdestruct(t *testing.T) {
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.Equal(t, *uint256.NewInt(1000), bal, "revert restores the pre-destruct balance")
+}
+
+func TestJournalRevert_FrameApproval(t *testing.T) {
+	t.Parallel()
+	ibs := versionedRevertIBS(&emptyReader{})
+	payer := accounts.InternAddress([20]byte{0xfa, 0x01})
+	ctx := ibs.NewFrameContext(&types.FrameTransaction{}, uint256.Int{})
+	prevPayer, prevApproved := ctx.Payer, ctx.SenderApproved
+
+	snap := ibs.PushSnapshot()
+	ctx.SetApproval(true, payer)
+	require.True(t, ctx.SenderApproved, "SetApproval set approval")
+	require.Equal(t, payer, ctx.Payer, "SetApproval set the payer")
+
+	ibs.RevertToSnapshot(snap, nil)
+	require.Equal(t, prevApproved, ctx.SenderApproved, "revert restores frame approval")
+	require.Equal(t, prevPayer, ctx.Payer, "revert restores the frame payer")
+}
+
+func TestJournalRevert_FrameStateGas(t *testing.T) {
+	t.Parallel()
+	ibs := versionedRevertIBS(&emptyReader{})
+	ctx := ibs.NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{{Limits: mdgas.MdGas{State: 10}}}}, uint256.Int{})
+
+	snap := ibs.PushSnapshot()
+	require.True(t, ctx.ChargeStateGas(3))
+	require.Equal(t, uint64(3), ctx.Receipts[0].GasUsed.State, "ChargeStateGas charged state gas")
+
+	ibs.RevertToSnapshot(snap, nil)
+	require.Equal(t, uint64(0), ctx.Receipts[0].GasUsed.State, "revert restores the charged state gas")
+}
+
+func TestJournalRevert_FrameTransient(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xfa, 0x03})
+	key := TransientKey(*uint256.NewInt(1))
+	ibs := versionedRevertIBS(&emptyReader{})
+	ibs.SetTransientState(addr, &key, uint256.NewInt(55))
+
+	snap := ibs.PushSnapshot()
+	ibs.ResetFrameTransientStorage()
+	require.Equal(t, uint256.Int{}, ibs.GetTransientState(addr, key), "frame reset cleared transient storage")
+
+	ibs.RevertToSnapshot(snap, nil)
+	require.Equal(t, *uint256.NewInt(55), ibs.GetTransientState(addr, key), "revert restores transient storage after a frame reset")
+}
+
+// journalKindRevertCoverage maps every journal entry kind to the test that pins its
+// revert behaviour (or the reason it needs none). TestJournalRevertCoverageComplete
+// asserts the map covers every kind in [0, kindEnd) so a newly added kind cannot land
+// without a revert test — the guard that keeps the stateObject removal verifiable by
+// fast unit tests rather than a long integration pass.
+var journalKindRevertCoverage = map[entryKind]string{
+	kindBalance:                 "TestJournalRevert_Balance",
+	kindNonce:                   "TestJournalRevert_Nonce",
+	kindStorage:                 "TestJournalRevert_Storage",
+	kindCode:                    "TestJournalRevert_Code",
+	kindRefund:                  "TestJournalRevert_Refund",
+	kindAccessListAddAccount:    "TestJournalRevert_AccessListAccount",
+	kindAccessListAddSlot:       "TestJournalRevert_AccessListSlot",
+	kindTransientStorage:        "TestJournalRevert_TransientStorage",
+	kindSelfdestruct:            "TestJournalRevert_Selfdestruct (+ selfdestruct_revert_versioned_test)",
+	kindCreateObject:            "TestNoMaterialize_CreateRevertDropsCells",
+	kindResetObject:             "TestNoMaterialize_RecreateRevertRestoresPrior",
+	kindTouch:                   "TestNoMaterialize_RevertedTouchNotPublished",
+	kindFrameApproval:           "TestJournalRevert_FrameApproval",
+	kindFrameStateGas:           "TestJournalRevert_FrameStateGas",
+	kindFrameTransient:          "TestJournalRevert_FrameTransient",
+	kindFrameStorageOwner:       "TestJournalDirtySymmetry (frame cell; dirty-symmetry covered)",
+	kindBalanceIncrease:         "none: materialized-only, deleted with the stateObject path",
+	kindBalanceIncreaseTransfer: "none: materialized-only, deleted with the stateObject path",
+	kindFakeStorage:             "none: materialized-only (stateObject.setFakeStorage), deleted with the path",
+}
+
+func TestJournalRevertCoverageComplete(t *testing.T) {
+	t.Parallel()
+	for k := entryKind(0); k < kindEnd; k++ {
+		if _, ok := journalKindRevertCoverage[k]; !ok {
+			t.Fatalf("journal kind %d has no revert-coverage entry: add a characterization test or document why it needs none", k)
+		}
+	}
+	require.Len(t, journalKindRevertCoverage, int(kindEnd), "coverage map has an entry for a kind that no longer exists")
 }
