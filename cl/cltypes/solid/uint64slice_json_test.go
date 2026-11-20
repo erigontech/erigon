@@ -20,6 +20,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -41,7 +43,11 @@ func uint64JSONValues(n int, seed uint64) []uint64 {
 
 func uint64JSON(t *testing.T, values []uint64) []byte {
 	t.Helper()
-	data, err := json.Marshal(values)
+	strs := make([]string, len(values))
+	for i, v := range values {
+		strs[i] = strconv.FormatUint(v, 10)
+	}
+	data, err := json.Marshal(strs)
 	require.NoError(t, err)
 	return data
 }
@@ -156,6 +162,45 @@ func TestUint64VectorSSZUnmarshalJSONRejectsLengthMismatch(t *testing.T) {
 			expected := solid.NewUint64VectorSSZ(size)
 			require.NoError(t, expected.DecodeSSZ(uint64SSZ(before), 0))
 			requireSameUint64Iterable(t, expected, vector)
+		})
+	}
+}
+
+func TestUint64ListSSZJSONRoundTrip(t *testing.T) {
+	for _, n := range uint64JSONLengths {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			values := uint64JSONValues(n, 100)
+			if n > 0 {
+				values[n-1] = math.MaxInt64
+			}
+			list := solid.NewUint64ListSSZFromSlice(uint64ListJSONLimit, values)
+
+			data, err := json.Marshal(list)
+			require.NoError(t, err)
+			decoded := solid.NewUint64ListSSZ(uint64ListJSONLimit)
+			require.NoError(t, json.Unmarshal(data, decoded))
+
+			requireSameUint64Iterable(t, list, decoded)
+		})
+	}
+}
+
+func TestUint64VectorSSZJSONRoundTrip(t *testing.T) {
+	for _, n := range uint64JSONLengths {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			values := uint64JSONValues(n, 100)
+			if n > 0 {
+				values[n-1] = math.MaxInt64
+			}
+			vector := solid.NewUint64VectorSSZ(n)
+			require.NoError(t, vector.DecodeSSZ(uint64SSZ(values), 0))
+
+			data, err := json.Marshal(vector)
+			require.NoError(t, err)
+			decoded := solid.NewUint64VectorSSZ(n)
+			require.NoError(t, json.Unmarshal(data, decoded))
+
+			requireSameUint64Iterable(t, vector, decoded)
 		})
 	}
 }

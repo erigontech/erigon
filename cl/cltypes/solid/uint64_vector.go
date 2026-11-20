@@ -44,14 +44,14 @@ func (arr uint64VectorSSZ) MarshalJSON() ([]byte, error) {
 }
 
 func (arr *uint64VectorSSZ) UnmarshalJSON(buf []byte) error {
-	var list []uint64
-	if err := json.Unmarshal(buf, &list); err != nil {
+	values, err := unmarshalUint64StringsJSON(buf)
+	if err != nil {
 		return err
 	}
-	if len(list) != arr.Length() {
-		return fmt.Errorf("uint64 vector length mismatch: %d != %d", len(list), arr.Length())
+	if len(values) != arr.Length() {
+		return fmt.Errorf("uint64 vector length mismatch: %d != %d", len(values), arr.Length())
 	}
-	return arr.u.replace(list)
+	return arr.u.replace(values)
 }
 
 func (arr *uint64VectorSSZ) Clear() {
