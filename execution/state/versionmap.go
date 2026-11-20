@@ -2059,18 +2059,6 @@ func resetBalance(vm *VersionMap, cells *btree.Map[int, *WriteCell[uint256.Int]]
 	c.setState(inc, FlagDone)
 }
 
-func (vm *VersionMap) deriveRemoval(addr accounts.Address, txIdx int) {
-	if vm.derivedRemovals == nil {
-		vm.derivedRemovals = map[derivedRemovalKey]struct{}{}
-	}
-	vm.derivedRemovals[derivedRemovalKey{addr, txIdx}] = struct{}{}
-}
-
-type derivedRemovalKey struct {
-	addr  accounts.Address
-	txIdx int
-}
-
 func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
 	vm.assertUnsealed(txIdx, addr, AddressPath, accounts.NilKey)
 	e := vm.load(addr)

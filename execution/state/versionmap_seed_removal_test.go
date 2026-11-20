@@ -875,29 +875,47 @@ func TestDropWritePutsBackTheStatusOfASeededBalance(t *testing.T) {
 	require.Equal(t, ValueChanged, c.valStatus)
 }
 
-// The derived removals are per account: a drop of another account's write at the same tx puts back
-// that account's value from the access list.
-func TestDropWritePutsBackTheSeedOfAnAccountNextToADerivedRemoval(t *testing.T) {
+// The derived removals are per account and tx: a drop of a write of another account at the tx, or of
+// the account at another tx, puts back the value from the access list.
+func TestDropWritePutsBackTheListedBalanceNextToADerivedRemoval(t *testing.T) {
 	t.Parallel()
 	x := accounts.InternAddress(common.HexToAddress("0x5a1e"))
 	y := accounts.InternAddress(common.HexToAddress("0x5a1f"))
 	acc := accounts.NewAccount()
 	acc.Balance = *uint256.NewInt(5)
 	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &acc}}
-	vm := NewVersionMap(types.BlockAccessList{
-		{Address: x.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}},
-		{Address: y.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(7)}}},
-	})
-	vm.SeedAddresses()
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
-	run := &WriteSet{}
-	run.SetBalance(y, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: y, Path: BalancePath, Version: Version{TxIndex: 0, Incarnation: 1}}, Val: *uint256.NewInt(9)})
-	vm.FlushVersionedWrites(run, false)
+	for _, tc := range []struct {
+		name  string
+		addr  accounts.Address
+		txIdx int
+		want  uint64
+	}{
+		{"another account at the tx", y, 0, 7},
+		{"the account at another tx", x, 2, 9},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			vm := NewVersionMap(types.BlockAccessList{
+				{
+					Address:        x.Value(),
+					BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}, {Index: 3, Value: *uint256.NewInt(9)}},
+					NonceChanges:   []*types.NonceChange{{Index: 2, Value: 1}},
+					CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: []byte{0x00}}},
+				},
+				{Address: y.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(7)}}},
+			})
+			vm.SeedAddresses()
+			require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+			run := &WriteSet{}
+			run.SetBalance(tc.addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: tc.addr, Path: BalancePath, Version: Version{TxIndex: tc.txIdx, Incarnation: 1}}, Val: *uint256.NewInt(11)})
+			vm.FlushVersionedWrites(run, false)
 
-	vm.DropWrite(y, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 2})
-	c := requireDoneCell(t, vm.load(y).Balance, 0, 2)
-	require.Equal(t, *uint256.NewInt(7), c.Value)
-	require.Equal(t, ValueChanged, c.valStatus)
+			vm.DropWrite(tc.addr, BalancePath, accounts.NilKey, Version{TxIndex: tc.txIdx, Incarnation: 2})
+			c := requireDoneCell(t, vm.load(tc.addr).Balance, tc.txIdx, 2)
+			require.Equal(t, *uint256.NewInt(tc.want), c.Value)
+			require.Equal(t, ValueChanged, c.valStatus)
+		})
+	}
 }
 
 // The access list seeds a removal of x at tx 3. A run of tx 3 writes a balance, the next creates
