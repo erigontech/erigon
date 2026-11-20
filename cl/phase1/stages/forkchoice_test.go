@@ -2283,6 +2283,47 @@ func TestPostForkchoiceHighestFinalizedFailureDoesNotPublish(t *testing.T) {
 	require.Equal(t, f.headSlot, f.cfg.blobDownloader.HeadSlot())
 }
 
+type unavailableCheckpointGraph struct {
+	fork_graph.ForkGraph
+	err error
+}
+
+func (g unavailableCheckpointGraph) CurrentStateLocked(common.Hash) *state.CachingBeaconState {
+	return nil
+}
+
+func (g unavailableCheckpointGraph) ReplayState(common.Hash) (*state.CachingBeaconState, error) {
+	return nil, g.err
+}
+
+func TestPendingSafeUpdatePacesHeadSelectionErrors(t *testing.T) {
+	want := errors.New("checkpoint state unavailable")
+	cfg := newLockOrderFixtureWithConfig(t, 0, nil, common.Hash{}, true, func(graph fork_graph.ForkGraph) fork_graph.ForkGraph {
+		return unavailableCheckpointGraph{graph, want}
+	}).cfg
+
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		require.ErrorIs(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, Args{}), want)
+		require.Zero(t, time.Since(started))
+
+		cfg.safeUpdatePending = true
+		for range 3 {
+			started := time.Now()
+			require.ErrorIs(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, Args{}), want)
+			require.True(t, cfg.safeUpdatePending)
+			require.Equal(t, sleepForSlotRewakeInterval, time.Since(started))
+		}
+
+		ctx, cancel := context.WithTimeout(t.Context(), sleepForSlotRewakeInterval/4)
+		defer cancel()
+		started = time.Now()
+		require.ErrorIs(t, doForkchoiceRoutine(ctx, log.New(), cfg, Args{}), context.DeadlineExceeded)
+		require.Equal(t, sleepForSlotRewakeInterval/4, time.Since(started))
+		require.True(t, cfg.safeUpdatePending)
+	})
+}
+
 func TestPendingSafeUpdatePacesFatalErrors(t *testing.T) {
 	cfg, _, _, _, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
 	want := errors.New("execution unavailable")

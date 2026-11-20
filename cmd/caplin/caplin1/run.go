@@ -515,7 +515,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	peerDas.SetColumnPublisher(dataColumnSidecarService.PublishColumns)
 	blockService := services.NewBlockService(ctx, indexDB, forkChoice, engine, dataColumnSidecarService, syncedDataManager, ethClock, beaconConfig, emitters)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
-	attestationService := services.NewAttestationService(ctx, forkChoice, aggregationPool, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier)
+	attestationService := services.NewAttestationService(ctx, forkChoice, aggregationPool, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier, config.EnableFastConfirmation)
 	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, batchSignatureVerifier, validatorParameters, false)
 	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, pool, false, batchSignatureVerifier, validatorParameters, config.EnableFastConfirmation)
 	voluntaryExitService := services.NewVoluntaryExitService(pool, emitters, syncedDataManager, beaconConfig, ethClock, batchSignatureVerifier)
@@ -557,7 +557,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	var onFastConfirmation func(uint64)
 	if config.EnableFastConfirmation {
 		onFastConfirmation = func(nowMs uint64) {
-			if err := forkChoice.OnFastConfirmation(ctx, nowMs, batchSignatureVerifier.FlushAggregateProofs); err != nil {
+			if err := forkChoice.OnFastConfirmation(ctx, nowMs, batchSignatureVerifier.FlushAttestations); err != nil {
 				logger.Warn("Fast confirmation unavailable", "err", err)
 			}
 		}

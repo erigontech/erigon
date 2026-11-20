@@ -20,12 +20,11 @@ import (
 	"cmp"
 	"slices"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 )
-
-const confirmationByzantineThreshold = 25
 
 type fastConfirmation struct {
 	confirmedRoot      common.Hash
@@ -41,26 +40,26 @@ func newFastConfirmation(finalized solid.Checkpoint) *fastConfirmation {
 }
 
 type fcrBalances struct {
-	balances []uint64
-	active   []bool
-	slashed  []bool
-	total    uint64
+	balances      []uint64
+	active        []bool
+	slashed       []bool
+	total         uint64
+	proposerScore uint64
 }
 
 type fcrVote struct {
-	root         common.Hash
-	status       cltypes.PayloadStatus
-	epoch        uint64
-	equivocating bool
+	root   common.Hash
+	status cltypes.PayloadStatus
+	epoch  uint64
 }
 
 type fcrView struct {
 	slot             uint64
 	slotsPerEpoch    uint64
 	balanceIncrement uint64
-	proposerBoost    uint64
 	committees       map[uint64][]uint64
 	votes            []fcrVote
+	equivocating     []byte
 	blocks           map[common.Hash]fcrBlock
 	head             common.Hash
 	finalized        solid.Checkpoint
@@ -88,6 +87,10 @@ type fcrRangeWeights struct {
 	support             map[fcrSupportedNode]uint64
 }
 
+func (weights fcrRangeWeights) adversarialWeight() uint64 {
+	return fcrSaturatingSub(weights.total/100*clparams.ConfirmationByzantineThreshold, weights.equivocating)
+}
+
 func (v *fcrView) rangeWeights(b *fcrBalances, start, end uint64) fcrRangeWeights {
 	key := fcrRange{b, start, end}
 	if cached, ok := v.ranges[key]; ok {
@@ -109,13 +112,15 @@ func (v *fcrView) rangeWeights(b *fcrBalances, start, end uint64) fcrRangeWeight
 			v.seen[index] = v.generation
 			balance := b.balances[index]
 			weights.total += balance
+			if isEquivocating(v.equivocating, index) {
+				weights.equivocating += balance
+				continue
+			}
 			if int(index) >= len(v.votes) {
 				continue
 			}
 			vote := v.votes[index]
-			if vote.equivocating {
-				weights.equivocating += balance
-			} else if !b.slashed[index] && vote.root != (common.Hash{}) {
+			if !b.slashed[index] && vote.root != (common.Hash{}) {
 				weights.support[fcrSupportedNode{vote.root, vote.status}] += balance
 			}
 		}
@@ -135,18 +140,13 @@ func (v *fcrView) committeeWeight(b *fcrBalances, start, end uint64) uint64 {
 	return v.rangeWeights(b, start, end).total
 }
 
-func (v *fcrView) adversarialWeight(b *fcrBalances, start, end uint64) uint64 {
-	weights := v.rangeWeights(b, start, end)
-	return fcrSaturatingSub(weights.total/100*confirmationByzantineThreshold, weights.equivocating)
-}
-
 func (v *fcrView) attestationScores(b *fcrBalances) map[common.Hash]uint64 {
 	if cached, ok := v.scores[b]; ok {
 		return cached
 	}
 	scores := make(map[common.Hash]uint64)
 	for i, vote := range v.votes {
-		if i < len(b.balances) && b.active[i] && !b.slashed[i] && !vote.equivocating && vote.root != (common.Hash{}) {
+		if i < len(b.balances) && b.active[i] && !b.slashed[i] && !isEquivocating(v.equivocating, uint64(i)) && vote.root != (common.Hash{}) {
 			scores[vote.root] += b.balances[i]
 		}
 	}
@@ -202,9 +202,8 @@ func (v *fcrView) oneConfirmed(b *fcrBalances, root common.Hash) bool {
 	if block.slot/v.slotsPerEpoch > parent.slot/v.slotsPerEpoch {
 		start = block.slot / v.slotsPerEpoch * v.slotsPerEpoch
 	}
-	adversarial := v.adversarialWeight(b, start, v.slot-1)
-	proposer := b.total / v.slotsPerEpoch * v.proposerBoost / 100
-	threshold := (maximum + proposer + 2*adversarial - discount) / 2
+	adversarial := v.rangeWeights(b, start, v.slot-1).adversarialWeight()
+	threshold := (maximum + b.proposerScore + 2*adversarial - discount) / 2
 	return v.attestationScores(b)[root] > threshold
 }
 
@@ -219,7 +218,7 @@ func (v *fcrView) emptySlotDiscount(b *fcrBalances, root common.Hash) uint64 {
 	if v.gloas && block.parentStatus != cltypes.PayloadStatusPending {
 		support += weights.support[fcrSupportedNode{block.parent, block.parentStatus}]
 	}
-	return fcrSaturatingSub(support, fcrSaturatingSub(weights.total/100*confirmationByzantineThreshold, weights.equivocating))
+	return fcrSaturatingSub(support, weights.adversarialWeight())
 }
 
 func (v *fcrView) ancestor(root common.Hash, slot uint64) common.Hash {
@@ -273,16 +272,15 @@ func (v *fcrView) honestFFGSupport() uint64 {
 	target := v.checkpoint(v.head, epoch)
 	var support uint64
 	for i, vote := range v.votes {
-		if i < len(b.balances) && b.active[i] && !b.slashed[i] && !vote.equivocating && vote.root != (common.Hash{}) && v.checkpoint(vote.root, vote.epoch) == target {
+		if i < len(b.balances) && b.active[i] && !b.slashed[i] && !isEquivocating(v.equivocating, uint64(i)) && vote.root != (common.Hash{}) && v.checkpoint(vote.root, vote.epoch) == target {
 			support += b.balances[i]
 		}
 	}
-	var weight, adversarial uint64
+	var weights fcrRangeWeights
 	if v.slot > 0 {
-		weight = v.committeeWeight(b, epoch*v.slotsPerEpoch, v.slot-1)
-		adversarial = v.adversarialWeight(b, epoch*v.slotsPerEpoch, v.slot-1)
+		weights = v.rangeWeights(b, epoch*v.slotsPerEpoch, v.slot-1)
 	}
-	return fcrSaturatingSub(support, adversarial) + (b.total-weight)/100*(100-confirmationByzantineThreshold)
+	return fcrSaturatingSub(support, weights.adversarialWeight()) + (b.total-weights.total)/100*(100-clparams.ConfirmationByzantineThreshold)
 }
 
 func (v *fcrView) noConflictingJustification() bool {

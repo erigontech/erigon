@@ -491,7 +491,7 @@ func TestAggregateAndProofUsesTargetShuffling(t *testing.T) {
 	require.Equal(t, []string{"bls", "target", "bls"}, callOrder)
 }
 
-func TestAggregateAndProofFutureBlockDoesNotVote(t *testing.T) {
+func TestAggregateAndProofFutureBlockVoteOptIn(t *testing.T) {
 	for _, mode := range []string{"validator", "fcr", "observer"} {
 		for _, offset := range []int{-1, 0, 1} {
 			t.Run(fmt.Sprintf("%s/offset=%d", mode, offset), func(t *testing.T) {
@@ -517,10 +517,10 @@ func TestAggregateAndProofFutureBlockDoesNotVote(t *testing.T) {
 					require.Zero(t, impl.opPool.AttestationsPool.Len())
 				} else {
 					require.NoError(t, err)
-					require.NoError(t, impl.batchSignatureVerifier.FlushAggregateProofs(t.Context()))
+					require.NoError(t, impl.batchSignatureVerifier.FlushAttestations(t.Context()))
 					require.Equal(t, 1, impl.opPool.AttestationsPool.Len())
 				}
-				if mode == "observer" || offset > 0 {
+				if mode == "observer" || mode == "fcr" && offset > 0 {
 					require.Empty(t, capture.attestingIndices)
 				} else {
 					require.NotEmpty(t, capture.attestingIndices)

@@ -32,13 +32,13 @@ import (
 
 func BenchmarkFastConfirmationMillionValidators(b *testing.B) {
 	const count = 1_000_000
-	balances := &fcrBalances{balances: make([]uint64, count), active: make([]bool, count), slashed: make([]bool, count), total: count * 32_000_000_000}
+	balances := &fcrBalances{balances: make([]uint64, count), active: make([]bool, count), slashed: make([]bool, count), total: count * 32_000_000_000, proposerScore: count * 32_000_000_000 / 32 * 40 / 100}
 	roots := make([]common.Hash, 64)
 	for i := range roots {
 		binary.LittleEndian.PutUint64(roots[i][:], uint64(i+1))
 	}
 	justified := solid.Checkpoint{Root: roots[32], Epoch: 1}
-	view := &fcrView{slot: 64, slotsPerEpoch: 32, balanceIncrement: 1_000_000_000, proposerBoost: 40, head: roots[63], headBalances: balances, finalized: solid.Checkpoint{Root: roots[0]}, unrealized: justified, blocks: make(map[common.Hash]fcrBlock), committees: make(map[uint64][]uint64), votes: make([]fcrVote, count)}
+	view := &fcrView{slot: 64, slotsPerEpoch: 32, balanceIncrement: 1_000_000_000, head: roots[63], headBalances: balances, finalized: solid.Checkpoint{Root: roots[0]}, unrealized: justified, blocks: make(map[common.Hash]fcrBlock), committees: make(map[uint64][]uint64), votes: make([]fcrVote, count)}
 	for i := range roots {
 		block := fcrBlock{slot: uint64(i), valid: true, unrealized: justified, votingSource: justified}
 		if i > 0 {

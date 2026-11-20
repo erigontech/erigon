@@ -394,7 +394,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Signature,
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
 		)
-		if blockHeader.Slot <= slot {
+		if !a.enableFastConfirmation || blockHeader.Slot <= slot {
 			a.forkchoiceStore.ProcessAttestingIndicies(
 				aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
 				attestingIndices,

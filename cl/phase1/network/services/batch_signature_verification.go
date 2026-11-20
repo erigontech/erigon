@@ -357,10 +357,17 @@ func (b *BatchSignatureVerifier) runBatchVerification(signatures, signRoots, pks
 	return verified, nil
 }
 
-func (b *BatchSignatureVerifier) FlushAggregateProofs(ctx context.Context) error {
+func (b *BatchSignatureVerifier) FlushAttestations(ctx context.Context) error {
+	if err := b.flush(ctx, b.attVerifyAndExecute); err != nil {
+		return err
+	}
+	return b.flush(ctx, b.aggregateProofVerify)
+}
+
+func (b *BatchSignatureVerifier) flush(ctx context.Context, queue chan<- *AggregateVerificationData) error {
 	done := make(chan struct{})
 	select {
-	case b.aggregateProofVerify <- &AggregateVerificationData{barrier: done}:
+	case queue <- &AggregateVerificationData{barrier: done}:
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-b.ctx.Done():

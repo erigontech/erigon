@@ -190,6 +190,10 @@ func (f *ForkChoiceStore) getHeadNode(viewAuxiliaryState auxiliaryStateView, try
 	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
 		return f.getHeadGloas(try)
 	}
+	if f.fastConfirmation != nil {
+		// The shared head cache must use exact checkpoint weights for fast confirmation.
+		viewAuxiliaryState = nil
+	}
 	return f.getHead(viewAuxiliaryState, try)
 }
 

@@ -812,17 +812,19 @@ func TestBatchSignatureVerifierWaitReturnsIgnoreOnContextCancel(t *testing.T) {
 	require.ErrorIs(t, err, ErrIgnore)
 }
 
-func TestBatchSignatureVerifierFlushWaitsForAggregateCallbacks(t *testing.T) {
+func TestBatchSignatureVerifierFlushWaitsForAttestationCallbacks(t *testing.T) {
 	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = withoutDecompressed(func(_, _, _ [][]byte) (bool, error) { return true, nil })
 	verifier := NewBatchSignatureVerifier(t.Context(), nil)
-	entry := newRepeatedSignatureEntry(1, 1)
-	applied := false
-	entry.F = func() { applied = true }
-	verifier.aggregateProofVerify <- entry
-	verifier.Start()
-	require.NoError(t, verifier.FlushAggregateProofs(t.Context()))
-	require.True(t, applied, "flush returned before the prior aggregate was applied")
+	applied := make(chan struct{}, 2)
+	for _, queue := range []chan *AggregateVerificationData{verifier.attVerifyAndExecute, verifier.aggregateProofVerify} {
+		entry := newRepeatedSignatureEntry(1, 1)
+		entry.F = func() { applied <- struct{}{} }
+		queue <- entry
+		verifier.startVerifier(queue, time.Hour)
+	}
+	require.NoError(t, verifier.FlushAttestations(t.Context()))
+	require.Len(t, applied, 2)
 }
 
 func TestBatchVerificationHandsEachItemItsDecompressedSignatures(t *testing.T) {

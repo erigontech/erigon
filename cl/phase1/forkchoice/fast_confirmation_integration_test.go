@@ -25,8 +25,11 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
+	"github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -159,6 +162,42 @@ func TestFastConfirmationWaitsForClock(t *testing.T) {
 	require.Equal(t, 1, calls)
 }
 
+type fastConfirmationReplayGraph struct {
+	fork_graph.ForkGraph
+	replay func() *state.CachingBeaconState
+}
+
+func (g fastConfirmationReplayGraph) CurrentStateLocked(common.Hash) *state.CachingBeaconState {
+	return nil
+}
+
+func (g fastConfirmationReplayGraph) ReplayState(common.Hash) (*state.CachingBeaconState, error) {
+	return g.replay(), nil
+}
+
+func TestFastConfirmationDiscardsResultWhenSlotAdvancesDuringReplay(t *testing.T) {
+	_, anchor, _ := tests.GetBellatrixRandom()
+	f := newOverlapTestStore(t, anchor, nil, false).store
+	f.EnableFastConfirmation(anchor.CurrentJustifiedCheckpoint())
+	slotMs := f.beaconCfg.SecondsPerSlot * 1000
+	now := anchor.GenesisTime()*1000 + (anchor.Slot()+1)*slotMs
+	f.OnTick(now)
+	_, _, err := f.GetHeadNode()
+	require.NoError(t, err)
+	_, err = f.getCheckpointState(f.FinalizedCheckpoint())
+	require.NoError(t, err)
+
+	rule := f.fastConfirmation.rule
+	f.forkGraph = fastConfirmationReplayGraph{ForkGraph: f.forkGraph, replay: func() *state.CachingBeaconState {
+		f.OnTick(now + slotMs)
+		return anchor
+	}}
+	require.NoError(t, f.OnFastConfirmation(t.Context(), now, nil))
+	require.Equal(t, f.slotAtTimeMs(now)+1, f.Slot())
+	require.NotSame(t, rule, f.fastConfirmation.rule)
+	require.Equal(t, f.FinalizedCheckpoint().Root, *f.fastConfirmation.result.Load())
+}
+
 func TestFastConfirmationSafeHashNeverPrecedesFinalized(t *testing.T) {
 	store, graph, old := executionHeadFixture(t)
 	newer := common.Hash{4}
@@ -277,21 +316,61 @@ func TestFastConfirmationExcludesEarlyVotes(t *testing.T) {
 			_, anchor, _ := tests.GetBellatrixRandom()
 			store := newOverlapTestStore(t, anchor, nil, false).store
 			store.EnableFastConfirmation(anchor.CurrentJustifiedCheckpoint())
-			slot := anchor.Slot() + 1
-			store.OnTick((anchor.GenesisTime() + slot*anchor.BeaconConfig().SecondsPerSlot) * 1000)
+			slotsPerEpoch := store.beaconCfg.SlotsPerEpoch
+			slot := (anchor.Slot()/slotsPerEpoch + 1) * slotsPerEpoch
+			tick := func(slot uint64) {
+				store.OnTick((anchor.GenesisTime() + slot*store.beaconCfg.SecondsPerSlot) * 1000)
+			}
+			tick(slot)
 			root := store.AnchorRoot()
-			store.ProcessAttestingIndicies(&solid.Attestation{Data: &solid.AttestationData{
-				Slot: slot + offset, BeaconBlockRoot: root,
-				Target: solid.Checkpoint{Epoch: (slot + offset) / store.beaconCfg.SlotsPerEpoch, Root: root},
-			}}, []uint64{0, 1})
+			vote := func(slot uint64, indices ...uint64) {
+				store.ProcessAttestingIndicies(&solid.Attestation{Data: &solid.AttestationData{
+					Slot: slot, BeaconBlockRoot: root, Target: solid.Checkpoint{Epoch: slot / slotsPerEpoch, Root: root},
+				}}, indices)
+			}
+			vote(slot-1, 0)
+			vote(slot+offset, 0, 1)
 			store.setUnequivocating(1)
-			view, err := store.fastConfirmationView(slot)
+			tick(slot + offset)
+			view, err := store.fastConfirmationView(store.Slot())
 			require.NoError(t, err)
-			require.Empty(t, view.votes[0].root, "early gossip votes must not contribute to FCR")
+			require.Equal(t, root, view.votes[0].root)
+			require.Equal(t, (slot-1)/slotsPerEpoch, view.votes[0].epoch)
 			require.Empty(t, view.votes[1].root)
-			require.True(t, view.votes[1].equivocating, "vote filtering must preserve equivocation evidence")
+			tick(slot + offset + 1)
+			view, err = store.fastConfirmationView(store.Slot())
+			require.NoError(t, err)
+			require.Equal(t, root, view.votes[0].root)
+			require.Equal(t, slot/slotsPerEpoch, view.votes[0].epoch)
+			require.Empty(t, view.votes[1].root)
 		})
 	}
+}
+
+func TestFastConfirmationGloasPendingVotes(t *testing.T) {
+	store, _, head := executionHeadFixture(t)
+	cp := solid.Checkpoint{Root: head.Root}
+	store.finalizedCheckpoint.Store(cp)
+	store.justifiedCheckpoint.Store(cp)
+	store.unrealizedJustifiedCheckpoint.Store(cp)
+	store.latestMessages = newLatestMessagesStore(1)
+	store.EnableFastConfirmation(cp)
+	vote := func(slot, payload uint64) {
+		store.ProcessAttestingIndicies(&solid.Attestation{Data: &solid.AttestationData{
+			Slot: slot, BeaconBlockRoot: head.Root, CommitteeIndex: payload, Target: cp,
+		}}, []uint64{0})
+	}
+	vote(2, 0)
+	vote(1, 1)
+	vote(1, 0)
+	store.OnTick(2 * store.beaconCfg.SecondsPerSlot * 1000)
+	msg, ok := store.getLatestMessage(0)
+	require.True(t, ok)
+	require.Equal(t, LatestMessage{Slot: 1, Root: head.Root, PayloadPresent: true}, msg)
+	store.OnTick(4 * store.beaconCfg.SecondsPerSlot * 1000)
+	msg, ok = store.getLatestMessage(0)
+	require.True(t, ok)
+	require.Equal(t, LatestMessage{Slot: 2, Root: head.Root}, msg)
 }
 
 func TestFastConfirmationEnablesExecutionStatusReporting(t *testing.T) {
@@ -366,8 +445,17 @@ func TestFastConfirmationHeaderOnlyAnchorVotes(t *testing.T) {
 }
 
 func TestFastConfirmationGloasInvalidPayloadKeepsEmptyPath(t *testing.T) {
-	for _, full := range []bool{false, true} {
-		t.Run(fmt.Sprintf("full=%t", full), func(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		full, rejectedEnvelope bool
+	}{
+		{"EMPTY after invalid payload", false, false},
+		{"FULL after invalid payload", true, false},
+		{"EMPTY after rejected envelope", false, true},
+		{"FULL after rejected envelope", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			full := tc.full
 			store, base, anchor := executionHeadFixture(t)
 			graph := &invalidTrackingGraph{getFinalizedExecutionHashForkGraph: base.getFinalizedExecutionHashForkGraph, invalid: make(map[common.Hash]bool)}
 			store.forkGraph = graph
@@ -378,7 +466,6 @@ func TestFastConfirmationGloasInvalidPayloadKeepsEmptyPath(t *testing.T) {
 			store.finalizedCheckpoint.Store(checkpoint)
 			store.unrealizedJustifiedCheckpoint.Store(checkpoint)
 			store.latestMessages = newLatestMessagesStore(4)
-			store.EnableFastConfirmation(checkpoint)
 			parent, child := common.Hash{4}, common.Hash{5}
 			for i, root := range []common.Hash{parent, child} {
 				block := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
@@ -395,19 +482,28 @@ func TestFastConfirmationGloasInvalidPayloadKeepsEmptyPath(t *testing.T) {
 				addInvalidAncestorsBlock(graph, root, block)
 				store.unrealizedJustifications.Store(root, checkpoint)
 			}
-			store.MarkPayloadStatus(parent, common.Hash{4}, execution_client.PayloadStatusInvalidated)
-			require.True(t, graph.IsBlockInvalid(parent))
+			if tc.rejectedEnvelope {
+				store.forkGraph = payloadVoteForkGraph{ForkGraph: graph, rejectedEnvelopes: map[common.Hash]bool{parent: true}}
+				cache, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
+				require.NoError(t, err)
+				cache.Add(common.Hash{4}, execution_client.PayloadStatusValidated)
+				store.executionPayloadStatus = cache
+			} else {
+				store.MarkPayloadStatus(parent, common.Hash{4}, execution_client.PayloadStatusInvalidated)
+				require.True(t, graph.IsBlockInvalid(parent))
+			}
 			require.False(t, store.cutOffByInvalidation(parent))
 			require.Equal(t, full, store.cutOffByInvalidation(child))
 			store.headHash, store.headSlot = child, 2
 			store.timeMs.Store(3 * store.beaconCfg.SecondsPerSlot * 1000)
+			store.EnableFastConfirmation(checkpoint)
 			for i := range 4 {
 				store.latestMessages.set(i, LatestMessage{Root: child, Slot: 2})
 			}
 			view, err := store.fastConfirmationView(store.Slot())
 			require.NoError(t, err)
 			balances := &fcrBalances{balances: []uint64{100, 100, 100, 100}, active: []bool{true, true, true, true}, slashed: make([]bool, 4), total: 400}
-			view.balanceIncrement, view.proposerBoost = 1, 0
+			view.balanceIncrement = 1
 			view.committees = map[uint64][]uint64{2: {0, 1, 2, 3}}
 			view.headBalances = balances
 			require.True(t, view.oneConfirmed(balances, parent), "the block's optional invalid payload must not exclude its EMPTY variant")
@@ -421,5 +517,92 @@ func TestFastConfirmationGloasInvalidPayloadKeepsEmptyPath(t *testing.T) {
 			view.slot = view.slotsPerEpoch
 			require.Equal(t, !full, rule.chainSafe(view, balances, child), "epoch-boundary reconfirmation must use the surviving payload path")
 		})
+	}
+}
+
+func TestFastConfirmationHeadAfterEligibleVote(t *testing.T) {
+	f, g, cp := newPreGloasHeadTestStore()
+	f.finalizedCheckpoint.Store(cp)
+	f.unrealizedJustifiedCheckpoint.Store(cp)
+	f.checkpointStates.Store(cp, &checkpointState{beaconConfig: f.beaconCfg, balances: []uint64{32}, actives: []byte{1}, slasheds: []byte{0}, validatorSetSize: 1})
+	slot := g.headers[cp.Root].Slot + 2
+	f.timeMs.Store(slot * f.beaconCfg.SecondsPerSlot * 1000)
+	f.EnableFastConfirmation(cp)
+	supported, other := common.Hash{0x41}, common.Hash{0x42}
+	for _, r := range []common.Hash{supported, other} {
+		block := cltypes.NewSignedBeaconBlock(f.beaconCfg, clparams.FuluVersion)
+		block.Block.ParentRoot, block.Block.Slot = cp.Root, slot-1
+		g.blocks[r], g.headers[r] = block, block.SignedBeaconBlockHeader().Header
+		f.updateChildren(slot-2, cp.Root, r)
+		f.headSet[r] = struct{}{}
+		f.unrealizedJustifications.Store(r, cp)
+	}
+	first, _, err := f.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, other, first.Root)
+	f.ProcessAttestingIndicies(&solid.Attestation{Data: &solid.AttestationData{Slot: slot - 1, BeaconBlockRoot: supported, Target: cp}}, []uint64{0})
+	root, _, err := f.GetHead(state.New(f.beaconCfg))
+	require.NoError(t, err)
+	require.Equal(t, supported, root, "head selection must use the justified checkpoint balances")
+	snapshot, err := f.fastConfirmationView(slot)
+	require.NoError(t, err)
+	require.Equal(t, supported, snapshot.votes[0].root)
+	require.Equal(t, supported, snapshot.head)
+}
+
+func TestFastConfirmationEquivocationWithoutLatestMessage(t *testing.T) {
+	_, anchor, _ := tests.GetBellatrixRandom()
+	f := newOverlapTestStore(t, anchor, nil, false).store
+	f.EnableFastConfirmation(anchor.CurrentJustifiedCheckpoint())
+	slot := anchor.Slot() + 1
+	f.OnTick((anchor.GenesisTime() + slot*f.beaconCfg.SecondsPerSlot) * 1000)
+	index := len(f.latestMessages.latestMessages)
+	f.setUnequivocating(uint64(index))
+	require.True(t, f.isUnequivocating(uint64(index)))
+	view, err := f.fastConfirmationView(slot)
+	require.NoError(t, err)
+	balances := &fcrBalances{balances: make([]uint64, index+1), active: make([]bool, index+1), slashed: make([]bool, index+1)}
+	balances.balances[index], balances.active[index] = 32_000_000_000, true
+	view.committees = map[uint64][]uint64{slot - 1: {uint64(index)}}
+	weights := view.rangeWeights(balances, slot-1, slot-1)
+	require.Equal(t, balances.balances[index], weights.total)
+	require.Equal(t, balances.balances[index], weights.equivocating, "committee member is in the store's equivocation set")
+}
+
+func TestFastConfirmationProposerScoreExcludesSlashedBalance(t *testing.T) {
+	_, anchor, _ := tests.GetBellatrixRandom()
+	f := newOverlapTestStore(t, anchor, nil, false).store
+	cp := f.FinalizedCheckpoint()
+	f.EnableFastConfirmation(cp)
+	slot := anchor.Slot() + 2
+	f.OnTick((anchor.GenesisTime() + slot*f.beaconCfg.SecondsPerSlot) * 1000)
+	view, err := f.fastConfirmationView(slot)
+	require.NoError(t, err)
+	increment := f.beaconCfg.EffectiveBalanceIncrement
+	f.checkpointStates.Store(cp, &checkpointState{
+		balances: []uint64{25 * increment, 7 * increment, 32 * increment, 32 * increment, 32 * increment, 32 * increment, 32 * increment, 32 * increment},
+		actives:  []byte{0xff}, slasheds: []byte{0xfc}, unslashedActiveBalance: 32 * increment,
+	})
+	require.NoError(t, f.loadFastConfirmationStates(view))
+	child := common.Hash{2}
+	view.blocks[child] = fcrBlock{slot: slot - 1, parent: view.head, valid: true}
+	view.committees[slot-1] = []uint64{0, 1}
+	view.votes[0] = fcrVote{root: child}
+	require.True(t, view.oneConfirmed(f.fastConfirmation.balances[cp], child))
+}
+
+func TestFastConfirmationIgnoresGossipOutsideTargetEpochWindow(t *testing.T) {
+	f := newGloasWeightTreeTestStore()
+	cp := solid.Checkpoint{Root: common.Hash{1}}
+	f.finalizedCheckpoint.Store(cp)
+	slots := f.beaconCfg.SlotsPerEpoch
+	f.timeMs.Store(3 * slots * f.beaconCfg.SecondsPerSlot * 1000)
+	f.EnableFastConfirmation(cp)
+	for _, epoch := range []uint64{1, 2} {
+		f.ProcessAttestingIndicies(&solid.Attestation{Data: &solid.AttestationData{
+			Slot: epoch * slots, Target: solid.Checkpoint{Epoch: epoch, Root: cp.Root}, BeaconBlockRoot: cp.Root,
+		}}, []uint64{epoch})
+		_, applied := f.getLatestMessage(epoch)
+		require.Equal(t, epoch == 2, applied)
 	}
 }

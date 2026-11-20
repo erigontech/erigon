@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,6 +45,10 @@ type fastConfirmationTracker struct {
 	attempted          bool
 	balances           map[solid.Checkpoint]*fcrBalances
 	anchorVotingSource solid.Checkpoint
+
+	// The store lock protects pending votes and the slot whose tick has applied them.
+	voteSlot     uint64
+	pendingVotes map[uint64]map[uint64]LatestMessage
 }
 
 func (f *ForkChoiceStore) GetExecutionFinalityHashes(head, finalizedFallback, safeFallback common.Hash) (common.Hash, common.Hash) {
@@ -71,7 +76,13 @@ func (f *ForkChoiceStore) EnableFastConfirmation(anchorVotingSource solid.Checkp
 	case *execution_client.ExecutionClientEngine:
 		engine.EnableFastConfirmation = true
 	}
-	f.fastConfirmation = &fastConfirmationTracker{rule: newFastConfirmation(f.FinalizedCheckpoint()), changed: make(chan struct{}, 1), anchorVotingSource: anchorVotingSource}
+	f.fastConfirmation = &fastConfirmationTracker{
+		rule:               newFastConfirmation(f.FinalizedCheckpoint()),
+		changed:            make(chan struct{}, 1),
+		anchorVotingSource: anchorVotingSource,
+		voteSlot:           f.Slot(),
+		pendingVotes:       make(map[uint64]map[uint64]LatestMessage),
+	}
 }
 
 func (f *ForkChoiceStore) FastConfirmationChanged() <-chan struct{} {
@@ -132,7 +143,7 @@ func (f *ForkChoiceStore) OnFastConfirmation(ctx context.Context, nowMs uint64, 
 	if err != nil {
 		return err
 	}
-	if nowMs+uint64(time.Since(started).Milliseconds()) >= deadline {
+	if f.Slot() != slot || nowMs+uint64(time.Since(started).Milliseconds()) >= deadline {
 		reset()
 		return nil
 	}
@@ -143,7 +154,7 @@ func (f *ForkChoiceStore) OnFastConfirmation(ctx context.Context, nowMs uint64, 
 	previous := tracker.balances[tracker.rule.previousObserved]
 	current := tracker.balances[tracker.rule.currentObserved]
 	root := tracker.rule.latestConfirmed(view, previous, current)
-	if nowMs+uint64(time.Since(started).Milliseconds()) >= slotStart+f.beaconCfg.SecondsPerSlot*1000 {
+	if f.Slot() != slot || nowMs+uint64(time.Since(started).Milliseconds()) >= slotStart+f.beaconCfg.SecondsPerSlot*1000 {
 		reset()
 		return nil
 	}
@@ -166,7 +177,7 @@ func (f *ForkChoiceStore) loadFastConfirmationStates(v *fcrView) error {
 		if err != nil {
 			return fmt.Errorf("fast confirmation balance source: %w", err)
 		}
-		b := &fcrBalances{balances: cs.balances, active: make([]bool, len(cs.balances)), slashed: make([]bool, len(cs.balances))}
+		b := &fcrBalances{proposerScore: getProposerScore(f, cs), balances: cs.balances, active: make([]bool, len(cs.balances)), slashed: make([]bool, len(cs.balances))}
 		for i, balance := range cs.balances {
 			b.active[i], b.slashed[i] = readFromBitset(cs.actives, i), readFromBitset(cs.slasheds, i)
 			if b.active[i] {
@@ -231,16 +242,16 @@ func (f *ForkChoiceStore) fastConfirmationView(slot uint64) (*fcrView, error) {
 		return nil, err
 	}
 	epoch := slot / f.beaconCfg.SlotsPerEpoch
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.Slot() != slot || f.fastConfirmation.voteSlot != slot || f.headHash != head.Root {
+		return nil, errFastConfirmationSnapshotChanged
+	}
 	if headSlot/f.beaconCfg.SlotsPerEpoch+1 < epoch {
 		return nil, errors.New("fast confirmation head is stale")
 	}
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	if f.Slot() != slot || f.headHash != head.Root {
-		return nil, errFastConfirmationSnapshotChanged
-	}
 	v := &fcrView{
-		slot: slot, slotsPerEpoch: f.beaconCfg.SlotsPerEpoch, balanceIncrement: f.beaconCfg.EffectiveBalanceIncrement, proposerBoost: f.beaconCfg.ProposerScoreBoost,
+		slot: slot, slotsPerEpoch: f.beaconCfg.SlotsPerEpoch, balanceIncrement: f.beaconCfg.EffectiveBalanceIncrement,
 		head: head.Root, finalized: f.finalizedCheckpoint.Load().(solid.Checkpoint), unrealized: f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint),
 		blocks: make(map[common.Hash]fcrBlock), gloas: f.beaconCfg.GetCurrentStateVersion(epoch) >= clparams.GloasVersion,
 	}
@@ -303,9 +314,12 @@ func (f *ForkChoiceStore) fastConfirmationView(slot uint64) (*fcrView, error) {
 	}
 	f.latestMessages.mu.RLock()
 	defer f.latestMessages.mu.RUnlock()
+	if f.hasEquivocator {
+		v.equivocating = slices.Clone(f.equivocatingIndicies)
+	}
 	v.votes = make([]fcrVote, len(f.latestMessages.latestMessages))
 	for i, message := range f.latestMessages.latestMessages {
-		vote := fcrVote{equivocating: f.isUnequivocating(uint64(i))}
+		var vote fcrVote
 		if message.Root != (common.Hash{}) && message.Slot < slot {
 			vote.root, vote.epoch, vote.status = message.Root, message.Epoch, cltypes.PayloadStatusPending
 			addChain(message.Root)

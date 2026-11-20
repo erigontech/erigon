@@ -2676,6 +2676,7 @@ func TestChainTipAncestorLookupOuterDeadlineDoesNotThrottleSlot(t *testing.T) {
 		f.tickTo(tip.Block.Slot)
 		f.pinCurrentSlot(&tip.Block.Slot)
 		f.cfg.emitter = beaconevents.NewEventEmitter()
+		f.cfg.safeUpdatePending = true
 		batch := &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: []*cltypes.SignedBeaconBlock{tip}, Peer: ancestorPeer}
 		f.sentinel.onRequest = func(ctx context.Context) { <-ctx.Done() }
 		importCtx, cancelImport := context.WithTimeout(t.Context(), 25*time.Second)
@@ -2698,6 +2699,24 @@ func TestChainTipAncestorLookupOuterDeadlineDoesNotThrottleSlot(t *testing.T) {
 		require.Len(t, f.sentinel.requests, 2, "retry in the same slot once the outer deadline is gone")
 		require.Len(t, blocks, 2)
 		require.Equal(t, missing.Block.Slot, blocks[0].Block.Slot)
+	})
+}
+
+func TestChainTipAncestorLookupOuterDeadlineThrottlesWithoutFCR(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newAncestorLookupFixture(t)
+		missing, _ := f.child(f.parent, 65)
+		tip, _ := f.child(missing, 66)
+		f.pinCurrentSlot(&tip.Block.Slot)
+		f.sentinel.onRequest = func(ctx context.Context) { <-ctx.Done() }
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		batch := &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: []*cltypes.SignedBeaconBlock{tip}, Peer: ancestorPeer}
+
+		require.Equal(t, batch.Data, withMissingAncestors(ctx, f.cfg, batch, nil))
+		require.Equal(t, tip.Block.Slot, f.cfg.ancestorLookupFailedSlot)
+		require.Equal(t, batch.Data, withMissingAncestors(t.Context(), f.cfg, batch, nil))
+		require.Len(t, f.sentinel.requests, 1)
 	})
 }
 

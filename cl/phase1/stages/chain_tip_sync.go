@@ -296,7 +296,7 @@ func withMissingAncestors(ctx context.Context, cfg *Cfg, batch *peers.PeeredObje
 	ancestors, err := fetchLinkedAncestors(lookupCtx, cfg, batch.Peer, orphan, start)
 	if err != nil {
 		log.Debug("[chainTipSync] ancestor lookup failed", "peer", batch.Peer, "startSlot", start, "orphanSlot", orphan.Block.Slot, "err", err)
-		if ctx.Err() == nil {
+		if !cfg.safeUpdatePending || ctx.Err() == nil {
 			cfg.ancestorLookupFailedSlot = cfg.ethClock.GetCurrentSlot()
 		}
 		return batch.Data

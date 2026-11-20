@@ -43,9 +43,9 @@ func TestFastConfirmationCommitteeWeight(t *testing.T) {
 	require.EqualValues(t, 700, v.committeeWeight(b, 3, 4))
 	require.EqualValues(t, 700, v.committeeWeight(b, 0, 3))
 	require.Zero(t, v.committeeWeight(b, 4, 3))
-	v.votes[0].equivocating = true
-	require.EqualValues(t, 75, v.adversarialWeight(b, 3, 4))
-	require.Zero(t, v.adversarialWeight(b, 3, 3))
+	v.equivocating = []byte{1}
+	require.EqualValues(t, 75, v.rangeWeights(b, 3, 4).adversarialWeight())
+	require.Zero(t, v.rangeWeights(b, 3, 3).adversarialWeight())
 }
 
 func TestFastConfirmationRequiresStrictSupportAndValidExecution(t *testing.T) {
@@ -61,9 +61,9 @@ func TestFastConfirmationRequiresStrictSupportAndValidExecution(t *testing.T) {
 	require.False(t, v.oneConfirmed(b, child))
 	block.valid = true
 	v.blocks[child] = block
-	v.votes[0].equivocating = true
+	v.equivocating = []byte{1}
 	require.False(t, v.oneConfirmed(b, child))
-	v.votes[0].equivocating = false
+	v.equivocating = nil
 	b.slashed[0] = true
 	require.False(t, v.oneConfirmed(b, child))
 }

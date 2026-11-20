@@ -101,7 +101,10 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 				// A forkchoice update that ran out of time is not a rejection, and sync has no payload
 				// to lose by carrying on: the next head will send another one.
 				logger.Debug("[Caplin] forkchoice update timed out", "head", headRoot)
-			case errors.Is(err, execution_client.ErrForkChoiceUpdateBusy), errors.Is(err, execution_client.ErrForkChoiceUpdateSyncing):
+			case errors.Is(err, execution_client.ErrForkChoiceUpdateBusy):
+				logger.Debug("[Caplin] forkchoice update was not started", "head", headRoot)
+				recordExecutionHead = false
+			case errors.Is(err, execution_client.ErrForkChoiceUpdateSyncing):
 				logger.Debug("[Caplin] forkchoice update deferred", "head", headRoot, "err", err)
 				recordExecutionHead = false
 			default:
@@ -609,6 +612,11 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 	cfg.forkChoiceWaitingForIndices = false
 	head, headSlot, err := selectForkChoiceHead(cfg)
 	if err != nil {
+		if cfg.safeUpdatePending {
+			if waitErr := common.Sleep(ctx, sleepForSlotRewakeInterval); waitErr != nil {
+				return waitErr
+			}
+		}
 		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
 	}
 	headRoot := head.Root
