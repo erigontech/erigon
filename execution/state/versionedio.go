@@ -2346,24 +2346,6 @@ func (ws *WriteSet) TouchUpdates(updates *commitment.Updates) {
 	}
 }
 
-// sortWriteHeaders sorts headers by (Address, Path, Key) for deterministic
-// processing order; WriteSet map iteration is non-deterministic in Go.
-// The sort relies on the AccountPath enum ordering defined in versionmap.go.
-func sortWriteHeaders(headers []WriteHeader) {
-	slices.SortFunc(headers, func(a, b WriteHeader) int {
-		if c := a.Address.Cmp(b.Address); c != 0 {
-			return c
-		}
-		if a.Path != b.Path {
-			if a.Path < b.Path {
-				return -1
-			}
-			return 1
-		}
-		return a.Key.Cmp(b.Key)
-	})
-}
-
 // hasHeader reports whether a write exists at h's (Address, Path, Key).
 func (ws *WriteSet) hasHeader(h WriteHeader) bool {
 	if ws == nil {

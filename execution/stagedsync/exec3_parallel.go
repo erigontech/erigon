@@ -1921,56 +1921,20 @@ func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint3
 	}
 
 	if txIndex < 0 || task.IsBlockEnd() {
-		// System TXs use full IBS reconstruction (no worker path, so no fee split).
-		// Strip coinbase/burnt since they may carry stale writes.
+		// System/block-end txs carry no fee split. Strip coinbase/burnt since the
+		// speculative run may have left stale balance writes, then hand the worker's
+		// finalized writes/reads straight through: the version map is the state, so
+		// no IBS rebuild or re-finalize is needed.
 		txOut, _, _, _ := result.TxOut.StripBalanceWrite(result.Coinbase, result.TxIn)
 		result.TxOut = txOut
 		txOut, _, _, _ = result.TxOut.StripBalanceWrite(result.ExecutionResult.BurntContractAddress, result.TxIn)
 		result.TxOut = txOut
 		result.TxIn.Delete(result.Coinbase)
 		result.TxIn.Delete(result.ExecutionResult.BurntContractAddress)
-		return result.finalizeSystemTx(task, txTask, vm, stateReader)
+		return nil, result.TxIn, result.TxOut, nil
 	}
 
 	return result.finalizeTx(task, txTask, cumulativeGasUsed, firstLogIndex, engine, vm, stateReader)
-}
-
-// finalizeSystemTx handles block-end and system TXs (txIndex < 0) via full
-// IBS reconstruction. These are infrequent (1 per block) so the overhead is
-// acceptable.
-func (result *execResult) finalizeSystemTx(
-	task *taskVersion,
-	txTask *exec.TxTask,
-	vm *state.VersionMap,
-	stateReader state.StateReader,
-) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
-	blockNum := task.Version().BlockNum
-	txIndex := task.Version().TxIndex
-	txIncarnation := task.Version().Incarnation
-
-	// Empty ReadSet so all reads go through the versionMap (which holds all prior TX
-	// writes). result.TxIn may be stale if the system TX ran speculatively before the
-	// regular TXs completed, returning pre-block values instead of the post-block
-	// state syscalls (withdrawal/consolidation) need.
-	ibs := state.NewWithVersionMap(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader), vm)
-	defer ibs.Close()
-	ibs.SetTxContext(blockNum, txIndex)
-	ibs.SetVersion(txIncarnation)
-	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
-		return nil, state.ReadSet{}, nil, err
-	}
-	ibs.SetTrace(txTask.Trace)
-
-	rules := txTask.Rules()
-	if blockNum == 0 {
-		// Genesis runs with empty rules, so its alloc keeps empty accounts (EIP-161 off).
-		rules = &chain.Rules{}
-	}
-	writes, stateErr := ibs.FinalizedWrites(rules)
-	if stateErr != nil {
-		return nil, state.ReadSet{}, nil, fmt.Errorf("finalize system tx block %d: state read: %w", blockNum, stateErr)
-	}
-	return nil, ibs.VersionedReads(), writes, nil
 }
 
 // finalizedBlockWrites is the block-end write-set. Deciding EIP-161 removals reads pre-block
