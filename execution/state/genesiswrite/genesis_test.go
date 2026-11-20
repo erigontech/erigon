@@ -1142,6 +1142,34 @@ func TestGenesisConstructorDropsAllocStorage(t *testing.T) {
 	require.Equal(t, root(nil), root(map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x0b")}))
 }
 
+// Genesis finalizes without EIP-8246: every self-destruct deletes its account, after all
+// constructors ran, nested creations included.
+func TestGenesisSelfDestructsFinalizeWithoutEIP8246(t *testing.T) {
+	t.Parallel()
+	a := common.HexToAddress("0x00000000000000000000000000000000c0ffee05")
+	b := common.HexToAddress("0x00000000000000000000000000000000c0ffee06")
+	selfDestruct := []byte{0x30, 0xff} // ADDRESS SELFDESTRUCT
+	// PUSH20 a BALANCE PUSH1 0 SSTORE
+	storeBalanceOfA := append(append([]byte{0x73}, a[:]...), 0x31, 0x60, 0x00, 0x55)
+	// MSTORE 0x30ff at word 0, then CREATE(value 1, offset 30, size 2): the child self-destructs.
+	createSelfDestructingChild := []byte{0x61, 0x30, 0xff, 0x60, 0x00, 0x52, 0x60, 0x02, 0x60, 0x1e, 0x60, 0x01, 0xf0, 0x50}
+	for name, tc := range map[string]struct {
+		alloc types.GenesisAlloc
+		root  string
+	}{
+		"zero balance":   {types.GenesisAlloc{a: {Constructor: selfDestruct}}, "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"},
+		"later reads it": {types.GenesisAlloc{a: {Balance: big.NewInt(5), Constructor: selfDestruct}, b: {Constructor: storeBalanceOfA}}, "0x3a347e8eca5fbf845400dc78507e7ff365b6f146a114b7f55388807435ddd681"},
+		"nested child":   {types.GenesisAlloc{a: {Balance: big.NewInt(5), Constructor: createSelfDestructingChild}}, "0xdf73771f177186430015650435d807056389fbc3525f2b0ddb6a9a0f4ed9f43e"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			block, ibs, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: chain.AllProtocolChanges, Alloc: tc.alloc})
+			require.NoError(t, err)
+			ibs.Close()
+			require.Equal(t, common.HexToHash(tc.root), block.Root())
+		})
+	}
+}
+
 // A constructor that self-destructs leaves no account, even under EIP-8246 rules.
 func TestGenesisSelfDestructingConstructorLeavesNoAccount(t *testing.T) {
 	t.Parallel()
