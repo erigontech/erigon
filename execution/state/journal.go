@@ -328,11 +328,6 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		}
 		return nil
 	case kindCreateObject:
-		if so, ok := s.stateObjects[je.account]; ok {
-			so.release()
-		}
-		delete(s.stateObjects, je.account)
-		delete(s.stateObjectsDirty, je.account)
 		// The account did not exist before this create, so all of its versioned
 		// writes originate from the creation being reverted. Field-level entries
 		// (balance/nonce/…) prune themselves on revert; the account-record writes
@@ -344,10 +339,6 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindResetObject:
-		if current, ok := s.stateObjects[je.account]; ok {
-			current.release()
-		}
-		delete(s.stateObjects, je.account)
 		// Restore the account-record writes the recreation overwrote back to the
 		// snapshot taken before it ran, so versionedWrites reflects prev's state
 		// again (the field-level entries handle the fields creation doesn't write).
@@ -358,12 +349,6 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 
 	case kindSelfdestruct:
 		prev := je.flags&flagSelfdestructPrev != 0
-		if so, ok := s.stateObjects[je.account]; ok {
-			// A transiently-materialized object keeps the create flag in its CreateContract
-			// cell, so only the destruct flag and balance are restored here.
-			so.selfdestructed = prev
-			so.setBalance(je.value)
-		}
 		if je.committed() {
 			s.versionedWrites.DelSelfDestruct(je.account)
 		} else if _, ok := s.versionedWrites.GetSelfDestruct(je.account); ok {
@@ -389,13 +374,6 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindBalance:
-		// Keep a materialized so.data in step (serial always has one; the parallel
-		// path only when the account was materialized for some other reason). Never
-		// materialize one just to revert on the parallel path — the cells below are
-		// authoritative there.
-		if so, ok := s.stateObjects[je.account]; ok {
-			so.setBalance(je.value)
-		}
 		if je.committed() {
 			s.versionedWrites.DelBalance(je.account)
 		} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {
@@ -404,9 +382,6 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindNonce:
-		if so, ok := s.stateObjects[je.account]; ok {
-			so.setNonce(je.aux)
-		}
 		if je.committed() {
 			s.versionedWrites.DelNonce(je.account)
 		} else if _, ok := s.versionedWrites.GetNonce(je.account); ok {
@@ -418,9 +393,6 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		prevcode, prevhash := []byte(nil), accounts.EmptyCodeHash
 		if je.extra != nil {
 			prevcode, prevhash = je.extra.prevcode, je.extra.prevhash
-		}
-		if so, ok := s.stateObjects[je.account]; ok {
-			so.setCode(accounts.Code{Hash: prevhash, Bytes: prevcode})
 		}
 		if je.committed() {
 			s.versionedWrites.DelCodeHash(je.account)
@@ -447,9 +419,6 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			s.versionedWrites.DelStorage(je.account, je.key)
 		} else if _, ok := s.versionedWrites.GetStorage(je.account, je.key); ok {
 			s.versionedWrites.updateStorage(je.account, je.key, je.value)
-		}
-		if so, ok := s.stateObjects[je.account]; ok {
-			so.setState(je.key, je.value)
 		}
 		return nil
 

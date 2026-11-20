@@ -1002,9 +1002,6 @@ func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *u
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
 		ibs.tracingHooks.OnBalanceChange(addr, *prev, update, reason)
 	}
-	if so, ok := ibs.stateObjects[addr]; ok {
-		so.setBalance(update)
-	}
 	ibs.recordWriteBalance(addr, update)
 	return nil
 }
@@ -1421,14 +1418,7 @@ func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uin
 		return nil
 	}
 	prev := base.Nonce
-	// Keep an already-materialized stateObject's so.data in step so the
-	// so.data-based commit paths (genesis FinalizeTx, RPC) stay correct.
-	if so, ok := ibs.stateObjects[addr]; ok {
-		prev = so.data.Nonce
-		so.setNonce(nonce)
-	}
-	// The tx's own nonce cell is authoritative for the journal prev: so.data can
-	// lag if the object was materialized after this tx's earlier writes.
+	// The tx's own nonce cell is authoritative for the journal prev.
 	if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
 		prev = vw.Val
 	}
@@ -1794,14 +1784,6 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 
 	if !preserveBalance && ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
 		ibs.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
-	}
-
-	if so, ok := ibs.stateObjects[addr]; ok {
-		so.markSelfdestructed()
-		so.createdContract = false
-		if !preserveBalance {
-			so.data.Balance.Clear()
-		}
 	}
 
 	ibs.recordWriteSelfDestruct(addr, true)
@@ -2287,21 +2269,9 @@ func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
 			continue
 		}
-		read, ok := ibs.versionedReads.GetAddress(addr)
+		read, _ := ibs.versionedReads.GetAddress(addr)
 		if (read.Val != nil && !read.Val.IsNil()) || !writes.createdEmpty(addr) {
 			continue
-		}
-		// With no address read this tx, the tx didn't observe the account's
-		// pre-tx state — which happens when an empty account created earlier in
-		// the block lingers in the IBS (e.g. a coinbase touched by a zero tip).
-		// Fall back to the pre-block base: a loaded account carries a non-zero
-		// CodeHash (EmptyCodeHash for an EOA), so a zero CodeHash means the
-		// account never existed and its created-empty writes are withheld;
-		// otherwise it existed and needs an explicit delete, so keep the writes.
-		if !ok {
-			if so, soOk := ibs.stateObjects[addr]; soOk && so.original.CodeHash != (accounts.CodeHash{}) {
-				continue
-			}
 		}
 		// With no version-map cell the account is absent before and after the tx, so dropping the
 		// writes is exact; a removal stamp would make every later toucher depend on this tx.
