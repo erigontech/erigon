@@ -1628,16 +1628,21 @@ func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uin
 		return err
 	}
 	if base == nil || ibs.accountLifecycle(addr) {
-		stateObject, err := ibs.GetOrNewStateObject(addr)
-		if err != nil {
-			return err
-		}
-		// The object is built from the base record and can lag this tx's own
-		// nonce write: seed it so a revert restores the live nonce.
+		// The journal prev is this tx's own nonce cell when present (it can lead the
+		// base record), else the fresh account's zero.
+		prev := uint64(0)
 		if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
-			stateObject.setNonce(vw.Val)
+			prev = vw.Val
 		}
-		stateObject.SetNonce(nonce, wasCommited, reason)
+		ibs.createVersioned(addr, base != nil)
+		ibs.journal.nonceChange(addr, prev, wasCommited)
+		if ibs.tracingHooks != nil {
+			if ibs.tracingHooks.OnNonceChangeV2 != nil {
+				ibs.tracingHooks.OnNonceChangeV2(addr, prev, nonce, reason)
+			} else if ibs.tracingHooks.OnNonceChange != nil {
+				ibs.tracingHooks.OnNonceChange(addr, prev, nonce)
+			}
+		}
 		ibs.recordWriteNonce(addr, nonce, reason)
 		return nil
 	}
