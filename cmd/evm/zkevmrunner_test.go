@@ -51,14 +51,14 @@ func TestDecodeFixturesRejectsTrailingData(t *testing.T) {
 	for _, trailer := range []string{` {"second":{}}`, ` garbage`} {
 		path := filepath.Join(t.TempDir(), "fixtures.json")
 		require.NoError(t, os.WriteFile(path, []byte(`{"first":{}}`+trailer), 0o600))
-		require.Error(t, decodeFixtures(path, func(string, json.RawMessage) error { return nil }), trailer)
+		require.Error(t, decodeFixtures(path, func(string, json.RawMessage, int64) error { return nil }), trailer)
 	}
 }
 
 func TestDecodeFixturesRejectsDuplicateNames(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fixtures.json")
 	require.NoError(t, os.WriteFile(path, []byte(`{"a":{},"a":{}}`), 0o600))
-	require.Error(t, decodeFixtures(path, func(string, json.RawMessage) error { return nil }))
+	require.Error(t, decodeFixtures(path, func(string, json.RawMessage, int64) error { return nil }))
 }
 
 func TestLoadZkevmWitnessesKeepsReferenceWhenExcludedFixtureDiffers(t *testing.T) {

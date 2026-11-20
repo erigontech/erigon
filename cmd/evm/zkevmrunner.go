@@ -144,7 +144,7 @@ func loadZkevmWitnesses(files []string) (map[zkevmWitnessKey]*testutil.ExpectedW
 	differs := make(map[zkevmWitnessKey]bool)
 	tm := newZkevmFailMatcher()
 	for _, fname := range files {
-		err := decodeFixtures(fname, func(name string, raw json.RawMessage) error {
+		err := decodeFixtures(fname, func(name string, raw json.RawMessage, _ int64) error {
 			excluded := tm.CheckFailureForName(filepath.ToSlash(fname)+"/"+name, nil) != nil
 			var test struct {
 				Network string
@@ -284,7 +284,7 @@ func runZkevmTestsParallel(root string, files []string, re *regexp.Regexp, witne
 func runZkevmTestFile(root, fname string, re *regexp.Regexp, witnesses map[zkevmWitnessKey]*testutil.ExpectedWitness) ([]testResult, error) {
 	relPath := relName(root, fname)
 	var results []testResult
-	err := decodeFixtures(fname, func(key string, raw json.RawMessage) error {
+	err := decodeFixtures(fname, func(key string, raw json.RawMessage, _ int64) error {
 		name := relPath + "/" + key
 		if !re.MatchString(name) {
 			return nil
@@ -308,10 +308,11 @@ func runZkevmTestFile(root, fname string, re *regexp.Regexp, witnesses map[zkevm
 	return results, nil
 }
 
-// decodeFixtures streams the fixtures of fname to fn one at a time: some
-// fixture files are hundreds of MB, and decoding a whole file at once would
-// keep every fixture of every worker's current file in memory.
-func decodeFixtures(fname string, fn func(name string, raw json.RawMessage) error) error {
+// decodeFixtures streams the fixtures of fname to fn one at a time, with the
+// offset of each in the file: some fixture files are hundreds of MB, and
+// decoding a whole file at once would keep every fixture of every worker's
+// current file in memory.
+func decodeFixtures(fname string, fn func(name string, raw json.RawMessage, offset int64) error) error {
 	f, err := os.Open(fname)
 	if err != nil {
 		return err
@@ -337,7 +338,7 @@ func decodeFixtures(fname string, fn func(name string, raw json.RawMessage) erro
 		if err := dec.Decode(&raw); err != nil {
 			return err
 		}
-		if err := fn(tok.(string), raw); err != nil {
+		if err := fn(tok.(string), raw, dec.InputOffset()-int64(len(raw))); err != nil {
 			return fmt.Errorf("fixture %s: %w", tok, err)
 		}
 	}

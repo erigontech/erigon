@@ -80,9 +80,28 @@ var engineXTestCommand = cli.Command{
 	},
 }
 
+// engineXNamedTest locates a test in its fixture file. Workers decode it
+// only when they run it, so the corpus is never held in memory at once.
 type engineXNamedTest struct {
-	name string
-	def  engineapitester.EngineXTestDefinition
+	name   string
+	file   string
+	offset int64
+	size   int
+}
+
+func (t engineXNamedTest) definition() (engineapitester.EngineXTestDefinition, error) {
+	var def engineapitester.EngineXTestDefinition
+	f, err := os.Open(t.file)
+	if err != nil {
+		return def, err
+	}
+	defer f.Close()
+	raw := make([]byte, t.size)
+	if _, err := f.ReadAt(raw, t.offset); err != nil {
+		return def, fmt.Errorf("read %s: %w", t.file, err)
+	}
+	err = json.Unmarshal(raw, &def)
+	return def, err
 }
 
 type engineXGroupKey struct {
@@ -246,8 +265,8 @@ func printTimings(results []testResult) {
 // Files under any pre_alloc/ directory are skipped: those are pre-allocation
 // inputs (consumed via --pre-alloc-dir), not test fixtures, and they don't
 // follow the engine-x JSON schema. Every other JSON in the tree is expected
-// to be a valid engine-x fixture; an unmarshal error is treated as a hard
-// failure rather than silently skipped.
+// to be a valid engine-x fixture: malformed JSON is a hard failure, and a test
+// whose body does not decode fails when it runs.
 func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]engineXNamedTest, int, error) {
 	files, err := collectFiles(path)
 	if err != nil {
@@ -259,22 +278,24 @@ func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]en
 		if isUnderPreAlloc(fname) {
 			continue
 		}
-		src, err := os.ReadFile(fname)
-		if err != nil {
-			return nil, 0, fmt.Errorf("read %s: %w", fname, err)
-		}
-		var tests map[string]engineapitester.EngineXTestDefinition
-		err = json.Unmarshal(src, &tests)
-		if err != nil {
-			return nil, 0, fmt.Errorf("unmarshal %s: %w", fname, err)
-		}
-		for name, def := range tests {
+		err := decodeFixtures(fname, func(name string, raw json.RawMessage, offset int64) error {
 			if !re.MatchString(name) {
-				continue
+				return nil
+			}
+			var def struct {
+				Fork         engineapitester.Fork         `json:"network"`
+				PreAllocHash engineapitester.PreAllocHash `json:"preHash"`
+			}
+			if err := json.Unmarshal(raw, &def); err != nil {
+				return err
 			}
 			key := engineXGroupKey{fork: def.Fork, hash: def.PreAllocHash}
-			groups[key] = append(groups[key], engineXNamedTest{name: name, def: def})
+			groups[key] = append(groups[key], engineXNamedTest{name: name, file: fname, offset: offset, size: len(raw)})
 			total++
+			return nil
+		})
+		if err != nil {
+			return nil, 0, fmt.Errorf("unmarshal %s: %w", fname, err)
 		}
 	}
 	return groups, total, nil
@@ -320,17 +341,17 @@ func runEngineXGroup(
 		// short-circuit through the already-known-block fast path instead of
 		// re-executing.
 		testCtx := engineapitester.ContextWithTestName(ctx, t.name)
-		var err error
-		if timeIt {
+		def, err := t.definition()
+		if err == nil && timeIt {
 			var stats execStats
 			_, stats, err = timedExec(false, func() ([]byte, uint64, error) {
-				return nil, 0, runner.Run(testCtx, t.def)
+				return nil, 0, runner.Run(testCtx, def)
 			})
 			if err == nil {
 				r.Stats = &stats
 			}
-		} else {
-			err = runner.Run(testCtx, t.def)
+		} else if err == nil {
+			err = runner.Run(testCtx, def)
 		}
 		if err != nil {
 			r.Pass = false
