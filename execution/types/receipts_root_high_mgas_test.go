@@ -67,4 +67,8 @@ func TestDeriveSha_ReceiptOver16MiB(t *testing.T) {
 	expectedBytes, err := hex.DecodeString(expectedRootHex)
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(expectedBytes), DeriveSha(receipts))
+
+	stream := NewListHashStream()
+	stream.Update(receipts)
+	require.Equal(t, common.Hash(expectedBytes), stream.Hash())
 }

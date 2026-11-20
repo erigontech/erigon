@@ -126,3 +126,22 @@ var (
 		BaseFee:     uint256.NewInt(7),
 	}
 )
+
+func TestListHashStreamMatchesDeriveSha(t *testing.T) {
+	t.Parallel()
+	sizes := []int{1000, 4096}
+	for n := 0; n <= 300; n++ {
+		sizes = append(sizes, n)
+	}
+	all := genTransactions(4096)
+	for _, n := range sizes {
+		list := all[:n]
+		s := NewListHashStream()
+		for i := range list {
+			s.Update(list[:i+1])
+		}
+		if got, want := s.Hash(), DeriveSha(list); got != want {
+			t.Fatalf("n=%d: stream %x, DeriveSha %x", n, got, want)
+		}
+	}
+}

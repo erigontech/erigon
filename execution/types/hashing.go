@@ -228,3 +228,73 @@ func prefixedPayloadHash(prefix byte, encode func(w io.Writer, buf []byte) error
 		return encode(w, buf)
 	})
 }
+
+type ListHashStream struct {
+	hb                       *trie.HashBuilder
+	groups, branches, hashes []uint16
+	leaf                     trie.GenStructStepLeafData
+	key, nextKey             *bytes.Buffer
+	val, nextVal             *bytes.Buffer
+	first                    bytes.Buffer
+	count                    int
+}
+
+func NewListHashStream() *ListHashStream {
+	return &ListHashStream{
+		hb:      trie.NewHashBuilder(false),
+		key:     new(bytes.Buffer),
+		nextKey: new(bytes.Buffer),
+		val:     new(bytes.Buffer),
+		nextVal: new(bytes.Buffer),
+	}
+}
+
+func (s *ListHashStream) Update(list DerivableList) {
+	i := s.count
+	s.count++
+	if i == 0 {
+		list.EncodeIndex(0, &s.first)
+		return
+	}
+	s.nextVal.Reset()
+	list.EncodeIndex(i, s.nextVal)
+	s.push(i)
+	if i == 0x7f {
+		s.pushFirst()
+	}
+}
+
+func (s *ListHashStream) Hash() common.Hash {
+	if s.count == 0 {
+		return empty.RootHash
+	}
+	if s.count <= 0x7f {
+		s.pushFirst()
+	}
+	s.step(nil)
+	hash, _ := s.hb.RootHash()
+	return hash
+}
+
+func (s *ListHashStream) pushFirst() {
+	s.nextVal.Reset()
+	s.nextVal.Write(s.first.Bytes())
+	s.push(0)
+}
+
+func (s *ListHashStream) push(i int) {
+	s.nextKey.Reset()
+	w := &hexWriter{s.nextKey}
+	encodeUint(uint(i), w)
+	_ = w.Commit()
+	if s.key.Len() > 0 {
+		s.step(s.nextKey.Bytes())
+	}
+	s.key, s.nextKey = s.nextKey, s.key
+	s.val, s.nextVal = s.nextVal, s.val
+}
+
+func (s *ListHashStream) step(succ []byte) {
+	s.leaf.Value = rlp.RlpEncodedBytes(s.val.Bytes())
+	s.groups, s.branches, s.hashes, _ = trie.GenStructStep(retain, s.key.Bytes(), succ, s.hb, nil, &s.leaf, s.groups, s.branches, s.hashes, false)
+}
