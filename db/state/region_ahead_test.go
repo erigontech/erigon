@@ -108,8 +108,4 @@ func TestRegionWordsSplitTheFileByContract(t *testing.T) {
 		_, _, ok := dt.regionWords(0, regionSlotKey(absent, 0)[:length.Addr])
 		require.False(t, ok)
 	}
-
-	for _, r := range [][2]uint64{{0, 1}, {0, words}, {words - 1, words + 1<<20}, {5, 5}, {9, 3}} {
-		d.MadvWillNeedWords(r[0], r[1])
-	}
 }

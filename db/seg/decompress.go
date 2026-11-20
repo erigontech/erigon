@@ -700,8 +700,7 @@ func (d *Decompressor) MadvWillNeedWords(from, to uint64) {
 	if d == nil || d._mmapHandle == nil {
 		return
 	}
-	base := uint64(cap(d._mmapHandle)-cap(d.data)) + d.wordsStart
-	from, to = base+from, min(base+to, uint64(len(d._mmapHandle)))
+	from, to = d.wordsFileOffset+from, min(d.wordsFileOffset+to, uint64(len(d._mmapHandle)))
 	if from >= to {
 		return
 	}

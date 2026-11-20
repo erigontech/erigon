@@ -1468,17 +1468,7 @@ func TestDecompressorRejectsDepthsOutOfTreeOrder(t *testing.T) {
 }
 
 func TestMadvWillNeedWordsAdvisesPageAlignedWindowsInsideTheMap(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "words")
-	c, err := NewCompressor(t.Context(), t.Name(), file, t.TempDir(), DefaultCfg, log.LvlDebug, log.New())
-	require.NoError(t, err)
-	defer c.Close()
-	word := make([]byte, 512)
-	for i := range 1024 {
-		require.NoError(t, c.AddUncompressedWord(fmt.Appendf(word[:0], "%0512d", i)))
-	}
-	require.NoError(t, c.Compress())
-	d, err := NewDecompressor(file)
-	require.NoError(t, err)
+	d := prepareBinaryDict(t, 1024, 512, false)
 	defer d.Close()
 
 	var advised [][2]uint64
@@ -1491,7 +1481,7 @@ func TestMadvWillNeedWordsAdvisesPageAlignedWindowsInsideTheMap(t *testing.T) {
 	defer func() { madviseWillNeed = orig }()
 
 	page := uint64(os.Getpagesize())
-	base := uint64(cap(d._mmapHandle)-cap(d.data)) + d.wordsStart
+	base := d.wordsFileOffset
 	words := uint64(len(d._mmapHandle)) - base
 	require.Greater(t, words, uint64(3*willNeedWindow))
 
