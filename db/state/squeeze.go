@@ -1106,11 +1106,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				}
 			}
 
-			if shardTo+shardStepsSize > lastShard && shardStepsSize > 1 {
-				shardStepsSize /= 2
-			}
-			shardFrom = shardTo
-			shardTo += shardStepsSize
+			shardFrom, shardTo, shardStepsSize = nextRebuildShard(shardTo, shardStepsSize, lastShard)
 			rangeFromTxNum = rangeToTxNum
 			rangeToTxNum += uint64(shardStepsSize) * a.StepSize()
 		}
@@ -1183,6 +1179,15 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 // rebuildShardKeys is the key count a rebuild shard aims for: short steps do not rebuild in thousands of tiny
 // shards, each with its own commit and merge, and dense steps do not collect one shard's keys past the memory.
 const rebuildShardKeys = 1 << 24
+
+// nextRebuildShard returns the shard after the one ending at prevTo. A shard never ends past the range: a wide
+// shard cannot halve its way onto a range end that is not a multiple of its size.
+func nextRebuildShard(prevTo, size, last kv.Step) (from, to, nextSize kv.Step) {
+	if prevTo+size > last && size > 1 {
+		size /= 2
+	}
+	return prevTo, min(prevTo+size, last), size
+}
 
 func rebuildShardMaxSteps(keysPerStep uint64) uint64 {
 	if keysPerStep == 0 {

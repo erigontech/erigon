@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestRebuildShardMaxSteps(t *testing.T) {
@@ -29,4 +31,16 @@ func TestRebuildShardMaxSteps(t *testing.T) {
 	require.Equal(t, uint64(8), rebuildShardMaxSteps(1_890_433)) // dense steps: 121M keys in a 64-step shard ran out of 62 GB
 	require.Equal(t, uint64(1), rebuildShardMaxSteps(1<<25))
 	require.Equal(t, uint64(1<<24), rebuildShardMaxSteps(1))
+}
+
+func TestNextRebuildShardStaysInsideTheRange(t *testing.T) {
+	const from, last = kv.Step(1024000), kv.Step(1040000)
+	shardTo, size := from+8192, kv.Step(8192)
+	for shardTo < last {
+		var shardFrom kv.Step
+		shardFrom, shardTo, size = nextRebuildShard(shardTo, size, last)
+		require.Less(t, shardFrom, shardTo)
+		require.LessOrEqual(t, shardTo, last)
+	}
+	require.Equal(t, last, shardTo)
 }
