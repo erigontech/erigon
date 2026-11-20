@@ -582,12 +582,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 	}
 	// Prepare the read and write sets.
 	if result.Err == nil {
-		// Genesis (block 0, txIndex -1) resolves `ibs` to the throwaway versioned
-		// IBS that GenesisToBlock builds, whatever the executor. Its writes reach
-		// the executor only through MakeWriteSet(stateWriter); the FinalizedWrites
-		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
-		isGenesis := t.TxIndex == -1 && t.BlockNumber() == 0
-		if ibs.IsVersioned() && !isGenesis {
+		if ibs.IsVersioned() {
 			result.TxOut, _ = ibs.FinalizedWrites(rules) // the read error is checked below for both branches
 		} else {
 			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
