@@ -314,7 +314,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 			subnetIdVal := uint64(subnet)
 			subnetId = &subnetIdVal
 		}
-		err = service.ProcessMessage(ctx, subnetId, msgObj)
+		err = service.ProcessMessage(serviceintf.WithGossipPeer(ctx, pid), subnetId, msgObj)
 		if errors.Is(err, synced_data.ErrNotSynced) || (err != nil && strings.Contains(err.Error(), "ignore")) {
 			// services.ErrIgnore is a big package. To avoid circular dependency, we use a simple string check.
 			log.Trace("[GossipManager] ignore message", "topic", name, "err", err)
@@ -323,13 +323,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 		} else if err != nil {
 			log.Warn("[GossipManager] reject message", "topic", name, "err", err, "peer", pid)
 			g.stats.addReject(name)
-			if banner := g.peerBanner; banner != nil {
-				select {
-				case g.peerBanQueue <- peerBan{banner: banner, pid: pid.String()}:
-				default:
-					log.Debug("[GossipManager] peer ban queue full, dropping ban", "peer", pid)
-				}
-			}
+			g.BanPeer(pid)
 			return pubsub.ValidationReject
 		}
 
@@ -337,6 +331,19 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 		monitor.ObserveGossipTopicSeen(name, len(msgData))
 		g.stats.addAccept(name)
 		return pubsub.ValidationAccept
+	}
+}
+
+// BanPeer does nothing without a peer banner.
+func (g *GossipManager) BanPeer(pid peer.ID) {
+	banner := g.peerBanner
+	if banner == nil {
+		return
+	}
+	select {
+	case g.peerBanQueue <- peerBan{banner: banner, pid: pid.String()}:
+	default:
+		log.Debug("[GossipManager] peer ban queue full, dropping ban", "peer", pid)
 	}
 }
 

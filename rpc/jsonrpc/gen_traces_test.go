@@ -133,7 +133,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	api := NewTraceAPI(baseApi, m.DB, &rpccfg.TraceApiConfig{})
-	traces, err := api.Block(context.Background(), rpc.BlockNumber(1), new(bool), nil)
+	traces, err := api.Block(context.Background(), rpc.BlockNumber(1), nil)
 	if err != nil {
 		t.Errorf("trace_block %d: %v", 0, err)
 	}
@@ -290,7 +290,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 func TestGeneratedTraceApiCollision(t *testing.T) {
 	m := rpcdaemontest.CreateTestExecModuleForTracesCollision(t)
 	api := newTraceApiForTest(m)
-	traces, err := api.Transaction(context.Background(), common.HexToHash("0xb2b9fa4c999c1c8370ce1fbd1c4315a9ce7f8421fe2ebed8a9051ff2e4e7e3da"), new(bool), nil)
+	traces, err := api.Transaction(context.Background(), common.HexToHash("0xb2b9fa4c999c1c8370ce1fbd1c4315a9ce7f8421fe2ebed8a9051ff2e4e7e3da"), nil)
 	if err != nil {
 		t.Errorf("trace_block %d: %v", 0, err)
 	}

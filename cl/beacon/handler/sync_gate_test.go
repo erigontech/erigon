@@ -235,12 +235,6 @@ func TestBlockProductionRefusesHistoricSlot(t *testing.T) {
 		headers                  map[string]string
 	}{
 		{
-			name:   "v3 GET",
-			method: http.MethodGet,
-			path: fmt.Sprintf("/eth/v3/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true",
-				targetSlot, (common.Bytes96{}).String()),
-		},
-		{
 			name:   "v4 POST",
 			method: http.MethodPost,
 			path:   fmt.Sprintf("/eth/v4/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true&include_payload=true", targetSlot, (common.Bytes96{}).String()),
@@ -265,13 +259,29 @@ func TestBlockProductionRefusesHistoricSlot(t *testing.T) {
 	}
 
 	for _, slot := range []uint64{currentSlot, currentSlot + 1} {
-		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
-			"/eth/v3/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true", slot, (common.Bytes96{}).String()), http.NoBody)
 		recorder := httptest.NewRecorder()
-		handler.mux.ServeHTTP(recorder, request)
+		handler.mux.ServeHTTP(recorder, postV4BlockRequest(t.Context(), slot, true, "", v4RequestBody(0, 100)))
 		require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 		require.NotContains(t, recorder.Body.String(), "historic slot")
 	}
+}
+
+func TestBlockProductionV3RefusesHistoricSlotPreGloas(t *testing.T) {
+	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = handler.beaconChainCfg.FarFutureEpoch
+	handler.beaconChainCfg.InitializeForkSchedule()
+	targetSlot := postState.Slot() + 1
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot + 1).AnyTimes()
+	handler.ethClock = clock
+	fcu.HighestImportedDescendantVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
+		"/eth/v3/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true", targetSlot, (common.Bytes96{}).String()), http.NoBody)
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "historic slot")
 }
 
 // Validator endpoints refuse to serve a head that trails the imported blocks, as block

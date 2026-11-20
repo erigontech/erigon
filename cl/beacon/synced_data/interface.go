@@ -35,6 +35,7 @@ type SyncedData interface {
 	OnHeadState(newState *state.CachingBeaconState) error
 	OnHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) error
 	OnOwnedHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) error
+	TakeSpareHeadState() *state.CachingBeaconState
 	UnsetHeadState()
 	ViewHeadState(fn ViewHeadStateFn) error
 	ViewHeadStateWithIdentity(fn ViewHeadStateWithIdentityFn) error
