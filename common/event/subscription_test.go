@@ -89,7 +89,7 @@ func TestResubscribe(t *testing.T) {
 	var i int
 	nfails := 6
 	sub := Resubscribe(100*time.Millisecond, func(ctx context.Context) (Subscription, error) {
-		// fmt.Printf("call #%d @ %v\\n", i, time.Now())
+		// fmt.Printf("call #%d @ %v\n", i, time.Now())
 		i++
 		if i == 2 {
 			// Delay the second failure a bit to reset the resubscribe interval.
