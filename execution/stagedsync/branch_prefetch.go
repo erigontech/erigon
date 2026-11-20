@@ -173,20 +173,19 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 	}
 }
 
-func (p *branchPrefetcher) walkChunk(it prefetchItem, read func(key []byte) []byte) (n int) {
+func (p *branchPrefetcher) walkChunk(it prefetchItem, read func(key []byte) []byte) {
 	it.touch(read)
-	for n = 1; n < branchPrefetchPerTx; n++ {
+	for range branchPrefetchPerTx - 1 {
 		select {
 		case next, ok := <-p.work:
 			if !ok {
-				return n
+				return
 			}
 			next.touch(read)
 		default:
-			return n
+			return
 		}
 	}
-	return n
 }
 
 func (it *prefetchItem) touch(read func(key []byte) []byte) {
