@@ -665,8 +665,11 @@ var (
 		Usage: "Force rebuild",
 	}
 	SnapshotNewSaltFlag = cli.BoolFlag{
-		Name:  "new-salt",
-		Usage: "Regenerate snapshot salts while rebuilding all accessors. Requires --rebuild and a completed initial snapshot download. `seg reset --keep-local-snapshots` restores the network salts: run `seg accessor --rebuild` again after it",
+		Name: "new-salt",
+		Usage: "Regenerate snapshot salts while rebuilding all accessors. Requires --rebuild and a " +
+			"completed initial snapshot download. `seg reset --keep-local-snapshots` clears chaindata " +
+			"and preverified.toml. Restart Erigon to restore network salts and wait for snapshot " +
+			"reconciliation to recreate preverified.toml, then stop Erigon before another offline rebuild.",
 	}
 	SnapshotFileFlag = cli.StringFlag{
 		Name:  "file",
