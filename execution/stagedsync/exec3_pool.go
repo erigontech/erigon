@@ -4,8 +4,6 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
-	"iter"
-	"slices"
 	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -21,12 +19,12 @@ const (
 )
 
 type poolTask struct {
-	be          *blockExecutor
-	tv          *taskVersion
-	next        int
-	prevHeaders []state.WriteHeader
-	result      *exec.TxResult
-	reruns      int
+	be         *blockExecutor
+	tv         *taskVersion
+	next       int
+	prevWrites *state.WriteSet
+	result     *exec.TxResult
+	reruns     int
 
 	mu      sync.Mutex
 	parked  bool
@@ -255,12 +253,8 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if result.Dep >= 0 {
 		return pt.rerunAfter(be.taskIndexOf(result.Dep))
 	}
-	var prev iter.Seq[state.WriteHeader]
-	if len(pt.prevHeaders) > 0 {
-		prev = slices.Values(pt.prevHeaders)
-	}
-	be.selfLoopFlush(tv.version, result, prev)
-	pt.prevHeaders = slices.AppendSeq(pt.prevHeaders[:0], result.TxOut.AllHeaders())
+	be.selfLoopFlush(tv.version, result, pt.prevWrites)
+	pt.prevWrites = result.TxOut
 
 	valid, target, blocker := be.selfLoopEvaluate(tv, result)
 	if !valid {

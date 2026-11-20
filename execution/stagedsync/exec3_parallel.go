@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"maps"
 	"math"
 	"os"
@@ -1750,9 +1749,9 @@ type txResult struct {
 
 // selfLoopFlush publishes the writes of the run at version to the versionMap, after dropping the
 // writes of the previous run that this run no longer makes.
-func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxResult, prev iter.Seq[state.WriteHeader]) {
-	if prev != nil {
-		be.dropUnwritten(version, prev, result.TxOut)
+func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxResult, prevWrites *state.WriteSet) {
+	if prevWrites != nil {
+		be.dropUnwritten(version, prevWrites, result.TxOut)
 	}
 	// Flush as ESTIMATE (complete=false) so a downstream read observes the in-flight
 	// dependency and pauses until this tx commits.
@@ -1762,8 +1761,8 @@ func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxRes
 // dropUnwritten drops the writes that an earlier run made and the run at version does not (see
 // VersionMap.DropWrite), and reports whether there were any. A net-zero storage write was never
 // materialized, so dropping it is a no-op.
-func (be *blockExecutor) dropUnwritten(version state.Version, prev iter.Seq[state.WriteHeader], cur *state.WriteSet) (dropped bool) {
-	for h := range prev {
+func (be *blockExecutor) dropUnwritten(version state.Version, prev, cur *state.WriteSet) (dropped bool) {
+	for h := range prev.AllHeaders() {
 		if !cur.Has(h) {
 			be.versionMap.DropWrite(h.Address, h.Path, h.Key, version)
 			dropped = true
@@ -3004,7 +3003,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
 				}
 			}
-			var ownedWrites *state.WriteSet // a copy this loop made, so it can be extended in place, unlike the worker's TxOut
+			var ownedWrites *state.WriteSet
 			if chainTx, ok := txTask.(*exec.TxTask); ok && chainTx.ChargesSenderAtValidation(int(txVersion.Incarnation)) {
 				senderWrites, charged, err := chargeSenderAtValidation(chainTx, txResult, txVersion, be.versionMap, *stateReader)
 				if err != nil {
@@ -3383,7 +3382,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 		hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
 
-		if be.dropUnwritten(txVersion, prevWrites.AllHeaders(), res.TxOut) {
+		if be.dropUnwritten(txVersion, prevWrites, res.TxOut) {
 			hasWriteChange = true
 		}
 
