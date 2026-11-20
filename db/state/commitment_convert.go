@@ -629,6 +629,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		logger.Info("[commitment_convert] no commitment files to convert")
 		return nil
 	}
+	var folds map[string]tailFold
 	if opts.TargetV3 {
 		converted := make(map[string]struct{}, len(files))
 		for _, f := range files {
@@ -647,10 +648,6 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		if err := checkCommitmentHistoryV3Start(at.d[kv.CommitmentDomain], at.StepSize()); err != nil {
 			return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3NoHistoryAdvice)
 		}
-	}
-	var folds map[string]tailFold
-	if opts.TargetV3 {
-		var err error
 		if folds, err = foldCommitmentTails(ctx, at, files, opts.DB, logger); err != nil {
 			return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3Advice)
 		}

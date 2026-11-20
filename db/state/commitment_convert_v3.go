@@ -308,12 +308,10 @@ func convertCommitmentFileV3(
 			if addErr := add([]byte(k), v); addErr != nil {
 				return addErr
 			}
+			seen[k] = struct{}{}
 		}
 		for k := range fold.prev {
 			if _, ok := seen[k]; ok {
-				continue
-			}
-			if _, ok := fold.cur[k]; ok {
 				continue
 			}
 			v, _, _, _, readErr := at.d[kv.CommitmentDomain].getLatestFromFiles([]byte(k), nil, stepTo-1)
