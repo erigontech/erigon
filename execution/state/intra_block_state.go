@@ -253,6 +253,11 @@ func New(stateReader StateReader) *IntraBlockState {
 	}
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
+	// The IBS is always versioned: it reads through the version-map view and never
+	// materializes a stateObject. Callers that need a shared block-level map rebind
+	// it via SetVersionMap (NewWithVersionMap); the rest get a private empty map.
+	ibs.SetVersionMap(NewVersionMap(nil))
+	ibs.SetTxContext(0, 0)
 	return ibs
 }
 

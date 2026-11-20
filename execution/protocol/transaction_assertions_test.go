@@ -193,6 +193,10 @@ func TestPostTxStateReadErrorAbortsTransaction(t *testing.T) {
 			t.Run(tc.name+"/"+caller.name, func(t *testing.T) {
 				evm, tx := frameTestEnv(t)
 				ibs := evm.IntraBlockState()
+				// Run the frame on a materialized IBS so the setup below leaves real
+				// stateObjects behind; the opcode hook flips to versioned mode to make a
+				// read fall back to one of them (the injected internal read error).
+				ibs.SetVersionMap(nil)
 				require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
 				require.NoError(t, ibs.SetCode(accounts.InternAddress(target), program.New().Append(tc.args.Bytes()).Op(tc.op, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
 				require.NoError(t, ibs.SetCode(accounts.InternAddress(body), program.New().Sstore(0, 1).Bytes(), tracing.CodeChangeUnspecified))

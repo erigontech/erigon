@@ -346,6 +346,11 @@ func TestExecuteReportsFailedWriteSetAsOperational(t *testing.T) {
 	want := errors.New("disk error")
 	ibs := state.New(state.NewNoopReader())
 	defer ibs.Close()
+	// The failing-writer path lives on the non-versioned MakeWriteSet branch; a
+	// versioned IBS takes its write-set via FinalizedWrites and never touches the
+	// writer. Unbind the version map so the seeded account materializes and the
+	// write-set is committed through the failing writer.
+	ibs.SetVersionMap(nil)
 	require.NoError(t, ibs.AddBalance(accounts.InternAddress(common.HexToAddress("0xaa")), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 
 	task := &TxTask{TxNum: 1, TxIndex: 0, Header: &types.Header{}, Config: chain.TestChainBerlinConfig}

@@ -198,7 +198,17 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	defer ibs.Close()
 	err = protocol.InitializeBlockExecution(engine, chainRdr, header, config, ibs, writer, logger, nil)
 	require.NoError(err)
-	account, err := reader.ReadAccountData(params.SystemAddress)
+
+	// InitializeBlockExecution finalizes into the version map on the versioned IBS;
+	// publish those writes into the shared domains the way exec3 does for TxIndex == -1.
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), engine, accounts.NilAddress, config)
+	writes, err := ibs.FinalizedWrites(blockContext.Rules(config))
+	require.NoError(err)
+	err = state.ApplyWrites(writes, domains, tx, header.Number.Uint64(), 2, false)
+	require.NoError(err)
+
+	freshReader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	account, err := freshReader.ReadAccountData(params.SystemAddress)
 	require.NoError(err)
 	require.NotNil(account)
 	require.True(account.Empty())

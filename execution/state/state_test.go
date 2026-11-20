@@ -379,37 +379,25 @@ func TestCodeResolve(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
-
-	state := New(NewReaderV3(domains.AsGetter(tx)))
-	defer state.Close()
+	rules := &chain.Rules{}
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
 
-	so0, err := state.GetOrNewStateObject(stateobjaddr0)
-	require.NoError(t, err)
+	seed := New(NewReaderV3(domains.AsGetter(tx)))
+
 	del := types.AddressToDelegation(stateobjaddr1)
-	_, err = so0.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash(del)), Bytes: del}, true, tracing.CodeChangeUnspecified)
-	require.NoError(t, err)
-	so0.selfdestructed = false
-	so0.deleted = false
-	state.setStateObject(stateobjaddr0, so0)
+	require.NoError(t, seed.CreateAccount(stateobjaddr0, true))
+	require.NoError(t, seed.SetCode(stateobjaddr0, del, tracing.CodeChangeUnspecified))
 
-	so1, err := state.GetOrNewStateObject(stateobjaddr1)
-	require.NoError(t, err)
 	target := []byte{'c', 'a', 'f', 'e'}
-	_, err = so1.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash(target)), Bytes: target}, true, tracing.CodeChangeUnspecified)
-	require.NoError(t, err)
-	so1.selfdestructed = false
-	so1.deleted = false
-	state.setStateObject(stateobjaddr1, so1)
+	require.NoError(t, seed.CreateAccount(stateobjaddr1, true))
+	require.NoError(t, seed.SetCode(stateobjaddr1, target, tracing.CodeChangeUnspecified))
 
-	err = state.FinalizeTx(&chain.Rules{}, w)
+	writes, err := seed.FinalizedWrites(rules)
 	require.NoError(t, err)
-
-	err = state.CommitBlock(&chain.Rules{}, w)
-	require.NoError(t, err)
+	require.NoError(t, ApplyWrites(writes, domains, tx, 0, txNum, false))
+	seed.Close()
 
 	state1 := New(NewReaderV3(domains.AsGetter(tx)))
 	defer state1.Close()
@@ -505,35 +493,28 @@ func TestDump(t *testing.T) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	st := New(NewReaderV3(domains.AsGetter(tx)))
-	defer st.Close()
+	rules := &chain.Rules{}
+	addr1 := toAddr([]byte{0x01})
+	addr2 := toAddr([]byte{0x01, 0x02})
+	addr3 := toAddr([]byte{0x02})
+
+	seed := New(NewReaderV3(domains.AsGetter(tx)))
 
 	// generate a few entries
-	obj1, err := st.GetOrNewStateObject(toAddr([]byte{0x01}))
-	require.NoError(t, err)
-	err = st.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
-	require.NoError(t, err)
-	obj2, err := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
-	require.NoError(t, err)
-	_, err = obj2.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3})), Bytes: []byte{3, 3, 3, 3, 3, 3, 3}}, true, tracing.CodeChangeUnspecified)
-	require.NoError(t, err)
-	obj2.setIncarnation(1)
-	obj3, err := st.GetOrNewStateObject(toAddr([]byte{0x02}))
-	require.NoError(t, err)
-	obj3.SetBalance(*uint256.NewInt(44), true, tracing.BalanceChangeUnspecified)
+	require.NoError(t, seed.CreateAccount(addr1, true))
+	require.NoError(t, seed.AddBalance(addr1, *uint256.NewInt(22), tracing.BalanceChangeUnspecified))
 
-	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
-	// write some of them to the trie
-	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
-	require.NoError(t, err)
-	err = w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
-	require.NoError(t, err)
-	err = st.FinalizeTx(&chain.Rules{}, w)
-	require.NoError(t, err)
+	require.NoError(t, seed.CreateAccount(addr2, true))
+	require.NoError(t, seed.SetCode(addr2, []byte{3, 3, 3, 3, 3, 3, 3}, tracing.CodeChangeUnspecified))
+	require.NoError(t, seed.SetIncarnation(addr2, 1))
 
-	blockWriter := NewWriter(domains.AsPutDel(tx), nil, txNum)
-	err = st.CommitBlock(&chain.Rules{}, blockWriter)
+	require.NoError(t, seed.CreateAccount(addr3, true))
+	require.NoError(t, seed.SetBalance(addr3, *uint256.NewInt(44), tracing.BalanceChangeUnspecified))
+
+	writes, err := seed.FinalizedWrites(rules)
 	require.NoError(t, err)
+	require.NoError(t, ApplyWrites(writes, domains, tx, 0, txNum, false))
+	seed.Close()
 	err = domains.Flush(context.Background(), tx)
 	require.NoError(t, err)
 

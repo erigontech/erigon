@@ -292,7 +292,11 @@ func TestPrestateTracerRetainedBalance(t *testing.T) {
 			// Settlement can credit an account after the root call has returned.
 			require.NoError(t, ibs.SetBalance(contract, uint256.Int{7}, tracing.BalanceChangeUnspecified))
 			if tc.finalize {
-				require.NoError(t, ibs.FinalizeTx(&chain.Rules{IsAmsterdam: tc.amsterdam}, executionstate.NewNoopWriter()))
+				// The versioned finalize is FinalizedWrites: it applies the EIP-8246
+				// balance-preserve and EIP-161 removals into the version map, so the
+				// tracer reads the post-tx state back from the same IBS.
+				_, err = ibs.FinalizedWrites(&chain.Rules{IsAmsterdam: tc.amsterdam})
+				require.NoError(t, err)
 			}
 			tracer.EmitTxEnd(&types.Receipt{}, mdgas.TxnGasUsage{}, nil)
 			result, err := tracer.GetResult()

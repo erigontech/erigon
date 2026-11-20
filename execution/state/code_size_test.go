@@ -161,21 +161,22 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	blockNum := uint64(1)
 	txNum := uint64(3)
 
-	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	rules := &chain.Rules{}
+	r := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
-	intraBlockState := state.New(r)
-	defer intraBlockState.Close()
+	seed := state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	// Start the 1st transaction
-	require.NoError(t, intraBlockState.CreateAccount(contract, true))
+	require.NoError(t, seed.CreateAccount(contract, true))
 
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
-	require.NoError(t, intraBlockState.SetCode(contract, code, tracing.CodeChangeUnspecified))
-	require.NoError(t, intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
-	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, w), "finalising 1st tx")
-	if err := intraBlockState.CommitBlock(&chain.Rules{}, w); err != nil {
-		t.Errorf("error committing block: %v", err)
-	}
+	require.NoError(t, seed.SetCode(contract, code, tracing.CodeChangeUnspecified))
+	require.NoError(t, seed.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
+
+	writes, err := seed.FinalizedWrites(rules)
+	require.NoError(t, err)
+	require.NoError(t, state.ApplyWrites(writes, sd, tx, 0, txNum, false))
+	seed.Close()
 
 	r2, err := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)

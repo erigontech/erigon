@@ -989,6 +989,10 @@ func TestApplyTransactionTxEndV2(t *testing.T) {
 			recipient := common.HexToAddress("0x2222222222222222222222222222222222222222")
 			ibs := state.New(state.NewNoopReader())
 			defer ibs.Close()
+			// applyTransaction persists through the stateWriter only on the materialized
+			// finalize path; the versioned path ends the tx into the version map instead.
+			// This test pins writer-error propagation, so finalize off a materialized IBS.
+			ibs.SetVersionMap(nil)
 			require.NoError(t, ibs.SetCode(accounts.InternAddress(recipient), []byte{
 				byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP),
 			}, tracing.CodeChangeUnspecified))
