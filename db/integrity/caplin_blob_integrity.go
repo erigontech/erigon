@@ -134,9 +134,11 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 	for i, r := range ranges {
 		g.Go(func() error {
 			return db.View(gctx, func(tx kv.Tx) error {
+				var dependsOnChild bool
 				for slot := r.from; slot < r.to; slot++ {
-					slotErr := checkCaplinBlobSnapshotSlot(gctx, tx, snapshots, reader, slot)
+					skippedPayload, slotErr := checkCaplinBlobSnapshotSlot(gctx, tx, snapshots, reader, slot)
 					if slotErr == nil {
+						dependsOnChild = dependsOnChild || skippedPayload
 						continue
 					}
 					if errors.Is(slotErr, context.Canceled) || errors.Is(slotErr, context.DeadlineExceeded) {
@@ -150,7 +152,7 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 						rangeErrs[i] = slotErr
 					}
 				}
-				passed[i] = rangeErrs[i] == nil
+				passed[i] = rangeErrs[i] == nil && !dependsOnChild
 				return nil
 			})
 		})
@@ -161,7 +163,7 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 			cache.add(string(CaplinBlobSidecars), r.fps)
 		}
 	}
-	return cmp.Or(waitErr, firstErr, cmp.Or(rangeErrs...))
+	return cmp.Or(waitErr, ctx.Err(), firstErr, cmp.Or(rangeErrs...))
 }
 
 func caplinBlobFingerprints(blob *snapshotsync.VisibleSegment, beacon []*snapshotsync.VisibleSegment) ([]fileFingerprint, error) {
@@ -261,54 +263,54 @@ func checkCaplinSnapshotSegment(ctx context.Context, name string, segment *snaps
 	return nil
 }
 
-func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, slot uint64) error {
-	if err := ctx.Err(); err != nil {
-		return err
+func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, slot uint64) (skippedPayload bool, err error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return false, ctxErr
 	}
 	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 	if err != nil {
-		return fmt.Errorf("blob snapshot slot %d: read canonical root: %w", slot, err)
+		return false, fmt.Errorf("blob snapshot slot %d: read canonical root: %w", slot, err)
 	}
 	block, err := snapshots.ReadFrozenBeaconBlockBodyForIntegrity(slot)
 	if err != nil {
-		return fmt.Errorf("blob snapshot slot %d: read beacon block: %w", slot, err)
+		return false, fmt.Errorf("blob snapshot slot %d: read beacon block: %w", slot, err)
 	}
 	sidecars, err := snapshots.ReadBlobSidecars(slot)
 	if err != nil {
-		return fmt.Errorf("blob snapshot slot %d: read sidecars: %w", slot, err)
+		return false, fmt.Errorf("blob snapshot slot %d: read sidecars: %w", slot, err)
 	}
 	if block == nil {
 		if canonicalRoot != (common.Hash{}) {
-			return fmt.Errorf("blob snapshot slot %d: canonical block is missing from beacon snapshots", slot)
+			return false, fmt.Errorf("blob snapshot slot %d: canonical block is missing from beacon snapshots", slot)
 		}
 		if len(sidecars) != 0 {
-			return fmt.Errorf("blob snapshot slot %d: beacon block is missing but found %d sidecars", slot, len(sidecars))
+			return false, fmt.Errorf("blob snapshot slot %d: beacon block is missing but found %d sidecars", slot, len(sidecars))
 		}
-		return nil
+		return false, nil
 	}
 	if block.Block == nil || block.Block.Body == nil {
-		return fmt.Errorf("blob snapshot slot %d: beacon block is incomplete", slot)
+		return false, fmt.Errorf("blob snapshot slot %d: beacon block is incomplete", slot)
 	}
 	if block.Block.Slot != slot {
-		return fmt.Errorf("blob snapshot slot %d: beacon block has slot %d", slot, block.Block.Slot)
+		return false, fmt.Errorf("blob snapshot slot %d: beacon block has slot %d", slot, block.Block.Slot)
 	}
 	if canonicalRoot == (common.Hash{}) {
-		return fmt.Errorf("blob snapshot slot %d: canonical block root is missing", slot)
+		return false, fmt.Errorf("blob snapshot slot %d: canonical block root is missing", slot)
 	}
 
 	beaconHeader, _, _, err := snapshots.ReadHeader(slot, tx)
 	if err != nil {
-		return fmt.Errorf("blob snapshot slot %d: read beacon header: %w", slot, err)
+		return false, fmt.Errorf("blob snapshot slot %d: read beacon header: %w", slot, err)
 	}
 	if beaconHeader == nil || beaconHeader.Header == nil {
-		return fmt.Errorf("blob snapshot slot %d: beacon snapshot header is missing", slot)
+		return false, fmt.Errorf("blob snapshot slot %d: beacon snapshot header is missing", slot)
 	}
 	beaconRoot, err := beaconHeader.Header.HashSSZ()
 	if err != nil {
-		return fmt.Errorf("blob snapshot slot %d: hash beacon header: %w", slot, err)
+		return false, fmt.Errorf("blob snapshot slot %d: hash beacon header: %w", slot, err)
 	}
 	if beaconRoot != canonicalRoot {
-		return fmt.Errorf("blob snapshot slot %d: beacon snapshot root does not match canonical root", slot)
+		return false, fmt.Errorf("blob snapshot slot %d: beacon snapshot root does not match canonical root", slot)
 	}
 	commitments := block.GetBlobKzgCommitments()
 	expected := 0
@@ -316,46 +318,46 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freez
 		expected = commitments.Len()
 	}
 	if expected > 0 && len(sidecars) == 0 && block.Version() >= clparams.GloasVersion {
-		skipped, err := freezeblocks.PayloadSkipped(ctx, tx, snapshots, reader, block, canonicalRoot)
+		skippedPayload, err = freezeblocks.PayloadSkipped(ctx, tx, snapshots, reader, block, canonicalRoot)
 		if err != nil {
-			return fmt.Errorf("blob snapshot slot %d: payload status: %w", slot, err)
+			return false, fmt.Errorf("blob snapshot slot %d: payload status: %w", slot, err)
 		}
-		if skipped {
+		if skippedPayload {
 			expected = 0
 		}
 	}
 	if len(sidecars) != expected {
-		return fmt.Errorf("blob snapshot slot %d: expected %d sidecars, got %d", slot, expected, len(sidecars))
+		return false, fmt.Errorf("blob snapshot slot %d: expected %d sidecars, got %d", slot, expected, len(sidecars))
 	}
 	for i, sidecar := range sidecars {
 		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
-			return fmt.Errorf("blob snapshot slot %d index %d: incomplete sidecar", slot, i)
+			return false, fmt.Errorf("blob snapshot slot %d index %d: incomplete sidecar", slot, i)
 		}
 		if sidecar.Index != uint64(i) {
-			return fmt.Errorf("blob snapshot slot %d: expected index %d, got %d", slot, i, sidecar.Index)
+			return false, fmt.Errorf("blob snapshot slot %d: expected index %d, got %d", slot, i, sidecar.Index)
 		}
 		commitment := commitments.Get(i)
 		if commitment == nil || sidecar.KzgCommitment != common.Bytes48(*commitment) {
-			return fmt.Errorf("blob snapshot slot %d index %d: sidecar commitment does not match beacon block", slot, i)
+			return false, fmt.Errorf("blob snapshot slot %d index %d: sidecar commitment does not match beacon block", slot, i)
 		}
 		if sidecar.SignedBlockHeader.Header.Slot != slot {
-			return fmt.Errorf("blob snapshot slot %d index %d: header has slot %d", slot, i, sidecar.SignedBlockHeader.Header.Slot)
+			return false, fmt.Errorf("blob snapshot slot %d index %d: header has slot %d", slot, i, sidecar.SignedBlockHeader.Header.Slot)
 		}
 		if sidecar.SignedBlockHeader.Signature != beaconHeader.Signature {
-			return fmt.Errorf("blob snapshot slot %d index %d: sidecar header signature does not match beacon snapshot", slot, i)
+			return false, fmt.Errorf("blob snapshot slot %d index %d: sidecar header signature does not match beacon snapshot", slot, i)
 		}
 		sidecarRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
 		if err != nil {
-			return fmt.Errorf("blob snapshot slot %d index %d: hash sidecar header: %w", slot, i, err)
+			return false, fmt.Errorf("blob snapshot slot %d index %d: hash sidecar header: %w", slot, i, err)
 		}
 		if sidecarRoot != canonicalRoot {
-			return fmt.Errorf("blob snapshot slot %d index %d: sidecar block root does not match canonical root", slot, i)
+			return false, fmt.Errorf("blob snapshot slot %d index %d: sidecar block root does not match canonical root", slot, i)
 		}
 	}
 	if err := blob_storage.VerifyBlobSidecars(sidecars, block.Version(), nil); err != nil {
-		return fmt.Errorf("blob snapshot slot %d: KZG/proof verification failed: %w", slot, err)
+		return false, fmt.Errorf("blob snapshot slot %d: KZG/proof verification failed: %w", slot, err)
 	}
-	return nil
+	return skippedPayload, nil
 }
 
 func checkCaplinBlobSnapshotsVisible(snapshots *freezeblocks.CaplinSnapshots, view *freezeblocks.CaplinView) error {
