@@ -272,10 +272,8 @@ func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) bool 
 }
 
 func (pt *poolTask) publish(p *taskPool) bool {
-	if pt.result != nil {
-		pt.result.ReadAddrs = pt.result.TxIn.AddrPaths()
-		pt.result.WriteAddrs = pt.result.TxOut.AddrPaths()
-	}
+	pt.result.ReadAddrs = pt.result.TxIn.AddrPaths()
+	pt.result.WriteAddrs = pt.result.TxOut.AddrPaths()
 	pt.send(p, pt.result)
 	pt.result = nil
 	pt.next = psReexec
