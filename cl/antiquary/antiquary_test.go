@@ -994,8 +994,8 @@ func TestBlobSegmentCompleteScansFilesAndResumesAtTheGap(t *testing.T) {
 	fileLost, asked = true, nil
 	complete, err = a.blobSegmentComplete(tx, 0, 8, blobCount)
 	require.NoError(t, err)
-	require.True(t, complete)
-	require.Empty(t, asked, "a finished backfill skips the scan")
+	require.False(t, complete, "a finished backfill does not make a lost file stored")
+	require.Equal(t, uint64(5), mxBlobRetirementGapSlot.GetValueUint64())
 }
 
 func TestBlobRetirementGapIsReported(t *testing.T) {

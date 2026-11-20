@@ -594,28 +594,26 @@ const blobRetirementGapLogInterval = 10 * time.Minute
 // blobSegmentComplete reports whether [from, to) can retire. An unfillable gap keeps backfill incomplete, but the
 // segments below it are still complete.
 func (s *Antiquary) blobSegmentComplete(tx kv.Tx, from, to uint64, blobCount freezeblocks.BlobCountBySlotFn) (bool, error) {
-	if !s.blobBackfilled.Load() {
-		for slot := max(from, s.blobCheckedTo); slot < to; slot++ {
-			want, skipped, err := blobCount(tx, slot)
-			if err != nil {
-				return false, err
-			}
-			if skipped {
-				continue
-			}
-			blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
-			if err != nil {
-				return false, err
-			}
-			stored, err := blob_storage.BlobsStored(s.ctx, s.blobStorage, slot, blockRoot, int(want))
-			if err != nil {
-				return false, err
-			}
-			if !stored {
-				s.blobCheckedTo = slot
-				s.reportBlobRetirementGap(from, slot, time.Now())
-				return false, nil
-			}
+	for slot := max(from, s.blobCheckedTo); slot < to; slot++ {
+		want, skipped, err := blobCount(tx, slot)
+		if err != nil {
+			return false, err
+		}
+		if skipped {
+			continue
+		}
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+		if err != nil {
+			return false, err
+		}
+		stored, err := blob_storage.BlobsStored(s.ctx, s.blobStorage, slot, blockRoot, int(want))
+		if err != nil {
+			return false, err
+		}
+		if !stored {
+			s.blobCheckedTo = slot
+			s.reportBlobRetirementGap(from, slot, time.Now())
+			return false, nil
 		}
 	}
 	mxBlobRetirementGapSlot.SetUint64(0)
