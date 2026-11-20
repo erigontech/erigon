@@ -39,10 +39,10 @@ func TestNewVersionMapParallelSeedMatchesSerial(t *testing.T) {
 		}
 	}
 	parallel := NewVersionMap(bal)
-	parallel.SeedAddresses()
+	parallel.SeedAddresses(InternBALAddresses(parallel.bal))
 	serial := &VersionMap{HasBAL: true, bal: bal}
-	serial.WriteChanges(bal)
-	serial.seedAddresses(0, len(bal))
+	serial.WriteChanges(bal, InternBALAddresses(bal))
+	serial.seedAddresses(InternBALAddresses(bal), 0, len(bal))
 
 	for i := range bal {
 		addr := accounts.InternAddress(bal[i].Address)

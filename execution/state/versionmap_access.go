@@ -293,9 +293,9 @@ func (view *VersionMapView) TracePrefix() string {
 // show. A 0-value touch removes an account that is EIP-161 empty in base. A create replaces the
 // storage of an account with no nonce and no code, and such an account can hold storage only with
 // a contract incarnation.
-func (vm *VersionMap) HasAmbiguousBaseAccount(eip161Enabled, isAura bool, base StateReader) (bool, error) {
+func (vm *VersionMap) HasAmbiguousBaseAccount(eip161Enabled, isAura bool, base StateReader, addrs []accounts.Address) (bool, error) {
 	for i := range vm.bal {
-		addr := vm.balAddr(i, &vm.bal[i])
+		addr := addrs[i]
 		acc, err := base.ReadAccountData(addr)
 		if err != nil {
 			return false, err
@@ -313,7 +313,7 @@ func (vm *VersionMap) HasAmbiguousBaseAccount(eip161Enabled, isAura bool, base S
 	return false, nil
 }
 
-func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {
+func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader, addrs []accounts.Address) error {
 	var stamps []*WriteSet
 	var candidates []uint32
 	for i := range vm.bal {
@@ -323,7 +323,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 		if maxIdx == 0 {
 			continue // only reads, no field change — not a removal candidate
 		}
-		addr := vm.balAddr(i, ac)
+		addr := addrs[i]
 		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
 			continue
 		}
@@ -382,21 +382,21 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 // existence is taken straight from the BAL (the account's first change index), with no
 // base read: the AddressPath is marked AccountFromBAL, so field reads still fall back to
 // the committed base for a base-present account's untouched fields.
-func (vm *VersionMap) SeedAddresses() {
+func (vm *VersionMap) SeedAddresses(addrs []accounts.Address) {
 	if balChunkWorkers(len(vm.bal)) <= 1 {
-		vm.seedAddresses(0, len(vm.bal))
+		vm.seedAddresses(addrs, 0, len(vm.bal))
 		return
 	}
-	forBALChunks(len(vm.bal), vm.seedAddresses)
+	forBALChunks(len(vm.bal), func(from, to int) { vm.seedAddresses(addrs, from, to) })
 }
 
-func (vm *VersionMap) seedAddresses(from, to int) {
+func (vm *VersionMap) seedAddresses(addrs []accounts.Address, from, to int) {
 	for i := from; i < to; i++ {
 		minIdx := balNextChangeIndex(&vm.bal[i], 0)
 		if minIdx == 0 {
 			continue
 		}
-		addr := vm.balAddr(i, &vm.bal[i])
+		addr := addrs[i]
 		av := VersionedAccountView{addr: addr, txIdx: int(minIdx), vm: vm}
 		if acc := av.Account(); acc != nil {
 			vm.WriteAddressExists(addr, Version{TxIndex: int(minIdx) - 1}, acc)

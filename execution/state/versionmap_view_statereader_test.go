@@ -113,8 +113,8 @@ func TestVersionMapViewMatchesVersionedStateReader(t *testing.T) {
 	base.accounts[burned] = &burnedBase
 
 	vm := NewVersionMap(bal)
-	vm.SeedAddresses()
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, base))
+	vm.SeedAddresses(InternBALAddresses(vm.bal))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, base, InternBALAddresses(vm.bal)))
 
 	// EIP-8246 preserve: self-destruct keeps a non-zero (non-deleted) balance at tx 0.
 	wsP := &WriteSet{}

@@ -119,7 +119,7 @@ func BenchmarkValidateAccountReads(b *testing.B) {
 		bal[n+i] = types.AccountChanges{Address: created[i].Value(), BalanceChanges: []*types.BalanceChange{{Index: 5, Value: *uint256.NewInt(2)}}}
 	}
 	vm := NewVersionMap(bal)
-	vm.SeedAddresses()
+	vm.SeedAddresses(InternBALAddresses(vm.bal))
 	for _, tc := range []struct {
 		name  string
 		addrs []accounts.Address

@@ -270,7 +270,6 @@ type VersionMap struct {
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
-	balAddrs []accounts.Address // bal's addresses, interned once per block
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -436,7 +435,25 @@ func (vm *VersionMap) assertUnsealed(txIdx int, addr accounts.Address, path Acco
 	}
 }
 
+// InternBALAddresses interns each account address of bal once. The caller passes the slice to every version
+// map call that walks the same BAL, so a block interns its BAL addresses once.
+func InternBALAddresses(bal types.BlockAccessList) []accounts.Address {
+	if len(bal) == 0 {
+		return nil
+	}
+	addrs := make([]accounts.Address, len(bal))
+	for i := range bal {
+		addrs[i] = accounts.InternAddress(bal[i].Address)
+	}
+	return addrs
+}
+
 func NewVersionMap(changes types.BlockAccessList) *VersionMap {
+	return NewBALVersionMap(changes, InternBALAddresses(changes))
+}
+
+// NewBALVersionMap is NewVersionMap with the BAL's addresses from InternBALAddresses.
+func NewBALVersionMap(changes types.BlockAccessList, addrs []accounts.Address) *VersionMap {
 	vm := &VersionMap{
 		HasBAL: len(changes) > 0,
 		bal:    changes,
@@ -450,12 +467,9 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		}
 		m := xsync.NewMap[accounts.Address, *AddressEntry](xsync.WithPresize(writers))
 		entries := make([]AddressEntry, writers)
-		vm.balAddrs = make([]accounts.Address, len(changes))
 		for i := range changes {
-			ac := &changes[i]
-			vm.balAddrs[i] = accounts.InternAddress(ac.Address)
-			if balAccountWrites(ac) {
-				m.Store(vm.balAddrs[i], &entries[0])
+			if balAccountWrites(&changes[i]) {
+				m.Store(addrs[i], &entries[0])
 				entries = entries[1:]
 				vm.nonEmpty.Store(true)
 			}
@@ -463,28 +477,15 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		vm.s.Store(m)
 	}
 	if balChunkWorkers(len(changes)) <= 1 {
-		vm.WriteChanges(changes)
+		vm.WriteChanges(changes, addrs)
 	} else {
-		forBALChunks(len(changes), vm.writeBALRange)
+		forBALChunks(len(changes), func(from, to int) { vm.writeChangesAt(changes, addrs, from, to) })
 	}
 	return vm
 }
 
-// writeBALRange writes vm.bal[from:to] like WriteChanges, keeping the once-interned addresses.
-func (vm *VersionMap) writeBALRange(from, to int) {
-	vm.writeChangesAt(vm.bal, from, to)
-}
-
 func balAccountWrites(ac *types.AccountChanges) bool {
 	return len(ac.StorageChanges)+len(ac.BalanceChanges)+len(ac.NonceChanges)+len(ac.CodeChanges) > 0
-}
-
-// balAddr is the interned address of ac, taken from balAddrs when ac is vm.bal[i].
-func (vm *VersionMap) balAddr(i int, ac *types.AccountChanges) accounts.Address {
-	if i < len(vm.balAddrs) && ac == &vm.bal[i] {
-		return vm.balAddrs[i]
-	}
-	return accounts.InternAddress(ac.Address)
 }
 
 // balChunkAccounts is the smallest share of a BAL that pays for its own goroutine.
@@ -616,11 +617,11 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 // WriteChanges pre-populates the version map from a BAL (EIP-7928), routing each
 // per-path change through the typed Write primitive so the value type is enforced at
 // compile time.
-func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
-	vm.writeChangesAt(changes, 0, len(changes))
+func (vm *VersionMap) WriteChanges(changes types.BlockAccessList, addrs []accounts.Address) {
+	vm.writeChangesAt(changes, addrs, 0, len(changes))
 }
 
-func (vm *VersionMap) writeChangesAt(changes types.BlockAccessList, from, to int) {
+func (vm *VersionMap) writeChangesAt(changes types.BlockAccessList, addrs []accounts.Address, from, to int) {
 	for i := from; i < to; i++ {
 		accountChanges := &changes[i]
 		if dbg.TraceBALFeed {
@@ -637,7 +638,7 @@ func (vm *VersionMap) writeChangesAt(changes types.BlockAccessList, from, to int
 		if !balAccountWrites(accountChanges) {
 			continue
 		}
-		addr := vm.balAddr(i, accountChanges)
+		addr := addrs[i]
 		e := vm.entryOrCreate(addr)
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {
