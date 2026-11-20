@@ -1111,17 +1111,20 @@ func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *u
 		prev = &cur
 	}
 	if base == nil || ibs.accountLifecycle(addr) {
-		stateObject, err := ibs.GetOrNewStateObject(addr)
-		if err != nil {
-			return err
-		}
-		// A destroyed-then-revived account's transient lags this tx's own balance
-		// write, so seed the live balance first or a revert restores the wrong
-		// one. The base==nil create path never read balance, so leave it untouched.
+		// hadPrevious is base != nil: getStateObject resolves a live record only when
+		// the versioned base is non-nil (a same-tx EIP-6780 destruct is still live);
+		// a cross-tx removal reads base nil, so it is a fresh createObject. The live
+		// case journals *prev (the account's own balance, so a revert restores it); the
+		// create case never read balance, so its prev is the fresh account's zero.
+		var prevBal uint256.Int
 		if base != nil {
-			stateObject.setBalance(*prev)
+			prevBal = *prev
 		}
-		stateObject.SetBalance(update, wasCommited, reason)
+		ibs.createVersioned(addr, base != nil)
+		ibs.journal.balanceChange(addr, prevBal, wasCommited, ibs.versionedWrites.balanceDeleted(addr))
+		if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
+			ibs.tracingHooks.OnBalanceChange(addr, prevBal, update, reason)
+		}
 		ibs.recordWriteBalance(addr, update)
 		return nil
 	}
@@ -2370,6 +2373,32 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		ibs.recordWriteBalance(addr, newobj.data.Balance)
 	}
 	return newobj
+}
+
+// createVersioned records the creation of addr into the version map and journal on the
+// versioned path with no stateObject (createObject's versioned recording, extracted).
+// hadPrevious is createObject's previous!=nil: the account resolved to a live record
+// (getStateObject returns nil for a cross-tx-destructed account on this path), so the
+// create is a reset whose fields the journal snapshots for revert rather than a fresh
+// createObject entry.
+func (ibs *IntraBlockState) createVersioned(addr accounts.Address, hadPrevious bool) {
+	account := accounts.NewAccount() // Root=empty.RootHash, CodeHash=EmptyCodeHash: newObject's normalized output
+	if !hadPrevious {
+		ibs.journal.createObjectChange(addr)
+	} else {
+		prevWrites := ibs.versionedWrites.snapshotCreateFields(addr)
+		ibs.journal.resetObjectChange(addr, nil, prevWrites)
+	}
+	ibs.recordWriteAddress(addr, &account)
+	ibs.recordWriteCodeHash(addr, account.CodeHash)
+	if hadPrevious {
+		ibs.recordWriteNonce(addr, account.Nonce, tracing.NonceChangeNewContract)
+	} else {
+		if _, res, ok := ibs.versionMap.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
+			ibs.recordWriteNonce(addr, account.Nonce, tracing.NonceChangeNewContract)
+		}
+		ibs.recordWriteBalance(addr, account.Balance)
+	}
 }
 
 // CreateAccount explicitly creates a state object. If a state object with the address
