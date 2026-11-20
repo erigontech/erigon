@@ -419,37 +419,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					// peers as before. See warm-restart: the checkpoint IS the head; nothing to backfill.
 					soleProducer := cfg.caplinConfig.LocalDiscovery && cfg.caplinConfig.DevValidatorSeed != ""
 					if cfg.state.Slot() == 0 || soleProducer {
-						checkpointSlot := cfg.state.Slot()
-						// Set the loaded state (genesis, or the resumed checkpoint) as the head so
-						// Syncing() returns false and the VC produces on top of it at the current slot.
-						if err := cfg.syncedData.OnHeadStateWithBlockRoot(cfg.state, startingRoot); err != nil {
-							return fmt.Errorf("failed to set head state on resume: %w", err)
-						}
-						// Mark forkchoice as synced so OnAttestation processes attestations.
-						cfg.forkChoice.SetSynced(true)
-						cfg.state = nil // Release the state
-						if checkpointSlot == 0 {
-							// Cold start: write the genesis beacon block so production finds the parent.
-							if err := writeGenesisBeaconBlock(ctx, cfg); err != nil {
-								return fmt.Errorf("failed to write genesis beacon block: %w", err)
-							}
-							return nil
-						}
-						// Warm restart: the persisted chain head can be AHEAD of this loaded
-						// checkpoint state. The head-state save (latest.ssz_snappy) lags block
-						// persistence on a crash or a kill during rapid production, so
-						// caplin/indexing + the EL hold blocks checkpointSlot+1..N that the loaded
-						// state doesn't know about. Anchoring on the stale checkpoint and producing
-						// immediately leaves the fork-choice head STUCK at the anchor: the EL is told
-						// head == the checkpoint's exec block while it already holds N, so it
-						// unwind-thrashes every slot and never advances. Replay the persisted beacon
-						// blocks forward to the true head so the fork choice + synced head reach N;
-						// the EL already has these blocks (newPayload=false skips re-execution), so
-						// the resulting forkchoice update matches the EL head — no unwind.
-						if err := replaySoleProducerToHead(ctx, logger, cfg, checkpointSlot); err != nil {
-							return fmt.Errorf("sole-producer warm resume replay: %w", err)
-						}
-						return nil
+						return anchorOnLoadedState(ctx, logger, cfg, startingRoot, soleProducer)
 					}
 
 					startingSlot := cfg.state.LatestBlockHeader().Slot
@@ -605,6 +575,33 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			},
 		},
 	}
+}
+
+func anchorOnLoadedState(ctx context.Context, logger log.Logger, cfg *Cfg, startingRoot common.Hash, soleProducer bool) error {
+	checkpointSlot := cfg.state.Slot()
+	// Set the loaded state (genesis, or the resumed checkpoint) as the head so
+	// Syncing() returns false and the VC produces on top of it at the current slot.
+	if err := cfg.syncedData.OnHeadStateWithBlockRoot(cfg.state, startingRoot); err != nil {
+		return fmt.Errorf("failed to set head state on resume: %w", err)
+	}
+	// Mark forkchoice as synced so OnAttestation processes attestations.
+	cfg.forkChoice.SetSynced(true)
+	cfg.state = nil // Release the state
+	if checkpointSlot == 0 {
+		// Cold start: write the genesis beacon block so production finds the parent.
+		if err := writeGenesisBeaconBlock(ctx, cfg); err != nil {
+			return fmt.Errorf("failed to write genesis beacon block: %w", err)
+		}
+		if !soleProducer {
+			return nil
+		}
+	}
+	// The persisted chain head can be ahead of the loaded state, genesis included before anything
+	// finalizes, so replay the persisted blocks the EL already holds to bring the fork choice head up to it.
+	if err := replaySoleProducerToHead(ctx, logger, cfg, checkpointSlot); err != nil {
+		return fmt.Errorf("sole-producer warm resume replay: %w", err)
+	}
+	return nil
 }
 
 // replaySoleProducerToHead brings a warm-restarted sole-producer node from its
