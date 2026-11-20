@@ -56,6 +56,8 @@ func TestReproduceCrash(t *testing.T) {
 	tsr := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	intraBlockState := state.New(tsr)
+
+	intraBlockState.SetVersionMap(nil)
 	defer intraBlockState.Close()
 	// Start the 1st transaction
 	require.NoError(t, intraBlockState.CreateAccount(contract, true))

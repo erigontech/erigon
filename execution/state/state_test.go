@@ -419,7 +419,6 @@ func TestCodeResolve(t *testing.T) {
 
 	state1 := New(NewReaderV3(domains.AsGetter(tx)))
 
-	state1.SetVersionMap(nil)
 	defer state1.Close()
 	state1.SetVersionMap(&VersionMap{})
 	state1.Prepare(&chain.Rules{}, accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, nil, nil)

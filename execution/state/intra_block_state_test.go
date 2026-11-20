@@ -1135,6 +1135,16 @@ func requireSameObservableState(t *testing.T, want, got *IntraBlockState, addrs 
 	}
 }
 
+func TestNewAndResetBuildAVersionedState(t *testing.T) {
+	ibs := New(NewNoopReader())
+	defer ibs.Close()
+	require.True(t, ibs.IsVersioned())
+	before := ibs.VersionMap()
+	ibs.Reset()
+	require.True(t, ibs.IsVersioned())
+	require.NotSame(t, before, ibs.VersionMap(), "Reset drops the previous tx's writes with its map")
+}
+
 func TestApplyVersionedWrites(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -1762,8 +1772,8 @@ func TestWriteFlushedToMatchesFinalizeTx(t *testing.T) {
 	}
 
 	materialized := New(reader)
-
 	materialized.SetVersionMap(nil)
+
 	defer materialized.Close()
 	materialized.SetTxContext(1, 0)
 	run(materialized)
@@ -1807,8 +1817,8 @@ func TestWriteFlushedToMatchesFinalizeTxAcrossTxs(t *testing.T) {
 	}
 
 	materialized := New(reader)
-
 	materialized.SetVersionMap(nil)
+
 	defer materialized.Close()
 	materialized.SetTxContext(1, 0)
 	tx0(materialized)
@@ -1862,8 +1872,8 @@ func TestWriteFlushedToMatchesFinalizeTxPreservedBalance(t *testing.T) {
 	}
 
 	materialized := New(reader)
-
 	materialized.SetVersionMap(nil)
+
 	defer materialized.Close()
 	materialized.SetTxContext(1, 0)
 	run(materialized)
@@ -1916,8 +1926,8 @@ func TestWriteFlushedToMatchesFinalizeTxIncarnationDecrease(t *testing.T) {
 	}
 
 	materialized := New(reader)
-
 	materialized.SetVersionMap(nil)
+
 	defer materialized.Close()
 	materialized.SetTxContext(1, 0)
 	run(materialized)

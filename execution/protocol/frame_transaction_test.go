@@ -231,8 +231,8 @@ func TestFrameTransactionMissingNonceManager(t *testing.T) {
 			t.Run(fmt.Sprintf("versioned=%t/%s", versioned, mode), func(t *testing.T) {
 				ibs := state.New(state.NewNoopReader())
 				defer ibs.Close()
-				if versioned {
-					ibs.SetVersionMap(state.NewVersionMap(nil))
+				if !versioned {
+					ibs.SetVersionMap(nil)
 				}
 				cfg := chain.AllProtocolChanges.Copy()
 				cfg.BogotaTime = common.NewUint64(0)

@@ -182,6 +182,7 @@ func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, 
 		ibs = NewWithVersionMap(reader, NewVersionMap(nil))
 	} else {
 		ibs = New(reader)
+		ibs.SetVersionMap(nil)
 	}
 	t.Cleanup(ibs.Close)
 	ibs.SetTxContext(1, 5)

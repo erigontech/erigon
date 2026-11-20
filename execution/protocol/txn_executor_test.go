@@ -1834,8 +1834,8 @@ func TestApplyTransactionTxEndSeesTxWrites(t *testing.T) {
 	for _, versioned := range []bool{false, true} {
 		t.Run(fmt.Sprintf("versioned=%v", versioned), func(t *testing.T) {
 			ibs := state.New(state.NewNoopReader())
-			if versioned {
-				ibs = state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+			if !versioned {
+				ibs.SetVersionMap(nil)
 			}
 			defer ibs.Close()
 			ibs.SetTxContext(1, 0)
