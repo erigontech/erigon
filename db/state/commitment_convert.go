@@ -61,6 +61,7 @@ type ConvertOpts struct {
 	// the original run; a mismatch produces mixed-encoding output silently.
 	Continue   bool
 	BeforeSwap func() error
+	DB         kv.TemporalRoDB
 }
 
 const (
@@ -647,6 +648,13 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 			return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3NoHistoryAdvice)
 		}
 	}
+	var folds map[string]tailFold
+	if opts.TargetV3 {
+		var err error
+		if folds, err = foldCommitmentTails(ctx, at, files, opts.DB, logger); err != nil {
+			return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3Advice)
+		}
+	}
 
 	// Output .kv version encodes the squeeze target for the version-gated reader (v2.1 squeezed,
 	// v2.2 plain); set once for the run so phase 1 writes and phase 2 discovery agree, then restore.
@@ -706,7 +714,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 
 	// Phase 1: convert all.
 	phaseStart := time.Now()
-	processedFiles, skippedFiles, totalSizeDelta, processedKeys, err := convertPhase1(ctx, at, pendingFiles, rebuildDir, opts, grandTotalKeys, logger)
+	processedFiles, skippedFiles, totalSizeDelta, processedKeys, err := convertPhase1(ctx, at, pendingFiles, rebuildDir, opts, folds, grandTotalKeys, logger)
 	if err != nil && opts.TargetV3 {
 		return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3Advice)
 	}
@@ -1521,6 +1529,7 @@ func convertPhase1(
 	files VisibleFiles,
 	rebuildDir string,
 	opts ConvertOpts,
+	folds map[string]tailFold,
 	grandTotalKeys uint64,
 	logger log.Logger,
 ) (processedFiles, skippedFiles int, totalSizeDelta int64, processedKeys uint64, err error) {
@@ -1533,7 +1542,7 @@ func convertPhase1(
 		var ki uint64
 		var convErr error
 		if opts.TargetV3 {
-			delta, ki, convErr = convertCommitmentFileV3(ctx, at, f, rebuildDir, i+1, N, grandTotalKeys, processedKeys, logger)
+			delta, ki, convErr = convertCommitmentFileV3(ctx, at, f, folds[f.Fullpath()], rebuildDir, i+1, N, grandTotalKeys, processedKeys, logger)
 		} else {
 			delta, _, ki, convErr = convertCommitmentFile(ctx, at, f, rebuildDir, opts, i+1, N, grandTotalKeys, processedKeys, logger)
 		}
