@@ -39,7 +39,11 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
@@ -805,22 +809,15 @@ func TestConvertCommitmentFiles_V3FoldsTheTailAfterTheStoredState(t *testing.T) 
 	for block := range maxTxNums {
 		maxTxNums[block] = uint64(block)*3 + 2
 	}
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		for block := range uint64(29) {
-			if block == 0 || block == 26 || block == 27 {
-				continue
-			}
-			if err := tx.Delete(kv.MaxTxNum, binary.BigEndian.AppendUint64(nil, block)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}))
 
 	func() {
 		at := agg.BeginFilesRo()
 		defer at.Close()
-		opts := state.ConvertOpts{TargetV3: true, DB: db, TxNums: rawdbv3.TxNums.WithCustomReadTxNumFunc(maxTxNums)}
+		empty := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).MustOpen()
+		t.Cleanup(empty.Close)
+		emptyDB, err := temporal.New(empty, agg, nil)
+		require.NoError(t, err)
+		opts := state.ConvertOpts{TargetV3: true, DB: emptyDB, TxNums: rawdbv3.TxNums.WithCustomReadTxNumFunc(maxTxNums)}
 		require.NoError(t, state.ConvertCommitmentFiles(t.Context(), at, opts, log.New()))
 	}()
 

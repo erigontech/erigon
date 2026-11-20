@@ -21,6 +21,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -53,7 +54,7 @@ func dbWithState(t *testing.T, buildFiles bool) (kv.TemporalRwDB, datadir.Dirs, 
 	const stepSize, txs, filed = 16, 64, 48
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
-	agg, _ := fillAccountState(t, db, txs)
+	agg, _ := fillAccountState(t, db, txs, 5)
 	ctx := t.Context()
 	if buildFiles {
 		require.NoError(t, agg.BuildFiles(db, filed, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
@@ -75,7 +76,7 @@ func dbWithState(t *testing.T, buildFiles bool) (kv.TemporalRwDB, datadir.Dirs, 
 	return db, dirs, countTail
 }
 
-func fillAccountState(t *testing.T, db kv.TemporalRwDB, txs uint64) (*state.Aggregator, []common.Hash) {
+func fillAccountState(t *testing.T, db kv.TemporalRwDB, txs, addrs uint64, skipCommitment ...uint64) (*state.Aggregator, []common.Hash) {
 	t.Helper()
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
@@ -88,15 +89,17 @@ func fillAccountState(t *testing.T, db kv.TemporalRwDB, txs uint64) (*state.Aggr
 		}
 		for i := range writes {
 			addr := make([]byte, 20)
-			binary.BigEndian.PutUint64(addr[12:], (txNum+i)%5+1)
+			binary.BigEndian.PutUint64(addr[12:], (txNum+i)%addrs+1)
 			acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
 			prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, addr)
 			require.NoError(t, err)
 			require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, prev))
 		}
-		root, err := domains.ComputeCommitment(t.Context(), tx, true, txNum, txNum, "", nil)
-		require.NoError(t, err)
-		roots[txNum] = common.Hash(root)
+		if !slices.Contains(skipCommitment, txNum) {
+			root, err := domains.ComputeCommitment(t.Context(), tx, true, txNum, txNum, "", nil)
+			require.NoError(t, err)
+			roots[txNum] = common.Hash(root)
+		}
 		require.NoError(t, rawdbv3.TxNums.Append(tx, txNum, txNum))
 	}
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, txs-1))
@@ -187,7 +190,7 @@ func TestCommitmentRebuildWithoutHistoryAfterPrunedHistoryRefusal(t *testing.T) 
 	statecfg.EnableHistoricalCommitment()
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
-	agg, roots := fillAccountState(t, db, 56)
+	agg, roots := fillAccountState(t, db, 56, 5)
 	require.NoError(t, agg.BuildFiles(db, 56, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
 	agg.CloseFilesNoReopen()
 	for _, d := range []string{dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {

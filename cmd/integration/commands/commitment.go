@@ -53,9 +53,12 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -66,6 +69,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 var (
@@ -666,6 +670,24 @@ func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, o
 	defer agg.Close()
 	if err := agg.OpenFolder(nil); err != nil {
 		return err
+	}
+	if opts.TargetV3 && !opts.NoDomain {
+		blockSnaps := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, logger)
+		defer blockSnaps.Close()
+		if err := blockSnaps.OpenFolder(); err != nil {
+			return err
+		}
+		rawDB, err := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Tmp).Open(ctx)
+		if err != nil {
+			return err
+		}
+		db, err := temporal.New(rawDB, agg, blockSnaps)
+		if err != nil {
+			rawDB.Close()
+			return err
+		}
+		defer db.Close()
+		opts.DB, opts.TxNums = db, freezeblocks.NewBlockReader(blockSnaps).TxnumReader()
 	}
 	return commitmentConvert(agg, ctx, logger, opts)
 }

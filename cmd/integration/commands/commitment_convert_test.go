@@ -390,7 +390,7 @@ func TestCommitmentConvertRestoreRetryLeavesExecutionUnchanged(t *testing.T) {
 	}))
 }
 
-func dbWithV3StateRoots(t *testing.T) (kv.TemporalRwDB, datadir.Dirs, []common.Hash) {
+func dbWithV3StateRoots(t *testing.T, addrs uint64, skipCommitment ...uint64) (kv.TemporalRwDB, datadir.Dirs, []common.Hash) {
 	t.Helper()
 	dirs := datadir.New(t.TempDir())
 	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
@@ -415,14 +415,14 @@ func dbWithV3StateRoots(t *testing.T) (kv.TemporalRwDB, datadir.Dirs, []common.H
 	require.NoError(t, err)
 	require.NoError(t, db.OpenStateSnapshots(t.Context()))
 	t.Cleanup(db.Close)
-	agg, roots := fillAccountState(t, db, 64)
+	agg, roots := fillAccountState(t, db, 64, addrs, skipCommitment...)
 	require.NoError(t, agg.BuildFiles(db, 48, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
 	return db, dirs, roots
 }
 
 func dbWithV3State(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) {
 	t.Helper()
-	db, dirs, _ := dbWithV3StateRoots(t)
+	db, dirs, _ := dbWithV3StateRoots(t, 5)
 	return db, dirs
 }
 

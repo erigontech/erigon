@@ -51,7 +51,7 @@ func writeErigonDBSettings(t *testing.T, dirs datadir.Dirs, stepSize uint64) {
 func legacyDatadirWithoutChaindata(t *testing.T) (dirs datadir.Dirs, stepSize, lastFiledTxNum uint64, roots []common.Hash) {
 	t.Helper()
 	t.Cleanup(statecfg.SetCommitmentV3(false))
-	db, dirs, roots := dbWithV3StateRoots(t)
+	db, dirs, roots := dbWithV3StateRoots(t, 5)
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	stepSize, lastFiledTxNum = agg.StepSize(), agg.EndTxNumMinimax()-1
 	writeErigonDBSettings(t, dirs, stepSize)
@@ -64,7 +64,7 @@ func legacyDatadirWithCommitmentHistory(t *testing.T) datadir.Dirs {
 	t.Helper()
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	statecfg.EnableHistoricalCommitment()
-	db, dirs, _ := dbWithV3StateRoots(t)
+	db, dirs, _ := dbWithV3StateRoots(t, 5)
 	writeErigonDBSettings(t, dirs, db.(state.HasAgg).Agg().(*state.Aggregator).StepSize())
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		enabled, flagged, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
@@ -334,6 +334,18 @@ func TestCommitmentConvertV3EmptySideErrors(t *testing.T) {
 
 		requireConvertRefusedBeforeWriting(t, dirs, "already exists with", "--v3", "--no-history")
 	})
+}
+
+func TestCommitmentConvertV3WithoutChaindataFoldsTheTail(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, dirs, _ := dbWithV3StateRoots(t, 64, 47)
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	require.Equal(t, uint64(48), agg.EndTxNumMinimax())
+	writeErigonDBSettings(t, dirs, agg.StepSize())
+	db.Close()
+	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
+
+	requireConvertRefusedBeforeWriting(t, dirs, "no block holds txNum 47", "--v3")
 }
 
 func TestCommitmentConvertV3WithNothingToConvert(t *testing.T) {
