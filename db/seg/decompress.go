@@ -692,16 +692,22 @@ func (d *Decompressor) MadvNormal() MadvDisabler {
 	return d
 }
 
+const willNeedWindow = 128 << 10
+
+var madviseWillNeed = mmap.MadviseWillNeed
+
 func (d *Decompressor) MadvWillNeedWords(from, to uint64) {
 	if d == nil || d._mmapHandle == nil {
 		return
 	}
 	base := uint64(cap(d._mmapHandle)-cap(d.data)) + d.wordsStart
 	from, to = base+from, min(base+to, uint64(len(d._mmapHandle)))
+	if from >= to {
+		return
+	}
 	from -= from % uint64(os.Getpagesize())
-	const window = 128 << 10
-	for ; from < to; from += window {
-		_ = mmap.MadviseWillNeed(d._mmapHandle[from:min(from+window, to)])
+	for ; from < to; from += willNeedWindow {
+		_ = madviseWillNeed(d._mmapHandle[from:min(from+willNeedWindow, to)])
 	}
 }
 
