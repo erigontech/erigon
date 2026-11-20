@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
+	"iter"
 	"slices"
 	"sync"
 
@@ -254,9 +255,11 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if result.Dep >= 0 {
 		return pt.rerunAfter(be.taskIndexOf(result.Dep))
 	}
-	result.ReadAddrs = result.TxIn.AddrPaths()
-	result.WriteAddrs = result.TxOut.AddrPaths()
-	be.selfLoopFlush(tv.version, result, slices.Values(pt.prevHeaders))
+	var prev iter.Seq[state.WriteHeader]
+	if len(pt.prevHeaders) > 0 {
+		prev = slices.Values(pt.prevHeaders)
+	}
+	be.selfLoopFlush(tv.version, result, prev)
 	pt.prevHeaders = slices.AppendSeq(pt.prevHeaders[:0], result.TxOut.AllHeaders())
 
 	valid, target, blocker := be.selfLoopEvaluate(tv, result)
@@ -275,6 +278,10 @@ func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) bool 
 }
 
 func (pt *poolTask) publish(p *taskPool) bool {
+	if pt.result != nil {
+		pt.result.ReadAddrs = pt.result.TxIn.AddrPaths()
+		pt.result.WriteAddrs = pt.result.TxOut.AddrPaths()
+	}
 	pt.send(p, pt.result)
 	pt.result = nil
 	pt.next = psReexec

@@ -83,3 +83,37 @@ func TestAddrPathsWriteSet(t *testing.T) {
 	var nilWS *WriteSet
 	require.Nil(t, nilWS.AddrPaths())
 }
+
+func TestAddrPathsMixedSets(t *testing.T) {
+	a := accounts.InternAddress(common.Address{1})
+	b := accounts.InternAddress(common.Address{2})
+	empty := accounts.InternAddress(common.Address{3})
+	var reads ReadSet
+	var writes WriteSet
+	for _, addr := range []accounts.Address{a, b, empty} {
+		for i := range byte(2) {
+			key := accounts.InternKey(common.Hash{i})
+			reads.SetHeader(addr, StoragePath, key, ReadHeader{})
+			writes.SetStorage(addr, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}})
+		}
+	}
+	clear(reads.storage[empty])
+	clear(writes.storage[empty])
+	reads.SetHeader(a, AddressPath, accounts.NilKey, ReadHeader{})
+	reads.SetHeader(b, CodePath, accounts.NilKey, ReadHeader{})
+	writes.SetAddress(a, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: a, Path: AddressPath}})
+	writes.SetCode(b, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: b, Path: CodePath}})
+
+	for _, tc := range []struct {
+		name string
+		got  []AddrPaths
+		want map[accounts.Address]uint16
+	}{
+		{"reads", reads.AddrPaths(), map[accounts.Address]uint16{a: 1<<StoragePath | 1<<AddressPath, b: 1<<StoragePath | 1<<CodePath}},
+		{"writes", writes.AddrPaths(), map[accounts.Address]uint16{a: ^uint16(0), b: 1<<StoragePath | 1<<CodePath}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, addrPathsMap(t, tc.got))
+		})
+	}
+}

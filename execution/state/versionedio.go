@@ -3493,39 +3493,52 @@ type AddrPaths struct {
 }
 
 func (s ReadSet) AddrPaths() []AddrPaths {
-	var out []AddrPaths
-	s.RangeFullHeaders(func(a accounts.Address, p AccountPath, _ accounts.StorageKey, _ ReadHeader) bool {
-		out = append(out, AddrPaths{a, 1 << p})
-		return true
-	})
-	return mergeAddrPaths(out)
+	masks := make(map[accounts.Address]uint16)
+	addReadPath(masks, s.address, AddressPath)
+	addReadPath(masks, s.balance, BalancePath)
+	addReadPath(masks, s.nonce, NoncePath)
+	addReadPath(masks, s.incarnation, IncarnationPath)
+	addReadPath(masks, s.selfDestruct, SelfDestructPath)
+	addReadPath(masks, s.createContract, CreateContractPath)
+	addReadPath(masks, s.code, CodePath)
+	addReadPath(masks, s.codeHash, CodeHashPath)
+	addReadPath(masks, s.codeSize, CodeSizePath)
+	return storageAddrPaths(masks, s.storage)
+}
+
+func addReadPath[T any](masks map[accounts.Address]uint16, reads map[accounts.Address]VersionedRead[T], path AccountPath) {
+	for addr := range reads {
+		masks[addr] |= 1 << path
+	}
 }
 
 func (ws *WriteSet) AddrPaths() []AddrPaths {
 	if ws == nil {
 		return nil
 	}
-	var out []AddrPaths
-	for h := range ws.AllHeaders() {
-		paths := uint16(1) << h.Path
+	masks := make(map[accounts.Address]uint16)
+	for h := range ws.accountHeaders() {
 		if h.Path.AffectsAccountLifecycle() {
-			paths = ^uint16(0)
+			masks[h.Address] = ^uint16(0)
+		} else {
+			masks[h.Address] |= 1 << h.Path
 		}
-		out = append(out, AddrPaths{h.Address, paths})
 	}
-	return mergeAddrPaths(out)
+	return storageAddrPaths(masks, ws.storage)
 }
 
-func mergeAddrPaths(s []AddrPaths) []AddrPaths {
-	slices.SortFunc(s, func(a, b AddrPaths) int { return a.Addr.Cmp(b.Addr) })
-	n := 0
-	for _, e := range s {
-		if n > 0 && s[n-1].Addr == e.Addr {
-			s[n-1].Paths |= e.Paths
-			continue
+func storageAddrPaths[T any](masks map[accounts.Address]uint16, storage map[accounts.Address]map[accounts.StorageKey]T) []AddrPaths {
+	for addr, slots := range storage {
+		if len(slots) > 0 {
+			masks[addr] |= 1 << StoragePath
 		}
-		s[n] = e
-		n++
 	}
-	return s[:n]
+	if len(masks) == 0 {
+		return nil
+	}
+	out := make([]AddrPaths, 0, len(masks))
+	for addr, paths := range masks {
+		out = append(out, AddrPaths{addr, paths})
+	}
+	return out
 }
