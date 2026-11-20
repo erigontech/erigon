@@ -2413,6 +2413,171 @@ func (ibs *IntraBlockState) createVersioned(addr accounts.Address, hadPrevious b
 	}
 }
 
+// createAccountVersioned is CreateAccount on the versioned path: it resolves the
+// prior account's lifecycle (existence, self-destruct, carried balance, prior
+// incarnation) from the version map and base reader with no stateObject.
+func (ibs *IntraBlockState) createAccountVersioned(addr accounts.Address, contractCreation bool) (err error) {
+	var hadPrevious, prevSelfdestructed bool
+	var prevIncarnation, prevPrevIncarnation uint64
+	var prevBalance uint256.Int
+
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+		defer func() {
+			var creatingContract string
+			if contractCreation {
+				creatingContract = " (contract)"
+			}
+			if err != nil {
+				fmt.Printf("%d (%d.%d) Create Account%s: %x, err=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, creatingContract, addr, err)
+			} else {
+				fmt.Printf("%d (%d.%d) Create Account%s: %x, balance=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, creatingContract, addr, prevBalance.String())
+			}
+		}()
+	}
+
+	readAccount, _, _, err := ibs.getVersionedAccount(addr, true)
+	if err != nil {
+		return err
+	}
+	if readAccount != nil {
+		hadPrevious = true
+		prevIncarnation = readAccount.Incarnation
+		prevPrevIncarnation = readAccount.PrevIncarnation
+		prevBalance = readAccount.Balance
+
+		destructed, _, _, err := refreshSelfDestruct(ibs, addr)
+		if err != nil {
+			return err
+		}
+		_, ownSD := ibs.versionedWriteSelfDestruct(addr)
+		// The versionMap may hold a prior tx's SelfDestructPath=true that
+		// versionedReadCore short-circuits, so read the versionMap directly.
+		if !destructed {
+			if d, res, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && res.resolved() && d {
+				destructed = true
+			}
+		}
+		// A later tx that left the account non-empty revived it after a prior
+		// tx's self-destruct. Check the field cells, as the record lags them.
+		if destructed && !ownSD {
+			if destructed, err = ibs.emptyFromVersionedFields(addr, readAccount); err != nil {
+				return err
+			}
+		}
+		prevSelfdestructed = destructed
+	} else if sd, ok := ibs.versionedWriteSelfDestruct(addr); ok && sd {
+		// A within-tx create→self-destruct leaves no base record and no cell; treat
+		// the destroyed account as the previous so the resurrect write is emitted.
+		hadPrevious = true
+		prevSelfdestructed = true
+	}
+
+	var prevInc uint64
+	if prevSelfdestructed {
+		prevInc = prevIncarnation
+	}
+	if hadPrevious && prevInc < prevPrevIncarnation {
+		prevInc = prevPrevIncarnation
+	}
+	// Capture each path's own (source, version) for the synthetic reads stamped
+	// below; inheriting the account-record version would trip the validator on
+	// the recursive AddressPath check.
+	incSource, incVersion := StorageRead, UnknownVersion
+	if inc, res, ok := ibs.versionMap.ReadIncarnation(addr, ibs.txIndex); ok && res.resolved() {
+		incSource = MapRead
+		incVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
+		if inc > prevInc {
+			prevInc = inc
+		}
+	}
+	balSource, balVersion := StorageRead, UnknownVersion
+	var preTxBalance uint256.Int
+	balWiped := false
+	if !ibs.noConflictDetection {
+		if bal, res, ok := ibs.versionMap.ReadBalance(addr, ibs.txIndex); ok && res.resolved() {
+			balSource = MapRead
+			balVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
+			preTxBalance = bal
+			// A burning destruct at or above the cell wipes the balance. As on the read
+			// path, the zero depends on the destruct, not on the wiped cell.
+			if destructed, sdRes, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && sdRes.resolved() && destructed &&
+				sdRes.DepIdx() >= res.DepIdx() && res.ValStatus() == ValueDeleted {
+				preTxBalance.Clear()
+				balWiped = true
+				ibs.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+					ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}},
+					Val:        true,
+				})
+			}
+		}
+	}
+	// Carry the live balance over the create (the EVM preserves funds sent to a
+	// not-yet-created address). Normally zero for a self-destructed previous, but a
+	// same-tx credit may have revived the account before this create, so carry a
+	// non-zero revived balance too.
+	var carryBalance uint256.Int
+	carryBalanceValid := hadPrevious && !prevSelfdestructed
+	if hadPrevious {
+		b, _, err := ibs.getBalance(addr)
+		if err != nil {
+			return err
+		}
+		if carryBalanceValid || !b.IsZero() {
+			carryBalance = b
+			carryBalanceValid = true
+		}
+	}
+
+	ibs.createVersioned(addr, hadPrevious)
+	if prevSelfdestructed {
+		// The reset-object journal entry marks addr dirty, but that mark is dropped
+		// on revert; this un-journalled increment keeps a resurrected address in
+		// journal.dirties across an intra-tx revert.
+		ibs.journal.dirty(addr)
+	}
+
+	var writeBalance uint256.Int
+	if carryBalanceValid {
+		writeBalance.Set(&carryBalance)
+	} else if !hadPrevious && balSource == MapRead {
+		// This tx already read the account destroyed, so there is no record, but a
+		// prior tx's fee or transfer revived it: carry that recorded pre-tx balance.
+		writeBalance.Set(&preTxBalance)
+	}
+
+	var incarnation uint64
+	if contractCreation {
+		// Record contract creation so FinalizedWrites does not remove a newly
+		// deployed contract as empty.
+		ibs.recordWriteCreateContract(addr, true)
+		incarnation = prevInc + 1
+		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+			fmt.Printf("%d (%d.%d) New Incarnation %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, incarnation)
+		}
+	}
+
+	// Synthetic reads let creation clashes between transactions be detected. The
+	// balance read carries the pre-tx balance (zero without a cell: the account was
+	// absent), since later reads, also after a revert, are served from it. An earlier
+	// internal read is promoted to give the balance write a block-access-list baseline.
+	ibs.MarkAddressAccess(addr, true)
+	if !ibs.noConflictDetection {
+		if vr, seen := ibs.versionedReads.GetBalance(addr); !seen && !balWiped {
+			ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, preTxBalance})
+		} else if seen && vr.internal {
+			vr.internal = false
+			ibs.versionedReads.SetBalance(addr, vr)
+		}
+		ibs.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader{Source: incSource, Version: incVersion}, prevInc})
+	}
+	ibs.recordWriteBalance(addr, writeBalance)
+	ibs.recordWriteIncarnation(addr, incarnation)
+	if !hadPrevious || prevSelfdestructed {
+		ibs.recordWriteSelfDestruct(addr, false)
+	}
+	return nil
+}
+
 // CreateAccount explicitly creates a state object. If a state object with the address
 // already exists the balance is carried over to the new account.
 //
@@ -2424,7 +2589,10 @@ func (ibs *IntraBlockState) createVersioned(addr accounts.Address, hadPrevious b
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreation bool) (err error) {
-	var prevInc uint64
+	if ibs.versionMap != nil {
+		return ibs.createAccountVersioned(addr, contractCreation)
+	}
+
 	var previous *stateObject
 
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
@@ -2445,124 +2613,19 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		}()
 	}
 
-	if ibs.versionMap == nil {
-		previous, err = ibs.getStateObject(addr, true)
-		if err != nil {
-			return err
-		}
-	} else {
-		readAccount, _, _, err := ibs.getVersionedAccount(addr, true)
-		if err != nil {
-			return err
-		}
-
-		if readAccount != nil {
-			account := readAccount
-
-			destructed, _, _, err := refreshSelfDestruct(ibs, addr)
-			if err != nil {
-				return err
-			}
-			_, ownSD := ibs.versionedWriteSelfDestruct(addr)
-
-			// Reuse the cached stateObject as `previous` so the selfdestructed flag
-			// and accumulated incarnation carry into the new object's
-			// PrevIncarnation.
-			if !destructed {
-				if so, ok := ibs.stateObjects[addr]; ok && so.selfdestructed {
-					// Accumulated-IBS path (e.g. GenerateChain): the cache marks it
-					// selfdestructed but versionedReadCore returned false via the
-					// so.deleted early exit; reuse the cached object.
-					previous = so
-				} else if ibs.versionMap != nil {
-					// Fresh-IBS worker path: no cache, but the versionMap may hold a
-					// prior tx's SelfDestructPath=true (versionedReadCore short-circuits
-					// it), so read the versionMap directly.
-					if d, res, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && res.resolved() && d {
-						destructed = true
-					}
-				}
-			}
-
-			// A later tx that left the account non-empty revived it after a prior
-			// tx's self-destruct. Check the field cells, as the record lags them.
-			if destructed && !ownSD {
-				if destructed, err = ibs.emptyFromVersionedFields(addr, account); err != nil {
-					return err
-				}
-			}
-
-			if previous == nil {
-				previous = newObject(ibs, addr, account, account)
-				previous.selfdestructed = destructed
-			}
-		} else if so, ok := ibs.stateObjects[addr]; ok && so.deleted {
-			// Selfdestructed in an earlier tx this block with no committed base
-			// (created within the block); preserve the deleted object as `previous`
-			// so CommitBlock can still emit DeleteAccount after a REVERT.
-			previous = so
-		} else if so, ok := ibs.stateObjects[addr]; ok {
-			// The serial block builder does not flush per-tx writes to the version
-			// map, so a same-block credit lives only in the cache; reuse it as
-			// `previous` to keep the balance carry-over below.
-			previous = so
-		} else if sd, ok := ibs.versionedWriteSelfDestruct(addr); ok && sd {
-			// Cache-free parallel path: a within-tx create→self-destruct leaves no
-			// base record and no cached object. Rebuild `previous` as destroyed so
-			// the resurrect write is emitted.
-			previous = newObject(ibs, addr, &accounts.Account{}, &accounts.Account{})
-			previous.selfdestructed = true
-		}
-	}
-
+	previous, err = ibs.getStateObject(addr, true)
 	if err != nil {
 		return err
 	}
+
+	var prevInc uint64
 	if previous != nil && previous.selfdestructed {
 		prevInc = previous.data.Incarnation
-	} else {
-		prevInc = 0
 	}
 	if previous != nil && prevInc < previous.data.PrevIncarnation {
 		prevInc = previous.data.PrevIncarnation
 	}
-	// Capture each path's own (source, version) for the synthetic reads stamped
-	// below; inheriting the account-record version would trip the validator on
-	// the recursive AddressPath check.
-	incSource, incVersion := StorageRead, UnknownVersion
-	if ibs.versionMap != nil {
-		if inc, res, ok := ibs.versionMap.ReadIncarnation(addr, ibs.txIndex); ok && res.resolved() {
-			incSource = MapRead
-			incVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
-			if inc > prevInc {
-				prevInc = inc
-			}
-		}
-	}
-	balSource, balVersion := StorageRead, UnknownVersion
-	var preTxBalance uint256.Int
-	balWiped := false
-	if ibs.versionMap != nil && !ibs.noConflictDetection {
-		if bal, res, ok := ibs.versionMap.ReadBalance(addr, ibs.txIndex); ok && res.resolved() {
-			balSource = MapRead
-			balVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
-			preTxBalance = bal
-			// A burning destruct at or above the cell wipes the balance. As on the read
-			// path, the zero depends on the destruct, not on the wiped cell.
-			if destructed, sdRes, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && sdRes.resolved() && destructed &&
-				sdRes.DepIdx() >= res.DepIdx() && res.ValStatus() == ValueDeleted {
-				preTxBalance.Clear()
-				balWiped = true
-				ibs.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-					ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}},
-					Val:        true,
-				})
-			}
-		}
-	}
-	// Capture the balance BEFORE createObject writes the fresh zero-balance
-	// record: previous.data.Balance can lag an in-block credit or committed
-	// prefund, and reading after createObject would see the just-written zero.
+
 	var carryBalance uint256.Int
 	carryBalanceValid := previous != nil && !previous.selfdestructed
 	if previous != nil {
@@ -2570,62 +2633,29 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		if err != nil {
 			return err
 		}
-		// Carry the live balance over the create. Normally zero for a self-destructed
-		// previous, but a same-tx credit may have revived the account before this create
-		// (the EVM preserves funds sent to a not-yet-created address), so carry a non-zero
-		// revived balance too.
 		if carryBalanceValid || !b.IsZero() {
 			carryBalance = b
 			carryBalanceValid = true
 		}
 	}
+
 	newObj := ibs.createObject(addr, previous)
 	if previous != nil && previous.selfdestructed {
-		// The reset-object journal entry marks addr dirty, but that mark is dropped
-		// on revert; this un-journalled increment keeps a resurrected address in
-		// journal.dirties across an intra-tx revert.
 		ibs.journal.dirty(addr)
 	}
 	if carryBalanceValid {
 		newObj.data.Balance.Set(&carryBalance)
-	} else if previous == nil && balSource == MapRead {
-		// This tx already read the account destroyed, so there is no record, but a
-		// prior tx's fee or transfer revived it: carry that recorded pre-tx balance.
-		newObj.data.Balance.Set(&preTxBalance)
 	}
 	newObj.data.PrevIncarnation = prevInc
 
 	if contractCreation {
 		newObj.createdContract = true
 		newObj.data.Incarnation = prevInc + 1
-		// Record contract creation so FinalizedWrites does not remove a newly
-		// deployed contract as empty.
-		ibs.recordWriteCreateContract(addr, true)
 		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) New Incarnation %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, newObj.data.Incarnation)
 		}
 	} else {
 		newObj.selfdestructed = false
-	}
-
-	// Synthetic reads let creation clashes between transactions be detected. The
-	// balance read carries the pre-tx balance (zero without a cell: the account was
-	// absent), since later reads, also after a revert, are served from it. An earlier
-	// internal read is promoted to give the balance write a block-access-list baseline.
-	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap != nil && !ibs.noConflictDetection {
-		if vr, seen := ibs.versionedReads.GetBalance(addr); !seen && !balWiped {
-			ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, preTxBalance})
-		} else if seen && vr.internal {
-			vr.internal = false
-			ibs.versionedReads.SetBalance(addr, vr)
-		}
-		ibs.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader{Source: incSource, Version: incVersion}, prevInc})
-	}
-	ibs.recordWriteBalance(addr, newObj.Balance())
-	ibs.recordWriteIncarnation(addr, newObj.data.Incarnation)
-	if previous == nil || previous.selfdestructed && !newObj.selfdestructed {
-		ibs.recordWriteSelfDestruct(addr, false)
 	}
 
 	return nil
