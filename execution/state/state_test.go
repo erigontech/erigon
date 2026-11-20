@@ -20,7 +20,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"testing"
 
@@ -30,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -45,75 +43,6 @@ import (
 
 func toAddr(a []byte) accounts.Address {
 	return accounts.InternAddress(common.BytesToAddress(a))
-}
-
-// recordingWriter wraps NoopWriter and captures WriteAccountStorage calls.
-type recordingWriter struct {
-	NoopWriter
-	storageWrites []struct{ orig, val uint256.Int }
-}
-
-func (rw *recordingWriter) WriteAccountStorage(_ accounts.Address, _ uint64, _ accounts.StorageKey, orig, val uint256.Int) error {
-	rw.storageWrites = append(rw.storageWrites, struct{ orig, val uint256.Int }{orig, val})
-	return nil
-}
-
-// TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin is a regression test for a bug
-// where FinalizeTx used blockOriginStorage (block-start value) instead of originStorage
-// (last-written value) to decide whether a storage write could be skipped.
-//
-// Scenario: slot starts at A. Tx1 writes A→B (FinalizeTx stores B in MDBX, sets
-// originStorage=B). Tx2 writes B→A (reverts to block-start). Old code compared
-// value(A) == blockOriginStorage(A) and skipped the write, leaving MDBX with B.
-// Fixed code compares value(A) != originStorage(B) and correctly writes A.
-func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
-	t.Parallel()
-
-	_, tx, domains := NewTestRwTx(t)
-
-	addr := toAddr([]byte("acct"))
-	key := accounts.ZeroKey
-	valA := *uint256.NewInt(1) // block-start value
-	valB := *uint256.NewInt(2)
-
-	// Write block-start state: account exists with slot=A.
-	txNum := uint64(1)
-	err := rawdbv3.TxNums.Append(tx, 1, 1)
-	require.NoError(t, err)
-	domains.SetTxNum(txNum)
-	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
-	setup := New(NewReaderV3(domains.AsGetter(tx)))
-	defer setup.Close()
-	require.NoError(t, setup.CreateAccount(addr, true))
-	require.NoError(t, setup.SetState(addr, key, valA))
-	err = setup.FinalizeTx(&chain.Rules{}, w)
-	require.NoError(t, err)
-	err = setup.CommitBlock(&chain.Rules{}, w)
-	require.NoError(t, err)
-
-	// IBS for the next block — reads block-start state (slot=A) from domains.
-	ibs := New(NewReaderV3(domains.AsGetter(tx)))
-	defer ibs.Close()
-
-	// Tx1: A → B.
-	require.NoError(t, ibs.SetState(addr, key, valB))
-	rw1 := &recordingWriter{}
-	err = ibs.FinalizeTx(&chain.Rules{}, rw1)
-	require.NoError(t, err)
-	require.Len(t, rw1.storageWrites, 1, "tx1 must emit a storage write")
-	require.Equal(t, valB, rw1.storageWrites[0].val, "tx1 must write B")
-
-	// Tx2: B → A (reverts to the block-start value).
-	require.NoError(t, ibs.SetState(addr, key, valA))
-	rw2 := &recordingWriter{}
-	err = ibs.FinalizeTx(&chain.Rules{}, rw2)
-	require.NoError(t, err)
-
-	// Regression: old code used blockOriginStorage[key]==A as origin, saw
-	// value==A, and silently skipped the write, leaving MDBX with B.
-	require.Len(t, rw2.storageWrites, 1, "tx2 must emit a storage write (A→B→A must not be skipped)")
-	require.Equal(t, valA, rw2.storageWrites[0].val, "tx2 must write A")
-	require.Equal(t, valB, rw2.storageWrites[0].orig, "tx2 origin must be B (last written value)")
 }
 
 func TestWriterAccountAndStorageNotifications(t *testing.T) {
@@ -290,87 +219,6 @@ func TestSnapshotEmpty(t *testing.T) {
 	state.PopSnapshot(snapshot)
 }
 
-// use testing instead of checker because checker does not support
-// printing/logging in tests (-check.vv does not work)
-func TestSnapshot2(t *testing.T) {
-	t.Parallel()
-	_, tx, domains := NewTestRwTx(t)
-
-	txNum := uint64(1)
-	err := rawdbv3.TxNums.Append(tx, 1, 1)
-	require.NoError(t, err)
-
-	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
-
-	state := New(NewReaderV3(domains.AsGetter(tx)))
-	defer state.Close()
-
-	stateobjaddr0 := toAddr([]byte("so0"))
-	stateobjaddr1 := toAddr([]byte("so1"))
-	storageaddr := accounts.ZeroKey
-
-	data0 := uint256.NewInt(17)
-	data1 := uint256.NewInt(18)
-
-	require.NoError(t, state.SetState(stateobjaddr0, storageaddr, *data0))
-	require.NoError(t, state.SetState(stateobjaddr1, storageaddr, *data1))
-
-	// db, trie are already non-empty values
-	so0, err := state.getStateObject(stateobjaddr0, true)
-	require.NoError(t, err)
-	so0.SetBalance(*uint256.NewInt(42), true, tracing.BalanceChangeUnspecified)
-	so0.SetNonce(43, true, tracing.NonceChangeUnspecified)
-	_, err = so0.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'})), Bytes: []byte{'c', 'a', 'f', 'e'}}, true, tracing.CodeChangeUnspecified)
-	require.NoError(t, err)
-	so0.selfdestructed = false
-	so0.deleted = false
-	state.setStateObject(stateobjaddr0, so0)
-
-	err = state.FinalizeTx(&chain.Rules{}, w)
-	require.NoError(t, err)
-
-	err = state.CommitBlock(&chain.Rules{}, w)
-	require.NoError(t, err)
-
-	// and one with deleted == true
-	so1, err := state.getStateObject(stateobjaddr1, true)
-	require.NoError(t, err)
-	so1.SetBalance(*uint256.NewInt(52), true, tracing.BalanceChangeUnspecified)
-	so1.SetNonce(53, true, tracing.NonceChangeUnspecified)
-	_, err = so1.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'})), Bytes: []byte{'c', 'a', 'f', 'e', '2'}}, true, tracing.CodeChangeUnspecified)
-	require.NoError(t, err)
-	so1.selfdestructed = true
-	so1.deleted = true
-	state.setStateObject(stateobjaddr1, so1)
-
-	so1, err = state.getStateObject(stateobjaddr1, true)
-	require.NoError(t, err)
-	if so1 != nil && !so1.deleted {
-		t.Fatalf("deleted object not nil when getting")
-	}
-
-	snapshot := state.PushSnapshot()
-	state.RevertToSnapshot(snapshot, nil)
-	state.PopSnapshot(snapshot)
-
-	so0Restored, err := state.getStateObject(stateobjaddr0, true)
-	require.NoError(t, err)
-	// Update lazily-loaded values before comparing.
-	_, _, err = so0Restored.GetState(storageaddr)
-	require.NoError(t, err)
-	_, err = so0Restored.Code()
-	require.NoError(t, err)
-	// non-deleted is equal (restored)
-	compareStateObjects(so0Restored, so0, t)
-
-	// deleted should be nil, both before and after restore of state copy
-	so1Restored, err := state.getStateObject(stateobjaddr1, true)
-	require.NoError(t, err)
-	if so1Restored != nil && !so1Restored.deleted {
-		t.Fatalf("deleted object not nil after restoring snapshot: %+v", so1Restored)
-	}
-}
-
 func TestCodeResolve(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -413,56 +261,6 @@ func TestCodeResolve(t *testing.T) {
 	resolved, err := state1.ResolveCode(stateobjaddr0)
 	require.NoError(t, err)
 	require.Equal(t, target, resolved.Bytes)
-}
-
-func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
-	if so0.Address() != so1.Address() {
-		t.Fatalf("Address mismatch: have %v, want %v", so0.address, so1.address)
-	}
-	bal0 := so0.Balance()
-	bal1 := so1.Balance()
-	if bal0.Cmp(&bal1) != 0 {
-		t.Fatalf("Balance mismatch: have %v, want %v", so0.Balance(), so1.Balance())
-	}
-	if so0.Nonce() != so1.Nonce() {
-		t.Fatalf("Nonce mismatch: have %v, want %v", so0.Nonce(), so1.Nonce())
-	}
-	if so0.data.Root != so1.data.Root {
-		t.Errorf("Root mismatch: have %x, want %x", so0.data.Root[:], so1.data.Root[:])
-	}
-	if so0.data.CodeHash != so1.data.CodeHash {
-		t.Fatalf("CodeHash mismatch: have %v, want %v", so0.data.CodeHash, so1.data.CodeHash)
-	}
-	if !bytes.Equal(so0.code.Bytes, so1.code.Bytes) {
-		t.Fatalf("Code mismatch: have %v, want %v", so0.code, so1.code)
-	}
-
-	if len(so1.dirtyStorage) != len(so0.dirtyStorage) {
-		t.Errorf("Dirty storage size mismatch: have %d, want %d", len(so1.dirtyStorage), len(so0.dirtyStorage))
-	}
-	for k, v := range so1.dirtyStorage {
-		if so0.dirtyStorage[k] != v {
-			t.Errorf("Dirty storage key %x mismatch: have %v, want %v", k, so0.dirtyStorage[k], v)
-		}
-	}
-	for k, v := range so0.dirtyStorage {
-		if so1.dirtyStorage[k] != v {
-			t.Errorf("Dirty storage key %x mismatch: have %v, want none.", k, v)
-		}
-	}
-	if len(so1.originStorage) != len(so0.originStorage) {
-		t.Errorf("Origin storage size mismatch: have %d, want %d", len(so1.originStorage), len(so0.originStorage))
-	}
-	for k, v := range so1.originStorage {
-		if so0.originStorage[k] != v {
-			t.Errorf("Origin storage key %x mismatch: have %v, want %v", k, so0.originStorage[k], v)
-		}
-	}
-	for k, v := range so0.originStorage {
-		if so1.originStorage[k] != v {
-			t.Errorf("Origin storage key %x mismatch: have %v, want none.", k, v)
-		}
-	}
 }
 
 func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {

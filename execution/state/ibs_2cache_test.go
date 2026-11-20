@@ -292,9 +292,9 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 		err = ibsN.SetState(addr, key, wantStorage)
 		require.NoError(t, err)
 
-		w := NewWriter(domains.AsPutDel(tx), nil, 2)
-		err = ibsN.FinalizeTx(&chain.Rules{}, w)
+		writes, err := ibsN.FinalizedWrites(&chain.Rules{})
 		require.NoError(t, err)
+		require.NoError(t, ApplyWrites(writes, domains, tx, 1, 2, false))
 	}
 
 	// — Block N+1: fresh IBS reads state that block N wrote to domains —
@@ -354,9 +354,9 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 	err = ibsApply.ApplyVersionedWrites(writes)
 	require.NoError(t, err)
 
-	w := NewWriter(domains.AsPutDel(tx), nil, 3)
-	err = ibsApply.FinalizeTx(&chain.Rules{}, w)
+	applied, err := ibsApply.FinalizedWrites(&chain.Rules{})
 	require.NoError(t, err)
+	require.NoError(t, ApplyWrites(applied, domains, tx, 1, 3, false))
 
 	// — Step 3: read back from domains, assert correct state —
 	ibsRead := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))

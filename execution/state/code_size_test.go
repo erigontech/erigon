@@ -80,19 +80,22 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 	_, tx, sd := state.NewTestRwTx(t)
 	blockNum, txNum := uint64(1), uint64(3)
-	_ = blockNum
 
-	r, tsw := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	intraBlockState := state.New(r)
-	defer intraBlockState.Close()
+	rules := &chain.Rules{}
+	r := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+
+	tx0 := state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	// Start the 1st transaction
-	require.NoError(t, intraBlockState.CreateAccount(contract, true))
+	require.NoError(t, tx0.CreateAccount(contract, true))
 
 	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
 
-	require.NoError(t, intraBlockState.SetCode(contract, oldCode, tracing.CodeChangeUnspecified))
-	require.NoError(t, intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
-	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 1st tx")
+	require.NoError(t, tx0.SetCode(contract, oldCode, tracing.CodeChangeUnspecified))
+	require.NoError(t, tx0.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
+	writes, err := tx0.FinalizedWrites(rules)
+	require.NoError(t, err)
+	require.NoError(t, state.ApplyWrites(writes, sd, tx, blockNum, txNum, false))
+	tx0.Close()
 	rh1, err := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 	//t.Logf("stateRoot %x", rh1)
@@ -102,9 +105,12 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
 
 	newCode := []byte{0x04, 0x04, 0x04, 0x04}
-	require.NoError(t, intraBlockState.SetCode(contract, newCode, tracing.CodeChangeUnspecified))
-
-	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 2nd tx")
+	tx1 := state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	defer tx1.Close()
+	require.NoError(t, tx1.SetCode(contract, newCode, tracing.CodeChangeUnspecified))
+	writes, err = tx1.FinalizedWrites(rules)
+	require.NoError(t, err)
+	require.NoError(t, state.ApplyWrites(writes, sd, tx, blockNum, txNum, false))
 
 	trieCode, tcErr = r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")
@@ -123,9 +129,8 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 
 	_, tx, sd := state.NewTestRwTx(t)
 	blockNum, txNum := uint64(1), uint64(3)
-	_ = blockNum
 
-	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	intraBlockState := state.New(r)
 	defer intraBlockState.Close()
@@ -136,10 +141,9 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 
 	require.NoError(t, intraBlockState.SetCode(contract, code, tracing.CodeChangeUnspecified))
 	require.NoError(t, intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
-	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, w), "finalising 1st tx")
-	if err := intraBlockState.CommitBlock(&chain.Rules{}, w); err != nil {
-		t.Errorf("error committing block: %v", err)
-	}
+	writes, err := intraBlockState.FinalizedWrites(&chain.Rules{})
+	require.NoError(t, err)
+	require.NoError(t, state.ApplyWrites(writes, sd, tx, blockNum, txNum, false))
 
 	codeSize, err := r.ReadAccountCodeSize(contract)
 	require.NoError(t, err, "you can receive the new code")
