@@ -25,7 +25,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 func genReceipts(n int, seed uint64) types.Receipts {
@@ -82,4 +85,21 @@ func TestReceiptPipelineCancelledGivesNoDigest(t *testing.T) {
 		t.Fatal("pipeline goroutine still running after its context was cancelled")
 	}
 	require.Nil(t, p.join())
+}
+
+func TestReceiptChecksOffWhenSkipFlagSet(t *testing.T) {
+	defer func(v bool) { dbg.SkipReceiptCheck = v }(dbg.SkipReceiptCheck)
+	pe := &parallelExecutor{}
+	pe.cfg.vmConfig = &vm.Config{}
+	pe.cfg.chainConfig = chain.AllProtocolChanges
+
+	dbg.SkipReceiptCheck = false
+	checkReceipts, checkBloom := pe.receiptChecks(1)
+	require.True(t, checkReceipts)
+	require.True(t, checkBloom)
+
+	dbg.SkipReceiptCheck = true
+	checkReceipts, checkBloom = pe.receiptChecks(1)
+	require.False(t, checkReceipts)
+	require.False(t, checkBloom)
 }

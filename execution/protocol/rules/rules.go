@@ -201,8 +201,6 @@ type EngineWriter interface {
 	APIs(chain ChainHeaderReader) []rpc.API
 }
 
-var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
-
 func DefaultBlockPostValidation(header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 	receipts types.Receipts, digest *types.ReceiptDigest, txns types.Transactions, logger log.Logger,
@@ -219,7 +217,7 @@ func DefaultBlockPostValidation(header *types.Header,
 			blobGasUsed, *header.BlobGasUsed, header.Number.Uint64(), header.Hash())
 	}
 
-	if alwaysSkipReceiptCheck {
+	if dbg.SkipReceiptCheck {
 		return nil
 	}
 

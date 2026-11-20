@@ -104,6 +104,6 @@ func (p *receiptPipeline) join() *types.ReceiptDigest {
 }
 
 func (pe *parallelExecutor) receiptChecks(blockNum uint64) (checkReceipts, checkBloom bool) {
-	checkBloom = !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
+	checkBloom = !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts && !dbg.SkipReceiptCheck
 	return checkBloom && pe.cfg.chainConfig.IsByzantium(blockNum), checkBloom
 }

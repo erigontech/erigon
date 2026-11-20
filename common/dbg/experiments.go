@@ -123,6 +123,7 @@ var (
 	traceDomains          = EnvStrings("TRACE_DOMAINS", ",", nil)
 	StopAfterBlock        = EnvUint("STOP_AFTER_BLOCK", 0)
 	BadBlockHalt          = EnvBool("BAD_BLOCK_HALT", false)
+	SkipReceiptCheck      = EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 	IgnoreBAL             = EnvBool("IGNORE_BAL", false)
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
 	// BALDrivenCommitment folds a block's commitment from its BAL ahead of the
