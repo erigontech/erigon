@@ -442,14 +442,21 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		bal:    changes,
 	}
 	if len(changes) > 0 {
-		m := xsync.NewMap[accounts.Address, *AddressEntry](xsync.WithPresize(len(changes)))
-		entries := make([]AddressEntry, len(changes))
+		writers := 0
+		for i := range changes {
+			if balAccountWrites(&changes[i]) {
+				writers++
+			}
+		}
+		m := xsync.NewMap[accounts.Address, *AddressEntry](xsync.WithPresize(writers))
+		entries := make([]AddressEntry, writers)
 		vm.balAddrs = make([]accounts.Address, len(changes))
 		for i := range changes {
 			ac := &changes[i]
 			vm.balAddrs[i] = accounts.InternAddress(ac.Address)
-			if len(ac.StorageChanges)+len(ac.BalanceChanges)+len(ac.NonceChanges)+len(ac.CodeChanges) > 0 {
-				m.Store(vm.balAddrs[i], &entries[i])
+			if balAccountWrites(ac) {
+				m.Store(vm.balAddrs[i], &entries[0])
+				entries = entries[1:]
 				vm.nonEmpty.Store(true)
 			}
 		}
@@ -466,6 +473,10 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 // writeBALRange writes vm.bal[from:to] like WriteChanges, keeping the once-interned addresses.
 func (vm *VersionMap) writeBALRange(from, to int) {
 	vm.writeChangesAt(vm.bal, from, to)
+}
+
+func balAccountWrites(ac *types.AccountChanges) bool {
+	return len(ac.StorageChanges)+len(ac.BalanceChanges)+len(ac.NonceChanges)+len(ac.CodeChanges) > 0
 }
 
 // balAddr is the interned address of ac, taken from balAddrs when ac is vm.bal[i].
@@ -623,8 +634,7 @@ func (vm *VersionMap) writeChangesAt(changes types.BlockAccessList, from, to int
 				len(accountChanges.StorageReads),
 			)
 		}
-		if len(accountChanges.StorageChanges) == 0 && len(accountChanges.BalanceChanges) == 0 &&
-			len(accountChanges.NonceChanges) == 0 && len(accountChanges.CodeChanges) == 0 {
+		if !balAccountWrites(accountChanges) {
 			continue
 		}
 		addr := vm.balAddr(i, accountChanges)
