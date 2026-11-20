@@ -127,7 +127,7 @@ var (
 	}
 )
 
-func TestListHashStreamMatchesDeriveSha(t *testing.T) {
+func TestListHashStreamMatchesTrie(t *testing.T) {
 	t.Parallel()
 	sizes := []int{1000, 4096}
 	for n := 0; n <= 300; n++ {
@@ -140,8 +140,8 @@ func TestListHashStreamMatchesDeriveSha(t *testing.T) {
 		for i := range list {
 			s.Update(list[:i+1])
 		}
-		if got, want := s.Hash(), DeriveSha(list); got != want {
-			t.Fatalf("n=%d: stream %x, DeriveSha %x", n, got, want)
+		if got, want := s.Hash(), legacyDeriveSha(list); got != want {
+			t.Fatalf("n=%d: stream %x, trie %x", n, got, want)
 		}
 	}
 }

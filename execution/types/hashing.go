@@ -21,7 +21,6 @@ package types
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 
 	"github.com/erigontech/erigon/common"
@@ -37,48 +36,11 @@ type DerivableList interface {
 }
 
 func DeriveSha(list DerivableList) common.Hash {
-	if list.Len() < 1 {
-		return empty.RootHash
+	s := NewListHashStream()
+	for range list.Len() {
+		s.Update(list)
 	}
-
-	var curr bytes.Buffer
-	var succ bytes.Buffer
-	var value bytes.Buffer
-
-	hb := trie.NewHashBuilder(false)
-
-	hb.Reset()
-	curr.Reset()
-	succ.Reset()
-
-	hexWriter := &hexWriter{&succ}
-
-	var groups, branches, hashes []uint16
-	var leafData trie.GenStructStepLeafData
-
-	traverseInLexOrder(list, func(i int, next int) {
-		curr.Reset()
-		curr.Write(succ.Bytes())
-		succ.Reset()
-
-		if next >= 0 {
-			encodeUint(uint(next), hexWriter)
-			if err := hexWriter.Commit(); err != nil {
-				panic(fmt.Errorf("fatal in DeriveSha: %w", err))
-			}
-		}
-
-		value.Reset()
-
-		if curr.Len() > 0 {
-			list.EncodeIndex(i, &value)
-			leafData.Value = rlp.RlpEncodedBytes(value.Bytes())
-			groups, branches, hashes, _ = trie.GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &leafData, groups, branches, hashes, false)
-		}
-	})
-
-	hash, _ := hb.RootHash()
-	return hash
+	return s.Hash()
 }
 
 type bytesWriter interface {
@@ -99,33 +61,6 @@ func (w *hexWriter) WriteByte(b byte) error {
 
 func (w *hexWriter) Commit() error {
 	return w.w.WriteByte(16)
-}
-
-func adjustIndex(i int, l int) int {
-	if i >= 0 && i < 127 && i < l-1 {
-		return i + 1
-	} else if i == 127 || (i < 127 && i >= l-1) {
-		return 0
-	}
-	return i
-}
-
-// traverseInLexOrder traverses the list indices in the order suitable for HashBuilder.
-// HashBuilder requires keys to be in the lexicographical order. Our keys are unit indices in RLP encoding in hex.
-// In RLP encoding 0 is 0080 where 1 is 000110, 2 is 000210, etc up until 128 which is 0801080010.
-// So, knowing that we can order indices in the right order even w/o really sorting them. Only 0 is misplaced, and should take the position after 127.
-// So, in the end we transform [0,...,127,128,...n] to [1,...,127,0,128,...,n] which will be [000110....070f10, 080010, 0801080010....] in hex encoding.
-func traverseInLexOrder(list DerivableList, traverser func(int, int)) {
-	for i := -1; i < list.Len(); i++ {
-		adjustedIndex := adjustIndex(i, list.Len())
-		nextIndex := i + 1
-		if nextIndex >= list.Len() {
-			nextIndex = -1
-		}
-		nextIndex = adjustIndex(nextIndex, list.Len())
-
-		traverser(adjustedIndex, nextIndex)
-	}
 }
 
 func retain(_ []byte) bool {
@@ -234,6 +169,7 @@ type ListHashStream struct {
 	groups, branches, hashes []uint16
 	leaf                     trie.GenStructStepLeafData
 	key, nextKey             *bytes.Buffer
+	hex                      hexWriter
 	val, nextVal             *bytes.Buffer
 	first                    bytes.Buffer
 	count                    int
@@ -284,9 +220,9 @@ func (s *ListHashStream) pushFirst() {
 
 func (s *ListHashStream) push(i int) {
 	s.nextKey.Reset()
-	w := &hexWriter{s.nextKey}
-	encodeUint(uint(i), w)
-	_ = w.Commit()
+	s.hex.w = s.nextKey
+	encodeUint(uint(i), &s.hex)
+	_ = s.hex.Commit()
 	if s.key.Len() > 0 {
 		s.step(s.nextKey.Bytes())
 	}
