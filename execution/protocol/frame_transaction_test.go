@@ -883,7 +883,7 @@ func TestFrameTransactionFeeSettlement(t *testing.T) {
 			blockCtx.Coinbase = accounts.InternAddress(coinbase)
 			config.NoBaseFee = false
 			evm.ResetBetweenBlocks(blockCtx, evm.TxContext, ibs, config, evm.ChainRules())
-			tx.Fees = types.FrameFees{MaxFee: uint256.Int{11}, TipCap: uint256.Int{3}}
+			tx.Fees.TipCap.SetUint64(3)
 			tx.Frames = []types.Frame{
 				{Mode: types.FrameVerify, Flags: types.FrameApproveExecution, Limits: mdgas.MdGas{Execution: 1_000}},
 				{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &payer, Limits: mdgas.MdGas{Execution: 5_000}},
@@ -932,7 +932,7 @@ func TestFrameTransactionFeeSettlementHook(t *testing.T) {
 	burn := common.Address{9}
 	evm.ChainConfig().BurntContract = map[string]common.Address{"0": burn}
 	evm.Context.BaseFee.SetUint64(1)
-	tx.Fees = types.FrameFees{MaxFee: *uint256.NewInt(3), TipCap: *uint256.NewInt(1)}
+	tx.Fees.TipCap.SetUint64(1)
 	require.NoError(t, evm.IntraBlockState().SetCode(sender, []byte{0x60, 3, 0x5f, 0x5f, 0xaa}, tracing.CodeChangeUnspecified))
 	tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}}
 	tx.Fees.MaxFee.SetUint64(tx.GetGasLimit() * 3)

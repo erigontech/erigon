@@ -100,10 +100,9 @@ func TestTransactionFeeDistribution(t *testing.T) {
 						tx := &types.FrameTransaction{
 							ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender.Value(),
 							Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
-							Fees:                types.FrameFees{MaxFee: uint256.Int{test.feeCap}, TipCap: uint256.Int{tipCap}},
+							Fees:                types.FrameFees{TipCap: uint256.Int{test.wantTip}},
 							BlobVersionedHashes: blobs,
 						}
-						tx.Fees.TipCap.SetUint64(test.wantTip)
 						if !test.free {
 							tx.Fees.MaxFee.SetUint64(tx.GetGasLimit()*(2+test.wantTip) + 7*tx.GetBlobGas())
 						}

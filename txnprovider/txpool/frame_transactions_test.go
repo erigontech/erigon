@@ -111,21 +111,21 @@ func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remot
 	}, nil
 }
 
-func framePoolSlot(t *testing.T, sender common.Address, tip, fee uint64, keys ...uint256.Int) *TxnSlot {
+func framePoolSlot(t *testing.T, sender common.Address, tip, feePerGas uint64, keys ...uint256.Int) *TxnSlot {
 	t.Helper()
-	return framePoolSlotWithNonce(t, sender, 0, tip, fee, keys...)
+	return framePoolSlotWithNonce(t, sender, 0, tip, feePerGas, keys...)
 }
 
-func framePoolSlotWithNonce(t *testing.T, sender common.Address, nonce, tip, fee uint64, keys ...uint256.Int) *TxnSlot {
+func framePoolSlotWithNonce(t *testing.T, sender common.Address, nonce, tip, feePerGas uint64, keys ...uint256.Int) *TxnSlot {
 	t.Helper()
 	tx := &types.FrameTransaction{
 		NonceKeys: keys,
 		Nonce:     nonce,
 		ChainID:   *uint256.NewInt(1), SenderAddress: sender,
 		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}}},
-		Fees:   types.FrameFees{TipCap: *uint256.NewInt(tip), MaxFee: *uint256.NewInt(fee)},
+		Fees:   types.FrameFees{TipCap: *uint256.NewInt(tip)},
 	}
-	tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+	tx.Fees.MaxFee.Mul(uint256.NewInt(tx.GetGasLimit()), uint256.NewInt(feePerGas))
 	return framePoolSlotFromTransaction(t, tx)
 }
 
@@ -585,9 +585,9 @@ func TestFramePoolReservationReleasePromotesOrdinary(t *testing.T) {
 					{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: binary.BigEndian.AppendUint64(nil, deadline), Limits: mdgas.MdGas{Execution: 5_000}},
 					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
 				},
-				Fees: types.FrameFees{TipCap: *uint256.NewInt(1), MaxFee: *uint256.NewInt(2)},
+				Fees: types.FrameFees{TipCap: *uint256.NewInt(1)},
 			}
-			tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+			tx.Fees.MaxFee.SetUint64(2 * tx.GetGasLimit())
 			var encoded bytes.Buffer
 			require.NoError(t, tx.MarshalBinary(&encoded))
 			frame := &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
@@ -650,9 +650,9 @@ func TestFramePoolRevalidationRefreshesSenderNonceChain(t *testing.T) {
 					{Mode: types.FrameVerify, Flags: types.FrameApproveExecution, Limits: mdgas.MdGas{Execution: 100}},
 					{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &payer, Limits: mdgas.MdGas{Execution: 100}},
 				},
-				Fees: types.FrameFees{TipCap: *uint256.NewInt(1), MaxFee: *uint256.NewInt(2)},
+				Fees: types.FrameFees{TipCap: *uint256.NewInt(1)},
 			}
-			tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+			tx.Fees.MaxFee.SetUint64(2 * tx.GetGasLimit())
 			var encoded bytes.Buffer
 			require.NoError(t, tx.MarshalBinary(&encoded))
 			frame := &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
@@ -2279,14 +2279,14 @@ func TestFramePoolRevalidationQueuesNonceSuccessor(t *testing.T) {
 			frameTx := &types.FrameTransaction{
 				ChainID: *uint256.NewInt(1), NonceKeys: nil, SenderAddress: sender,
 				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}}},
-				Fees:   types.FrameFees{TipCap: *uint256.NewInt(1), MaxFee: *uint256.NewInt(2)},
+				Fees:   types.FrameFees{TipCap: *uint256.NewInt(1)},
 			}
 			if funding == "sponsor" {
 				backend.payer = common.Address{2}
 				frameTx.Frames[0].Flags = types.FrameApproveExecution
 				frameTx.Frames = append(frameTx.Frames, types.Frame{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &backend.payer, Limits: mdgas.MdGas{Execution: 100}})
 			}
-			frameTx.Fees.MaxFee.Mul(&frameTx.Fees.MaxFee, uint256.NewInt(frameTx.GetGasLimit()))
+			frameTx.Fees.MaxFee.SetUint64(2 * frameTx.GetGasLimit())
 			frame := &TxnSlot{Txn: frameTx}
 			ordinary := newTestTxnSlot(1, 0, 1, 2, 21_000)
 			var txns TxnSlots
@@ -2727,7 +2727,7 @@ func TestFramePoolExpiry(t *testing.T) {
 						{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: binary.BigEndian.AppendUint64(nil, deadline), Limits: mdgas.MdGas{Execution: 5_000}},
 						{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
 					},
-					Fees: types.FrameFees{TipCap: *uint256.NewInt(1), MaxFee: *uint256.NewInt(1)},
+					Fees: types.FrameFees{TipCap: *uint256.NewInt(1)},
 				}
 				tx.Fees.MaxFee.SetUint64(tx.GetGasLimit())
 				var encoded bytes.Buffer
@@ -2812,9 +2812,9 @@ func TestFramePoolCreationNonceChanges(t *testing.T) {
 					{Mode: types.FrameDefault, Target: &factory, Limits: mdgas.MdGas{Execution: 10_000, State: 400_000}},
 					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
 				},
-				Fees: types.FrameFees{TipCap: *uint256.NewInt(1), MaxFee: *uint256.NewInt(1)},
+				Fees: types.FrameFees{TipCap: *uint256.NewInt(1)},
 			}
-			tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+			tx.Fees.MaxFee.SetUint64(tx.GetGasLimit())
 			var encoded bytes.Buffer
 			require.NoError(t, tx.MarshalBinary(&encoded))
 			slot := &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}

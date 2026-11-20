@@ -78,7 +78,6 @@ func newMixedFrameReplayChain(t *testing.T, ordinaryReverts bool) (*execmodulete
 	require.NoError(t, err)
 	frameTx := &types.FrameTransaction{
 		ChainID: *cfg.ChainID, Nonce: 1, NonceKeys: nil, SenderAddress: sender,
-		Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &frameTarget, Limits: mdgas.MdGas{Execution: 10_000}},
@@ -86,7 +85,7 @@ func newMixedFrameReplayChain(t *testing.T, ordinaryReverts bool) (*execmodulete
 		},
 		Signatures: []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1, Signature: make([]byte, 65)}},
 	}
-	frameTx.Fees.MaxFee.Mul(&frameTx.Fees.MaxFee, uint256.NewInt(frameTx.GetGasLimit()))
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 	hash := frameTx.SigningHash(nil)
 	sig, err := crypto.Sign(hash[:], key)
 	require.NoError(t, err)
@@ -191,14 +190,13 @@ func TestAssertReplayPreservesFeeAccounting(t *testing.T) {
 		for nonce := range uint64(2) {
 			tx := &types.FrameTransaction{
 				ChainID: *cfg.ChainID, NonceKeys: nil, Nonce: nonce, SenderAddress: sender,
-				Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 				Frames: []types.Frame{
 					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 					{Mode: types.FrameSender, Target: &body, Limits: mdgas.MdGas{Execution: 10_000}},
 					{Mode: types.FrameAssert, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
 				},
 			}
-			tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+			tx.Fees.MaxFee.SetUint64(tx.GetGasLimit())
 			b.AddTx(tx)
 		}
 	})

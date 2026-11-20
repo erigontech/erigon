@@ -1147,12 +1147,10 @@ func TestDecodeTxnProviderPreservesNonces(t *testing.T) {
 			ChainID: *cfg.ChainID, SenderAddress: sender, Nonce: seq,
 			NonceKeys: []uint256.Int{*uint256.NewInt(nonceKey)},
 			Frames:    []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
-			Fees:      types.FrameFees{MaxFee: *uint256.NewInt(1_000_000_000)},
 		}
 		if nonceKey == 0 {
 			tx.NonceKeys = nil
 		}
-		tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
 		var encoded bytes.Buffer
 		require.NoError(t, tx.MarshalBinary(&encoded))
 		return encoded.Bytes()
@@ -1239,7 +1237,6 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 			approval := types.Frame{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Data: []byte{1}, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}}
 			first := &types.FrameTransaction{
 				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{*uint256.NewInt(tc.key)}, SenderAddress: sender,
-				Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 				Frames: []types.Frame{
 					{Mode: types.FrameDefault, Target: &creator, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
 					approval,
@@ -1248,7 +1245,6 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 			if tc.key == 0 {
 				first.NonceKeys = nil
 			}
-			first.Fees.MaxFee.Mul(&first.Fees.MaxFee, uint256.NewInt(first.GetGasLimit()))
 			// CREATE increments the creator's nonce, and legacy approval increments
 			// it once more when the creator is also the transaction sender.
 			secondNonce := uint64(1)
@@ -1258,9 +1254,8 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 			secondNonce = uint64(int64(secondNonce) + tc.nonceOffset)
 			second := &types.FrameTransaction{
 				ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: creator, Nonce: secondNonce,
-				Fees: types.FrameFees{MaxFee: uint256.Int{1}}, Frames: []types.Frame{approval},
+				Frames: []types.Frame{approval},
 			}
-			second.Fees.MaxFee.Mul(&second.Fees.MaxFee, uint256.NewInt(second.GetGasLimit()))
 			frames := []*types.FrameTransaction{first, second}
 			if tc.duplicate {
 				frames = []*types.FrameTransaction{first, first, second}
@@ -1268,14 +1263,12 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 			if tc.independent {
 				frames = append(frames, &types.FrameTransaction{
 					ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: independent,
-					Fees: types.FrameFees{MaxFee: uint256.Int{1}}, Frames: []types.Frame{approval},
+					Frames: []types.Frame{approval},
 				})
-			}
-			if tc.independent {
-				frames[len(frames)-1].Fees.MaxFee.SetUint64(frames[len(frames)-1].GetGasLimit())
 			}
 			txs := make([]hexutil.Bytes, 0, len(frames))
 			for _, tx := range frames {
+				tx.Fees.MaxFee.SetUint64(tx.GetGasLimit())
 				var encoded bytes.Buffer
 				require.NoError(t, tx.MarshalBinary(&encoded))
 				txs = append(txs, encoded.Bytes())
@@ -1338,13 +1331,12 @@ func TestBuildBlockV1FrameNonceAfterOrdinaryCreate(t *testing.T) {
 	require.NoError(t, err)
 	frame := &types.FrameTransaction{
 		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: creator, Nonce: 1,
-		Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 		Frames: []types.Frame{{
 			Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Data: []byte{1},
 			Limits: mdgas.MdGas{Execution: 1_000},
 		}},
 	}
-	frame.Fees.MaxFee.Mul(&frame.Fees.MaxFee, uint256.NewInt(frame.GetGasLimit()))
+	frame.Fees.MaxFee.SetUint64(frame.GetGasLimit())
 	var txs []hexutil.Bytes
 	for _, tx := range []types.Transaction{ordinary, frame} {
 		var encoded bytes.Buffer

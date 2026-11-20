@@ -45,7 +45,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-func recentRootPoolSlot(t *testing.T, sender common.Address, rootSlot, fee uint64) *TxnSlot {
+func recentRootPoolSlot(t *testing.T, sender common.Address, rootSlot, feePerGas uint64) *TxnSlot {
 	t.Helper()
 	data := make([]byte, 72)
 	data[0], data[71] = 1, 2
@@ -56,9 +56,9 @@ func recentRootPoolSlot(t *testing.T, sender common.Address, rootSlot, fee uint6
 			{Mode: types.FrameVerify, Target: &types.FrameRecentRootVerifier, Data: data, Limits: mdgas.MdGas{Execution: 20_000}},
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
 		},
-		Fees: types.FrameFees{TipCap: *uint256.NewInt(fee), MaxFee: *uint256.NewInt(fee)},
+		Fees: types.FrameFees{TipCap: *uint256.NewInt(feePerGas)},
 	}
-	tx.Fees.MaxFee.SetUint64(fee * tx.GetGasLimit())
+	tx.Fees.MaxFee.SetUint64(feePerGas * tx.GetGasLimit())
 	return framePoolSlotFromTransaction(t, tx)
 }
 

@@ -241,13 +241,12 @@ func TestGetLatestLogsFrameFeeAccounting(t *testing.T) {
 	}))
 	frameTx := &types.FrameTransaction{
 		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
-		Fees: types.FrameFees{MaxFee: uint256.Int{2}},
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 10_000}},
 		},
 	}
-	frameTx.Fees.MaxFee.Mul(&frameTx.Fees.MaxFee, uint256.NewInt(frameTx.GetGasLimit()))
+	frameTx.Fees.MaxFee.SetUint64(2 * frameTx.GetGasLimit())
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))

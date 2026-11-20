@@ -932,7 +932,7 @@ func (s *simulator) simulateBlock(
 	}
 
 	// Marshal the block in RPC format including the call results in a custom field.
-	blockResult := ethapi.RPCMarshalBlockWithFramePrices(block, true, s.fullTransactions, &blockCtx.BlobBaseFee, receiptList)
+	blockResult := ethapi.RPCMarshalBlock(block, true, s.fullTransactions)
 	repairLogs(callResults, block.Hash())
 	blockResult.Calls = callResults
 	return blockResult, block, nil

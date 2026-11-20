@@ -227,14 +227,13 @@ func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
 	frameTx := &types.FrameTransaction{
 		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
-		Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &successfulTarget, Limits: mdgas.MdGas{Execution: 10_000, State: 5_000}},
 			{Mode: types.FrameSender, Target: &revertingTarget, Limits: mdgas.MdGas{Execution: 10_000}},
 		},
 	}
-	frameTx.Fees.MaxFee.Mul(&frameTx.Fees.MaxFee, uint256.NewInt(frameTx.GetGasLimit()))
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddFailedTx(frameTx) })
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
@@ -1074,13 +1073,12 @@ func TestFrameCallConstructor(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
 	frameTx := &types.FrameTransaction{
 		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
-		Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 		Frames: []types.Frame{
 			{Mode: types.FrameDefault, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Data: []byte{1}, Limits: mdgas.MdGas{Execution: 1_000}},
 		},
 	}
-	frameTx.Fees.MaxFee.Mul(&frameTx.Fees.MaxFee, uint256.NewInt(frameTx.GetGasLimit()))
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
@@ -1179,13 +1177,12 @@ func TestFrameCallConstructorFeeAccounting(t *testing.T) {
 	}))
 	frameTx := &types.FrameTransaction{
 		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
-		Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &factory, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
 		},
 	}
-	frameTx.Fees.MaxFee.Mul(&frameTx.Fees.MaxFee, uint256.NewInt(frameTx.GetGasLimit()))
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))

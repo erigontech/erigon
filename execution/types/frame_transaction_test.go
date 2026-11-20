@@ -419,7 +419,7 @@ func TestFrameTransactionAsMessage(t *testing.T) {
 		NonceKeys: nil,
 		ChainID:   *uint256.NewInt(1), SenderAddress: common.HexToAddress("0x1234"),
 		Frames: []Frame{{Mode: FrameVerify, Flags: FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}}},
-		Fees:   FrameFees{TipCap: *uint256.NewInt(2), MaxFee: *uint256.NewInt(20)},
+		Fees:   FrameFees{TipCap: *uint256.NewInt(2)},
 	}
 	tx.Fees.MaxFee.SetUint64(tx.GetGasLimit() * 20)
 	rules := &chain.Rules{IsBogota: true, ChainID: uint256.NewInt(1)}
