@@ -24,8 +24,8 @@ type TorrentPeerManager struct {
 	nodeSourceFn func() NodeSource
 	logger       log.Logger
 
-	// probe, inject and now default to dialing over the client's sockets, adding the peer to every
-	// torrent and the wall clock; tests replace them.
+	// probe, inject and now default to dialing over the client's sockets, adding peers to the torrents
+	// and the wall clock; tests replace them.
 	probe  func(ctx context.Context, addr string) bool
 	inject func([]torrent.PeerInfo)
 	now    func() time.Time
@@ -60,7 +60,7 @@ func NewTorrentPeerManager(client *torrent.Client, nodeSourceFn func() NodeSourc
 		now:          time.Now,
 	}
 	m.probe = m.dialable
-	m.inject = m.addPeersToAllTorrents
+	m.inject = m.addPeersToTorrents
 	return m
 }
 
@@ -87,7 +87,7 @@ func (m *TorrentPeerManager) Run(ctx context.Context) {
 	}
 }
 
-// sync scans the current DevP2P peer set and adds the peers whose BT endpoint answers to every torrent.
+// sync scans the current DevP2P peer set and adds the peers whose BT endpoint answers to the torrents.
 // The torrent client dials a peer once per torrent and keeps no memory of failures across torrents, so an
 // endpoint that does not answer (NAT, firewall) would cost thousands of dials, each waiting for its timeout.
 // Each endpoint is checked with one dial first; an unreachable one is checked again later.
@@ -187,7 +187,8 @@ func (m *TorrentPeerManager) dialable(ctx context.Context, addr string) bool {
 	return answered
 }
 
-func (m *TorrentPeerManager) addPeersToAllTorrents(changed []torrent.PeerInfo) {
+// addPeersToTorrents gives a new torrent every reachable peer and a known torrent only the changed peers.
+func (m *TorrentPeerManager) addPeersToTorrents(changed []torrent.PeerInfo) {
 	var all []torrent.PeerInfo
 	for _, p := range m.knownPeers {
 		if p.reachable {
