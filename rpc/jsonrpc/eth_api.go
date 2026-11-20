@@ -153,6 +153,10 @@ type BaseAPI struct {
 	// all caches are thread-safe
 	stateCache kvcache.Cache
 	blocksLRU  *cache.HashByteLRU[*types.Block]
+	// decodedBlocksWindow is how far below the head rpcBlockWithTxHashes still decodes and caches
+	// a block: about as many blocks as blocksLRU holds, so a block read through it is not evicted
+	// by older ones.
+	decodedBlocksWindow uint64
 	// headersLRU holds headers decoded for header-only lookups.
 	headersLRU *cache.HashByteLRU[*types.Header]
 
@@ -196,8 +200,11 @@ type BaseAPI struct {
 	witnessCache *witnessResultCache
 }
 
-// BlockCacheBytes bounds the decoded blocks the RPC layer keeps. A mainnet block costs ~331KB of
-// heap, so this holds ~1600 of them, about 5 hours of chain.
+// mainnetBlockHeapSize is the average blockHeapSize of a recent mainnet block.
+const mainnetBlockHeapSize = 331 * datasize.KB
+
+// BlockCacheBytes bounds the decoded blocks the RPC layer keeps: ~1600 mainnet blocks, about
+// 5 hours of chain.
 var BlockCacheBytes = dbg.EnvDataSize("RPC_BLOCK_CACHE", 512*datasize.MB)
 
 // HeaderCacheBytes bounds the decoded headers the RPC layer keeps for header-only lookups.
@@ -265,6 +272,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		getLogsMaxResults: conf.GetLogsMaxResults,
 		logQueryLimit:     conf.LogQueryLimit,
 	}
+	api.decodedBlocksWindow = uint64(BlockCacheBytes / mainnetBlockHeapSize)
 	_, api.remoteBlocks = unwrapBlockReader(blockReader).(*freezeblocks.RemoteBlockReader)
 	api._preMergeData.SetTTL(defaultPreMergeDataTTL)
 	api._preMergeUnsettledTTL = defaultUnsettledPreMergeTTL
@@ -466,6 +474,41 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 		api.blocksLRU.Add(hash, block)
 	}
 	return block, nil
+}
+
+// rpcBlockWithTxHashes is ethapi.RPCMarshalBlock(block, true, false). A block near the head is
+// read through the block cache, where requests repeat. An older uncached block is read without
+// decoding its transactions and is not cached.
+func (api *BaseAPI) rpcBlockWithTxHashes(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*ethapi.RPCBlock, error) {
+	if api.blocksLRU != nil {
+		if block, ok := api.blocksLRU.Get(hash); ok && block != nil {
+			return ethapi.RPCMarshalBlock(block, true, false), nil
+		}
+	}
+	head, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return nil, err
+	}
+	if number+api.decodedBlocksWindow >= head {
+		block, err := api.blockWithSenders(ctx, tx, hash, number)
+		if err != nil || block == nil {
+			return nil, err
+		}
+		return ethapi.RPCMarshalBlock(block, true, false), nil
+	}
+	header, err := api.headerByHashAndNumber(ctx, tx, hash, number)
+	if err != nil || header == nil {
+		return nil, err
+	}
+	body, err := api._blockReader.BodyWithRawTransactions(ctx, tx, hash, number)
+	if err != nil || body == nil {
+		return nil, err
+	}
+	if header.WithdrawalsHash == nil && len(body.Withdrawals) == 0 {
+		// Some block files hold empty rather than nil withdrawals for pre-Shapella blocks.
+		body.Withdrawals = nil
+	}
+	return ethapi.RPCMarshalRawBlock(header, hash, body), nil
 }
 
 func (api *BaseAPI) headerByHashAndNumber(ctx context.Context, tx kv.Getter, hash common.Hash, number uint64) (*types.Header, error) {

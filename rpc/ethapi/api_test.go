@@ -647,3 +647,42 @@ func TestCallArgsUnmarshalMatchesEncodingJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestRPCMarshalRawBlockMatchesRPCMarshalBlock(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	longData := bytes.Repeat([]byte{0xab}, 300)
+	accessList := types.AccessList{{Address: to, StorageKeys: []common.Hash{{1}}}}
+	dynamic := func() types.DynamicFeeTransaction {
+		return types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 3, GasLimit: 50000, To: &to, Data: longData},
+			ChainID:  *uint256.NewInt(1), TipCap: *uint256.NewInt(2), FeeCap: *uint256.NewInt(30), AccessList: accessList,
+		}
+	}
+	dynamicTx := dynamic()
+	txs := []types.Transaction{
+		pinnedLegacyTx(),
+		&types.LegacyTx{CommonTx: types.CommonTx{Nonce: 2, GasLimit: 21000, To: &to, Data: longData}, GasPrice: *uint256.NewInt(5)},
+		&types.AccessListTx{LegacyTx: types.LegacyTx{CommonTx: types.CommonTx{Nonce: 4, GasLimit: 30000, To: &to}, GasPrice: *uint256.NewInt(7)}, ChainID: *uint256.NewInt(1), AccessList: accessList},
+		&dynamicTx,
+		&types.BlobTx{DynamicFeeTransaction: dynamic(), MaxFeePerBlobGas: *uint256.NewInt(9), BlobVersionedHashes: []common.Hash{{0x01}}},
+		&types.SetCodeTransaction{DynamicFeeTransaction: dynamic(), Authorizations: []types.Authorization{{ChainID: *uint256.NewInt(1), Address: to, Nonce: 1}}},
+	}
+	binaries, err := types.MarshalTransactionsBinary(txs)
+	require.NoError(t, err)
+
+	withdrawal := &types.Withdrawal{Index: 1, Validator: 2, Address: common.HexToAddress("0x01"), Amount: 3}
+	for _, withdrawals := range []types.Withdrawals{nil, {}, {withdrawal}} {
+		for _, txCount := range []int{0, 1, len(txs)} {
+			header := &types.Header{Number: *uint256.NewInt(9), Difficulty: *uint256.NewInt(1), BaseFee: uint256.NewInt(7), Extra: []byte{1, 2, 3}}
+			uncles := []*types.Header{{Number: *uint256.NewInt(8)}}
+			block := types.NewBlock(header, txs[:txCount], uncles, nil, withdrawals, nil)
+			body := &types.RawBody{Transactions: binaries[:txCount], Uncles: uncles, Withdrawals: withdrawals}
+
+			want, err := json.Marshal(RPCMarshalBlock(block, true, false))
+			require.NoError(t, err)
+			got, err := json.Marshal(RPCMarshalRawBlock(block.HeaderNoCopy(), block.Hash(), body))
+			require.NoError(t, err)
+			require.JSONEq(t, string(want), string(got), "withdrawals=%v txs=%d", withdrawals, txCount)
+		}
+	}
+}

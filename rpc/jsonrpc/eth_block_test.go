@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -604,4 +605,53 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 	}
 
 	assert.Equal(t, expectedAmount, *txCount)
+}
+
+func TestGetBlockWithTxHashesMatchesDecodedBlock(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	for _, window := range []uint64{0, 1 << 32} {
+		t.Run(fmt.Sprintf("window=%d", window), func(t *testing.T) {
+			base := newBaseApiForTest(m)
+			base.decodedBlocksWindow = window
+			requireTxHashesMatchDecodedBlock(t, m, newEthApiForTest(base, m.DB, nil, nil))
+		})
+	}
+}
+
+func requireTxHashesMatchDecodedBlock(t *testing.T, m *execmoduletester.ExecModuleTester, api *APIImpl) {
+	ctx := context.Background()
+
+	tx, err := m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	head, err := m.BlockReader.CurrentBlock(tx)
+	require.NoError(t, err)
+	require.NotZero(t, head.NumberU64())
+
+	withTxs := 0
+	for n := uint64(0); n <= head.NumberU64(); n++ {
+		hash, ok, err := m.BlockReader.CanonicalHash(ctx, tx, n)
+		require.NoError(t, err)
+		require.True(t, ok)
+		block, _, err := m.BlockReader.BlockWithSenders(ctx, tx, hash, n)
+		require.NoError(t, err)
+		if block.Transactions().Len() > 0 {
+			withTxs++
+		}
+		want, err := json.Marshal(ethapi.RPCMarshalBlock(block, true, false))
+		require.NoError(t, err)
+
+		byNumber, err := api.GetBlockByNumber(ctx, rpc.BlockNumber(n), false)
+		require.NoError(t, err)
+		got, err := json.Marshal(byNumber)
+		require.NoError(t, err)
+		require.JSONEq(t, string(want), string(got), "by number %d", n)
+
+		byHash, err := api.GetBlockByHash(ctx, rpc.BlockNumberOrHashWithHash(hash, false), false)
+		require.NoError(t, err)
+		got, err = json.Marshal(byHash)
+		require.NoError(t, err)
+		require.JSONEq(t, string(want), string(got), "by hash %d", n)
+	}
+	require.NotZero(t, withTxs)
 }

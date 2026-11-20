@@ -32,6 +32,7 @@ import (
 	"github.com/valyala/fastjson"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -738,20 +739,34 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
 		}
 	}
 
-	uncles := block.Uncles()
+	return marshalBlock(block.Header(), block.Hash(), uint64(block.Size()), transactions, block.Uncles(), block.Withdrawals())
+}
+
+// RPCMarshalRawBlock is RPCMarshalBlock(block, true, false) of the block made of header and
+// body, without decoding the transactions.
+func RPCMarshalRawBlock(header *types.Header, hash common.Hash, body *types.RawBody) *RPCBlock {
+	hashes := make([]common.Hash, len(body.Transactions))
+	for i, txn := range body.Transactions {
+		hashes[i] = crypto.Keccak256Hash(txn)
+	}
+	return marshalBlock(types.CopyHeader(header), hash, uint64(body.BlockSize(header)), hashes, body.Uncles, body.Withdrawals)
+}
+
+// marshalBlock takes ownership of header: the result aliases it.
+func marshalBlock(header *types.Header, hash common.Hash, size uint64, transactions any, uncles []*types.Header, withdrawals types.Withdrawals) *RPCBlock {
 	uncleHashes := make([]common.Hash, len(uncles))
 	for i, uncle := range uncles {
 		uncleHashes[i] = uncle.Hash()
 	}
 
 	result := &RPCBlock{
-		Size:         hexutil.Uint64(block.Size()),
+		Size:         hexutil.Uint64(size),
 		Transactions: transactions,
 		Uncles:       uncleHashes,
 	}
-	marshalHeaderInto(&result.RPCHeader, block.Header(), block.Hash())
-	if w := block.Withdrawals(); w != nil {
-		result.Withdrawals = &w
+	marshalHeaderInto(&result.RPCHeader, header, hash)
+	if withdrawals != nil {
+		result.Withdrawals = &withdrawals
 	}
 	return result
 }

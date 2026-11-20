@@ -236,6 +236,14 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		if err := api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum); err != nil {
 			return nil, err
 		}
+		if !fullTx {
+			overlayTx := api.filters.WithOverlay(tx)
+			hash, ok, err := api._blockReader.CanonicalHash(ctx, overlayTx, blockNum)
+			if err != nil || !ok {
+				return nil, err
+			}
+			return api.rpcBlockWithTxHashes(ctx, overlayTx, hash, blockNum)
+		}
 		b, err = api.blockByNumber(ctx, rpc.BlockNumber(blockNum), tx)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
@@ -326,6 +334,14 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
+	}
+
+	if !fullTx {
+		number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+		if err != nil || number == nil {
+			return nil, err
+		}
+		return api.rpcBlockWithTxHashes(ctx, tx, hash, *number)
 	}
 
 	block, err := api.blockByHashWithSenders(ctx, tx, hash)

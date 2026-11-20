@@ -888,6 +888,28 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 	return payloadSize, txsLen, unclesLen, withdrawalsLen
 }
 
+// BlockSize is Block.Size of the block made of header and rb. In the block encoding a typed
+// transaction is wrapped in an RLP string, while rb holds it in its binary encoding.
+func (rb RawBody) BlockSize(header *Header) int {
+	headerLen := header.EncodingSize()
+	size := rlp.ListPrefixLen(headerLen) + headerLen
+	txsLen := 0
+	for _, txn := range rb.Transactions {
+		txsLen += len(txn)
+		if len(txn) > 0 && txn[0] < 0x80 { // typed: string prefix, which is as long as a list prefix
+			txsLen += rlp.ListPrefixLen(len(txn))
+		}
+	}
+	size += rlp.ListPrefixLen(txsLen) + txsLen
+	unclesLen := EncodingSizeGenericList(rb.Uncles)
+	size += rlp.ListPrefixLen(unclesLen) + unclesLen
+	if rb.Withdrawals != nil {
+		withdrawalsLen := EncodingSizeGenericList(rb.Withdrawals)
+		size += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
+	}
+	return rlp.ListPrefixLen(size) + size
+}
+
 func (rb RawBody) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := rb.payloadSize()
 	b := rlp.NewEncodingBuf()
