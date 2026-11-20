@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -158,4 +159,11 @@ func TestUint64VectorSSZUnmarshalJSONRejectsLengthMismatch(t *testing.T) {
 			requireSameUint64Iterable(t, expected, vector)
 		})
 	}
+}
+
+func TestUint64ListSSZMarshalJSONMaxUint64(t *testing.T) {
+	list := solid.NewUint64ListSSZFromSlice(uint64ListJSONLimit, []uint64{math.MaxUint64})
+	data, err := json.Marshal(list)
+	require.NoError(t, err)
+	require.JSONEq(t, `["18446744073709551615"]`, string(data))
 }

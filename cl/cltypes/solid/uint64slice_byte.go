@@ -112,7 +112,7 @@ func (arr *byteBasedUint64Slice) CopyTo(target *byteBasedUint64Slice) {
 func (arr *byteBasedUint64Slice) MarshalJSON() ([]byte, error) {
 	list := make([]string, arr.l)
 	for i := 0; i < arr.l; i++ {
-		list[i] = strconv.FormatInt(int64(arr.Get(i)), 10)
+		list[i] = strconv.FormatUint(arr.Get(i), 10)
 	}
 	return json.Marshal(list)
 }
