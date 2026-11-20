@@ -809,23 +809,29 @@ func TestConvertCommitmentFiles_V3FoldsTheTailAfterTheStoredState(t *testing.T) 
 	_, _, rootAt := writeBlocks(t, write, true)
 	db, agg, _ := writeBlocks(t, write, false)
 
-	at := agg.BeginFilesRo()
-	defer at.Close()
-	require.NoError(t, state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{TargetV3: true, DB: db}, log.New()))
+	func() {
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		require.NoError(t, state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{TargetV3: true, DB: db}, log.New()))
+	}()
 
-	tx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	for _, end := range []uint64{64, 80} {
-		v, found, _, fileEnd, err := state.AggTx(tx).DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentV3State, end-1)
+	func() {
+		tx, err := db.BeginTemporalRo(t.Context())
 		require.NoError(t, err)
-		require.True(t, found)
-		require.Equal(t, end, fileEnd)
-		_, txNum, root, err := commitment.DecodeCommitmentV3State(v)
-		require.NoError(t, err)
-		require.Equal(t, end-1, txNum)
-		require.Equal(t, rootAt[end-1], common.Hash(root), "file ending at %d", end)
-	}
+		defer tx.Rollback()
+		for _, end := range []uint64{64, 80} {
+			v, found, _, fileEnd, err := state.AggTx(tx).DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentV3State, end-1)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, end, fileEnd)
+			_, txNum, root, err := commitment.DecodeCommitmentV3State(v)
+			require.NoError(t, err)
+			require.Equal(t, end-1, txNum)
+			require.Equal(t, rootAt[end-1], common.Hash(root), "file ending at %d", end)
+		}
+	}()
+
+	testPrefixFoldMatchesStateRecord(t, func(*testing.T, string) (kv.TemporalRwDB, *state.Aggregator) { return db, agg }, "converted")
 }
 
 func testAccount(seed uint64) []byte {
