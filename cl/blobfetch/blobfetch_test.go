@@ -147,6 +147,7 @@ func TestRetryBackoffCapsRetryAfter(t *testing.T) {
 		"31":          30 * time.Second,
 		"9223372037":  30 * time.Second,
 		"18446744074": 30 * time.Second,
+		"+9223372037": 30 * time.Second,
 	} {
 		resp := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": {header}}}
 		require.Equal(t, want, retryBackoff(time.Second, 30*time.Second, 0, resp), "Retry-After: %s", header)

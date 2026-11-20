@@ -174,7 +174,7 @@ var transport = http.DefaultTransport.(*http.Transport).Clone()
 
 func retryBackoff(lo, hi time.Duration, attempt int, resp *http.Response) time.Duration {
 	if resp != nil && (resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable) {
-		if seconds, err := strconv.ParseUint(resp.Header.Get("Retry-After"), 10, 64); err == nil {
+		if seconds, err := strconv.ParseUint(strings.TrimPrefix(resp.Header.Get("Retry-After"), "+"), 10, 64); err == nil {
 			return time.Duration(min(seconds, uint64(hi/time.Second))) * time.Second
 		}
 	}
