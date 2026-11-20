@@ -518,11 +518,30 @@ func bnhPtr(b rpc.BlockNumberOrHash) *rpc.BlockNumberOrHash { return &b }
 
 type nonceAtHeadClient struct {
 	txpoolproto.TxpoolClient
-	lookup func(*txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error)
+	lookup func(*txpoolproto.NonceAtRequest) (*txpoolproto.NonceReply, error)
 }
 
-func (c nonceAtHeadClient) Nonce(_ context.Context, req *txpoolproto.NonceRequest, _ ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
+func (c nonceAtHeadClient) NonceAt(_ context.Context, req *txpoolproto.NonceAtRequest, _ ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
 	return c.lookup(req)
+}
+
+type legacyNoncePool struct {
+	txpoolproto.UnimplementedTxpoolServer
+}
+
+func (legacyNoncePool) Nonce(context.Context, *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
+	return &txpoolproto.NonceReply{Found: true, Nonce: 1}, nil
+}
+
+func TestPendingNonceRequiresNonceAt(t *testing.T) {
+	m := execmoduletester.New(t)
+	m.TxPoolGrpcServer = legacyNoncePool{}
+	_, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, txpoolproto.NewTxpoolClient(conn), nil)
+	block := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	nonce, err := api.GetTransactionCount(t.Context(), m.Address, &block)
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+	require.Nil(t, nonce)
 }
 
 func TestPendingNonceRetriesAtCurrentHead(t *testing.T) {
@@ -536,7 +555,7 @@ func TestPendingNonceRetriesAtCurrentHead(t *testing.T) {
 	})
 	require.NoError(t, err)
 	calls := 0
-	pool := nonceAtHeadClient{lookup: func(req *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
+	pool := nonceAtHeadClient{lookup: func(req *txpoolproto.NonceAtRequest) (*txpoolproto.NonceReply, error) {
 		calls++
 		if calls == 1 {
 			require.Equal(t, gointerfaces.ConvertHashToH256(m.Genesis.Hash()), req.BlockHash)
@@ -557,7 +576,7 @@ func TestPendingNonceRetriesAtCurrentHead(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	api.txPool = nonceAtHeadClient{lookup: func(*txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
+	api.txPool = nonceAtHeadClient{lookup: func(*txpoolproto.NonceAtRequest) (*txpoolproto.NonceReply, error) {
 		cancel()
 		return nil, status.Error(codes.Aborted, "pool head changed")
 	}}
@@ -585,7 +604,7 @@ func TestPendingNonceUsesAccountFromPinnedBlock(t *testing.T) {
 			Data:    accounts.SerialiseV3(&account),
 		}},
 	}}})
-	pool := nonceAtHeadClient{lookup: func(req *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
+	pool := nonceAtHeadClient{lookup: func(req *txpoolproto.NonceAtRequest) (*txpoolproto.NonceReply, error) {
 		require.Equal(t, gointerfaces.ConvertHashToH256(m.Genesis.Hash()), req.BlockHash)
 		return &txpoolproto.NonceReply{}, nil
 	}}

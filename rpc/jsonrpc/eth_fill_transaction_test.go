@@ -41,7 +41,7 @@ import (
 // errPoolClient simulates a txpool gRPC call failure.
 type errPoolClient struct{ stubTxPoolClient }
 
-func (errPoolClient) Nonce(_ context.Context, _ *txpoolproto.NonceRequest, _ ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
+func (errPoolClient) NonceAt(_ context.Context, _ *txpoolproto.NonceAtRequest, _ ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
 	return nil, errors.New("pool unavailable")
 }
 
@@ -51,7 +51,7 @@ type fixedNoncePoolClient struct {
 	nonce uint64
 }
 
-func (c fixedNoncePoolClient) Nonce(_ context.Context, _ *txpoolproto.NonceRequest, _ ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
+func (c fixedNoncePoolClient) NonceAt(_ context.Context, _ *txpoolproto.NonceAtRequest, _ ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
 	return &txpoolproto.NonceReply{Found: true, Nonce: c.nonce}, nil
 }
 

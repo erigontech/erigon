@@ -686,7 +686,7 @@ func newTestEthAPIWithFilters(t *testing.T, m *execmoduletester.ExecModuleTester
 
 type stubTxPoolClient struct{ txpoolproto.TxpoolClient }
 
-func (stubTxPoolClient) Nonce(context.Context, *txpoolproto.NonceRequest, ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
+func (stubTxPoolClient) NonceAt(context.Context, *txpoolproto.NonceAtRequest, ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
 	return &txpoolproto.NonceReply{}, nil
 }
 
@@ -953,7 +953,7 @@ type nonceTxPool struct {
 	err   error
 }
 
-func (p nonceTxPool) Nonce(context.Context, *txpoolproto.NonceRequest, ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
+func (p nonceTxPool) NonceAt(context.Context, *txpoolproto.NonceAtRequest, ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
 	return p.reply, p.err
 }
 

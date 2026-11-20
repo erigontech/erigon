@@ -102,6 +102,10 @@ func (*GrpcDisabled) Nonce(ctx context.Context, request *txpoolproto.NonceReques
 	return nil, ErrPoolDisabled
 }
 
+func (*GrpcDisabled) NonceAt(ctx context.Context, request *txpoolproto.NonceAtRequest) (*txpoolproto.NonceReply, error) {
+	return nil, ErrPoolDisabled
+}
+
 func (*GrpcDisabled) GetBlobs(ctx context.Context, request *txpoolproto.GetBlobsRequest) (*txpoolproto.GetBlobsReply, error) {
 	return nil, ErrPoolDisabled
 }
@@ -331,23 +335,24 @@ func (s *GrpcServer) Status(_ context.Context, _ *txpoolproto.StatusRequest) (*t
 	}, nil
 }
 
-func (s *GrpcServer) Nonce(ctx context.Context, in *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
-	addr := gointerfaces.ConvertH160toAddress(in.Address)
-	var nonce uint64
-	var found bool
-	if in.BlockHash == nil {
-		nonce, found = s.txPool.NonceFromAddress(addr)
-	} else {
-		var err error
-		nonce, found, err = s.txPool.nonceAt(addr, gointerfaces.ConvertH256ToHash(in.BlockHash), in.StateNonce)
-		if err != nil {
-			return nil, status.Error(codes.Aborted, err.Error())
-		}
+func (s *GrpcServer) Nonce(_ context.Context, in *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
+	nonce, found := s.txPool.NonceFromAddress(gointerfaces.ConvertH160toAddress(in.Address))
+	return &txpoolproto.NonceReply{Nonce: nonce, Found: found}, nil
+}
+
+func (s *GrpcServer) NonceAt(_ context.Context, in *txpoolproto.NonceAtRequest) (*txpoolproto.NonceReply, error) {
+	addr, head := in.GetAddress(), in.GetBlockHash()
+	if addr.GetHi() == nil {
+		return nil, status.Error(codes.InvalidArgument, "incomplete address")
 	}
-	return &txpoolproto.NonceReply{
-		Nonce: nonce,
-		Found: found,
-	}, nil
+	if head.GetHi() == nil || head.GetLo() == nil {
+		return nil, status.Error(codes.InvalidArgument, "incomplete block hash")
+	}
+	nonce, found, err := s.txPool.nonceAt(gointerfaces.ConvertH160toAddress(addr), gointerfaces.ConvertH256ToHash(head), in.StateNonce)
+	if err != nil {
+		return nil, status.Error(codes.Aborted, err.Error())
+	}
+	return &txpoolproto.NonceReply{Nonce: nonce, Found: found}, nil
 }
 
 // NewSlotsStreams - it's safe to use this class as non-pointer

@@ -122,7 +122,7 @@ func (api *APIImpl) pendingNonce(ctx context.Context, address common.Address) (*
 		if err != nil {
 			return nil, err
 		}
-		reply, err := api.txPool.Nonce(ctx, req)
+		reply, err := api.txPool.NonceAt(ctx, req)
 		if err == nil {
 			nonce := req.StateNonce
 			if reply.Found {
@@ -141,7 +141,7 @@ func (api *APIImpl) pendingNonce(ctx context.Context, address common.Address) (*
 	}
 }
 
-func (api *APIImpl) pendingNonceRequest(ctx context.Context, address common.Address) (*txpoolproto.NonceRequest, error) {
+func (api *APIImpl) pendingNonceRequest(ctx context.Context, address common.Address) (*txpoolproto.NonceAtRequest, error) {
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
@@ -175,7 +175,7 @@ func (api *APIImpl) pendingNonceRequest(ctx context.Context, address common.Addr
 	if err != nil {
 		return nil, err
 	}
-	req := &txpoolproto.NonceRequest{
+	req := &txpoolproto.NonceAtRequest{
 		Address:   gointerfaces.ConvertAddressToH160(address),
 		BlockHash: gointerfaces.ConvertHashToH256(head),
 	}
