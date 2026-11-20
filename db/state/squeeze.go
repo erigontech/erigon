@@ -1184,13 +1184,16 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	return latestRoot, nil
 }
 
-// rebuildShardKeys is the key count a rebuild shard grows towards, so a datadir with short steps does not
-// rebuild in thousands of tiny shards, each with its own commit and merge.
+// rebuildShardKeys is the key count a rebuild shard aims for: short steps do not rebuild in thousands of tiny
+// shards, each with its own commit and merge, and dense steps do not collect one shard's keys past the memory.
 const rebuildShardKeys = 1 << 24
 
 func rebuildShardMaxSteps(keysPerStep uint64) uint64 {
-	steps := uint64(commitment.DefaultRebuildShardMaxSteps)
-	for keysPerStep > 0 && steps*2*keysPerStep <= rebuildShardKeys {
+	if keysPerStep == 0 {
+		return commitment.DefaultRebuildShardMaxSteps
+	}
+	steps := uint64(1)
+	for steps*2*keysPerStep <= rebuildShardKeys {
 		steps *= 2
 	}
 	return steps

@@ -24,7 +24,9 @@ import (
 
 func TestRebuildShardMaxSteps(t *testing.T) {
 	require.Equal(t, uint64(64), rebuildShardMaxSteps(0))
-	require.Equal(t, uint64(64), rebuildShardMaxSteps(218_000)) // mainnet steps keep 64-step shards
-	require.Equal(t, uint64(8192), rebuildShardMaxSteps(1_748)) // 3125-tx steps: 1.79G keys over 1,024,000 steps
+	require.Equal(t, uint64(64), rebuildShardMaxSteps(218_000))  // mainnet steps keep 64-step shards
+	require.Equal(t, uint64(8192), rebuildShardMaxSteps(1_748))  // 3125-tx steps: 1.79G keys over 1,024,000 steps
+	require.Equal(t, uint64(8), rebuildShardMaxSteps(1_890_433)) // dense steps: 121M keys in a 64-step shard ran out of 62 GB
+	require.Equal(t, uint64(1), rebuildShardMaxSteps(1<<25))
 	require.Equal(t, uint64(1<<24), rebuildShardMaxSteps(1))
 }
