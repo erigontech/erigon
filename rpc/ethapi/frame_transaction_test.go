@@ -53,10 +53,12 @@ func TestFrameRPCGasPriceMaxTip(t *testing.T) {
 func TestFrameRPCGasPriceUnaffordable(t *testing.T) {
 	tx := &types.FrameTransaction{Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}}}
 	tx.Fees.MaxFee.SetUint64(tx.GetGasLimit() - 1)
-	result := NewRPCTransaction(tx, common.Hash{1}, 1, 1, 0, uint256.NewInt(1), nil, 0)
-	data, err := json.Marshal(result)
-	require.NoError(t, err)
-	require.NotContains(t, string(data), `"gasPrice"`)
+	for _, gasUsed := range []uint64{0, tx.GetGasLimit()} {
+		result := NewRPCTransaction(tx, common.Hash{1}, 1, 1, 0, uint256.NewInt(1), nil, gasUsed)
+		data, err := json.Marshal(result)
+		require.NoError(t, err)
+		require.NotContainsf(t, string(data), `"gasPrice"`, "gas used: %d", gasUsed)
+	}
 }
 
 func TestFrameRPCBlockGasPriceWithBlob(t *testing.T) {

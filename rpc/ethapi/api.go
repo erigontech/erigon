@@ -998,32 +998,35 @@ func newRPCTransaction(txn types.Transaction, baseFee, blobBaseFee *uint256.Int,
 	return result
 }
 
-// A frame's settled price can exceed its GASPRICE estimate, so use the receipt's
-// gas usage when available. Both prices require the blob base fee if the frame carries blobs.
+// In a block with a base fee, a frame's settled price can exceed its GASPRICE
+// estimate. Use receipt gas usage when available. Leave the price unset if the
+// budget cannot cover base fees or a blob-carrying frame's blob base fee is unknown.
 func (r *RPCTransaction) setGasPrice(txn types.Transaction, baseFee, blobBaseFee *uint256.Int, gasUsed uint64) {
 	if baseFee == nil {
 		r.GasPrice = (*hexutil.U256)(txn.GetFeeCap())
 		return
 	}
 	if frame, ok := txn.(*types.FrameTransaction); ok {
-		if frame.GetBlobGas() != 0 && blobBaseFee == nil {
-			r.GasPrice = nil
-			return
-		}
-		if gasUsed != 0 {
-			r.GasPrice = (*hexutil.U256)(ethutils.ReceiptGasPrice(frame, gasUsed, baseFee, blobBaseFee))
-			return
-		}
+		r.GasPrice = nil
 		if blobBaseFee == nil {
+			if frame.GetBlobGas() != 0 {
+				return
+			}
 			blobBaseFee = new(uint256.Int)
 		}
-		budget, err := frame.Fees.Budget(uint64(r.Gas), frame.GetBlobGas(), baseFee, blobBaseFee)
-		if err != nil {
-			// A stored block can contain a frame that cannot pay its base fees.
-			r.GasPrice = nil
-			return
+		if gasUsed != 0 {
+			tip, err := ethutils.ReceiptGasTip(frame, gasUsed, baseFee, blobBaseFee)
+			if err != nil {
+				return
+			}
+			r.computedGasPrice = hexutil.U256(u256.Add(*baseFee, tip))
+		} else {
+			budget, err := frame.Fees.Budget(uint64(r.Gas), frame.GetBlobGas(), baseFee, blobBaseFee)
+			if err != nil {
+				return
+			}
+			r.computedGasPrice = hexutil.U256(budget.GasPrice)
 		}
-		r.computedGasPrice = hexutil.U256(budget.GasPrice)
 	} else {
 		r.computedGasPrice = hexutil.U256(u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap()))
 	}

@@ -373,7 +373,7 @@ func ReceiptGasTip(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *
 func ReceiptGasPrice(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) *uint256.Int {
 	if txn.Type() != types.FrameTxType {
 		if baseFee == nil {
-			return txn.GetTipCap()
+			return new(uint256.Int).Set(txn.GetTipCap())
 		}
 		tip := txn.GetEffectiveGasTip(baseFee)
 		return new(uint256.Int).Add(baseFee, &tip)

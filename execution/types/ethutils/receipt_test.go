@@ -37,6 +37,14 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream/ethjsontest"
 )
 
+func TestPreLondonReceiptGasPriceIsIndependent(t *testing.T) {
+	txn := &types.LegacyTx{GasPrice: *uint256.NewInt(7)}
+	price := ReceiptGasPrice(txn, 21_000, nil, nil)
+	require.Equal(t, &txn.GasPrice, price)
+	price.Clear()
+	require.Equal(t, uint256.NewInt(7), &txn.GasPrice)
+}
+
 // MarshalReceipt must reuse a Bloom the receipt already carries instead of
 // hashing the logs again on every call, and compute it only when unset.
 func TestMarshalReceiptReusesReceiptBloom(t *testing.T) {
