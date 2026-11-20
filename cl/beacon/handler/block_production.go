@@ -2686,7 +2686,7 @@ func (a *ApiHandler) publishBlindedBlocks(r *http.Request, apiVersion int) (*bea
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
-	b, err := readBoundedBody(r.Body, limit)
+	b, err := readBoundedBody(r, limit)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
@@ -2858,7 +2858,7 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
-	body, err := readBoundedBody(r.Body, limit)
+	body, err := readBoundedBody(r, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -2918,7 +2918,7 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 
 	switch r.Header.Get("Content-Type") {
 	case "application/json":
-		body, err := readBoundedBody(r.Body, maxGloasPublishedBlockSize)
+		body, err := readBoundedBody(r, maxGloasPublishedBlockSize)
 		if err != nil {
 			return nil, err
 		}
@@ -2935,7 +2935,7 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 		}, nil
 
 	case "application/octet-stream":
-		octect, err := readBoundedBody(r.Body, maxGloasPublishedBlockSize)
+		octect, err := readBoundedBody(r, maxGloasPublishedBlockSize)
 		if err != nil {
 			return nil, err
 		}
@@ -2949,8 +2949,11 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 	return nil, errors.New("invalid content type")
 }
 
-func readBoundedBody(body io.Reader, limit int64) ([]byte, error) {
-	b, err := io.ReadAll(io.LimitReader(body, limit+1))
+func readBoundedBody(r *http.Request, limit int64) ([]byte, error) {
+	if r.ContentLength > limit {
+		return nil, fmt.Errorf("request body exceeds %d bytes", limit)
+	}
+	b, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
 		return nil, err
 	}

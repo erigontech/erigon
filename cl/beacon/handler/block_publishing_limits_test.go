@@ -80,6 +80,39 @@ func TestPublishedBlockSSZBodyLimit(t *testing.T) {
 	}
 }
 
+func TestPublishedBlockRejectsDeclaredOversizedBody(t *testing.T) {
+	h := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
+	for _, tc := range []struct {
+		name    string
+		blinded bool
+		handler beaconhttp.EndpointHandlerFunc[*beaconhttp.BeaconResponse]
+	}{
+		{"v1/full", false, h.PostEthV1BeaconBlocks},
+		{"v2/full", false, h.PostEthV2BeaconBlocks},
+		{"v1/blinded", true, h.PostEthV1BlindedBlocks},
+		{"v2/blinded", true, h.PostEthV2BlindedBlocks},
+	} {
+		for _, contentType := range []string{"application/json", "application/octet-stream"} {
+			t.Run(tc.name+"/"+contentType, func(t *testing.T) {
+				limit, err := h.publishedBlockBodyLimit(clparams.FuluVersion, tc.blinded)
+				require.NoError(t, err)
+				body := &io.LimitedReader{R: publishingJSONSpaces{}, N: limit + 1}
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", body)
+				req.ContentLength = limit + 1
+				req.Header.Set("Content-Type", contentType)
+				req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+
+				_, err = tc.handler(httptest.NewRecorder(), req)
+				var endpointErr *beaconhttp.EndpointError
+				require.ErrorAs(t, err, &endpointErr)
+				require.Equal(t, http.StatusBadRequest, endpointErr.Code)
+				require.ErrorContains(t, err, "request body exceeds")
+				require.Equal(t, limit+1, body.N, "body was read")
+			})
+		}
+	}
+}
+
 func TestPublishedBlockJSONBodyLimit(t *testing.T) {
 	for _, blinded := range []bool{false, true} {
 		versions := []clparams.StateVersion{clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion}
