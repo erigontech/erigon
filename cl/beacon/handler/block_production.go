@@ -2659,12 +2659,9 @@ func (a *ApiHandler) publishBlindedBlocks(r *http.Request, apiVersion int) (*bea
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, cltypes.ErrGloasCannotBlind)
 	}
 	defer r.Body.Close()
-	contentType, err := requestContentType(r)
+	contentType, err := publishedBlockContentType(r)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err)
-	}
-	if contentType != "application/json" && contentType != "application/octet-stream" {
-		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, fmt.Errorf("unsupported content type: %s", contentType))
+		return nil, err
 	}
 	isJSON := contentType == "application/json"
 
@@ -2840,9 +2837,9 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 	if block == nil {
 		return nil, errors.New("failed to create block")
 	}
-	contentType := r.Header.Get("Content-Type")
-	if contentType != "application/json" && contentType != "application/octet-stream" {
-		return nil, errors.New("invalid content type")
+	contentType, err := publishedBlockContentType(r)
+	if err != nil {
+		return nil, err
 	}
 	limit, err := a.publishedBlockBodyLimit(version, false)
 	if err != nil {
@@ -2904,9 +2901,13 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 	version clparams.StateVersion,
 	r *http.Request,
 ) (*cltypes.DenebSignedBeaconBlock, error) {
+	contentType, err := publishedBlockContentType(r)
+	if err != nil {
+		return nil, err
+	}
 	signedBlock := cltypes.NewSignedBeaconBlock(a.beaconChainCfg, version)
 
-	switch r.Header.Get("Content-Type") {
+	switch contentType {
 	case "application/json":
 		body, err := readBoundedBody(r, maxGloasPublishedBlockSize)
 		if err != nil {
@@ -2924,7 +2925,7 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 			SignedBlock: signedBlock,
 		}, nil
 
-	case "application/octet-stream":
+	default:
 		octect, err := readBoundedBody(r, maxGloasPublishedBlockSize)
 		if err != nil {
 			return nil, err
@@ -2936,7 +2937,17 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 			SignedBlock: signedBlock,
 		}, nil
 	}
-	return nil, errors.New("invalid content type")
+}
+
+func publishedBlockContentType(r *http.Request) (string, error) {
+	contentType, err := requestContentType(r)
+	if err != nil {
+		return "", beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err)
+	}
+	if contentType != "application/json" && contentType != "application/octet-stream" {
+		return "", beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, fmt.Errorf("unsupported content type: %s", contentType))
+	}
+	return contentType, nil
 }
 
 func readBoundedBody(r *http.Request, limit int64) ([]byte, error) {
