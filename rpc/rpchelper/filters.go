@@ -1009,6 +1009,9 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 		return fmt.Errorf("unprocessable payload: %w", err)
 	}
 
+	if kv := dbg.GapHeader(); kv != nil {
+		ff.logger.Info("[gap-probe]", append([]any{"block", header.Number.Uint64() - 1}, kv...)...)
+	}
 	ff.invalidateStalePendingBlock(&header)
 
 	ev := &Shared[*types.Header]{Value: &header}

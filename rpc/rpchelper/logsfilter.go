@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -248,6 +249,7 @@ func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.
 func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogsReply) {
 	// The same log instance is sent to every matching subscriber, each reading it from
 	// its own goroutine, so it must not be mutated after the first Send.
+	gapNs, gapSeq := dbg.GapLogArrived()
 	lg := ethutils.RPCLogFromProto(eventLog)
 	addr, topics := lg.Address, lg.Topics
 
@@ -262,6 +264,9 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogs
 		}
 		if !a.chooseTopics(filter, topics) {
 			return nil
+		}
+		if filter.allAddrs == 0 {
+			dbg.GapLogMatched(lg, gapNs, gapSeq)
 		}
 		filter.sender.Send(lg)
 		return nil

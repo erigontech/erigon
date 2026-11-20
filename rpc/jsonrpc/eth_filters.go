@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -185,6 +186,8 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 				log.Warn("[rpc] error while notifying subscription", "err", err)
 			}
 		}
+		gapAddressed, _ := ctx.Value(gapAddressedKey{}).(bool)
+		var gapLogs []any
 		for {
 			select {
 			case item, ok := <-ch:
@@ -192,12 +195,26 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 					log.Warn(closedWarn)
 					return
 				}
+				gapWake := time.Now().UnixNano()
+				gapLogs = gapLogs[:0]
 				err := rpc.CoalesceNotifications(notifier, func() {
+					if gapAddressed {
+						gapLogs = append(gapLogs, any(item))
+					}
 					notify(emit, item)
 					for range len(ch) {
-						notify(emit, <-ch)
+						next := <-ch
+						if gapAddressed {
+							gapLogs = append(gapLogs, any(next))
+						}
+						notify(emit, next)
 					}
 				})
+				if _, head := any(item).(*rpchelper.Shared[*types.Header]); head {
+					dbg.GapHeadWritten(rpc.ProbeConnKey(notifier))
+				} else if len(gapLogs) > 0 {
+					dbg.GapLogsWritten(rpc.ProbeConnKey(notifier), gapLogs, gapWake)
+				}
 				if err != nil {
 					log.Warn("[rpc] notification batch write failed, connection closed", "err", err)
 				}
@@ -305,6 +322,9 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 	if api.filters == nil {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
+	if len(crit.Addresses) > 0 {
+		ctx = context.WithValue(ctx, gapAddressedKey{}, true)
+	}
 	return subscribeRPC(ctx,
 		func() (<-chan *types.Log, func(), error) {
 			logs, id, err := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit, rpchelper.ProtocolWS)
@@ -345,3 +365,6 @@ func (api *APIImpl) TransactionReceipts(ctx context.Context, crit *filters.Recei
 		},
 		"[rpc] receipts channel was closed")
 }
+
+// gapAddressedKey marks, for the gap probe (not for merge), a logs subscription with addresses.
+type gapAddressedKey struct{}
