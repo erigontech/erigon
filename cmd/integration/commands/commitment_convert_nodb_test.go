@@ -346,6 +346,7 @@ func TestCommitmentConvertV3WithoutChaindataFoldsTheTail(t *testing.T) {
 	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
 
 	requireConvertRefusedBeforeWriting(t, dirs, "no block holds txNum 47", "--v3")
+	requireConvertRefusedBeforeWriting(t, dirs, "no block holds txNum 47", "--v3", "--no-history")
 }
 
 func TestCommitmentConvertV3WithNothingToConvert(t *testing.T) {
