@@ -413,9 +413,18 @@ func (cc *commitmentCalculator) ownsChangeset(n uint64) bool {
 // handleMessage contains the break logic — decides what to do with each
 // message in the stream.
 
+type probeTxTimes struct {
+	n                          int
+	handle, touch, edge, ahead time.Duration
+}
+
+var probeTx probeTxTimes
+
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
 	switch r := msg.(type) {
 	case *txResult:
+		txT0 := time.Now()
+		defer func() { probeTx.handle += time.Since(txT0); probeTx.n++ }()
 		var base state.StateReader
 		perBlock := cc.perBlockCompute(r.blockNum)
 		if r.versionMap != nil {
@@ -431,7 +440,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		if pb != nil {
 			pb.txSeen = true
 		}
+		aheadT0 := time.Now()
 		cc.maybeComputeAhead(ctx, r.blockNum)
+		probeTx.ahead += time.Since(aheadT0)
 		if pb != nil && pb.failed {
 			return
 		}
@@ -439,7 +450,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
 			cc.hashAtFold = !perBlock
 			if !cc.computedAhead[r.blockNum] || dbg.BALShadowCompute {
+				touchT0 := time.Now()
 				cc.accumulateTouched(r.writes, base)
+				probeTx.touch += time.Since(touchT0)
 			}
 			cc.txsSinceCheckpoint++
 		}
@@ -450,7 +463,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// commitment .kv inconsistent. If a late-consumed blockRequest leaves
 		// computedAhead[n] unset and both paths checkpoint the same edge, that is
 		// benign — both emit identical values at the same txNum.
+		edgeT0 := time.Now()
 		stepEdge := cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum)
+		probeTx.edge += time.Since(edgeT0)
 		// Intra-block checkpoint: for a non-BAL per-block block, fold every
 		// commitmentIntraBlockTxs txs so the commitment hash overlaps execution
 		// rather than running wholly at block end. The block-end fold then covers
@@ -492,6 +507,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		cc.txsSinceCheckpoint = 0
 
 		commitStart := time.Now()
+		if logNpPhases {
+			cc.logger.Info("[np-phase] committx", "blk", r.BlockNum, "txs", probeTx.n, "npTxHandle", probeTx.handle, "npTouch", probeTx.touch, "npEdge", probeTx.edge, "npAhead", probeTx.ahead, "npQueue", time.Since(r.execEndedAt))
+		}
+		probeTx = probeTxTimes{}
 		switch {
 		case cc.computedAhead[r.BlockNum]:
 			// Already computed ahead from its BAL. In shadow mode, recompute
