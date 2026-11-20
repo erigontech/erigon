@@ -18,6 +18,8 @@ package network
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -132,4 +134,20 @@ func TestWarnBackfillIncompleteWithoutUnresolvedSlots(t *testing.T) {
 		"currentSlot", uint64(15_300_001), "highestBackfilled", uint64(15_300_000),
 		"frozenBlobsTo", uint64(14_880_000), "frozenBlocksTo", uint64(15_220_000),
 	}, handler.records[0].Ctx)
+}
+
+func TestDownloadOnceWarnsWhileThePassRuns(t *testing.T) {
+	downloader := newBoundaryDownloader(t, 20, 0, 0, &boundaryBlockReader{})
+	handler := &backfillLogHandler{}
+	downloader.logger.SetHandler(handler)
+
+	require.NoError(t, downloader.downloadOnce(true))
+	warned := slices.IndexFunc(handler.records, func(r *log.Record) bool {
+		return r.Lvl == log.LvlWarn && strings.Contains(r.Msg, "Blob backfilling is not finished")
+	})
+	finished := slices.IndexFunc(handler.records, func(r *log.Record) bool {
+		return strings.Contains(r.Msg, "Blob history download finished")
+	})
+	require.NotEqual(t, -1, finished)
+	require.True(t, warned >= 0 && warned < finished, "a pass must warn while it runs, warned at record %d, finished at %d", warned, finished)
 }
