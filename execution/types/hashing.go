@@ -173,6 +173,8 @@ type ListHashStream struct {
 	val, nextVal             *bytes.Buffer
 	first                    bytes.Buffer
 	count                    int
+	root                     common.Hash
+	hashed                   bool
 }
 
 func NewListHashStream() *ListHashStream {
@@ -186,6 +188,9 @@ func NewListHashStream() *ListHashStream {
 }
 
 func (s *ListHashStream) Update(list DerivableList) {
+	if s.hashed {
+		panic("ListHashStream: Update after Hash")
+	}
 	i := s.count
 	s.count++
 	if i == 0 {
@@ -201,20 +206,23 @@ func (s *ListHashStream) Update(list DerivableList) {
 }
 
 func (s *ListHashStream) Hash() common.Hash {
-	if s.count == 0 {
-		return empty.RootHash
+	if s.hashed {
+		return s.root
 	}
-	if s.count <= 0x7f {
-		s.pushFirst()
+	hash := empty.RootHash
+	if s.count > 0 {
+		if s.count <= 0x7f {
+			s.pushFirst()
+		}
+		s.step(nil)
+		hash, _ = s.hb.RootHash()
 	}
-	s.step(nil)
-	hash, _ := s.hb.RootHash()
+	s.root, s.hashed = hash, true
 	return hash
 }
 
 func (s *ListHashStream) pushFirst() {
-	s.nextVal.Reset()
-	s.nextVal.Write(s.first.Bytes())
+	s.nextVal = &s.first
 	s.push(0)
 }
 
