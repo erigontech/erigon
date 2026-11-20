@@ -18,7 +18,6 @@ package blobfetch
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httptrace"
@@ -157,30 +156,24 @@ func TestRetryBackoffCapsRetryAfter(t *testing.T) {
 func TestFailedFetchKeepsDefaultTransportIdleConnections(t *testing.T) {
 	defer func(wait time.Duration) { RetryWait = wait }(RetryWait)
 	RetryWait = time.Millisecond
-	shared := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("ok"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	t.Cleanup(shared.Close)
+	t.Cleanup(srv.Close)
 	get := func() (reused bool) {
 		ctx := httptrace.WithClientTrace(t.Context(), &httptrace.ClientTrace{
 			GotConn: func(info httptrace.GotConnInfo) { reused = info.Reused },
 		})
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, shared.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
 		require.NoError(t, err)
 		resp, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
-		_, err = io.Copy(io.Discard, resp.Body)
 		require.NoError(t, err)
 		require.NoError(t, resp.Body.Close())
 		return reused
 	}
 	get()
-	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	t.Cleanup(failing.Close)
 
-	_, err := getBeaconData(t.Context(), failing.URL, "blobs", 1)
+	_, err := getBeaconData(t.Context(), srv.URL, "blobs", 1)
 	require.Error(t, err)
 	require.True(t, get(), "a failed fetch closed the idle connections of http.DefaultTransport")
 }
