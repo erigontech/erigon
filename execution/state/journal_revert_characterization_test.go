@@ -282,7 +282,7 @@ var journalKindRevertCoverage = map[entryKind]string{
 
 func TestJournalRevertCoverageComplete(t *testing.T) {
 	t.Parallel()
-	for k := entryKind(0); k < kindEnd; k++ {
+	for k := range kindEnd {
 		if _, ok := journalKindRevertCoverage[k]; !ok {
 			t.Fatalf("journal kind %d has no revert-coverage entry: add a characterization test or document why it needs none", k)
 		}
