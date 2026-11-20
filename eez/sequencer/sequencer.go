@@ -127,6 +127,17 @@ type Witnesses interface {
 	Record(ctx context.Context, pin interface{ Close() }, h *types.Header) error
 }
 
+// Announcements signs each produced block.
+type Announcements interface {
+	// Announce signs and keeps the announcement of block h alone, a block
+	// about to become the head.
+	Announce(ctx context.Context, h *types.Header) error
+	// Record signs and keeps the announcement of block h, the head, and those
+	// of the unsettled blocks below it that lack one, as far back as it keeps
+	// announcements, a bounded number per call.
+	Record(ctx context.Context, h *types.Header) error
+}
+
 // Config tunes a Sequencer.
 type Config struct {
 	Timing Timing
@@ -143,6 +154,8 @@ type Config struct {
 	DABudget int
 	// Witnesses, when set, captures each produced block's witness.
 	Witnesses Witnesses
+	// Announcements, when set, signs each produced block.
+	Announcements Announcements
 	// Composer, when set, composes the Sync blocks.
 	Composer SyncSlotComposer
 }
@@ -463,6 +476,12 @@ func (s *Sequencer) build(ctx context.Context, kind Kind, parent *types.Header, 
 
 // insert commits block, a composer's block of kind, on the head.
 func (s *Sequencer) insert(ctx context.Context, kind Kind, block *types.Block) (*types.Header, error) {
+	if a := s.cfg.Announcements; a != nil {
+		// Its hash is known: followers find the announcement with the head. A
+		// failure is retried once the block is the head, and the blocks below
+		// wait for that too: derivation may be replacing them now.
+		_ = a.Announce(ctx, block.Header())
+	}
 	return s.commit(ctx, kind, block.NumberU64(), func(ctx context.Context, hook follower.CommitHook) (*types.Block, error) {
 		return block, s.committer.Insert(ctx, []*types.Block{block}, hook)
 	})
@@ -482,6 +501,13 @@ func (s *Sequencer) commit(ctx context.Context, kind Kind, number uint64, put fu
 	}()
 	// Before derivation resumes: a block it replaces has no witness to build.
 	record := func(h *types.Header) {
+		// Before the witness: followers read the head as soon as it moves.
+		if a := s.cfg.Announcements; a != nil {
+			if err := a.Record(wctx, h); err != nil {
+				loadMetrics().announceFailed.Inc()
+				s.logger.Error("[eez] produced block without an announcement", "event", "eez.sequencer.announcement.failed", "number", number, "err", err)
+			}
+		}
 		switch {
 		case pinErr != nil:
 			s.witnessFailed(number, pinErr)

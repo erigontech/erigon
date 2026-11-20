@@ -20,8 +20,11 @@ package testfixtures
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"runtime"
 )
@@ -41,6 +44,25 @@ func Dir() string {
 // Path returns the absolute path of a file under eez/testdata.
 func Path(elem ...string) string {
 	return filepath.Join(append([]string{Dir()}, elem...)...)
+}
+
+// ReadGzip returns the decompressed content of a gzip file under eez/testdata.
+func ReadGzip(elem ...string) ([]byte, error) {
+	path := Path(elem...)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	z, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+	data, err := io.ReadAll(z)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+	return data, nil
 }
 
 // decodeStrict unmarshals data into v and rejects unknown fields and trailing

@@ -128,12 +128,30 @@ func TestWireRejects(t *testing.T) {
 		{"truncated snappy", snappy.Encode(nil, noBlock)[:20], seqsig.ErrMalformed},
 		// A length header alone: rejected before the payload is allocated.
 		{"declared size above the cap", binary.AppendUvarint(nil, seqsig.MaxMessageSize+1), seqsig.ErrTooLarge},
+		{"padded preamble", padded(snappy.Encode(nil, noBlock)), seqsig.ErrMalformed},
+		{"preamble of five bytes", []byte{0x80, 0x80, 0x80, 0x80, 0x00}, seqsig.ErrMalformed},
 		{"decompressed size above the cap", snappy.Encode(nil, make([]byte, seqsig.MaxMessageSize+1)), seqsig.ErrTooLarge},
 	} {
-		_, err := seqsig.Decode(c.data)
-		require.ErrorIs(t, err, c.want, c.name)
+		t.Run(c.name, func(t *testing.T) {
+			_, err := seqsig.Decode(c.data)
+			require.ErrorIs(t, err, c.want)
+		})
 	}
 	require.NoError(t, func() error { _, err := seqsig.Decode(snappy.Encode(nil, noBlock)); return err }())
+
+	// A one-byte preamble of zero is minimal.
+	empty, err := seqsig.Decompress(snappy.Encode(nil, nil))
+	require.NoError(t, err)
+	require.Empty(t, empty)
+}
+
+// padded returns the Snappy block data with its length preamble one byte
+// longer than its minimal form.
+func padded(data []byte) []byte {
+	n, k := binary.Uvarint(data)
+	pre := binary.AppendUvarint(nil, n)
+	pre[len(pre)-1] |= 0x80
+	return append(append(pre, 0x00), data[k:]...)
 }
 
 // incompressible returns n bytes Snappy leaves at their length plus framing.
@@ -214,8 +232,9 @@ func literalsOfLen(t *testing.T, enc []byte, n int) []byte {
 	return out
 }
 
-// TestWireDecodeSnappyCap: Decode refuses a Snappy block over the cap, as
-// Encode does, also when it decodes to an envelope under the cap.
+// TestWireDecodeSnappyCap: Decode bounds the envelope, not its Snappy block,
+// so every encoding of an envelope under the cap decodes; the gossip frame
+// cap bounds the block.
 func TestWireDecodeSnappyCap(t *testing.T) {
 	e := seqsig.Envelope{Signature: make([]byte, 65), Block: make([]byte, seqsig.MaxMessageSize-200)}
 	data, err := seqsig.Encode(e)
@@ -223,9 +242,9 @@ func TestWireDecodeSnappyCap(t *testing.T) {
 	enc := uncompressed(t, data)
 	require.Less(t, len(enc), seqsig.MaxMessageSize)
 
-	got, err := seqsig.Decode(literalsOfLen(t, enc, seqsig.MaxMessageSize))
-	require.NoError(t, err)
-	require.Equal(t, e, got)
-	_, err = seqsig.Decode(literalsOfLen(t, enc, seqsig.MaxMessageSize+1))
-	require.ErrorIs(t, err, seqsig.ErrTooLarge)
+	for _, n := range []int{seqsig.MaxMessageSize, seqsig.MaxMessageSize + 1} {
+		got, err := seqsig.Decode(literalsOfLen(t, enc, n))
+		require.NoError(t, err, "%d bytes", n)
+		require.Equal(t, e, got)
+	}
 }

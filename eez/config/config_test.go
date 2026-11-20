@@ -151,6 +151,15 @@ func TestResolveRules(t *testing.T) {
 const eezDevL2 = `{"name":"eez","rollupId":1,"l1ChainId":10200,"eezRegistry":"0x96d6b9a4ad7ce2ea5ac80ce7f2ecef1e26c8fa33","registryDeployBlock":23413742,"blockInterval":1,"l1BlockTime":5,"blockGasLimit":30000000,
 "rollupX":{"blockIntervalSeconds":1,"syncIntervalBlocks":5,"l1Reference":{"chainId":10200,"number":23413703,"hash":"0x5ac534c090ac3b1383dd8a7647a9df20af2a358dec370e708e1c48bd7d6488ad","timestamp":1791397980,"prevRandao":"0x1af463d6327b8c6b5a5bb581238f0b136d2b93bce04a35b9672734f0383f44ee"}}}`
 
+// TestAnnounces: only the spec's production rules have App. D.6
+// announcements; no other rule set signs or checks one.
+func TestAnnounces(t *testing.T) {
+	require.True(t, Announces(SpecProduction))
+	for _, ruleSet := range []uint64{0, Rollup0, RollupX, RollupXV01} {
+		require.False(t, Announces(ruleSet), "rule set %d", ruleSet)
+	}
+}
+
 func TestRollupX(t *testing.T) {
 	c, err := FromJSON([]byte(eezDevL2))
 	require.NoError(t, err)

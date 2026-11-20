@@ -19,7 +19,6 @@ package overlay
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"net"
 	"strings"
@@ -95,7 +94,7 @@ func publishHeadsAt(ctx context.Context, o *Overlay, epoch uint64, every time.Du
 			if err != nil {
 				panic(err)
 			}
-			_ = o.Publish(ctx, seqsig.Envelope{Head: h, Signature: sig})
+			_ = o.Publish(ctx, seqsig.Envelope{Head: h, Signature: sig, Block: blockOf(h)})
 			select {
 			case <-ctx.Done():
 			case <-time.After(every):
@@ -275,8 +274,7 @@ func TestRogueFloodDoesNotStallPublisher(t *testing.T) {
 		case msg := <-relayed:
 			seen++
 			requireAnonymous(t, msg)
-			id := sha256.Sum256(msg.Data)
-			require.Equal(t, string(id[:]), msg.ID, "message id")
+			require.Equal(t, msgID(msg.Message), msg.ID, "message id")
 			e, err := seqsig.Decode(msg.Data)
 			require.NoError(t, err)
 			h, err := e.Verify(testDomain, addr(0))

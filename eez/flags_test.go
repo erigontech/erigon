@@ -409,6 +409,9 @@ func TestCheckChainRefusesOverlay(t *testing.T) {
 		require.ErrorIs(t, overlay.CheckChain(&cc), ErrConfig, "rule set %d", l2.RuleSet())
 		require.NoError(t, plain.CheckChain(&cc), "rule set %d", l2.RuleSet())
 	}
+	// No chain config selects it yet.
+	require.ErrorIs(t, overlay.checkRuleSet(config.SpecProduction), ErrConfig, "spec production")
+	require.NoError(t, plain.checkRuleSet(config.SpecProduction), "spec production")
 }
 
 // initGenesis runs InitGenesis on genesis under the flags args.

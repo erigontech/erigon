@@ -17,12 +17,16 @@
 package seqsig
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -44,13 +48,12 @@ type Envelope struct {
 	Head Head
 	// Signature is r ‖ s ‖ v over Head.SigningHash.
 	Signature []byte
-	// Block is the consensus RLP of the head block, empty for none: a head
-	// that rewinds to a block peers already have carries none.
+	// Block is the consensus RLP of the head block, which every envelope
+	// carries.
 	Block []byte
 }
 
-// VerifiedHead is a head signed by the authorized signer, with its block if
-// the envelope carried one.
+// VerifiedHead is a head signed by the authorized signer, with its block.
 type VerifiedHead struct {
 	Head   Head
 	Signer common.Address
@@ -70,23 +73,17 @@ func Sign(h Head, d Domain, key *ecdsa.PrivateKey) ([]byte, error) {
 
 // Recover returns the address that signed h in domain d.
 //
-// The parity byte may be 0 or 1, 27 or 28, or an EIP-155 value, and s may be
-// high: every encoding of one signature recovers the same signer.
+// Only v 27 or 28 with low s is taken. A relay may re-encode a signature,
+// and nodes relay the first copy of a head only: a copy one node takes and
+// another refuses would hold the head back from the stricter.
 func Recover(h Head, d Domain, sig []byte) (common.Address, error) {
 	if len(sig) != SignatureLength {
 		return common.Address{}, fmt.Errorf("%w: %d bytes, want %d", ErrBadSignature, len(sig), SignatureLength)
 	}
-	v := sig[64]
-	var parity byte
-	switch {
-	case v <= 1:
-		parity = v
-	case v == 27 || v == 28:
-		parity = v - 27
-	case v >= 35:
-		parity = (v - 35) & 1
-	default:
-		return common.Address{}, fmt.Errorf("%w: parity byte %d", ErrBadSignature, v)
+	// A v other than 27 or 28 leaves a parity other than 0 or 1, which fails.
+	parity := sig[64] - 27
+	if !crypto.TransactionSignatureIsValid(parity, new(uint256.Int).SetBytes(sig[:32]), new(uint256.Int).SetBytes(sig[32:64]), false) {
+		return common.Address{}, fmt.Errorf("%w: v %d, or r or s out of range", ErrBadSignature, sig[64])
 	}
 	var buf [SignatureLength]byte
 	copy(buf[:], sig)
@@ -99,9 +96,9 @@ func Recover(h Head, d Domain, sig []byte) (common.Address, error) {
 	return crypto.PubkeyToAddress(*pub), nil
 }
 
-// Verify checks that e names d's rollup, is signed by authorized, and, when
-// it carries a block, that the block is the head's: its hash, parent and
-// number, with a body that matches its header.
+// Verify checks that e names d's rollup, is signed by authorized, and
+// carries the head's block: its hash, parent and number, with a body that
+// matches its header.
 func (e Envelope) Verify(d Domain, authorized common.Address) (*VerifiedHead, error) {
 	if e.Head.RollupID != d.RollupID {
 		return nil, fmt.Errorf("%w: %d, want %d", ErrWrongRollup, e.Head.RollupID, d.RollupID)
@@ -115,7 +112,7 @@ func (e Envelope) Verify(d Domain, authorized common.Address) (*VerifiedHead, er
 	}
 	v := &VerifiedHead{Head: e.Head, Signer: signer}
 	if len(e.Block) == 0 {
-		return v, nil
+		return nil, fmt.Errorf("%w: no block", ErrBlockDecode)
 	}
 	b, err := DecodeBlock(e.Block)
 	if err != nil {
@@ -135,13 +132,43 @@ func (e Envelope) Verify(d Domain, authorized common.Address) (*VerifiedHead, er
 
 // DecodeBlock decodes a consensus-RLP block whose body matches its header, so
 // that its hash binds the whole block.
+//
+// Only the canonical encoding is taken: the transactions root commits to the
+// decoded transactions, not to their bytes, so another encoding has the same
+// hash and could hold the head back from a node that refuses it.
 func DecodeBlock(enc []byte) (*types.Block, error) {
 	var b types.Block
 	if err := rlp.DecodeBytes(enc, &b); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrBlockDecode, err)
 	}
+	if canonical, err := rlp.EncodeToBytes(&b); err != nil || !bytes.Equal(canonical, enc) {
+		return nil, fmt.Errorf("%w: not the canonical encoding", ErrBlockDecode)
+	}
+	// The decoder also takes a number or base fee above 64 bits, and an AuRa
+	// step and seal in place of the mix hash and nonce.
+	if h := b.HeaderNoCopy(); !h.Number.IsUint64() || h.BaseFee != nil && !h.BaseFee.IsUint64() || len(h.AuRaSeal) > 0 {
+		return nil, fmt.Errorf("%w: header outside the Ethereum shape", ErrBlockDecode)
+	}
+	for i, tx := range b.Transactions() {
+		if !blockTx(tx) {
+			return nil, fmt.Errorf("%w: transaction %d of type %#x", ErrBlockDecode, i, tx.Type())
+		}
+	}
 	if err := b.Body().MatchesHeader(b.HeaderNoCopy()); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrBodyMismatch, err)
 	}
 	return &b, nil
+}
+
+// blockTx reports whether tx is of a type a head's block may carry. The
+// registry also decodes the types of other rule sets.
+func blockTx(tx types.Transaction) bool {
+	switch tx.Type() {
+	case types.LegacyTxType, types.AccessListTxType, types.DynamicFeeTxType, types.BlobTxType, types.SetCodeTxType:
+		return true
+	case protocol.SystemTxType:
+		to := tx.GetTo()
+		return to != nil && *to == protocol.EEZL2Address
+	}
+	return false
 }

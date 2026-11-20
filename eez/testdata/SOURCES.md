@@ -17,6 +17,12 @@ License: `MIT OR Apache-2.0` (eez-rollup0).
 
 License: `MIT` (eez-rollupX).
 
+`unsafe_block_announcement_vectors.json.gz`, gzip-compressed with `gzip -9 -n`, holds known answers for the unsafe-block announcement of Rollup0 App. D.6 (`specs-draft` `2c6d346`), which publishes none: the domain tag App. D.6 states; for one key, the first development account of Hardhat and Anvil (`0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266`), on chain ids 6290, 1 and 2^64, the signed message, the `r || s || v` signature and the envelope; the first signature with the other `v`, which recovers another producer; and 26 envelopes for chain 6290 that each break one rule. `unsafe_block_announcement_vectors.go` beside it, a `//go:build ignore` program, produced them with `github.com/decred/dcrd/dcrec/secp256k1/v4` v4.4.1 (RFC 6979 signatures with low s, and recovery), `golang.org/x/crypto/sha3` v0.58.0 (Keccak-256) and RLP written out in it; Erigon signs with libsecp256k1 and hashes with `fastkeccak`. From the repository root, `go run ./eez/testdata/vectors/unsafe_block_announcement_vectors.go | gzip -9 -n > eez/testdata/vectors/unsafe_block_announcement_vectors.json.gz` regenerates the file; decompressed, its SHA-256 is `10936a67f0470da9f7b2adfe75e25cc3d2ff9439bf75486e03c2c647f7a1b5da`. Two pure-Python secp256k1 implementations with RFC 6979, one hashing with pycryptodome 3.23.0 and one with its own Keccak-f[1600], reproduced every valid vector and recovered the key from the high-s twin; they are not vendored.
+
+`signed_head_p2p_v0.json.gz` is Appendix A, the test vector, of `docs/sequencer-p2p-spec.md` (signed heads and their gossip, v0) in `eez-association/eez-rollup0` at `c61f1e0f79008090d8ee39693a66f8269753364e`, transcribed from its tables and annotated hex listings: the key, chain id, registry and claim it signs; the 612-byte block, its hash, the EIP-712 domain separator and signing hash; the RFC 6979 signature; the 763-byte envelope RLP; the topic and the message id. It is gzip-compressed with `gzip -9 -n`; decompressed, its SHA-256 is `fceacefb750962e8ae5b39ad6522ae3753243fda67d32091ec3b693af5ebce12`. Upstream pins the same values in the `spec_vector` test of `crates/eez-p2p/src/wire.rs`. The block hash, signing hash, signature and message id are checked against Erigon's own computation of them, so a transcription error fails the tests.
+
+License: `MIT OR Apache-2.0` (eez-rollup0).
+
 ## windows/
 
 Recorded L2 block windows with their execution witnesses, from `eez-association/eez-rollup0` at `a270a06a92131d1987d49903a4174eef04ce959c`, `crates/eez-prover-stateless/tests/fixtures/<name>/`. Each directory keeps the upstream `README.md` describing its recording. Blocks are consensus RLP (`debug_getRawBlock`), witnesses are reth `debug_executionWitness` results, `oracle.json` and `blocks.json` hold values read back from the chain or the reference signer.
@@ -81,6 +87,9 @@ License: `LGPL-3.0-only` (nethermind).
 | `vectors/native-profile-v1.json` | `e34194f2a2cba5151f27fb3964be1c6a22961a3ad7a11ff46d66668e9d966276` |
 | `vectors/public_inputs_hash_vectors.json` | `8a787a8e307089a5be0ec4a56d8bd0e1ef4d8862eb58bb6b5086347ff2745472` |
 | `vectors/rolling_hash_vectors.json` | `bc37e3a369c91dde689c586899a4f2cc49da50770032f24dfa5c313f5368b88d` |
+| `vectors/signed_head_p2p_v0.json.gz` | `c4060e5d5801e39d63e4780e95044b1922d1b05da27676f69404132426f67712` |
+| `vectors/unsafe_block_announcement_vectors.go` | `44ece4fa5a64e96efea79314d9517a0e5cdacf64ce00fce9c824c020cd759e27` |
+| `vectors/unsafe_block_announcement_vectors.json.gz` | `e0dfa34a21920562242bdea7788f959f2514ec514303a4fca5b73b2ad6a2f175` |
 | `windows/captured-devnet-anchor-402/block-397.rlp.hex` | `f7768c77f78a57ee124aceef59fac0a9e6c5a06203cf4c000ea94e6d63f2cb88` |
 | `windows/captured-devnet-anchor-402/block-398.rlp.hex` | `b8f2164643d5a87278f6e5e9d0ef11eb588123d9ec00ddc5c05f9d9113170d79` |
 | `windows/captured-devnet-anchor-402/block-399.rlp.hex` | `8b6eefefcffe93192d3cda9078d9cd64361a43503719e6e1d14f758406acb603` |

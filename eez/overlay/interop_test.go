@@ -19,18 +19,22 @@ package overlay
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/golang/snappy"
 	"github.com/holiman/uint256"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/eez/seqsig"
@@ -124,6 +128,52 @@ func TestSignedMessageNotDelivered(t *testing.T) {
 	require.False(t, ok, "A delivered a signed message")
 }
 
+// TestAuthorFieldsRefused: a message carrying from, seqno, signature or key,
+// present but empty included, is refused, and refused before its id is seen:
+// the clean copy, which has the same id, is delivered after it.
+func TestAuthorFieldsRefused(t *testing.T) {
+	t.Parallel()
+	a := newTestNode(t, 1)
+	oa := a.start()
+	// A host without gossipsub, writing RPCs by hand.
+	h, err := newHost(key(6), ma.StringCast("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = h.Close() })
+	require.NoError(t, h.Connect(t.Context(), a.info()))
+	s, err := h.NewStream(t.Context(), a.info().ID, pubsub.GossipSubID_v11)
+	require.NoError(t, err)
+	defer s.Close()
+	topic := Topic(testDomain.ChainID, testDomain.RollupID)
+	send := func(m *pubsubpb.Message) {
+		b, err := proto.Marshal(&pubsubpb.RPC{Publish: []*pubsubpb.Message{m}})
+		require.NoError(t, err)
+		_, err = s.Write(append(binary.AppendUvarint(nil, uint64(len(b))), b...))
+		require.NoError(t, err)
+	}
+
+	empty := []byte{}
+	for i, set := range []func(*pubsubpb.Message){
+		func(m *pubsubpb.Message) { m.From = empty },
+		func(m *pubsubpb.Message) { m.Seqno = empty },
+		func(m *pubsubpb.Message) { m.Signature = empty },
+		func(m *pubsubpb.Message) { m.Key = empty },
+		func(m *pubsubpb.Message) { m.Key = []byte{1} },
+	} {
+		h := head(nowMs(), uint64(i+1), 0x60)
+		data := mustEncode(0, h)
+		carried := &pubsubpb.Message{Topic: &topic, Data: data}
+		set(carried)
+		send(carried)
+		_, ok := awaitHead(oa.Heads(), h.BlockHash, time.Second)
+		require.False(t, ok, "case %d: delivered a message carrying an author field", i)
+		send(&pubsubpb.Message{Topic: &topic, Data: data})
+		_, ok = awaitHead(oa.Heads(), h.BlockHash, 5*time.Second)
+		require.True(t, ok, "case %d: the clean copy was held back", i)
+		_, ok = awaitHead(oa.Heads(), h.BlockHash, time.Second)
+		require.False(t, ok, "case %d: delivered twice", i)
+	}
+}
+
 // largeBlock returns a block whose single transaction carries size random,
 // incompressible bytes.
 func largeBlock(t *testing.T, size int) *types.Block {
@@ -165,6 +215,47 @@ func TestLargeHeadRelays(t *testing.T) {
 	got, ok := awaitHead(oc.Heads(), blk.Hash(), deadline)
 	require.True(t, ok, "C did not receive the large head")
 	require.NotNil(t, got.Block)
+	require.Equal(t, blk.Hash(), got.Block.Hash())
+}
+
+// snappyOfLen returns raw as a Snappy block of exactly n bytes: its first
+// bytes as one-byte literals, the rest as one literal with a 4-byte tag.
+func snappyOfLen(t *testing.T, raw []byte, n int) []byte {
+	t.Helper()
+	out := binary.AppendUvarint(nil, uint64(len(raw)))
+	k := n - len(out) - len(raw) - 4
+	rest := len(raw) - k
+	require.True(t, k >= 0 && rest > 1<<16 && rest <= 1<<24, "%d one-byte literals, %d in one", k, rest)
+	for _, b := range raw[:k] {
+		out = append(out, 0, b)
+	}
+	out = append(out, 62<<2, byte(rest-1), byte((rest-1)>>8), byte((rest-1)>>16))
+	return append(out, raw[k:]...)
+}
+
+// TestSnappyBlockAboveCapRelays: a head whose envelope is under the cap is
+// delivered when its Snappy block is over it; the frame cap bounds the block.
+func TestSnappyBlockAboveCapRelays(t *testing.T) {
+	t.Parallel()
+	a := newTestNode(t, 1)
+	oa := a.start()
+	r := newRawNode(t, 5, nil, a)
+	require.Eventually(t, func() bool { return len(r.topic.ListPeers()) == 1 }, deadline, 50*time.Millisecond)
+
+	blk := largeBlock(t, 6<<20)
+	enc, err := rlp.EncodeToBytes(blk)
+	require.NoError(t, err)
+	h := seqsig.Head{
+		RollupID: testDomain.RollupID, Number: blk.NumberU64(), BlockHash: blk.Hash(),
+		ParentHash: blk.ParentHash(), EpochMs: nowMs(), Counter: 1,
+	}
+	raw, err := snappy.Decode(nil, encode(t, signed(t, 0, h, enc)))
+	require.NoError(t, err)
+	data := snappyOfLen(t, raw, seqsig.MaxMessageSize+1024)
+	require.Less(t, len(data), MaxMessageSize, "within the frame cap")
+	require.NoError(t, r.topic.Publish(t.Context(), data))
+	got, ok := awaitHead(oa.Heads(), blk.Hash(), deadline)
+	require.True(t, ok, "A did not deliver the head")
 	require.Equal(t, blk.Hash(), got.Block.Hash())
 }
 

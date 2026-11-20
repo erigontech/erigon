@@ -3554,7 +3554,7 @@ An L1-only boot on a rollup0 network checks the same root: it stops with "L1 his
 
 ### Signed heads
 
-The sequencer signs every change of its head: an EIP-712 `SignedHead` of the rollup id, the block's number, hash and parent hash, the start time of the signing process in milliseconds (its epoch) and a counter, in the domain `EEZ Sequencer`, version `0`, of the L2 chain id and the registry. It gossips each head, with its block, on a libp2p gossipsub overlay. With `--eez.p2p.listen` and `--eez.sequencer.address` the follower joins the overlay and takes as its head the highest-version head, latest epoch first, then highest counter, among those that descend from the safe block:
+The sequencer signs every change of its head: an EIP-712 `SignedHead` of the rollup id, the block's number, hash and parent hash, the start time of the signing process in milliseconds (its epoch) and a counter, in the domain `EEZ Sequencer`, version `0`, of the L2 chain id and the registry. It gossips each head, with its block, on a libp2p gossipsub overlay. Nodes take one encoding of each head, so that every node reaches the same verdict on a relayed copy: the signature with `v` 27 or 28 and low `s`, the block in its canonical encoding, the Snappy length in its minimal form. With `--eez.p2p.listen` and `--eez.sequencer.address` the follower joins the overlay and takes as its head the highest-version head, latest epoch first, then highest counter, among those that descend from the safe block:
 
 ```bash
 ./build/bin/erigon --eez.enabled --chain=eez-devnet --datadir=/data/eez-b \
@@ -3576,7 +3576,7 @@ The node refuses to start with:
 
 - `--eez.p2p.listen` without `--eez.sequencer.address` or the reverse, and `--eez.p2p.peers` without `--eez.p2p.listen`;
 - `--eez.p2p.listen` and `--eez.sequencer.rpc` together: both set the head;
-- the overlay flags on rollupX networks, whose sequencer signs no heads;
+- the overlay flags on rollupX networks and under the spec's production rules, whose sequencer signs no heads;
 - `--eez.sync.l1only=false` on rollupX networks;
 - peers mode beside an L1 without `--eez.bootnodes`, `--eez.staticpeers` or `--eez.trustedpeers`;
 - discovery on a rollup0 network without `--bootnodes` or `--discovery.dns`;
@@ -3619,6 +3619,8 @@ With `--eez.sequencer` the node also produces the chain ahead of settlement, fro
 Every produced block's execution witness is kept in `<datadir>/eez/witnesses` until L1 finality covers the block. It has the shape of `debug_executionWitness`, plus the trie nodes that removing each accessed account or slot collapses onto, so that a prover can compute state roots inside the block, not only at its end. A block left without one logs `[eez] produced block without a witness` at error level.
 
 With `--eez.sequencer.keyfile` the sequencer signs every change of its head: the blocks it produces or takes from a composer, a rollback, and the heads derivation moves it to when L1 settles other blocks or reorgs. Each head is an EIP-712 `SignedHead` with its block attached, versioned by the time in milliseconds at which the process starts signing, once boot has caught up with L1, and a counter that starts at 1, so a restarted sequencer outranks its earlier self. A head replaced before its block can be read is not signed. The key file holds 64 hex characters and must not be accessible to other users. Without it the node logs a warning and signs nothing.
+
+Rollup0 App. D.6 unsafe-block announcements, `rlp([0, chainId, blockHash, signature])`, belong to the spec's production rules, which none of these networks runs. Under them the key signs the announcement of every produced block instead of its heads, so that it never signs two schemes, and keeps it in `<datadir>/eez/announcements` until L1 finality passes the block or the chain grows 524,288 (2^19) blocks past it. An unsettled block left unsigned, by a failure or a previous run, is signed with the blocks that follow, at most 512 per block. A follower with `--eez.sequencer.rpc` then takes only the blocks the sequencer serves a valid announcement for, waiting for a missing one and refusing a malformed one or one that names another chain or block. It keeps those announcements likewise and serves them, and reads again, at most 256 blocks per poll, until L1 settles the block, one it could not keep. On rollup0 and rollupX networks no announcement is signed or checked, and `eez_getUnsafeBlockAnnouncement` returns `null`.
 
 The sequencer keeps the txpool, without gossip, and serves its blocks to its [L2 peers](https://docs.erigon.tech/fundamentals/eez-follower#l2-peers). With `--eez.p2p.listen` it publishes every head it signs on the overlay. Followers with its key's address in `--eez.sequencer.address` and its overlay address in `--eez.p2p.peers` follow those heads, and fetch the blocks they lack from it over devp2p. A sequencer's overlay requires `--eez.sequencer.keyfile`, and `--eez.sequencer.address`, when set, must be the key's address. The overlay relays the heads another process signs with the same key, under its own epoch, but they never move the sequencer's head. Publishing never holds up production: a head the overlay has not taken when the next one is signed is dropped and counted. Erigon followers can also take the produced blocks with `--eez.sequencer.rpc`. The first producer of a new chain has no peers to take history from and runs with `--eez.sync.l1only`. The sequencer runs on a node of its own, not beside its L1, does not follow `--eez.sequencer.rpc`, and produces rollup0 networks only.
 
@@ -3672,6 +3674,7 @@ The `eez` namespace, enabled with `--http.api=...,eez`:
 - `eez_settlement(blockNumber)`: the L1 settlement that settled an EEZ block, or `null` while none has, or when it predates the follower's start or the latest finalized settlement.
 - `eez_decodeBatch(input)`: a `postAndVerifyBatch` input decoded, with the DA payload it carries.
 - `eez_executionWitnessByNumber(blockNumber)`: on a sequencer whose `--http.api` includes `debug`, the witness kept for a produced canonical block, or `null` when there is none.
+- `eez_getUnsafeBlockAnnouncement(blockNumber)`: under the spec's production rules, the RLP-encoded App. D.6 announcement of a canonical block that a sequencer with `--eez.sequencer.keyfile` produced or a follower with `--eez.sequencer.rpc` took; otherwise `null`.
 - `eez_sequencerStatus()`: on a sequencer, the Live, Future and Sync blocks produced since start, the latest produced block, the Sync block of the latest slot and the consecutive Sync blocks skipped off the grid.
 
 EEZ system transactions (type `0x76`) render with the gas limit of their rule set, a zero gas price and zero signature values, from the system address. The gas limit is `2000000` on rollup0 networks. On rollupX v0.0.1 networks it is the cap of `16777216`: a rollupX system transaction runs with the gas its block has left, up to that cap.
@@ -3694,7 +3697,7 @@ Of boot and [L2 peers](https://docs.erigon.tech/fundamentals/eez-follower#l2-pee
 - `eez_p2p_message_received_total`, and of those `eez_p2p_message_accepted_total`, `eez_p2p_message_ignored_total` and `eez_p2p_message_rejected_total`: overlay messages from peers, by the verdict of the relay rule.
 - `eez_p2p_inbound_dropped_total`: accepted heads dropped because the follower had not taken the previous 64.
 
-Of a sequencer: `eez_sequencer_blocks_total{kind}`, `eez_sequencer_head`, `eez_sequencer_off_grid_skips_total`, `eez_sequencer_trigger_failures_total`, `eez_sequencer_witness_failures_total`, `eez_sequencer_heads_signed_total`, `eez_sequencer_heads_skipped_total` and `eez_sequencer_heads_dropped_total`.
+Of a sequencer: `eez_sequencer_blocks_total{kind}`, `eez_sequencer_head`, `eez_sequencer_off_grid_skips_total`, `eez_sequencer_trigger_failures_total`, `eez_sequencer_witness_failures_total`, `eez_sequencer_heads_signed_total`, `eez_sequencer_heads_skipped_total`, `eez_sequencer_heads_dropped_total` and `eez_sequencer_announcement_failures_total`.
 
 Every 30 seconds the follower logs `[eez] following` with the last L1 block it scanned (`l1Scanned`), the L1 head it scans to (`l1Head`), the finalized L1 block, the safe and finalized EEZ blocks, the batches derived since the previous line and the blocks they carry. Each derived batch also logs `[eez] batch derived` with its L1 block, transaction and block range. A sequencer logs `[eez] Sync slot` with the blocks each trigger produces, and `[eez] produced block` with each block's kind, number and transaction count. A Sync block that would land off the grid is skipped with a warning (`eez.sequencer.sync_slot.off_grid_skipped`), and three in a row log `eez.sequencer.sync_slot.off_grid_stalled` at error level.
 

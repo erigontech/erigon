@@ -103,10 +103,17 @@ const (
 	// networks run since 2026-10-28: types 0x45 and 0x46, base fee to a
 	// fee collector, L1 history updates.
 	RollupXV01 uint64 = 3
+	// SpecProduction is the rule set of the Rollup0 spec's production rules,
+	// which no chain config selects yet.
+	SpecProduction uint64 = 4
 )
 
 // IsRollupX reports whether ruleSet is a rule set of eez-rollupX.
 func IsRollupX(ruleSet uint64) bool { return ruleSet == RollupX || ruleSet == RollupXV01 }
+
+// Announces reports whether producers under ruleSet sign App. D.6
+// unsafe-block announcements and followers check them.
+func Announces(ruleSet uint64) bool { return ruleSet == SpecProduction }
 
 // RollupX constants.
 const (

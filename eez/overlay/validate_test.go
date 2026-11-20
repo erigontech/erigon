@@ -21,6 +21,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
+	"sync"
 	"testing"
 
 	"github.com/golang/snappy"
@@ -31,6 +33,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/eez/internal/testfixtures"
 	"github.com/erigontech/erigon/eez/seqsig"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -55,17 +59,42 @@ func key(i byte) *ecdsa.PrivateKey {
 
 func addr(i byte) common.Address { return crypto.PubkeyToAddress(key(i).PublicKey) }
 
-func head(epochMs, counter uint64, hash byte) seqsig.Head {
+// blocks holds the encoding of every block head built, by hash.
+var blocks sync.Map
+
+// head returns the head of block number counter, told apart from its siblings
+// by mark, as counter of signing process epochMs.
+func head(epochMs, counter uint64, mark byte) seqsig.Head {
+	b := types.NewBlock(&types.Header{Number: *uint256.NewInt(counter), ParentHash: common.Hash{0x11}, Extra: []byte{mark}}, nil, nil, nil, nil, nil)
+	enc, err := rlp.EncodeToBytes(b)
+	if err != nil {
+		panic(err)
+	}
+	blocks.Store(b.Hash(), enc)
 	return seqsig.Head{
-		RollupID: testDomain.RollupID, Number: counter, BlockHash: common.Hash{hash},
+		RollupID: testDomain.RollupID, Number: counter, BlockHash: b.Hash(),
 		ParentHash: common.Hash{0x11}, EpochMs: epochMs, Counter: counter,
 	}
 }
 
+// blockOf returns the encoding of the block of a head that head built.
+func blockOf(h seqsig.Head) []byte {
+	enc, ok := blocks.Load(h.BlockHash)
+	if !ok {
+		panic("no block for the head")
+	}
+	return enc.([]byte)
+}
+
+// signed returns h signed by key signer, carrying block, or h's own block
+// when nil.
 func signed(t *testing.T, signer byte, h seqsig.Head, block []byte) seqsig.Envelope {
 	t.Helper()
 	sig, err := seqsig.Sign(h, testDomain, key(signer))
 	require.NoError(t, err)
+	if block == nil {
+		block = blockOf(h)
+	}
 	return seqsig.Envelope{Head: h, Signature: sig, Block: block}
 }
 
@@ -82,7 +111,7 @@ func mustEncode(signer byte, h seqsig.Head) []byte {
 	if err != nil {
 		panic(err)
 	}
-	data, err := seqsig.Encode(seqsig.Envelope{Head: h, Signature: sig})
+	data, err := seqsig.Encode(seqsig.Envelope{Head: h, Signature: sig, Block: blockOf(h)})
 	if err != nil {
 		panic(err)
 	}
@@ -120,6 +149,8 @@ func TestRelayRule(t *testing.T) {
 	trailing, err := snappy.Decode(nil, first)
 	require.NoError(t, err)
 	oversize := binary.AppendUvarint(nil, seqsig.MaxMessageSize+1)
+	bare := signed(t, 0, head(100, 2, 2), nil)
+	bare.Block = nil
 
 	steps := []struct {
 		name string
@@ -129,6 +160,7 @@ func TestRelayRule(t *testing.T) {
 		{"undecodable", []byte("junk"), pubsub.ValidationReject},
 		{"above the size cap", oversize, pubsub.ValidationReject},
 		{"trailing bytes", snappy.Encode(nil, append(trailing, 0x80)), pubsub.ValidationReject},
+		{"padded preamble", padded(first), pubsub.ValidationReject},
 		{"first head", first, pubsub.ValidationAccept},
 		{"same message", first, pubsub.ValidationIgnore},
 		{"re-encoded copy", reencode(first, 1), pubsub.ValidationIgnore},
@@ -138,6 +170,7 @@ func TestRelayRule(t *testing.T) {
 		{"other rollup", encode(t, signed(t, 0, otherRollup, nil)), pubsub.ValidationReject},
 		{"tampered head", encode(t, tampered), pubsub.ValidationReject},
 		{"block not the head's", encode(t, signed(t, 0, head(100, 2, 1), blockEnc)), pubsub.ValidationReject},
+		{"no block", encode(t, bare), pubsub.ValidationReject},
 		{"equivocation", encode(t, signed(t, 0, head(100, 1, 2), nil)), pubsub.ValidationReject},
 		{"next head", encode(t, signed(t, 0, head(100, 2, 2), nil)), pubsub.ValidationAccept},
 		{"restarted signer", encode(t, signed(t, 0, head(200, 1, 3), nil)), pubsub.ValidationAccept},
@@ -159,8 +192,49 @@ func TestRelayRule(t *testing.T) {
 	require.Equal(t, pubsub.ValidationIgnore, got, "evicted source")
 }
 
+// padded returns the Snappy block data with its length preamble one byte
+// longer than its minimal form.
+func padded(data []byte) []byte {
+	n, k := binary.Uvarint(data)
+	pre := binary.AppendUvarint(nil, n)
+	pre[len(pre)-1] |= 0x80
+	return append(append(pre, 0x00), data[k:]...)
+}
+
+// TestMessageID: the id of a message is that of its decompressed envelope on
+// its topic, so every Snappy encoding of a head has one id, and the signed-head
+// vector of eez/testdata/SOURCES.md has its known id. Data that is not a
+// Snappy block within the cap is hashed as is, under another domain.
 func TestMessageID(t *testing.T) {
-	data := encode(t, signed(t, 0, head(100, 1, 1), nil))
-	want := sha256.Sum256(data)
-	require.Equal(t, string(want[:]), msgID(&pubsubpb.Message{Data: data}))
+	raw, err := testfixtures.ReadGzip("vectors", "signed_head_p2p_v0.json.gz")
+	require.NoError(t, err)
+	var v struct {
+		Envelope  hexutil.Bytes `json:"envelope"`
+		Topic     string        `json:"topic"`
+		MessageID hexutil.Bytes `json:"messageId"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &v))
+	require.Equal(t, v.Topic, Topic(1337, 1))
+	data := snappy.Encode(nil, v.Envelope)
+	for _, enc := range [][]byte{data, reencode(data, 1), reencode(data, 60)} {
+		require.Equal(t, string(v.MessageID), msgID(&pubsubpb.Message{Topic: &v.Topic, Data: enc}))
+	}
+
+	invalid := func(data []byte) string {
+		h := sha256.New()
+		h.Write([]byte{0, 0, 0, 0})
+		h.Write(binary.LittleEndian.AppendUint64(nil, uint64(len(v.Topic))))
+		h.Write([]byte(v.Topic))
+		h.Write(data)
+		return string(h.Sum(nil)[:20])
+	}
+	for name, enc := range map[string][]byte{
+		"not snappy":                 []byte("junk"),
+		"padded preamble":            padded(data),
+		"truncated":                  data[:len(data)-1],
+		"declared above the cap":     binary.AppendUvarint(nil, seqsig.MaxMessageSize+1),
+		"decompressed above the cap": snappy.Encode(nil, make([]byte, seqsig.MaxMessageSize+1)),
+	} {
+		require.Equal(t, invalid(enc), msgID(&pubsubpb.Message{Topic: &v.Topic, Data: enc}), name)
+	}
 }

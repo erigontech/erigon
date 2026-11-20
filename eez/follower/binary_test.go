@@ -61,6 +61,7 @@ import (
 	"github.com/erigontech/erigon/eez/overlay"
 	"github.com/erigontech/erigon/eez/seqsig"
 	seqpkg "github.com/erigontech/erigon/eez/sequencer"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/enode"
 )
@@ -634,9 +635,11 @@ func TestAllInOneBinary(t *testing.T) {
 	go func() {
 		epoch := uint64(time.Now().UnixMilli())
 		for counter := uint64(1); ctx.Err() == nil; counter++ {
-			h := seqsig.Head{RollupID: 1, Number: counter, BlockHash: common.Hash{byte(counter)}, ParentHash: common.Hash{0xff}, EpochMs: epoch, Counter: counter}
-			if sig, err := seqsig.Sign(h, domain, sequencer); err == nil {
-				_ = publisher.Publish(ctx, seqsig.Envelope{Head: h, Signature: sig})
+			b := types.NewBlock(&types.Header{Number: *uint256.NewInt(counter), ParentHash: common.Hash{0xff}}, nil, nil, nil, nil, nil)
+			enc, encErr := rlp.EncodeToBytes(b)
+			h := seqsig.Head{RollupID: 1, Number: counter, BlockHash: b.Hash(), ParentHash: common.Hash{0xff}, EpochMs: epoch, Counter: counter}
+			if sig, err := seqsig.Sign(h, domain, sequencer); err == nil && encErr == nil {
+				_ = publisher.Publish(ctx, seqsig.Envelope{Head: h, Signature: sig, Block: enc})
 			}
 			select {
 			case <-ctx.Done():
@@ -752,7 +755,8 @@ func enodeURL(key *ecdsa.PrivateKey, port string) string {
 // a couple of L2 blocks, while its safe block stays L1's. The sequencer, first
 // producer of the chain, derives from L1 alone, its overlay needs its key, it
 // reports itself as the source of its head and its overlay peers, and it
-// refuses debug_setHead.
+// refuses debug_setHead. On a rollup0 network its key signs no App. D.6
+// announcement.
 func TestSequencerBinary(t *testing.T) {
 	bin := os.Getenv("EEZ_ERIGON")
 	if bin == "" {
@@ -976,6 +980,9 @@ func TestSequencerBinary(t *testing.T) {
 	require.Positive(t, uint64(*followerStatus.OverlayPeers), "the follower of signed heads")
 	var ignored any
 	require.ErrorContains(t, call(t.Context(), s.url, "debug_setHead", &ignored, hexutil.Uint64(0)), "only driver")
+	var env *hexutil.Bytes
+	require.NoError(t, call(t.Context(), s.url, "eez_getUnsafeBlockAnnouncement", &env, receipt.BlockNumber))
+	require.Nil(t, env, "an App. D.6 announcement on a rollup0 network")
 
 	require.NoError(t, s.cmd.Process.Signal(os.Interrupt))
 	select {
