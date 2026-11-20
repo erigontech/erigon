@@ -62,6 +62,9 @@ func foldCommitmentTail(ctx context.Context, at *AggregatorRoTx, f VisibleFile, 
 		return nil, nil
 	}
 	differs := fmt.Errorf("commitment state txNum %d differs from file end txNum %d", stateTxNum, end-1)
+	if stateTxNum >= end {
+		return nil, differs
+	}
 	if len(dt.ht.files) > 0 {
 		return nil, fmt.Errorf("%w; the tail after it is not folded while commitment history is present", differs)
 	}
