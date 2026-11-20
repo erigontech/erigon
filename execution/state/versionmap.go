@@ -487,13 +487,12 @@ func (vm *VersionMap) balAddr(i int, ac *types.AccountChanges) accounts.Address 
 	return accounts.InternAddress(ac.Address)
 }
 
-// balChunkAccounts is the smallest share of a BAL that pays for its own goroutine: two 128-account chunks
-// seed 16-27% faster than one goroutine, a 128-account BAL does not gain from a split.
+// balChunkAccounts is the smallest share of a BAL that pays for its own goroutine.
 const balChunkAccounts = 128
 
 func balChunkWorkers(n int) int {
 	if n < 2*balChunkAccounts {
-		return 1 // no GOMAXPROCS read: it takes the scheduler lock, and every IntraBlockState builds an empty map
+		return 1 // no GOMAXPROCS read: it takes the scheduler lock, and empty maps are built often
 	}
 	return min(runtime.GOMAXPROCS(-1), n/balChunkAccounts)
 }

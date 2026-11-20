@@ -46,7 +46,7 @@ func TestNewVersionMapParallelSeedMatchesSerial(t *testing.T) {
 
 	for i := range bal {
 		addr := accounts.InternAddress(bal[i].Address)
-		for tx := 0; tx < 9; tx++ {
+		for tx := range 9 {
 			pb, pr, pok := parallel.ReadBalance(addr, tx)
 			sb, sr, sok := serial.ReadBalance(addr, tx)
 			require.Equal(t, sb, pb)
