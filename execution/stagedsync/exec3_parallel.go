@@ -970,6 +970,21 @@ func (pe *parallelExecutor) prevBlockBase(raw state.StateReader, blockNum uint64
 	return state.PrevBlockBase(raw, pe.prevBlocks, blockNum)
 }
 
+func (pe *parallelExecutor) checkInclusionList(ctx context.Context, applyTx kv.TemporalTx, be *blockExecutor, tt *exec.TxTask, reader state.StateReader, txIndex int) error {
+	ilReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, be.versionMap, reader)
+	// The task's GetHash reads through the block producer's tx, which this
+	// goroutine must not use.
+	blockContext := tt.EvmBlockContext
+	var headerTx kv.Tx = applyTx
+	if overlay := pe.doms.BlockOverlay(); overlay != nil {
+		headerTx = overlay.NewReadView(applyTx)
+	}
+	blockContext.GetHash = protocol.GetHashFn(tt.Header, func(hash common.Hash, number uint64) (*types.Header, error) {
+		return pe.cfg.blockReader.Header(ctx, headerTx, hash, number)
+	})
+	return pe.cfg.readAheader.CheckInclusionList(be.gasPool, be.blockHash, tt.Txs, ilReader, &blockContext, pe.cfg.chainConfig, pe.cfg.vmConfig)
+}
+
 func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "exec-loop")))
 	// The exec loop owns shutdown sequencing: on exit it closes commitResults then
@@ -3552,8 +3567,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
 				if pe.cfg.readAheader != nil && be.tasks[0].Version().TxIndex <= 0 {
-					ilReader := state.NewVersionedStateReader(finalVersion.TxIndex, state.ReadSet{}, be.versionMap, reader)
-					if err := pe.cfg.readAheader.CheckInclusionList(be.gasPool, be.blockHash, tt.Txs, ilReader, &tt.EvmBlockContext, pe.cfg.chainConfig, pe.cfg.vmConfig); err != nil {
+					if err := pe.checkInclusionList(ctx, applyTx, be, tt, reader, finalVersion.TxIndex); err != nil {
 						return be.operationalBlockResult(fmt.Errorf("can't check inclusion list for block %d: %w", be.blockNum, err)), nil
 					}
 				}
