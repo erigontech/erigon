@@ -262,6 +262,23 @@ func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockSta
 	return ibs
 }
 
+// NewVersionedBlock returns a state that reads through the version-map view, for
+// re-executing a block's txs in order (a later tx may re-create an account an
+// earlier one destroyed, so conflict detection stays on).
+func NewVersionedBlock(stateReader StateReader) *IntraBlockState {
+	ibs := NewWithVersionMap(stateReader, NewVersionMap(nil))
+	ibs.SetTxContext(0, 0)
+	return ibs
+}
+
+// NewVersionedCall is NewVersionedBlock for a single call, with cross-tx conflict
+// detection off.
+func NewVersionedCall(stateReader StateReader) *IntraBlockState {
+	ibs := NewVersionedBlock(stateReader)
+	ibs.SetNoConflictDetection()
+	return ibs
+}
+
 // NewForSequentialCommitment builds a versioned IBS that keeps the stateObject cache on; only genesis needs both.
 func NewForSequentialCommitment(stateReader StateReader) *IntraBlockState {
 	ibs := New(stateReader)
