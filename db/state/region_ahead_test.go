@@ -77,6 +77,15 @@ func TestRegionAheadAdvisesAContractOnceAfterEnoughFileHits(t *testing.T) {
 	require.False(t, dt.regionAhead(0, regionSlotKey(1, 0)))
 	dt.probe = nil
 	require.True(t, dt.regionAhead(0, regionSlotKey(1, 0)))
+
+	for file := 1; len(dt.regionHits) < regionAheadTracked; file++ {
+		dt.regionAhead(file, regionSlotKey(3, 0))
+	}
+	for range 2 * regionAheadHits {
+		require.False(t, dt.regionAhead(0, regionSlotKey(3, 0)))
+		require.False(t, dt.regionAhead(0, regionSlotKey(2, 0)))
+	}
+	require.Len(t, dt.regionHits, regionAheadTracked)
 }
 
 func TestRegionWordsSplitTheFileByContract(t *testing.T) {

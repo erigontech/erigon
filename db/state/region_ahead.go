@@ -24,6 +24,7 @@ import (
 const (
 	regionAheadHits     = 64
 	regionAheadMaxBytes = 64 << 20
+	regionAheadTracked  = 1024
 )
 
 type regionKey struct {
@@ -37,12 +38,14 @@ func (dt *DomainRoTx) regionAhead(i int, k []byte) bool {
 	}
 	if dt.regionHits == nil {
 		dt.regionHits = make(map[regionKey]uint32)
-	} else if len(dt.regionHits) > 1024 {
-		clear(dt.regionHits)
 	}
 	key := regionKey{addr: [length.Addr]byte(k[:length.Addr]), file: i}
-	dt.regionHits[key]++
-	if dt.regionHits[key] != regionAheadHits {
+	hits, tracked := dt.regionHits[key]
+	if !tracked && len(dt.regionHits) == regionAheadTracked {
+		return false
+	}
+	dt.regionHits[key] = hits + 1
+	if hits+1 != regionAheadHits {
 		return false
 	}
 	from, to, ok := dt.regionWords(i, key.addr[:])
