@@ -1853,15 +1853,15 @@ func (at *AggregatorRoTx) AssertFilesGap() error {
 	defer a.dirtyFilesLock.Unlock()
 	filesEnd := a.dirtyFilesEndTxNumMinimax()
 	v := a.visible.Load()
-	var visibleEnd uint64
-	for id, d := range a.d {
-		if d != nil && d.Enabled && !a.unalignedDomain[id] && v.d[id] != nil {
-			visibleEnd = max(visibleEnd, v.d[id].files.EndTxNum())
+	var visibleEnd uint64 // every visible list is cut at the same end, so the longest one shows it
+	for _, d := range v.d {
+		if d != nil {
+			visibleEnd = max(visibleEnd, d.files.EndTxNum())
 		}
 	}
-	for id, ii := range a.standaloneIIs() {
-		if ii != nil && ii.Enabled && !a.unalignedIdx[id] && v.iis[id] != nil {
-			visibleEnd = max(visibleEnd, v.iis[id].files.EndTxNum())
+	for _, ii := range v.iis {
+		if ii != nil {
+			visibleEnd = max(visibleEnd, ii.files.EndTxNum())
 		}
 	}
 	if visibleEnd < filesEnd {
