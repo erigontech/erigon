@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // StopReason says WHY a pre-execution round was stopped. It is the caller's reason, not execution's:
@@ -79,7 +80,7 @@ func stopReasonOf(ctx context.Context) StopReason {
 	if errors.As(context.Cause(ctx), &s) {
 		return s.Reason
 	}
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	if d, ok := ctx.Deadline(); errors.Is(ctx.Err(), context.DeadlineExceeded) || ok && !time.Now().Before(d) {
 		return StopSlotEnd
 	}
 	return StopShutdown

@@ -64,6 +64,8 @@ type taskPool struct {
 	cond   *sync.Cond
 	queue  taskHeap
 	closed bool
+
+	stop roundStop
 }
 
 // Test hooks; nil in production.
@@ -74,6 +76,9 @@ var (
 
 func newTaskPool(pe *parallelExecutor, base []*exec.WorkerContext) *taskPool {
 	p := &taskPool{pe: pe}
+	if pe.stoppableRound() {
+		p.stop = pe.roundStop
+	}
 	p.cond = sync.NewCond(&p.mu)
 	context.AfterFunc(pe.workersCtx, func() {
 		p.mu.Lock()
@@ -220,6 +225,9 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 
 func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	be, tv := pt.be, pt.tv
+	if tv.index > be.frontier()+1 && p.stop.due() {
+		return pt.waitThen(tv.index-1, psRun)
+	}
 	finalExec := be.frontier() >= tv.index-1
 	if err := wk.ensureTx(p); err != nil {
 		pt.sendOperational(p, fmt.Errorf("block %d tx %d: open roTx: %w", be.blockNum, tv.index, err))

@@ -30,7 +30,7 @@ import (
 // Only an ACCUMULATION round may: its block-end does not run, so what it leaves is the same shape as
 // what any other round leaves — a prefix the next round extends. A round that has to finalize cannot
 // stop part way, because the block it would leave claims a body it did not execute.
-func (be *blockExecutor) stoppableRound(pe *parallelExecutor) bool {
+func (pe *parallelExecutor) stoppableRound() bool {
 	return pe.isForkValidation && pe.doms != nil && pe.doms.FlashblockAccumulating()
 }
 
@@ -45,21 +45,32 @@ func (be *blockExecutor) stopping(pe *parallelExecutor) bool {
 	if be.cut {
 		return true
 	}
-	if !be.stoppableRound(pe) {
+	if !pe.stoppableRound() {
 		return false
 	}
 	if be.gasFull {
 		return true
 	}
-	if pe.roundStop == nil {
+	return pe.roundStop.due()
+}
+
+type roundStop struct {
+	done <-chan struct{}
+	end  time.Time
+}
+
+// due reports that the round's stop has come, read from the clock as well as the channel because the
+// timer that closes the channel runs late while every worker is busy.
+func (s roundStop) due() bool {
+	if s.done == nil {
 		return false
 	}
 	select {
-	case <-pe.roundStop:
+	case <-s.done:
+		return true
 	default:
-		return false
+		return !s.end.IsZero() && !time.Now().Before(s.end)
 	}
-	return true
 }
 
 // cutIfStopped shortens a stopped round to the transactions that completed, and reports whether it did.

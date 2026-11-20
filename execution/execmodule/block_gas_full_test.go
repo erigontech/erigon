@@ -174,18 +174,30 @@ func TestBlockGasFull_IsDistinctFromTheSlotEnding(t *testing.T) {
 	const txGas = 10_000_000
 	rig, burn := newGasRig(t, 300_000_000)
 
-	round := make([][]byte, 0, 12)
-	for n := uint64(0); n < 12; n++ {
+	const warmups = 3
+	var perBurn time.Duration
+	for n := uint64(0); n < warmups; n++ {
+		start := time.Now()
+		_, _, _, err := rig.m.ExecModule.PreExecuteFlashblock(rig.ctx, rig.inputs, [][]byte{burn(n, txGas)})
+		require.NoError(t, err)
+		if took := time.Since(start); perBurn == 0 || took < perBurn {
+			perBurn = took
+		}
+	}
+
+	round := make([][]byte, 0, 24)
+	for n := uint64(warmups); n < warmups+24; n++ {
 		round = append(round, burn(n, txGas))
 	}
 	// A budget that expires part way through, on a block with ample gas.
-	deadlined, cancel := context.WithTimeout(rig.ctx, 120*time.Millisecond)
+	deadlined, cancel := context.WithTimeout(rig.ctx, perBurn)
 	defer cancel()
 
 	_, _, vr, err := rig.m.ExecModule.PreExecuteFlashblock(deadlined, rig.inputs, round)
 
 	var stopped execmodule.ExecutionStopped
 	require.ErrorAs(t, err, &stopped)
+	require.Less(t, stopped.Applied, len(round), "the deadline has to expire part way through the round")
 	require.Equal(t, execmodule.StopSlotEnd, stopped.Reason, "the clock ran out, not the block's gas")
 	require.False(t, vr.GasFull)
 }

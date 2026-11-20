@@ -123,7 +123,7 @@ type parallelExecutor struct {
 	consumers   *resultStream
 	maxBlockNum uint64 // set before execLoop; exec loop exits when reached
 	// roundStop is the round's own cancellation: closed means schedule nothing more and keep what executed (exec3_stop.go).
-	roundStop   <-chan struct{}
+	roundStop   roundStop
 	txProgress  exec.TxProgress
 	blockGas    *exec.BlockGas
 	accumulator *shards.Accumulator
@@ -404,8 +404,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// calculator run until the abort (exec3_stop.go).
 	outer := exec.Outer(ctx)
 	if outer != ctx {
-		pe.roundStop = ctx.Done()
-		defer func() { pe.roundStop = nil }()
+		pe.roundStop.done = ctx.Done()
+		pe.roundStop.end, _ = ctx.Deadline()
+		defer func() { pe.roundStop = roundStop{} }()
 	}
 	roundCtx := ctx
 	ctx = exec.UntilAbort(ctx)
@@ -1141,7 +1142,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	}
 
 	// Read once: a stop with transactions out is driven by their results, and re-arming a closed channel would spin.
-	roundStop := pe.roundStop
+	roundStop := pe.roundStop.done
 
 	for {
 		if applyTx, err = pe.refreshApplyTx(ctx, applyTx); err != nil {
@@ -3171,7 +3172,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				delete(be.revalidate, tx)
 			}
 		}
-		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil && be.stoppableRound(pe) && !be.fitsBlockGas(txTask) {
+		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil && pe.stoppableRound() && !be.fitsBlockGas(txTask) {
 			be.gasFull = true
 			if be.onGasFull != nil {
 				be.onGasFull()

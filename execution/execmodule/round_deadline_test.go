@@ -79,28 +79,34 @@ func TestRoundStopsAtItsDeadline(t *testing.T) {
 		return buf.Bytes()
 	}
 
-	// A first round that is allowed to finish, both to give the block a body worth protecting and to
+	// First rounds that are allowed to finish, both to give the block a body worth protecting and to
 	// measure what this work really costs — the deadline below has to be well inside it to mean anything.
-	start := time.Now()
-	_, _, vr, err := exec.PreExecuteFlashblock(ctx, inputs, [][]byte{burn(0, 10_000_000)})
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus)
-	perBurn := time.Since(start)
+	const warmups = 3
+	var perBurn time.Duration
+	for i := uint64(0); i < warmups; i++ {
+		start := time.Now()
+		_, _, vr, err := exec.PreExecuteFlashblock(ctx, inputs, [][]byte{burn(i, 10_000_000)})
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus)
+		if took := time.Since(start); perBurn == 0 || took < perBurn {
+			perBurn = took
+		}
+	}
 	t.Logf("one 10M-gas burn costs %s", perBurn.Round(time.Millisecond))
 	committed := exec.FlashBodyForTest()
-	require.Len(t, committed, 1)
+	require.Len(t, committed, warmups)
 
 	// Now a round of many burns with a deadline that only covers a fraction of them.
-	const burns = 12
+	const burns = 24
 	round := make([][]byte, 0, burns)
-	for i := uint64(1); i <= burns; i++ {
+	for i := uint64(warmups); i < warmups+burns; i++ {
 		round = append(round, burn(i, 10_000_000))
 	}
 	budget := perBurn * 2
 	deadlined, cancel := context.WithDeadline(ctx, time.Now().Add(budget))
 	defer cancel()
 
-	start = time.Now()
+	start := time.Now()
 	_, _, _, err = exec.PreExecuteFlashblock(deadlined, inputs, round)
 	took := time.Since(start)
 
@@ -129,7 +135,7 @@ func TestRoundStopsAtItsDeadline(t *testing.T) {
 
 	// And the remainder is the caller's. It goes back in a round of its own, which the block accepts in
 	// full — a transaction the stop skipped is not a transaction the block refuses.
-	_, _, vr, err = exec.PreExecuteFlashblock(ctx, inputs, round[stopped.Applied:])
+	_, _, vr, err := exec.PreExecuteFlashblock(ctx, inputs, round[stopped.Applied:])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus)
 	require.Len(t, exec.FlashBodyForTest(), len(committed)+burns,
