@@ -3,6 +3,7 @@ package npprof
 
 import (
 	"bytes"
+	"encoding/base64"
 	"net/http"
 	"os"
 	"runtime"
@@ -64,6 +65,9 @@ func keep(kind string, b []byte) { mu.Lock(); last[kind] = b; mu.Unlock() }
 
 // Handler waits 3 s, so the block the caller is waiting for has finished, then serves the last profile of kind.
 func Handler(kind string) http.HandlerFunc {
+	if os.Getenv("NP_PROF_LOG") == "true" {
+		log.Info("[npprof] profile", "kind", name, "b64", base64.StdEncoding.EncodeToString(b))
+	}
 	return func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(3 * time.Second)
 		mu.Lock()
