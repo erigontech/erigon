@@ -375,7 +375,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		if err != nil {
 			return nil, err
 		}
-		transactions.VersionedBlockState(genEnv.ibs)
 
 		minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
@@ -420,7 +419,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		if err != nil {
 			return nil, err
 		}
-		transactions.VersionedCallState(genEnv.ibs)
+		genEnv.ibs.SetNoConflictDetection()
 		stateWriter = genEnv.noopWriter
 	}
 
@@ -501,7 +500,12 @@ func PostStateCalculated(cfg *chain.Config, blockNum uint64, commitmentHistoryEn
 	return observed && frozen == 0
 }
 
-func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (_ types.Receipts, err error) {
+func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (types.Receipts, error) {
+	return g.GetReceiptsPrefetched(ctx, cfg, tx, block, opts, nil)
+}
+
+// GetReceiptsPrefetched is GetReceipts that takes the persisted receipts from prefetch when it has them.
+func (g *Generator) GetReceiptsPrefetched(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts, prefetch *ReceiptsPrefetch) (_ types.Receipts, err error) {
 	tx = g.filters.WithTemporalOverlay(tx)
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
@@ -542,7 +546,10 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	// If/when receipts are saved to the DB *with* the `postState` field,
 	// this check on `calculatePostState` should be removed to utilize the stored receipt.
 	if !rpcDisableRCache && !calculatePostState {
-		receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
+		receiptsFromDB = prefetch.Receipts(block)
+		if len(receiptsFromDB) == 0 {
+			receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -572,7 +579,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	if !calculatePostState {
 		// Fast path (post-Byzantium): use the shared derivation package.
 		// DeriveBlockReceipts sets BlockHash and FirstLogIndexWithinBlock.
-		transactions.VersionedBlockState(genEnv.ibs)
 		receipts, err = sharedreceipts.DeriveBlockReceipts(ctx, cfg, g.engine, block.HeaderNoCopy(), block.Transactions(), genEnv.ibs, genEnv.gp, genEnv.getHeader)
 		if err != nil {
 			return nil, err
@@ -620,7 +626,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			stateWriter = genEnv.noopWriter
 		}
 
-		transactions.VersionedBlockState(genEnv.ibs)
 		for i, txn := range block.Transactions() {
 			select {
 			case <-ctx.Done():

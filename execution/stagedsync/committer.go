@@ -318,7 +318,7 @@ func (cc *commitmentCalculator) Stop() {
 	cc.wg.Wait()
 	if p := cc.branchPrefetch; p != nil {
 		p.close()
-		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
+		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(), "dropped", p.dropped.Load())
 		if commitmentdb.ParentReadsWanted() {
 			if r := cc.parentRecords(); r != nil {
 				commitmentdb.PublishParentRecords(r)
@@ -765,8 +765,6 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // buffer rather than compute()'s shared one.
 func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
 	cc.finishPrefetch()
-	cc.branchPrefetch.pause()
-	defer cc.branchPrefetch.resume()
 	sdCtx := cc.doms.GetCommitmentContext()
 	if cc.branchPrefetch != nil {
 		sdCtx.SetFeed(&cc.feed.Feed)
@@ -1072,13 +1070,8 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	}()
 
 	// Flush block N-1's own pending update (hash-routed to N-1's saved changeset,
-	// independent of N's diff below) — the one remaining changesetMu window, brief
-	// rather than spanning the fold that follows.
-	if err := func() error {
-		cc.doms.LockChangesetAccumulator()
-		defer cc.doms.UnlockChangesetAccumulator()
-		return cc.doms.FlushPendingUpdatesLocked(cc.roTx)
-	}(); err != nil {
+	// independent of N's diff below).
+	if err := cc.doms.FlushPendingUpdates(cc.roTx); err != nil {
 		return nil, err
 	}
 

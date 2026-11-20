@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"time"
 
@@ -47,6 +48,12 @@ import (
 // Above the largest request the spec allows, about 17 MB: MAX_COMMITTEES_PER_SLOT * TARGET_AGGREGATORS_PER_COMMITTEE
 // aggregates, each with a full Electra aggregation bitlist.
 const maxAggregateAndProofsRequestSize = 32 << 20
+
+const (
+	attesterSlashingJSONOverhead = 4 << 10
+	// Each of the two lists carries decimal uint64 strings with JSON delimiters.
+	attesterSlashingJSONBytesPerIndexPair = 2 * 32
+)
 
 const blockArrivalPollInterval = 50 * time.Millisecond
 
@@ -367,12 +374,48 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 
 func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) {
 	clVersion := a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetCurrentEpoch())
-
-	req := cltypes.NewAttesterSlashing(clVersion)
-	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+	req, err := a.readAttesterSlashing(w, r, clVersion)
+	if err != nil {
+		err.WriteTo(w)
 		return
 	}
+	a.submitAttesterSlashing(w, r, req)
+}
+
+func (a *ApiHandler) PostEthV2BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) {
+	version, err := clparams.StringToClVersion(r.Header.Get("Eth-Consensus-Version"))
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid Eth-Consensus-Version header: %w", err)).WriteTo(w)
+		return
+	}
+	req, endpointErr := a.readAttesterSlashing(w, r, version)
+	if endpointErr != nil {
+		endpointErr.WriteTo(w)
+		return
+	}
+	a.submitAttesterSlashing(w, r, req)
+}
+
+func (a *ApiHandler) readAttesterSlashing(w http.ResponseWriter, r *http.Request, version clparams.StateVersion) (*cltypes.AttesterSlashing, *beaconhttp.EndpointError) {
+	maxIndices := state.MaxIndexedAttestationIndices(a.beaconChainCfg, version)
+	if maxIndices > uint64(math.MaxInt) || maxIndices > (math.MaxInt64-attesterSlashingJSONOverhead)/attesterSlashingJSONBytesPerIndexPair {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("attester slashing limits exceed supported range"))
+	}
+	maxBodySize := attesterSlashingJSONOverhead + int64(maxIndices)*attesterSlashingJSONBytesPerIndexPair
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodySize))
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	req := cltypes.NewAttesterSlashing(version)
+	req.Attestation_1.AttestingIndices.SetCap(int(maxIndices))
+	req.Attestation_2.AttestingIndices.SetCap(int(maxIndices))
+	if err := json.Unmarshal(body, req); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	return req, nil
+}
+
+func (a *ApiHandler) submitAttesterSlashing(w http.ResponseWriter, r *http.Request, req *cltypes.AttesterSlashing) {
 	if err := a.forkchoiceStore.OnAttesterSlashing(req, false); errors.Is(err, forkchoice.ErrIgnore) {
 		pooled, ok := a.operationsPool.AttesterSlashingsPool.Get(pool.ComputeKeyForAttesterSlashing(req))
 		if !ok {
