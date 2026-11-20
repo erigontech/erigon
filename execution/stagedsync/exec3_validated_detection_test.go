@@ -379,7 +379,7 @@ func TestSelfLoopFlushKeepsTheSeedOfADroppedWrite(t *testing.T) {
 				be.versionMap = state.NewVersionMap(types.BlockAccessList{seed})
 				run := &exec.TxResult{Task: be.tasks[1].Task, TxOut: c.earlier}
 				be.selfLoopFlush(earlier, run, nil)
-				be.selfLoopFlush(dropping, &exec.TxResult{Task: be.tasks[1].Task, TxOut: &state.WriteSet{}}, run.TxOut)
+				be.selfLoopFlush(dropping, &exec.TxResult{Task: be.tasks[1].Task, TxOut: &state.WriteSet{}}, run.TxOut.AllHeaders())
 
 				key := accounts.NilKey
 				if c.paths[0] == state.StoragePath {

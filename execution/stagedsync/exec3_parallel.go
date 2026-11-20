@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"maps"
 	"math"
 	"os"
@@ -1749,9 +1750,9 @@ type txResult struct {
 
 // selfLoopFlush publishes the writes of the run at version to the versionMap, after dropping the
 // writes of the previous run that this run no longer makes.
-func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxResult, prevWrites *state.WriteSet) {
-	if prevWrites != nil {
-		be.dropUnwritten(version, prevWrites, result.TxOut)
+func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxResult, prev iter.Seq[state.WriteHeader]) {
+	if prev != nil {
+		be.dropUnwritten(version, prev, result.TxOut)
 	}
 	// Flush as ESTIMATE (complete=false) so a downstream read observes the in-flight
 	// dependency and pauses until this tx commits.
@@ -1761,8 +1762,8 @@ func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxRes
 // dropUnwritten drops the writes that an earlier run made and the run at version does not (see
 // VersionMap.DropWrite), and reports whether there were any. A net-zero storage write was never
 // materialized, so dropping it is a no-op.
-func (be *blockExecutor) dropUnwritten(version state.Version, prev, cur *state.WriteSet) (dropped bool) {
-	for h := range prev.AllHeaders() {
+func (be *blockExecutor) dropUnwritten(version state.Version, prev iter.Seq[state.WriteHeader], cur *state.WriteSet) (dropped bool) {
+	for h := range prev {
 		if !cur.Has(h) {
 			be.versionMap.DropWrite(h.Address, h.Path, h.Key, version)
 			dropped = true
@@ -3001,8 +3002,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				}
 				be.blockIO.RecordReads(txVersion, reads)
 				be.versionMap.FlushVersionedWrites(senderWrites, false)
-				ownedWrites = be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites)
-				be.blockIO.RecordWrites(txVersion, ownedWrites)
+				ownedWrites = be.extendWrites(txVersion, senderWrites)
 				be.markReadersDirty(tx, senderWrites)
 				// A charge-at-validation sender's gas debit is not in the worker's TxOut, so
 				// calcFees' coinbase/burnt override (which reads TxOut) would miss it and credit
@@ -3020,7 +3020,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				if ownedWrites != nil {
 					ownedWrites.MergeFrom(tipWrites)
 				} else {
-					be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(tipWrites))
+					be.extendWrites(txVersion, tipWrites)
 				}
 				be.markReadersDirty(tx, tipWrites)
 			}
@@ -3041,6 +3041,17 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		be.signalCommitted(tx)
 	}
 	return nil, nil
+}
+
+func (be *blockExecutor) extendWrites(v state.Version, add *state.WriteSet) *state.WriteSet {
+	ws := be.blockIO.WriteSet(v.TxIndex)
+	if !ws.IsEmpty() {
+		ws.MergeFrom(add)
+		return ws
+	}
+	ws = ws.Merge(add)
+	be.blockIO.RecordWrites(v, ws)
+	return ws
 }
 
 // signalCommitted advances the commit frontier to tx and wakes exactly the tasks
@@ -3333,7 +3344,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 		hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
 
-		if be.dropUnwritten(txVersion, prevWrites, res.TxOut) {
+		if be.dropUnwritten(txVersion, prevWrites.AllHeaders(), res.TxOut) {
 			hasWriteChange = true
 		}
 
