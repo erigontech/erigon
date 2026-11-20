@@ -84,7 +84,7 @@ type EthAPI interface {
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (*ethutils.RPCReceipt, error)
-	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) (LogsResult, error)
 	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) (ethutils.RPCReceipts, error)
 
 	// Block access list related (see ./eth_block_access_list.go)
@@ -1317,6 +1317,7 @@ type APIImpl struct {
 	RpcTxSyncMaxTimeout         time.Duration
 	logger                      log.Logger
 	gasOracleLogger             log.Logger
+	headLogs                    atomic.Pointer[headBlockLogs]
 }
 
 // NewEthAPI returns APIImpl instance
