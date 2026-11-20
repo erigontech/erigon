@@ -364,12 +364,9 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.sdProbeEpoch++
 	ibs.accessList.Reset()
 	clear(ibs.transientStorage)
-	ibs.versionMap = nil
-	// noMaterialize is meaningful only alongside a versionMap; clear it with the
-	// map so a reused IBS can't run unversioned with the stateObject cache still
-	// suppressed (which would silently drop writes). The versioned worker re-sets
-	// both right after Reset; the block assembler never calls Reset mid-block.
-	ibs.noMaterialize = false
+	// Reset leaves versionMap/noMaterialize as they are: a versioned IBS stays
+	// versioned across Reset (its caller re-binds the map it wants via SetVersionMap),
+	// so it never transiently drops to the stateObject path mid-reuse.
 	ibs.noConflictDetection = false
 	ibs.codeByHash = nil
 	clear(ibs.committedBase)
