@@ -140,7 +140,7 @@ type EngineReader interface {
 
 	ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 		gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-		receipts types.Receipts, txns types.Transactions, logger log.Logger) error
+		receipts types.Receipts, digest *types.ReceiptDigest, txns types.Transactions, logger log.Logger) error
 
 	// Close terminates any background threads, DB's etc maintained by the rules engine.
 	Close() error
@@ -205,7 +205,7 @@ var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
 func DefaultBlockPostValidation(header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+	receipts types.Receipts, digest *types.ReceiptDigest, txns types.Transactions, logger log.Logger,
 ) error {
 	if gasUsed != header.GasUsed {
 		logger.Warn("gas used mismatch", "block", header.Number.Uint64(), "header", header.GasUsed, "execution", gasUsed,
@@ -219,29 +219,31 @@ func DefaultBlockPostValidation(header *types.Header,
 			blobGasUsed, *header.BlobGasUsed, header.Number.Uint64(), header.Hash())
 	}
 
-	var bloom types.Bloom
-	bloomFromReceipts := checkReceipts && checkBloom && !alwaysSkipReceiptCheck
-	if checkReceipts && !alwaysSkipReceiptCheck {
-		for _, r := range receipts {
-			r.Bloom = types.CreateBloom(types.Receipts{r})
-			if bloomFromReceipts {
-				bloom.Or(&r.Bloom)
-			}
-		}
-		receiptHash := types.DeriveSha(receipts)
-		if receiptHash != header.ReceiptHash {
-			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
-				receiptHash, header.ReceiptHash, header.Number.Uint64(), header.Hash())
-		}
+	if alwaysSkipReceiptCheck {
+		return nil
 	}
 
-	if checkBloom && !alwaysSkipReceiptCheck {
-		if !bloomFromReceipts {
-			bloom = types.CreateBloom(receipts)
+	var bloom types.Bloom
+	if checkReceipts {
+		if digest == nil {
+			digest = &types.ReceiptDigest{}
+			for _, r := range receipts {
+				r.Bloom = types.CreateBloom(types.Receipts{r})
+				digest.Bloom.Or(&r.Bloom)
+			}
+			digest.Root = types.DeriveSha(receipts)
 		}
-		if bloom != header.Bloom {
-			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", header.Bloom, bloom)
+		if digest.Root != header.ReceiptHash {
+			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
+				digest.Root, header.ReceiptHash, header.Number.Uint64(), header.Hash())
 		}
+		bloom = digest.Bloom
+	} else if checkBloom {
+		bloom = types.CreateBloom(receipts)
+	}
+
+	if checkBloom && bloom != header.Bloom {
+		return fmt.Errorf("invalid bloom (remote: %x  local: %x)", header.Bloom, bloom)
 	}
 
 	return nil

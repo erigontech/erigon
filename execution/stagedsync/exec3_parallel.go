@@ -729,8 +729,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					pe.prevBlocks.RemoveTail()
 					var blockValidatorWaiter *blockValidator
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { // Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
-						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum)
+						checkReceipts, checkBloom := pe.receiptChecks(applyResult.BlockNum)
 
 						header, txs := applyResult.Header, applyResult.Txs
 						if header == nil {
@@ -761,7 +760,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						// Spawn per-block validation concurrently; joined via Wait() below
 						// after the other per-result work has run alongside it.
 						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
-							lastHeader, txs, pe.cfg.chainConfig, pe.logger)
+							applyResult.ReceiptDigest, lastHeader, txs, pe.cfg.chainConfig, pe.logger)
 					}
 
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
@@ -1700,6 +1699,7 @@ type blockResult struct {
 	ApplyCount       int
 	TxIO             *state.VersionedIO
 	Receipts         types.Receipts
+	ReceiptDigest    *types.ReceiptDigest
 	Stats            map[int]ExecutionStat
 	Deps             *state.DAG
 	AllDeps          map[int]map[int]bool
@@ -2673,6 +2673,7 @@ type blockExecutor struct {
 	// already owns: the worker owns all re-execution, so the scheduler dispatches
 	// each task exactly once. Touched only on the exec-loop goroutine.
 	selfLoopDispatched map[int]bool
+	receiptPipeline    *receiptPipeline
 }
 
 // readyForDepOrderValidation decides whether tx may be validated out of contiguous
@@ -3389,6 +3390,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// Use the finalized snapshot — be.results[tx] may have been
 			// overwritten by a later incarnation from a concurrent worker.
 			result := be.finalizedResults[tx]
+			if tx == 0 && task.Version().TxIndex == -1 {
+				be.receiptPipeline = pe.newReceiptPipeline(ctx, be.blockNum, task)
+			}
 
 			applyResult := txResult{
 				blockNum:              be.blockNum,
@@ -3412,6 +3416,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				applyResult.blockGasUsed = int64(result.Receipt.GasUsed)
 
 				applyResult.receipt = result.Receipt.Copy()
+				if be.receiptPipeline != nil {
+					be.receiptPipeline.feed(result.Receipt)
+				}
 				applyResult.logs = applyResult.receipt.Logs
 				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
@@ -3457,6 +3464,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		isPartial := len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1
 
 		txTask := be.tasks[len(be.tasks)-1].Task
+
+		var receiptDigest *types.ReceiptDigest
+		if be.receiptPipeline != nil {
+			receiptDigest = be.receiptPipeline.join()
+			be.receiptPipeline = nil
+		}
 
 		var blockReceipts types.Receipts
 		for i := range be.results {
@@ -3641,6 +3654,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			ApplyCount:       be.applyCount,
 			TxIO:             be.blockIO,
 			Receipts:         blockReceipts,
+			ReceiptDigest:    receiptDigest,
 			receiptsComplete: receiptsComplete,
 			Stats:            be.stats,
 			Deps:             &deps,

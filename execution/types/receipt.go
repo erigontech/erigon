@@ -639,6 +639,11 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 // Receipts implements DerivableList for receipts.
 type Receipts []*Receipt
 
+type ReceiptDigest struct {
+	Bloom Bloom
+	Root  common.Hash
+}
+
 // Len returns the number of receipts in this list.
 func (rs Receipts) Len() int { return len(rs) }
 

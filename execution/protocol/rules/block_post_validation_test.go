@@ -59,7 +59,7 @@ func TestBlockPostValidation_PreByzantiumBloomMismatch(t *testing.T) {
 	const checkReceipts = false // pre-Byzantium gate
 	const checkBloom = true
 
-	err := DefaultBlockPostValidation(header, 21912, 0, checkReceipts, checkBloom, receipts, nil, log.New())
+	err := DefaultBlockPostValidation(header, 21912, 0, checkReceipts, checkBloom, receipts, nil, nil, log.New())
 	if err == nil {
 		t.Fatal("expected bloom-mismatch error on pre-Byzantium block, got nil")
 	}
@@ -69,14 +69,14 @@ func TestBlockPostValidation_PreByzantiumBloomMismatch(t *testing.T) {
 
 	// Set the correct bloom — validation must pass.
 	header.Bloom = correctBloom
-	if err := DefaultBlockPostValidation(header, 21912, 0, checkReceipts, checkBloom, receipts, nil, log.New()); err != nil {
+	if err := DefaultBlockPostValidation(header, 21912, 0, checkReceipts, checkBloom, receipts, nil, nil, log.New()); err != nil {
 		t.Fatalf("expected success when bloom matches, got: %v", err)
 	}
 
 	// With checkBloom disabled the mismatch must not trigger an error
 	// (sanity check that the new flag does gate the new path).
 	header.Bloom = types.Bloom{}
-	if err := DefaultBlockPostValidation(header, 21912, 0, checkReceipts, false, receipts, nil, log.New()); err != nil {
+	if err := DefaultBlockPostValidation(header, 21912, 0, checkReceipts, false, receipts, nil, nil, log.New()); err != nil {
 		t.Fatalf("checkBloom=false should skip bloom validation, got: %v", err)
 	}
 }
@@ -132,16 +132,39 @@ func TestBlockPostValidation_ReceiptBloomReuse(t *testing.T) {
 	const checkReceipts = true
 	const checkBloom = true
 
-	if err := DefaultBlockPostValidation(header, 42_000, 0, checkReceipts, checkBloom, receipts, nil, log.New()); err != nil {
+	if err := DefaultBlockPostValidation(header, 42_000, 0, checkReceipts, checkBloom, receipts, nil, nil, log.New()); err != nil {
 		t.Fatalf("expected receipt+bloom validation to accept OR-merged bloom: %v", err)
 	}
 
 	header.Bloom = types.Bloom{}
-	err := DefaultBlockPostValidation(header, 42_000, 0, checkReceipts, checkBloom, receipts, nil, log.New())
+	err := DefaultBlockPostValidation(header, 42_000, 0, checkReceipts, checkBloom, receipts, nil, nil, log.New())
 	if err == nil {
 		t.Fatal("expected bloom-mismatch error, got nil")
 	}
 	if !strings.Contains(err.Error(), "invalid bloom") {
 		t.Fatalf("expected \"invalid bloom\" error, got: %v", err)
+	}
+}
+
+func TestBlockPostValidation_UsesGivenReceiptDigest(t *testing.T) {
+	t.Parallel()
+	digest := &types.ReceiptDigest{Bloom: types.Bloom{1}, Root: common.Hash{2}}
+	header := &types.Header{Number: *uint256.NewInt(1), GasUsed: 21000, Bloom: digest.Bloom, ReceiptHash: digest.Root}
+	receipts := types.Receipts{{CumulativeGasUsed: 21000}}
+
+	if err := DefaultBlockPostValidation(header, 21000, 0, true, true, receipts, digest, nil, log.New()); err != nil {
+		t.Fatalf("digest matching the header must validate: %v", err)
+	}
+
+	wrongRoot := &types.ReceiptDigest{Bloom: digest.Bloom, Root: common.Hash{3}}
+	err := DefaultBlockPostValidation(header, 21000, 0, true, true, receipts, wrongRoot, nil, log.New())
+	if err == nil || !strings.Contains(err.Error(), "receiptHash mismatch") {
+		t.Fatalf("expected receiptHash mismatch, got %v", err)
+	}
+
+	wrongBloom := &types.ReceiptDigest{Root: digest.Root}
+	err = DefaultBlockPostValidation(header, 21000, 0, true, true, receipts, wrongBloom, nil, log.New())
+	if err == nil || !strings.Contains(err.Error(), "invalid bloom") {
+		t.Fatalf("expected invalid bloom, got %v", err)
 	}
 }
