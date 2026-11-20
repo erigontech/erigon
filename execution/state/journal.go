@@ -75,7 +75,6 @@ const (
 type journalExtra struct {
 	frame                *FrameContext
 	prevTransient        transientStorage
-	prevObj              *stateObject         // kindResetObject: the cached object, nil if none
 	prevWrites           *createWriteSnapshot // kindResetObject
 	prevhash             accounts.CodeHash    // kindCode
 	prevcode             []byte               // kindCode
@@ -194,8 +193,8 @@ func (j *journal) createObjectChange(account accounts.Address) {
 	j.dirties[account]++
 }
 
-func (j *journal) resetObjectChange(account accounts.Address, prev *stateObject, prevWrites *createWriteSnapshot) {
-	j.push(journalEntry{kind: kindResetObject, account: account, extra: &journalExtra{prevObj: prev, prevWrites: prevWrites}})
+func (j *journal) resetObjectChange(account accounts.Address, prevWrites *createWriteSnapshot) {
+	j.push(journalEntry{kind: kindResetObject, account: account, extra: &journalExtra{prevWrites: prevWrites}})
 	j.dirties[account]++
 }
 

@@ -137,10 +137,6 @@ type IntraBlockState struct {
 	stateReader StateReader
 	codeAccess  codeAccessTracker // stateReader, if it tracks code access
 
-	// This map holds 'live' objects, which will get modified while processing a state transition.
-	stateObjects      map[accounts.Address]*stateObject
-	stateObjectsDirty map[accounts.Address]struct{}
-
 	// The refund counter, also used by state transitioning.
 	refund uint64
 
@@ -159,10 +155,9 @@ type IntraBlockState struct {
 
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
-	journal          *journal
-	stateObjectArena stateObjectArena // same lifetime with `journal`. used only if `noMaterialize == true`
-	trace            bool
-	tracingHooks     *tracing.Hooks
+	journal      *journal
+	trace        bool
+	tracingHooks *tracing.Hooks
 	recordAccess     bool // gates MarkAddressAccess — enabled in Prepare
 
 	// Versioned storage used for parallel tx processing, versions
@@ -226,16 +221,14 @@ type sdProbeEntry struct {
 // Create a new state from a given trie
 func New(stateReader StateReader) *IntraBlockState {
 	ibs := &IntraBlockState{
-		stateReader:       stateReader,
-		stateObjects:      map[accounts.Address]*stateObject{},
-		stateObjectsDirty: map[accounts.Address]struct{}{},
-		journal:           newJournal(),
-		accessList:        accessList{addresses: make(map[accounts.Address]int)},
-		transientStorage:  newTransientStorage(),
-		recordAccess:      false,
-		txIndex:           0,
-		trace:             false,
-		dep:               UnknownDep,
+		stateReader:      stateReader,
+		journal:          newJournal(),
+		accessList:       accessList{addresses: make(map[accounts.Address]int)},
+		transientStorage: newTransientStorage(),
+		recordAccess:     false,
+		txIndex:          0,
+		trace:            false,
+		dep:              UnknownDep,
 	}
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
@@ -305,9 +298,6 @@ func (ibs *IntraBlockState) CodeReadCount() int64 {
 // SetVersionMap binds the IBS to a versionMap; noMaterialize follows versionMap presence.
 func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 	noMaterialize := versionMap != nil
-	if dbg.AssertEnabled && noMaterialize != ibs.noMaterialize && !ibs.stateObjectArena.empty() {
-		panic("noMaterialize changed with arena slots outstanding")
-	}
 	ibs.versionMap = versionMap
 	ibs.noMaterialize = noMaterialize
 }
@@ -342,11 +332,6 @@ func (ibs *IntraBlockState) hasWrite(addr accounts.Address, path AccountPath, ke
 // the underlying state trie to avoid reloading data for the next operations.
 func (ibs *IntraBlockState) Reset() {
 	ibs.lastCode = accounts.Code{}
-	for _, so := range ibs.stateObjects {
-		so.release()
-	}
-	clear(ibs.stateObjects)
-	clear(ibs.stateObjectsDirty)
 	ibs.logs.reset()
 	ibs.clearJournalAndRefund()
 	ibs.txIndex = 0
@@ -406,7 +391,7 @@ func NewPooled(stateReader StateReader) *IntraBlockState {
 // ReleasePooled hands ibs to the next NewPooled, or closes it when it grew too
 // large to keep.
 func ReleasePooled(ibs *IntraBlockState) {
-	if ibs.stateObjects == nil { // closed: its maps are gone
+	if ibs.journal == nil { // closed
 		return
 	}
 	if ibs.resetForPool() {
@@ -424,7 +409,7 @@ const maxPooledEntries = 16 * 1024
 // small enough to pool.
 func (ibs *IntraBlockState) resetForPool() bool {
 	reads := ibs.versionedReads
-	poolable := len(ibs.stateObjects)+ibs.accessList.entries()+reads.entries() <= maxPooledEntries
+	poolable := ibs.accessList.entries()+reads.entries() <= maxPooledEntries
 	ibs.Reset()
 	if !poolable {
 		return false
@@ -457,18 +442,17 @@ func (ibs *IntraBlockState) SetCodeByHash(c CodeByHash) { ibs.codeByHash = c }
 // Release Deprecated use Close
 func (ibs *IntraBlockState) Release(bool) { ibs.Close() }
 
-// Close returns pooled resources (like journal, stateObjects, versioned writes)
+// Close returns pooled resources (like journal, versioned writes)
 // back to their pools. Call this when the IntraBlockState is no longer needed.
 // Call Reset() to re-use IntraBlockState object
 // Idempotent, thread-unsafe
 func (ibs *IntraBlockState) Close() {
-	if ibs == nil || ibs.stateObjects == nil {
+	if ibs == nil || ibs.journal == nil {
 		return
 	}
 
-	stateObjects, journal := ibs.stateObjects, ibs.journal
-	ibs.stateObjects, ibs.journal = nil, nil
-	ibs.stateObjectArena.release()
+	journal := ibs.journal
+	ibs.journal = nil
 	ibs.logs.release()
 	ibs.revisions.reset()
 	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
@@ -476,25 +460,10 @@ func (ibs *IntraBlockState) Close() {
 	ibs.versionedWrites.ReleaseAndReset()
 	ibs.versionedOrigins.ReleaseAndReset()
 
-	releaseResources(stateObjects, journal)
+	releaseResources(journal)
 }
 
-// The noMaterialize path never releases what it takes, so a pool draw there
-// would be a one-way drain on the materializing paths.
-func (ibs *IntraBlockState) allocStateObject() *stateObject {
-	if ibs.noMaterialize {
-		if so := ibs.stateObjectArena.alloc(); so != nil {
-			return so
-		}
-		return newHeapObject()
-	}
-	return stateObjectPool.Get().(*stateObject)
-}
-
-func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *journal) {
-	for _, so := range stateObjects {
-		so.release()
-	}
+func releaseResources(journal *journal) {
 	if journal != nil {
 		journal.release()
 	}
@@ -1675,6 +1644,8 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 	return nil
 }
 
+type Storage map[accounts.StorageKey]uint256.Int
+
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) error {
@@ -1865,7 +1836,7 @@ func (ibs *IntraBlockState) createVersioned(addr accounts.Address, hadPrevious b
 		ibs.journal.createObjectChange(addr)
 	} else {
 		prevWrites := ibs.versionedWrites.snapshotCreateFields(addr)
-		ibs.journal.resetObjectChange(addr, nil, prevWrites)
+		ibs.journal.resetObjectChange(addr, prevWrites)
 	}
 	ibs.recordWriteAddress(addr, &account)
 	ibs.recordWriteCodeHash(addr, account.CodeHash)
@@ -2422,12 +2393,6 @@ func (ibs *IntraBlockState) clearJournalAndRefund() {
 	ibs.journal.Reset()
 	ibs.revisions.reset()
 	ibs.refund = uint64(0)
-	if dbg.AssertEnabled && !ibs.noMaterialize && !ibs.stateObjectArena.empty() {
-		// Slots are rewound per transaction, so only the path that caches nothing
-		// may draw them.
-		panic("stateObjectArena not empty with noMaterialize=false")
-	}
-	ibs.stateObjectArena.reset() // same lifetime with `journal`
 }
 
 // Prepare handles the preparatory steps for executing a state transition.

@@ -24,36 +24,6 @@ import (
 // with a missing cell and lifecycle checks treat it as an inert baseline.
 const originIndex = -2
 
-func codeSizeFromStateObject(ibs *IntraBlockState, so *stateObject, addr accounts.Address) (int, error) {
-	if so == nil || so.deleted {
-		return 0, nil
-	}
-	if so.code.Bytes != nil {
-		ibs.callCodeAccessHook(addr, so.code.Bytes)
-		return so.code.Len(), nil
-	}
-	if so.data.CodeHash.IsEmpty() {
-		return 0, nil
-	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
-		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
-	}
-	var readStart time.Time
-	if dbg.KVReadLevelledMetrics {
-		readStart = time.Now()
-	}
-	// Size-only read for stateless-witness correctness: a witness node has the
-	// size but not the bytes, so ReadAccountCode would report EXTCODESIZE 0.
-	size, err := ibs.stateReader.ReadAccountCodeSize(addr)
-	if dbg.KVReadLevelledMetrics {
-		ibs.codeReadDuration += time.Since(readStart)
-		ibs.codeReadCount++
-	}
-	ibs.stateReader.SetTrace(false, "")
-	ibs.RecordStateReadError(err)
-	return size, err
-}
-
 // originStorageDirect reads a storage slot's pre-block origin value straight from the
 // state reader, no stateObject. A contract this tx created (own CreateContract cell)
 // has fresh storage, so a cold slot reads zero rather than a prior incarnation's value.
@@ -194,11 +164,10 @@ type readPathOutcome uint8
 const (
 	_ readPathOutcome = iota // unset (zero value)
 
-	outcomeLegacyStorage // versionMap == nil: typed wrapper does direct storage read on r.so
-	outcomeWriteSetHit   // r.vw is set; typed wrapper returns its Val*
-	outcomeMapDone       // versionMap hit; the path's typed map*Val field carries the value
-	outcomeReadSetHit    // a prior read matched; typed wrapper re-fetches it via GetX
-	outcomeStorageRead   // r.so resolved; wrapper does typed storage read + records r.hdr
+	outcomeWriteSetHit // r.vw is set; typed wrapper returns its Val*
+	outcomeMapDone     // versionMap hit; the path's typed map*Val field carries the value
+	outcomeReadSetHit  // a prior read matched; typed wrapper re-fetches it via GetX
+	outcomeStorageRead // cold origin resolved into the path's typed map*Val field; wrapper records r.hdr
 	outcomeReturnZero    // typed wrapper returns the path-typed zero value (account absent)
 	outcomeReturnEmpty   // typed wrapper returns the path-typed empty value (account exists, field wiped): EmptyCodeHash for CodeHashPath, otherwise the zero value
 	outcomeReturnDefault // typed wrapper returns its caller-supplied defaultV
@@ -222,8 +191,6 @@ type readPathResult struct {
 	vwCodeHash       *VersionedWrite[accounts.CodeHash]
 	vwCodeSize       *VersionedWrite[int]
 	vwStorage        *VersionedWrite[uint256.Int]
-
-	so *stateObject // outcomeStorageRead / outcomeLegacyStorage
 
 	// account carries the composed base account for the four account-field paths
 	// (Balance/Nonce/Incarnation/CodeHash) when it resolved from the versionMap, so
@@ -981,18 +948,11 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 		var v uint256.Int
 		if r.account != nil {
 			v = r.account.Balance
-		} else if r.so != nil && !r.so.deleted {
-			v = r.so.Balance()
 		}
 		if r.recordVR {
 			s.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return uint256.Int{}, StorageRead, UnknownVersion, nil
-		}
-		return r.so.Balance(), StorageRead, UnknownVersion, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, nil
 	default:
@@ -1069,18 +1029,11 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 		var v uint64
 		if r.account != nil {
 			v = r.account.Nonce
-		} else if r.so != nil && !r.so.deleted {
-			v = r.so.Nonce()
 		}
 		if r.recordVR {
 			s.versionedReads.SetNonce(addr, VersionedRead[uint64]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return 0, StorageRead, UnknownVersion, nil
-		}
-		return r.so.Nonce(), StorageRead, UnknownVersion, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return 0, r.source, r.version, nil
 	default:
@@ -1150,18 +1103,11 @@ func readIncarnation(s *IntraBlockState, addr accounts.Address) (uint64, ReadSou
 		var v uint64
 		if r.account != nil {
 			v = r.account.Incarnation
-		} else if r.so != nil && !r.so.deleted {
-			v = r.so.data.Incarnation
 		}
 		if r.recordVR {
 			s.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return 0, StorageRead, UnknownVersion, nil
-		}
-		return r.so.data.Incarnation, StorageRead, UnknownVersion, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return 0, r.source, r.version, nil
 	default:
@@ -1297,28 +1243,11 @@ func readCodeSegment(s *IntraBlockState, addr accounts.Address, seg *codeSegment
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
-		var v accounts.Code
-		if r.so != nil {
-			if !r.so.deleted {
-				code, err := r.so.CodeTyped()
-				if err != nil {
-					return accounts.Code{}, StorageRead, UnknownVersion, err
-				}
-				v = code
-			}
-		} else {
-			v = r.mapCodeVal
-		}
+		v := r.mapCodeVal
 		if r.recordVR {
 			s.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return accounts.Code{}, StorageRead, UnknownVersion, nil
-		}
-		code, err := r.so.CodeTyped()
-		return code, StorageRead, UnknownVersion, err
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return accounts.Code{}, r.source, r.version, nil
 	default:
@@ -1458,26 +1387,11 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
-		var v int
-		if r.so != nil {
-			sz, err := codeSizeFromStateObject(s, r.so, addr)
-			if err != nil {
-				return 0, r.source, r.version, err
-			}
-			v = sz
-		} else {
-			v = r.mapCodeSizeVal
-		}
+		v := r.mapCodeSizeVal
 		if r.recordVR {
 			s.versionedReads.SetCodeSize(addr, VersionedRead[int]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		v, err := codeSizeFromStateObject(s, r.so, addr)
-		if err != nil {
-			return 0, StorageRead, UnknownVersion, err
-		}
-		return v, StorageRead, UnknownVersion, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return 0, r.source, r.version, nil
 	default:
@@ -1511,28 +1425,18 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address, commited bool) (acc
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
-		var v accounts.CodeHash
-		switch {
-		case r.account != nil:
+		v := accounts.NilCodeHash
+		if r.account != nil {
 			// Match newObject: an empty CodeHash normalizes to EmptyCodeHash.
 			v = r.account.CodeHash
 			if v.IsEmpty() {
 				v = accounts.EmptyCodeHash
 			}
-		case r.so != nil && !r.so.deleted:
-			v = r.so.data.CodeHash
-		default:
-			v = accounts.NilCodeHash
 		}
 		if r.recordVR {
 			s.versionedReads.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return accounts.NilCodeHash, StorageRead, UnknownVersion, nil
-		}
-		return r.so.data.CodeHash, StorageRead, UnknownVersion, nil
 	case outcomeReturnZero, outcomeReturnDefault:
 		return accounts.NilCodeHash, r.source, r.version, nil
 	case outcomeReturnEmpty:
@@ -1617,27 +1521,14 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		}
 		return v, r.source, r.version, false, nil
 	case outcomeStorageRead:
-		var v uint256.Int
-		var clean bool
-		if r.so != nil {
-			if !r.so.deleted {
-				var err error
-				if v, clean, err = r.so.GetState(key); err != nil {
-					return uint256.Int{}, r.source, r.version, false, err
-				}
-			}
-		} else {
-			// Cold origin read resolved by originStorageDirect: no dirty
-			// value exists on the parallel path, so it is always clean.
-			v, clean = r.mapStorageVal, true
-		}
-		if clean {
-			seedStorageOrigin(s, addr, key, v, &r)
-		}
+		// Cold origin read resolved by originStorageDirect: no dirty value exists on
+		// the parallel path, so it is always clean.
+		v := r.mapStorageVal
+		seedStorageOrigin(s, addr, key, v, &r)
 		if r.recordVR {
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
-		return v, r.source, r.version, clean, nil
+		return v, r.source, r.version, true, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, false, nil
 	default:
@@ -1665,18 +1556,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
-		var v uint256.Int
-		if r.so != nil {
-			if !r.so.deleted {
-				cv, err := r.so.GetCommittedState(key)
-				if err != nil {
-					return uint256.Int{}, StorageRead, UnknownVersion, err
-				}
-				v = cv
-			}
-		} else {
-			v = r.mapStorageVal
-		}
+		v := r.mapStorageVal
 		seedStorageOrigin(s, addr, key, v, &r)
 		if r.recordVR {
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
@@ -1722,29 +1602,10 @@ func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSour
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
-		var v bool
-		if r.so != nil {
-			switch {
-			case r.so.deleted:
-				v = false
-			case r.so.createdContract:
-				v = false
-			default:
-				v = r.so.selfdestructed
-			}
-		}
 		if r.recordVR {
-			s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{r.hdr, v})
+			s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{r.hdr, false})
 		}
-		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil {
-			return false, StorageRead, UnknownVersion, nil
-		}
-		if r.so.deleted || r.so.createdContract {
-			return false, StorageRead, UnknownVersion, nil
-		}
-		return r.so.selfdestructed, StorageRead, UnknownVersion, nil
+		return false, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return false, r.source, r.version, nil
 	default:
