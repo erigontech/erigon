@@ -22,7 +22,7 @@
     - '--healthcheck'
     - '--http'
     - '--http.addr=0.0.0.0'
-    - '--http.api=eth,erigon,web3,net,debug,ots,trace,txpool'
+    - '--http.api=eth,erigon,web3,net,ots,trace,txpool'
     - '--http.corsdomain=*'
     - '--http.vhosts=any'
     - '--log.console.verbosity=1'

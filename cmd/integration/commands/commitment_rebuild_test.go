@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -42,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -204,8 +206,23 @@ func TestCommitmentRebuildWithoutHistoryAfterPrunedHistoryRefusal(t *testing.T) 
 	t.Cleanup(func() { datadirCli, noHistory, yes = prevDatadir, prevNoHistory, prevYes })
 	datadirCli, noHistory, yes = dirs.DataDir, true, true
 	t.Cleanup(statecfg.SetCommitmentV3(true))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for block, root := range roots {
+			header := &types.Header{Number: *uint256.NewInt(uint64(block)), Root: root}
+			if err := rawdb.WriteHeader(tx, header); err != nil {
+				return err
+			}
+			if err := rawdb.WriteCanonicalHash(tx, header.Hash(), uint64(block)); err != nil {
+				return err
+			}
+		}
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
 
 	require.NoError(t, commitmentRebuild(db, t.Context(), log.New()))
+	commitmentHistory, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
+	require.NoError(t, err)
+	require.Empty(t, commitmentHistory, "--no-history rebuilds the domain only")
 	c, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
 	require.NoError(t, err)
 	require.Equal(t, uint64(47), c.TxNum)

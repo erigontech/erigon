@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/bits"
 	"runtime"
 	"slices"
@@ -209,6 +210,9 @@ func (u *ParticipationBitList) EncodeSSZ(dst []byte) ([]byte, error) {
 // DecodeSSZ replaces the underlying byte slice of the BitList with a copy of the input byte slice.
 // It then updates the length of the BitList to match the length of the new byte slice.
 func (u *ParticipationBitList) DecodeSSZ(dst []byte, _ int) error {
+	if len(dst) > u.c {
+		return fmt.Errorf("participation list length exceeds limit: %d > %d", len(dst), u.c)
+	}
 	u.u = make([]byte, len(dst))
 	copy(u.u, dst)
 	u.l = len(dst)

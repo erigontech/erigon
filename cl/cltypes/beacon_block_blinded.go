@@ -287,8 +287,14 @@ func (b *BlindedBeaconBody) UnmarshalJSON(buf []byte) error {
 	if err := json.Unmarshal(buf, (*bodyJSON)(b)); err != nil {
 		return err
 	}
+	if b.ExecutionRequests == nil && b.Version >= clparams.ElectraVersion {
+		return errors.New("blinded beacon body contains null execution requests")
+	}
+	if b.Attestations == nil {
+		return errors.New("blinded beacon body contains null attestations")
+	}
 	if b.AttesterSlashings == nil {
-		return nil
+		return errors.New("blinded beacon body contains null attester slashings")
 	}
 	return solid.RangeErr(b.AttesterSlashings, func(i int, slashing *AttesterSlashing, _ int) error {
 		if slashing == nil || slashing.Attestation_1 == nil || slashing.Attestation_2 == nil {
