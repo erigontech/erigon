@@ -3,16 +3,11 @@ package protocol
 import (
 	"fmt"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -90,113 +85,65 @@ func ApplyBlockMessageNoFeeBurnOrTip(evm *vm.EVM, msg Message, gp *GasPool, refu
 
 // executeSlotExceeded is Execute for a transaction that is not executed: the same consensus checks and gas
 // purchase, the nonce consumed, the whole gas limit used with nothing refunded, the tip and burn settled on
-// that gas, and an out-of-gas result. Nothing else is touched — no value moves, no code runs, and no
-// EIP-7702 authorization is applied.
+// that gas, and an out-of-gas result. No value moves, no code runs, and no EIP-7702 authorization is applied.
 func (st *TxnExecutor) executeSlotExceeded() (result *evmtypes.ExecutionResult, err error) {
 	if st.evm.IntraBlockState().IsVersioned() {
 		defer func() {
 			if r := recover(); r != nil {
-				if r != state.ErrDependency {
-					log.Debug("Recovered from slot-exceeded transition failure.", "Error:", r, "stack", dbg.Stack())
-				}
-				depTxIndex := st.evm.IntraBlockState().DepTxIndex()
-				if depTxIndex < 0 {
-					err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
-				}
-				err = ErrExecAbortError{
-					DependencyTxIndex: depTxIndex,
-					OriginError:       err}
+				err = fmt.Errorf("%w: %v at: %s", ErrExecPanic, r, dbg.Stack())
 			}
 		}()
 	}
 
 	msg := st.msg
-	coinbase := st.evm.Context.Coinbase
-	senderInitBalance, err := st.state.GetBalance(msg.From())
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-	}
-	var coinbaseInitBalance uint256.Int
-	if !st.noFeeBurnAndTip {
-		coinbaseInitBalance, err = st.state.GetBalance(coinbase)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-		}
-	}
-
-	intrinsicGasResult, overflow := st.calcIntrinsicGas(msg.To().IsNil(), msg.Authorizations(), msg.AccessList())
+	rules := st.evm.ChainRules()
+	vmConfig := st.evm.Config()
+	intrinsicGasResult, overflow := intrinsicGas(msg, rules, vmConfig.HasEip3860(rules))
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	if err := st.preCheck(false, intrinsicGasResult); err != nil {
+	fees, err := st.preCheck(false, intrinsicGasResult)
+	if err != nil {
 		return nil, err
 	}
-	// The nonce is consumed whatever the transaction is: an out-of-gas creation consumes its nonce too.
+	if err := st.buyGas(fees, false); err != nil {
+		return nil, err
+	}
 	nonce, err := st.state.GetNonce(msg.From())
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 	}
-	st.state.SetNonce(msg.From(), nonce+1, tracing.NonceChangeEoACall)
-
-	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
-	if overflow {
-		return nil, ErrGasUintOverflow
-	}
-	if msg.Gas() < intrinsicGas || msg.Gas() < intrinsicGasResult.FloorGasCost {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, msg.Gas(), intrinsicGas)
+	if err := st.state.SetNonce(msg.From(), nonce+1, tracing.NonceChangeEoACall); err != nil {
+		return nil, err
 	}
 
-	// The whole gas limit is used and none of it is refunded, all of it in the regular dimension.
-	rules := st.evm.ChainRules()
 	st.txnGasUsedB4Refunds = msg.Gas()
 	st.txnGasUsed = msg.Gas()
-	st.blockRegularGasUsed = msg.Gas()
-	if err := st.gp.ConsumeRegular(st.blockRegularGasUsed); err != nil {
+	st.blockExecutionGasUsed = msg.Gas()
+	if err := st.gp.ConsumeExecution(st.blockExecutionGasUsed); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 	}
 
-	effectiveTip := *st.gasPrice
-	if rules.IsLondon {
-		if st.feeCap.Gt(&st.evm.Context.BaseFee) {
-			effectiveTip = u256.Min(*st.tipCap, u256.Sub(*st.feeCap, st.evm.Context.BaseFee))
-		} else {
-			effectiveTip = u256.Num0
-		}
+	tipAmount, err := st.payCoinbase(st.txnGasUsed)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 	}
-	tipAmount := u256.Mul(u256.U64(st.txnGasUsed), effectiveTip)
-	if !st.noFeeBurnAndTip {
-		if err := st.state.AddBalance(coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-		}
-	}
-
-	var burnAmount uint256.Int
-	burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
-	if !msg.IsFree() && rules.IsLondon && !burntContractAddress.IsNil() {
-		burnAmount = u256.Mul(u256.U64(st.txnGasUsed), st.evm.Context.BaseFee)
-		if rules.IsAura && rules.IsPrague {
-			burnAmount = u256.Add(burnAmount, st.evm.BlobFee)
-		}
-		if !st.noFeeBurnAndTip {
-			st.state.AddBalance(burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
-		}
+	burnAmount, burntContractAddress, err := st.burnFees(st.txnGasUsed, fees.blobGasVal)
+	if err != nil {
+		return nil, err
 	}
 
 	result = &evmtypes.ExecutionResult{
-		ReceiptGasUsed:      st.txnGasUsed,
-		BlockRegularGasUsed: st.blockRegularGasUsed,
-		BlockStateGasUsed:   st.blockStateGasUsed,
-		MaxGasUsed:          st.txnGasUsedB4Refunds,
-		IntrinsicGas:        intrinsicGasResult,
-		Err:                 vm.ErrOutOfGas,
-		SenderInitBalance:   senderInitBalance,
-		CoinbaseInitBalance: coinbaseInitBalance,
-		FeeTipped:           tipAmount,
-		FeeBurnt:            burnAmount,
+		TxnGasUsage:    mdgas.TxnGasUsage{BlockExecutionGasUsed: st.blockExecutionGasUsed},
+		ReceiptGasUsed: st.txnGasUsed,
+		MaxGasUsed:     st.txnGasUsedB4Refunds,
+		Err:            vm.ErrOutOfGas,
+		FeeTipped:      tipAmount,
+		FeeBurnt:       burnAmount,
 	}
 	result.BurntContractAddress = burntContractAddress
 	if st.evm.Context.PostApplyMessage != nil {
-		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result, rules)
+		st.evm.Context.PostApplyMessage(st.state, msg.From(), st.evm.Context.Coinbase, result, rules)
 	}
 	return result, nil
 }

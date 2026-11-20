@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	datadir2 "github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -63,7 +64,7 @@ var renameCmd = &cobra.Command{
 }
 
 func init() {
-	renameCmd.Flags().StringVar(&datadir, "datadir", "", "Directory containing versioned files")
+	flags.DirVar(renameCmd.Flags(), &datadir, "datadir", "", "Directory containing versioned files")
 	renameCmd.Flags().StringSliceVar(&includeDomains, "include-domains", []string{}, "Domains to include (default: all)")
 	renameCmd.Flags().StringSliceVar(&excludeDomains, "exclude-domains", []string{}, "Domains to exclude")
 	renameCmd.Flags().StringSliceVar(&includeExts, "include-exts", []string{}, "Extensions to include (default: all)")

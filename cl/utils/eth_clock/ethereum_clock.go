@@ -17,17 +17,18 @@
 package eth_clock
 
 import (
-	"sync/atomic"
+	"cmp"
 	"encoding/binary"
 	"fmt"
 	"math"
 	"slices"
-	"sort"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 var maximumClockDisparity = 500 * time.Millisecond
@@ -55,6 +56,7 @@ func StartChainAt(c EthereumClock, genesisTime uint64) bool {
 
 //go:generate mockgen -typed=true -source=./ethereum_clock.go -destination=./ethereum_clock_mock.go -package=eth_clock . EthereumClock
 type EthereumClock interface {
+	Now() time.Time
 	GetSlotTime(slot uint64) time.Time
 	GetCurrentSlot() uint64
 	GetEpochAtSlot(slot uint64) uint64
@@ -68,7 +70,7 @@ type EthereumClock interface {
 	LastFork() (common.Bytes4, error)                                      // GetLastFork
 	StateVersionByForkDigest(common.Bytes4) (clparams.StateVersion, error) // ForkDigestVersion
 	StateVersionByEpoch(uint64) clparams.StateVersion
-	//ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error)
+	// ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error)
 	ComputeForkDigest(epoch uint64) (digest common.Bytes4, err error) // new in fulu
 
 	GenesisValidatorsRoot() common.Hash
@@ -85,11 +87,11 @@ func forkList(schedule map[common.Bytes4]clparams.VersionScheduleEntry) (f []for
 	for version, entry := range schedule {
 		f = append(f, forkNode{epoch: entry.Epoch, version: version, stateVersion: entry.StateVersion})
 	}
-	sort.Slice(f, func(i, j int) bool {
-		if f[i].epoch == f[j].epoch {
-			return f[i].stateVersion < f[j].stateVersion
+	slices.SortFunc(f, func(a, b forkNode) int {
+		if a.epoch == b.epoch {
+			return cmp.Compare(a.stateVersion, b.stateVersion)
 		}
-		return f[i].epoch < f[j].epoch
+		return cmp.Compare(a.epoch, b.epoch)
 	})
 	return
 }
@@ -99,13 +101,19 @@ type ethereumClockImpl struct {
 	genesisValidatorsRoot common.Hash
 	beaconCfg             *clparams.BeaconChainConfig
 	forkDigestToVersion   map[common.Bytes4]clparams.StateVersion
+	now                   func() time.Time
 }
 
 func NewEthereumClock(genesisTime uint64, genesisValidatorsRoot common.Hash, beaconCfg *clparams.BeaconChainConfig) EthereumClock {
+	return NewEthereumClockWithNow(genesisTime, genesisValidatorsRoot, beaconCfg, time.Now)
+}
+
+func NewEthereumClockWithNow(genesisTime uint64, genesisValidatorsRoot common.Hash, beaconCfg *clparams.BeaconChainConfig, now func() time.Time) EthereumClock {
 	impl := &ethereumClockImpl{
 		beaconCfg:             beaconCfg,
 		genesisValidatorsRoot: genesisValidatorsRoot,
 		forkDigestToVersion:   make(map[common.Bytes4]clparams.StateVersion),
+		now:                   now,
 	}
 	impl.genesisTime.Store(genesisTime)
 
@@ -137,30 +145,43 @@ func NewEthereumClock(genesisTime uint64, genesisValidatorsRoot common.Hash, bea
 	return impl
 }
 
+func (t *ethereumClockImpl) Now() time.Time {
+	return t.now()
+}
+
 func (t *ethereumClockImpl) GetSlotTime(slot uint64) time.Time {
 	slotTime := t.genesisTime.Load() + t.beaconCfg.SecondsPerSlot*slot
 	return time.Unix(int64(slotTime), 0)
 }
 
 func (t *ethereumClockImpl) GetCurrentSlot() uint64 {
-	now := uint64(time.Now().Unix())
-	if now < t.genesisTime.Load() {
+	return t.slotAt(t.now())
+}
+
+func (t *ethereumClockImpl) slotAt(now time.Time) uint64 {
+	seconds := uint64(now.Unix())
+	if seconds < t.genesisTime.Load() {
 		return 0
 	}
-
-	return (now - t.genesisTime.Load()) / t.beaconCfg.SecondsPerSlot
+	return (seconds - t.genesisTime.Load()) / t.beaconCfg.SecondsPerSlot
 }
 
 func (t *ethereumClockImpl) GetEpochAtSlot(slot uint64) uint64 {
 	return slot / t.beaconCfg.SlotsPerEpoch
 }
 
+// IsSlotCurrentSlotWithMaximumClockDisparity implements the spec's is_current_slot: the current time
+// is within the slot, widened by maximumClockDisparity on both ends.
 func (t *ethereumClockImpl) IsSlotCurrentSlotWithMaximumClockDisparity(slot uint64) bool {
-	slotTime := t.GetSlotTime(slot)
-	currSlot := t.GetCurrentSlot()
-	minSlot := t.GetSlotByTime(slotTime.Add(-maximumClockDisparity))
-	maxSlot := t.GetSlotByTime(slotTime.Add(maximumClockDisparity))
-	return minSlot == currSlot || maxSlot == currSlot
+	// The disparity is shorter than a slot, so only neighbours of the current slot can qualify.
+	// Checking that first also keeps the time arithmetic below from overflowing.
+	now := t.now()
+	currentSlot := t.slotAt(now)
+	if slot > currentSlot+1 || slot+1 < currentSlot {
+		return false
+	}
+	return !now.Add(maximumClockDisparity).Before(t.GetSlotTime(slot)) &&
+		!t.GetSlotTime(slot+1).Add(maximumClockDisparity).Before(now)
 }
 
 func (t *ethereumClockImpl) GetSlotByTime(time time.Time) uint64 {
@@ -168,11 +189,6 @@ func (t *ethereumClockImpl) GetSlotByTime(time time.Time) uint64 {
 }
 
 func (t *ethereumClockImpl) GetCurrentEpoch() uint64 {
-	now := uint64(time.Now().Unix())
-	if now < t.genesisTime.Load() {
-		return 0
-	}
-
 	return t.GetCurrentSlot() / t.beaconCfg.SlotsPerEpoch
 }
 
@@ -190,34 +206,34 @@ func (t *ethereumClockImpl) NextForkDigest() (common.Bytes4, error) {
 }
 
 func (t *ethereumClockImpl) ForkId() ([]byte, error) {
-	digest, err := t.CurrentForkDigest()
+	// All three fields come from one clock read, so an epoch boundary cannot split them.
+	currentEpoch := t.GetCurrentEpoch()
+	digest, err := t.ComputeForkDigest(currentEpoch)
 	if err != nil {
 		return nil, err
 	}
 
-	currentEpoch := t.GetCurrentEpoch()
-
-	if time.Now().Unix() < int64(t.genesisTime.Load()) {
-		currentEpoch = 0
+	// Fulu p2p spec: next_fork_version changes only at regular forks, not BPO forks,
+	// so it is the version in effect at next_fork_epoch (current if none is scheduled).
+	nextForkEpoch := t.nextForkEpochIncludeBPO(currentEpoch)
+	versionEpoch := currentEpoch
+	if nextForkEpoch != t.beaconCfg.FarFutureEpoch {
+		versionEpoch = nextForkEpoch
 	}
-
-	var nextForkVersion [4]byte
-	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
-		if currentEpoch < fork.epoch {
-			nextForkVersion = fork.version
-			break
-		}
-		nextForkVersion = fork.version
-	}
+	nextForkVersion := utils.Uint32ToBytes4(t.beaconCfg.GetForkVersionByVersion(t.beaconCfg.GetCurrentStateVersion(versionEpoch)))
 
 	enrForkId := make([]byte, 16)
-	copy(enrForkId, digest[:])                                             // current fork digest
-	copy(enrForkId[4:], nextForkVersion[:])                                // next fork version
-	binary.BigEndian.PutUint64(enrForkId[8:], t.NextForkEpochIncludeBPO()) // next fork epoch
+	copy(enrForkId, digest[:])                                  // current fork digest
+	copy(enrForkId[4:], nextForkVersion[:])                     // next fork version
+	binary.LittleEndian.PutUint64(enrForkId[8:], nextForkEpoch) // next fork epoch
 	return enrForkId, nil
 }
 
 func (t *ethereumClockImpl) NextForkEpochIncludeBPO() uint64 {
+	return t.nextForkEpochIncludeBPO(t.GetCurrentEpoch())
+}
+
+func (t *ethereumClockImpl) nextForkEpochIncludeBPO(currentEpoch uint64) uint64 {
 	// collect all fork epochs
 	forkEpochs := make([]uint64, 0, len(t.beaconCfg.ForkVersionSchedule)+len(t.beaconCfg.BlobSchedule))
 	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
@@ -229,7 +245,6 @@ func (t *ethereumClockImpl) NextForkEpochIncludeBPO() uint64 {
 	}
 	slices.Sort(forkEpochs)
 	// find the next fork epoch
-	currentEpoch := t.GetCurrentEpoch()
 	nextForkEpoch := t.beaconCfg.FarFutureEpoch
 	for _, forkEpoch := range forkEpochs {
 		if forkEpoch > currentEpoch {
@@ -284,8 +299,8 @@ func (t *ethereumClockImpl) xorDigestWithBlobParams(digest *common.Bytes4, epoch
 	blobParamsBytes := make([]byte, 16)
 	binary.LittleEndian.PutUint64(blobParamsBytes[:8], blobParams.Epoch)
 	binary.LittleEndian.PutUint64(blobParamsBytes[8:], blobParams.MaxBlobsPerBlock)
-	blobParamsHash := utils.Sha256(blobParamsBytes)
-	for i := 0; i < 4; i++ {
+	blobParamsHash := crypto.Sha256(blobParamsBytes)
+	for i := range 4 {
 		digest[i] ^= blobParamsHash[i]
 	}
 }
@@ -321,5 +336,5 @@ func (t *ethereumClockImpl) GenesisTime() uint64 {
 func computeForkDataRoot(version [4]byte, genesisValidatorsRoot common.Hash) common.Hash {
 	var currentVersion32 common.Hash
 	copy(currentVersion32[:], version[:])
-	return utils.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
+	return crypto.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
 }

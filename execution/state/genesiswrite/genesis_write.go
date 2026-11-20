@@ -24,12 +24,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"slices"
 	"strings"
-	"testing"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -37,22 +34,22 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
-	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	polygonchain "github.com/erigontech/erigon/polygon/chain"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // GenesisMismatchError is raised when trying to overwrite an existing
@@ -68,27 +65,19 @@ func (e *GenesisMismatchError) Error() string {
 		advice = fmt.Sprintf(" (try with flag --chain=%s)", specs[0].Name)
 	} else if len(specs) > 1 {
 		names := make([]string, len(specs))
-		for i, s := range specs {
-			names[i] = s.Name
+		for i := range specs {
+			names[i] = specs[i].Name
 		}
 		advice = fmt.Sprintf(" (try with flag --chain=<%s>)", strings.Join(names, "|"))
 	}
 	return fmt.Sprintf("database contains genesis (have %x, new %x)", e.Stored, e.New) + advice
 }
 
-// CommitGenesisBlock writes or updates the genesis block in db.
-// The block that will be used is:
-//
-//	                     genesis == nil       genesis != nil
-//	                  +------------------------------------------
-//	db has no genesis |  main-net          |  genesis
-//	db has genesis    |  from DB           |  genesis (if compatible)
-//
-// The stored chain configuration will be updated if it is compatible (i.e. does not
-// specify a fork block below the local head block). In case of a conflict, the
-// error is a *params.ConfigCompatError and the new, unwritten config is returned.
-//
-// The returned chain configuration is never nil.
+// CommitGenesisBlock writes genesis or updates the stored chain configuration.
+// If the DB already has genesis, a supplied genesis must have the same block hash.
+// If genesis is nil, it uses the stored block, or mainnet genesis for an empty DB.
+// Above block 0, conflicting configuration changes return *chain.ConfigCompatError
+// and the rejected configuration. Other errors may return a nil configuration.
 func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, chainName string, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	return CommitGenesisBlockWithOverride(db, genesis, chainName, nil, nil, false, dirs, logger)
 }
@@ -152,15 +141,22 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		}
 	}
 
-	if (storedHash == common.Hash{}) {
-		custom := true
-		if genesis == nil {
-			logger.Info("Writing main-net genesis block")
-			genesis = chainspec.MainnetGenesisBlock()
-			custom = false
-		}
+	custom := genesis != nil
+	if genesis == nil && (storedHash == common.Hash{}) {
+		logger.Info("Writing main-net genesis block")
+		genesis = chainspec.MainnetGenesisBlock()
+	}
+	if genesis != nil {
+		// Copy the struct, not just the config it points at: a named chain hands over the
+		// registered Genesis, and assigning the copied config back writes into it.
+		g := *genesis
+		g.Config = g.Config.Copy()
+		genesis = &g
 		applyOverrides(genesis.Config)
-		block, _, err1 := write(tx, genesis, dirs, logger)
+	}
+
+	if (storedHash == common.Hash{}) {
+		block, err1 := write(tx, genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -172,10 +168,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, _, err1 := GenesisToBlock(nil, genesis, dirs, logger)
+		block, ibs, err1 := GenesisToBlock(genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
+		ibs.Close()
 		hash := block.Hash()
 		if hash != storedHash {
 			return genesis.Config, block, &GenesisMismatchError{Stored: storedHash, New: hash}
@@ -189,17 +186,19 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			return genesis.Config, nil, err
 		}
 	}
-	// Get the existing chain configuration.
-	newCfg := configOrDefault(genesis, chainName, storedHash)
+	// Get the existing chain configuration. configOrDefault can return a package-level
+	// singleton -- chain.AllProtocolChanges, or a chainspec's own *chain.Config -- so the
+	// overrides go onto a copy or they rewrite the schedule for every later reader.
+	newCfg := configOrDefault(genesis, chainName, storedHash).Copy()
 	applyOverrides(newCfg)
-	if err := newCfg.CheckConfigForkOrder(); err != nil {
-		return newCfg, nil, err
-	}
 	storedCfg, storedErr := rawdb.ReadChainConfig(tx, storedHash)
-	if storedErr != nil && newCfg.Bor == nil {
+	if storedErr != nil {
 		return newCfg, nil, storedErr
 	}
 	if storedCfg == nil {
+		if err := newCfg.CheckConfigForkOrder(); err != nil {
+			return newCfg, nil, err
+		}
 		logger.Warn("Found genesis block without chain config")
 		err1 := rawdb.WriteChainConfig(tx, storedHash, newCfg)
 		if err1 != nil {
@@ -210,30 +209,54 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	// Special case: don't change the existing config of a private chain if no new
 	// config is supplied. This is useful, for example, to preserve DB config created by erigon init.
 	// In that case, only apply the overrides.
-	if genesis == nil {
-		if !keepStoredChainConfig {
-			spec, err := chainspec.ChainSpecByName(chainName)
-			if err != nil {
-				// Unknown chain name — always keep stored config
-				keepStoredChainConfig = true
-			} else if spec.GenesisHash != (common.Hash{}) && spec.GenesisHash != storedHash {
-				// Known chain name but genesis hash doesn't match (e.g. custom
-				// genesis with chainId 1 in Hive tests) — keep stored config
-				keepStoredChainConfig = true
-			}
+	if genesis == nil && !keepStoredChainConfig {
+		spec, err := chainspec.ChainSpecByName(chainName)
+		if err != nil {
+			// Unknown chain name — always keep stored config
+			keepStoredChainConfig = true
+		} else if spec.GenesisHash != (common.Hash{}) && spec.GenesisHash != storedHash {
+			// Known chain name but genesis hash doesn't match (e.g. custom
+			// genesis with chainId 1 in Hive tests) — keep stored config
+			keepStoredChainConfig = true
 		}
-		if keepStoredChainConfig {
-			newCfg = storedCfg
-			applyOverrides(newCfg)
+	}
+	if keepStoredChainConfig {
+		if genesis != nil && !sameUint256(newCfg.ChainID, storedCfg.ChainID) {
+			return newCfg, storedBlock, fmt.Errorf("genesis chain ID mismatch: database has %v, supplied genesis has %v", storedCfg.ChainID, newCfg.ChainID)
 		}
+		// storedCfg is the receiver of CheckCompatible below, so overriding it in
+		// place would compare it against itself and find no conflict.
+		newCfg = storedCfg.Copy()
+		applyOverrides(newCfg)
+	}
+	// The ordering check runs here, not on configOrDefault's result: under
+	// keepStoredChainConfig that one is discarded, so validating it rejects a schedule
+	// the node never adopts and passes the one it does.
+	if err := newCfg.CheckConfigForkOrder(); err != nil {
+		return newCfg, nil, err
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
-	height := rawdb.ReadHeaderNumber(tx, rawdb.ReadHeadHeaderHash(tx))
-	if height != nil {
-		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height)
-		if compatibilityErr != nil && *height != 0 && compatibilityErr.RewindTo != 0 {
+	headHash := rawdb.ReadHeadHeaderHash(tx)
+	if height := rawdb.ReadHeaderNumber(tx, headHash); height != nil && *height != 0 {
+		// The head's time, not just its number: the post-merge forks are scheduled by
+		// timestamp and cannot be compared against a block number. Only a fork that moved
+		// can conflict on that axis, so an undatable head is fatal only to those -- a
+		// datadir whose head header is gone still starts on an unchanged schedule.
+		var headTime uint64
+		if !storedCfg.SameTimestampForks(newCfg) {
+			var err error
+			if headTime, err = headTimestamp(tx, headHash, *height, chainName, dirs, logger); err != nil {
+				return newCfg, storedBlock, err
+			}
+		}
+		toleratedForks, compatibilityErr := checkCompatibleTolerating(storedCfg, newCfg, *height, headTime)
+		if compatibilityErr != nil {
 			return newCfg, storedBlock, compatibilityErr
+		}
+		if len(toleratedForks) > 0 {
+			logger.Warn("Replacing the stored chain config, tolerating PoW-era fork differences that select nothing on this chain",
+				"genesisHash", storedHash, "toleratedForkChanges", strings.Join(toleratedForks, ", "), "storedConfig", storedCfg, "newConfig", newCfg)
 		}
 	}
 	if err := rawdb.WriteChainConfig(tx, storedHash, newCfg); err != nil {
@@ -242,23 +265,97 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	return newCfg, storedBlock, nil
 }
 
-func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err := GenesisToBlock(nil, g, dirs, logger)
-	if err != nil {
-		return nil, nil, err
+func sameUint256(a, b *uint256.Int) bool {
+	return a == b || (a != nil && b != nil && a.Eq(b))
+}
+
+// checkCompatibleTolerating runs CheckCompatible after the PoW-era forks that are nil in one
+// config and 0 in the other take their stored value, and lists those forks. With TTD 0 every
+// block after genesis is PoS, so DAO, the glaciers and MergeNetsplit select nothing; with London
+// at block 0 the difficulty calculation never selects Muir Glacier. The chain ID and the engine
+// setup must match too, as CheckCompatible does not fully compare them.
+func checkCompatibleTolerating(stored, next *chain.Config, height, headTime uint64) (tolerated []string, err *chain.ConfigCompatError) {
+	normalized := next.Copy()
+	tolerate := func(name string, storedFork, newFork *uint64) *uint64 {
+		switch {
+		case storedFork == nil && newFork != nil && *newFork == 0:
+			tolerated = append(tolerated, name+" nil->0")
+		case newFork == nil && storedFork != nil && *storedFork == 0:
+			tolerated = append(tolerated, name+" 0->nil")
+		default:
+			return newFork
+		}
+		return storedFork
 	}
+	if sameUint256(stored.ChainID, next.ChainID) &&
+		sameUint256(stored.TerminalTotalDifficulty, next.TerminalTotalDifficulty) &&
+		stored.TerminalTotalDifficultyPassed == next.TerminalTotalDifficultyPassed &&
+		stored.Aura == nil && next.Aura == nil && !stored.IsL2() && !next.IsL2() {
+		posFromGenesis := stored.TerminalTotalDifficulty != nil && stored.TerminalTotalDifficulty.IsZero()
+		if posFromGenesis {
+			normalized.DAOForkBlock = tolerate("daoForkBlock", stored.DAOForkBlock, next.DAOForkBlock)
+			normalized.ArrowGlacierBlock = tolerate("arrowGlacierBlock", stored.ArrowGlacierBlock, next.ArrowGlacierBlock)
+			normalized.GrayGlacierBlock = tolerate("grayGlacierBlock", stored.GrayGlacierBlock, next.GrayGlacierBlock)
+			normalized.MergeNetsplitBlock = tolerate("mergeNetsplitBlock", stored.MergeNetsplitBlock, next.MergeNetsplitBlock)
+		}
+		if posFromGenesis || stored.IsLondon(0) {
+			normalized.MuirGlacierBlock = tolerate("muirGlacierBlock", stored.MuirGlacierBlock, next.MuirGlacierBlock)
+		}
+	}
+	return tolerated, stored.CheckCompatible(normalized, height, headTime)
+}
+
+// headTimestamp reads the head header's time, falling back to the block files: kv.Headers
+// holds no header for the snapshot-covered range while the kv.HeaderNumber marker and
+// HeadHeaderKey do, so a snapshot-synced node has the number without the header. Neither
+// source having it is an error rather than a time of 0, at which every fork scheduled
+// after genesis reads as inactive and a rescheduled one would be written unchecked.
+func headTimestamp(tx kv.Tx, hash common.Hash, number uint64, chainName string, dirs datadir.Dirs, logger log.Logger) (uint64, error) {
+	if head := rawdb.ReadHeader(tx, hash, number); head != nil {
+		return head.Time, nil
+	}
+	snaps := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: chainName}, dirs.Snap, logger)
+	defer snaps.Close()
+	if err := snaps.OpenSegments([]snaptype.Type{snaptype2.Headers}, false); err != nil {
+		return 0, fmt.Errorf("opening the header files to date head %x at %d: %w", hash, number, err)
+	}
+	// Read through this RoSnapshots' own view: the tx above pins the node's own
+	// snapshots, not the private ones just opened here.
+	view := snaps.View()
+	defer view.Close()
+	head, err := freezeblocks.NewBlockReader(snaps).HeaderFromView(view, number)
+	if err != nil {
+		return 0, err
+	}
+	if head == nil {
+		return 0, fmt.Errorf("head header %x at %d is in neither the database nor the block files, so the active timestamp forks are unknown; an unindexed header segment reads the same way, and `erigon snapshots index` rebuilds it", hash, number)
+	}
+	// The block files are indexed by height, not by hash, so a stale head marker would
+	// otherwise be dated with whatever block sits at that number.
+	if head.Hash() != hash {
+		return 0, fmt.Errorf("the block files hold %x at %d, not the head marker's %x", head.Hash(), number, hash)
+	}
+	return head.Time, nil
+}
+
+func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, error) {
+	block, statedb, err := GenesisToBlock(g, dirs, logger)
+	if err != nil {
+		return nil, err
+	}
+	defer statedb.Close()
 
 	stateWriter := state.NewNoopWriter()
 
 	blockNum := block.Number()
 	if !blockNum.IsZero() {
-		return nil, statedb, errors.New("can't commit genesis block with number > 0")
+		return nil, errors.New("can't commit genesis block with number > 0")
 	}
 	if err := statedb.CommitBlock(&chain.Rules{}, stateWriter); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
+		return nil, fmt.Errorf("cannot write state: %w", err)
 	}
 
-	return block, statedb, nil
+	return block, nil
 }
 
 func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger log.Logger) *types.Block {
@@ -267,7 +364,7 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger l
 		panic(err)
 	}
 	defer tx.Rollback()
-	block, _, err := write(tx, g, dirs, logger)
+	block, err := write(tx, g, dirs, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -280,13 +377,13 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger l
 
 // Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err := WriteGenesisState(g, dirs, logger)
+func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, error) {
+	block, err := WriteGenesisState(g, dirs, logger)
 	if err != nil {
-		return block, statedb, err
+		return block, err
 	}
 	err = WriteGenesisBesideState(block, tx, g)
-	return block, statedb, err
+	return block, err
 }
 
 // Write writes the block a genesis specification to the database.
@@ -325,9 +422,10 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 	return rawdb.WriteChainConfig(tx, block.Hash(), config)
 }
 
-// GenesisToBlock creates the genesis block and writes state of a genesis specification
-// to the given database (or discards it if nil).
-func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+// GenesisToBlock creates the genesis block from a genesis specification, computing its
+// state root from the genesis allocation alone — block 0 has no prior state, so the
+// root follows from the version map with no database.
+func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
@@ -335,72 +433,41 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 
 	head, withdrawals := GenesisWithoutStateToBlock(g)
 
-	ctx := context.Background()
-
-	// some users creating > 1Gb custom genesis by `erigon init`.
-	// On Windows, MDBX file-mappings are backed by the paging file for their
-	// full map size, so a large reservation immediately exhausts the pagefile
-	// when parallel goroutines open multiple databases. On Linux/macOS the
-	// reservation is sparse, but each open env still eats from the process's
-	// finite virtual address space (~128 TB on x86-64) — enough to matter
-	// when many EngineApiTester instances are alive in one process. 16 GB
-	// keeps headroom for outsized custom genesis allocations while letting
-	// 100+ testers coexist. 1 GB on Windows because the pagefile minimum is
-	// 8 GB.
-	genesisMapSize := 16 * datasize.GB
-	if runtime.GOOS == "windows" {
-		genesisMapSize = 1 * datasize.GB
-	}
-	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(genesisMapSize).GrowthStep(1 * datasize.MB).MustOpen()
-	defer genesisTmpDB.Close()
-
-	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
-	if err != nil {
-		return nil, nil, err
-	}
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, genesisTmpDB)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer agg.Close()
-
-	tdb, err := temporal.New(genesisTmpDB, agg)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer tdb.Close()
-
-	tx, err := tdb.BeginTemporalRw(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer tx.Rollback()
-
-	// Genesis is a one-shot commitment over an empty DB; the parallel trie has no
-	// context factory wired here, so use the sequential trie (identical root).
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
-	if err != nil {
-		return nil, nil, err
-	}
-	defer sd.Close()
-
-	rh, ibs, err := ComputeGenesisCommitment(ctx, g, tx, sd, head)
+	statedb, writes, err := GenesisState(g, head)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	rh, err := genesisStateRoot(writes, statedb.VersionMap())
+	if err != nil {
+		return nil, nil, err
+	}
 	head.Root = common.BytesToHash(rh)
 
-	return types.NewBlock(head, nil, nil, nil, withdrawals), ibs, nil
+	return types.NewBlock(head, nil, nil, nil, withdrawals, nil), statedb, nil
 }
 
-func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.TemporalTx, sd *execctx.SharedDomains, head *types.Header) ([]byte, *state.IntraBlockState, error) {
-	blockNum := uint64(0)
-	txNum := uint64(1) // 2 system txs in begin/end of block. Attribute state-writes to first, consensus state-changes to second
+// genesisStateRoot computes block 0's state root from the version map via the block
+// committer's read-as-of emit over an in-memory trie — the same mechanism every later
+// block's root uses, with no database behind it.
+func genesisStateRoot(writes *state.WriteSet, vm *state.VersionMap) ([]byte, error) {
+	view := vm.View(1, state.NewNoopReader())
+	updates := commitment.NewUpdates(commitment.ModeUpdate, "", commitment.KeyToHexNibbleHash)
+	defer updates.Close()
+	if err := state.EmitTouchedAsOf(writes, view, updates); err != nil {
+		return nil, err
+	}
+	hph := commitment.NewHexPatriciaHashed(20, commitment.NewMemoryContext(), commitment.DefaultTrieConfig())
+	defer hph.Release()
+	return hph.Process(context.Background(), updates, "genesis", nil, commitment.WarmupConfig{})
+}
 
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-
-	statedb := state.NewWithVersionMap(r, &state.VersionMap{})
+// GenesisState builds the state the genesis allocation commits to into a fresh versioned
+// IntraBlockState, returning it with the finalized write set already published to the
+// state's version map.
+func GenesisState(g *types.Genesis, head *types.Header) (*state.IntraBlockState, *state.WriteSet, error) {
+	statedb := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	statedb.SetTxContext(0, 0)
 	statedb.SetTrace(false)
 
 	hasConstructorAllocation := false
@@ -422,9 +489,12 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 	for _, addr := range addrs {
 		account := g.Alloc[addr]
 
-		balance, overflow := uint256.FromBig(account.Balance)
-		if overflow {
-			panic("overflow at genesis allocs")
+		balance := new(uint256.Int)
+		if account.Balance != nil {
+			var overflow bool
+			if balance, overflow = uint256.FromBig(account.Balance); overflow {
+				panic("overflow at genesis allocs")
+			}
 		}
 		address := accounts.InternAddress(addr)
 		err := statedb.AddBalance(address, *balance, tracing.BalanceIncreaseGenesisBalance)
@@ -461,16 +531,12 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 			}
 		}
 	}
-	if err := statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
-		return nil, nil, err
-	}
-
-	rh, err := sd.ComputeCommitment(ctx, tx, true, blockNum, txNum, "genesis", nil)
+	writes, err := statedb.FinalizedWrites(&chain.Rules{})
 	if err != nil {
 		return nil, nil, err
 	}
-
-	return rh, statedb, nil
+	statedb.FlushWritesToVersionMap(writes)
+	return statedb, writes, nil
 }
 
 // GenesisWithoutStateToBlock creates the genesis block, assuming an empty state.
@@ -543,7 +609,7 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 	}
 
 	if g.Config != nil && g.Config.IsAmsterdam(g.Timestamp) {
-		if !g.Config.IsEIPDisabled(7928) {
+		if g.Config.IsEIPEnabled(7928, g.Timestamp) {
 			if g.BlockAccessListHash != nil {
 				head.BlockAccessListHash = g.BlockAccessListHash
 			} else {
@@ -552,17 +618,11 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 		if g.SlotNumber != nil {
 			head.SlotNumber = g.SlotNumber
+		} else {
+			head.SlotNumber = new(uint64)
 		}
 	}
 
-	// these fields need to be overriden for Bor running in a kurtosis devnet
-	if g.Config != nil && g.Config.Bor != nil && g.Config.ChainID.Uint64() == polygonchain.BorKurtosisDevnetChainId {
-		withdrawals = []*types.Withdrawal{}
-		head.BlobGasUsed = new(uint64)
-		head.ExcessBlobGas = new(uint64)
-		emptyHash := common.HexToHash("0x0")
-		head.ParentBeaconBlockRoot = &emptyHash
-	}
 	return
 }
 
@@ -576,15 +636,4 @@ func sortedAllocAddresses(m types.GenesisAlloc) []common.Address {
 		return bytes.Compare(a[:], b[:])
 	})
 	return addrs
-}
-
-func sortedAllocKeys(m types.GenesisAlloc) []string {
-	keys := make([]string, len(m))
-	i := 0
-	for k := range m {
-		keys[i] = string(k[:])
-		i++
-	}
-	slices.Sort(keys)
-	return keys
 }

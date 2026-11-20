@@ -16,10 +16,15 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 // SendRawTransaction implements eth_sendRawTransaction. Creates a new message call or contract creation for a previously signed transaction.
 func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
+	if err := txpool.ValidateSerializedTxn(encodedTx); err != nil {
+		return common.Hash{}, err
+	}
 	txn, err := types.DecodeWrappedTransaction(encodedTx)
 	if err != nil {
 		return common.Hash{}, err
@@ -35,14 +40,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
 
-	// Read the chain config under a SHORT-LIVED RoTx and RELEASE it immediately — do NOT hold a core-DB
-	// RoTx across api.txPool.Add below. Add opens its OWN core-DB RoTx (AddLocalTxns -> chainDB().BeginTemporalRo),
-	// and the core DB's RoTx limiter is small (roTxLimit, default 32). Holding RoTx#1 here while Add needs a
-	// nested RoTx on the SAME db deadlocks under concurrent submission: once ~cap requests each hold their
-	// outer RoTx, every slot is consumed and no request can acquire its nested one, so none ever releases —
-	// the pool is permanently full and everything that needs a core-DB RoTx (incl. block production) starves.
-	// (Observed: a concurrent eth_sendRawTransaction flood wedged the node — 32 handlers holding RoTx#1 while
-	// blocked acquiring the nested RoTx, 300+ queued behind them, consensus halted.)
+	// Admission opens its own state view; release this database reader before calling it.
 	cc, err := func() (*chain.Config, error) {
 		tx, err := api.db.BeginTemporalRo(ctx)
 		if err != nil {
@@ -91,47 +89,75 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 
 // SendRawTransactionSync implements eth_sendRawTransactionSync (https://eips.ethereum.org/EIPS/eip-7966).
 // Creates a new message call or contract creation for a previously signed transaction waiting for the transaction to be processed and the receipt to be available.
-func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeoutMs *uint64) (map[string]any, error) {
-	// If timeout is not specified or zero, we use the default, otherwise we use the passed one capped by max.
-	timeout := api.RpcTxSyncDefaultTimeout
-	if timeoutMs != nil && *timeoutMs > 0 {
-		reqTimeout := time.Duration(*timeoutMs) * time.Millisecond
-		timeout = min(reqTimeout, api.RpcTxSyncMaxTimeout)
-	}
-	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
+func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeoutMs *uint64) (*ethutils.RPCReceipt, error) {
 	hash, err := api.SendRawTransaction(ctx, encodedTx)
 	if err != nil {
 		return nil, err
 	}
 
+	return api.waitForReceipt(ctx, hash, api.txSyncTimeout(timeoutMs))
+}
+
+// txSyncTimeout returns the requested timeout capped by the maximum, or the default when none is requested.
+func (api *APIImpl) txSyncTimeout(timeoutMs *uint64) time.Duration {
+	if timeoutMs == nil || *timeoutMs == 0 {
+		return api.RpcTxSyncDefaultTimeout
+	}
+	if *timeoutMs > uint64(api.RpcTxSyncMaxTimeout.Milliseconds()) { // in ms: a huge request overflows a Duration
+		return api.RpcTxSyncMaxTimeout
+	}
+	return time.Duration(*timeoutMs) * time.Millisecond
+}
+
+const receiptPollInterval = time.Second
+
+func (api *APIImpl) waitForReceipt(ctx context.Context, hash common.Hash, timeout time.Duration) (*ethutils.RPCReceipt, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	// Subscribe to receive the receipt for the submitted transaction using the transaction hash.
 	criteria := filters.ReceiptsFilterCriteria{
 		TransactionHashes: []common.Hash{hash},
 	}
-	receiptsCh, id := api.filters.SubscribeReceipts(128, criteria)
-	defer api.filters.UnsubscribeReceipts(id)
-
-	// Theoretically, we should subscribe *before* submitting the transaction, but then we couldn't filter by hash.
-	// Hence, we add this fast-path to be sure we won't miss the receipt in all cases.
-	if receipt, err := api.GetTransactionReceipt(ctx, hash); err != nil && receipt != nil {
-		return receipt, nil
+	receiptsCh, id, err := api.filters.SubscribeReceipts(128, criteria)
+	switch {
+	case err == nil:
+		defer api.filters.UnsubscribeReceipts(id)
+	case errors.Is(err, rpchelper.ErrTooManySubscriptions):
+		// The poll below carries the wait on its own; the nil channel never fires.
+	default:
+		return nil, err
 	}
 
-	// Wait up to the timeout for the transaction to be processed and the receipt to be available.
-	select {
-	case <-timeoutCtx.Done():
-		return nil, &rpc.TxSyncTimeoutError{
-			Msg:  fmt.Sprintf("the transaction was added to the mempool but wasn't processed in %v", timeout),
-			Hash: hash,
+	// The filter update reaches the server asynchronously and without an ack, so a receipt produced before it
+	// lands is never delivered on the channel. Look the receipt up periodically to cover that window.
+	poll := time.NewTicker(receiptPollInterval)
+	defer poll.Stop()
+	for {
+		// An exhausted budget is the timeout itself and is reported as such below; any other lookup failure is real.
+		receipt, err := api.GetTransactionReceipt(timeoutCtx, hash)
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
 		}
-	case protoReceipt, ok := <-receiptsCh:
-		if !ok || protoReceipt == nil {
-			log.Warn("[rpc] receipts subscription was closed")
-			return nil, fmt.Errorf("receipts subscription was closed")
+		if receipt != nil {
+			return receipt, nil
 		}
-		return ethutils.MarshalSubscribeReceipt(protoReceipt), nil
+
+		select {
+		case <-timeoutCtx.Done():
+			return nil, &rpc.TxSyncTimeoutError{
+				Msg:  fmt.Sprintf("the transaction was added to the mempool but wasn't processed in %v", timeout),
+				Hash: hash,
+			}
+		case batch, ok := <-receiptsCh:
+			// The filter is this transaction's hash, so the batch holds only its receipt.
+			if !ok || batch == nil || len(batch.Value) == 0 {
+				log.Warn("[rpc] receipts subscription was closed")
+				return nil, fmt.Errorf("receipts subscription was closed")
+			}
+			return ethutils.MarshalSubscribeReceipt(batch.Value[0]), nil
+		case <-poll.C:
+		}
 	}
 }
 

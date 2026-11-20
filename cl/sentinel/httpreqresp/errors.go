@@ -23,7 +23,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/golang/snappy"
+	"github.com/erigontech/erigon/common/snappypool"
 )
 
 const maxErrorMessageBytes = 256
@@ -82,7 +82,7 @@ func (r ResponseCode) ErrorMessage(resp *http.Response) (string, error) {
 	// Error response bodies are length-prefixed before the snappy payload.
 	rawReader := bufio.NewReader(resp.Body)
 	lengthDone := false
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		b, err := rawReader.ReadByte()
 		if err != nil {
 			return "", err
@@ -95,7 +95,8 @@ func (r ResponseCode) ErrorMessage(resp *http.Response) (string, error) {
 	if !lengthDone {
 		return "", errMalformedErrorMessageLength
 	}
-	sr := snappy.NewReader(rawReader)
+	sr := snappypool.Reader(rawReader)
+	defer snappypool.PutReader(sr)
 	decoded, err := io.ReadAll(io.LimitReader(sr, maxErrorMessageBytes))
 	if err != nil {
 		return "", err

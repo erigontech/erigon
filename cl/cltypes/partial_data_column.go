@@ -29,18 +29,17 @@ type PartialDataColumnHeader struct {
 	Slot                         uint64                         `json:"slot,omitempty"`                            // [New in Gloas:EIP7732]
 	BeaconBlockRoot              common.Hash                    `json:"beacon_block_root,omitempty"`               // [New in Gloas:EIP7732]
 
-	version      clparams.StateVersion
-	beaconConfig *clparams.BeaconChainConfig
+	version clparams.StateVersion
 }
 
-func NewPartialDataColumnHeader(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *PartialDataColumnHeader {
-	h := &PartialDataColumnHeader{version: version, beaconConfig: cfg}
+func NewPartialDataColumnHeader(version clparams.StateVersion) *PartialDataColumnHeader {
+	h := &PartialDataColumnHeader{version: version}
 	h.init()
 	return h
 }
 
 func (h *PartialDataColumnHeader) init() {
-	cfg := h.beaconConfig
+	cfg := clparams.GetBeaconConfig()
 	if h.KzgCommitments == nil {
 		h.KzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](int(cfg.MaxBlobCommittmentsPerBlock), 48)
 	}
@@ -97,9 +96,9 @@ func (h *PartialDataColumnHeader) HashSSZ() ([32]byte, error) {
 
 func (h *PartialDataColumnHeader) Clone() clonable.Clonable {
 	if h == nil {
-		return &PartialDataColumnHeader{beaconConfig: clparams.GetBeaconConfig()}
+		return &PartialDataColumnHeader{}
 	}
-	return NewPartialDataColumnHeader(h.version, h.beaconConfig)
+	return NewPartialDataColumnHeader(h.version)
 }
 
 func (h *PartialDataColumnHeader) Static() bool {
@@ -116,26 +115,33 @@ type PartialDataColumnSidecar struct {
 	KzgProofs          *solid.ListSSZ[*KZGProof]                `json:"kzg_proofs"`
 	Header             *solid.ListSSZ[*PartialDataColumnHeader] `json:"header"`
 
-	version      clparams.StateVersion
-	beaconConfig *clparams.BeaconChainConfig
+	version clparams.StateVersion
 }
 
-func NewPartialDataColumnSidecar(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *PartialDataColumnSidecar {
-	s := &PartialDataColumnSidecar{version: version, beaconConfig: cfg}
+func NewPartialDataColumnSidecar(version clparams.StateVersion) *PartialDataColumnSidecar {
+	s := &PartialDataColumnSidecar{version: version}
 	s.init()
 	return s
 }
 
 func (s *PartialDataColumnSidecar) init() {
-	cfg := s.beaconConfig
+	cfg := clparams.GetBeaconConfig()
 	if s.CellsPresentBitmap == nil {
 		s.CellsPresentBitmap = solid.NewBitList(0, int(cfg.MaxBlobCommittmentsPerBlock))
 	}
 	if s.PartialColumn == nil {
-		s.PartialColumn = solid.NewStaticListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
+		if s.version >= clparams.GloasVersion {
+			s.PartialColumn = solid.NewStaticProgressiveListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
+		} else {
+			s.PartialColumn = solid.NewStaticListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
+		}
 	}
 	if s.KzgProofs == nil {
-		s.KzgProofs = solid.NewStaticListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+		if s.version >= clparams.GloasVersion {
+			s.KzgProofs = solid.NewStaticProgressiveListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+		} else {
+			s.KzgProofs = solid.NewStaticListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+		}
 	}
 	if s.Header == nil {
 		s.Header = solid.NewDynamicListSSZ[*PartialDataColumnHeader](1)
@@ -146,6 +152,8 @@ func (s *PartialDataColumnSidecar) Version() clparams.StateVersion { return s.ve
 
 func (s *PartialDataColumnSidecar) SetVersion(v clparams.StateVersion) {
 	s.version = v
+	s.PartialColumn = nil
+	s.KzgProofs = nil
 	s.init()
 }
 
@@ -164,6 +172,8 @@ func (s *PartialDataColumnSidecar) EncodeSSZ(buf []byte) ([]byte, error) {
 
 func (s *PartialDataColumnSidecar) DecodeSSZ(buf []byte, version int) error {
 	s.version = clparams.StateVersion(version)
+	s.PartialColumn = nil
+	s.KzgProofs = nil
 	s.init()
 	return ssz2.UnmarshalSSZ(buf, version, s.getSchema()...)
 }
@@ -180,14 +190,29 @@ func (s *PartialDataColumnSidecar) EncodingSizeSSZ() int {
 }
 
 func (s *PartialDataColumnSidecar) HashSSZ() ([32]byte, error) {
+	if s.version >= clparams.GloasVersion {
+		bitmapRoot, err := s.CellsPresentBitmap.HashSSZProgressive()
+		if err != nil {
+			return [32]byte{}, err
+		}
+		partialColumnRoot, err := s.PartialColumn.HashSSZProgressive(nil)
+		if err != nil {
+			return [32]byte{}, err
+		}
+		proofsRoot, err := s.KzgProofs.HashSSZProgressive(nil)
+		if err != nil {
+			return [32]byte{}, err
+		}
+		return merkle_tree.HashTreeRoot(bitmapRoot[:], partialColumnRoot[:], proofsRoot[:])
+	}
 	return merkle_tree.HashTreeRoot(s.getSchema()...)
 }
 
 func (s *PartialDataColumnSidecar) Clone() clonable.Clonable {
 	if s == nil {
-		return &PartialDataColumnSidecar{beaconConfig: clparams.GetBeaconConfig()}
+		return &PartialDataColumnSidecar{}
 	}
-	return NewPartialDataColumnSidecar(s.version, s.beaconConfig)
+	return NewPartialDataColumnSidecar(s.version)
 }
 
 func (s *PartialDataColumnSidecar) Static() bool {
@@ -208,19 +233,23 @@ func (s *PartialDataColumnSidecar) GetHeader() *PartialDataColumnHeader {
 //
 // Schema: available, requests
 type PartialDataColumnPartsMetadata struct {
-	Available    *solid.BitList `json:"available"`
-	Requests     *solid.BitList `json:"requests"`
-	beaconConfig *clparams.BeaconChainConfig
+	Available *solid.BitList `json:"available"`
+	Requests  *solid.BitList `json:"requests"`
+	version   clparams.StateVersion
 }
 
-func NewPartialDataColumnPartsMetadata(cfg *clparams.BeaconChainConfig) *PartialDataColumnPartsMetadata {
-	m := &PartialDataColumnPartsMetadata{beaconConfig: cfg}
+func NewPartialDataColumnPartsMetadata(version clparams.StateVersion) *PartialDataColumnPartsMetadata {
+	m := &PartialDataColumnPartsMetadata{version: version}
 	m.init()
 	return m
 }
 
+func (m *PartialDataColumnPartsMetadata) SetVersion(version clparams.StateVersion) {
+	m.version = version
+}
+
 func (m *PartialDataColumnPartsMetadata) init() {
-	cfg := m.beaconConfig
+	cfg := clparams.GetBeaconConfig()
 	if m.Available == nil {
 		m.Available = solid.NewBitList(0, int(cfg.MaxBlobCommittmentsPerBlock))
 	}
@@ -235,6 +264,7 @@ func (m *PartialDataColumnPartsMetadata) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (m *PartialDataColumnPartsMetadata) DecodeSSZ(buf []byte, version int) error {
+	m.version = clparams.StateVersion(version)
 	m.init()
 	return ssz2.UnmarshalSSZ(buf, version, m.Available, m.Requests)
 }
@@ -246,14 +276,25 @@ func (m *PartialDataColumnPartsMetadata) EncodingSizeSSZ() int {
 
 func (m *PartialDataColumnPartsMetadata) HashSSZ() ([32]byte, error) {
 	m.init()
+	if m.version >= clparams.GloasVersion {
+		availableRoot, err := m.Available.HashSSZProgressive()
+		if err != nil {
+			return [32]byte{}, err
+		}
+		requestsRoot, err := m.Requests.HashSSZProgressive()
+		if err != nil {
+			return [32]byte{}, err
+		}
+		return merkle_tree.HashTreeRoot(availableRoot[:], requestsRoot[:])
+	}
 	return merkle_tree.HashTreeRoot(m.Available, m.Requests)
 }
 
 func (m *PartialDataColumnPartsMetadata) Clone() clonable.Clonable {
 	if m == nil {
-		return NewPartialDataColumnPartsMetadata(clparams.GetBeaconConfig())
+		return NewPartialDataColumnPartsMetadata(clparams.Phase0Version)
 	}
-	return NewPartialDataColumnPartsMetadata(m.beaconConfig)
+	return NewPartialDataColumnPartsMetadata(m.version)
 }
 
 func (m *PartialDataColumnPartsMetadata) Static() bool {

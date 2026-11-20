@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,8 +46,9 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-// BenchmarkEngineGetBlobsV3WorstCasePayload gives e2e measurements for engine_getBlobsV3.
-func BenchmarkEngineGetBlobsV3WorstCasePayload(b *testing.B) {
+// BenchmarkEngineGetBlobsV3 gives e2e measurements for engine_getBlobsV3 at the mainnet-typical
+// (6 blobs) and protocol worst-case (128 blobs) request sizes.
+func BenchmarkEngineGetBlobsV3(b *testing.B) {
 	if os.Getenv("ERIGON_RUN_GETBLOBS_BENCH") == "" {
 		b.Skip("set ERIGON_RUN_GETBLOBS_BENCH=1 to run this full-node benchmark")
 	}
@@ -54,18 +56,7 @@ func BenchmarkEngineGetBlobsV3WorstCasePayload(b *testing.B) {
 	// getBlobs rejects more than 128 hashes per call (-38004), so 128 is the largest payload it serves.
 	const maxBlobs = 128
 
-	logger := testlog.Logger(b, log.LvlError)
-	ctx := context.Background()
-
-	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, b.TempDir())
-	require.NoError(b, err)
-	b.Cleanup(func() { require.NoError(b, eat.Close()) })
-
-	rpcClient, err := rpc.DialHTTP(eat.JsonRpcUrl, logger)
-	require.NoError(b, err)
-	b.Cleanup(rpcClient.Close)
-
-	hashes := submitBlobTxns(ctx, b, eat, rpcClient, maxBlobs)
+	ctx, eat, hashes := setupGetBlobsBenchmark(b, maxBlobs)
 
 	require.Eventually(b, func() bool {
 		resp, err := eat.EngineApiClient.GetBlobsV3(ctx, hashes)
@@ -80,19 +71,85 @@ func BenchmarkEngineGetBlobsV3WorstCasePayload(b *testing.B) {
 		return true
 	}, 30*time.Second, 100*time.Millisecond, "all %d blobs should become queryable", maxBlobs)
 
-	// Measure the server's response latency over real JSON-RPC WITHOUT the client-side decode:
-	// issue a raw JWT-authenticated POST and drain the body to io.Discard. The client never
-	// hex-decodes the multi-MB payload into structs — in production that cost is the consensus
-	// layer's, not erigon's — so the timing reflects what the node is actually charged for.
+	for _, tc := range []struct {
+		name   string
+		hashes []common.Hash
+	}{
+		{"blobs=6", hashes[:6]},
+		{fmt.Sprintf("blobs=%d", maxBlobs), hashes},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			minRespBytes := int64(len(tc.hashes)) * params.BlobSize * 2
+			benchmarkGetBlobsHTTP(b, ctx, eat, "engine_getBlobsV3", []any{tc.hashes}, minRespBytes)
+		})
+	}
+}
+
+func BenchmarkEngineGetBlobsV4(b *testing.B) {
+	const maxBlobs = 128
+	ctx, eat, hashes := setupGetBlobsBenchmark(b, maxBlobs)
+	emptySelection := make(hexutil.Bytes, params.CellsPerExtBlob/8)
+	require.Eventually(b, func() bool {
+		resp, err := eat.EngineApiClient.GetBlobsV4(ctx, hashes, emptySelection)
+		if err != nil || len(resp) != len(hashes) {
+			return false
+		}
+		for _, bundle := range resp {
+			if bundle == nil {
+				return false
+			}
+		}
+		return true
+	}, 30*time.Second, 100*time.Millisecond, "all %d blobs should become queryable", maxBlobs)
+
+	for _, blobs := range []int{6, maxBlobs} {
+		for _, cells := range []int{8, 64, int(params.CellsPerExtBlob)} {
+			b.Run(fmt.Sprintf("blobs=%d/cells=%d", blobs, cells), func(b *testing.B) {
+				cellMask := make(hexutil.Bytes, params.CellsPerExtBlob/8)
+				for i := range cells {
+					cellMask[i/8] |= 1 << (i % 8)
+				}
+				resp, err := eat.EngineApiClient.GetBlobsV4(ctx, hashes[:blobs], cellMask)
+				require.NoError(b, err)
+				require.Len(b, resp, blobs)
+				for _, bundle := range resp {
+					require.NotNil(b, bundle)
+					require.Len(b, bundle.BlobCells, cells)
+					require.Len(b, bundle.Proofs, cells)
+				}
+				minRespBytes := int64(blobs*cells) * (int64(params.BytesPerCell) + int64(len(goethkzg.KZGProof{}))) * 2
+				benchmarkGetBlobsHTTP(b, ctx, eat, "engine_getBlobsV4", []any{hashes[:blobs], cellMask}, minRespBytes)
+			})
+		}
+	}
+}
+
+func setupGetBlobsBenchmark(b *testing.B, blobs int) (context.Context, engineapitester.EngineApiTester, []common.Hash) {
+	b.Helper()
+	logger := testlog.Logger(b, log.LvlError)
+	ctx := context.Background()
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, b.TempDir())
+	require.NoError(b, err)
+	b.Cleanup(func() { require.NoError(b, eat.Close()) })
+
+	rpcClient, err := rpc.DialHTTP(eat.JsonRpcUrl, logger)
+	require.NoError(b, err)
+	b.Cleanup(rpcClient.Close)
+
+	return ctx, eat, submitBlobTxns(ctx, b, eat, rpcClient, blobs)
+}
+
+func benchmarkGetBlobsHTTP(b *testing.B, ctx context.Context, eat engineapitester.EngineApiTester, method string, rpcParams []any, minRespBytes int64) {
+	b.Helper()
+	httpClient := &http.Client{Transport: jwt.NewHttpRoundTripper(http.DefaultTransport, eat.JwtSecret)}
 	reqBody, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
-		"method":  "engine_getBlobsV3",
-		"params":  []any{hashes},
+		"method":  method,
+		"params":  rpcParams,
 	})
 	require.NoError(b, err)
 
-	httpClient := &http.Client{Transport: jwt.NewHttpRoundTripper(http.DefaultTransport, eat.JwtSecret)}
 	getBlobsRaw := func() (int64, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, eat.EngineApiUrl, bytes.NewReader(reqBody))
 		if err != nil {
@@ -116,9 +173,8 @@ func BenchmarkEngineGetBlobsV3WorstCasePayload(b *testing.B) {
 
 	respBytes, err := getBlobsRaw()
 	require.NoError(b, err)
-	require.Greater(b, respBytes, int64(1<<20), "response must carry the blobs")
-	b.Logf("worst-case getBlobsV3 over JSON-RPC: %d blobs, %d cell proofs/blob, ~%d KiB response (client decode excluded)", maxBlobs, params.CellsPerExtBlob, respBytes/1024)
-
+	require.Greater(b, respBytes, minRespBytes, "response must carry the requested data")
+	b.Logf("%s over JSON-RPC: ~%d KiB response (client decode excluded)", method, respBytes/1024)
 	b.SetBytes(respBytes)
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -127,7 +183,7 @@ func BenchmarkEngineGetBlobsV3WorstCasePayload(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		if n < 1<<20 {
+		if n < minRespBytes {
 			b.Fatalf("short response: %d bytes", n)
 		}
 	}
@@ -144,15 +200,9 @@ func submitBlobTxns(ctx context.Context, b *testing.B, eat engineapitester.Engin
 	nonce := nonceBig.Uint64()
 
 	hashes := make([]common.Hash, 0, maxBlobs)
-	tag := byte(0)
 	for remaining := maxBlobs; remaining > 0; {
 		count := min(remaining, params.MaxBlobsPerTxn)
-		tags := make([]byte, count)
-		for i := range tags {
-			tag++
-			tags[i] = tag
-		}
-		wrapper := buildWrappedBlobTxn(b, eat.ChainId(), eat.CoinbaseKey, nonce, tags)
+		wrapper := buildWrappedBlobTxn(b, eat.ChainId(), eat.CoinbaseKey, nonce, count)
 		var buf bytes.Buffer
 		require.NoError(b, wrapper.MarshalBinaryWrapped(&buf))
 		var txnHash common.Hash
@@ -165,10 +215,10 @@ func submitBlobTxns(ctx context.Context, b *testing.B, eat engineapitester.Engin
 	return hashes
 }
 
-// buildWrappedBlobTxn builds a Fulu-era (cell-proof) wrapped blob txn carrying one distinct blob per
-// tag, signed by key. Each blob is zero apart from one low-order byte set to its tag, which keeps
-// every field element a valid BLS scalar while giving every blob a distinct commitment.
-func buildWrappedBlobTxn(b *testing.B, chainID *uint256.Int, key *ecdsa.PrivateKey, nonce uint64, tags []byte) *types.BlobTxWrapper {
+// buildWrappedBlobTxn builds a Fulu-era (cell-proof) wrapped blob txn carrying count distinct blobs,
+// signed by key. Blob field elements are random below the BLS modulus (top byte zero): zero-filled
+// blobs would make content-dependent costs (compression, transfer) vanish from the measurement.
+func buildWrappedBlobTxn(b *testing.B, chainID *uint256.Int, key *ecdsa.PrivateKey, nonce uint64, count int) *types.BlobTxWrapper {
 	b.Helper()
 	to := common.Address{0x10}
 	wrapper := &types.BlobTxWrapper{WrapperVersion: 1}
@@ -180,14 +230,18 @@ func buildWrappedBlobTxn(b *testing.B, chainID *uint256.Int, key *ecdsa.PrivateK
 	wrapper.Tx.FeeCap = *uint256.NewInt(1_000_000_000_000)
 	wrapper.Tx.MaxFeePerBlobGas = *uint256.NewInt(1_000_000_000)
 
-	wrapper.Blobs = make(types.Blobs, len(tags))
-	wrapper.Commitments = make(types.BlobKzgs, len(tags))
-	wrapper.Proofs = make(types.KZGProofs, 0, len(tags)*int(params.CellsPerExtBlob))
-	wrapper.Tx.BlobVersionedHashes = make([]common.Hash, len(tags))
+	wrapper.Blobs = make(types.Blobs, count)
+	wrapper.Commitments = make(types.BlobKzgs, count)
+	wrapper.Proofs = make(types.KZGProofs, 0, count*int(params.CellsPerExtBlob))
+	wrapper.Tx.BlobVersionedHashes = make([]common.Hash, count)
 
 	kzgCtx := kzg.Ctx()
-	for i, tag := range tags {
-		wrapper.Blobs[i][len(wrapper.Blobs[i])-1] = tag
+	for i := range count {
+		_, err := rand.Read(wrapper.Blobs[i][:])
+		require.NoError(b, err)
+		for fe := 0; fe < len(wrapper.Blobs[i]); fe += 32 {
+			wrapper.Blobs[i][fe] = 0
+		}
 		commitment, err := kzgCtx.BlobToKZGCommitment((*goethkzg.Blob)(&wrapper.Blobs[i]), 0)
 		require.NoError(b, err)
 		copy(wrapper.Commitments[i][:], commitment[:])

@@ -85,7 +85,7 @@ var pledgeData1 = "00000000000000000000000000ce0d46d924cc8437c806721496599fc3ffa
 var mixedCaseData1 = "00000000000000000000000000000000000000000000000000000000000f42400000000000000000000000000000000000000000000000000000020489e8000000000000000000000000000000000000000000000000000000000000000f4241"
 
 func TestEventId(t *testing.T) {
-	var table = []struct {
+	table := []struct {
 		definition   string
 		expectations map[string]common.Hash
 	}{
@@ -116,7 +116,7 @@ func TestEventId(t *testing.T) {
 }
 
 func TestEventString(t *testing.T) {
-	var table = []struct {
+	table := []struct {
 		definition   string
 		expectations map[string]string
 	}{
@@ -165,7 +165,6 @@ func TestEventMultiValueWithArrayUnpack(t *testing.T) {
 }
 
 func TestEventTupleUnpack(t *testing.T) {
-
 	type EventTransfer struct {
 		Value *big.Int
 	}
@@ -215,7 +214,7 @@ func TestEventTupleUnpack(t *testing.T) {
 	bigintExpected2 := big.NewInt(2218516807680)
 	bigintExpected3 := big.NewInt(1000001)
 	addr := common.HexToAddress("0x00Ce0d46d924CC8437c806721496599FC3FFA268")
-	var testCases = []struct {
+	testCases := []struct {
 		data     string
 		dest     any
 		expected any
@@ -270,7 +269,8 @@ func TestEventTupleUnpack(t *testing.T) {
 		&EventPledge{
 			addr,
 			bigintExpected2,
-			[3]byte{'u', 's', 'd'}},
+			[3]byte{'u', 's', 'd'},
+		},
 		jsonEventPledge,
 		"",
 		"Can unpack Pledge event into structure",
@@ -280,7 +280,8 @@ func TestEventTupleUnpack(t *testing.T) {
 		&[]any{
 			&addr,
 			&bigintExpected2,
-			&[3]byte{'u', 's', 'd'}},
+			&[3]byte{'u', 's', 'd'},
+		},
 		jsonEventPledge,
 		"",
 		"Can unpack Pledge event into slice",
@@ -290,7 +291,8 @@ func TestEventTupleUnpack(t *testing.T) {
 		&[3]any{
 			&addr,
 			&bigintExpected2,
-			&[3]byte{'u', 's', 'd'}},
+			&[3]byte{'u', 's', 'd'},
+		},
 		jsonEventPledge,
 		"",
 		"Can unpack Pledge event into an array",

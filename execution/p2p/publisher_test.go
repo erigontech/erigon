@@ -80,7 +80,7 @@ func TestPublisher(t *testing.T) {
 
 		// we hear about block1 from peers 1,2,3,4
 		header1 := &types.Header{Number: *uint256.NewInt(1)}
-		block1 := types.NewBlockWithHeader(header1)
+		block1 := types.NewBlockWithHeader(header1, nil)
 		td1 := uint256.NewInt(5)
 		waitPeersMayMissHash := func(peersCount int) func() bool {
 			return func() bool { return len(pt.peerTracker.ListPeersMayMissBlockHash(header1.Hash())) == peersCount }
@@ -401,4 +401,26 @@ func sendEvent[T any](ctx context.Context, t *testing.T, ch chan T, e T) {
 		require.FailNow(t, "send timed out")
 	case ch <- e: // no-op
 	}
+}
+
+func TestPublisherDropsTasksOnFullQueueWithoutPanic(t *testing.T) {
+	t.Parallel()
+
+	p := NewPublisher(log.Root(), nil, nil)
+	for range cap(p.tasks) {
+		p.PublishBlockRangeUpdate(eth.BlockRangeUpdatePacket{Latest: 1})
+	}
+	require.Len(t, p.tasks, cap(p.tasks))
+
+	// A block range update task has no block, so dropping it must not dereference one.
+	require.NotPanics(t, func() {
+		p.PublishBlockRangeUpdate(eth.BlockRangeUpdatePacket{Latest: 2})
+	})
+
+	// Dropping a block task still logs the block fields.
+	block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(1)}, nil)
+	require.NotPanics(t, func() {
+		p.PublishNewBlock(block, *uint256.NewInt(1))
+	})
+	require.Len(t, p.tasks, cap(p.tasks))
 }

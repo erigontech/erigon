@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"errors"
 	"math/rand"
-	"sort"
 	"testing"
 )
 
@@ -113,21 +112,6 @@ func TestDecodeKeyV2_Vectors(t *testing.T) {
 			}
 			if !bytes.Equal(got, v.nibbles) {
 				t.Fatalf("DecodeKeyV2(%x) = %x, want %x", v.key, got, v.nibbles)
-			}
-		})
-	}
-}
-
-func TestEncodeKeyV2_RoundTrip(t *testing.T) {
-	for _, v := range v2Vectors() {
-		t.Run(v.name, func(t *testing.T) {
-			encoded := EncodeKeyV2(v.nibbles)
-			decoded, err := DecodeKeyV2(encoded)
-			if err != nil {
-				t.Fatalf("round-trip decode error: %v", err)
-			}
-			if !bytes.Equal(decoded, v.nibbles) {
-				t.Fatalf("round-trip mismatch: got %x, want %x", decoded, v.nibbles)
 			}
 		})
 	}
@@ -328,59 +312,6 @@ func v1HexToCompactNoTerm(hex []byte) []byte {
 		buf[1+i] = (hex[2*i] << 4) | (hex[2*i+1] & 0x0F)
 	}
 	return buf
-}
-
-// BenchmarkLocalityV1VsV2 measures DB-key sort-order locality for V1 (HP-prefix
-// front) vs V2 (suffix-parity) over 100K seeded random paths with realistic
-// commitment-trie length distribution. For each scheme we sort encoded keys
-// byte-wise and report the mean common nibble prefix length between consecutive
-// neighbors. This is evidence for issue #17838 — not a pass/fail assertion.
-func BenchmarkLocalityV1VsV2(b *testing.B) {
-	const N = 100_000
-	rng := rand.New(rand.NewSource(0xBEEFCAFE))
-	paths := make([][]byte, N)
-	for i := range paths {
-		// realistic-ish: uniform over [16, MaxPathNibbles]; covers shallow internal
-		// trie paths and full Keccak-derived account/storage paths
-		length := 16 + rng.Intn(MaxPathNibbles-16+1)
-		p := make([]byte, length)
-		for j := range p {
-			p[j] = byte(rng.Intn(16))
-		}
-		paths[i] = p
-	}
-
-	var v1Mean, v2Mean float64
-	for b.Loop() {
-		v1Keys := make([][]byte, N)
-		v2Keys := make([][]byte, N)
-		for i, p := range paths {
-			v1Keys[i] = v1HexToCompactNoTerm(p)
-			v2Keys[i] = EncodeKeyV2(p)
-		}
-		v1Idx := make([]int, N)
-		v2Idx := make([]int, N)
-		for i := range v1Idx {
-			v1Idx[i] = i
-			v2Idx[i] = i
-		}
-		sort.Slice(v1Idx, func(i, j int) bool {
-			return bytes.Compare(v1Keys[v1Idx[i]], v1Keys[v1Idx[j]]) < 0
-		})
-		sort.Slice(v2Idx, func(i, j int) bool {
-			return bytes.Compare(v2Keys[v2Idx[i]], v2Keys[v2Idx[j]]) < 0
-		})
-
-		var v1Sum, v2Sum int64
-		for i := 1; i < N; i++ {
-			v1Sum += int64(commonNibblePrefix(paths[v1Idx[i-1]], paths[v1Idx[i]]))
-			v2Sum += int64(commonNibblePrefix(paths[v2Idx[i-1]], paths[v2Idx[i]]))
-		}
-		v1Mean = float64(v1Sum) / float64(N-1)
-		v2Mean = float64(v2Sum) / float64(N-1)
-	}
-	b.ReportMetric(v1Mean, "v1_neighbor_prefix")
-	b.ReportMetric(v2Mean, "v2_neighbor_prefix")
 }
 
 func FuzzEncodeDecodeKeyV2(f *testing.F) {

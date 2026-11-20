@@ -7,6 +7,9 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+
 jobs:
   tests:
     strategy:
@@ -14,12 +17,17 @@ jobs:
         #        disable macos-15 until https://github.com/erigontech/erigon/issues/8789
         os: [ ubuntu-24.04 ] # required check includes runner version. Do not change it only here.
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
+    timeout-minutes: 60
 
     steps:
       - name: Checkout custom actions
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
@@ -64,12 +72,17 @@ jobs:
       matrix:
         os: [ windows-2025 ]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
+    timeout-minutes: 60
 
     steps:
       - name: Checkout custom actions
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon

@@ -106,7 +106,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	rules := context.Rules(chain.AllProtocolChanges)
-	statedb, _ := testutil.MakePreState(rules, tx, alloc, context.BlockNumber)
+	statedb, _ := testutil.MakePreState(rules, m.DB, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
 	tracer, err := tracers.New("prestateTracer", new(tracers.Context), json.RawMessage("{}"))
@@ -126,7 +126,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: exeRes.ReceiptGasUsed}, nil)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: exeRes.ReceiptGasUsed}, exeRes.TxnGasUsage, nil)
 	// Retrieve the trace result and compare against the etalon
 	res, err := tracer.GetResult()
 	if err != nil {
@@ -138,5 +138,25 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 	if _, has := ret["0x60f3f640a8508fc6a86d45df051962668e1e8ac7"]; has {
 		t.Fatalf("Expected NOT present 0x60f3f640a8508fc6a86d45df051962668e1e8ac7 in result because empty")
+	}
+}
+
+// A js tracer that is rejected must show why, instead of a bare "tracer not found".
+func TestNewReportsJSTracerError(t *testing.T) {
+	cases := []struct {
+		name, code, want string
+	}{
+		{"null", "null", "Cannot convert undefined or null to object"},
+		{"throwing getter", "{get result() { throw 1 }, fault: function() {}}", "1 at result"},
+		{"typo in native name", "callTracr", "ReferenceError: callTracr is not defined"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr, err := tracers.New(tc.code, &tracers.Context{}, json.RawMessage("{}"))
+			require.Nil(t, tr)
+			require.Error(t, err)
+			require.ErrorContains(t, err, "tracer not found")
+			require.ErrorContains(t, err, tc.want)
+		})
 	}
 }

@@ -8,27 +8,28 @@ sidebar_position: 17
 
 When Erigon runs inside a Docker container and creates files (like its data directory), those files need to be accessible to your local user account on your host machine.
 
-The potential issue is that Docker often creates these files with a default User ID (UID) of `1000`. If this doesn't match your host machine's UID, you may run into permission issues when trying to access, modify, or delete the data directory from your host machine.
+The Erigon image runs as user ID (UID) `1000` and group ID (GID) `1000` by default. For a host-mounted data directory, use the UID and GID that own the directory and its files.
 
-#### The Solution: Using Your Host UID
+#### The Solution: Using Your Host UID and GID
 
-To prevent these problems, you can run the Docker container using your local operating system's User ID (UID).
+Pass both IDs as `--user UID:GID`. Numeric IDs do not need corresponding named accounts inside the image.
 
-Running the container with your host machine's UID ensures that any files created or modified by Erigon inside the container will be owned by that specific user ID on the host operating system. This synchronization of permissions makes managing the data directory much easier.
+If you specify only a UID that has no account inside the image, Docker uses GID `0`. Database access may work because the UID matches, but compaction can fail when it tries to preserve the database's original group.
 
-If you are encountering permission issues, you can find your user ID using this command:
+Find your host user's UID and GID with:
 
 ```bash
 id -u
+id -g
 ```
 
 #### Example Run
 
-To use a specific UID, like `1205`, and mount a host data directory (`/erigon-data`) into the container, use the `--user` flag:
+For a data directory (`/erigon-data`) owned by your current host user and primary group:
 
 ```sh
 docker run \
---user 1205 \
+--user "$(id -u):$(id -g)" \
 -v /erigon-data:/container-erigon-data \
 -it erigontech/erigon:<version_tag> \
 --chain=hoodi \
@@ -36,7 +37,7 @@ docker run \
 --datadir /container-erigon-data
 ```
 
-In this example, the Erigon process inside the container will run as user `1205` and the contents of the host directory `/erigon-data` will be written and owned by user `1205` on your host OS.
+The container runs with your host user's UID and GID. If an existing data directory belongs to another account, use that account's UID and GID instead.
 
 ### Environment Variables <a href="#environment-variables" id="environment-variables"></a>
 

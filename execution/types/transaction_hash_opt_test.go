@@ -104,7 +104,7 @@ func referenceSetCodeHash(tx *SetCodeTransaction) common.Hash {
 func TestTxHashMatchesReflectionReference(t *testing.T) {
 	t.Parallel()
 	tr := NewTRand()
-	for i := 0; i < 300; i++ {
+	for range 300 {
 		legacy := tr.RandTransaction(LegacyTxType).(*LegacyTx)
 		assertHash(t, "legacy", legacy.Hash(), referenceLegacyHash(legacy))
 
@@ -129,44 +129,21 @@ func assertHash(t *testing.T, name string, got, want common.Hash) {
 	}
 }
 
-// TestAAHashMatchesMarshalBinary checks AccountAbstractionTransaction's hash against its
-// canonical serialization. AA can't use the reflection oracle above: its SenderAddress
-// (accounts.Address = unique.Handle) has unexported fields the reflection encoder skips,
-// so the old []any hash dropped the sender. Hash() now uses encodePayload, matching the
-// wire bytes from MarshalBinary.
-func TestAAHashMatchesMarshalBinary(t *testing.T) {
+// TestFrameHashMatchesMarshalBinary checks the hash against the full wire encoding,
+// including the type byte. Both paths use the same RLP encoder, so this checks their
+// consistency but cannot detect encoding errors shared by both paths.
+func TestFrameHashMatchesMarshalBinary(t *testing.T) {
 	t.Parallel()
 	tr := NewTRand()
-	for i := 0; i < 100; i++ {
-		tx := tr.RandTransaction(AccountAbstractionTxType).(*AccountAbstractionTransaction)
+	for range 100 {
+		tx := tr.RandTransaction(FrameTxType).(*FrameTransaction)
 		var buf bytes.Buffer
 		if err := tx.MarshalBinary(&buf); err != nil {
 			t.Fatalf("MarshalBinary: %v", err)
 		}
-		if got, want := tx.Hash(), crypto.HashData(buf.Bytes()); got != want {
-			t.Fatalf("AA Hash %x != keccak(MarshalBinary) %x", got, want)
+		if got, want := tx.Hash(), crypto.Keccak256Hash(buf.Bytes()); got != want {
+			t.Fatalf("Frame Hash %x != keccak(MarshalBinary) %x", got, want)
 		}
-	}
-}
-
-func BenchmarkTxHash(b *testing.B) {
-	tr := NewTRand()
-	for name, txType := range map[string]int{
-		"legacy":     LegacyTxType,
-		"accesslist": AccessListTxType,
-		"dynamicfee": DynamicFeeTxType,
-		"blob":       BlobTxType,
-		"setcode":    SetCodeTxType,
-		"aa":         AccountAbstractionTxType,
-	} {
-		tx := tr.RandTransaction(txType)
-		b.Run(name, func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				tx.Hash()
-				resetTxHashCache(tx)
-			}
-		})
 	}
 }
 
@@ -182,7 +159,7 @@ func resetTxHashCache(tx Transaction) {
 		t.hash.Store(nil)
 	case *SetCodeTransaction:
 		t.hash.Store(nil)
-	case *AccountAbstractionTransaction:
+	case *FrameTransaction:
 		t.hash.Store(nil)
 	}
 }

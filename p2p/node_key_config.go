@@ -26,8 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 )
 
-type NodeKeyConfig struct {
-}
+type NodeKeyConfig struct{}
 
 func (config NodeKeyConfig) DefaultPath(datadir string) string {
 	return path.Join(datadir, "nodekey")
@@ -58,7 +57,7 @@ func (config NodeKeyConfig) load(keyfile string) (*ecdsa.PrivateKey, error) {
 }
 
 func (config NodeKeyConfig) save(keyfile string, key *ecdsa.PrivateKey) error {
-	err := os.MkdirAll(path.Dir(keyfile), 0755)
+	err := os.MkdirAll(path.Dir(keyfile), 0o755)
 	if err == nil {
 		err = crypto.SaveECDSA(keyfile, key)
 	}

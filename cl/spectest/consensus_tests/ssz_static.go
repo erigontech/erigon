@@ -47,8 +47,10 @@ type Root struct {
 	Root string `yaml:"root"`
 }
 
-const rootsFile = "roots.yaml"
-const serializedFile = "serialized.ssz_snappy"
+const (
+	rootsFile      = "roots.yaml"
+	serializedFile = "serialized.ssz_snappy"
+)
 
 func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.Handler {
 	return spectest.HandlerFunc(func(t *testing.T, fsroot fs.FS, c spectest.TestCase) (err error) {
@@ -92,7 +94,6 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 			var br snapshot_format.MockBlockReader
 			if blk.Version() >= clparams.BellatrixVersion {
 				br = snapshot_format.MockBlockReader{Block: blk.Block.Body.ExecutionPayload}
-
 			}
 
 			blk2, err := snapshot_format.ReadBlockFromSnapshot(&b, &br, &clparams.MainnetBeaconConfig)

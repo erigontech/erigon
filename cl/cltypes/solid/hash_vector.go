@@ -18,11 +18,12 @@ package solid
 
 import (
 	"encoding/json"
+	"fmt"
 
-	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -34,14 +35,14 @@ func NewHashVector(s int) HashVectorSSZ {
 	return &hashVector{
 		u: &hashList{
 			u: make([]byte, s*length.Hash),
-			c: int(merkle_tree.NextPowerOfTwo(uint64(s))),
+			c: int(math.NextPowerOfTwo(uint64(s))),
 			l: s,
 		},
 	}
 }
 
-func (arr *hashVector) Bytes() []byte {
-	return arr.u.u[:arr.u.l*length.Hash]
+func (h *hashVector) Bytes() []byte {
+	return h.u.u[:h.u.l*length.Hash]
 }
 
 func (h *hashVector) Append(val common.Hash) {
@@ -53,7 +54,18 @@ func (h hashVector) MarshalJSON() ([]byte, error) {
 }
 
 func (h *hashVector) UnmarshalJSON(buf []byte) error {
-	return json.Unmarshal(buf, h.u)
+	var hashes []common.Hash
+	if err := json.Unmarshal(buf, &hashes); err != nil {
+		return err
+	}
+	if len(hashes) != h.Length() {
+		return fmt.Errorf("hash vector length mismatch: %d != %d", len(hashes), h.Length())
+	}
+	h.u.Clear()
+	for _, hash := range hashes {
+		h.u.Append(hash)
+	}
+	return nil
 }
 
 func (h *hashVector) Cap() int {

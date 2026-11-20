@@ -39,8 +39,8 @@ func (noExecutionData) Transactions(uint64, common.Hash) (*solid.TransactionsSSZ
 func (noExecutionData) Withdrawals(uint64, common.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error) {
 	return nil, errors.New("no execution block")
 }
-func (noExecutionData) SetBeaconChainConfig(*clparams.BeaconChainConfig) {}
-func (noExecutionData) CacheBody(uint64, [][]byte, []*types.Withdrawal)  {}
+func (noExecutionData) SetBeaconChainConfig(*clparams.BeaconChainConfig)             {}
+func (noExecutionData) CacheBody(uint64, common.Hash, [][]byte, []*types.Withdrawal) {}
 
 // A genesis block's payload is empty; reading it back must not ask the EL for a block it never had.
 func TestReadBlockFromSnapshotKeepsAnEmptyPayloadEmpty(t *testing.T) {

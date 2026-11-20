@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/p2p/enode"
 )
@@ -59,7 +60,8 @@ func createSentinel(
 	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
 	initialStatus *cltypes.Status,
-	logger log.Logger) (*sentinel.Sentinel, *enode.LocalNode, error) {
+	logger log.Logger,
+) (*sentinel.Sentinel, *enode.LocalNode, error) {
 	sent, err := sentinel.New(
 		ctx,
 		cfg,
@@ -100,9 +102,10 @@ func StartSentinelService(
 	ethClock eth_clock.EthereumClock,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
-	PeerDasStateReader peerdasstate.PeerDasStateReader,
+	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
-	logger log.Logger) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
+	logger log.Logger,
+) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
 	sent, localNode, err := createSentinel(
 		ctx,
 		cfg,
@@ -112,7 +115,7 @@ func StartSentinelService(
 		forkChoiceReader,
 		ethClock,
 		dataColumnStorage,
-		PeerDasStateReader,
+		peerDasStateReader,
 		p2p,
 		srvCfg.InitialStatus,
 		logger,
@@ -132,17 +135,19 @@ func StartServe(
 	srvCfg *ServerConfig,
 	creds credentials.TransportCredentials,
 ) {
-	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr)
+	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr) //nolint:noctx
 	if err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 		return
 	}
-	// Create a gRPC server
-	gRPCserver := grpc.NewServer(grpc.Creds(creds))
-	//go server.ListenToGossip()
-	// Regiser our server as a gRPC server
-	sentinelproto.RegisterSentinelServer(gRPCserver, server)
+	gRPCserver := newGRPCServer(server, creds)
 	if err := gRPCserver.Serve(lis); err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 	}
+}
+
+func newGRPCServer(server sentinelproto.SentinelServer, creds credentials.TransportCredentials) *grpc.Server {
+	gRPCserver := grpcutil.NewServerWithOpts(creds)
+	sentinelproto.RegisterSentinelServer(gRPCserver, server)
+	return gRPCserver
 }

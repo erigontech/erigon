@@ -30,6 +30,13 @@ func (m *nonceReaderStub) ReadAccountDataForDebug(a accounts.Address) (*accounts
 func (m *nonceReaderStub) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
+func (m *nonceReaderStub) ReadAccountByPlainAddr(a common.Address) (*accounts.Account, error) {
+	return m.ReadAccountData(accounts.InternAddress(a))
+}
+func (m *nonceReaderStub) HasAccount(a common.Address) (bool, error) {
+	acc, err := m.ReadAccountData(accounts.InternAddress(a))
+	return acc != nil, err
+}
 func (m *nonceReaderStub) HasStorage(accounts.Address) (bool, error)               { return false, nil }
 func (m *nonceReaderStub) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
 func (m *nonceReaderStub) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }

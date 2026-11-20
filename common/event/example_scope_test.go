@@ -31,8 +31,10 @@ import (
 //
 // Our example program consists of two servers, each of which performs a calculation when
 // requested. The servers also allow subscribing to results of all computations.
-type divServer struct{ results event.Feed }
-type mulServer struct{ results event.Feed }
+type (
+	divServer struct{ results event.Feed }
+	mulServer struct{ results event.Feed }
+)
 
 func (s *divServer) do(a, b int) int {
 	r := a / b
@@ -96,9 +98,7 @@ func ExampleSubscriptionScope() {
 	// Run a subscriber in the background.
 	divsub := app.SubscribeResults('/', divs)
 	mulsub := app.SubscribeResults('*', muls)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer fmt.Println("subscriber exited")
 		defer divsub.Unsubscribe()
 		defer mulsub.Unsubscribe()
@@ -114,7 +114,7 @@ func ExampleSubscriptionScope() {
 				return
 			}
 		}
-	}()
+	})
 
 	// Interact with the app.
 	app.Calc('/', 22, 11)

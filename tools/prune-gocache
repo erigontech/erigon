@@ -72,10 +72,10 @@ def main() -> int:
     )
     parser.add_argument(
         "--limit",
-        default="10G",
+        default="20G",
         type=parse_limit,
         metavar="N",
-        help="Maximum cache size. Accepts K/M/G suffixes. Default: 10G",
+        help="Maximum cache size. Accepts K/M/G suffixes. Default: 20G",
     )
     parser.add_argument(
         "--dry-run",
@@ -110,10 +110,13 @@ def main() -> int:
             except OSError:
                 pass
 
-    # Sort: skip files first (True > False), then most recently used.
-    # It's not yet known whether sorting size descending or ascending is better
-    # for cache hit rates — it may not matter much in practice.
-    files.sort(reverse=True)
+    # Sort: skip files first (True > False), then by (atime-mtime, -size) descending.
+    # atime-mtime measures reuse: a large positive delta means the file was written long ago
+    # but accessed recently — a genuine cross-run cache hit. Files written and never reused
+    # have delta≈0 and sort last. This is robust to noatime/relatime mounts where all files
+    # in a single CI run appear accessed at roughly the same time. -size prefers smaller files
+    # as tie-breaker, since action files are tiny and critical; evicting them orphans outputs.
+    files.sort(key=lambda f: (f[0], f[1] - f[2], -f[3]), reverse=True)
 
     if args.debug:
         print("{:<12} {:<12} {:<10} {:<11} {}".format("atime", "mtime", "size", "decision", "path"))
@@ -123,6 +126,8 @@ def main() -> int:
     deleted = 0
     deleted_size = 0
     errors = 0
+    retained_first = retained_last = None
+    deleted_first = deleted_last = None
     for skip, atime, mtime, size, path in files:
         if skip:
             decision = "skip"
@@ -132,6 +137,10 @@ def main() -> int:
             if keep:
                 total += size
                 kept += 1
+                t = (atime, mtime, size)
+                if retained_first is None:
+                    retained_first = t
+                retained_last = t
             delete = not keep
             decision = "retain" if keep else "delete"
 
@@ -142,6 +151,10 @@ def main() -> int:
         if delete:
             deleted += 1
             deleted_size += size
+            t = (atime, mtime, size)
+            if deleted_first is None:
+                deleted_first = t
+            deleted_last = t
             if not args.dry_run:
                 try:
                     os.remove(path)
@@ -149,9 +162,23 @@ def main() -> int:
                     print("failed to remove {}: {}".format(path, e), file=sys.stderr)
                     errors += 1
 
-    action = "would delete" if args.dry_run else "deleted"
-    print("GoCache pruned: kept {} files ({:.2f} GB), {} {} files ({:.2f} GB)".format(
-        kept, total / 1024**3, action, deleted, deleted_size / 1024**3))
+    def fmt_tuple(t):
+        return "({}, {}, {})".format(format_ago(t[0]), format_ago(t[1]), format_size(t[2]))
+
+    action_retain = "would retain" if args.dry_run else "retained"
+    action_delete = "would delete" if args.dry_run else "deleted"
+
+    if retained_first is not None:
+        print("{} {} files ({:.2f} GB) [{}, {}]".format(
+            action_retain, kept, total / 1024**3, fmt_tuple(retained_first), fmt_tuple(retained_last)))
+    else:
+        print("{} {} files ({:.2f} GB)".format(action_retain, kept, total / 1024**3))
+
+    if deleted_first is not None:
+        print("{} {} files ({:.2f} GB) [{}, {}]".format(
+            action_delete, deleted, deleted_size / 1024**3, fmt_tuple(deleted_first), fmt_tuple(deleted_last)))
+    elif deleted:
+        print("{} {} files ({:.2f} GB)".format(action_delete, deleted, deleted_size / 1024**3))
     if errors:
         print("errors: {}".format(errors), file=sys.stderr)
         return 1

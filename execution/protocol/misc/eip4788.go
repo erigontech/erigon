@@ -30,14 +30,7 @@ func ApplyBeaconRootEip4788(
 	tracer *tracing.Hooks,
 	vmctx *tracing.VMContext,
 ) {
-	if tracer != nil {
-		if tracer.OnSystemCallStartV2 != nil && vmctx != nil {
-			tracer.OnSystemCallStartV2(vmctx)
-		} else if tracer.OnSystemCallStart != nil {
-			tracer.OnSystemCallStart()
-		}
-	}
-
+	tracer.EmitSystemCallStart(vmctx)
 	if tracer != nil && tracer.OnSystemCallEnd != nil {
 		defer tracer.OnSystemCallEnd()
 	}

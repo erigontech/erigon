@@ -34,6 +34,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 )
 
@@ -69,20 +70,20 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 		mapSize = 1 * datasize.GB
 	}
 	db := mdbx.New(dbcfg.TemporaryDB, r.logger).
-		InMem(nil, r.dirs.Tmp).MapSize(mapSize).GrowthStep(1 * datasize.MB).MustOpen()
+		InMem(r.dirs.Tmp).MapSize(mapSize).GrowthStep(1 * datasize.MB).MustOpen()
 	defer db.Close()
 
 	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(r.dirs, r.logger, false)
 	if err != nil {
 		return nil, err
 	}
-	agg, err := dbstate.New(r.dirs).Logger(r.logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, db)
+	agg, err := dbstate.New(r.dirs).Logger(r.logger).WithErigonDBSettings(erigonDBSettings).Open(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer agg.Close()
 
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -100,17 +101,21 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	}
 	defer tsd.Close()
 
-	// We must compute genesis commitment from scratch because there's no history for block 0
+	// Seed the genesis state as the replay base: block 0 has no history to reconstruct from.
 	genesis, err := rawdb.ReadGenesis(tx)
 	if err != nil {
 		return nil, err
 	}
 	genesisHeader, _ := genesiswrite.GenesisWithoutStateToBlock(genesis)
-	_, _, err = genesiswrite.ComputeGenesisCommitment(ctx, genesis, ttx, tsd, genesisHeader)
+	ibs, genesisWrites, err := genesiswrite.GenesisState(genesis, genesisHeader)
 	if err != nil {
 		return nil, err
 	}
-	genesisRoot, err := tsd.GetCommitmentCtx().Trie().RootHash()
+	ibs.Close()
+	if err := state.ApplyWrites(genesisWrites, tsd, ttx, 0, 1, false); err != nil {
+		return nil, err
+	}
+	genesisRoot, err := tsd.ComputeCommitment(ctx, ttx, true, 0, 1, "genesis", nil)
 	if err != nil {
 		return nil, err
 	}

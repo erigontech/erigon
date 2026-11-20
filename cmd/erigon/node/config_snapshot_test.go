@@ -17,12 +17,18 @@
 package node
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -36,18 +42,18 @@ func buildEthConfig(t *testing.T, args []string) *ethconfig.Config {
 	t.Helper()
 
 	var result *ethconfig.Config
-	app := cli.NewApp()
+	app := &cli.Command{}
 	app.Flags = erigoncli.DefaultFlags
-	app.Action = func(ctx *cli.Context) error {
+	app.Action = func(nodeCtx context.Context, ctx *cli.Command) error {
 		logger := log.Root()
 		nodeCfg := &nodecfg.Config{}
 		nodeCfg.Dirs.DataDir = t.TempDir()
 		ethCfg := ethconfig.Defaults
-		erigoncli.BuildEthConfig(ctx, nodeCfg, &ethCfg, logger)
+		erigoncli.BuildEthConfig(nodeCtx, ctx, nodeCfg, &ethCfg, logger)
 		result = &ethCfg
 		return nil
 	}
-	require.NoError(t, app.Run(append([]string{"erigon"}, args...)))
+	require.NoError(t, app.Run(context.Background(), append([]string{"erigon"}, args...)))
 	require.NotNil(t, result)
 	return result
 }
@@ -70,6 +76,7 @@ type configSnapshot struct {
 	// Feature flags
 	ExperimentalBAL     bool `json:"experimental_bal"`
 	KeepExecutionProofs bool `json:"keep_execution_proofs"`
+	PersistReceipts     bool `json:"persist_receipts"`
 
 	// Snapshot config
 	SnapKeepBlocks bool `json:"snap_keep_blocks"`
@@ -78,8 +85,6 @@ type configSnapshot struct {
 	NoDownloader   bool `json:"no_downloader"`
 
 	// Consensus
-	HeimdallURL     string `json:"heimdall_url"`
-	WithoutHeimdall bool   `json:"without_heimdall"`
 }
 
 func snapshotConfig(cfg *ethconfig.Config) configSnapshot {
@@ -95,12 +100,11 @@ func snapshotConfig(cfg *ethconfig.Config) configSnapshot {
 		ExecWorkerCount:     cfg.Sync.ExecWorkerCount,
 		ExperimentalBAL:     cfg.ExperimentalBAL,
 		KeepExecutionProofs: cfg.Sync.KeepExecutionProofs,
+		PersistReceipts:     cfg.Sync.PersistReceiptsCacheV2,
 		SnapKeepBlocks:      cfg.Snapshot.KeepBlocks,
 		SnapProduceE2:       cfg.Snapshot.ProduceE2,
 		SnapProduceE3:       cfg.Snapshot.ProduceE3,
 		NoDownloader:        cfg.Snapshot.NoDownloader,
-		HeimdallURL:         cfg.HeimdallURL,
-		WithoutHeimdall:     cfg.WithoutHeimdall,
 	}
 }
 
@@ -116,12 +120,19 @@ func TestConfigDefaults(t *testing.T) {
 	require.True(t, snap.InternalCL, "internal CL (Caplin) is on by default")
 	require.False(t, snap.ExperimentalBAL, "experimental BAL should be off by default")
 	require.False(t, snap.KeepExecutionProofs, "keep execution proofs should be off by default")
+	require.True(t, snap.PersistReceipts, "persist receipts is on by default")
 
 	// Snapshot defaults
 	require.True(t, snap.SnapProduceE2, "snap produce e2 should be on by default")
 	require.True(t, snap.SnapProduceE3, "snap produce e3 should be on by default")
 	require.False(t, snap.NoDownloader, "downloader should be enabled by default")
 	require.False(t, snap.SnapKeepBlocks, "snap keep blocks should be off by default")
+}
+
+func TestConfigCommitmentV3StartsOnFreshDatadir(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	cfg := buildEthConfig(t, nil)
+	require.False(t, cfg.Snapshot.NoDownloader)
 }
 
 // TestConfigWithFlags verifies that specific flag combinations produce the
@@ -162,13 +173,6 @@ func TestConfigWithFlags(t *testing.T) {
 			},
 		},
 		{
-			name: "without heimdall",
-			args: []string{"--bor.withoutheimdall"},
-			check: func(t *testing.T, snap configSnapshot) {
-				require.True(t, snap.WithoutHeimdall)
-			},
-		},
-		{
 			name: "sync loop block limit",
 			args: []string{"--sync.loop.block.limit=1000"},
 			check: func(t *testing.T, snap configSnapshot) {
@@ -182,6 +186,73 @@ func TestConfigWithFlags(t *testing.T) {
 			cfg := buildEthConfig(t, tt.args)
 			snap := snapshotConfig(cfg)
 			tt.check(t, snap)
+		})
+	}
+}
+
+// TestPersistReceiptsDefaultByMode pins that the historical receipts cache
+// defaults to on in every prune mode, and that the legacy --persist.receipts
+// alias keeps working.
+func TestPersistReceiptsDefaultByMode(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"default mode", nil, true},
+		{"archive", []string{"--prune.mode=archive"}, true},
+		{"full", []string{"--prune.mode=full"}, true},
+		{"minimal", []string{"--prune.mode=minimal"}, true},
+		{"blocks", []string{"--prune.mode=blocks"}, true},
+		{"explicit on with full", []string{"--prune.mode=full", "--prune.include-receipts"}, true},
+		{"explicit on with archive", []string{"--prune.mode=archive", "--prune.include-receipts"}, true},
+		{"explicit off with full", []string{"--prune.mode=full", "--prune.include-receipts=false"}, false},
+		{"legacy persist.receipts alias", []string{"--prune.mode=full", "--persist.receipts"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := buildEthConfig(t, tt.args)
+			require.Equal(t, tt.want, cfg.Sync.PersistReceiptsCacheV2)
+		})
+	}
+}
+
+// A datadir created before the default flipped keeps the value it was built
+// with: the stored flag wins over the config, in both directions.
+func TestPersistReceiptsStoredValueOverridesDefault(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		stored     bool
+		fromConfig bool
+		want       bool
+	}{
+		{"receipts-off datadir ignores the new default", false, true, false},
+		{"receipts-on datadir ignores an explicit opt-out", true, false, true},
+		{"agreement leaves the value alone", true, true, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+				return kvcfg.PersistReceipts.ForceWrite(tx, tt.stored)
+			}))
+
+			var notChanged, got bool
+			require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+				var err error
+				notChanged, got, err = kvcfg.PersistReceipts.EnsureNotChanged(tx, tt.fromConfig)
+				return err
+			}))
+
+			require.Equal(t, tt.want, got)
+			require.Equal(t, tt.stored == tt.fromConfig, notChanged)
+
+			var after bool
+			require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
+				var err error
+				after, err = kvcfg.PersistReceipts.Enabled(tx)
+				return err
+			}))
+			require.Equal(t, tt.stored, after, "the stored flag must survive the check")
 		})
 	}
 }

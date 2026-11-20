@@ -20,10 +20,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
-	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -31,21 +30,16 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type StateChangeSet struct {
-	Diffs [kv.DomainLen]kv.DomainDiff // there are 4 domains of state changes
-}
-
-func (s *StateChangeSet) Copy() *StateChangeSet {
-	res := *s
-	for i := range s.Diffs {
-		res.Diffs[i] = *s.Diffs[i].Copy()
-	}
-	return &res
+	Diffs [kv.DomainLen]kv.DomainDiff
 }
 
 func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
+	out = slices.Grow(out, serializeDiffSetBufLen(diffSet))
+
 	// Version prefix: [0, 1]. Two bytes so we can distinguish from the old format where
 	// byte[0] is dictLen (>=1 for non-empty, 0 only when diffSetLen is also 0).
 	// New format: byte[0]==0, byte[1]>0 (version). Old format: byte[0]>=1 or both bytes==0.
@@ -53,29 +47,6 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 
 	if len(diffSet) == 0 {
 		return append(out, 0, 0, 0, 0) // diffSet len (4) = 0
-	}
-
-	totalKeyLen := 0
-	totalValueLen := 0
-	for i := range diffSet {
-		totalKeyLen += len(diffSet[i].Key)
-		if diffSet[i].Value != nil {
-			totalValueLen += len(diffSet[i].Value)
-		}
-	}
-
-	// Format: version(2) + uint32(len) + per entry: uint32(keyLen) + key + uint8(hasValue) + [uint32(valLen) + val]
-	totalSize := len(out) + 4 + len(diffSet)*(4+1) + totalKeyLen + totalValueLen
-	// Add space for value length prefixes (only for entries with values)
-	for i := range diffSet {
-		if diffSet[i].Value != nil {
-			totalSize += 4
-		}
-	}
-	if cap(out) < totalSize {
-		ret := make([]byte, len(out), totalSize)
-		copy(ret, out)
-		out = ret
 	}
 	ret := out
 
@@ -220,14 +191,15 @@ func MergeDiffSets(newer, older []kv.DomainEntryDiff) []kv.DomainEntryDiff {
 	i, j := 0, 0
 	for i < len(newer) && j < len(older) {
 		cmp := strings.Compare(older[j].Key, newer[i].Key)
-		if cmp < 0 {
+		switch {
+		case cmp < 0:
 			result = append(result, older[j])
 			j++
-		} else if cmp == 0 {
+		case cmp == 0:
 			result = append(result, older[j])
 			i++
 			j++
-		} else {
+		default:
 			result = append(result, newer[i])
 			i++
 		}
@@ -243,12 +215,12 @@ func MergeDiffSets(newer, older []kv.DomainEntryDiff) []kv.DomainEntryDiff {
 	return result
 }
 
-func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
+func (s *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 	// Do  diff_length + diffSet
 	ret := out
 	tmp := make([]byte, 4)
-	for i := range d.Diffs {
-		diffSet := d.Diffs[i].GetDiffSet()
+	for i := range s.Diffs {
+		diffSet := s.Diffs[i].GetDiffSet()
 		binary.BigEndian.PutUint32(tmp, uint32(serializeDiffSetBufLen(diffSet)))
 		ret = append(ret, tmp...)
 
@@ -257,14 +229,15 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 				for _, entry := range diffSet {
 					address := entry.Key[:len(entry.Key)-8]
 					keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-					if entry.Value != nil && len(entry.Value) > 0 {
+					switch {
+					case len(entry.Value) > 0:
 						var account accounts.Account
 						if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
 							fmt.Printf("diffset (Block:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockNumber, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
 						}
-					} else if entry.Value == nil {
+					case entry.Value == nil:
 						fmt.Printf("diffset (Block:%d): acc %x: [different step], step: %d\n", blockNumber, address, keyStep)
-					} else {
+					default:
 						fmt.Printf("diffset (Block:%d): del acc: %x, step: %d\n", blockNumber, address, keyStep)
 					}
 				}
@@ -276,11 +249,12 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 					copy(address[:], entry.Key[:length.Addr])
 					copy(location[:], entry.Key[length.Addr:len(entry.Key)-8])
 					keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-					if entry.Value != nil && len(entry.Value) > 0 {
+					switch {
+					case len(entry.Value) > 0:
 						fmt.Printf("diffset (Block:%d): storage [%x %x] => [%x]\n", blockNumber, address, location, entry.Value)
-					} else if entry.Value == nil {
+					case entry.Value == nil:
 						fmt.Printf("diffset (Block:%d): storage [%x %x] => [different step], step: %d\n", blockNumber, address, location, keyStep)
-					} else {
+					default:
 						fmt.Printf("diffset (Block:%d): storage [%x %x] => [empty], step: %d\n", blockNumber, address, location, keyStep)
 					}
 				}
@@ -316,7 +290,10 @@ func deserializeKeys(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {
 }
 
 const DiffChunkKeyLen = 48
-const DiffChunkLen = 4*1024 - 32
+
+// DiffChunkLen keeps 2 chunks inline in one mdbx leaf page - values bigger than half a page go to
+// overflow pages, which cost extra FreeList maintenance. See TestNoOverflowPages.
+const DiffChunkLen = int(ethconfig.DefaultChainDBPageSize)/2 - DiffChunkKeyLen - 32
 
 type threadSafeBuf struct {
 	b []byte
@@ -351,7 +328,7 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	binary.BigEndian.PutUint64(key, blockNumber)
 	copy(key[8:], blockHash[:])
 
-	for i := 0; i < chunkCount; i++ {
+	for i := range chunkCount {
 		start := i * DiffChunkLen
 		end := min((i+1)*DiffChunkLen, len(keys))
 		binary.BigEndian.PutUint64(key[40:], uint64(i))
@@ -395,8 +372,8 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 	}
 
 	key := make([]byte, 48)
-	val := make([]byte, 0, DiffChunkLen*chunkCount)
-	for i := uint64(0); i < chunkCount; i++ {
+	val := make([]byte, 0, DiffChunkLen*int(chunkCount))
+	for i := range chunkCount {
 		binary.BigEndian.PutUint64(key, blockNumber)
 		copy(key[8:], blockHash[:])
 		binary.BigEndian.PutUint64(key[40:], i)
@@ -412,8 +389,9 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 
 	return deserializeKeys(val), true, nil
 }
+
 func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
-	//TODO: move this function somewhere from `commitment`/`state` pkg
+	// TODO: move this function somewhere from `commitment`/`state` pkg
 	changesetsCursor, err := tx.Cursor(kv.ChangeSets3)
 	if err != nil {
 		return 0, err
@@ -447,193 +425,4 @@ func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 		return 0, err
 	}
 	return blockNumber, nil
-
-}
-
-type DomainIOMetrics struct {
-	CacheReadCount    int64
-	CacheReadDuration time.Duration
-	CacheGetCount     int64
-	CachePutCount     int64
-	CacheGetSize      int
-	CacheGetKeySize   int
-	CacheGetValueSize int
-	CachePutSize      int
-	CachePutKeySize   int
-	CachePutValueSize int
-	DbReadCount       int64
-	DbReadDuration    time.Duration
-	FileReadCount     int64
-	FileReadDuration  time.Duration
-	// UniqueFileReadCount counts distinct prefixes that fell through to a file
-	// read; FileReadCount / UniqueFileReadCount is the read-amplification ratio.
-	UniqueFileReadCount int64
-	// UniqueLenBuckets is the prefix-byte-length distribution of those distinct
-	// prefixes, bucketed by lenBucket (maps compact-encoded length to trie depth).
-	UniqueLenBuckets [10]int64
-
-	// StateCache hit/miss tracks the SharedDomains.stateCache layer
-	// specifically (the per-execution Account/Storage/Code cache), distinct
-	// from CacheReadCount which counts sd.mem and sd.parent.mem hits.
-	// Hit means stateCache.Get returned ok (we skipped MDBX+files).
-	// Miss means stateCache.Get returned !ok and we fell through to aggTx.
-	StateCacheHitCount  int64
-	StateCacheMissCount int64
-}
-
-type DomainMetrics struct {
-	sync.RWMutex
-	DomainIOMetrics
-	Domains map[kv.Domain]*DomainIOMetrics
-
-	// seenFileReads dedups prefixes for UpdateFileReadsUnique. Capped at
-	// maxSeenFileReads entries: past the cap, uniqueness counting stops so the
-	// set can't grow without bound under a long-lived dbg.KVReadLevelledMetrics run.
-	seenFileReads    sync.Map
-	seenFileReadsLen atomic.Int64
-}
-
-// maxSeenFileReads bounds the read-amplification dedup set; beyond it
-// UniqueFileReadCount saturates rather than tracking every prefix forever.
-const maxSeenFileReads = 1 << 20
-
-func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.CacheReadCount++
-	readDuration := time.Since(start)
-	dm.CacheReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.CacheReadCount++
-		d.CacheReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			CacheReadCount:    1,
-			CacheReadDuration: readDuration,
-		}
-	}
-}
-
-func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.DbReadCount++
-	readDuration := time.Since(start)
-	dm.DbReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.DbReadCount++
-		d.DbReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			DbReadCount:    1,
-			DbReadDuration: readDuration,
-		}
-	}
-}
-
-func (dm *DomainMetrics) UpdateStateCacheHit(domain kv.Domain) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.StateCacheHitCount++
-	if d, ok := dm.Domains[domain]; ok {
-		d.StateCacheHitCount++
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{StateCacheHitCount: 1}
-	}
-}
-
-func (dm *DomainMetrics) UpdateStateCacheMiss(domain kv.Domain) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.StateCacheMissCount++
-	if d, ok := dm.Domains[domain]; ok {
-		d.StateCacheMissCount++
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{StateCacheMissCount: 1}
-	}
-}
-
-func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.FileReadCount++
-	readDuration := time.Since(start)
-	dm.FileReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.FileReadCount++
-		d.FileReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			FileReadCount:    1,
-			FileReadDuration: readDuration,
-		}
-	}
-}
-
-// Maps prefix byte-length to a UniqueLenBuckets index.
-func lenBucket(n int) int {
-	switch {
-	case n <= 1:
-		return 0
-	case n <= 4:
-		return 1
-	case n <= 8:
-		return 2
-	case n <= 16:
-		return 3
-	case n <= 32:
-		return 4
-	case n == 33:
-		return 5
-	case n <= 36:
-		return 6
-	case n <= 44:
-		return 7
-	case n <= 64:
-		return 8
-	default:
-		return 9
-	}
-}
-
-// Like UpdateFileReads but also tracks prefix uniqueness for the read-amplification ratio; copies key.
-func (dm *DomainMetrics) UpdateFileReadsUnique(domain kv.Domain, key []byte, start time.Time) {
-	// Composite key so two domains can hold the same prefix shape without colliding.
-	domainKey := domain.String() + ":" + string(key)
-	alreadySeen := true
-	if dm.seenFileReadsLen.Load() < maxSeenFileReads {
-		if _, loaded := dm.seenFileReads.LoadOrStore(domainKey, struct{}{}); !loaded {
-			dm.seenFileReadsLen.Add(1)
-			alreadySeen = false
-		}
-	}
-	bucket := lenBucket(len(key))
-
-	dm.Lock()
-	defer dm.Unlock()
-	dm.FileReadCount++
-	readDuration := time.Since(start)
-	dm.FileReadDuration += readDuration
-	if !alreadySeen {
-		dm.UniqueFileReadCount++
-		dm.UniqueLenBuckets[bucket]++
-	}
-	if d, ok := dm.Domains[domain]; ok {
-		d.FileReadCount++
-		d.FileReadDuration += readDuration
-		if !alreadySeen {
-			d.UniqueFileReadCount++
-			d.UniqueLenBuckets[bucket]++
-		}
-	} else {
-		newD := &DomainIOMetrics{
-			FileReadCount:    1,
-			FileReadDuration: readDuration,
-		}
-		if !alreadySeen {
-			newD.UniqueFileReadCount = 1
-			newD.UniqueLenBuckets[bucket] = 1
-		}
-		dm.Domains[domain] = newD
-	}
 }

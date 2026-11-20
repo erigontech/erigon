@@ -27,13 +27,12 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/edsrzf/mmap-go"
-
-	"github.com/erigontech/erigon/db/recsplit/efcommon"
 
 	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/recsplit/efcommon"
 )
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
@@ -71,7 +70,7 @@ type EliasFano struct {
 // EliasFano so heap-backed EliasFano carries no extra overhead.
 type OffHeapBuilder struct {
 	*EliasFano
-	backingMmap mmap.MMap
+	backingMmap mmap.Rw
 	backingFile *os.File
 }
 
@@ -89,7 +88,7 @@ func (b *OffHeapBuilder) Close() {
 	if b.backingFile != nil {
 		name := b.backingFile.Name()
 		_ = b.backingFile.Close()
-		dir.RemoveFile(name)
+		_ = dir.RemoveFile(name)
 		b.backingFile = nil
 	}
 }
@@ -106,14 +105,6 @@ func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
 	ef.u = maxOffset + 1
 	ef.wordsUpperBits = ef.deriveFields()
 	return ef
-}
-
-// fallocate extends f to size bytes and forces disk-block allocation. On
-// sparse-file filesystems (Linux ext4) an RDWR mmap write to an unallocated
-// region raises SIGBUS; this write surfaces ENOSPC as a normal error instead.
-func fallocate(f *os.File, size int64) error {
-	_, err := f.WriteAt([]byte{0}, size-1)
-	return err
 }
 
 // NewEliasFanoOffHeap is like NewEliasFano but backs the data buffer with a
@@ -141,13 +132,13 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (_ 
 	defer func() {
 		if err != nil {
 			f.Close()
-			dir.RemoveFile(f.Name())
+			_ = dir.RemoveFile(f.Name())
 		}
 	}()
 	if err := fallocate(f, sizeBytes); err != nil {
 		return nil, fmt.Errorf("pre-allocate ef tmp file: %w", err)
 	}
-	m, err := mmap.MapRegion(f, int(sizeBytes), mmap.RDWR, 0, 0)
+	m, err := mmap.OpenRw(f, int(sizeBytes))
 	if err != nil {
 		return nil, fmt.Errorf("mmap ef tmp file: %w", err)
 	}
@@ -304,6 +295,52 @@ func (ef *EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord
 	return
 }
 
+// getProbe is get with pr touching the pages it reads; a separate copy keeps get free of the touches.
+func (ef *EliasFano) getProbe(i uint64, pr *mmap.Probe) (val uint64, window uint64, sel int, currWord uint64, lower uint64) {
+	if ef.l != 0 {
+		lowerPos := i * ef.l
+		idx64, shift := lowerPos/64, lowerPos%64
+		pr.Touch(unsafe.Pointer(&ef.lowerBits[idx64]))
+		lower = ef.lowerBits[idx64] >> shift
+		if shift > 0 {
+			lower |= ef.lowerBits[idx64+1] << (64 - shift)
+		}
+	}
+
+	jumpSuperQ := (i / superQ) * superQSize
+	jumpInsideSuperQ := (i % superQ) / q
+	idx64, shift := jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
+	mask := uint64(0xffffffff) << shift
+	pr.Touch(unsafe.Pointer(&ef.jump[jumpSuperQ]))
+	pr.Touch(unsafe.Pointer(&ef.jump[idx64]))
+	jump := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
+
+	currWord = jump / 64
+	pr.Touch(unsafe.Pointer(&ef.upperBits[currWord]))
+	window = ef.upperBits[currWord] & (uint64(0xffffffffffffffff) << (jump % 64))
+	d := int(i & qMask)
+
+	for bitCount := bits.OnesCount64(window); bitCount <= d; bitCount = bits.OnesCount64(window) {
+		currWord++
+		window = ef.upperBits[currWord]
+		d -= bitCount
+	}
+
+	sel = bitutil.Select64(window, d)
+	val = (currWord*64+uint64(sel)-i)<<ef.l | (lower & ef.lowerBitsMask)
+
+	return
+}
+
+// GetProbe is Get with pr touching the pages it reads.
+func (ef *EliasFano) GetProbe(i uint64, pr *mmap.Probe) uint64 {
+	if pr == nil {
+		return ef.Get(i)
+	}
+	val, _, _, _, _ := ef.getProbe(i, pr)
+	return val
+}
+
 func (ef *EliasFano) Get(i uint64) uint64 {
 	val, _, _, _, _ := ef.get(i)
 	return val
@@ -347,7 +384,7 @@ func (ef *EliasFano) upper(i uint64) uint64 {
 }
 
 func Seek(data []byte, n uint64) (uint64, uint64, bool) {
-	ef, _ := ReadEliasFano(data) //for better perf: app-code can use ef.Reset(data).Seek(n)
+	ef, _ := ReadEliasFano(data) // for better perf: app-code can use ef.Reset(data).Seek(n)
 	return ef.Seek(n)
 }
 
@@ -566,18 +603,18 @@ type EliasFanoIter struct {
 	lowerBits []uint64
 	upperBits []uint64
 
-	//constants
+	// constants
 	count         uint64
 	lowerBitsMask uint64
 	l             uint64
 	upperStep     uint64
 	reverse       bool
 
-	//fields of current value
+	// fields of current value
 	upper    uint64
 	upperIdx uint64
 
-	//fields of next value
+	// fields of next value
 	lowerIdx  uint64
 	upperMask uint64
 
@@ -783,7 +820,79 @@ func (ef *EliasFano) AppendBytes(buf []byte) []byte {
 	return buf
 }
 
-// Read inputs the state of golomb rice encoding from a reader s
+// ReadEliasFanoChecked is ReadEliasFano for bytes that may be corrupt. The
+// plain form derives its layout from the count and universe in the header and
+// allocates from it, so a forged header panics in makeslice before any caller
+// can look at the result.
+func ReadEliasFanoChecked(r []byte) (*EliasFano, int, error) {
+	if len(r) < 16 {
+		return nil, 0, fmt.Errorf("elias-fano header needs 16 bytes, got %d", len(r))
+	}
+	probe := &EliasFano{
+		count: binary.BigEndian.Uint64(r[:8]),
+		u:     binary.BigEndian.Uint64(r[8:16]),
+	}
+	// count is stored as n-1, so 0 is a one-element sequence. These two values
+	// are the ones computeLayout cannot survive: count+1 overflows to a zero
+	// divisor, and universe 0 underflows maxOffset.
+	if probe.count == math.MaxUint64 || probe.u == 0 {
+		return nil, 0, fmt.Errorf("elias-fano count %d, universe %d", probe.count, probe.u)
+	}
+	_, _, _, totalWords := probe.computeLayout()
+	if avail := (len(r) - 16) / uint64Size; totalWords < 0 || totalWords > avail {
+		return nil, 0, fmt.Errorf("elias-fano needs %d words, %d available", totalWords, avail)
+	}
+	ef, n := ReadEliasFano(r)
+	if err := ef.checkUpperBits(); err != nil {
+		return nil, 0, err
+	}
+	return ef, n, nil
+}
+
+// checkUpperBits replays the jump-table construction against the upper bits and
+// compares, which is the same single pass a bit count would cost. A lookup jumps
+// to the bit an entry names and then walks the slice unchecked, so an entry the
+// bits do not agree with is an out-of-range index rather than a wrong answer.
+func (ef *EliasFano) checkUpperBits() error {
+	mismatch := func(what string, i, want, got uint64) error {
+		return fmt.Errorf("elias-fano %s for element %d is %d, upper bits say %d", what, i, got, want)
+	}
+	var c, lastSuperQ uint64
+	for i := uint64(0); i < uint64(len(ef.upperBits)); i++ {
+		for word := ef.upperBits[i]; word != 0; word &= word - 1 {
+			b := uint64(bits.TrailingZeros64(word))
+			if c&superQMask == 0 {
+				lastSuperQ = i*64 + b
+				idx := (c / superQ) * superQSize
+				if idx >= uint64(len(ef.jump)) {
+					return fmt.Errorf("elias-fano jump table holds %d words, element %d reads word %d", len(ef.jump), c, idx)
+				}
+				if ef.jump[idx] != lastSuperQ {
+					return mismatch("superQ jump", c, lastSuperQ, ef.jump[idx])
+				}
+			}
+			if c&qMask == 0 {
+				jumpSuperQ := (c / superQ) * superQSize
+				jumpInsideSuperQ := (c % superQ) / q
+				idx64, shift := jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
+				if idx64 >= uint64(len(ef.jump)) {
+					return fmt.Errorf("elias-fano jump table holds %d words, element %d reads word %d", len(ef.jump), c, idx64)
+				}
+				want := i*64 + b - lastSuperQ
+				if got := (ef.jump[idx64] >> shift) & 0xffffffff; got != want {
+					return mismatch("jump offset", c, want, got)
+				}
+			}
+			c++
+		}
+	}
+	if c != ef.count+1 {
+		return fmt.Errorf("elias-fano upper bits hold %d values, header says %d", c, ef.count+1)
+	}
+	return nil
+}
+
+// ReadEliasFano inputs the state of golomb rice encoding from a reader s
 func ReadEliasFano(r []byte) (*EliasFano, int) {
 	ef := &EliasFano{
 		count: binary.BigEndian.Uint64(r[:8]),
@@ -930,9 +1039,9 @@ func (ef *DoubleEliasFano) build(cumKeys []uint64, position []uint64) bool {
 		set(ef.upperBitsPosition, ((position[i]-bitDelta)>>ef.lPosition)+i)
 		//fmt.Printf("i=%d, set pos for %d = %d\n", i, position[i]-bitDelta, (position[i]-bitDelta)>>ef.lPosition+i)
 	}
-	//fmt.Printf("loweBits %b\n", ef.lowerBits)
-	//fmt.Printf("upperBitsCumKeys %b\n", ef.upperBitsCumKeys)
-	//fmt.Printf("upperBitsPosition %b\n", ef.upperBitsPosition)
+	// fmt.Printf("loweBits %b\n", ef.lowerBits)
+	// fmt.Printf("upperBitsCumKeys %b\n", ef.upperBitsCumKeys)
+	// fmt.Printf("upperBitsPosition %b\n", ef.upperBitsPosition)
 	// i iterates over the 64-bit words in the wordCumKeys vector
 	// c iterates over bits in the wordCumKeys
 	// lastSuperQ is the largest multiple of 2^14 (4096) which is no larger than c
@@ -1020,7 +1129,8 @@ func (ef *DoubleEliasFano) Data() []uint64 {
 }
 
 func (ef *DoubleEliasFano) get2(i uint64) (cumKeys uint64, position uint64,
-	windowCumKeys uint64, selectCumKeys int, currWordCumKeys uint64, lower uint64, cumDelta uint64) {
+	windowCumKeys uint64, selectCumKeys int, currWordCumKeys uint64, lower uint64, cumDelta uint64,
+) {
 	posLower := i * (ef.lCumKeys + ef.lPosition)
 	idx64, shift := posLower/64, posLower%64
 	lower = ef.lowerBits[idx64] >> shift

@@ -842,7 +842,7 @@ func (e *ExecModule) frontierStateReader(ctx context.Context) (state.StateReader
 	if sd == nil {
 		// No in-progress or canonical SD yet (the very first block): read genesis/canonical state straight off
 		// the DB tx (a TemporalTx is itself a TemporalGetter). A fresh account reads nonce 0 — correct base.
-		return state.NewReaderV3(roTx), func() { roTx.Rollback() }, nil
+		return state.NewReaderV3(execctx.NewTemporalTxStateGetter(roTx)), func() { roTx.Rollback() }, nil
 	}
 	ov := sd.BlockOverlay()
 	if ov != nil {

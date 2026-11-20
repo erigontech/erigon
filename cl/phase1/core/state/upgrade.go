@@ -17,8 +17,9 @@
 package state
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -43,10 +44,11 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 	b.SetInactivityScores(make([]uint64, b.ValidatorLength()))
 	// Change version
 	b.SetVersion(clparams.AltairVersion)
+	b.ValidatorSet().ClearPhase0Data()
 	// Fill in previous epoch participation from the pre state's pending attestations
 	if err := solid.RangeErr[*solid.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, i2 int) error {
 		attestationData := pa.Data
-		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay, false)
+		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay, 0, false)
 		if err != nil {
 			return err
 		}
@@ -71,17 +73,20 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 
 	b.ResetPreviousEpochAttestations()
 	// Process sync committees
-	var err error
 	currentSyncCommittee, err := b.ComputeNextSyncCommittee()
 	if err != nil {
 		return err
 	}
-	b.SetCurrentSyncCommittee(currentSyncCommittee)
+	if err := b.SetCurrentSyncCommittee(currentSyncCommittee); err != nil {
+		return err
+	}
 	nextSyncCommittee, err := b.ComputeNextSyncCommittee()
 	if err != nil {
 		return err
 	}
-	b.SetNextSyncCommittee(nextSyncCommittee)
+	if err := b.SetNextSyncCommittee(nextSyncCommittee); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -200,14 +205,12 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		return true
 	})
 	// sort
-	sort.Slice(validators, func(i, j int) bool {
-		vi, vj := validators[i].validator, validators[j].validator
-		if vi.ActivationEligibilityEpoch() == vj.ActivationEligibilityEpoch() {
-			//  If eligibility epochs are equal, compare indices
-			return validators[i].index < validators[j].index
+	slices.SortFunc(validators, func(a, b tempValidator) int {
+		ae, be := a.validator.ActivationEligibilityEpoch(), b.validator.ActivationEligibilityEpoch()
+		if ae == be {
+			return cmp.Compare(a.index, b.index)
 		}
-		// Otherwise, sort by activationEligibilityEpoch
-		return vi.ActivationEligibilityEpoch() < vj.ActivationEligibilityEpoch()
+		return cmp.Compare(ae, be)
 	})
 
 	for _, v := range validators {
@@ -220,10 +223,14 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		}
 		curValidator := v.validator
 		// Do NOT directly modify the validator in the validator set, because we need to mark validatorSet as dirty in BeaconState
-		//curValidator.SetEffectiveBalance(0)
-		//curValidator.SetActivationEligibilityEpoch(b.BeaconConfig().FarFutureEpoch)
-		b.SetEffectiveBalanceForValidatorAtIndex(int(v.index), 0)
-		b.SetActivationEligibilityEpochForValidatorAtIndex(int(v.index), b.BeaconConfig().FarFutureEpoch)
+		// curValidator.SetEffectiveBalance(0)
+		// curValidator.SetActivationEligibilityEpoch(b.BeaconConfig().FarFutureEpoch)
+		if err := b.SetEffectiveBalanceForValidatorAtIndex(int(v.index), 0); err != nil {
+			return err
+		}
+		if err := b.SetActivationEligibilityEpochForValidatorAtIndex(int(v.index), b.BeaconConfig().FarFutureEpoch); err != nil {
+			return err
+		}
 		// Use bls.G2_POINT_AT_INFINITY as a signature field placeholder
 		// and GENESIS_SLOT to distinguish from a pending deposit request
 		b.AppendPendingDeposit(&solid.PendingDeposit{
@@ -236,13 +243,19 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 	}
 
 	// Ensure early adopters of compounding credentials go through the activation churn
+	var queueErr error
 	b.ValidatorSet().Range(func(vindex int, v solid.Validator, _ int) bool {
 		if HasCompoundingWithdrawalCredential(v, b.BeaconConfig()) {
-			QueueExcessActiveBalance(b, uint64(vindex), &v)
+			if queueErr = QueueExcessActiveBalance(b, uint64(vindex), &v); queueErr != nil {
+				return false
+			}
 		}
 		return true
 	})
-	log.Info("Upgrade to Electra complete")
+	if queueErr != nil {
+		return queueErr
+	}
+	log.Debug("Upgrade to Electra complete")
 	return nil
 }
 
@@ -269,13 +282,13 @@ func (b *CachingBeaconState) UpgradeToFulu() error {
 		if err != nil {
 			return err
 		}
-		for j := 0; j < len(proposerIndices); j++ {
+		for j := range proposerIndices {
 			lookahead.Set(i*int(b.BeaconConfig().SlotsPerEpoch)+j, proposerIndices[j])
 		}
 	}
 	b.SetProposerLookahead(lookahead)
 
-	log.Info("Upgrade to Fulu complete")
+	log.Debug("Upgrade to Fulu complete")
 	return nil
 }
 
@@ -291,29 +304,27 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 	forkData.CurrentVersion = utils.Uint32ToBytes4(uint32(cfg.GloasForkVersion))
 	b.SetFork(forkData)
 
-	// Get the latest block hash from the previous execution payload header
-	latestBlockHash := b.LatestExecutionPayloadHeader().BlockHash
+	latestPayloadHeader := b.LatestExecutionPayloadHeader()
+	latestBlockHeader := b.LatestBlockHeader()
+	latestBlockHash := latestPayloadHeader.BlockHash
 
-	// Replace latest_execution_payload_header with latest_execution_payload_bid
-	// The bid contains only the block_hash from the previous header
-	// Compute the execution_requests_root for an empty ExecutionRequests
-	emptyRequests := cltypes.NewExecutionRequests(cfg)
+	emptyRequests := cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
 	emptyRequestsRoot, err := emptyRequests.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("UpgradeToGloas: failed to hash empty execution requests: %w", err)
 	}
 
 	bid := &cltypes.ExecutionPayloadBid{
-		ParentBlockHash:       common.Hash{},
+		ParentBlockHash:       latestPayloadHeader.ParentHash,
+		ParentBlockRoot:       latestBlockHeader.ParentRoot,
 		BlockHash:             latestBlockHash,
-		BuilderIndex:          0,
-		Slot:                  0,
+		PrevRandao:            latestPayloadHeader.PrevRandao,
+		GasLimit:              latestPayloadHeader.GasLimit,
+		BuilderIndex:          clparams.BuilderIndexSelfBuild,
+		Slot:                  latestBlockHeader.Slot,
 		Value:                 0,
 		BlobKzgCommitments:    *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 		ExecutionRequestsRoot: emptyRequestsRoot,
-		PrevRandao:            common.Hash{},
-		GasLimit:              b.LatestExecutionPayloadHeader().GasLimit,
-		ParentBlockRoot:       common.Hash{},
 	}
 	b.SetLatestExecutionPayloadBid(bid)
 
@@ -365,7 +376,7 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 		return err
 	}
 
-	log.Info("Upgrade to Gloas complete")
+	log.Debug("Upgrade to Gloas complete")
 	return nil
 }
 
@@ -375,13 +386,6 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
 	cfg := b.BeaconConfig()
 
-	// Build a set of validator pubkeys
-	validatorPubkeys := make(map[common.Bytes48]struct{})
-	b.ValidatorSet().Range(func(_ int, v solid.Validator, _ int) bool {
-		validatorPubkeys[v.PublicKey()] = struct{}{}
-		return true
-	})
-
 	// Process pending deposits
 	pendingDeposits := b.GetPendingDeposits()
 	newPendingDeposits := solid.NewPendingDepositList(cfg)
@@ -390,7 +394,7 @@ func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
 		deposit := pendingDeposits.Get(i)
 
 		// Deposits for existing validators stay in pending queue
-		if _, isValidator := validatorPubkeys[deposit.PubKey]; isValidator {
+		if _, isValidator := b.ValidatorIndexByPubkey(deposit.PubKey); isValidator {
 			newPendingDeposits.Append(deposit)
 			continue
 		}
@@ -409,7 +413,9 @@ func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
 			}
 		}
 
-		ApplyDepositForBuilder(b, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature, deposit.Slot)
+		if err := ApplyDepositForBuilder(b, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature, deposit.Slot); err != nil {
+			return err
+		}
 	}
 
 	b.SetPendingDeposits(newPendingDeposits)

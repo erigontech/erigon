@@ -88,10 +88,10 @@ func TestSlotExceededTxIsSealedAsFailedAndReplays(t *testing.T) {
 		require.NotNil(t, br)
 		require.Len(t, br.Block.Transactions(), len(nonces))
 
-		vr2, verr := validateChain(ctx, exec, br.Block.Header())
+		vr2, verr := validateChain(ctx, exec, br.Block)
 		require.NoError(t, verr)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, vr2.ValidationStatus, "replay: %s", vr2.ValidationError)
-		ur, uerr := updateForkChoice(ctx, exec, br.Block.Header())
+		ur, uerr := forkChoiceTo(ctx, exec, br.Block.Header())
 		require.NoError(t, uerr)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status)
 		return br

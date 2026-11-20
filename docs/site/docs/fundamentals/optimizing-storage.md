@@ -6,7 +6,7 @@ sidebar_position: 12
 
 # Optimizing Storage
 
-For optimal performance, it's recommended to store the datadir on a fast NVMe-RAID disk. However, if this is not feasible, you can store the history on a cheaper disk and still achieve good performance.
+For optimal performance, store the datadir on a single fast NVMe device formatted with ext4 or XFS — see [Filesystem](../get-started/hardware-requirements#filesystem). If that is not feasible, you can keep the history on a cheaper disk and still achieve good performance.
 
 ### Step 1
 
@@ -19,7 +19,7 @@ Place the `datadir` on the slower disk. Then, create symbolic links (using `ln -
 
 This will speed up the execution of E3.
 
-On the **slow disk** place `datadir` folder with the following structure:
+On the **slow disk** place the `datadir` folder with the following structure:
 
 * `chaindata` (linked to fast disk)
 * `snapshots`

@@ -48,13 +48,13 @@ Note that we've also specified which RPC namespaces to enable in the above comma
 
 ### Running remotely
 
-To start the daemon remotely - just don't set the `--datadir` flag:
+To start the daemon remotely - just don't set the `--datadir` flag. The private API is unauthenticated by default (see [TLS](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)) and can rewind the chain, so bind it to a private address that only the daemon's host can reach, never to `0.0.0.0`:
 
 ```[bash]
 make erigon
-./build/bin/erigon --datadir=<your_data_dir> --private.api.addr=0.0.0.0:9090
+./build/bin/erigon --datadir=<your_data_dir> --private.api.addr=<erigon_private_ip>:9090
 make rpcdaemon
-./build/bin/rpcdaemon --private.api.addr=<erigon_ip>:9090 --txpool.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
+./build/bin/rpcdaemon --private.api.addr=<erigon_private_ip>:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 The daemon should respond with something like:
@@ -205,9 +205,10 @@ If the `--http.url` flag is set, then `--http.addr` and `--http.port` with both 
 
 note that this is NOT geth-style IPC. for that, read the next section, IPC endpoint(geth-compatible)
 
-### HTTPS, HTTP2, and H2C
+### HTTPS and HTTP2
 
-Erigon supports HTTPS, HTTP2, and H2C out of the box. H2C is served by the default HTTP handler.
+Erigon serves HTTP/1.1 on the plain HTTP port and negotiates HTTP/2 over TLS via ALPN. Cleartext HTTP/2 is not
+served: a client that offers it, such as `curl --http2`, is answered on HTTP/1.1.
 
 To enable the HTTPS+HTTP2 server, add flag `--https.enabled`, along with providing flags `--https.cert="/path/to.cert"`
 and `--https.key=/path/to.key`
@@ -265,6 +266,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 |                                            |         |                                                       |
 | eth_getBlockByHash                         | Yes     |                                                       |
 | eth_getBlockByNumber                       | Yes     |                                                       |
+| eth_getHeaderByHash                        | Yes     |                                                       |
+| eth_getHeaderByNumber                      | Yes     |                                                       |
 | eth_getBlockTransactionCountByHash         | Yes     |                                                       |
 | eth_getBlockTransactionCountByNumber       | Yes     |                                                       |
 | eth_getUncleByBlockHashAndIndex            | Yes     |                                                       |
@@ -310,6 +313,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_sendTransaction                        | -       | not yet implemented                                   |
 | eth_sign                                   | No      | deprecated                                            |
 | eth_signTransaction                        | -       | not yet implemented                                   |
+| eth_fillTransaction                        | Yes     |                                                       |
 |                                            |         |                                                       |
 | eth_getProof                               | Yes     | Limited to last 100000 blocks                         |
 |                                            |         |                                                       |
@@ -351,6 +355,10 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_getBlobsV1                          | Yes     |                                                       |
 | engine_getBlobsV2                          | Yes     | Added in Fusaka                                       |
 | engine_getBlobsV3                          | Yes     | Added with BPO3                                       |
+| engine_getBlobsV4                          | Yes     | Added in Amsterdam                                   |
+|                                            |         |                                                       |
+| testing_buildBlockV1                       | Yes     | Testing environments only, disabled by default        |
+| testing_commitBlockV1                      | Yes     | Testing environments only, disabled by default        |
 |                                            |         |                                                       |
 | debug_accountRange                         | Yes     |                                                       |
 | debug_accountAt                            | Yes     |                                                       |
@@ -358,6 +366,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | debug_getModifiedAccountsByNumber          | Yes     |                                                       |
 | debug_getModifiedAccountsByHash            | Yes     |                                                       |
 | debug_getRawBlock                          | Yes     |                                                       |
+| debug_getRawBlockAccessList                | Yes     | Added in Amsterdam (EIP-7928)                         |
 | debug_getRawHeader                         | Yes     |                                                       |
 | debug_getRawReceipts                       | Yes     |                                                       |
 | debug_getRawTransaction                    | Yes     |                                                       |
@@ -387,6 +396,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | txpool_content                             | Yes     | `remote`                                              |
 | txpool_contentFrom                         | Yes     | `remote`                                              |
 | txpool_status                              | Yes     | `remote`                                              |
+| txpool_inspect                             | Yes     | `remote`                                              |
 |                                            |         |                                                       |
 | eth_getCompilers                           | No      | deprecated                                            |
 | eth_compileLLL                             | No      | deprecated                                            |
@@ -410,18 +420,6 @@ The following table shows the current implementation status of Erigon's RPC daem
 | erigon_forks                               | Yes     | Erigon only                                           |
 | erigon_nodeInfo                            | Yes     | Erigon only                                           |
 | erigon_cacheCheck                          | Yes     | Erigon only                                           |
-|                                            |         |                                                       |
-| bor_getSnapshot                            | Yes     | Bor only                                              |
-| bor_getAuthor                              | Yes     | Bor only                                              |
-| bor_getSnapshotAtHash                      | Yes     | Bor only                                              |
-| bor_getSigners                             | Yes     | Bor only                                              |
-| bor_getSignersAtHash                       | Yes     | Bor only                                              |
-| bor_getCurrentProposer                     | Yes     | Bor only                                              |
-| bor_getCurrentValidators                   | Yes     | Bor only                                              |
-| bor_getSnapshotProposer                    | Yes     | Bor only                                              |
-| bor_getSnapshotProposerSequence            | Yes     | Bor only                                              |
-| bor_getRootHash                            | Yes     | Bor only                                              |
-| bor_getVoteOnHash                          | Yes     | Bor only                                              |
 |                                            |         |                                                       |
 | ots_getApiLevel                            | Yes     | Otterscan                                             |
 | ots_getInternalOperations                  | Yes     | Otterscan                                             |

@@ -33,10 +33,11 @@ func TestDependency(t *testing.T) {
 		return dfs.copy()
 	}
 
+	accessors := statecfg.AccessorHashMap
 	dinfo := &DependentInfo{
 		entity:      CommitmentDomainUniversal,
 		filesGetter: fg,
-		accessors:   statecfg.AccessorHashMap,
+		accessors:   &accessors,
 	}
 
 	checker := NewDependencyIntegrityChecker(logger)
@@ -47,7 +48,6 @@ func TestDependency(t *testing.T) {
 		require.Equal(t, resultA, checker.CheckDependentPresent(AccountDomainUniversal, All, startTxNum, endTxNum))
 		require.Equal(t, resultS, checker.CheckDependentPresent(StorageDomainUniversal, All, startTxNum, endTxNum))
 		require.Equal(t, resultC, checker.CheckDependentPresent(CommitmentDomainUniversal, All, startTxNum, endTxNum))
-
 	}
 
 	assertFn(0, 1, true, true, true)
@@ -76,10 +76,11 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 		return dfs.copy()
 	}
 
+	accessors := statecfg.AccessorHashMap
 	dinfo := &DependentInfo{
 		entity:      CommitmentDomainUniversal,
 		filesGetter: fg,
-		accessors:   statecfg.AccessorHashMap,
+		accessors:   &accessors,
 	}
 
 	checker := NewDependencyIntegrityChecker(logger)
@@ -90,7 +91,6 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 		require.Equal(t, resultA, checker.CheckDependentPresent(AccountDomainUniversal, All, startTxNum, endTxNum))
 		require.Equal(t, resultS, checker.CheckDependentPresent(StorageDomainUniversal, All, startTxNum, endTxNum))
 		require.Equal(t, resultC, checker.CheckDependentPresent(CommitmentDomainUniversal, All, startTxNum, endTxNum))
-
 	}
 
 	assertFn(0, 1, true, true, true)
@@ -132,12 +132,13 @@ func TestDependency_DisableInterDomain(t *testing.T) {
 	historyFiles.Set(cf12)
 
 	checker := NewDependencyIntegrityChecker(logger)
+	accessors := statecfg.AccessorHashMap
 
 	// Inter-domain: account → commitment
 	checker.AddDependency(AccountDomainUniversal, &DependentInfo{
 		entity:      CommitmentDomainUniversal,
 		filesGetter: func() *DirtyFiles { return commitmentFiles.copy() },
-		accessors:   statecfg.AccessorHashMap,
+		accessors:   &accessors,
 	})
 
 	// Intra-domain: commitment II → commitment history
@@ -145,7 +146,7 @@ func TestDependency_DisableInterDomain(t *testing.T) {
 	checker.AddDependency(commitmentII, &DependentInfo{
 		entity:      commitmentII,
 		filesGetter: func() *DirtyFiles { return historyFiles.copy() },
-		accessors:   statecfg.AccessorHashMap,
+		accessors:   &accessors,
 	})
 
 	// Before DisableInterDomain: both should enforce

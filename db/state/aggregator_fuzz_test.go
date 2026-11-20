@@ -32,11 +32,16 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
@@ -68,11 +73,11 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		addrData := data[:txs*length.Addr]
 		locData := data[txs*length.Addr : txs*(length.Addr+length.Hash)]
 		addrs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(addrs[i][:], addrData[i*length.Addr:(i+1)*length.Addr])
 		}
 		locs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -92,14 +97,14 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 			var v [8]byte
 			binary.BigEndian.PutUint64(v[:], txNum)
 			if txNum%135 == 0 {
-				pv, _, err := rwTx.GetLatest(kv.CommitmentDomain, commKey2)
+				pv, _, err := rwTx.GetLatest(kv.CommitmentDomain, commKey2, kv.GetLatestOptions{})
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, v[:], txNum, pv)
 				require.NoError(t, err)
 				otherMaxWrite = txNum
 			} else {
-				pv, _, err := rwTx.GetLatest(kv.CommitmentDomain, commKey1)
+				pv, _, err := rwTx.GetLatest(kv.CommitmentDomain, commKey1, kv.GetLatestOptions{})
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, v[:], txNum, pv)
@@ -117,7 +122,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		err = rwTx.Commit()
 		require.NoError(t, err)
 
-		err = agg.BuildFiles(txs)
+		err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 		require.NoError(t, err)
 
 		rwTx, err = db.BeginTemporalRw(t.Context())
@@ -138,24 +143,23 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		require.NoError(t, err)
 		defer roTx.Rollback()
 
-		v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1)
+		v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotNil(t, v, "key %x not found", commKey1)
 
 		require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 
-		v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
+		v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotNil(t, v, "key %x not found", commKey2)
 
 		require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v))
 	})
-
 }
 
 func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 
 	rwTx, err := db.BeginTemporalRw(f.Context())
 	require.NoError(f, err)
@@ -171,7 +175,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
-	//var maxWrite, otherMaxWrite uint64
+	// var maxWrite, otherMaxWrite uint64
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) < int(txs*(length.Addr+length.Hash)) {
 			t.Skip()
@@ -179,11 +183,11 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		addrData := data[:txs*length.Addr]
 		locData := data[txs*length.Addr : txs*(length.Addr+length.Hash)]
 		addrs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(addrs[i][:], addrData[i*length.Addr:(i+1)*length.Addr])
 		}
 		locs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -217,7 +221,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		err = rwTx.Commit()
 		require.NoError(t, err)
 
-		err = agg.BuildFiles(txs)
+		err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 		require.NoError(t, err)
 
 		rwTx, err = db.BeginTemporalRw(t.Context())
@@ -240,15 +244,15 @@ func testFuzzDbAndAggregatorv3(f *testing.F, stepSize uint64) (kv.TemporalRwDB, 
 	require := require.New(f)
 	dirs := datadir.New(f.TempDir())
 	logger := log.New()
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(f, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(f, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	f.Cleanup(db.Close)
 
-	agg, err := state.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(f.Context(), db)
+	agg, err := state.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(f.Context())
 	require.NoError(err)
 	f.Cleanup(agg.Close)
-	err = agg.OpenFolder()
+	err = agg.OpenFolder(db)
 	require.NoError(err)
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(err)
 	return tdb, agg
 }

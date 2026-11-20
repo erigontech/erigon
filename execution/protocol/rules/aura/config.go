@@ -44,12 +44,12 @@ func newValidatorSetFromJson(j *chain.ValidatorSetJson, posdaoTransition *uint64
 		return &SimpleList{validators: j.List}
 	}
 	if j.SafeContract != nil {
-		return NewValidatorSafeContract(*j.SafeContract, posdaoTransition, nil)
+		return NewValidatorSafeContract(*j.SafeContract, posdaoTransition)
 	}
 	if j.Contract != nil {
 		return &ValidatorContract{
 			contractAddress:  *j.Contract,
-			validators:       NewValidatorSafeContract(*j.Contract, posdaoTransition, nil),
+			validators:       NewValidatorSafeContract(*j.Contract, posdaoTransition),
 			posdaoTransition: posdaoTransition,
 		}
 	}
@@ -191,9 +191,7 @@ func FromJson(jsonParams *chain.AuRaConfig) (AuthorityRoundParams, error) {
 	if jsonParams.BlockReward == nil {
 		params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: &u256.Num0})
 	} else {
-		if jsonParams.BlockReward != nil {
-			params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: uint256.NewInt(*jsonParams.BlockReward)})
-		}
+		params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: uint256.NewInt(*jsonParams.BlockReward)})
 	}
 	params.BlockReward.Sort()
 

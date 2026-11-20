@@ -24,11 +24,12 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -36,13 +37,20 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-// unable to decode supplied params, or an invalid number of parameters
-type nonCanonicalHashError struct{ hash common.Hash }
+// NonCanonicalHashError reports a known block hash that is not on the canonical chain.
+type NonCanonicalHashError struct{ hash common.Hash }
 
-func (e nonCanonicalHashError) ErrorCode() int { return -32603 }
+func (e NonCanonicalHashError) ErrorCode() int { return -32603 }
 
-func (e nonCanonicalHashError) Error() string {
+func (e NonCanonicalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
+}
+
+// BlockNotExecutedError reports a block past the execution stage's progress.
+type BlockNotExecutedError struct{ Block, LastExecuted uint64 }
+
+func (e *BlockNotExecutedError) Error() string {
+	return fmt.Sprintf("block %d is not executed (last executed: %d)", e.Block, e.LastExecuted)
 }
 
 func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
@@ -52,14 +60,22 @@ func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	}
 
 	if blockNumber > lastExecutedBlock {
-		return fmt.Errorf("block %d is not executed (last executed: %d)", blockNumber, lastExecutedBlock)
+		return &BlockNotExecutedError{Block: blockNumber, LastExecuted: lastExecutedBlock}
 	}
 
 	return nil
 }
 
-func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, common.Hash, bool, error) {
-	bn, bh, latest, found, err := _GetBlockNumber(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, br, filters)
+// GetBlockNumber resolves a block selector within the view tx already carries:
+// a plain tx reads the committed view, an overlay-aware tx (see
+// Filters.BeginTemporalRoWithOverlay) reads that overlay generation. The
+// resolver never changes the view, so dependent reads can reuse tx.
+//
+// It has no pending-block source: "pending" resolves to the latest executed
+// block. Endpoints that serve the in-memory pending block pre-check it
+// themselves before calling here.
+func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader) (uint64, common.Hash, bool, error) {
+	bn, bh, latest, found, err := _GetBlockNumber(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, br)
 	if err != nil {
 		return 0, common.Hash{}, false, err
 	}
@@ -69,8 +85,8 @@ func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx
 	return bn, bh, latest, err
 }
 
-func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, common.Hash, bool, error) {
-	bn, bh, latest, found, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
+func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader) (uint64, common.Hash, bool, error) {
+	bn, bh, latest, found, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br)
 	if err != nil {
 		return 0, common.Hash{}, false, err
 	}
@@ -80,22 +96,9 @@ func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberO
 	return bn, bh, latest, nil
 }
 
-func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
-	// overlayTx transparently reads from the block overlay when a background
-	// commit is pending, falling back to the DB tx otherwise.
-	overlayTx := tx
-	if filters != nil {
-		overlayTx = filters.WithOverlay(tx)
-	}
-
-	// Due to the changed semantics of `latest` block in RPC request, it is now distinct
-	// from the block number corresponding to the plain state.
-	// Read from overlayTx so the execution progress includes uncommitted blocks
-	// during background commits — otherwise "latest" resolves to a block number
-	// ahead of plainStateBlockNumber, causing state reads to use the historical
-	// path (which fails because history isn't committed yet).
+func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
 	var plainStateBlockNumber uint64
-	if plainStateBlockNumber, err = stages.GetStageProgress(overlayTx, stages.Execution); err != nil {
+	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return 0, common.Hash{}, false, false, fmt.Errorf("getting plain state block number: %w", err)
 	}
 
@@ -105,43 +108,27 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 		number := *blockNrOrHash.BlockNumber
 		switch number {
 		case rpc.LatestBlockNumber:
-			if blockNumber, err = GetLatestBlockNumber(overlayTx); err != nil {
+			if blockNumber, err = GetLatestBlockNumber(tx); err != nil {
 				return 0, common.Hash{}, false, false, err
 			}
 		case rpc.EarliestBlockNumber:
 			blockNumber = 0
 		case rpc.FinalizedBlockNumber:
-			blockNumber, err = GetFinalizedBlockNumber(overlayTx)
+			blockNumber, err = GetFinalizedBlockNumber(tx)
 			if err != nil {
 				return 0, common.Hash{}, false, false, err
 			}
 		case rpc.SafeBlockNumber:
-			blockNumber, err = GetSafeBlockNumber(overlayTx)
+			blockNumber, err = GetSafeBlockNumber(tx)
 			if err != nil {
 				return 0, common.Hash{}, false, false, err
 			}
-		case rpc.PendingBlockNumber:
-			// `pending` is the PRE-CONFIRMED head: the block currently being executed, which on a
-			// run-ahead producer is AHEAD of the forkchoice head that `latest` resolves to. Same
-			// convention as OP Stack flashblocks, where `pending` serves the sub-block being built.
-			// Only when this node has no pre-exec frontier does it fall back to the old meaning
-			// (the txpool/mining block).
-			if _, preHash, preNum, release, ok := filters.PinPreconfirmed(); ok {
-				release()
-				return preNum, preHash, false, true, nil
-			}
-			pendingBlock := filters.LastPendingBlock()
-			if pendingBlock == nil {
-				blockNumber = plainStateBlockNumber
-			} else {
-				return pendingBlock.NumberU64(), pendingBlock.Hash(), false, true, nil
-			}
-		case rpc.LatestExecutedBlockNumber:
+		case rpc.PendingBlockNumber, rpc.LatestExecutedBlockNumber:
 			blockNumber = plainStateBlockNumber
 		default:
 			blockNumber = uint64(number.Int64())
 		}
-		hash, ok, err = br.CanonicalHash(ctx, overlayTx, blockNumber)
+		hash, ok, err = br.CanonicalHash(ctx, tx, blockNumber)
 		if err != nil {
 			return 0, common.Hash{}, false, false, err
 		}
@@ -149,7 +136,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			return blockNumber, hash, blockNumber == plainStateBlockNumber, false, nil
 		}
 	} else {
-		number, err := br.HeaderNumber(ctx, overlayTx, hash)
+		number, err := br.HeaderNumber(ctx, tx, hash)
 		if err != nil {
 			return 0, common.Hash{}, false, false, err
 		}
@@ -158,38 +145,26 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 		}
 		blockNumber = *number
 
-		ch, ok, err := br.CanonicalHash(ctx, overlayTx, blockNumber)
+		ch, ok, err := br.CanonicalHash(ctx, tx, blockNumber)
 		if err != nil {
 			return 0, common.Hash{}, false, false, err
 		}
 		if requireCanonical && (!ok || ch != hash) {
-			return 0, common.Hash{}, false, false, nonCanonicalHashError{hash}
+			return 0, common.Hash{}, false, false, NonCanonicalHashError{hash}
 		}
 	}
 	return blockNumber, hash, blockNumber == plainStateBlockNumber, true, nil
 }
 
-func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, blockNrOrHash rpc.BlockNumberOrHash, txnIndex int, filters *Filters, stateCache kvcache.Cache, txNumReader rawdbv3.TxNumsReader) (state.StateReader, error) {
-	if p, ok := PreconfirmedView(ctx, tx, blockNrOrHash, filters); ok {
-		return p.Reader, nil
-	}
-
-	blockNumber, _, latest, found, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
+func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br dbservices.FullBlockReader, blockNrOrHash rpc.BlockNumberOrHash, txnIndex int, stateCache kvcache.Cache, txNumReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+	blockNumber, _, latest, found, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
 		return nil, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
 	}
-	// Use overlay tx for the state reader so the kvcache View sees the
-	// correct state version during background commits.
-	stateTx := tx
-	if filters != nil {
-		if overlayTx, ok := filters.WithOverlay(tx).(kv.TemporalTx); ok {
-			stateTx = overlayTx
-		}
-	}
-	return CreateStateReaderFromBlockNumber(ctx, stateTx, blockNumber, latest, txnIndex, stateCache, txNumReader)
+	return CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, txnIndex, stateCache, txNumReader)
 }
 
 // PreconfirmedView serves a query asking for `pending` from the PRE-EXECUTED frontier: the block the
@@ -266,24 +241,41 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blo
 	return CreateHistoryCachedStateReader(ctx, cacheView, tx, blockNumber+1, txnIndex, txNumsReader)
 }
 
+func CreateUncachedStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, latest bool, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+	if latest {
+		return NewLatestStateReader(execctx.NewTemporalTxStateGetter(tx)), nil
+	}
+	return CreateHistoryStateReader(ctx, tx, blockNumber+1, txnIndex, txNumsReader)
+}
+
 func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	minTxNum, err := txNumsReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
-	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
+	return CreateHistoryStateReaderAtTxNum(ctx, tx, blockNumber, txNum, txNumsReader)
+}
+
+// CreateHistoryStateReaderAtTxNum checks history availability at an already resolved txNum.
+// blockNumber is used only in pruning errors.
+func CreateHistoryStateReaderAtTxNum(ctx context.Context, tx kv.TemporalTx, blockNumber, txNum uint64, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return nil, err
+	}
+	if txNum < minHistoryTxNum {
 		firstAvailBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, minHistoryTxNum)
-		return nil, fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, blockNumber, firstAvailBlock)
+		return nil, fmt.Errorf("%w: requested block %d, history is available from block %d", state.ErrPruned, blockNumber, firstAvailBlock)
 	}
 	return state.NewHistoryReaderV3(tx, txNum), nil
 }
 
-func NewLatestStateReader(getter kv.TemporalGetter) state.StateReader {
+func NewLatestStateReader(getter execctxapi.StateGetter) state.StateReader {
 	return state.NewReaderV3(getter)
 }
 
-func NewLatestStateWriter(tx kv.TemporalTx, domains *execctx.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
+func NewLatestStateWriter(tx kv.TemporalTx, domains *execctx.SharedDomains, blockReader dbservices.FullBlockReader, blockNum uint64) state.StateWriter {
 	minTxNum, err := blockReader.TxnumReader().Min(context.Background(), tx, blockNum)
 	if err != nil {
 		panic(err)
@@ -310,8 +302,12 @@ func CreateHistoryCachedStateReader(ctx context.Context, cache kvcache.CacheView
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
-	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
-		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d", state.PrunedError, txNum, minHistoryTxNum)
+	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return nil, err
+	}
+	if txNum < minHistoryTxNum {
+		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d", state.ErrPruned, txNum, minHistoryTxNum)
 	}
 	return &cachedHistoryReaderV3{
 		cache:     asOfView,
@@ -324,6 +320,7 @@ type cachedHistoryReaderV3 struct {
 	cache     asOfView
 	reader    *state.HistoryReaderV3
 	composite []byte
+	addr      common.Address
 }
 
 func (hr *cachedHistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
@@ -347,9 +344,12 @@ func (hr *cachedHistoryReaderV3) SetTxNum(txNum uint64) {
 }
 
 func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	addressValue := address.Value()
-	enc, ok, err := hr.cache.GetAsOf(addressValue[:], hr.reader.GetTxNum())
+	return hr.ReadAccountByPlainAddr(address.Value())
+}
 
+func (hr *cachedHistoryReaderV3) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	hr.addr = address
+	enc, ok, err := hr.cache.GetAsOf(hr.addr[:], hr.reader.GetTxNum())
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +365,21 @@ func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*acc
 		return &a, nil
 	}
 
-	return hr.reader.ReadAccountData(address)
+	return hr.reader.ReadAccountByPlainAddr(address)
+}
+
+// HasAccount answers from the cached encoding's length, so a historical existence check
+// costs no DeserialiseV3 either.
+func (hr *cachedHistoryReaderV3) HasAccount(address common.Address) (bool, error) {
+	hr.addr = address
+	enc, ok, err := hr.cache.GetAsOf(hr.addr[:], hr.reader.GetTxNum())
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		return len(enc) > 0, nil
+	}
+	return hr.reader.HasAccount(address)
 }
 
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
@@ -388,10 +402,6 @@ func (hr *cachedHistoryReaderV3) ReadAccountStorage(address accounts.Address, ke
 		return res, ok, err
 	}
 	return hr.reader.ReadAccountStorage(address, key)
-}
-
-func (hr *cachedHistoryReaderV3) HasStorage(address accounts.Address) (bool, error) {
-	return hr.reader.HasStorage(address)
 }
 
 func (hr *cachedHistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {

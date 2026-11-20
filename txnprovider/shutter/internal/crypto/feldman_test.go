@@ -64,7 +64,7 @@ func TestNewPolynomial(t *testing.T) {
 
 	for _, cs := range invalidCoefficients {
 		_, err := NewPolynomial(cs)
-		assert.NotEqual(t, err, nil)
+		assert.Error(t, err)
 	}
 }
 
@@ -166,7 +166,7 @@ func TestVerifyPolyEval(t *testing.T) {
 	p2, err := RandomPolynomial(randReader, threshold-1)
 	require.NoError(t, err)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		xi := KeyperX(i)
 		vi1 := p1.Eval(xi)
 		vi2 := p2.Eval(xi)
@@ -182,7 +182,7 @@ func TestVerifyPolyEval(t *testing.T) {
 func TestPi(t *testing.T) {
 	gammasNonAff := []*blst.P2{}
 	gammasAff := []*blst.P2Affine{}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		gammaAff := makeTestG2(int64(i + 2))
 		gamma := new(blst.P2)
 		gamma.FromAffine(gammaAff)

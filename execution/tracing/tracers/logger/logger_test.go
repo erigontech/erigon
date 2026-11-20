@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
@@ -38,37 +39,21 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-type dummyContractRef struct {
-	calledForEach bool
-}
-
-func (dummyContractRef) ReturnGas(*big.Int)          {}
-func (dummyContractRef) Address() common.Address     { return accounts.ZeroAddress.Value() }
-func (dummyContractRef) Value() *big.Int             { return new(big.Int) }
-func (dummyContractRef) SetCode(common.Hash, []byte) {}
-func (d *dummyContractRef) ForEachStorage(callback func(key, value common.Hash) bool) {
-	d.calledForEach = true
-}
-func (d *dummyContractRef) SubBalance(amount *big.Int) {}
-func (d *dummyContractRef) AddBalance(amount *big.Int) {}
-func (d *dummyContractRef) SetBalance(*big.Int)        {}
-func (d *dummyContractRef) SetNonce(uint64)            {}
-func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
-
 func TestStoreCapture(t *testing.T) {
 	//c := vm.NewJumpDestCache(128)
 	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
 	ibs.AddRefund(1337)
 
 	var (
 		logger   = NewStructLogger(nil)
 		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{Tracer: logger.Hooks()})
-		contract = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+		contract = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
 	var index common.Hash
 	logger.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
-	_, _, _, err := evm.Run(contract, mdgas.MdGas{Regular: 200_000, State: params.StateGasPerStorageSet}, []byte{}, false)
+	_, _, _, err := evm.Run(contract, mdgas.MdGas{Execution: 200_000, State: params.StateGasPerStorageSet}, []byte{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,15 +65,63 @@ func TestStoreCapture(t *testing.T) {
 	if logger.storage[contract.Address()][index] != exp {
 		t.Errorf("expected %x, got %x", exp, logger.storage[contract.Address()][index])
 	}
+	encoded, err := json.Marshal(FormatLogs(logger.StructLogs()))
+	require.NoError(t, err)
+	var logs []map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &logs))
+	require.EqualValues(t, params.StateGasPerStorageSet, logs[2]["stateGasReservoir"])
+	require.EqualValues(t, params.StateGasPerStorageSet, logs[2]["stateGasCost"])
+	require.NotContains(t, logs[0], "stateGasCost")
+
+	contract.Code[1] = 0
+	_, _, _, err = evm.Run(contract, mdgas.MdGas{Execution: 200_000}, nil, false)
+	require.NoError(t, err)
+	encoded, err = json.Marshal(FormatLogs(logger.StructLogs()))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(encoded, &logs))
+	require.EqualValues(t, -int64(params.StateGasPerStorageSet), logs[6]["stateGasCost"])
+}
+
+func TestStructLoggerHaltedStorageStepIsNotRecorded(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+
+	var (
+		logger   = NewStructLogger(nil)
+		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{Tracer: logger.Hooks()})
+		contract = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	)
+	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
+	logger.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
+
+	_, _, _, err := evm.Run(contract, mdgas.MdGas{Execution: 200_000}, nil, true)
+	require.ErrorIs(t, err, vm.ErrWriteProtection)
+	_, _, _, err = evm.Run(contract, mdgas.MdGas{Execution: 6 + params.SstoreSentryGasEIP2200}, nil, false)
+	require.ErrorIs(t, err, vm.ErrOutOfGas)
+
+	logs := logger.StructLogs()
+	require.Len(t, logs, 6)
+	for _, i := range []int{2, 5} {
+		require.Equal(t, vm.SSTORE, logs[i].Op)
+		require.Error(t, logs[i].Err)
+		require.Empty(t, logs[i].Storage)
+	}
+	require.Empty(t, logger.storage[contract.Address()])
+}
+
+func TestStructLoggerTxEndError(t *testing.T) {
+	logger := NewStructLogger(nil)
+	logger.Hooks().EmitTxEnd(nil, mdgas.TxnGasUsage{}, vm.ErrInsufficientBalance)
+	require.ErrorIs(t, logger.Error(), vm.ErrInsufficientBalance)
 }
 
 func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
 	var buf bytes.Buffer
 	logger := NewJSONLogger(nil, &buf)
-	logger.OnSystemCallStartV2(&tracing.VMContext{IntraBlockState: &mockIBS{}})
+	logger.OnSystemCallStartV2(&tracing.VMContext{Rules: &chain.Rules{IsAmsterdam: true}, IntraBlockState: &mockIBS{}})
 
 	scope := &mockOpContext{}
-	logger.OnOpcode(0, byte(vm.STOP), 100, 0, scope, nil, 0, nil)
+	logger.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100, State: 200}, mdgas.MdGasCost{Execution: 10, State: -30}, scope, nil, 0, nil)
 
 	var entry map[string]json.RawMessage
 	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &entry); err != nil {
@@ -97,6 +130,14 @@ func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
 	if _, ok := entry["refund"]; !ok {
 		t.Fatal("expected json logger to emit opcode output after system call start")
 	}
+	var stateGas uint64
+	require.NoError(t, json.Unmarshal(entry["stateGasReservoir"], &stateGas))
+	require.EqualValues(t, 200, stateGas)
+	require.Contains(t, entry, "stateGasCost")
+	require.JSONEq(t, `-30`, string(entry["stateGasCost"]))
+	buf.Reset()
+	logger.OnExitV2(0, nil, mdgas.MdGasUsage{Execution: 10}, nil, false)
+	require.JSONEq(t, `{"output":"","gasUsed":"0xa","stateGasUsed":0}`, buf.String())
 }
 
 //func TestStoreCapture(t *testing.T) {

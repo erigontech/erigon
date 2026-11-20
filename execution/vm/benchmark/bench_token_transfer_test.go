@@ -60,12 +60,13 @@ func BenchmarkERC20Transfer(b *testing.B) {
 
 	b.Run("transfer/100M", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 100_000_000)
-		deployContract(statedb, addrContract, code)
-		setStorage(statedb, addrContract, slots)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		vmenv := benchConfig(b, 100_000_000)
+		statedb := vmenv.IntraBlockState()
+		deployContract(b, statedb, addrContract, code)
+		setStorage(b, statedb, addrContract, slots)
+		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, vmenv, addrContract)
 		}
 	})
 }
@@ -102,12 +103,13 @@ func BenchmarkERC20TransferFrom(b *testing.B) {
 
 	b.Run("transferFrom/100M", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 100_000_000)
-		deployContract(statedb, addrContract, code)
-		setStorage(statedb, addrContract, slots)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		vmenv := benchConfig(b, 100_000_000)
+		statedb := vmenv.IntraBlockState()
+		deployContract(b, statedb, addrContract, code)
+		setStorage(b, statedb, addrContract, slots)
+		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, vmenv, addrContract)
 		}
 	})
 }
@@ -126,12 +128,13 @@ func BenchmarkERC20BalanceOf(b *testing.B) {
 
 	b.Run("balanceOf/100M", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 100_000_000)
-		deployContract(statedb, addrContract, code)
-		setStorage(statedb, addrContract, slots)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		vmenv := benchConfig(b, 100_000_000)
+		statedb := vmenv.IntraBlockState()
+		deployContract(b, statedb, addrContract, code)
+		setStorage(b, statedb, addrContract, slots)
+		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, vmenv, addrContract)
 		}
 	})
 }
@@ -146,7 +149,7 @@ func BenchmarkERC20BatchTransfers(b *testing.B) {
 		slots := map[uint256.Int]uint256.Int{
 			*uint256.NewInt(0): *uint256.NewInt(uint64(n) * 1000), // from balance
 		}
-		for i := 0; i < n; i++ {
+		for i := range n {
 			toSlot := uint64(i + 1)
 			slots[*uint256.NewInt(toSlot)] = *uint256.NewInt(0) // to balance starts at 0
 			p.
@@ -163,14 +166,13 @@ func BenchmarkERC20BatchTransfers(b *testing.B) {
 			b.ReportAllocs()
 			// Each transfer ~= 2 SLOAD + 2 SSTORE
 			gas := uint64(n)*30_000 + 100_000
-			cfg, statedb := benchConfig(b, gas)
-			deployContract(statedb, addrContract, code)
-			setStorage(statedb, addrContract, slots)
+			vmenv := benchConfig(b, gas)
+			statedb := vmenv.IntraBlockState()
+			deployContract(b, statedb, addrContract, code)
+			setStorage(b, statedb, addrContract, slots)
+			callComplete(b, vmenv, addrContract, nil)
 			for b.Loop() {
-				snap := statedb.PushSnapshot()
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
-				statedb.RevertToSnapshot(snap, nil)
-				statedb.PopSnapshot(snap)
+				callComplete(b, vmenv, addrContract, nil)
 			}
 		})
 	}

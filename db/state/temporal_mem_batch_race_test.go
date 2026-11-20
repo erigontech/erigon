@@ -24,16 +24,10 @@ import (
 // matters.
 func TestMergeDoesNotRaceWithGetLatest(t *testing.T) {
 	mk := func() *TemporalMemBatch {
-		sd := &TemporalMemBatch{
-			storage:             btree2.NewMap[string, []dataWithTxNum](128),
-			stepSize:            1,
-			forkableWriters:     map[kv.ForkableId]kv.BufferedWriter{},
-			pastForkableWriters: map[kv.ForkableId][]kv.BufferedWriter{},
+		return &TemporalMemBatch{
+			storage:  btree2.NewMap[string, []dataWithTxNum](128),
+			stepSize: 1,
 		}
-		for i := range sd.domains {
-			sd.domains[i] = map[string][]dataWithTxNum{}
-		}
-		return sd
 	}
 
 	keys := make([]string, 64)
@@ -44,8 +38,8 @@ func TestMergeDoesNotRaceWithGetLatest(t *testing.T) {
 	sd := mk()
 	// Seed the target so readers find something rather than short-circuiting on a miss.
 	for _, k := range keys {
-		sd.domains[kv.AccountsDomain][k] = []dataWithTxNum{{data: []byte(k), txNum: 1}}
-		sd.storage.Set(k, []dataWithTxNum{{data: []byte(k), txNum: 1}})
+		sd.putLatestLocked(kv.AccountsDomain, k, dataWithTxNum{data: []byte(k), txNum: 1})
+		sd.putLatestLocked(kv.StorageDomain, k, dataWithTxNum{data: []byte(k), txNum: 1})
 	}
 
 	const rounds = 200
@@ -75,8 +69,8 @@ func TestMergeDoesNotRaceWithGetLatest(t *testing.T) {
 	for i := 0; i < rounds; i++ {
 		other := mk()
 		for j, k := range keys {
-			other.domains[kv.AccountsDomain][k] = []dataWithTxNum{{data: []byte(k), txNum: uint64(i*100 + j)}}
-			other.storage.Set(k, []dataWithTxNum{{data: []byte(k), txNum: uint64(i*100 + j)}})
+			other.putLatestLocked(kv.AccountsDomain, k, dataWithTxNum{data: []byte(k), txNum: uint64(i*100 + j)})
+			other.putLatestLocked(kv.StorageDomain, k, dataWithTxNum{data: []byte(k), txNum: uint64(i*100 + j)})
 		}
 		if err := sd.Merge(other, false); err != nil {
 			close(stop)

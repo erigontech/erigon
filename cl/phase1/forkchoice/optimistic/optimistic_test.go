@@ -94,7 +94,6 @@ func checkSyncMapLength(m *sync.Map, length int) bool {
 }
 
 func (t *optimisticTestSuite) TestAddOptimisticCandidate() {
-
 	// Add an optimistic candidate
 	err := t.opStore.AddOptimisticCandidate(mockBlock1Root, mockBlock1)
 	t.Require().NoError(err)
@@ -158,6 +157,17 @@ func (t *optimisticTestSuite) TestValidateBlock() {
 		parent:       mockBlock3_1.ParentRoot,
 		children:     []common.Hash{},
 	}, node)
+}
+
+func (t *optimisticTestSuite) TestValidateBlockSweepsLowerNumberedRoots() {
+	err := t.opStore.AddOptimisticCandidate(mockBlock1Root, mockBlock1)
+	t.Require().NoError(err)
+
+	// mockBlock4Root was never added, so the ancestor walk stops at once and only the
+	// execution-block-number sweep can remove the candidate.
+	err = t.opStore.ValidateBlock(mockBlock4Root, mockBlock3_2)
+	t.Require().NoError(err)
+	t.Require().True(checkSyncMapLength(&t.opStore.optimisticRoots, 0))
 }
 
 func (t *optimisticTestSuite) TestInvalidateBlock() {

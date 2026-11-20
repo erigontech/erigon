@@ -59,8 +59,7 @@ type testInterface2 interface {
 	test2() int
 }
 
-type testImpl struct {
-}
+type testImpl struct{}
 
 func (t *testImpl) test1() bool { return true }
 func (t *testImpl) test2() int  { return 10 }
@@ -71,7 +70,7 @@ func TestHasCallback(t *testing.T) {
 
 	assert.Nil(t, err, "Subscribe failed")
 
-	if bus.HasCallback(reflect.TypeOf("String")) {
+	if bus.HasCallback(reflect.TypeFor[string]()) {
 		t.Fail()
 	}
 	if !bus.HasCallback() {
@@ -136,6 +135,24 @@ func TestUnsubscribe(t *testing.T) {
 	}
 }
 
+func TestManagedEventBusUnregisterAllReleasesLockOnError(t *testing.T) {
+	bus := NewServiceBus(&execPool{workerpool.New(runtime.NumCPU())}).GetEventBus("key")
+	owner := &struct{}{}
+	handler := func(int) {}
+	assert.NoError(t, bus.Register(owner, handler))
+	assert.NoError(t, bus.eventBus.Unsubscribe(handler))
+	assert.Error(t, bus.UnregisterAll(owner))
+
+	done := make(chan error, 1)
+	go func() { done <- bus.Register(owner, handler) }()
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Register blocked: UnregisterAll kept registrationLock after an error")
+	}
+}
+
 func TestPublish(t *testing.T) {
 	bus := NewEventBus(&execPool{workerpool.New(runtime.NumCPU())})
 	handler := func(a int, b int) {
@@ -173,9 +190,7 @@ func TestSubcribeOnceAsync(t *testing.T) {
 		t.Fail()
 	}
 
-	var cb func(a int, out *[]int)
-
-	if bus.HasCallback(reflect.TypeOf(cb)) {
+	if bus.HasCallback(reflect.TypeFor[func(a int, out *[]int)]()) {
 		t.Fail()
 	}
 }

@@ -23,7 +23,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
@@ -31,16 +30,8 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func copyConfig(original *chain.Config) *chain.Config {
-	var copy chain.Config
-	if err := copier.CopyWithOption(&copy, original, copier.Option{DeepCopy: true}); err != nil {
-		panic(err)
-	}
-	return &copy
-}
-
 func config() *chain.Config {
-	config := copyConfig(chain.AllProtocolChanges)
+	config := chain.AllProtocolChanges.Copy()
 	config.LondonBlock = common.NewUint64(5)
 	return config
 }
@@ -85,7 +76,11 @@ func TestBlockGasLimits(t *testing.T) {
 			BaseFee:  initial,
 			Number:   *uint256.NewInt(tc.pNum + 1),
 		}
-		err := VerifyEip1559Header(config(), parent, header, false /*skipGasLimit*/)
+		cfg := config()
+		err := VerifyEip1559Header(cfg, parent, header)
+		if err == nil {
+			err = VerifyParentGasLimit(cfg, parent, header)
+		}
 		if tc.ok && err != nil {
 			t.Errorf("test %d: Expected valid header: %s", i, err)
 		}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -33,54 +34,75 @@ type beaconResponse struct {
 	Data json.RawMessage `json:"data"`
 }
 
-// StatusError is a non-OK beacon API response, carrying the code so a caller can tell "this does
-// not exist" apart from "the beacon is not up yet". The difference decides whether waiting helps:
-// a 503 while Caplin starts is transient, a 404 for the head means there is no head to have.
-type StatusError struct {
-	Path   string
-	Status int
-	Body   string
-}
-
-func (e *StatusError) Error() string {
-	return fmt.Sprintf("beacon GET %s: status %d: %s", e.Path, e.Status, e.Body)
-}
-
 // IsNotFound reports whether err is a beacon 404.
 func IsNotFound(err error) bool {
-	var se *StatusError
-	return errors.As(err, &se) && se.Status == http.StatusNotFound
+	var se *statusError
+	return errors.As(err, &se) && se.code == http.StatusNotFound
 }
 
 // get performs a GET request and unmarshals the `data` field into dst.
-func (c *BeaconClient) get(ctx context.Context, path string, dst interface{}) error {
-	url := c.baseURL + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (c *BeaconClient) get(ctx context.Context, path string, dst any) error {
+	wrapper, err := c.getResponse(ctx, path)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Accept", "application/json")
+	return json.Unmarshal(wrapper.Data, dst)
+}
 
+func (c *BeaconClient) getResponse(ctx context.Context, path string) (*beaconResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	return c.doResponse(req, path)
+}
+
+// postResponse performs a POST request with a JSON body and returns the decoded response.
+func (c *BeaconClient) postResponse(ctx context.Context, path, body string, headers http.Header) (*beaconResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, strings.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	maps.Copy(req.Header, headers)
+	return c.doResponse(req, path)
+}
+
+func (c *BeaconClient) doResponse(req *http.Request, path string) (*beaconResponse, error) {
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("beacon GET %s: %w", path, err)
+		return nil, fmt.Errorf("beacon %s %s: %w", req.Method, path, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return &StatusError{Path: path, Status: resp.StatusCode, Body: string(body)}
+		return nil, &statusError{method: req.Method, path: path, code: resp.StatusCode, body: string(body)}
 	}
 
 	var wrapper beaconResponse
 	if err := json.NewDecoder(resp.Body).Decode(&wrapper); err != nil {
-		return fmt.Errorf("beacon GET %s: decode: %w", path, err)
+		return nil, fmt.Errorf("beacon %s %s: decode: %w", req.Method, path, err)
 	}
-	return json.Unmarshal(wrapper.Data, dst)
+	return &wrapper, nil
+}
+
+// statusError is a non-200 response to a Beacon API request.
+type statusError struct {
+	method string
+	path   string
+	code   int
+	body   string
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("beacon %s %s: status %d: %s", e.method, e.path, e.code, e.body)
 }
 
 // post performs a POST request with a JSON body.
-func (c *BeaconClient) post(ctx context.Context, path string, body interface{}) error {
+func (c *BeaconClient) post(ctx context.Context, path string, body any) error {
 	url := c.baseURL + path
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
@@ -109,7 +131,7 @@ func (c *BeaconClient) post(ctx context.Context, path string, body interface{}) 
 // postAndDecode performs a POST request with a JSON body and unmarshals the
 // response `data` field into dst. This is needed for endpoints like
 // /eth/v1/validator/duties/attester/{epoch} which are POST-only per spec.
-func (c *BeaconClient) postAndDecode(ctx context.Context, path string, body interface{}, dst interface{}) error {
+func (c *BeaconClient) postAndDecode(ctx context.Context, path string, body any, dst any) error {
 	url := c.baseURL + path
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
@@ -142,7 +164,15 @@ func (c *BeaconClient) postAndDecode(ctx context.Context, path string, body inte
 }
 
 // postJSON performs a POST request with a JSON body and Eth-Consensus-Version header.
-func (c *BeaconClient) postJSON(ctx context.Context, path string, body interface{}, version string) error {
+func (c *BeaconClient) postJSON(ctx context.Context, path string, body any, version string) error {
+	headers := make(http.Header)
+	if version != "" {
+		headers.Set("Eth-Consensus-Version", version)
+	}
+	return c.postJSONWithHeaders(ctx, path, body, headers)
+}
+
+func (c *BeaconClient) postJSONWithHeaders(ctx context.Context, path string, body any, headers http.Header) error {
 	url := c.baseURL + path
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
@@ -154,9 +184,7 @@ func (c *BeaconClient) postJSON(ctx context.Context, path string, body interface
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if version != "" {
-		req.Header.Set("Eth-Consensus-Version", version)
-	}
+	maps.Copy(req.Header, headers)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -167,31 +195,6 @@ func (c *BeaconClient) postJSON(ctx context.Context, path string, body interface
 	if resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("beacon POST %s: status %d: %s", path, resp.StatusCode, string(respBody))
-	}
-	return nil
-}
-
-// postSSZ performs a POST request with an SSZ body and Eth-Consensus-Version header.
-func (c *BeaconClient) postSSZ(ctx context.Context, path string, sszBody []byte, version string) error {
-	url := c.baseURL + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(sszBody)))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/octet-stream")
-	if version != "" {
-		req.Header.Set("Eth-Consensus-Version", version)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("beacon POST SSZ %s: %w", path, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("beacon POST SSZ %s: status %d: %s", path, resp.StatusCode, string(body))
 	}
 	return nil
 }

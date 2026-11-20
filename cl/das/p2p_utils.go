@@ -22,13 +22,11 @@ const (
 	KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH = 4
 )
 
-// VerifyDataColumnSidecar verifies if the data column sidecar is valid according to protocol rules.
-// This function is re-entrant and thread-safe.
-// For Fulu: uses KzgCommitments from the sidecar.
-// For GLOAS: use VerifyDataColumnSidecarWithCommitments instead.
-func VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar, cfg *clparams.BeaconChainConfig) bool {
+// VerifyDataColumnSidecar checks the sidecar's structure without needing its block.
+// Gloas sidecars also need VerifyDataColumnSidecarWithCommitments once the block is available.
+func VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar) bool {
 	// The sidecar index must be within the valid range
-	if sidecar.Index >= cfg.NumberOfColumns {
+	if sidecar.Index >= clparams.GetBeaconConfig().NumberOfColumns {
 		return false
 	}
 
@@ -59,9 +57,9 @@ func VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar, cfg *clparams.B
 // VerifyDataColumnSidecarWithCommitments verifies if the data column sidecar is valid according to GLOAS protocol rules.
 // [Modified in Gloas:EIP7732] kzg_commitments is now passed as a parameter.
 // This function is re-entrant and thread-safe.
-func VerifyDataColumnSidecarWithCommitments(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment], cfg *clparams.BeaconChainConfig) bool {
+func VerifyDataColumnSidecarWithCommitments(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
 	// The sidecar index must be within the valid range
-	if sidecar.Index >= cfg.NumberOfColumns {
+	if sidecar.Index >= clparams.GetBeaconConfig().NumberOfColumns {
 		return false
 	}
 
@@ -148,22 +146,10 @@ func verifyKZGProofsInternal(sidecar *cltypes.DataColumnSidecar, kzgCommitments 
 	return true
 }
 
-func ComputeCells(blobs *cltypes.Blob) ([]cltypes.Cell, error) {
-	cells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(blobs), 0 /* numGoRoutines */)
-	if err != nil {
-		return nil, err
-	}
-	ret := make([]cltypes.Cell, len(cells))
-	for i, cell := range &cells {
-		ret[i] = cltypes.Cell(*cell)
-	}
-	return ret, nil
-}
-
 // ComputeSubnetForDataColumnSidecar computes the subnet ID for a given data column sidecar index.
 // This function is re-entrant and thread-safe.
-func ComputeSubnetForDataColumnSidecar(columnIndex cltypes.ColumnIndex, cfg *clparams.BeaconChainConfig) uint64 {
-	return columnIndex % cfg.DataColumnSidecarSubnetCount
+func ComputeSubnetForDataColumnSidecar(columnIndex cltypes.ColumnIndex) uint64 {
+	return columnIndex % clparams.GetBeaconConfig().DataColumnSidecarSubnetCount
 }
 
 // VerifyDataColumnSidecarInclusionProof verifies if the inclusion proof in the sidecar is correct.

@@ -21,6 +21,7 @@ package shutter
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -104,7 +105,7 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 	txns := make([]EncryptedTxnSubmission, 0, count)
 
 	var totalGasLimit uint64
-	var idxOffset TxnIndex
+	nextTxnIndex := from
 	var err error
 	etp.mu.RLock()
 	defer etp.mu.RUnlock()
@@ -125,7 +126,6 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 		}
 
 		totalGasLimit = newTotalGasLimit
-		nextTxnIndex := from + idxOffset
 		if item.TxnIndex < nextTxnIndex {
 			// this should never happen - highlights bug in the logic somewhere
 			err = fmt.Errorf("unexpected item txn index lt next txn index: %d < %d", item.TxnIndex, nextTxnIndex)
@@ -142,11 +142,9 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 				"from", from,
 				"to", to,
 			)
-			idxOffset += item.TxnIndex - nextTxnIndex + 1
-			return true // continue
 		}
 
-		idxOffset++
+		nextTxnIndex = item.TxnIndex + 1
 		txns = append(txns, item)
 		return true // continue
 	})
@@ -242,19 +240,16 @@ func (etp *EncryptedTxnsPool) handleEncryptedTxnSubmissionEvent(ctx context.Cont
 		return nil
 	}
 
-	lastEncryptedTxnSubmission, ok := etp.submissions.Max()
-	if ok && encryptedTxnSubmission.TxnIndex <= lastEncryptedTxnSubmission.TxnIndex {
-		etp.logger.Warn("submission is behind last known", "last", lastEncryptedTxnSubmission.TxnIndex, "event", encryptedTxnSubmission.TxnIndex)
+	lastEncryptedTxnSubmission, ok := etp.lastSubmissionUpToEon(encryptedTxnSubmission.EonIndex)
+	sameEon := ok && lastEncryptedTxnSubmission.EonIndex == encryptedTxnSubmission.EonIndex
+	if sameEon && encryptedTxnSubmission.TxnIndex <= lastEncryptedTxnSubmission.TxnIndex {
+		etp.logger.Warn(
+			"submission is behind last known",
+			"eon", encryptedTxnSubmission.EonIndex,
+			"last", lastEncryptedTxnSubmission.TxnIndex,
+			"event", encryptedTxnSubmission.TxnIndex,
+		)
 		return nil
-		//
-		// TODO looks like we have an issue on unwind
-		//
-
-		//return fmt.Errorf(
-		//	"unexpected new encrypted txn submission index is lte last: %d >= %d",
-		//	lastEncryptedTxnSubmission.TxnIndex,
-		//	encryptedTxnSubmission.TxnIndex,
-		//)
 	}
 
 	etp.addSubmission(encryptedTxnSubmission)
@@ -265,10 +260,30 @@ func (etp *EncryptedTxnsPool) handleEncryptedTxnSubmissionEvent(ctx context.Cont
 	return nil
 }
 
+// lastSubmissionUpToEon returns the greatest known submission with EonIndex <= eon.
+// Callers must hold etp.mu.
+func (etp *EncryptedTxnsPool) lastSubmissionUpToEon(eon EonIndex) (EncryptedTxnSubmission, bool) {
+	var last EncryptedTxnSubmission
+	var found bool
+	pivot := EncryptedTxnSubmission{EonIndex: eon, TxnIndex: math.MaxUint64}
+	etp.submissions.DescendLessOrEqual(pivot, func(item EncryptedTxnSubmission) bool {
+		last = item
+		found = true
+		return false
+	})
+	return last, found
+}
+
 func (etp *EncryptedTxnsPool) fillSubmissionGap(ctx context.Context, last, new EncryptedTxnSubmission) error {
 	fromTxnIndex := last.TxnIndex + 1
 	startBlockNum := last.BlockNum + 1
 	endBlockNum := new.BlockNum
+	if startBlockNum > endBlockNum {
+		// both events are in the same block: anything between them arrives through
+		// the same ordered subscription, so there is nothing to backfill
+		return nil
+	}
+
 	etp.logger.Info(
 		"filling submission gap",
 		"startBlockNum", startBlockNum,
@@ -287,7 +302,7 @@ func (etp *EncryptedTxnsPool) fillSubmissionGap(ctx context.Context, last, new E
 
 func (etp *EncryptedTxnsPool) watchFirstBlockAfterInit(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
-	blockEventC := make(chan BlockEvent)
+	blockEventC := make(chan BlockEvent, 1)
 	unregister := etp.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
 		select {
 		case <-ctx.Done():

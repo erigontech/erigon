@@ -166,7 +166,7 @@ func (e *ExecModule) closePreExecutedLocked(ctx context.Context, blockHash commo
 
 	e.traceCanonicalStatus(ctx, tx, header, blockNumber, "close")
 
-	status, _, validationError, criticalError := e.forkValidator.ExecuteInto(ctx, doms, tx, header, body.RawBody())
+	status, _, validationError, criticalError := e.forkValidator.ExecuteInto(ctx, doms, tx, header, body)
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
 	}
@@ -175,9 +175,6 @@ func (e *ExecModule) closePreExecutedLocked(ctx context.Context, blockHash commo
 		result.ValidationStatus = ExecutionStatusBadBlock
 		if validationError != nil {
 			result.ValidationError = validationError.Error()
-		}
-		if e.stateCache != nil {
-			e.stateCache.ClearWithHash(header.ParentHash)
 		}
 		return result, nil
 	}
@@ -310,7 +307,7 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 			//
 			// The block's last deferred branch update is written into the block's own domain first, so the round
 			// reads those branches through its parent like any other block data.
-			if err = stagingBase.FlushPendingUpdates(ctx, roTx); err != nil {
+			if err = stagingBase.FlushPendingUpdates(roTx); err != nil {
 				return ValidationResult{}, fmt.Errorf("pre-exec round num=%d: flush the block's pending commitment: %w", blockNumber, err)
 			}
 			if doms, err = execctx.NewSharedDomains(ctx, roTx, e.logger, execctx.WithParent(stagingBase)); err != nil {
@@ -362,7 +359,7 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 			return ValidationResult{}, err
 		}
 
-		if err = doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+		if err = doms.InitBlockOverlay(roTx); err != nil {
 			doms.Close()
 			return ValidationResult{}, err
 		}
@@ -483,7 +480,7 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 	// EXECUTION, not validation — so it runs the block through ExecuteInto, which touches no validation
 	// state. (It used to call ValidatePayload, whose side effect of storing doms as fv.sharedDom is what
 	// put producer state in the validation slot and subjected it to newPayload/FCU teardown.)
-	status, notifications, validationError, criticalError := e.forkValidator.ExecuteInto(ctx, doms, tx, header, body.RawBody())
+	status, notifications, validationError, criticalError := e.forkValidator.ExecuteInto(ctx, doms, tx, header, body)
 	// A round that does not go on to register its SD in the frontier owns it, and has to close it. Only the
 	// fresh-SD path can reach here holding one nobody else knows about: the carry-forward path is executing
 	// into the frontier's own generation, which the frontier closes.

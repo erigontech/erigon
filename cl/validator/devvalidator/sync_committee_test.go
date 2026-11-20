@@ -17,7 +17,7 @@ func TestBuildSyncCommitteeMessage(t *testing.T) {
 	root := common.Hash{0xde, 0xad, 0xbe, 0xef}
 	sig := common.Bytes96{0x11, 0x22, 0x33}
 
-	body := []interface{}{buildSyncCommitteeMessage(42, root, 7, sig)}
+	body := []any{buildSyncCommitteeMessage(42, root, 7, sig)}
 
 	raw, err := json.Marshal(body)
 	require.NoError(t, err)

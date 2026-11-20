@@ -23,9 +23,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -34,7 +34,7 @@ import (
 type ChainReader struct {
 	Cfg         *chain.Config
 	Db          kv.Tx
-	BlockReader services.FullBlockReader
+	BlockReader dbservices.FullBlockReader
 	Logger      log.Logger
 }
 
@@ -110,6 +110,3 @@ func (cr ChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int {
 }
 
 func (cr ChainReader) FrozenBlocks() uint64 { return cr.BlockReader.FrozenBlocks() }
-func (cr ChainReader) FrozenBorBlocks(align bool) uint64 {
-	return cr.BlockReader.FrozenBorBlocks(align)
-}

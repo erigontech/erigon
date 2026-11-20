@@ -41,9 +41,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
-var (
-	ErrShuttingDown = errors.New("shutting down")
-)
+var ErrShuttingDown = errors.New("shutting down")
 
 const (
 	baseProtocolVersion    = 5
@@ -258,9 +256,8 @@ func (p *Peer) run() (peerErr *PeerError) {
 		readErr    = make(chan error, 1)
 	)
 
-	p.wg.Add(2)
-	go p.readLoop(readErr)
-	go p.pingLoop()
+	p.wg.Go(func() { p.readLoop(readErr) })
+	p.wg.Go(p.pingLoop)
 
 	// Start all protocol handlers.
 	writeStart <- struct{}{}
@@ -282,7 +279,7 @@ func (p *Peer) run() (peerErr *PeerError) {
 			// Allow the next write to start if there was no error.
 			writeStart <- struct{}{}
 		case err := <-readErr:
-			if reason, ok := err.(DiscReason); ok {
+			if reason, ok := errors.AsType[DiscReason](err); ok {
 				return NewPeerError(PeerErrorDiscReasonRemote, reason, nil, "Peer.run got a remote DiscReason")
 			} else {
 				return NewPeerError(PeerErrorDiscReason, DiscNetworkError, err, "Peer.run readErr")
@@ -298,7 +295,6 @@ func (p *Peer) run() (peerErr *PeerError) {
 func (p *Peer) pingLoop() {
 	defer dbg.LogPanic()
 	ping := time.NewTimer(pingInterval)
-	defer p.wg.Done()
 	defer ping.Stop()
 	for {
 		select {
@@ -321,7 +317,6 @@ func (p *Peer) pingLoop() {
 
 func (p *Peer) readLoop(errc chan<- error) {
 	defer dbg.LogPanic()
-	defer p.wg.Done()
 	for {
 		msg, err := p.rw.ReadMsg()
 		if err != nil {
@@ -422,7 +417,6 @@ outer:
 }
 
 func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error) {
-	p.wg.Add(len(p.running))
 	for _, proto := range p.running {
 		proto.closed = p.closed
 		proto.wstart = writeStart
@@ -432,16 +426,15 @@ func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error)
 			rw = newMsgEventer(rw, p.events, p.ID(), proto.Name, p.RemoteAddr().String(), p.LocalAddr().String())
 		}
 		p.log.Trace("[p2p] Starting protocol", "proto", proto.Name, "version", proto.Version)
-		go func() {
+		p.wg.Go(func() {
 			defer dbg.LogPanic()
-			defer p.wg.Done()
 			err := proto.Run(p, rw)
 			// only unit test protocols can return nil
 			if err == nil {
 				err = NewPeerError(PeerErrorTest, DiscQuitting, nil, "Protocol "+proto.cap().String()+" returned")
 			}
 			p.protoErr <- err
-		}()
+		})
 	}
 }
 
@@ -521,7 +514,6 @@ func (rw *protoRW) WriteMsg(msg Msg) (err error) {
 }
 
 func (rw *protoRW) ReadMsg() (Msg, error) {
-
 	select {
 	case msg := <-rw.in:
 		msg.Code -= rw.offset

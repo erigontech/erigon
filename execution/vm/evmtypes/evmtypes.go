@@ -17,6 +17,8 @@
 package evmtypes
 
 import (
+	"bytes"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -51,6 +53,9 @@ type BlockContext struct {
 	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
 	SlotNumber  uint64           // Provides information for SLOTNUM
 
+	// L2Version is populated by the chain's engine/block-context construction
+	// for L2 chains; zero otherwise.
+	L2Version uint64
 	// SlotExceeded lists, ascending, the body indices of transactions the producer included as FAILED because
 	// they could not execute within the slot. Read from the header's extra-data on chains that enable it
 	// (chain.Config.SlotExceededTxs); empty everywhere else. Only paths replaying a block's own transactions
@@ -75,31 +80,23 @@ type TxContext struct {
 	TxHash     common.Hash
 	Origin     accounts.Address // Provides information for ORIGIN
 	GasPrice   uint256.Int      // Provides information for GASPRICE
-	BlobFee    uint256.Int      // The fee for blobs(blobGas * blobGasPrice) incurred in the txn
 	BlobHashes []common.Hash    // Provides versioned blob hashes for BLOBHASH
 }
 
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	ReceiptGasUsed       uint64                       // Gas used by the transaction with refunds (what the user pays) - see EIP-7778
-	BlockRegularGasUsed  uint64                       // Per-tx regular gas for block-level accounting (pre-Amsterdam: same as block gas)
-	BlockStateGasUsed    uint64                       // Per-tx state gas for block-level Bottleneck (EIP-8037)
-	MaxGasUsed           uint64                       // Gas used by the transaction before refunds
-	IntrinsicGas         mdgas.IntrinsicGasCalcResult // Intrinsic gas computed pre-execution. Plumbed so block-pool inclusion checks at finalize time can reuse the value via protocol.InclusionContributionsWithIgas instead of recomputing IntrinsicGas per tx.
-	Err                  error                        // Any error encountered during the execution(listed in core/vm/errors.go)
-	Reverted             bool                         // Whether the execution was aborted by `REVERT`
-	ReturnData           []byte                       // Returned data from evm(function result or data supplied with revert opcode)
-	SenderInitBalance    uint256.Int
-	CoinbaseInitBalance  uint256.Int
+	mdgas.TxnGasUsage
+	Payer                *common.Address
+	FrameReceipts        []types.FrameReceipt
+	ReceiptGasUsed       uint64 // Gas paid after refunds and the calldata floor
+	MaxGasUsed           uint64 // Gas used by the transaction before refunds
+	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)
+	Reverted             bool   // Whether the execution was aborted by `REVERT`
+	ReturnData           []byte // Returned data from evm(function result or data supplied with revert opcode)
 	FeeTipped            uint256.Int
 	FeeBurnt             uint256.Int
 	BurntContractAddress accounts.Address
-
-	// SelfDestructedWithBalance holds accounts that were selfdestructed during
-	// execution but received ETH after the SELFDESTRUCT opcode ran (EIP-7708).
-	// Captured before SoftFinalise clears the journal.
-	SelfDestructedWithBalance []AddressAndBalance
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -111,13 +108,23 @@ func (result *ExecutionResult) Unwrap() error {
 // Failed returns the indicator whether the execution is successful or not
 func (result *ExecutionResult) Failed() bool { return result.Err != nil }
 
+// ReceiptForTracing supplies final gas and frame outcomes to transaction-end hooks
+// before a full receipt is built. Block metadata and combined logs are added later.
+func (result *ExecutionResult) ReceiptForTracing() *types.Receipt {
+	status := uint64(types.ReceiptStatusSuccessful)
+	if result.Failed() {
+		status = types.ReceiptStatusFailed
+	}
+	return &types.Receipt{GasUsed: result.ReceiptGasUsed, Status: status, Payer: result.Payer, FrameReceipts: result.FrameReceipts}
+}
+
 // Return is a helper function to help caller distinguish between revert reason
 // and function return. Return returns the data after execution if no error occurs.
 func (result *ExecutionResult) Return() []byte {
 	if result.Err != nil {
 		return nil
 	}
-	return common.Copy(result.ReturnData)
+	return bytes.Clone(result.ReturnData)
 }
 
 // Revert returns the concrete revert reason if the execution is aborted by `REVERT`
@@ -126,7 +133,7 @@ func (result *ExecutionResult) Revert() []byte {
 	if !result.Reverted {
 		return nil
 	}
-	return common.Copy(result.ReturnData)
+	return bytes.Clone(result.ReturnData)
 }
 
 type (
@@ -141,25 +148,16 @@ type (
 	GetHashFunc func(uint64) (common.Hash, error)
 
 	// PostApplyMessageFunc is an extension point to execute custom logic at the end of core.ApplyMessage.
-	// It's used in Bor for AddFeeTransferLog or in ethereum to clear out the authority code at end of tx.
+	// Used to clear out the authority code at end of tx.
 	PostApplyMessageFunc func(ibs IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *ExecutionResult, chainRules *chain.Rules)
 )
-
-type AddressAndBalance struct {
-	Address common.Address
-	Balance uint256.Int
-}
 
 // IntraBlockState is an EVM database for full state querying.
 type IntraBlockState interface {
 	SubBalance(accounts.Address, uint256.Int, tracing.BalanceChangeReason) error
 	AddBalance(accounts.Address, uint256.Int, tracing.BalanceChangeReason) error
 	GetBalance(accounts.Address) (uint256.Int, error)
-
-	GetRemovedAccountsWithBalance() []AddressAndBalance
-
 	AddLog(*types.Log)
-
 	SetHooks(hooks *tracing.Hooks)
 	Trace() bool
 	BlockNumber() uint64

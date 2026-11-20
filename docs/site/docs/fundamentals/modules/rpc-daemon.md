@@ -38,7 +38,7 @@ When running RPC Daemon in Local or Remote deployment mode, use this command to 
 ./build/bin/rpcdaemon --help
 ```
 
-The `--help` flag listing is reproduced below for your convenience.
+A summary of the available flags is shown below. It is not a verbatim dump — run `rpcdaemon --help` on your build for the authoritative, up-to-date listing (some defaults are host-dependent).
 
 ```text
 rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access
@@ -48,11 +48,7 @@ Usage:
 
 Flags:
       --datadir string                              path to Erigon working directory
-      --db.read.concurrency int                     Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU) (default 1408)
-      --diagnostics.disabled                        Disable diagnostics
-      --diagnostics.endpoint.addr string            Diagnostics HTTP server listening interface (default "127.0.0.1")
-      --diagnostics.endpoint.port uint              Diagnostics HTTP server listening port (default 6062)
-      --diagnostics.speedtest                       Enable speed test
+      --db.read.concurrency int                     Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead
       --graphql                                     enables graphql endpoint (disabled by default)
       --grpc                                        Enable GRPC server
       --grpc.addr string                            GRPC server listening interface (default "localhost")
@@ -62,6 +58,7 @@ Flags:
       --http.addr string                            HTTP server listening interface (default "localhost")
       --http.api strings                            API's offered over the RPC interface: eth,erigon,web3,net,debug,trace,txpool,db. Supported methods: https://github.com/erigontech/erigon/tree/main/cmd/rpcdaemon (default [eth,erigon])
       --http.compression                            Disable http compression (default true)
+      --http.compression.loopback                   Also compress HTTP-RPC responses to loopback clients (default false)
       --http.corsdomain strings                     Comma separated list of domains from which to accept cross origin requests (browser enforced)
       --http.dbg.single                             Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed
       --http.enabled                                enable http server (default true)
@@ -91,7 +88,6 @@ Flags:
       --metrics.addr string                         Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
       --metrics.port int                            Metrics HTTP server listening port (default 6061)
       --ots.search.max.pagesize uint                Max allowed page size for search methods (default 25)
-      --polygon.sync                                Enable if Erigon has been synced using the new polygon sync component
       --pprof                                       Enable the pprof HTTP server
       --pprof.addr string                           pprof HTTP server listening interface (default "127.0.0.1")
       --pprof.cpuprofile string                     Write CPU profile to the given file
@@ -103,17 +99,19 @@ Flags:
       --rpc.batch.limit int                         Maximum number of requests in a batch (default 100)
       --rpc.evmtimeout duration                     Maximum amount of time to wait for the answer from EVM call. (default 5m0s)
       --rpc.gascap uint                             Sets a cap on gas that can be used in eth_call/estimateGas (default 50000000)
-      --rpc.maxgetproofrewindblockcount.limit int   Max GetProof rewind block count (default 100000)
       --rpc.overlay.getlogstimeout duration         Maximum amount of time to wait for the answer from the overlay_getLogs call. (default 5m0s)
       --rpc.overlay.replayblocktimeout duration     Maximum amount of time to wait for the answer to replay a single block when called from an overlay_getLogs call. (default 10s)
       --rpc.returndata.limit int                    Maximum number of bytes returned from eth_call or similar invocations (default 100000)
-      --rpc.slow duration                           Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Excluded methods: eth_getBlock,eth_getBlockByNumber,eth_getBlockByHash,eth_blockNumber,erigon_blockNumber,erigon_getHeaderByNumber,erigon_getHeaderByHash,erigon_getBlockByTimestamp,eth_call
+      --rpc.slow duration                           Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Excluded methods: eth_getBlock,eth_getBlockByNumber,eth_getBlockByHash,eth_getHeaderByNumber,eth_getHeaderByHash,eth_blockNumber,erigon_blockNumber,erigon_getHeaderByNumber,erigon_getHeaderByHash,erigon_getBlockByTimestamp,eth_call
       --rpc.streaming.disable                       Erigon has enabled json streaming for some heavy endpoints (like trace_*). It's a trade-off: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)
-      --rpc.subscription.filters.maxaddresses int   Maximum number of addresses per subscription to filter logs by.
+      --rpc.subscription.filters.maxaddresses int   Maximum number of addresses accepted per log subscription.
       --rpc.subscription.filters.maxheaders int     Maximum number of block headers to store per subscription.
       --rpc.subscription.filters.maxlogs int        Maximum number of logs to store per subscription.
-      --rpc.subscription.filters.maxtopics int      Maximum number of topics per subscription to filter logs by.
+      --rpc.subscription.filters.maxsubscriptions int   Maximum number of live filters and subscriptions across all clients. Set to 0 to disable the limit. (default 10000)
+      --rpc.subscription.filters.maxtopics int      Maximum number of topic alternatives accepted across all positions per log subscription.
       --rpc.subscription.filters.maxtxs int         Maximum number of transactions to store per subscription.
+      --rpc.subscription.filters.timeout duration   Timeout before idle filters are evicted. Defaults to 5m; set to 0 to disable eviction. (default 5m0s)
+      --rpc.subscription.limit int                  Maximum number of concurrent subscriptions per connection (WebSocket, IPC). 0 = unlimited (default 1024)
       --rpc.txfeecap float                          Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap) (default 1)
       --socket.enabled                              Enable IPC server
       --socket.url string                           IPC server listening url. prefix supported are tcp, unix (default "unix:///var/run/erigon.sock")
@@ -123,11 +121,9 @@ Flags:
       --tls.key string                              key file for client side TLS handshake for GRPC
       --trace string                                Write execution trace to the given file
       --trace.compat                                Bug for bug compatibility with OE for trace_ routines
-      --trace.maxtraces uint                        Sets a limit on traces that can be returned in trace_filter (default 200)
       --txpool.api.addr string                      txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)
       --verbosity string                            Set the log level for console logs (default "info")
       --ws                                          Enable Websockets - Same port as HTTP[S]
       --ws.api.subscribelogs.channelsize int        Size of the channel used for websocket logs subscriptions (default 8192)
       --ws.compression                              Enable Websocket compression (RFC 7692)
 ```
-

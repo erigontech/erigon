@@ -32,7 +32,7 @@ func TestFeedPanics(t *testing.T) {
 	{
 		var f Feed
 		f.Send(2)
-		want := feedTypeError{op: "Send", got: reflect.TypeOf(uint64(0)), want: reflect.TypeOf(0)}
+		want := feedTypeError{op: "Send", got: reflect.TypeFor[uint64](), want: reflect.TypeFor[int]()}
 		if err := checkPanic(want, func() { f.Send(uint64(2)) }); err != nil {
 			t.Error(err)
 		}
@@ -41,7 +41,7 @@ func TestFeedPanics(t *testing.T) {
 		var f Feed
 		ch := make(chan int)
 		f.Subscribe(ch)
-		want := feedTypeError{op: "Send", got: reflect.TypeOf(uint64(0)), want: reflect.TypeOf(0)}
+		want := feedTypeError{op: "Send", got: reflect.TypeFor[uint64](), want: reflect.TypeFor[int]()}
 		if err := checkPanic(want, func() { f.Send(uint64(2)) }); err != nil {
 			t.Error(err)
 		}
@@ -49,7 +49,7 @@ func TestFeedPanics(t *testing.T) {
 	{
 		var f Feed
 		f.Send(2)
-		want := feedTypeError{op: "Subscribe", got: reflect.TypeOf(make(chan uint64)), want: reflect.TypeOf(make(chan<- int))}
+		want := feedTypeError{op: "Subscribe", got: reflect.TypeFor[chan uint64](), want: reflect.TypeFor[chan<- int]()}
 		if err := checkPanic(want, func() { f.Subscribe(make(chan uint64)) }); err != nil {
 			t.Error(err)
 		}
@@ -66,6 +66,14 @@ func TestFeedPanics(t *testing.T) {
 			t.Error(err)
 		}
 	}
+	{
+		var f Feed
+		f.TrySend(2)
+		want := feedTypeError{op: "TrySend", got: reflect.TypeFor[uint64](), want: reflect.TypeFor[int]()}
+		if err := checkPanic(want, func() { f.TrySend(uint64(2)) }); err != nil {
+			t.Error(err)
+		}
+	}
 }
 
 func checkPanic(want error, fn func()) (err error) {
@@ -74,7 +82,7 @@ func checkPanic(want error, fn func()) (err error) {
 		if panic == nil {
 			err = errors.New("didn't panic")
 		} else if !reflect.DeepEqual(panic, want) {
-			err = fmt.Errorf("panicked with wrong error: got %q, want %q", panic, want)
+			err = fmt.Errorf("panicked with wrong error: got %v, want %w", panic, want)
 		}
 	}()
 	fn()
@@ -116,7 +124,7 @@ func TestFeed(t *testing.T) {
 	const n = 1000
 	done.Add(n)
 	subscribed.Add(n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go subscriber(i)
 	}
 	subscribed.Wait()
@@ -127,6 +135,179 @@ func TestFeed(t *testing.T) {
 		t.Errorf("second send delivered %d times, want 0", nsent)
 	}
 	done.Wait()
+}
+
+func TestFeedTrySendSkipsSlowSubscribers(t *testing.T) {
+	var feed Feed
+	slow := make(chan int)
+	slowSub := feed.Subscribe(slow)
+	defer slowSub.Unsubscribe()
+	ready := make(chan int, 1)
+	readySub := feed.Subscribe(ready)
+	defer readySub.Unsubscribe()
+
+	if delivered := feed.TrySend(1); delivered != 1 {
+		t.Fatalf("TrySend delivered %d times, want 1", delivered)
+	}
+	if value := <-ready; value != 1 {
+		t.Fatalf("received %d, want 1", value)
+	}
+}
+
+func TestFeedTrySendDoesNotWaitForBlockedSend(t *testing.T) {
+	var feed Feed
+	slow := make(chan int)
+	slowSub := feed.Subscribe(slow)
+	defer slowSub.Unsubscribe()
+	ready := make(chan int, 1)
+	readySub := feed.Subscribe(ready)
+	defer readySub.Unsubscribe()
+
+	sendDone := make(chan struct{})
+	go func() {
+		feed.Send(1)
+		close(sendDone)
+	}()
+	if value := <-ready; value != 1 {
+		t.Fatalf("received %d, want 1", value)
+	}
+
+	completed := make(chan int, 1)
+	go func() { completed <- feed.TrySend(2) }()
+	select {
+	case delivered := <-completed:
+		if delivered != 1 {
+			t.Fatalf("TrySend delivered %d times, want 1", delivered)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("TrySend waited for a blocked Send")
+	}
+	if value := <-ready; value != 2 {
+		t.Fatalf("received %d, want 2", value)
+	}
+
+	slowSub.Unsubscribe()
+	select {
+	case <-sendDone:
+	case <-time.After(time.Second):
+		t.Fatal("Send remained blocked after unsubscribe")
+	}
+}
+
+func TestFeedTrySendDoesNotWaitForSubscriptionLock(t *testing.T) {
+	var feed Feed
+	ready := make(chan int, 1)
+	sub := feed.Subscribe(ready)
+	defer sub.Unsubscribe()
+	feed.mu.Lock()
+	defer feed.mu.Unlock()
+
+	completed := make(chan int, 1)
+	go func() { completed <- feed.TrySend(1) }()
+	select {
+	case delivered := <-completed:
+		if delivered != 1 {
+			t.Fatalf("TrySend delivered %d times, want 1", delivered)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("TrySend waited for the subscription lock")
+	}
+	if value := <-ready; value != 1 {
+		t.Fatalf("received %d, want 1", value)
+	}
+}
+
+func TestFeedTrySendStaleSubscriptionDoesNotSendAfterUnsubscribe(t *testing.T) {
+	var feed Feed
+	ch := make(chan int, 1)
+	sub := feed.Subscribe(ch).(*feedSub)
+
+	sub.Unsubscribe()
+	close(ch)
+	if sent := feed.TrySend(1); sent != 0 {
+		t.Fatalf("TrySend delivered %d times after unsubscribe", sent)
+	}
+}
+
+func TestFeedConcurrentTrySendDeliversEveryEventToReadySubscribers(t *testing.T) {
+	const subscribers = 20_000
+	var feed Feed
+	channels := make([]chan int, subscribers)
+	for i := range channels {
+		channels[i] = make(chan int, 2)
+		feed.Subscribe(channels[i])
+	}
+
+	start := make(chan struct{})
+	delivered := make(chan int, 2)
+	for value := 1; value <= 2; value++ {
+		go func() {
+			<-start
+			delivered <- feed.TrySend(value)
+		}()
+	}
+	close(start)
+
+	for range 2 {
+		if got := <-delivered; got != subscribers {
+			t.Fatalf("TrySend delivered %d times, want %d", got, subscribers)
+		}
+	}
+	for i, ch := range channels {
+		if len(ch) != 2 {
+			t.Fatalf("subscriber %d received %d events, want 2", i, len(ch))
+		}
+	}
+}
+
+func TestFeedTrySendDeliversToReadySubscriberDuringSubscriptionChanges(t *testing.T) {
+	const (
+		changes = 4
+		events  = 5_000
+	)
+	var feed Feed
+	ready := make(chan int, events)
+	readySub := feed.Subscribe(ready)
+	defer readySub.Unsubscribe()
+
+	stop := make(chan struct{})
+	started := make(chan struct{}, changes)
+	var workers sync.WaitGroup
+	for range changes {
+		workers.Go(func() {
+			first := true
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				ch := make(chan int, 1)
+				sub := feed.Subscribe(ch)
+				sub.Unsubscribe()
+				if first {
+					started <- struct{}{}
+					first = false
+				}
+			}
+		})
+	}
+	defer func() {
+		close(stop)
+		workers.Wait()
+	}()
+	for range changes {
+		<-started
+	}
+
+	for value := range events {
+		if delivered := feed.TrySend(value); delivered == 0 {
+			t.Fatalf("TrySend dropped event %d while a ready subscriber was available", value)
+		}
+	}
+	if len(ready) != events {
+		t.Fatalf("ready subscriber received %d events, want %d", len(ready), events)
+	}
 }
 
 func TestFeedSubscribeSameChannel(t *testing.T) {
@@ -145,7 +326,7 @@ func TestFeedSubscribeSameChannel(t *testing.T) {
 		done.Done()
 	}
 	expectRecv := func(wantValue, n int) {
-		for i := 0; i < n; i++ {
+		for range n {
 			if v := <-ch; v != wantValue {
 				t.Errorf("received %d, want %d", v, wantValue)
 			}
@@ -183,12 +364,10 @@ func TestFeedSubscribeBlockedPost(t *testing.T) {
 	defer wg.Wait()
 
 	feed.Subscribe(ch1)
-	wg.Add(nsends)
-	for i := 0; i < nsends; i++ {
-		go func() {
+	for range nsends {
+		wg.Go(func() {
 			feed.Send(99)
-			wg.Done()
-		}()
+		})
 	}
 
 	sub2 := feed.Subscribe(ch2)
@@ -220,12 +399,10 @@ func TestFeedUnsubscribeBlockedPost(t *testing.T) {
 	}
 
 	// Queue up some Sends. None of these can make progress while bchan isn't read.
-	wg.Add(nsends)
-	for i := 0; i < nsends; i++ {
-		go func() {
+	for range nsends {
+		wg.Go(func() {
 			feed.Send(99)
-			wg.Done()
-		}()
+		})
 	}
 	// Subscribe the other channels.
 	for i, ch := range chans {
@@ -253,11 +430,9 @@ func TestFeedUnsubscribeSentChan(t *testing.T) {
 	)
 	defer sub2.Unsubscribe()
 
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		feed.Send(0)
-		wg.Done()
-	}()
+	})
 
 	// Wait for the value on ch1.
 	<-ch1
@@ -270,11 +445,9 @@ func TestFeedUnsubscribeSentChan(t *testing.T) {
 
 	// Send again. This should send to ch2 only, so the wait group will unblock
 	// as soon as a value is received on ch2.
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		feed.Send(0)
-		wg.Done()
-	}()
+	})
 	<-ch2
 	wg.Wait()
 }
@@ -306,32 +479,101 @@ func TestFeedUnsubscribeFromInbox(t *testing.T) {
 	}
 }
 
-func BenchmarkFeedSend1000(b *testing.B) {
-	var (
-		done  sync.WaitGroup
-		feed  Feed
-		nsubs = 1000
-	)
-	subscriber := func(ch <-chan int) {
-		for i := 0; i < b.N; i++ {
-			<-ch
+func TestFeedTrySendOrFailReportsSlowSubscribers(t *testing.T) {
+	var feed Feed
+	slow := make(chan int)
+	slowSub := feed.Subscribe(slow)
+	defer slowSub.Unsubscribe()
+	ready := make(chan int, 1)
+	readySub := feed.Subscribe(ready)
+	defer readySub.Unsubscribe()
+
+	completed := make(chan int, 1)
+	go func() { completed <- feed.TrySendOrFail(1) }()
+	select {
+	case delivered := <-completed:
+		if delivered != 1 {
+			t.Fatalf("TrySendOrFail delivered %d times, want 1", delivered)
 		}
-		done.Done()
+	case <-time.After(time.Second):
+		t.Fatal("TrySendOrFail waited for a slow subscriber")
 	}
-	done.Add(nsubs)
-	for i := 0; i < nsubs; i++ {
-		ch := make(chan int, 200)
-		feed.Subscribe(ch)
-		go subscriber(ch)
+	if value := <-ready; value != 1 {
+		t.Fatalf("received %d, want 1", value)
+	}
+	select {
+	case err := <-slowSub.Err():
+		if !errors.Is(err, ErrSubscriberLagged) {
+			t.Fatalf("slow subscriber got %v, want ErrSubscriberLagged", err)
+		}
+	default:
+		t.Fatal("slow subscriber was not told about the dropped value")
+	}
+	select {
+	case err := <-readySub.Err():
+		t.Fatalf("ready subscriber got %v", err)
+	default:
 	}
 
-	// The actual benchmark.
-	for i := 0; b.Loop(); i++ {
-		if feed.Send(i) != nsubs {
-			panic("wrong number of sends")
+	// The subscription stays active: the subscriber decides whether to stop.
+	go func() { completed <- feed.Send(2) }()
+	if value := <-slow; value != 2 {
+		t.Fatalf("received %d, want 2", value)
+	}
+	if value := <-ready; value != 2 {
+		t.Fatalf("received %d, want 2", value)
+	}
+	<-completed
+}
+
+func TestFeedTrySendOrFailRacesUnsubscribe(t *testing.T) {
+	var feed Feed
+	for range 1000 {
+		sub := feed.Subscribe(make(chan int))
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			feed.TrySendOrFail(1)
+		}()
+		sub.Unsubscribe()
+		<-done
+	}
+}
+
+func TestFeedTrySendOrFailReportsEveryLagButKeepsOnePending(t *testing.T) {
+	var feed Feed
+	sub := feed.Subscribe(make(chan int))
+	defer sub.Unsubscribe()
+
+	feed.TrySendOrFail(1)
+	if err := <-sub.Err(); !errors.Is(err, ErrSubscriberLagged) {
+		t.Fatalf("first lag: got %v", err)
+	}
+	feed.TrySendOrFail(2)
+	select {
+	case err := <-sub.Err():
+		if !errors.Is(err, ErrSubscriberLagged) {
+			t.Fatalf("second lag: got %v", err)
 		}
+	default:
+		t.Fatal("a lag after the first one was read is not reported")
 	}
 
-	b.StopTimer()
-	done.Wait()
+	completed := make(chan struct{})
+	go func() {
+		feed.TrySendOrFail(3)
+		feed.TrySendOrFail(4)
+		close(completed)
+	}()
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("a pending lag report blocked the send")
+	}
+	<-sub.Err()
+	select {
+	case err := <-sub.Err():
+		t.Fatalf("two misses left two reports: %v", err)
+	default:
+	}
 }

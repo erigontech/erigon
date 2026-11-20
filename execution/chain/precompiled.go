@@ -51,9 +51,7 @@ const (
 	PrecompilesIstanbul
 	PrecompilesBerlin
 	PrecompilesCancun
-	PrecompilesNapoli
 	PrecompilesPrague
-	PrecompilesBhilai
 	PrecompilesOsaka
 	numPrecompileForks
 )
@@ -63,12 +61,8 @@ func (r *Rules) PrecompileForkId() PrecompileForkId {
 	switch {
 	case r.IsOsaka:
 		return PrecompilesOsaka
-	case r.IsBhilai:
-		return PrecompilesBhilai
 	case r.IsPrague:
 		return PrecompilesPrague
-	case r.IsNapoli:
-		return PrecompilesNapoli
 	case r.IsCancun:
 		return PrecompilesCancun
 	case r.IsBerlin:

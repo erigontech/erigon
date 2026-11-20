@@ -26,9 +26,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
 // hexCompact emits a V1-encoded key with no terminator for the supplied nibbles.
@@ -41,47 +47,6 @@ func hexCompact(nibs ...byte) []byte {
 // v2Key emits a V2 canonical key for the supplied nibbles.
 func v2Key(nibs ...byte) []byte {
 	return nibbles.EncodeKeyV2(nibs)
-}
-
-// branchWithAccountKey returns a minimal valid BranchData containing exactly one
-// fieldAccountAddr cell at nibble 0 with the supplied bytes as the plain-key
-// payload. The varint length prefix uses a single byte (so keys must be < 128B).
-//
-// Layout: [touchMap=0x0001 BE][afterMap=0x0001 BE][fields=0x02][varint(len)][keyBytes]
-// fieldAccountAddr = 2 (see execution/commitment/commitment.go:180).
-func branchWithAccountKey(keyBytes []byte) []byte {
-	require := func(cond bool, msg string) {
-		if !cond {
-			panic(msg)
-		}
-	}
-	require(len(keyBytes) < 128, "branchWithAccountKey: keyBytes must fit single-byte varint")
-	var buf bytes.Buffer
-	var hdr [4]byte
-	binary.BigEndian.PutUint16(hdr[0:], 0x0001) // touchMap: nibble 0
-	binary.BigEndian.PutUint16(hdr[2:], 0x0001) // afterMap: nibble 0
-	buf.Write(hdr[:])
-	buf.WriteByte(0x02)                // fields = fieldAccountAddr
-	buf.WriteByte(byte(len(keyBytes))) // varint length (single-byte form for len < 128)
-	buf.Write(keyBytes)
-	return buf.Bytes()
-}
-
-// branchWithStorageKey is the storage-side variant of branchWithAccountKey.
-// fieldStorageAddr = 4 (commitment.go:181).
-func branchWithStorageKey(keyBytes []byte) []byte {
-	if len(keyBytes) >= 128 {
-		panic("branchWithStorageKey: keyBytes must fit single-byte varint")
-	}
-	var buf bytes.Buffer
-	var hdr [4]byte
-	binary.BigEndian.PutUint16(hdr[0:], 0x0001)
-	binary.BigEndian.PutUint16(hdr[2:], 0x0001)
-	buf.Write(hdr[:])
-	buf.WriteByte(0x04)
-	buf.WriteByte(byte(len(keyBytes)))
-	buf.Write(keyBytes)
-	return buf.Bytes()
 }
 
 func TestDetectKeyEncoding_AllV1(t *testing.T) {
@@ -159,65 +124,6 @@ func TestDetectKeyEncoding_KnownAmbiguous(t *testing.T) {
 	require.True(t, v2,
 		"detector classifies ambiguous V1 file as V2 — known limitation, "+
 			"documented in detectKeyEncoding godoc")
-}
-
-func TestDetectSqueezeState_AllSqueezed(t *testing.T) {
-	// All embedded plain-key fields are short (4-byte file offsets).
-	samples := []sampledPair{
-		{k: []byte("key1"), v: branchWithAccountKey([]byte{0x01, 0x02, 0x03, 0x04})},
-		{k: []byte("key2"), v: branchWithAccountKey([]byte{0x05, 0x06, 0x07})},
-		{k: []byte("key3"), v: branchWithStorageKey([]byte{0x08, 0x09})},
-	}
-	squeezed, err := detectSqueezeState(samples)
-	require.NoError(t, err)
-	require.True(t, squeezed)
-}
-
-func TestDetectSqueezeState_AllUnsqueezed(t *testing.T) {
-	addr20 := bytes.Repeat([]byte{0xaa}, 20)
-	addr52 := bytes.Repeat([]byte{0xbb}, 52)
-	samples := []sampledPair{
-		{k: []byte("key1"), v: branchWithAccountKey(addr20)},
-		{k: []byte("key2"), v: branchWithAccountKey(addr20)},
-		{k: []byte("key3"), v: branchWithStorageKey(addr52)},
-	}
-	squeezed, err := detectSqueezeState(samples)
-	require.NoError(t, err)
-	require.False(t, squeezed)
-}
-
-func TestDetectSqueezeState_PartialSqueezed(t *testing.T) {
-	// One short key among full-length keys — decisive squeezed signal.
-	addr20 := bytes.Repeat([]byte{0xcc}, 20)
-	samples := []sampledPair{
-		{k: []byte("key1"), v: branchWithAccountKey(addr20)},
-		{k: []byte("key2"), v: branchWithAccountKey(addr20)},
-		{k: []byte("key3"), v: branchWithAccountKey([]byte{0x01, 0x02, 0x03})}, // short
-		{k: []byte("key4"), v: branchWithAccountKey(addr20)},
-	}
-	squeezed, err := detectSqueezeState(samples)
-	require.NoError(t, err)
-	require.True(t, squeezed)
-}
-
-func TestDetectSqueezeState_StateKeysOnly(t *testing.T) {
-	samples := []sampledPair{
-		{k: commitmentdb.KeyCommitmentState, v: []byte{0x01, 0x02, 0x03}},
-		{k: commitmentdb.KeyCommitmentState, v: nil},
-	}
-	_, err := detectSqueezeState(samples)
-	require.ErrorIs(t, err, errNoNonStateSamples)
-}
-
-func TestDetectSqueezeState_EmptyValuesSkipped(t *testing.T) {
-	addr20 := bytes.Repeat([]byte{0xdd}, 20)
-	samples := []sampledPair{
-		{k: []byte("key1"), v: nil}, // skipped (empty value)
-		{k: []byte("key2"), v: branchWithAccountKey(addr20)},
-	}
-	squeezed, err := detectSqueezeState(samples)
-	require.NoError(t, err)
-	require.False(t, squeezed)
 }
 
 // nibblePaths covers the keyXform fixtures: a handful of distinct nibble paths
@@ -333,9 +239,10 @@ type fakeVisibleFile struct {
 	end   uint64
 }
 
-func (f fakeVisibleFile) Fullpath() string     { return f.path }
-func (f fakeVisibleFile) StartRootNum() uint64 { return f.start }
-func (f fakeVisibleFile) EndRootNum() uint64   { return f.end }
+func (f fakeVisibleFile) Fullpath() string         { return f.path }
+func (f fakeVisibleFile) StartRootNum() uint64     { return f.start }
+func (f fakeVisibleFile) EndRootNum() uint64       { return f.end }
+func (f fakeVisibleFile) Version() version.Version { return version.V1_0 }
 
 // preflightTestStepSize matches the unit step used in these tests: each input
 // "file" spans one step, so StartRootNum=N maps to step range [N, N+1).
@@ -351,7 +258,7 @@ var preflightTestAccessors = []string{".bt", ".kvi", ".kvei"}
 // are made unique for easier debugging.
 func fakeInputFiles(firstStep uint64, n int) VisibleFiles {
 	out := make(VisibleFiles, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		s := firstStep + uint64(i)
 		out[i] = fakeVisibleFile{
 			path:  fmt.Sprintf("/fake/v1-commitment.%d-%d.kv", s, s+1),
@@ -564,4 +471,168 @@ func TestPreflightResume_validationErrorPreservesDisk(t *testing.T) {
 		_, statErr := os.Stat(p)
 		require.NoError(t, statErr, "file %s must survive validation-error return", p)
 	}
+}
+
+func TestConvertedSinkEmitSendsFullBatch(t *testing.T) {
+	out := make(chan *convertedBatch, 1)
+	sink := convertedSink{ctx: t.Context(), out: out, res: getConvertedBatch()}
+	require.NoError(t, sink.emit([]byte{1}, []byte{2}, v3.LegacyDirect))
+	require.NoError(t, sink.emit(bytes.Repeat([]byte{3}, commitmentV3BatchBytes), nil, v3.LegacyDirect))
+	full := <-out
+	require.Len(t, full.ents, 1)
+	require.LessOrEqual(t, len(full.buf), commitmentV3BatchBytes)
+	require.Len(t, sink.res.ents, 1)
+}
+
+func TestConvertResolveLegacyHistoryConflicts(t *testing.T) {
+	for _, kind := range []v3.LegacyKind{v3.LegacyDirect, v3.LegacySynthesized} {
+		t.Run(fmt.Sprint(kind), func(t *testing.T) {
+			_, err := resolveLegacyHistory(v3.StorageNodeKey([32]byte{}, nil, nil), []v3.LegacyEntry{
+				{Kind: kind, Value: []byte{1}},
+				{Kind: kind, Value: []byte{2}},
+			})
+			require.ErrorIs(t, err, v3.ErrLegacyConflict)
+		})
+	}
+}
+
+func TestHistoryConvertTxNumLookups(t *testing.T) {
+	const txs, stepSize, keys = 160, 16, 31
+	db, ii, _ := filledInvIndexOfSize(t, txs, stepSize, keys, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for step := range kv.Step(txs/stepSize - 1) {
+		require.NoError(t, ii.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
+	}
+	require.NoError(t, tx.Commit())
+
+	ic := ii.beginForTests()
+	defer ic.Close()
+	require.NotEmpty(t, ic.files)
+	filesEnd := ic.files[len(ic.files)-1].endTxNum
+	for _, keyNum := range []uint64{1, 7, 13, 31} {
+		var key [8]byte
+		binary.BigEndian.PutUint64(key[:], keyNum)
+		for txNum := uint64(0); txNum <= filesEnd+1; txNum++ {
+			var want uint64
+			for m := keyNum; m < txNum && m < filesEnd; m += keyNum {
+				want = m
+			}
+			got, ok, err := lastWriteBefore(ic, key[:], txNum)
+			require.NoError(t, err)
+			require.Equal(t, want != 0, ok, "key %d txNum %d", keyNum, txNum)
+			require.Equal(t, want, got, "key %d txNum %d", keyNum, txNum)
+		}
+		for _, f := range ic.files {
+			var want []uint64
+			for m := keyNum; m < f.endTxNum; m += keyNum {
+				if m >= f.startTxNum {
+					want = append(want, m)
+				}
+			}
+			got, err := appendFileTxNums(nil, ic, f.startTxNum, f.endTxNum, key[:])
+			require.NoError(t, err)
+			require.Equal(t, want, got, "key %d file %d-%d", keyNum, f.startTxNum, f.endTxNum)
+		}
+	}
+}
+
+func TestConvertPhase3RestoreKeepsUnmovedDomainFile(t *testing.T) {
+	dirs := datadir.Open(t.TempDir())
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	rangeFiles := []string{
+		"v2.0-commitment.0-32.bt",
+		"v2.0-commitment.0-32.kv",
+	}
+	original := map[string][]byte{
+		rangeFiles[0]: []byte("ORIG_BT"),
+		rangeFiles[1]: []byte("ORIG_KV"),
+	}
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+	for _, name := range rangeFiles {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), original[name], 0o644))
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(backupDir, rangeFiles[1]), 0o755))
+
+	moved, err := convertPhase3(dirs.SnapDomain, backupDir, []commitmentHistoryRange{{fromStep: 0, toStep: 32}})
+	require.Error(t, err)
+	require.Equal(t, 1, moved)
+	require.FileExists(t, filepath.Join(backupDir, rangeFiles[0]))
+	require.FileExists(t, filepath.Join(dirs.SnapDomain, rangeFiles[1]))
+	require.NoError(t, dir.RemoveFile(filepath.Join(backupDir, rangeFiles[1])))
+
+	_, err = RestoreCommitmentFiles(t.Context(), dirs, log.New())
+	require.NoError(t, err)
+	for _, name := range rangeFiles {
+		require.Equal(t, original[name], readFileBytesForTest(t, filepath.Join(dirs.SnapDomain, name)))
+	}
+}
+
+func TestConvertPhase3RestoreKeepsEveryRange(t *testing.T) {
+	dirs := datadir.Open(t.TempDir())
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	rangeFiles := []string{
+		"v2.0-commitment.0-16.bt",
+		"v2.0-commitment.0-16.kv",
+		"v2.0-commitment.16-32.bt",
+		"v2.0-commitment.16-32.kv",
+	}
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+	for _, name := range rangeFiles {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), []byte("ORIG_"+name), 0o644))
+	}
+	blocked := filepath.Join(backupDir, rangeFiles[3])
+	require.NoError(t, os.MkdirAll(blocked, 0o755))
+
+	moved, err := convertPhase3(dirs.SnapDomain, backupDir, []commitmentHistoryRange{{fromStep: 0, toStep: 16}, {fromStep: 16, toStep: 32}})
+	require.Error(t, err)
+	require.Equal(t, 3, moved)
+	require.NoError(t, dir.RemoveFile(blocked))
+
+	_, err = RestoreCommitmentFiles(t.Context(), dirs, log.New())
+	require.NoError(t, err)
+	for _, name := range rangeFiles {
+		require.Equal(t, []byte("ORIG_"+name), readFileBytesForTest(t, filepath.Join(dirs.SnapDomain, name)))
+	}
+}
+
+func TestConvertPhase3RestoreKeepsUnmovedHistoryAccessor(t *testing.T) {
+	dirs := datadir.Open(t.TempDir())
+	backupRoot := filepath.Join(dirs.Snap, "backup")
+	backupDir := filepath.Join(backupRoot, "accessor")
+	rangeFiles := []string{
+		"v2.0-commitment.0-32.efi",
+		"v2.0-commitment.0-32.vi",
+	}
+	original := map[string][]byte{
+		rangeFiles[0]: []byte("ORIG_EFI"),
+		rangeFiles[1]: []byte("ORIG_VI"),
+	}
+	require.NoError(t, os.MkdirAll(dirs.SnapAccessors, 0o755))
+	for _, name := range rangeFiles {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapAccessors, name), original[name], 0o644))
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(backupRoot, "history"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(backupDir, rangeFiles[1]), 0o755))
+
+	moved, err := convertPhase3(dirs.SnapAccessors, backupDir, []commitmentHistoryRange{{fromStep: 0, toStep: 32}})
+	require.Error(t, err)
+	require.Equal(t, 1, moved)
+	require.FileExists(t, filepath.Join(backupDir, rangeFiles[0]))
+	require.FileExists(t, filepath.Join(dirs.SnapAccessors, rangeFiles[1]))
+	require.NoError(t, dir.RemoveFile(filepath.Join(backupDir, rangeFiles[1])))
+
+	_, err = RestoreCommitmentFiles(t.Context(), dirs, log.New())
+	require.NoError(t, err)
+	for _, name := range rangeFiles {
+		require.Equal(t, original[name], readFileBytesForTest(t, filepath.Join(dirs.SnapAccessors, name)))
+	}
+}
+
+func readFileBytesForTest(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return data
 }

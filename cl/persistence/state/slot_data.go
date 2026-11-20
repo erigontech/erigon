@@ -87,7 +87,7 @@ func SlotDataFromBeaconState(s *state.CachingBeaconState) *SlotData {
 }
 
 // Serialize serializes the state into a byte slice with zstd compression.
-func (m *SlotData) WriteTo(w io.Writer) error {
+func (m *SlotData) Serialize(w io.Writer) error {
 	buf, err := ssz2.MarshalSSZ(nil, m.getSchema()...)
 	if err != nil {
 		return err
@@ -108,7 +108,7 @@ func (m *SlotData) WriteTo(w io.Writer) error {
 }
 
 // Deserialize deserializes the state from a byte slice with zstd compression.
-func (m *SlotData) ReadFrom(r io.Reader, cfg *clparams.BeaconChainConfig) error {
+func (m *SlotData) Deserialize(r io.Reader) error {
 	m.Eth1Data = &cltypes.Eth1Data{}
 	m.Fork = &cltypes.Fork{}
 	var err error
@@ -145,7 +145,8 @@ func (m *SlotData) getSchema() []any {
 	}
 
 	if m.Version >= clparams.ElectraVersion {
-		schema = append(schema,
+		schema = append(
+			schema,
 			&m.DepositRequestsStartIndex,
 			&m.DepositBalanceToConsume,
 			&m.ExitBalanceToConsume,
@@ -155,7 +156,8 @@ func (m *SlotData) getSchema() []any {
 		)
 	}
 	if m.Version >= clparams.GloasVersion {
-		schema = append(schema,
+		schema = append(
+			schema,
 			&m.NextWithdrawalBuilderIndex,
 			m.LatestBlockHash[:],
 		)

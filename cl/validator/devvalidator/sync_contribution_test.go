@@ -33,7 +33,7 @@ func TestBuildContribution(t *testing.T) {
 		},
 		Signature: common.Bytes96{0x07},
 	}
-	raw, err := json.Marshal([]interface{}{signed})
+	raw, err := json.Marshal([]any{signed})
 	require.NoError(t, err)
 
 	var decoded []*cltypes.SignedContributionAndProof

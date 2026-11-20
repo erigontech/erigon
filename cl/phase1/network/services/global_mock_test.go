@@ -17,11 +17,13 @@
 package services
 
 import (
+	"testing"
+
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -67,7 +69,7 @@ func (m *mockFuncs) VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumn
 	return ret0
 }
 
-func (m *mockFuncs) VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar, _ *clparams.BeaconChainConfig) bool {
+func (m *mockFuncs) VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar) bool {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "VerifyDataColumnSidecar", sidecar)
 	ret0, _ := ret[0].(bool)
@@ -75,7 +77,7 @@ func (m *mockFuncs) VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar, 
 }
 
 // [New in Gloas:EIP7732] GLOAS verification functions with kzg_commitments parameter
-func (m *mockFuncs) VerifyDataColumnSidecarWithCommitments(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment], _ *clparams.BeaconChainConfig) bool {
+func (m *mockFuncs) VerifyDataColumnSidecarWithCommitments(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "VerifyDataColumnSidecarWithCommitments", sidecar, kzgCommitments)
 	ret0, _ := ret[0].(bool)
@@ -87,4 +89,31 @@ func (m *mockFuncs) VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar *clt
 	ret := m.ctrl.Call(m, "VerifyDataColumnSidecarKZGProofsWithCommitments", sidecar, kzgCommitments)
 	ret0, _ := ret[0].(bool)
 	return ret0
+}
+
+// saveSignatureGlobals restores the package-level signature-verification func
+// vars when the test finishes, so a test's mock (bound to its own gomock
+// controller) can't leak into a later shuffled test and panic there.
+func saveSignatureGlobals(t testing.TB) {
+	origComputeSigningRoot := computeSigningRoot
+	origBlsVerify := blsVerify
+	origBlsVerifyMultipleSignatures := blsVerifyMultipleSignatures
+	t.Cleanup(func() {
+		computeSigningRoot = origComputeSigningRoot
+		blsVerify = origBlsVerify
+		blsVerifyMultipleSignatures = origBlsVerifyMultipleSignatures
+	})
+}
+
+func saveCommitteeGlobals(t testing.TB) {
+	origCommitteeCount, origSubnet := computeCommitteeCountPerSlot, computeSubnetForAttestation
+	t.Cleanup(func() { computeCommitteeCountPerSlot, computeSubnetForAttestation = origCommitteeCount, origSubnet })
+}
+
+// withoutDecompressed adapts a (bool, error) verification stub; callbacks then fall back to the compressed signatures.
+func withoutDecompressed(verify func(sigs, msgs, pks [][]byte) (bool, error)) func(sigs, msgs, pks [][]byte) (bool, []bls.Signature, error) {
+	return func(sigs, msgs, pks [][]byte) (bool, []bls.Signature, error) {
+		valid, err := verify(sigs, msgs, pks)
+		return valid, nil, err
+	}
 }

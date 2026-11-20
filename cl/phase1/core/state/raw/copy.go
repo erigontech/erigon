@@ -25,6 +25,10 @@ import (
 )
 
 func (b *BeaconState) CopyInto(dst *BeaconState) error {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	dst.version = b.version
 	dst.genesisTime = b.genesisTime
 	dst.genesisValidatorsRoot = b.genesisValidatorsRoot
 	dst.slot = b.slot
@@ -107,9 +111,12 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 		dst.builderPendingWithdrawals = b.builderPendingWithdrawals.ShallowCopy()
 		dst.latestBlockHash = b.latestBlockHash
 		dst.payloadExpectedWithdrawals = b.payloadExpectedWithdrawals.ShallowCopy()
-		b.ptcWindow.CopyTo(dst.ptcWindow)
+		for i := 0; i < b.ptcWindow.Length(); i++ {
+			ptc := dst.ptcWindow.Get(i)
+			b.ptcWindow.Get(i).CopyTo(ptc)
+			dst.ptcWindow.Set(i, ptc)
+		}
 	}
-	dst.version = b.version
 	// Now sync internals: copy the cached leaf hashes but mark every leaf
 	// dirty so the destination will recompute them on the next HashSSZ().
 	// This avoids propagating stale cache entries when the source state is

@@ -57,7 +57,7 @@ func TestFeedOf(t *testing.T) {
 	const n = 1000
 	done.Add(n)
 	subscribed.Add(n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go subscriber(i)
 	}
 	subscribed.Wait()
@@ -86,7 +86,7 @@ func TestFeedOfSubscribeSameChannel(t *testing.T) {
 		done.Done()
 	}
 	expectRecv := func(wantValue, n int) {
-		for i := 0; i < n; i++ {
+		for range n {
 			if v := <-ch; v != wantValue {
 				t.Errorf("received %d, want %d", v, wantValue)
 			}
@@ -124,12 +124,10 @@ func TestFeedOfSubscribeBlockedPost(t *testing.T) {
 	defer wg.Wait()
 
 	feed.Subscribe(ch1)
-	wg.Add(nsends)
-	for i := 0; i < nsends; i++ {
-		go func() {
+	for range nsends {
+		wg.Go(func() {
 			feed.Send(99)
-			wg.Done()
-		}()
+		})
 	}
 
 	sub2 := feed.Subscribe(ch2)
@@ -161,12 +159,10 @@ func TestFeedOfUnsubscribeBlockedPost(t *testing.T) {
 	}
 
 	// Queue up some Sends. None of these can make progress while bchan isn't read.
-	wg.Add(nsends)
-	for i := 0; i < nsends; i++ {
-		go func() {
+	for range nsends {
+		wg.Go(func() {
 			feed.Send(99)
-			wg.Done()
-		}()
+		})
 	}
 	// Subscribe the other channels.
 	for i, ch := range chans {
@@ -194,11 +190,9 @@ func TestFeedOfUnsubscribeSentChan(t *testing.T) {
 	)
 	defer sub2.Unsubscribe()
 
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		feed.Send(0)
-		wg.Done()
-	}()
+	})
 
 	// Wait for the value on ch1.
 	<-ch1
@@ -211,11 +205,9 @@ func TestFeedOfUnsubscribeSentChan(t *testing.T) {
 
 	// Send again. This should send to ch2 only, so the wait group will unblock
 	// as soon as a value is received on ch2.
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		feed.Send(0)
-		wg.Done()
-	}()
+	})
 	<-ch2
 	wg.Wait()
 }
@@ -245,34 +237,4 @@ func TestFeedOfUnsubscribeFromInbox(t *testing.T) {
 	if len(feed.sendCases) != 1 {
 		t.Errorf("sendCases is non-empty after unsubscribe")
 	}
-}
-
-func BenchmarkFeedOfSend1000(b *testing.B) {
-	var (
-		done  sync.WaitGroup
-		feed  FeedOf[int]
-		nsubs = 1000
-	)
-	subscriber := func(ch <-chan int) {
-		for i := 0; i < b.N; i++ {
-			<-ch
-		}
-		done.Done()
-	}
-	done.Add(nsubs)
-	for i := 0; i < nsubs; i++ {
-		ch := make(chan int, 200)
-		feed.Subscribe(ch)
-		go subscriber(ch)
-	}
-
-	// The actual benchmark.
-	for i := 0; b.Loop(); i++ {
-		if feed.Send(i) != nsubs {
-			panic("wrong number of sends")
-		}
-	}
-
-	b.StopTimer()
-	done.Wait()
 }

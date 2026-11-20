@@ -17,6 +17,7 @@
 package recsplit
 
 import (
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/common/murmur3"
 )
 
@@ -69,25 +70,44 @@ func (r *IndexReader) twoLayerLookup(key []byte) (uint64, bool) {
 	}
 	return r.OrdinalLookup(id), true
 }
-func (r *IndexReader) twoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
+
+func (r *IndexReader) twoLayerLookupByHash(hi, lo uint64, pr *mmap.Probe) (offset, ordinal uint64, ok bool) {
 	if r.index.Empty() {
-		return 0, false
+		return 0, 0, false
 	}
-	id, ok := r.index.Lookup(hi, lo)
+	ordinal, ok = r.index.LookupProbe(hi, lo, pr)
 	if !ok {
-		return 0, false
+		return 0, 0, false
 	}
-	return r.index.OrdinalLookup(id), true
+	if pr == nil {
+		return r.index.OrdinalLookup(ordinal), ordinal, true
+	}
+	return r.index.offsetEf.GetProbe(ordinal, pr), ordinal, true
 }
 func (r *IndexReader) BaseDataID() uint64 { return r.index.BaseDataID() }
 
 // TwoLayerLookupByHash high-level methods. allow to turn-off `enum` in future
 func (r *IndexReader) TwoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
-	enums := r.index.Enums()
-	if enums {
-		return r.twoLayerLookupByHash(hi, lo)
+	return r.TwoLayerLookupByHashProbe(hi, lo, nil)
+}
+
+// TwoLayerLookupByHashProbe is TwoLayerLookupByHash with pr touching the pages it reads.
+func (r *IndexReader) TwoLayerLookupByHashProbe(hi, lo uint64, pr *mmap.Probe) (uint64, bool) {
+	if !r.index.Enums() {
+		return r.index.LookupProbe(hi, lo, pr)
 	}
-	return r.index.Lookup(hi, lo)
+	offset, _, ok := r.twoLayerLookupByHash(hi, lo, pr)
+	return offset, ok
+}
+
+// TwoLayerLookupByHashWithOrdinal also returns the key's ordinal in the indexed
+// file, which the two-layer lookup computes on the way to the offset. Requires
+// an index built with Enums, otherwise no ordinal exists.
+func (r *IndexReader) TwoLayerLookupByHashWithOrdinal(hi, lo uint64) (offset, ordinal uint64, ok bool) {
+	if !r.index.Enums() {
+		return 0, 0, false
+	}
+	return r.twoLayerLookupByHash(hi, lo, nil)
 }
 
 // TwoLayerLookup high-level methods. allow to turn-off `enum` in future

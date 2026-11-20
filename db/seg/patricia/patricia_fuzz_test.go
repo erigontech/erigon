@@ -19,6 +19,7 @@ package patricia
 import (
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"testing"
 )
 
@@ -60,13 +61,16 @@ func FuzzLongestMatch(f *testing.F) {
 		if len(keys) == 0 {
 			return
 		}
+		// keys indexes the generated match data below, so map iteration order
+		// would make the same fuzz input build a different test string each run.
+		slices.Sort(keys)
 		var data []byte
 		for i := 0; i < 4*(len(test)/4); i += 4 {
 			keyIdx := int(binary.BigEndian.Uint32(test[i : i+4]))
-			keyIdx = keyIdx % len(keys)
+			keyIdx %= len(keys)
 			key := []byte(keys[keyIdx])
 			data = append(data, key...)
-			for j := 0; j < len(key); j++ {
+			for j := range key {
 				data = append(data, key[len(key)-1-j])
 			}
 		}
@@ -109,26 +113,32 @@ func FuzzLongestMatch(f *testing.F) {
 		for key, val := range keyMap {
 			ac.Insert([]byte(key), val)
 		}
-		acm := NewACMatcher(ac)
-		// exercise the prefix-resume path: a reused matcher must give the same
-		// result as a fresh one, for the same word and for suffix/other words
-		if len(data) > 1 {
-			pre := acm.FindLongestMatches(data[:len(data)/2])
-			fresh := NewACMatcher(ac).FindLongestMatches(data[:len(data)/2])
-			if len(pre) != len(fresh) {
-				t.Errorf("AC warm/fresh mismatch on half word: %d vs %d", len(pre), len(fresh))
+		sameMatches := func(what string, got, want Matches) {
+			t.Helper()
+			if len(got) != len(want) {
+				t.Errorf("AC warm/fresh %s: %d matches, want %d", what, len(got), len(want))
+				return
 			}
-		}
-		m4 := acm.FindLongestMatches(data)
-		m4again := NewACMatcher(ac).FindLongestMatches(data)
-		if len(m4) != len(m4again) {
-			t.Errorf("AC warm/fresh mismatch: %d vs %d", len(m4), len(m4again))
-		} else {
-			for i := range m4 {
-				if m4[i].Start != m4again[i].Start || m4[i].End != m4again[i].End {
-					t.Errorf("AC warm/fresh mismatch at %d: %+v vs %+v", i, m4[i], m4again[i])
+			for i := range got {
+				if got[i].Start != want[i].Start || got[i].End != want[i].End {
+					t.Errorf("AC warm/fresh %s at %d: %+v, want %+v", what, i, got[i], want[i])
 				}
 			}
+		}
+		// exercise the prefix-resume path: a reused matcher must give the same
+		// result as a fresh one, for words that grow and that shrink
+		acm := NewACMatcher(ac)
+		if len(data) > 1 {
+			half := data[:len(data)/2]
+			sameMatches("half word", acm.FindLongestMatches(half), NewACMatcher(ac).FindLongestMatches(half))
+		}
+		m4 := slices.Clone(acm.FindLongestMatches(data))
+		sameMatches("full word", m4, NewACMatcher(ac).FindLongestMatches(data))
+		if len(data) > 2 {
+			// shorter than the cached word: states is re-sliced down, and every
+			// match comes from carried-over states with no fresh scan at all
+			third := data[:len(data)/3]
+			sameMatches("shrunk word", acm.FindLongestMatches(third), NewACMatcher(ac).FindLongestMatches(third))
 		}
 		if len(oracle) == len(m4) {
 			for i, m := range oracle {

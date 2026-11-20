@@ -24,6 +24,7 @@ Two things run these fuzzers:
 
 | Package | Fuzzers |
 |---|---|
+| `cl/persistence/blob_storage` | `FuzzParsePackHeader` |
 | `common/bitutil` | `FuzzEncoder`, `FuzzDecoder` |
 | `db/datastruct/fusefilter` | `FuzzReaderOnBytes`, `FuzzReaderShardedOnBytes`, `FuzzWriterRoundTrip` |
 | `db/recsplit/eliasfano16` | `FuzzSingleEliasFano`, `FuzzDoubleEliasFano` |
@@ -62,6 +63,12 @@ go test ./db/seg/ -run '^$' -fuzz '^FuzzCompress$' -fuzztime 30s
 - Newly discovered "interesting" inputs are cached under
   `$(go env GOCACHE)/fuzz`; a crashing input is written to the package's
   `testdata/fuzz/<FuzzName>/` so it can be committed and replayed.
+- A `FAIL` whose only detail is `context deadline exceeded`, with no file written
+  under `testdata/fuzz/`, is the fuzzing engine misreporting the end of the
+  `fuzztime` window, not a finding — rerun it
+  ([golang/go#75804](https://github.com/golang/go/issues/75804), fixed in Go
+  1.27). The nightly workflow recognises and ignores that exact signature;
+  anything else is a real failure.
 
 Replay just the seed + discovered corpus (no mutation), e.g. to reproduce a
 crash file someone committed:
@@ -74,8 +81,8 @@ go test ./db/seg/ -run '^FuzzCompress$'
 
 [`.github/workflows/test-fuzz.yml`](../.github/workflows/test-fuzz.yml) runs
 every target nightly (03:00 UTC) on a free GitHub-hosted runner, each for a
-short `fuzztime`, with a per-target corpus cache so each run builds on the
-previous night's findings. It can also be triggered manually
+short `fuzztime`, with a per-target corpus kept for 30 days as a `fuzz-corpus-<target>`
+artifact. Each run continues from the newest artifact of its ref. It can also be triggered manually
 (`workflow_dispatch`) with a custom `fuzztime` for a deeper ad-hoc run.
 
 This is intentionally **not** part of the PR/merge CI gate: seed-corpus

@@ -18,7 +18,5 @@ package requests
 
 import "errors"
 
-var (
-	// ErrBadRequest for http bad requests
-	ErrBadRequest = errors.New("bad request")
-)
+// ErrBadRequest for http bad requests
+var ErrBadRequest = errors.New("bad request")

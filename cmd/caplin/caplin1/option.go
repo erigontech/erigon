@@ -27,8 +27,32 @@ type option struct {
 
 type CaplinOption func(*option)
 
-func WithBuilder(mevRelayUrl string, beaconConfig *clparams.BeaconChainConfig) CaplinOption {
+func WithBuilder(mevRelayURL string, beaconConfig *clparams.BeaconChainConfig, policy builder.BuilderTargetPolicy) CaplinOption {
 	return func(o *option) {
-		o.builderClient = builder.NewBlockBuilderClient(mevRelayUrl, beaconConfig)
+		if mevRelayURL == "" {
+			o.builderClient = builder.NewDynamicBuilderClient(beaconConfig, policy)
+			return
+		}
+		o.builderClient = builder.NewBlockBuilderClientWithPolicy(mevRelayURL, beaconConfig, policy)
 	}
+}
+
+func builderOptionForConfig(config *clparams.CaplinConfig, beaconConfig *clparams.BeaconChainConfig) (CaplinOption, bool) {
+	legacyRelayURL := ""
+	skippedLegacy := false
+	if config.BeaconAPIRouter.Builder {
+		if config.RelayUrlExist() {
+			legacyRelayURL = config.MevRelayUrl
+		} else {
+			skippedLegacy = true
+		}
+	}
+	if !config.BeaconAPIRouter.Validator && legacyRelayURL == "" {
+		return nil, skippedLegacy
+	}
+	return WithBuilder(legacyRelayURL, beaconConfig, builderTargetPolicyForConfig(config)), skippedLegacy
+}
+
+func builderTargetPolicyForConfig(config *clparams.CaplinConfig) builder.BuilderTargetPolicy {
+	return builder.BuilderTargetPolicy{AllowPrivate: config != nil && config.AllowPrivateBuilderURLs}
 }

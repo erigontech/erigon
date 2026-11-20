@@ -135,7 +135,7 @@ func waitForRevalidationPing(t *testing.T, transport *pingRecorder, tab *Table, 
 
 	simclock := tab.cfg.Clock.(*mclock.Simulated)
 	maxAttempts := tab.len() * 8
-	for i := 0; i < maxAttempts; i++ {
+	for range maxAttempts {
 		simclock.Run(tab.cfg.PingInterval * slowRevalidationFactor)
 		p := transport.waitPing(2 * time.Second)
 		if p == nil {
@@ -156,7 +156,7 @@ func TestTable_IPLimit(t *testing.T) {
 	defer db.Close()
 	defer tab.close()
 
-	for i := 0; i < tableIPLimit+1; i++ {
+	for i := range tableIPLimit + 1 {
 		n := nodeAtDistance(tab.self().ID(), i, net.IP{172, 0, 1, byte(i)})
 		tab.addFoundNode(n, false)
 	}
@@ -174,7 +174,7 @@ func TestTable_BucketIPLimit(t *testing.T) {
 	defer tab.close()
 
 	d := 3
-	for i := 0; i < bucketIPLimit+1; i++ {
+	for i := range bucketIPLimit + 1 {
 		n := nodeAtDistance(tab.self().ID(), d, net.IP{172, 0, 1, byte(i)})
 		tab.addFoundNode(n, false)
 	}
@@ -388,6 +388,7 @@ func checkBucketContent(t *testing.T, tab *Table, nodes []*enode.Node) {
 
 	b := tab.bucket(nodes[0].ID())
 	if reflect.DeepEqual(unwrapNodes(b.entries), nodes) {
+		checkIPLimitInvariant(t, tab)
 		return
 	}
 	t.Log("wrong bucket content. have nodes:")
@@ -399,9 +400,6 @@ func checkBucketContent(t *testing.T, tab *Table, nodes []*enode.Node) {
 		t.Logf("  %v (seq=%v, ip=%v)", n.ID(), n.Seq(), n.IPAddr())
 	}
 	t.FailNow()
-
-	// Also check IP limits.
-	checkIPLimitInvariant(t, tab)
 }
 
 // This test checks that ENR updates happen during revalidation. If a node in the table
@@ -482,7 +480,7 @@ func nodeIDEqual[N nodeType](n1, n2 N) bool {
 
 // gen wraps quick.Value so it's easier to use.
 // it generates a random value of the given value's type.
-func gen(typ interface{}, rand *rand.Rand) interface{} {
+func gen(typ any, rand *rand.Rand) any {
 	v, ok := quick.Value(reflect.TypeOf(typ), rand)
 	if !ok {
 		panic(fmt.Sprintf("couldn't generate random value of type %T", typ))
@@ -580,7 +578,7 @@ func TestTable_waitForNodesLocking(t *testing.T) {
 	waitDone := make(chan struct{})
 	go func() {
 		defer close(waitDone)
-		tab.waitForNodes(waitCtx, 1<<20)
+		_ = tab.waitForNodes(waitCtx, 1<<20)
 	}()
 
 	// Call addFoundNode in a loop to send to the feed repeatedly.

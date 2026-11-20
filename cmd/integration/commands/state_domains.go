@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -42,25 +43,16 @@ import (
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 func init() {
 	withDataDir(readDomains)
 	withChain(readDomains)
-	withHeimdall(readDomains)
 	withWorkers(readDomains)
 	withStartTx(readDomains)
 
 	rootCmd.AddCommand(readDomains)
 }
-
-// if trie variant is not hex, we could not have another rootHash with to verify it
-var (
-	stepSize uint64
-	lastStep uint64
-)
 
 // write command to just seek and query state by addr and domain from state db and files (if any)
 var readDomains = &cobra.Command{
@@ -71,7 +63,7 @@ var readDomains = &cobra.Command{
 	Args:      cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
@@ -85,7 +77,7 @@ var readDomains = &cobra.Command{
 
 		var readFromDomain string
 		var addrs [][]byte
-		for i := 0; i < len(args); i++ {
+		for i := range args {
 			if i == 0 {
 				switch s := strings.ToLower(args[i]); s {
 				case "account", "storage", "code", "commitment":
@@ -98,14 +90,14 @@ var readDomains = &cobra.Command{
 			}
 			addr, err := hex.DecodeString(strings.TrimPrefix(args[i], "0x"))
 			if err != nil {
-				logger.Warn("invalid address passed", "str", args[i], "at position", i, "err", err)
+				logger.Warn("invalid address passed", "str", args[i], "position", i, "err", err)
 				continue
 			}
 			addrs = append(addrs, addr)
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -118,7 +110,7 @@ var readDomains = &cobra.Command{
 		}
 		defer stateDb.Close()
 
-		if err := requestDomains(chainDb, stateDb, ctx, readFromDomain, addrs, logger); err != nil {
+		if err := requestDomains(stateDb, ctx, readFromDomain, addrs, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -127,7 +119,7 @@ var readDomains = &cobra.Command{
 	},
 }
 
-func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
+func requestDomains(stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
@@ -140,7 +132,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		return err
 	}
 
-	r := state.NewReaderV3(domains.AsGetter(temporalTx))
+	r := state.NewReaderV3(domains.AsStateGetter(temporalTx, execctxapi.StateGetterOptions{}))
 	latestTx, latestBlock, err := domains.SeekCommitment(ctx, temporalTx)
 	if err != nil {
 		return fmt.Errorf("failed to seek commitment to txn %d: %w", startTxNum, err)
@@ -157,6 +149,10 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 			acc, err := r.ReadAccountData(accounts.InternAddress(common.BytesToAddress(addr)))
 			if err != nil {
 				logger.Error("failed to read account", "addr", addr, "err", err)
+				continue
+			}
+			if acc == nil {
+				logger.Info(fmt.Sprintf("%x: not found", addr))
 				continue
 			}
 			logger.Info(fmt.Sprintf("%x: nonce=%d balance=%d code=%x root=%x", addr, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash, acc.Root))

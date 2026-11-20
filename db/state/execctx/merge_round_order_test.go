@@ -50,7 +50,7 @@ func TestSharedDomains_MergedRoundsCommitNewestWrite(t *testing.T) {
 
 	require.NoError(t, block.Flush(ctx, rwTx))
 
-	enc, _, err := rwTx.GetLatest(kv.AccountsDomain, addr[:])
+	enc, _, err := rwTx.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.NotEmpty(t, enc, "the account never reached the committed state")
 

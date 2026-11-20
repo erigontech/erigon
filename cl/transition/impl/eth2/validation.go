@@ -25,17 +25,22 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 )
 
-func (I *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.BeaconBlock) error {
-	if !I.FullValidation {
+// ErrInvalidBlockSignature reports a bad proposer signature. The block root does not cover the
+// signature, so this error does not prove that the block itself is invalid.
+var ErrInvalidBlockSignature = errors.New("invalid block signature")
+
+func (imp *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.BeaconBlock) error {
+	if !imp.FullValidation {
 		return nil
 	}
 	expectedStateRoot, err := s.HashSSZ()
 	if err != nil {
-		return fmt.Errorf("unable to generate state root: %v", err)
+		return fmt.Errorf("unable to generate state root: %w", err)
 	}
 	if expectedStateRoot != currentBlock.StateRoot {
 		return fmt.Errorf("expected state root differs from received state root, slot %d , we have %s, ans %s", s.Slot(), hex.EncodeToString(expectedStateRoot[:]), hex.EncodeToString(currentBlock.StateRoot[:]))
@@ -43,16 +48,19 @@ func (I *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.Be
 	return nil
 }
 
-func (I *impl) VerifyBlockSignature(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
-	if !I.FullValidation {
+func (imp *impl) VerifyBlockSignature(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
+	if !imp.FullValidation {
 		return nil
 	}
 	valid, err := VerifyBlockSignature(s, block)
+	if errors.Is(err, raw.ErrInvalidValidatorIndex) {
+		return fmt.Errorf("invalid proposer index: %w", err)
+	}
 	if err != nil {
-		return fmt.Errorf("error validating block signature: %v", err)
+		return fmt.Errorf("%w: %w", ErrInvalidBlockSignature, err)
 	}
 	if !valid {
-		return errors.New("block not valid")
+		return ErrInvalidBlockSignature
 	}
 	return nil
 }

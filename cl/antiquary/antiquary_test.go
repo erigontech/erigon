@@ -22,23 +22,30 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 func newTestCollector(t *testing.T) *etl.Collector {
@@ -59,10 +66,10 @@ func newTestCompressor(buf *bytes.Buffer) *zstd.Encoder {
 func collectAll(t *testing.T, c *etl.Collector) map[string][]byte {
 	t.Helper()
 	result := make(map[string][]byte)
-	c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error { //nolint:gocritic
-		result[string(k)] = common.Copy(v)
+	require.NoError(t, c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error { //nolint:gocritic
+		result[string(k)] = bytes.Clone(v)
 		return next(nil, nil, nil)
-	}, etl.TransformArgs{})
+	}, etl.TransformArgs{}))
 	return result
 }
 
@@ -86,7 +93,7 @@ func (db *countingRwDB) Update(ctx context.Context, f func(tx kv.RwTx) error) er
 }
 
 func TestIndexBeaconSnapshotsCommitsPerBatchAndPersistsProgress(t *testing.T) {
-	baseDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	baseDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	db := &countingRwDB{RwDB: baseDB}
 	ctx := context.Background()
 	to := uint64(snaptype.CaplinMergeLimit + 2)
@@ -126,7 +133,7 @@ func TestIndexBeaconSnapshotsCommitsPerBatchAndPersistsProgress(t *testing.T) {
 }
 
 func TestIndexBeaconSnapshotsDoesNotAdvanceProgressOnFailedBatch(t *testing.T) {
-	baseDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	baseDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	db := &countingRwDB{RwDB: baseDB}
 	ctx := context.Background()
 	to := uint64(snaptype.CaplinMergeLimit + 2)
@@ -214,7 +221,7 @@ func TestAntiquateField(t *testing.T) {
 
 	data := []byte("hello world antiquary field data")
 	slot := uint64(clparams.SlotsPerDump*3 + 42) // not aligned to SlotsPerDump
-	require.NoError(t, antiquateField(context.Background(), slot, data, buf, compressor, collector))
+	require.NoError(t, antiquateField(slot, data, buf, compressor, collector))
 
 	collected := collectAll(t, collector)
 	// antiquateField rounds the slot down to SlotsPerDump boundary
@@ -237,7 +244,7 @@ func TestAntiquateField_SlotAligned(t *testing.T) {
 
 	data := []byte("aligned slot data")
 	slot := uint64(clparams.SlotsPerDump * 5) // exactly aligned
-	require.NoError(t, antiquateField(context.Background(), slot, data, buf, compressor, collector))
+	require.NoError(t, antiquateField(slot, data, buf, compressor, collector))
 
 	collected := collectAll(t, collector)
 	_, ok := collected[string(base_encoding.Encode64ToBytes4(slot))]
@@ -261,12 +268,12 @@ func TestAntiquateBytesListDiff(t *testing.T) {
 
 	key := base_encoding.Encode64ToBytes4(42)
 	// Use a simple diff function that just writes the new data
-	simpleDiff := func(w io.Writer, old, new []byte) error {
-		_, err := w.Write(new)
+	simpleDiff := func(w io.Writer, oldVal, newVal []byte) error {
+		_, err := w.Write(newVal)
 		return err
 	}
 
-	require.NoError(t, antiquateBytesListDiff(context.Background(), key, old, newData, collector, simpleDiff))
+	require.NoError(t, antiquateBytesListDiff(key, old, newData, &bytes.Buffer{}, collector, simpleDiff))
 
 	collected := collectAll(t, collector)
 	result, ok := collected[string(key)]
@@ -291,7 +298,7 @@ func TestAntiquateBytesListDiff_WithRealDiffFn(t *testing.T) {
 
 	key := base_encoding.Encode64ToBytes4(99)
 	require.NoError(t, antiquateBytesListDiff(
-		context.Background(), key, old, newData, collector,
+		key, old, newData, &bytes.Buffer{}, collector,
 		base_encoding.ComputeCompressedSerializedUint64ListDiff,
 	))
 
@@ -301,7 +308,7 @@ func TestAntiquateBytesListDiff_WithRealDiffFn(t *testing.T) {
 }
 
 func TestFindNearestSlotBackwards(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -311,7 +318,7 @@ func TestFindNearestSlotBackwards(t *testing.T) {
 	// Write canonical roots at slots 0, 32, 64 (epoch boundaries with SlotsPerEpoch=32)
 	for _, slot := range []uint64{0, 32, 64} {
 		root := common.Hash{byte(slot)}
-		require.NoError(t, beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, root))
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 	}
 
 	// From slot 64 (epoch boundary with canonical root) → should return 64
@@ -336,7 +343,7 @@ func TestFindNearestSlotBackwards(t *testing.T) {
 }
 
 func TestFindNearestSlotBackwards_NoRoots(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -349,8 +356,64 @@ func TestFindNearestSlotBackwards_NoRoots(t *testing.T) {
 	require.Equal(t, uint64(0), result)
 }
 
+func TestPtcWindowEpochReconstructionStart(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 1000
+	forkSlot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+	lastPreForkEpochStart := forkSlot - cfg.SlotsPerEpoch
+	require.NoError(t, beacon_indicies.MarkRootCanonical(tx, lastPreForkEpochStart, common.Hash{1}))
+	const targetSlot = uint64(1_000_000)
+
+	missing := func(string, []byte) ([]byte, error) { return nil, nil }
+	attempt, forced, err := ptcWindowEpochReconstructionStart(tx, &cfg, 0, targetSlot, missing)
+	require.NoError(t, err)
+	require.True(t, forced)
+	require.Equal(t, lastPreForkEpochStart, attempt)
+
+	present := func(table string, key []byte) ([]byte, error) {
+		require.Equal(t, kv.PtcWindowEpochTable, table)
+		require.Equal(t, base_encoding.Encode64ToBytes4(forkSlot), key)
+		return []byte{1}, nil
+	}
+	attempt, forced, err = ptcWindowEpochReconstructionStart(tx, &cfg, 0, targetSlot, present)
+	require.NoError(t, err)
+	require.False(t, forced)
+	require.Equal(t, targetSlot, attempt)
+
+	t.Run("nothing processed", func(t *testing.T) {
+		cfg.GloasForkEpoch = 0
+		getter := func(string, []byte) ([]byte, error) {
+			t.Fatal("unexpected PtcWindowEpoch lookup")
+			return nil, nil
+		}
+		attempt, forced, err := ptcWindowEpochReconstructionStart(tx, &cfg, 0, 0, getter)
+		require.NoError(t, err)
+		require.False(t, forced)
+		require.Zero(t, attempt)
+	})
+
+	t.Run("post-fork anchor", func(t *testing.T) {
+		cfg.GloasForkEpoch = 0
+		const anchorSlot = uint64(128)
+		presentAtAnchor := func(table string, key []byte) ([]byte, error) {
+			require.Equal(t, kv.PtcWindowEpochTable, table)
+			require.Equal(t, base_encoding.Encode64ToBytes4(anchorSlot), key)
+			return []byte{1}, nil
+		}
+		attempt, forced, err := ptcWindowEpochReconstructionStart(tx, &cfg, anchorSlot, targetSlot, presentAtAnchor)
+		require.NoError(t, err)
+		require.False(t, forced)
+		require.Equal(t, targetSlot, attempt)
+	})
+}
+
 func TestComputeSlotToBeRequested(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -361,7 +424,7 @@ func TestComputeSlotToBeRequested(t *testing.T) {
 	for slot := uint64(0); slot <= 200000; slot += cfg.SlotsPerEpoch {
 		root := common.Hash{}
 		binary.LittleEndian.PutUint64(root[:], slot)
-		require.NoError(t, beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, root))
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 	}
 
 	// If targetSlot > SlotsPerDump * backoffStep, we get findNearestSlotBackwards(targetSlot - SlotsPerDump*backoffStep)
@@ -382,7 +445,7 @@ func TestComputeSlotToBeRequested(t *testing.T) {
 }
 
 func TestComputeSlotToBeRequested_ReturnsGenesis(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -424,8 +487,10 @@ func TestNotifyBlobBackfilled(t *testing.T) {
 	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.Dirs{}, nil, nil, nil, nil, nil, nil, log.New(), true, true, true, false, nil)
 
 	require.False(t, a.blobBackfilled.Load())
-	a.NotifyBlobBackfilled()
+	a.NotifyBlobBackfilled(true)
 	require.True(t, a.blobBackfilled.Load())
+	a.NotifyBlobBackfilled(false)
+	require.False(t, a.blobBackfilled.Load())
 }
 
 func TestBeaconStatesCollector_CollectStateRoot(t *testing.T) {
@@ -435,7 +500,7 @@ func TestBeaconStatesCollector_CollectStateRoot(t *testing.T) {
 	root := common.HexToHash("0xdeadbeef")
 	require.NoError(t, c.collectStateRoot(42, root))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -455,7 +520,7 @@ func TestBeaconStatesCollector_CollectBlockRoot(t *testing.T) {
 	root := common.HexToHash("0xcafebabe")
 	require.NoError(t, c.collectBlockRoot(100, root))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -476,7 +541,7 @@ func TestBeaconStatesCollector_CollectEpochRandaoMix(t *testing.T) {
 	epoch := uint64(5)
 	require.NoError(t, c.collectEpochRandaoMix(epoch, mix))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -497,7 +562,7 @@ func TestBeaconStatesCollector_CollectIntraEpochRandaoMix(t *testing.T) {
 	mix := common.HexToHash("0x1111222233334444")
 	require.NoError(t, c.collectIntraEpochRandaoMix(77, mix))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -521,7 +586,7 @@ func TestBeaconStatesCollector_CollectSlashings(t *testing.T) {
 
 	require.NoError(t, c.collectSlashings(200, slashings))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -553,9 +618,9 @@ func TestBeaconStatesCollector_CollectBalancesDiffs(t *testing.T) {
 	binary.LittleEndian.PutUint64(newBal[8:], 250)
 	binary.LittleEndian.PutUint64(newBal[16:], 300)
 
-	require.NoError(t, c.collectBalancesDiffs(context.Background(), 500, old, newBal))
+	require.NoError(t, c.collectBalancesDiffs(500, old, newBal))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -585,7 +650,7 @@ func TestBeaconStatesCollector_CollectBalancesDump(t *testing.T) {
 	slot := uint64(clparams.SlotsPerDump * 2) // aligned to dump boundary
 	require.NoError(t, c.collectBalancesDump(slot, balances))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -614,7 +679,7 @@ func TestBeaconStatesCollector_CollectActiveIndices(t *testing.T) {
 	epoch := uint64(7)
 	require.NoError(t, c.collectActiveIndices(epoch, indices))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -646,7 +711,7 @@ func TestBeaconStatesCollector_FlushMultipleCollections(t *testing.T) {
 	require.NoError(t, c.collectBlockRoot(10, root2))
 	require.NoError(t, c.collectIntraEpochRandaoMix(10, mix))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -679,7 +744,7 @@ func TestBeaconStatesCollector_CollectInactivityScores(t *testing.T) {
 
 	require.NoError(t, c.collectInactivityScores(300, scores))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -706,14 +771,14 @@ func TestBeaconStatesCollector_CollectEffectiveBalancesDump(t *testing.T) {
 	numValidators := 3
 	raw := make([]byte, validatorSetSize*numValidators)
 	// Set effective balances
-	for i := 0; i < numValidators; i++ {
+	for i := range numValidators {
 		binary.LittleEndian.PutUint64(raw[i*validatorSetSize+80:], uint64((i+1)*32_000_000_000))
 	}
 
 	slot := uint64(clparams.SlotsPerDump * 4)
 	require.NoError(t, c.collectEffectiveBalancesDump(slot, raw))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -732,8 +797,224 @@ func TestBeaconStatesCollector_CollectEffectiveBalancesDump(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, numValidators*8, len(decompressed))
 
-	for i := 0; i < numValidators; i++ {
+	for i := range numValidators {
 		eb := binary.LittleEndian.Uint64(decompressed[i*8:])
 		require.Equal(t, uint64((i+1)*32_000_000_000), eb)
 	}
+}
+
+type noopDownloaderClient struct {
+	dbservices.NoopSeederClient
+}
+
+func (noopDownloaderClient) Download(context.Context, *downloaderproto.DownloadRequest) error {
+	return nil
+}
+
+func TestLoopReturnsOnContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	a := &Antiquary{
+		ctx:        ctx,
+		blocks:     true,
+		cfg:        &clparams.MainnetBeaconConfig,
+		downloader: noopDownloaderClient{},
+		logger:     log.New(),
+		backfilled: &atomic.Bool{},
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.Loop()
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Loop did not return after context cancellation")
+	}
+}
+
+// The retirement loop runs for the process lifetime, so a cancelled context must end it
+// rather than leave the select spinning on an always-ready ctx.Done.
+func TestRetirementLoopReturnsOnContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	a := &Antiquary{
+		ctx:            ctx,
+		cfg:            &clparams.MainnetBeaconConfig,
+		logger:         log.New(),
+		backfilled:     &atomic.Bool{},
+		blobBackfilled: &atomic.Bool{},
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.retirementLoop()
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("retirementLoop did not return after context cancellation")
+	}
+}
+
+func staticSnapshotHeaderReader(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
+	return &cltypes.SignedBeaconBlockHeader{
+		Header: &cltypes.BeaconBlockHeader{
+			Slot:       slot,
+			Root:       common.Hash{byte(slot % 251)},
+			ParentRoot: common.Hash{byte((slot + 1) % 251)},
+		},
+	}, slot + 1, common.Hash{byte((slot + 2) % 251)}, nil
+}
+
+// BlocksAvailable is the inclusive last readable slot and ReadBeaconBlockBodyBySlot serves that slot
+// from the snapshot path, but indexBeaconSnapshots takes an exclusive bound. Handing it the
+// inclusive tip leaves that slot unindexed while the cursor records it as done, so a reader that
+// resolves roots through the canonical index sees a block with no root there for as long as the tip
+// stays put.
+func TestRebuildBeaconSnapshotIndexIndexesTheVisibleTip(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	const tip = uint64(antiquaryIndexBatchSlots + 3)
+
+	_, err := rebuildBeaconSnapshotIndex(ctx, db, func() uint64 { return tip },
+		staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, tip)
+		require.NoError(t, err)
+		require.NotEqual(t, common.Hash{}, root, "the visible snapshot tip was left unindexed")
+
+		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+		require.NoError(t, err)
+		require.Equal(t, tip+1, progress, "the cursor must be the first slot not yet indexed")
+		return nil
+	}))
+}
+
+// Re-running against an unchanged tip must be a no-op rather than treating a cursor of tip+1 as
+// progress that ran ahead of the snapshots.
+func TestRebuildBeaconSnapshotIndexIsIdempotentAtAStaticTip(t *testing.T) {
+	baseDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	const tip = uint64(4)
+	tipFn := func() uint64 { return tip }
+
+	_, err := rebuildBeaconSnapshotIndex(ctx, baseDB, tipFn, staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+
+	db := &countingRwDB{RwDB: baseDB}
+	_, err = rebuildBeaconSnapshotIndex(ctx, db, tipFn, staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+	require.Zero(t, db.commits, "a static tip must not be re-indexed")
+
+	require.NoError(t, baseDB.View(ctx, func(tx kv.Tx) error {
+		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+		require.NoError(t, err)
+		require.Equal(t, tip+1, progress)
+		return nil
+	}))
+}
+
+func TestBlobSegmentCompleteRejectsACountAboveTheBlock(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, beacon_indicies.MarkRootCanonical(tx, 3, common.Hash{3}))
+	storage := mock_services.NewMockBlobStorage(gomock.NewController(t))
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(3), nil).AnyTimes()
+	storage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
+	a := &Antiquary{ctx: t.Context(), logger: log.New(), blobStorage: storage, blobBackfilled: &atomic.Bool{}}
+
+	for _, want := range []uint64{2, 0} {
+		complete, err := a.blobSegmentComplete(tx, 3, 4, func(kv.Tx, uint64) (uint64, bool, error) { return want, false, nil })
+		require.NoError(t, err)
+		require.False(t, complete, "the dump requires the counts to be equal, want %d", want)
+	}
+}
+
+// A count row stays after its sidecar file is lost, so the scan must check the files. It rescans from the gap.
+func TestBlobSegmentCompleteScansFilesAndResumesAtTheGap(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	wants := map[uint64]uint64{3: 2, 5: 2}
+	for slot := range wants {
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, common.Hash{byte(slot)}))
+	}
+	lost := map[uint64]bool{5: true}
+	storage := mock_services.NewMockBlobStorage(gomock.NewController(t))
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, root common.Hash) (uint32, error) {
+		return uint32(wants[uint64(root[0])]), nil
+	}).AnyTimes()
+	storage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, slot uint64, _ common.Hash, idx uint64) (bool, error) {
+		return idx != 1 || !lost[slot], nil
+	}).AnyTimes()
+	a := &Antiquary{ctx: t.Context(), logger: log.New(), blobStorage: storage, blobBackfilled: &atomic.Bool{}}
+	var asked []uint64
+	blobCount := func(_ kv.Tx, slot uint64) (uint64, bool, error) {
+		asked = append(asked, slot)
+		return wants[slot], false, nil
+	}
+
+	complete, err := a.blobSegmentComplete(tx, 0, 5, blobCount)
+	require.NoError(t, err)
+	require.True(t, complete, "the segment below the gap is complete")
+
+	complete, err = a.blobSegmentComplete(tx, 0, 8, blobCount)
+	require.NoError(t, err)
+	require.False(t, complete, "the sidecar file of slot 5 is lost")
+	require.Equal(t, uint64(5), a.blobCheckedTo)
+	require.Equal(t, uint64(5), mxBlobRetirementGapSlot.GetValueUint64())
+
+	lost = map[uint64]bool{3: true}
+	complete, err = a.blobSegmentComplete(tx, 0, 8, blobCount)
+	require.NoError(t, err)
+	require.False(t, complete, "the gap at slot 5 is filled, but the file of slot 3 is lost")
+	require.Equal(t, uint64(3), mxBlobRetirementGapSlot.GetValueUint64())
+
+	lost, asked = nil, nil
+	complete, err = a.blobSegmentComplete(tx, 0, 8, blobCount)
+	require.NoError(t, err)
+	require.True(t, complete)
+	require.Equal(t, uint64(3), asked[0], "the scan resumes at the last known gap")
+	require.Zero(t, mxBlobRetirementGapSlot.GetValueUint64())
+
+	asked = nil
+	complete, err = a.blobSegmentComplete(tx, 8, 9, blobCount)
+	require.NoError(t, err)
+	require.True(t, complete)
+	require.Equal(t, uint64(8), asked[0], "the next segment starts above a gap that has retired")
+
+	a.blobBackfilled.Store(true)
+	lost, asked = map[uint64]bool{5: true}, nil
+	complete, err = a.blobSegmentComplete(tx, 0, 8, blobCount)
+	require.NoError(t, err)
+	require.False(t, complete, "a finished backfill does not make a lost file stored")
+	require.Equal(t, uint64(5), mxBlobRetirementGapSlot.GetValueUint64())
+}
+
+func TestBlobRetirementGapIsReported(t *testing.T) {
+	var buf bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&buf, log.LogfmtFormat()))
+	a := &Antiquary{logger: logger}
+
+	a.reportBlobRetirementGap(10_000, 12_345, time.Unix(1_000, 0))
+	a.reportBlobRetirementGap(10_000, 12_346, time.Unix(1_060, 0))
+	require.Equal(t, uint64(12_346), mxBlobRetirementGapSlot.GetValueUint64(), "the rate limit covers only the log")
+	require.Equal(t, 1, strings.Count(buf.String(), "gapSlot="), "the log is rate limited")
+
+	a.reportBlobRetirementGap(10_000, 12_345, time.Unix(1_000, 0).Add(blobRetirementGapLogInterval))
+	require.Equal(t, 2, strings.Count(buf.String(), "gapSlot="))
 }

@@ -17,25 +17,23 @@
 package btindex
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
 	"sync"
 	"time"
-	"unsafe"
-
-	"github.com/c2h5oh/datasize"
-	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/common/murmur3"
+	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
@@ -46,7 +44,9 @@ const BtreeLogPrefix = "btree"
 
 // DefaultBtreeM - amount of keys on leaf of BTree
 // It will do log2(M) co-located-reads from data file - for binary-search inside leaf
-var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 256))
+var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 64))
+
+const DefaultBtreeMLegacy = uint64(256) // for legacy format (determined first byte), we created the files with m=256
 
 const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
 
@@ -59,8 +59,12 @@ const (
 )
 
 // BtInterp enables interpolation search in the leaf window, falling back to binary after BtInterpBudget probes.
-var BtInterp = dbg.EnvBool("BT_INTERP", true)
-var BtInterpBudget = uint64(dbg.EnvInt("BT_INTERP_BUDGET", 8))
+var (
+	BtInterp       = dbg.EnvBool("BT_INTERP", true)
+	BtInterpBudget = uint64(dbg.EnvInt("BT_INTERP_BUDGET", 8))
+)
+
+var BtPrefixSeed = dbg.EnvBool("BT_PREFIX_SEED", true)
 
 var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
 
@@ -77,8 +81,7 @@ func (c *Cursor) Close() {
 	if c == nil {
 		return
 	}
-	c.key = c.key[:0]
-	c.value = c.value[:0]
+	c.key, c.value = nil, nil
 	c.d = 0
 	c.getter = nil
 	if c.returnInto != nil {
@@ -137,8 +140,8 @@ func (c *Cursor) next() bool {
 }
 
 func (c *Cursor) resetNoRead(di uint64, g *seg.Reader) error {
-	if c.d >= c.ef.Count() {
-		return fmt.Errorf("%w %d/%d", ErrBtIndexLookupBounds, c.d, c.ef.Count())
+	if di >= c.ef.Count() {
+		return fmt.Errorf("%w %d/%d", ErrBtIndexLookupBounds, di, c.ef.Count())
 	}
 
 	c.d = di
@@ -226,7 +229,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (_ *BtIndexWrit
 	if btw.indexF, err = dir.CreateTemp(args.IndexFile); err != nil {
 		return nil, fmt.Errorf("create temp index file for %s: %w", args.IndexFile, err)
 	}
-	btw.writer = &countingWriter{w: getBufioWriter(btw.indexF)}
+	btw.writer = &countingWriter{w: bufiopool.Writer(btw.indexF)}
 
 	if args.KeyCount > 0 {
 		if args.M == 0 {
@@ -264,6 +267,9 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 	// every M-th key (di==0 included) is kept as a B-tree node
 	if di%btw.args.M != 0 {
 		return nil
+	}
+	if nodeOff := btw.writer.written - 1; nodeOff > math.MaxUint32 {
+		return fmt.Errorf("[index] %s: node section offset %d exceeds the %d-byte reader limit; rebuild with a larger M", btw.indexFileName, nodeOff, uint64(math.MaxUint32))
 	}
 	if err := (Node{key: key}).Encode(btw.writer, btw.nodeHeaderBuf[:]); err != nil {
 		return err
@@ -309,17 +315,17 @@ func (btw *BtIndexWriter) Build() error {
 	btw.logger.Log(btw.args.Lvl, "[index] write", "file", btw.indexFileName)
 	btw.built = true
 
-	if err = btw.writer.Flush(); err != nil {
+	if err := btw.writer.Flush(); err != nil {
 		return err
 	}
-	if err = btw.fsync(); err != nil {
+	if err := btw.fsync(); err != nil {
 		return err
 	}
 	tmpName := btw.indexF.Name()
-	if err = btw.indexF.Close(); err != nil {
+	if err := btw.indexF.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(tmpName, btw.args.IndexFile); err != nil {
+	if err := os.Rename(tmpName, btw.args.IndexFile); err != nil {
 		return err
 	}
 	btw.indexF = nil
@@ -352,7 +358,7 @@ func (btw *BtIndexWriter) closeTemps() {
 
 func (btw *BtIndexWriter) Close() {
 	if btw.writer != nil {
-		putBufioWriter(btw.writer.w)
+		bufiopool.PutWriter(btw.writer.w)
 		btw.writer = nil
 	}
 	if btw.indexF != nil { // non-nil means Build didn't rename it: drop the partial .tmp
@@ -365,7 +371,7 @@ func (btw *BtIndexWriter) Close() {
 }
 
 type BtIndex struct {
-	m        mmap.MMap
+	m        mmap.Ro
 	data     []byte
 	ef       *eliasfano32.EliasFano
 	file     *os.File
@@ -375,20 +381,12 @@ type BtIndex struct {
 	filePath string
 	indexM   uint64
 	pool     sync.Pool
-}
-
-// Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
-func CreateBtreeIndexWithDecompressor(indexPath string, existenceFilterPath string, M uint64, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors statecfg.Accessors) (*BtIndex, error) {
-	err := BuildBtreeIndexWithDecompressor(indexPath, existenceFilterPath, decompressor, ps, tmpdir, seed, logger, noFsync, accessors)
-	if err != nil {
-		return nil, err
-	}
-	return OpenBtreeIndexWithDecompressor(indexPath, M, decompressor)
+	onClose  []func()
 }
 
 // OpenBtreeIndexAndDataFile opens btree index file and data file and returns it along with BtIndex instance
 // Mostly useful for testing
-func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed seg.FileCompression, trace bool) (_ *seg.Decompressor, _ *BtIndex, err error) {
+func OpenBtreeIndexAndDataFile(indexPath, dataPath string, compressed seg.FileCompression) (_ *seg.Decompressor, _ *BtIndex, err error) {
 	d, err := seg.NewDecompressor(dataPath)
 	if err != nil {
 		return nil, nil, err
@@ -399,7 +397,7 @@ func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed 
 		}
 	}()
 	kv := seg.NewReader(d.MakeGetter(), compressed)
-	bt, err := OpenBtreeIndexWithDecompressor(indexPath, M, kv)
+	bt, err := OpenBtreeIndexWithDecompressor(indexPath, kv)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -411,7 +409,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath strin
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
 
-	defer kv.MadvNormal().DisableReadAhead()
+	defer kv.MadvSequential().DisableReadAhead()
 
 	var existenceFilter *existence.Filter
 	if accessors.Has(statecfg.AccessorExistence) {
@@ -446,7 +444,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath strin
 
 	for kv.HasNext() {
 		key, _ = kv.Next(key[:0])
-		if err = iw.AddKey(key, pos); err != nil {
+		if err := iw.AddKey(key, pos); err != nil {
 			return err
 		}
 		hi, _ := murmur3.Sum128WithSeed(key, salt)
@@ -472,10 +470,18 @@ func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath strin
 	return nil
 }
 
-func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Reader) (bt *BtIndex, err error) {
+func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (*BtIndex, error) {
+	return openBtreeIndex(indexPath, kvGetter, false)
+}
+
+// OpenBtreeIndexInMem reads the whole index into memory instead of mapping it, so lookups never wait for page cache misses.
+func OpenBtreeIndexInMem(indexPath string, kvGetter *seg.Reader) (*BtIndex, error) {
+	return openBtreeIndex(indexPath, kvGetter, true)
+}
+
+func openBtreeIndex(indexPath string, kvGetter *seg.Reader, inMem bool) (bt *BtIndex, err error) {
 	idx := &BtIndex{
 		filePath: indexPath,
-		indexM:   M,
 	}
 
 	var validationPassed bool
@@ -506,26 +512,37 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		return idx, nil
 	}
 
-	idx.m, err = mmap.MapRegion(idx.file, int(idx.size), mmap.RDONLY, 0, 0)
-	if err != nil {
-		return nil, err
+	if inMem {
+		idx.data = make([]byte, idx.size)
+		if _, err = io.ReadFull(idx.file, idx.data); err != nil {
+			return nil, err
+		}
+	} else {
+		idx.m, err = mmap.OpenRo(idx.file, int(idx.size))
+		if err != nil {
+			return nil, err
+		}
+		// Decoding below walks the whole node blob, so readahead pays off once. Lookups
+		// afterwards are scattered, hence OpenRo's MADV_RANDOM is restored on the way out.
+		_ = mmap.MadviseSequential(idx.m)
+		defer func() { _ = mmap.MadviseRandom(idx.m) }()
+		idx.data = idx.m[:idx.size]
 	}
-	idx.data = idx.m[:idx.size]
 
-	var nodeOfftEF *eliasfano32.EliasFano
+	var nd pivots
 	var keysBlob []byte
-	var nodeStride uint64
+	m := DefaultBtreeMLegacy // newer format ("use footer") carry m in the file itself
 	switch idx.data[0] {
 	case btFirstByteLegacy: // legacy [EF][nodesCount][di-nodes]
 		var pos int
 		idx.ef, pos = eliasfano32.ReadEliasFano(idx.data)
 		if len(idx.data[pos:]) > 0 {
 			keysBlob = idx.data[pos:]
-			if nodeOfftEF, nodeStride, _, err = decodeListNodesV0(keysBlob); err != nil {
+			if nd, _, err = decodeListNodesV0(keysBlob); err != nil {
 				return nil, err
 			}
-			if nodeStride == 0 { // <2 nodes: only di=0 exists, stride is irrelevant
-				nodeStride = M
+			if nd.stride == 0 { // <2 nodes: only di=0 exists, stride is irrelevant
+				nd.stride = m
 			}
 		}
 	case btFirstByteUseFooter: // footer-based layout: [leadingByte][nodes][EF][footer][anchor]
@@ -540,21 +557,21 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		if footer.FormatVersion != btVersion {
 			return nil, fmt.Errorf("btindex: %s: unsupported format version %d (want %d): upgrade Erigon", indexPath, footer.FormatVersion, btVersion)
 		}
-		M = footer.Meta.M
-		if M == 0 || footer.Meta.EfOffset >= uint64(footerStart) {
-			return nil, fmt.Errorf("btindex: corrupt footer in %s (M=%d ef_offset=%d body=%d)", indexPath, M, footer.Meta.EfOffset, footerStart)
+		m = footer.Meta.M
+		if m == 0 || footer.Meta.EfOffset >= uint64(footerStart) {
+			return nil, fmt.Errorf("btindex: corrupt footer in %s (M=%d ef_offset=%d body=%d)", indexPath, m, footer.Meta.EfOffset, footerStart)
 		}
 		// ceil(K/M) overflow-safe: (K+M-1)/M overflows when K≈MaxUint64; use (K-1)/M+1 for K>0.
 		var nodesCount uint64
 		if footer.Meta.KeysCount > 0 {
-			nodesCount = (footer.Meta.KeysCount-1)/M + 1
+			nodesCount = (footer.Meta.KeysCount-1)/m + 1
 		}
 		keysBlob = idx.data[1:]
-		nodeStride = M
 		var nodesEnd int
-		if nodeOfftEF, nodesEnd, err = decodeNodes(keysBlob, nodesCount); err != nil {
+		if nd, nodesEnd, err = decodeNodes(keysBlob, nodesCount); err != nil {
 			return nil, err
 		}
+		nd.stride = m
 		if footer.Meta.EfOffset != uint64(alignUp(1+nodesEnd, btEFAlign)) { // cross-check ef_offset against the decoded nodes
 			return nil, fmt.Errorf("btindex: corrupt footer in %s: ef_offset=%d but nodes end at %d", indexPath, footer.Meta.EfOffset, alignUp(1+nodesEnd, btEFAlign))
 		}
@@ -566,17 +583,17 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		return nil, fmt.Errorf("btindex: %s: unknown format byte %#x", indexPath, idx.data[0])
 	}
 
-	idx.indexM = M
+	idx.indexM = m
 	idx.pool.New = func() any {
 		return &Cursor{ef: idx.ef, returnInto: &idx.pool}
 	}
 
 	defer kvGetter.MadvNormal().DisableReadAhead()
 
-	if nodeOfftEF == nil {
-		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup)
+	if nd.nodeOfft == nil {
+		idx.bplus = NewBpsTree(kvGetter, idx.ef, m, idx.dataLookup)
 	} else {
-		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, keysBlob, nodeOfftEF, nodeStride)
+		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, m, idx.dataLookup, keysBlob, nd)
 	}
 	idx.bplus.cursorGetter = idx.newCursor
 
@@ -618,10 +635,6 @@ func (b *BtIndex) newCursor(k, v []byte, d uint64, g *seg.Reader) *Cursor {
 	return c
 }
 
-func (b *BtIndex) DataHandle() unsafe.Pointer {
-	return unsafe.Pointer(&b.data[0])
-}
-
 func (b *BtIndex) Size() int64 { return b.size }
 
 func (b *BtIndex) ModTime() time.Time { return b.modTime }
@@ -633,6 +646,12 @@ func (b *BtIndex) FileName() string { return path.Base(b.filePath) }
 func (b *BtIndex) M() uint64 { return b.indexM }
 
 func (b *BtIndex) Empty() bool { return b == nil || b.ef == nil || b.ef.Count() == 0 }
+
+// OnClose registers fn to run once when the index is closed.
+func (b *BtIndex) OnClose(fn func()) { b.onClose = append(b.onClose, fn) }
+
+// InMem reports whether the index was read into memory by OpenBtreeIndexInMem.
+func (b *BtIndex) InMem() bool { return b != nil && b.m == nil && b.data != nil }
 
 func (b *BtIndex) KeyCount() uint64 {
 	if b.Empty() {
@@ -661,10 +680,15 @@ func (b *BtIndex) Close() {
 		b.bplus.Close()
 		b.bplus = nil
 	}
+	b.data, b.ef = nil, nil
+	for _, fn := range b.onClose {
+		fn()
+	}
+	b.onClose = nil
 }
 
 // Get - exact match of key. `k == nil` - means not found
-func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile uint64, found bool, err error) {
+func (b *BtIndex) Get(lookup, buf []byte, gr *seg.Reader) (k, v []byte, offsetInFile uint64, found bool, err error) {
 	// TODO: optimize by "push-down" - instead of using seek+compare, alloc can have method Get which will return nil if key doesn't exists
 	// alternativaly: can allocate cursor on-stack
 	// 	it := Iter{} // allocation on stack
@@ -683,7 +707,7 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 	// weak assumption that k will be ignored and used lookup instead.
 	// since fetching k and v from data file is required to use Getter.
 	// Why to do Getter.Reset twice when we can get kv right there.
-	v, found, offsetInFile, err = b.bplus.Get(gr, lookup)
+	v, found, offsetInFile, err = b.bplus.Get(gr, lookup, buf)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return k, v, offsetInFile, false, nil
@@ -691,6 +715,23 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 		return lookup, v, offsetInFile, false, err
 	}
 	return lookup, v, offsetInFile, found, nil
+}
+
+func (b *BtIndex) GetValSize(lookup []byte, gr *seg.Reader) (size int, found bool, err error) {
+	if b.Empty() {
+		return 0, false, nil
+	}
+	if b.bplus == nil {
+		panic(fmt.Errorf("GetValSize: `b.bplus` is nil: %s", gr.FileName()))
+	}
+	size, found, err = b.bplus.GetValSize(gr, lookup)
+	if err != nil {
+		if errors.Is(err, ErrBtIndexLookupBounds) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return size, found, nil
 }
 
 // Seek moves cursor to position where key >= x.
@@ -724,19 +765,3 @@ func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 
 func (b *BtIndex) Offsets() *eliasfano32.EliasFano { return b.bplus.Offsets() }
 func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() }
-
-// Erigon doesn't create tons of bufio readers/writers, but it has tons of
-// parallel small unit-tests which each create many small files and bufio
-// readers/writers — pooling avoids the allocation pressure in that scenario.
-var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
-
-func getBufioWriter(w io.Writer) *bufio.Writer {
-	bw := bufioWriterPool.Get().(*bufio.Writer)
-	bw.Reset(w)
-	return bw
-}
-
-// Reset(nil) before Put is required: without it the pool entry retains a
-// reference to the underlying io.Writer/io.Reader, keeping it alive until the
-// next GC cycle or until the entry is reused — whichever comes first.
-func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }

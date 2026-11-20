@@ -67,6 +67,10 @@ func compatStatusPacket(reply eth.StatusPacket, status *sentryproto.StatusData, 
 }
 
 func compatStatusPacket69(reply eth.StatusPacket69, status *sentryproto.StatusData, version, minVersion uint) error {
+	blockRange := eth.BlockRangeUpdatePacket{Earliest: reply.MinimumBlock, Latest: reply.LatestBlock, LatestHash: reply.LatestBlockHash}
+	if err := blockRange.Validate(); err != nil {
+		return err
+	}
 	return checkCompatibility(reply.NetworkID, reply.ProtocolVersion, reply.Genesis, reply.ForkID, status, version, minVersion)
 }
 
@@ -132,7 +136,7 @@ func handShake[T StatusPacket](
 
 	t := time.NewTimer(timeout)
 	defer t.Stop()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case err := <-errChan:
 			if err != nil {
@@ -164,7 +168,7 @@ func encodeStatusPacket(status *sentryproto.StatusData, version uint) eth.Status
 	return eth.StatusPacket{
 		ProtocolVersion: uint32(version),
 		NetworkID:       status.NetworkId,
-		TD:              ourTD.ToBig(),
+		TD:              ourTD,
 		Head:            gointerfaces.ConvertH256ToHash(status.BestHash),
 		Genesis:         genesisHash,
 		ForkID:          forkid.NewIDFromForks(status.ForkData.HeightForks, status.ForkData.TimeForks, genesisHash, status.MaxBlockHeight, status.MaxBlockTime),

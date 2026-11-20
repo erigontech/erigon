@@ -21,11 +21,14 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
+
+type create2InputHookKey struct{}
 
 type CreateTracer struct {
 	ctx     context.Context
@@ -43,7 +46,7 @@ func NewCreateTracer(ctx context.Context, target accounts.Address) *CreateTracer
 		found:  false,
 	}
 	tracer.hooks = &tracing.Hooks{
-		OnEnter: tracer.OnEnter,
+		OnEnterV2: tracer.OnEnterV2,
 	}
 
 	return tracer
@@ -61,7 +64,7 @@ func (t *CreateTracer) Found() bool {
 	return t.found
 }
 
-func (t *CreateTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *CreateTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	if t.found {
 		return
 	}
@@ -74,4 +77,9 @@ func (t *CreateTracer) OnEnter(depth int, typ byte, from accounts.Address, to ac
 
 	t.found = true
 	t.Creator = from
+	if vm.OpCode(typ) == vm.CREATE2 {
+		if onCreate2, ok := t.ctx.Value(create2InputHookKey{}).(func([]byte)); ok {
+			onCreate2(input)
+		}
+	}
 }

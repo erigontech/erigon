@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"time"
@@ -66,6 +67,13 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 }
 
 func UnwindFinish(u *UnwindState, tx kv.RwTx) (err error) {
+	hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
+	if err != nil {
+		return err
+	}
+	if hash != (common.Hash{}) {
+		rawdb.WriteHeadBlockHash(tx, hash)
+	}
 	return u.Done(tx)
 }
 
@@ -96,7 +104,7 @@ func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier
 		}
 		headerRLP := rawdb.ReadHeaderRLP(tx, common.BytesToHash(hash), blockNum)
 		if headerRLP != nil {
-			headersRlp = append(headersRlp, common.Copy(headerRLP))
+			headersRlp = append(headersRlp, bytes.Clone(headerRLP))
 		}
 		return common.Stopped(ctx.Done())
 	}); err != nil {

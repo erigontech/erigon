@@ -118,6 +118,17 @@ func createLog() *notifications.LogNotification {
 	}
 }
 
+func TestLogNotificationToProtoIncludesBlockTimestamp(t *testing.T) {
+	log := createLog()
+	log.BlockTimestamp = 123
+
+	converted := logNotificationToProto(log)
+
+	if converted.BlockTimestamp != 123 {
+		t.Fatalf("expected block timestamp 123, got %d", converted.BlockTimestamp)
+	}
+}
+
 func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
@@ -144,7 +155,7 @@ func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 
 	// now see if a log would be sent or not
 	lg := createLog()
-	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
+	agg.distributeLogs([]*notifications.LogNotification{lg})
 
 	if len(srv.sent) != 0 {
 		t.Error("expected the sent slice to be empty")
@@ -177,14 +188,14 @@ func TestLogsFilter_AllAddressesAndTopicsFilter_DistributesLogRegardless(t *test
 
 	// now see if a log would be sent or not
 	lg := createLog()
-	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
+	agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 1 {
 		t.Error("expected the sent slice to have the log present")
 	}
 
 	lg = createLog()
 	lg.Topics = []common.Hash{topic1}
-	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
+	agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 2 {
 		t.Error("expected any topic to be allowed through the filter")
 	}
@@ -193,7 +204,7 @@ func TestLogsFilter_AllAddressesAndTopicsFilter_DistributesLogRegardless(t *test
 	var addr common.Address
 	addr.SetBytes(address1[:])
 	lg.Address = addr
-	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
+	agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 3 {
 		t.Error("expected any address to be allowed through the filter")
 	}
@@ -225,14 +236,14 @@ func TestLogsFilter_TopicFilter_OnlyAllowsThatTopicThrough(t *testing.T) {
 
 	// now see if a log would be sent or not
 	lg := createLog()
-	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
+	agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 0 {
 		t.Error("the sent slice should be empty as the topic didn't match")
 	}
 
 	lg = createLog()
 	lg.Topics = []common.Hash{topic1}
-	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
+	agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 1 {
 		t.Error("expected the log to be distributed as the topic matched")
 	}
@@ -264,7 +275,7 @@ func TestLogsFilter_AddressFilter_OnlyAllowsThatAddressThrough(t *testing.T) {
 
 	// now see if a log would be sent or not
 	lg := createLog()
-	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
+	agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 0 {
 		t.Error("the sent slice should be empty as the address didn't match")
 	}
@@ -273,7 +284,7 @@ func TestLogsFilter_AddressFilter_OnlyAllowsThatAddressThrough(t *testing.T) {
 	var addr common.Address
 	addr.SetBytes(address1[:])
 	lg.Address = addr
-	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
+	agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 1 {
 		t.Error("expected the log to be distributed as the address matched")
 	}
@@ -326,7 +337,7 @@ func TestLogsFilter_SendFailure_DoesNotSkipHealthySubscribers(t *testing.T) {
 		logs = append(logs, lg)
 	}
 
-	_ = agg.distributeLogs(logs)
+	agg.distributeLogs(logs)
 
 	if got, want := len(healthySrv.sent), logsToSend; got != want {
 		t.Fatalf("expected healthy subscriber to receive %d logs, got %d", want, got)
@@ -346,15 +357,13 @@ func TestLogsFilter_RemoveLogsFilter_IsIdempotent(t *testing.T) {
 	healthySrv := newTestServer(ctx)
 
 	brokenID, brokenFilter := agg.insertLogsFilter(brokenSrv)
-	healthyID, healthyFilter := agg.insertLogsFilter(healthySrv)
+	healthyID, _ := agg.insertLogsFilter(healthySrv)
 
 	req := &remoteproto.LogsFilterRequest{AllAddresses: true, AllTopics: true}
-	agg.updateLogsFilter(brokenFilter, req)
-	agg.updateLogsFilter(healthyFilter, req)
+	agg.updateLogsFilter(brokenID, req)
+	agg.updateLogsFilter(healthyID, req)
 
-	if err := agg.distributeLogs([]*notifications.LogNotification{createLog()}); err != nil {
-		t.Fatalf("distributeLogs returned error: %v", err)
-	}
+	agg.distributeLogs([]*notifications.LogNotification{createLog()})
 
 	// Simulate deferred cleanup in subscribeLogs for a filter already removed in distributeLogs.
 	agg.removeLogsFilter(brokenID, brokenFilter)
@@ -367,5 +376,26 @@ func TestLogsFilter_RemoveLogsFilter_IsIdempotent(t *testing.T) {
 	}
 	if _, ok := agg.logsFilters[healthyID]; !ok {
 		t.Fatalf("expected healthy filter %d to remain", healthyID)
+	}
+}
+
+func TestLogsFilter_UpdateAfterFailedSendKeepsOtherSubscriber(t *testing.T) {
+	agg := NewLogsFilterAggregator(shards.NewEvents())
+	brokenSrv := newTestServer(t.Context())
+	brokenSrv.sendErr = errors.New("send failed")
+	healthySrv := newTestServer(t.Context())
+	brokenID, brokenFilter := agg.insertLogsFilter(brokenSrv)
+	healthyID, _ := agg.insertLogsFilter(healthySrv)
+	all := &remoteproto.LogsFilterRequest{AllAddresses: true, AllTopics: true}
+	agg.updateLogsFilter(brokenID, all)
+	agg.updateLogsFilter(healthyID, all)
+
+	agg.distributeLogs([]*notifications.LogNotification{createLog()})
+	agg.updateLogsFilter(brokenID, &remoteproto.LogsFilterRequest{AllAddresses: true, Topics: []*typesproto.H256{gointerfaces.ConvertHashToH256(common.Hash{0xbb})}})
+	agg.removeLogsFilter(brokenID, brokenFilter)
+	agg.distributeLogs([]*notifications.LogNotification{createLog()})
+
+	if got := len(healthySrv.sent); got != 2 {
+		t.Fatalf("expected the healthy subscriber to receive both logs, got %d", got)
 	}
 }

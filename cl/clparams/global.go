@@ -2,31 +2,19 @@ package clparams
 
 import "sync/atomic"
 
-var (
-	globalBeaconConfig atomic.Pointer[BeaconChainConfig]
-	globalCaplinConfig atomic.Pointer[CaplinConfig]
-)
+var globalBeaconConfig atomic.Pointer[BeaconChainConfig]
 
 // Safe to call more than once; later calls replace the previous config.
-func InitGlobalStaticConfig(bcfg *BeaconChainConfig, ccfg *CaplinConfig) {
+func InitGlobalStaticConfig(bcfg *BeaconChainConfig) {
 	if bcfg == nil {
 		panic("cannot initialize globalBeaconConfig with nil")
 	}
-	if ccfg == nil {
-		panic("cannot initialize globalCaplinConfig with nil")
+	if err := bcfg.ValidateExecutionRequestTypeConstants(); err != nil {
+		panic(err)
 	}
 	globalBeaconConfig.Store(bcfg)
-	globalCaplinConfig.Store(ccfg)
 }
 
 func GetBeaconConfig() *BeaconChainConfig {
 	return globalBeaconConfig.Load()
-}
-
-func IsDevnet() bool {
-	cfg := globalCaplinConfig.Load()
-	if cfg == nil {
-		return false
-	}
-	return cfg.IsDevnet()
 }

@@ -25,19 +25,20 @@ import (
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // generateAllDomainsOverlap writes {0,1},{1,2} subset files shadowed by a {0,2}
 // covering file for every state domain, so that overlap-cleanup has garbage to
 // retire after OpenFolder.
-func generateAllDomainsOverlap(t *testing.T, agg *Aggregator) {
+func generateAllDomainsOverlap(t *testing.T, db kv.RoDB, agg *Aggregator) {
 	t.Helper()
 	ranges := []testFileRange{{0, 1}, {1, 2}, {0, 2}}
 	generateAccountsFile(t, agg.Dirs(), ranges)
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
 	generateCommitmentFile(t, agg.Dirs(), ranges)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 }
 
 func mustExist(t *testing.T, path string, want bool) {
@@ -52,9 +53,10 @@ func mustExist(t *testing.T, path string, want bool) {
 // removed from disk; it is physically deleted only once the last pinning reader
 // closes. A reader opened after retirement no longer sees it.
 func TestAggregatorReadAfterRetire(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize := uint64(10)
-	_, agg := testDbAndAggregatorv3(t, stepSize)
-	generateAllDomainsOverlap(t, agg)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	generateAllDomainsOverlap(t, db, agg)
 
 	// subset (overlap) files for the accounts history — shadowed by 0-2, non-frozen
 	subset01 := filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-1.v")
@@ -68,7 +70,7 @@ func TestAggregatorReadAfterRetire(t *testing.T) {
 	at := agg.BeginFilesRo()
 
 	// retire the overlap files; they get attached to the generation `at` pins
-	require.NoError(t, agg.RemoveOverlapsAfterMerge(t.Context()))
+	require.NoError(t, agg.RemoveOverlapsAfterMerge())
 
 	// still pinned by `at` → must NOT be deleted yet
 	mustExist(t, subset01, true)
@@ -95,9 +97,10 @@ func TestAggregatorReadAfterRetire(t *testing.T) {
 // that debug tx closes. Guards against the reclaimer deleting a file out from
 // under a concurrent accessor build.
 func TestAggregatorRetireDeferredWhileDebugPins(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize := uint64(10)
-	_, agg := testDbAndAggregatorv3(t, stepSize)
-	generateAllDomainsOverlap(t, agg)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	generateAllDomainsOverlap(t, db, agg)
 
 	subset01 := filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-1.v")
 	mustExist(t, subset01, true)
@@ -106,7 +109,7 @@ func TestAggregatorRetireDeferredWhileDebugPins(t *testing.T) {
 	rotx := agg.DebugBeginDirtyFilesRo()
 
 	// retire the overlap files; they are pinned by rotx so must be parked, not deleted
-	require.NoError(t, agg.RemoveOverlapsAfterMerge(t.Context()))
+	require.NoError(t, agg.RemoveOverlapsAfterMerge())
 	mustExist(t, subset01, true) // deferred — still on disk
 
 	// releasing the debug pin triggers the deferred deletion
@@ -118,16 +121,15 @@ func TestAggregatorRetireDeferredWhileDebugPins(t *testing.T) {
 // concurrent retirement under the race detector: no double-free / use-after-free
 // of FilesItem regardless of how Close and reclamation interleave.
 func TestAggregatorReclaimConcurrent(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize := uint64(10)
-	_, agg := testDbAndAggregatorv3(t, stepSize)
-	generateAllDomainsOverlap(t, agg)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	generateAllDomainsOverlap(t, db, agg)
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
-	for i := 0; i < 16; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 16 {
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -139,10 +141,10 @@ func TestAggregatorReclaimConcurrent(t *testing.T) {
 				_ = tx.d[kv.AccountsDomain].ht.files.EndTxNum()
 				tx.Close()
 			}
-		}()
+		})
 	}
 
-	require.NoError(t, agg.RemoveOverlapsAfterMerge(t.Context()))
+	require.NoError(t, agg.RemoveOverlapsAfterMerge())
 	close(stop)
 	wg.Wait()
 

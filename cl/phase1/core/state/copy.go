@@ -17,19 +17,24 @@
 package state
 
 import (
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/maphash"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
+var pubkeyIndexDeltaSize = metrics.GetOrCreateGauge("beacon_state_pubkey_index_delta_size")
+
 func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
+	return b.copyInto(bs, nil)
+}
+
+func (b *CachingBeaconState) copyInto(bs *CachingBeaconState, totalActiveBalance *uint64) (err error) {
 	err = b.BeaconState.CopyInto(bs.BeaconState)
 	if err != nil {
 		return err
 	}
 
-	err = bs.reinitCaches()
+	bs.publicKeyIndices = pubkeyIndexFromBase(b.publicKeyIndices.base, bs.ValidatorSet())
+	pubkeyIndexDeltaSize.SetInt(len(bs.publicKeyIndices.delta))
+	err = bs.reinitCaches(totalActiveBalance)
 	if err != nil {
 		return err
 	}
@@ -41,41 +46,16 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 	return nil
 }
 
-func (bs *CachingBeaconState) reinitCaches() error {
-	if bs.Version() == clparams.Phase0Version {
-		return bs.InitBeaconState()
-	}
-
-	if bs.publicKeyIndicies == nil {
-		bs.publicKeyIndicies = maphash.NewNonConcurrentMap[uint64]()
-	} else {
-		bs.publicKeyIndicies.Clear()
-	}
-
-	bs.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		bs.publicKeyIndicies.Set(v.PublicKeyBytes(), uint64(idx))
-		return true
-	})
-
-	bs.totalActiveBalanceCache = nil
-	bs._refreshActiveBalancesIfNeeded()
-	bs.previousStateRoot = common.Hash{}
-	bs.initCaches()
-	if err := bs._updateProposerIndex(); err != nil {
-		return err
-	}
-	if bs.Version() >= clparams.Phase0Version {
-		return bs._initializeValidatorsPhase0()
-	}
-
-	return nil
-}
-
-func (b *CachingBeaconState) Copy() (bs *CachingBeaconState, err error) {
+func (b *CachingBeaconState) Copy() (*CachingBeaconState, error) {
 	copied := New(b.BeaconConfig())
-	err = b.CopyInto(copied)
-	if err != nil {
+	if err := b.copyInto(copied, nil); err != nil {
 		return nil, err
 	}
 	return copied, nil
+}
+
+// CopyIntoWithTotalActiveBalance is CopyInto, but it uses total instead of rescanning the validators.
+// total must equal what a rescan of this state gives; a wrong value changes consensus computations.
+func (b *CachingBeaconState) CopyIntoWithTotalActiveBalance(bs *CachingBeaconState, total uint64) error {
+	return b.copyInto(bs, &total)
 }

@@ -28,7 +28,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/fromdb"
@@ -46,8 +45,6 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/node/shards"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 var stateStages = &cobra.Command{
@@ -63,8 +60,7 @@ Examples:
 		`,
 	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
@@ -76,7 +72,7 @@ Examples:
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		builderConfig := buildercfg.BuilderConfig{}
 		utils.SetupMinerCobra(cmd, &builderConfig)
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -104,9 +100,8 @@ Examples:
 var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -134,9 +129,9 @@ func init() {
 	withIntegrityChecks(stateStages)
 	withMining(stateStages)
 	withChain(stateStages)
-	withHeimdall(stateStages)
 	withWorkers(stateStages)
 	withChaosMonkey(stateStages)
+	withExperimentalCommitment(stateStages)
 	rootCmd.AddCommand(stateStages)
 
 	withConfig(loopExecCmd)
@@ -144,19 +139,16 @@ func init() {
 	withBatchSize(loopExecCmd)
 	withUnwind(loopExecCmd)
 	withChain(loopExecCmd)
-	withHeimdall(loopExecCmd)
 	withWorkers(loopExecCmd)
 	withChaosMonkey(loopExecCmd)
+	withExperimentalCommitment(loopExecCmd)
 	rootCmd.AddCommand(loopExecCmd)
 }
 
 func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig, ctx context.Context, logger1 log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return err
-	}
-
-	_, engine, vmConfig, stateStages := newSync(ctx, db, &builderConfig, logger1)
+	_, clean, engine, vmConfig, stateStages := newSync(ctx, db, &builderConfig, logger1)
+	defer clean()
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 
 	tx, err := db.BeginTemporalRw(ctx)
@@ -196,17 +188,18 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 	senderAtBlock := progress(tx, stages.Senders)
 	execAtBlock := progress(tx, stages.Execution)
 
-	var stopAt = senderAtBlock
+	stopAt := senderAtBlock
 	onlyOneUnwind := block == 0 && unwindEvery == 0 && unwind > 0
 	backward := unwindEvery < unwind
-	if onlyOneUnwind {
+	switch {
+	case onlyOneUnwind:
 		if unwind > execAtBlock {
 			return errors.New("cannot unwind past 0")
 		}
 		stopAt = progress(tx, stages.Execution) - unwind
-	} else if block > 0 && block < senderAtBlock {
+	case block > 0 && block < senderAtBlock:
 		stopAt = block
-	} else if backward {
+	case backward:
 		stopAt = 1
 	}
 
@@ -252,7 +245,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 
 		// All stages forward to `execStage + unwindEvery` block
 		execAtBlock = progress(tx, stages.Execution)
@@ -282,7 +275,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 				return err
 			}
 
-			if err = sd.Commit(ctx, tx); err != nil {
+			if err := sd.Commit(ctx, tx); err != nil {
 				return err
 			}
 			sd.Close()
@@ -290,7 +283,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
-			defer tx.Rollback()
+			defer tx.Rollback() //nolint:gocritic
 			// Fresh SD: a committed SD is never reused.
 			if sd, err = execctx.NewSharedDomains(ctx, tx, logger1); err != nil {
 				return err
@@ -325,7 +318,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 
 		// allow backward loop
 		if unwind > 0 && unwindEvery > 0 {
@@ -343,7 +336,8 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
 	chainConfig := fromdb.ChainConfig(db)
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	_, engine, vmConfig, sync := newSync(ctx, db, nil, logger)
+	_, clean, engine, vmConfig, sync := newSync(ctx, db, nil, logger)
+	defer clean()
 
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -391,19 +385,20 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 		if err != nil {
 			return err
 		}
-		defer sd.Close()
+		defer sd.Close() //nolint:gocritic
+		sd.SetInMemHistoryReads(false)
 		_ = sync.SetCurrentStage(stages.Execution)
 		t := time.Now()
 		if _, err = sync.Run(sd, tx, initialCycle, false); err != nil {
 			return err
 		}
-		logger.Info("[Integration] ", "loop time", time.Since(t))
+		logger.Info("[Integration] ", "loopTime", time.Since(t))
 		sd.Close()
 		tx.Rollback()
 		tx, err = db.BeginTemporalRw(ctx)
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 	}
 }

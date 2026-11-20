@@ -31,7 +31,7 @@ func TestValidateChain_AcceptsLocallySealedWithoutReExec(t *testing.T) {
 	// Record it as if the driver's marker seal ran (ingestSealedFlashblockLocked) — but insert NO block.
 	exec.RecordSealedForTest(sealed)
 
-	res, err := exec.ValidateChain(ctx, h, 2)
+	res, err := exec.ValidateChain(ctx, types.NewBlockWithHeader(sealed, nil))
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, res.ValidationStatus, "must ACCEPT our own sealed block (no re-exec)")
 	require.Equal(t, root, res.ComputedRoot, "must return the sealed root by lookup, not by re-execution")

@@ -71,7 +71,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 		t.Fatal("roots are the same")
 	}
 
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil, chain.Blocks[0].BlockAccessListSidecar())
 	incorrectChain := &blockgen.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
@@ -96,6 +96,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
+	defer st.Close()
 	exist, err := st.Exist(accounts.InternAddress(to))
 	if err != nil {
 		t.Error(err)
@@ -157,7 +158,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 		t.Fatal("roots are the same")
 	}
 
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil, chain.Blocks[0].BlockAccessListSidecar())
 	incorrectChain := &blockgen.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
@@ -183,6 +184,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
+	defer st.Close()
 	exist, err := st.Exist(accounts.InternAddress(to))
 	if err != nil {
 		t.Error(err)
@@ -231,7 +233,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	incorrectHeader := types.CopyHeader(chain.Headers[0]) // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[1].Root
 
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil, chain.Blocks[0].BlockAccessListSidecar())
 	incorrectChain := &blockgen.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
@@ -257,6 +259,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
+	defer st.Close()
 	exist, err := st.Exist(accounts.InternAddress(to))
 	if err != nil {
 		t.Error(err)
@@ -305,7 +308,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	incorrectHeader := types.CopyHeader(chain.Headers[0]) // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[1].Root
 
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil, chain.Blocks[0].BlockAccessListSidecar())
 	incorrectChain := &blockgen.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
@@ -331,6 +334,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
+	defer st.Close()
 	exist, err := st.Exist(accounts.InternAddress(to))
 	if err != nil {
 		t.Error(err)
@@ -378,7 +382,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	// BLOCK 1
 	incorrectHeader := types.CopyHeader(chain.Headers[0]) // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[1].Root
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil, chain.Blocks[0].BlockAccessListSidecar())
 	incorrectChain := &blockgen.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 
 	if err = m.InsertChain(incorrectChain); err == nil {
@@ -405,6 +409,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
+	defer st.Close()
 	exist, err := st.Exist(accounts.InternAddress(to))
 	if err != nil {
 		t.Error(err)
@@ -458,6 +463,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -478,7 +484,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 
 	incorrectHeader := types.CopyHeader(chain.Headers[1]) // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[0].Root
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[1].Transactions(), chain.Blocks[1].Uncles(), chain.Receipts[1], nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[1].Transactions(), chain.Blocks[1].Uncles(), chain.Receipts[1], nil, chain.Blocks[1].BlockAccessListSidecar())
 	incorrectChain := &blockgen.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 
 	// BLOCK 2 - INCORRECT
@@ -488,6 +494,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -514,6 +521,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -568,6 +576,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -594,6 +603,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -617,7 +627,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	// BLOCK 3 - INCORRECT
 	incorrectHeader := types.CopyHeader(chain.Headers[2]) // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[1].Root
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[2].Transactions(), chain.Blocks[2].Uncles(), chain.Receipts[2], nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[2].Transactions(), chain.Blocks[2].Uncles(), chain.Receipts[2], nil, chain.Blocks[2].BlockAccessListSidecar())
 	incorrectChain := &blockgen.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 
 	if err = m.InsertChain(incorrectChain); err == nil {
@@ -668,6 +678,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -695,6 +706,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -722,7 +734,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	// BLOCK 4 - INCORRECT
 	incorrectHeader := types.CopyHeader(chain.Headers[3]) // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[1].Root
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[3].Transactions(), chain.Blocks[3].Uncles(), chain.Receipts[3], nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[3].Transactions(), chain.Blocks[3].Uncles(), chain.Receipts[3], nil, chain.Blocks[3].BlockAccessListSidecar())
 	incorrectChain := &blockgen.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 
 	if err = m.InsertChain(incorrectChain); err == nil {
@@ -776,6 +788,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -802,6 +815,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -829,7 +843,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	// BLOCK 4 - INCORRECT
 	incorrectHeader := types.CopyHeader(chain.Headers[3]) // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[1].Root
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[3].Transactions(), chain.Blocks[3].Uncles(), chain.Receipts[3], nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[3].Transactions(), chain.Blocks[3].Uncles(), chain.Receipts[3], nil, chain.Blocks[3].BlockAccessListSidecar())
 	incorrectChain := &blockgen.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
@@ -886,6 +900,7 @@ func getGenesis(funds ...*big.Int) initialData {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: allocs,
 		},
@@ -903,7 +918,7 @@ func GenerateBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*execm
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(txs), func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(len(txs), func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 		var isContractCall bool
 		signer := types.LatestSignerForChainID(nil)

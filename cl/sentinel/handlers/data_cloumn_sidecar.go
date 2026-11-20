@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"errors"
+	"slices"
+	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -10,26 +13,41 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
 var errInvalidDataColumnIndex = errors.New("invalid column index")
 
-func writeDataColumnSidecarsEmptySuccess(s network.Stream) error {
-	return nil
+const (
+	// columnChunkWriteDeadline is the per-chunk response timeout that other clients still apply.
+	columnChunkWriteDeadline = 10 * time.Second
+	// columnByRootResponseBudget is when ByRoot stops starting chunks; plus columnChunkWriteDeadline it is both handlers' hard stop.
+	columnByRootResponseBudget = 30 * time.Second
+)
+
+func (c *ConsensusHandlers) renewColumnWriteDeadline(s network.Stream, start time.Time) error {
+	deadline := c.now().Add(columnChunkWriteDeadline)
+	if hardStop := start.Add(columnByRootResponseBudget + columnChunkWriteDeadline); deadline.After(hardStop) {
+		deadline = hardStop
+	}
+	return s.SetWriteDeadline(deadline)
 }
 
 func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) error {
+	start := c.now()
+	requestCtx, cancel := context.WithTimeout(c.ctx, StreamDeadline)
+	defer cancel()
 	curEpoch := c.ethClock.GetCurrentEpoch()
 
 	// Use current epoch's version for decoding (supports Fulu and GLOAS)
 	version := c.beaconConfig.GetCurrentStateVersion(curEpoch)
-	req := cltypes.NewColumnSidecarsByRangeRequest(c.beaconConfig)
+	req := &cltypes.ColumnSidecarsByRangeRequest{}
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 	if curEpoch < c.beaconConfig.FuluForkEpoch {
-		return writeDataColumnSidecarsEmptySuccess(s)
+		return nil
 	}
 
 	// check params.
@@ -52,7 +70,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 	if req.Count == 0 || req.Columns.Length() == 0 || endSlot <= fuluStartSlot {
-		return writeDataColumnSidecarsEmptySuccess(s)
+		return nil
 	}
 	startSlot := max(req.StartSlot, fuluStartSlot)
 	if endSlot-startSlot > c.beaconConfig.MinEpochsForDataColumnSidecarsRequests*c.beaconConfig.SlotsPerEpoch {
@@ -60,24 +78,34 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 	}
 
 	// Consume additional rate-limit tokens: slots × columns per slot, capped at config max.
-	if cost := dataColumnSidecarsRequestCost(endSlot-startSlot, uint64(req.Columns.Length()), c.beaconConfig.MaxRequestDataColumnSidecars); !c.consumeRateLimit(s, cost) {
+	if cost := requestCost(endSlot-startSlot, uint64(req.Columns.Length()), c.beaconConfig.MaxRequestDataColumnSidecars); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
 	curSlot := c.ethClock.GetCurrentSlot()
 	if startSlot > curSlot {
-		return writeDataColumnSidecarsEmptySuccess(s)
+		return nil
 	}
 
-	tx, err := c.indiciesDB.BeginRo(c.ctx)
+	tx, err := c.indiciesDB.BeginRo(requestCtx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	return c.writeColumnsByRange(requestCtx, s, tx, req, start, startSlot, endSlot, curSlot)
+}
 
-	count := 0
-	var responseErr error
-	for slot := startSlot; slot < endSlot; slot++ {
+// writeColumnsByRange serves whole blocks. Columns a block does not store take none of the response limit.
+func (c *ConsensusHandlers) writeColumnsByRange(ctx context.Context, s network.Stream, tx kv.Tx, req *cltypes.ColumnSidecarsByRangeRequest, start time.Time, startSlot, endSlot, curSlot uint64) error {
+	requested := make([]uint64, 0, req.Columns.Length())
+	req.Columns.Range(func(_ int, columnIndex uint64, _ int) bool {
+		requested = append(requested, columnIndex)
+		return true
+	})
+	slices.Sort(requested)
+	requested = slices.Compact(requested)
+	served := uint64(0)
+	for slot := startSlot; slot < endSlot && served < c.beaconConfig.MaxRequestDataColumnSidecars && ctx.Err() == nil; slot++ {
 		if slot > curSlot {
 			// slot is in the future
 			break
@@ -97,67 +125,65 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 			continue
 		}
 
-		req.Columns.Range(func(index int, columnIndex uint64, length int) bool {
-			if count >= int(c.beaconConfig.MaxRequestDataColumnSidecars) {
-				// max number of sidecars reached
-				return false
+		columns := make([]uint64, 0, len(requested))
+		for _, columnIndex := range requested {
+			if ctx.Err() != nil {
+				break
 			}
+			var exists bool
+			if exists, err = c.dataColumnStorage.ColumnSidecarExists(ctx, slot, blockRoot, int64(columnIndex)); err != nil {
+				break
+			}
+			if exists {
+				columns = append(columns, columnIndex)
+			}
+		}
+		if ctx.Err() != nil {
+			break
+		}
+		if err != nil {
+			log.Debug("failed to check if data column sidecar exists", "error", err)
+			return err
+		}
+		if len(columns) == 0 {
+			continue
+		}
+		if served > 0 && served+uint64(len(columns)) > c.beaconConfig.MaxRequestDataColumnSidecars {
+			break
+		}
 
-			exists, err := c.dataColumnStorage.ColumnSidecarExists(c.ctx, slot, blockRoot, int64(columnIndex))
-			if err != nil {
-				log.Debug("failed to check if data column sidecar exists", "error", err)
-				responseErr = err
-				return false
-			}
-			if !exists {
-				// skip
-				return true
-			}
-
-			forkDigest, err := c.ethClock.ComputeForkDigest(slot / c.beaconConfig.SlotsPerEpoch)
-			if err != nil {
-				log.Debug("failed to compute fork digest", "error", err)
-				responseErr = err
-				return false
+		forkDigest, err := c.ethClock.ComputeForkDigest(epoch)
+		if err != nil {
+			log.Debug("failed to compute fork digest", "error", err)
+			return err
+		}
+		for _, columnIndex := range columns {
+			if err := c.renewColumnWriteDeadline(s, start); err != nil {
+				return err
 			}
 			if _, err := s.Write([]byte{SuccessfulResponsePrefix}); err != nil {
 				log.Debug("failed to write success byte", "error", err)
-				responseErr = err
-				return false
+				return err
 			}
-
 			if _, err := s.Write(forkDigest[:]); err != nil {
 				log.Debug("failed to write fork digest", "error", err)
-				responseErr = err
-				return false
+				return err
 			}
-
 			if err := c.dataColumnStorage.WriteStream(s, slot, blockRoot, columnIndex); err != nil {
 				log.Debug("failed to write stream data column sidecar", "error", err)
-				responseErr = err
-				return false
+				return err
 			}
-			count++
-			return true
-		})
-		if responseErr != nil {
-			break
 		}
-		if count >= int(c.beaconConfig.MaxRequestDataColumnSidecars) {
-			// max number of sidecars reached
-			break
-		}
+		served += uint64(len(columns))
 	}
-	if responseErr != nil {
-		return responseErr
-	}
-	if count == 0 {
-		return writeDataColumnSidecarsEmptySuccess(s)
+	if served == 0 {
+		return ctx.Err() // an aborted scan must not look like an empty range
 	}
 	return nil
 }
 
 func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) error {
+	start := c.now()
 	curEpoch := c.ethClock.GetCurrentEpoch()
 
 	// Use current epoch's version for decoding (supports Fulu and GLOAS)
@@ -191,9 +217,9 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 	if totalColumns == 0 {
-		return writeDataColumnSidecarsEmptySuccess(s)
+		return nil
 	}
-	if cost := dataColumnSidecarsRequestCost(1, uint64(totalColumns), c.beaconConfig.MaxRequestDataColumnSidecars); !c.consumeRateLimit(s, cost) {
+	if cost := requestCost(1, uint64(totalColumns), c.beaconConfig.MaxRequestDataColumnSidecars); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -207,8 +233,19 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 	defer tx.Rollback()
 
 	count := 0
+	budgetSpent := false
+	outOfBudget := func() bool {
+		if !budgetSpent && count > 0 && c.now().Sub(start) >= columnByRootResponseBudget {
+			budgetSpent = true
+			log.Debug("[pubsubhandler] data column sidecars by root response budget spent", "peer", s.Conn().RemotePeer().String(), "served", count, "requested", totalColumns)
+		}
+		return budgetSpent
+	}
 	var responseErr error
 	for i := 0; i < req.Len(); i++ {
+		if outOfBudget() {
+			break
+		}
 		id := req.Get(i)
 		blockRoot := id.BlockRoot
 		columns := id.Columns
@@ -239,6 +276,9 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 				// max number of sidecars reached
 				return false
 			}
+			if outOfBudget() {
+				return false
+			}
 
 			exists, err := c.dataColumnStorage.ColumnSidecarExists(c.ctx, *slot, blockRoot, int64(columnIndex))
 			if err != nil {
@@ -250,10 +290,17 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 				// skip
 				return true
 			}
+			if outOfBudget() {
+				return false
+			}
 
 			forkDigest, err := c.ethClock.ComputeForkDigest(*slot / c.beaconConfig.SlotsPerEpoch)
 			if err != nil {
 				log.Debug("failed to compute fork digest", "error", err)
+				responseErr = err
+				return false
+			}
+			if err := c.renewColumnWriteDeadline(s, start); err != nil {
 				responseErr = err
 				return false
 			}
@@ -281,25 +328,17 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 			break
 		}
 	}
-	if responseErr != nil {
-		return responseErr
-	}
-	if count == 0 {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
-	}
-	return nil
+	return responseErr
 }
 
-func dataColumnSidecarsRequestCost(slots, columns, maxSidecars uint64) int {
-	if slots == 0 || columns == 0 || maxSidecars == 0 {
+// requestCost returns the estimated additional tokens to charge after admission.
+// Check the cap by division so large counts cannot overflow the multiplication.
+func requestCost(count, multiplier, limit uint64) int {
+	if count == 0 || multiplier == 0 || limit == 0 {
 		return 0
 	}
-	if slots > maxSidecars/columns {
-		return int(maxSidecars) - 1
+	if count > limit/multiplier {
+		return int(limit) - 1
 	}
-	sidecars := slots * columns
-	if sidecars > maxSidecars {
-		sidecars = maxSidecars
-	}
-	return int(sidecars) - 1
+	return int(count*multiplier) - 1
 }

@@ -72,7 +72,7 @@ func TestFuzzLifecycleConcurrent(t *testing.T) {
 	//   5
 	//
 	components := make([]component.Component[fuzzProvider], numComponents)
-	for i := 0; i < numComponents; i++ {
+	for i := range numComponents {
 		c, err := component.NewComponent[fuzzProvider](ctx,
 			component.WithId(fmt.Sprintf("fuzz-%d", i)),
 			component.WithProvider(&fuzzProvider{id: i}))
@@ -104,11 +104,8 @@ func TestFuzzLifecycleConcurrent(t *testing.T) {
 	// Execute concurrently.
 	var wg sync.WaitGroup
 	opsPerWorker := numOps / numWorkers
-	for w := 0; w < numWorkers; w++ {
-		w := w
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for w := range numWorkers {
+		wg.Go(func() {
 			start := w * opsPerWorker
 			end := start + opsPerWorker
 			if w == numWorkers-1 {
@@ -134,7 +131,7 @@ func TestFuzzLifecycleConcurrent(t *testing.T) {
 					}
 				}()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -170,7 +167,7 @@ func TestFuzzLifecycleSerial(t *testing.T) {
 	ctx := t.Context()
 
 	components := make([]component.Component[fuzzProvider], numComponents)
-	for i := 0; i < numComponents; i++ {
+	for i := range numComponents {
 		c, err := component.NewComponent[fuzzProvider](ctx,
 			component.WithId(fmt.Sprintf("sfuzz-%d", i)),
 			component.WithProvider(&fuzzProvider{id: i}))
@@ -185,7 +182,7 @@ func TestFuzzLifecycleSerial(t *testing.T) {
 		components[i].AddDependency(components[i-1])
 	}
 
-	for i := 0; i < numOps; i++ {
+	for i := range numOps {
 		target := rng.Intn(numComponents)
 		activate := rng.Float64() < 0.6
 		c := components[target]
@@ -237,7 +234,7 @@ func TestFuzzAddRemoveConcurrent(t *testing.T) {
 	ctx := t.Context()
 
 	components := make([]component.Component[fuzzProvider], numComponents)
-	for i := 0; i < numComponents; i++ {
+	for i := range numComponents {
 		c, err := component.NewComponent[fuzzProvider](ctx,
 			component.WithId(fmt.Sprintf("ar-%d", i)),
 			component.WithProvider(&fuzzProvider{id: i}))
@@ -263,11 +260,8 @@ func TestFuzzAddRemoveConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	opsPerWorker := numOps / numWorkers
-	for w := 0; w < numWorkers; w++ {
-		w := w
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for w := range numWorkers {
+		wg.Go(func() {
 			start := w * opsPerWorker
 			end := start + opsPerWorker
 			if w == numWorkers-1 {
@@ -301,7 +295,7 @@ func TestFuzzAddRemoveConcurrent(t *testing.T) {
 					}
 				}()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

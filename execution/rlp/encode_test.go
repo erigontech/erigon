@@ -25,16 +25,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"runtime"
 	"sync"
 	"testing"
+
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/race"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 )
 
 type testEncoder struct {
@@ -420,49 +421,22 @@ func TestEncodeToReaderPiecewise(t *testing.T) {
 func TestEncodeToReaderReturnToPool(t *testing.T) {
 	buf := make([]byte, 50)
 	wg := new(sync.WaitGroup)
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			for i := 0; i < 1000; i++ {
+	for range 5 {
+		wg.Go(func() {
+			for range 1000 {
 				_, r, _ := EncodeToReader("foo")
-				io.ReadAll(r)
-				r.Read(buf)
-				r.Read(buf)
-				r.Read(buf)
-				r.Read(buf)
+				_, _ = io.ReadAll(r)
+				_, _ = r.Read(buf)
+				_, _ = r.Read(buf)
+				_, _ = r.Read(buf)
+				_, _ = r.Read(buf)
 			}
-			wg.Done()
-		}()
+		})
 	}
 	wg.Wait()
 }
 
 var sink any
-
-func BenchmarkPutint(b *testing.B) {
-	buf := make([]byte, 8)
-	for b.Loop() {
-		putint(buf, 0x12345678)
-		sink = buf
-	}
-}
-
-func BenchmarkEncodeUint256Ints(b *testing.B) {
-	ints := make([]*uint256.Int, 200)
-	for i := range ints {
-		ints[i] = new(uint256.Int).Lsh(uint256.NewInt(1), uint(i))
-	}
-	out := bytes.NewBuffer(make([]byte, 0, 4096))
-
-	b.ReportAllocs()
-
-	for b.Loop() {
-		out.Reset()
-		if err := Encode(out, ints); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
 
 func TestStringLen56(t *testing.T) {
 	str := hexutil.MustDecodeHex("7907ca011864321def1e92a3021868f397516ce37c959f25f8dddd3161d7b8301152b35f135c814fae9f487206471b6b0d713cd51a2d3598")
@@ -498,7 +472,7 @@ func TestEncodeUint256Buffer(t *testing.T) {
 
 	var writer3 bytes.Buffer
 	var buf31 [31]byte
-	require.Panics(t, func() { EncodeUint256(i, &writer3, buf31[:]) })
+	require.Panics(t, func() { _ = EncodeUint256(i, &writer3, buf31[:]) })
 }
 
 func TestEncodeUint256Random(t *testing.T) {
@@ -522,34 +496,149 @@ func TestEncodeUint256Random(t *testing.T) {
 	}
 }
 
-func BenchmarkEncodeConcurrentInterface(b *testing.B) {
-	type struct1 struct {
-		A string
-		B *uint256.Int
-		C [20]byte
-	}
-	value := []any{
-		uint(999),
-		&struct1{A: "hello", B: uint256.NewInt(0xFFFFFFFF)},
-		[10]byte{1, 2, 3, 4, 5, 6},
-		[]string{"yeah", "yeah", "yeah"},
-	}
+type (
+	ptrTestAddr [20]byte
+	ptrTestHash [32]byte
+)
 
-	var wg sync.WaitGroup
-	for cpu := 0; cpu < runtime.NumCPU(); cpu++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+type ptrTestInner struct {
+	Address ptrTestAddr
+	Topics  []ptrTestHash
+	Data    []byte
+}
 
-			var buffer bytes.Buffer
-			for i := 0; i < b.N; i++ {
-				buffer.Reset()
-				err := Encode(&buffer, value)
-				if err != nil {
-					panic(err)
-				}
+type ptrTestOuter struct {
+	Head    ptrTestHash
+	Num     uint64
+	Bloom   [256]byte
+	Inners  []*ptrTestInner
+	Payload []byte
+}
+
+// TestEncodeValueAndPointerAgree pins the invariant callers rely on when switching
+// rlp.Encode(w, x) to rlp.Encode(w, &x): a pointer encodes exactly as the value it
+// points at. Both forms box into `any`; the pointer form is cheaper because boxing a
+// pointer copies nothing and leaves the pointee addressable, sparing the encoder a
+// reflect.New copy of each [N]byte it holds.
+func TestEncodeValueAndPointerAgree(t *testing.T) {
+	inner := &ptrTestInner{
+		Address: ptrTestAddr{1, 2, 3},
+		Topics:  []ptrTestHash{{4}, {5}},
+		Data:    []byte("payload"),
+	}
+	cases := []any{
+		ptrTestHash{9, 9, 9},
+		ptrTestAddr{},
+		*inner,
+		ptrTestInner{},
+		ptrTestOuter{Head: ptrTestHash{7}, Num: 42, Inners: []*ptrTestInner{inner, {}}, Payload: make([]byte, 100)},
+		ptrTestOuter{},
+		[17]uint64{1, 2, 3},
+	}
+	for i, c := range cases {
+		var byValue, byPointer bytes.Buffer
+		if err := Encode(&byValue, c); err != nil {
+			t.Fatalf("case %d: encode value: %v", i, err)
+		}
+		// pointerTo yields a pointer to a copy, which must still encode identically.
+		pv := pointerTo(c)
+		if err := Encode(&byPointer, pv); err != nil {
+			t.Fatalf("case %d: encode pointer: %v", i, err)
+		}
+		if !bytes.Equal(byValue.Bytes(), byPointer.Bytes()) {
+			t.Errorf("case %d (%T): value=%x pointer=%x", i, c, byValue.Bytes(), byPointer.Bytes())
+		}
+	}
+}
+
+// TestEncodePointerAvoidsByteArrayCopies documents why the pointer form is preferred:
+// fields of a value boxed into an interface are not addressable, so every [N]byte
+// field costs a reflect.New copy that the pointer form avoids entirely.
+func TestEncodePointerAvoidsByteArrayCopies(t *testing.T) {
+	v := ptrTestOuter{Inners: []*ptrTestInner{{}}, Payload: make([]byte, 64)}
+
+	allocsPerEncode := func(val any) float64 {
+		return testing.AllocsPerRun(200, func() {
+			if err := Encode(io.Discard, val); err != nil {
+				t.Fatal(err)
 			}
-		}()
+		})
 	}
-	wg.Wait()
+	byValue := allocsPerEncode(v)
+	byPointer := allocsPerEncode(&v)
+	t.Logf("allocs/op: byValue=%v byPointer=%v", byValue, byPointer)
+
+	if byValue <= byPointer {
+		t.Errorf("expected the value form to allocate more than the pointer form, got value=%v pointer=%v", byValue, byPointer)
+	}
+	// encBuffer is pooled, and sync.Pool drops a random quarter of the values put
+	// back under the race detector, so the pooled path is not reliably zero there.
+	// The relative check above survives: its gap is the two reflect.New copies,
+	// which the pool does not touch.
+	//goland:noinspection GoBoolExpressions
+	if !race.Enabled && byPointer != 0 {
+		t.Errorf("pointer form should not allocate, got %v allocs/op", byPointer)
+	}
+}
+
+func pointerTo(v any) any {
+	switch t := v.(type) {
+	case ptrTestHash:
+		return &t
+	case ptrTestAddr:
+		return &t
+	case ptrTestInner:
+		return &t
+	case ptrTestOuter:
+		return &t
+	case [17]uint64:
+		return &t
+	}
+	panic("unhandled case")
+}
+
+// The JSON wrapper types in common/hexutil are named versions of plain Go types, and
+// several consensus structs carry them. RLP must see through the wrapper, or the same
+// value would be stored differently depending on which type a field happens to use.
+func TestHexutilWrappersEncodeLikeTheirBaseType(t *testing.T) {
+	for _, v := range []uint64{0, 1, 127, 128, 255, 256, 1 << 32, ^uint64(0)} {
+		wrapped, err := EncodeToBytes(hexutil.Uint64(v))
+		require.NoError(t, err)
+		plain, err := EncodeToBytes(v)
+		require.NoError(t, err)
+		require.Equal(t, plain, wrapped, "hexutil.Uint64(%d)", v)
+
+		wrapped, err = EncodeToBytes(hexutil.Uint(uint(v)))
+		require.NoError(t, err)
+		plain, err = EncodeToBytes(uint(v))
+		require.NoError(t, err)
+		require.Equal(t, plain, wrapped, "hexutil.Uint(%d)", v)
+	}
+
+	for _, b := range [][]byte{nil, {}, {0}, {1, 2, 3}, make([]byte, 300)} {
+		wrapped, err := EncodeToBytes(hexutil.Bytes(b))
+		require.NoError(t, err)
+		plain, err := EncodeToBytes(b)
+		require.NoError(t, err)
+		require.Equal(t, plain, wrapped, "hexutil.Bytes(%x)", b)
+	}
+}
+
+// A named uint256.Int is an array of four words, so the slice writer would encode it as a
+// list of limbs. RLP refuses it instead of storing a value no decoder expects.
+func TestNamedUint256IsRefused(t *testing.T) {
+	n := uint256.NewInt(0x1234)
+	plain, err := EncodeToBytes(n)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x82, 0x12, 0x34}, plain)
+
+	_, err = EncodeToBytes((*hexutil.U256)(n))
+	require.ErrorContains(t, err, "would encode its four words as a list")
+	_, err = EncodeToBytes(hexutil.U256(*n))
+	require.ErrorContains(t, err, "would encode its four words as a list")
+	_, err = EncodeToBytes(struct{ N *hexutil.U256 }{(*hexutil.U256)(n)})
+	require.ErrorContains(t, err, "would encode its four words as a list")
+
+	var into hexutil.U256
+	require.ErrorContains(t, DecodeBytes(plain, &into), "would encode its four words as a list")
 }

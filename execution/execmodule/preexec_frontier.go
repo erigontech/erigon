@@ -383,7 +383,7 @@ func (f *preExecFrontier) RetireBelow(ctx context.Context, tx kv.TemporalTx, upT
 	for _, g := range f.gens {
 		if g.number < upTo {
 			if g.sd != nil {
-				_ = g.sd.FlushPendingUpdates(ctx, tx)
+				_ = g.sd.FlushPendingUpdates(tx)
 				f.closeGen(g)
 			}
 			continue

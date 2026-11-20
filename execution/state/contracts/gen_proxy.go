@@ -156,7 +156,7 @@ func bindProxy(address common.Address, caller bind.ContractCaller, transactor bi
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Proxy *ProxyRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Proxy *ProxyRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Proxy.Contract.ProxyCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -167,7 +167,7 @@ func (_Proxy *ProxyRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, er
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Proxy *ProxyRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Proxy *ProxyRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Proxy.Contract.ProxyTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -175,7 +175,7 @@ func (_Proxy *ProxyRaw) Transact(opts *bind.TransactOpts, method string, params 
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Proxy *ProxyCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Proxy *ProxyCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Proxy.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -186,7 +186,7 @@ func (_Proxy *ProxyTransactorRaw) Transfer(opts *bind.TransactOpts) (types.Trans
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Proxy *ProxyTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Proxy *ProxyTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Proxy.Contract.contract.Transact(opts, method, params...)
 }
 

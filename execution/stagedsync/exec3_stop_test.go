@@ -25,7 +25,6 @@ func TestExecStatusListTruncate(t *testing.T) {
 		m.markComplete(i)
 	}
 	m.takeNextPending() // 3 is in progress
-	m.pushDeferred(4)
 
 	m.truncate(3)
 
@@ -33,7 +32,6 @@ func TestExecStatusListTruncate(t *testing.T) {
 	require.Equal(t, 2, m.maxComplete())
 	require.Equal(t, -1, m.minPending(), "a task above the cut was left pending")
 	require.Equal(t, 0, m.inProgressCount(), "a task above the cut was left in progress")
-	require.Empty(t, m.deferred, "a task above the cut was left deferred")
 	for blocker, deps := range m.dependency {
 		require.Less(t, blocker, 3, "a dependency survives on a task that was cut away")
 		for dep := range deps {

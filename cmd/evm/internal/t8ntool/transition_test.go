@@ -20,6 +20,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 // A signed transaction supplied via JSON (no secretKey) must keep its v, r, s
@@ -45,4 +50,32 @@ func TestGetTransactionPreservesSignature(t *testing.T) {
 	require.EqualValues(t, 0x1b, v.Uint64(), "v must be preserved")
 	require.False(t, r.IsZero(), "r must be preserved")
 	require.False(t, s.IsZero(), "s must be preserved")
+}
+
+// A transaction type t8n cannot build must be rejected, not decoded into a nil transaction.
+func TestGetTransactionRejectsUnsupportedType(t *testing.T) {
+	t.Parallel()
+	var twk txWithKey
+	err := twk.UnmarshalJSON([]byte(`{"type":"0x3","input":"0x","gas":"0x5208","nonce":"0x0","value":"0x0"}`))
+	require.ErrorContains(t, err, "unsupported transaction type")
+}
+
+// TestT8nSharedDomainsUsesParallelTrie pins t8n on the same commitment trie the
+// rest of the binary uses. The variant is only upgraded once a DB is wired in, so
+// a construction that skips that step computes the state root sequentially.
+func TestT8nSharedDomainsUsesParallelTrie(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	// No t.Parallel: mutates process-global statecfg flags.
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := newT8nSharedDomains(t.Context(), db, tx)
+	require.NoError(t, err)
+	defer sd.Close()
+
+	require.Equal(t, commitment.VariantParallelHexPatricia, sd.GetCommitmentCtx().Trie().Variant(),
+		"t8n computes the state root on the sequential trie while the flag selects the parallel one")
 }

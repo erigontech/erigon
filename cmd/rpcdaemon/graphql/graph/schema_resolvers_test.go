@@ -17,16 +17,25 @@
 package graph
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/99designs/gqlgen/graphql/handler"
+	"github.com/99designs/gqlgen/graphql/handler/transport"
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	ethapi "github.com/erigontech/erigon/rpc/ethapi"
@@ -164,19 +173,19 @@ func TestDecodeOptionalAddress(t *testing.T) {
 }
 
 func TestDecodeOptionalBig(t *testing.T) {
-	b, err := decodeOptionalBig(nil, "gasPrice")
+	b, err := decodeOptionalU256(nil, "gasPrice")
 	if err != nil || b != nil {
 		t.Fatal("expected nil, nil for nil input")
 	}
 
 	invalid := "not-hex"
-	_, err = decodeOptionalBig(&invalid, "gasPrice")
+	_, err = decodeOptionalU256(&invalid, "gasPrice")
 	if err == nil {
 		t.Fatal("expected error for invalid hex")
 	}
 
 	valid := "0x1234"
-	b, err = decodeOptionalBig(&valid, "gasPrice")
+	b, err = decodeOptionalU256(&valid, "gasPrice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,8 +205,8 @@ func TestRpcLogsToModel(t *testing.T) {
 	txHash := common.HexToHash("0x" + strings.Repeat("cc", 32))
 	topic := common.HexToHash("0x" + strings.Repeat("dd", 32))
 
-	logs := types.RPCLogs{
-		{Log: types.Log{
+	logs := types.Logs{
+		{
 			Address:     addr,
 			Topics:      []common.Hash{topic},
 			Data:        hexutil.Bytes{0x01, 0x02},
@@ -205,7 +214,7 @@ func TestRpcLogsToModel(t *testing.T) {
 			BlockHash:   blockHash,
 			TxHash:      txHash,
 			Index:       3,
-		}},
+		},
 	}
 	result = rpcLogsToModel(logs)
 	if len(result) != 1 {
@@ -235,7 +244,7 @@ func TestRpcLogsToModel(t *testing.T) {
 // mockGraphQLAPI is a minimal stub of jsonrpc.GraphQLAPI for resolver-level tests.
 type mockGraphQLAPI struct {
 	getLogsCrit   filters.FilterCriteria
-	getLogsResult types.RPCLogs
+	getLogsResult types.Logs
 	getLogsErr    error
 
 	callBlockNum rpc.BlockNumber
@@ -251,52 +260,84 @@ type mockGraphQLAPI struct {
 	gasPriceResult string
 	gasPriceErr    error
 
+	maxPriorityFeeResult string
+	maxPriorityFeeErr    error
+
 	sendRawTx     hexutil.Bytes
 	sendRawResult common.Hash
 	sendRawErr    error
 
 	pendingTxns []types.Transaction
 	pendingErr  error
+
+	accountInfoAddr     common.Address
+	accountInfoBlockNum rpc.BlockNumber
+	accountBalance      string
+	accountNonce        uint64
+	accountCode         string
+	accountInfoErr      error
+
+	blockDetails map[string]any
+	withTxs      *bool
+	txBlockNum   uint64
+	txFound      bool
 }
 
-func (m *mockGraphQLAPI) GetBlockDetails(_ context.Context, _ rpc.BlockNumber) (map[string]any, error) {
-	return nil, nil
+func (m *mockGraphQLAPI) GetBlockDetails(_ context.Context, _ rpc.BlockNumber, withTxs *bool) (map[string]any, error) {
+	m.withTxs = withTxs
+	return m.blockDetails, nil
 }
-func (m *mockGraphQLAPI) GetBlockDetailsByHash(_ context.Context, _ common.Hash) (map[string]any, error) {
-	return nil, nil
+
+func (m *mockGraphQLAPI) GetBlockDetailsByHash(_ context.Context, _ common.Hash, withTxs *bool) (map[string]any, error) {
+	m.withTxs = withTxs
+	return m.blockDetails, nil
 }
 func (m *mockGraphQLAPI) GetLatestBlockNumber(_ context.Context) (uint64, error) { return 0, nil }
 func (m *mockGraphQLAPI) GetChainID(_ context.Context) (*uint256.Int, error)     { return nil, nil }
-func (m *mockGraphQLAPI) GetAccountInfo(_ context.Context, _ common.Address, _ rpc.BlockNumber) (string, uint64, string, error) {
-	return "", 0, "", nil
+func (m *mockGraphQLAPI) GetAccountInfo(_ context.Context, addr common.Address, blockNum rpc.BlockNumber) (string, uint64, string, error) {
+	m.accountInfoAddr = addr
+	m.accountInfoBlockNum = blockNum
+	return m.accountBalance, m.accountNonce, m.accountCode, m.accountInfoErr
 }
+
 func (m *mockGraphQLAPI) GetAccountStorage(_ context.Context, _ common.Address, _ string, _ rpc.BlockNumber) (string, error) {
 	return "", nil
 }
+
 func (m *mockGraphQLAPI) GetBlockNumberForTx(_ context.Context, _ common.Hash) (uint64, bool, error) {
-	return 0, false, nil
+	return m.txBlockNum, m.txFound, nil
 }
+
 func (m *mockGraphQLAPI) SendRawTransaction(_ context.Context, data hexutil.Bytes) (common.Hash, error) {
 	m.sendRawTx = data
 	return m.sendRawResult, m.sendRawErr
 }
+
 func (m *mockGraphQLAPI) Call(_ context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*jsonrpc.GraphQLCallResult, error) {
 	m.callBlockNum = blockNumber
 	m.callArgs = args
 	return m.callResult, m.callErr
 }
+
 func (m *mockGraphQLAPI) EstimateGas(_ context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (uint64, error) {
 	m.estimateGasBlockNum = blockNumber
 	m.estimateGasArgs = args
 	return m.estimateGasResult, m.estimateGasErr
 }
+
 func (m *mockGraphQLAPI) GasPrice(_ context.Context) (string, error) {
 	return m.gasPriceResult, m.gasPriceErr
 }
-func (m *mockGraphQLAPI) GetLogs(_ context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
+
+func (m *mockGraphQLAPI) MaxPriorityFeePerGas(_ context.Context) (string, error) {
+	return m.maxPriorityFeeResult, m.maxPriorityFeeErr
+}
+
+func (m *mockGraphQLAPI) GetLogs(_ context.Context, crit filters.FilterCriteria) (types.Logs, error) {
 	m.getLogsCrit = crit
 	return m.getLogsResult, m.getLogsErr
 }
+
 func (m *mockGraphQLAPI) GetPendingTransactions(_ context.Context) ([]types.Transaction, error) {
 	return m.pendingTxns, m.pendingErr
 }
@@ -308,13 +349,13 @@ func TestBlockResolver_Logs(t *testing.T) {
 
 	t.Run("success — criteria and result", func(t *testing.T) {
 		mock := &mockGraphQLAPI{
-			getLogsResult: types.RPCLogs{
-				{Log: types.Log{
+			getLogsResult: types.Logs{
+				{
 					Address:     common.HexToAddress(addr),
 					BlockNumber: 10,
 					BlockHash:   common.HexToHash(blockHash),
 					TxHash:      common.HexToHash("0x" + strings.Repeat("cc", 32)),
-				}},
+				},
 			},
 		}
 		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
@@ -604,6 +645,17 @@ func TestQueryResolver_GasPrice(t *testing.T) {
 	})
 }
 
+func TestQueryResolver_MaxPriorityFeePerGas(t *testing.T) {
+	r := &queryResolver{&Resolver{GraphQLAPI: &mockGraphQLAPI{maxPriorityFeeResult: "0x3b9aca00"}}}
+	got, err := r.MaxPriorityFeePerGas(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "0x3b9aca00", got)
+
+	r = &queryResolver{&Resolver{GraphQLAPI: &mockGraphQLAPI{maxPriorityFeeErr: errors.New("node not ready")}}}
+	_, err = r.MaxPriorityFeePerGas(context.Background())
+	require.Error(t, err)
+}
+
 func TestAccountResolver_Storage(t *testing.T) {
 	validAddr := "0x1234567890123456789012345678901234567890"
 	validSlot := "0x" + strings.Repeat("ab", 32)
@@ -760,4 +812,392 @@ func TestPendingResolver_EstimateGas_ForwardsPendingBlockNumber(t *testing.T) {
 	if mock.estimateGasBlockNum != rpc.PendingBlockNumber {
 		t.Errorf("expected PendingBlockNumber, got %d", mock.estimateGasBlockNum)
 	}
+}
+
+func TestBlockResolver_Miner(t *testing.T) {
+	minerAddr := "0x1234567890123456789012345678901234567890"
+	obj := &model.Block{Number: 10, Miner: &model.Account{Address: minerAddr, BlockNum: 10}}
+
+	t.Run("populates account state at the block", func(t *testing.T) {
+		mock := &mockGraphQLAPI{accountBalance: "0x64", accountNonce: 7, accountCode: "0xabcd"}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.Miner(context.Background(), obj, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Balance != "0x64" || got.TransactionCount != 7 || got.Code != "0xabcd" {
+			t.Errorf("miner account not populated: %+v", got)
+		}
+		if mock.accountInfoBlockNum != rpc.BlockNumber(10) {
+			t.Errorf("expected block 10, got %d", mock.accountInfoBlockNum)
+		}
+		if mock.accountInfoAddr != common.HexToAddress(minerAddr) {
+			t.Errorf("wrong address queried: %s", mock.accountInfoAddr)
+		}
+	})
+
+	t.Run("honors the block argument", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		override := uint64(5)
+		if _, err := r.Miner(context.Background(), obj, &override); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mock.accountInfoBlockNum != rpc.BlockNumber(5) {
+			t.Errorf("expected override block 5, got %d", mock.accountInfoBlockNum)
+		}
+	})
+
+	t.Run("nil miner (ommer stub) returns an error without a state read", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.Miner(context.Background(), &model.Block{Number: 10}, nil)
+		if err == nil || got != nil {
+			t.Fatalf("expected (nil, error), got (%v, %v)", got, err)
+		}
+	})
+
+	t.Run("miner stub with empty address returns an error without a state read", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		obj := &model.Block{Number: 10, Miner: &model.Account{BlockNum: 10}}
+		got, err := r.Miner(context.Background(), obj, nil)
+		if err == nil || got != nil {
+			t.Fatalf("expected (nil, error), got (%v, %v)", got, err)
+		}
+	})
+
+	t.Run("GetAccountInfo error propagates", func(t *testing.T) {
+		mock := &mockGraphQLAPI{accountInfoErr: errors.New("state pruned")}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		if _, err := r.Miner(context.Background(), obj, nil); err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestTransactionResolver_CreatedContract(t *testing.T) {
+	contractAddr := "0x1234567890123456789012345678901234567890"
+
+	t.Run("populates contract account at the tx block", func(t *testing.T) {
+		mock := &mockGraphQLAPI{accountBalance: "0x1", accountNonce: 1, accountCode: "0xdead"}
+		r := &transactionResolver{&Resolver{GraphQLAPI: mock}}
+		obj := &model.Transaction{
+			Block:           &model.Block{Number: 42},
+			CreatedContract: &model.Account{Address: contractAddr, BlockNum: 42},
+		}
+		got, err := r.CreatedContract(context.Background(), obj, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Balance != "0x1" || got.TransactionCount != 1 || got.Code != "0xdead" {
+			t.Errorf("createdContract account not populated: %+v", got)
+		}
+		if mock.accountInfoBlockNum != rpc.BlockNumber(42) {
+			t.Errorf("expected block 42, got %d", mock.accountInfoBlockNum)
+		}
+	})
+
+	t.Run("nil for non-contract-creating tx", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &transactionResolver{&Resolver{GraphQLAPI: mock}}
+		obj := &model.Transaction{Block: &model.Block{Number: 42}}
+		got, err := r.CreatedContract(context.Background(), obj, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != nil {
+			t.Errorf("expected nil createdContract, got %+v", got)
+		}
+	})
+
+	t.Run("honors the block argument", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &transactionResolver{&Resolver{GraphQLAPI: mock}}
+		obj := &model.Transaction{
+			Block:           &model.Block{Number: 42},
+			CreatedContract: &model.Account{Address: contractAddr, BlockNum: 42},
+		}
+		override := uint64(7)
+		if _, err := r.CreatedContract(context.Background(), obj, &override); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mock.accountInfoBlockNum != rpc.BlockNumber(7) {
+			t.Errorf("expected override block 7, got %d", mock.accountInfoBlockNum)
+		}
+	})
+}
+
+func TestLogResolver_Account(t *testing.T) {
+	logAddr := "0x1234567890123456789012345678901234567890"
+	obj := &model.Log{Account: &model.Account{Address: logAddr, BlockNum: 10}}
+
+	t.Run("populates emitting account at the log's block", func(t *testing.T) {
+		mock := &mockGraphQLAPI{accountBalance: "0x2", accountNonce: 3, accountCode: "0xbeef"}
+		r := &logResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.Account(context.Background(), obj, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Balance != "0x2" || got.TransactionCount != 3 || got.Code != "0xbeef" {
+			t.Errorf("log account not populated: %+v", got)
+		}
+		if mock.accountInfoBlockNum != rpc.BlockNumber(10) {
+			t.Errorf("expected block 10, got %d", mock.accountInfoBlockNum)
+		}
+	})
+
+	t.Run("honors the block argument", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &logResolver{&Resolver{GraphQLAPI: mock}}
+		override := uint64(99)
+		if _, err := r.Account(context.Background(), obj, &override); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mock.accountInfoBlockNum != rpc.BlockNumber(99) {
+			t.Errorf("expected override block 99, got %d", mock.accountInfoBlockNum)
+		}
+	})
+
+	t.Run("nil account returns an error", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &logResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.Account(context.Background(), &model.Log{}, nil)
+		if err == nil || got != nil {
+			t.Fatalf("expected (nil, error), got (%v, %v)", got, err)
+		}
+	})
+}
+
+// Transactions are built only when the query selects them, so every path that reaches them must still return them.
+func TestQueryResolver_BlockTransactionsBySelection(t *testing.T) {
+	t.Parallel()
+
+	to := common.HexToAddress("0xAbCdEf0123456789aBcDeF0123456789AbCdEf04")
+	header := &types.Header{Number: *uint256.NewInt(7), BaseFee: uint256.NewInt(50)}
+	txn := &types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, GasLimit: 21000, To: &to, Value: *uint256.NewInt(5)}, GasPrice: *uint256.NewInt(60)}
+	block := types.NewBlockFromStorage(header.Hash(), header, []types.Transaction{txn}, nil, nil, nil)
+	receipt := &types.Receipt{Status: types.ReceiptStatusSuccessful, TxHash: txn.Hash(), GasUsed: 21000, BlockNumber: uint256.NewInt(7)}
+	mock := &mockGraphQLAPI{
+		blockDetails: map[string]any{
+			"block":    ethapi.RPCMarshalBlock(block, false, false),
+			"receipts": []*jsonrpc.GraphQLReceipt{jsonrpc.NewGraphQLReceipt(receipt, txn, chain.TestChainOsakaConfig, header)},
+		},
+		txBlockNum: 7,
+		txFound:    true,
+	}
+	srv := handler.New(NewExecutableSchema(Config{Resolvers: &Resolver{GraphQLAPI: mock}}))
+	srv.AddTransport(transport.POST{})
+
+	query := func(q string) string {
+		body, err := json.Marshal(map[string]string{"query": q})
+		require.NoError(t, err)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+
+	require.JSONEq(t, `{"data":{"block":{"number":"0x7"}}}`, query(`{block(number:7){number}}`))
+	require.Equal(t, ptr(false), mock.withTxs, "a number-only query must not ask for the transactions")
+	hash := txn.Hash().Hex()
+	for _, q := range []string{
+		`{block(number:7){transactions{hash}}}`,
+		`{block(number:7){transactionAt(index:0){hash}}}`,
+		`{block(number:7){...F}} fragment F on Block{transactions{hash}}`,
+		`{blocks(from:7,to:7){transactions{hash}}}`,
+		`{transaction(hash:"` + hash + `"){hash}}`,
+	} {
+		require.Contains(t, query(q), hash, q)
+		require.Equal(t, ptr(true), mock.withTxs, q)
+	}
+}
+
+type countingBlocksAPI struct {
+	mockGraphQLAPI
+	head  uint64
+	calls int
+}
+
+func (m *countingBlocksAPI) GetBlockDetails(_ context.Context, number rpc.BlockNumber, _ *bool) (map[string]any, error) {
+	m.calls++
+	if number < 0 || uint64(number) > m.head {
+		return nil, nil
+	}
+	header := &types.Header{Number: *uint256.NewInt(uint64(number))}
+	block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, nil, nil)
+	return map[string]any{"block": ethapi.RPCMarshalBlock(block, false, false)}, nil
+}
+
+func TestQueryResolver_Blocks_RangeCapCannotWrap(t *testing.T) {
+	t.Parallel()
+
+	mock := &countingBlocksAPI{head: 100}
+	srv := handler.New(NewExecutableSchema(Config{Resolvers: &Resolver{GraphQLAPI: mock}}))
+	srv.AddTransport(transport.POST{})
+	body, err := json.Marshal(map[string]string{"query": `{blocks(from:0,to:"0xffffffffffffffff"){number}}`})
+	require.NoError(t, err)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	require.Contains(t, rec.Body.String(), "Invalid params")
+	require.Zero(t, mock.calls, "a range wider than the cap must be rejected before any block is read")
+}
+
+type chainBlocksAPI struct {
+	mockGraphQLAPI
+	byNumber map[uint64]*types.Block
+}
+
+func (m *chainBlocksAPI) details(b *types.Block) map[string]any {
+	if b == nil {
+		return nil
+	}
+	return map[string]any{"block": ethapi.RPCMarshalBlock(b, false, false), "receipts": []*jsonrpc.GraphQLReceipt{}}
+}
+
+func (m *chainBlocksAPI) GetBlockDetails(_ context.Context, number rpc.BlockNumber, _ *bool) (map[string]any, error) {
+	return m.details(m.byNumber[uint64(number)]), nil
+}
+
+func (m *chainBlocksAPI) GetBlockDetailsByHash(_ context.Context, hash common.Hash, _ *bool) (map[string]any, error) {
+	for _, b := range m.byNumber {
+		if b.Hash() == hash {
+			return m.details(b), nil
+		}
+	}
+	return nil, nil
+}
+
+func TestBlockResolver_ParentIsTheParentBlock(t *testing.T) {
+	t.Parallel()
+
+	genesis := types.NewBlockFromStorage(common.Hash{}, &types.Header{GasLimit: 5000}, nil, nil, nil, nil)
+	genesisHash := genesis.Header().Hash()
+	genesis = types.NewBlockFromStorage(genesisHash, genesis.Header(), nil, nil, nil, nil)
+	childHeader := &types.Header{Number: *uint256.NewInt(1), ParentHash: genesisHash, GasLimit: 6000}
+	child := types.NewBlockFromStorage(childHeader.Hash(), childHeader, nil, nil, nil, nil)
+	mock := &chainBlocksAPI{byNumber: map[uint64]*types.Block{0: genesis, 1: child}}
+
+	srv := handler.New(NewExecutableSchema(Config{Resolvers: &Resolver{GraphQLAPI: mock}}))
+	srv.AddTransport(transport.POST{})
+	query := func(q string) string {
+		body, err := json.Marshal(map[string]string{"query": q})
+		require.NoError(t, err)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+
+	require.JSONEq(t,
+		`{"data":{"block":{"parent":{"number":"0x0","hash":"`+genesisHash.Hex()+`","gasLimit":"0x1388"}}}}`,
+		query(`{block(number:1){parent{number hash gasLimit}}}`))
+	require.JSONEq(t, `{"data":{"block":{"parent":null}}}`, query(`{block(number:0){parent{hash}}}`))
+}
+
+func TestLogResolver_TransactionIsTheEmittingTransaction(t *testing.T) {
+	t.Parallel()
+
+	to := common.HexToAddress("0xAbCdEf0123456789aBcDeF0123456789AbCdEf04")
+	emitter := common.HexToAddress("0x00000000000000000000000000000000000000e1")
+	header := &types.Header{Number: *uint256.NewInt(7), BaseFee: uint256.NewInt(50)}
+	txn := &types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, GasLimit: 50000, To: &to, Value: *uint256.NewInt(5)}, GasPrice: *uint256.NewInt(60)}
+	block := types.NewBlockFromStorage(header.Hash(), header, []types.Transaction{txn}, nil, nil, nil)
+	log := &types.Log{Address: emitter, BlockNumber: 7, BlockHash: block.Hash(), TxHash: txn.Hash()}
+	receipt := &types.Receipt{Status: types.ReceiptStatusSuccessful, TxHash: txn.Hash(), GasUsed: 30000, CumulativeGasUsed: 30000, BlockNumber: uint256.NewInt(7), Logs: types.Logs{log}}
+	mock := &mockGraphQLAPI{
+		blockDetails: map[string]any{
+			"block":    ethapi.RPCMarshalBlock(block, false, false),
+			"receipts": []*jsonrpc.GraphQLReceipt{jsonrpc.NewGraphQLReceipt(receipt, txn, chain.TestChainOsakaConfig, header)},
+		},
+		getLogsResult: types.Logs{log},
+		txBlockNum:    7,
+		txFound:       true,
+	}
+	srv := handler.New(NewExecutableSchema(Config{Resolvers: &Resolver{GraphQLAPI: mock}}))
+	srv.AddTransport(transport.POST{})
+	query := func(q string) string {
+		body, err := json.Marshal(map[string]string{"query": q})
+		require.NoError(t, err)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+
+	tx := `{"hash":"` + txn.Hash().Hex() + `","gasUsed":"0x7530","to":{"address":"` + strings.ToLower(to.Hex()) + `"}}`
+	require.JSONEq(t,
+		`{"data":{"block":{"transactions":[{"logs":[{"transaction":`+tx+`}]}]}}}`,
+		query(`{block(number:7){transactions{logs{transaction{hash gasUsed to{address}}}}}}`))
+	require.JSONEq(t,
+		`{"data":{"logs":[{"transaction":`+tx+`}]}}`,
+		query(`{logs(filter:{}){transaction{hash gasUsed to{address}}}}`))
+	require.JSONEq(t,
+		`{"data":{"block":{"logs":[{"transaction":`+tx+`}]}}}`,
+		query(`{block(number:7){logs(filter:{}){transaction{hash gasUsed to{address}}}}}`))
+}
+
+type countingByHashAPI struct {
+	*mockGraphQLAPI
+	byHash atomic.Int32
+}
+
+func (m *countingByHashAPI) GetBlockDetailsByHash(ctx context.Context, hash common.Hash, withTxs *bool) (map[string]any, error) {
+	m.byHash.Add(1)
+	return m.mockGraphQLAPI.GetBlockDetailsByHash(ctx, hash, withTxs)
+}
+
+func TestLogResolver_TransactionLoadsEachBlockOnce(t *testing.T) {
+	t.Parallel()
+
+	to := common.HexToAddress("0xAbCdEf0123456789aBcDeF0123456789AbCdEf04")
+	header := &types.Header{Number: *uint256.NewInt(7), BaseFee: uint256.NewInt(50)}
+	txns := []types.Transaction{
+		&types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, GasLimit: 50000, To: &to}, GasPrice: *uint256.NewInt(60)},
+		&types.LegacyTx{CommonTx: types.CommonTx{Nonce: 2, GasLimit: 50000, To: &to}, GasPrice: *uint256.NewInt(60)},
+	}
+	block := types.NewBlockFromStorage(header.Hash(), header, txns, nil, nil, nil)
+	var logs types.Logs
+	var receipts []*jsonrpc.GraphQLReceipt
+	for i, txn := range txns {
+		txLogs := types.Logs{
+			{Address: to, BlockNumber: 7, BlockHash: block.Hash(), TxHash: txn.Hash(), TxIndex: hexutil.Uint(i)},
+			{Address: to, BlockNumber: 7, BlockHash: block.Hash(), TxHash: txn.Hash(), TxIndex: hexutil.Uint(i)},
+		}
+		logs = append(logs, txLogs...)
+		gasUsed := uint64(21000 * (i + 1))
+		receipt := &types.Receipt{Status: types.ReceiptStatusSuccessful, TxHash: txn.Hash(), TransactionIndex: uint(i), GasUsed: gasUsed, CumulativeGasUsed: gasUsed, BlockNumber: uint256.NewInt(7), Logs: txLogs}
+		receipts = append(receipts, jsonrpc.NewGraphQLReceipt(receipt, txn, chain.TestChainOsakaConfig, header))
+	}
+	mock := &countingByHashAPI{mockGraphQLAPI: &mockGraphQLAPI{
+		blockDetails:  map[string]any{"block": ethapi.RPCMarshalBlock(block, false, false), "receipts": receipts},
+		getLogsResult: logs,
+	}}
+	srv := handler.New(NewExecutableSchema(Config{Resolvers: &Resolver{GraphQLAPI: mock}}))
+	srv.AddTransport(transport.POST{})
+	query := func(q string) string {
+		body, err := json.Marshal(map[string]string{"query": q})
+		require.NoError(t, err)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+
+	tx0 := `{"hash":"` + txns[0].Hash().Hex() + `","gasUsed":"0x5208"}`
+	tx1 := `{"hash":"` + txns[1].Hash().Hex() + `","gasUsed":"0xa410"}`
+	require.JSONEq(t,
+		`{"data":{"logs":[{"transaction":`+tx0+`},{"transaction":`+tx0+`},{"transaction":`+tx1+`},{"transaction":`+tx1+`}]}}`,
+		query(`{logs(filter:{}){transaction{hash gasUsed}}}`))
+	require.EqualValues(t, 1, mock.byHash.Load())
+
+	mock.byHash.Store(0)
+	require.Contains(t, query(`{logs(filter:{}){transaction{hash}}}`), txns[1].Hash().Hex())
+	require.Zero(t, mock.byHash.Load())
 }

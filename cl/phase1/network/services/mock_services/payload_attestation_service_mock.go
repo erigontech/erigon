@@ -157,3 +157,41 @@ func (c *MockPayloadAttestationServiceProcessMessageCall) DoAndReturn(f func(con
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// ProcessRESTMessage mocks base method.
+func (m *MockPayloadAttestationService) ProcessRESTMessage(arg0 context.Context, arg1 *cltypes.PayloadAttestationMessage, arg2 func() error) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ProcessRESTMessage", arg0, arg1, arg2)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ProcessRESTMessage indicates an expected call of ProcessRESTMessage.
+func (mr *MockPayloadAttestationServiceMockRecorder) ProcessRESTMessage(arg0, arg1, arg2 any) *MockPayloadAttestationServiceProcessRESTMessageCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessRESTMessage", reflect.TypeOf((*MockPayloadAttestationService)(nil).ProcessRESTMessage), arg0, arg1, arg2)
+	return &MockPayloadAttestationServiceProcessRESTMessageCall{Call: call}
+}
+
+// MockPayloadAttestationServiceProcessRESTMessageCall wrap *gomock.Call
+type MockPayloadAttestationServiceProcessRESTMessageCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPayloadAttestationServiceProcessRESTMessageCall) Return(arg0 error) *MockPayloadAttestationServiceProcessRESTMessageCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPayloadAttestationServiceProcessRESTMessageCall) Do(f func(context.Context, *cltypes.PayloadAttestationMessage, func() error) error) *MockPayloadAttestationServiceProcessRESTMessageCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPayloadAttestationServiceProcessRESTMessageCall) DoAndReturn(f func(context.Context, *cltypes.PayloadAttestationMessage, func() error) error) *MockPayloadAttestationServiceProcessRESTMessageCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}

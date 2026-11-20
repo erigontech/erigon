@@ -20,30 +20,30 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-type FilesForMerge struct {
+type visibleFilesForMerge struct {
 	d     [kv.DomainLen][]*FilesItem
 	dHist [kv.DomainLen][]*FilesItem
 	dIdx  [kv.DomainLen][]*FilesItem
 	ii    [kv.StandaloneIdxLen][]*FilesItem
 }
 
-func (sf *FilesForMerge) DomainFiles(name kv.Domain) []*FilesItem {
+func (sf *visibleFilesForMerge) DomainFiles(name kv.Domain) []*FilesItem {
 	return sf.d[name]
 }
 
-func (sf *FilesForMerge) DomainHistoryFiles(name kv.Domain) []*FilesItem {
+func (sf *visibleFilesForMerge) DomainHistoryFiles(name kv.Domain) []*FilesItem {
 	return sf.dHist[name]
 }
 
-func (sf *FilesForMerge) DomainInvertedIndexFiles(name kv.Domain) []*FilesItem {
+func (sf *visibleFilesForMerge) DomainInvertedIndexFiles(name kv.Domain) []*FilesItem {
 	return sf.dIdx[name]
 }
 
-func (sf *FilesForMerge) InvertedIndexFiles(id int) []*FilesItem {
+func (sf *visibleFilesForMerge) InvertedIndexFiles(id int) []*FilesItem {
 	return sf.ii[id]
 }
 
-func (sf *FilesForMerge) Close() {
+func (sf *visibleFilesForMerge) Close() {
 	clist := make([][]*FilesItem, 0, 3*int(kv.DomainLen)+kv.StandaloneIdxLen)
 	for id := range sf.d {
 		clist = append(clist, sf.d[id], sf.dIdx[id], sf.dHist[id])
@@ -57,10 +57,10 @@ func (sf *FilesForMerge) Close() {
 	}
 }
 
-func (at *AggregatorRoTx) FilesInRange(r *Ranges) (*FilesForMerge, error) {
-	sf := &FilesForMerge{}
+func (at *AggregatorRoTx) filesInRange(r *Ranges) (*visibleFilesForMerge, error) {
+	sf := &visibleFilesForMerge{}
 	for id := range at.d {
-		if at.d[id].d.Disable {
+		if !at.d[id].d.Enabled {
 			continue
 		}
 		if !r.domain[id].any() {
@@ -69,7 +69,7 @@ func (at *AggregatorRoTx) FilesInRange(r *Ranges) (*FilesForMerge, error) {
 		sf.d[id], sf.dIdx[id], sf.dHist[id] = at.d[id].staticFilesInRange(r.domain[id])
 	}
 	for id, rng := range r.invertedIndex {
-		if rng == nil || at.iis[id] == nil || at.iis[id].ii.Disable {
+		if rng == nil || at.iis[id] == nil || !at.iis[id].ii.Enabled {
 			continue
 		}
 		if !rng.needMerge {
@@ -96,27 +96,21 @@ type MergeResult struct {
 }
 
 func (mf MergeResult) FilePaths(relative string) (fPaths []string) {
-	for id, d := range mf.d {
-		if d == nil {
-			continue
-		}
-		fPaths = append(fPaths, d.FilePaths(relative)...)
-		if mf.dHist[id] != nil {
-			fPaths = append(fPaths, mf.dHist[id].FilePaths(relative)...)
-		}
-		if mf.dIdx[id] != nil && mf.dIdx[id].frozen {
-			fPaths = append(fPaths, mf.dIdx[id].FilePaths(relative)...)
+	for id := range mf.d {
+		for _, item := range []*FilesItem{mf.d[id], mf.dHist[id], mf.dIdx[id]} {
+			if item != nil {
+				fPaths = append(fPaths, item.FilePaths(relative)...)
+			}
 		}
 	}
-
 	for _, ii := range mf.iis {
-		if ii == nil {
-			continue
+		if ii != nil {
+			fPaths = append(fPaths, ii.FilePaths(relative)...)
 		}
-		fPaths = append(fPaths, ii.FilePaths(relative)...)
 	}
 	return fPaths
 }
+
 func (mf *MergeResult) Close() {
 	if mf == nil {
 		return

@@ -17,13 +17,17 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // TestShouldComputeOnRequest_GenesisFirstBatch is the regression test for
@@ -106,82 +110,164 @@ func TestShouldComputeOnRequest_BlockZeroAfterAdvance(t *testing.T) {
 		"stale block 0 result while we've already computed block 5 — skip")
 }
 
-// TestHandleMessage_TxResultPinsAsOfReaderTxNum is the regression test for
-// the snapshot-loaded lazy-load crash: cc.asOfReader is constructed with
-// txNum=0, and only computeAndPublish / computeAndCheck (which run on
-// blockResult) overwrite that field. But cc.state.ApplyWrites runs on
-// every txResult and triggers ensureAccount / ensureStorage lazy-loads
-// through the same reader. txResults arrive before the first blockResult,
-// so the very first lazy-load fires with asOfReader.txNum=0. On a synced-
-// from-genesis chain that's in-window so seekInFiles handles it
-// gracefully; on a snapshot-loaded chain whose visible window starts
-// well past genesis (e.g. perf-devnet-3 starting at txNum~2.9B) it fails
-// hard with `seekInFiles(invIndex=storage,txNum=0) but data before
-// txNum=N not available` and FCU fails on every block.
-//
-// The fix in handleMessage's *txResult branch pins asOfReader.txNum to
-// the current tx's txNum BEFORE ApplyWrites runs. computeAndPublish /
-// computeAndCheck overwrite the field back to lastTxNum+1 right before
-// ComputeCommitment, so this per-tx setting only affects the lazy-load
-// path and never leaks into the trie fold path.
-//
-// We test the post-condition (asOfReader.txNum == r.txNum after each
-// txResult) — the simplest invariant that catches the absence of the
-// fix. The ordering relative to ApplyWrites (set BEFORE) is enforced by
-// inspection: the test cannot observe a successful lazy-load without
-// pulling in real SharedDomains plumbing, but a missing assignment
-// would leave txNum at its prior value and fail this test directly.
-func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
-	asOfReader := &asOfStateReader{txNum: 0}
-	cs := newCalcState(asOfReader, nil, "test")
-	// Disable lazy-load — without a real SharedDomains the asOfReader's
-	// Read would NPE on r.sd.GetAsOf. The fix's contract is independent
-	// of whether the read succeeds: txNum must be pinned before the
-	// load is even attempted.
-	cs.domainReader = nil
+func TestAsOfStateReaderDoesNotOwnBranchesByDefault(t *testing.T) {
+	require.False(t, (&asOfStateReader{}).OwnsBranches())
+}
+
+// TestHandleBlockRequest_EmptyBALFallsToIncremental pins the empty-BAL gate.
+// A genuine empty BAL (0xc0) decodes to a non-nil empty slice, so a nil check
+// alone selects BAL-driven mode and computes zero changes → parent root →
+// spurious wrong-trie-root. Mode selection must gate on len(bal) > 0.
+func TestHandleBlockRequest_EmptyBALFallsToIncremental(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
 	cc := &commitmentCalculator{
-		asOfReader: asOfReader,
-		state:      cs,
+		pending:       map[uint64]*pendingBlock{},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		// Not the batch's first block and no blockResult seen yet, so the
+		// compute-ahead gate is shut — maybeComputeAhead returns before touching
+		// the (nil) doms/updates, isolating the mode-selection under test.
+		hasFirstBlock:      true,
+		firstBlockNum:      100,
+		hasSeenBlockResult: false,
 	}
 
-	// A txResult must carry at least one write to enter the fix's
-	// `if len(r.writes) > 0` branch — empty writes have no lazy-loads
-	// to seed and therefore intentionally don't update txNum.
-	someWrites := state.VersionedWrites{
-		// Path/value content irrelevant — domainReader is nil so the
-		// lazy-load path skips the real read. We only need len(writes)>0.
-		&state.VersionedWrite{},
+	emptyBAL := make(types.BlockAccessList, 0)
+	require.NotNil(t, emptyBAL, "empty BAL must be non-nil to exercise the gate")
+
+	cc.handleBlockRequest(context.Background(), &blockRequest{blockNum: 5, bal: emptyBAL})
+
+	pb, ok := cc.pending[5]
+	require.True(t, ok, "block request must be recorded")
+	assert.Equal(t, calcModeIncremental, pb.mode,
+		"an empty (non-nil) BAL declares no changes and must fall to "+
+			"incremental mode; computing it ahead would compute the parent root and "+
+			"fail an otherwise-valid block with ErrWrongTrieRoot")
+}
+
+// One block without a BAL ends compute-ahead for the whole batch: the chain stays
+// anchored at the last block that advanced the commitment domain, so every later
+// block reads a stale baseline and stays on the incremental path.
+func TestContiguityGuard_ChainNeverRecovers(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	ctx := context.Background()
+	cc := &commitmentCalculator{
+		signalCtx:     ctx,
+		pending:       map[uint64]*pendingBlock{},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5,
+		perBlockFrom:  1 << 62,
+		// Block 5 computed ahead, block 6 had no BAL and never advanced the domain.
+		hasComputed:        true,
+		lastComputedBlock:  5,
+		hasSeenBlockResult: true,
 	}
 
-	// First txResult: txNum jumps from 0 to 12345.
-	cc.handleMessage(context.Background(), &txResult{
-		txNum:  12345,
-		writes: someWrites,
-	})
-	require.Equal(t, uint64(12345), cc.asOfReader.txNum,
-		"asOfReader.txNum must be pinned to the current tx's txNum before "+
-			"ApplyWrites; otherwise lazy-loads triggered by the writes use "+
-			"the stale value (initially 0) and fail on snapshot-loaded chains.")
+	for n := uint64(7); n <= 12; n++ {
+		cc.lastBlockResultSeen = n - 1 // gate open: only the contiguity guard may reject
+		cc.pending[n] = &pendingBlock{
+			req:  &blockRequest{blockNum: n, bal: make(types.BlockAccessList, 1)},
+			mode: calcModeBALDriven,
+		}
+		cc.maybeComputeAhead(ctx, n)
+		assert.False(t, cc.computedAhead[n], "block %d must not compute ahead across the gap at block 6", n)
+	}
+	assert.Equal(t, uint64(5), cc.lastComputedBlock, "the chain must stay anchored at block 5")
+}
 
-	// Subsequent txResult: txNum advances to 12346. Verifies the field
-	// is updated on every txResult, not just the first one.
-	cc.handleMessage(context.Background(), &txResult{
-		txNum:  12346,
-		writes: someWrites,
-	})
-	require.Equal(t, uint64(12346), cc.asOfReader.txNum,
-		"asOfReader.txNum must advance on every txResult (each tx's "+
-			"first-touch lazy-loads need the matching pre-tx baseline).")
+// TestComputeAheadCap_StopsComputeAhead pins the orphan guard: once the shared
+// executor context carries a stopCause, the calculator must not compute any
+// block ahead past the coalesce block M — otherwise commitment would advance
+// past the state exec stops at. The signal is read from the context cause, not
+// a shared flag.
+func TestComputeAheadCap_StopsComputeAhead(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	dbg.BALDrivenCommitment = true
 
-	// Empty-writes txResult: the fix's len(writes)>0 guard skips the
-	// pin. asOfReader stays where the prior tx left it. This is the
-	// intended behavior — an empty writeset has no lazy-loads to seed,
-	// so updating txNum would be wasted work and could mask real
-	// regressions in producers that drop writes.
-	cc.handleMessage(context.Background(), &txResult{
-		txNum:  12347,
-		writes: nil,
-	})
-	require.Equal(t, uint64(12346), cc.asOfReader.txNum,
-		"empty writes → no lazy-load → don't bump txNum; the prior pin stands.")
+	signalCtx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+
+	cc := &commitmentCalculator{
+		signalCtx: signalCtx,
+		pending: map[uint64]*pendingBlock{
+			5: {req: &blockRequest{blockNum: 5, bal: make(types.BlockAccessList, 1)}, mode: calcModeBALDriven},
+		},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5, // gate open for block 5 without a prior blockResult
+	}
+
+	// Coalesce block M=4: block 5 is past M and must not compute ahead.
+	cancel(&stopCause{block: 4, kind: stopMoreWork})
+	cc.maybeComputeAhead(context.Background(), 5) // must return before computeBlockFromBAL
+
+	assert.False(t, cc.computedAhead[5], "a compute-ahead past the coalesce block M must not run")
+}
+
+func TestComputeAheadCap_StopsOperationalWindDown(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	dbg.BALDrivenCommitment = true
+
+	signalCtx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+
+	cause := errors.New("commitment lazy-load failed")
+	pe := &parallelExecutor{cancelExecLoop: cancel}
+	pe.cancelOperational(4, cause)
+
+	sc, ok := stopCauseOf(signalCtx)
+	require.True(t, ok, "operational cancellation must publish its block boundary")
+	require.Equal(t, uint64(4), sc.block)
+	require.Equal(t, stopOperational, sc.kind)
+	require.Same(t, cause, sc.err)
+
+	cc := &commitmentCalculator{
+		signalCtx: signalCtx,
+		pending: map[uint64]*pendingBlock{
+			5: {req: &blockRequest{blockNum: 5, bal: make(types.BlockAccessList, 1)}, mode: calcModeBALDriven},
+		},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5,
+		perBlockFrom:  100,
+	}
+
+	cc.maybeComputeAhead(context.Background(), 5)
+	assert.False(t, cc.computedAhead[5], "failure wind-down must not compute ahead past its block")
+}
+
+func TestHandOffUpdatesRotatesTwoBuffers(t *testing.T) {
+	first := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), commitment.KeyToHexNibbleHash)
+	second := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), commitment.KeyToHexNibbleHash)
+	cc := &commitmentCalculator{updates: first, spare: second}
+
+	touch := func(u *commitment.Updates, addr byte) {
+		u.TouchPlainKey(string(bytes.Repeat([]byte{addr}, 20)), nil, u.TouchAccount)
+	}
+
+	touch(cc.updates, 1)
+	handed := cc.handOffUpdates()
+	require.Same(t, first, handed, "the filled buffer must be the one handed off")
+	require.NotZero(t, handed.Size(), "the handed-off buffer must keep the updates it will be folded from")
+	require.Same(t, second, cc.updates, "the spare must rotate in")
+	require.Zero(t, cc.updates.Size(), "the rotated-in buffer must be empty")
+
+	touch(cc.updates, 2)
+	handed = cc.handOffUpdates()
+	require.Same(t, second, handed)
+	require.NotZero(t, handed.Size(), "the handed-off buffer must keep the updates it will be folded from")
+	require.Same(t, first, cc.updates, "rotation must reuse the first buffer, not allocate")
+	require.Zero(t, cc.updates.Size(), "the reused buffer must be reset before refilling")
 }

@@ -5,6 +5,8 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -14,19 +16,20 @@ func BenchmarkVersionedReadGetters(b *testing.B) {
 	_, tx, domains := NewTestRwTx(b)
 	_ = tx
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	addr := accounts.InternAddress([20]byte{0x01})
 	key := accounts.InternKey([32]byte{0x01})
 
 	// Seed version map: tx 0 wrote nonce, balance, storage
 	v0 := Version{TxIndex: 0, Incarnation: 1}
-	mvhm.Write(addr, NoncePath, accounts.NilKey, v0, uint64(42), true)
-	mvhm.Write(addr, BalancePath, accounts.NilKey, v0, *uint256.NewInt(100), true)
-	mvhm.Write(addr, StoragePath, key, v0, *uint256.NewInt(123), true)
+	mvhm.WriteNonce(addr, v0, uint64(42), true)
+	mvhm.WriteBalance(addr, v0, *uint256.NewInt(100), true)
+	mvhm.WriteStorage(addr, key, v0, *uint256.NewInt(123), true)
 
 	// tx 1 reads → hits MapRead path inside versionedRead
 	s := NewWithVersionMap(reader, mvhm)
+	defer s.Close()
 	s.txIndex = 1
 
 	b.Run("GetNonce", func(b *testing.B) {
@@ -49,4 +52,91 @@ func BenchmarkVersionedReadGetters(b *testing.B) {
 			_, _ = s.GetState(addr, key)
 		}
 	})
+}
+
+// BenchmarkWarmExtCodeHash measures the warm EXTCODEHASH opcode sequence
+// (Empty + GetCodeHash) on the noMaterialize/versionMap path — the hot path of
+// the warm-extcodehash perf cell. After the first iteration the reads hit the
+// read-once fast-path, so this isolates the steady-state warm-read cost + allocs.
+func BenchmarkWarmExtCodeHashSeq(b *testing.B) {
+	_, tx, domains := NewTestRwTx(b)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+
+	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+	code := []byte{0x60, 0x01, 0x60, 0x02, 0x01}
+	ch := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	v0 := Version{TxIndex: 0, Incarnation: 1}
+	mvhm.WriteAddress(addr, v0, func() *accounts.Account { a := accounts.NewAccount(); a.Nonce = 1; a.CodeHash = ch; return &a }(), true)
+	mvhm.WriteNonce(addr, v0, uint64(1), true)
+	mvhm.WriteBalance(addr, v0, uint256.Int{}, true)
+	mvhm.WriteCodeHash(addr, v0, ch, true)
+
+	s := NewWithVersionMap(reader, mvhm)
+	s.txIndex = 1
+	// warm the read-set (first EXTCODEHASH)
+	_, _ = s.Empty(addr)
+	_, _ = s.GetCodeHash(addr)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = s.Empty(addr)
+		_, _ = s.GetCodeHash(addr)
+	}
+}
+
+// BenchmarkWarmExtCodeHashAbsent measures the warm EXTCODEHASH state sequence on an
+// absent account, with a revert every txOps ops as in a loop that ends out of gas.
+func BenchmarkWarmExtCodeHashAbsent(b *testing.B) {
+	_, tx, domains := NewTestRwTx(b)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	addr := accounts.InternAddress([20]byte{0xAB, 0x5E})
+	s := NewWithVersionMap(reader, NewVersionMap(nil))
+	s.txIndex = 1
+	s.StartAccessRecording()
+
+	const txOps = 150_000
+	snapshot := s.PushSnapshot()
+	ops := 0
+	b.ReportAllocs()
+	for b.Loop() {
+		s.AddAddressToAccessList(addr)
+		s.MarkAddressAccess(addr, false)
+		_, _ = s.Empty(addr)
+		if ops++; ops == txOps {
+			s.RevertToSnapshot(snapshot, nil)
+			snapshot = s.PushSnapshot()
+			ops = 0
+		}
+	}
+}
+
+// BenchmarkWarmEmptyExisting measures a repeat Empty on an existing account with
+// no own write, by the field that decides the verdict.
+func BenchmarkWarmEmptyExisting(b *testing.B) {
+	cases := []struct {
+		name string
+		set  func(a *accounts.Account)
+	}{
+		{"balance", func(a *accounts.Account) { a.Balance = *uint256.NewInt(100) }},
+		{"nonce", func(a *accounts.Account) { a.Nonce = 1 }},
+		{"code", func(a *accounts.Account) { a.CodeHash = accounts.InternCodeHash([32]byte{0xaa}) }},
+		{"truly-empty", func(a *accounts.Account) {}},
+	}
+	for _, c := range cases {
+		b.Run(c.name, func(b *testing.B) {
+			addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+			account := accounts.NewAccount()
+			c.set(&account)
+			reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{addr: &account}}
+			s := NewWithVersionMap(reader, NewVersionMap(nil))
+			s.txIndex = 1
+			_, _ = s.Empty(addr)
+
+			b.ReportAllocs()
+			for b.Loop() {
+				_, _ = s.Empty(addr)
+			}
+		})
+	}
 }

@@ -100,10 +100,10 @@ func (h *orphanHarness) seal(params *builder.Parameters, wantTxs int) *types.Hea
 
 func (h *orphanHarness) adopt(hdr *types.Header) {
 	h.t.Helper()
-	vr, err := validateChain(h.ctx, h.m.ExecModule, hdr)
+	vr, err := validateChain(h.ctx, h.m.ExecModule, types.NewBlockWithHeader(hdr, nil))
 	require.NoError(h.t, err)
 	require.Equal(h.t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "newPayload block %d: %s", hdr.Number.Uint64(), vr.ValidationError)
-	ur, err := updateForkChoice(h.ctx, h.m.ExecModule, hdr)
+	ur, err := forkChoiceTo(h.ctx, h.m.ExecModule, hdr)
 	require.NoError(h.t, err)
 	require.Equal(h.t, execmodule.ExecutionStatusSuccess, ur.Status, "fork choice block %d", hdr.Number.Uint64())
 }

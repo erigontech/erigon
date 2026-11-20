@@ -3,8 +3,7 @@ name: SonarCloud Branch Scan
 # SonarCloud rejects a branch analysis dated older than the branch's latest
 # processed one, so analyses must reach it in chronological order. This
 # workflow is the only submitter of branch analyses: it scans after each push,
-# serialized per branch by a FIFO concurrency queue, reusing the coverage
-# profile uploaded by the commit's merge-queue run.
+# serialized per branch by a FIFO concurrency queue.
 
 on:
   push:
@@ -17,12 +16,11 @@ concurrency:
   queue: max
 
 permissions:
-  actions: read
   contents: read
+  actions: write
+  pull-requests: read
 
 jobs:
   sonar:
     uses: ./.github/workflows/sonar.yml
-    with:
-      scan-only: true
     secrets: inherit

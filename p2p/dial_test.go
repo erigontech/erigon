@@ -297,7 +297,9 @@ func TestDialSchedRemoveStatic(t *testing.T) {
 			},
 		},
 		// Since all static nodes are removed, they should not be dialed again.
-		{}, {}, {},
+		{},
+		{},
+		{},
 	})
 }
 
@@ -507,7 +509,8 @@ func runDialTest(t *testing.T, config dialConfig, rounds []dialTestRound) {
 	dialsched = newDialScheduler(config, iterator, setup, 66)
 	defer dialsched.stop()
 
-	for i, round := range rounds {
+	for i := range rounds {
+		round := &rounds[i]
 		// Apply peer set updates.
 		for _, c := range round.peersAdded {
 			if peers[c.node.ID()] != nil {

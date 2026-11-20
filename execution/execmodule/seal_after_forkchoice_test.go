@@ -67,7 +67,7 @@ func TestSealAfterAForkChoiceStillClosesTheOpenBlock(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "round: %s", vr.ValidationError)
 
 	// The consensus layer's fork choice for the parent lands before the seal.
-	ur, err := updateForkChoice(ctx, exec, head)
+	ur, err := forkChoiceTo(ctx, exec, head)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status)
 
@@ -76,7 +76,7 @@ func TestSealAfterAForkChoiceStillClosesTheOpenBlock(t *testing.T) {
 	require.NotNil(t, br, "the seal closed no block after a fork choice")
 	require.Len(t, br.Block.Transactions(), 1)
 	require.Equal(t, tx.Hash(), br.Block.Transactions()[0].Hash())
-	vr2, err := validateChain(ctx, exec, br.Block.Header())
+	vr2, err := validateChain(ctx, exec, br.Block)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, vr2.ValidationStatus, "newPayload: %s", vr2.ValidationError)
 }
@@ -134,7 +134,7 @@ func TestSealUnderNewAttributesReplaysTheBodyFromItsParentState(t *testing.T) {
 	require.NotNil(t, br)
 	require.Equal(t, later.Timestamp, br.Block.Time())
 	require.Len(t, br.Block.Transactions(), 1, "the re-open dropped the block's own transaction")
-	vr2, err := validateChain(ctx, exec, br.Block.Header())
+	vr2, err := validateChain(ctx, exec, br.Block)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, vr2.ValidationStatus, "newPayload: %s", vr2.ValidationError)
 }

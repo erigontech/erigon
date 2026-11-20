@@ -20,28 +20,9 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sync"
 
 	"github.com/erigontech/erigon/node/app/util/random"
-	"golang.org/x/exp/constraints"
 )
-
-func SequentialGenerator[T constraints.Integer](initialId T) IdGenerator[T] {
-	return &sequentialGenerator[T]{initialId, sync.Mutex{}}
-}
-
-type sequentialGenerator[T constraints.Integer] struct {
-	nextId T
-	mutex  sync.Mutex
-}
-
-func (generator *sequentialGenerator[T]) GenerateId(generationContext context.Context, entity ...interface{}) (T, error) {
-	generator.mutex.Lock()
-	id := generator.nextId
-	generator.nextId++
-	generator.mutex.Unlock()
-	return id, nil
-}
 
 func FixedValueGenerator[T comparable](value T) IdGenerator[T] {
 	return &fixedValueGenerator[T]{value}
@@ -51,7 +32,7 @@ type fixedValueGenerator[T comparable] struct {
 	value T
 }
 
-func (generator *fixedValueGenerator[T]) GenerateId(generationContext context.Context, entity ...interface{}) (T, error) {
+func (generator *fixedValueGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
 	return generator.value, nil
 }
 
@@ -59,10 +40,9 @@ func PassThroughGenerator[T comparable]() IdGenerator[T] {
 	return &passThroughGenerator[T]{}
 }
 
-type passThroughGenerator[T comparable] struct {
-}
+type passThroughGenerator[T comparable] struct{}
 
-func (generator *passThroughGenerator[T]) GenerateId(generationContext context.Context, entity ...interface{}) (T, error) {
+func (generator *passThroughGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
 	return entity[0].(T), nil
 }
 
@@ -74,17 +54,16 @@ type randomGenerator[T comparable] struct {
 	len uint
 }
 
-func (generator *randomGenerator[T]) GenerateId(generationContext context.Context, entity ...interface{}) (T, error) {
+func (generator *randomGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
 	var v T
 	t := reflect.TypeOf(v)
 
 	switch t.Kind() {
 	case reflect.String:
-		return ((interface{})(random.RandomString(generator.len))).(T), nil
+		return any(random.RandomString(generator.len)).(T), nil
 	case reflect.Slice:
-		switch t.Elem().Kind() {
-		case reflect.Uint8:
-			return ((interface{})(random.RandomBytes(generator.len))).(T), nil
+		if t.Elem().Kind() == reflect.Uint8 {
+			return any(random.RandomBytes(generator.len)).(T), nil
 		}
 	}
 
@@ -99,15 +78,15 @@ func (generator *randomGenerator[T]) GenerateId(generationContext context.Contex
 //
 //	[]byte or string value it is returned as the id
 //	cri.IdGenerator it is called to generatan is
-func ContextualGenerator[T comparable](key interface{}) IdGenerator[T] {
+func ContextualGenerator[T comparable](key any) IdGenerator[T] {
 	return &contextualGenerator[T]{key}
 }
 
 type contextualGenerator[T comparable] struct {
-	key interface{}
+	key any
 }
 
-func (generator *contextualGenerator[T]) GenerateId(generationContext context.Context, entity ...interface{}) (T, error) {
+func (generator *contextualGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
 	value := generationContext.Value(generator.key)
 
 	var zero T
@@ -125,19 +104,7 @@ func (generator *contextualGenerator[T]) GenerateId(generationContext context.Co
 		value = id
 	}
 
-	switch typed := value.(type) {
-	/*	case []byte:
-			return typed, nil
-		case string:
-			return []byte(typed), nil
-		case fmt.Stringer:
-			return []byte(typed.String()), nil
-		case cri.IdGenerator:
-			return typed.GenerateId(generationContext, entity...)
-		default:
-			return []byte(fmt.Sprint(typed)), nil
-	*/
-	case T:
+	if typed, ok := value.(T); ok {
 		return typed, nil
 	}
 

@@ -1,6 +1,7 @@
 package beaconevents
 
 import (
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
@@ -28,6 +29,9 @@ const (
 	OpPayloadAttestationMessage EventTopic = "payload_attestation_message" // [New in Gloas:EIP7732]
 	OpExecutionPayloadBid       EventTopic = "execution_payload_bid"       // [New in Gloas:EIP7732]
 	OpExecutionPayloadAvailable EventTopic = "execution_payload_available" // [New in Gloas:EIP7732]
+	OpExecutionPayload          EventTopic = "execution_payload"
+	OpExecutionPayloadGossip    EventTopic = "execution_payload_gossip"
+	OpProposerPreferences       EventTopic = "proposer_preferences"
 )
 
 type (
@@ -43,6 +47,16 @@ type (
 	PayloadAttestationMessageData = cltypes.PayloadAttestationMessage
 	SignedExecutionPayloadBidData = cltypes.SignedExecutionPayloadBid
 )
+
+type VersionedPayloadAttestationMessage struct {
+	Version string                         `json:"version"`
+	Data    *PayloadAttestationMessageData `json:"data"`
+}
+
+type VersionedSignedExecutionPayloadBid struct {
+	Version string                         `json:"version"`
+	Data    *SignedExecutionPayloadBidData `json:"data"`
+}
 
 // DataColumnSidecarData includes block_root and slot for SSE events
 type DataColumnSidecarData struct {
@@ -73,6 +87,7 @@ func NewDataColumnSidecarData(sidecar *cltypes.DataColumnSidecar) *DataColumnSid
 // State event topics
 const (
 	StateHead                        EventTopic = "head"
+	StateHeadV2                      EventTopic = "head_v2"
 	StateBlock                       EventTopic = "block"
 	StateBlockGossip                 EventTopic = "block_gossip"
 	StateFinalizedCheckpoint         EventTopic = "finalized_checkpoint"
@@ -91,6 +106,55 @@ type HeadData struct {
 	PreviousDutyDependentRoot common.Hash `json:"previous_duty_dependent_root"`
 	CurrentDutyDependentRoot  common.Hash `json:"current_duty_dependent_root"`
 	ExecutionOptimistic       bool        `json:"execution_optimistic"`
+}
+
+type HeadV2Data struct {
+	Version string        `json:"version"`
+	Data    HeadV2Content `json:"data"`
+}
+
+type HeadV2Content struct {
+	Slot                      uint64      `json:"slot,string"`
+	Block                     common.Hash `json:"block"`
+	State                     common.Hash `json:"state"`
+	PayloadStatus             string      `json:"payload_status"`
+	EpochTransition           bool        `json:"epoch_transition"`
+	CurrentEpochDependentRoot common.Hash `json:"current_epoch_dependent_root"`
+	NextEpochDependentRoot    common.Hash `json:"next_epoch_dependent_root"`
+	ExecutionOptimistic       bool        `json:"execution_optimistic"`
+}
+
+type ExecutionPayloadData struct {
+	Slot                uint64      `json:"slot,string"`
+	BuilderIndex        uint64      `json:"builder_index,string"`
+	BlockHash           common.Hash `json:"block_hash"`
+	BlockRoot           common.Hash `json:"block_root"`
+	ExecutionOptimistic bool        `json:"execution_optimistic"`
+}
+
+type ExecutionPayloadGossipData struct {
+	Slot         uint64      `json:"slot,string"`
+	BuilderIndex uint64      `json:"builder_index,string"`
+	BlockHash    common.Hash `json:"block_hash"`
+	BlockRoot    common.Hash `json:"block_root"`
+}
+
+type VersionedSignedProposerPreferences struct {
+	Version string                             `json:"version"`
+	Data    *cltypes.SignedProposerPreferences `json:"data"`
+}
+
+func PayloadStatusName(status cltypes.PayloadStatus) string {
+	switch status {
+	case cltypes.PayloadStatusEmpty:
+		return "empty"
+	case cltypes.PayloadStatusFull:
+		return "full"
+	case cltypes.PayloadStatusPending:
+		return "pending"
+	default:
+		return "unknown"
+	}
 }
 
 type BlockData struct {
@@ -142,18 +206,52 @@ type PayloadAttributesData struct {
 	Data    PayloadAttributesContent `json:"data"`
 }
 
+type PayloadAttributes struct {
+	Timestamp             uint64                 `json:"timestamp,string"`
+	PrevRandao            common.Hash            `json:"prev_randao"`
+	SuggestedFeeRecipient common.Address         `json:"suggested_fee_recipient"`
+	Withdrawals           *[]*cltypes.Withdrawal `json:"withdrawals,omitempty"`
+	ParentBeaconBlockRoot *common.Hash           `json:"parent_beacon_block_root,omitempty"`
+	SlotNumber            *uint64                `json:"slot_number,string,omitempty"`
+	TargetGasLimit        *uint64                `json:"target_gas_limit,string,omitempty"`
+}
+
+// NewPayloadAttributes encodes value as the PayloadAttributesV<N> of version.
+func NewPayloadAttributes(version clparams.StateVersion, value *engine_types.PayloadAttributes) PayloadAttributes {
+	attributes := PayloadAttributes{
+		Timestamp:             uint64(value.Timestamp),
+		PrevRandao:            value.PrevRandao,
+		SuggestedFeeRecipient: value.SuggestedFeeRecipient,
+	}
+	if version.AfterOrEqual(clparams.CapellaVersion) {
+		withdrawals := make([]*cltypes.Withdrawal, len(value.Withdrawals))
+		for i, withdrawal := range value.Withdrawals {
+			withdrawals[i] = &cltypes.Withdrawal{
+				Index:     uint64(withdrawal.Index),
+				Validator: uint64(withdrawal.Validator),
+				Address:   withdrawal.Address,
+				Amount:    uint64(withdrawal.Amount),
+			}
+		}
+		attributes.Withdrawals = &withdrawals
+	}
+	if version.AfterOrEqual(clparams.DenebVersion) {
+		attributes.ParentBeaconBlockRoot = value.ParentBeaconBlockRoot
+	}
+	if version.AfterOrEqual(clparams.GloasVersion) {
+		attributes.SlotNumber = (*uint64)(value.SlotNumber)
+		attributes.TargetGasLimit = (*uint64)(value.TargetGasLimit)
+	}
+	return attributes
+}
+
 type PayloadAttributesContent struct {
-	/*
-		proposal_slot: the slot at which a block using these payload attributes may be built.
-		parent_block_root: the beacon block root of the parent block to be built upon.
-		parent_block_number: the execution block number of the parent block.
-		parent_block_hash: the execution block hash of the parent block.
-		proposer_index: the validator index of the proposer at proposal_slot on the chain identified by parent_block_root.
-	*/
-	ProposerIndex     uint64                         `json:"proposer_index,string"`
-	ProposalSlot      uint64                         `json:"proposal_slot,string"`
-	ParentBlockNumber uint64                         `json:"parent_block_number,string"`
-	ParentBlockRoot   common.Hash                    `json:"parent_block_root"`
-	ParentBlockHash   common.Hash                    `json:"parent_block_hash"`
-	PayloadAttributes engine_types.PayloadAttributes `json:"payload_attributes"`
+	ProposerIndex      uint64            `json:"proposer_index,string"`
+	ProposalSlot       uint64            `json:"proposal_slot,string"`
+	ParentBlockNumber  *uint64           `json:"parent_block_number,string,omitempty"`
+	ParentBlockRoot    common.Hash       `json:"parent_block_root"`
+	ParentBlockHash    common.Hash       `json:"parent_block_hash"`
+	SafeBlockHash      *common.Hash      `json:"safe_block_hash,omitempty"`
+	FinalizedBlockHash *common.Hash      `json:"finalized_block_hash,omitempty"`
+	PayloadAttributes  PayloadAttributes `json:"payload_attributes"`
 }

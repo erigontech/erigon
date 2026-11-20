@@ -70,7 +70,6 @@ func TestShutterBlockBuilding(t *testing.T) {
 	amount := big.NewInt(1)
 	// amount of blocks it takes to deploy a new keyper set based on contractsDeployer.DeployKeyperSet
 	keyperSetDeploymentBlocks := uint64(4)
-	txnPointer := uint64(0)
 
 	// deploy initial eon 0
 	currentBlock, err := uni.rpcApiClient.BlockNumber()
@@ -82,6 +81,7 @@ func TestShutterBlockBuilding(t *testing.T) {
 
 	t.Run("eon 0", func(t *testing.T) {
 		require.Equal(t, shutter.EonIndex(0), ekg.EonIndex)
+		txnPointer := uint64(0)
 
 		t.Run("build shutter block", func(t *testing.T) {
 			// submit 1 shutter txn
@@ -169,6 +169,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 		_, _, err = uni.contractsDeployer.DeployKeyperSet(ctx, uni.contractsDeployment, ekg)
 		require.NoError(t, err)
 		require.Equal(t, shutter.EonIndex(1), ekg.EonIndex)
+		// the sequencer contract numbers submissions per eon, so the keyper txn pointer restarts at 0
+		txnPointer := uint64(0)
 
 		t.Run("build shutter block", func(t *testing.T) {
 			// submit 1 shutter txn using the new eon
@@ -236,8 +238,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		err := eat.Close()
-		require.NoError(t, err)
+		require.NoError(t, eat.Close())
 	})
 	// prepare shutter config for the next engine api tester
 	shutterPort, err := freeport.NextFreePort()
@@ -340,8 +341,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	decryptionKeySender, err := testhelpers.DialDecryptionKeysSender(ctx, logger, decryptionKeySenderPort, decryptionKeySenderP2pPrivKey)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		err := decryptionKeySender.Close()
-		require.NoError(t, err)
+		require.NoError(t, decryptionKeySender.Close())
 	})
 	// now that we've deployed all shutter contracts - we can restart erigon with shutter enabled
 	require.NoError(t, eat.Close())

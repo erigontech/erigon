@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -29,8 +28,8 @@ func newGraph(t *testing.T) *forkGraphDisk {
 	t.Helper()
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
-	fg := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(),
-		beacon_router_configuration.RouterConfiguration{}, beaconevents.NewEventEmitter())
+	fg, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
 	return fg.(*forkGraphDisk)
 }
 

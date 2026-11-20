@@ -22,21 +22,23 @@ package eth
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockReader services.HeaderReader) ([]*types.Header, error) {
+func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockReader dbservices.HeaderReader) ([]*types.Header, error) {
 	hashMode := query.Origin.Hash != (common.Hash{})
 	first := true
 	maxNonCanonical := uint64(100)
@@ -145,7 +147,7 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 	return headers, nil
 }
 
-func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader services.HeaderAndBodyReader) []rlp.RawValue { //nolint:unparam
+func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader dbservices.HeaderAndBodyReader) []rlp.RawValue { //nolint:unparam
 	// Gather blocks until the fetch or network limits is reached
 	var bytes int
 	bodies := make([]rlp.RawValue, 0, len(query))
@@ -155,9 +157,10 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 			lookups >= 2*MaxBodiesServe {
 			break
 		}
+		// Stop at the first unknown hash: each one may scan all header snapshots.
 		number, _ := blockReader.HeaderNumber(context.Background(), db, hash)
 		if number == nil {
-			continue
+			break
 		}
 		bodyRLP, _ := blockReader.BodyRlp(context.Background(), db, hash, *number)
 		if len(bodyRLP) == 0 {
@@ -179,6 +182,17 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 // empty (e.g. a chain without system contracts)".
 var notAvailableSentinel = rlp.RawValue{0x80}
 
+// BlockAccessListGetter serves cached Block Access Lists or regenerates them by
+// re-executing blocks against historical state. Regeneration returns (nil, nil)
+// when no BAL applies (pre-Amsterdam or unknown block) and an error when it fails
+// (e.g. the required state history is pruned).
+type BlockAccessListGetter interface {
+	GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64, beforeReplay func() error) ([]byte, error)
+}
+
+// ErrBlockAccessListThrottled reports that the replay budget is unavailable.
+var ErrBlockAccessListThrottled = errors.New("block access list replay throttled")
+
 // AnswerGetBlockAccessListsQuery looks up the RLP-encoded Block Access List
 // for each requested block hash (EIP-7928 / EIP-8159 eth/71). The response is
 // positionally aligned with the request: entry i is the BAL bytes for query[i],
@@ -187,20 +201,43 @@ var notAvailableSentinel = rlp.RawValue{0x80}
 // rawdb.WriteBlockAccessListBytes, so we hand the bytes through unchanged as
 // rlp.RawValue. A genuinely empty BAL is stored as 0xc0 and returned as such.
 //
+// BALs are only kept in the database for the reorg window; older blocks are
+// regenerated on demand via balGetter (EIP-7928 requires serving BALs for the
+// weak subjectivity period). A nil balGetter or a getter failure degrades to
+// the sentinel.
+//
 // Limits mirror AnswerGetBlockBodiesQuery: softResponseLimit caps total reply
-// size, MaxBlockAccessListsServe caps the disk-lookup count. When a limit is
-// reached, the response is truncated (not padded with 0x80) — the peer sees a
-// shorter array than requested, same convention as the BlockBodies handler.
-func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, blockReader services.HeaderReader) []rlp.RawValue { //nolint:unparam
+// size, MaxBlockAccessListsServe caps the disk-lookup count, and
+// MaxBlockAccessListsRegenerate caps the re-execution work per request. When a
+// limit is reached, the response is truncated (not padded with 0x80) — the peer
+// sees a shorter array than requested, same convention as the BlockBodies handler.
+// Cancellation or throttling also truncates the response.
+func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db kv.TemporalTx, query GetBlockAccessListsPacket, blockReader dbservices.HeaderReader, balGetter BlockAccessListGetter, beforeReplay func() error) []rlp.RawValue {
 	var bytes int
+	var regenerations int
 	bals := make([]rlp.RawValue, 0, len(query))
+	admitReplay := func() error {
+		if regenerations >= MaxBlockAccessListsRegenerate {
+			return ErrBlockAccessListThrottled
+		}
+		if beforeReplay != nil {
+			if err := beforeReplay(); err != nil {
+				return err
+			}
+		}
+		regenerations++
+		return nil
+	}
 
 	for lookups, hash := range query {
-		if bytes >= softResponseLimit || len(bals) >= MaxBlockAccessListsServe ||
+		if ctx.Err() != nil || bytes >= softResponseLimit || len(bals) >= MaxBlockAccessListsServe ||
 			lookups >= 2*MaxBlockAccessListsServe {
 			break
 		}
-		number, _ := blockReader.HeaderNumber(context.Background(), db, hash)
+		number, _ := blockReader.HeaderNumber(ctx, db, hash)
+		if ctx.Err() != nil {
+			break
+		}
 		if number == nil {
 			// We don't know the block — peer can retry elsewhere.
 			bals = append(bals, notAvailableSentinel)
@@ -208,10 +245,22 @@ func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, b
 			continue
 		}
 		bal, _ := rawdb.ReadBlockAccessListBytes(db, hash, *number)
+		if len(bal) == 0 && balGetter != nil {
+			var err error
+			bal, err = balGetter.GetBlockAccessListBytes(ctx, cfg, db, hash, *number, admitReplay)
+			if errors.Is(err, ErrBlockAccessListThrottled) ||
+				errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				break
+			}
+			// Keep a completed BAL if the deadline expired after replay finished.
+			if ctx.Err() != nil && (err != nil || len(bal) == 0) {
+				break
+			}
+		}
 		if len(bal) == 0 {
-			// We have the block but no BAL stored (pre-Amsterdam, or pruned).
-			// Return 0x80 — unambiguously "not available", distinct from a
-			// genuinely empty BAL which would be stored as 0xc0.
+			// We have the block but no BAL: pre-Amsterdam, or pruned beyond
+			// the regenerable history window. Return 0x80 — unambiguously
+			// "not available", distinct from a genuinely empty BAL (0xc0).
 			bals = append(bals, notAvailableSentinel)
 			bytes += len(notAvailableSentinel)
 			continue
@@ -283,7 +332,7 @@ const NoSizeLimit = math.MaxInt
 // ReceiptQueryOpts controls the behavior differences between eth protocol versions
 // when answering GetReceipts queries.
 type ReceiptQueryOpts struct {
-	// EthVersion is the protocol version (e.g. direct.ETH68, direct.ETH69, direct.ETH70).
+	// EthVersion is the protocol version (e.g. ETH68, ETH69, ETH70).
 	// eth/69+ uses encoding without the Bloom field.
 	EthVersion uint
 	// FirstBlockReceiptIndex skips this many receipts from the first block (eth/70).
@@ -291,6 +340,8 @@ type ReceiptQueryOpts struct {
 	// SizeLimit is the maximum encoded response size for per-receipt truncation.
 	// Use NoSizeLimit to disable truncation (eth/68, eth/69).
 	SizeLimit int
+	// Deadline ends the response after the block being served when it passes; zero means none.
+	Deadline time.Time
 }
 
 func AnswerGetReceiptsQueryCacheOnly(ctx context.Context, receiptsGetter ReceiptsGetter, query GetReceiptsPacket, opts ReceiptQueryOpts) (*CachedReceipts, bool, error) {
@@ -364,7 +415,7 @@ func encodeBlockReceiptsWithLimit(receipts types.Receipts, totalBytes int, opts 
 	return encoded, len(encoded), true, nil
 }
 
-func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.HeaderAndBodyReader, db kv.TemporalTx, query GetReceiptsPacket, cached *CachedReceipts, opts ReceiptQueryOpts) ([]rlp.RawValue, bool, error) {
+func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br dbservices.HeaderAndBodyReader, db kv.TemporalTx, query GetReceiptsPacket, cached *CachedReceipts, opts ReceiptQueryOpts) ([]rlp.RawValue, bool, error) {
 	var (
 		numBytes     int
 		receipts     []rlp.RawValue
@@ -435,6 +486,9 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 
 		if !complete {
 			return receipts, true, nil
+		}
+		if !opts.Deadline.IsZero() && time.Now().After(opts.Deadline) {
+			return receipts, false, nil
 		}
 	}
 	return receipts, false, nil

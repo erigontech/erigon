@@ -22,16 +22,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 	"time"
-
-	"github.com/klauspost/compress/zstd"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -41,10 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
-
-var buffersPool = sync.Pool{
-	New: func() any { return &bytes.Buffer{} },
-}
 
 type HistoricalStatesReader struct {
 	cfg            *clparams.BeaconChainConfig
@@ -62,7 +56,8 @@ func NewHistoricalStatesReader(
 	blockReader freezeblocks.BeaconSnapshotReader,
 	validatorTable *state_accessors.StaticValidatorTable,
 	genesisState *state.CachingBeaconState, stateSn *snapshotsync.CaplinStateSnapshots,
-	syncedData synced_data.SyncedData) *HistoricalStatesReader {
+	syncedData synced_data.SyncedData,
+) *HistoricalStatesReader {
 	shuffledIndiciesCache := lru.NewWithTTL[uint64, []uint64]("shuffledIndiciesCacheReader", 64, 2*time.Minute)
 
 	return &HistoricalStatesReader{
@@ -118,7 +113,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	blockHeader := block.SignedBeaconBlockHeader().Header
 	blockHeader.Root = common.Hash{}
 	// Read the epoch and per-slot data.
-	slotData, err := state_accessors.ReadSlotData(kvGetter, slot, r.cfg)
+	slotData, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +136,9 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetVersion(slotData.Version)
 	ret.SetGenesisTime(r.genesisState.GenesisTime())
 	ret.SetGenesisValidatorsRoot(r.genesisState.GenesisValidatorsRoot())
-	ret.SetSlot(slot)
+	if err := ret.SetSlot(slot); err != nil {
+		return nil, fmt.Errorf("failed to set slot: %w", err)
+	}
 	ret.SetFork(slotData.Fork)
 	// History
 	stateRoots, blockRoots := solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot)), solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot))
@@ -267,8 +264,12 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if nextSyncCommittee == nil {
 		nextSyncCommittee = r.genesisState.NextSyncCommittee()
 	}
-	ret.SetCurrentSyncCommittee(currentSyncCommittee)
-	ret.SetNextSyncCommittee(nextSyncCommittee)
+	if err := ret.SetCurrentSyncCommittee(currentSyncCommittee); err != nil {
+		return nil, fmt.Errorf("failed to set current sync committee: %w", err)
+	}
+	if err := ret.SetNextSyncCommittee(nextSyncCommittee); err != nil {
+		return nil, fmt.Errorf("failed to set next sync committee: %w", err)
+	}
 	// Execution
 	if ret.Version() < clparams.BellatrixVersion {
 		return ret, nil
@@ -352,24 +353,21 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	ret.SetLatestExecutionPayloadBid(latestBid)
 
-	// Queue-based fields: Builders, BuilderPendingWithdrawals, PayloadExpectedWithdrawals.
-	// Use ReadRequiredQueueSSZ (not ReadQueueSSZ) so that missing dump data on
-	// upgraded DBs surfaces ErrMissingGloasData instead of silently producing
-	// empty lists.
+	gloasForkSlot := r.cfg.GloasForkEpoch * r.cfg.SlotsPerEpoch
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](int(r.cfg.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
-	if err := ReadRequiredQueueSSZ(kvGetter, slot, kv.BuildersDump, kv.Builders, builders); err != nil {
+	if err := ReadBuildersSSZ(kvGetter, slot, gloasForkSlot, r.cfg.BuilderRegistryLimit, builders); err != nil {
 		return nil, fmt.Errorf("failed to read builders: %w", err)
 	}
 	ret.SetBuilders(builders)
 
 	builderPendingWithdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(r.cfg.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
-	if err := ReadRequiredQueueSSZ(kvGetter, slot, kv.BuilderPendingWithdrawalsDump, kv.BuilderPendingWithdrawals, builderPendingWithdrawals); err != nil {
+	if err := ReadRequiredQueueSSZ(kvGetter, slot, gloasForkSlot, kv.BuilderPendingWithdrawalsDump, kv.BuilderPendingWithdrawals, builderPendingWithdrawals); err != nil {
 		return nil, fmt.Errorf("failed to read builder pending withdrawals: %w", err)
 	}
 	ret.SetBuilderPendingWithdrawals(builderPendingWithdrawals)
 
 	payloadExpectedWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(r.cfg.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ())
-	if err := ReadRequiredQueueSSZ(kvGetter, slot, kv.PayloadExpectedWithdrawalsDump, kv.PayloadExpectedWithdrawals, payloadExpectedWithdrawals); err != nil {
+	if err := ReadRequiredQueueSSZ(kvGetter, slot, gloasForkSlot, kv.PayloadExpectedWithdrawalsDump, kv.PayloadExpectedWithdrawals, payloadExpectedWithdrawals); err != nil {
 		return nil, fmt.Errorf("failed to read payload expected withdrawals: %w", err)
 	}
 	ret.SetPayloadExpectedWithdrawals(payloadExpectedWithdrawals)
@@ -388,7 +386,8 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetBuilderPendingPayments(builderPendingPayments)
 
 	ptcWindow := solid.NewUint64VectorOfVectors(int((2+r.cfg.MinSeedLookahead)*r.cfg.SlotsPerEpoch), int(r.cfg.PtcSize))
-	if err := readCompressedSSZ(kvGetter, slot, kv.PtcWindowTable, ptcWindow, int(ret.Version())); err != nil {
+	ptcWindowSlot := r.cfg.RoundSlotToEpoch(slot)
+	if err := readCompressedSSZ(kvGetter, ptcWindowSlot, kv.PtcWindowEpochTable, ptcWindow, int(ret.Version())); err != nil {
 		return nil, fmt.Errorf("failed to read ptc window: %w", err)
 	}
 	ret.SetPtcWindow(ptcWindow)
@@ -416,7 +415,13 @@ func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, kvGetter state_
 			return err
 		}
 		if len(v) != 32 {
-			return fmt.Errorf("invalid key %x", key)
+			// An empty entry is a not-yet-reconstructed slot the antiquary can
+			// re-antiquate past; a non-empty entry of the wrong length is
+			// corruption and must surface as a hard error.
+			if len(v) != 0 {
+				return fmt.Errorf("table %s slot %d: corrupt root, %d bytes (want 32)", table, i, len(v))
+			}
+			return fmt.Errorf("%w: table %s slot %d", ErrMissingHistoryVectorData, table, i)
 		}
 		currKeySlot = i
 		out.Set(int(currKeySlot%size), common.BytesToHash(v))
@@ -424,6 +429,12 @@ func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, kvGetter state_
 		if inserted == needFromDB {
 			break
 		}
+	}
+
+	// A short window means the tail slots are absent from both DB and snapshots;
+	// leaving those vector entries zero would fabricate roots, so surface it.
+	if inserted < needFromDB {
+		return fmt.Errorf("%w: table %s slot %d", ErrMissingHistoryVectorData, table, slot-needFromDB+inserted)
 	}
 
 	for i := 0; i < int(needFromGenesis); i++ {
@@ -509,7 +520,7 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, kvGetter state_access
 	}
 	var currKeyEpoch uint64
 
-	for i := roundedSlot - (needFromDB)*r.cfg.SlotsPerEpoch; i <= highestAvaiableSlot; i++ {
+	for i := roundedSlot - needFromDB*r.cfg.SlotsPerEpoch; i <= highestAvaiableSlot; i++ {
 		key := base_encoding.Encode64ToBytes4(i)
 		v, err := kvGetter(kv.RandaoMixes, key)
 		if err != nil {
@@ -572,23 +583,15 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
 	}
 
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
-
-	if _, err := buffer.Write(compressed); err != nil {
-		return nil, err
-	}
-
 	// Read the diff file
-	zstdReader, err := zstd.NewReader(buffer)
+	zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
 	if err != nil {
 		return nil, err
 	}
-	defer zstdReader.Close()
-
 	currentList := make([]byte, validatorSetLength*8)
-	if _, err = io.ReadFull(zstdReader, currentList); err != nil && err != io.ErrUnexpectedEOF {
+	_, err = io.ReadFull(zstdReader, currentList)
+	base_encoding.PutZstdReader(zstdReader)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, err
 	}
 
@@ -644,10 +647,6 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, kvGetter state_ac
 	remainder := slot % clparams.SlotsPerDump
 	freshDumpSlot := slot - remainder
 
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
-
 	var compressed []byte
 	currentStageProgress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
@@ -670,16 +669,14 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, kvGetter state_ac
 	if len(compressed) == 0 {
 		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
 	}
-	if _, err := buffer.Write(compressed); err != nil {
-		return nil, err
-	}
-	zstdReader, err := zstd.NewReader(buffer)
+	zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
 	if err != nil {
 		return nil, err
 	}
-	defer zstdReader.Close()
 	currentList := make([]byte, validatorSetLength*8)
-	if _, err = io.ReadFull(zstdReader, currentList); err != nil && err != io.ErrUnexpectedEOF {
+	_, err = io.ReadFull(zstdReader, currentList)
+	base_encoding.PutZstdReader(zstdReader)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, err
 	}
 
@@ -758,14 +755,14 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(kvGetter state_access
 		return err
 	}
 	// Read the diff file
-	zstdReader, err := zstd.NewReader(&b)
+	zstdReader, err := base_encoding.GetZstdReader(&b)
 	if err != nil {
 		return err
 	}
-	defer zstdReader.Close()
 	currentList := make([]byte, size*8)
-
-	if _, err = io.ReadFull(zstdReader, currentList); err != nil && !errors.Is(err, io.EOF) {
+	_, err = io.ReadFull(zstdReader, currentList)
+	base_encoding.PutZstdReader(zstdReader)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("failed to read dump: %w, len: %d", err, len(v))
 	}
 
@@ -774,7 +771,7 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(kvGetter state_access
 
 func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, kvGetter state_accessors.GetValFn, slot uint64) (*solid.ValidatorSet, error) {
 	// Read the minimal beacon state which have the small fields.
-	sd, err := state_accessors.ReadSlotData(kvGetter, slot, r.cfg)
+	sd, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -875,7 +872,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 	}
 
 	// Read the minimal beacon state which have the small fields.
-	sd, err := state_accessors.ReadSlotData(kvGetter, slot, r.cfg)
+	sd, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -898,10 +895,36 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 		if block == nil {
 			continue
 		}
+		var parentPayloadAvailable bool
+		if block.Version() >= clparams.GloasVersion && block.Block.Body.Attestations.Len() > 0 {
+			parentSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, block.Block.ParentRoot)
+			if err != nil {
+				return nil, nil, err
+			}
+			if parentSlot == nil {
+				genesisSlot := r.genesisState.Slot()
+				genesisRoot, err := kvGetter(kv.BlockRoot, base_encoding.Encode64ToBytes4(genesisSlot))
+				if err != nil {
+					return nil, nil, err
+				}
+				if len(genesisRoot) != 32 || block.Block.ParentRoot != common.BytesToHash(genesisRoot) {
+					return nil, nil, fmt.Errorf("parent block root %x not found", block.Block.ParentRoot)
+				}
+				genesisParentSlot := r.genesisState.LatestBlockHeader().Slot
+				parentSlot = &genesisParentSlot
+			}
+
+			availability := solid.NewBitVector(int(r.cfg.SlotsPerHistoricalRoot))
+			if err := readCompressedSSZ(kvGetter, i, kv.ExecutionPayloadAvailabilityTable, availability, int(block.Version())); err != nil {
+				return nil, nil, err
+			}
+			parentPayloadAvailable = availability.GetBitAt(int(*parentSlot % r.cfg.SlotsPerHistoricalRoot))
+		}
 		currentEpoch := i / r.cfg.SlotsPerEpoch
 
 		// Read the participation flags
-		block.Block.Body.Attestations.Range(func(index int, attestation *solid.Attestation, length int) bool {
+		for index := 0; index < block.Block.Body.Attestations.Len(); index++ {
+			attestation := block.Block.Body.Attestations.Get(index)
 			data := attestation.Data
 			isCurrentEpoch := data.Target.Epoch == currentEpoch
 			var activeIndicies []uint64
@@ -914,7 +937,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 				}
 			} else {
 				if currentEpoch == prevEpoch {
-					return true
+					continue
 				}
 				activeIndicies = previousActiveIndicies
 			}
@@ -922,43 +945,34 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 			attestationEpoch := data.Slot / r.cfg.SlotsPerEpoch
 
 			mixPosition := (attestationEpoch + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
-			mix, err := r.ReadRandaoMixBySlotAndIndex(tx, kvGetter, data.Slot, mixPosition)
+			mix, err := r.ReadRandaoMixBySlotAndIndex(kvGetter, data.Slot, mixPosition)
 			if err != nil {
-				return false
+				return nil, nil, err
 			}
 
-			var attestingIndicies []uint64
-			attestingIndicies, err = r.attestingIndicies(attestation, true, mix, activeIndicies)
+			attestingIndicies, err := r.attestingIndicies(attestation, true, mix, activeIndicies)
 			if err != nil {
-				return false
+				return nil, nil, err
 			}
-			var participationFlagsIndicies []uint8
-			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, kvGetter, block.Version(), i, *data, i-data.Slot, true)
+			participationFlagsIndicies, err := r.getAttestationParticipationFlagIndicies(kvGetter, block.Version(), i, *data, i-data.Slot, parentPayloadAvailable, true)
 			if err != nil {
-				return false
+				return nil, nil, err
 			}
-			prevIdxs := isCurrentEpoch && currentEpoch != prevEpoch
+			participation := previousIdxs
+			if data.Target.Epoch == epoch {
+				participation = currentIdxs
+			}
 			// apply the flags
 			for _, idx := range attestingIndicies {
 				for _, flagIndex := range participationFlagsIndicies {
-					var flagParticipation cltypes.ParticipationFlags
-					if prevIdxs {
-						flagParticipation = cltypes.ParticipationFlags(currentIdxs.Get(int(idx)))
-					} else {
-						flagParticipation = cltypes.ParticipationFlags(previousIdxs.Get(int(idx)))
-					}
+					flagParticipation := cltypes.ParticipationFlags(participation.Get(int(idx)))
 					if flagParticipation.HasFlag(int(flagIndex)) {
 						continue
 					}
-					if prevIdxs {
-						currentIdxs.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
-					} else {
-						previousIdxs.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
-					}
+					participation.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
 				}
 			}
-			return true
-		})
+		}
 	}
 	return currentIdxs, previousIdxs, nil
 }
@@ -971,28 +985,8 @@ func (r *HistoricalStatesReader) computeRelevantEpochs(slot uint64) (uint64, uin
 	return epoch, epoch - 1
 }
 
-func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, kvGetter state_accessors.GetValFn, activeIdxs [][]uint64, epochs []uint64) error {
-	var wg sync.WaitGroup
-	wg.Add(len(epochs))
-	for i, epoch := range epochs {
-		mixPosition := (epoch + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
-		mix, err := r.ReadRandaoMixBySlotAndIndex(tx, kvGetter, epochs[0]*r.cfg.SlotsPerEpoch, mixPosition)
-		if err != nil {
-			return err
-		}
-
-		go func(mix common.Hash, epoch uint64, idxs []uint64) {
-			defer wg.Done()
-
-			_, _ = r.ComputeCommittee(mix, idxs, epoch*r.cfg.SlotsPerEpoch, r.cfg.TargetCommitteeSize, 0)
-		}(mix, epoch, activeIdxs[i])
-	}
-	wg.Wait()
-	return nil
-}
-
 func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, kvGetter state_accessors.GetValFn, slot uint64) (solid.Uint64ListSSZ, error) {
-	sd, err := state_accessors.ReadSlotData(kvGetter, slot, r.cfg)
+	sd, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -1010,7 +1004,7 @@ func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, kvGetter state
 	return balancesList, balancesList.DecodeSSZ(balances, 0)
 }
 
-func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, kvGetter state_accessors.GetValFn, slot, index uint64) (common.Hash, error) {
+func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(kvGetter state_accessors.GetValFn, slot, index uint64) (common.Hash, error) {
 	epoch := slot / r.cfg.SlotsPerEpoch
 	epochSubIndex := epoch % r.cfg.EpochsPerHistoricalVector
 	if index == epochSubIndex {
@@ -1018,34 +1012,25 @@ func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, kvGetter 
 		if err != nil {
 			return common.Hash{}, err
 		}
+		if len(intraRandaoMix) == 0 {
+			return common.Hash{}, fmt.Errorf("%w at slot %d", ErrRandaoMixUnavailable, slot)
+		}
 		if len(intraRandaoMix) != 32 {
 			return common.Hash{}, fmt.Errorf("invalid intra randao mix length %d", len(intraRandaoMix))
 		}
 		return common.BytesToHash(intraRandaoMix), nil
 	}
-	needFromGenesis := true
-	var epochLookup uint64
-	if index <= epochSubIndex {
-		if epoch > (epochSubIndex - index) {
-			needFromGenesis = false
-			epochLookup = epoch - (epochSubIndex - index)
-		}
-	} else {
-		if epoch > (epochSubIndex + (r.cfg.EpochsPerHistoricalVector - index)) {
-			needFromGenesis = false
-			epochLookup = epoch - (epochSubIndex + (r.cfg.EpochsPerHistoricalVector - index))
-		}
+	distance := (epochSubIndex + r.cfg.EpochsPerHistoricalVector - index) % r.cfg.EpochsPerHistoricalVector
+	if distance > epoch || epoch-distance < r.genesisState.Slot()/r.cfg.SlotsPerEpoch {
+		return r.genesisState.GetRandaoMix(int(index)), nil
 	}
-	if epochLookup < r.genesisState.Slot()/r.cfg.SlotsPerEpoch {
-		needFromGenesis = true
-	}
-
-	if needFromGenesis {
-		return r.genesisState.GetRandaoMixes(epoch), nil
-	}
+	epochLookup := epoch - distance
 	mixBytes, err := kvGetter(kv.RandaoMixes, base_encoding.Encode64ToBytes4(epochLookup*r.cfg.SlotsPerEpoch))
 	if err != nil {
 		return common.Hash{}, err
+	}
+	if len(mixBytes) == 0 {
+		return common.Hash{}, fmt.Errorf("%w at epoch %d", ErrRandaoMixUnavailable, epochLookup)
 	}
 	if len(mixBytes) != 32 {
 		return common.Hash{}, fmt.Errorf("invalid mix length %d", len(mixBytes))
@@ -1053,15 +1038,11 @@ func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, kvGetter 
 	return common.BytesToHash(mixBytes), nil
 }
 
+var ErrRandaoMixUnavailable = errors.New("randao mix unavailable")
+
 func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
 	remainder := slot % clparams.SlotsPerDump
 	freshDumpSlot := slot - remainder
-
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
-
-	var compressed []byte
 
 	compressed, err := kvGetter(dumpTable, base_encoding.Encode64ToBytes4(freshDumpSlot))
 	if err != nil {
@@ -1069,16 +1050,12 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 	}
 
 	if len(compressed) != 0 {
-		if _, err := buffer.Write(compressed); err != nil {
-			return err
-		}
-		zstdReader, err := zstd.NewReader(buffer)
+		zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
 		if err != nil {
 			return err
 		}
-		defer zstdReader.Close()
-
 		sszEnc, err := io.ReadAll(zstdReader)
+		base_encoding.PutZstdReader(zstdReader)
 		if err != nil {
 			return err
 		}
@@ -1089,7 +1066,6 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 	}
 
 	for currSlot := freshDumpSlot + 1; currSlot <= slot; currSlot++ {
-		buffer.Reset()
 		key := base_encoding.Encode64ToBytes4(currSlot)
 		v, err := kvGetter(diffsTable, key)
 		if err != nil {
@@ -1099,58 +1075,24 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 			continue
 		}
 
-		if _, err := buffer.Write(v); err != nil {
-			return err
-		}
-
-		if err := base_encoding.ApplySSZQueueDiff(buffer, out, 0); err != nil {
-			return err
+		if err := base_encoding.ApplySSZQueueDiff(bytes.NewReader(v), out, 0); err != nil {
+			return fmt.Errorf("apply queue diff from table %s at slot %d: %w", diffsTable, currSlot, err)
 		}
 	}
 	return nil
 }
 
-// ReadRequiredQueueSSZ is like ReadQueueSSZ but returns ErrMissingGloasData if
-// the dump table contains no entry for the target dump slot. Used for GLOAS
-// queue fields where missing data indicates an unbackfilled DB upgrade rather
-// than a genuinely empty list.
-//
-// Unlike calling ReadQueueSSZ after a separate existence check, this function
-// reads the dump key exactly once and reuses the bytes for decoding.
-func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
-	freshDumpSlot := slot - slot%clparams.SlotsPerDump
-	compressed, err := kvGetter(dumpTable, base_encoding.Encode64ToBytes4(freshDumpSlot))
+// ReadRequiredQueueSSZ is like ReadQueueSSZ but returns ErrMissingGloasData when
+// the dump is missing and its slot is after forkSlot. A missing dump at or before
+// forkSlot is read as an empty list, because the first Gloas diff holds the full
+// list. The replay then starts at the dump slot, so a diff stored there is not skipped.
+func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot, forkSlot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
+	firstDiffSlot, err := readRequiredDump(kvGetter, slot, forkSlot, dumpTable, out)
 	if err != nil {
 		return err
 	}
-	if len(compressed) == 0 {
-		return fmt.Errorf("%w: table %s, slot %d", ErrMissingGloasData, dumpTable, slot)
-	}
 
-	// Decompress and decode the dump (reuse buffer pool).
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
-
-	if _, err := buffer.Write(compressed); err != nil {
-		return err
-	}
-	zstdReader, err := zstd.NewReader(buffer)
-	if err != nil {
-		return err
-	}
-	defer zstdReader.Close()
-	sszEnc, err := io.ReadAll(zstdReader)
-	if err != nil {
-		return err
-	}
-	if err := out.DecodeSSZ(sszEnc, 0); err != nil {
-		return err
-	}
-
-	// Apply per-slot diffs from dump+1 to target slot.
-	for currSlot := freshDumpSlot + 1; currSlot <= slot; currSlot++ {
-		buffer.Reset()
+	for currSlot := firstDiffSlot; currSlot <= slot; currSlot++ {
 		key := base_encoding.Encode64ToBytes4(currSlot)
 		v, err := kvGetter(diffsTable, key)
 		if err != nil {
@@ -1159,11 +1101,76 @@ func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors
 		if len(v) == 0 {
 			continue
 		}
-		if _, err := buffer.Write(v); err != nil {
+		if err := base_encoding.ApplySSZQueueDiff(bytes.NewReader(v), out, 0); err != nil {
+			return fmt.Errorf("apply queue diff from table %s at slot %d: %w", diffsTable, currSlot, err)
+		}
+	}
+	return nil
+}
+
+func readRequiredDump[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot, forkSlot uint64, dumpTable string, out *solid.ListSSZ[T]) (uint64, error) {
+	freshDumpSlot := slot - slot%clparams.SlotsPerDump
+	compressed, err := kvGetter(dumpTable, base_encoding.Encode64ToBytes4(freshDumpSlot))
+	if err != nil {
+		return 0, err
+	}
+
+	firstDiffSlot := freshDumpSlot + 1
+	if len(compressed) == 0 {
+		if freshDumpSlot > forkSlot {
+			return 0, fmt.Errorf("%w: table %s, slot %d", ErrMissingGloasData, dumpTable, slot)
+		}
+		firstDiffSlot = freshDumpSlot
+	} else {
+		zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
+		if err != nil {
+			return 0, err
+		}
+		sszEnc, err := io.ReadAll(zstdReader)
+		base_encoding.PutZstdReader(zstdReader)
+		if err != nil {
+			return 0, err
+		}
+		if err := out.DecodeSSZ(sszEnc, 0); err != nil {
+			return 0, err
+		}
+	}
+	return firstDiffSlot, nil
+}
+
+func ReadBuildersSSZ(kvGetter state_accessors.GetValFn, slot, forkSlot, registryLimit uint64, out *solid.ListSSZ[*cltypes.Builder]) error {
+	firstDiffSlot, err := readRequiredDump(kvGetter, slot, forkSlot, kv.BuildersDump, out)
+	if err != nil {
+		return err
+	}
+
+	for currSlot := slot - slot%clparams.SlotsPerDump; currSlot <= slot; currSlot++ {
+		key := base_encoding.Encode64ToBytes4(currSlot)
+		row, err := kvGetter(kv.Builders, key)
+		if err != nil {
 			return err
 		}
-		if err := base_encoding.ApplySSZQueueDiff(buffer, out, 0); err != nil {
+		if len(row) != 0 {
+			// A loaded dump already includes its own slot's row; checking that row still detects legacy history at dump slots.
+			if currSlot < firstDiffSlot {
+				err = state_accessors.CheckBuildersDiffRow(row)
+			} else {
+				err = state_accessors.ApplyBuildersDiff(row, out, registryLimit)
+			}
+			if err != nil {
+				return fmt.Errorf("read builders diff from table %s at slot %d: %w", kv.Builders, currSlot, err)
+			}
+			continue
+		}
+		if currSlot < forkSlot {
+			continue
+		}
+		slotData, err := kvGetter(kv.SlotData, key)
+		if err != nil {
 			return err
+		}
+		if len(slotData) != 0 {
+			return fmt.Errorf("%w: missing row from table %s at slot %d", state_accessors.ErrHistoryRebuildRequired, kv.Builders, currSlot)
 		}
 	}
 	return nil
@@ -1176,6 +1183,14 @@ func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors
 // rather than proceeding with zero-valued fields.
 var ErrMissingGloasData = errors.New("missing GLOAS snapshot data (re-antiquation required)")
 
+// ErrMissingHistoryVectorData is returned when a dense block_roots/state_roots
+// history slot has a missing (empty) snapshot entry. Per process_slot these
+// vectors are filled every slot (never empty), so an empty entry is a frozen
+// data gap, not valid state — the caller must re-antiquate past it rather than
+// fabricate a root. A non-empty entry of the wrong length is corruption and
+// surfaces as a hard error instead.
+var ErrMissingHistoryVectorData = errors.New("missing block/state root history (re-antiquation required)")
+
 // readCompressedSSZ reads a zstd-compressed SSZ value from the given table at the given slot,
 // decompresses it and decodes it into `out`. Used for per-slot GLOAS fields.
 //
@@ -1183,6 +1198,7 @@ var ErrMissingGloasData = errors.New("missing GLOAS snapshot data (re-antiquatio
 // slot, which prevents callers from silently operating on zero-valued state.
 func readCompressedSSZ[T interface {
 	DecodeSSZ(buf []byte, version int) error
+	EncodingSizeSSZ() int
 }](kvGetter state_accessors.GetValFn, slot uint64, table string, out T, version int) error {
 	compressed, err := kvGetter(table, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
@@ -1192,22 +1208,19 @@ func readCompressedSSZ[T interface {
 		return fmt.Errorf("%w: table %s, slot %d", ErrMissingGloasData, table, slot)
 	}
 
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
-
-	if _, err := buffer.Write(compressed); err != nil {
-		return err
-	}
-	zstdReader, err := zstd.NewReader(buffer)
+	zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
 	if err != nil {
 		return err
 	}
-	defer zstdReader.Close()
-
 	sszEnc, err := io.ReadAll(zstdReader)
+	base_encoding.PutZstdReader(zstdReader)
 	if err != nil {
 		return err
+	}
+	if table == kv.PtcWindowEpochTable {
+		if expected := out.EncodingSizeSSZ(); len(sszEnc) != expected {
+			return fmt.Errorf("table %s slot %d: corrupt SSZ length %d, expected %d", table, slot, len(sszEnc), expected)
+		}
 	}
 	return out.DecodeSSZ(sszEnc, version)
 }

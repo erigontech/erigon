@@ -18,7 +18,6 @@ package handlers
 
 import (
 	"encoding/hex"
-	"io"
 	"strings"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -34,32 +33,37 @@ import (
 // Since packets are just structs, they can be resent with no issue
 
 func (c *ConsensusHandlers) pingHandler(s network.Stream) error {
+	request := &cltypes.Ping{}
+	if err := ssz_snappy.DecodeAndReadNoForkDigestExact(s, request, clparams.Phase0Version, uint64(request.EncodingSizeSSZ())); err != nil {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+	}
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
 		Id: c.me.Seq(),
 	}, SuccessfulResponsePrefix)
 }
 
 func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
-	peerId := s.Conn().RemotePeer().String()
+	peerId := s.Conn().RemotePeer()
 	gid := &cltypes.Ping{}
 	if s.Conn().IsClosed() {
 		return nil
 	}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, gid, clparams.Phase0Version); err != nil {
+	if err := ssz_snappy.DecodeAndReadNoForkDigestExact(s, gid, clparams.Phase0Version, uint64(gid.EncodingSizeSSZ())); err != nil {
 		if strings.Contains(err.Error(), "stream reset") {
 			return nil
 		}
-		return err
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
+	log.Debug("Received goodbye message", "peer", peerId, "reason", gid.Id)
 
 	if gid.Id > 250 { // 250 is the status code for getting banned due to whatever reason
-		v, err := c.host.Peerstore().Get("AgentVersion", peerId)
+		v, err := c.host.Peerstore().Get(peerId, "AgentVersion")
 		if err == nil {
 			log.Warn("Received goodbye message from peer", "v", v)
 		}
 	}
 	// ignore the error from goodbye, we don't care about it
-	ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
+	_ = ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
 		Id: 1,
 	}, SuccessfulResponsePrefix)
 	return nil
@@ -122,12 +126,9 @@ func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
-	// Per eth2 spec the responder must read the peer's Status before replying.
-	// Read and discard the incoming request body so the stream advances correctly.
 	peerStatus := &cltypes.Status{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, peerStatus, clparams.Phase0Version); err != nil {
-		// If we cannot read the request, drain whatever is left and proceed.
-		_, _ = io.Copy(io.Discard, s)
+	if err := ssz_snappy.DecodeAndReadNoForkDigestExact(s, peerStatus, clparams.Phase0Version, uint64(peerStatus.EncodingSizeSSZ())); err != nil {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 	status := c.hs.Status()
 	status.EarliestAvailableSlot = nil
@@ -135,10 +136,9 @@ func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) statusV2Handler(s network.Stream) error {
-	// Per eth2 spec the responder must read the peer's Status before replying.
-	peerStatus := &cltypes.Status{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, peerStatus, clparams.Phase0Version); err != nil {
-		_, _ = io.Copy(io.Discard, s)
+	peerStatus := &cltypes.Status{EarliestAvailableSlot: new(uint64)}
+	if err := ssz_snappy.DecodeAndReadNoForkDigestExact(s, peerStatus, clparams.FuluVersion, uint64(peerStatus.EncodingSizeSSZ())); err != nil {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 	status := c.hs.Status()
 	forkDigest, err := c.ethClock.CurrentForkDigest()

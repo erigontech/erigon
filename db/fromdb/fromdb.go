@@ -35,7 +35,6 @@ func ChainConfig(db kv.RoDB) (cc *chain.Config) {
 		cc, err = rawdb.ReadChainConfig(tx, genesisBlockHash)
 		return err
 	})
-
 	if err != nil {
 		panic(fmt.Errorf("failed to read chain config: %w", err))
 	}

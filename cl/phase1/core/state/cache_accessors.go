@@ -22,7 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
@@ -46,12 +47,17 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 		return cachedIndicies
 	}
 
-	// Check global cache using block root at beginning of previous epoch
-	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1)
-	if err == nil {
-		if cachedIndicies, _, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok && len(cachedIndicies) > 0 {
+	decisionRoot, lookaheadRoot, ok := b.shufflingDecisionRoots(epoch)
+	if ok {
+		if cachedIndicies, hit := caches.ActiveValidatorsCacheGlobal.Get(epoch, decisionRoot); hit && len(cachedIndicies) > 0 {
 			b.activeValidatorsCache.Add(epoch, cachedIndicies)
 			return cachedIndicies
+		}
+		if lookaheadRoot != (common.Hash{}) {
+			if cachedIndicies, hit := caches.LookaheadActiveValidatorsCacheGlobal.Get(epoch, lookaheadRoot); hit && len(cachedIndicies) > 0 {
+				b.activeValidatorsCache.Add(epoch, cachedIndicies)
+				return cachedIndicies
+			}
 		}
 	}
 
@@ -63,10 +69,41 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 		}
 	}
 
-	// Store in both caches (totalActiveBalance will be set by _refreshActiveBalancesIfNeeded)
 	b.activeValidatorsCache.Add(epoch, indicies)
+	if lookaheadRoot != (common.Hash{}) {
+		caches.LookaheadActiveValidatorsCacheGlobal.Put(epoch, lookaheadRoot, indicies)
+	}
 
 	return indicies
+}
+
+func (b *CachingBeaconState) shufflingDecisionRoots(epoch uint64) (common.Hash, common.Hash, bool) {
+	if epoch < 2 {
+		return common.Hash{}, common.Hash{}, false
+	}
+	slotsPerEpoch := b.BeaconConfig().SlotsPerEpoch
+	decisionSlot := (epoch-1)*slotsPerEpoch - 1
+	if decisionSlot > b.Slot() {
+		return common.Hash{}, common.Hash{}, false
+	}
+	if decisionSlot < b.Slot() {
+		root, err := b.GetBlockRootAtSlot(decisionSlot)
+		return root, common.Hash{}, err == nil
+	}
+	header := b.LatestBlockHeader()
+	if header.Root == (common.Hash{}) {
+		return common.Hash{}, common.Hash{}, false
+	}
+	root, err := header.HashSSZ()
+	if err != nil {
+		return common.Hash{}, common.Hash{}, false
+	}
+	blockRoot := common.Hash(root)
+	index := int(decisionSlot % b.BeaconConfig().SlotsPerHistoricalRoot)
+	if b.BlockRoots().Get(index) != blockRoot {
+		return common.Hash{}, common.Hash{}, false
+	}
+	return blockRoot, b.StateRoots().Get(index), true
 }
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
@@ -93,26 +130,35 @@ func (b *CachingBeaconState) ComputeCommittee(
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconAttester)
+	seed := shuffling.GetSeed(mix, epoch, b.BeaconConfig().DomainBeaconAttester)
 
 	if shuffledIndicesInterface, ok := b.shuffledSetsCache.Get(seed); ok {
 		shuffledIndicies = shuffledIndicesInterface
 	} else {
-		blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1)
-		if cachedIndicies, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok && err == nil {
-			shuffledIndicies = cachedIndicies
-		} else {
-			// print stack trace
+		decisionRoot, lookaheadRoot, ok := b.shufflingDecisionRoots(epoch)
+		if ok {
+			if cachedIndicies, hit := caches.ShuffledIndiciesCacheGlobal.Get(epoch, decisionRoot); hit {
+				shuffledIndicies = cachedIndicies
+			} else if lookaheadRoot != (common.Hash{}) {
+				if cachedIndicies, hit := caches.LookaheadShuffledIndiciesCacheGlobal.Get(epoch, lookaheadRoot); hit {
+					shuffledIndicies = cachedIndicies
+				}
+			}
+		}
+		if shuffledIndicies == nil {
 			shuffledIndicies = make([]uint64, lenIndicies)
 			start := time.Now()
 			shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, slot)
 			shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
+			if lookaheadRoot != (common.Hash{}) {
+				caches.LookaheadShuffledIndiciesCacheGlobal.Put(epoch, lookaheadRoot, shuffledIndicies)
+			}
 		}
 
 		b.shuffledSetsCache.Add(seed, shuffledIndicies)
 	}
 
-	return shuffledIndicies[start:end], nil
+	return shuffledIndicies[start:end:end], nil
 }
 
 // GetBeaconProposerIndex updates cache and gets the beacon proposer index
@@ -139,7 +185,7 @@ func (b *CachingBeaconState) GetBeaconProposerIndices(epoch uint64) ([]uint64, e
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
+	seed := shuffling.GetSeed(mix, epoch, b.BeaconConfig().DomainBeaconProposer)
 
 	// Write the seed to an array.
 	seedArray := [32]byte{}
@@ -150,29 +196,25 @@ func (b *CachingBeaconState) GetBeaconProposerIndices(epoch uint64) ([]uint64, e
 
 // GetBeaconProposerIndexForSlot compute the proposer index for a specific slot
 func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64, error) {
-	epoch := slot / b.BeaconConfig().SlotsPerEpoch
-
-	if b.Version() >= clparams.FuluVersion {
-		stateEpoch := b.Slot() / b.BeaconConfig().SlotsPerEpoch
-		if epoch >= stateEpoch && epoch <= stateEpoch+b.BeaconConfig().MinSeedLookahead {
-			p := b.GetProposerLookahead()
-			index := int((epoch-stateEpoch)*b.BeaconConfig().SlotsPerEpoch + slot%b.BeaconConfig().SlotsPerEpoch)
-			return p.Get(index), nil
-		}
+	if proposer, ok := b.ProposerIndexFromLookahead(slot); ok {
+		return proposer, nil
 	}
 
+	epoch := slot / b.BeaconConfig().SlotsPerEpoch
 	hash := sha256.New()
 	beaconConfig := b.BeaconConfig()
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	input := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
+	input := shuffling.GetSeed(mix, epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotByteArray, slot)
 
 	// Add slot to the end of the input.
-	inputWithSlot := append(input[:], slotByteArray...)
+	inputWithSlot := make([]byte, 0, len(input)+len(slotByteArray))
+	inputWithSlot = append(inputWithSlot, input[:]...)
+	inputWithSlot = append(inputWithSlot, slotByteArray...)
 
 	// Calculate the hash.
 	hash.Write(inputWithSlot)
@@ -186,6 +228,20 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 		return shuffling.ComputeUnslashedBalanceWeightedProposerIndex(b.BeaconState, indices, seedArray)
 	}
 	return shuffling.ComputeProposerIndex(b.BeaconState, indices, seedArray)
+}
+
+// ProposerIndexFromLookahead returns the proposer of slot from proposer_lookahead when its epoch is in the lookahead window.
+func (b *CachingBeaconState) ProposerIndexFromLookahead(slot uint64) (uint64, bool) {
+	if b.Version() < clparams.FuluVersion {
+		return 0, false
+	}
+	epoch := slot / b.BeaconConfig().SlotsPerEpoch
+	stateEpoch := b.Slot() / b.BeaconConfig().SlotsPerEpoch
+	if epoch < stateEpoch || epoch-stateEpoch > b.BeaconConfig().MinSeedLookahead {
+		return 0, false
+	}
+	index := int((epoch-stateEpoch)*b.BeaconConfig().SlotsPerEpoch + slot%b.BeaconConfig().SlotsPerEpoch)
+	return b.GetProposerLookahead().Get(index), true
 }
 
 // BaseRewardPerIncrement return base rewards for processing sync committee and duties.
@@ -234,9 +290,9 @@ func (b *CachingBeaconState) CommitteeCount(epoch uint64) uint64 {
 func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 	data *solid.AttestationData,
 	inclusionDelay uint64,
+	parentSlot uint64,
 	skipAssert bool,
 ) ([]uint8, error) {
-
 	var justifiedCheckpoint solid.Checkpoint
 	// get checkpoint from epoch
 	if data.Target.Epoch == Epoch(b) {
@@ -273,7 +329,7 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 			}
 			payloadMatch = true
 		} else {
-			slotIndex := data.Slot % b.BeaconConfig().SlotsPerHistoricalRoot
+			slotIndex := parentSlot % b.BeaconConfig().SlotsPerHistoricalRoot
 			aval := b.GetExecutionPayloadAvailability()
 			payloadAvailable := aval.GetBitAt(int(slotIndex))
 			payloadMatch = (data.CommitteeIndex == 1) == payloadAvailable
@@ -359,9 +415,8 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 
 	// pre-gloas computation
 	beaconConfig := b.BeaconConfig()
-	optimizedHashFunc := utils.OptimizedSha256NotThreadSafe()
 	epoch := Epoch(b) + 1
-	//math.MaxUint8
+	// math.MaxUint8
 	activeValidatorIndicies := b.GetActiveValidatorsIndices(epoch)
 	activeValidatorCount := uint64(len(activeValidatorIndicies))
 	if activeValidatorCount == 0 {
@@ -371,11 +426,22 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, beaconConfig.DomainSyncCommittee)
+	seed := shuffling.GetSeed(mix, epoch, beaconConfig.DomainSyncCommittee)
 	i := uint64(0)
 	syncCommitteeSize := int(beaconConfig.SyncCommitteeSize)
 	syncCommitteePubKeys := make([]common.Bytes48, 0, syncCommitteeSize)
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(b.BeaconConfig(), seed)
+	maxEffectiveBalance := beaconConfig.MaxEffectiveBalanceForVersion(b.Version())
+	isElectra := b.Version() >= clparams.ElectraVersion
+	// Electra hashes seed+i/16 (one hash per 16 indices), pre-Electra seed+i/32.
+	groupSize := uint64(32)
+	if isElectra {
+		groupSize = 16
+	}
+	var buf [40]byte
+	copy(buf[:32], seed[:])
+	var cachedHash [32]byte
+	cachedGroup := ^uint64(0)
 	for len(syncCommitteePubKeys) < syncCommitteeSize {
 		shuffledIndex, err := shuffling.ComputeShuffledIndex(
 			b.BeaconConfig(),
@@ -383,7 +449,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 			activeValidatorCount,
 			seed,
 			preInputs,
-			optimizedHashFunc,
+			crypto.Sha256,
 		)
 		if err != nil {
 			return nil, err
@@ -394,27 +460,21 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 		if err != nil {
 			return nil, err
 		}
-		if b.Version() >= clparams.ElectraVersion {
-			// electra and after
-			// random_bytes = hash(seed + uint_to_bytes(i // 16))
-			// offset = i % 16 * 2
-			// random_value = bytes_to_uint64(random_bytes[offset:offset + 2])
-			buf := make([]byte, 8)
-			binary.LittleEndian.PutUint64(buf, i/16)
-			input := append(seed[:], buf...)
-			randomBytes := utils.Sha256(input)
+		// random_bytes = hash(seed + uint_to_bytes(i // groupSize)); one hash covers a whole group.
+		if group := i / groupSize; group != cachedGroup {
+			binary.LittleEndian.PutUint64(buf[32:], group)
+			cachedHash = crypto.Sha256(buf[:])
+			cachedGroup = group
+		}
+		if isElectra {
 			offset := (i % 16) * 2
-			randomValue := binary.LittleEndian.Uint16(randomBytes[offset : offset+2])
-			if validator.EffectiveBalance()*math.MaxUint16 >= beaconConfig.MaxEffectiveBalanceForVersion(b.Version())*uint64(randomValue) {
+			randomValue := binary.LittleEndian.Uint16(cachedHash[offset : offset+2])
+			if validator.EffectiveBalance()*math.MaxUint16 >= maxEffectiveBalance*uint64(randomValue) {
 				syncCommitteePubKeys = append(syncCommitteePubKeys, validator.PublicKey())
 			}
 		} else {
-			// Compute random byte.
-			buf := make([]byte, 8)
-			binary.LittleEndian.PutUint64(buf, i/32)
-			input := append(seed[:], buf...)
-			randomByte := uint64(utils.Sha256(input)[i%32])
-			if validator.EffectiveBalance()*math.MaxUint8 >= beaconConfig.MaxEffectiveBalanceForVersion(b.Version())*randomByte {
+			randomByte := uint64(cachedHash[i%32])
+			if validator.EffectiveBalance()*math.MaxUint8 >= maxEffectiveBalance*randomByte {
 				syncCommitteePubKeys = append(syncCommitteePubKeys, validator.PublicKey())
 			}
 		}
@@ -465,7 +525,7 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 			)
 		}
 
-		attestingIndices := []uint64{}
+		attestingIndices := make([]uint64, 0, len(committee))
 		for i, member := range committee {
 			bitIndex := i % 8
 			sliceIndex := i / 8
@@ -531,6 +591,10 @@ func (b *CachingBeaconState) GetValidatorActivationChurnLimit() uint64 {
 // Falls back to ComputePTC when the requested slot is outside the
 // ptcWindow's 3-epoch range (e.g. state advanced far past the parent).
 func (b *CachingBeaconState) GetPTC(slot uint64) ([]uint64, error) {
+	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
+	if epoch < b.BeaconConfig().GloasForkEpoch {
+		return nil, fmt.Errorf("GetPTC: slot %d is pre-Gloas", slot)
+	}
 	if b.Version() >= clparams.GloasVersion {
 		ptc, err := b.GetPTCFromWindow(slot)
 		if err == nil {
@@ -595,18 +659,20 @@ func (b *CachingBeaconState) ComputePTC(slot uint64) ([]uint64, error) {
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
 	mix := b.GetRandaoMix(int(mixPosition))
-	baseSeed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainPtcAttester)
+	baseSeed := shuffling.GetSeed(mix, epoch, b.BeaconConfig().DomainPtcAttester)
 
 	// seed = hash(get_seed(state, epoch, DOMAIN_PTC_ATTESTER) + uint_to_bytes(slot))
 	slotBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotBytes, slot)
-	seedInput := append(baseSeed[:], slotBytes...)
-	seed := utils.Sha256(seedInput)
+	seedInput := make([]byte, 0, len(baseSeed)+len(slotBytes))
+	seedInput = append(seedInput, baseSeed[:]...)
+	seedInput = append(seedInput, slotBytes...)
+	seed := crypto.Sha256(seedInput)
 
 	// Concatenate all committees for this slot in order
 	indices := []uint64{}
 	committeesPerSlot := b.CommitteeCount(epoch)
-	for i := uint64(0); i < committeesPerSlot; i++ {
+	for i := range committeesPerSlot {
 		committee, err := b.GetBeaconCommitee(slot, i)
 		if err != nil {
 			return nil, err
@@ -646,7 +712,7 @@ func (b *CachingBeaconState) InitializePtcWindow() error {
 	for epochOffset := uint64(0); epochOffset < 1+cfg.MinSeedLookahead; epochOffset++ {
 		epoch := currentEpoch + epochOffset
 		epochStartSlot := epoch * slotsPerEpoch
-		for i := uint64(0); i < slotsPerEpoch; i++ {
+		for i := range slotsPerEpoch {
 			slot := epochStartSlot + i
 			ptc, err := b.ComputePTC(slot)
 			if err != nil {
@@ -679,12 +745,10 @@ func (b *CachingBeaconState) GetIndexedPayloadAttestation(payloadAttestation *cl
 			indices = append(indices, index)
 		}
 	}
-	sort.SliceStable(indices, func(i, j int) bool {
-		return indices[i] < indices[j]
-	})
+	slices.Sort(indices)
 
 	return &cltypes.IndexedPayloadAttestation{
-		AttestingIndices: solid.NewRawUint64List(len(indices), indices),
+		AttestingIndices: solid.NewRawUint64List(int(b.BeaconConfig().PtcSize), indices),
 		Data:             payloadAttestation.Data,
 		Signature:        payloadAttestation.Signature,
 	}, nil

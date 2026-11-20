@@ -156,7 +156,7 @@ func bindDisperse(address common.Address, caller bind.ContractCaller, transactor
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Disperse *DisperseRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Disperse *DisperseRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Disperse.Contract.DisperseCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -167,7 +167,7 @@ func (_Disperse *DisperseRaw) Transfer(opts *bind.TransactOpts) (types.Transacti
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Disperse *DisperseRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Disperse *DisperseRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Disperse.Contract.DisperseTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -175,7 +175,7 @@ func (_Disperse *DisperseRaw) Transact(opts *bind.TransactOpts, method string, p
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Disperse *DisperseCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Disperse *DisperseCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Disperse.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -186,7 +186,7 @@ func (_Disperse *DisperseTransactorRaw) Transfer(opts *bind.TransactOpts) (types
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Disperse *DisperseTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Disperse *DisperseTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Disperse.Contract.contract.Transact(opts, method, params...)
 }
 

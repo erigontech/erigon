@@ -173,7 +173,7 @@ func bindKeyperSet(address common.Address, caller bind.ContractCaller, transacto
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_KeyperSet *KeyperSetRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_KeyperSet *KeyperSetRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _KeyperSet.Contract.KeyperSetCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -184,7 +184,7 @@ func (_KeyperSet *KeyperSetRaw) Transfer(opts *bind.TransactOpts) (types.Transac
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_KeyperSet *KeyperSetRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_KeyperSet *KeyperSetRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _KeyperSet.Contract.KeyperSetTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -192,7 +192,7 @@ func (_KeyperSet *KeyperSetRaw) Transact(opts *bind.TransactOpts, method string,
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_KeyperSet *KeyperSetCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_KeyperSet *KeyperSetCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _KeyperSet.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -203,7 +203,7 @@ func (_KeyperSet *KeyperSetTransactorRaw) Transfer(opts *bind.TransactOpts) (typ
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_KeyperSet *KeyperSetTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_KeyperSet *KeyperSetTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _KeyperSet.Contract.contract.Transact(opts, method, params...)
 }
 
@@ -211,7 +211,7 @@ func (_KeyperSet *KeyperSetTransactorRaw) Transact(opts *bind.TransactOpts, meth
 //
 // Solidity: function getMember(uint64 index) view returns(address)
 func (_KeyperSet *KeyperSetCaller) GetMember(opts *bind.CallOpts, index uint64) (common.Address, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSet.contract.Call(opts, &out, "getMember", index)
 
 	if err != nil {
@@ -242,7 +242,7 @@ func (_KeyperSet *KeyperSetCallerSession) GetMember(index uint64) (common.Addres
 //
 // Solidity: function getMembers() view returns(address[])
 func (_KeyperSet *KeyperSetCaller) GetMembers(opts *bind.CallOpts) ([]common.Address, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSet.contract.Call(opts, &out, "getMembers")
 
 	if err != nil {
@@ -273,7 +273,7 @@ func (_KeyperSet *KeyperSetCallerSession) GetMembers() ([]common.Address, error)
 //
 // Solidity: function getNumMembers() view returns(uint64)
 func (_KeyperSet *KeyperSetCaller) GetNumMembers(opts *bind.CallOpts) (uint64, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSet.contract.Call(opts, &out, "getNumMembers")
 
 	if err != nil {
@@ -304,7 +304,7 @@ func (_KeyperSet *KeyperSetCallerSession) GetNumMembers() (uint64, error) {
 //
 // Solidity: function getPublisher() view returns(address)
 func (_KeyperSet *KeyperSetCaller) GetPublisher(opts *bind.CallOpts) (common.Address, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSet.contract.Call(opts, &out, "getPublisher")
 
 	if err != nil {
@@ -335,7 +335,7 @@ func (_KeyperSet *KeyperSetCallerSession) GetPublisher() (common.Address, error)
 //
 // Solidity: function getThreshold() view returns(uint64)
 func (_KeyperSet *KeyperSetCaller) GetThreshold(opts *bind.CallOpts) (uint64, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSet.contract.Call(opts, &out, "getThreshold")
 
 	if err != nil {
@@ -366,7 +366,7 @@ func (_KeyperSet *KeyperSetCallerSession) GetThreshold() (uint64, error) {
 //
 // Solidity: function isAllowedToBroadcastEonKey(address a) view returns(bool)
 func (_KeyperSet *KeyperSetCaller) IsAllowedToBroadcastEonKey(opts *bind.CallOpts, a common.Address) (bool, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSet.contract.Call(opts, &out, "isAllowedToBroadcastEonKey", a)
 
 	if err != nil {
@@ -397,7 +397,7 @@ func (_KeyperSet *KeyperSetCallerSession) IsAllowedToBroadcastEonKey(a common.Ad
 //
 // Solidity: function isFinalized() view returns(bool)
 func (_KeyperSet *KeyperSetCaller) IsFinalized(opts *bind.CallOpts) (bool, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSet.contract.Call(opts, &out, "isFinalized")
 
 	if err != nil {
@@ -428,7 +428,7 @@ func (_KeyperSet *KeyperSetCallerSession) IsFinalized() (bool, error) {
 //
 // Solidity: function owner() view returns(address)
 func (_KeyperSet *KeyperSetCaller) Owner(opts *bind.CallOpts) (common.Address, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSet.contract.Call(opts, &out, "owner")
 
 	if err != nil {
@@ -812,11 +812,11 @@ func (_KeyperSet *KeyperSetFilterer) OwnershipTransferredEventID() common.Hash {
 // Solidity: event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
 func (_KeyperSet *KeyperSetFilterer) FilterOwnershipTransferred(opts *bind.FilterOpts, previousOwner []common.Address, newOwner []common.Address) (*KeyperSetOwnershipTransferredIterator, error) {
 
-	var previousOwnerRule []interface{}
+	var previousOwnerRule []any
 	for _, previousOwnerItem := range previousOwner {
 		previousOwnerRule = append(previousOwnerRule, previousOwnerItem)
 	}
-	var newOwnerRule []interface{}
+	var newOwnerRule []any
 	for _, newOwnerItem := range newOwner {
 		newOwnerRule = append(newOwnerRule, newOwnerItem)
 	}
@@ -833,11 +833,11 @@ func (_KeyperSet *KeyperSetFilterer) FilterOwnershipTransferred(opts *bind.Filte
 // Solidity: event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
 func (_KeyperSet *KeyperSetFilterer) WatchOwnershipTransferred(opts *bind.WatchOpts, sink chan<- *KeyperSetOwnershipTransferred, previousOwner []common.Address, newOwner []common.Address) (event.Subscription, error) {
 
-	var previousOwnerRule []interface{}
+	var previousOwnerRule []any
 	for _, previousOwnerItem := range previousOwner {
 		previousOwnerRule = append(previousOwnerRule, previousOwnerItem)
 	}
-	var newOwnerRule []interface{}
+	var newOwnerRule []any
 	for _, newOwnerItem := range newOwner {
 		newOwnerRule = append(newOwnerRule, newOwnerItem)
 	}

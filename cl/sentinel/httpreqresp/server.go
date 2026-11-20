@@ -19,6 +19,7 @@ package httpreqresp
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -34,6 +35,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -46,29 +48,29 @@ const (
 )
 
 const (
-	// maxResponseChunks is MAX_REQUEST_BLOCKS; with MaxChunkSize it sets the absolute
-	// multi-chunk ceiling (maxMultiChunkResponse).
-	maxResponseChunks = 1024
+	// MaxResponseChunks is the most blocks or envelopes a request asks for. With MAX_PAYLOAD_SIZE it sets the
+	// byte ceiling (maxMultiChunkResponse) of every multi-chunk response; blobs and columns are small enough to fit.
+	MaxResponseChunks = 64
 	// maxSingleObjectResponse bounds single-chunk protocols (status, ping, metadata,
 	// goodbye, light-client singles), whose responses are at most tens of KiB.
 	maxSingleObjectResponse = 1024 * 1024
 )
 
-// maxMultiChunkResponse is the on-wire MAX_REQUEST_BLOCKS × MAX_CHUNK_SIZE ceiling: the backstop a
+// maxMultiChunkResponse is the on-wire MaxResponseChunks × MAX_PAYLOAD_SIZE ceiling: the backstop a
 // caller-supplied multi-chunk budget is clamped to, so a miscomputed or overflowed budget can't make
-// the handler stream more than a spec-maximal response.
-var maxMultiChunkResponse = communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), maxResponseChunks)
+// the handler stream more than that.
+var maxMultiChunkResponse = communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), MaxResponseChunks)
 
 // ErrResponseTooLarge is surfaced by the response body when a peer's response exceeds the per-topic
 // size cap. Callers treat it as a peer failure rather than a valid (truncated) response.
 var ErrResponseTooLarge = errors.New("reqresp: response exceeds size cap")
 
-// maxResponseBodySize is the byte ceiling the caller may read for a response on the given topic.
+// MaxResponseBodySize is the byte ceiling the caller may read for a response on the given topic.
 // Single-object protocols, and any request that arrives without a caller budget (an empty request,
 // or a multi-chunk caller that failed to size one), get the tight single-object cap — never the
-// multi-GiB ceiling, so a missing budget surfaces as ErrResponseTooLarge rather than an OOM. A
+// multi-chunk ceiling, so a missing budget surfaces as ErrResponseTooLarge rather than an OOM. A
 // multi-chunk caller that does supply a budget gets it, clamped to maxMultiChunkResponse.
-func maxResponseBodySize(topic string, maxBytes uint64) uint64 {
+func MaxResponseBodySize(topic string, maxBytes uint64) uint64 {
 	if maxBytes == 0 || !communication.IsMultiChunkProtocol(topic) {
 		return maxSingleObjectResponse
 	}
@@ -150,6 +152,10 @@ func Do(handler http.Handler, r *http.Request) (*http.Response, error) {
 	}()
 	select {
 	case resp := <-resultCh:
+		if err := r.Context().Err(); err != nil {
+			resp.Body.Close()
+			return nil, err
+		}
 		return resp, nil
 	case <-r.Context().Done():
 		// The handler may still publish a response whose body owns a live stream; close it once
@@ -254,7 +260,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// Parse comma-separated topics for multistream protocol negotiation.
 		// The first topic is preferred; libp2p picks the first one the peer supports.
 		var protocolIDs []protocol.ID
-		for _, t := range strings.Split(topic, ",") {
+		for t := range strings.SplitSeq(topic, ",") {
 			if t = strings.TrimSpace(t); t != "" {
 				protocolIDs = append(protocolIDs, protocol.ID(t))
 			}
@@ -265,10 +271,18 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 			http.Error(w, "can't Connect to Peer: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		cancelled := make(chan struct{})
+		stopCancellation := context.AfterFunc(r.Context(), func() {
+			defer close(cancelled)
+			_ = stream.Reset()
+		})
 		// The successful path hands the stream off to the response body, which closes it; on every
 		// other path this deferred close releases it.
 		streamTransferred := false
 		defer func() {
+			if !stopCancellation() {
+				<-cancelled
+			}
 			if !streamTransferred {
 				stream.Close()
 			}
@@ -276,7 +290,9 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// Update topic to the actually negotiated protocol so callers know which version was used.
 		topic = string(stream.Protocol())
 		// this write deadline is not part of the eth p2p spec, but we are implying it.
-		stream.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if err := stream.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			log.Trace("[httpreqresp] failed to set write deadline", "err", err)
+		}
 		var bytesWritten int64
 		// When multiple protocols are offered, the request body matches the
 		// first (preferred) protocol. If the peer negotiated a different
@@ -303,10 +319,12 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		}
 		code := make([]byte, 1)
 		// we have 5 seconds to read the next byte. this is the 5 TTFB_TIMEOUT in the spec
-		stream.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if err := stream.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			log.Trace("[httpreqresp] failed to set read deadline", "err", err)
+		}
 		n, err := io.ReadFull(stream, code)
 		synthesizedEmptySuccess := false
-		if err == io.EOF && n == 0 && communication.IsMultiChunkProtocol(topic) {
+		if err == io.EOF && n == 0 && communication.IsMultiChunkProtocol(topic) { //nolint:errorlint // intentional bare sentinel check
 			synthesizedEmptySuccess = true
 		} else if err != nil {
 			http.Error(w, "Read Code: "+err.Error()+", readBytes="+strconv.Itoa(n)+", bytesWritten="+strconv.FormatInt(bytesWritten, 10)+", contentLength="+strconv.FormatInt(r.ContentLength, 10)+", topic="+topic+", peer="+peerIdBase58, http.StatusBadRequest)
@@ -332,11 +350,13 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		}
 		// the deadline is 10 * expected chunk count, which the user can send. otherwise we will only wait 10 seconds
 		// this is technically incorrect, and more aggressive than the network might like.
-		stream.SetReadDeadline(time.Now().Add(10 * time.Second * time.Duration(chunks)))
+		if err := stream.SetReadDeadline(time.Now().Add(10 * time.Second * time.Duration(chunks))); err != nil {
+			log.Trace("[httpreqresp] failed to set read deadline", "err", err)
+		}
 		// Stream the response through a per-topic size cap instead of buffering it: a compliant
 		// response passes through untouched, a flood is bounded at the cap and the caller sees
 		// ErrResponseTooLarge.
-		limit := int64(maxResponseBodySize(topic, maxBytes))
+		limit := int64(MaxResponseBodySize(topic, maxBytes))
 		cw.setStreamingBody(&streamBody{Reader: newMaxBytesReader(stream, limit), Closer: stream})
 		streamTransferred = true
 	}

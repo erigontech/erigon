@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -66,12 +68,11 @@ func TestAWriteAfterMergeFailsInsteadOfCrashing(t *testing.T) {
 // and dead for WRITING, and the pre-exec round that still owned it killed the node on every
 // 9,600-order soak pass.
 func TestTakingTheWritersEmptiesTheSource(t *testing.T) {
-	src := &TemporalMemBatch{}
+	src := &TemporalMemBatch{storage: btree2.NewMap[string, []dataWithTxNum](128)}
 	for i := range src.domainWriters {
 		src.domainWriters[i] = &DomainBufferedWriter{discard: true}
 	}
-	src.forkableWriters = map[kv.ForkableId]kv.BufferedWriter{}
-	dst := &TemporalMemBatch{pastForkableWriters: map[kv.ForkableId][]kv.BufferedWriter{}}
+	dst := &TemporalMemBatch{storage: btree2.NewMap[string, []dataWithTxNum](128)}
 
 	// Untouched: a source kept alive keeps every writer and is not marked merged away.
 	if src.mergedAway.Load() {
@@ -83,7 +84,9 @@ func TestTakingTheWritersEmptiesTheSource(t *testing.T) {
 		}
 	}
 
-	dst.takeWritersFrom(src)
+	if err := dst.Merge(src, false); err != nil {
+		t.Fatal(err)
+	}
 
 	if !src.mergedAway.Load() {
 		t.Error("the source was emptied but not marked merged away, so the error cannot say why")

@@ -164,10 +164,10 @@ func TestInsertingALocallySealedBlockAllocatesNoTxnIds(t *testing.T) {
 			"allocated the block's transactions a second range", committed, moduleContext)
 
 	// The block is still accepted and canonicalised, and the chain goes on from it.
-	vr, err := validateChain(ctx, exec, br.Block.Header())
+	vr, err := validateChain(ctx, exec, br.Block)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "newPayload: %s", vr.ValidationError)
-	ur, err := updateForkChoice(ctx, exec, br.Block.Header())
+	ur, err := forkChoiceTo(ctx, exec, br.Block.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status)
 

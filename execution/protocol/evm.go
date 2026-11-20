@@ -39,20 +39,12 @@ import (
 
 // NewEVMBlockContext creates a new context for use in the EVM.
 func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (common.Hash, error),
-	engine rules.EngineReader, author accounts.Address, config *chain.Config) evmtypes.BlockContext {
+	engine rules.EngineReader, author accounts.Address, config *chain.Config,
+) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary accounts.Address
 	if author.IsNil() {
-		if config.Bor != nil && config.Bor.IsRio(header.Number.Uint64()) {
-			beneficiary = config.Bor.CalculateCoinbase(header.Number.Uint64())
-
-			// In case the coinbase is not set post Rio, use the default coinbase
-			if beneficiary.IsNil() {
-				beneficiary, _ = engine.Author(header)
-			}
-		} else {
-			beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
-		}
+		beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
 	} else {
 		beneficiary = author
 	}
@@ -84,7 +76,6 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
 		transferFunc = misc.Transfer
-		postApplyMessageFunc = misc.LogSelfDestructedAccounts
 	}
 
 	var slotNumber uint64
@@ -122,7 +113,8 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
 func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) (*types.Header, error)) func(n uint64) (common.Hash, error) {
-	refNumber := ref.Number.Uint64() - 1
+	blockNumber := ref.Number.Uint64()
+	refNumber := blockNumber - 1
 	refHash := ref.ParentHash
 	lastKnownNumber := refNumber
 	lastKnownHash := refHash
@@ -133,6 +125,9 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 	hashLookupCache.Add(refNumber, refHash)
 
 	return func(n uint64) (common.Hash, error) {
+		if n >= blockNumber {
+			return common.Hash{}, nil
+		}
 		hashLookupCacheLock.Lock()
 		defer hashLookupCacheLock.Unlock()
 
@@ -152,9 +147,6 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 		}
 
 		if n > lastKnownNumber {
-			if n > refNumber {
-				return common.Hash{}, fmt.Errorf("block number out of range: max=%d", refNumber)
-			}
 			lastKnownNumber = refNumber
 			lastKnownHash = refHash
 		}
@@ -168,25 +160,27 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 				}
 
 				lastKnownHash = hash
-				lastKnownNumber = lastKnownNumber - 1
+				lastKnownNumber--
 				if n == lastKnownNumber {
 					//fmt.Println("GH-CA1", lastKnownNumber, lastKnownHash)
 					return lastKnownHash, nil
 				}
 			}
 
+			hash, num := lastKnownHash, lastKnownNumber
 			header, err := func() (*types.Header, error) {
-				hash, num := lastKnownHash, lastKnownNumber
 				hashLookupCacheLock.Unlock()
 				defer hashLookupCacheLock.Lock()
 				return getHeader(hash, num)
 			}()
-
 			if err != nil {
 				return common.Hash{}, err
 			}
 			if header == nil {
-				break
+				return common.Hash{}, fmt.Errorf("header %d %x not found", num, hash)
+			}
+			if header.Number.Uint64() != num {
+				return common.Hash{}, fmt.Errorf("header %x has number %d, want %d", hash, header.Number.Uint64(), num)
 			}
 			lastKnownHash = header.ParentHash
 			lastKnownNumber = header.Number.Uint64() - 1
@@ -197,8 +191,6 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 				return lastKnownHash, nil
 			}
 		}
-
-		return common.Hash{}, nil
 	}
 }
 

@@ -31,6 +31,7 @@ var (
 	// as opposed to from a JUMPSUB instruction
 	ErrInvalidSubroutineEntry   = errors.New("invalid subroutine entry")
 	ErrOutOfGas                 = errors.New("out of gas")
+	ErrRuntimeOutOfGas          = fmt.Errorf("runtime: %w", ErrOutOfGas)
 	ErrCodeStoreOutOfGas        = errors.New("contract creation code storage out of gas")
 	ErrDepth                    = errors.New("max call depth exceeded")
 	ErrInsufficientBalance      = errors.New("insufficient balance for transfer")
@@ -91,7 +92,12 @@ func (e *ErrInvalidOpCode) Error() string {
 	return fmt.Sprintf("invalid opcode: %s", e.opcode)
 }
 
-func (m *ErrInvalidOpCode) Is(target error) bool {
+// Undefined reports whether the opcode itself is undefined, rather than its immediate operand invalid.
+func (e *ErrInvalidOpCode) Undefined() bool {
+	return e.operand == nil
+}
+
+func (e *ErrInvalidOpCode) Is(target error) bool {
 	_, is := target.(*ErrInvalidOpCode)
 	return is
 }

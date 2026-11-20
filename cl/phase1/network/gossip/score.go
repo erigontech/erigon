@@ -250,13 +250,9 @@ func (g *GossipManager) defaultSyncSubnetTopicParams(activeValidators uint64) *p
 	firstDecayDuration := 1 * g.oneEpochDuration()
 	meshDecayDuration := 4 * g.oneEpochDuration()
 
-	rate := subnetWeight * 2 / gossip.GossipSubD
-	if rate == 0 {
-		log.Warn("rate is 0, skipping initializing topic scoring")
-		return nil
-	}
+	rate := float64(subnetWeight) * 2 / gossip.GossipSubD
 	// Determine expected first deliveries based on the message rate.
-	firstMessageCap, err := decayLimit(g.scoreDecay(firstDecayDuration), float64(rate))
+	firstMessageCap, err := decayLimit(g.scoreDecay(firstDecayDuration), rate)
 	if err != nil {
 		log.Warn("Skipping initializing topic scoring")
 		return nil
@@ -303,7 +299,7 @@ func decayLimit(decayRate, rate float64) (float64, error) {
 func (g *GossipManager) committeeCountPerSlot() uint64 {
 	activeValidatorCount := g.activeIndicies
 	cfg := g.beaconConfig
-	var committeesPerSlot = activeValidatorCount / cfg.SlotsPerEpoch / cfg.TargetCommitteeSize
+	committeesPerSlot := activeValidatorCount / cfg.SlotsPerEpoch / cfg.TargetCommitteeSize
 
 	if committeesPerSlot > cfg.MaxCommitteesPerSlot {
 		return cfg.MaxCommitteesPerSlot
@@ -359,13 +355,9 @@ func (g *GossipManager) defaultAggregateSubnetTopicParams() *pubsub.TopicScorePa
 		firstDecayDuration = 4 * g.oneEpochDuration()
 		meshDecayDuration = 16 * g.oneEpochDuration()
 	}
-	rate := numPerSlot * 2 / gossip.GossipSubD
-	if rate == 0 {
-		log.Trace("rate is 0, skipping initializing topic scoring")
-		return nil
-	}
+	rate := float64(numPerSlot) * 2 / gossip.GossipSubD
 	// Determine expected first deliveries based on the message rate.
-	firstMessageCap, err := decayLimit(g.scoreDecay(firstDecayDuration), float64(rate))
+	firstMessageCap, err := decayLimit(g.scoreDecay(firstDecayDuration), rate)
 	if err != nil {
 		log.Trace("skipping initializing topic scoring", "err", err)
 		return nil

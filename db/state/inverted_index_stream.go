@@ -79,6 +79,59 @@ func (it *InvertedIdxStreamFiles) next() uint64 {
 	return n
 }
 
+func (it *InvertedIdxStreamFiles) CanSeek() bool { return it.limit < 0 }
+
+// seekLinearSteps is how many elements Seek steps over instead of searching: a search in an Elias-Fano
+// sequence costs more than a few steps, and targets that close are common when both inputs are dense.
+const seekLinearSteps = 16
+
+func (it *InvertedIdxStreamFiles) before(v uint64) bool {
+	asc := bool(it.orderAscend)
+	return it.err == nil && it.hasNext && (asc && it.nextN < v || !asc && it.nextN > v)
+}
+
+// near estimates from the density of the current file whether v is at most seekLinearSteps elements
+// ahead. A v past the file is never near: stepping there would look the key up in files Seek drops.
+func (it *InvertedIdxStreamFiles) near(v uint64) bool {
+	if it.seqIt == nil {
+		return false
+	}
+	lo, hi := it.seq.Min(), it.seq.Max()
+	asc := bool(it.orderAscend)
+	if asc && v > hi || !asc && v < lo {
+		return false
+	}
+	dist := max(v, it.nextN) - min(v, it.nextN)
+	return dist <= seekLinearSteps*(hi-lo+1)/it.seq.Count()
+}
+
+// Seek drops the files that end before v without looking the key up in them, then seeks inside the current file.
+func (it *InvertedIdxStreamFiles) Seek(v uint64) error {
+	if it.near(v) {
+		for i := 0; i < seekLinearSteps && it.before(v); i++ {
+			it.advanceInFiles()
+		}
+	}
+	if !it.before(v) {
+		return it.err
+	}
+	it.startTxNum = int(v)
+	asc := bool(it.orderAscend)
+	for len(it.stack) > 0 {
+		top := it.stack[len(it.stack)-1]
+		if asc && top.endTxNum > v || !asc && top.startTxNum <= v {
+			break
+		}
+		top.reader.Close()
+		it.stack = it.stack[:len(it.stack)-1]
+	}
+	if it.seqIt != nil {
+		it.seqIt.(interface{ Seek(uint64) }).Seek(v)
+	}
+	it.advanceInFiles()
+	return it.err
+}
+
 func (it *InvertedIdxStreamFiles) advanceInFiles() {
 	for {
 		for it.seqIt == nil {
@@ -110,8 +163,8 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 			it.seqIt = seqIt
 		}
 
-		//Asc:  [from, to) AND from < to
-		//Desc: [from, to) AND from > to
+		// Asc:  [from, to) AND from < to
+		// Desc: [from, to) AND from > to
 		if it.orderAscend {
 			for it.seqIt.HasNext() {
 				n, err := it.seqIt.Next()
@@ -120,7 +173,7 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 					return
 				}
 				isBeforeRange := int(n) < it.startTxNum
-				if isBeforeRange { //skip
+				if isBeforeRange { // skip
 					continue
 				}
 				isAfterRange := it.endTxNum >= 0 && int(n) >= it.endTxNum
@@ -140,7 +193,7 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 					return
 				}
 				isAfterRange := it.startTxNum >= 0 && int(n) > it.startTxNum
-				if isAfterRange { //skip
+				if isAfterRange { // skip
 					continue
 				}
 				isBeforeRange := it.endTxNum >= 0 && int(n) <= it.endTxNum

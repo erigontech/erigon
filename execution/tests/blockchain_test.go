@@ -21,10 +21,12 @@ package executiontests
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"maps"
 	"math"
 	"math/big"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -37,11 +39,15 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	libchain "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -49,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
@@ -61,7 +68,7 @@ var (
 
 // makeBlockChain creates a deterministic chain of blocks rooted at parent.
 func makeBlockChain(parent *types.Block, n int, m *execmoduletester.ExecModuleTester, seed int) *blockgen.ChainPack {
-	chain, _ := blockgen.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, n, func(i int, b *blockgen.BlockGen) {
+	chain, _ := m.GenerateChainFrom(parent, n, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{0: byte(seed), 19: byte(i)})
 	})
 	return chain
@@ -106,7 +113,7 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 	})
 	require.NoError(t, err)
 
-	canonicalMock.DB.View(ctx, func(tx kv.Tx) error {
+	err = canonicalMock.DB.View(ctx, func(tx kv.Tx) error {
 		if hash2, _, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash: %v", err)
 		}
@@ -252,10 +259,10 @@ func testShorterFork(t *testing.T) {
 
 // Tests that given a starting canonical chain of a given size, creating longer
 // forks do take canonical ownership.
-func TestLongerForkHeaders(t *testing.T) { testLongerFork(t, false) }
-func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t, true) }
+func TestLongerForkHeaders(t *testing.T) { testLongerFork(t) }
+func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t) }
 
-func testLongerFork(t *testing.T, full bool) {
+func testLongerFork(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -326,11 +333,11 @@ func TestReorgShortBlocks(t *testing.T) {
 func testReorgShort(t *testing.T) {
 	t.Parallel()
 	long := make([]int64, 96)
-	for i := 0; i < len(long); i++ {
+	for i := range long {
 		long[i] = 60
 	}
 	short := make([]int64, len(long)-1)
-	for i := 0; i < len(short); i++ {
+	for i := range short {
 		short[i] = -9
 	}
 	testReorg(t, long, short, 12746192)
@@ -341,13 +348,13 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
 	// Insert one chain first, then the other
-	firstChain, err := blockgen.GenerateChain(m.ChainConfig, m.Current(nil), m.Engine, m.DB, len(first), func(i int, b *blockgen.BlockGen) {
+	firstChain, err := m.GenerateChainFrom(m.Current(nil), len(first), func(i int, b *blockgen.BlockGen) {
 		b.OffsetTime(first[i])
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	secondChain, err := blockgen.GenerateChain(m.ChainConfig, m.Current(nil), m.Engine, m.DB, len(second), func(i int, b *blockgen.BlockGen) {
+	secondChain, err := m.GenerateChainFrom(m.Current(nil), len(second), func(i int, b *blockgen.BlockGen) {
 		b.OffsetTime(second[i])
 	})
 	if err != nil {
@@ -493,7 +500,7 @@ func TestChainTxReorgs(t *testing.T) {
 	//  - futureAdd: transaction added after the reorg has already finished
 	var pastAdd, freshAdd, futureAdd types.Transaction
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, gen *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(3, func(i int, gen *blockgen.BlockGen) {
 		switch i {
 		case 0:
 			pastDrop, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr2), addr2, uint256.NewInt(1000), params.TxGas, nil, nil), *signer, key2)
@@ -519,7 +526,7 @@ func TestChainTxReorgs(t *testing.T) {
 	}
 
 	// overwrite the old chain
-	chain, err = blockgen.GenerateChain(m2.ChainConfig, m2.Genesis, m2.Engine, m2.DB, 5, func(i int, gen *blockgen.BlockGen) {
+	chain, err = m2.GenerateChain(5, func(i int, gen *blockgen.BlockGen) {
 		switch i {
 		case 0:
 			pastAdd, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr3), addr3, uint256.NewInt(1000), params.TxGas, nil, nil), *signer, key3)
@@ -630,7 +637,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 	t.Parallel()
 	m := newCanonical(t, 0)
 
-	chain, err2 := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {})
+	chain, err2 := m.GenerateChain(10, func(i int, gen *blockgen.BlockGen) {})
 	if err2 != nil {
 		t.Fatalf("generate chain: %v", err2)
 	}
@@ -686,7 +693,7 @@ func TestEIP155Transition(t *testing.T) {
 	)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chain, chainErr := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
+	chain, chainErr := m.GenerateChain(4, func(i int, block *blockgen.BlockGen) {
 		var (
 			tx      types.Transaction
 			err     error
@@ -754,12 +761,10 @@ func TestEIP155Transition(t *testing.T) {
 
 	// generate an invalid chain id transaction
 	config := &libchain.Config{ChainID: uint256.NewInt(2), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)}
-	chain, chainErr = blockgen.GenerateChain(config, chain.TopBlock, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
-		var (
-			basicTx = func(signer types.Signer) (types.Transaction, error) {
-				return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
-			}
-		)
+	chain, chainErr = m.GenerateChainWithConfig(config, chain.TopBlock, 4, func(i int, block *blockgen.BlockGen) {
+		basicTx := func(signer types.Signer) (types.Transaction, error) {
+			return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
+		}
 		if i == 0 {
 			tx, txErr := basicTx(*types.LatestSigner(config))
 			if txErr != nil {
@@ -806,7 +811,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithPruneMode(pm))
 
 	head := uint64(4)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, int(head), func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(int(head), func(i int, block *blockgen.BlockGen) {
 		var (
 			tx      types.Transaction
 			err     error
@@ -851,7 +856,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		return fmt.Errorf("generate blocks: %w", err)
 	}
 
-	if err = m.InsertChain(chain); err != nil {
+	if err := m.InsertChain(chain); err != nil {
 		return err
 	}
 
@@ -987,7 +992,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
 		var (
 			txn    types.Transaction
 			err    error
@@ -1086,7 +1091,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 
 	var theAddr common.Address
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
 		switch i {
 		case 0:
@@ -1123,24 +1128,28 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
+	defer st.Close()
 	require.NoError(t, err)
 	exist, err := st.Exist(accounts.InternAddress(theAddr))
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should've been removed")
 
 	st = state.New(m.NewHistoryStateReader(1, tx))
+	defer st.Close()
 	require.NoError(t, err)
 	exist, err = st.Exist(accounts.InternAddress(theAddr))
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #0")
 
 	st = state.New(m.NewHistoryStateReader(2, tx))
+	defer st.Close()
 	require.NoError(t, err)
 	exist, err = st.Exist(accounts.InternAddress(theAddr))
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #1")
 
 	st = state.New(m.NewHistoryStateReader(3, tx))
+	defer st.Close()
 	require.NoError(t, err)
 	exist, err = st.Exist(accounts.InternAddress(theAddr))
 	require.NoError(t, err)
@@ -1161,15 +1170,15 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	// Generate a canonical chain to act as the main dataset
 	m, m2 := execmoduletester.New(t), execmoduletester.New(t)
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *blockgen.BlockGen) { b.SetCoinbase(common.Address{1}) })
+	chain, err := m.GenerateChain(64, func(i int, b *blockgen.BlockGen) { b.SetCoinbase(common.Address{1}) })
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
 	// Generate a bunch of fork blocks, each side forking from the canonical chain
 	forks := make([]*blockgen.ChainPack, chain.Length())
-	for i := 0; i < len(forks); i++ {
-		fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, i+1, func(j int, b *blockgen.BlockGen) {
+	for i := range forks {
+		fork, err := m.GenerateChain(i+1, func(j int, b *blockgen.BlockGen) {
 			if j == i {
 				b.SetCoinbase(common.Address{2})
 				b.OffsetTime(-2) // By reducing time, we increase difficulty of the fork, so that it can overwrite the canonical chain
@@ -1234,13 +1243,13 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	// MaxReorgDepth, so the inserting node needs changesets for every block.
 	m, m2 := execmoduletester.New(t), execmoduletester.New(t, execmoduletester.WithAlwaysGenerateChangesets(true))
 
-	shared, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *blockgen.BlockGen) {
+	shared, err := m.GenerateChain(64, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate shared chain: %v", err)
 	}
-	original, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64+2*triesInMemory, func(i int, b *blockgen.BlockGen) {
+	original, err := m.GenerateChain(64+2*triesInMemory, func(i int, b *blockgen.BlockGen) {
 		if i < 64 {
 			b.SetCoinbase(common.Address{1})
 		} else {
@@ -1250,7 +1259,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate original chain: %v", err)
 	}
-	competitor, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64+2*triesInMemory+1, func(i int, b *blockgen.BlockGen) {
+	competitor, err := m.GenerateChain(64+2*triesInMemory+1, func(i int, b *blockgen.BlockGen) {
 		if i < 64 {
 			b.SetCoinbase(common.Address{1})
 		} else {
@@ -1299,7 +1308,7 @@ func TestLowDiffLongChain(t *testing.T) {
 
 	// We must use a pretty long chain to ensure that the fork doesn't overtake us
 	// until after at least 128 blocks post tip
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 6*triesInMemory, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(6*triesInMemory, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		b.OffsetTime(-9)
 	})
@@ -1307,7 +1316,7 @@ func TestLowDiffLongChain(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Generate fork chain, starting from an early block
-	fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 11+8*triesInMemory, func(i int, b *blockgen.BlockGen) {
+	fork, err := m.GenerateChain(11+8*triesInMemory, func(i int, b *blockgen.BlockGen) {
 		if i < 11 {
 			b.SetCoinbase(common.Address{1})
 			b.OffsetTime(-9)
@@ -1410,7 +1419,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 	)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
@@ -1483,7 +1492,8 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	}
 	bbCode := []byte{
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1) + byte(len(initCode)-1),
+	}
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -1495,7 +1505,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := accounts.InternCodeHash(crypto.HashData(initCode))
+	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
 	aa := accounts.InternAddress(types.CreateAddress2(bb, [32]byte{}, initHash))
 	t.Logf("Destination address: %x\n", aa)
 
@@ -1519,7 +1529,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		},
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa.Value(),
@@ -1542,6 +1552,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	defer tx.Rollback()
 
 	statedb := state.New(m.NewHistoryStateReader(2, tx))
+	defer statedb.Close()
 
 	// If all is correct, then slot 1 and 2 are zero
 	key1 := accounts.InternKey(common.HexToHash("01"))
@@ -1645,7 +1656,7 @@ func TestCVE2020_26265(t *testing.T) {
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, caller,
@@ -1666,6 +1677,7 @@ func TestCVE2020_26265(t *testing.T) {
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		reader := m.NewHistoryStateReader(2, tx)
 		statedb := state.New(reader)
+		defer statedb.Close()
 
 		got, err := statedb.GetBalance(aa)
 		if err != nil {
@@ -1719,7 +1731,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa.Value(),
@@ -1739,6 +1751,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
+		defer statedb.Close()
 
 		// If all is correct, then both slots are zero
 		key1 := accounts.InternKey(common.HexToHash("01"))
@@ -1815,7 +1828,8 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	}
 	bbCode := []byte{
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1) + byte(len(initCode)-1),
+	}
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -1827,7 +1841,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := accounts.InternCodeHash(crypto.HashData(initCode))
+	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
 	aa := accounts.InternAddress(types.CreateAddress2(bb, [32]byte{}, initHash))
 	t.Logf("Destination address: %x\n", aa)
 	gspec := &types.Genesis{
@@ -1857,13 +1871,13 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		exist    bool
 		blocknum int
 	}
-	var current = &expectation{
+	current := &expectation{
 		exist:    true, // exists in genesis
 		blocknum: 0,
 		values:   map[int]int{1: 1, 2: 2},
 	}
 	var expectations []*expectation
-	var newDestruct = func(e *expectation) types.Transaction {
+	newDestruct := func(e *expectation) types.Transaction {
 		tx, _ := types.SignTx(types.NewTransaction(nonce, aa.Value(),
 			&u256.Num0, 50000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		nonce++
@@ -1874,7 +1888,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		//t.Logf("block %d; adding destruct\n", e.blocknum)
 		return tx
 	}
-	var newResurrect = func(e *expectation) types.Transaction {
+	newResurrect := func(e *expectation) types.Transaction {
 		tx, _ := types.SignTx(types.NewTransaction(nonce, bb,
 			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		nonce++
@@ -1886,8 +1900,8 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		return tx
 	}
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 150, func(i int, b *blockgen.BlockGen) {
-		var exp = new(expectation)
+	chain, err := m.GenerateChain(150, func(i int, b *blockgen.BlockGen) {
+		exp := new(expectation)
 		exp.blocknum = i + 1
 		exp.values = make(map[int]int)
 		maps.Copy(exp.values, current.values)
@@ -1913,7 +1927,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	var asHash = func(num int) common.Hash {
+	asHash := func(num int) common.Hash {
 		return common.BytesToHash([]byte{byte(num)})
 	}
 	for i := range chain.Blocks {
@@ -1922,8 +1936,8 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
 		err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-
 			statedb := state.New(m.NewStateReader(tx))
+			defer statedb.Close()
 			// If all is correct, then slot 1 and 2 are zero
 			key1 := accounts.InternKey(common.HexToHash("01"))
 			got, err := statedb.GetState(aa, key1)
@@ -2020,7 +2034,8 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	}
 	bbCode := []byte{
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1) + byte(len(initCode)-1),
+	}
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -2032,7 +2047,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := accounts.InternCodeHash(crypto.HashData(initCode))
+	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
 	aa := accounts.InternAddress(types.CreateAddress2(bb, [32]byte{}, initHash))
 	t.Logf("Destination address: %x\n", aa)
 
@@ -2052,7 +2067,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	nonce := uint64(0)
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(4, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to BB
 		tx, _ := types.SignTx(types.NewTransaction(nonce, bb,
@@ -2065,9 +2080,9 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	}
 
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-
 		// Import the canonical chain
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
+		defer statedb.Close()
 		got, err := statedb.GetBalance(aa)
 		if err != nil {
 			return err
@@ -2082,6 +2097,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 				t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 			}
 			statedb = state.New(m.NewHistoryStateReader(1, tx))
+			defer statedb.Close()
 			got, err := statedb.GetBalance(aa)
 			if err != nil {
 				return err
@@ -2140,7 +2156,7 @@ func TestEIP2718Transition(t *testing.T) {
 	)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		gasPrice, _ := uint256.FromBig(big.NewInt(1))
 		chainID := gspec.Config.ChainID
@@ -2187,7 +2203,6 @@ func TestEIP2718Transition(t *testing.T) {
 		vm.GasQuickStep*2 + params.WarmStorageReadCostEIP2929 + params.ColdSloadCostEIP2929
 	if block.GasUsed() != expected {
 		t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expected, block.GasUsed())
-
 	}
 }
 
@@ -2256,7 +2271,7 @@ func TestEIP1559Transition(t *testing.T) {
 	)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key1))
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 501, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(501, func(i int, b *blockgen.BlockGen) {
 		if i == 500 {
 			b.SetCoinbase(common.Address{1})
 		} else {
@@ -2307,6 +2322,7 @@ func TestEIP1559Transition(t *testing.T) {
 
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(block.NumberU64()+1, tx))
+		defer statedb.Close()
 
 		// 3: Ensure that miner received only the tx's tip.
 		actual, err := statedb.GetBalance(accounts.InternAddress(block.Coinbase()))
@@ -2336,7 +2352,7 @@ func TestEIP1559Transition(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	chain, err = blockgen.GenerateChain(m.ChainConfig, block, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chain, err = m.GenerateChainFrom(block, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{2})
 
 		var txn types.Transaction = types.NewTransaction(0, aa, &u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(common.GWei)), nil)
@@ -2355,6 +2371,7 @@ func TestEIP1559Transition(t *testing.T) {
 	block = chain.Blocks[0]
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(block.NumberU64()+1, tx))
+		defer statedb.Close()
 		baseFee := block.BaseFee()
 		tip := block.Transactions()[0].GetEffectiveGasTip(baseFee)
 		effectiveTip := tip.Uint64()
@@ -2385,4 +2402,220 @@ func TestEIP1559Transition(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+// blockEndLogEngine makes the given number of system calls to contract at the
+// end of every block, as an engine with a block reward contract does.
+type blockEndLogEngine struct {
+	*ethash.FakeEthash
+	contract accounts.Address
+	calls    int
+}
+
+func (e *blockEndLogEngine) Finalize(config *libchain.Config, header *types.Header, ibs *state.IntraBlockState,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chainReader rules.ChainReader,
+	syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
+) (types.FlatRequests, error) {
+	if _, err := e.FakeEthash.Finalize(config, header, ibs, uncles, receipts, withdrawals, chainReader, syscall, skipReceiptsEval, logger); err != nil {
+		return nil, err
+	}
+	for range e.calls {
+		if _, err := syscall(e.contract, nil); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
+}
+
+func (e *blockEndLogEngine) FinalizeAndAssemble(chainConfig *libchain.Config, header *types.Header, ibs *state.IntraBlockState,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	chainReader rules.ChainReader, syscall rules.SystemCall, call rules.Call, logger log.Logger,
+) (*types.Block, types.FlatRequests, error) {
+	if _, err := e.Finalize(chainConfig, header, ibs, uncles, r, withdrawals, chainReader, syscall, false, logger); err != nil {
+		return nil, nil, err
+	}
+	return types.NewBlock(header, txs, uncles, r, withdrawals, nil), nil, nil
+}
+
+// Logs of block-end system calls must reach the log address and topic indexes
+// at the block's final txNum.
+func TestBlockEndSyscallLogsReachLogIndexes(t *testing.T) {
+	for _, workers := range []int{1, 4} {
+		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
+			prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+			t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
+
+			logContract := common.HexToAddress("0x00000000000000000000000000000000000c0de0")
+			code := []byte{byte(vm.PUSH1), 0x42, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG1), byte(vm.STOP)}
+			key, err := crypto.ToECDSA(common.LeftPadBytes([]byte{1}, 32))
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			config := libchain.TestChainBerlinConfig
+			gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+				sender:      {Balance: big.NewInt(1_000_000_000_000_000_000)},
+				logContract: {Code: code},
+			}}
+			engine := &blockEndLogEngine{FakeEthash: ethash.NewFaker(), contract: accounts.InternAddress(logContract), calls: 3}
+
+			ethconfig.Defaults.Sync.ExecWorkerCount = workers
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithEngine(engine))
+			signer := types.LatestSignerForChainID(config.ChainID)
+			const blocks = 3
+			chainPack, err := m.GenerateChain(blocks, func(i int, b *blockgen.BlockGen) {
+				for range 2 {
+					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(sender), common.Address{0xaa}, uint256.NewInt(1), 21_000, uint256.NewInt(10_000_000_000), nil), *signer, key)
+					require.NoError(t, err)
+					b.AddTx(txn)
+				}
+			})
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(chainPack))
+
+			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+				var want []uint64
+				for bn := uint64(1); bn <= blocks; bn++ {
+					maxTxNum, err := rawdbv3.TxNums.Max(t.Context(), tx, bn)
+					require.NoError(t, err)
+					want = append(want, maxTxNum)
+				}
+				topic := common.Hash{31: 0x42}
+				for _, q := range []struct {
+					idx kv.InvertedIdx
+					key []byte
+				}{{kv.LogAddrIdx, logContract[:]}, {kv.LogTopicIdx, topic[:]}} {
+					it, err := tx.IndexRange(q.idx, q.key, 0, -1, order.Asc, kv.Unlim)
+					require.NoError(t, err)
+					got, err := stream.ToArrayU64(it)
+					require.NoError(t, err)
+					require.Equal(t, want, got, "index %v", q.idx)
+				}
+				return nil
+			}))
+		})
+	}
+}
+
+// TestParallelStepEdgeFoldsMatchSerial builds BAL blocks of transfers, deploys and storage writes with a tiny
+// step size, so every block crosses several mid-block step edges. The parallel executor must reproduce the roots
+// the serial block generator computed.
+func TestParallelStepEdgeFoldsMatchSerial(t *testing.T) {
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
+
+	counter := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
+	deployCode := append([]byte{byte(vm.PUSH1), byte(len(counter)), byte(vm.PUSH1), 12, byte(vm.PUSH1), 0, byte(vm.CODECOPY), byte(vm.PUSH1), byte(len(counter)), byte(vm.PUSH1), 0, byte(vm.RETURN)}, counter...)
+	config := libchain.AllProtocolChanges
+	gasPrice := uint256.NewInt(10_000_000_000)
+	for seed := range 16 {
+		t.Run(fmt.Sprint("seed=", seed), func(t *testing.T) {
+			rng := rand.New(rand.NewPCG(uint64(seed), 3125))
+			keys := make([]*ecdsa.PrivateKey, 8)
+			alloc := types.GenesisAlloc{}
+			for i := range keys {
+				var kb [32]byte
+				for j := range kb {
+					kb[j] = byte(rng.IntN(256))
+				}
+				kb[0] |= 1
+				key, err := crypto.ToECDSA(kb[:])
+				require.NoError(t, err)
+				keys[i] = key
+				alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(common.Ether)}
+			}
+			ethconfig.Defaults.Sync.ExecWorkerCount = 4
+			m := execmoduletester.New(t, execmoduletester.WithKey(keys[0]),
+				execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc, GasLimit: 60_000_000}),
+				execmoduletester.WithExperimentalBAL(), execmoduletester.WithStepSize(8))
+			signer := types.LatestSignerForChainID(config.ChainID)
+			nonces := make([]uint64, len(keys))
+			var deployed []common.Address
+			chainPack, err := m.GenerateChain(4, func(_ int, b *blockgen.BlockGen) {
+				for range 40 {
+					s := rng.IntN(len(keys))
+					from := crypto.PubkeyToAddress(keys[s].PublicKey)
+					var txn types.Transaction
+					switch r := rng.IntN(4); {
+					case r == 0 || len(deployed) == 0:
+						deployed = append(deployed, types.CreateAddress(from, nonces[s]))
+						txn = types.NewContractCreation(nonces[s], uint256.NewInt(0), 500_000, gasPrice, deployCode)
+					case r == 1:
+						txn = types.NewTransaction(nonces[s], deployed[rng.IntN(len(deployed))], uint256.NewInt(0), 300_000, gasPrice, nil)
+					default:
+						to := crypto.PubkeyToAddress(keys[rng.IntN(len(keys))].PublicKey)
+						if rng.IntN(2) == 0 {
+							to = common.BytesToAddress([]byte{byte(rng.IntN(200)) + 1, 0xee})
+						}
+						txn = types.NewTransaction(nonces[s], to, uint256.NewInt(uint64(rng.IntN(3))), 300_000, gasPrice, nil)
+					}
+					signed, err := types.SignTx(txn, *signer, keys[s])
+					require.NoError(t, err)
+					b.AddTx(signed)
+					nonces[s]++
+				}
+			})
+			require.NoError(t, err)
+			for i := range chainPack.Blocks {
+				for _, r := range chainPack.Receipts[i] {
+					require.Equal(t, types.ReceiptStatusSuccessful, r.Status)
+				}
+			}
+			require.NoError(t, m.InsertChain(chainPack))
+		})
+	}
+}
+
+// TestParallelStepEdgeKeepsRevivedStorage revives a CREATE2 address in one tx, writes a slot in its init code,
+// then writes another slot after a mid-block step edge: the fold after the edge must not wipe the first slot.
+func TestParallelStepEdgeKeepsRevivedStorage(t *testing.T) {
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
+
+	counter := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
+	// With call value: self-destruct in the creating tx. Without: slot 1 = 1, deploy counter.
+	initCode := append([]byte{
+		byte(vm.CALLVALUE), byte(vm.PUSH1), 21, byte(vm.JUMPI),
+		byte(vm.PUSH1), 1, byte(vm.PUSH1), 1, byte(vm.SSTORE),
+		byte(vm.PUSH1), byte(len(counter)), byte(vm.PUSH1), 24, byte(vm.PUSH1), 0, byte(vm.CODECOPY),
+		byte(vm.PUSH1), byte(len(counter)), byte(vm.PUSH1), 0, byte(vm.RETURN),
+		byte(vm.JUMPDEST), byte(vm.CALLER), byte(vm.SELFDESTRUCT),
+	}, counter...)
+	factoryCode := []byte{
+		byte(vm.CALLDATASIZE), byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.CALLDATACOPY),
+		byte(vm.PUSH1), 0, byte(vm.CALLDATASIZE), byte(vm.PUSH1), 0, byte(vm.CALLVALUE), byte(vm.CREATE2),
+		byte(vm.POP), byte(vm.STOP),
+	}
+	factory := common.HexToAddress("0xfac7")
+	child := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	from := crypto.PubkeyToAddress(key.PublicKey)
+	config := libchain.AllProtocolChanges
+	alloc := types.GenesisAlloc{from: {Balance: big.NewInt(common.Ether)}, factory: {Code: factoryCode, Balance: big.NewInt(0)}}
+	ethconfig.Defaults.Sync.ExecWorkerCount = 4
+	m := execmoduletester.New(t, execmoduletester.WithKey(key),
+		execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc, GasLimit: 60_000_000}),
+		execmoduletester.WithExperimentalBAL(), execmoduletester.WithStepSize(8))
+	signer := types.LatestSignerForChainID(config.ChainID)
+	gasPrice := uint256.NewInt(10_000_000_000)
+	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		var nonce uint64
+		add := func(to common.Address, value uint64, data []byte) {
+			signed, err := types.SignTx(types.NewTransaction(nonce, to, uint256.NewInt(value), 1_000_000, gasPrice, data), *signer, key)
+			require.NoError(t, err)
+			b.AddTx(signed)
+			nonce++
+		}
+		add(factory, 1, initCode)
+		add(factory, 0, initCode)
+		for i := range 10 {
+			add(common.BytesToAddress([]byte{byte(i) + 1, 0xee}), 1, nil)
+		}
+		add(child, 0, nil)
+	})
+	require.NoError(t, err)
+	for _, r := range chainPack.Receipts[0] {
+		require.Equal(t, types.ReceiptStatusSuccessful, r.Status)
+	}
+	require.NoError(t, m.InsertChain(chainPack))
 }

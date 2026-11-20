@@ -22,14 +22,15 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"maps"
 	"math/bits"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"unsafe"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -48,9 +48,6 @@ import (
 )
 
 var (
-	mxTrieProcessedKeys   = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxTrieBranchesUpdated = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
-
 	mxTrieStateSkipRate                 = metrics.GetOrCreateCounter("trie_state_skip_rate")
 	mxTrieStateLoadRate                 = metrics.GetOrCreateCounter("trie_state_load_rate")
 	mxTrieStateLevelledSkipRatesAccount = [...]metrics.Counter{
@@ -87,35 +84,25 @@ var (
 	}
 )
 
-// Trie represents commitment variant.
 type Trie interface {
-	// RootHash produces root hash of the trie
 	RootHash() (hash []byte, err error)
 
-	// Makes trie more verbose
-	SetTrace(bool)
-	// Trace domain writes only (no filding etc)
-	SetTraceDomain(bool)
-	SetCapture(capture []string)
-	GetCapture(truncate bool) []string
-	EnableCsvMetrics(filePathPrefix string)
+	SetTraceWriter(io.Writer)
 
-	// Variant returns commitment trie variant
 	Variant() TrieVariant
 
-	// Reset Drops everything from the trie
 	Reset()
 
-	// Set context for state IO
 	ResetContext(ctx PatriciaContext)
 
-	// Process updates. If warmup.Enabled is true, pre-warms MDBX page cache in parallel.
-	// onProgress (optional) is called periodically with commitment progress info.
 	Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error)
 
-	// Release returns the trie to a pool for reuse. After calling Release,
-	// the caller must not use the trie.
 	Release()
+}
+
+type TrieStateCodec interface {
+	EncodeState(blockNum, txNum uint64) ([]byte, error)
+	RestoreState(value []byte) (blockNum, txNum uint64, err error)
 }
 
 type CommitProgress struct {
@@ -125,41 +112,77 @@ type CommitProgress struct {
 }
 
 type PatriciaContext interface {
-	// GetBranch load branch node and fill up the cells
-	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
-	// and for the extension, account, and leaf type, the `l` and `k`
 	Branch(prefix []byte) ([]byte, kv.Step, error)
-	// store branch data
+	// Implementations must copy prefix and data rather than retain them: callers may pass
+	// pooled buffers that are recycled for a later, unrelated update.
+	// A nil prevData asks the writer to read the previous value.
+	// A non-nil empty slice means the branch was absent from the trie,
+	// even if an unreachable record remains in storage.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
-	// fetch account with given plain key
 	Account(plainKey []byte) (*Update, error)
-	// fetch storage with given plain key
 	Storage(plainKey []byte) (*Update, error)
 }
 
 type TrieVariant string
 
 const (
-	// VariantHexPatriciaTrie used as default commitment approach
-	VariantHexPatriciaTrie      TrieVariant = "hex-patricia-hashed"
-	VariantParallelHexPatricia  TrieVariant = "hex-parallel-patricia-hashed"
-	VariantStreamingHexPatricia TrieVariant = "hex-streaming-patricia-hashed"
+	VariantHexPatriciaTrie     TrieVariant = "hex-patricia-hashed"
+	VariantParallelHexPatricia TrieVariant = "hex-parallel-patricia-hashed"
+	VariantCommitmentV3        TrieVariant = "commitment-v3"
+	CommitmentV3StateMarker    byte        = 0x04
 )
 
-// InitializeTrieAndUpdates constructs the trie + updates buffer from cfg.
+var (
+	KeyCommitmentState   = []byte("state")
+	KeyCommitmentV3State = []byte{0x42}
+	CommitmentStateKeys  = [][]byte{KeyCommitmentV3State, KeyCommitmentState}
+)
+
+const CommitmentV3StateSize = 1 + 8 + 8 + 32
+
+var (
+	ErrCommitmentV3StateMarker = errors.New("commitment v3: invalid state variant marker")
+	ErrCommitmentV3StateSize   = errors.New("commitment v3: invalid state size")
+)
+
+func EncodeCommitmentV3State(root []byte, blockNum, txNum uint64) ([]byte, error) {
+	if len(root) != length.Hash {
+		return nil, ErrCommitmentV3StateSize
+	}
+	dst := make([]byte, 1, CommitmentV3StateSize)
+	dst[0] = CommitmentV3StateMarker
+	dst = binary.BigEndian.AppendUint64(dst, txNum)
+	dst = binary.BigEndian.AppendUint64(dst, blockNum)
+	return append(dst, root...), nil
+}
+
+func DecodeCommitmentV3State(value []byte) (blockNum, txNum uint64, root []byte, err error) {
+	if len(value) != CommitmentV3StateSize {
+		return 0, 0, nil, ErrCommitmentV3StateSize
+	}
+	if value[0] != CommitmentV3StateMarker {
+		return 0, 0, nil, ErrCommitmentV3StateMarker
+	}
+	return binary.BigEndian.Uint64(value[9:17]), binary.BigEndian.Uint64(value[1:9]), bytes.Clone(value[17:]), nil
+}
+
+func IsCommitmentStateKey(key []byte) bool {
+	return slices.ContainsFunc(CommitmentStateKeys, func(k []byte) bool { return bytes.Equal(key, k) })
+}
+
+var NewCommitmentV3Trie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
+
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
+	case VariantCommitmentV3:
+		if NewCommitmentV3Trie == nil {
+			panic("commitment v3 selected without importing execution/commitment/v3")
+		}
+		return NewCommitmentV3Trie(tmpdir, cfg)
 	case VariantParallelHexPatricia:
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
 		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
-		return trie, tree
-	case VariantStreamingHexPatricia:
-		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
-		sc := NewStreamingCommitter(nil, length.Addr, cfg)
-		trie.SetStreamingCommitter(sc)
-		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
-		tree.SetStreamingCommitter(sc)
 		return trie, tree
 	case VariantHexPatriciaTrie:
 		fallthrough
@@ -201,15 +224,13 @@ func (p cellFields) String() string {
 	return sb.String()
 }
 
-// cellEncodeData contains only the fields needed for EncodeBranch.
-// This is much smaller than cell (which has hashedExtension[128], Update, etc.)
 // TODO: unify with cell by shrinking cell struct to eliminate this separate type
 type cellEncodeData struct {
 	extension   [64]byte
-	accountAddr [20]byte                        // common.Address
-	storageAddr [length.Addr + length.Hash]byte // 20 + 32 = 52 bytes
-	hash        [32]byte                        // common.Hash
-	stateHash   [32]byte                        // common.Hash
+	accountAddr [20]byte
+	storageAddr [length.Addr + length.Hash]byte
+	hash        [32]byte
+	stateHash   [32]byte
 
 	extLen         int16
 	accountAddrLen int16
@@ -218,7 +239,6 @@ type cellEncodeData struct {
 	stateHashLen   int16
 }
 
-// cellEncodeDataFromCell extracts the encoding-relevant fields from a cell into a cellEncodeData.
 func cellEncodeDataFromCell(c *cell) cellEncodeData {
 	var d cellEncodeData
 	d.extLen = c.extLen
@@ -234,119 +254,128 @@ func cellEncodeDataFromCell(c *cell) cellEncodeData {
 	return d
 }
 
-// DeferredBranchUpdate holds the data needed to perform a branch update later.
-// This allows collecting updates during the fold phase and running computeCellHash + EncodeBranch in parallel.
 type DeferredBranchUpdate struct {
-	prefix   []byte
-	bitmap   uint16
-	touchMap uint16
-	afterMap uint16
-
-	// Cells needed for EncodeBranch - only the fields required for encoding
-	cells [16]cellEncodeData
-
-	// Previous data from ctx.Branch (for merging)
-	prev []byte
-	// Result after encoding (filled by parallel workers)
+	prefix  []byte
+	raw     BranchData
+	prev    []byte
 	encoded BranchData
+	// Backing store for a merged encoded value. encoded either aliases raw or points
+	// here, so it is never itself reused — this is the buffer that survives pooling.
+	encodedBuf []byte
+	// rawWrite writes raw as-is without merging it against prev, for a tombstone whose
+	// prev is carried only for the domain diff (see CollectTombstone).
+	rawWrite bool
 }
 
-// Global pool for deferred branch updates.
-var deferredUpdatePool = sync.Pool{
+var deferredUpdatePool = &sync.Pool{
 	New: func() any {
 		return &DeferredBranchUpdate{}
 	},
 }
 
-// Metrics for getDeferredUpdate - use atomics for thread safety
-var getDeferredUpdateCount atomic.Int64
-
-// ResetDeferredUpdateMetrics resets the getDeferredUpdate metrics.
-func ResetDeferredUpdateMetrics() {
-	getDeferredUpdateCount.Store(0)
-}
-
-// GetDeferredUpdateMetrics returns the count for getDeferredUpdate calls.
-func GetDeferredUpdateMetrics() int64 {
-	return getDeferredUpdateCount.Load()
-}
-
-// getDeferredUpdate gets a DeferredBranchUpdate from the global pool
-// and copies only the fields needed for encoding.
-func getDeferredUpdate(
-	prefix []byte,
-	bitmap, touchMap, afterMap uint16,
-	cells *[16]cellEncodeData,
-	prev []byte,
-) *DeferredBranchUpdate {
-	getDeferredUpdateCount.Add(1)
+func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
-	upd.prefix = common.Copy(prefix)
-	upd.bitmap = bitmap
-	upd.touchMap = touchMap
-	upd.afterMap = afterMap
-
-	// Direct struct copy for each cell in bitmap
-	for bitset := bitmap; bitset != 0; {
-		bit := bitset & -bitset
-		nibble := bits.TrailingZeros16(bit)
-		upd.cells[nibble] = cells[nibble]
-		bitset ^= bit
-	}
-
-	upd.prev = common.Copy(prev)
+	upd.prefix = reuseBytes(upd.prefix, prefix)
+	upd.raw = reuseBytes(upd.raw, raw)
+	upd.prev = reuseBytes(upd.prev, prev)
 	upd.encoded = nil
+	upd.rawWrite = false
 
 	return upd
 }
 
+// reuseBytes copies src into dst's backing array, matching bytes.Clone's nil handling:
+// a nil src yields nil, so pool history cannot change the result's nil-ness. Callers
+// distinguish a nil prev ("look it up") from an empty one ("absent from the trie").
+func reuseBytes(dst, src []byte) []byte {
+	if src == nil {
+		return nil
+	}
+	if cap(dst) == 0 {
+		dst = make([]byte, 0, len(src)) // non-nil even for an empty src, as bytes.Clone is
+	}
+	return append(dst[:0], src...)
+}
+
+// capLen hides a recycled buffer's leftover capacity, so what a callback sees is derived
+// from the input rather than from whichever update last used the pooled object.
+func capLen(b []byte) []byte {
+	if b == nil {
+		return nil
+	}
+	return slices.Clip(b)
+}
+
 // putDeferredUpdate returns a DeferredBranchUpdate to the global pool.
-// Clears slice references so pooled objects don't hold stale memory.
 func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	if upd != nil {
-		upd.prefix = nil
-		upd.prev = nil
+		// encoded can alias raw, so it is dropped rather than recycled; prefix, raw,
+		// prev and encodedBuf keep their backing arrays for the next checkout.
 		upd.encoded = nil
 		deferredUpdatePool.Put(upd)
 	}
 }
 
-// PendingCommitmentUpdate stores deferred branch updates for a specific block.
-// Used by the commitment context to defer branch update application until a later flush.
+type BranchDelta struct {
+	Key  []byte
+	Data []byte
+	Prev []byte
+}
+
+type FeedSlot struct {
+	Hash  [32]byte
+	Value []byte
+}
+
+type FeedAccount struct {
+	Hash   [32]byte
+	Update *Update
+	Slots  []FeedSlot
+}
+
+type Feed struct {
+	Accounts []FeedAccount
+	Keys     int
+}
+
+type LeafRefs struct {
+	Mask uint16
+	Refs [][32]byte
+}
+
 type PendingCommitmentUpdate struct {
 	BlockNum uint64
-	// BlockHash is the hash of the block these deferred updates were
-	// generated for. It disambiguates pastChangesAccumulator lookups when
-	// multiple changesets exist for the same block number (e.g. during a
-	// fork-bounce reorg test where canonical and fork chains both saved a
-	// block 1 changeset). Without the hash, GetChangesetByBlockNum returns
-	// the first match it iterates — non-deterministic and wrong in that
-	// scenario.
+	// BlockHash disambiguates changeset lookups sharing a block number.
 	BlockHash common.Hash
 	TxNum     uint64
 	Deferred  []*DeferredBranchUpdate
+	Deltas    [][]BranchDelta
+	// Metrics is the producing trie's, carried so the later apply still reaches
+	// that trie's log counters. The Prometheus counters do not depend on it —
+	// publishBranchWrites bills those where the write lands.
+	Metrics *Metrics
 }
 
-// Clear returns all deferred updates to the pool and nils the slice.
 func (p *PendingCommitmentUpdate) Clear() {
+	p.Deltas = nil
 	for _, upd := range p.Deferred {
 		putDeferredUpdate(upd)
 	}
 	p.Deferred = nil
 }
 
+// BranchCache is populated by SharedDomains.Commit, not by this encoder.
 type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
 	metrics   *Metrics
 
-	// Deferred updates support
 	deferUpdates       bool
-	maxDeferredUpdates int // flush threshold; 0 = use DefaultMaxDeferredUpdates from config
+	callerOwnsDeferred bool
+	maxDeferredUpdates int
 	deferred           []*DeferredBranchUpdate
-	pendingPrefixes    *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -356,101 +385,75 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 	}
 }
 
-// setDeferUpdates enables or disables deferred update collection.
-// When enabled, CollectUpdate will store updates in a cache instead of applying them immediately.
 func (be *BranchEncoder) setDeferUpdates(defer_ bool) {
 	be.deferUpdates = defer_
-	if defer_ {
-		if be.deferred == nil {
-			be.deferred = make([]*DeferredBranchUpdate, 0, 64)
-		}
-		if be.pendingPrefixes == nil {
-			be.pendingPrefixes = maphash.NewNonConcurrentMap[struct{}]()
-		}
+	if defer_ && be.deferred == nil {
+		be.deferred = make([]*DeferredBranchUpdate, 0, 64)
 	}
 }
 
-// DeferUpdatesEnabled returns whether deferred update collection is enabled.
 func (be *BranchEncoder) DeferUpdatesEnabled() bool {
 	return be.deferUpdates
 }
 
-// HasPendingPrefix returns true if the given prefix has a pending deferred update.
-func (be *BranchEncoder) HasPendingPrefix(prefix []byte) bool {
-	if be.pendingPrefixes == nil {
-		return false
-	}
-	_, found := be.pendingPrefixes.Get(prefix)
-	return found
-}
-
-// ClearDeferred clears the deferred updates list and returns all objects to the pool.
 func (be *BranchEncoder) ClearDeferred() {
 	for _, upd := range be.deferred {
 		putDeferredUpdate(upd)
 	}
-	be.deferred = be.deferred[:0]
-	if be.pendingPrefixes != nil {
-		be.pendingPrefixes.Clear()
-	}
-	ResetDeferredUpdateMetrics()
+	// Delete, not reslice: this encoder sits inside a pooled trie.
+	be.deferred = slices.Delete(be.deferred, 0, len(be.deferred))
 }
 
-// encodeDeferredUpdate encodes a branch update using the provided encoder and merger.
-// Cell hashes are already computed during fold() before cells were copied.
-func encodeDeferredUpdate(
-	upd *DeferredBranchUpdate,
-	encoder *BranchEncoder,
-	merger *BranchMerger,
-) error {
-	update, err := encoder.EncodeBranch(upd.bitmap, upd.touchMap, upd.afterMap, &upd.cells)
-	if err != nil {
-		return err
+func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
+	if upd.rawWrite {
+		upd.encoded = upd.raw
+		return nil
 	}
-
 	if len(upd.prev) > 0 {
-		if bytes.Equal(upd.prev, update) {
-			upd.encoded = nil // skip unchanged
+		if bytes.Equal(upd.prev, upd.raw) {
+			upd.encoded = nil
 			return nil
 		}
-		update, err = merger.Merge(upd.prev, update)
+		merged, err := merger.Merge(upd.prev, upd.raw)
 		if err != nil {
 			return err
 		}
+		upd.encodedBuf = reuseBytes(upd.encodedBuf, merged)
+		upd.encoded = upd.encodedBuf
+		return nil
 	}
-
-	upd.encoded = common.Copy(update)
+	upd.encoded = upd.raw
 	return nil
 }
 
-// ApplyDeferredUpdates encodes branch updates concurrently and writes them.
+// putBranch is bound by the same no-retain rule as PatriciaContext.PutBranch.
 func (be *BranchEncoder) ApplyDeferredUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
 ) error {
-	written, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch)
-	if err != nil {
+	if _, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch, be.metrics); err != nil {
 		return err
-	}
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(uint64(written))
 	}
 	return nil
 }
 
-// Pools for worker encoders/mergers to avoid per-call allocations.
-var (
-	workerEncoderPool = sync.Pool{New: func() any { return NewBranchEncoder(1024) }}
-	workerMergerPool  = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
-)
+var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
 
-// ApplyDeferredBranchUpdates encodes deferred branch updates concurrently and writes them.
-// Returns the number of updates successfully written.
+// ApplyDeferredBranchUpdates applies the queued branch writes and returns how many
+// were written. Writes are published to the branch-write counters as they land,
+// not against a round: the caller-owned path applies from SharedDomains after the
+// producing round has already closed, so there is no round left to bill. m, when
+// non-nil, additionally carries them into that trie's log counters.
+//
+// putBranch must copy prefix and data rather than retain them: they are pooled and
+// reused for a later, unrelated update. prevData is cloned per update and carries
+// no such constraint.
 func ApplyDeferredBranchUpdates(
 	deferred []*DeferredBranchUpdate,
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
-) (int, error) {
+	m *Metrics,
+) (n int, err error) {
 	if len(deferred) == 0 {
 		return 0, nil
 	}
@@ -458,121 +461,93 @@ func ApplyDeferredBranchUpdates(
 		numWorkers = 1
 	}
 
-	// Sequential fast path: avoids goroutine and channel overhead for small batches.
 	if numWorkers == 1 || len(deferred) <= numWorkers {
-		encoder := workerEncoderPool.Get().(*BranchEncoder)
 		merger := workerMergerPool.Get().(*BranchMerger)
-		defer workerEncoderPool.Put(encoder)
 		defer workerMergerPool.Put(merger)
 
-		var written int
+		var written, bytesOut int
 		for _, upd := range deferred {
-			if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
+			if err := mergeDeferredUpdate(upd, merger); err != nil {
+				PublishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			if upd.encoded == nil {
 				continue
 			}
-			if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+			if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+				PublishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			written++
+			bytesOut += len(upd.encoded)
 		}
-		mxTrieBranchesUpdated.AddInt(written)
+		PublishBranchWrites(written, bytesOut, m)
 		return written, nil
 	}
 
-	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially.
-	type result struct {
-		upd *DeferredBranchUpdate
-		err error
-	}
-	// Size channels to actual batch length, not the 50K max.
-	resultCh := make(chan result, len(deferred))
-	workCh := make(chan *DeferredBranchUpdate, len(deferred))
-
-	// Start workers with pooled encoders/mergers.
+	chunk := (len(deferred) + numWorkers - 1) / numWorkers
+	errs := make([]error, numWorkers)
 	var wg sync.WaitGroup
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			encoder := workerEncoderPool.Get().(*BranchEncoder)
+	for w := 0; w < numWorkers; w++ {
+		w := w
+		lo := w * chunk
+		hi := min(lo+chunk, len(deferred))
+		if lo >= hi {
+			break
+		}
+		wg.Go(func() {
 			merger := workerMergerPool.Get().(*BranchMerger)
-			defer workerEncoderPool.Put(encoder)
 			defer workerMergerPool.Put(merger)
-
-			for upd := range workCh {
-				err := encodeDeferredUpdate(upd, encoder, merger)
-				resultCh <- result{upd: upd, err: err}
+			for i := lo; i < hi; i++ {
+				if err := mergeDeferredUpdate(deferred[i], merger); err != nil {
+					errs[w] = err
+					return
+				}
 			}
-		}()
+		})
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return 0, err
+		}
 	}
 
-	// Close resultCh when all workers are done
-	go func() {
-		wg.Wait()
-		close(resultCh)
-	}()
-
-	// Send work in background
-	go func() {
-		for _, upd := range deferred {
-			workCh <- upd
-		}
-		close(workCh)
-	}()
-
-	// Process results as they come in - write to storage immediately
-	var firstErr error
-	var written int
-	for res := range resultCh {
-		if res.err != nil {
-			if firstErr == nil {
-				firstErr = res.err
-			}
+	var written, bytesOut int
+	for _, upd := range deferred {
+		if upd.encoded == nil {
 			continue
 		}
-		if res.upd.encoded == nil {
-			continue // skip unchanged
-		}
-		if firstErr != nil {
-			continue // drain channel but don't write after error
-		}
-		if err := putBranch(res.upd.prefix, res.upd.encoded, res.upd.prev); err != nil {
-			firstErr = err
-			continue
+		if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+			PublishBranchWrites(written, bytesOut, m)
+			return written, err
 		}
 		written++
+		bytesOut += len(upd.encoded)
 	}
-	mxTrieBranchesUpdated.AddInt(written)
-	return written, firstErr
+	PublishBranchWrites(written, bytesOut, m)
+	return written, nil
 }
 
 func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
+// prev is the branch read during unfold, empty when the branch is new.
+// A nil prev is passed to PutBranch as a non-nil empty slice to avoid a storage read.
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
-	isNew bool,
+	prev []byte,
 ) error {
-	var prev []byte
-	var err error
-
-	if !isNew {
-		prev, _, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
+	if be.deferUpdates {
+		return be.CollectDeferredUpdate(ctx, prefix, bitmap, touchMap, afterMap, cells, prev)
 	}
 	if prev == nil {
 		prev = []byte{}
 	}
-
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
 		return err
@@ -580,7 +555,7 @@ func (be *BranchEncoder) CollectUpdate(
 
 	if len(prev) > 0 {
 		if bytes.Equal(prev, update) {
-			return nil // do not write the same data for prefix
+			return nil
 		}
 		update, err = be.merger.Merge(prev, update)
 		if err != nil {
@@ -588,67 +563,69 @@ func (be *BranchEncoder) CollectUpdate(
 		}
 	}
 
-	prefixCopy := common.Copy(prefix)
-	updateCopy := common.Copy(update)
-	if err = ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
+	prefixCopy := bytes.Clone(prefix)
+	updateCopy := bytes.Clone(update)
+	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	// BranchCache population is owned by SharedDomains.Commit, not the encoder.
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(1)
-	}
-	mxTrieBranchesUpdated.Inc()
+	PublishBranchWrites(1, len(updateCopy), be.metrics)
 	return nil
 }
 
-// CollectDeferredUpdate stores a branch update job for later parallel processing.
-// Unlike CollectUpdate, this does NOT call EncodeBranch immediately - it copies the cellEncodeData
-// and defers encoding for parallel execution later.
-// Cell hashes are already computed during fold() before this is called.
-// Flushes pending updates if a duplicate prefix is detected or if deferred count exceeds maxDeferredUpdates.
+// See CollectUpdate for the meaning of prev.
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
-	isNew bool,
+	prev []byte,
 ) error {
-	// Flush if duplicate prefix or too many deferred updates
 	limit := be.maxDeferredUpdates
 	if limit == 0 {
 		limit = DefaultMaxDeferredUpdates
 	}
-	needsFlush := len(be.deferred) >= limit
-	if !needsFlush {
-		_, needsFlush = be.pendingPrefixes.Get(prefix)
-	}
-
-	if needsFlush {
+	if !be.callerOwnsDeferred && len(be.deferred) >= limit {
 		if err := be.ApplyDeferredUpdates(16, ctx.PutBranch); err != nil {
 			return err
 		}
 		be.ClearDeferred()
 	}
-
-	var prev []byte
-	var err error
-
-	if !isNew {
-		prev, _, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
-	}
 	if prev == nil {
 		prev = []byte{}
 	}
 
-	// Track this prefix as pending
-	be.pendingPrefixes.Set(prefix, struct{}{})
+	raw, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
+	if err != nil {
+		return err
+	}
+	be.deferred = append(be.deferred, getDeferredUpdate(prefix, raw, prev))
+	return nil
+}
 
-	// Get a pooled DeferredBranchUpdate and copy all fields
-	upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, cells, prev)
-	be.deferred = append(be.deferred, upd)
+// CollectTombstone writes an empty-branch tombstone at prefix (touchMap present,
+// afterMap zero, no cells) without merging it against prev. The tombstone carries
+// no cells, and a real stored branch can be shorter than its bitmap implies (state
+// hashes, extensions, inlined leaves), so Merge would overrun it. prev is still
+// forwarded to PutBranch so the domain diff records the real previous branch and an
+// unwind across the destruct restores it rather than an empty tombstone.
+func (be *BranchEncoder) CollectTombstone(ctx PatriciaContext, prefix []byte, touchMap uint16, prev []byte) error {
+	if be.deferUpdates {
+		if err := be.CollectDeferredUpdate(ctx, prefix, 0, touchMap, 0, nil, prev); err != nil {
+			return err
+		}
+		be.deferred[len(be.deferred)-1].rawWrite = true
+		return nil
+	}
+	raw, err := be.EncodeBranch(0, touchMap, 0, nil)
+	if err != nil {
+		return err
+	}
+	prefixCopy := bytes.Clone(prefix)
+	updateCopy := bytes.Clone(raw)
+	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
+		return err
+	}
+	PublishBranchWrites(1, len(updateCopy), be.metrics)
 	return nil
 }
 
@@ -663,8 +640,6 @@ func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
 	return nil
 }
 
-// EncodeBranch encodes branch data from cellEncodeData. Pure serializer with no side effects.
-// Result should be copied before next call to EncodeBranch, underlying slice is reused.
 func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *[16]cellEncodeData) (BranchData, error) {
 	be.buf.Reset()
 
@@ -733,7 +708,6 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *
 
 type BranchData []byte
 
-// ChildCount returns the number of children present in the branch.
 func (branchData BranchData) ChildCount() int {
 	if len(branchData) < 4 {
 		return 0
@@ -741,8 +715,10 @@ func (branchData BranchData) ChildCount() int {
 	return bits.OnesCount16(binary.BigEndian.Uint16(branchData[2:4]))
 }
 
+func (branchData BranchData) IsTombstone() bool { return len(branchData) == 0 }
+
 func (branchData BranchData) String() string {
-	if len(branchData) == 0 {
+	if branchData.IsTombstone() {
 		return ""
 	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
@@ -762,7 +738,6 @@ func (branchData BranchData) String() string {
 			pos++
 			var err error
 			if pos, err = cell.fillFromFields(branchData, pos, fields); err != nil {
-				// This is used for test output, so ok to panic
 				panic(err)
 			}
 			sb.WriteString("{")
@@ -792,11 +767,31 @@ func (branchData BranchData) String() string {
 	return sb.String()
 }
 
-// if fn returns nil, the original key will be kept from branchData.
-// Uses span-based lazy copy: unchanged regions of branchData are copied in bulk
-// only when a key actually changes. When no keys change, returns branchData as-is
-// with zero copies. When the caller passes nil or an undersized buffer, newData
-// is auto-sized to len(branchData) on first use.
+// A malformed branch reports true: treat as referenced, never under-report.
+func (branchData BranchData) HasShortenedKeys() bool {
+	_, _, shortened, err := branchData.CountPlainKeys()
+	return shortened > 0 || err != nil
+}
+
+// CountPlainKeys tallies the branch's keys by kind. It walks every cell rather than stopping at the
+// first shortened key, so a branch holding both kinds reports both truthfully. A non-nil err is a
+// parse failure, and leaves the tally partial.
+func (branchData BranchData) CountPlainKeys() (plainAccounts, plainStorages, shortened uint64, err error) {
+	_, err = branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		switch {
+		case isStorage && len(key) == length.Addr+length.Hash:
+			plainStorages++
+		case !isStorage && len(key) == length.Addr:
+			plainAccounts++
+		default:
+			shortened++
+		}
+		return nil, nil
+	})
+	return plainAccounts, plainStorages, shortened, err
+}
+
+// If fn returns nil, the original key is kept.
 func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error)) (BranchData, error) {
 	if len(branchData) < 4 {
 		return branchData, nil
@@ -811,9 +806,12 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 
 	pos := 4
 	anyChanged := false
-	spanStart := 0 // start of current unchanged span in branchData
+	spanStart := 0
 	for bitset, j := touchMap&afterMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
+		if pos >= len(branchData) {
+			return nil, errors.New("replacePlainKeys buffer too small for cell fields")
+		}
 		fields := cellFields(branchData[pos])
 		pos++
 		if fields&fieldExtension != 0 {
@@ -938,22 +936,20 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 	if !anyChanged {
 		return branchData, nil
 	}
-	// Flush remaining unchanged span
 	newData = append(newData, branchData[spanStart:]...)
 	return newData, nil
 }
 
-// IsComplete determines whether given branch data is complete, meaning that all information about all the children is present
-// Each of 16 children of a branch node have two attributes
-// touch - whether this child has been modified or deleted in this branchData (corresponding bit in touchMap is set)
-// after - whether after this branchData application, the child is present in the tree or not (corresponding bit in afterMap is set)
 func (branchData BranchData) IsComplete() bool {
+	if len(branchData) < 4 {
+		return false
+	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
 	return ^touchMap&afterMap == 0
 }
 
-// MergeHexBranches combines two branchData, number 2 coming after (and potentially shadowing) number 1
+// branch2 shadows branch1 where both touch the same cell.
 func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []byte) (BranchData, error) {
 	if branchData2 == nil {
 		return branchData, nil
@@ -977,7 +973,6 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 	for bitset, j := bitmap1|bitmap2, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		if bitmap2&bit != 0 {
-			// Add fields from branchData2
 			fields := cellFields(branchData2[pos2])
 			newData = append(newData, byte(fields))
 			pos2++
@@ -1000,7 +995,7 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 			}
 		}
 		if bitmap1&bit != 0 {
-			add := (touchMap2&bit == 0) && (afterMap2&bit != 0) // Add fields from branchData1
+			add := (touchMap2&bit == 0) && (afterMap2&bit != 0)
 			fields := cellFields(branchData[pos1])
 			if add {
 				newData = append(newData, byte(fields))
@@ -1055,17 +1050,17 @@ func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*
 }
 
 func (branchData BranchData) Validate(branchKey []byte) error {
-	if len(branchData) == 0 {
+	if branchData.IsTombstone() {
 		return nil
 	}
 	_, afterMap, row, err := branchData.decodeCells()
 	if err != nil {
 		return err
 	}
-	if err = validateAfterMap(afterMap, row); err != nil {
+	if err := validateAfterMap(afterMap, row); err != nil {
 		return err
 	}
-	if err = validatePlainKeys(branchKey, row, keccak.NewFastKeccak()); err != nil {
+	if err := validatePlainKeys(branchKey, row); err != nil {
 		return err
 	}
 	return nil
@@ -1085,7 +1080,7 @@ func validateAfterMap(afterMap uint16, row [16]*cell) error {
 	return nil
 }
 
-func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakState) error {
+func validatePlainKeys(branchKey []byte, row [16]*cell) error {
 	uncompactedBranchKey := nibbles.CompactToHex(branchKey)
 	if nibbles.HasTerm(uncompactedBranchKey) {
 		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]
@@ -1102,7 +1097,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakStat
 		if c.accountAddrLen == 0 && c.storageAddrLen == 0 {
 			continue
 		}
-		err := c.deriveHashedKeys(depth, keccak, length.Addr, hashBuf[:])
+		err := c.deriveHashedKeys(depth, length.Addr, hashBuf[:])
 		if err != nil {
 			return err
 		}
@@ -1143,7 +1138,7 @@ func NewHexBranchMerger(capacity uint64) *BranchMerger {
 	return &BranchMerger{buf: make([]byte, capacity)}
 }
 
-// MergeHexBranches combines two branchData, number 2 coming after (and potentially shadowing) number 1
+// branch2 shadows branch1 where both touch the same cell.
 func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData, error) {
 	if len(branch2) == 0 {
 		return branch1, nil
@@ -1171,7 +1166,6 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 	for bitset, j := bitmap1|bitmap2, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		if bitmap2&bit != 0 {
-			// Add fields from branch2
 			fields := cellFields(branch2[pos2])
 			m.buf = append(m.buf, byte(fields))
 			pos2++
@@ -1198,7 +1192,7 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 			}
 		}
 		if bitmap1&bit != 0 {
-			add := (touchMap2&bit == 0) && (afterMap2&bit != 0) // Add fields from branchData1
+			add := (touchMap2&bit == 0) && (afterMap2&bit != 0)
 			fields := cellFields(branch1[pos1])
 			if add {
 				m.buf = append(m.buf, byte(fields))
@@ -1235,6 +1229,8 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 func ParseTrieVariant(s string) TrieVariant {
 	var trieVariant TrieVariant
 	switch s {
+	case "v3":
+		trieVariant = VariantCommitmentV3
 	case "parallel":
 		trieVariant = VariantParallelHexPatricia
 	case "hex":
@@ -1270,7 +1266,6 @@ type BranchStat struct {
 	IsRoot        bool
 }
 
-// do not add stat of root node to other branch stat
 func (bs *BranchStat) Collect(other *BranchStat) {
 	if other == nil {
 		return
@@ -1321,7 +1316,6 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 	stat.ValSize = uint64(len(branch))
 	stat.IsRoot = true
 
-	// if key is not "state" then we are interested in the branch data
 	if !bytes.Equal(key, []byte("state")) {
 		stat.IsRoot = false
 
@@ -1329,7 +1323,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 		if err != nil {
 			return nil
 		}
-		stat.TAMapsSize = uint64(2 + 2) // touchMap + afterMap
+		stat.TAMapsSize = uint64(2 + 2)
 		stat.CellCount = uint64(bits.OnesCount16(tm & am))
 
 		medians := make(map[string][]int16)
@@ -1365,8 +1359,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 				panic("unexpected cell " + c.FullString())
 			}
 			if c.extLen > 0 {
-				switch tv {
-				case VariantHexPatriciaTrie:
+				if tv == VariantHexPatriciaTrie {
 					stat.ExtSize += uint64(c.extLen)
 				}
 				stat.ExtCount++
@@ -1392,7 +1385,6 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 	return stat
 }
 
-// Defines how to evaluate commitments
 type Mode uint
 
 const (
@@ -1400,13 +1392,8 @@ const (
 	ModeDirect   Mode = 1
 	ModeUpdate   Mode = 2
 	ModeParallel Mode = 3
+	ModeCollect  Mode = 4
 )
-
-// streamingSink receives touched keys for a StreamingCommitter's fold; plainKey
-// and update must stay valid until the committer's Process call.
-type streamingSink interface {
-	TouchKey(hashedKey, plainKey []byte, update *Update)
-}
 
 func (m Mode) String() string {
 	switch m {
@@ -1418,59 +1405,46 @@ func (m Mode) String() string {
 		return "update"
 	case ModeParallel:
 		return "parallel"
+	case ModeCollect:
+		return "collect"
 	default:
 		return "unknown"
 	}
 }
 
 type Updates struct {
-	hasher keyHasher
-	keys   map[string]struct{} // plain keys to keep only unique keys in etl
-	etl    *etl.Collector      // all-in-one collector
-	// Sorted by hashedKey first, with plainKey as a tiebreaker (see
-	// keyUpdateLessFn). Trie traversal must happen in hashedKey order so
-	// Process's fold/unfold operates on adjacent paths; iterating by
-	// plainKey produced a divergent root and was the root cause of the
-	// eip1153/eip7778/eip7976/eip7825 wrong-trie-root failures. ModeDirect
-	// achieves the same ordering via its etl collector keyed on hashedKey;
-	// this btree must match.
-	tree    *btree.BTreeG[*KeyUpdate]
-	treeIdx map[string]*KeyUpdate // plainKey → btree entry for O(1) lookup in ModeUpdate
-	mode    Mode
-	tmpdir  string
-
-	// parallel holds the prefix trie of touched hashed keys; nil outside ModeParallel.
+	hasher   keyHasher
+	keys     map[string]struct{}
+	etl      *etl.Collector
+	tree     *btree.BTreeG[*KeyUpdate]
+	treeIdx  map[string]*KeyUpdate
+	mode     Mode
+	tmpdir   string
 	parallel *parallelUpdate
 
-	// streaming (ModeParallel only) forwards every touched key to streamer.
-	streaming bool
-	streamer  streamingSink
+	direct         []KeyUpdate
+	directBytes    int
+	directMemLimit int
 
-	batchSlab []KeyUpdate // grow-only slab for HashSort batch (avoids per-key heap allocs)
+	hashedTouches [][]byte
 
-	// Ring of byte arenas for HashSort key copies; a slot is reused only after its prior generation's warm items drain.
+	batchSlab []KeyUpdate
+
 	arenas   [arenaRingSize][]byte
 	curArena int
 	gen      uint64
+
+	addrCache      AddrHashCache
+	addrCacheReuse bool
 }
 
-// arenaRingSize is how many byte arenas HashSort cycles; raising it only adds memory headroom, never affects correctness.
 const arenaRingSize = 2
 
-// arenaAlloc appends b to the byte arena and returns the sub-slice.
-// The returned slice is valid until the arena is reset.
-// The arena must have sufficient capacity (via arenaEnsureCap) before
-// accumulating a batch; if capacity is exceeded, arenaAlloc falls back
-// to an independent heap allocation to keep previously returned
-// sub-slices valid.
 func (t *Updates) arenaAlloc(b []byte) []byte {
 	arena := t.arenas[t.curArena]
 	off := len(arena)
 	needed := off + len(b)
 	if needed > cap(arena) {
-		// Arena capacity exceeded — fall back to an independent allocation.
-		// This keeps previously returned sub-slices valid while avoiding a
-		// panic that would crash a production node.
 		result := make([]byte, len(b))
 		copy(result, b)
 		return result
@@ -1481,7 +1455,6 @@ func (t *Updates) arenaAlloc(b []byte) []byte {
 	return arena[off:needed]
 }
 
-// arenaEnsureCap reserves at least c bytes in every ring buffer; call before a batch so a mid-batch grow can't reallocate and invalidate returned sub-slices.
 func (t *Updates) arenaEnsureCap(c int) {
 	for i := range t.arenas {
 		if cap(t.arenas[i]) < c {
@@ -1490,40 +1463,42 @@ func (t *Updates) arenaEnsureCap(c int) {
 	}
 }
 
-// IsConcurrentCommitment reports whether commitment runs in the parallel mode.
-func (t *Updates) IsConcurrentCommitment() bool {
-	return t.mode == ModeParallel
-}
-
 type keyHasher func(key []byte) []byte
 
-func keyHasherNoop(key []byte) []byte { return key }
+func hasherReusesAddrPrefix(h keyHasher) bool {
+	return reflect.ValueOf(h).Pointer() == reflect.ValueOf(KeyToHexNibbleHash).Pointer()
+}
 
-// NewEmpty creates a fresh Updates matching the receiver. The streaming sink must
-// carry over, or a buffer rotated mid-stream silently computes a stale root.
+func (t *Updates) hashKey(key []byte) []byte {
+	if t.addrCacheReuse {
+		return KeyToHexNibbleHashCached(key, &t.addrCache)
+	}
+	return t.hasher(key)
+}
+
 func (t *Updates) NewEmpty() *Updates {
-	n := NewUpdates(t.mode, t.tmpdir, t.hasher)
-	n.streamer = t.streamer
-	n.streaming = t.streaming
-	return n
+	return NewUpdates(t.mode, t.tmpdir, t.hasher)
 }
 
 func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	t := &Updates{
-		hasher: hasher,
-		tmpdir: tmpdir,
-		mode:   m,
+		hasher:         hasher,
+		tmpdir:         tmpdir,
+		mode:           m,
+		addrCacheReuse: hasherReusesAddrPrefix(hasher),
+		directMemLimit: defaultDirectMemLimit,
 	}
 	switch t.mode {
 	case ModeDirect:
 		t.keys = make(map[string]struct{})
-		t.initCollector()
 	case ModeUpdate:
 		t.tree = btree.NewG(64, keyUpdateLessFn)
 		t.treeIdx = make(map[string]*KeyUpdate)
 	case ModeParallel:
 		t.keys = make(map[string]struct{})
 		t.parallel = newParallelUpdate()
+	case ModeCollect:
+		t.treeIdx = make(map[string]*KeyUpdate)
 	}
 	return t
 }
@@ -1534,7 +1509,6 @@ func (t *Updates) SetMode(m Mode) {
 	case ModeDirect:
 		if t.keys == nil {
 			t.keys = make(map[string]struct{})
-			t.initCollector()
 		}
 	case ModeUpdate:
 		if t.tree == nil {
@@ -1557,23 +1531,47 @@ func (t *Updates) initCollector() {
 		t.etl.Close()
 		t.etl = nil
 	}
-	t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
+	t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("component", "update-tree")).LogLvl(log.LvlDebug)
 	t.etl.SortAndFlushInBackground(true)
+}
+
+const defaultDirectMemLimit = 512 << 20
+
+const directEntryOverhead = 48
+
+func plainKeyBytes(pk string) []byte {
+	if len(pk) == 0 {
+		return []byte{}
+	}
+	return common.ToBytesZeroCopy(pk)
+}
+
+func (t *Updates) collectDirect(hashedKey []byte, plainKey string) {
+	if t.etl != nil {
+		if err := t.etl.Collect(hashedKey, plainKeyBytes(plainKey)); err != nil {
+			log.Warn("failed to collect updated key", "key", fmt.Sprintf("%x", plainKey), "err", err)
+		}
+		return
+	}
+	t.direct = append(t.direct, KeyUpdate{hashedKey: hashedKey, plainKey: plainKey})
+	t.directBytes += len(hashedKey) + len(plainKey) + directEntryOverhead
+	if t.directBytes >= t.directMemLimit {
+		t.spillDirect()
+	}
+}
+
+func (t *Updates) spillDirect() {
+	t.initCollector()
+	for i := range t.direct {
+		if err := t.etl.Collect(t.direct[i].hashedKey, plainKeyBytes(t.direct[i].plainKey)); err != nil {
+			log.Warn("failed to collect updated key", "key", fmt.Sprintf("%x", t.direct[i].plainKey), "err", err)
+		}
+	}
+	t.direct, t.directBytes = nil, 0
 }
 
 func (t *Updates) Mode() Mode { return t.mode }
 
-// SetStreamingCommitter forwards ModeParallel touches to sink; nil disables streaming.
-func (t *Updates) SetStreamingCommitter(sink streamingSink) {
-	t.streamer = sink
-	t.streaming = sink != nil
-}
-
-// Streaming reports whether touches are being forwarded to a StreamingCommitter.
-func (t *Updates) Streaming() bool { return t.streaming }
-
-// PlainKeys returns a copy of the set of plain keys that have been touched.
-// Meaningful only in ModeDirect and ModeParallel; nil otherwise.
 func (t *Updates) PlainKeys() map[string]struct{} {
 	if (t.mode != ModeDirect && t.mode != ModeParallel) || t.keys == nil {
 		return nil
@@ -1591,13 +1589,13 @@ func (t *Updates) Size() (updates uint64) {
 		return uint64(len(t.keys))
 	case ModeUpdate:
 		return uint64(t.tree.Len())
+	case ModeCollect:
+		return uint64(len(t.treeIdx))
 	default:
 		return 0
 	}
 }
 
-// TouchPlainKey marks plainKey as updated and applies different fn for different key types
-// (different behaviour for Code, Account and Storage key modifications).
 func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, val []byte)) {
 	switch t.mode {
 	case ModeUpdate:
@@ -1606,7 +1604,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
-				hashedKey: t.hasher(common.ToBytesZeroCopy(key)),
+				hashedKey: t.hashKey(common.ToBytesZeroCopy(key)),
 				update:    new(Update),
 			}
 			fn(pivot, val)
@@ -1615,70 +1613,55 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
-			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
-
-			err := t.etl.Collect(hashedKey, keyBytes)
-			if err != nil {
-				log.Warn("failed to collect updated key", "key", key, "err", err)
-			}
+			t.collectDirect(t.hashKey(common.ToBytesZeroCopy(key)), key)
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
-		if _, ok := t.keys[key]; !ok {
-			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
-			ik := t.parallel.internKey(keyBytes)
-			t.parallel.Insert(hashedKey, ik, nil)
-			if t.streaming && t.streamer != nil {
-				t.streamer.TouchKey(hashedKey, ik, nil)
-			}
-			t.keys[key] = struct{}{}
+		if _, ok := t.keys[key]; ok {
+			return
 		}
+		keyBytes := common.ToBytesZeroCopy(key)
+		hashedKey := t.hashKey(keyBytes)
+		ik := t.parallel.internKey(keyBytes)
+		t.keys[key] = struct{}{}
+		t.parallel.Collect(hashedKey, ik, nil)
+	case ModeCollect:
+		existing, ok := t.treeIdx[key]
+		if !ok {
+			existing = &KeyUpdate{plainKey: key, update: new(Update)}
+			t.treeIdx[key] = existing
+		}
+		fn(existing, val)
 	default:
 	}
 }
 
-// TouchPlainKeyDirect applies a pre-built Update to the key without
-// serialization/deserialization. Used by the commitment calculator which
-// receives aggregated state changes via channel instead of serialized bytes
-// from DomainPut.
+func (t *Updates) HashKey(key []byte) []byte { return t.hashKey(key) }
+
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
+	t.TouchPlainKeyDirectHashed(key, nil, update)
+}
+
+func (t *Updates) hashedOr(key string, hashed []byte) []byte {
+	if hashed != nil {
+		return hashed
+	}
+	return t.hashKey(common.ToBytesZeroCopy(key))
+}
+
+func (t *Updates) TouchPlainKeyDirectHashed(key string, hashed []byte, update *Update) {
 	if dbg.TraceTouchKey {
-		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%d nonce=%d codeHash=%x\n",
-			key, update.Flags, &update.Balance, update.Nonce, update.CodeHash)
+		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%s nonce=%d codeHash=%x\n",
+			key, update.Flags, update.Balance.String(), update.Nonce, update.CodeHash)
 	}
 	switch t.mode {
 	case ModeUpdate:
 		if existing, ok := t.treeIdx[key]; ok {
-			// Merge into existing entry
-			if update.Flags&DeleteUpdate != 0 {
-				existing.update.Flags = DeleteUpdate
-				existing.update.CodeHash = empty.CodeHash
-			} else {
-				existing.update.Flags &^= DeleteUpdate
-				if update.Flags&BalanceUpdate != 0 {
-					existing.update.Balance.Set(&update.Balance)
-					existing.update.Flags |= BalanceUpdate
-				}
-				if update.Flags&NonceUpdate != 0 {
-					existing.update.Nonce = update.Nonce
-					existing.update.Flags |= NonceUpdate
-				}
-				if update.Flags&CodeUpdate != 0 {
-					existing.update.CodeHash = update.CodeHash
-					existing.update.Flags |= CodeUpdate
-				}
-				if update.Flags&StorageUpdate != 0 {
-					existing.update.Storage = update.Storage
-					existing.update.StorageLen = update.StorageLen
-					existing.update.Flags |= StorageUpdate
-				}
-			}
+			mergeUpdateInto(existing.update, update)
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
-				hashedKey: t.hasher(common.ToBytesZeroCopy(key)),
+				hashedKey: t.hashedOr(key, hashed),
 				update:    new(Update),
 			}
 			*pivot.update = *update
@@ -1687,19 +1670,12 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
-			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
-
-			err := t.etl.Collect(hashedKey, keyBytes)
-			if err != nil {
-				log.Warn("failed to collect updated key", "key", key, "err", err)
-			}
+			t.collectDirect(t.hashedOr(key, hashed), key)
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
 		keyBytes := common.ToBytesZeroCopy(key)
-		hashedKey := t.hasher(keyBytes)
-		// Carry the value so the fold uses it directly instead of re-reading ctx, which lags cc.state.
+		hashedKey := t.hashedOr(key, hashed)
 		u := new(Update)
 		*u = *update
 		ik := keyBytes
@@ -1707,12 +1683,74 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			ik = t.parallel.internKey(keyBytes)
 			t.keys[key] = struct{}{}
 		}
-		t.parallel.Insert(hashedKey, ik, u)
-		if t.streaming && t.streamer != nil {
-			t.streamer.TouchKey(hashedKey, ik, u)
+		t.parallel.Collect(hashedKey, ik, u)
+	case ModeCollect:
+		if existing, ok := t.treeIdx[key]; ok {
+			mergeUpdateInto(existing.update, update)
+			return
 		}
+		u := *update
+		t.treeIdx[key] = &KeyUpdate{plainKey: key, update: &u}
 	default:
 	}
+}
+
+func mergeUpdateInto(existing, update *Update) {
+	if update.DeleteStorageSubtree {
+		existing.DeleteStorageSubtree = true
+	}
+	if update.Flags&DeleteUpdate != 0 {
+		existing.Flags = DeleteUpdate
+		existing.CodeHash = empty.CodeHash
+		return
+	}
+	existing.Flags &^= DeleteUpdate
+	if update.Flags&BalanceUpdate != 0 {
+		existing.Balance.Set(&update.Balance)
+		existing.Flags |= BalanceUpdate
+	}
+	if update.Flags&NonceUpdate != 0 {
+		existing.Nonce = update.Nonce
+		existing.Flags |= NonceUpdate
+	}
+	if update.Flags&CodeUpdate != 0 {
+		existing.CodeHash = update.CodeHash
+		existing.Flags |= CodeUpdate
+	}
+	if update.Flags&StorageUpdate != 0 {
+		existing.Storage = update.Storage
+		existing.StorageLen = update.StorageLen
+		existing.Flags |= StorageUpdate
+	}
+}
+
+func (t *Updates) Drain(fn func(plainKey string, update *Update) error) error {
+	t.hashedTouches = t.hashedTouches[:0]
+	for key, item := range t.treeIdx {
+		if err := fn(key, item.update); err != nil {
+			return err
+		}
+	}
+	clear(t.treeIdx)
+	return nil
+}
+
+func (t *Updates) Untouch(plainKey string) bool {
+	if t.mode != ModeCollect {
+		return false
+	}
+	_, ok := t.treeIdx[plainKey]
+	delete(t.treeIdx, plainKey)
+	return ok
+}
+
+func (t *Updates) UntouchAll() []string {
+	if t.mode != ModeCollect {
+		return nil
+	}
+	keys := slices.Collect(maps.Keys(t.treeIdx))
+	clear(t.treeIdx)
+	return keys
 }
 
 func (t *Updates) TouchHashedKey(hashedKey []byte) {
@@ -1721,14 +1759,9 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		if len(hashedKey) == 0 {
 			return
 		}
-		// string(hashedKey) copies the bytes, so dedupKey is safe even if the caller reuses the slice.
-		// No extra copy needed before etl.Collect: see Collector.Collect — it copies k and v internally.
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			err := t.etl.Collect(hashedKey, []byte{})
-			if err != nil {
-				log.Warn("failed to collect hashed key", "hashedKey", fmt.Sprintf("%x", hashedKey), "err", err)
-			}
+			t.collectDirect(common.ToBytesZeroCopy(dedupKey), "")
 			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeParallel:
@@ -1737,15 +1770,28 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		}
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			// Hashed-only touch has no plainKey; the parallel fold rejects such a terminator.
-			t.parallel.Insert(hashedKey, nil, nil)
+			t.parallel.Collect(common.ToBytesZeroCopy(dedupKey), nil, nil)
 			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeUpdate:
-		pivot := &KeyUpdate{hashedKey: common.Copy(hashedKey), update: new(Update)}
+		pivot := &KeyUpdate{hashedKey: bytes.Clone(hashedKey), update: new(Update)}
 		t.tree.ReplaceOrInsert(pivot)
+	case ModeCollect:
+		if len(hashedKey) != 0 {
+			t.hashedTouches = append(t.hashedTouches, bytes.Clone(hashedKey))
+		}
 	default:
 	}
+}
+
+func (t *Updates) CollectedHashedKeys() [][]byte {
+	keys := make([][]byte, 0, len(t.treeIdx)+len(t.hashedTouches))
+	for key := range t.treeIdx {
+		keys = append(keys, bytes.Clone(t.hashKey([]byte(key))))
+	}
+	keys = append(keys, t.hashedTouches...)
+	slices.SortFunc(keys, bytes.Compare)
+	return slices.CompactFunc(keys, bytes.Equal)
 }
 
 func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
@@ -1754,7 +1800,7 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 		return
 	}
 	if c.update.Flags&DeleteUpdate != 0 {
-		c.update.Flags = 0 // also could invert with ^ but 0 is just a reset
+		c.update.Flags = 0
 	}
 
 	acc := accounts.Account{}
@@ -1762,22 +1808,16 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	if err != nil {
 		panic(err)
 	}
-	if c.update.Nonce != acc.Nonce {
-		c.update.Nonce = acc.Nonce
-		c.update.Flags |= NonceUpdate
+	c.update.Nonce = acc.Nonce
+	c.update.Balance.Set(&acc.Balance)
+	if acc.CodeHash.IsEmpty() {
+		c.update.CodeHash = empty.CodeHash
+	} else {
+		c.update.CodeHash = acc.CodeHash.Value()
 	}
-	if !c.update.Balance.Eq(&acc.Balance) {
-		c.update.Balance.Set(&acc.Balance)
-		c.update.Flags |= BalanceUpdate
-	}
-	if acc.CodeHash.Value() != c.update.CodeHash {
-		if acc.CodeHash.IsEmpty() {
-			c.update.CodeHash = empty.CodeHash
-		} else {
-			c.update.Flags |= CodeUpdate
-			c.update.CodeHash = acc.CodeHash.Value()
-		}
-	}
+	// val is the whole account record, so flag every field: a cell may skip its state
+	// read only when the update it was given covers the account completely.
+	c.update.Flags |= BalanceUpdate | NonceUpdate | CodeUpdate
 }
 
 func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
@@ -1792,15 +1832,17 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 }
 
 func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
-	c.update.Flags |= CodeUpdate
 	if len(code) == 0 {
-		if c.update.Flags == 0 {
+		if t.mode == ModeCollect && c.update.Flags == 0 {
 			c.update.Flags = DeleteUpdate
+		} else {
+			c.update.Flags |= CodeUpdate
 		}
 		c.update.CodeHash = empty.CodeHash
 		return
 	}
-	c.update.CodeHash = crypto.HashData(code)
+	c.update.Flags |= CodeUpdate
+	c.update.CodeHash = crypto.Keccak256Hash(code)
 }
 
 func (t *Updates) Close() {
@@ -1813,7 +1855,9 @@ func (t *Updates) Close() {
 	}
 	if t.etl != nil {
 		t.etl.Close()
+		t.etl = nil
 	}
+	t.direct, t.directBytes = nil, 0
 	if t.parallel != nil {
 		t.parallel.Close()
 		t.parallel = nil
@@ -1822,16 +1866,56 @@ func (t *Updates) Close() {
 
 const hashSortBatchSize = 10_000
 
-// HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
-// Keys are processed in batches of 10k to control memory usage.
-// If warmuper is non-nil, keys are submitted for parallel warming before processing.
-// Caller is responsible for calling warmuper.Wait() after processing completes.
-// IMPORTANT: fn must not retain hk or pk slices after returning; they are backed by
-// reusable arena memory that is invalidated between batches.
+func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
+	slices.SortStableFunc(t.direct, func(a, b KeyUpdate) int {
+		return bytes.Compare(a.hashedKey, b.hashedKey)
+	})
+
+	var prevKey []byte
+	for start := 0; start < len(t.direct); start += hashSortBatchSize {
+		batch := t.direct[start:min(start+hashSortBatchSize, len(t.direct))]
+		if warmuper != nil {
+			for i := range batch {
+				hk := batch[i].hashedKey
+				startDepth := 0
+				minLen := min(len(prevKey), len(hk))
+				for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
+					startDepth++
+				}
+				warmuper.WarmKey(hk, startDepth, t.gen)
+				prevKey = hk
+			}
+		}
+		for i := range batch {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err := fn(batch[i].hashedKey, plainKeyBytes(batch[i].plainKey), nil); err != nil {
+				return err
+			}
+		}
+	}
+
+	clear(t.direct)
+	t.direct = t.direct[:0]
+	t.directBytes = 0
+	return nil
+}
+
+// fn must not retain hk or pk slices after returning: they're backed by reusable arena memory.
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
+	// [:cap] because the loops below reslice batchSlab many times.
+	defer func() { clear(t.batchSlab[:cap(t.batchSlab)]) }()
+
 	switch t.mode {
 	case ModeDirect:
+		cnt := len(t.keys)
 		clear(t.keys)
+		if t.etl == nil {
+			return t.hashSortDirectInMem(ctx, warmuper, fn)
+		}
 
 		t.batchSlab = t.batchSlab[:0]
 		if warmuper != nil {
@@ -1839,22 +1923,18 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return err
 			}
 		}
-		// Pre-size the arena so a mid-batch grow can't reallocate and invalidate live sub-slices (≤180 B/key, 192 with headroom).
-		t.arenaEnsureCap(hashSortBatchSize * 192)
+		t.arenaEnsureCap(min(cnt, hashSortBatchSize) * 192)
 		t.arenas[t.curArena] = t.arenas[t.curArena][:0]
 		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			// Copy into arena since ETL may reuse buffers
 			hk := t.arenaAlloc(k)
 			pk := t.arenaAlloc(v)
 			t.batchSlab = append(t.batchSlab, KeyUpdate{hashedKey: hk, plainKey: unsafe.String(unsafe.SliceData(pk), len(pk))})
 
-			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
 				startDepth := 0
 				if prevKey != nil {
-					// Find common prefix length
 					minLen := min(len(prevKey), len(hk))
 					for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
 						startDepth++
@@ -1864,7 +1944,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				prevKey = append(prevKey[:0], hk...)
 			}
 
-			// Process batch when full
 			if len(t.batchSlab) >= hashSortBatchSize {
 				for i := range t.batchSlab {
 					select {
@@ -1894,7 +1973,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			return err
 		}
 
-		// Process remaining keys in final batch
 		for i := range t.batchSlab {
 			select {
 			case <-ctx.Done():
@@ -1906,7 +1984,8 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			}
 		}
 
-		t.initCollector()
+		t.etl.Close()
+		t.etl = nil
 
 	case ModeUpdate:
 		t.batchSlab = t.batchSlab[:0]
@@ -1915,7 +1994,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return err
 			}
 		}
-		t.arenaEnsureCap(hashSortBatchSize * 144)
+		t.arenaEnsureCap(min(t.tree.Len(), hashSortBatchSize) * 144)
 		t.arenas[t.curArena] = t.arenas[t.curArena][:0]
 		var prevKey []byte
 		var processErr error
@@ -1976,7 +2055,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			return processErr
 		}
 
-		// Process remaining keys in final batch
 		for i := range t.batchSlab {
 			select {
 			case <-ctx.Done():
@@ -1989,13 +2067,25 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		}
 		t.tree.Clear(true)
 
+	case ModeCollect:
+		return errors.New("commitment: ModeCollect has no HashSort; use Drain")
+
 	default:
 		return nil
 	}
 	return nil
 }
 
-// Reset clears all updates
+func (t *Updates) consumeParallel() {
+	if t.mode != ModeParallel {
+		return
+	}
+	clear(t.keys)
+	if t.parallel != nil {
+		t.parallel.Reset()
+	}
+}
+
 func (t *Updates) Reset() {
 	switch t.mode {
 	case ModeDirect:
@@ -2004,7 +2094,13 @@ func (t *Updates) Reset() {
 		} else {
 			clear(t.keys)
 		}
-		t.initCollector()
+		if t.etl != nil {
+			t.etl.Close()
+			t.etl = nil
+		}
+		clear(t.direct)
+		t.direct = t.direct[:0]
+		t.directBytes = 0
 	case ModeUpdate:
 		t.tree.Clear(true)
 		clear(t.treeIdx)
@@ -2017,6 +2113,9 @@ func (t *Updates) Reset() {
 		if t.parallel != nil {
 			t.parallel.Reset()
 		}
+	case ModeCollect:
+		clear(t.treeIdx)
+		t.hashedTouches = t.hashedTouches[:0]
 	default:
 	}
 	t.batchSlab = t.batchSlab[:0]
@@ -2025,6 +2124,7 @@ func (t *Updates) Reset() {
 	}
 	t.curArena = 0
 	t.gen = 0
+	t.addrCache.reset()
 }
 
 type KeyUpdate struct {
@@ -2033,15 +2133,9 @@ type KeyUpdate struct {
 	update    *Update
 }
 
-// keyUpdateLessFn orders KeyUpdate entries by hashedKey. Process requires
-// updates to arrive in hashedKey-sorted order so fold/unfold operates on
-// adjacent trie paths; iterating by plainKey produces a different trie
-// traversal sequence and yields a divergent root hash. ModeDirect achieves
-// this via its etl collector keyed on hashedKey; ModeUpdate's btree must
-// match that order.
-//
-// plainKey is used only as a tiebreaker (e.g. for TouchHashedKey entries
-// that share their hashedKey with a "real" entry).
+// keyUpdateLessFn orders by hashedKey first: Process requires hashedKey-sorted order for
+// fold/unfold to walk adjacent trie paths, else the root hash diverges. plainKey is only
+// a tiebreaker, e.g. for TouchHashedKey entries sharing a hashedKey with a "real" entry.
 func keyUpdateLessFn(i, j *KeyUpdate) bool {
 	if c := bytes.Compare(i.hashedKey, j.hashedKey); c != 0 {
 		return c < 0
@@ -2086,6 +2180,13 @@ type Update struct {
 	Flags      UpdateFlags
 	Balance    uint256.Int
 	Nonce      uint64
+
+	// DeleteStorageSubtree is a transient (never-serialized) signal that this
+	// account was self-destructed or created as a contract in the block: its whole
+	// storage subtree must be pruned before this account's update is applied, so the
+	// account rebuilds from empty storage. Set by the commitment calculator; consumed
+	// by the trie during Process. Not a Flags bit because Flags is serialized and merged.
+	DeleteStorageSubtree bool
 }
 
 func (u *Update) Reset() {
@@ -2094,25 +2195,29 @@ func (u *Update) Reset() {
 	u.Nonce = 0
 	u.StorageLen = 0
 	u.CodeHash = empty.CodeHash
+	u.DeleteStorageSubtree = false
 }
 
-// Copy creates a deep copy of the Update.
 func (u *Update) Copy() *Update {
 	if u == nil {
 		return nil
 	}
 	c := &Update{
-		CodeHash:   u.CodeHash,
-		Storage:    u.Storage,
-		StorageLen: u.StorageLen,
-		Flags:      u.Flags,
-		Nonce:      u.Nonce,
+		CodeHash:             u.CodeHash,
+		Storage:              u.Storage,
+		StorageLen:           u.StorageLen,
+		Flags:                u.Flags,
+		Nonce:                u.Nonce,
+		DeleteStorageSubtree: u.DeleteStorageSubtree,
 	}
 	c.Balance.Set(&u.Balance)
 	return c
 }
 
 func (u *Update) Merge(b *Update) {
+	if b.DeleteStorageSubtree {
+		u.DeleteStorageSubtree = true
+	}
 	if b.Flags == DeleteUpdate {
 		u.Flags = DeleteUpdate
 		return

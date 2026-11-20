@@ -31,10 +31,11 @@ var defaultFetcherConfig = FetcherConfig{
 type RequestIdGenerator func() uint64
 
 type FetcherConfig struct {
-	responseTimeout    time.Duration
-	retryBackOff       time.Duration
-	maxRetries         uint64
-	requestIdGenerator RequestIdGenerator
+	responseTimeout     time.Duration
+	retryBackOff        time.Duration
+	maxRetries          uint64
+	requestIdGenerator  RequestIdGenerator
+	skipFailureTracking bool
 }
 
 func (fc FetcherConfig) CopyWithOptions(opts ...FetcherOption) FetcherConfig {
@@ -71,6 +72,13 @@ func WithMaxRetries(maxRetries uint64) FetcherOption {
 func WithRequestIdGenerator(requestIdGenerator RequestIdGenerator) FetcherOption {
 	return func(config FetcherConfig) FetcherConfig {
 		config.requestIdGenerator = requestIdGenerator
+		return config
+	}
+}
+
+func WithoutFailureTracking() FetcherOption {
+	return func(config FetcherConfig) FetcherConfig {
+		config.skipFailureTracking = true
 		return config
 	}
 }

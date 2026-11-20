@@ -20,11 +20,13 @@ import "encoding/binary"
 
 type HashFn func(input []byte) []byte
 
-const hSeedSize = int8(32)
-const hRoundSize = int8(1)
-const hPositionWindowSize = int8(4)
-const hPivotViewSize = hSeedSize + hRoundSize
-const hTotalSize = hSeedSize + hRoundSize + hPositionWindowSize
+const (
+	hSeedSize           = int8(32)
+	hRoundSize          = int8(1)
+	hPositionWindowSize = int8(4)
+	hPivotViewSize      = hSeedSize + hRoundSize
+	hTotalSize          = hSeedSize + hRoundSize + hPositionWindowSize
+)
 
 // To make it completely clear:
 // Memory layout hash input:
@@ -58,7 +60,7 @@ func innerPermuteIndex(hashFn HashFn, rounds uint8, index uint64, listSize uint6
 	if rounds == 0 {
 		return index
 	}
-	buf := make([]byte, hTotalSize, hTotalSize)
+	buf := make([]byte, hTotalSize)
 	r := uint8(0)
 	if !dir {
 		// Start at last round.
@@ -178,7 +180,7 @@ func innerShuffleList[T any](hashFn HashFn, input []T, rounds uint8, seed [32]by
 		return
 	}
 	listSize := uint64(len(input))
-	buf := make([]byte, hTotalSize, hTotalSize)
+	buf := make([]byte, hTotalSize)
 	r := uint8(0)
 	if !dir {
 		// Start at last round.

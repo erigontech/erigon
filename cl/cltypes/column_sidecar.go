@@ -42,18 +42,19 @@ type DataColumnSidecar struct {
 	SignedBlockHeader            *SignedBeaconBlockHeader       `json:"signed_block_header,omitempty"`             // [Removed in Gloas:EIP7732]
 	KzgCommitmentsInclusionProof solid.HashVectorSSZ            `json:"kzg_commitments_inclusion_proof,omitempty"` // [Removed in Gloas:EIP7732]
 
-	version      clparams.StateVersion       // internal: tracks the version for encoding
-	beaconConfig *clparams.BeaconChainConfig // internal: per-instance config for multi-chain support
+	version clparams.StateVersion // internal: tracks the version for encoding
 }
 
-func NewDataColumnSidecar(cfg *clparams.BeaconChainConfig) *DataColumnSidecar {
-	d := &DataColumnSidecar{beaconConfig: cfg}
+func NewDataColumnSidecar() *DataColumnSidecar {
+	d := &DataColumnSidecar{}
 	d.tryInit()
 	return d
 }
 
-func NewDataColumnSidecarWithVersion(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *DataColumnSidecar {
-	d := &DataColumnSidecar{version: version, beaconConfig: cfg}
+// NewDataColumnSidecarWithVersion creates a new DataColumnSidecar with a specific version.
+// Use this when you need version-aware encoding.
+func NewDataColumnSidecarWithVersion(version clparams.StateVersion) *DataColumnSidecar {
+	d := &DataColumnSidecar{version: version}
 	d.tryInitWithVersion(version)
 	return d
 }
@@ -64,15 +65,11 @@ func (d *DataColumnSidecar) Version() clparams.StateVersion {
 }
 
 func (d *DataColumnSidecar) Clone() clonable.Clonable {
-	if d == nil {
-		return &DataColumnSidecar{beaconConfig: clparams.GetBeaconConfig()}
-	}
 	newSidecar := &DataColumnSidecar{
 		BlockRoot:       d.BlockRoot,
 		Slot:            d.Slot,
 		BeaconBlockRoot: d.BeaconBlockRoot,
 		version:         d.version,
-		beaconConfig:    d.beaconConfig,
 	}
 	newSidecar.tryInitWithVersion(d.version)
 	return newSidecar
@@ -83,12 +80,20 @@ func (d *DataColumnSidecar) tryInit() {
 }
 
 func (d *DataColumnSidecar) tryInitWithVersion(version clparams.StateVersion) {
-	cfg := d.beaconConfig
+	cfg := clparams.GetBeaconConfig()
 	if d.Column == nil {
-		d.Column = solid.NewStaticListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
+		if version >= clparams.GloasVersion {
+			d.Column = solid.NewStaticProgressiveListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
+		} else {
+			d.Column = solid.NewStaticListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
+		}
 	}
 	if d.KzgProofs == nil {
-		d.KzgProofs = solid.NewStaticListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+		if version >= clparams.GloasVersion {
+			d.KzgProofs = solid.NewStaticProgressiveListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+		} else {
+			d.KzgProofs = solid.NewStaticListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+		}
 	}
 	// Pre-Gloas fields (Fulu and earlier)
 	if version < clparams.GloasVersion {
@@ -107,6 +112,8 @@ func (d *DataColumnSidecar) tryInitWithVersion(version clparams.StateVersion) {
 
 func (d *DataColumnSidecar) DecodeSSZ(buf []byte, version int) error {
 	d.version = clparams.StateVersion(version)
+	d.Column = nil
+	d.KzgProofs = nil
 	d.tryInitWithVersion(d.version)
 	return ssz2.UnmarshalSSZ(buf, version, d.getSchemaForVersion(d.version)...)
 }
@@ -125,11 +132,6 @@ func (d *DataColumnSidecar) getSchemaForVersion(version clparams.StateVersion) [
 	}
 	// Fulu and earlier
 	return []any{&d.Index, d.Column, d.KzgCommitments, d.KzgProofs, d.SignedBlockHeader, d.KzgCommitmentsInclusionProof}
-}
-
-// getSchema returns the SSZ schema using the stored version.
-func (d *DataColumnSidecar) getSchema() []any {
-	return d.getSchemaForVersion(d.version)
 }
 
 func (d *DataColumnSidecar) EncodingSizeSSZ() int {
@@ -242,21 +244,14 @@ type ColumnSidecarsByRangeRequest struct {
 	  count: uint64
 	  columns: List[ColumnIndex, NUMBER_OF_COLUMNS]
 	*/
-	StartSlot    uint64
-	Count        uint64
-	Columns      solid.Uint64ListSSZ
-	beaconConfig *clparams.BeaconChainConfig
-}
-
-func NewColumnSidecarsByRangeRequest(cfg *clparams.BeaconChainConfig) *ColumnSidecarsByRangeRequest {
-	c := &ColumnSidecarsByRangeRequest{beaconConfig: cfg}
-	c.tryInit()
-	return c
+	StartSlot uint64
+	Count     uint64
+	Columns   solid.Uint64ListSSZ
 }
 
 func (c *ColumnSidecarsByRangeRequest) tryInit() {
 	if c.Columns == nil {
-		c.Columns = solid.NewUint64ListSSZ(int(c.beaconConfig.NumberOfColumns))
+		c.Columns = solid.NewUint64ListSSZ(int(clparams.GetBeaconConfig().NumberOfColumns))
 	}
 }
 
@@ -275,11 +270,8 @@ func (c *ColumnSidecarsByRangeRequest) EncodingSizeSSZ() int {
 	return 16 + c.Columns.EncodingSizeSSZ()
 }
 
-func (c *ColumnSidecarsByRangeRequest) Clone() clonable.Clonable {
-	if c == nil {
-		return &ColumnSidecarsByRangeRequest{beaconConfig: clparams.GetBeaconConfig()}
-	}
-	return &ColumnSidecarsByRangeRequest{beaconConfig: c.beaconConfig}
+func (*ColumnSidecarsByRangeRequest) Clone() clonable.Clonable {
+	return &ColumnSidecarsByRangeRequest{}
 }
 
 func (c *ColumnSidecarsByRangeRequest) Static() bool {
@@ -288,20 +280,19 @@ func (c *ColumnSidecarsByRangeRequest) Static() bool {
 
 // DataColumnsByRootIdentifier is the request for getting a range of column sidecars by root identifier.
 type DataColumnsByRootIdentifier struct {
-	BlockRoot    common.Hash
-	Columns      solid.Uint64ListSSZ
-	beaconConfig *clparams.BeaconChainConfig
+	BlockRoot common.Hash
+	Columns   solid.Uint64ListSSZ
 }
 
-func NewDataColumnsByRootIdentifier(cfg *clparams.BeaconChainConfig) *DataColumnsByRootIdentifier {
-	d := &DataColumnsByRootIdentifier{beaconConfig: cfg}
+func NewDataColumnsByRootIdentifier() *DataColumnsByRootIdentifier {
+	d := &DataColumnsByRootIdentifier{}
 	d.tryInit()
 	return d
 }
 
 func (d *DataColumnsByRootIdentifier) tryInit() {
 	if d.Columns == nil {
-		d.Columns = solid.NewUint64ListSSZ(int(d.beaconConfig.NumberOfColumns))
+		d.Columns = solid.NewUint64ListSSZ(int(clparams.GetBeaconConfig().NumberOfColumns))
 	}
 }
 
@@ -321,11 +312,8 @@ func (d *DataColumnsByRootIdentifier) EncodingSizeSSZ() int {
 	return 32 + 4 + d.Columns.EncodingSizeSSZ()
 }
 
-func (d *DataColumnsByRootIdentifier) Clone() clonable.Clonable {
-	if d == nil {
-		return &DataColumnsByRootIdentifier{beaconConfig: clparams.GetBeaconConfig()}
-	}
-	return &DataColumnsByRootIdentifier{beaconConfig: d.beaconConfig}
+func (*DataColumnsByRootIdentifier) Clone() clonable.Clonable {
+	return &DataColumnsByRootIdentifier{}
 }
 
 func (d *DataColumnsByRootIdentifier) Static() bool {

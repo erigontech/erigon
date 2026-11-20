@@ -45,6 +45,14 @@ func GetConfig(db kv.Getter, buf []byte) (*Config, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("invalid chain config JSON: %s, %w", data, err)
 	}
+	// Config has no 'bor' field, so a stored Polygon config would otherwise load
+	// with its consensus settings silently dropped. Matches rawdb.ReadChainConfig.
+	var probe struct {
+		Bor json.RawMessage `json:"bor"`
+	}
+	if err := json.Unmarshal(data, &probe); err == nil && len(probe.Bor) > 0 && string(probe.Bor) != "null" {
+		return nil, fmt.Errorf("chain config carries a 'bor' section: Polygon is not supported, see https://github.com/0xPolygon/erigon")
+	}
 	return &config, nil
 }
 

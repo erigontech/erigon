@@ -33,6 +33,8 @@ type processFunc func(s abstract.BeaconState) error
 func runEpochTransitionConsensusTest(t *testing.T, sszSnappyTest, sszSnappyExpected []byte, f processFunc) {
 	testState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(testState, sszSnappyTest, int(clparams.BellatrixVersion)))
+	_, err := testState.HashSSZ()
+	require.NoError(t, err)
 	expectedState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(expectedState, sszSnappyExpected, int(clparams.BellatrixVersion)))
 	// Make up state transistor
@@ -128,10 +130,7 @@ func TestProcessHistoricalRoots(t *testing.T) {
 }
 
 func TestProcessParticipationFlagUpdates(t *testing.T) {
-	runEpochTransitionConsensusTest(t, startingParticipationFlagState, expectedParticipationFlagState, func(s abstract.BeaconState) error {
-		ProcessParticipationFlagUpdates(s)
-		return nil
-	})
+	runEpochTransitionConsensusTest(t, startingParticipationFlagState, expectedParticipationFlagState, ProcessParticipationFlagUpdates)
 }
 
 func TestProcessSlashings(t *testing.T) {
@@ -152,17 +151,11 @@ func TestEth1DataReset(t *testing.T) {
 }
 
 func TestRandaoMixesReset(t *testing.T) {
-	runEpochTransitionConsensusTest(t, startingRandaoMixesResetState, expectedRandaoMixesResetState, func(s abstract.BeaconState) error {
-		ProcessRandaoMixesReset(s)
-		return nil
-	})
+	runEpochTransitionConsensusTest(t, startingRandaoMixesResetState, expectedRandaoMixesResetState, ProcessRandaoMixesReset)
 }
 
 func TestSlashingsReset(t *testing.T) {
-	runEpochTransitionConsensusTest(t, startingSlashingsResetState, expectedSlashingsResetState, func(s abstract.BeaconState) error {
-		ProcessSlashingsReset(s)
-		return nil
-	})
+	runEpochTransitionConsensusTest(t, startingSlashingsResetState, expectedSlashingsResetState, ProcessSlashingsReset)
 }
 
 //go:embed test_data/epoch_processing/inactivity_scores_expected_test.ssz_snappy

@@ -17,6 +17,7 @@
 package trie
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	length2 "github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -83,7 +85,7 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlp.RlpSerializable) 
 		return fmt.Errorf("length %d", length)
 	}
 	key := keyHex[len(keyHex)-length:]
-	s := &ShortNode{Key: common.Copy(key), Val: ValueNode(common.Copy(val.RawBytes()))}
+	s := &ShortNode{Key: bytes.Clone(key), Val: ValueNode(bytes.Clone(val.RawBytes()))}
 	hb.nodeStack = append(hb.nodeStack, s)
 	if err := hb.leafHashWithKeyVal(key, val); err != nil {
 		return err
@@ -211,7 +213,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
 	key := keyHex[len(keyHex)-length:]
-	copy(hb.acc.Root[:], EmptyRoot[:])
+	copy(hb.acc.Root[:], empty.RootHash[:])
 	hb.acc.CodeHash = accounts.EmptyCodeHash
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
@@ -221,17 +223,17 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	var root Node
 	if fieldSet&uint32(4) != 0 {
 		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
-		if hb.acc.Root != EmptyRoot {
+		if hb.acc.Root != empty.RootHash {
 			// Root is on top of the stack
 			root = hb.nodeStack[len(hb.nodeStack)-popped-1]
 			if root == nil {
-				root = &HashNode{hash: common.Copy(hb.acc.Root[:])}
+				root = &HashNode{hash: bytes.Clone(hb.acc.Root[:])}
 			}
 		}
 		popped++
 	}
 	var accountCode CodeNode
-	var codeHash = accounts.EmptyCodeHash
+	codeHash := accounts.EmptyCodeHash
 
 	if fieldSet&uint32(8) != 0 {
 		var codeHashValue common.Hash
@@ -260,10 +262,10 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	}
 
 	a := &AccountNode{accCopy, root, true, accountCode, accountCodeSize}
-	s := &ShortNode{Key: common.Copy(key), Val: a}
+	s := &ShortNode{Key: bytes.Clone(key), Val: a}
 	// this invocation will take care of the popping given number of items from both hash stack and node stack,
 	// pushing resulting hash to the hash stack, and nil to the node stack
-	if err = hb.accountLeafHashWithKey(key, popped); err != nil {
+	if err := hb.accountLeafHashWithKey(key, popped); err != nil {
 		return err
 	}
 	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-length2.Hash:])
@@ -274,35 +276,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
 	return nil
-}
-
-func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
-	if hb.trace {
-		fmt.Printf("ACCOUNTLEAFHASH %d (%b)\n", length, fieldSet)
-	}
-	key := keyHex[len(keyHex)-length:]
-	hb.acc.Nonce = nonce
-	hb.acc.Balance.Set(balance)
-	hb.acc.Incarnation = incarnation
-
-	popped := 0
-	if fieldSet&AccountFieldStorageOnly != 0 {
-		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
-		popped++
-	} else {
-		copy(hb.acc.Root[:], EmptyRoot[:])
-	}
-
-	if fieldSet&AccountFieldCodeOnly != 0 {
-		var codeHashValue common.Hash
-		copy(codeHashValue[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
-		hb.acc.CodeHash = accounts.InternCodeHash(codeHashValue)
-		popped++
-	} else {
-		hb.acc.CodeHash = accounts.EmptyCodeHash
-	}
-
-	return hb.accountLeafHashWithKey(key, popped)
 }
 
 // To be called internally
@@ -365,10 +338,10 @@ func (hb *HashBuilder) extension(key []byte) error {
 	var s *ShortNode
 	switch n := nd.(type) {
 	case nil:
-		branchHash := common.Copy(hb.hashStack[len(hb.hashStack)-length2.Hash:])
-		s = &ShortNode{Key: common.Copy(key), Val: &HashNode{hash: branchHash}}
+		branchHash := bytes.Clone(hb.hashStack[len(hb.hashStack)-length2.Hash:])
+		s = &ShortNode{Key: bytes.Clone(key), Val: &HashNode{hash: branchHash}}
 	case *FullNode:
-		s = &ShortNode{Key: common.Copy(key), Val: n}
+		s = &ShortNode{Key: bytes.Clone(key), Val: n}
 	default:
 		return fmt.Errorf("wrong Val type for an extension: %T", nd)
 	}
@@ -442,7 +415,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 	}
 	var capture []byte //nolint: used for tracing
 	if hb.trace {
-		capture = common.Copy(branchHash[:length2.Hash+1])
+		capture = bytes.Clone(branchHash[:length2.Hash+1])
 	}
 	if _, err := writer.Write(branchHash[:length2.Hash+1]); err != nil {
 		return err
@@ -475,10 +448,10 @@ func (hb *HashBuilder) branch(set uint16) error {
 	nodes := hb.nodeStack[len(hb.nodeStack)-digits:]
 	hashes := hb.hashStack[len(hb.hashStack)-hashStackStride*digits:]
 	var i int
-	for digit := uint(0); digit < 16; digit++ {
+	for digit := range uint(16) {
 		if ((1 << digit) & set) != 0 {
 			if nodes[i] == nil {
-				f.Children[digit] = &HashNode{hash: common.Copy(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
+				f.Children[digit] = &HashNode{hash: bytes.Clone(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
 			} else {
 				f.Children[digit] = nodes[i]
 			}
@@ -513,7 +486,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	// Calculate the size of the resulting RLP
 	totalSize := 17 // These are 17 length prefixes
 	var i int
-	for digit := uint(0); digit < 16; digit++ {
+	for digit := range uint(16) {
 		if ((1 << digit) & set) != 0 {
 			if hashes[hashStackStride*i] == 0x80+length2.Hash {
 				totalSize += length2.Hash
@@ -535,7 +508,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 		fmt.Printf("branchHash {\n")
 	}
 	hb.b[0] = rlp.EmptyStringCode
-	for digit := uint(0); digit < 17; digit++ {
+	for digit := range uint(17) {
 		if ((1 << digit) & set) != 0 {
 			if hashes[hashStackStride*i] == byte(0x80+length2.Hash) {
 				if _, err := writer.Write(hashes[hashStackStride*i : hashStackStride*i+hashStackStride]); err != nil {
@@ -605,7 +578,7 @@ func (hb *HashBuilder) code(code []byte) error {
 	if hb.trace {
 		fmt.Printf("CODE\n")
 	}
-	codeCopy := common.Copy(code)
+	codeCopy := bytes.Clone(code)
 	n := CodeNode(codeCopy)
 	hb.nodeStack = append(hb.nodeStack, n)
 	hb.sha.Reset()
@@ -628,7 +601,7 @@ func (hb *HashBuilder) emptyRoot() {
 	hb.nodeStack = append(hb.nodeStack, nil)
 	var hash [hashStackStride]byte // RLP representation of hash (or un-hashes value)
 	hash[0] = 0x80 + length2.Hash
-	copy(hash[1:], EmptyRoot[:])
+	copy(hash[1:], empty.RootHash[:])
 	hb.hashStack = append(hb.hashStack, hash[:]...)
 }
 
@@ -670,7 +643,7 @@ func (hb *HashBuilder) printTopHashes(prefix []byte, _, children uint16) {
 	digits := bits.OnesCount16(children)
 	hashes := hb.hashStack[len(hb.hashStack)-hashStackStride*digits:]
 	var i int
-	for digit := uint(0); digit < 16; digit++ {
+	for digit := range uint(16) {
 		if ((1 << digit) & children) != 0 {
 			fmt.Printf("topHash: %x%02x, %x\n", prefix, digit, hashes[hashStackStride*i+1:hashStackStride*(i+1)])
 			i++

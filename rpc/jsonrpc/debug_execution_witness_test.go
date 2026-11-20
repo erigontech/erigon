@@ -18,35 +18,73 @@ package jsonrpc
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 // fakeStateReader is a minimal state.StateReader backed by an in-memory account
 // map, used to exercise RecordingState predicates without a database.
 type fakeStateReader struct {
 	accounts map[common.Address]*accounts.Account
+	codes    map[common.Address][]byte
 }
 
 func (r *fakeStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	return r.accounts[address.Value()], nil
 }
+
+func (r *fakeStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *fakeStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *fakeStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return r.accounts[address.Value()], nil
 }
+
 func (r *fakeStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *fakeStateReader) HasStorage(address accounts.Address) (bool, error)         { return false, nil }
-func (r *fakeStateReader) ReadAccountCode(address accounts.Address) ([]byte, error)  { return nil, nil }
-func (r *fakeStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) { return 0, nil }
+
+func (r *fakeStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	return r.codes[address.Value()], nil
+}
+
+func (r *fakeStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	return len(r.codes[address.Value()]), nil
+}
+
 func (r *fakeStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
 	return 0, nil
 }
@@ -205,6 +243,49 @@ func TestCollectAccessedState_Legacy7702Designator(t *testing.T) {
 	}
 }
 
+func TestRecordingStateCodeReadAfterRevertedWrite(t *testing.T) {
+	for _, operation := range []string{"code", "size", "delegation"} {
+		t.Run(operation, func(t *testing.T) {
+			writer := accounts.InternAddress(common.HexToAddress("0x11"))
+			reader := accounts.InternAddress(common.HexToAddress("0x22"))
+			code := []byte{0x60, 0x01, 0x00}
+			codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+			inner := &fakeStateReader{
+				accounts: map[common.Address]*accounts.Account{
+					writer.Value(): {Nonce: 1, Root: empty.RootHash, CodeHash: accounts.EmptyCodeHash},
+					reader.Value(): {Nonce: 1, Root: empty.RootHash, CodeHash: codeHash},
+				},
+				codes: map[common.Address][]byte{reader.Value(): code},
+			}
+			recorded := NewRecordingState(inner)
+			ibs := state.New(recorded)
+			defer ibs.Close()
+			transactions.VersionedBlockState(ibs)
+			ibs.SetTxContext(1, 0)
+			read := func() error {
+				switch operation {
+				case "size":
+					_, err := ibs.GetCodeSize(reader)
+					return err
+				case "delegation":
+					_, _, err := ibs.GetDelegatedDesignation(reader)
+					return err
+				default:
+					_, err := ibs.GetCode(reader)
+					return err
+				}
+			}
+			snapshot := ibs.PushSnapshot()
+			require.NoError(t, ibs.SetCode(writer, code, tracing.CodeChangeContractCreation))
+			require.NoError(t, read())
+			require.Empty(t, collectAccessedState(recorded, witnessModeCanonical).SortedCodes)
+			ibs.RevertToSnapshot(snapshot, nil)
+			require.NoError(t, read())
+			require.Equal(t, []hexutil.Bytes{code}, collectAccessedState(recorded, witnessModeCanonical).SortedCodes)
+		})
+	}
+}
+
 // TestCollectAccessedState_KeysOnlyExistingAccounts asserts that a 20-byte address
 // key is emitted only for accounts represented in the witness trie (present in pre-
 // or post-state); an address that exists in neither is excluded, while its accessed
@@ -330,7 +411,7 @@ func TestCheckWitnessKeysComplete(t *testing.T) {
 	})
 	t.Run("large missing list truncated, total preserved", func(t *testing.T) {
 		used := make(map[common.Address]struct{})
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			var a common.Address
 			a[19] = byte(i)
 			used[a] = struct{}{}
@@ -388,4 +469,581 @@ func TestResolveWitnessMode(t *testing.T) {
 			t.Errorf("default should be legacy, got %v", got)
 		}
 	})
+}
+
+// TestWitnessReaderComposition pins the per-phase reader the two build phases install:
+// head-capture reads commitment from the pinned parent and plain state at the phase's
+// txNum (block-end for collapse detection, parent for the trie), while the durable path
+// reads both planes from a single committed tx.
+func TestWitnessReaderComposition(t *testing.T) {
+	t.Parallel()
+
+	const (
+		firstTxNumInBlock = uint64(500)
+		endTxNum          = uint64(1000)
+	)
+	hc := &headCaptureSource{}
+
+	collapse := collapseReaderFor(hc, nil, firstTxNumInBlock, endTxNum)
+	hcCollapse, ok := collapse.(*commitmentdb.CommitmentReplayStateReader)
+	require.True(t, ok, "head-capture collapse phase must install the dual-tx reader")
+	asOf, ok := hcCollapse.PlainStateAsOf()
+	require.True(t, ok)
+	require.Equal(t, endTxNum, asOf, "collapse detection reads plain state at block end")
+	require.False(t, collapse.WithHistory())
+
+	trie := trieReaderFor(hc, nil, firstTxNumInBlock)
+	hcTrie, ok := trie.(*commitmentdb.CommitmentReplayStateReader)
+	require.True(t, ok, "head-capture trie phase must install the dual-tx reader")
+	asOf, ok = hcTrie.PlainStateAsOf()
+	require.True(t, ok)
+	require.Equal(t, firstTxNumInBlock, asOf, "trie phase reads plain state at the parent")
+	require.True(t, trie.WithHistory(), "trie phase is read-only: PutBranch must no-op during witness capture")
+
+	durableCollapse := collapseReaderFor(nil, nil, firstTxNumInBlock, endTxNum)
+	splitReader, ok := durableCollapse.(*commitmentdb.SplitStateReader)
+	require.True(t, ok, "durable collapse phase installs the split-history reader")
+	asOf, ok = splitReader.PlainStateAsOf()
+	require.True(t, ok)
+	require.Equal(t, endTxNum, asOf, "durable collapse reads plain state at block end")
+
+	durableTrie := trieReaderFor(nil, nil, firstTxNumInBlock)
+	historyReader, ok := durableTrie.(*commitmentdb.HistoryStateReader)
+	require.True(t, ok, "durable trie phase installs a plain history reader")
+	require.Equal(t, firstTxNumInBlock, historyReader.AsOf())
+}
+
+// TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent drives the head-capture build
+// with a tip-pinned tx used as the parent of an older block, so the pinned commitment
+// plane does not match parent(B). The build must fail a validation gate and return no
+// result — a wrong witness is never produced. On a cache-only head-capture node nothing
+// is cached and the block serves out-of-window: a miss never falls through to a history
+// recompute.
+func TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		cacheOnly bool
+	}{
+		{"nil cache", false},
+		{"cache only", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previousSchema := statecfg.Schema
+			statecfg.EnableHistoricalCommitment()
+			t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+			m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+			ctx := context.Background()
+
+			require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+				return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+			}))
+
+			api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+			if tc.cacheOnly {
+				api.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+			}
+
+			tx, err := api.db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+
+			// Block 3 is a non-empty old block; a tx pinned at the committed tip carries the
+			// wrong parent commitment for it.
+			const blockNum = uint64(3)
+			bn := rpc.BlockNumber(blockNum)
+			info, err := api.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+			require.NoError(t, err)
+
+			result, err := api.buildWitnessResultHeadCapture(ctx, tx, &rollingPin{tx: tx}, nil, info, witnessModeLegacy)
+			require.Error(t, err, "a mispinned parent must fail a validation gate")
+			require.Nil(t, result, "no witness is produced on gate failure")
+			if !tc.cacheOnly {
+				return
+			}
+			require.Equal(t, 0, api.witnessCache.Len(), "a gate failure caches nothing")
+
+			served, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+			require.ErrorIs(t, err, errWitnessOutOfWindow, "cache-only never recomputes a failed block from history")
+			require.Nil(t, served)
+		})
+	}
+}
+
+// TestExecutionWitnessCacheOnlyServe pins the Task 7 cache-only serve contract for a
+// head-capture minimal node (no commitment history, never recomputes): a by-number miss
+// is out-of-window, a by-number hit serves the cached pointer, and a by-hash request for
+// a still-resident but no-longer-canonical hash is rejected as reorged-away rather than
+// served as canonical.
+func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	ctx := context.Background()
+
+	var block1Hash common.Hash
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		block1Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 1)
+		return err
+	}))
+
+	bn := rpc.BlockNumber(1)
+	sentinel := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xde, 0xad, 0xbe, 0xef}}}
+
+	t.Run("by-number miss returns out-of-window, never recomputes", func(t *testing.T) {
+		api.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.ErrorIs(t, err, errWitnessOutOfWindow)
+		require.Nil(t, result, "a cache-only miss must not build a witness")
+	})
+
+	t.Run("canonical mode returns canonical-unavailable, not out-of-window", func(t *testing.T) {
+		api.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		canonical := "canonical"
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, &canonical)
+		require.ErrorIs(t, err, errWitnessCanonicalUnavailable)
+		require.Nil(t, result, "a cache-only node never builds a canonical witness")
+	})
+
+	t.Run("by-number hit serves cached pointer", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, true, true)
+		cache.Add(block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.Same(t, sentinel, result, "a cached by-number request serves the stored pointer")
+	})
+
+	t.Run("by-number miss waits for the running build", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, true, true)
+		registerFinishedBuild(cache, block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		hitBefore, awaitBefore := witnessCacheHitCounter.GetValueUint64(), witnessCacheAwaitCounter.GetValueUint64()
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.Same(t, sentinel, result, "a cache-only miss must serve the running build, not out-of-window")
+		require.Equal(t, hitBefore, witnessCacheHitCounter.GetValueUint64(), "a joined build is not a resident hit")
+		require.Equal(t, awaitBefore+1, witnessCacheAwaitCounter.GetValueUint64(), "a joined build counts as an await")
+	})
+
+	t.Run("by-hash orphan is reorged-away, never serves the resident entry", func(t *testing.T) {
+		// Store a non-canonical fork header at height 1 so a by-hash request resolves to
+		// block 1 but the hash differs from the canonical one.
+		var hdr *types.Header
+		require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+			var err error
+			hdr, err = m.BlockReader.HeaderByNumber(ctx, tx, 1)
+			return err
+		}))
+		require.NotNil(t, hdr)
+		fork := types.CopyHeader(hdr)
+		fork.Extra = append(append([]byte{}, fork.Extra...), 0xff)
+		forkHash := fork.Hash()
+		require.NotEqual(t, block1Hash, forkHash)
+		require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+			return rawdb.WriteHeader(tx, fork)
+		}))
+
+		cache := newWitnessResultCache(96, 0, true, true)
+		cache.Add(forkHash, sentinel) // resident under the orphan hash
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		byHash := rpc.BlockNumberOrHash{BlockHash: &forkHash}
+
+		tx, err := api.db.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		result, hit, reorgedAway := api.serveFromWitnessCache(ctx, tx, byHash, witnessModeLegacy)
+		require.False(t, hit, "a non-canonical by-hash request must not serve its resident entry")
+		require.True(t, reorgedAway, "an orphan hash must be flagged reorged-away")
+		require.Nil(t, result)
+
+		_, err = api.ExecutionWitness(ctx, byHash, nil)
+		require.ErrorIs(t, err, errWitnessReorgedAway)
+
+		// requireCanonical: true must still land in the reorged-away bucket, not the generic
+		// out-of-window one: the serve path owns the canonical check for the orphan signal.
+		byHashRequireCanonical := rpc.BlockNumberOrHash{BlockHash: &forkHash, RequireCanonical: true}
+		result, hit, reorgedAway = api.serveFromWitnessCache(ctx, tx, byHashRequireCanonical, witnessModeLegacy)
+		require.False(t, hit)
+		require.True(t, reorgedAway, "requireCanonical must not collapse an orphan into a plain miss")
+		require.Nil(t, result)
+
+		_, err = api.ExecutionWitness(ctx, byHashRequireCanonical, nil)
+		require.ErrorIs(t, err, errWitnessReorgedAway)
+	})
+}
+
+// TestGetWitnessHeadCaptureOutOfWindow pins that eth_getWitness on a head-capture minimal
+// node (no commitment history, RLP/uncached, cannot recompute) returns the typed
+// out-of-window error rather than the commitment-history hard gate.
+func TestGetWitnessHeadCaptureOutOfWindow(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+
+	base := newBaseApiForTest(m)
+	base.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	bn := rpc.BlockNumber(1)
+	_, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.ErrorIs(t, err, errWitnessOutOfWindow)
+}
+
+// TestGetWitnessHeadCaptureOutOfWindowWhenPruned pins that eth_getWitness on a head-capture
+// minimal node returns the typed out-of-window error even for a block below the state-history
+// prune horizon: the head-capture check must precede the prune-history gate so an old request
+// gets one typed signal instead of a prune-history error.
+func TestGetWitnessHeadCaptureOutOfWindowWhenPruned(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+
+	base := newBaseApiForTest(m)
+	base.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+	// A history-distance prune mode that leaves block 1 below the prune horizon, so the
+	// prune-history gate would fire first if it were still ahead of the head-capture check.
+	mode := prune.Mode{Initialised: true, History: prune.Distance(1)}
+	base._pruneMode.Store(&mode)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	bn := rpc.BlockNumber(1)
+	_, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.ErrorIs(t, err, errWitnessOutOfWindow)
+}
+
+// TestGetWitness covers the eth_getWitness / eth_getTxWitness inputs the head-capture
+// tests do not reach: genesis, a block hash, an unknown block, and the transaction
+// index bound.
+func TestGetWitness(t *testing.T) {
+	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
+	dbg.AssertEnabled = true
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { dbg.AssertEnabled, statecfg.Schema = previousAssert, previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	// An empty witness is the one-byte version header, not zero bytes.
+	emptyWitness := hexutil.Bytes{0x00}
+
+	var block1Hash common.Hash
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		block1Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 1)
+		return err
+	}))
+
+	t.Run("genesis is an empty witness", func(t *testing.T) {
+		bn := rpc.BlockNumber(0)
+		got, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+		require.NoError(t, err)
+		require.Equal(t, emptyWitness, got)
+	})
+
+	bn := rpc.BlockNumber(1)
+	byNumber, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err)
+	require.NotEqual(t, emptyWitness, byNumber, "block 1 must carry a real witness, not the empty one")
+
+	t.Run("by hash matches by number", func(t *testing.T) {
+		got, err := api.GetWitness(ctx, rpc.BlockNumberOrHashWithHash(block1Hash, true))
+		require.NoError(t, err)
+		require.Equal(t, byNumber, got)
+	})
+
+	t.Run("unknown block", func(t *testing.T) {
+		unknown := rpc.BlockNumber(999_999)
+		got, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &unknown})
+		var notFound rpc.BlockNotFoundErr
+		require.ErrorAs(t, err, &notFound)
+		require.Nil(t, got)
+	})
+
+	t.Run("tx witness for the first transaction", func(t *testing.T) {
+		got, err := api.GetTxWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, 0)
+		require.NoError(t, err)
+		require.Equal(t, byNumber, got, "a tx witness carries the whole block's witness")
+	})
+
+	t.Run("tx index out of bounds", func(t *testing.T) {
+		got, err := api.GetTxWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, 100)
+		require.ErrorContains(t, err, "transaction index out of bounds")
+		require.Nil(t, got)
+	})
+
+	// An index above math.MaxInt64 decodes fine and must not wrap negative past the bound.
+	t.Run("tx index overflowing int is out of bounds", func(t *testing.T) {
+		got, err := api.GetTxWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, hexutil.Uint(1)<<63)
+		require.ErrorContains(t, err, "transaction index out of bounds")
+		require.Nil(t, got)
+	})
+
+	for _, tc := range []struct {
+		name            string
+		history, blocks prune.BlockAmount
+	}{
+		{"pruned history", prune.Distance(1), prune.KeepAllBlocksPruneMode},
+		{"pruned transactions", prune.KeepAllBlocksPruneMode, prune.Distance(1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := newBaseApiForTest(m)
+			base._pruneMode.Store(&prune.Mode{Initialised: true, History: tc.history, Blocks: tc.blocks})
+			api := newEthApiForTest(base, m.DB, nil, nil)
+
+			got, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+			require.ErrorIs(t, err, state.ErrPruned)
+			require.Nil(t, got)
+			got, err = api.GetTxWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, 0)
+			require.ErrorIs(t, err, state.ErrPruned)
+			require.Nil(t, got)
+		})
+	}
+}
+
+// TestGetWitnessRequiresCommitmentHistory pins that eth_getWitness reports the missing
+// prerequisite rather than failing deeper in the build.
+func TestGetWitnessRequiresCommitmentHistory(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, false)
+	}))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	bn := rpc.BlockNumber(1)
+	got, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.ErrorContains(t, err, "requires commitment history")
+	require.Nil(t, got)
+}
+
+// A witness whose state nodes are wrong is caught only by the stateless replay, so the
+// assert gate is what separates the two modes: off it is accepted, on it fails closed.
+func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
+	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { dbg.AssertEnabled, statecfg.Schema = previousAssert, previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	tx, err := api.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	block, err := api.blockByNumberWithSenders(ctx, tx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, block)
+
+	fullEngine, ok := api.engine().(rules.Engine)
+	require.True(t, ok)
+
+	bad := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xde, 0xad, 0xbe, 0xef}}}
+
+	dbg.AssertEnabled = false
+	require.NoError(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
+		"without the gate a witness is never replayed, so a wrong one passes")
+
+	dbg.AssertEnabled = true
+	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
+		"under the gate the stateless replay rejects a wrong witness")
+}
+
+type fixedParentState struct {
+	acc  map[accounts.Address]*accounts.Account
+	slot map[accounts.StorageKey][]byte
+}
+
+func (p fixedParentState) GetCommittedAccount(addr accounts.Address) (*accounts.Account, bool) {
+	a, ok := p.acc[addr]
+	return a, ok
+}
+
+func (p fixedParentState) GetCommittedStorage(_ accounts.Address, key accounts.StorageKey) ([]byte, bool) {
+	v, ok := p.slot[key]
+	return v, ok
+}
+
+type fixedHistory struct {
+	state.StateReader
+	acc  map[accounts.Address]*accounts.Account
+	slot map[accounts.StorageKey]uint256.Int
+}
+
+func (h fixedHistory) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	return h.acc[addr], nil
+}
+
+func (h fixedHistory) ReadAccountStorage(_ accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	v, ok := h.slot[key]
+	return v, ok, nil
+}
+
+func TestParentStateReaderServesTheValidationsParentState(t *testing.T) {
+	previous := dbg.AssertEnabled
+	t.Cleanup(func() { dbg.AssertEnabled = previous })
+	cached, absent, unseen := accounts.InternAddress(common.Address{1}), accounts.InternAddress(common.Address{2}), accounts.InternAddress(common.Address{3})
+	full, empty, other := accounts.InternKey(common.Hash{1}), accounts.InternKey(common.Hash{2}), accounts.InternKey(common.Hash{3})
+	history := fixedHistory{
+		acc:  map[accounts.Address]*accounts.Account{cached: {Nonce: 7}, unseen: {Nonce: 9}},
+		slot: map[accounts.StorageKey]uint256.Int{full: *uint256.NewInt(5), other: *uint256.NewInt(6)},
+	}
+	parent := fixedParentState{
+		acc:  map[accounts.Address]*accounts.Account{cached: {Nonce: 7}, absent: nil},
+		slot: map[accounts.StorageKey][]byte{full: {5}, empty: nil},
+	}
+	for _, asserts := range []bool{false, true} {
+		dbg.AssertEnabled = asserts
+		r := &parentStateReader{StateReader: history, parent: parent}
+		acc, err := r.ReadAccountData(cached)
+		require.NoError(t, err)
+		require.Equal(t, uint64(7), acc.Nonce)
+		acc.Nonce = 8
+		require.Equal(t, uint64(7), parent.acc[cached].Nonce, "callers get a copy")
+		acc, err = r.ReadAccountData(absent)
+		require.NoError(t, err)
+		require.Nil(t, acc)
+		acc, err = r.ReadAccountData(unseen)
+		require.NoError(t, err)
+		require.Equal(t, uint64(9), acc.Nonce, "a key the validation never read comes from history")
+		v, ok, err := r.ReadAccountStorage(cached, full)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, uint64(5), v.Uint64())
+		v, ok, err = r.ReadAccountStorage(cached, empty)
+		require.NoError(t, err)
+		require.False(t, ok)
+		require.True(t, v.IsZero())
+		v, _, err = r.ReadAccountStorage(cached, other)
+		require.NoError(t, err)
+		require.Equal(t, uint64(6), v.Uint64())
+	}
+
+	dbg.AssertEnabled = true
+	wrong := fixedParentState{acc: map[accounts.Address]*accounts.Account{cached: {Nonce: 1}}, slot: map[accounts.StorageKey][]byte{full: {4}}}
+	r := &parentStateReader{StateReader: history, parent: wrong}
+	_, err := r.ReadAccountData(cached)
+	require.Error(t, err, "asserts reject a cached account that differs from history")
+	_, _, err = r.ReadAccountStorage(cached, full)
+	require.Error(t, err, "asserts reject a cached slot that differs from history")
+}
+
+func TestBuildAccessedStateStopsOnCancelledContext(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	tx, err := api.db.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	bn := rpc.BlockNumber(3)
+	info, err := api.resolveWitnessBlock(m.Ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err)
+	require.NotEmpty(t, info.Block.Transactions())
+	chainConfig, err := api.chainConfig(m.Ctx, tx)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(m.Ctx)
+	cancel()
+	_, _, err = api.buildAccessedState(ctx, tx, info.Block, chainConfig, api.engine(), info.FirstTxNumInBlock, witnessModeLegacy, nil)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+type chainWitnesses struct {
+	Legacy     [][]byte
+	Canonical  [][]byte
+	GetWitness []hexutil.Bytes
+}
+
+func collectChainWitnesses(t *testing.T, commitmentV3 bool) chainWitnesses {
+	previousAssert := dbg.AssertEnabled
+	t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
+	dbg.AssertEnabled = true
+	t.Cleanup(statecfg.SetCommitmentV3(commitmentV3))
+	statecfg.EnableHistoricalCommitment()
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	var latest uint64
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		latest, err = stages.GetStageProgress(tx, stages.Execution)
+		return err
+	}))
+	require.Positive(t, latest)
+
+	debugAPI := newDebugApiForTest(m)
+	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	var out chainWitnesses
+	for n := uint64(1); n <= latest; n++ {
+		bn := rpc.BlockNumber(n)
+		at := rpc.BlockNumberOrHash{BlockNumber: &bn}
+		for _, mode := range []string{"legacy", "canonical"} {
+			result, err := debugAPI.ExecutionWitness(ctx, at, &mode)
+			require.NoError(t, err, "block %d mode %s", n, mode)
+			encoded, err := json.Marshal(result)
+			require.NoError(t, err)
+			if mode == "legacy" {
+				out.Legacy = append(out.Legacy, encoded)
+			} else {
+				out.Canonical = append(out.Canonical, encoded)
+			}
+		}
+		witness, err := ethAPI.GetWitness(ctx, at)
+		require.NoError(t, err, "block %d eth_getWitness", n)
+		out.GetWitness = append(out.GetWitness, witness)
+	}
+	return out
+}
+
+func TestWitnessesMatchHPHUnderCommitmentV3(t *testing.T) {
+	var hph, v3 chainWitnesses
+	require.True(t, t.Run("hph", func(t *testing.T) { hph = collectChainWitnesses(t, false) }))
+	require.True(t, t.Run("v3", func(t *testing.T) { v3 = collectChainWitnesses(t, true) }))
+	require.NotEmpty(t, hph.Legacy)
+	for n := range hph.Legacy {
+		require.Equal(t, string(hph.Legacy[n]), string(v3.Legacy[n]), "debug_executionWitness legacy, block %d", n+1)
+		require.Equal(t, string(hph.Canonical[n]), string(v3.Canonical[n]), "debug_executionWitness canonical, block %d", n+1)
+		require.Equal(t, hph.GetWitness[n], v3.GetWitness[n], "eth_getWitness, block %d", n+1)
+	}
+}
+
+func TestHeadCaptureRejectsWrongTracedRoot(t *testing.T) {
+	m, testChain := newV3HistoryTestExecModule(t)
+	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
+	pin, err := openRollingPin(t.Context(), m.DB)
+	require.NoError(t, err)
+	t.Cleanup(pin.close)
+	require.NoError(t, m.InsertChain(testChain.Slice(1, 2)))
+	committed, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer committed.Rollback()
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	bn := rpc.BlockNumber(2)
+	info, err := api.resolveWitnessBlock(t.Context(), committed, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err)
+	header := info.Block.Header()
+	header.Root = common.Hash{0xde, 0xad}
+	info.Block = info.Block.WithSeal(header)
+	result, err := api.buildWitnessResultHeadCapture(t.Context(), committed, pin, &commitmentdb.ParentRecords{}, info, witnessModeLegacy)
+	require.ErrorContains(t, err, "commitment root mismatch (traced=true)")
+	require.Nil(t, result)
 }

@@ -20,18 +20,18 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/direct"
 )
 
 // Per the devp2p spec, a Receipts response carries one receipt list per requested
@@ -91,13 +91,26 @@ func TestAnswerGetReceiptsQuery_EndsResponseWhenBlockUnreadable(t *testing.T) {
 	require.Equal(t, []rlp.RawValue{f.encoded(t, 0)}, resp)
 }
 
+// A passed deadline still serves the first block, then ends the response.
+func TestAnswerGetReceiptsQuery_StopsAfterDeadline(t *testing.T) {
+	f := newReceiptsQueryFixture(t, 3)
+	resp, lastBlockIncomplete, err := answerQueryOpts(t, f, ReceiptQueryOpts{EthVersion: ETH68, SizeLimit: NoSizeLimit, Deadline: time.Unix(1, 0)})
+	require.NoError(t, err)
+	require.False(t, lastBlockIncomplete)
+	require.Equal(t, []rlp.RawValue{f.encoded(t, 0)}, resp)
+}
+
 func answerQuery(t *testing.T, f *receiptsQueryFixture) ([]rlp.RawValue, bool, error) {
 	t.Helper()
-	db := temporal.NewTestDB(t, dbcfg.ChainDB)
+	return answerQueryOpts(t, f, ReceiptQueryOpts{EthVersion: ETH68, SizeLimit: NoSizeLimit})
+}
+
+func answerQueryOpts(t *testing.T, f *receiptsQueryFixture, opts ReceiptQueryOpts) ([]rlp.RawValue, bool, error) {
+	t.Helper()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	opts := ReceiptQueryOpts{EthVersion: direct.ETH68, SizeLimit: NoSizeLimit}
 	return AnswerGetReceiptsQuery(context.Background(), chain.TestChainBerlinConfig, f.getter, f.br, tx, f.query, nil, opts)
 }
 
@@ -118,13 +131,13 @@ func newReceiptsQueryFixture(t *testing.T, n int) *receiptsQueryFixture {
 		getter: &queryTestReceiptsGetter{receipts: map[common.Hash]types.Receipts{}, errs: map[common.Hash]error{}},
 	}
 	parent := common.Hash{}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		header := &types.Header{
 			ParentHash:  parent,
 			ReceiptHash: common.Hash{0xde, 0xad},
 		}
 		header.Number.SetUint64(uint64(i + 1))
-		block := types.NewBlockWithHeader(header)
+		block := types.NewBlockWithHeader(header, nil)
 		hash := block.Hash()
 		parent = hash
 		receipts := types.Receipts{&types.Receipt{CumulativeGasUsed: uint64(21_000 * (i + 1))}}
@@ -146,7 +159,7 @@ func (f *receiptsQueryFixture) encoded(t *testing.T, blockIdx int) rlp.RawValue 
 }
 
 type queryTestBlockReader struct {
-	services.HeaderAndBodyReader
+	dbservices.HeaderAndBodyReader
 	numbers    map[common.Hash]uint64
 	numberErrs map[common.Hash]error
 	blocks     map[common.Hash]*types.Block

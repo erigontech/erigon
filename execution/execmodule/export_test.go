@@ -64,6 +64,7 @@ func (e *ExecModule) ModuleContextTxnSequenceForTest(ctx context.Context) (commi
 	if committed, err = roTx.ReadSequence(kv.EthTx); err != nil {
 		return 0, 0, false, err
 	}
+	sd.BlockOverlay().UpdateTxn(roTx)
 	if moduleContext, err = sd.BlockOverlay().ReadSequence(kv.EthTx); err != nil {
 		return 0, 0, false, err
 	}

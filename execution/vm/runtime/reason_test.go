@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -77,7 +78,7 @@ func newTestIBS(t *testing.T, tracer *tracing.Hooks) *Config {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
+	ibs := state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	ibs.SetHooks(tracer)
 
 	cfg := new(Config)
@@ -101,8 +102,9 @@ func TestCreateEmitsNonceChangeContractCreator(t *testing.T) {
 	initCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.RETURN)}
 
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
+	defer cfg.State.Close()
 
-	_, _, _, err := Create(initCode, cfg, 0)
+	_, _, _, err := Create(initCode, cfg)
 	require.NoError(t, err)
 
 	// Filter for NonceChangeContractCreator events.
@@ -136,8 +138,9 @@ func TestCreateEmitsNonceChangeNewContract(t *testing.T) {
 	initCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.RETURN)}
 
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
+	defer cfg.State.Close()
 
-	_, contractAddr, _, err := Create(initCode, cfg, 0)
+	_, contractAddr, _, err := Create(initCode, cfg)
 	require.NoError(t, err)
 
 	newContractAddr := accounts.InternAddress(contractAddr)
@@ -187,8 +190,9 @@ func TestCreateEmitsCodeChangeContractCreation(t *testing.T) {
 	}
 
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
+	defer cfg.State.Close()
 
-	_, contractAddr, _, err := Create(initCode, cfg, 0)
+	_, contractAddr, _, err := Create(initCode, cfg)
 	require.NoError(t, err)
 
 	newContractAddr := accounts.InternAddress(contractAddr)
@@ -235,8 +239,9 @@ func TestCreateReasonOrdering(t *testing.T) {
 	}
 
 	cfg := newTestIBS(t, tracer)
+	defer cfg.State.Close()
 
-	_, _, _, err := Create(initCode, cfg, 0)
+	_, _, _, err := Create(initCode, cfg)
 	require.NoError(t, err)
 
 	expected := []event{
@@ -264,8 +269,9 @@ func TestCodeChangeUnspecifiedOnSetup(t *testing.T) {
 	// Simple code: STOP
 	code := []byte{byte(vm.STOP)}
 	cfg := newTestIBS(t, tracer)
+	defer cfg.State.Close()
 
-	_, _, err := Execute(code, nil, cfg, t.TempDir())
+	_, _, err := Execute(code, nil, cfg)
 	require.NoError(t, err)
 
 	// The setup SetCode in runtime.Execute must produce CodeChangeUnspecified.
@@ -275,24 +281,9 @@ func TestCodeChangeUnspecifiedOnSetup(t *testing.T) {
 		"setup SetCode must use CodeChangeUnspecified, not a deployment reason")
 }
 
-// TestReasonRoundTripThroughIBS verifies that every NonceChangeReason and
-// CodeChangeReason value used by the call sites outside this package
-// (TxnExecutor EoA-call / EIP-7702 paths, account-abstraction exec) plumbs
-// unchanged through IntraBlockState.SetNonce / SetCode into the V2 tracer
-// hook.
-//
-// This is a plumbing guard only. It does NOT lock in which reason a given
-// call site passes — if a future refactor changes
-// `state.SetCode(addr, code, tracing.CodeChangeAuthorization)` in
-// txn_executor.go to `tracing.CodeChangeUnspecified`, this test stays
-// green. What it does catch is the layer it actually exercises:
-//   - IBS.SetNonce / SetCode dropping or coercing the reason argument
-//   - The stateObject -> V2 hook plumbing forwarding the wrong reason
-//   - Stringer indices going out of sync with the constant values
-//
-// A true end-to-end call-site guard for the TxnExecutor and aa_exec emit
-// sites would need a TxnExecutor fixture (message, signer, gas pool,
-// authorization list) — that's a follow-up rather than part of this PR.
+// TestReasonRoundTripThroughIBS checks that nonce and code change reasons reach
+// tracer hooks unchanged through IntraBlockState. The caller's choice of reason
+// is outside this test's scope.
 func TestReasonRoundTripThroughIBS(t *testing.T) {
 	t.Run("nonce reasons", func(t *testing.T) {
 		nonceReasons := []tracing.NonceChangeReason{
@@ -312,6 +303,7 @@ func TestReasonRoundTripThroughIBS(t *testing.T) {
 					},
 				}
 				cfg := newTestIBS(t, tracer)
+				defer cfg.State.Close()
 				addr := accounts.InternAddress(common.HexToAddress("0x01"))
 
 				require.NoError(t, cfg.State.SetNonce(addr, 1, reason))
@@ -340,6 +332,7 @@ func TestReasonRoundTripThroughIBS(t *testing.T) {
 					},
 				}
 				cfg := newTestIBS(t, tracer)
+				defer cfg.State.Close()
 				addr := accounts.InternAddress(common.HexToAddress("0x02"))
 
 				require.NoError(t, cfg.State.SetCode(addr, []byte{byte(vm.STOP)}, reason))

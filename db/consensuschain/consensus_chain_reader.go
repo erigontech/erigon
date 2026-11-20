@@ -23,9 +23,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -33,11 +33,16 @@ import (
 type Reader struct {
 	config      *chain.Config
 	tx          kv.Tx
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 	logger      log.Logger
 }
 
-func NewReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockReader, logger log.Logger) *Reader {
+// logger is used only on read-error paths, so a nil one stays invisible until
+// something fails. log.Logger is an interface, and calling it then panics.
+func NewReader(config *chain.Config, tx kv.Tx, blockReader dbservices.FullBlockReader, logger log.Logger) *Reader {
+	if logger == nil {
+		logger = log.Root()
+	}
 	return &Reader{config, tx, blockReader, logger}
 }
 
@@ -47,16 +52,19 @@ func (cr Reader) CurrentHeader() *types.Header {
 	h, _ := cr.blockReader.HeaderByHash(context.TODO(), cr.tx, hash)
 	return h
 }
+
 func (cr Reader) CurrentFinalizedHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceFinalized(cr.tx)
 	h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
 	return h
 }
+
 func (cr Reader) CurrentSafeHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceSafe(cr.tx)
 	h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
 	return h
 }
+
 func (cr Reader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
@@ -64,14 +72,15 @@ func (cr Reader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	}
 	return rawdb.ReadHeader(cr.tx, hash, number)
 }
+
 func (cr Reader) GetHeaderByNumber(number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
 		return h
 	}
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
-
 }
+
 func (cr Reader) GetHeaderByHash(hash common.Hash) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
@@ -80,6 +89,7 @@ func (cr Reader) GetHeaderByHash(hash common.Hash) *types.Header {
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }
+
 func (cr Reader) GetTd(hash common.Hash, number uint64) *uint256.Int {
 	td, err := rawdb.ReadTd(cr.tx, hash, number)
 	if err != nil {
@@ -88,12 +98,12 @@ func (cr Reader) GetTd(hash common.Hash, number uint64) *uint256.Int {
 	}
 	return td
 }
-func (cr Reader) FrozenBlocks() uint64              { return cr.blockReader.FrozenBlocks() }
-func (cr Reader) FrozenBorBlocks(align bool) uint64 { return cr.blockReader.FrozenBorBlocks(align) }
+func (cr Reader) FrozenBlocks() uint64 { return cr.blockReader.FrozenBlocks() }
 func (cr Reader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	b, _, _ := cr.blockReader.BlockWithSenders(context.Background(), cr.tx, hash, number)
 	return b
 }
+
 func (cr Reader) HasBlock(hash common.Hash, number uint64) bool {
 	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
 	return b != nil

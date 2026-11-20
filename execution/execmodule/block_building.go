@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -78,6 +79,13 @@ func (e *ExecModule) NewPayloadAttrs(ctx context.Context, params *builder.Parame
 	return e.blockAssembler.NewPayloadAttrs(ctx, params)
 }
 
+func (e *ExecModule) InclusionList(ctx context.Context) (types.Transactions, error) {
+	if e.inclusionListFunc == nil {
+		return nil, errors.New("inclusion list building is not available")
+	}
+	return e.inclusionListFunc(ctx)
+}
+
 func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
 	if !e.config.IsShanghai(time) && withdrawals != nil {
 		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}
@@ -88,12 +96,119 @@ func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.
 	return nil
 }
 
-func (e *ExecModule) evictOldBuilders() {
-	ids := common.SortedKeys(e.builders)
+// buildDuration returns how long a payload builder may run before it stops itself.
+//
+// A consensus layer may send payload attributes well ahead of the slot the payload is for and then
+// call getPayload against the cached payload id, without sending fresh attributes. A builder that
+// stops before that slot hands back a payload missing every transaction that arrived in between, so
+// build until shortly into the target slot, derived from the payload's own timestamp. The floor
+// leaves a late request no worse off than a fixed budget; the cap stops an implausible timestamp
+// from pinning a builder and its resources.
+func buildDuration(payloadTimestamp uint64, now time.Time, secondsPerSlot uint64) time.Duration {
+	slot := time.Duration(secondsPerSlot) * time.Second
+	// Reject beyond the cap horizon before converting: a large enough timestamp overflows
+	// time.Unix and lands in the past, which would take the floor instead of the cap.
+	horizon := now.Add(2 * slot)
+	if payloadTimestamp > uint64(max(horizon.Unix(), 0)) {
+		return 2 * slot
+	}
+	d := time.Unix(int64(payloadTimestamp), 0).Add(slot / 3).Sub(now)
+	return min(max(d, slot/4), 2*slot)
+}
 
-	// remove old builders so that at most MaxBuilders - 1 remain
-	for i := 0; i <= len(e.builders)-engine_helpers.MaxBuilders; i++ {
-		delete(e.builders, ids[i])
+// stopGraceDuration returns how long a builder that reached its budget may take to finish up - the
+// transaction in flight, the packing tail, payload finalization - before it is taken as stuck and
+// discarded.
+func stopGraceDuration(secondsPerSlot uint64) time.Duration {
+	return time.Duration(secondsPerSlot) * time.Second / 2
+}
+
+// sameBuildRequest reports whether a request is asking for the payload another one is already
+// building. A custom transaction provider is never treated as the same request: it is stateful and
+// hands its transactions over once, so a second request carrying one is not asking for what the
+// first is building, and comparing the provider itself would read fields the running build writes.
+func sameBuildRequest(previous, current *builder.Parameters) bool {
+	if previous == nil || current == nil {
+		return false
+	}
+	if previous.CustomTxnProvider != nil || current.CustomTxnProvider != nil {
+		return false
+	}
+	// The payload id is this module's to assign, so it is not part of the question, and comparing
+	// copies keeps the caller's parameters out of it.
+	withoutID := func(p *builder.Parameters) builder.Parameters {
+		stripped := *p
+		stripped.PayloadId = 0
+		return stripped
+	}
+	previousWithoutID, currentWithoutID := withoutID(previous), withoutID(current)
+	return reflect.DeepEqual(&previousWithoutID, &currentWithoutID)
+}
+
+// builderEntry keeps a builder with the immutable parameters it was created for, so the two cannot
+// drift apart and eviction can drop the timestamp index without scanning it.
+type builderEntry struct {
+	builder *builder.BlockBuilder
+	params  *builder.Parameters
+}
+
+// isIndexedFor reports whether the timestamp index still resolves to this entry, which is what has
+// to be cleaned up when the entry goes.
+func (e *ExecModule) isIndexedFor(id uint64, entry *builderEntry) bool {
+	return entry != nil && entry.params != nil && e.buildersByTimestamp[entry.params.Timestamp] == id
+}
+
+// isLiveProposalTarget reports whether an entry is what a proposal is still waiting on: the builder
+// its timestamp resolves to, for a slot that has not passed. Being indexed is not enough on its own,
+// because every slot has its own timestamp and successful entries stay indexed: protecting all of
+// them would mean never evicting anything.
+func (e *ExecModule) isLiveProposalTarget(id uint64, entry *builderEntry, now time.Time) bool {
+	if !e.isIndexedFor(id, entry) {
+		return false
+	}
+	// A builder that can no longer produce is not worth protecting, however live its slot.
+	if entry.builder == nil || entry.builder.Failed() || entry.builder.Discarded() {
+		return false
+	}
+	// Compared as seconds rather than times, so an implausible timestamp wraps into "not live"
+	// instead of overflowing into the past.
+	nowSeconds := uint64(max(now.Unix(), 0))
+	slotSeconds := e.config.SecondsPerSlot()
+	timestamp := entry.params.Timestamp
+	return timestamp+slotSeconds > nowSeconds && timestamp <= nowSeconds+2*slotSeconds
+}
+
+// dropBuilder removes and discards a builder.
+func (e *ExecModule) dropBuilder(id uint64, entry *builderEntry) {
+	if entry != nil {
+		if e.isIndexedFor(id, entry) {
+			delete(e.buildersByTimestamp, entry.params.Timestamp)
+		}
+		if entry.builder != nil {
+			entry.builder.Discard()
+		}
+	}
+	delete(e.builders, id)
+}
+
+// evictOldBuilders makes room for one builder by dropping the oldest entries, except those a live
+// proposal is still waiting on.
+func (e *ExecModule) evictOldBuilders() {
+	remaining := len(e.builders) - engine_helpers.MaxBuilders + 1
+	if remaining <= 0 {
+		return
+	}
+	now := time.Now()
+	for _, id := range common.SortedKeys(e.builders) {
+		if remaining <= 0 {
+			return
+		}
+		entry := e.builders[id]
+		if e.isLiveProposalTarget(id, entry, now) {
+			continue
+		}
+		e.dropBuilder(id, entry)
+		remaining--
 	}
 }
 
@@ -120,8 +235,14 @@ func (e *ExecModule) evictOldBuilders() {
 // AssembleBlock refused whenever one ran (live328: 115 "failed to produce execution payload" in two
 // minutes). It was fixed by giving rounds their own domain (roundMu), not by making the refusal cheaper.
 func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error) {
-	// ONE BLOCK AT A TIME. nextPayloadId and lastParameters are touched by this method alone, so this is
-	// the whole of the exclusion assembly needs.
+	if err := ctx.Err(); err != nil {
+		return AssembleBlockResult{}, err
+	}
+	if err := e.backgroundCtx.Err(); err != nil {
+		return AssembleBlockResult{}, err
+	}
+	// ONE BLOCK AT A TIME. nextPayloadId is touched by this method alone, so this is the whole of the
+	// exclusion assembly needs.
 	e.assembleMu.Lock()
 	defer e.assembleMu.Unlock()
 
@@ -129,24 +250,20 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		return AssembleBlockResult{}, err
 	}
 
-	// First check if we're already building a block with the requested parameters
-	if e.lastParameters != nil {
-		params.PayloadId = e.lastParameters.PayloadId
-		if reflect.DeepEqual(e.lastParameters, params) {
-			e.logger.Info("[ForkChoiceUpdated] duplicate build request")
-			return AssembleBlockResult{PayloadID: e.lastParameters.PayloadId}, nil
-		}
-	}
-
-	e.nextPayloadId++
-	params.PayloadId = e.nextPayloadId
-	e.lastParameters = params
-
 	// DAG-L2 BOUNDARY ASSEMBLE: on a DAG-driven L2 the CL's FCU-with-attributes does NOT build from-scratch
 	// from the txpool. It inserts a block-end MARKER carrying these attrs into the ordering layer, then seals
 	// the already-pre-executed body (zero re-execution). The marker carrying params gives attribute agreement
 	// for free (pre-exec ran under these same attrs, sourced from this FCU). See [[dag_start_end_system_tx]].
 	if e.blockAssembler != nil {
+		e.pendingBlockMu.Lock()
+		for previousID, previous := range e.pendingBlock {
+			if sameBuildRequest(previous, params) {
+				e.pendingBlockMu.Unlock()
+				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
+				return AssembleBlockResult{PayloadID: previousID}, nil
+			}
+		}
+		e.pendingBlockMu.Unlock()
 		// RE-ANCHOR: if the CL is now building on a DIFFERENT parent than the in-progress flashblock was
 		// opened on, Caplin accepted a new head — drop the stale fork and re-anchor the frontier to it. This
 		// is the ONLY part of an assemble that reaches into fork-validator and module-context state, so it is
@@ -167,8 +284,11 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		if err := e.blockAssembler.AssembleBlock(ctx, params); err != nil {
 			return AssembleBlockResult{}, err
 		}
+		e.nextPayloadId++
+		ownedParams := params.Copy()
+		ownedParams.PayloadId = e.nextPayloadId
 		e.pendingBlockMu.Lock()
-		e.pendingBlock[e.nextPayloadId] = params
+		e.pendingBlock[e.nextPayloadId] = ownedParams
 		e.pendingBlockMu.Unlock()
 		e.logger.Debug("[ForkChoiceUpdated] DAG boundary begun", "payload", e.nextPayloadId, "parent", params.ParentHash, "ts", params.Timestamp, "randao", params.PrevRandao)
 		return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
@@ -184,12 +304,29 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	e.semTake("AssembleBlock:builder")
 	defer e.semDrop()
 
+	// A stopped builder is still worth reusing: it holds the payload it was stopped for, which is
+	// exactly what a repeated request is asking for. Only one that cannot produce - failed, or
+	// discarded with its work still winding down - has to be passed over.
+	for previousID, previous := range e.builders {
+		if previous != nil && previous.params != nil && previous.params.Timestamp == params.Timestamp && previous.builder != nil &&
+			!previous.builder.Failed() && !previous.builder.Discarded() {
+			if sameBuildRequest(previous.params, params) {
+				e.buildersByTimestamp[params.Timestamp] = previousID
+				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
+				return AssembleBlockResult{PayloadID: previousID}, nil
+			}
+		}
+	}
 	e.evictOldBuilders()
+
+	e.nextPayloadId++
+	ownedParams := params.Copy()
+	ownedParams.PayloadId = e.nextPayloadId
 
 	// PRECONFIRM VARIANT: if a preconfirm producer (op-stack sequencer) has accumulated a matching in-progress
 	// flashblock in the fork validator, SEAL it synchronously and hand it back directly — no from-scratch build,
 	// no body re-execution. Falls through to the builder when none.
-	if br, ok, err := e.assemblePreconfirmed(ctx, params); err != nil {
+	if br, ok, err := e.assemblePreconfirmed(ctx, ownedParams); err != nil {
 		return AssembleBlockResult{}, err
 	} else if ok {
 		e.preconfirmedBlocks[e.nextPayloadId] = br
@@ -197,7 +334,23 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
 	}
 
-	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, params, e.config.SecondsPerSlot()/4)
+	secondsPerSlot := e.config.SecondsPerSlot()
+	maxBuildTime := buildDuration(params.Timestamp, time.Now(), secondsPerSlot)
+	// Explicit lists use the request budget, independent of the payload timestamp.
+	if ownedParams.RequireAllTransactions {
+		if deadline, ok := ctx.Deadline(); ok {
+			maxBuildTime = time.Until(deadline)
+		}
+	}
+	e.builders[e.nextPayloadId] = &builderEntry{
+		builder: builder.NewBlockBuilder(e.backgroundCtx, e.builderFunc, ownedParams,
+			maxBuildTime, stopGraceDuration(secondsPerSlot)),
+		params: ownedParams,
+	}
+	if ownedParams.RequireAllTransactions {
+		context.AfterFunc(ctx, e.builders[e.nextPayloadId].builder.Discard)
+	}
+	e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId
 	e.logger.Debug("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
@@ -310,7 +463,7 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 
 	e.auditSealedBody(ctx, number, body.Transactions)
 
-	block := types.NewBlockForAsembling(sealed, body.Transactions, nil, receipts, params.Withdrawals)
+	block := types.NewBlockForAsembling(sealed, body.Transactions, nil, receipts, params.Withdrawals, nil)
 
 	// newPayload ingest: re-key the extending fork to the sealed header so a subsequent FCU canonicalises it.
 	if err := e.ingestSealedFlashblockLocked(ctx, sealed); err != nil {
@@ -722,11 +875,6 @@ func (e *ExecModule) orphanFromLocked(parent *types.Header) {
 		}
 	}
 	e.pendingBlockMu.Unlock()
-	// Reads executed on top of the orphans went into the shared state cache; the re-opened height would read
-	// its state back from there.
-	if e.stateCache != nil {
-		e.stateCache.ClearWithHash(parent.Hash())
-	}
 	e.frontierHeader.Store(parent)
 	e.logger.Warn("[execmodule] pre-executed blocks orphaned — the consensus layer built on their parent",
 		"parent", parent.Hash(), "from", from, "dropped", dropped)
@@ -765,16 +913,7 @@ func (e *ExecModule) headerByHashLocked(ctx context.Context, hash common.Hash) *
 // INTERNAL — the reconcile (SealBlock) and the boundary re-anchor (AssembleBlock) are its only callers, both
 // already under the semaphore.
 func (e *ExecModule) abandonExtendingForkLocked() {
-	e.flash.mu.Lock()
-	parent := e.flash.built.Parent
-	e.flash.mu.Unlock()
 	e.preExec.Abandon()
-	// The abandoned generation's state went into the shared state cache as it executed, and a re-open's candidate
-	// filter reads nonces from there before execution resets the cache for the block: the block's own transactions
-	// read as already applied and were dropped (live43, block 1: the close then failed "nonce too low").
-	if e.stateCache != nil && parent != (common.Hash{}) {
-		e.stateCache.ClearWithHash(parent)
-	}
 	// The driver re-opens the SAME block number FRESH after an abandon, so drop the maintained flashblock body
 	// too — otherwise PreExecuteFlashblock (which only auto-resets on a NEW number) would keep the stale body.
 	e.flash.mu.Lock()
@@ -826,6 +965,9 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 }
 
 func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error) {
+	if err := ctx.Err(); err != nil {
+		return AssembledBlockResult{}, err
+	}
 	// DAG BOUNDARY: complete a boundary assemble whose marker was inserted (non-blocking) by AssembleBlock.
 	// GetAssembledBlock FIRST, WITHOUT the semaphore — the commits-handler PreExecute needs the semaphore to
 	// record the body, so holding it here would deadlock the wait. Then acquire the semaphore and seal via
@@ -890,12 +1032,25 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 		return AssembledBlockResult{Block: br, BlockValue: blockValue(br, br.Block.Header().BaseFee)}, nil
 	}
 
-	bldr, ok := e.builders[payloadID]
-	if !ok {
-		return AssembledBlockResult{}, nil
+	entry, ok := e.builders[payloadID]
+	if !ok || entry == nil || entry.builder == nil {
+		return AssembledBlockResult{Unknown: true}, nil
 	}
-	blockWithReceipts, err := bldr.Stop()
+	blockWithReceipts, err := entry.builder.Stop(ctx)
+	if errors.Is(err, builder.ErrDiscarded) {
+		e.dropBuilder(payloadID, entry)
+		return AssembledBlockResult{Unknown: true}, nil
+	}
 	if err != nil {
+		// Stop reports the caller's wait expiring and the build's own failure through the same
+		// error, and a build can fail with a context error of its own - a transaction provider
+		// giving up, say. Only the builder knows which happened, so ask it rather than guess from
+		// the error: a caller that gave up leaves a builder still worth collecting.
+		if !entry.builder.Failed() {
+			return AssembledBlockResult{}, err
+		}
+		// Keeping a failed entry would hand its latched error to every retry.
+		e.dropBuilder(payloadID, entry)
 		e.logger.Error("Failed to build PoS block", "err", err)
 		return AssembledBlockResult{}, err
 	}
@@ -1007,4 +1162,3 @@ func sameProposerAttrs(a, b FlashblockInputs) bool {
 	return a.Timestamp == b.Timestamp && a.PrevRandao == b.PrevRandao &&
 		a.FeeRecipient == b.FeeRecipient && a.ParentBeaconBlockRoot == b.ParentBeaconBlockRoot
 }
-

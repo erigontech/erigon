@@ -27,10 +27,11 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -56,7 +57,7 @@ type BadHeaderEntry struct {
 type EngineBlockDownloader struct {
 	backgroundCtx context.Context
 	status        atomic.Value // current Status of the downloading process, aka: is it doing anything
-	blockReader   services.FullBlockReader
+	blockReader   dbservices.FullBlockReader
 	db            kv.RoDB
 	chainRW       chainreader.ChainReaderWriterEth1
 	syncCfg       ethconfig.Sync
@@ -70,7 +71,7 @@ func NewEngineBlockDownloader(
 	ctx context.Context,
 	logger log.Logger,
 	executionClient execmodule.ExecutionModule,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	db kv.RoDB,
 	config *chain.Config,
 	syncCfg ethconfig.Sync,
@@ -139,7 +140,7 @@ func (e *EngineBlockDownloader) download(ctx context.Context, req BackwardDownlo
 		if errors.Is(err, p2p.ErrChainLengthExceedsLimit) {
 			// Expected: gap is unbridgeable by a chain-length-limited download; the EL relies on FCU or staged sync.
 			e.logger.Info("[EngineBlockDownloader] backward download skipped — gap exceeds limit, awaiting FCU/staged sync", args...)
-		} else {
+		} else if !commonerrors.IsOnlyCanceled(err) {
 			e.logger.Warn("[EngineBlockDownloader] could not process backward download request", args...)
 		}
 		e.status.Store(Idle)
@@ -157,6 +158,9 @@ func newPayloadGapExceedsLimit(currentHeadNum, missingBlockNum, maxReorgDepth ui
 func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDownloadRequest) error {
 	err := e.downloadBlocks(ctx, req)
 	if err != nil {
+		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) && req.ValidateChainTip != nil {
+			e.ReportBadHeader(req.ValidateChainTip.Hash(), common.Hash{}, err.Error())
+		}
 		return fmt.Errorf("could not process backward download of blocks: %w", err)
 	}
 	e.logger.Info("[EngineBlockDownloader] backward download of blocks finished successfully", req.LogArgs()...)
@@ -164,11 +168,14 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 		return nil
 	}
 	tip := req.ValidateChainTip
-	err = e.chainRW.InsertBlock(ctx, tip, nil)
+	err = e.chainRW.InsertBlock(ctx, tip)
 	if err != nil {
+		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
+			e.ReportBadHeader(tip.Hash(), common.Hash{}, err.Error())
+		}
 		return fmt.Errorf("could not insert request chain tip for validation: %w", err)
 	}
-	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, tip.Hash(), tip.NumberU64())
+	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, tip)
 	if err != nil {
 		return fmt.Errorf("request chain tip validation failed: %w", err)
 	}
@@ -217,13 +224,17 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 		return err
 	}
 
+	var batches batchFeed = feed
+	if req.Trigger == FcuTrigger {
+		batches = newBatchPrefetcher(ctx, feed, int64(e.syncCfg.BodyCacheLimit))
+	}
 	logProgressTicker := time.NewTicker(30 * time.Second)
 	defer logProgressTicker.Stop()
 
 	var batch p2p.BlockBatchResult
 	var insertedBlocksWithoutExec int
 	var lastTip *types.Block
-	for batch, err = feed.Next(ctx); err == nil && len(batch.Blocks) > 0; batch, err = feed.Next(ctx) {
+	for batch, err = batches.Next(ctx); err == nil && len(batch.Blocks) > 0; batch, err = batches.Next(ctx) {
 		blocks := batch.Blocks
 		progressLogArgs := []any{
 			"from", blocks[0].NumberU64(),
@@ -237,8 +248,18 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 		default:
 			e.logger.Trace("[EngineBlockDownloader] processing downloaded blocks", progressLogArgs...)
 		}
-		err := e.chainRW.InsertBlocks(ctx, blocks, batch.BALs)
+		err := e.chainRW.InsertBlocks(ctx, blocks)
 		if err != nil {
+			if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
+				for _, block := range blocks {
+					rawBlock := types.RawBlock{Header: block.HeaderNoCopy(), Body: block.RawBody()}
+					if rawBlock.ValidateMaxRlpSize(e.chainRW.Config()) != nil {
+						e.ReportBadHeader(block.Hash(), common.Hash{}, err.Error())
+						e.ReportBadHeader(req.MissingHash, common.Hash{}, err.Error())
+						break
+					}
+				}
+			}
 			return err
 		}
 		insertedBlocksWithoutExec += len(blocks)
@@ -272,7 +293,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 }
 
 func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *types.Block, requested common.Hash) error {
-	status, validationErr, lastValidHash, err := e.chainRW.ValidateChain(ctx, block.Hash(), block.NumberU64())
+	status, validationErr, lastValidHash, err := e.chainRW.ValidateChain(ctx, block)
 	if err != nil {
 		return err
 	}
@@ -297,9 +318,24 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 			lastValidHash,
 		)
 	}
-	fcuStatus, _, lastValidHash, err := e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{}, 0)
+	fcuStatus, validationErr, lastValidHash, err := e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{}, 0)
 	if err != nil {
 		return err
+	}
+	if fcuStatus == execmodule.ExecutionStatusTooFarAway {
+		e.logger.Debug(
+			"[EngineBlockDownloader] continuing block batch download after fork choice answered too far away",
+			"tip", block.Hash(),
+			"latestValidHash", lastValidHash,
+			"err", common.Deref(validationErr),
+		)
+		return nil
+	}
+	if fcuStatus == execmodule.ExecutionStatusBadBlock {
+		ve := common.Deref(validationErr)
+		e.ReportBadHeader(block.Hash(), common.Hash{}, ve)
+		e.ReportBadHeader(requested, common.Hash{}, ve)
+		return fmt.Errorf("bad block when updating fork choice for batch download: tip=%s, err=%s", block.Hash(), ve)
 	}
 	if fcuStatus != execmodule.ExecutionStatusSuccess {
 		return fmt.Errorf(

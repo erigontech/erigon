@@ -1,0 +1,58 @@
+name: Changes
+
+# Fast path: detect whether a pull request touches anything outside the docs.
+# Callers guard expensive jobs with `needs.changes.outputs.code != 'false'` so a
+# docs-only PR skips them, and with `needs.changes.outputs.docs_site == 'true'`
+# for jobs that only matter when docs/site/** is touched.
+#
+# For every event other than pull_request (push, merge_group, schedule,
+# workflow_dispatch, and any workflow_call reached from those) both outputs are
+# true, so non-PR runs keep their full coverage.
+
+on:
+  workflow_call:
+    outputs:
+      code:
+        description: "true unless the PR touches only docs/, root-level llms*.txt and root-level *.md"
+        value: ${{ jobs.check.outputs.code }}
+      docs_site:
+        description: "true when the PR touches docs/site/**"
+        value: ${{ jobs.check.outputs.docs_site }}
+
+permissions:
+  contents: read
+  # Reads the PR file list via the REST API.
+  pull-requests: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      code: ${{ steps.check.outputs.code }}
+      docs_site: ${{ steps.check.outputs.docs_site }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "docs_site=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --paginate --jq '.[].filename') \
+            || { echo "Failed to fetch PR files from GitHub API"; exit 1; }
+          # "code" = any file outside: docs/*, root-level llms*.txt, root-level *.md
+          # (nested *.md like execution/README.md still counts as a code change)
+          if echo "$files" | grep -qvE '^(docs/|llms[^/]*\.txt$|[^/]*\.md$)'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$files" | grep -qE '^docs/site/'; then
+            echo "docs_site=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_site=false" >> "$GITHUB_OUTPUT"
+          fi

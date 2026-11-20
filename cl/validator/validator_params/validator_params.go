@@ -18,17 +18,16 @@ package validator_params
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
 )
 
 type ValidatorParams struct {
-	feeRecipients sync.Map
-	// defaultFeeRecipient is the chain's coinbase for any proposer that has not registered one of
-	// its own. It exists because the alternative is address(0): coinbase is execution-affecting
-	// (fee credit and the COINBASE opcode), so an unregistered proposer does not merely forgo its
-	// fees — it burns every block's fees to the zero address, and a follower that disagrees about
-	// the address diverges outright.
+	feeRecipients      sync.Map
+	attachedValidators sync.Map
+	generation         atomic.Uint64
+	// defaultFeeRecipient is the chain-wide coinbase for a proposer that has registered none, so its fees do not go to address(0).
 	defaultFeeRecipient common.Address
 }
 
@@ -43,7 +42,23 @@ func (vp *ValidatorParams) SetDefaultFeeRecipient(addr common.Address) {
 }
 
 func (vp *ValidatorParams) SetFeeRecipient(validatorIndex uint64, feeRecipient common.Address) {
-	vp.feeRecipients.Store(validatorIndex, feeRecipient)
+	// Validator clients re-register unchanged on a schedule, so only a real change counts: a
+	// generation that moved on every call would be useless to anyone caching a lookup.
+	if previous, loaded := vp.feeRecipients.Swap(validatorIndex, feeRecipient); !loaded || previous.(common.Address) != feeRecipient {
+		vp.generation.Add(1)
+	}
+	vp.AddAttachedValidator(validatorIndex)
+}
+
+func (vp *ValidatorParams) AddAttachedValidator(validatorIndex uint64) {
+	vp.attachedValidators.Store(validatorIndex, struct{}{})
+}
+
+// Generation changes whenever a registration is added or its fee recipient changes, and is zero
+// until the first one arrives. A consumer caching a lookup can compare it to find out whether a
+// later registration could have changed the answer.
+func (vp *ValidatorParams) Generation() uint64 {
+	return vp.generation.Load()
 }
 
 // GetFeeRecipient returns the proposer's registered recipient, falling back to the chain default.
@@ -60,9 +75,14 @@ func (vp *ValidatorParams) GetFeeRecipient(validatorIndex uint64) (common.Addres
 	return val.(common.Address), true
 }
 
+func (vp *ValidatorParams) HasAttachedValidator(validatorIndex uint64) bool {
+	_, ok := vp.attachedValidators.Load(validatorIndex)
+	return ok
+}
+
 func (vp *ValidatorParams) GetValidators() []uint64 {
 	validators := []uint64{}
-	vp.feeRecipients.Range(func(key, value any) bool {
+	vp.attachedValidators.Range(func(key, value any) bool {
 		validators = append(validators, key.(uint64))
 		return true
 	})

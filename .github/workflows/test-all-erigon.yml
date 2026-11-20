@@ -8,6 +8,10 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   tests-mac-linux:
     strategy:
@@ -21,12 +25,8 @@ jobs:
           - ubuntu-24.04
           - macos-15
           - windows-2025
-        # Run both serial and parallel exec paths every time so divergence is
-        # caught on the PR rather than after a release. The matrix entries
-        # spawn separate runners and run concurrently — wall-clock unchanged,
-        # runner-minutes doubled.
-        exec_mode:
-          - serial
+        commitment_mode:
+          - v3
           - parallel
         include:
           # Windows GitHub-hosted runners run noticeably slower than Linux for
@@ -37,8 +37,9 @@ jobs:
             skip_execution_tests: 'true'
           - os: macos-15
             skip_execution_tests: 'true'
-    name: tests-mac-linux (${{ matrix.os }}, ${{ matrix.exec_mode }})
+    name: tests-mac-linux (${{ matrix.os }}, ${{ matrix.commitment_mode }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
 
     steps:
       - name: Declare runners
@@ -50,30 +51,31 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
-          submodules: true
           cleanup-space: true
           ramdisk: true
           cache-namespace: test-all-erigon
-          # Go's test cache can't see ERIGON_EXEC3_PARALLEL (read at package
-          # init), so serial and parallel results only stay mode-pure if each
-          # exec mode keeps its own cache lineage.
-          build-cache-extra-key: ${{ matrix.exec_mode }}
+          build-cache-extra-key: commitment-${{ matrix.commitment_mode }}
 
-      - name: Run all tests on ${{ matrix.os }} (${{ matrix.exec_mode }} exec)
+      - name: Run all tests on ${{ matrix.os }} (${{ matrix.commitment_mode }} commitment)
         env:
           SKIP_FLAKY_TESTS: 'true'
           TEST_TIMEOUT: ${{ matrix.test_timeout || '20m' }}
           ERIGON_SKIP_EXECUTION_TESTS: ${{ matrix.skip_execution_tests || '' }}
-          # Toggle dbg.Exec3Parallel from CI without code changes. envLookup
-          # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
-          # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
-          ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
+          ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
+          ERIGON_COMMITMENT_V3: ${{ matrix.commitment_mode == 'v3' && 'true' || 'false' }}
         run: |
           if ! make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"; then
+            # A failed test binary is a real result: a cold rerun only repeats it or hides a flake. A build failure,
+            # or a full disk the log reports, still takes the cache clear below; a disk failure that prints nothing
+            # (a SIGBUS on a sparse mmap) does not.
+            if grep -qE '^FAIL[[:space:]]+[^[:space:]]+[[:space:]]+[0-9.]+s' run.log && ! grep -q -e 'no space left on device' -e 'not enough space on the disk' -e '\[build failed\]' run.log; then
+              exit 1
+            fi
             # Retry after clearing the Go build cache. Low disk space can cause
             # severe, non-obvious build/test failures that don't surface a clear
             # "no space left" message. Tuning a cache size limit is too fragile;

@@ -36,7 +36,7 @@ func RestartUnderGDB() {
 	runCommand := "run " + formatArgsForLLDB(filteredArgs)
 
 	// maybe in future it would be a script in a separate file
-	//TODO: discover some more features from lldb and add it here
+	// TODO: discover some more features from lldb and add it here
 	lldbScript := fmt.Sprintf(`
 settings set auto-confirm true
 target create "%s"
@@ -59,7 +59,7 @@ disassemble -a $pc
 
 quit
 `, exePath, runCommand)
-	//TODO: add something to memory around fault address
+	// TODO: add something to memory around fault address
 	// some ideas bellow:
 	//	script fault_addr = int(lldb.frame.FindRegister('pc').GetValue(), 16) -128
 	//	memory read --format x --size 8 --count 16 --outfile /tmp/mem.txt fault_addr
@@ -69,11 +69,12 @@ quit
 		fmt.Fprintln(os.Stderr, "Error: could not create temp file for LLDB script:", err)
 		os.Exit(1)
 	}
-	defer dir.RemoveFile(tmpFile.Name())
-
+	// No defer cleanup: on success syscall.Exec replaces the process, and the
+	// exec'd lldb still needs the script file, so it is only removed on failure.
 	_, err = tmpFile.WriteString(lldbScript)
 	closeErr := tmpFile.Close()
 	if err != nil || closeErr != nil {
+		_ = dir.RemoveFile(tmpFile.Name())
 		fmt.Fprintln(os.Stderr, "Error: could not write or close LLDB script:", err, closeErr)
 		os.Exit(1)
 	}
@@ -88,17 +89,17 @@ quit
 	// process replacing in order to keep only one erigon alive
 	err = syscall.Exec(lldbPath, cmd.Args, os.Environ())
 	if err != nil {
+		_ = dir.RemoveFile(tmpFile.Name())
 		fmt.Fprintln(os.Stderr, "Failed to restart under LLDB:", err)
 		os.Exit(1)
 	}
 }
 
-// formatArgsForLLDB
 func formatArgsForLLDB(args []string) string {
 	var formattedArgs []string
 	for _, arg := range args {
 		if strings.Contains(arg, " ") {
-			formattedArgs = append(formattedArgs, fmt.Sprintf(`"%s"`, arg)) // Экранируем пробелы
+			formattedArgs = append(formattedArgs, fmt.Sprintf("%q", arg))
 		} else {
 			formattedArgs = append(formattedArgs, arg)
 		}

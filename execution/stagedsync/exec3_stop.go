@@ -92,11 +92,7 @@ func (be *blockExecutor) cutIfStopped(pe *parallelExecutor) bool {
 	if k < 0 || k >= len(be.tasks)-2 {
 		return false
 	}
-	be.tasks = be.tasks[:k+1]
-	be.results = be.results[:k+1]
-	be.txIncarnations = be.txIncarnations[:k+1]
-	be.execFailed = be.execFailed[:k+1]
-	be.execAborted = be.execAborted[:k+1]
+	be.cutLen = k + 1
 	be.execTasks.truncate(k + 1)
 	be.validateTasks.truncate(k + 1)
 	be.publishTasks.truncate(k + 1)
@@ -105,7 +101,7 @@ func (be *blockExecutor) cutIfStopped(pe *parallelExecutor) bool {
 		log.Warn("[round-stop] drained",
 			"inFlightAtStop", be.stopInFlight,
 			"drainMs", time.Since(be.stopSeen).Milliseconds(),
-			"kept", k+1, "ofTasks", len(be.tasks))
+			"kept", be.cutLen, "ofTasks", len(be.tasks))
 	}
 	return true
 }

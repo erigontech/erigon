@@ -20,6 +20,7 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/cl/p2p"
+	"github.com/erigontech/erigon/cl/sentinel/handlers"
 )
 
 type SentinelConfig struct {
@@ -32,4 +33,5 @@ type SentinelConfig struct {
 	EnableBlocks       bool
 	SubscribeAllTopics bool // Capture all topics
 	ActiveIndicies     uint64
+	EnvelopeRebuilder  handlers.EnvelopeRebuilder
 }

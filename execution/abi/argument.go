@@ -66,7 +66,8 @@ func (argument *Argument) UnmarshalJSON(data []byte) error {
 // NonIndexed returns the arguments with indexed arguments filtered out.
 func (arguments Arguments) NonIndexed() Arguments {
 	var ret []Argument
-	for _, arg := range arguments {
+	for i := range arguments {
+		arg := arguments[i]
 		if !arg.Indexed {
 			ret = append(ret, arg)
 		}
@@ -88,8 +89,8 @@ func (arguments Arguments) Unpack(data []byte) ([]any, error) {
 		// Nothing to unmarshal, return default variables
 		nonIndexedArgs := arguments.NonIndexed()
 		defaultVars := make([]any, len(nonIndexedArgs))
-		for index, arg := range nonIndexedArgs {
-			defaultVars[index] = reflect.New(arg.Type.GetType())
+		for index := range nonIndexedArgs {
+			defaultVars[index] = reflect.New(nonIndexedArgs[index].Type.GetType())
 		}
 		return defaultVars, nil
 	}
@@ -112,8 +113,9 @@ func (arguments Arguments) UnpackIntoMap(v map[string]any, data []byte) error {
 	if err != nil {
 		return err
 	}
-	for i, arg := range arguments.NonIndexed() {
-		v[arg.Name] = marshalledValues[i]
+	nonIndexed := arguments.NonIndexed()
+	for i := range nonIndexed {
+		v[nonIndexed[i].Name] = marshalledValues[i]
 	}
 	return nil
 }
@@ -155,15 +157,16 @@ func (arguments Arguments) copyTuple(v any, marshalledValues []any) error {
 	switch value.Kind() {
 	case reflect.Struct:
 		argNames := make([]string, len(nonIndexedArgs))
-		for i, arg := range nonIndexedArgs {
-			argNames[i] = arg.Name
+		for i := range nonIndexedArgs {
+			argNames[i] = nonIndexedArgs[i].Name
 		}
 		var err error
 		abi2struct, err := mapArgNamesToStructFields(argNames, value)
 		if err != nil {
 			return err
 		}
-		for i, arg := range nonIndexedArgs {
+		for i := range nonIndexedArgs {
+			arg := &nonIndexedArgs[i]
 			field := value.FieldByName(abi2struct[arg.Name])
 			if !field.IsValid() {
 				return fmt.Errorf("abi: field %s can't be found in the given value", arg.Name)
@@ -194,7 +197,8 @@ func (arguments Arguments) UnpackValues(data []byte) ([]any, error) {
 	nonIndexedArgs := arguments.NonIndexed()
 	retval := make([]any, 0, len(nonIndexedArgs))
 	virtualArgs := 0
-	for index, arg := range nonIndexedArgs {
+	for index := range nonIndexedArgs {
+		arg := &nonIndexedArgs[index]
 		marshalledValue, err := toGoType((index+virtualArgs)*32, arg.Type, data)
 		if arg.Type.T == ArrayTy && !isDynamicType(arg.Type) {
 			// If we have a static array, like [3]uint256, these are coded as
@@ -240,8 +244,8 @@ func (arguments Arguments) Pack(args ...any) ([]byte, error) {
 
 	// input offset is the bytes offset for packed output
 	inputOffset := 0
-	for _, abiArg := range abiArgs {
-		inputOffset += getTypeSize(abiArg.Type)
+	for i := range abiArgs {
+		inputOffset += getTypeSize(abiArgs[i].Type)
 	}
 	var ret []byte
 	for i, a := range args {

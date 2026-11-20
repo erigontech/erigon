@@ -138,7 +138,7 @@ func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight,
 		for i, fork := range forks {
 			// If our head is beyond this fork, continue to the next (we have a dummy
 			// fork of maxuint64 as the last item to always fail this check eventually).
-			if headHeight > fork || (forkIsTimeBased(fork) && headTime > fork) {
+			if fork != math.MaxUint64 && (headHeight >= fork || (forkIsTimeBased(fork) && headTime >= fork)) {
 				continue
 			}
 			// Found the first unpassed fork block, check if our current state matches
@@ -156,7 +156,7 @@ func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight,
 			}
 			// The local and remote nodes are in different forks currently, check if the
 			// remote checksum is a subset of our local forks (rule #2).
-			for j := 0; j < i; j++ {
+			for j := range i {
 				if sums[j] == id.Hash {
 					// Remote checksum is a subset, validate based on the announced next fork
 					if forks[j] != id.Next {
@@ -230,18 +230,6 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 
 	if config.Aura != nil && config.Aura.PosdaoTransition != nil {
 		heightForks = append(heightForks, *config.Aura.PosdaoTransition)
-	}
-
-	if config.Bor != nil {
-		if config.Bor.GetAgraBlock() != nil {
-			heightForks = append(heightForks, *config.Bor.GetAgraBlock())
-		}
-		if config.Bor.GetNapoliBlock() != nil {
-			heightForks = append(heightForks, *config.Bor.GetNapoliBlock())
-		}
-		if config.Bor.GetBhilaiBlock() != nil {
-			heightForks = append(heightForks, *config.Bor.GetBhilaiBlock())
-		}
 	}
 
 	// Sort the fork block numbers & times to permit chronological XOR

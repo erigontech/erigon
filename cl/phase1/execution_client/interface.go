@@ -18,7 +18,11 @@ package execution_client
 
 import (
 	"context"
+	"errors"
 	"math/big"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -29,7 +33,33 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-var errContextExceeded = "rpc error: code = DeadlineExceeded desc = context deadline exceeded"
+// ErrForkChoiceUpdateTimeout reports that the execution layer did not answer a forkchoice update
+// in time. The update is not refused by it - the execution layer may still apply it - and no
+// payload id came back, so a caller that needed one has to treat this as a failure rather than as
+// an empty success.
+var ErrForkChoiceUpdateTimeout = errors.New("forkchoice update timed out")
+
+// ErrForkChoiceUpdateBusy reports that the execution module did not start the update.
+var ErrForkChoiceUpdateBusy = errors.New("forkchoice update was not started because the execution module is busy")
+
+// ErrForkChoiceUpdateNoPayloadID reports that an attribute-bearing update did not start a payload build.
+var ErrForkChoiceUpdateNoPayloadID = errors.New("forkchoice update returned no payload ID")
+
+// legacyGrpcDeadlineMessage is what a deadline used to be recognised by. Kept as a last resort for
+// a transport that reports one without a status code or a wrapped context error.
+const legacyGrpcDeadlineMessage = "rpc error: code = DeadlineExceeded desc = context deadline exceeded"
+
+// isDeadlineExceeded reports whether err is the execution layer running out of time, by the
+// context, by the gRPC status, or by the message a transport that carries neither would produce.
+func isDeadlineExceeded(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if status.Code(err) == codes.DeadlineExceeded {
+		return true
+	}
+	return err.Error() == legacyGrpcDeadlineMessage
+}
 
 // ExecutionEngine is used only for syncing up very close to chain tip and to stay in sync.
 // It pretty much mimics engine API.
@@ -43,14 +73,17 @@ type ExecutionEngine interface {
 	// block early. head is the parent (fork-choice head) execution hash. No-op on engines that don't support it.
 	NewPayloadAttrs(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) error
 	SupportInsertion() bool
-	InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error
-	InsertBlock(ctx context.Context, block *types.Block, bal []byte) error
+	InsertBlocks(ctx context.Context, blocks []*types.Block) error
+	InsertBlock(ctx context.Context, block *types.Block) error
 	CurrentHeader(ctx context.Context) (*types.Header, error)
+	GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error)
 	IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error)
 	Ready(ctx context.Context) (bool, error)
 	// Range methods
 	GetBodiesByRange(ctx context.Context, start, count uint64) ([]*types.RawBody, error)
 	GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error)
+	// Callers must not modify returned block access lists because they may share memory with an EL cache.
+	GetPayloadBodiesByHash(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error)
 	HasBlock(ctx context.Context, hash common.Hash) (bool, error)
 	// Snapshots
 	FrozenBlocks(ctx context.Context) uint64
@@ -60,4 +93,6 @@ type ExecutionEngine interface {
 
 	// Blobs
 	GetBlobs(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) (blobs [][]byte, proofs [][][]byte, err error)
+	// Client identification
+	GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error)
 }

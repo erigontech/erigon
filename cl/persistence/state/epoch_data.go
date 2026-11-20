@@ -66,7 +66,7 @@ func EpochDataFromBeaconState(s *state.CachingBeaconState) *EpochData {
 }
 
 // Serialize serializes the state into a byte slice with zstd compression.
-func (m *EpochData) WriteTo(w io.Writer) error {
+func (m *EpochData) Serialize(w io.Writer) error {
 	buf, err := ssz2.MarshalSSZ(nil, m.getSchema()...)
 	if err != nil {
 		return err
@@ -81,7 +81,7 @@ func (m *EpochData) WriteTo(w io.Writer) error {
 }
 
 // Deserialize deserializes the state from a byte slice with zstd compression.
-func (m *EpochData) ReadFrom(r io.Reader) error {
+func (m *EpochData) Deserialize(r io.Reader) error {
 	m.JustificationBits = &cltypes.JustificationBits{}
 
 	lenB := make([]byte, 8)

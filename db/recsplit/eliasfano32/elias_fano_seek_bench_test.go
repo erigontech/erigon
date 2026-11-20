@@ -29,7 +29,7 @@ import (
 func buildEF(count, stride uint64) *EliasFano {
 	maxOffset := (count - 1) * stride
 	ef := NewEliasFano(count, maxOffset)
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		ef.AddOffset(i * stride)
 	}
 	ef.Build()
@@ -172,7 +172,7 @@ func BenchmarkAddOffset(b *testing.B) {
 			maxOffset := (count - 1) * tc.stride
 			for b.Loop() {
 				ef := NewEliasFano(count, maxOffset)
-				for i := uint64(0); i < count; i++ {
+				for i := range uint64(count) {
 					ef.AddOffset(i * tc.stride)
 				}
 				ef.Build()

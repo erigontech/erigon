@@ -99,10 +99,10 @@ func (h *roundHarness) sealAndAdopt(params *builder.Parameters, wantTxs int) *ty
 	require.NotNil(h.t, br)
 	require.Len(h.t, br.Block.Transactions(), wantTxs)
 	hdr := br.Block.Header()
-	vr, err := validateChain(h.ctx, h.m.ExecModule, hdr)
+	vr, err := validateChain(h.ctx, h.m.ExecModule, br.Block)
 	require.NoError(h.t, err)
 	require.Equal(h.t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "newPayload: %s", vr.ValidationError)
-	ur, err := updateForkChoice(h.ctx, h.m.ExecModule, hdr)
+	ur, err := forkChoiceTo(h.ctx, h.m.ExecModule, hdr)
 	require.NoError(h.t, err)
 	require.Equal(h.t, execmodule.ExecutionStatusSuccess, ur.Status)
 	return hdr
