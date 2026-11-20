@@ -118,12 +118,27 @@ func (arr *byteBasedUint64Slice) MarshalJSON() ([]byte, error) {
 }
 
 func (arr *byteBasedUint64Slice) UnmarshalJSON(buf []byte) error {
-	var list []uint64
-
-	if err := json.Unmarshal(buf, &list); err != nil {
+	values, err := unmarshalUint64StringsJSON(buf)
+	if err != nil {
 		return err
 	}
-	return arr.replace(list)
+	return arr.replace(values)
+}
+
+func unmarshalUint64StringsJSON(buf []byte) ([]uint64, error) {
+	var strs []string
+	if err := json.Unmarshal(buf, &strs); err != nil {
+		return nil, err
+	}
+	values := make([]uint64, len(strs))
+	for i, s := range strs {
+		v, err := strconv.ParseUint(s, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		values[i] = v
+	}
+	return values, nil
 }
 
 func (arr *byteBasedUint64Slice) replace(values []uint64) error {
