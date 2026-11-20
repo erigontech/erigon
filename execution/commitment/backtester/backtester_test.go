@@ -25,9 +25,7 @@ import (
 )
 
 func TestBacktesterRejectsCommitmentV3(t *testing.T) {
-	previous := statecfg.ExperimentalCommitmentV3
-	statecfg.ExperimentalCommitmentV3 = true
-	t.Cleanup(func() { statecfg.ExperimentalCommitmentV3 = previous })
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 
 	require.ErrorContains(t, (Backtester{}).run(t.Context(), nil, 1, 1), "not supported on commitment v3")
 }

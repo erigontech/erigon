@@ -107,7 +107,7 @@ func (bt Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) 
 }
 
 func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64, toBlock uint64) error {
-	if statecfg.ExperimentalCommitmentV3 {
+	if statecfg.Schema.CommitmentDomain.CommitmentV3Records {
 		return errors.New("not supported on commitment v3")
 	}
 	start := time.Now()
