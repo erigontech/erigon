@@ -408,11 +408,7 @@ func (b *BeaconBody) ensureNilFields() {
 		b.Eth1Data = &Eth1Data{}
 	}
 	if b.SyncAggregate == nil {
-		bitsSize := defaultSyncCommitteeBitsSize
-		if b.beaconCfg != nil {
-			bitsSize = int(b.beaconCfg.SyncCommitteeSize) / 8
-		}
-		b.SyncAggregate = NewSyncAggregateWithSize(bitsSize)
+		b.SyncAggregate = newSyncAggregateForConfig(b.beaconCfg)
 	}
 	if b.ProposerSlashings == nil {
 		if b.Version >= clparams.GloasVersion {
@@ -790,6 +786,23 @@ func (b *BeaconBody) KzgCommitmentsInclusionProof() ([][32]byte, error) {
 	return merkle_tree.MerkleProof(4, 11, b.getSchema(false)...)
 }
 
+type requiredBodyField struct {
+	name   string
+	isNull bool
+}
+
+// rejectNullBodyFields expects decoding targets to preallocate every required
+// field, so a nil field after decoding means an explicit JSON null, while an
+// omitted key keeps its preallocated value.
+func rejectNullBodyFields(body string, fields ...requiredBodyField) error {
+	for _, field := range fields {
+		if field.isNull {
+			return fmt.Errorf("%s contains null %s", body, field.name)
+		}
+	}
+	return nil
+}
+
 func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	limits := beaconBodyLimitsForConfig(b.beaconCfg, b.Version)
 	ptcSize := clparams.MaxPtcSize
@@ -815,6 +828,10 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 		SignedExecutionPayloadBid *SignedExecutionPayloadBid          `json:"signed_execution_payload_bid,omitempty"`
 		PayloadAttestations       *solid.ListSSZ[*PayloadAttestation] `json:"payload_attestations,omitempty"`
 		ParentExecutionRequests   *ExecutionRequests                  `json:"parent_execution_requests,omitempty"`
+	}
+	tmp.Eth1Data = &Eth1Data{}
+	if b.Version >= clparams.AltairVersion {
+		tmp.SyncAggregate = newSyncAggregateForConfig(b.beaconCfg)
 	}
 	tmp.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](limits.proposerSlashings, 416)
 	tmp.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](limits.attesterSlashings)
@@ -848,6 +865,22 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
+	version := b.Version
+	if err := rejectNullBodyFields("beacon body",
+		requiredBodyField{"eth1 data", tmp.Eth1Data == nil},
+		requiredBodyField{"proposer slashings", tmp.ProposerSlashings == nil},
+		requiredBodyField{"attester slashings", tmp.AttesterSlashings == nil},
+		requiredBodyField{"attestations", tmp.Attestations == nil},
+		requiredBodyField{"deposits", tmp.Deposits == nil},
+		requiredBodyField{"voluntary exits", tmp.VoluntaryExits == nil},
+		requiredBodyField{"sync aggregate", version >= clparams.AltairVersion && tmp.SyncAggregate == nil},
+		requiredBodyField{"execution payload", version >= clparams.BellatrixVersion && version < clparams.GloasVersion && tmp.ExecutionPayload == nil},
+		requiredBodyField{"bls to execution changes", version >= clparams.CapellaVersion && tmp.ExecutionChanges == nil},
+		requiredBodyField{"blob kzg commitments", version >= clparams.DenebVersion && version < clparams.GloasVersion && tmp.BlobKzgCommitments == nil},
+		requiredBodyField{"execution requests", version >= clparams.ElectraVersion && version < clparams.GloasVersion && tmp.ExecutionRequests == nil},
+	); err != nil {
+		return err
+	}
 	if b.Version >= clparams.GloasVersion {
 		if tmp.SignedExecutionPayloadBid == nil || tmp.SignedExecutionPayloadBid.Message == nil {
 			return errors.New("gloas beacon body contains a null execution payload bid")
@@ -878,18 +911,12 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 			return errors.New("gloas beacon body contains null parent execution requests")
 		}
 	}
-	if tmp.AttesterSlashings == nil {
-		return errors.New("beacon body contains null attester slashings")
-	}
 	tmp.AttesterSlashings.Range(func(_ int, value *AttesterSlashing, _ int) bool {
 		// Set version with config for preset-aware limits
 		value.SetVersionWithConfig(b.Version, b.beaconCfg)
 		return true
 	})
 	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
-		if tmp.Attestations == nil {
-			return errors.New("beacon body contains null attestations")
-		}
 		if err := solid.RangeErr(tmp.Attestations, func(_ int, att *solid.Attestation, _ int) error {
 			return att.ValidateForConfig(b.beaconCfg, b.Version)
 		}); err != nil {

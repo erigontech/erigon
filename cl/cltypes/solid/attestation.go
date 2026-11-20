@@ -41,6 +41,8 @@ const (
 
 var errCommitteeBitsTooWide = errors.New("committee bits wider than the mainnet preset")
 
+var errIncompleteAttestationJSON = errors.New("attestation is missing aggregation bits or data")
+
 // Attestation type represents a statement or confirmation of some occurrence or phenomenon.
 type Attestation struct {
 	AggregationBits *BitList         `json:"aggregation_bits"`
@@ -266,6 +268,9 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 		if err := json.Unmarshal(data, &temp); err != nil {
 			return err
 		}
+		if temp.AggregationBits == nil || temp.AggregationBits.Length() == 0 || temp.Data == nil {
+			return errIncompleteAttestationJSON
+		}
 		a.AggregationBits = temp.AggregationBits
 		a.Data = temp.Data
 		a.Signature = temp.Signature
@@ -278,6 +283,9 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 	temp.AggregationBits = NewBitList(0, aggregationBitsSizeDeneb)
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return err
+	}
+	if temp.AggregationBits == nil || temp.AggregationBits.Length() == 0 || temp.Data == nil {
+		return errIncompleteAttestationJSON
 	}
 	// Copy the temporary struct into the actual struct
 	a.AggregationBits = temp.AggregationBits
