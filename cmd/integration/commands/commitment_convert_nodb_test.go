@@ -98,13 +98,6 @@ func runCommitmentConvert(t *testing.T, dirs datadir.Dirs, flags ...string) erro
 	return root.ExecuteContext(t.Context())
 }
 
-func requireNoThrowawayDB(t *testing.T, dirs datadir.Dirs) {
-	t.Helper()
-	left, err := filepath.Glob(filepath.Join(dirs.Tmp, "commitment-convert-*"))
-	require.NoError(t, err)
-	require.Empty(t, left)
-}
-
 func requireCommitmentFilesPrefix(t *testing.T, dirPath, glob, prefix string) {
 	t.Helper()
 	files, err := filepath.Glob(filepath.Join(dirPath, glob))
@@ -179,7 +172,6 @@ func requireConvertRefusedBeforeWriting(t *testing.T, dirs datadir.Dirs, wantErr
 	before := snapshotTree(t, dirs.Snap)
 	require.ErrorContains(t, runCommitmentConvert(t, dirs, flags...), wantErr)
 	require.Equal(t, before, snapshotTree(t, dirs.Snap))
-	requireNoThrowawayDB(t, dirs)
 }
 
 func TestCommitmentConvertWithoutChaindata(t *testing.T) {
@@ -188,7 +180,6 @@ func TestCommitmentConvertWithoutChaindata(t *testing.T) {
 	require.NoError(t, runCommitmentConvert(t, dirs, "--v3"))
 
 	require.NoDirExists(t, dirs.Chaindata)
-	requireNoThrowawayDB(t, dirs)
 	requireCommitmentKVPrefix(t, dirs, "v3.")
 
 	require.NoError(t, state.MatchCommitmentSchemaToFiles(dirs))
@@ -216,7 +207,6 @@ func TestCommitmentConvertModesWithoutChaindata(t *testing.T) {
 			require.NoError(t, runCommitmentConvert(t, dirs, mode.flags...))
 
 			require.NoDirExists(t, dirs.Chaindata)
-			requireNoThrowawayDB(t, dirs)
 			requireCommitmentKVPrefix(t, dirs, mode.kvPrefix)
 		})
 	}
@@ -233,18 +223,6 @@ func TestCommitmentConvertRestoreWithoutChaindata(t *testing.T) {
 	require.NoDirExists(t, filepath.Join(dirs.Snap, "backup", "domains"))
 }
 
-func TestCommitmentConvertWithoutChaindataRemovesTheThrowawayDBOnError(t *testing.T) {
-	dirs, _, _, _ := legacyDatadirWithoutChaindata(t)
-	backup := filepath.Join(dirs.Snap, "backup", "domains")
-	require.NoError(t, os.MkdirAll(backup, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(backup, "stale"), []byte{1}, 0o644))
-
-	require.ErrorContains(t, runCommitmentConvert(t, dirs, "--v3"), "already exists with 1 entries")
-
-	require.NoDirExists(t, dirs.Chaindata)
-	requireNoThrowawayDB(t, dirs)
-}
-
 func TestCommitmentConvertWithoutChaindataOpensV3FilesAtTheirVersions(t *testing.T) {
 	dirs, _, _, _ := legacyDatadirWithoutChaindata(t)
 	require.NoError(t, runCommitmentConvert(t, dirs, "--v3"))
@@ -253,7 +231,6 @@ func TestCommitmentConvertWithoutChaindataOpensV3FilesAtTheirVersions(t *testing
 	require.ErrorContains(t, runCommitmentConvert(t, dirs, "--squeeze=true"), "apply to legacy commitment files only")
 
 	require.NoDirExists(t, dirs.Chaindata)
-	requireNoThrowawayDB(t, dirs)
 	requireCommitmentKVPrefix(t, dirs, "v3.")
 }
 
@@ -264,7 +241,6 @@ func TestCommitmentConvertWithoutChaindataRefusesMissingSalt(t *testing.T) {
 	require.ErrorIs(t, runCommitmentConvert(t, dirs, "--v3"), state.ErrCannotStartWithoutSaltFiles)
 
 	require.NoDirExists(t, dirs.Chaindata)
-	requireNoThrowawayDB(t, dirs)
 	requireCommitmentKVPrefix(t, dirs, "v2.2-")
 }
 
@@ -274,7 +250,6 @@ func TestCommitmentConvertV3HistoryFromFiles(t *testing.T) {
 
 	require.NoError(t, runCommitmentConvert(t, dirs, "--v3"))
 
-	requireNoThrowawayDB(t, dirs)
 	requireCommitmentFilesPrefix(t, dirs.SnapHistory, "*-commitment.*.v", "v3.")
 	requireCommitmentKVPrefix(t, dirs, "v3.")
 }
@@ -290,7 +265,6 @@ func TestCommitmentConvertV3SplitRunFromFiles(t *testing.T) {
 	statecfg.SetCommitmentV3(false)
 	require.NoError(t, runCommitmentConvert(t, dirs, "--v3", "--no-history"))
 
-	requireNoThrowawayDB(t, dirs)
 	requireCommitmentFilesPrefix(t, dirs.SnapHistory, "*-commitment.*.v", "v3.")
 	requireCommitmentKVPrefix(t, dirs, "v3.")
 }
@@ -353,5 +327,4 @@ func TestCommitmentConvertV3WithNothingToConvert(t *testing.T) {
 
 	require.Contains(t, logs.String(), "no files needed conversion; no backup or promote performed")
 	require.Equal(t, before, snapshotTree(t, dirs.Snap))
-	requireNoThrowawayDB(t, dirs)
 }

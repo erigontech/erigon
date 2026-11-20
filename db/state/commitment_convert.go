@@ -623,14 +623,17 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	}
 	convertDomain := !opts.TargetV3 || !opts.NoDomain
 	convertHistory := opts.TargetV3 && !opts.NoHistory
+	dirs := at.Dirs()
+	rebuildDir := filepath.Join(dirs.Snap, "rebuild", "domain")
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
 	if convertHistory {
 		for _, sub := range []string{"history", "idx", "accessor"} {
-			if err := preflightBackupDir(filepath.Join(at.Dirs().Snap, "backup", sub)); err != nil {
+			if err := preflightBackupDir(filepath.Join(dirs.Snap, "backup", sub)); err != nil {
 				return err
 			}
 		}
 	}
-	if err := requireV3SideFiles(at.Dirs(), opts); err != nil {
+	if err := requireV3SideFiles(dirs, opts); err != nil {
 		return err
 	}
 	allFiles := at.Files(kv.CommitmentDomain)
@@ -656,7 +659,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 				converted[filepath.Base(f.Fullpath())] = struct{}{}
 			}
 		}
-		unindexed, err := legacyCommitmentFilesNotConverted(at.Dirs(), converted, convertDomain, convertHistory)
+		unindexed, err := legacyCommitmentFilesNotConverted(dirs, converted, convertDomain, convertHistory)
 		if err != nil {
 			return err
 		}
@@ -680,10 +683,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	defer at.a.applyReferencesInCommitmentBranches(prevRefs)
 
 	commitmentDomain := at.d[kv.CommitmentDomain].d
-	var requiredAccessors []string
-	if convertDomain {
-		requiredAccessors = requiredAccessorsForCommitment(commitmentDomain.Accessors)
-	}
+	requiredAccessors := requiredAccessorsForCommitment(commitmentDomain.Accessors)
 	if opts.TargetV3 {
 		legacyDomainCfg := commitmentDomain.DomainCfg
 		legacyAccessors := commitmentDomain.Accessors
@@ -699,14 +699,8 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		} else {
 			commitmentDomain.History.FileVersion.DataV = legacyHistoryVersion
 		}
-		if convertDomain {
-			requiredAccessors = requiredAccessorsForCommitment(statecfg.CommitmentV3Accessors)
-		}
+		requiredAccessors = requiredAccessorsForCommitment(statecfg.CommitmentV3Accessors)
 	}
-
-	dirs := at.Dirs()
-	rebuildDir := filepath.Join(dirs.Snap, "rebuild", "domain")
-	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
 
 	if convertDomain {
 		if err := preflightBackupDir(backupDir); err != nil {
@@ -714,72 +708,25 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		}
 	}
 
-	// requiredAccessors mirrors the set Phase 2 verifies post-conversion;
-	// preflightResume reuses it to classify shards from prior interrupted runs.
-	// pendingFiles is the suffix of `files` that still needs Phase 1 work.
-	// `files` itself stays as the full original input list — Phases 2-3 walk
-	// it to identify and back up originals for shards completed in prior
-	// runs that already exist in rebuildDir. When Continue=false,
-	// preflightResume wipes rebuildDir and returns files unchanged, so
-	// pendingFiles == files and behavior is byte-identical to before.
-	var pendingFiles VisibleFiles
-	if convertDomain {
-		var preflightErr error
-		pendingFiles, preflightErr = preflightResume(files, rebuildDir, requiredAccessors, at.StepSize(), opts.Continue, logger)
-		if preflightErr != nil {
-			return preflightErr
-		}
-
-		if err := os.MkdirAll(rebuildDir, 0o755); err != nil {
-			return fmt.Errorf("[commitment_convert] mkdir rebuild dir %s: %w", rebuildDir, err)
-		}
-	}
-
-	priorCompleteCount := len(files) - len(pendingFiles)
-	if convertDomain && opts.Continue && len(pendingFiles) == 0 && priorCompleteCount > 0 {
-		logger.Info("[commitment_convert] all input files already converted in rebuild dir; proceeding to Phase 2")
-	}
-
-	// Pre-pass: sum total key count across files Phase 1 will actually
-	// touch so the keys-overall percentage reflects work-remaining. When
-	// Continue=false, pendingFiles == files, so the sum is byte-identical
-	// to today's. KeyCountInFiles is cheap (no I/O — just sums cached
-	// decompressor.Count() values), so this loop costs O(pendingFiles).
-	var grandTotalKeys uint64
-	for _, f := range pendingFiles {
-		grandTotalKeys += at.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
-	}
-
-	var processedFiles, skippedFiles int
-	var totalSizeDelta int64
-	var processedKeys uint64
-	var err error
-	if convertDomain {
-		phaseStart := time.Now()
-		processedFiles, skippedFiles, totalSizeDelta, processedKeys, err = convertPhase1(ctx, at, pendingFiles, rebuildDir, opts, grandTotalKeys, logger)
-		if err != nil && opts.TargetV3 {
-			return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3Advice)
-		}
-		if err != nil {
-			return err
-		}
-		logger.Info(fmt.Sprintf(
-			"[commitment_convert] phase 1 complete: converted %d, skipped %d, total %d, keys=%s in %s, sizeDelta=%s",
-			processedFiles, skippedFiles, len(pendingFiles),
-			common.PrettyCounter(processedKeys),
-			time.Since(phaseStart).Round(time.Second), signedByteSizeHR(totalSizeDelta),
-		))
-	}
-
 	var historyRanges []commitmentHistoryRange
 	historyStage := newCommitmentV3HistoryStage(dirs)
 	if convertHistory {
+		var err error
 		if historyRanges, err = convertCommitmentHistoryV3(ctx, at, historyStage, logger); err != nil {
 			return fmt.Errorf("[commitment_convert] phase 1 history: %w; no commitment file was replaced; %s", err, rebuildV3Advice)
 		}
 	}
 
-	if processedFiles == 0 && priorCompleteCount == 0 && len(historyRanges) == 0 {
+	var convertedFiles VisibleFiles
+	var processedFiles, priorCompleteCount int
+	if convertDomain {
+		var err error
+		if convertedFiles, processedFiles, priorCompleteCount, err = convertDomainFiles(ctx, at, files, rebuildDir, requiredAccessors, opts, logger); err != nil {
+			return err
+		}
+	}
+	expectedConverted := processedFiles + priorCompleteCount
+	if expectedConverted == 0 && len(historyRanges) == 0 {
 		if convertDomain {
 			if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
 				logger.Warn("[commitment_convert] failed to remove empty rebuild dir", "path", rebuildDir, "err", rmErr)
@@ -789,27 +736,10 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		logger.Info("[commitment_convert] no files needed conversion; no backup or promote performed")
 		return nil
 	}
-
-	var convertedFiles VisibleFiles
-	var expectedConverted int
-	if convertDomain {
-		// Phase 2: pre-swap check — identify converted files and verify every
-		// expected accessor sibling landed in rebuildDir. Walks the full input
-		// list so prior-run shards (those filtered out of pendingFiles) are
-		// included in convertedFiles and reach Phase 3's backup step.
-		if opts.TargetV3 {
-			commitmentDomain.Accessors = statecfg.CommitmentV3Accessors
-		}
-		convertedFiles, err = convertPhase2(at, files, rebuildDir)
-		if err != nil {
+	if opts.TargetV3 && convertDomain {
+		if err := markExecResetPending(dirs); err != nil {
 			return err
 		}
-		expectedConverted = processedFiles + priorCompleteCount
-		if len(convertedFiles) != expectedConverted {
-			return fmt.Errorf("[commitment_convert] phase 2 mismatch: %d converted this run + %d from prior runs = %d expected, %d found in rebuild dir",
-				processedFiles, priorCompleteCount, expectedConverted, len(convertedFiles))
-		}
-		logger.Info(fmt.Sprintf("[commitment_convert] phase 2 pre-swap check: %d files ok", len(convertedFiles)))
 	}
 
 	// Windows can't rename a mmapped file, so drop the aggregator's handles on
@@ -820,29 +750,9 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	at.a.CloseFilesNoReopen()
 
 	if convertDomain {
-		// Phase 3: backup originals.
-		ranges := make([]commitmentHistoryRange, len(convertedFiles))
-		for i, f := range convertedFiles {
-			ranges[i] = commitmentHistoryRange{fromStep: kv.Step(f.StartRootNum() / stepSize), toStep: kv.Step(f.EndRootNum() / stepSize)}
+		if err := swapDomainFiles(dirs, convertedFiles, rebuildDir, backupDir, stepSize, logger); err != nil {
+			return err
 		}
-		movedToBackup, err := convertPhase3(dirs.SnapDomain, backupDir, ranges)
-		if err != nil {
-			return commitmentRestoreError("phase 3 backup", err)
-		}
-		logger.Info(fmt.Sprintf("[commitment_convert] phase 3 backup: %d files moved to %s",
-			movedToBackup, backupDir))
-
-		// Phase 4: promote rebuilt files into snapshots/domain/.
-		promoted, err := convertPhase4(rebuildDir, dirs.SnapDomain)
-		if err != nil {
-			return commitmentRestoreError("phase 4 promote", err)
-		}
-		if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
-			logger.Warn("[commitment_convert] failed to remove empty rebuild dir", "path", rebuildDir, "err", rmErr)
-		}
-		cleanupParentIfEmpty(filepath.Dir(rebuildDir), logger)
-		logger.Info(fmt.Sprintf("[commitment_convert] phase 4 promote: %d files moved to %s",
-			promoted, dirs.SnapDomain))
 	}
 	if len(historyRanges) > 0 {
 		historyBackup := filepath.Join(dirs.Snap, "backup")
@@ -894,7 +804,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	if opts.TargetV3 {
 		next := "`integration stage_exec --reset` before starting erigon"
 		if !convertDomain {
-			if err := forEachCommitmentDataFile(at.Dirs().SnapDomain, func(_ string, major uint64) error {
+			if err := forEachCommitmentDataFile(dirs.SnapDomain, func(_ string, major uint64) error {
 				if major < 3 {
 					next = "`integration commitment convert --v3 --no-history`"
 				}
@@ -905,6 +815,103 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		}
 		logger.Info("[commitment_convert] next step: run " + next)
 	}
+	return nil
+}
+
+// convertDomainFiles runs phases 1 and 2 for the commitment .kv files: it writes the
+// converted files into rebuildDir and checks them; snapshots/domain/ is not touched.
+func convertDomainFiles(ctx context.Context, at *AggregatorRoTx, files VisibleFiles, rebuildDir string, requiredAccessors []string, opts ConvertOpts, logger log.Logger) (converted VisibleFiles, processedFiles, priorCompleteCount int, err error) {
+	// requiredAccessors mirrors the set Phase 2 verifies post-conversion;
+	// preflightResume reuses it to classify shards from prior interrupted runs.
+	// pendingFiles is the suffix of `files` that still needs Phase 1 work.
+	// `files` itself stays as the full original input list — Phases 2-3 walk
+	// it to identify and back up originals for shards completed in prior
+	// runs that already exist in rebuildDir. When Continue=false,
+	// preflightResume wipes rebuildDir and returns files unchanged, so
+	// pendingFiles == files and behavior is byte-identical to before.
+	pendingFiles, err := preflightResume(files, rebuildDir, requiredAccessors, at.StepSize(), opts.Continue, logger)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	if err := os.MkdirAll(rebuildDir, 0o755); err != nil {
+		return nil, 0, 0, fmt.Errorf("[commitment_convert] mkdir rebuild dir %s: %w", rebuildDir, err)
+	}
+
+	priorCompleteCount = len(files) - len(pendingFiles)
+	if opts.Continue && len(pendingFiles) == 0 && priorCompleteCount > 0 {
+		logger.Info("[commitment_convert] all input files already converted in rebuild dir; proceeding to Phase 2")
+	}
+
+	// Pre-pass: sum total key count across files Phase 1 will actually
+	// touch so the keys-overall percentage reflects work-remaining. When
+	// Continue=false, pendingFiles == files, so the sum is byte-identical
+	// to today's. KeyCountInFiles is cheap (no I/O — just sums cached
+	// decompressor.Count() values), so this loop costs O(pendingFiles).
+	var grandTotalKeys uint64
+	for _, f := range pendingFiles {
+		grandTotalKeys += at.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
+	}
+
+	// Phase 1: convert all.
+	phaseStart := time.Now()
+	processedFiles, skippedFiles, totalSizeDelta, processedKeys, err := convertPhase1(ctx, at, pendingFiles, rebuildDir, opts, grandTotalKeys, logger)
+	if err != nil && opts.TargetV3 {
+		return nil, 0, 0, fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3Advice)
+	}
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	logger.Info(fmt.Sprintf(
+		"[commitment_convert] phase 1 complete: converted %d, skipped %d, total %d, keys=%s in %s, sizeDelta=%s",
+		processedFiles, skippedFiles, len(pendingFiles),
+		common.PrettyCounter(processedKeys),
+		time.Since(phaseStart).Round(time.Second), signedByteSizeHR(totalSizeDelta),
+	))
+
+	// Phase 2: pre-swap check — identify converted files and verify every
+	// expected accessor sibling landed in rebuildDir. Walks the full input
+	// list so prior-run shards (those filtered out of pendingFiles) are
+	// included in convertedFiles and reach Phase 3's backup step.
+	if opts.TargetV3 {
+		at.d[kv.CommitmentDomain].d.Accessors = statecfg.CommitmentV3Accessors
+	}
+	converted, err = convertPhase2(at, files, rebuildDir)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	expectedConverted := processedFiles + priorCompleteCount
+	if len(converted) != expectedConverted {
+		return nil, 0, 0, fmt.Errorf("[commitment_convert] phase 2 mismatch: %d converted this run + %d from prior runs = %d expected, %d found in rebuild dir",
+			processedFiles, priorCompleteCount, expectedConverted, len(converted))
+	}
+	logger.Info(fmt.Sprintf("[commitment_convert] phase 2 pre-swap check: %d files ok", len(converted)))
+	return converted, processedFiles, priorCompleteCount, nil
+}
+
+// swapDomainFiles runs phases 3 and 4: it moves the originals of converted to backupDir and
+// promotes the rebuilt files from rebuildDir into snapshots/domain/.
+func swapDomainFiles(dirs datadir.Dirs, converted VisibleFiles, rebuildDir, backupDir string, stepSize uint64, logger log.Logger) error {
+	ranges := make([]commitmentHistoryRange, len(converted))
+	for i, f := range converted {
+		ranges[i] = commitmentHistoryRange{fromStep: kv.Step(f.StartRootNum() / stepSize), toStep: kv.Step(f.EndRootNum() / stepSize)}
+	}
+	movedToBackup, err := convertPhase3(dirs.SnapDomain, backupDir, ranges)
+	if err != nil {
+		return commitmentRestoreError("phase 3 backup", err)
+	}
+	logger.Info(fmt.Sprintf("[commitment_convert] phase 3 backup: %d files moved to %s",
+		movedToBackup, backupDir))
+
+	promoted, err := convertPhase4(rebuildDir, dirs.SnapDomain)
+	if err != nil {
+		return commitmentRestoreError("phase 4 promote", err)
+	}
+	if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
+		logger.Warn("[commitment_convert] failed to remove empty rebuild dir", "path", rebuildDir, "err", rmErr)
+	}
+	cleanupParentIfEmpty(filepath.Dir(rebuildDir), logger)
+	logger.Info(fmt.Sprintf("[commitment_convert] phase 4 promote: %d files moved to %s",
+		promoted, dirs.SnapDomain))
 	return nil
 }
 
@@ -923,6 +930,41 @@ const restoreManifestName = ".restore_manifest"
 // behind; subsequent runs ignore it (buildRestoreManifest skips both names) and
 // the next successful manifest write truncates it.
 const restoreManifestTmpName = ".restore_manifest.tmp"
+
+// execResetPendingName marks a datadir whose commitment files changed format while
+// chaindata still holds Execution state in the old format.
+const execResetPendingName = ".exec_reset_pending"
+
+func markExecResetPending(dirs datadir.Dirs) error {
+	backupRoot := filepath.Join(dirs.Snap, "backup")
+	if err := os.MkdirAll(backupRoot, dir.DirPerm); err != nil {
+		return fmt.Errorf("[commitment_convert] mark pending execution reset: %w", err)
+	}
+	if err := writeRestoreManifestAtomic(filepath.Join(backupRoot, execResetPendingName), nil); err != nil {
+		return fmt.Errorf("[commitment_convert] mark pending execution reset: %w", err)
+	}
+	return nil
+}
+
+func CheckExecResetDone(dirs datadir.Dirs) error {
+	_, err := os.Stat(filepath.Join(dirs.Snap, "backup", execResetPendingName))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check pending execution reset: %w", err)
+	}
+	return errors.New("commitment files changed format and the execution state was not reset: run `integration stage_exec --reset` first")
+}
+
+func CompleteExecReset(dirs datadir.Dirs, logger log.Logger) error {
+	backupRoot := filepath.Join(dirs.Snap, "backup")
+	if err := dir.RemoveFile(filepath.Join(backupRoot, execResetPendingName)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("clear pending execution reset: %w", err)
+	}
+	cleanupParentIfEmpty(backupRoot, logger)
+	return nil
+}
 
 // RestoreCommitmentFiles undoes ConvertCommitmentFiles by moving every file
 // from snapshots/backup/domains/ back into snapshots/domain/, and from
@@ -948,7 +990,7 @@ const restoreManifestTmpName = ".restore_manifest.tmp"
 // Takes datadir.Dirs directly (not an AggregatorRoTx) so restore can run even
 // when the on-disk state is broken enough that the aggregator can't open it —
 // which is exactly when restore is most needed.
-func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (bool, error) {
+func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	backupRoot := filepath.Join(dirs.Snap, "backup")
 	historyDirs := [][2]string{{"history", dirs.SnapHistory}, {"idx", dirs.SnapIdx}, {"accessor", dirs.SnapAccessors}}
 	historyPending := false
@@ -961,39 +1003,59 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 		[][2]string{{filepath.Join(backupRoot, "domains"), dirs.SnapDomain}, {filepath.Join(backupRoot, "history"), dirs.SnapHistory}},
 	)
 	if err != nil {
-		return false, err
+		return err
+	}
+	if restoredV3 {
+		if err := markExecResetPending(dirs); err != nil {
+			return err
+		}
 	}
 	if err := restoreCommitmentBackup(ctx, filepath.Join(backupRoot, "domains"), dirs.SnapDomain, !historyPending && !restoredV3, logger); err != nil {
-		return false, err
+		return err
 	}
 	for _, pair := range historyDirs {
 		if err := restoreCommitmentBackup(ctx, filepath.Join(backupRoot, pair[0]), pair[1], false, logger); err != nil {
-			return false, err
+			return err
 		}
 	}
-	return restoredV3, nil
+	return nil
 }
 
 func MatchCommitmentSchemaToFiles(d datadir.Dirs) error {
 	cfg := statecfg.Schema.CommitmentDomain
-	domainV3, historyV3 := cfg.CommitmentV3Records, cfg.Hist.FileVersion.DataV.Current.Major >= 3
-	var domain, history bool
-	if err := forEachCommitmentDataFile(d.SnapDomain, func(_ string, major uint64) error {
-		domainV3 = domain && domainV3 || major >= 3
-		domain = true
-		return nil
-	}); err != nil {
+	domainV3, err := commitmentFilesAreV3(d.SnapDomain, cfg.CommitmentV3Records)
+	if err != nil {
 		return err
 	}
-	if err := forEachCommitmentDataFile(d.SnapHistory, func(_ string, major uint64) error {
-		historyV3 = history && historyV3 || major >= 3
-		history = true
-		return nil
-	}); err != nil {
+	historyV3, err := commitmentFilesAreV3(d.SnapHistory, cfg.Hist.FileVersion.DataV.Current.Major >= 3)
+	if err != nil {
 		return err
 	}
 	statecfg.SetCommitmentFileVersions(domainV3, historyV3)
 	return nil
+}
+
+// commitmentFilesAreV3 reports whether the commitment files in dirPath are v3, or
+// returns ifNone when dirPath has no commitment files.
+func commitmentFilesAreV3(dirPath string, ifNone bool) (bool, error) {
+	var legacyName, v3Name string
+	if err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
+		if major >= 3 {
+			v3Name = name
+		} else {
+			legacyName = name
+		}
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	if legacyName != "" && v3Name != "" {
+		return false, fmt.Errorf("commitment files have mixed major versions: %s and %s", legacyName, v3Name)
+	}
+	if legacyName == "" && v3Name == "" {
+		return ifNone, nil
+	}
+	return v3Name != "", nil
 }
 
 func forEachCommitmentDataFile(dirPath string, fn func(name string, major uint64) error) error {
@@ -1035,13 +1097,13 @@ func refuseV3CommitmentFiles(dirs datadir.Dirs) error {
 }
 
 func HasCommitmentHistoryFiles(d datadir.Dirs) (bool, error) {
-	return hasCommitmentDataFile(d.SnapHistory, ".v")
+	return hasCommitmentDataFile(d.SnapHistory)
 }
 
-func hasCommitmentDataFile(dirPath, ext string) (bool, error) {
+func hasCommitmentDataFile(dirPath string) (bool, error) {
 	found := false
-	err := forEachCommitmentDataFile(dirPath, func(name string, _ uint64) error {
-		found = found || filepath.Ext(name) == ext
+	err := forEachCommitmentDataFile(dirPath, func(string, uint64) error {
+		found = true
 		return nil
 	})
 	return found, err
@@ -1052,7 +1114,7 @@ func requireV3SideFiles(dirs datadir.Dirs, opts ConvertOpts) error {
 		return nil
 	}
 	if opts.NoDomain {
-		return requireCommitmentFiles(dirs.SnapHistory, ".v", "history", "--no-domain")
+		return requireCommitmentFiles(dirs.SnapHistory, "history", "--no-domain")
 	}
 	if opts.NoHistory {
 		if err := forEachCommitmentDataFile(dirs.SnapHistory, func(name string, major uint64) error {
@@ -1066,13 +1128,13 @@ func requireV3SideFiles(dirs datadir.Dirs, opts ConvertOpts) error {
 		if err := preflightBackupDir(filepath.Join(dirs.Snap, "backup", "domains")); err != nil {
 			return err
 		}
-		return requireCommitmentFiles(dirs.SnapDomain, ".kv", "domain", "--no-history")
+		return requireCommitmentFiles(dirs.SnapDomain, "domain", "--no-history")
 	}
 	return nil
 }
 
-func requireCommitmentFiles(dirPath, ext, kind, flag string) error {
-	found, err := hasCommitmentDataFile(dirPath, ext)
+func requireCommitmentFiles(dirPath, kind, flag string) error {
+	found, err := hasCommitmentDataFile(dirPath)
 	if err != nil {
 		return err
 	}

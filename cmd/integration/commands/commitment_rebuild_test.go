@@ -131,7 +131,7 @@ func TestCommitmentConvertV3KeepsTheDBTail(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, _, countTail := dbWithState(t, true)
 	tail, progress := countTail(), executionProgressOf(t, db)
-	require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
+	require.NoError(t, commitmentConvert(db.(state.HasAgg).Agg().(*state.Aggregator), t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
 	require.Equal(t, tail, countTail())
 	require.Equal(t, progress, executionProgressOf(t, db))
 }
@@ -151,14 +151,14 @@ func TestCommitmentConvertV3RefusedKeepsTheDBTail(t *testing.T) {
 	backup := filepath.Join(dirs.Snap, "backup", "domains")
 	require.NoError(t, os.MkdirAll(backup, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(backup, "stale"), []byte{1}, 0o644))
-	require.Error(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
+	require.Error(t, commitmentConvert(db.(state.HasAgg).Agg().(*state.Aggregator), t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
 	require.Equal(t, before, countTail())
 }
 
 func TestCommitmentConvertV3WithoutFilesKeepsTheDBTail(t *testing.T) {
 	db, _, countTail := dbWithState(t, false)
 	before := countTail()
-	require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
+	require.NoError(t, commitmentConvert(db.(state.HasAgg).Agg().(*state.Aggregator), t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
 	require.Equal(t, before, countTail())
 }
 
@@ -199,7 +199,7 @@ func TestCommitmentRebuildWithoutHistoryAfterPrunedHistoryRefusal(t *testing.T) 
 	}
 	require.NoError(t, agg.ReloadFiles())
 
-	err := commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true})
+	err := commitmentConvert(db.(state.HasAgg).Agg().(*state.Aggregator), t.Context(), log.New(), state.ConvertOpts{TargetV3: true})
 	require.ErrorContains(t, err, "then run `integration commitment rebuild --yes --no-history` with ERIGON_COMMITMENT_V3=true")
 
 	agg.CloseFilesNoReopen()

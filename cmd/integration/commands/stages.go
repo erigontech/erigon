@@ -695,6 +695,13 @@ func resolveExecTarget(block, limit, execProgress, sendersProgress uint64) (targ
 	return target, !(target > 0 && target <= execProgress)
 }
 
+func resetExec(ctx context.Context, db kv.TemporalRwDB, dirs datadir.Dirs, logger log.Logger) error {
+	if err := rawdbreset.ResetExec(ctx, db); err != nil {
+		return err
+	}
+	return dbstate.CompleteExecReset(dirs, logger)
+}
+
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	defer startExecProfiling(dirs, logger)()
@@ -704,10 +711,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	defer engine.Close()
 	must(sync.SetCurrentStage(stages.Execution))
 	if reset {
-		if err := rawdbreset.ResetExec(ctx, db); err != nil {
-			return err
-		}
-		return nil
+		return resetExec(ctx, db, dirs, logger)
 	}
 	if err := checkCommitmentTrieMatchesFiles(); err != nil {
 		return err
@@ -1178,6 +1182,9 @@ func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.Tempo
 	if err := dbstate.MatchCommitmentSchemaToFiles(dirs); err != nil {
 		return nil, err
 	}
+	if err := dbstate.CheckSnapshotsCompatibility(dirs); err != nil {
+		return nil, err
+	}
 	chainConfig := fromdb.ChainConfig(db)
 	snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
 	_allSnapshotsSingleton = blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, logger)
@@ -1195,18 +1202,8 @@ func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.Tempo
 }
 
 func checkCommitmentTrieMatchesFiles() error {
-	cfg := statecfg.Schema.CommitmentDomain
-	if cfg.CommitmentV3Records != statecfg.ExperimentalCommitmentV3 {
-		if statecfg.ExperimentalCommitmentV3 {
-			return errors.New("commitment domain files are legacy and ERIGON_COMMITMENT_V3=true; run `integration commitment convert --v3` without it first")
-		}
-		return errors.New("commitment domain files are v3 and ERIGON_COMMITMENT_V3 is off; set ERIGON_COMMITMENT_V3=true")
-	}
-	if (cfg.Hist.FileVersion.DataV.Current.Major >= 3) != cfg.CommitmentV3Records {
-		if cfg.CommitmentV3Records {
-			return errors.New("commitment domain files are v3 and history files are legacy; roll the conversion back with `integration commitment convert --restore`")
-		}
-		return errors.New("commitment history files are v3 and domain files are legacy; finish the conversion with `integration commitment convert --v3 --no-history` or roll it back with `integration commitment convert --restore`")
+	if statecfg.ExperimentalCommitmentV3 && !statecfg.Schema.CommitmentDomain.CommitmentV3Records {
+		return errors.New("commitment domain files are legacy and ERIGON_COMMITMENT_V3=true; run `integration commitment convert --v3` without it first")
 	}
 	return nil
 }

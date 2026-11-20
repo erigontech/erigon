@@ -345,9 +345,11 @@ func TestLegacyCommitmentFiles(t *testing.T) {
 				} else {
 					names = []string{"domain/v3.0-commitment.16-32.kv", "domain/v3.0-commitment.32-48.kv", "domain/v2.0-commitment.32-48.bt", "history/v3.0-commitment.32-48.v", "idx/v2.0-commitment.32-48.ef"}
 				}
-				names = append(names, mixedRange...)
 				for _, name := range names {
 					want[name] = false
+				}
+				for _, name := range mixedRange {
+					want[name] = true
 				}
 				if v3 {
 					want["domain/v2.2-commitment.0-16.kv"] = true

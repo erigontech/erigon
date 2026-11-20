@@ -193,6 +193,9 @@ func localV3CommitmentTip(dirs datadir.Dirs) (tip uint64, found bool, err error)
 	return tip, len(files) > 0, nil
 }
 
+// incompatibleCommitmentFiles returns the files to skip. True marks a file that cannot be
+// skipped: a domain file without compatible commitment, or a file of a commitment history
+// range that has both v2 and v3 files.
 func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint64) map[string]bool {
 	type stepRange struct {
 		history  bool
@@ -211,7 +214,11 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint
 	compatible := make(map[stepRange]bool)
 	incompatible := make(map[stepRange]bool)
 	skipped := make(map[string]bool)
-	historyMajors := make(map[stepRange]map[uint64][]string)
+	type historyFiles struct {
+		v2, v3 bool
+		names  []string
+	}
+	historyRanges := make(map[stepRange]*historyFiles)
 	for _, p := range items {
 		info, _, ok := snaptype.ParseFileName("", p.Name)
 		if !ok {
@@ -226,10 +233,13 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint
 		}
 		if info.Ext == ".kv" || info.Ext == ".v" {
 			if r.history {
-				if historyMajors[r] == nil {
-					historyMajors[r] = make(map[uint64][]string)
+				h := historyRanges[r]
+				if h == nil {
+					h = &historyFiles{}
+					historyRanges[r] = h
 				}
-				historyMajors[r][uint64(info.Version.Major)] = append(historyMajors[r][uint64(info.Version.Major)], p.Name)
+				h.v2, h.v3 = h.v2 || info.Version.Major < 3, h.v3 || info.Version.Major >= 3
+				h.names = append(h.names, p.Name)
 			}
 			if (info.Version.Major >= 3) == v3 {
 				compatible[r] = true
@@ -256,26 +266,18 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint
 		return false
 	}
 	mixed := make(map[stepRange]bool)
-	for r, majors := range historyMajors {
-		var hasV2, hasV3 bool
-		for major := range majors {
-			hasV2 = hasV2 || major < 3
-			hasV3 = hasV3 || major >= 3
-		}
-		if !hasV2 || !hasV3 {
+	for r, h := range historyRanges {
+		if !h.v2 || !h.v3 {
 			continue
 		}
 		mixed[r] = true
-		for _, names := range majors {
-			for _, name := range names {
-				skipped[name] = false
-			}
+		for _, name := range h.names {
+			skipped[name] = true
 		}
-		log.Warn("Skipping commitment history range that has both v2 and v3 files", "from", r.from, "to", r.to)
 	}
 	for name, f := range ranges {
 		if mixed[f.stepRange] {
-			skipped[name] = false
+			skipped[name] = true
 			continue
 		}
 		if compatible[f.stepRange] || f.required && f.to <= localV3Tip || !v3 && !hasIncompatible(f) {
@@ -806,6 +808,9 @@ func SyncSnapshots(
 		var skippedTip uint64
 		for _, p := range items {
 			if missing, ok := incompatibleCommitment[p.Name]; ok {
+				if missing && isStateHistory(p.Name) {
+					return fmt.Errorf("the snapshot manifest has both v2 and v3 commitment history for the step range of %s", p.Name)
+				}
 				if missing && !statecfg.ExperimentalCommitmentV3 {
 					return fmt.Errorf("commitment v3 is disabled, but the snapshot manifest has only v3 commitment for %s: %s", p.Name, legacyRemedy)
 				}

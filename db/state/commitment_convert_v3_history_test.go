@@ -608,7 +608,7 @@ func TestRestoreCommitmentFiles_V3RestoresHistory(t *testing.T) {
 				}
 				require.NoError(t, dir.RemoveFile(domainBackup))
 			}
-			_, restoreErr := state.RestoreCommitmentFiles(t.Context(), dirs, log.New())
+			restoreErr := state.RestoreCommitmentFiles(t.Context(), dirs, log.New())
 			require.NoError(t, restoreErr)
 
 			history, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))

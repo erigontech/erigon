@@ -132,33 +132,36 @@ func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
 	}
 }
 
-func TestNewTemporalDBAllowsV3FilesWhenV3IsDisabled(t *testing.T) {
+func TestNewTemporalDBRejectsV3FilesWhenV3IsDisabled(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	db, dirs := dbWithV3State(t)
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
-	previousDatadir := datadirCli
-	datadirCli = dirs.DataDir
-	t.Cleanup(func() { datadirCli = previousDatadir })
-
-	opened, err := newTemporalDB(t.Context(), db, log.New())
+	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment.*"))
 	require.NoError(t, err)
-	opened.Close()
+	for _, f := range files {
+		require.NoError(t, dir.RemoveFile(f))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+
+	requireNewTemporalDBError(t, db, dirs, "requires commitment v3")
 }
 
-func TestNewTemporalDBAllowsMixedCommitmentFiles(t *testing.T) {
+func TestNewTemporalDBRejectsMixedCommitmentDomainFiles(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	db, dirs := dbWithV3State(t)
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+
+	requireNewTemporalDBError(t, db, dirs, "mixed major versions")
+}
+
+func requireNewTemporalDBError(t *testing.T, db kv.RwDB, dirs datadir.Dirs, wantErr string) {
+	t.Helper()
 	previousDatadir := datadirCli
 	datadirCli = dirs.DataDir
 	t.Cleanup(func() { datadirCli = previousDatadir })
-
-	opened, err := newTemporalDB(t.Context(), db, log.New())
-	require.NoError(t, err)
-	opened.Close()
+	_, err := newTemporalDB(t.Context(), db, log.New())
+	require.ErrorContains(t, err, wantErr)
 }
 
 func TestIntegrationOpensCommitmentFilesAtTheirVersions(t *testing.T) {
@@ -167,26 +170,27 @@ func TestIntegrationOpensCommitmentFilesAtTheirVersions(t *testing.T) {
 		datadirCli, chaindata = previousDatadir, previousChaindata
 		openSnapshotOnce = sync.Once{}
 	})
-	open := func(t *testing.T, dirs datadir.Dirs) {
+	open := func(t *testing.T, dirs datadir.Dirs) error {
 		t.Helper()
 		datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
 		openSnapshotOnce = sync.Once{}
 		opened, err := openDB(t.Context(), dbCfg(dbcfg.ChainDB, dirs.Chaindata), false, log.New())
-		require.NoError(t, err)
-		opened.Close()
+		if err == nil {
+			opened.Close()
+		}
+		return err
 	}
 
 	t.Run("v3 files, v3 off", func(t *testing.T) {
 		t.Cleanup(statecfg.SetCommitmentV3(false))
 		db, dirs := dbWithV3State(t)
-		require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true, NoHistory: true}))
+		require.NoError(t, commitmentConvert(db.(state.HasAgg).Agg().(*state.Aggregator), t.Context(), log.New(), state.ConvertOpts{TargetV3: true, NoHistory: true}))
 		db.Close()
 		v3Files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "v3.0-commitment.*.kv"))
 		require.NoError(t, err)
 		require.NotEmpty(t, v3Files)
 
-		open(t, dirs)
-		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "files are v3 and ERIGON_COMMITMENT_V3 is off")
+		require.ErrorContains(t, open(t, dirs), "requires commitment v3")
 	})
 
 	t.Run("legacy files, v3 on", func(t *testing.T) {
@@ -195,7 +199,7 @@ func TestIntegrationOpensCommitmentFilesAtTheirVersions(t *testing.T) {
 		db.Close()
 		statecfg.SetCommitmentV3(true)
 
-		open(t, dirs)
+		require.NoError(t, open(t, dirs))
 		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "files are legacy and ERIGON_COMMITMENT_V3=true")
 	})
 
@@ -205,8 +209,7 @@ func TestIntegrationOpensCommitmentFilesAtTheirVersions(t *testing.T) {
 		requireCommitmentKVPrefix(t, dirs, "v2.")
 		statecfg.SetCommitmentV3(false)
 
-		open(t, dirs)
-		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "history files are v3 and domain files are legacy")
+		require.ErrorContains(t, open(t, dirs), "mixed major versions")
 	})
 }
 
@@ -219,7 +222,7 @@ func TestCommitmentConvertLegacyRestoreKeepsExecution(t *testing.T) {
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		return stages.SaveStageProgress(tx, stages.Execution, 100)
 	}))
-	require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetSqueeze: true}))
+	require.NoError(t, commitmentConvert(db.(state.HasAgg).Agg().(*state.Aggregator), t.Context(), log.New(), state.ConvertOpts{TargetSqueeze: true}))
 	db.Close()
 
 	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
@@ -346,4 +349,31 @@ func dbWithV3State(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) {
 	t.Helper()
 	db, dirs, _ := dbWithV3StateRoots(t)
 	return db, dirs
+}
+
+func TestResetExecClearsPendingExecReset(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	previousDatadir, previousChaindata := datadirCli, chaindata
+	t.Cleanup(func() { datadirCli, chaindata = previousDatadir, previousChaindata })
+
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backupDir, 0o755))
+	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment.*"))
+	require.NoError(t, err)
+	for _, f := range files {
+		require.NoError(t, os.Rename(f, filepath.Join(backupDir, filepath.Base(f))))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-2.kv"), nil, 0o644))
+	require.NoError(t, commitmentRestore(t.Context(), log.New()))
+	require.ErrorContains(t, state.CheckExecResetDone(dirs), "stage_exec --reset")
+
+	openSnapshotOnce = sync.Once{}
+	opened, err := openDB(t.Context(), dbCfg(dbcfg.ChainDB, dirs.Chaindata), false, log.New())
+	require.NoError(t, err)
+	defer opened.Close()
+	require.NoError(t, resetExec(t.Context(), opened, dirs, log.New()))
+	require.NoError(t, state.CheckExecResetDone(dirs))
 }

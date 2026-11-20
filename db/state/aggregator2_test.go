@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -176,4 +177,21 @@ func TestOpenRefusesMixedCommitmentVersions(t *testing.T) {
 		agg.Close()
 	}
 	require.ErrorContains(t, err, "mixed major versions")
+}
+
+func TestOpenRefusesPendingExecReset(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, markExecResetPending(dirs))
+
+	agg, err := NewTest(dirs).SanityOldNaming().Open(t.Context())
+	if err == nil {
+		agg.Close()
+	}
+	require.ErrorContains(t, err, "stage_exec --reset")
+
+	require.NoError(t, CompleteExecReset(dirs, log.New()))
+	agg, err = NewTest(dirs).SanityOldNaming().Open(t.Context())
+	require.NoError(t, err)
+	agg.Close()
+	require.NoDirExists(t, filepath.Join(dirs.Snap, "backup"))
 }
