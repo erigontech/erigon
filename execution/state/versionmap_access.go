@@ -295,7 +295,7 @@ func (view *VersionMapView) TracePrefix() string {
 // a contract incarnation.
 func (vm *VersionMap) HasAmbiguousBaseAccount(eip161Enabled, isAura bool, base StateReader) (bool, error) {
 	for i := range vm.bal {
-		addr := accounts.InternAddress(vm.bal[i].Address)
+		addr := vm.balAddr(i, &vm.bal[i])
 		acc, err := base.ReadAccountData(addr)
 		if err != nil {
 			return false, err
