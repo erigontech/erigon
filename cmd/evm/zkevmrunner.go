@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -333,8 +334,13 @@ func decodeFixtures(fname string, fn func(name string, raw json.RawMessage) erro
 			return fmt.Errorf("fixture %s: %w", tok, err)
 		}
 	}
-	_, err = dec.Token()
-	return err
+	if _, err := dec.Token(); err != nil {
+		return err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return errors.New("trailing data after the fixtures object")
+	}
+	return nil
 }
 
 // relName returns fname relative to root, slash-normalised, so the resulting

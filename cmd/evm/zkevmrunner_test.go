@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,4 +45,12 @@ func TestLoadZkevmWitnessesDropsReferenceEqualToEveryFixture(t *testing.T) {
 	reference, ok := witnesses[zkevmWitnessKey{"Amsterdam", hash}]
 	require.True(t, ok)
 	require.Nil(t, reference)
+}
+
+func TestDecodeFixturesRejectsTrailingData(t *testing.T) {
+	for _, trailer := range []string{` {"second":{}}`, ` garbage`} {
+		path := filepath.Join(t.TempDir(), "fixtures.json")
+		require.NoError(t, os.WriteFile(path, []byte(`{"first":{}}`+trailer), 0o600))
+		require.Error(t, decodeFixtures(path, func(string, json.RawMessage) error { return nil }), trailer)
+	}
 }
