@@ -492,15 +492,8 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	defer roTx.Rollback()
 
-	blockNumber, _, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader)
+	blockNumber, _, isLatest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, roTx, api._blockReader)
 	if err != nil {
-		return nil, err
-	}
-
-	// A canonical hash exists for blocks the header stage has downloaded but
-	// execution has not reached; the commitment history getProof needs is only
-	// written by execution.
-	if err := rpchelper.CheckBlockExecuted(roTx, blockNumber); err != nil {
 		return nil, err
 	}
 

@@ -199,11 +199,8 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	blockNumber, blockHash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockParameter, tx, api._blockReader)
+	blockNumber, blockHash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockParameter, tx, api._blockReader)
 	if err != nil {
-		return nil, err
-	}
-	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return nil, err
 	}
 

@@ -321,16 +321,12 @@ func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Ad
 	defer tx.Rollback()
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
-	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNum, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return "", 0, "", err
 	}
 
 	if err := api.checkPruneState(ctx, tx, blockNum); err != nil {
-		return "", 0, "", err
-	}
-
-	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return "", 0, "", err
 	}
 
@@ -376,16 +372,12 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 	defer tx.Rollback()
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
-	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNum, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return zeroStorageHash, err
 	}
 
 	if err := api.checkPruneState(ctx, tx, blockNum); err != nil {
-		return zeroStorageHash, err
-	}
-
-	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return zeroStorageHash, err
 	}
 
