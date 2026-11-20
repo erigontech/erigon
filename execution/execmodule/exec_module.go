@@ -638,16 +638,24 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 	if blockNumber <= e.preExec.CommittedHeight() {
 		var executedTo uint64
 		var canonical bool
+		var stateIsCanonical bool
 		if err := e.db.View(ctx, func(tx kv.Tx) (err error) {
 			if canonical, err = e.blockReader.IsCanonical(ctx, tx, blockHash, blockNumber); err != nil || !canonical {
 				return err
 			}
-			executedTo, err = stages.GetStageProgress(tx, stages.Execution)
-			return err
+			if executedTo, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+				return err
+			}
+			executedHash, err := rawdb.ReadCanonicalHash(tx, executedTo)
+			if err != nil {
+				return err
+			}
+			stateIsCanonical = executedHash == rawdb.ReadHeadBlockHash(tx)
+			return nil
 		}); err != nil {
 			return ValidationResult{}, err
 		}
-		if canonical && blockNumber <= executedTo {
+		if canonical && stateIsCanonical && blockNumber <= executedTo {
 			return ValidationResult{ValidationStatus: ExecutionStatusSuccess, LatestValidHash: blockHash}, nil
 		}
 	}
