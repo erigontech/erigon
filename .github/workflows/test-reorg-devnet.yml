@@ -42,6 +42,9 @@ jobs:
           build-args: BINARIES=erigon
           cache-from: type=gha,scope=reorg-devnet
           cache-to: type=gha,scope=reorg-devnet,mode=max
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
       - name: Test devnet driver
         run: make test-reorg-devnet-driver
       - name: Bounce, heal and restart

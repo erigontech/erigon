@@ -12,6 +12,11 @@ spec = importlib.util.spec_from_file_location("reorg", Path(__file__).with_name(
 reorg = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(reorg)
 
+# The devnet requests no storage slots. Use the trie fixture's account proof at its original state root.
+PROOF_FIXTURE = Path(__file__).resolve().parents[1] / "execution/commitment/trie/proofResponse.json"
+ACCOUNT_PROOF = dict(json.loads(PROOF_FIXTURE.read_text()), storageProof=[])
+STATE_ROOT = "0x21054df428c339643677a514d1df8414d114b5a858aeb45b7dc9698b189c5ddf"
+
 
 class ReorgWaitTests(unittest.TestCase):
     def test_wait_retries_partial_responses(self):
@@ -38,7 +43,7 @@ class ReorgWaitTests(unittest.TestCase):
 
 
 class ReorgRecoveryTests(unittest.TestCase):
-    def run_recovery(self, next_heads, transient_failures=()):
+    def run_recovery(self, next_heads, transient_failures=(), *, rpc_overrides=None):
         pending_failures = set(transient_failures)
         branches = ["A"] * 6
         partitioned = healed = restarted = False
@@ -48,6 +53,13 @@ class ReorgRecoveryTests(unittest.TestCase):
         running_beacons = set(range(1, 7))
         votes_ready = False
         restarted_at = None
+
+        def block_at(node, height):
+            block_hash = f"{branches[node]}-{height}"
+            return {
+                "number": hex(height), "hash": block_hash, "stateRoot": STATE_ROOT,
+                "transactions": [f"tx-{block_hash}-0", f"tx-{block_hash}-1"], "gasUsed": "0x1",
+            }
 
         def cli(command, **kwargs):
             nonlocal restarted, restarted_at
@@ -113,22 +125,26 @@ class ReorgRecoveryTests(unittest.TestCase):
                     # The witness first lags its peers; only later reads can show new production.
                     latest = next_heads[node] if elapsed > restarted_at else (100 if node == 4 else 110)
                 height = latest if params[0] == "latest" else int(params[0], 16)
-                if height > latest:
-                    return {"result": None}
-                return {"result": {
-                    "number": hex(height), "hash": f"{branches[node]}-{height}",
-                    "stateRoot": f"root-{height}", "transactions": [f"tx-{branches[node]}-{height}"],
-                    "gasUsed": "0x1",
-                }}
-            if method == "eth_getBlockReceipts":
+                result = block_at(node, height) if height <= latest else None
+            elif method == "eth_getBlockReceipts":
+                height = int(params[0], 16)
                 if restarted:
-                    checked_heights.append(int(params[0], 16))
-                return {"result": [{"from": "sender", "to": "contract", "contractAddress": None}]}
-            if method == "eth_getProof":
-                return {"result": {"accountProof": ["proof"]}}
-            if method == "eth_getTransactionReceipt":
-                return {"result": None}
-            self.fail(f"unexpected RPC method: {method}")
+                    checked_heights.append(height)
+                block = block_at(node, height)
+                result = [{
+                    "blockHash": block["hash"], "blockNumber": block["number"],
+                    "transactionHash": tx, "transactionIndex": hex(i),
+                    "from": ACCOUNT_PROOF["address"], "to": ACCOUNT_PROOF["address"], "contractAddress": None,
+                } for i, tx in enumerate(block["transactions"])]
+            elif method == "eth_getProof":
+                result = ACCOUNT_PROOF
+            elif method == "eth_getTransactionReceipt":
+                result = None
+            else:
+                self.fail(f"unexpected RPC method: {method}")
+            if rpc_overrides and method in rpc_overrides:
+                result = rpc_overrides[method](result)
+            return {"result": result}
 
         def sleep(seconds):
             nonlocal elapsed, votes_ready
@@ -155,6 +171,26 @@ class ReorgRecoveryTests(unittest.TestCase):
         self.assertEqual("recovered", result["phase"])
         self.assertGreater(int(result["height"], 16), 110)
         self.assertEqual(int(result["height"], 16), checked_heights[-1])
+
+    def test_recovery_rejects_receipts_that_do_not_match_the_block(self):
+        for name, change in {
+            "discarded block": lambda rows: [dict(row, blockHash="discarded") for row in rows],
+            "wrong transaction order": lambda rows: rows[::-1],
+            "missing transaction": lambda rows: rows[:1],
+            "wrong index": lambda rows: [dict(row, transactionIndex="0x0") for row in rows],
+        }.items():
+            with self.subTest(name=name), self.assertRaisesRegex(AssertionError, "receipt"):
+                self.run_recovery([114] * 6, rpc_overrides={"eth_getBlockReceipts": change})
+
+    def test_recovery_rejects_proofs_that_do_not_match_the_block(self):
+        for name, method, change in [
+            ("null proof", "eth_getProof", lambda proof: None),
+            ("wrong balance", "eth_getProof", lambda proof: dict(proof, balance="0x1")),
+            ("wrong root", "eth_getBlockByNumber", lambda block: dict(block, stateRoot="0x" + "ff" * 32)),
+            ("wrong address", "eth_getBlockReceipts", lambda rows: [dict(row, to="0x" + "22" * 20) for row in rows]),
+        ]:
+            with self.subTest(name=name), self.assertRaisesRegex(AssertionError, "proof"):
+                self.run_recovery([114] * 6, rpc_overrides={method: change})
 
     def test_recovery_retries_transient_reads_and_partition_updates(self):
         result, _ = self.run_recovery([114] * 6, ("state", "eth_getBlockReceipts", "eth_getProof", "clear"))

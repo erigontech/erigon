@@ -6,6 +6,7 @@ from contextlib import ExitStack
 import json
 import http.client
 import os
+from pathlib import Path
 import subprocess
 import time
 import urllib.error
@@ -52,6 +53,14 @@ def retry(description, operation):
 
 def same_block(blocks):
     return all(block is not None for block in blocks) and len({block["hash"] for block in blocks}) == 1
+
+
+def verify_account_proofs(state_root, proofs):
+    result = subprocess.run(
+        ["go", "run", "./tools/verify-reorg-proofs"], cwd=Path(__file__).resolve().parents[1],
+        input=json.dumps({"stateRoot": state_root, "proofs": proofs}), text=True, stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 0, f"account proof verification at {state_root} failed: {result.stderr.strip()}"
 
 
 def run(enclave):
@@ -105,13 +114,22 @@ def run(enclave):
         receipts = retry(f"receipts at {height}", lambda: [rpc(url, "eth_getBlockReceipts", height) for url in execution])
         assert receipts[0], f"no transaction workload at {height}"
         assert all(rows == receipts[0] for rows in receipts), f"receipt disagreement at {height}"
+        for header, rows in zip(blocks, receipts, strict=True):
+            assert [r["transactionHash"] for r in rows] == header["transactions"], f"receipt transactions differ at {height}"
+            for i, row in enumerate(rows):
+                location = row["blockHash"], row["blockNumber"], row["transactionIndex"]
+                assert location == (header["hash"], height, hex(i)), f"receipt {i} at {height} points to {location}"
+
         addresses = {row["from"] for row in receipts[0]}
         addresses.update(row["to"] for row in receipts[0] if row["to"])
         addresses.update(row["contractAddress"] for row in receipts[0] if row["contractAddress"])
+        account_proofs = {}
         for address in sorted(addresses):
             proofs = retry(f"proofs for {address} at {height}",
                            lambda: [rpc(url, "eth_getProof", address, [], height) for url in execution])
             assert all(proof == proofs[0] for proof in proofs), f"state disagreement for {address} at {height}"
+            account_proofs[address] = proofs[0]
+        verify_account_proofs(blocks[0]["stateRoot"], account_proofs)
 
     wait("initial finality on every CL", lambda: min(finality()) >= 2, timeout=1200)
     partitioned = False
