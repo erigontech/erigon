@@ -322,6 +322,42 @@ func TestPostPoolAttesterSlashingBodyLimit(t *testing.T) {
 	}
 }
 
+func TestPostPoolAttesterSlashingFullLists(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	for _, tc := range []struct {
+		name  string
+		epoch uint64
+	}{
+		{name: "pre-Electra", epoch: 0},
+		{name: "Electra", epoch: cfg.ElectraForkEpoch},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			version := cfg.GetCurrentStateVersion(tc.epoch)
+			limit := int(state.MaxIndexedAttestationIndices(&cfg, version))
+			handler, store := newAttesterSlashingTestHandler(t, &cfg, tc.epoch)
+
+			slashing := cltypes.NewAttesterSlashing(version)
+			for i := range limit {
+				// 20-digit values, the widest decimal uint64 strings.
+				slashing.Attestation_1.AttestingIndices.Append(math.MaxUint64 - uint64(i))
+				slashing.Attestation_2.AttestingIndices.Append(math.MaxUint64 - uint64(i))
+			}
+			body, err := json.Marshal(slashing)
+			require.NoError(t, err)
+			require.Less(t, len(body), attesterSlashingJSONOverhead+limit*attesterSlashingJSONBytesPerIndexPair)
+
+			resp := httptest.NewRecorder()
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/attester_slashings", bytes.NewReader(body))
+			handler.PostEthV1BeaconPoolAttesterSlashings(resp, req)
+			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+			stored := store.Pool.AttesterSlashingsPool.Raw()
+			require.Len(t, stored, 1)
+			require.Equal(t, limit, stored[0].Attestation_1.AttestingIndices.Length())
+			require.Equal(t, limit, stored[0].Attestation_2.AttestingIndices.Length())
+		})
+	}
+}
+
 func TestPostPoolAttesterSlashingIndexLimit(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxValidatorsPerCommittee = 1
