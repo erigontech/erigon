@@ -1141,3 +1141,16 @@ func TestGenesisConstructorDropsAllocStorage(t *testing.T) {
 	}
 	require.Equal(t, root(nil), root(map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x0b")}))
 }
+
+// Pins the genesis root of a constructor that self-destructs under Amsterdam rules.
+func TestGenesisSelfDestructingConstructorRoot(t *testing.T) {
+	t.Parallel()
+	addr := common.HexToAddress("0x00000000000000000000000000000000c0ffee04")
+	selfDestruct := []byte{0x30, 0xff} // ADDRESS SELFDESTRUCT
+	block, ibs, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: chain.AllProtocolChanges, Alloc: types.GenesisAlloc{
+		addr: {Balance: big.NewInt(5), Constructor: selfDestruct},
+	}})
+	require.NoError(t, err)
+	ibs.Close()
+	require.Equal(t, common.HexToHash("0x0ce1587d3a75b9b18f20e9aaa0ed22615fa9d6c870db8061e9ee6aaf3c771241"), block.Root())
+}
