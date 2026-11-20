@@ -18,8 +18,10 @@ package blobfetch
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"testing"
 	"time"
 
@@ -136,4 +138,58 @@ func TestFetchAndStoreComputesAProofOnlyWithAFreeBudgetSlot(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the proof was not computed after a budget slot was released")
 	}
+}
+
+func TestRetryBackoffCapsRetryAfter(t *testing.T) {
+	for header, want := range map[string]time.Duration{
+		"0":           0,
+		"30":          30 * time.Second,
+		"31":          30 * time.Second,
+		"9223372037":  30 * time.Second,
+		"18446744074": 30 * time.Second,
+	} {
+		resp := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": {header}}}
+		require.Equal(t, want, retryBackoff(time.Second, 30*time.Second, 0, resp), "Retry-After: %s", header)
+	}
+}
+
+func TestFailedFetchKeepsDefaultTransportIdleConnections(t *testing.T) {
+	defer func(wait time.Duration) { RetryWait = wait }(RetryWait)
+	RetryWait = time.Millisecond
+	shared := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	t.Cleanup(shared.Close)
+	get := func() (reused bool) {
+		ctx := httptrace.WithClientTrace(t.Context(), &httptrace.ClientTrace{
+			GotConn: func(info httptrace.GotConnInfo) { reused = info.Reused },
+		})
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, shared.URL, nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_, err = io.Copy(io.Discard, resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		return reused
+	}
+	get()
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(failing.Close)
+
+	_, err := getBeaconData(t.Context(), failing.URL, "blobs", 1)
+	require.Error(t, err)
+	require.True(t, get(), "a failed fetch closed the idle connections of http.DefaultTransport")
+}
+
+func TestGetBeaconDataRejectsTrailingData(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[]} {"data":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := getBeaconData(t.Context(), srv.URL, "blobs", 1)
+	require.ErrorContains(t, err, "decode")
 }

@@ -19,7 +19,6 @@
 package blobfetch
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -30,6 +29,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,7 +54,7 @@ import (
 // MaxSidecarJSONSize bounds one sidecar in a JSON response: the hex blob is 256 KiB.
 const MaxSidecarJSONSize = 512 << 10
 
-// RequestTimeout bounds one endpoint request. A full response, 21 blobs of hex JSON, is about 6 MB. Variables so
+// RequestTimeout bounds one attempt at an endpoint request, the body read included. A full response, 21 blobs of hex JSON, is about 6 MB. Variables so
 // tests can shorten them.
 var (
 	RequestTimeout = time.Minute
@@ -170,6 +170,17 @@ func Retrieve(ctx context.Context, endpoint string, root common.Hash, block *clt
 	return sidecars, nil
 }
 
+var transport = http.DefaultTransport.(*http.Transport).Clone()
+
+func retryBackoff(lo, hi time.Duration, attempt int, resp *http.Response) time.Duration {
+	if resp != nil && (resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable) {
+		if seconds, err := strconv.ParseUint(resp.Header.Get("Retry-After"), 10, 64); err == nil {
+			return time.Duration(min(seconds, uint64(hi/time.Second))) * time.Second
+		}
+	}
+	return min(retryablehttp.DefaultBackoff(lo, hi, attempt, resp), hi)
+}
+
 func getBeaconData(ctx context.Context, endpoint, path string, maxEntries int) ([]json.RawMessage, error) {
 	base, err := url.Parse(endpoint)
 	if err != nil {
@@ -184,14 +195,12 @@ func getBeaconData(ctx context.Context, endpoint, path string, maxEntries int) (
 	req.Header.Set("Accept", "application/json")
 
 	client := &retryablehttp.Client{
-		HTTPClient:   &http.Client{Timeout: RequestTimeout},
+		HTTPClient:   &http.Client{Timeout: RequestTimeout, Transport: transport},
 		RetryWaitMin: RetryWait,
 		RetryWaitMax: 30 * time.Second,
 		RetryMax:     2,
 		CheckRetry:   retryablehttp.DefaultRetryPolicy,
-		Backoff: func(lo, hi time.Duration, attempt int, resp *http.Response) time.Duration {
-			return min(retryablehttp.DefaultBackoff(lo, hi, attempt, resp), hi)
-		},
+		Backoff:      retryBackoff,
 		ErrorHandler: retryablehttp.PassthroughErrorHandler,
 	}
 	var raw []byte
@@ -220,7 +229,7 @@ func getBeaconData(ctx context.Context, endpoint, path string, maxEntries int) (
 	var response struct {
 		Data []json.RawMessage `json:"data"`
 	}
-	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&response); err != nil {
+	if err := json.Unmarshal(raw, &response); err != nil {
 		return nil, fmt.Errorf("blob retrieval decode failed %w", err)
 	}
 	if len(response.Data) > maxEntries {
