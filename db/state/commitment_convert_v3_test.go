@@ -814,8 +814,8 @@ func TestConvertCommitmentFiles_V3FoldsTheTailAfterTheStoredState(t *testing.T) 
 		maxTxNums[block] = uint64(block)*3 + 2
 	}
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		for block := range uint64(26) {
-			if block == 0 {
+		for block := range uint64(29) {
+			if block == 0 || block == 26 || block == 27 {
 				continue
 			}
 			if err := tx.Delete(kv.MaxTxNum, binary.BigEndian.AppendUint64(nil, block)); err != nil {

@@ -90,10 +90,12 @@ func foldCommitmentTail(ctx context.Context, at *AggregatorRoTx, f VisibleFile, 
 	cfg.Variant = commitment.VariantHexPatriciaTrie
 	cfg.DeferBranchUpdates = false
 	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithTrieConfig(cfg), execctx.WithoutSharedBranchCache())
-	if err != nil {
+	if sd != nil {
+		defer sd.Close()
+	}
+	if err != nil && !errors.Is(err, commitmentdb.ErrBehindCommitment) {
 		return nil, err
 	}
-	defer sd.Close()
 	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(tx, end-1))
 	seekTxNum, _, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
