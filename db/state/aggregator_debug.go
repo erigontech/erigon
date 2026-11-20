@@ -32,7 +32,7 @@ type iiDirtyFilesRoTx struct {
 	files []*FilesItem
 }
 
-func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
+func (a *Aggregator) debugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 	ac := &aggDirtyFilesRoTx{
 		agg:    a,
 		domain: make([]*domainDirtyFilesRoTx, len(a.d)),
@@ -47,11 +47,11 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 	ac.visible = a.visible.Load()
 	ac.visible.refcnt.Add(1)
 	for i, d := range a.d {
-		ac.domain[i] = d.DebugBeginDirtyFilesRo()
+		ac.domain[i] = d.debugBeginDirtyFilesRo()
 	}
 
 	for i := 0; i < a.iisCount; i++ {
-		ac.ii[i] = a.iis[i].DebugBeginDirtyFilesRo()
+		ac.ii[i] = a.iis[i].debugBeginDirtyFilesRo()
 	}
 
 	return ac
@@ -166,7 +166,7 @@ func (ac *aggDirtyFilesRoTx) Close() {
 	ac.visible = nil
 }
 
-func (d *Domain) DebugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
+func (d *Domain) debugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
 	var files []*FilesItem
 	iter := d.dirtyFiles.Iter()
 	defer iter.Release()
@@ -176,7 +176,7 @@ func (d *Domain) DebugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
 	return &domainDirtyFilesRoTx{
 		d:       d,
 		files:   files,
-		history: d.History.DebugBeginDirtyFilesRo(),
+		history: d.History.debugBeginDirtyFilesRo(),
 	}
 }
 
@@ -199,7 +199,7 @@ func (d *domainDirtyFilesRoTx) Close() {
 	d.d = nil
 }
 
-func (h *History) DebugBeginDirtyFilesRo() *historyDirtyFilesRoTx {
+func (h *History) debugBeginDirtyFilesRo() *historyDirtyFilesRoTx {
 	var files []*FilesItem
 	iter := h.dirtyFiles.Iter()
 	defer iter.Release()
@@ -209,7 +209,7 @@ func (h *History) DebugBeginDirtyFilesRo() *historyDirtyFilesRoTx {
 	return &historyDirtyFilesRoTx{
 		h:     h,
 		files: files,
-		ii:    h.InvertedIndex.DebugBeginDirtyFilesRo(),
+		ii:    h.InvertedIndex.debugBeginDirtyFilesRo(),
 	}
 }
 
@@ -231,7 +231,7 @@ func (f *historyDirtyFilesRoTx) Close() {
 	f.h = nil
 }
 
-func (ii *InvertedIndex) DebugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
+func (ii *InvertedIndex) debugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
 	var files []*FilesItem
 	iter := ii.dirtyFiles.Iter()
 	defer iter.Release()

@@ -92,7 +92,7 @@ func TestAggregatorReadAfterRetire(t *testing.T) {
 }
 
 // TestAggregatorRetireDeferredWhileDebugPins verifies that a file retired by an
-// overlap-cleanup is NOT physically deleted while a DebugBeginDirtyFilesRo
+// overlap-cleanup is NOT physically deleted while a debugBeginDirtyFilesRo
 // (BuildMissedAccessors) still pins the generation — deletion is deferred until
 // that debug tx closes. Guards against the reclaimer deleting a file out from
 // under a concurrent accessor build.
@@ -106,7 +106,7 @@ func TestAggregatorRetireDeferredWhileDebugPins(t *testing.T) {
 	mustExist(t, subset01, true)
 
 	// pin the current generation (incl. the soon-to-be-retired overlaps in its dirtyFiles)
-	rotx := agg.DebugBeginDirtyFilesRo()
+	rotx := agg.debugBeginDirtyFilesRo()
 
 	// retire the overlap files; they are pinned by rotx so must be parked, not deleted
 	require.NoError(t, agg.RemoveOverlapsAfterMerge())
