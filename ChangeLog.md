@@ -54,6 +54,7 @@
 
 ### Changed
 
+- rpc: `overlay_callConstructor` reports the retry's result after a rolled-back deployment. It returns `null` for deployments deleted by `SELFDESTRUCT` or rolled back by a failed `POST_TX` assertion. Factory deployments now enforce the fork's initcode size limit and use the gas forwarded by `CREATE` or `CREATE2`, so storing a larger runtime can run out of gas (#26512) — by @yperbasis
 - p2p: the discovery endpoint predictor, which fills the local node record's IP and UDP port when they are not configured, now counts endpoint statements once per reporter network (IPv4 /24, IPv6 /48; hosts on the LAN individually) and ignores statements about an endpoint of the other address family. A node whose discovery peers all share one public /24 or /48 no longer predicts its endpoint from them (#24975) — by @mardgez13
 
 ---

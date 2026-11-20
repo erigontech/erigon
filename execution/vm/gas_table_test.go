@@ -650,7 +650,6 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 				s := state.New(r)
 				defer s.Close()
 				initCode := program.New().Push(0xaa).Push(0).Op(vm.MSTORE8).Return(0, 1).Bytes()
-				replacementCreationCode := []byte{byte(vm.STOP)}
 				salt := uint256.NewInt(0)
 				factoryAddress := common.HexToAddress("0xfac0")
 				factory := accounts.InternAddress(factoryAddress)
@@ -665,8 +664,7 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 					},
 				}
 				_ = s.CommitBlock(vmctx.Rules(tt.config), w)
-				var evmRef *vm.EVM
-				var overlayErr error
+				var mutationErr error
 				capturing := false
 				hooks := &tracing.Hooks{
 					OnEnter: func(_ int, typ byte, from, to accounts.Address, _ bool, _ []byte, _ uint64, value uint256.Int, _ []byte) {
@@ -674,18 +672,10 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 							return
 						}
 						capturing = true
-						_, _, _, _, overlayErr = evmRef.OverlayCreate(
-							from,
-							vm.NewCodeAndHash(replacementCreationCode),
-							mdgas.MdGas{Execution: 400_000},
-							value,
-							to,
-							vm.CREATE2,
-							true,
-						)
+						mutationErr = s.SetNonce(to, 1, tracing.NonceChangeUnspecified)
 					},
 				}
-				evmRef = vm.NewEVM(
+				evmRef := vm.NewEVM(
 					vmctx,
 					evmtypes.TxContext{},
 					s,
@@ -694,7 +684,7 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 				)
 				ret, _, _, err := evmRef.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Execution: 1_000_000}, uint256.Int{}, false)
 				require.NoError(t, err)
-				require.NoError(t, overlayErr)
+				require.NoError(t, mutationErr)
 				require.True(t, capturing)
 				require.Equal(t, common.Address{}, common.BytesToAddress(ret))
 				code, err := evmRef.IntraBlockState().GetCode(target)
