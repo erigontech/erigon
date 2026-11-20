@@ -22,10 +22,13 @@ import (
 	"fmt"
 	"math"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
@@ -34,7 +37,7 @@ import (
 )
 
 // CheckCaplinBlobSidecars verifies frozen blob snapshot coverage, canonical identity, and cryptographic proofs.
-func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeblocks.CaplinSnapshots, beaconCfg *clparams.BeaconChainConfig, blobsFromSlot uint64, failFast bool, logger log.Logger) error {
+func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeblocks.CaplinSnapshots, beaconCfg *clparams.BeaconChainConfig, blobsFromSlot uint64, failFast bool, cache *IntegrityCache, logger log.Logger) error {
 	if snapshots == nil {
 		return fmt.Errorf("blob snapshot integrity: caplin snapshots are unavailable")
 	}
@@ -101,23 +104,86 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 		logger.Error("[integrity] CaplinBlobSidecars", "err", err)
 		return err
 	}
+	type blobRange struct {
+		from, to uint64
+		fps      []fileFingerprint
+	}
+	var ranges []blobRange
+	for _, segment := range view.BlobSidecars() {
+		from, to := segment.Src().GetRange()
+		var fps []fileFingerprint
+		if cache != nil {
+			var err error
+			if fps, err = caplinBlobFingerprints(segment, view.BeaconBlocks()); err != nil {
+				return err
+			}
+			if cache.has(string(CaplinBlobSidecars), fps) {
+				logger.Info("[integrity] CaplinBlobSidecars skipping (cache hit)", "from", from, "to", to)
+				continue
+			}
+		}
+		ranges = append(ranges, blobRange{from, to, fps})
+	}
+
 	reader := freezeblocks.NewBeaconSnapshotReader(snapshots, nil, beaconCfg)
-	return db.View(ctx, func(tx kv.Tx) error {
-		for _, segment := range view.BlobSidecars() {
-			from, to := segment.Src().GetRange()
-			for slot := from; slot < to; slot++ {
-				if slotErr := checkCaplinBlobSnapshotSlot(ctx, tx, snapshots, reader, slot); slotErr != nil {
+	rangeErrs := make([]error, len(ranges))
+	passed := make([]bool, len(ranges))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(estimate.AlmostAllCPUs())
+	for i, r := range ranges {
+		g.Go(func() error {
+			return db.View(gctx, func(tx kv.Tx) error {
+				for slot := r.from; slot < r.to; slot++ {
+					slotErr := checkCaplinBlobSnapshotSlot(gctx, tx, snapshots, reader, slot)
+					if slotErr == nil {
+						continue
+					}
 					if errors.Is(slotErr, context.Canceled) || errors.Is(slotErr, context.DeadlineExceeded) {
 						return slotErr
 					}
-					if reportErr := report(slotErr); reportErr != nil {
-						return reportErr
+					logger.Error("[integrity] CaplinBlobSidecars", "err", slotErr)
+					if failFast {
+						return slotErr
+					}
+					if rangeErrs[i] == nil {
+						rangeErrs[i] = slotErr
 					}
 				}
-			}
+				passed[i] = rangeErrs[i] == nil
+				return nil
+			})
+		})
+	}
+	waitErr := g.Wait()
+	for i, r := range ranges {
+		if passed[i] {
+			cache.add(string(CaplinBlobSidecars), r.fps)
 		}
+	}
+	if waitErr != nil {
+		return waitErr
+	}
+	if firstErr != nil {
 		return firstErr
-	})
+	}
+	for _, err := range rangeErrs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func caplinBlobFingerprints(blob *snapshotsync.VisibleSegment, beacon []*snapshotsync.VisibleSegment) ([]fileFingerprint, error) {
+	from, to := blob.Src().GetRange()
+	paths := []string{blob.Src().FilePath()}
+	for _, segment := range beacon {
+		beaconFrom, beaconTo := segment.Src().GetRange()
+		if beaconTo > from && beaconFrom < to {
+			paths = append(paths, segment.Src().FilePath())
+		}
+	}
+	return fingerprintsOf(paths...)
 }
 
 func checkCaplinBlobSnapshotLayout(ctx context.Context, view *freezeblocks.CaplinView) error {
