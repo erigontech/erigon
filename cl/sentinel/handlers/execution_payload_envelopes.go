@@ -306,7 +306,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 		return nil
 	}
 
-	if cost := min(req.Length(), int(maxPayloads)) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := req.Length() - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
