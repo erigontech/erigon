@@ -30,11 +30,12 @@ import (
 
 // commitmentResult is the outcome of a single commitment computation.
 type commitmentResult struct {
-	blockNum  uint64
-	blockHash common.Hash
-	txNum     uint64
-	rootHash  []byte
-	err       error
+	blockNum   uint64
+	blockHash  common.Hash
+	txNum      uint64
+	rootHash   []byte
+	err        error
+	inProgress bool
 }
 
 // commitComputeRequest tells the calculator to compute commitment now. It flows
@@ -822,7 +823,7 @@ func (cc *commitmentCalculator) fail(ctx context.Context, br *blockResult, err e
 	if cc.logger != nil {
 		cc.logger.Error("["+cc.logPrefix+"] commitmentCalculator: reporting failure", "block", br.BlockNum, "err", err)
 	}
-	cc.publish(ctx, commitmentResult{blockNum: br.BlockNum, blockHash: br.BlockHash, txNum: br.lastTxNum, err: err})
+	cc.publish(ctx, commitmentResult{blockNum: br.BlockNum, blockHash: br.BlockHash, txNum: br.lastTxNum, err: err, inProgress: isInProgressHeader(br.Header)})
 }
 
 // shouldComputeOnRequest returns true when there's a blockResult and either
@@ -847,12 +848,14 @@ type commitTarget struct {
 	lastTxNum  uint64
 	stateRoot  common.Hash
 	parent     commitmentdb.ParentState
+	inProgress bool
 }
 
 func targetOf(br *blockResult) commitTarget {
 	t := commitTarget{blockNum: br.BlockNum, blockHash: br.BlockHash, lastTxNum: br.lastTxNum, stateRoot: br.StateRoot, parent: br.parentState}
 	if br.Header != nil {
 		t.parentHash = br.Header.ParentHash
+		t.inProgress = isInProgressHeader(br.Header)
 	}
 	return t
 }
@@ -972,7 +975,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	if !m.publishRoot && !mismatch {
 		return
 	}
-	r := commitmentResult{blockNum: t.blockNum, blockHash: t.blockHash, txNum: t.lastTxNum, rootHash: rh}
+	r := commitmentResult{blockNum: t.blockNum, blockHash: t.blockHash, txNum: t.lastTxNum, rootHash: rh, inProgress: t.inProgress}
 	if mismatch {
 		r.err = fmt.Errorf("%w: block %d root %x expected %x", ErrWrongTrieRoot, t.blockNum, rh, t.stateRoot)
 	}

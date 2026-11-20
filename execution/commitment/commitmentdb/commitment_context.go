@@ -1175,6 +1175,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		if !ok {
 			return 0, 0, errors.New("cannot typecast parallel hex patricia trie")
 		}
+		ppht.Reset()
 		hext = ppht.RootTrie()
 	}
 	if hext == nil {

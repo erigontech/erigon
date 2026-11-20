@@ -577,7 +577,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				}
 				// An in-progress flashblock header carries an all-zero output side, so its root is a placeholder;
 				// the block was executed, so execution progress still advances with it.
-				if pe.isForkValidation && (isInProgressHeader(lastHeader) || dbg.FlashblockSkipPostValidation) {
+				if pe.isForkValidation && (cr.inProgress || dbg.FlashblockSkipPostValidation) {
 					pe.logger.Debug("[flashblock] skip wrong-trie-root", "block", cr.blockNum, "computed", cr.rootHash)
 					pe.txExecutor.lastCommittedBlockNum.Store(cr.blockNum)
 					pe.txExecutor.lastCommittedTxNum.Store(cr.txNum)
