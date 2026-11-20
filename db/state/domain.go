@@ -770,6 +770,7 @@ type DomainRoTx struct {
 
 	dataReaders []*seg.Reader
 	btReaders   []*btindex.BtIndex
+	regionHits  map[regionKey]uint32
 	mapReaders  []*recsplit.IndexReader
 
 	lookupFullKey []byte // scratch buffer for lookupByShortenedKey
@@ -1733,6 +1734,9 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		}
 		if traceGetLatest == dt.name {
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), k, f.src.decompressor.FileName())
+		}
+		if dt.name == kv.StorageDomain {
+			dt.regionAhead(i, k)
 		}
 		return v, true, f.startTxNum, f.endTxNum, nil
 	}
