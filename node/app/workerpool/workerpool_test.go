@@ -91,14 +91,9 @@ func TestMaxWorkers(t *testing.T) {
 		if wp.waitingQueue.Len() != wp.WaitingQueueSize() {
 			t.Fatal("Working Queue size returned should not be 0")
 		}
-		for startCount := 0; startCount < maxWorkers; {
-			synctest.Wait()
-			select {
-			case <-started:
-				startCount++
-			default:
-				t.Fatal("timed out waiting for workers to start")
-			}
+		synctest.Wait()
+		if len(started) != maxWorkers {
+			t.Fatal("timed out waiting for workers to start")
 		}
 
 		// Release workers.
