@@ -21,6 +21,18 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/exec"
 )
 
 func TestReadTxLimitCoversExecReaders(t *testing.T) {
@@ -32,7 +44,7 @@ func TestReadTxLimitCoversExecReaders(t *testing.T) {
 }
 
 func TestRoTxsLimit(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	defaultLimit := int64(DefaultDBReadConcurrency())
 	floor := func(execWorkers, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers int) int64 {
 		return int64(execWorkers + parallelCommitmentReaders + warmupWorkers + blockReadAheadWorkers + execPermanentReadTxs + execReadAheadTxs + dbReadTxsReserved)
@@ -53,5 +65,30 @@ func TestRoTxsLimit(t *testing.T) {
 			t.Parallel()
 			require.Equal(t, tc.want, RoTxsLimit(tc.cfg, tc.execWorkers, tc.parallelCommitmentReaders, tc.warmupWorkers, tc.blockReadAheadWorkers))
 		})
+	}
+}
+
+func TestRoTxsLimitWithBranchPrefetcher(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	limit := RoTxsLimit(1, 1, 0, 0, 0)
+	rawDB := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).
+		RoTxsLimiter(semaphore.NewWeighted(limit)).MustOpen()
+	agg := state.NewTest(datadir.New(t.TempDir())).MustOpen(t.Context())
+	db, err := temporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	t.Cleanup(db.Close)
+
+	ctx := kv.WithNonBlockingAcquire(t.Context())
+	for range dbReadTxsReserved {
+		tx, err := db.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		t.Cleanup(tx.Rollback)
+	}
+	p := exec.NewBranchPrefetcher(ctx, db)
+	t.Cleanup(p.Close)
+	for range 1 + execPermanentReadTxs + execReadAheadTxs {
+		tx, err := db.BeginTemporalRo(ctx)
+		require.NoError(t, err, "execution reader needs a permit while the prefetcher is open")
+		t.Cleanup(tx.Rollback)
 	}
 }

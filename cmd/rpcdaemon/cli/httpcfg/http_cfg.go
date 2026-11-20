@@ -23,6 +23,8 @@ import (
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -57,6 +59,9 @@ func RoTxsLimit(dbReadConcurrency, execWorkers, parallelCommitmentReaders, warmu
 		limit = dbReadConcurrency
 	}
 	workerReaders := max(execWorkers, 0) + max(parallelCommitmentReaders, 0) + max(warmupWorkers, 0) + max(blockReadAheadWorkers, 0)
+	if statecfg.ExperimentalCommitmentV3 {
+		workerReaders += exec.BranchPrefetchTxs
+	}
 	return int64(max(limit, workerReaders+execPermanentReadTxs+execReadAheadTxs+dbReadTxsReserved))
 }
 

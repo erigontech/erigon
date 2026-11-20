@@ -27,7 +27,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
@@ -35,7 +34,7 @@ import (
 
 const (
 	branchPrefetchWorkers  = 8
-	branchPrefetchTxs      = 16
+	BranchPrefetchTxs      = 16
 	branchPrefetchBatch    = 8
 	branchPrefetchBacklog  = 1 << 16
 	branchPrefetchDrainMax = 100 * time.Millisecond
@@ -88,22 +87,7 @@ type BranchPrefetchStats struct {
 	DrainTimeouts            int
 }
 
-type PrefetchView struct{ MDBX, Files uint64 }
-
-func ViewOf(tx kv.TemporalTx) PrefetchView {
-	tx = kv.UnderlyingTx(tx)
-	v := PrefetchView{MDBX: tx.ViewID()}
-	if files, ok := tx.(interface{ HistoryFilesGeneration() uint64 }); ok {
-		v.Files = files.HistoryFilesGeneration()
-	}
-	return v
-}
-
 type BranchPrefetcher struct {
-	BlockNum   uint64
-	ParentHash common.Hash
-	View       PrefetchView
-
 	seed   maphash.Seed
 	shards [branchPrefetchShards]prefetchedShard
 	bytes  atomic.Int64
@@ -114,7 +98,6 @@ type BranchPrefetcher struct {
 	mu      sync.Mutex
 	idle    *sync.Cond
 	txs     []kv.TemporalTx
-	pool    int
 	backlog []PathTouch
 	head    int
 	running int
@@ -133,8 +116,8 @@ func NewBranchPrefetcher(ctx context.Context, db kv.RoDB) *BranchPrefetcher {
 	if db == nil {
 		return p
 	}
-	ctx = kv.WithNonBlockingAcquire(context.WithoutCancel(ctx))
-	for range branchPrefetchTxs {
+	ctx = kv.WithNonBlockingAcquire(ctx)
+	for range BranchPrefetchTxs {
 		tx, err := db.BeginRo(ctx) //nolint:gocritic
 		if err != nil {
 			break
@@ -144,23 +127,15 @@ func NewBranchPrefetcher(ctx context.Context, db kv.RoDB) *BranchPrefetcher {
 			tx.Rollback()
 			break
 		}
-		view := ViewOf(ttx)
-		if len(p.txs) == 0 {
-			p.View = view
-		} else if view != p.View {
-			tx.Rollback()
-			break
-		}
 		p.txs = append(p.txs, ttx)
 	}
-	p.pool = len(p.txs)
 	return p
 }
 
 func (p *BranchPrefetcher) Add(items ...PathTouch) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.closed || p.pool == 0 {
+	if p.closed || len(p.txs)+p.running == 0 {
 		return
 	}
 	if p.head*2 >= len(p.backlog) {
@@ -219,38 +194,14 @@ func (p *BranchPrefetcher) take(tx kv.TemporalTx, batch []PathTouch) int {
 	}
 	if n == 0 {
 		p.running--
-		p.release(tx)
+		if p.closed {
+			tx.Rollback()
+		} else {
+			p.txs = append(p.txs, tx)
+			p.idle.Broadcast()
+		}
 	}
 	return n
-}
-
-func (p *BranchPrefetcher) release(tx kv.TemporalTx) {
-	if p.closed {
-		tx.Rollback()
-		return
-	}
-	p.txs = append(p.txs, tx)
-	p.idle.Broadcast()
-}
-
-func (p *BranchPrefetcher) borrow() kv.TemporalTx {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.txs) == 0 {
-		return nil
-	}
-	tx := p.txs[len(p.txs)-1]
-	p.txs = p.txs[:len(p.txs)-1]
-	return tx
-}
-
-func (p *BranchPrefetcher) giveBack(tx kv.TemporalTx) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.release(tx)
-	if !p.closed {
-		p.spawn(branchPrefetchWorkers)
-	}
 }
 
 func (p *BranchPrefetcher) Drain(ctx context.Context) {
@@ -272,7 +223,7 @@ func (p *BranchPrefetcher) Drain(ctx context.Context) {
 	p.backlog = p.backlog[:p.head+len(slices.Compact(rest))]
 	p.drainBacklog += len(p.backlog) - p.head
 	for !p.closed && ctx.Err() == nil && (p.head < len(p.backlog) || p.running > 0) {
-		p.spawn(branchPrefetchTxs)
+		p.spawn(BranchPrefetchTxs)
 		p.idle.Wait()
 	}
 	if ctx.Err() != nil && p.head < len(p.backlog) {
@@ -361,64 +312,4 @@ func (p *BranchPrefetcher) Put(key, data []byte, step kv.Step) []byte {
 	p.bytes.Add(r.size(string(key)))
 	s.mu.Unlock()
 	return data
-}
-
-type prefetchSlot struct {
-	sync.Mutex
-	p             *BranchPrefetcher
-	claimedNum    uint64
-	claimedParent common.Hash
-	shut          bool
-}
-
-func (s *prefetchSlot) publish(p *BranchPrefetcher) bool {
-	s.Lock()
-	if s.shut || s.claimedNum == p.BlockNum && s.claimedParent == p.ParentHash {
-		s.Unlock()
-		return false
-	}
-	old := s.p
-	s.p = p
-	s.Unlock()
-	old.Close()
-	return true
-}
-
-func (s *prefetchSlot) take(blockNum uint64, parentHash common.Hash, view PrefetchView) *BranchPrefetcher {
-	s.Lock()
-	s.claimedNum, s.claimedParent = blockNum, parentHash
-	p := s.p
-	if p == nil || p.BlockNum != blockNum || p.ParentHash != parentHash {
-		s.Unlock()
-		return nil
-	}
-	s.p = nil
-	s.Unlock()
-	if p.View != view || p.pool == 0 {
-		p.Close()
-		return nil
-	}
-	return p
-}
-
-func (s *prefetchSlot) close(shut bool) {
-	s.Lock()
-	p := s.p
-	s.p, s.shut = nil, shut
-	s.Unlock()
-	p.Close()
-}
-
-func (bra *BlockReadAheader) BranchPrefetcher(ctx context.Context, db kv.RoDB, blockNum uint64, parentHash common.Hash, view PrefetchView) (*BranchPrefetcher, bool) {
-	if bra != nil {
-		if p := bra.prefetchers.take(blockNum, parentHash, view); p != nil {
-			return p, true
-		}
-	}
-	p := NewBranchPrefetcher(ctx, db)
-	if p.pool > 0 && p.View != view {
-		p.Close()
-		p = NewBranchPrefetcher(ctx, nil)
-	}
-	return p, false
 }

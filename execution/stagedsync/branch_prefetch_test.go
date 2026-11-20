@@ -116,7 +116,7 @@ func TestParentRecordsOnlyForOneVerifiedChildOfTheReadHead(t *testing.T) {
 	ctx := t.Context()
 	db, _, doms := setupStepTest(t)
 	out := make(chan commitmentResult, 1)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 0, make(chan applyResult), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 0, make(chan applyResult), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 	cc.readAtNum, cc.readAtHash = 9, head
@@ -191,7 +191,7 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 	db, tx, doms := setupStepTest(t)
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 	p := cc.branchPrefetch
@@ -246,8 +246,6 @@ type recordingTx struct {
 	kv.TemporalTx
 	db *recordingRoDB
 }
-
-func (tx *recordingTx) ViewID() uint64 { return 0 }
 
 func (tx *recordingTx) GetLatest(_ kv.Domain, key []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	tx.db.mu.Lock()

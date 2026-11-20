@@ -107,7 +107,6 @@ type commitmentCalculator struct {
 
 	branchPrefetch *exec.BranchPrefetcher
 	touchBatch     []exec.PathTouch
-	adopted        bool
 
 	prefetch   *commitment.Warmuper
 	balBlock   bool
@@ -236,7 +235,6 @@ func newCommitmentCalculator(
 	out chan commitmentResult,
 	drTemplate *state.LayeredDomainReader,
 	logCommit func(commitment.CommitProgress),
-	readAheader *exec.BlockReadAheader,
 ) (*commitmentCalculator, error) {
 	// ModeUpdate carries values in its btree for the trie to read; the parallel
 	// trie reads leaf values from the as-of reader and v3 owns its own collected
@@ -297,7 +295,7 @@ func newCommitmentCalculator(
 				cc.readAtNum, cc.readAtHash = n, h
 			}
 		}
-		cc.branchPrefetch, cc.adopted = readAheader.BranchPrefetcher(workCtx, db, cc.readAtNum+1, cc.readAtHash, exec.ViewOf(roTx))
+		cc.branchPrefetch = exec.NewBranchPrefetcher(workCtx, db)
 		asOfReader.prefetched = cc.branchPrefetch
 	}
 	if dbg.BALCommitmentWarmupReaders() > 0 {
@@ -322,7 +320,7 @@ func (cc *commitmentCalculator) Stop() {
 	if p := cc.branchPrefetch; p != nil {
 		p.Close()
 		st := p.Stats()
-		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", st.Bytes, "adopted", cc.adopted, "queued", st.Queued, "dropped", st.Dropped, "backlog", st.Backlog, "drainTimeout", st.DrainTimeouts, "foldHits", st.FoldHits, "foldMisses", st.FoldMisses, "drainWaitUs", st.DrainWait.Microseconds())
+		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", st.Bytes, "queued", st.Queued, "dropped", st.Dropped, "backlog", st.Backlog, "drainTimeout", st.DrainTimeouts, "foldHits", st.FoldHits, "foldMisses", st.FoldMisses, "drainWaitUs", st.DrainWait.Microseconds())
 		if commitmentdb.ParentReadsWanted() {
 			if r := cc.parentRecords(); r != nil {
 				commitmentdb.PublishParentRecords(r)
@@ -918,7 +916,6 @@ func (cc *commitmentCalculator) finishPrefetch() {
 // path; the per-call differences live in m.
 
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
-	exec.StopPreExec(t.blockHash)
 	cc.finishPrefetch()
 	// The version map is the ledger: exec's writes already encode every EIP-161 /
 	// self-destruct removal, so emitTouched folds the block's touched keys straight

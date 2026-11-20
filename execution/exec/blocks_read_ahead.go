@@ -52,9 +52,7 @@ type BlockReadAheader struct {
 	// pre-warmed. Without it, prefetches only warm OS page cache + RoTx
 	// cursors — disconnected from the cache layer the EVM actually reads.
 	// Mirrors reth's CachedReads / ExecutionCache "same hashmap" property.
-	stateCache  *cache.StateCache
-	preExec     *preExecCfg
-	prefetchers prefetchSlot
+	stateCache *cache.StateCache
 }
 
 func NewBlockReadAheader() *BlockReadAheader {
@@ -207,12 +205,11 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 		}
 		bal = balSidecar.BlockAccessList()
 	}
-	recovery, _ := bra.recoveries.Peek(blockHash)
 	go func() {
 		defer bra.warmupGate.Release(1)
 		defer close(done)
 		defer cancel()
-		bra.warmBody(ctx, db, header, body, bal, dbg.ReadAheadWorkers, recovery)
+		bra.warmBody(ctx, db, header, body, bal, dbg.ReadAheadWorkers)
 	}()
 }
 
@@ -248,7 +245,6 @@ func (bra *BlockReadAheader) SuspendWarmup(ctx context.Context) (func(), error) 
 	if err := bra.warmupGate.Acquire(ctx, 1); err != nil {
 		return nil, err
 	}
-	bra.prefetchers.close(false)
 	return sync.OnceFunc(func() { bra.warmupGate.Release(1) }), nil
 }
 
@@ -281,7 +277,6 @@ func (bra *BlockReadAheader) WaitForWarmup(ctx context.Context) {
 	if err := bra.warmupGate.Acquire(ctx, 1); err == nil {
 		bra.warmupGate.Release(1)
 	}
-	bra.prefetchers.close(true)
 }
 
 type SendersRecovery struct {
@@ -471,12 +466,9 @@ func warmBALStateTask(ctx context.Context, stateReader *state.ReaderV3, account 
 }
 
 // warmBody warms state for all transactions in a body using multiple workers.
-// It reads: To accounts, To account code, To account storage from access lists,
-// and block-level access lists; without a BAL and with V3_PREEXEC it pre-executes
-// the transactions instead. Each worker creates its own transaction.
 // AddHeaderAndBody permits only one warmBody at a time; concurrent requests
 // skip warming.
-func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body, bal types.BlockAccessList, workers int, recovery *SendersRecovery) {
+func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body, bal types.BlockAccessList, workers int) {
 	if !dbg.ReadAhead {
 		return
 	}
@@ -487,27 +479,6 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 		codeMode := balCodeWarmupModeForFlags(dbg.ReadAheadBALCode, dbg.ReadAheadTxCode)
 		if err := bra.warmBAL(ctx, db, bal, body.Transactions, codeMode, workers); err != nil && !errors.Is(err, context.Canceled) {
 			log.Warn("[warmBAL] failed", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
-		}
-		return
-	}
-	var p *BranchPrefetcher
-	if statecfg.ExperimentalCommitmentV3 {
-		p = NewBranchPrefetcher(ctx, db)
-		p.BlockNum, p.ParentHash = header.Number.Uint64(), header.ParentHash
-		if p.pool == 0 || !bra.prefetchers.publish(p) {
-			p.Close()
-			p = nil
-		}
-	}
-	if preExecOn && bra.preExec != nil {
-		if err := bra.preExecTxns(ctx, db, header, body.Transactions, workers, recovery, p); err != nil && !errors.Is(err, context.Canceled) {
-			log.Warn("[preexec] failed", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
-		}
-		return
-	}
-	if p != nil {
-		if err := bra.warmStatic(ctx, p, header, body, recovery, workers); err != nil && !errors.Is(err, context.Canceled) {
-			log.Warn("[warmStatic] failed", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
 		}
 		return
 	}
