@@ -23,7 +23,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
@@ -36,10 +38,33 @@ const (
 	branchPrefetchMaxBytes = 1 << 30
 )
 
+var prefetchSeqSteps = dbg.EnvInt("V3_PREFETCH_SEQ_STEPS", 0)
+
 type prefetchItem struct {
 	account [32]byte
 	slot    [32]byte
 	storage bool
+}
+
+func newPrefetchItem(account, slot []byte) prefetchItem {
+	it := prefetchItem{account: [32]byte(account)}
+	if slot != nil {
+		it.slot, it.storage = [32]byte(slot), true
+	}
+	return it
+}
+
+func comparePrefetchItems(a, b prefetchItem) int {
+	if c := bytes.Compare(a.account[:], b.account[:]); c != 0 {
+		return c
+	}
+	if a.storage != b.storage {
+		if a.storage {
+			return 1
+		}
+		return -1
+	}
+	return bytes.Compare(a.slot[:], b.slot[:])
 }
 
 type prefetchedRecord struct {
@@ -69,8 +94,9 @@ type branchPrefetcher struct {
 	shards [branchPrefetchShards]prefetchedShard
 	bytes  atomic.Int64
 
-	pausing          atomic.Bool
-	dropped, drained atomic.Uint64
+	pausing            atomic.Bool
+	dropped, drained   atomic.Uint64
+	seqNexts, seqSeeks atomic.Uint64
 }
 
 func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB) *branchPrefetcher {
@@ -183,6 +209,12 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 			p.gate.RUnlock()
 			continue
 		}
+		var seq *dbstate.AggregatorRoTx
+		if prefetchSeqSteps > 0 {
+			if seq, _ = tx.AggTx().(*dbstate.AggregatorRoTx); seq != nil {
+				seq.SetSeqLookup(kv.CommitmentDomain, prefetchSeqSteps)
+			}
+		}
 		read := func(key []byte) []byte {
 			if data, _, ok := p.get(key); ok {
 				return data
@@ -194,6 +226,11 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 			return p.put(key, data, step)
 		}
 		p.walkChunk(it, read)
+		if seq != nil {
+			nexts, seeks := seq.SeqLookupStats(kv.CommitmentDomain)
+			p.seqNexts.Add(nexts)
+			p.seqSeeks.Add(seeks)
+		}
 		tx.Rollback()
 		p.gate.RUnlock()
 	}

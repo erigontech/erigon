@@ -17,6 +17,7 @@
 package btindex
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -765,3 +766,48 @@ func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 
 func (b *BtIndex) Offsets() *eliasfano32.EliasFano { return b.bplus.Offsets() }
 func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() }
+
+type SeqHint struct {
+	key          []byte
+	di           uint64
+	valid        bool
+	Nexts, Seeks uint64
+}
+
+func (b *BtIndex) GetSeq(h *SeqHint, lookup, buf []byte, g *seg.Reader, maxSteps int) ([]byte, bool, error) {
+	if b.Empty() {
+		return nil, false, nil
+	}
+	if h.valid && bytes.Compare(h.key, lookup) < 0 {
+		offt := b.bplus.offt
+		for range maxSteps {
+			if h.di+1 >= offt.Count() {
+				break
+			}
+			h.di++
+			g.Reset(offt.GetProbe(h.di, g.Probe()))
+			k, _ := g.Next(h.key[:0])
+			h.key = append(h.key[:0], k...)
+			if c := bytes.Compare(h.key, lookup); c >= 0 {
+				h.Nexts++
+				if c > 0 {
+					return nil, false, nil
+				}
+				v, _ := g.Next(buf[:0])
+				return v, true, nil
+			}
+		}
+	}
+	h.Seeks++
+	c, err := b.Seek(g, lookup)
+	if err != nil || c == nil {
+		h.valid = false
+		return nil, false, err
+	}
+	defer c.Close()
+	h.di, h.key, h.valid = c.d, append(h.key[:0], c.key...), true
+	if !bytes.Equal(c.key, lookup) {
+		return nil, false, nil
+	}
+	return append(buf[:0], c.value...), true, nil
+}

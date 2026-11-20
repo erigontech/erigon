@@ -17,9 +17,11 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"math"
 	"math/rand"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -229,4 +231,37 @@ func computeAheadRoot(t *testing.T, wantFeed bool) []byte {
 		require.Equal(t, uint64(queued), cc.branchPrefetch.drained.Load(), "compute-ahead pauses the prefetcher like a block compute, and queues nothing the BAL request already queued")
 	}
 	return rh
+}
+
+func TestPrefetchWritesSortedForSeqLookup(t *testing.T) {
+	defer func(v int) { prefetchSeqSteps = v }(prefetchSeqSteps)
+	prefetchSeqSteps = 4
+	ws := newWS()
+	for i := range 16 {
+		addr := accounts.InternAddress(common.Address{19: byte(i + 1)})
+		ws.bal(addr, state.Version{}, *uint256.NewInt(uint64(i + 1)))
+		for j := range i % 4 {
+			ws.stor(addr, accounts.InternKey(common.Hash{31: byte(j + 1)}), state.Version{}, *uint256.NewInt(1))
+		}
+	}
+	p := newPrefetchRecords()
+	p.work = make(chan prefetchItem, 256)
+	cc := &commitmentCalculator{branchPrefetch: p}
+	cc.prefetchWrites(ws.build())
+	close(p.work)
+	var got []prefetchItem
+	for it := range p.work {
+		got = append(got, it)
+	}
+	require.Len(t, got, 16+0+1+2+3+0+1+2+3+0+1+2+3+0+1+2+3)
+	queueKey := func(it prefetchItem) []byte {
+		storage := byte(0)
+		if it.storage {
+			storage = 1
+		}
+		return slices.Concat(it.account[:], []byte{storage}, it.slot[:])
+	}
+	for i := 1; i < len(got); i++ {
+		require.Negative(t, bytes.Compare(queueKey(got[i-1]), queueKey(got[i])), i)
+	}
 }

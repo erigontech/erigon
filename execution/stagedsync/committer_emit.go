@@ -138,11 +138,7 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 }
 
 func (cc *commitmentCalculator) queueBranch(account, slot []byte) {
-	it := prefetchItem{account: [32]byte(account)}
-	if slot != nil {
-		it.slot, it.storage = [32]byte(slot), true
-	}
-	cc.branchPrefetch.add(it)
+	cc.branchPrefetch.add(newPrefetchItem(account, slot))
 }
 
 // emitTouched writes one commitment Update per touched key, reading each final value
