@@ -240,7 +240,7 @@ func CheckMixedCommitmentFiles(d datadir.Dirs) error {
 				v3Name, v3Major = name, major
 			}
 			if legacyName != "" && v3Name != "" {
-				return fmt.Errorf("commitment files have mixed major versions: %s (v%d) and %s (v%d)", legacyName, legacyMajor, v3Name, v3Major)
+				return fmt.Errorf("commitment files have mixed major versions: %s (v%d) and %s (v%d); %s", legacyName, legacyMajor, v3Name, v3Major, statecfg.MixedCommitmentAdvice)
 			}
 			return nil
 		})
@@ -255,24 +255,28 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	if err := CheckMixedCommitmentFiles(d); err != nil {
 		return err
 	}
-	for _, dirPath := range d.VersionedDirs() {
-		if dirPath == d.SnapDomain || dirPath == d.SnapHistory {
-			err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
-				if statecfg.Schema.CommitmentDomain.CommitmentV3Records && major < 3 {
-					return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; with ERIGON_COMMITMENT_V3 unset, "+
-						"convert the datadir with `integration commitment convert --v3`, "+
-						"or roll back an interrupted conversion with `integration commitment convert --restore`; "+rebuildV3Advice, name, major)
-				}
-				if !statecfg.ExperimentalCommitmentV3 && major >= 3 {
-					return fmt.Errorf("commitment file %s requires commitment v3; run erigon with --experimental.commitment-v3 (other tools: ERIGON_COMMITMENT_V3=true), "+
-						"or roll back an interrupted conversion with `integration commitment convert --restore`", name)
-				}
-				return nil
-			})
-			if err != nil {
-				return err
+	for _, dirPath := range []string{d.SnapDomain, d.SnapHistory} {
+		err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
+			if statecfg.Schema.CommitmentDomain.CommitmentV3Records && major < 3 {
+				return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; with ERIGON_COMMITMENT_V3 unset, "+
+					"convert the datadir with `integration commitment convert --v3`, "+
+					"or roll back an interrupted conversion with `integration commitment convert --restore`; "+rebuildV3Advice, name, major)
 			}
+			if !statecfg.ExperimentalCommitmentV3 && major >= 3 {
+				return fmt.Errorf("commitment file %s requires commitment v3; run erigon with --experimental.commitment-v3 (other tools: ERIGON_COMMITMENT_V3=true), "+
+					"or roll back an interrupted conversion with `integration commitment convert --restore`", name)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
+	}
+	return CheckSnapshotFileVersions(d)
+}
+
+func CheckSnapshotFileVersions(d datadir.Dirs) error {
+	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				if os.IsNotExist(err) { // skip magically disappeared files
@@ -316,6 +320,5 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 			return err
 		}
 	}
-
 	return nil
 }

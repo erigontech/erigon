@@ -498,6 +498,9 @@ var cmdCommitmentPrint = &cobra.Command{
 }
 
 func printCommitment(db kv.TemporalRwDB, ctx context.Context) error {
+	if err := checkCommitmentTrieMatchesFiles(); err != nil {
+		return err
+	}
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)

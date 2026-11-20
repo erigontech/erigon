@@ -225,6 +225,9 @@ const DefaultCommitmentV3 = false
 
 var ExperimentalCommitmentV3 = dbg.EnvBool("COMMITMENT_V3", DefaultCommitmentV3)
 
+const MixedCommitmentAdvice = "finish the conversion with `integration commitment convert --v3` (`--continue` resumes an interrupted one), " +
+	"or run `erigon seg reset` and restart erigon to download v3 files from the seeders"
+
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
 		Name: kv.AccountsDomain, ValuesTable: kv.TblAccountVals,

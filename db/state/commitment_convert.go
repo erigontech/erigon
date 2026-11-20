@@ -1058,7 +1058,7 @@ func commitmentFilesAreV3(dirPath string, ifNone bool) (bool, error) {
 		return false, err
 	}
 	if legacyName != "" && v3Name != "" {
-		return false, fmt.Errorf("commitment files have mixed major versions: %s and %s", legacyName, v3Name)
+		return false, fmt.Errorf("commitment files have mixed major versions: %s and %s; %s", legacyName, v3Name, statecfg.MixedCommitmentAdvice)
 	}
 	if legacyName == "" && v3Name == "" {
 		return ifNone, nil

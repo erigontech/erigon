@@ -132,7 +132,7 @@ func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
 	}
 }
 
-func TestNewTemporalDBRejectsV3FilesWhenV3IsDisabled(t *testing.T) {
+func TestNewTemporalDBAllowsV3FilesWhenV3IsDisabled(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	db, dirs := dbWithV3State(t)
@@ -143,8 +143,13 @@ func TestNewTemporalDBRejectsV3FilesWhenV3IsDisabled(t *testing.T) {
 		require.NoError(t, dir.RemoveFile(f))
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+	previousDatadir := datadirCli
+	datadirCli = dirs.DataDir
+	t.Cleanup(func() { datadirCli = previousDatadir })
 
-	requireNewTemporalDBError(t, dirs, "requires commitment v3")
+	opened, err := newTemporalDB(t.Context(), mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen(), log.New())
+	require.NoError(t, err)
+	opened.Close()
 }
 
 func TestNewTemporalDBRejectsMixedCommitmentDomainFiles(t *testing.T) {
@@ -154,10 +159,18 @@ func TestNewTemporalDBRejectsMixedCommitmentDomainFiles(t *testing.T) {
 	db.Close()
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
 
-	requireNewTemporalDBError(t, dirs, "mixed major versions")
+	requireNewTemporalDBError(t, dirs, "mixed major versions", statecfg.MixedCommitmentAdvice)
 }
 
-func requireNewTemporalDBError(t *testing.T, dirs datadir.Dirs, wantErr string) {
+func TestNewTemporalDBRefusesOldSnapshotNames(t *testing.T) {
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1-accounts.0-1.kv"), nil, 0o644))
+
+	requireNewTemporalDBError(t, dirs, "incompatible with the current erigon version")
+}
+
+func requireNewTemporalDBError(t *testing.T, dirs datadir.Dirs, wantErrs ...string) {
 	t.Helper()
 	previousDatadir := datadirCli
 	datadirCli = dirs.DataDir
@@ -165,7 +178,9 @@ func requireNewTemporalDBError(t *testing.T, dirs datadir.Dirs, wantErr string) 
 	db := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
 	defer db.Close()
 	_, err := newTemporalDB(t.Context(), db, log.New())
-	require.ErrorContains(t, err, wantErr)
+	for _, want := range wantErrs {
+		require.ErrorContains(t, err, want)
+	}
 }
 
 func TestIntegrationOpensCommitmentFilesAtTheirVersions(t *testing.T) {
@@ -194,7 +209,10 @@ func TestIntegrationOpensCommitmentFilesAtTheirVersions(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, v3Files)
 
-		require.ErrorContains(t, open(t, dirs), "requires commitment v3")
+		require.NoError(t, open(t, dirs))
+		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "stage_exec --reset")
+		require.NoError(t, state.CompleteExecReset(dirs, log.New()))
+		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "files are v3 and ERIGON_COMMITMENT_V3 is off")
 	})
 
 	t.Run("legacy files, v3 on", func(t *testing.T) {
@@ -213,8 +231,30 @@ func TestIntegrationOpensCommitmentFilesAtTheirVersions(t *testing.T) {
 		requireCommitmentKVPrefix(t, dirs, "v2.")
 		statecfg.SetCommitmentV3(false)
 
-		require.ErrorContains(t, open(t, dirs), "mixed major versions")
+		require.NoError(t, open(t, dirs))
+		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "history files are v3 and domain files are legacy")
 	})
+}
+
+func TestCommitmentReadersRefuseV3FilesWhenV3IsDisabled(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	previousDatadir, previousChaindata := datadirCli, chaindata
+	t.Cleanup(func() {
+		datadirCli, chaindata = previousDatadir, previousChaindata
+		openSnapshotOnce = sync.Once{}
+	})
+	db, dirs := dbWithV3State(t)
+	require.NoError(t, commitmentConvert(db.(state.HasAgg).Agg().(*state.Aggregator), t.Context(), log.New(), state.ConvertOpts{TargetV3: true, NoHistory: true}))
+	db.Close()
+	require.NoError(t, state.CompleteExecReset(dirs, log.New()))
+	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
+	openSnapshotOnce = sync.Once{}
+	opened, err := openDB(t.Context(), dbCfg(dbcfg.ChainDB, dirs.Chaindata), false, log.New())
+	require.NoError(t, err)
+	t.Cleanup(opened.Close)
+
+	require.ErrorContains(t, printCommitment(opened, t.Context()), "files are v3 and ERIGON_COMMITMENT_V3 is off")
+	require.ErrorContains(t, requestDomains(opened, t.Context(), kv.AccountsDomain.String(), nil, log.New()), "files are v3 and ERIGON_COMMITMENT_V3 is off")
 }
 
 func TestCommitmentConvertLegacyRestoreKeepsExecution(t *testing.T) {

@@ -810,6 +810,30 @@ func TestSyncSnapshotsCommitmentRequestList(t *testing.T) {
 	}
 }
 
+func TestSyncSnapshotsRefusesMixedCommitmentHistory(t *testing.T) {
+	cfg, ok := snapcfg.KnownCfg(networkname.Mainnet)
+	require.True(t, ok)
+	previous := *cfg
+	t.Cleanup(func() { *cfg = previous })
+	cfg.Local = false
+	cfg.Preverified.Items = nil
+	for _, name := range []string{"domain/v2.2-commitment.0-16.kv", "domain/v2.0-accounts.0-16.kv", "history/v2.0-commitment.0-16.v", "history/v3.0-commitment.0-16.v", "accessor/v2.0-commitment.0-16.vi"} {
+		cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: name, Hash: strings.Repeat("0", 40)})
+	}
+	for _, keep := range []bool{true, false} {
+		t.Run(fmt.Sprintf("commitment history=%t", keep), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(false))
+			err := SyncSnapshots(t.Context(), "test", "test", false, false, false, BlobRetention{}, prune.ArchiveMode, NoCaplin, nil, &requestListBlockReader{}, &chain.Config{ChainName: networkname.Mainnet}, &requestListDownloader{}, ethconfig.Sync{KeepExecutionProofs: keep}, 16, datadir.New(t.TempDir()))
+			if !keep {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, "both v2 and v3 commitment history")
+			require.ErrorContains(t, err, "run without `--prune.include-commitment-history`")
+		})
+	}
+}
+
 func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 	legacyFiles := []string{
 		"domain/v2.2-commitment.0-16.kv",

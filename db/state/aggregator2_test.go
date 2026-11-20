@@ -153,7 +153,7 @@ func TestCheckMixedCommitmentFilesRejectsMixedMajors(t *testing.T) {
 			require.NoError(t, os.WriteFile(filepath.Join(legacyDir, test.legacy), nil, 0o644))
 			require.NoError(t, os.WriteFile(filepath.Join(v3Dir, test.v3), nil, 0o644))
 			require.ErrorContains(t, CheckMixedCommitmentFiles(dirs), "mixed major versions")
-			require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "mixed major versions")
+			require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "or run `erigon seg reset` and restart erigon")
 		})
 	}
 }
