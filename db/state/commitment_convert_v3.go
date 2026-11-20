@@ -698,12 +698,13 @@ func VerifyCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, histo
 		return errors.New("commitment history is disabled")
 	}
 	points := append([]uint64{math.MaxUint64}, asOf...)
+	var historySampled int
 	if history {
 		samples, err := commitmentV3HistorySamples(a)
 		if err != nil {
 			return err
 		}
-		points = append(points, samples...)
+		points, historySampled = append(points, samples...), len(samples)
 	}
 	defer a.MadvNormal().DisableReadAhead()
 	groups := (len(points) + commitmentV3VerifyGroup - 1) / commitmentV3VerifyGroup
@@ -730,7 +731,8 @@ func VerifyCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, histo
 				"records", common.PrettyCounter(c.Records), "took", time.Since(groupStarted).Round(time.Second), "done", fmt.Sprintf("%d/%d", gi*commitmentV3VerifyGroup+i+1, len(points)))
 		}
 	}
-	logger.Info("[commitment verify] done", "points", len(points), "history", history, "took", time.Since(started).Round(time.Millisecond))
+	logger.Info("[commitment verify] done: records fold to the roots of their own state records, not checked against block headers",
+		"points", len(points), "historyFilesSampled", historySampled, "took", time.Since(started).Round(time.Millisecond))
 	return nil
 }
 
