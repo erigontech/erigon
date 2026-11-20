@@ -3427,6 +3427,33 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 	}
 }
 
+func TestPublishBlindedBlocksRejectsNullAttestations(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	h := &ApiHandler{
+		beaconChainCfg: &clparams.MainnetBeaconConfig,
+		builderClient:  builderClient,
+	}
+	block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	var request map[string]any
+	require.NoError(t, json.Unmarshal(body, &request))
+	request["message"].(map[string]any)["body"].(map[string]any)["attestations"] = nil
+	body, err = json.Marshal(request)
+	require.NoError(t, err)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+
+	require.NotPanics(t, func() {
+		_, err = h.publishBlindedBlocks(req, 2)
+	})
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusBadRequest, endpointErr.Code)
+}
+
 func TestValidateBuilderPayload(t *testing.T) {
 	validPayload := func(version clparams.StateVersion) *cltypes.Eth1Block {
 		payload := cltypes.NewEth1Block(version, &clparams.MainnetBeaconConfig)
