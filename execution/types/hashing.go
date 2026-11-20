@@ -187,6 +187,8 @@ func NewListHashStream() *ListHashStream {
 	}
 }
 
+// Update hashes element n of list, where n is the number of earlier calls,
+// so list must still hold the earlier elements.
 func (s *ListHashStream) Update(list DerivableList) {
 	if s.hashed {
 		panic("ListHashStream: Update after Hash")
