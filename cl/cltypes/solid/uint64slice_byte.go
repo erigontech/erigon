@@ -123,13 +123,15 @@ func (arr *byteBasedUint64Slice) UnmarshalJSON(buf []byte) error {
 	if err := json.Unmarshal(buf, &list); err != nil {
 		return err
 	}
-	arr.Clear()
-	arr.l = len(list)
-	for _, elem := range list {
-		arr.Append(elem)
+	return arr.replace(list)
+}
+
+func (arr *byteBasedUint64Slice) replace(values []uint64) error {
+	buf := make([]byte, 0, len(values)*8)
+	for _, v := range values {
+		buf = binary.LittleEndian.AppendUint64(buf, v)
 	}
-	arr.MerkleTree = nil
-	return nil
+	return arr.DecodeSSZ(buf, 0)
 }
 
 // Range iterates over the slice and applies a provided function to each element.

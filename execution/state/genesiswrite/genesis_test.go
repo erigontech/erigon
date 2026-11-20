@@ -1081,23 +1081,23 @@ func TestSetupGenesis(t *testing.T) {
 	}
 }
 
-func TestComputeGenesisCommitmentIgnoresStateInSharedDomains(t *testing.T) {
+// The genesis root GenesisToBlock computes from the version map alone (an in-memory
+// trie) must equal the root of the same genesis write set applied to SharedDomains and
+// committed — the path rpchelper reconstructs block 0 through. A divergence would mean
+// the block header's root and a replay-based root disagree.
+func TestGenesisRootMatchesAppliedCommitment(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	logger := log.New()
 	addr := common.HexToAddress("0x00000000000000000000000000000000c0ffee02")
-	newGenesis := func(balance int64, code []byte, slotVal common.Hash) *types.Genesis {
-		return &types.Genesis{
-			Config: chain.AllProtocolChanges,
-			Alloc: types.GenesisAlloc{addr: {
-				Balance: big.NewInt(balance),
-				Code:    code,
-				Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): slotVal},
-			}},
-		}
+	genSpec := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{addr: {
+			Balance: big.NewInt(5),
+			Code:    []byte{0x60, 0x02},
+			Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x0b")},
+		}},
 	}
-	stale := newGenesis(100, []byte{0x60, 0x01}, common.HexToHash("0x0a"))
-	genSpec := newGenesis(5, []byte{0x60, 0x02}, common.HexToHash("0x0b"))
 	want, ibs, err := genesiswrite.GenesisToBlock(genSpec, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	ibs.Close()
@@ -1110,14 +1110,12 @@ func TestComputeGenesisCommitmentIgnoresStateInSharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 
-	head, _ := genesiswrite.GenesisWithoutStateToBlock(stale)
-	_, ibs, err = genesiswrite.ComputeGenesisCommitment(ctx, stale, tx, sd, head)
+	head, _ := genesiswrite.GenesisWithoutStateToBlock(genSpec)
+	ibs, writes, err := genesiswrite.GenesisState(genSpec, head)
 	require.NoError(t, err)
 	ibs.Close()
-
-	head, _ = genesiswrite.GenesisWithoutStateToBlock(genSpec)
-	root, ibs, err := genesiswrite.ComputeGenesisCommitment(ctx, genSpec, tx, sd, head)
+	require.NoError(t, state.ApplyWrites(writes, sd, tx, 0, 1, false))
+	root, err := sd.ComputeCommitment(ctx, tx, true, 0, 1, "genesis", nil)
 	require.NoError(t, err)
-	ibs.Close()
 	require.Equal(t, want.Root(), common.BytesToHash(root))
 }

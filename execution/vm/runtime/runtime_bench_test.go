@@ -79,8 +79,6 @@ func BenchmarkCall(b *testing.B) {
 	require.NoError(b, cfg.State.SetBalance(cfg.Origin, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified))
 	//cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
-	tmpdir := b.TempDir()
-
 	// Execute runs the deployed runtime code, so the constructor never initialises
 	// seller/value and every entry point hits the contract's pre-REVERT throw.
 	// Pinned so the benchmark cannot degrade further without failing; making it
@@ -90,7 +88,7 @@ func BenchmarkCall(b *testing.B) {
 		snap := cfg.State.PushSnapshot()
 		for range 400 {
 			for _, input := range inputs {
-				if _, _, err := Execute(code, input, cfg, tmpdir); !errors.Is(err, vm.ErrInvalidJump) {
+				if _, _, err := Execute(code, input, cfg); !errors.Is(err, vm.ErrInvalidJump) {
 					b.Fatalf("expected the contract throw, got %v", err)
 				}
 			}
