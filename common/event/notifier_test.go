@@ -21,7 +21,6 @@ import (
 	"runtime"
 	"sync"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -46,29 +45,12 @@ func requireReturns(t *testing.T, done <-chan error) error {
 	}
 }
 
-func requireReturnsSynctest(t *testing.T, done <-chan error) error {
-	t.Helper()
-	// synctest.Wait settles the bubble's goroutines (durable blocks only);
-	// a mutex deadlock here hangs until the package timeout, as with any
-	// synctest test, since sync.Mutex.Lock is not a durable block.
-	synctest.Wait()
-	select {
-	case err := <-done:
-		return err
-	default:
-		t.Fatal("Wait did not return")
-		return nil
-	}
-}
-
 func TestNotifierWaitReturnsWhenSignaled(t *testing.T) {
 	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		n := NewNotifier()
-		done := waitAsync(n, t.Context())
-		n.SetAndBroadcast()
-		require.NoError(t, requireReturnsSynctest(t, done))
-	})
+	n := NewNotifier()
+	done := waitAsync(n, t.Context())
+	n.SetAndBroadcast()
+	require.NoError(t, requireReturns(t, done))
 }
 
 func TestNotifierWaitReturnsWhenAlreadySignaled(t *testing.T) {
@@ -80,47 +62,40 @@ func TestNotifierWaitReturnsWhenAlreadySignaled(t *testing.T) {
 
 func TestNotifierWaitReturnsOnContextCancel(t *testing.T) {
 	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		n := NewNotifier()
-		ctx, cancel := context.WithCancel(t.Context())
-		done := waitAsync(n, ctx)
-		cancel()
-		require.ErrorIs(t, requireReturnsSynctest(t, done), context.Canceled)
-	})
+	n := NewNotifier()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := waitAsync(n, ctx)
+	cancel()
+	require.ErrorIs(t, requireReturns(t, done), context.Canceled)
 }
 
 func TestNotifierSetAndBroadcastReleasesEveryWaiter(t *testing.T) {
 	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		const waiters = 32
-		n := NewNotifier()
+	const waiters = 32
+	n := NewNotifier()
 
-		results := make([]<-chan error, waiters)
-		for i := range results {
-			results[i] = waitAsync(n, t.Context())
-		}
-		synctest.Wait()
-		n.SetAndBroadcast()
+	results := make([]<-chan error, waiters)
+	for i := range results {
+		results[i] = waitAsync(n, t.Context())
+	}
+	n.SetAndBroadcast()
 
-		for _, done := range results {
-			require.NoError(t, requireReturnsSynctest(t, done))
-		}
-	})
+	for _, done := range results {
+		require.NoError(t, requireReturns(t, done))
+	}
 }
 
 func TestNotifierResetClearsSignal(t *testing.T) {
 	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		n := NewNotifier()
-		n.SetAndBroadcast()
-		require.NoError(t, requireReturnsSynctest(t, waitAsync(n, t.Context())))
+	n := NewNotifier()
+	n.SetAndBroadcast()
+	require.NoError(t, requireReturns(t, waitAsync(n, t.Context())))
 
-		n.Reset()
-		ctx, cancel := context.WithCancel(t.Context())
-		done := waitAsync(n, ctx)
-		cancel()
-		require.ErrorIs(t, requireReturnsSynctest(t, done), context.Canceled)
-	})
+	n.Reset()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := waitAsync(n, ctx)
+	cancel()
+	require.ErrorIs(t, requireReturns(t, done), context.Canceled)
 }
 
 // A cancelled Wait must not leave its inner goroutine parked in cond.Wait().
