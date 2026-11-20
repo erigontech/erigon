@@ -1704,16 +1704,14 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 			return integrity.CheckCommitmentKvDeref(ctx, db, cache, failFast, logger)
 		case integrity.CommitmentHistVal:
 			if !commitmentHistoryEnabled {
-				logger.Info("[integrity] CommitmentHistVal skipped because commitment history is not enabled on this datadir")
-				return nil
+				return fmt.Errorf("%w: commitment history is not enabled on this datadir", integrity.ErrSkipped)
 			}
 			scCopy := sc
 			scCopy.SampleRatio /= 10_000 // it's very slow check
 			return integrity.CheckCommitmentHistVal(ctx, scCopy, db, blockReader, failFast, logger)
 		case integrity.StateRootVerifyByHistory:
 			if !commitmentHistoryEnabled {
-				logger.Info("[integrity] StateRootVerifyByHistory skipped because commitment history is not enabled on this datadir")
-				return nil
+				return fmt.Errorf("%w: commitment history is not enabled on this datadir", integrity.ErrSkipped)
 			}
 			to, err := stateFilesProgress(ctx, db, blockReader.TxnumReader())
 			if err != nil {
