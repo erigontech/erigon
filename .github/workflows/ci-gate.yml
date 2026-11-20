@@ -93,7 +93,7 @@ jobs:
     uses: ./.github/workflows/check-large-files.yml
 
   bench:
-    if: needs.changes.outputs.code != 'false'
+    if: needs.changes.outputs.code != 'false' && github.event_name != 'merge_group'
     needs: [changes]
     uses: ./.github/workflows/test-bench.yml
 
@@ -113,7 +113,7 @@ jobs:
     # (GitHub withholds non-GITHUB_TOKEN secrets from Dependabot even for same-repo PRs),
     # so skip the scan for those to avoid a guaranteed failure in ci-gate.
     if: |
-      needs.changes.outputs.code != 'false' &&
+      needs.changes.outputs.code != 'false' && github.event_name != 'merge_group' &&
       ((github.event.pull_request.head.repo.full_name == github.repository &&
         github.actor != 'dependabot[bot]') ||
        github.event_name != 'pull_request')

@@ -123,9 +123,9 @@ func (a *AttesterSlashing) decodeSSZWithConfig(buf []byte, version int, cfg *clp
 	a.Attestation_1 = NewIndexedAttestationWithConfig(clparams.StateVersion(version), cfg)
 	a.Attestation_2 = NewIndexedAttestationWithConfig(clparams.StateVersion(version), cfg)
 	if strict {
-		return ssz2.UnmarshalSSZStrict(buf, version, a.Attestation_1, a.Attestation_2)
+		return ssz2.UnmarshalSSZStrict(buf, version, withSSZConfig(a.Attestation_1, cfg), withSSZConfig(a.Attestation_2, cfg))
 	}
-	return ssz2.UnmarshalSSZ(buf, version, a.Attestation_1, a.Attestation_2)
+	return ssz2.UnmarshalSSZ(buf, version, withSSZConfig(a.Attestation_1, cfg), withSSZConfig(a.Attestation_2, cfg))
 }
 
 func (a *AttesterSlashing) EncodingSizeSSZ() int {

@@ -37,7 +37,7 @@ import (
 // boundaries and fee settlement; the EVM executes each individual frame.
 // A non-nil validation tracer limits execution to the pool's validation prefix
 // and causes all simulated changes to be reverted.
-func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refunds, gasBailout bool, validation *frameValidationTracer) (result *evmtypes.ExecutionResult, err error) {
+func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refunds bool, validation *frameValidationTracer) (result *evmtypes.ExecutionResult, err error) {
 	rules := st.evm.ChainRules()
 	if !rules.IsBogota {
 		return nil, types.ErrTxTypeNotSupported
@@ -122,13 +122,12 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	defer st.state.PopSnapshot(snapshot)
 	ctx := st.state.NewFrameContext(tx, maxCost)
 	ctx.LegacyNonce = nonce
-	ctx.GasBailout = gasBailout
 	st.evm.FrameContext = ctx
 	defer func() {
 		st.evm.FrameContext = nil
 		// Transaction rejection and mempool simulation undo every frame's changes.
-		// Ordinary execution failures use the frame or batch snapshot instead,
-		// preserving approvals and nonce consumption from earlier successful frames.
+		// A failure within an accepted transaction uses a frame, atomic batch or
+		// POST_TX body snapshot, preserving changes before that boundary.
 		if err != nil || validation != nil {
 			st.state.RevertToSnapshot(snapshot, err)
 		}
@@ -149,8 +148,15 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			tracer.EmitExit(0, nil, gasUsed, vm.VMErrorFromErr(traceErr), err != nil)
 		}()
 	}
+	hasPostTx := len(tx.Frames) > 0 && tx.Frames[len(tx.Frames)-1].Mode == types.FramePostTx
 	var lastErr error
 	batchStart, batchSnapshot := -1, -1
+	bodyStart, bodySnapshot := -1, -1
+	defer func() {
+		if bodySnapshot >= 0 {
+			st.state.PopSnapshot(bodySnapshot)
+		}
+	}()
 	for i := 0; i < len(tx.Frames); i++ {
 		frame := &tx.Frames[i]
 		ctx.Index = i
@@ -191,8 +197,8 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			ctx.Receipts[i].Logs = st.state.LogsSince(logStart)
 		} else {
 			lastErr = frameErr
-			// A failed VERIFY rejects the transaction. Other frame failures remain
-			// receipt outcomes and allow later frames to run, subject to atomic batches.
+			// A failed VERIFY rejects the transaction. Other failures affect the
+			// receipts and the rollback boundary without invalidating the transaction.
 			if frame.Mode == types.FrameVerify {
 				return nil, fmt.Errorf("verification frame %d failed: %w", i, frameErr)
 			}
@@ -208,6 +214,24 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 				return nil, nil
 			}
 		}
+		if frame.Mode == types.FramePostTx && frameErr != nil {
+			if bodySnapshot < 0 {
+				return nil, errors.New("frame transaction without payment approval")
+			}
+			// Assertions preserve the complete payment-approval frame, including
+			// its state changes after APPROVE returns from a nested call.
+			st.state.RevertToSnapshot(bodySnapshot, frameErr)
+			// Revert removes the snapshot. Clear its reusable ID so deferred
+			// cleanup cannot pop a later snapshot.
+			bodySnapshot = -1
+			for j := bodyStart; j <= i; j++ {
+				ctx.Receipts[j].Logs = nil
+			}
+			for j := i + 1; j < len(tx.Frames); j++ {
+				st.skipFrame(j)
+			}
+			break
+		}
 		if batchStart >= 0 {
 			if frameErr != nil {
 				// The journal restores state-gas charges, including refills to earlier
@@ -219,14 +243,16 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 				// The first frame without the flag is still part of this batch.
 				for tx.Frames[i].Flags&types.FrameAtomicBatch != 0 {
 					i++
-					ctx.Receipts[i].Status = types.ReceiptStatusSkipped
-					st.evm.TraceSkippedFrame(i)
+					st.skipFrame(i)
 				}
 			}
 			if frameErr != nil || frame.Flags&types.FrameAtomicBatch == 0 {
 				st.state.PopSnapshot(batchSnapshot)
 				batchStart, batchSnapshot = -1, -1
 			}
+		}
+		if hasPostTx && bodySnapshot < 0 && !ctx.Payer.IsNil() {
+			bodyStart, bodySnapshot = i+1, st.state.PushSnapshot()
 		}
 	}
 	if ctx.Payer.IsNil() {
@@ -239,7 +265,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		used.State += receipt.GasUsed.State
 	}
 	var refund uint64
-	if refunds && !gasBailout {
+	if refunds {
 		refund = min(st.state.GetRefund(), used.Total()/params.RefundQuotientEIP3529)
 	}
 	// Refunds reduce the payer's fee, but do not free block execution capacity.
@@ -252,10 +278,8 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	paid := paidExecution + used.State
 	fee := u256.Mul(u256.U64(paid), *st.gasPrice)
 	change := u256.Sub(maxCost, u256.Add(fee, blobCost))
-	if !gasBailout {
-		if err := st.state.AddBalance(ctx.Payer, change, tracing.BalanceIncreaseGasReturn); err != nil {
-			return nil, err
-		}
+	if err := st.state.AddBalance(ctx.Payer, change, tracing.BalanceIncreaseGasReturn); err != nil {
+		return nil, err
 	}
 	tipped, err := st.payCoinbase(paid)
 	if err != nil {
@@ -285,4 +309,9 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		st.evm.Context.PostApplyMessage(st.state, sender, st.evm.Context.Coinbase, result, rules)
 	}
 	return result, nil
+}
+
+func (st *TxnExecutor) skipFrame(index int) {
+	st.evm.FrameContext.Receipts[index].Status = types.ReceiptStatusSkipped
+	st.evm.TraceSkippedFrame(index)
 }

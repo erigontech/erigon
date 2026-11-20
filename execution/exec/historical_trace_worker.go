@@ -396,9 +396,9 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
 					// End of block transaction in a block
 					reader := state.NewHistoryReaderV3(tx, outputTxNum)
-					ibs := state.New(reader)
+					ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
 					defer ibs.Close()
-					transactions.VersionedCallState(ibs)
+					ibs.SetNoConflictDetection()
 					ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 					syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 						return protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{})
