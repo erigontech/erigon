@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -651,6 +652,9 @@ func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, o
 	}
 	settings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dirs.Tmp, dir.DirPerm); err != nil { // the converter's sorts spill there
 		return err
 	}
 	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).Open(ctx)
