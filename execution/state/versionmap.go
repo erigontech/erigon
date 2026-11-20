@@ -876,9 +876,9 @@ func (vm *VersionMap) accountFloorsAt(addr accounts.Address, txIdx int) (f accou
 	case c != nil && k == destroyedAt:
 		// A balance-preserving SELFDESTRUCT (EIP-8246) keeps its balance.
 		f.balance, f.hasBalance = c.Value, true
-	case absent:
-		// A self-destruct with no preserving balance cell and no revival is a full wipe:
-		// the account is gone, not preserved at an older balance.
+	case c != nil || absent:
+		// The destruct wipes a balance written below it, even under a later nonce or code
+		// revival; with no cell and no revival the account is gone.
 		f.balance, f.hasBalance = uint256.Int{}, true
 	}
 	if _, c := floorCell(e.Incarnation, txIdx); c != nil {
