@@ -124,6 +124,6 @@ func TestProcessFrozenBlocksDoesNotRestorePublishedNotifications(t *testing.T) {
 	require.NotNil(t, capture.batch)
 	require.Len(t, capture.batch.ChangeBatch, 1)
 	require.Equal(t, uint64(1), capture.batch.ChangeBatch[0].BlockHeight)
-	require.Equal(t, [][]byte{{1}}, capture.batch.ChangeBatch[0].Txs)
+	require.Nil(t, capture.batch.ChangeBatch[0].Txs, "a block with no canonical body announces no transaction mined")
 	require.False(t, notifications.Accumulator.HasPendingChanges(), "published changes must stay cleared")
 }

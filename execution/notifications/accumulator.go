@@ -105,6 +105,9 @@ func (a *Accumulator) MarkIncomplete() {
 // removeMined delete a sender's whole run at or below that nonce, which nothing re-sends.
 func (a *Accumulator) SetCanonicalTxs(canonicalTxs func(height uint64) ([][]byte, bool)) (replaced, cleared int) {
 	for i := range a.changes {
+		if a.changes[i].Direction == DirectionUnwind {
+			continue
+		}
 		txs, ok := canonicalTxs(a.changes[i].BlockHeight)
 		if !ok {
 			if len(a.changes[i].Txs) > 0 {

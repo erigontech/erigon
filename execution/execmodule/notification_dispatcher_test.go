@@ -269,7 +269,8 @@ func TestDispatcherRefreshesIncompleteAccountChanges(t *testing.T) {
 			published, err := module.dispatchNotificationsFromOverlay(ctx, doms, 1, nil)
 			require.NoError(t, err)
 			require.True(t, published)
-			require.Equal(t, recorded, capture.batch.ChangeBatch[0], "recorded transactions and state changes must be preserved")
+			recorded.Txs = nil
+			require.Equal(t, recorded, capture.batch.ChangeBatch[0], "state changes are preserved and, with no canonical body, no transaction is announced mined")
 			require.True(t, capture.batch.StateChangesIncomplete)
 			latest := kvcache.NewLatestBatchCache()
 			latest.OnNewBlock(capture.batch)
