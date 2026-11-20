@@ -436,7 +436,9 @@ func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.M
 	if !tx.UsesLegacyNonce() {
 		args.KeyedNoncesLen = uint64(len(tx.NonceKeys))
 	}
-	// EIP-8250 prices the full nonce encodings as calldata, including RLP prefixes.
+	// EIP-8250 charges the RLP-encoded nonce key list, including its prefix, as
+	// calldata. Only a single-use keyed nonce (MaxUint64) omits the nonce value
+	// from that charge.
 	args.DataLen, args.DataNonZeroLen = tx.nonceDataCounts()
 	addData := func(data []byte) {
 		args.DataLen += uint64(len(data))
@@ -465,6 +467,8 @@ func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.M
 		addData(sig.Signer)
 		addData(sig.Message)
 		if len(sig.Message) == 0 {
+			// SigningHash commits only to this signature's length. Charging all
+			// its bytes as nonzero gives a fixed calldata cost for that length.
 			args.DataLen += uint64(len(sig.Signature))
 			args.DataNonZeroLen += uint64(len(sig.Signature))
 		} else {

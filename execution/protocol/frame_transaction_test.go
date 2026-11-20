@@ -828,8 +828,9 @@ func TestFrameTransactionCancellation(t *testing.T) {
 
 func TestFrameTransactionFeeSettlement(t *testing.T) {
 	t.Parallel()
-	// Three frames and the encoded nonce cost 12,000 + 3*475 + 3*16 = 13,473
-	// intrinsic gas. The approvals use 107 and 3,007 gas; each Sstore emits two PUSH1s.
+	// With three frames and empty calldata, intrinsic gas is 12,000 + 3*475 + 2*16 = 13,457.
+	// The two nonzero bytes encode the empty nonce key list (0xc0) and zero nonce (0x80).
+	// The approvals use 107 and 3,007 gas. Each Sstore emits two PUSH1s.
 	for _, test := range []struct {
 		name                       string
 		code                       []byte

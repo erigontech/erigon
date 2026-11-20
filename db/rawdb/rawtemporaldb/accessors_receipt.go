@@ -19,6 +19,8 @@ var (
 )
 
 // CumulativeGasUsedAsOf reads the block's cumulative gas usage before txNum.
+// Callers that need an exact total must check that receipt history covers txNum.
+// A read below the retention floor can return a later total without an error.
 func CumulativeGasUsedAsOf(tx kv.TemporalTx, txNum uint64) (uint64, error) {
 	v, ok, err := tx.GetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, txNum)
 	if err != nil || !ok {

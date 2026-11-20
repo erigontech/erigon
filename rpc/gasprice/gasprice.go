@@ -200,8 +200,8 @@ func (oracle *Oracle) SuggestTipCapAtHead(ctx context.Context) (*uint256.Int, ui
 	sparseCount := 0
 	for _, prices := range phase1 {
 		added := len(prices)
-		// Empty block (or all transactions from coinbase): fall back to the
-		// last known price so the percentile estimate stays stable.
+		// If the block has no eligible tips, use the last known tip to keep
+		// the percentile estimate stable.
 		if added == 0 && latestPrice != nil {
 			txPrices = append(txPrices, new(uint256.Int).Set(latestPrice))
 			added = 1
@@ -309,10 +309,9 @@ func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64,
 	return results, g.Wait()
 }
 
-// getBlockPricesFromBackend calculates the lowest transaction gas prices in a
-// given block using the supplied backend (which may be a Fork'd per-goroutine
-// backend). Empty blocks or blocks where all transactions come from the coinbase
-// contribute nothing to out; the caller applies its own fallback.
+// getBlockPricesFromBackend samples the lowest effective proposer tips per gas,
+// excluding transactions from the coinbase. A frame's tip depends on gas used,
+// so the sample skips frames whose receipt gas usage is unavailable.
 //
 // Compute each tip before sorting so comparisons do not repeat fee calculations.
 func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend OracleBackend, blockNum uint64, limit int,

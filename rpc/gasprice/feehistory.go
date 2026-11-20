@@ -341,15 +341,13 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	}
 	oldestBlock := lastBlock + 1 - uint64(blocks)
 
-	// The reward percentiles are computed from each block's transactions and the gas
-	// their receipts report; the other series come from headers alone. Availability is
-	// a lower bound, so the oldest block of the range decides for all of it.
+	// Reward percentiles need receipt gas usage. The other series use headers alone.
+	// For mined blocks, the reward range stops before the first unexecuted block
+	// or one whose gas usage is unavailable after pruning.
 	if len(rewardPercentiles) != 0 {
 		if err := oracle.backend.CheckBlockRewardsAvailable(ctx, oldestBlock); err != nil {
-			// Fee history stops at the first unavailable block rather than skipping
-			// to newer blocks. If the oldest block is pruned, return an empty result,
-			// matching the missing-block path below.
 			if errors.Is(err, state.ErrPruned) {
+				// A pruned oldest block gives an empty range.
 				err = nil
 			}
 			return common.Big0, nil, nil, nil, nil, nil, err

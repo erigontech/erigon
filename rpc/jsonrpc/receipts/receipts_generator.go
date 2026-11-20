@@ -858,13 +858,12 @@ func firstHistoryChange(tx kv.TemporalTx, index kv.InvertedIdx, key []byte, from
 }
 
 func (r *receiptGasReader) read(g *Generator, tx kv.TemporalTx, header *types.Header, txn types.Transaction, txNum uint64, index int) (*types.Receipt, error) {
-	// GetAsOf below the retention floor can return the first surviving total.
-	// An independently retained receipt still gives the exact gas used.
 	firstRead := txNum
 	if index == 0 {
 		firstRead++ // the previous total is zero at the start of the block
 	}
 	if firstRead < r.historyStart {
+		// A cached or persisted receipt can still supply the exact gas used.
 		hash := header.Hash()
 		if receipt, ok := g.TryGetCachedReceipt(hash, txNum, index); ok {
 			return receipt, nil
