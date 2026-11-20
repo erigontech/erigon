@@ -29,3 +29,19 @@ func TestLoadZkevmWitnessesUsesValidMinimalReference(t *testing.T) {
 	require.Len(t, witnesses, 1)
 	require.Equal(t, []hexutil.Bytes{{1}}, witnesses[zkevmWitnessKey{"Amsterdam", hash}].State)
 }
+
+func TestLoadZkevmWitnessesDropsReferenceEqualToEveryFixture(t *testing.T) {
+	hash := common.HexToHash("0x01")
+	success := "0x" + strings.Repeat("00", 32) + "01" + strings.Repeat("00", 10)
+	path := filepath.Join(t.TempDir(), "fixtures.json")
+	data := fmt.Sprintf(`{
+		"a": {"network":"Amsterdam","blocks":[{"blockHeader":{"hash":%q},"statelessOutputBytes":%q,"executionWitness":{"state":["0x01","0x02"]}}]},
+		"b": {"network":"Amsterdam","blocks":[{"blockHeader":{"hash":%q},"statelessOutputBytes":%q,"executionWitness":{"state":["0x02","0x01"]}}]}
+	}`, hash, success, hash, success)
+	require.NoError(t, os.WriteFile(path, []byte(data), 0o600))
+	witnesses, err := loadZkevmWitnesses([]string{path})
+	require.NoError(t, err)
+	reference, ok := witnesses[zkevmWitnessKey{"Amsterdam", hash}]
+	require.True(t, ok)
+	require.Nil(t, reference)
+}
