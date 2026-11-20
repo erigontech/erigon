@@ -23,10 +23,15 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider"
 )
 
@@ -47,6 +52,20 @@ func TestBestReleasesTheLockWhenTheCallerGivesUpWaitingForABlock(t *testing.T) {
 	p.lock.Unlock()
 }
 
+type provideTxnsResult struct {
+	txns []types.Transaction
+	err  error
+}
+
+func provideTxnsAsync(ctx context.Context, pool *TxPool, opts ...txnprovider.ProvideOption) <-chan provideTxnsResult {
+	done := make(chan provideTxnsResult, 1)
+	go func() {
+		txns, err := pool.ProvideTxns(ctx, opts...)
+		done <- provideTxnsResult{txns, err}
+	}()
+	return done
+}
+
 func TestProvideTxnsInterruptsParentBlockWaitWhilePoolIsLocked(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -63,15 +82,7 @@ func TestProvideTxnsInterruptsParentBlockWaitWhilePoolIsLocked(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				stop := make(chan struct{})
-				type result struct {
-					txns []types.Transaction
-					err  error
-				}
-				done := make(chan result, 1)
-				go func() {
-					txns, err := p.ProvideTxns(ctx, txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockWaitStop(stop))
-					done <- result{txns, err}
-				}()
+				done := provideTxnsAsync(ctx, p, txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockWaitStop(stop))
 				synctest.Wait()
 				p.lock.Lock()
 				defer p.lock.Unlock()
@@ -121,6 +132,57 @@ func TestPeekBestWakesAtRequestedBlock(t *testing.T) {
 	})
 }
 
+func TestProvideTxnsRechecksParentAfterUnwind(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, pool, _, _ := newTestPool(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		readers := semaphore.NewWeighted(1)
+		opts := mdbx.New(dbcfg.TxPoolDB, log.New()).RoTxsLimiter(readers)
+		pool.poolDB = mdbxtest.InMem(t, opts, t.TempDir()).MustOpen()
+		t.Cleanup(pool.poolDB.Close)
+
+		sender := common.Address{1}
+		update := func(height uint64, direction remoteproto.Direction) error {
+			change := newBlockChangeForAccounts(common.Hash{byte(height)}, 0, sender)
+			change.ChangeBatch[0].BlockHeight = height
+			change.ChangeBatch[0].Direction = direction
+			return pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+		}
+		require.NoError(t, update(1, remoteproto.Direction_FORWARD))
+		var slots TxnSlots
+		slots.Append(newTestSenderTxnSlot(sender, 0), sender[:], true)
+		_, err := pool.AddLocalTxns(ctx, slots)
+		require.NoError(t, err)
+
+		// Queue the unwind first so it takes effect after both callers see the parent
+		// and before either caller can open its database snapshot.
+		require.NoError(t, readers.Acquire(ctx, 1))
+		unwound := make(chan error, 1)
+		go func() { unwound <- update(0, remoteproto.Direction_UNWIND) }()
+		synctest.Wait()
+		stop := make(chan struct{})
+		stopped := provideTxnsAsync(ctx, pool, txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockWaitStop(stop))
+		waiting := provideTxnsAsync(ctx, pool, txnprovider.WithParentBlockNum(1))
+		synctest.Wait()
+		readers.Release(1)
+		require.NoError(t, <-unwound)
+		synctest.Wait()
+		close(stop)
+		got := <-stopped
+		require.NoError(t, got.err)
+		require.Empty(t, got.txns, "stopped builder selected transactions below its requested parent")
+		require.Empty(t, waiting, "selection returned before the pool reached the parent again")
+		require.True(t, readers.TryAcquire(1), "waiting for the parent held a database reader")
+		readers.Release(1)
+
+		require.NoError(t, update(1, remoteproto.Direction_FORWARD))
+		got = <-waiting
+		require.NoError(t, got.err)
+		require.Len(t, got.txns, 1)
+	})
+}
+
 func TestProvideTxnsReturnsWhileTheStartupReloadHoldsTheLock(t *testing.T) {
 	p := new(TxPool)
 	require.False(t, p.Started())
@@ -128,15 +190,7 @@ func TestProvideTxnsReturnsWhileTheStartupReloadHoldsTheLock(t *testing.T) {
 	p.lock.Lock()
 	t.Cleanup(p.lock.Unlock)
 
-	type provided struct {
-		txns []types.Transaction
-		err  error
-	}
-	returned := make(chan provided, 1)
-	go func() {
-		txns, err := p.ProvideTxns(t.Context(), txnprovider.WithParentBlockNum(1))
-		returned <- provided{txns, err}
-	}()
+	returned := provideTxnsAsync(t.Context(), p, txnprovider.WithParentBlockNum(1))
 
 	select {
 	case got := <-returned:
