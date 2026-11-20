@@ -14,16 +14,17 @@ permissions:
 
 jobs:
   unwind:
+    name: unbatched unwind (${{ matrix.commitment }})
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
-        commitment: ${{ fromJSON(inputs.cache-warming-only && '["serial"]' || '["serial", "parallel"]') }}
-        batch: ${{ fromJSON(inputs.cache-warming-only && '[false]' || '[false, true]') }}
+        commitment: ${{ fromJSON(inputs.cache-warming-only && '["parallel"]' || '["parallel", "v3"]') }}
     env:
-      ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment == 'parallel' && 'true' || 'false' }}
-      ERIGON_BATCH_COMMITMENTS: ${{ matrix.batch }}
+      ERIGON_COMMITMENT_V3: ${{ matrix.commitment == 'v3' && 'true' || 'false' }}
+      # The all-tests workflow covers both formats with batching enabled.
+      ERIGON_BATCH_COMMITMENTS: 'false'
     steps:
       - uses: actions/checkout@v7
         with:

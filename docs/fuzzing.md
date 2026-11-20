@@ -82,8 +82,10 @@ go test ./db/seg/ -run '^FuzzCompress$'
 `TestEngineApiReorgSchedules` generates bounded schedules of extension, branch
 changes, fork bounces, restart, pruning and invalid payloads. It compares every
 resulting head with a branch executed without reorgs, including state, history,
-canonical metadata and transaction indexes. Fixed schedules run in
-`make test-unwind`; the nightly workflow runs 100 additional seeds.
+canonical metadata and transaction indexes. CI runs the fixed schedules with both
+the legacy parallel trie and commitment V3. `make test-all` covers batching on,
+and the unwind workflow runs `make test-unwind` with batching off. The nightly
+workflow runs 100 additional seeds.
 
 These node integration tests use a seeded generator because file builds and
 restarts can exceed Go's native fuzz worker limit of ten seconds per input.
