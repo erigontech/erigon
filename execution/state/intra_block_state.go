@@ -1708,53 +1708,23 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 	if ibs.noMaterialize && !ibs.warmReadable(addr) && ibs.hasWrite(addr, AddressPath, accounts.NilKey) && !ibs.accountLifecycle(addr) {
 		return ibs.setCreatedCode(addr, canonical, reason)
 	}
+	if ibs.versionMap != nil {
+		return ibs.writeCodeVersioned(addr, canonical, reason)
+	}
+
 	stateObject, err := ibs.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
 	}
-	codeHash := canonical.Hash
 	baseCodeHash := stateObject.data.CodeHash
 	origHash := stateObject.original.CodeHash
-	if ibs.versionMap != nil {
-		// baseCodeHash ("what this SetCode saw") is the current cell, including
-		// this tx's own earlier code writes. origHash (the cumulative net-zero
-		// baseline) is the versionMap floor at txIndex — the tx-start value.
-		if ch, chErr := ibs.GetCodeHash(addr); chErr == nil {
-			baseCodeHash = ch
-		}
-		origHash, err = ibs.GetCommittedCodeHash(addr)
-		if err != nil {
-			return err
-		}
-	}
-	if ibs.noMaterialize {
-		seed, err := ibs.codeSeed(addr, baseCodeHash)
-		if err != nil {
-			return err
-		}
-		stateObject.setCode(seed)
-	}
 	written, err := stateObject.SetCode(canonical, !ibs.hasWrite(addr, CodePath, accounts.NilKey), reason)
 	if err != nil {
 		return err
 	}
 	if written {
-		// Skip when the new code matches either the value seen by THIS SetCode
-		// call (revert to in-tx base) or the pre-tx original (cumulative net-zero,
-		// e.g. an EIP-7702 delegate-then-reset in the same tx). The net-zero case
-		// is disabled for newly created objects, whose original holds the
-		// pre-creation snapshot — deleting the code writes there corrupts the trie.
-		matchesOriginal := !stateObject.newlyCreated && codeHash == origHash
-		unchanged := codeHash == baseCodeHash || matchesOriginal
-		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-			if unchanged {
-				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x originalHash=%x codeLen=%d\n",
-					ibs.blockNum, ibs.txIndex, ibs.version, addr, codeHash, baseCodeHash, stateObject.original.CodeHash, len(code))
-			} else {
-				fmt.Printf("%d (%d.%d) SetCode WRITE %x codeHash=%x baseHash=%x codeLen=%d\n",
-					ibs.blockNum, ibs.txIndex, ibs.version, addr, codeHash, baseCodeHash, len(code))
-			}
-		}
+		matchesOriginal := !stateObject.newlyCreated && canonical.Hash == origHash
+		unchanged := canonical.Hash == baseCodeHash || matchesOriginal
 		ibs.writeCode(addr, canonical, unchanged)
 	}
 	return nil
@@ -1819,6 +1789,60 @@ func (ibs *IntraBlockState) setCreatedCode(addr accounts.Address, code accounts.
 	}
 	ibs.journalCodeChange(addr, prev.Hash, prev.Bytes, code, !hadCode, reason)
 	ibs.writeCode(addr, code, code.Hash == prev.Hash)
+	return nil
+}
+
+// writeCodeVersioned is SetCode on the parallel (versionMap) path for an account
+// not caught by setCreatedCode (an existing, warm or lifecycle account). It
+// mirrors stateObject.SetCode's set decision and the net-zero drop without a
+// transient stateObject. An absent account is created first (as GetOrNewStateObject
+// would), which makes the pre-write code empty and disables the net-zero check.
+func (ibs *IntraBlockState) writeCodeVersioned(addr accounts.Address, code accounts.Code, reason tracing.CodeChangeReason) error {
+	base, _, _, err := ibs.versionedAccountBase(addr, false)
+	if err != nil {
+		return err
+	}
+	newlyCreated := base == nil
+	if newlyCreated {
+		ibs.createVersioned(addr, false)
+	}
+	// baseCodeHash ("what this SetCode saw") is the current cell, including this
+	// tx's own earlier code writes. origHash (the cumulative net-zero baseline) is
+	// the versionMap floor at txIndex — the tx-start value.
+	baseCodeHash, err := ibs.GetCodeHash(addr)
+	if err != nil {
+		return err
+	}
+	origHash, err := ibs.GetCommittedCodeHash(addr)
+	if err != nil {
+		return err
+	}
+	seed, err := ibs.codeSeed(addr, baseCodeHash)
+	if err != nil {
+		return err
+	}
+	// bytes.Equal guards the codeHash-without-code case: a matching hash against
+	// empty prev bytes must still heal the CodeDomain, not skip.
+	if seed.Hash == code.Hash && bytes.Equal(seed.Bytes, code.Bytes) {
+		return nil
+	}
+	ibs.journalCodeChange(addr, baseCodeHash, seed.Bytes, code, !ibs.hasWrite(addr, CodePath, accounts.NilKey), reason)
+	// Skip when the new code matches either the value seen by this SetCode call
+	// (revert to in-tx base) or the pre-tx original (cumulative net-zero, e.g. an
+	// EIP-7702 delegate-then-reset in the same tx). The net-zero case is disabled
+	// for a newly created account, whose original holds the pre-creation snapshot.
+	matchesOriginal := !newlyCreated && code.Hash == origHash
+	unchanged := code.Hash == baseCodeHash || matchesOriginal
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+		if unchanged {
+			fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x originalHash=%x codeLen=%d\n",
+				ibs.blockNum, ibs.txIndex, ibs.version, addr, code.Hash, baseCodeHash, origHash, len(code.Bytes))
+		} else {
+			fmt.Printf("%d (%d.%d) SetCode WRITE %x codeHash=%x baseHash=%x codeLen=%d\n",
+				ibs.blockNum, ibs.txIndex, ibs.version, addr, code.Hash, baseCodeHash, len(code.Bytes))
+		}
+	}
+	ibs.writeCode(addr, code, unchanged)
 	return nil
 }
 
