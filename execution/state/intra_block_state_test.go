@@ -1873,6 +1873,54 @@ func TestWriteFlushedToMatchesFinalizeTxPreservedBalance(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(50), got.accounts[c].Balance)
 }
 
+// createClearingWriter records CreateContract and clears the account's storage, as Writer does.
+type createClearingWriter struct {
+	*finalStateWriter
+	created map[accounts.Address]bool
+}
+
+func (w createClearingWriter) CreateContract(address accounts.Address) error {
+	w.created[address] = true
+	delete(w.storage, address)
+	return nil
+}
+
+// A balance-preserving SELFDESTRUCT wipes the storage the tx did not touch on both paths.
+func TestWriteFlushedToMatchesFinalizeTxPreservedBalanceClearsStorage(t *testing.T) {
+	t.Parallel()
+	c := accounts.InternAddress(common.Address{3})
+	withCode := acctBal(50)
+	withCode.CodeHash = accounts.InternCodeHash(common.Hash{9})
+	reader := &fakeBaseReader{accts: map[accounts.Address]*accounts.Account{c: withCode}}
+	rules := &chain.Rules{IsSpuriousDragon: true, IsByzantium: true, IsAmsterdam: true}
+	newWriter := func() createClearingWriter {
+		return createClearingWriter{finalStateWriter: newFinalStateWriter(), created: map[accounts.Address]bool{}}
+	}
+
+	materialized := New(reader)
+	defer materialized.Close()
+	materialized.SetTxContext(1, 0)
+	_, err := materialized.Selfdestruct(c, true)
+	require.NoError(t, err)
+	want := newWriter()
+	require.NoError(t, materialized.FinalizeTx(rules, want))
+
+	versioned := NewWithVersionMap(reader, NewVersionMap(nil))
+	defer versioned.Close()
+	versioned.SetTxContext(1, 0)
+	_, err = versioned.Selfdestruct(c, true)
+	require.NoError(t, err)
+	writes, err := versioned.FinalizedWrites(rules)
+	require.NoError(t, err)
+	versioned.FlushWritesToVersionMap(writes)
+	got := newWriter()
+	require.NoError(t, versioned.WriteFlushedTo(writes, got))
+
+	require.True(t, want.created[c], "FinalizeTx clears the destroyed storage")
+	require.Equal(t, want.created, got.created)
+	require.Equal(t, want.accounts, got.accounts)
+}
+
 // downRevClearingWriter clears an account's code and storage on an incarnation decrease, as Writer does.
 type downRevClearingWriter struct{ *finalStateWriter }
 

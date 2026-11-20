@@ -314,6 +314,10 @@ func TestVersionMapView_GetAccountTable(t *testing.T) {
 			name: "self-destruct cell only", setup: func(vm *VersionMap) { vm.WriteSelfDestruct(addr, v(0), true, true) },
 			base: &committed, wasDeleted: true, baseReads: 1,
 		},
+		{name: "self-destruct wipes a balance credited below it", setup: func(vm *VersionMap) {
+			vm.WriteBalance(addr, v(0), *uint256.NewInt(5), true)
+			vm.WriteSelfDestruct(addr, v(1), true, true)
+		}, base: &committed, wasDeleted: true, baseReads: 1},
 		{name: "self-destruct wipes nonce and code hash below it", setup: func(vm *VersionMap) {
 			vm.WriteNonce(addr, v(0), 9, true)
 			vm.WriteCodeHash(addr, v(0), cellCode, true)

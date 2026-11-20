@@ -3090,23 +3090,11 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 		}
 		// A ValueDeleted balance write is the removal verdict (an EIP-161 touched-empty or a
 		// burning self-destruct) encoded as data at finalization; compose() does not gate on
-		// it, so force the account absent to take the delete / EIP-8246-preserve path below.
+		// it, so force the account absent to take the delete path below.
 		if bal, ok := writes.GetBalance(addr); ok && bal.Deletes() {
 			account = nil
 		}
 		if account == nil {
-			if bal, ok := writes.GetBalance(addr); ok && !bal.Deletes() && !bal.Val.IsZero() {
-				// An EIP-8246 SELFDESTRUCT leaves a balance-only account, as updateAccount does.
-				preserved := accounts.NewAccount()
-				preserved.Balance = bal.Val
-				if err := stateWriter.CreateContract(addr); err != nil {
-					return err
-				}
-				if err := stateWriter.UpdateAccountData(addr, original, &preserved); err != nil {
-					return err
-				}
-				continue
-			}
 			if err := stateWriter.DeleteAccount(addr, original); err != nil {
 				return err
 			}
@@ -3125,7 +3113,10 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 				return err
 			}
 		}
-		if created, ok := writes.GetCreateContract(addr); ok && created.Val {
+		created, _ := writes.GetCreateContract(addr)
+		destructed, _ := writes.GetSelfDestruct(addr)
+		// A balance-preserving SELFDESTRUCT (EIP-8246) leaves a present account but still wipes its storage.
+		if (created != nil && created.Val) || (destructed != nil && destructed.Val) {
 			if err := stateWriter.CreateContract(addr); err != nil {
 				return err
 			}

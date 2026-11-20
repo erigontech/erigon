@@ -25,12 +25,9 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestLiveReadMatchesInterpreter proves the completeness premise for retiring the
-// live-path self-destruct reconstruction: the live IBS read (getVersionedAccount,
-// which today routes through eip8246PreservedAccount + the manual SD gate) resolves
-// account existence and fields identically to the one finalized interpreter
-// (ApplyView.ReadAccountData) across the self-destruct / preserve / revival shapes.
-// If the live path can be driven off the interpreter, these must already agree.
+// TestLiveReadMatchesInterpreter pins that the live IBS read and the version-map
+// interpreter (ApplyView.ReadAccountData) agree on account existence and fields across
+// the self-destruct, preserve, revival and recreate shapes.
 func TestLiveReadMatchesInterpreter(t *testing.T) {
 	t.Parallel()
 
@@ -71,6 +68,22 @@ func TestLiveReadMatchesInterpreter(t *testing.T) {
 			vm.WriteNonce(addr, Version{TxIndex: 1}, 1, true)
 			vm.WriteIncarnation(addr, Version{TxIndex: 1}, 2, true)
 			writeFor(vm, addr, CodeHashPath, accounts.NilKey, Version{TxIndex: 1}, code, true)
+		}},
+		{"recreate seen only through field cells above a burn", func() *accountStateReader { return newAccountStateReader() }, func(vm *VersionMap, addr accounts.Address) {
+			ws := &WriteSet{}
+			ws.SetContractRemoval(addr, Version{TxIndex: 0})
+			vm.FlushVersionedWrites(ws, true)
+			vm.WriteNonce(addr, Version{TxIndex: 1}, 1, true)
+			writeFor(vm, addr, CodeHashPath, accounts.NilKey, Version{TxIndex: 1}, code, true)
+		}},
+		{"bare self-destruct over a committed account", func() *accountStateReader {
+			r := newAccountStateReader()
+			a := accounts.NewAccount()
+			a.Nonce, a.Balance, a.CodeHash = 3, *uint256.NewInt(100), code
+			r.accounts[getAddress(1)] = &a
+			return r
+		}, func(vm *VersionMap, addr accounts.Address) {
+			vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
 		}},
 		{"live account, cells over base", func() *accountStateReader {
 			r := newAccountStateReader()

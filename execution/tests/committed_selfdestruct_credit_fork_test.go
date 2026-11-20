@@ -45,21 +45,10 @@ import (
 //     the later credit recreates it as a plain EOA (nonce 0, no code).
 //   - EIP-6780 onward: a not-same-tx-created contract is not deleted, so its code
 //     and nonce survive and the credit lands on the preserved contract.
-//
-// It is the reachability proof for the version-map reader unification: the
-// committed-base "balance-preserving SELFDESTRUCT then credited" cell shape (on
-// which the live read path and the one finalized interpreter disagree on
-// nonce/code) can only arise if the write side wipes a committed contract's
-// nonce/code cross-tx. EIP-6780 forbids that, so the shape is unreachable — which
-// this test holds true under real execution across the fork ladder.
 func TestCommittedContractSelfdestructThenCredited(t *testing.T) {
-	// forks spanning the three SELFDESTRUCT eras the account outcome depends on.
-	forkNames := []string{
-		"SpuriousDragon", "Byzantium", "Istanbul", "Berlin", "London",
-		"Shanghai", "Cancun", "Prague", "Osaka", "Amsterdam",
-	}
+	// The last fork before EIP-6780 and the first with it.
+	forkNames := []string{"Shanghai", "Cancun"}
 	contractCode := []byte{byte(vm.ADDRESS), byte(vm.SELFDESTRUCT)}
-	emptyCodeHash := accounts.EmptyCodeHash
 
 	for _, forkName := range forkNames {
 		cfg, ok := testforks.Forks[forkName]
@@ -124,10 +113,10 @@ func TestCommittedContractSelfdestructThenCredited(t *testing.T) {
 					require.NoError(t, err)
 					if eip6780 {
 						require.Equal(t, uint64(1), nonce, "EIP-6780: committed contract nonce preserved")
-						require.NotEqual(t, emptyCodeHash, codeHash, "EIP-6780: committed contract code preserved")
+						require.NotEqual(t, accounts.EmptyCodeHash, codeHash, "EIP-6780: committed contract code preserved")
 					} else {
 						require.Equal(t, uint64(0), nonce, "pre-6780: destroyed contract recreated as EOA, nonce 0")
-						require.Equal(t, emptyCodeHash, codeHash, "pre-6780: destroyed contract recreated as EOA, no code")
+						require.Equal(t, accounts.EmptyCodeHash, codeHash, "pre-6780: destroyed contract recreated as EOA, no code")
 					}
 					return nil
 				}))

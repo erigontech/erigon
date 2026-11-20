@@ -17,6 +17,7 @@
 package state
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -170,4 +171,34 @@ func TestVersionMapViewMatchesVersionedStateReader(t *testing.T) {
 			require.Equal(t, wantV, gotV, "ReadAccountStorage val %x/%x", addr, k)
 		}
 	}
+}
+
+type failingViewReader struct {
+	minimalStateReader
+	err error
+}
+
+func (r *failingViewReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return nil, r.err
+}
+
+func (r *failingViewReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
+	return uint256.Int{}, false, r.err
+}
+
+func TestVersionMapViewReportsEveryBaseReadError(t *testing.T) {
+	t.Parallel()
+	readErr := errors.New("domain read failed")
+	view := NewVersionMap(nil).ViewAtTxIndex(0, &failingViewReader{err: readErr})
+	key := accounts.InternKey(uint256.NewInt(1).Bytes32())
+
+	for i := range 2 {
+		_, err := view.ReadAccountData(getAddress(1 + i))
+		require.ErrorIs(t, err, readErr, "account read %d", i)
+		_, err = view.ReadAccountIncarnation(getAddress(1 + i))
+		require.ErrorIs(t, err, readErr, "incarnation read %d", i)
+		_, _, err = view.ReadAccountStorage(getAddress(1+i), key)
+		require.ErrorIs(t, err, readErr, "storage read %d", i)
+	}
+	require.ErrorIs(t, view.Err(), readErr)
 }
