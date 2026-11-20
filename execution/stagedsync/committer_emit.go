@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"github.com/erigontech/erigon/common/dbg"
 	"slices"
 	"time"
 
@@ -115,6 +116,8 @@ func (cc *commitmentCalculator) touchHash(plainKey []byte) []byte {
 	return cc.updates.HashKey(plainKey)
 }
 
+var stubNoBaseWarm = dbg.EnvBool("STUB_NO_BASE_WARM", false)
+
 func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state.StateReader) {
 	if _, seen := cc.touchedAccounts[a]; seen {
 		return
@@ -124,7 +127,7 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 	cc.touchedAccounts[a] = cc.touchHash(address[:])
 	probeTx.hash += time.Since(hashT0)
 	probeTx.accounts++
-	if base != nil {
+	if base != nil && !stubNoBaseWarm {
 		baseT0 := time.Now()
 		defer func() { probeTx.base += time.Since(baseT0) }()
 		if acc, err := base.ReadAccountData(a); err == nil {
