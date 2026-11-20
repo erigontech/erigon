@@ -272,6 +272,26 @@ func TestCommitmentConvertV3SplitRunFromFiles(t *testing.T) {
 	require.NoError(t, state.CheckMixedCommitmentFiles(dirs))
 }
 
+func TestCommitmentConvertV3NoHistoryRefusesUnfinishedHistoryPromote(t *testing.T) {
+	dirs := legacyDatadirWithCommitmentHistory(t)
+	require.NoError(t, runCommitmentConvert(t, dirs, "--v3", "--no-domain"))
+	accessors, err := filepath.Glob(filepath.Join(dirs.SnapAccessors, "*-commitment.*"))
+	require.NoError(t, err)
+	require.NotEmpty(t, accessors)
+	stage := filepath.Join(dirs.Snap, "rebuild", "accessor")
+	require.NoError(t, os.MkdirAll(stage, 0o755))
+	for _, f := range accessors {
+		require.NoError(t, os.Rename(f, filepath.Join(stage, filepath.Base(f))))
+	}
+
+	statecfg.SetCommitmentV3(false)
+	requireConvertRefusedBeforeWriting(t, dirs, "`integration commitment convert --restore`", "--v3", "--no-history")
+
+	require.NoError(t, runCommitmentConvert(t, dirs, "--restore"))
+	requireCommitmentFilesPrefix(t, dirs.SnapHistory, "*-commitment.*.v", "v2.")
+	require.NoError(t, state.CheckMixedCommitmentFiles(dirs))
+}
+
 func TestCommitmentConvertV3NoHistoryRefusesLegacyHistory(t *testing.T) {
 	dirs := legacyDatadirWithCommitmentHistory(t)
 	requireCommitmentFilesPrefix(t, dirs.SnapHistory, "*-commitment.*.v", "v2.")

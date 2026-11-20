@@ -1154,6 +1154,19 @@ func requireV3SideFiles(dirs datadir.Dirs, opts ConvertOpts) error {
 		}); err != nil {
 			return err
 		}
+		stage := newCommitmentV3HistoryStage(dirs)
+		for _, stageDir := range []string{stage.history, stage.idx, stage.accessor} {
+			entries, err := os.ReadDir(stageDir)
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if len(entries) > 0 {
+				return fmt.Errorf("[commitment_convert] %s is not empty: the --no-domain run did not finish moving v3 commitment history; roll it back with `integration commitment convert --restore`", stageDir)
+			}
+		}
 		if err := preflightBackupDir(filepath.Join(dirs.Snap, "backup", "domains")); err != nil {
 			return err
 		}
