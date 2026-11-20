@@ -19,7 +19,6 @@
 package mdbx_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -30,12 +29,12 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func TestBucketCRUD(t *testing.T) {
 	require := require.New(t)
-	db, tx := memdb.NewTestTx(t)
+	db, tx := mdbxtest.NewTestTx(t)
 
 	normalBucket := kv.ChaindataTables[15]
 	deprecatedBucket := "none"
@@ -117,7 +116,7 @@ func TestReadOnlyMode(t *testing.T) {
 	}).MustOpen()
 	defer db2.Close()
 
-	tx, err := db2.BeginRo(context.Background())
+	tx, err := db2.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 

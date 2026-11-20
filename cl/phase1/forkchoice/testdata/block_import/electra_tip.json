@@ -1,0 +1,30 @@
+{
+  "case": "electra",
+  "mode": "tip",
+  "blocks": [
+    {
+      "slot": 8258,
+      "block_root": "0x6d9472d95582e9e032cb184cea3c2e5f86ce28e0daa0d96d133948f4553da6f0",
+      "snapshot_sha256": "7935b522022dd1f1bfbc79c3826131eb907b8d5fbdc605831195090d225f92b1",
+      "latest_message_count": 12,
+      "epoch_first": false,
+      "randao_vector_present": false,
+      "proposer_boost_root": "0x6d9472d95582e9e032cb184cea3c2e5f86ce28e0daa0d96d133948f4553da6f0",
+      "head": "0x6d9472d95582e9e032cb184cea3c2e5f86ce28e0daa0d96d133948f4553da6f0",
+      "head_slot": 8258,
+      "event_count": 1
+    },
+    {
+      "slot": 8290,
+      "block_root": "0x09d1b84e3f0ff12aa6aeb6803d735ae5f5dc4801a925b55810c553a84e316eb4",
+      "snapshot_sha256": "421bd9f352093ec9e29446a047e2d747200acfe96f4d43b40b1e92a2751a12fd",
+      "latest_message_count": 35,
+      "epoch_first": false,
+      "randao_vector_present": false,
+      "proposer_boost_root": "0x09d1b84e3f0ff12aa6aeb6803d735ae5f5dc4801a925b55810c553a84e316eb4",
+      "head": "0x09d1b84e3f0ff12aa6aeb6803d735ae5f5dc4801a925b55810c553a84e316eb4",
+      "head_slot": 8290,
+      "event_count": 1
+    }
+  ]
+}

@@ -2,6 +2,7 @@ package integrity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -10,12 +11,12 @@ import (
 
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 )
 
-func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+func CheckRCacheNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
 	defer func() {
 		log.Info("[integrity] RCacheNoDups: done", "err", err)
 	}()
@@ -30,7 +31,13 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 
 	rcacheDomainProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
 	fromBlock := uint64(1)
-	toBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, rcacheDomainProgress)
+	toBlock, ok, err := txNumsReader.FindBlockNum(ctx, tx, rcacheDomainProgress)
+	if err != nil {
+		return fmt.Errorf("findBlockNum(%d) fails: %w", rcacheDomainProgress, err)
+	}
+	if !ok {
+		return fmt.Errorf("findBlockNum(%d) not found", rcacheDomainProgress)
+	}
 
 	if err := ValidateDomainProgress(ctx, db, kv.RCacheDomain, txNumsReader); err != nil {
 		return err
@@ -38,10 +45,10 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 
 	log.Info("[integrity] RCacheNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 
-	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, "CheckRCacheNoDups", RCacheNoDupsRange)
+	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(RCacheNoDups), rcacheNoDupsRange)
 }
 
-func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+func rcacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool, probs *problems) (err error) {
 	if fromBlock > toBlock {
 		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
 	}
@@ -55,15 +62,12 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 	if err != nil {
 		return err
 	}
-	if toBlock > 0 {
-		toBlock-- // [fromBlock,toBlock)
-	}
-
 	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
 	if err != nil {
 		return err
 	}
 
+	stepSize := tx.Debug().StepSize()
 	prevCumUsedGas := -1
 	expectedFirstLogIdx := uint32(0)
 	blockNum := fromBlock
@@ -98,22 +102,18 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 		logIdx := r.FirstLogIndexWithinBlock
 		exactLogIdx := logIdx == expectedFirstLogIdx
 		if !exactLogIdx && txNum <= _max {
-			err := fmt.Errorf("RCacheNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, expectedFirstLogIdx=%d", txNum, blockNum, _min, _max, logIdx, expectedFirstLogIdx)
-			if failFast {
+			if err := probs.report(failFast, fmt.Errorf("%w: block %d tx %d (txNum %d, step %d): firstLogIndex=%d, want %d", ErrIntegrity, blockNum, txNum-_min-1, txNum, (txNum+1)/stepSize, logIdx, expectedFirstLogIdx)); err != nil {
 				return err
 			}
-			log.Error(err.Error())
 		}
 		expectedFirstLogIdx = logIdx + uint32(len(r.Logs))
 
 		cumUsedGas := r.CumulativeGasUsed
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
 		if !strongMonotonicCumGasUsed && txNum <= _max { // system tx can be skipped
-			err := fmt.Errorf("RCacheNoDups: non-monotonic cumUsedGas at txnum: %d, block: %d(%d-%d), cumUsedGas=%d, prevCumUsedGas=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)
-			if failFast {
+			if err := probs.report(failFast, fmt.Errorf("%w: block %d tx %d (txNum %d, step %d): cumulativeGasUsed=%d, previous tx has %d", ErrIntegrity, blockNum, txNum-_min-1, txNum, (txNum+1)/stepSize, cumUsedGas, prevCumUsedGas)); err != nil {
 				return err
 			}
-			log.Error(err.Error())
 		}
 		prevCumUsedGas = int(cumUsedGas)
 
@@ -129,22 +129,23 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 	return nil
 }
 
-type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) error
+type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool, p *problems) error
 
-func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, prefix string, fn chunkFn) (err error) {
+func parallelChunkCheck(ctx context.Context, sampler *Sampler, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool, prefix string, fn chunkFn) (err error) {
 	blockRange := toBlock - fromBlock + 1
 	if blockRange == 0 {
 		return nil
 	}
 
 	numWorkers := estimate.AlmostAllCPUs()
-	chunkSize := uint64(1000)
+	chunkSize := uint64(100)
 
+	var probs problems
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(numWorkers)
 	var completedChunks atomic.Uint64
 	totalChunks := (blockRange + chunkSize - 1) / chunkSize
-	log.Info("[integrity] CheckRCacheNoDups", "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange)
+	log.Info("[integrity] "+prefix, "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange, "seed", sampler.Seed, "sampleRatio", sampler.SampleRatio)
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -162,26 +163,24 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 		}
 	}()
 
-	// Process chunks in parallel
 	for start := fromBlock; start <= toBlock; start += chunkSize {
+		if sampler.CanSkip() {
+			continue
+		}
 		end := min(start+chunkSize-1, toBlock)
-
-		chunkStart := start // Capture loop variable
-		chunkEnd := end     // Capture loop variable
-
+		chunkStart := start
+		chunkEnd := end
 		g.Go(func() error {
-			chunkErr := fn(ctx, chunkStart, chunkEnd, db, blockReader, failFast)
+			chunkErr := fn(ctx, chunkStart, chunkEnd, db, blockReader, failFast, &probs)
 			if chunkErr != nil {
 				return chunkErr
 			}
-
 			completedChunks.Add(1)
 			return nil
 		})
 	}
 
-	if err := g.Wait(); err != nil {
-		return err
-	}
-	return nil
+	// A chunk that failed operationally must not erase the problems already reported: the count
+	// is what --failFast=false is run for.
+	return errors.Join(g.Wait(), probs.verdict(prefix))
 }

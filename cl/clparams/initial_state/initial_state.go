@@ -17,19 +17,25 @@
 package initial_state
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
-func downloadGenesisState(url string) ([]byte, error) {
-	// Download genesis state by wget the url. MUST NOT RETURN NIL thorugh GET request. use go stnadard library
-	resp, err := http.Get(url)
+func downloadGenesisState(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -38,61 +44,65 @@ func downloadGenesisState(url string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to download genesis state: %s", resp.Status)
 	}
 	return io.ReadAll(resp.Body)
-
 }
 
-//go:embed mainnet.state.ssz
-var mainnetStateSSZ []byte
+//go:embed mainnet.state.ssz.zst
+var mainnetStateCompressed []byte
 
-//go:embed sepolia.state.ssz
-var sepoliaStateSSZ []byte
+//go:embed sepolia.state.ssz.zst
+var sepoliaStateCompressed []byte
 
-//go:embed gnosis.state.ssz
-var gnosisStateSSZ []byte
+//go:embed gnosis.state.ssz.zst
+var gnosisStateCompressed []byte
 
-//go:embed chiado.state.ssz
-var chiadoStateSSZ []byte
+//go:embed chiado.state.ssz.zst
+var chiadoStateCompressed []byte
 
-//go:embed bloatnet.state.ssz
-var bloatnetStateSSZ []byte
+//go:embed bloatnet.state.ssz.zst
+var bloatnetStateCompressed []byte
 
 // Return genesis state
-func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, error) {
+func GetGenesisState(ctx context.Context, network clparams.NetworkType) (*state.CachingBeaconState, error) {
 	_, config := clparams.GetConfigsByNetwork(network)
 	returnState := state.New(config)
 
+	var compressed []byte
+	version := clparams.Phase0Version
 	switch network {
 	case chainspec.MainnetChainID:
-		if err := returnState.DecodeSSZ(mainnetStateSSZ, int(clparams.Phase0Version)); err != nil {
-			return nil, err
-		}
+		compressed = mainnetStateCompressed
 	case chainspec.SepoliaChainID:
-		if err := returnState.DecodeSSZ(sepoliaStateSSZ, int(clparams.Phase0Version)); err != nil {
-			return nil, err
-		}
+		compressed = sepoliaStateCompressed
 	case chainspec.GnosisChainID:
-		if err := returnState.DecodeSSZ(gnosisStateSSZ, int(clparams.Phase0Version)); err != nil {
-			return nil, err
-		}
+		compressed = gnosisStateCompressed
 	case chainspec.ChiadoChainID:
-		if err := returnState.DecodeSSZ(chiadoStateSSZ, int(clparams.Phase0Version)); err != nil {
-			return nil, err
-		}
+		compressed = chiadoStateCompressed
 	case chainspec.HoodiChainID:
 		// Download genesis state by wget the url
-		encodedState, err := downloadGenesisState("https://github.com/eth-clients/hoodi/raw/main/metadata/genesis.ssz")
+		encodedState, err := downloadGenesisState(ctx, "https://github.com/eth-clients/hoodi/raw/main/metadata/genesis.ssz")
 		if err != nil {
 			return nil, err
 		}
 		if err := returnState.DecodeSSZ(encodedState, int(clparams.DenebVersion)); err != nil {
 			return nil, err
 		}
+		return returnState, nil
 	case chainspec.BloatnetNetworkID:
-		if err := returnState.DecodeSSZ(bloatnetStateSSZ, int(clparams.DenebVersion)); err != nil {
-			return nil, err
-		}
+		compressed, version = bloatnetStateCompressed, clparams.ElectraVersion
 	default:
 		return nil, nil
+	}
+	decoder, err := zstd.NewReader(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer decoder.Close()
+	encodedState, err := decoder.DecodeAll(compressed, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := returnState.DecodeSSZ(encodedState, int(version)); err != nil {
+		return nil, err
 	}
 	return returnState, nil
 }

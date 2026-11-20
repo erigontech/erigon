@@ -24,7 +24,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -53,16 +54,24 @@ var migrations = map[kv.Label][]Migration{
 	dbcfg.ChainDB: {
 		dbSchemaVersion5,
 		ResetStageTxnLookup,
+		dbSchemaVersion6,
+		dbSchemaVersion7,
+		dropLegacyE2Tables,
+		createPtcWindowEpochTable,
+		createExecutionPayloadEnvelopeSignaturesTable,
+		dropCodeCacheTable,
 	},
 	dbcfg.TxPoolDB: {},
 	dbcfg.SentryDB: {},
 }
 
-type Callback func(tx kv.RwTx, progress []byte, isDone bool) error
-type Migration struct {
-	Name string
-	Up   func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error
-}
+type (
+	Callback  func(tx kv.RwTx, progress []byte, isDone bool) error
+	Migration struct {
+		Name string
+		Up   func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error
+	}
+)
 
 var (
 	ErrMigrationNonUniqueName   = errors.New("please provide unique migration name")
@@ -76,10 +85,16 @@ var (
 // directory. Only the kv.Migrations table is opened; all other tables are excluded. The DB
 // survives deletion of any other sub-database (e.g. chaindata) so migration state persists
 // across datadir clean-ups.
+//
+// MapSize is capped at 1 GB: the DB only tracks migration names (kilobytes
+// even with thousands of migrations) and the default 2 TB MDBX reservation
+// would otherwise consume process address space at a rate that limits how
+// many engine-api testers can coexist in one process.
 func OpenMigrationsDB(migrationsDir string, logger log.Logger) (kv.RwDB, error) {
 	dir.MustExist(migrationsDir)
 	return kv2.New(dbcfg.MigrationsDB, logger).
 		Path(migrationsDir).
+		MapSize(1 * datasize.GB).
 		Open(context.Background())
 }
 
@@ -103,9 +118,9 @@ func AppliedMigrations(tx kv.Tx, withPayload bool) (map[string][]byte, error) {
 			return nil
 		}
 		if withPayload {
-			applied[string(common.Copy(k))] = common.Copy(v)
+			applied[string(bytes.Clone(k))] = bytes.Clone(v)
 		} else {
-			applied[string(common.Copy(k))] = []byte{}
+			applied[string(bytes.Clone(k))] = []byte{}
 		}
 		return nil
 	})
@@ -164,18 +179,15 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 			return fmt.Errorf("reading DB schema version: %w", err)
 		}
 		if ok {
-			if major > kv.DBSchemaVersion.Major {
-				return fmt.Errorf("cannot downgrade major DB version from %d to %d", major, kv.DBSchemaVersion.Major)
-			} else if major == kv.DBSchemaVersion.Major {
-				if minor > kv.DBSchemaVersion.Minor {
-					return fmt.Errorf("cannot downgrade minor DB version from %d.%d to %d.%d", major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Major)
-				}
-			} else {
-				if kv.DBSchemaVersion.Major != major {
-					return fmt.Errorf(
-						"cannot switch major DB version, db: %d, erigon: %d, try \"rm -rf %s\" if you are sure that you are running right version of erigon on right datadir",
-						major, kv.DBSchemaVersion.Major, chaindata)
-				}
+			switch {
+			case major > kv.DBSchemaVersion.Major || major == kv.DBSchemaVersion.Major && minor > kv.DBSchemaVersion.Minor:
+				return fmt.Errorf("%s was written by a newer Erigon (DB schema %d.%d), this Erigon supports %d.%d: run the newer Erigon, or remove %s to rebuild it from snapshots",
+					chaindata, major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Minor, chaindata)
+			case major < kv.DBSchemaVersion.Major:
+				return fmt.Errorf(
+					"cannot switch major DB version, db: %d, erigon: %d, try \"rm -rf %s\" if you are sure that you are running right version of erigon on right datadir",
+					major, kv.DBSchemaVersion.Major, chaindata,
+				)
 			}
 		}
 		return nil
@@ -184,6 +196,15 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 	}
 
 	return nil
+}
+
+// StampVersion refuses a DB from a newer schema, then marks it with this binary's schema.
+// It runs on every open: applied migrations are recorded outside chaindata, so a re-created chaindata has no pending ones.
+func (m *Migrator) StampVersion(db kv.RwDB, chaindata string) error {
+	if err := m.VerifyVersion(db, chaindata); err != nil {
+		return err
+	}
+	return db.Update(context.Background(), rawdb.WriteDBSchemaVersion)
 }
 
 // Apply runs all pending migrations in order.
@@ -231,6 +252,7 @@ func (m *Migrator) Apply(db kv.RwDB, migrationsDB kv.RwDB, dataDir, chaindata st
 		}
 
 		callbackCalled := false // commit function must be called if no error, protection against people's mistake
+		var stagesProgress []byte
 
 		logger.Info("Apply migration", "name", v.Name)
 		var progress []byte
@@ -258,24 +280,25 @@ func (m *Migrator) Apply(db kv.RwDB, migrationsDB kv.RwDB, dataDir, chaindata st
 			}
 			callbackCalled = true
 
-			// Capture the target DB's stage state for bug-report context, then record
-			// the migration as complete in the migrations-tracking DB.
-			stagesProgress, err := json.Marshal(tx)
-			if err != nil {
-				return err
-			}
-			return migrationsDB.Update(context.Background(), func(migTx kv.RwTx) error {
-				if err := migTx.Put(kv.Migrations, []byte(v.Name), stagesProgress); err != nil {
-					return err
-				}
-				return migTx.Delete(kv.Migrations, []byte("_progress_"+v.Name))
-			})
+			// Capture the target DB's stage state for bug-report context.
+			var err error
+			stagesProgress, err = json.Marshal(tx)
+			return err
 		}, logger); err != nil {
 			return fmt.Errorf("migrator.Apply.Up: %s, %w", v.Name, err)
 		}
 
 		if !callbackCalled {
 			return fmt.Errorf("%w: %s", ErrMigrationCommitNotCalled, v.Name)
+		}
+		// Recorded only after Up committed: the migrations DB is a separate env.
+		if err := migrationsDB.Update(context.Background(), func(migTx kv.RwTx) error {
+			if err := migTx.Put(kv.Migrations, []byte(v.Name), stagesProgress); err != nil {
+				return err
+			}
+			return migTx.Delete(kv.Migrations, []byte("_progress_"+v.Name))
+		}); err != nil {
+			return fmt.Errorf("migrator.Apply: %s, %w", v.Name, err)
 		}
 		logger.Info("Applied migration", "name", v.Name)
 	}

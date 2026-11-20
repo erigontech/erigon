@@ -25,8 +25,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -37,7 +39,7 @@ func TestCompressEmptyDict(t *testing.T) {
 	file := filepath.Join(tmpDir, "compressed")
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 100
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,14 +99,14 @@ func prepareDictMetadata(t testing.TB, multiplier int, hasMetadata bool, metadat
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
 	cfg.ExpectMetadata = hasMetadata
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
 	k := bytes.Repeat([]byte("long"), multiplier)
 	v := bytes.Repeat([]byte("word"), multiplier)
-	for i := 0; i < keys; i++ {
+	for i := range keys {
 		if err = c.AddWord(nil); err != nil {
 			panic(err)
 		}
@@ -274,6 +276,12 @@ func Test_CompressWithMetadata(t *testing.T) {
 	d := prepareDictMetadata(t, 1, true, metadata, 100)
 	defer d.Close()
 	require.Equal(t, metadata, d.GetMetadata())
+	prefixLen := uint64(2 + 4 + len(metadata))
+	if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
+		prefixLen++
+	}
+	require.Equal(t, prefixLen+d.wordsStart, d.wordsFileOffset)
+	require.Equal(t, d.wordsFileOffset, d.MakeGetter().dataOffset)
 	g := d.MakeGetter()
 	i := 0
 	g.Reset(0)
@@ -341,7 +349,7 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, DefaultCfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, DefaultCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 
@@ -352,7 +360,8 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	}
 	for i := range 100 {
 		// Semantic: "empty word" means "found key with empty value". "nil" - means key was deleted - not encodable by compressor
-		words = append(words,
+		words = append(
+			words,
 			nil,
 			[]byte{},
 
@@ -387,4 +396,168 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	if cs := checksum(file); cs != 1879837905 {
 		t.Errorf("fast-path output differs from main, checksum=%d", cs)
 	}
+}
+
+// The number of superstring windows a file is split into is a property of the data, so it
+// must not depend on SamplingFactor — sampling only selects which windows feed the dict.
+func TestCompressSamplingCoversWholeFile(t *testing.T) {
+	const word = "mykeyabc"
+	const nWords = 5000
+
+	windowCount := func(samplingFactor uint64) uint64 {
+		logger := log.New()
+		tmpDir := t.TempDir()
+		file := filepath.Join(tmpDir, "compressed")
+		cfg := DefaultCfg
+		cfg.MinPatternScore = 1
+		cfg.SamplingFactor = samplingFactor
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		require.NoError(t, err)
+		defer c.Close()
+		c.superstringLimit = 1000
+
+		for range nWords {
+			require.NoError(t, c.AddWord([]byte(word)))
+		}
+		count := c.superstringCount
+		require.NoError(t, c.Compress())
+
+		d, err := NewDecompressor(file)
+		require.NoError(t, err)
+		defer d.Close()
+		require.EqualValues(t, nWords, d.Count())
+		return count
+	}
+
+	full := windowCount(1)
+	require.Greater(t, full, uint64(1))
+	require.Equal(t, full, windowCount(4))
+	require.Equal(t, full, windowCount(8))
+}
+
+// Close must reclaim the pattern workers NewCompressor started. A caller that
+// gives up between NewCompressor and Compress leaks one goroutine per worker,
+// each pinning its suffix-array buffers, for the lifetime of the parent context.
+func TestCompressorCloseReleasesWorkers(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	c, err := NewCompressor(t.Context(), t.Name(), filepath.Join(tmpDir, "compressed"), tmpDir, DefaultCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	require.NoError(t, c.AddWord([]byte("word")))
+
+	c.Close()
+
+	done := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close() returned while pattern workers are still running")
+	}
+}
+
+// newCompressorWithStoppedWorkers returns a compressor whose context is already cancelled and
+// whose pattern workers have exited, so nothing reads the superstrings channel any more.
+// It is not closed on test failure: Close would close the channel under a still-blocked sender.
+func newCompressorWithStoppedWorkers(t *testing.T) *Compressor {
+	t.Helper()
+	tmpDir := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	cfg := DefaultCfg
+	cfg.SamplingFactor = 1
+	c, err := NewCompressor(ctx, t.Name(), filepath.Join(tmpDir, "compressed"), tmpDir, cfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if !t.Failed() {
+			c.Close()
+		}
+	})
+	c.superstringLimit = 1000
+
+	cancel()
+	c.wg.Wait()
+	return c
+}
+
+func requireReturnsWithin(t *testing.T, timeout time.Duration, f func() error) error {
+	t.Helper()
+	errCh := make(chan error, 1)
+	go func() { errCh <- f() }()
+	select {
+	case err := <-errCh:
+		return err
+	case <-time.After(timeout):
+		t.Fatal("blocked after context cancel")
+		return nil
+	}
+}
+
+func TestCompressorAddWordReturnsAfterCancel(t *testing.T) {
+	c := newCompressorWithStoppedWorkers(t)
+	word := bytes.Repeat([]byte{'a'}, 100)
+
+	err := requireReturnsWithin(t, 10*time.Second, func() error {
+		for range 2048 {
+			if err := c.AddWord(word); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestCompressorCompressReturnsAfterCancel(t *testing.T) {
+	c := newCompressorWithStoppedWorkers(t)
+	for len(c.superstrings) < cap(c.superstrings) {
+		c.superstrings <- []uint16{1}
+	}
+	c.superstring = []uint16{1}
+
+	err := requireReturnsWithin(t, 10*time.Second, c.Compress)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestParseFileCompression(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want FileCompression
+	}{
+		{"none", CompressNone},
+		{"k", CompressKeys},
+		{"v", CompressVals},
+		{"kv", CompressKeys | CompressVals},
+	} {
+		got, err := ParseFileCompression(tc.in)
+		require.NoError(t, err)
+		require.Equalf(t, tc.want, got, "%q", tc.in)
+	}
+	_, err := ParseFileCompression("zstd")
+	require.Error(t, err)
+}
+
+func TestCompressWithPatternCandidatesStopsWorkersOnCancel(t *testing.T) {
+	tmpDir := t.TempDir()
+	raw, err := NewRawWordsFile(filepath.Join(tmpDir, "raw"))
+	require.NoError(t, err)
+	defer raw.CloseAndRemove()
+	for i := range 4096 {
+		require.NoError(t, raw.Append(fmt.Appendf(nil, "word %d", i)))
+	}
+	require.NoError(t, raw.Flush())
+	cf, err := os.Create(filepath.Join(tmpDir, "out"))
+	require.NoError(t, err)
+	defer cf.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	cfg := DefaultCfg
+	cfg.Workers = 4
+	running := goleak.IgnoreCurrent()
+	err = compressWithPatternCandidates(ctx, false, cfg, t.Name(), filepath.Join(tmpDir, "seg"), cf, raw, &DictionaryBuilder{}, log.LvlDebug, log.New())
+	require.ErrorIs(t, err, context.Canceled)
+	goleak.VerifyNone(t, running)
 }

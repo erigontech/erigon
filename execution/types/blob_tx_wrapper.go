@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"math/bits"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
@@ -39,13 +38,17 @@ const (
 	LEN_48 = 48 // KZGCommitment & KZGProof sizes
 )
 
-type KZGCommitment [LEN_48]byte // Compressed BLS12-381 G1 element
-type KZGProof [LEN_48]byte
-type Blob [params.BlobSize]byte
+type (
+	KZGCommitment [LEN_48]byte // Compressed BLS12-381 G1 element
+	KZGProof      [LEN_48]byte
+	Blob          [params.BlobSize]byte
+)
 
-type BlobKzgs []KZGCommitment
-type KZGProofs []KZGProof
-type Blobs []Blob
+type (
+	BlobKzgs  []KZGCommitment
+	KZGProofs []KZGProof
+	Blobs     []Blob
+)
 
 type BlobTxWrapper struct {
 	Tx             BlobTx
@@ -77,7 +80,7 @@ func (li BlobKzgs) payloadSize() int {
 }
 
 func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	for _, cmtmt := range li {
@@ -93,22 +96,16 @@ func (li *BlobKzgs) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return fmt.Errorf("open BlobKzgs (Commitments): %w", err)
 	}
-	var b []byte
-	cmtmt := KZGCommitment{}
-
-	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-		if len(b) == LEN_48 {
-			copy((cmtmt)[:], b)
-			*li = append(*li, cmtmt)
-		} else {
-			return fmt.Errorf("wrong size for BlobKzgs (Commitments): %d, %v", len(b), b[0])
+	for s.MoreDataInList() {
+		var cmtmt KZGCommitment
+		if err = s.ReadBytes(cmtmt[:]); err != nil {
+			return fmt.Errorf("read BlobKzgs (Commitment): %w", err)
 		}
+		*li = append(*li, cmtmt)
 	}
-
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close BlobKzgs (Commitments): %w", err)
 	}
-
 	return nil
 }
 
@@ -125,7 +122,7 @@ func (li KZGProofs) payloadSize() int {
 }
 
 func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	for _, proof := range li {
@@ -138,26 +135,19 @@ func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 
 func (li *KZGProofs) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
-
 	if err != nil {
 		return fmt.Errorf("open KZGProofs (Proofs): %w", err)
 	}
-	var b []byte
-	proof := KZGProof{}
-
-	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-		if len(b) == LEN_48 {
-			copy((proof)[:], b)
-			*li = append(*li, proof)
-		} else {
-			return fmt.Errorf("wrong size for KZGProofs (Proofs): %d, %v", len(b), b[0])
+	for s.MoreDataInList() {
+		var proof KZGProof
+		if err = s.ReadBytes(proof[:]); err != nil {
+			return fmt.Errorf("read KZGProof: %w", err)
 		}
+		*li = append(*li, proof)
 	}
-
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close KZGProofs (Proofs): %w", err)
 	}
-
 	return nil
 }
 
@@ -177,11 +167,11 @@ func (blobs Blobs) payloadSize() int {
 }
 
 func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
-	for _, blob := range blobs {
-		if err := rlp.EncodeString(blob[:], w, b); err != nil {
+	for i := range blobs {
+		if err := rlp.EncodeString(blobs[i][:], w, b); err != nil {
 			return err
 		}
 	}
@@ -193,22 +183,16 @@ func (blobs *Blobs) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return fmt.Errorf("open Blobs: %w", err)
 	}
-	var b []byte
-	blob := Blob{}
-
-	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-		if len(b) == params.BlobSize {
-			copy((blob)[:], b)
-			*blobs = append(*blobs, blob)
-		} else {
-			return fmt.Errorf("wrong size for Blobs: %d, %v", len(b), b[0])
+	for s.MoreDataInList() {
+		var blob Blob
+		if err = s.ReadBytes(blob[:]); err != nil {
+			return fmt.Errorf("read Blob: %w", err)
 		}
+		*blobs = append(*blobs, blob)
 	}
-
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close Blobs: %w", err)
 	}
-
 	return nil
 }
 
@@ -219,7 +203,7 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	versionedHashes = make([]common.Hash, len(blobs))
 
 	kzgCtx := libkzg.Ctx()
-	for i := 0; i < len(blobs); i++ {
+	for i := range blobs {
 		commitment, err := kzgCtx.BlobToKZGCommitment((*goethkzg.Blob)(&blobs[i]), 1 /*numGoRoutines*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not convert blob to commitment: %w", err)
@@ -237,6 +221,36 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	return commitments, versionedHashes, proofs, nil
 }
 
+// ComputeCommitments returns the KZG commitments of the blobs.
+func (blobs Blobs) ComputeCommitments() ([]KZGCommitment, error) {
+	commitments := make([]KZGCommitment, len(blobs))
+	kzgCtx := libkzg.Ctx()
+	for i := range blobs {
+		commitment, err := kzgCtx.BlobToKZGCommitment((*goethkzg.Blob)(&blobs[i]), 1 /*numGoRoutines*/)
+		if err != nil {
+			return nil, fmt.Errorf("could not convert blob to commitment: %w", err)
+		}
+		commitments[i] = KZGCommitment(commitment)
+	}
+	return commitments, nil
+}
+
+// ComputeCellProofs returns the EIP-7594 cell proofs of the blobs, CellsPerExtBlob per blob.
+func (blobs Blobs) ComputeCellProofs() (KZGProofs, error) {
+	kzgCtx := libkzg.Ctx()
+	cellProofs := make(KZGProofs, 0, len(blobs)*int(params.CellsPerExtBlob))
+	for i := range blobs {
+		_, proofs, err := kzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&blobs[i]), 4)
+		if err != nil {
+			return nil, fmt.Errorf("compute cell proofs for blob %d: %w", i, err)
+		}
+		for _, p := range &proofs {
+			cellProofs = append(cellProofs, KZGProof(p))
+		}
+	}
+	return cellProofs, nil
+}
+
 func toBlobs(_blobs Blobs) []*goethkzg.Blob {
 	blobs := make([]*goethkzg.Blob, len(_blobs))
 	for i := range _blobs {
@@ -244,6 +258,7 @@ func toBlobs(_blobs Blobs) []*goethkzg.Blob {
 	}
 	return blobs
 }
+
 func toComms(_comms BlobKzgs) []goethkzg.KZGCommitment {
 	comms := make([]goethkzg.KZGCommitment, len(_comms))
 	for i, _comm := range _comms {
@@ -251,6 +266,7 @@ func toComms(_comms BlobKzgs) []goethkzg.KZGCommitment {
 	}
 	return comms
 }
+
 func toProofs(_proofs KZGProofs) []goethkzg.KZGProof {
 	proofs := make([]goethkzg.KZGProof, len(_proofs))
 	for i, _proof := range _proofs {
@@ -264,6 +280,24 @@ func (c KZGCommitment) ComputeVersionedHash() common.Hash {
 }
 
 /* BlobTxWrapper methods */
+
+// WithSidecar returns a copy of btx wrapped with the sidecar of sc.
+func (btx *BlobTx) WithSidecar(sc *BlobTxWrapper) *BlobTxWrapper {
+	return &BlobTxWrapper{Tx: btx.copyData(), WrapperVersion: sc.WrapperVersion, Blobs: sc.Blobs, Commitments: sc.Commitments, Proofs: sc.Proofs}
+}
+
+// VerifyProofs checks the KZG proofs against the blobs and commitments: cell proofs
+// for wrapper version 1, one blob proof per blob otherwise.
+func (txw *BlobTxWrapper) VerifyProofs() error {
+	if txw.WrapperVersion == 1 {
+		blobs := make([][]byte, len(txw.Blobs))
+		for i := range txw.Blobs {
+			blobs[i] = txw.Blobs[i][:]
+		}
+		return libkzg.VerifyCellProofBatch(blobs, toComms(txw.Commitments), toProofs(txw.Proofs))
+	}
+	return libkzg.Ctx().VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.Commitments), toProofs(txw.Proofs))
+}
 
 // validateBlobTransactionWrapper implements validate_blob_transaction_wrapper from EIP-4844
 func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
@@ -295,7 +329,7 @@ func (txw *BlobTxWrapper) Type() byte               { return txw.Tx.Type() }
 func (txw *BlobTxWrapper) GetChainID() *uint256.Int { return txw.Tx.GetChainID() }
 func (txw *BlobTxWrapper) GetNonce() uint64         { return txw.Tx.GetNonce() }
 func (txw *BlobTxWrapper) GetTipCap() *uint256.Int  { return txw.Tx.GetTipCap() }
-func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int {
 	return txw.Tx.GetEffectiveGasTip(baseFee)
 }
 func (txw *BlobTxWrapper) GetFeeCap() *uint256.Int { return txw.Tx.GetFeeCap() }
@@ -331,7 +365,7 @@ func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction,
 
 func (txw *BlobTxWrapper) Hash() common.Hash { return txw.Tx.Hash() }
 
-func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) common.Hash {
+func (txw *BlobTxWrapper) SigningHash(chainID *uint256.Int) common.Hash {
 	return txw.Tx.SigningHash(chainID)
 }
 
@@ -401,6 +435,7 @@ func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 func (txw *BlobTxWrapper) EncodingSize() int {
 	return txw.Tx.EncodingSize()
 }
+
 func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
 	l, _, _ := txw.Tx.payloadSize()
 	payloadSize += l + rlp.ListPrefixLen(l)
@@ -415,16 +450,17 @@ func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
 	payloadSize += l + rlp.ListPrefixLen(l)
 	return
 }
+
 func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// encode TxType
 	b[0] = BlobTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
 	payloadSize := txw.payloadSize()
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	bw := bytes.Buffer{}
@@ -451,9 +487,39 @@ func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
 	}
 	return nil
 }
+
+// ConvertToV1 converts a legacy (wrapper_version=0) blob sidecar into
+// wrapper_version=1 by computing EIP-7594 cell proofs from the blobs.
+// Returns the re-encoded wrapped transaction bytes.
+// TODO: remove once ecosystem tooling fully supports wrapper_version=1.
+func (txw *BlobTxWrapper) ConvertToV1() ([]byte, error) {
+	cellProofs, err := txw.Blobs.ComputeCellProofs()
+	if err != nil {
+		return nil, err
+	}
+
+	// Mutate in-place for marshalling, then restore.
+	origVersion := txw.WrapperVersion
+	origProofs := txw.Proofs
+	txw.WrapperVersion = 1
+	txw.Proofs = cellProofs
+
+	var buf bytes.Buffer
+	err = txw.MarshalBinaryWrapped(&buf)
+
+	txw.WrapperVersion = origVersion
+	txw.Proofs = origProofs
+
+	if err != nil {
+		return nil, fmt.Errorf("marshal converted wrapper: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
 func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
 	return txw.Tx.MarshalBinary(w)
 }
+
 func (txw *BlobTxWrapper) EncodeRLP(w io.Writer) error {
 	return txw.Tx.EncodeRLP(w)
 }

@@ -20,9 +20,6 @@ import (
 	"bytes"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
-
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 // Given a ChunkLocator, moves forward over the chunks and inside each chunk, moves
@@ -116,9 +113,4 @@ func NewForwardBlockProvider(chunkLocator ChunkLocator, minBlock uint64) BlockPr
 
 		return nextBlock, hasNext, nil
 	}
-}
-
-func NewCallCursorForwardBlockProvider(cursor kv.Cursor, addr common.Address, minBlock uint64) BlockProvider {
-	chunkLocator := newCallChunkLocator(cursor, addr, true)
-	return NewForwardBlockProvider(chunkLocator, minBlock)
 }

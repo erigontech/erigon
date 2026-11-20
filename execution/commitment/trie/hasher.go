@@ -26,17 +26,20 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
 type hasher struct {
-	sha                  keccak.KeccakState
+	sha      keccak.KeccakState
+	bw       *ByteArrayWriter
+	callback func(common.Hash, Node)
+
 	valueNodesRlpEncoded bool
-	buffers              [1024 * 1024]byte
 	prefixBuf            [8]byte
-	bw                   *ByteArrayWriter
-	callback             func(common.Hash, Node)
+	buffers              [1024 * 1024]byte
 }
 
 const rlpPrefixLength = 4
@@ -50,22 +53,12 @@ var hashersPool = sync.Pool{
 	},
 }
 
-// hash or if RLP < 32 bytes --> RLP
-func CalcNodeHash(n Node) ([]byte, error) {
-	h := newHasher(false)
-	var hn common.Hash
-	_, err := h.hash(n, false, hn[:])
-	if err != nil {
-		return nil, err
-	}
-	return hn[:], nil
-}
-
 func newHasher(valueNodesRlpEncoded bool) *hasher {
 	h := hashersPool.Get().(*hasher)
 	h.valueNodesRlpEncoded = valueNodesRlpEncoded
 	return h
 }
+
 func returnHasherToPool(h *hasher) {
 	h.callback = nil
 	hashersPool.Put(h)
@@ -128,20 +121,21 @@ func (h *hasher) hashInternal(n Node, force bool, storeTo []byte, bufOffset int)
 
 func writeRlpPrefix(buffer []byte, pos int) []byte {
 	serLength := pos - rlpPrefixLength
-	if serLength < 56 {
+	switch {
+	case serLength < 56:
 		buffer[3] = byte(192 + serLength)
 		return buffer[3:pos]
-	} else if serLength < 256 {
+	case serLength < 256:
 		// serLength can be encoded as 1 byte
 		buffer[3] = byte(serLength)
 		buffer[2] = byte(247 + 1)
 		return buffer[2:pos]
-	} else if serLength < 65536 {
+	case serLength < 65536:
 		buffer[3] = byte(serLength & 255)
 		buffer[2] = byte(serLength >> 8)
 		buffer[1] = byte(247 + 2)
 		return buffer[1:pos]
-	} else {
+	default:
 		buffer[3] = byte(serLength & 255)
 		buffer[2] = byte((serLength >> 8) & 255)
 		buffer[1] = byte(serLength >> 16)
@@ -162,9 +156,9 @@ func (h *hasher) hashChildren(original Node, bufOffset int) ([]byte, error) {
 	case *ShortNode:
 		// Starting at position 3, to leave space for len prefix
 		// Encode key
-		compactKey := hexToCompact(n.Key)
+		compactKey := nibbles.HexToCompact(n.Key)
 		h.bw.Setup(buffer, pos)
-		written, err := rlp.EncodeByteArrayAsRlp(compactKey, h.bw, h.prefixBuf[:])
+		written, err := rlp.EncodeStringWithLen(compactKey, h.bw, h.prefixBuf[:])
 		if err != nil {
 			return nil, err
 		}
@@ -181,7 +175,7 @@ func (h *hasher) hashChildren(original Node, bufOffset int) ([]byte, error) {
 		} else if ac, ok := n.Val.(*AccountNode); ok {
 			// Hashing the storage trie if necessary
 			if ac.Storage == nil {
-				ac.Root = EmptyRoot
+				ac.Root = empty.RootHash
 			} else {
 				_, err := h.hashInternal(ac.Storage, true, ac.Root[:], bufOffset+pos)
 				if err != nil {
@@ -205,7 +199,7 @@ func (h *hasher) hashChildren(original Node, bufOffset int) ([]byte, error) {
 
 	case *DuoNode:
 		i1, i2 := n.childrenIdx()
-		for i := 0; i < 17; i++ {
+		for i := range 17 {
 			var child Node
 
 			if i == int(i1) {
@@ -298,7 +292,18 @@ func (h *hasher) valueNodeToBuffer(vn ValueNode, buffer []byte, pos int) (int, e
 }
 
 func (h *hasher) accountNodeToBuffer(ac *AccountNode, buffer []byte, pos int) (int, error) {
-	acRlp := make([]byte, ac.EncodingLengthForHashing())
+	encLen := int(ac.EncodingLengthForHashing())
+	const accountRlpScratchSize = 128
+	// Reuse the end of the pre-allocated buffers to avoid heap allocation when
+	// the account RLP fits in the scratch region. Fall back to a dedicated
+	// allocation if the encoding grows beyond the scratch capacity.
+	var acRlp []byte
+	if encLen <= accountRlpScratchSize && len(h.buffers) >= accountRlpScratchSize {
+		start := len(h.buffers) - accountRlpScratchSize
+		acRlp = h.buffers[start : start+encLen]
+	} else {
+		acRlp = make([]byte, encLen)
+	}
 	ac.EncodeForHashing(acRlp)
 	enc := rlp.RlpEncodedBytes(acRlp)
 	h.bw.Setup(buffer, pos)
@@ -315,7 +320,7 @@ func (h *hasher) accountNodeToBuffer(ac *AccountNode, buffer []byte, pos int) (i
 // force enforces the hashing even for short RLPs.
 func (h *hasher) nodeRef(nodeRlp []byte, force bool, storeTo []byte) (int, error) {
 	if nodeRlp == nil {
-		copy(storeTo, emptyHash[:])
+		clear(storeTo[:32])
 		return 32, nil
 	}
 	if len(nodeRlp) < 32 && !force {

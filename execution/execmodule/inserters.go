@@ -18,115 +18,170 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"math/big"
+	"time"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/execmodule/moduleutil"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 )
 
-func (e *ExecModule) InsertBlocks(ctx context.Context, req *executionproto.InsertBlocksRequest) (*executionproto.InsertionResult, error) {
-	if !e.semaphore.TryAcquire(1) {
-		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
-		return &executionproto.InsertionResult{
-			Result: executionproto.ExecutionStatus_Busy,
-		}, nil
+// flushBlockOverlayToDB flushes the block overlay to DB, bounding memory
+// during bulk inserts. Not called for single-block chain-tip inserts.
+// It drops the whole module SD: RPC and getter views fall back to the
+// FCU-published SD only while currentContext is nil.
+func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.SharedDomains) error {
+	overlay := sd.BlockOverlay()
+	if overlay == nil {
+		return nil
+	}
+	rwTx, err := e.db.BeginTemporalRw(ctx)
+	if err != nil {
+		return fmt.Errorf("ethereumExecutionModule.InsertBlocks: begin rw for overlay flush: %w", err)
+	}
+	defer rwTx.Rollback()
+	if err := overlay.Flush(ctx, rwTx); err != nil {
+		return fmt.Errorf("ethereumExecutionModule.InsertBlocks: flush overlay: %w", err)
+	}
+	if err := rwTx.Commit(); err != nil {
+		return fmt.Errorf("ethereumExecutionModule.InsertBlocks: commit overlay: %w", err)
+	}
+	e.closeModuleContext()
+	return nil
+}
+
+func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (ExecutionStatus, error) {
+	// Serialize behind any in-flight exec-module op, blocking rather than failing fast with Busy.
+	start := time.Now()
+	// Timed across the whole call so the metric includes semaphore wait.
+	defer insertBlocksDuration.ObserveDuration(start)
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: semaphore acquire: %w", err)
 	}
 	defer e.semaphore.Release(1)
-	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
+	e.logger.Debug("ethereumExecutionModule.InsertBlocks: semaphore acquired", "wait", time.Since(start))
+	e.forkValidator.ClearWithUnwind()
 	frozenBlocks := e.blockReader.FrozenBlocks()
 
-	tx, err := e.db.BeginRw(ctx)
+	// Open a read-only tx for the base data; writes accumulate in the
+	// SharedDomains block overlay and are flushed via a brief RwTx.
+	roTx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
+		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer roTx.Rollback()
 
-	type balKey struct {
-		hash   common.Hash
-		number uint64
-	}
-	balEntries := make(map[balKey]*executionproto.BlockAccessListEntry, len(req.BlockAccessLists))
-	for _, entry := range req.BlockAccessLists {
-		if entry == nil || entry.BlockHash == nil {
-			continue
+	// Ensure currentContext has a block overlay for accumulating writes.
+	sd := e.currentContext
+	if sd == nil {
+		sd, err = execctx.NewSharedDomains(ctx, roTx, e.logger)
+		// ErrBehindCommitment is tolerated: sd is usable, catch-up drives txNums forward.
+		if err != nil {
+			if !errors.Is(err, commitmentdb.ErrBehindCommitment) {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %w", err)
+			}
+			e.logger.Info("ethereumExecutionModule.InsertBlocks: state ahead of blocks, proceeding with catch-up", "err", err)
 		}
-		hash := gointerfaces.ConvertH256ToHash(entry.BlockHash)
-		balEntries[balKey{hash: hash, number: entry.BlockNumber}] = entry
+		e.lock.Lock()
+		e.currentContext = sd
+		e.lock.Unlock()
 	}
+	if sd.BlockOverlay() == nil {
+		if err := sd.InitBlockOverlay(roTx); err != nil {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
+		}
+	} else {
+		sd.BlockOverlay().UpdateTxn(roTx)
+	}
+	blockOverlay := sd.BlockOverlay()
 
-	for _, block := range req.Blocks {
-		// Skip frozen blocks.
-		if block.Header.BlockNumber < frozenBlocks {
-			continue
-		}
-		header, err := moduleutil.HeaderRpcToHeader(block.Header)
-		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert headers: %s", err)
-		}
-		body, err := moduleutil.ConvertRawBlockBodyFromRpc(block.Body)
-		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert body: %s", err)
-		}
-		rawBlock := types.RawBlock{Header: header, Body: body}
-		err = rawBlock.ValidateMaxRlpSize(e.config)
-		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: max rlp size validation: %w", err)
-		}
-		var parentTd *big.Int
+	for _, block := range blocks {
+		header := block.HeaderNoCopy()
 		height := header.Number.Uint64()
+
+		// Skip frozen blocks.
+		if height < frozenBlocks {
+			continue
+		}
+
+		body := block.RawBody()
+		rawBlock := types.RawBlock{Header: header, Body: body}
+		if err := rawBlock.ValidateMaxRlpSize(e.config); err != nil {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: max rlp size validation: %w", err)
+		}
+		blockAccessList := block.BlockAccessListSidecar()
+		var blockAccessListBytes []byte
+		var blockAccessListHash common.Hash
+		if blockAccessList != nil {
+			if header.BlockAccessListHash == nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
+			}
+			if err := blockAccessList.ValidateForBlock(header.GasLimit, len(block.Transactions())); err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: validateBlockAccessList, block %d: %w", height, err)
+			}
+			blockAccessListBytes, err = blockAccessList.Bytes()
+			if err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: encodeBlockAccessList, block %d: %w", height, err)
+			}
+			blockAccessListHash, err = blockAccessList.Hash()
+			if err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: hash block access list, block %d: %w", height, err)
+			}
+			if blockAccessListHash != *header.BlockAccessListHash {
+				return 0, fmt.Errorf("%w: block %d block access list hash mismatch: got %s, want %s", types.ErrInvalidBlockAccessList, height, blockAccessListHash, *header.BlockAccessListHash)
+			}
+		}
+
+		var parentTd *uint256.Int
 		if height > 0 {
-			// Parent's total difficulty
-			parentTd, err = rawdb.ReadTd(tx, header.ParentHash, height-1)
+			// Parent's total difficulty — reads from overlay first, then base RO tx.
+			parentTd, err = rawdb.ReadTd(blockOverlay, header.ParentHash, height-1)
 			if err != nil || parentTd == nil {
-				return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
+				return 0, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %w", header.ParentHash, height-1, err)
 			}
 		} else {
-			parentTd = big.NewInt(0)
+			parentTd = new(uint256.Int)
 		}
 
 		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height, e.logger)
 		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height, e.logger)
 
 		// Sum TDs.
-		td := parentTd.Add(parentTd, header.Difficulty.ToBig())
-		if err := rawdb.WriteHeader(tx, header); err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
+		blockHash := header.Hash()
+		var td uint256.Int
+		if _, overflow := td.AddOverflow(parentTd, &header.Difficulty); overflow {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: TD overflows uint256 at height %d hash %x", height, blockHash)
 		}
-		if err := rawdb.WriteTd(tx, header.Hash(), height, td); err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %s", err)
+		if err := rawdb.WriteHeader(blockOverlay, header); err != nil {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %w", err)
 		}
-		if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), height, body); err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
+		if err := rawdb.WriteTd(blockOverlay, blockHash, height, td); err != nil {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %w", err)
 		}
-		key := balKey{hash: header.Hash(), number: height}
-		if entry, ok := balEntries[key]; ok && entry != nil {
-			if header.BlockAccessListHash == nil {
-				return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
+		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, blockHash, height, body); err != nil {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %w", err)
+		}
+		if blockAccessList != nil {
+			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, blockHash, height, blockAccessListBytes); err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %w", height, err)
 			}
-			balBytes := entry.BlockAccessList
-			if len(balBytes) == 0 {
-				balBytes, err = types.EncodeBlockAccessListBytes(nil)
-				if err != nil {
-					return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: encode empty block access list, block %d: %s", height, err)
-				}
-			}
-			if err := rawdb.WriteBlockAccessListBytes(tx, header.Hash(), height, balBytes); err != nil {
-				return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
-			}
+			e.readAheader.AddBlockAccessList(blockHash, blockAccessList)
 		}
-		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not commit: %s", err)
+		e.logger.Trace("Inserted block", "hash", blockHash, "number", header.Number)
 	}
 
-	return &executionproto.InsertionResult{
-		Result: executionproto.ExecutionStatus_Success,
-	}, nil
+	// On ChainTip - store blocks in Overlay
+	// On Non-ChainTip - flush to db because batches are big
+	if len(blocks) > 16 {
+		if err := e.flushBlockOverlayToDB(ctx, sd); err != nil {
+			return 0, err
+		}
+	}
+	return ExecutionStatusSuccess, nil
 }

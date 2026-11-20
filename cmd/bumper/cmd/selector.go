@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -25,6 +25,10 @@ type SelectorModel struct {
 	confirmMode    bool
 	canceled       bool
 	domainTypesMap map[string]string
+
+	width      int
+	height     int
+	viewOffset int
 }
 
 // NewSelectorModel initializes based on include/exclude lists
@@ -34,8 +38,15 @@ func NewSelectorModel(includeDomains, includeExts, excludeDomains, excludeExts [
 	exts = append(exts, extCfgMap[domainType]...)
 	exts = append(exts, extCfgMap[idxType]...)
 
+	sel := initialSelection(domains, res, includeDomains, includeExts, excludeDomains, excludeExts)
+	return &SelectorModel{domains: domains, exts: exts, selected: sel, domainTypesMap: res}
+}
+
+// initialSelection returns the domains and extensions to pre-select. Each
+// include filter acts as a whitelist when non-empty; otherwise the matching
+// exclude filter acts as a blacklist.
+func initialSelection(domains []string, domainTypes map[string]string, includeDomains, includeExts, excludeDomains, excludeExts []string) map[string]struct{} {
 	sel := map[string]struct{}{}
-	// determine domains to show
 	for _, d := range domains {
 		if len(includeDomains) > 0 {
 			if slices.Contains(includeDomains, d) {
@@ -45,25 +56,30 @@ func NewSelectorModel(includeDomains, includeExts, excludeDomains, excludeExts [
 			sel[d] = struct{}{}
 		}
 	}
-	// determine exts to show
-	for selected := range sel {
-		for _, e := range extCfgMap[res[selected]] {
-			if slices.Contains(includeExts, e) {
-				sel[e] = struct{}{}
-				continue
-			}
-			if !slices.Contains(excludeExts, e) {
+	for _, d := range domains {
+		if _, ok := sel[d]; !ok {
+			continue
+		}
+		for _, e := range extCfgMap[domainTypes[d]] {
+			if len(includeExts) > 0 {
+				if slices.Contains(includeExts, e) {
+					sel[e] = struct{}{}
+				}
+			} else if !slices.Contains(excludeExts, e) {
 				sel[e] = struct{}{}
 			}
 		}
 	}
-	return &SelectorModel{domains: domains, exts: exts, selected: sel, domainTypesMap: res}
+	return sel
 }
 
 func (m *SelectorModel) Init() tea.Cmd { return nil }
 
 func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -77,6 +93,7 @@ func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.cursorCol > 0 {
 				m.cursorCol--
 				m.cursorRow = 0
+				m.viewOffset = 0
 			}
 		case "right", "l":
 			if m.confirmMode {
@@ -86,6 +103,7 @@ func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.cursorCol < 1 {
 				m.cursorCol++
 				m.cursorRow = 0
+				m.viewOffset = 0
 			}
 		case "up", "k":
 			if m.confirmMode {
@@ -94,6 +112,7 @@ func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.cursorRow > 0 {
 				m.cursorRow--
+				m.clampViewOffset()
 			}
 		case "down", "j":
 			if m.confirmMode {
@@ -104,6 +123,7 @@ func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				maxRow := m.columnLength() - 1
 				if m.cursorRow < maxRow {
 					m.cursorRow++
+					m.clampViewOffset()
 				}
 			}
 		case "enter", " ":
@@ -124,12 +144,45 @@ func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *SelectorModel) View() string {
+// availableListHeight returns how many list rows fit in the current terminal.
+// header: margin-top(1) + content(1) + margin-bottom(1) + extra \n(1) = 4 lines
+// footer: blank line(1) + confirm/hint line(1) = 2 lines; plus 1 safety margin
+func (m *SelectorModel) availableListHeight() int {
+	if m.height == 0 {
+		return 999
+	}
+	avail := max(m.height-7, 1)
+	return avail
+}
+
+func (m *SelectorModel) clampViewOffset() {
+	avail := m.availableListHeight()
+	if m.cursorRow < m.viewOffset {
+		m.viewOffset = m.cursorRow
+	}
+	if m.cursorRow >= m.viewOffset+avail {
+		m.viewOffset = m.cursorRow - avail + 1
+	}
+	maxOffset := max(m.columnLength()-avail, 0)
+	if m.viewOffset > maxOffset {
+		m.viewOffset = maxOffset
+	}
+	if m.viewOffset < 0 {
+		m.viewOffset = 0
+	}
+}
+
+func (m *SelectorModel) View() tea.View {
 	header := "←/→ to switch columns or OK/Cancel, ↑/↓ to move, enter/space to toggle, tab to confirm"
 	var s strings.Builder
 	s.WriteString(lipgloss.NewStyle().Margin(1, 2).Render(header) + "\n")
+
+	avail := m.availableListHeight()
 	maxRows := max(len(m.domains), len(m.exts))
-	for i := 0; i < maxRows; i++ {
+	start := m.viewOffset
+	end := min(start+avail, maxRows)
+
+	for i := start; i < end; i++ {
 		left := "   "
 		if m.cursorCol == 0 && m.cursorRow == i && !m.confirmMode {
 			left = "> "
@@ -171,7 +224,9 @@ func (m *SelectorModel) View() string {
 	} else {
 		s.WriteString("(Tab to switch to OK/Cancel)\n")
 	}
-	return s.String()
+	v := tea.NewView(s.String())
+	v.AltScreen = true
+	return v
 }
 
 func (m *SelectorModel) toggleCurrent() {

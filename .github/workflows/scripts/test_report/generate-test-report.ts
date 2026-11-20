@@ -2,30 +2,30 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 
 const acceptedWorkflows = [
-    '.github/workflows/ci.yml',
-    //'.github/workflows/lint.yml',
-    //'.github/workflows/manifest.yml',
+    //'.github/workflows/ci-gate.yml',
     '.github/workflows/qa-clean-exit-block-downloading.yml',
     '.github/workflows/qa-clean-exit-snapshot-downloading.yml',
     '.github/workflows/qa-constrained-tip-tracking.yml',
+    '.github/workflows/qa-exec-from-zero.yml',
     '.github/workflows/qa-rpc-integration-tests-gnosis.yml',
     '.github/workflows/qa-rpc-integration-tests-latest.yml',
-    '.github/workflows/qa-rpc-integration-tests-polygon.yml',
+    '.github/workflows/qa-rpc-integration-tests-remote.yml',
     '.github/workflows/qa-rpc-integration-tests.yml',
     '.github/workflows/qa-rpc-performance-tests.yml',
     '.github/workflows/qa-rpc-performance-comparison-tests.yml',
     '.github/workflows/qa-snap-download.yml',
     '.github/workflows/qa-sync-from-scratch-minimal-node.yml',
+    '.github/workflows/qa-sync-from-scratch-full-node.yml',
     '.github/workflows/qa-sync-from-scratch.yml',
     '.github/workflows/qa-sync-with-externalcl.yml',
+    '.github/workflows/qa-stage-exec.yml',
     '.github/workflows/qa-tip-tracking-gnosis.yml',
     '.github/workflows/qa-tip-tracking.yml',
     '.github/workflows/qa-tip-tracking-with-load.yml',
     '.github/workflows/qa-txpool-performance-test.yml',
     '.github/workflows/test-all-erigon-race.yml',
-    //'.github/workflows/test-all-erigon.yml',
-    '.github/workflows/test-hive-eest.yml',
     '.github/workflows/test-hive.yml',
+    '.github/workflows/test-fuzz.yml',
     '.github/workflows/test-integration-caplin.yml',
     '.github/workflows/test-kurtosis-assertoor.yml'
 ];
@@ -54,14 +54,16 @@ class WorkflowRunSummary {
     jobs!: JobSummary[];
 }
 
-// Generates an array of date strings between two dates (inclusive)
+// Generates an array of date strings between two dates (inclusive), using UTC
 function getDateStringsBetween(startDate: Date, endDate: Date): string[] {
     const dates: string[] = [];
     const current = new Date(startDate);
+    // Normalize to UTC midnight to avoid issues with local time shifts
+    current.setUTCHours(0, 0, 0, 0);
 
     while (current <= endDate) {
         dates.push(current.toISOString().split('T')[0]);
-        current.setDate(current.getDate() + 1);
+        current.setUTCDate(current.getUTCDate() + 1);
     }
 
     return dates;
@@ -156,6 +158,43 @@ function mapChain(chain: string | null): string {
     return chain;
 }
 
+// Chain-related words referenced by mapChain — removed from the job name when a chain
+// is detected, since the chain emoji already conveys them.
+const CHAIN_WORDS = new Set([
+    'bor', 'mainnet', 'polygon', 'lighthouse', 'prysm', 'ethereum',
+    'sepolia', 'hoodi', 'amoy', 'chiado', 'gnosis',
+    'externalcl', 'test', 'integ', 'benchmark',
+]);
+
+// Transforms a job name by replacing chain references with the mapChain emoji and
+// dropping words already present in the workflow name (to avoid redundancy with the
+// Test column). Words not in either category are preserved.
+function transformJobName(jobName: string, workflowName: string): string {
+    let chainEmoji = '';
+    const jobMapped = mapChain(jobName);
+    if (jobMapped !== jobName) {
+        chainEmoji = jobMapped;
+    } else {
+        const wfMapped = mapChain(workflowName);
+        if (wfMapped !== workflowName) chainEmoji = wfMapped;
+    }
+
+    const tokenize = (s: string) => s.split(/[^a-zA-Z0-9]+/).filter(w => w.length > 0);
+    const workflowWords = new Set(tokenize(workflowName).map(w => w.toLowerCase()));
+
+    const remaining: string[] = [];
+    for (const token of tokenize(jobName)) {
+        const lower = token.toLowerCase();
+        if (workflowWords.has(lower)) continue;
+        if (chainEmoji && CHAIN_WORDS.has(lower)) continue;
+        remaining.push(token);
+    }
+
+    return chainEmoji
+        ? [chainEmoji, ...remaining].join(' ').trim()
+        : remaining.join(' ').trim();
+}
+
 // Removes 'QA' and chain information from a job name
 function cleanJobName(jobName: string): string {
     return jobName
@@ -177,16 +216,14 @@ export async function run() {
         // Input
         const token = process.env.GITHUB_TOKEN as string;  // The GitHub token for authentication
         const startDate = new Date(process.env.START_DATE as string);  // The start date for filtering workflow runs
+        startDate.setUTCHours(0, 0, 0, 0);
         const endDate = new Date(process.env.END_DATE as string);   // The end date for filtering workflow runs
+        endDate.setUTCHours(23, 59, 59, 999);
         // The branch name, defaults to the current branch or 'main' if not in GitHub Actions
         const branch= process.env.BRANCH_NAME ?? (github.context.ref ? github.context.ref.replace(/^refs\/\w+\//, '') : 'main');
         // Use github.context.repo if available, otherwise use default values
         const repoArray = process.env.GITHUB_REPOSITORY ? process.env.GITHUB_REPOSITORY.split('/') : ['erigontech', 'erigon'];
         const { owner, repo } = github.context.action ? github.context.repo : { owner: repoArray[0], repo: repoArray[1] };
-
-        endDate.setUTCHours(23, 59, 59, 999);
-
-        const created = `${startDate.toISOString().split('T')[0]}..${endDate.toISOString().split('T')[0]}`;
 
         // Log the inputs
         core.info(`Generating test report for branch: ${branch}`);
@@ -198,89 +235,92 @@ export async function run() {
 
         const summaries: WorkflowRunSummary[] = [];
 
+        // Generate days list upfront — used both for fetching (one day at a time to stay
+        // under GitHub API's 1000-result hard cap) and for building the report table.
+        const days = getDateStringsBetween(new Date(startDate), new Date(endDate));
+
         // Fetch workflow runs for the specified repository, branch, and date range and process them
-        let page = 1;
+        // Query one day at a time so each request stays well under the 1000-result API limit.
         const per_page = 100;
-        while (true) {
-            const {data: {workflow_runs}} = await octokit.rest.actions.listWorkflowRunsForRepo({
-                owner,
-                repo,
-                branch,
-                per_page,
-                page,
-                created,
-            });
-
-            if (!workflow_runs.length) break;
-
-            // Iterate through the current page of workflow runs
-            for (const run of workflow_runs) {
-                const runDate = new Date(run.created_at);
-                if (runDate < startDate || runDate > endDate) continue;
-
-                // Include only tests
-                if (!acceptedWorkflows.includes(run.path ?? '')) {
-                    core.info(`Skipping workflow run: ${run.name} (${run.id})`);
-                    continue;
-                }
-
-                core.info(`Processing workflow run: ${run.name} (${run.id}) - status=${run.status}, conclusion=${run.conclusion}`);
-
-                const {data: jobsData} = await octokit.rest.actions.listJobsForWorkflowRun({
+        for (const day of days) {
+            let page = 1;
+            while (true) {
+                const {data: {workflow_runs}} = await octokit.rest.actions.listWorkflowRunsForRepo({
                     owner,
                     repo,
-                    run_id: run.id,
+                    branch,
+                    per_page,
+                    page,
+                    created: day,
                 });
 
-                // Iterate through the jobs in the workflow run
-                if (!jobsData.jobs || !jobsData.jobs.length) {
-                    core.info(`No jobs found for workflow run: ${run.name} (${run.id})`);
-                    continue;
-                }
-                for (const job of jobsData.jobs) {
+                if (!workflow_runs.length) break;
 
-                    const workflowName = run.name ?? run.id.toString();
-                    const jobName = job.name;
+                // Iterate through the current page of workflow runs
+                for (const run of workflow_runs) {
+                    const runDate = new Date(run.created_at);
+                    if (runDate < startDate || runDate > endDate) continue;
 
-                    // Map the job conclusion to an icon
-                    let conclusion = mapConclusionToIcon(job.conclusion, job.status);
-
-                    // Correction to treat 'cancelled' with steps differently than 'cancelled' without steps
-                    if (job.conclusion === 'cancelled' && job.steps && job.steps.length > 0)
-                        conclusion = mapConclusionToIcon('cancelled_after_start', job.status);
-
-                    // Find or create the workflow summary
-                    let workflowSummary = summaries.find(w => w.name === workflowName);
-                    if (!workflowSummary) {
-                        workflowSummary = {name: workflowName, jobs: []};
-                        summaries.push(workflowSummary);
+                    // Include only tests
+                    if (!acceptedWorkflows.includes(run.path ?? '')) {
+                        core.info(`Skipping workflow run: ${run.name} (${run.id})`);
+                        continue;
                     }
 
-                    // Find or create the job summary
-                    let jobSummary = workflowSummary.jobs.find(j => j.name === jobName);
-                    if (!jobSummary) {
-                        jobSummary = {name: jobName, results: []};
-                        workflowSummary.jobs.push(jobSummary);
-                    }
+                    core.info(`Processing workflow run: ${run.name} (${run.id}) - status=${run.status}, conclusion=${run.conclusion}`);
 
-                    // Add the job result to the job summary
-                    jobSummary.results.push({
-                        date: runDate.toISOString().split('T')[0],
-                        sha: run.head_sha,
-                        conclusion,
-                        runId: run.id,
-                        jobId: job.id,
+                    const {data: jobsData} = await octokit.rest.actions.listJobsForWorkflowRun({
+                        owner,
+                        repo,
+                        run_id: run.id,
                     });
+
+                    // Iterate through the jobs in the workflow run
+                    if (!jobsData.jobs || !jobsData.jobs.length) {
+                        core.info(`No jobs found for workflow run: ${run.name} (${run.id})`);
+                        continue;
+                    }
+                    for (const job of jobsData.jobs) {
+
+                        const workflowName = run.name ?? run.id.toString();
+                        const jobName = job.name;
+
+                        // Map the job conclusion to an icon
+                        let conclusion = mapConclusionToIcon(job.conclusion, job.status);
+
+                        // Correction to treat 'cancelled' with steps differently than 'cancelled' without steps
+                        if (job.conclusion === 'cancelled' && job.steps && job.steps.length > 0)
+                            conclusion = mapConclusionToIcon('cancelled_after_start', job.status);
+
+                        // Find or create the workflow summary
+                        let workflowSummary = summaries.find(w => w.name === workflowName);
+                        if (!workflowSummary) {
+                            workflowSummary = {name: workflowName, jobs: []};
+                            summaries.push(workflowSummary);
+                        }
+
+                        // Find or create the job summary
+                        let jobSummary = workflowSummary.jobs.find(j => j.name === jobName);
+                        if (!jobSummary) {
+                            jobSummary = {name: jobName, results: []};
+                            workflowSummary.jobs.push(jobSummary);
+                        }
+
+                        // Add the job result to the job summary
+                        jobSummary.results.push({
+                            date: runDate.toISOString().split('T')[0],
+                            sha: run.head_sha,
+                            conclusion,
+                            runId: run.id,
+                            jobId: job.id,
+                        });
+                    }
                 }
+
+                if (workflow_runs.length < per_page) break;
+                page++;
             }
-
-            if (workflow_runs.length < per_page) break;
-            page++;
         }
-
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        const days = getDateStringsBetween(start, end);
 
         // Prepare the summary table header
         const table: SummaryRow[] = [  // format: [Test, Job, Date1, Date2, ...]
@@ -302,11 +342,9 @@ export async function run() {
         for (const workflowSummary of summaries) {
             for (const jobSummary of workflowSummary.jobs) {
 
-                // Map the job name to a more readable format
-                let jobName = mapChain(workflowSummary.name)
-                if (jobName == workflowSummary.name) {
-                    jobName = mapChain(jobSummary.name);
-                }
+                // Transform the job name: replace chain refs with mapChain output,
+                // drop words shared with the workflow name, keep the rest.
+                const jobName = transformJobName(jobSummary.name, workflowSummary.name);
 
                 // order the results by date
                 if (jobSummary.results.length > 0) {

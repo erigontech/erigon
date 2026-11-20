@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
 func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint64, validatorSet *solid.ValidatorSet, previousEpochParticipation *solid.ParticipationBitList) [][]bool {
@@ -32,12 +31,11 @@ func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint
 		flagsUnslashedIndiciesSet[i] = make([]bool, validatorSet.Length())
 	}
 
-	threading.ParallellForLoop(1, 0, validatorSet.Length(), func(validatorIndex int) error {
+	for validatorIndex := range validatorSet.Length() {
 		for i := range weights {
 			flagsUnslashedIndiciesSet[i][validatorIndex] = state.IsUnslashedParticipatingIndex(validatorSet, previousEpochParticipation, previousEpoch, uint64(validatorIndex), i)
 		}
-		return nil
-	})
+	}
 
 	return flagsUnslashedIndiciesSet
 }
@@ -74,16 +72,28 @@ func ProcessEpoch(s abstract.BeaconState) error {
 
 	ProcessEth1DataReset(s)
 	if s.Version() >= clparams.ElectraVersion {
-		ProcessPendingDeposits(s)
-		ProcessPendingConsolidations(s)
+		if err := ProcessPendingDeposits(s); err != nil {
+			return err
+		}
+		if err := ProcessPendingConsolidations(s); err != nil {
+			return err
+		}
+	}
+
+	if s.Version() >= clparams.GloasVersion {
+		ProcessBuilderPendingPayments(s)
 	}
 
 	if err := ProcessEffectiveBalanceUpdates(s); err != nil {
 		return err
 	}
 
-	ProcessSlashingsReset(s)
-	ProcessRandaoMixesReset(s)
+	if err := ProcessSlashingsReset(s); err != nil {
+		return err
+	}
+	if err := ProcessRandaoMixesReset(s); err != nil {
+		return err
+	}
 
 	if err := ProcessHistoricalRootsUpdate(s); err != nil {
 		return err
@@ -96,7 +106,9 @@ func ProcessEpoch(s abstract.BeaconState) error {
 	}
 
 	if s.Version() >= clparams.AltairVersion {
-		ProcessParticipationFlagUpdates(s)
+		if err := ProcessParticipationFlagUpdates(s); err != nil {
+			return err
+		}
 		if err := ProcessSyncCommitteeUpdate(s); err != nil {
 			return err
 		}
@@ -104,6 +116,12 @@ func ProcessEpoch(s abstract.BeaconState) error {
 
 	if s.Version() >= clparams.FuluVersion {
 		if err := ProcessProposerLookahead(s); err != nil {
+			return err
+		}
+	}
+
+	if s.Version() >= clparams.GloasVersion {
+		if err := ProcessPtcWindow(s); err != nil {
 			return err
 		}
 	}

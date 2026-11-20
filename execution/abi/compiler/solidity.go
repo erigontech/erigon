@@ -69,7 +69,8 @@ func ParseCombinedJSON(combinedJSON []byte, source string, languageVersion strin
 	}
 	// Compilation succeeded, assemble and return the contracts.
 	contracts := make(map[string]*Contract)
-	for name, info := range output.Contracts {
+	for name := range output.Contracts {
+		info := output.Contracts[name]
 		// Parse the individual compilation results.
 		var abi any
 		if err := json.Unmarshal([]byte(info.Abi), &abi); err != nil {
@@ -117,7 +118,8 @@ func parseCombinedJSONV8(combinedJSON []byte, source string, languageVersion str
 	}
 	// Compilation succeeded, assemble and return the contracts.
 	contracts := make(map[string]*Contract)
-	for name, info := range output.Contracts {
+	for name := range output.Contracts {
+		info := output.Contracts[name]
 		contracts[name] = &Contract{
 			Code:        "0x" + info.Bin,
 			RuntimeCode: "0x" + info.BinRuntime,

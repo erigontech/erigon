@@ -1,0 +1,37 @@
+name: Cancel orphaned merge-queue runs
+
+# GitHub's merge queue creates `gh-readonly-queue/<base>/pr-<N>-<sha>` branches
+# and deletes them when entries leave the queue (reshuffle, removal, successful
+# merge). CI Gate runs against those branches do not auto-cancel on deletion —
+# their concurrency key for merge_group is per-run_id (see ci-gate.yml) — so
+# orphaned runs keep burning runner-minutes until they finish naturally. This
+# workflow cancels them the moment the underlying queue branch is deleted.
+
+on:
+  delete:
+
+permissions:
+  actions: write
+
+jobs:
+  cancel-orphans:
+    if: github.event.ref_type == 'branch' && startsWith(github.event.ref, 'gh-readonly-queue/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel active runs against deleted queue branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DELETED_REF: ${{ github.event.ref }}
+        run: |
+          set -euo pipefail
+          echo "Deleted merge-queue branch: ${DELETED_REF}"
+          encoded_ref=$(jq -rn --arg b "${DELETED_REF}" '$b|@uri')
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${encoded_ref}&per_page=100" \
+            --jq '.workflow_runs[] | select(.status != "completed") | .id' \
+          | while IFS= read -r id; do
+              [ -z "$id" ] && continue
+              [ "$id" = "$GITHUB_RUN_ID" ] && continue
+              echo "Cancelling orphaned run ${id}"
+              gh run cancel "${id}" -R "${GITHUB_REPOSITORY}" || true
+            done

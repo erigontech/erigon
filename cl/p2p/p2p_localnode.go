@@ -12,10 +12,39 @@ import (
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
+// privateRanges lists RFC1918 and loopback ranges that are not publicly routable.
+var privateRanges = func() []net.IPNet {
+	ranges := []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "::1/128", "fc00::/7"}
+	out := make([]net.IPNet, 0, len(ranges))
+	for _, r := range ranges {
+		_, ipNet, _ := net.ParseCIDR(r)
+		out = append(out, *ipNet)
+	}
+	return out
+}()
+
+// warnIfPrivateENRIP logs a warning when the address that will be published in the
+// discv5 ENR is a private/RFC1918 address and no external IP was resolved via NAT.
+// In that case external peers cannot initiate connections to this node.
+func warnIfPrivateENRIP(advertiseIP net.IP, externalIP net.IP, logger log.Logger) {
+	if externalIP != nil || advertiseIP == nil || advertiseIP.IsUnspecified() {
+		return
+	}
+	for _, r := range privateRanges {
+		if r.Contains(advertiseIP) {
+			logger.Warn("[Caplin] ENR advertises a private/RFC1918 IP — incoming peers WILL NOT be able to connect. "+
+				"If running behind Docker or NAT, set --caplin.nat=extip:<public-ip> (or --caplin.nat=stun) "+
+				"and expose UDP/TCP ports.", "addr", advertiseIP)
+			return
+		}
+	}
+}
+
 func newLocalNode(
 	ctx context.Context,
 	privKey *ecdsa.PrivateKey,
 	ipAddr net.IP,
+	externalIP net.IP, // from NAT resolution; overrides ipAddr in the ENR when set
 	udpPort, tcpPort int,
 	tmpDir string,
 	logger log.Logger,
@@ -26,24 +55,34 @@ func newLocalNode(
 	}
 	localNode := enode.NewLocalNode(db, privKey)
 
-	udpEntry := enr.UDP(udpPort)
-	tcpEntry := enr.TCP(tcpPort)
-
-	localNode.Set(udpEntry)
-	localNode.Set(tcpEntry)
+	localNode.Set(enr.UDP(udpPort))
+	if tcpPort != 0 {
+		localNode.Set(enr.TCP(tcpPort))
+	}
 	localNode.SetFallbackUDP(udpPort)
 
-	if ipAddr.IsUnspecified() {
+	// Determine the IP to advertise in the ENR:
+	//   1. NAT-resolved external IP takes priority (e.g. --caplin.nat=extip:<ip> or stun).
+	//   2. If bind addr is 0.0.0.0, fall back to OS outbound IP detection.
+	//   3. Otherwise use the bind IP as-is.
+	advertiseIP := ipAddr
+	if externalIP != nil {
+		advertiseIP = externalIP
+	} else if ipAddr.IsUnspecified() {
 		if detected := detectOutboundIP(ipAddr); detected != nil {
 			logger.Info("[Caplin] Discovery address is unspecified, using detected outbound IP for ENR. Set --caplin.discovery.addr explicitly to override", "detected", detected)
-			ipAddr = detected
+			advertiseIP = detected
 		} else {
 			logger.Warn("[Caplin] Discovery address is unspecified and outbound IP detection failed, ENR will have no IP. Set --caplin.discovery.addr to your public IP")
+			advertiseIP = nil
 		}
 	}
-	if !ipAddr.IsUnspecified() {
-		localNode.Set(enr.IP(ipAddr))
-		localNode.SetFallbackIP(ipAddr)
+
+	warnIfPrivateENRIP(advertiseIP, externalIP, logger)
+
+	if advertiseIP != nil && !advertiseIP.IsUnspecified() {
+		localNode.Set(enr.IP(advertiseIP))
+		localNode.SetFallbackIP(advertiseIP)
 	}
 
 	return localNode, nil
@@ -56,7 +95,7 @@ func detectOutboundIP(unspecified net.IP) net.IP {
 	if unspecified.To4() == nil {
 		network, target = "udp6", "[2001:4860:4860::8888]:80"
 	}
-	conn, err := net.Dial(network, target)
+	conn, err := net.Dial(network, target) //nolint:noctx
 	if err != nil {
 		return nil
 	}
@@ -92,14 +131,15 @@ func NewUDPv5Listener(ctx context.Context, cfg *P2PConfig, discCfg discover.Conf
 	if err != nil {
 		return nil, err
 	}
+	boundUDPPort := conn.LocalAddr().(*net.UDPAddr).Port
 
-	localNode, err := newLocalNode(ctx, discCfg.PrivateKey, ip, port, int(cfg.TCPPort), cfg.TmpDir, logger)
+	localNode, err := newLocalNode(ctx, discCfg.PrivateKey, ip, cfg.ExternalIP, boundUDPPort, int(cfg.TCPPort), cfg.TmpDir, logger)
 	if err != nil {
 		return nil, err
 	}
 
 	// Start stream handlers
-	net, err := discover.ListenV5(conn, localNode, discCfg)
+	net, err := discover.ListenV5(ctx, conn, localNode, discCfg)
 	if err != nil {
 		return nil, err
 	}

@@ -25,6 +25,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -41,7 +44,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	}
 	defer tx.Rollback()
 
-	latestState := rpchelper.NewLatestStateReader(tx)
+	latestState := rpchelper.NewLatestStateReader(execctx.NewTemporalTxStateGetter(tx))
 	plainStateAcc, err := latestState.ReadAccountData(accounts.InternAddress(addr))
 	if err != nil {
 		return nil, err
@@ -55,6 +58,15 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	// EOA?
 	if plainStateAcc.IsEmptyCodeHash() {
 		return nil, nil
+	}
+	if plainStateAcc.Incarnation == state.NonContractIncarnation {
+		code, err := latestState.ReadAccountCode(accounts.InternAddress(addr))
+		if err != nil {
+			return nil, err
+		}
+		if _, delegated := types.ParseDelegation(code); delegated {
+			return nil, nil
+		}
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
@@ -133,7 +145,8 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
 		if err != nil {
 			log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
-			panic(err)
+			searchErr = err
+			return false
 		}
 		if !ok {
 			return false
@@ -157,6 +170,24 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		return nil, searchErr
 	}
 	if creationTxnID == 0 {
+		afterGenesis, err := api._txNumReader.Min(ctx, tx, 1)
+		if err != nil {
+			return nil, err
+		}
+		if err := api.checkPruneState(ctx, tx, 0); err != nil {
+			return nil, err
+		}
+		codeChanges, err := tx.IndexRange(kv.CodeHistoryIdx, addr[:], int(afterGenesis), -1, order.Asc, 1)
+		if err != nil {
+			return nil, err
+		}
+		defer codeChanges.Close()
+		if !codeChanges.HasNext() {
+			return nil, nil
+		}
+		if _, err := codeChanges.Next(); err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
 	}
 
@@ -180,6 +211,9 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	tracer := NewCreateTracer(ctx, accounts.InternAddress(addr))
 	if err := api.genericTracer(tx, ctx, bn, creationTxnID, txIndex, chainConfig, tracer); err != nil {
 		return nil, err
+	}
+	if !tracer.Found() {
+		return nil, fmt.Errorf("contract creator not found for address %s", addr)
 	}
 	return &ContractCreatorData{
 		Tx:      tracer.Tx.Hash(),

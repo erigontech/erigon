@@ -1,0 +1,71 @@
+name: Cache Warming
+
+# Warms Go build, module, and test-result caches on main, release, and
+# performance branches so that pull_request and merge_group runs start with
+# a warm base-branch cache. GitHub's cache isolation rules mean caches saved
+# on a branch are only accessible to that branch and its base branch — so
+# without a push trigger on main, every PR opens to a cold cache.
+#
+# Calls the same reusable sub-workflows that ci-gate uses. GITHUB_WORKFLOW_REF
+# points at the top-level workflow (cache-warming here, ci-gate in gate runs),
+# so each sub-workflow passes a fixed cache-namespace to setup-erigon to keep
+# cache keys identical across both paths.
+#
+# Workflows that benefit from Go test result caching (tests, race-tests,
+# caplin) run their full test suites; lint likewise runs in full because
+# golangci-lint's analysis cache is only populated by running the linters,
+# not by compiling. Workflows where result caching is not possible or useful
+# (bench, sonar, eest-spec) use cache-warming-only: true to compile only,
+# keeping those runs fast.
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+      - performance
+      - performance-stable
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  pull-requests: read
+
+jobs:
+  tests:
+    uses: ./.github/workflows/test-all-erigon.yml
+
+  race-tests:
+    uses: ./.github/workflows/test-all-erigon-race.yml
+
+  caplin:
+    uses: ./.github/workflows/test-integration-caplin.yml
+
+  lint:
+    uses: ./.github/workflows/lint.yml
+
+  bench:
+    uses: ./.github/workflows/test-bench.yml
+    with:
+      cache-warming-only: true
+
+  eest-spec:
+    uses: ./.github/workflows/test-eest-spec.yml
+    with:
+      cache-warming-only: true
+
+  repro:
+    uses: ./.github/workflows/reproducible-build.yml
+
+  sonar:
+    uses: ./.github/workflows/sonar.yml
+    with:
+      cache-warming-only: true
+    secrets: inherit
+
+  kurtosis:
+    uses: ./.github/workflows/test-kurtosis-assertoor.yml
+    with:
+      cache-warming-only: true
+    secrets: inherit

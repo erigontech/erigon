@@ -17,9 +17,8 @@
 package rpctest
 
 import (
-	"bufio"
+	"errors"
 	"fmt"
-	"os"
 )
 
 // BenchEthCall compares response of Erigon with Geth
@@ -27,84 +26,44 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//			    false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//			    false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
 //	                 recordFile stores all eth_call returned with success
 //	                 errorFile stores information when erigon and geth doesn't return same data
-func BenchEthEstimateGas(erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
+func BenchEthEstimateGas(erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
-	var rec *bufio.Writer
-	var errs *bufio.Writer
+	rec, errs, cleanup, err := openWriters(recordFileName, errorFileName)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, cleanup()) }()
+
 	var resultsCh chan CallResult = nil
-	var nTransactions = 0
-
-	if errorFileName != "" {
-		f, err := os.Create(errorFileName)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for errorFile: %v\n", errorFileName, err)
-		}
-		defer f.Close()
-		errs = bufio.NewWriter(f)
-		defer errs.Flush()
-	}
-
-	if recordFileName != "" {
-		frec, errRec := os.Create(recordFileName)
-		if errRec != nil {
-			return fmt.Errorf("Cannot create file %s for errorFile: %v\n", recordFileName, errRec)
-		}
-		defer frec.Close()
-		rec = bufio.NewWriter(frec)
-		defer rec.Flush()
-	}
+	nTransactions := 0
 
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_estimateGas"}, resultsCh)
+		go writePattern(true, []string{"eth_estimateGas"}, resultsCh)
 	}
-	var res CallResult
-
 	reqGen := &RequestGenerator{}
 
 	for bn := blockFrom; bn <= blockTo; bn++ {
 
-		var b EthBlockByNumber
-		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
-		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
+		b, skip, err := fetchBlock(reqGen, bn, needCompare, rec)
+		if err != nil {
+			return err
+		}
+		if skip {
+			continue
 		}
 
-		if b.Error != nil {
-			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
-		}
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 
-		if needCompare {
-			var bg EthBlockByNumber
-			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &bg)
-			if res.Err != nil {
-				return fmt.Errorf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
-			}
-			if bg.Error != nil {
-				return fmt.Errorf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
-			}
-			if !compareBlocks(&b, &bg) {
-				if rec != nil {
-					fmt.Fprintf(rec, "Block difference for block=%d\n", bn)
-					rec.Flush()
-					continue
-				} else {
-					return fmt.Errorf("Block one or more fields areis different for block %d\n", bn)
-				}
-			}
-		}
+			nTransactions++
 
-		for _, txn := range b.Result.Transactions {
-
-			nTransactions = nTransactions + 1
-
-			var request string
-			request = reqGen.ethEstimateGas(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input)
+			request := reqGen.ethEstimateGas(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input)
 
 			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, txn.Hash)
 

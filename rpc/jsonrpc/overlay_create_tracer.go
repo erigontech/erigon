@@ -17,56 +17,58 @@
 package jsonrpc
 
 import (
+	"errors"
+
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
-	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
 type OverlayCreateTracer struct {
 	contractAddress accounts.Address
+	statedb         *state.IntraBlockState
 	isCapturing     bool
-	code            []byte
-	gasCap          uint64
+	depth           int
 	err             error
-	resultCode      []byte
-	evm             *vm.EVM
 }
 
-func (ct *OverlayCreateTracer) Tracer() *tracers.Tracer {
-	return &tracers.Tracer{
-		Hooks: &tracing.Hooks{
-			OnTxStart: nil,
-			OnEnter:   ct.OnEnter,
-		},
+func (ct *OverlayCreateTracer) TracingHooks() *tracing.Hooks {
+	return &tracing.Hooks{
+		OnEnterV2: ct.OnEnterV2,
+		OnExitV2:  ct.OnExitV2,
 	}
 }
 
-// Top call frame
-func (ct *OverlayCreateTracer) CaptureStart(env *vm.EVM, from accounts.Address, to accounts.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	ct.evm = env
+// After a successful deployment, ignore later errors at its address even if
+// the runtime code is empty. A rollback lets the tracer observe the next attempt.
+func (ct *OverlayCreateTracer) canCapture(target accounts.Address) bool {
+	return target == ct.contractAddress && !ct.isCapturing && !ct.statedb.ContractCreatedInTx(target)
 }
-func (ct *OverlayCreateTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {}
 
-// Rest of the frames
-func (ct *OverlayCreateTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
-	if ct.isCapturing {
-		return
+func (ct *OverlayCreateTracer) onInitCodeOverrideError(target accounts.Address, err error) {
+	if ct.canCapture(target) {
+		ct.err = err
 	}
+}
 
-	if (vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2) && to == ct.contractAddress {
+func (ct *OverlayCreateTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
+	if (vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2) && ct.canCapture(to) {
 		ct.isCapturing = true
-		_, _, _, err := ct.evm.OverlayCreate(from, vm.NewCodeAndHash(ct.code), ct.gasCap, value, to, vm.OpCode(typ), true /* incrementNonce */)
-		if err != nil {
-			ct.err = err
-		} else {
-			if result, err := ct.evm.IntraBlockState().GetCode(ct.contractAddress); err != nil {
-				ct.resultCode = result
-			} else {
-				ct.err = err
-			}
+		ct.depth = depth
+	}
+}
+
+func (ct *OverlayCreateTracer) OnExitV2(depth int, _ []byte, _ mdgas.MdGasUsage, err error, _ bool) {
+	if ct.isCapturing && depth == ct.depth {
+		// The RPC encoder would otherwise use the tracing wrapper's error code.
+		if vmErr, ok := errors.AsType[*vm.VMError](err); ok {
+			err = vmErr.Unwrap()
 		}
+		ct.err = err
+		ct.isCapturing = false
 	}
 }

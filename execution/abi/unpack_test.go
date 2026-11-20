@@ -37,7 +37,7 @@ import (
 func TestUnpack(t *testing.T) {
 	for i, test := range packUnpackTests {
 		t.Run(strconv.Itoa(i)+" "+test.def, func(t *testing.T) {
-			//Unpack
+			// Unpack
 			def := fmt.Sprintf(`[{ "name" : "method", "type": "function", "outputs": %s}]`, test.def)
 			abi, err := JSON(strings.NewReader(def))
 			if err != nil {
@@ -106,13 +106,13 @@ var unpackTests = []unpackTest{
 		err:  "abi: cannot unmarshal uint32 in to uint16",
 	},
 	{
-		def:  `[{"type": "uint17"}]`,
+		def:  `[{"type": "uint72"}]`,
 		enc:  "0000000000000000000000000000000000000000000000000000000000000001",
 		want: uint16(0),
 		err:  "abi: cannot unmarshal *big.Int in to uint16",
 	},
 	{
-		def:  `[{"type": "uint17"}]`,
+		def:  `[{"type": "uint72"}]`,
 		enc:  "0000000000000000000000000000000000000000000000000000000000000001",
 		want: big.NewInt(1),
 	},
@@ -128,7 +128,7 @@ var unpackTests = []unpackTest{
 		err:  "abi: cannot unmarshal int32 in to int16",
 	},
 	{
-		def:  `[{"type": "int17"}]`,
+		def:  `[{"type": "int72"}]`,
 		enc:  "0000000000000000000000000000000000000000000000000000000000000001",
 		want: int16(0),
 		err:  "abi: cannot unmarshal *big.Int in to int16",
@@ -226,7 +226,7 @@ var unpackTests = []unpackTest{
 func TestLocalUnpackTests(t *testing.T) {
 	for i, test := range unpackTests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			//Unpack
+			// Unpack
 			def := fmt.Sprintf(`[{ "name" : "method", "type": "function", "outputs": %s}]`, test.def)
 			abi, err := JSON(strings.NewReader(def))
 			if err != nil {
@@ -307,7 +307,7 @@ type methodMultiOutput struct {
 func methodMultiReturn(require *require.Assertions) (ABI, []byte, methodMultiOutput) {
 	const definition = `[
 	{ "name" : "multi", "type": "function", "outputs": [ { "name": "Int", "type": "uint256" }, { "name": "String", "type": "string" } ] }]`
-	var expected = methodMultiOutput{big.NewInt(1), "hello"}
+	expected := methodMultiOutput{big.NewInt(1), "hello"}
 
 	abi, err := JSON(strings.NewReader(definition))
 	require.NoError(err)
@@ -333,7 +333,7 @@ func TestMethodMultiReturn(t *testing.T) {
 
 	abi, data, expected := methodMultiReturn(require.New(t))
 	bigint := new(big.Int)
-	var testCases = []struct {
+	testCases := []struct {
 		dest     any
 		expected any
 		error    string
@@ -492,7 +492,7 @@ func TestMultiReturnWithDeeplyNestedArray(t *testing.T) {
 	// construct the test array, each 3 char element is joined with 61 '0' chars,
 	// to from the ((3 + 61) * 0.5) = 32 byte elements in the array.
 	buff.Write(common.Hex2Bytes(strings.Join([]string{
-		"", //empty, to apply the 61-char separator to the first element as well.
+		"", // empty, to apply the 61-char separator to the first element as well.
 		"111", "112", "113", "121", "122", "123",
 		"211", "212", "213", "221", "222", "223",
 		"311", "312", "313", "321", "322", "323",
@@ -841,7 +841,7 @@ func TestUnpackTuple(t *testing.T) {
 		A      *big.Int
 	}
 	var ret Ret
-	var expected = Ret{
+	expected := Ret{
 		FieldS: S{
 			A: big.NewInt(1),
 			B: []*big.Int{big.NewInt(1), big.NewInt(2)},
@@ -851,7 +851,7 @@ func TestUnpackTuple(t *testing.T) {
 			},
 		},
 		FieldT: T{
-			big.NewInt(0), big.NewInt(1),
+			big.NewInt(0).SetBits([]big.Word{}), big.NewInt(1),
 		},
 		A: big.NewInt(1),
 	}
@@ -860,7 +860,7 @@ func TestUnpackTuple(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if reflect.DeepEqual(ret, expected) {
+	if !reflect.DeepEqual(ret, expected) {
 		t.Error("unexpected unpack value")
 	}
 }

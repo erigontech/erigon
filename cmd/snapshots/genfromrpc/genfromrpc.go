@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
@@ -42,7 +42,7 @@ var FromBlock = cli.Uint64Flag{
 }
 
 var Command = cli.Command{
-	Action:      func(cliCtx *cli.Context) error { return genFromRPc(cliCtx) },
+	Action:      genFromRPc,
 	Name:        "genfromrpc",
 	Usage:       "genfromrpc utilities",
 	Flags:       []cli.Flag{&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock},
@@ -104,16 +104,16 @@ func getUint256FromField(rawTx map[string]any, field string) *uint256.Int {
 // buildDynamicFeeFields sets the common dynamic fee fields from rawTx.
 func buildDynamicFeeFields(tx *types.DynamicFeeTransaction, rawTx map[string]any) {
 	if chainID := getUint256FromField(rawTx, "chainId"); chainID != nil {
-		tx.ChainID = chainID
+		tx.ChainID = *chainID
 	}
 	if accessListRaw, ok := rawTx["accessList"].([]any); ok {
 		tx.AccessList = decodeAccessList(accessListRaw)
 	}
 	if tipCap := getUint256FromField(rawTx, "maxPriorityFeePerGas"); tipCap != nil {
-		tx.TipCap = tipCap
+		tx.TipCap = *tipCap
 	}
 	if feeCap := getUint256FromField(rawTx, "maxFeePerGas"); feeCap != nil {
-		tx.FeeCap = feeCap
+		tx.FeeCap = *feeCap
 	}
 }
 
@@ -138,7 +138,6 @@ func parseCommonTx(rawTx map[string]any) (*types.CommonTx, error) {
 		commonTx.To = &addr
 	}
 	if valueStr, ok := rawTx["value"].(string); ok {
-		commonTx.Value = new(uint256.Int)
 		commonTx.Value.SetFromBig(convertHexToBigInt(valueStr))
 	}
 	if inputStr, ok := rawTx["input"].(string); ok && len(inputStr) >= 2 && inputStr[:2] == "0x" {
@@ -189,6 +188,14 @@ func decodeBlobVersionedHashes(rawVersionedHashes []string) []common.Hash {
 	return hashes
 }
 
+// derefUint256 returns *v if v is non-nil, otherwise a zero uint256.Int.
+func derefUint256(v *uint256.Int) uint256.Int {
+	if v != nil {
+		return *v
+	}
+	return uint256.Int{}
+}
+
 // --- Transaction builders ---
 
 // makeLegacyTx builds a legacy transaction.
@@ -204,7 +211,7 @@ func makeLegacyTx(commonTx *types.CommonTx, rawTx map[string]any) types.Transact
 			R:        commonTx.R,
 			S:        commonTx.S,
 		},
-		GasPrice: getUint256FromField(rawTx, "gasPrice"),
+		GasPrice: derefUint256(getUint256FromField(rawTx, "gasPrice")),
 	}
 	return tx
 }
@@ -223,11 +230,11 @@ func makeAccessListTx(commonTx *types.CommonTx, rawTx map[string]any) types.Tran
 				R:        commonTx.R,
 				S:        commonTx.S,
 			},
-			GasPrice: getUint256FromField(rawTx, "gasPrice"),
+			GasPrice: derefUint256(getUint256FromField(rawTx, "gasPrice")),
 		},
 	}
 	if chainID := getUint256FromField(rawTx, "chainId"); chainID != nil {
-		tx.ChainID = chainID
+		tx.ChainID = *chainID
 	}
 	if accessListRaw, ok := rawTx["accessList"].([]any); ok {
 		tx.AccessList = decodeAccessList(accessListRaw)
@@ -266,7 +273,7 @@ func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]any) types.Transac
 		}},
 	}
 	buildDynamicFeeFields(&blobTx.DynamicFeeTransaction, rawTx)
-	blobTx.MaxFeePerBlobGas = getUint256FromField(rawTx, "maxFeePerBlobGas")
+	blobTx.MaxFeePerBlobGas = derefUint256(getUint256FromField(rawTx, "maxFeePerBlobGas"))
 	// The raw JSON is expected to contain a slice of strings.
 	if rawHashes, ok := rawTx["blobVersionedHashes"].([]any); ok {
 		var hashStrs []string
@@ -337,9 +344,9 @@ func unMarshalTransactions(rawTxs []map[string]any) (types.Transactions, error) 
 }
 
 // getBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
-func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*types.Block, error) {
+func getBlockByNumber(ctx context.Context, client *rpc.Client, blockNumber *big.Int, verify bool) (*types.Block, error) {
 	var block BlockJson
-	err := client.CallContext(context.Background(), &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
+	err := client.CallContext(ctx, &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +385,7 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 		Transactions: txs,
 		Uncles:       block.Uncles,
 		Withdrawals:  block.Withdrawals,
-	})
+	}, nil)
 	if verify {
 		if blk.Hash() != block.BlkHash {
 			return nil, fmt.Errorf("block hash mismatch, expected %s, got %s. num=%d", blk.Hash(), block.BlkHash, blockNumber)
@@ -389,7 +396,7 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 
 // genFromRPc connects to the RPC, fetches blocks starting from the given block,
 // and writes them into the local database.
-func genFromRPc(cliCtx *cli.Context) error {
+func genFromRPc(ctx context.Context, cliCtx *cli.Command) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	jsonRpcAddr := cliCtx.String(RpcAddr.Name)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
@@ -407,7 +414,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 	// Query latest block number.
 	var latestBlockHex string
-	if err := client.CallContext(context.Background(), &latestBlockHex, "eth_blockNumber"); err != nil {
+	if err := client.CallContext(ctx, &latestBlockHex, "eth_blockNumber"); err != nil {
 		log.Warn("Error fetching latest block number", "err", err)
 		return err
 	}
@@ -421,10 +428,10 @@ func genFromRPc(cliCtx *cli.Context) error {
 		prev := i
 		prevTime := time.Now()
 		timer := time.NewTimer(40 * time.Second)
-		err := db.Update(context.TODO(), func(tx kv.RwTx) error {
+		err := db.Update(ctx, func(tx kv.RwTx) error {
 			for blockNum := i; blockNum < latestBlock.Uint64(); blockNum++ {
 				blockNumber.SetUint64(blockNum)
-				blk, err := getBlockByNumber(client, &blockNumber, verification)
+				blk, err := getBlockByNumber(ctx, client, &blockNumber, verification)
 				if err != nil {
 					return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 				}

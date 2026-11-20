@@ -20,10 +20,14 @@
 package vm
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 // calcMemSize64 calculates the required memory size, and returns
@@ -67,16 +71,6 @@ func getData(data []byte, start uint64, size uint64) []byte {
 	return common.RightPadBytes(data[start:end], int(size))
 }
 
-// getDataBig returns a slice from the data based on the start and size and pads
-// up to size with zero's. This function is overflow safe.
-func getDataBig(data []byte, start *uint256.Int, size uint64) []byte {
-	start64, overflow := start.Uint64WithOverflow()
-	if overflow {
-		start64 = ^uint64(0)
-	}
-	return getData(data, start64, size)
-}
-
 // ToWordSize returns the ceiled word size required for memory expansion.
 func ToWordSize(size uint64) uint64 {
 	if size > math.MaxUint64-31 {
@@ -84,4 +78,41 @@ func ToWordSize(size uint64) uint64 {
 	}
 
 	return (size + 31) / 32
+}
+
+// See EIP-170 & EIP-7954
+func CheckMaxCodeSize(size int, rules *chain.Rules) error {
+	// EIP-3860 (Shanghai) requires the code-size limit even where EIP-170 is disabled.
+	if !rules.IsEIP170Enabled() && !rules.IsShanghai {
+		return nil
+	}
+
+	var maxSize int
+	switch {
+	case rules.IsAmsterdam:
+		maxSize = params.MaxCodeSizeAmsterdam
+	default:
+		maxSize = params.MaxCodeSize
+	}
+	if size > maxSize {
+		return fmt.Errorf("%w: size %v limit %v", ErrMaxCodeSizeExceeded, size, maxSize)
+	}
+	return nil
+}
+
+// See EIP-3860 & EIP-7954
+func CheckMaxInitCodeSize(size uint64, eip3860, eip7954 bool) error {
+	var maxSize uint64
+	switch {
+	case eip7954:
+		maxSize = params.MaxInitCodeSizeAmsterdam
+	case eip3860:
+		maxSize = params.MaxInitCodeSize
+	default:
+		return nil
+	}
+	if size > maxSize {
+		return fmt.Errorf("%w: size %v limit %v", ErrMaxInitCodeSizeExceeded, size, maxSize)
+	}
+	return nil
 }

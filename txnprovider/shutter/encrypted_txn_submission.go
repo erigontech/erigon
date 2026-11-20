@@ -50,7 +50,7 @@ func EncryptedTxnSubmissionFromLogEvent(event *contracts.SequencerTransactionSub
 		Sender:               event.Sender,
 		EncryptedTransaction: event.EncryptedTransaction,
 		GasLimit:             event.GasLimit,
-		BlockNum:             event.Raw.BlockNumber,
+		BlockNum:             uint64(event.Raw.BlockNumber),
 	}
 }
 

@@ -1,0 +1,112 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package app
+
+import (
+	"context"
+	"fmt"
+	"reflect"
+
+	"github.com/erigontech/erigon/node/app/util/random"
+)
+
+func FixedValueGenerator[T comparable](value T) IdGenerator[T] {
+	return &fixedValueGenerator[T]{value}
+}
+
+type fixedValueGenerator[T comparable] struct {
+	value T
+}
+
+func (generator *fixedValueGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
+	return generator.value, nil
+}
+
+func PassThroughGenerator[T comparable]() IdGenerator[T] {
+	return &passThroughGenerator[T]{}
+}
+
+type passThroughGenerator[T comparable] struct{}
+
+func (generator *passThroughGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
+	return entity[0].(T), nil
+}
+
+func RandomGenerator[T comparable](len uint) IdGenerator[T] {
+	return &randomGenerator[T]{len}
+}
+
+type randomGenerator[T comparable] struct {
+	len uint
+}
+
+func (generator *randomGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
+	var v T
+	t := reflect.TypeOf(v)
+
+	switch t.Kind() {
+	case reflect.String:
+		return any(random.RandomString(generator.len)).(T), nil
+	case reflect.Slice:
+		if t.Elem().Kind() == reflect.Uint8 {
+			return any(random.RandomBytes(generator.len)).(T), nil
+		}
+	}
+
+	return v, fmt.Errorf("can't generate random values for: %s", t)
+}
+
+// NewContextualGenerator returns an id generator which returns a generated value based on the
+//
+//	contents of the key passed in the received genration contexts.
+//
+// If the key is a:
+//
+//	[]byte or string value it is returned as the id
+//	cri.IdGenerator it is called to generatan is
+func ContextualGenerator[T comparable](key any) IdGenerator[T] {
+	return &contextualGenerator[T]{key}
+}
+
+type contextualGenerator[T comparable] struct {
+	key any
+}
+
+func (generator *contextualGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
+	value := generationContext.Value(generator.key)
+
+	var zero T
+	if value == nil {
+		return zero, fmt.Errorf("can't find generation key %v in context", generator.key)
+	}
+
+	if ids, ok := value.(*[]T); ok {
+		if len(*ids) == 0 {
+			return zero, fmt.Errorf("no more ids for generation key %v in context", generator.key)
+		}
+
+		id := (*ids)[0]
+		*ids = (*ids)[1:]
+		value = id
+	}
+
+	if typed, ok := value.(T); ok {
+		return typed, nil
+	}
+
+	return zero, fmt.Errorf("unhandled type: %T", value)
+}

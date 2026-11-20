@@ -17,13 +17,15 @@
 package chain
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/big"
+	"slices"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/generics"
@@ -37,13 +39,11 @@ import (
 // Config is stored in the database on a per block basis. This means
 // that any network, identified by its genesis block, can have its own
 // set of configuration options.
-//
-// Config must be copied only with jinzhu/copier since it contains a sync.Once.
 type Config struct {
-	ChainName string   `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
-	ChainID   *big.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
+	ChainName string       `json:"chainName"` // chain name, eg: mainnet, sepolia, gnosis
+	ChainID   *uint256.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
 
-	Rules RulesName `json:"consensus,omitempty"` // aura, ethash or clique
+	Rules RulesName `json:"consensus,omitempty"` // aura or ethash
 
 	// *Block fields activate the corresponding hard fork at a certain block number,
 	// while *Time fields do so based on the block's time stamp.
@@ -52,46 +52,45 @@ type Config struct {
 
 	// ETH mainnet upgrades
 	// See https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades
-	HomesteadBlock        *big.Int `json:"homesteadBlock,omitempty"`
-	DAOForkBlock          *big.Int `json:"daoForkBlock,omitempty"`
-	TangerineWhistleBlock *big.Int `json:"eip150Block,omitempty"`
-	SpuriousDragonBlock   *big.Int `json:"eip155Block,omitempty"`
-	ByzantiumBlock        *big.Int `json:"byzantiumBlock,omitempty"`
-	ConstantinopleBlock   *big.Int `json:"constantinopleBlock,omitempty"`
-	PetersburgBlock       *big.Int `json:"petersburgBlock,omitempty"`
-	IstanbulBlock         *big.Int `json:"istanbulBlock,omitempty"`
-	MuirGlacierBlock      *big.Int `json:"muirGlacierBlock,omitempty"`
-	BerlinBlock           *big.Int `json:"berlinBlock,omitempty"`
-	LondonBlock           *big.Int `json:"londonBlock,omitempty"`
-	ArrowGlacierBlock     *big.Int `json:"arrowGlacierBlock,omitempty"`
-	GrayGlacierBlock      *big.Int `json:"grayGlacierBlock,omitempty"`
+	HomesteadBlock        *uint64 `json:"homesteadBlock,omitempty"`
+	DAOForkBlock          *uint64 `json:"daoForkBlock,omitempty"`
+	TangerineWhistleBlock *uint64 `json:"eip150Block,omitempty"`
+	SpuriousDragonBlock   *uint64 `json:"eip155Block,omitempty"`
+	ByzantiumBlock        *uint64 `json:"byzantiumBlock,omitempty"`
+	ConstantinopleBlock   *uint64 `json:"constantinopleBlock,omitempty"`
+	PetersburgBlock       *uint64 `json:"petersburgBlock,omitempty"`
+	IstanbulBlock         *uint64 `json:"istanbulBlock,omitempty"`
+	MuirGlacierBlock      *uint64 `json:"muirGlacierBlock,omitempty"`
+	BerlinBlock           *uint64 `json:"berlinBlock,omitempty"`
+	LondonBlock           *uint64 `json:"londonBlock,omitempty"`
+	ArrowGlacierBlock     *uint64 `json:"arrowGlacierBlock,omitempty"`
+	GrayGlacierBlock      *uint64 `json:"grayGlacierBlock,omitempty"`
 
 	// EIP-3675: Upgrade consensus to Proof-of-Stake (a.k.a. "Paris", "The Merge")
-	TerminalTotalDifficulty       *big.Int `json:"terminalTotalDifficulty,omitempty"`       // The merge happens when terminal total difficulty is reached
-	TerminalTotalDifficultyPassed bool     `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
-	MergeNetsplitBlock            *big.Int `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
-	MergeHeight                   *big.Int `json:"mergeBlock,omitempty"`                    // The Merge block number
+	TerminalTotalDifficulty       *uint256.Int `json:"terminalTotalDifficulty,omitempty"`       // The merge happens when terminal total difficulty is reached
+	TerminalTotalDifficultyPassed bool         `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
+	MergeNetsplitBlock            *uint64      `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
+	MergeHeight                   *uint64      `json:"mergeBlock,omitempty"`                    // The Merge block number
 
 	// Mainnet fork scheduling switched from block numbers to timestamps after The Merge
-	ShanghaiTime  *big.Int `json:"shanghaiTime,omitempty"`
-	CancunTime    *big.Int `json:"cancunTime,omitempty"`
-	PragueTime    *big.Int `json:"pragueTime,omitempty"`
-	OsakaTime     *big.Int `json:"osakaTime,omitempty"`
-	AmsterdamTime *big.Int `json:"amsterdamTime,omitempty"`
+	ShanghaiTime  *uint64 `json:"shanghaiTime,omitempty"`
+	CancunTime    *uint64 `json:"cancunTime,omitempty"`
+	PragueTime    *uint64 `json:"pragueTime,omitempty"`
+	OsakaTime     *uint64 `json:"osakaTime,omitempty"`
+	AmsterdamTime *uint64 `json:"amsterdamTime,omitempty"`
+	BogotaTime    *uint64 `json:"bogotaTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
-	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
-	BlobSchedule          map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
-	Bpo1Time              *big.Int                      `json:"bpo1Time,omitempty"`
-	Bpo2Time              *big.Int                      `json:"bpo2Time,omitempty"`
-	Bpo3Time              *big.Int                      `json:"bpo3Time,omitempty"`
-	Bpo4Time              *big.Int                      `json:"bpo4Time,omitempty"`
-	Bpo5Time              *big.Int                      `json:"bpo5Time,omitempty"`
-	parseBlobScheduleOnce sync.Once                     `copier:"-"`
-	parsedBlobSchedule    map[uint64]*params.BlobConfig
+	MinBlobGasPrice *uint64                       `json:"minBlobGasPrice,omitempty"`
+	BlobSchedule    map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
+	Bpo1Time        *uint64                       `json:"bpo1Time,omitempty"`
+	Bpo2Time        *uint64                       `json:"bpo2Time,omitempty"`
+	Bpo3Time        *uint64                       `json:"bpo3Time,omitempty"`
+	Bpo4Time        *uint64                       `json:"bpo4Time,omitempty"`
+	Bpo5Time        *uint64                       `json:"bpo5Time,omitempty"`
 
 	// Balancer fork (Gnosis Chain). See https://hackmd.io/@filoozom/rycoQITlWl
-	BalancerTime            *big.Int                         `json:"balancerTime,omitempty"`
+	BalancerTime            *uint64                          `json:"balancerTime,omitempty"`
 	BalancerRewriteBytecode map[common.Address]hexutil.Bytes `json:"balancerRewriteBytecode,omitempty"`
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
@@ -104,153 +103,201 @@ type Config struct {
 	// See also EIP-6110: Supply validator deposits on chain
 	DepositContract common.Address `json:"depositContractAddress,omitempty"`
 
+	// (Optional) EIP-7002: Execution layer triggerable withdrawals
+	WithdrawalRequestContract *common.Address `json:"withdrawalRequestContractAddress,omitempty"`
+
+	// (Optional) EIP-7251: Increase the MAX_EFFECTIVE_BALANCE
+	ConsolidationRequestContract *common.Address `json:"consolidationRequestContractAddress,omitempty"`
+
+	// (Optional) EIP-8282: The Builder Deposit Addresses
+	BuilderDepositContract *common.Address `json:"builderDepositContractAddress,omitempty"`
+
+	// (Optional) EIP-8282: The Builder Exit Addresses
+	BuilderExitContract *common.Address `json:"builderExitContractAddress,omitempty"`
+
 	DefaultBlockGasLimit *uint64 `json:"defaultBlockGasLimit,omitempty"`
 
 	// Various rules engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
-	Clique *CliqueConfig `json:"clique,omitempty"`
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
 
-	Bor     BorConfig       `json:"-"`
-	BorJSON json.RawMessage `json:"bor,omitempty"`
+	// L2 carries opaque L2-chain-specific config. L2JSON is decoded from the
+	// chainspec JSON verbatim; the registering L2 package unmarshals it into
+	// L2 at spec-registration time.
+	L2     L2Config        `json:"-"`
+	L2JSON json.RawMessage `json:"l2,omitempty"`
 
-	// Account Abstraction
-	AllowAA bool
+	// DisabledEIPs lists EIPs that are disabled for this chain, even when
+	// their parent fork is active. Used for devnets where the reference
+	// client doesn't yet implement certain EIPs (e.g. [7708, 7778, 7928]).
+	DisabledEIPs []int `json:"disabledEIPs,omitempty"`
 }
 
+// IsEIPEnabled reports whether the given EIP is active at the given block time:
+// its parent fork is active AND it is not listed in DisabledEIPs. This is the
+// complete gate — call sites must not add a separate fork check.
+func (c *Config) IsEIPEnabled(eip int, time uint64) bool {
+	if slices.Contains(c.DisabledEIPs, eip) {
+		return false
+	}
+	switch eip {
+	case 7708, 7928:
+		return c.IsAmsterdam(time)
+	default:
+		panic(fmt.Sprintf("IsEIPEnabled: EIP %d is not mapped to a fork", eip))
+	}
+}
+
+// IsL2 returns whether this chain config carries L2-chain-specific config,
+// either already resolved (L2) or still opaque (L2JSON).
+func (c *Config) IsL2() bool {
+	return c != nil && (c.L2 != nil || (len(c.L2JSON) > 0 && !bytes.Equal(c.L2JSON, jsonNull)))
+}
+
+var jsonNull = []byte("null")
+
 var (
-	TestChainConfig = &Config{
-		ChainID:               big.NewInt(1337),
+	TestChainAuraConfig = &Config{
+		ChainID:               uint256.NewInt(1),
+		Rules:                 AuRaRules,
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(0),
+		ByzantiumBlock:        common.NewUint64(0),
+		ConstantinopleBlock:   common.NewUint64(0),
+		PetersburgBlock:       common.NewUint64(0),
+		IstanbulBlock:         common.NewUint64(0),
+		MuirGlacierBlock:      common.NewUint64(0),
+		BerlinBlock:           common.NewUint64(0),
+		LondonBlock:           common.NewUint64(0),
+		Aura:                  &AuRaConfig{},
+		DisabledEIPs:          []int{170},
+	}
+
+	TestChainBerlinConfig = &Config{
+		ChainID:               uint256.NewInt(1337),
 		Rules:                 EtHashRules,
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(0),
+		ByzantiumBlock:        common.NewUint64(0),
+		ConstantinopleBlock:   common.NewUint64(0),
+		PetersburgBlock:       common.NewUint64(0),
+		IstanbulBlock:         common.NewUint64(0),
+		MuirGlacierBlock:      common.NewUint64(0),
+		BerlinBlock:           common.NewUint64(0),
 		Ethash:                new(EthashConfig),
 	}
 
-	TestChainAuraConfig = &Config{
-		ChainID:               big.NewInt(1),
-		Rules:                 AuRaRules,
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           big.NewInt(0),
-		Aura:                  &AuRaConfig{},
+	TestChainOsakaConfig = &Config{
+		ChainID:                       uint256.NewInt(1337),
+		Rules:                         EtHashRules,
+		HomesteadBlock:                common.NewUint64(0),
+		TangerineWhistleBlock:         common.NewUint64(0),
+		SpuriousDragonBlock:           common.NewUint64(0),
+		ByzantiumBlock:                common.NewUint64(0),
+		ConstantinopleBlock:           common.NewUint64(0),
+		PetersburgBlock:               common.NewUint64(0),
+		IstanbulBlock:                 common.NewUint64(0),
+		MuirGlacierBlock:              common.NewUint64(0),
+		BerlinBlock:                   common.NewUint64(0),
+		LondonBlock:                   common.NewUint64(0),
+		ArrowGlacierBlock:             common.NewUint64(0),
+		GrayGlacierBlock:              common.NewUint64(0),
+		TerminalTotalDifficulty:       uint256.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		ShanghaiTime:                  common.NewUint64(0),
+		CancunTime:                    common.NewUint64(0),
+		PragueTime:                    common.NewUint64(0),
+		OsakaTime:                     common.NewUint64(0),
+		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
+		Ethash:                        new(EthashConfig),
 	}
 
 	// AllProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the main net protocol.
 	AllProtocolChanges = &Config{
-		ChainID:                       big.NewInt(1337),
+		ChainID:                       uint256.NewInt(1337),
 		Rules:                         EtHashRules,
-		HomesteadBlock:                big.NewInt(0),
-		TangerineWhistleBlock:         big.NewInt(0),
-		SpuriousDragonBlock:           big.NewInt(0),
-		ByzantiumBlock:                big.NewInt(0),
-		ConstantinopleBlock:           big.NewInt(0),
-		PetersburgBlock:               big.NewInt(0),
-		IstanbulBlock:                 big.NewInt(0),
-		MuirGlacierBlock:              big.NewInt(0),
-		BerlinBlock:                   big.NewInt(0),
-		LondonBlock:                   big.NewInt(0),
-		ArrowGlacierBlock:             big.NewInt(0),
-		GrayGlacierBlock:              big.NewInt(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
+		HomesteadBlock:                common.NewUint64(0),
+		TangerineWhistleBlock:         common.NewUint64(0),
+		SpuriousDragonBlock:           common.NewUint64(0),
+		ByzantiumBlock:                common.NewUint64(0),
+		ConstantinopleBlock:           common.NewUint64(0),
+		PetersburgBlock:               common.NewUint64(0),
+		IstanbulBlock:                 common.NewUint64(0),
+		MuirGlacierBlock:              common.NewUint64(0),
+		BerlinBlock:                   common.NewUint64(0),
+		LondonBlock:                   common.NewUint64(0),
+		ArrowGlacierBlock:             common.NewUint64(0),
+		GrayGlacierBlock:              common.NewUint64(0),
+		TerminalTotalDifficulty:       uint256.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
-		ShanghaiTime:                  big.NewInt(0),
-		CancunTime:                    big.NewInt(0),
-		PragueTime:                    big.NewInt(0),
-		OsakaTime:                     big.NewInt(0),
-		AmsterdamTime:                 big.NewInt(0),
+		ShanghaiTime:                  common.NewUint64(0),
+		CancunTime:                    common.NewUint64(0),
+		PragueTime:                    common.NewUint64(0),
+		OsakaTime:                     common.NewUint64(0),
+		AmsterdamTime:                 common.NewUint64(0),
 		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 		Ethash:                        new(EthashConfig),
 	}
 )
 
-type BorConfig interface {
-	fmt.Stringer
-	IsAgra(num uint64) bool
-	GetAgraBlock() *big.Int
-	IsNapoli(num uint64) bool
-	GetNapoliBlock() *big.Int
-	IsAhmedabad(number uint64) bool
-	GetAhmedabadBlock() *big.Int
-	IsBhilai(num uint64) bool
-	GetBhilaiBlock() *big.Int
-	IsRio(num uint64) bool
-	GetRioBlock() *big.Int
-	StateReceiverContractAddress() accounts.Address
-	CalculateSprintNumber(number uint64) uint64
-	CalculateSprintLength(number uint64) uint64
-	CalculateCoinbase(number uint64) accounts.Address
+// L2Config is the resolved implementation of an L2 stack's chain-specific
+// config, registered by the L2 package at spec-registration time.
+type L2Config interface {
+	// Name returns the short identifier of the L2 stack (e.g. used to select
+	// a registered rules engine).
+	Name() string
+
+	// ResolveRules lets an L2 stack finalize the per-block Rules after the
+	// standard fork resolution: set L2Version and flip any EVM-fork booleans
+	// that the L2 gates on its own version ladder instead of L1 time/number.
+	ResolveRules(l2Version, blockNum, blockTime uint64, rules *Rules)
 }
 
-func timestampToTime(unixSec int64) *time.Time {
-	t := time.Unix(unixSec, 0).UTC()
+func timestampToTime(unixSec uint64) *time.Time {
+	t := time.Unix(int64(unixSec), 0).UTC()
 	return &t
 }
 
 func (c *Config) String() string {
 	engine := c.getEngine()
 
-	if c.Bor != nil {
-		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Bhilai: %v, Rio: %v, Engine: %v}",
-			c.ChainID,
-			c.Bor.GetAgraBlock(),
-			c.Bor.GetNapoliBlock(),
-			c.Bor.GetAhmedabadBlock(),
-			c.Bor.GetBhilaiBlock(),
-			c.Bor.GetRioBlock(),
-			engine,
-		)
-	}
-
 	var b strings.Builder
 	fmt.Fprintf(&b, "{ChainID: %v, Terminal Total Difficulty: %v", c.ChainID, c.TerminalTotalDifficulty)
 	if c.ShanghaiTime != nil {
-		fmt.Fprintf(&b, ", Shapella: %v", timestampToTime(c.ShanghaiTime.Int64()))
+		fmt.Fprintf(&b, ", Shapella: %v", timestampToTime(*c.ShanghaiTime))
 	}
 	if c.CancunTime != nil {
-		fmt.Fprintf(&b, ", Dencun: %v", timestampToTime(c.CancunTime.Int64()))
+		fmt.Fprintf(&b, ", Dencun: %v", timestampToTime(*c.CancunTime))
 	}
 	if c.PragueTime != nil {
-		fmt.Fprintf(&b, ", Pectra: %v", timestampToTime(c.PragueTime.Int64()))
+		fmt.Fprintf(&b, ", Pectra: %v", timestampToTime(*c.PragueTime))
 	}
 	if c.OsakaTime != nil {
-		fmt.Fprintf(&b, ", Fusaka: %v", timestampToTime(c.OsakaTime.Int64()))
+		fmt.Fprintf(&b, ", Fusaka: %v", timestampToTime(*c.OsakaTime))
 	}
 	if c.Bpo1Time != nil {
-		fmt.Fprintf(&b, ", BPO1: %v", timestampToTime(c.Bpo1Time.Int64()))
+		fmt.Fprintf(&b, ", BPO1: %v", timestampToTime(*c.Bpo1Time))
 	}
 	if c.Bpo2Time != nil {
-		fmt.Fprintf(&b, ", BPO2: %v", timestampToTime(c.Bpo2Time.Int64()))
+		fmt.Fprintf(&b, ", BPO2: %v", timestampToTime(*c.Bpo2Time))
 	}
 	if c.Bpo3Time != nil {
-		fmt.Fprintf(&b, ", BPO3: %v", timestampToTime(c.Bpo3Time.Int64()))
+		fmt.Fprintf(&b, ", BPO3: %v", timestampToTime(*c.Bpo3Time))
 	}
 	if c.Bpo4Time != nil {
-		fmt.Fprintf(&b, ", BPO4: %v", timestampToTime(c.Bpo4Time.Int64()))
+		fmt.Fprintf(&b, ", BPO4: %v", timestampToTime(*c.Bpo4Time))
 	}
 	if c.Bpo5Time != nil {
-		fmt.Fprintf(&b, ", BPO5: %v", timestampToTime(c.Bpo5Time.Int64()))
+		fmt.Fprintf(&b, ", BPO5: %v", timestampToTime(*c.Bpo5Time))
 	}
 	if c.BalancerTime != nil {
-		fmt.Fprintf(&b, ", Balancer: %v", timestampToTime(c.BalancerTime.Int64()))
+		fmt.Fprintf(&b, ", Balancer: %v", timestampToTime(*c.BalancerTime))
 	}
 	if c.AmsterdamTime != nil {
-		fmt.Fprintf(&b, ", Glamsterdam: %v", timestampToTime(c.AmsterdamTime.Int64()))
+		fmt.Fprintf(&b, ", Glamsterdam: %v", timestampToTime(*c.AmsterdamTime))
 	}
 	fmt.Fprintf(&b, ", Engine: %v}", engine)
 	return b.String()
@@ -260,10 +307,6 @@ func (c *Config) getEngine() string {
 	switch {
 	case c.Ethash != nil:
 		return c.Ethash.String()
-	case c.Clique != nil:
-		return c.Clique.String()
-	case c.Bor != nil:
-		return c.Bor.String()
 	case c.Aura != nil:
 		return c.Aura.String()
 	default:
@@ -291,6 +334,12 @@ func (c *Config) IsSpuriousDragon(num uint64) bool {
 	return isForked(c.SpuriousDragonBlock, num)
 }
 
+// IsEIP161Enabled reports whether EIP-161 empty-account clearing applies at num:
+// Spurious Dragon is active and EIP-161 has not been disabled.
+func (c *Config) IsEIP161Enabled(num uint64) bool {
+	return c.IsSpuriousDragon(num) && !slices.Contains(c.DisabledEIPs, 161)
+}
+
 // IsByzantium returns whether num is either equal to the Byzantium fork block or greater.
 func (c *Config) IsByzantium(num uint64) bool {
 	return isForked(c.ByzantiumBlock, num)
@@ -306,11 +355,9 @@ func (c *Config) IsMuirGlacier(num uint64) bool {
 	return isForked(c.MuirGlacierBlock, num)
 }
 
-// IsPetersburg returns whether num is either
-// - equal to or greater than the PetersburgBlock fork block,
-// - OR is nil, and Constantinople is active
+// IsPetersburg returns whether num is either equal to the Petersburg fork block or greater.
 func (c *Config) IsPetersburg(num uint64) bool {
-	return isForked(c.PetersburgBlock, num) || c.PetersburgBlock == nil && isForked(c.ConstantinopleBlock, num)
+	return isForked(c.PetersburgBlock, num)
 }
 
 // IsIstanbul returns whether num is either equal to the Istanbul fork block or greater.
@@ -343,24 +390,6 @@ func (c *Config) IsShanghai(time uint64) bool {
 	return isForked(c.ShanghaiTime, time)
 }
 
-// IsAgra returns whether num is either equal to the Agra fork block or greater.
-// The Agra hard fork is based on the Shanghai hard fork, but it doesn't include withdrawals.
-// Also Agra is activated based on the block number rather than the timestamp.
-// Refer to https://forum.polygon.technology/t/pip-28-agra-hardfork
-func (c *Config) IsAgra(num uint64) bool {
-	return (c != nil) && (c.Bor != nil) && c.Bor.IsAgra(num)
-}
-
-// Refer to https://forum.polygon.technology/t/pip-33-napoli-upgrade
-func (c *Config) IsNapoli(num uint64) bool {
-	return (c != nil) && (c.Bor != nil) && c.Bor.IsNapoli(num)
-}
-
-// Refer to https://forum.polygon.technology/t/pip-63-bhilai-hardfork
-func (c *Config) IsBhilai(num uint64) bool {
-	return (c != nil) && (c.Bor != nil) && c.Bor.IsBhilai(num)
-}
-
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
 func (c *Config) IsCancun(time uint64) bool {
 	return isForked(c.CancunTime, time)
@@ -369,6 +398,11 @@ func (c *Config) IsCancun(time uint64) bool {
 // IsAmsterdam returns whether time is either equal to the Amsterdam fork time or greater.
 func (c *Config) IsAmsterdam(time uint64) bool {
 	return isForked(c.AmsterdamTime, time)
+}
+
+// IsBogota returns whether time is either equal to the Bogota fork time or greater.
+func (c *Config) IsBogota(time uint64) bool {
+	return isForked(c.BogotaTime, time)
 }
 
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
@@ -397,56 +431,31 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 }
 
 func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
-	c.parseBlobScheduleOnce.Do(func() {
-		// Populate with default values
-		c.parsedBlobSchedule = make(map[uint64]*params.BlobConfig)
-		if c.CancunTime != nil {
-			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
+	var cfg *params.BlobConfig
+	var cfgTime uint64
+	// The latest activation at or before time wins; on a tie, the entry considered last.
+	consider := func(activation *uint64, v *params.BlobConfig) {
+		if activation != nil && *activation <= time && *activation >= cfgTime {
+			cfg, cfgTime = v, *activation
 		}
-		if c.PragueTime != nil {
-			c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
+	}
+	override := func(activation *uint64, fork string) {
+		if v, ok := c.BlobSchedule[fork]; ok {
+			consider(activation, v)
 		}
-
-		// Override with supplied values
-		val, ok := c.BlobSchedule["cancun"]
-		if ok && c.CancunTime != nil {
-			c.parsedBlobSchedule[c.CancunTime.Uint64()] = val
-		}
-		val, ok = c.BlobSchedule["prague"]
-		if ok && c.PragueTime != nil {
-			c.parsedBlobSchedule[c.PragueTime.Uint64()] = val
-		}
-		val, ok = c.BlobSchedule["osaka"]
-		if ok && c.OsakaTime != nil {
-			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
-		}
-		val, ok = c.BlobSchedule["gloas"]
-		if ok && c.AmsterdamTime != nil {
-			c.parsedBlobSchedule[c.AmsterdamTime.Uint64()] = val
-		}
-		val, ok = c.BlobSchedule["bpo1"]
-		if ok && c.Bpo1Time != nil {
-			c.parsedBlobSchedule[c.Bpo1Time.Uint64()] = val
-		}
-		val, ok = c.BlobSchedule["bpo2"]
-		if ok && c.Bpo2Time != nil {
-			c.parsedBlobSchedule[c.Bpo2Time.Uint64()] = val
-		}
-		val, ok = c.BlobSchedule["bpo3"]
-		if ok && c.Bpo3Time != nil {
-			c.parsedBlobSchedule[c.Bpo3Time.Uint64()] = val
-		}
-		val, ok = c.BlobSchedule["bpo4"]
-		if ok && c.Bpo4Time != nil {
-			c.parsedBlobSchedule[c.Bpo4Time.Uint64()] = val
-		}
-		val, ok = c.BlobSchedule["bpo5"]
-		if ok && c.Bpo5Time != nil {
-			c.parsedBlobSchedule[c.Bpo5Time.Uint64()] = val
-		}
-	})
-
-	return ConfigValueLookup(c.parsedBlobSchedule, time)
+	}
+	consider(c.CancunTime, &params.DefaultCancunBlobConfig)
+	consider(c.PragueTime, &params.DefaultPragueBlobConfig)
+	override(c.CancunTime, "cancun")
+	override(c.PragueTime, "prague")
+	override(c.OsakaTime, "osaka")
+	override(c.AmsterdamTime, "gloas")
+	override(c.Bpo1Time, "bpo1")
+	override(c.Bpo2Time, "bpo2")
+	override(c.Bpo3Time, "bpo3")
+	override(c.Bpo4Time, "bpo4")
+	override(c.Bpo5Time, "bpo5")
+	return cfg
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
@@ -482,9 +491,6 @@ func (c *Config) GetMaxRlpBlockSize(time uint64) int {
 }
 
 func (c *Config) SecondsPerSlot() uint64 {
-	if c.Bor != nil {
-		return 2 // Polygon
-	}
 	if c.Aura != nil {
 		return 5 // Gnosis
 	}
@@ -493,46 +499,107 @@ func (c *Config) SecondsPerSlot() uint64 {
 
 func (c *Config) SystemContracts(time uint64) map[string]accounts.Address {
 	contracts := map[string]accounts.Address{}
+	if c.IsAmsterdam(time) {
+		contracts["BUILDER_DEPOSIT_CONTRACT_ADDRESS"] = c.GetBuilderDepositContract()
+		contracts["BUILDER_EXIT_CONTRACT_ADDRESS"] = c.GetBuilderExitContract()
+	}
 	if c.IsCancun(time) {
 		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
 	}
 	if c.IsPrague(time) {
-		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = params.ConsolidationRequestAddress
+		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = c.GetConsolidationRequestContract()
 		contracts["DEPOSIT_CONTRACT_ADDRESS"] = accounts.InternAddress(c.DepositContract)
 		contracts["HISTORY_STORAGE_ADDRESS"] = params.HistoryStorageAddress
-		contracts["WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS"] = params.WithdrawalRequestAddress
+		contracts["WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS"] = c.GetWithdrawalRequestContract()
 	}
 	return contracts
 }
 
+// GetWithdrawalRequestContract returns the configured EIP-7002 withdrawal request contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetWithdrawalRequestContract() accounts.Address {
+	if c.WithdrawalRequestContract != nil {
+		return accounts.InternAddress(*c.WithdrawalRequestContract)
+	}
+	return params.WithdrawalRequestAddress
+}
+
+// GetConsolidationRequestContract returns the configured EIP-7251 consolidation request contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetConsolidationRequestContract() accounts.Address {
+	if c.ConsolidationRequestContract != nil {
+		return accounts.InternAddress(*c.ConsolidationRequestContract)
+	}
+	return params.ConsolidationRequestAddress
+}
+
+// GetBuilderDepositContract returns the configured EIP-8282 builder deposit contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetBuilderDepositContract() accounts.Address {
+	if c.BuilderDepositContract != nil {
+		return accounts.InternAddress(*c.BuilderDepositContract)
+	}
+	return params.BuilderDepositAddress
+}
+
+// GetBuilderExitContract returns the configured EIP-8282 builder exit contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetBuilderExitContract() accounts.Address {
+	if c.BuilderExitContract != nil {
+		return accounts.InternAddress(*c.BuilderExitContract)
+	}
+	return params.BuilderExitAddress
+}
+
 // CheckCompatible checks whether scheduled fork transitions have been imported
 // with a mismatching chain configuration.
-func (c *Config) CheckCompatible(newcfg *Config, height uint64) *ConfigCompatError {
-	bhead := height
-
-	// Iterate checkCompatible to find the lowest conflict.
-	var lasterr *ConfigCompatError
-	for {
-		err := c.checkCompatible(newcfg, bhead)
-		if err == nil || (lasterr != nil && err.RewindTo == lasterr.RewindTo) {
+func (c *Config) CheckCompatible(newcfg *Config, height, headTime uint64) *ConfigCompatError {
+	// The axes are iterated separately. checkCompatibleBlocks returns at its first
+	// conflict, so sharing one loop lets a block fork the chain cannot rewind past --
+	// an EIP155 chain ID change, whose target is block 0 on every modern chain -- hide
+	// every timestamp conflict behind it.
+	var blockErr *ConfigCompatError
+	for bhead := height; ; {
+		err := c.checkCompatibleBlocks(newcfg, bhead)
+		if err == nil || (blockErr != nil && err.RewindTo == blockErr.RewindTo) {
 			break
 		}
-		lasterr = err
-		bhead = err.RewindTo
+		blockErr, bhead = err, err.RewindTo
 	}
-	return lasterr
+
+	var timeErr *ConfigCompatError
+	for btime := headTime; ; {
+		err := c.checkCompatibleTimestamps(newcfg, btime)
+		if err == nil || (timeErr != nil && err.RewindToTime == timeErr.RewindToTime) {
+			break
+		}
+		timeErr, btime = err, err.RewindToTime
+	}
+
+	switch {
+	case blockErr == nil:
+		return timeErr
+	case timeErr == nil:
+		return blockErr
+	default:
+		blockErr.WhatTime = timeErr.WhatTime
+		blockErr.StoredTime, blockErr.NewTime = timeErr.StoredTime, timeErr.NewTime
+		blockErr.RewindToTime = timeErr.RewindToTime
+		return blockErr
+	}
 }
 
 type forkBlockNumber struct {
 	name        string
-	blockNumber *big.Int
+	blockNumber *uint64
 	optional    bool // if true, the fork may be nil and next fork is still allowed
+	outOfOrder  bool // if true, the fork is exempt from the ordering check (one-off fork, e.g. DAO)
 }
 
 func (c *Config) forkBlockNumbers() []forkBlockNumber {
 	return []forkBlockNumber{
 		{name: "homesteadBlock", blockNumber: c.HomesteadBlock},
-		{name: "daoForkBlock", blockNumber: c.DAOForkBlock, optional: true},
+		{name: "daoForkBlock", blockNumber: c.DAOForkBlock, optional: true, outOfOrder: true},
 		{name: "eip150Block", blockNumber: c.TangerineWhistleBlock},
 		{name: "eip155Block", blockNumber: c.SpuriousDragonBlock},
 		{name: "byzantiumBlock", blockNumber: c.ByzantiumBlock},
@@ -548,7 +615,50 @@ func (c *Config) forkBlockNumbers() []forkBlockNumber {
 	}
 }
 
-// CheckConfigForkOrder checks that we don't "skip" any forks
+type forkTimestamp struct {
+	name        string // the config field, as it is spelled in JSON
+	what        string // how the fork is named in a compatibility error
+	timestamp   *uint64
+	predecessor string // name of an earlier entry; empty for the first timestamp fork
+}
+
+// forkTimestamps is the shared inventory for fork ordering and compatibility checks.
+// Predecessors must appear earlier in the list so validation can resolve them in one pass.
+// BPO forks can fall before or after Amsterdam, and Balancer runs before Osaka on Gnosis;
+// explicit predecessors let each branch keep its own order.
+func (c *Config) forkTimestamps() []forkTimestamp {
+	return []forkTimestamp{
+		{name: "shanghaiTime", what: "Shanghai fork timestamp", timestamp: c.ShanghaiTime},
+		{name: "cancunTime", what: "Cancun fork timestamp", timestamp: c.CancunTime, predecessor: "shanghaiTime"},
+		{name: "pragueTime", what: "Prague fork timestamp", timestamp: c.PragueTime, predecessor: "cancunTime"},
+		{name: "osakaTime", what: "Osaka fork timestamp", timestamp: c.OsakaTime, predecessor: "pragueTime"},
+		{name: "bpo1Time", what: "BPO1 fork timestamp", timestamp: c.Bpo1Time, predecessor: "osakaTime"},
+		{name: "bpo2Time", what: "BPO2 fork timestamp", timestamp: c.Bpo2Time, predecessor: "bpo1Time"},
+		{name: "bpo3Time", what: "BPO3 fork timestamp", timestamp: c.Bpo3Time, predecessor: "bpo2Time"},
+		{name: "bpo4Time", what: "BPO4 fork timestamp", timestamp: c.Bpo4Time, predecessor: "bpo3Time"},
+		{name: "bpo5Time", what: "BPO5 fork timestamp", timestamp: c.Bpo5Time, predecessor: "bpo4Time"},
+		{name: "amsterdamTime", what: "Amsterdam fork timestamp", timestamp: c.AmsterdamTime, predecessor: "osakaTime"},
+		{name: "bogotaTime", what: "Bogota fork timestamp", timestamp: c.BogotaTime, predecessor: "amsterdamTime"},
+		{name: "balancerTime", what: "Balancer fork timestamp", timestamp: c.BalancerTime, predecessor: "pragueTime"},
+	}
+}
+
+// SameTimestampForks reports whether every time-based fork is scheduled identically.
+// When they are, no head time can produce a timestamp conflict, so the caller need not
+// establish one.
+func (c *Config) SameTimestampForks(newcfg *Config) bool {
+	newTimes := newcfg.forkTimestamps()
+	for i, f := range c.forkTimestamps() {
+		if !numEqual(f.timestamp, newTimes[i].timestamp) {
+			return false
+		}
+	}
+	return true
+}
+
+// CheckConfigForkOrder rejects missing predecessors and reversed activation schedules.
+// Future forks may remain unscheduled, but an enabled fork requires its mandatory
+// predecessors to be enabled no later. Equal activation points are allowed.
 func (c *Config) CheckConfigForkOrder() error {
 	if c != nil && c.ChainID != nil && c.ChainID.Uint64() == 77 {
 		return nil
@@ -557,33 +667,58 @@ func (c *Config) CheckConfigForkOrder() error {
 	var lastFork forkBlockNumber
 
 	for _, fork := range c.forkBlockNumbers() {
-		if lastFork.name != "" {
+		if lastFork.name != "" && !fork.outOfOrder {
 			// Next one must be higher number
 			if lastFork.blockNumber == nil && fork.blockNumber != nil {
 				return fmt.Errorf("unsupported fork ordering: %v not enabled, but %v enabled at %v",
-					lastFork.name, fork.name, fork.blockNumber)
+					lastFork.name, fork.name, *fork.blockNumber)
 			}
 			if lastFork.blockNumber != nil && fork.blockNumber != nil {
-				if lastFork.blockNumber.Cmp(fork.blockNumber) > 0 {
+				if *lastFork.blockNumber > *fork.blockNumber {
 					return fmt.Errorf("unsupported fork ordering: %v enabled at %v, but %v enabled at %v",
-						lastFork.name, lastFork.blockNumber, fork.name, fork.blockNumber)
+						lastFork.name, *lastFork.blockNumber, fork.name, *fork.blockNumber)
 				}
 			}
 			// If it was optional and not set, then ignore it
 		}
-		if !fork.optional || fork.blockNumber != nil {
+		if (!fork.optional || fork.blockNumber != nil) && !fork.outOfOrder {
 			lastFork = fork
+		}
+	}
+	// At the switch from block heights to timestamps, only the predecessor's presence
+	// can be checked: its activation value cannot be compared across the two units.
+	if lastFork.blockNumber == nil && c.ShanghaiTime != nil {
+		return fmt.Errorf("unsupported fork ordering: %v not enabled, but shanghaiTime enabled at %v",
+			lastFork.name, *c.ShanghaiTime)
+	}
+
+	timestamps := make(map[string]*uint64)
+	for _, fork := range c.forkTimestamps() {
+		timestamps[fork.name] = fork.timestamp
+		if fork.timestamp == nil || fork.predecessor == "" {
+			continue
+		}
+		previous := timestamps[fork.predecessor]
+		if previous == nil {
+			return fmt.Errorf("unsupported fork ordering: %v not enabled, but %v enabled at %v",
+				fork.predecessor, fork.name, *fork.timestamp)
+		}
+		if *previous > *fork.timestamp {
+			return fmt.Errorf("unsupported fork ordering: %v enabled at %v, but %v enabled at %v",
+				fork.predecessor, *previous, fork.name, *fork.timestamp)
 		}
 	}
 	return nil
 }
 
-func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError {
-	// returns true if a fork scheduled at s1 cannot be rescheduled to block s2 because head is already past the fork.
-	incompatible := func(s1, s2 *big.Int, head uint64) bool {
-		return (isForked(s1, head) || isForked(s2, head)) && !numEqual(s1, s2)
-	}
+// incompatible reports whether a fork scheduled at s1 cannot be rescheduled to s2
+// because head is already past the fork. head is a block number or a timestamp
+// depending on the axis.
+func incompatible(s1, s2 *uint64, head uint64) bool {
+	return (isForked(s1, head) || isForked(s2, head)) && !numEqual(s1, s2)
+}
 
+func (c *Config) checkCompatibleBlocks(newcfg *Config, head uint64) *ConfigCompatError {
 	// Ethereum mainnet forks
 	if incompatible(c.HomesteadBlock, newcfg.HomesteadBlock, head) {
 		return newCompatError("Homestead fork block", c.HomesteadBlock, newcfg.HomesteadBlock)
@@ -597,7 +732,7 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 	if incompatible(c.SpuriousDragonBlock, newcfg.SpuriousDragonBlock, head) {
 		return newCompatError("Spurious Dragon fork block", c.SpuriousDragonBlock, newcfg.SpuriousDragonBlock)
 	}
-	if c.IsSpuriousDragon(head) && !numEqual(c.ChainID, newcfg.ChainID) {
+	if c.IsSpuriousDragon(head) && !uint256Equal(c.ChainID, newcfg.ChainID) {
 		return newCompatError("EIP155 chain ID", c.SpuriousDragonBlock, newcfg.SpuriousDragonBlock)
 	}
 	if incompatible(c.ByzantiumBlock, newcfg.ByzantiumBlock, head) {
@@ -638,46 +773,130 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 	return nil
 }
 
-func numEqual(x, y *big.Int) bool {
+// checkCompatibleTimestamps compares the post-merge forks, which are scheduled by
+// timestamp and so cannot be compared against a block number.
+func (c *Config) checkCompatibleTimestamps(newcfg *Config, headTime uint64) *ConfigCompatError {
+	newTimes := newcfg.forkTimestamps()
+	for i, f := range c.forkTimestamps() {
+		if incompatible(f.timestamp, newTimes[i].timestamp, headTime) {
+			return newTimestampCompatError(f.what, f.timestamp, newTimes[i].timestamp)
+		}
+	}
+	return nil
+}
+
+func numEqual(x, y *uint64) bool {
 	if x == nil {
 		return y == nil
 	}
 	if y == nil {
-		return x == nil
+		return false
+	}
+	return *x == *y
+}
+
+func uint256Equal(x, y *uint256.Int) bool {
+	if x == nil {
+		return y == nil
+	}
+	if y == nil {
+		return false
 	}
 	return x.Cmp(y) == 0
 }
 
 // ConfigCompatError is raised if the locally-stored blockchain is initialised with a
-// ChainConfig that would alter the past.
+// ChainConfig that would alter the past. The two fork axes are independent, so one
+// error can carry a conflict on each, and correcting only one still leaves the node
+// on an incompatible schedule.
 type ConfigCompatError struct {
+	// What names the conflicting block-based fork, empty when only timestamps conflict.
 	What string
-	// block numbers of the stored and new configurations
-	StoredConfig, NewConfig *big.Int
+	// block numbers of the stored and new configurations, for a block-based fork
+	StoredConfig, NewConfig *uint64
 	// the block number to which the local chain must be rewound to correct the error
 	RewindTo uint64
+
+	// WhatTime names the conflicting time-based fork, empty when only blocks conflict.
+	WhatTime string
+	// timestamps of the stored and new configurations, for a time-based fork
+	StoredTime, NewTime *uint64
+	// the timestamp to which the local chain must be rewound to correct the error
+	RewindToTime uint64
 }
 
-func newCompatError(what string, storedblock, newblock *big.Int) *ConfigCompatError {
-	var rew *big.Int
-	switch {
-	case storedblock == nil:
-		rew = newblock
-	case newblock == nil || storedblock.Cmp(newblock) < 0:
-		rew = storedblock
-	default:
-		rew = newblock
-	}
-	err := &ConfigCompatError{what, storedblock, newblock, 0}
-	if rew != nil && rew.Sign() > 0 {
-		err.RewindTo = rew.Uint64() - 1
+func newCompatError(what string, storedblock, newblock *uint64) *ConfigCompatError {
+	rew := rewindTarget(storedblock, newblock)
+	err := &ConfigCompatError{What: what, StoredConfig: storedblock, NewConfig: newblock}
+	if rew != nil && *rew > 0 {
+		err.RewindTo = *rew - 1
 	}
 	return err
 }
 
-func (err *ConfigCompatError) Error() string {
-	return fmt.Sprintf("mismatching %s in database (have %d, want %d, rewindto %d)", err.What, err.StoredConfig, err.NewConfig, err.RewindTo)
+func newTimestampCompatError(what string, storedtime, newtime *uint64) *ConfigCompatError {
+	rew := rewindTarget(storedtime, newtime)
+	err := &ConfigCompatError{WhatTime: what, StoredTime: storedtime, NewTime: newtime}
+	if rew != nil && *rew > 0 {
+		err.RewindToTime = *rew - 1
+	}
+	return err
 }
+
+// rewindTarget is the earlier of the two schedules: rewinding past it is what makes the
+// two configurations agree again.
+func rewindTarget(stored, scheduled *uint64) *uint64 {
+	switch {
+	case stored == nil:
+		return scheduled
+	case scheduled == nil || *stored < *scheduled:
+		return stored
+	default:
+		return scheduled
+	}
+}
+
+// Copy returns a config whose fields can be reassigned without the original seeing it.
+// Every pointer, map and slice is shared with the source, so a caller that mutates
+// through one still writes into the original -- reassigning a field is what this is for.
+//
+// Deliberately not a deep copy. jinzhu/copier's DeepCopy turns a nil map or slice into an
+// empty one at every nesting depth, and Aura.Validators tells the two apart: a nil List
+// with Multi set is a multi validator set, an empty non-nil List is a set with no
+// validators at all.
+func (c *Config) Copy() *Config {
+	cp := *c
+	return &cp
+}
+
+func uint64PtrStr(p *uint64) string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%d", *p)
+}
+
+func (err *ConfigCompatError) Error() string {
+	blocks := fmt.Sprintf("mismatching %s in database (have %s, want %s, rewindto %d)",
+		err.What, uint64PtrStr(err.StoredConfig), uint64PtrStr(err.NewConfig), err.RewindTo)
+	times := fmt.Sprintf("mismatching %s in database (have timestamp %s, want timestamp %s, rewindto timestamp %d)",
+		err.WhatTime, uint64PtrStr(err.StoredTime), uint64PtrStr(err.NewTime), err.RewindToTime)
+	switch {
+	case !err.HasTimestampConflict():
+		return blocks
+	case !err.HasBlockConflict():
+		return times
+	default:
+		return blocks + "; " + times
+	}
+}
+
+// HasBlockConflict reports whether a block-based fork conflicts.
+func (err *ConfigCompatError) HasBlockConflict() bool { return err.What != "" }
+
+// HasTimestampConflict reports whether a time-based fork conflicts. A fork activating at
+// timestamp 0 or 1 rewinds to 0, so a zero rewind target cannot stand in for "no conflict".
+func (err *ConfigCompatError) HasTimestampConflict() bool { return err.WhatTime != "" }
 
 // EthashConfig is the rules engine configs for proof-of-work based sealing.
 type EthashConfig struct{}
@@ -685,17 +904,6 @@ type EthashConfig struct{}
 // String implements the stringer interface, returning the rules engine details.
 func (c *EthashConfig) String() string {
 	return "ethash"
-}
-
-// CliqueConfig is the rules engine configs for proof-of-authority based sealing.
-type CliqueConfig struct {
-	Period uint64 `json:"period"` // Number of seconds between blocks to enforce
-	Epoch  uint64 `json:"epoch"`  // Epoch length to reset votes and checkpoint
-}
-
-// String implements the stringer interface, returning the rules engine details.
-func (c *CliqueConfig) String() string {
-	return "clique"
 }
 
 // Looks up a config value as of a given block number (or time).
@@ -723,23 +931,67 @@ func ConfigValueLookup[T any](field map[uint64]T, number uint64) T {
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                           *big.Int
+	ChainID                                           *uint256.Int
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon bool
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
-	IsCancun, IsNapoli, IsBhilai                      bool
-	IsPrague, IsOsaka, IsAmsterdam                    bool
+	IsCancun                                          bool
+	IsPrague, IsOsaka, IsAmsterdam, IsBogota          bool
+	DisabledEIPs                                      []int
 	IsAura                                            bool
+
+	// L2Version is the L2 stack's own upgrade version (e.g. an ArbOS-style
+	// version ladder), resolved per block by the chain's L2Config oracle.
+	// Zero for L1 chains.
+	L2Version uint64
+}
+
+// IsEIPEnabled reports whether the given EIP is active for this chain: its
+// parent fork is active AND it is not listed in DisabledEIPs. Complete gate —
+// no separate fork check needed at call sites.
+func (r *Rules) IsEIPEnabled(eip int) bool {
+	if slices.Contains(r.DisabledEIPs, eip) {
+		return false
+	}
+	switch eip {
+	case 7708, 7928:
+		return r.IsAmsterdam
+	case 161, 170:
+		return r.IsSpuriousDragon
+	default:
+		panic(fmt.Sprintf("IsEIPEnabled: EIP %d is not mapped to a fork", eip))
+	}
+}
+
+// IsEIP161Enabled reports whether EIP-161 is in effect: the Spurious Dragon fork
+// is active and EIP-161 is not disabled (genesis/pre-state loads disable it via
+// DisabledEIPs to retain declared empty accounts).
+func (r *Rules) IsEIP161Enabled() bool {
+	return r.IsEIPEnabled(161)
+}
+
+// IsEIP170Enabled reports whether EIP-170 (the contract code-size limit) is
+// enabled: Spurious Dragon is active and EIP-170 is not disabled (Gnosis/Chiado
+// disable it via DisabledEIPs).
+func (r *Rules) IsEIP170Enabled() bool {
+	return r.IsEIPEnabled(170)
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.
-func isForked(s *big.Int, head uint64) bool {
+func isForked(s *uint64, head uint64) bool {
 	if s == nil {
 		return false
 	}
-	return s.Uint64() <= head
+	return *s <= head
 }
 
 func (c *Config) IsPreMerge(blockNumber uint64) bool {
-	return c.MergeHeight != nil && blockNumber < c.MergeHeight.Uint64()
+	return c.MergeHeight != nil && blockNumber < *c.MergeHeight
+}
+
+func (c *Config) IsPostMerge(number, time uint64) bool {
+	return (c.TerminalTotalDifficulty != nil && c.TerminalTotalDifficulty.IsZero()) ||
+		(c.MergeHeight != nil && number >= *c.MergeHeight) ||
+		(c.MergeNetsplitBlock != nil && number >= *c.MergeNetsplitBlock) ||
+		c.IsShanghai(time)
 }

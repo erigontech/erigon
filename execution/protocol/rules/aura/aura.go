@@ -19,6 +19,7 @@ package aura
 import (
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -27,13 +28,13 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -95,7 +96,7 @@ func (s *Step) optCalibrate() bool {
 	return true
 }
 
-type ReceivedStepHashes map[uint64]map[common.Address]common.Hash //BTreeMap<(u64, Address), H256>
+type ReceivedStepHashes map[uint64]map[common.Address]common.Hash // BTreeMap<(u64, Address), H256>
 
 // nolint
 func (r ReceivedStepHashes) get(step uint64, author common.Address) (common.Hash, bool) {
@@ -192,7 +193,7 @@ func (e *EpochManager) zoomToAfter(chain rules.ChainHeaderReader, er *NonTransac
 		e.finalityChecker = NewRollingFinality(epochSet)
 		if proof.SignalNumber >= DEBUG_LOG_FROM {
 			fmt.Printf("new rolling finality: %d\n", proof.SignalNumber)
-			for i := 0; i < len(epochSet); i++ {
+			for i := range epochSet {
 				fmt.Printf("\t%x\n", epochSet[i])
 			}
 		}
@@ -210,7 +211,7 @@ func (e *EpochManager) zoomToAfter(chain rules.ChainHeaderReader, er *NonTransac
 // / The block corresponding the parent hash must be stored already.
 // nolint
 func epochTransitionFor(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, parentHash common.Hash) (transition EpochTransition, ok bool) {
-	//TODO: probably this version of func doesn't support non-canonical epoch transitions
+	// TODO: probably this version of func doesn't support non-canonical epoch transitions
 	h := chain.GetHeaderByHash(parentHash)
 	if h == nil {
 		return transition, false
@@ -240,9 +241,8 @@ type AuRa struct {
 	EmptyStepsSet *EmptyStepSet
 	EpochManager  *EpochManager // Mutex<EpochManager>,
 
-	certifier     *common.Address // certifies service transactions
-	certifierLock sync.Mutex
-	db            kv.RwDB
+	certifier atomic.Pointer[common.Address] // certifies service transactions
+	db        kv.RwDB
 }
 
 func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
@@ -383,7 +383,13 @@ func (c *AuRa) VerifyHeader(chain rules.ChainHeaderReader, header *types.Header,
 		log.Error("rules.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
 		return rules.ErrUnknownAncestor
 	}
-	return ethash.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/, c.HasGasLimitContract() /*skipGasLimit*/)
+	if err := ethash.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/); err != nil {
+		return err
+	}
+	if !c.HasGasLimitContract() {
+		return misc.VerifyParentGasLimit(chain.Config(), parent, header)
+	}
+	return nil
 }
 
 // nolint
@@ -569,20 +575,9 @@ func (c *AuRa) VerifyUncles(chain rules.ChainReader, header *types.Header, uncle
 	//return nil
 }
 
-// VerifySeal implements rules.Engine, checking whether the signature contained
-// in the header satisfies the consensus protocol requirements.
-func (c *AuRa) VerifySeal(chain rules.ChainHeaderReader, header *types.Header) error {
-	return nil
-	//snap, err := c.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
-	//if err != nil {
-	//	return err
-	//}
-	//return c.verifySeal(chain, header, snap)
-}
-
 // Prepare implements rules.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
-func (c *AuRa) Prepare(chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
+func (c *AuRa) Prepare(chain rules.ChainHeaderReader, header *types.Header) error {
 	return nil
 	/// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	//header.Coinbase = common.Address{}
@@ -649,11 +644,14 @@ func (c *AuRa) Prepare(chain rules.ChainHeaderReader, header *types.Header, stat
 	//return nil
 }
 
-func (c *AuRa) rewriteBytecode(blockNum uint64, state *state.IntraBlockState) {
+func (c *AuRa) rewriteBytecode(blockNum uint64, state *state.IntraBlockState) error {
 	for addressValue, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
 		address := accounts.InternAddress(addressValue)
-		state.SetCode(address, rewrittenCode)
+		if err := state.SetCode(address, rewrittenCode, tracing.CodeChangeUnspecified); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
@@ -661,29 +659,29 @@ func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, h
 ) error {
 	blockNum := header.Number.Uint64()
 
-	//Check block gas limit from smart contract, if applicable
+	// Check block gas limit from smart contract, if applicable
 	err := c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
 	if err != nil {
 		return err
 	}
 
-	c.rewriteBytecode(blockNum, state)
+	if err := c.rewriteBytecode(blockNum, state); err != nil {
+		return err
+	}
 
 	syscall := func(addr accounts.Address, data []byte) ([]byte, error) {
 		return syscallCustom(addr, data, state, header, false /* constCall */)
 	}
-	c.certifierLock.Lock()
-	if c.cfg.Registrar != nil && c.certifier == nil && config.IsLondon(blockNum) {
-		c.certifier = getCertifier(*c.cfg.Registrar, syscall)
+	if c.cfg.Registrar != nil && c.certifier.Load() == nil && config.IsLondon(blockNum) {
+		c.certifier.CompareAndSwap(nil, getCertifier(*c.cfg.Registrar, syscall))
 	}
-	c.certifierLock.Unlock()
 
 	if blockNum == 1 {
 		proof, err := c.GenesisEpochData(header, syscall)
 		if err != nil {
 			panic(err)
 		}
-		err = c.e.PutEpoch(header.ParentHash, 0, proof) //TODO: block 0 hardcoded - need fix it inside validators
+		err = c.e.PutEpoch(header.ParentHash, 0, proof) // TODO: block 0 hardcoded - need fix it inside validators
 		if err != nil {
 			panic(err)
 		}
@@ -719,7 +717,9 @@ func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, 
 		return err
 	}
 	for _, r := range rewards {
-		state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock)
+		if err := state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -745,7 +745,7 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 		if header.Number.Uint64() >= DEBUG_LOG_FROM {
 			fmt.Printf("insert_pending_transition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(receipts), len(pendingTransitionProof))
 		}
-		if err = c.e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
+		if err := c.e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
 			return nil, err
 		}
 	}
@@ -839,7 +839,7 @@ func isEpochEnd(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, f
 			// block that breaks the invariant that the parent's step < the block's step.
 			self.step.can_propose.store(false, AtomicOrdering::SeqCst);
 		*/
-		return rlp.EncodeToBytes(EpochTransitionProof{SignalNumber: signalNumber.Uint64(), SetProof: pendingTransitionProof, FinalityProof: finalityProofRLP})
+		return rlp.EncodeToBytes(&EpochTransitionProof{SignalNumber: signalNumber.Uint64(), SetProof: pendingTransitionProof, FinalityProof: finalityProofRLP})
 	}
 	return nil, nil
 }
@@ -848,7 +848,7 @@ func isEpochEnd(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, f
 // to construct transition proof. author == ec_recover(sig) known
 // since the blocks are in the DB.
 func allHeadersUntil(chain rules.ChainHeaderReader, from *types.Header, to common.Hash) (out []*types.Header) {
-	var header = from
+	header := from
 	for {
 		header = chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 		if header == nil {
@@ -876,16 +876,7 @@ func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, s
 	}
 
 	// Assemble and return the final block for sealing
-	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals), nil, nil
-}
-
-// Authorize injects a private key into the rules engine to mint new blocks with.
-func (c *AuRa) Authorize(signer common.Address, signFn clique.SignerFn) {
-	c.signerMutex.Lock()
-	defer c.signerMutex.Unlock()
-
-	//c.signer = signer
-	//c.signFn = signFn
+	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals, nil), nil, nil
 }
 
 func (c *AuRa) GenesisEpochData(header *types.Header, caller rules.SystemCall) ([]byte, error) {
@@ -893,7 +884,7 @@ func (c *AuRa) GenesisEpochData(header *types.Header, caller rules.SystemCall) (
 	if err != nil {
 		return nil, err
 	}
-	res, err := rlp.EncodeToBytes(EpochTransitionProof{SignalNumber: 0, SetProof: setProof, FinalityProof: []byte{}})
+	res, err := rlp.EncodeToBytes(&EpochTransitionProof{SignalNumber: 0, SetProof: setProof, FinalityProof: []byte{}})
 	if err != nil {
 		panic(err)
 	}
@@ -970,20 +961,13 @@ func (c *AuRa) Seal(chain rules.ChainHeaderReader, block *types.BlockWithReceipt
 	//		log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
 	//	}
 	//}()
-	//
 	//return nil
-}
-
-func stepProposer(validators ValidatorSet, blockHash common.Hash, step uint64, call rules.Call) (common.Address, error) {
-	//c, err := validators.defaultCaller(blockHash)
-	//if err != nil {
-	//	return common.Address{}, err
-	//}
-	return validators.getWithCaller(blockHash, uint(step), call)
 }
 
 // epochSet fetch correct validator set for epoch at header, taking into account
 // finality of previous transitions.
+//
+//nolint:unused
 func (c *AuRa) epochSet(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, h *types.Header, call rules.SystemCall) (ValidatorSet, uint64, error) {
 	if c.cfg.ImmediateTransitions {
 		return c.cfg.Validators, h.Number.Uint64(), nil
@@ -1015,27 +999,65 @@ func calculateScore(parentStep, currentStep, currentEmptySteps uint64) uint256.I
 }
 
 func (c *AuRa) SealHash(header *types.Header) common.Hash {
-	return clique.SealHash(header)
+	return sealHash(header)
+}
+
+// sealHash returns the hash of a block prior to it being sealed.
+func sealHash(header *types.Header) (hash common.Hash) {
+	hasher := crypto.NewKeccakState()
+	defer crypto.ReturnToPool(hasher)
+	encodeSigHeader(hasher, header)
+	hasher.Sum(hash[:0])
+	return hash
+}
+
+func encodeSigHeader(w io.Writer, header *types.Header) {
+	enc := []any{
+		header.ParentHash,
+		header.UncleHash,
+		header.Coinbase,
+		header.Root,
+		header.TxHash,
+		header.ReceiptHash,
+		header.Bloom,
+		header.Difficulty,
+		header.Number,
+		header.GasLimit,
+		header.GasUsed,
+		header.Time,
+		header.Extra[:len(header.Extra)-crypto.SignatureLength], // Yes, this will panic if extra is too short
+		header.MixDigest,
+		header.Nonce,
+	}
+	if header.BaseFee != nil {
+		enc = append(enc, header.BaseFee)
+	}
+	if err := rlp.Encode(w, enc); err != nil {
+		panic("can't encode: " + err.Error())
+	}
 }
 
 // See https://openethereum.github.io/Permissioning.html#gas-price
-// This is thread-safe: it only accesses the `certifier` which is used behind a RWLock
+// It holds no lock across the syscall: under parallel execution the syscall can wait on another tx that also checks.
 func (c *AuRa) IsServiceTransaction(sender accounts.Address, syscall rules.SystemCall) bool {
-	c.certifierLock.Lock()
-	defer c.certifierLock.Unlock()
-	if c.certifier == nil && c.cfg.Registrar != nil {
-		c.certifier = getCertifier(*c.cfg.Registrar, syscall)
+	if c.certifier.Load() == nil && c.cfg.Registrar != nil {
+		c.certifier.CompareAndSwap(nil, getCertifier(*c.cfg.Registrar, syscall))
 	}
-	if c.certifier == nil {
+	certifier := c.certifier.Load()
+	if certifier == nil {
 		return false
 	}
 	packed, err := certifierAbi().Pack("certified", sender.Value())
 	if err != nil {
 		panic(err)
 	}
-	out, err := syscall(accounts.InternAddress(*c.certifier), packed)
+	out, err := syscall(accounts.InternAddress(*certifier), packed)
 	if err != nil {
-		panic(err)
+		// Failing closed (treat as non-service tx) is safer than crashing the RPC handler.
+		// One way to hit this: an eth_call against a block whose chain rules don't include
+		// opcodes used by the certifier contract bytecode (e.g. SHR pre-Constantinople).
+		log.Warn("[aura] failed to call certifier", "certifier", *certifier, "err", err)
+		return false
 	}
 	res, err := certifierAbi().Unpack("certified", out)
 	if err != nil {
@@ -1051,7 +1073,7 @@ func (c *AuRa) IsServiceTransaction(sender accounts.Address, syscall rules.Syste
 	return false
 }
 
-// Close implements rules.Engine. It's a noop for clique as there are no background threads.
+// Close implements rules.Engine.
 func (c *AuRa) Close() error {
 	c.db.Close()
 	common.SafeClose(c.exitCh)
@@ -1061,14 +1083,7 @@ func (c *AuRa) Close() error {
 // APIs implements rules.Engine, returning the user facing RPC API to allow
 // controlling the signer voting.
 func (c *AuRa) APIs(chain rules.ChainHeaderReader) []rpc.API {
-	return []rpc.API{
-		//{
-		//Namespace: "clique",
-		//Version:   "1.0",
-		//Service:   &API{chain: chain, clique: c},
-		//Public:    false,
-		//}
-	}
+	return []rpc.API{}
 }
 
 // nolint
@@ -1129,7 +1144,7 @@ func (c *AuRa) CalculateRewards(_ *chain.Config, header *types.Header, _ []*type
 		reward = c.cfg.BlockReward[i]
 	}
 	if !found {
-		return nil, errors.New("Current block's reward is not found; this indicates a chain config error")
+		return nil, errors.New("current block's reward is not found; this indicates a chain config error")
 	}
 
 	r := rules.Reward{Beneficiary: accounts.InternAddress(header.Coinbase), Kind: rules.RewardAuthor, Amount: *reward.amount}
@@ -1146,7 +1161,7 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 	amounts := make([]uint64, 0, len(withdrawals))
 	addresses := make([]common.Address, 0, len(withdrawals))
 	for _, w := range withdrawals {
-		amounts = append(amounts, w.Amount)
+		amounts = append(amounts, uint64(w.Amount))
 		addresses = append(addresses, w.Address)
 	}
 
@@ -1168,6 +1183,13 @@ func (c *AuRa) GetTransferFunc() evmtypes.TransferFunc {
 
 func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return nil
+}
+
+func (c *AuRa) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
+	return rules.DefaultBlockPostValidation(header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 /*

@@ -20,15 +20,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
+	"sync"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -38,7 +39,7 @@ import (
 
 var (
 	ErrNoHead      = errors.New("ReadChainHead: ReadCurrentHeader error")
-	ErrNoSnapshots = errors.New("ReadChainHeadFromSnapshots: no snapshot data available")
+	ErrNoSnapshots = errors.New("readChainHeadFromSnapshots: no snapshot data available")
 )
 
 type ChainHead struct {
@@ -51,7 +52,7 @@ type ChainHead struct {
 
 type StatusDataProvider struct {
 	db          kv.RoDB
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 
 	networkId   uint64
 	genesisHash common.Hash
@@ -60,15 +61,27 @@ type StatusDataProvider struct {
 	timeForks   []uint64
 
 	logger log.Logger
+
+	// cache holds the latest ChainHead, invalidated by new-header
+	// notifications from the execution pipeline (via Run).
+	// Protected by cacheMu for concurrent fetch coalescing.
+	// cacheVer is bumped on each invalidation so that a fetch in
+	// progress doesn't store stale data after a concurrent invalidation.
+	cache    atomic.Pointer[ChainHead]
+	cacheMu  sync.Mutex
+	cacheVer atomic.Uint64
 }
 
+// NewStatusDataProvider requires a db whose txs pin a block-files view (a
+// kv.TemporalRoDB): the snapshot fallback taken when the db holds no head
+// header reads block files through the tx.
 func NewStatusDataProvider(
 	db kv.RoDB,
 	chainConfig *chain.Config,
 	genesis *types.Block,
 	networkId uint64,
 	logger log.Logger,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 ) *StatusDataProvider {
 	s := &StatusDataProvider{
 		db:          db,
@@ -82,18 +95,6 @@ func NewStatusDataProvider(
 	s.heightForks, s.timeForks = forkid.GatherForks(chainConfig, genesis.Time())
 
 	return s
-}
-
-func uint256FromBigInt(num *big.Int) (*uint256.Int, error) {
-	if num == nil {
-		num = new(big.Int)
-	}
-	num256 := new(uint256.Int)
-	overflow := num256.SetFromBig(num)
-	if overflow {
-		return nil, errors.New("uint256FromBigInt: big.Int greater than 2^256-1")
-	}
-	return num256, nil
 }
 
 func makeGenesisChainHead(genesis *types.Block) ChainHead {
@@ -110,47 +111,104 @@ func makeGenesisChainHead(genesis *types.Block) ChainHead {
 
 func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusData {
 	return &sentryproto.StatusData{
-		NetworkId:          s.networkId,
-		TotalDifficulty:    gointerfaces.ConvertUint256IntToH256(head.HeadTd),
-		BestHash:           gointerfaces.ConvertHashToH256(head.HeadHash),
-		MaxBlockHeight:     head.HeadHeight,
-		MaxBlockTime:       head.HeadTime,
-		MinimumBlockHeight: head.MinimumHeight,
+		NetworkId:       s.networkId,
+		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(head.HeadTd),
+		BestHash:        gointerfaces.ConvertHashToH256(head.HeadHash),
+		MaxBlockHeight:  head.HeadHeight,
+		MaxBlockTime:    head.HeadTime,
+		// Peers reject a Status with earliest above latest, and retained block files can start above the head during first sync.
+		MinimumBlockHeight: min(head.MinimumHeight, head.HeadHeight),
 		ForkData: &sentryproto.Forks{
 			Genesis:     gointerfaces.ConvertHashToH256(s.genesisHash),
-			HeightForks: s.heightForks,
-			TimeForks:   s.timeForks,
+			HeightForks: append([]uint64(nil), s.heightForks...),
+			TimeForks:   append([]uint64(nil), s.timeForks...),
 		},
 	}
 }
 
+// Run listens for new-header notifications and invalidates the cached
+// ChainHead so the next GetStatusData call fetches fresh data from the DB.
+// Blocks until ctx is cancelled.
+func (s *StatusDataProvider) Run(ctx context.Context, headersCh <-chan [][]byte, snapshotsCh <-chan struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-headersCh:
+			s.cacheVer.Add(1)
+			s.cache.Store(nil)
+		case <-snapshotsCh:
+			s.cacheVer.Add(1)
+			s.cache.Store(nil)
+		}
+	}
+}
+
 // GetStatusData returns the current StatusData.
-// Uses DB head, falls back to snapshot data when unavailable
+//
+// The ChainHead is cached and invalidated by new-header notifications from
+// the execution pipeline (via Run). Concurrent callers share a single DB
+// fetch through cacheMu. This eliminates repeated MDBX read transactions
+// that previously blocked GC page reclamation.
+//
+// Falls back to snapshot data when the DB head is unavailable.
 func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
-	var minimumBlock uint64
-	if err := s.db.View(ctx, func(tx kv.Tx) error {
-		var err error
-		minimumBlock, err = s.blockReader.MinimumBlockAvailable(ctx, tx)
-		return err
-	}); err != nil {
-		return nil, fmt.Errorf("GetStatusData: minimumBlock error: %w", err)
+	if head := s.cache.Load(); head != nil {
+		return s.makeStatusData(*head), nil
 	}
 
-	chainHead, err := ReadChainHead(ctx, s.db, minimumBlock)
-	if err == nil {
-		return s.makeStatusData(chainHead), nil
+	// Cache miss — fetch from DB, coalescing concurrent callers.
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
+	// Double-check after acquiring lock.
+	if head := s.cache.Load(); head != nil {
+		return s.makeStatusData(*head), nil
 	}
-	if !errors.Is(err, ErrNoHead) {
+
+	ver := s.cacheVer.Load()
+	head, err := s.fetchChainHead(ctx)
+	if err != nil {
 		return nil, err
 	}
 
-	s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using latest available snapshot data.")
-
-	snapHead, err := s.ReadChainHeadFromSnapshots(ctx, minimumBlock)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read chain head from snapshots: %w", err)
+	// Only store if no invalidation happened during the fetch.
+	if s.cacheVer.Load() == ver {
+		s.cache.Store(&head)
 	}
-	return s.makeStatusData(snapHead), nil
+	return s.makeStatusData(head), nil
+}
+
+// fetchChainHead reads MinimumBlockAvailable and ChainHead in a single DB
+// read transaction. Falls back to snapshot data when the DB head is missing.
+func (s *StatusDataProvider) fetchChainHead(ctx context.Context) (ChainHead, error) {
+	var chainHead ChainHead
+	var headErr error
+
+	if err := s.db.View(ctx, func(tx kv.Tx) error {
+		minimumBlock, err := s.blockReader.MinimumBlockAvailable(ctx, tx)
+		if err != nil {
+			return fmt.Errorf("MinimumBlockAvailable: %w", err)
+		}
+		chainHead, headErr = ReadChainHeadWithTx(tx, minimumBlock)
+		if headErr == nil || !errors.Is(headErr, ErrNoHead) {
+			return nil // headErr handled below
+		}
+
+		s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using latest available snapshot data.")
+
+		chainHead, headErr = s.readChainHeadFromSnapshots(ctx, tx, minimumBlock)
+		if headErr != nil {
+			headErr = fmt.Errorf("failed to read chain head from snapshots: %w", headErr)
+		}
+		return nil
+	}); err != nil {
+		return ChainHead{}, fmt.Errorf("GetStatusData: %w", err)
+	}
+	if headErr != nil {
+		return ChainHead{}, headErr
+	}
+	return chainHead, nil
 }
 
 // ReadChainHeadWithTx reads chain head in DB
@@ -168,12 +226,11 @@ func ReadChainHeadWithTx(tx kv.Tx, minimumBlock uint64) (ChainHead, error) {
 	if err != nil {
 		return ChainHead{}, fmt.Errorf("ReadChainHead: ReadTd error at height %d and hash %s: %w", height, hash, err)
 	}
-	td256, err := uint256FromBigInt(td)
-	if err != nil {
-		return ChainHead{}, fmt.Errorf("ReadChainHead: total difficulty conversion error: %w", err)
+	if td == nil {
+		td = new(uint256.Int)
 	}
 
-	return ChainHead{height, time, hash, minimumBlock, td256}, nil
+	return ChainHead{height, time, hash, minimumBlock, td}, nil
 }
 
 func ReadChainHead(ctx context.Context, db kv.RoDB, minimumBlock uint64) (ChainHead, error) {
@@ -186,16 +243,19 @@ func ReadChainHead(ctx context.Context, db kv.RoDB, minimumBlock uint64) (ChainH
 	return head, err
 }
 
-// ReadChainHeadFromSnapshots attempts to construct a ChainHead from snapshot data.
-func (s *StatusDataProvider) ReadChainHeadFromSnapshots(ctx context.Context, minimumBlock uint64) (ChainHead, error) {
-	latest := s.blockReader.FrozenBlocks()
+// readChainHeadFromSnapshots attempts to construct a ChainHead from snapshot data.
+func (s *StatusDataProvider) readChainHeadFromSnapshots(ctx context.Context, tx kv.Tx, minimumBlock uint64) (ChainHead, error) {
+	latest := s.blockReader.FrozenBlocksInView(tx)
 	if latest == 0 {
 		return ChainHead{}, ErrNoSnapshots
 	}
 
-	header, err := s.blockReader.HeaderByNumber(ctx, nil, latest)
-	if err != nil || header == nil {
+	header, err := s.blockReader.HeaderByNumber(ctx, tx, latest)
+	if err != nil {
 		return ChainHead{}, fmt.Errorf("failed reading snapshot header %d: %w", latest, err)
+	}
+	if header == nil {
+		return ChainHead{}, fmt.Errorf("%w: snapshot header %d not found", ErrNoSnapshots, latest)
 	}
 
 	return ChainHead{

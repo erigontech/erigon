@@ -42,7 +42,7 @@ func ReadMultiEncSeq(baseNum uint64, raw []byte) *SequenceReader {
 
 // This is a specialized "fast" Count method that shouldn't allocate new objects, but read the count directly
 // from raw data
-func Count(baseNum uint64, data []byte) uint64 {
+func Count(data []byte) uint64 {
 	// plain elias fano (legacy)
 	if data[0]&PlainEliasFanoMask == 0 {
 		return eliasfano32.Count(data)
@@ -62,7 +62,7 @@ func Count(baseNum uint64, data []byte) uint64 {
 }
 
 // TODO: optimize me - to avoid object allocation (this TODO was inherited from elias_fano.go)
-func Seek(baseNum uint64, data []byte, n uint64) (uint64, bool) {
+func Seek(baseNum uint64, data []byte, n uint64) (uint64, uint64, bool) {
 	seq := ReadMultiEncSeq(baseNum, data)
 	return seq.Seek(n)
 }
@@ -140,7 +140,13 @@ func (s *SequenceReader) Reset(baseNum uint64, raw []byte) { // no `return param
 	panic(fmt.Sprintf("unknown sequence encoding: %d", raw[0]))
 }
 
-func (s *SequenceReader) Seek(v uint64) (uint64, bool) {
+func (s *SequenceReader) assertSorted() {
+	if s.Count() > 1 && s.Max() < s.Min() {
+		panic(fmt.Sprintf("SequenceReader: corrupt sequence: Max()=%d < Min()=%d, Count=%d, enc=%d", s.Max(), s.Min(), s.Count(), s.currentEnc))
+	}
+}
+
+func (s *SequenceReader) Seek(v uint64) (uint64, uint64, bool) {
 	switch s.currentEnc {
 	case SimpleEncoding:
 		return s.sseq.Seek(v)
@@ -152,7 +158,7 @@ func (s *SequenceReader) Seek(v uint64) (uint64, bool) {
 }
 
 func (s *SequenceReader) Has(v uint64) bool {
-	n, ok := s.Seek(v)
+	n, _, ok := s.Seek(v)
 	return ok && n == v
 }
 

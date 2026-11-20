@@ -31,7 +31,7 @@ import (
 func genTransactions(n uint64) Transactions {
 	txs := Transactions{}
 
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		tx := NewTransaction(i, common.Address{}, uint256.NewInt(1000+i), 10+i, uint256.NewInt(1000+i), fmt.Appendf(nil, "hello%d", i))
 		txs = append(txs, tx)
 	}
@@ -41,7 +41,7 @@ func genTransactions(n uint64) Transactions {
 
 func TestEncodeUint(t *testing.T) {
 	t.Parallel()
-	for i := 0; i < 64000; i++ {
+	for i := range 64000 {
 		bbOld := bytes.NewBuffer(make([]byte, 10))
 		bbNew := bytes.NewBuffer(make([]byte, 10))
 		bbOld.Reset()
@@ -83,7 +83,6 @@ func checkDeriveSha(t *testing.T, list DerivableList) {
 	deriveSha := DeriveSha(list)
 	if !hashesEqual(legacySha, deriveSha) {
 		t.Errorf("unexpected hash: %v (expected: %v)\n", deriveSha.Hex(), legacySha.Hex())
-
 	}
 }
 
@@ -103,7 +102,7 @@ func legacyDeriveSha(list DerivableList) common.Hash {
 		valbuf.Reset()
 		_ = rlp.Encode(keybuf, uint(i))
 		list.EncodeIndex(i, valbuf)
-		trie.Update(keybuf.Bytes(), common.Copy(valbuf.Bytes()))
+		trie.Update(keybuf.Bytes(), bytes.Clone(valbuf.Bytes()))
 	}
 	return trie.Hash()
 }
@@ -111,28 +110,19 @@ func legacyDeriveSha(list DerivableList) common.Hash {
 var (
 	smallTxList = genTransactions(100)
 	largeTxList = genTransactions(100000)
+
+	benchHeader = &Header{
+		ParentHash:  common.Hash{1, 2, 3},
+		UncleHash:   common.Hash{4, 5, 6},
+		Root:        common.Hash{10, 11, 12},
+		TxHash:      common.Hash{13, 14, 15},
+		ReceiptHash: common.Hash{16, 17, 18},
+		Difficulty:  *uint256.NewInt(1_000_000),
+		Number:      *uint256.NewInt(20_000_000),
+		GasLimit:    30_000_000,
+		GasUsed:     15_000_000,
+		Time:        1_700_000_000,
+		Extra:       make([]byte, 32),
+		BaseFee:     uint256.NewInt(7),
+	}
 )
-
-func BenchmarkLegacySmallList(b *testing.B) {
-	for b.Loop() {
-		legacyDeriveSha(smallTxList)
-	}
-}
-
-func BenchmarkCurrentSmallList(b *testing.B) {
-	for b.Loop() {
-		DeriveSha(smallTxList)
-	}
-}
-
-func BenchmarkLegacyLargeList(b *testing.B) {
-	for b.Loop() {
-		legacyDeriveSha(largeTxList)
-	}
-}
-
-func BenchmarkCurrentLargeList(b *testing.B) {
-	for b.Loop() {
-		DeriveSha(largeTxList)
-	}
-}

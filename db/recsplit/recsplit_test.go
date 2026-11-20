@@ -17,15 +17,20 @@
 package recsplit
 
 import (
-	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
+	"math"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func TestRecSplit2(t *testing.T) {
@@ -47,16 +52,16 @@ func TestRecSplit2(t *testing.T) {
 	if err = rs.AddKey([]byte("first_key"), 0); err != nil {
 		t.Error(err)
 	}
-	if err = rs.Build(context.Background()); err == nil {
+	if err = rs.Build(t.Context()); err == nil {
 		t.Errorf("test is expected to fail, too few keys added")
 	}
 	if err = rs.AddKey([]byte("second_key"), 0); err != nil {
 		t.Error(err)
 	}
-	if err = rs.Build(context.Background()); err != nil {
+	if err = rs.Build(t.Context()); err != nil {
 		t.Error(err)
 	}
-	if err = rs.Build(context.Background()); err == nil {
+	if err = rs.Build(t.Context()); err == nil {
 		t.Errorf("test is expected to fail, hash gunction was built already")
 	}
 	if err = rs.AddKey([]byte("key_to_fail"), 0); err == nil {
@@ -86,7 +91,7 @@ func TestRecSplitDuplicate(t *testing.T) {
 	if err := rs.AddKey([]byte("first_key"), 0); err != nil {
 		t.Error(err)
 	}
-	if err := rs.Build(context.Background()); err == nil {
+	if err := rs.Build(t.Context()); err == nil {
 		t.Errorf("test is expected to fail, duplicate key")
 	}
 }
@@ -120,17 +125,17 @@ func TestIndexLookup(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer rs.Close()
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if err := rs.Build(context.Background()); err != nil {
+		if err := rs.Build(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 		idx := MustOpen(indexFile)
 		defer idx.Close()
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			reader := NewIndexReader(idx)
 			offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 			assert.True(t, ok)
@@ -148,7 +153,7 @@ func TestIndexLookup(t *testing.T) {
 		LeafSize:   8,
 
 		Enums:              false,
-		LessFalsePositives: true, //must not impact index when `Enums: false`
+		LessFalsePositives: true, // must not impact index when `Enums: false`
 	}
 	t.Run("v0", func(t *testing.T) {
 		test(t, cfg)
@@ -156,6 +161,11 @@ func TestIndexLookup(t *testing.T) {
 	t.Run("v1", func(t *testing.T) {
 		cfg := cfg
 		cfg.Version = 1
+		test(t, cfg)
+	})
+	t.Run("v2", func(t *testing.T) {
+		cfg := cfg
+		cfg.Version = 2
 		test(t, cfg)
 	})
 }
@@ -207,6 +217,30 @@ func TestFindBijectionSmallBuckets(t *testing.T) {
 	}
 }
 
+// findSplit masks partition indexes with maxFanout-1 instead of bounds-checking them.
+// That is only correct while every reachable (leafSize, m) keeps fanout - and the
+// largest index a key can land in - below maxFanout.
+func TestSplitParamsFanoutBound(t *testing.T) {
+	for leafSize := uint16(1); leafSize <= MaxLeafSize; leafSize++ {
+		primaryAggrBound := leafSize * uint16(math.Max(2, math.Ceil(0.35*float64(leafSize)+1./2.)))
+		secondaryAggrBound := primaryAggrBound * 2
+		if leafSize >= 7 {
+			secondaryAggrBound = primaryAggrBound * uint16(math.Ceil(0.21*float64(leafSize)+9./10.))
+		}
+		// m == MaxUint16 is excluded: splitParams computes m+1, which wraps to 0 and
+		// yields unit 0. Unreachable for real bucket sizes and unrelated to the mask.
+		for m := leafSize + 1; m < math.MaxUint16; m++ {
+			fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
+			if fanout > maxFanout {
+				t.Fatalf("fanout %d > maxFanout %d at leafSize=%d m=%d", fanout, maxFanout, leafSize, m)
+			}
+			if j := (m - 1) / unit; j >= fanout {
+				t.Fatalf("index %d >= fanout %d at leafSize=%d m=%d unit=%d", j, fanout, leafSize, m, unit)
+			}
+		}
+	}
+}
+
 func TestFindSplit(t *testing.T) {
 	const (
 		leafSize           = uint16(8)
@@ -224,9 +258,8 @@ func TestFindSplit(t *testing.T) {
 	}
 
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
-	count := make([]uint16, secondaryAggrBound)
 
-	salt := findSplit(bucket, 0, fanout, unit, count)
+	salt := findSplit(bucket, 0, fanout, unit)
 
 	// Verify: each partition gets exactly 'unit' keys (except possibly the last)
 	partitionCounts := make([]uint16, fanout)
@@ -259,9 +292,8 @@ func TestFindSplitSecondaryAggr(t *testing.T) {
 	}
 
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
-	count := make([]uint16, secondaryAggrBound)
 
-	salt := findSplit(bucket, 0, fanout, unit, count)
+	salt := findSplit(bucket, 0, fanout, unit)
 
 	partitionCounts := make([]uint16, fanout)
 	for _, key := range bucket {
@@ -273,156 +305,6 @@ func TestFindSplitSecondaryAggr(t *testing.T) {
 	}
 	remainder := m - unit*(fanout-1)
 	assert.Equal(t, remainder, partitionCounts[fanout-1])
-}
-
-func BenchmarkFindSplit(b *testing.B) {
-	// Simulate realistic aggregation-level buckets.
-	// With leafSize=8: primaryAggrBound=32, secondaryAggrBound=96.
-	// A bucket of size 2000 first splits with fanout=2, unit=1056 (secondaryAggr level),
-	// then recursively into primaryAggr and leaf levels.
-	// The most common aggregation call is primaryAggr level: m~32, fanout=4, unit=8.
-	const (
-		leafSize           = uint16(8)
-		primaryAggrBound   = uint16(32) // leafSize * max(2, ceil(0.35*8+0.5)) = 8*4
-		secondaryAggrBound = uint16(96) // primaryAggrBound * ceil(0.21*8+0.9) = 32*3
-	)
-	// Generate buckets at the primary aggregation level (most frequent)
-	const numBuckets = 1000
-	const m = primaryAggrBound // 32 keys
-	buckets := make([][m]uint64, numBuckets)
-	for i := range buckets {
-		for j := range buckets[i] {
-			key := fmt.Appendf(nil, "split_%d_%d", i, j)
-			hi, lo := murmur3.Sum128WithSeed(key, 1)
-			_ = hi
-			buckets[i][j] = lo
-		}
-	}
-	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
-	salt := uint64(0x6453cec3f7376937) // startSeed[1]
-	count := make([]uint16, secondaryAggrBound)
-
-	b.ResetTimer()
-	for b.Loop() {
-		for i := range buckets {
-			findSplit(buckets[i][:], salt, fanout, unit, count)
-		}
-	}
-}
-
-func BenchmarkFindBijection(b *testing.B) {
-	// Simulate realistic leaf buckets: leafSize=8 keys with murmur3 hashes
-	const leafSize = 8
-	const numBuckets = 1000
-	buckets := make([][leafSize]uint64, numBuckets)
-	for i := range buckets {
-		for j := range buckets[i] {
-			key := fmt.Appendf(nil, "key_%d_%d", i, j)
-			hi, lo := murmur3.Sum128WithSeed(key, 1)
-			_ = hi
-			buckets[i][j] = lo
-		}
-	}
-	salt := uint64(0x106393c187cae2a) // startSeed[0]
-
-	b.ResetTimer()
-	for b.Loop() {
-		for i := range buckets {
-			findBijection(buckets[i][:], salt)
-		}
-	}
-}
-
-func BenchmarkBuild(b *testing.B) {
-	b.ReportAllocs()
-	logger := log.New()
-	tmpDir := b.TempDir()
-	salt := uint32(1)
-	const KeysN = 1_000_000
-
-	// Pre-allocate all keys outside the benchmark loop
-	keys := make([][]byte, KeysN)
-	for j := 0; j < KeysN; j++ {
-		keys[j] = fmt.Appendf(nil, "key %d", j)
-	}
-	b.ResetTimer()
-	for i := 0; b.Loop(); i++ {
-		b.StopTimer()
-		indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_%d", i))
-		rs, err := NewRecSplit(RecSplitArgs{
-			KeyCount:   KeysN,
-			BucketSize: 2000,
-			Salt:       &salt,
-			TmpDir:     tmpDir,
-			IndexFile:  indexFile,
-			LeafSize:   8,
-			NoFsync:    true,
-		}, logger)
-		if err != nil {
-			b.Fatal(err)
-		}
-		for j := 0; j < KeysN; j++ {
-			if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
-				b.Fatal(err)
-			}
-		}
-		b.StartTimer()
-		if err := rs.Build(context.Background()); err != nil {
-			b.Fatal(err)
-		}
-		b.StopTimer()
-		rs.Close()
-		b.StartTimer()
-	}
-}
-func BenchmarkAddKeyAndBuild(b *testing.B) {
-	b.ReportAllocs()
-	logger := log.New()
-	tmpDir := b.TempDir()
-	salt := uint32(1)
-	const KeysN = 1_000_000
-
-	keys := make([][]byte, KeysN)
-	for j := 0; j < KeysN; j++ {
-		keys[j] = fmt.Appendf(nil, "key %d", j)
-	}
-
-	for _, enums := range []bool{false, true} {
-		name := "noEnums"
-		if enums {
-			name = "enums"
-		}
-		b.Run(name, func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				b.StopTimer()
-				indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_full_%s_%d", name, i))
-				rs, err := NewRecSplit(RecSplitArgs{
-					KeyCount:   KeysN,
-					BucketSize: 2000,
-					Salt:       &salt,
-					TmpDir:     tmpDir,
-					IndexFile:  indexFile,
-					LeafSize:   8,
-					Enums:      enums,
-					NoFsync:    true,
-				}, logger)
-				if err != nil {
-					b.Fatal(err)
-				}
-				b.StartTimer()
-				for j := 0; j < KeysN; j++ {
-					if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
-						b.Fatal(err)
-					}
-				}
-				if err := rs.Build(context.Background()); err != nil {
-					b.Fatal(err)
-				}
-				b.StopTimer()
-				rs.Close()
-			}
-		})
-	}
 }
 
 func TestTwoLayerIndex(t *testing.T) {
@@ -438,18 +320,18 @@ func TestTwoLayerIndex(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer rs.Close()
-		for i := 0; i < N; i++ {
+		for i := range N {
 			if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if err := rs.Build(context.Background()); err != nil {
+		if err := rs.Build(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 
 		idx := MustOpen(indexFile)
 		defer idx.Close()
-		for i := 0; i < N; i++ {
+		for i := range N {
 			reader := NewIndexReader(idx)
 			e, _ := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 			if e != uint64(i) {
@@ -479,4 +361,214 @@ func TestTwoLayerIndex(t *testing.T) {
 		cfg.Version = 1
 		test(t, cfg)
 	})
+	t.Run("v2", func(t *testing.T) {
+		cfg := cfg
+		cfg.Version = 2
+		test(t, cfg)
+	})
+}
+
+func TestIndexLookupParallel(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	salt := uint32(1)
+	const N = 1000
+
+	for _, workers := range []int{2, 4, 8} {
+		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
+			indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_w%d", workers))
+			rs, err := NewRecSplit(RecSplitArgs{
+				KeyCount:   N,
+				BucketSize: 10,
+				Salt:       &salt,
+				TmpDir:     tmpDir,
+				IndexFile:  indexFile,
+				LeafSize:   8,
+				Workers:    workers,
+				NoFsync:    true,
+			}, logger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rs.Close()
+			for i := range N {
+				if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := rs.Build(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			idx := MustOpen(indexFile)
+			defer idx.Close()
+			for i := range N {
+				reader := NewIndexReader(idx)
+				offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
+				assert.True(t, ok)
+				if offset != uint64(i*17) {
+					t.Errorf("workers=%d key %d: expected offset %d, got %d", workers, i, i*17, offset)
+				}
+			}
+		})
+	}
+}
+
+// TestParallelMatchesSequential checks that the index file produced by the parallel
+// build path is byte-for-byte identical to the one produced by the sequential path.
+func TestParallelMatchesSequential(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	salt := uint32(42)
+	const N = 10_000
+
+	keys := make([][]byte, N)
+	for i := range keys {
+		keys[i] = fmt.Appendf(nil, "key-%d", i)
+	}
+
+	fileChecksum := func(path string) []byte {
+		t.Helper()
+		f, err := os.Open(path)
+		require.NoError(t, err)
+		defer f.Close()
+		h := sha256.New()
+		_, err = io.Copy(h, f)
+		require.NoError(t, err)
+		return h.Sum(nil)
+	}
+
+	build := func(workers int, indexFile string) {
+		t.Helper()
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:   N,
+			BucketSize: 100,
+			Salt:       &salt,
+			TmpDir:     tmpDir,
+			IndexFile:  indexFile,
+			LeafSize:   8,
+			NoFsync:    true,
+			Workers:    workers,
+		}, logger)
+		require.NoError(t, err)
+		defer rs.Close()
+		for i, k := range keys {
+			require.NoError(t, rs.AddKey(k, uint64(i*17)))
+		}
+		require.NoError(t, rs.Build(t.Context()))
+	}
+
+	seqFile := filepath.Join(tmpDir, "seq.idx")
+	build(1, seqFile)
+	seqSum := fileChecksum(seqFile)
+
+	for _, workers := range []int{2, 4, 8} {
+		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
+			parFile := filepath.Join(tmpDir, fmt.Sprintf("par_w%d.idx", workers))
+			build(workers, parFile)
+			assert.Equal(t, seqSum, fileChecksum(parFile),
+				"parallel (workers=%d) index file differs from sequential", workers)
+		})
+	}
+}
+
+// ResetNextSalt must leave the builder as if it were fresh. It is reached on
+// every collision retry, so state carried over from the failed attempt lands in
+// the rebuilt index.
+func TestResetNextSaltRebuilds(t *testing.T) {
+	for _, ver := range []version.DataStructureVersion{0, 1, 2} {
+		t.Run(fmt.Sprintf("v%d", ver), func(t *testing.T) {
+			testResetNextSaltRebuilds(t, ver, false)
+		})
+		t.Run(fmt.Sprintf("v%d_lessFalsePositives", ver), func(t *testing.T) {
+			testResetNextSaltRebuilds(t, ver, true)
+		})
+	}
+}
+
+func testResetNextSaltRebuilds(t *testing.T, ver version.DataStructureVersion, lessFalsePositives bool) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	indexFile := filepath.Join(tmpDir, "index")
+	salt := uint32(1)
+	const N = 1000
+
+	cfg := RecSplitArgs{
+		KeyCount: N, BucketSize: 10, Salt: &salt, TmpDir: tmpDir,
+		IndexFile: indexFile, LeafSize: 8, Enums: true,
+		LessFalsePositives: lessFalsePositives, Version: ver,
+	}
+	rs, err := NewRecSplit(cfg, logger)
+	require.NoError(t, err)
+	defer rs.Close()
+
+	build := func() {
+		t.Helper()
+		for i := range N {
+			require.NoError(t, rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)))
+		}
+		require.NoError(t, rs.Build(t.Context()))
+
+		idx := MustOpen(indexFile)
+		defer idx.Close()
+		reader := NewIndexReader(idx)
+		for i := range N {
+			e, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
+			require.True(t, ok)
+			require.Equal(t, uint64(i), e)
+			require.Equal(t, uint64(i*17), idx.OrdinalLookup(e))
+		}
+	}
+
+	build()
+	require.NoError(t, rs.ResetNextSalt())
+	build()
+}
+
+// A real collision surfaces part-way through the build, so ResetNextSalt runs
+// with the encoders already holding the failed attempt's output.
+func TestResetNextSaltAfterCollision(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	indexFile := filepath.Join(tmpDir, "index")
+	salt := uint32(1)
+	const N = 1000
+
+	rs, err := NewRecSplit(RecSplitArgs{
+		KeyCount: N, BucketSize: 10, Salt: &salt, TmpDir: tmpDir,
+		IndexFile: indexFile, LeafSize: 8, Enums: true, LessFalsePositives: true,
+		Version: 2,
+	}, logger)
+	require.NoError(t, err)
+	defer rs.Close()
+
+	// a duplicated key collides in its bucket, after earlier buckets are encoded
+	for i := range N {
+		key := fmt.Appendf(nil, "key %d", i)
+		if i == N-1 {
+			key = fmt.Appendf(nil, "key %d", 0)
+		}
+		require.NoError(t, rs.AddKey(key, uint64(i*17)))
+	}
+	require.ErrorIs(t, rs.Build(t.Context()), ErrCollision)
+	require.NotZero(t, rs.gr.Bits(), "collision must surface after some buckets are encoded")
+
+	require.NoError(t, rs.ResetNextSalt())
+
+	for i := range N {
+		require.NoError(t, rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)))
+	}
+	require.NoError(t, rs.Build(t.Context()))
+	leaked, err := filepath.Glob(indexFile + ".*.tmp")
+	require.NoError(t, err)
+	require.Empty(t, leaked, "a failed build must not leave its temp index file")
+
+	idx := MustOpen(indexFile)
+	defer idx.Close()
+	reader := NewIndexReader(idx)
+	for i := range N {
+		e, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
+		require.True(t, ok)
+		require.Equal(t, uint64(i), e)
+		require.Equal(t, uint64(i*17), idx.OrdinalLookup(e))
+	}
 }

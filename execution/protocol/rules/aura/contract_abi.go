@@ -22,6 +22,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura/contracts"
@@ -51,7 +53,7 @@ func callBlockRewardAbi(contractAddr common.Address, syscall rules.SystemCall, b
 	beneficiariesRes := res[0].([]common.Address)
 	rewardsBig := res[1].([]*big.Int)
 	rewardsU256 := make([]*uint256.Int, len(rewardsBig))
-	for i := 0; i < len(rewardsBig); i++ {
+	for i := range rewardsBig {
 		var overflow bool
 		rewardsU256[i], overflow = uint256.FromBig(rewardsBig[i])
 		if overflow {
@@ -91,7 +93,7 @@ func certifierAbi() abi.ABI     { return contracts.CertifierABI }
 func registrarAbi() abi.ABI     { return contracts.RegistrarABI }
 func withdrawalAbi() abi.ABI    { return contracts.WithdrawalABI }
 
-var serviceTransactionCheckerHashedKey, _ = common.HashData([]byte("service_transaction_checker"))
+var serviceTransactionCheckerHashedKey = crypto.Keccak256Hash([]byte("service_transaction_checker"))
 
 func getCertifier(registrar common.Address, syscall rules.SystemCall) *common.Address {
 	packed, err := registrarAbi().Pack("getAddress", serviceTransactionCheckerHashedKey, "A")
@@ -100,14 +102,17 @@ func getCertifier(registrar common.Address, syscall rules.SystemCall) *common.Ad
 	}
 	out, err := syscall(accounts.InternAddress(registrar), packed)
 	if err != nil {
-		panic(err)
+		// Failing closed (no certifier) lets the caller treat the txn as non-service rather than crash the RPC handler.
+		log.Warn("[aura] failed to call registrar for certifier address", "registrar", registrar, "err", err)
+		return nil
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	res, err := registrarAbi().Unpack("getAddress", out)
 	if err != nil {
-		panic(err)
+		log.Warn("[aura] failed to unpack registrar getAddress response", "registrar", registrar, "err", err)
+		return nil
 	}
 	certifier := res[0].(common.Address)
 	return &certifier

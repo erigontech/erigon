@@ -19,14 +19,15 @@ package transactions
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -51,7 +52,7 @@ func DoCall(
 	gasCap uint64,
 	chainConfig *chain.Config,
 	stateReader state.StateReader,
-	headerReader services.HeaderReader,
+	headerReader dbservices.HeaderReader,
 	callTimeout time.Duration,
 ) (*evmtypes.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
@@ -62,7 +63,9 @@ func DoCall(
 		}
 	*/
 
-	state := state.New(stateReader)
+	ibs := state.NewPooled(stateReader)
+	defer state.ReleasePooled(ibs)
+	VersionedCallState(ibs)
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -77,31 +80,38 @@ func DoCall(
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
+	effectiveHeader := blockOverrides.OverrideHeader(header)
+
 	// Get a new instance of the EVM.
-	msg, err := args.ToMessage(gasCap, header.BaseFee)
+	msg, err := args.ToMessage(gasCap, effectiveHeader.BaseFee)
 	if err != nil {
 		return nil, err
 	}
-	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
+	msg.SetSkipExecutionGasCap(true)
+	blockCtx := NewEVMBlockContext(engine, effectiveHeader, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	if blockOverrides != nil {
 		if err := blockOverrides.Override(&blockCtx); err != nil {
 			return nil, err
 		}
 	}
+	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
-	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
-	// Wait for the context to be done and cancel the evm. Even if the
-	// EVM has finished, cancelling may be done (repeatedly)
-	go func() {
-		<-ctx.Done()
+	vmConfig := vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true}
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
+	// stop() runs before cancel() (LIFO), so the callback cannot fire for a later call, and
+	// this EVM is not reused, so a callback already running needs no join.
+	var timedOut atomic.Bool
+	stop := context.AfterFunc(ctx, func() {
+		timedOut.Store(true)
 		evm.Cancel()
-	}()
+	})
+	defer stop()
 
 	// Override the fields of specified contracts before execution.
 	if stateOverrides != nil {
 		rules := blockCtx.Rules(chainConfig)
 		precompiles := vm.ActivePrecompiledContracts(rules)
-		if err := stateOverrides.Override(state, precompiles, blockCtx.Rules(chainConfig)); err != nil {
+		if err := stateOverrides.Override(ibs, precompiles, rules); err != nil {
 			return nil, err
 		}
 		evm.SetPrecompiles(precompiles)
@@ -114,14 +124,15 @@ func DoCall(
 	}
 
 	// If the timer caused an abort, return an appropriate error message
-	if evm.Cancelled() {
+	if timedOut.Load() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", callTimeout)
 	}
 	return result, nil
 }
 
 func NewEVMBlockContextWithOverrides(ctx context.Context, engine rules.EngineReader, header *types.Header, tx kv.Getter,
-	reader services.CanonicalReader, config *chain.Config, blockOverrides *ethapi2.BlockOverrides, blockHashOverrides ethapi2.BlockHashOverrides) evmtypes.BlockContext {
+	reader dbservices.CanonicalReader, config *chain.Config, blockOverrides *ethapi2.BlockOverrides, blockHashOverrides ethapi2.BlockHashOverrides,
+) evmtypes.BlockContext {
 	blockHashFunc := MakeBlockHashProvider(ctx, tx, reader, blockHashOverrides)
 	blockContext := protocol.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
 	if blockOverrides != nil {
@@ -131,27 +142,28 @@ func NewEVMBlockContextWithOverrides(ctx context.Context, engine rules.EngineRea
 }
 
 func NewEVMBlockContext(engine rules.EngineReader, header *types.Header, requireCanonical bool, tx kv.Getter,
-	headerReader services.HeaderReader, config *chain.Config) evmtypes.BlockContext {
+	headerReader dbservices.HeaderReader, config *chain.Config,
+) evmtypes.BlockContext {
 	blockHashFunc := MakeHeaderGetter(requireCanonical, tx, headerReader)
 	return protocol.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
 }
 
 type BlockHashProvider func(blockNum uint64) (common.Hash, error)
 
-func MakeBlockHashProvider(ctx context.Context, tx kv.Getter, reader services.CanonicalReader, overrides ethapi2.BlockHashOverrides) BlockHashProvider {
+func MakeBlockHashProvider(ctx context.Context, tx kv.Getter, reader dbservices.CanonicalReader, overrides ethapi2.BlockHashOverrides) BlockHashProvider {
 	return func(blockNum uint64) (common.Hash, error) {
 		if blockHash, ok := overrides[blockNum]; ok {
 			return blockHash, nil
 		}
 		blockHash, ok, err := reader.CanonicalHash(ctx, tx, blockNum)
 		if err != nil || !ok {
-			log.Error("[evm] canonical hash not found", "blockNum", blockNum, "ok", ok, "err", err)
+			log.Debug("[evm] canonical hash not found", "blockNum", blockNum, "ok", ok, "err", err)
 		}
 		return blockHash, err
 	}
 }
 
-func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader services.HeaderReader) BlockHashProvider {
+func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader dbservices.HeaderReader) BlockHashProvider {
 	return func(n uint64) (common.Hash, error) {
 		h, err := headerReader.HeaderByNumber(context.Background(), tx, n)
 		if err != nil {
@@ -177,10 +189,61 @@ type ReusableCaller struct {
 	message        *types.Message
 }
 
+// Close returns the state built by the last DoCallWithNewGas to its pools.
+// r.evm is never cleared: the timeout watcher goroutine reads it and is never awaited.
+func (r *ReusableCaller) Close() {
+	if ibs := r.evm.IntraBlockState(); ibs != nil {
+		state.ReleasePooled(ibs)
+	}
+}
+
+func (r *ReusableCaller) Message() *types.Message { return r.message }
+
+// VersionedCallState puts a one-shot call on the versioned state path block execution
+// uses. Reset clears the flags, so a reused state calls this again.
+func VersionedCallState(ibs *state.IntraBlockState) {
+	VersionedBlockState(ibs)
+	ibs.SetNoConflictDetection()
+}
+
+// VersionedBlockState is VersionedCallState for a state that runs several txs in order:
+// a later tx may re-create an account an earlier one destroyed, so CreateAccount keeps
+// the read that carries the balance it was given in between.
+func VersionedBlockState(ibs *state.IntraBlockState) {
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	ibs.SetTxContext(0, 0)
+}
+
+// InitialState returns the state every call runs against, rewound to the request's
+// overrides. eth_estimateGas probes the same state several times, so the state object
+// is reused and reset rather than rebuilt: Reset returns its objects to their pools,
+// which is what building a new one would have to allocate again.
+// The precompiles come with it because a MovePrecompileTo override changes them.
+// The state stays owned by the EVM, so Close must not run until the last probe: it
+// nils the journal Reset would then rewind.
+func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledContracts, error) {
+	ibs := r.evm.IntraBlockState()
+	if ibs == nil {
+		ibs = state.NewPooled(r.stateReader)
+	} else {
+		ibs.Reset()
+	}
+	VersionedCallState(ibs)
+	if r.stateOverrides == nil {
+		return ibs, nil, nil
+	}
+	precompiles := vm.ActivePrecompiledContracts(r.rules)
+	if err := r.stateOverrides.Override(ibs, precompiles, r.rules); err != nil {
+		return nil, nil, err
+	}
+	return ibs, precompiles, nil
+}
+
 func (r *ReusableCaller) DoCallWithNewGas(
 	ctx context.Context,
 	newGas uint64,
-	engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
+	engine rules.EngineReader,
+) (*evmtypes.ExecutionResult, error) {
 	var cancel context.CancelFunc
 	if r.callTimeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, r.callTimeout)
@@ -196,20 +259,32 @@ func (r *ReusableCaller) DoCallWithNewGas(
 
 	// reset the EVM so that we can continue to use it with the new context
 	txCtx := protocol.NewEVMTxContext(r.message)
-	ibs := state.New(r.stateReader)
+	ibs, precompiles, err := r.InitialState()
+	if err != nil {
+		return nil, err
+	}
 	if r.stateOverrides != nil {
-		precompiles := vm.ActivePrecompiledContracts(r.rules)
-		if err := r.stateOverrides.Override(ibs, precompiles, r.rules); err != nil {
-			return nil, err
-		}
 		r.evm.SetPrecompiles(precompiles)
 	}
 	r.evm.Reset(txCtx, ibs)
 
-	timedOut := false
-	go func() {
-		<-ctx.Done()
-		timedOut = true
+	// Cancel the EVM if the context is done while the call is running. The
+	// deferred stop() runs before cancel() (LIFO), so on normal return the
+	// callback can never fire and cancel the shared EVM during a later call.
+	var timedOut atomic.Bool
+	cancelled := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(cancelled)
+		timedOut.Store(true)
+		r.evm.Cancel()
+	})
+	// stop() does not wait for a callback that already started, so join it: a
+	// Cancel() landing after the next probe's Reset() aborts that probe, and an
+	// aborted frame reports err == nil.
+	defer func() {
+		if !stop() {
+			<-cancelled
+		}
 	}()
 
 	gp := new(protocol.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
@@ -220,7 +295,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	}
 
 	// If the timer caused an abort, return an appropriate error message
-	if timedOut {
+	if timedOut.Load() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", r.callTimeout)
 	}
 
@@ -237,13 +312,10 @@ func NewReusableCaller(
 	gasCap uint64,
 	blockNrOrHash rpc.BlockNumberOrHash,
 	tx kv.Tx,
-	headerReader services.HeaderReader,
+	headerReader dbservices.HeaderReader,
 	chainConfig *chain.Config,
 	callTimeout time.Duration,
 ) (*ReusableCaller, error) {
-
-	ibs := state.New(stateReader)
-
 	baseFee := header.BaseFee
 
 	msg, err := initialArgs.ToMessage(gasCap, baseFee)
@@ -258,9 +330,11 @@ func NewReusableCaller(
 			return nil, err
 		}
 	}
+	initialArgs.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
+	vmConfig := vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true}
 
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state.NewPooled(stateReader), chainConfig, vmConfig)
 
 	return &ReusableCaller{
 		evm:            evm,

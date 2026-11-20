@@ -20,8 +20,6 @@
 package misc
 
 import (
-	"math/big"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -33,7 +31,7 @@ var DAOForkBlockExtra = common.FromHex("0x64616f2d686172642d666f726b")
 
 // DAOForkExtraRange is the number of consecutive blocks from the DAO fork point
 // to override the extra-data in to prevent no-fork attacks.
-var DAOForkExtraRange = big.NewInt(10)
+const DAOForkExtraRange = 10
 
 // DAORefundContract is the address of the refund contract to send DAO balances to.
 var DAORefundContract = accounts.InternAddress(common.HexToAddress("0xbf4ed7b27f1d666546e30d74d50d173d20bca754"))

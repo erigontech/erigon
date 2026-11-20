@@ -67,7 +67,7 @@ func (*PendingAttestation) Clone() clonable.Clonable {
 }
 
 // Implement custom json unmarshalling for Attestation.
-func (p *PendingAttestation) UnmarshalJSON(data []byte) error {
+func (a *PendingAttestation) UnmarshalJSON(data []byte) error {
 	// Unmarshal as normal into a temporary struct
 	type tempPendingAttestation struct {
 		AggregationBits *BitList         `json:"aggregation_bits"`
@@ -81,9 +81,9 @@ func (p *PendingAttestation) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	// Copy the temporary struct into the actual struct
-	p.AggregationBits = temp.AggregationBits
-	p.Data = temp.Data
-	p.InclusionDelay = temp.InclusionDelay
-	p.ProposerIndex = temp.ProposerIndex
+	a.AggregationBits = temp.AggregationBits
+	a.Data = temp.Data
+	a.InclusionDelay = temp.InclusionDelay
+	a.ProposerIndex = temp.ProposerIndex
 	return nil
 }

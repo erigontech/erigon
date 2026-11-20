@@ -80,11 +80,15 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 		return err
 	}
 
-	if err := v.validateKeys(msg, eon); err != nil {
+	if err := v.validateKeysCount(msg); err != nil {
 		return err
 	}
 
-	return v.validateExtraData(msg, eon)
+	if err := v.validateExtraData(msg, eon); err != nil {
+		return err
+	}
+
+	return v.validateKeys(msg, eon)
 }
 
 func (v DecryptionKeysValidator) validateExtraData(msg *proto.DecryptionKeys, eon Eon) error {
@@ -198,7 +202,7 @@ func (v DecryptionKeysValidator) validateSignatures(msg *proto.DecryptionKeys, e
 	return nil
 }
 
-func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys, eon Eon) error {
+func (v DecryptionKeysValidator) validateKeysCount(msg *proto.DecryptionKeys) error {
 	if len(msg.Keys) == 0 {
 		return ErrEmptyKeys
 	}
@@ -207,6 +211,10 @@ func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys, eon Eon
 		return fmt.Errorf("%w: %d", ErrTooManyKeys, len(msg.Keys))
 	}
 
+	return nil
+}
+
+func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys, eon Eon) error {
 	eonPublicKey, err := eon.PublicKey()
 	if err != nil {
 		return err

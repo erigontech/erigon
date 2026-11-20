@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/stagedsync"
-	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -43,13 +42,13 @@ func TestHeaderVerification(t *testing.T) {
 	t.Parallel()
 	// Create a simple chain to verify
 	var (
-		gspec  = &types.Genesis{Config: libchain.TestChainConfig}
+		gspec  = &types.Genesis{Config: libchain.TestChainBerlinConfig}
 		engine = ethash.NewFaker()
 	)
 	logger := testlog.Logger(t, log.LvlInfo)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithEngine(engine))
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
+	chain, err := m.GenerateChain(8, nil)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
@@ -58,7 +57,7 @@ func TestHeaderVerification(t *testing.T) {
 		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 			for j, valid := range []bool{true, false} {
 				chainReader := stagedsync.ChainReader{
-					Cfg:         libchain.TestChainConfig,
+					Cfg:         libchain.TestChainBerlinConfig,
 					Db:          tx,
 					BlockReader: m.BlockReader,
 					Logger:      logger,
@@ -100,7 +99,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlInfo)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithEngine(engine))
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
+	chain, err := m.GenerateChain(8, nil)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
 	}

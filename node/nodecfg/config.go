@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -72,6 +71,11 @@ type Config struct {
 
 	// Configuration of peer-to-peer networking.
 	P2P p2p.Config
+
+	// ExecWorkerCount is the resolved parallel-exec worker count for this node;
+	// OpenDatabase floors the read-tx semaphore on it. 0 falls back to the
+	// process-wide dbg.Exec3Workers.
+	ExecWorkerCount int `toml:"-"`
 
 	// IPCPath is the requested location to place the IPC endpoint. If the path is
 	// a simple file name, it is placed inside the data directory (or on the root
@@ -114,9 +118,6 @@ type Config struct {
 	// interface.
 	HTTPTimeouts rpccfg.HTTPTimeouts
 
-	// HTTPPathPrefix specifies a path prefix on which http-rpc is to be served.
-	HTTPPathPrefix string `toml:",omitempty"`
-
 	// WSHost is the host interface on which to start the websocket RPC server. If
 	// this field is empty, no websocket API endpoint will be started.
 	WSHost string
@@ -125,9 +126,6 @@ type Config struct {
 	// default zero value is/ valid and will pick a port number randomly (useful for
 	// ephemeral nodes).
 	WSPort int `toml:",omitempty"`
-
-	// WSPathPrefix specifies a path prefix on which ws-rpc is to be served.
-	WSPathPrefix string `toml:",omitempty"`
 
 	// WSOrigins is the list of domain to accept websocket requests from. Please be
 	// aware that the server can only act upon the HTTP request the client sends and
@@ -173,7 +171,8 @@ type Config struct {
 
 	Http httpcfg.HttpCfg
 
-	DebugMux *http.ServeMux
+	DebugMux      *http.ServeMux
+	DisableSentry bool
 }
 
 // IPCEndpoint resolves an IPC endpoint based on a configured value, taking into
@@ -206,18 +205,6 @@ func (c *Config) NodeDB() string {
 	return c.ResolvePath(datadirNodeDatabase)
 }
 
-// DefaultIPCEndpoint returns the IPC path used by default.
-func DefaultIPCEndpoint(clientIdentifier string) string {
-	if clientIdentifier == "" {
-		clientIdentifier = strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
-		if clientIdentifier == "" {
-			panic("empty executable name")
-		}
-	}
-	config := &Config{Dirs: datadir.New(paths.DefaultDataDir()), IPCPath: clientIdentifier + ".ipc"}
-	return config.IPCEndpoint()
-}
-
 // HTTPEndpoint resolves an HTTP endpoint based on the configured host interface
 // and port parameters.
 func (c *Config) HTTPEndpoint() string {
@@ -227,12 +214,6 @@ func (c *Config) HTTPEndpoint() string {
 	return fmt.Sprintf("%s:%d", c.HTTPHost, c.HTTPPort)
 }
 
-// DefaultHTTPEndpoint returns the HTTP endpoint used by default.
-func DefaultHTTPEndpoint() string {
-	config := &Config{HTTPHost: DefaultHTTPHost, HTTPPort: DefaultHTTPPort}
-	return config.HTTPEndpoint()
-}
-
 // WSEndpoint resolves a websocket endpoint based on the configured host interface
 // and port parameters.
 func (c *Config) WSEndpoint() string {
@@ -240,12 +221,6 @@ func (c *Config) WSEndpoint() string {
 		return ""
 	}
 	return fmt.Sprintf("%s:%d", c.WSHost, c.WSPort)
-}
-
-// DefaultWSEndpoint returns the websocket endpoint used by default.
-func DefaultWSEndpoint() string {
-	config := &Config{WSHost: DefaultWSHost, WSPort: DefaultWSPort}
-	return config.WSEndpoint()
 }
 
 // ExtRPCEnabled returns the indicator whether node enables the external

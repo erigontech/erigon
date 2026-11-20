@@ -2,12 +2,12 @@ package bench
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon/cmd/txnbench/internal/rpcclient"
 	"math"
 	"os"
 	"time"
+
+	"github.com/erigontech/erigon/cmd/txnbench/internal/rpcclient"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -60,7 +60,7 @@ func RunBenchmark(ctx context.Context, c *rpcclient.Client, name string) (BenchO
 
 			// 10 reqs — warm avg + stddev
 			durs := make([]float64, 0, repeats)
-			for i := 0; i < repeats; i++ {
+			for i := range repeats {
 				t1 := time.Now()
 				if _, err := c.EthGetTransactionByHash(ctx, tx); err != nil {
 					return BenchOutput{}, fmt.Errorf("repeat %d eth_getTransactionByHash(%s): %w", i+1, tx, err)
@@ -102,8 +102,4 @@ func meanStd(xs []float64) (mean, std float64) {
 		std = math.Sqrt(s2 / float64(len(xs)-1))
 	}
 	return
-}
-
-func isNonNullJSON(raw json.RawMessage) bool {
-	return len(raw) > 0 && string(raw) != "null"
 }

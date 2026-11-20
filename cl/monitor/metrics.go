@@ -11,14 +11,6 @@ import (
 var (
 	// VALIDATOR METRICS
 
-	// metricAttestHit is the number of attestations that hit for those validators we observe within current_epoch-2
-	metricAttestHit = metrics.GetOrCreateCounter("validator_attestation_hit")
-	// metricAttestMiss is the number of attestations that miss for those validators we observe within current_epoch-2
-	metricAttestMiss = metrics.GetOrCreateCounter("validator_attestation_miss")
-	// metricProposerHit is the number of proposals that hit for those validators we observe in previous slot
-	metricProposerHit = metrics.GetOrCreateCounter("validator_proposal_hit")
-	// metricProposerMiss is the number of proposals that miss for those validators we observe in previous slot
-	metricProposerMiss = metrics.GetOrCreateCounter("validator_proposal_miss")
 	// aggregateAndProofSignatures is the sum of signatures in all the aggregates in the recent slot
 	aggregateAndProofSignatures = metrics.GetOrCreateGauge("aggregate_and_proof_signatures")
 
@@ -97,7 +89,6 @@ func (a *aggregateQualityMetric) observe(participationCount int, totalCount int)
 	aggregateQualityMax.Set(a.qualities[len(a.qualities)-1])
 
 	a.qualities = a.qualities[:0]
-
 }
 
 var (
@@ -167,14 +158,8 @@ func ObserveBatchVerificationThroughput(d time.Duration, totalSigs int) {
 
 // ObserveGossipTopicSeen increments the gossip topic seen metric
 func ObserveGossipTopicSeen(topic string, l int) {
-	var metric metrics.Counter
-	metricI, ok := gossipMetricsMap.LoadOrStore(topic, metrics.GetOrCreateCounter(gossipTopicsMetricCounterPrefix+"_"+topic))
-	if ok {
-		metric = metricI.(metrics.Counter)
-	} else {
-		metric = metrics.GetOrCreateCounter(gossipTopicsMetricCounterPrefix + "_" + topic)
-		gossipMetricsMap.Store(topic, metric)
-	}
+	metricI, _ := gossipMetricsMap.LoadOrStore(topic, metrics.GetOrCreateCounter(gossipTopicsMetricCounterPrefix+"_"+topic))
+	metric := metricI.(metrics.Counter)
 	metric.Add(float64(l))
 }
 

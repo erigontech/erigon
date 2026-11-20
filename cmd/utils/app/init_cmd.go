@@ -17,11 +17,9 @@
 package app
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
+	"context"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -29,10 +27,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 var initCommand = cli.Command{
@@ -44,7 +40,7 @@ var initCommand = cli.Command{
 		&utils.DataDirFlag,
 		&utils.ChainFlag,
 	},
-	//Category: "BLOCKCHAIN COMMANDS",
+	// Category: "BLOCKCHAIN COMMANDS",
 	Description: `
 The init command initializes a new genesis block and definition for the network.
 This is a destructive action and changes the network in which you will be
@@ -55,11 +51,11 @@ It expects the genesis file as argument.`,
 
 // initGenesis will initialise the given JSON format genesis file and writes it as
 // the zero'd block (i.e. genesis) or will fail hard if it can't succeed.
-func initGenesis(cliCtx *cli.Context) error {
+func initGenesis(ctx context.Context, cliCtx *cli.Command) error {
 	var logger log.Logger
 	var tracer *tracers.Tracer
 	var err error
-	if logger, tracer, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, tracer, _, _, err = debug.Setup(ctx, cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	// Make sure we have a valid genesis JSON
@@ -68,35 +64,19 @@ func initGenesis(cliCtx *cli.Context) error {
 		utils.Fatalf("Must supply path to genesis JSON file")
 	}
 
-	file, err := os.Open(genesisPath)
+	genesis, err := utils.ReadGenesisFile(genesisPath)
 	if err != nil {
-		utils.Fatalf("Failed to read genesis file: %v", err)
-	}
-	defer file.Close()
-
-	genesis := new(types.Genesis)
-	if err := json.NewDecoder(file).Decode(genesis); err != nil {
-		utils.Fatalf("invalid genesis file: %v", err)
-	}
-
-	if genesis.Config.BorJSON != nil {
-		borConfig := &borcfg.BorConfig{}
-		err = json.Unmarshal(genesis.Config.BorJSON, borConfig)
-		if err != nil {
-			panic(fmt.Sprintf("Could not parse 'bor' config for %s: %v", genesisPath, err))
-		}
-
-		genesis.Config.Bor = borConfig
+		return err
 	}
 
 	// Open and initialise both full and light databases
-	stack, err := MakeNodeWithDefaultConfig(cliCtx, logger)
+	stack, err := MakeNodeWithDefaultConfig(ctx, cliCtx, logger)
 	if err != nil {
 		return err
 	}
 	defer stack.Close()
 
-	chaindb, err := node.OpenDatabase(cliCtx.Context, stack.Config(), dbcfg.ChainDB, "", false, logger)
+	chaindb, err := node.OpenDatabase(ctx, stack.Config(), dbcfg.ChainDB, "", false, logger)
 	if err != nil {
 		utils.Fatalf("Failed to open database: %v", err)
 	}
@@ -106,7 +86,7 @@ func initGenesis(cliCtx *cli.Context) error {
 			tracer.Hooks.OnBlockchainInit(genesis.Config)
 		}
 	}
-	_, block, err := genesiswrite.CommitGenesisBlock(chaindb, genesis, datadir.New(cliCtx.String(utils.DataDirFlag.Name)), logger)
+	_, block, err := genesiswrite.CommitGenesisBlock(chaindb, genesis, cliCtx.String(utils.ChainFlag.Name), datadir.New(cliCtx.String(utils.DataDirFlag.Name)), logger)
 	if err != nil {
 		utils.Fatalf("Failed to write genesis block: %v", err)
 	}

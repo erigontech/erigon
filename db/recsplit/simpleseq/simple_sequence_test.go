@@ -1,7 +1,6 @@
 package simpleseq
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -41,32 +40,37 @@ func TestSimpleSequence(t *testing.T) {
 
 	t.Run("seek", func(t *testing.T) {
 		// before baseNum
-		v, found := s.Seek(10)
+		v, pos, found := s.Seek(10)
 		require.True(t, found)
 		require.Equal(t, uint64(1001), v)
+		require.Equal(t, uint64(0), pos)
 
 		// at baseNum
-		v, found = s.Seek(1000)
+		v, pos, found = s.Seek(1000)
 		require.True(t, found)
 		require.Equal(t, uint64(1001), v)
+		require.Equal(t, uint64(0), pos)
 
 		// at elem
-		v, found = s.Seek(1007)
+		v, pos, found = s.Seek(1007)
 		require.True(t, found)
 		require.Equal(t, uint64(1007), v)
+		require.Equal(t, uint64(1), pos)
 
 		// between elems
-		v, found = s.Seek(1014)
+		v, pos, found = s.Seek(1014)
 		require.True(t, found)
 		require.Equal(t, uint64(1015), v)
+		require.Equal(t, uint64(2), pos)
 
 		// at last
-		v, found = s.Seek(1027)
+		v, pos, found = s.Seek(1027)
 		require.True(t, found)
 		require.Equal(t, uint64(1027), v)
+		require.Equal(t, uint64(3), pos)
 
 		// after last
-		v, found = s.Seek(1028)
+		v, _, found = s.Seek(1028)
 		require.False(t, found)
 		require.Equal(t, uint64(0), v)
 
@@ -305,11 +309,12 @@ func TestReadSimpleSequence(t *testing.T) {
 	require.Equal(t, uint64(1001), s.Min())
 	require.Equal(t, uint64(1027), s.Max())
 
-	v, found := s.Seek(1007)
+	v, pos, found := s.Seek(1007)
 	require.True(t, found)
 	require.Equal(t, uint64(1007), v)
+	require.Equal(t, uint64(1), pos)
 
-	v, found = s.Seek(9999)
+	v, _, found = s.Seek(9999)
 	require.False(t, found)
 	require.Equal(t, uint64(0), v)
 }
@@ -317,38 +322,8 @@ func TestReadSimpleSequence(t *testing.T) {
 func makeSequence(n int) *SimpleSequence {
 	base := uint64(1_000_000)
 	s := NewSimpleSequence(base, uint64(n))
-	for i := 0; i < n; i++ {
+	for i := range n {
 		s.AddOffset(base + uint64(i)*7 + 1)
 	}
 	return s
-}
-
-func BenchmarkSimpleSequenceSeek(b *testing.B) {
-	for _, size := range []int{1, 2, 4, 16} {
-		s := makeSequence(size)
-		minV := s.Min()
-		maxV := s.Max()
-		midV := s.Get(uint64(size / 2))
-
-		b.Run(fmt.Sprintf("n=%d/hit_first", size), func(b *testing.B) {
-			for b.Loop() {
-				s.Seek(minV)
-			}
-		})
-		b.Run(fmt.Sprintf("n=%d/hit_mid", size), func(b *testing.B) {
-			for b.Loop() {
-				s.Seek(midV)
-			}
-		})
-		b.Run(fmt.Sprintf("n=%d/hit_last", size), func(b *testing.B) {
-			for b.Loop() {
-				s.Seek(maxV)
-			}
-		})
-		b.Run(fmt.Sprintf("n=%d/miss", size), func(b *testing.B) {
-			for b.Loop() {
-				s.Seek(maxV + 1)
-			}
-		})
-	}
 }

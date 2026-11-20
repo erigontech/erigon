@@ -19,6 +19,8 @@ package sync_contribution_pool
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -26,14 +28,14 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 var testHash = common.Hash{0x01, 0x02, 0x03, 0x04}
 
 func getTestCommitteesMessages(n int) (privateKeys [][]byte, messages []cltypes.SyncCommitteeMessage, s *state.CachingBeaconState) {
 	s = state.New(&clparams.MainnetBeaconConfig)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		privateKey, err := bls.GenerateKey()
 		if err != nil {
 			panic(err)
@@ -43,7 +45,7 @@ func getTestCommitteesMessages(n int) (privateKeys [][]byte, messages []cltypes.
 		if err != nil {
 			panic(err)
 		}
-		msg := utils.Sha256(testHash[:], domain)
+		msg := crypto.Sha256(testHash[:], domain)
 		sig := privateKey.Sign(msg[:])
 		message := cltypes.SyncCommitteeMessage{
 			BeaconBlockRoot: testHash,
@@ -58,7 +60,9 @@ func getTestCommitteesMessages(n int) (privateKeys [][]byte, messages []cltypes.
 		c := currCommittee.GetCommittee()
 		c[i] = common.Bytes48(bls.CompressPublicKey(privateKey.PublicKey()))
 		currCommittee.SetCommittee(c)
-		s.SetCurrentSyncCommittee(currCommittee)
+		if err := s.SetCurrentSyncCommittee(currCommittee); err != nil {
+			panic(err)
+		}
 	}
 	return
 }
@@ -75,4 +79,93 @@ func TestSyncContributionPool(t *testing.T) {
 
 	contribution.SubcommitteeIndex = 1
 	require.NoError(t, pool.AddSyncContribution(s, contribution))
+}
+
+// The next committee signs for the last slot of a period; the head may not have imported that slot yet.
+func TestSyncContributionPoolAggregatesTheLastSlotOfAPeriodBeforeItsBlock(t *testing.T) {
+	_, msgs, s := getTestCommitteesMessages(1)
+	cfg := s.BeaconConfig()
+	nextPeriod := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	require.NoError(t, s.SetSlot(nextPeriod-2))
+	// Move the member from the current committee to the next one.
+	current, next := s.CurrentSyncCommittee().Copy(), s.NextSyncCommittee().Copy()
+	currentKeys, nextKeys := current.GetCommittee(), next.GetCommittee()
+	nextKeys[0], currentKeys[0] = currentKeys[0], common.Bytes48{}
+	current.SetCommittee(currentKeys)
+	next.SetCommittee(nextKeys)
+	require.NoError(t, s.SetCurrentSyncCommittee(current))
+	require.NoError(t, s.SetNextSyncCommittee(next))
+
+	msg := msgs[0]
+	msg.Slot = nextPeriod - 1
+	pool := NewSyncContributionPool(cfg)
+	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &msg))
+	contribution := pool.GetSyncContribution(msg.Slot, 0, testHash)
+	require.Equal(t, msg.Signature, contribution.Signature)
+}
+
+// The pool keeps contributions from the head's slot to one epoch after it: after empty slots the
+// next proposer and aggregators read slots well past the head, and older ones can no longer be
+// aggregated. A stalled head still bounds what is kept.
+func TestSyncContributionPoolKeepsOneEpochFromTheHead(t *testing.T) {
+	_, msgs, s := getTestCommitteesMessages(1)
+	const headSlot = 10
+	require.NoError(t, s.SetSlot(headSlot))
+	epoch := s.BeaconConfig().SlotsPerEpoch
+	pool := NewSyncContributionPool(s.BeaconConfig())
+	kept := map[uint64]bool{
+		headSlot - 1:         false,
+		headSlot:             true,
+		headSlot + 2:         true, // two empty slots after the head
+		headSlot + epoch:     true,
+		headSlot + epoch + 1: false,
+	}
+	for slot := range kept {
+		msg := msgs[0]
+		msg.Slot = slot
+		require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &msg))
+	}
+
+	for slot, want := range kept {
+		contribution := pool.GetSyncContribution(slot, 0, testHash)
+		if want {
+			require.Equal(t, msgs[0].Signature, contribution.Signature, "slot %d", slot)
+		} else {
+			require.Equal(t, common.Bytes96(bls.InfiniteSignature), contribution.Signature, "slot %d", slot)
+		}
+	}
+}
+
+// The proposer reads the contributions for blocks, which are pruned by the same window.
+func TestSyncContributionPoolKeepsOneEpochFromTheHeadForBlocks(t *testing.T) {
+	_, msgs, s := getTestCommitteesMessages(1)
+	const headSlot = 10
+	require.NoError(t, s.SetSlot(headSlot))
+	epoch := s.BeaconConfig().SlotsPerEpoch
+	pool := NewSyncContributionPool(s.BeaconConfig())
+	kept := map[uint64]bool{
+		headSlot - 1:         false,
+		headSlot:             true,
+		headSlot + 2:         true,
+		headSlot + epoch:     true,
+		headSlot + epoch + 1: false,
+	}
+	msg := msgs[0]
+	msg.Slot = headSlot
+	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &msg))
+	contribution := pool.GetSyncContribution(headSlot, 0, testHash)
+	for slot := range kept {
+		c := contribution.Copy()
+		c.Slot = slot
+		require.NoError(t, pool.AddSyncContribution(s, c))
+	}
+	next := msgs[0]
+	next.Slot = headSlot + 1
+	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &next)) // runs the cleanup
+
+	for slot, want := range kept {
+		aggregate, err := pool.GetSyncAggregate(slot, testHash)
+		require.NoError(t, err)
+		require.Equal(t, want, utils.BitsOnCount(aggregate.SyncCommiteeBits) > 0, "slot %d", slot)
+	}
 }

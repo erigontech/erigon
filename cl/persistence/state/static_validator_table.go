@@ -18,6 +18,7 @@ package state_accessors
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 
@@ -84,7 +85,7 @@ type cborStaticValidator struct {
 }
 
 // Serialize encodes the StaticValidator data into CBOR format and writes it to the given writer.
-func (s *StaticValidator) WriteTo(w io.Writer) error {
+func (s *StaticValidator) Serialize(w io.Writer) error {
 	return cbor.Marshal(w, cborStaticValidator{
 		PublicKeys:            s.publicKeys,
 		WithdrawalCredentials: s.withdrawalCredentials,
@@ -97,7 +98,7 @@ func (s *StaticValidator) WriteTo(w io.Writer) error {
 }
 
 // Deserialize decodes CBOR data from the given reader and updates the StaticValidator fields.
-func (s *StaticValidator) ReadFrom(r io.Reader) error {
+func (s *StaticValidator) Deserialize(r io.Reader) error {
 	tmp := &cborStaticValidator{}
 	if err := cbor.Unmarshal(&tmp, r); err != nil {
 		return err
@@ -287,13 +288,16 @@ func NewStaticValidatorTable() *StaticValidatorTable {
 func (s *StaticValidatorTable) AddValidator(v solid.Validator, validatorIndex, slot uint64) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
-	if slot <= s.slot && s.slot != 0 {
+	// Idempotency is by index, not slot: guarding on slot leaves a table restored
+	// short (fewer entries than the set) permanently unfillable, since the genesis
+	// re-adds all arrive at slot 0.
+	if validatorIndex < uint64(len(s.validatorTable)) {
 		return nil
 	}
-	s.validatorTable = append(s.validatorTable, NewStaticValidatorFromValidator(v, slot))
-	if validatorIndex != uint64(len(s.validatorTable))-1 {
-		return errors.New("validator index mismatch")
+	if validatorIndex != uint64(len(s.validatorTable)) {
+		return fmt.Errorf("validator index gap: index %d with table length %d", validatorIndex, len(s.validatorTable))
 	}
+	s.validatorTable = append(s.validatorTable, NewStaticValidatorFromValidator(v, slot))
 	return nil
 }
 
@@ -375,12 +379,6 @@ func (s *StaticValidatorTable) AddWithdrawableEpoch(validatorIndex, slot uint64,
 	return nil
 }
 
-func (s *StaticValidatorTable) GetInPlace(validatorIndex uint64, slot uint64, v solid.Validator) {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	s.validatorTable[validatorIndex].ToValidator(v, slot)
-}
-
 func (s *StaticValidatorTable) ForEach(fn func(validatorIndex uint64, validator *StaticValidator) bool) {
 	s.sync.RLock()
 	defer s.sync.RUnlock()
@@ -389,48 +387,6 @@ func (s *StaticValidatorTable) ForEach(fn func(validatorIndex uint64, validator 
 			break
 		}
 	}
-}
-
-func (s *StaticValidatorTable) WithdrawalCredentials(validatorIndex uint64, slot uint64) common.Hash {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	return s.validatorTable[validatorIndex].WithdrawalCredentials(slot)
-}
-
-func (s *StaticValidatorTable) Slashed(validatorIndex uint64, slot uint64) bool {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	return s.validatorTable[validatorIndex].Slashed(slot)
-}
-
-func (s *StaticValidatorTable) ActivationEligibilityEpoch(validatorIndex uint64, slot uint64) uint64 {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	return s.validatorTable[validatorIndex].ActivationEligibilityEpoch(slot)
-}
-
-func (s *StaticValidatorTable) ActivationEpoch(validatorIndex uint64, slot uint64) uint64 {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	return s.validatorTable[validatorIndex].ActivationEpoch(slot)
-}
-
-func (s *StaticValidatorTable) ExitEpoch(validatorIndex uint64, slot uint64) uint64 {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	return s.validatorTable[validatorIndex].ExitEpoch(slot)
-}
-
-func (s *StaticValidatorTable) WithdrawableEpoch(validatorIndex uint64, slot uint64) uint64 {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	return s.validatorTable[validatorIndex].WithdrawableEpoch(slot)
-}
-
-func (s *StaticValidatorTable) GetStaticValidator(validatorIndex uint64) *StaticValidator {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	return s.validatorTable[validatorIndex]
 }
 
 // This is for versioning
@@ -456,4 +412,10 @@ func (s *StaticValidatorTable) Slot() uint64 {
 	s.sync.RLock()
 	defer s.sync.RUnlock()
 	return s.slot
+}
+
+func (s *StaticValidatorTable) Length() int {
+	s.sync.RLock()
+	defer s.sync.RUnlock()
+	return len(s.validatorTable)
 }

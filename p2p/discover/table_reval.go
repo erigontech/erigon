@@ -124,7 +124,7 @@ func (tab *Table) doRevalidate(resp revalidationResponse, node *enode.Node) {
 	if remoteSeq > node.Seq() {
 		newrec, err := tab.net.RequestENR(node)
 		if err != nil {
-			tab.log.Debug("[p2p] ENR request failed", "id", node.ID(), "err", err)
+			tab.log.Trace("[p2p] ENR request failed", "id", node.ID(), "err", err)
 		} else {
 			resp.newRecord = newrec
 		}
@@ -155,7 +155,9 @@ func (tr *tableRevalidation) handleResponse(tab *Table, resp revalidationRespons
 	// This is done via defer to avoid holding Table lock while writing to DB.
 	defer func() {
 		if n.isValidatedLive && n.livenessChecks > 5 {
-			tab.db.UpdateNode(resp.n.Node)
+			if err := tab.db.UpdateNode(resp.n.Node); err != nil {
+				tab.log.Trace("[p2p] Failed to store seed node", "id", n.ID(), "err", err)
+			}
 		}
 	}()
 
@@ -168,7 +170,7 @@ func (tr *tableRevalidation) handleResponse(tab *Table, resp revalidationRespons
 		if n.livenessChecks <= 0 {
 			tab.deleteInBucket(b, n.ID())
 		} else {
-			tab.log.Debug("[p2p] Node revalidation failed", "b", b.index, "id", n.ID(), "checks", n.livenessChecks, "q", n.revalList.name)
+			tab.log.Trace("[p2p] Node revalidation failed", "b", b.index, "id", n.ID(), "checks", n.livenessChecks, "q", n.revalList.name)
 			tr.moveToList(&tr.fast, n, now, &tab.rand)
 		}
 		return
@@ -177,7 +179,7 @@ func (tr *tableRevalidation) handleResponse(tab *Table, resp revalidationRespons
 	// The node responded.
 	n.livenessChecks++
 	n.isValidatedLive = true
-	tab.log.Debug("[p2p] Node revalidated", "b", b.index, "id", n.ID(), "checks", n.livenessChecks, "q", n.revalList.name)
+	tab.log.Trace("[p2p] Node revalidated", "b", b.index, "id", n.ID(), "checks", n.livenessChecks, "q", n.revalList.name)
 	var endpointChanged bool
 	if resp.newRecord != nil {
 		_, endpointChanged = tab.bumpInBucket(b, resp.newRecord, false)

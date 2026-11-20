@@ -40,8 +40,10 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-type Version = version.Version
-type Versions = version.Versions
+type (
+	Version  = version.Version
+	Versions = version.Versions
+)
 
 type FirstKeyGetter func(ctx context.Context) uint64
 
@@ -69,8 +71,10 @@ func (f IndexBuilderFunc) Build(ctx context.Context, info FileInfo, salt uint32,
 	return f(ctx, info, salt, chainConfig, tmpDir, p, lvl, logger)
 }
 
-var saltMap = map[string]uint32{}
-var saltLock sync.RWMutex
+var (
+	saltMap  = map[string]uint32{}
+	saltLock sync.RWMutex
+)
 
 func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, error) {
 	// issue: https://github.com/erigontech/erigon/issues/14300
@@ -83,6 +87,18 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 		return nil, err
 	}
 
+	var saltBytes []byte
+	if exists {
+		if saltBytes, err = os.ReadFile(fpath); err != nil {
+			return nil, err
+		}
+		// WriteFileWithFsync truncates before writing, so an interrupted write leaves a
+		// wrong-sized file behind. It carries no usable salt, so treat it as missing.
+		if exists = len(saltBytes) == 4; !exists {
+			logger.Warn("discarding malformed snaptype salt file, accessors built under the previous salt no longer match", "file", fpath, "len", len(saltBytes))
+		}
+	}
+
 	if !exists {
 		if !autoCreate {
 			logger.Debug("snaptype salt file not found + autocreate disabled")
@@ -90,20 +106,7 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 		}
 		dir.MustExist(baseDir)
 
-		saltBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(saltBytes, randUint32())
-		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
-			return nil, err
-		}
-	}
-	saltBytes, err := os.ReadFile(fpath)
-	if err != nil {
-		return nil, err
-	}
-	if len(saltBytes) != 4 {
-		dir.MustExist(baseDir)
-
-		saltBytes := make([]byte, 4)
+		saltBytes = make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, randUint32())
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return nil, err
@@ -112,7 +115,6 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 
 	salt := binary.BigEndian.Uint32(saltBytes)
 	return &salt, nil
-
 }
 
 // GetIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
@@ -157,7 +159,7 @@ var CaplinIndexes = struct {
 	BlobSidecarSlot: Index{Name: "blocksidecars", Version: version.V1_1_standart},
 }
 
-func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
+func (i Index) HasFile(info FileInfo, dirEntries []string, logger log.Logger) bool {
 	dir := info.Dir()
 	// segment, err := seg.NewDecompressor(info.Path)
 
@@ -167,14 +169,13 @@ func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 
 	// defer segment.Close()
 
-	// Let's actually
-	if _, err := os.Stat(info.Path); err != nil {
-		logger.Debug("[ind] HasFile: seg file didn't found", "path", info.Path, "dir", dir, "err", err)
+	if !slices.Contains(dirEntries, filepath.Base(info.Path)) {
+		logger.Debug("[ind] HasFile: seg file didn't found", "path", info.Path, "dir", dir)
 		return false
 	}
 
 	fNameMask := IdxFileMask(info.From, info.To, i.Name)
-	fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, fNameMask))
+	fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, dir)
 	if err != nil {
 		logger.Debug("[ind] HasFile: files by pattern didn't found", "f", fNameMask, "dir", dir, "err", err)
 		return false
@@ -196,14 +197,12 @@ func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 	}
 
 	idx, err := recsplit.OpenIndex(fPath)
-
 	if err != nil {
 		logger.Debug("[ind] HasFile: opening index", "path", fPath, "err", err)
 		return false
 	}
 
-	defer idx.Close()
-
+	idx.Close()
 	return true // idx.ModTime().After(segment.ModTime())
 }
 
@@ -217,7 +216,7 @@ type Type interface {
 	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
 	IdxFileNames(from uint64, to uint64) []string
 	Indexes() []Index
-	HasIndexFiles(info FileInfo, logger log.Logger) bool
+	HasIndexFiles(info FileInfo, dirEntries []string, logger log.Logger) bool
 	BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
 	ExtractRange(ctx context.Context, info FileInfo, rangeExtractor RangeExtractor, indexBuilder IndexBuilder, firstKeyGetter FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger, hashResolver BlockHashResolver) (uint64, error)
 
@@ -236,10 +235,38 @@ type SnapType struct {
 // These are raw maps with no mutex protection becuase they are
 // expected to be written to once during program initialization
 // and them be readonly
-var registeredTypes = map[Enum]Type{}
-var namedTypes = map[string]Type{}
+var (
+	registeredTypes = map[Enum]Type{}
+	namedTypes      = map[string]Type{}
+)
 
 func RegisterType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
+	if enum >= MinCaplinEnum && enum < MaxCaplinEnum {
+		panic(fmt.Sprintf("snaptype: enum %d is in the caplin range, cannot register %q", enum, name))
+	}
+	return register(enum, name, versions, rangeExtractor, indexes, indexBuilder)
+}
+
+func RegisterCaplinType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
+	if enum < MinCaplinEnum || enum >= MaxCaplinEnum {
+		panic(fmt.Sprintf("snaptype: enum %d for %q outside caplin range [%d, %d)", enum, name, MinCaplinEnum, MaxCaplinEnum))
+	}
+	return register(enum, name, versions, rangeExtractor, indexes, indexBuilder)
+}
+
+func register(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
+	if prev, taken := registeredTypes[enum]; taken {
+		panic(fmt.Sprintf("snaptype: enum %d already registered as %q, cannot register %q", enum, prev.Name(), name))
+	}
+	if prev, taken := namedTypes[strings.ToLower(name)]; taken {
+		panic(fmt.Sprintf("snaptype: name %q already registered at enum %d", name, prev.Enum()))
+	}
+	// Runtime file slices are sized by MaxEnum and indexed by enum, so an
+	// out-of-range registration must fail here, not on first slice access.
+	if enum < MinCoreEnum || enum >= MaxEnum {
+		panic(fmt.Sprintf("snaptype: enum %d for %q outside [%d, %d)", enum, name, MinCoreEnum, MaxEnum))
+	}
+
 	t := SnapType{
 		enum: enum, name: name, versions: versions, indexes: indexes, rangeExtractor: rangeExtractor, indexBuilder: indexBuilder,
 	}
@@ -319,10 +346,12 @@ func (s SnapType) Indexes() []Index {
 }
 
 func (s SnapType) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
-	salt, err := GetIndexSalt(info.Dir(), logger)
-
-	if err != nil {
-		return err
+	var salt uint32
+	if !IsCaplinType(s.enum) {
+		var err error
+		if salt, err = GetIndexSalt(info.Dir(), logger); err != nil {
+			return err
+		}
 	}
 
 	if indexBuilder == nil {
@@ -332,9 +361,9 @@ func (s SnapType) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder 
 	return indexBuilder.Build(ctx, info, salt, chainConfig, tmpDir, p, lvl, logger)
 }
 
-func (s SnapType) HasIndexFiles(info FileInfo, logger log.Logger) bool {
+func (s SnapType) HasIndexFiles(info FileInfo, dirEntries []string, logger log.Logger) bool {
 	for _, index := range s.indexes {
-		if !index.HasFile(info, logger) {
+		if !index.HasFile(info, dirEntries, logger) {
 			return false
 		}
 	}
@@ -388,11 +417,17 @@ type Enums struct {
 	Unknown Enum
 }
 
-const MinCoreEnum = 1
-const MinBorEnum = 11
-const MinCaplinEnum = 9
+const (
+	MinCoreEnum   = 1
+	MaxCaplinEnum = 50 // exclusive upper bound of the caplin enum range
+	MinCaplinEnum = 10
+)
 
-const MaxEnum = 15
+// MinCaplinStateEnum is the first beacon-state type; BeaconBlocks and BlobSidecars occupy
+// the two slots below it, so a new caplin block type must go here, not at a free tail slot.
+const MinCaplinStateEnum = MinCaplinEnum + 2
+
+const MaxEnum = 54
 
 var CaplinEnums = struct {
 	Enums
@@ -404,30 +439,16 @@ var CaplinEnums = struct {
 	BlobSidecars: MinCaplinEnum + 1,
 }
 
-func (ft Enum) String() string {
-	switch ft {
-	case CaplinEnums.BeaconBlocks:
-		return "beaconblocks"
-	case CaplinEnums.BlobSidecars:
-		return "blobsidecars"
-	default:
-		if t, ok := registeredTypes[ft]; ok {
-			return t.Name()
-		}
-
-		panic(fmt.Sprintf("unknown file type: %d", ft))
+func (e Enum) String() string {
+	if t, ok := registeredTypes[e]; ok {
+		return t.Name()
 	}
+
+	panic(fmt.Sprintf("unknown file type: %d", e))
 }
 
-func (ft Enum) Type() Type {
-	switch ft {
-	case CaplinEnums.BeaconBlocks:
-		return BeaconBlocks
-	case CaplinEnums.BlobSidecars:
-		return BlobSidecars
-	default:
-		return registeredTypes[ft]
-	}
+func (e Enum) Type() Type {
+	return registeredTypes[e]
 }
 
 func (e Enum) FileName(from uint64, to uint64) string {
@@ -439,8 +460,8 @@ func (e Enum) FileInfo(dir string, from uint64, to uint64) FileInfo {
 	return f
 }
 
-func (e Enum) HasIndexFiles(info FileInfo, logger log.Logger) bool {
-	return e.Type().HasIndexFiles(info, logger)
+func (e Enum) HasIndexFiles(info FileInfo, dirEntries []string, logger log.Logger) bool {
+	return e.Type().HasIndexFiles(info, dirEntries, logger)
 }
 
 func (e Enum) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
@@ -449,17 +470,10 @@ func (e Enum) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder Inde
 
 func ParseEnum(s string) (Enum, bool) {
 	s = strings.ToLower(s)
-	switch s {
-	case "beaconblocks":
-		return CaplinEnums.BeaconBlocks, true
-	case "blobsidecars", "blocksidecars":
-		return CaplinEnums.BlobSidecars, true
-	default:
-		if t, ok := namedTypes[s]; ok {
-			return t.Enum(), true
-		}
-		return Enums{}.Unknown, false
+	if t, ok := namedTypes[s]; ok {
+		return t.Enum(), true
 	}
+	return Enums{}.Unknown, false
 }
 
 // Idx - iterate over segment and building .idx file
@@ -495,9 +509,9 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 	cfg.KeyCount = d.Count()
 	idxVer := indexVersion.Current
 	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(idxVer, info.From, info.To))
-	versionOfRs := uint8(0)
+	versionOfRs := version.DataStructureVersion(0)
 	if !idxVer.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
-		versionOfRs = 1
+		versionOfRs = recsplit.ExistenceFilterVersion
 	}
 	cfg.Version = versionOfRs
 	rs, err := recsplit.NewRecSplit(cfg, logger)
@@ -533,7 +547,9 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 		if err = rs.Build(ctx); err != nil {
 			if errors.Is(err, recsplit.ErrCollision) {
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-				rs.ResetNextSalt()
+				if err := rs.ResetNextSalt(); err != nil {
+					return err
+				}
 				continue
 			}
 			return err
@@ -591,7 +607,9 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 		if err = rs.Build(ctx); err != nil {
 			if errors.Is(err, recsplit.ErrCollision) {
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-				rs.ResetNextSalt()
+				if err := rs.ResetNextSalt(); err != nil {
+					return err
+				}
 				continue
 			}
 			return err
@@ -605,7 +623,6 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, ind
 	var lastKeyValue uint64
 
 	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, seg.DefaultCfg, lvl, logger)
-
 	if err != nil {
 		return lastKeyValue, err
 	}
@@ -614,7 +631,6 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, ind
 	lastKeyValue, err = extractor.Extract(ctx, f.From, f.To, firstKey, chainDB, chainConfig, func(v []byte) error {
 		return sn.AddWord(v)
 	}, workers, lvl, logger, hashResolver)
-
 	if err != nil {
 		return lastKeyValue, fmt.Errorf("ExtractRange: %w", err)
 	}

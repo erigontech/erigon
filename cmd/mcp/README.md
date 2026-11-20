@@ -8,19 +8,28 @@ to AI assistants like Claude Desktop via the MCP standard.
 ### 1. Embedded (inside Erigon)
 
 The MCP server runs inside the Erigon process with direct access to APIs.
-Enabled with `--mcp.addr` and `--mcp.port` flags.
+It is **enabled by default** on `127.0.0.1:8553` (TCP).
 
 ```bash
-./build/bin/erigon --datadir=./data --mcp.addr=127.0.0.1 --mcp.port=8553
+# MCP server starts automatically
+./build/bin/erigon --datadir=./data
+
+# Disable it entirely
+./build/bin/erigon --datadir=./data --mcp.disable
+
+# Custom address/port (⚠️ 0.0.0.0 exposes the MCP server to all network
+# interfaces — use only on trusted networks or behind a firewall)
+./build/bin/erigon --datadir=./data --mcp.addr=0.0.0.0 --mcp.port=9000
 ```
 
-This mode uses SSE transport and provides full access to all tools including
-in-process Prometheus metrics.
+This mode serves streamable HTTP at `/mcp` and SSE at `/sse` on the same port,
+and includes in-process Prometheus metrics. RPC tools are limited to the
+namespaces enabled by `--http.api` (e.g. `--http.api=eth,erigon,ots,trace`).
 
 ### 2. Standalone (`cmd/mcp`)
 
 A separate binary that connects to Erigon via JSON-RPC or direct DB access.
-Supports stdio transport (for Claude Desktop) and SSE.
+Supports stdio transport (for Claude Desktop) and HTTP (streamable HTTP + SSE).
 
 ```bash
 make mcp
@@ -77,12 +86,13 @@ This is the standard transport for Claude Desktop and similar tools.
 ./build/bin/mcp --port 8545
 ```
 
-### SSE (Server-Sent Events)
+### HTTP (streamable HTTP + SSE)
 
-Serves MCP over HTTP with SSE transport:
+Serves MCP over HTTP: streamable HTTP at `/mcp`, SSE at `/sse` (`sse` is
+accepted as a deprecated alias of `http`):
 
 ```bash
-./build/bin/mcp --port 8545 --transport sse --sse.addr 127.0.0.1:8553
+./build/bin/mcp --port 8545 --transport http --sse.addr 127.0.0.1:8553
 ```
 
 ## Claude Desktop Configuration
@@ -158,6 +168,6 @@ In standalone mode, these return an informational message.
 | `--port`             | 0                       | JSON-RPC port shorthand                        |
 | `--datadir`          |                         | Erigon data directory (enables direct DB mode) |
 | `--private.api.addr` | `127.0.0.1:9090`        | gRPC private API (with --datadir)              |
-| `--transport`        | `stdio`                 | Transport: `stdio` or `sse`                    |
-| `--sse.addr`         | `127.0.0.1:8553`        | SSE listen address                             |
+| `--transport`        | `stdio`                 | Transport: `stdio` or `http` (`sse` = alias)   |
+| `--sse.addr`         | `127.0.0.1:8553`        | HTTP listen address (transport=http)           |
 | `--log.dir`          |                         | Log directory (overrides datadir detection)    |

@@ -20,7 +20,6 @@
 package nodecfg_test
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -41,23 +40,23 @@ func TestDataDirCreation(t *testing.T) {
 	}
 	// Create a temporary data dir and check that it can be used by a node
 	dir := t.TempDir()
-	node, err := node2.New(context.Background(), &nodecfg.Config{Dirs: datadir.New(dir)}, log.New())
+	node, err := node2.New(t.Context(), &nodecfg.Config{Dirs: datadir.New(dir)}, log.New())
 	if err != nil {
 		t.Fatalf("failed to create stack with existing datadir: %v", err)
 	}
-	if err := node.Close(); err != nil {
+	if err = node.Close(); err != nil {
 		t.Fatalf("failed to close node: %v", err)
 	}
 	// Generate a long non-existing datadir path and check that it gets created by a node
 	dir = filepath.Join(dir, "a", "b", "c", "d", "e", "f")
-	node, err = node2.New(context.Background(), &nodecfg.Config{Dirs: datadir.New(dir)}, log.New())
+	node, err = node2.New(t.Context(), &nodecfg.Config{Dirs: datadir.New(dir)}, log.New())
 	if err != nil {
 		t.Fatalf("failed to create stack with creatable datadir: %v", err)
 	}
-	if err := node.Close(); err != nil {
+	if err = node.Close(); err != nil {
 		t.Fatalf("failed to close node: %v", err)
 	}
-	if _, err := os.Stat(dir); err != nil {
+	if _, err = os.Stat(dir); err != nil {
 		t.Fatalf("freshly created datadir not accessible: %v", err)
 	}
 	// Verify that an impossible datadir fails creation
@@ -65,13 +64,15 @@ func TestDataDirCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temporary file: %v", err)
 	}
-	defer dir2.RemoveFile(file.Name())
+	if err := dir2.RemoveFile(file.Name()); err != nil {
+		t.Fatalf("failed to remove temporary file: %v", err)
+	}
 }
 
 // Tests that IPC paths are correctly resolved to valid endpoints of different
 // platforms.
 func TestIPCPathResolution(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		DataDir  string
 		IPCPath  string
 		Windows  bool

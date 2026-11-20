@@ -4,6 +4,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -54,20 +56,21 @@ func NewLogTracer(traceTransfers bool, blockNumber uint64, blockHash, txHash com
 
 func (t *LogTracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnEnter: t.onEnter,
-		OnExit:  t.onExit,
-		OnLog:   t.onLog,
+		OnEnterV2: t.onEnterV2,
+		OnExitV2:  t.onExitV2,
+		OnLog:     t.onLog,
 	}
 }
 
-func (t *LogTracer) onEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *LogTracer) onEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	t.logs = append(t.logs, make([]*types.Log, 0))
-	if vm.OpCode(typ) != vm.DELEGATECALL && !value.IsZero() {
+	op := vm.OpCode(typ)
+	if op != vm.DELEGATECALL && op != vm.CALLCODE && !value.IsZero() {
 		t.captureTransfer(from, to, &value)
 	}
 }
 
-func (t *LogTracer) onExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *LogTracer) onExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if depth == 0 {
 		t.onEnd(reverted)
 		return
@@ -81,14 +84,17 @@ func (t *LogTracer) onExit(depth int, output []byte, gasUsed uint64, err error, 
 	t.logs = t.logs[:size-1]
 	size--
 
-	// Clear logs if call failed.
-	if !reverted {
+	// Clear logs if call failed. They are the latest logs, so their indices are free again.
+	if reverted {
+		t.count -= len(call)
+	} else {
 		t.logs[size-1] = append(t.logs[size-1], call...)
 	}
 }
 
 func (t *LogTracer) onEnd(reverted bool) {
 	if reverted {
+		t.count -= len(t.logs[0])
 		t.logs[0] = nil
 	}
 }
@@ -102,11 +108,11 @@ func (t *LogTracer) captureLog(address common.Address, topics []common.Hash, dat
 		Address:     address,
 		Topics:      topics,
 		Data:        data,
-		BlockNumber: t.blockNumber,
+		BlockNumber: hexutil.Uint64(t.blockNumber),
 		BlockHash:   t.blockHash,
 		TxHash:      t.txHash,
-		TxIndex:     t.txIdx,
-		Index:       uint(t.count),
+		TxIndex:     hexutil.Uint(t.txIdx),
+		Index:       hexutil.Uint(t.count),
 	})
 	t.count++
 }
@@ -122,7 +128,8 @@ func (t *LogTracer) captureTransfer(from, to accounts.Address, value *uint256.In
 		common.BytesToHash(fromValue[:]),
 		common.BytesToHash(toValue[:]),
 	}
-	t.captureLog(transferAddress, topics, common.BigToHash(value.ToBig()).Bytes())
+	valueHash := common.BigToHash(value.ToBig())
+	t.captureLog(transferAddress, topics, valueHash[:])
 }
 
 // Reset prepares the LogTracer for the next transaction.

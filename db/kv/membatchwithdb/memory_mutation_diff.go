@@ -51,23 +51,28 @@ func (m *MemoryDiff) Flush(tx kv.RwTx) error {
 	}
 	// Iterate over each bucket and apply changes accordingly.
 	for bucketInfo, bucketDiff := range m.diff {
-		if bucketInfo.dupsort {
-			dbCursor, err := tx.RwCursorDupSort(bucketInfo.name)
-			if err != nil {
-				return err
-			}
-			defer dbCursor.Close()
-			for _, entry := range bucketDiff {
-				if err := dbCursor.Put(entry.k, entry.v); err != nil {
+		if err := func() error {
+			if bucketInfo.dupsort {
+				dbCursor, err := tx.RwCursorDupSort(bucketInfo.name)
+				if err != nil {
 					return err
 				}
-			}
-		} else {
-			for _, entry := range bucketDiff {
-				if err := tx.Put(bucketInfo.name, entry.k, entry.v); err != nil {
-					return err
+				defer dbCursor.Close()
+				for _, entry := range bucketDiff {
+					if err := dbCursor.Put(entry.k, entry.v); err != nil {
+						return err
+					}
+				}
+			} else {
+				for _, entry := range bucketDiff {
+					if err := tx.Put(bucketInfo.name, entry.k, entry.v); err != nil {
+						return err
+					}
 				}
 			}
+			return nil
+		}(); err != nil {
+			return err
 		}
 	}
 	return nil

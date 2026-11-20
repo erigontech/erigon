@@ -18,10 +18,11 @@ package rlp
 
 import (
 	"fmt"
+	"math/rand"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/hexutil"
 )
@@ -56,24 +57,6 @@ var parseU32Tests = []struct {
 	{payload: hexutil.MustDecodeHex("85FF6738FF7C"), expectErr: fmt.Errorf("%w: uint32 must not be more than 4 bytes long, got 5", ErrParse)},
 }
 
-var parseU256Tests = []struct {
-	expectErr error
-	expectRes *uint256.Int
-	payload   []byte
-	expectPos int
-}{
-	{payload: hexutil.MustDecodeHex("8BFFFFFFFFFFFFFFFFFF7C"), expectErr: fmt.Errorf("%w: unexpected end of payload", ErrParse)},
-	{payload: hexutil.MustDecodeHex("8AFFFFFFFFFFFFFFFFFF7C"), expectPos: 11, expectRes: new(uint256.Int).SetBytes(hexutil.MustDecodeHex("FFFFFFFFFFFFFFFFFF7C"))},
-	{payload: hexutil.MustDecodeHex("85CE05050505"), expectPos: 6, expectRes: new(uint256.Int).SetUint64(0xCE05050505)},
-	{payload: hexutil.MustDecodeHex("820400"), expectPos: 3, expectRes: new(uint256.Int).SetUint64(1024)},
-	{payload: hexutil.MustDecodeHex("07"), expectPos: 1, expectRes: new(uint256.Int).SetUint64(7)},
-	{payload: hexutil.MustDecodeHex("8107"), expectErr: fmt.Errorf("%w: non-canonical size information", ErrParse)},
-	{payload: hexutil.MustDecodeHex("B8020004"), expectErr: fmt.Errorf("%w: non-canonical size information", ErrParse)},
-	{payload: hexutil.MustDecodeHex("C0"), expectErr: fmt.Errorf("%w: must be a string, instead of a list", ErrParse)},
-	{payload: hexutil.MustDecodeHex("00"), expectErr: fmt.Errorf("%w: integer encoding for RLP must not have leading zeros: 00", ErrParse)},
-	{payload: hexutil.MustDecodeHex("A101000000000000000000000000000000000000008B000000000000000000000000"), expectErr: fmt.Errorf("%w: uint256 must not be more than 32 bytes long, got 33", ErrParse)},
-}
-
 func TestPrimitives(t *testing.T) {
 	for i, tt := range parseU64Tests {
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
@@ -93,16 +76,94 @@ func TestPrimitives(t *testing.T) {
 			assert.Equal(tt.expectRes, res)
 		})
 	}
-	for i, tt := range parseU256Tests {
-		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
-			assert := assert.New(t)
-			res := new(uint256.Int)
-			pos, err := ParseU256(tt.payload, 0, res)
-			assert.Equal(tt.expectErr, err)
-			assert.Equal(tt.expectPos, pos)
-			if err == nil {
-				assert.Equal(tt.expectRes, res)
-			}
+}
+
+func TestCountItems(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		val  any
+		want int
+	}{
+		{"empty", []uint{}, 0},
+		{"single byte items", []uint{1, 2, 3}, 3},
+		{"short strings", []string{"aa", "bb"}, 2},
+		{"long string", []string{string(make([]byte, 200))}, 1},
+		{"nested lists", [][]uint{{1}, {2, 3}, {}}, 3},
+		{"mixed widths", []string{"", "a", string(make([]byte, 60))}, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			enc, err := EncodeToBytes(tc.val)
+			require.NoError(t, err)
+			s := NewBytesStream(enc)
+			defer PutStream(s)
+			size, err := s.List()
+			require.NoError(t, err)
+			raw := s.Peek()
+			require.GreaterOrEqual(t, uint64(len(raw)), size)
+			assert.Equal(t, tc.want, CountItems(raw[:size]))
 		})
+	}
+}
+
+// CountItems sizes allocations from attacker-controlled bytes, so it must never
+// report more items than the input can hold, and never panic.
+func TestCountItemsBounded(t *testing.T) {
+	t.Parallel()
+	check := func(raw []byte) {
+		t.Helper()
+		got := CountItems(raw)
+		assert.GreaterOrEqual(t, got, 0)
+		assert.LessOrEqual(t, got, len(raw), "%d bytes reported %d items", len(raw), got)
+	}
+	corrupt := []byte{0x00, 0x7f, 0x80, 0x81, 0xb7, 0xb8, 0xbf, 0xc0, 0xc1, 0xf7, 0xf8, 0xff}
+	for _, n := range []int{1, 2, 7, 33, 260} {
+		for _, b := range corrupt {
+			raw := make([]byte, n)
+			for i := range raw {
+				raw[i] = b
+			}
+			check(raw)
+		}
+	}
+	rnd := rand.New(rand.NewSource(1))
+	for range 2000 {
+		raw := make([]byte, rnd.Intn(64))
+		rnd.Read(raw)
+		check(raw)
+	}
+}
+
+// The span scan skips the canonicality Prefix enforces, so pin that the two
+// still agree on every well-formed payload.
+func TestCountItemsMatchesPrefixWalk(t *testing.T) {
+	t.Parallel()
+	viaPrefix := func(payload []byte) int {
+		n := 0
+		for pos := 0; pos < len(payload); n++ {
+			dataPos, dataLen, _, err := Prefix(payload, pos)
+			if err != nil {
+				return n
+			}
+			pos = dataPos + dataLen
+		}
+		return n
+	}
+	for _, val := range []any{
+		[]uint{},
+		[]uint{0, 1, 127, 128, 1 << 20, 1 << 60},
+		[]string{"", "a", string(make([]byte, 55)), string(make([]byte, 56)), string(make([]byte, 70000))},
+		[][]uint{{}, {1}, {2, 3, 4}},
+		[][]byte{nil, {0x7f}, {0x80}, make([]byte, 300)},
+	} {
+		enc, err := EncodeToBytes(val)
+		require.NoError(t, err)
+		s := NewBytesStream(enc)
+		size, err := s.List()
+		require.NoError(t, err)
+		payload := s.Peek()[:size]
+		assert.Equal(t, viaPrefix(payload), CountItems(payload), "%T", val)
+		PutStream(s)
 	}
 }

@@ -24,16 +24,18 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 )
 
-func ApplyBeaconRootEip4788(parentBeaconBlockRoot *common.Hash, syscall rules.SystemCall, tracer *tracing.Hooks) {
-	if tracer != nil && tracer.OnSystemCallStart != nil {
-		tracer.OnSystemCallStart()
-	}
-
+func ApplyBeaconRootEip4788(
+	parentBeaconBlockRoot *common.Hash,
+	syscall rules.SystemCall,
+	tracer *tracing.Hooks,
+	vmctx *tracing.VMContext,
+) {
+	tracer.EmitSystemCallStart(vmctx)
 	if tracer != nil && tracer.OnSystemCallEnd != nil {
 		defer tracer.OnSystemCallEnd()
 	}
 
-	_, err := syscall(params.BeaconRootsAddress, parentBeaconBlockRoot.Bytes())
+	_, err := syscall(params.BeaconRootsAddress, parentBeaconBlockRoot[:])
 	if err != nil {
 		log.Warn("Failed to call beacon roots contract", "err", err)
 	}

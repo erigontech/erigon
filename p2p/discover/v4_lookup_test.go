@@ -89,11 +89,9 @@ func TestUDPv4_LookupIterator(t *testing.T) {
 		bootnodes[i] = lookupTestnet.node(256, i)
 	}
 	fillTable(test.table, bootnodes, true)
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		serveTestnet(test, lookupTestnet)
-		wg.Done()
-	}()
+	})
 
 	// Create the iterator and collect the nodes it yields.
 	iter := test.udp.RandomNodes()
@@ -133,11 +131,9 @@ func TestUDPv4_LookupIteratorClose(t *testing.T) {
 	}
 	fillTable(test.table, bootnodes, true)
 
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		serveTestnet(test, lookupTestnet)
-		wg.Done()
-	}()
+	})
 
 	it := test.udp.RandomNodes()
 	if ok := it.Next(); !ok || it.Node() == nil {
@@ -162,21 +158,19 @@ func TestUDPv4_LookupIteratorClose(t *testing.T) {
 }
 
 func serveTestnet(test *udpTest, testnet *preminedTestnet) {
+	// Every reply may come back as errUnsolicitedReply: the reply matcher has a
+	// hard respTimeout deadline and this goroutine can be descheduled past it.
+	// Dropping a reply only costs the caller one lookup round.
 	for done := false; !done; {
 		done = test.waitPacketOut(func(p v4wire.Packet, to netip.AddrPort, hash []byte) {
 			n, key := testnet.nodeByAddr(to)
 			switch p.(type) {
 			case *v4wire.Ping:
-				// Tolerate errUnsolicitedReply for Pong: under CI load, the
-				// reply matcher's 500ms timeout can fire before serveTestnet
-				// gets scheduled to send the Pong back. A late Pong is
-				// harmless for the lookup test — the node will simply be
-				// re-pinged on the next round.
 				test.packetInFromTolerate(key, to, &v4wire.Pong{Expiration: futureExp, ReplyTok: hash}, errUnsolicitedReply)
 			case *v4wire.Findnode:
 				dist := enode.LogDist(n.ID(), testnet.target.ID())
 				nodes := testnet.nodesAtDistance(dist - 1)
-				test.packetInFrom(nil, key, to, &v4wire.Neighbors{Expiration: futureExp, Nodes: nodes})
+				test.packetInFromTolerate(key, to, &v4wire.Neighbors{Expiration: futureExp, Nodes: nodes}, errUnsolicitedReply)
 			}
 		})
 	}
@@ -291,7 +285,9 @@ func (tn *preminedTestnet) node(dist, index int) *enode.Node {
 	rec := new(enr.Record)
 	rec.Set(enr.IP{127, byte(dist >> 8), byte(dist), byte(index)})
 	rec.Set(enr.UDP(5000))
-	enode.SignV4(rec, key)
+	if err := enode.SignV4(rec, key); err != nil {
+		panic(err)
+	}
 	n, _ := enode.New(enode.ValidSchemes, rec)
 	return n
 }

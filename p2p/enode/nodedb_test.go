@@ -30,129 +30,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c2h5oh/datasize"
+	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
+	"github.com/erigontech/erigon/p2p/enr"
 )
-
-// BenchmarkNodeDBGeometry for `dbSyncBytesThreshold` constant
-//   - must use `-cpu=` because even 1-core overloading disk write IO. Multi-core bench is unreliable here (degradating with time).
-//   - same about `-benchtime=30s` and -benchtime can't be smaller than SyncPeriod
-//   - target is: to improve throughput without big ms_worst
-//   - params to choose: pageSize, syncPeriod, syncBytes
-//
-// go test -bench=BenchmarkNodeDBGeometry/20kb      -run=BenchmarkNodeDBGeometry -cpu=1 -count=1 -benchtime=10s ./p2p/enode > old.txt
-// go test -bench=BenchmarkNodeDBGeometry/10mb_1sec -run=BenchmarkNodeDBGeometry -cpu=1 -count=1 -benchtime=10s ./p2p/enode > new.txt
-// benchstat old.txt new.txt
-func BenchmarkNodeDBGeometry(b *testing.B) {
-	keys, vals := make([][]byte, 100_000), make([][]byte, 100_000)
-	for i := range keys {
-		keys[i] = fmt.Appendf(nil, "key %d", i)
-		vals[i] = fmt.Appendf(nil, "val %d", i)
-	}
-	cfg := mdbx.New(dbcfg.ChainDB, log.New()).
-		PageSize(4 * datasize.KB).
-		MapSize(8 * datasize.GB).
-		GrowthStep(2 * datasize.MB).
-		Flags(func(f uint) uint {
-			return mdbxgo.SafeNoSync | mdbxgo.WriteMap
-		}).
-		SyncBytes(20 * datasize.MB).
-		SyncPeriod(2 * time.Second).
-		DirtySpace(uint64(32 * datasize.MB))
-
-	doBench := func(b *testing.B, db kv.RwDB) {
-		//b.ReportAllocs()
-		time.Sleep(200 * time.Millisecond) // give for OS a bit time between bench runs - to reduce cumulative effect
-		b.ResetTimer()
-		var worst time.Duration
-		var i int
-		for b.Loop() {
-			i++
-			tx, _ := db.BeginRw(context.Background()) //nolint:gocritic
-
-			v := vals[i%len(vals)]
-			v[0]++ // modify value a bit on every update
-			_ = tx.Put(kv.Headers, keys[i%len(keys)], v)
-			t := time.Now()
-			_ = tx.Commit()
-			worst = max(worst, time.Since(t))
-		}
-		b.ReportMetric(float64(worst.Milliseconds()), "ms_worst")
-		db.Close()
-		dir.RemoveFile(db.Path())
-	}
-
-	b.Run("20kb", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.KB).SyncPeriod(1 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-	b.Run("200kb", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(200 * datasize.KB).SyncPeriod(1 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-	b.Run("1mb 1sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(1 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-	b.Run("1mb 2sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(1 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-	b.Run("5mb 1sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(5 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-	b.Run("5mb 2sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(5 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-
-	b.Run("10mb 1sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-
-	b.Run("10mb 2sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-	b.Run("10mb 5sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).SyncPeriod(5 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-
-	b.Run("20mb 1sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-
-	b.Run("20mb 2sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-	b.Run("20mb 5sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).SyncPeriod(5 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-}
 
 var keytestID = HexID("51232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439")
 
@@ -222,13 +104,13 @@ func TestDBInt64(t *testing.T) {
 	defer db.Close()
 
 	tests := nodeDBInt64Tests
-	for i := 0; i < len(tests); i++ {
+	for i := range tests {
 		// Insert the next value
 		if err := db.storeInt64(tests[i].key, tests[i].value); err != nil {
 			t.Errorf("test %d: failed to store value: %v", i, err)
 		}
 		// Check all existing and non existing values
-		for j := 0; j < len(tests); j++ {
+		for j := range tests {
 			num := db.fetchInt64(tests[j].key)
 			switch {
 			case j <= i && num != tests[j].value:
@@ -382,9 +264,8 @@ func TestDBSeedQuery(t *testing.T) {
 	// times to avoid flakes.
 	const attempts = 15
 	var err error
-	tmpDir := t.TempDir()
-	for i := 0; i < attempts; i++ {
-		if err = testSeedQuery(tmpDir); err == nil {
+	for range attempts {
+		if err = testSeedQuery(); err == nil {
 			return
 		}
 	}
@@ -393,7 +274,7 @@ func TestDBSeedQuery(t *testing.T) {
 	}
 }
 
-func testSeedQuery(tmpDir string) error {
+func testSeedQuery() error {
 	db, err := OpenDB("")
 	if err != nil {
 		panic(err)
@@ -624,6 +505,111 @@ func TestDBExpireV5(t *testing.T) {
 	defer db.Close()
 
 	ip := netip.AddrFrom4([4]byte{127, 0, 0, 1})
-	db.UpdateFindFailsV5(ID{}, ip, 4)
+	if err := db.UpdateFindFailsV5(ID{}, ip, 4); err != nil {
+		t.Fatal(err)
+	}
 	db.expireNodes()
+}
+
+// This test checks that the pong time of a node whose first stored item is its
+// pong is not attributed to the node stored before it.
+func TestDBExpirationNextNodePong(t *testing.T) {
+	db, err := OpenDB("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now()
+	stale := SignNull(new(enr.Record), ID{1})
+	fresh := SignNull(new(enr.Record), ID{2})
+	staleIP := netip.AddrFrom4([4]byte{127, 0, 0, 1})
+	freshIP := netip.AddrFrom4([4]byte{127, 0, 0, 2})
+
+	if err := db.UpdateNode(stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateLastPongReceived(stale.ID(), staleIP, now.Add(-dbNodeExpiration-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateLastPongReceived(fresh.ID(), freshIP, now); err != nil {
+		t.Fatal(err)
+	}
+
+	db.expireNodes()
+
+	if db.Node(stale.ID()) != nil {
+		t.Error("stale node should be removed")
+	}
+	if pong := db.LastPongReceived(fresh.ID(), freshIP); !pong.Equal(now.Truncate(time.Second)) {
+		t.Errorf("fresh pong time should be kept, got %v", pong)
+	}
+}
+
+// An unbonded node only ever has a ping row, so without a pong it must still expire.
+func TestDBExpiresNodeWithOnlyAPingRow(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	ip := netip.AddrFrom4([4]byte{127, 0, 0, 1})
+	now := time.Now()
+	stale, fresh := ID{1}, ID{2}
+	require.NoError(t, db.UpdateLastPingReceived(stale, ip, now.Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(fresh, ip, now))
+
+	db.expireNodes()
+
+	require.Zero(t, db.LastPingReceived(stale, ip).Unix(), "the stale ping row is deleted")
+	require.Equal(t, now.Unix(), db.LastPingReceived(fresh, ip).Unix())
+}
+
+func TestDBExpiredPongDecidesOverFreshPing(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	id := ID{1}
+	ponged, pinged := netip.AddrFrom4([4]byte{127, 0, 0, 1}), netip.AddrFrom4([4]byte{127, 0, 0, 2})
+	require.NoError(t, db.UpdateLastPongReceived(id, ponged, time.Now().Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(id, pinged, time.Now()))
+
+	db.expireNodes()
+
+	require.Zero(t, db.LastPongReceived(id, ponged).Unix())
+	require.Zero(t, db.LastPingReceived(id, pinged).Unix(), "a pong row decides the expiry, not a newer ping")
+}
+
+func TestDBExpiresStalePingRowOfALiveNode(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	id, oldIP, newIP := ID{1}, netip.AddrFrom4([4]byte{127, 0, 0, 1}), netip.AddrFrom4([4]byte{127, 0, 0, 2})
+	now := time.Now()
+	require.NoError(t, db.UpdateLastPingReceived(id, oldIP, now.Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(id, newIP, now))
+
+	db.expireNodes()
+
+	require.Zero(t, db.LastPingReceived(id, oldIP).Unix(), "a source IP that stopped pinging must not stay")
+	require.Equal(t, now.Unix(), db.LastPingReceived(id, newIP).Unix())
+}
+
+func TestDBExpiresNodeRecordByItsPing(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	seeds := makeDBExpirationNodes()
+	stale, fresh := seeds[0].node, seeds[1].node
+	require.NoError(t, db.UpdateNode(stale))
+	require.NoError(t, db.UpdateNode(fresh))
+	require.NoError(t, db.UpdateLastPingReceived(stale.ID(), stale.IPAddr(), time.Now().Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(fresh.ID(), fresh.IPAddr(), time.Now()))
+
+	db.expireNodes()
+
+	require.Nil(t, db.Node(stale.ID()), "a node whose only proof is a stale ping must be deleted")
+	require.NotNil(t, db.Node(fresh.ID()))
 }

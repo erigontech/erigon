@@ -31,7 +31,8 @@ Create an upbeat daily status report for the repo as a GitHub issue.
 ## What to include
 
 - Recent repository activity (issues, PRs, discussions, releases, code changes)
-- Progress tracking, goal reminders and highlights
+- Recent repository test results
+- Progress tracking, discovered problems, goal reminders and highlights
 - Project status and recommendations
 - Actionable next steps for maintainers
 
@@ -44,5 +45,5 @@ Create an upbeat daily status report for the repo as a GitHub issue.
 ## Process
 
 1. Gather recent activity from the repository
-2. Study the repository, its issues and its pull requests
+2. Study the repository, its issues, its pull requests and its test results
 3. Add your findings and insights into the run summary section

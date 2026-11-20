@@ -20,6 +20,7 @@
 package rlp
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -128,26 +129,26 @@ type field struct {
 // structFields resolves the typeinfo of all public fields in a struct type.
 func structFields(typ reflect.Type) (fields []field, err error) {
 	// Convert fields to rlpstruct.Field.
-	var allStructFields []rlpstruct.Field
+	allStructFields := make([]rlpstruct.Field, typ.NumField())
 	for i := 0; i < typ.NumField(); i++ {
 		rf := typ.Field(i)
-		allStructFields = append(allStructFields, rlpstruct.Field{
+		allStructFields[i] = rlpstruct.Field{
 			Name:     rf.Name,
 			Index:    i,
 			Exported: rf.PkgPath == "",
 			Tag:      string(rf.Tag),
 			Type:     *rtypeToStructType(rf.Type, nil),
-		})
+		}
 	}
 
 	// Filter/validate fields.
 	structFields, structTags, err := rlpstruct.ProcessFields(allStructFields)
 	if err != nil {
-		if tagErr, ok := err.(rlpstruct.TagError); ok {
+		if tagErr, ok := errors.AsType[rlpstruct.TagError](err); ok {
 			tagErr.StructType = typ.String()
 			return nil, tagErr
 		}
-		if optErr, ok := err.(rlpstruct.OptionalFieldError); ok {
+		if optErr, ok := errors.AsType[rlpstruct.OptionalFieldError](err); ok {
 			optErr.StructType = typ.String()
 			return nil, optErr
 		}

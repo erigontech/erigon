@@ -43,7 +43,7 @@ const BlockSize = 32
 // XORBlocks xors the two blocks and returns the result.
 func XORBlocks(b1 Block, b2 Block) Block {
 	var b Block
-	for i := 0; i < BlockSize; i++ {
+	for i := range BlockSize {
 		b[i] = b1[i] ^ b2[i]
 	}
 	return b
@@ -116,7 +116,7 @@ func fp12Exp(base *blst.Fp12, exp *big.Int) *blst.Fp12 {
 func computeC3(blocks []Block, sigma Block) []Block {
 	numBlocks := len(blocks)
 	encryptedBlocks := make([]Block, numBlocks)
-	for i := 0; i < numBlocks; i++ {
+	for i := range numBlocks {
 		key := computeBlockKey(sigma, uint64(i))
 		encryptedBlock := XORBlocks(key, blocks[i])
 		encryptedBlocks[i] = encryptedBlock
@@ -173,7 +173,7 @@ func (m *EncryptedMessage) Sigma(epochSecretKey *EpochSecretKey) Block {
 func DecryptBlocks(encryptedBlocks []Block, sigma Block) []Block {
 	numBlocks := len(encryptedBlocks)
 	decryptedBlocks := make([]Block, numBlocks)
-	for i := 0; i < numBlocks; i++ {
+	for i := range numBlocks {
 		key := computeBlockKey(sigma, uint64(i))
 		decryptedBlock := XORBlocks(encryptedBlocks[i], key)
 		decryptedBlocks[i] = decryptedBlock
@@ -190,7 +190,7 @@ func PadMessage(m []byte) []Block {
 
 	numBlocks := len(m) / BlockSize
 	blocks := make([]Block, numBlocks)
-	for i := 0; i < numBlocks; i++ {
+	for i := range numBlocks {
 		copy(blocks[i][:], m[i*BlockSize:(i+1)*BlockSize])
 	}
 	return blocks

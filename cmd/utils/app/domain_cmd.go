@@ -2,13 +2,14 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
 	"slices"
 	"time"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/datadir"
@@ -17,7 +18,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
-func domainStat(cliCtx *cli.Context) error {
+func domainStat(ctx context.Context, cliCtx *cli.Command) error {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -27,7 +28,6 @@ func domainStat(cliCtx *cli.Context) error {
 	}
 
 	// Open chaindata
-	ctx := cliCtx.Context
 	dirs := datadir.Open(cliCtx.String(utils.DataDirFlag.Name))
 	db, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Open(ctx)
 	if err != nil {

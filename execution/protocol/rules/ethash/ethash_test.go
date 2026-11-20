@@ -20,6 +20,9 @@
 package ethash
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -35,11 +38,11 @@ func TestRemoteSealer(t *testing.T) {
 	defer ethash.Close()
 
 	api := &API{ethash}
-	if _, err := api.GetWork(); err != errNoMiningWork {
+	if _, err := api.GetWork(); !errors.Is(err, errNoMiningWork) {
 		t.Error("expect to return an error indicate there is no mining work")
 	}
 	header := &types.Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(100)}
-	block := types.NewBlockWithHeader(header)
+	block := types.NewBlockWithHeader(header, nil)
 	blockWithReceipts := &types.BlockWithReceipts{Block: block}
 	sealhash := ethash.SealHash(header)
 
@@ -61,7 +64,7 @@ func TestRemoteSealer(t *testing.T) {
 	}
 	// Push new block with same block number to replace the original one.
 	header = &types.Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(1000)}
-	block = types.NewBlockWithHeader(header)
+	block = types.NewBlockWithHeader(header, nil)
 	blockWithReceipts = &types.BlockWithReceipts{Block: block}
 	sealhash = ethash.SealHash(header)
 	err = ethash.Seal(nil, blockWithReceipts, results, nil)
@@ -87,7 +90,7 @@ func TestHashRate(t *testing.T) {
 	}
 
 	api := &API{ethash}
-	for i := 0; i < len(hashrate); i += 1 {
+	for i := range hashrate {
 		if res := api.SubmitHashRate(hashrate[i], ids[i]); !res {
 			t.Error("remote miner submit hashrate failed")
 		}
@@ -108,11 +111,41 @@ func TestClosedRemoteSealer(t *testing.T) {
 	_ = ethash.Close()
 
 	api := &API{ethash}
-	if _, err := api.GetWork(); err != errEthashStopped {
+	if _, err := api.GetWork(); !errors.Is(err, errEthashStopped) {
 		t.Error("expect to return an error to indicate ethash is stopped")
 	}
 
 	if res := api.SubmitHashRate(hexutil.Uint64(100), common.HexToHash("a")); res {
 		t.Error("expect to return false when submit hashrate to a stopped ethash")
+	}
+}
+
+func TestMemoryMapAndGenerateCleansTempFileOnRenameFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "target")
+
+	// Force rename failure by making the destination path a directory.
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("failed to create destination directory: %v", err)
+	}
+
+	_, _, _, err := memoryMapAndGenerate(path, 1024, false, func(buffer []uint32) {})
+	if err == nil {
+		t.Fatal("expected rename failure, got nil")
+	}
+	// Pin the failure to os.Rename so the test fails loudly if a future change
+	// shifts the failure to an earlier step (Create/Truncate/mmap) — the cleanup
+	// path under test is the post-rename one.
+	var linkErr *os.LinkError
+	if !errors.As(err, &linkErr) || linkErr.Op != "rename" {
+		t.Fatalf("expected *os.LinkError with Op=rename, got: %v", err)
+	}
+
+	temps, globErr := filepath.Glob(path + ".*")
+	if globErr != nil {
+		t.Fatalf("glob failed: %v", globErr)
+	}
+	if len(temps) != 0 {
+		t.Fatalf("temporary files were not cleaned up: %v", temps)
 	}
 }

@@ -16,7 +16,11 @@
 
 package rpc
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"maps"
+	"slices"
+)
 
 type AllowList map[string]struct{}
 
@@ -27,31 +31,17 @@ func (a *AllowList) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	realA := make(map[string]struct{})
-
+	*a = make(AllowList, len(keys))
 	for _, k := range keys {
-		realA[k] = struct{}{}
+		(*a)[k] = struct{}{}
 	}
-
-	*a = realA
 
 	return nil
 }
 
 // MarshalJSON returns *m as the JSON encoding of
 func (a *AllowList) MarshalJSON() ([]byte, error) {
-	var realA map[string]struct{} = *a
-	keys := make([]string, len(realA))
-	i := 0
-	for key := range realA {
-		keys[i] = key
-		i++
-	}
-	return json.Marshal(keys)
+	return json.Marshal(slices.Collect(maps.Keys(*a)))
 }
 
 type ForbiddenList map[string]struct{}
-
-func newForbiddenList() ForbiddenList {
-	return ForbiddenList{}
-}

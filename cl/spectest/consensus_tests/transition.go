@@ -19,6 +19,7 @@ package consensus_tests
 import (
 	"fmt"
 	"io/fs"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,11 +27,48 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/spectest/spectest"
 	"github.com/erigontech/erigon/cl/transition/machine"
 )
 
-type TransitionCore struct {
+type TransitionCore struct{}
+
+func readTransitionPostState(root fs.FS, version clparams.StateVersion) (*state.CachingBeaconState, bool, error) {
+	postState, err := spectest.ReadBeaconState(root, version, spectest.PostSsz)
+	if os.IsNotExist(err) {
+		return nil, true, nil
+	}
+	return postState, false, err
+}
+
+func transitionStateWithPrecomputedCheck(t *testing.T, impl machine.Interface, beaconState *state.CachingBeaconState, block *cltypes.SignedBeaconBlock) error {
+	t.Helper()
+	cfg := beaconState.BeaconConfig()
+	if cfg.RoundSlotToEpoch(block.Block.Slot) <= cfg.RoundSlotToEpoch(beaconState.Slot()) {
+		return machine.TransitionState(impl, beaconState, block)
+	}
+
+	precomputedState, err := beaconState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, impl.ProcessSlots(precomputedState, cfg.RoundSlotToEpoch(block.Block.Slot)))
+	_, err = precomputedState.HashSSZ()
+	require.NoError(t, err)
+	advancedErr := machine.TransitionStateFromPrecomputedEpochState(impl, precomputedState, block)
+	var advancedState []byte
+	if advancedErr == nil {
+		advancedState, err = precomputedState.EncodeSSZ(nil)
+		require.NoError(t, err)
+	}
+
+	transitionErr := machine.TransitionState(impl, beaconState, block)
+	require.Equalf(t, transitionErr != nil, advancedErr != nil, "normal transition error: %v; precomputed transition error: %v", transitionErr, advancedErr)
+	if transitionErr == nil {
+		normalState, err := beaconState.EncodeSSZ(nil)
+		require.NoError(t, err)
+		require.Equal(t, normalState, advancedState)
+	}
+	return transitionErr
 }
 
 func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
@@ -46,7 +84,7 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 	}
 	startState, err := spectest.ReadBeaconState(root, c.Version()-1, spectest.PreSsz)
 	require.NoError(t, err)
-	stopState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
+	stopState, expectedError, err := readTransitionPostState(root, c.Version())
 	require.NoError(t, err)
 	switch c.Version() {
 	case clparams.AltairVersion:
@@ -61,9 +99,12 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 		startState.BeaconConfig().ElectraForkEpoch = meta.ForkEpoch
 	case clparams.FuluVersion:
 		startState.BeaconConfig().FuluForkEpoch = meta.ForkEpoch
+	case clparams.GloasVersion:
+		startState.BeaconConfig().GloasForkEpoch = meta.ForkEpoch
 	}
 	startSlot := startState.Slot()
 	blockIndex := 0
+	var transitionErr error
 	for {
 		testSlot, err := spectest.ReadBlockSlot(root, blockIndex)
 		require.NoError(t, err)
@@ -80,9 +121,18 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 			break
 		}
 		blockIndex++
-		if err := machine.TransitionState(c.Machine, startState, block); err != nil {
-			return fmt.Errorf("cannot transition state: %s. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot)
+		transitionErr = transitionStateWithPrecomputedCheck(t, c.Machine, startState, block)
+		if transitionErr != nil {
+			if !expectedError {
+				return fmt.Errorf("cannot transition state: %w. slot=%d. start_slot=%d", transitionErr, block.Block.Slot, startSlot)
+			}
+			break
 		}
+	}
+	if expectedError {
+		require.Error(t, transitionErr)
+		require.EqualValues(t, meta.BlockCount, blockIndex, "only the final block may be invalid")
+		return nil
 	}
 	expectedRoot, err := stopState.HashSSZ()
 	require.NoError(t, err)

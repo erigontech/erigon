@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -35,15 +36,17 @@ type Forks struct {
 
 // Forks implements erigon_forks. Returns the genesis block hash and a sorted list of all forks block numbers
 func (api *ErigonImpl) Forks(ctx context.Context) (Forks, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return Forks{}, err
-	}
-	defer tx.Rollback()
+	chainConfig, genesis, ok := api.tryChainConfigWithGenesis()
+	if !ok {
+		tx, err := api.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return Forks{}, err
+		}
+		defer tx.Rollback()
 
-	chainConfig, genesis, err := api.chainConfigWithGenesis(ctx, tx)
-	if err != nil {
-		return Forks{}, err
+		if chainConfig, genesis, err = api.chainConfigWithGenesis(ctx, tx); err != nil {
+			return Forks{}, err
+		}
 	}
 	heightForks, timeForks := forkid.GatherForks(chainConfig, genesis.Time())
 
@@ -53,7 +56,7 @@ func (api *ErigonImpl) Forks(ctx context.Context) (Forks, error) {
 // Post the merge eth_blockNumber will return latest forkChoiceHead block number
 // erigon_blockNumber will return latest executed block number or any block number requested
 func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.BlockNumber) (hexutil.Uint64, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return 0, err
 	}
@@ -85,11 +88,16 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 		if err != nil {
 			return 0, err
 		}
-	default:
+	case rpc.LatestExecutedBlockNumber, rpc.PendingBlockNumber:
 		blockNum, err = rpchelper.GetLatestExecutedBlockNumber(tx)
 		if err != nil {
 			return 0, err
 		}
+	default:
+		if rpcBlockNum < 0 {
+			return 0, fmt.Errorf("invalid block number %d", rpcBlockNum)
+		}
+		blockNum = uint64(rpcBlockNum)
 	}
 
 	return hexutil.Uint64(blockNum), nil

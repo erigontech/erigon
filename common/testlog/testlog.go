@@ -28,32 +28,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// Handler returns a log handler which logs to the unit test log of t.
-func Handler(t *testing.T, level log.Lvl) log.Handler {
-	t.Helper()
-	return log.LvlFilterHandler(level, &handler{t, log.TerminalFormat()})
-}
-
-type handler struct {
-	t   *testing.T
-	fmt log.Format
-}
-
-func (h *handler) Log(r *log.Record) error {
-	h.t.Logf("%s", h.fmt.Format(r))
-	return nil
-}
-
-func (h *handler) Enabled(ctx context.Context, lvl log.Lvl) bool {
-	return true
-}
-
 // logger implements log.Logger such that all output goes to the unit test log via
 // t.Logf(). All methods in between logger.Trace, logger.Debug, etc. are marked as test
 // helpers, so the file and line number in unit test output correspond to the call site
 // which emitted the log message.
 type logger struct {
-	t   *testing.T
+	t   testing.TB
 	log log.Logger
 	mu  *sync.Mutex
 	h   *bufHandler
@@ -74,7 +54,7 @@ func (h *bufHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
 }
 
 // Logger returns a logger which logs to the unit test log of t.
-func Logger(t *testing.T, level log.Lvl) log.Logger {
+func Logger(t testing.TB, level log.Lvl) log.Logger {
 	t.Helper()
 
 	l := &logger{

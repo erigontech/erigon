@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/p2p/enode"
 )
@@ -48,6 +49,7 @@ type ServerConfig struct {
 }
 
 func createSentinel(
+	ctx context.Context,
 	cfg *sentinel.SentinelConfig,
 	blockReader freezeblocks.BeaconSnapshotReader,
 	blobStorage blob_storage.BlobStorage,
@@ -57,9 +59,11 @@ func createSentinel(
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
-	logger log.Logger) (*sentinel.Sentinel, *enode.LocalNode, error) {
+	initialStatus *cltypes.Status,
+	logger log.Logger,
+) (*sentinel.Sentinel, *enode.LocalNode, error) {
 	sent, err := sentinel.New(
-		context.Background(),
+		ctx,
 		cfg,
 		ethClock,
 		blockReader,
@@ -74,6 +78,12 @@ func createSentinel(
 	if err != nil {
 		return nil, nil, err
 	}
+	// Set initial status BEFORE starting the listener so that peers connecting
+	// immediately see a valid Status (fork digest, head, finalized checkpoint)
+	// instead of all-zeros which causes them to penalize/ban us.
+	if initialStatus != nil {
+		sent.SetStatus(initialStatus)
+	}
 	localNode, err := sent.Start()
 	if err != nil {
 		return nil, nil, err
@@ -83,6 +93,7 @@ func createSentinel(
 }
 
 func StartSentinelService(
+	ctx context.Context,
 	cfg *sentinel.SentinelConfig,
 	blockReader freezeblocks.BeaconSnapshotReader,
 	blobStorage blob_storage.BlobStorage,
@@ -91,11 +102,12 @@ func StartSentinelService(
 	ethClock eth_clock.EthereumClock,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
-	PeerDasStateReader peerdasstate.PeerDasStateReader,
+	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
-	logger log.Logger) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
-	ctx := context.Background()
+	logger log.Logger,
+) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
 	sent, localNode, err := createSentinel(
+		ctx,
 		cfg,
 		blockReader,
 		blobStorage,
@@ -103,18 +115,15 @@ func StartSentinelService(
 		forkChoiceReader,
 		ethClock,
 		dataColumnStorage,
-		PeerDasStateReader,
+		peerDasStateReader,
 		p2p,
+		srvCfg.InitialStatus,
 		logger,
 	)
 	if err != nil {
 		return nil, nil, err
 	}
-	// rcmgrObs.MustRegisterWith(prometheus.DefaultRegisterer)
 	logger.Info("[Sentinel] Sentinel started", "enr", sent.String())
-	if srvCfg.InitialStatus != nil {
-		sent.SetStatus(srvCfg.InitialStatus)
-	}
 	server := NewSentinelServer(ctx, sent, logger)
 	go StartServe(server, srvCfg, srvCfg.Creds)
 
@@ -126,16 +135,19 @@ func StartServe(
 	srvCfg *ServerConfig,
 	creds credentials.TransportCredentials,
 ) {
-	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr)
+	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr) //nolint:noctx
 	if err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
+		return
 	}
-	// Create a gRPC server
-	gRPCserver := grpc.NewServer(grpc.Creds(creds))
-	//go server.ListenToGossip()
-	// Regiser our server as a gRPC server
-	sentinelproto.RegisterSentinelServer(gRPCserver, server)
+	gRPCserver := newGRPCServer(server, creds)
 	if err := gRPCserver.Serve(lis); err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 	}
+}
+
+func newGRPCServer(server sentinelproto.SentinelServer, creds credentials.TransportCredentials) *grpc.Server {
+	gRPCserver := grpcutil.NewServerWithOpts(creds)
+	sentinelproto.RegisterSentinelServer(gRPCserver, server)
+	return gRPCserver
 }

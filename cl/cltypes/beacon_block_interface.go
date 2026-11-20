@@ -6,6 +6,20 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
+// ColumnSyncableSignedBlock is implemented by both SignedBeaconBlock and SignedBlindedBeaconBlock
+// for PeerDAS column synchronization operations.
+// [New in Gloas:EIP7732] This interface allows PeerDAS to work with both block types
+// without needing to call Blinded() which fails for GLOAS blocks.
+type ColumnSyncableSignedBlock interface {
+	Version() clparams.StateVersion
+	GetSlot() uint64
+	BlockHashSSZ() ([32]byte, error)
+	GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment]
+	// BlockSignature lets PeerDAS reject a column whose header signature does not match the block.
+	// It belongs on the interface so a wrapper cannot silently drop the check.
+	BlockSignature() common.Bytes96
+}
+
 type GenericBeaconBlock interface {
 	Version() clparams.StateVersion
 	GetSlot() uint64
@@ -29,4 +43,7 @@ type GenericBeaconBody interface {
 	GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment]
 	GetExecutionChanges() *solid.ListSSZ[*SignedBLSToExecutionChange]
 	GetExecutionRequests() *ExecutionRequests
+	GetSignedExecutionPayloadBid() *SignedExecutionPayloadBid
+	GetPayloadAttestations() *solid.ListSSZ[*PayloadAttestation]
+	GetParentExecutionRequests() *ExecutionRequests
 }

@@ -37,17 +37,17 @@ func (ref *RebasedEliasFano) Reset(baseNum uint64, raw []byte) { // no `return p
 	ref.ef.Reset(raw)
 }
 
-func (ref *RebasedEliasFano) Seek(v uint64) (uint64, bool) {
+func (ref *RebasedEliasFano) Seek(v uint64) (uint64, uint64, bool) {
 	if v < ref.baseNum {
 		v = ref.baseNum
 	}
 
-	n, found := ref.ef.Seek(v - ref.baseNum)
-	return ref.baseNum + n, found
+	n, pos, found := ref.ef.Seek(v - ref.baseNum)
+	return ref.baseNum + n, pos, found
 }
 
 func (ref *RebasedEliasFano) Has(v uint64) bool {
-	n, ok := ref.Seek(v)
+	n, _, ok := ref.Seek(v)
 	return ok && n == v
 }
 
@@ -92,7 +92,7 @@ func (it *RebasedIterWrapper) Seek(v uint64) {
 		it.it.Seek(0)
 		if it.reverse {
 			// force exhaustion as we are seeking before the first elem
-			it.it.Next()
+			_, _ = it.it.Next()
 		}
 		return
 	}
