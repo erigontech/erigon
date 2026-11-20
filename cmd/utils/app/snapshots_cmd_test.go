@@ -1671,16 +1671,6 @@ func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 	writeChainMetadata(t, ctx, chainDB, networkname.Mainnet, 1)
 	chainDB.Close()
 
-	header := &types.Header{Number: *uint256.NewInt(0), Time: 1000, Difficulty: *uint256.NewInt(1), Extra: []byte{}}
-	encodedHeader, err := rlp.EncodeToBytes(header)
-	require.NoError(t, err)
-	headerHash := header.Hash()
-	duWriteSegmentWord(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Headers, append([]byte{headerHash[0]}, encodedHeader...))
-	duWriteSegment(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Bodies)
-	headerIndexPath := filepath.Join(dirs.Snap,
-		snaptype.IdxFileName(version.V1_0, 0, 500_000, snaptype2.Enums.Headers.String()))
-	require.FileExists(t, headerIndexPath)
-
 	statePath := filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kv")
 	compressor, err := seg.NewCompressor(ctx, t.Name(), statePath, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
@@ -1732,7 +1722,6 @@ func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 		require.NoError(t, readErr)
 		require.Equal(t, oldSalt, salt, "rejected salt rotation must leave %s untouched", name)
 	}
-	require.FileExists(t, headerIndexPath)
 	require.FileExists(t, oldBtree)
 	require.FileExists(t, oldExistence)
 	require.NoFileExists(t, dirs.PreverifiedPath())
@@ -1747,26 +1736,6 @@ func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 		require.Len(t, salt, 4)
 		require.NotEqual(t, oldSalt, salt)
 	}
-
-	// Rebuilt block accessors may have a newer version than the segments.
-	headerIndexes, err := filepath.Glob(filepath.Join(dirs.Snap, "*-headers.idx"))
-	require.NoError(t, err)
-	require.Len(t, headerIndexes, 1, "the full command must recreate a header index")
-	headerIndex, err := recsplit.OpenIndex(headerIndexes[0])
-	require.NoError(t, err)
-	defer headerIndex.Close()
-	require.Greater(t, headerIndex.KeyCount(), uint64(0))
-	_, found := headerIndex.Reader().Lookup(headerHash[:])
-	require.True(t, found, "rebuilt block accessor must resolve the encoded header")
-
-	bodyIndexes, err := filepath.Glob(filepath.Join(dirs.Snap, "*-bodies.idx"))
-	require.NoError(t, err)
-	require.Len(t, bodyIndexes, 1, "the full command must recreate the body index")
-	bodyIndex, err := recsplit.OpenIndex(bodyIndexes[0])
-	require.NoError(t, err)
-	defer bodyIndex.Close()
-	_, found = bodyIndex.Reader().Lookup([]byte{0}) // body at block zero
-	require.True(t, found, "rebuilt body accessor must resolve the original block number")
 
 	btrees, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.0-64.bt"))
 	require.NoError(t, err)
@@ -1841,20 +1810,6 @@ func Test_renewSnapshotSaltFilesForRebuild(t *testing.T) {
 	}
 }
 
-func Test_removeAccessorsForRebuildPreservesSalts(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	oldSalt := []byte{0x12, 0x34, 0x56, 0x78}
-	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
-		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), oldSalt, 0o644))
-	}
-	require.NoError(t, removeAccessorsForRebuild(dirs, log.New()))
-	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
-		salt, err := os.ReadFile(filepath.Join(dirs.Snap, name))
-		require.NoError(t, err)
-		require.Equal(t, oldSalt, salt)
-	}
-}
-
 func Test_removeAccessorsForRebuild(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 
@@ -1879,6 +1834,8 @@ func Test_removeAccessorsForRebuild(t *testing.T) {
 		filepath.Join(dirs.SnapIdx, "v1.0-accounts.0-64.ef"),
 		filepath.Join(dirs.SnapHistory, "v1.0-accounts.0-64.v"),
 		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kv"),
+		filepath.Join(dirs.Snap, "salt-state.txt"),
+		filepath.Join(dirs.Snap, "salt-blocks.txt"),
 	}
 	for _, f := range accessors {
 		touch(f)

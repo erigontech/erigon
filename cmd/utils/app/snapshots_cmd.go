@@ -189,7 +189,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotRebuildFlag,
-				&cli.BoolFlag{Name: "new-salt", Usage: "Regenerate snapshot salts while rebuilding all accessors (requires --rebuild and a completed initial snapshot download)"},
+				&SnapshotNewSaltFlag,
 			}),
 		},
 		{
@@ -663,6 +663,10 @@ var (
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
 		Usage: "Force rebuild",
+	}
+	SnapshotNewSaltFlag = cli.BoolFlag{
+		Name:  "new-salt",
+		Usage: "Regenerate snapshot salts while rebuilding all accessors. Requires --rebuild and a completed initial snapshot download. `seg reset --keep-local-snapshots` restores the network salts: run `seg accessor --rebuild` again after it",
 	}
 	SnapshotFileFlag = cli.StringFlag{
 		Name:  "file",
@@ -3015,11 +3019,11 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	defer logger.Info("Done")
 
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
-	newSalt := cliCtx.Bool("new-salt")
-	if newSalt && !rebuild {
-		return errors.New("--new-salt requires --rebuild")
-	}
+	newSalt := cliCtx.Bool(SnapshotNewSaltFlag.Name)
 	if newSalt {
+		if !rebuild {
+			return errors.New("--new-salt requires --rebuild")
+		}
 		if err := requirePinnedSnapshotSet(dirs); err != nil {
 			return err
 		}
