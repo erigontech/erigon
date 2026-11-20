@@ -935,6 +935,9 @@ const restoreManifestTmpName = ".restore_manifest.tmp"
 // chaindata still holds Execution state in the old format.
 const execResetPendingName = ".exec_reset_pending"
 
+// legacyExecResetPendingName is the same marker as written by an interrupted v3 restore of older binaries.
+const legacyExecResetPendingName = ".restore_v3_reset_pending"
+
 func markExecResetPending(dirs datadir.Dirs) error {
 	backupRoot := filepath.Join(dirs.Snap, "backup")
 	if err := os.MkdirAll(backupRoot, dir.DirPerm); err != nil {
@@ -947,20 +950,25 @@ func markExecResetPending(dirs datadir.Dirs) error {
 }
 
 func CheckExecResetDone(dirs datadir.Dirs) error {
-	_, err := os.Stat(filepath.Join(dirs.Snap, "backup", execResetPendingName))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
+	for _, name := range []string{execResetPendingName, legacyExecResetPendingName} {
+		_, err := os.Stat(filepath.Join(dirs.Snap, "backup", name))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("check pending execution reset: %w", err)
+		}
+		return errors.New("commitment files changed format and the execution state was not reset: run `integration stage_exec --reset` first")
 	}
-	if err != nil {
-		return fmt.Errorf("check pending execution reset: %w", err)
-	}
-	return errors.New("commitment files changed format and the execution state was not reset: run `integration stage_exec --reset` first")
+	return nil
 }
 
 func CompleteExecReset(dirs datadir.Dirs, logger log.Logger) error {
 	backupRoot := filepath.Join(dirs.Snap, "backup")
-	if err := dir.RemoveFile(filepath.Join(backupRoot, execResetPendingName)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("clear pending execution reset: %w", err)
+	for _, name := range []string{execResetPendingName, legacyExecResetPendingName} {
+		if err := dir.RemoveFile(filepath.Join(backupRoot, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("clear pending execution reset: %w", err)
+		}
 	}
 	cleanupParentIfEmpty(backupRoot, logger)
 	return nil

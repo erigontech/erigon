@@ -1202,6 +1202,9 @@ func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.Tempo
 }
 
 func checkCommitmentTrieMatchesFiles() error {
+	if err := dbstate.CheckExecResetDone(datadir.New(datadirCli)); err != nil {
+		return err
+	}
 	if statecfg.ExperimentalCommitmentV3 && !statecfg.Schema.CommitmentDomain.CommitmentV3Records {
 		return errors.New("commitment domain files are legacy and ERIGON_COMMITMENT_V3=true; run `integration commitment convert --v3` without it first")
 	}

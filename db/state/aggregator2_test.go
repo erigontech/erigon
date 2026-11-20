@@ -195,3 +195,15 @@ func TestOpenRefusesPendingExecReset(t *testing.T) {
 	agg.Close()
 	require.NoDirExists(t, filepath.Join(dirs.Snap, "backup"))
 }
+
+func TestCheckExecResetDoneRecognizesLegacyMarker(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	backupRoot := filepath.Join(dirs.Snap, "backup")
+	require.NoError(t, os.MkdirAll(backupRoot, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(backupRoot, ".restore_v3_reset_pending"), nil, 0o644))
+
+	require.ErrorContains(t, CheckExecResetDone(dirs), "stage_exec --reset")
+	require.NoError(t, CompleteExecReset(dirs, log.New()))
+	require.NoError(t, CheckExecResetDone(dirs))
+	require.NoDirExists(t, backupRoot)
+}

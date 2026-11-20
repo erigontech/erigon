@@ -136,6 +136,7 @@ func TestNewTemporalDBRejectsV3FilesWhenV3IsDisabled(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	db, dirs := dbWithV3State(t)
+	db.Close()
 	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment.*"))
 	require.NoError(t, err)
 	for _, f := range files {
@@ -143,23 +144,26 @@ func TestNewTemporalDBRejectsV3FilesWhenV3IsDisabled(t *testing.T) {
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
 
-	requireNewTemporalDBError(t, db, dirs, "requires commitment v3")
+	requireNewTemporalDBError(t, dirs, "requires commitment v3")
 }
 
 func TestNewTemporalDBRejectsMixedCommitmentDomainFiles(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	db, dirs := dbWithV3State(t)
+	db.Close()
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
 
-	requireNewTemporalDBError(t, db, dirs, "mixed major versions")
+	requireNewTemporalDBError(t, dirs, "mixed major versions")
 }
 
-func requireNewTemporalDBError(t *testing.T, db kv.RwDB, dirs datadir.Dirs, wantErr string) {
+func requireNewTemporalDBError(t *testing.T, dirs datadir.Dirs, wantErr string) {
 	t.Helper()
 	previousDatadir := datadirCli
 	datadirCli = dirs.DataDir
 	t.Cleanup(func() { datadirCli = previousDatadir })
+	db := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	defer db.Close()
 	_, err := newTemporalDB(t.Context(), db, log.New())
 	require.ErrorContains(t, err, wantErr)
 }
@@ -376,4 +380,15 @@ func TestResetExecClearsPendingExecReset(t *testing.T) {
 	defer opened.Close()
 	require.NoError(t, resetExec(t.Context(), opened, dirs, log.New()))
 	require.NoError(t, state.CheckExecResetDone(dirs))
+}
+
+func TestCheckCommitmentTrieMatchesFilesRefusesPendingExecReset(t *testing.T) {
+	previousDatadir := datadirCli
+	t.Cleanup(func() { datadirCli = previousDatadir })
+	dirs := datadir.New(t.TempDir())
+	datadirCli = dirs.DataDir
+	require.NoError(t, os.MkdirAll(filepath.Join(dirs.Snap, "backup"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "backup", ".exec_reset_pending"), nil, 0o644))
+
+	require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "stage_exec --reset")
 }
