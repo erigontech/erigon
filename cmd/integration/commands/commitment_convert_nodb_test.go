@@ -349,6 +349,20 @@ func TestCommitmentConvertV3WithoutChaindataFoldsTheTail(t *testing.T) {
 	requireConvertRefusedBeforeWriting(t, dirs, "no block holds txNum 47", "--v3", "--no-history")
 }
 
+func TestCommitmentConvertV3RefusesTheTailFoldBesideCommitmentHistory(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	statecfg.EnableHistoricalCommitment()
+	db, dirs, _ := dbWithV3StateRoots(t, 64, 47)
+	writeErigonDBSettings(t, dirs, db.(state.HasAgg).Agg().(*state.Aggregator).StepSize())
+	db.Close()
+	statecfg.SetCommitmentV3(false)
+
+	requireConvertRefusedBeforeWriting(t, dirs, "not folded while commitment history is present", "--v3")
+	require.NoError(t, runCommitmentConvert(t, dirs, "--v3", "--no-domain"))
+	statecfg.SetCommitmentV3(false)
+	requireConvertRefusedBeforeWriting(t, dirs, "not folded while commitment history is present", "--v3", "--no-history")
+}
+
 func TestCommitmentConvertV3WithNothingToConvert(t *testing.T) {
 	dirs, _, _, _ := legacyDatadirWithoutChaindata(t)
 	require.NoError(t, app.DeleteStateSnapshots(app.DeleteStateSnapshotsArgs{Dirs: dirs, DomainNames: []string{"commitment"}}))
