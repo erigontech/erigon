@@ -794,14 +794,12 @@ func TestVersionedReaderServesBALMarkedAccountFromOrigin(t *testing.T) {
 	require.Zero(t, reader.reads, "the stored origin answers every tx")
 }
 
-// SeedEmptyRemovals derives zero balances from the access list and the pre-block state: a deleted
-// balance where it removes the account, and a zero balance where a later tx revives it without a
-// balance change. They are the tx's final writes, as the cells of the access list are. When a re-run
-// of the tx drops a balance write that an earlier run made there, the derived balance is back as Done
-// with its status, also when the earlier run wrote an equal value, which kept the cell Done and
-// rewrote its status. A change takes the re-run's incarnation, so that a reader of the earlier run's
-// cell is invalid.
-func TestDropWritePutsBackADerivedZeroBalance(t *testing.T) {
+// SeedEmptyRemovals derives removals from the access list and the pre-block state, each with a deleted
+// balance. It is the tx's final write, as the cells of the access list are. When a re-run of the tx
+// drops a balance write that an earlier run made there, the deleted balance is back as Done, also when
+// the earlier run wrote an equal value, which kept the cell Done and rewrote its status. A change takes
+// the re-run's incarnation, so that a reader of the earlier run's cell is invalid.
+func TestDropWritePutsBackADerivedRemoval(t *testing.T) {
 	t.Parallel()
 	prefunded := func(t *testing.T) (accounts.Address, *VersionMap) {
 		x, _, vm := seededRemovalOfPrefundedAccount(t)
@@ -830,36 +828,28 @@ func TestDropWritePutsBackADerivedZeroBalance(t *testing.T) {
 		require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 		return x, vm
 	}
-	balance := func(v uint64) func(*WriteSet, accounts.Address, Version) {
-		return func(ws *WriteSet, x accounts.Address, ver Version) {
-			ws.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: ver}, Val: *uint256.NewInt(v)})
-		}
-	}
 	for _, tc := range []struct {
-		name      string
-		seed      func(*testing.T) (accounts.Address, *VersionMap)
-		txIdx     int
-		overwrite func(*WriteSet, accounts.Address, Version)
-		status    valueStatus
+		name    string
+		seed    func(*testing.T) (accounts.Address, *VersionMap)
+		txIdx   int
+		balance uint64
 	}{
-		{"removal where the access list has a zero balance", prefunded, 0, balance(5), ValueDeleted},
-		{"removal over an equal balance", prefunded, 0, balance(0), ValueDeleted},
-		{"removal where the access list has no balance", uncoded, 1, balance(5), ValueDeleted},
-		{"revival", prefunded, 1, balance(5), ValueChanged},
-		{"revival over a removal", prefunded, 1, (*WriteSet).SetEmptyRemoval, ValueChanged},
-		{"removal at the tx of a revival", removedTwice, 1, balance(5), ValueDeleted},
+		{"the access list has a zero balance", prefunded, 0, 5},
+		{"over an equal balance", prefunded, 0, 0},
+		{"the access list has no balance", uncoded, 1, 5},
+		{"at the tx of a revival", removedTwice, 1, 5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			x, vm := tc.seed(t)
 			run := &WriteSet{}
-			tc.overwrite(run, x, Version{TxIndex: tc.txIdx, Incarnation: 1})
+			run.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: Version{TxIndex: tc.txIdx, Incarnation: 1}}, Val: *uint256.NewInt(tc.balance)})
 			vm.FlushVersionedWrites(run, false)
 
 			vm.DropWrite(x, BalancePath, accounts.NilKey, Version{TxIndex: tc.txIdx, Incarnation: 2})
 			c := requireDoneCell(t, vm.load(x).Balance, tc.txIdx, 2)
 			require.True(t, c.Value.IsZero())
-			require.Equal(t, tc.status, c.valStatus)
+			require.Equal(t, ValueDeleted, c.valStatus)
 		})
 	}
 }
@@ -885,9 +875,9 @@ func TestDropWritePutsBackTheStatusOfASeededBalance(t *testing.T) {
 	require.Equal(t, ValueChanged, c.valStatus)
 }
 
-// The derived balances are per account: a drop of another account's write at the same tx puts back
+// The derived removals are per account: a drop of another account's write at the same tx puts back
 // that account's value from the access list.
-func TestDropWritePutsBackTheSeedOfAnAccountNextToADerivedBalance(t *testing.T) {
+func TestDropWritePutsBackTheSeedOfAnAccountNextToADerivedRemoval(t *testing.T) {
 	t.Parallel()
 	x := accounts.InternAddress(common.HexToAddress("0x5a1e"))
 	y := accounts.InternAddress(common.HexToAddress("0x5a1f"))

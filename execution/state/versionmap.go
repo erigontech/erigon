@@ -269,10 +269,10 @@ type VersionMap struct {
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
-	// derivedBalances holds the zero balances that SeedEmptyRemovals derives from bal and the
-	// pre-block state, by account and tx, with their status: deleted where the account is removed,
-	// changed where it is revived. Seeding writes it before execution, and it is read-only after.
-	derivedBalances map[derivedBalanceKey]valueStatus
+	// derivedRemovals holds the account and tx of each removal that SeedEmptyRemovals derives from
+	// bal and the pre-block state, where it seeds a deleted balance. Seeding writes it before
+	// execution, and it is read-only after.
+	derivedRemovals map[derivedRemovalKey]struct{}
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -1947,9 +1947,9 @@ func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accoun
 }
 
 // DropWrite removes the cell of a write that an earlier run of the tx at v.TxIndex made and its run at v
-// does not make. A value the access list seeds there, or a zero balance that seeding derives from it,
-// is put back as Done instead: before the seal, a reader takes a seeded cell as the tx's final write
-// and validation trusts it.
+// does not make. A value the access list seeds there, or the deleted balance of a removal that seeding
+// derives from it, is put back as Done instead: before the seal, a reader takes a seeded cell as the
+// tx's final write and validation trusts it.
 func (vm *VersionMap) DropWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version) {
 	if vm.HasBAL && vm.resetToSeed(addr, path, key, v) {
 		return
@@ -1957,8 +1957,8 @@ func (vm *VersionMap) DropWrite(addr accounts.Address, path AccountPath, key acc
 	vm.Delete(addr, path, key, v.TxIndex, false)
 }
 
-// resetToSeed puts the value the access list seeds for addr's path at v.TxIndex, or the zero balance
-// that seeding derives there, back into the cell there, and reports whether there is one.
+// resetToSeed puts the value the access list seeds for addr's path at v.TxIndex, or the deleted balance
+// of a removal that seeding derives there, back into the cell there, and reports whether there is one.
 func (vm *VersionMap) resetToSeed(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version) bool {
 	ac := vm.balAccount(addr)
 	e := vm.load(addr)
@@ -1972,8 +1972,8 @@ func (vm *VersionMap) resetToSeed(addr accounts.Address, path AccountPath, key a
 	defer vm.endDeleteStamp(v.TxIndex, &stamped)
 	switch path {
 	case BalancePath:
-		if status, ok := vm.derivedBalances[derivedBalanceKey{addr, v.TxIndex}]; ok {
-			resetBalance(vm, e.Balance, v, uint256.Int{}, status, &stamped)
+		if _, ok := vm.derivedRemovals[derivedRemovalKey{addr, v.TxIndex}]; ok {
+			resetBalance(vm, e.Balance, v, uint256.Int{}, ValueDeleted, &stamped)
 			break
 		}
 		c, ok := balChangeAt(ac.BalanceChanges, func(c *types.BalanceChange) uint32 { return c.Index }, v.TxIndex)
@@ -2059,16 +2059,14 @@ func resetBalance(vm *VersionMap, cells *btree.Map[int, *WriteCell[uint256.Int]]
 	c.setState(inc, FlagDone)
 }
 
-// deriveBalance records a zero balance that seeding derives for addr at txIdx. A later record for the
-// same tx replaces an earlier one, as the later stamp's flush does.
-func (vm *VersionMap) deriveBalance(addr accounts.Address, txIdx int, status valueStatus) {
-	if vm.derivedBalances == nil {
-		vm.derivedBalances = map[derivedBalanceKey]valueStatus{}
+func (vm *VersionMap) deriveRemoval(addr accounts.Address, txIdx int) {
+	if vm.derivedRemovals == nil {
+		vm.derivedRemovals = map[derivedRemovalKey]struct{}{}
 	}
-	vm.derivedBalances[derivedBalanceKey{addr, txIdx}] = status
+	vm.derivedRemovals[derivedRemovalKey{addr, txIdx}] = struct{}{}
 }
 
-type derivedBalanceKey struct {
+type derivedRemovalKey struct {
 	addr  accounts.Address
 	txIdx int
 }

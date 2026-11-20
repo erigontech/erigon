@@ -358,7 +358,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 			rm := &WriteSet{}
 			rm.SetEmptyRemoval(addr, Version{TxIndex: int(idx) - 1})
 			stamps = append(stamps, rm)
-			vm.deriveBalance(addr, int(idx)-1, ValueDeleted)
+			vm.deriveRemoval(addr, int(idx)-1)
 			if idx == maxIdx {
 				continue
 			}
@@ -367,7 +367,6 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 				live := &WriteSet{}
 				live.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: int(next) - 1}}})
 				stamps = append(stamps, live)
-				vm.deriveBalance(addr, int(next)-1, ValueChanged)
 			}
 		}
 	}
