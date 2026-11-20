@@ -55,9 +55,10 @@ func (d *connDeduper) preferred(c network.Conn) bool {
 }
 
 // resolve closes the duplicates that the arrival of c makes redundant. A new preferred connection
-// replaces the others. A new non-preferred one is closed only when a preferred connection was
-// opened shortly before it, which is a simultaneous dial; otherwise the preferred connection may be
-// dead, and the new one is kept until it is gone.
+// replaces the others. A new non-preferred one is closed only by the peer that dialled it, and only
+// when a preferred connection was opened shortly before it: the dialler would not have dialled a
+// peer it was connected to, so that preferred connection came from a simultaneous dial. On the
+// other side the preferred connection may be half-open and the new one a reconnection, so it stays.
 func (d *connDeduper) resolve(c network.Conn) {
 	conns := d.net.ConnsToPeer(c.RemotePeer())
 	if d.preferred(c) {
@@ -66,6 +67,9 @@ func (d *connDeduper) resolve(c network.Conn) {
 				d.closeWhenIdle(other, c)
 			}
 		}
+		return
+	}
+	if c.Stat().Direction != network.DirOutbound {
 		return
 	}
 	opened := c.Stat().Opened

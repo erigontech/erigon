@@ -639,7 +639,8 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Directi
 	}
 
 	valid, err := validate()
-	if !valid && err != nil && s.LostDuplicateConnection(peerId) {
+	// A status read cut by a duplicate close can also fail to decode, which looks like a fork mismatch.
+	if !valid && s.LostDuplicateConnection(peerId) {
 		valid, err = validate()
 	}
 	if !valid && err != nil {

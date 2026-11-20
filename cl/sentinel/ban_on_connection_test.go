@@ -150,6 +150,25 @@ func TestHandshakeCutByADuplicateCloseIsRetried(t *testing.T) {
 	}
 }
 
+// A status response cut while its body is read fails to decode, which ValidatePeer reports like a
+// fork mismatch. Right after a duplicate close it is retried, so the peer keeps its connection.
+func TestStatusReadCutByADuplicateCloseIsRetried(t *testing.T) {
+	local, remote := connectedPair(t)
+	s := testSentinel(t, local)
+	s.p2p = stubP2P{host: local, lostDuplicate: true}
+	calls := 0
+	kept := s.handleNewConnection(remote.ID(), network.DirOutbound, nil, func() (bool, error) {
+		calls++
+		return calls > 1, nil
+	})
+	require.True(t, kept)
+	require.Equal(t, 2, calls)
+	require.Equal(t, network.Connected, local.Network().Connectedness(remote.ID()))
+
+	kept = s.handleNewConnection(remote.ID(), network.DirOutbound, nil, func() (bool, error) { return false, nil })
+	require.False(t, kept, "a fork mismatch on the retry still disconnects the peer")
+}
+
 func TestOnConnectionLogsActualTransport(t *testing.T) {
 	tests := []struct {
 		name       string

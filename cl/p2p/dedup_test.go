@@ -80,6 +80,16 @@ func newDedupFixture(after time.Duration) (*connDeduper, *fakeConn, *fakeConn) {
 	return d, preferred, other
 }
 
+// newDialerDedupFixture is newDedupFixture from the high ID peer: the preferred connection was
+// dialled by the remote, and the non-preferred one by this peer the given time later.
+func newDialerDedupFixture(after time.Duration) (*connDeduper, *fakeConn, *fakeConn) {
+	d, preferred, other := newDedupFixture(after)
+	d.local = highID
+	preferred.remote, preferred.dir = lowID, network.DirInbound
+	other.remote, other.dir = lowID, network.DirOutbound
+	return d, preferred, other
+}
+
 func TestDedupPrefersTheConnectionDialledByTheLowerID(t *testing.T) {
 	low := newConnDeduper(lowID, nil)
 	high := newConnDeduper(highID, nil)
@@ -108,23 +118,32 @@ func TestDedupNeverClosesAPreferredConnection(t *testing.T) {
 }
 
 func TestDedupClosesANewConnectionFromASimultaneousDial(t *testing.T) {
-	d, preferred, other := newDedupFixture(time.Second)
+	d, preferred, other := newDialerDedupFixture(time.Second)
 	d.resolve(other)
 	require.True(t, other.IsClosed())
+	require.False(t, preferred.IsClosed())
+}
+
+// Only the dialler knows that the preferred connection registered while it was dialling. On the
+// other side the preferred connection may be half-open and the new one the remote's reconnection.
+func TestDedupKeepsANewConnectionTheRemoteDialled(t *testing.T) {
+	d, preferred, other := newDedupFixture(time.Second)
+	d.resolve(other)
+	require.False(t, other.IsClosed())
 	require.False(t, preferred.IsClosed())
 }
 
 // A preferred connection older than a simultaneous dial may be dead: the remote dials again after it
 // lost the connection, so the new one must stay.
 func TestDedupKeepsANewConnectionWhenThePreferredOneIsOld(t *testing.T) {
-	d, preferred, other := newDedupFixture(time.Minute)
+	d, preferred, other := newDialerDedupFixture(time.Minute)
 	d.resolve(other)
 	require.False(t, other.IsClosed())
 	require.False(t, preferred.IsClosed())
 }
 
 func TestDedupKeepsTheOtherConnectionWhenThePreferredOneClosed(t *testing.T) {
-	d, preferred, other := newDedupFixture(time.Second)
+	d, preferred, other := newDialerDedupFixture(time.Second)
 	preferred.closed.Store(true)
 	d.resolve(other)
 	require.False(t, other.IsClosed())

@@ -22,6 +22,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -95,11 +96,14 @@ var _ io.ReadCloser = (*blockingResponseBody)(nil)
 type peerRequestBackendStub struct {
 	handler       http.Handler
 	active        int
-	lostDuplicate bool
+	lostDuplicate *atomic.Bool
 }
 
-func (p peerRequestBackendStub) GetPeersCount() (int, int, int)       { return p.active, 0, 0 }
-func (p peerRequestBackendStub) LostDuplicateConnection(peer.ID) bool { return p.lostDuplicate }
+func (p peerRequestBackendStub) GetPeersCount() (int, int, int) { return p.active, 0, 0 }
+func (p peerRequestBackendStub) LostDuplicateConnection(peer.ID) bool {
+	return p.lostDuplicate != nil && p.lostDuplicate.Load()
+}
+
 func (p peerRequestBackendStub) Config() *sentinel.SentinelConfig {
 	config := &sentinel.SentinelConfig{}
 	config.MaxPeerCount = 1
@@ -112,10 +116,31 @@ func (p peerRequestBackendStub) ReqRespHandler() http.Handler { return p.handler
 func TestFailedRequestKeepsAPeerThatJustLostADuplicateConnection(t *testing.T) {
 	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{active: 1}}
 	require.True(t, server.dropOnFailure(peer.ID("peer")))
-	server.peerRequestBackend = peerRequestBackendStub{active: 1, lostDuplicate: true}
+	lost := &atomic.Bool{}
+	lost.Store(true)
+	server.peerRequestBackend = peerRequestBackendStub{active: 1, lostDuplicate: lost}
 	require.False(t, server.dropOnFailure(peer.ID("peer")))
 	server.peerRequestBackend = peerRequestBackendStub{active: 0}
 	require.False(t, server.dropOnFailure(peer.ID("peer")), "below the peer limit failures never drop")
+}
+
+// The duplicate can close while the request runs, so the drop decision is taken when the request
+// fails. The server has no sentinel, so a drop would panic.
+func TestRequestCutByADuplicateCloseKeepsThePeer(t *testing.T) {
+	lost := &atomic.Bool{}
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		active:        1,
+		lostDuplicate: lost,
+		handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			lost.Store(true)
+			w.WriteHeader(http.StatusBadRequest)
+		}),
+	}}
+	require.NotPanics(t, func() {
+		_, err := server.requestPeer(t.Context(), peer.ID("peer"), &sentinelproto.RequestData{Data: []byte("request")})
+		var httpErr *HTTPError
+		require.ErrorAs(t, err, &httpErr)
+	})
 }
 
 func receivePeerRequestTestValue[T any](t *testing.T, values <-chan T) T {
