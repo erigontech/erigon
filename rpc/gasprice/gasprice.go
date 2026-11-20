@@ -50,7 +50,7 @@ type OracleBackend interface {
 	ChainConfig() *chain.Config
 	GetLatestBlockNumber() (uint64, error)
 
-	GetReceiptsGasUsed(ctx context.Context, block *types.Block, framesOnly bool) (types.Receipts, error)
+	GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 
 	// CheckBlockRewardsAvailable reports whether the transactions of a block and the
@@ -343,7 +343,7 @@ func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend Ora
 			continue
 		}
 		if !receiptsLoaded {
-			receipts, err = backend.GetReceiptsGasUsed(ctx, block, true)
+			receipts, err = backend.GetReceiptsGasUsed(ctx, block)
 			if err != nil {
 				return err
 			}

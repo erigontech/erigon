@@ -146,12 +146,10 @@ func TestFeeHistory(t *testing.T) {
 
 // feeChain serves a fixed chain from memory; Fork returns nil, so the oracle reads it sequentially.
 type feeChain struct {
-	blocks            []*types.Block
-	receipts          map[uint64]types.Receipts
-	receiptErr        error
-	pending           *types.Block
-	fetches           atomic.Int32
-	frameReceiptReads atomic.Int32
+	blocks   []*types.Block
+	receipts map[uint64]types.Receipts
+	pending  *types.Block
+	fetches  atomic.Int32
 }
 
 func (c *feeChain) block(number uint64) *types.Block {
@@ -183,12 +181,7 @@ func (c *feeChain) ChainConfig() *chain.Config { return chain.AllProtocolChanges
 
 func (c *feeChain) GetLatestBlockNumber() (uint64, error) { return uint64(len(c.blocks) - 1), nil }
 
-func (c *feeChain) GetReceiptsGasUsed(_ context.Context, b *types.Block, framesOnly bool) (types.Receipts, error) {
-	if framesOnly {
-		c.frameReceiptReads.Add(1)
-	} else if c.receiptErr != nil {
-		return nil, c.receiptErr
-	}
+func (c *feeChain) GetReceiptsGasUsed(_ context.Context, b *types.Block) (types.Receipts, error) {
 	return c.receipts[b.NumberU64()], nil
 }
 
@@ -255,6 +248,7 @@ func TestFeeHistoryValues(t *testing.T) {
 			},
 			receipts: map[uint64]types.Receipts{
 				1: {{GasUsed: 63_000}, {GasUsed: 21_000}, {GasUsed: 42_000}},
+				2: {},
 				3: {{GasUsed: 30_000_000}},
 			},
 		}

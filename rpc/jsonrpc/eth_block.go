@@ -269,7 +269,7 @@ func (api *BaseAPI) marshalBlock(ctx context.Context, tx kv.TemporalTx, block *t
 			}
 			var receipts types.Receipts
 			if useReceipts {
-				receipts, err = api.frameReceiptsGasUsed(ctx, tx, block)
+				receipts, err = api.canonicalReceiptsGasUsed(ctx, tx, block)
 				if err != nil {
 					return nil, err
 				}

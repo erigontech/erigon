@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sort"
 	"sync/atomic"
 
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 var (
@@ -529,9 +529,9 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 						fees.block, fees.err = localBackend.BlockByNumber(fetchCtx, rpc.BlockNumber(blockNumber))
 					}
 					if fees.block != nil && fees.err == nil {
-						fees.receipts, fees.err = localBackend.GetReceiptsGasUsed(fetchCtx, fees.block, false)
-						_, unexecuted := errors.AsType[*rpchelper.BlockNotExecutedError](fees.err)
-						if unexecuted || errors.Is(fees.err, state.ErrPruned) {
+						fees.receipts, fees.err = localBackend.GetReceiptsGasUsed(fetchCtx, fees.block)
+						missingGasUsed := fees.err == nil && (fees.receipts == nil || slices.Contains(fees.receipts, nil))
+						if missingGasUsed || errors.Is(fees.err, state.ErrPruned) {
 							blockResults[idx].missing = true
 							continue
 						}

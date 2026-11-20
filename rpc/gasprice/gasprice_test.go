@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
@@ -156,7 +155,6 @@ func TestSuggestTipCapFrameFeeBudget(t *testing.T) {
 			tip, err := oracle.SuggestTipCap(t.Context())
 			require.NoError(t, err)
 			require.Equal(t, uint256.NewInt(tc.wantTip), tip)
-			require.EqualValues(t, 1, backend.frameReceiptReads.Load())
 		})
 	}
 }
@@ -166,7 +164,7 @@ func TestOracleWithPrunedFrameReceipt(t *testing.T) {
 	frame := &types.FrameTransaction{SenderAddress: common.Address{1}}
 	header := &types.Header{Number: *uint256.NewInt(1), Coinbase: common.Address{2}, BaseFee: uint256.NewInt(10), GasLimit: 30_000_000}
 	block := types.NewBlockFromStorage(header.Hash(), header, types.Transactions{transfer, frame}, nil, nil, nil)
-	backend := &feeChain{blocks: []*types.Block{nil, block}, receipts: map[uint64]types.Receipts{1: {nil, nil}}, receiptErr: state.ErrPruned}
+	backend := &feeChain{blocks: []*types.Block{nil, block}, receipts: map[uint64]types.Receipts{1: {{GasUsed: 21_000}, nil}}}
 	config := gaspricecfg.Config{Blocks: 1, MaxHeaderHistory: 1, MaxBlockHistory: 1}
 	oracle := gasprice.NewOracle(backend, config, jsonrpc.NewGasPriceCache(), nil, log.New())
 	t.Run("suggestion uses the ordinary transaction", func(t *testing.T) {
@@ -355,8 +353,8 @@ func (m *mockOracleBackend) GetLatestBlockNumber() (uint64, error) {
 	return m.head.Number.Uint64(), nil
 }
 
-func (m *mockOracleBackend) GetReceiptsGasUsed(_ context.Context, _ *types.Block, _ bool) (types.Receipts, error) {
-	return nil, nil
+func (m *mockOracleBackend) GetReceiptsGasUsed(context.Context, *types.Block) (types.Receipts, error) {
+	return types.Receipts{}, nil
 }
 
 func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
