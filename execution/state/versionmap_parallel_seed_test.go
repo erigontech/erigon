@@ -28,7 +28,7 @@ import (
 )
 
 func TestNewVersionMapParallelSeedMatchesSerial(t *testing.T) {
-	const n = 4 * balChunkAccounts
+	n := 4 * balChunkAccounts
 	bal := make(types.BlockAccessList, n)
 	for i := range bal {
 		bal[i] = types.AccountChanges{
