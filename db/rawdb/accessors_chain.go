@@ -26,6 +26,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -905,15 +906,23 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 	}
 	defer c.Close()
 
-	// find first non-genesis block
 	firstK, _, err := c.Seek(hexutil.EncodeTs(1))
 	if err != nil {
 		return deleted, err
 	}
-	if firstK == nil { // nothing to delete
+	firstBody, err := firstKeyFrom(tx, kv.BlockBody, hexutil.EncodeTs(1))
+	if err != nil {
 		return deleted, err
 	}
-	blockFrom := binary.BigEndian.Uint64(firstK)
+	if firstK == nil && firstBody == nil { // nothing to delete
+		return deleted, nil
+	}
+	blockFrom := uint64(math.MaxUint64)
+	for _, k := range [][]byte{firstK, firstBody} { // a body may have lost its header
+		if k != nil {
+			blockFrom = min(blockFrom, binary.BigEndian.Uint64(k))
+		}
+	}
 	stopAtBlock := min(blockTo, blockFrom+uint64(blocksDeleteLimit))
 
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
@@ -933,9 +942,17 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 	return deleted, nil
 }
 
-// blockNumberKeyedTables hold one entry per (block number, hash) key and can be
-// cut as a block-number range.
 var blockNumberKeyedTables = []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers}
+
+func firstKeyFrom(tx kv.Tx, table string, from []byte) ([]byte, error) {
+	c, err := tx.Cursor(table)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	k, _, err := c.Seek(from)
+	return k, err
+}
 
 // deleteBlocksRange removes blockNumberKeyedTables rows in [blockFrom, to) (nil
 // to = end of table) together with each body's kv.EthTx span. EthTx is keyed by
@@ -954,9 +971,12 @@ func deleteBlocksRange(ctx context.Context, tx kv.RwTx, blockFrom uint64, to []b
 	defer c.Close()
 
 	txIDFrom, txIDTo := make([]byte, 8), make([]byte, 8)
-	for k, v, err := c.Seek(hexutil.EncodeTs(blockFrom)); k != nil; k, v, err = c.Next() {
+	for k, v, err := c.Seek(hexutil.EncodeTs(blockFrom)); ; k, v, err = c.Next() {
 		if err != nil {
 			return err
+		}
+		if k == nil {
+			break
 		}
 		n := binary.BigEndian.Uint64(k)
 		if to != nil && n >= binary.BigEndian.Uint64(to) { // [from, to)
