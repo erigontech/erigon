@@ -23,8 +23,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
@@ -88,7 +86,7 @@ type BranchPrefetcher struct {
 
 	foldHits, foldMisses atomic.Uint64
 
-	workers errgroup.Group
+	workers sync.WaitGroup
 	mu      sync.Mutex
 	txs     []kv.TemporalTx
 	backlog []PathTouch
@@ -99,7 +97,7 @@ type BranchPrefetcher struct {
 	queued, dropped int
 }
 
-func NewBranchPrefetcher(ctx context.Context, db kv.RoDB) *BranchPrefetcher {
+func NewBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB) *BranchPrefetcher {
 	p := &BranchPrefetcher{seed: maphash.MakeSeed()}
 	for i := range p.shards {
 		p.shards[i].records = make(map[string]prefetchedRecord)
@@ -109,16 +107,11 @@ func NewBranchPrefetcher(ctx context.Context, db kv.RoDB) *BranchPrefetcher {
 	}
 	ctx = kv.WithNonBlockingAcquire(ctx)
 	for range BranchPrefetchTxs {
-		tx, err := db.BeginRo(ctx) //nolint:gocritic
+		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
 			break
 		}
-		ttx, ok := tx.(kv.TemporalTx)
-		if !ok {
-			tx.Rollback()
-			break
-		}
-		p.txs = append(p.txs, ttx)
+		p.txs = append(p.txs, tx)
 	}
 	return p
 }
@@ -146,10 +139,7 @@ func (p *BranchPrefetcher) spawn() {
 		tx := p.txs[len(p.txs)-1]
 		p.txs = p.txs[:len(p.txs)-1]
 		p.running++
-		p.workers.Go(func() error {
-			p.work(tx)
-			return nil
-		})
+		p.workers.Go(func() { p.work(tx) })
 	}
 }
 
@@ -208,7 +198,7 @@ func (p *BranchPrefetcher) Close() {
 		p.txs = nil
 	}
 	p.mu.Unlock()
-	_ = p.workers.Wait()
+	p.workers.Wait()
 }
 
 func (p *BranchPrefetcher) Stats() BranchPrefetchStats {

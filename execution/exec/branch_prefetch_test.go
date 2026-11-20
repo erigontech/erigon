@@ -62,7 +62,7 @@ func (tx *fakeTx) rolledBack() int {
 }
 
 type fakeDB struct {
-	kv.RoDB
+	kv.TemporalRoDB
 	mu     sync.Mutex
 	begins int
 	limit  int
@@ -73,7 +73,7 @@ type fakeDB struct {
 
 func newFakeDB(limit int) *fakeDB { return &fakeDB{limit: limit} }
 
-func (d *fakeDB) BeginRo(context.Context) (kv.Tx, error) {
+func (d *fakeDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.begins++
@@ -138,7 +138,7 @@ func TestBranchPrefetcherOpensItsReadTxsOnce(t *testing.T) {
 }
 
 func TestBranchPrefetcherWithoutReadTxsQueuesNothing(t *testing.T) {
-	for name, db := range map[string]kv.RoDB{"nil db": nil, "failing BeginRo": newFakeDB(0)} {
+	for name, db := range map[string]kv.TemporalRoDB{"nil db": nil, "failing BeginTemporalRo": newFakeDB(0)} {
 		p := NewBranchPrefetcher(t.Context(), db)
 		p.Add(storageTouch(1))
 		require.Zero(t, p.Stats().Queued, name)

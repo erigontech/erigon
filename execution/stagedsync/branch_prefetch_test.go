@@ -227,14 +227,14 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 }
 
 type recordingRoDB struct {
-	kv.RoDB
+	kv.TemporalRoDB
 	mu     sync.Mutex
 	keys   []string
 	limit  int
 	opened int
 }
 
-func (db *recordingRoDB) BeginRo(context.Context) (kv.Tx, error) {
+func (db *recordingRoDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	if db.limit > 0 && db.opened >= db.limit {
