@@ -1265,10 +1265,8 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 	}
 
 	if ibs.versionMap != nil {
-		// The touch only depends on emptiness. For an existing account compute
-		// it from field reads without materializing/reconstructing the
-		// stateObject; only an absent account needs GetOrNewStateObject so
-		// createObject records the AddressPath write (OCC create detection).
+		// The touch only depends on emptiness. For an existing account compute it
+		// from field reads without reconstructing the stateObject.
 		account, _, _, err := ibs.versionedAccountBase(addr, true)
 		if err != nil {
 			return err
@@ -1283,12 +1281,11 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 			}
 			return nil
 		}
-		// No cell and no committed record: getStateObject would resolve the same absence again.
-		if ibs.noMaterialize && ibs.versionMap.load(addr) == nil {
-			ibs.createObject(addr, nil)
-			markTouched()
-			return nil
-		}
+		// Absent or destroyed-no-revival: (re)create as empty and touch, recording
+		// the AddressPath write for OCC create detection. A fresh account is empty.
+		ibs.createVersioned(addr, false)
+		markTouched()
+		return nil
 	}
 
 	stateObject, err := ibs.GetOrNewStateObject(addr)
@@ -1893,8 +1890,7 @@ func (ibs *IntraBlockState) setState(addr accounts.Address, key accounts.Storage
 
 // setStateVersioned records a storage write on the parallel (versionMap) path
 // without materializing a stateObject. It mirrors stateObject.SetState's set
-// decision and journalling. An already-materialized stateObject is kept in step
-// so the so.data-based commit paths (genesis FinalizeTx, RPC) stay correct.
+// decision and journalling.
 func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key accounts.StorageKey, value uint256.Int) error {
 	prev, source, _, commited, err := readStateForSet(ibs, addr, key)
 	if err != nil {
@@ -1914,9 +1910,6 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnStorageChange != nil {
 		ibs.tracingHooks.OnStorageChange(addr, key, prev, value)
 	}
-	if so, ok := ibs.stateObjects[addr]; ok {
-		so.setState(key, value)
-	}
 	ibs.recordWriteStorage(addr, key, value, prev)
 	return nil
 }
@@ -1924,11 +1917,18 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) error {
-	stateObject, err := ibs.GetOrNewStateObject(addr)
-	if err != nil {
-		return err
-	}
 	if ibs.versionMap != nil {
+		base, _, _, err := ibs.versionedAccountBase(addr, false)
+		if err != nil {
+			return err
+		}
+		if base == nil {
+			ibs.createVersioned(addr, false)
+		}
+		incarnation, err := ibs.GetIncarnation(addr)
+		if err != nil {
+			return err
+		}
 		// An incarnation cell wipes storage and code for later transactions: a slot
 		// or code without a newer cell reads as empty, so the code is written again.
 		code, err := ibs.getCode(addr)
@@ -1938,7 +1938,7 @@ func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) e
 		if code.Len() > 0 {
 			ibs.writeCode(addr, code, false)
 		}
-		ibs.recordWriteIncarnation(addr, stateObject.data.Incarnation)
+		ibs.recordWriteIncarnation(addr, incarnation)
 		// The incarnation cell does not hide a slot cell of an earlier transaction.
 		for _, key := range ibs.versionMap.StorageKeys(addr) {
 			prev, _, _ := ibs.versionMap.ReadStorage(addr, key, ibs.txIndex)
@@ -1950,6 +1950,10 @@ func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) e
 		}
 		return nil
 	}
+	stateObject, err := ibs.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
 	if stateObject != nil {
 		stateObject.SetStorage(storage)
 	}
@@ -1960,6 +1964,18 @@ func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) e
 func (ibs *IntraBlockState) SetIncarnation(addr accounts.Address, incarnation uint64) error {
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) SetIncarnation %x, %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, incarnation)
+	}
+
+	if ibs.versionMap != nil {
+		base, _, _, err := ibs.versionedAccountBase(addr, false)
+		if err != nil {
+			return err
+		}
+		if base == nil {
+			ibs.createVersioned(addr, false)
+		}
+		ibs.recordWriteIncarnation(addr, incarnation)
+		return nil
 	}
 
 	stateObject, err := ibs.GetOrNewStateObject(addr)
