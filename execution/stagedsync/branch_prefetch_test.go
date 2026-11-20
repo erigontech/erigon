@@ -250,3 +250,16 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 	require.Len(t, out, 1)
 	require.ErrorIs(t, (<-out).err, v3.ErrRecordFormat, "compute-ahead must read commitment records through the prefetch map")
 }
+
+func TestBranchPrefetcherKeepsTheFirstRecordOfAKey(t *testing.T) {
+	p := newPrefetchRecords()
+	key := []byte{0x42, 0x00}
+	first := p.put(key, []byte{1, 2, 3}, 4)
+	size := p.bytes.Load()
+	second := p.put(key, []byte{1, 2, 3}, 4)
+	require.Same(t, &first[0], &second[0], "a second read of a key must not replace the record a fold may already hold")
+	got, _, ok := p.get(key)
+	require.True(t, ok)
+	require.Same(t, &first[0], &got[0])
+	require.Equal(t, size, p.bytes.Load())
+}

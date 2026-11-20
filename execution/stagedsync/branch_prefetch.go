@@ -143,7 +143,8 @@ func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
 	s := p.shard(key)
 	s.mu.Lock()
 	if old, ok := s.records[string(key)]; ok {
-		p.bytes.Add(-old.size(string(key)))
+		s.mu.Unlock()
+		return old.data
 	}
 	r := prefetchedRecord{data: data, step: step, refs: refs}
 	s.records[string(key)] = r
