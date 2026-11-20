@@ -502,7 +502,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Set tx context for system init call (txIndex -1)
 			ibs.ResetVersionedIO()
 			ibs.SetTxContext(b.header.Number.Uint64(), -1)
-			err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, nil, logger, nil)
+			err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, logger, nil)
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
 			}

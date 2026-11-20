@@ -193,7 +193,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 		}
 		result.Err = rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
 		if result.Err == nil {
-			result.Err = ibs.FinalizeTx(rules, noop)
+			ibs.EndTransaction()
 		}
 	case txTask.IsBlockEnd():
 		if txTask.BlockNumber() == 0 {

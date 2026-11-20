@@ -96,7 +96,7 @@ func RederiveBlockAccessList(
 		return nil
 	}
 	ibs.SetTxContext(blockNum, -1)
-	err := protocol.InitializeBlockExecution(engine, chainReader, header, cfg, ibs, noopWriter, logger, nil)
+	err := protocol.InitializeBlockExecution(engine, chainReader, header, cfg, ibs, logger, nil)
 	if err = phaseErr(err); err != nil {
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: initialize block %d: %w", blockNum, err)
 	}
