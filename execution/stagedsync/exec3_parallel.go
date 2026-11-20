@@ -3391,7 +3391,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// overwritten by a later incarnation from a concurrent worker.
 			result := be.finalizedResults[tx]
 			if tx == 0 && task.Version().TxIndex == -1 {
-				be.receiptPipeline = pe.newReceiptPipeline(ctx, be.blockNum, task)
+				if txTask, ok := task.(*exec.TxTask); ok && be.blockNum != 0 {
+					if checkReceipts, _ := pe.receiptChecks(be.blockNum); checkReceipts {
+						be.receiptPipeline = newReceiptPipeline(ctx, len(txTask.Txs))
+					}
+				}
 			}
 
 			applyResult := txResult{

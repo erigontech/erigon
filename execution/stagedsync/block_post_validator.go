@@ -7,7 +7,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
@@ -107,15 +106,4 @@ func (p *receiptPipeline) join() *types.ReceiptDigest {
 func (pe *parallelExecutor) receiptChecks(blockNum uint64) (checkReceipts, checkBloom bool) {
 	checkBloom = !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
 	return checkBloom && pe.cfg.chainConfig.IsByzantium(blockNum), checkBloom
-}
-
-func (pe *parallelExecutor) newReceiptPipeline(ctx context.Context, blockNum uint64, task exec.Task) *receiptPipeline {
-	txTask, ok := task.(*exec.TxTask)
-	if !ok || blockNum == 0 {
-		return nil
-	}
-	if checkReceipts, _ := pe.receiptChecks(blockNum); !checkReceipts {
-		return nil
-	}
-	return newReceiptPipeline(ctx, len(txTask.Txs))
 }
