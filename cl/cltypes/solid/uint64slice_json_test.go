@@ -211,3 +211,17 @@ func TestUint64VectorSSZJSONRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+func TestUint64VectorSSZUnmarshalJSONAfterClear(t *testing.T) {
+	const size = 5
+	values := uint64JSONValues(size, 100)
+
+	vector := solid.NewUint64VectorSSZ(size)
+	vector.Clear()
+	require.ErrorContains(t, json.Unmarshal([]byte("[]"), vector), "length mismatch")
+	require.NoError(t, json.Unmarshal(uint64JSON(t, values), vector))
+
+	expected := solid.NewUint64VectorSSZ(size)
+	require.NoError(t, expected.DecodeSSZ(uint64SSZ(values), 0))
+	requireSameUint64Iterable(t, expected, vector)
+}

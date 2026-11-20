@@ -48,8 +48,8 @@ func (arr *uint64VectorSSZ) UnmarshalJSON(buf []byte) error {
 	if err != nil {
 		return err
 	}
-	if len(values) != arr.Length() {
-		return fmt.Errorf("uint64 vector length mismatch: %d != %d", len(values), arr.Length())
+	if len(values) != arr.Cap() {
+		return fmt.Errorf("uint64 vector length mismatch: %d != %d", len(values), arr.Cap())
 	}
 	return arr.u.replace(values)
 }
