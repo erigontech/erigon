@@ -40,7 +40,7 @@ import (
 )
 
 // TxPoolAPIVersion
-var TxPoolAPIVersion = &typesproto.VersionReply{Major: 1, Minor: 0, Patch: 0}
+var TxPoolAPIVersion = &typesproto.VersionReply{Major: 1, Minor: 1, Patch: 0}
 
 type txPool interface {
 	PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error)
@@ -51,6 +51,7 @@ type txPool interface {
 	KnownTxnReason(hash []byte) txpoolcfg.DiscardReason
 	RejectFramePrefix(hash common.Hash)
 	NonceFromAddress(addr [20]byte) (nonce uint64, found bool)
+	nonceAt(addr [20]byte, head common.Hash, stateNonce uint64) (uint64, bool, error)
 	GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle)
 }
 
@@ -332,7 +333,17 @@ func (s *GrpcServer) Status(_ context.Context, _ *txpoolproto.StatusRequest) (*t
 
 func (s *GrpcServer) Nonce(ctx context.Context, in *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
 	addr := gointerfaces.ConvertH160toAddress(in.Address)
-	nonce, found := s.txPool.NonceFromAddress(addr)
+	var nonce uint64
+	var found bool
+	if in.BlockHash == nil {
+		nonce, found = s.txPool.NonceFromAddress(addr)
+	} else {
+		var err error
+		nonce, found, err = s.txPool.nonceAt(addr, gointerfaces.ConvertH256ToHash(in.BlockHash), in.StateNonce)
+		if err != nil {
+			return nil, status.Error(codes.Aborted, err.Error())
+		}
+	}
 	return &txpoolproto.NonceReply{
 		Nonce: nonce,
 		Found: found,

@@ -88,6 +88,10 @@ func (m *addMockTxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
 
 func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, found bool) { return 0, false }
 
+func (m *addMockTxPool) nonceAt([20]byte, common.Hash, uint64) (uint64, bool, error) {
+	return 0, false, nil
+}
+
 func (m *addMockTxPool) GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle) { return nil }
 
 func TestMapDiscardReasonToProto(t *testing.T) {

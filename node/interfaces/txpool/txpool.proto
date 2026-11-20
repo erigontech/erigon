@@ -74,6 +74,10 @@ message StatusReply {
 
 message NonceRequest {
   types.H160 address = 1;
+  // When set, the pool must have applied this block before answering.
+  // state_nonce is the account nonce read at that block.
+  types.H256 block_hash = 2;
+  uint64 state_nonce = 3;
 }
 message NonceReply {
   bool found = 1;
@@ -111,9 +115,9 @@ service Txpool {
   rpc OnAdd(OnAddRequest) returns (stream OnAddReply);
   // returns high level status
   rpc Status(StatusRequest) returns (StatusReply);
-  // Nonce returns the last pooled account nonce before the first gap, starting
-  // at the sender's state nonce. If the state nonce is missing, found is false
-  // even if the pool holds higher account nonces.
+  // Nonce returns the last consecutive pooled account nonce. Address-only
+  // requests start at the pool's state nonce. A different requested head
+  // returns ABORTED so the caller can read the current block and retry.
   rpc Nonce(NonceRequest) returns (NonceReply);
   // returns the list of blobs and proofs for a given list of blob hashes
   rpc GetBlobs(GetBlobsRequest) returns (GetBlobsReply);

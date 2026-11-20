@@ -659,8 +659,12 @@ func (x *StatusReply) GetBaseFeeCount() uint32 {
 }
 
 type NonceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Address       *typesproto.H160       `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Address *typesproto.H160       `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	// When set, the pool must have applied this block before answering.
+	// state_nonce is the account nonce read at that block.
+	BlockHash     *typesproto.H256 `protobuf:"bytes,2,opt,name=block_hash,json=blockHash,proto3" json:"block_hash,omitempty"`
+	StateNonce    uint64           `protobuf:"varint,3,opt,name=state_nonce,json=stateNonce,proto3" json:"state_nonce,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -700,6 +704,20 @@ func (x *NonceRequest) GetAddress() *typesproto.H160 {
 		return x.Address
 	}
 	return nil
+}
+
+func (x *NonceRequest) GetBlockHash() *typesproto.H256 {
+	if x != nil {
+		return x.BlockHash
+	}
+	return nil
+}
+
+func (x *NonceRequest) GetStateNonce() uint64 {
+	if x != nil {
+		return x.StateNonce
+	}
+	return 0
 }
 
 type NonceReply struct {
@@ -1058,9 +1076,13 @@ const file_txpool_txpool_proto_rawDesc = "" +
 	"\vStatusReply\x12#\n" +
 	"\rpending_count\x18\x01 \x01(\rR\fpendingCount\x12!\n" +
 	"\fqueued_count\x18\x02 \x01(\rR\vqueuedCount\x12$\n" +
-	"\x0ebase_fee_count\x18\x03 \x01(\rR\fbaseFeeCount\"5\n" +
+	"\x0ebase_fee_count\x18\x03 \x01(\rR\fbaseFeeCount\"\x82\x01\n" +
 	"\fNonceRequest\x12%\n" +
-	"\aaddress\x18\x01 \x01(\v2\v.types.H160R\aaddress\"8\n" +
+	"\aaddress\x18\x01 \x01(\v2\v.types.H160R\aaddress\x12*\n" +
+	"\n" +
+	"block_hash\x18\x02 \x01(\v2\v.types.H256R\tblockHash\x12\x1f\n" +
+	"\vstate_nonce\x18\x03 \x01(\x04R\n" +
+	"stateNonce\"8\n" +
 	"\n" +
 	"NonceReply\x12\x14\n" +
 	"\x05found\x18\x01 \x01(\bR\x05found\x12\x14\n" +
@@ -1140,36 +1162,37 @@ var file_txpool_txpool_proto_depIdxs = []int32{
 	19, // 3: txpool.AllReply.txs:type_name -> txpool.AllReply.Tx
 	20, // 4: txpool.PendingReply.txs:type_name -> txpool.PendingReply.Tx
 	22, // 5: txpool.NonceRequest.address:type_name -> types.H160
-	21, // 6: txpool.GetBlobsRequest.blob_hashes:type_name -> types.H256
-	17, // 7: txpool.GetBlobsReply.blobs_with_proofs:type_name -> txpool.BlobAndProof
-	1,  // 8: txpool.AllReply.Tx.txn_type:type_name -> txpool.AllReply.TxnType
-	22, // 9: txpool.AllReply.Tx.sender:type_name -> types.H160
-	22, // 10: txpool.PendingReply.Tx.sender:type_name -> types.H160
-	23, // 11: txpool.Txpool.Version:input_type -> google.protobuf.Empty
-	2,  // 12: txpool.Txpool.FindUnknown:input_type -> txpool.TxHashes
-	3,  // 13: txpool.Txpool.Add:input_type -> txpool.AddRequest
-	5,  // 14: txpool.Txpool.Transactions:input_type -> txpool.TransactionsRequest
-	9,  // 15: txpool.Txpool.All:input_type -> txpool.AllRequest
-	23, // 16: txpool.Txpool.Pending:input_type -> google.protobuf.Empty
-	7,  // 17: txpool.Txpool.OnAdd:input_type -> txpool.OnAddRequest
-	12, // 18: txpool.Txpool.Status:input_type -> txpool.StatusRequest
-	14, // 19: txpool.Txpool.Nonce:input_type -> txpool.NonceRequest
-	16, // 20: txpool.Txpool.GetBlobs:input_type -> txpool.GetBlobsRequest
-	24, // 21: txpool.Txpool.Version:output_type -> types.VersionReply
-	2,  // 22: txpool.Txpool.FindUnknown:output_type -> txpool.TxHashes
-	4,  // 23: txpool.Txpool.Add:output_type -> txpool.AddReply
-	6,  // 24: txpool.Txpool.Transactions:output_type -> txpool.TransactionsReply
-	10, // 25: txpool.Txpool.All:output_type -> txpool.AllReply
-	11, // 26: txpool.Txpool.Pending:output_type -> txpool.PendingReply
-	8,  // 27: txpool.Txpool.OnAdd:output_type -> txpool.OnAddReply
-	13, // 28: txpool.Txpool.Status:output_type -> txpool.StatusReply
-	15, // 29: txpool.Txpool.Nonce:output_type -> txpool.NonceReply
-	18, // 30: txpool.Txpool.GetBlobs:output_type -> txpool.GetBlobsReply
-	21, // [21:31] is the sub-list for method output_type
-	11, // [11:21] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	21, // 6: txpool.NonceRequest.block_hash:type_name -> types.H256
+	21, // 7: txpool.GetBlobsRequest.blob_hashes:type_name -> types.H256
+	17, // 8: txpool.GetBlobsReply.blobs_with_proofs:type_name -> txpool.BlobAndProof
+	1,  // 9: txpool.AllReply.Tx.txn_type:type_name -> txpool.AllReply.TxnType
+	22, // 10: txpool.AllReply.Tx.sender:type_name -> types.H160
+	22, // 11: txpool.PendingReply.Tx.sender:type_name -> types.H160
+	23, // 12: txpool.Txpool.Version:input_type -> google.protobuf.Empty
+	2,  // 13: txpool.Txpool.FindUnknown:input_type -> txpool.TxHashes
+	3,  // 14: txpool.Txpool.Add:input_type -> txpool.AddRequest
+	5,  // 15: txpool.Txpool.Transactions:input_type -> txpool.TransactionsRequest
+	9,  // 16: txpool.Txpool.All:input_type -> txpool.AllRequest
+	23, // 17: txpool.Txpool.Pending:input_type -> google.protobuf.Empty
+	7,  // 18: txpool.Txpool.OnAdd:input_type -> txpool.OnAddRequest
+	12, // 19: txpool.Txpool.Status:input_type -> txpool.StatusRequest
+	14, // 20: txpool.Txpool.Nonce:input_type -> txpool.NonceRequest
+	16, // 21: txpool.Txpool.GetBlobs:input_type -> txpool.GetBlobsRequest
+	24, // 22: txpool.Txpool.Version:output_type -> types.VersionReply
+	2,  // 23: txpool.Txpool.FindUnknown:output_type -> txpool.TxHashes
+	4,  // 24: txpool.Txpool.Add:output_type -> txpool.AddReply
+	6,  // 25: txpool.Txpool.Transactions:output_type -> txpool.TransactionsReply
+	10, // 26: txpool.Txpool.All:output_type -> txpool.AllReply
+	11, // 27: txpool.Txpool.Pending:output_type -> txpool.PendingReply
+	8,  // 28: txpool.Txpool.OnAdd:output_type -> txpool.OnAddReply
+	13, // 29: txpool.Txpool.Status:output_type -> txpool.StatusReply
+	15, // 30: txpool.Txpool.Nonce:output_type -> txpool.NonceReply
+	18, // 31: txpool.Txpool.GetBlobs:output_type -> txpool.GetBlobsReply
+	22, // [22:32] is the sub-list for method output_type
+	12, // [12:22] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_txpool_txpool_proto_init() }

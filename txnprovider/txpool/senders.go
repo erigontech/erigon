@@ -41,18 +41,23 @@ type BySenderAndNonce struct {
 	senderIDFrameTxn  map[uint64]*metaTxn
 }
 
-func (b *BySenderAndNonce) lastConsecutiveAccountNonce(senderID uint64) (nonce uint64, found bool) {
-	lowerEntries := uint64(b.count(senderID))
-	b.descend(senderID, func(mt *metaTxn) bool {
-		lowerEntries--
-		// Keyed nonces sort last, and the pool removes account nonces below the
-		// state nonce. For an account nonce N, lowerEntries counts the distinct
-		// pooled nonces in [stateNonce, N). That range has nonceDistance possible
-		// values, so equal counts mean there is no gap.
-		if !mt.keyedNonce && mt.nonceDistance == lowerEntries {
-			nonce, found = mt.TxnSlot.Nonce, true
+func (b *BySenderAndNonce) lastConsecutiveAccountNonce(senderID uint64, stateNonce *uint64) (nonce uint64, found bool) {
+	var next uint64
+	if stateNonce != nil {
+		next = *stateNonce
+	}
+	b.ascendFrom(senderID, next, func(mt *metaTxn) bool {
+		if mt.keyedNonce {
 			return false
 		}
+		if stateNonce == nil && !found {
+			next = mt.TxnSlot.Nonce - mt.nonceDistance
+		}
+		if mt.TxnSlot.Nonce != next {
+			return false
+		}
+		nonce, found = next, true
+		next++
 		return true
 	})
 	return nonce, found
@@ -65,9 +70,13 @@ func (b *BySenderAndNonce) ascendAll(f func(*metaTxn) bool) {
 }
 
 func (b *BySenderAndNonce) ascend(senderID uint64, f func(*metaTxn) bool) {
+	b.ascendFrom(senderID, 0, f)
+}
+
+func (b *BySenderAndNonce) ascendFrom(senderID, nonce uint64, f func(*metaTxn) bool) {
 	s := b.search
 	s.TxnSlot.SenderID = senderID
-	s.TxnSlot.Nonce = 0
+	s.TxnSlot.Nonce = nonce
 	s.keyedNonce = false
 	b.tree.AscendGreaterOrEqual(s, func(mt *metaTxn) bool {
 		if mt.TxnSlot.SenderID != senderID {

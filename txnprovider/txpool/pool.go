@@ -2592,11 +2592,25 @@ func (p *TxPool) deleteMinedBlobTxn(hash string) {
 func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, found bool) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	return p.lastAccountNonceLocked(addr, nil)
+}
+
+func (p *TxPool) nonceAt(addr [20]byte, head common.Hash, stateNonce uint64) (uint64, bool, error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	if !p.Started() || p.stateViewStale || p.stateBlockHash != head {
+		return 0, false, errPoolNotReady
+	}
+	nonce, found := p.lastAccountNonceLocked(addr, &stateNonce)
+	return nonce, found, nil
+}
+
+func (p *TxPool) lastAccountNonceLocked(addr [20]byte, stateNonce *uint64) (uint64, bool) {
 	senderID, ok := p.senders.getID(addr)
 	if !ok {
 		return 0, false
 	}
-	return p.all.lastConsecutiveAccountNonce(senderID)
+	return p.all.lastConsecutiveAccountNonce(senderID, stateNonce)
 }
 
 // removeMined - apply new highest block (or batch of blocks)

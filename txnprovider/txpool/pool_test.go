@@ -915,7 +915,8 @@ func TestNonceFromAddress(t *testing.T) {
 	ctx, pool, _, _ := newTestPool(t)
 	addr := common.Address{1}
 	const stateNonce = 2
-	change := newBlockChangeForAccounts(common.Hash{}, stateNonce, addr)
+	head := common.Hash{1}
+	change := newBlockChangeForAccounts(head, stateNonce, addr)
 	change.PendingBlockBaseFee = 200_000
 	require.NoError(pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
@@ -949,6 +950,22 @@ func TestNonceFromAddress(t *testing.T) {
 	require.True(found)
 	assert.Equal(uint64(6), nonce)
 
+	// An eviction can open a gap before the next sender refresh.
+	senderID, ok := pool.senders.getID(addr)
+	require.True(ok)
+	evicted := pool.all.get(senderID, 4)
+	require.NotNil(evicted)
+	pool.removeFromSubPool(evicted, "test")
+	pool.discardLocked(evicted, txpoolcfg.PendingPoolOverflow)
+	nonce, found = pool.NonceFromAddress(addr)
+	require.True(found)
+	assert.Equal(uint64(3), nonce)
+
+	nonce, found, lookupErr := pool.nonceAt(addr, head, stateNonce)
+	require.NoError(lookupErr)
+	require.True(found)
+	assert.Equal(uint64(3), nonce)
+
 	// test too expensive tx
 	{
 		var txnSlots TxnSlots
@@ -974,6 +991,11 @@ func TestNonceFromAddress(t *testing.T) {
 			assert.Equal(txpoolcfg.NonceTooLow, reason, reason.String())
 		}
 	}
+	_, _, err := pool.nonceAt(addr, common.Hash{2}, stateNonce)
+	require.ErrorIs(err, errPoolNotReady)
+	pool.MarkStateStale()
+	_, _, err = pool.nonceAt(addr, head, stateNonce)
+	require.ErrorIs(err, errPoolNotReady)
 }
 
 func TestSetCodeAuthorizationAdmission(t *testing.T) {

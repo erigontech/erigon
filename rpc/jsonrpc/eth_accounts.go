@@ -19,12 +19,16 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+	"time"
 
-	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -91,36 +95,94 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	return (*hexutil.U256)(&acc.Balance), nil
 }
 
-// GetTransactionCount implements eth_getTransactionCount and returns the account
-// nonce at the requested block. For "pending", it advances past consecutive
-// pooled account nonces starting at the sender's state nonce. If that sequence
-// is empty, it reads the nonce from state.
+// GetTransactionCount implements eth_getTransactionCount. For "pending", the
+// account nonce and the pooled transactions must refer to the same executed block.
 func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHashArg *rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
-	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
-	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
-		reply, err := api.txPool.Nonce(ctx, &txpoolproto.NonceRequest{
-			Address: gointerfaces.ConvertAddressToH160(address),
-		}, &grpc.EmptyCallOption{})
-		if err != nil {
-			return nil, err
-		}
-		if reply.Found {
-			reply.Nonce++
-			return (*hexutil.Uint64)(&reply.Nonce), nil
-		}
+	block := blockOrLatest(blockNrOrHashArg)
+	if block.BlockNumber != nil && *block.BlockNumber == rpc.PendingBlockNumber {
+		return api.pendingNonce(ctx, address)
 	}
-	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
+	tx, reader, err := api.stateReaderAt(ctx, block)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	nonce := hexutil.Uint64(0)
 	acc, err := reader.ReadAccountByPlainAddr(address)
 	if acc == nil || err != nil {
-		return &nonce, err
+		return new(hexutil.Uint64), err
 	}
-	return (*hexutil.Uint64)(&acc.Nonce), err
+	return (*hexutil.Uint64)(&acc.Nonce), nil
+}
+
+func (api *APIImpl) pendingNonce(ctx context.Context, address common.Address) (*hexutil.Uint64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for delay := 10 * time.Millisecond; ; delay = min(2*delay, 250*time.Millisecond) {
+		req, err := api.pendingNonceRequest(ctx, address)
+		if err != nil {
+			return nil, err
+		}
+		reply, err := api.txPool.Nonce(ctx, req)
+		if err == nil {
+			nonce := req.StateNonce
+			if reply.Found {
+				nonce = reply.Nonce + 1
+			}
+			return (*hexutil.Uint64)(&nonce), nil
+		}
+		if status.Code(err) != codes.Aborted {
+			return nil, err
+		}
+		// Either side can advance first. Reopen the snapshot on the next attempt
+		// so a reorg can supersede the head we originally requested.
+		if err := common.Sleep(ctx, delay); err != nil {
+			return nil, fmt.Errorf("waiting for transaction pool and execution head to agree: %w", err)
+		}
+	}
+}
+
+func (api *APIImpl) pendingNonceRequest(ctx context.Context, address common.Address) (*txpoolproto.NonceRequest, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	block, err := rpchelper.GetLatestExecutedBlockNumber(tx)
+	if err != nil {
+		return nil, err
+	}
+	// Remote block and state services can already be serving a different head.
+	// Mutable canonical hashes and account data must come from the pinned view.
+	head, err := rawdb.ReadCanonicalHash(tx, block)
+	if err != nil {
+		return nil, err
+	}
+	if head == (common.Hash{}) && block <= api._blockReader.FrozenBlocks() {
+		head, _, err = api._blockReader.CanonicalHash(ctx, tx, block)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if head == (common.Hash{}) {
+		return nil, fmt.Errorf("canonical hash missing for executed block %d", block)
+	}
+	var pinned execmodule.Cache
+	view, err := pinned.View(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	account, err := rpchelper.CreateLatestCachedStateReader(view, tx).ReadAccountByPlainAddr(address)
+	if err != nil {
+		return nil, err
+	}
+	req := &txpoolproto.NonceRequest{
+		Address:   gointerfaces.ConvertAddressToH160(address),
+		BlockHash: gointerfaces.ConvertHashToH256(head),
+	}
+	if account != nil {
+		req.StateNonce = account.Nonce
+	}
+	return req, nil
 }
 
 // GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
