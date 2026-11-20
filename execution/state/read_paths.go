@@ -289,21 +289,6 @@ func (ibs *IntraBlockState) wroteAccountLifecycle(addr accounts.Address) bool {
 }
 
 func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, skipStorage bool, r *readPathResult) {
-	if s.versionMap == nil {
-		so, err := s.getStateObject(addr, true)
-		if err != nil {
-			r.err = err
-			r.source = StorageRead
-			r.version = UnknownVersion
-			return
-		}
-		r.outcome = outcomeLegacyStorage
-		r.so = so
-		r.source = StorageRead
-		r.version = UnknownVersion
-		return
-	}
-
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
 		// When the deletion reflects a prior tx's selfdestruct, surface the SD version
 		// rather than UnknownVersion so records match later SD-zero-path reads and
@@ -797,24 +782,8 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 		if so == nil && r.account == nil {
 			hdr.Source = StorageRead
-			// An absent account's field is its default. readAccountInternal already
-			// resolved the committed base (seedOrigin); a nil result means the account
-			// is in neither the map nor the base, so a materialized stateObject could
-			// add nothing. Record the absent read and return the default — the
-			// noMaterialize flow must never resolve through a stateObject.
-			if !s.noMaterialize {
-				obj, err := s.getStateObject(addr, true)
-				if err != nil {
-					r.err = err
-					r.outcome = outcomeReturnDefault
-					r.source = StorageRead
-					r.version = UnknownVersion
-					return
-				}
-				so = obj
-			}
 		}
-		if s.noMaterialize && so != nil {
+		if so != nil {
 			r.err = fmt.Errorf("noMaterialize read fell back to a materialized stateObject: %x %s", addr, AccountKey{path, key})
 			r.outcome = outcomeReturnDefault
 			r.source = StorageRead
@@ -1665,14 +1634,6 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 // which SetState uses to decide between deleting vs. updating the
 // versioned write on revert.
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
-	if s.versionMap == nil {
-		so, err := s.getStateObject(addr, true)
-		if err != nil || so == nil || so.deleted {
-			return uint256.Int{}, StorageRead, UnknownVersion, false, err
-		}
-		v, clean, err := so.GetState(key)
-		return v, StorageRead, UnknownVersion, clean, err
-	}
 	if !s.warmReadable(addr) {
 		if vw, ok := s.versionedWrites.GetStorage(addr, key); ok {
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil
@@ -1732,14 +1693,6 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 
 // readCommittedState reads a storage slot with committed-view semantics.
 func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, error) {
-	if s.versionMap == nil {
-		so, err := s.getStateObject(addr, true)
-		if err != nil || so == nil || so.deleted {
-			return uint256.Int{}, StorageRead, UnknownVersion, err
-		}
-		v, err := so.GetCommittedState(key)
-		return v, StorageRead, UnknownVersion, err
-	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, true, false, &r)
 	if r.err != nil {

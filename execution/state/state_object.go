@@ -236,12 +236,6 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 
 // SetState updates a value in account storage.
 func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, force bool) (_ bool, err error) {
-	// If the fake storage is set, put the temporary state update here.
-	if so.fakeStorage != nil {
-		so.db.journal.fakeStorageChange(so.address, key, so.fakeStorage[key])
-		so.fakeStorage[key] = value
-		return true, nil
-	}
 	// If the new value is the same as old, don't set
 	var prev uint256.Int
 	var commited bool

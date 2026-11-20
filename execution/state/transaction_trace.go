@@ -94,7 +94,7 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 			if _, ok := nonceBefore[entry.account]; !ok {
 				nonceBefore[entry.account] = entry.aux
 			}
-		case kindStorage, kindFakeStorage:
+		case kindStorage:
 			slot := frameStorageSlot{entry.account, entry.key}
 			if _, ok := trace.storageBefore[slot]; !ok {
 				trace.storageBefore[slot] = entry.value
