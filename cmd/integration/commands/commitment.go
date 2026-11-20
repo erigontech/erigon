@@ -193,28 +193,30 @@ Examples:
   integration commitment branch --datadir /path/to/datadir --prefix 0a1b
   integration commitment branch --datadir /path/to/datadir --prefix 0a1b --txnum 1000000
   integration commitment branch --datadir /path/to/datadir  # reads root (empty prefix)`,
-	Run: func(cmd *cobra.Command, args []string) {
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		defer debug.Exit()
 
 		prefix, err := commitment.PrefixStringToNibbles(branchPrefixFlag)
 		if err != nil {
-			logger.Error("Failed to parse prefix", "error", err)
-			return
+			return fmt.Errorf("parsing prefix: %w", err)
 		}
 
 		dirs := datadir.New(datadirCli)
 		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer chainDb.Close()
+		if statecfg.Schema.CommitmentDomain.CommitmentV3Records {
+			return errors.New("not supported on commitment v3")
+		}
 
 		// Start a read-only temporal transaction
 		tx, err := chainDb.BeginTemporalRo(ctx)
 		if err != nil {
-			logger.Error("Failed to begin temporal tx", "error", err)
-			return
+			return fmt.Errorf("beginning temporal tx: %w", err)
 		}
 		defer tx.Rollback()
 
@@ -223,23 +225,21 @@ Examples:
 			fmt.Printf("(asOfTxNum: %d)\n", txnumFlag)
 			reader := commitmentdb.NewHistoryStateReader(tx, txnumFlag)
 			if err := readBranch(reader, prefix, stepSize); err != nil {
-				logger.Error("Failed to read branch", "error", err)
-				return
+				return fmt.Errorf("reading branch: %w", err)
 			}
 		} else {
 			// Latest state read
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			if err != nil {
-				logger.Error("Failed to create shared domains", "error", err)
-				return
+				return fmt.Errorf("creating shared domains: %w", err)
 			}
 			defer sd.Close()
 			reader := commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{})
 			if err := readBranch(reader, prefix, stepSize); err != nil {
-				logger.Error("Failed to read branch", "error", err)
-				return
+				return fmt.Errorf("reading branch: %w", err)
 			}
 		}
+		return nil
 	},
 }
 
@@ -269,7 +269,6 @@ func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize ui
 	return nil
 }
 
-// integration commitment rebuild
 var cmdCommitmentVerify = &cobra.Command{
 	Use:   "verify",
 	Short: "Fold the v3 commitment records to the stored state root, at the latest state and at --asof txNums; fails on orphan records",
@@ -589,6 +588,10 @@ Examples:
 			TargetNibblesV2: convertNibblesV2,
 			Continue:        convertContinue,
 			TargetV3:        convertV3,
+		}
+		if convertV3 {
+			br, _ := blocksIO(db, logger)
+			opts.DB, opts.TxNums = db, br.TxnumReader()
 		}
 		return commitmentConvert(db, cmd.Context(), logger, opts)
 	},

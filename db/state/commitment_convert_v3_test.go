@@ -18,6 +18,7 @@ package state_test
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"maps"
@@ -779,6 +780,142 @@ func TestConvertCommitmentFiles_V3RebuiltStepRefusesBeforeSwap(t *testing.T) {
 	require.ErrorContains(t, err, "no commitment file was replaced; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if commitment history was pruned")
 	require.False(t, swapped)
 	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "backup"))
+	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "rebuild"))
+}
+
+func TestConvertCommitmentFiles_V3FoldsTheTailAfterTheStoredState(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	pairs, others := accountPairsByFirstNibble(t)
+	x, y, w, z := pairs[0][0], pairs[0][1], pairs[1][0], pairs[1][1]
+	slot := append(slices.Clone(x), make([]byte, length.Hash)...)
+	write := func(txNum uint64, put func(kv.Domain, []byte, []byte), del func(kv.Domain, []byte)) {
+		switch txNum {
+		case 0:
+			put(kv.AccountsDomain, x, testAccount(0))
+		case 1:
+			put(kv.AccountsDomain, y, testAccount(1))
+		case 2:
+			put(kv.AccountsDomain, w, testAccount(2))
+		case 63:
+			put(kv.AccountsDomain, x, testAccount(63))
+			put(kv.StorageDomain, slot, []byte{1})
+		case 64:
+			put(kv.AccountsDomain, x, testAccount(0))
+			del(kv.StorageDomain, slot)
+		case 78:
+			put(kv.AccountsDomain, z, testAccount(78))
+		default:
+			put(kv.AccountsDomain, others[txNum%uint64(len(others))], testAccount(txNum))
+		}
+	}
+	_, _, rootAt := writeBlocks(t, write, true)
+	db, agg, _ := writeBlocks(t, write, false)
+	maxTxNums := make(maxTxNumByBlock, 29)
+	for block := range maxTxNums {
+		maxTxNums[block] = uint64(block)*3 + 2
+	}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for block := range uint64(29) {
+			if block == 0 || block == 26 || block == 27 {
+				continue
+			}
+			if err := tx.Delete(kv.MaxTxNum, binary.BigEndian.AppendUint64(nil, block)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	func() {
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		opts := state.ConvertOpts{TargetV3: true, DB: db, TxNums: rawdbv3.TxNums.WithCustomReadTxNumFunc(maxTxNums)}
+		require.NoError(t, state.ConvertCommitmentFiles(t.Context(), at, opts, log.New()))
+	}()
+
+	func() {
+		tx, err := db.BeginTemporalRo(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		for _, end := range []uint64{64, 80} {
+			v, found, _, fileEnd, err := state.AggTx(tx).DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentV3State, end-1)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, end, fileEnd)
+			blockNum, txNum, root, err := commitment.DecodeCommitmentV3State(v)
+			require.NoError(t, err)
+			require.Equal(t, end-1, txNum)
+			require.Equal(t, (end-1)/3, blockNum, "file ending at %d", end)
+			require.Equal(t, rootAt[end-1], common.Hash(root), "file ending at %d", end)
+		}
+	}()
+
+	testPrefixFoldMatchesStateRecord(t, func(*testing.T, string) (kv.TemporalRwDB, *state.Aggregator) { return db, agg }, "converted")
+}
+
+type maxTxNumByBlock []uint64
+
+func (m maxTxNumByBlock) MaxTxNum(_ context.Context, _ kv.Tx, _ kv.Cursor, block uint64) (uint64, bool, error) {
+	if block >= uint64(len(m)) {
+		return 0, false, nil
+	}
+	return m[block], true, nil
+}
+
+func (m maxTxNumByBlock) BlockNumber(_ context.Context, _ kv.Tx, txNum uint64) (uint64, bool, error) {
+	block, _ := slices.BinarySearch(m, txNum)
+	return uint64(block), block < len(m), nil
+}
+
+func testAccount(seed uint64) []byte {
+	return accounts.SerialiseV3(&accounts.Account{Nonce: seed + 1, Balance: *uint256.NewInt(seed + 1), CodeHash: accounts.EmptyCodeHash})
+}
+
+func writeBlocks(t *testing.T, write func(txNum uint64, put func(kv.Domain, []byte, []byte), del func(kv.Domain, []byte)), everyTx bool) (kv.TemporalRwDB, *state.Aggregator, map[uint64]common.Hash) {
+	t.Helper()
+	db, agg, rwTx, domains := convertTestDomains(t, 16)
+	put, del, _ := domainWriter(t, domains, rwTx)
+	rootAt := map[uint64]common.Hash{}
+	for block := range uint64(29) {
+		last := (block+1)*3 - 1
+		for txNum := block * 3; txNum <= last; txNum++ {
+			write(txNum,
+				func(d kv.Domain, k, v []byte) { put(d, k, v, txNum) },
+				func(d kv.Domain, k []byte) { del(d, k, txNum) })
+			if everyTx || txNum == last {
+				root, err := domains.ComputeCommitment(t.Context(), rwTx, true, block, txNum, "", nil)
+				require.NoError(t, err)
+				rootAt[txNum] = common.Hash(root)
+			}
+		}
+		require.NoError(t, rawdbv3.TxNums.Append(rwTx, block, last))
+	}
+	require.NoError(t, stages.SaveStageProgress(rwTx, stages.Execution, 28))
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+	domains.Close()
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.BuildFiles(db, 87, unboundedFinalityCtx))
+	return db, agg, rootAt
+}
+
+func accountPairsByFirstNibble(t *testing.T) (pairs [][2][]byte, others [][]byte) {
+	t.Helper()
+	var byNibble [16][][]byte
+	for i := range 64 {
+		addr := make([]byte, length.Addr)
+		binary.BigEndian.PutUint64(addr[length.Addr-8:], uint64(i+1))
+		n := crypto.Keccak256(addr)[0] >> 4
+		byNibble[n] = append(byNibble[n], addr)
+	}
+	for _, addrs := range byNibble {
+		if len(addrs) >= 2 && len(pairs) < 2 {
+			pairs = append(pairs, [2][]byte{addrs[0], addrs[1]})
+			continue
+		}
+		others = append(others, addrs...)
+	}
+	require.Len(t, pairs, 2)
+	return pairs, others
 }
 
 func TestConvertCommitmentFiles_V3RejectsCorruptLatestRecord(t *testing.T) {

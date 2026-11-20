@@ -570,9 +570,8 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	} else {
 		reader = state.NewHistoryReaderV3(tx, maxTxNum+1)
 	}
-	ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	ibs := state.NewVersionedCall(reader)
 	defer ibs.Close()
-	ibs.SetNoConflictDetection()
 	// The validation hook rejects BLOCKHASH but does not stop the opcode from calling GetHash, where
 	// an error would be taken for the node's failure, not for an invalid transaction.
 	noBlockHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }

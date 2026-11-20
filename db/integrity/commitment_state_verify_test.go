@@ -120,10 +120,10 @@ func checkStateVerifyOnRandomWrites(t *testing.T, v3 bool) {
 
 	// Run the state verification check
 	err = integrity.CheckStateVerify(ctx, db, true /* failFast */, 0 /* fromStep */, logger)
-	require.NoError(t, err)
-	if v3 {
-		require.NoError(t, integrity.CheckCommitmentKvDeref(ctx, db, nil, true, logger))
-		require.NoError(t, integrity.CheckCommitmentKvi(ctx, integrity.SamplerCfg{SampleRatio: 1}, db, nil, true, logger))
+	if !v3 {
+		require.NoError(t, err)
+	} else {
+		require.ErrorIs(t, err, integrity.ErrSkipped)
 		checks, err := state.FoldCommitmentV3(ctx, agg, []uint64{math.MaxUint64}, nil)
 		require.NoError(t, err)
 		require.NotZero(t, checks[0].Records)

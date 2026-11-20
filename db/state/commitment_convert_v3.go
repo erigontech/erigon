@@ -192,6 +192,7 @@ func convertCommitmentFileV3(
 	ctx context.Context,
 	at *AggregatorRoTx,
 	file VisibleFile,
+	fold tailFold,
 	dstDir string,
 	fileIdx, fileTotal int,
 	grandTotalKeys, processedKeys uint64,
@@ -256,6 +257,14 @@ func convertCommitmentFileV3(
 				return gctx.Err()
 			}
 		}
+		add := func(k, v []byte) error {
+			batch.pairs = append(batch.pairs, [2][]byte{k, v})
+			if len(batch.pairs) == commitmentV3Batch {
+				return send()
+			}
+			return nil
+		}
+		seen := make(map[string]struct{}, len(fold.cur)+len(fold.prev))
 		for reader.HasNext() {
 			k := readOwned(reader, batch, keysCompressed)
 			if !reader.HasNext() {
@@ -263,16 +272,19 @@ func convertCommitmentFileV3(
 			}
 			n := read.Add(1)
 			v := readOwned(reader, batch, valsCompressed)
+			if folded, ok := fold.cur[string(k)]; ok {
+				v = folded
+				seen[string(k)] = struct{}{}
+			} else if _, ok := fold.prev[string(k)]; ok {
+				seen[string(k)] = struct{}{}
+			}
 			if bytes.Equal(k, commitment.KeyCommitmentState) && len(v) >= 8 {
 				if txNum := binary.BigEndian.Uint64(v); txNum != endTxNum-1 {
 					return fmt.Errorf("commitment state txNum %d differs from file end txNum %d", txNum, endTxNum-1)
 				}
 			}
-			batch.pairs = append(batch.pairs, [2][]byte{k, v})
-			if len(batch.pairs) == commitmentV3Batch {
-				if sendErr := send(); sendErr != nil {
-					return sendErr
-				}
+			if addErr := add(k, v); addErr != nil {
+				return addErr
 			}
 			select {
 			case <-logEvery.C:
@@ -281,6 +293,27 @@ func convertCommitmentFileV3(
 					common.PrettyCounter(processedKeys+n), common.PrettyCounter(grandTotalKeys),
 					buildPhase1Prefix(fileIdx, fileTotal, processedKeys+n, grandTotalKeys)))
 			default:
+			}
+		}
+		for k, v := range fold.cur {
+			if _, ok := seen[k]; ok {
+				continue
+			}
+			if addErr := add([]byte(k), v); addErr != nil {
+				return addErr
+			}
+			seen[k] = struct{}{}
+		}
+		for k := range fold.prev {
+			if _, ok := seen[k]; ok {
+				continue
+			}
+			v, _, _, _, readErr := at.d[kv.CommitmentDomain].getLatestFromFiles([]byte(k), nil, stepTo-1)
+			if readErr != nil {
+				return readErr
+			}
+			if addErr := add([]byte(k), bytes.Clone(v)); addErr != nil {
+				return addErr
 			}
 		}
 		if len(batch.pairs) == 0 {
@@ -294,7 +327,7 @@ func convertCommitmentFileV3(
 		defer wat.Close()
 		vals := &legacyFileValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], maxStep: stepTo - 1}
 		conv := v3.NewLegacyConverter(vals, st.keysV2, incremental)
-		delta := &legacyDelta{commitment: wat.d[kv.CommitmentDomain], before: stepFrom - 1, after: stepTo - 1, keysV2: st.keysV2}
+		delta := &legacyDelta{commitment: wat.d[kv.CommitmentDomain], before: stepFrom - 1, after: stepTo - 1, keysV2: st.keysV2, fold: fold}
 		reach := &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) { return delta.read(key, delta.after) }}
 		delta.reachBefore = &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) { return delta.read(key, delta.before) }}
 		sink := &convertedSink{ctx: gctx, out: out, res: getConvertedBatch()}
@@ -432,11 +465,19 @@ type legacyDelta struct {
 	commitment         *DomainRoTx
 	before, after      kv.Step
 	keysV2             bool
+	fold               tailFold
 	reachBefore        *legacyReach
 	stack, kids, prevs []legacyChild
 }
 
 func (w *legacyDelta) read(key []byte, step kv.Step) ([]byte, error) {
+	overlay := w.fold.prev
+	if step == w.after {
+		overlay = w.fold.cur
+	}
+	if v, ok := overlay[string(key)]; ok {
+		return v, nil
+	}
 	v, _, _, _, err := w.commitment.getLatestFromFiles(key, nil, step)
 	return v, err
 }
