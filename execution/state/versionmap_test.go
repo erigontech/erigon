@@ -1586,9 +1586,9 @@ func TestGetStateObject_NoRecordReadStillReconciles(t *testing.T) {
 	ibs := NewWithVersionMap(&fixedAccountReader{acc: dbAcc}, mvhm)
 	defer ibs.Release(false)
 	ibs.txIndex = 5
-	so, err := ibs.getStateObject(addr, false)
+	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
-	require.NotNil(t, so)
+	require.True(t, exists)
 	rd, ok := ibs.versionedReads.GetAddress(addr)
 	require.True(t, ok)
 	require.NotNil(t, rd.Val)
@@ -1970,9 +1970,9 @@ func TestGetStateObject_SelfDestructedButBALFunded_StaysAlive(t *testing.T) {
 	ibs := NewWithVersionMap(&fixedAccountReader{acc: dbAcc}, mvhm)
 	defer ibs.Release(false)
 	ibs.txIndex = 5
-	so, err := ibs.getStateObject(addr, true)
+	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
-	require.NotNil(t, so)
+	require.True(t, exists)
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.Equal(t, *uint256.NewInt(1000), bal)

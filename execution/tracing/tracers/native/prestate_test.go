@@ -241,7 +241,7 @@ func TestPrestateTracerDiffModeAfterFinalization(t *testing.T) {
 	_, err = ibs.Selfdestruct(contract, false)
 	require.NoError(t, err)
 	tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
-	require.NoError(t, ibs.FinalizeTx(&chain.Rules{}, executionstate.NewNoopWriter()))
+	ibs.EndTransaction()
 	tracer.EmitTxEnd(&types.Receipt{}, mdgas.TxnGasUsage{}, nil)
 	result, err := tracer.GetResult()
 	require.NoError(t, err)

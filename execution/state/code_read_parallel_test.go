@@ -35,18 +35,15 @@ func TestCodeReadParallel_NoMaterialize(t *testing.T) {
 	got, err := ibs.GetCode(addr)
 	require.NoError(t, err)
 	assert.Equal(t, code, got, "cold GetCode must return the committed code")
-	assert.Empty(t, ibs.stateObjects, "cold parallel GetCode must not materialize a stateObject")
 
 	sz, err := ibs.GetCodeSize(addr)
 	require.NoError(t, err)
 	assert.Equal(t, len(code), sz, "cold GetCodeSize must return the committed size")
-	assert.Empty(t, ibs.stateObjects, "cold parallel GetCodeSize must not materialize a stateObject")
 
-	// Repeat reads hit the recorded ReadSet, still no materialization.
+	// Repeat reads hit the recorded ReadSet.
 	got2, err := ibs.GetCode(addr)
 	require.NoError(t, err)
 	assert.Equal(t, code, got2)
-	assert.Empty(t, ibs.stateObjects)
 }
 
 // TestCodeReadParallel_EmptyCodeHashIgnoresStaleCode pins the codeHash gate on
@@ -101,12 +98,9 @@ func TestCommittedCodeHashComesFromAccountRecord(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, code, got)
 
-	so, err := ibs.getStateObject(addr, false)
+	gotHash, err := ibs.GetCodeHash(addr)
 	require.NoError(t, err)
-	require.NotNil(t, so)
-	require.Equal(t, recordHash, so.data.CodeHash, "account record must stay authoritative")
-	require.Equal(t, recordHash, so.code.Hash)
-	require.Equal(t, recordHash, so.original.CodeHash)
+	require.Equal(t, recordHash, gotHash, "account record must stay authoritative")
 }
 
 // TestPriorTxCodeWriteHashComesFromTheCell pins the cell as the authority for a
@@ -128,13 +122,10 @@ func TestPriorTxCodeWriteHashComesFromTheCell(t *testing.T) {
 	ibs.SetTxContext(100, 7)
 	ibs.SetVersion(0)
 
-	so, err := ibs.getStateObject(addr, false)
+	code, err := ibs.ResolveCode(addr)
 	require.NoError(t, err)
-	require.NotNil(t, so)
-
-	require.Equal(t, priorCode, so.code.Bytes)
-	require.Equal(t, cellHash, so.code.Hash, "the cell's hash must win, not keccak(bytes)")
-	require.Equal(t, cellHash, so.data.CodeHash)
+	require.Equal(t, priorCode, code.Bytes)
+	require.Equal(t, cellHash, code.Hash, "the cell's hash must win, not keccak(bytes)")
 }
 
 // TestPriorTxCodeWriteHashSurvivesReadSetHit pins the same authority once the
@@ -167,13 +158,10 @@ func TestPriorTxCodeWriteHashSurvivesReadSetHit(t *testing.T) {
 
 	ibs.journal.dirties[addr] = 1
 
-	so, err := ibs.getStateObject(addr, false)
+	code, err := ibs.ResolveCode(addr)
 	require.NoError(t, err)
-	require.NotNil(t, so)
-
-	require.Equal(t, priorCode, so.code.Bytes)
-	require.Equal(t, cellHash, so.code.Hash, "the cell's hash must win, not keccak(bytes)")
-	require.Equal(t, cellHash, so.data.CodeHash)
+	require.Equal(t, priorCode, code.Bytes)
+	require.Equal(t, cellHash, code.Hash, "the cell's hash must win, not keccak(bytes)")
 }
 
 // refreshCode no longer derives a missing hash from the bytes, so a producer
@@ -290,7 +278,6 @@ func TestCodeSegment_RecordsTheSameHeaderWithoutBytes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, code, got)
 	require.Equal(t, 1, reader.segmentReads)
-	require.Empty(t, segmented.stateObjects)
 
 	haveRead, ok := segmented.versionedReads.GetCode(addr)
 	require.True(t, ok)
@@ -392,14 +379,10 @@ func TestCodeSegment_UncommittedCodeStaysOnTheNormalPath(t *testing.T) {
 }
 
 func TestCodeSegment_CopiesFromTheOffsetAndZeroPads(t *testing.T) {
-	for name, vm := range map[string]*VersionMap{"version map": NewVersionMap(nil), "no version map": nil} {
-		t.Run(name, func(t *testing.T) {
-			ibs, _, addr, code := newSegmentRead(t, vm)
-			dst := []byte{0xff, 0xff, 0xff, 0xff}
-			require.NoError(t, ibs.ReadCodeSegmentTo(addr, 3, dst))
-			require.Equal(t, []byte{code[3], code[4], 0, 0}, dst)
-		})
-	}
+	ibs, _, addr, code := newSegmentRead(t, NewVersionMap(nil))
+	dst := []byte{0xff, 0xff, 0xff, 0xff}
+	require.NoError(t, ibs.ReadCodeSegmentTo(addr, 3, dst))
+	require.Equal(t, []byte{code[3], code[4], 0, 0}, dst)
 }
 
 func segmentReadThenLowerCodeWrite(t *testing.T) (*IntraBlockState, *VersionMap, accounts.Address, []byte) {

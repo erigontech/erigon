@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -37,7 +38,7 @@ func BenchmarkIntraBlockStateReset(b *testing.B) {
 			for i := range addrs {
 				addrs[i] = accounts.InternAddress(common.BytesToAddress([]byte{byte(i), byte(i >> 8), 0x5a}))
 			}
-			ibs := New(nil)
+			ibs := New(NewNoopReader())
 			var one uint256.Int
 			one.SetUint64(1)
 
@@ -45,9 +46,7 @@ func BenchmarkIntraBlockStateReset(b *testing.B) {
 			b.ResetTimer()
 			for b.Loop() {
 				for _, a := range addrs {
-					ibs.nilAccounts[a] = struct{}{}
-					ibs.stateObjectsDirty[a] = struct{}{}
-					ibs.balanceInc[a] = nil
+					_ = ibs.AddBalance(a, one, tracing.BalanceChangeUnspecified)
 					ibs.transientStorage.Set(ibs.journal, a, &TransientKey{}, &one)
 				}
 				ibs.Reset()

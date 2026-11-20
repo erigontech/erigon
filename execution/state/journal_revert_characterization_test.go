@@ -275,9 +275,6 @@ var journalKindRevertCoverage = map[entryKind]string{
 	kindFrameStateGas:           "TestJournalRevert_FrameStateGas",
 	kindFrameTransient:          "TestJournalRevert_FrameTransient",
 	kindFrameStorageOwner:       "TestJournalDirtySymmetry (frame cell; dirty-symmetry covered)",
-	kindBalanceIncrease:         "none: materialized-only, deleted with the stateObject path",
-	kindBalanceIncreaseTransfer: "none: materialized-only, deleted with the stateObject path",
-	kindFakeStorage:             "none: materialized-only (stateObject.setFakeStorage), deleted with the path",
 }
 
 func TestJournalRevertCoverageComplete(t *testing.T) {
