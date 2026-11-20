@@ -86,6 +86,14 @@ func (o *PrevBlockReader) ReadAccountStorage(a accounts.Address, k accounts.Stor
 	return o.chain.ReadAccountStorage(a, k)
 }
 
+// ReadAccountCodeSegmentTo reads a segment only when no prior block is layered over the base reader.
+func (o *PrevBlockReader) ReadAccountCodeSegmentTo(a accounts.Address, from uint64, dst []byte) (bool, error) {
+	if segmentReader, ok := o.chain.(codeSegmentReader); ok {
+		return segmentReader.ReadAccountCodeSegmentTo(a, from, dst)
+	}
+	return false, nil
+}
+
 func (o *PrevBlockReader) ReadAccountCode(a accounts.Address) ([]byte, error) {
 	return o.chain.ReadAccountCode(a)
 }

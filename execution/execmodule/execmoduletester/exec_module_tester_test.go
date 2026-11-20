@@ -87,6 +87,18 @@ func TestUnexecutedGenesis(t *testing.T) {
 	}
 }
 
+func TestNewWithTxPoolReturnsStarted(t *testing.T) {
+	t.Run("test lifecycle", func(t *testing.T) {
+		m := execmoduletester.New(t, execmoduletester.WithTxPool())
+		require.True(t, m.TxPool.Started())
+	})
+	t.Run("caller lifecycle", func(t *testing.T) {
+		m := execmoduletester.New(nil, execmoduletester.WithTxPool())
+		defer m.Close()
+		require.True(t, m.TxPool.Started())
+	})
+}
+
 func TestInsertChain(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t)

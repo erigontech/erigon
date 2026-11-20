@@ -531,6 +531,10 @@ func (m *Message) Authorities(chainID *uint256.Int) *RecoveredAuthorities {
 	return m.RecoveredAuthorities()
 }
 
+func (m *Message) SetData(data []byte) {
+	m.data = data
+}
+
 func (m *Message) SetBlobVersionedHashes(blobHashes []common.Hash) {
 	m.blobHashes = blobHashes
 }

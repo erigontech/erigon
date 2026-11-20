@@ -168,6 +168,7 @@ var (
 	forwardBeaconProbeTimeout    = 21 * time.Second
 	forwardBeaconFallbackDelay   = 5 * time.Second
 	forwardBeaconResponsePoll    = 10 * time.Millisecond
+	beaconAPIClient              = &http.Client{Timeout: 10 * time.Second}
 )
 
 const maxConcurrentForwardBeaconRequests = 2
@@ -607,6 +608,9 @@ Process:
 
 	previousHighestSlotProcessed := f.highestSlotProcessed
 	highestSlotProcessed, err := f.process(previousHighestSlotProcessed, processBlocks, envelopes)
+	if err != nil && ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		if resp.fromHTTP {
 			f.httpPreferred.Store(false)
@@ -792,9 +796,10 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 }
 
 // ImportHeldGloasTip processes the held Gloas block, then passes it to importTip with the envelope that arrives within
-// envelopeTimeout (nil if none) and the time the fetch ended, and reports whether both succeeded. A tip that processing
-// rejects is dropped; any other tip that is not imported is tried again in the next slot. A held block that is the
-// parent of a downloaded block has a successor and is left to the batch path.
+// envelopeTimeout (nil if none) and the time the fetch ended, and reports whether both succeeded. A tip whose fetch
+// or processing is cut short by ctx cancellation is kept with its retry slot. Otherwise a tip that processing rejects is
+// dropped, and any other tip that is not imported is tried again in the next slot. A held block that is the parent of
+// a downloaded block has a successor and is left to the batch path.
 func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelopeTimeout time.Duration, importTip func(tip *cltypes.SignedBeaconBlock, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) bool) bool {
 	f.mu.Lock()
 	tip, tipPeer, retrySlot := f.gloasLookahead, f.gloasLookaheadPeer, f.gloasTipRetrySlot
@@ -831,6 +836,9 @@ func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelo
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	highestSlotProcessed, err := f.process(f.highestSlotProcessed, blocks, nil)
+	if err != nil && ctx.Err() != nil {
+		return false
+	}
 	if err != nil || highestSlotProcessed < tip.Block.Slot || !importTip(tip, root, envelopes[root], receivedAt) {
 		if f.currentSlot != nil {
 			f.gloasTipRetrySlot = saturatingIncrement(f.currentSlot())
@@ -1021,7 +1029,7 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 	}
 
 	results := make([]slotResult, count)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := beaconAPIClient
 	sem := make(chan struct{}, 8) // limit concurrent requests
 	var wg sync.WaitGroup
 	requestCtx, cancel := context.WithCancel(ctx)
@@ -1195,7 +1203,7 @@ func fetchEnvelopesFromBeaconAPI(
 	}
 
 	results := make([]envResult, len(toFetch))
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := beaconAPIClient
 	sem := make(chan struct{}, 8)
 	var wg sync.WaitGroup
 

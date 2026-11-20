@@ -458,6 +458,7 @@ func testExecutionPayloadEnvelopesByRangeHandler(
 
 	_, err = stream.Write(reqBuf.Bytes())
 	require.NoError(t, err)
+	require.NoError(t, stream.CloseWrite())
 	if tc.wantResponsePrefix != SuccessfulResponsePrefix {
 		firstByte := make([]byte, 1)
 		_, err = io.ReadFull(stream, firstByte)
@@ -522,6 +523,7 @@ func testExecutionPayloadEnvelopesByRangeHandler(
 		require.NoError(t, err)
 		_, err = stream.Write(reqBuf.Bytes())
 		require.NoError(t, err)
+		require.NoError(t, stream.CloseWrite())
 		firstByte := make([]byte, 1)
 		_, err = io.ReadFull(stream, firstByte)
 		require.NoError(t, err)
@@ -1569,6 +1571,7 @@ func TestExecutionPayloadEnvelopesByRootHandlerRejectsOverLimit(t *testing.T) {
 
 	_, err = stream.Read(make([]byte, 1))
 	require.Error(t, err)
+	require.NotErrorIs(t, err, io.EOF, "an over-limit request must be rejected by decoding, not answered and closed")
 }
 
 func TestExecutionPayloadEnvelopesByRangeHandler_PreGloas(t *testing.T) {

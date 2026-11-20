@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	eezrules "github.com/erigontech/erigon/eez/rules"
@@ -53,8 +52,8 @@ func (e creditingEngine) PostProcessTx(_ *chain.Config, ibs *state.IntraBlockSta
 }
 
 // TestPostProcessorKeepsAccount checks that a post-processor writing one field of
-// an account no transaction touched leaves the rest of it, under the parallel
-// executor as serially. No reader shares the first block, so the first credit
+// an account no transaction touched leaves the rest of it, with several workers
+// as with one. No reader shares the first block, so the first credit
 // builds on the account's committed record.
 func TestPostProcessorKeepsAccount(t *testing.T) {
 	credited := common.HexToAddress("0x00000000000000000000000000000000000c0de1")
@@ -74,7 +73,7 @@ func TestPostProcessorKeepsAccount(t *testing.T) {
 	require.NoError(t, err)
 	withEngine := execmoduletester.WithEngine(creditingEngine{Engine: engine, credited: accounts.InternAddress(credited)})
 
-	dbg.Exec3Parallel = false
+	ethconfig.Defaults.Sync.ExecWorkerCount = 1
 	_, serial := derivertest.NewL2Of(t, c.spec, withEngine)
 	parent, err := serial.HeaderByNumber(t.Context(), 0)
 	require.NoError(t, err)
@@ -99,7 +98,6 @@ func TestPostProcessorKeepsAccount(t *testing.T) {
 	}
 	for _, workers := range []int{1, 2, 4} {
 		t.Run(fmt.Sprintf("workers %d", workers), func(t *testing.T) {
-			dbg.Exec3Parallel = true
 			ethconfig.Defaults.Sync.ExecWorkerCount = workers
 			m, chain := derivertest.NewL2Of(t, c.spec, withEngine)
 			require.NoError(t, m.InsertChain(&blockgen.ChainPack{Blocks: blocks, Headers: headers, TopBlock: blocks[len(blocks)-1]}))

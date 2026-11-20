@@ -74,7 +74,7 @@ func TestAttestationDueMs(t *testing.T) {
 		postGloas uint64
 	}{
 		{name: "mainnet", config: MainnetBeaconConfig, preGloas: 3999, postGloas: 3000},
-		{name: "6 second slots", config: BeaconChainConfig{SecondsPerSlot: 6}, preGloas: 1999, postGloas: 1500},
+		{name: "6 second slots", config: BeaconChainConfig{SecondsPerSlot: 6, AttestationDueBps: AttestationDueBps, AttestationDueBpsGloas: AttestationDueBpsGloas}, preGloas: 1999, postGloas: 1500},
 		{name: "gnosis", config: BeaconConfigs[chainspec.GnosisChainID], preGloas: 1666, postGloas: 1250},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -128,6 +128,23 @@ func TestCustomConfigBoundsMaxCommitteesPerSlot(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, test.committees, beaconCfg.MaxCommitteesPerSlot)
+		})
+	}
+}
+
+func TestCustomConfigBoundsMaxValidatorsPerCommittee(t *testing.T) {
+	for _, validators := range []uint64{4096, MaxSupportedValidatorsPerCommittee, MaxSupportedValidatorsPerCommittee + 1, math.MaxUint64} {
+		t.Run(fmt.Sprint(validators), func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, os.WriteFile(configPath, fmt.Appendf(nil, "MAX_VALIDATORS_PER_COMMITTEE: %d\n", validators), 0o644))
+
+			beaconCfg, _, err := CustomConfig(configPath)
+			if validators > MaxSupportedValidatorsPerCommittee {
+				require.EqualError(t, err, fmt.Sprintf("MAX_VALIDATORS_PER_COMMITTEE exceeds supported limit: %d > %d", validators, uint64(MaxSupportedValidatorsPerCommittee)))
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, validators, beaconCfg.MaxValidatorsPerCommittee)
 		})
 	}
 }

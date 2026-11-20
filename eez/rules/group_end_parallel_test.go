@@ -29,7 +29,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -52,15 +51,15 @@ import (
 const groupEndTipCap, groupEndFeeCap uint64 = common.GWei, 100 * common.GWei
 
 // groupEndChain builds v0.1 blocks on a 699169 genesis with alloc added,
-// serially and in parallel.
+// with one worker and with several.
 type groupEndChain struct {
 	t    *testing.T
 	spec chainspec.Spec
 }
 
 func newGroupEndChain(t *testing.T, alloc types.GenesisAlloc) *groupEndChain {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 	spec := networks.Chiado699169
 	genesis := *spec.Genesis
 	genesis.Alloc = maps.Clone(genesis.Alloc)
@@ -97,7 +96,7 @@ func (c *groupEndChain) nativeTx(selector [4]byte, value uint64) types.Transacti
 	return tx
 }
 
-// serial builds block 1 with txs and coinbase without the parallel executor,
+// serial builds block 1 with txs and coinbase with one worker,
 // unless opts ask for block access lists.
 func (c *groupEndChain) serial(coinbase common.Address, txs []types.Transaction, opts ...execmoduletester.Option) (*deriver.ExecChain, *types.BlockWithReceipts) {
 	_, chain, built := c.build(coinbase, txs, opts...)
@@ -106,7 +105,7 @@ func (c *groupEndChain) serial(coinbase common.Address, txs []types.Transaction,
 
 // build is serial with the tester holding the chain.
 func (c *groupEndChain) build(coinbase common.Address, txs []types.Transaction, opts ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *deriver.ExecChain, *types.BlockWithReceipts) {
-	dbg.Exec3Parallel = false
+	ethconfig.Defaults.Sync.ExecWorkerCount = 1
 	m, chain := derivertest.NewL2Of(c.t, c.spec, opts...)
 	parent, err := chain.HeaderByNumber(c.t.Context(), 0)
 	require.NoError(c.t, err)
@@ -123,9 +122,8 @@ func (c *groupEndChain) build(coinbase common.Address, txs []types.Transaction, 
 	return m, chain, built
 }
 
-// parallel imports block into a fresh chain with the parallel executor.
+// parallel imports block into a fresh chain with workers workers.
 func (c *groupEndChain) parallel(t *testing.T, workers int, block *types.Block, opts ...execmoduletester.Option) *deriver.ExecChain {
-	dbg.Exec3Parallel = true
 	ethconfig.Defaults.Sync.ExecWorkerCount = workers
 	m, chain := derivertest.NewL2Of(t, c.spec, opts...)
 	require.NoError(t, m.InsertChain(&blockgen.ChainPack{Blocks: []*types.Block{block}, Headers: []*types.Header{block.Header()}, TopBlock: block}))

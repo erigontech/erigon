@@ -79,8 +79,7 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 		}
 	}
 
-	// Create the parent state database
-	statedb := state.New(reader)
+	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
 
 	getHeader := func(hash common.Hash, n uint64) (*types.Header, error) {
 		return headerReader.HeaderByNumber(ctx, dbtx, n)
@@ -203,13 +202,17 @@ func AssembleTracer(
 		if config.TracerConfig != nil {
 			cfg = *config.TracerConfig
 		}
-		tracer, err := tracers.New(*config.Tracer, &tracers.Context{TxHash: txHash, TxIndex: txnIndex, BlockHash: blockHash, BlockNumber: blockNumber}, cfg)
+		deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
+		tracer, err := tracers.New(*config.Tracer, &tracers.Context{TxHash: txHash, TxIndex: txnIndex, BlockHash: blockHash, Ctx: deadlineCtx, BlockNumber: blockNumber}, cfg)
 		if err != nil {
+			if deadlineCtx.Err() != nil {
+				err = errors.New("execution timeout")
+			}
+			cancel()
 			return nil, false, func() {}, err
 		}
 
 		// Handle timeouts and RPC cancellations
-		deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
 		go func() {
 			<-deadlineCtx.Done()
 			tracer.Stop(errors.New("execution timeout"))

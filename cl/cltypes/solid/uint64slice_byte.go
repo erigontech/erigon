@@ -19,6 +19,7 @@ package solid
 import (
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strconv"
 
@@ -122,13 +123,15 @@ func (arr *byteBasedUint64Slice) UnmarshalJSON(buf []byte) error {
 	if err := json.Unmarshal(buf, &list); err != nil {
 		return err
 	}
-	arr.Clear()
-	arr.l = len(list)
-	for _, elem := range list {
-		arr.Append(elem)
+	return arr.replace(list)
+}
+
+func (arr *byteBasedUint64Slice) replace(values []uint64) error {
+	buf := make([]byte, 0, len(values)*8)
+	for _, v := range values {
+		buf = binary.LittleEndian.AppendUint64(buf, v)
 	}
-	arr.MerkleTree = nil
-	return nil
+	return arr.DecodeSSZ(buf, 0)
 }
 
 // Range iterates over the slice and applies a provided function to each element.
@@ -213,6 +216,9 @@ func (arr *byteBasedUint64Slice) Cap() int {
 
 // HashListSSZ computes the SSZ hash of the slice as a list. It returns the hash and any error encountered.
 func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
+	if arr.l > arr.c {
+		return [32]byte{}, fmt.Errorf("uint64 list length exceeds limit: %d > %d", arr.l, arr.c)
+	}
 	if arr.MerkleTree == nil {
 		arr.MerkleTree = &merkle_tree.MerkleTree{}
 		cap := uint64((arr.c*8 + length.Hash - 1) / length.Hash)
@@ -306,6 +312,9 @@ func (arr *byteBasedUint64Slice) EncodeSSZ(buf []byte) ([]byte, error) {
 func (arr *byteBasedUint64Slice) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf)%8 > 0 {
 		return ssz.ErrBadDynamicLength
+	}
+	if l := len(buf) / 8; l > arr.c {
+		return fmt.Errorf("uint64 list length exceeds limit: %d > %d", l, arr.c)
 	}
 	arr.l = len(buf) / 8
 	bufferLength := length.Hash*((arr.l-1)/4) + length.Hash

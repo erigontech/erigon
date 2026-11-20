@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"maps"
 	"math/big"
 	"os"
@@ -30,6 +29,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -69,7 +69,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/node/shards"
 )
 
 // Genesis occupies txNums 0 and 1; block 1 then spans 2 (block start), 3 (tx0),
@@ -133,7 +132,7 @@ type resumeBALFixture struct {
 	// rcacheForeign seeds each of those entries with the next transaction's
 	// receipt instead.
 	rcacheForeign bool
-	// inspect, when set, sees the state each exec and execSerial run leaves.
+	// inspect, when set, sees the state each exec run leaves.
 	inspect func(t *testing.T, sd *execctx.SharedDomains, tx kv.TemporalTx)
 }
 
@@ -423,13 +422,11 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 	assembled, err := ba.AssembleBlock(ibs, tx, logger)
 	require.NoError(t, err)
 
-	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), fx.engine, accounts.NilAddress, fx.config)
-	blockRules := blockContext.Rules(fx.config)
 	for _, ws := range ba.WriteSets() {
 		if ws == nil || ws.IsEmpty() {
 			continue
 		}
-		require.NoError(t, state.ApplyWrites(ws, domains, tx, 1, txNum, nil, blockRules, false))
+		require.NoError(t, state.ApplyWrites(ws, domains, tx, 1, txNum, false))
 	}
 	root, err := domains.ComputeCommitment(ctx, tx, false, 1, txNum, "resume-bal", nil)
 	require.NoError(t, err)
@@ -592,14 +589,10 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	return out.verdict, nil
 }
 
-// run executes block from point with the serial or the parallel executor and
-// returns the block's rejection, an invalid-block verdict or an operational
-// error.
-func (fx *resumeBALFixture) run(t *testing.T, block *types.Block, point resumePoint, serial bool) error {
+// run executes block from point and returns the block's rejection, an
+// invalid-block verdict or an operational error.
+func (fx *resumeBALFixture) run(t *testing.T, block *types.Block, point resumePoint) error {
 	t.Helper()
-	if serial {
-		return fx.execSerial(t, block, point)
-	}
 	verdict, err := fx.exec(t, block, point)
 	if verdict != nil {
 		return verdict.err
@@ -626,58 +619,6 @@ func (fx *resumeBALFixture) execCfg(t *testing.T, db kv.TemporalRwDB, dirs datad
 	syncCfg := ethconfig.Defaults.Sync
 	syncCfg.ExecWorkerCount = 2
 	return StageExecuteBlocksCfg(db, prune.DefaultMode, 512*datasize.MB, fx.config, fx.engine, &vm.Config{}, nil, false, false, dirs, blockReader, nil, syncCfg, false, nil)
-}
-
-// execSerial runs block through the serial executor from point and checks the
-// state root it leaves against the header's.
-func (fx *resumeBALFixture) execSerial(t *testing.T, block *types.Block, point resumePoint) error {
-	t.Helper()
-	ctx := context.Background()
-	logger := log.New()
-	dirs := datadir.New(t.TempDir())
-	db := newResumeTestDB(t)
-	fx.seed(t, db, point)
-	if fx.wipeHistory {
-		wipeHistoryTables(t, db)
-	}
-	cfg := fx.execCfg(t, db, dirs, block)
-	cfg.notifications = shards.NewNotifications(nil)
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	t.Cleanup(rwTx.Rollback)
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger)
-	require.NoError(t, err)
-	t.Cleanup(domains.Close)
-	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, logger))
-	se := &serialExecutor{txExecutor: txExecutor{cfg: cfg, rs: rs, doms: domains, applyTx: rwTx, logger: logger}}
-	require.NoError(t, se.resetWorkers(ctx, rs, rwTx))
-	t.Cleanup(func() { _ = se.worker.ResetTx(nil) })
-
-	header := block.HeaderNoCopy()
-	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), fx.engine, accounts.NilAddress, fx.config)
-	var tasks []exec.Task
-	txNum := resumeBALBlockStartTxNum
-	for txIndex := -1; txIndex <= len(block.Transactions()); txIndex++ {
-		if txIndex >= int(point) {
-			tasks = append(tasks, &exec.TxTask{
-				TxNum: txNum, TxIndex: txIndex, Header: header, Txs: block.Transactions(), Uncles: block.Uncles(),
-				Withdrawals: block.Withdrawals(), EvmBlockContext: blockContext, Logger: logger,
-			})
-		}
-		txNum++
-	}
-	if _, err := se.executeBlock(ctx, tasks, true); err != nil {
-		return err
-	}
-	if fx.inspect != nil {
-		fx.inspect(t, domains, rwTx)
-	}
-	root, err := domains.ComputeCommitment(ctx, rwTx, false, 1, txNum-1, "resume-serial", nil)
-	require.NoError(t, err)
-	if have := common.BytesToHash(root); have != block.Root() {
-		return fmt.Errorf("%w: %x, want %x", ErrWrongTrieRoot, have, block.Root())
-	}
-	return nil
 }
 
 // TestResumedBlockValidatesBlockAccessList pins that a block resumed after a
@@ -952,26 +893,16 @@ func testResumedBlockTxGas(t *testing.T, config *chain.Config) {
 			testCase{"after tx0 without receipts or history/unbound", invalid, unbound[2].Hash(), offset, afterTx0, true, true, nil})
 	}
 	for _, tc := range cases {
-		for _, serial := range []bool{false, true} {
-			// The serial executor refuses Amsterdam blocks.
-			if serial && isAmsterdam {
-				continue
+		t.Run(tc.name, func(t *testing.T) {
+			fx.engine = boundAt{base, tc.mark, tc.offset}
+			fx.noPrefixReceipts, fx.wipeHistory = tc.noPrefixReceipts, tc.wipeHistory
+			err := fx.run(t, tc.block, tc.point)
+			if tc.err == nil {
+				require.NoError(t, err)
+				return
 			}
-			name := "parallel/" + tc.name
-			if serial {
-				name = "serial/" + tc.name
-			}
-			t.Run(name, func(t *testing.T) {
-				fx.engine = boundAt{base, tc.mark, tc.offset}
-				fx.noPrefixReceipts, fx.wipeHistory = tc.noPrefixReceipts, tc.wipeHistory
-				err := fx.run(t, tc.block, tc.point, serial)
-				if tc.err == nil {
-					require.NoError(t, err)
-					return
-				}
-				require.ErrorIs(t, err, tc.err)
-			})
-		}
+			require.ErrorIs(t, err, tc.err)
+		})
 	}
 }
 
@@ -1046,11 +977,11 @@ func (fx *resumeBALFixture) recordGas(t *testing.T, have *uint256.Int) uint256.I
 	return want
 }
 
-// TestResumedBlockGasFromBlock checks that both executors, resuming a block
-// after transactions that left less gas than a later message's limit, give
+// TestResumedBlockGasFromBlock checks that the executor, resuming a block
+// after transactions that left less gas than a later message's limit, gives
 // that message, which takes its gas from the block, what the transactions
 // left, also when their receipts are missing, the latest one then an earlier
-// block's, and check the message's bound gas limit against it.
+// block's, and checks the message's bound gas limit against it.
 func TestResumedBlockGasFromBlock(t *testing.T) {
 	for _, prefix := range []struct {
 		name  string
@@ -1081,26 +1012,20 @@ func TestResumedBlockGasFromBlock(t *testing.T) {
 			{"after prefix without receipts", resumePoint(last), true, false},
 			{"after prefix with only an earlier block's receipt", resumePoint(last), true, true},
 		} {
-			for _, serial := range []bool{false, true} {
-				name := prefix.name + "/parallel/" + tc.name
-				if serial {
-					name = prefix.name + "/serial/" + tc.name
-				}
-				t.Run(name, func(t *testing.T) {
-					left, recorded = 0, uint256.Int{}
-					fx.noPrefixReceipts, fx.earlierReceipt = tc.noPrefixReceipts, tc.earlierReceipt
-					err := fx.run(t, fx.block, tc.point, serial)
-					require.Equal(t, want, recorded, "gas recorded by the message")
-					require.NoError(t, err)
-					require.Equal(t, wantLeft, left, "gas left checked at the message")
-				})
-			}
+			t.Run(prefix.name+"/"+tc.name, func(t *testing.T) {
+				left, recorded = 0, uint256.Int{}
+				fx.noPrefixReceipts, fx.earlierReceipt = tc.noPrefixReceipts, tc.earlierReceipt
+				err := fx.run(t, fx.block, tc.point)
+				require.Equal(t, want, recorded, "gas recorded by the message")
+				require.NoError(t, err)
+				require.Equal(t, wantLeft, left, "gas left checked at the message")
+			})
 		}
 	}
 }
 
-// TestResumedBlockReceipts checks that both executors, resuming a block after
-// transactions whose receipts are missing, record the receipt of the message
+// TestResumedBlockReceipts checks that the executor, resuming a block after
+// transactions whose receipts are missing, records the receipt of the message
 // after them with the cumulative gas, blob gas and log index the whole block
 // gives it, not with those of the receipt domain's latest record, whether the
 // message takes its gas from the block or not, before Amsterdam and from it.
@@ -1252,50 +1177,40 @@ func testResumedBlockReceipts(t *testing.T, config *chain.Config, fromBlock bool
 			testCase{"after tx1 without receipts or history/receipt cache", resumePoint(2), true, false, false, true, 2, 0, false})
 	}
 	for _, tc := range cases {
-		for _, serial := range []bool{false, true} {
-			// The serial executor refuses Amsterdam blocks.
-			if serial && isAmsterdam {
-				continue
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.rcacheTxs > 0 {
+				saved := statecfg.Schema.RCacheDomain
+				statecfg.EnableHistoricalRCache()
+				t.Cleanup(func() { statecfg.Schema.RCacheDomain = saved })
 			}
-			name := "parallel/" + tc.name
-			if serial {
-				name = "serial/" + tc.name
+			gas, blobGas, logIndex, recorded = 0, 0, 0, uint256.Int{}
+			clear(engine.counts)
+			finalized = nil
+			fx.noPrefixReceipts, fx.earlierReceipt, fx.earlierGas = tc.noPrefixReceipts, tc.earlierReceipt, 0
+			fx.wipeHistory, fx.rcacheTxs, fx.rcacheForeign = tc.wipeHistory, tc.rcacheTxs, tc.rcacheForeign
+			if tc.unchangedTx0 {
+				fx.earlierGas = fx.receipts[0].CumulativeGasUsed
 			}
-			t.Run(name, func(t *testing.T) {
-				if tc.rcacheTxs > 0 {
-					saved := statecfg.Schema.RCacheDomain
-					statecfg.EnableHistoricalRCache()
-					t.Cleanup(func() { statecfg.Schema.RCacheDomain = saved })
+			require.NoError(t, fx.run(t, fx.block, tc.point))
+			require.Equal(t, wantRecorded, recorded, "gas the message got")
+			require.Equal(t, wantGas, gas, "cumulative gas")
+			require.Equal(t, wantBlobGas, blobGas, "cumulative blob gas")
+			require.Equal(t, uint64(4), logIndex, "log index after the message")
+			// From Amsterdam the block access list check executes them again.
+			if tc.point != fromBlockStart && !isAmsterdam {
+				require.Equal(t, tc.replays, engine.counts[0], "times tx0 executed again")
+			}
+			require.Len(t, finalized, len(txs), "receipts the block is finalized with")
+			var firstLogIndex uint
+			for i, receipt := range finalized {
+				require.Equal(t, txs[i].Hash(), receipt.TxHash, "finalized receipt %d", i)
+				require.Equal(t, uint32(firstLogIndex), receipt.FirstLogIndexWithinBlock, "finalized receipt %d", i)
+				for _, lg := range receipt.Logs {
+					require.Equal(t, firstLogIndex, uint(lg.Index), "log of finalized receipt %d", i)
+					firstLogIndex++
 				}
-				gas, blobGas, logIndex, recorded = 0, 0, 0, uint256.Int{}
-				clear(engine.counts)
-				finalized = nil
-				fx.noPrefixReceipts, fx.earlierReceipt, fx.earlierGas = tc.noPrefixReceipts, tc.earlierReceipt, 0
-				fx.wipeHistory, fx.rcacheTxs, fx.rcacheForeign = tc.wipeHistory, tc.rcacheTxs, tc.rcacheForeign
-				if tc.unchangedTx0 {
-					fx.earlierGas = fx.receipts[0].CumulativeGasUsed
-				}
-				require.NoError(t, fx.run(t, fx.block, tc.point, serial))
-				require.Equal(t, wantRecorded, recorded, "gas the message got")
-				require.Equal(t, wantGas, gas, "cumulative gas")
-				require.Equal(t, wantBlobGas, blobGas, "cumulative blob gas")
-				require.Equal(t, uint64(4), logIndex, "log index after the message")
-				// From Amsterdam the block access list check executes them again.
-				if tc.point != fromBlockStart && !isAmsterdam {
-					require.Equal(t, tc.replays, engine.counts[0], "times tx0 executed again")
-				}
-				require.Len(t, finalized, len(txs), "receipts the block is finalized with")
-				var firstLogIndex uint
-				for i, receipt := range finalized {
-					require.Equal(t, txs[i].Hash(), receipt.TxHash, "finalized receipt %d", i)
-					require.Equal(t, uint32(firstLogIndex), receipt.FirstLogIndexWithinBlock, "finalized receipt %d", i)
-					for _, lg := range receipt.Logs {
-						require.Equal(t, firstLogIndex, uint(lg.Index), "log of finalized receipt %d", i)
-						firstLogIndex++
-					}
-				}
-			})
-		}
+			}
+		})
 	}
 }
 
@@ -1321,7 +1236,7 @@ func (txn noWritesTxn) AsMessage(s types.Signer, baseFee *uint256.Int, rules *ch
 	return free, nil
 }
 
-// TestResumedBlockGasFromBlockAfterNoWrites checks that both executors resume a
+// TestResumedBlockGasFromBlockAfterNoWrites checks that the executor resumes a
 // block after a transaction that wrote no state and left no receipt before a
 // message taking its gas from the block: the block start's writes show the
 // state history holds the block.
@@ -1348,23 +1263,14 @@ func TestResumedBlockGasFromBlockAfterNoWrites(t *testing.T) {
 	var recorded uint256.Int
 	want := fx.recordGas(t, &recorded)
 	fx.noPrefixReceipts = true
-	for _, serial := range []bool{false, true} {
-		name := "parallel"
-		if serial {
-			name = "serial"
-		}
-		t.Run(name, func(t *testing.T) {
-			recorded = uint256.Int{}
-			require.NoError(t, fx.run(t, fx.block, afterTx0, serial))
-			require.Equal(t, want, recorded, "gas recorded by tx1")
-		})
-	}
+	require.NoError(t, fx.run(t, fx.block, afterTx0))
+	require.Equal(t, want, recorded, "gas recorded by tx1")
 }
 
-// TestResumedBlockWithoutPrefixGas checks that both executors, resuming a
+// TestResumedBlockWithoutPrefixGas checks that the executor, resuming a
 // block after a transaction whose gas neither its receipt nor the state
-// history tells, fail the run without judging the block when a later message
-// takes its gas from the block, and execute the block otherwise.
+// history tells, fails the run without judging the block when a later message
+// takes its gas from the block, and executes the block otherwise.
 func TestResumedBlockWithoutPrefixGas(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -1379,33 +1285,21 @@ func TestResumedBlockWithoutPrefixGas(t *testing.T) {
 		var recorded uint256.Int
 		want := fx.recordGas(t, &recorded)
 		fx.noPrefixReceipts, fx.wipeHistory = true, true
-		for _, serial := range []bool{false, true} {
-			name := "parallel/" + tc.name
-			if serial {
-				name = "serial/" + tc.name
+		t.Run(tc.name, func(t *testing.T) {
+			recorded = uint256.Int{}
+			verdict, err := fx.exec(t, fx.block, afterTx0)
+			if verdict != nil {
+				t.Fatalf("block judged: %v", verdict.err)
 			}
-			t.Run(name, func(t *testing.T) {
-				recorded = uint256.Int{}
-				var err error
-				if serial {
-					err = fx.execSerial(t, fx.block, afterTx0)
-				} else {
-					var verdict *blockVerdict
-					verdict, err = fx.exec(t, fx.block, afterTx0)
-					if verdict != nil {
-						t.Fatalf("block judged: %v", verdict.err)
-					}
-				}
-				if !tc.fromBlock {
-					require.NoError(t, err)
-					require.Equal(t, want, recorded, "gas recorded by tx1")
-					return
-				}
-				require.ErrorIs(t, err, state.ErrPruned)
-				require.NotErrorIs(t, err, rules.ErrInvalidBlock)
-				require.NotErrorIs(t, err, ErrWrongTrieRoot)
-			})
-		}
+			if !tc.fromBlock {
+				require.NoError(t, err)
+				require.Equal(t, want, recorded, "gas recorded by tx1")
+				return
+			}
+			require.ErrorIs(t, err, state.ErrPruned)
+			require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+			require.NotErrorIs(t, err, ErrWrongTrieRoot)
+		})
 	}
 }
 
@@ -1510,8 +1404,8 @@ func TestParallelResumedAtOtherTask(t *testing.T) {
 	require.ErrorContains(t, err, "otherTask")
 }
 
-// TestResumedBlockBlobGas checks that both executors, resuming a block after a
-// transaction that used blob gas, reject a later one whose blobs the rest of
+// TestResumedBlockBlobGas checks that the executor, resuming a block after a
+// transaction that used blob gas, rejects a later one whose blobs the rest of
 // the block's blob gas does not fit, also without the first one's receipt,
 // the latest one then an earlier block's, whether or not the later one takes
 // its gas from the block.
@@ -1564,15 +1458,31 @@ func TestResumedBlockBlobGas(t *testing.T) {
 		{"after tx0 without receipts/gas from block", fromBlock, afterTx0, true, false},
 		{"after tx0 with only an earlier block's receipt/gas from block", fromBlock, afterTx0, true, true},
 	} {
-		for _, serial := range []bool{false, true} {
-			name := "parallel/" + tc.name
-			if serial {
-				name = "serial/" + tc.name
-			}
-			t.Run(name, func(t *testing.T) {
-				fx.block, fx.noPrefixReceipts, fx.earlierReceipt = tc.block, tc.noPrefixReceipts, tc.earlierReceipt
-				require.ErrorIs(t, fx.run(t, tc.block, tc.point, serial), protocol.ErrBlobGasLimitReached)
-			})
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			fx.block, fx.noPrefixReceipts, fx.earlierReceipt = tc.block, tc.noPrefixReceipts, tc.earlierReceipt
+			require.ErrorIs(t, fx.run(t, tc.block, tc.point), protocol.ErrBlobGasLimitReached)
+		})
 	}
+}
+
+// panicFinalizeEngine panics the exec loop at block end, after the apply loop
+// has had time to take the block's tx results.
+type panicFinalizeEngine struct{ rules.Engine }
+
+func (panicFinalizeEngine) Finalize(*chain.Config, *types.Header, *state.IntraBlockState, []*types.Header,
+	types.Receipts, []*types.Withdrawal, rules.ChainReader, rules.SystemCall, bool, log.Logger,
+) (types.FlatRequests, error) {
+	time.Sleep(50 * time.Millisecond)
+	panic("finalize failed")
+}
+
+// TestExecLoopPanicMidBlockIsNotInvalidBlock pins that an exec-loop panic after
+// the block's tx results reached the apply loop is an internal error, not a verdict.
+func TestExecLoopPanicMidBlockIsNotInvalidBlock(t *testing.T) {
+	fx := newResumeBALFixture(t)
+	fx.engine = panicFinalizeEngine{Engine: fx.engine}
+	verdict, err := fx.exec(t, fx.block, fromBlockStart)
+	require.Nil(t, verdict)
+	require.ErrorContains(t, err, "finalize failed")
+	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 }

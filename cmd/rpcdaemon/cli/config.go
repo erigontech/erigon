@@ -115,7 +115,6 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&eezEnabled, eez.EnabledFlag.Name, false, "Enable EEZ support: the l2 config section, transaction type 0x76 and the EEZ rules engine")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GraphQLEnabled, "graphql", false, "enables graphql endpoint (disabled by default)")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 50_000_000, "Sets a cap on gas that can be used in eth_call/estimateGas")
-	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
 
 	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, utils.RpcAccessListFlag.Name, "", "Specify granular (method-by-method) API allowlist")
 	rootCmd.PersistentFlags().UintVar(&cfg.RpcBatchConcurrency, utils.RpcBatchConcurrencyFlag.Name, 2, utils.RpcBatchConcurrencyFlag.Usage)
@@ -234,25 +233,16 @@ type StateChangesClient interface {
 
 func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient, cache kvcache.Cache) {
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
+		for ctx.Err() == nil {
+			err := subscribeToStateChanges(ctx, client, cache)
+			if ctx.Err() != nil {
 				return
-			default:
 			}
-			if err := subscribeToStateChanges(ctx, client, cache); err != nil {
-				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-					// ctx-aware retry delay so callers cancelling ctx don't have to
-					// wait up to 3s for the next retry cycle.
-					err = common.Sleep(ctx, 3*time.Second)
-					if err == nil {
-						continue
-					}
-				}
-				if errors.Is(err, context.Canceled) {
-					return
-				}
+			if err != nil && !grpcutil.IsRetryLater(err) && !grpcutil.IsEndOfStream(err) {
 				log.Warn("[rpcdaemon subscribeToStateChanges]", "err", err)
+			}
+			if common.Sleep(ctx, 3*time.Second) != nil {
+				return
 			}
 		}
 	}()

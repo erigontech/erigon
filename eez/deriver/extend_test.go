@@ -72,7 +72,7 @@ func TestExtendBuildsEveryTransactionOnce(t *testing.T) {
 // extend derives block 1 of b's chain from txs under ctx.
 func (b *stateGasBlock) extend(t *testing.T, ctx context.Context, txs ...types.Transaction) (*types.BlockWithReceipts, error) {
 	t.Helper()
-	_, chain := b.chain(t, 0, func(e *eezrules.Engine) rules.Engine { return headerless{e} })
+	_, chain := b.chain(t, 1, func(e *eezrules.Engine) rules.Engine { return headerless{e} })
 	parent, err := chain.HeaderByNumber(t.Context(), 0)
 	require.NoError(t, err)
 	l2 := b.genesis.Config.L2.(*config.L2Config)
@@ -198,7 +198,7 @@ func (d *drip) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]typ
 // produce builds block 1 from txs as the sequencer does.
 func (b *stateGasBlock) produce(t *testing.T, wrap func(*eezrules.Engine) rules.Engine, txs txnprovider.TxnProvider) *types.BlockWithReceipts {
 	t.Helper()
-	_, chain := b.chain(t, 0, wrap)
+	_, chain := b.chain(t, 1, wrap)
 	parent, err := chain.HeaderByNumber(t.Context(), 0)
 	require.NoError(t, err)
 	l2 := b.genesis.Config.L2.(*config.L2Config)

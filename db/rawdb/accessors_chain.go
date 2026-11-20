@@ -173,14 +173,6 @@ func ResetBadBlockCache(tx kv.Tx, limit int) error {
 
 /* latest bad blocks end */
 
-func IsCanonicalHash(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
-	canonicalHash, err := ReadCanonicalHash(db, number)
-	if err != nil {
-		return false, err
-	}
-	return canonicalHash != (common.Hash{}) && canonicalHash == hash, nil
-}
-
 // ReadHeaderNumber returns the header number assigned to a hash.
 func ReadHeaderNumber(db kv.Getter, hash common.Hash) *uint64 {
 	data, err := db.GetOne(kv.HeaderNumber, hash[:])
@@ -440,19 +432,6 @@ func WriteHeader(db kv.RwTx, header *types.Header) error {
 	return nil
 }
 
-func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash common.Hash, headerRlp []byte, skipIndexing bool) error {
-	if err := db.Put(kv.Headers, dbutils.HeaderKey(number, hash), headerRlp); err != nil {
-		return err
-	}
-	if skipIndexing {
-		return nil
-	}
-	if err := WriteHeaderNumber(db, hash, number); err != nil {
-		return err
-	}
-	return nil
-}
-
 // DeleteHeader - dangerous, use PruneBlocks/TruncateBlocks methods
 func DeleteHeader(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.Headers, dbutils.HeaderKey(number, hash)); err != nil {
@@ -470,18 +449,6 @@ func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVa
 		log.Error("ReadStorageBodyRLP failed", "err", err)
 	}
 	return bodyRlp
-}
-
-func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, bool, error) {
-	txnRlp, err := TxnRlpByIdxInBlock(db, blockHash, blockNum, txIdxInBlock)
-	if err != nil || txnRlp == nil {
-		return nil, false, err
-	}
-	txn, err := types.DecodeTransaction(txnRlp)
-	if err != nil {
-		return nil, false, err
-	}
-	return txn, true, nil
 }
 
 // TxnRlpByIdxInBlock returns the stored encoding of the i-th transaction of a block, or nil when it does not exist.
@@ -1374,58 +1341,77 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, 
 	return res, true, nil
 }
 
-func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
-	blockHash := block.Hash()
-	blockNum := block.NumberU64()
+func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (types.Receipts, error) {
 	transactions := block.Transactions()
+	// Hashing the transactions overlaps with reading the receipts.
+	hashed := make(chan struct{})
+	go func() {
+		defer close(hashed)
+		for _, txn := range transactions {
+			txn.Hash()
+		}
+	}()
+	defer func() { <-hashed }()
 
-	minTxNum, err := txNumReader.Min(context.Background(), tx, blockNum)
+	res, err := ReadBlockReceiptsCacheV2(context.Background(), tx, block.NumberU64(), txNumReader)
 	if err != nil {
-		return
+		return nil, err
 	}
-	maxTxNum, err := txNumReader.Max(context.Background(), tx, blockNum)
-	if err != nil {
-		return
-	}
+	<-hashed
+	return DeriveCachedBlockReceipts(block, res), nil
+}
 
-	receiptIdx := 0
-	for txNum := minTxNum; txNum < maxTxNum+1; txNum++ {
-		v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, txNum+1)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-		if len(v) == 0 {
-			continue
-		}
-
-		// Convert the receipts from their storage form to their internal representation
-		receipt := &types.ReceiptForStorage{}
-		if err := rlp.DecodeBytes(v, receipt); err != nil {
-			return nil, fmt.Errorf("ReadReceiptsCacheV2: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
-		}
-		x := (*types.Receipt)(receipt)
-		txnIdx := int(receipt.TransactionIndex)
-		if txnIdx < 0 || txnIdx != receiptIdx || txnIdx >= len(transactions) {
-			// RCacheV2 is read in txNum order. The stored transaction index must
-			// match the next receipt position, otherwise derive the block instead.
-			return nil, nil
-		}
-		txn := transactions[txnIdx]
-		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txn.Hash(), true)
-		res = append(res, x)
-		receiptIdx++
+// DeriveCachedBlockReceipts completes the RCacheV2 receipts of block with the block fields.
+// It returns nil when res does not hold one receipt per transaction: block receipt RPCs require the full set.
+func DeriveCachedBlockReceipts(block *types.Block, res types.Receipts) types.Receipts {
+	transactions := block.Transactions()
+	if len(res) != len(transactions) {
+		return nil
 	}
-	if receiptIdx != len(transactions) {
-		// Block receipt RPCs require the full ordered receipt set.
-		return nil, nil
+	blockHash, blockNum := block.Hash(), block.NumberU64()
+	for i, x := range res {
+		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, transactions[i].Hash(), false)
 	}
-	return res, nil
+	return res
 }
 
 func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
 	var w rawtemporaldb.ReceiptWriter
 	return w.Append(tx, receipt, txNum)
+}
+
+// ReadBlockReceiptsCacheV2 reads and decodes the RCacheV2 receipts of blockNum, with their blooms,
+// without the block. A gap returns nil, and a missing tail returns a shorter list.
+func ReadBlockReceiptsCacheV2(ctx context.Context, tx kv.TemporalTx, blockNum uint64, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
+	minTxNum, err := txNumReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	maxTxNum, err := txNumReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	for txNum := minTxNum; txNum < maxTxNum+1; txNum++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, txNum+1)
+		if err != nil {
+			return nil, err
+		}
+		if !ok || len(v) == 0 {
+			continue
+		}
+		receipt := &types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(v, receipt); err != nil {
+			return nil, fmt.Errorf("ReadBlockReceiptsCacheV2: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
+		}
+		x := (*types.Receipt)(receipt)
+		if int(x.TransactionIndex) != len(res) {
+			return nil, nil
+		}
+		x.Bloom = types.CreateBloom(types.Receipts{x})
+		res = append(res, x)
+	}
+	return res, nil
 }

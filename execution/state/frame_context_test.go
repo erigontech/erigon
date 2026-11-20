@@ -26,7 +26,8 @@ import (
 )
 
 func TestFrameContextLazyHashes(t *testing.T) {
-	var ibs IntraBlockState
+	ibs := New(NewNoopReader())
+	t.Cleanup(ibs.Close)
 	tx := &types.FrameTransaction{
 		NonceKeys:  []uint256.Int{{1}, {2}},
 		Frames:     []types.Frame{{Data: []byte{3}}},

@@ -30,7 +30,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/deriver"
@@ -41,6 +40,7 @@ import (
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -97,7 +97,7 @@ func TestGroupEndBurnRPCReplay(t *testing.T) {
 			require.NoError(t, err)
 			created := types.CreateAddress(derivertest.UserAddress(), 1)
 
-			dbg.Exec3Parallel = false
+			ethconfig.Defaults.Sync.ExecWorkerCount = 1
 			m, chain := derivertest.NewL2Of(t, c.spec)
 			parent, err := chain.HeaderByNumber(t.Context(), 0)
 			require.NoError(t, err)
@@ -187,7 +187,7 @@ func checkGroupEndRPCReplay(t *testing.T, m *execmoduletester.ExecModuleTester, 
 		api := jsonrpc.NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 		for _, traceTypes := range [][]string{{"trace"}, {"trace", "stateDiff"}, {"vmTrace"}} {
 			t.Run(fmt.Sprint(traceTypes), func(t *testing.T) {
-				results, err := api.ReplayBlockTransactions(t.Context(), rpc.BlockNumberOrHashWithNumber(1), traceTypes, nil, nil)
+				results, err := api.ReplayBlockTransactions(t.Context(), rpc.BlockNumberOrHashWithNumber(1), traceTypes, nil)
 				require.NoError(t, err)
 				require.Len(t, results, 3)
 				require.Equal(t, want, results[2].Output)
@@ -212,11 +212,11 @@ func checkGroupEndRPCReplay(t *testing.T, m *execmoduletester.ExecModuleTester, 
 
 	t.Run("trace_replayTransaction", func(t *testing.T) {
 		api := jsonrpc.NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
-		blockResults, err := api.ReplayBlockTransactions(t.Context(), rpc.BlockNumberOrHashWithNumber(1), []string{"stateDiff"}, nil, nil)
+		blockResults, err := api.ReplayBlockTransactions(t.Context(), rpc.BlockNumberOrHashWithNumber(1), []string{"stateDiff"}, nil)
 		require.NoError(t, err)
 		require.Len(t, blockResults, 3)
 		for i, txn := range block.Transactions() {
-			res, err := api.ReplayTransaction(t.Context(), txn.Hash(), []string{"stateDiff"}, nil, nil)
+			res, err := api.ReplayTransaction(t.Context(), txn.Hash(), []string{"stateDiff"}, nil)
 			require.NoError(t, err)
 			want, err := json.Marshal(blockResults[i].StateDiff)
 			require.NoError(t, err)

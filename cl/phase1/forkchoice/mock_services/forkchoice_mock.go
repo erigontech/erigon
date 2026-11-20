@@ -90,6 +90,7 @@ type ForkChoiceStorageMock struct {
 	WeightsMock                                        []forkchoice.ForkNode
 	LightClientBootstraps                              map[common.Hash]*cltypes.LightClientBootstrap
 	NewestLCUpdate                                     *cltypes.LightClientUpdate
+	NewestLCFinalityUpdate                             *cltypes.LightClientUpdate
 	LCUpdates                                          map[uint64]*cltypes.LightClientUpdate
 	SyncContributionPool                               sync_contribution_pool.SyncContributionPool
 	Headers                                            map[common.Hash]*cltypes.BeaconBlockHeader
@@ -415,7 +416,7 @@ func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(blockRoot common.Hash) (*sta
 	return st.Copy()
 }
 
-func (f *ForkChoiceStorageMock) GetOwnedStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+func (f *ForkChoiceStorageMock) GetOwnedStateAtBlockRoot(blockRoot common.Hash, _ *state.CachingBeaconState) (*state.CachingBeaconState, error) {
 	return f.GetStateAtBlockRoot(blockRoot)
 }
 
@@ -748,6 +749,10 @@ func (f *ForkChoiceStorageMock) GetLightClientBootstrap(
 	blockRoot common.Hash,
 ) (*cltypes.LightClientBootstrap, bool) {
 	return f.LightClientBootstraps[blockRoot], f.LightClientBootstraps[blockRoot] != nil
+}
+
+func (f *ForkChoiceStorageMock) NewestLightClientFinalityUpdate() *cltypes.LightClientUpdate {
+	return f.NewestLCFinalityUpdate
 }
 
 func (f *ForkChoiceStorageMock) NewestLightClientUpdate() *cltypes.LightClientUpdate {

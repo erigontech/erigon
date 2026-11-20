@@ -141,7 +141,7 @@ func TestBlockStartBurnTraceReplay(t *testing.T) {
 
 	base := jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	api := jsonrpc.NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
-	blockResults, err := api.ReplayBlockTransactions(t.Context(), rpc.BlockNumberOrHashWithNumber(2), []string{"trace", "stateDiff"}, nil, nil)
+	blockResults, err := api.ReplayBlockTransactions(t.Context(), rpc.BlockNumberOrHashWithNumber(2), []string{"trace", "stateDiff"}, nil)
 	require.NoError(t, err)
 	require.Len(t, blockResults, 4)
 	require.Equal(t, want, blockResults[3].Output, "trace_replayBlockTransactions")
@@ -150,7 +150,7 @@ func TestBlockStartBurnTraceReplay(t *testing.T) {
 
 	for _, traceTypes := range [][]string{{"trace"}, {"stateDiff"}, {"trace", "stateDiff"}, {"vmTrace"}} {
 		t.Run(fmt.Sprint("trace_replayTransaction ", traceTypes), func(t *testing.T) {
-			res, err := api.ReplayTransaction(t.Context(), read.Hash(), traceTypes, nil, nil)
+			res, err := api.ReplayTransaction(t.Context(), read.Hash(), traceTypes, nil)
 			require.NoError(t, err)
 			require.Equal(t, want, res.Output)
 			if res.StateDiff != nil {
@@ -161,13 +161,13 @@ func TestBlockStartBurnTraceReplay(t *testing.T) {
 		})
 	}
 	t.Run("trace_transaction", func(t *testing.T) {
-		traces, err := api.Transaction(t.Context(), read.Hash(), nil, nil)
+		traces, err := api.Transaction(t.Context(), read.Hash(), nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, traces)
 		require.Equal(t, want, traceOutput(t, traces[0]))
 	})
 	t.Run("trace_get", func(t *testing.T) {
-		trace, err := api.Get(t.Context(), read.Hash(), []hexutil.Uint64{}, nil, nil)
+		trace, err := api.Get(t.Context(), read.Hash(), []hexutil.Uint64{}, nil)
 		require.NoError(t, err)
 		require.NotNil(t, trace)
 		require.Equal(t, want, traceOutput(t, *trace))

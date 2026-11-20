@@ -322,10 +322,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	if builderOption, skippedLegacy := builderOptionForConfig(&config, beaconConfig); builderOption != nil {
 		caplinOptions = append(caplinOptions, builderOption)
 		if skippedLegacy {
-			log.Warn("builder api enable but relay url not set. Skipping builder mode")
+			log.Warn("MEV relay URL not set; relay-dependent builder endpoints disabled")
 		}
 	} else if skippedLegacy {
-		log.Warn("builder api enable but relay url not set. Skipping builder mode")
+		log.Warn("MEV relay URL not set; relay-dependent builder endpoints disabled")
 	}
 	log.Info("Starting caplin")
 
@@ -507,7 +507,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	peerDas := das.NewPeerDas(beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager, rcsn, indexDB)
 	forkChoice.InitPeerDas(peerDas)   // hack init
 	peerDas.SetForkChoice(forkChoice) // [New in Gloas:EIP7732] Set forkChoice for GLOAS kzg_commitments lookup
-	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(beaconConfig, networkConfig, syncedDataManager, gossipManager, aggregationPool)
+	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(beaconConfig, networkConfig, syncedDataManager, gossipManager, aggregationPool, ethClock, validatorParameters)
+	go committeeSub.RunProposalWindows(ctx)
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
 	// Define gossip services
 	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)

@@ -211,7 +211,7 @@ func ExecuteBlockEphemerally(
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
 		ibs.SetTxContext(blockNum, len(txs))
-		newBlock, _, err = FinalizeBlockExecution(engine, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger)
+		newBlock, _, err = FinalizeBlockExecution(engine, block.Header(), txs, block.Uncles(), chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -340,7 +340,7 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 func FinalizeBlockExecution(
 	engine rules.Engine,
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
-	stateWriter state.StateWriter, cc *chain.Config,
+	cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
 	withdrawals []*types.Withdrawal, chainReader rules.ChainReader,
 	isMining bool,
@@ -351,9 +351,10 @@ func FinalizeBlockExecution(
 		return ret, err
 	}
 
-	if ibs.IsVersioned() {
-		ibs.StartAccessRecording()
+	if !ibs.IsVersioned() {
+		return nil, nil, errors.New("block state has no version map")
 	}
+	ibs.StartAccessRecording()
 
 	if isMining {
 		newBlock, retRequests, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, nil, logger)
@@ -363,18 +364,6 @@ func FinalizeBlockExecution(
 	if err != nil {
 		return nil, nil, err
 	}
-
-	// A versioned ibs (parallel-mode block assembly) commits from the versionMap
-	// write-set — the caller applies ba.WriteSets() via ApplyWrites after
-	// assembly, so so.data must not also be flushed here. versionMap==nil callers
-	// (ExecuteBlockEphemerally, RPC) keep the so.data CommitBlock.
-	if !ibs.IsVersioned() {
-		blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
-		if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
-			return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
-		}
-	}
-
 	return newBlock, retRequests, nil
 }
 

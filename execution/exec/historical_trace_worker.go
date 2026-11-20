@@ -421,9 +421,9 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
 					// End of block transaction in a block
 					reader := state.NewHistoryReaderV3(tx, outputTxNum)
-					ibs := state.New(reader)
+					ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
 					defer ibs.Close()
-					transactions.VersionedCallState(ibs)
+					ibs.SetNoConflictDetection()
 					ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 					syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 						return protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{})
@@ -636,13 +636,4 @@ func BlkRangeToSteps(ctx context.Context, tx kv.TemporalTx, fromBlock, toBlock u
 
 	stepSize := tx.Debug().StepSize()
 	return float64(fromTxNum) / float64(stepSize), float64(toTxNum) / float64(stepSize), nil
-}
-
-func BlkRangeToStepsOnDB(ctx context.Context, db kv.TemporalRoDB, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer tx.Rollback()
-	return BlkRangeToSteps(ctx, tx, fromBlock, toBlock, txNumsReader)
 }

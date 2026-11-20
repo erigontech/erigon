@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -146,8 +145,8 @@ type stateGasBlock struct {
 
 func newStateGasBlock(t *testing.T, slots byte, amsterdam bool) *stateGasBlock {
 	t.Helper()
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 	eez.Register()
 	eezl2 := protocol.RollupXEEZL2Address
 	filler := common.HexToAddress("0x00000000000000000000000000000000000f111e")
@@ -188,11 +187,10 @@ func newStateGasBlock(t *testing.T, slots byte, amsterdam bool) *stateGasBlock {
 }
 
 // chain starts a chain on the genesis with the engine wrap makes of the EEZ
-// engine, executing serially or with workers parallel workers.
+// engine, executing with workers parallel workers.
 func (b *stateGasBlock) chain(t *testing.T, workers int, wrap func(*eezrules.Engine) rules.Engine) (*execmoduletester.ExecModuleTester, *deriver.ExecChain) {
 	t.Helper()
-	dbg.Exec3Parallel = workers > 0
-	ethconfig.Defaults.Sync.ExecWorkerCount = max(workers, 1)
+	ethconfig.Defaults.Sync.ExecWorkerCount = workers
 	engine, err := eezrules.New(b.osaka)
 	require.NoError(t, err)
 	genesis := b.genesis
@@ -206,10 +204,10 @@ func (b *stateGasBlock) chain(t *testing.T, workers int, wrap func(*eezrules.Eng
 	return m, deriver.NewExecChain(m.ExecModule, m.DB, m.BlockReader, m.ReceiptsReader, m.ChainConfig)
 }
 
-// build derives block 1 serially with the engine wrap makes.
+// build derives block 1 with one worker and the engine wrap makes.
 func (b *stateGasBlock) build(t *testing.T, wrap func(*eezrules.Engine) rules.Engine) (*execmoduletester.ExecModuleTester, *types.BlockWithReceipts) {
 	t.Helper()
-	m, chain := b.chain(t, 0, wrap)
+	m, chain := b.chain(t, 1, wrap)
 	parent, err := chain.HeaderByNumber(t.Context(), 0)
 	require.NoError(t, err)
 	l2 := b.genesis.Config.L2.(*config.L2Config)
@@ -244,7 +242,7 @@ func TestExtendNativeGasAmsterdam(t *testing.T) {
 	require.Equal(t, left, built.Block.Transactions()[1].GetGasLimit())
 }
 
-// TestInsertNativeGas checks that serial and parallel execution accept a
+// TestInsertNativeGas checks that execution with any worker count accepts a
 // native transaction with the gas its block admits and reject one with other
 // gas: from Amsterdam, what its receipts leave.
 func TestInsertNativeGas(t *testing.T) {
@@ -260,7 +258,7 @@ func TestInsertNativeGas(t *testing.T) {
 			require.NotEqual(t, gas, wrong)
 			_, invalid := b.build(t, func(e *eezrules.Engine) rules.Engine { return pinnedNativeGas{headerless{e}, wrong} })
 			require.Equal(t, wrong, invalid.Block.Transactions()[1].GetGasLimit())
-			for _, workers := range []int{0, 1, 2, 4} {
+			for _, workers := range []int{1, 2, 4} {
 				t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
 					require.NoError(t, b.insert(t, workers, valid.Block))
 					require.ErrorContains(t, b.insert(t, workers, invalid.Block), fmt.Sprintf("%s: %d, want %d", execprotocol.ErrGasLimitPosition, wrong, gas))

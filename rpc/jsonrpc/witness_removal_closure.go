@@ -199,5 +199,5 @@ func (w *HeadWitnesses) Build(ctx context.Context, pin *WitnessPin, hash common.
 	if info.Block.ParentHash() != pin.pin.hash {
 		return nil, fmt.Errorf("block %d (%x) is not a child of the pinned head %d (%x)", info.BlockNum, hash, pin.pin.num, pin.pin.hash)
 	}
-	return w.api.buildWitnessResultHeadCapture(ctx, tx, pin.pin.tx, info, witnessModeLegacy)
+	return w.api.buildWitnessResultHeadCapture(ctx, tx, pin.pin, nil, info, witnessModeLegacy)
 }

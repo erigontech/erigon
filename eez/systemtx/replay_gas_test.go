@@ -216,14 +216,14 @@ var traceMethods = []struct {
 	gas   func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) (uint64, error)
 }{
 	{"trace_replayTransaction", true, func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) (uint64, error) {
-		res, err := api.ReplayTransaction(t.Context(), block.Transactions()[index].Hash(), []string{"trace"}, nil, nil)
+		res, err := api.ReplayTransaction(t.Context(), block.Transactions()[index].Hash(), []string{"trace"}, nil)
 		if err != nil {
 			return 0, err
 		}
 		return rootCallGas(t, res.Trace, index), nil
 	}},
 	{"trace_transaction", true, func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) (uint64, error) {
-		traces, err := api.Transaction(t.Context(), block.Transactions()[index].Hash(), nil, nil)
+		traces, err := api.Transaction(t.Context(), block.Transactions()[index].Hash(), nil)
 		if err != nil {
 			return 0, err
 		}
@@ -233,7 +233,7 @@ var traceMethods = []struct {
 	{"trace_replayBlockTransactions trace", true, replayBlockGas("trace")},
 	{"trace_replayBlockTransactions trace,stateDiff", false, replayBlockGas("trace", "stateDiff")},
 	{"trace_block", true, func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) (uint64, error) {
-		traces, err := api.Block(t.Context(), rpc.BlockNumber(block.NumberU64()), nil, nil)
+		traces, err := api.Block(t.Context(), rpc.BlockNumber(block.NumberU64()), nil)
 		if err != nil {
 			return 0, err
 		}
@@ -243,7 +243,7 @@ var traceMethods = []struct {
 		n := rpc.BlockNumber(block.NumberU64())
 		var buf bytes.Buffer
 		stream := jsonstream.New(&buf)
-		if err := api.Filter(t.Context(), jsonrpc.TraceFilterRequest{FromBlock: &n, ToBlock: &n}, nil, nil, stream); err != nil {
+		if err := api.Filter(t.Context(), jsonrpc.TraceFilterRequest{FromBlock: &n, ToBlock: &n}, nil, stream); err != nil {
 			return 0, err
 		}
 		require.NoError(t, stream.Flush())
@@ -253,7 +253,7 @@ var traceMethods = []struct {
 
 func replayBlockGas(traceTypes ...string) func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) (uint64, error) {
 	return func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) (uint64, error) {
-		results, err := api.ReplayBlockTransactions(t.Context(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64())), traceTypes, nil, nil)
+		results, err := api.ReplayBlockTransactions(t.Context(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64())), traceTypes, nil)
 		if err != nil {
 			return 0, err
 		}
@@ -433,7 +433,7 @@ func TestReplayGasFromBlockLaggingReceipts(t *testing.T) {
 	require.ErrorContains(t, err, missing, "GetReceipt")
 	api := newTraceAPI(m)
 	// A block trace fails on the type-0x76 transaction, so only this one replays the transfer.
-	_, err = api.ReplayTransaction(t.Context(), plain.Hash(), []string{"trace"}, nil, nil)
+	_, err = api.ReplayTransaction(t.Context(), plain.Hash(), []string{"trace"}, nil)
 	require.NoError(t, err, "trace_replayTransaction of the transfer")
 	for _, method := range traceMethods {
 		t.Run(method.name, func(t *testing.T) {

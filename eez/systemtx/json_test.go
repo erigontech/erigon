@@ -106,7 +106,7 @@ func TestRPCReceipt(t *testing.T) {
 		TxHash:            tx.Hash(),
 		BlockNumber:       uint256.NewInt(5),
 	}
-	fields := jsonFields(t, ethutils.MarshalReceipt(receipt, tx, chain.TestChainOsakaConfig, header, true, false))
+	fields := jsonFields(t, ethutils.MarshalReceipt(receipt, tx, chain.TestChainOsakaConfig, header, true))
 
 	require.Equal(t, "0x76", fields["type"])
 	require.Equal(t, "0x0", fields["effectiveGasPrice"])
