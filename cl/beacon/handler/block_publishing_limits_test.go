@@ -38,9 +38,9 @@ import (
 
 // Supply padding without allocating an oversized request in the test. The
 // LimitedReader also records how many bytes the handler actually consumes.
-type publishingJSONSpaces struct{}
+type publishingPadding struct{}
 
-func (publishingJSONSpaces) Read(p []byte) (int, error) {
+func (publishingPadding) Read(p []byte) (int, error) {
 	for i := range p {
 		p[i] = ' '
 	}
@@ -62,8 +62,9 @@ func TestPublishedBlockSSZBodyLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			limit, err := h.publishedBlockBodyLimit(clparams.FuluVersion, tc.blinded)
 			require.NoError(t, err)
+			const excess = 4096
 			for _, contentLength := range []int64{-1, 1} {
-				body := &io.LimitedReader{R: publishingJSONSpaces{}, N: limit + 4096}
+				body := &io.LimitedReader{R: publishingPadding{}, N: limit + excess}
 				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", body)
 				req.ContentLength = contentLength
 				req.Header.Set("Content-Type", "application/octet-stream")
@@ -74,7 +75,7 @@ func TestPublishedBlockSSZBodyLimit(t *testing.T) {
 				require.ErrorAs(t, err, &endpointErr)
 				require.Equal(t, http.StatusBadRequest, endpointErr.Code)
 				require.ErrorContains(t, err, "request body exceeds")
-				require.EqualValues(t, 4095, body.N)
+				require.EqualValues(t, excess-1, body.N)
 			}
 		})
 	}
@@ -96,7 +97,7 @@ func TestPublishedBlockRejectsDeclaredOversizedBody(t *testing.T) {
 			t.Run(tc.name+"/"+contentType, func(t *testing.T) {
 				limit, err := h.publishedBlockBodyLimit(clparams.FuluVersion, tc.blinded)
 				require.NoError(t, err)
-				body := &io.LimitedReader{R: publishingJSONSpaces{}, N: limit + 1}
+				body := &io.LimitedReader{R: publishingPadding{}, N: limit + 1}
 				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", body)
 				req.ContentLength = limit + 1
 				req.Header.Set("Content-Type", contentType)
@@ -141,7 +142,7 @@ func TestPublishedBlockJSONBodyLimit(t *testing.T) {
 					if size == limit && version != clparams.ElectraVersion {
 						continue
 					}
-					padding := &io.LimitedReader{R: publishingJSONSpaces{}, N: size - int64(len(body))}
+					padding := &io.LimitedReader{R: publishingPadding{}, N: size - int64(len(body))}
 					req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, route,
 						io.MultiReader(bytes.NewReader(body), padding))
 					require.EqualValues(t, -1, req.ContentLength)

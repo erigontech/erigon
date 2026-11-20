@@ -2882,7 +2882,7 @@ func (a *ApiHandler) publishedBlockBodyLimit(version clparams.StateVersion, blin
 		blockSize = max(blockSize, a.netConfig.GossipMaxSize, a.netConfig.GossipMaxSizeBellatrix)
 	}
 	if blockSize > (math.MaxInt64-1)/4 {
-		return 0, errors.New("block JSON limit exceeds supported range")
+		return 0, errors.New("block body limit exceeds supported range")
 	}
 	limit := int64(blockSize * 4)
 	if blinded || version < clparams.DenebVersion {
@@ -2899,11 +2899,11 @@ func (a *ApiHandler) publishedBlockBodyLimit(version clparams.StateVersion, blin
 	const blobJSONSize = 2*cltypes.BYTES_PER_BLOB + 8
 	const proofJSONSize = 2*cltypes.BYTES_KZG_PROOF + 8
 	if proofsPerBlob > (math.MaxInt64-blobJSONSize)/proofJSONSize {
-		return 0, errors.New("blob proof JSON limit exceeds supported range")
+		return 0, errors.New("blob proof body limit exceeds supported range")
 	}
 	bytesPerBlob := int64(blobJSONSize + proofsPerBlob*proofJSONSize)
 	if blobs > uint64((math.MaxInt64-1-limit)/bytesPerBlob) {
-		return 0, errors.New("block contents JSON limit exceeds supported range")
+		return 0, errors.New("block contents body limit exceeds supported range")
 	}
 	return limit + int64(blobs)*bytesPerBlob, nil
 }
