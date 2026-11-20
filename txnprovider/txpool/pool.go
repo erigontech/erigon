@@ -1048,17 +1048,6 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		if yielded != nil && yielded.Contains(mt.TxnSlot.IDHash) {
 			continue
 		}
-		// Pending is ordered without the blob fee, so promotion only demotes a blob txn the blob fee has risen
-		// past once it is the worst one.
-		if !coversPendingFees(mt, pendingBaseFee, pendingBlobFee) {
-			toDemote = append(toDemote, mt)
-			continue
-		}
-
-		if mt.TxnSlot.TxType() != FrameTxnType && mt.TxnSlot.GetGas() > p.blockGasLimit.Load() {
-			// Skip transactions with very large gas limit
-			continue
-		}
 		var limits mdgas.MdGas
 		var intrinsicGasResult mdgas.IntrinsicGasCalcResult
 		var err error
@@ -1069,6 +1058,15 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			limits, err = protocol.TransactionGasLimits(mt.TxnSlot.Txn, isAmsterdam)
 		}
 		if err != nil {
+			continue
+		}
+		// A pending blob transaction can become underpriced before it reaches the
+		// bottom of the pool, where promotion would normally demote it.
+		if !coversPendingFees(mt, limits.Total(), pendingBaseFee, pendingBlobFee) {
+			toDemote = append(toDemote, mt)
+			continue
+		}
+		if !isFrame && mt.TxnSlot.GetGas() > p.blockGasLimit.Load() {
 			continue
 		}
 		executionGas, stateGas := limits.Execution, limits.State
@@ -2667,12 +2665,18 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 	return nil
 }
 
-func (p *TxPool) updateGasLimitMarker(mt *metaTxn, blockGasLimit uint64) {
+// updateGasLimitMarker also returns the total for frame pricing. Invalid limits
+// saturate as in FrameTransaction.GetGasLimit.
+func (p *TxPool) updateGasLimitMarker(mt *metaTxn, blockGasLimit uint64) uint64 {
 	limits, err := protocol.TransactionGasLimits(mt.TxnSlot.Txn, p.isAmsterdam())
 	mt.subPool &^= NotTooMuchGas
-	if err == nil && limits.Execution <= blockGasLimit && limits.State <= blockGasLimit {
+	if err != nil {
+		return math.MaxUint64
+	}
+	if limits.Execution <= blockGasLimit && limits.State <= blockGasLimit {
 		mt.subPool |= NotTooMuchGas
 	}
+	return limits.Total()
 }
 
 func (p *TxPool) refreshSender(cacheView kvcache.CacheView, senderID uint64) error {
@@ -2746,9 +2750,10 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			senderTxnKept = true
 		}
 
+		gasLimit := p.updateGasLimitMarker(mt, blockGasLimit)
 		var feeCap *uint256.Int
 		if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok {
-			feeCap = frame.ExecutionFeeCap(uint256.NewInt(p.pendingBlobFee.Load()))
+			feeCap = frame.Fees.ExecutionFeeCap(gasLimit, frame.GetBlobGas(), uint256.NewInt(p.pendingBlobFee.Load()))
 		} else {
 			feeCap = mt.TxnSlot.GetFeeCap()
 		}
@@ -2761,7 +2766,6 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			}
 			mt.nonceDistance, mt.cumulativeBalanceDistance = 0, 0
 			mt.subPool |= NoNonceGaps | EnoughBalance
-			p.updateGasLimitMarker(mt, blockGasLimit)
 			p.updateInSubPool(mt)
 			return true
 		}
@@ -2810,8 +2814,6 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 				mt.cumulativeBalanceDistance = cumulativeRequiredBalance.Uint64() - senderBalance.Uint64()
 			}
 		}
-
-		p.updateGasLimitMarker(mt, blockGasLimit)
 
 		if mt.TxnSlot.Traced {
 			p.logger.Info("TX TRACING: onSenderStateChange loop iteration update", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "senderId", mt.TxnSlot.SenderID, "nonce", mt.TxnSlot.Nonce, "subPool", mt.currentSubPool)
@@ -2867,9 +2869,9 @@ func (p *TxPool) promote(cacheView kvcache.CacheView, pendingBaseFee uint64, pen
 // coversPendingFees reports whether a txn, and every txn before it in its sender's nonce chain, pays the pending
 // block's base fee and blob fee. The txn's own blob fee cap is checked too, as the chain minimum is only set once
 // onSenderStateChange has seen the txn.
-func coversPendingFees(mt *metaTxn, pendingBaseFee, pendingBlobFee uint64) bool {
+func coversPendingFees(mt *metaTxn, frameGasLimit, pendingBaseFee, pendingBlobFee uint64) bool {
 	if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok {
-		if _, _, err := frame.Fees.RequiredCost(frame.GetGasLimit(), frame.GetBlobGas(), uint256.NewInt(pendingBaseFee), uint256.NewInt(pendingBlobFee)); err != nil {
+		if _, _, err := frame.Fees.RequiredCost(frameGasLimit, frame.GetBlobGas(), uint256.NewInt(pendingBaseFee), uint256.NewInt(pendingBlobFee)); err != nil {
 			return false
 		}
 	}
@@ -2878,8 +2880,11 @@ func coversPendingFees(mt *metaTxn, pendingBaseFee, pendingBlobFee uint64) bool 
 }
 
 func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements) {
+	coversFees := func(mt *metaTxn) bool {
+		return coversPendingFees(mt, mt.TxnSlot.GetGas(), pendingBaseFee, pendingBlobFee)
+	}
 	// Demote worst transactions that do not qualify for pending sub pool anymore, to other sub pools, or discard
-	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || !coversPendingFees(worst, pendingBaseFee, pendingBlobFee)); worst = p.pending.Worst() {
+	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || !coversFees(worst)); worst = p.pending.Worst() {
 		tx := p.pending.PopWorst()
 		if worst.subPool >= BaseFeePoolBits {
 			p.baseFee.Add(tx, "demote-pending", p.logger)
@@ -2894,7 +2899,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 	var blobFeeBlocked []*metaTxn
 	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && best.minFeeCap.CmpUint64(pendingBaseFee) >= 0; best = p.baseFee.Best() {
 		tx := p.baseFee.PopBest()
-		if !coversPendingFees(tx, pendingBaseFee, pendingBlobFee) {
+		if !coversFees(tx) {
 			blobFeeBlocked = append(blobFeeBlocked, tx)
 			continue
 		}
@@ -2914,7 +2919,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 	// Promote best transactions from the queued pool to either pending or base fee pool, while they qualify
 	for best := p.queued.Best(); p.queued.Len() > 0 && best.subPool >= BaseFeePoolBits; best = p.queued.Best() {
 		tx := p.queued.PopBest()
-		if coversPendingFees(best, pendingBaseFee, pendingBlobFee) {
+		if coversFees(best) {
 			announceFirstPending(announcements, tx)
 			p.pending.Add(tx, p.logger)
 		} else {

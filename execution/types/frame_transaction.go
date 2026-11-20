@@ -106,6 +106,16 @@ type FrameFeeBudget struct {
 
 var ErrFrameFeeBudget = errors.New("frame fee budget below base fees")
 
+// ExecutionFeeCap uses the combined execution and state gas limit to price the
+// budget left after paying for blobs.
+func (fees *FrameFees) ExecutionFeeCap(gasLimit, blobGas uint64, blobBaseFee *uint256.Int) *uint256.Int {
+	var blobCost uint256.Int
+	if _, overflow := blobCost.MulOverflow(uint256.NewInt(blobGas), blobBaseFee); overflow || blobCost.Gt(&fees.MaxFee) {
+		return new(uint256.Int)
+	}
+	return new(uint256.Int).Div(new(uint256.Int).Sub(&fees.MaxFee, &blobCost), uint256.NewInt(gasLimit))
+}
+
 // RequiredCost returns the total base-fee charge at the declared gas limit and
 // the portion spent on blobs. MaxFee must cover the total.
 func (fees *FrameFees) RequiredCost(gasLimit, blobGas uint64, baseFee, blobBaseFee *uint256.Int) (required, blobCost uint256.Int, err error) {
@@ -396,11 +406,7 @@ func (tx *FrameTransaction) GetFeeCap() *uint256.Int {
 
 // ExecutionFeeCap converts the total fee budget to a per-gas bound after blobs.
 func (tx *FrameTransaction) ExecutionFeeCap(blobBaseFee *uint256.Int) *uint256.Int {
-	var blobCost uint256.Int
-	if _, overflow := blobCost.MulOverflow(uint256.NewInt(tx.GetBlobGas()), blobBaseFee); overflow || blobCost.Gt(&tx.Fees.MaxFee) {
-		return new(uint256.Int)
-	}
-	return new(uint256.Int).Div(new(uint256.Int).Sub(&tx.Fees.MaxFee, &blobCost), uint256.NewInt(tx.GetGasLimit()))
+	return tx.Fees.ExecutionFeeCap(tx.GetGasLimit(), tx.GetBlobGas(), blobBaseFee)
 }
 
 func (tx *FrameTransaction) GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int {

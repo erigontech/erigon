@@ -103,11 +103,14 @@ func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remot
 			dependencies = append(dependencies, gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier))
 		}
 	}
-	cost := new(uint256.Int).Mul(uint256.NewInt(tx.GetGasLimit()), tx.GetTipCap())
 	return &remoteproto.FrameValidationReply{
-		Valid: b.valid, Payer: gointerfaces.ConvertAddressToH160(b.payer),
-		PayerBalance: gointerfaces.ConvertUint256IntToH256(uint256.NewInt(b.balance)), MaxCost: gointerfaces.ConvertUint256IntToH256(cost),
-		Paymaster: b.paymaster, Deadline: expiry, Dependencies: dependencies, CreationNonces: b.creationNonces,
+		Valid:          b.valid,
+		Payer:          gointerfaces.ConvertAddressToH160(b.payer),
+		PayerBalance:   gointerfaces.ConvertUint256IntToH256(uint256.NewInt(b.balance)),
+		Paymaster:      b.paymaster,
+		Deadline:       expiry,
+		Dependencies:   dependencies,
+		CreationNonces: b.creationNonces,
 	}, nil
 }
 
