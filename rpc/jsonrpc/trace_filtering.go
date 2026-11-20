@@ -517,9 +517,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 			return nil, err
 		}
-		ibs := state.NewWithVersionMap(state.NewHistoryReaderV3(dbtx, txNum), state.NewVersionMap(nil))
+		ibs := state.NewVersionedCall(state.NewHistoryReaderV3(dbtx, txNum))
 		defer ibs.Close()
-		ibs.SetNoConflictDetection()
 
 		evmTxCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
@@ -761,7 +760,7 @@ func (api *TraceAPIImpl) callBlock(
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
-	ibs := state.NewWithVersionMap(cachedReader, state.NewVersionMap(nil))
+	ibs := state.NewVersionedBlock(cachedReader)
 	defer ibs.Close()
 	// The block-start system calls come before tx 0, as block execution runs them.
 	ibs.SetTxContext(block.NumberU64(), -1)
@@ -921,9 +920,8 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 		return func(txIndex int) error {
 			msg := msgs[txIndex]
-			workerIbs := state.NewWithVersionMap(state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(txIndex)), state.NewVersionMap(nil))
+			workerIbs := state.NewVersionedCall(state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(txIndex)))
 			defer workerIbs.Close()
-			workerIbs.SetNoConflictDetection()
 
 			traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: callParams[txIndex].txHash}
 
@@ -1019,9 +1017,8 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
-	ibs := state.NewWithVersionMap(cachedReader, state.NewVersionMap(nil))
+	ibs := state.NewVersionedCall(cachedReader)
 	defer ibs.Close()
-	ibs.SetNoConflictDetection()
 
 	logger := log.New("component", "trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
