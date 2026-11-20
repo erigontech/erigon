@@ -19,7 +19,6 @@ package protocol
 import (
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/holiman/uint256"
 
@@ -53,9 +52,6 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	nonce, err := st.state.GetNonce(sender)
 	if err != nil {
 		return nil, err
-	}
-	if tx.UsesLegacyNonce() && tx.Nonce == math.MaxUint64 {
-		return nil, ErrNonceMax
 	}
 	if !tx.UsesLegacyNonce() {
 		// EIP-8250 requires the manager to be predeployed. Otherwise nonce writes
