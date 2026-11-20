@@ -810,7 +810,7 @@ func SyncSnapshots(
 			if missing, ok := incompatibleCommitment[p.Name]; ok {
 				if missing && isStateHistory(p.Name) {
 					return fmt.Errorf("the snapshot manifest has both v2 and v3 commitment history for the step range of %s: "+
-						"run without `--prune.include-commitment-history` or with `--snap.skip-state-snapshot-download`", p.Name)
+						"delete the chaindata folder and restart without `--prune.include-commitment-history` or with `--snap.skip-state-snapshot-download`", p.Name)
 				}
 				if missing && !statecfg.ExperimentalCommitmentV3 {
 					return fmt.Errorf("commitment v3 is disabled, but the snapshot manifest has only v3 commitment for %s: %s", p.Name, legacyRemedy)

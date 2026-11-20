@@ -181,6 +181,7 @@ func TestCommitmentConvertWithoutChaindata(t *testing.T) {
 
 	require.NoDirExists(t, dirs.Chaindata)
 	requireCommitmentKVPrefix(t, dirs, "v3.")
+	require.NoError(t, state.CheckExecResetDone(dirs))
 
 	require.NoError(t, state.MatchCommitmentSchemaToFiles(dirs))
 	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(t.Context())
@@ -261,12 +262,14 @@ func TestCommitmentConvertV3SplitRunFromFiles(t *testing.T) {
 
 	requireCommitmentFilesPrefix(t, dirs.SnapHistory, "*-commitment.*.v", "v3.")
 	requireCommitmentKVPrefix(t, dirs, "v2.")
+	require.ErrorContains(t, state.CheckMixedCommitmentFiles(dirs), "finish the conversion with `integration commitment convert --v3 --no-history`")
 
 	statecfg.SetCommitmentV3(false)
 	require.NoError(t, runCommitmentConvert(t, dirs, "--v3", "--no-history"))
 
 	requireCommitmentFilesPrefix(t, dirs.SnapHistory, "*-commitment.*.v", "v3.")
 	requireCommitmentKVPrefix(t, dirs, "v3.")
+	require.NoError(t, state.CheckMixedCommitmentFiles(dirs))
 }
 
 func TestCommitmentConvertV3NoHistoryRefusesLegacyHistory(t *testing.T) {

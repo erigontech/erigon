@@ -736,8 +736,10 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		logger.Info("[commitment_convert] no files needed conversion; no backup or promote performed")
 		return nil
 	}
+	resetPending := false
 	if opts.TargetV3 && convertDomain {
-		if err := markExecResetPending(dirs); err != nil {
+		var err error
+		if resetPending, err = markExecResetPending(dirs); err != nil {
 			return err
 		}
 	}
@@ -802,7 +804,10 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		doneSummary, backupDir,
 	))
 	if opts.TargetV3 {
-		next := "`integration stage_exec --reset` before starting erigon"
+		next := "erigon with `--experimental.commitment-v3`"
+		if resetPending {
+			next = "`integration stage_exec --reset` before starting erigon"
+		}
 		if !convertDomain {
 			if err := forEachCommitmentDataFile(dirs.SnapDomain, func(_ string, major uint64) error {
 				if major < 3 {
@@ -938,15 +943,22 @@ const execResetPendingName = ".exec_reset_pending"
 // legacyExecResetPendingName is the same marker as written by an interrupted v3 restore of older binaries.
 const legacyExecResetPendingName = ".restore_v3_reset_pending"
 
-func markExecResetPending(dirs datadir.Dirs) error {
+func markExecResetPending(dirs datadir.Dirs) (bool, error) {
+	chaindata, err := os.ReadDir(dirs.Chaindata)
+	if errors.Is(err, os.ErrNotExist) || err == nil && len(chaindata) == 0 {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("[commitment_convert] mark pending execution reset: %w", err)
+	}
 	backupRoot := filepath.Join(dirs.Snap, "backup")
 	if err := os.MkdirAll(backupRoot, dir.DirPerm); err != nil {
-		return fmt.Errorf("[commitment_convert] mark pending execution reset: %w", err)
+		return false, fmt.Errorf("[commitment_convert] mark pending execution reset: %w", err)
 	}
 	if err := writeRestoreManifestAtomic(filepath.Join(backupRoot, execResetPendingName), nil); err != nil {
-		return fmt.Errorf("[commitment_convert] mark pending execution reset: %w", err)
+		return false, fmt.Errorf("[commitment_convert] mark pending execution reset: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func CheckExecResetDone(dirs datadir.Dirs) error {
@@ -1014,7 +1026,7 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 		return err
 	}
 	if restoredV3 {
-		if err := markExecResetPending(dirs); err != nil {
+		if _, err := markExecResetPending(dirs); err != nil {
 			return err
 		}
 	}
@@ -1046,24 +1058,33 @@ func MatchCommitmentSchemaToFiles(d datadir.Dirs) error {
 // commitmentFilesAreV3 reports whether the commitment files in dirPath are v3, or
 // returns ifNone when dirPath has no commitment files.
 func commitmentFilesAreV3(dirPath string, ifNone bool) (bool, error) {
-	var legacyName, v3Name string
-	if err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
+	legacyName, v3Name, err := commitmentFileNames(dirPath)
+	if err != nil {
+		return false, err
+	}
+	if legacyName != "" && v3Name != "" {
+		return false, mixedCommitmentError(legacyName, v3Name, statecfg.MixedCommitmentAdvice)
+	}
+	if legacyName == "" && v3Name == "" {
+		return ifNone, nil
+	}
+	return v3Name != "", nil
+}
+
+func commitmentFileNames(dirPath string) (legacyName, v3Name string, err error) {
+	err = forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
 		if major >= 3 {
 			v3Name = name
 		} else {
 			legacyName = name
 		}
 		return nil
-	}); err != nil {
-		return false, err
-	}
-	if legacyName != "" && v3Name != "" {
-		return false, fmt.Errorf("commitment files have mixed major versions: %s and %s; %s", legacyName, v3Name, statecfg.MixedCommitmentAdvice)
-	}
-	if legacyName == "" && v3Name == "" {
-		return ifNone, nil
-	}
-	return v3Name != "", nil
+	})
+	return legacyName, v3Name, err
+}
+
+func mixedCommitmentError(legacyName, v3Name, advice string) error {
+	return fmt.Errorf("commitment files have mixed major versions: %s and %s; %s", legacyName, v3Name, advice)
 }
 
 func forEachCommitmentDataFile(dirPath string, fn func(name string, major uint64) error) error {

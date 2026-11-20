@@ -829,7 +829,7 @@ func TestSyncSnapshotsRefusesMixedCommitmentHistory(t *testing.T) {
 				return
 			}
 			require.ErrorContains(t, err, "both v2 and v3 commitment history")
-			require.ErrorContains(t, err, "run without `--prune.include-commitment-history`")
+			require.ErrorContains(t, err, "delete the chaindata folder and restart without `--prune.include-commitment-history`")
 		})
 	}
 }

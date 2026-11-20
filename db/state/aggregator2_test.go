@@ -136,10 +136,12 @@ func TestCheckMixedCommitmentFilesRejectsMixedMajors(t *testing.T) {
 		name   string
 		legacy string
 		v3     string
+		advice string
 	}{
-		{name: "domain data", legacy: "v2.0-commitment.0-1.kv", v3: "v3.0-commitment.1-2.kv"},
-		{name: "history data", legacy: "v2.0-commitment.0-1.v", v3: "v3.0-commitment.1-2.v"},
-		{name: "across domain and history", legacy: "v2.0-commitment.0-1.kv", v3: "v3.0-commitment.1-2.v"},
+		{name: "domain data", legacy: "v2.0-commitment.0-1.kv", v3: "v3.0-commitment.1-2.kv", advice: "`integration commitment convert --restore`"},
+		{name: "history data", legacy: "v2.0-commitment.0-1.v", v3: "v3.0-commitment.1-2.v", advice: "`integration commitment convert --restore`"},
+		{name: "legacy domain, v3 history", legacy: "v2.0-commitment.0-1.kv", v3: "v3.0-commitment.1-2.v", advice: "finish the conversion with `integration commitment convert --v3 --no-history`"},
+		{name: "v3 domain, legacy history", legacy: "v2.0-commitment.0-1.v", v3: "v3.0-commitment.1-2.kv", advice: "`integration commitment convert --restore`"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			dirs := datadir.New(t.TempDir())
@@ -153,7 +155,10 @@ func TestCheckMixedCommitmentFilesRejectsMixedMajors(t *testing.T) {
 			require.NoError(t, os.WriteFile(filepath.Join(legacyDir, test.legacy), nil, 0o644))
 			require.NoError(t, os.WriteFile(filepath.Join(v3Dir, test.v3), nil, 0o644))
 			require.ErrorContains(t, CheckMixedCommitmentFiles(dirs), "mixed major versions")
-			require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "or run `erigon seg reset` and restart erigon")
+			err := CheckSnapshotsCompatibility(dirs)
+			require.ErrorContains(t, err, test.advice)
+			require.ErrorContains(t, err, "or run `erigon seg reset` and restart erigon")
+			require.NotContains(t, err.Error(), "`integration commitment convert --v3`")
 		})
 	}
 }
@@ -181,7 +186,13 @@ func TestOpenRefusesMixedCommitmentVersions(t *testing.T) {
 
 func TestOpenRefusesPendingExecReset(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
-	require.NoError(t, markExecResetPending(dirs))
+	marked, err := markExecResetPending(dirs)
+	require.NoError(t, err)
+	require.False(t, marked)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Chaindata, "mdbx.dat"), nil, 0o644))
+	marked, err = markExecResetPending(dirs)
+	require.NoError(t, err)
+	require.True(t, marked)
 
 	agg, err := NewTest(dirs).SanityOldNaming().Open(t.Context())
 	if err == nil {

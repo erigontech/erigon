@@ -229,24 +229,23 @@ func (w *workersCfg) unlockEditing() {
 }
 
 func CheckMixedCommitmentFiles(d datadir.Dirs) error {
-	var legacyName, v3Name string
-	var legacyMajor, v3Major uint64
-	for _, dirPath := range []string{d.SnapDomain, d.SnapHistory} {
-		err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
-			if major < 3 && legacyName == "" {
-				legacyName, legacyMajor = name, major
-			}
-			if major >= 3 && v3Name == "" {
-				v3Name, v3Major = name, major
-			}
-			if legacyName != "" && v3Name != "" {
-				return fmt.Errorf("commitment files have mixed major versions: %s (v%d) and %s (v%d); %s", legacyName, legacyMajor, v3Name, v3Major, statecfg.MixedCommitmentAdvice)
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
+	domainLegacy, domainV3, err := commitmentFileNames(d.SnapDomain)
+	if err != nil {
+		return err
+	}
+	historyLegacy, historyV3, err := commitmentFileNames(d.SnapHistory)
+	if err != nil {
+		return err
+	}
+	switch {
+	case domainLegacy != "" && domainV3 != "":
+		return mixedCommitmentError(domainLegacy, domainV3, statecfg.MixedCommitmentAdvice)
+	case historyLegacy != "" && historyV3 != "":
+		return mixedCommitmentError(historyLegacy, historyV3, statecfg.MixedCommitmentAdvice)
+	case domainLegacy != "" && historyV3 != "":
+		return mixedCommitmentError(domainLegacy, historyV3, "finish the conversion with `integration commitment convert --v3 --no-history`, or "+statecfg.MixedCommitmentAdvice)
+	case domainV3 != "" && historyLegacy != "":
+		return mixedCommitmentError(historyLegacy, domainV3, statecfg.MixedCommitmentAdvice)
 	}
 	return nil
 }
