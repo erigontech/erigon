@@ -512,8 +512,15 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	minTxBlockGas := mdgas.MinTxBlockGas(e.config.IsLondon(header.Number.Uint64()), e.config.IsPrague(header.Time), e.config.IsAmsterdam(header.Time))
 	if uint64(len(req.Transactions)) > header.GasLimit/minTxBlockGas {
+		// A validated parent is the latest valid ancestor of this payload. Otherwise it cannot be
+		// determined here, and latestValidHash stays null.
+		var latestValidHash common.Hash
+		if e.chainRW.IsValidated(req.ParentHash) {
+			latestValidHash = req.ParentHash
+		}
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
+			LatestValidHash: latestValidOrNull(latestValidHash),
 			ValidationError: engine_types.NewStringifiedError(fmt.Errorf("%w: %d transactions use at least %d gas each", protocol.ErrGasLimitReached, len(req.Transactions), minTxBlockGas)),
 		}, nil
 	}
