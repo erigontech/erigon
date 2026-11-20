@@ -186,13 +186,7 @@ func TestOpenRefusesMixedCommitmentVersions(t *testing.T) {
 
 func TestOpenRefusesPendingExecReset(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
-	marked, err := markExecResetPending(dirs)
-	require.NoError(t, err)
-	require.False(t, marked)
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Chaindata, "mdbx.dat"), nil, 0o644))
-	marked, err = markExecResetPending(dirs)
-	require.NoError(t, err)
-	require.True(t, marked)
+	require.NoError(t, markExecResetPending(dirs))
 
 	agg, err := NewTest(dirs).SanityOldNaming().Open(t.Context())
 	if err == nil {

@@ -736,10 +736,8 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		logger.Info("[commitment_convert] no files needed conversion; no backup or promote performed")
 		return nil
 	}
-	resetPending := false
 	if opts.TargetV3 && convertDomain {
-		var err error
-		if resetPending, err = markExecResetPending(dirs); err != nil {
+		if err := markExecResetPending(dirs); err != nil {
 			return err
 		}
 	}
@@ -804,10 +802,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		doneSummary, backupDir,
 	))
 	if opts.TargetV3 {
-		next := "erigon with `--experimental.commitment-v3`"
-		if resetPending {
-			next = "`integration stage_exec --reset` before starting erigon"
-		}
+		next := "`integration stage_exec --reset` before starting erigon"
 		if !convertDomain {
 			if err := forEachCommitmentDataFile(dirs.SnapDomain, func(_ string, major uint64) error {
 				if major < 3 {
@@ -943,22 +938,15 @@ const execResetPendingName = ".exec_reset_pending"
 // legacyExecResetPendingName is the same marker as written by an interrupted v3 restore of older binaries.
 const legacyExecResetPendingName = ".restore_v3_reset_pending"
 
-func markExecResetPending(dirs datadir.Dirs) (bool, error) {
-	chaindata, err := os.ReadDir(dirs.Chaindata)
-	if errors.Is(err, os.ErrNotExist) || err == nil && len(chaindata) == 0 {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("[commitment_convert] mark pending execution reset: %w", err)
-	}
+func markExecResetPending(dirs datadir.Dirs) error {
 	backupRoot := filepath.Join(dirs.Snap, "backup")
 	if err := os.MkdirAll(backupRoot, dir.DirPerm); err != nil {
-		return false, fmt.Errorf("[commitment_convert] mark pending execution reset: %w", err)
+		return fmt.Errorf("[commitment_convert] mark pending execution reset: %w", err)
 	}
 	if err := writeRestoreManifestAtomic(filepath.Join(backupRoot, execResetPendingName), nil); err != nil {
-		return false, fmt.Errorf("[commitment_convert] mark pending execution reset: %w", err)
+		return fmt.Errorf("[commitment_convert] mark pending execution reset: %w", err)
 	}
-	return true, nil
+	return nil
 }
 
 func CheckExecResetDone(dirs datadir.Dirs) error {
@@ -1026,7 +1014,7 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 		return err
 	}
 	if restoredV3 {
-		if _, err := markExecResetPending(dirs); err != nil {
+		if err := markExecResetPending(dirs); err != nil {
 			return err
 		}
 	}

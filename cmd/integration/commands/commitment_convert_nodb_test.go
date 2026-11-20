@@ -181,7 +181,7 @@ func TestCommitmentConvertWithoutChaindata(t *testing.T) {
 
 	require.NoDirExists(t, dirs.Chaindata)
 	requireCommitmentKVPrefix(t, dirs, "v3.")
-	require.NoError(t, state.CheckExecResetDone(dirs))
+	require.ErrorContains(t, state.CheckExecResetDone(dirs), "stage_exec --reset")
 
 	require.NoError(t, state.MatchCommitmentSchemaToFiles(dirs))
 	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(t.Context())
