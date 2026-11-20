@@ -3486,3 +3486,46 @@ func (ws *WriteSet) createdEmpty(addr accounts.Address) bool {
 	_, hasCodeSize := ws.codeSize[addr]
 	return !hasCode && !hasIncarnation && !destroyed && !createdContract && !hasCodeSize && len(ws.storage[addr]) == 0
 }
+
+type AddrPaths struct {
+	Addr  accounts.Address
+	Paths uint16
+}
+
+func (s ReadSet) AddrPaths() []AddrPaths {
+	var out []AddrPaths
+	s.RangeFullHeaders(func(a accounts.Address, p AccountPath, _ accounts.StorageKey, _ ReadHeader) bool {
+		out = append(out, AddrPaths{a, 1 << p})
+		return true
+	})
+	return mergeAddrPaths(out)
+}
+
+func (ws *WriteSet) AddrPaths() []AddrPaths {
+	if ws == nil {
+		return nil
+	}
+	var out []AddrPaths
+	for h := range ws.AllHeaders() {
+		paths := uint16(1) << h.Path
+		if h.Path.AffectsAccountLifecycle() {
+			paths = ^uint16(0)
+		}
+		out = append(out, AddrPaths{h.Address, paths})
+	}
+	return mergeAddrPaths(out)
+}
+
+func mergeAddrPaths(s []AddrPaths) []AddrPaths {
+	slices.SortFunc(s, func(a, b AddrPaths) int { return a.Addr.Cmp(b.Addr) })
+	n := 0
+	for _, e := range s {
+		if n > 0 && s[n-1].Addr == e.Addr {
+			s[n-1].Paths |= e.Paths
+			continue
+		}
+		s[n] = e
+		n++
+	}
+	return s[:n]
+}

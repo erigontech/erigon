@@ -254,6 +254,8 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if result.Dep >= 0 {
 		return pt.rerunAfter(be.taskIndexOf(result.Dep))
 	}
+	result.ReadAddrs = result.TxIn.AddrPaths()
+	result.WriteAddrs = result.TxOut.AddrPaths()
 	be.selfLoopFlush(tv.version, result, slices.Values(pt.prevHeaders))
 	pt.prevHeaders = slices.AppendSeq(pt.prevHeaders[:0], result.TxOut.AllHeaders())
 

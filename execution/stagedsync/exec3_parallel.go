@@ -2733,6 +2733,18 @@ func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
 	})
 }
 
+func (be *blockExecutor) indexReadAddrs(taskIdx int, addrs []state.AddrPaths) {
+	for _, e := range addrs {
+		l := be.readerByAddr[e.Addr]
+		i, found := slices.BinarySearchFunc(l, taskIdx, cmpReaderTx)
+		if found {
+			l[i].paths |= e.Paths
+		} else {
+			be.readerByAddr[e.Addr] = slices.Insert(l, i, addrReader{taskIdx, e.Paths})
+		}
+	}
+}
+
 type addrReader struct {
 	tx    int
 	paths uint16
@@ -2761,8 +2773,14 @@ func readersAbove(l []addrReader, tx int) []addrReader {
 // have changed. Only successors can be invalidated by writerTx's write. Runs only
 // on the execLoop, so the readerByAddr read and revalidate write need no lock. A missed
 // reader is unsafe; the finalize oracle (ERIGON_ASSERT) guards against that.
-func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
+func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet, addrs []state.AddrPaths) {
 	if ws == nil {
+		return
+	}
+	if addrs != nil {
+		for _, e := range addrs {
+			be.markAddrReadersDirty(writerTx, ws, e.Addr, e.Paths)
+		}
 		return
 	}
 	written := map[accounts.Address]uint16{}
@@ -2774,14 +2792,18 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 		}
 	}
 	for addr, paths := range written {
-		readers := readersAbove(be.readerByAddr[addr], writerTx)
-		if len(readers) == 0 || be.versionMap.WritesAlreadySeeded(addr, ws) {
-			continue
-		}
-		for _, r := range readers {
-			if r.paths&paths != 0 && !be.revalidate[r.tx] && be.blockIO.ReadSet(be.tasks[r.tx].Task.Version().TxIndex).DependsOnAt(ws, addr) {
-				be.revalidate[r.tx] = true
-			}
+		be.markAddrReadersDirty(writerTx, ws, addr, paths)
+	}
+}
+
+func (be *blockExecutor) markAddrReadersDirty(writerTx int, ws *state.WriteSet, addr accounts.Address, paths uint16) {
+	readers := readersAbove(be.readerByAddr[addr], writerTx)
+	if len(readers) == 0 || be.versionMap.WritesAlreadySeeded(addr, ws) {
+		return
+	}
+	for _, r := range readers {
+		if r.paths&paths != 0 && !be.revalidate[r.tx] && be.blockIO.ReadSet(be.tasks[r.tx].Task.Version().TxIndex).DependsOnAt(ws, addr) {
+			be.revalidate[r.tx] = true
 		}
 	}
 }
@@ -2916,7 +2938,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 		// Flush the merged writes (including fee changes) so subsequent per-tx
 		// finalizations see the full post-tx state via the versionMap fallback chain.
 		be.versionMap.FlushVersionedWrites(merged, true)
-		be.markReadersDirty(tx, merged)
+		be.markReadersDirty(tx, merged, nil)
 	}
 
 	// A read-only versionMap-slice view over the tx's raw write-set; apply and
@@ -3003,7 +3025,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				be.blockIO.RecordReads(txVersion, reads)
 				be.versionMap.FlushVersionedWrites(senderWrites, false)
 				ownedWrites = be.extendWrites(txVersion, senderWrites)
-				be.markReadersDirty(tx, senderWrites)
+				be.markReadersDirty(tx, senderWrites, nil)
 				// A charge-at-validation sender's gas debit is not in the worker's TxOut, so
 				// calcFees' coinbase/burnt override (which reads TxOut) would miss it and credit
 				// the fee onto the stale pre-charge balance when the sender is the fee recipient.
@@ -3022,7 +3044,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				} else {
 					be.extendWrites(txVersion, tipWrites)
 				}
-				be.markReadersDirty(tx, tipWrites)
+				be.markReadersDirty(tx, tipWrites, nil)
 			}
 		}
 		be.coinbaseFlushedUpTo = tx
@@ -3188,6 +3210,15 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *state.WriteSet) []int {
 	set := map[int]struct{}{}
 	seen := map[accounts.Address]struct{}{}
+	addAddr := func(a accounts.Address) {
+		if _, ok := seen[a]; ok {
+			return
+		}
+		seen[a] = struct{}{}
+		for _, r := range readersAbove(be.readerByAddr[a], changedTx) {
+			set[r.tx] = struct{}{}
+		}
+	}
 	add := func(ws *state.WriteSet, skipBALSeeded bool) {
 		if ws == nil {
 			return
@@ -3196,19 +3227,23 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 			if skipBALSeeded && h.Path.BALSeeded() {
 				continue
 			}
-			if _, ok := seen[h.Address]; ok {
-				continue
-			}
-			seen[h.Address] = struct{}{}
-			for _, r := range readersAbove(be.readerByAddr[h.Address], changedTx) {
-				set[r.tx] = struct{}{}
-			}
+			addAddr(h.Address)
 		}
 	}
 	// A BAL-seeded cell the tx still writes already holds its final value, so a reader of
 	// it stays valid; a wrong BAL fails the block. A dropped write may not be in the BAL,
 	// so its readers are always re-checked.
-	add(newWrites, be.versionMap.HasBAL)
+	var writeAddrs []state.AddrPaths
+	if !be.versionMap.HasBAL && changedTx < len(be.results) && be.results[changedTx] != nil {
+		writeAddrs = be.results[changedTx].WriteAddrs
+	}
+	if writeAddrs != nil {
+		for _, e := range writeAddrs {
+			addAddr(e.Addr)
+		}
+	} else {
+		add(newWrites, be.versionMap.HasBAL)
+	}
 	add(oldWrites, false)
 	return slices.Sorted(maps.Keys(set))
 }
@@ -3333,10 +3368,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	txVersion := res.Version()
 
 	be.blockIO.RecordReads(txVersion, res.TxIn)
-	be.indexReads(tx, res.TxIn)
+	if res.ReadAddrs != nil {
+		be.indexReadAddrs(tx, res.ReadAddrs)
+	} else {
+		be.indexReads(tx, res.TxIn)
+	}
 	// This tx's writes just published; flag any successor that already read one of
 	// its cells for finalize-boundary re-validation.
-	be.markReadersDirty(tx, res.TxOut)
+	be.markReadersDirty(tx, res.TxOut, res.WriteAddrs)
 
 	if res.Version().Incarnation == 0 {
 		be.blockIO.RecordWrites(txVersion, res.TxOut)
