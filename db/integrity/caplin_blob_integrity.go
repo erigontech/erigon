@@ -17,6 +17,7 @@
 package integrity
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -160,18 +161,7 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 			cache.add(string(CaplinBlobSidecars), r.fps)
 		}
 	}
-	if waitErr != nil {
-		return waitErr
-	}
-	if firstErr != nil {
-		return firstErr
-	}
-	for _, err := range rangeErrs {
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return cmp.Or(waitErr, firstErr, cmp.Or(rangeErrs...))
 }
 
 func caplinBlobFingerprints(blob *snapshotsync.VisibleSegment, beacon []*snapshotsync.VisibleSegment) ([]fileFingerprint, error) {
