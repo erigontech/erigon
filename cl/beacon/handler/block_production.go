@@ -890,16 +890,19 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			fmt.Errorf("invalid slot: %w", err),
 		)
 	}
+	if gloasOptions == nil && a.beaconChainCfg.GetCurrentStateVersion(targetSlot/a.beaconChainCfg.SlotsPerEpoch) >= clparams.GloasVersion {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("block production from Gloas requires POST /eth/v4/validator/blocks/{slot}"))
+	}
 	if err := checkBlockProductionSlot(targetSlot, a.ethClock.GetCurrentSlot()); err != nil {
 		return nil, err
 	}
 
 	builderBoostFactor := uint64(100)
-	if options := gloasBlockOptionsFromContext(ctx); options != nil {
-		builderBoostFactor = options.builderConfig.BuilderBoostFactor
+	if gloasOptions != nil {
+		builderBoostFactor = gloasOptions.builderConfig.BuilderBoostFactor
 	}
 	builderBoostFactorStr := r.URL.Query().Get("builder_boost_factor")
-	if builderBoostFactorStr != "" && gloasBlockOptionsFromContext(ctx) == nil {
+	if builderBoostFactorStr != "" && gloasOptions == nil {
 		builderBoostFactor, err = strconv.ParseUint(builderBoostFactorStr, 10, 64)
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(
@@ -1036,14 +1039,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			if err != nil {
 				log.Warn("Failed to compute beacon block root for self-build envelope", "err", err)
 			} else {
-				options := gloasBlockOptionsFromContext(ctx)
-				var cached *selfBuildPayload
-				if options != nil {
-					cached = options.selfBuildPayload
-				} else {
-					cached, _ = a.selfBuildPayloads.Get(bid.Message.BlockHash)
-				}
-				if cached != nil {
+				if cached := gloasOptions.selfBuildPayload; cached != nil {
 					cachedReqs := cached.ExecutionRequests
 					if cachedReqs == nil {
 						cachedReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
@@ -1056,10 +1052,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 						ParentBeaconBlockRoot: denebBlock.Block.ParentRoot,
 					}
 					a.selfBuildEnvelopes.Add(selfBuildEnvelopeKey{Slot: targetSlot, BeaconBlockRoot: beaconBlockRoot}, envelope)
-					// SSZ encoding only serializes Data, not Extra — only include
-					// the envelope in JSON responses to keep the header truthful.
-					switch {
-					case options != nil && options.includePayload:
+					if gloasOptions.includePayload {
 						contents := cltypes.NewGloasBlockContents(a.beaconChainCfg, targetSlot)
 						contents.Block = denebBlock.Block
 						contents.ExecutionPayloadEnvelope = envelope
@@ -1070,9 +1063,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 							With("execution_payload_blinded", block.IsBlinded()).
 							With("execution_payload_value", block.GetExecutionValue().String()).
 							With("consensus_block_value", consensusValue.String())
-						executionPayloadIncluded = true
-					case options == nil && !beaconhttp.WillEncodeSSZ(r.Header.Get("Accept")):
-						resp = resp.With("execution_payload_envelope", envelope)
 						executionPayloadIncluded = true
 					}
 					log.Info("BlockProduction: included unsigned execution payload envelope in response",
@@ -2252,8 +2242,18 @@ AttLoop:
 			}
 			rawIdxs = append(rawIdxs, currentValidatorIndex)
 		}
+		encoded, err := slashing.EncodeSSZ(nil)
+		if err != nil {
+			continue
+		}
+		normalized := new(cltypes.AttesterSlashing)
+		if err := normalized.DecodeSSZWithConfig(encoded, int(targetVersion), a.beaconChainCfg); err != nil {
+			continue
+		}
+		// Nested attestation decoders reset the limits to mainnet defaults.
+		normalized.SetVersionWithConfig(targetVersion, a.beaconChainCfg)
 		slashedIndicies = append(slashedIndicies, rawIdxs...)
-		attesterSlashings.Append(slashing)
+		attesterSlashings.Append(normalized)
 		if attesterSlashings.Len() >= int(maxAttesterSlashings) {
 			break
 		}

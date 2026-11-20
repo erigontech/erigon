@@ -76,6 +76,11 @@ func SetCommitmentV3FoldChunkForTest(n int) int {
 	return old
 }
 
+func SetFoldCommitmentV3RangeHookForTest(h func(seq int)) func() {
+	foldCommitmentV3RangeHook = h
+	return func() { foldCommitmentV3RangeHook = nil }
+}
+
 func SetLegacyShapeMinVersionsForTest(n uint64) uint64 {
 	old := legacyShapeMinVersions
 	legacyShapeMinVersions = n

@@ -262,14 +262,6 @@ func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockSta
 	return ibs
 }
 
-// NewForSequentialCommitment builds a versioned IBS that keeps the stateObject cache on; only genesis needs both.
-func NewForSequentialCommitment(stateReader StateReader) *IntraBlockState {
-	ibs := New(stateReader)
-	ibs.versionMap = NewVersionMap(nil)
-	ibs.noMaterialize = false
-	return ibs
-}
-
 func (ibs *IntraBlockState) ReadDuration() time.Duration {
 	return ibs.accountReadDuration + ibs.storageReadDuration + ibs.codeReadDuration
 }
@@ -1995,13 +1987,14 @@ func (ibs *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 		return false, nil
 	}
 	prevBalance := stateObject.Balance()
-	ibs.journal.selfdestructChange(addr, stateObject.selfdestructed, prevBalance, !ibs.hasWrite(addr, SelfDestructPath, accounts.NilKey))
+	ibs.journal.selfdestructChange(addr, stateObject.selfdestructed, stateObject.createdContract, prevBalance, !ibs.hasWrite(addr, SelfDestructPath, accounts.NilKey))
 
 	if !preserveBalance && ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
 		ibs.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
 	}
 
 	stateObject.markSelfdestructed()
+	stateObject.destructedCreated = stateObject.destructedCreated || stateObject.createdContract
 	stateObject.createdContract = false
 
 	ibs.recordWriteIncarnation(addr, stateObject.data.Incarnation)
@@ -2092,6 +2085,17 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 }
 
 var zeroBalance uint256.Int
+
+// ContractCreatedInTx reports whether the current transaction created a contract at addr.
+// The marker survives SELFDESTRUCT and is cleared if the creation is rolled back.
+func (ibs *IntraBlockState) ContractCreatedInTx(addr accounts.Address) bool {
+	if ibs.versionMap != nil {
+		created, _ := ibs.versionedWriteCreateContract(addr)
+		return created
+	}
+	so := ibs.stateObjects[addr]
+	return so != nil && so.newlyCreated && (so.createdContract || so.destructedCreated)
+}
 
 // Used for EIP-6780
 func (ibs *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
@@ -2880,30 +2884,42 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 	return writes, ibs.StateReadError()
 }
 
-// publishCreateDestructAsBalances replaces the writes of a contract the tx created at an absent
-// address and destroyed with those of a new account holding its kept balance: under EIP-8246 that
-// balance is all the tx leaves, and withholdCreatedEmptyAccounts then treats it like any created
-// account. An address that existed may hold storage, which only the destruct's cells wipe, so it
-// keeps them. It returns the replaced addresses.
+// publishCreateDestructAsBalances replaces the writes of a contract the tx created and destroyed
+// with those of an account holding its kept balance: under EIP-8246 that balance is all the tx
+// leaves, and withholdCreatedEmptyAccounts then treats an account at an absent address like any
+// created account. At an address that existed, the creation stays, as it replaces the old storage,
+// with the zero incarnation that the destruct leaves and the dead contract's zeroed slots, which
+// readers of the state changes see; such an account that ends empty keeps the destruct, which
+// removes it. It returns the replaced addresses.
 func (ibs *IntraBlockState) publishCreateDestructAsBalances(writes *WriteSet) map[accounts.Address]struct{} {
 	var replaced map[accounts.Address]struct{}
 	for addr, sd := range writes.selfDestruct {
-		if cc, ok := writes.createContract[addr]; !sd.Val || !ok || !cc.Val {
+		cc, ok := writes.createContract[addr]
+		if !sd.Val || !ok || !cc.Val {
 			continue
 		}
 		balance, ok := writes.balance[addr]
 		if !ok || balance.Deletes() {
 			continue // a burning destruct leaves no balance-only account
 		}
-		if !ibs.readAbsent(addr) {
+		existed := !ibs.readAbsent(addr)
+		if existed && balance.Val.IsZero() {
 			continue
 		}
+		slots := writes.storage[addr]
 		version := ibs.Version()
 		writes.deleteAddr(addr)
 		created := accounts.NewAccount()
 		writes.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: version}, Val: &created})
 		writes.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: version}, Val: accounts.EmptyCodeHash})
 		writes.SetBalance(addr, balance)
+		if existed {
+			writes.SetCreateContract(addr, cc)
+			writes.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: version}})
+			if slots != nil {
+				writes.storage[addr] = slots
+			}
+		}
 		if replaced == nil {
 			replaced = map[accounts.Address]struct{}{}
 		}
@@ -2938,7 +2954,7 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 			continue
 		}
 		if _, ok := replaced[addr]; ok {
-			continue // absent before the tx, so withholdCreatedEmptyAccounts settled it
+			continue // withholdCreatedEmptyAccounts settled an absent one, and one that existed keeps a balance
 		}
 		if empty, known := createdSelfDestructEmpty(writes, realSelfDestruct, addr); known {
 			if empty {
@@ -3250,6 +3266,13 @@ func (ibs *IntraBlockState) AddSlotToAccessList(addr accounts.Address, slot acco
 		ibs.journal.accessListAddSlotChange(addr, slot)
 	}
 	return addrMod, slotMod
+}
+
+// AddSlotOnlyToAccessList preserves account coldness for EIP-7906 storage lookups.
+func (ibs *IntraBlockState) AddSlotOnlyToAccessList(addr accounts.Address, slot accounts.StorageKey) {
+	if ibs.accessList.AddSlotOnly(addr, slot) {
+		ibs.journal.accessListAddSlotOnlyChange(addr, slot)
+	}
 }
 
 // AddressInAccessList returns true if the given address is in the access list.

@@ -746,6 +746,8 @@ var (
 
 const commitmentV3RangeChunks = 64
 
+var foldCommitmentV3RangeHook func(seq int)
+
 type foldChunk struct {
 	batch *hashedBatch
 	state []byte
@@ -757,6 +759,7 @@ func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, progres
 	at.Close()
 	workers := max(1, runtime.GOMAXPROCS(0))
 	type task struct {
+		seq    int
 		r      [2][]byte
 		chunks []chan foldChunk
 	}
@@ -776,8 +779,8 @@ func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, progres
 				close(o)
 			}
 		}()
-		for _, r := range ranges {
-			t := task{r: r, chunks: make([]chan foldChunk, len(asOf))}
+		for seq, r := range ranges {
+			t := task{seq: seq, r: r, chunks: make([]chan foldChunk, len(asOf))}
 			for j := range asOf {
 				t.chunks[j] = make(chan foldChunk, commitmentV3RangeChunks)
 				select {
@@ -801,6 +804,9 @@ func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, progres
 			dt := at.d[kv.CommitmentDomain]
 			hasher := v3.NewRecordHasher()
 			for t := range in {
+				if foldCommitmentV3RangeHook != nil {
+					foldCommitmentV3RangeHook(t.seq)
+				}
 				for j, txNum := range asOf {
 					err := foldCommitmentV3Range(gctx, dt, txNum, t.r, hasher, func(c foldChunk) error {
 						select {

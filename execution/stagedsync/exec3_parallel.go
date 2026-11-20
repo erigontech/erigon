@@ -127,8 +127,9 @@ type parallelExecutor struct {
 	// changeset; blocks below it run without one.
 	changesetWindowStart uint64
 	// currentChangeSet is the block's changeset while it is being built: the exec
-	// loop creates it and saves it by hash, then the apply fold and the committer
-	// bind it transiently by hash under changesetMu. Deliberately NOT installed as a
+	// loop creates it and saves it by hash, then the apply fold binds it transiently
+	// by hash under changesetMu and the committer's flush writes into its commitment
+	// diff directly. Deliberately NOT installed as a
 	// persistent live accumulator — the apply loop is the sole sd.mem writer, so a
 	// global install would only race the fold's own transient bind.
 	currentChangeSet *changeset.StateChangeSet
@@ -1951,11 +1952,10 @@ func (result *execResult) finalizeSystemTx(
 	// writes). result.TxIn may be stale if the system TX ran speculatively before the
 	// regular TXs completed, returning pre-block values instead of the post-block
 	// state syscalls (withdrawal/consolidation) need.
-	ibs := state.New(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader))
+	ibs := state.NewWithVersionMap(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader), vm)
 	defer ibs.Close()
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
-	ibs.SetVersionMap(vm)
 	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
 		return nil, state.ReadSet{}, nil, err
 	}
@@ -3542,10 +3542,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 			pe.RUnlock()
 
-			ibs := state.New(reader)
+			ibs := state.NewWithVersionMap(reader, be.versionMap)
 			defer ibs.Close()
 			ibs.SetVersion(finalVersion.Incarnation)
-			ibs.SetVersionMap(be.versionMap)
 			ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
 			ibs.StartAccessRecording()
 

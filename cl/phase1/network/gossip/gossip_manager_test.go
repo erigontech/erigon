@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	gossipnames "github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/p2p/mock_services"
+	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -332,6 +333,26 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_ProcessMessageError
 
 	result := validator(ctx, pid, msg)
 	s.Equal(pubsub.ValidationReject, result)
+}
+
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorPassesForwardingPeer() {
+	var got peer.ID
+	service := &mockService{
+		processFunc: func(ctx context.Context, _ *uint64, _ any) error {
+			got, _ = serviceintf.GossipPeer(ctx)
+			return nil
+		},
+	}
+	validator := s.gm.newPubsubValidator(service)
+	msg := createMockMessage("/eth2/abcd1234/beacon_block/ssz_snappy", utils.CompressSnappy([]byte("test data")))
+
+	s.Equal(pubsub.ValidationAccept, validator(context.Background(), peer.ID("forwarder"), msg))
+	s.Equal(peer.ID("forwarder"), got)
+}
+
+func (s *newPubsubValidatorTestSuite) TestBanPeerWithoutBannerIsNoop() {
+	s.NotPanics(func() { s.gm.BanPeer(peer.ID("forwarder")) })
+	s.Empty(s.gm.peerBanQueue)
 }
 
 func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorBansEncodedPeerID() {

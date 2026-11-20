@@ -51,6 +51,17 @@ type Config struct {
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
+
+	// OverrideInitCode selects replacement initcode by deployment address during RPC replay.
+	// CREATE2 derives that address from the original initcode. A match can supply empty initcode.
+	// The VM clears the original code hash so the replacement bypasses the shared JUMPDEST cache.
+	OverrideInitCode func(address accounts.Address) (replacement []byte, matched bool)
+	// OriginalCreate2InitCode lets replay identify the target when a CREATE2 gas
+	// check fails before the VM derives the address.
+	OriginalCreate2InitCode *Create2InitCode
+	// OnInitCodeOverrideError reports gas or preparation errors that occur before a
+	// nested constructor frame opens. The receiver filters by deployment address.
+	OnInitCodeOverrideError func(address accounts.Address, err error)
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
@@ -576,6 +587,9 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 	// Increment the call depth which is restricted to 1024
 	evm.depth++
 	defer func() {
+		if err != nil && evm.config.OnInitCodeOverrideError != nil {
+			evm.reportCreateError(callContext, err)
+		}
 		// EIP-8037: snapshot the spilled portion and derive the frame's net
 		// state-gas usage from the reservoir delta before callContext.put()
 		// clears them. A state charge lowers stateGas (or raises stateGasSpill

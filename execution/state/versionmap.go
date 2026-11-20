@@ -2311,6 +2311,22 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	return vm.ValidateReadSet(txIdx, lastIO.ReadSet(txIdx), checkVersion, traceInvalid, tracePrefix)
 }
 
+// validateBalanceAtDestruct rejects a stale balance read at a destruct's version. A non-zero balance
+// read at a destruct's version came from the balance cell. A re-run can move that cell to a new
+// incarnation while the seeded destruct keeps its version.
+func (vm *VersionMap) validateBalanceAtDestruct(addr accounts.Address, tr VersionedRead[uint256.Int], txIdx int) VersionValidity {
+	if tr.Val.IsZero() {
+		return VersionValid
+	}
+	if e := vm.load(addr); e == nil || !e.destructed.Load() {
+		return VersionValid
+	}
+	if rr := vm.ReadStatus(addr, BalancePath, accounts.NilKey, txIdx); rr.DepIdx() == tr.Version.TxIndex && rr.Incarnation() != tr.Version.Incarnation {
+		return VersionInvalid
+	}
+	return VersionValid
+}
+
 // validateAccountAtMarker rejects an account read that matches the version of the BAL existence
 // marker but not the account's existence. A destruct seeded for the marker's tx can have the
 // same version, but the marker records an account that exists: an absent read is valid only
@@ -2373,18 +2389,8 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		}
 	}
 	for a, tr := range rs.balance {
-		// A balance read that a destruct wiped is zero. A non-zero read at the tx of a destruct the
-		// access list seeds read the balance cell there, which a re-run can move to a new incarnation
-		// while the seeded destruct keeps its version, so it is checked against that cell first.
-		if vm.HasBAL && !tr.Val.IsZero() {
-			if e := vm.load(a); e != nil && e.destructed.Load() {
-				if rr := vm.ReadStatus(a, BalancePath, accounts.NilKey, txIdx); rr.DepIdx() == tr.Version.TxIndex && rr.Incarnation() != tr.Version.Incarnation {
-					if traceInvalid {
-						fmt.Printf("%s RD %x balance at a destruct, (%d.%d)!=(%d.%d)\n", tracePrefix, a, tr.Version.TxIndex, tr.Version.Incarnation, rr.DepIdx(), rr.Incarnation())
-					}
-					return VersionInvalid
-				}
-			}
+		if vm.HasBAL && !ok(vm.validateBalanceAtDestruct(a, tr, txIdx)) {
+			return
 		}
 		if !ok(validatePath(a, BalancePath, tr.ReadHeader)) {
 			return
