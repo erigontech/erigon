@@ -17,12 +17,12 @@
 package antiquary
 
 import (
-	"context"
 	"testing"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -98,15 +98,6 @@ func TestNextBlobSegmentKeepsTheBacklogForCompressionParallelism(t *testing.T) {
 	require.True(t, isBlobBacklog(from, backlogTo), "two pending segments are a catch-up")
 }
 
-type blockBodyReader struct {
-	freezeblocks.BeaconSnapshotReader
-	blocks map[uint64]*cltypes.SignedBeaconBlock
-}
-
-func (r blockBodyReader) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
-	return r.blocks[slot], nil
-}
-
 // A sidecar file lost under a surviving count row is a hole: the segment waits for the file instead of failing the dump.
 func TestAntiquateBlobsWaitsForALostSidecarFile(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
@@ -128,7 +119,8 @@ func TestAntiquateBlobsWaitsForALostSidecarFile(t *testing.T) {
 	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
 	block.Block.Slot = slot
 	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
-	reader := blockBodyReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: block}}
+	reader := tests.NewMockBlockReader()
+	reader.U[slot] = block
 
 	fs := afero.NewMemMapFs()
 	storage := blob_storage.NewBlobStore(db, fs)
