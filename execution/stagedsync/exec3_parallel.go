@@ -971,6 +971,9 @@ func (pe *parallelExecutor) prevBlockBase(raw state.StateReader, blockNum uint64
 }
 
 func (pe *parallelExecutor) checkInclusionList(ctx context.Context, applyTx kv.TemporalTx, be *blockExecutor, tt *exec.TxTask, reader state.StateReader, txIndex int) error {
+	if pe.cfg.readAheader == nil || be.tasks[0].Version().TxIndex > 0 {
+		return nil
+	}
 	ilReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, be.versionMap, reader)
 	// The task's GetHash reads through the block producer's tx, which this
 	// goroutine must not use.
@@ -3564,10 +3567,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			ibs.StartAccessRecording()
 
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
-				if pe.cfg.readAheader != nil && be.tasks[0].Version().TxIndex <= 0 {
-					if err := pe.checkInclusionList(ctx, applyTx, be, tt, reader, finalVersion.TxIndex); err != nil {
-						return be.operationalBlockResult(fmt.Errorf("can't check inclusion list for block %d: %w", be.blockNum, err)), nil
-					}
+				if err := pe.checkInclusionList(ctx, applyTx, be, tt, reader, finalVersion.TxIndex); err != nil {
+					return be.operationalBlockResult(fmt.Errorf("can't check inclusion list for block %d: %w", be.blockNum, err)), nil
 				}
 
 				// Syscalls share the main ibs so their writes land in

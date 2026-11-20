@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -49,7 +48,6 @@ func TestParallelResumedBlockEndLeavesInclusionListUnchecked(t *testing.T) {
 	config := chain.TestChainBerlinConfig
 
 	pe, roTx := newResumeTestExec(t, db, config)
-	pe.cfg.engine = ethash.NewFaker()
 	pe.cfg.vmConfig = &vm.Config{}
 	pe.cfg.readAheader = exec.NewBlockReadAheader()
 
@@ -68,20 +66,9 @@ func TestParallelResumedBlockEndLeavesInclusionListUnchecked(t *testing.T) {
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 	be := newBlockExec(1, blockHash, gasPool, nil, newResultStream(), false, nil)
 	endTask := &exec.TxTask{Header: header, Txs: types.Transactions{included}, TxNum: 2, TxIndex: 1, Config: config}
-	eTaskEnd := &execTask{Task: endTask, index: 0}
-	endVersion := &taskVersion{
-		execTask: eTaskEnd,
-		version:  state.Version{BlockNum: 1, TxIndex: 1, Incarnation: 1, TxNum: 2},
-	}
-	be.tasks = []*execTask{eTaskEnd}
-	be.results = []*execResult{{TxResult: &exec.TxResult{Task: endVersion}}}
-	be.finalizedResults[0] = &execResult{TxResult: &exec.TxResult{Task: endVersion}}
-	be.execTasks.setComplete(0)
-	be.validateTasks.setComplete(0)
-	be.publishTasks.setComplete(0)
-
-	_, err = be.nextResult(ctx, pe, &exec.TxResult{Task: endVersion}, roTx)
-	require.NoError(t, err)
+	be.tasks = []*execTask{{Task: endTask, index: 0}}
+	reader := state.NewReaderV3(pe.domainsRead().AsGetter(roTx))
+	require.NoError(t, pe.checkInclusionList(ctx, roTx, be, endTask, reader, 1))
 
 	_, ilHash, ok := pe.cfg.readAheader.ReadInclusionList(blockHash)
 	require.True(t, ok)
@@ -102,7 +89,6 @@ func TestParallelInclusionListCheckResolvesBlockHashWithoutProducerTx(t *testing
 	}))
 
 	pe, roTx := newResumeTestExec(t, db, config)
-	pe.cfg.engine = ethash.NewFaker()
 	pe.cfg.vmConfig = &vm.Config{NoBaseFee: true}
 	pe.cfg.blockReader = freezeblocks.NewBlockReader(nil)
 	pe.cfg.readAheader = exec.NewBlockReadAheader()
@@ -140,6 +126,7 @@ func TestParallelInclusionListCheckResolvesBlockHashWithoutProducerTx(t *testing
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 	be := newBlockExec(3, blockHash, gasPool, nil, newResultStream(), false, nil)
 	endTask := &exec.TxTask{Header: header, TxNum: 2, TxIndex: 0, Config: config, EvmBlockContext: blockContext}
+	be.tasks = []*execTask{{Task: endTask, index: 0}}
 	reader := state.NewReaderV3(pe.domainsRead().AsGetter(roTx))
 	require.NoError(t, pe.checkInclusionList(ctx, roTx, be, endTask, reader, 0))
 
