@@ -607,6 +607,10 @@ Examples:
 			Continue:        convertContinue,
 			TargetV3:        convertV3,
 		}
+		if convertV3 {
+			br, _ := blocksIO(db, logger)
+			opts.DB, opts.TxNums = db, br.TxnumReader()
+		}
 		return commitmentConvert(db, cmd.Context(), logger, opts)
 	},
 }
