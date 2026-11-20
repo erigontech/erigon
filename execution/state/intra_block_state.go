@@ -1629,12 +1629,19 @@ func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uin
 	}
 	if base == nil || ibs.accountLifecycle(addr) {
 		// The journal prev is this tx's own nonce cell when present (it can lead the
-		// base record), else the fresh account's zero.
+		// base record), else the live account's nonce, else the fresh account's zero.
 		prev := uint64(0)
+		if base != nil {
+			prev = base.Nonce
+		}
 		if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
 			prev = vw.Val
 		}
-		ibs.createVersioned(addr, base != nil)
+		// Only an absent/destroyed account is created here; a live account with an
+		// in-block lifecycle event (accountLifecycle) keeps its record and code.
+		if base == nil {
+			ibs.createVersioned(addr, false)
+		}
 		ibs.journal.nonceChange(addr, prev, wasCommited)
 		if ibs.tracingHooks != nil {
 			if ibs.tracingHooks.OnNonceChangeV2 != nil {
