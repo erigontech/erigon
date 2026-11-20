@@ -30,11 +30,16 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
+
+var noActiveKeyperSetRevertData = hexutil.Encode(crypto.Keccak256([]byte("NoActiveKeyperSet()"))[:4])
 
 type EonTracker interface {
 	Run(ctx context.Context) error
@@ -244,6 +249,10 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (_ Eon, _ bool,
 
 	eonIndex, err := et.ksmContract.GetKeyperSetIndexByBlock(callOpts, blockNum)
 	if err != nil {
+		if dataErr, ok := errors.AsType[rpc.DataError](err); ok && dataErr.ErrorData() == noActiveKeyperSetRevertData {
+			et.resetEonCache()
+			return Eon{}, false, nil
+		}
 		return Eon{}, false, fmt.Errorf("get keyper set index by block: %w", err)
 	}
 
