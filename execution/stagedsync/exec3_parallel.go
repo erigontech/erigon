@@ -273,6 +273,10 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 // foldTx applies one published tx's versionMap view and indexes to sd.mem.
 // Finalize logs share the final virtual task's txNum. That task has already
 // handled the receipt cache, so finalize indexes logs without changing it.
+type probeApplyTimes struct{ fold, balAdd time.Duration }
+
+var probeApply probeApplyTimes
+
 func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
 	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
 	defer restoreCS()
@@ -670,16 +674,20 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// every cell a published tx wrote is in the versionMap, so later txs
 					// resolve it there and never read it from sd.mem.
 					if !finalized && foldErr == nil {
+						foldT0 := time.Now()
 						foldErr = pe.foldTx(ctx, rwTx, applyResult)
+						probeApply.fold += time.Since(foldT0)
 					}
 					if applyResult.txIO != nil {
 						if balBuilder == nil {
 							balBuilder = state.NewBlockAccessListBuilder()
 						}
+						addT0 := time.Now()
 						for balBuilder.Next()+1 < applyResult.balSealed {
 							i := balBuilder.Next()
 							balBuilder.Add(i, applyResult.txIO.ReadSet(i), applyResult.txIO.WriteSet(i))
 						}
+						probeApply.balAdd += time.Since(addT0)
 					}
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
@@ -775,7 +783,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					h, txIO, blockBAL := lastHeader, applyResult.TxIO, applyResult.BAL
 					go func() {
 						defer close(balDone)
+						procT0 := time.Now()
 						computedBAL, balErr = bal.Process(blockBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+						pe.logger.Info("[np-phase] apply", "blk", applyResult.BlockNum, "npFold", probeApply.fold, "npBALAdd", probeApply.balAdd, "npBALProcess", time.Since(procT0), "npSinceExecEnd", time.Since(applyResult.execEndedAt))
+						probeApply = probeApplyTimes{}
 					}()
 
 					// StartChange + NotifyAccumulator both run in the apply goroutine to
