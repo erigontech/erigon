@@ -456,24 +456,28 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a dead client shows only the first line of its error",
           "| 500 | reth | dead: dial: bad handshake | | | | |" in details, details)
 
-# --- eth_subscribe: the vs newHeads rows get an overview row of their own --------
+# --- eth_subscribe: the vs first newHeads rows get an overview row, the vs newHeads rows do not ---
 
 with tempfile.TemporaryDirectory() as tmp:
     write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
-        "logs vs newHeads": api(1, 12, 20, 100, p90_ms=8),
-        "logs vs newHeads dapp": api(0.4, 12, 20, 60, p90_ms=8),
-        "transactionReceipts vs newHeads indexer": api(20, 40, 60, 10, p90_ms=30)})]}])
+        "logs vs newHeads dapp": api(2.4, 12, 20, 60, p90_ms=8),
+        "logs vs first newHeads": api(3, 12, 20, 100, p90_ms=8),
+        "logs vs first newHeads dapp": api(3, 12, 20, 60, p90_ms=8),
+        "transactionReceipts vs first newHeads indexer": api(20, 40, 60, 10, p90_ms=30)})]}])
     write_result(tmp, "geth", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
-        "logs vs newHeads": api(0.2, 13, 20, 100, p90_ms=9),
-        "logs vs newHeads dapp": api(0.1, 13, 20, 60, p90_ms=9),
-        "transactionReceipts vs newHeads indexer": api(25, 45, 70, 10, p90_ms=35)})]}])
+        "logs vs newHeads dapp": api(0.2, 13, 20, 60, p90_ms=9),
+        "logs vs first newHeads": api(3.3, 13, 20, 100, p90_ms=9),
+        "logs vs first newHeads dapp": api(3.3, 13, 20, 60, p90_ms=9),
+        "transactionReceipts vs first newHeads indexer": api(25, 45, 70, 10, p90_ms=35)})]}])
     md = mod.render_overview(mod.overview_results(mod.load_results(tmp)), "p50")
-    check("a vs newHeads measure has its own overview row",
-          fanout_row(md, "eth_subscribe_classes logs vs newHeads dapp", "500") == ["500", "0.40", "0.10*", "🔴"], md)
-    check("the vs newHeads rows of every class are in the overview",
-          fanout_row(md, "eth_subscribe_classes transactionReceipts vs newHeads indexer", "500") == ["500", "20.00*", "25.00", "🟢"], md)
-    check("a vs newHeads measure with copies per class has no overview row of its own",
-          "eth_subscribe_classes logs vs newHeads 500" not in " ".join(md.split()), md)
+    check("a vs first newHeads measure has its own overview row",
+          fanout_row(md, "eth_subscribe_classes logs vs first newHeads dapp", "500") == ["500", "3.00*", "3.30", "🟢"], md)
+    check("the vs first newHeads rows of every class are in the overview",
+          fanout_row(md, "eth_subscribe_classes transactionReceipts vs first newHeads indexer", "500")
+          == ["500", "20.00*", "25.00", "🟢"], md)
+    check("a vs first newHeads measure with copies per class has no overview row of its own",
+          "eth_subscribe_classes logs vs first newHeads 500" not in " ".join(md.split()), md)
+    check("the vs newHeads measures are not in the overview", "logs vs newHeads" not in md, md)
 
 # --- eth_subscribe client classes: legend and the three measures per class -------
 
@@ -517,7 +521,8 @@ with tempfile.TemporaryDirectory() as tmp:
             "newHeads latency wallet": api(1900 * f, 3300, 3500, 900),
             "newHeads fan-out wallet": api(3 * f, 16, 20, 900),
             "newHeads fan-out": api(3 * f, 16, 20, 990),
-            "logs vs newHeads dapp": api(0.4 * f, 12, 20, 60)})]}], CLASSES)
+            "logs vs newHeads dapp": api(0.4 * f, 12, 20, 60),
+            "logs vs first newHeads dapp": api(3 * f, 12, 20, 60)})]}], CLASSES)
     write_result(tmp, "erigon", "eth_call", [{"qps": "1", "testRepetitions": [rep(1, 2, 3)]}])
     patterns = mod.load_patterns(tmp)
     check("the pattern of a test with client classes is loaded", list(patterns) == ["eth_subscribe_classes"], patterns)
@@ -534,15 +539,17 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the split of the connections is by largest remainder with at least one per class",
           mod.split_connections(10, [90, 9, 1]) == [8, 1, 1] and mod.split_connections(500, [90, 9, 1]) == [450, 45, 5],
           mod.split_connections(10, [90, 9, 1]))
-    check("the legend explains the three measures",
-          "**latency**" in md and "**fan-out**" in md and "**vs newHeads**" in md, md)
+    check("the legend explains the four measures",
+          "**latency**" in md and "**fan-out**" in md and "**vs first newHeads**" in md and "**vs newHeads**" in md, md)
     check("the table has the measures of each class, p50 / p95 per client, the fastest p50 marked",
           "| wallet | newHeads latency | 1900.00* / 3300.00 | 3800.00 / 3300.00 |" in md
           and "| wallet | newHeads fan-out | 3.00* / 16.00 | 6.00 / 16.00 |" in md
-          and "| dapp | logs vs newHeads | 0.40* / 12.00 | 0.80 / 12.00 |" in md, md)
+          and "| dapp | logs vs newHeads | 0.40* / 12.00 | 0.80 / 12.00 |" in md
+          and "| dapp | logs vs first newHeads | 3.00* / 12.00 | 6.00 / 12.00 |" in md, md)
     check("the classes follow the order of the pattern", md.find("| wallet |") < md.find("| dapp |"), md)
-    check("in a class the measures are by type, newHeads first, then latency, fan-out, vs newHeads",
-          md.find("| wallet | newHeads latency") < md.find("| wallet | newHeads fan-out"), md)
+    check("in a class the measures are by type, newHeads first, then latency, fan-out, vs first newHeads, vs newHeads",
+          md.find("| wallet | newHeads latency") < md.find("| wallet | newHeads fan-out")
+          and md.find("| dapp | logs vs first newHeads") < md.find("| dapp | logs vs newHeads"), md)
     rows = [line.split("|")[1].strip() for line in md.splitlines() if line.startswith("| ") and "Class" not in line]
     check("every row of the class table is of one class", set(rows) == {"wallet", "dapp"}, rows)
     code, out = run_main(["--results-dir", tmp])

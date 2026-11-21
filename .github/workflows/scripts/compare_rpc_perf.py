@@ -7,10 +7,11 @@ status of Erigon per test label and QPS step, then, per test label and QPS step,
 p50, p95 and max latency of each client, followed by its rows by method (mixed, run with
 --verbose) or by subscription measure (eth_subscribe), when the reports have them.
 The fan-out measures of eth_subscribe (how long the node takes to send one notification
-to every connection) and its vs newHeads measures (how long after the head a log or receipt
-of the block reaches the same connection) also get overview rows, one per client class when
-the pattern has them, since the latency of the test itself is mostly the block import time,
-the same for all clients. The receipts measures of a client that sends the receipts of a block one
+to every connection) and its vs first newHeads measures (how long after the first head of the
+block a log or receipt of the block reaches a connection) also get overview rows, one per client
+class when the pattern has them, since the latency of the test itself is mostly the block import
+time, the same for all clients. The vs newHeads measures (after the head on the same connection)
+are only in the class table: a node that sends the heads late looks fast there. The receipts measures of a client that sends the receipts of a block one
 notification each, instead of one list per block, are marked with !.
 A test whose pattern splits the connections into client classes gets, after the overviews,
 a legend of the classes and the measures and a table with the measures of each class.
@@ -102,11 +103,11 @@ def load_apis(repetitions):
 
 
 def overview_results(results):
-    """Add to the results a test per fan-out or vs newHeads measure, as "<label> <measure>", for the overview only."""
+    """Add to the results a test per fan-out or vs first newHeads measure, as "<label> <measure>", for the overview only."""
     out = dict(results)
     for label, clients in results.items():
         names = {n for steps in clients.values() for s in steps.values() for n in s.get("apis", {})
-                 if "fan-out" in n or "vs newHeads" in n}
+                 if "fan-out" in n or "vs first newHeads" in n}
         for name in names:
             if any(other.startswith(name + " ") for other in names):
                 continue
@@ -141,15 +142,18 @@ MEASURE_LEGEND = [
     "- **fan-out**: arrival minus the first arrival of the same event on any connection, the time the node "
     "takes to send one notification to every subscriber, plus the time the notification waits in rpc_perf: "
     "compare it only between the clients of the same run.",
+    "- **vs first newHeads**: arrival of a log or receipt minus the first arrival of the head of the same block on "
+    "any connection: how long a client waits for its logs and receipts once the node starts to announce the block.",
     "- **vs newHeads**: arrival of a log or receipt minus the arrival of the head of the same block on the same "
-    "connection, the filtering and encoding of the logs and receipts after the head.",
+    "connection, the filtering and encoding of the logs and receipts after the head; a node that sends the heads late "
+    "looks fast here, so it is not in the overview.",
 ]
 PER_RECEIPT_LEGEND = ("- **per receipt**: a client that sends the receipts of a block one notification each, "
                       "marked with !: the arrival of the last one minus the first.")
 PER_RECEIPT_MARK = ("! sends the receipts of a block one notification each, not one list per block: "
                     "its receipts measures take the arrival of the last one.")
 TYPE_ORDER = ["newHeads", "logs", "transactionReceipts"]
-MEASURE_ORDER = ["latency", "fan-out", "vs newHeads", "per receipt"]
+MEASURE_ORDER = ["latency", "fan-out", "vs first newHeads", "vs newHeads", "per receipt"]
 
 
 def measure_rank(measure):
@@ -207,7 +211,7 @@ def class_legend(pattern):
 
 
 def render_classes(results, patterns):
-    """Return, per test with client classes, the legend and the latency, fan-out and vs newHeads of each class."""
+    """Return, per test with client classes, the legend and the measures of each class."""
     lines = []
     for label in sorted(patterns):
         if label not in results:
