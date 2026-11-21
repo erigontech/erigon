@@ -330,6 +330,8 @@ var cmdCommitmentRebuild = &cobra.Command{
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		defer debug.Exit()
 		skipFilesDBGapCheck = statecfg.ExperimentalCommitmentV3
+		// The rebuild writes a file per shard and per merge; in-memory existence filters and hash indexes of those files grow the heap until the run ends.
+		statecfg.Schema.CommitmentDomain.ExistenceFilter = statecfg.ExistenceFilterRandom
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			return fmt.Errorf("opening DB: %w", err)
