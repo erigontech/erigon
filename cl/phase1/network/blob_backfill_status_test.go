@@ -137,17 +137,28 @@ func TestWarnBackfillIncompleteWithoutUnresolvedSlots(t *testing.T) {
 }
 
 func TestDownloadOnceWarnsWhileThePassRuns(t *testing.T) {
-	downloader := newBoundaryDownloader(t, 20, 0, 0, &boundaryBlockReader{})
+	reader := &boundaryBlockReader{}
+	downloader := newBoundaryDownloader(t, blocksBatchSize, 0, 0, reader)
 	handler := &backfillLogHandler{}
 	downloader.logger.SetHandler(handler)
+	downloader.nextBackfillWarning = time.Now().Add(blobBackfillWarningInterval)
 
-	require.NoError(t, downloader.downloadOnce(true))
-	warned := slices.IndexFunc(handler.records, func(r *log.Record) bool {
-		return r.Lvl == log.LvlWarn && strings.Contains(r.Msg, "Blob backfilling is not finished")
-	})
-	finished := slices.IndexFunc(handler.records, func(r *log.Record) bool {
-		return strings.Contains(r.Msg, "Blob history download finished")
-	})
-	require.NotEqual(t, -1, finished)
-	require.True(t, warned >= 0 && warned < finished, "a pass must warn while it runs, warned at record %d, finished at %d", warned, finished)
+	hasWarning := func() bool {
+		return slices.ContainsFunc(handler.records, func(r *log.Record) bool {
+			return r.Lvl == log.LvlWarn && strings.Contains(r.Msg, "Blob backfilling is not finished")
+		})
+	}
+	var warnedBySecondBatch bool
+	reader.onRead = func(slot uint64) {
+		switch slot {
+		case blocksBatchSize:
+			require.False(t, hasWarning(), "the first batch started before the warning deadline")
+			downloader.nextBackfillWarning = time.Time{}
+		case 0:
+			warnedBySecondBatch = hasWarning()
+		}
+	}
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.True(t, warnedBySecondBatch, "the warning was due when the second batch started")
 }
