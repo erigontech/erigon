@@ -1,0 +1,219 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package prove
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/eez/l1"
+	"github.com/erigontech/erigon/eez/protocol"
+	"github.com/erigontech/erigon/eez/prove/provepb"
+)
+
+// attester is a quorum member's prover: it signs the public inputs hash of
+// the batch it is sent under vkey, after delay, unless refusal is set.
+type attester struct {
+	ps, signer common.Address
+	vkey       common.Hash
+	p          *prover
+	member     *Member
+}
+
+func newAttester(t *testing.T, ps byte, delay time.Duration, refusal error) *attester {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	a := &attester{ps: common.Address{ps}, signer: crypto.PubkeyToAddress(key.PublicKey), vkey: common.Hash{ps, 0x77}}
+	a.p = &prover{}
+	a.p.answer = func(int) (*provepb.Proof, *provepb.Rejected, error) {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		if refusal != nil {
+			return nil, nil, refusal
+		}
+		b, err := protocol.DecodePostAndVerifyBatch(a.p.finalized().GetSettlement().GetAbiCalldata())
+		if err != nil {
+			return nil, nil, err
+		}
+		hash, err := publicInputsHash(b, a.vkey, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &provepb.Proof{PublicInputsHash: hash[:], Proof: sign(t, key, hash[:])}, nil, nil
+	}
+	c, err := Dial(serve(t, a.p), a.signer, common.Hash{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+	a.member = &Member{ProofSystem: a.ps, Attester: a.signer, Client: c}
+	return a
+}
+
+// registered is the manager's registration of attesters with threshold.
+func registered(threshold uint64, attesters ...*attester) func(context.Context) (l1.Registration, error) {
+	reg := l1.Registration{Threshold: threshold, Keys: map[common.Address]l1.Key{}}
+	for _, a := range attesters {
+		reg.Keys[a.ps] = l1.Key{VKey: a.vkey, Signer: a.signer}
+	}
+	return func(context.Context) (l1.Registration, error) { return reg, nil }
+}
+
+func members(attesters ...*attester) []*Member {
+	var out []*Member
+	for _, a := range attesters {
+		out = append(out, a.member)
+	}
+	return out
+}
+
+// quorumWindow is anchor402's window, its batch listing proof systems.
+func quorumWindow(t *testing.T, proofSystems ...common.Address) *Window {
+	t.Helper()
+	w := anchor402(t).window()
+	b := *w.Batch
+	b.ProofSystems = proofSystems
+	b.RollupIDsWithProofSystems = []protocol.RollupIDWithProofSystems{{RollupID: w.RollupID, ProofSystemIndexes: []uint64{}}}
+	for i := range proofSystems {
+		b.RollupIDsWithProofSystems[0].ProofSystemIndexes = append(b.RollupIDsWithProofSystems[0].ProofSystemIndexes, uint64(i))
+	}
+	w.Batch = &b
+	return w
+}
+
+func proofSystemsOf(atts []Attestation) []common.Address {
+	var out []common.Address
+	for _, a := range atts {
+		out = append(out, a.ProofSystem)
+	}
+	return out
+}
+
+// TestQuorumAssembles: every keyed member is asked with the batch listing
+// its proof system alone, under the manager's key, and the attestations
+// come back in ascending proof-system order whatever the members' order;
+// each one verifies in the assembled batch.
+func TestQuorumAssembles(t *testing.T) {
+	a, b, c := newAttester(t, 0xa, 0, nil), newAttester(t, 0xb, 0, nil), newAttester(t, 0xc, 0, nil)
+	q := &Quorum{Members: members(c, a, b), Register: registered(2, a, b, c), Grace: time.Second}
+	w := quorumWindow(t, a.ps, b.ps, c.ps)
+	atts, err := q.ProveBy(t.Context(), w, time.Now().Add(5*time.Second), 0)
+	require.NoError(t, err)
+	require.Equal(t, []common.Address{a.ps, b.ps, c.ps}, proofSystemsOf(atts))
+	for _, x := range []*attester{a, b, c} {
+		sent, err := protocol.DecodePostAndVerifyBatch(x.p.finalized().GetSettlement().GetAbiCalldata())
+		require.NoError(t, err)
+		require.Equal(t, []common.Address{x.ps}, sent.ProofSystems)
+	}
+	assembled := *w.Batch
+	p, err := protocol.NewPublicInputs(&assembled, nil, [][]byte{nil}, [][]common.Hash{{a.vkey, b.vkey, c.vkey}}, common.Address{})
+	require.NoError(t, err)
+	hashes, err := p.ProofSystemHashes(3)
+	require.NoError(t, err)
+	for i, x := range []*attester{a, b, c} {
+		_, err := attest(atts[i].Proof, hashes[i][:], x.signer)
+		require.NoError(t, err, "proof system %x", x.ps)
+	}
+}
+
+// TestQuorumThreshold: a quorum reached without a refusing member; a
+// member the manager does not key, or whose proof system signs for another
+// address, is not asked; a threshold no usable members reach is refused
+// before asking any.
+func TestQuorumThreshold(t *testing.T) {
+	a, b := newAttester(t, 0xa, 0, nil), newAttester(t, 0xb, 0, nil)
+	bad := newAttester(t, 0xc, 0, status.Error(codes.InvalidArgument, "window refused"))
+	atts, err := (&Quorum{Members: members(a, b, bad), Register: registered(2, a, b, bad), Grace: time.Millisecond}).
+		ProveBy(t.Context(), quorumWindow(t, a.ps, b.ps, bad.ps), time.Now().Add(5*time.Second), 0)
+	require.NoError(t, err)
+	require.Equal(t, []common.Address{a.ps, b.ps}, proofSystemsOf(atts))
+
+	a = newAttester(t, 0xa, 0, nil)
+	unkeyed, rotated := newAttester(t, 0xd, 0, nil), newAttester(t, 0xe, 0, nil)
+	reg := registered(2, a, rotated)
+	register := func(ctx context.Context) (l1.Registration, error) {
+		r, err := reg(ctx)
+		r.Keys[rotated.ps] = l1.Key{VKey: rotated.vkey, Signer: common.Address{0xff}}
+		return r, err
+	}
+	_, err = (&Quorum{Members: members(a, unkeyed, rotated), Register: register}).
+		ProveBy(t.Context(), quorumWindow(t, a.ps, unkeyed.ps, rotated.ps), time.Now().Add(5*time.Second), 0)
+	require.ErrorIs(t, err, ErrQuorumUnreachable)
+	for _, x := range []*attester{a, unkeyed, rotated} {
+		calls, _ := x.p.last()
+		require.Zero(t, calls, "nobody asked")
+	}
+}
+
+// TestQuorumKeysEachMember: a member signing under any key but the
+// manager's, as its address padded, does not count.
+func TestQuorumKeysEachMember(t *testing.T) {
+	a := newAttester(t, 0xa, 0, nil)
+	padded := l1.Key{VKey: common.BytesToHash(a.signer[:]), Signer: a.signer}
+	register := func(context.Context) (l1.Registration, error) {
+		return l1.Registration{Threshold: 1, Keys: map[common.Address]l1.Key{a.ps: padded}}, nil
+	}
+	_, err := (&Quorum{Members: members(a), Register: register}).
+		ProveBy(t.Context(), quorumWindow(t, a.ps), time.Now().Add(5*time.Second), 0)
+	require.ErrorIs(t, err, ErrAttestation)
+	require.Equal(t, codes.Unknown, status.Code(err), "the node's to fix")
+}
+
+// TestQuorumFailure: a quorum that is not reached reports the provers'
+// status when every failed member answered with one, a refusal before a
+// transient failure; the registration failing is the node's.
+func TestQuorumFailure(t *testing.T) {
+	down := func(ps byte) *attester { return newAttester(t, ps, 0, status.Error(codes.Unavailable, "down")) }
+	a, b := down(0xa), down(0xb)
+	_, err := (&Quorum{Members: members(a, b), Register: registered(2, a, b)}).
+		ProveBy(t.Context(), quorumWindow(t, a.ps, b.ps), time.Now().Add(300*time.Millisecond), 0)
+	require.Equal(t, codes.Unavailable, status.Code(err))
+
+	refusing := newAttester(t, 0xc, 0, status.Error(codes.InvalidArgument, "window refused"))
+	_, err = (&Quorum{Members: members(a, refusing), Register: registered(2, a, refusing)}).
+		ProveBy(t.Context(), quorumWindow(t, a.ps, refusing.ps), time.Now().Add(300*time.Millisecond), 0)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+
+	unreadable := func(context.Context) (l1.Registration, error) { return l1.Registration{}, errors.New("L1 down") }
+	_, err = (&Quorum{Members: members(a), Register: unreadable}).
+		ProveBy(t.Context(), quorumWindow(t, a.ps), time.Now().Add(time.Second), 0)
+	require.ErrorContains(t, err, "L1 down")
+	require.Equal(t, codes.Unknown, status.Code(err))
+}
+
+// TestQuorumGrace: once the threshold is met, a late answer within the
+// grace still counts and a member past it is cancelled.
+func TestQuorumGrace(t *testing.T) {
+	a, b := newAttester(t, 0xa, 0, nil), newAttester(t, 0xb, 0, nil)
+	late, stuck := newAttester(t, 0xc, 100*time.Millisecond, nil), newAttester(t, 0xd, 5*time.Second, nil)
+	q := &Quorum{Members: members(a, b, late, stuck), Register: registered(2, a, b, late, stuck), Grace: 400 * time.Millisecond}
+	begin := time.Now()
+	atts, err := q.ProveBy(t.Context(), quorumWindow(t, a.ps, b.ps, late.ps, stuck.ps), time.Now().Add(10*time.Second), 0)
+	require.NoError(t, err)
+	require.Equal(t, []common.Address{a.ps, b.ps, late.ps}, proofSystemsOf(atts))
+	require.Less(t, time.Since(begin), 2*time.Second, "the stuck member is cancelled")
+	require.True(t, slices.IsSortedFunc(atts, func(x, y Attestation) int { return x.ProofSystem.Cmp(y.ProofSystem) }))
+}

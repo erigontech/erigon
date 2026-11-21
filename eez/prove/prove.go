@@ -90,6 +90,9 @@ type Window struct {
 	Time     uint64
 	// Block returns window block n with its witness.
 	Block func(ctx context.Context, n uint64) (*types.Block, *Witness, error)
+	// VKey, when set, is the verification key of the batch's one proof
+	// system, in place of the client's.
+	VKey common.Hash
 }
 
 // Client asks a prover for the attestation of a window.
@@ -173,7 +176,11 @@ func (c *Client) Prove(ctx context.Context, w *Window) ([]byte, error) {
 	if settlement.AbiCalldata, err = protocol.EncodePostAndVerifyBatch(&unproven); err != nil {
 		return nil, err
 	}
-	want, err := publicInputsHash(&unproven, c.vkey, custom)
+	vkey := c.vkey
+	if w.VKey != (common.Hash{}) {
+		vkey = w.VKey
+	}
+	want, err := publicInputsHash(&unproven, vkey, custom)
 	if err != nil {
 		return nil, err
 	}

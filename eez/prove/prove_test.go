@@ -211,8 +211,9 @@ type prover struct {
 	mu sync.Mutex
 	// streams counts the streams opened, calls the Finalize requests.
 	streams, calls int
-	// frames are the requests of the last stream.
+	// frames are the requests of the last stream, fin its last Finalize.
 	frames []*provepb.ClientFrame
+	fin    *provepb.Finalize
 	// aborted counts streams the client ended before an answer.
 	aborted int
 	// answer answers Finalize call: a proof, a rejection, or a status
@@ -262,6 +263,7 @@ func (p *prover) ProveStream(s provepb.Prover_ProveStreamServer) error {
 			p.mu.Lock()
 			p.calls++
 			call := p.calls
+			p.fin = k.Finalize
 			p.mu.Unlock()
 			proof, rej, err := p.answer(call)
 			if err != nil {
@@ -292,6 +294,13 @@ func (p *prover) ProveStream(s provepb.Prover_ProveStreamServer) error {
 			return nil
 		}
 	}
+}
+
+// finalized returns the last Finalize request.
+func (p *prover) finalized() *provepb.Finalize {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.fin
 }
 
 func (p *prover) last() (int, []*provepb.ClientFrame) {
