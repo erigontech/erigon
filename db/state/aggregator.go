@@ -1846,6 +1846,30 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return ceiling
 }
 
+// AssertFilesGap reports a gap in the files on disk: visible files then stop before the files end.
+func (at *AggregatorRoTx) AssertFilesGap() error {
+	a := at.a
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	filesEnd := a.dirtyFilesEndTxNumMinimax()
+	v := a.visible.Load()
+	var visibleEnd uint64 // every visible list is cut at the same end, so the longest one shows it
+	for _, d := range v.d {
+		if d != nil {
+			visibleEnd = max(visibleEnd, d.files.EndTxNum())
+		}
+	}
+	for _, ii := range v.iis {
+		if ii != nil {
+			visibleEnd = max(visibleEnd, ii.files.EndTxNum())
+		}
+	}
+	if visibleEnd < filesEnd {
+		return fmt.Errorf("a gap in files: visible files end at txNum %d, files reach %d", visibleEnd, filesEnd)
+	}
+	return nil
+}
+
 // aggregatorVisible immutable visible-for-application files (no gaps, no overlaps, indexed)
 // See also
 //
