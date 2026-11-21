@@ -31,6 +31,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -82,6 +83,7 @@ type handler struct {
 	subscriptionLimit   int // concurrent subscriptions a connection may hold; 0 = unlimited
 	pendingSubs         int // subscribe calls in flight, each holding one slot of subscriptionLimit
 	maxBatchConcurrency uint
+	batchResponseLimit  int
 	traceRequests       bool
 
 	// slow requests
@@ -201,7 +203,7 @@ func hasInOrderCall(calls []*jsonrpcMessage) bool {
 }
 
 // answerBatchCall runs one call of a batch and returns its answer, or nil when it needs none.
-func (h *handler) answerBatchCall(cp *callProc, msg *jsonrpcMessage) []byte {
+func (h *handler) answerBatchCall(cp *callProc, msg *jsonrpcMessage, responseBytes *atomic.Int64) []byte {
 	select {
 	case <-cp.ctx.Done():
 		return nil
@@ -213,10 +215,14 @@ func (h *handler) answerBatchCall(cp *callProc, msg *jsonrpcMessage) []byte {
 	buf := bytes.NewBuffer(nil)
 	stream := jsonstream.Get(buf)
 	defer jsonstream.Put(stream)
-	if res := h.handleCallMsg(cp, msg, stream); res != nil {
+	if h.batchResponseLimit > 0 && responseBytes.Load() > int64(h.batchResponseLimit) && msg.isCall() {
+		reason := fmt.Sprintf("batch response limit %d exceeded (can increase by --rpc.batch-response-max-size)", h.batchResponseLimit)
+		msg.errorResponse(&CustomError{Code: ErrCodeResponseTooLarge, Message: reason}).writeTo(stream)
+	} else if res := h.handleCallMsg(cp, msg, stream); res != nil {
 		res.writeTo(stream)
 	}
 	_ = stream.Flush()
+	responseBytes.Add(int64(buf.Len()))
 	if buf.Len() == 0 {
 		return nil
 	}
@@ -252,9 +258,10 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, done func()) {
 	h.startCallProc(func(cp *callProc) {
 		// Answers go to their request's slot, because the reply order must match the request order.
 		answersWithNils := make([][]byte, len(calls))
+		var responseBytes atomic.Int64
 		if hasInOrderCall(calls) {
 			for i, msg := range calls {
-				answersWithNils[i] = h.answerBatchCall(cp, msg)
+				answersWithNils[i] = h.answerBatchCall(cp, msg, &responseBytes)
 			}
 		} else {
 			// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
@@ -267,7 +274,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, done func()) {
 					defer func() {
 						<-boundedConcurrency
 					}()
-					answersWithNils[i] = h.answerBatchCall(cp, calls[i])
+					answersWithNils[i] = h.answerBatchCall(cp, calls[i], &responseBytes)
 				})
 			}
 			wg.Wait()

@@ -69,6 +69,7 @@ const (
 	ErrCodeResourceNotFound        = -32001
 	ErrCodeVMError                 = -32015
 	ErrCodeServerOverloaded        = -32005 // JSON-RPC "Too many requests"
+	ErrCodeResponseTooLarge        = -32003
 
 	ErrCodeTxSyncTimeout = 4
 )
