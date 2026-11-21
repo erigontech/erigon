@@ -493,6 +493,91 @@ func TestCallWarmsPragueDelegationTarget(t *testing.T) {
 	require.True(t, statedb.AddressInAccessList(delegatedTo))
 }
 
+func TestDelegationDesignatorIsFollowedOnlyFromPrague(t *testing.T) {
+	t.Parallel()
+
+	cancun := chain.TestChainOsakaConfig.Copy()
+	cancun.PragueTime = nil
+	cancun.OsakaTime = nil
+
+	caller := accounts.InternAddress(common.HexToAddress("0x1000"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
+	delegatedTo := accounts.InternAddress(common.HexToAddress("0x3000"))
+	one := common.LeftPadBytes([]byte{1}, 32)
+	const gasLimit = uint64(1_000_000)
+	childGas := uint256.NewInt(0x10000)
+
+	newState := func(t *testing.T, callerCode []byte) *state.IntraBlockState {
+		statedb := state.New(state.NewNoopReader())
+		t.Cleanup(statedb.Close)
+		require.NoError(t, statedb.SetCode(recipient, types.AddressToDelegation(delegatedTo), tracing.CodeChangeUnspecified))
+		require.NoError(t, statedb.SetCode(delegatedTo, program.New().Push(1).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes(), tracing.CodeChangeUnspecified))
+		if callerCode != nil {
+			require.NoError(t, statedb.SetCode(caller, callerCode, tracing.CodeChangeUnspecified))
+		}
+		return statedb
+	}
+
+	calls := map[string]*program.Program{
+		"CALL":         program.New().Call(childGas, recipient.Value(), 0, 0, 0, 0, 0),
+		"CALLCODE":     program.New().CallCode(childGas, recipient.Value(), 0, 0, 0, 0, 0),
+		"DELEGATECALL": program.New().DelegateCall(childGas, recipient.Value(), 0, 0, 0, 0),
+		"STATICCALL":   program.New().StaticCall(childGas, recipient.Value(), 0, 0, 0, 0),
+	}
+
+	for _, tc := range []struct {
+		name   string
+		config *chain.Config
+		prague bool
+	}{
+		{"cancun", cancun, false},
+		{"prague", chain.TestChainOsakaConfig, true},
+	} {
+		t.Run(tc.name+"/top-level", func(t *testing.T) {
+			t.Parallel()
+			ret, gasRemaining, err := Call(recipient, nil, &Config{ChainConfig: tc.config, GasLimit: gasLimit, State: newState(t, nil)})
+			if tc.prague {
+				require.NoError(t, err)
+				require.Equal(t, one, ret)
+				return
+			}
+			require.ErrorIs(t, err, &vm.ErrInvalidOpCode{})
+			require.Empty(t, ret)
+			require.Equal(t, mdgas.MdGas{}, gasRemaining)
+		})
+		for op, call := range calls {
+			t.Run(tc.name+"/"+op, func(t *testing.T) {
+				t.Parallel()
+				var childGasUsed uint64
+				var childErr error
+				hooks := &tracing.Hooks{
+					OnExit: func(depth int, _ []byte, gasUsed uint64, err error, _ bool) {
+						if depth == 1 {
+							childGasUsed, childErr = gasUsed, err
+						}
+					},
+				}
+				callerCode := program.New().Append(call.Bytes()).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
+				ret, _, err := Call(caller, nil, &Config{
+					ChainConfig: tc.config,
+					GasLimit:    gasLimit,
+					State:       newState(t, callerCode),
+					EVMConfig:   vm.Config{Tracer: hooks},
+				})
+				require.NoError(t, err)
+				if tc.prague {
+					require.NoError(t, childErr)
+					require.Equal(t, one, ret)
+					return
+				}
+				require.ErrorIs(t, childErr, &vm.ErrInvalidOpCode{})
+				require.Equal(t, childGas.Uint64(), childGasUsed)
+				require.Equal(t, make([]byte, 32), ret)
+			})
+		}
+	}
+}
+
 func fakeHeader(n uint64, parentHash common.Hash) *types.Header {
 	return &types.Header{
 		Coinbase:   common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
