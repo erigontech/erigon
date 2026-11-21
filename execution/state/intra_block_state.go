@@ -253,6 +253,7 @@ func New(stateReader StateReader) *IntraBlockState {
 	}
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
+	ibs.SetVersionMap(NewVersionMap(nil))
 	return ibs
 }
 
@@ -262,11 +263,20 @@ func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockSta
 	return ibs
 }
 
-// NewForSequentialCommitment builds a versioned IBS that keeps the stateObject cache on; only genesis needs both.
-func NewForSequentialCommitment(stateReader StateReader) *IntraBlockState {
-	ibs := New(stateReader)
-	ibs.versionMap = NewVersionMap(nil)
-	ibs.noMaterialize = false
+// NewVersionedBlock returns a state that reads through the version-map view, for
+// re-executing a block's txs in order (a later tx may re-create an account an
+// earlier one destroyed, so conflict detection stays on).
+func NewVersionedBlock(stateReader StateReader) *IntraBlockState {
+	ibs := NewWithVersionMap(stateReader, NewVersionMap(nil))
+	ibs.SetTxContext(0, 0)
+	return ibs
+}
+
+// NewVersionedCall is NewVersionedBlock for a single call, with cross-tx conflict
+// detection off.
+func NewVersionedCall(stateReader StateReader) *IntraBlockState {
+	ibs := NewVersionedBlock(stateReader)
+	ibs.SetNoConflictDetection()
 	return ibs
 }
 
@@ -355,12 +365,7 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.sdProbeEpoch++
 	ibs.accessList.Reset()
 	clear(ibs.transientStorage)
-	ibs.versionMap = nil
-	// noMaterialize is meaningful only alongside a versionMap; clear it with the
-	// map so a reused IBS can't run unversioned with the stateObject cache still
-	// suppressed (which would silently drop writes). The versioned worker re-sets
-	// both right after Reset; the block assembler never calls Reset mid-block.
-	ibs.noMaterialize = false
+	ibs.SetVersionMap(NewVersionMap(nil))
 	ibs.noConflictDetection = false
 	ibs.codeByHash = nil
 	clear(ibs.committedBase)
@@ -1001,15 +1006,17 @@ func (ibs *IntraBlockState) GetCommittedCodeHash(addr accounts.Address) (account
 	return hash, nil
 }
 
-// ResolveCode returns the code a call to addr executes, following an EIP-7702 delegation. The
-// code hash comes from the same read as the code.
-func (ibs *IntraBlockState) ResolveCode(addr accounts.Address) (accounts.Code, error) {
+// ResolveCode returns the code a call to addr executes. With followDelegation set, it follows an
+// EIP-7702 delegation; otherwise a delegation designator is ordinary code. The code hash comes
+// from the same read as the code.
+func (ibs *IntraBlockState) ResolveCode(addr accounts.Address, followDelegation bool) (accounts.Code, error) {
 	// committed=false so the tx's own writes (e.g. EIP-7702 authorization) are
 	// visible rather than stale delegation code from the version map.
 	code, err := ibs.getCode(addr)
-	// eip-7702
-	if delegation, ok := types.ParseDelegation(code.Bytes); ok {
-		return ibs.getCode(delegation)
+	if followDelegation {
+		if delegation, ok := types.ParseDelegation(code.Bytes); ok {
+			return ibs.getCode(delegation)
+		}
 	}
 	if err != nil {
 		return accounts.Code{}, err
@@ -2094,6 +2101,17 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 
 var zeroBalance uint256.Int
 
+// ContractCreatedInTx reports whether the current transaction created a contract at addr.
+// The marker survives SELFDESTRUCT and is cleared if the creation is rolled back.
+func (ibs *IntraBlockState) ContractCreatedInTx(addr accounts.Address) bool {
+	if ibs.versionMap != nil {
+		created, _ := ibs.versionedWriteCreateContract(addr)
+		return created
+	}
+	so := ibs.stateObjects[addr]
+	return so != nil && so.newlyCreated && (so.createdContract || so.destructedCreated)
+}
+
 // Used for EIP-6780
 func (ibs *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
 	stateObject, err := ibs.getStateObject(addr, true)
@@ -2848,6 +2866,17 @@ func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	// Invalidate journal because reverting across transactions is not allowed.
 	ibs.clearJournalAndRefund()
 	return nil
+}
+
+// BurnSelfDestructs makes every self-destruct of this state delete its account, also one
+// that ran with balance-preserving (EIP-8246) rules. For genesis only, which finalizes
+// without EIP-8246: a block keeps the balance that EIP-8246 preserves.
+func (ibs *IntraBlockState) BurnSelfDestructs() {
+	for addr, sd := range ibs.versionedWrites.SelfDestructs() {
+		if b, ok := ibs.versionedWrites.GetBalance(addr); sd.Val && ok && !b.Deletes() {
+			ibs.recordWriteBalanceDeleted(addr)
+		}
+	}
 }
 
 // FinalizedWrites applies EIP-6780 normalization and EIP-161 filtering, then

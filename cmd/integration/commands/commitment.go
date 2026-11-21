@@ -47,14 +47,18 @@ import (
 	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -65,6 +69,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 var (
@@ -191,28 +196,30 @@ Examples:
   integration commitment branch --datadir /path/to/datadir --prefix 0a1b
   integration commitment branch --datadir /path/to/datadir --prefix 0a1b --txnum 1000000
   integration commitment branch --datadir /path/to/datadir  # reads root (empty prefix)`,
-	Run: func(cmd *cobra.Command, args []string) {
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		defer debug.Exit()
 
 		prefix, err := commitment.PrefixStringToNibbles(branchPrefixFlag)
 		if err != nil {
-			logger.Error("Failed to parse prefix", "error", err)
-			return
+			return fmt.Errorf("parsing prefix: %w", err)
 		}
 
 		dirs := datadir.New(datadirCli)
 		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer chainDb.Close()
+		if statecfg.Schema.CommitmentDomain.CommitmentV3Records {
+			return errors.New("not supported on commitment v3")
+		}
 
 		// Start a read-only temporal transaction
 		tx, err := chainDb.BeginTemporalRo(ctx)
 		if err != nil {
-			logger.Error("Failed to begin temporal tx", "error", err)
-			return
+			return fmt.Errorf("beginning temporal tx: %w", err)
 		}
 		defer tx.Rollback()
 
@@ -221,23 +228,21 @@ Examples:
 			fmt.Printf("(asOfTxNum: %d)\n", txnumFlag)
 			reader := commitmentdb.NewHistoryStateReader(tx, txnumFlag)
 			if err := readBranch(reader, prefix, stepSize); err != nil {
-				logger.Error("Failed to read branch", "error", err)
-				return
+				return fmt.Errorf("reading branch: %w", err)
 			}
 		} else {
 			// Latest state read
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			if err != nil {
-				logger.Error("Failed to create shared domains", "error", err)
-				return
+				return fmt.Errorf("creating shared domains: %w", err)
 			}
 			defer sd.Close()
 			reader := commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{})
 			if err := readBranch(reader, prefix, stepSize); err != nil {
-				logger.Error("Failed to read branch", "error", err)
-				return
+				return fmt.Errorf("reading branch: %w", err)
 			}
 		}
+		return nil
 	},
 }
 
@@ -267,7 +272,6 @@ func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize ui
 	return nil
 }
 
-// integration commitment rebuild
 var cmdCommitmentVerify = &cobra.Command{
 	Use:   "verify",
 	Short: "Fold the v3 commitment records to the stored state root, at the latest state and at --asof txNums; fails on orphan records",
@@ -346,6 +350,11 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	dirs := datadir.New(datadirCli)
 	if reset {
 		return rawdbreset.Reset(ctx, db, stages.Execution)
+	}
+	if !clearCommitment {
+		if err := checkCommitmentTrieMatchesFiles(); err != nil {
+			return err
+		}
 	}
 
 	br, _ := blocksIO(db, logger)
@@ -492,6 +501,9 @@ var cmdCommitmentPrint = &cobra.Command{
 }
 
 func printCommitment(db kv.TemporalRwDB, ctx context.Context) error {
+	if err := checkCommitmentTrieMatchesFiles(); err != nil {
+		return err
+	}
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
@@ -543,6 +555,8 @@ tool detects the current state of each file and converts only what is needed.
 Files already in the target state on disk under <datadir>/snapshots/domain/
 are skipped.
 
+It reads and writes snapshot files only: <datadir>/chaindata is never opened and may be absent.
+
 Originals are preserved at <datadir>/snapshots/backup/domains/ for revert.
 
 --restore is a sibling mode that moves the originals back into place and
@@ -556,6 +570,8 @@ mismatch silently produces mixed-encoding output. Without --continue, a
 mid-run crash discards any in-progress work in snap/rebuild/domain/ and
 Phase 1 restarts from scratch. --continue is mutually exclusive with
 --restore.
+
+For --v3, history is converted when snapshots/history holds commitment .v files; --no-domain skips domain files and --no-history skips history files; a split run converts history (--no-domain) first. --no-domain with no commitment .v files, or --no-history with no commitment .kv files, is an error.
 
 Examples:
   integration commitment convert --datadir /path/to/datadir --chain mainnet
@@ -573,6 +589,12 @@ Examples:
 		if convertV3 && (convertRestore || cmd.Flags().Changed("squeeze") || cmd.Flags().Changed("nibbles.v2")) {
 			return errors.New("--v3 is mutually exclusive with --restore/--squeeze/--nibbles.v2")
 		}
+		if !convertV3 && (convertNoDomain || convertNoHistory) {
+			return errors.New("--no-domain and --no-history require --v3")
+		}
+		if convertNoDomain && convertNoHistory {
+			return errors.New("--no-domain and --no-history together leave nothing to convert")
+		}
 		if convertRestore && convertContinue {
 			return errors.New("--continue is mutually exclusive with --restore")
 		}
@@ -582,60 +604,27 @@ Examples:
 		if convertRestore {
 			return commitmentRestore(ctx, logger)
 		}
-		if err := dbstate.CheckRestoreResetDone(datadir.New(datadirCli)); err != nil {
-			return err
-		}
-
-		if convertV3 {
-			legacyHistory, err := filepath.Glob(filepath.Join(datadir.New(datadirCli).SnapHistory, "*-commitment.*.v"))
-			if err != nil {
-				return fmt.Errorf("listing commitment history: %w", err)
-			}
-			if len(legacyHistory) > 0 {
-				statecfg.EnableHistoricalCommitment()
-			}
-		}
-
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
-		if err != nil {
-			return fmt.Errorf("opening DB: %w", err)
-		}
-		defer db.Close()
-
 		opts := dbstate.ConvertOpts{
 			TargetSqueeze:   convertSqueeze,
 			TargetNibblesV2: convertNibblesV2,
 			Continue:        convertContinue,
 			TargetV3:        convertV3,
+			NoDomain:        convertNoDomain,
+			NoHistory:       convertNoHistory,
 		}
-		return commitmentConvert(db, cmd.Context(), logger, opts)
+		return commitmentConvertWithoutChaindata(ctx, logger, opts)
 	},
 }
 
-// commitmentRestore moves the files back before openDB so recovery still works
-// when MDBX/aggregator/snapshots can't open — which is exactly when --restore
-// is most needed.
 func commitmentRestore(ctx context.Context, logger log.Logger) error {
-	restoredV3, err := dbstate.RestoreCommitmentFiles(ctx, datadir.New(datadirCli), logger)
-	if err != nil || !restoredV3 {
+	if err := dbstate.RestoreCommitmentFiles(ctx, datadir.New(datadirCli), logger); err != nil {
 		return err
 	}
-	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
-	if err != nil {
-		return fmt.Errorf("commitment files are restored, but the execution state still needs a reset: re-run the same `integration commitment convert --restore` command before starting erigon: %w", err)
-	}
-	defer db.Close()
-	if err := rawdbreset.ResetExec(ctx, db); err != nil {
-		return err
-	}
-	return dbstate.CompleteCommitmentRestore(datadir.New(datadirCli), logger)
+	logger.Info("Commitment files restored. Next step: integration stage_exec --reset")
+	return nil
 }
 
-func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
-	if opts.TargetV3 {
-		opts.BeforeSwap = func() error { return rawdbreset.ResetExec(ctx, db) }
-	}
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+func commitmentConvert(agg *dbstate.Aggregator, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
 	agg.PresetOfflineMerge()
 	agg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))
 	agg.DisableAllDependencies()
@@ -648,6 +637,59 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	// nil-guarded closeFiles), but MadvNormal would dereference freed mmap.
 
 	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
+}
+
+func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
+	dirs := datadir.Open(datadirCli)
+	if err := CheckSaltFilesExist(dirs); err != nil {
+		return err
+	}
+	if err := dbstate.MatchCommitmentSchemaToFiles(dirs); err != nil {
+		return err
+	}
+	if opts.TargetV3 && !opts.NoHistory {
+		hasHistory, err := dbstate.HasCommitmentHistoryFiles(dirs)
+		if err != nil {
+			return err
+		}
+		if hasHistory {
+			statecfg.EnableHistoricalCommitment()
+		}
+	}
+	settings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dirs.Tmp, dir.DirPerm); err != nil { // the converter's sorts spill there
+		return err
+	}
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(nil); err != nil {
+		return err
+	}
+	if opts.TargetV3 && !opts.NoDomain {
+		blockSnaps := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, logger)
+		defer blockSnaps.Close()
+		if err := blockSnaps.OpenFolder(); err != nil {
+			return err
+		}
+		rawDB, err := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Tmp).Open(ctx)
+		if err != nil {
+			return err
+		}
+		db, err := temporal.New(rawDB, agg, blockSnaps)
+		if err != nil {
+			rawDB.Close()
+			return err
+		}
+		defer db.Close()
+		opts.DB, opts.TxNums = db, freezeblocks.NewBlockReader(blockSnaps).TxnumReader()
+	}
+	return commitmentConvert(agg, ctx, logger, opts)
 }
 
 // integration commitment visualize

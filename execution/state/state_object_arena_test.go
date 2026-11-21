@@ -105,6 +105,7 @@ func TestNoMaterializeReadReusesArena(t *testing.T) {
 // takes arena slots, the materializing path takes pooled objects.
 func TestNoMaterializeAllocStateObjectUsesArena(t *testing.T) {
 	materializing := New(&emptyReader{})
+	materializing.SetVersionMap(nil)
 	defer materializing.Close()
 	pooled := materializing.allocStateObject()
 	assert.False(t, pooled.arena, "materializing path must use the pool")

@@ -172,7 +172,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 		if txTask.BlockNumber() == 0 {
 			// Genesis block
 			var genesisIbs *state.IntraBlockState
-			_, genesisIbs, err = genesiswrite.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
+			_, genesisIbs, err = genesiswrite.GenesisToBlock(rw.execArgs.Genesis)
 			if err != nil {
 				panic(fmt.Errorf("GenesisToBlock: %w", err))
 			}
@@ -396,9 +396,9 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
 					// End of block transaction in a block
 					reader := state.NewHistoryReaderV3(tx, outputTxNum)
-					ibs := state.New(reader)
+					ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
 					defer ibs.Close()
-					transactions.VersionedCallState(ibs)
+					ibs.SetNoConflictDetection()
 					ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 					syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 						return protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{})

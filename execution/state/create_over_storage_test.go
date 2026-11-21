@@ -221,10 +221,12 @@ func TestRevertedSelfdestructKeepsCreatedContract(t *testing.T) {
 			ibs := tc.new(reader)
 			defer ibs.Close()
 			ibs.SetTxContext(1, 0)
+			beforeCreate := ibs.PushSnapshot()
 			require.NoError(t, ibs.CreateAccount(x, true))
 			snap := ibs.PushSnapshot()
 			_, err := ibs.Selfdestruct(x, false)
 			require.NoError(t, err)
+			require.True(t, ibs.ContractCreatedInTx(x))
 			_, err = ibs.GetState(x, k5)
 			require.NoError(t, err)
 			ibs.RevertToSnapshot(snap, nil)
@@ -234,6 +236,8 @@ func TestRevertedSelfdestructKeepsCreatedContract(t *testing.T) {
 			original, err := ibs.GetCommittedState(x, k5)
 			require.NoError(t, err)
 			require.True(t, original.IsZero())
+			ibs.RevertToSnapshot(beforeCreate, nil)
+			require.False(t, ibs.ContractCreatedInTx(x))
 		})
 	}
 }
@@ -244,6 +248,7 @@ func TestRevertedSelfdestructKeepsEarlierTxOrigin(t *testing.T) {
 	x, _, k5, reader := slotsBeforeTheBlock()
 	rules := &chain.Rules{}
 	ibs := New(reader)
+	ibs.SetVersionMap(nil)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 0)
 	require.NoError(t, ibs.CreateAccount(x, true))
@@ -254,6 +259,7 @@ func TestRevertedSelfdestructKeepsEarlierTxOrigin(t *testing.T) {
 	snap := ibs.PushSnapshot()
 	_, err := ibs.Selfdestruct(x, false)
 	require.NoError(t, err)
+	require.False(t, ibs.ContractCreatedInTx(x))
 	ibs.RevertToSnapshot(snap, nil)
 	original, err := ibs.GetCommittedState(x, k5)
 	require.NoError(t, err)
@@ -267,6 +273,7 @@ func TestRevertedSelfdestructCommitsSlotEqualToPreCreationValue(t *testing.T) {
 	x, _, k5, reader := slotsBeforeTheBlock()
 	rules := &chain.Rules{}
 	ibs := New(reader)
+	ibs.SetVersionMap(nil)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 0)
 	require.NoError(t, ibs.CreateAccount(x, true))
