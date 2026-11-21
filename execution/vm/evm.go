@@ -27,7 +27,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -587,13 +586,9 @@ type codeAndHash struct {
 	hash accounts.CodeHash
 }
 
-func NewCodeAndHash(code []byte) *codeAndHash {
-	return &codeAndHash{code: code}
-}
-
 func (c *codeAndHash) Hash() accounts.CodeHash {
 	if c.hash.IsZero() {
-		c.hash = accounts.InternCodeHash(crypto.Keccak256Hash(c.code))
+		c.hash = accounts.NewCode(c.code).Hash
 	}
 	return c.hash
 }
@@ -669,11 +664,6 @@ func (evm *EVM) hasCreateCollision(address accounts.Address) (bool, error) {
 	return targetNonce != 0 || !targetCodeHash.IsEmpty(), nil
 }
 
-func (evm *EVM) OverlayCreate(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool) ([]byte, accounts.Address, mdgas.MdGas, mdgas.MdGasUsage, error) {
-	ret, addr, gasRemaining, gasUsed, err := evm.create(caller, codeAndHash, gas, value, address, typ, incrementNonce, false)
-	return ret, addr, gasRemaining, gasUsed, err
-}
-
 // create creates a new contract using code as deployment code.
 func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool) ([]byte, accounts.Address, mdgas.MdGas, mdgas.MdGasUsage, error) {
 	return evm.createWithPreparation(caller, codeAndHash, gas, value, address, typ, incrementNonce, bailout, nil)
@@ -685,6 +675,14 @@ func (evm *EVM) createPrepared(caller accounts.Address, codeAndHash *codeAndHash
 
 func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool, preparation *createPreparation) (ret []byte, createAddress accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	gasRemaining = gas
+	// With EIP-3860, nested creations select the replacement when calculating
+	// the initcode charge, before gas is forwarded to the constructor.
+	if override := evm.config.OverrideInitCode; override != nil && (preparation == nil || !evm.config.HasEip3860(evm.chainRules)) {
+		if replacement, matched := override(address); matched {
+			codeAndHash.code = replacement
+			codeAndHash.hash = accounts.NilCodeHash
+		}
+	}
 
 	depth := evm.depth
 	if depth == 0 {

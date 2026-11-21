@@ -309,16 +309,18 @@ func TestVersionMapView_GetAccountTable(t *testing.T) {
 			vm.FlushVersionedWrites(ws, true)
 		}, base: &committed, acc: committed, ok: true, baseReads: 1},
 		{
+			// SELFDESTRUCT means deleted: a lone SD cell with no preserving balance cell
+			// is a full wipe, so the account is gone — not kept at its committed balance.
 			name: "self-destruct cell only", setup: func(vm *VersionMap) { vm.WriteSelfDestruct(addr, v(0), true, true) },
-			base: &committed, acc: committed, ok: true, wasDeleted: true, baseReads: 1,
+			base: &committed, wasDeleted: true, baseReads: 1,
 		},
-		{name: "EIP-8246 destruct keeps raw floors below it", setup: func(vm *VersionMap) {
+		{name: "self-destruct wipes nonce and code hash below it", setup: func(vm *VersionMap) {
 			vm.WriteNonce(addr, v(0), 9, true)
 			vm.WriteCodeHash(addr, v(0), cellCode, true)
 			vm.WriteSelfDestruct(addr, v(1), true, true)
 			vm.WriteBalance(addr, v(1), *uint256.NewInt(3), true)
 		}, base: &committed, acc: with(committed, func(a *accounts.Account) {
-			a.Balance, a.Nonce, a.CodeHash = *uint256.NewInt(3), 9, cellCode
+			a.Balance, a.Nonce, a.CodeHash = *uint256.NewInt(3), 0, accounts.EmptyCodeHash
 		}), ok: true, wasDeleted: true, baseReads: 1},
 		{name: "BAL marker over base", setup: func(vm *VersionMap) {
 			vm.WriteAddressExists(addr, v(0), &marker)

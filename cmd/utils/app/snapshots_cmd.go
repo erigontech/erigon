@@ -445,7 +445,7 @@ var snapshotCommand = cli.Command{
 				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (speeds up repeated runs)"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0); slow checks use 1/10000 of it", Value: 1.0},
-				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; each check gets (remaining / remaining_checks). 0 (default) means no limit"},
+				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; the run fails if it ends before every check has finished. 0 (default) means no limit"},
 			}),
 		},
 		{
@@ -1687,7 +1687,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		case integrity.CaplinStateRoots:
 			return integrity.CheckCaplinStateRoots(ctx, dirs, failFast, logger)
 		case integrity.CaplinBlobSidecars:
-			return integrity.CheckCaplinBlobSidecars(ctx, res.CaplinIndexDB, res.CaplinSnaps, res.BeaconConfig, blobsFromSlot, failFast, logger)
+			return integrity.CheckCaplinBlobSidecars(ctx, res.CaplinIndexDB, res.CaplinSnaps, res.BeaconConfig, blobsFromSlot, failFast, cache, logger)
 		case integrity.ReceiptsNoDups:
 			return integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast)
 		case integrity.RCacheNoDups:
@@ -1704,16 +1704,14 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 			return integrity.CheckCommitmentKvDeref(ctx, db, cache, failFast, logger)
 		case integrity.CommitmentHistVal:
 			if !commitmentHistoryEnabled {
-				logger.Info("[integrity] CommitmentHistVal skipped because commitment history is not enabled on this datadir")
-				return nil
+				return fmt.Errorf("%w: commitment history is not enabled on this datadir", integrity.ErrSkipped)
 			}
 			scCopy := sc
 			scCopy.SampleRatio /= 10_000 // it's very slow check
 			return integrity.CheckCommitmentHistVal(ctx, scCopy, db, blockReader, failFast, logger)
 		case integrity.StateRootVerifyByHistory:
 			if !commitmentHistoryEnabled {
-				logger.Info("[integrity] StateRootVerifyByHistory skipped because commitment history is not enabled on this datadir")
-				return nil
+				return fmt.Errorf("%w: commitment history is not enabled on this datadir", integrity.ErrSkipped)
 			}
 			to, err := stateFilesProgress(ctx, db, blockReader.TxnumReader())
 			if err != nil {
@@ -1735,53 +1733,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		}
 	}
 
-	var deadline time.Time
-	if budget := cliCtx.Duration("integrity.budget"); budget > 0 {
-		requestedChecks = integrity.SortChecksByCost(requestedChecks)
-		deadline = time.Now().Add(budget)
-		logger.Info("[integrity] budget", "total", budget, "perCheck", budget/time.Duration(len(requestedChecks)))
-	}
-
-	for i, chk := range requestedChecks {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		checkCtx := ctx
-		var cancel context.CancelFunc
-		if !deadline.IsZero() {
-			remaining := time.Until(deadline)
-			if remaining <= 0 {
-				logger.Info("[integrity] budget exhausted, skipping remaining", "skipped", len(requestedChecks)-i)
-				break
-			}
-			slice := remaining / time.Duration(len(requestedChecks)-i)
-			checkCtx, cancel = context.WithTimeout(ctx, slice)
-		}
-
-		logger.Info("[integrity] starting", "check", chk)
-		start := time.Now()
-		err := runCheck(checkCtx, chk)
-		elapsed := time.Since(start)
-		if cancel != nil {
-			cancel()
-		}
-
-		if err == nil {
-			logger.Info("[integrity] done", "check", chk, "elapsed", elapsed)
-			continue
-		}
-		if parentErr := ctx.Err(); parentErr != nil {
-			return parentErr
-		}
-		if integrity.BudgetExhausted(err) {
-			logger.Info("[integrity] budget exhausted, moving on", "check", chk, "elapsed", elapsed)
-			continue
-		}
-		return fmt.Errorf("%s: %w", chk, err)
-	}
-
-	return nil
+	return integrity.RunChecks(ctx, requestedChecks, cliCtx.Duration("integrity.budget"), runCheck, logger)
 }
 
 // stateFilesProgress returns the latest block fully covered by state-history files.
@@ -2629,14 +2581,17 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 }
 
 func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := state.CheckMixedCommitmentFiles(dat); err != nil {
+		return err
+	}
 	if chainDB == nil {
 		chainDB = dbCfg(dbcfg.ChainDB, dat.Chaindata).MustOpen()
 		defer chainDB.Close()
 	}
 
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
 		return err

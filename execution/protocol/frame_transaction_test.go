@@ -87,6 +87,7 @@ func frameTestEnv(t testing.TB) (*vm.EVM, *types.FrameTransaction) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
 	ibs := state.New(state.NewNoopReader())
+	ibs.SetVersionMap(nil)
 	t.Cleanup(ibs.Close)
 	evm := newTestEVM(ibs, cfg, 30_000_000)
 	sender := common.HexToAddress("0x1000")
@@ -230,8 +231,8 @@ func TestFrameTransactionMissingNonceManager(t *testing.T) {
 			t.Run(fmt.Sprintf("versioned=%t/%s", versioned, mode), func(t *testing.T) {
 				ibs := state.New(state.NewNoopReader())
 				defer ibs.Close()
-				if versioned {
-					ibs.SetVersionMap(state.NewVersionMap(nil))
+				if !versioned {
+					ibs.SetVersionMap(nil)
 				}
 				cfg := chain.AllProtocolChanges.Copy()
 				cfg.BogotaTime = common.NewUint64(0)
@@ -397,102 +398,69 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 	}
 }
 
-func TestFrameTransactionRPCGasBailout(t *testing.T) {
-	for _, bailout := range []bool{false, true} {
-		t.Run(fmt.Sprint(bailout), func(t *testing.T) {
+func TestFrameTransactionInsufficientPayerBalance(t *testing.T) {
+	evm, tx := frameTestEnv(t)
+	ibs := evm.IntraBlockState()
+	sender := accounts.InternAddress(tx.SenderAddress)
+	payer := common.HexToAddress("0x2000")
+	payerAddress := accounts.InternAddress(payer)
+	require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveExecution).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(payerAddress, program.New().Push(types.FrameApprovePayment).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+	tx.Fees.FeeCap.SetUint64(1)
+	tx.Frames = []types.Frame{
+		{Mode: types.FrameVerify, Flags: types.FrameApproveExecution, Limits: mdgas.MdGas{Execution: 1_000}},
+		{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &payer, Limits: mdgas.MdGas{Execution: 5_000}},
+	}
+	_, err := applyFrameTest(t, evm, tx)
+	require.ErrorIs(t, err, vm.ErrExecutionReverted)
+}
+
+func TestFrameTransactionValueTransfer(t *testing.T) {
+	for _, balance := range []uint64{0, 20} {
+		t.Run(fmt.Sprintf("balance=%d", balance), func(t *testing.T) {
 			evm, tx := frameTestEnv(t)
 			ibs := evm.IntraBlockState()
 			sender := accounts.InternAddress(tx.SenderAddress)
-			payer := common.HexToAddress("0x2000")
-			payerAddress := accounts.InternAddress(payer)
-			require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveExecution).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
-			require.NoError(t, ibs.SetCode(payerAddress, program.New().Push(types.FrameApprovePayment).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
-			tx.Fees.FeeCap.SetUint64(1)
-			tx.Frames = []types.Frame{
-				{Mode: types.FrameVerify, Flags: types.FrameApproveExecution, Limits: mdgas.MdGas{Execution: 1_000}},
-				{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &payer, Limits: mdgas.MdGas{Execution: 5_000}},
-			}
-			msg, err := tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
-			require.NoError(t, err)
-			result, err := ApplyMessage(evm, msg, NewGasPool(30_000_000, 0), true, bailout, nil)
-			if !bailout {
-				require.ErrorIs(t, err, vm.ErrExecutionReverted)
-				return
-			}
-			require.NoError(t, err)
-			require.NoError(t, result.Err)
-			require.Equal(t, &payer, result.Payer)
-			balance, err := ibs.GetBalance(payerAddress)
-			require.NoError(t, err)
-			require.True(t, balance.IsZero(), "gas bailout must neither debit nor refund the payer")
-		})
-	}
-}
-
-func TestFrameTransactionRPCValueBailout(t *testing.T) {
-	for _, balance := range []uint64{0, 20} {
-		for _, bailout := range []bool{false, true} {
-			t.Run(fmt.Sprintf("balance=%d/bailout=%t", balance, bailout), func(t *testing.T) {
-				evm, tx := frameTestEnv(t)
-				ibs := evm.IntraBlockState()
-				sender := accounts.InternAddress(tx.SenderAddress)
-				target := common.HexToAddress("0x2000")
-				require.NoError(t, ibs.SetBalance(sender, uint256.Int{balance}, tracing.BalanceChangeUnspecified))
-				require.NoError(t, ibs.SetBalance(accounts.InternAddress(target), uint256.Int{1}, tracing.BalanceChangeUnspecified))
-				require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
-				tx.Frames = []types.Frame{
-					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
-					{Mode: types.FrameSender, Target: &target, Value: uint256.Int{10}, Limits: mdgas.MdGas{Execution: 10_000}},
-				}
-				msg, err := tx.AsMessage(types.Signer{}, nil, evm.ChainRules())
-				require.NoError(t, err)
-				result, err := ApplyMessage(evm, msg, NewGasPool(30_000_000, 0), true, bailout, nil)
-				require.NoError(t, err)
-				if balance < 10 && !bailout {
-					require.ErrorIs(t, result.Err, vm.ErrExecutionReverted)
-					return
-				}
-				require.NoError(t, result.Err)
-				got, err := ibs.GetBalance(accounts.InternAddress(target))
-				require.NoError(t, err)
-				require.Equal(t, uint256.Int{11}, got)
-				got, err = ibs.GetBalance(sender)
-				require.NoError(t, err)
-				want := uint64(0)
-				if balance >= 10 {
-					want = balance - 10
-				}
-				require.Equal(t, uint256.Int{want}, got)
-			})
-		}
-	}
-}
-
-func TestFrameTransactionRPCBailoutRefund(t *testing.T) {
-	for _, bailout := range []bool{false, true} {
-		t.Run(fmt.Sprint(bailout), func(t *testing.T) {
-			evm, tx := frameTestEnv(t)
-			ibs := evm.IntraBlockState()
 			target := common.HexToAddress("0x2000")
-			require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
-			require.NoError(t, ibs.SetCode(accounts.InternAddress(target), program.New().Sstore(0, 1).Sstore(0, 0).Op(vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetBalance(sender, uint256.Int{balance}, tracing.BalanceChangeUnspecified))
+			require.NoError(t, ibs.SetBalance(accounts.InternAddress(target), uint256.Int{1}, tracing.BalanceChangeUnspecified))
+			require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
 			tx.Frames = []types.Frame{
 				{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
-				{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 100_000, State: params.StateGasPerStorageSet}},
+				{Mode: types.FrameSender, Target: &target, Value: uint256.Int{10}, Limits: mdgas.MdGas{Execution: 10_000}},
 			}
-			msg, err := tx.AsMessage(types.Signer{}, nil, evm.ChainRules())
+			result, err := applyFrameTest(t, evm, tx)
 			require.NoError(t, err)
-			result, err := ApplyMessage(evm, msg, NewGasPool(30_000_000, 0), true, bailout, nil)
-			require.NoError(t, err)
+			if balance < 10 {
+				require.ErrorIs(t, result.Err, vm.ErrExecutionReverted)
+				return
+			}
 			require.NoError(t, result.Err)
-			require.NotZero(t, ibs.GetRefund())
-			if bailout {
-				require.Zero(t, result.GasRefund)
-			} else {
-				require.NotZero(t, result.GasRefund)
-			}
+			got, err := ibs.GetBalance(accounts.InternAddress(target))
+			require.NoError(t, err)
+			require.Equal(t, uint256.Int{11}, got)
+			got, err = ibs.GetBalance(sender)
+			require.NoError(t, err)
+			require.Equal(t, uint256.Int{balance - 10}, got)
 		})
 	}
+}
+
+func TestFrameTransactionGasRefund(t *testing.T) {
+	evm, tx := frameTestEnv(t)
+	ibs := evm.IntraBlockState()
+	target := common.HexToAddress("0x2000")
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(target), program.New().Sstore(0, 1).Sstore(0, 0).Op(vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
+	tx.Frames = []types.Frame{
+		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+		{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 100_000, State: params.StateGasPerStorageSet}},
+	}
+	result, err := applyFrameTest(t, evm, tx)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	require.NotZero(t, ibs.GetRefund())
+	require.NotZero(t, result.GasRefund)
 }
 
 func TestFrameTransactionRPCBlobFeeCheck(t *testing.T) {

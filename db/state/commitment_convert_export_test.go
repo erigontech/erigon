@@ -60,6 +60,12 @@ func SetCommitmentV3BatchBytesForTest(n int) int {
 	return old
 }
 
+func SetCommitmentV3BatchForTest(n int) int {
+	old := commitmentV3Batch
+	commitmentV3Batch = n
+	return old
+}
+
 func SetLegacyCommitTxNumsForTest(fn func(*DomainRoTx, uint64, uint64) ([]uint64, error)) {
 	if fn == nil {
 		legacyCommitTxNumsFn = legacyCommitTxNums

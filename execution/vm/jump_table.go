@@ -112,6 +112,9 @@ func newBogotaInstructionSet() JumpTable {
 	instructionSet[FRAMEPARAM] = operation{execute: opFrameParam, constantGas: 2, numPop: 2, numPush: 1}
 	instructionSet[SIGPARAM] = operation{execute: opSigParam, constantGas: 2, numPop: 2, numPush: 1}
 	instructionSet[SIGDATACOPY] = operation{execute: opSigDataCopy, constantGas: 3, dynamicGas: gasCallDataCopy, memorySize: memoryCallDataCopy, numPop: 4}
+	instructionSet[TXTRACE] = operation{execute: opTxTrace, constantGas: params.WarmStorageReadCostEIP2929, numPop: 2, numPush: 1}
+	instructionSet[TXDIFF] = operation{execute: opTxDiff, constantGas: params.WarmStorageReadCostEIP2929, dynamicGas: gasTxDiff, numPop: 3, numPush: 1}
+	instructionSet[EVENTDATACOPY] = operation{execute: opEventDataCopy, constantGas: 3, dynamicGas: gasExtCodeCopy, memorySize: memoryExtCodeCopy, numPop: 4}
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
@@ -233,7 +236,7 @@ func newConstantinopleInstructionSet() JumpTable {
 		dynamicGas:  gasCreate2,
 		numPop:      4,
 		numPush:     1,
-		memorySize:  memoryCreate2,
+		memorySize:  memoryCreate,
 		string:      stCreate2,
 	}
 	validateAndFillMaxStack(&instructionSet)

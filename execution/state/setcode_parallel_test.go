@@ -363,6 +363,7 @@ func TestResolveCodeTakesTheHashFromTheRead(t *testing.T) {
 			ibs = NewWithVersionMap(r, NewVersionMap(nil))
 		} else {
 			ibs = New(r)
+			ibs.SetVersionMap(nil)
 		}
 		got, err := ibs.ResolveCode(addr, true)
 		require.NoError(t, err)

@@ -345,6 +345,7 @@ func (w failingAccountWriter) UpdateAccountData(accounts.Address, *accounts.Acco
 func TestExecuteReportsFailedWriteSetAsOperational(t *testing.T) {
 	want := errors.New("disk error")
 	ibs := state.New(state.NewNoopReader())
+	ibs.SetVersionMap(nil)
 	defer ibs.Close()
 	require.NoError(t, ibs.AddBalance(accounts.InternAddress(common.HexToAddress("0xaa")), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 
@@ -353,4 +354,54 @@ func TestExecuteReportsFailedWriteSetAsOperational(t *testing.T) {
 
 	require.ErrorIs(t, result.Err, want)
 	require.True(t, result.Operational)
+}
+
+func TestCreateReceiptBlobGasUsed(t *testing.T) {
+	t.Parallel()
+
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	to := crypto.PubkeyToAddress(key.PublicKey)
+	config := chain.TestChainOsakaConfig
+	signer := types.MakeSigner(config, 1, 0)
+	newDynamic := func() types.DynamicFeeTransaction {
+		return types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{To: &to, GasLimit: 21_000},
+			ChainID:  *config.ChainID,
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(1),
+		}
+	}
+	newBlob := func(hashes ...common.Hash) types.Transaction {
+		return &types.BlobTx{DynamicFeeTransaction: newDynamic(), MaxFeePerBlobGas: *uint256.NewInt(1), BlobVersionedHashes: hashes}
+	}
+	dynamic := newDynamic()
+
+	tests := []struct {
+		name string
+		tx   types.Transaction
+	}{
+		{"blob-2", newBlob(common.Hash{1, 1}, common.Hash{1, 2})},
+		{"blob-1", newBlob(common.Hash{1, 1})},
+		{"dynamic-fee", &dynamic},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			signedTx, err := types.SignTx(tc.tx, *signer, key)
+			require.NoError(t, err)
+			result := &TxResult{
+				Task: &TxTask{
+					Header: &types.Header{Number: *uint256.NewInt(1)},
+					Txs:    types.Transactions{signedTx},
+					Config: config,
+				},
+			}
+			receipt, err := result.CreateReceipt(0, 21_000, 0)
+			require.NoError(t, err)
+			require.Equal(t, signedTx.GetBlobGas(), receipt.BlobGasUsed)
+			if signedTx.Type() == types.BlobTxType {
+				require.NotZero(t, receipt.BlobGasUsed)
+			}
+		})
+	}
 }

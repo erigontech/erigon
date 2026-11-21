@@ -193,6 +193,9 @@ func localV3CommitmentTip(dirs datadir.Dirs) (tip uint64, found bool, err error)
 	return tip, len(files) > 0, nil
 }
 
+// incompatibleCommitmentFiles returns the files to skip. True marks a file that cannot be
+// skipped: a domain file without compatible commitment, or a file of a commitment history
+// range that has both v2 and v3 files.
 func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint64) map[string]bool {
 	type stepRange struct {
 		history  bool
@@ -211,6 +214,11 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint
 	compatible := make(map[stepRange]bool)
 	incompatible := make(map[stepRange]bool)
 	skipped := make(map[string]bool)
+	type historyFiles struct {
+		v2, v3 bool
+		names  []string
+	}
+	historyRanges := make(map[stepRange]*historyFiles)
 	for _, p := range items {
 		info, _, ok := snaptype.ParseFileName("", p.Name)
 		if !ok {
@@ -224,6 +232,15 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint
 			continue
 		}
 		if info.Ext == ".kv" || info.Ext == ".v" {
+			if r.history {
+				h := historyRanges[r]
+				if h == nil {
+					h = &historyFiles{}
+					historyRanges[r] = h
+				}
+				h.v2, h.v3 = h.v2 || info.Version.Major < 3, h.v3 || info.Version.Major >= 3
+				h.names = append(h.names, p.Name)
+			}
 			if (info.Version.Major >= 3) == v3 {
 				compatible[r] = true
 			} else {
@@ -248,7 +265,21 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint
 		}
 		return false
 	}
+	mixed := make(map[stepRange]bool)
+	for r, h := range historyRanges {
+		if !h.v2 || !h.v3 {
+			continue
+		}
+		mixed[r] = true
+		for _, name := range h.names {
+			skipped[name] = true
+		}
+	}
 	for name, f := range ranges {
+		if mixed[f.stepRange] {
+			skipped[name] = true
+			continue
+		}
 		if compatible[f.stepRange] || f.required && f.to <= localV3Tip || !v3 && !hasIncompatible(f) {
 			continue
 		}
@@ -777,6 +808,10 @@ func SyncSnapshots(
 		var skippedTip uint64
 		for _, p := range items {
 			if missing, ok := incompatibleCommitment[p.Name]; ok {
+				if missing && isStateHistory(p.Name) {
+					return fmt.Errorf("the snapshot manifest has both v2 and v3 commitment history for the step range of %s: "+
+						"delete the chaindata folder and restart without `--prune.include-commitment-history` or with `--snap.skip-state-snapshot-download`", p.Name)
+				}
 				if missing && !statecfg.ExperimentalCommitmentV3 {
 					return fmt.Errorf("commitment v3 is disabled, but the snapshot manifest has only v3 commitment for %s: %s", p.Name, legacyRemedy)
 				}
