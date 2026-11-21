@@ -241,6 +241,9 @@ func (e *EngineServer) validatePayloadAttributesPreFCU(version clparams.StateVer
 	if e.config.IsAmsterdam(timestamp) && version < clparams.GloasVersion { // V3 fcu at an Amsterdam timestamp
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
+	if e.config.IsEIPEnabled(7805, timestamp) && version < clparams.HezeVersion { // V4 fcu at a FOCIL timestamp
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
 	if version >= clparams.CapellaVersion && e.checkWithdrawals(timestamp, payloadAttributes.Withdrawals) != nil {
 		return &engine_helpers.InvalidPayloadAttributesErr
 	}
@@ -264,17 +267,26 @@ func (e *EngineServer) validatePayloadAttributesPostFCU(version clparams.StateVe
 	if !e.config.IsAmsterdam(timestamp) && version >= clparams.GloasVersion { // V4 outside Amsterdam window
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
+	if !e.config.IsEIPEnabled(7805, timestamp) && version >= clparams.HezeVersion { // V5 outside FOCIL window
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
 	}
 	if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // TargetGasLimit required for V4 attrs
 	}
+	if version >= clparams.HezeVersion && payloadAttributes.InclusionListTransactions == nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // InclusionListTransactions required for V5 attributes
+	}
 	if version < clparams.GloasVersion && payloadAttributes.SlotNumber != nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // pre-V4 attrs MUST NOT carry slotNumber
 	}
 	if version < clparams.GloasVersion && payloadAttributes.TargetGasLimit != nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // pre-V4 attrs MUST NOT carry targetGasLimit
+	}
+	if version < clparams.HezeVersion && payloadAttributes.InclusionListTransactions != nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // pre-V4 attrs MUST NOT carry InclusionListTransactions
 	}
 	return nil
 }
@@ -971,6 +983,12 @@ func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		e.logger.Debug("[ForkChoiceUpdated] got quick payload status", "status", status.Status)
 	}
 
+	if version >= clparams.HezeVersion && status.Status == engine_types.ValidStatus {
+		if err := e.setRetainedInclusionListSatisfied(ctx, status, forkchoiceState.HeadHash); err != nil {
+			return nil, err
+		}
+	}
+
 	// engine_forkchoiceUpdatedV2's Request section makes the "wrong version of
 	// structure" rule independent of fork-choice sync state, so run those
 	// checks before the SYNCING short-circuit below. The remaining attribute
@@ -1033,6 +1051,10 @@ func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	if version >= clparams.GloasVersion {
 		assembleParams.SlotNumber = (*uint64)(payloadAttributes.SlotNumber)
 		assembleParams.TargetGasLimit = (*uint64)(payloadAttributes.TargetGasLimit)
+	}
+
+	if version >= clparams.HezeVersion {
+		assembleParams.InclusionList = decodeInclusionList(payloadAttributes.InclusionListTransactions)
 	}
 
 	var assembled execmodule.AssembleBlockResult
@@ -1292,6 +1314,35 @@ func (e *EngineServer) validatedPayloadStatus(block *types.Block, status execmod
 	}
 
 	return resp
+}
+
+// setRetainedInclusionListSatisfied leaves the result null when it is unknown, so the head stays VALID.
+func (e *EngineServer) setRetainedInclusionListSatisfied(ctx context.Context, status *engine_types.PayloadStatus, headHash common.Hash) error {
+	headNumber, err := e.chainRW.HeaderNumber(ctx, headHash)
+	if err != nil || headNumber == nil {
+		return err
+	}
+	satisfied, err := e.executionService.RetainedInclusionListSatisfied(ctx, headHash, *headNumber)
+	if err != nil {
+		return err
+	}
+	status.InclusionListSatisfied = satisfied
+	return nil
+}
+
+func decodeInclusionList(inclusionList []hexutil.Bytes) types.Transactions {
+	il := make(types.Transactions, 0, len(inclusionList))
+	for _, enc := range inclusionList {
+		if types.TypedTransactionMarshalledAsRlpString(enc) {
+			continue
+		}
+		txn, err := types.UnmarshalTransactionFromBinary(enc, false)
+		if err != nil {
+			continue
+		}
+		il = append(il, txn)
+	}
+	return il
 }
 
 // ancestorRejected is the validation error of a block whose ancestor is in the bad-block cache.

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"runtime"
@@ -74,6 +75,9 @@ type stubExecutionModule struct {
 	inclusionListFunc      func(ctx context.Context) (types.Transactions, error)
 	witnessView            func() error
 	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
+	isCanonicalHashFunc    func(ctx context.Context, hash common.Hash) (bool, error)
+	ilSatisfiedFunc        func(ctx context.Context, blockHash common.Hash, blockNumber uint64, il types.Transactions) (*bool, error)
+	retainedILSatisfied    func(ctx context.Context, blockHash common.Hash, blockNumber uint64) (*bool, error)
 	readyFunc              func(ctx context.Context) (bool, error)
 	isCanonicalHashFunc    func(ctx context.Context, hash common.Hash) (bool, error)
 	isValidatedFunc        func(hash common.Hash) bool
@@ -226,6 +230,20 @@ func (s *stubExecutionModule) ValidateChainAndView(ctx context.Context, block *t
 func (s *stubExecutionModule) InclusionList(ctx context.Context) (types.Transactions, error) {
 	if s.inclusionListFunc != nil {
 		return s.inclusionListFunc(ctx)
+	}
+	return nil, nil
+}
+
+func (s *stubExecutionModule) InclusionListSatisfied(ctx context.Context, blockHash common.Hash, blockNumber uint64, il types.Transactions) (*bool, error) {
+	if s.ilSatisfiedFunc != nil {
+		return s.ilSatisfiedFunc(ctx, blockHash, blockNumber, il)
+	}
+	return nil, nil
+}
+
+func (s *stubExecutionModule) RetainedInclusionListSatisfied(ctx context.Context, blockHash common.Hash, blockNumber uint64) (*bool, error) {
+	if s.retainedILSatisfied != nil {
+		return s.retainedILSatisfied(ctx, blockHash, blockNumber)
 	}
 	return nil, nil
 }
@@ -1975,6 +1993,382 @@ func TestNewPayloadV5RequiresBlockAccessListBeforeAmsterdam(t *testing.T) {
 	var invalidParams *rpc.InvalidParamsError
 	require.ErrorAs(t, err, &invalidParams)
 	require.Equal(t, "blockAccessList missing", invalidParams.Message)
+}
+
+func TestForkchoiceUpdatedSetsRetainedInclusionListSatisfiedAfterExecution(t *testing.T) {
+	t.Parallel()
+
+	headHash := common.Hash{0x1}
+	headNumber := uint64(1)
+	header := &types.Header{}
+	header.Number.SetUint64(headNumber)
+	var checkedHash common.Hash
+	var checkedNumber uint64
+	stub := &stubExecutionModule{
+		getHeaderFunc: getHeaderReturning(headHash, header),
+		headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+			return &headNumber, nil
+		},
+		updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+			return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: headHash}, nil
+		},
+		retainedILSatisfied: func(_ context.Context, hash common.Hash, number uint64) (*bool, error) {
+			checkedHash, checkedNumber = hash, number
+			satisfied := false
+			return &satisfied, nil
+		},
+	}
+	cfg := allForksChainConfig()
+	cfg.BogotaTime = common.NewUint64(0)
+	ctx := context.Background()
+	downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+
+	resp, err := srv.forkchoiceUpdated(ctx, &engine_types.ForkChoiceState{HeadHash: headHash}, nil, clparams.HezeVersion)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.ValidStatus, resp.PayloadStatus.Status)
+	require.NotNil(t, resp.PayloadStatus.InclusionListSatisfied)
+	require.False(t, *resp.PayloadStatus.InclusionListSatisfied)
+	require.Equal(t, headHash, checkedHash)
+	require.Equal(t, headNumber, checkedNumber)
+}
+
+func TestForkchoiceUpdatedSetsRetainedInclusionListSatisfiedOnUnchangedHead(t *testing.T) {
+	t.Parallel()
+
+	forkchoiceState := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x1},
+		SafeBlockHash:      common.Hash{0x2},
+		FinalizedBlockHash: common.Hash{0x3},
+	}
+	headNumber := uint64(1)
+	for _, test := range []struct {
+		name    string
+		version clparams.StateVersion
+		want    *bool
+	}{
+		{name: "v5", version: clparams.HezeVersion, want: new(true)},
+		{name: "v4 has no inclusion list result", version: clparams.GloasVersion, want: nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			stub := &stubExecutionModule{
+				getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
+					return execmodule.ForkChoiceState{
+						HeadHash:      forkchoiceState.HeadHash,
+						SafeHash:      forkchoiceState.SafeBlockHash,
+						FinalizedHash: forkchoiceState.FinalizedBlockHash,
+					}, nil
+				},
+				headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+					return &headNumber, nil
+				},
+				retainedILSatisfied: func(context.Context, common.Hash, uint64) (*bool, error) {
+					satisfied := true
+					return &satisfied, nil
+				},
+			}
+			cfg := allForksChainConfig()
+			cfg.BogotaTime = common.NewUint64(0)
+			srv := NewEngineServer(log.New(), cfg, stub, nil, false, false, false, true, nil, nil, 0, 0)
+
+			resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, nil, test.version)
+			require.NoError(t, err)
+			require.Equal(t, engine_types.ValidStatus, resp.PayloadStatus.Status)
+			require.Equal(t, test.want, resp.PayloadStatus.InclusionListSatisfied)
+		})
+	}
+}
+
+func TestForkchoiceUpdatedKeepsBuildingWhenInclusionListResultIsUnknown(t *testing.T) {
+	t.Parallel()
+
+	header := makeParentHeader(1000)
+	headHash := header.Hash()
+	headNumber := header.Number.Uint64()
+	var checkedRetained bool
+	stub := &stubExecutionModule{
+		getHeaderFunc: getHeaderReturning(headHash, header),
+		headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+			return &headNumber, nil
+		},
+		updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+			return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: headHash}, nil
+		},
+		retainedILSatisfied: func(context.Context, common.Hash, uint64) (*bool, error) {
+			checkedRetained = true
+			return nil, nil
+		},
+		assembleBlockFunc: func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+			return execmodule.AssembleBlockResult{PayloadID: 7}, nil
+		},
+	}
+	cfg := allForksChainConfig()
+	cfg.BogotaTime = common.NewUint64(0)
+	ctx := context.Background()
+	downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, true, true, nil, nil, 0, 0)
+
+	slotNumber, targetGasLimit := hexutil.Uint64(1), hexutil.Uint64(header.GasLimit)
+	resp, err := srv.forkchoiceUpdated(ctx, &engine_types.ForkChoiceState{HeadHash: headHash}, &engine_types.PayloadAttributes{
+		Timestamp:                 hexutil.Uint64(header.Time + 12),
+		PrevRandao:                common.Hash{0xaa},
+		SuggestedFeeRecipient:     common.HexToAddress("0x1111111111111111111111111111111111111111"),
+		Withdrawals:               []*types.Withdrawal{},
+		ParentBeaconBlockRoot:     &common.Hash{0xbb},
+		SlotNumber:                &slotNumber,
+		TargetGasLimit:            &targetGasLimit,
+		InclusionListTransactions: []hexutil.Bytes{},
+	}, clparams.HezeVersion)
+	require.NoError(t, err)
+	require.True(t, checkedRetained)
+	require.Equal(t, engine_types.ValidStatus, resp.PayloadStatus.Status)
+	require.Nil(t, resp.PayloadStatus.InclusionListSatisfied)
+	require.NotNil(t, resp.PayloadId)
+}
+
+func TestForkchoiceUpdatedPassesInclusionListToPayloadBuild(t *testing.T) {
+	t.Parallel()
+
+	header := makeParentHeader(1000)
+	headHash := header.Hash()
+	headNumber := header.Number.Uint64()
+	cfg := allForksChainConfig()
+	cfg.BogotaTime = common.NewUint64(0)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	ilTxn := makeSignedRawTx(t, key, cfg, 0, headNumber+1, header.Time+12)
+	slotNumber, targetGasLimit := hexutil.Uint64(1), hexutil.Uint64(header.GasLimit)
+	attributes := func(inclusionList []hexutil.Bytes) *engine_types.PayloadAttributes {
+		return &engine_types.PayloadAttributes{
+			Timestamp:                 hexutil.Uint64(header.Time + 12),
+			PrevRandao:                common.Hash{0xaa},
+			SuggestedFeeRecipient:     common.HexToAddress("0x1111111111111111111111111111111111111111"),
+			Withdrawals:               []*types.Withdrawal{},
+			ParentBeaconBlockRoot:     &common.Hash{0xbb},
+			SlotNumber:                &slotNumber,
+			TargetGasLimit:            &targetGasLimit,
+			InclusionListTransactions: inclusionList,
+		}
+	}
+
+	for _, test := range []struct {
+		name          string
+		version       clparams.StateVersion
+		inclusionList []hexutil.Bytes
+		want          []common.Hash
+	}{
+		{name: "v5 skips malformed entries", version: clparams.HezeVersion, inclusionList: []hexutil.Bytes{ilTxn, {0xde, 0xad}}, want: []common.Hash{crypto.Keccak256Hash(ilTxn)}},
+		{name: "v4 has no inclusion list", version: clparams.GloasVersion, want: nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var built *builder.Parameters
+			stub := &stubExecutionModule{
+				getHeaderFunc: getHeaderReturning(headHash, header),
+				headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+					return &headNumber, nil
+				},
+				updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+					return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: headHash}, nil
+				},
+				assembleBlockFunc: func(_ context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+					built = params
+					return execmodule.AssembleBlockResult{PayloadID: 7}, nil
+				},
+			}
+			chainConfig := cfg
+			if test.version < clparams.HezeVersion {
+				chainConfig = allForksChainConfig()
+			}
+			ctx := context.Background()
+			downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), stub, nil, nil, chainConfig, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), chainConfig, stub, downloader, false, false, true, true, nil, nil, 0, 0)
+
+			_, err := srv.forkchoiceUpdated(ctx, &engine_types.ForkChoiceState{HeadHash: headHash}, attributes(test.inclusionList), test.version)
+			require.NoError(t, err)
+			require.NotNil(t, built)
+			var got []common.Hash
+			for _, txn := range built.InclusionList {
+				got = append(got, txn.Hash())
+			}
+			require.Equal(t, test.want, got)
+		})
+	}
+}
+
+func TestForkchoiceUpdatedV5AlwaysEncodesInclusionListSatisfied(t *testing.T) {
+	t.Parallel()
+
+	forkchoiceState := &engine_types.ForkChoiceState{HeadHash: common.Hash{0x1}}
+	stub := &stubExecutionModule{
+		getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
+			return execmodule.ForkChoiceState{HeadHash: forkchoiceState.HeadHash}, nil
+		},
+	}
+	cfg := allForksChainConfig()
+	cfg.BogotaTime = common.NewUint64(0)
+	srv := NewEngineServer(log.New(), cfg, stub, nil, false, false, false, true, nil, nil, 0, 0)
+
+	v5, err := srv.ForkchoiceUpdatedV5(context.Background(), forkchoiceState, nil, nil)
+	require.NoError(t, err)
+	encoded, err := json.Marshal(v5)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"inclusionListSatisfied":null`)
+
+	v4, err := srv.ForkchoiceUpdatedV4(context.Background(), forkchoiceState, nil, nil)
+	require.NoError(t, err)
+	encoded, err = json.Marshal(v4)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "inclusionListSatisfied")
+}
+
+func bogotaAtTimestamp(timestamp uint64) *chain.Config {
+	cfg := allForksChainConfig()
+	cfg.BogotaTime = common.NewUint64(timestamp)
+	return cfg
+}
+
+func gloasPayloadAttributes(timestamp uint64, inclusionList []hexutil.Bytes) *engine_types.PayloadAttributes {
+	slotNumber, targetGasLimit := hexutil.Uint64(1), hexutil.Uint64(30_000_000)
+	return &engine_types.PayloadAttributes{
+		Timestamp:                 hexutil.Uint64(timestamp),
+		PrevRandao:                common.Hash{0xaa},
+		SuggestedFeeRecipient:     common.HexToAddress("0x1111111111111111111111111111111111111111"),
+		Withdrawals:               []*types.Withdrawal{},
+		ParentBeaconBlockRoot:     &common.Hash{0xbb},
+		SlotNumber:                &slotNumber,
+		TargetGasLimit:            &targetGasLimit,
+		InclusionListTransactions: inclusionList,
+	}
+}
+
+func TestForkchoiceUpdatedValidatesBogotaAttributesWhenValid(t *testing.T) {
+	t.Parallel()
+
+	forkchoiceState := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x1},
+		SafeBlockHash:      common.Hash{0x2},
+		FinalizedBlockHash: common.Hash{0x3},
+	}
+	for _, test := range []struct {
+		name       string
+		version    clparams.StateVersion
+		attributes *engine_types.PayloadAttributes
+		wantCode   int
+	}{
+		{name: "v4 at bogota timestamp", version: clparams.GloasVersion, attributes: gloasPayloadAttributes(1001, nil), wantCode: -38005},
+		{name: "v5 before bogota", version: clparams.HezeVersion, attributes: gloasPayloadAttributes(999, []hexutil.Bytes{}), wantCode: -38005},
+		{name: "v5 without inclusion list", version: clparams.HezeVersion, attributes: gloasPayloadAttributes(1001, nil), wantCode: -38003},
+		{name: "v4 carrying inclusion list", version: clparams.GloasVersion, attributes: gloasPayloadAttributes(999, []hexutil.Bytes{}), wantCode: -38003},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			stub := &stubExecutionModule{
+				getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
+					return execmodule.ForkChoiceState{
+						HeadHash:      forkchoiceState.HeadHash,
+						SafeHash:      forkchoiceState.SafeBlockHash,
+						FinalizedHash: forkchoiceState.FinalizedBlockHash,
+					}, nil
+				},
+			}
+			srv := NewEngineServer(log.New(), bogotaAtTimestamp(1000), stub, nil, false, false, false, true, nil, nil, 0, 0)
+
+			resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, test.attributes, test.version)
+			require.Nil(t, resp)
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, test.wantCode, rpcErr.ErrorCode())
+		})
+	}
+}
+
+func TestForkchoiceUpdatedBogotaAttributesWhenSyncing(t *testing.T) {
+	t.Parallel()
+
+	forkchoiceState := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x1},
+		SafeBlockHash:      common.Hash{0x2},
+		FinalizedBlockHash: common.Hash{0x3},
+	}
+	newSyncingServer := func() *EngineServer {
+		stub := &stubExecutionModule{}
+		cfg := bogotaAtTimestamp(1000)
+		srv := NewEngineServer(log.New(), cfg, stub, engine_block_downloader.NewEngineBlockDownloader(
+			context.Background(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil,
+		), false, false, false, true, nil, nil, 0, 0)
+		srv.test = true
+		return srv
+	}
+
+	t.Run("v4 at bogota timestamp is rejected before the sync check", func(t *testing.T) {
+		t.Parallel()
+		resp, err := newSyncingServer().forkchoiceUpdated(context.Background(), forkchoiceState, gloasPayloadAttributes(1001, nil), clparams.GloasVersion)
+		require.Nil(t, resp)
+		var rpcErr rpc.Error
+		require.ErrorAs(t, err, &rpcErr)
+		require.Equal(t, -38005, rpcErr.ErrorCode())
+	})
+	t.Run("v5 without inclusion list waits for a valid head", func(t *testing.T) {
+		t.Parallel()
+		resp, err := newSyncingServer().forkchoiceUpdated(context.Background(), forkchoiceState, gloasPayloadAttributes(1001, nil), clparams.HezeVersion)
+		require.NoError(t, err)
+		require.Equal(t, engine_types.SyncingStatus, resp.PayloadStatus.Status)
+		require.Nil(t, resp.PayloadId)
+	})
+}
+
+func bogotaWithoutFOCILAtTimestamp(timestamp uint64) *chain.Config {
+	cfg := bogotaAtTimestamp(timestamp)
+	cfg.DisabledEIPs = []int{7805}
+	return cfg
+}
+
+func TestForkchoiceUpdatedV5RejectsBogotaAttributesWithoutFOCIL(t *testing.T) {
+	t.Parallel()
+
+	forkchoiceState := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x1},
+		SafeBlockHash:      common.Hash{0x2},
+		FinalizedBlockHash: common.Hash{0x3},
+	}
+	stub := &stubExecutionModule{
+		getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
+			return execmodule.ForkChoiceState{
+				HeadHash:      forkchoiceState.HeadHash,
+				SafeHash:      forkchoiceState.SafeBlockHash,
+				FinalizedHash: forkchoiceState.FinalizedBlockHash,
+			}, nil
+		},
+	}
+	srv := NewEngineServer(log.New(), bogotaWithoutFOCILAtTimestamp(1000), stub, nil, false, false, false, true, nil, nil, 0, 0)
+
+	resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, gloasPayloadAttributes(1001, []hexutil.Bytes{}), clparams.HezeVersion)
+	require.Nil(t, resp)
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, -38005, rpcErr.ErrorCode())
+}
+
+func TestForkchoiceUpdatedV4AcceptsBogotaAttributesWithoutFOCIL(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubExecutionModule{}
+	cfg := bogotaWithoutFOCILAtTimestamp(1000)
+	srv := NewEngineServer(log.New(), cfg, stub, engine_block_downloader.NewEngineBlockDownloader(
+		context.Background(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil,
+	), false, false, false, true, nil, nil, 0, 0)
+	srv.test = true
+
+	forkchoiceState := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x1},
+		SafeBlockHash:      common.Hash{0x2},
+		FinalizedBlockHash: common.Hash{0x3},
+	}
+	resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, gloasPayloadAttributes(1001, nil), clparams.GloasVersion)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.SyncingStatus, resp.PayloadStatus.Status)
 }
 
 func TestForkchoiceUpdatedReturnsSyncingForIncompleteExecution(t *testing.T) {

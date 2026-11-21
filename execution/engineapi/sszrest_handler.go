@@ -425,6 +425,7 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 		writeEngineProblem(w, err)
 		return
 	}
+	resp.PayloadStatus.SSZVersion = version
 	out, err := encodeForkchoiceResponse(resp)
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())

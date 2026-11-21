@@ -33,6 +33,7 @@ var ourCapabilities = []string{
 	"engine_forkchoiceUpdatedV2",
 	"engine_forkchoiceUpdatedV3",
 	"engine_forkchoiceUpdatedV4",
+	"engine_forkchoiceUpdatedV5",
 	"engine_newPayloadV1",
 	"engine_newPayloadV2",
 	"engine_newPayloadV3",
@@ -158,6 +159,16 @@ func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState 
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4
 func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, custodyColumns *engine_types.CustodyColumns) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.GloasVersion)
+}
+
+// Successor of [ForkchoiceUpdatedV4] post Bogota, with inclusion list
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_forkchoiceupdatedv5
+func (e *EngineServer) ForkchoiceUpdatedV5(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, custodyColumns *engine_types.CustodyColumns) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	resp, err := e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.HezeVersion)
+	if resp != nil && resp.PayloadStatus != nil {
+		resp.PayloadStatus.SSZVersion = clparams.HezeVersion
+	}
+	return resp, err
 }
 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.

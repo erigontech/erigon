@@ -17,6 +17,7 @@
 package engineapi_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
@@ -159,6 +160,31 @@ func TestEngineApiClearsFreshZeroAmountWithdrawal(t *testing.T) {
 		require.Empty(t, changes.BalanceChanges)
 		require.Empty(t, changes.NonceChanges)
 		require.Empty(t, changes.CodeChanges)
+	})
+}
+
+func TestEngineApiBuiltBlockIncludesInclusionListTransactions(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Config.BogotaTime = common.NewUint64(0)
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		ilTxn, err := eat.Transactor.CreateSimpleTransfer(eat.CoinbaseKey, common.HexToAddress("0x42"), big.NewInt(1))
+		require.NoError(t, err)
+		var encoded bytes.Buffer
+		require.NoError(t, ilTxn.MarshalBinary(&encoded))
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx, engineapitester.WithInclusionListTransactions([]hexutil.Bytes{encoded.Bytes(), {0xde, 0xad}}))
+		require.NoError(t, err)
+		require.Equal(t, []hexutil.Bytes{encoded.Bytes()}, payload.ExecutionPayload.Transactions)
 	})
 }
 

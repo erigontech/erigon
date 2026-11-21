@@ -35,6 +35,7 @@ type EngineAPI interface {
 	ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error)
 	ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error)
 	ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, custodyColumns *engine_types.CustodyColumns) (*engine_types.ForkChoiceUpdatedResponse, error)
+	ForkchoiceUpdatedV5(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, custodyColumns *engine_types.CustodyColumns) (*engine_types.ForkChoiceUpdatedResponse, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.ExecutionPayload, error)
 	GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error)
 	GetPayloadV3(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error)

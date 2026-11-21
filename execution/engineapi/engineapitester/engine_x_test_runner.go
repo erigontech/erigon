@@ -597,6 +597,8 @@ func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, v
 				r, err = tester.EngineApiClient.ForkchoiceUpdatedV3(ctx, &fcu, nil)
 			case "4":
 				r, err = tester.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcu, nil, nil)
+			case "5":
+				r, err = tester.EngineApiClient.ForkchoiceUpdatedV5(ctx, &fcu, nil, nil)
 			default:
 				return nil, "", fmt.Errorf("unsupported fcu version: %s", version)
 			}

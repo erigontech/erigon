@@ -143,6 +143,8 @@ func (c *Config) IsEIPEnabled(eip int, time uint64) bool {
 	switch eip {
 	case 7708, 7928:
 		return c.IsAmsterdam(time)
+	case 7805:
+		return c.IsBogota(time)
 	default:
 		panic(fmt.Sprintf("IsEIPEnabled: EIP %d is not mapped to a fork", eip))
 	}

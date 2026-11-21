@@ -49,7 +49,7 @@ const (
 
 // These are implemented wire schemas, independent of the chain's fork schedule.
 // Each operation applies its own fork activation rules after decoding.
-var engineForkOrder = []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"}
+var engineForkOrder = []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam", "bogota"}
 
 func engineForkVersion(name string) (clparams.StateVersion, bool) {
 	switch name {
@@ -65,6 +65,8 @@ func engineForkVersion(name string) (clparams.StateVersion, bool) {
 		return clparams.FuluVersion, true
 	case "amsterdam":
 		return clparams.GloasVersion, true
+	case "bogota":
+		return clparams.HezeVersion, true
 	default:
 		return 0, false
 	}
@@ -72,6 +74,8 @@ func engineForkVersion(name string) (clparams.StateVersion, bool) {
 
 func forkNameAtTime(cfg *chain.Config, time uint64) string {
 	switch {
+	case cfg.IsBogota(time):
+		return "bogota"
 	case cfg.IsAmsterdam(time):
 		return "amsterdam"
 	case cfg.IsOsaka(time):

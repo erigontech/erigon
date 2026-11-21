@@ -197,9 +197,14 @@ func withdrawalsFromList(l *solid.ListSSZ[*cltypes.Withdrawal]) []*types.Withdra
 	return out
 }
 
+func NewPayloadStatusSSZ(version clparams.StateVersion) *PayloadStatus {
+	return &PayloadStatus{SSZVersion: version}
+}
+
 func (s *PayloadStatus) Static() bool { return false }
 
 func (s *PayloadStatus) EncodeSSZ(dst []byte) ([]byte, error) {
+	version := s.payloadStatusSSZVersion()
 	status, err := payloadStatusByte(s.Status)
 	if err != nil {
 		return nil, err
@@ -215,36 +220,81 @@ func (s *PayloadStatus) EncodeSSZ(dst []byte) ([]byte, error) {
 		msg := s.ValidationError.Error().Error()
 		validationErr = [][]byte{[]byte(strings.ToValidUTF8(msg[:min(len(msg), sszMaxValidationError)], ""))}
 	}
-	return ssz2.MarshalSSZ(dst, []byte{status}, latestHashes, solid.NewTransactionsSSZFromTransactions(validationErr))
+	errList := solid.NewTransactionsSSZFromTransactions(validationErr)
+	if version < clparams.HezeVersion {
+		return ssz2.MarshalSSZ(dst, []byte{status}, latestHashes, errList)
+	}
+	ilSatisfied := solid.NewByteListSSZ(1)
+	if s.InclusionListSatisfied != nil {
+		var b byte
+		if *s.InclusionListSatisfied {
+			b = 1
+		}
+		_ = ilSatisfied.SetBytes([]byte{b})
+	}
+	return ssz2.MarshalSSZ(dst, []byte{status}, latestHashes, errList, ilSatisfied)
+}
+
+type payloadStatusDecodeFields struct {
+	status                 [1]byte
+	latestValidHash        solid.HashListSSZ
+	validationError        *solid.TransactionsSSZ
+	inclusionListSatisfied *solid.ByteListSSZ
+}
+
+func (s *PayloadStatus) decodeSSZSchema(fields *payloadStatusDecodeFields) []any {
+	schema := []any{fields.status[:], fields.latestValidHash, fields.validationError}
+	if s.SSZVersion >= clparams.HezeVersion {
+		schema = append(schema, fields.inclusionListSatisfied)
+	}
+	return schema
 }
 
 func (s *PayloadStatus) DecodeSSZ(buf []byte, version int) error {
-	latest := solid.NewHashList(1)
-	validationErr := solid.NewTransactionsSSZWithLimits(1, sszMaxValidationError)
-	status := []byte{0}
-	if err := ssz2.UnmarshalSSZ(buf, version, status, latest, validationErr); err != nil {
+	s.SSZVersion = clparams.StateVersion(version)
+	fields := payloadStatusDecodeFields{
+		latestValidHash:        solid.NewHashList(1),
+		validationError:        solid.NewTransactionsSSZWithLimits(1, sszMaxValidationError),
+		inclusionListSatisfied: solid.NewByteListSSZ(1),
+	}
+	if err := ssz2.UnmarshalSSZ(buf, version, s.decodeSSZSchema(&fields)...); err != nil {
 		return err
 	}
-	engineStatus, err := payloadStatusFromByte(status[0])
+	engineStatus, err := payloadStatusFromByte(fields.status[0])
 	if err != nil {
 		return err
 	}
 	s.Status = engineStatus
 	s.LatestValidHash = nil
-	if latest.Length() > 0 {
-		hash := latest.Get(0)
+	s.ValidationError = nil
+	s.InclusionListSatisfied = nil
+	if fields.latestValidHash.Length() > 0 {
+		hash := fields.latestValidHash.Get(0)
 		s.LatestValidHash = &hash
 	}
-	s.ValidationError = nil
-	if validationErr.Len() != 0 {
-		s.ValidationError = NewStringifiedErrorFromString(string(validationErr.UnderlyngReference()[0]))
+	if fields.validationError.Len() != 0 {
+		s.ValidationError = NewStringifiedErrorFromString(string(fields.validationError.UnderlyngReference()[0]))
+	}
+	if b := fields.inclusionListSatisfied.Bytes(); len(b) == 1 {
+		if b[0] > 1 {
+			return fmt.Errorf("invalid inclusionListSatisfied byte %d", b[0])
+		}
+		satisfied := b[0] == 1
+		s.InclusionListSatisfied = &satisfied
 	}
 	return nil
 }
 
 func (s *PayloadStatus) EncodingSizeSSZ() int { out, _ := s.EncodeSSZ(nil); return len(out) }
-func (*PayloadStatus) Clone() clonable.Clonable {
-	return &PayloadStatus{}
+func (s *PayloadStatus) Clone() clonable.Clonable {
+	return NewPayloadStatusSSZ(s.payloadStatusSSZVersion())
+}
+
+func (s *PayloadStatus) payloadStatusSSZVersion() clparams.StateVersion {
+	if s != nil && s.SSZVersion != 0 {
+		return s.SSZVersion
+	}
+	return clparams.BellatrixVersion
 }
 
 func payloadStatusByte(status EngineStatus) (uint8, error) {
@@ -309,6 +359,10 @@ func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 	if a.TargetGasLimit != nil {
 		targetGasLimit = uint64(*a.TargetGasLimit)
 	}
+	inclusionList := make([][]byte, len(a.InclusionListTransactions))
+	for i, tx := range a.InclusionListTransactions {
+		inclusionList[i] = tx
+	}
 	switch version {
 	case clparams.BellatrixVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:])
@@ -316,8 +370,10 @@ func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals)
 	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:])
-	default: // GloasVersion+
+	case clparams.GloasVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], slot, targetGasLimit)
+	default: // HezeVersion+
+		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], slot, targetGasLimit, solid.NewTransactionsSSZFromTransactions(inclusionList))
 	}
 }
 
@@ -335,6 +391,7 @@ type payloadAttributesDecodeFields struct {
 	parentBeaconBlockRoot common.Hash
 	slotNumber            uint64
 	targetGasLimit        uint64
+	inclusionList         *solid.TransactionsSSZ
 }
 
 func (a *PayloadAttributes) decodeSSZSchema(fields *payloadAttributesDecodeFields) []any {
@@ -345,15 +402,17 @@ func (a *PayloadAttributes) decodeSSZSchema(fields *payloadAttributesDecodeField
 		schema = append(schema, fields.withdrawals)
 	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
 		schema = append(schema, fields.withdrawals, fields.parentBeaconBlockRoot[:])
-	default: // GloasVersion+
+	case clparams.GloasVersion:
 		schema = append(schema, fields.withdrawals, fields.parentBeaconBlockRoot[:], &fields.slotNumber, &fields.targetGasLimit)
+	default: // HezeVersion+
+		schema = append(schema, fields.withdrawals, fields.parentBeaconBlockRoot[:], &fields.slotNumber, &fields.targetGasLimit, fields.inclusionList)
 	}
 	return schema
 }
 
 func (a *PayloadAttributes) decodeSSZ(buf []byte, version int, strict bool) error {
 	a.SSZVersion = clparams.StateVersion(version)
-	fields := payloadAttributesDecodeFields{withdrawals: NewWithdrawalList(nil)}
+	fields := payloadAttributesDecodeFields{withdrawals: NewWithdrawalList(nil), inclusionList: &solid.TransactionsSSZ{}}
 	unmarshal := ssz2.UnmarshalSSZ
 	if strict {
 		unmarshal = ssz2.UnmarshalSSZStrict
@@ -369,7 +428,7 @@ func (a *PayloadAttributes) decodeSSZ(buf []byte, version int, strict bool) erro
 		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
 		parentBeaconBlockRoot := fields.parentBeaconBlockRoot
 		a.ParentBeaconBlockRoot = &parentBeaconBlockRoot
-	default: // GloasVersion+
+	case clparams.GloasVersion:
 		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
 		parentBeaconBlockRoot := fields.parentBeaconBlockRoot
 		a.ParentBeaconBlockRoot = &parentBeaconBlockRoot
@@ -377,6 +436,18 @@ func (a *PayloadAttributes) decodeSSZ(buf []byte, version int, strict bool) erro
 		a.SlotNumber = &slotNumber
 		tgl := hexutil.Uint64(fields.targetGasLimit)
 		a.TargetGasLimit = &tgl
+	default: // HezeVersion+
+		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
+		parentBeaconBlockRoot := fields.parentBeaconBlockRoot
+		a.ParentBeaconBlockRoot = &parentBeaconBlockRoot
+		slotNumber := hexutil.Uint64(fields.slotNumber)
+		a.SlotNumber = &slotNumber
+		tgl := hexutil.Uint64(fields.targetGasLimit)
+		a.TargetGasLimit = &tgl
+		a.InclusionListTransactions = make([]hexutil.Bytes, fields.inclusionList.Len())
+		for i, tx := range fields.inclusionList.UnderlyngReference() {
+			a.InclusionListTransactions[i] = tx
+		}
 	}
 	a.Timestamp = hexutil.Uint64(fields.timestamp)
 	return nil
