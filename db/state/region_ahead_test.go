@@ -100,12 +100,11 @@ func TestRegionAheadAdvisesAContractOnceAfterEnoughFileHits(t *testing.T) {
 	for file := 1; len(dt.regionHits) < regionAheadTracked; file++ {
 		dt.regionAhead(file, regionSlotKey(3, 0))
 	}
-	for range 2 * regionAheadHits {
+	for range regionAheadHits {
 		dt.regionAhead(0, regionSlotKey(3, 0))
-		dt.regionAhead(0, regionSlotKey(2, 0))
 	}
-	require.Len(t, *advised, 2)
-	require.Len(t, dt.regionHits, regionAheadTracked)
+	require.Len(t, dt.regionHits, 1)
+	require.Equal(t, [][2]uint64{contractRegion(t, dt, 2), contractRegion(t, dt, 1), contractRegion(t, dt, 3)}, *advised)
 }
 
 func TestRegionAheadSkipsARegionOverTheCap(t *testing.T) {
