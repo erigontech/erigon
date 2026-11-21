@@ -362,7 +362,7 @@ func TestResolveCodeTakesTheHashFromTheRead(t *testing.T) {
 		} else {
 			ibs = New(r)
 		}
-		got, err := ibs.ResolveCode(addr)
+		got, err := ibs.ResolveCode(addr, true)
 		require.NoError(t, err)
 		require.Equal(t, code, got.Bytes, "versioned=%v", versioned)
 		require.Equal(t, hash, got.Hash, "versioned=%v", versioned)

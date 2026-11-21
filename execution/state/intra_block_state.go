@@ -338,9 +338,7 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.sdProbeEpoch++
 	ibs.accessList.Reset()
 	clear(ibs.transientStorage)
-	// Reset leaves versionMap/noMaterialize as they are: a versioned IBS stays
-	// versioned across Reset (its caller re-binds the map it wants via SetVersionMap),
-	// so it never transiently drops to the stateObject path mid-reuse.
+	ibs.SetVersionMap(NewVersionMap(nil))
 	ibs.noConflictDetection = false
 	ibs.codeByHash = nil
 	clear(ibs.committedBase)
@@ -863,15 +861,17 @@ func (ibs *IntraBlockState) GetCommittedCodeHash(addr accounts.Address) (account
 	return hash, nil
 }
 
-// ResolveCode returns the code a call to addr executes, following an EIP-7702 delegation. The
-// code hash comes from the same read as the code.
-func (ibs *IntraBlockState) ResolveCode(addr accounts.Address) (accounts.Code, error) {
+// ResolveCode returns the code a call to addr executes. With followDelegation set, it follows an
+// EIP-7702 delegation; otherwise a delegation designator is ordinary code. The code hash comes
+// from the same read as the code.
+func (ibs *IntraBlockState) ResolveCode(addr accounts.Address, followDelegation bool) (accounts.Code, error) {
 	// committed=false so the tx's own writes (e.g. EIP-7702 authorization) are
 	// visible rather than stale delegation code from the version map.
 	code, err := ibs.getCode(addr)
-	// eip-7702
-	if delegation, ok := types.ParseDelegation(code.Bytes); ok {
-		return ibs.getCode(delegation)
+	if followDelegation {
+		if delegation, ok := types.ParseDelegation(code.Bytes); ok {
+			return ibs.getCode(delegation)
+		}
 	}
 	if err != nil {
 		return accounts.Code{}, err
@@ -1005,15 +1005,6 @@ func (ibs *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 	update := u256.Add(prev, amount)
 
 	return ibs.writeBalanceVersioned(addr, &prev, update, wasCommited, reason)
-}
-
-func (ibs *IntraBlockState) touchAccount(addr accounts.Address) {
-	ibs.journal.touchAccount(addr, false, uint256.Int{})
-	if addr == ripemd {
-		// Explicitly put it in the dirty-cache, which is otherwise generated from
-		// flattened journals.
-		ibs.journal.dirty(addr)
-	}
 }
 
 // TouchAccount materializes an empty account and records the zero-balance touch
@@ -2081,6 +2072,17 @@ func (ibs *IntraBlockState) GetRefund() uint64 {
 // match the reference implementation.
 func EIP161EmptyRemoval(eip161Enabled, isAura bool, addr accounts.Address) bool {
 	return eip161Enabled && (!isAura || addr != params.SystemAddress)
+}
+
+// BurnSelfDestructs makes every self-destruct of this state delete its account, also one
+// that ran with balance-preserving (EIP-8246) rules. For genesis only, which finalizes
+// without EIP-8246: a block keeps the balance that EIP-8246 preserves.
+func (ibs *IntraBlockState) BurnSelfDestructs() {
+	for addr, sd := range ibs.versionedWrites.SelfDestructs() {
+		if b, ok := ibs.versionedWrites.GetBalance(addr); sd.Val && ok && !b.Deletes() {
+			ibs.recordWriteBalanceDeleted(addr)
+		}
+	}
 }
 
 // FinalizedWrites applies EIP-6780 normalization and EIP-161 filtering, then

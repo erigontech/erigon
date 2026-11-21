@@ -357,14 +357,22 @@ func stateRootsDiffer(a, b []byte) bool {
 	return errA != nil || errB != nil || !bytes.Equal(rootA, rootB)
 }
 
-func legacyCommitmentAsOf(dt *DomainRoTx, key []byte, txNum uint64) ([]byte, error) {
+func legacyCommitmentAsOf(dt *DomainRoTx, key []byte, txNum uint64, expand func([]byte, uint64, uint64) ([]byte, error)) ([]byte, error) {
 	v, found, err := dt.ht.historySeekInFiles(key, txNum)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
-		if v, _, _, _, err = dt.getLatestFromFiles(key, nil, kv.NoStepBound); err != nil {
+		var fromTxNum, toTxNum uint64
+		if v, _, fromTxNum, toTxNum, err = dt.getLatestFromFiles(key, nil, kv.NoStepBound); err != nil {
 			return nil, err
+		}
+		if expand != nil && !commitment.IsCommitmentStateKey(key) &&
+			CommitmentBranchReferenced(dt.fileVersionByRange(fromTxNum, toTxNum), dt.d.stepSize, fromTxNum, toTxNum) {
+			v, err = expand(v, fromTxNum, toTxNum)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	return bytes.Clone(v), nil
@@ -594,6 +602,9 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		wat := at.a.BeginFilesRo()
 		defer wat.Close()
 		wdt := wat.d[kv.CommitmentDomain]
+		expand := func(value []byte, fromTxNum, toTxNum uint64) ([]byte, error) {
+			return expandSqueezedCommitmentBranch(wat, value, fromTxNum, toTxNum)
+		}
 		vals := &legacyHistoryValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], cache: map[string]historyValue{}, cacheCap: max(1<<14, historyValueCacheTotal/workers)}
 		conv := v3.NewLegacyConverter(vals, keysV2, false)
 		var cur, nextVersion, childCur, childNext, scratch historyVersion
@@ -619,7 +630,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 			path := make([]byte, 64)
 			nibbles.Expand(addrHash[:], path)
 			legacyKey := encodeLegacyPrefix(path, keysV2)
-			value, err := legacyCommitmentAsOf(wdt, legacyKey, txNum)
+			value, err := legacyCommitmentAsOf(wdt, legacyKey, txNum, expand)
 			if err != nil {
 				return nil, err
 			}
@@ -634,7 +645,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		}
 		var reachTxNum uint64
 		reach := &legacyReach{keysV2: keysV2, read: func(key []byte) ([]byte, error) {
-			return legacyCommitmentAsOf(wdt, key, reachTxNum)
+			return legacyCommitmentAsOf(wdt, key, reachTxNum, expand)
 		}}
 		reachableAsOf := func(legacyKey, value []byte, txNum uint64) (bool, error) {
 			reachTxNum, reach.chain = txNum, reach.chain[:0]
@@ -701,7 +712,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 			if found && written.txNum == txNum {
 				return nil
 			}
-			value, err := legacyCommitmentAsOf(wdt, childKey, txNum)
+			value, err := legacyCommitmentAsOf(wdt, childKey, txNum, expand)
 			if err != nil {
 				return err
 			}
@@ -771,7 +782,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 					if i+1 < len(txNums) {
 						return value(i + 1), nil
 					}
-					return legacyCommitmentAsOf(wdt, legacyKey, toTxNum)
+					return legacyCommitmentAsOf(wdt, legacyKey, toTxNum, expand)
 				}
 				chains.Add(1)
 				versions.Add(uint64(len(txNums)))
@@ -996,6 +1007,17 @@ func convertHistoryPhase4(dirs datadir.Dirs, stage commitmentV3HistoryStage) (in
 		}
 	}
 	return moved, nil
+}
+
+func visibleCommitmentHistoryRanges(a *Aggregator) []commitmentHistoryRange {
+	at := a.BeginFilesRo()
+	defer at.Close()
+	stepSize := at.StepSize()
+	ranges := make([]commitmentHistoryRange, 0, len(at.d[kv.CommitmentDomain].ht.files))
+	for _, v := range at.d[kv.CommitmentDomain].ht.files {
+		ranges = append(ranges, commitmentHistoryRange{fromStep: kv.Step(v.startTxNum / stepSize), toStep: kv.Step(v.endTxNum / stepSize)})
+	}
+	return ranges
 }
 
 func verifyCommitmentV3History(ctx context.Context, a *Aggregator, ranges []commitmentHistoryRange, logger log.Logger) error {
