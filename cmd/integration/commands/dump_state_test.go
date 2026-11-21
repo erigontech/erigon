@@ -195,8 +195,9 @@ func seedTestAccounts(t *testing.T) kv.TemporalTx {
 
 	w := state.NewWriter(domains.AsPutDel(tx), nil, txNum)
 	require.NoError(t, st.FinalizeTx(&chainpkg.Rules{}, w))
-	blockWriter := state.NewWriter(domains.AsPutDel(tx), nil, txNum)
-	require.NoError(t, st.CommitBlock(&chainpkg.Rules{}, blockWriter))
+	writes, err := st.FinalizedWrites(&chainpkg.Rules{})
+	require.NoError(t, err)
+	require.NoError(t, state.ApplyWrites(writes, domains, tx, 1, txNum, false))
 	require.NoError(t, domains.Flush(context.Background(), tx))
 
 	return tx
@@ -243,8 +244,9 @@ func seedManyAccounts(t testing.TB, n int) kv.TemporalTx {
 
 	w := state.NewWriter(domains.AsPutDel(tx), nil, txNum)
 	require.NoError(t, st.FinalizeTx(&chainpkg.Rules{}, w))
-	blockWriter := state.NewWriter(domains.AsPutDel(tx), nil, txNum)
-	require.NoError(t, st.CommitBlock(&chainpkg.Rules{}, blockWriter))
+	writes, err := st.FinalizedWrites(&chainpkg.Rules{})
+	require.NoError(t, err)
+	require.NoError(t, state.ApplyWrites(writes, domains, tx, 1, txNum, false))
 	require.NoError(t, domains.Flush(context.Background(), tx))
 
 	return tx

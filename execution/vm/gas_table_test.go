@@ -117,31 +117,45 @@ func testTemporalTxSD(t testing.TB) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	return tx, sd
 }
 
+// seedState stages the pre-state for a gas test directly in a shared version map:
+// seedFn runs as tx 0, its writes are flushed to the map, and the returned IBS reads
+// them back as committed at tx 1. No SharedDomains / temporal DB is involved.
+func seedState(t testing.TB, rules *chain.Rules, seedFn func(seed *state.IntraBlockState)) *state.IntraBlockState {
+	t.Helper()
+	versionMap := state.NewVersionMap(nil)
+	seed := state.NewWithVersionMap(state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader()), versionMap)
+	seed.SetTxContext(0, 0)
+	seedFn(seed)
+	writes, err := seed.FinalizedWrites(rules)
+	require.NoError(t, err)
+	seed.FlushWritesToVersionMap(writes)
+	seed.Close()
+
+	s := state.NewWithVersionMap(state.NewVersionedStateReader(1, state.ReadSet{}, versionMap, state.NewNoopReader()), versionMap)
+	s.SetTxContext(0, 1)
+	return s
+}
+
 func TestEIP2200(t *testing.T) {
 	for i, tt := range eip2200Tests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			t.Parallel()
 
-			tx, sd := testTemporalTxSD(t)
-			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
-			require.NoError(t, err)
-
-			r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-			s := state.New(r)
-			defer s.Close()
-
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
-			require.NoError(t, s.CreateAccount(address, true))
-			require.NoError(t, s.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified))
-			require.NoError(t, s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original))))
-
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
 					return nil
 				},
 			}
-			_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), w)
+			rules := vmctx.Rules(chain.TestChainBerlinConfig)
+
+			s := seedState(t, rules, func(seed *state.IntraBlockState) {
+				require.NoError(t, seed.CreateAccount(address, true))
+				require.NoError(t, seed.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified))
+				require.NoError(t, seed.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original))))
+			})
+			defer s.Close()
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, vm.Config{ExtraEips: []int{2200}})
 			mdGas := mdgas.MdGas{
 				Execution: tt.gaspool,
@@ -225,23 +239,21 @@ func TestEIP8038SStore(t *testing.T) {
 	for _, tt := range eip8038SStoreTests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			tx, sd := testTemporalTxSD(t)
-			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
-			require.NoError(t, err)
-			r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-			s := state.New(r)
-			defer s.Close()
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
-			require.NoError(t, s.CreateAccount(address, true))
-			require.NoError(t, s.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified))
-			require.NoError(t, s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original))))
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
 					return nil
 				},
 			}
-			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
+			rules := vmctx.Rules(chain.AllProtocolChanges)
+
+			s := seedState(t, rules, func(seed *state.IntraBlockState) {
+				require.NoError(t, seed.CreateAccount(address, true))
+				require.NoError(t, seed.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified))
+				require.NoError(t, seed.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original))))
+			})
+			defer s.Close()
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{})
 			pool := mdgas.MdGas{Execution: 10_000_000, State: 10_000_000}
 			_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, pool, uint256.Int{}, false /* bailout */)
@@ -380,22 +392,20 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			tx, sd := testTemporalTxSD(t)
-			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
-			require.NoError(t, err)
-			r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-			s := state.New(r)
-			defer s.Close()
 			caller := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
-			require.NoError(t, s.CreateAccount(caller, true))
-			require.NoError(t, s.SetCode(caller, hexutil.MustDecode(callerCode), tracing.CodeChangeUnspecified))
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
 					return nil
 				},
 			}
-			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
+			rules := vmctx.Rules(chain.AllProtocolChanges)
+
+			s := seedState(t, rules, func(seed *state.IntraBlockState) {
+				require.NoError(t, seed.CreateAccount(caller, true))
+				require.NoError(t, seed.SetCode(caller, hexutil.MustDecode(callerCode), tracing.CodeChangeUnspecified))
+			})
+			defer s.Close()
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{})
 			ret, gas, _, err := vmenv.Call(accounts.ZeroAddress, caller, nil, tt.pool, uint256.Int{}, false /* bailout */)
 			require.NoError(t, err)
@@ -412,29 +422,27 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 
 func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
 	t.Parallel()
-	tx, sd := testTemporalTxSD(t)
-	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
-	require.NoError(t, err)
-	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	s := state.New(r)
-	defer s.Close()
 	initCode := program.New().Push(0).Push(400_000).Op(vm.MSTORE).Return(0, 0).Bytes()
 	salt := uint256.NewInt(0)
 	factoryAddress := common.HexToAddress("0xfac0")
 	factory := accounts.InternAddress(factoryAddress)
 	target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
 	factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
-	require.NoError(t, s.CreateAccount(factory, true))
-	require.NoError(t, s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
-	require.NoError(t, s.CreateAccount(target, false))
-	require.NoError(t, s.AddBalance(target, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 	vmctx := evmtypes.BlockContext{
 		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
 			return nil
 		},
 	}
-	_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
+	rules := vmctx.Rules(chain.AllProtocolChanges)
+
+	s := seedState(t, rules, func(seed *state.IntraBlockState) {
+		require.NoError(t, seed.CreateAccount(factory, true))
+		require.NoError(t, seed.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
+		require.NoError(t, seed.CreateAccount(target, false))
+		require.NoError(t, seed.AddBalance(target, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	})
+	defer s.Close()
 	var enteredCreateGas, availableCreateGas uint64
 	hooks := &tracing.Hooks{
 		OnEnter: func(_ int, typ byte, _, _ accounts.Address, _ bool, _ []byte, gas uint64, _ uint256.Int, _ []byte) {
@@ -480,13 +488,6 @@ func TestCreate2OntoStorageOnlyAccountChargesNewAccountAndClearsStorage(t *testi
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			tx, sd := testTemporalTxSD(t)
-			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
-			require.NoError(t, err)
-			r := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-			w := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-			s := state.New(r)
-			defer s.Close()
 
 			initCode := []byte{byte(vm.STOP)}
 			salt := uint256.NewInt(0)
@@ -494,23 +495,39 @@ func TestCreate2OntoStorageOnlyAccountChargesNewAccountAndClearsStorage(t *testi
 			factory := accounts.InternAddress(factoryAddress)
 			target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
 			factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
-			require.NoError(t, s.CreateAccount(factory, true))
-			require.NoError(t, s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
 					return nil
 				},
 			}
-			require.NoError(t, s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w))
-			require.NoError(t, s.CreateAccount(target, true))
-			require.NoError(t, s.SetState(target, accounts.ZeroKey, *uint256.NewInt(1)))
-			empty, err := s.Empty(target)
+			// Persist the storage-only target as committed pre-state without EIP-161
+			// empty-removal pruning it, so the CREATE2 under Amsterdam wipes it.
+			versionMap := state.NewVersionMap(nil)
+			seed := state.NewWithVersionMap(state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader()), versionMap)
+			seed.SetTxContext(0, 0)
+			require.NoError(t, seed.CreateAccount(factory, true))
+			require.NoError(t, seed.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
+			require.NoError(t, seed.CreateAccount(target, true))
+			require.NoError(t, seed.SetState(target, accounts.ZeroKey, *uint256.NewInt(1)))
+			writes, err := seed.FinalizedWrites(&chain.Rules{})
+			require.NoError(t, err)
+			seed.FlushWritesToVersionMap(writes)
+			seed.Close()
+
+			check := state.NewWithVersionMap(state.NewVersionedStateReader(1, state.ReadSet{}, versionMap, state.NewNoopReader()), versionMap)
+			check.SetTxContext(0, 1)
+			empty, err := check.Empty(target)
 			require.NoError(t, err)
 			require.True(t, empty)
-			stored, err := s.GetState(target, accounts.ZeroKey)
+			stored, err := check.GetState(target, accounts.ZeroKey)
 			require.NoError(t, err)
 			require.Equal(t, uint64(1), stored.Uint64())
+			check.Close()
+
+			s := state.NewWithVersionMap(state.NewVersionedStateReader(1, state.ReadSet{}, versionMap, state.NewNoopReader()), versionMap)
+			s.SetTxContext(0, 1)
+			defer s.Close()
 
 			createFrames := 0
 			hooks := &tracing.Hooks{
@@ -550,18 +567,10 @@ func TestCreateTraceOnEarlyFailure(t *testing.T) {
 			tt.name,
 			func(t *testing.T) {
 				t.Parallel()
-				tx, sd := testTemporalTxSD(t)
-				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
-				require.NoError(t, err)
-				r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-				s := state.New(r)
-				defer s.Close()
 				initCode := program.New().Push(0).Return(0, 0).Bytes()
 				salt := uint256.NewInt(0)
 				factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
 				factoryCode := program.New().Mstore(initCode, 0).Push(salt).Push(len(initCode)).Push(0).Push(1).Op(vm.CREATE2).Bytes()
-				require.NoError(t, s.CreateAccount(factory, true))
-				require.NoError(t, s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
 				vmctx := evmtypes.BlockContext{
 					CanTransfer: func(_ evmtypes.IntraBlockState, _ accounts.Address, value uint256.Int) (bool, error) {
 						return value.IsZero(), nil
@@ -570,7 +579,13 @@ func TestCreateTraceOnEarlyFailure(t *testing.T) {
 						return nil
 					},
 				}
-				_ = s.CommitBlock(vmctx.Rules(tt.config), w)
+				rules := vmctx.Rules(tt.config)
+
+				s := seedState(t, rules, func(seed *state.IntraBlockState) {
+					require.NoError(t, seed.CreateAccount(factory, true))
+					require.NoError(t, seed.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
+				})
+				defer s.Close()
 				var enteredCreateGas, exitedCreateGasUsed, availableCreateGas uint64
 				var enteredCreateCount, exitedCreateCount int
 				hooks := &tracing.Hooks{
@@ -593,7 +608,7 @@ func TestCreateTraceOnEarlyFailure(t *testing.T) {
 					},
 				}
 				vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, tt.config, vm.Config{Tracer: hooks})
-				_, _, _, err = vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Execution: 500_000}, uint256.Int{}, false)
+				_, _, _, err := vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Execution: 500_000}, uint256.Int{}, false)
 				require.NoError(t, err)
 				require.NotZero(t, availableCreateGas)
 				if !tt.forwarded {
@@ -645,27 +660,25 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 		t.Run(
 			tt.name,
 			func(t *testing.T) {
-				tx, sd := testTemporalTxSD(t)
-				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
-				require.NoError(t, err)
-				r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-				s := state.New(r)
-				defer s.Close()
 				initCode := program.New().Push(0xaa).Push(0).Op(vm.MSTORE8).Return(0, 1).Bytes()
 				salt := uint256.NewInt(0)
 				factoryAddress := common.HexToAddress("0xfac0")
 				factory := accounts.InternAddress(factoryAddress)
 				target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
 				factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
-				require.NoError(t, s.CreateAccount(factory, true))
-				require.NoError(t, s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
 				vmctx := evmtypes.BlockContext{
 					CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 					Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
 						return nil
 					},
 				}
-				_ = s.CommitBlock(vmctx.Rules(tt.config), w)
+				rules := vmctx.Rules(tt.config)
+
+				s := seedState(t, rules, func(seed *state.IntraBlockState) {
+					require.NoError(t, seed.CreateAccount(factory, true))
+					require.NoError(t, seed.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
+				})
+				defer s.Close()
 				var mutationErr error
 				capturing := false
 				hooks := &tracing.Hooks{
@@ -778,10 +791,10 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	t.Parallel()
 
 	tx, sd := testTemporalTxSD(t)
-	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+	_, _, err := sd.SeekCommitment(t.Context(), tx)
 	require.NoError(t, err)
 
-	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	s := state.New(r)
 	defer s.Close()
 
@@ -802,7 +815,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 			return transferErr
 		},
 	}
-	_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), w)
+	_, _ = s.FinalizedWrites(vmctx.Rules(chain.TestChainBerlinConfig))
 
 	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, vm.Config{})
 	_, _, _, err = vmenv.Call(params.SystemAddress, address, nil, mdgas.MdGas{Execution: math.MaxUint64}, uint256.Int{}, false /* bailout */)

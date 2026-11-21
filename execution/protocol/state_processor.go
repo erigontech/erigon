@@ -109,15 +109,6 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	if err != nil {
 		return nil, err
 	}
-	// FinalizeTx clears the journal that lets reads see the tx's own versioned writes, so a versioned
-	// state ends the tx for tracers first.
-	finalizeFirst := !ibs.IsVersioned()
-	if finalizeFirst {
-		err = ibs.FinalizeTx(rules, stateWriter)
-		if err != nil {
-			return nil, err
-		}
-	}
 	gasUsed.AddResult(result)
 	gasUsed.Blob += txn.GetBlobGas()
 
@@ -127,16 +118,13 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 		// by the txn
 		receipt = MakeReceipt(&header.Number, header.Hash(), txn, gasUsed.Receipt, result, ibs, evm)
 	}
-	if !finalizeFirst {
-		if cfg.Tracer.HasTxEndHook() {
-			cfg.Tracer.EmitTxEnd(receipt, result.TxnGasUsage, nil)
-			txEnded = true
-		}
-		err = ibs.FinalizeTx(rules, stateWriter)
-		if err != nil {
-			return nil, err
-		}
+	// EndTransaction clears the journal that lets reads see the tx's own versioned writes,
+	// so the tracer's tx-end hook fires first.
+	if cfg.Tracer.HasTxEndHook() {
+		cfg.Tracer.EmitTxEnd(receipt, result.TxnGasUsage, nil)
+		txEnded = true
 	}
+	ibs.EndTransaction()
 
 	return receipt, err
 }

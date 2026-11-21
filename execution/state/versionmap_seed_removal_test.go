@@ -703,9 +703,10 @@ func createAndDestroyInTx0(t *testing.T, reader StateReader, vm *VersionMap, x a
 	}
 	_, err := ibs.Selfdestruct(x, true)
 	require.NoError(t, err)
-	require.NoError(t, ibs.MakeWriteSet(&chain.Rules{IsAmsterdam: true}, NewNoopWriter()))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), false)
-	vm.MarkWritesValidated(ibs.VersionedWrites(), nil)
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsAmsterdam: true})
+	require.NoError(t, err)
+	vm.FlushVersionedWrites(writes, false)
+	vm.MarkWritesValidated(writes, nil)
 }
 
 // As above, but tx 1 credits x in the window: the credit creates a fresh account instead of

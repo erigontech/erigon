@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -332,24 +333,53 @@ func TestChargesSenderAtValidationIncludesCreation(t *testing.T) {
 	require.True(t, task(1).ChargesSenderAtValidation(0))
 }
 
-type failingAccountWriter struct {
-	*state.NoopWriter
-	err error
+// failingAccountReader funds one address and fails the base read of another, standing
+// in for a transient domain read failure for a specific account.
+type failingAccountReader struct {
+	state.StateReader
+	fundAddr accounts.Address
+	failAddr accounts.Address
+	err      error
 }
 
-func (w failingAccountWriter) UpdateAccountData(accounts.Address, *accounts.Account, *accounts.Account) error {
-	return w.err
+func (r failingAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	switch addr {
+	case r.failAddr:
+		return nil, r.err
+	case r.fundAddr:
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(1_000_000_000_000_000_000)
+		return &acc, nil
+	}
+	return r.StateReader.ReadAccountData(addr)
 }
 
-// A failed write says nothing about the block, so it must stop the stage rather than crash the node or condemn the block.
+// A read failure while composing the write-set says nothing about the block, so it must
+// stop the stage operationally rather than crash the node or condemn the block.
 func TestExecuteReportsFailedWriteSetAsOperational(t *testing.T) {
 	want := errors.New("disk error")
-	ibs := state.New(state.NewNoopReader())
+	config := chain.TestChainBerlinConfig
+	sender := accounts.InternAddress(common.HexToAddress("0xaa"))
+	to := common.HexToAddress("0xbb")
+	reader := failingAccountReader{state.NewNoopReader(), sender, accounts.InternAddress(to), want}
+	versionMap := state.NewVersionMap(nil)
+	ibs := state.New(state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, reader))
 	defer ibs.Close()
-	require.NoError(t, ibs.AddBalance(accounts.InternAddress(common.HexToAddress("0xaa")), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	ibs.SetVersionMap(versionMap)
+	ibs.SetTxContext(1, 0)
 
-	task := &TxTask{TxNum: 1, TxIndex: 0, Header: &types.Header{}, Config: chain.TestChainBerlinConfig}
-	result := task.Execute(nil, nil, nil, ibs, failingAccountWriter{state.NewNoopWriter(), want}, chain.TestChainBerlinConfig, nil, datadir.Dirs{}, true)
+	engine := ethash.NewFaker()
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, Coinbase: common.HexToAddress("0xcc")}
+	getHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
+	blockContext := protocol.NewEVMBlockContext(header, getHash, engine, accounts.InternAddress(header.Coinbase), config)
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, vm.Config{})
+
+	// A zero-value transfer touches the recipient, so FinalizedWrites composes its
+	// pre-tx state to decide EIP-161 removal; that base read fails.
+	txn := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, GasLimit: 21000}, GasPrice: *uint256.NewInt(1)}
+	txn.SetSender(sender)
+	task := &TxTask{TxNum: 1, TxIndex: 0, Header: header, Config: config, Txs: types.Transactions{txn}, EvmBlockContext: blockContext}
+	result := task.Execute(evm, engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
 
 	require.ErrorIs(t, result.Err, want)
 	require.True(t, result.Operational)

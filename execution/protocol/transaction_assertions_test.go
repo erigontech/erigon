@@ -17,6 +17,7 @@
 package protocol
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -164,21 +165,32 @@ func TestTxDiffValidationErrors(t *testing.T) {
 	}
 }
 
+type gatedStorageFailure struct {
+	state.StateReader
+	armed *bool
+	err   error
+}
+
+func (r gatedStorageFailure) ReadAccountStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	if *r.armed {
+		return uint256.Int{}, false, r.err
+	}
+	return r.StateReader.ReadAccountStorage(addr, key)
+}
+
+// A post-tx TXDIFF op reads the committed value of an unwritten slot through the base
+// reader; a failed read there must abort the transaction fatally, surface via
+// StateReadError, and roll back the body frame's storage write rather than commit it.
 func TestPostTxStateReadErrorAbortsTransaction(t *testing.T) {
 	target := common.HexToAddress("0x2000")
 	body := common.HexToAddress("0x3000")
 	parent := common.HexToAddress("0x4000")
 	for _, tc := range []struct {
-		name  string
-		op    vm.OpCode
-		args  *program.Program
-		trace bool
+		name string
+		args *program.Program
 	}{
-		{"TXTRACE", vm.TXTRACE, program.New().Push0().Push0(), true},
-		{"TXDIFF trace", vm.TXDIFF, program.New().Push0().Push0().Push(6), true},
-		{"EVENTDATACOPY", vm.EVENTDATACOPY, program.New().Push0().Push0().Push0().Push0(), true},
-		{"TXDIFF storage before", vm.TXDIFF, program.New().Push0().Push(target).Push0(), false},
-		{"TXDIFF storage after", vm.TXDIFF, program.New().Push0().Push(target).Push(1), false},
+		{"TXDIFF storage before", program.New().Push0().Push(target).Push0()},
+		{"TXDIFF storage after", program.New().Push0().Push(target).Push(1)},
 	} {
 		for _, caller := range []struct {
 			name string
@@ -192,9 +204,13 @@ func TestPostTxStateReadErrorAbortsTransaction(t *testing.T) {
 		} {
 			t.Run(tc.name+"/"+caller.name, func(t *testing.T) {
 				evm, tx := frameTestEnv(t)
-				ibs := evm.IntraBlockState()
+				armed := false
+				readErr := errors.New("storage read failed")
+				ibs := state.New(gatedStorageFailure{state.NewNoopReader(), &armed, readErr})
+				defer ibs.Close()
+				require.NoError(t, ibs.SetBalance(accounts.InternAddress(tx.SenderAddress), *uint256.NewInt(10_000_000), tracing.BalanceChangeUnspecified))
 				require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
-				require.NoError(t, ibs.SetCode(accounts.InternAddress(target), program.New().Append(tc.args.Bytes()).Op(tc.op, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
+				require.NoError(t, ibs.SetCode(accounts.InternAddress(target), program.New().Append(tc.args.Bytes()).Op(vm.TXDIFF, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
 				require.NoError(t, ibs.SetCode(accounts.InternAddress(body), program.New().Sstore(0, 1).Bytes(), tracing.CodeChangeUnspecified))
 				frameTarget := target
 				if caller.code != nil {
@@ -208,44 +224,31 @@ func TestPostTxStateReadErrorAbortsTransaction(t *testing.T) {
 					{Mode: types.FramePostTx, Target: &frameTarget, Limits: mdgas.MdGas{Execution: 20_000}},
 				}
 
-				var readErr, frameErr error
+				var frameErr error
 				config := evm.Config()
 				config.Tracer = &tracing.Hooks{
 					OnOpcode: func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
-						if vm.OpCode(op) != tc.op {
+						if vm.OpCode(op) != vm.TXDIFF {
 							return
 						}
-						address := accounts.InternAddress(target)
-						key := accounts.InternKey(common.Hash{})
-						if tc.trace {
-							address = accounts.InternAddress(body)
-						} else {
-							_, err := evm.FrameContext.TransactionTrace(ibs)
-							require.NoError(t, err)
-						}
-						// A materialized account in versioned mode triggers an internal read
-						// error without setting StateReadError. Inject it only for this opcode.
-						ibs.SetVersionMap(state.NewVersionMap(nil))
-						_, readErr = ibs.GetState(address, key)
-						require.ErrorContains(t, readErr, "noMaterialize read fell back to a materialized stateObject")
-						require.NoError(t, ibs.StateReadError())
+						armed = true
 					},
 					OnExitV2: func(_ int, _ []byte, _ mdgas.MdGasUsage, err error, _ bool) {
-						if ibs.IsVersioned() {
+						if armed {
 							frameErr = err
 						}
-						ibs.SetVersionMap(nil)
+						armed = false
 					},
 				}
 				evm.ResetBetweenBlocks(evm.Context, evm.TxContext, ibs, config, evm.ChainRules())
 
 				result, err := applyFrameTest(t, evm, tx)
-				require.Error(t, readErr)
-				require.ErrorContains(t, frameErr, readErr.Error())
-				require.ErrorIs(t, err, vm.ErrIntraBlockStateFailed)
-				require.ErrorContains(t, err, readErr.Error())
+				require.ErrorIs(t, err, readErr)
+				require.ErrorIs(t, frameErr, vm.ErrIntraBlockStateFailed)
+				require.ErrorIs(t, frameErr, readErr)
 				require.Nil(t, result)
-				require.ErrorIs(t, ibs.StateReadError(), vm.ErrIntraBlockStateFailed)
+				require.ErrorIs(t, ibs.StateReadError(), readErr)
+				armed = false
 				value, err := ibs.GetState(accounts.InternAddress(body), accounts.InternKey(common.Hash{}))
 				require.NoError(t, err)
 				require.True(t, value.IsZero())

@@ -190,15 +190,24 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	header.GasLimit = 12500000
 
 	// Set up block 1 state the same way exec3 does for TxIndex == -1:
-	// engine.Initialize + FinalizeTx via InitializeBlockExecution.
+	// engine.Initialize via InitializeBlockExecution.
 	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, logger))
 	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsStateGetter(tx, execctxapi.StateGetterOptions{})))
-	writer := state.NewVersionedWriteCollector(rs)
 	ibs := state.New(reader)
 	defer ibs.Close()
-	err = protocol.InitializeBlockExecution(engine, chainRdr, header, config, ibs, writer, logger, nil)
+	err = protocol.InitializeBlockExecution(engine, chainRdr, header, config, ibs, logger, nil)
 	require.NoError(err)
-	account, err := reader.ReadAccountData(params.SystemAddress)
+
+	// Finalize the init writes into the version map and publish them into the
+	// shared domains the way exec3 does for TxIndex == -1.
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), engine, accounts.NilAddress, config)
+	writes, err := ibs.FinalizedWrites(blockContext.Rules(config))
+	require.NoError(err)
+	err = state.ApplyWrites(writes, domains, tx, header.Number.Uint64(), 2, false)
+	require.NoError(err)
+
+	freshReader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	account, err := freshReader.ReadAccountData(params.SystemAddress)
 	require.NoError(err)
 	require.NotNil(account)
 	require.True(account.Empty())

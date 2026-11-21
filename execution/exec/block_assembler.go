@@ -153,7 +153,7 @@ func (ba *BlockAssembler) recordPhase(ibs *state.IntraBlockState, writes *state.
 
 func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) error {
 	if err := protocol.InitializeBlockExecution(ba.cfg.Engine,
-		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, state.NewNoopWriter(), logger, nil); err != nil {
+		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, logger, nil); err != nil {
 		return err
 	}
 	writes, err := ibs.FinalizedWrites(ba.blockRules)
