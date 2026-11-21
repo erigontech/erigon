@@ -377,10 +377,14 @@ func newComposer(ctx context.Context, chainConfig *chain.Config, cfg *eez.Sequen
 		MaxGas:    c.MaxGas,
 		Proof:     timing.Proof,
 		Slack:     timing.Slack,
+
+		Poster:         poster.From(),
+		ExpectExternal: c.ExpectExternal,
 	}, chain, witnesses, prover, poster, observer,
 		f.Settled, func() uint64 { return f.Status().Finalized }, f.HeadTo, logger)
+	comp.Settlements(f.Deriver().Settlement)
 	logger.Info("[eez] composer mode", "poster", poster.From(), "attester", c.Attester, "proofSystem", c.ProofSystem,
-		"maxBlocks", composer.GridCap(c.MaxBlocks, k), "maxGas", c.MaxGas, "priorityFee", c.PriorityFee)
+		"maxBlocks", composer.GridCap(c.MaxBlocks, k), "maxGas", c.MaxGas, "priorityFee", c.PriorityFee, "expectExternal", c.ExpectExternal)
 	return comp, func() {
 		comp.Close()
 		_ = prover.Close()

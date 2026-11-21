@@ -277,6 +277,41 @@ func TestSuffixReplay(t *testing.T) {
 	require.Equal(t, uint64(3), f.deriver.Cursor())
 }
 
+// TestRivalReplacesTheLocalTail: a settlement posted by another composer,
+// differing from the local chain inside its range, moves the head to its
+// terminal; the local blocks above it leave the canonical chain.
+func TestRivalReplacesTheLocalTail(t *testing.T) {
+	compose := func(c *derivertest.Composer, second common.Address, n int) *derivertest.Batch {
+		blocks := make([]derivertest.Block, n)
+		for i := range blocks {
+			blocks[i] = derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, uint64(i+1))}}
+		}
+		blocks[1].Coinbase = second
+		return c.Compose(nil, blocks...)
+	}
+	rival := derivertest.NewComposer(t)
+	settled := compose(rival, alice, 3)
+	rival.Post(derivertest.Posting{Batch: settled})
+
+	local := derivertest.NewComposer(t)
+	tail := compose(local, bob, 5)
+	f := followerOn(t, local.Chain)
+	f.m = local.L2
+	fc, err := f.m.ExecModule.GetForkChoice(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, tail.Blocks[4].Hash(), fc.HeadHash)
+	require.NoError(t, f.deriver.Reconcile(t.Context(), rival.Scan()))
+	derivertest.RequireChain(t, f.chain, settled.Blocks...)
+	fc, err = f.m.ExecModule.GetForkChoice(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, settled.Blocks[2].Hash(), fc.HeadHash)
+	for _, b := range tail.Blocks[3:] {
+		got, err := f.chain.BlockByNumber(t.Context(), b.NumberU64())
+		require.NoError(t, err)
+		require.False(t, got != nil && got.Hash() == b.Hash(), "block %d still canonical", b.NumberU64())
+	}
+}
+
 // TestOutboundGateOnLocalBlocks checks the outbound gate on a Sync block
 // the local chain already holds.
 func TestOutboundGateOnLocalBlocks(t *testing.T) {

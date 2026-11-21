@@ -162,6 +162,13 @@ func (l *Ledger[T]) find(height uint64, post common.Hash) *entry[T] {
 	return nil
 }
 
+// Posts reports whether post is the posting of the batch at height.
+func (l *Ledger[T]) Posts(height uint64, post common.Hash) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.find(height, post) != nil
+}
+
 // MarkSettled records that L1 settled post's batch.
 func (l *Ledger[T]) MarkSettled(height uint64, post common.Hash) {
 	l.mu.Lock()

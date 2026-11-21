@@ -547,15 +547,17 @@ func TestComposerFlags(t *testing.T) {
 	require.Equal(t, uint64(300), c.MaxBlocks)
 	require.Equal(t, uint64(16_777_216), c.MaxGas)
 	require.Equal(t, uint64(10_000_000_000), c.PriorityFee)
+	require.False(t, c.ExpectExternal)
 
 	cfg, err = parse(t, append(slices.Clone(composer), "--eez.l1.builder=https://builder.example", "--eez.batch.maxblocks=120",
-		"--eez.batch.maxgas=2000000", "--eez.l1.priorityfee=1000000000")...)
+		"--eez.batch.maxgas=2000000", "--eez.l1.priorityfee=1000000000", "--eez.composer.expectexternal")...)
 	require.NoError(t, err)
 	c = cfg.Sequencer.Composer
 	require.Equal(t, "https://builder.example", c.Builder)
 	require.Equal(t, uint64(120), c.MaxBlocks)
 	require.Equal(t, uint64(2_000_000), c.MaxGas)
 	require.Equal(t, uint64(1_000_000_000), c.PriorityFee)
+	require.True(t, c.ExpectExternal)
 	require.Empty(t, c.L1Front)
 
 	cfg, err = parse(t, append(slices.Clone(composer), "--eez.composer.l1front=127.0.0.1:8547")...)
@@ -613,6 +615,7 @@ func TestComposerFlags(t *testing.T) {
 		"front without composer":    {append(slices.Clone(sequencer), "--eez.composer.l1front=127.0.0.1:8547"), "--eez.composer.l1front requires --eez.composer"},
 		"front over a websocket L1": {append([]string{"--eez.enabled", "--eez.l1.rpc=ws://l1:8546", "--eez.l1.builder=http://builder", "--eez.composer.l1front=127.0.0.1:8547"}, without("--eez.enabled", "--eez.l1.rpc")...), "--eez.composer.l1front forwards to --eez.l1.rpc over http(s)"},
 		"front over a hostless L1":  {append([]string{"--eez.enabled", "--eez.l1.rpc=http:l1", "--eez.l1.builder=http://builder", "--eez.composer.l1front=127.0.0.1:8547"}, without("--eez.enabled", "--eez.l1.rpc")...), "--eez.composer.l1front forwards to --eez.l1.rpc over http(s)"},
+		"external without composer": {append(slices.Clone(sequencer), "--eez.composer.expectexternal"), "--eez.composer.expectexternal requires --eez.composer"},
 		"bad L2 front":              {append(slices.Clone(composer), "--eez.composer.l2front=8548", "--eez.composer.l2rpc=http://127.0.0.1:8545"), "--eez.composer.l2front"},
 		"L2 front without RPC":      {append(slices.Clone(composer), "--eez.composer.l2front=127.0.0.1:8548"), "--eez.composer.l2rpc"},
 		"L2 RPC without front":      {append(slices.Clone(composer), "--eez.composer.l2rpc=http://127.0.0.1:8545"), "--eez.composer.l2front"},

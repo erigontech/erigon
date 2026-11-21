@@ -288,7 +288,9 @@ type Receipt struct {
 	Status      uint64
 	BlockNumber uint64
 	TxIndex     uint64
-	Logs        []*types.Log
+	// From is the transaction's sender.
+	From common.Address
+	Logs []*types.Log
 }
 
 // Receipt returns the receipt of the transaction with hash, nil when the
@@ -298,6 +300,7 @@ func (r *RPC) Receipt(ctx context.Context, hash common.Hash) (*Receipt, error) {
 		Status      *hexutil.Uint64 `json:"status"`
 		BlockNumber *hexutil.Uint64 `json:"blockNumber"`
 		TxIndex     *hexutil.Uint64 `json:"transactionIndex"`
+		From        common.Address  `json:"from"`
 		Logs        []*types.Log    `json:"logs"`
 	}
 	what := fmt.Sprintf("receipt of %x", hash)
@@ -310,7 +313,7 @@ func (r *RPC) Receipt(ctx context.Context, hash common.Hash) (*Receipt, error) {
 	if raw.Status == nil || raw.BlockNumber == nil || raw.TxIndex == nil {
 		return nil, fmt.Errorf("%w: %s lacks status, blockNumber or transactionIndex", ErrInconsistent, what)
 	}
-	return &Receipt{Status: uint64(*raw.Status), BlockNumber: uint64(*raw.BlockNumber), TxIndex: uint64(*raw.TxIndex), Logs: raw.Logs}, nil
+	return &Receipt{Status: uint64(*raw.Status), BlockNumber: uint64(*raw.BlockNumber), TxIndex: uint64(*raw.TxIndex), From: raw.From, Logs: raw.Logs}, nil
 }
 
 // revertCode is the JSON-RPC error code of an execution revert (EIP-1474).

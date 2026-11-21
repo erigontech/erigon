@@ -196,6 +196,10 @@ var (
 		Name:  "eez.composer.l1front",
 		Usage: "host:port of the L1 front, where wallets send the L1 transactions that call into the chain; set, steady Sync blocks carry their effects. Forwards other requests to an http(s) --eez.l1.rpc",
 	}
+	ComposerExpectExternalFlag = cli.BoolFlag{
+		Name:  "eez.composer.expectexternal",
+		Usage: "Expect other composers to settle the chain: their settlements are logged as information, not as errors",
+	}
 	ComposerL2FrontFlag = cli.StringFlag{
 		Name:  "eez.composer.l2front",
 		Usage: "host:port of the L2 front, where wallets send the chain's transactions that call L1, with --eez.composer.l2rpc; rollup0 chains only",
@@ -245,7 +249,7 @@ var Flags = []cli.Flag{
 	&ChainFlag, &HTTPPortFlag, &HTTPAPIFlag, &PortFlag, &BootnodesFlag, &StaticPeersFlag, &TrustedPeersFlag,
 	&SequencerFlag, &ProofTimeFlag, &SubmissionSlackFlag, &SequencerMaxDepthFlag, &SequencerFeeRecipientFlag, &SequencerKeyFileFlag,
 	&ComposerFlag, &PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag, &L1BuilderFlag, &L1PriorityFeeFlag,
-	&BatchMaxBlocksFlag, &BatchMaxGasFlag, &ComposerL1FrontFlag, &ComposerL2FrontFlag, &ComposerL2RPCFlag,
+	&BatchMaxBlocksFlag, &BatchMaxGasFlag, &ComposerL1FrontFlag, &ComposerL2FrontFlag, &ComposerL2RPCFlag, &ComposerExpectExternalFlag,
 	&L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
 }
 
@@ -319,6 +323,8 @@ type ComposerConfig struct {
 	// L2Front, when set, is where the L2 front listens; it reads and
 	// forwards to the chain's JSON-RPC at L2RPC.
 	L2Front, L2RPC string
+	// ExpectExternal reports settlements from other posters as expected.
+	ExpectExternal bool
 }
 
 // L2Flags are the l2 section fields set on the command line.
@@ -520,7 +526,7 @@ func sequencerConfig(cmd *cli.Command) (*SequencerConfig, error) {
 	return s, nil
 }
 
-var composerFlags = []cli.Flag{&PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag, &L1BuilderFlag, &L1PriorityFeeFlag, &BatchMaxBlocksFlag, &BatchMaxGasFlag, &ComposerL1FrontFlag, &ComposerL2FrontFlag, &ComposerL2RPCFlag}
+var composerFlags = []cli.Flag{&PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag, &L1BuilderFlag, &L1PriorityFeeFlag, &BatchMaxBlocksFlag, &BatchMaxGasFlag, &ComposerL1FrontFlag, &ComposerL2FrontFlag, &ComposerL2RPCFlag, &ComposerExpectExternalFlag}
 
 // composerConfig reads the composer flags, nil without --eez.composer.
 func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
@@ -545,6 +551,8 @@ func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
 		L1Front:     cmd.String(ComposerL1FrontFlag.Name),
 		L2Front:     cmd.String(ComposerL2FrontFlag.Name),
 		L2RPC:       cmd.String(ComposerL2RPCFlag.Name),
+
+		ExpectExternal: cmd.Bool(ComposerExpectExternalFlag.Name),
 	}
 	for _, f := range []struct {
 		flag *cli.StringFlag

@@ -26,6 +26,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/post"
@@ -1606,4 +1608,129 @@ func TestComposerDisposesOfAFailedOutboundBatchL1Settled(t *testing.T) {
 	h.c.RecoverFailed(t.Context())
 	require.Equal(t, []*Held{out}, pool.PopN(math.MaxInt))
 	require.Equal(t, uint32(1), out.Attempts, "where L1 stopped")
+}
+
+// senders is an L1 on which each posting in from has a receipt from its
+// sender.
+type senders struct {
+	from map[common.Hash]common.Address
+}
+
+func (s senders) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
+	return &l1.Header{Number: n}, nil
+}
+
+func (senders) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1}, nil }
+
+func (s senders) Receipt(_ context.Context, h common.Hash) (*l1.Receipt, error) {
+	from, ok := s.from[h]
+	if !ok {
+		return nil, nil
+	}
+	return &l1.Receipt{Status: 1, From: from}, nil
+}
+
+func (senders) HasTransaction(context.Context, common.Hash) (bool, error) { return false, nil }
+
+// logLines is a log sink safe for the composer's goroutines.
+type logLines struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *logLines) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *logLines) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
+}
+
+func captureLogs(c *Composer) *logLines {
+	lines := &logLines{}
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(lines, log.TerminalFormatNoColor()))
+	c.logger = logger
+	return lines
+}
+
+// settlements is derivation's index: each record settles up to its last block.
+func settlements(records ...deriver.Record) func(uint64) (deriver.Record, bool) {
+	return func(n uint64) (deriver.Record, bool) {
+		for _, r := range records {
+			if n <= r.LastL2Block {
+				return r, true
+			}
+		}
+		return deriver.Record{}, false
+	}
+}
+
+// TestComposerAttributesSettlements: each settlement derivation passes is
+// logged as this composer's, by the posting it recorded or by its poster's
+// address for a posting from before a restart, or as another poster's,
+// which an error reports unless external batches are expected.
+func TestComposerAttributesSettlements(t *testing.T) {
+	for _, expect := range []bool{false, true} {
+		t.Run(fmt.Sprintf("expect=%v", expect), func(t *testing.T) {
+			other := common.Address{0xe}
+			node := senders{from: map[common.Hash]common.Address{{0xe}: other}}
+			h := newHarness(t, newTestChain(t, 12), 12, node)
+			poster := crypto.PubkeyToAddress(h.poster.key.PublicKey)
+			node.from[common.Hash{0xd}] = poster
+			h.c.cfg.Poster, h.c.cfg.ExpectExternal = poster, expect
+			h.c.Settlements(settlements(
+				deriver.Record{TxHash: common.Hash{0xf}, LastL2Block: 4},
+				deriver.Record{TxHash: common.Hash{0xe}, LastL2Block: 8},
+				deriver.Record{TxHash: common.Hash{0xd}, LastL2Block: 12},
+			))
+			lines := captureLogs(h.c)
+			h.c.RecoverFailed(t.Context())
+			h.c.ledger.Begin(Posted[*Held]{Height: 4, Post: common.Hash{0xf}})
+			h.c.ledger.MarkSettled(4, common.Hash{0xf})
+			h.cursor.Store(12)
+			h.c.RecoverFailed(t.Context())
+			h.c.Close()
+			out := lines.String()
+			require.Equal(t, 2, strings.Count(out, "event=eez.composer.batch.confirmed"), out)
+			require.Contains(t, out, "to=4")
+			require.Contains(t, out, "to=12")
+			if expect {
+				require.Regexp(t, `INFO.*event=eez.composer.batch.external .*to=8`, out)
+				require.NotContains(t, out, "external.unexpected")
+			} else {
+				require.Regexp(t, `EROR.*event=eez.composer.batch.external.unexpected .*to=8`, out)
+			}
+		})
+	}
+}
+
+// TestComposerAuditsASupersededPosting: a finalized height another poster
+// settled is no reorg: the posting it superseded is not looked for.
+func TestComposerAuditsASupersededPosting(t *testing.T) {
+	chain := newTestChain(t, 8, 8)
+	node := &triggers{landed: map[common.Hash]bool{}}
+	h := newHarness(t, chain, 8, node)
+	h.c.Settlements(settlements(deriver.Record{TxHash: common.Hash{0xe}, LastL2Block: 8}))
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	// The rival's block carries the outbound transaction.
+	out := held(addr(0xa), 0, Outbound, 1)
+	out.Hash = chain.blocks[8].Transactions()[0].Hash()
+	require.NoError(t, pool.Push(out, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
+	lines := captureLogs(h.c)
+	h.cursor.Store(8)
+	h.final.Store(8)
+	h.c.RecoverFailed(t.Context())
+	h.c.RecoverFailed(t.Context())
+	h.c.Close()
+	require.Empty(t, h.c.ledger.entries)
+	require.NotContains(t, lines.String(), "finality_audit.rolled_out")
+	require.Zero(t, pool.Len())
+	require.False(t, pool.Holds(out.Hash), "final in the rival's block")
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/l1/post"
 	"github.com/erigontech/erigon/eez/protocol"
@@ -87,6 +88,10 @@ type Config struct {
 	// that stops answering does not hold block production; zero is
 	// DefaultL1Read.
 	L1Read time.Duration
+	// Poster is the address the composer posts from; ExpectExternal
+	// reports settlements from other posters as expected, not as errors.
+	Poster         common.Address
+	ExpectExternal bool
 }
 
 // Composer settles the sequencer's blocks on L1 with anchor-only batches:
@@ -118,6 +123,12 @@ type Composer struct {
 	pending emission
 	// last is the cursor RecoverFailed saw last.
 	last uint64
+	// settlement returns derivation's settlement covering a block;
+	// attributed is the cursor up to which settlements were attributed,
+	// once attributing.
+	settlement  func(number uint64) (deriver.Record, bool)
+	attributed  uint64
+	attributing bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -146,6 +157,12 @@ func New(cfg Config, chain Chain, witnesses Witnesses, prover Prover, poster Pos
 // Sync block.
 func (c *Composer) Recover(pool *HeldPool, substitute func(ctx context.Context, failed *types.Header) (*types.Header, error)) {
 	c.pool, c.substitute = pool, substitute
+}
+
+// Settlements sets derivation's index of settlements, which attributes
+// each one derivation passes to its poster.
+func (c *Composer) Settlements(settlement func(number uint64) (deriver.Record, bool)) {
+	c.settlement = settlement
 }
 
 // Close stops the observers.
@@ -644,6 +661,7 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 		}
 	}
 	c.last = cursor
+	c.attribute(cursor)
 	rctx, cancel := context.WithTimeout(ctx, c.cfg.L1Read)
 	defer cancel()
 	for _, p := range c.ledger.SettledAbove(cursor) {
@@ -714,6 +732,67 @@ func (c *Composer) head() (uint64, bool) {
 	}
 }
 
+// attribute logs the poster of each settlement derivation passed up to
+// cursor since the last call: this composer, by the posting its ledger
+// recorded or, for one posted before a restart, by its address; else
+// another poster, an error unless ExpectExternal. Settlements before the
+// first call are not attributed.
+func (c *Composer) attribute(cursor uint64) {
+	if c.settlement == nil {
+		return
+	}
+	if !c.attributing || cursor <= c.attributed {
+		c.attributing, c.attributed = true, cursor
+		return
+	}
+	for n := c.attributed + 1; n <= cursor; {
+		r, ok := c.settlement(n)
+		if !ok || r.LastL2Block < n {
+			break
+		}
+		n = r.LastL2Block + 1
+		if c.ledger.Posts(r.LastL2Block, r.TxHash) {
+			c.confirmed(r)
+			continue
+		}
+		c.wg.Go(func() { c.attributeAfar(r) })
+	}
+	c.attributed = cursor
+}
+
+// attributeAfar attributes r, a settlement the ledger did not post, by the
+// sender of its posting.
+func (c *Composer) attributeAfar(r deriver.Record) {
+	ctx, cancel := context.WithTimeout(c.ctx, c.cfg.L1Read)
+	defer cancel()
+	receipt, err := c.observer.Node.Receipt(ctx, r.TxHash)
+	switch {
+	case err != nil || receipt == nil:
+		c.logger.Warn("[eez] settlement's poster unknown", "event", "eez.composer.batch.unattributed", "to", r.LastL2Block, "post", r.TxHash, "err", err)
+	case receipt.From == c.cfg.Poster:
+		c.confirmed(r)
+	case c.cfg.ExpectExternal:
+		c.logger.Info("[eez] another poster settled the chain", "event", "eez.composer.batch.external",
+			"to", r.LastL2Block, "post", r.TxHash, "poster", receipt.From, "l1Block", r.L1Block)
+	default:
+		c.logger.Error("[eez] another poster settled the chain, which no composer expects", "event", "eez.composer.batch.external.unexpected",
+			"to", r.LastL2Block, "post", r.TxHash, "poster", receipt.From, "l1Block", r.L1Block)
+	}
+}
+
+func (c *Composer) confirmed(r deriver.Record) {
+	c.logger.Info("[eez] settlement confirmed", "event", "eez.composer.batch.confirmed", "to", r.LastL2Block, "post", r.TxHash, "l1Block", r.L1Block)
+}
+
+// superseded reports whether another posting than p's settled its height.
+func (c *Composer) superseded(p Posted[*Held]) bool {
+	if c.settlement == nil {
+		return false
+	}
+	r, ok := c.settlement(p.Height)
+	return ok && r.TxHash != p.Post
+}
+
 // release ends the reservations of txs, which a batch settled.
 func (c *Composer) release(txs []*Held) {
 	if c.pool != nil && len(txs) > 0 {
@@ -732,6 +811,8 @@ func (c *Composer) audit(p Posted[*Held]) {
 	switch {
 	case err != nil:
 		c.logger.Error("[eez] finality audit failed", "event", "eez.composer.finality_audit.check_failed", "to", p.Height, "post", p.Post, "err", err)
+	case r == nil && c.superseded(p):
+		// Another posting settled the height; what ran of p is final in it.
 	case r == nil:
 		c.logger.Error("[eez] finalized settlement's posting is not on L1", "event", "eez.composer.finality_audit.rolled_out", "to", p.Height, "post", p.Post,
 			"held", len(p.Txs))
