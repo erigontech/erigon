@@ -629,7 +629,12 @@ func (cc *commitmentCalculator) forgetBlock(n uint64) {
 // maybeComputeAhead computes block n from its BAL when it is BAL-driven, the
 // compute-ahead gate is open, and doing so is safe — overlapping with block n's
 // execution. Idempotent (computedAhead guard).
+var stubNoBALAhead = dbg.EnvBool("STUB_NO_BAL_AHEAD", false)
+
 func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64) {
+	if stubNoBALAhead {
+		return
+	}
 	pb, ok := cc.pending[n]
 	if !ok || pb.failed || pb.mode != calcModeBALDriven || cc.computedAhead[n] {
 		return
