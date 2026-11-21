@@ -301,7 +301,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 * `--rpc.accessList value`: Specifies a granular API allowlist.
 * `--rpc.gascap value`: Sets a cap on gas usage for `eth_call`/`estimateGas`.
   * Default: `50000000`
-* `--rpc.batch.limit value`: Sets the maximum number of requests in a batch.
+* `--rpc.batch.limit value`: Sets the maximum number of requests in a batch, and of messages handled at once on one WebSocket connection.
   * Default: `100`
 * `--rpc.subscription.limit value`: Maximum number of concurrent subscriptions per WebSocket or IPC connection.
   * Default: `1024`

@@ -483,7 +483,7 @@ func TestWebsocketWriteTimeoutClosesStalledConn(t *testing.T) {
 		if err != nil {
 			return
 		}
-		wc := newWebsocketCodec(conn, hw.conn, nil, r.Host, r.Header, r.RemoteAddr)
+		wc := newWebsocketCodec(conn, hw.conn, nil, 0, r.Host, r.Header, r.RemoteAddr)
 		defer wc.Close()
 		codecs <- wc
 		// A hijacked request's context never ends, so wait for the connection itself.
@@ -667,7 +667,7 @@ func TestWebsocketPingDuringSlowWriteKeepsConn(t *testing.T) {
 		if err != nil {
 			return
 		}
-		wc := newWebsocketCodec(conn, hw.conn, nil, r.Host, r.Header, r.RemoteAddr)
+		wc := newWebsocketCodec(conn, hw.conn, nil, 0, r.Host, r.Header, r.RemoteAddr)
 		defer wc.Close()
 		codecs <- wc
 		for {
@@ -730,7 +730,7 @@ func TestWebsocketCoalescedMessagesLeaveInOneWrite(t *testing.T) {
 			return
 		}
 		hw.conn.Conn = writeCountingConn{hw.conn.Conn, &writes}
-		wc := newWebsocketCodec(conn, hw.conn, nil, r.Host, r.Header, r.RemoteAddr)
+		wc := newWebsocketCodec(conn, hw.conn, nil, 0, r.Host, r.Header, r.RemoteAddr)
 		defer wc.Close()
 		codecs <- wc
 		for {
@@ -1108,4 +1108,164 @@ func TestClientWebsocketMessageSizeLimit(t *testing.T) {
 		c.Close()
 		require.Equal(t, tc.wantErr, err != nil, "limit %d: %v", tc.limit, err)
 	}
+}
+
+const wsTestCall = `{"jsonrpc":"2.0","id":1,"method":"test_echo"}`
+
+func callLimitedWebsocketCodec(t *testing.T, limit int) (*websocketCodec, *websocket.Conn) {
+	t.Helper()
+	accepted := make(chan *websocketCodec, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		accepted <- newWebsocketCodec(conn, nil, &ingressBudget{limit: 1024 * 1024}, limit, r.Host, r.Header, r.RemoteAddr)
+	}))
+	t.Cleanup(ts.Close)
+	client, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(ts.URL, "http:"), nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.CloseNow() })
+	codec := <-accepted
+	t.Cleanup(codec.Close)
+	return codec, client
+}
+
+// readOneCall takes the connection's only call slot and returns what frees it.
+func readOneCall(t *testing.T, codec *websocketCodec, client *websocket.Conn) func() {
+	t.Helper()
+	require.NoError(t, client.Write(t.Context(), websocket.MessageText, []byte(wsTestCall)))
+	_, _, err := codec.ReadBatch(0)
+	require.NoError(t, err)
+	return codec.takeRelease()
+}
+
+func readWaitingForSlot(t *testing.T, codec *websocketCodec) <-chan error {
+	t.Helper()
+	read := make(chan error, 1)
+	go func() {
+		_, _, err := codec.ReadBatch(0)
+		read <- err
+	}()
+	require.Eventually(t, func() bool { return codec.adapter.slotWaits.Load()%2 == 1 }, 5*time.Second, time.Millisecond)
+	return read
+}
+
+func TestWebsocketReadWaitsForAFreeCallSlot(t *testing.T) {
+	t.Parallel()
+	codec, client := callLimitedWebsocketCodec(t, 1)
+	release := readOneCall(t, codec, client)
+	require.NoError(t, client.Write(t.Context(), websocket.MessageText, []byte(wsTestCall)))
+
+	read := readWaitingForSlot(t, codec)
+	require.Never(t, func() bool { return len(read) > 0 }, 100*time.Millisecond, 5*time.Millisecond)
+
+	release()
+	require.NoError(t, <-read)
+}
+
+func TestWebsocketPingSparesAConnectionWaitingForACallSlot(t *testing.T) {
+	t.Parallel()
+	codec, client := callLimitedWebsocketCodec(t, 1)
+	release := readOneCall(t, codec, client)
+	require.NoError(t, client.Write(t.Context(), websocket.MessageText, []byte(wsTestCall)))
+	read := readWaitingForSlot(t, codec)
+
+	codec.ping()
+
+	release()
+	require.NoError(t, <-read, "the frame behind the wait must still arrive")
+}
+
+func TestWebsocketCloseWakesAReadWaitingForACallSlot(t *testing.T) {
+	t.Parallel()
+	codec, client := callLimitedWebsocketCodec(t, 1)
+	readOneCall(t, codec, client)
+	read := readWaitingForSlot(t, codec)
+
+	codec.Close()
+
+	select {
+	case err := <-read:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the read still waits for a slot after Close")
+	}
+}
+
+func TestWebsocketPeerGoneEndsTheReadOnceASlotIsFree(t *testing.T) {
+	t.Parallel()
+	codec, client := callLimitedWebsocketCodec(t, 1)
+	release := readOneCall(t, codec, client)
+	read := readWaitingForSlot(t, codec)
+
+	require.NoError(t, client.CloseNow())
+	release()
+
+	select {
+	case err := <-read:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the read did not see the closed peer")
+	}
+	require.Empty(t, codec.adapter.callSlots, "a failed read must give its slot back")
+}
+
+func TestWebsocketPingAlreadyRunningSparesAConnectionThatStartsWaiting(t *testing.T) {
+	t.Parallel()
+	codec, client := callLimitedWebsocketCodec(t, 1)
+	release := readOneCall(t, codec, client)
+	require.NoError(t, client.Write(t.Context(), websocket.MessageText, []byte(wsTestCall)))
+
+	pinged := make(chan struct{})
+	go func() {
+		defer close(pinged)
+		codec.ping()
+	}()
+	time.Sleep(50 * time.Millisecond) // the ping reads the wait counter before the read loop starts to wait
+	read := readWaitingForSlot(t, codec)
+	<-pinged
+
+	release()
+	require.NoError(t, <-read)
+}
+
+type heldCallService struct {
+	entered, release chan struct{}
+}
+
+func (s *heldCallService) Hold(context.Context) {
+	s.entered <- struct{}{}
+	<-s.release
+}
+
+func (s *heldCallService) Quick() {}
+
+func TestWebsocketServerAppliesBatchLimitToCallsInFlight(t *testing.T) {
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	srv.SetBatchLimit(1)
+	service := &heldCallService{entered: make(chan struct{}), release: make(chan struct{})}
+	require.NoError(t, srv.RegisterName("held", service))
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer httpsrv.Close()
+	client, err := DialWebsocket(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), "", logger)
+	require.NoError(t, err)
+	defer client.Close()
+
+	held := make(chan error, 1)
+	go func() { held <- client.Call(nil, "held_hold") }()
+	<-service.entered
+	quick := make(chan error, 1)
+	go func() { quick <- client.Call(nil, "held_quick") }()
+	require.Never(t, func() bool { return len(quick) > 0 }, 200*time.Millisecond, 10*time.Millisecond)
+
+	close(service.release)
+	require.NoError(t, <-held)
+	require.NoError(t, <-quick)
 }

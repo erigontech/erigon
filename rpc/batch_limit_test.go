@@ -84,7 +84,7 @@ func TestBatchLimitWebsocketBudgetHeldUntilAnswered(t *testing.T) {
 			return
 		}
 		hw.conn.Conn = &blockedWriteConn{Conn: hw.conn.Conn, writing: writing, unblock: unblock}
-		srv.ServeCodecWithContext(r.Context(), newWebsocketCodec(conn, hw.conn, &srv.ingress, r.Host, r.Header, r.RemoteAddr), 0)
+		srv.ServeCodecWithContext(r.Context(), newWebsocketCodec(conn, hw.conn, &srv.ingress, 0, r.Host, r.Header, r.RemoteAddr), 0)
 	}))
 	defer httpsrv.Close()
 
