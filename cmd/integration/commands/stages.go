@@ -130,7 +130,7 @@ var (
 	cmdStageHeaders     = makeStageCmd("stage_headers", stageHeaders, true, false, false)
 	cmdStageBodies      = makeStageCmd("stage_bodies", stageBodies, true, false, false)
 	cmdStageSenders     = makeStageCmd("stage_senders", stageSenders, true, false, false)
-	cmdStageExec        = makeStageCmd("stage_exec", stageExec, true, true, false)
+	cmdStageExec        = resetWithoutChaindata(makeStageCmd("stage_exec", stageExec, true, true, false))
 	cmdStageExecReplay  = makeStageCmd("stage_exec_replay", stageExecReplay, true, true, false)
 	cmdCaptureBlock     = makeStageCmd("capture_block", captureBlock, false, true, false)
 	cmdStageCustomTrace = makeStageCmd("stage_custom_trace", stageCustomTrace, true, true, false)
@@ -693,6 +693,29 @@ func resolveExecTarget(block, limit, execProgress, sendersProgress uint64) (targ
 		}
 	}
 	return target, !(target > 0 && target <= execProgress)
+}
+
+// resetWithoutChaindata lets `stage_exec --reset` run on a datadir without a DB in its
+// own chaindata: there is no execution state to reset, so it only clears the
+// pending-reset marker that a commitment convert left. An integration tool never
+// creates a DB, and the node starts a new one.
+func resetWithoutChaindata(cmd *cobra.Command) *cobra.Command {
+	runE := cmd.RunE
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if reset && isDefaultChaindata(chaindata, datadirCli) {
+			exists, err := dir.FileExist(filepath.Join(chaindata, "mdbx.dat"))
+			if err != nil {
+				return err
+			}
+			if !exists {
+				logger := debug.SetupCobra(cmd, "integration")
+				logger.Info("[stage_exec] no chaindata: nothing to reset")
+				return dbstate.CompleteExecReset(datadir.Open(datadirCli), logger)
+			}
+		}
+		return runE(cmd, args)
+	}
+	return cmd
 }
 
 func resetExec(ctx context.Context, db kv.TemporalRwDB, dirs datadir.Dirs, logger log.Logger) error {
