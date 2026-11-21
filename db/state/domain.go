@@ -344,13 +344,6 @@ func (d *Domain) buildBtIndex(btPath, kveiPath string, r *seg.Reader, salt uint3
 	return d.openBtIndex(btPath, r)
 }
 
-// useExistenceFilterMode opens the domain's next files with mode until restore is called.
-func (d *Domain) useExistenceFilterMode(mode statecfg.ExistenceFilterMode) (restore func()) {
-	prev := d.ExistenceFilter
-	d.ExistenceFilter = mode
-	return func() { d.ExistenceFilter = prev }
-}
-
 func (d *Domain) existenceFilterMode() statecfg.ExistenceFilterMode {
 	name := d.Name.String()
 	switch {

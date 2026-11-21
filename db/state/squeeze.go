@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -896,9 +895,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 // DB expected to be empty, committed into db keys will be not processed.
 func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, _ error) {
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
-	// The rebuild writes a file per shard and per merge; on mmap their existence filters and hash indexes stay out
-	// of the heap, which otherwise grows with every file until the run ends.
-	defer a.d[kv.CommitmentDomain].useExistenceFilterMode(statecfg.ExistenceFilterRandom)()
 
 	// disable hard alignment; allowing commitment and storage/account to have
 	// different visibleFiles
