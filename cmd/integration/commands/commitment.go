@@ -59,10 +59,10 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -1549,8 +1549,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		}
 		stat := commitment.DecodeBranchAndCollectStat(key, val, tv)
 		if stat == nil {
-			err := fmt.Errorf("failed to decode branch: %x %x", key, val)
-			panic(err)
+			return fmt.Errorf("failed to decode branch: %x %x", key, val)
 		}
 		keysSink <- *stat
 	}
@@ -1558,18 +1557,12 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 }
 
 func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
-	if info, _, ok := snaptype.ParseFileName("", filepath.Base(fpath)); ok && info.Version.Major >= 3 {
+	if v, _ := version.ParseVersion(filepath.Base(fpath)); v.Major >= 3 {
 		return nil, fmt.Errorf("%s holds v3 commitment records; visualize decodes legacy branches only", filepath.Base(fpath))
 	}
 	stats := make(chan commitment.BranchStat, 8)
-	errch := make(chan error)
-	go func() {
-		err := extractKVPairFromCompressed(fpath, stats)
-		if err != nil {
-			errch <- err
-		}
-		close(errch)
-	}()
+	errch := make(chan error, 1)
+	go func() { errch <- extractKVPairFromCompressed(fpath, stats) }()
 
 	totals := newVisualizeOverallStat()
 	for s := range stats {
@@ -1589,12 +1582,8 @@ func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
 		totals.prefixes[s.KeySize] = ps
 	}
 
-	select {
-	case err := <-errch:
-		if err != nil {
-			return nil, err
-		}
-	default:
+	if err := <-errch; err != nil {
+		return nil, err
 	}
 	return totals, nil
 }

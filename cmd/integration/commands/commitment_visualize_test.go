@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -44,4 +45,20 @@ func TestCommitmentVisualizeReadsLegacyFiles(t *testing.T) {
 	require.NotEmpty(t, files)
 	_, err = processCommitmentFile(files[0])
 	require.NoError(t, err)
+}
+
+// A file whose name has no version is decoded, and a record that is no legacy branch
+// fails the file instead of panicking.
+func TestCommitmentVisualizeFailsOnAnUnnamedV3File(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	_, dirs, _ := dbWithState(t, true)
+	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "v3.*-commitment.*.kv"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	unnamed := filepath.Join(t.TempDir(), "commitment.kv")
+	data, err := os.ReadFile(files[0])
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(unnamed, data, 0o600))
+	_, err = processCommitmentFile(unnamed)
+	require.ErrorContains(t, err, "failed to decode branch")
 }
