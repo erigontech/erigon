@@ -24,6 +24,7 @@
 // Build ordering:
 //  1. BuildDownloader — torrent client, gRPC proxy
 //  2. BuildStorage — DB references, file-change callbacks, block retirement
+//  3. BuildTxPool — transaction pool and its gRPC server; needs the sentry MultiClient
 //
 // Components are configured and initialized in backend.go (deps differ per component),
 // but the builder owns allocation and provides a single access point.
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	downloadercomp "github.com/erigontech/erigon/node/components/downloader"
 	storagecomp "github.com/erigontech/erigon/node/components/storage"
+	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -46,6 +48,7 @@ import (
 type Builder struct {
 	Downloader *downloadercomp.Provider
 	Storage    *storagecomp.Provider
+	TxPool     *txpoolcomp.Provider
 }
 
 // New allocates a Builder with all providers pre-initialized.
@@ -53,6 +56,7 @@ func New() *Builder {
 	return &Builder{
 		Downloader: &downloadercomp.Provider{},
 		Storage:    &storagecomp.Provider{},
+		TxPool:     &txpoolcomp.Provider{},
 	}
 }
 
@@ -67,4 +71,9 @@ func (b *Builder) BuildDownloader(ctx context.Context, dlCfg *downloadercfg.Cfg,
 // and after SetUpBlockReader (needs ChainDB, BlockReader, etc.).
 func (b *Builder) BuildStorage(deps storagecomp.Deps) error {
 	return b.Storage.Initialize(deps)
+}
+
+// BuildTxPool assembles the transaction pool, or only a disabled gRPC server when the pool is disabled.
+func (b *Builder) BuildTxPool(deps txpoolcomp.Deps) error {
+	return b.TxPool.Initialize(deps)
 }
