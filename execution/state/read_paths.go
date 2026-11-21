@@ -126,6 +126,13 @@ func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 	if currentHash == accounts.EmptyCodeHash {
 		return accounts.Code{Hash: accounts.EmptyCodeHash}, nil
 	}
+	// An earlier tx in this block may have installed the code; its bytes live in
+	// the version map, not the pre-block origin. Resolve them there first so the
+	// seed carries the bytes matching currentHash rather than nil bytes from the
+	// origin reader (which would make an identical SetCode look like a change).
+	if code, _, ok := ibs.versionMap.ReadCode(addr, ibs.txIndex); ok {
+		return code, nil
+	}
 	code, err := ibs.originCodeDirect(addr)
 	if err != nil {
 		return accounts.Code{}, err
