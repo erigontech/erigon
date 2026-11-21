@@ -287,14 +287,21 @@ func (b *BlindedBeaconBody) UnmarshalJSON(buf []byte) error {
 	if err := json.Unmarshal(buf, (*bodyJSON)(b)); err != nil {
 		return err
 	}
-	if b.ExecutionRequests == nil && b.Version >= clparams.ElectraVersion {
-		return errors.New("blinded beacon body contains null execution requests")
-	}
-	if b.Attestations == nil {
-		return errors.New("blinded beacon body contains null attestations")
-	}
-	if b.AttesterSlashings == nil {
-		return errors.New("blinded beacon body contains null attester slashings")
+	// execution_payload_header is left out: callers that require it reset it to
+	// nil before decoding, so nil cannot tell an explicit null from an omitted key.
+	if err := rejectNullBodyFields("blinded beacon body",
+		requiredBodyField{"eth1 data", b.Eth1Data == nil},
+		requiredBodyField{"proposer slashings", b.ProposerSlashings == nil},
+		requiredBodyField{"attester slashings", b.AttesterSlashings == nil},
+		requiredBodyField{"attestations", b.Attestations == nil},
+		requiredBodyField{"deposits", b.Deposits == nil},
+		requiredBodyField{"voluntary exits", b.VoluntaryExits == nil},
+		requiredBodyField{"sync aggregate", b.Version >= clparams.AltairVersion && b.SyncAggregate == nil},
+		requiredBodyField{"bls to execution changes", b.Version >= clparams.CapellaVersion && b.ExecutionChanges == nil},
+		requiredBodyField{"blob kzg commitments", b.Version >= clparams.DenebVersion && b.BlobKzgCommitments == nil},
+		requiredBodyField{"execution requests", b.Version >= clparams.ElectraVersion && b.ExecutionRequests == nil},
+	); err != nil {
+		return err
 	}
 	return solid.RangeErr(b.AttesterSlashings, func(i int, slashing *AttesterSlashing, _ int) error {
 		if slashing == nil || slashing.Attestation_1 == nil || slashing.Attestation_2 == nil {
@@ -341,11 +348,7 @@ func (b *BlindedBeaconBody) ensureNilFields() {
 		b.Eth1Data = &Eth1Data{}
 	}
 	if b.SyncAggregate == nil {
-		bitsSize := defaultSyncCommitteeBitsSize
-		if b.beaconCfg != nil {
-			bitsSize = int(b.beaconCfg.SyncCommitteeSize) / 8
-		}
-		b.SyncAggregate = NewSyncAggregateWithSize(bitsSize)
+		b.SyncAggregate = newSyncAggregateForConfig(b.beaconCfg)
 	}
 	if b.ExecutionPayload == nil {
 		b.ExecutionPayload = NewEth1Header(b.Version)

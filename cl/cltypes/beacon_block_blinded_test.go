@@ -18,6 +18,7 @@ package cltypes
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -167,6 +168,50 @@ func TestBlindedBeaconBodyJSONRejectsNullExecutionRequests(t *testing.T) {
 func TestBlindedBeaconBodyJSONRejectsNullOperationLists(t *testing.T) {
 	for _, version := range []clparams.StateVersion{clparams.BellatrixVersion, clparams.CapellaVersion, clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion} {
 		for _, input := range []string{`{"attestations":null}`, `{"attester_slashings":null}`} {
+			t.Run(version.String()+"/"+input, func(t *testing.T) {
+				body := NewBlindedBeaconBody(&clparams.MainnetBeaconConfig, version)
+				require.Error(t, json.Unmarshal([]byte(input), body))
+			})
+		}
+	}
+}
+
+func TestBlindedBeaconBodyJSONRejectsNullRequiredFields(t *testing.T) {
+	bellatrix := []string{"eth1_data", "proposer_slashings", "attester_slashings", "attestations", "deposits", "voluntary_exits", "sync_aggregate"}
+	capella := slices.Concat(bellatrix, []string{"bls_to_execution_changes"})
+	deneb := slices.Concat(capella, []string{"blob_kzg_commitments"})
+	electra := slices.Concat(deneb, []string{"execution_requests"})
+	for version, fields := range map[clparams.StateVersion][]string{
+		clparams.BellatrixVersion: bellatrix,
+		clparams.CapellaVersion:   capella,
+		clparams.DenebVersion:     deneb,
+		clparams.ElectraVersion:   electra,
+		clparams.FuluVersion:      electra,
+	} {
+		for _, field := range fields {
+			t.Run(version.String()+"/"+field, func(t *testing.T) {
+				body := NewBlindedBeaconBody(&clparams.MainnetBeaconConfig, version)
+				err := json.Unmarshal([]byte(`{"`+field+`":null}`), body)
+				require.ErrorContains(t, err, "beacon body contains null")
+			})
+		}
+	}
+}
+
+func TestBlindedBeaconBodyJSONAcceptsOmittedFields(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.BellatrixVersion, clparams.CapellaVersion, clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			body := NewBlindedBeaconBody(&clparams.MainnetBeaconConfig, version)
+			require.NoError(t, json.Unmarshal([]byte(`{}`), body))
+			_, err := body.HashSSZ()
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestBlindedBeaconBodyJSONRejectsIncompleteOperations(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.DenebVersion, clparams.FuluVersion} {
+		for _, input := range incompleteOperationsJSON(version) {
 			t.Run(version.String()+"/"+input, func(t *testing.T) {
 				body := NewBlindedBeaconBody(&clparams.MainnetBeaconConfig, version)
 				require.Error(t, json.Unmarshal([]byte(input), body))
