@@ -95,20 +95,52 @@ func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberO
 	return bn, bh, latest, nil
 }
 
-func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
-	var plainStateBlockNumber uint64
-	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
-		return 0, common.Hash{}, false, false, fmt.Errorf("getting plain state block number: %w", err)
+// ResolveExecutedBlock resolves the block like GetCanonicalBlockNumber (or
+// GetBlockNumber without requireCanonical) and then checks it like
+// CheckBlockExecuted, both against a single read of the execution progress in tx.
+func ResolveExecutedBlock(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader) (uint64, common.Hash, bool, error) {
+	executed, err := readExecutionProgress(tx)
+	if err != nil {
+		return 0, common.Hash{}, false, err
 	}
+	bn, bh, latest, found, err := resolveBlockNumber(ctx, requireCanonical, blockNrOrHash, tx, br, executed)
+	if err != nil {
+		return 0, common.Hash{}, false, err
+	}
+	if !found {
+		return 0, common.Hash{}, false, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
+	}
+	if bn > executed {
+		return 0, common.Hash{}, false, &BlockNotExecutedError{Block: bn, LastExecuted: executed}
+	}
+	return bn, bh, latest, nil
+}
 
+func readExecutionProgress(tx kv.Tx) (uint64, error) {
+	executed, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return 0, fmt.Errorf("getting plain state block number: %w", err)
+	}
+	return executed, nil
+}
+
+func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
+	plainStateBlockNumber, err := readExecutionProgress(tx)
+	if err != nil {
+		return 0, common.Hash{}, false, false, err
+	}
+	return resolveBlockNumber(ctx, requireCanonical, blockNrOrHash, tx, br, plainStateBlockNumber)
+}
+
+func resolveBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader, plainStateBlockNumber uint64) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
 	var ok bool
 	hash, ok = blockNrOrHash.Hash()
 	if !ok {
 		number := *blockNrOrHash.BlockNumber
 		switch number {
 		case rpc.LatestBlockNumber:
-			if blockNumber, err = GetLatestBlockNumber(tx); err != nil {
-				return 0, common.Hash{}, false, false, err
+			if blockNumber, ok = forkchoiceHeadNumber(tx); !ok {
+				blockNumber = plainStateBlockNumber
 			}
 		case rpc.EarliestBlockNumber:
 			blockNumber = 0

@@ -1281,7 +1281,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader)
+	blockNumber, hash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, *blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, callBlockError(err, *blockNrOrHash)
 	}
@@ -1297,11 +1297,6 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
-	}
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return nil, err
 	}
 
 	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api._txNumReader)
@@ -1527,7 +1522,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if err := rejectPending(*parentNrOrHash); err != nil {
 		return nil, err
 	}
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader)
+	blockNumber, hash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, *parentNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, callBlockError(err, *parentNrOrHash)
 	}
@@ -1562,11 +1557,6 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		if err != nil {
 			return nil, fmt.Errorf("convert callParam to txn: %w", err)
 		}
-	}
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return nil, err
 	}
 
 	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api._txNumReader)
@@ -1989,7 +1979,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	num := rpc.LatestBlockNumber
 	blockNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &num}
 
-	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader)
+	blockNumber, hash, latest, err := rpchelper.ResolveExecutedBlock(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, dbtx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -2005,11 +1995,6 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
-	}
-
-	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
-	if err != nil {
-		return nil, err
 	}
 
 	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, blockNumber, latest, 0, api._txNumReader)
