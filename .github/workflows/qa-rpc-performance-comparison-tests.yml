@@ -30,7 +30,7 @@ on:
           - eth_getBlockReceipts_gen
           - eth_getBlockByNumber_gen
           - eth_subscribe_newHeads
-          - eth_subscribe
+          - eth_subscribe_classes
   schedule:
     - cron: '0 2 * * *'   # Run daily at 02:00 UTC
 
@@ -354,11 +354,14 @@ jobs:
             ./build/bin/rpc_pattern_gen eth_subscribe --newHeads 10 \
               --out "perf/pattern/$CHAIN/stress_test_eth_subscribe_newHeads_gen_latest.jsonl"
           fi
-          # The subscriptions name no block (logs with no filter), so the pattern does not age before its run.
-          if selected eth_subscribe; then
-            ./build/bin/rpc_pattern_gen eth_subscribe --url http://localhost:8545 \
-              --newHeads 10 --logs 10 --transactionReceipts 10 --logs-filter all \
-              --out "perf/pattern/$CHAIN/stress_test_eth_subscribe_gen_latest.jsonl"
+          # The connections are split into the clients of an RPC provider: wallets follow the heads, dapps also
+          # a filtered log each, indexers also every log and receipt. The filters name no block, so the pattern does not age.
+          if selected eth_subscribe_classes; then
+            ./build/bin/rpc_pattern_gen eth_subscribe --url http://localhost:8545 --logs-filter address \
+              --client wallet:90:newHeads=1 \
+              --client dapp:9:newHeads=1,logs=50,pick=1 \
+              --client indexer:1:newHeads=1,logs-all=1,transactionReceipts=1 \
+              --out "perf/pattern/$CHAIN/stress_test_eth_subscribe_classes_gen_latest.jsonl"
           fi
           # With --block-tag latest every request asks for "latest", the chain head of each client when the request
           # runs: the requests do not depend on the blocks read here, so they need no verify and rpc_perf cycles them.
@@ -459,7 +462,7 @@ jobs:
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_debug_traceBlockByNumber_callTracer_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_debug_traceBlockByNumber_structLog_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_subscribe_newHeads_gen_latest.jsonl
-            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_subscribe_gen_latest.jsonl
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_subscribe_classes_gen_latest.jsonl
           retention-days: 1
 
       - name: Wait for the latest patterns from the erigon job
@@ -737,23 +740,29 @@ jobs:
           if [ "$RPC_TEST" = "eth_subscribe_newHeads" ]; then sequence=100:300; fi
           bash .github/workflows/scripts/run_rpc_perf.sh eth_subscribe stress_test_eth_subscribe_newHeads_gen_latest "$sequence" eth_subscribe_newHeads
 
-      - name: Sync clients before eth_subscribe
-        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe')
+      - name: Sync clients before eth_subscribe_classes
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_classes')
         continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_subscribe" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_subscribe" >> "$GITHUB_ENV"; exit 1; }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_subscribe_classes" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_subscribe_classes" >> "$GITHUB_ENV"; exit 1; }
 
-      # The qps of the sequence is the number of WebSocket connections, each with the 30 subscriptions of the pattern.
-      # In the full run a short check (about 10 blocks per repetition); alone, a longer and heavier one.
-      - name: Run eth_subscribe
-        id: perf_eth_subscribe
-        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe')
+      # The qps of the sequence is the number of WebSocket connections, split among the client classes of the pattern;
+      # at most 500, the default connection limit of Reth.
+      # In the full run a short check (about 10 blocks per repetition); alone, a longer one.
+      - name: Run eth_subscribe_classes
+        id: perf_eth_subscribe_classes
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_classes')
         continue-on-error: true
-        timeout-minutes: ${{ needs.setup.outputs.rpc_test == 'eth_subscribe' && 30 || 20 }}
+        timeout-minutes: ${{ needs.setup.outputs.rpc_test == 'eth_subscribe_classes' && 30 || 20 }}
+        env:
+          # The fan-out is taken when rpc_perf reads a notification, so it also holds the time the notification
+          # waits in rpc_perf, which grows when the tool has fewer CPUs. Cores 8-15 keep that wait low; the client
+          # shares 8-11 with the tool and serves these subscriptions with a fraction of one core.
+          RPC_PERF_CPUS: 8-15,24-31
         run: |
-          sequence=10:120
-          if [ "$RPC_TEST" = "eth_subscribe" ]; then sequence=100:300; fi
-          bash .github/workflows/scripts/run_rpc_perf.sh eth_subscribe stress_test_eth_subscribe_gen_latest "$sequence" eth_subscribe
+          sequence=500:120
+          if [ "$RPC_TEST" = "eth_subscribe_classes" ]; then sequence=500:300; fi
+          bash .github/workflows/scripts/run_rpc_perf.sh eth_subscribe stress_test_eth_subscribe_classes_gen_latest "$sequence" eth_subscribe_classes
 
       - name: Collect the benchmark results
         id: collect_results
@@ -775,7 +784,7 @@ jobs:
             eth_getBlockReceipts_gen=${{ steps.perf_eth_getBlockReceipts_gen.outcome }}
             eth_getBlockByNumber_gen=${{ steps.perf_eth_getBlockByNumber_gen.outcome }}
             eth_subscribe_newHeads=${{ steps.perf_eth_subscribe_newHeads.outcome }}
-            eth_subscribe=${{ steps.perf_eth_subscribe.outcome }}
+            eth_subscribe_classes=${{ steps.perf_eth_subscribe_classes.outcome }}
           JOB_STATUS: ${{ job.status }}
         run: |
           mv "$OUTPUT_LOG" "$RESULT_DIR/"

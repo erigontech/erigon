@@ -17,6 +17,12 @@ if [ "$verbose" == "true" ]; then
   verbose_flag=(--verbose)
 fi
 
+# Every client of a run subscribes in the same random order; the next run draws another one.
+seed_flag=()
+if [ "$method" == "eth_subscribe" ]; then
+  seed_flag=(--subscribe-seed "$GITHUB_RUN_ID")
+fi
+
 result_file=$CLIENT-$label-result.json
 
 # clean temporary area
@@ -45,7 +51,7 @@ fi
                      --json-report "$RESULT_DIR/$result_file" \
                      --testing-client "$CLIENT" \
                      --more-percentiles \
-                     "${verbose_flag[@]}" 2>&1 | tee -a "$OUTPUT_LOG"
+                     "${verbose_flag[@]}" "${seed_flag[@]}" 2>&1 | tee -a "$OUTPUT_LOG"
 perf_exit_status=${PIPESTATUS[0]}
 
 # Detect the pre-built db version
