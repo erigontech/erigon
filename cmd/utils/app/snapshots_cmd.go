@@ -2581,14 +2581,17 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 }
 
 func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := state.CheckMixedCommitmentFiles(dat); err != nil {
+		return err
+	}
 	if chainDB == nil {
 		chainDB = dbCfg(dbcfg.ChainDB, dat.Chaindata).MustOpen()
 		defer chainDB.Close()
 	}
 
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
 		return err
