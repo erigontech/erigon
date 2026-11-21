@@ -278,7 +278,12 @@ func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]en
 		if isUnderPreAlloc(fname) {
 			continue
 		}
-		err := decodeFixtures(fname, func(name string, raw json.RawMessage, offset int64) error {
+		err := decodeFixtures(fname, func(name string, dec *json.Decoder) error {
+			var raw json.RawMessage
+			if err := dec.Decode(&raw); err != nil {
+				return err
+			}
+			offset := dec.InputOffset() - int64(len(raw))
 			if !re.MatchString(name) {
 				return nil
 			}
