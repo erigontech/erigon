@@ -878,12 +878,18 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 			return errors.New("gloas beacon body contains null parent execution requests")
 		}
 	}
+	if tmp.AttesterSlashings == nil {
+		return errors.New("beacon body contains null attester slashings")
+	}
 	tmp.AttesterSlashings.Range(func(_ int, value *AttesterSlashing, _ int) bool {
 		// Set version with config for preset-aware limits
 		value.SetVersionWithConfig(b.Version, b.beaconCfg)
 		return true
 	})
 	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
+		if tmp.Attestations == nil {
+			return errors.New("beacon body contains null attestations")
+		}
 		if err := solid.RangeErr(tmp.Attestations, func(_ int, att *solid.Attestation, _ int) error {
 			return att.ValidateForConfig(b.beaconCfg, b.Version)
 		}); err != nil {
