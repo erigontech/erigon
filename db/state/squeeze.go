@@ -1073,12 +1073,10 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
 			switch rebuildTrieCfg.Variant {
-			case commitment.VariantParallelHexPatricia:
+			case commitment.VariantParallelHexPatricia, commitment.VariantCommitmentV3:
 				domains.EnableParaTrieDB(rwDb)
-			case commitment.VariantCommitmentV3:
-				domains.EnableParaTrieDB(rwDb)
-				domains.SetStorageWorkersMax(rebuildStorageWorkersMax(estimate.TotalMemory()))
 			}
+			domains.SetStorageWorkersMax(rebuildStorageWorkersMax(estimate.TotalMemory()))
 
 			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
@@ -1186,12 +1184,10 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	return latestRoot, nil
 }
 
-// rebuildStorageWorkerMemory budgets a quarter of the memory for parallel v3 storage folds at 1 GiB each: a fold
-// worker measured ~0.35 GB of heap, and the rest of the rebuild needs the other three quarters.
-const rebuildStorageWorkerMemory = 4 * datasize.GB
-
+// rebuildStorageWorkersMax caps the top-level parallel v3 storage folds at 1 GiB each in a quarter of the memory: a
+// fold worker measured ~0.35 GB of heap, and the rest of the rebuild needs the other three quarters.
 func rebuildStorageWorkersMax(totalMemory uint64) int {
-	return max(1, int(totalMemory/uint64(rebuildStorageWorkerMemory)))
+	return max(1, int(totalMemory/4/uint64(datasize.GB)))
 }
 
 func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
