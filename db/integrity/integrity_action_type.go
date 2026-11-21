@@ -140,6 +140,16 @@ const (
 	// pre-pass rather than from the check loop, because only --file-integrity-cache enables
 	// it, but it is named so --skip-check can turn it off like any other check.
 	TorrentPieces Check = "TorrentPieces"
+
+	// CodeHash verifies that the code domain holds the code of each account's code hash: in the
+	// latest state, and after every code hash change in the accounts history files. Catches
+	// a code write or delete dropped while the account's code hash changed.
+	CodeHash Check = "CodeHash"
+
+	// StorageOfAbsentAccount verifies that an account absent before a txNum of the accounts
+	// history files has no storage as of that txNum. Catches a destroyed account whose storage
+	// history misses the wipe in the destroying tx.
+	StorageOfAbsentAccount Check = "StorageOfAbsentAccount"
 )
 
 // FastChecks is ordered cheapest → heaviest so time-budgeted runs give unused
@@ -151,7 +161,7 @@ var FastChecks = []Check{
 }
 
 var (
-	SlowChecks       = []Check{CaplinBlobSidecars, StateVerify, HistoryVi}
+	SlowChecks       = []Check{CaplinBlobSidecars, StateVerify, HistoryVi, CodeHash, StorageOfAbsentAccount}
 	DeprecatedChecks = []Check{
 		CommitmentKvDeref, // StateVerify - will overcome
 		StateProgress,
