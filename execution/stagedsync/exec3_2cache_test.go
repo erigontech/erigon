@@ -116,6 +116,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 	baseReader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	bufferedRdr := state.NewBufferedReader(rs, baseReader)
 	ibsN1 := state.New(bufferedRdr)
+	ibsN1.SetVersionMap(nil)
 	defer ibsN1.Close()
 
 	// Must read block N's value from rs.accounts, not stale domains.
@@ -132,6 +133,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 	// Sanity check: a plain domain reader (no buffering) still sees zero —
 	// the timing hole is real without rs.accounts.
 	ibsRaw := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	ibsRaw.SetVersionMap(nil)
 	defer ibsRaw.Close()
 	rawBal, err := ibsRaw.GetBalance(addr)
 	require.NoError(t, err)
@@ -152,6 +154,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 
 	// After domain apply, plain reader must see the correct value.
 	ibsRawAfter := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	ibsRawAfter.SetVersionMap(nil)
 	defer ibsRawAfter.Close()
 	rawBalAfter, err := ibsRawAfter.GetBalance(addr)
 	require.NoError(t, err)

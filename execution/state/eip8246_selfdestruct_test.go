@@ -271,6 +271,7 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		reader := newAccountStateReader()
 		vm := NewVersionMap(nil)
 		ibs := New(reader)
+		ibs.SetVersionMap(nil)
 		defer ibs.Close()
 		ibs.SetTxContext(1, 0)
 		ibs.SetVersion(0)

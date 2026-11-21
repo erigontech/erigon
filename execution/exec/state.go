@@ -44,8 +44,6 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 )
 
-var noop = state.NewNoopWriter()
-
 type WorkerMetrics struct {
 	Active              activeCount
 	GasUsed             activeCount

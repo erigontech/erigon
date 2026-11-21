@@ -48,7 +48,7 @@ import (
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
-const commitmentV3Batch = 1024
+var commitmentV3Batch = 1024
 
 var commitmentV3BatchBytes = 1 << 20
 
@@ -208,10 +208,6 @@ func convertCommitmentFileV3(
 	if err != nil && !errors.Is(err, errNoNonStateSamples) {
 		return 0, 0, fmt.Errorf("convertCommitmentFileV3 %q: %w", file.Fullpath(), err)
 	}
-	if st.squeezed {
-		return 0, 0, fmt.Errorf("convertCommitmentFileV3 %q: branches reference plain keys by offset; unsqueeze first with `commitment convert` without --squeeze", file.Fullpath())
-	}
-
 	stepSize := at.StepSize()
 	startTxNum, endTxNum := file.StartRootNum(), file.EndRootNum()
 	if endTxNum == 0 || endTxNum < startTxNum {
@@ -314,9 +310,17 @@ func convertCommitmentFileV3(
 			if _, ok := seen[k]; ok {
 				continue
 			}
-			v, _, _, _, readErr := at.d[kv.CommitmentDomain].getLatestFromFiles([]byte(k), nil, stepTo-1)
+			commitmentRo := at.d[kv.CommitmentDomain]
+			v, _, fromTxNum, toTxNum, readErr := commitmentRo.getLatestFromFiles([]byte(k), nil, stepTo-1)
 			if readErr != nil {
 				return readErr
+			}
+			// v comes from an older file, while the workers expand references against this
+			// file's range: expand them here, against v's own file. Full keys stay as they are.
+			if CommitmentBranchReferenced(commitmentRo.fileVersionByRange(fromTxNum, toTxNum), stepSize, fromTxNum, toTxNum) {
+				if v, readErr = expandSqueezedCommitmentBranch(at, v, fromTxNum, toTxNum); readErr != nil {
+					return fmt.Errorf("expand squeezed branch: %w", readErr)
+				}
 			}
 			if addErr := add([]byte(k), bytes.Clone(v)); addErr != nil {
 				return addErr
@@ -333,13 +337,24 @@ func convertCommitmentFileV3(
 		defer wat.Close()
 		vals := &legacyFileValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], maxStep: stepTo - 1}
 		conv := v3.NewLegacyConverter(vals, st.keysV2, incremental)
-		delta := &legacyDelta{commitment: wat.d[kv.CommitmentDomain], before: stepFrom - 1, after: stepTo - 1, keysV2: st.keysV2, fold: fold}
+		expand := func(value []byte, fromTxNum, toTxNum uint64) ([]byte, error) {
+			return expandSqueezedCommitmentBranch(wat, value, fromTxNum, toTxNum)
+		}
+		delta := &legacyDelta{commitment: wat.d[kv.CommitmentDomain], before: stepFrom - 1, after: stepTo - 1, keysV2: st.keysV2, stepSize: stepSize, expand: expand, fold: fold}
 		reach := &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) { return delta.read(key, delta.after) }}
 		delta.reachBefore = &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) { return delta.read(key, delta.before) }}
 		sink := &convertedSink{ctx: gctx, out: out, res: getConvertedBatch()}
 		for batch := range in {
 			for _, p := range batch.pairs {
-				if convErr := convertLegacyPairV3(p[0], p[1], incremental, conv, reach, delta, sink.emit); convErr != nil {
+				value := p[1]
+				if st.squeezed && !commitment.IsCommitmentStateKey(p[0]) {
+					expanded, expandErr := expand(value, startTxNum, endTxNum)
+					if expandErr != nil {
+						return fmt.Errorf("expand squeezed branch: %w", expandErr)
+					}
+					value = expanded
+				}
+				if convErr := convertLegacyPairV3(p[0], value, incremental, conv, reach, delta, sink.emit); convErr != nil {
 					return convErr
 				}
 			}
@@ -467,10 +482,29 @@ func convertLegacyPairV3(k, v []byte, incremental bool, conv *v3.LegacyConverter
 	return delta.children(k, prev, v, live, conv, reach, emit)
 }
 
+func expandSqueezedCommitmentBranch(at *AggregatorRoTx, value []byte, startTxNum, endTxNum uint64) ([]byte, error) {
+	if len(value) == 0 {
+		return value, nil
+	}
+	accounts := at.d[kv.AccountsDomain]
+	storage := at.d[kv.StorageDomain]
+	accountFile, err := accounts.lookupVisibleFileByRange(startTxNum, endTxNum)
+	if err != nil {
+		return nil, err
+	}
+	storageFile, err := storage.lookupVisibleFileByRange(startTxNum, endTxNum)
+	if err != nil {
+		return nil, err
+	}
+	return ExpandShortenedKeysInBranch(value, accounts, storage, accountFile, storageFile, startTxNum, endTxNum)
+}
+
 type legacyDelta struct {
 	commitment         *DomainRoTx
 	before, after      kv.Step
 	keysV2             bool
+	stepSize           uint64
+	expand             func([]byte, uint64, uint64) ([]byte, error)
 	fold               tailFold
 	reachBefore        *legacyReach
 	stack, kids, prevs []legacyChild
@@ -484,8 +518,12 @@ func (w *legacyDelta) read(key []byte, step kv.Step) ([]byte, error) {
 	if v, ok := overlay[string(key)]; ok {
 		return v, nil
 	}
-	v, _, _, _, err := w.commitment.getLatestFromFiles(key, nil, step)
-	return v, err
+	v, _, fromTxNum, toTxNum, err := w.commitment.getLatestFromFiles(key, nil, step)
+	if err != nil || w.expand == nil || commitment.IsCommitmentStateKey(key) ||
+		!CommitmentBranchReferenced(w.commitment.fileVersionByRange(fromTxNum, toTxNum), w.stepSize, fromTxNum, toTxNum) {
+		return v, err
+	}
+	return w.expand(v, fromTxNum, toTxNum)
 }
 
 func (w *legacyDelta) children(k, prev, v []byte, live bool, conv *v3.LegacyConverter, reach *legacyReach, emit v3.LegacyEmitFunc) error {
