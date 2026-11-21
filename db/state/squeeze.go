@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -1071,9 +1072,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if rebuildTrieCfg.Variant == commitment.VariantParallelHexPatricia {
+			switch rebuildTrieCfg.Variant {
+			case commitment.VariantParallelHexPatricia, commitment.VariantCommitmentV3:
 				domains.EnableParaTrieDB(rwDb)
 			}
+			domains.SetStorageWorkersMax(rebuildStorageWorkersMax(estimate.TotalMemory()))
 
 			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
@@ -1179,6 +1182,12 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	}
 
 	return latestRoot, nil
+}
+
+// rebuildStorageWorkersMax caps the top-level parallel v3 storage folds at 1 GiB each in a quarter of the memory: a
+// fold worker measured ~0.35 GB of heap, and the rest of the rebuild needs the other three quarters.
+func rebuildStorageWorkersMax(totalMemory uint64) int {
+	return max(1, int(totalMemory/4/uint64(datasize.GB)))
 }
 
 func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
