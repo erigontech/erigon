@@ -253,6 +253,31 @@ test-short: test-filtered
 test-all: override GO_FLAGS := -timeout $(default_test_timeout) $(GO_FLAGS)
 test-all: test-filtered
 
+## test-unwind:                       execution and storage suites across unwind modes
+.PHONY: test-unwind
+test-unwind: override GOTEST_PACKAGES = ./execution/engineapi ./execution/execmodule ./execution/execmodule/execmoduletester ./execution/stagedsync ./execution/stagedsync/stageloop ./execution/notifications ./execution/state ./execution/commitment ./db/state ./db/state/execctx ./db/rawdb/rawtemporaldb
+test-unwind: override GO_FLAGS := -timeout=20m -count=1 $(GO_FLAGS)
+test-unwind:
+	$(GOTEST)
+
+.PHONY: test-reorg-schedules
+test-reorg-schedules: override GOTEST_PACKAGES = ./execution/engineapi
+test-reorg-schedules: override GO_FLAGS := -timeout=25m -count=1 -run '^TestEngineApiReorgSchedules$$' -v $(GO_FLAGS)
+test-reorg-schedules:
+	$(GOTEST)
+
+.PHONY: test-reorg-devnet-driver
+test-reorg-devnet-driver:
+	python3 -m unittest tools/test_reorg_devnet_test.py
+
+KURTOSIS ?= kurtosis
+REORG_ENCLAVE ?= unwind-reorg
+## test-reorg-devnet:                  bounce, heal and restart real CLs using test/erigon:current
+.PHONY: test-reorg-devnet
+test-reorg-devnet:
+	$(KURTOSIS) run --privileged --enclave $(REORG_ENCLAVE) tools/kurtosis/reorg --args-file .github/workflows/kurtosis/reorg-bounce.io
+	KURTOSIS=$(KURTOSIS) python3 tools/test-reorg-devnet.py $(REORG_ENCLAVE)
+
 ## test-fixtures:                      download & verify all pinned test fixture tarballs
 .PHONY: test-fixtures
 test-fixtures: test-fixtures-cl

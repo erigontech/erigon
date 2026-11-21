@@ -61,6 +61,11 @@ jobs:
     needs: [changes]
     uses: ./.github/workflows/test-all-erigon-race.yml
 
+  unwind:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
+    uses: ./.github/workflows/test-unwind.yml
+
   eest-spec-tests:
     if: needs.changes.outputs.code != 'false'
     needs: [changes]
@@ -128,6 +133,7 @@ jobs:
       - lint
       - tests
       - race-tests
+      - unwind
       - eest-spec-tests
       - hive
       - hive-eest

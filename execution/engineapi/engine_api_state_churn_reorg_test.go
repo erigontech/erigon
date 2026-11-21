@@ -237,9 +237,7 @@ func buildChurnChain(
 	seed func(k int) int64,
 	tweakOpts ...func(*bind.TransactOpts),
 ) (payloads []*engineapitester.MockClPayload, addr common.Address, churn *contracts.StateChurn, sums []*big.Int) {
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
-	require.NoError(t, err)
-	transactOpts.GasLimit = params.MaxTxnGasLimit
+	transactOpts := newChurnTransactOpts(t, eat)
 	for _, tweak := range tweakOpts {
 		tweak(transactOpts)
 	}
@@ -259,6 +257,17 @@ func buildChurnChain(
 		sums = append(sums, recordChurnSum(ctx, t, churn))
 	}
 	return payloads, addr, churn, sums
+}
+
+func newChurnTransactOpts(t *testing.T, eat engineapitester.EngineApiTester) *bind.TransactOpts {
+	t.Helper()
+	opts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+	require.NoError(t, err)
+	opts.GasLimit = params.MaxTxnGasLimit
+	// These small blocks lower the base fee. Price against genesis so re-added
+	// transactions stay mineable when a reorg returns to an earlier, higher fee.
+	opts.GasPrice = new(big.Int).Mul(eat.GenesisBlock.BaseFee().ToBig(), big.NewInt(2))
+	return opts
 }
 
 func applyStateChurnPoke(
@@ -292,9 +301,9 @@ func churnAndAssert(
 	pokes int,
 	seed func(k int) int64,
 ) (payloads []*engineapitester.MockClPayload, sums []*big.Int) {
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
-	require.NoError(t, err)
-	transactOpts.GasLimit = params.MaxTxnGasLimit
+	transactOpts := newChurnTransactOpts(t, eat)
+	_, _, cursor, _ := readChurn(ctx, t, churn)
+	pokesApplied := cursor.Uint64()
 	for k := range pokes {
 		var txn types.Transaction
 		require.Eventually(t, func() bool {
@@ -310,7 +319,10 @@ func churnAndAssert(
 		require.NoError(t, err)
 		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, block.ExecutionPayload, txn.Hash()))
 		sum := recordChurnSum(ctx, t, churn)
-		assertChurnState(ctx, t, eat, churn, block, sum)
+		// Reorg notifications can return earlier pokes to the pool. Every
+		// transaction in this workload is a poke, including those mined again.
+		pokesApplied += uint64(len(block.ExecutionPayload.Transactions))
+		assertChurnStateAtCursor(ctx, t, eat, churn, block, sum, pokesApplied)
 		payloads = append(payloads, block)
 		sums = append(sums, sum)
 	}
@@ -360,9 +372,11 @@ func recordChurnSum(ctx context.Context, t *testing.T, churn *contracts.StateChu
 	return tracked
 }
 
-// assertChurnState waits for the canonical head to settle on want (matching both
-// number and hash) and then asserts the contract's live state is self-consistent,
-// equal to wantSum, and at the cursor expected for want's height.
+// assertChurnState waits for want's hash and number to become canonical, then
+// checks the churn invariant and wantSum. The expected cursor is height-2:
+// block 1 is empty, block 2 deploys the contract, and each later block has one poke.
+// Use assertChurnStateAtCursor when blocks may contain multiple pokes,
+// including requeued transactions.
 func assertChurnState(
 	ctx context.Context,
 	t *testing.T,
@@ -371,6 +385,20 @@ func assertChurnState(
 	want *engineapitester.MockClPayload,
 	wantSum *big.Int,
 ) {
+	t.Helper()
+	assertChurnStateAtCursor(ctx, t, eat, churn, want, wantSum, want.ExecutionPayload.BlockNumber.Uint64()-2)
+}
+
+func assertChurnStateAtCursor(
+	ctx context.Context,
+	t *testing.T,
+	eat engineapitester.EngineApiTester,
+	churn *contracts.StateChurn,
+	want *engineapitester.MockClPayload,
+	wantSum *big.Int,
+	wantCursor uint64,
+) {
+	t.Helper()
 	height := want.ExecutionPayload.BlockNumber.Uint64()
 	assertCanonicalHead(ctx, t, eat, want)
 
@@ -383,9 +411,7 @@ func assertChurnState(
 	tracked, computed, cursor, ok := readChurn(ctx, t, churn)
 	require.Truef(t, ok, "in-EVM check() must hold at height %d: tracked=%s computed=%s", height, tracked, computed)
 	require.Equalf(t, wantSum, tracked, "live trackedSum must match the recorded value at height %d", height)
-	// cursor increments once per poke (height-2 at each block), so a head that moved
-	// without rolling back state would read the wrong value here.
-	require.Equalf(t, height-2, cursor.Uint64(), "live cursor must equal pokes applied at height %d", height)
+	require.Equalf(t, wantCursor, cursor.Uint64(), "live cursor must equal pokes applied at height %d", height)
 }
 
 // assertCanonicalHead blocks until the canonical head reported over JSON-RPC
