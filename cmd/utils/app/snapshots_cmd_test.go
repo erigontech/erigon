@@ -1710,7 +1710,7 @@ func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 	require.FileExists(t, oldExistence)
 
 	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
-	args := []string{"erigon", "seg", "accessor", "--datadir", dirs.DataDir, "--rebuild", "--new-salt"}
+	args := []string{"erigon", "seg", "accessor", "--log.dir.disable", "--datadir", dirs.DataDir, "--rebuild", "--new-salt"}
 
 	err = app.Run(ctx, args)
 	require.ErrorContains(t, err, "requires a completed initial snapshot download")
