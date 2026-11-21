@@ -363,7 +363,7 @@ func TestPoolRepeatedUnwindDoesNotPenalizeSender(t *testing.T) {
 	for _, incomplete := range []bool{false, true} {
 		t.Run(fmt.Sprintf("incomplete=%t", incomplete), func(t *testing.T) {
 			ctx, pool, _, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-			pool.cfg.AccountSlots = 16
+			pool.cfg.AccountSlots = 17
 			pool.cfg.MaxNonceGap = 64
 			var txns TxnSlots
 			for i := range 17 {
