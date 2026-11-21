@@ -772,12 +772,15 @@ func DeleteBadBlock(db kv.RwTx, hash common.Hash, number uint64) error {
 			return err
 		}
 	}
-	if err := db.Delete(kv.Senders, key); err != nil {
+	for _, table := range []string{kv.Senders, kv.BlockBody, kv.BlockAccessList} {
+		if err := db.Delete(table, key); err != nil {
+			return err
+		}
+	}
+	if err := db.Delete(kv.Headers, dbutils.HeaderKey(number, hash)); err != nil {
 		return err
 	}
-	DeleteBody(db, hash, number)
-	DeleteHeader(db, hash, number)
-	return nil
+	return db.Delete(kv.HeaderNumber, hash[:])
 }
 
 func deleteTxs(db kv.RwTx, b types.BodyOnlyTxn) error {
