@@ -255,8 +255,6 @@ type ExecModule struct {
 	stateCache  *cache.StateCache
 	readAheader *exec.BlockReadAheader
 
-	stateTransitionObserver StateTransitionObserver
-
 	stopNode func() error
 }
 
@@ -269,7 +267,7 @@ type ExecModuleOption func(*ExecModule)
 // for integration tests.
 func WithStateTransitionObserver(observer StateTransitionObserver) ExecModuleOption {
 	return func(module *ExecModule) {
-		module.stateTransitionObserver = observer
+		module.pipelineExecutor.stateTransitionObserver = observer
 	}
 }
 

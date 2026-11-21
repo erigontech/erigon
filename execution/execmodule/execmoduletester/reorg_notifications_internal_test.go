@@ -895,11 +895,14 @@ func TestBelowFinalityForkchoiceKeepsPendingNotifications(t *testing.T) {
 	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
 		var err error
 		committed, err = stages.GetStageProgress(tx, stages.Finish)
-		require.Equal(t, badTip.Hash(), rawdb.ReadCurrentHeader(tx).Hash(), "the rejected catch-up left its requested head marker")
-		return err
+		if err != nil {
+			return err
+		}
+		require.Greater(t, committed, uint64(2))
+		require.Less(t, committed, badTip.NumberU64())
+		require.Equal(t, chain.Blocks[committed-1].Hash(), rawdb.ReadCurrentHeader(tx).Hash())
+		return nil
 	}))
-	require.Greater(t, committed, uint64(2))
-	require.Less(t, committed, badTip.NumberU64())
 	fcu, err = m.UpdateForkChoice(t.Context(), chain.Blocks[0].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
