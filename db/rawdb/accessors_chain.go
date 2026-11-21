@@ -759,6 +759,44 @@ func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 	}
 }
 
+// DeleteBadBlock removes the header, total difficulty, body, senders and transactions of a block that failed validation.
+// Valid non-canonical blocks stay in the DB until PruneBlocks removes them.
+func DeleteBadBlock(db kv.RwTx, hash common.Hash, number uint64) error {
+	key := dbutils.BlockBodyKey(number, hash)
+	b, ok, err := ReadBodyOnlyTxnByKey(db, key)
+	if err != nil {
+		return err
+	}
+	if ok {
+		if err := deleteTxs(db, b); err != nil {
+			return err
+		}
+	}
+	for _, table := range []string{kv.Senders, kv.BlockBody, kv.BlockAccessList} {
+		if err := db.Delete(table, key); err != nil {
+			return err
+		}
+	}
+	headerKey := dbutils.HeaderKey(number, hash)
+	for _, table := range []string{kv.Headers, kv.HeaderTD} {
+		if err := db.Delete(table, headerKey); err != nil {
+			return err
+		}
+	}
+	return db.Delete(kv.HeaderNumber, hash[:])
+}
+
+func deleteTxs(db kv.RwTx, b types.BodyOnlyTxn) error {
+	txIDBytes := make([]byte, 8)
+	for txID := b.BaseTxnID.U64(); txID <= b.BaseTxnID.LastSystemTx(b.TxCount); txID++ {
+		binary.BigEndian.PutUint64(txIDBytes, txID)
+		if err := db.Delete(kv.EthTx, txIDBytes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func AppendCanonicalTxNums(tx kv.RwTx, from uint64) error {
 	nextBaseTxNum := 0
 	if from > 0 {
@@ -935,14 +973,8 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 		}
 		if !ok {
 			log.Debug("PruneBlocks: block body not found", "height", n)
-		} else {
-			txIDBytes := make([]byte, 8)
-			for txID := b.BaseTxnID.U64(); txID <= b.BaseTxnID.LastSystemTx(b.TxCount); txID++ {
-				binary.BigEndian.PutUint64(txIDBytes, txID)
-				if err := tx.Delete(kv.EthTx, txIDBytes); err != nil {
-					return deleted, err
-				}
-			}
+		} else if err := deleteTxs(tx, b); err != nil {
+			return deleted, err
 		}
 		// Copying k because otherwise the same memory will be reused
 		// for the next key and Delete below will end up deleting 1 more record than required
@@ -987,12 +1019,8 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 			return err
 		}
 		if ok {
-			txIDBytes := make([]byte, 8)
-			for txID := b.BaseTxnID.U64(); txID <= b.BaseTxnID.LastSystemTx(b.TxCount); txID++ {
-				binary.BigEndian.PutUint64(txIDBytes, txID)
-				if err := tx.Delete(kv.EthTx, txIDBytes); err != nil {
-					return err
-				}
+			if err := deleteTxs(tx, b); err != nil {
+				return err
 			}
 		}
 		// Copying k because otherwise the same memory will be reused
