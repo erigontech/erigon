@@ -870,3 +870,31 @@ func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testi
 		t.Error("6: expected transaction hashes to be nil with no subscriptions")
 	}
 }
+
+func TestFilters_SubscriptionWithSeveralAddressesReceivesLogOnce(t *testing.T) {
+	t.Parallel()
+	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
+	other := common.HexToAddress("0x01")
+	ch, _, _ := f.SubscribeLogs(256, filters.FilterCriteria{Addresses: []common.Address{other, address1, other}}, "")
+
+	lg := createLog()
+	lg.Address = address1H160
+	f.OnNewLogs(lg)
+
+	require.Len(t, ch, 1)
+}
+
+func TestFilters_UnsubscribedAddressFilterReceivesNoLog(t *testing.T) {
+	t.Parallel()
+	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
+	criteria := filters.FilterCriteria{Addresses: []common.Address{address1}}
+	_, id, _ := f.SubscribeLogs(256, criteria, "")
+	kept, _, _ := f.SubscribeLogs(256, criteria, "")
+	require.True(t, f.UnsubscribeLogs(id))
+
+	lg := createLog()
+	lg.Address = address1H160
+	f.OnNewLogs(lg)
+
+	require.Len(t, kept, 1)
+}
