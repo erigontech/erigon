@@ -16,6 +16,22 @@
 
 package vm
 
+import (
+	"maps"
+
+	"github.com/holiman/uint256"
+)
+
 func MemoryGasCost(callContext *CallContext, newMemSize uint64) (uint64, error) {
 	return memoryGasCost(callContext, newMemSize)
+}
+
+func UnregisterPrecompiles(chainID *uint256.Int) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	if _, exists := chainSetsSnapshot()[*chainID]; exists {
+		next := maps.Clone(chainSetsSnapshot())
+		delete(next, *chainID)
+		chainSets.Store(&next)
+	}
 }

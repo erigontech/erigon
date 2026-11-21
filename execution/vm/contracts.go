@@ -113,9 +113,13 @@ func forkTierFor(chainRules *chain.Rules) forkTier {
 	}
 }
 
+func activeSet(chainRules *chain.Rules) *mergedPrecompileSet {
+	return &resolveChainSets(rulesChainID(chainRules))[forkTierFor(chainRules)]
+}
+
 // Precompiles returns the precompiles active under chainRules.
 func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
-	return forkSets[forkTierFor(chainRules)].contracts
+	return activeSet(chainRules).contracts
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -222,6 +226,8 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{eip7951: true},
 }
 
+// Deprecated: prefer ActivePrecompiles, which includes the registered chain's
+// overlay. These are the built-in addresses for a fork and nothing else.
 var (
 	PrecompiledAddressesHomestead []accounts.Address
 	PrecompiledAddressesByzantium []accounts.Address
@@ -256,7 +262,7 @@ func init() {
 // ActivePrecompiles returns the addresses of the precompiles enabled with the
 // current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
-	return forkSets[forkTierFor(rules)].addresses
+	return activeSet(rules).addresses
 }
 
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.
