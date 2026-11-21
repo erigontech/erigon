@@ -27,6 +27,7 @@ type depsTest struct {
 	pe        *parallelExecutor
 	be        *blockExecutor
 	deliverTx func(tx, inc int, reads state.ReadSet)
+	stamp     bool
 }
 
 func valueTransfers(senders, recipients []accounts.Address) types.Transactions {
@@ -106,6 +107,9 @@ func newTracedDepsTest(t *testing.T, txs types.Transactions, hooks *tracing.Hook
 			TxIn:            reads,
 			TxOut:           &state.WriteSet{},
 			ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 21000},
+		}
+		if d.stamp {
+			res.ValStamp = be.versionMap.WriteSeq()
 		}
 		blockRes, err := be.nextResult(context.Background(), pe, res, roTx)
 		require.NoError(t, err)

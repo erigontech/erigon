@@ -211,17 +211,25 @@ func TestValSkip_StorageOnlyPromotionOnLifecycleEntryBumps(t *testing.T) {
 		"validated": func(vm *VersionMap, ws *WriteSet) { vm.MarkWritesValidated(ws, nil) },
 		"complete":  func(vm *VersionMap, ws *WriteSet) { vm.MarkWritesComplete(ws) },
 	}
+	lifecycle := map[string]AccountPath{
+		"incarnation":    IncarnationPath,
+		"createContract": CreateContractPath,
+		"selfDestruct":   SelfDestructPath,
+	}
 	for name, promote := range promotions {
-		vm := newStampedMap(32)
-		flushPath(vm, addr, 1, SelfDestructPath)
-		ws := newWriteSet(&VersionedWrite[uint256.Int]{
-			WriteHeader: WriteHeader{Address: addr, Key: slot, Version: Version{TxIndex: 3}, Path: StoragePath},
-			Val:         *uint256.NewInt(1),
-		})
-		vm.FlushVersionedWrites(ws, false)
-		stamp := vm.WriteSeq()
-		promote(vm, ws)
-		require.False(t, vm.QuietBelow(5, stamp), "%s: a storage-only promotion on an entry with lifecycle cells must bump", name)
+		for cell, path := range lifecycle {
+			vm := newStampedMap(32)
+			flushPath(vm, addr, 1, path)
+			ws := newWriteSet(&VersionedWrite[uint256.Int]{
+				WriteHeader: WriteHeader{Address: addr, Key: slot, Version: Version{TxIndex: 3}, Path: StoragePath},
+				Val:         *uint256.NewInt(1),
+			})
+			vm.FlushVersionedWrites(ws, false)
+			stamp := vm.WriteSeq()
+			promote(vm, ws)
+			require.False(t, vm.QuietBelow(5, stamp), "%s, %s cell: a storage-only promotion on an entry with lifecycle cells must bump", name, cell)
+			require.True(t, vm.QuietBelow(5, vm.WriteSeq()), "%s, %s cell: the promotion must close its stamp bracket", name, cell)
+		}
 	}
 }
 
@@ -377,4 +385,81 @@ func TestQuietBelow_StampsSizedForLastIndex(t *testing.T) {
 	vm.mutBegin(last)
 	vm.mutEnd(last)
 	require.True(t, vm.QuietBelow(last, stamp), "a write by L does not block reader L")
+}
+
+func originPublishFixture() (*VersionMap, accounts.Address, accounts.StorageKey, func(int) VersionValidity) {
+	vm := newStampedMap(8)
+	addr := accounts.InternAddress(common.HexToAddress("0x920fd507"))
+	slot := accounts.InternKey(common.HexToHash("0xf41f8421"))
+	rs := ReadSet{}
+	rs.SetStorage(addr, slot, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+		Val:        *uint256.NewInt(7),
+	})
+	check := func(rv, wv Version) VersionValidity {
+		if rv != wv {
+			return VersionInvalid
+		}
+		return VersionValid
+	}
+	validate := func(txIdx int) VersionValidity { return vm.ValidateReadSet(txIdx, rs, check, false, "") }
+	return vm, addr, slot, validate
+}
+
+func TestValSkip_OriginPublishKeepsUnknownVersionStorageReadValid(t *testing.T) {
+	t.Parallel()
+	vm, addr, slot, validate := originPublishFixture()
+	const i = 5
+	stamp := vm.WriteSeq()
+	require.Equal(t, VersionValid, validate(i))
+
+	vm.StoreOriginStorage(addr, slot, *uint256.NewInt(3))
+
+	require.True(t, vm.QuietBelow(i, stamp), "origin publication is unstamped")
+	require.Equal(t, VersionValid, validate(i),
+		"an unstamped origin publication must not turn a validated read stale")
+}
+
+func TestValSkip_LowerWriteAfterOriginInvalidatesUnknownVersionStorageRead(t *testing.T) {
+	t.Parallel()
+	vm, addr, slot, validate := originPublishFixture()
+	const k, i = 2, 5
+	vm.StoreOriginStorage(addr, slot, *uint256.NewInt(3))
+	stamp := vm.WriteSeq()
+
+	vm.WriteStorage(addr, slot, Version{TxIndex: k}, *uint256.NewInt(9), true)
+
+	require.False(t, vm.QuietBelow(i, stamp))
+	require.Equal(t, VersionInvalid, validate(i))
+}
+
+// A tx reads a slot of a contract that a lower tx created. Another tx read the same slot
+// while the creation was still in flight, and publishes the slot origin afterwards.
+func TestValSkip_OriginPublishedAfterReadOfCreatedContract(t *testing.T) {
+	t.Parallel()
+	c := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	vm := newStampedMap(4)
+
+	creator := newNoMaterializeTx(vm, 0)
+	require.NoError(t, creator.CreateAccount(c, true))
+	created := creator.VersionedWrites()
+	vm.FlushVersionedWrites(created, false)
+
+	late := newNoMaterializeTx(vm, 2)
+	_, err := late.GetState(c, slot)
+	require.NoError(t, err)
+
+	vm.MarkWritesValidated(created, nil)
+
+	reader := newNoMaterializeTx(vm, 1)
+	_, err = reader.GetState(c, slot)
+	require.NoError(t, err)
+	stamp := vm.WriteSeq()
+	require.Equal(t, VersionValid, validateReads(vm, reader, 1))
+
+	late.PublishOrigins()
+
+	require.True(t, vm.QuietBelow(1, stamp))
+	require.Equal(t, VersionValid, validateReads(vm, reader, 1))
 }
