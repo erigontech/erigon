@@ -41,7 +41,10 @@ import (
 )
 
 // stubP2P satisfies p2p.P2PManager with only the host the connection handler needs.
-type stubP2P struct{ host host.Host }
+type stubP2P struct {
+	host          host.Host
+	lostDuplicate bool
+}
 
 func (s stubP2P) Pubsub() *pubsub.PubSub                      { return nil }
 func (s stubP2P) Host() host.Host                             { return s.host }
@@ -50,6 +53,7 @@ func (s stubP2P) BandwidthCounter() *metrics.BandwidthCounter { return nil }
 func (s stubP2P) UDPv5Listener() *discover.UDPv5              { return nil }
 func (s stubP2P) SetENRAttSubnets(subnets []uint64)           {}
 func (s stubP2P) UpdateENRSyncNets(subnetIndex int, on bool)  {}
+func (s stubP2P) ConsumeDuplicateLoss(peer.ID) bool           { return s.lostDuplicate }
 
 func testSentinel(t *testing.T, h host.Host) *Sentinel {
 	t.Helper()
@@ -117,6 +121,52 @@ func TestOnConnectionClosesABannedPeer(t *testing.T) {
 	s.onConnection(local.Network(), conns[0])
 
 	waitDisconnected(t, local, remote.ID())
+}
+
+// Closing a duplicate connection can cut a status handshake that ran over it. The peer is still
+// connected, so the handshake is retried instead of counted as a failure.
+func TestHandshakeCutByADuplicateCloseIsRetried(t *testing.T) {
+	for _, lostDuplicate := range []bool{true, false} {
+		local, remote := connectedPair(t)
+		s := testSentinel(t, local)
+		s.p2p = stubP2P{host: local, lostDuplicate: lostDuplicate}
+		calls := 0
+		kept := s.handleNewConnection(remote.ID(), network.DirOutbound, nil, func() (bool, error) {
+			calls++
+			if calls == 1 {
+				return false, errors.New("stream reset")
+			}
+			return true, nil
+		})
+		require.True(t, kept)
+		failures, _ := s.peers.RecordHandshakeFailure(remote.ID())
+		if lostDuplicate {
+			require.Equal(t, 2, calls)
+			require.Equal(t, 1, failures, "the cut handshake must not count as a failure")
+		} else {
+			require.Equal(t, 1, calls)
+			require.Equal(t, 2, failures)
+		}
+	}
+}
+
+// A status response cut while its body is read fails to decode, which ValidatePeer reports like a
+// fork mismatch. Right after a duplicate close it is retried, so the peer keeps its connection.
+func TestStatusReadCutByADuplicateCloseIsRetried(t *testing.T) {
+	local, remote := connectedPair(t)
+	s := testSentinel(t, local)
+	s.p2p = stubP2P{host: local, lostDuplicate: true}
+	calls := 0
+	kept := s.handleNewConnection(remote.ID(), network.DirOutbound, nil, func() (bool, error) {
+		calls++
+		return calls > 1, nil
+	})
+	require.True(t, kept)
+	require.Equal(t, 2, calls)
+	require.Equal(t, network.Connected, local.Network().Connectedness(remote.ID()))
+
+	kept = s.handleNewConnection(remote.ID(), network.DirOutbound, nil, func() (bool, error) { return false, nil })
+	require.False(t, kept, "a fork mismatch on the retry still disconnects the peer")
 }
 
 func TestOnConnectionLogsActualTransport(t *testing.T) {

@@ -17,4 +17,6 @@ type P2PManager interface {
 	UDPv5Listener() *discover.UDPv5
 	SetENRAttSubnets(subnets []uint64)
 	UpdateENRSyncNets(subnetIndex int, on bool)
+	// ConsumeDuplicateLoss reports whether pid just lost a duplicate of a connection it kept, and forgets it.
+	ConsumeDuplicateLoss(pid peer.ID) bool
 }

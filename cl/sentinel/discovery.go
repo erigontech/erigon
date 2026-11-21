@@ -321,6 +321,12 @@ func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCoun
 	return coverage, subnetToPeers
 }
 
+// ConsumeDuplicateLoss reports whether a failure with pid may come from one of its duplicate
+// connections closing while another one stays open. The loss excuses one failure.
+func (s *Sentinel) ConsumeDuplicateLoss(pid peer.ID) bool {
+	return s.p2p.Host().Network().Connectedness(pid) == network.Connected && s.p2p.ConsumeDuplicateLoss(pid)
+}
+
 func (s *Sentinel) closePeer(pid peer.ID) {
 	if err := s.p2p.Host().Network().ClosePeer(pid); err != nil {
 		log.Trace("[Sentinel] failed to close peer", "peer", pid, "err", err)
@@ -633,6 +639,10 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Directi
 	}
 
 	valid, err := validate()
+	// A status read cut by a duplicate close can also fail to decode, which looks like a fork mismatch.
+	if !valid && s.ConsumeDuplicateLoss(peerId) {
+		valid, err = validate()
+	}
 	if !valid && err != nil {
 		failureCount, becameUndialable := s.peers.RecordHandshakeFailure(peerId)
 		s.logger.Debug("[Sentinel] Handshake failed", "peer", peerId, "count", failureCount, "err", err)
