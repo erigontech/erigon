@@ -62,6 +62,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -704,9 +705,9 @@ Examples:
   integration commitment visualize --output /tmp/analysis /path/to/*.kv
   integration commitment visualize --state /path/to/commitment.kv  # print state only`,
 	Args: cobra.MinimumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		_ = debug.SetupCobra(cmd, "integration")
-		visualizeCommitmentFiles(args)
+		return visualizeCommitmentFiles(args)
 	},
 }
 
@@ -1406,7 +1407,7 @@ func printBenchResults(name string, stats BenchStats, totalSize int64, keyCount 
 	fmt.Println()
 }
 
-func visualizeCommitmentFiles(files []string) {
+func visualizeCommitmentFiles(files []string) error {
 	sema := make(chan struct{}, visualizeConcurrency)
 	for i := 0; i < cap(sema); i++ {
 		sema <- struct{}{}
@@ -1414,6 +1415,8 @@ func visualizeCommitmentFiles(files []string) {
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	var failed []error
+	var charted int
 
 	page := components.NewPage()
 	page.SetLayout(components.PageFlexLayout)
@@ -1432,10 +1435,14 @@ func visualizeCommitmentFiles(files []string) {
 			stat, err := processCommitmentFile(fpath)
 			if err != nil {
 				fmt.Printf("processing failed: %v", err)
+				mu.Lock()
+				failed = append(failed, err)
+				mu.Unlock()
 				return
 			}
 
 			mu.Lock()
+			charted++
 			page.AddCharts(
 				prefixLenCountChart(fpath, stat),
 				countersChart(fpath, stat),
@@ -1447,8 +1454,8 @@ func visualizeCommitmentFiles(files []string) {
 	}
 	wg.Wait()
 	fmt.Println()
-	if visualizePrintState {
-		return
+	if visualizePrintState || charted == 0 {
+		return errors.Join(failed...)
 	}
 
 	dir := filepath.Dir(files[0])
@@ -1478,6 +1485,7 @@ func visualizeCommitmentFiles(files []string) {
 	if err := page.Render(io.MultiWriter(f)); err != nil {
 		panic(err)
 	}
+	return errors.Join(failed...)
 }
 
 type visualizeOverallStat struct {
@@ -1548,8 +1556,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		}
 		stat := commitment.DecodeBranchAndCollectStat(key, val, tv)
 		if stat == nil {
-			err := fmt.Errorf("failed to decode branch: %x %x", key, val)
-			panic(err)
+			return fmt.Errorf("failed to decode branch: %x %x", key, val)
 		}
 		keysSink <- *stat
 	}
@@ -1557,15 +1564,12 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 }
 
 func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
+	if v, _ := version.ParseVersion(filepath.Base(fpath)); v.Major >= 3 {
+		return nil, fmt.Errorf("%s holds v3 commitment records; visualize decodes legacy branches only", filepath.Base(fpath))
+	}
 	stats := make(chan commitment.BranchStat, 8)
-	errch := make(chan error)
-	go func() {
-		err := extractKVPairFromCompressed(fpath, stats)
-		if err != nil {
-			errch <- err
-		}
-		close(errch)
-	}()
+	errch := make(chan error, 1)
+	go func() { errch <- extractKVPairFromCompressed(fpath, stats) }()
 
 	totals := newVisualizeOverallStat()
 	for s := range stats {
@@ -1585,12 +1589,8 @@ func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
 		totals.prefixes[s.KeySize] = ps
 	}
 
-	select {
-	case err := <-errch:
-		if err != nil {
-			return nil, err
-		}
-	default:
+	if err := <-errch; err != nil {
+		return nil, err
 	}
 	return totals, nil
 }
