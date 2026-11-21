@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -168,7 +169,7 @@ var (
 	}
 	AttestersFlag = cli.StringFlag{
 		Name:  "eez.attesters",
-		Usage: "URL of the prover attesting the batches, http://host:port or https://host:port",
+		Usage: "Provers attesting the batches: one http(s)://host:port with --eez.attester.address and --eez.proofsystem, or up to 16 comma-separated url=attester=proofsystem",
 	}
 	AttesterAddressFlag = cli.StringFlag{
 		Name:  "eez.attester.address",
@@ -313,11 +314,8 @@ type ComposerConfig struct {
 	// L1 is the URL of the L1 node the composer reads and posts through.
 	L1        string
 	PosterKey *ecdsa.PrivateKey
-	// Prover is the URL of the prover; Attester the address of its
-	// attestations, for the proof system ProofSystem.
-	Prover      string
-	Attester    common.Address
-	ProofSystem common.Address
+	// Attesters attest the batches, each for its proof system.
+	Attesters []Attester
 	// Builder takes the bundles; PriorityFee is a posting's tip in wei.
 	Builder     string
 	PriorityFee uint64
@@ -332,6 +330,71 @@ type ComposerConfig struct {
 	ExpectExternal bool
 	// MaxTxs bounds the held transactions one Sync block takes.
 	MaxTxs int
+}
+
+// Attester is a prover at URL whose attestations recover to Address, for
+// the proof system ProofSystem.
+type Attester struct {
+	URL                  string
+	Address, ProofSystem common.Address
+}
+
+// maxAttesters bounds a batch's proof systems.
+const maxAttesters = 16
+
+// attesters reads --eez.attesters: url=attester=proofsystem entries, or one
+// URL whose attester and proof system have flags of their own.
+func attesters(cmd *cli.Command) ([]Attester, error) {
+	v := cmd.String(AttestersFlag.Name)
+	listed := strings.Contains(v, "=")
+	if !listed {
+		for _, f := range []*cli.StringFlag{&AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag} {
+			if !cmd.IsSet(f.Name) {
+				return nil, fmt.Errorf("%w: --%s requires --%s", ErrConfig, ComposerFlag.Name, f.Name)
+			}
+		}
+		v += "=" + cmd.String(AttesterAddressFlag.Name) + "=" + cmd.String(ProofSystemFlag.Name)
+	} else {
+		for _, f := range []*cli.StringFlag{&AttesterAddressFlag, &ProofSystemFlag} {
+			if cmd.IsSet(f.Name) {
+				return nil, fmt.Errorf("%w: --%s with --%s entries naming their attesters", ErrConfig, f.Name, AttestersFlag.Name)
+			}
+		}
+	}
+	entries := strings.Split(v, ",")
+	if len(entries) > maxAttesters {
+		return nil, fmt.Errorf("%w: --%s: %d attesters, at most %d", ErrConfig, AttestersFlag.Name, len(entries), maxAttesters)
+	}
+	var out []Attester
+	for i, e := range entries {
+		parts := strings.Split(e, "=")
+		if len(parts) != 3 {
+			return nil, fmt.Errorf("%w: --%s entry %d is not url=attester=proofsystem", ErrConfig, AttestersFlag.Name, i+1)
+		}
+		if _, _, err := prove.Target(parts[0]); err != nil {
+			return nil, fmt.Errorf("%w: --%s: %w", ErrConfig, AttestersFlag.Name, err)
+		}
+		a := Attester{URL: parts[0]}
+		for _, x := range []struct {
+			flag *cli.StringFlag
+			v    string
+			out  *common.Address
+		}{{&AttesterAddressFlag, parts[1], &a.Address}, {&ProofSystemFlag, parts[2], &a.ProofSystem}} {
+			if !common.IsHexAddress(x.v) || common.HexToAddress(x.v) == (common.Address{}) {
+				name := x.flag.Name
+				if listed {
+					name = AttestersFlag.Name
+				}
+				return nil, fmt.Errorf("%w: --%s: %q is not an address", ErrConfig, name, x.v)
+			}
+			*x.out = common.HexToAddress(x.v)
+		}
+		if slices.ContainsFunc(out, func(o Attester) bool { return o.ProofSystem == a.ProofSystem }) {
+			return nil, fmt.Errorf("%w: --%s: proof system %x listed twice", ErrConfig, AttestersFlag.Name, a.ProofSystem)
+		}
+		out = append(out, a)
+	}
+	return out, nil
 }
 
 // L2Flags are the l2 section fields set on the command line.
@@ -551,7 +614,6 @@ func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
 	}
 	c := &ComposerConfig{
 		L1:          node,
-		Prover:      cmd.String(AttestersFlag.Name),
 		Builder:     cmd.String(L1BuilderFlag.Name),
 		PriorityFee: cmd.Uint64(L1PriorityFeeFlag.Name),
 		MaxBlocks:   cmd.Uint64(BatchMaxBlocksFlag.Name),
@@ -593,29 +655,20 @@ func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
 	if !isHTTP(c.Builder) {
 		return nil, fmt.Errorf("%w: --%s %q is not an http(s) URL; set it beside a websocket --%s", ErrConfig, L1BuilderFlag.Name, l1.RedactURL(c.Builder), L1RPCFlag.Name)
 	}
-	for _, f := range []*cli.StringFlag{&PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag} {
+	for _, f := range []*cli.StringFlag{&PosterKeyFileFlag, &AttestersFlag} {
 		if !cmd.IsSet(f.Name) {
 			return nil, fmt.Errorf("%w: --%s requires --%s", ErrConfig, ComposerFlag.Name, f.Name)
 		}
 	}
-	if _, _, err := prove.Target(c.Prover); err != nil {
-		return nil, fmt.Errorf("%w: --%s: %w", ErrConfig, AttestersFlag.Name, err)
-	}
-	for _, a := range []struct {
-		flag *cli.StringFlag
-		out  *common.Address
-	}{{&AttesterAddressFlag, &c.Attester}, {&ProofSystemFlag, &c.ProofSystem}} {
-		v := cmd.String(a.flag.Name)
-		if !common.IsHexAddress(v) {
-			return nil, fmt.Errorf("%w: --%s %q is not an address", ErrConfig, a.flag.Name, v)
-		}
-		*a.out = common.HexToAddress(v)
+	var err error
+	if c.Attesters, err = attesters(cmd); err != nil {
+		return nil, err
 	}
 	key, err := loadKey(cmd.String(PosterKeyFileFlag.Name))
 	if err != nil {
 		return nil, fmt.Errorf("%w: --%s: %w", ErrConfig, PosterKeyFileFlag.Name, err)
 	}
-	if crypto.PubkeyToAddress(key.PublicKey) == c.Attester {
+	if poster := crypto.PubkeyToAddress(key.PublicKey); slices.ContainsFunc(c.Attesters, func(a Attester) bool { return a.Address == poster }) {
 		return nil, fmt.Errorf("%w: --%s holds the attester's key; posting and attesting are separate authorities", ErrConfig, PosterKeyFileFlag.Name)
 	}
 	c.PosterKey = key

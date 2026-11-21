@@ -18,6 +18,7 @@ package composer
 
 import (
 	"bytes"
+	"slices"
 
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/types"
@@ -41,6 +42,10 @@ const (
 
 	txGas = 21_000
 )
+
+// proofSystemGas is the execution of each proof system's verification past
+// the first, which postBatchBaseGas covers.
+const proofSystemGas = 14_000
 
 // proofPlaceholder stands for the proof of a batch not yet proven: longer
 // than a 65-byte ECDSA attestation and all non-zero, so it prices above it.
@@ -71,12 +76,12 @@ func floored(execution, tokens uint64) uint64 { return max(execution, floorGas(t
 // tokens.
 func postBatchGas(b *protocol.ProofSystemBatch) (standard, tokens uint64, err error) {
 	sized := *b
-	sized.Proofs = [][]byte{proofPlaceholder}
+	sized.Proofs = slices.Repeat([][]byte{proofPlaceholder}, max(len(b.ProofSystems), 1))
 	input, err := protocol.EncodePostAndVerifyBatch(&sized)
 	if err != nil {
 		return 0, 0, err
 	}
-	return txGas + postBatchBaseGas + postBatchEntryGas*uint64(len(b.Entries)) + calldataGas(input), floorTokens(input), nil
+	return txGas + postBatchBaseGas + postBatchEntryGas*uint64(len(b.Entries)) + proofSystemGas*uint64(max(len(b.ProofSystems), 1)-1) + calldataGas(input), floorTokens(input), nil
 }
 
 // FloorGas is the EIP-7623 floor of a transaction with input.

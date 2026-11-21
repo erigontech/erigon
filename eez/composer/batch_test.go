@@ -54,7 +54,7 @@ func window(t *testing.T, name string) ([]*types.Block, *protocol.ProofSystemBat
 }
 
 func devnetBatcher(proofSystem common.Address) *Batcher {
-	return &Batcher{RollupID: 1, ProofSystem: proofSystem, Signer: types.LatestSignerForChainID(uint256.NewInt(6290))}
+	return &Batcher{RollupID: 1, ProofSystems: []common.Address{proofSystem}, Signer: types.LatestSignerForChainID(uint256.NewInt(6290))}
 }
 
 // TestAnchorBatchOfRecordedWindows is T-CMP-4 for anchor-only batches: from

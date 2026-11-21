@@ -19,6 +19,7 @@ package eez
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -539,9 +540,7 @@ func TestComposerFlags(t *testing.T) {
 	c := cfg.Sequencer.Composer
 	require.NotNil(t, c)
 	require.Equal(t, crypto.FromECDSA(key), crypto.FromECDSA(c.PosterKey))
-	require.Equal(t, "http://127.0.0.1:50061", c.Prover)
-	require.Equal(t, common.HexToAddress(attester), c.Attester)
-	require.Equal(t, common.HexToAddress(proofSystem), c.ProofSystem)
+	require.Equal(t, []Attester{{URL: "http://127.0.0.1:50061", Address: common.HexToAddress(attester), ProofSystem: common.HexToAddress(proofSystem)}}, c.Attesters)
 	require.Equal(t, "http://l1:8545", c.L1)
 	require.Equal(t, "http://l1:8545", c.Builder, "the L1 node takes the bundles")
 	require.Equal(t, uint64(300), c.MaxBlocks)
@@ -575,6 +574,47 @@ func TestComposerFlags(t *testing.T) {
 	cfg, err = parse(t, sequencer...)
 	require.NoError(t, err)
 	require.Nil(t, cfg.Sequencer.Composer)
+
+	const second = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+	quorum := "--eez.attesters=http://127.0.0.1:50061=" + attester + "=" + proofSystem + ",https://attester.example:443=" + second + "=0x0000000000000000000000000000000000000042"
+	listed := func(extra ...string) []string {
+		var out []string
+		for _, a := range composer {
+			if !strings.HasPrefix(a, "--eez.attesters") && !strings.HasPrefix(a, "--eez.attester.address") && !strings.HasPrefix(a, "--eez.proofsystem") {
+				out = append(out, a)
+			}
+		}
+		return append(append(out, quorum), extra...)
+	}
+	cfg, err = parse(t, listed()...)
+	require.NoError(t, err)
+	require.Equal(t, []Attester{
+		{URL: "http://127.0.0.1:50061", Address: common.HexToAddress(attester), ProofSystem: common.HexToAddress(proofSystem)},
+		{URL: "https://attester.example:443", Address: common.HexToAddress(second), ProofSystem: common.HexToAddress("0x42")},
+	}, cfg.Sequencer.Composer.Attesters)
+	seventeen := "--eez.attesters="
+	for i := range 17 {
+		if i > 0 {
+			seventeen += ","
+		}
+		seventeen += fmt.Sprintf("http://127.0.0.1:%d=%s=0x%040x", 50000+i, second, i+1)
+	}
+	for name, c := range map[string]struct {
+		args []string
+		want string
+	}{
+		"list and address":         {append(listed(), "--eez.attester.address="+attester), "--eez.attester.address"},
+		"list and proof system":    {append(listed(), "--eez.proofsystem="+proofSystem), "--eez.proofsystem"},
+		"duplicate proof system":   {append(listed()[:len(listed())-1], "--eez.attesters=http://a:1="+attester+"="+proofSystem+",http://b:2="+second+"="+proofSystem), "proof system"},
+		"entry without a key":      {append(listed()[:len(listed())-1], "--eez.attesters=http://a:1="+attester), "--eez.attesters"},
+		"entry with a bad address": {append(listed()[:len(listed())-1], "--eez.attesters=http://a:1=0x12="+proofSystem), "--eez.attesters"},
+		"entry with a bad URL":     {append(listed()[:len(listed())-1], "--eez.attesters=a:1="+attester+"="+proofSystem), "--eez.attesters"},
+		"seventeen attesters":      {append(listed()[:len(listed())-1], seventeen), "16"},
+	} {
+		_, err := parse(t, c.args...)
+		require.ErrorIs(t, err, ErrConfig, name)
+		require.ErrorContains(t, err, c.want, name)
+	}
 
 	attesterKey := filepath.Join(dir, "attester")
 	attesterSecret, err := crypto.HexToECDSA("59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d")
@@ -636,10 +676,11 @@ func TestComposerFlags(t *testing.T) {
 		"websocket L1 alone": append([]string{"--eez.enabled", "--eez.l1.rpc=wss://user:secret@l1.example/v3/KEY"}, without("--eez.enabled", "--eez.l1.rpc")...),
 		"front over a websocket L1": append([]string{"--eez.enabled", "--eez.l1.rpc=wss://user:secret@l1.example/v3/KEY", "--eez.l1.builder=http://builder", "--eez.composer.l1front=127.0.0.1:8547"},
 			without("--eez.enabled", "--eez.l1.rpc")...),
-		"bad builder":       append(slices.Clone(composer), "--eez.l1.builder=ftp://user:secret@builder.example/KEY?key=KEY"),
-		"bad prover":        append(without("--eez.attesters"), "--eez.attesters=ftp://user:secret@prover.example:1/KEY"),
-		"unparsable prover": append(without("--eez.attesters"), "--eez.attesters=http://user:secret@[prover/KEY"),
-		"bad L2 RPC":        append(slices.Clone(composer), "--eez.composer.l2front=127.0.0.1:8548", "--eez.composer.l2rpc=wss://user:secret@l2.example/KEY"),
+		"bad builder":        append(slices.Clone(composer), "--eez.l1.builder=ftp://user:secret@builder.example/KEY?key=KEY"),
+		"bad prover":         append(without("--eez.attesters"), "--eez.attesters=ftp://user:secret@prover.example:1/KEY"),
+		"unparsable prover":  append(without("--eez.attesters"), "--eez.attesters=http://user:secret@[prover/KEY"),
+		"bad L2 RPC":         append(slices.Clone(composer), "--eez.composer.l2front=127.0.0.1:8548", "--eez.composer.l2rpc=wss://user:secret@l2.example/KEY"),
+		"bad attester entry": append(without("--eez.attesters", "--eez.attester.address", "--eez.proofsystem"), "--eez.attesters=http://user:secret@prover.example:1/KEY=0x01"),
 	} {
 		_, err := parse(t, args...)
 		require.ErrorIs(t, err, ErrConfig, name)

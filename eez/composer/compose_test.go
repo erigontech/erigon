@@ -537,7 +537,7 @@ func TestComposeWaitsForALighterWindow(t *testing.T) {
 	heavy := func(t *testing.T, f *crossFixture) (chain *testChain, window, alone uint64) {
 		chain = newTestChain(t, 8, 1, 2, 3, 4, 5, 6, 7, 8)
 		f.c.chain = chain
-		f.c.cfg.Batcher = &Batcher{RollupID: 1, ProofSystem: f.c.cfg.Batcher.ProofSystem, Signer: testSigner}
+		f.c.cfg.Batcher = &Batcher{RollupID: 1, ProofSystems: f.c.cfg.Batcher.ProofSystems, Signer: testSigner}
 		sync := types.CopyHeader(f.w.sync.Header())
 		sync.ParentHash = chain.blocks[8].Hash()
 		f.c.x.Header = func(*types.Header, rules.ChainHeaderReader) (*types.Header, error) {

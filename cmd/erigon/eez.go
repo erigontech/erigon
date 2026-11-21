@@ -324,6 +324,10 @@ func sequencerTiming(l2 *config.L2Config, cfg *eez.SequencerConfig) sequencer.Ti
 	}
 }
 
+// registrationTimeout bounds the read of the manager's registration a
+// batch's attestations need.
+const registrationTimeout = 5 * time.Second
+
 // newComposer returns the composer settling the blocks of chain, whose
 // witnesses are in witnesses, from the derivation state of f; stop releases
 // it once the sequencer has stopped.
@@ -346,10 +350,35 @@ func newComposer(ctx context.Context, chainConfig *chain.Config, cfg *eez.Sequen
 	if id := poster.ChainID(); id != l2.L1ChainID {
 		return nil, nil, nil, nil, fmt.Errorf("%w: --%s is chain %d, not the L1 %d", eez.ErrConfig, eez.L1RPCFlag.Name, id, l2.L1ChainID)
 	}
-	// The ECDSA proof system registers its attester's address as its key.
-	prover, err := prove.Dial(c.Prover, c.Attester, common.BytesToHash(c.Attester[:]))
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("%w: %w", eez.ErrConfig, err)
+	prover, proofSystems := &prove.Quorum{Grace: prove.DefaultGrace}, make([]common.Address, 0, len(c.Attesters))
+	closeProvers := func() {
+		for _, m := range prover.Members {
+			_ = m.Client.Close()
+		}
+	}
+	defer func() {
+		if err != nil {
+			closeProvers()
+		}
+	}()
+	for _, a := range c.Attesters {
+		// The key each attestation is checked under is the manager's, read per batch.
+		client, err := prove.Dial(a.URL, a.Address, common.Hash{})
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("%w: %w", eez.ErrConfig, err)
+		}
+		prover.Members = append(prover.Members, &prove.Member{ProofSystem: a.ProofSystem, Attester: a.Address, Client: client})
+		proofSystems = append(proofSystems, a.ProofSystem)
+	}
+	slices.SortFunc(proofSystems, func(x, y common.Address) int { return x.Cmp(y) })
+	prover.Register = func(ctx context.Context) (l1.Registration, error) {
+		ctx, cancel := context.WithTimeout(ctx, registrationTimeout)
+		defer cancel()
+		head, err := node.Head(ctx)
+		if err != nil {
+			return l1.Registration{}, err
+		}
+		return l1.ReadRegistration(ctx, node, l2.Registry, l2.RollupID, proofSystems, head.Hash)
 	}
 	timing := sequencerTiming(l2, cfg)
 	k := timing.K()
@@ -371,7 +400,7 @@ func newComposer(ctx context.Context, chainConfig *chain.Config, cfg *eez.Sequen
 		}
 	}
 	comp = composer.New(composer.Config{
-		Batcher:   &composer.Batcher{RollupID: l2.RollupID, ProofSystem: c.ProofSystem, Signer: types.LatestSignerForChainID(chainConfig.ChainID)},
+		Batcher:   &composer.Batcher{RollupID: l2.RollupID, ProofSystems: proofSystems, Signer: types.LatestSignerForChainID(chainConfig.ChainID)},
 		K:         k,
 		MaxBlocks: composer.GridCap(c.MaxBlocks, k),
 		MaxGas:    c.MaxGas,
@@ -383,11 +412,11 @@ func newComposer(ctx context.Context, chainConfig *chain.Config, cfg *eez.Sequen
 	}, chain, witnesses, prover, poster, observer,
 		f.Settled, func() uint64 { return f.Status().Finalized }, f.HeadTo, logger)
 	comp.Settlements(f.Deriver().Settlement)
-	logger.Info("[eez] composer mode", "poster", poster.From(), "attester", c.Attester, "proofSystem", c.ProofSystem,
+	logger.Info("[eez] composer mode", "poster", poster.From(), "attesters", len(c.Attesters), "proofSystems", proofSystems,
 		"maxBlocks", composer.GridCap(c.MaxBlocks, k), "maxGas", c.MaxGas, "priorityFee", c.PriorityFee, "maxTxs", c.MaxTxs, "expectExternal", c.ExpectExternal)
 	return comp, func() {
 		comp.Close()
-		_ = prover.Close()
+		closeProvers()
 		node.Close()
 	}, cross, pool, nil
 }

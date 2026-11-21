@@ -322,14 +322,14 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 		RollupID: c.cfg.Batcher.RollupID, Batch: batch, Anchor: anchor, From: e.cursor + 1, To: e.sync, Block: c.windowBlock,
 		L1Parent: e.fx.anchor, Time: sync.Time,
 	}
-	sig, err := c.prover.ProveBy(ctx, w2, start, c.cfg.Proof)
+	atts, err := c.prover.ProveBy(ctx, w2, start, c.cfg.Proof)
 	if err != nil {
 		if !proverFailed(err) {
 			err = nodeFault(err)
 		}
 		return fmt.Errorf("prove %d..%d: %w", e.cursor+1, e.sync, err)
 	}
-	batch.Proofs = [][]byte{sig}
+	attach(batch, atts)
 	input, err := protocol.EncodePostAndVerifyBatch(batch)
 	if err != nil {
 		return err

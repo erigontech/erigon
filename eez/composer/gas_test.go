@@ -117,7 +117,7 @@ func TestPostingGasAddsTargetBeforeTheFloor(t *testing.T) {
 func TestSyncIntervalWithinCeiling(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	b := &Batcher{RollupID: 1, ProofSystem: common.Address{0xab}, Signer: testSigner}
+	b := &Batcher{RollupID: 1, ProofSystems: []common.Address{{0xab}}, Signer: testSigner}
 	for _, k := range []uint64{2, 6, sequencer.MaxCatchup} {
 		for _, ceiling := range []uint64{MinPostBatchGas, 4_000_000, MaxPostBatchGas} {
 			blocks := fullInterval(t, key, k, sequencer.DABudget(k, ceiling))
@@ -278,4 +278,18 @@ func TestBudgetCutsTheDrain(t *testing.T) {
 	require.Equal(t, (MaxPostBatchGas-drainMargin-551_000)/per, accepted)
 	require.Less(t, accepted, uint64(50))
 	require.Equal(t, 551_000+accepted*per, b.projected)
+}
+
+// TestPostBatchGasPerProofSystem: each further proof system adds its
+// verification and its proof's calldata.
+func TestPostBatchGasPerProofSystem(t *testing.T) {
+	_, mined, _ := window(t, "captured-devnet-anchor-402")
+	one, err := PostBatchGas(mined)
+	require.NoError(t, err)
+	three := *mined
+	three.ProofSystems = []common.Address{{0xa}, {0xb}, {0xc}}
+	three.RollupIDsWithProofSystems = []protocol.RollupIDWithProofSystems{{RollupID: mined.RollupIDsWithProofSystems[0].RollupID, ProofSystemIndexes: []uint64{0, 1, 2}}}
+	got, err := PostBatchGas(&three)
+	require.NoError(t, err)
+	require.Greater(t, got, one+2*proofSystemGas+2*16*uint64(len(proofPlaceholder)))
 }

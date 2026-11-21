@@ -58,9 +58,9 @@ type Witnesses interface {
 	Get(ctx context.Context, number uint64, hash common.Hash) (json.RawMessage, error)
 }
 
-// Prover attests settlement windows.
+// Prover gathers the attestations of settlement windows.
 type Prover interface {
-	ProveBy(ctx context.Context, w *prove.Window, start time.Time, per time.Duration) ([]byte, error)
+	ProveBy(ctx context.Context, w *prove.Window, start time.Time, per time.Duration) ([]prove.Attestation, error)
 }
 
 // Poster signs postings and sends them to L1.
@@ -409,11 +409,11 @@ func (c *Composer) postBlocks(ctx context.Context, kind emitKind, cursor uint64,
 		return err
 	}
 	w := &prove.Window{RollupID: c.cfg.Batcher.RollupID, Batch: batch, Anchor: anchor, From: cursor + 1, To: to, Block: c.windowBlock}
-	sig, err := c.prover.ProveBy(ctx, w, start, per)
+	atts, err := c.prover.ProveBy(ctx, w, start, per)
 	if err != nil {
 		return fmt.Errorf("prove %d..%d: %w", cursor+1, to, err)
 	}
-	batch.Proofs = [][]byte{sig}
+	attach(batch, atts)
 	input, err := protocol.EncodePostAndVerifyBatch(batch)
 	if err != nil {
 		return err

@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/eez/protocol/da"
+	"github.com/erigontech/erigon/eez/prove"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -34,8 +35,9 @@ import (
 // Batcher encodes the batches of a rollup.
 type Batcher struct {
 	RollupID uint64
-	// ProofSystem attests the batches.
-	ProofSystem common.Address
+	// ProofSystems may attest the batches, in ascending order: a batch is
+	// sized for all and posted with those that attest it.
+	ProofSystems []common.Address
 	// Signer recovers the senders of the blocks' transactions.
 	Signer *types.Signer
 }
@@ -190,8 +192,8 @@ func (b *Batcher) Batch(cursor common.Hash, blocks []*types.Block, fx Effects, c
 		StaticEntries:             []protocol.StaticExecutionEntry{},
 		ImmediateEntryCount:       big.NewInt(int64(1 + len(fx.Outbound))),
 		ImmediateStaticEntryCount: new(big.Int),
-		ProofSystems:              []common.Address{b.ProofSystem},
-		RollupIDsWithProofSystems: []protocol.RollupIDWithProofSystems{{RollupID: b.RollupID, ProofSystemIndexes: []uint64{0}}},
+		ProofSystems:              slices.Clone(b.ProofSystems),
+		RollupIDsWithProofSystems: []protocol.RollupIDWithProofSystems{{RollupID: b.RollupID, ProofSystemIndexes: indexes(len(b.ProofSystems))}},
 		BlobIndices:               []*big.Int{},
 		CallData:                  da.Encode((&da.Payload{RollupID: b.RollupID, Actions: actions, Operations: span.Encode()}).Messages()...),
 		Proofs:                    [][]byte{},
@@ -215,4 +217,26 @@ func (b *Batcher) ordinary(tx types.Transaction) error {
 		return errors.New("system transaction by its sender")
 	}
 	return nil
+}
+
+// indexes returns 0..n-1, the proof-system indexes of a rollup selecting
+// all of a batch's n proof systems.
+func indexes(n int) []uint64 {
+	out := make([]uint64, n)
+	for i := range out {
+		out[i] = uint64(i)
+	}
+	return out
+}
+
+// attach sets b's proof systems to those of atts, in their order, with
+// their proofs.
+func attach(b *protocol.ProofSystemBatch, atts []prove.Attestation) {
+	b.ProofSystems, b.Proofs = make([]common.Address, len(atts)), make([][]byte, len(atts))
+	for i, a := range atts {
+		b.ProofSystems[i], b.Proofs[i] = a.ProofSystem, a.Proof
+	}
+	for i := range b.RollupIDsWithProofSystems {
+		b.RollupIDsWithProofSystems[i].ProofSystemIndexes = indexes(len(atts))
+	}
 }

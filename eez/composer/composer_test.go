@@ -158,9 +158,12 @@ type testProver struct {
 	err    error
 	// before runs as a session begins.
 	before func()
+	// attesting, when set, are the proof systems that attest, else all of
+	// the batch's.
+	attesting []common.Address
 }
 
-func (p *testProver) ProveBy(ctx context.Context, w *prove.Window, start time.Time, per time.Duration) ([]byte, error) {
+func (p *testProver) ProveBy(ctx context.Context, w *prove.Window, start time.Time, per time.Duration) ([]prove.Attestation, error) {
 	if p.before != nil {
 		p.before()
 	}
@@ -184,7 +187,18 @@ func (p *testProver) ProveBy(ctx context.Context, w *prove.Window, start time.Ti
 	if got.witnessErr != nil {
 		return nil, got.witnessErr
 	}
-	return bytes.Clone(testProof), p.err
+	if p.err != nil {
+		return nil, p.err
+	}
+	attesting := p.attesting
+	if attesting == nil {
+		attesting = w.Batch.ProofSystems
+	}
+	var atts []prove.Attestation
+	for _, ps := range attesting {
+		atts = append(atts, prove.Attestation{ProofSystem: ps, Proof: append(bytes.Clone(testProof), ps[0])})
+	}
+	return atts, nil
 }
 
 type testPoster struct {
@@ -304,7 +318,7 @@ func newHarness(t *testing.T, chain *testChain, maxBlocks uint64, node Receipts)
 		node = quiet{}
 	}
 	cfg := Config{
-		Batcher: &Batcher{RollupID: 1, ProofSystem: common.Address{0xab}, Signer: testSigner},
+		Batcher: &Batcher{RollupID: 1, ProofSystems: []common.Address{{0xab}}, Signer: testSigner},
 		K:       4, MaxBlocks: maxBlocks, MaxGas: MaxPostBatchGas, Proof: time.Second, Slack: 100 * time.Millisecond,
 	}
 	obs := &Observer{Node: node, RollupID: 1, EEZ: eezL1, Every: time.Millisecond, Logger: log.New()}
@@ -342,7 +356,7 @@ func (h *harness) requireWindow(t *testing.T, i int, from, to uint64, target pos
 	u := p.batch.Entries[0].RollupUpdates[0]
 	require.Equal(t, h.chain.blocks[from-1].Hash(), u.CurrentRoot)
 	require.Equal(t, h.chain.blocks[to].Hash(), u.NewRoot)
-	require.Equal(t, [][]byte{testProof}, p.batch.Proofs)
+	require.Equal(t, [][]byte{append(bytes.Clone(testProof), 0xab)}, p.batch.Proofs)
 	input, err := protocol.EncodePostAndVerifyBatch(p.batch)
 	require.NoError(t, err)
 	require.Equal(t, input, h.poster.inputs[i])
@@ -1846,4 +1860,20 @@ func TestComposerAuditFailureLetsGo(t *testing.T) {
 	h.c.Close()
 	require.False(t, pool.Holds(out.Hash))
 	require.Zero(t, pool.Len())
+}
+
+// TestComposerPostsTheQuorum: a batch sized for every configured proof
+// system is posted with those that attested, in order.
+func TestComposerPostsTheQuorum(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 8), 8, nil)
+	a, b, c := common.Address{0xa}, common.Address{0xb}, common.Address{0xc}
+	h.c.cfg.Batcher.ProofSystems = []common.Address{a, b, c}
+	h.prover.attesting = []common.Address{a, c}
+	h.slot(t, 8, 50, sequencer.ModeSteady)
+	require.Len(t, h.targets(t), 1)
+	posted, err := protocol.DecodePostAndVerifyBatch(h.poster.inputs[0])
+	require.NoError(t, err)
+	require.Equal(t, []common.Address{a, c}, posted.ProofSystems)
+	require.Equal(t, []uint64{0, 1}, posted.RollupIDsWithProofSystems[0].ProofSystemIndexes)
+	require.Equal(t, [][]byte{append(bytes.Clone(testProof), 0xa), append(bytes.Clone(testProof), 0xc)}, posted.Proofs)
 }
