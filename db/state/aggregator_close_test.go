@@ -196,6 +196,44 @@ func TestAggregatorConcurrentClose(t *testing.T) {
 
 // Close releases the cached data held by the commitment BranchCache while
 // keeping the cache object itself usable for a later reopen.
+func TestAggregatorEnableDomainKeepsPinnedView(t *testing.T) {
+	db, agg := testDbAndAggregatorv3(t, 10)
+	ctx := t.Context()
+	key, value := []byte{1}, []byte{7}
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		// A disabled domain can retain data from an earlier run.
+		writer := at.d[kv.RCacheDomain].newWriter(db, agg.dirs.Tmp, false)
+		defer writer.Close()
+		require.NoError(t, writer.PutWithPrev(key, value, 1, nil))
+		return writer.Flush(ctx, tx)
+	}))
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		before := agg.BeginFilesRo()
+		defer before.Close()
+		_, _, found, err := before.d[kv.RCacheDomain].GetLatest(key, tx)
+		require.NoError(t, err)
+		require.False(t, found)
+
+		agg.EnableDomain(kv.RCacheDomain)
+		after := agg.BeginFilesRo()
+		defer after.Close()
+		got, _, found, err := after.d[kv.RCacheDomain].GetLatest(key, tx)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, value, got)
+
+		_, _, found, err = before.d[kv.RCacheDomain].GetLatest(key, tx)
+		require.NoError(t, err)
+		require.False(t, found, "enabling a domain must not change an open reader")
+		writer := before.d[kv.RCacheDomain].NewWriter(db)
+		defer writer.Close()
+		require.True(t, writer.discard, "an old view must keep its write policy")
+		return nil
+	}))
+}
+
 func TestAggregatorCloseReleasesBranchCache(t *testing.T) {
 	prev := dbg.UseStateCache
 	dbg.SetUseStateCache(true)
