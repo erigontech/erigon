@@ -792,12 +792,17 @@ func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOfTxNum uint64) (Com
 	at := a.BeginFilesRo()
 	defer at.Close()
 	dt := at.d[kv.CommitmentDomain]
+	// The fold reads every file front to back; without readahead each page fault is a separate 4 KiB read.
+	dt.files.EnableReadAhead()
+	defer dt.files.DisableReadAhead()
 	latest, err := dt.DebugRangeLatestFromFiles(nil, nil, -1)
 	if err != nil {
 		return CommitmentV3Check{}, err
 	}
 	var it stream.KV = latest
 	if asOfTxNum != math.MaxUint64 {
+		dt.ht.files.EnableReadAhead()
+		defer dt.ht.files.DisableReadAhead()
 		hist := &HistoryRangeAsOfFiles{hc: dt.ht, startTxNum: asOfTxNum, limit: kv.Unlim, orderAscend: order.Asc, ctx: ctx, logger: dt.ht.h.logger}
 		if err = hist.init(dt.ht.iit.files); err != nil {
 			hist.Close()
