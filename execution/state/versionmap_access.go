@@ -18,6 +18,7 @@ package state
 
 import (
 	"cmp"
+	"github.com/erigontech/erigon/common/dbg"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -313,6 +314,8 @@ func (vm *VersionMap) HasAmbiguousBaseAccount(eip161Enabled, isAura bool, base S
 	return false, nil
 }
 
+var stubSeedNoBase = dbg.EnvBool("STUB_SEED_NO_BASE", false)
+
 func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {
 	var stamps []*WriteSet
 	var candidates []uint32
@@ -345,6 +348,9 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 				continue
 			}
 			if ch, ok := versionedUpdateCodeHash(vm, addr, int(idx)); ok && !ch.IsEmpty() {
+				continue
+			}
+			if stubSeedNoBase {
 				continue
 			}
 			av := VersionedAccountView{addr: addr, txIdx: int(idx), vm: vm, base: base}
