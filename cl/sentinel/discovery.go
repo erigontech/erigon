@@ -226,6 +226,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 		case <-pruneTicker.C:
 			// Prune excess peers periodically
 			s.pruneExcessPeers()
+			s.evictIdlePeers(time.Now())
 		case <-searchTicker.C:
 			coverage := s.getSubnetCoverage()
 			underserved := underservedSubnets(&coverage)
@@ -319,6 +320,11 @@ func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCoun
 
 	log.Trace("[Sentinel] Subnet coverage check (GossipSub)", "forkDigest", fmt.Sprintf("%x", forkDigest))
 	return coverage, subnetToPeers
+}
+
+// MarkPeerUseful records that pid answered one of our data requests.
+func (s *Sentinel) MarkPeerUseful(pid peer.ID) {
+	s.p2p.MarkPeerUseful(pid)
 }
 
 func (s *Sentinel) closePeer(pid peer.ID) {

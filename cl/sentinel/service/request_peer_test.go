@@ -94,6 +94,13 @@ var _ io.ReadCloser = (*blockingResponseBody)(nil)
 
 type peerRequestBackendStub struct {
 	handler http.Handler
+	useful  *[]peer.ID
+}
+
+func (p peerRequestBackendStub) MarkPeerUseful(pid peer.ID) {
+	if p.useful != nil {
+		*p.useful = append(*p.useful, pid)
+	}
 }
 
 func (p peerRequestBackendStub) GetPeersCount() (int, int, int) { return 0, 0, 0 }
@@ -103,6 +110,36 @@ func (p peerRequestBackendStub) Config() *sentinel.SentinelConfig {
 	return config
 }
 func (p peerRequestBackendStub) ReqRespHandler() http.Handler { return p.handler }
+
+// Only an answer to a data request counts as useful: status, ping and metadata are heartbeats that
+// an idle peer answers too.
+func TestPeerAnsweringADataRequestIsUseful(t *testing.T) {
+	answer := func(code string) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("REQRESP-RESPONSE-CODE", code)
+			_, _ = w.Write([]byte("answer"))
+		})
+	}
+	for _, tc := range []struct {
+		topic, code string
+		useful      bool
+	}{
+		{communication.BeaconBlocksByRangeProtocolV2, "0", true},
+		{communication.DataColumnSidecarsByRootProtocolV1, "0", true},
+		{communication.StatusProtocolV2, "0", false},
+		{communication.MetadataProtocolV3, "0", false},
+		{communication.BeaconBlocksByRangeProtocolV2, "2", false},
+	} {
+		var useful []peer.ID
+		server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{handler: answer(tc.code), useful: &useful}}
+		_, _ = server.requestPeer(t.Context(), peer.ID("peer"), &sentinelproto.RequestData{Topic: tc.topic, Data: []byte("request")})
+		if tc.useful {
+			require.Equal(t, []peer.ID{"peer"}, useful, tc.topic)
+		} else {
+			require.Empty(t, useful, tc.topic+" code "+tc.code)
+		}
+	}
+}
 
 func receivePeerRequestTestValue[T any](t *testing.T, values <-chan T) T {
 	t.Helper()

@@ -74,6 +74,7 @@ type Sentinel struct {
 	logger             log.Logger
 	forkChoiceReader   forkchoice.ForkChoiceStorageReader
 	pidToEnr           sync.Map
+	staticPeers        map[peer.ID]struct{} // never evicted as idle
 	pidToEnodeId       sync.Map
 	ethClock           eth_clock.EthereumClock
 	peerDasStateReader peerdasstate.PeerDasStateReader
@@ -186,6 +187,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 			log.Trace("[Sentinel] Peer disconnected", "peer", peerId, "direction", c.Stat().Direction, "addr", c.RemoteMultiaddr())
 		},
 	})
+	s.staticPeers = staticPeerIDs(s.cfg.NetworkConfig.StaticPeers)
 	go s.listenForPeers()
 	go s.proactiveSubnetPeerSearch() // Proactively search for peers when subnet coverage is low
 	_, connected, _ := s.GetPeersCount()

@@ -72,6 +72,7 @@ type p2pManager struct {
 	bwc      *metrics.BandwidthCounter
 	host     host.Host
 	gater    *Gater
+	useful   *peerUsefulness
 	udpv5    *discover.UDPv5
 	ethClock eth_clock.EthereumClock
 }
@@ -150,9 +151,11 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		cfg:      cfg,
 		host:     host,
 		gater:    gater,
+		useful:   newPeerUsefulness(),
 		bwc:      bwc,
 		ethClock: ethClock,
 	}
+	host.Network().Notify(p.useful)
 	p2pCtx, cancel := context.WithCancel(ctx)
 	initialized := false
 	defer func() {
@@ -271,6 +274,14 @@ func (p *p2pManager) Host() host.Host {
 
 func (p *p2pManager) SetDialPolicy(dialable func(peer.ID) bool) {
 	p.gater.SetDialPolicy(dialable)
+}
+
+func (p *p2pManager) MarkPeerUseful(pid peer.ID) {
+	p.useful.mark(pid)
+}
+
+func (p *p2pManager) PeerLastUseful(pid peer.ID) (time.Time, bool) {
+	return p.useful.lastUseful(pid)
 }
 
 func (p *p2pManager) BandwidthCounter() *metrics.BandwidthCounter {

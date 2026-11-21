@@ -119,6 +119,7 @@ func responseBodyWeight(topic string, maxBytes uint64) int64 {
 
 type peerRequestBackend interface {
 	GetPeersCount() (active int, connected int, disconnected int)
+	MarkPeerUseful(pid peer.ID)
 	Config() *sentinel.SentinelConfig
 	ReqRespHandler() http.Handler
 }
@@ -171,6 +172,12 @@ func (s *SentinelServer) BanPeerForInvalidData(_ context.Context, p *sentinelpro
 	s.sentinel.Peers().SetBanStatus(pid, true)
 	s.dropPeer(pid)
 	return &sentinelproto.EmptyMessage{}, nil
+}
+
+// isDataRequest reports whether a request type fetches chain data. Status, ping, metadata and goodbye
+// are heartbeats that an idle peer answers too.
+func isDataRequest(requestType string) bool {
+	return strings.HasSuffix(requestType, "_by_range") || strings.HasSuffix(requestType, "_by_root")
 }
 
 func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
@@ -279,6 +286,9 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 			s.dropPeer(pid)
 		}
 		return nil, err
+	}
+	if isDataRequest(requestType) {
+		s.peerRequestBackend.MarkPeerUseful(pid)
 	}
 	ans := &sentinelproto.ResponseData{
 		Data:  data,

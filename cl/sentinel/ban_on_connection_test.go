@@ -41,15 +41,24 @@ import (
 )
 
 // stubP2P satisfies p2p.P2PManager with only the host the connection handler needs.
-type stubP2P struct{ host host.Host }
+type stubP2P struct {
+	host       host.Host
+	ps         *pubsub.PubSub
+	lastUseful map[peer.ID]time.Time
+}
 
-func (s stubP2P) Pubsub() *pubsub.PubSub                      { return nil }
+func (s stubP2P) Pubsub() *pubsub.PubSub                      { return s.ps }
 func (s stubP2P) Host() host.Host                             { return s.host }
 func (s stubP2P) SetDialPolicy(func(peer.ID) bool)            {}
 func (s stubP2P) BandwidthCounter() *metrics.BandwidthCounter { return nil }
 func (s stubP2P) UDPv5Listener() *discover.UDPv5              { return nil }
 func (s stubP2P) SetENRAttSubnets(subnets []uint64)           {}
 func (s stubP2P) UpdateENRSyncNets(subnetIndex int, on bool)  {}
+func (s stubP2P) MarkPeerUseful(peer.ID)                      {}
+func (s stubP2P) PeerLastUseful(pid peer.ID) (time.Time, bool) {
+	t, ok := s.lastUseful[pid]
+	return t, ok
+}
 
 func testSentinel(t *testing.T, h host.Host) *Sentinel {
 	t.Helper()

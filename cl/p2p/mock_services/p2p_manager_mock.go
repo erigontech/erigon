@@ -11,6 +11,7 @@ package mock_services
 
 import (
 	reflect "reflect"
+	time "time"
 
 	discover "github.com/erigontech/erigon/p2p/discover"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -70,6 +71,33 @@ func (m *MockP2PManager) Host() host.Host {
 func (mr *MockP2PManagerMockRecorder) Host() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Host", reflect.TypeOf((*MockP2PManager)(nil).Host))
+}
+
+// MarkPeerUseful mocks base method.
+func (m *MockP2PManager) MarkPeerUseful(pid peer.ID) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "MarkPeerUseful", pid)
+}
+
+// MarkPeerUseful indicates an expected call of MarkPeerUseful.
+func (mr *MockP2PManagerMockRecorder) MarkPeerUseful(pid any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkPeerUseful", reflect.TypeOf((*MockP2PManager)(nil).MarkPeerUseful), pid)
+}
+
+// PeerLastUseful mocks base method.
+func (m *MockP2PManager) PeerLastUseful(pid peer.ID) (time.Time, bool) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PeerLastUseful", pid)
+	ret0, _ := ret[0].(time.Time)
+	ret1, _ := ret[1].(bool)
+	return ret0, ret1
+}
+
+// PeerLastUseful indicates an expected call of PeerLastUseful.
+func (mr *MockP2PManagerMockRecorder) PeerLastUseful(pid any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PeerLastUseful", reflect.TypeOf((*MockP2PManager)(nil).PeerLastUseful), pid)
 }
 
 // Pubsub mocks base method.
