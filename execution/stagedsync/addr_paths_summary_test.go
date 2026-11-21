@@ -27,41 +27,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func summaryReads(addrs []accounts.Address, slot accounts.StorageKey) state.ReadSet {
-	hdr := state.ReadHeader{Source: state.StorageRead}
-	rs := state.ReadSet{}
-	rs.SetHeader(addrs[0], state.BalancePath, accounts.StorageKey{}, hdr)
-	rs.SetHeader(addrs[0], state.NoncePath, accounts.StorageKey{}, hdr)
-	for i := range byte(5) {
-		rs.SetHeader(addrs[1], state.StoragePath, accounts.InternKey(common.Hash{i, 7}), hdr)
-	}
-	rs.SetHeader(addrs[1], state.StoragePath, slot, hdr)
-	rs.SetHeader(addrs[2], state.CodeHashPath, accounts.StorageKey{}, hdr)
-	return rs
-}
-
-func TestSummaryIndexReadsMatchesHeaderWalk(t *testing.T) {
-	addrs := []accounts.Address{
-		accounts.InternAddress(common.HexToAddress("0xa1")),
-		accounts.InternAddress(common.HexToAddress("0xa2")),
-		accounts.InternAddress(common.HexToAddress("0xa3")),
-	}
-	slot := accounts.InternKey(common.HexToHash("0x01"))
-	walk := newDetExecutor(t, 4)
-	sum := newDetExecutor(t, 4)
-	for _, tx := range []int{2, 1, 3, 2} {
-		rs := summaryReads(addrs, slot)
-		if tx == 3 {
-			rs = state.ReadSet{}
-			rs.SetHeader(addrs[0], state.CodePath, accounts.StorageKey{}, state.ReadHeader{Source: state.StorageRead})
-		}
-		walk.indexReads(tx, rs)
-		sum.indexReadAddrs(tx, rs.AddrPaths())
-	}
-	require.NotEmpty(t, walk.readerByAddr)
-	require.Equal(t, walk.readerByAddr, sum.readerByAddr)
-}
-
 func TestSummaryMarkReadersDirtyMatchesHeaderWalk(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xa1"))
 	other := accounts.InternAddress(common.HexToAddress("0xa2"))

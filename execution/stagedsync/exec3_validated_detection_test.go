@@ -194,6 +194,34 @@ func TestRevalCandidates_BALKeepsReadersOfDroppedWrite(t *testing.T) {
 	require.Equal(t, []int{1}, be.revalCandidates(0, newWS().build(), oldW))
 }
 
+func TestRevalCandidatesFromWriteAddrsMatchesTheWriteSet(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
+	b := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000bb"))
+	c := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000cc"))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	writer := state.Version{TxIndex: 0}
+	ws := newWS().stor(a, slot, writer, *uint256.NewInt(1)).selfDestruct(b, writer, true).build()
+	reads := map[int]state.ReadSet{}
+	for tx, addr := range map[int]accounts.Address{1: a, 2: b, 3: c} {
+		rs := state.ReadSet{}
+		rs.SetHeader(addr, state.BalancePath, accounts.StorageKey{}, state.ReadHeader{Source: state.StorageRead})
+		reads[tx] = rs
+	}
+	candidates := func(withSummary bool) []int {
+		be := newDetExecutor(t, 4)
+		be.results = make([]*execResult, 4)
+		if withSummary {
+			be.results[0] = &execResult{TxResult: &exec.TxResult{TxOut: ws, WriteAddrs: ws.AddrPaths()}}
+		}
+		for tx, rs := range reads {
+			be.indexReads(tx, rs)
+		}
+		return be.revalCandidates(0, ws, nil)
+	}
+	require.Equal(t, []int{1, 2}, candidates(false))
+	require.Equal(t, []int{1, 2}, candidates(true))
+}
+
 func TestFinalizeFlushFlagsTheReaderOfAChangedCell(t *testing.T) {
 	be := newDetExecutor(t, 4)
 	be.versionMap.HasBAL = true
