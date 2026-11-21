@@ -230,7 +230,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			ic := ii.beginForTests()
 			defer ic.Close()
 
-			ii.integrateDirtyFiles(sf, txFrom, txTo)
+			reclaimFiles(ii.integrateDirtyFiles(sf, txFrom, txTo))
 			stat, err := ic.HashSeekingPrune(t.Context(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, prune.DefaultStorageMode)
 			require.NoError(t, err)
 			require.Zero(t, stat.PruneCountTx)
@@ -365,7 +365,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			ic := ii.beginForTests()
 			defer ic.Close()
 
-			ii.integrateDirtyFiles(sf, txFrom, txTo)
+			reclaimFiles(ii.integrateDirtyFiles(sf, txFrom, txTo))
 			st := &prune.Stat{
 				MinTxNum:         0,
 				MaxTxNum:         0,
@@ -398,7 +398,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
 			ic := ii.beginForTests()
 			defer ic.Close()
-			ii.integrateDirtyFiles(sf, txFrom, txTo)
+			reclaimFiles(ii.integrateDirtyFiles(sf, txFrom, txTo))
 
 			// Drain step 0 from the db so minTxNumInDB >= files.EndTxNum; otherwise
 			// CanPrune's files-based clause would return true regardless of progress state.
@@ -423,7 +423,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			sf, _ := ii.buildFiles(t.Context(), 0, collation, background.NewProgressSet())
 			collation.Close()
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
-			ii.integrateDirtyFiles(sf, txFrom, txTo)
+			reclaimFiles(ii.integrateDirtyFiles(sf, txFrom, txTo))
 
 			ic := ii.beginForTests()
 			defer ic.Close()
@@ -889,7 +889,7 @@ func (ii *InvertedIndex) collateBuildIntegrate(ctx context.Context, step kv.Step
 	if err != nil {
 		return err
 	}
-	ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
+	reclaimFiles(ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize)))
 	return nil
 }
 

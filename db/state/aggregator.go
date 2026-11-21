@@ -1361,14 +1361,15 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
+	var retired retiredFiles //nolint:prealloc // Most builds replace no files.
 	for id, d := range a.d {
-		d.integrateDirtyFiles(sf.d[id], txNumFrom, txNumTo)
+		retired = append(retired, d.integrateDirtyFiles(sf.d[id], txNumFrom, txNumTo)...)
 	}
 	for id, ii := range a.standaloneIIs() {
-		ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)
+		retired = append(retired, ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)...)
 	}
 
-	a.recalcVisibleFiles(nil)
+	a.recalcVisibleFiles(retired)
 }
 
 func (a *Aggregator) DomainTables(names ...kv.Domain) (tables []string) {
@@ -2181,21 +2182,22 @@ func (a *Aggregator) integrateMergedDirtyFiles(in *MergeResult) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
+	var retired retiredFiles
 	for id, d := range a.d {
 		if !d.Enabled {
 			continue
 		}
-		d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])
+		retired = append(retired, d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])...)
 	}
 
 	for id, ii := range a.standaloneIIs() {
 		if !ii.Enabled {
 			continue
 		}
-		ii.integrateMergedDirtyFiles(in.iis[id])
+		retired = append(retired, ii.integrateMergedDirtyFiles(in.iis[id])...)
 	}
 
-	a.cleanAfterMergeLocked(at, in)
+	a.cleanAfterMergeLocked(at, in, retired)
 }
 
 func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
@@ -2205,15 +2207,14 @@ func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
-	a.cleanAfterMergeLocked(at, in)
+	a.cleanAfterMergeLocked(at, in, nil)
 }
 
-func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult) {
+func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult, retired retiredFiles) {
 	// Collect garbage names and remove it from dirtyFiles in one pass. onFilesDelete
 	// blocks downstream (e.g. Downloader) before recalc/reclaim physically unlinks
 	// anything (deferred to reclaimRetired), so it won't re-create a file we delete.
 	var deleted []string
-	var retired []*FilesItem
 	// Commitment goes first: a domain input is kept while a commitment file of its range is still dirty.
 	order := []kv.Domain{kv.CommitmentDomain}
 	for id := range at.d {

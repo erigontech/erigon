@@ -164,7 +164,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 					values[string(keyBuf)] = updates[vi:]
 					require.True(t, slices.IsSorted(seenKeys))
 				}
-				h.integrateDirtyFiles(sf, i, i+h.stepSize)
+				reclaimFiles(h.integrateDirtyFiles(sf, i, i+h.stepSize))
 				lastAggergatedTx = i + h.stepSize
 				return nil
 			}(); err != nil {
@@ -1140,7 +1140,7 @@ func (h *History) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv
 	if err != nil {
 		return err
 	}
-	h.integrateDirtyFiles(sf, txFrom, txTo)
+	reclaimFiles(h.integrateDirtyFiles(sf, txFrom, txTo))
 	return nil
 }
 
