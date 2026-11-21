@@ -1186,7 +1186,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	return latestRoot, nil
 }
 
-// rebuildStorageWorkerMemory is the heap one parallel v3 storage fold takes during a rebuild.
+// rebuildStorageWorkerMemory budgets a quarter of the memory for parallel v3 storage folds at 1 GiB each: a fold
+// worker measured ~0.35 GB of heap, and the rest of the rebuild needs the other three quarters.
 const rebuildStorageWorkerMemory = 4 * datasize.GB
 
 func rebuildStorageWorkersMax(totalMemory uint64) int {
