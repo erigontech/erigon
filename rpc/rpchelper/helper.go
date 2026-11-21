@@ -139,8 +139,8 @@ func resolveBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHas
 		number := *blockNrOrHash.BlockNumber
 		switch number {
 		case rpc.LatestBlockNumber:
-			if blockNumber, err = GetLatestBlockNumber(tx); err != nil {
-				return 0, common.Hash{}, false, false, err
+			if blockNumber, ok = forkchoiceHeadNumber(tx); !ok {
+				blockNumber = plainStateBlockNumber
 			}
 		case rpc.EarliestBlockNumber:
 			blockNumber = 0

@@ -23,9 +23,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/rpc"
@@ -44,23 +46,36 @@ func (rawdbBlockReader) HeaderNumber(_ context.Context, tx kv.Getter, hash commo
 	return rawdb.ReadHeaderNumber(tx, hash), nil
 }
 
-func TestResolveExecutedBlock(t *testing.T) {
-	_, tx := mdbxtest.NewTestTx(t)
-	hashOf := func(n uint64) common.Hash { return common.Hash{0x01, byte(n)} }
-	// Canonical blocks 0..5; execution reached 3, the forkchoice head is 5.
+var (
+	byNumber = rpc.BlockNumberOrHashWithNumber
+	sideHash = common.Hash{0x02, 2}
+)
+
+func hashOf(n uint64) common.Hash { return common.Hash{0x01, byte(n)} }
+
+func byHash(h common.Hash) rpc.BlockNumberOrHash { return rpc.BlockNumberOrHashWithHash(h, true) }
+
+// newExecutedChainTx returns a tx with canonical blocks 0..5, a side block at
+// height 2 and execution progress at 3.
+func newExecutedChainTx(t *testing.T) kv.TemporalRwTx {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(t.Context()) //nolint:gocritic
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
 	for n := uint64(0); n <= 5; n++ {
 		require.NoError(t, rawdb.WriteCanonicalHash(tx, hashOf(n), n))
 		require.NoError(t, rawdb.WriteHeaderNumber(tx, hashOf(n), n))
 	}
-	sideHash := common.Hash{0x02, 2}
 	require.NoError(t, rawdb.WriteHeaderNumber(tx, sideHash, 2))
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 3))
+	return tx
+}
+
+func TestResolveExecutedBlock(t *testing.T) {
+	tx := newExecutedChainTx(t)
 	rawdb.WriteForkchoiceHead(tx, hashOf(5))
 	rawdb.WriteForkchoiceSafe(tx, hashOf(2))
 	rawdb.WriteForkchoiceFinalized(tx, hashOf(1))
-
-	byNumber := rpc.BlockNumberOrHashWithNumber
-	byHash := func(h common.Hash) rpc.BlockNumberOrHash { return rpc.BlockNumberOrHashWithHash(h, true) }
 
 	for _, tc := range []struct {
 		name       string
@@ -117,4 +132,32 @@ func TestResolveExecutedBlock(t *testing.T) {
 		require.Equal(t, uint64(2), number)
 		require.Equal(t, sideHash, hash)
 	})
+}
+
+func TestResolveExecutedBlockLatestWithoutForkchoiceHead(t *testing.T) {
+	tx := newExecutedChainTx(t)
+
+	number, hash, latest, err := ResolveExecutedBlock(t.Context(), true, byNumber(rpc.LatestBlockNumber), tx, rawdbBlockReader{})
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), number)
+	require.Equal(t, hashOf(3), hash)
+	require.True(t, latest)
+}
+
+func TestResolveExecutedBlockReadsOnlyGivenTx(t *testing.T) {
+	tx := newExecutedChainTx(t)
+	overlay, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer overlay.Close()
+	require.NoError(t, stages.SaveStageProgress(overlay, stages.Execution, 5))
+
+	_, _, _, err = ResolveExecutedBlock(t.Context(), true, byNumber(5), tx, rawdbBlockReader{})
+	var notExecuted *BlockNotExecutedError
+	require.ErrorAs(t, err, &notExecuted)
+	require.Equal(t, uint64(3), notExecuted.LastExecuted)
+
+	number, _, latest, err := ResolveExecutedBlock(t.Context(), true, byNumber(5), overlay.NewReadView(tx), rawdbBlockReader{})
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), number)
+	require.True(t, latest)
 }
