@@ -233,7 +233,7 @@ func TestCommittedFallbackDependsOnInFlightDestruct(t *testing.T) {
 		NonceChanges:   []*types.NonceChange{{Index: 2, Value: 1}},
 		CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: []byte{0x60, 0x01}}},
 	}})
-	vm.SeedAddresses()
+	vm.SeedAddresses(InternBALAddresses(vm.bal))
 
 	header := func(path AccountPath, status valueStatus) WriteHeader {
 		h := WriteHeader{Address: addr, Path: path, Version: Version{TxIndex: 0}}

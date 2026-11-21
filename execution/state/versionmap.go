@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -438,13 +439,83 @@ func (vm *VersionMap) assertUnsealed(txIdx int, addr accounts.Address, path Acco
 	}
 }
 
+// InternBALAddresses interns each account address of bal once. The caller passes the slice to every version
+// map call that walks the same BAL, so a block interns its BAL addresses once.
+func InternBALAddresses(bal types.BlockAccessList) []accounts.Address {
+	if len(bal) == 0 {
+		return nil
+	}
+	addrs := make([]accounts.Address, len(bal))
+	for i := range bal {
+		addrs[i] = accounts.InternAddress(bal[i].Address)
+	}
+	return addrs
+}
+
 func NewVersionMap(changes types.BlockAccessList) *VersionMap {
+	return NewBALVersionMap(changes, InternBALAddresses(changes))
+}
+
+// NewBALVersionMap is NewVersionMap with the BAL's addresses from InternBALAddresses.
+func NewBALVersionMap(changes types.BlockAccessList, addrs []accounts.Address) *VersionMap {
 	vm := &VersionMap{
 		HasBAL: len(changes) > 0,
 		bal:    changes,
 	}
-	vm.WriteChanges(changes)
+	if len(changes) > 0 {
+		writers := 0
+		for i := range changes {
+			if balAccountWrites(&changes[i]) {
+				writers++
+			}
+		}
+		m := xsync.NewMap[accounts.Address, *AddressEntry](xsync.WithPresize(writers))
+		entries := make([]AddressEntry, writers)
+		for i := range changes {
+			if balAccountWrites(&changes[i]) {
+				m.Store(addrs[i], &entries[0])
+				entries = entries[1:]
+				vm.nonEmpty.Store(true)
+			}
+		}
+		vm.s.Store(m)
+	}
+	if balChunkWorkers(len(changes)) <= 1 {
+		vm.WriteChanges(changes, addrs)
+	} else {
+		forBALChunks(len(changes), func(from, to int) { vm.writeChangesAt(changes, addrs, from, to) })
+	}
 	return vm
+}
+
+func balAccountWrites(ac *types.AccountChanges) bool {
+	return len(ac.StorageChanges)+len(ac.BalanceChanges)+len(ac.NonceChanges)+len(ac.CodeChanges) > 0
+}
+
+// balChunkAccounts is the smallest share of a BAL that pays for its own goroutine.
+const balChunkAccounts = 128
+
+func balChunkWorkers(n int) int {
+	if n < 2*balChunkAccounts {
+		return 1 // no GOMAXPROCS read: it takes the scheduler lock, and empty maps are built often
+	}
+	return min(runtime.GOMAXPROCS(-1), n/balChunkAccounts)
+}
+
+// forBALChunks runs fn over disjoint account ranges of a BAL with n accounts, on several goroutines
+// for a large BAL. Accounts own their version-map entries, so the ranges never share a cell.
+func forBALChunks(n int, fn func(from, to int)) {
+	workers := balChunkWorkers(n)
+	if workers <= 1 {
+		fn(0, n)
+		return
+	}
+	var wg sync.WaitGroup
+	step := (n + workers - 1) / workers
+	for from := 0; from < n; from += step {
+		wg.Go(func() { fn(from, min(from+step, n)) })
+	}
+	wg.Wait()
 }
 
 // balAccount returns the access list's changes of addr. The access list is validated, so its
@@ -550,8 +621,12 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 // WriteChanges pre-populates the version map from a BAL (EIP-7928), routing each
 // per-path change through the typed Write primitive so the value type is enforced at
 // compile time.
-func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
-	for i := range changes {
+func (vm *VersionMap) WriteChanges(changes types.BlockAccessList, addrs []accounts.Address) {
+	vm.writeChangesAt(changes, addrs, 0, len(changes))
+}
+
+func (vm *VersionMap) writeChangesAt(changes types.BlockAccessList, addrs []accounts.Address, from, to int) {
+	for i := from; i < to; i++ {
 		accountChanges := &changes[i]
 		if dbg.TraceBALFeed {
 			fmt.Printf(
@@ -564,11 +639,10 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 				len(accountChanges.StorageReads),
 			)
 		}
-		if len(accountChanges.StorageChanges) == 0 && len(accountChanges.BalanceChanges) == 0 &&
-			len(accountChanges.NonceChanges) == 0 && len(accountChanges.CodeChanges) == 0 {
+		if !balAccountWrites(accountChanges) {
 			continue
 		}
-		addr := accounts.InternAddress(accountChanges.Address)
+		addr := addrs[i]
 		e := vm.entryOrCreate(addr)
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {

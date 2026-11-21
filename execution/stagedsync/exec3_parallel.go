@@ -1381,7 +1381,7 @@ func (pe *parallelExecutor) startBlock(be *blockExecutor) error {
 		if err := be.versionMap.SeedEmptyRemovals(
 			be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum),
 			pe.cfg.chainConfig.Aura != nil,
-			base); err != nil {
+			base, be.balAddrs); err != nil {
 			return fmt.Errorf("seed EIP-161 removals of block %d: %w", be.blockNum, err)
 		}
 	}
@@ -2586,6 +2586,7 @@ type blockExecutor struct {
 
 	// Multi-version map
 	versionMap *state.VersionMap
+	balAddrs   []accounts.Address // the BAL's interned addresses, from newBlockExec to startBlock's seeding
 
 	// Stores the inputs and outputs of the last incarnation of all transactions
 	blockIO *state.VersionedIO
@@ -2692,8 +2693,9 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
-	versionMap := state.NewVersionMap(accessList)
-	versionMap.SeedAddresses()
+	balAddrs := state.InternBALAddresses(accessList)
+	versionMap := state.NewBALVersionMap(accessList, balAddrs)
+	versionMap.SeedAddresses(balAddrs)
 	be := &blockExecutor{
 		blockNum:            blockNum,
 		blockHash:           blockHash,
@@ -2702,6 +2704,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		finalizedResults:    map[int]*execResult{},
 		blockIO:             &state.VersionedIO{},
 		versionMap:          versionMap,
+		balAddrs:            balAddrs,
 		profile:             profile,
 		consumers:           consumers,
 		gasPool:             gasPool,
