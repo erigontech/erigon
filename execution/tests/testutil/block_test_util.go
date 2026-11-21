@@ -359,7 +359,7 @@ func (bt *BlockTest) validateHeadAndPostState(m *execmoduletester.ExecModuleTest
 	if common.Hash(bt.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
 	}
-	newDB := state.New(m.NewStateReader(tx))
+	newDB := state.NewWithVersionMap(m.NewStateReader(tx), state.NewVersionMap(nil))
 	if err := bt.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %w", err)
 	}

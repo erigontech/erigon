@@ -85,6 +85,7 @@ type attestationTestSuite struct {
 
 func (t *attestationTestSuite) SetupTest() {
 	saveSignatureGlobals(t.T())
+	saveCommitteeGlobals(t.T())
 	t.gomockCtrl = gomock.NewController(t.T())
 	t.mockForkChoice = &mock_services.ForkChoiceStorageMock{}
 	_, st, _ := tests.GetBellatrixRandom()
@@ -427,12 +428,10 @@ func (t *attestationTestSuite) setupTargetShufflingAttestation(version clparams.
 	epoch := slot / cfg.SlotsPerEpoch
 	t.ethClock.EXPECT().GetEpochAtSlot(slot).Return(epoch).Times(1)
 	t.ethClock.EXPECT().GetCurrentSlot().Return(slot).Times(1)
-	origCommitteeCount, origSubnet := computeCommitteeCountPerSlot, computeSubnetForAttestation
 	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, slot, slotsPerEpoch uint64) uint64 {
 		return headState.CommitteeCount(slot / slotsPerEpoch)
 	}
 	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 { return 1 }
-	t.T().Cleanup(func() { computeCommitteeCountPerSlot, computeSubnetForAttestation = origCommitteeCount, origSubnet })
 	computeSigningRoot = func(ssz.HashableSSZ, []byte) ([32]byte, error) { return [32]byte{}, nil }
 	blsVerifyMultipleSignatures = withoutDecompressed(func([][]byte, [][]byte, [][]byte) (bool, error) { return true, nil })
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1562,8 +1561,7 @@ func TestAttestation(t *testing.T) {
 
 func TestAttestationForLateBlockIsProcessedOnceBlockArrives(t *testing.T) {
 	saveSignatureGlobals(t)
-	origCommitteeCount, origSubnet := computeCommitteeCountPerSlot, computeSubnetForAttestation
-	t.Cleanup(func() { computeCommitteeCountPerSlot, computeSubnetForAttestation = origCommitteeCount, origSubnet })
+	saveCommitteeGlobals(t)
 	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 { return 8 }
 	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 { return 1 }
 	computeSigningRoot = func(ssz.HashableSSZ, []byte) ([32]byte, error) { return [32]byte{}, nil }
@@ -1618,8 +1616,7 @@ func TestAttestationForLateBlockIsProcessedOnceBlockArrives(t *testing.T) {
 // The pool gets the signature the batch verifier decompressed, not nil and not a decompression of the attestation's bytes.
 func TestAttestationHandsThePoolTheSignatureTheBatchVerifierDecompressed(t *testing.T) {
 	saveSignatureGlobals(t)
-	origCommitteeCount, origSubnet := computeCommitteeCountPerSlot, computeSubnetForAttestation
-	t.Cleanup(func() { computeCommitteeCountPerSlot, computeSubnetForAttestation = origCommitteeCount, origSubnet })
+	saveCommitteeGlobals(t)
 	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 { return 8 }
 	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 { return 1 }
 	computeSigningRoot = func(ssz.HashableSSZ, []byte) ([32]byte, error) { return [32]byte{}, nil }
