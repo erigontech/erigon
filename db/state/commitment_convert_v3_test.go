@@ -39,7 +39,11 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
@@ -767,22 +771,21 @@ func TestConvertCommitmentFiles_V3RebuiltStepRefusesBeforeSwap(t *testing.T) {
 
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	swapped := false
-	err = state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{
-		TargetV3: true,
-		BeforeSwap: func() error {
-			swapped = true
-			return nil
-		},
-	}, log.New())
+	err = state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{TargetV3: true}, log.New())
 	require.ErrorContains(t, err, "commitment state txNum 62 differs from file end txNum 63")
-	require.ErrorContains(t, err, "no commitment file was replaced; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if commitment history was pruned")
-	require.False(t, swapped)
+	require.ErrorContains(t, err, "no commitment file was replaced; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if the history of accounts, storage, code or commitment was pruned")
 	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "backup"))
 	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "rebuild"))
 }
 
 func TestConvertCommitmentFiles_V3FoldsTheTailAfterTheStoredState(t *testing.T) {
+	t.Run("plain", func(t *testing.T) { testV3FoldsTheTail(t, false) })
+	// A key the first file's tail fold changed, which the next file does not hold, is read
+	// back from the first file: its references resolve against that file's range.
+	t.Run("squeezed", func(t *testing.T) { testV3FoldsTheTail(t, true) })
+}
+
+func testV3FoldsTheTail(t *testing.T, squeeze bool) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	pairs, others := accountPairsByFirstNibble(t)
 	x, y, w, z := pairs[0][0], pairs[0][1], pairs[1][0], pairs[1][1]
@@ -813,22 +816,21 @@ func TestConvertCommitmentFiles_V3FoldsTheTailAfterTheStoredState(t *testing.T) 
 	for block := range maxTxNums {
 		maxTxNums[block] = uint64(block)*3 + 2
 	}
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		for block := range uint64(29) {
-			if block == 0 || block == 26 || block == 27 {
-				continue
-			}
-			if err := tx.Delete(kv.MaxTxNum, binary.BigEndian.AppendUint64(nil, block)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}))
 
+	if squeeze {
+		runOrchestrator(t, db, state.ConvertOpts{TargetSqueeze: true})
+		first := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)[0]
+		require.True(t, strings.HasPrefix(filepath.Base(first), "v2.1-"), "%s is squeezed", filepath.Base(first))
+		require.NoError(t, dir.RemoveAll(filepath.Join(agg.Dirs().Snap, "backup")))
+	}
 	func() {
 		at := agg.BeginFilesRo()
 		defer at.Close()
-		opts := state.ConvertOpts{TargetV3: true, DB: db, TxNums: rawdbv3.TxNums.WithCustomReadTxNumFunc(maxTxNums)}
+		empty := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).MustOpen()
+		t.Cleanup(empty.Close)
+		emptyDB, err := temporal.New(empty, agg, nil)
+		require.NoError(t, err)
+		opts := state.ConvertOpts{TargetV3: true, DB: emptyDB, TxNums: rawdbv3.TxNums.WithCustomReadTxNumFunc(maxTxNums)}
 		require.NoError(t, state.ConvertCommitmentFiles(t.Context(), at, opts, log.New()))
 	}()
 

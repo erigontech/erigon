@@ -315,7 +315,7 @@ func TestCodeSegment_LaterReadSeesFullCode(t *testing.T) {
 	for name, read := range map[string]func(*IntraBlockState, accounts.Address) ([]byte, error){
 		"GetCode": (*IntraBlockState).GetCode,
 		"ResolveCode": func(ibs *IntraBlockState, addr accounts.Address) ([]byte, error) {
-			code, err := ibs.ResolveCode(addr)
+			code, err := ibs.ResolveCode(addr, true)
 			return code.Bytes, err
 		},
 		"ReadCodeSegmentTo": func(ibs *IntraBlockState, addr accounts.Address) ([]byte, error) {
