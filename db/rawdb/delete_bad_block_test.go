@@ -42,7 +42,7 @@ func (tx failingDeleteTx) Delete(table string, k []byte) error {
 
 // A failed delete fails the purge, so the caller rolls back instead of committing half of it.
 func TestDeleteBadBlockReturnsEveryDeleteError(t *testing.T) {
-	for _, table := range []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers, kv.HeaderNumber} {
+	for _, table := range []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers, kv.HeaderTD, kv.HeaderNumber} {
 		t.Run(table, func(t *testing.T) {
 			_, tx := mdbxtest.NewTestTx(t)
 			err := rawdb.DeleteBadBlock(failingDeleteTx{RwTx: tx, table: table}, common.Hash{1}, 1)

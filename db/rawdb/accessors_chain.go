@@ -759,7 +759,7 @@ func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 	}
 }
 
-// DeleteBadBlock removes the header, body, senders and transactions of a block that failed validation.
+// DeleteBadBlock removes the header, total difficulty, body, senders and transactions of a block that failed validation.
 // Valid non-canonical blocks stay in the DB until PruneBlocks removes them.
 func DeleteBadBlock(db kv.RwTx, hash common.Hash, number uint64) error {
 	key := dbutils.BlockBodyKey(number, hash)
@@ -777,8 +777,11 @@ func DeleteBadBlock(db kv.RwTx, hash common.Hash, number uint64) error {
 			return err
 		}
 	}
-	if err := db.Delete(kv.Headers, dbutils.HeaderKey(number, hash)); err != nil {
-		return err
+	headerKey := dbutils.HeaderKey(number, hash)
+	for _, table := range []string{kv.Headers, kv.HeaderTD} {
+		if err := db.Delete(table, headerKey); err != nil {
+			return err
+		}
 	}
 	return db.Delete(kv.HeaderNumber, hash[:])
 }
