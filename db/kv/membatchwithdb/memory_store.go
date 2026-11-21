@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"maps"
 	"sort"
 	"sync"
 	"unsafe"
@@ -36,16 +37,23 @@ import (
 // Compile-time check that memStore implements kv.RwTx.
 var _ kv.RwTx = (*memStore)(nil)
 
-// memEntry is a key-value pair stored in the btree.
+// memEntry is a key-value pair stored in the btree, or a tombstone that
+// hides the row of a lower layer.
 type memEntry struct {
-	k []byte
-	v []byte
+	k       []byte
+	v       []byte
+	deleted bool
 }
+
+// keyWide reports whether e is a DupSort tombstone for all values of its key:
+// a value tombstone always has a non-nil value.
+func (e memEntry) keyWide() bool { return e.deleted && e.v == nil }
 
 // memTable is a single table backed by a btree.
 type memTable struct {
 	tree    *btree2.BTreeG[memEntry]
 	dupSort bool
+	cleared bool
 }
 
 func newMemTable(dupSort bool) *memTable {
@@ -56,6 +64,9 @@ func newMemTable(dupSort bool) *memTable {
 			if c != 0 {
 				return c < 0
 			}
+			if aw, bw := a.keyWide(), b.keyWide(); aw || bw {
+				return aw && !bw
+			}
 			return bytes.Compare(a.v, b.v) < 0
 		}
 	} else {
@@ -64,7 +75,7 @@ func newMemTable(dupSort bool) *memTable {
 		}
 	}
 	return &memTable{
-		// NoLocks: true because all concurrency is handled by memStore.mu.
+		// NoLocks: true because each store's mu guards its trees, and snapshot copies share nodes copy-on-write.
 		tree:    btree2.NewBTreeGOptions(less, btree2.Options{NoLocks: true}),
 		dupSort: dupSort,
 	}
@@ -75,20 +86,45 @@ func newMemTable(dupSort bool) *memTable {
 // affinity (no runtime.LockOSThread), so it can be safely used across
 // goroutine migrations between Engine API calls.
 //
-// Thread safety: all access is protected by mu. Btrees use NoLocks:true
-// because the store-level mutex serializes all operations.
+// Thread safety: all access to a live store is protected by mu. Btrees use
+// NoLocks:true because the store-level mutex serializes all operations. A
+// snapshot owns copies of the trees and is never written, so it has a nil mu
+// and its reads take no lock.
 type memStore struct {
-	mu        sync.RWMutex
+	mu        *sync.RWMutex
 	tables    map[string]*memTable
 	sequences map[string]uint64
 }
 
 func newMemStore() *memStore {
 	return &memStore{
+		mu:        &sync.RWMutex{},
 		tables:    make(map[string]*memTable),
 		sequences: make(map[string]uint64),
 	}
 }
+
+func (s *memStore) rlock() {
+	if s.mu != nil {
+		s.mu.RLock()
+	}
+}
+
+func (s *memStore) runlock() {
+	if s.mu != nil {
+		s.mu.RUnlock()
+	}
+}
+
+// lock panics on a snapshot: its readers take no lock, so a write would race them.
+func (s *memStore) lock() {
+	if s.mu == nil {
+		panic("membatchwithdb: write to a read-only overlay snapshot")
+	}
+	s.mu.Lock()
+}
+
+func (s *memStore) unlock() { s.mu.Unlock() }
 
 func memTableIsDupSort(table string) bool {
 	config, ok := kv.ChaindataTablesCfg[table]
@@ -96,6 +132,150 @@ func memTableIsDupSort(table string) bool {
 		return false
 	}
 	return config.Flags&kv.DupSort != 0
+}
+
+// markDupSort makes a table that ChaindataTablesCfg does not know a DupSort table, as a DupSort
+// cursor on it says it is one. Rows already stored keep their order: a plain table has one per key.
+func (s *memStore) markDupSort(table string) {
+	if _, known := kv.ChaindataTablesCfg[table]; known || s.mu == nil {
+		return
+	}
+	s.lock()
+	defer s.unlock()
+	t := s.getOrCreateTable(table)
+	if t.dupSort {
+		return
+	}
+	d := newMemTable(true)
+	t.tree.Scan(func(e memEntry) bool {
+		d.tree.Set(e)
+		return true
+	})
+	t.tree, t.dupSort = d.tree, true // in place: open cursors hold t
+}
+
+// snapshot returns a point-in-time copy that later writes to s do not change.
+func (s *memStore) snapshot() *memStore {
+	if s.mu == nil {
+		return s
+	}
+	s.lock()
+	defer s.unlock()
+	snap := &memStore{
+		tables:    make(map[string]*memTable, len(s.tables)),
+		sequences: maps.Clone(s.sequences),
+	}
+	for name, t := range s.tables {
+		snap.tables[name] = &memTable{tree: t.tree.Copy(), dupSort: t.dupSort, cleared: t.cleared}
+	}
+	return snap
+}
+
+// hides reports whether the lower-layer row (k, v) is hidden by ClearTable or
+// a tombstone; a nil v checks only the key. Must be called with mu held.
+func (t *memTable) hides(k, v []byte) bool {
+	if t.cleared {
+		return true
+	}
+	if !t.dupSort {
+		e, found := t.tree.Get(memEntry{k: k})
+		return found && e.deleted
+	}
+	if _, found := t.tree.Get(memEntry{k: k, deleted: true}); found {
+		return true
+	}
+	if v == nil {
+		return false
+	}
+	e, found := t.tree.Get(memEntry{k: k, v: v})
+	return found && e.deleted
+}
+
+// isHidden is memTable.hides for a table name.
+func (s *memStore) isHidden(table string, k, v []byte) bool {
+	s.rlock()
+	defer s.runlock()
+	t, ok := s.tables[table]
+	return ok && t.hides(k, v)
+}
+
+// isCleared reports whether ClearTable hid the lower-layer rows of table.
+func (s *memStore) isCleared(table string) bool {
+	s.rlock()
+	defer s.runlock()
+	t, ok := s.tables[table]
+	return ok && t.cleared
+}
+
+// tombstones returns the ClearTable flag and the tombstones of table; a row
+// with a nil value stands for the whole key.
+func (s *memStore) tombstones(table string) (cleared bool, rows []entry) {
+	s.rlock()
+	defer s.runlock()
+	t, ok := s.tables[table]
+	if !ok {
+		return false, nil
+	}
+	t.tree.Scan(func(e memEntry) bool {
+		if e.deleted {
+			rows = append(rows, entry{k: e.k, v: e.v})
+		}
+		return true
+	})
+	return t.cleared, rows
+}
+
+// hasTombstone reports whether table holds a tombstone with fromKey <= k < toKey;
+// nil bounds are open.
+func (s *memStore) hasTombstone(table string, fromKey, toKey []byte) bool {
+	s.rlock()
+	defer s.runlock()
+	t, ok := s.tables[table]
+	if !ok {
+		return false
+	}
+	iter := t.tree.Iter()
+	defer iter.Release()
+	for valid := iter.Seek(memEntry{k: fromKey, deleted: true}); valid; valid = iter.Next() {
+		item := iter.Item()
+		if toKey != nil && bytes.Compare(item.k, toKey) >= 0 {
+			return false
+		}
+		if item.deleted {
+			return true
+		}
+	}
+	return false
+}
+
+// deleteExact replaces the (k, v) pair of a DupSort table, or the key of a
+// plain table, with a tombstone. Must be called with mu held.
+func (t *memTable) deleteExact(k, v []byte) {
+	e := memEntry{k: bytes.Clone(k), deleted: true}
+	if t.dupSort {
+		e.v = append([]byte{}, v...)
+	}
+	t.tree.Set(e)
+}
+
+// skipDeleted moves a positioned iterator past tombstones.
+func skipDeleted(iter *btree2.IterG[memEntry], valid, forward bool) bool {
+	for valid && iter.Item().deleted {
+		if forward {
+			valid = iter.Next()
+		} else {
+			valid = iter.Prev()
+		}
+	}
+	return valid
+}
+
+// skipDeletedDup moves a positioned iterator past the tombstones of key only.
+func skipDeletedDup(iter *btree2.IterG[memEntry], valid bool, key []byte) bool {
+	for valid && iter.Item().deleted && bytes.Equal(iter.Item().k, key) {
+		valid = iter.Next()
+	}
+	return valid
 }
 
 // getOrCreateTable must be called with mu held (read or write).
@@ -111,41 +291,41 @@ func (s *memStore) getOrCreateTable(table string) *memTable {
 // --- kv.Getter ---
 
 func (s *memStore) Has(table string, key []byte) (bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.rlock()
+	defer s.runlock()
 	t, ok := s.tables[table]
 	if !ok {
 		return false, nil
 	}
-	_, found := t.tree.Get(memEntry{k: key})
-	return found, nil
+	e, found := t.tree.Get(memEntry{k: key})
+	return found && !e.deleted, nil
 }
 
 func (s *memStore) GetOne(table string, key []byte) ([]byte, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.rlock()
+	defer s.runlock()
 	t, ok := s.tables[table]
 	if !ok {
 		return nil, nil
 	}
 	item, found := t.tree.Get(memEntry{k: key})
-	if !found {
+	if !found || item.deleted {
 		return nil, nil
 	}
-	return bytes.Clone(item.v), nil
+	return append([]byte{}, item.v...), nil // non-nil even for an empty value, so callers do not fall back to the db
 }
 
 func (s *memStore) Rollback() {}
 
 func (s *memStore) ReadSequence(bucket string) (uint64, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.rlock()
+	defer s.runlock()
 	return s.sequences[bucket], nil
 }
 
 func (s *memStore) ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.rlock()
+	defer s.runlock()
 	t, ok := s.tables[table]
 	if !ok {
 		return nil
@@ -159,12 +339,11 @@ func (s *memStore) ForEach(table string, fromPrefix []byte, walker func(k, v []b
 	} else {
 		started = iter.First()
 	}
-	for started {
+	for started = skipDeleted(&iter, started, true); started; started = skipDeleted(&iter, iter.Next(), true) {
 		item := iter.Item()
 		if err := walker(item.k, item.v); err != nil {
 			return err
 		}
-		started = iter.Next()
 	}
 	return nil
 }
@@ -173,8 +352,8 @@ func (s *memStore) ForAmount(table string, prefix []byte, amount uint32, walker 
 	if amount == 0 {
 		return nil
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.rlock()
+	defer s.runlock()
 	t, ok := s.tables[table]
 	if !ok {
 		return nil
@@ -182,18 +361,12 @@ func (s *memStore) ForAmount(table string, prefix []byte, amount uint32, walker 
 	iter := t.tree.Iter()
 	defer iter.Release()
 
-	if !iter.Seek(memEntry{k: prefix}) {
-		return nil
-	}
-	for amount > 0 {
+	for valid := skipDeleted(&iter, iter.Seek(memEntry{k: prefix}), true); valid && amount > 0; valid = skipDeleted(&iter, iter.Next(), true) {
 		item := iter.Item()
 		if err := walker(item.k, item.v); err != nil {
 			return err
 		}
 		amount--
-		if !iter.Next() {
-			break
-		}
 	}
 	return nil
 }
@@ -201,8 +374,8 @@ func (s *memStore) ForAmount(table string, prefix []byte, amount uint32, walker 
 // --- kv.Putter ---
 
 func (s *memStore) Put(table string, k, v []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.lock()
+	defer s.unlock()
 	t := s.getOrCreateTable(table)
 	t.tree.Set(memEntry{k: bytes.Clone(k), v: bytes.Clone(v)})
 	// Keep sequences map in sync when writing to the Sequence table.
@@ -213,20 +386,17 @@ func (s *memStore) Put(table string, k, v []byte) error {
 }
 
 func (s *memStore) Delete(table string, k []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t, ok := s.tables[table]
-	if !ok {
-		return nil
-	}
+	s.lock()
+	defer s.unlock()
+	t := s.getOrCreateTable(table)
 	if !t.dupSort {
-		t.tree.Delete(memEntry{k: k})
+		t.tree.Set(memEntry{k: bytes.Clone(k), deleted: true})
 		return nil
 	}
-	// DupSort: delete all entries with this key.
+	// DupSort: replace all entries with this key by one key-wide tombstone.
 	var toDelete []memEntry
 	iter := t.tree.Iter()
-	if iter.Seek(memEntry{k: k}) {
+	if iter.Seek(memEntry{k: k, deleted: true}) {
 		for {
 			item := iter.Item()
 			if !bytes.Equal(item.k, k) {
@@ -242,12 +412,13 @@ func (s *memStore) Delete(table string, k []byte) error {
 	for _, item := range toDelete {
 		t.tree.Delete(item)
 	}
+	t.tree.Set(memEntry{k: bytes.Clone(k), deleted: true})
 	return nil
 }
 
 func (s *memStore) IncrementSequence(bucket string, amount uint64) (uint64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.lock()
+	defer s.unlock()
 	current := s.sequences[bucket]
 	s.sequences[bucket] = current + amount
 	// Keep the Sequence table in sync for Flush.
@@ -259,8 +430,8 @@ func (s *memStore) IncrementSequence(bucket string, amount uint64) (uint64, erro
 }
 
 func (s *memStore) ResetSequence(bucket string, newValue uint64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.lock()
+	defer s.unlock()
 	s.sequences[bucket] = newValue
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, newValue)
@@ -286,11 +457,11 @@ func (s *memStore) CollectMetrics() {}
 // --- kv.BucketMigrator ---
 
 func (s *memStore) ListTables() ([]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.rlock()
+	defer s.runlock()
 	names := make([]string, 0, len(s.tables))
 	for name, t := range s.tables {
-		if t.tree.Len() > 0 {
+		if t.tree.Len() > 0 || t.cleared {
 			names = append(names, name)
 		}
 	}
@@ -299,32 +470,32 @@ func (s *memStore) ListTables() ([]string, error) {
 }
 
 func (s *memStore) DropTable(table string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.lock()
+	defer s.unlock()
 	delete(s.tables, table)
 	return nil
 }
 
 func (s *memStore) CreateTable(table string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.lock()
+	defer s.unlock()
 	s.getOrCreateTable(table)
 	return nil
 }
 
 func (s *memStore) ExistsTable(table string) (bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.rlock()
+	defer s.runlock()
 	_, ok := s.tables[table]
 	return ok, nil
 }
 
 func (s *memStore) ClearTable(table string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if t, ok := s.tables[table]; ok {
-		t.tree.Clear()
-	}
+	s.lock()
+	defer s.unlock()
+	t := s.getOrCreateTable(table)
+	t.cleared = true
+	t.tree.Clear()
 	return nil
 }
 
@@ -339,8 +510,8 @@ func (s *memStore) CursorDupSort(table string) (kv.CursorDupSort, error) {
 }
 
 func (s *memStore) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.rlock()
+	defer s.runlock()
 	t, ok := s.tables[table]
 	if !ok {
 		return &memStoreSliceIter{}, nil
@@ -357,8 +528,8 @@ func (s *memStore) Prefix(table string, prefix []byte) (stream.KV, error) {
 }
 
 func (s *memStore) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.rlock()
+	defer s.runlock()
 	t, ok := s.tables[table]
 	if !ok {
 		return &memStoreSliceIter{}, nil
@@ -367,8 +538,8 @@ func (s *memStore) RangeDupSort(table string, key []byte, fromPrefix, toPrefix [
 }
 
 func (s *memStore) BucketSize(table string) (uint64, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.rlock()
+	defer s.runlock()
 	t, ok := s.tables[table]
 	if !ok {
 		return 0, nil
@@ -377,13 +548,20 @@ func (s *memStore) BucketSize(table string) (uint64, error) {
 }
 
 func (s *memStore) Count(bucket string) (uint64, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.rlock()
+	defer s.runlock()
 	t, ok := s.tables[bucket]
 	if !ok {
 		return 0, nil
 	}
-	return uint64(t.tree.Len()), nil
+	var n uint64
+	t.tree.Scan(func(e memEntry) bool {
+		if !e.deleted {
+			n++
+		}
+		return true
+	})
+	return n, nil
 }
 
 func (s *memStore) ViewID() uint64          { return 0 }
@@ -450,9 +628,17 @@ func (db *memStoreDB) Path() string                { return "<mem>" }
 // are not safe for concurrent modification).
 
 func (s *memStore) newCursor(table string) *memStoreCursor {
-	s.mu.Lock()
-	t := s.getOrCreateTable(table)
-	s.mu.Unlock()
+	var t *memTable
+	if s.mu == nil {
+		// A snapshot map is read concurrently, so a missing table gets a detached empty one.
+		if t = s.tables[table]; t == nil {
+			t = newMemTable(memTableIsDupSort(table))
+		}
+	} else {
+		s.lock()
+		t = s.getOrCreateTable(table)
+		s.unlock()
+	}
 	return &memStoreCursor{
 		store:  s,
 		table:  t,
@@ -470,49 +656,39 @@ type memStoreCursor struct {
 	current memEntry
 }
 
-func (c *memStoreCursor) First() ([]byte, []byte, error) {
-	c.store.mu.RLock()
-	defer c.store.mu.RUnlock()
-	iter := c.table.tree.Iter()
-	c.valid = iter.First()
-	if !c.valid {
+// land records the entry the iterator stopped at, or an exhausted cursor.
+func (c *memStoreCursor) land(iter *btree2.IterG[memEntry], valid bool) ([]byte, []byte, error) {
+	c.valid = valid
+	if !valid {
 		c.current = memEntry{}
-		iter.Release()
 		return nil, nil, nil
 	}
 	c.current = iter.Item()
-	iter.Release()
 	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
+}
+
+func (c *memStoreCursor) First() ([]byte, []byte, error) {
+	c.store.rlock()
+	defer c.store.runlock()
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	return c.land(&iter, skipDeleted(&iter, iter.First(), true))
 }
 
 func (c *memStoreCursor) Last() ([]byte, []byte, error) {
-	c.store.mu.RLock()
-	defer c.store.mu.RUnlock()
+	c.store.rlock()
+	defer c.store.runlock()
 	iter := c.table.tree.Iter()
-	c.valid = iter.Last()
-	if !c.valid {
-		c.current = memEntry{}
-		iter.Release()
-		return nil, nil, nil
-	}
-	c.current = iter.Item()
-	iter.Release()
-	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
+	defer iter.Release()
+	return c.land(&iter, skipDeleted(&iter, iter.Last(), false))
 }
 
 func (c *memStoreCursor) Seek(seek []byte) ([]byte, []byte, error) {
-	c.store.mu.RLock()
-	defer c.store.mu.RUnlock()
+	c.store.rlock()
+	defer c.store.runlock()
 	iter := c.table.tree.Iter()
-	c.valid = iter.Seek(memEntry{k: seek})
-	if !c.valid {
-		c.current = memEntry{}
-		iter.Release()
-		return nil, nil, nil
-	}
-	c.current = iter.Item()
-	iter.Release()
-	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
+	defer iter.Release()
+	return c.land(&iter, skipDeleted(&iter, iter.Seek(memEntry{k: seek}), true))
 }
 
 func (c *memStoreCursor) SeekExact(key []byte) ([]byte, []byte, error) {
@@ -530,51 +706,39 @@ func (c *memStoreCursor) Next() ([]byte, []byte, error) {
 	if !c.valid {
 		return nil, nil, nil
 	}
-	c.store.mu.RLock()
-	defer c.store.mu.RUnlock()
+	c.store.rlock()
+	defer c.store.runlock()
 	iter := c.table.tree.Iter()
-	c.valid = c.seekToNext(&iter)
-	if !c.valid {
-		c.current = memEntry{}
-		iter.Release()
-		return nil, nil, nil
-	}
-	c.current = iter.Item()
-	iter.Release()
-	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
+	defer iter.Release()
+	return c.land(&iter, skipDeleted(&iter, c.seekToNext(&iter), true))
 }
 
 func (c *memStoreCursor) Prev() ([]byte, []byte, error) {
 	if !c.valid {
 		return nil, nil, nil
 	}
-	c.store.mu.RLock()
-	defer c.store.mu.RUnlock()
+	c.store.rlock()
+	defer c.store.runlock()
 	iter := c.table.tree.Iter()
+	defer iter.Release()
+	var valid bool
 	if iter.Seek(c.current) {
-		c.valid = iter.Prev()
+		valid = iter.Prev()
 	} else {
-		c.valid = iter.Last()
+		valid = iter.Last()
 	}
-	if !c.valid {
-		c.current = memEntry{}
-		iter.Release()
-		return nil, nil, nil
-	}
-	c.current = iter.Item()
-	iter.Release()
-	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
+	return c.land(&iter, skipDeleted(&iter, valid, false))
 }
 
 func (c *memStoreCursor) Current() ([]byte, []byte, error) {
 	if !c.valid {
 		return nil, nil, nil
 	}
-	c.store.mu.RLock()
-	defer c.store.mu.RUnlock()
+	c.store.rlock()
+	defer c.store.runlock()
 	iter := c.table.tree.Iter()
 	defer iter.Release()
-	if !iter.Seek(c.current) {
+	if !skipDeleted(&iter, iter.Seek(c.current), true) {
 		return nil, nil, nil
 	}
 	item := iter.Item()
@@ -585,11 +749,11 @@ func (c *memStoreCursor) NextDup() ([]byte, []byte, error) {
 	if !c.valid {
 		return nil, nil, nil
 	}
-	c.store.mu.RLock()
-	defer c.store.mu.RUnlock()
+	c.store.rlock()
+	defer c.store.runlock()
 	iter := c.table.tree.Iter()
 	defer iter.Release()
-	if !c.seekToNext(&iter) || !bytes.Equal(iter.Item().k, c.current.k) {
+	if !skipDeletedDup(&iter, c.seekToNext(&iter), c.current.k) || !bytes.Equal(iter.Item().k, c.current.k) {
 		return nil, nil, nil
 	}
 	c.current = iter.Item()
@@ -600,73 +764,55 @@ func (c *memStoreCursor) NextNoDup() ([]byte, []byte, error) {
 	if !c.valid {
 		return nil, nil, nil
 	}
-	c.store.mu.RLock()
-	defer c.store.mu.RUnlock()
+	c.store.rlock()
+	defer c.store.runlock()
 	iter := c.table.tree.Iter()
-	currentKey := c.current.k
-	for c.valid = c.seekToNext(&iter); c.valid; c.valid = iter.Next() {
-		c.current = iter.Item()
-		if !bytes.Equal(c.current.k, currentKey) {
-			iter.Release()
-			return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
-		}
+	defer iter.Release()
+	valid := skipDeleted(&iter, c.seekToNext(&iter), true)
+	for valid && bytes.Equal(iter.Item().k, c.current.k) {
+		valid = skipDeleted(&iter, iter.Next(), true)
 	}
-	c.current = memEntry{}
-	iter.Release()
-	return nil, nil, nil
+	return c.land(&iter, valid)
 }
 
 func (c *memStoreCursor) SeekBothRange(key, value []byte) ([]byte, error) {
-	c.store.mu.RLock()
-	defer c.store.mu.RUnlock()
+	c.store.rlock()
+	defer c.store.runlock()
 	iter := c.table.tree.Iter()
-	c.valid = iter.Seek(memEntry{k: key, v: value})
-	if !c.valid {
-		c.current = memEntry{}
-		iter.Release()
+	defer iter.Release()
+	k, v, _ := c.land(&iter, skipDeletedDup(&iter, iter.Seek(memEntry{k: key, v: value}), key))
+	if !bytes.Equal(k, key) {
 		return nil, nil
 	}
-	c.current = iter.Item()
-	iter.Release()
-	if !bytes.Equal(c.current.k, key) {
-		return nil, nil
-	}
-	return bytes.Clone(c.current.v), nil
+	return v, nil
 }
 
 func (c *memStoreCursor) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
-	c.store.mu.RLock()
-	defer c.store.mu.RUnlock()
+	c.store.rlock()
+	defer c.store.runlock()
 	iter := c.table.tree.Iter()
-	c.valid = iter.Seek(memEntry{k: key, v: value})
-	if !c.valid {
-		c.current = memEntry{}
-		iter.Release()
+	defer iter.Release()
+	k, v, _ := c.land(&iter, skipDeletedDup(&iter, iter.Seek(memEntry{k: key, v: value}), key))
+	if !bytes.Equal(k, key) || !bytes.Equal(v, value) {
 		return nil, nil, nil
 	}
-	c.current = iter.Item()
-	iter.Release()
-	if !bytes.Equal(c.current.k, key) || !bytes.Equal(c.current.v, value) {
-		return nil, nil, nil
-	}
-	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
+	return k, v, nil
 }
 
 func (c *memStoreCursor) FirstDup() ([]byte, error) {
 	if !c.valid {
 		return nil, nil
 	}
-	c.store.mu.RLock()
-	defer c.store.mu.RUnlock()
-	currentKey := bytes.Clone(c.current.k)
+	c.store.rlock()
+	defer c.store.runlock()
+	currentKey := c.current.k
 	iter := c.table.tree.Iter()
-	c.valid = iter.Seek(memEntry{k: currentKey})
+	defer iter.Release()
+	c.valid = skipDeleted(&iter, iter.Seek(memEntry{k: currentKey}), true)
 	if !c.valid || !bytes.Equal(iter.Item().k, currentKey) {
-		iter.Release()
 		return nil, nil
 	}
 	c.current = iter.Item()
-	iter.Release()
 	return bytes.Clone(c.current.v), nil
 }
 
@@ -674,28 +820,73 @@ func (c *memStoreCursor) LastDup() ([]byte, error) {
 	if !c.valid {
 		return nil, nil
 	}
-	c.store.mu.RLock()
-	defer c.store.mu.RUnlock()
-	currentKey := bytes.Clone(c.current.k)
+	c.store.rlock()
+	defer c.store.runlock()
+	currentKey := c.current.k
 	iter := c.table.tree.Iter()
+	defer iter.Release()
 	nextKey, ok := kv.NextSubtree(currentKey)
-	if ok {
-		found := iter.Seek(memEntry{k: nextKey})
-		if found {
-			c.valid = iter.Prev()
-		} else {
-			c.valid = iter.Last()
-		}
+	if ok && iter.Seek(memEntry{k: nextKey}) {
+		c.valid = iter.Prev()
 	} else {
 		c.valid = iter.Last()
 	}
+	c.valid = skipDeleted(&iter, c.valid, false)
 	if !c.valid || !bytes.Equal(iter.Item().k, currentKey) {
-		iter.Release()
 		return nil, nil
 	}
 	c.current = iter.Item()
-	iter.Release()
 	return bytes.Clone(c.current.v), nil
+}
+
+// firstRaw, seekRaw, nextRaw and nextNoDupRaw are First, Seek, Next and
+// NextNoDup that can stop at a tombstone and report it, so a caller decides how
+// many tombstones to walk.
+func (c *memStoreCursor) firstRaw() ([]byte, []byte, bool) {
+	c.store.rlock()
+	defer c.store.runlock()
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	return c.landRaw(&iter, iter.First())
+}
+
+func (c *memStoreCursor) seekRaw(seek []byte) ([]byte, []byte, bool) {
+	c.store.rlock()
+	defer c.store.runlock()
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	return c.landRaw(&iter, iter.Seek(memEntry{k: seek}))
+}
+
+func (c *memStoreCursor) nextRaw() ([]byte, []byte, bool) {
+	if !c.valid {
+		return nil, nil, false
+	}
+	c.store.rlock()
+	defer c.store.runlock()
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	return c.landRaw(&iter, c.seekToNext(&iter))
+}
+
+func (c *memStoreCursor) nextNoDupRaw() ([]byte, []byte, bool) {
+	if !c.valid {
+		return nil, nil, false
+	}
+	c.store.rlock()
+	defer c.store.runlock()
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	valid := c.seekToNext(&iter)
+	for valid && bytes.Equal(iter.Item().k, c.current.k) {
+		valid = iter.Next()
+	}
+	return c.landRaw(&iter, valid)
+}
+
+func (c *memStoreCursor) landRaw(iter *btree2.IterG[memEntry], valid bool) ([]byte, []byte, bool) {
+	k, v, _ := c.land(iter, valid)
+	return k, v, c.current.deleted
 }
 
 func (c *memStoreCursor) PrevDup() ([]byte, []byte, error)   { panic("PrevDup not implemented") }
@@ -713,22 +904,24 @@ func (c *memStoreCursor) DeleteCurrent() error {
 	if !c.valid {
 		return nil
 	}
-	c.store.mu.Lock()
-	defer c.store.mu.Unlock()
+	c.store.lock()
+	defer c.store.unlock()
 	iter := c.table.tree.Iter()
-	defer iter.Release()
-	if !iter.Seek(c.current) {
-		return nil
+	valid := skipDeleted(&iter, iter.Seek(c.current), true)
+	if valid {
+		c.current = iter.Item()
 	}
-	c.current = iter.Item()
-	c.table.tree.Delete(c.current)
+	iter.Release()
+	if valid {
+		c.table.deleteExact(c.current.k, c.current.v)
+	}
 	return nil
 }
 
 func (c *memStoreCursor) DeleteExact(k, v []byte) error {
-	c.store.mu.Lock()
-	defer c.store.mu.Unlock()
-	c.table.tree.Delete(memEntry{k: k, v: v})
+	c.store.lock()
+	defer c.store.unlock()
+	c.table.deleteExact(k, v)
 	return nil
 }
 
@@ -775,6 +968,10 @@ func (s *memStore) collectRange(t *memTable, fromPrefix, toPrefix []byte, asc bo
 			if toPrefix != nil && bytes.Compare(item.k, toPrefix) >= 0 {
 				break
 			}
+			if item.deleted {
+				valid = iter.Next()
+				continue
+			}
 			entries = append(entries, memEntry{k: bytes.Clone(item.k), v: bytes.Clone(item.v)})
 			valid = iter.Next()
 		}
@@ -799,6 +996,10 @@ func (s *memStore) collectRange(t *memTable, fromPrefix, toPrefix []byte, asc bo
 			if fromPrefix != nil && bytes.Compare(item.k, fromPrefix) < 0 {
 				break
 			}
+			if item.deleted {
+				valid = iter.Prev()
+				continue
+			}
 			entries = append(entries, memEntry{k: bytes.Clone(item.k), v: bytes.Clone(item.v)})
 			valid = iter.Prev()
 		}
@@ -820,8 +1021,12 @@ func (s *memStore) collectRangeDupSort(t *memTable, key []byte, fromPrefix, toPr
 			if !bytes.Equal(item.k, key) {
 				break
 			}
-			if toPrefix != nil && bytes.Compare(item.v, toPrefix) >= 0 {
+			if toPrefix != nil && !item.keyWide() && bytes.Compare(item.v, toPrefix) >= 0 {
 				break
+			}
+			if item.deleted {
+				valid = iter.Next()
+				continue
 			}
 			entries = append(entries, memEntry{k: bytes.Clone(item.k), v: bytes.Clone(item.v)})
 			valid = iter.Next()
@@ -843,7 +1048,7 @@ func (s *memStore) collectRangeDupSort(t *memTable, key []byte, fromPrefix, toPr
 		} else {
 			nextKey, ok := kv.NextSubtree(key)
 			if ok {
-				found := iter.Seek(memEntry{k: nextKey})
+				found := iter.Seek(memEntry{k: nextKey, deleted: true})
 				if found {
 					valid = iter.Prev()
 				} else {
@@ -858,8 +1063,12 @@ func (s *memStore) collectRangeDupSort(t *memTable, key []byte, fromPrefix, toPr
 			if !bytes.Equal(item.k, key) {
 				break
 			}
-			if fromPrefix != nil && bytes.Compare(item.v, fromPrefix) < 0 {
+			if fromPrefix != nil && !item.keyWide() && bytes.Compare(item.v, fromPrefix) < 0 {
 				break
+			}
+			if item.deleted {
+				valid = iter.Prev()
+				continue
 			}
 			entries = append(entries, memEntry{k: bytes.Clone(item.k), v: bytes.Clone(item.v)})
 			valid = iter.Prev()

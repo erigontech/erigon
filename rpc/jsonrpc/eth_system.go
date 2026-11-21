@@ -761,6 +761,11 @@ func (b *GasPriceOracleBackend) keepsParentIdentities(tx kv.TemporalTx) (bool, e
 	return hash == b.parentTip.hash, nil
 }
 
+// overlayRebinder is a pinned tx that can pin another tx to its overlay snapshot.
+type overlayRebinder interface {
+	Rebind(tx kv.TemporalTx) kv.TemporalTx
+}
+
 func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBackend, func(), error) {
 	if b.db == nil {
 		return nil, nil, nil // Fork not supported; caller falls back to sequential
@@ -790,9 +795,13 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 			return nil, nil, nil
 		}
 	}
-	// Reuse the parent's pin (rationale on rpchelper.PinToOverlay).
-	overlay, _ := membatchwithdb.ViewOverlay(b.tx)
-	return &GasPriceOracleBackend{db: b.db, tx: rpchelper.PinToOverlay(tx, overlay), baseApi: b.baseApi, parentViewID: tx.ViewID(), parentTip: b.parentTip, forkPrepared: true},
+	// Reuse the parent's overlay snapshot: a new one could hold later overlay writes.
+	pinned, ok := b.tx.(overlayRebinder)
+	if !ok {
+		tx.Rollback()
+		return nil, nil, nil
+	}
+	return &GasPriceOracleBackend{db: b.db, tx: pinned.Rebind(tx), baseApi: b.baseApi, parentViewID: tx.ViewID(), parentTip: b.parentTip, forkPrepared: true},
 		func() { tx.Rollback() },
 		nil
 }
