@@ -967,6 +967,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	rebuildTrieCfg := commitment.DefaultTrieConfig()
 	rebuildTrieCfg.EnableTrieWarmup = false
 	rebuildTrieCfg.Variant = execctx.PickTrieVariant()
+	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
 
 	var totalKeysCommitted uint64
 
@@ -996,7 +997,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		stepsInShard := uint64(shardTo - shardFrom)
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
-		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), rebuildShardMaxSteps(keysPerStep)))
+		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), maxShardSteps))
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
 		}
@@ -1106,7 +1107,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				}
 			}
 
-			shardFrom, shardTo, shardStepsSize = nextRebuildShard(shardTo, shardStepsSize, lastShard)
+			if shardTo+shardStepsSize > lastShard && shardStepsSize > 1 {
+				shardStepsSize /= 2
+			}
+			shardFrom = shardTo
+			shardTo += shardStepsSize
 			rangeFromTxNum = rangeToTxNum
 			rangeToTxNum += uint64(shardStepsSize) * a.StepSize()
 		}
@@ -1174,30 +1179,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	}
 
 	return latestRoot, nil
-}
-
-// rebuildShardKeys is the key count a rebuild shard aims for: short steps do not rebuild in thousands of tiny
-// shards, each with its own commit and merge, and dense steps do not collect one shard's keys past the memory.
-const rebuildShardKeys = 1 << 24
-
-// nextRebuildShard returns the shard after the one ending at prevTo. A shard never ends past the range: a wide
-// shard cannot halve its way onto a range end that is not a multiple of its size.
-func nextRebuildShard(prevTo, size, last kv.Step) (from, to, nextSize kv.Step) {
-	if prevTo+size > last && size > 1 {
-		size /= 2
-	}
-	return prevTo, min(prevTo+size, last), size
-}
-
-func rebuildShardMaxSteps(keysPerStep uint64) uint64 {
-	if keysPerStep == 0 {
-		return commitment.DefaultRebuildShardMaxSteps
-	}
-	steps := uint64(1)
-	for steps*2*keysPerStep <= rebuildShardKeys {
-		steps *= 2
-	}
-	return steps
 }
 
 func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
