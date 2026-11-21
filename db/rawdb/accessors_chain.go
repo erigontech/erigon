@@ -893,6 +893,10 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 	return nil
 }
 
+// blockKeyedTables are keyed by block number, so a block range is one key range.
+// EthTx is keyed by txnID, so PruneBlocks and TruncateBlocks delete it per block.
+var blockKeyedTables = []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers}
+
 // PruneBlocks - delete [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db: [1, to)
 // doesn't change sequences of kv.EthTx
@@ -919,8 +923,6 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 	var b types.BodyOnlyTxn
 	var ok bool
 
-	// EthTx is keyed by txnID, not block number, so it can't be cut as a block
-	// range like the tables below: delete its per-block spans while scanning.
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return deleted, err
@@ -951,7 +953,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 	c.Close() // release the read cursor before range-deleting the same table
 
 	from, to := hexutil.EncodeTs(blockFrom), hexutil.EncodeTs(stopAtBlock)
-	for _, table := range []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers} {
+	for _, table := range blockKeyedTables {
 		if _, err = kv.DeleteRange(tx, table, from, to); err != nil {
 			return deleted, err
 		}
@@ -974,8 +976,6 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	if blockFrom < 1 { // protect genesis
 		blockFrom = 1
 	}
-	// EthTx is keyed by txnID, not block number, so it can't be cut as a block
-	// range like the tables below: delete its per-block spans while scanning.
 	if err := tx.ForEach(kv.Headers, hexutil.EncodeTs(blockFrom), func(k, v []byte) error {
 		b, ok, err := ReadBodyOnlyTxnByKey(tx, k)
 		if err != nil {
@@ -1004,7 +1004,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	}
 
 	from := hexutil.EncodeTs(blockFrom)
-	for _, table := range []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers} {
+	for _, table := range blockKeyedTables {
 		if _, err := kv.DeleteRange(tx, table, from, nil); err != nil {
 			return err
 		}
