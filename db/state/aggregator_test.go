@@ -488,12 +488,8 @@ func generateStorageFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange
 
 func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
-	ver := version.V1_0_standart
 	stepSize := uint64(10)
-	schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapDomain, "commitment", DataExtensionKv, ver).
-		Accessor(dirs.SnapDomain, ver).
-		Build()
+	schema := NewDomainSnapSchema(statecfg.Schema.CommitmentDomain, stepSize, dirs)
 	populateFiles2(t, dirs, schema, stepSize, ranges)
 }
 
@@ -577,6 +573,41 @@ func TestAggregator_BuildFiles_EmptyStepOK(t *testing.T) {
 	// BuildFiles must not refuse — the guard's `step > 0` clause should let
 	// this through.
 	require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 2*stepSize, unboundedFinalityCtx))
+}
+
+func TestAggregatorBuildWithHistoryAtStepZero(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+
+	for _, zeroStepDomain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain} {
+		t.Run(zeroStepDomain.String(), func(t *testing.T) {
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			ctx := t.Context()
+			generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 5}})
+			generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 5}})
+			require.NoError(t, agg.OpenFolder(db))
+			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+				at := agg.BeginFilesRo()
+				defer at.Close()
+				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain} {
+					firstStep := uint64(10)
+					if domain == zeroStepDomain {
+						firstStep = 0
+					}
+					writer := at.d[domain].NewWriter(db)
+					t.Cleanup(writer.Close)
+					for step := firstStep; step <= 11; step++ {
+						require.NoError(t, writer.PutWithPrev([]byte{byte(step)}, []byte{7}, step*stepSize+1, nil))
+					}
+					require.NoError(t, writer.Flush(ctx, tx))
+					writer.Close()
+				}
+				return nil
+			}))
+			require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 11*stepSize, unboundedFinalityCtx))
+			requireVisibleEnd(t, agg, 11*stepSize)
+		})
+	}
 }
 
 // putHistoryKey inserts a single (txNumBE, key) pair into the domain's
