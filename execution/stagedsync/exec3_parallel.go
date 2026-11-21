@@ -1373,6 +1373,10 @@ func (pe *parallelExecutor) processRequest(execRequest *execRequest, applyTx kv.
 
 func (pe *parallelExecutor) startBlock(be *blockExecutor) error {
 	if be.execStarted.IsZero() && be.versionMap.HasBAL {
+		pe.ensureChangesetAccumulator(be.blockNum, be.blockHash)
+		if pe.consumers != nil && pe.currentChangeSetHash == be.blockHash {
+			pe.consumers.sendControl("commitResults", &changesetSaved{blockNum: be.blockNum})
+		}
 		var reader state.StateReader = state.NewReaderV3(pe.domainsRead().AsGetter(pe.applyTx))
 		if first := be.tasks[0]; first.IsHistoric() {
 			reader = state.NewHistoryReaderV3WithSharedDomains(pe.applyTx, pe.domainsRead(), first.Version().TxNum)

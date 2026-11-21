@@ -545,6 +545,12 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		cc.forgetBlock(r.BlockNum)
 		cc.maybeComputeAhead(ctx, r.BlockNum+1)
 
+	case *changesetSaved:
+		if pb := cc.pending[r.blockNum]; pb != nil {
+			pb.txSeen = true
+		}
+		cc.maybeComputeAhead(ctx, r.blockNum)
+
 	case *commitComputeRequest:
 		if cc.shouldComputeOnRequest() {
 			cc.compute(ctx, targetOf(cc.lastBlockResult), computeMode{checkRoot: true, publishRoot: true})
@@ -554,6 +560,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		}
 	}
 }
+
+// changesetSaved tells the calculator that the exec loop saved this execution's changeset of the block, so a
+// BAL-driven block computes ahead while its txs run instead of from its first tx result.
+type changesetSaved struct{ blockNum uint64 }
 
 // handleBlockRequest records the per-block mode from a blockRequest —
 // BAL-driven when the block carries a BAL, BAL I/O is enabled and
