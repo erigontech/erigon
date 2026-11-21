@@ -381,11 +381,12 @@ func announces(chainConfig *chain.Config) bool {
 	return ok && config.Announces(l2.RuleSet())
 }
 
-// onStop is a lifecycle that runs a function when stopped.
-type onStop func()
+// onStop is a lifecycle that runs f when stopped; a pointer, as the node
+// compares the lifecycles it registers and funcs do not compare.
+type onStop struct{ f func() }
 
-func (onStop) Start() error  { return nil }
-func (f onStop) Stop() error { f(); return nil }
+func (*onStop) Start() error  { return nil }
+func (s *onStop) Stop() error { s.f(); return nil }
 
 // dialL1 connects to the L1 node of cfg.
 func dialL1(ctx context.Context, cfg *eez.Config, dirs datadir.Dirs, logger log.Logger) (l1.ChainReader, error) {
@@ -567,12 +568,12 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 	// Lifecycles stop in reverse: the sequencer, the follower, the signer of
 	// its heads, then the stores they write.
 	if witnesses != nil || announcements != nil {
-		n.RegisterLifecycle(onStop(closeStores))
+		n.RegisterLifecycle(&onStop{closeStores})
 	}
 	if stopComposer != nil {
 		// Stops after the sequencer, which hands it the Sync blocks, and
 		// before the witness store it proves from.
-		n.RegisterLifecycle(onStop(stopComposer))
+		n.RegisterLifecycle(&onStop{stopComposer})
 	}
 	if signer != nil {
 		// Stops after the follower, the writer of the heads it signs, and
