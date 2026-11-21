@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -18,10 +19,18 @@ import (
 )
 
 var (
-	mode = os.Getenv("NP_PROF")
-	mu   sync.Mutex
-	last = map[string][]byte{}
+	mode      = os.Getenv("NP_PROF")
+	profileHz = profileRate()
+	mu        sync.Mutex
+	last      = map[string][]byte{}
 )
+
+func profileRate() int {
+	if hz, err := strconv.Atoi(os.Getenv("NP_PROF_HZ")); err == nil && hz > 0 {
+		return hz
+	}
+	return 500
+}
 
 // Begin starts the profile NP_PROF names (cpu or fgprof); the returned func stops it and keeps it.
 func Begin() func() {
@@ -30,7 +39,7 @@ func Begin() func() {
 	var buf bytes.Buffer
 	switch mode {
 	case "cpu":
-		runtime.SetCPUProfileRate(500)
+		runtime.SetCPUProfileRate(profileHz)
 		if pprof.StartCPUProfile(&buf) != nil {
 			return func() {}
 		}
@@ -66,7 +75,10 @@ func keep(kind string, b []byte) {
 	last[kind] = b
 	mu.Unlock()
 	if os.Getenv("NP_PROF_LOG") == "true" {
-		log.Info("[npprof] profile", "kind", kind, "b64", base64.StdEncoding.EncodeToString(b))
+		enc := base64.StdEncoding.EncodeToString(b)
+		for i := 0; i*8000 < len(enc); i++ { // docker splits log lines at 16 KiB
+			log.Info("[npprof] profile", "kind", kind, "part", i, "of", (len(enc)+7999)/8000, "b64", enc[i*8000:min(len(enc), (i+1)*8000)])
+		}
 	}
 }
 
