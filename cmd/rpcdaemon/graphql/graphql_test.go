@@ -174,7 +174,7 @@ func TestGraphQLQueryBlock(t *testing.T) {
 }
 
 func TestGraphQLQueryDepthLimit(t *testing.T) {
-	srv := httptest.NewServer(CreateHandler(nil))
+	srv := httptest.NewServer(CreateHandler(nil, 0))
 	defer srv.Close()
 
 	post := func(q string) string {
@@ -197,4 +197,22 @@ func TestGraphQLQueryDepthLimit(t *testing.T) {
 	require.NotContains(t, body, "exceeds the limit")
 	require.Contains(t, body, `"data"`)
 	require.Contains(t, post(nest(`{__type(name:\"Block\"){fields{type{`, "ofType", "name", maxQueryDepth-3)), "exceeds the limit")
+}
+
+func TestGraphQLQueryFieldLimit(t *testing.T) {
+	srv := httptest.NewServer(CreateHandler(nil, 3))
+	defer srv.Close()
+
+	post := func(q string) string {
+		resp, err := http.Post(srv.URL, "application/json", strings.NewReader(`{"query":"`+q+`"}`)) //nolint:noctx
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		return string(body)
+	}
+
+	require.NotContains(t, post("{a:__typename b:__typename c:__typename}"), "exceeds the limit")
+	require.Contains(t, post("{a:__typename b:__typename c:__typename d:__typename}"), "exceeds the limit")
+	require.Contains(t, post("{a:__typename ...F} fragment F on Query {b:__typename c:__typename d:__typename}"), "exceeds the limit")
 }
