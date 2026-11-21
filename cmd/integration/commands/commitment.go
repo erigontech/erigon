@@ -502,26 +502,20 @@ var cmdCommitmentPrint = &cobra.Command{
 
 // commitmentFileState describes the commitment state record of the file that ends at maxTxNum.
 func commitmentFileState(acRo *dbstate.AggregatorRoTx, maxTxNum uint64) (string, error) {
-	if !statecfg.Schema.CommitmentDomain.CommitmentV3Records {
-		rootNode, _, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentState, maxTxNum)
-		if err != nil {
-			return "", fmt.Errorf("failed to get root node from files: %w", err)
-		}
-		rootString, err := commitment.HexTrieStateToShortString(rootNode)
-		if err != nil {
-			return "", fmt.Errorf("failed to extract state root from root node: %w", err)
-		}
-		return rootString, nil
+	v3 := statecfg.Schema.CommitmentDomain.CommitmentV3Records
+	key := commitment.KeyCommitmentState
+	if v3 {
+		key = commitment.KeyCommitmentV3State
 	}
-	record, _, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentV3State, maxTxNum)
+	record, _, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, key, maxTxNum)
 	if err != nil {
-		return "", fmt.Errorf("failed to get the v3 state record from files: %w", err)
+		return "", fmt.Errorf("failed to get the commitment state from files: %w", err)
+	}
+	if !v3 {
+		return commitment.HexTrieStateToShortString(record)
 	}
 	blockNum, txNum, root, err := commitment.DecodeCommitmentV3State(record)
-	if err != nil {
-		return "", fmt.Errorf("failed to decode the v3 state record: %w", err)
-	}
-	return fmt.Sprintf("block: %d txn: %d rootHash: %x", blockNum, txNum, root), nil
+	return fmt.Sprintf("block: %d txn: %d rootHash: %x", blockNum, txNum, root), err
 }
 
 func printCommitment(db kv.TemporalRwDB, ctx context.Context) error {
@@ -548,7 +542,7 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context) error {
 		count := acRo.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
 		rootString, err := commitmentFileState(acRo, f.EndRootNum()-1)
 		if err != nil {
-			return err
+			return fmt.Errorf("%s: failed to decode the commitment state: %w", name, err)
 		}
 		fmt.Printf("%28s: prefixes %8s %s\n", name, common.PrettyCounter(count), rootString)
 	}

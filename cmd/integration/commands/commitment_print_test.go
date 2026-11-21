@@ -17,18 +17,36 @@
 package commands
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/execfinality"
 )
 
 func TestCommitmentPrint(t *testing.T) {
-	for _, v3 := range []bool{false, true} {
-		t.Run(map[bool]string{false: "legacy", true: "v3"}[v3], func(t *testing.T) {
-			t.Cleanup(statecfg.SetCommitmentV3(v3))
-			db, dirs, _ := dbWithState(t, true)
+	for _, tc := range []struct {
+		name string
+		v3   bool
+	}{{"legacy", false}, {"v3", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
+			dirs := datadir.New(t.TempDir())
+			db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
+			agg, roots := fillAccountState(t, db, 64, 5)
+			require.NoError(t, agg.BuildFiles(db, 48, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
+
+			acRo := agg.BeginFilesRo()
+			defer acRo.Close()
+			got, err := commitmentFileState(acRo, 47)
+			require.NoError(t, err)
+			require.Equal(t, fmt.Sprintf("block: 47 txn: 47 rootHash: %x", roots[47]), got)
+
 			prevDatadir := datadirCli
 			t.Cleanup(func() { datadirCli = prevDatadir })
 			datadirCli = dirs.DataDir
