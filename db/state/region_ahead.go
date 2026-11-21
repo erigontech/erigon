@@ -19,12 +19,17 @@ package state
 import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 const (
-	regionAheadHits     = 64
-	regionAheadMaxBytes = 64 << 20
-	regionAheadTracked  = 1024
+	regionAheadHits    = 64
+	regionAheadTracked = 1024
+)
+
+var (
+	regionAheadMaxBytes uint64 = 64 << 20
+	regionAdvise               = (*seg.Decompressor).MadvWillNeedWords
 )
 
 type regionKey struct {
@@ -32,9 +37,9 @@ type regionKey struct {
 	file int
 }
 
-func (dt *DomainRoTx) regionAhead(i int, k []byte) bool {
+func (dt *DomainRoTx) regionAhead(i int, k []byte) {
 	if len(k) <= length.Addr || dt.probe != nil {
-		return false
+		return
 	}
 	if dt.regionHits == nil {
 		dt.regionHits = make(map[regionKey]uint32)
@@ -42,25 +47,21 @@ func (dt *DomainRoTx) regionAhead(i int, k []byte) bool {
 	key := regionKey{addr: [length.Addr]byte(k[:length.Addr]), file: i}
 	hits, tracked := dt.regionHits[key]
 	if !tracked && len(dt.regionHits) == regionAheadTracked {
-		return false
+		return
 	}
 	dt.regionHits[key] = hits + 1
 	if hits+1 != regionAheadHits {
-		return false
+		return
 	}
 	from, to, ok := dt.regionWords(i, key.addr[:])
 	if !ok || to-from > regionAheadMaxBytes {
-		return false
+		return
 	}
-	dt.files[i].src.decompressor.MadvWillNeedWords(from, to)
-	return true
+	regionAdvise(dt.files[i].src.decompressor, from, to)
 }
 
 func (dt *DomainRoTx) regionWords(i int, prefix []byte) (from, to uint64, ok bool) {
 	bt := dt.statelessBtree(i)
-	if bt == nil || bt.Empty() {
-		return 0, 0, false
-	}
 	g := dt.dataReader(dt.files[i].src.decompressor)
 	c, err := bt.Seek(g, prefix)
 	if err != nil || c == nil {

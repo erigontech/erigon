@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
@@ -57,9 +58,23 @@ func storageDomainTxWithContracts(t *testing.T, contracts byte, slots int) *Doma
 	return dt
 }
 
+func recordRegionAdvise(t *testing.T) *[][2]uint64 {
+	var advised [][2]uint64
+	orig := regionAdvise
+	regionAdvise = func(_ *seg.Decompressor, from, to uint64) { advised = append(advised, [2]uint64{from, to}) }
+	t.Cleanup(func() { regionAdvise = orig })
+	return &advised
+}
+
+func contractRegion(t *testing.T, dt *DomainRoTx, addr byte) [2]uint64 {
+	from, to, ok := dt.regionWords(0, regionSlotKey(addr, 0)[:length.Addr])
+	require.True(t, ok)
+	return [2]uint64{from, to}
+}
+
 func TestRegionAheadAdvisesAContractOnceAfterEnoughFileHits(t *testing.T) {
-	t.Parallel()
 	dt := storageDomainTxWithContracts(t, 3, 200)
+	advised := recordRegionAdvise(t)
 	read := func(addr byte, from, to int) {
 		for slot := from; slot < to; slot++ {
 			_, found, _, _, err := dt.getLatestFromFiles(regionSlotKey(addr, slot), nil, kv.NoStepBound)
@@ -69,23 +84,47 @@ func TestRegionAheadAdvisesAContractOnceAfterEnoughFileHits(t *testing.T) {
 	}
 	read(2, 0, regionAheadHits-1)
 	read(1, 0, regionAheadHits-2)
-	require.False(t, dt.regionAhead(0, regionSlotKey(1, 0)))
-	require.True(t, dt.regionAhead(0, regionSlotKey(2, 0)))
-	require.False(t, dt.regionAhead(0, regionSlotKey(2, 0)))
+	dt.regionAhead(0, regionSlotKey(1, 0))
+	require.Empty(t, *advised)
+	dt.regionAhead(0, regionSlotKey(2, 0))
+	dt.regionAhead(0, regionSlotKey(2, 0))
+	require.Equal(t, [][2]uint64{contractRegion(t, dt, 2)}, *advised)
 
 	dt.probe = &mmap.Probe{}
-	require.False(t, dt.regionAhead(0, regionSlotKey(1, 0)))
+	dt.regionAhead(0, regionSlotKey(1, 0))
+	require.Len(t, *advised, 1)
 	dt.probe = nil
-	require.True(t, dt.regionAhead(0, regionSlotKey(1, 0)))
+	dt.regionAhead(0, regionSlotKey(1, 0))
+	require.Equal(t, [][2]uint64{contractRegion(t, dt, 2), contractRegion(t, dt, 1)}, *advised)
 
 	for file := 1; len(dt.regionHits) < regionAheadTracked; file++ {
 		dt.regionAhead(file, regionSlotKey(3, 0))
 	}
 	for range 2 * regionAheadHits {
-		require.False(t, dt.regionAhead(0, regionSlotKey(3, 0)))
-		require.False(t, dt.regionAhead(0, regionSlotKey(2, 0)))
+		dt.regionAhead(0, regionSlotKey(3, 0))
+		dt.regionAhead(0, regionSlotKey(2, 0))
 	}
+	require.Len(t, *advised, 2)
 	require.Len(t, dt.regionHits, regionAheadTracked)
+}
+
+func TestRegionAheadSkipsARegionOverTheCap(t *testing.T) {
+	dt := storageDomainTxWithContracts(t, 1, 200)
+	advised := recordRegionAdvise(t)
+	region := contractRegion(t, dt, 1)
+	orig := regionAheadMaxBytes
+	t.Cleanup(func() { regionAheadMaxBytes = orig })
+	for _, c := range []struct {
+		maxBytes uint64
+		want     int
+	}{{region[1] - region[0] - 1, 0}, {region[1] - region[0], 1}} {
+		dt.regionHits, *advised = nil, nil
+		regionAheadMaxBytes = c.maxBytes
+		for range regionAheadHits {
+			dt.regionAhead(0, regionSlotKey(1, 0))
+		}
+		require.Len(t, *advised, c.want, c.maxBytes)
+	}
 }
 
 func TestRegionWordsSplitTheFileByContract(t *testing.T) {
