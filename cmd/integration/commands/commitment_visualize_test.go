@@ -62,3 +62,20 @@ func TestCommitmentVisualizeFailsOnAnUnnamedV3File(t *testing.T) {
 	_, err = processCommitmentFile(unnamed)
 	require.ErrorContains(t, err, "failed to decode branch")
 }
+
+// A file that cannot be charted fails the command, and no empty page is written.
+func TestCommitmentVisualizeCommandFailsOnAV3File(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	_, dirs, _ := dbWithState(t, true)
+	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "v3.*-commitment.*.kv"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	out := t.TempDir()
+	prevOutput := visualizeOutputDir
+	t.Cleanup(func() { visualizeOutputDir = prevOutput })
+	root := integrationRoot()
+	cmdCommitmentVisualize.SetContext(t.Context())
+	root.SetArgs([]string{"--log.dir.disable", "commitment", "visualize", "--output", out, files[0]})
+	require.ErrorContains(t, root.ExecuteContext(t.Context()), "v3 commitment records")
+	require.NoFileExists(t, filepath.Join(out, "analysis.html"))
+}

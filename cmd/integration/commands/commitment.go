@@ -705,9 +705,9 @@ Examples:
   integration commitment visualize --output /tmp/analysis /path/to/*.kv
   integration commitment visualize --state /path/to/commitment.kv  # print state only`,
 	Args: cobra.MinimumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		_ = debug.SetupCobra(cmd, "integration")
-		visualizeCommitmentFiles(args)
+		return visualizeCommitmentFiles(args)
 	},
 }
 
@@ -1407,7 +1407,7 @@ func printBenchResults(name string, stats BenchStats, totalSize int64, keyCount 
 	fmt.Println()
 }
 
-func visualizeCommitmentFiles(files []string) {
+func visualizeCommitmentFiles(files []string) error {
 	sema := make(chan struct{}, visualizeConcurrency)
 	for i := 0; i < cap(sema); i++ {
 		sema <- struct{}{}
@@ -1415,6 +1415,8 @@ func visualizeCommitmentFiles(files []string) {
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	var failed []error
+	var charted int
 
 	page := components.NewPage()
 	page.SetLayout(components.PageFlexLayout)
@@ -1433,10 +1435,14 @@ func visualizeCommitmentFiles(files []string) {
 			stat, err := processCommitmentFile(fpath)
 			if err != nil {
 				fmt.Printf("processing failed: %v", err)
+				mu.Lock()
+				failed = append(failed, err)
+				mu.Unlock()
 				return
 			}
 
 			mu.Lock()
+			charted++
 			page.AddCharts(
 				prefixLenCountChart(fpath, stat),
 				countersChart(fpath, stat),
@@ -1448,8 +1454,8 @@ func visualizeCommitmentFiles(files []string) {
 	}
 	wg.Wait()
 	fmt.Println()
-	if visualizePrintState {
-		return
+	if visualizePrintState || charted == 0 {
+		return errors.Join(failed...)
 	}
 
 	dir := filepath.Dir(files[0])
@@ -1479,6 +1485,7 @@ func visualizeCommitmentFiles(files []string) {
 	if err := page.Render(io.MultiWriter(f)); err != nil {
 		panic(err)
 	}
+	return errors.Join(failed...)
 }
 
 type visualizeOverallStat struct {
