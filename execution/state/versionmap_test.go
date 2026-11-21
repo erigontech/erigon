@@ -172,7 +172,7 @@ func TestFlushMVWrite(t *testing.T) {
 			WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: ver},
 			Val:         valueFor(AddressPath, ver.TxIndex, int(ver.Incarnation)).(*accounts.Account),
 		})
-		mvh.FlushVersionedWrites(ws, true)
+		mvh.FlushWrites(ws, true)
 	}
 
 	flushAddress(ap1, Version{0, 0, 0, 1})
@@ -532,7 +532,7 @@ func TestOneValuePerVersion_WriteSideForbidsValueChange(t *testing.T) {
 	published := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
 	)
-	vm.FlushVersionedWrites(published, false)
+	vm.FlushWrites(published, false)
 
 	// Completing that same version with a different value is exactly the divergence a
 	// read-side value check would have caught. The write side rejects it outright, so
@@ -559,7 +559,7 @@ func TestOneValuePerVersion_StorageCellForbidsValueChange(t *testing.T) {
 	published := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
 	)
-	vm.FlushVersionedWrites(published, false)
+	vm.FlushWrites(published, false)
 
 	diverged := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(200)},
@@ -586,7 +586,7 @@ func TestNoBump_ValuePathKeepsVersionUnlessSelfDestructed(t *testing.T) {
 		if withSD {
 			ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: v}, Val: true})
 		}
-		vm.FlushVersionedWrites(ws, false)
+		vm.FlushWrites(ws, false)
 	}
 	balCellInc := func(vm *VersionMap, addr accounts.Address) Incarnation {
 		e := vm.load(addr)
@@ -644,8 +644,8 @@ func TestNoBump_CreateAccountMarker(t *testing.T) {
 		t.Parallel()
 		addr := getAddress(82)
 		vm := NewVersionMap(nil)
-		vm.FlushVersionedWrites(createWrites(vm, addr, 0), false)
-		vm.FlushVersionedWrites(createWrites(vm, addr, 1), false)
+		vm.FlushWrites(createWrites(vm, addr, 0), false)
+		vm.FlushWrites(createWrites(vm, addr, 1), false)
 		require.Equal(t, Incarnation(0), balCellInc(vm, addr))
 	})
 
@@ -654,8 +654,8 @@ func TestNoBump_CreateAccountMarker(t *testing.T) {
 		addr := getAddress(83)
 		vm := NewVersionMap(nil)
 		writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 3}, true, true)
-		vm.FlushVersionedWrites(createWrites(vm, addr, 0), false)
-		vm.FlushVersionedWrites(createWrites(vm, addr, 1), false)
+		vm.FlushWrites(createWrites(vm, addr, 0), false)
+		vm.FlushWrites(createWrites(vm, addr, 1), false)
 		require.Equal(t, Incarnation(1), balCellInc(vm, addr))
 	})
 }
@@ -668,7 +668,7 @@ func TestNoBump_CompleteFlushKeepsEqualValueVersion(t *testing.T) {
 	flush := func(vm *VersionMap, inc Incarnation, val uint64, complete bool) {
 		ws := &WriteSet{}
 		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 5, Incarnation: inc}}, Val: *uint256.NewInt(val)})
-		vm.FlushVersionedWrites(ws, complete)
+		vm.FlushWrites(ws, complete)
 	}
 	cell := func(vm *VersionMap) *WriteCell[uint256.Int] {
 		c, ok := vm.load(addr).Balance.Get(5)
@@ -757,7 +757,7 @@ func TestValidateRead_StoragePath_StaleColdRead_InvalidByVersion(t *testing.T) {
 	shadow := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: Version{TxIndex: 5, Incarnation: 1}, valStatus: ValueUnchanged}, Val: *uint256.NewInt(200)},
 	)
-	vm.FlushVersionedWrites(shadow, true)
+	vm.FlushWrites(shadow, true)
 
 	io := NewVersionedIO(10)
 	rs := ReadSet{}
@@ -775,7 +775,7 @@ func TestValidateRead_StoragePath_StaleColdRead_InvalidByVersion(t *testing.T) {
 }
 
 // TestFlushEstimate_ValidTxNotMarkedEstimate verifies that when
-// FlushVersionedWrites is called with complete=true for a valid TX,
+// FlushWrites is called with complete=true for a valid TX,
 // the entries are FlagDone (not FlagEstimate). This is critical:
 // marking valid TX writes as Estimate causes downstream TXs to
 // abort with ErrDependency, leading to livelocks.
@@ -789,7 +789,7 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
 	)
-	vm.FlushVersionedWrites(writes, true)
+	vm.FlushWrites(writes, true)
 
 	// TX 10 reads should see FlagDone → MVReadResultDone.
 	_, res, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
@@ -802,7 +802,7 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	writes2 := newWriteSet(
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Key: accounts.NilKey, Version: Version{TxIndex: 7, Incarnation: 2}}, Val: uint64(5)},
 	)
-	vm.FlushVersionedWrites(writes2, false)
+	vm.FlushWrites(writes2, false)
 
 	// TX 10 reads NoncePath should see FlagEstimate → MVReadResultDependency.
 	_, res2, _ := readFor(vm, addr, NoncePath, accounts.NilKey, 10)
@@ -822,7 +822,7 @@ func TestFlushEstimateRacingMarkWritesCompleteKeepsDone(t *testing.T) {
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
 	)
 	rerun := newWriteSet(cloneVW(writes.balance[addr]))
-	vm.FlushVersionedWrites(writes, false)
+	vm.FlushWrites(writes, false)
 	vm.MarkWritesValidated(writes, nil)
 	cell := writes.balance[addr].cell
 	const iterations = 10000
@@ -837,7 +837,7 @@ func TestFlushEstimateRacingMarkWritesCompleteKeepsDone(t *testing.T) {
 				runtime.Gosched()
 			}
 			for range 16 {
-				vm.FlushVersionedWrites(rerun, false)
+				vm.FlushWrites(rerun, false)
 			}
 		})
 		workers.Go(func() {
@@ -864,7 +864,7 @@ func TestMarkWritesCompleteRunsUnderReadersOfTheEntry(t *testing.T) {
 	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
 	)
-	vm.FlushVersionedWrites(writes, false)
+	vm.FlushWrites(writes, false)
 
 	e := vm.load(addr)
 	e.mu.RLock()
@@ -899,7 +899,7 @@ func TestMarkWritesComplete_FlagFlipPreservesValue(t *testing.T) {
 	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
 	)
-	vm.FlushVersionedWrites(writes, false)
+	vm.FlushWrites(writes, false)
 
 	_, res, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
 	require.Equal(t, MVReadResultDependency, res.Status(), "estimate flush reads back as a dependency")
@@ -1188,7 +1188,7 @@ func TestVersionedWritePoolReuse_NoStaleFields(t *testing.T) {
 	want := *uint256.NewInt(42)
 	ibs.recordWriteBalance(addr, want)
 
-	vw, ok := ibs.versionedWrites.GetBalance(addr)
+	vw, ok := ibs.writes.GetBalance(addr)
 	require.True(t, ok, "recordWriteBalance must record a balance write")
 	require.Equal(t, addr, vw.Address, "Address must not retain the recycled value")
 	require.Equal(t, BalancePath, vw.Path, "Path must not retain the recycled value")
@@ -1291,7 +1291,7 @@ func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
 	ws := &WriteSet{}
 	ws.SetBalance(sender, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: sender, Path: BalancePath, Version: Version{TxIndex: 0, Incarnation: 0}}, Val: postBalance})
 	ws.SetNonce(sender, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: sender, Path: NoncePath, Version: Version{TxIndex: 0, Incarnation: 0}}, Val: postNonce})
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 
 	require.Equal(t, VersionValid, vm.ValidateVersion(0, io, checkVersionEqual, false, ""),
 		"tx 0 should validate (no prior writes to conflict with)")
@@ -1500,7 +1500,7 @@ func TestAbsentConclusionThenCreatorFlushAborts(t *testing.T) {
 		WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}},
 		Val:         1,
 	})
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 	// The read-once fast path serves the repeat probe from the recorded read —
 	// consistent with the absence the EVM already consumed, never a silent
 	// adoption of the fresh cell — and commit-time validation catches the
@@ -1509,7 +1509,7 @@ func TestAbsentConclusionThenCreatorFlushAborts(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, exists)
 	io := NewVersionedIO(10)
-	io.RecordReads(Version{TxIndex: 9}, ibs.versionedReads)
+	io.RecordReads(Version{TxIndex: 9}, ibs.reads)
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(9, io, validateEqualVersion, true, ""))
 }
 
@@ -1541,12 +1541,12 @@ func TestColdFieldReadAfterReconciledLoadValidates(t *testing.T) {
 	ch, err := ibs.GetCodeHash(addr)
 	require.NoError(t, err)
 	require.Equal(t, code.Hash, ch)
-	if tr, ok := ibs.versionedReads.GetCodeHash(addr); ok {
+	if tr, ok := ibs.reads.GetCodeHash(addr); ok {
 		require.NotEqual(t, ReadSetRead, tr.Source)
 	}
 	ibs.PublishOrigins()
 	io := NewVersionedIO(61)
-	io.RecordReads(Version{TxIndex: 60}, ibs.versionedReads)
+	io.RecordReads(Version{TxIndex: 60}, ibs.reads)
 	require.Equal(t, VersionValid, vm.ValidateVersion(60, io, checkVersionEqual, true, ""))
 }
 
@@ -1562,13 +1562,13 @@ func TestGetVersionedAccount_ReconcilesDBLoadedRecordRead(t *testing.T) {
 	ibs := NewWithVersionMap(&fixedAccountReader{acc: dbAcc}, mvhm)
 	defer ibs.Release(false)
 	ibs.txIndex = 5
-	acc, _, _, err := ibs.getVersionedAccount(addr, true)
+	acc, _, _, err := ibs.getAccount(addr, true)
 	require.NoError(t, err)
 	require.NotNil(t, acc)
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.Equal(t, *uint256.NewInt(700), bal)
-	rd, ok := ibs.versionedReads.GetAddress(addr)
+	rd, ok := ibs.reads.GetAddress(addr)
 	require.True(t, ok)
 	require.NotNil(t, rd.Val)
 	require.NotNil(t, rd.Val.Account())
@@ -1589,7 +1589,7 @@ func TestGetStateObject_NoRecordReadStillReconciles(t *testing.T) {
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
 	require.True(t, exists)
-	rd, ok := ibs.versionedReads.GetAddress(addr)
+	rd, ok := ibs.reads.GetAddress(addr)
 	require.True(t, ok)
 	require.NotNil(t, rd.Val)
 	require.NotNil(t, rd.Val.Account())
@@ -1604,7 +1604,7 @@ func TestGetVersionedAccount_NoSynthesisForEmpty(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
 	defer ibs.Release(false)
 	ibs.txIndex = 5
-	acc, _, _, err := ibs.getVersionedAccount(addr, true)
+	acc, _, _, err := ibs.getAccount(addr, true)
 	require.NoError(t, err)
 	assert.Nil(t, acc)
 }
@@ -1617,7 +1617,7 @@ func TestGetVersionedAccount_NoSynthesisFromEstimate(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
 	defer ibs.Release(false)
 	ibs.txIndex = 5
-	acc, _, _, err := ibs.getVersionedAccount(addr, true)
+	acc, _, _, err := ibs.getAccount(addr, true)
 	require.NoError(t, err)
 	assert.Nil(t, acc)
 }
@@ -1637,7 +1637,7 @@ func TestGetVersionedAccount_NoSynthesisAfterSelfDestruct(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
 	defer ibs.Release(false)
 	ibs.txIndex = 5
-	acc, _, _, err := ibs.getVersionedAccount(addr, true)
+	acc, _, _, err := ibs.getAccount(addr, true)
 	require.NoError(t, err)
 	assert.Nil(t, acc)
 }
@@ -1705,7 +1705,7 @@ func TestValidateRead_WipedSlotReadInvalidatedWhenLaterDestructGoes(t *testing.T
 	require.NoError(t, err)
 	require.True(t, b.IsZero(), "slot B was wiped by both destructs")
 	ibs.PublishOrigins()
-	reads := ibs.VersionedReads()
+	reads := ibs.Reads()
 	for _, key := range []accounts.StorageKey{keyA, keyB} {
 		read, ok := reads.GetStorage(addr, key)
 		require.True(t, ok)
@@ -1793,7 +1793,7 @@ func TestCommittedReadsBeforeDestructWithBalanceOnlyRevival(t *testing.T) {
 			require.True(t, nonEmpty)
 			ibs.PublishOrigins()
 			io := NewVersionedIO(3)
-			io.RecordReads(Version{TxIndex: 2}, ibs.versionedReads)
+			io.RecordReads(Version{TxIndex: 2}, ibs.reads)
 			require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, ""))
 
 			vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
@@ -1833,7 +1833,7 @@ func TestCodeHashReadAfterSelfDestruct(t *testing.T) {
 			require.Equal(t, accounts.EmptyCodeHash, codeHash)
 
 			io := NewVersionedIO(3)
-			io.RecordReads(Version{TxIndex: 2}, ibs.VersionedReads())
+			io.RecordReads(Version{TxIndex: 2}, ibs.Reads())
 			vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
 			vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(tc.preservedBalance), true)
 
@@ -2011,7 +2011,7 @@ func TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip(t *testing.T) {
 	}
 	validate := func(vm *VersionMap, ibs *IntraBlockState) VersionValidity {
 		io := NewVersionedIO(6)
-		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.versionedReads)
+		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.reads)
 		return vm.ValidateVersion(5, io, validateEqualVersion, true, "")
 	}
 	t.Run("code read is witnessed and a redeploy flush invalidates it", func(t *testing.T) {
@@ -2021,7 +2021,7 @@ func TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip(t *testing.T) {
 		got, err := ibs.GetCode(addr)
 		require.NoError(t, err)
 		require.Empty(t, got)
-		_, recorded := ibs.versionedReads.GetCode(addr)
+		_, recorded := ibs.reads.GetCode(addr)
 		require.True(t, recorded)
 		require.Equal(t, VersionValid, validate(vm, ibs))
 		vm.WriteCode(addr, Version{TxIndex: 4}, accounts.NewCode(code), true)
@@ -2117,7 +2117,7 @@ func TestFlushNetZeroRerunClearsEarlierRunsCell(t *testing.T) {
 			vm.StoreOriginStorage(addr, slot, *uint256.NewInt(5))
 			if test.earlier != "" {
 				first := storageWriteSet(addr, slot, 0, test.earlierValue, ValueChanged)
-				vm.FlushVersionedWrites(first, false)
+				vm.FlushWrites(first, false)
 				if test.earlier == "validated" {
 					vm.MarkWritesValidated(first, func(accounts.Address) bool { return false })
 				}
@@ -2130,7 +2130,7 @@ func TestFlushNetZeroRerunClearsEarlierRunsCell(t *testing.T) {
 					Val:         *uint256.NewInt(1),
 				})
 			}
-			vm.FlushVersionedWrites(rerun, false)
+			vm.FlushWrites(rerun, false)
 
 			val, res, ok := vm.ReadStorage(addr, slot, 2)
 			require.True(t, ok)
@@ -2190,14 +2190,14 @@ func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
 	vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(42)}}}}}})
 	for incarnation, val := range []uint64{42, 9} {
 		ws := storageWriteSet(addr, slot, Incarnation(incarnation), val, ValueChanged)
-		vm.FlushVersionedWrites(ws, false)
+		vm.FlushWrites(ws, false)
 		vm.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
 	}
 	reads := ReadSet{}
 	reads.SetStorage(addr, slot, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, Val: *uint256.NewInt(9)})
 	require.Equal(t, VersionValid, vm.ValidateReadSet(2, reads, validateEqualVersion, false, ""))
 
-	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 2, 5, ValueUnchanged), false)
+	vm.FlushWrites(storageWriteSet(addr, slot, 2, 5, ValueUnchanged), false)
 
 	require.Equal(t, VersionInvalid, vm.ValidateReadSet(2, reads, validateEqualVersion, false, ""))
 	val, res, ok := vm.ReadStorage(addr, slot, 2)
@@ -2218,7 +2218,7 @@ func TestMarkWritesCompleteWaitsForReadersOfADestructEntry(t *testing.T) {
 		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: true},
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: uint256.Int{}},
 	)
-	vm.FlushVersionedWrites(writes, false)
+	vm.FlushWrites(writes, false)
 
 	e := vm.load(addr)
 	e.mu.RLock()
@@ -2258,7 +2258,7 @@ func TestMarkWritesCompleteRunsUnderReadersOfACreatedEntry(t *testing.T) {
 		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: false},
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: *uint256.NewInt(5)},
 	)
-	vm.FlushVersionedWrites(writes, false)
+	vm.FlushWrites(writes, false)
 
 	e := vm.load(addr)
 	e.mu.RLock()
@@ -2287,12 +2287,12 @@ func TestMarkWritesCompleteWaitsForReadersOfARevivedEntry(t *testing.T) {
 
 	addr := getAddress(54)
 	vm := NewVersionMap(nil)
-	vm.FlushVersionedWrites(newWriteSet(&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 1, Incarnation: 1}}, Val: true}), true)
+	vm.FlushWrites(newWriteSet(&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 1, Incarnation: 1}}, Val: true}), true)
 	writes := newWriteSet(
 		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: false},
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: *uint256.NewInt(5)},
 	)
-	vm.FlushVersionedWrites(writes, false)
+	vm.FlushWrites(writes, false)
 
 	e := vm.load(addr)
 	e.mu.RLock()
@@ -2325,12 +2325,12 @@ func TestMarkWritesCompleteWaitsForReadersOfACreatedThenDestroyedEntry(t *testin
 
 	addr := getAddress(55)
 	vm := NewVersionMap(nil)
-	vm.FlushVersionedWrites(newWriteSet(&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 1, Incarnation: 1}}, Val: false}), true)
+	vm.FlushWrites(newWriteSet(&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 1, Incarnation: 1}}, Val: false}), true)
 	writes := newWriteSet(
 		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: true},
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: uint256.Int{}},
 	)
-	vm.FlushVersionedWrites(writes, false)
+	vm.FlushWrites(writes, false)
 
 	e := vm.load(addr)
 	e.mu.RLock()
@@ -2370,7 +2370,7 @@ func TestOneValuePerVersion_AddressCellIgnoresRoot(t *testing.T) {
 		WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Key: accounts.NilKey, Version: ver},
 		Val:         &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash, Root: empty.RootHash},
 	})
-	vm.FlushVersionedWrites(published, false)
+	vm.FlushWrites(published, false)
 
 	zeroRoot := newWriteSet(&VersionedWrite[*accounts.Account]{
 		WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Key: accounts.NilKey, Version: ver},
@@ -2381,7 +2381,7 @@ func TestOneValuePerVersion_AddressCellIgnoresRoot(t *testing.T) {
 
 // A panic inside a flush (here the Done->Estimate assert) must not leave the account's lock held:
 // the self-loop worker recovers it, and every later reader of the account would block forever.
-func TestFlushVersionedWritesPanicReleasesAccountLock(t *testing.T) {
+func TestFlushWritesPanicReleasesAccountLock(t *testing.T) {
 	prev := dbg.AssertEnabled
 	dbg.AssertEnabled = true
 	t.Cleanup(func() { dbg.AssertEnabled = prev })
@@ -2390,8 +2390,8 @@ func TestFlushVersionedWritesPanicReleasesAccountLock(t *testing.T) {
 	addr := accounts.InternAddress(common.Address{0xab})
 	ws := &WriteSet{}
 	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true})
-	vm.FlushVersionedWrites(ws, true)
-	require.Panics(t, func() { vm.FlushVersionedWrites(ws, false) }, "a Done cell downgraded to Estimate trips the assert")
+	vm.FlushWrites(ws, true)
+	require.Panics(t, func() { vm.FlushWrites(ws, false) }, "a Done cell downgraded to Estimate trips the assert")
 
 	read := make(chan struct{})
 	go func() {
@@ -2413,7 +2413,7 @@ func TestReadResultFitsInRegisters(t *testing.T) {
 
 // A flush that panics must release the account lock, or the account's readers block forever
 // after the executor recovers the panic.
-func TestFlushVersionedWrites_PanicReleasesTheAccountLock(t *testing.T) {
+func TestFlushWrites_PanicReleasesTheAccountLock(t *testing.T) {
 	t.Parallel()
 
 	addr := getAddress(45)
@@ -2423,9 +2423,9 @@ func TestFlushVersionedWrites_PanicReleasesTheAccountLock(t *testing.T) {
 			&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: incarnation}}, Val: *uint256.NewInt(val)},
 		)
 	}
-	vm.FlushVersionedWrites(balanceWrite(2, 100), false)
+	vm.FlushWrites(balanceWrite(2, 100), false)
 
-	require.Panics(t, func() { vm.FlushVersionedWrites(balanceWrite(1, 42), false) })
+	require.Panics(t, func() { vm.FlushWrites(balanceWrite(1, 42), false) })
 	e := vm.load(addr)
 	require.True(t, e.mu.TryLock(), "the account lock is still held after the panic")
 	e.mu.Unlock()
@@ -2505,7 +2505,7 @@ func TestMarkWritesValidatedKeepsASeededDoneCell(t *testing.T) {
 				vm.MarkWritesValidated(flushPath(vm, addr, 1, SelfDestructPath), nil)
 			}
 			ws := balanceWrite(addr, Version{TxIndex: 3}, 7)
-			vm.FlushVersionedWrites(ws, false)
+			vm.FlushWrites(ws, false)
 			require.Equal(t, FlagDone, balanceFlag(t, vm, addr, 3), "a flush that matches the seed is a no-op")
 			vm.MarkWritesValidated(ws, nil)
 			require.Equal(t, FlagDone, balanceFlag(t, vm, addr, 3))
@@ -2522,8 +2522,8 @@ func TestMarkWritesValidatedPanicsOnANewerIncarnation(t *testing.T) {
 	vm := NewVersionMap(nil)
 	addr := accounts.InternAddress(common.HexToAddress("0x12"))
 	stale := balanceWrite(addr, Version{TxIndex: 3}, 1)
-	vm.FlushVersionedWrites(stale, false)
-	vm.FlushVersionedWrites(balanceWrite(addr, Version{TxIndex: 3, Incarnation: 1}, 2), false)
+	vm.FlushWrites(stale, false)
+	vm.FlushWrites(balanceWrite(addr, Version{TxIndex: 3, Incarnation: 1}, 2), false)
 	require.Panics(t, func() { vm.MarkWritesValidated(stale, nil) })
 	require.Equal(t, FlagEstimate, balanceFlag(t, vm, addr, 3))
 }
@@ -2544,8 +2544,8 @@ func TestMarkWritesMarksAWriteSetMergedBeforeItsFlush(t *testing.T) {
 			b := accounts.InternAddress(common.HexToAddress("0x14"))
 			first, second := balanceWrite(a, Version{TxIndex: 3}, 1), balanceWrite(b, Version{TxIndex: 3}, 2)
 			merged := first.Merge(second)
-			vm.FlushVersionedWrites(first, false)
-			vm.FlushVersionedWrites(second, false)
+			vm.FlushWrites(first, false)
+			vm.FlushWrites(second, false)
 			tc.mark(vm, merged)
 			require.Equal(t, tc.want, balanceFlag(t, vm, a, 3))
 			require.Equal(t, tc.want, balanceFlag(t, vm, b, 3))
@@ -2558,9 +2558,9 @@ func TestMarkWritesValidatedPanicsOnACellRecreatedAtANewerIncarnation(t *testing
 	vm := NewVersionMap(nil)
 	addr := accounts.InternAddress(common.HexToAddress("0x15"))
 	stale := balanceWrite(addr, Version{TxIndex: 3}, 1)
-	vm.FlushVersionedWrites(stale, false)
+	vm.FlushWrites(stale, false)
 	vm.Delete(addr, BalancePath, accounts.NilKey, 3, true)
-	vm.FlushVersionedWrites(balanceWrite(addr, Version{TxIndex: 3, Incarnation: 1}, 2), false)
+	vm.FlushWrites(balanceWrite(addr, Version{TxIndex: 3, Incarnation: 1}, 2), false)
 	require.Panics(t, func() { vm.MarkWritesValidated(stale, nil) })
 	require.Equal(t, FlagEstimate, balanceFlag(t, vm, addr, 3))
 }
@@ -2570,9 +2570,9 @@ func TestMarkWritesValidatedMarksACellRecreatedAtTheSameIncarnation(t *testing.T
 	vm := NewVersionMap(nil)
 	addr := accounts.InternAddress(common.HexToAddress("0x16"))
 	first := balanceWrite(addr, Version{TxIndex: 3}, 1)
-	vm.FlushVersionedWrites(first, false)
+	vm.FlushWrites(first, false)
 	vm.DeleteAll(addr, 3)
-	vm.FlushVersionedWrites(balanceWrite(addr, Version{TxIndex: 3}, 1), false)
+	vm.FlushWrites(balanceWrite(addr, Version{TxIndex: 3}, 1), false)
 	vm.MarkWritesValidated(first, nil)
 	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
 }
@@ -2734,10 +2734,10 @@ func TestWritesAlreadySeededRefusesACellTheNetZeroResetMadeDone(t *testing.T) {
 	vm := NewVersionMap(seededSlotBAL(addr, slot))
 	for incarnation, val := range []uint64{42, 9} {
 		ws := storageWriteSet(addr, slot, Incarnation(incarnation), val, ValueChanged)
-		vm.FlushVersionedWrites(ws, false)
+		vm.FlushWrites(ws, false)
 		vm.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
 	}
-	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 2, 5, ValueUnchanged), false)
+	vm.FlushWrites(storageWriteSet(addr, slot, 2, 5, ValueUnchanged), false)
 
 	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 3, 42, ValueChanged)))
 }
@@ -2749,8 +2749,8 @@ func TestWritesAlreadySeededRefusesARecreatedCell(t *testing.T) {
 	slot := accounts.InternKey(common.Hash{0x04})
 	vm := NewVersionMap(seededSlotBAL(addr, slot))
 	vm.Delete(addr, StoragePath, slot, 1, false)
-	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 2, 42, ValueChanged), false)
-	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 3, 5, ValueUnchanged), false)
+	vm.FlushWrites(storageWriteSet(addr, slot, 2, 42, ValueChanged), false)
+	vm.FlushWrites(storageWriteSet(addr, slot, 3, 5, ValueUnchanged), false)
 
 	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 4, 42, ValueChanged)))
 }
@@ -2760,7 +2760,7 @@ func TestWritesAlreadySeededKeepsTheSeedThroughValidation(t *testing.T) {
 	slot := accounts.InternKey(common.Hash{0x04})
 	vm := NewVersionMap(seededSlotBAL(addr, slot))
 	ws := storageWriteSet(addr, slot, 0, 42, ValueChanged)
-	vm.FlushVersionedWrites(ws, false)
+	vm.FlushWrites(ws, false)
 	vm.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
 
 	require.True(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 0, 42, ValueChanged)))
@@ -2772,7 +2772,7 @@ func TestWritesAlreadySeededKeepsTheSeedThroughCompletion(t *testing.T) {
 	slot := accounts.InternKey(common.Hash{0x04})
 	vm := NewVersionMap(seededSlotBAL(addr, slot))
 	ws := storageWriteSet(addr, slot, 0, 42, ValueChanged)
-	vm.FlushVersionedWrites(ws, false)
+	vm.FlushWrites(ws, false)
 	vm.MarkWritesComplete(ws)
 
 	require.True(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 0, 42, ValueChanged)))
@@ -2784,8 +2784,8 @@ func TestWritesAlreadySeededRefusesACellATxOverwrote(t *testing.T) {
 	vm := NewVersionMap(seededSlotBAL(addr, slot))
 	require.True(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 0, 42, ValueChanged)))
 
-	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 0, 9, ValueChanged), true)
-	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 1, 42, ValueChanged), true)
+	vm.FlushWrites(storageWriteSet(addr, slot, 0, 9, ValueChanged), true)
+	vm.FlushWrites(storageWriteSet(addr, slot, 1, 42, ValueChanged), true)
 
 	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 2, 42, ValueChanged)))
 }

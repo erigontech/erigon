@@ -1552,9 +1552,9 @@ func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag
 	return true
 }
 
-// FlushVersionedWrites routes a tx's typed write collections into the version map. Each
+// FlushWrites routes a tx's typed write collections into the version map. Each
 // cell is positioned by the write's (txIndex, incarnation), so the loop order is irrelevant.
-func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
+func (vm *VersionMap) FlushWrites(writes *WriteSet, complete bool) {
 	if writes == nil {
 		return
 	}
@@ -1746,7 +1746,7 @@ func (vm *VersionMap) markWrites(writes *WriteSet, flag statusFlag, isFeeRecipie
 	}
 	for addr, inner := range writes.storage {
 		for _, vw := range inner {
-			// Net-zero writes are never materialized on a BAL block (see FlushVersionedWrites),
+			// Net-zero writes are never materialized on a BAL block (see FlushWrites),
 			// so there is no cell to mark.
 			if vm.HasBAL && vw.valStatus == ValueUnchanged {
 				continue

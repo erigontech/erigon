@@ -173,7 +173,7 @@ func TestPrepareRecordsSystemCoinbaseInBlockAccessList(t *testing.T) {
 	ibs.Prepare(&chain.Rules{IsShanghai: true}, accounts.ZeroAddress, params.SystemAddress, accounts.NilAddress, nil, nil)
 
 	io := NewVersionedIO(1)
-	io.RecordReads(Version{TxIndex: 0}, ibs.VersionedReads())
+	io.RecordReads(Version{TxIndex: 0}, ibs.Reads())
 	bal := io.AsBlockAccessList()
 
 	require.Len(t, bal, 1)
@@ -519,8 +519,8 @@ func TestVersionedIO_RemovedDependencyFallsThroughToStorage(t *testing.T) {
 	ibs := NewWithVersionMap(sr, NewVersionMap(nil))
 	ibs.SetTxContext(2, 0)
 
-	ibs.versionedReads = ReadSet{}
-	ibs.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
+	ibs.reads = ReadSet{}
+	ibs.reads.SetStorage(addr, key, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(0xBB),
 	})
@@ -576,7 +576,7 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 	// the zero-balance from Selfdestruct with a non-zero value that must be kept.
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeUnspecified))
 
-	writes := ibs.VersionedWrites()
+	writes := ibs.Writes()
 
 	pathSet := map[AccountPath]bool{}
 	for h := range writes.AllHeaders() {
@@ -763,7 +763,7 @@ func TestAccountRead_BalancePathPromotion_DoesNotInvalidate(t *testing.T) {
 	// Same call the parallel-exec scheduler makes between worker
 	// completion and apply.
 	io := NewVersionedIO(1)
-	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
+	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.Reads())
 
 	checkVersionEqual := func(rv, wv Version) VersionValidity {
 		if rv == wv {
@@ -807,7 +807,7 @@ func TestCreateAccount_SyntheticIncarnationStamp_DoesNotInvalidate(t *testing.T)
 	ibs.PublishOrigins()
 
 	io := NewVersionedIO(1)
-	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
+	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.Reads())
 
 	checkVersionEqual := func(rv, wv Version) VersionValidity {
 		if rv == wv {
@@ -823,7 +823,7 @@ func TestCreateAccount_SyntheticIncarnationStamp_DoesNotInvalidate(t *testing.T)
 			"BalancePath version")
 }
 
-// getVersionedAccount must honour a prior tx's SelfDestructPath cell even
+// getAccount must honour a prior tx's SelfDestructPath cell even
 // when stateReader (which doesn't consult the versionMap) returns the pre-SD
 // record. Without this gate Empty() returns false and a CALL-with-value to
 // the SD'd address misses CallNewAccountGas.
@@ -849,23 +849,23 @@ func TestGetVersionedAccount_PriorTxSelfDestruct_ReturnsNil(t *testing.T) {
 
 	// Tx 4's worker IBS. The base reader returns the pre-SD account directly —
 	// no versionMap-aware wrapper short-circuits the SD case. Only
-	// getVersionedAccount's versionMap check should convert that to nil.
+	// getAccount's versionMap check should convert that to nil.
 	ibs := New(reader)
 	ibs.SetTxContext(0, 4)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
 
-	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	account, _, _, err := ibs.getAccount(addr, true)
 	require.NoError(t, err)
 	require.Nil(t, account,
-		"getVersionedAccount must return nil for an address self-destructed "+
+		"getAccount must return nil for an address self-destructed "+
 			"by a prior tx with no revival, even when the underlying "+
 			"stateReader still surfaces the pre-SD record")
 }
 
 // Metamorphic SD+CREATE2 in one tx: SelfDestructPath=true and a fresh
 // AddressPath land at the SAME TxIdx. A strict hi > destructTxIndex
-// revival check would miss this; getVersionedAccount must recognise
+// revival check would miss this; getAccount must recognise
 // AddressPath at TxIdx >= destructTxIndex as revival.
 func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing.T) {
 	t.Parallel()
@@ -900,11 +900,11 @@ func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
 
-	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	account, _, _, err := ibs.getAccount(addr, true)
 	require.NoError(t, err)
 	require.NotNil(t, account,
 		"same-tx SD+CREATE2 (metamorphic) re-creates the contract; "+
-			"getVersionedAccount must surface the re-created account, not nil")
+			"getAccount must surface the re-created account, not nil")
 	require.Equal(t, uint64(2), account.Incarnation,
 		"the re-created account's Incarnation should reflect the CREATE2 (not the pre-SD value)")
 }
@@ -1377,7 +1377,7 @@ func TestCreateAccount_FundedThenCreated_SyntheticReadKeepsPreTxBalance(t *testi
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(1), tracing.BalanceChangeTransfer)) // funds it 0 -> 1
 	require.NoError(t, ibs.CreateAccount(addr, true))                                           // CREATE2 deploys the contract
 
-	rs := ibs.VersionedReads()
+	rs := ibs.Reads()
 	vr, ok := rs.GetBalance(addr)
 	require.True(t, ok, "a synthetic BalancePath read must be recorded for the created account")
 	require.True(t, vr.Val.IsZero(),
@@ -1406,8 +1406,8 @@ func TestCreateAccount_InternalBalanceReadPromotedOnCreate_NoSpuriousBalanceChan
 	require.NoError(t, ibs.CreateAccount(addr, true))
 
 	io := NewVersionedIO(1)
-	io.RecordReads(Version{TxIndex: 0}, ibs.VersionedReads())
-	io.RecordWrites(Version{TxIndex: 0}, ibs.VersionedWrites())
+	io.RecordReads(Version{TxIndex: 0}, ibs.Reads())
+	io.RecordWrites(Version{TxIndex: 0}, ibs.Writes())
 	bal := io.AsBlockAccessList()
 
 	for _, ac := range bal {
@@ -1502,7 +1502,7 @@ func TestVersionedIO_RemovalFlushedDuringCodeHashReadEmptyCodeChangeOmitted(t *t
 	removal.SetEmptyRemoval(authority, Version{TxIndex: 0})
 	vm.fieldMissHook = func() {
 		vm.fieldMissHook = nil
-		vm.FlushVersionedWrites(removal, true)
+		vm.FlushWrites(removal, true)
 	}
 
 	for i, target := range []accounts.Address{delegate, accounts.ZeroAddress} {
@@ -1533,7 +1533,7 @@ func TestVersionedIO_RemovalFlushedDuringCodeHashReadEmptyCodeChangeOmitted(t *t
 	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true, IsByzantium: true, IsCancun: true, IsPrague: true, IsAmsterdam: true})
 	require.NoError(t, err)
 	io := NewVersionedIO(2)
-	io.RecordReads(Version{TxIndex: 1}, ibs.VersionedReads())
+	io.RecordReads(Version{TxIndex: 1}, ibs.Reads())
 	io.RecordWrites(Version{TxIndex: 1}, writes)
 	bal := io.AsBlockAccessList()
 	idx := slices.IndexFunc(bal, func(ac types.AccountChanges) bool { return ac.Address == authority.Value() })
@@ -1898,10 +1898,10 @@ func TestArenaBoundsTheOverflowListItKeeps(t *testing.T) {
 
 func TestOnlyAReusedStateOwnsItsCells(t *testing.T) {
 	ibs := New(NewNoopReader())
-	require.False(t, ibs.versionedWrites.ArenaBacked(), "a one-shot state buys no slabs")
+	require.False(t, ibs.writes.ArenaBacked(), "a one-shot state buys no slabs")
 
-	ibs.ResetVersionedIO()
-	require.True(t, ibs.versionedWrites.ArenaBacked(), "a state that outlives a tx owns its cells")
+	ibs.ResetIO()
+	require.True(t, ibs.writes.ArenaBacked(), "a state that outlives a tx owns its cells")
 }
 
 // A path that writes a handful of cells must buy a handful: the first slab is
@@ -2008,12 +2008,12 @@ func TestReusedReadSetBoundsTheSlotsItsMapsHeld(t *testing.T) {
 func TestArenaAddressWritesOutliveTheSlab(t *testing.T) {
 	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
 	defer ibs.Close()
-	ibs.versionedWrites.UseArena()
+	ibs.writes.UseArena()
 	addr := accounts.InternAddress(common.HexToAddress("0xacc7"))
 	ibs.recordWriteAddress(addr, &accounts.Account{Nonce: 7, Balance: *uint256.NewInt(9)})
 
-	published := ibs.VersionedWrites()
-	ibs.versionedWrites.ReleaseAndReset()
+	published := ibs.Writes()
+	ibs.writes.ReleaseAndReset()
 	ibs.recordWriteAddress(addr, &accounts.Account{Nonce: 1})
 
 	vw, ok := published.GetAddress(addr)
@@ -2025,7 +2025,7 @@ func TestArenaAddressWritesOutliveTheSlab(t *testing.T) {
 	for i := range 128 {
 		ibs.recordWriteAddress(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), &accounts.Account{Nonce: uint64(i)})
 	}
-	ibs.versionedWrites.ReleaseAndReset()
+	ibs.writes.ReleaseAndReset()
 	acc := &accounts.Account{Nonce: 3}
 	require.Zero(t, testing.AllocsPerRun(100, func() { ibs.recordWriteAddress(addr, acc) }), "no allocation per AddressPath write")
 }
@@ -2063,7 +2063,7 @@ func TestCreateAccount_RecordsSelfDestructReadForOrdering(t *testing.T) {
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
 	require.NoError(t, ibs.CreateAccount(addr, true))
-	reads := ibs.VersionedReads()
+	reads := ibs.Reads()
 	_, tracked := reads.GetSelfDestruct(addr)
 	require.True(t, tracked, "CreateAccount must record the SelfDestructPath dependency for ordering")
 }

@@ -92,7 +92,7 @@ func RederiveBlockAccessList(
 		}
 		ibs.MergeTxIOInto(balIO, writes)
 		ibs.FlushWritesToVersionMap(writes)
-		ibs.ResetVersionedIO()
+		ibs.ResetIO()
 		return nil
 	}
 	ibs.SetTxContext(blockNum, -1)
@@ -122,7 +122,7 @@ func RederiveBlockAccessList(
 		receipts = append(receipts, receipt)
 	}
 	ibs.SetTxContext(blockNum, len(txns))
-	ibs.ResetVersionedIO()
+	ibs.ResetIO()
 	_, _, err = protocol.FinalizeBlockExecution(engine, header, txns, uncles, cfg, ibs, receipts, withdrawals, chainReader, false, logger)
 	if err = phaseErr(err); err != nil {
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize block %d: %w", blockNum, err)

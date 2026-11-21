@@ -840,7 +840,7 @@ func (s *simulator) simulateBlock(
 		if err := intraBlockState.WriteFlushedTo(writes, stateWriter); err != nil {
 			return fmt.Errorf("apply simulated writes: %w", err)
 		}
-		intraBlockState.ResetVersionedIO()
+		intraBlockState.ResetIO()
 		return nil
 	}
 
@@ -901,7 +901,7 @@ func (s *simulator) simulateBlock(
 		return systemCallCustom(contract, data, intraBlockState, header, false)
 	}
 	intraBlockState.SetTxContext(blockNumber, len(bsc.Calls))
-	intraBlockState.ResetVersionedIO()
+	intraBlockState.ResetIO()
 	if balMode {
 		// Withdrawal recipients left absent still belong in the BAL as accessed.
 		intraBlockState.StartAccessRecording()

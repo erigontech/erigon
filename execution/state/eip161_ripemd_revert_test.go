@@ -76,7 +76,7 @@ func touchThenRevertRemoves(t *testing.T, addr accounts.Address) bool {
 // touchAccount deliberately bumps ripemd's journal dirty count so a touch
 // outlives the reverting transaction, and serial therefore still sweeps the
 // account under EIP-161. The versioned path derives its write set from
-// versionedWrites, and reverting the touch's zero-balance write dropped that
+// writes, and reverting the touch's zero-balance write dropped that
 // sweep — so the account kept its trie leaf and mainnet's Spurious Dragon
 // clearing blocks re-executed to a wrong state root (first observed at block
 // 2,675,119).

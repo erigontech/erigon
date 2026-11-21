@@ -104,7 +104,7 @@ func TestEmitTouched_ProducesExpectedUpdates(t *testing.T) {
 		t.Run(sc.name, func(t *testing.T) {
 			ws := sc.ws
 			vm := state.NewVersionMap(nil)
-			vm.FlushVersionedWrites(ws, true)
+			vm.FlushWrites(ws, true)
 
 			got := emitTouchedUpdates(t, vm, T, nil, state.NewVersionMapWriteView(ws, vm, txIdx))
 			require.Equal(t, sc.expect, got)
@@ -139,7 +139,7 @@ func TestEmitTouched_CrossBlockStorageResolvesFromBase(t *testing.T) {
 
 	t.Run("non-zero base value writes the slot", func(t *testing.T) {
 		vm := state.NewVersionMap(nil)
-		vm.FlushVersionedWrites(flushed, true)
+		vm.FlushWrites(flushed, true)
 		base := newMapStateReader()
 		base.accounts[addr] = &acc
 		base.storage[addr] = map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(42)}
@@ -149,7 +149,7 @@ func TestEmitTouched_CrossBlockStorageResolvesFromBase(t *testing.T) {
 
 	t.Run("absent base value deletes the slot", func(t *testing.T) {
 		vm := state.NewVersionMap(nil)
-		vm.FlushVersionedWrites(flushed, true)
+		vm.FlushWrites(flushed, true)
 		base := newMapStateReader()
 		base.accounts[addr] = &acc
 		got := emitTouchedUpdates(t, vm, T, base, state.NewVersionMapWriteView(recorded, vm, txIdx))
@@ -172,11 +172,11 @@ func TestEmitTouched_BatchKeepsEarlierBlockDestruct(t *testing.T) {
 
 	wsA := newWS().selfDestruct(addr, ver, true).bal(addr, ver, uint256.Int{}).build()
 	vmA := state.NewVersionMap(nil)
-	vmA.FlushVersionedWrites(wsA, true)
+	vmA.FlushWrites(wsA, true)
 
 	wsB := newWS().bal(addr, ver, *uint256.NewInt(7)).build()
 	vmB := state.NewVersionMap(nil)
-	vmB.FlushVersionedWrites(wsB, true)
+	vmB.FlushWrites(wsB, true)
 
 	got := emitTouchedUpdates(t, vmB, T, newMapStateReader(),
 		state.NewVersionMapWriteView(wsA, vmA, txIdx), state.NewVersionMapWriteView(wsB, vmB, txIdx))[string(av[:])]
@@ -219,7 +219,7 @@ func TestEmitTouched_ZeroCodeHashFoldsAsEmpty(t *testing.T) {
 
 	ws := newWS().bal(addr, ver, *uint256.NewInt(5)).addr(addr, ver, &accounts.Account{Balance: *uint256.NewInt(5)}).build()
 	vm := state.NewVersionMap(nil)
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 
 	got := emitTouchedUpdates(t, vm, txIdx+1, newMapStateReader(), state.NewVersionMapWriteView(ws, vm, txIdx))[string(av[:])]
 	require.Equal(t, *uint256.NewInt(5), got.Balance)
@@ -264,7 +264,7 @@ func TestEmitTouched_BaseReadErrorFailsTheFold(t *testing.T) {
 	t.Run("storage", func(t *testing.T) {
 		ws := newWS().bal(addr, ver, *uint256.NewInt(1)).stor(addr, slot, ver, *uint256.NewInt(1)).build()
 		vm := state.NewVersionMap(nil)
-		vm.FlushVersionedWrites(newWS().bal(addr, ver, *uint256.NewInt(1)).build(), true)
+		vm.FlushWrites(newWS().bal(addr, ver, *uint256.NewInt(1)).build(), true)
 		cc := &commitmentCalculator{updates: newTestUpdates()}
 		cc.accumulateTouched(ws, nil)
 		err := cc.emitTouched(vm.View(txIdx+1, &errStorageBase{mapStateReader: newMapStateReader(), err: boom}), newTestUpdates())
@@ -291,7 +291,7 @@ func TestEmitTouched_FirstTouchBaseReadErrorFailsTheFold(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xf2})
 	ws := newWS().bal(addr, ver, *uint256.NewInt(5)).build()
 	vm := state.NewVersionMap(nil)
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 	boom := errors.New("first-touch read failed")
 	failing := &failingAccountReader{mapStateReader: newMapStateReader(), err: boom}
 
@@ -320,7 +320,7 @@ func TestEmitTouched_FoldReusesFirstTouchBaseRead(t *testing.T) {
 
 	ws := newWS().bal(addr, ver, *uint256.NewInt(5)).build()
 	vm := state.NewVersionMap(nil)
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 	base := &countingAccountReader{mapStateReader: newMapStateReader()}
 	base.accounts[addr] = &acc
 
@@ -338,7 +338,7 @@ func TestEmitTouched_FoldReusesFirstTouchBaseRead(t *testing.T) {
 
 	other := state.NewVersionMap(nil)
 	other.SetBaseTxNum(100)
-	other.FlushVersionedWrites(ws, true)
+	other.FlushWrites(ws, true)
 	require.NoError(t, cc.emitTouched(cc.foldView(other, 100+txIdx+1, base), newTestUpdates()))
 	require.Equal(t, readsBeforeFold+1, base.reads, "a fold over another block must read its own base")
 }
@@ -355,7 +355,7 @@ func TestEmitTouched_FoldReusesFirstTouchKeyHash(t *testing.T) {
 	slot := accounts.InternKey([32]byte{0x3})
 	ws := newWS().bal(addr, ver, *uint256.NewInt(5)).nonce(addr, ver, 1).stor(addr, slot, ver, *uint256.NewInt(9)).build()
 	vm := state.NewVersionMap(nil)
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 
 	hashes := 0
 	hasher := func(key []byte) []byte {

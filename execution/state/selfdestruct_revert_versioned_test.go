@@ -31,7 +31,7 @@ func TestSelfdestructVersioned_RevertPreservesPriorBalanceWrite(t *testing.T) {
 	// Balance written BEFORE the snapshot; no prior SelfDestructPath write, so the
 	// revert takes the wasCommited branch that previously deleted the balance cell.
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(1000), tracing.BalanceChangeUnspecified))
-	pre, ok := ibs.versionedWrites.GetBalance(addr)
+	pre, ok := ibs.writes.GetBalance(addr)
 	require.True(t, ok, "precondition: a versioned balance write exists")
 	require.Equal(t, uint64(1000), pre.Val.Uint64())
 
@@ -41,7 +41,7 @@ func TestSelfdestructVersioned_RevertPreservesPriorBalanceWrite(t *testing.T) {
 
 	ibs.RevertToSnapshot(snap, nil)
 
-	got, ok := ibs.versionedWrites.GetBalance(addr)
+	got, ok := ibs.writes.GetBalance(addr)
 	require.True(t, ok, "reverting the self-destruct must not delete the pre-snapshot balance write")
 	require.Equal(t, uint64(1000), got.Val.Uint64(), "the pre-snapshot balance value must be restored")
 }

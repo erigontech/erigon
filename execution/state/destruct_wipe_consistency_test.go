@@ -27,7 +27,7 @@ func TestDestructWipe_WipedStorageReadRecorded(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, value.IsZero())
 	ibs.RevertToSnapshot(snapshot, nil)
-	reads := ibs.VersionedReads()
+	reads := ibs.Reads()
 	read, ok := reads.GetStorage(addr, key)
 	require.True(t, ok, "wiped storage read must be recorded")
 	require.True(t, read.Val.IsZero())

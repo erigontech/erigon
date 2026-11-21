@@ -120,11 +120,11 @@ func TestVersionMapViewMatchesVersionedStateReader(t *testing.T) {
 	wsP := &WriteSet{}
 	wsP.SetSelfDestruct(preserve, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: preserve, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true})
 	wsP.SetBalance(preserve, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: preserve, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(5)})
-	vm.FlushVersionedWrites(wsP, true)
+	vm.FlushWrites(wsP, true)
 	// Burn: contract removal (self-destruct + balance ValueDeleted) at tx 0.
 	wsB := &WriteSet{}
 	wsB.SetContractRemoval(burned, Version{TxIndex: 0})
-	vm.FlushVersionedWrites(wsB, true)
+	vm.FlushWrites(wsB, true)
 
 	const txIdx = 3
 	view := vm.View(uint64(txIdx), base) // baseTxNum defaults to 0, so txNum==txIdx

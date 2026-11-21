@@ -1892,7 +1892,7 @@ func TestParallelNextResultKeepsTheSeedOfADroppedWrite(t *testing.T) {
 
 	earlier := state.Version{BlockNum: 1, TxIndex: 0}
 	earlierWrites := newWS().bal(addr, earlier, *uint256.NewInt(8)).build()
-	be.versionMap.FlushVersionedWrites(earlierWrites, false)
+	be.versionMap.FlushWrites(earlierWrites, false)
 	be.blockIO.RecordWrites(earlier, earlierWrites)
 
 	dropping := state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 2}

@@ -52,9 +52,8 @@ func TestJournalDirtySymmetry(t *testing.T) {
 	}{
 		{"createObjectChange", kindCreateObject, func(j *journal) { j.createObjectChange(addr) }},
 		{"resetObjectChange", kindResetObject, func(j *journal) { j.resetObjectChange(addr, nil) }},
-		{"selfdestructChange", kindSelfdestruct, func(j *journal) { j.selfdestructChange(addr, false, false, val, false) }},
-		{"selfdestructChangeVersioned", kindSelfdestruct, func(j *journal) {
-			j.selfdestructChangeVersioned(addr, false, val, false, false, 0, false, val, false)
+		{"selfdestructChange", kindSelfdestruct, func(j *journal) {
+			j.selfdestructChange(addr, false, val, false, false, 0, false, val, false)
 		}},
 		{"balanceChange", kindBalance, func(j *journal) { j.balanceChange(addr, val, false, false) }},
 		{"nonceChange", kindNonce, func(j *journal) { j.nonceChange(addr, 1, false) }},

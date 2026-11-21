@@ -13,7 +13,7 @@ import (
 // EIP-6780: a contract self-destructed in the CURRENT tx stays alive until
 // end-of-tx cleanup, so Empty() must report it as NON-empty within the same tx
 // (it had code — it executed SELFDESTRUCT). On the versioned path the SD clears
-// the nonce/code-hash/balance cells, so emptyFromVersionedFields wrongly returns
+// the nonce/code-hash/balance cells, so emptyFromFields wrongly returns
 // empty=true -> a same-tx CALL to it charges params.StateGasNewAccount (183600),
 // over-charging gas (the eip8246/eip6780 post_send_opcode_CALL zkevm failures).
 func TestEIP6780_SelfdestructVersioned_NotEmptySameTx(t *testing.T) {

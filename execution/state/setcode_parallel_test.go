@@ -93,8 +93,8 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 	require.NoError(t, err)
 
 	// Flush TX 88 writes to versionMap
-	writes88 := ibs88.VersionedWrites()
-	vm.FlushVersionedWrites(writes88, true)
+	writes88 := ibs88.Writes()
+	vm.FlushWrites(writes88, true)
 
 	// Verify TX 88 wrote empty code hash to versionMap
 	ch, rr, ok := vm.ReadCodeHash(addr, 89)
@@ -122,11 +122,11 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 	assert.Equal(t, delegationCode, code,
 		"GetCode after SetCode(delegationCode) should return the delegation code, not empty")
 
-	// Also verify that the versionedWrites contain the CodePath entry.
-	writes90 := ibs90.VersionedWrites()
+	// Also verify that the writes contain the CodePath entry.
+	writes90 := ibs90.Writes()
 	_, hasCodeWrite := writes90.GetCode(addr)
 	assert.True(t, hasCodeWrite,
-		"TX 90 should have a CodePath write in versionedWrites (the revert-to-original optimisation should NOT have fired)")
+		"TX 90 should have a CodePath write in writes (the revert-to-original optimisation should NOT have fired)")
 }
 
 // TestSetCodeParallel_ValidatedFloorNotSuppressed pins the early-break wrong-root:
@@ -172,8 +172,8 @@ func TestSetCodeParallel_ValidatedFloorNotSuppressed(t *testing.T) {
 	ibs17.SetTxContext(100, 17)
 	ibs17.SetVersion(0)
 	require.NoError(t, ibs17.SetCode(addr, delegationCodeB, tracing.CodeChangeAuthorization))
-	writes17 := ibs17.VersionedWrites()
-	vm.FlushVersionedWrites(writes17, false)
+	writes17 := ibs17.Writes()
+	vm.FlushWrites(writes17, false)
 	vm.MarkWritesValidated(writes17, nil)
 
 	ch, rr, ok := vm.ReadCodeHash(addr, 46)
@@ -192,7 +192,7 @@ func TestSetCodeParallel_ValidatedFloorNotSuppressed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, delegationCodeA, code, "GetCode must return the re-delegation, not the Validated floor")
 
-	writes46 := ibs46.VersionedWrites()
+	writes46 := ibs46.Writes()
 	_, hasCodeWrite := writes46.GetCode(addr)
 	assert.True(t, hasCodeWrite, "TX 46 codehash write must NOT be suppressed against a Validated floor")
 	_, hasHashWrite := writes46.GetCodeHash(addr)
@@ -233,7 +233,7 @@ func TestSetCodeParallel_NoMaterialize_DelegateThenRevoke(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, code, "delegate-then-revoke must leave the code empty")
 
-	writes := ibs.VersionedWrites()
+	writes := ibs.Writes()
 	_, hasCodeWrite := writes.GetCode(addr)
 	assert.False(t, hasCodeWrite, "net-zero delegate-then-revoke must fold away the CodePath write")
 }
@@ -274,7 +274,7 @@ func TestSetCodeParallel_NoMaterialize_DelegateThenRevokeBALCreatedAccount(t *te
 	require.NoError(t, ibs.SetCode(addr, delegation, tracing.CodeChangeAuthorization))
 	require.NoError(t, ibs.SetCode(addr, nil, tracing.CodeChangeAuthorizationClear))
 
-	_, hasCodeWrite := ibs.VersionedWrites().GetCode(addr)
+	_, hasCodeWrite := ibs.Writes().GetCode(addr)
 	assert.False(t, hasCodeWrite)
 }
 
@@ -332,7 +332,7 @@ func TestGetDelegatedDesignation_TracksSplitCodePublish(t *testing.T) {
 	_, delegated, err := ibs.GetDelegatedDesignation(authority)
 	require.NoError(t, err)
 	require.False(t, delegated)
-	reads := ibs.VersionedReads()
+	reads := ibs.Reads()
 	_, tracked := reads.GetCode(authority)
 	require.True(t, tracked)
 	io := NewVersionedIO(1)

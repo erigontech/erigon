@@ -422,11 +422,11 @@ func (t *TxTask) VersionMap() *state.VersionMap {
 }
 
 func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
-	return ibs.VersionedReads()
+	return ibs.Reads()
 }
 
 func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet {
-	return ibs.VersionedWrites()
+	return ibs.Writes()
 }
 
 func (t *TxTask) IsBlockEnd() bool {

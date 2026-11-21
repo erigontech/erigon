@@ -64,7 +64,7 @@ func TestStorageColdReadSeedsOrigin(t *testing.T) {
 
 	// The read itself is recorded at originIndex (not UnknownVersion), so it is
 	// value-validated against the shared origin rather than version-only.
-	tr, recorded := ibs.versionedReads.GetStorage(addr, key)
+	tr, recorded := ibs.reads.GetStorage(addr, key)
 	require.True(t, recorded)
 	require.Equal(t, originIndex, tr.Version.TxIndex, "cold read must record the origin version")
 }
@@ -122,7 +122,7 @@ func TestFinalizedWritesHandsOverOrigins(t *testing.T) {
 	_, err = ibs.FinalizedWrites(nil)
 	require.NoError(t, err)
 
-	require.True(t, ibs.versionedOrigins.IsEmpty(), "published origins must not be kept for the next tx")
+	require.True(t, ibs.origins.IsEmpty(), "published origins must not be kept for the next tx")
 	got, ok := ibs.stateUpdates.LoadOriginStorage(addr, key)
 	require.True(t, ok)
 	require.Equal(t, committed, got)
@@ -144,7 +144,7 @@ func TestFinalizedWritesHandsOverAccountOrigin(t *testing.T) {
 	_, err = ibs.FinalizedWrites(nil)
 	require.NoError(t, err)
 
-	require.True(t, ibs.versionedOrigins.IsEmpty(), "published origins must not be kept for the next tx")
+	require.True(t, ibs.origins.IsEmpty(), "published origins must not be kept for the next tx")
 	got, ok := ibs.stateUpdates.LoadOriginAccount(addr)
 	require.True(t, ok)
 	require.Equal(t, acc.Nonce, got.Nonce)

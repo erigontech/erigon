@@ -44,7 +44,7 @@ func TestValSkip_SelfDestructPromotionBumpsStamp(t *testing.T) {
 		WriteHeader: WriteHeader{Address: addr, Version: Version{TxIndex: j}, Path: SelfDestructPath},
 		Val:         true,
 	})
-	vm.FlushVersionedWrites(sd, false)
+	vm.FlushWrites(sd, false)
 
 	rs := ReadSet{}
 	rs.SetStorage(addr, slot, VersionedRead[uint256.Int]{
@@ -78,7 +78,7 @@ func TestQuietBelow_SeedPutBackByADroppedWriteBlocks(t *testing.T) {
 	vm.InitStamps(8)
 	earlier := &WriteSet{}
 	earlier.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}}, Val: *uint256.NewInt(8)})
-	vm.FlushVersionedWrites(earlier, false)
+	vm.FlushWrites(earlier, false)
 	stamp := vm.WriteSeq()
 
 	vm.DropWrite(addr, BalancePath, accounts.NilKey, Version{TxIndex: 1, Incarnation: 1})
@@ -180,7 +180,7 @@ func flushPath(vm *VersionMap, addr accounts.Address, tx int, path AccountPath) 
 	default:
 		ws = newWriteSet(&VersionedWrite[uint256.Int]{WriteHeader: h, Val: *uint256.NewInt(1)})
 	}
-	vm.FlushVersionedWrites(ws, false)
+	vm.FlushWrites(ws, false)
 	return ws
 }
 
@@ -218,7 +218,7 @@ func TestValSkip_StorageOnlyPromotionOnLifecycleEntryBumps(t *testing.T) {
 			WriteHeader: WriteHeader{Address: addr, Key: slot, Version: Version{TxIndex: 3}, Path: StoragePath},
 			Val:         *uint256.NewInt(1),
 		})
-		vm.FlushVersionedWrites(ws, false)
+		vm.FlushWrites(ws, false)
 		stamp := vm.WriteSeq()
 		promote(vm, ws)
 		require.False(t, vm.QuietBelow(5, stamp), "%s: a storage-only promotion on an entry with lifecycle cells must bump", name)
@@ -346,7 +346,7 @@ func TestQuietBelow_NoOpBALCodeFlushDoesNotBump(t *testing.T) {
 	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: version}, Val: code})
 	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: version}, Val: code.Hash})
 	ws.SetCodeSize(addr, &VersionedWrite[int]{WriteHeader: WriteHeader{Address: addr, Path: CodeSizePath, Version: version}, Val: code.Len()})
-	vm.FlushVersionedWrites(ws, false)
+	vm.FlushWrites(ws, false)
 	require.True(t, vm.QuietBelow(5, stamp), "an equal code flush must not stamp")
 }
 

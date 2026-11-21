@@ -728,8 +728,8 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 //
 //   - Block assembler (serial, proposer): FinalizeTx iterated
 //     sdb.journal.dirties after the tx and, for any stateObject with
-//     `so.deleted == true`, dropped its whole versionedReads entry:
-//     if so.deleted { delete(sdb.versionedReads, addr) }
+//     `so.deleted == true`, dropped its whole reads entry:
+//     if so.deleted { delete(sdb.reads, addr) }
 //     That removed the new contract's SSTORE-gas-calc read from the
 //     per-tx read set before it was merged into balIO.
 //

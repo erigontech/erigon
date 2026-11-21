@@ -296,7 +296,7 @@ func (s *ReadSet) GetStorage(addr accounts.Address, key accounts.StorageKey) (Ve
 }
 
 // getHeader probes the read set for path and returns the type-agnostic
-// header only.  This is the single read-set probe versionedReadCore uses —
+// header only.  This is the single read-set probe readCore uses —
 // uniform return type, so the runtime path switch works without the value
 // type leaking into the probe.
 func (s *ReadSet) getHeader(addr accounts.Address, path AccountPath, key accounts.StorageKey) (ReadHeader, bool) {
@@ -377,7 +377,7 @@ func (s *ReadSet) hasAnyReadAt(addr accounts.Address) bool {
 }
 
 // setHeader records a header-only read (zero value) at (addr, path, key).
-// Used on the dependency-conflict paths where versionedReadCore records the
+// Used on the dependency-conflict paths where readCore records the
 // read purely for ValidateVersion's version check — the value is never
 // consulted there (it was zero in the legacy VersionedRead path too).
 func (s *ReadSet) SetHeader(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader) {
@@ -997,7 +997,7 @@ func (ws *WriteSet) newVWStorage() *VersionedWrite[uint256.Int] {
 	return getVWStorage()
 }
 
-// WriteSet is the cell-pipeline target shape for versionedWrites.
+// WriteSet is the cell-pipeline target shape for writes.
 // Symmetric with ReadSet — see that type for rationale.
 type WriteSet struct {
 	address        map[accounts.Address]*VersionedWrite[*accounts.Account]

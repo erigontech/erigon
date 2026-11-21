@@ -113,7 +113,7 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	_, hasSelfDestruct := writes.GetSelfDestruct(addr)
 	require.True(t, hasSelfDestruct, "the removal carries the self-destruct marker")
 
-	vm.FlushVersionedWrites(writes, true)
+	vm.FlushWrites(writes, true)
 	published, err := WithoutVanished(writes, vm, 0, false, &minimalStateReader{})
 	require.NoError(t, err)
 	_, hasSelfDestruct = published.GetSelfDestruct(addr)
@@ -141,7 +141,7 @@ func TestCreatedEmptyAccountTouchedByInFlightTxIsNoDependency(t *testing.T) {
 	t.Cleanup(first.Close)
 	first.SetTxContext(1, 0)
 	require.NoError(t, first.TouchAccount(addr))
-	vm.FlushVersionedWrites(finalizedWrites(t, first, rules), false)
+	vm.FlushWrites(finalizedWrites(t, first, rules), false)
 
 	next := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(next.Close)
@@ -203,7 +203,7 @@ func TestEmptyAccountTouchInvalidatedByFunding(t *testing.T) {
 	require.NoError(t, ibs.TouchAccount(addr))
 
 	io := NewVersionedIO(3)
-	io.RecordReads(Version{TxIndex: 2}, ibs.VersionedReads())
+	io.RecordReads(Version{TxIndex: 2}, ibs.Reads())
 
 	account := accounts.NewAccount()
 	account.Balance = *uint256.NewInt(32649)
@@ -230,7 +230,7 @@ func TestDestroyedAccountReadRemainsValid(t *testing.T) {
 	require.False(t, exists)
 
 	io := NewVersionedIO(3)
-	io.RecordReads(Version{TxIndex: 2}, ibs.VersionedReads())
+	io.RecordReads(Version{TxIndex: 2}, ibs.Reads())
 	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, false, ""))
 }
 
@@ -255,14 +255,14 @@ func TestFinalizedWritesRemoveTouchedEmptyAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, exists)
 	io := NewVersionedIO(3)
-	io.RecordReads(Version{TxIndex: 2}, early.VersionedReads())
+	io.RecordReads(Version{TxIndex: 2}, early.Reads())
 
 	toucher := newTx(1)
 	exists, err = toucher.Exist(addr)
 	require.NoError(t, err)
 	require.True(t, exists)
 	require.NoError(t, toucher.AddBalance(addr, uint256.Int{}, 0))
-	vm.FlushVersionedWrites(finalizedWrites(t, toucher, &chain.Rules{IsSpuriousDragon: true}), true)
+	vm.FlushWrites(finalizedWrites(t, toucher, &chain.Rules{IsSpuriousDragon: true}), true)
 
 	// The emptied pre-existing account is removed: a later tx reads it absent, and
 	// an earlier tx's existence read predating the removal is stale (invalidated).
@@ -362,7 +362,7 @@ func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {
 	ibs.SetTxContext(1, 0)
 
 	require.NoError(t, ibs.TouchAccount(addr))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), false)
+	vm.FlushWrites(ibs.Writes(), false)
 
 	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
 	_, hasAddress := writes.GetAddress(addr)
@@ -526,13 +526,13 @@ func TestRecreateAfterEmptyRemovalShadowsBalanceDelete(t *testing.T) {
 			removal := finalizedWrites(t, touch, rules)
 			bal, ok := removal.GetBalance(addr)
 			require.True(t, ok && bal.Deletes(), "the touching tx removes the account")
-			vm.FlushVersionedWrites(removal, true)
+			vm.FlushWrites(removal, true)
 
 			recreate := NewWithVersionMap(&minimalStateReader{}, vm)
 			t.Cleanup(recreate.Close)
 			recreate.SetTxContext(1, 1)
 			require.NoError(t, tc.recreate(recreate, addr))
-			vm.FlushVersionedWrites(finalizedWrites(t, recreate, rules), true)
+			vm.FlushWrites(finalizedWrites(t, recreate, rules), true)
 
 			acc, ok, _ := vm.View(2, &minimalStateReader{}).GetAccount(addr)
 			require.True(t, ok, "the re-created account must read present to commitment")

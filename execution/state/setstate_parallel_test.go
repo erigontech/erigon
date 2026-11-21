@@ -31,7 +31,7 @@ func TestSetStateParallel_NoMaterialize(t *testing.T) {
 
 	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(42)))
 
-	writes := ibs.VersionedWrites()
+	writes := ibs.Writes()
 	vw, ok := writes.GetStorage(addr, key)
 	require.True(t, ok, "StoragePath write expected")
 	assert.Equal(t, uint256.NewInt(42), &vw.Val)
@@ -62,7 +62,7 @@ func TestSetStateParallel_NoOpToCommitted(t *testing.T) {
 
 	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(9)))
 
-	writes := ibs.VersionedWrites()
+	writes := ibs.Writes()
 	_, ok := writes.GetStorage(addr, key)
 	assert.False(t, ok, "writing the committed value should record no storage write")
 }
@@ -94,8 +94,8 @@ func TestGetCommittedStateParallel_ValidatedFloor(t *testing.T) {
 	ibs0.SetTxContext(100, 0)
 	ibs0.SetVersion(0)
 	require.NoError(t, ibs0.SetState(addr, key, *predVal))
-	writes0 := ibs0.VersionedWrites()
-	vm.FlushVersionedWrites(writes0, false)
+	writes0 := ibs0.Writes()
+	vm.FlushWrites(writes0, false)
 	vm.MarkWritesValidated(writes0, nil)
 
 	_, rr, ok := vm.ReadStorage(addr, key, 5)
@@ -161,7 +161,7 @@ func TestBaseStateReadConsistency_NoReResolve(t *testing.T) {
 
 	// The recorded read must stay pinned at the consumed version (0.0) so seal
 	// validation catches the floor change (now 0.1) and re-executes.
-	tr, ok := ibs.versionedReads.GetStorage(addr, key)
+	tr, ok := ibs.reads.GetStorage(addr, key)
 	require.True(t, ok)
 	assert.Equal(t, 0, tr.Version.TxIndex)
 	assert.Equal(t, 0, int(tr.Version.Incarnation), "recorded dep must remain the consumed incarnation, not re-resolve to 0.1")

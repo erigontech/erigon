@@ -134,7 +134,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	// Clear any stale versioned reads/writes accumulated between transactions
 	// (e.g. from TxNonce calls in the gen callback). These reads were recorded
 	// with the previous tx's txIndex and must not pollute the next tx's read set.
-	b.ibs.ResetVersionedIO()
+	b.ibs.ResetIO()
 	txVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
 	b.ibs.SetTxContext(txVersion.BlockNum, txVersion.TxIndex)
 	if b.gasUsed == nil {
@@ -150,10 +150,10 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	if err != nil {
 		panic(err)
 	}
-	b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
+	b.blockIO.RecordReads(txVersion, b.ibs.Reads())
 	b.blockIO.RecordWrites(txVersion, writes)
-	b.versionMap.FlushVersionedWrites(writes, true)
-	b.ibs.ResetVersionedIO()
+	b.versionMap.FlushWrites(writes, true)
+	b.ibs.ResetIO()
 
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
@@ -173,7 +173,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 	if b.gasPool == nil {
 		b.SetCoinbase(common.Address{})
 	}
-	b.ibs.ResetVersionedIO()
+	b.ibs.ResetIO()
 	txVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
 	b.ibs.SetTxContext(txVersion.BlockNum, txVersion.TxIndex)
 	if b.gasUsed == nil {
@@ -190,10 +190,10 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 		if err != nil {
 			panic(err)
 		}
-		b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
+		b.blockIO.RecordReads(txVersion, b.ibs.Reads())
 		b.blockIO.RecordWrites(txVersion, writes)
-		b.versionMap.FlushVersionedWrites(writes, true)
-		b.ibs.ResetVersionedIO()
+		b.versionMap.FlushWrites(writes, true)
+		b.ibs.ResetIO()
 	}
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
@@ -500,7 +500,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		}
 		if b.engine != nil {
 			// Set tx context for system init call (txIndex -1)
-			ibs.ResetVersionedIO()
+			ibs.ResetIO()
 			ibs.SetTxContext(b.header.Number.Uint64(), -1)
 			err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, logger, nil)
 			if err != nil {
@@ -512,10 +512,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			if err != nil {
 				return nil, nil, err
 			}
-			b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
+			b.blockIO.RecordReads(initVersion, ibs.Reads())
 			b.blockIO.RecordWrites(initVersion, writes)
-			b.versionMap.FlushVersionedWrites(writes, true)
-			ibs.ResetVersionedIO()
+			b.versionMap.FlushWrites(writes, true)
+			ibs.ResetIO()
 		}
 		// Execute any user modifications to the block
 		if gen != nil {
@@ -528,7 +528,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// uses floor(txIdx-1).
 			b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
 			// Reset versioned I/O before finalize to capture system call I/O cleanly
-			ibs.ResetVersionedIO()
+			ibs.ResetIO()
 			ibs.StartAccessRecording()
 			// Finalize and seal the block
 			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -544,10 +544,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			if err != nil {
 				return nil, nil, err
 			}
-			b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())
+			b.blockIO.RecordReads(finalizeVersion, ibs.Reads())
 			b.blockIO.RecordWrites(finalizeVersion, writes)
-			b.versionMap.FlushVersionedWrites(writes, true)
-			ibs.ResetVersionedIO()
+			b.versionMap.FlushWrites(writes, true)
+			ibs.ResetIO()
 
 			// Write state changes to db
 			// Commit from the versionMap write-set via ApplyWrites, the same domain apply

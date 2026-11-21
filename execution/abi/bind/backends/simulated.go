@@ -828,7 +828,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 		return err
 	}
 	b.pendingState.FlushWritesToVersionMap(writes)
-	b.pendingState.ResetVersionedIO()
+	b.pendingState.ResetIO()
 	b.pendingState.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions())+1)
 	protocol.SetGasUsed(b.pendingHeader, b.pendingGasUsed)
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))

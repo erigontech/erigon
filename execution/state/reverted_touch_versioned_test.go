@@ -26,11 +26,11 @@ func TestNoMaterialize_RevertedTouchNotPublished(t *testing.T) {
 
 	snap := ibs.PushSnapshot()
 	require.NoError(t, ibs.TouchAccount(addr))
-	_, touched := ibs.VersionedWrites().GetBalance(addr)
+	_, touched := ibs.Writes().GetBalance(addr)
 	require.True(t, touched, "touch records a BalancePath write while in effect")
 
 	ibs.RevertToSnapshot(snap, nil)
 
-	_, ok := ibs.VersionedWrites().GetBalance(addr)
+	_, ok := ibs.Writes().GetBalance(addr)
 	require.False(t, ok, "a touch reverted before commit must not publish a BalancePath write")
 }

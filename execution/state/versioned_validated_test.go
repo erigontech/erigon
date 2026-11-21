@@ -39,8 +39,8 @@ func writeValidated(t *testing.T, vm *VersionMap, reader StateReader, txIndex in
 	t.Cleanup(w.Close)
 	w.txIndex = txIndex
 	require.NoError(t, w.SetState(addr, key, val))
-	writes := w.VersionedWrites()
-	vm.FlushVersionedWrites(writes, false)
+	writes := w.Writes()
+	vm.FlushWrites(writes, false)
 	vm.MarkWritesValidated(writes, nil)
 	return writes
 }
@@ -92,7 +92,7 @@ func TestValidated_SealTimeReadDepMustMatchFinalDep(t *testing.T) {
 	// value at a new incarnation.
 	vm.WriteStorage(addr, slot, Version{TxIndex: 3, Incarnation: 1}, v2, true)
 
-	valid := vm.ValidateReadSet(16, r.VersionedReads(),
+	valid := vm.ValidateReadSet(16, r.Reads(),
 		func(rv, wv Version) VersionValidity {
 			if rv != wv {
 				return VersionInvalid
@@ -129,7 +129,7 @@ func TestValidated_SealSameIncarnationStaysValid(t *testing.T) {
 	// incarnation, same value.
 	vm.MarkWritesComplete(wWrites)
 
-	valid := vm.ValidateReadSet(16, r.VersionedReads(),
+	valid := vm.ValidateReadSet(16, r.Reads(),
 		func(rv, wv Version) VersionValidity {
 			if rv != wv {
 				return VersionInvalid
@@ -152,7 +152,7 @@ func TestValidated_DestructedFeeRecipientHidesItsWrites(t *testing.T) {
 	base := &sdAccountReader{addr: fee, account: &acc}
 	vm := NewVersionMap(nil)
 	credit := balanceWrite(fee, Version{TxIndex: 1}, 150)
-	vm.FlushVersionedWrites(credit, false)
+	vm.FlushWrites(credit, false)
 	vm.MarkWritesComplete(credit)
 
 	reader := NewWithVersionMap(base, vm)
@@ -168,8 +168,8 @@ func TestValidated_DestructedFeeRecipientHidesItsWrites(t *testing.T) {
 	destroyed, err := writer.Selfdestruct(fee, false)
 	require.NoError(t, err)
 	require.True(t, destroyed)
-	ws := writer.VersionedWrites()
-	vm.FlushVersionedWrites(ws, false)
+	ws := writer.Writes()
+	vm.FlushWrites(ws, false)
 	vm.MarkWritesValidated(ws, func(a accounts.Address) bool { return a == fee })
 
 	val, err := reader.GetState(fee, slot)

@@ -41,7 +41,7 @@ func TestVersionedRead_RecordOnce_DirtyReResolveDoesNotOverwrite(t *testing.T) {
 	defer w.Close()
 	w.txIndex = 0
 	require.NoError(t, w.SetState(addr, key, v1))
-	mvhm.FlushVersionedWrites(w.VersionedWrites(), true)
+	mvhm.FlushWrites(w.Writes(), true)
 
 	// Reader (tx2) first read: sees the committed v1 and records the dependency.
 	r := NewWithVersionMap(reader, mvhm)
@@ -66,7 +66,7 @@ func TestVersionedRead_RecordOnce_DirtyReResolveDoesNotOverwrite(t *testing.T) {
 		"repeat read must return the first-recorded value (record-once), not re-resolve to v2")
 
 	// Final dep check: reader consumed v1, committed value is now v2 -> invalid.
-	valid := mvhm.ValidateReadSet(2, r.VersionedReads(),
+	valid := mvhm.ValidateReadSet(2, r.Reads(),
 		func(rv, wv Version) VersionValidity {
 			if rv != wv {
 				return VersionInvalid

@@ -212,7 +212,7 @@ func TestAuthoritativeAddressWriteDropsBALSource(t *testing.T) {
 		vm.WriteAddressExists(a, Version{TxIndex: 0}, &marker)
 		ws := &WriteSet{}
 		ws.SetAddress(a, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: a, Path: AddressPath, Version: Version{TxIndex: 0}}, Val: &written})
-		vm.FlushVersionedWrites(ws, complete)
+		vm.FlushWrites(ws, complete)
 		return vm
 	}
 	other := accounts.InternAddress(common.HexToAddress("0x07e5"))
@@ -268,12 +268,12 @@ func TestEstimateFlushReplacesBALAddressMarker(t *testing.T) {
 	ws := &WriteSet{}
 	ws.SetAddress(a, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: a, Path: AddressPath, Version: Version{TxIndex: 0}}, Val: &inFlight})
 
-	vm.FlushVersionedWrites(ws, false)
+	vm.FlushWrites(ws, false)
 	_, res, ok := vm.ReadAddress(a, 1)
 	require.True(t, ok)
 	require.Equal(t, MVReadResultDependency, res.Status())
 
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 	got, res, ok := vm.ReadAddress(a, 1)
 	require.True(t, ok)
 	require.Equal(t, MVReadResultDone, res.Status())
@@ -296,7 +296,7 @@ func TestEstimateFlushKeepsBALSeededCode(t *testing.T) {
 	ws.SetCode(a, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: a, Path: CodePath, Version: v}, Val: code})
 	ws.SetCodeSize(a, &VersionedWrite[int]{WriteHeader: WriteHeader{Address: a, Path: CodeSizePath, Version: v}, Val: code.Len()})
 
-	vm.FlushVersionedWrites(ws, false)
+	vm.FlushWrites(ws, false)
 	got, res, ok := vm.ReadCode(a, 1)
 	require.True(t, ok)
 	require.Equal(t, MVReadResultDone, res.Status())
@@ -479,7 +479,7 @@ func redestruct(vm *VersionMap, x accounts.Address, txIdx int) *WriteSet {
 		}
 		removal = &WriteSet{}
 		removal.SetContractRemoval(x, Version{TxIndex: txIdx, Incarnation: inc})
-		vm.FlushVersionedWrites(removal, false)
+		vm.FlushWrites(removal, false)
 	}
 	return removal
 }
@@ -500,7 +500,7 @@ func TestInFlightFlushOfTheSeededRemovalKeepsItDone(t *testing.T) {
 			x, reader, vm := seededRemovalOfPrefundedAccount(t)
 			removal := &WriteSet{}
 			tc.remove(removal, x, Version{TxIndex: 0, Incarnation: 1})
-			vm.FlushVersionedWrites(removal, false)
+			vm.FlushWrites(removal, false)
 			_, res, _ := vm.ReadSelfDestruct(x, 1)
 			require.Equal(t, MVReadResultDone, res.Status())
 			_, res, _ = vm.ReadBalance(x, 1)
@@ -530,12 +530,12 @@ func TestReflushedDestructOfAnEarlierRunTakesTheNewVersion(t *testing.T) {
 	vm := NewVersionMap(types.BlockAccessList{{Address: other.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}}}})
 	run0 := &WriteSet{}
 	run0.SetEmptyRemoval(x, Version{TxIndex: 0})
-	vm.FlushVersionedWrites(run0, false)
+	vm.FlushWrites(run0, false)
 	vm.MarkWritesValidated(run0, nil)
 
 	run1 := &WriteSet{}
 	run1.SetEmptyRemoval(x, Version{TxIndex: 0, Incarnation: 1})
-	vm.FlushVersionedWrites(run1, false)
+	vm.FlushWrites(run1, false)
 	vm.MarkWritesComplete(run1)
 	_, res, _ := vm.ReadSelfDestruct(x, 1)
 	require.Equal(t, Incarnation(1), res.Incarnation())
@@ -660,7 +660,7 @@ func TestPresentAccountReadFromTheMarkerNeedsASealedRevival(t *testing.T) {
 		WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: Version{TxIndex: 1, Incarnation: 1}},
 		Val:         *uint256.NewInt(7),
 	})
-	vm.FlushVersionedWrites(credit, false)
+	vm.FlushWrites(credit, false)
 	vm.MarkWritesValidated(credit, nil)
 	require.False(t, presentRead.DependsOn(WriteHeader{Address: x, Path: BalancePath}))
 	require.Equal(t, VersionInvalid, vm.ValidateReadSet(2, presentRead, validateEqualVersion, false, ""))
@@ -670,7 +670,7 @@ func TestPresentAccountReadFromTheMarkerNeedsASealedRevival(t *testing.T) {
 	existsOnRerun, err := rerun.Exist(x)
 	require.NoError(t, err)
 	require.True(t, existsOnRerun)
-	require.Equal(t, VersionValid, vm.ValidateReadSet(2, rerun.VersionedReads(), validateEqualVersion, false, ""), "a re-run validates, so the rule does not loop")
+	require.Equal(t, VersionValid, vm.ValidateReadSet(2, rerun.Reads(), validateEqualVersion, false, ""), "a re-run validates, so the rule does not loop")
 
 	vm.MarkWritesComplete(credit)
 	require.Equal(t, VersionValid, vm.ValidateReadSet(2, presentRead, validateEqualVersion, false, ""))
@@ -684,7 +684,7 @@ func existenceRead(t *testing.T, reader StateReader, vm *VersionMap, x accounts.
 	ibs.SetTxContext(1, txIdx)
 	exists, err := ibs.Exist(x)
 	require.NoError(t, err)
-	reads := ibs.VersionedReads()
+	reads := ibs.Reads()
 	read, ok := reads.GetAddress(x)
 	require.True(t, ok)
 	return exists, ReadSet{address: map[accounts.Address]VersionedRead[AccountView]{x: read}}
@@ -705,7 +705,7 @@ func createAndDestroyInTx0(t *testing.T, reader StateReader, vm *VersionMap, x a
 	require.NoError(t, err)
 	writes, err := ibs.FinalizedWrites(&chain.Rules{IsAmsterdam: true})
 	require.NoError(t, err)
-	vm.FlushVersionedWrites(writes, false)
+	vm.FlushWrites(writes, false)
 	vm.MarkWritesValidated(writes, nil)
 }
 
@@ -815,18 +815,18 @@ func TestABalanceReadAtTheSeededDestructsVersionIsStaleOnceTheBalanceMoves(t *te
 		require.NoError(t, err)
 		require.False(t, ibs.HadInvalidRead())
 		require.Equal(t, *uint256.NewInt(want), balance)
-		return ibs.VersionedReads()
+		return ibs.Reads()
 	}
 
 	first := &WriteSet{}
 	first.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: Version{TxIndex: 3}}, Val: *uint256.NewInt(8)})
-	vm.FlushVersionedWrites(first, false)
+	vm.FlushWrites(first, false)
 	vm.MarkWritesValidated(first, nil)
 	reads := readBalance(8)
 
 	final := &WriteSet{}
 	final.SetEmptyRemoval(x, Version{TxIndex: 3, Incarnation: 1})
-	vm.FlushVersionedWrites(final, false)
+	vm.FlushWrites(final, false)
 	vm.MarkWritesValidated(final, nil)
 	require.Equal(t, VersionInvalid, vm.ValidateReadSet(4, reads, validateEqualVersion, false, ""))
 	require.Equal(t, VersionValid, vm.ValidateReadSet(4, readBalance(0), validateEqualVersion, false, ""))

@@ -132,7 +132,7 @@ func TestEmitTouchedFeedCarriesWhatEmitTouchedEmits(t *testing.T) {
 		stor(a(5), k(3), ver, *uint256.NewInt(7)).
 		build()
 	vm := state.NewVersionMap(nil)
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 	view := func() *state.VersionMapView { return vm.View(txIdx+1, nil) }
 
 	plain := &commitmentCalculator{updates: newTestUpdates()}

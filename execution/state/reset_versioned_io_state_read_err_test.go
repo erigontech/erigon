@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ResetVersionedIO rebinds the per-tx read/write sets for the next tx; a
+// ResetIO rebinds the per-tx read/write sets for the next tx; a
 // state-read error recorded for one tx must not stick to the next. A sticky
 // error would fail a later tx that read cleanly, and (with the EIP-161 removal
 // bail) would suppress a legitimate empty-account deletion.
@@ -34,7 +34,7 @@ func TestResetVersionedIO_ClearsStateReadError(t *testing.T) {
 	ibs.RecordStateReadError(errors.New("transient read failure"))
 	require.Error(t, ibs.StateReadError(), "precondition: error recorded")
 
-	ibs.ResetVersionedIO()
+	ibs.ResetIO()
 
-	require.NoError(t, ibs.StateReadError(), "ResetVersionedIO must clear the per-tx state-read error")
+	require.NoError(t, ibs.StateReadError(), "ResetIO must clear the per-tx state-read error")
 }

@@ -67,7 +67,7 @@ func destroyThenRecreate(t *testing.T, reader *accountStateReader, addr accounts
 	destroyer.EndTransaction()
 	destroyWrites := finalizedWrites(t, destroyer, amsterdamRules)
 	t.Cleanup(destroyWrites.ReleaseAndReset)
-	vm.FlushVersionedWrites(destroyWrites, true)
+	vm.FlushWrites(destroyWrites, true)
 
 	recreator := newAmsterdamIBS(reader, vm, 1)
 	t.Cleanup(recreator.Close)
@@ -97,7 +97,7 @@ func destroyThenRecreate(t *testing.T, reader *accountStateReader, addr accounts
 
 func validateReads(vm *VersionMap, ibs *IntraBlockState, txIdx int) VersionValidity {
 	io := NewVersionedIO(txIdx + 1)
-	io.RecordReads(Version{TxIndex: txIdx}, ibs.VersionedReads())
+	io.RecordReads(Version{TxIndex: txIdx}, ibs.Reads())
 	return vm.ValidateVersion(txIdx, io, validateEqualVersion, true, "")
 }
 
@@ -115,7 +115,7 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 	destroyWrites, recreateWrites, changes := destroyThenRecreate(t, reader, addr, code)
 
 	vm := NewVersionMap(changes)
-	vm.FlushVersionedWrites(destroyWrites, true)
+	vm.FlushWrites(destroyWrites, true)
 	ibs := newAmsterdamIBS(reader, vm, 2)
 	defer ibs.Close()
 
@@ -147,7 +147,7 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 	require.Equal(t, code, resolved.Bytes)
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	vm.FlushVersionedWrites(recreateWrites, true)
+	vm.FlushWrites(recreateWrites, true)
 	rerun := newAmsterdamIBS(reader, vm, 2)
 	defer rerun.Close()
 	exists, err = rerun.Exist(addr)
@@ -171,7 +171,7 @@ func TestConsumedAbsenceOutlivesRecreationFlush(t *testing.T) {
 	destroyWrites, recreateWrites, _ := destroyThenRecreate(t, reader, addr, []byte{0x60, 0x01})
 
 	vm := NewVersionMap(nil)
-	vm.FlushVersionedWrites(destroyWrites, true)
+	vm.FlushWrites(destroyWrites, true)
 	ibs := newAmsterdamIBS(reader, vm, 2)
 	defer ibs.Close()
 
@@ -179,7 +179,7 @@ func TestConsumedAbsenceOutlivesRecreationFlush(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, empty)
 
-	vm.FlushVersionedWrites(recreateWrites, true)
+	vm.FlushWrites(recreateWrites, true)
 
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
@@ -209,7 +209,7 @@ func TestEIP8246PreserveSelfDestructRevert(t *testing.T) {
 	ibs.RevertToSnapshot(snap, nil)
 
 	ibs.EndTransaction()
-	vm.FlushVersionedWrites(finalizedWrites(t, ibs, amsterdamRules), true)
+	vm.FlushWrites(finalizedWrites(t, ibs, amsterdamRules), true)
 
 	acc, ok, _ := vm.View(1, reader).GetAccount(addr)
 	require.True(t, ok)
@@ -237,7 +237,7 @@ func TestCommittedFallbackDependsOnInFlightDestruct(t *testing.T) {
 		h.valStatus = status
 		return h
 	}
-	vm.FlushVersionedWrites(newWriteSet(
+	vm.FlushWrites(newWriteSet(
 		&VersionedWrite[*accounts.Account]{WriteHeader: header(AddressPath, ValueChanged), Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash, Root: empty.RootHash}},
 		&VersionedWrite[bool]{WriteHeader: header(SelfDestructPath, ValueChanged), Val: true},
 		&VersionedWrite[uint256.Int]{WriteHeader: header(BalancePath, ValueDeleted)},
@@ -278,9 +278,9 @@ func TestWipedFieldOutcomeDependsOnInFlightDestruct(t *testing.T) {
 	}
 	// A validated destruct can still be re-run, and the re-run's flush puts it back in flight.
 	backInFlight := func(vm *VersionMap, ws *WriteSet) {
-		vm.FlushVersionedWrites(ws, false)
+		vm.FlushWrites(ws, false)
 		vm.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
-		vm.FlushVersionedWrites(ws, false)
+		vm.FlushWrites(ws, false)
 	}
 	t.Run("absent", func(t *testing.T) {
 		vm := NewVersionMap(nil)
@@ -293,10 +293,10 @@ func TestWipedFieldOutcomeDependsOnInFlightDestruct(t *testing.T) {
 	})
 	t.Run("revived", func(t *testing.T) {
 		vm := NewVersionMap(nil)
-		vm.FlushVersionedWrites(destruct(0), true)
+		vm.FlushWrites(destruct(0), true)
 		revival := &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}}, Val: *uint256.NewInt(5)}
 		revival.valStatus = ValueChanged
-		vm.FlushVersionedWrites(newWriteSet(revival), true)
+		vm.FlushWrites(newWriteSet(revival), true)
 		backInFlight(vm, destruct(2))
 
 		ibs := newAmsterdamIBS(newAccountStateReader(addr), vm, 3)

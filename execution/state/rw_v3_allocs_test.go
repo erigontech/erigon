@@ -560,7 +560,7 @@ func TestApplyWritesFoldPrevAfterCreationInUncommittedPriorBlock(t *testing.T) {
 				ibs.SetTxContext(1, txIdx)
 				require.NoError(t, body(ibs))
 				writes := finalizedWrites(t, ibs, rules)
-				block1.FlushVersionedWrites(writes, true)
+				block1.FlushWrites(writes, true)
 				block1.SealUpTo(txIdx)
 				block1Folds = append(block1Folds, func() error {
 					return ApplyWrites(NewVersionMapWriteView(writes, block1, txIdx), domains, tx, 1, txNum, false)
