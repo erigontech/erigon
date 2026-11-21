@@ -1041,20 +1041,20 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		roTx.Rollback()
 
 		for shardFrom < lastShard { // recreate this file range 1+ steps
-			nextKey := func() (ok bool, k []byte) {
+			nextKey := func() (ok bool, k, v []byte) {
 				if !keyIter.HasNext() {
-					return false, nil
+					return false, nil, nil
 				}
-				k, _, err := keyIter.Next()
+				k, v, err := keyIter.Next()
 				if err != nil {
 					err = fmt.Errorf("CommitmentRebuild: keyIter.Next() %w", err)
 					panic(err)
 				}
 				processed++
 				if processed%(keysPerStep*uint64(shardStepsSize)) == 0 && shardTo != lastShard {
-					return false, k
+					return false, k, v
 				}
-				return true, k
+				return true, k, v
 			}
 
 			rwTx, err := rwDb.BeginTemporalRw(ctx)
@@ -1181,7 +1181,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	return latestRoot, nil
 }
 
-func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
+func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (ok bool, k, v []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
 	aggTx := AggTx(tx)
 	sd.DiscardWrites(kv.AccountsDomain)
 	sd.DiscardWrites(kv.StorageDomain)
@@ -1195,9 +1195,10 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 
 	sf := time.Now()
 	var processed uint64
-	for ok, key := next(); ; ok, key = next() {
+	// The stream reads the range's own file, so each value is the key's latest as of the range end.
+	for ok, key, val := next(); ; ok, key, val = next() {
 		if len(key) != 0 {
-			if err := sd.GetCommitmentCtx().TouchKeyFromState(tx, key); err != nil {
+			if err := sd.GetCommitmentCtx().TouchKeyValue(key, val); err != nil {
 				return nil, err
 			}
 			processed++
