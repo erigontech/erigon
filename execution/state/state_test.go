@@ -241,6 +241,7 @@ func TestCodeResolve(t *testing.T) {
 	seed.Close()
 
 	state1 := New(NewReaderV3(domains.AsGetter(tx)))
+
 	defer state1.Close()
 	state1.SetVersionMap(&VersionMap{})
 	state1.Prepare(&chain.Rules{}, accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, nil, nil)
@@ -251,7 +252,7 @@ func TestCodeResolve(t *testing.T) {
 	code, err := state1.GetCode(stateobjaddr0)
 	require.NoError(t, err)
 	require.Equal(t, del, code)
-	resolved, err := state1.ResolveCode(stateobjaddr0)
+	resolved, err := state1.ResolveCode(stateobjaddr0, true)
 	require.NoError(t, err)
 	require.Equal(t, target, resolved.Bytes)
 }

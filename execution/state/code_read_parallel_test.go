@@ -122,7 +122,7 @@ func TestPriorTxCodeWriteHashComesFromTheCell(t *testing.T) {
 	ibs.SetTxContext(100, 7)
 	ibs.SetVersion(0)
 
-	code, err := ibs.ResolveCode(addr)
+	code, err := ibs.ResolveCode(addr, true)
 	require.NoError(t, err)
 	require.Equal(t, priorCode, code.Bytes)
 	require.Equal(t, cellHash, code.Hash, "the cell's hash must win, not keccak(bytes)")
@@ -158,7 +158,7 @@ func TestPriorTxCodeWriteHashSurvivesReadSetHit(t *testing.T) {
 
 	ibs.journal.dirties[addr] = 1
 
-	code, err := ibs.ResolveCode(addr)
+	code, err := ibs.ResolveCode(addr, true)
 	require.NoError(t, err)
 	require.Equal(t, priorCode, code.Bytes)
 	require.Equal(t, cellHash, code.Hash, "the cell's hash must win, not keccak(bytes)")
@@ -302,7 +302,7 @@ func TestCodeSegment_LaterReadSeesFullCode(t *testing.T) {
 	for name, read := range map[string]func(*IntraBlockState, accounts.Address) ([]byte, error){
 		"GetCode": (*IntraBlockState).GetCode,
 		"ResolveCode": func(ibs *IntraBlockState, addr accounts.Address) ([]byte, error) {
-			code, err := ibs.ResolveCode(addr)
+			code, err := ibs.ResolveCode(addr, true)
 			return code.Bytes, err
 		},
 		"ReadCodeSegmentTo": func(ibs *IntraBlockState, addr accounts.Address) ([]byte, error) {
