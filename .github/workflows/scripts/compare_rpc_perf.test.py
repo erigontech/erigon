@@ -504,7 +504,7 @@ CLASSES = {"description": "eth_subscribe by client class: wallet share 90: 1 new
            "clients": [{"name": "wallet", "share": 90}, {"name": "dapp", "share": 9, "pick": 1},
                        {"name": "indexer", "share": 1}]}
 
-# --- eth_subscribe: a client that sends one notification per receipt is marked with ! ---
+# --- eth_subscribe: a client that sends one notification per receipt is marked with ( )! and not compared ---
 
 with tempfile.TemporaryDirectory() as tmp:
     write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
@@ -515,22 +515,23 @@ with tempfile.TemporaryDirectory() as tmp:
         "transactionReceipts fan-out indexer": api(0.62, 2, 3, 10),
         "transactionReceipts per receipt indexer": api(5, 9, 12, 10)})]}])
     md = mod.render_overview(mod.overview_results(mod.load_results(tmp)), "p50")
-    check("the receipts rows mark with ! the client that sends one notification per receipt",
+    check("the receipts rows show in ( )! the client that sends one notification per receipt, out of the status",
           fanout_row(md, "eth_subscribe_classes transactionReceipts fan-out indexer", "500")
-          == ["500", "0.63", "0.62*!", "🟡"], md)
+          == ["500", "0.63*", "(0.62)!", "🟢"], md)
     check("the rows of the other types have no !",
           fanout_row(md, "eth_subscribe_classes newHeads fan-out indexer", "500") == ["500", "1.00", "0.30*", "🔴"], md)
-    check("the overview legend explains the !", "! sends the receipts of a block one notification each" in md, md)
+    check("the overview legend explains the ( )!",
+          "( )! not compared: the client sends the receipts of a block one notification each" in md, md)
     md = mod.render_classes(mod.load_results(tmp), {"eth_subscribe_classes": CLASSES})
-    check("the class table marks the receipts measures of that client with !",
-          "| indexer | transactionReceipts fan-out | 0.63 / 2.00 | 0.62*! / 2.00 |" in md
+    check("the class table shows the receipts measures of that client in ( )!, out of the fastest",
+          "| indexer | transactionReceipts fan-out | 0.63* / 2.00 | (0.62)! / (2.00) |" in md
           and "| indexer | newHeads fan-out | 1.00 / 2.00 | 0.30* / 2.00 |" in md, md)
 
 with tempfile.TemporaryDirectory() as tmp:
     write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
         "transactionReceipts fan-out indexer": api(0.63, 2, 3, 10)})]}])
     md = mod.render_overview(mod.overview_results(mod.load_results(tmp)), "p50")
-    check("without a client that sends one notification per receipt the legend has no !", "! sends" not in md, md)
+    check("without a client that sends one notification per receipt the legend has no ( )!", "( )!" not in md, md)
 
 with tempfile.TemporaryDirectory() as tmp:
     for client, f in (("erigon", 1), ("geth", 2)):

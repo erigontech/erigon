@@ -14,7 +14,8 @@ time. The newHeads latency (from the block timestamp, so with the consensus
 client and the block execution) gets one overview row for all the classes: it is the wait a user sees.
 The vs newHeads measures (after the head on the same connection)
 are only in the class table: a node that sends the heads late looks fast there. The receipts measures of a client that sends the receipts of a block one
-notification each, instead of one list per block, are marked with !.
+notification each, instead of one list per block, are shown as (value)! and left out of the fastest
+and of the Erigon status: with no end-of-block marker, a subscriber cannot know when the last one has arrived.
 A test whose pattern splits the connections into client classes gets, after the overviews,
 a legend of the classes and the measures and a table with the measures of each class.
 p50, p90 and p95 are the median over the repetitions, max is the worst one.
@@ -157,9 +158,10 @@ MEASURE_LEGEND = [
     "looks fast here, so it is not in the overview.",
 ]
 PER_RECEIPT_LEGEND = ("- **per receipt**: a client that sends the receipts of a block one notification each, "
-                      "marked with !: the arrival of the last one minus the first.")
-PER_RECEIPT_MARK = ("! sends the receipts of a block one notification each, not one list per block: "
-                    "its receipts measures take the arrival of the last one.")
+                      "shown as (value)!: the arrival of the last one minus the first.")
+PER_RECEIPT_MARK = ("( )! not compared: the client sends the receipts of a block one notification each, with no "
+                    "end-of-block marker, so a subscriber cannot know when the last one has arrived; its value "
+                    "is the arrival of the last one, known only after the test.")
 TYPE_ORDER = ["newHeads", "logs", "transactionReceipts"]
 MEASURE_ORDER = ["latency", "fan-out", "vs first newHeads", "vs newHeads", "per receipt"]
 
@@ -242,10 +244,11 @@ def render_classes(results, patterns):
                 measures = {n[:-len(cls) - 1] for a in apis.values() for n in a if n.endswith(" " + cls)}
                 for measure in sorted(measures, key=measure_rank):
                     rows = {c: a.get(f"{measure} {cls}") for c, a in apis.items()}
-                    best = min((r["p50"] for r in rows.values() if r), default=None)
+                    per_receipt = {c for c in rows if is_per_receipt(steps[c], measure)}
+                    best = min((r["p50"] for c, r in rows.items() if r and c not in per_receipt), default=None)
                     cells = [steps[c]["failed"] if is_failed(steps[c]) else
-                             f"{r['p50']:.2f}{'*' if r['p50'] == best else ''}"
-                             f"{'!' if is_per_receipt(steps[c], measure) else ''} / {r['p95']:.2f}" if r else "-"
+                             f"({r['p50']:.2f})! / ({r['p95']:.2f})" if c in per_receipt else
+                             f"{r['p50']:.2f}{'*' if r['p50'] == best else ''} / {r['p95']:.2f}" if r else "-"
                              for c, r in rows.items()]
                     lines.append(f"| {cls} | {measure} | " + " | ".join(cells) + " |")
         lines.append("")
@@ -290,8 +293,9 @@ def latency_cell(step, best, best_rpc, percentile):
         return step["failed"] + " "
     if not all_succeeded(step, best_rpc):
         return "err "
-    return (f"{step[percentile]:.2f}" + ("*" if step[percentile] == best else " ")
-            + ("!" if step.get("per_receipt") else ""))
+    if step.get("per_receipt"):
+        return f"({step[percentile]:.2f})!"
+    return f"{step[percentile]:.2f}" + ("*" if step[percentile] == best else " ")
 
 
 def render_overview(results, percentile):
@@ -309,7 +313,8 @@ def render_overview(results, percentile):
             marked = marked or any(s and s.get("per_receipt") for s in steps.values())
             alive = {c: s for c, s in steps.items() if s and not is_failed(s)}
             best_rpc = max((s["rpc_success"] for s in alive.values()), default=1)
-            ok = {c: s[percentile] for c, s in alive.items() if all_succeeded(s, best_rpc)}
+            ok = {c: s[percentile] for c, s in alive.items()
+                  if all_succeeded(s, best_rpc) and not s.get("per_receipt")}
             best = min(ok.values()) if ok else None
             next_best = min((v for c, v in ok.items() if c != "erigon"), default=None)
             cells = [latency_cell(steps.get(c), best, best_rpc, percentile) for c in clients]
