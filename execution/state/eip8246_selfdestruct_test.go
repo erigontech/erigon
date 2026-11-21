@@ -268,6 +268,7 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		t.Parallel()
 		reader := newAccountStateReader()
 		ibs := New(reader)
+		ibs.SetVersionMap(nil)
 		defer ibs.Close()
 		ibs.SetTxContext(1, 0)
 		require.NoError(t, ibs.CreateAccount(addr, true))
