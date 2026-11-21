@@ -1064,7 +1064,11 @@ func TestComposeOutboundRefuses(t *testing.T) {
 			f.c.logger.SetHandler(log.StreamHandler(&buf, log.TerminalFormatNoColor()))
 			require.Nil(t, f.compose(t))
 			require.Contains(t, buf.String(), c.err)
-			require.Equal(t, 1, strings.Count(buf.String(), "eez.composer.poison"), "evicted once, with its chain")
+			event := "event=eez.composer.cc_compose.poison_eviction_completed"
+			if strings.HasPrefix(c.err, ErrMultiCall.Error()) {
+				event = "event=eez.composer.cc_compose.outbound_multicall_unsupported"
+			}
+			require.Equal(t, 1, strings.Count(buf.String(), event), "evicted once, with its chain")
 			require.Zero(t, f.pool.Len())
 			f.pool.mu.Lock()
 			defer f.pool.mu.Unlock()
@@ -1718,4 +1722,18 @@ func TestComposeOutboundWaitsOnANonceGap(t *testing.T) {
 	require.Nil(t, f.compose(t))
 	require.Equal(t, uint32(1), h.Deferred)
 	require.Equal(t, []*Held{h}, f.pool.PopN(math.MaxInt), "not evicted")
+}
+
+// TestComposeDrainEvent: each composition logs the pool it drained from
+// and what it took, at most MaxTxs.
+func TestComposeDrainEvent(t *testing.T) {
+	f := newCrossFixture(t)
+	for n := range uint64(3) {
+		f.hold(t, n, f.call.Source, f.call.Data)
+	}
+	f.c.x.MaxTxs = 2
+	lines := captureLogs(f.c)
+	f.compose(t)
+	require.Regexp(t, `event=eez.composer.sync_slot.drain .*pool=3 drained=2`, lines.String())
+	require.Equal(t, 1, f.pool.Len(), "the third waits")
 }

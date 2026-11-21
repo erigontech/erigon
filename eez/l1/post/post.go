@@ -183,7 +183,7 @@ func (p *Poster) Sign(ctx context.Context, input []byte, gas uint64) (types.Tran
 	// Only the gas used is charged; a balance short of the limit may still do.
 	need, overflow := new(uint256.Int).MulOverflow(feeCap, uint256.NewInt(gas))
 	if balance, err := p.node.Balance(ctx, p.from); err == nil && (overflow || balance.Lt(need)) {
-		p.logger.Error("[eez] poster balance below the posting's gas limit at its fee cap", "event", "eez.poster.underfunded",
+		p.logger.Error("[eez] poster balance below the posting's gas limit at its fee cap", "event", "eez.composer.postbatch.poster_underfunded",
 			"poster", p.from, "balance", balance, "need", need)
 	}
 	to := p.to

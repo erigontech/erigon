@@ -217,6 +217,7 @@ func (c *Composer) decide(cursor, sync, ts, target uint64, mode sequencer.Mode, 
 // its transactions.
 func (c *Composer) ComposeSyncSlot(ctx context.Context, parent *types.Header, ts, target uint64, mode sequencer.Mode) sequencer.Composed {
 	c.abandon()
+	c.logger.Info("[eez] Sync slot", "event", "eez.composer.sync_slot.invoked", "timestamp", ts, "mode", mode, "target", target)
 	cursor := c.settle(ctx)
 	sync := parent.Number.Uint64() + 1
 	at, inFlight := c.ledger.Blocking(cursor)
@@ -225,7 +226,7 @@ func (c *Composer) ComposeSyncSlot(ctx context.Context, parent *types.Header, ts
 		if sync-cursor > 2*c.cfg.MaxBlocks {
 			lvl = log.LvlWarn
 		}
-		c.logger.Log(lvl, "[eez] batch in flight, Sync slot posts nothing", "event", "eez.composer.settlement.backlog",
+		c.logger.Log(lvl, "[eez] batch in flight, Sync slot posts nothing", "event", "eez.composer.sync_slot.bundle_in_flight",
 			"sync", sync, "cursor", cursor, "inFlight", at)
 	}
 	c.pending = c.decide(cursor, sync, ts, target, mode, inFlight)
@@ -266,7 +267,7 @@ func (c *Composer) SyncCommitted(ctx context.Context, sync *types.Header) {
 		if e.target.Time != 0 {
 			start, per = time.Unix(int64(e.target.Time), 0).Add(-c.cfg.Slack-c.cfg.Proof), c.cfg.Proof
 		}
-		err := c.post(ctx, e.cursor, sync, e.target, start, per)
+		err := c.post(ctx, emitAnchor, e.cursor, sync, e.target, start, per)
 		if err == nil {
 			return
 		}
@@ -345,7 +346,7 @@ func (c *Composer) chunk(ctx context.Context, cursor, sync uint64, target post.T
 	if lo == len(ends) {
 		return fmt.Errorf("no empty grid block above cursor %d within the gas limit", cursor)
 	}
-	return c.postBlocks(ctx, cursor, blocks[:ends[lo]-cursor], target, time.Now().Add(c.cfg.Proof), 0)
+	return c.postBlocks(ctx, emitChunk, cursor, blocks[:ends[lo]-cursor], target, time.Now().Add(c.cfg.Proof), 0)
 }
 
 // fits reports whether the anchor-only batch of blocks posts within the gas
@@ -373,8 +374,9 @@ func (c *Composer) blocks(ctx context.Context, cursor, to uint64) ([]*types.Bloc
 }
 
 // post proves, signs and sends the anchor-only batch of cursor+1..terminal,
-// proving with start and per as ProveBy takes them, and watches it.
-func (c *Composer) post(ctx context.Context, cursor uint64, terminal *types.Header, target post.Target, start time.Time, per time.Duration) error {
+// an anchor or a chunk by kind, proving with start and per as ProveBy takes
+// them, and watches it.
+func (c *Composer) post(ctx context.Context, kind emitKind, cursor uint64, terminal *types.Header, target post.Target, start time.Time, per time.Duration) error {
 	blocks, err := c.blocks(ctx, cursor, terminal.Number.Uint64())
 	if err != nil {
 		return err
@@ -382,12 +384,12 @@ func (c *Composer) post(ctx context.Context, cursor uint64, terminal *types.Head
 	if last := blocks[len(blocks)-1].Hash(); last != terminal.Hash() {
 		return fmt.Errorf("block %d is %x, not the terminal %x", terminal.Number.Uint64(), last, terminal.Hash())
 	}
-	return c.postBlocks(ctx, cursor, blocks, target, start, per)
+	return c.postBlocks(ctx, kind, cursor, blocks, target, start, per)
 }
 
 // postBlocks proves, signs and sends the anchor-only batch of blocks, the
 // chain from the cursor's child, and watches it.
-func (c *Composer) postBlocks(ctx context.Context, cursor uint64, blocks []*types.Block, target post.Target, start time.Time, per time.Duration) error {
+func (c *Composer) postBlocks(ctx context.Context, kind emitKind, cursor uint64, blocks []*types.Block, target post.Target, start time.Time, per time.Duration) error {
 	terminal := blocks[len(blocks)-1].Header()
 	to := terminal.Number.Uint64()
 	// The window's blocks are canonical, so the first one's parent is the cursor.
@@ -425,14 +427,21 @@ func (c *Composer) postBlocks(ctx context.Context, cursor uint64, blocks []*type
 	if err != nil {
 		return err
 	}
-	c.send(cursor, terminal, batch, []types.Transaction{tx}, target, nil)
+	c.send(kind, cursor, terminal, batch, []types.Transaction{tx}, target, nil)
 	return nil
+}
+
+// dispatched names the event of a sent posting of kind.
+var dispatched = map[emitKind]string{
+	emitAnchor:  "eez.composer.phase1.bundle.dispatched",
+	emitChunk:   "eez.composer.emission.historical_chunk",
+	emitEffects: "eez.composer.bundle.dispatched",
 }
 
 // send records the posting bundle[0] of batch, cursor+1..terminal, carrying
 // held, then sends bundle for target and watches it, off the sequencer's
 // goroutine: a builder that hangs holds the verdict, not the chain.
-func (c *Composer) send(cursor uint64, terminal *types.Header, batch *protocol.ProofSystemBatch, bundle []types.Transaction, target post.Target, held []*Held) {
+func (c *Composer) send(kind emitKind, cursor uint64, terminal *types.Header, batch *protocol.ProofSystemBatch, bundle []types.Transaction, target post.Target, held []*Held) {
 	to, hash := terminal.Number.Uint64(), bundle[0].Hash()
 	judged := *batch
 	judged.CallData, judged.Proofs = nil, nil
@@ -448,10 +457,10 @@ func (c *Composer) send(cursor uint64, terminal *types.Header, batch *protocol.P
 		case err != nil:
 			// A bundle the builder refused may be refused for what it holds.
 			c.ledger.Report(to, hash, watch, Failed, !errors.Is(err, post.ErrBundleRefused))
-			c.logger.Warn("[eez] batch not sent", "event", "eez.composer.batch.unsent", "to", to, "post", hash, "err", err)
+			c.logger.Warn("[eez] batch not sent", "event", "eez.composer.bundle.observe_failed", "to", to, "post", hash, "err", err)
 			return
 		default:
-			c.logger.Info("[eez] batch posted", "event", "eez.composer.batch.posted", "from", cursor+1, "to", to, "post", hash,
+			c.logger.Info("[eez] batch posted", "event", dispatched[kind], "from", cursor+1, "to", to, "post", hash,
 				"l1Block", sent.Block, "pinned", sent.Time != 0, "triggers", len(held))
 		}
 		c.observe(to, hash, watch, batch, terminal, sent, false)
@@ -482,7 +491,14 @@ func (c *Composer) observe(to uint64, hash common.Hash, watch uint64, batch *pro
 		return
 	}
 	c.ledger.Report(to, hash, watch, verdict, verdict == Failed && (free || c.missed(sent)))
-	c.logger.Info("[eez] batch verdict", "event", "eez.composer.batch.verdict", "to", to, "post", hash, "verdict", verdict)
+	lvl := log.LvlInfo
+	switch verdict {
+	case SettledPartial:
+		lvl = log.LvlWarn
+	case Failed:
+		lvl = log.LvlError
+	}
+	c.logger.Log(lvl, "[eez] batch verdict", "event", "eez.composer.bundle.observed", "to", to, "post", hash, "verdict", verdict)
 }
 
 // block returns block n, failing when it is not canonical: the follower may
@@ -552,9 +568,12 @@ func plain(in []hexutil.Bytes) [][]byte {
 func (c *Composer) RecoverFailed(ctx context.Context) {
 	c.settle(ctx)
 	if p, ok := c.ledger.TakeFailed(c.last); ok {
-		c.logger.Warn("[eez] batch failed on L1, the next Sync slot posts again", "event", "eez.composer.batch.failed",
-			"to", p.Height, "post", p.Post, "txs", len(p.Txs))
-		if len(p.Txs) > 0 {
+		if len(p.Txs) == 0 {
+			c.logger.Warn("[eez] batch failed on L1, the next Sync slot posts again", "event", "eez.composer.batch.failed",
+				"to", p.Height, "post", p.Post)
+		} else {
+			c.logger.Warn("[eez] batch failed on L1, its Sync block is replaced", "event", "eez.composer.recovery.rolled_back",
+				"to", p.Height, "post", p.Post, "txs", len(p.Txs))
 			c.recoverHeld(ctx, p)
 		}
 	}
@@ -604,6 +623,7 @@ func (c *Composer) recoverHeld(ctx context.Context, p Posted[*Held]) {
 		}
 		keep = append(keep, tx)
 	}
+	c.burned(spent)
 	c.pool.Release(spent)
 	if !p.SlotSkipped {
 		keep = c.charge(c.pool, keep)
@@ -640,8 +660,12 @@ func (c *Composer) charge(pool *HeldPool, txs []*Held, charged ...*Held) []*Held
 	}
 	for _, r := range roots {
 		evicted := pool.Evict(r.sender, r.direction, r.nonce)
-		c.logger.Error("[eez] held transaction evicted after failed bundles", "event", "eez.composer.recovery.evicted",
-			"sender", r.sender, "direction", r.direction, "nonce", r.nonce, "queued", len(evicted))
+		c.logger.Error("[eez] held transaction evicted after failed bundles", "event", "eez.composer.recovery.poison_evicted",
+			"sender", r.sender, "direction", r.direction, "nonce", r.nonce)
+		if len(evicted) > 0 {
+			c.logger.Error("[eez] held transactions evicted behind it", "event", "eez.composer.recovery.nonce_chain_evicted",
+				"sender", r.sender, "direction", r.direction, "nonce", r.nonce, "queued", len(evicted))
+		}
 	}
 	return keep
 }
@@ -793,6 +817,15 @@ func (c *Composer) superseded(p Posted[*Held]) bool {
 	return ok && r.TxHash != p.Post
 }
 
+// burned logs txs, whose nonces a failed or partial batch spent: they do
+// not return to the pool, and one that reverted must be sent again.
+func (c *Composer) burned(txs []*Held) {
+	for _, tx := range txs {
+		c.logger.Warn("[eez] held transaction's nonce spent, not requeued", "event", "eez.composer.recovery.nonce_burned",
+			"hash", tx.Hash, "sender", tx.Sender, "direction", tx.Direction, "nonce", tx.Nonce)
+	}
+}
+
 // release ends the reservations of txs, which a batch settled.
 func (c *Composer) release(txs []*Held) {
 	if c.pool != nil && len(txs) > 0 {
@@ -931,6 +964,7 @@ func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
 	}
 	c.logger.Info("[eez] partial settlement disposed of", "event", "eez.composer.recovery.settled_partial",
 		"to", p.Height, "post", p.Post, "txs", len(p.Txs), "spent", len(ran), "charged", charged)
+	c.burned(ran)
 	c.release(ran)
 	if culprit != nil {
 		rest = c.charge(c.pool, rest, culprit)

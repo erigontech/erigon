@@ -134,7 +134,7 @@ func (k *composition) add(h *Held) error {
 	}
 	switch {
 	case h.Nonce < onChain:
-		c.logger.Info("[eez] held transaction dropped: its nonce is spent", "event", "eez.composer.stale",
+		c.logger.Warn("[eez] held transaction dropped: its nonce is spent", "event", "eez.composer.cc_compose.stale_nonce_evicted",
 			"hash", h.Hash, "sender", h.Sender, "direction", h.Direction, "nonce", h.Nonce, "onChain", onChain)
 		c.x.Pool.Release([]*Held{h})
 		return nil
@@ -185,7 +185,7 @@ func (k *composition) add(h *Held) error {
 			k.drop(h)
 			return nil
 		}
-		c.logger.Info("[eez] held transaction waits: the manager cannot pay its value", "event", "eez.composer.funding",
+		c.logger.Info("[eez] held transaction waits: the manager cannot pay its value", "event", "eez.composer.cc_compose.funding_retry",
 			"hash", h.Hash, "sender", h.Sender, "nonce", h.Nonce, "attempts", h.Attempts, "err", err)
 		k.deferred = append(k.deferred, h)
 		k.unroomed++
@@ -215,7 +215,11 @@ func (k *composition) room(h *Held, cost l1Cost) error {
 
 // evict evicts h with the rest of its nonce chain, err why.
 func (k *composition) evict(h *Held, err error) {
-	k.c.logger.Warn("[eez] held transaction evicted: it cannot compose", "event", "eez.composer.poison",
+	event := "eez.composer.cc_compose.poison_eviction_completed"
+	if errors.Is(err, ErrMultiCall) {
+		event = "eez.composer.cc_compose.outbound_multicall_unsupported"
+	}
+	k.c.logger.Warn("[eez] held transaction evicted: it cannot compose", "event", event,
 		"hash", h.Hash, "sender", h.Sender, "direction", h.Direction, "nonce", h.Nonce, "err", err)
 	k.c.x.Pool.Evict(h.Sender, h.Direction, h.Nonce)
 	k.drop(h)

@@ -1734,3 +1734,28 @@ func TestComposerAuditsASupersededPosting(t *testing.T) {
 	require.Zero(t, pool.Len())
 	require.False(t, pool.Holds(out.Hash), "final in the rival's block")
 }
+
+// TestComposerEvents: a slot logs its invocation, and each posting its kind
+// as dispatched and its verdict as observed.
+func TestComposerEvents(t *testing.T) {
+	t.Run("anchor", func(t *testing.T) {
+		chain := newTestChain(t, 8)
+		h := newHarness(t, chain, 8, newLanding(t, chain.blocks[8].Hash()))
+		lines := captureLogs(h.c)
+		h.slot(t, 8, 50, sequencer.ModeSteady)
+		require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Settled }, 5*time.Second, time.Millisecond)
+		h.c.Close()
+		out := lines.String()
+		require.Regexp(t, `event=eez.composer.sync_slot.invoked .*mode=steady`, out)
+		require.Regexp(t, `event=eez.composer.phase1.bundle.dispatched .*to=8`, out)
+		require.Regexp(t, `INFO.*event=eez.composer.bundle.observed .*verdict=settled`, out)
+	})
+	t.Run("chunk", func(t *testing.T) {
+		h := newHarness(t, newTestChain(t, 12, 2, 8), 8, nil)
+		lines := captureLogs(h.c)
+		h.slot(t, 12, 50, sequencer.ModeSteady)
+		h.targets(t)
+		h.c.Close()
+		require.Regexp(t, `event=eez.composer.emission.historical_chunk .*to=4`, lines.String())
+	})
+}

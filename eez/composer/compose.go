@@ -112,7 +112,11 @@ type effects struct {
 // next slot, in the count. Nil when none composes.
 func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Header, target, ts uint64) *effects {
 	k := &composition{c: c, ctx: ctx, fx: &effects{}}
-	if !k.pop(c.x.MaxTxs) {
+	queued := c.x.Pool.Len()
+	k.pop(c.x.MaxTxs)
+	c.logger.Info("[eez] held transactions drained", "event", "eez.composer.sync_slot.drain",
+		"cursor", cursor, "parent", parent.Number.Uint64(), "pool", queued, "drained", len(k.rest), "max", c.x.MaxTxs)
+	if len(k.rest) == 0 {
 		return nil
 	}
 	fx := k.fx
@@ -168,10 +172,14 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 	switch {
 	case err == nil:
 	case full(err):
-		c.logger.Info("[eez] Sync block full, the rest waits for the next slot", "event", "eez.composer.compose.full",
+		event := "eez.composer.sync_slot.gas_budget_cut"
+		if errors.Is(err, ErrFull) {
+			event = "eez.composer.sync_slot.block_gas_cut"
+		}
+		c.logger.Info("[eez] Sync block full, the rest waits for the next slot", "event", event,
 			"composed", len(fx.held), "waiting", waiting, "reason", err)
 	default:
-		c.logger.Warn("[eez] composition stopped, the rest waits for the next slot", "event", "eez.composer.compose.stopped",
+		c.logger.Warn("[eez] composition stopped, the rest waits for the next slot", "event", "eez.composer.phase2.transient",
 			"composed", len(fx.held), "waiting", waiting, "err", err)
 	}
 	deferred := k.deferred
@@ -187,7 +195,7 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 		return nil
 	}
 	fx.projected, fx.targetGas = k.gas.projected, k.gas.target
-	c.logger.Info("[eez] Sync block composed", "event", "eez.composer.composed", "held", len(fx.held), "outbound", len(fx.outbound),
+	c.logger.Info("[eez] Sync block composed", "event", "eez.composer.sync_slot.built", "held", len(fx.held), "outbound", len(fx.outbound),
 		"inbound", len(fx.deliveries), "txs", len(fx.txs), "waiting", waiting, "postingGas", fx.projected)
 	return fx
 }
@@ -340,7 +348,7 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 		}
 		bundle = append(bundle, trigger)
 	}
-	c.send(e.cursor, sync, batch, bundle, e.target, e.fx.held)
+	c.send(emitEffects, e.cursor, sync, batch, bundle, e.target, e.fx.held)
 	return nil
 }
 
