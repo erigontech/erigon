@@ -428,6 +428,60 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 	}
 }
 
+// A payload with more transactions than its gas limit allows is INVALID. When its parent is
+// validated, the parent is the latest valid ancestor and latestValidHash must name it; when the
+// parent is not validated, latestValidHash stays null.
+func TestNewPayloadGasLimitRejectionReportsValidatedParent(t *testing.T) {
+	t.Parallel()
+
+	const gasLimit = 1
+	parentHash := common.Hash{0x1}
+	for _, test := range []struct {
+		name            string
+		parentValidated bool
+	}{
+		{name: "validated parent", parentValidated: true},
+		{name: "parent not validated", parentValidated: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := preCancunChainConfig()
+			to := common.Address{0x1}
+			txs := types.Transactions{&types.LegacyTx{CommonTx: types.CommonTx{To: &to, GasLimit: 21_000}}}
+			header := makeParentHeader(1001)
+			header.ParentHash = parentHash
+			header.UncleHash = empty.UncleHash
+			header.GasLimit = gasLimit
+			header.TxHash = types.DeriveSha(txs)
+			withdrawals := types.Withdrawals{}
+			withdrawalsHash := types.DeriveSha(withdrawals)
+			header.WithdrawalsHash = &withdrawalsHash
+			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
+			payload, err := engine_types.ExecutionPayloadFromBlock(block)
+			require.NoError(t, err)
+
+			stub := &stubExecutionModule{
+				isValidatedFunc: func(hash common.Hash) bool { return test.parentValidated && hash == parentHash },
+			}
+			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+			srv.test = true
+
+			status, err := srv.NewPayloadV2(t.Context(), payload)
+			require.NoError(t, err)
+			require.Equal(t, engine_types.InvalidStatus, status.Status)
+			require.ErrorContains(t, status.ValidationError.Error(), "gas limit reached")
+			if test.parentValidated {
+				require.NotNil(t, status.LatestValidHash)
+				require.Equal(t, parentHash, *status.LatestValidHash)
+			} else {
+				require.Nil(t, status.LatestValidHash)
+			}
+		})
+	}
+}
+
 func TestNewPayloadOverBlobLimitOnBadParentWithUnknownAncestor(t *testing.T) {
 	t.Parallel()
 
