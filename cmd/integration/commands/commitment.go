@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -1557,6 +1558,9 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 }
 
 func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
+	if info, _, ok := snaptype.ParseFileName("", filepath.Base(fpath)); ok && info.Version.Major >= 3 {
+		return nil, fmt.Errorf("%s holds v3 commitment records; visualize decodes legacy branches only", filepath.Base(fpath))
+	}
 	stats := make(chan commitment.BranchStat, 8)
 	errch := make(chan error)
 	go func() {

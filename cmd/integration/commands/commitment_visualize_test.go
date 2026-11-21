@@ -1,0 +1,47 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package commands
+
+import (
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/state/statecfg"
+)
+
+// visualize decodes legacy branches: a file of v3 records is refused, not a panic.
+func TestCommitmentVisualizeRefusesV3Files(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	_, dirs, _ := dbWithState(t, true)
+	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "v3.*-commitment.*.kv"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	_, err = processCommitmentFile(files[0])
+	require.ErrorContains(t, err, "v3 commitment records")
+}
+
+func TestCommitmentVisualizeReadsLegacyFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	_, dirs, _ := dbWithState(t, true)
+	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment.*.kv"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	_, err = processCommitmentFile(files[0])
+	require.NoError(t, err)
+}
