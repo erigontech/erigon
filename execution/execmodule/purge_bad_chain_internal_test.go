@@ -52,7 +52,9 @@ func TestPurgeBadChainDeletesTheWholeBlock(t *testing.T) {
 	defer tx.Rollback()
 	require.NoError(t, rawdb.WriteBlock(tx, bad))
 	require.NoError(t, rawdb.WriteSenders(tx, bad.Hash(), bad.NumberU64(), []common.Address{{0x03}, {0x03}}))
-	require.NotZero(t, countRows(t, tx, kv.EthTx))
+	txs, err := tx.Count(kv.EthTx)
+	require.NoError(t, err)
+	require.NotZero(t, txs)
 
 	require.NoError(t, e.purgeBadChain(ctx, tx, validHash, bad.Hash()))
 
@@ -63,11 +65,7 @@ func TestPurgeBadChainDeletesTheWholeBlock(t *testing.T) {
 	senders, err := tx.GetOne(kv.Senders, key)
 	require.NoError(t, err)
 	require.Nil(t, senders, "senders of a purged block must be deleted")
-	require.Zero(t, countRows(t, tx, kv.EthTx), "transactions of a purged block must be deleted")
-}
-
-func countRows(t *testing.T, tx kv.Tx, table string) (n int) {
-	t.Helper()
-	require.NoError(t, tx.ForEach(table, nil, func(_, _ []byte) error { n++; return nil }))
-	return n
+	txs, err = tx.Count(kv.EthTx)
+	require.NoError(t, err)
+	require.Zero(t, txs, "transactions of a purged block must be deleted")
 }
