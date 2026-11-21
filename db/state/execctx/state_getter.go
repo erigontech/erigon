@@ -118,7 +118,7 @@ func (sd *SharedDomains) AsOfGetter(tx kv.TemporalTx) *AsOfGetter {
 }
 
 func (g *AsOfGetter) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
-	if v, ok, err := g.sd.mem.GetAsOf(domain, key, ts); err != nil || ok {
+	if v, ok, err := g.sd.GetAsOf(domain, key, ts); err != nil || ok {
 		return v, ok, err
 	}
 	if v, hit := g.view.GetAsOf(domain, key, ts); hit {
