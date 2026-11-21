@@ -256,6 +256,16 @@ func TestToTransactionBlobWithoutMaxFeePerBlobGas(t *testing.T) {
 	require.True(t, blobTx.MaxFeePerBlobGas.IsZero())
 }
 
+// A call may name gasPrice or the dynamic fee fields, not both.
+func TestToMessageGasPriceWithDynamicFee(t *testing.T) {
+	gasPrice := hexutil.U256(*uint256.NewInt(2_000_000_000))
+	maxFee := hexutil.U256(*uint256.NewInt(3_000_000_000))
+	args := CallArgs{GasPrice: &gasPrice, MaxFeePerGas: &maxFee}
+
+	_, err := args.ToMessage(50_000_000, uint256.NewInt(1_000_000_000))
+	require.ErrorContains(t, err, "both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
+}
+
 // RPCMarshalHeader aliases the header it is given: the U256 quantities, the
 // extraData slice and the fields callers may null out all point straight at it.
 // RPCMarshalBlock must therefore hand it a copy — the result is mutable and
