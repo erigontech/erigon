@@ -379,7 +379,7 @@ func plainKeyDomain(plainKey []byte) (kv.Domain, error) {
 	case length.Addr + length.Hash:
 		return kv.StorageDomain, nil
 	default:
-		return 0, fmt.Errorf("touch key from state: unexpected key length %d (%x)", len(plainKey), plainKey)
+		return 0, fmt.Errorf("touch key: unexpected plain key length %d (%x)", len(plainKey), plainKey)
 	}
 }
 

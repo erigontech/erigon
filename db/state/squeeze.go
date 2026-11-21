@@ -1041,6 +1041,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		roTx.Rollback()
 
 		for shardFrom < lastShard { // recreate this file range 1+ steps
+			// The stream reads the range's own file, so each value is the key's latest as of the range end.
 			nextKey := func() (ok bool, k, v []byte) {
 				if !keyIter.HasNext() {
 					return false, nil, nil
@@ -1195,7 +1196,6 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 
 	sf := time.Now()
 	var processed uint64
-	// The stream reads the range's own file, so each value is the key's latest as of the range end.
 	for ok, key, val := next(); ; ok, key, val = next() {
 		if len(key) != 0 {
 			if err := sd.GetCommitmentCtx().TouchKeyValue(key, val); err != nil {
