@@ -3486,3 +3486,59 @@ func (ws *WriteSet) createdEmpty(addr accounts.Address) bool {
 	_, hasCodeSize := ws.codeSize[addr]
 	return !hasCode && !hasIncarnation && !destroyed && !createdContract && !hasCodeSize && len(ws.storage[addr]) == 0
 }
+
+type AddrPaths struct {
+	Addr  accounts.Address
+	Paths uint16
+}
+
+func (s ReadSet) AddrPaths() []AddrPaths {
+	masks := make(map[accounts.Address]uint16)
+	addReadPath(masks, s.address, AddressPath)
+	addReadPath(masks, s.balance, BalancePath)
+	addReadPath(masks, s.nonce, NoncePath)
+	addReadPath(masks, s.incarnation, IncarnationPath)
+	addReadPath(masks, s.selfDestruct, SelfDestructPath)
+	addReadPath(masks, s.createContract, CreateContractPath)
+	addReadPath(masks, s.code, CodePath)
+	addReadPath(masks, s.codeHash, CodeHashPath)
+	addReadPath(masks, s.codeSize, CodeSizePath)
+	return storageAddrPaths(masks, s.storage)
+}
+
+func addReadPath[T any](masks map[accounts.Address]uint16, reads map[accounts.Address]VersionedRead[T], path AccountPath) {
+	for addr := range reads {
+		masks[addr] |= 1 << path
+	}
+}
+
+func (ws *WriteSet) AddrPaths() []AddrPaths {
+	if ws == nil {
+		return nil
+	}
+	masks := make(map[accounts.Address]uint16)
+	for h := range ws.accountHeaders() {
+		if h.Path.AffectsAccountLifecycle() {
+			masks[h.Address] = ^uint16(0)
+		} else {
+			masks[h.Address] |= 1 << h.Path
+		}
+	}
+	return storageAddrPaths(masks, ws.storage)
+}
+
+func storageAddrPaths[T any](masks map[accounts.Address]uint16, storage map[accounts.Address]map[accounts.StorageKey]T) []AddrPaths {
+	for addr, slots := range storage {
+		if len(slots) > 0 {
+			masks[addr] |= 1 << StoragePath
+		}
+	}
+	if len(masks) == 0 {
+		return nil
+	}
+	out := make([]AddrPaths, 0, len(masks))
+	for addr, paths := range masks {
+		out = append(out, AddrPaths{addr, paths})
+	}
+	return out
+}

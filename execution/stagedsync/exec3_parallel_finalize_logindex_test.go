@@ -231,9 +231,9 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
 }
 
-// A tx charged at validation records one copy of its writes, kept by TxOut as well, and
-// the worker's own write-set stays free of the sender charge and the tip.
-func TestChargedTxKeepsOneCopyOfItsWrites(t *testing.T) {
+// A tx charged at validation records its writes, the sender charge and the tip in the
+// worker's own write-set, kept by TxOut as well.
+func TestChargedTxExtendsTheWorkersWritesInPlace(t *testing.T) {
 	db := newResumeTestDB(t)
 	sender := senderIsCoinbaseKey.rawAddress
 	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
@@ -294,5 +294,5 @@ func TestChargedTxKeepsOneCopyOfItsWrites(t *testing.T) {
 	require.True(t, tipped, "the tip must be recorded")
 	_, kept := recorded.GetNonce(created)
 	require.True(t, kept, "the worker's writes must be recorded")
-	require.Equal(t, 1, workerWrites.Count(), "the worker's write-set must stay as the worker left it")
+	require.Same(t, workerWrites, recorded, "the loop extends the worker's write set in place")
 }
