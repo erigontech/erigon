@@ -883,8 +883,9 @@ func TestComposedSyncBlockWithoutAWitness(t *testing.T) {
 	require.True(t, p.SlotSkipped)
 }
 
-// TestComposedSyncBlockFailureCharges: a composition the prover refuses
-// fails charged; one it cannot reach fails uncharged.
+// TestComposedSyncBlockFailureCharges: a composition the prover refuses,
+// or cannot prove within its retries, fails charged; one whose proof the
+// node stops or whose attestation the node cannot check fails uncharged.
 func TestComposedSyncBlockFailureCharges(t *testing.T) {
 	for _, c := range []struct {
 		name   string
@@ -902,7 +903,8 @@ func TestComposedSyncBlockFailureCharges(t *testing.T) {
 		{name: "a refused proof", err: status.Error(codes.InvalidArgument, "window refused")},
 		{name: "a batch the batcher refuses", rollup: 2},
 		{name: "a posting over its gas", maxGas: 900_000},
-		{name: "an unreachable prover", err: status.Error(codes.Unavailable, "down"), skipped: true},
+		{name: "an unreachable prover", err: status.Error(codes.Unavailable, "down")},
+		{name: "a proof past its deadline", err: status.Error(codes.DeadlineExceeded, "too late")},
 		{name: "a cancelled proof", err: status.Error(codes.Canceled, "stopping"), skipped: true},
 		{name: "a malformed attestation", err: prove.ErrAttestation, skipped: true},
 		{name: "an anchor header unread", unread: true, skipped: true},

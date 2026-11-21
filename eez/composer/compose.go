@@ -252,14 +252,15 @@ func owed(err error) bool {
 	return !ok
 }
 
-// refused reports a prover's refusal of a window, which the same window
-// meets again.
-func refused(err error) bool {
+// proverFailed reports a window the prover refused or could not prove
+// within its retries, which the composition is charged for; a failure with
+// no prover status is the node's, as is a cancelled request.
+func proverFailed(err error) bool {
 	switch status.Code(err) {
 	case codes.OK, codes.Unknown, codes.Canceled:
 		return false
 	}
-	return !prove.Retryable(err)
+	return true
 }
 
 func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.Header) error {
@@ -315,7 +316,7 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 	}
 	sig, err := c.prover.ProveBy(ctx, w2, start, c.cfg.Proof)
 	if err != nil {
-		if !refused(err) {
+		if !proverFailed(err) {
 			err = nodeFault(err)
 		}
 		return fmt.Errorf("prove %d..%d: %w", e.cursor+1, e.sync, err)
