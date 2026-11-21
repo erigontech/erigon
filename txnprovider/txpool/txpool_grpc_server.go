@@ -40,7 +40,7 @@ import (
 )
 
 // TxPoolAPIVersion
-var TxPoolAPIVersion = &typesproto.VersionReply{Major: 1, Minor: 0, Patch: 0}
+var TxPoolAPIVersion = &typesproto.VersionReply{Major: 1, Minor: 1, Patch: 0}
 
 type txPool interface {
 	PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error)
@@ -50,7 +50,8 @@ type txPool interface {
 	CountContent() (int, int, int)
 	KnownTxnReason(hash []byte) txpoolcfg.DiscardReason
 	RejectFramePrefix(hash common.Hash)
-	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
+	NonceFromAddress(addr [20]byte) (nonce uint64, found bool)
+	nonceAt(addr [20]byte, head common.Hash, stateNonce uint64) (uint64, bool, error)
 	GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle)
 }
 
@@ -98,6 +99,10 @@ func (*GrpcDisabled) Status(ctx context.Context, request *txpoolproto.StatusRequ
 }
 
 func (*GrpcDisabled) Nonce(ctx context.Context, request *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
+	return nil, ErrPoolDisabled
+}
+
+func (*GrpcDisabled) NonceAt(ctx context.Context, request *txpoolproto.NonceAtRequest) (*txpoolproto.NonceReply, error) {
 	return nil, ErrPoolDisabled
 }
 
@@ -330,14 +335,24 @@ func (s *GrpcServer) Status(_ context.Context, _ *txpoolproto.StatusRequest) (*t
 	}, nil
 }
 
-// returns nonce for address
-func (s *GrpcServer) Nonce(ctx context.Context, in *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
-	addr := gointerfaces.ConvertH160toAddress(in.Address)
-	nonce, inPool := s.txPool.NonceFromAddress(addr)
-	return &txpoolproto.NonceReply{
-		Nonce: nonce,
-		Found: inPool,
-	}, nil
+func (s *GrpcServer) Nonce(_ context.Context, in *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
+	nonce, found := s.txPool.NonceFromAddress(gointerfaces.ConvertH160toAddress(in.Address))
+	return &txpoolproto.NonceReply{Nonce: nonce, Found: found}, nil
+}
+
+func (s *GrpcServer) NonceAt(_ context.Context, in *txpoolproto.NonceAtRequest) (*txpoolproto.NonceReply, error) {
+	addr, head := in.GetAddress(), in.GetBlockHash()
+	if addr.GetHi() == nil {
+		return nil, status.Error(codes.InvalidArgument, "incomplete address")
+	}
+	if head.GetHi() == nil || head.GetLo() == nil {
+		return nil, status.Error(codes.InvalidArgument, "incomplete block hash")
+	}
+	nonce, found, err := s.txPool.nonceAt(gointerfaces.ConvertH160toAddress(addr), gointerfaces.ConvertH256ToHash(head), in.StateNonce)
+	if err != nil {
+		return nil, status.Error(codes.Aborted, err.Error())
+	}
+	return &txpoolproto.NonceReply{Nonce: nonce, Found: found}, nil
 }
 
 // NewSlotsStreams - it's safe to use this class as non-pointer

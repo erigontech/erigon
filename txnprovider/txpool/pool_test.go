@@ -940,79 +940,60 @@ func writeTestSenderState(t *testing.T, ctx context.Context, coreDB kv.TemporalR
 
 func TestNonceFromAddress(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
-	ch := make(chan Announcements, 100)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := mdbxtest.NewTestPoolDB(t)
-	cfg := txpoolcfg.DefaultConfig
-	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New())
-	require.NoError(err)
-	pool.started.Store(true)
-	require.NotNil(pool)
-	var stateVersionID uint64 = 0
-	pendingBaseFee := uint64(200000)
-	// start blocks from 0, set empty hash - then kvcache will also work on this
-	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remoteproto.StateChangeBatch{
-		StateVersionId:      stateVersionID,
-		PendingBlockBaseFee: pendingBaseFee,
-		BlockGasLimit:       1000000,
-		ChangeBatch: []*remoteproto.StateChange{
-			{BlockHeight: 0, BlockHash: h1},
-		},
-	}
-	var addr [20]byte
-	addr[0] = 1
-	acc := accounts.Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
-	}
-	v := accounts.SerialiseV3(&acc)
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-		Action:  remoteproto.Action_UPSERT,
-		Address: gointerfaces.ConvertAddressToH160(addr),
-		Data:    v,
-	})
-	tx, err := db.BeginRw(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
-	require.NoError(err)
+	ctx, pool, _, _ := newTestPool(t)
+	addr := common.Address{1}
+	const stateNonce = 2
+	head := common.Hash{1}
+	change := newBlockChangeForAccounts(head, stateNonce, addr)
+	change.PendingBlockBaseFee = 200_000
+	require.NoError(pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
-	{
+	addNonces := func(nonces ...uint64) {
+		t.Helper()
 		var txnSlots TxnSlots
-		txnSlot1 := newTestTxnSlot(3, 0, 300000, 300000, 100000)
-		txnSlot1.IDHash[0] = 1
-		txnSlots.Append(txnSlot1, addr[:], true)
-
+		for _, nonce := range nonces {
+			slot := newTestTxnSlot(nonce, 0, 300000, 300000, 100000)
+			slot.IDHash = slot.Txn.Hash()
+			txnSlots.Append(slot, addr[:], true)
+		}
 		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(err)
+		require.Len(reasons, len(nonces))
 		for _, reason := range reasons {
-			assert.Equal(txpoolcfg.Success, reason, reason.String())
+			require.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
 
-	{
-		txnSlots := TxnSlots{}
-		txnSlot2 := newTestTxnSlot(4, 0, 300000, 300000, 100000)
-		txnSlot2.IDHash[0] = 2
-		txnSlot3 := newTestTxnSlot(6, 0, 300000, 300000, 100000)
-		txnSlot3.IDHash[0] = 3
-		txnSlots.Append(txnSlot2, addr[:], true)
-		txnSlots.Append(txnSlot3, addr[:], true)
-		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-		require.NoError(err)
-		for _, reason := range reasons {
-			assert.Equal(txpoolcfg.Success, reason, reason.String())
-		}
-		nonce, ok := pool.NonceFromAddress(addr)
-		assert.True(ok)
-		assert.Equal(uint64(6), nonce)
-	}
+	addNonces(3, 4, 6)
+	_, found := pool.NonceFromAddress(addr)
+	assert.False(found)
+
+	addNonces(stateNonce)
+	nonce, found := pool.NonceFromAddress(addr)
+	require.True(found)
+	assert.Equal(uint64(4), nonce)
+
+	addNonces(5)
+	nonce, found = pool.NonceFromAddress(addr)
+	require.True(found)
+	assert.Equal(uint64(6), nonce)
+
+	// An eviction can open a gap before the next sender refresh.
+	senderID, ok := pool.senders.getID(addr)
+	require.True(ok)
+	evicted := pool.all.get(senderID, 4)
+	require.NotNil(evicted)
+	pool.removeFromSubPool(evicted, "test")
+	pool.discardLocked(evicted, txpoolcfg.PendingPoolOverflow)
+	nonce, found = pool.NonceFromAddress(addr)
+	require.True(found)
+	assert.Equal(uint64(3), nonce)
+
+	nonce, found, lookupErr := pool.nonceAt(addr, head, stateNonce)
+	require.NoError(lookupErr)
+	require.True(found)
+	assert.Equal(uint64(3), nonce)
+
 	// test too expensive tx
 	{
 		var txnSlots TxnSlots
@@ -1038,6 +1019,11 @@ func TestNonceFromAddress(t *testing.T) {
 			assert.Equal(txpoolcfg.NonceTooLow, reason, reason.String())
 		}
 	}
+	_, _, err := pool.nonceAt(addr, common.Hash{2}, stateNonce)
+	require.ErrorIs(err, errPoolNotReady)
+	pool.MarkStateStale()
+	_, _, err = pool.nonceAt(addr, head, stateNonce)
+	require.ErrorIs(err, errPoolNotReady)
 }
 
 func TestSetCodeAuthorizationAdmission(t *testing.T) {
@@ -1310,106 +1296,39 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 func TestReplaceWithHigherFee(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
-	ch := make(chan Announcements, 100)
-	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := mdbxtest.NewTestPoolDB(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	cfg := txpoolcfg.DefaultConfig
-	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New())
-	require.NoError(err)
-	pool.started.Store(true)
-	require.NotNil(pool)
-	var stateVersionID uint64 = 0
-	pendingBaseFee := uint64(200000)
-	// start blocks from 0, set empty hash - then kvcache will also work on this
-	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remoteproto.StateChangeBatch{
-		StateVersionId:      stateVersionID,
-		PendingBlockBaseFee: pendingBaseFee,
-		BlockGasLimit:       1000000,
-		ChangeBatch: []*remoteproto.StateChange{
-			{BlockHeight: 0, BlockHash: h1},
-		},
-	}
-	var addr [20]byte
-	addr[0] = 1
-	acc := accounts.Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
-	}
-	v := accounts.SerialiseV3(&acc)
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-		Action:  remoteproto.Action_UPSERT,
-		Address: gointerfaces.ConvertAddressToH160(addr),
-		Data:    v,
-	})
-	tx, err := db.BeginRw(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
-	require.NoError(err)
+	ctx, pool, _, _ := newTestPool(t)
+	addr := common.Address{1}
+	change := newBlockChangeForAccounts(common.Hash{}, 2, addr)
+	change.PendingBlockBaseFee = 200_000
+	require.NoError(pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
-	{
-		var txnSlots TxnSlots
-		txnSlot := newTestTxnSlot(3, 0, 300000, 3000000, 100000)
-		txnSlot.IDHash[0] = 1
-		txnSlots.Append(txnSlot, addr[:], true)
+	submit := func(tip, feeCap uint64, want txpoolcfg.DiscardReason) string {
+		t.Helper()
+		slot := newTestTxnSlot(3, 0, tip, feeCap, 100_000)
+		slot.IDHash = slot.Txn.Hash()
+		var txns TxnSlots
+		txns.Append(slot, addr[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txns)
+		require.NoError(err)
+		require.Len(reasons, 1)
+		require.Equal(want, reasons[0], reasons[0].String())
+		return string(slot.IDHash[:])
+	}
 
-		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-		require.NoError(err)
-		for _, reason := range reasons {
-			assert.Equal(txpoolcfg.Success, reason, reason.String())
-		}
-	}
-	// Bumped only feeCap, transaction not accepted
-	{
-		txnSlots := TxnSlots{}
-		txnSlot := newTestTxnSlot(3, 0, 300000, 30000000, 100000)
-		txnSlot.IDHash[0] = 2
-		txnSlots.Append(txnSlot, addr[:], true)
-		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-		require.NoError(err)
-		for _, reason := range reasons {
-			assert.Equal(txpoolcfg.NotReplaced, reason, reason.String())
-		}
-		nonce, ok := pool.NonceFromAddress(addr)
-		assert.True(ok)
-		assert.Equal(uint64(3), nonce)
-	}
-	// Bumped only tip, transaction not accepted
-	{
-		txnSlots := TxnSlots{}
-		txnSlot := newTestTxnSlot(3, 0, 3000000, 3000000, 100000)
-		txnSlot.IDHash[0] = 3
-		txnSlots.Append(txnSlot, addr[:], true)
-		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-		require.NoError(err)
-		for _, reason := range reasons {
-			assert.Equal(txpoolcfg.NotReplaced, reason, reason.String())
-		}
-		nonce, ok := pool.NonceFromAddress(addr)
-		assert.True(ok)
-		assert.Equal(uint64(3), nonce)
-	}
-	// Bumped both tip and feeCap by 10%, txn accepted
-	{
-		txnSlots := TxnSlots{}
-		txnSlot := newTestTxnSlot(3, 0, 330000, 3300000, 100000)
-		txnSlot.IDHash[0] = 4
-		txnSlots.Append(txnSlot, addr[:], true)
-		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-		require.NoError(err)
-		for _, reason := range reasons {
-			assert.Equal(txpoolcfg.Success, reason, reason.String())
-		}
-		nonce, ok := pool.NonceFromAddress(addr)
-		assert.True(ok)
-		assert.Equal(uint64(3), nonce)
-	}
+	const tip, feeCap = 300_000, 3_000_000
+	originalHash := submit(tip, feeCap, txpoolcfg.Success)
+
+	higherFeeCapHash := submit(tip, 10*feeCap, txpoolcfg.NotReplaced)
+	assert.Contains(pool.byHash, originalHash)
+	assert.NotContains(pool.byHash, higherFeeCapHash)
+
+	higherTipHash := submit(10*tip, feeCap, txpoolcfg.NotReplaced)
+	assert.Contains(pool.byHash, originalHash)
+	assert.NotContains(pool.byHash, higherTipHash)
+
+	replacementHash := submit(tip+tip/10, feeCap+feeCap/10, txpoolcfg.Success)
+	assert.NotContains(pool.byHash, originalHash)
+	assert.Contains(pool.byHash, replacementHash)
 }
 
 func TestReverseNonces(t *testing.T) {
