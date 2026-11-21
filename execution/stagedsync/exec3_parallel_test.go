@@ -184,11 +184,11 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	return &exec.TxResult{}
 }
 
-func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) *state.WriteSet {
+func (t *testExecTask) Writes(_ *state.IntraBlockState) *state.WriteSet {
 	return t.writeMap
 }
 
-func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) state.ReadSet {
+func (t *testExecTask) Reads(_ *state.IntraBlockState) state.ReadSet {
 	return t.readMap
 }
 

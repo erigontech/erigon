@@ -2886,7 +2886,7 @@ func (ibs *IntraBlockState) Version() Version {
 	}
 }
 
-// VersionedReads returns the in-flight per-path read set.  The returned
+// Reads returns the in-flight per-path read set.  The returned
 // value shares the underlying maps with the IBS; it is handed over at
 // end of tx (RecordReads / TxIn), after which ResetIO rebinds
 // the IBS field to a fresh set.
@@ -2902,12 +2902,12 @@ func (ibs *IntraBlockState) ResetIO() {
 	ibs.stateReadErr = nil
 }
 
-// ResetReads clears tracked versioned reads without affecting writes.
+// ResetReads clears tracked reads without affecting writes.
 func (ibs *IntraBlockState) ResetReads() {
 	ibs.reads = ReadSet{}
 }
 
-// VersionedWrites returns a frozen typed snapshot of this tx's recorded writes.
+// Writes returns a frozen typed snapshot of this tx's recorded writes.
 // The snapshot logic lives on the write-set itself (WriteSet.Snapshot); this is
 // the IntraBlockState accessor for it.
 func (ibs *IntraBlockState) Writes() *WriteSet {
