@@ -128,6 +128,17 @@ func TestCommitmentRebuildWithoutHistoryDropsTheDBTail(t *testing.T) {
 	requireExecutionReset(t, db, countTail)
 }
 
+func TestCommitmentRebuildRefusesUnretiredSteps(t *testing.T) {
+	db, dirs, countTail := dbWithState(t, false)
+	prevDatadir, prevNoHistory, prevYes := datadirCli, noHistory, yes
+	t.Cleanup(func() { datadirCli, noHistory, yes = prevDatadir, prevNoHistory, prevYes })
+	datadirCli, noHistory, yes = dirs.DataDir, true, true
+
+	tail := countTail()
+	require.ErrorContains(t, commitmentRebuild(db, t.Context(), log.New()), "run `erigon seg retire` first")
+	require.Equal(t, tail, countTail())
+}
+
 func TestCommitmentConvertV3DropsTheDBTail(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, _, countTail := dbWithState(t, true)
