@@ -2557,11 +2557,15 @@ func (at *AggregatorRoTx) Generation() uint64 { return at.visible.generation }
 // not cover yet, as `erigon seg retire` would build. The files on disk count, not
 // the visible ones: accounts are not visible without their commitment files.
 func (at *AggregatorRoTx) AssertRetired(tx kv.Tx) error {
-	a, accounts := at.a, at.a.d[kv.AccountsDomain]
+	a := at.a
 	a.dirtyFilesLock.Lock()
-	filesEnd := kv.Step(accounts.dirtyFilesEndTxNumMinimax() / a.StepSize())
+	filesEnd := kv.Step(a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax() / a.StepSize())
 	a.dirtyFilesLock.Unlock()
-	if inDB := accounts.maxStepInDB(tx); inDB > filesEnd {
+	var inDB kv.Step
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		inDB = max(inDB, a.d[d].maxStepInDB(tx))
+	}
+	if inDB > filesEnd {
 		return fmt.Errorf("the DB holds steps %d-%d that are not in files: run `erigon seg retire` first", filesEnd, inDB)
 	}
 	return nil

@@ -31,14 +31,16 @@ import (
 func TestAssertRetired(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for name, tc := range map[string]struct {
-		lastTxNumInDB uint64 // 0: the DB holds no accounts history
+		lastTxNumInDB uint64 // 0: the DB holds no history
 		noCommitment  bool
 		retired       bool
+		domain        kv.Domain
 	}{
-		"empty DB":                     {0, false, true},
-		"partial step in DB":           {29, false, true},
-		"one full step in DB":          {30, false, false},
-		"no commitment files, retired": {29, true, true},
+		"empty DB":                     {0, false, true, kv.AccountsDomain},
+		"partial step in DB":           {29, false, true, kv.AccountsDomain},
+		"one full step in DB":          {30, false, false, kv.AccountsDomain},
+		"no commitment files, retired": {29, true, true, kv.AccountsDomain},
+		"one full step of storage":     {30, false, false, kv.StorageDomain},
 	} {
 		t.Run(name, func(t *testing.T) {
 			db, agg := testDbAndAggregatorv3(t, 10)
@@ -53,7 +55,7 @@ func TestAssertRetired(t *testing.T) {
 			defer tx.Rollback()
 			if tc.lastTxNumInDB > 0 {
 				key := binary.BigEndian.AppendUint64(nil, tc.lastTxNumInDB)
-				require.NoError(t, tx.Put(agg.d[kv.AccountsDomain].History.InvertedIndex.KeysTable, key, []byte{1}))
+				require.NoError(t, tx.Put(agg.d[tc.domain].History.InvertedIndex.KeysTable, key, []byte{1}))
 			}
 			at := agg.BeginFilesRo()
 			defer at.Close()
