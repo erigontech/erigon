@@ -98,7 +98,8 @@ func captureOnOpcodeWithReturnData(t *testing.T, cfg *LogConfig, memory []byte, 
 
 	l.OnOpcodeV2(0, byte(op), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, rData, 1, nil)
 
-	// Mirror what ExecuteTraceTx does to close the stream after execution.
+	// The EVM ends the root frame, then ExecuteTraceTx closes the stream.
+	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 	stream.WriteArrayEnd()
 	stream.WriteObjectEnd()
 	stream.Flush()
@@ -131,7 +132,8 @@ func captureOnOpcodes(t *testing.T, cfg *LogConfig, n int) []map[string]json.Raw
 		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 	}
 
-	// Mirror what ExecuteTraceTx does to close the stream after execution.
+	// The EVM ends the root frame, then ExecuteTraceTx closes the stream.
+	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 	stream.WriteArrayEnd()
 	stream.WriteObjectEnd()
 	stream.Flush()
@@ -199,6 +201,7 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 	for i := range 4 {
 		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 	}
+	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 	stream.WriteArrayEnd()
 	stream.WriteObjectEnd()
 	stream.Flush()
@@ -228,6 +231,7 @@ func TestJsonStreamLoggerStateGasCost(t *testing.T) {
 	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 10, State: 30}, scope, nil, 1, nil)
 	l.OnOpcodeV2(1, byte(vm.SSTORE), mdgas.MdGas{Execution: 60}, mdgas.MdGasCost{Execution: 10, State: -30}, scope, nil, 1, nil)
 	l.OnOpcodeV2(2, byte(vm.STOP), mdgas.MdGas{Execution: 80}, mdgas.MdGasCost{}, scope, nil, 1, nil)
+	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 	closeStreamLikeCaller(stream)
 	require.NoError(t, stream.Flush())
 	var result struct {
@@ -477,6 +481,7 @@ func TestJsonStreamLogger_StorageEncodingManyKeys(t *testing.T) {
 
 	// Close the way the production epilogue does: ClosePending would repair an
 	// imbalance into valid JSON and hide exactly what this pins.
+	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 	stream.WriteArrayEnd()
 	stream.WriteObjectEnd()
 	require.NoError(t, stream.Flush())
@@ -510,6 +515,7 @@ func TestJsonStreamLogger_StorageWithMemory(t *testing.T) {
 	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
 	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
 	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
+	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 	stream.WriteArrayEnd()
 	stream.WriteObjectEnd()
 	require.NoError(t, stream.Flush())
@@ -584,6 +590,7 @@ func largeTrace(tb testing.TB, steps int, cfg *LogConfig) (produced int64, peakB
 			peakBuffer = n
 		}
 	}
+	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 	stream.WriteArrayEnd()
 	stream.WriteObjectEnd()
 	require.NoError(tb, stream.Flush())
@@ -610,6 +617,20 @@ func TestJsonStreamLogger_LargeTraceStaysBounded(t *testing.T) {
 				"%d writes for %d steps: memory words must batch through the buffer, not forward one write per word", writes, steps)
 		})
 	}
+}
+
+// A step larger than FlushThreshold, written after its capture, still streams out in pieces: the
+// stream's buffer does not grow to hold the whole step.
+func TestJsonStreamLogger_LargeStepStaysBounded(t *testing.T) {
+	var out countingWriter
+	stream := jsonstream.New(&out)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, t.Context(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+	scope := &mockOpContext{memory: bytes.Repeat([]byte{0xab}, jsonstream.FlushThreshold)}
+	l.OnOpcodeV2(0, byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
+	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
+	require.Greater(t, out.n, int64(2*jsonstream.FlushThreshold))
+	require.Less(t, cap(stream.Buffer()), 2*jsonstream.FlushThreshold)
 }
 
 // TestStackJSONMatchesUint256Hex pins the stack encoding against uint256.Hex,
@@ -646,6 +667,7 @@ func TestJsonStreamLogger_StackFollowsValueChanges(t *testing.T) {
 		}
 		l.OnOpcodeV2(uint64(i), byte(vm.ADD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, &mockOpContext{stack: stack}, nil, 1, nil)
 	}
+	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 	closeStreamLikeCaller(stream)
 	require.NoError(t, stream.Flush())
 
@@ -677,6 +699,7 @@ func TestJsonStreamLogger_HaltedStorageStepIsNotRecorded(t *testing.T) {
 	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{}, haltedSstore, nil, 1, vm.ErrWriteProtection)
 	l.OnOpcodeV2(1, byte(vm.SLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{}, haltedSload, nil, 1, vm.ErrOutOfGas)
 	l.OnOpcodeV2(2, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{}, sstore, nil, 1, nil)
+	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 	closeStreamLikeCaller(stream)
 	require.NoError(t, stream.Flush())
 
@@ -689,4 +712,82 @@ func TestJsonStreamLogger_HaltedStorageStepIsNotRecorded(t *testing.T) {
 	require.NotContains(t, result.StructLogs[1], "storage")
 	require.JSONEq(t, `{"0x0000000000000000000000000000000000000000000000000000000000000002":"0x0000000000000000000000000000000000000000000000000000000000000009"}`,
 		string(result.StructLogs[2]["storage"]))
+}
+
+// A step whose opcode halts its frame has the error and no cost on its own entry, whether the
+// interpreter finds the halt before the opcode runs or while it runs. The entry keeps the state
+// from before the opcode. A REVERT that completes is not a halt.
+func TestJsonStreamLogger_HaltedStepHasErrorAndNoCost(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		op         vm.OpCode
+		stepErr    error // error of the opcode hook: a halt found before the opcode runs
+		fault      error // error of the fault hook: a halt found while the opcode runs
+		faultPc    uint64
+		faultOp    vm.OpCode
+		faultDepth int // the halted step is pc 1, op, depth 1
+		limit      int
+		halted     bool
+		wantLogs   int
+	}{
+		{name: "halt while the opcode runs", op: vm.JUMP, fault: vm.ErrInvalidJump, faultPc: 1, faultOp: vm.JUMP, faultDepth: 1, halted: true, wantLogs: 2},
+		{name: "halt before the opcode runs", op: vm.SSTORE, stepErr: vm.ErrOutOfGas, halted: true, wantLogs: 2},
+		{name: "completed REVERT", op: vm.REVERT, fault: vm.ErrExecutionReverted, faultPc: 1, faultOp: vm.REVERT, faultDepth: 1, wantLogs: 2},
+		{name: "fault at another pc", op: vm.JUMP, fault: vm.ErrInvalidJump, faultPc: 7, faultOp: vm.JUMP, faultDepth: 1, wantLogs: 2},
+		{name: "fault of another opcode", op: vm.JUMP, fault: vm.ErrInvalidJump, faultPc: 1, faultOp: vm.JUMPI, faultDepth: 1, wantLogs: 2},
+		{name: "fault at another depth", op: vm.JUMP, fault: vm.ErrInvalidJump, faultPc: 1, faultOp: vm.JUMP, faultDepth: 2, wantLogs: 2},
+		{name: "fault of a step past the limit", op: vm.JUMP, fault: vm.ErrInvalidJump, faultPc: 1, faultOp: vm.JUMP, faultDepth: 1, limit: 1, wantLogs: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			stream := jsonstream.New(&buf)
+			l := NewJsonStreamLogger(&LogConfig{Limit: tc.limit, DisableStorage: true, EnableMemory: true, EnableReturnData: true}, t.Context(), stream)
+			l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+			rData := []byte{0x22}
+			scope := &mockOpContext{stack: []uint256.Int{*uint256.NewInt(5)}, memory: bytes.Repeat([]byte{0x11}, 32)}
+			l.OnOpcodeV2(0, byte(vm.PUSH1), mdgas.MdGas{Execution: 100, State: 50}, mdgas.MdGasCost{Execution: 3}, scope, rData, 1, nil)
+			l.OnOpcodeV2(1, byte(tc.op), mdgas.MdGas{Execution: 97, State: 50}, mdgas.MdGasCost{Execution: 8, State: 20}, scope, rData, 1, tc.stepErr)
+			// The opcode changes the stack, memory and return data in place, which must not reach the entry.
+			scope.stack = nil
+			scope.memory[0], rData[0] = 0xff, 0xff
+			if tc.fault != nil {
+				l.OnFaultV2(tc.faultPc, byte(tc.faultOp), mdgas.MdGas{}, mdgas.MdGasCost{}, scope, tc.faultDepth, vm.VMErrorFromErr(tc.fault))
+			}
+			l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
+			closeStreamLikeCaller(stream)
+			require.NoError(t, stream.Flush())
+
+			var result struct {
+				StructLogs []map[string]json.RawMessage `json:"structLogs"`
+			}
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.Bytes())
+			require.Len(t, result.StructLogs, tc.wantLogs)
+			require.JSONEq(t, `3`, string(result.StructLogs[0]["gasCost"]))
+			require.NotContains(t, result.StructLogs[0], "error")
+			if tc.wantLogs == 1 {
+				return
+			}
+			step := result.StructLogs[1]
+			require.JSONEq(t, `["0x5"]`, string(step["stack"]))
+			require.JSONEq(t, `["0x`+strings.Repeat("11", 32)+`"]`, string(step["memory"]))
+			require.JSONEq(t, `"0x22"`, string(step["returnData"]))
+			require.JSONEq(t, `50`, string(step["stateGasReservoir"]))
+			if tc.halted {
+				want := tc.stepErr
+				if want == nil {
+					want = tc.fault
+				}
+				var msg string
+				require.NoError(t, json.Unmarshal(step["error"], &msg))
+				require.Equal(t, want.Error(), msg)
+				require.JSONEq(t, `0`, string(step["gasCost"]))
+				require.NotContains(t, step, "stateGasCost")
+				return
+			}
+			require.NotContains(t, step, "error")
+			require.JSONEq(t, `8`, string(step["gasCost"]))
+			require.JSONEq(t, `20`, string(step["stateGasCost"]))
+		})
+	}
 }

@@ -388,6 +388,78 @@ func TestTraceTransactionSeesStateOverrides(t *testing.T) {
 	require.Equal(t, "execution reverted", trace.Error)
 }
 
+// The struct logger puts the error of an exceptional halt on the step of the halting opcode, with
+// gasCost 0 and no stateGasCost, also when the halt is found while the opcode runs. A REVERT that
+// completes, and the CALL whose callee halts, have no error.
+func TestTraceCallStructLoggerHaltedStep(t *testing.T) {
+	m, _, calls := gasTracingTestChain(t)
+	api := newDebugApiForTest(m)
+	block := rpc.BlockNumberOrHashWithNumber(1)
+	call := calls[0]
+	call.Nonce, call.Data = nil, nil
+	callee := common.HexToAddress("0x3000")
+	for _, tc := range []struct {
+		name   string
+		code   hexutil.Bytes // code of the frame whose last step is checked
+		gas    uint32        // gas the caller forwards; zero runs code in the root frame
+		static bool          // the caller uses STATICCALL
+		op     string
+		halted bool
+		cost   uint64 // gasCost of a step that completes
+	}{
+		{name: "invalid jump", code: hexutil.Bytes{byte(vm.PUSH1), 5, byte(vm.JUMP)}, gas: 100_000, op: "JUMP", halted: true},
+		{name: "invalid jump in the root frame", code: hexutil.Bytes{byte(vm.PUSH1), 5, byte(vm.JUMP)}, op: "JUMP", halted: true},
+		{name: "INVALID", code: hexutil.Bytes{byte(vm.INVALID)}, gas: 100_000, op: "INVALID", halted: true},
+		{name: "return data out of bounds", code: hexutil.Bytes{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.RETURNDATACOPY)}, gas: 100_000, op: "RETURNDATACOPY", halted: true},
+		{name: "TSTORE in a static call", code: hexutil.Bytes{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.TSTORE), byte(vm.STOP)}, gas: 100_000, static: true, op: "TSTORE", halted: true},
+		{name: "memory out of gas", code: hexutil.Bytes{byte(vm.PUSH1), 1, byte(vm.PUSH4), 0x0f, 0xff, 0xff, 0xff, byte(vm.MSTORE)}, gas: 100_000, op: "MSTORE", halted: true},
+		{name: "state gas out of gas", code: hexutil.Bytes{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP)}, gas: 50_000, op: "SSTORE", halted: true},
+		{name: "completed REVERT", code: hexutil.Bytes{byte(vm.PUSH1), 32, byte(vm.PUSH0), byte(vm.REVERT)}, gas: 100_000, op: "REVERT", cost: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			overrides := ethapi.StateOverrides{accounts.InternAddress(*call.To): {Code: &tc.code}}
+			depth := 1
+			if tc.gas != 0 {
+				caller, callOp := hexutil.Bytes{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0)}, vm.STATICCALL
+				if !tc.static {
+					caller, callOp = append(caller, byte(vm.PUSH0)), vm.CALL // the value
+				}
+				caller = append(caller, byte(vm.PUSH2), 0x30, 0x00, byte(vm.PUSH3), byte(tc.gas>>16), byte(tc.gas>>8), byte(tc.gas),
+					byte(callOp), byte(vm.POP), byte(vm.STOP))
+				overrides = ethapi.StateOverrides{accounts.InternAddress(*call.To): {Code: &caller}, accounts.InternAddress(callee): {Code: &tc.code}}
+				depth = 2
+			}
+			var trace struct {
+				Failed     bool                         `json:"failed"`
+				StructLogs []map[string]json.RawMessage `json:"structLogs"`
+			}
+			readGasTrace(t, &trace, func(stream *jsonstream.Stream) error {
+				return api.TraceCall(m.Ctx, call, &block, &tracersConfig.TraceConfig{StateOverrides: &overrides}, stream)
+			})
+			require.Equal(t, depth == 1, trace.Failed)
+			var last map[string]json.RawMessage
+			for _, step := range trace.StructLogs {
+				if string(step["depth"]) == fmt.Sprint(depth) {
+					last = step
+				} else {
+					require.NotContains(t, step, "error", "a step of the caller")
+				}
+			}
+			require.Equal(t, `"`+tc.op+`"`, string(last["op"]))
+			require.NotContains(t, last, "stateGasCost")
+			if tc.halted {
+				var msg string
+				require.NoError(t, json.Unmarshal(last["error"], &msg))
+				require.NotEmpty(t, msg)
+				require.JSONEq(t, `0`, string(last["gasCost"]))
+				return
+			}
+			require.NotContains(t, last, "error")
+			require.JSONEq(t, fmt.Sprint(tc.cost), string(last["gasCost"]))
+		})
+	}
+}
+
 func TestTraceCallManySeesStateOverrides(t *testing.T) {
 	m, _, calls := gasTracingTestChain(t)
 	api := newDebugApiForTest(m)
