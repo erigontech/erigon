@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
@@ -1177,4 +1178,41 @@ func testRandomReorgs(t *testing.T, config *chain.Config, seed uint64) {
 	for _, blocks := range sides {
 		insertAndSwitchTo(t, m, blocks)
 	}
+}
+
+func TestFailedForkchoiceUnwindAllowsCanonicalExtension(t *testing.T) {
+	m, canonical, side := newReorgChains(t, 4, 3)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks[:3]))
+	m.ExecModule.WaitIdle(t.Context())
+	status, err := m.InsertBlocks(t.Context(), side.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	missing := dbutils.BlockBodyKey(2, canonical.Blocks[1].Hash())
+	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		value, err := tx.GetOne(kv.ChangeSets3, missing)
+		require.NoError(t, err)
+		require.NotEmpty(t, value)
+		return tx.Delete(kv.ChangeSets3, missing)
+	}))
+	_, err = m.UpdateForkChoice(t.Context(), side.TopBlock.Header())
+	require.ErrorContains(t, err, "missing diffset for executed block 2")
+	m.ExecModule.WaitIdle(t.Context())
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		require.Equal(t, canonical.Blocks[2].Hash(), rawdb.ReadHeadBlockHash(tx))
+		return nil
+	}))
+	status, err = m.InsertBlocks(t.Context(), canonical.Blocks[3:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	result, err := m.UpdateForkChoice(t.Context(), canonical.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		require.Equal(t, canonical.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
+		value, err := tx.GetOne(kv.ChangeSets3, missing)
+		require.NoError(t, err)
+		require.Empty(t, value, "extension must not need to repair the failed unwind")
+		return nil
+	}))
 }

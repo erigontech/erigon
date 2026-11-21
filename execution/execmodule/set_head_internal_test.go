@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -61,6 +62,8 @@ func (tx commitErrorTx) Commit() error { return tx.err }
 
 type setHeadBlockReader struct{ dbservices.FullBlockReader }
 
+func (setHeadBlockReader) TxnumReader() rawdbv3.TxNumsReader { return rawdbv3.TxNums }
+
 func (setHeadBlockReader) CanonicalHash(_ context.Context, tx kv.Getter, number uint64) (common.Hash, bool, error) {
 	hash, err := rawdb.ReadCanonicalHash(tx, number)
 	return hash, hash != (common.Hash{}), err
@@ -83,7 +86,7 @@ func TestSetHeadFailedCommitPreservesPendingNotifications(t *testing.T) {
 	accum := NewAccumulation()
 	accum.Accumulator.StartChange(head, nil, false)
 	want := accum.Accumulator.Changes()[0].ToProto()
-	sync := stagedsync.New(ethconfig.Sync{}, []*stagedsync.Stage{{
+	sync := stagedsync.New(rawdbv3.TxNums, ethconfig.Sync{}, []*stagedsync.Stage{{
 		ID: stages.Headers,
 		Unwind: func(u *stagedsync.UnwindState, _ *stagedsync.StageState, _ *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
 			accum.Accumulator.StartChange(target, nil, true)
@@ -138,7 +141,7 @@ func TestSetHeadClearsSafeAndFinalizedAboveTarget(t *testing.T) {
 				rawdb.WriteForkchoiceFinalized(tx, hashes[tc.finalized])
 				return stages.SaveStageProgress(tx, stages.Headers, tc.head)
 			}))
-			sync := stagedsync.New(ethconfig.Sync{}, []*stagedsync.Stage{{
+			sync := stagedsync.New(rawdbv3.TxNums, ethconfig.Sync{}, []*stagedsync.Stage{{
 				ID: stages.Headers,
 				Unwind: func(u *stagedsync.UnwindState, _ *stagedsync.StageState, _ *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
 					return u.Done(tx)

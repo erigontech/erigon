@@ -728,7 +728,7 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 		return nil
 	}
 
-	unwindToLimit, err := rawtemporaldb.CanUnwindToBlockNum(applyTx)
+	unwindToLimit, err := rawtemporaldb.CanUnwindToBlockNum(applyTx, cfg.blockReader.TxnumReader())
 	if err != nil {
 		return err
 	}
@@ -739,7 +739,7 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 	unwindTo := blockNumber - jump
 
 	// protect from too far unwind
-	allowedUnwindTo, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindTo, applyTx)
+	allowedUnwindTo, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindTo, applyTx, cfg.blockReader.TxnumReader())
 	if err != nil {
 		return err
 	}
