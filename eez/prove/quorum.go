@@ -125,9 +125,12 @@ func (q *Quorum) ProveBy(ctx context.Context, w *Window, start time.Time, per ti
 				continue
 			}
 			atts = append(atts, Attestation{ProofSystem: a.m.ProofSystem, Proof: a.proof})
-			if uint64(len(atts)) == threshold && pending > 0 {
+			switch {
+			case uint64(len(atts)) == threshold && pending > 0:
 				timer = time.NewTimer(q.Grace)
 				grace = timer.C
+			case failed.lost(len(atts), pending):
+				pending = 0
 			}
 		case <-grace:
 			pending = 0

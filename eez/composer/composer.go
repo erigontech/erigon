@@ -626,6 +626,9 @@ func (c *Composer) recoverHeld(ctx context.Context, p Posted[*Held]) {
 	c.burned(spent)
 	c.pool.Release(spent)
 	switch {
+	case p.Culprit != nil && landed[p.Culprit.Hash]:
+		// The refused trigger ran on L1 anyway: its nonce is spent, the
+		// rest of its chain stands.
 	case p.Culprit != nil:
 		keep = c.eject(keep, p.Culprit)
 	case !p.SlotSkipped:

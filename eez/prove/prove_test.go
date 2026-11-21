@@ -224,8 +224,8 @@ type prover struct {
 	// reply, when set, replaces the reply to request i of a stream; nil
 	// sends none, errEnd ends the stream with no status.
 	reply func(i int, f *provepb.ClientFrame, r *provepb.ServerFrame) (*provepb.ServerFrame, error)
-	// details, when set, go unwrapped in the trailer of a status that ends
-	// the stream.
+	// details, when set, go unwrapped in the stream's trailer, as the
+	// reference prover sends a refusal's.
 	details []byte
 }
 
@@ -241,6 +241,9 @@ func (p *prover) ProveStream(s provepb.Prover_ProveStreamServer) error {
 		p.frames = frames
 		p.mu.Unlock()
 	}()
+	if p.details != nil {
+		s.SetTrailer(metadata.Pairs(detailsTrailer, string(p.details)))
+	}
 	for i := 0; ; i++ {
 		f, err := s.Recv()
 		if err != nil {
@@ -271,10 +274,9 @@ func (p *prover) ProveStream(s provepb.Prover_ProveStreamServer) error {
 			p.fin = k.Finalize
 			p.mu.Unlock()
 			proof, rej, err := p.answer(call)
-			if err != nil {
-				if p.details != nil {
-					s.SetTrailer(metadata.Pairs(detailsTrailer, string(p.details)))
-				}
+			if errors.Is(err, errEnd) {
+				return nil
+			} else if err != nil {
 				return err
 			}
 			if rej != nil {
@@ -856,6 +858,41 @@ func TestProveNamesTheRefusedEffect(t *testing.T) {
 				require.Equal(t, *c.want, r)
 			})
 		}
+	}
+}
+
+// TestProveTakesNoCodeFromAMessage: a code is restored only from grpc-go's
+// report of a trailer whose details decode as a google.rpc.Status of another
+// code, never into OK, nor from a prover's message alike.
+func TestProveTakesNoCodeFromAMessage(t *testing.T) {
+	f := anchor402(t)
+	statusOf := func(code codes.Code, msg string) []byte {
+		raw, err := proto.Marshal(status.New(code, msg).Proto())
+		require.NoError(t, err)
+		return raw
+	}
+	refusal, err := proto.Marshal(&provepb.ProveFailure{ActionableFailure: &provepb.ProveFailure_Inbound{
+		Inbound: &provepb.InboundFailure{EntryIndex: 2, EntryHash: bytes.Repeat([]byte{0xf0}, 32)},
+	}})
+	require.NoError(t, err)
+	alike := mismatch + "FailedPrecondition, refused"
+	for _, c := range []struct {
+		name    string
+		end     error
+		details []byte
+	}{
+		{"an end without a status, another code's details", errEnd, statusOf(codes.FailedPrecondition, "refused")},
+		{"a message alike, a refusal's details", status.Error(codes.Internal, alike), refusal},
+		{"a message alike, details of its code", status.Error(codes.Internal, alike), statusOf(codes.Internal, alike)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p := &prover{details: c.details, answer: func(int) (*provepb.Proof, *provepb.Rejected, error) { return nil, nil, c.end }}
+			proof, err := dial(t, serve(t, p), f).ProveBy(t.Context(), f.window(), time.Now().Add(time.Second), 0)
+			require.Nil(t, proof)
+			require.Equal(t, codes.Internal, status.Code(err), "%v", err)
+			_, ok := Refusal(err)
+			require.False(t, ok)
+		})
 	}
 }
 

@@ -550,7 +550,7 @@ func received(err error, trailer metadata.MD) error {
 	if !ok {
 		return err
 	}
-	if code, ok := sent(s); ok {
+	if code, ok := sent(s, trailer.Get(detailsTrailer)); ok {
 		s = status.New(code, s.Message())
 		err = s.Err()
 	}
@@ -564,15 +564,23 @@ func received(err error, trailer metadata.MD) error {
 	return &RefusedError{Refused: r, Status: s}
 }
 
-// sent returns the code of a status grpc-go reports as INTERNAL, its details
-// not a google.rpc.Status of that code.
-func sent(s *status.Status) (codes.Code, bool) {
+// sent returns the code of a failure grpc-go reports as INTERNAL because
+// details, its one value, decode as a google.rpc.Status of another code;
+// the message is grpc-go's only then, not a status the prover sent.
+func sent(s *status.Status, details []string) (codes.Code, bool) {
 	rest, ok := strings.CutPrefix(s.Message(), mismatch)
-	if s.Code() != codes.Internal || !ok {
+	if s.Code() != codes.Internal || !ok || len(details) != 1 {
 		return 0, false
 	}
-	for c := codes.OK; c <= codes.Unauthenticated; c++ {
-		if strings.HasPrefix(rest, c.String()+",") {
+	// A google.rpc.Status, the type of s's proto, without importing it.
+	p := s.Proto()
+	d := p.ProtoReflect().New()
+	if proto.Unmarshal([]byte(details[0]), d.Interface()) != nil || proto.Equal(d.Interface(), p) {
+		return 0, false
+	}
+	other := d.Get(d.Descriptor().Fields().ByName("code")).Int()
+	for c := codes.Canceled; c <= codes.Unauthenticated; c++ {
+		if strings.HasPrefix(rest, c.String()+",") && int64(c) != other {
 			return c, true
 		}
 	}

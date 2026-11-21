@@ -274,6 +274,17 @@ func TestQuorumGivesUp(t *testing.T) {
 		ProveBy(t.Context(), quorumWindow(t, refusing.ps, failing.ps, stuck.ps), time.Now().Add(10*time.Second), 0)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 	require.Less(t, time.Since(begin), 1500*time.Millisecond)
+
+	// An attestation can leave the threshold out of reach as a failure does.
+	refusing2 := newAttester(t, 0xd, 0, status.Error(codes.InvalidArgument, "window refused"))
+	late := newAttester(t, 0xe, 200*time.Millisecond, nil)
+	stuck2 := newAttester(t, 0xf, 3*time.Second, nil)
+	all := []*attester{refusing, refusing2, late, stuck2}
+	begin = time.Now()
+	_, err = (&Quorum{Members: members(all...), Register: registered(3, all...)}).
+		ProveBy(t.Context(), quorumWindow(t, refusing.ps, refusing2.ps, late.ps, stuck2.ps), time.Now().Add(10*time.Second), 0)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Less(t, time.Since(begin), 1500*time.Millisecond)
 }
 
 // refusalDetails encodes r as a prover's refusal details.

@@ -1065,6 +1065,51 @@ func TestComposedSyncBlockRefusedForOne(t *testing.T) {
 	}
 }
 
+// TestEffectsCulprit: a refused inbound entry resolves to the held
+// transaction its delivery was made for, however many deliveries each made.
+func TestEffectsCulprit(t *testing.T) {
+	out, first, second := held(addr(0xa), 0, Outbound, 1), held(addr(0xb), 0, Inbound, 2), held(addr(0xc), 0, Inbound, 3)
+	fx := &effects{held: []*Held{out, first, second}, outbound: make([]protocol.ExecutionEntry, 1), owners: []*Held{first, first, second}}
+	batch := &protocol.ProofSystemBatch{}
+	for i := range 5 {
+		batch.Entries = append(batch.Entries, protocol.ExecutionEntry{
+			RollupUpdates: []protocol.RollupUpdate{}, L2ToL1Calls: []protocol.CrossChainCall{}, ExpectedL1ToL2Calls: []protocol.ExpectedCall{},
+			DestinationRollupID: 1, ReturnData: []byte{byte(i)},
+		})
+	}
+	hash := func(i int) common.Hash {
+		h, err := protocol.ExecutionEntryHash(&batch.Entries[i])
+		require.NoError(t, err)
+		return h
+	}
+	for _, c := range []struct {
+		index uint32
+		hash  common.Hash
+		want  *Held
+		err   error
+	}{
+		{index: 2, hash: hash(2), want: first},
+		{index: 3, hash: hash(3), want: first},
+		{index: 4, hash: hash(4), want: second},
+		{index: 1, hash: hash(1), err: errUnresolved},
+		{index: 0, hash: hash(0), err: errUnresolved},
+		{index: 3, hash: hash(4)},
+		{index: 5, hash: hash(4)},
+	} {
+		got, err := fx.culprit(prove.Refused{Index: c.index, Hash: c.hash}, nil, batch)
+		switch {
+		case c.want != nil:
+			require.NoError(t, err, "entry %d", c.index)
+			require.Same(t, c.want, got, "entry %d", c.index)
+		case c.err != nil:
+			require.ErrorIs(t, err, c.err, "entry %d", c.index)
+		default:
+			require.Error(t, err, "entry %d", c.index)
+			require.NotErrorIs(t, err, errUnresolved, "entry %d", c.index)
+		}
+	}
+}
+
 // holdOutbound holds the window's recorded outbound transaction i.
 func (f *crossFixture) holdOutbound(t *testing.T, i int) *Held {
 	t.Helper()

@@ -1526,6 +1526,7 @@ func TestComposerRecoversHeldTransactions(t *testing.T) {
 		{name: "requeued, charged", queued: map[common.Hash]uint32{{1}: 1, {2}: 0, {3}: 1}, replaced: true},
 		{name: "a refused transaction goes with its chain, the rest free", culprit: common.Hash{1}, queued: map[common.Hash]uint32{{3}: 0}, replaced: true},
 		{name: "a refused transaction goes alone, the rest free", attempts: 2, culprit: common.Hash{3}, queued: map[common.Hash]uint32{{1}: 2, {2}: 0}, replaced: true},
+		{name: "a refused trigger that landed leaves its chain", landed: true, culprit: common.Hash{1}, queued: map[common.Hash]uint32{{2}: 0, {3}: 0}, replaced: true},
 		{name: "a skipped slot is free", skipped: true, queued: map[common.Hash]uint32{{1}: 0, {2}: 0, {3}: 0}, replaced: true},
 		{name: "a landed trigger is released", landed: true, queued: map[common.Hash]uint32{{2}: 0, {3}: 1}, replaced: true},
 		{name: "the third failure evicts the chain", attempts: 2, queued: map[common.Hash]uint32{{3}: 1}, replaced: true},
@@ -1632,6 +1633,28 @@ func TestComposerDisposesOfAFailedOutboundBatchL1Settled(t *testing.T) {
 	h.c.RecoverFailed(t.Context())
 	require.Equal(t, []*Held{out}, pool.PopN(math.MaxInt))
 	require.Equal(t, uint32(1), out.Attempts, "where L1 stopped")
+}
+
+// TestComposerEjectsAnOutboundCulprit: an outbound transaction the provers
+// refused a batch for is evicted with the rest of its chain; composed, it
+// stays held, so the sequencer never takes it as a plain transaction.
+func TestComposerEjectsAnOutboundCulprit(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 8), 8, &triggers{landed: map[common.Hash]bool{}})
+	pool := NewHeldPool()
+	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+	for n := range uint64(3) {
+		require.NoError(t, pool.Push(held(addr(0xa), n, Outbound, byte(n+1)), 0))
+	}
+	require.NoError(t, pool.Push(held(addr(0xb), 0, Outbound, 9), 0))
+	inBatch := pool.PopN(2)
+	pool.Composed(inBatch, 8)
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: inBatch, Culprit: inBatch[1]})
+	h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
+	h.c.RecoverFailed(t.Context())
+	require.Equal(t, []common.Hash{{1}, {9}}, hashes(pool.PopN(math.MaxInt)))
+	require.Zero(t, inBatch[0].Attempts)
+	require.True(t, pool.Holds(common.Hash{2}))
+	require.False(t, pool.Holds(common.Hash{3}), "never in a Sync block")
 }
 
 // senders is an L1 on which each posting in from has a receipt from its
