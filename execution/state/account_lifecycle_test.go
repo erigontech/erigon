@@ -175,7 +175,7 @@ func TestAccountLifecycle_LayersOwnTxWrites(t *testing.T) {
 		return ibs, vm
 	}
 	ownSD := func(ibs *IntraBlockState, addr accounts.Address, val bool) {
-		ibs.versionedWrites.SetSelfDestruct(addr, &VersionedWrite[bool]{
+		ibs.writes.SetSelfDestruct(addr, &VersionedWrite[bool]{
 			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 5}}, Val: val,
 		})
 		ibs.journal.dirties[addr] = 1

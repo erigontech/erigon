@@ -28,7 +28,7 @@ import (
 
 // Revival is decided at three sites with two different definitions:
 //
-//   - the two readers — getVersionedAccount and versionedStateReader.ReadAccountData —
+//   - the two readers — getAccount and versionedStateReader.ReadAccountData —
 //     agree exactly: revived = AddressPath >= destructTx OR {Balance,Nonce,CodeHash} > destructTx
 //   - the validator — validateReadImpl — omits the AddressPath >= arm:
 //     revived = {Balance,Nonce,CodeHash} > destructTx
@@ -71,7 +71,7 @@ func TestRevivalConsistency_SameTxMetamorphic_ReaderAndValidatorAgree(t *testing
 	ibs.SetTxContext(0, 4)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
-	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	account, _, _, err := ibs.getAccount(addr, true)
 	require.NoError(t, err)
 	require.NotNil(t, account, "reader must surface the re-created account")
 	require.Equal(t, uint64(2), account.Incarnation)
@@ -111,7 +111,7 @@ func TestRevivalConsistency_AddressPathOnly_ReaderAndValidatorDiverge(t *testing
 	ibs.SetTxContext(0, 5)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
-	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	account, _, _, err := ibs.getAccount(addr, true)
 	require.NoError(t, err)
 	require.NotNil(t, account, "reader's AddressPath >= arm reports the account revived")
 

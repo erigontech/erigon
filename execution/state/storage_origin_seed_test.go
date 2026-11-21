@@ -56,7 +56,7 @@ func TestStorageColdReadSeedsOrigin(t *testing.T) {
 	ibs.PublishOrigins()
 
 	// The seed is visible to any later reader as an originIndex cell.
-	got, res, ok := ibs.versionMap.ReadStorage(addr, key, 5)
+	got, res, ok := ibs.stateUpdates.ReadStorage(addr, key, 5)
 	require.True(t, ok, "cold storage read must seed a versionMap origin cell")
 	require.Equal(t, MVReadResultDone, res.Status())
 	require.Equal(t, originIndex, res.DepIdx(), "slot origin must be seeded at originIndex (-2)")
@@ -64,7 +64,7 @@ func TestStorageColdReadSeedsOrigin(t *testing.T) {
 
 	// The read itself is recorded at originIndex (not UnknownVersion), so it is
 	// value-validated against the shared origin rather than version-only.
-	tr, recorded := ibs.versionedReads.GetStorage(addr, key)
+	tr, recorded := ibs.reads.GetStorage(addr, key)
 	require.True(t, recorded)
 	require.Equal(t, originIndex, tr.Version.TxIndex, "cold read must record the origin version")
 }
@@ -93,7 +93,7 @@ func TestStorageCommittedReadSeedsOrigin(t *testing.T) {
 	require.Equal(t, committed, v)
 	ibs.PublishOrigins()
 
-	got, res, ok := ibs.versionMap.ReadStorage(addr, key, 5)
+	got, res, ok := ibs.stateUpdates.ReadStorage(addr, key, 5)
 	require.True(t, ok, "cold committed read must seed a versionMap origin cell")
 	require.Equal(t, originIndex, res.DepIdx())
 	require.Equal(t, committed, got)
@@ -122,8 +122,8 @@ func TestFinalizedWritesHandsOverOrigins(t *testing.T) {
 	_, err = ibs.FinalizedWrites(nil)
 	require.NoError(t, err)
 
-	require.True(t, ibs.versionedOrigins.IsEmpty(), "published origins must not be kept for the next tx")
-	got, ok := ibs.versionMap.LoadOriginStorage(addr, key)
+	require.True(t, ibs.origins.IsEmpty(), "published origins must not be kept for the next tx")
+	got, ok := ibs.stateUpdates.LoadOriginStorage(addr, key)
 	require.True(t, ok)
 	require.Equal(t, committed, got)
 }
@@ -144,8 +144,8 @@ func TestFinalizedWritesHandsOverAccountOrigin(t *testing.T) {
 	_, err = ibs.FinalizedWrites(nil)
 	require.NoError(t, err)
 
-	require.True(t, ibs.versionedOrigins.IsEmpty(), "published origins must not be kept for the next tx")
-	got, ok := ibs.versionMap.LoadOriginAccount(addr)
+	require.True(t, ibs.origins.IsEmpty(), "published origins must not be kept for the next tx")
+	got, ok := ibs.stateUpdates.LoadOriginAccount(addr)
 	require.True(t, ok)
 	require.Equal(t, acc.Nonce, got.Nonce)
 	require.Equal(t, acc.Balance, got.Balance)

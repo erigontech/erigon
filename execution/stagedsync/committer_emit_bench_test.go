@@ -45,7 +45,7 @@ func BenchmarkEmitTouched(b *testing.B) {
 			bal(addr(2*tx), ver, *uint256.NewInt(uint64(tx))).nonce(addr(2*tx), ver, 1).
 			bal(addr(2*tx+1), ver, *uint256.NewInt(1)).
 			stor(addr(2*tx+1), accounts.InternKey(slot), ver, *uint256.NewInt(1)).build()
-		vm.FlushVersionedWrites(ws, true)
+		vm.FlushWrites(ws, true)
 		cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, tx), nil)
 	}
 	u := commitment.NewUpdates(commitment.ModeParallel, b.TempDir(), commitment.KeyToHexNibbleHash)

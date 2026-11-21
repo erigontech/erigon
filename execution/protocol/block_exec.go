@@ -103,7 +103,7 @@ func ExecuteBlockEphemerally(
 				return err
 			}
 		}
-		ibs.ResetVersionedIO()
+		ibs.ResetIO()
 		return nil
 	}
 
@@ -159,7 +159,7 @@ func ExecuteBlockEphemerally(
 			if !vmConfig.StatelessExec || errors.Is(err, ErrExecPanic) {
 				return nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)
 			}
-			ibs.ResetVersionedIO()
+			ibs.ResetIO()
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
 		} else {
 			if err := endPhase(); err != nil {
@@ -346,9 +346,6 @@ func FinalizeBlockExecution(
 		return ret, err
 	}
 
-	if !ibs.IsVersioned() {
-		return nil, nil, errors.New("block state has no version map")
-	}
 	ibs.StartAccessRecording()
 
 	if isMining {

@@ -56,7 +56,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.True(t, destroyed)
 		ibs.EndTransaction()
 		writes := finalizedWrites(t, ibs, sd)
-		vm.FlushVersionedWrites(writes, true)
+		vm.FlushWrites(writes, true)
 
 		_, ok, _ := vm.View(1, reader).GetAccount(addr)
 		require.False(t, ok, "a destroyed pre-existing contract must project as absent")
@@ -77,7 +77,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.True(t, destroyed)
 		ibs.EndTransaction()
 		writes := finalizedWrites(t, ibs, sd)
-		vm.FlushVersionedWrites(writes, true)
+		vm.FlushWrites(writes, true)
 
 		_, ok, _ := vm.View(1, reader).GetAccount(addr)
 		require.False(t, ok, "an account created and destroyed in one tx must project as absent")
@@ -97,7 +97,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, destroyed)
 		destroyer.EndTransaction()
-		vm.FlushVersionedWrites(finalizedWrites(t, destroyer, sd), true)
+		vm.FlushWrites(finalizedWrites(t, destroyer, sd), true)
 
 		recreator := newAmsterdamIBS(reader, vm, 1)
 		t.Cleanup(recreator.Close)
@@ -105,7 +105,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.NoError(t, recreator.SetNonce(addr, 1, tracing.NonceChangeNewContract))
 		require.NoError(t, recreator.SetCode(addr, code, tracing.CodeChangeContractCreation))
 		recreator.EndTransaction()
-		vm.FlushVersionedWrites(finalizedWrites(t, recreator, sd), true)
+		vm.FlushWrites(finalizedWrites(t, recreator, sd), true)
 
 		acc, ok, _ := vm.View(2, reader).GetAccount(addr)
 		require.True(t, ok, "a recreated account must project as live after the recreate tx")
@@ -125,13 +125,13 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		t.Cleanup(recreator.Close)
 		require.NoError(t, recreator.SetNonce(addr, 1, tracing.NonceChangeAuthorization))
 		recreator.EndTransaction()
-		vm.FlushVersionedWrites(finalizedWrites(t, recreator, sd), true)
+		vm.FlushWrites(finalizedWrites(t, recreator, sd), true)
 
 		toucher := newAmsterdamIBS(reader, vm, 0)
 		t.Cleanup(toucher.Close)
 		require.NoError(t, toucher.AddBalance(addr, uint256.Int{}, tracing.BalanceChangeUnspecified))
 		toucher.EndTransaction()
-		vm.FlushVersionedWrites(finalizedWrites(t, toucher, sd), true)
+		vm.FlushWrites(finalizedWrites(t, toucher, sd), true)
 
 		acc, ok, _ := vm.View(2, reader).GetAccount(addr)
 		require.True(t, ok, "the recreated account must project as live")
@@ -149,7 +149,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(50), tracing.BalanceChangeUnspecified))
 		ibs.EndTransaction()
 		writes := finalizedWrites(t, ibs, sd)
-		vm.FlushVersionedWrites(writes, true)
+		vm.FlushWrites(writes, true)
 
 		acc, ok, _ := vm.View(1, reader).GetAccount(addr)
 		require.True(t, ok, "a funded account must project as live")
@@ -223,7 +223,7 @@ func TestVersionMapView_GetAccountTable(t *testing.T) {
 		return func(vm *VersionMap) {
 			ws := &WriteSet{}
 			ws.SetEmptyRemoval(addr, v(0))
-			vm.FlushVersionedWrites(ws, complete)
+			vm.FlushWrites(ws, complete)
 		}
 	}
 
@@ -306,7 +306,7 @@ func TestVersionMapView_GetAccountTable(t *testing.T) {
 		{name: "EIP-161 removal at the view's txIdx is not visible", setup: func(vm *VersionMap) {
 			ws := &WriteSet{}
 			ws.SetEmptyRemoval(addr, v(2))
-			vm.FlushVersionedWrites(ws, true)
+			vm.FlushWrites(ws, true)
 		}, base: &committed, acc: committed, ok: true, baseReads: 1},
 		{
 			// SELFDESTRUCT means deleted: a lone SD cell with no preserving balance cell

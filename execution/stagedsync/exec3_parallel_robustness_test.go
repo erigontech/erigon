@@ -981,7 +981,7 @@ func sameSet(a, b []uint64) bool {
 //     cascading through the tx queue.
 //
 // The dep-order validation path flushes each tx with complete = its own
-// validity (FlushVersionedWrites(writeSet, valid, ...)), so an invalidated tx
+// validity (FlushWrites(writeSet, valid, ...)), so an invalidated tx
 // flushes with complete=false. This test asserts the downstream effect: a tx
 // that later reads the slot must see MVReadResultDependency (the validator
 // treats this as VersionInvalid and forces re-execution), not MVReadResultDone.
@@ -1002,7 +1002,7 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 	// The dep-order path flushes an invalidated tx with complete = its validity,
 	// i.e. false (writes stored as Estimate, not Done).
 	const complete = false
-	vm.FlushVersionedWrites(invalidTxWrites, complete)
+	vm.FlushWrites(invalidTxWrites, complete)
 
 	// Downstream tx=16 reads the slot — this is the read that committed
 	// phantom state in the bug.

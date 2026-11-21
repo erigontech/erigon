@@ -62,7 +62,7 @@ func TestCreateOverAbsenceConsumedBeforeDestructFlush(t *testing.T) {
 			diverged := ibs.HadInvalidRead()
 			if !diverged {
 				io := NewVersionedIO(2)
-				io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
+				io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.Reads())
 				diverged = vm.ValidateVersion(1, io, validateEqualVersion, false, "") != VersionValid
 			}
 			require.True(t, diverged,

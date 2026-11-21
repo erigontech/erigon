@@ -56,9 +56,8 @@ type Task interface {
 		calcFees bool) *TxResult
 
 	Version() state.Version
-	VersionMap() *state.VersionMap
-	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
-	VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet
+	Reads(ibs *state.IntraBlockState) state.ReadSet
+	Writes(ibs *state.IntraBlockState) *state.WriteSet
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
 
 	Tx() types.Transaction
@@ -417,16 +416,12 @@ func (t *TxTask) Dependencies() []int {
 	return t.dependencies
 }
 
-func (t *TxTask) VersionMap() *state.VersionMap {
-	return nil
+func (t *TxTask) Reads(ibs *state.IntraBlockState) state.ReadSet {
+	return ibs.Reads()
 }
 
-func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
-	return ibs.VersionedReads()
-}
-
-func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet {
-	return ibs.VersionedWrites()
+func (t *TxTask) Writes(ibs *state.IntraBlockState) *state.WriteSet {
+	return ibs.Writes()
 }
 
 func (t *TxTask) IsBlockEnd() bool {
@@ -583,7 +578,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			result.Err = stateErr
 			result.TxOut = nil
 		} else {
-			result.TxIn = t.VersionedReads(ibs)
+			result.TxIn = t.Reads(ibs)
 		}
 	}
 

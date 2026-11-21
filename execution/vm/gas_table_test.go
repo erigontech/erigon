@@ -289,7 +289,7 @@ func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
 			slot := accounts.InternKey(common.HexToHash("0x01"))
 			require.NoError(t, statedb.CreateAccount(contract, true))
 			require.NoError(t, statedb.SetCode(contract, hexutil.MustDecode("0x6001600155"), tracing.CodeChangeUnspecified))
-			statedb.ResetVersionedReads()
+			statedb.ResetReads()
 			blockCtx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) {
 					return true, nil
@@ -317,7 +317,7 @@ func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			reads := statedb.VersionedReads()
+			reads := statedb.Reads()
 			_, read := reads.GetStorage(contract, slot)
 			require.Equal(t, tt.expectRead, read)
 		})
@@ -341,7 +341,7 @@ func TestEIP7928SystemCallReadsAbsentTarget(t *testing.T) {
 		false,
 	)
 	require.NoError(t, err)
-	reads := statedb.VersionedReads()
+	reads := statedb.Reads()
 	_, read := reads.GetCode(target)
 	require.True(t, read)
 	exists, err := statedb.Exist(target)

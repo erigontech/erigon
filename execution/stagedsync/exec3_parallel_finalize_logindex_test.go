@@ -267,7 +267,7 @@ func TestChargedTxKeepsOneCopyOfItsWrites(t *testing.T) {
 		WriteHeader: state.WriteHeader{Address: created, Path: state.NoncePath, Version: regular.Version()},
 		Val:         1,
 	})
-	be.versionMap.FlushVersionedWrites(workerWrites, false)
+	be.versionMap.FlushWrites(workerWrites, false)
 
 	be.execTasks.setInProgress(0)
 	res, err := be.nextResult(t.Context(), pe, &exec.TxResult{

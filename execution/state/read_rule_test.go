@@ -30,7 +30,7 @@ func TestReadRule_XB1_RemovedAccountWipesCommittedStorage(t *testing.T) {
 	vm := NewVersionMap(nil)
 	ws := &WriteSet{}
 	ws.SetEmptyRemoval(addr, Version{TxIndex: 0}) // block N+1 removes it (EIP-161, no SelfDestruct cell)
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 
 	vr := NewVersionedStateReader(1, ReadSet{}, vm, base)
 	val, _, err := vr.ReadAccountStorage(addr, slot)
@@ -96,7 +96,7 @@ func TestReadRule_B3_PostRemovalWriteVisibleBaseSuppressed(t *testing.T) {
 	vm := NewVersionMap(nil)
 	ws := &WriteSet{}
 	ws.SetEmptyRemoval(addr, Version{TxIndex: 0})
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(5), true)        // revive @1
 	vm.WriteStorage(addr, slotT, Version{TxIndex: 1}, *uint256.NewInt(7), true) // revival-era slot write @1
 
@@ -126,7 +126,7 @@ func TestReadRule_XB4_PrevBlockCascadeRemovalSuppressesStorage(t *testing.T) {
 	removal := NewVersionMap(nil)
 	ws := &WriteSet{}
 	ws.SetEmptyRemoval(addr, Version{TxIndex: 0})
-	removal.FlushVersionedWrites(ws, true)
+	removal.FlushWrites(ws, true)
 	removal.SealUpTo(0)
 
 	r := layerVersionMaps(base, []*VersionMap{removal})

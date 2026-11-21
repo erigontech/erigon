@@ -101,7 +101,7 @@ func newRawViewVM(firstTxNum uint64) *state.VersionMap {
 func recordTx(vm *state.VersionMap, blockNum uint64, blockHash common.Hash, txNum uint64, rules *chain.Rules, ws *state.WriteSet) *txResult {
 	var writes state.WriteSetView
 	if ws != nil {
-		vm.FlushVersionedWrites(ws, true)
+		vm.FlushWrites(ws, true)
 		txIdx := 0
 		for _, vw := range ws.Balances() {
 			txIdx = vw.Version.TxIndex

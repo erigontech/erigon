@@ -152,7 +152,7 @@ func TestPriorTxCodeWriteHashSurvivesReadSetHit(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, priorCode, got)
 
-	tr, ok := ibs.versionedReads.GetCode(addr)
+	tr, ok := ibs.reads.GetCode(addr)
 	require.True(t, ok, "the first read must be recorded")
 	require.Equal(t, MapRead, tr.Source)
 
@@ -270,7 +270,7 @@ func TestCodeSegment_RecordsTheSameHeaderWithoutBytes(t *testing.T) {
 	got, err := normal.GetCode(addr)
 	require.NoError(t, err)
 	require.Equal(t, code, got)
-	wantRead, ok := normal.versionedReads.GetCode(addr)
+	wantRead, ok := normal.reads.GetCode(addr)
 	require.True(t, ok)
 
 	segmented, reader, addr, code := newSegmentRead(t, NewVersionMap(nil))
@@ -279,7 +279,7 @@ func TestCodeSegment_RecordsTheSameHeaderWithoutBytes(t *testing.T) {
 	require.Equal(t, code, got)
 	require.Equal(t, 1, reader.segmentReads)
 
-	haveRead, ok := segmented.versionedReads.GetCode(addr)
+	haveRead, ok := segmented.reads.GetCode(addr)
 	require.True(t, ok)
 	require.Equal(t, wantRead.ReadHeader, haveRead.ReadHeader)
 	require.Nil(t, haveRead.Val.Bytes, "the decoded bytes must not be retained")
@@ -330,10 +330,10 @@ func TestCodeSegment_LowerTxCodeWriteInvalidatesTheRead(t *testing.T) {
 	ws := &WriteSet{}
 	lowerCode := accounts.NewCode([]byte{0x60, 0x00})
 	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: lowerCode})
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 
 	io := NewVersionedIO(6)
-	io.RecordReads(Version{TxIndex: 5}, ibs.VersionedReads())
+	io.RecordReads(Version{TxIndex: 5}, ibs.Reads())
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""))
 }
 
@@ -345,10 +345,10 @@ func TestCodeSegment_LowerTxSelfDestructInvalidatesTheRead(t *testing.T) {
 
 	ws := &WriteSet{}
 	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}}, Val: true})
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 
 	io := NewVersionedIO(6)
-	io.RecordReads(Version{TxIndex: 5}, ibs.VersionedReads())
+	io.RecordReads(Version{TxIndex: 5}, ibs.Reads())
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""))
 }
 
@@ -359,7 +359,7 @@ func TestCodeSegment_UncommittedCodeStaysOnTheNormalPath(t *testing.T) {
 		mapped := accounts.NewCode([]byte{0x60, 0x00})
 		ws := &WriteSet{}
 		ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: mapped})
-		vm.FlushVersionedWrites(ws, true)
+		vm.FlushWrites(ws, true)
 
 		got, err := segmentOf(ibs, addr, len(mapped.Bytes))
 		require.NoError(t, err)
@@ -393,7 +393,7 @@ func segmentReadThenLowerCodeWrite(t *testing.T) (*IntraBlockState, *VersionMap,
 	require.NoError(t, err)
 	ws := &WriteSet{}
 	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: accounts.NewCode([]byte{0x60, 0x00})})
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 	return ibs, vm, addr, code
 }
 
@@ -409,7 +409,7 @@ func TestCodeSegment_CopiesCodeAnEarlierTxWrote(t *testing.T) {
 			ibs, reader, addr, _ := newSegmentRead(t, vm)
 			ws := &WriteSet{}
 			ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: accounts.NewCode(written)})
-			vm.FlushVersionedWrites(ws, true)
+			vm.FlushWrites(ws, true)
 
 			got, err := segmentOf(ibs, addr, len(written)+2)
 			require.NoError(t, err)
@@ -429,7 +429,7 @@ func TestCodeSegment_RefreshKeepsTheFirstReadCode(t *testing.T) {
 
 func TestCodeSegment_VersionedReaderKeepsTheFirstReadCode(t *testing.T) {
 	ibs, vm, addr, code := segmentReadThenLowerCodeWrite(t)
-	vr := NewVersionedStateReader(5, ibs.VersionedReads(), vm, ibs.stateReader)
+	vr := NewVersionedStateReader(5, ibs.Reads(), vm, ibs.stateReader)
 	got, err := vr.ReadAccountCode(addr)
 	require.NoError(t, err)
 	require.Equal(t, code, got)

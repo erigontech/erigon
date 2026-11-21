@@ -61,7 +61,7 @@ func destructThenRevive(vm *VersionMap, addr accounts.Address) {
 
 // A value-transfer revival writes no Nonce or CodeHash, so the account record
 // still floors on the pre-destruct cells. Both have to be wiped, or the record
-// contradicts the code and nonce versionedReadCore serves the EVM.
+// contradicts the code and nonce readCore serves the EVM.
 func TestVersionedStateReader_AccountCodeHashWipedByInRangeDestruct(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(105)
@@ -524,7 +524,7 @@ func TestSelfdestructRecordReadsBackWiped(t *testing.T) {
 
 			fw, fwErr := ibs.FinalizedWrites(&chain.Rules{})
 			require.NoError(t, fwErr)
-			vm.FlushVersionedWrites(fw, true)
+			vm.FlushWrites(fw, true)
 
 			// The destruct's wipe is confirmed by the write-side signals ReadAccountData
 			// reconstructs from, not by read-side field synthesis: both a burn
@@ -593,7 +593,7 @@ func TestWipedReadAfterRevivalKeepsSelfDestructFalse(t *testing.T) {
 			require.NoError(t, tc.read(ibs))
 			// Before HasSelfdestructed, which records the cell itself and ignores a
 			// value read from the version map.
-			recorded, ok := ibs.versionedReads.GetSelfDestruct(addr)
+			recorded, ok := ibs.reads.GetSelfDestruct(addr)
 			require.True(t, ok)
 			require.False(t, recorded.Val, "the recorded read must hold the revival")
 			destructed, err := ibs.HasSelfdestructed(addr)
