@@ -423,9 +423,10 @@ func prefetchBALCommitmentV3(ctx context.Context, db kv.RoDB, hashedKeys [][]byt
 		if !ok {
 			return
 		}
-		cold, sampleErr := sampleCold(ctx, p, kv.CommitmentDomain, sampleEvenly(keys, residencySampleKeys))
+		sample := sampleEvenly(keys, residencySampleKeys)
+		cold, sampleErr := sampleCold(ctx, p, kv.CommitmentDomain, sample)
 		logSampleFailure(kv.CommitmentDomain, sampleErr)
-		if sampleErr != nil || !cold {
+		if sampleErr != nil || !cold || len(sample) == len(keys) {
 			return
 		}
 		err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, keys)

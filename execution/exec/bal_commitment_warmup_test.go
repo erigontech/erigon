@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	commitmentv3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -555,4 +556,28 @@ func TestFirstFailurePrefersAReadFailureOverAnIncompleteBatch(t *testing.T) {
 	require.Equal(t, failed, firstFailure(context.Canceled, failed), "a cancelled chunk does not hide a read failure")
 	require.Equal(t, kv.ErrPrefetchIncomplete, firstFailure(nil, kv.ErrPrefetchIncomplete))
 	require.NoError(t, firstFailure(nil, nil))
+}
+
+func TestV3TrieKeysAreDistinctAndCoverEveryPath(t *testing.T) {
+	addr, storageOnly := make([]byte, 20), make([]byte, 20)
+	addr[19], storageOnly[19] = 1, 2
+	s1, s2 := slices.Concat(addr, make([]byte, 32)), slices.Concat(addr, make([]byte, 32))
+	s2[51] = 2
+	s3 := slices.Concat(storageOnly, make([]byte, 32))
+	hashed := [][]byte{commitment.KeyToHexNibbleHash(addr), commitment.KeyToHexNibbleHash(s1), commitment.KeyToHexNibbleHash(s2), commitment.KeyToHexNibbleHash(s3)}
+
+	keys := v3TrieKeys(hashed)
+	seen := map[string]bool{}
+	for _, k := range keys {
+		require.Falsef(t, seen[string(k)], "duplicate key %x", k)
+		seen[string(k)] = true
+	}
+	for _, hk := range hashed {
+		for _, k := range commitmentv3.PathNodeKeys(nil, hk, prefetchFlatDepth) {
+			require.Truef(t, seen[string(k)], "path key %x missing", k)
+		}
+	}
+	for _, k := range commitmentv3.PathNodeKeys(nil, hashed[3][:64], prefetchFlatDepth) {
+		require.Truef(t, seen[string(k)], "account path key %x of a storage-only account missing", k)
+	}
 }

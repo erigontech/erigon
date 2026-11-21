@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -1245,4 +1246,10 @@ func TestCachePopulatingGetterBoundedReadSkipsAVisibleEntry(t *testing.T) {
 	got, _, err := cpg.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{}.WithMaxStep(0))
 	require.NoError(t, err)
 	require.Equal(t, historical, got)
+}
+
+func TestBALHexTrieWarmupsByVariant(t *testing.T) {
+	require.True(t, balHexTrieWarmups(commitment.VariantParallelHexPatricia))
+	require.True(t, balHexTrieWarmups(commitment.VariantHexPatriciaTrie))
+	require.False(t, balHexTrieWarmups(commitment.VariantCommitmentV3))
 }
