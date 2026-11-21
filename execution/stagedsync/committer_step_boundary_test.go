@@ -727,6 +727,10 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 	require.Nil(t, doms.GetCommitmentContext().PeekPendingUpdate(), "block 1's pending branch writes were not flushed")
 	require.Zero(t, liveCS.Diffs[kv.CommitmentDomain].Len(),
 		"pre-window per-block compute leaked CommitmentDomain diffs into the live changeset accumulator")
+	if statecfg.ExperimentalCommitmentV3 {
+		requireV3RecordsMatchAccounts(t, doms, tx, lastTxNum+1, accountValues)
+		return
+	}
 	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
 }
 
