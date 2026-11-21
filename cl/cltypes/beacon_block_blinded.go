@@ -287,8 +287,14 @@ func (b *BlindedBeaconBody) UnmarshalJSON(buf []byte) error {
 	if err := json.Unmarshal(buf, (*bodyJSON)(b)); err != nil {
 		return err
 	}
+	if b.ExecutionRequests == nil && b.Version >= clparams.ElectraVersion {
+		return errors.New("blinded beacon body contains null execution requests")
+	}
+	if b.Attestations == nil {
+		return errors.New("blinded beacon body contains null attestations")
+	}
 	if b.AttesterSlashings == nil {
-		return nil
+		return errors.New("blinded beacon body contains null attester slashings")
 	}
 	return solid.RangeErr(b.AttesterSlashings, func(i int, slashing *AttesterSlashing, _ int) error {
 		if slashing == nil || slashing.Attestation_1 == nil || slashing.Attestation_2 == nil {
@@ -310,6 +316,13 @@ func (b *BlindedBeaconBody) SetVersion(version clparams.StateVersion) *BlindedBe
 		b.ExecutionPayload = NewEth1Header(version)
 	} else {
 		b.ExecutionPayload.SetVersion(version)
+	}
+	if b.AttesterSlashings != nil {
+		b.AttesterSlashings.Range(func(index int, slashing *AttesterSlashing, _ int) bool {
+			slashing.SetVersionWithConfig(version, b.beaconCfg)
+			b.AttesterSlashings.Set(index, slashing)
+			return true
+		})
 	}
 	return b
 }
@@ -403,21 +416,17 @@ func (b *BlindedBeaconBody) DecodeSSZ(buf []byte, version int) error {
 
 	b.ExecutionPayload = NewEth1Header(b.Version)
 
-	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...); err != nil {
+	if err := ssz2.UnmarshalSSZ(buf, version, slashingDecodeSchema(b.getSchema(false), b.beaconCfg)...); err != nil {
 		return err
 	}
 
-	// Post-decode fixup: propagate preset-aware limits to decoded attestations and slashings.
+	// Post-decode fixup: propagate preset-aware limits to decoded attestations.
 	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
 		if err := solid.RangeErr(b.Attestations, func(_ int, att *solid.Attestation, _ int) error {
 			return att.ValidateForConfig(b.beaconCfg, b.Version)
 		}); err != nil {
 			return err
 		}
-		b.AttesterSlashings.Range(func(_ int, as *AttesterSlashing, _ int) bool {
-			as.SetVersionWithConfig(b.Version, b.beaconCfg)
-			return true
-		})
 	}
 	return nil
 }
