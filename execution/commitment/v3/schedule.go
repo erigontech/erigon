@@ -97,12 +97,15 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 	return g.Wait()
 }
 
-func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, workers, fanOutMin int) ([32]byte, deltaParts, error) {
+func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, workers, storageWorkersMax, fanOutMin int) ([32]byte, deltaParts, error) {
 	storageWorkers, accountWorkers := workers, workers
 	if workers <= 0 {
 		workers = runtime.GOMAXPROCS(0)
 		storageWorkers = workers * storageOversubscribe
 		accountWorkers = min(workers, accountPlaneFanout)
+	}
+	if storageWorkersMax > 0 {
+		storageWorkers = min(storageWorkers, storageWorkersMax)
 	}
 	storageRoots := make([][32]byte, len(storage))
 	storageParts := make([]deltaParts, len(storage))
