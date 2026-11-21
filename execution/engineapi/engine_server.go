@@ -983,8 +983,12 @@ func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		}
 	}
 
-	// No need for payload building
-	if payloadAttributes == nil || status.Status != engine_types.ValidStatus {
+	// No need for payload building:
+	// 1. No payload attributes provided
+	// 2. Status is not VALID
+	// 3. Head is below finalized block: per engine_forkchoiceUpdated spec, client
+	//    MUST NOT begin a payload build process and MUST return payloadId: null.
+	if payloadAttributes == nil || status.Status != engine_types.ValidStatus || status.HeadBelowFinalized {
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
 	}
 
@@ -1438,8 +1442,9 @@ func (e *EngineServer) HandleForkChoice(
 		return invalid, nil
 	}
 	payloadStatus := &engine_types.PayloadStatus{
-		Status:          convertGrpcStatusToEngineStatus(status),
-		LatestValidHash: &result.LatestValidHash,
+		Status:             convertGrpcStatusToEngineStatus(status),
+		LatestValidHash:    &result.LatestValidHash,
+		HeadBelowFinalized: result.HeadBelowFinalized,
 	}
 
 	if result.ValidationError != "" {

@@ -165,10 +165,11 @@ type ExecutionPayloadBodyV2 struct {
 }
 
 type PayloadStatus struct {
-	Status          EngineStatus      `json:"status"`
-	ValidationError *StringifiedError `json:"validationError"`
-	LatestValidHash *common.Hash      `json:"latestValidHash"`
-	CriticalError   error             `json:"-"`
+	Status             EngineStatus      `json:"status"`
+	ValidationError    *StringifiedError `json:"validationError"`
+	LatestValidHash    *common.Hash      `json:"latestValidHash"`
+	CriticalError      error             `json:"-"`
+	HeadBelowFinalized bool              `json:"-"`
 }
 
 type ForkChoiceUpdatedResponse struct {

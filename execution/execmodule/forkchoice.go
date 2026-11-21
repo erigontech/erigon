@@ -264,8 +264,9 @@ func (e *ExecModule) shortCircuitForkchoice(
 		}
 	}
 	return ForkChoiceResult{
-		LatestValidHash: blockHash,
-		Status:          ExecutionStatusSuccess,
+		LatestValidHash:    blockHash,
+		Status:             ExecutionStatusSuccess,
+		HeadBelowFinalized: belowFinality,
 	}, nil
 }
 
