@@ -503,6 +503,8 @@ func TestHeldPoolHolds(t *testing.T) {
 	p.PopN(1)
 	require.True(t, p.Holds(a.Hash), "in flight")
 	p.Release([]*Held{a})
+	require.True(t, p.Holds(a.Hash), "settled, not final")
+	p.Forget([]*Held{a})
 	require.False(t, p.Holds(a.Hash))
 	in := held(addr(0xb), 0, Inbound, 3)
 	require.NoError(t, p.Push(in, 0))

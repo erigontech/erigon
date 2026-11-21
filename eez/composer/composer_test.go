@@ -1313,19 +1313,58 @@ func TestComposerDisposesOfPartialSettlements(t *testing.T) {
 }
 
 // TestComposerAuditsFinality: a finalized settlement's posting is looked up
-// on L1 before it leaves the ledger.
+// on L1 before it leaves the ledger; one missing returns the settlement's
+// transactions to the pool. Until then a settled outbound transaction stays
+// held, as an L2 rewind may return it to the rollup's pool.
 func TestComposerAuditsFinality(t *testing.T) {
-	chain := newTestChain(t, 8)
-	node := newLanding(t, chain.blocks[8].Hash())
-	h := newHarness(t, chain, 8, node)
-	h.slot(t, 8, 50, sequencer.ModeSteady)
-	require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Settled }, 5*time.Second, time.Millisecond)
-	before := node.asked.Load()
+	for _, gone := range []bool{false, true} {
+		t.Run(fmt.Sprintf("gone=%v", gone), func(t *testing.T) {
+			chain := newTestChain(t, 8)
+			node := newLanding(t, chain.blocks[8].Hash())
+			h := newHarness(t, chain, 8, node)
+			pool := NewHeldPool()
+			h.c.Recover(pool, nil)
+			out := held(addr(0xa), 0, Outbound, 1)
+			require.NoError(t, pool.Push(out, 0))
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
+			h.c.ledger.MarkSettled(8, common.Hash{0xf})
+			h.cursor.Store(8)
+			h.c.RecoverFailed(t.Context())
+			require.True(t, pool.Holds(out.Hash), "settled, not final")
+			before := node.asked.Load()
+			node.gone.Store(gone)
+			h.final.Store(8)
+			h.c.RecoverFailed(t.Context())
+			require.Empty(t, h.c.ledger.entries)
+			require.Eventually(t, func() bool { return node.asked.Load() > before }, 5*time.Second, time.Millisecond)
+			h.c.Close()
+			require.Equal(t, gone, pool.Holds(out.Hash))
+			require.Equal(t, gone, pool.Len() == 1)
+		})
+	}
+}
+
+// TestComposerForgetsAFinalizedBatchThatNeverLanded: a batch derivation
+// passed without a verdict on its posting is not looked for at finality;
+// what ran of it is final in the block derivation built.
+func TestComposerForgetsAFinalizedBatchThatNeverLanded(t *testing.T) {
+	chain := newTestChain(t, 8, 8)
+	h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	out := held(addr(0xa), 0, Outbound, 1)
+	out.Hash = chain.blocks[8].Transactions()[0].Hash()
+	require.NoError(t, pool.Push(out, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
 	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	require.True(t, pool.Holds(out.Hash), "ran, not final")
 	h.final.Store(8)
 	h.c.RecoverFailed(t.Context())
+	h.c.Close()
 	require.Empty(t, h.c.ledger.entries)
-	require.Eventually(t, func() bool { return node.asked.Load() > before }, 5*time.Second, time.Millisecond)
+	require.False(t, pool.Holds(out.Hash), "final")
+	require.Zero(t, pool.Len())
 }
 
 // triggers is an L1 on which the held transactions in landed have receipts.

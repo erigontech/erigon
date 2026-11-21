@@ -543,10 +543,15 @@ func (c *Composer) RecoverFailed(ctx context.Context) {
 	}
 	for _, p := range c.ledger.TakeFinalized(c.finalized()) {
 		// Derivation passing a posting that never landed confirms the height,
-		// not the posting.
-		if p.Landed {
-			c.wg.Go(func() { c.audit(p) })
+		// not the posting: what ran of it is final in the block derivation
+		// built.
+		if !p.Landed {
+			if c.pool != nil {
+				c.pool.Forget(p.Txs)
+			}
+			continue
 		}
+		c.wg.Go(func() { c.audit(p) })
 	}
 }
 
@@ -717,7 +722,9 @@ func (c *Composer) release(txs []*Held) {
 }
 
 // audit checks that the posting of a finalized settlement is on L1: one
-// missing means a reorg the follower did not see.
+// missing means a reorg the follower did not see, and its transactions
+// return to the pool for the next drain to revalidate. Otherwise they are
+// final.
 func (c *Composer) audit(p Posted[*Held]) {
 	ctx, cancel := context.WithTimeout(c.ctx, c.cfg.L1Read)
 	defer cancel()
@@ -726,7 +733,15 @@ func (c *Composer) audit(p Posted[*Held]) {
 	case err != nil:
 		c.logger.Error("[eez] finality audit failed", "event", "eez.composer.finality_audit.check_failed", "to", p.Height, "post", p.Post, "err", err)
 	case r == nil:
-		c.logger.Error("[eez] finalized settlement's posting is not on L1", "event", "eez.composer.finality_audit.rolled_out", "to", p.Height, "post", p.Post)
+		c.logger.Error("[eez] finalized settlement's posting is not on L1", "event", "eez.composer.finality_audit.rolled_out", "to", p.Height, "post", p.Post,
+			"held", len(p.Txs))
+		if c.pool != nil && len(p.Txs) > 0 {
+			c.pool.PushFront(p.Txs)
+		}
+		return
+	}
+	if c.pool != nil {
+		c.pool.Forget(p.Txs)
 	}
 }
 
