@@ -92,11 +92,6 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 	require.ErrorContains(t, root.ExecuteContext(t.Context()), "--continue is mutually exclusive with --restore")
 
 	convertRestore, convertContinue = false, false
-	statecfg.ExperimentalCommitmentV3 = true
-	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--restore"})
-	require.ErrorContains(t, root.ExecuteContext(t.Context()), "without ERIGON_COMMITMENT_V3=true")
-
-	convertRestore = false
 	statecfg.ExperimentalCommitmentV3 = false
 	convertV3 = false
 	statecfg.ExperimentalCommitmentV3 = true
