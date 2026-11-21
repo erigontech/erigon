@@ -143,10 +143,24 @@ func TestCommitmentVerifyRunsWithoutChaindata(t *testing.T) {
 	db, dirs := dbWithV3State(t)
 	db.Close()
 	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
+	require.NoError(t, dir.RemoveFile(filepath.Join(dirs.Snap, "salt-blocks.txt")), "verify opens no block files")
 
 	datadirCli, verifyAsOf = dirs.DataDir, nil
 	require.NoError(t, commitmentVerify(t.Context(), log.New()))
 	require.NoDirExists(t, dirs.Chaindata)
+}
+
+// verify refuses a datadir with snapshot files of an unsupported naming or version, as the DB-backed open did.
+func TestCommitmentVerifyChecksSnapshotFileVersions(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	previousDatadir, previousVerifyAsOf := datadirCli, verifyAsOf
+	t.Cleanup(func() { datadirCli, verifyAsOf = previousDatadir, previousVerifyAsOf })
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1-accounts.0-1.kv"), nil, 0o600))
+
+	datadirCli, verifyAsOf = dirs.DataDir, nil
+	require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), "incompatible with the current erigon version")
 }
 
 func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {

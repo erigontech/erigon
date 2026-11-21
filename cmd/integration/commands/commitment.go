@@ -289,8 +289,10 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 		return errors.New("verify reads v3 commitment records; run with ERIGON_COMMITMENT_V3=true")
 	}
 	dirs := datadir.Open(datadirCli)
-	if err := CheckSaltFilesExist(dirs); err != nil {
+	if salt, err := dbstate.GetStateIndicesSalt(dirs, false, logger); err != nil {
 		return err
+	} else if salt == nil {
+		return dbstate.ErrCannotStartWithoutSaltFiles
 	}
 	if err := dbstate.MatchCommitmentSchemaToFiles(dirs); err != nil {
 		return err
@@ -654,6 +656,9 @@ func commitmentConvert(agg *dbstate.Aggregator, ctx context.Context, logger log.
 
 // openStateFiles opens the state snapshot files of dirs without chaindata.
 func openStateFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*dbstate.Aggregator, error) {
+	if err := dbstate.CheckSnapshotFileVersions(dirs); err != nil {
+		return nil, err
+	}
 	settings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {
 		return nil, err
