@@ -38,6 +38,15 @@ import (
 )
 
 func TestCheckCommitmentRootFailsWithoutVisibleCommitmentFile(t *testing.T) {
+	testCheckCommitmentRootFailsOnAGap(t, 2, "-commitment.")
+}
+
+// A gap after the first files also fails: the visible files stop before it.
+func TestCheckCommitmentRootFailsOnAGapAfterTheFirstFiles(t *testing.T) {
+	testCheckCommitmentRootFailsOnAGap(t, 7, "-commitment.4-6.")
+}
+
+func testCheckCommitmentRootFailsOnAGap(t *testing.T, steps uint64, removed string) {
 	ctx, logger := t.Context(), log.New()
 	const stepSize = uint64(10)
 	dirs := datadir.New(t.TempDir())
@@ -50,7 +59,7 @@ func TestCheckCommitmentRootFailsWithoutVisibleCommitmentFile(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 	require.NoError(t, err)
 	defer sd.Close()
-	for txNum := uint64(1); txNum <= 2*stepSize; txNum++ {
+	for txNum := uint64(1); txNum <= steps*stepSize; txNum++ {
 		acc := accounts.NewAccount()
 		acc.Balance = *uint256.NewInt(txNum)
 		addr := common.BigToAddress(uint256.NewInt(txNum).ToBig())
@@ -58,19 +67,24 @@ func TestCheckCommitmentRootFailsWithoutVisibleCommitmentFile(t *testing.T) {
 	}
 	require.NoError(t, sd.Flush(ctx, tx))
 	require.NoError(t, tx.Commit())
-	require.NoError(t, agg.BuildFiles(db, 2*stepSize, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, steps*stepSize, unboundedFinalityCtx))
 
 	agg.CloseFilesNoReopen()
 	entries, err := os.ReadDir(dirs.SnapDomain)
 	require.NoError(t, err)
+	var n int
 	for _, e := range entries {
-		if strings.Contains(e.Name(), "-commitment.") {
+		if strings.Contains(e.Name(), removed) {
 			require.NoError(t, dir.RemoveFile(filepath.Join(dirs.SnapDomain, e.Name())))
+			n++
 		}
 	}
+	require.NotZero(t, n, "no %s file to remove", removed)
 	require.NoError(t, agg.ReloadFiles())
 
-	require.ErrorIs(t, integrity.CheckCommitmentRoot(ctx, db, nil, true, logger), integrity.ErrIntegrity)
+	err = integrity.CheckCommitmentRoot(ctx, db, nil, true, logger)
+	require.ErrorIs(t, err, integrity.ErrIntegrity)
+	require.ErrorContains(t, err, "a gap in files")
 }
 
 func TestCheckCommitmentRootPassesOnEmptyDatadir(t *testing.T) {
