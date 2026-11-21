@@ -384,7 +384,7 @@ func newComposer(ctx context.Context, chainConfig *chain.Config, cfg *eez.Sequen
 		f.Settled, func() uint64 { return f.Status().Finalized }, f.HeadTo, logger)
 	comp.Settlements(f.Deriver().Settlement)
 	logger.Info("[eez] composer mode", "poster", poster.From(), "attester", c.Attester, "proofSystem", c.ProofSystem,
-		"maxBlocks", composer.GridCap(c.MaxBlocks, k), "maxGas", c.MaxGas, "priorityFee", c.PriorityFee, "expectExternal", c.ExpectExternal)
+		"maxBlocks", composer.GridCap(c.MaxBlocks, k), "maxGas", c.MaxGas, "priorityFee", c.PriorityFee, "maxTxs", c.MaxTxs, "expectExternal", c.ExpectExternal)
 	return comp, func() {
 		comp.Close()
 		_ = prover.Close()
@@ -422,6 +422,7 @@ func crossChain(ctx context.Context, comp *composer.Composer, seq *sequencer.Seq
 		Escrow: func(ctx context.Context, block common.Hash) (*uint256.Int, error) {
 			return l1.Escrow(ctx, node, l2.Registry, l2.RollupID, block)
 		},
+		MaxTxs: c.MaxTxs,
 	})
 	comp.Recover(pool, seq.Substitute)
 	info, err := ingress.Info(l2.Registry, protocol.EEZL2Address, l2.L1ChainID, chainConfig.ChainID.Uint64(), version.VersionWithCommit(version.GitCommit))

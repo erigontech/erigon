@@ -548,9 +548,10 @@ func TestComposerFlags(t *testing.T) {
 	require.Equal(t, uint64(16_777_216), c.MaxGas)
 	require.Equal(t, uint64(10_000_000_000), c.PriorityFee)
 	require.False(t, c.ExpectExternal)
+	require.Equal(t, 50, c.MaxTxs)
 
 	cfg, err = parse(t, append(slices.Clone(composer), "--eez.l1.builder=https://builder.example", "--eez.batch.maxblocks=120",
-		"--eez.batch.maxgas=2000000", "--eez.l1.priorityfee=1000000000", "--eez.composer.expectexternal")...)
+		"--eez.batch.maxgas=2000000", "--eez.l1.priorityfee=1000000000", "--eez.composer.expectexternal", "--eez.batch.maxtxs=3")...)
 	require.NoError(t, err)
 	c = cfg.Sequencer.Composer
 	require.Equal(t, "https://builder.example", c.Builder)
@@ -558,6 +559,7 @@ func TestComposerFlags(t *testing.T) {
 	require.Equal(t, uint64(2_000_000), c.MaxGas)
 	require.Equal(t, uint64(1_000_000_000), c.PriorityFee)
 	require.True(t, c.ExpectExternal)
+	require.Equal(t, 3, c.MaxTxs)
 	require.Empty(t, c.L1Front)
 
 	cfg, err = parse(t, append(slices.Clone(composer), "--eez.composer.l1front=127.0.0.1:8547")...)
@@ -607,6 +609,7 @@ func TestComposerFlags(t *testing.T) {
 		"bad prover":                {append(without("--eez.attesters"), "--eez.attesters=127.0.0.1:50061"), "--eez.attesters"},
 		"poster is attester":        {append(without("--eez.poster.keyfile"), "--eez.poster.keyfile="+attesterKey), "attester's key"},
 		"no blocks":                 {append(slices.Clone(composer), "--eez.batch.maxblocks=0"), "--eez.batch.maxblocks"},
+		"no transactions":           {append(slices.Clone(composer), "--eez.batch.maxtxs=0"), "--eez.batch.maxtxs"},
 		"gas below a batch":         {append(slices.Clone(composer), "--eez.batch.maxgas=1000000"), "--eez.batch.maxgas"},
 		"gas above EIP-7825":        {append(slices.Clone(composer), "--eez.batch.maxgas=16777217"), "--eez.batch.maxgas"},
 		"websocket L1 alone":        {append([]string{"--eez.enabled", "--eez.l1.rpc=ws://l1:8546"}, without("--eez.enabled", "--eez.l1.rpc")...), "--eez.l1.builder"},

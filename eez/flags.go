@@ -192,6 +192,11 @@ var (
 		Usage: "Most blocks a batch settles, rounded down to a multiple of the Sync interval",
 		Value: 300,
 	}
+	BatchMaxTxsFlag = cli.IntFlag{
+		Name:  "eez.batch.maxtxs",
+		Usage: "Most held cross-chain transactions a Sync block takes",
+		Value: 50,
+	}
 	ComposerL1FrontFlag = cli.StringFlag{
 		Name:  "eez.composer.l1front",
 		Usage: "host:port of the L1 front, where wallets send the L1 transactions that call into the chain; set, steady Sync blocks carry their effects. Forwards other requests to an http(s) --eez.l1.rpc",
@@ -249,7 +254,7 @@ var Flags = []cli.Flag{
 	&ChainFlag, &HTTPPortFlag, &HTTPAPIFlag, &PortFlag, &BootnodesFlag, &StaticPeersFlag, &TrustedPeersFlag,
 	&SequencerFlag, &ProofTimeFlag, &SubmissionSlackFlag, &SequencerMaxDepthFlag, &SequencerFeeRecipientFlag, &SequencerKeyFileFlag,
 	&ComposerFlag, &PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag, &L1BuilderFlag, &L1PriorityFeeFlag,
-	&BatchMaxBlocksFlag, &BatchMaxGasFlag, &ComposerL1FrontFlag, &ComposerL2FrontFlag, &ComposerL2RPCFlag, &ComposerExpectExternalFlag,
+	&BatchMaxBlocksFlag, &BatchMaxTxsFlag, &BatchMaxGasFlag, &ComposerL1FrontFlag, &ComposerL2FrontFlag, &ComposerL2RPCFlag, &ComposerExpectExternalFlag,
 	&L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
 }
 
@@ -325,6 +330,8 @@ type ComposerConfig struct {
 	L2Front, L2RPC string
 	// ExpectExternal reports settlements from other posters as expected.
 	ExpectExternal bool
+	// MaxTxs bounds the held transactions one Sync block takes.
+	MaxTxs int
 }
 
 // L2Flags are the l2 section fields set on the command line.
@@ -526,7 +533,7 @@ func sequencerConfig(cmd *cli.Command) (*SequencerConfig, error) {
 	return s, nil
 }
 
-var composerFlags = []cli.Flag{&PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag, &L1BuilderFlag, &L1PriorityFeeFlag, &BatchMaxBlocksFlag, &BatchMaxGasFlag, &ComposerL1FrontFlag, &ComposerL2FrontFlag, &ComposerL2RPCFlag, &ComposerExpectExternalFlag}
+var composerFlags = []cli.Flag{&PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag, &L1BuilderFlag, &L1PriorityFeeFlag, &BatchMaxBlocksFlag, &BatchMaxTxsFlag, &BatchMaxGasFlag, &ComposerL1FrontFlag, &ComposerL2FrontFlag, &ComposerL2RPCFlag, &ComposerExpectExternalFlag}
 
 // composerConfig reads the composer flags, nil without --eez.composer.
 func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
@@ -548,6 +555,7 @@ func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
 		Builder:     cmd.String(L1BuilderFlag.Name),
 		PriorityFee: cmd.Uint64(L1PriorityFeeFlag.Name),
 		MaxBlocks:   cmd.Uint64(BatchMaxBlocksFlag.Name),
+		MaxTxs:      int(cmd.Int(BatchMaxTxsFlag.Name)),
 		L1Front:     cmd.String(ComposerL1FrontFlag.Name),
 		L2Front:     cmd.String(ComposerL2FrontFlag.Name),
 		L2RPC:       cmd.String(ComposerL2RPCFlag.Name),
@@ -613,6 +621,9 @@ func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
 	c.PosterKey = key
 	if c.MaxBlocks == 0 {
 		return nil, fmt.Errorf("%w: --%s must be positive", ErrConfig, BatchMaxBlocksFlag.Name)
+	}
+	if c.MaxTxs <= 0 {
+		return nil, fmt.Errorf("%w: --%s must be positive", ErrConfig, BatchMaxTxsFlag.Name)
 	}
 	var ok bool
 	if c.MaxGas, ok = composer.PostBatchGasCeiling(cmd.Uint64(BatchMaxGasFlag.Name)); !ok {
