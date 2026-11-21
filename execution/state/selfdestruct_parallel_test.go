@@ -58,7 +58,6 @@ func TestSelfdestructParallel_NoMaterialize(t *testing.T) {
 	bal, ok := writes.GetBalance(addr)
 	require.True(t, ok, "BalancePath write expected")
 	assert.True(t, bal.Val.IsZero(), "balance should be cleared")
-
 }
 
 // TestSelfdestructParallel_RepeatedSameTx verifies that a second SELFDESTRUCT of
