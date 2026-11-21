@@ -18,6 +18,7 @@ package commands
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -132,6 +133,56 @@ func TestCommitmentVerifyRejectsAsOfWithoutHistory(t *testing.T) {
 	verifyAsOf = []uint{0}
 	openSnapshotOnce = sync.Once{}
 	require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), "history is disabled")
+}
+
+// verify opens a chaindata made before a table was added: it applies the migrations
+// that create the table, as rebuild does, instead of panicking in the accede-mode open.
+func TestCommitmentVerifyOpensAnOlderChaindata(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	previousDatadir, previousChaindata, previousVerifyAsOf := datadirCli, chaindata, verifyAsOf
+	t.Cleanup(func() { datadirCli, chaindata, verifyAsOf = previousDatadir, previousChaindata, previousVerifyAsOf })
+	db, dirs := dbWithV3State(t)
+	dbPath := db.Path()
+	db.Close()
+	chaindataWithoutTable(t, dbPath, kv.ExecutionPayloadEnvelopeSignatures)
+
+	datadirCli, chaindata, verifyAsOf = dirs.DataDir, dbPath, nil
+	openSnapshotOnce = sync.Once{}
+	require.NotPanics(t, func() { require.NoError(t, commitmentVerify(t.Context(), log.New())) })
+}
+
+// chaindataWithoutTable rewrites the chaindata at path as an older binary made it: without table.
+func chaindataWithoutTable(t *testing.T, path, table string) {
+	t.Helper()
+	ctx, logger := t.Context(), log.New()
+	src := mdbx.New(dbcfg.ChainDB, logger).Path(path).MustOpen()
+	dstPath := filepath.Join(t.TempDir(), "chaindata")
+	dst := mdbx.New(dbcfg.ChainDB, logger).Path(dstPath).WithTableCfg(func(tables kv.TableCfg) kv.TableCfg {
+		tables = maps.Clone(tables)
+		delete(tables, table)
+		return tables
+	}).MustOpen()
+	require.NoError(t, src.View(ctx, func(stx kv.Tx) error {
+		return dst.Update(ctx, func(dtx kv.RwTx) error {
+			names, err := stx.ListTables()
+			if err != nil {
+				return err
+			}
+			for _, name := range names {
+				if _, ok := kv.ChaindataTablesCfg[name]; !ok || name == table {
+					continue
+				}
+				if err := stx.ForEach(name, nil, func(k, v []byte) error { return dtx.Put(name, k, v) }); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}))
+	src.Close()
+	dst.Close()
+	require.NoError(t, dir.RemoveAll(path))
+	require.NoError(t, os.Rename(dstPath, path))
 }
 
 func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {

@@ -288,7 +288,7 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 	if !statecfg.ExperimentalCommitmentV3 {
 		return errors.New("verify reads v3 commitment records; run with ERIGON_COMMITMENT_V3=true")
 	}
-	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, logger)
+	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 	if err != nil {
 		return err
 	}
