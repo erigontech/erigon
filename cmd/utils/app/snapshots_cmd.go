@@ -622,6 +622,15 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name:        "storage-prefix-estimate",
+			Action:      segStoragePrefix,
+			Description: "Estimate bytes saved by replacing the address prefix of storage keys with the shortest prefix unique among accounts of the same range",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.BoolFlag{Name: "recompress", Usage: "also compress storage keys with and without short prefixes to measure compressed sizes (slow, needs temp disk space)"},
+			}),
+		},
+		{
 			Name:        "domain",
 			Description: "Domain related subcommands",
 			Commands: []*cli.Command{
