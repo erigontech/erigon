@@ -33,7 +33,7 @@ type connDeduper struct {
 	lossTolerance time.Duration
 
 	mu   sync.Mutex
-	lost map[peer.ID]time.Time // when a peer last lost a connection while another one stayed open
+	lost map[peer.ID]time.Time // when a peer last lost a duplicate of a connection it kept
 }
 
 func newConnDeduper(local peer.ID, n network.Network) *connDeduper {
@@ -55,15 +55,17 @@ func (d *connDeduper) preferred(c network.Conn) bool {
 }
 
 // resolve closes the duplicates that the arrival of c makes redundant. A new preferred connection
-// replaces the others. A new non-preferred one is closed only by the peer that dialled it, and only
-// when a preferred connection was opened shortly before it: the dialler would not have dialled a
-// peer it was connected to, so that preferred connection came from a simultaneous dial. On the
-// other side the preferred connection may be half-open and the new one a reconnection, so it stays.
+// replaces the older non-preferred ones. A non-preferred connection is closed only by the peer that
+// dialled it, and only when a preferred connection was opened shortly before it: the dialler would
+// not have dialled a peer it was connected to, so that preferred connection came from a simultaneous
+// dial. Elsewhere a newer non-preferred connection may be a reconnection that replaces a half-open
+// preferred one, so it stays.
 func (d *connDeduper) resolve(c network.Conn) {
 	conns := d.net.ConnsToPeer(c.RemotePeer())
 	if d.preferred(c) {
+		opened := c.Stat().Opened
 		for _, other := range conns {
-			if other != c && !d.preferred(other) {
+			if other != c && !d.preferred(other) && !other.Stat().Opened.After(opened) {
 				d.closeWhenIdle(other, c)
 			}
 		}
@@ -95,6 +97,8 @@ func (d *connDeduper) closeWhenIdle(dup, keep network.Conn) {
 	if keep.IsClosed() || dup.IsClosed() {
 		return
 	}
+	// Close resets the streams before the Disconnected notification, so the loss is recorded first.
+	d.recordLoss(dup.RemotePeer())
 	_ = dup.Close()
 }
 
@@ -107,34 +111,55 @@ func hasRequestStreams(c network.Conn) bool {
 	return false
 }
 
-// LostDuplicateRecently reports whether pid lost a connection while another one stayed open, within
-// the tolerance. Requests and handshakes cut by that close are not the peer's fault.
-func (d *connDeduper) LostDuplicateRecently(pid peer.ID) bool {
+// ConsumeDuplicateLoss reports whether pid lost a duplicate connection within the tolerance, and
+// forgets it, so one closed duplicate excuses one failure. A request or handshake cut by that close is
+// not the peer's fault.
+func (d *connDeduper) ConsumeDuplicateLoss(pid peer.ID) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	at, ok := d.lost[pid]
-	if ok && time.Since(at) > d.lossTolerance {
-		delete(d.lost, pid)
-		return false
+	delete(d.lost, pid)
+	return ok && time.Since(at) <= d.lossTolerance
+}
+
+func (d *connDeduper) recordLoss(pid peer.ID) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	now := time.Now()
+	for p, at := range d.lost {
+		if now.Sub(at) > d.lossTolerance {
+			delete(d.lost, p)
+		}
 	}
-	return ok
+	d.lost[pid] = now
 }
 
 func (d *connDeduper) Connected(_ network.Network, c network.Conn) {
 	time.AfterFunc(d.grace, func() { d.resolve(c) })
 }
 
+// Disconnected records the loss of c only when a remaining connection was opened within the
+// simultaneous-dial window of it. A peer that keeps an older connection and closes a newer one gets
+// no exemption.
 func (d *connDeduper) Disconnected(n network.Network, c network.Conn) {
 	pid := c.RemotePeer()
+	opened := c.Stat().Opened
+	paired := false
+	for _, other := range n.ConnsToPeer(pid) {
+		if gap := opened.Sub(other.Stat().Opened); gap >= -d.window && gap <= d.window {
+			paired = true
+			break
+		}
+	}
+	if paired {
+		d.recordLoss(pid)
+	}
+	// The other connections may be closing concurrently; a peer left with none keeps no record.
 	if len(n.ConnsToPeer(pid)) == 0 {
 		d.mu.Lock()
 		delete(d.lost, pid)
 		d.mu.Unlock()
-		return
 	}
-	d.mu.Lock()
-	d.lost[pid] = time.Now()
-	d.mu.Unlock()
 }
 
 func (d *connDeduper) Listen(network.Network, ma.Multiaddr)      {}

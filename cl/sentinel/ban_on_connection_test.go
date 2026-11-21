@@ -53,7 +53,7 @@ func (s stubP2P) BandwidthCounter() *metrics.BandwidthCounter { return nil }
 func (s stubP2P) UDPv5Listener() *discover.UDPv5              { return nil }
 func (s stubP2P) SetENRAttSubnets(subnets []uint64)           {}
 func (s stubP2P) UpdateENRSyncNets(subnetIndex int, on bool)  {}
-func (s stubP2P) LostDuplicateRecently(peer.ID) bool          { return s.lostDuplicate }
+func (s stubP2P) ConsumeDuplicateLoss(peer.ID) bool           { return s.lostDuplicate }
 
 func testSentinel(t *testing.T, h host.Host) *Sentinel {
 	t.Helper()

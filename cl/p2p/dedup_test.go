@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -185,26 +186,115 @@ func TestDedupKeepsTheOtherConnectionWhenThePreferredOneClosesWhileWaiting(t *te
 	require.False(t, other.IsClosed())
 }
 
-func TestDedupRemembersAConnectionLostWhileAnotherStayed(t *testing.T) {
+// A reconnection opened after the preferred connection may replace a half-open one, so the preferred
+// connection's timer must not close it; its dialler closes it if it came from a simultaneous dial.
+func TestDedupKeepsAReconnectionOpenedAfterThePreferredConnection(t *testing.T) {
+	d, preferred, reconn := newDedupFixture(time.Second)
+	d.resolve(reconn)
+	d.resolve(preferred)
+	require.False(t, reconn.IsClosed())
+	require.False(t, preferred.IsClosed())
+}
+
+func TestDedupRecordsTheLossOfASimultaneousPairOnce(t *testing.T) {
 	d, preferred, other := newDedupFixture(time.Second)
 	n := d.net.(*fakeNetwork)
 	n.conns = []network.Conn{preferred}
 	d.Disconnected(n, other)
-	require.True(t, d.LostDuplicateRecently(highID))
+	require.True(t, d.ConsumeDuplicateLoss(highID))
+	require.False(t, d.ConsumeDuplicateLoss(highID), "the record is consumed by its first use")
 
+	d.Disconnected(n, other)
 	d.lossTolerance = 0
 	time.Sleep(time.Millisecond)
-	require.False(t, d.LostDuplicateRecently(highID))
-
-	d.lossTolerance = time.Minute
-	n.conns = nil
-	d.Disconnected(n, preferred)
-	require.False(t, d.LostDuplicateRecently(highID), "the last connection closing is a disconnect")
+	require.False(t, d.ConsumeDuplicateLoss(highID), "the record expires")
 }
 
-// slowGater delays the secured checkpoint so that two dials started together are both in flight
-// before either connection registers, which is what makes a simultaneous dial produce two.
-type slowGater struct{ allowAll }
+// A peer that keeps one connection and opens and closes another must not earn an exemption.
+func TestDedupIgnoresTheLossOfAConnectionNotPairedWithARemainingOne(t *testing.T) {
+	d, preferred, other := newDedupFixture(time.Minute)
+	n := d.net.(*fakeNetwork)
+	n.conns = []network.Conn{preferred}
+	d.Disconnected(n, other)
+	require.False(t, d.ConsumeDuplicateLoss(highID))
+
+	n.conns = nil
+	d.Disconnected(n, preferred)
+	require.False(t, d.ConsumeDuplicateLoss(highID), "the last connection closing is a disconnect")
+}
+
+type closingNetwork struct {
+	fakeNetwork
+	calls int
+}
+
+// ConnsToPeer reports the remaining connection once, then none, as when ClosePeer closes both in parallel.
+func (n *closingNetwork) ConnsToPeer(peer.ID) []network.Conn {
+	n.calls++
+	if n.calls == 1 {
+		return n.conns
+	}
+	return nil
+}
+
+func TestDedupDoesNotKeepARecordForAPeerThatIsGone(t *testing.T) {
+	d, preferred, other := newDedupFixture(time.Second)
+	n := &closingNetwork{fakeNetwork: fakeNetwork{conns: []network.Conn{preferred}}}
+	d.Disconnected(n, other)
+	require.Empty(t, d.lost)
+
+	d.lost[lowID] = time.Now().Add(-time.Hour)
+	d.recordLoss(highID)
+	require.NotContains(t, d.lost, lowID, "expired records are swept on insert")
+}
+
+type recordingCloseConn struct {
+	*fakeConn
+	onClose func()
+}
+
+func (c *recordingCloseConn) Close() error { c.onClose(); return c.fakeConn.Close() }
+
+// Closing resets the streams before the Disconnected notification, so the loss is recorded first.
+func TestDedupRecordsTheLossBeforeClosingADuplicate(t *testing.T) {
+	d, preferred, other := newDedupFixture(-time.Second)
+	recordedAtClose := false
+	dup := &recordingCloseConn{fakeConn: other, onClose: func() { _, recordedAtClose = d.lost[highID] }}
+	d.net.(*fakeNetwork).conns = []network.Conn{preferred, dup}
+	d.resolve(preferred)
+	require.True(t, other.IsClosed())
+	require.True(t, recordedAtClose)
+}
+
+// barrierGater holds each secured checkpoint until the host has reached it for both its outbound
+// dial and the remote's inbound one, so two dials started together are both in flight before either
+// connection registers.
+type barrierGater struct {
+	allowAll
+	in, out         chan struct{}
+	inOnce, outOnce sync.Once
+}
+
+func newBarrierGater() *barrierGater {
+	return &barrierGater{in: make(chan struct{}), out: make(chan struct{})}
+}
+
+func (g *barrierGater) InterceptSecured(dir network.Direction, _ peer.ID, _ network.ConnMultiaddrs) bool {
+	if dir == network.DirInbound {
+		g.inOnce.Do(func() { close(g.in) })
+	} else {
+		g.outOnce.Do(func() { close(g.out) })
+	}
+	timeout := time.After(5 * time.Second)
+	for _, reached := range []chan struct{}{g.in, g.out} {
+		select {
+		case <-reached:
+		case <-timeout:
+			return true
+		}
+	}
+	return true
+}
 
 type allowAll struct{}
 
@@ -212,10 +302,6 @@ func (allowAll) InterceptPeerDial(peer.ID) bool                                 
 func (allowAll) InterceptAddrDial(peer.ID, ma.Multiaddr) bool                    { return true }
 func (allowAll) InterceptAccept(network.ConnMultiaddrs) bool                     { return true }
 func (allowAll) InterceptUpgraded(network.Conn) (bool, control.DisconnectReason) { return true, 0 }
-func (slowGater) InterceptSecured(network.Direction, peer.ID, network.ConnMultiaddrs) bool {
-	time.Sleep(100 * time.Millisecond)
-	return true
-}
 
 type dedupHost struct {
 	host.Host
@@ -236,7 +322,7 @@ func newDedupHost(t *testing.T) *dedupHost {
 		libp2p.DefaultMuxers,
 		libp2p.Security(noise.ID, noise.New),
 		libp2p.Ping(false),
-		libp2p.ConnectionGater(slowGater{}),
+		libp2p.ConnectionGater(newBarrierGater()),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = h.Close() })

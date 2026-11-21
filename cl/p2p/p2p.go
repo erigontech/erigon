@@ -276,8 +276,8 @@ func (p *p2pManager) SetDialPolicy(dialable func(peer.ID) bool) {
 	p.gater.SetDialPolicy(dialable)
 }
 
-func (p *p2pManager) LostDuplicateRecently(pid peer.ID) bool {
-	return p.deduper.LostDuplicateRecently(pid)
+func (p *p2pManager) ConsumeDuplicateLoss(pid peer.ID) bool {
+	return p.deduper.ConsumeDuplicateLoss(pid)
 }
 
 func (p *p2pManager) BandwidthCounter() *metrics.BandwidthCounter {

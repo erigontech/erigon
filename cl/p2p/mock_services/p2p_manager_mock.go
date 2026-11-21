@@ -58,6 +58,20 @@ func (mr *MockP2PManagerMockRecorder) BandwidthCounter() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BandwidthCounter", reflect.TypeOf((*MockP2PManager)(nil).BandwidthCounter))
 }
 
+// ConsumeDuplicateLoss mocks base method.
+func (m *MockP2PManager) ConsumeDuplicateLoss(pid peer.ID) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ConsumeDuplicateLoss", pid)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// ConsumeDuplicateLoss indicates an expected call of ConsumeDuplicateLoss.
+func (mr *MockP2PManagerMockRecorder) ConsumeDuplicateLoss(pid any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConsumeDuplicateLoss", reflect.TypeOf((*MockP2PManager)(nil).ConsumeDuplicateLoss), pid)
+}
+
 // Host mocks base method.
 func (m *MockP2PManager) Host() host.Host {
 	m.ctrl.T.Helper()
@@ -70,20 +84,6 @@ func (m *MockP2PManager) Host() host.Host {
 func (mr *MockP2PManagerMockRecorder) Host() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Host", reflect.TypeOf((*MockP2PManager)(nil).Host))
-}
-
-// LostDuplicateRecently mocks base method.
-func (m *MockP2PManager) LostDuplicateRecently(pid peer.ID) bool {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "LostDuplicateRecently", pid)
-	ret0, _ := ret[0].(bool)
-	return ret0
-}
-
-// LostDuplicateRecently indicates an expected call of LostDuplicateRecently.
-func (mr *MockP2PManagerMockRecorder) LostDuplicateRecently(pid any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LostDuplicateRecently", reflect.TypeOf((*MockP2PManager)(nil).LostDuplicateRecently), pid)
 }
 
 // Pubsub mocks base method.

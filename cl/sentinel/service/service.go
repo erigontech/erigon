@@ -119,7 +119,7 @@ func responseBodyWeight(topic string, maxBytes uint64) int64 {
 
 type peerRequestBackend interface {
 	GetPeersCount() (active int, connected int, disconnected int)
-	LostDuplicateConnection(pid peer.ID) bool
+	ConsumeDuplicateLoss(pid peer.ID) bool
 	Config() *sentinel.SentinelConfig
 	ReqRespHandler() http.Handler
 }
@@ -176,10 +176,11 @@ func (s *SentinelServer) BanPeerForInvalidData(_ context.Context, p *sentinelpro
 
 // dropOnFailure reports whether a failed request drops pid: only at the peer limit, and not right
 // after one of its duplicate connections closed, which can cut the request. It is asked when the
-// request fails, because the duplicate can close while the request runs.
+// request fails, because the duplicate can close while the request runs, and it uses up the loss
+// only when the peer would otherwise be dropped.
 func (s *SentinelServer) dropOnFailure(pid peer.ID) bool {
 	activePeers, _, _ := s.peerRequestBackend.GetPeersCount()
-	return activePeers >= int(s.peerRequestBackend.Config().MaxPeerCount) && !s.peerRequestBackend.LostDuplicateConnection(pid)
+	return activePeers >= int(s.peerRequestBackend.Config().MaxPeerCount) && !s.peerRequestBackend.ConsumeDuplicateLoss(pid)
 }
 
 func (s *SentinelServer) dropFailedPeer(pid peer.ID) {

@@ -100,8 +100,8 @@ type peerRequestBackendStub struct {
 }
 
 func (p peerRequestBackendStub) GetPeersCount() (int, int, int) { return p.active, 0, 0 }
-func (p peerRequestBackendStub) LostDuplicateConnection(peer.ID) bool {
-	return p.lostDuplicate != nil && p.lostDuplicate.Load()
+func (p peerRequestBackendStub) ConsumeDuplicateLoss(peer.ID) bool {
+	return p.lostDuplicate != nil && p.lostDuplicate.CompareAndSwap(true, false)
 }
 
 func (p peerRequestBackendStub) Config() *sentinel.SentinelConfig {
@@ -118,10 +118,12 @@ func TestFailedRequestKeepsAPeerThatJustLostADuplicateConnection(t *testing.T) {
 	require.True(t, server.dropOnFailure(peer.ID("peer")))
 	lost := &atomic.Bool{}
 	lost.Store(true)
+	server.peerRequestBackend = peerRequestBackendStub{active: 0, lostDuplicate: lost}
+	require.False(t, server.dropOnFailure(peer.ID("peer")), "below the peer limit failures never drop")
+	require.True(t, lost.Load(), "a failure that drops nothing leaves the loss for the next one")
 	server.peerRequestBackend = peerRequestBackendStub{active: 1, lostDuplicate: lost}
 	require.False(t, server.dropOnFailure(peer.ID("peer")))
-	server.peerRequestBackend = peerRequestBackendStub{active: 0}
-	require.False(t, server.dropOnFailure(peer.ID("peer")), "below the peer limit failures never drop")
+	require.True(t, server.dropOnFailure(peer.ID("peer")), "one loss excuses one failure")
 }
 
 // The duplicate can close while the request runs, so the drop decision is taken when the request
