@@ -730,7 +730,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	var historyRanges []commitmentHistoryRange
 	historyStage := newCommitmentV3HistoryStage(dirs)
 	if opts.TargetV3 {
-		if historyRanges, err = convertCommitmentHistoryV3(ctx, at, historyStage, logger); err != nil {
+		if historyRanges, err = convertCommitmentHistoryV3(ctx, at, historyStage, opts.Continue, logger); err != nil {
 			return fmt.Errorf("[commitment_convert] phase 1 history: %w; no commitment file was replaced; %s", err, rebuildV3Advice)
 		}
 	}
@@ -822,13 +822,8 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		return commitmentRestoreError("phase 5 ReloadFiles", reloadErr)
 	}
 	if opts.TargetV3 {
-		if err := verifyCommitmentV3Files(ctx, at.a, logger); err != nil {
+		if err := VerifyCommitmentV3(ctx, at.a, nil, len(historyRanges) > 0, logger); err != nil {
 			return commitmentRestoreError("v3 verification", err)
-		}
-		if len(historyRanges) > 0 {
-			if err := verifyCommitmentV3History(ctx, at.a, historyRanges, logger); err != nil {
-				return commitmentRestoreError("v3 history verification", err)
-			}
 		}
 	}
 
@@ -908,12 +903,10 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 	}
 	resetPending := pendingErr == nil
 	historyDirs := [][2]string{{"history", dirs.SnapHistory}, {"idx", dirs.SnapIdx}, {"accessor", dirs.SnapAccessors}}
-	historyPending := false
-	for _, pair := range historyDirs {
-		if _, err := os.Stat(filepath.Join(backupRoot, pair[0])); err == nil {
-			historyPending = true
-		}
-	}
+	historyPending := slices.ContainsFunc(historyDirs, func(pair [2]string) bool {
+		_, err := os.Stat(filepath.Join(backupRoot, pair[0]))
+		return err == nil
+	})
 	restoredV3, err := preflightRestoreV3Orphans(
 		[][2]string{{filepath.Join(backupRoot, "domains"), dirs.SnapDomain}, {filepath.Join(backupRoot, "history"), dirs.SnapHistory}},
 	)

@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -178,17 +179,40 @@ func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, lastFrozenCommit, uint64(3))
 	for txNum := range lastFrozenCommit + 1 {
-		check, rootErr := state.FoldCommitmentV3(ctx, agg, txNum+1)
+		checks, rootErr := state.FoldCommitmentV3(ctx, agg, []uint64{txNum + 1}, nil)
 		require.NoErrorf(t, rootErr, "records as of txNum %d", txNum+1)
-		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
+		require.Equalf(t, roots[txNum], checks[0].Root, "root as of txNum %d", txNum+1)
 	}
 }
 
 func TestConvertCommitmentFiles_V3History(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
+	testConvertCommitmentHistoryRoots(t)
+}
+
+func TestConvertCommitmentFiles_V3HistorySplitChains(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	previousBatchBytes := state.SetCommitmentV3BatchBytesForTest(256)
+	t.Cleanup(func() { state.SetCommitmentV3BatchBytesForTest(previousBatchBytes) })
+	testConvertCommitmentHistoryRoots(t)
+}
+
+func TestConvertCommitmentFiles_V3HistoryShapeTable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	previousMinVersions := state.SetLegacyShapeMinVersionsForTest(1)
+	t.Cleanup(func() { state.SetLegacyShapeMinVersionsForTest(previousMinVersions) })
+	testConvertCommitmentHistoryRoots(t)
+}
+
+func testConvertCommitmentHistoryRoots(t *testing.T) {
+	t.Helper()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg, roots := testDbAggregatorWithCommitmentHistory(t, 10, 32)
 	legacyHistory, err := filepath.Glob(filepath.Join(agg.Dirs().SnapHistory, "*-commitment.*.v"))
 	require.NoError(t, err)
@@ -202,6 +226,11 @@ func TestConvertCommitmentFiles_V3History(t *testing.T) {
 	for _, p := range converted {
 		require.Truef(t, strings.HasPrefix(filepath.Base(p), "v3.0-"), "%s is not a v3.0 history file", filepath.Base(p))
 	}
+	requireCommitmentHistoryRoots(t, db, agg, roots)
+}
+
+func requireCommitmentHistoryRoots(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, roots map[uint64][]byte) {
+	t.Helper()
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -210,17 +239,57 @@ func TestConvertCommitmentFiles_V3History(t *testing.T) {
 	_, lastFrozenCommit, _, err := commitment.DecodeCommitmentV3State(latestState)
 	require.NoError(t, err)
 	tx.Rollback()
-	checked := 0
+	var asOf []uint64
 	for _, txNum := range slices.Sorted(maps.Keys(roots)) {
 		if txNum > lastFrozenCommit {
 			break
 		}
-		checked++
-		check, rootErr := state.FoldCommitmentV3(t.Context(), agg, txNum+1)
-		require.NoErrorf(t, rootErr, "records as of txNum %d", txNum+1)
-		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
+		asOf = append(asOf, txNum+1)
 	}
-	require.Greater(t, checked, 90)
+	require.Greater(t, len(asOf), 90)
+	defer state.SetCommitmentV3FoldRangesForTest(state.SetCommitmentV3FoldRangesForTest(5))
+	defer state.SetCommitmentV3FoldChunkForTest(state.SetCommitmentV3FoldChunkForTest(1))
+	checks, err := state.FoldCommitmentV3(t.Context(), agg, append(asOf, math.MaxUint64), nil)
+	require.NoError(t, err)
+	for i, txNum := range asOf {
+		require.Equalf(t, roots[txNum-1], checks[i].Root, "root as of txNum %d in one fold of %d", txNum, len(asOf))
+	}
+}
+
+func TestConvertCommitmentFiles_V3HistoryContinueSkipsConvertedFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg, roots := testDbAggregatorWithCommitmentHistory(t, 10, 32)
+	legacyHistory, err := filepath.Glob(filepath.Join(agg.Dirs().SnapHistory, "*-commitment.*.v"))
+	require.NoError(t, err)
+	require.Greater(t, len(legacyHistory), 1)
+
+	errInterrupted := errors.New("interrupted")
+	var converted []int
+	interrupt := true
+	state.SetConvertHistoryAfterFileHookForTest(func(idx int) error {
+		converted = append(converted, idx)
+		if interrupt {
+			interrupt = false
+			return errInterrupted
+		}
+		return nil
+	})
+	t.Cleanup(func() { state.SetConvertHistoryAfterFileHookForTest(nil) })
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
+	tx.Rollback()
+	require.ErrorIs(t, err, errInterrupted)
+
+	converted = nil
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, Continue: true})
+	require.NotContains(t, converted, 0, "--continue must reuse the history file converted before the interrupt")
+	require.Len(t, converted, len(legacyHistory)-1)
+	requireCommitmentHistoryRoots(t, db, agg, roots)
 }
 
 func TestConvertCommitmentFiles_V3HistoryRejectsAsOfOrphans(t *testing.T) {
@@ -237,6 +306,17 @@ func TestConvertCommitmentFiles_V3HistoryRejectsAsOfOrphans(t *testing.T) {
 	t.Cleanup(tx.Rollback) //nolint:gocritic
 	err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
 	tx.Rollback()
+	require.ErrorContains(t, err, "orphan records")
+}
+
+func TestVerifyCommitmentV3_RejectsOrphanInLastGroup(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 7, 2)
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+	orphanTx := injectCommitmentHistoryOrphan(t, db, agg)
+	clean := orphanTx + 1
+	require.NoError(t, state.VerifyCommitmentV3(t.Context(), agg, []uint64{clean, clean, clean}, false, log.New()))
+	err := state.VerifyCommitmentV3(t.Context(), agg, []uint64{clean, clean, clean, orphanTx}, false, log.New())
 	require.ErrorContains(t, err, "orphan records")
 }
 
@@ -310,7 +390,7 @@ type commitmentHistoryPair struct {
 	key, value []byte
 }
 
-func injectCommitmentHistoryOrphan(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator) {
+func injectCommitmentHistoryOrphan(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator) uint64 {
 	t.Helper()
 	dirs := agg.Dirs()
 	historyPaths, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
@@ -373,6 +453,7 @@ func injectCommitmentHistoryOrphan(t *testing.T, db kv.TemporalRwDB, agg *state.
 	rewriteCommitmentHistoryIndex(t, dirs, idxPath, idxPairs, cfg)
 	require.NoError(t, agg.ReloadFiles())
 	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
+	return orphanTx
 }
 
 func readCommitmentHistoryValues(t *testing.T, path string, cfg statecfg.HistCfg) []commitmentHistoryPair {
@@ -576,7 +657,7 @@ func TestConvertCommitmentFiles_V3HistoryStaleStorageBranchOfRecreatedAccount(t 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
 
 	for txNum := uint64(1); txNum <= stepSize*steps; txNum++ {
-		_, err := state.FoldCommitmentV3(ctx, agg, txNum)
+		_, err := state.FoldCommitmentV3(ctx, agg, []uint64{txNum}, nil)
 		require.NoErrorf(t, err, "records as of txNum %d", txNum)
 	}
 }
@@ -644,9 +725,9 @@ func TestConvertCommitmentFiles_V3HistoryExtensionRoot(t *testing.T) {
 		if txNum >= stepSize*(steps-1) {
 			break
 		}
-		check, err := state.FoldCommitmentV3(t.Context(), agg, txNum+1)
+		checks, err := state.FoldCommitmentV3(t.Context(), agg, []uint64{txNum + 1}, nil)
 		require.NoErrorf(t, err, "records as of txNum %d", txNum+1)
-		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
+		require.Equalf(t, roots[txNum], checks[0].Root, "root as of txNum %d", txNum+1)
 	}
 }
 
@@ -681,9 +762,9 @@ func TestConvertCommitmentFiles_V3HistoryRootWithOnlyDirectLeaves(t *testing.T) 
 		if txNum >= stepSize*(steps-1) {
 			break
 		}
-		check, err := state.FoldCommitmentV3(t.Context(), agg, txNum+1)
+		checks, err := state.FoldCommitmentV3(t.Context(), agg, []uint64{txNum + 1}, nil)
 		require.NoErrorf(t, err, "records as of txNum %d", txNum+1)
-		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
+		require.Equalf(t, roots[txNum], checks[0].Root, "root as of txNum %d", txNum+1)
 	}
 }
 

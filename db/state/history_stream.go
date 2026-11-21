@@ -53,7 +53,8 @@ type HistoryRangeAsOfFiles struct {
 	logger log.Logger
 	ctx    context.Context
 
-	seq multiencseq.SequenceReader // re-usable instance, to reduce allocations
+	seq    multiencseq.SequenceReader // re-usable instance, to reduce allocations
+	pagers historyPagers
 }
 
 func (hi *HistoryRangeAsOfFiles) Close() {
@@ -148,30 +149,9 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 			return fmt.Errorf(".vi of %s holds no value for key %x at txNum %d, which %s indexes",
 				historyItem.src.decompressor.FileName(), hi.nextKey, txNum, top.g.FileName())
 		}
-
-		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
-
-		if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-			compressedPageValuesCount = hi.hc.h.HistoryValuesOnCompressedPage
-		}
-
-		if compressedPageValuesCount <= 1 {
-			g := hi.hc.statelessGetter(top.histFileIdx)
-			g.Reset(offset)
-			hi.nextVal, _ = g.Next(nil)
-		} else {
-			g := seg.NewPagedReader(hi.hc.statelessGetter(top.histFileIdx), compressedPageValuesCount, true)
-			g.Reset(offset)
-			for i := 0; i < compressedPageValuesCount && g.HasNext(); i++ {
-				k, v, _, _ := g.Next2(nil)
-				histKey := historyKey(txNum, hi.nextKey, nil)
-				if bytes.Equal(histKey, k) {
-					hi.nextVal = v
-					break
-				}
-			}
-		}
-		return nil
+		var err error
+		hi.nextVal, err = hi.pagers.value(hi.hc, top.histFileIdx, offset, txNum, hi.nextKey)
+		return err
 	}
 	hi.nextKey = nil
 	return nil
@@ -415,6 +395,30 @@ func (r *bufRotor) put(v []byte) []byte {
 	return r.bufs[r.i]
 }
 
+type historyPagers []*seg.PagedReader
+
+func (p *historyPagers) value(hc *HistoryRoTx, i int, offset, txNum uint64, key []byte) ([]byte, error) {
+	d := hc.files[i].src.decompressor
+	pageSize := d.CompressedPageValuesCount()
+	if d.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+		pageSize = hc.h.HistoryValuesOnCompressedPage
+	}
+	if *p == nil {
+		*p = make(historyPagers, len(hc.files))
+	}
+	g := (*p)[i]
+	if g == nil {
+		g = seg.NewPagedReader(hc.statelessGetter(i), pageSize, true)
+		(*p)[i] = g
+	}
+	g.Reset(offset)
+	v, err := g.GetFromPage(historyKey(txNum, key, nil))
+	if err == nil && v == nil {
+		return nil, fmt.Errorf("page of %s holds no value for key %x at txNum %d", g.FileName(), key, txNum)
+	}
+	return v, err
+}
+
 // HistoryChangesIterFiles - producing state-patch for Unwind - return state-patch for Unwind: "what keys changed between `[from, to)` and what was their value BEFORE txNum"
 // Performs multi-way Union of frozen files. Later files override earlier files for same key
 type HistoryChangesIterFiles struct {
@@ -430,7 +434,8 @@ type HistoryChangesIterFiles struct {
 	err        error
 	limit      int
 
-	seq multiencseq.SequenceReader // re-usable instance, to reduce allocations
+	seq    multiencseq.SequenceReader // re-usable instance, to reduce allocations
+	pagers historyPagers
 }
 
 func (hi *HistoryChangesIterFiles) Close() {
@@ -477,30 +482,9 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			return fmt.Errorf(".vi of %s holds no value for key %x at txNum %d, which %s indexes",
 				historyItem.src.decompressor.FileName(), hi.nextKey, txNum, top.g.FileName())
 		}
-
-		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
-
-		if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-			compressedPageValuesCount = hi.hc.h.HistoryValuesOnCompressedPage
-		}
-
-		if compressedPageValuesCount <= 1 {
-			g := hi.hc.statelessGetter(top.histFileIdx)
-			g.Reset(offset)
-			hi.nextVal, _ = g.Next(nil)
-		} else {
-			g := seg.NewPagedReader(hi.hc.statelessGetter(top.histFileIdx), compressedPageValuesCount, true)
-			g.Reset(offset)
-			for i := 0; i < compressedPageValuesCount && g.HasNext(); i++ {
-				k, v, _, _ := g.Next2(nil)
-				histKey := historyKey(txNum, hi.nextKey, nil)
-				if bytes.Equal(histKey, k) {
-					hi.nextVal = v
-					break
-				}
-			}
-		}
-		return nil
+		var err error
+		hi.nextVal, err = hi.pagers.value(hi.hc, top.histFileIdx, offset, txNum, hi.nextKey)
+		return err
 	}
 	hi.nextKey = nil
 	return nil

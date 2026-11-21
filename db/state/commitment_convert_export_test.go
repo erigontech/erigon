@@ -54,9 +54,36 @@ func SetConvertPhase5HookForTest(fn func() error) {
 	convertPhase5Hook = fn
 }
 
+func SetConvertHistoryAfterFileHookForTest(fn func(idx int) error) {
+	convertHistoryAfterFileHook = fn
+}
+
 func SetCommitmentV3BatchBytesForTest(n int) int {
 	old := commitmentV3BatchBytes
 	commitmentV3BatchBytes = n
+	return old
+}
+
+func SetCommitmentV3FoldRangesForTest(n uint64) uint64 {
+	old := commitmentV3FoldRanges
+	commitmentV3FoldRanges = n
+	return old
+}
+
+func SetCommitmentV3FoldChunkForTest(n int) int {
+	old := commitmentV3FoldChunk
+	commitmentV3FoldChunk = n
+	return old
+}
+
+func SetFoldCommitmentV3RangeHookForTest(h func(seq int)) func() {
+	foldCommitmentV3RangeHook = h
+	return func() { foldCommitmentV3RangeHook = nil }
+}
+
+func SetLegacyShapeMinVersionsForTest(n uint64) uint64 {
+	old := legacyShapeMinVersions
+	legacyShapeMinVersions = n
 	return old
 }
 

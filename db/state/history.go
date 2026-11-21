@@ -1282,6 +1282,9 @@ func (ht *HistoryRoTx) historyValueAt(key []byte, seek iiSeekResult, txNum uint6
 	if err != nil {
 		return nil, false, err
 	}
+	if v == nil {
+		return nil, false, fmt.Errorf("page of %s holds no value for key %x at txNum %d", g.FileName(), key, histTxNum)
+	}
 	if traceGetAsOf == ht.h.FilenameBase {
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}

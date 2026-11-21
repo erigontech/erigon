@@ -71,6 +71,7 @@ var (
 	branchPrefixFlag string
 	txnumFlag        uint64
 	verifyAsOf       []uint
+	verifyHistory    bool
 )
 
 // visualize command flags
@@ -139,6 +140,7 @@ func init() {
 	withChain(cmdCommitmentVerify)
 	withDataDir(cmdCommitmentVerify)
 	cmdCommitmentVerify.Flags().UintSliceVar(&verifyAsOf, "asof", nil, "also fold the records as of these txNums")
+	cmdCommitmentVerify.Flags().BoolVar(&verifyHistory, "history", false, "also fold the records just after the first state of every commitment history file")
 	commitmentCmd.AddCommand(cmdCommitmentVerify)
 
 	// commitment visualize
@@ -290,31 +292,11 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 	defer db.Close()
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	agg.DisableAllDependencies()
-	points := []uint64{math.MaxUint64}
-	for _, txNum := range verifyAsOf {
-		points = append(points, uint64(txNum))
+	asOf := make([]uint64, len(verifyAsOf))
+	for i, txNum := range verifyAsOf {
+		asOf[i] = uint64(txNum)
 	}
-	historyDisabled := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Hist.HistoryDisabled
-	for _, asOf := range points {
-		label := "latest"
-		if asOf != math.MaxUint64 {
-			label = strconv.FormatUint(asOf, 10)
-			if historyDisabled {
-				return fmt.Errorf("as of %s: commitment history is disabled", label)
-			}
-		}
-		started := time.Now()
-		c, err := dbstate.FoldCommitmentV3(ctx, agg, asOf)
-		if err != nil {
-			return fmt.Errorf("as of %s: %w", label, err)
-		}
-		if asOf != math.MaxUint64 && c.TxNum >= asOf {
-			return fmt.Errorf("as of %s: no commitment history covers txNum %d", label, asOf)
-		}
-		logger.Info("[commitment verify] ok", "asOf", label, "block", c.BlockNum, "txNum", c.TxNum, "root", hex.EncodeToString(c.Root),
-			"records", common.PrettyCounter(c.Records), "took", time.Since(started).Round(time.Millisecond))
-	}
-	return nil
+	return dbstate.VerifyCommitmentV3(ctx, agg, asOf, verifyHistory, logger)
 }
 
 var cmdCommitmentRebuild = &cobra.Command{

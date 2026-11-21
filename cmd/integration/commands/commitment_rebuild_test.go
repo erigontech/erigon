@@ -223,8 +223,9 @@ func TestCommitmentRebuildWithoutHistoryAfterPrunedHistoryRefusal(t *testing.T) 
 	commitmentHistory, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
 	require.NoError(t, err)
 	require.Empty(t, commitmentHistory, "--no-history rebuilds the domain only")
-	c, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
+	checks, err := state.FoldCommitmentV3(t.Context(), agg, []uint64{math.MaxUint64}, nil)
 	require.NoError(t, err)
+	c := checks[0]
 	require.Equal(t, uint64(47), c.TxNum)
 	require.Equal(t, roots[c.TxNum], common.Hash(c.Root))
 }

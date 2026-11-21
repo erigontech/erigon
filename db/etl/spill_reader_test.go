@@ -147,3 +147,37 @@ func TestSpillReaderDrainAtEOF(t *testing.T) {
 		})
 	}
 }
+
+func TestSpillReaderPrefetchAhead(t *testing.T) {
+	for _, sizes := range [][]int{
+		{13},
+		{(8 << 20) + 13, 13, 13},
+		{(12 << 20) + 13},
+		{(4 << 20) + 13, (4 << 20) + 13, (4 << 20) + 13},
+	} {
+		t.Run(fmt.Sprint(sizes), func(t *testing.T) {
+			buffer := NewSortableBuffer(32 << 20)
+			defer buffer.Reset()
+			for i, size := range sizes {
+				buffer.Put([]byte{byte(i)}, bytes.Repeat([]byte{42}, size))
+			}
+			provider, err := FlushToDisk(t.Name(), buffer, t.TempDir(), log.LvlDebug)
+			require.NoError(t, err)
+			defer provider.Dispose()
+			p := provider.(*fileDataProvider)
+			for range sizes {
+				pos := 0
+				if p.mmapReader != nil {
+					pos = p.mmapReader.pos
+				}
+				_, _, err = p.Next()
+				require.NoError(t, err)
+				require.GreaterOrEqual(t, p.prefetched, pos)
+			}
+			prefetched := p.prefetched
+			_, _, err = p.Next()
+			require.ErrorIs(t, err, io.EOF)
+			require.Equal(t, prefetched, p.prefetched)
+		})
+	}
+}

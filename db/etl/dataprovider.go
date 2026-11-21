@@ -45,7 +45,13 @@ type fileDataProvider struct {
 	mmapData   mmap.Ro          // mmap'd file content
 	wg         *errgroup.Group
 	discarded  int
+	prefetched int
 }
+
+const (
+	spillPrefetch     = 2 << 20
+	spillPrefetchCall = 128 << 10
+)
 
 // mmapBytesReader tracks position for reading from mmap'd data
 type mmapBytesReader struct {
@@ -133,6 +139,14 @@ func (p *fileDataProvider) Next() ([]byte, []byte, error) {
 		end := (p.mmapReader.pos - (4 << 20)) / os.Getpagesize() * os.Getpagesize()
 		_ = discardSpillRange(p.file, p.mmapData, p.discarded, end)
 		p.discarded = end
+	}
+	if pos := p.mmapReader.pos; pos < len(p.mmapData) && p.prefetched < len(p.mmapData) && pos+spillPrefetch/2 >= p.prefetched {
+		start := max(p.prefetched, pos/os.Getpagesize()*os.Getpagesize())
+		end := min(start+spillPrefetch, len(p.mmapData))
+		for off := start; off < end; off += spillPrefetchCall {
+			_ = mmap.MadviseWillNeed(p.mmapData[off:min(off+spillPrefetchCall, end)])
+		}
+		p.prefetched = end
 	}
 	key, err := readKeyField(p.mmapReader)
 	if err != nil {

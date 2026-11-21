@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -53,19 +54,12 @@ const commitmentV3Batch = 1024
 var commitmentV3BatchBytes = 1 << 20
 
 type kvBatch struct {
-	seq   uint64
 	buf   []byte
 	pairs [][2][]byte
 }
 
 func (b *kvBatch) reset() {
 	b.buf, b.pairs = b.buf[:0], b.pairs[:0]
-}
-
-func (b *kvBatch) own(word []byte) []byte {
-	start := len(b.buf)
-	b.buf = append(b.buf, word...)
-	return b.buf[start:]
 }
 
 const commitmentV3Collectors = 4
@@ -705,7 +699,6 @@ func (v *legacyFileValues) Storage(plainKey []byte) ([]byte, error) {
 }
 
 type hashedBatch struct {
-	seq     uint64
 	buf     []byte
 	records []hashedRecord
 	expects []hashedExpect
@@ -730,177 +723,297 @@ func (b *hashedBatch) expect(key, hash []byte) error {
 	return nil
 }
 
-var foldCommitmentV3BatchHook func(seq uint64)
-
 var hashedBatchPool = sync.Pool{New: func() any { return &hashedBatch{} }}
 
-func verifyCommitmentV3Files(ctx context.Context, a *Aggregator, logger log.Logger) error {
+func newHashedBatch() *hashedBatch {
+	b := hashedBatchPool.Get().(*hashedBatch)
+	b.buf, b.records, b.expects = b.buf[:0], b.records[:0], b.expects[:0]
+	return b
+}
+
+const commitmentV3VerifyGroup = 4
+
+func VerifyCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, history bool, logger log.Logger) error {
 	started := time.Now()
-	c, err := FoldCommitmentV3(ctx, a, math.MaxUint64)
-	if err != nil {
-		return err
+	if (history || len(asOf) > 0) && statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Hist.HistoryDisabled {
+		return errors.New("commitment history is disabled")
 	}
-	logger.Info("[commitment_convert] v3 records verified", "root", fmt.Sprintf("%x", c.Root), "block", c.BlockNum, "txNum", c.TxNum,
-		"records", common.PrettyCounter(c.Records), "took", time.Since(started).Round(time.Millisecond))
+	points := append([]uint64{math.MaxUint64}, asOf...)
+	var historySampled int
+	if history {
+		samples, err := commitmentV3HistorySamples(a)
+		if err != nil {
+			return err
+		}
+		points, historySampled = append(points, samples...), len(samples)
+	}
+	defer a.MadvNormal().DisableReadAhead()
+	groups := (len(points) + commitmentV3VerifyGroup - 1) / commitmentV3VerifyGroup
+	logged := time.Now()
+	for gi := range groups {
+		group := points[gi*commitmentV3VerifyGroup : min((gi+1)*commitmentV3VerifyGroup, len(points))]
+		groupStarted := time.Now()
+		checks, err := FoldCommitmentV3(ctx, a, group, func(done, total int) {
+			if time.Since(logged) < 30*time.Second {
+				return
+			}
+			logged = time.Now()
+			logger.Info("[commitment verify] progress", "group", fmt.Sprintf("%d/%d", gi+1, groups), "ranges", fmt.Sprintf("%d/%d", done, total),
+				"progress", fmt.Sprintf("%.1f%%", 100*(float64(gi)+float64(done)/float64(total))/float64(groups)), "elapsed", time.Since(started).Round(time.Second))
+		})
+		if err != nil {
+			return err
+		}
+		for i, c := range checks {
+			if group[i] != math.MaxUint64 && c.TxNum >= group[i] {
+				return fmt.Errorf("%s: no commitment history covers txNum %d", asOfLabel(group[i]), group[i])
+			}
+			logger.Info("[commitment verify] ok", "asOf", asOfLabel(group[i]), "block", c.BlockNum, "txNum", c.TxNum, "root", fmt.Sprintf("%x", c.Root),
+				"records", common.PrettyCounter(c.Records), "took", time.Since(groupStarted).Round(time.Second), "done", fmt.Sprintf("%d/%d", gi*commitmentV3VerifyGroup+i+1, len(points)))
+		}
+	}
+	logger.Info("[commitment verify] done: records fold to the roots of their own state records, not checked against block headers",
+		"points", len(points), "historyFilesSampled", historySampled, "took", time.Since(started).Round(time.Millisecond))
 	return nil
 }
 
 type CommitmentV3Check struct {
-	Root                              []byte
-	BlockNum, TxNum, Records, Orphans uint64
+	Root                     []byte
+	BlockNum, TxNum, Records uint64
 }
 
-func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOfTxNum uint64) (CommitmentV3Check, error) {
+var (
+	commitmentV3FoldRanges uint64 = 8192
+	commitmentV3FoldChunk         = 4096
+)
+
+const commitmentV3RangeChunks = 64
+
+var foldCommitmentV3RangeHook func(seq int)
+
+type foldChunk struct {
+	batch *hashedBatch
+	state []byte
+}
+
+func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, progress func(done, total int)) ([]CommitmentV3Check, error) {
 	at := a.BeginFilesRo()
-	defer at.Close()
-	dt := at.d[kv.CommitmentDomain]
-	latest, err := dt.DebugRangeLatestFromFiles(nil, nil, -1)
+	ranges := commitmentV3KeyRanges(at.d[kv.CommitmentDomain], commitmentV3FoldRanges)
+	at.Close()
+	workers := max(1, runtime.GOMAXPROCS(0))
+	type task struct {
+		seq    int
+		r      [2][]byte
+		chunks []chan foldChunk
+	}
+	in := make(chan task)
+	orders := make([]chan chan foldChunk, len(asOf))
+	for j := range orders {
+		orders[j] = make(chan chan foldChunk, workers*2)
+	}
+	states := make([][]byte, len(asOf))
+	folds := make([]CommitmentV3Check, len(asOf))
+	orphans := make([]uint64, len(asOf))
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		defer func() {
+			close(in)
+			for _, o := range orders {
+				close(o)
+			}
+		}()
+		for seq, r := range ranges {
+			t := task{seq: seq, r: r, chunks: make([]chan foldChunk, len(asOf))}
+			for j := range asOf {
+				t.chunks[j] = make(chan foldChunk, commitmentV3RangeChunks)
+				select {
+				case orders[j] <- t.chunks[j]:
+				case <-gctx.Done():
+					return gctx.Err()
+				}
+			}
+			select {
+			case in <- t:
+			case <-gctx.Done():
+				return gctx.Err()
+			}
+		}
+		return nil
+	})
+	for range workers {
+		g.Go(func() error {
+			at := a.BeginFilesRo()
+			defer at.Close()
+			dt := at.d[kv.CommitmentDomain]
+			hasher := v3.NewRecordHasher()
+			for t := range in {
+				if foldCommitmentV3RangeHook != nil {
+					foldCommitmentV3RangeHook(t.seq)
+				}
+				for j, txNum := range asOf {
+					err := foldCommitmentV3Range(gctx, dt, txNum, t.r, hasher, func(c foldChunk) error {
+						select {
+						case t.chunks[j] <- c:
+							return nil
+						case <-gctx.Done():
+							return gctx.Err()
+						}
+					})
+					close(t.chunks[j])
+					if err != nil {
+						return fmt.Errorf("%s: %w", asOfLabel(txNum), err)
+					}
+				}
+			}
+			return nil
+		})
+	}
+	for j, txNum := range asOf {
+		g.Go(func() error {
+			m := v3.NewRecordMatcher(a.dirs.Tmp)
+			defer m.Close()
+			done := 0
+			for chunks := range orders[j] {
+				for {
+					var c foldChunk
+					var ok bool
+					select {
+					case c, ok = <-chunks:
+					case <-gctx.Done():
+						return gctx.Err()
+					}
+					if !ok {
+						break
+					}
+					if c.state != nil {
+						states[j] = c.state
+					}
+					b := c.batch
+					for _, r := range b.records {
+						for _, e := range b.expects[r.e0:r.e1] {
+							if err := m.Expect(b.buf[e.k0:e.k1], e.hash[:]); err != nil {
+								return fmt.Errorf("%s: %w", asOfLabel(txNum), err)
+							}
+						}
+						if err := m.Record(b.buf[r.k0:r.k1], r.hash); err != nil {
+							return fmt.Errorf("%s: %w", asOfLabel(txNum), err)
+						}
+					}
+					hashedBatchPool.Put(b)
+				}
+				done++
+				if j == 0 && progress != nil {
+					progress(done, len(ranges))
+				}
+			}
+			root, records, n, err := m.Finish()
+			if err != nil {
+				return fmt.Errorf("%s: %w", asOfLabel(txNum), err)
+			}
+			folds[j], orphans[j] = CommitmentV3Check{Root: root[:], Records: records}, n
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	for j, txNum := range asOf {
+		c := &folds[j]
+		var stateRoot []byte
+		var err error
+		if c.BlockNum, c.TxNum, stateRoot, err = commitment.DecodeCommitmentV3State(states[j]); err != nil {
+			return nil, fmt.Errorf("%s: state %x: %w", asOfLabel(txNum), states[j], err)
+		}
+		if !bytes.Equal(c.Root, stateRoot) {
+			return nil, fmt.Errorf("%s: records fold to root %x, state at block %d records %x", asOfLabel(txNum), c.Root, c.BlockNum, stateRoot)
+		}
+		if orphans[j] != 0 {
+			return nil, fmt.Errorf("%s: %d orphan records (block %d, %d records)", asOfLabel(txNum), orphans[j], c.BlockNum, c.Records)
+		}
+	}
+	return folds, nil
+}
+
+func asOfLabel(txNum uint64) string {
+	if txNum == math.MaxUint64 {
+		return "as of latest"
+	}
+	return fmt.Sprintf("as of txNum %d", txNum)
+}
+
+func commitmentV3KeyRanges(dt *DomainRoTx, n uint64) [][2][]byte {
+	var bt *btindex.BtIndex
+	var dec *seg.Decompressor
+	for _, f := range dt.files {
+		if b := f.src.bindex; b != nil && (bt == nil || b.KeyCount() > bt.KeyCount()) {
+			bt, dec = b, f.src.decompressor
+		}
+	}
+	var ranges [][2][]byte
+	var from []byte
+	if bt != nil && bt.KeyCount() > n {
+		r := dt.dataReader(dec)
+		for i := range n - 1 {
+			c := bt.OrdinalLookup(r, (i+1)*bt.KeyCount()/n)
+			if c == nil {
+				continue
+			}
+			to := bytes.Clone(c.Key())
+			c.Close()
+			if bytes.Compare(to, from) <= 0 {
+				continue
+			}
+			ranges = append(ranges, [2][]byte{from, to})
+			from = to
+		}
+	}
+	return append(ranges, [2][]byte{from, nil})
+}
+
+func foldCommitmentV3Range(ctx context.Context, dt *DomainRoTx, asOf uint64, r [2][]byte, hasher *v3.RecordHasher, send func(foldChunk) error) error {
+	latest, err := dt.DebugRangeLatestFromFiles(r[0], r[1], -1)
 	if err != nil {
-		return CommitmentV3Check{}, err
+		return err
 	}
 	var it stream.KV = latest
-	if asOfTxNum != math.MaxUint64 {
-		hist := &HistoryRangeAsOfFiles{hc: dt.ht, startTxNum: asOfTxNum, limit: kv.Unlim, orderAscend: order.Asc, ctx: ctx, logger: dt.ht.h.logger}
+	if asOf != math.MaxUint64 {
+		hist := &HistoryRangeAsOfFiles{hc: dt.ht, from: r[0], toPrefix: r[1], startTxNum: asOf, limit: kv.Unlim, orderAscend: order.Asc, ctx: ctx, logger: dt.ht.h.logger}
 		if err = hist.init(dt.ht.iit.files); err != nil {
 			hist.Close()
 			latest.Close()
-			return CommitmentV3Check{}, err
+			return err
 		}
 		it = stream.UnionKV(hist, latest, -1)
 	}
 	defer it.Close()
-	c, state, err := foldCommitmentV3Records(ctx, a.dirs.Tmp, it)
-	if err != nil {
-		return CommitmentV3Check{}, err
-	}
-	var stateRoot []byte
-	c.BlockNum, c.TxNum, stateRoot, err = commitment.DecodeCommitmentV3State(state)
-	if err != nil {
-		return CommitmentV3Check{}, fmt.Errorf("state %x: %w", state, err)
-	}
-	if !bytes.Equal(c.Root, stateRoot) {
-		return CommitmentV3Check{}, fmt.Errorf("records fold to root %x, state at block %d records %x", c.Root, c.BlockNum, stateRoot)
-	}
-	if c.Orphans != 0 {
-		return CommitmentV3Check{}, fmt.Errorf("%d orphan records (block %d, %d records)", c.Orphans, c.BlockNum, c.Records)
-	}
-	return c, nil
-}
-
-func foldCommitmentV3Records(ctx context.Context, tmpdir string, it stream.KV) (CommitmentV3Check, []byte, error) {
-	workers := max(1, runtime.GOMAXPROCS(0))
-	in := make(chan *kvBatch, workers*2)
-	out := make(chan *hashedBatch, workers*2)
-	// Bounds the reorder backlog: a slot is taken at dispatch, in seq order, and freed when the batch is folded.
-	inFlight := make(chan struct{}, workers*4)
 	var state []byte
-	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error {
-		defer close(in)
-		var seq uint64
-		batch := kvBatchPool.Get().(*kvBatch)
-		batch.reset()
-		send := func() error {
-			batch.seq = seq
-			seq++
-			select {
-			case inFlight <- struct{}{}:
-			case <-gctx.Done():
-				return gctx.Err()
-			}
-			select {
-			case in <- batch:
-				batch = kvBatchPool.Get().(*kvBatch)
-				batch.reset()
-				return nil
-			case <-gctx.Done():
-				return gctx.Err()
-			}
+	res := newHashedBatch()
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
 		}
-		for it.HasNext() {
-			k, v, nextErr := it.Next()
-			if nextErr != nil {
-				return nextErr
-			}
-			if len(v) == 0 {
-				continue
-			}
-			if bytes.Equal(k, commitment.KeyCommitmentV3State) {
-				state = bytes.Clone(v)
-				continue
-			}
-			batch.pairs = append(batch.pairs, [2][]byte{batch.own(k), batch.own(v)})
-			if len(batch.pairs) == commitmentV3Batch {
-				if sendErr := send(); sendErr != nil {
-					return sendErr
-				}
-			}
+		if len(v) == 0 {
+			continue
 		}
-		if len(batch.pairs) == 0 {
-			return nil
+		if bytes.Equal(k, commitment.KeyCommitmentV3State) {
+			state = bytes.Clone(v)
+			continue
 		}
-		return send()
-	})
-	goWorkers(g, workers, func() error {
-		hasher := v3.NewRecordHasher()
-		for batch := range in {
-			if foldCommitmentV3BatchHook != nil {
-				foldCommitmentV3BatchHook(batch.seq)
-			}
-			res := hashedBatchPool.Get().(*hashedBatch)
-			res.seq, res.buf, res.records, res.expects = batch.seq, res.buf[:0], res.records[:0], res.expects[:0]
-			for _, p := range batch.pairs {
-				k0 := len(res.buf)
-				res.buf = append(res.buf, p[0]...)
-				r := hashedRecord{k0: k0, k1: len(res.buf), e0: len(res.expects)}
-				hash, hashErr := hasher.Hash(p[0], p[1], res.expect)
-				if hashErr != nil {
-					return hashErr
-				}
-				r.hash, r.e1 = hash, len(res.expects)
-				res.records = append(res.records, r)
-			}
-			kvBatchPool.Put(batch)
-			select {
-			case out <- res:
-			case <-gctx.Done():
-				return gctx.Err()
-			}
+		k0 := len(res.buf)
+		res.buf = append(res.buf, k...)
+		rec := hashedRecord{k0: k0, k1: len(res.buf), e0: len(res.expects)}
+		if rec.hash, err = hasher.Hash(k, v, res.expect); err != nil {
+			return err
 		}
-		return nil
-	}, func() { close(out) })
-	matcher := v3.NewRecordMatcher(tmpdir)
-	defer matcher.Close()
-	g.Go(func() error {
-		waiting := map[uint64]*hashedBatch{}
-		var next uint64
-		for res := range out {
-			waiting[res.seq] = res
-			for b, ok := waiting[next]; ok; b, ok = waiting[next] {
-				delete(waiting, next)
-				next++
-				for _, r := range b.records {
-					for _, e := range b.expects[r.e0:r.e1] {
-						if matchErr := matcher.Expect(b.buf[e.k0:e.k1], e.hash[:]); matchErr != nil {
-							return matchErr
-						}
-					}
-					if matchErr := matcher.Record(b.buf[r.k0:r.k1], r.hash); matchErr != nil {
-						return matchErr
-					}
-				}
-				hashedBatchPool.Put(b)
-				<-inFlight
+		rec.e1 = len(res.expects)
+		res.records = append(res.records, rec)
+		if len(res.records) >= commitmentV3FoldChunk {
+			if err := send(foldChunk{batch: res}); err != nil {
+				return err
 			}
+			res = newHashedBatch()
 		}
-		return nil
-	})
-	if err := g.Wait(); err != nil {
-		return CommitmentV3Check{}, nil, err
 	}
-	root, records, orphans, err := matcher.Finish()
-	if err != nil {
-		return CommitmentV3Check{}, nil, err
-	}
-	return CommitmentV3Check{Root: root[:], Records: records, Orphans: orphans}, state, nil
+	return send(foldChunk{batch: res, state: state})
 }
