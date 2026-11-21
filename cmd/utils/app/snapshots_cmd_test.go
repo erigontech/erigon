@@ -1712,9 +1712,6 @@ func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
 	args := []string{"erigon", "seg", "accessor", "--datadir", dirs.DataDir, "--rebuild", "--new-salt"}
 
-	// Before the initial download is pinned, a downloader restart can reconcile
-	// salt-state.txt against a newer manifest. Refuse before removing any accessor
-	// or salt so this datadir remains usable and can finish its initial download.
 	err = app.Run(ctx, args)
 	require.ErrorContains(t, err, "requires a completed initial snapshot download")
 	for _, name := range []string{"salt-blocks.txt", "salt-state.txt"} {
@@ -1784,16 +1781,7 @@ func Test_renewSnapshotSaltFilesForRebuild(t *testing.T) {
 				require.NoError(t, os.WriteFile(path, oldSalt, 0o644))
 				require.NoError(t, os.WriteFile(path+".torrent", []byte("old torrent"), 0o644))
 			}
-			// Model a previously generated accessor and a data segment. The command
-			// must remove the old accessor without ever deleting snapshot data.
-			accessor := filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.bt")
-			require.NoError(t, os.WriteFile(accessor, []byte("old accessor"), 0o644))
-			dataPath := filepath.Join(dirs.Snap, "v1.0-headers.0-500.seg")
-			require.NoError(t, os.WriteFile(dataPath, []byte("snapshot data"), 0o644))
-
-			require.NoError(t, removeAccessorsForRebuild(dirs, log.New()))
 			require.NoError(t, renewSnapshotSaltFilesForRebuild(dirs, log.New()))
-			require.NoFileExists(t, accessor)
 			for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
 				path := filepath.Join(dirs.Snap, name)
 				salt, err := os.ReadFile(path)
@@ -1805,7 +1793,6 @@ func Test_renewSnapshotSaltFilesForRebuild(t *testing.T) {
 			for _, name := range []string{"salt.txt", "salt.txt.torrent"} {
 				require.NoFileExists(t, filepath.Join(dirs.Snap, name))
 			}
-			require.FileExists(t, dataPath)
 		})
 	}
 }

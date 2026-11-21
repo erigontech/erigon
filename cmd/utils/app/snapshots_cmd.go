@@ -666,10 +666,8 @@ var (
 	}
 	SnapshotNewSaltFlag = cli.BoolFlag{
 		Name: "new-salt",
-		Usage: "Regenerate snapshot salts while rebuilding all accessors. Requires --rebuild and a " +
-			"completed initial snapshot download. `seg reset --keep-local-snapshots` clears chaindata " +
-			"and preverified.toml. Restart Erigon to restore network salts and wait for snapshot " +
-			"reconciliation to recreate preverified.toml, then stop Erigon before another offline rebuild.",
+		Usage: "Regenerate block and state salts. Requires --rebuild and a completed initial snapshot download (preverified.toml). " +
+			"After seg reset --keep-local-snapshots, the next start restores the network salts.",
 	}
 	SnapshotFileFlag = cli.StringFlag{
 		Name:  "file",
@@ -2998,10 +2996,7 @@ func removeAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger) error {
 	return nil
 }
 
-// requirePinnedSnapshotSet prevents salt rotation while the initial snapshot download can still
-// reconcile local files against a newer remote manifest. The downloader writes preverified.toml
-// only after the full initial snapshot set is complete; before then it may replace salt-state.txt
-// while retaining accessors that were just rebuilt with a different salt.
+// The downloader may replace salt-state.txt until preverified.toml exists, which would orphan accessors built with a new salt.
 func requirePinnedSnapshotSet(dirs datadir.Dirs) error {
 	preverifiedPath := dirs.PreverifiedPath()
 	exists, err := dir2.FileExist(preverifiedPath)
@@ -3009,7 +3004,7 @@ func requirePinnedSnapshotSet(dirs datadir.Dirs) error {
 		return fmt.Errorf("check initial snapshot download completion: %w", err)
 	}
 	if !exists {
-		return fmt.Errorf("--new-salt requires a completed initial snapshot download: %s is missing; wait for the initial snapshot download to finish before rotating salts", preverifiedPath)
+		return fmt.Errorf("--new-salt requires a completed initial snapshot download: %s is missing", preverifiedPath)
 	}
 	return nil
 }
