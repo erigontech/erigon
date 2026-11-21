@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"sync"
@@ -974,50 +975,58 @@ func TestComposerRequeuesRolledOutTransactions(t *testing.T) {
 }
 
 // TestComposerDisposesOfPartialTransactions: once derivation passes a batch
-// L1 kept part of, the triggers L1 has are spent and let go; the rest return
-// to the pool, and only the one where L1 stopped is charged.
+// L1 kept part of, the outbound transactions in its rebuilt block and the
+// triggers L1 has are spent and let go; the rest return to the pool, and
+// only the one where L1 stopped is charged.
 func TestComposerDisposesOfPartialTransactions(t *testing.T) {
 	for _, c := range []struct {
 		name     string
-		attempts uint32 // of the first trigger
+		attempts uint32 // of the first unspent outbound transaction
 		lookup   error
-		// spentFirst has the first trigger run on L1.
-		spentFirst bool
-		allSpent   bool
+		allSpent bool
 		// queued are the transactions back in the pool, with their attempts.
 		queued map[common.Hash]uint32
 		kept   bool // the batch waits for the next call
 	}{
-		{name: "the rest requeued, the first unspent charged", queued: map[common.Hash]uint32{{2}: 1, {4}: 0, {5}: 0}},
+		{name: "the rest requeued, the first unspent charged", queued: map[common.Hash]uint32{{2}: 1, {4}: 0}},
 		{name: "the charge evicts the chain", attempts: 2, queued: map[common.Hash]uint32{{4}: 0}},
-		{name: "none charged behind a spent trigger", spentFirst: true, queued: map[common.Hash]uint32{{4}: 0, {5}: 0}},
-		{name: "a lookup failing", lookup: errors.New("node down"), queued: map[common.Hash]uint32{{5}: 0}, kept: true},
-		{name: "every trigger spent", allSpent: true, queued: map[common.Hash]uint32{{5}: 0}},
+		{name: "a lookup failing", lookup: errors.New("node down"), queued: map[common.Hash]uint32{}, kept: true},
+		{name: "every transaction spent", allSpent: true, queued: map[common.Hash]uint32{}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			chain := newTestChain(t, 8, 8)
 			node := &triggers{landed: map[common.Hash]bool{}, failed: c.lookup}
-			h := newHarness(t, newTestChain(t, 8), 8, node)
+			h := newHarness(t, chain, 8, node)
 			pool := NewHeldPool()
 			h.c.Recover(pool, nil)
-			cut := held(addr(0xb), 0, Inbound, 2)
+			// a's outbound transaction ran: it is in the block derivation rebuilt.
+			ran := held(addr(0xa), 0, Outbound, 1)
+			ran.Hash = chain.blocks[8].Transactions()[0].Hash()
+			cut := held(addr(0xb), 0, Outbound, 2)
 			cut.Attempts = c.attempts
-			behind := held(addr(0xb), 1, Inbound, 5)
+			behind := held(addr(0xb), 1, Outbound, 5)
 			landed, dropped := held(addr(0xc), 0, Inbound, 3), held(addr(0xd), 0, Inbound, 4)
 			node.landed[landed.Hash] = true
-			if c.spentFirst {
-				node.landed[cut.Hash] = true
-			}
 			if c.allSpent {
+				cut, behind = held(addr(0xb), 0, Inbound, 2), nil
 				node.landed[cut.Hash], node.landed[dropped.Hash] = true, true
 			}
-			for _, tx := range []*Held{cut, behind, landed, dropped} {
-				require.NoError(t, pool.Push(tx, 0))
+			for _, tx := range []*Held{ran, cut, behind, landed, dropped} {
+				if tx != nil {
+					require.NoError(t, pool.Push(tx, 0))
+				}
 			}
 			txs := pool.PopN(math.MaxInt)
-			// b's second transaction missed the batch: it waits in the pool.
-			pool.PushFront([]*Held{behind})
-			txs = slices.DeleteFunc(txs, func(tx *Held) bool { return tx == behind })
-			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: txs})
+			if behind != nil {
+				// b's second transaction missed the batch: it waits in the pool.
+				pool.PushFront([]*Held{behind})
+				txs = slices.DeleteFunc(txs, func(tx *Held) bool { return tx == behind })
+				c.queued = maps.Clone(c.queued)
+				if c.attempts < maxAttempts-1 {
+					c.queued[behind.Hash] = 0
+				}
+			}
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: txs})
 			h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
 			h.cursor.Store(8)
 
@@ -1034,6 +1043,7 @@ func TestComposerDisposesOfPartialTransactions(t *testing.T) {
 				}
 				h.c.ledger.mu.Unlock()
 				require.Contains(t, spent, landed.Hash, "kept for a reorg")
+				require.Contains(t, spent, ran.Hash, "kept for a reorg")
 				require.Equal(t, c.allSpent, slices.Contains(spent, dropped.Hash), "only what ran is kept")
 			}
 			got := map[common.Hash]uint32{}
