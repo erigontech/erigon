@@ -557,11 +557,13 @@ func GetEmbeddedWebseeds(chain string) ([]string, bool) {
 
 // Webseeds returns the webseeds of the snapshot branch the manifest comes from (SNAPS_GIT_BRANCH).
 func Webseeds(ctx context.Context, chain string) ([]string, bool) {
-	return webseedsFrom(ctx, snapshotGitBranch, chain, func(ctx context.Context, branch, chain string) ([]byte, error) {
-		ctx, cancel := context.WithTimeout(ctx, webseedsFetchTimeout)
-		defer cancel()
-		return FetchTomlFromURL(ctx, WebseedTomlGitHubURL(branch, chain))
-	})
+	return webseedsFrom(ctx, snapshotGitBranch, chain, fetchWebseeds)
+}
+
+var fetchWebseeds = func(ctx context.Context, branch, chain string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, webseedsFetchTimeout)
+	defer cancel()
+	return fetchSnapshotFile(ctx, WebseedTomlGitHubURL(branch, chain), false)
 }
 
 // webseedsFetchTimeout bounds the fetch: it runs on every startup, even when preverified.toml makes the manifest fetch unnecessary.
@@ -598,17 +600,20 @@ const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
 
 // FetchChainToml fetches a single chain's TOML file from the snapshot CDN.
 func FetchChainToml(ctx context.Context, source SnapshotSource, branch, chain string) ([]byte, error) {
-	var url string
+	url := ChainTomlGitHubURL(branch, chain)
 	if source == R2 {
 		url = ChainTomlR2URL(branch, chain)
-	} else {
-		url = ChainTomlGitHubURL(branch, chain)
 	}
+	return fetchSnapshotFile(ctx, url, source == R2)
+}
+
+// fetchSnapshotFile fetches a file of the snapshot repository, with the CDN headers for R2.
+func fetchSnapshotFile(ctx context.Context, url string, cloudflare bool) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	if source == R2 {
+	if cloudflare {
 		InsertCloudflareHeaders(req)
 	}
 	resp, err := http.DefaultClient.Do(req)
@@ -617,7 +622,7 @@ func FetchChainToml(ctx context.Context, source SnapshotSource, branch, chain st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch snapshot hashes by %q: status code %d %s", url, resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("failed to fetch %q: status code %d %s", url, resp.StatusCode, resp.Status)
 	}
 	res, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -3,6 +3,8 @@ package snapcfg
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -69,4 +71,30 @@ func TestWebseedsFollowTheManifestBranch(t *testing.T) {
 	got, ok = webseedsFrom(t.Context(), "release/3.10", networkname.Mainnet, unknownFormat)
 	require.True(t, ok)
 	require.Equal(t, EmbeddedWebseeds[networkname.Mainnet], got, "a webseed this version cannot parse falls back to the embedded list")
+}
+
+// Webseeds, which the downloader and the verify commands use, reads the branch the
+// manifest comes from.
+func TestWebseedsUseTheSnapshotBranch(t *testing.T) {
+	prevBranch, prevFetch := snapshotGitBranch, fetchWebseeds
+	t.Cleanup(func() { snapshotGitBranch, fetchWebseeds = prevBranch, prevFetch })
+	var fetchedBranch string
+	snapshotGitBranch = "release/3.10"
+	fetchWebseeds = func(_ context.Context, branch, _ string) ([]byte, error) {
+		fetchedBranch = branch
+		return []byte(`"e3-v1-pub" = "v1:https://erigon310-v1-snapshots-mainnet.erigon.network"`), nil
+	}
+	got, ok := Webseeds(t.Context(), networkname.Mainnet)
+	require.True(t, ok)
+	require.Equal(t, []string{"v1:https://erigon310-v1-snapshots-mainnet.erigon.network"}, got)
+	require.Equal(t, "release/3.10", fetchedBranch)
+}
+
+func TestFetchSnapshotFileErrorNamesTheFile(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(srv.Close)
+	url := srv.URL + "/release/3.10/webseed/mainnet.toml"
+	_, err := fetchSnapshotFile(t.Context(), url, false)
+	require.ErrorContains(t, err, url)
+	require.NotContains(t, err.Error(), "overridden")
 }
