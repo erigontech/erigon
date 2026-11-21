@@ -953,16 +953,18 @@ func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *u
 		prev = &cur
 	}
 	if base == nil || ibs.accountLifecycle(addr) {
-		// hadPrevious is base != nil: getStateObject resolves a live record only when
-		// the versioned base is non-nil (a same-tx EIP-6780 destruct is still live);
-		// a cross-tx removal reads base nil, so it is a fresh createObject. The live
-		// case journals *prev (the account's own balance, so a revert restores it); the
-		// create case never read balance, so its prev is the fresh account's zero.
+		// The lifecycle case (base != nil) journals *prev, the account's own balance,
+		// so a revert restores it; the create case never read balance, so its prev is
+		// the fresh account's zero.
 		var prevBal uint256.Int
 		if base != nil {
 			prevBal = *prev
 		}
-		ibs.createVersioned(addr, base != nil)
+		// Only an absent account is created here; a live account with an in-block
+		// lifecycle event (accountLifecycle) keeps its record and code.
+		if base == nil {
+			ibs.createVersioned(addr, false)
+		}
 		ibs.journal.balanceChange(addr, prevBal, wasCommited, ibs.versionedWrites.balanceDeleted(addr))
 		if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
 			ibs.tracingHooks.OnBalanceChange(addr, prevBal, update, reason)
