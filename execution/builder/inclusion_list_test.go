@@ -21,9 +21,12 @@ import (
 	"math"
 	"testing"
 
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
@@ -64,4 +67,85 @@ func TestBuildInclusionListWithoutTxnProviderFails(t *testing.T) {
 	got, err := b.BuildInclusionList(t.Context())
 	require.ErrorIs(t, err, txpool.ErrPoolDisabled)
 	require.Nil(t, got)
+}
+
+func signedTransfer(t *testing.T, signer *types.Signer, nonce uint64) types.Transaction {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	txn, err := types.SignTx(types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil), *signer, key)
+	require.NoError(t, err)
+	return txn
+}
+
+func TestInclusionListTxnProviderOffersInclusionListFirst(t *testing.T) {
+	t.Parallel()
+	signer := types.LatestSignerForChainID(uint256.NewInt(1))
+	a, b := signedTransfer(t, signer, 0), signedTransfer(t, signer, 0)
+	pooled := signedTransfer(t, signer, 0)
+	next := &recordingTxnProvider{txns: []types.Transaction{pooled}}
+	provider := newInclusionListTxnProvider(types.Transactions{types.CopyTxs(types.Transactions{a})[0], b}, signer, next)
+	yielded := mapset.NewSet[[32]byte]()
+
+	got, err := provider.ProvideTxns(t.Context(), txnprovider.WithAmount(3), txnprovider.WithTxnIdsFilter(yielded), txnprovider.WithAvailableRlpSpace(1000))
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{a.Hash(), b.Hash(), pooled.Hash()}, txnHashes(got))
+	sender, ok := got[0].GetSender()
+	require.True(t, ok, "senders must be recovered for the builder's filter")
+	wantSender, err := a.Sender(*signer)
+	require.NoError(t, err)
+	require.Equal(t, wantSender, sender)
+	require.True(t, yielded.Contains(a.Hash()))
+	require.True(t, yielded.Contains(b.Hash()))
+	require.Equal(t, 1, next.opts.Amount)
+	require.Equal(t, 1000-a.EncodingSize()-b.EncodingSize(), next.opts.AvailableRlpSpace)
+}
+
+func TestInclusionListTxnProviderSkipsYieldedTransactions(t *testing.T) {
+	t.Parallel()
+	signer := types.LatestSignerForChainID(uint256.NewInt(1))
+	a, b := signedTransfer(t, signer, 0), signedTransfer(t, signer, 0)
+	provider := newInclusionListTxnProvider(types.Transactions{a, b}, signer, nil)
+	yielded := mapset.NewSet[[32]byte](a.Hash())
+
+	got, err := provider.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(yielded))
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{b.Hash()}, txnHashes(got))
+
+	got, err = provider.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(yielded))
+	require.NoError(t, err)
+	require.Empty(t, got)
+}
+
+func TestInclusionListTxnProviderRespectsAmount(t *testing.T) {
+	t.Parallel()
+	signer := types.LatestSignerForChainID(uint256.NewInt(1))
+	a, b := signedTransfer(t, signer, 0), signedTransfer(t, signer, 0)
+	next := &recordingTxnProvider{txns: []types.Transaction{signedTransfer(t, signer, 0)}}
+	provider := newInclusionListTxnProvider(types.Transactions{a, b}, signer, next)
+
+	got, err := provider.ProvideTxns(t.Context(), txnprovider.WithAmount(1), txnprovider.WithTxnIdsFilter(mapset.NewSet[[32]byte]()))
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{a.Hash()}, txnHashes(got))
+	require.Zero(t, next.opts.Amount, "a full batch must not ask the pool")
+}
+
+func TestInclusionListTxnProviderDropsTransactionsWithoutSender(t *testing.T) {
+	t.Parallel()
+	signer := types.LatestSignerForChainID(uint256.NewInt(1))
+	unsigned := types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil)
+	signed := signedTransfer(t, signer, 0)
+	provider := newInclusionListTxnProvider(types.Transactions{unsigned, signed}, signer, nil)
+
+	got, err := provider.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(mapset.NewSet[[32]byte]()))
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{signed.Hash()}, txnHashes(got))
+}
+
+func txnHashes(txns []types.Transaction) []common.Hash {
+	hashes := make([]common.Hash, len(txns))
+	for i, txn := range txns {
+		hashes[i] = txn.Hash()
+	}
+	return hashes
 }

@@ -33,8 +33,9 @@ func TestParametersCopyKeepsNothingShared(t *testing.T) {
 	require.Nil(t, (*Parameters)(nil).Copy())
 
 	// An empty slice is not the same request as an absent one, so the distinction has to survive.
-	empty := (&Parameters{Withdrawals: []*types.Withdrawal{}, ExtraData: []byte{}}).Copy()
+	empty := (&Parameters{Withdrawals: []*types.Withdrawal{}, InclusionList: types.Transactions{}, ExtraData: []byte{}}).Copy()
 	require.NotNil(t, empty.Withdrawals)
+	require.NotNil(t, empty.InclusionList)
 	require.NotNil(t, empty.ExtraData)
 
 	root := common.Hash{0x01}
@@ -45,6 +46,7 @@ func TestParametersCopyKeepsNothingShared(t *testing.T) {
 		ParentBeaconBlockRoot: &root,
 		SlotNumber:            &slot,
 		TargetGasLimit:        &gasLimit,
+		InclusionList:         types.Transactions{types.NewTransaction(6, common.Address{0x06}, nil, 21_000, nil, nil)},
 		ExtraData:             []byte{5},
 	}
 	copied := params.Copy()
@@ -53,6 +55,7 @@ func TestParametersCopyKeepsNothingShared(t *testing.T) {
 	root[0] = 10
 	slot = 20
 	gasLimit = 30
+	params.InclusionList[0] = types.NewTransaction(60, common.Address{0x06}, nil, 21_000, nil, nil)
 	params.ExtraData[0] = 50
 
 	require.Nil(t, copied.Withdrawals[0])
@@ -60,6 +63,7 @@ func TestParametersCopyKeepsNothingShared(t *testing.T) {
 	require.Equal(t, common.Hash{0x01}, *copied.ParentBeaconBlockRoot)
 	require.Equal(t, uint64(2), *copied.SlotNumber)
 	require.Equal(t, uint64(3), *copied.TargetGasLimit)
+	require.Equal(t, uint64(6), copied.InclusionList[0].GetNonce())
 	require.Equal(t, byte(5), copied.ExtraData[0])
 }
 
@@ -68,6 +72,6 @@ func TestParametersCopyCoversEveryField(t *testing.T) {
 
 	// Copy has to be revisited whenever a reference-typed field is added, and nothing else will say
 	// so: a shallow copy of a new slice or pointer compiles and silently shares it.
-	require.Equal(t, 12, reflect.TypeFor[Parameters]().NumField(),
+	require.Equal(t, 13, reflect.TypeFor[Parameters]().NumField(),
 		"Parameters gained or lost a field; check whether Copy has to copy it")
 }

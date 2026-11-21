@@ -111,9 +111,12 @@ func (cl *MockCl) StartBuilding(ctx context.Context, opts ...BlockBuildingOption
 		func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
 			var r *enginetypes.ForkChoiceUpdatedResponse
 			var err error
-			if cl.chainConfig.AmsterdamTime != nil {
+			switch {
+			case cl.chainConfig.IsBogota(uint64(payloadAttributes.Timestamp)):
+				r, err = cl.engineApiClient.ForkchoiceUpdatedV5(ctx, &forkChoiceState, &payloadAttributes, nil)
+			case cl.chainConfig.AmsterdamTime != nil:
 				r, err = cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, &payloadAttributes, nil)
-			} else {
+			default:
 				r, err = cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, &payloadAttributes)
 			}
 			if err != nil {
@@ -176,6 +179,12 @@ func (cl *MockCl) nextPayloadBuildInputs(ctx context.Context, opts ...BlockBuild
 		payloadAttributes.SlotNumber = (*hexutil.Uint64)(&slotNumber)
 		targetGasLimit := hexutil.Uint64(cl.genesisGasLimit)
 		payloadAttributes.TargetGasLimit = &targetGasLimit
+	}
+	if cl.chainConfig.IsBogota(timestamp) {
+		payloadAttributes.InclusionListTransactions = []hexutil.Bytes{}
+		if options.inclusionListTransactions != nil {
+			payloadAttributes.InclusionListTransactions = options.inclusionListTransactions
+		}
 	}
 	cl.logger.Debug("[mock-cl] building block", "timestamp", timestamp)
 	return forkChoiceState, payloadAttributes, nil
@@ -305,9 +314,12 @@ func (cl *MockCl) UpdateForkChoiceByHash(ctx context.Context, head common.Hash) 
 		func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
 			var r *enginetypes.ForkChoiceUpdatedResponse
 			var err error
-			if cl.chainConfig.AmsterdamTime != nil {
+			switch {
+			case cl.chainConfig.BogotaTime != nil:
+				r, err = cl.engineApiClient.ForkchoiceUpdatedV5(ctx, &forkChoiceState, nil, nil)
+			case cl.chainConfig.AmsterdamTime != nil:
 				r, err = cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, nil, nil)
-			} else {
+			default:
 				r, err = cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, nil)
 			}
 			if err != nil {
@@ -356,10 +368,17 @@ func WithWithdrawals(withdrawals []*types.Withdrawal) BlockBuildingOption {
 	}
 }
 
+func WithInclusionListTransactions(inclusionListTransactions []hexutil.Bytes) BlockBuildingOption {
+	return func(opts *blockBuildingOptions) {
+		opts.inclusionListTransactions = inclusionListTransactions
+	}
+}
+
 type blockBuildingOptions struct {
-	timestamp          *uint64
-	waitUntilTimestamp bool
-	withdrawals        []*types.Withdrawal
+	timestamp                 *uint64
+	waitUntilTimestamp        bool
+	withdrawals               []*types.Withdrawal
+	inclusionListTransactions []hexutil.Bytes
 }
 
 func RetryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineStatus, retryErrors []error,

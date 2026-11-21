@@ -36,6 +36,7 @@ type Parameters struct {
 	ParentBeaconBlockRoot *common.Hash        // added in Dencun (EIP-4788)
 	SlotNumber            *uint64             // added in Amsterdam (EIP-7843)
 	TargetGasLimit        *uint64             // added in Gloas (EIP-7732)
+	InclusionList         types.Transactions  // added in Bogota (EIP-7805)
 	// CustomTxnProvider overrides the block's transaction source when non-nil.
 	// nil → use the injected TxnProvider (normal mempool path)
 	CustomTxnProvider txnprovider.TxnProvider
@@ -75,6 +76,9 @@ func (p *Parameters) Copy() *Parameters {
 	if p.TargetGasLimit != nil {
 		limit := *p.TargetGasLimit
 		copied.TargetGasLimit = &limit
+	}
+	if p.InclusionList != nil {
+		copied.InclusionList = types.CopyTxs(p.InclusionList)
 	}
 	return &copied
 }
