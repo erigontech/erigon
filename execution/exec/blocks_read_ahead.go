@@ -498,7 +498,7 @@ func balHexTrieWarmups(variant commitment.TrieVariant) bool {
 		return true
 	}
 	hexWarmupsOffLog.Do(func() {
-		log.Info("[warmBAL] commitment v3: the BAL trie warmup and the commitment branch batch prefetch read hex-patricia keys, both off")
+		log.Info("[warmBAL] commitment v3: the BAL trie warmup and the commitment branch batch prefetch read hex-patricia keys, both off; the v3 trie paths get their own batch prefetch")
 	})
 	return false
 }
@@ -527,6 +527,11 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		if hexWarmups {
 			group.Go(func() error {
 				prefetchBALCommitment(ctx, db, trieKeys())
+				return nil
+			})
+		} else {
+			group.Go(func() error {
+				prefetchBALCommitmentV3(ctx, db, trieKeys())
 				return nil
 			})
 		}

@@ -117,3 +117,17 @@ func splitDepthV3(data, hashedKey []byte, depth int) int {
 	}
 	return depth + 1 + common
 }
+
+// PathNodeKeys appends the node keys at depths 0..maxDepth on the path of a nibble hashed key: 64 nibbles of an
+// account, or 128 of a storage slot (the account's nibbles, then the slot's).
+func PathNodeKeys(dst [][]byte, hashedKey []byte, maxDepth int) [][]byte {
+	plane, path := tagAccountNode, hashedKey
+	var owner []byte
+	if len(hashedKey) == 128 {
+		plane, owner, path = tagStorageNode, packPath(hashedKey[:64], nil), hashedKey[64:]
+	}
+	for depth := 0; depth <= min(maxDepth, len(path)); depth++ {
+		dst = append(dst, nodeKey(plane, owner, path[:depth], nil))
+	}
+	return dst
+}
