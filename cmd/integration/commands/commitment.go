@@ -507,9 +507,12 @@ func commitmentFileState(acRo *dbstate.AggregatorRoTx, maxTxNum uint64) (string,
 	if v3 {
 		key = commitment.KeyCommitmentV3State
 	}
-	record, _, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, key, maxTxNum)
+	record, found, _, fileEnd, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, key, maxTxNum)
 	if err != nil {
 		return "", fmt.Errorf("failed to get the commitment state from files: %w", err)
+	}
+	if !found || fileEnd != maxTxNum+1 { // an older file's record is not this file's state
+		return "no state record", nil
 	}
 	if !v3 {
 		return commitment.HexTrieStateToShortString(record)

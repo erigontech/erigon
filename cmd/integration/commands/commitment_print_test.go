@@ -46,6 +46,9 @@ func TestCommitmentPrint(t *testing.T) {
 			got, err := commitmentFileState(acRo, 47)
 			require.NoError(t, err)
 			require.Equal(t, fmt.Sprintf("block: 47 txn: 47 rootHash: %x", roots[47]), got)
+			got, err = commitmentFileState(acRo, 63) // no file ends at 64: the lookup would find the 2-3 file
+			require.NoError(t, err)
+			require.Equal(t, "no state record", got)
 
 			prevDatadir := datadirCli
 			t.Cleanup(func() { datadirCli = prevDatadir })
