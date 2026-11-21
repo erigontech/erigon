@@ -164,10 +164,10 @@ type readPathOutcome uint8
 const (
 	_ readPathOutcome = iota // unset (zero value)
 
-	outcomeWriteSetHit // r.vw is set; typed wrapper returns its Val*
-	outcomeMapDone     // versionMap hit; the path's typed map*Val field carries the value
-	outcomeReadSetHit  // a prior read matched; typed wrapper re-fetches it via GetX
-	outcomeStorageRead // cold origin resolved into the path's typed map*Val field; wrapper records r.hdr
+	outcomeWriteSetHit   // r.vw is set; typed wrapper returns its Val*
+	outcomeMapDone       // versionMap hit; the path's typed map*Val field carries the value
+	outcomeReadSetHit    // a prior read matched; typed wrapper re-fetches it via GetX
+	outcomeStorageRead   // cold origin resolved into the path's typed map*Val field; wrapper records r.hdr
 	outcomeReturnZero    // typed wrapper returns the path-typed zero value (account absent)
 	outcomeReturnEmpty   // typed wrapper returns the path-typed empty value (account exists, field wiped): EmptyCodeHash for CodeHashPath, otherwise the zero value
 	outcomeReturnDefault // typed wrapper returns its caller-supplied defaultV

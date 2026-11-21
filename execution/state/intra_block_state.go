@@ -158,7 +158,7 @@ type IntraBlockState struct {
 	journal      *journal
 	trace        bool
 	tracingHooks *tracing.Hooks
-	recordAccess     bool // gates MarkAddressAccess — enabled in Prepare
+	recordAccess bool // gates MarkAddressAccess — enabled in Prepare
 
 	// Versioned storage used for parallel tx processing, versions
 	// are maintaned across transactions until they are reset

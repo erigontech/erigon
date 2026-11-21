@@ -259,22 +259,22 @@ func TestJournalRevert_FrameTransient(t *testing.T) {
 // without a revert test — the guard that keeps the stateObject removal verifiable by
 // fast unit tests rather than a long integration pass.
 var journalKindRevertCoverage = map[entryKind]string{
-	kindBalance:                 "TestJournalRevert_Balance",
-	kindNonce:                   "TestJournalRevert_Nonce",
-	kindStorage:                 "TestJournalRevert_Storage",
-	kindCode:                    "TestJournalRevert_Code",
-	kindRefund:                  "TestJournalRevert_Refund",
-	kindAccessListAddAccount:    "TestJournalRevert_AccessListAccount",
-	kindAccessListAddSlot:       "TestJournalRevert_AccessListSlot",
-	kindTransientStorage:        "TestJournalRevert_TransientStorage",
-	kindSelfdestruct:            "TestJournalRevert_Selfdestruct (+ selfdestruct_revert_versioned_test)",
-	kindCreateObject:            "TestNoMaterialize_CreateRevertDropsCells",
-	kindResetObject:             "TestNoMaterialize_RecreateRevertRestoresPrior",
-	kindTouch:                   "TestNoMaterialize_RevertedTouchNotPublished",
-	kindFrameApproval:           "TestJournalRevert_FrameApproval",
-	kindFrameStateGas:           "TestJournalRevert_FrameStateGas",
-	kindFrameTransient:          "TestJournalRevert_FrameTransient",
-	kindFrameStorageOwner:       "TestJournalDirtySymmetry (frame cell; dirty-symmetry covered)",
+	kindBalance:              "TestJournalRevert_Balance",
+	kindNonce:                "TestJournalRevert_Nonce",
+	kindStorage:              "TestJournalRevert_Storage",
+	kindCode:                 "TestJournalRevert_Code",
+	kindRefund:               "TestJournalRevert_Refund",
+	kindAccessListAddAccount: "TestJournalRevert_AccessListAccount",
+	kindAccessListAddSlot:    "TestJournalRevert_AccessListSlot",
+	kindTransientStorage:     "TestJournalRevert_TransientStorage",
+	kindSelfdestruct:         "TestJournalRevert_Selfdestruct (+ selfdestruct_revert_versioned_test)",
+	kindCreateObject:         "TestNoMaterialize_CreateRevertDropsCells",
+	kindResetObject:          "TestNoMaterialize_RecreateRevertRestoresPrior",
+	kindTouch:                "TestNoMaterialize_RevertedTouchNotPublished",
+	kindFrameApproval:        "TestJournalRevert_FrameApproval",
+	kindFrameStateGas:        "TestJournalRevert_FrameStateGas",
+	kindFrameTransient:       "TestJournalRevert_FrameTransient",
+	kindFrameStorageOwner:    "TestJournalDirtySymmetry (frame cell; dirty-symmetry covered)",
 }
 
 func TestJournalRevertCoverageComplete(t *testing.T) {
