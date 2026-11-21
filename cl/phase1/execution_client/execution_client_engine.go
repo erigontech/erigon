@@ -59,11 +59,12 @@ func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 // directly; remote mode uses authenticated HTTP JSON-RPC for Engine API and
 // eth_* calls.
 type ExecutionClientEngine struct {
-	engine    engineapi.EngineAPI
-	chainRW   *chainreader.ChainReaderWriterEth1 // non-nil for local mode
-	rpcClient *rpc.Client                        // non-nil for remote mode (eth_* calls)
-	txpool    txpoolproto.TxpoolClient           // non-nil for local mode
-	beaconCfg *clparams.BeaconChainConfig
+	EnableFastConfirmation bool
+	engine                 engineapi.EngineAPI
+	chainRW                *chainreader.ChainReaderWriterEth1 // non-nil for local mode
+	rpcClient              *rpc.Client                        // non-nil for remote mode (eth_* calls)
+	txpool                 txpoolproto.TxpoolClient           // non-nil for local mode
+	beaconCfg              *clparams.BeaconChainConfig
 }
 
 // NewExecutionClientEngineLocal creates an in-process client with direct chain
@@ -195,6 +196,25 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		return nil, fmt.Errorf("engine ForkchoiceUpdated failed: %w", err)
 	}
 
+	if cc.EnableFastConfirmation && attributes == nil {
+		if resp == nil || resp.PayloadStatus == nil {
+			return nil, errors.New("engine forkchoice response is missing payload status")
+		}
+		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
+			return nil, err
+		}
+		if resp.PayloadId != nil {
+			return nil, errors.New("engine forkchoice returned a payload ID without attributes")
+		}
+		switch resp.PayloadStatus.Status {
+		case engine_types.ValidStatus:
+			return []byte{}, nil
+		case engine_types.SyncingStatus:
+			return nil, ErrForkChoiceUpdateSyncing
+		default:
+			return nil, fmt.Errorf("engine forkchoice status: %s", resp.PayloadStatus.Status)
+		}
+	}
 	if resp.PayloadId == nil {
 		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
 			return nil, err

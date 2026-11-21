@@ -61,6 +61,9 @@ func (f *ForkChoiceStore) onTickPerSlot(timeMs uint64) {
 	f.mu.Lock()
 	defer f.drainQueuedWork()
 	defer f.mu.Unlock()
+	if f.fastConfirmation != nil {
+		f.applyPendingVotes(currentSlot)
+	}
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 	f.proposerBoostRoot.Store(common.Hash{})

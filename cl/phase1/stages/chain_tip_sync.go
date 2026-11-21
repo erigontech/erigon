@@ -143,10 +143,9 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 
 // startFetchingBlocksMissedByGossipAfterSomeTime starts fetching blocks that might have been missed by gossip after a delay.
 // It periodically fetches blocks from the highest seen block up to the current slot and sends the results or errors to the provided channels.
-func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cfg, args Args, respCh chan<- *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) {
-	// Wait for half the duration of SecondsPerSlot or until the context is done
+func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cfg, args Args, delay time.Duration, respCh chan<- *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) {
 	select {
-	case <-time.After((time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second) / 2):
+	case <-time.After(delay):
 	case <-ctx.Done():
 		return
 	}
@@ -204,7 +203,7 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 
 // listenToIncomingBlocksUntilANewBlockIsReceived listens for incoming blocks until a new block with a slot greater than or equal to the target slot is received.
 // It processes blocks, checks their validity, and publishes them. It also handles context cancellation and logs progress periodically.
-func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger log.Logger, cfg *Cfg, args Args, respCh <-chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) error {
+func listenToIncomingBlocksUntilANewBlockIsReceived(importCtx, fetchCtx context.Context, logger log.Logger, cfg *Cfg, args Args, respCh <-chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) error {
 	// Timer to log progress every 30 seconds
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()
@@ -218,15 +217,20 @@ func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger 
 	rejected := make(map[common.Hash]error)
 	// An index commit wakes the loop, which returns once the highest seen block is indexed.
 	indicesChanged := cfg.emitter.BlockIndicesChanged()
-	if highestSeenBlockIndexed(ctx, cfg, args.targetSlot) {
+	if highestSeenBlockIndexed(importCtx, cfg, args.targetSlot) {
 		return nil
 	}
 MainLoop:
 	for {
-		if err := retryPendingBlockWrite(ctx, cfg); err != nil {
+		if err := retryPendingBlockWrite(importCtx, cfg); err != nil {
 			return err
 		}
 		select {
+		case <-cfg.forkChoice.FastConfirmationChanged():
+			if !cfg.safeUpdatePending {
+				cfg.safeUpdatePending = true
+				break MainLoop
+			}
 		case <-presenceTicker.C:
 			// Check if the highest seen block is greater than or equal to the target slot
 			if cfg.forkChoice.HighestSeen() >= args.targetSlot {
@@ -234,12 +238,12 @@ MainLoop:
 			}
 		case <-indicesChanged:
 			indicesChanged = cfg.emitter.BlockIndicesChanged()
-			if highestSeenBlockIndexed(ctx, cfg, args.targetSlot) {
+			if highestSeenBlockIndexed(importCtx, cfg, args.targetSlot) {
 				break MainLoop
 			}
-		case <-ctx.Done():
+		case <-fetchCtx.Done():
 			// Handle context cancellation
-			return ctx.Err()
+			return fetchCtx.Err()
 		case err := <-errCh:
 			// Handle errors received on the error channel
 			return err
@@ -247,7 +251,7 @@ MainLoop:
 			if blocks == nil {
 				continue
 			}
-			if processChainTipBatch(ctx, cfg, args, withMissingAncestors(ctx, cfg, blocks, rejected), seenBlockRoots, rejected) {
+			if processChainTipBatch(importCtx, fetchCtx, cfg, args, withMissingAncestors(fetchCtx, cfg, blocks, rejected), seenBlockRoots, rejected) {
 				break MainLoop
 			}
 		case <-logTicker.C:
@@ -287,12 +291,14 @@ func withMissingAncestors(ctx context.Context, cfg *Cfg, batch *peers.PeeredObje
 		return batch.Data
 	}
 	// Bound each lookup to half a slot so the loop can still react to the gossip block.
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot)*time.Second/2)
+	lookupCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot)*time.Second/2)
 	defer cancel()
-	ancestors, err := fetchLinkedAncestors(ctx, cfg, batch.Peer, orphan, start)
+	ancestors, err := fetchLinkedAncestors(lookupCtx, cfg, batch.Peer, orphan, start)
 	if err != nil {
 		log.Debug("[chainTipSync] ancestor lookup failed", "peer", batch.Peer, "startSlot", start, "orphanSlot", orphan.Block.Slot, "err", err)
-		cfg.ancestorLookupFailedSlot = cfg.ethClock.GetCurrentSlot()
+		if !cfg.safeUpdatePending || ctx.Err() == nil {
+			cfg.ancestorLookupFailedSlot = cfg.ethClock.GetCurrentSlot()
+		}
 		return batch.Data
 	}
 	return append(ancestors, batch.Data...)
@@ -381,7 +387,7 @@ func firstBlockWithMissingParent(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock, 
 	return nil
 }
 
-func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cltypes.SignedBeaconBlock, seenBlockRoots map[common.Hash]struct{}, rejected map[common.Hash]error) bool {
+func processChainTipBatch(importCtx, fetchCtx context.Context, cfg *Cfg, args Args, blocks []*cltypes.SignedBeaconBlock, seenBlockRoots map[common.Hash]struct{}, rejected map[common.Hash]error) bool {
 	// [GLOAS] Batch-determine and fetch parent envelopes before processing blocks.
 	envelopeRoots, batchBlockByRoot := determineParentEnvelopeRoots(cfg, blocks)
 	parentBlockByRoot := func(root common.Hash) *cltypes.SignedBeaconBlock {
@@ -394,7 +400,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 		block := parentBlockByRoot(root)
 		return block, block != nil
 	})
-	envelopes, storedEnvelopeRoots := fetchParentEnvelopes(ctx, cfg, envelopeRoots, validateEnvelope)
+	envelopes, storedEnvelopeRoots := fetchParentEnvelopes(fetchCtx, cfg, envelopeRoots, validateEnvelope)
 	storedReplayRoots := storedParentReplayRoots(
 		blocks,
 		args.targetSlot,
@@ -420,14 +426,14 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 
 	for _, block := range blocks {
 		blockRoot, _ := block.Block.HashSSZ() // Ignoring error as block would not process if HashSSZ failed
-		if !ensureAnchorEnvelopeForChild(ctx, cfg.forkChoice, func(recoveryCtx context.Context) error {
+		if !ensureAnchorEnvelopeForChild(fetchCtx, cfg.forkChoice, func(recoveryCtx context.Context) error {
 			return ensureAnchorEnvelopeOnce(recoveryCtx, cfg)
 		}, block) {
-			rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, errAnchorEnvelopeUnavailable.Error(), errAnchorEnvelopeUnavailable)
+			rejectChainTipBlock(importCtx, cfg, rejected, block, blockRoot, errAnchorEnvelopeUnavailable.Error(), errAnchorEnvelopeUnavailable)
 			continue
 		}
 		if _, ok := cfg.forkChoice.GetHeader(block.Block.ParentRoot); !ok {
-			rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, "parent not in fork graph", rejected[block.Block.ParentRoot])
+			rejectChainTipBlock(importCtx, cfg, rejected, block, blockRoot, "parent not in fork graph", rejected[block.Block.ParentRoot])
 			time.Sleep(time.Millisecond)
 			continue
 		}
@@ -449,7 +455,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 			parentRoot := common.Hash(block.Block.ParentRoot)
 			if env, ok := envelopes[parentRoot]; ok {
 				_, wasStored := storedEnvelopeRoots[parentRoot]
-				envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg) && !wasStored)
+				envErr := cfg.forkChoice.OnExecutionPayload(importCtx, env, false, canValidateGloasPayloads(cfg) && !wasStored)
 				if envErr != nil {
 					log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
 				}
@@ -458,8 +464,8 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 					imported.add(parentBlock.Block.Slot)
 				}
 				if wasStored && parentEnvelopeRequired(block, parentBlock) {
-					if reason := payloadReplay.rejection(ctx, cfg, cfg.forkChoice, parentRoot, env, envErr); reason != nil {
-						rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, "parent payload not accepted", reason)
+					if reason := payloadReplay.rejection(importCtx, cfg, cfg.forkChoice, parentRoot, env, envErr); reason != nil {
+						rejectChainTipBlock(importCtx, cfg, rejected, block, blockRoot, "parent payload not accepted", reason)
 						continue
 					}
 				}
@@ -467,14 +473,14 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 		}
 
 		// Process the block without its data; the deferred requestCustodyBackfill fetches it.
-		if err := processBlock(ctx, cfg, block, true); err != nil {
+		if err := processBlock(importCtx, cfg, block, true); err != nil {
 			if cfg.pendingBlockWrite != nil {
 				return false
 			}
 			if parentEnvelopeUnavailable(cfg, block, envelopes, parentBlockByRoot) {
-				rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, errParentEnvelopeUnavailable.Error(), errParentEnvelopeUnavailable)
+				rejectChainTipBlock(importCtx, cfg, rejected, block, blockRoot, errParentEnvelopeUnavailable.Error(), errParentEnvelopeUnavailable)
 			} else {
-				rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, "process block failed", err)
+				rejectChainTipBlock(importCtx, cfg, rejected, block, blockRoot, "process block failed", err)
 			}
 			if rememberBlockAfterProcess(err) {
 				seenBlockRoots[blockRoot] = struct{}{}
@@ -1767,11 +1773,22 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1024)
 	errCh := make(chan error)
 
-	// 25 seconds is a good timeout for this
-	ctx, cn := context.WithTimeout(ctx, 25*time.Second)
-	defer cn()
+	importCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+	fetchCtx := importCtx
+	delay := time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second / 2
+	if cfg.safeUpdatePending {
+		delay = 0
+		var cancelFetch context.CancelFunc
+		fetchCtx, cancelFetch = context.WithTimeout(importCtx, sleepForSlotRewakeInterval)
+		defer cancelFetch()
+	}
 
-	go startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, args, respCh, errCh)
+	go startFetchingBlocksMissedByGossipAfterSomeTime(fetchCtx, cfg, args, delay, respCh, errCh)
 
-	return listenToIncomingBlocksUntilANewBlockIsReceived(ctx, logger, cfg, args, respCh, errCh)
+	err = listenToIncomingBlocksUntilANewBlockIsReceived(importCtx, fetchCtx, logger, cfg, args, respCh, errCh)
+	if cfg.safeUpdatePending && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		return nil
+	}
+	return err
 }

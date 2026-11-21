@@ -279,21 +279,47 @@ func TestForkChoiceUpdateRejectsMissingPayloadIDForPayloadBuild(t *testing.T) {
 	require.Nil(t, id)
 }
 
-func TestForkChoiceUpdateAllowsMissingPayloadIDWithoutPayloadBuild(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	cc := &ExecutionClientEngine{
-		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
-			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
-		}},
-		beaconCfg: &cfg,
+func TestForkChoiceUpdateWithoutPayloadBuild(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		for _, status := range []engine_types.EngineStatus{engine_types.ValidStatus, engine_types.SyncingStatus, engine_types.InvalidStatus, engine_types.AcceptedStatus, "UNKNOWN"} {
+			for _, withID := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/fcr=%t/payloadID=%t", status, enabled, withID), func(t *testing.T) {
+					response := &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: &engine_types.PayloadStatus{Status: status}}
+					if withID {
+						id := hexutil.Bytes{1}
+						response.PayloadId = &id
+					}
+					cc := &ExecutionClientEngine{EnableFastConfirmation: enabled, engine: &fcuEngineStub{response: response}}
+					id, err := cc.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion)
+					switch {
+					case !enabled || status == engine_types.ValidStatus && !withID:
+						require.NoError(t, err)
+						if withID {
+							require.Equal(t, []byte{1}, id)
+						} else {
+							require.Empty(t, id)
+						}
+					case status == engine_types.SyncingStatus && !withID:
+						require.ErrorIs(t, err, ErrForkChoiceUpdateSyncing)
+					default:
+						require.Error(t, err)
+					}
+				})
+			}
+		}
 	}
-
-	id, err := cc.ForkChoiceUpdate(
-		t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion,
-	)
-
-	require.NoError(t, err)
-	require.Empty(t, id)
+	for name, response := range map[string]*engine_types.ForkChoiceUpdatedResponse{
+		"nil response": nil,
+		"nil status":   {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cc := &ExecutionClientEngine{EnableFastConfirmation: true, engine: &fcuEngineStub{response: response}}
+			require.NotPanics(t, func() {
+				_, err := cc.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion)
+				require.Error(t, err)
+			})
+		})
+	}
 }
 
 func TestExecutionPayloadFromSSZBlock_BlockAccessListGloasOnly(t *testing.T) {

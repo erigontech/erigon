@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/spf13/afero"
@@ -89,12 +90,18 @@ type chainTipBatchForkGraph struct {
 
 type chainTipBatchEnvelopeSentinel struct {
 	sentinelproto.SentinelClient
-	response []byte
-	calls    int
+	response  []byte
+	calls     int
+	onRequest func(context.Context) error
 }
 
-func (s *chainTipBatchEnvelopeSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+func (s *chainTipBatchEnvelopeSentinel) SendRequest(ctx context.Context, _ *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
 	s.calls++
+	if s.onRequest != nil {
+		if err := s.onRequest(ctx); err != nil {
+			return nil, err
+		}
+	}
 	return &sentinelproto.ResponseData{Data: s.response, Peer: &sentinelproto.Peer{Pid: "envelope-peer"}}, nil
 }
 
@@ -407,6 +414,41 @@ func TestChainTipSyncVerifiesStoredGloasPayloadWhileBehind(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Equal(t, 1, engine.newPayloadCalls)
 	require.True(t, cfg.forkChoice.IsPayloadVerified(headRoot))
+}
+
+func TestChainTipSyncRecoversExecutionWhileSafeUpdatePending(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	headBlock := graph.parents[headRoot]
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+
+	selectedRoot, _, err := cfg.forkChoice.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, headRoot, selectedRoot)
+	require.True(t, cfg.forkChoice.HasEnvelope(headRoot))
+	_, found := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(headRoot)
+	require.False(t, found)
+
+	cfg.safeUpdatePending = true
+	cfg.ethClock = eth_clock.NewEthereumClock(0, common.Hash{}, cfg.beaconCfg)
+	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), &chainTipBatchEnvelopeSentinel{}, cfg.beaconCfg, cfg.ethClock)
+	engine.supportInsertion = true
+	collector := &gloasCollectorTest{}
+	cfg.blockCollector = collector
+	args := Args{seenSlot: headBlock.Block.Slot, targetSlot: headBlock.Block.Slot + 1}
+	for i, status := range []execution_client.PayloadStatus{execution_client.PayloadStatusNone, execution_client.PayloadStatusValidated} {
+		engine.payloadStatus = status
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		err := chainTipSync(ctx, log.Root(), cfg, args)
+		cancel()
+
+		require.NoError(t, err, "retry publication without waiting for another block")
+		require.Equal(t, i+1, engine.newPayloadCalls)
+		require.Equal(t, i+1, collector.flushCalls)
+		require.True(t, cfg.safeUpdatePending, "only an accepted fork-choice update clears the pending wake")
+		require.Equal(t, status == execution_client.PayloadStatusValidated, cfg.forkChoice.IsPayloadVerified(headRoot))
+	}
 }
 
 func TestForwardSyncReplayMakesGloasPayloadAvailableForHeadSelection(t *testing.T) {
@@ -822,7 +864,7 @@ func TestChainTipBatchReplayBudgetSkipsParentsWithUsableVerdict(t *testing.T) {
 			}
 
 			seen := make(map[common.Hash]struct{})
-			processChainTipBatch(t.Context(), cfg, Args{targetSlot: childB.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{childA, childB}, seen, make(map[common.Hash]error))
+			processChainTipBatch(t.Context(), t.Context(), cfg, Args{targetSlot: childB.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{childA, childB}, seen, make(map[common.Hash]error))
 
 			require.Equal(t, 1, engine.newPayloadCalls)
 			require.Equal(t, graph.envelopes[parentARoot].Message.Payload.BlockHash, replayedPayload)
@@ -872,7 +914,7 @@ func TestChainTipBatchReplayBudgetStopsAtTarget(t *testing.T) {
 	}
 
 	reachedTarget := processChainTipBatch(
-		t.Context(),
+		t.Context(), t.Context(),
 		cfg,
 		Args{targetSlot: childA.Block.Slot},
 		[]*cltypes.SignedBeaconBlock{childA, childB},
@@ -927,7 +969,7 @@ func TestChainTipBatchRejectsFullChildOfRejectedAnchor(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
 			for range 2 {
-				reachedTarget := processChainTipBatch(ctx, cfg, Args{targetSlot: child.Block.Slot}, []*cltypes.SignedBeaconBlock{child}, seen, rejected)
+				reachedTarget := processChainTipBatch(ctx, ctx, cfg, Args{targetSlot: child.Block.Slot}, []*cltypes.SignedBeaconBlock{child}, seen, rejected)
 
 				require.False(t, reachedTarget)
 				require.True(t, store.IsEnvelopeRejected(anchorRoot))
@@ -955,7 +997,7 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 		delete(graph.envelopes, parentRoot)
 		seen := make(map[common.Hash]struct{})
 
-		processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen, make(map[common.Hash]error))
+		processChainTipBatch(t.Context(), t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen, make(map[common.Hash]error))
 
 		require.Equal(t, 1, sentinel.calls)
 		require.Equal(t, 1, engine.newPayloadCalls)
@@ -975,7 +1017,7 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 		require.NoError(t, err)
 		seen := make(map[common.Hash]struct{})
 
-		reachedTarget := processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen, make(map[common.Hash]error))
+		reachedTarget := processChainTipBatch(t.Context(), t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen, make(map[common.Hash]error))
 
 		require.False(t, reachedTarget)
 		require.Equal(t, 1, engine.newPayloadCalls)
@@ -992,7 +1034,7 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 		require.NoError(t, err)
 		seen := make(map[common.Hash]struct{})
 
-		processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen, make(map[common.Hash]error))
+		processChainTipBatch(t.Context(), t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen, make(map[common.Hash]error))
 
 		require.Equal(t, 1, engine.newPayloadCalls)
 		require.Zero(t, graph.added[common.Hash(fullRoot)])
@@ -1018,7 +1060,7 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 				blocks = []*cltypes.SignedBeaconBlock{emptyChild, fullChild}
 			}
 
-			processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, blocks, seen, make(map[common.Hash]error))
+			processChainTipBatch(t.Context(), t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, blocks, seen, make(map[common.Hash]error))
 
 			require.Equal(t, 1, engine.newPayloadCalls)
 			require.Zero(t, graph.added[common.Hash(fullRoot)])
@@ -1494,12 +1536,12 @@ func TestChainTipBatchPassesARejectionToDescendants(t *testing.T) {
 	cfg.chainTipRejections = newChainTipRejections(time.Hour, nil)
 	cfg.chainTipRejections.lastLog = time.Now()
 
-	processChainTipBatch(t.Context(), cfg, args, []*cltypes.SignedBeaconBlock{fullChild, grandchild}, seen, rejected)
+	processChainTipBatch(t.Context(), t.Context(), cfg, args, []*cltypes.SignedBeaconBlock{fullChild, grandchild}, seen, rejected)
 	reason := rejected[common.Hash(fullRoot)]
 	require.ErrorContains(t, reason, "parent payload invalid")
 	require.Equal(t, reason, rejected[grandchildRoot])
 
-	processChainTipBatch(t.Context(), cfg, args, []*cltypes.SignedBeaconBlock{greatGrandchild}, seen, rejected)
+	processChainTipBatch(t.Context(), t.Context(), cfg, args, []*cltypes.SignedBeaconBlock{greatGrandchild}, seen, rejected)
 	require.Equal(t, reason, rejected[greatGrandchildRoot])
 
 	replay := cfg.chainTipRejections.reasons["parent payload not accepted"]
@@ -1538,7 +1580,7 @@ func TestChainTipBatchPreservesTerminalParentError(t *testing.T) {
 			seen := make(map[common.Hash]struct{})
 			rejected := make(map[common.Hash]error)
 
-			reachedTarget := processChainTipBatch(t.Context(), cfg, Args{targetSlot: grandchild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{child, grandchild}, seen, rejected)
+			reachedTarget := processChainTipBatch(t.Context(), t.Context(), cfg, Args{targetSlot: grandchild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{child, grandchild}, seen, rejected)
 
 			require.False(t, reachedTarget)
 			cause := rejected[childRoot]
@@ -1573,7 +1615,7 @@ func TestChainTipBatchImportsChildOfBatchParentWithPeerEnvelope(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
-	processChainTipBatch(ctx, cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{parent, fullChild}, make(map[common.Hash]struct{}), make(map[common.Hash]error))
+	processChainTipBatch(ctx, ctx, cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{parent, fullChild}, make(map[common.Hash]struct{}), make(map[common.Hash]error))
 
 	require.Equal(t, 1, graph.added[parentRoot])
 	require.Equal(t, 1, graph.added[common.Hash(fullRoot)])
@@ -1595,7 +1637,7 @@ func TestChainTipBatchReportsAParentEnvelopeNoPeerServes(t *testing.T) {
 	defer cancel()
 	rejected := make(map[common.Hash]error)
 
-	processChainTipBatch(ctx, cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, make(map[common.Hash]struct{}), rejected)
+	processChainTipBatch(ctx, ctx, cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, make(map[common.Hash]struct{}), rejected)
 
 	require.ErrorIs(t, rejected[common.Hash(fullRoot)], errParentEnvelopeUnavailable)
 	require.Contains(t, cfg.chainTipRejections.reasons, errParentEnvelopeUnavailable.Error())
@@ -1646,7 +1688,7 @@ func TestChainTipBatchRequestsCustodyBackfillForImportedSlots(t *testing.T) {
 	peerDas.EXPECT().BackfillCustodyColumns(parent.Block.Slot, child.Block.Slot).Times(1)
 	cfg.peerDas = peerDas
 
-	processChainTipBatch(t.Context(), cfg, Args{targetSlot: child.Block.Slot}, []*cltypes.SignedBeaconBlock{child}, make(map[common.Hash]struct{}), make(map[common.Hash]error))
+	processChainTipBatch(t.Context(), t.Context(), cfg, Args{targetSlot: child.Block.Slot}, []*cltypes.SignedBeaconBlock{child}, make(map[common.Hash]struct{}), make(map[common.Hash]error))
 
 	childRoot, err := child.Block.HashSSZ()
 	require.NoError(t, err)
@@ -1661,7 +1703,7 @@ func TestChainTipBatchWithoutImportsRequestsNoCustodyBackfill(t *testing.T) {
 	orphan.Block.Slot = child.Block.Slot
 	orphan.Block.ParentRoot = common.Hash{0xde, 0xad}
 
-	processChainTipBatch(t.Context(), cfg, Args{targetSlot: orphan.Block.Slot}, []*cltypes.SignedBeaconBlock{orphan}, make(map[common.Hash]struct{}), make(map[common.Hash]error))
+	processChainTipBatch(t.Context(), t.Context(), cfg, Args{targetSlot: orphan.Block.Slot}, []*cltypes.SignedBeaconBlock{orphan}, make(map[common.Hash]struct{}), make(map[common.Hash]error))
 }
 
 // newChildOnEmptyParent builds a block that does not build on the payload of its parent, so that no
@@ -1788,7 +1830,7 @@ func (f *ancestorLookupFixture) listen(targetSlot uint64, batches ...[]*cltypes.
 	}
 	ctx, cancel := context.WithTimeout(f.t.Context(), 2*time.Second)
 	defer cancel()
-	return listenToIncomingBlocksUntilANewBlockIsReceived(ctx, log.Root(), f.cfg, Args{targetSlot: targetSlot}, respCh, make(chan error))
+	return listenToIncomingBlocksUntilANewBlockIsReceived(ctx, ctx, log.Root(), f.cfg, Args{targetSlot: targetSlot}, respCh, make(chan error))
 }
 
 // process runs one batch from the serving peer through the lookup and the import, as the chain tip loop does.
@@ -1797,7 +1839,7 @@ func (f *ancestorLookupFixture) process(targetSlot uint64, rejected map[common.H
 	ctx, cancel := context.WithTimeout(f.t.Context(), 2*time.Second)
 	defer cancel()
 	served := &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: batch, Peer: ancestorPeer}
-	return processChainTipBatch(ctx, f.cfg, Args{targetSlot: targetSlot}, withMissingAncestors(ctx, f.cfg, served, rejected), make(map[common.Hash]struct{}), rejected)
+	return processChainTipBatch(ctx, ctx, f.cfg, Args{targetSlot: targetSlot}, withMissingAncestors(ctx, f.cfg, served, rejected), make(map[common.Hash]struct{}), rejected)
 }
 
 // The peer that served a block whose parent is unknown is asked for the slots below it, and the
@@ -2246,6 +2288,7 @@ func TestChainTipAncestorLookupEndsWithinHalfASlot(t *testing.T) {
 	)
 	missing, _ := f.child(f.parent, 65)
 	tip, _ := f.child(missing, 66)
+	f.pinCurrentSlot(&tip.Block.Slot)
 	var requestedAt, deadline time.Time
 	var hasDeadline bool
 	f.sentinel.onRequest = func(ctx context.Context) {
@@ -2266,6 +2309,7 @@ func TestChainTipAncestorLookupEndsWithinHalfASlot(t *testing.T) {
 	require.True(t, hasDeadline)
 	require.LessOrEqual(t, deadline.Sub(requestedAt), halfSlot)
 	require.Less(t, time.Since(started), stageTimeout/2, "a stalled lookup outlived its half-slot deadline")
+	require.Equal(t, f.cfg.ethClock.GetCurrentSlot(), f.cfg.ancestorLookupFailedSlot)
 }
 
 // A lookup that fails after the clock moved on throttles the slot it ended in.
@@ -2463,6 +2507,246 @@ func TestChainTipPollBatchCarriesThePeerThatServedIt(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, batch.Data, 1)
 			require.Equal(t, pollPeer, batch.Peer)
+		})
+	}
+}
+
+func TestPendingSafeUpdateFetchesMissedParent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newAncestorLookupFixture(t)
+		middle, middleRoot := f.child(f.parent, 65)
+		tip, tipRoot := f.child(middle, 66)
+		f.tickTo(tip.Block.Slot)
+		f.pinCurrentSlot(&tip.Block.Slot)
+		f.cfg.emitter = beaconevents.NewEventEmitter()
+		f.cfg.safeUpdatePending = true
+		digest, err := f.sentinel.clock.ComputeForkDigest(tip.Block.Slot / f.cfg.beaconCfg.SlotsPerEpoch)
+		require.NoError(t, err)
+		var response bytes.Buffer
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, middle, digest[:]...))
+		require.NoError(t, response.WriteByte(0))
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, tip, digest[:]...))
+		f.sentinel.response = response.Bytes()
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+
+		err = chainTipSync(ctx, log.Root(), f.cfg, Args{seenSlot: f.parent.Block.Slot, targetSlot: tip.Block.Slot})
+
+		require.NoError(t, err)
+		require.Equal(t, 1, f.graph.added[middleRoot], "fetch the parent missed by gossip")
+		require.Equal(t, 1, f.graph.added[tipRoot], "import its child after recovery")
+		head, _, err := f.cfg.forkChoice.GetHead(nil)
+		require.NoError(t, err)
+		require.Equal(t, tipRoot, head)
+		require.True(t, f.cfg.safeUpdatePending)
+	})
+}
+
+func TestPendingSafeUpdateBoundsMissedBlockWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newAncestorLookupFixture(t)
+		targetSlot := f.parent.Block.Slot + 1
+		f.pinCurrentSlot(&targetSlot)
+		f.cfg.emitter = beaconevents.NewEventEmitter()
+		f.cfg.safeUpdatePending = true
+		f.cfg.forkChoice.EnableFastConfirmation(f.cfg.forkChoice.FinalizedCheckpoint())
+		now := (targetSlot+1)*f.cfg.beaconCfg.SecondsPerSlot*1000 - 1
+		f.cfg.forkChoice.OnTick(now)
+		require.NoError(t, f.cfg.forkChoice.OnFastConfirmation(t.Context(), now, nil))
+		require.Len(t, f.cfg.forkChoice.FastConfirmationChanged(), 1)
+		started := time.Now()
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+
+		err := chainTipSync(ctx, log.Root(), f.cfg, Args{seenSlot: f.parent.Block.Slot, targetSlot: targetSlot})
+
+		require.NoError(t, err)
+		synctest.Wait()
+		require.Positive(t, f.sentinel.calls, "try fetching even while a safe update is pending")
+		require.LessOrEqual(t, time.Since(started), 2*time.Second, "retry publication even if no block arrives")
+		require.True(t, f.cfg.safeUpdatePending)
+		require.Empty(t, f.cfg.forkChoice.FastConfirmationChanged())
+
+		stopped, stop := context.WithCancel(t.Context())
+		stop()
+		require.ErrorIs(t, chainTipSync(stopped, log.Root(), f.cfg, Args{seenSlot: f.parent.Block.Slot, targetSlot: targetSlot}), context.Canceled)
+	})
+}
+
+func TestChainTipSyncSlowImportWhileSafeUpdatePending(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pending bool
+		cancel  bool
+		delay   time.Duration
+		timeout bool
+	}{
+		{"pending", true, false, 2 * time.Second, false},
+		{"flag off", false, false, 2 * time.Second, false},
+		{"stage canceled", true, true, 2 * time.Second, false},
+		{"pending import timeout", true, false, 30 * time.Second, true},
+		{"flag off import timeout", false, false, 30 * time.Second, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := newAncestorLookupFixture(t)
+				block, root := f.child(f.parent, 65)
+				f.tickTo(block.Block.Slot)
+				f.pinCurrentSlot(&block.Block.Slot)
+				f.cfg.emitter = beaconevents.NewEventEmitter()
+				f.cfg.safeUpdatePending = tc.pending
+				digest, err := f.sentinel.clock.ComputeForkDigest(block.Block.Slot / f.cfg.beaconCfg.SlotsPerEpoch)
+				require.NoError(t, err)
+				var response bytes.Buffer
+				require.NoError(t, ssz_snappy.EncodeAndWrite(&response, block, digest[:]...))
+				f.sentinel.response = response.Bytes()
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				f.cfg.indiciesDB = &blockWriteErrorDB{RwDB: f.cfg.indiciesDB, beforeUpdate: func(importCtx context.Context) error {
+					if tc.cancel {
+						cancel()
+					}
+					return common.Sleep(importCtx, tc.delay)
+				}}
+
+				started := time.Now()
+				err = chainTipSync(ctx, log.Root(), f.cfg, Args{seenSlot: f.parent.Block.Slot, targetSlot: block.Block.Slot})
+
+				if tc.cancel {
+					require.ErrorIs(t, err, context.Canceled)
+					require.NotNil(t, f.cfg.pendingBlockWrite)
+					return
+				}
+				if tc.timeout {
+					if tc.pending {
+						require.NoError(t, err)
+					} else {
+						require.ErrorIs(t, err, context.DeadlineExceeded)
+					}
+					require.NotNil(t, f.cfg.pendingBlockWrite)
+					require.InDelta(t, 25, time.Since(started).Seconds(), 0.1)
+					return
+				}
+				require.NoError(t, err)
+				require.Nil(t, f.cfg.pendingBlockWrite, "fetch timeout must not cancel block persistence")
+				require.Equal(t, 1, f.graph.added[root])
+				require.NoError(t, f.cfg.indiciesDB.View(t.Context(), func(tx kv.Tx) error {
+					slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
+					require.NoError(t, err)
+					require.NotNil(t, slot)
+					require.Equal(t, block.Block.Slot, *slot)
+					return nil
+				}))
+				require.Equal(t, tc.pending, f.cfg.safeUpdatePending)
+			})
+		})
+	}
+}
+
+func TestChainTipBatchSlowPayloadImportOutlivesFetchDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg, graph, parentRoot, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+		cfg.rpc, _ = newChainTipBatchEnvelopeRPC(t, cfg.beaconCfg, graph.envelopes[parentRoot])
+		delete(graph.envelopes, parentRoot)
+		engine.newPayloadFn = func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+			if err := common.Sleep(ctx, 2*time.Second); err != nil {
+				return execution_client.PayloadStatusNone, err
+			}
+			return execution_client.PayloadStatusValidated, nil
+		}
+		fetchCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		rejected := make(map[common.Hash]error)
+
+		reached := processChainTipBatch(t.Context(), fetchCtx, cfg, Args{targetSlot: child.Block.Slot}, []*cltypes.SignedBeaconBlock{child}, make(map[common.Hash]struct{}), rejected)
+
+		require.True(t, reached)
+		require.Empty(t, rejected)
+		require.ErrorIs(t, fetchCtx.Err(), context.DeadlineExceeded)
+		require.Equal(t, 1, engine.newPayloadCalls)
+		require.True(t, cfg.forkChoice.IsPayloadVerified(parentRoot))
+	})
+}
+
+func TestChainTipAncestorLookupOuterDeadlineDoesNotThrottleSlot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newAncestorLookupFixture(t)
+		missing, _ := f.child(f.parent, 65)
+		tip, _ := f.child(missing, 66)
+		f.tickTo(tip.Block.Slot)
+		f.pinCurrentSlot(&tip.Block.Slot)
+		f.cfg.emitter = beaconevents.NewEventEmitter()
+		f.cfg.safeUpdatePending = true
+		batch := &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: []*cltypes.SignedBeaconBlock{tip}, Peer: ancestorPeer}
+		f.sentinel.onRequest = func(ctx context.Context) { <-ctx.Done() }
+		importCtx, cancelImport := context.WithTimeout(t.Context(), 25*time.Second)
+		defer cancelImport()
+		fetchCtx, cancelFetch := context.WithTimeout(importCtx, time.Second)
+		defer cancelFetch()
+		respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1)
+		respCh <- batch
+		started := time.Now()
+		err := listenToIncomingBlocksUntilANewBlockIsReceived(importCtx, fetchCtx, log.Root(), f.cfg, Args{targetSlot: tip.Block.Slot}, respCh, make(chan error))
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.NoError(t, importCtx.Err())
+		require.InDelta(t, 1, time.Since(started).Seconds(), 0.1)
+		require.Len(t, f.sentinel.requests, 1)
+		require.Zero(t, f.cfg.ancestorLookupFailedSlot)
+
+		f.sentinel.onRequest = nil
+		f.sentinel.serve = servingChain(0, missing)
+		blocks := withMissingAncestors(importCtx, f.cfg, batch, make(map[common.Hash]error))
+		require.Len(t, f.sentinel.requests, 2, "retry in the same slot once the outer deadline is gone")
+		require.Len(t, blocks, 2)
+		require.Equal(t, missing.Block.Slot, blocks[0].Block.Slot)
+	})
+}
+
+func TestChainTipAncestorLookupOuterDeadlineThrottlesWithoutFCR(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newAncestorLookupFixture(t)
+		missing, _ := f.child(f.parent, 65)
+		tip, _ := f.child(missing, 66)
+		f.pinCurrentSlot(&tip.Block.Slot)
+		f.sentinel.onRequest = func(ctx context.Context) { <-ctx.Done() }
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		batch := &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: []*cltypes.SignedBeaconBlock{tip}, Peer: ancestorPeer}
+
+		require.Equal(t, batch.Data, withMissingAncestors(ctx, f.cfg, batch, nil))
+		require.Equal(t, tip.Block.Slot, f.cfg.ancestorLookupFailedSlot)
+		require.Equal(t, batch.Data, withMissingAncestors(t.Context(), f.cfg, batch, nil))
+		require.Len(t, f.sentinel.requests, 1)
+	})
+}
+
+func TestChainTipSlowEnvelopesUseFetchDeadline(t *testing.T) {
+	for _, kind := range []string{"parent", "anchor"} {
+		t.Run(kind, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cfg, graph, parentRoot, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+				peerRPC, sentinel := newChainTipBatchEnvelopeRPC(t, cfg.beaconCfg, graph.envelopes[parentRoot])
+				cfg.rpc = peerRPC
+				sentinel.onRequest = func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
+				delete(graph.envelopes, parentRoot)
+				if kind == "anchor" {
+					cfg.forkChoice = newAnchorForkChoiceStore(t, cfg.beaconCfg, graph.parentState, engine)
+					child.Block.ParentRoot = cfg.forkChoice.AnchorRoot()
+					cfg.caplinConfig.DisabledCheckpointSync = true
+				}
+				importCtx, cancelImport := context.WithTimeout(t.Context(), 25*time.Second)
+				defer cancelImport()
+				fetchCtx, cancelFetch := context.WithTimeout(importCtx, time.Second)
+				defer cancelFetch()
+				started := time.Now()
+				rejected := make(map[common.Hash]error)
+				require.False(t, processChainTipBatch(importCtx, fetchCtx, cfg, Args{targetSlot: child.Block.Slot}, []*cltypes.SignedBeaconBlock{child}, make(map[common.Hash]struct{}), rejected))
+				require.Positive(t, sentinel.calls)
+				require.NotEmpty(t, rejected)
+				require.NoError(t, importCtx.Err())
+				require.ErrorIs(t, fetchCtx.Err(), context.DeadlineExceeded)
+				require.InDelta(t, 1, time.Since(started).Seconds(), 0.1)
+			})
 		})
 	}
 }

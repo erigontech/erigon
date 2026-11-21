@@ -148,7 +148,7 @@ func (a *ApiHandler) emitPayloadAttributes() error {
 	attributes := a.payloadBuildAttributes(
 		baseState, head.Root, proposalSlot, feeRecipient, withdrawals, &slotNumber, targetGasLimit, stateVersion,
 	)
-	finalizedHash, safeHash := a.payloadBuildFinalityHashes(baseState, payloadSource.head)
+	finalizedHash, safeHash := a.payloadBuildFinalityHashes(baseState, head.Root, payloadSource.head)
 	if current, _, err := a.forkchoiceStore.GetHeadNode(); err != nil || current != head || proposalSlot <= a.ethClock.GetCurrentSlot() {
 		return err
 	}

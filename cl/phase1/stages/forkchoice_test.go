@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
@@ -87,6 +88,10 @@ func (s *pausingHeadView) ViewHeadState(fn synced_data.ViewHeadStateFn) error {
 
 type statusSentinel struct {
 	sentinelproto.SentinelClient
+}
+
+func (*statusSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	return &sentinelproto.ResponseData{Peer: &sentinelproto.Peer{Pid: "test-peer"}}, nil
 }
 
 func (*statusSentinel) SetStatus(context.Context, *sentinelproto.Status, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
@@ -710,15 +715,16 @@ func TestComputeForkChoiceRecordsGloasExecutionHeadAfterTimeout(t *testing.T) {
 	require.Equal(t, previousWake, cfg.sleepForSlotLastWake)
 }
 
-type busyOnceExecutionModule struct {
+type deferredOnceExecutionModule struct {
 	execmodule.ExecutionModule
+	firstResult     execmodule.ForkChoiceResult
 	forkChoiceCalls int
 }
 
-func (m *busyOnceExecutionModule) UpdateForkChoice(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+func (m *deferredOnceExecutionModule) UpdateForkChoice(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
 	m.forkChoiceCalls++
 	if m.forkChoiceCalls == 1 {
-		return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}, nil
+		return m.firstResult, nil
 	}
 	return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess}, nil
 }
@@ -727,7 +733,7 @@ func TestGloasForkChoiceRejectedAsBusyIsResent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
 		bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
-		module := &busyOnceExecutionModule{}
+		module := &deferredOnceExecutionModule{firstResult: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}}
 		direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
 		require.NoError(t, err)
 		engine.forkChoiceFn = direct.ForkChoiceUpdate
@@ -758,6 +764,40 @@ func TestGloasForkChoiceRejectedAsBusyIsResent(t *testing.T) {
 		require.Equal(t, 2, module.forkChoiceCalls)
 		require.Equal(t, bid.BlockHash, cfg.executionHead)
 	})
+}
+
+func TestDirectSafeUpdateRetriesUntilAccepted(t *testing.T) {
+	for _, result := range []execmodule.ForkChoiceResult{
+		{Status: execmodule.ExecutionStatusBusy},
+		{Status: execmodule.ExecutionStatusBusy, UpdateInProgress: true},
+		{Status: execmodule.ExecutionStatusMissingSegment},
+		{Status: execmodule.ExecutionStatusTooFarAway},
+	} {
+		t.Run(result.Status.String(), func(t *testing.T) {
+			cfg, _, _, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+			module := &deferredOnceExecutionModule{firstResult: result}
+			direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+			require.NoError(t, err)
+			direct.EnableFastConfirmation = true
+			engine.forkChoiceFn = direct.ForkChoiceUpdate
+			cfg.executionHead = headBlock.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash
+			cfg.safeUpdatePending = true
+
+			synctest.Test(t, func(t *testing.T) {
+				started := time.Now()
+				_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+				require.NoError(t, err)
+				require.True(t, cfg.safeUpdatePending, "an unaccepted safe update must retain its retry")
+				require.Zero(t, time.Since(started))
+
+				_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+				require.NoError(t, err)
+				require.False(t, cfg.safeUpdatePending)
+				require.Equal(t, 2, module.forkChoiceCalls)
+				require.Equal(t, sleepForSlotRewakeInterval, time.Since(started))
+			})
+		})
+	}
 }
 
 func TestComputeForkChoiceKeepsGloasExecutionHeadAfterFatalError(t *testing.T) {
@@ -2275,6 +2315,131 @@ func TestPostForkchoiceHighestFinalizedFailureDoesNotPublish(t *testing.T) {
 
 	f.requireCopiesAndPublishes(t, 0)
 	require.Equal(t, f.headSlot, f.cfg.blobDownloader.HeadSlot())
+}
+
+type unavailableCheckpointGraph struct {
+	fork_graph.ForkGraph
+	err error
+}
+
+func (g unavailableCheckpointGraph) CurrentStateLocked(common.Hash) *state.CachingBeaconState {
+	return nil
+}
+
+func (g unavailableCheckpointGraph) ReplayState(common.Hash) (*state.CachingBeaconState, error) {
+	return nil, g.err
+}
+
+func TestPendingSafeUpdatePacesHeadSelectionErrors(t *testing.T) {
+	want := errors.New("checkpoint state unavailable")
+	cfg := newLockOrderFixtureWithConfig(t, 0, nil, common.Hash{}, true, func(graph fork_graph.ForkGraph) fork_graph.ForkGraph {
+		return unavailableCheckpointGraph{graph, want}
+	}).cfg
+
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		require.ErrorIs(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, Args{}), want)
+		require.Zero(t, time.Since(started))
+
+		cfg.safeUpdatePending = true
+		for range 3 {
+			started := time.Now()
+			require.ErrorIs(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, Args{}), want)
+			require.True(t, cfg.safeUpdatePending)
+			require.Equal(t, sleepForSlotRewakeInterval, time.Since(started))
+		}
+
+		ctx, cancel := context.WithTimeout(t.Context(), sleepForSlotRewakeInterval/4)
+		defer cancel()
+		started = time.Now()
+		require.ErrorIs(t, doForkchoiceRoutine(ctx, log.New(), cfg, Args{}), context.DeadlineExceeded)
+		require.Equal(t, sleepForSlotRewakeInterval/4, time.Since(started))
+		require.True(t, cfg.safeUpdatePending)
+	})
+}
+
+func TestPendingSafeUpdatePacesFatalErrors(t *testing.T) {
+	cfg, _, _, _, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+	want := errors.New("execution unavailable")
+	var calls []time.Time
+	engine.forkChoiceFn = func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
+		calls = append(calls, time.Now())
+		return nil, want
+	}
+	cfg.safeUpdatePending = true
+	synctest.Test(t, func(t *testing.T) {
+		for attempt := range 3 {
+			started := time.Now()
+			_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+			require.ErrorIs(t, err, want)
+			require.True(t, cfg.safeUpdatePending)
+			if attempt == 0 {
+				require.Zero(t, time.Since(started), "first failure must not delay head publication")
+			} else {
+				require.Equal(t, sleepForSlotRewakeInterval, calls[attempt].Sub(calls[attempt-1]))
+			}
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		_, _, err := computeAndNotifyServicesOfNewForkChoice(ctx, log.New(), cfg)
+		require.ErrorIs(t, err, context.Canceled)
+		require.Len(t, calls, 3, "canceled retries must not call the engine")
+		require.True(t, cfg.safeUpdatePending)
+	})
+}
+
+func TestPendingSafeUpdateDoesNotDelayNewHead(t *testing.T) {
+	for _, failure := range []error{execution_client.ErrForkChoiceUpdateBusy, execution_client.ErrForkChoiceUpdateTimeout, execution_client.ErrForkChoiceUpdateSyncing} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			cfg, graph, root, block, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+			cfg.safeUpdatePending = true
+			engine.forkChoiceErr = failure
+			head := forkchoice.ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusFull}
+			synctest.Test(t, func(t *testing.T) {
+				started := time.Now()
+				require.NoError(t, notifyServicesOfHead(t.Context(), log.New(), cfg, head, block.Block.Slot))
+				require.Zero(t, time.Since(started))
+				require.True(t, cfg.safeUpdatePending)
+				time.Sleep(sleepForSlotRewakeInterval / 4)
+				require.NoError(t, notifyServicesOfHead(t.Context(), log.New(), cfg, head, block.Block.Slot))
+				require.Equal(t, sleepForSlotRewakeInterval, time.Since(started), "wait only the remaining interval")
+
+				head.Root = common.Hash{0x77}
+				graph.parents[head.Root] = block
+				started = time.Now()
+				require.NoError(t, notifyServicesOfHead(t.Context(), log.New(), cfg, head, block.Block.Slot))
+				require.Zero(t, time.Since(started), "a new beacon head must not wait, even with the same execution head")
+
+				engine.forkChoiceErr = nil
+				require.NoError(t, notifyServicesOfHead(t.Context(), log.New(), cfg, head, block.Block.Slot))
+				require.False(t, cfg.safeUpdatePending)
+				cfg.safeUpdatePending = true
+				engine.forkChoiceErr = failure
+				started = time.Now()
+				require.NoError(t, notifyServicesOfHead(t.Context(), log.New(), cfg, head, block.Block.Slot))
+				require.Zero(t, time.Since(started), "success must clear the retry delay")
+			})
+		})
+	}
+}
+
+func TestDirectForkChoiceFlagOffRecordsDeferredHead(t *testing.T) {
+	for _, result := range []execmodule.ForkChoiceResult{
+		{Status: execmodule.ExecutionStatusMissingSegment},
+		{Status: execmodule.ExecutionStatusTooFarAway},
+		{Status: execmodule.ExecutionStatusReorgTooDeep},
+		{Status: execmodule.ExecutionStatusBusy, UpdateInProgress: true},
+	} {
+		t.Run(result.Status.String(), func(t *testing.T) {
+			cfg, _, _, block, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+			direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, &deferredOnceExecutionModule{firstResult: result}, time.Second), nil)
+			require.NoError(t, err)
+			engine.forkChoiceFn = direct.ForkChoiceUpdate
+			_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+			require.NoError(t, err)
+			require.Equal(t, block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash, cfg.executionHead)
+		})
+	}
 }
 
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.

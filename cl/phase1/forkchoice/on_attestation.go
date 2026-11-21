@@ -205,6 +205,9 @@ func (f *ForkChoiceStore) ProcessAttestingIndicies(
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.fastConfirmation != nil && attestation.Data.Slot < f.Slot() && f.validateTargetEpochAgainstCurrentTime(attestation) != nil {
+		return
+	}
 	f.updateLatestMessages(attestation, attestionIndicies)
 }
 
@@ -280,13 +283,11 @@ func (f *ForkChoiceStore) getLatestMessage(validatorIndex uint64) (LatestMessage
 }
 
 func (f *ForkChoiceStore) isUnequivocating(validatorIndex uint64) bool {
-	// f.equivocatingIndicies is a bitlist
-	index := validatorIndex / 8
-	if index >= uint64(len(f.equivocatingIndicies)) {
-		return false
-	}
-	subIndex := validatorIndex % 8
-	return f.equivocatingIndicies[index]&(1<<subIndex) != 0
+	return isEquivocating(f.equivocatingIndicies, validatorIndex)
+}
+
+func isEquivocating(indices []byte, index uint64) bool {
+	return index/8 < uint64(len(indices)) && indices[index/8]&(1<<(index%8)) != 0
 }
 
 func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
@@ -316,70 +317,80 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	f.voteTally.update(f, validatorIndex)
 }
 
-func (f *ForkChoiceStore) updateLatestMessages(
-	attestation *solid.Attestation,
-	indicies []uint64,
-) {
-	if f.trackGloasWeights() {
+func (f *ForkChoiceStore) updateLatestMessages(attestation *solid.Attestation, indices []uint64) {
+	data := attestation.Data
+	message := LatestMessage{Epoch: data.Target.Epoch, Slot: data.Slot, Root: data.BeaconBlockRoot, PayloadPresent: data.CommitteeIndex == 1}
+	slot := f.Slot()
+	tracker := f.fastConfirmation
+	if tracker != nil {
+		slot = tracker.voteSlot
+		if data.Slot >= slot {
+			tracker.queueVotes(message, indices)
+			return
+		}
+	}
+	gloas := f.prepareVoteUpdate(slot)
+	for _, index := range indices {
+		f.applyLatestMessage(index, message, gloas)
+	}
+}
+
+func (t *fastConfirmationTracker) queueVotes(message LatestMessage, indices []uint64) {
+	pending := t.pendingVotes[message.Slot]
+	if pending == nil {
+		pending = make(map[uint64]LatestMessage)
+		t.pendingVotes[message.Slot] = pending
+	}
+	for _, index := range indices {
+		if _, exists := pending[index]; !exists {
+			pending[index] = message
+		}
+	}
+}
+
+func (f *ForkChoiceStore) applyPendingVotes(currentSlot uint64) {
+	tracker := f.fastConfirmation
+	for tracker.voteSlot < currentSlot {
+		slot := tracker.voteSlot
+		tracker.voteSlot++
+		pending := tracker.pendingVotes[slot]
+		if len(pending) > 0 {
+			gloas := f.prepareVoteUpdate(tracker.voteSlot)
+			for index, message := range pending {
+				f.applyLatestMessage(index, message, gloas)
+			}
+		}
+		delete(tracker.pendingVotes, slot)
+	}
+}
+
+func (f *ForkChoiceStore) prepareVoteUpdate(slot uint64) bool {
+	gloas := f.beaconCfg.GetCurrentStateVersion(f.computeEpochAtSlot(slot)) >= clparams.GloasVersion
+	if gloas {
 		f.voteTally = voteTally{}
-		f.updateLatestMessagesGloas(attestation, indicies)
+	}
+	return gloas
+}
+
+func (f *ForkChoiceStore) applyLatestMessage(index uint64, message LatestMessage, gloas bool) {
+	if f.isUnequivocating(index) {
+		return
+	}
+	previous, has := f.getLatestMessage(index)
+	if gloas {
+		if has && message.Slot <= previous.Slot {
+			return
+		}
+		message.Epoch = 0
 	} else {
-		f.updateLatestMessagesPreGloas(attestation, indicies)
+		if has && message.Epoch <= previous.Epoch {
+			return
+		}
+		message.PayloadPresent = false
 	}
-}
-
-func (f *ForkChoiceStore) updateLatestMessagesPreGloas(
-	attestation *solid.Attestation,
-	indicies []uint64,
-) {
-	slot := attestation.Data.Slot
-	beaconBlockRoot := attestation.Data.BeaconBlockRoot
-	target := attestation.Data.Target
-
-	for _, index := range indicies {
-		if f.isUnequivocating(index) {
-			continue
-		}
-		validatorMessage, has := f.getLatestMessage(index)
-		if !has || target.Epoch > validatorMessage.Epoch {
-			f.setLatestMessage(index, LatestMessage{
-				Epoch: target.Epoch,
-				Root:  beaconBlockRoot,
-				Slot:  slot, // Set slot for GLOAS compatibility at fork boundary
-			})
-		}
-	}
-}
-
-// updateLatestMessagesGloas updates latest messages using slot-based comparison
-// and tracks payload_present from the attestation index.
-// [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) updateLatestMessagesGloas(
-	attestation *solid.Attestation,
-	indicies []uint64,
-) {
-	slot := attestation.Data.Slot
-	beaconBlockRoot := attestation.Data.BeaconBlockRoot
-	payloadPresent := attestation.Data.CommitteeIndex == 1
-	updated := false
-
-	for _, index := range indicies {
-		if f.isUnequivocating(index) {
-			continue
-		}
-		validatorMessage, has := f.getLatestMessage(index)
-		if !has || slot > validatorMessage.Slot {
-			f.setLatestMessage(index, LatestMessage{
-				Slot:           slot,
-				Root:           beaconBlockRoot,
-				PayloadPresent: payloadPresent,
-			})
-			updated = true
-		}
-	}
-	if updated {
-		f.headHash = common.Hash{}
-		f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.setLatestMessage(index, message)
+	if gloas || f.fastConfirmation != nil {
+		f.invalidateCachedHead()
 	}
 }
 

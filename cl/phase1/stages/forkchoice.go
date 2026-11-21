@@ -60,6 +60,10 @@ func selectForkChoiceHead(cfg *Cfg) (head forkchoice.ForkChoiceNode, headSlot ui
 	return head, headSlot, nil
 }
 
+type forkChoiceUpdate struct {
+	beaconHead, head, safe, finalized common.Hash
+}
+
 func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head forkchoice.ForkChoiceNode, headSlot uint64) error {
 	headRoot := head.Root
 	headVersion := cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
@@ -73,14 +77,25 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 	if engine := cfg.forkChoice.Engine(); engine != nil {
 		finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
 		justifiedCheckpoint := cfg.forkChoice.JustifiedCheckpoint()
-		logger.Debug("Caplin is sending forkchoice")
-
-		if _, err := engine.ForkChoiceUpdate(
-			ctx,
+		finalizedHash, safeHash := cfg.forkChoice.GetExecutionFinalityHashes(headRoot,
 			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
-			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
-			executionHead, nil, headVersion,
+			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root))
+		update := forkChoiceUpdate{beaconHead: headRoot, head: executionHead, safe: safeHash, finalized: finalizedHash}
+		if cfg.safeUpdatePending && update == cfg.lastFailedForkChoice {
+			if delay := time.Until(cfg.forkChoiceRetryAt); delay > 0 {
+				if err := common.Sleep(ctx, delay); err != nil {
+					return err
+				}
+			}
+		}
+		logger.Debug("Caplin is sending forkchoice")
+		if _, err := engine.ForkChoiceUpdate(
+			ctx, finalizedHash, safeHash, executionHead, nil, headVersion,
 		); err != nil {
+			if cfg.safeUpdatePending {
+				cfg.lastFailedForkChoice = update
+				cfg.forkChoiceRetryAt = time.Now().Add(sleepForSlotRewakeInterval)
+			}
 			switch {
 			case errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout):
 				// A forkchoice update that ran out of time is not a rejection, and sync has no payload
@@ -89,10 +104,18 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 			case errors.Is(err, execution_client.ErrForkChoiceUpdateBusy):
 				logger.Debug("[Caplin] forkchoice update was not started", "head", headRoot)
 				recordExecutionHead = false
+			case errors.Is(err, execution_client.ErrForkChoiceUpdateSyncing):
+				logger.Debug("[Caplin] forkchoice update deferred", "head", headRoot, "err", err)
+				recordExecutionHead = false
 			default:
 				return fmt.Errorf("failed to run forkchoice: %w", err)
 			}
+		} else {
+			cfg.safeUpdatePending = false
+			cfg.forkChoiceRetryAt = time.Time{}
 		}
+	} else {
+		cfg.safeUpdatePending = false
 	}
 	if recordExecutionHead {
 		cfg.executionHead = executionHead
@@ -589,6 +612,11 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 	cfg.forkChoiceWaitingForIndices = false
 	head, headSlot, err := selectForkChoiceHead(cfg)
 	if err != nil {
+		if cfg.safeUpdatePending {
+			if waitErr := common.Sleep(ctx, sleepForSlotRewakeInterval); waitErr != nil {
+				return waitErr
+			}
+		}
 		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
 	}
 	headRoot := head.Root

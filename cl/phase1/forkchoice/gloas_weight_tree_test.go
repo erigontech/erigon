@@ -57,7 +57,7 @@ func TestPreGloasDoesNotDirtyGloasWeightTree(t *testing.T) {
 			Target:          solid.Checkpoint{Epoch: 2, Root: common.HexToHash("0xaaaa")},
 		},
 	}
-	f.updateLatestMessagesPreGloas(att, []uint64{1, 2, 3})
+	f.updateLatestMessages(att, []uint64{1, 2, 3})
 
 	msg, has := f.getLatestMessage(2)
 	require.True(t, has)
@@ -660,7 +660,9 @@ func TestGloasUpdatesBeforeBaselineAreDropped(t *testing.T) {
 			Target:          solid.Checkpoint{Epoch: 2, Root: common.HexToHash("0xaaaa")},
 		},
 	}
-	f.updateLatestMessagesGloas(att, []uint64{1, 2, 3})
+	store, _, _ := executionHeadFixture(t)
+	f.beaconCfg = store.beaconCfg
+	f.updateLatestMessages(att, []uint64{1, 2, 3})
 
 	require.Empty(t, f.gloasWeightTree.applied)
 }

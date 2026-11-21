@@ -62,6 +62,7 @@ type CaplinCliCfg struct {
 	AllowedOrigins            []string `json:"allowed_origins"`
 	AllowCredentials          bool     `json:"allow_credentials"`
 	PreserveGraffiti          bool     `json:"preserve_graffiti"`
+	EnableFastConfirmation    bool     `json:"enable_fast_confirmation"`
 	DisablePayloadPreparation bool     `json:"disable_payload_preparation"`
 	SubscribeAllTopics        bool     `json:"subscribe_all_topics"`
 
@@ -90,6 +91,7 @@ func SetupCaplinCli(ctx *cli.Command) (cfg *CaplinCliCfg, err error) {
 	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Uint(caplinflags.BeaconApiPort.Name))
 	cfg.AllowCredentials = ctx.Bool(utils.BeaconApiAllowCredentialsFlag.Name)
 	cfg.PreserveGraffiti = ctx.Bool(utils.BeaconApiPreserveGraffitiFlag.Name)
+	cfg.EnableFastConfirmation = ctx.Bool(utils.EnableFastConfirmationFlag.Name)
 	cfg.DisablePayloadPreparation = ctx.Bool(utils.CaplinPayloadPreparationDisableFlag.Name)
 	cfg.AllowedMethods = ctx.StringSlice(utils.BeaconApiAllowMethodsFlag.Name)
 	cfg.AllowedOrigins = ctx.StringSlice(utils.BeaconApiAllowOriginsFlag.Name)
