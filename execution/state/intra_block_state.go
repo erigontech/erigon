@@ -1797,13 +1797,29 @@ func (ibs *IntraBlockState) setCreatedCode(addr accounts.Address, code accounts.
 // mirrors stateObject.SetCode's set decision and the net-zero drop without a
 // transient stateObject. An absent account is created first (as GetOrNewStateObject
 // would), which makes the pre-write code empty and disables the net-zero check.
-func (ibs *IntraBlockState) writeCodeVersioned(addr accounts.Address, code accounts.Code, reason tracing.CodeChangeReason) error {
+// getOrCreateVersioned ensures addr has a record on the versioned path — creating
+// one when the version map has none — and reports whether this tx created it (its
+// own AddressPath write, from the create here or an earlier op in this tx). It is
+// the versioned form of the old GetOrNewStateObject.
+func (ibs *IntraBlockState) getOrCreateVersioned(addr accounts.Address) (created bool, err error) {
 	base, _, _, err := ibs.versionedAccountBase(addr, false)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if base == nil {
 		ibs.createVersioned(addr, false)
+	}
+	_, created = ibs.versionedWrites.GetAddress(addr)
+	return created, nil
+}
+
+func (ibs *IntraBlockState) writeCodeVersioned(addr accounts.Address, code accounts.Code, reason tracing.CodeChangeReason) error {
+	// createdThisTx is the own AddressPath write (from the create here or an earlier
+	// op in this tx, e.g. create→SELFDESTRUCT), not base == nil: the create's own
+	// AddressPath write already makes base non-nil.
+	createdThisTx, err := ibs.getOrCreateVersioned(addr)
+	if err != nil {
+		return err
 	}
 	// baseCodeHash ("what this SetCode saw") is the current cell, including this
 	// tx's own earlier code writes. origHash (the cumulative net-zero baseline) is
@@ -1825,15 +1841,15 @@ func (ibs *IntraBlockState) writeCodeVersioned(addr accounts.Address, code accou
 	if seed.Hash == code.Hash && bytes.Equal(seed.Bytes, code.Bytes) {
 		return nil
 	}
-	ibs.journalCodeChange(addr, baseCodeHash, seed.Bytes, code, !ibs.hasWrite(addr, CodePath, accounts.NilKey), reason)
+	// Pass seed.Hash (the actual previous code's hash), not baseCodeHash (the
+	// CodeHashPath cell, which can lag this tx's own Code write), so a revert restores
+	// exactly what the materialized path restored.
+	ibs.journalCodeChange(addr, seed.Hash, seed.Bytes, code, !ibs.hasWrite(addr, CodePath, accounts.NilKey), reason)
 	// Skip when the new code matches either the value seen by this SetCode call
 	// (revert to in-tx base) or the pre-tx original (cumulative net-zero, e.g. an
 	// EIP-7702 delegate-then-reset in the same tx). The net-zero case is disabled
 	// for an account this tx created — its origHash is a pre-creation snapshot, not a
-	// value the tx reverts to. Own-creation is the AddressPath write (from the create
-	// above or an earlier op in this tx, e.g. create→SELFDESTRUCT), not base == nil:
-	// the create's own AddressPath write already makes base non-nil.
-	_, createdThisTx := ibs.versionedWrites.GetAddress(addr)
+	// value the tx reverts to.
 	matchesOriginal := !createdThisTx && code.Hash == origHash
 	unchanged := code.Hash == baseCodeHash || matchesOriginal
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
@@ -1945,12 +1961,8 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 // storage. This function should only be used for debugging.
 func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) error {
 	if ibs.versionMap != nil {
-		base, _, _, err := ibs.versionedAccountBase(addr, false)
-		if err != nil {
+		if _, err := ibs.getOrCreateVersioned(addr); err != nil {
 			return err
-		}
-		if base == nil {
-			ibs.createVersioned(addr, false)
 		}
 		incarnation, err := ibs.GetIncarnation(addr)
 		if err != nil {
@@ -1994,12 +2006,8 @@ func (ibs *IntraBlockState) SetIncarnation(addr accounts.Address, incarnation ui
 	}
 
 	if ibs.versionMap != nil {
-		base, _, _, err := ibs.versionedAccountBase(addr, false)
-		if err != nil {
+		if _, err := ibs.getOrCreateVersioned(addr); err != nil {
 			return err
-		}
-		if base == nil {
-			ibs.createVersioned(addr, false)
 		}
 		ibs.recordWriteIncarnation(addr, incarnation)
 		return nil
@@ -2459,23 +2467,30 @@ func (ibs *IntraBlockState) createVersioned(addr accounts.Address, hadPrevious b
 // createAccountVersioned is CreateAccount on the versioned path: it resolves the
 // prior account's lifecycle (existence, self-destruct, carried balance, prior
 // incarnation) from the version map and base reader with no stateObject.
+// traceCreateAccount is the deferred CreateAccount logger shared by the versioned
+// and materialized paths; each passes its own error and resolved-balance closure
+// (evaluated at defer time).
+func (ibs *IntraBlockState) traceCreateAccount(addr accounts.Address, contractCreation bool, errp *error, balance func() string) func() {
+	return func() {
+		var creatingContract string
+		if contractCreation {
+			creatingContract = " (contract)"
+		}
+		if *errp != nil {
+			fmt.Printf("%d (%d.%d) Create Account%s: %x, err=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, creatingContract, addr, *errp)
+			return
+		}
+		fmt.Printf("%d (%d.%d) Create Account%s: %x, balance=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, creatingContract, addr, balance())
+	}
+}
+
 func (ibs *IntraBlockState) createAccountVersioned(addr accounts.Address, contractCreation bool) (err error) {
 	var hadPrevious, prevSelfdestructed bool
 	var prevIncarnation, prevPrevIncarnation uint64
 	var prevBalance uint256.Int
 
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-		defer func() {
-			var creatingContract string
-			if contractCreation {
-				creatingContract = " (contract)"
-			}
-			if err != nil {
-				fmt.Printf("%d (%d.%d) Create Account%s: %x, err=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, creatingContract, addr, err)
-			} else {
-				fmt.Printf("%d (%d.%d) Create Account%s: %x, balance=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, creatingContract, addr, prevBalance.String())
-			}
-		}()
+		defer ibs.traceCreateAccount(addr, contractCreation, &err, func() string { return prevBalance.String() })()
 	}
 
 	readAccount, _, _, err := ibs.getVersionedAccount(addr, true)
@@ -2639,21 +2654,13 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	var previous *stateObject
 
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-		defer func() {
-			var creatingContract string
-			if contractCreation {
-				creatingContract = " (contract)"
+		defer ibs.traceCreateAccount(addr, contractCreation, &err, func() string {
+			var bal uint256.Int
+			if previous != nil {
+				bal = previous.data.Balance
 			}
-			if err != nil {
-				fmt.Printf("%d (%d.%d) Create Account%s: %x, err=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, creatingContract, addr, err)
-			} else {
-				var bal uint256.Int
-				if previous != nil {
-					bal = previous.data.Balance
-				}
-				fmt.Printf("%d (%d.%d) Create Account%s: %x, balance=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, creatingContract, addr, bal.String())
-			}
-		}()
+			return bal.String()
+		})()
 	}
 
 	previous, err = ibs.getStateObject(addr, true)
