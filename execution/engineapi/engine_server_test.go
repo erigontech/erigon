@@ -182,7 +182,7 @@ func TestNewPayloadBoundsDerivedBlobHashAllocations(t *testing.T) {
 	measure := func(derive bool) uint64 {
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
-		status, err := srv.newPayload(ctx, payload, []common.Hash{}, &common.Hash{}, nil, clparams.DenebVersion, derive, nil)
+		status, err := srv.newPayload(ctx, payload, []common.Hash{}, &common.Hash{}, nil, nil, clparams.DenebVersion, derive, nil)
 		runtime.ReadMemStats(&after)
 		require.NoError(t, err)
 		require.Equal(t, engine_types.InvalidStatus, status.Status)
@@ -291,7 +291,7 @@ func TestNewPayloadBuildsTheWitnessAfterTheEngineLock(t *testing.T) {
 
 	var validHash common.Hash
 	var freeInOnValid bool
-	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash, _ *jsonrpc.ExecutionWitnessResult) {
+	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash, _ *jsonrpc.ExecutionWitnessResult) {
 		validHash, freeInOnValid = blockHash, engineLockFree()
 	})
 	require.NoError(t, err)
@@ -316,7 +316,7 @@ func TestNewPayloadWaitsForReadinessWithoutTheEngineLock(t *testing.T) {
 		return true, nil
 	}
 
-	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(common.Hash, *jsonrpc.ExecutionWitnessResult) {})
+	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, nil, clparams.CapellaVersion, false, func(common.Hash, *jsonrpc.ExecutionWitnessResult) {})
 	require.NoError(t, err)
 	require.Equal(t, engine_types.ValidStatus, status.Status)
 	require.False(t, lockHeldInReady)
@@ -403,6 +403,9 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 
 			var status *engine_types.PayloadStatus
 			switch {
+			case test.frame:
+				payload.BlockAccessList = &hexutil.Bytes{0xc0}
+				status, err = srv.NewPayloadV6(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{}, []hexutil.Bytes{})
 			case test.amsterdam:
 				payload.BlockAccessList = &hexutil.Bytes{0xc0}
 				status, err = srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
@@ -1558,7 +1561,7 @@ func (c *witnessChain) witness(block *types.Block) (*engine_types.PayloadStatus,
 	require.NoError(c.t, err)
 	var witness *jsonrpc.ExecutionWitnessResult
 	var witnessErr error
-	status, err := c.srv.newPayload(c.t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash, built *jsonrpc.ExecutionWitnessResult) {
+	status, err := c.srv.newPayload(c.t.Context(), payload, nil, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash, built *jsonrpc.ExecutionWitnessResult) {
 		witness, witnessErr = c.srv.payloadWitness(c.t.Context(), blockHash, built)
 	})
 	require.NoError(c.t, err)
@@ -1631,7 +1634,7 @@ func TestNewPayloadWitnessSurvivesAnEvictionBeforeOnValid(t *testing.T) {
 	require.NoError(t, err)
 	var witness *jsonrpc.ExecutionWitnessResult
 	var witnessErr error
-	status, err := c.srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash, built *jsonrpc.ExecutionWitnessResult) {
+	status, err := c.srv.newPayload(t.Context(), payload, nil, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash, built *jsonrpc.ExecutionWitnessResult) {
 		c.dropCachedWitnesses()
 		witness, witnessErr = c.srv.payloadWitness(t.Context(), blockHash, built)
 	})
@@ -1728,7 +1731,7 @@ func TestNewPayloadWitnessAnswersSyncingWhenTheModuleIsBusy(t *testing.T) {
 	}
 
 	onValidCalled := false
-	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(common.Hash, *jsonrpc.ExecutionWitnessResult) { onValidCalled = true })
+	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, nil, clparams.CapellaVersion, false, func(common.Hash, *jsonrpc.ExecutionWitnessResult) { onValidCalled = true })
 	require.NoError(t, err)
 	require.Equal(t, engine_types.SyncingStatus, status.Status)
 	require.False(t, onValidCalled)

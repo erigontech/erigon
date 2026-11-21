@@ -337,6 +337,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_newPayloadV3                        | Yes     |                                                       |
 | engine_newPayloadV4                        | Yes     | Added in Pectra                                       |
 | engine_newPayloadV5                        | Yes     | Added in Amsterdam                                    |
+| engine_newPayloadV6                        | Yes     | Added in Bogota                                       |
 | engine_forkchoiceUpdatedV1                 | Yes     |                                                       |
 | engine_forkchoiceUpdatedV2                 | Yes     |                                                       |
 | engine_forkchoiceUpdatedV3                 | Yes     |                                                       |

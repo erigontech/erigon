@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
@@ -33,8 +35,13 @@ import (
 )
 
 func newPayloadWitnessTester(t *testing.T, args engineapitester.EngineApiTesterInitArgs) engineapitester.EngineApiTester {
+	return newPayloadWitnessTesterWithGenesis(t, args, func(*types.Genesis) {})
+}
+
+func newPayloadWitnessTesterWithGenesis(t *testing.T, args engineapitester.EngineApiTesterInitArgs, tweak func(*types.Genesis)) engineapitester.EngineApiTester {
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
 	require.NoError(t, err)
+	tweak(genesis)
 	args.Logger = testlog.Logger(t, log.LvlDebug)
 	args.DataDir = t.TempDir()
 	args.Genesis = genesis
@@ -64,9 +71,13 @@ func buildChangerPayload(ctx context.Context, t *testing.T, eat engineapitester.
 }
 
 func postPayloadWitness(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, p *engineapitester.MockClPayload) (int, []byte) {
+	return postForkPayloadWitness(ctx, t, eat, p, clparams.GloasVersion, "amsterdam", nil)
+}
+
+func postForkPayloadWitness(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, p *engineapitester.MockClPayload, version clparams.StateVersion, fork string, inclusionList []hexutil.Bytes) (int, []byte) {
 	payload := *p.ExecutionPayload
-	payload.SSZVersion = clparams.GloasVersion
-	body, err := engineapi.EncodeNewPayloadEnvelope(clparams.GloasVersion, &payload, *p.ParentBeaconBlockRoot, p.ExecutionRequests)
+	payload.SSZVersion = version
+	body, err := engineapi.EncodeNewPayloadEnvelope(version, &payload, *p.ParentBeaconBlockRoot, p.ExecutionRequests, inclusionList)
 	require.NoError(t, err)
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"iat": time.Now().Unix()}).SignedString(eat.JwtSecret)
 	require.NoError(t, err)
@@ -74,7 +85,7 @@ func postPayloadWitness(ctx context.Context, t *testing.T, eat engineapitester.E
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/octet-stream")
-	req.Header.Set("Eth-Execution-Version", "amsterdam")
+	req.Header.Set("Eth-Execution-Version", fork)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -85,12 +96,18 @@ func postPayloadWitness(ctx context.Context, t *testing.T, eat engineapitester.E
 
 func requirePayloadWitness(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, p *engineapitester.MockClPayload) *jsonrpc.ExecutionWitnessResult {
 	code, body := postPayloadWitness(ctx, t, eat, p)
+	_, witness := requireValidWithWitness(t, code, body, clparams.GloasVersion)
+	return witness
+}
+
+func requireValidWithWitness(t *testing.T, code int, body []byte, version clparams.StateVersion) (*enginetypes.PayloadStatus, *jsonrpc.ExecutionWitnessResult) {
+	t.Helper()
 	require.Equal(t, http.StatusOK, code, string(body))
-	status, witness, err := engineapi.DecodePayloadStatusWithWitness(body)
+	status, witness, err := engineapi.DecodePayloadStatusWithWitness(body, version)
 	require.NoError(t, err)
 	require.Equal(t, enginetypes.ValidStatus, status.Status, status.ValidationError)
 	require.NotNil(t, witness)
-	return witness
+	return status, witness
 }
 
 // The reference is debug_executionWitness in canonical mode, rebuilt from commitment
@@ -145,6 +162,36 @@ func TestEngineApiPayloadWitnessForValidatedPayload(t *testing.T) {
 		witness := requirePayloadWitness(ctx, t, eat, payload)
 		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payload))
 		requireDebugExecutionWitness(ctx, t, eat, payload, witness)
+	})
+}
+
+// A validated Bogota payload resubmitted with a new inclusion list gets that list checked and its witness, while the
+// fork validator still retains its state.
+func TestEngineApiPayloadWitnessChecksNewInclusionListOfValidatedPayload(t *testing.T) {
+	eat := newPayloadWitnessTesterWithGenesis(t, engineapitester.EngineApiTesterInitArgs{}, func(genesis *types.Genesis) {
+		genesis.Config.BogotaTime = common.NewUint64(0)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		payload, _ := buildChangerPayload(ctx, t, eat)
+		status, err := eat.MockCl.InsertNewPayload(ctx, payload)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.ValidStatus, status.Status)
+
+		unfundedKey, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		txn, err := types.SignTx(
+			types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(common.GWei), nil),
+			*types.LatestSignerForChainID(eat.ChainId()),
+			unfundedKey,
+		)
+		require.NoError(t, err)
+		var encoded bytes.Buffer
+		require.NoError(t, txn.MarshalBinary(&encoded))
+
+		code, body := postForkPayloadWitness(ctx, t, eat, payload, clparams.HezeVersion, "bogota", []hexutil.Bytes{encoded.Bytes()})
+		status, witness := requireValidWithWitness(t, code, body, clparams.HezeVersion)
+		require.NotNil(t, status.InclusionListSatisfied)
+		require.NotEmpty(t, witness.State)
 	})
 }
 
