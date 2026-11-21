@@ -310,9 +310,17 @@ func convertCommitmentFileV3(
 			if _, ok := seen[k]; ok {
 				continue
 			}
-			v, _, _, _, readErr := at.d[kv.CommitmentDomain].getLatestFromFiles([]byte(k), nil, stepTo-1)
+			commitmentRo := at.d[kv.CommitmentDomain]
+			v, _, fromTxNum, toTxNum, readErr := commitmentRo.getLatestFromFiles([]byte(k), nil, stepTo-1)
 			if readErr != nil {
 				return readErr
+			}
+			// v comes from an older file, while the workers expand references against this
+			// file's range: expand them here, against v's own file. Full keys stay as they are.
+			if CommitmentBranchReferenced(commitmentRo.fileVersionByRange(fromTxNum, toTxNum), stepSize, fromTxNum, toTxNum) {
+				if v, readErr = expandSqueezedCommitmentBranch(at, v, fromTxNum, toTxNum); readErr != nil {
+					return fmt.Errorf("expand squeezed branch: %w", readErr)
+				}
 			}
 			if addErr := add([]byte(k), bytes.Clone(v)); addErr != nil {
 				return addErr

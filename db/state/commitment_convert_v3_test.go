@@ -779,6 +779,13 @@ func TestConvertCommitmentFiles_V3RebuiltStepRefusesBeforeSwap(t *testing.T) {
 }
 
 func TestConvertCommitmentFiles_V3FoldsTheTailAfterTheStoredState(t *testing.T) {
+	t.Run("plain", func(t *testing.T) { testV3FoldsTheTail(t, false) })
+	// A key the first file's tail fold changed, which the next file does not hold, is read
+	// back from the first file: its references resolve against that file's range.
+	t.Run("squeezed", func(t *testing.T) { testV3FoldsTheTail(t, true) })
+}
+
+func testV3FoldsTheTail(t *testing.T, squeeze bool) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	pairs, others := accountPairsByFirstNibble(t)
 	x, y, w, z := pairs[0][0], pairs[0][1], pairs[1][0], pairs[1][1]
@@ -810,6 +817,12 @@ func TestConvertCommitmentFiles_V3FoldsTheTailAfterTheStoredState(t *testing.T) 
 		maxTxNums[block] = uint64(block)*3 + 2
 	}
 
+	if squeeze {
+		runOrchestrator(t, db, state.ConvertOpts{TargetSqueeze: true})
+		first := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)[0]
+		require.True(t, strings.HasPrefix(filepath.Base(first), "v2.1-"), "%s is squeezed", filepath.Base(first))
+		require.NoError(t, dir.RemoveAll(filepath.Join(agg.Dirs().Snap, "backup")))
+	}
 	func() {
 		at := agg.BeginFilesRo()
 		defer at.Close()
