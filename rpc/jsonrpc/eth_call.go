@@ -108,10 +108,8 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 	defer tx.Rollback()
 
 	pre, preconfirmed := rpchelper.PreconfirmedView(ctx, tx, blockNrOrHash, api.filters)
-	if !preconfirmed {
-		if err := rejectPendingState(blockNrOrHash); err != nil {
-			return nil, err
-		}
+	if !preconfirmed && rejectPendingState(blockNrOrHash) != nil {
+		blockNrOrHash = latestExecutedNumOrHash
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)

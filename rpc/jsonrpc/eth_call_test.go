@@ -713,11 +713,6 @@ func TestStateCallMethodsRejectPendingTag(t *testing.T) {
 	ctx := context.Background()
 	pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
 
-	t.Run("eth_call", func(t *testing.T) {
-		_, err := api.Call(ctx, ethapi.CallArgs{}, &pending, nil, nil)
-		require.ErrorIs(t, err, errPendingStateNotSupported)
-	})
-
 	t.Run("eth_createAccessList", func(t *testing.T) {
 		_, err := api.CreateAccessList(ctx, ethapi.CallArgs{}, &pending, nil, nil)
 		require.ErrorIs(t, err, errPendingStateNotSupported)

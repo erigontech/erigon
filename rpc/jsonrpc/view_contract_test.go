@@ -197,10 +197,7 @@ func TestPendingTagStillRejectedByReplayEndpoints(t *testing.T) {
 	pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
 	args := ethapi2.CallArgs{From: &addr, To: &addr}
 
-	_, err := api.Call(m.Ctx, args, &pending, nil, nil)
-	require.ErrorIs(t, err, errPendingStateNotSupported)
-
-	_, err = api.CreateAccessList(m.Ctx, args, &pending, nil, nil)
+	_, err := api.CreateAccessList(m.Ctx, args, &pending, nil, nil)
 	require.ErrorIs(t, err, errPendingStateNotSupported)
 }
 
@@ -313,4 +310,22 @@ func TestCallBundleRejectsNonCanonicalBlockHash(t *testing.T) {
 
 	_, err := api.CallBundle(m.Ctx, []common.Hash{txHash}, selector, nil)
 	require.ErrorContains(t, err, "is not currently canonical")
+}
+
+func TestCallPendingWithoutFrontierAnswersFromLatestExecuted(t *testing.T) {
+	balanceOfProbe := append(append([]byte{0x73}, stateProbeAddr[:]...), 0x31, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3)
+	args := ethapi2.CallArgs{Data: (*hexutil.Bytes)(&balanceOfProbe)}
+	pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	latestExecuted := rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
+
+	for _, withPending := range []bool{true, false} {
+		api, m, pendingNum := pendingTestAPIs(t, withPending)
+		want, err := api.Call(m.Ctx, args, &latestExecuted, nil, nil)
+		require.NoError(t, err)
+		require.Equal(t, uint64(pendingNum-1), new(uint256.Int).SetBytes(want).Uint64(), "fixture: one wei per block")
+
+		got, err := api.Call(m.Ctx, args, &pending, nil, nil)
+		require.NoError(t, err, "eth_call must answer pending when no pre-executed frontier is published")
+		require.Equal(t, want, got)
+	}
 }

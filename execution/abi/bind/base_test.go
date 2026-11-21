@@ -21,12 +21,14 @@ package bind_test
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -261,4 +263,23 @@ func newMockLog(topics []common.Hash, txHash common.Hash) types.Log {
 		Index:       7,
 		Removed:     false,
 	}
+}
+
+type pendingErrCaller struct{ mockCaller }
+
+var errPendingRefused = errors.New("pending refused")
+
+func (pendingErrCaller) PendingCallContract(context.Context, bind.CallMsg) ([]byte, error) {
+	return nil, errPendingRefused
+}
+
+func TestPendingCallReturnsTheCallError(t *testing.T) {
+	out := abi.Arguments{{Type: abi.Type{T: abi.UintTy, Size: 256}}}
+	bc := bind.NewBoundContract(common.Address{}, abi.ABI{
+		Methods: map[string]abi.Method{"something": {Name: "something", Outputs: out}},
+	}, &pendingErrCaller{}, nil, nil)
+
+	var res []any
+	err := bc.Call(&bind.CallOpts{Pending: true}, &res, "something")
+	require.ErrorIs(t, err, errPendingRefused)
 }
