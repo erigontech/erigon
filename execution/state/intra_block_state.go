@@ -1802,8 +1802,7 @@ func (ibs *IntraBlockState) writeCodeVersioned(addr accounts.Address, code accou
 	if err != nil {
 		return err
 	}
-	newlyCreated := base == nil
-	if newlyCreated {
+	if base == nil {
 		ibs.createVersioned(addr, false)
 	}
 	// baseCodeHash ("what this SetCode saw") is the current cell, including this
@@ -1830,8 +1829,12 @@ func (ibs *IntraBlockState) writeCodeVersioned(addr accounts.Address, code accou
 	// Skip when the new code matches either the value seen by this SetCode call
 	// (revert to in-tx base) or the pre-tx original (cumulative net-zero, e.g. an
 	// EIP-7702 delegate-then-reset in the same tx). The net-zero case is disabled
-	// for a newly created account, whose original holds the pre-creation snapshot.
-	matchesOriginal := !newlyCreated && code.Hash == origHash
+	// for an account this tx created — its origHash is a pre-creation snapshot, not a
+	// value the tx reverts to. Own-creation is the AddressPath write (from the create
+	// above or an earlier op in this tx, e.g. create→SELFDESTRUCT), not base == nil:
+	// the create's own AddressPath write already makes base non-nil.
+	_, createdThisTx := ibs.versionedWrites.GetAddress(addr)
+	matchesOriginal := !createdThisTx && code.Hash == origHash
 	unchanged := code.Hash == baseCodeHash || matchesOriginal
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 		if unchanged {

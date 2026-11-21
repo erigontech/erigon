@@ -242,6 +242,102 @@ func TestNoMaterialize_CreateAfterBurnedCreditDependsOnDestruct(t *testing.T) {
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, true, ""))
 }
 
+// A tx that re-creates an account and sets its code back to the pre-block original
+// must still record the code write. The net-zero "matches original" skip applies
+// only to accounts the tx did NOT create; keying it off base==nil wrongly treated a
+// re-created account (whose own AddressPath write makes base non-nil) as not-created,
+// dropping the Code/CodeHash writes and leaving it code-less after the recreation
+// cleared the code hash.
+func TestNoMaterialize_RecreateWithOriginalCodeKeepsCodeWrite(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0xcc})
+	code := []byte("recreated-same-code")
+	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	committed := accounts.NewAccount()
+	committed.Nonce = 1
+	committed.Balance = *uint256.NewInt(1000)
+	committed.CodeHash = codeHash
+	ibs := NewWithVersionMap(&fieldReader{addr: addr, account: &committed, code: code}, NewVersionMap(nil))
+	ibs.SetTxContext(1, 0)
+
+	// Create the account and set code X, then self-destruct it, then (post-snapshot)
+	// clear the code and revert. The revert must restore code X. The net-zero skip
+	// must not fire for this tx-created account against its pre-block original hash.
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.NoError(t, ibs.SetCode(addr, code, tracing.CodeChangeContractCreation))
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	snap := ibs.PushSnapshot()
+	require.NoError(t, ibs.SetCode(addr, nil, tracing.CodeChangeUnspecified))
+	ibs.RevertToSnapshot(snap, nil)
+
+	got, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, code, got, "reverting the code clear must restore code X, not net-zero it away")
+	ch, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, codeHash, ch)
+}
+
+// codeSeed must resolve the previous code bytes from the version map when an
+// earlier tx in the block installed the code (its bytes are not in the pre-block
+// origin). Otherwise re-setting the identical code emits a spurious code-change
+// hook, and replacing it reports empty previous bytes to tracers.
+func TestNoMaterialize_SetCodeUsesEarlierTxCodeAsSeed(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0xdd})
+	codeX := []byte("earlier-tx-code-x")
+	vm := NewVersionMap(nil)
+	ibs0 := newNoMaterializeTx(vm, 0)
+	require.NoError(t, ibs0.CreateAccount(addr, true))
+	require.NoError(t, ibs0.SetCode(addr, codeX, tracing.CodeChangeContractCreation))
+	vm.FlushVersionedWrites(ibs0.VersionedWrites(), true)
+
+	type change struct{ prev, next []byte }
+	codeHook := func(rec *[]change) *tracing.Hooks {
+		return &tracing.Hooks{OnCodeChange: func(_ accounts.Address, _ accounts.CodeHash, prev []byte, _ accounts.CodeHash, code []byte) {
+			*rec = append(*rec, change{prev, code})
+		}}
+	}
+
+	// Re-setting the identical code installed by the earlier tx is a no-op.
+	var ch1 []change
+	ibs1 := newNoMaterializeTx(vm, 1)
+	ibs1.SetHooks(codeHook(&ch1))
+	require.NoError(t, ibs1.SetCode(addr, codeX, tracing.CodeChangeUnspecified))
+	require.Empty(t, ch1, "re-setting the earlier tx's code must emit no code change")
+
+	// Replacing it reports the earlier tx's code bytes as the previous value.
+	codeY := []byte("later-code-y")
+	var ch2 []change
+	ibs2 := newNoMaterializeTx(vm, 2)
+	ibs2.SetHooks(codeHook(&ch2))
+	require.NoError(t, ibs2.SetCode(addr, codeY, tracing.CodeChangeUnspecified))
+	require.Len(t, ch2, 1, "replacing the code emits exactly one change")
+	require.Equal(t, codeX, ch2[0].prev, "the previous code must be the earlier tx's bytes, not empty")
+	require.Equal(t, codeY, ch2[0].next)
+}
+
+// SetStorage (a debug-only full-storage replace) records the account's current
+// incarnation as read through the version map, not a transient object's field.
+// Pins the stateObject-free behaviour: for a freshly created contract the recorded
+// incarnation equals GetIncarnation (the materialized path recorded the object's 0).
+func TestNoMaterialize_SetStorageRecordsCurrentIncarnation(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0xee})
+	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+
+	require.NoError(t, ibs.SetStorage(addr, Storage{accounts.InternKey([32]byte{0x01}): *uint256.NewInt(7)}))
+
+	inc, err := ibs.GetIncarnation(addr)
+	require.NoError(t, err)
+	wInc, ok := ibs.VersionedWrites().GetIncarnation(addr)
+	require.True(t, ok, "SetStorage records an incarnation write")
+	require.Equal(t, inc, wInc.Val, "SetStorage records the account's current incarnation")
+}
+
 func newNoMaterializeTx(vm *VersionMap, txIndex int) *IntraBlockState {
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
 	ibs.SetTxContext(1, txIndex)
