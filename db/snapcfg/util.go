@@ -23,6 +23,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -589,8 +590,12 @@ func webseedsFrom(ctx context.Context, branch, chain string, fetch func(ctx cont
 
 func validWebseeds(named map[string]string) error {
 	for _, w := range named {
-		if _, err := WebseedToUrl(w); err != nil {
+		s, err := WebseedToUrl(w)
+		if err != nil {
 			return err
+		}
+		if u, err := url.Parse(s); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("webseed %q is not an HTTP(S) URL with a host", w)
 		}
 	}
 	return nil

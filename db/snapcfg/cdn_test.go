@@ -71,6 +71,15 @@ func TestWebseedsFollowTheManifestBranch(t *testing.T) {
 	got, ok = webseedsFrom(t.Context(), "release/3.10", networkname.Mainnet, unknownFormat)
 	require.True(t, ok)
 	require.Equal(t, EmbeddedWebseeds[networkname.Mainnet], got, "a webseed this version cannot parse falls back to the embedded list")
+
+	for _, bad := range []string{"v1:", "v1:erigon310-v1-snapshots-mainnet.erigon.network", "v1:ftp://erigon310-v1-snapshots-mainnet.erigon.network"} {
+		badURL := func(context.Context, string, string) ([]byte, error) {
+			return []byte(`"e3-v1-pub" = "` + bad + `"`), nil
+		}
+		got, ok = webseedsFrom(t.Context(), "release/3.10", networkname.Mainnet, badURL)
+		require.True(t, ok)
+		require.Equal(t, EmbeddedWebseeds[networkname.Mainnet], got, "%q is no HTTP(S) URL with a host", bad)
+	}
 }
 
 // Webseeds, which the downloader and the verify commands use, reads the branch the
