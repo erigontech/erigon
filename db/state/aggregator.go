@@ -38,6 +38,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -107,6 +108,8 @@ type Aggregator struct {
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
 
+	deferredDomainWarnings [kv.DomainLen]rate.Sometimes
+
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
@@ -159,6 +162,9 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*
 		workers:            workersCfg{merge: dbg.MergeWorkers, collateAndBuild: dbg.CollateWorkers},
 
 		produce: true,
+	}
+	for id := range a.deferredDomainWarnings {
+		a.deferredDomainWarnings[id].Interval = time.Minute
 	}
 	empty := &aggregatorVisible{}
 	a.visible.Store(empty)
@@ -1103,6 +1109,17 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 		}
 
 		g.Go(func() error {
+			canBuild, err := d.prepareSnapshotStep(workerCtx, db, firstStepNotInFiles, step)
+			if err != nil {
+				return fmt.Errorf("checking %s snapshot start: %w", d.Name, err)
+			}
+			if !canBuild {
+				a.deferredDomainWarnings[id].Do(func() {
+					a.logger.Warn("[snapshots] domain snapshot deferred", "domain", d.Name,
+						"filesEndStep", firstStepNotInFiles, "buildStep", step, "action", "finish backfilling the domain through this step")
+				})
+				return nil
+			}
 			var collation Collation
 			if err := db.View(workerCtx, func(tx kv.Tx) (err error) {
 				collation, err = d.collate(workerCtx, step, txFrom, txTo, tx)
