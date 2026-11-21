@@ -30,11 +30,16 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
+
+var noActiveKeyperSetRevertData = hexutil.Encode(crypto.Keccak256([]byte("NoActiveKeyperSet()"))[:4])
 
 type EonTracker interface {
 	Run(ctx context.Context) error
@@ -176,9 +181,7 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 	eon, ok, err := et.readEonAtNewBlockEvent(blockNum)
 	if errors.Is(err, bind.ErrNoCode) {
 		// A reset or unwind can precede deployment, invalidating all cached eons.
-		et.currentEon = nil
-		et.recentEons.Clear(false)
-		et.lastCleanupBlockNum = 0
+		et.resetEonCache()
 		return nil
 	}
 	if err != nil {
@@ -199,6 +202,12 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 	return nil
 }
 
+func (et *KsmEonTracker) resetEonCache() {
+	et.currentEon = nil
+	et.recentEons.Clear(false)
+	et.lastCleanupBlockNum = 0
+}
+
 func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (_ Eon, _ bool, err error) {
 	var cached bool
 	startTime := time.Now()
@@ -211,6 +220,9 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (_ Eon, _ bool,
 	}()
 
 	callOpts := &bind.CallOpts{BlockNumber: uint256.NewInt(blockNum)}
+	if et.currentEon != nil && blockNum < et.currentEon.ActivationBlock {
+		et.resetEonCache()
+	}
 	if et.currentEon == nil {
 		var numKeyperSets uint64
 		numKeyperSets, err = et.ksmContract.GetNumKeyperSets(callOpts)
@@ -237,6 +249,10 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (_ Eon, _ bool,
 
 	eonIndex, err := et.ksmContract.GetKeyperSetIndexByBlock(callOpts, blockNum)
 	if err != nil {
+		if dataErr, ok := errors.AsType[rpc.DataError](err); ok && dataErr.ErrorData() == noActiveKeyperSetRevertData {
+			et.resetEonCache()
+			return Eon{}, false, nil
+		}
 		return Eon{}, false, fmt.Errorf("get keyper set index by block: %w", err)
 	}
 
