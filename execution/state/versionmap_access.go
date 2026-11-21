@@ -364,6 +364,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 			rm := &WriteSet{}
 			rm.SetEmptyRemoval(addr, Version{TxIndex: int(idx) - 1})
 			stamps = append(stamps, rm)
+			vm.recordDerivedRemoval(addr, int(idx)-1)
 			if idx == maxIdx {
 				continue
 			}
@@ -379,6 +380,18 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 		vm.FlushVersionedWrites(ws, true)
 	}
 	return nil
+}
+
+func (vm *VersionMap) recordDerivedRemoval(addr accounts.Address, txIdx int) {
+	if vm.derivedRemovals == nil {
+		vm.derivedRemovals = map[derivedRemovalKey]struct{}{}
+	}
+	vm.derivedRemovals[derivedRemovalKey{addr, txIdx}] = struct{}{}
+}
+
+type derivedRemovalKey struct {
+	addr  accounts.Address
+	txIdx int
 }
 
 // SeedAddresses marks each BAL account as existing at its creating tx, so the address

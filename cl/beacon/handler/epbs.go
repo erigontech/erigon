@@ -1035,6 +1035,10 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
+	if err := signedEnvelope.ValidateForPersistence(a.beaconChainCfg); err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
 	receivedAt := time.Now()
 	if !blobDataIncluded && contents == nil {
 		contents, err = a.pendingLocalExecutionPayloadEnvelopeContents(signedEnvelope)

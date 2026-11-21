@@ -166,14 +166,17 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, logger
 		return nil, err
 	}
 	if err := CheckSaltFilesExist(dirs); err != nil {
+		rawDB.Close()
 		return nil, err
 	}
 	db, err := newTemporalDB(ctx, rawDB, logger)
 	if err != nil {
+		rawDB.Close()
 		return nil, err
 	}
 	blockSnaps, _, err := allSnapshots(ctx, db, logger)
 	if err != nil {
+		db.Close()
 		return nil, err
 	}
 	logSnapshotStats(ctx, db, blockSnaps, logger)
