@@ -219,7 +219,7 @@ func TestCodeSegment_DeclinedReadCountsOnce(t *testing.T) {
 	prev := dbg.KVReadLevelledMetrics
 	dbg.KVReadLevelledMetrics = true
 	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prev })
-	_, reader, addr, code := newSegmentRead(t, nil)
+	_, reader, addr, code := newSegmentRead(t, NewVersionMap(nil))
 	ibs := NewWithVersionMap(&decliningCodeReader{codeReader: reader.codeReader}, NewVersionMap(nil))
 	ibs.SetTxContext(100, 5)
 	ibs.SetVersion(0)
