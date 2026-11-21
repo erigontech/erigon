@@ -1040,6 +1040,34 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 }
 
+func TestSetCodePrerequisiteRejections(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		config   *chain.Config
+		creation bool
+		want     txpoolcfg.DiscardReason
+	}{
+		{"before Prague", chain.TestChainBerlinConfig, true, txpoolcfg.TypeNotActivated},
+		{"contract creation", chain.TestChainOsakaConfig, true, txpoolcfg.InvalidCreateTxn},
+		{"missing authorizations", chain.TestChainOsakaConfig, false, txpoolcfg.NoAuthorizations},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, tc.config)
+			slot := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
+			tx := slot.Txn.(*types.SetCodeTransaction)
+			tx.Authorizations = nil
+			if tc.creation {
+				tx.To = nil
+			}
+			var txns TxnSlots
+			txns.Append(slot, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.want}, reasons)
+		})
+	}
+}
+
 func TestSetCodeAuthorizationAdmission(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -1784,6 +1812,31 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			if reason != test.expected {
 				t.Errorf("expected %v, got %v", test.expected, reason)
 			}
+		})
+	}
+}
+
+func TestPoolDeclaredGasCap(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config *chain.Config
+		cap    uint64
+	}{
+		{"before Osaka", testforks.Forks["Prague"], params.MaxTxnGasLimit},
+		{"Amsterdam", chain.AllProtocolChanges, params.MaxTxnTotalGasLimit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, tc.config)
+			pool.blockGasLimit.Store(tc.cap + 1)
+			var txns TxnSlots
+			for i, gas := range []uint64{tc.cap, tc.cap + 1} {
+				slot := newTestTxnSlot(uint64(i), 0, 1, 2, gas)
+				slot.IDHash[0] = byte(i + 1)
+				txns.Append(slot, sender[:], true)
+			}
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.GasLimitTooHigh}, reasons)
 		})
 	}
 }

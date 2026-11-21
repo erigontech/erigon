@@ -49,6 +49,12 @@ type IntrinsicGasCalcResult struct {
 	FloorGasCost uint64
 }
 
+// CheckGasLimit returns the minimum gas required and whether the transaction covers it.
+func (r IntrinsicGasCalcResult) CheckGasLimit(gasLimit uint64) (required uint64, ok bool) {
+	required = max(r.ExecutionGas, r.FloorGasCost)
+	return required, gasLimit >= required
+}
+
 type FrameIntrinsicGasCalcArgs struct {
 	FramesLen         uint64
 	KeyedNoncesLen    uint64

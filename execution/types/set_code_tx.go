@@ -35,6 +35,26 @@ import (
 
 const DelegateDesignationCodeSize = 23
 
+var (
+	ErrSetCodePrePrague           = errors.New("SetCode transaction not allowed before Prague fork")
+	ErrSetCodeContractCreation    = errors.New("contract creation not allowed with type4 txs")
+	ErrSetCodeEmptyAuthorizations = errors.New("SetCode transaction must have at least one authorization")
+)
+
+// ValidateSetCodePrerequisites treats a nil authorization list as an empty SetCode list.
+func ValidateSetCodePrerequisites(auths []Authorization, contractCreation, isPrague bool) error {
+	if !isPrague {
+		return ErrSetCodePrePrague
+	}
+	if contractCreation {
+		return ErrSetCodeContractCreation
+	}
+	if len(auths) == 0 {
+		return ErrSetCodeEmptyAuthorizations
+	}
+	return nil
+}
+
 type SetCodeTransaction struct {
 	DynamicFeeTransaction
 	Authorizations []Authorization
