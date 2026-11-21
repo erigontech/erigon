@@ -56,7 +56,6 @@ type Task interface {
 		calcFees bool) *TxResult
 
 	Version() state.Version
-	VersionMap() *state.VersionMap
 	Reads(ibs *state.IntraBlockState) state.ReadSet
 	Writes(ibs *state.IntraBlockState) *state.WriteSet
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
@@ -415,10 +414,6 @@ func (t *TxTask) Dependencies() []int {
 	}
 
 	return t.dependencies
-}
-
-func (t *TxTask) VersionMap() *state.VersionMap {
-	return nil
 }
 
 func (t *TxTask) Reads(ibs *state.IntraBlockState) state.ReadSet {
