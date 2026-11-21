@@ -20,53 +20,59 @@
 package cli
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/db/version"
 )
 
-// HelpData is a one shot struct to pass to the usage template
-type HelpData struct {
-	App        any
-	FlagGroups []FlagGroup
-}
+// NewApp creates an app with sane defaults.
+func NewApp(desc string) *cli.Command {
+	app := &cli.Command{}
+	app.Name = filepath.Base(os.Args[0])
+	app.Version = version.VersionWithCommit(version.GitCommit)
+	app.Usage = desc
+	app.EnableShellCompletion = true
 
-// FlagGroup is a collection of flags belonging to a single topic.
-type FlagGroup struct {
-	Name  string
-	Flags []cli.Flag
-}
+	app.Suggest = true
 
-// ByCategory sorts an array of FlagGroup by Name in the order
-// defined in AppHelpFlagGroups.
-type ByCategory []FlagGroup
-
-func (a ByCategory) Len() int      { return len(a) }
-func (a ByCategory) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
-func (a ByCategory) Less(i, j int) bool {
-	iCat, jCat := a[i].Name, a[j].Name
-	iIdx, jIdx := len(a), len(a) // ensure non categorized flags come last
-
-	for i, group := range a {
-		if iCat == group.Name {
-			iIdx = i
-		}
-		if jCat == group.Name {
-			jIdx = i
-		}
+	// Only show usage if explicitly requested via --help
+	app.OnUsageError = func(ctx context.Context, cmd *cli.Command, err error, isSubcommand bool) error {
+		// Print the error but not the usage
+		root := cmd.Root()
+		fmt.Fprintf(errWriter(root), "Error: %v\n", err)
+		fmt.Fprintf(errWriter(root), "Run '%s --help' for usage.\n", root.Name)
+		// Return cli.Exit to signal we've handled the error
+		return cli.Exit("", 1)
 	}
 
-	return iIdx < jIdx
+	// Configure exit error handler to prevent additional output
+	app.ExitErrHandler = func(ctx context.Context, cmd *cli.Command, err error) {
+		if err == nil {
+			return
+		}
+		format, code := "Error: %v\n", 1
+		if exitErr, ok := errors.AsType[cli.ExitCoder](err); ok {
+			format, code = "%v\n", exitErr.ExitCode()
+		}
+		if err.Error() != "" {
+			fmt.Fprintf(errWriter(cmd.Root()), format, err)
+		}
+		cli.OsExiter(code)
+	}
+
+	return app
 }
 
-// NewApp creates an app with sane defaults.
-func NewApp(gitCommit, usage string) *cli.App {
-	app := cli.NewApp()
-	app.Name = filepath.Base(os.Args[0])
-	app.Version = version.VersionWithCommit(gitCommit)
-	app.Usage = usage
-	return app
+func errWriter(cmd *cli.Command) io.Writer {
+	if cmd.ErrWriter != nil {
+		return cmd.ErrWriter
+	}
+	return os.Stderr
 }

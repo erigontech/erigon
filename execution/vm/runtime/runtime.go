@@ -20,23 +20,17 @@
 package runtime
 
 import (
-	"context"
+	"errors"
 	"math"
 	"math/big"
-	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -48,18 +42,21 @@ import (
 // the EVM.
 type Config struct {
 	ChainConfig *chain.Config
-	Difficulty  *big.Int
+	Difficulty  *uint256.Int
 	Origin      accounts.Address
 	Coinbase    accounts.Address
-	BlockNumber *big.Int
-	Time        *big.Int
+	BlockNumber uint64
+	Time        uint64
 	GasLimit    uint64
 	GasPrice    uint256.Int
 	Value       uint256.Int
 	EVMConfig   vm.Config
 	BaseFee     uint256.Int
+	L2Version   uint64
 
-	State     *state.IntraBlockState
+	State *state.IntraBlockState
+
+	ownState  *state.IntraBlockState // the State a run built because the caller gave none
 	GetHashFn func(n uint64) (common.Hash, error)
 }
 
@@ -67,24 +64,24 @@ type Config struct {
 func setDefaults(cfg *Config) {
 	if cfg.ChainConfig == nil {
 		cfg.ChainConfig = &chain.Config{
-			ChainID:               big.NewInt(1),
-			HomesteadBlock:        new(big.Int),
-			TangerineWhistleBlock: new(big.Int),
-			SpuriousDragonBlock:   new(big.Int),
-			ByzantiumBlock:        new(big.Int),
-			ConstantinopleBlock:   new(big.Int),
-			PetersburgBlock:       new(big.Int),
-			IstanbulBlock:         new(big.Int),
-			MuirGlacierBlock:      new(big.Int),
-			BerlinBlock:           new(big.Int),
-			LondonBlock:           new(big.Int),
-			ArrowGlacierBlock:     new(big.Int),
-			GrayGlacierBlock:      new(big.Int),
-			ShanghaiTime:          new(big.Int),
-			CancunTime:            new(big.Int),
-			PragueTime:            new(big.Int),
-			OsakaTime:             new(big.Int),
-			AmsterdamTime:         new(big.Int),
+			ChainID:               uint256.NewInt(1),
+			HomesteadBlock:        new(uint64),
+			TangerineWhistleBlock: new(uint64),
+			SpuriousDragonBlock:   new(uint64),
+			ByzantiumBlock:        new(uint64),
+			ConstantinopleBlock:   new(uint64),
+			PetersburgBlock:       new(uint64),
+			IstanbulBlock:         new(uint64),
+			MuirGlacierBlock:      new(uint64),
+			BerlinBlock:           new(uint64),
+			LondonBlock:           new(uint64),
+			ArrowGlacierBlock:     new(uint64),
+			GrayGlacierBlock:      new(uint64),
+			ShanghaiTime:          new(uint64),
+			CancunTime:            new(uint64),
+			PragueTime:            new(uint64),
+			OsakaTime:             new(uint64),
+			AmsterdamTime:         new(uint64),
 		}
 	}
 
@@ -92,20 +89,14 @@ func setDefaults(cfg *Config) {
 		cfg.Origin = accounts.ZeroAddress
 	}
 	if cfg.Difficulty == nil {
-		cfg.Difficulty = new(big.Int)
-	}
-	if cfg.Time == nil {
-		cfg.Time = big.NewInt(time.Now().Unix())
+		cfg.Difficulty = new(uint256.Int)
 	}
 	if cfg.GasLimit == 0 {
 		cfg.GasLimit = math.MaxUint64
 	}
-	if cfg.BlockNumber == nil {
-		cfg.BlockNumber = new(big.Int)
-	}
 	if cfg.GetHashFn == nil {
 		cfg.GetHashFn = func(n uint64) (common.Hash, error) {
-			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
+			return crypto.Keccak256Hash([]byte(new(big.Int).SetUint64(n).String())), nil
 		}
 	}
 }
@@ -118,30 +109,14 @@ func setDefaults(cfg *Config) {
 
 var contractAsAddress = accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
-func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.IntraBlockState, error) {
+func Execute(code, input []byte, cfg *Config) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
 		cfg = new(Config)
-		setDefaults(cfg)
 	}
+	setDefaults(cfg)
 
-	externalState := cfg.State != nil
-	if !externalState {
-		dirs := datadir.New(tempdir)
-		db := temporaltest.NewTestDB(nil, dirs)
-		defer db.Close()
-
-		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-		if err != nil {
-			return nil, nil, err
-		}
-		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-		if err != nil {
-			return nil, nil, err
-		}
-		defer sd.Close()
-		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
+	if cfg.State == nil || cfg.State == cfg.ownState { // the versioned CreateAccount keeps earlier storage, so only a new state gives an empty contract
+		ownState(cfg)
 	}
 	var (
 		address = contractAsAddress
@@ -149,73 +124,87 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		sender  = cfg.Origin
 		rules   = vmenv.ChainRules()
 	)
-	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil, nil)
-	cfg.State.CreateAccount(address, true)
+	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
+	if err := cfg.State.CreateAccount(address, true); err != nil {
+		return nil, nil, err
+	}
 	// set the receiver's (the executing contract) code for execution.
-	cfg.State.SetCode(address, code)
+	if err := cfg.State.SetCode(address, code, tracing.CodeChangeUnspecified); err != nil {
+		return nil, nil, err
+	}
 	// Call the code with the given configuration.
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
-		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)
+		cfg.EVMConfig.Tracer.OnTxStart(vmenv.GetVMContext(), nil, accounts.ZeroAddress)
 	}
-	ret, _, err := vmenv.Call(
+	ret, _, _, err := vmenv.Call(
 		sender,
 		contractAsAddress,
 		input,
-		cfg.GasLimit,
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false),
 		cfg.Value,
 		false, /* bailout */
 	)
-	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
-		cfg.EVMConfig.Tracer.OnTxEnd(nil, err)
-	}
+	cfg.EVMConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 
 	return ret, cfg.State, err
 }
 
 // Create executes the code using the EVM create method
-func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, uint64, error) {
+func Create(input []byte, cfg *Config) ([]byte, common.Address, mdgas.MdGas, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
 	setDefaults(cfg)
 
-	externalState := cfg.State != nil
-	if !externalState {
-		tmp := filepath.Join(os.TempDir(), "create-vm")
-		defer dir.RemoveAll(tmp) //nolint
-
-		dirs := datadir.New(tmp)
-		db := temporaltest.NewTestDB(nil, dirs)
-		defer db.Close()
-		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-		if err != nil {
-			return nil, [20]byte{}, 0, err
-		}
-		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-		if err != nil {
-			return nil, [20]byte{}, 0, err
-		}
-		defer sd.Close()
-		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
+	if cfg.State == nil {
+		ownState(cfg)
 	}
 	var (
 		vmenv  = NewEnv(cfg)
 		sender = cfg.Origin
 		rules  = vmenv.ChainRules()
+		gas    = mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false)
 	)
-	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil, nil)
-
-	// Call the code with the given configuration.
-	code, address, leftOverGas, err := vmenv.Create(
-		sender,
-		input,
-		cfg.GasLimit,
-		cfg.Value,
-		false,
-	)
-	return code, address.Value(), leftOverGas, err
+	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
+	if !rules.IsAmsterdam {
+		code, address, leftOverGas, _, err := vmenv.Create(
+			sender,
+			input,
+			gas,
+			cfg.Value,
+			nil,
+			false,
+		)
+		return code, address.Value(), leftOverGas, err
+	}
+	canTransfer, err := vmenv.Context.CanTransfer(cfg.State, sender, cfg.Value)
+	if err != nil {
+		return nil, common.Address{}, mdgas.MdGas{}, err
+	}
+	if !canTransfer {
+		return nil, common.Address{}, gas, vm.ErrInsufficientBalance
+	}
+	nonce, err := cfg.State.GetNonce(sender)
+	if err != nil {
+		return nil, common.Address{}, mdgas.MdGas{}, err
+	}
+	if nonce+1 < nonce {
+		return nil, common.Address{}, gas, vm.ErrNonceUintOverflow
+	}
+	address := accounts.InternAddress(types.CreateAddress(sender.Value(), nonce))
+	leftOverGas, topLevelGasUsed, err := protocol.HandleRuntimeCreate(vmenv, address, gas)
+	var code []byte
+	var createdAddress accounts.Address
+	if err == nil {
+		code, createdAddress, leftOverGas, _, err = vmenv.Create(sender, input, leftOverGas, cfg.Value, nil, false)
+		protocol.RefillTopLevelGas(&leftOverGas, &topLevelGasUsed, cfg.EVMConfig.RestoreState, err, cfg.EVMConfig.Tracer)
+	} else if errors.Is(err, vm.ErrRuntimeOutOfGas) {
+		if nonceErr := cfg.State.SetNonce(sender, nonce+1, tracing.NonceChangeContractCreator); nonceErr != nil {
+			return nil, common.Address{}, mdgas.MdGas{}, nonceErr
+		}
+		protocol.HandleRuntimeFailure(vmenv, vm.CREATE, sender, address, input, gas, &leftOverGas, cfg.Value, err)
+	}
+	return code, createdAddress.Value(), leftOverGas, err
 }
 
 // Call executes the code given by the contract's address. It will return the
@@ -223,36 +212,55 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 //
 // Call, unlike Execute, requires a config and also requires the State field to
 // be set.
-func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
+func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.MdGas, error) {
 	setDefaults(cfg)
 
 	vmenv := NewEnv(cfg)
 
-	sender, err := cfg.State.GetOrNewStateObject(cfg.Origin)
-	if err != nil {
-		return nil, 0, err
-	}
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
-	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil, nil)
-
-	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
-		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
+	// Without EIP-161 an empty account survives in the post-state, and a
+	// zero-value transfer does not create the sender, so the origin has to
+	// exist for the dump and for CALL gas to match.
+	if !rules.IsEIP161Enabled() {
+		if _, err := statedb.GetOrNewStateObject(cfg.Origin); err != nil {
+			return nil, mdgas.MdGas{}, err
+		}
 	}
 
-	// Call the code with the given configuration.
-	ret, leftOverGas, err := vmenv.Call(
-		sender.Address(),
-		address,
-		input,
-		cfg.GasLimit,
-		cfg.Value,
-		false, /* bailout */
-	)
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
+		cfg.EVMConfig.Tracer.OnTxStart(vmenv.GetVMContext(), nil, accounts.ZeroAddress)
+	}
 
-	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
-		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas}, err)
+	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false)
+	leftOverGas, topLevelCallGasUsed, err := protocol.HandleRuntimeCall(vmenv, address, cfg.Value, gas)
+	var ret []byte
+	if err == nil {
+		ret, leftOverGas, _, err = vmenv.Call(
+			cfg.Origin,
+			address,
+			input,
+			leftOverGas,
+			cfg.Value,
+			false, /* bailout */
+		)
+		protocol.RefillTopLevelGas(&leftOverGas, &topLevelCallGasUsed, cfg.EVMConfig.RestoreState, err, cfg.EVMConfig.Tracer)
+	} else if errors.Is(err, vm.ErrRuntimeOutOfGas) {
+		protocol.HandleRuntimeFailure(vmenv, vm.CALL, cfg.Origin, address, input, gas, &leftOverGas, cfg.Value, err)
+	}
+
+	if cfg.EVMConfig.Tracer.HasTxEndHook() {
+		cfg.EVMConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas.Total()}, mdgas.TxnGasUsage{}, err)
 	}
 
 	return ret, leftOverGas, err
+}
+
+// ownState gives a run without a caller state a versioned state over an empty base, and remembers it as the
+// runtime's own. The caller keeps the states it was returned.
+func ownState(cfg *Config) {
+	cfg.State = state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	cfg.State.SetNoConflictDetection()
+	cfg.ownState = cfg.State
 }

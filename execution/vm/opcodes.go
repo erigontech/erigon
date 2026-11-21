@@ -108,6 +108,21 @@ const (
 	BASEFEE     OpCode = 0x48
 	BLOBHASH    OpCode = 0x49
 	BLOBBASEFEE OpCode = 0x4a
+	SLOTNUM     OpCode = 0x4b
+)
+
+const APPROVE OpCode = 0xaa
+
+const (
+	TXPARAM OpCode = 0xb0 + iota
+	FRAMEDATALOAD
+	FRAMEDATACOPY
+	FRAMEPARAM
+	SIGPARAM
+	SIGDATACOPY
+	TXTRACE
+	TXDIFF
+	EVENTDATACOPY
 )
 
 // 0x50 range - 'storage' and execution.
@@ -207,6 +222,13 @@ const (
 	LOG4
 )
 
+// 0xe0 range - additional stack operations.
+const (
+	DUPN     OpCode = 0xe6
+	SWAPN    OpCode = 0xe7
+	EXCHANGE OpCode = 0xe8
+)
+
 // 0xf0 range - closures.
 const (
 	CREATE OpCode = 0xf0 + iota
@@ -276,22 +298,33 @@ var opCodeToString = map[OpCode]string{
 	EXTCODEHASH:    "EXTCODEHASH",
 
 	// 0x40 range - block operations.
-	BLOCKHASH:   "BLOCKHASH",
-	COINBASE:    "COINBASE",
-	TIMESTAMP:   "TIMESTAMP",
-	NUMBER:      "NUMBER",
-	DIFFICULTY:  "DIFFICULTY",
-	GASLIMIT:    "GASLIMIT",
-	CHAINID:     "CHAINID",
-	SELFBALANCE: "SELFBALANCE",
-	BASEFEE:     "BASEFEE",
-	BLOBHASH:    "BLOBHASH",
-	BLOBBASEFEE: "BLOBBASEFEE",
+	BLOCKHASH:     "BLOCKHASH",
+	COINBASE:      "COINBASE",
+	TIMESTAMP:     "TIMESTAMP",
+	NUMBER:        "NUMBER",
+	DIFFICULTY:    "DIFFICULTY",
+	GASLIMIT:      "GASLIMIT",
+	CHAINID:       "CHAINID",
+	SELFBALANCE:   "SELFBALANCE",
+	BASEFEE:       "BASEFEE",
+	BLOBHASH:      "BLOBHASH",
+	BLOBBASEFEE:   "BLOBBASEFEE",
+	SLOTNUM:       "SLOTNUM",
+	APPROVE:       "APPROVE",
+	TXPARAM:       "TXPARAM",
+	FRAMEDATALOAD: "FRAMEDATALOAD",
+	FRAMEDATACOPY: "FRAMEDATACOPY",
+	FRAMEPARAM:    "FRAMEPARAM",
+	SIGPARAM:      "SIGPARAM",
+	SIGDATACOPY:   "SIGDATACOPY",
+	TXTRACE:       "TXTRACE",
+	TXDIFF:        "TXDIFF",
+	EVENTDATACOPY: "EVENTDATACOPY",
 
 	// 0x50 range - 'storage' and execution.
 	POP: "POP",
-	//DUP:     "DUP",
-	//SWAP:    "SWAP",
+	// DUP:     "DUP",
+	// SWAP:    "SWAP",
 	MLOAD:    "MLOAD",
 	MSTORE:   "MSTORE",
 	MSTORE8:  "MSTORE8",
@@ -381,6 +414,11 @@ var opCodeToString = map[OpCode]string{
 	LOG3:   "LOG3",
 	LOG4:   "LOG4",
 
+	// 0xe0 range.
+	DUPN:     "DUPN",
+	SWAPN:    "SWAPN",
+	EXCHANGE: "EXCHANGE",
+
 	// 0xf0 range.
 	CREATE:       "CREATE",
 	CALL:         "CALL",
@@ -444,6 +482,17 @@ var stringToOp = map[string]OpCode{
 	"BASEFEE":        BASEFEE,
 	"BLOBHASH":       BLOBHASH,
 	"BLOBBASEFEE":    BLOBBASEFEE,
+	"SLOTNUM":        SLOTNUM,
+	"APPROVE":        APPROVE,
+	"TXPARAM":        TXPARAM,
+	"FRAMEDATALOAD":  FRAMEDATALOAD,
+	"FRAMEDATACOPY":  FRAMEDATACOPY,
+	"FRAMEPARAM":     FRAMEPARAM,
+	"SIGPARAM":       SIGPARAM,
+	"SIGDATACOPY":    SIGDATACOPY,
+	"TXTRACE":        TXTRACE,
+	"TXDIFF":         TXDIFF,
+	"EVENTDATACOPY":  EVENTDATACOPY,
 	"DELEGATECALL":   DELEGATECALL,
 	"STATICCALL":     STATICCALL,
 	"CODESIZE":       CODESIZE,
@@ -546,6 +595,9 @@ var stringToOp = map[string]OpCode{
 	"LOG2":           LOG2,
 	"LOG3":           LOG3,
 	"LOG4":           LOG4,
+	"DUPN":           DUPN,
+	"SWAPN":          SWAPN,
+	"EXCHANGE":       EXCHANGE,
 	"CREATE":         CREATE,
 	"CREATE2":        CREATE2,
 	"CALL":           CALL,

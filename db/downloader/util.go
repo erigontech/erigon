@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
-
 	//nolint:gosec
 	"errors"
 	"fmt"
@@ -39,7 +38,6 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -48,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state"
 )
 
 // TODO: Update this list, or pull from common location (central manifest or canonical multi-file torrent).
@@ -66,7 +65,7 @@ var websocketTrackers = []string{
 // Trackers - break down by priority tier
 var Trackers = [][]string{
 	udpOrHttpTrackers,
-	//websocketTrackers // TODO: Ws protocol producing too many errors and flooding logs. But it's also very fast and reactive.
+	// websocketTrackers // TODO: Ws protocol producing too many errors and flooding logs. But it's also very fast and reactive.
 }
 
 func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) ([]string, error) {
@@ -79,18 +78,26 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 		return nil, err
 	}
 
-	segConfig, _ := snapcfg.KnownCfg(chainName)
+	segConfig := snapcfg.KnownCfgOrDevnet(chainName)
 
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
 		// A bit hacky but whatever... basically caplin is incompatible with enums.
-		if strings.HasSuffix(fPath, path.Join("caplin", name)) {
+		if strings.HasSuffix(filepath.ToSlash(fPath), path.Join("caplin", name)) {
 			res = append(res, path.Join("caplin", name))
 			continue
 		}
 		if strings.HasPrefix(name, "salt") && strings.HasSuffix(name, "txt") {
 			res = append(res, name)
+			continue
+		}
+		if name == state.ERIGONDB_SETTINGS_FILE {
+			res = append(res, name)
+			continue
+		}
+		// Skip any other .toml files
+		if strings.HasSuffix(name, ".toml") {
 			continue
 		}
 		if !skipSeedableCheck && !snaptype.IsCorrectFileName(name) {
@@ -125,7 +132,7 @@ func seedableStateFilesBySubDir(dir, subDir string, skipSeedableCheck bool) ([]s
 		if !skipSeedableCheck && !snaptype.IsStateFileSeedable(name) {
 			continue
 		}
-		res = append(res, filepath.Join(subDir, name))
+		res = append(res, path.Join(subDir, name)) // torrent names are slash-separated
 	}
 	return res, nil
 }
@@ -144,7 +151,7 @@ func ensureCantLeaveDir(fName, root string) (string, error) {
 	if !filepath.IsLocal(fName) {
 		return fName, fmt.Errorf("relative paths are not allowed: %s", fName)
 	}
-	return fName, nil
+	return filepath.ToSlash(fName), nil // torrent names are slash-separated
 }
 
 func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *AtomicTorrentFS) (ok bool, err error) {
@@ -173,7 +180,6 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *A
 	if err := info.BuildFromFilePath(fPath); err != nil {
 		return false, fmt.Errorf("createTorrentFileFromSegment: %w", err)
 	}
-	// Really need to check this is "slash"-style. I suspect it will do the wrong thing on Windows.
 	info.Name = fName
 
 	return torrentFiles.CreateWithMetaInfo(info, nil)
@@ -321,12 +327,12 @@ func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
 }
 
 func readPeerID(db kv.RoDB) (peerID []byte, err error) {
-	if err = db.View(context.Background(), func(tx kv.Tx) error {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		peerIDFromDB, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
 		if err != nil {
 			return fmt.Errorf("get peer id: %w", err)
 		}
-		peerID = common.Copy(peerIDFromDB)
+		peerID = bytes.Clone(peerIDFromDB)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -371,11 +377,17 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			f.Close()
-		}
-	}()
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if stat.Size() != info.TotalLength() {
+		err := fmt.Errorf("size mismatch, file: %s, got %d, torrent expects %d", t.Name(), stat.Size(), info.TotalLength())
+		log.Warn("[verify.failfast] ", "err", err)
+		return err
+	}
 
 	hasher := sha1.New()
 	for i := 0; i < info.NumPieces(); i++ {

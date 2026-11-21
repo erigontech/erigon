@@ -1,25 +1,27 @@
 package gossip
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"golang.org/x/net/context"
 )
 
-func RegisterGossipService[T any](gm *GossipManager, service serviceintf.Service[T], conditions ...ConditionFunc) {
+func RegisterGossipService[T any](gm *GossipManager, service serviceintf.Service[T], conditions ...ConditionFunc) (subscribed, expired int) {
 	wrappedService := wrapService(service)
 	gossipSrv := GossipService{
 		Service:    wrappedService,
 		conditions: conditions,
 	}
 	gm.registeredServices = append(gm.registeredServices, gossipSrv)
-	if err := gm.registerGossipService(wrappedService, conditions...); err != nil {
+	subscribed, expired, err := gm.registerGossipService(wrappedService, conditions...)
+	if err != nil {
 		panic(err)
 	}
+	return
 }
 
 type ConditionFunc func(peer.ID, *pubsub.Message, clparams.StateVersion) bool

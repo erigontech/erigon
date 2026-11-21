@@ -1,15 +1,16 @@
 package app
 
 import (
+	"cmp"
+	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
+	"strings"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -22,7 +23,7 @@ type CheckFilesParams struct {
 }
 
 // checkLastFileTo = -1 if don't need this check
-func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (lastFileTo uint64, empty bool, err error) {
+func CheckFilesForSchema(schema *state.E2SnapSchema, params CheckFilesParams) (lastFileTo uint64, empty bool, err error) {
 	// check in schema specific directory (and accessor directories)
 
 	// checks:
@@ -30,47 +31,36 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 	// - starts from 0
 	// - more than 0 files
 	// - no overlaps
-	// - each data file has corresponding index/bt etc.1
+	// - each data file has its idx files
 	// - versions: between min supported version and max
 	// - lastFileTo check
-	// - sum = maxTo check (probably redundant if no gaps/overlaps)
 
-	// collect all data files
-	dataFiles := make([]state.SnapInfo, 0)
-	sumRange := uint64(0)
-	if err := filepath.WalkDir(schema.DataDirectory(), func(path string, info fs.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) { //it's ok if some file get removed during walk
-				return nil
-			}
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-
-		basepath := filepath.Base(path)
-
-		res, ok := schema.Parse(basepath)
-		if !ok {
-			return nil // not matching file
-		}
-
-		if !res.IsDataFile() {
-			// ignore the idx files
-			return nil
-		}
-
-		sumRange += res.To - res.From
-		dataFiles = append(dataFiles, *res)
-
-		return nil
-	}); err != nil {
+	entries, err := os.ReadDir(schema.DataDirectory())
+	if err != nil && !os.IsNotExist(err) {
 		return 0, false, err
 	}
+	files := map[string][]state.SnapInfo{}
+	dataFiles := make([]state.SnapInfo, 0)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		res, ok := schema.Parse(entry.Name())
+		if !ok {
+			continue
+		}
+		if res.IsDataFile() {
+			dataFiles = append(dataFiles, *res)
+		}
+		name := unversionedName(res.Name)
+		files[name] = append(files[name], *res)
+	}
 
-	sort.Slice(dataFiles, func(i, j int) bool {
-		return (dataFiles[i].From < dataFiles[j].From) || (dataFiles[i].From == dataFiles[j].From && dataFiles[i].To < dataFiles[j].To)
+	slices.SortFunc(dataFiles, func(a, b state.SnapInfo) int {
+		if a.From != b.From {
+			return cmp.Compare(a.From, b.From)
+		}
+		return cmp.Compare(a.To, b.To)
 	})
 
 	if len(dataFiles) == 0 {
@@ -89,10 +79,6 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 		return 0, false, fmt.Errorf("last %s snapshot file must end at %d, found at %d (file: %s)", schema.DataTag(), params.checkLastFileTo, dataFiles[len(dataFiles)-1].To, dataFiles[len(dataFiles)-1].Name)
 	}
 
-	if sumRange != dataFiles[len(dataFiles)-1].To-dataFiles[0].From {
-		return 0, false, fmt.Errorf("sum of ranges of %s snapshot files (%d) does not match last 'to' value (%d)", schema.DataTag(), sumRange, dataFiles[len(dataFiles)-1].To)
-	}
-
 	prevFrom, prevTo := dataFiles[0].From, dataFiles[0].To
 	for i := 1; i < len(dataFiles); i++ {
 		df := dataFiles[i]
@@ -109,40 +95,38 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 		prevFrom, prevTo = df.From, df.To
 	}
 
-	accessors := schema.AccessorList()
+	versions := schema.Versions()
 	for _, dataFile := range dataFiles {
-		// corresponding accessor exists?
 		from, to := kv.RootNum(dataFile.From), kv.RootNum(dataFile.To)
-
-		// should get the same name as dataFile...
-		// this checks the version is correct (between min and current), and that there's only one such data file
-		if _, err := schema.DataFile(version.StrictSearchVersion, from, to); err != nil {
-			return 0, false, fmt.Errorf("unsupported data file version: %s: %v", dataFile.Name, err)
+		dataName, _ := schema.DataFile(versions.DataFileVersion.Current, from, to)
+		if err := onlySupportedFile(files[unversionedName(dataName)], versions.DataFileVersion); err != nil {
+			return 0, false, fmt.Errorf("unsupported data file version: %s: %w", dataFile.Name, err)
 		}
 
-		if accessors.Has(statecfg.AccessorHashMap) {
-			for idxPos := uint16(0); idxPos < schema.AccessorIdxCount(); idxPos++ {
-				_, err := schema.AccessorIdxFile(version.StrictSearchVersion, from, to, idxPos)
-				if err != nil {
-					return 0, false, fmt.Errorf("missing %s accessor idx file for data file %s (idx tag: %d): %v", schema.DataTag(), dataFile.Name, idxPos, err)
-				}
-			}
-		}
-
-		if accessors.Has(statecfg.AccessorBTree) {
-			_, err := schema.BtIdxFile(version.StrictSearchVersion, from, to)
-			if err != nil {
-				return 0, false, fmt.Errorf("missing %s bt tree file for data file %s: %v", schema.DataTag(), dataFile.Name, err)
-			}
-		}
-
-		if accessors.Has(statecfg.AccessorExistence) {
-			_, err := schema.ExistenceFile(version.StrictSearchVersion, from, to)
-			if err != nil {
-				return 0, false, fmt.Errorf("missing %s existence filter for data file %s: %v", schema.DataTag(), dataFile.Name, err)
+		for idxPos := range schema.AccessorIdxCount() {
+			idxName, _ := schema.AccessorIdxFile(versions.AccessorVersion.Current, from, to, idxPos)
+			if err := onlySupportedFile(files[unversionedName(idxName)], versions.AccessorVersion); err != nil {
+				return 0, false, fmt.Errorf("missing %s accessor idx file for data file %s (idx tag: %d): %w", schema.DataTag(), dataFile.Name, idxPos, err)
 			}
 		}
 	}
 
 	return dataFiles[len(dataFiles)-1].To, false, nil
+}
+
+func unversionedName(path string) string {
+	_, name, _ := strings.Cut(filepath.Base(path), "-")
+	return name
+}
+
+func onlySupportedFile(versions []state.SnapInfo, supported version.Versions) error {
+	switch {
+	case len(versions) == 0:
+		return errors.New("file not found")
+	case len(versions) > 1:
+		return fmt.Errorf("more than one version found: %s and %s", versions[0].Name, versions[1].Name)
+	case !supported.Supports(versions[0].Version):
+		return fmt.Errorf("unsupported version: %s", versions[0].Name)
+	}
+	return nil
 }

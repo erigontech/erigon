@@ -17,7 +17,7 @@
 package test
 
 import (
-	"context"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io/fs"
@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -59,7 +60,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, stepSize uint64) (kv.Temp
 		path = fpath
 	}
 	dirs := datadir.New(path)
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 	return db, db.(state.HasAgg).Agg().(*state.Aggregator), path
 }
 
@@ -74,18 +75,17 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	aggStep := uint64(100)
 	blockSize := uint64(10) // lets say that each block contains 10 tx, after each block we do commitment
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, agg, datadir := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 	blockNum, txNum := uint64(0), uint64(0)
-	domains.SetTxNum(txNum)
 
 	rnd := rand.New(rand.NewSource(time.Now().Unix()))
 
@@ -111,8 +111,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		txNum = i
 		blockNum = txNum / blockSize
 		writer.SetTxNum(txNum)
-		domains.SetTxNum(txNum)
-		domains.SetBlockNum(txNum / blockSize)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
 		var locVal common.Hash
@@ -172,7 +170,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(txs)
+	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	domains.Close()
@@ -196,7 +194,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
-	domains, err = execctx.NewSharedDomains(ctx, tx, log.New())
+	defer tx.Rollback()
+	domains, err = execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -214,7 +213,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	//	cct.Close()
 	//}
 
-	err = domains.SeekCommitment(ctx, tx)
+	_, _, err = domains.SeekCommitment(ctx, tx)
 	require.NoError(t, err)
 	tx.Rollback()
 
@@ -227,12 +226,13 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domains, err = execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err = execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 	writer = state2.NewWriter(domains.AsPutDel(tx), nil, txNum)
 
-	txToStart := domains.TxNum()
+	txToStart, _, err := domains.SeekCommitment(ctx, tx)
+	require.NoError(t, err)
 
 	rh, err = domains.ComputeCommitment(ctx, tx, false, blockNum, txNum, "", nil)
 	require.NoError(t, err)
@@ -242,8 +242,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	for tt := txToStart; tt <= txs; tt++ {
 		txNum = tt
 		blockNum = txNum / blockSize
-		domains.SetTxNum(txNum)
-		domains.SetBlockNum(blockNum)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
 		//fmt.Printf("tx+ %d addr %x\n", txNum, addrs[i])
@@ -291,7 +289,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		hashes    = make([][]byte, 0)
 	)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, agg, datadir := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 	blockNum, txNum := uint64(0), uint64(0)
@@ -302,18 +300,16 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 		require.NoError(t, err)
 		defer domains.Close()
 		rnd := rand.New(rand.NewSource(time.Now().Unix()))
 
-		domains.SetTxNum(txNum)
 		writer := state2.NewWriter(domains.AsPutDel(tx), nil, txNum)
 
 		for i := testStartedFromTxNum; i <= txs; i++ {
 			txNum = i
 			blockNum = txNum / blockSize
-			domains.SetTxNum(txNum)
 			binary.BigEndian.PutUint64(aux[:], txNum)
 
 			var locVal common.Hash
@@ -356,7 +352,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		err = tx.Commit()
 		require.NoError(t, err)
 
-		err = agg.BuildFiles(txs)
+		err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 		require.NoError(t, err)
 
 		domains.Close()
@@ -376,11 +372,11 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 		require.NoError(t, err)
 		defer domains.Close()
 
-		err = domains.SeekCommitment(ctx, tx)
+		_, _, err = domains.SeekCommitment(ctx, tx)
 		tx.Rollback()
 		require.NoError(t, err)
 
@@ -393,13 +389,14 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		tx, err = db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
-		domains, err = execctx.NewSharedDomains(ctx, tx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 		require.NoError(t, err)
 		defer domains.Close()
 
 		writer := state2.NewWriter(domains.AsPutDel(tx), nil, txNum)
 
-		txToStart := domains.TxNum()
+		txToStart, _, err := domains.SeekCommitment(ctx, tx)
+		require.NoError(t, err)
 		require.EqualValues(t, 0, txToStart)
 		txToStart = testStartedFromTxNum
 
@@ -409,15 +406,13 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		s, err := chainspec.ChainSpecByName(networkname.Test)
 		require.NoError(t, err)
 		require.Equal(t, s.GenesisStateRoot, common.BytesToHash(rh))
-		//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
-		//common.BytesToHash(rh))
+		// require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
+		// common.BytesToHash(rh))
 
 		var i, j int
 		for tt := txToStart; tt <= txs; tt++ {
 			txNum = tt
 			blockNum = txNum / blockSize
-			domains.SetTxNum(txNum)
-			domains.SetBlockNum(blockNum)
 			binary.BigEndian.PutUint64(aux[:], txNum)
 
 			err = writer.UpdateAccountData(addrs[i], &accounts.Account{}, accs[i])
@@ -436,7 +431,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			}
 		}
 	})
-
 }
 
 func randomAccount(t *testing.T) (*accounts.Account, accounts.Address) {
@@ -446,7 +440,6 @@ func randomAccount(t *testing.T) (*accounts.Account, accounts.Address) {
 		t.Fatal(err)
 	}
 	acc := accounts.NewAccount()
-	acc.Initialised = true
 	acc.Balance = u256.U64(uint64(rand.Int63()))
 	addr := accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
 	return &acc, addr
@@ -455,13 +448,13 @@ func randomAccount(t *testing.T) (*accounts.Account, accounts.Address) {
 func TestCommit(t *testing.T) {
 	aggStep := uint64(100)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db, _, _ := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 	blockNum, txNum := uint64(0), uint64(0)
@@ -480,20 +473,52 @@ func TestCommit(t *testing.T) {
 	for i := 1; i < 3; i++ {
 		addr[0] = byte(i)
 
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 		loc[0] = byte(i)
 
-		err = domains.DomainPut(kv.StorageDomain, tx, append(common.Copy(addr), loc...), []byte("0401"), txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, tx, append(bytes.Clone(addr), loc...), []byte("0401"), txNum, nil)
 		require.NoError(t, err)
 	}
 
-	domains.SetTrace(false, false)
 	domainsHash, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 	err = domains.Flush(ctx, tx)
 	require.NoError(t, err)
 
 	require.Equal(t, common.BytesToHash(common.FromHex("0xfe81cd91357cd915cae7c02b5a4771e903c16b29dec582818076954be3741030")), common.BytesToHash(domainsHash))
+}
 
+// The commitment context routes both the trie trace and the branch read/write
+// trace through one io.Writer; branch writes surface as [SDC] lines.
+func TestCommitmentContextTraceWriter(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	ctx := t.Context()
+	db, _, _ := testDbAndAggregatorv3(t, t.TempDir(), uint64(100))
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// Sequential: the assertions below pin HexPatriciaHashed's own trace lines.
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithSequentialCommitment())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	acc := accounts.Account{Balance: u256.U64(7), CodeHash: accounts.EmptyCodeHash, Incarnation: 1}
+	val := accounts.SerialiseV3(&acc)
+	addr := common.Hex2Bytes("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e")
+	for i := 1; i < 12; i++ { // diverging first nibbles force a branch node
+		addr[0] = byte(i * 16)
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, bytes.Clone(addr), val, 0, nil))
+	}
+
+	var trace strings.Builder
+	domains.GetCommitmentCtx().SetTraceWriter(&trace)
+	_, err = domains.ComputeCommitment(ctx, tx, true, 0, 0, "", nil)
+	require.NoError(t, err)
+	domains.GetCommitmentCtx().SetTraceWriter(nil)
+
+	out := trace.String()
+	require.Contains(t, out, "[SDC] PutBranch", "branch writes must trace through the writer")
+	require.Contains(t, out, "[proc]", "trie must trace processed keys through the same writer")
 }

@@ -17,52 +17,46 @@
 package jsonrpc
 
 import (
-	"context"
+	"cmp"
+	"encoding/json"
+	"net/http/httptest"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
-	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/privateapi"
-	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestEthSubscribe(t *testing.T) {
-	m, require := mock.Mock(t), require.New(t)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 7, func(i int, b *blockgen.BlockGen) {
+	ctx := t.Context()
+	logger := log.New()
+	m := execmoduletester.New(t)
+	chain, err := m.GenerateChain(7, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
-	require.NoError(err)
-
-	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          1,
-		BlockHeadersPacket: chain.Headers,
-	})
-	require.NoError(err)
-
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(err)
-	}
-	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
-
-	ctx := context.Background()
-	logger := log.New()
-	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications, m.BlockReader, nil, logger, builder.NewLatestBlockBuiltStore(), nil)
+	require.NoError(t, err)
+	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore(), m.ChainConfig)
 	backendClient := direct.NewEthBackendClientDirect(backendServer)
 	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
 	// Creating a new filter will set up new internal subscription channels actively managed by subscription tasks.
@@ -70,94 +64,143 @@ func TestEthSubscribe(t *testing.T) {
 	// at the start of Subscribe, to be sure that the subscription is ready, otherwise we could miss some events.
 	subscriptionReadyWg := sync.WaitGroup{}
 	subscriptionReadyWg.Add(1)
-	onNewSnapshot := func() {
-		subscriptionReadyWg.Done()
-	}
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log)
-	subscriptionReadyWg.Wait() // This is needed *before* stages.StageLoopIteration, which sends NEW_HEADER events
-
-	newHeads, id := ff.SubscribeNewHeads(16)
+	// Only the first NEW_SNAPSHOT signals readiness; background block retirement emits more.
+	onNewSnapshot := sync.OnceFunc(subscriptionReadyWg.Done)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log, nil)
+	subscriptionReadyWg.Wait() // This is needed *before* inserting the blocks, which sends NEW_HEADER events
+	newHeads, id, err := ff.SubscribeNewHeads(16, "")
+	require.NoError(t, err)
 	defer ff.UnsubscribeHeads(id)
-
-	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 	highestSeenHeader := chain.TopBlock.NumberU64()
-
-	hook := stageloop.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil, nil, nil)
-	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
-		if err != nil {
-			return err
-		}
-		defer sd.Close()
-		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
-			return err
-		}
-
-		return sd.Flush(m.Ctx, tx)
-	}); err != nil {
-		t.Fatal(err)
-	}
-
+	err = m.InsertChain(chain)
+	require.NoError(t, err)
 	for i := uint64(1); i <= highestSeenHeader; i++ {
 		header := <-newHeads
-		require.Equal(i, header.Number.Uint64())
+		require.Equal(t, i, header.Value.Number.Uint64())
 	}
 }
 
 func TestEthSubscribeReceipts(t *testing.T) {
-	m, require := mock.Mock(t), require.New(t)
-
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, b *blockgen.BlockGen) {
-		b.SetCoinbase(common.Address{1})
-	})
-	require.NoError(err)
-
-	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          1,
-		BlockHeadersPacket: chain.Headers,
-	})
-	require.NoError(err)
-
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(err)
-	}
-	m.ReceiveWg.Wait()
-
-	ctx := context.Background()
+	ctx := t.Context()
 	logger := log.New()
-	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications, m.BlockReader, nil, logger, builder.NewLatestBlockBuiltStore(), nil)
+	m := execmoduletester.New(t)
+	chain, err := m.GenerateChain(3, func(i int, b *blockgen.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+		tx, err := types.SignTx(types.NewTransaction(uint64(i), m.Address, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore(), m.ChainConfig)
 	backendClient := direct.NewEthBackendClientDirect(backendServer)
 	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
-
 	subscriptionReadyWg := sync.WaitGroup{}
 	subscriptionReadyWg.Add(1)
-	onNewSnapshot := func() {
-		subscriptionReadyWg.Done()
-	}
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log)
+	// Only the first NEW_SNAPSHOT signals readiness; background block retirement emits more.
+	onNewSnapshot := sync.OnceFunc(subscriptionReadyWg.Done)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log, nil)
 	subscriptionReadyWg.Wait()
-
-	_, id := ff.SubscribeReceipts(16, filters.ReceiptsFilterCriteria{
+	newReceipts, id, _ := ff.SubscribeReceipts(16, filters.ReceiptsFilterCriteria{
 		TransactionHashes: []common.Hash{},
 	})
 	defer ff.UnsubscribeReceipts(id)
-
-	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-
-	hook := stageloop.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil, nil, nil)
-	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := execctx.NewSharedDomains(m.Ctx, tx, log.Root())
-		if err != nil {
-			return err
-		}
-		defer sd.Close()
-		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
-			return err
-		}
-		return sd.Flush(m.Ctx, tx)
-	}); err != nil {
-		t.Fatal(err)
+	// Wait for the server-side receipt filter to be fully activated before inserting
+	// blocks. SubscribeReceipts sends a filter update request through a channel which
+	// is processed asynchronously by the server goroutine. Without this wait,
+	// InsertChain may execute and call NotifyReceipts before HasReceiptSubscriptions
+	// returns true, causing all receipt notifications to be silently dropped.
+	require.Eventually(t, func() bool {
+		return m.Notifications.Events.HasReceiptSubscriptions()
+	}, 5*time.Second, time.Millisecond)
+	err = m.InsertChain(chain)
+	require.NoError(t, err)
+	highestSeenHeader := chain.TopBlock.NumberU64()
+	receipts := make([]*remoteproto.SubscribeReceiptsReply, highestSeenHeader)
+	for i := uint64(1); i <= highestSeenHeader; i++ {
+		// 1 tx per block -> 1 receipt per block, delivered as that block's batch
+		batch := (<-newReceipts).Value
+		require.Len(t, batch, 1)
+		require.True(t, batch[0].LastInBlock)
+		receipts[i-1] = batch[0]
 	}
-	t.Logf("Successfully created receipt subscription with ID: %v", id)
+	slices.SortFunc(receipts, func(a, b *remoteproto.SubscribeReceiptsReply) int {
+		return cmp.Compare(a.BlockNumber, b.BlockNumber)
+	})
+	for i := uint64(1); i <= highestSeenHeader; i++ {
+		require.Equal(t, i, receipts[i-1].BlockNumber)
+	}
+}
+
+// sharedJSON reaches rpc through interfaces that package keeps unexported; these mirror them, so a
+// pointer receiver or a renamed method fails here instead of sending {} to every subscriber.
+var (
+	_ interface {
+		MarshalFastJSONTo(*jsonstream.Stream) error
+	} = sharedJSON[*types.Header, *types.Header]{}
+	_ interface{ LocalValue() any } = sharedJSON[*types.Header, *types.Header]{}
+)
+
+func TestSharedJSONEncodesTheValue(t *testing.T) {
+	h := &types.Header{Number: *uint256.NewInt(7)}
+	s := sharedJSON[*types.Header, *types.Header]{&rpchelper.Shared[*types.Header]{Value: h}, headerValue}
+	got, err := jsonstream.Marshal(s)
+	require.NoError(t, err)
+	want, err := json.Marshal(h)
+	require.NoError(t, err)
+	require.Equal(t, string(want), string(got))
+	require.Same(t, h, s.LocalValue())
+}
+
+// fastOnly encodes differently through its fast marshaller than through reflection, so the output
+// shows which one ran.
+type fastOnly struct{}
+
+func (fastOnly) MarshalFastJSONTo(w *jsonstream.Stream) error {
+	w.WriteRaw(`"fast"`)
+	return nil
+}
+
+// An event whose value has a fast marshaller is encoded with it, not with reflection.
+func TestSharedJSONUsesTheFastMarshaller(t *testing.T) {
+	s := sharedJSON[int, fastOnly]{&rpchelper.Shared[int]{Value: 1}, func(int) fastOnly { return fastOnly{} }}
+	got, err := jsonstream.Marshal(s)
+	require.NoError(t, err)
+	require.Equal(t, `"fast"`, string(got))
+}
+
+// newHeads through the rpc package's notifier, as a websocket client receives it.
+func TestEthSubscribeNewHeadsOverWebsocket(t *testing.T) {
+	m := execmoduletester.New(t)
+	ff := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, kvcache.New(kvcache.DefaultCoherentConfig), m), m.DB, nil, nil)
+
+	server := rpc.NewServer(50, false, false, true, m.Log, 100)
+	require.NoError(t, server.RegisterName("eth", api))
+	defer server.Stop()
+	httpsrv := httptest.NewServer(server.WebsocketHandler([]string{"*"}, nil, false, m.Log))
+	defer httpsrv.Close()
+	client, err := rpc.DialWebsocket(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), "", m.Log)
+	require.NoError(t, err)
+	defer client.Close()
+
+	ch := make(chan json.RawMessage, 1)
+	sub, err := client.EthSubscribe(t.Context(), ch, "newHeads")
+	require.NoError(t, err)
+	defer sub.Unsubscribe()
+
+	header := &types.Header{Number: *uint256.NewInt(7)}
+	payload, err := rlp.EncodeToBytes(header)
+	require.NoError(t, err)
+	ff.OnNewEvent(&remoteproto.SubscribeReply{Type: remoteproto.Event_HEADER, Data: payload})
+
+	want, err := json.Marshal(header)
+	require.NoError(t, err)
+	select {
+	case got := <-ch:
+		require.Equal(t, string(want), string(got))
+	case err := <-sub.Err():
+		t.Fatal(err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("no newHeads notification")
+	}
 }

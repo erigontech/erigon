@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 var _ ssz2.SizedObjectSSZ = (*JustificationBits)(nil)
@@ -34,6 +35,7 @@ type JustificationBits [JustificationBitsLength]bool // Bit vector of size 4
 func (j JustificationBits) Clone() clonable.Clonable {
 	return JustificationBits{}
 }
+
 func (j JustificationBits) Byte() (out byte) {
 	for i, bit := range j {
 		if !bit {
@@ -45,6 +47,9 @@ func (j JustificationBits) Byte() (out byte) {
 }
 
 func (j *JustificationBits) DecodeSSZ(b []byte, _ int) error {
+	if len(b) < 1 {
+		return ssz.ErrLowBufferSize
+	}
 	j[0] = b[0]&1 > 0
 	j[1] = b[0]&2 > 0
 	j[2] = b[0]&4 > 0

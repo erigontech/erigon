@@ -22,6 +22,7 @@ package enr
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -101,8 +102,8 @@ func TestLoadErrors(t *testing.T) {
 	// Check error for invalid keys.
 	var list []uint
 	err = r.Load(WithEntry(ip4.ENRKey(), &list))
-	kerr, ok := err.(*KeyError)
-	if !ok {
+	var kerr *KeyError
+	if !errors.As(err, &kerr) {
 		t.Fatalf("expected KeyError, got %T", err)
 	}
 	assert.Equal(t, kerr.Key, ip4.ENRKey())
@@ -143,7 +144,7 @@ func TestSortedGetAndSet(t *testing.T) {
 		for i, w := range tt.want {
 			// set got's key from r.pair[i], so that we preserve order of pairs
 			got := pair{k: r.pairs[i].k}
-			require.NoError(t, r.Load(WithEntry(w.k, &got.v)))
+			assert.NoError(t, r.Load(WithEntry(w.k, &got.v)))
 			assert.Equal(t, w, got)
 		}
 	}
@@ -153,7 +154,7 @@ func TestSortedGetAndSet(t *testing.T) {
 func TestDirty(t *testing.T) {
 	var r Record
 
-	if _, err := rlp.EncodeToBytes(r); err != errEncodeUnsigned {
+	if _, err := rlp.EncodeToBytes(r); !errors.Is(err, errEncodeUnsigned) {
 		t.Errorf("expected errEncodeUnsigned, got %#v", err)
 	}
 
@@ -162,14 +163,40 @@ func TestDirty(t *testing.T) {
 		t.Error("record is not signed")
 	}
 	_, err := rlp.EncodeToBytes(r)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	r.SetSeq(3)
 	if len(r.signature) != 0 {
 		t.Error("signature still set after modification")
 	}
-	if _, err := rlp.EncodeToBytes(r); err != errEncodeUnsigned {
+	if _, err := rlp.EncodeToBytes(r); !errors.Is(err, errEncodeUnsigned) {
 		t.Errorf("expected errEncodeUnsigned, got %#v", err)
+	}
+}
+
+func TestSize(t *testing.T) {
+	var r Record
+
+	// Empty record size is 3 bytes.
+	// Unsigned records cannot be encoded, but they could, the encoding
+	// would be [ 0, 0 ] -> 0xC28080.
+	assert.Equal(t, uint64(3), r.Size())
+
+	// Add one attribute. The size increases to 5, the encoding
+	// would be [ 0, 0, "k", "v" ] -> 0xC58080C26B76.
+	r.Set(WithEntry("k", "v"))
+	assert.Equal(t, uint64(5), r.Size())
+
+	// Now add a signature.
+	nodeid := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	require.NoError(t, signTest(nodeid, &r))
+	assert.Equal(t, uint64(45), r.Size())
+	enc, _ := rlp.EncodeToBytes(&r)
+	if r.Size() != uint64(len(enc)) {
+		t.Error("Size() not equal encoded length", len(enc))
+	}
+	if r.Size() != computeSize(&r) {
+		t.Error("Size() not equal computed size", computeSize(&r))
 	}
 }
 
@@ -179,7 +206,7 @@ func TestSeq(t *testing.T) {
 	assert.Equal(t, uint64(0), r.Seq())
 	r.Set(UDP(1))
 	assert.Equal(t, uint64(0), r.Seq())
-	signTest([]byte{5}, &r)
+	require.NoError(t, signTest([]byte{5}, &r))
 	assert.Equal(t, uint64(0), r.Seq())
 	r.Set(UDP(2))
 	assert.Equal(t, uint64(1), r.Seq())
@@ -226,7 +253,7 @@ func TestRecordTooBig(t *testing.T) {
 
 	// set a big value for random key, expect error
 	r.Set(WithEntry(key, randomString(SizeLimit)))
-	if err := signTest([]byte{5}, &r); err != errTooBig {
+	if err := signTest([]byte{5}, &r); !errors.Is(err, errTooBig) {
 		t.Fatalf("expected to get errTooBig, got %#v", err)
 	}
 
@@ -235,13 +262,36 @@ func TestRecordTooBig(t *testing.T) {
 	require.NoError(t, signTest([]byte{5}, &r))
 }
 
+// This checks that incomplete RLP inputs are handled correctly.
+func TestDecodeIncomplete(t *testing.T) {
+	type decTest struct {
+		input []byte
+		err   error
+	}
+	tests := []decTest{
+		{[]byte{0xC0}, errIncompleteList},
+		{[]byte{0xC1, 0x1}, errIncompleteList},
+		{[]byte{0xC2, 0x1, 0x2}, nil},
+		{[]byte{0xC3, 0x1, 0x2, 0x3}, errIncompletePair},
+		{[]byte{0xC4, 0x1, 0x2, 0x3, 0x4}, nil},
+		{[]byte{0xC5, 0x1, 0x2, 0x3, 0x4, 0x5}, errIncompletePair},
+	}
+	for _, test := range tests {
+		var r Record
+		err := rlp.DecodeBytes(test.input, &r)
+		if !errors.Is(err, test.err) {
+			t.Errorf("wrong error for %X: %v", test.input, err)
+		}
+	}
+}
+
 // TestSignEncodeAndDecodeRandom tests encoding/decoding of records containing random key/value pairs.
 func TestSignEncodeAndDecodeRandom(t *testing.T) {
 	var r Record
 
 	// random key/value pairs for testing
 	pairs := map[string]uint32{}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		key := randomString(7)
 		value := rnd.Uint32()
 		pairs[key] = value
@@ -249,8 +299,11 @@ func TestSignEncodeAndDecodeRandom(t *testing.T) {
 	}
 
 	require.NoError(t, signTest([]byte{5}, &r))
-	_, err := rlp.EncodeToBytes(r)
+
+	enc, err := rlp.EncodeToBytes(r)
 	require.NoError(t, err)
+	require.Equal(t, uint64(len(enc)), r.Size())
+	require.Equal(t, uint64(len(enc)), computeSize(&r))
 
 	for k, v := range pairs {
 		desc := fmt.Sprintf("key %q", k)

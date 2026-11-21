@@ -18,16 +18,18 @@ package integrity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 )
 
-func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) error {
+func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, from, to uint64, failFast bool) error {
+	var probs problems
 	defer log.Info("[integrity] Blocks: done")
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
@@ -35,34 +37,35 @@ func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader service
 	maxBlockNum := blockReader.Snapshots().SegmentsMax()
 
 	if to != 0 && maxBlockNum > to {
-		maxBlockNum = 2
+		maxBlockNum = to
 	}
 
 	for i := from; i < maxBlockNum; i += 10_000 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			b, err := blockReader.BlockByNumber(ctx, tx, i)
 			if err != nil {
-				return err
+				if reportErr := probs.report(failFast, err); reportErr != nil {
+					return reportErr
+				}
+				return nil
 			}
 			if b == nil {
-				err := fmt.Errorf("[integrity] block not found in snapshots: %d", i)
-				if failFast {
+				if err := probs.report(failFast, fmt.Errorf("[integrity] block not found in snapshots: %d", i)); err != nil {
 					return err
 				}
-				log.Error(err.Error())
 			}
 			return nil
 		}); err != nil {
-			return err
+			return errors.Join(err, probs.verdict(string(Blocks)))
 		}
 
 		select {
 		case <-ctx.Done():
-			return nil
+			return errors.Join(ctx.Err(), probs.verdict(string(Blocks)))
 		case <-logEvery.C:
-			log.Info("[integrity] Blocks", "blockNum", fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(maxBlockNum)))
+			log.Info("[integrity] Blocks", "blockNum", fmt.Sprintf("%s/%s", common.PrettyExact(i), common.PrettyExact(maxBlockNum)))
 		default:
 		}
 	}
-	return nil
+	return probs.verdict(string(Blocks))
 }

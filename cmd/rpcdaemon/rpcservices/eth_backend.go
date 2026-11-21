@@ -30,10 +30,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -44,17 +44,17 @@ import (
 	"github.com/erigontech/erigon/p2p"
 )
 
-var _ services.FullBlockReader = &RemoteBackend{}
+var _ dbservices.FullBlockReader = &RemoteBackend{}
 
 type RemoteBackend struct {
 	remoteEthBackend remoteproto.ETHBACKENDClient
 	log              log.Logger
 	version          gointerfaces.Version
 	db               kv.RoDB
-	blockReader      services.FullBlockReader
+	blockReader      dbservices.FullBlockReader
 }
 
-func NewRemoteBackend(client remoteproto.ETHBACKENDClient, db kv.RoDB, blockReader services.FullBlockReader) *RemoteBackend {
+func NewRemoteBackend(client remoteproto.ETHBACKENDClient, db kv.RoDB, blockReader dbservices.FullBlockReader) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: client,
 		version:          gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion),
@@ -64,31 +64,37 @@ func NewRemoteBackend(client remoteproto.ETHBACKENDClient, db kv.RoDB, blockRead
 	}
 }
 
+// BlockReader returns the block reader that RemoteBackend wraps.
+func (back *RemoteBackend) BlockReader() dbservices.FullBlockReader { return back.blockReader }
+
 func (back *RemoteBackend) CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64) {
 	return back.blockReader.CanPruneTo(currentBlockInDB)
 }
+
 func (back *RemoteBackend) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
 	panic("not implemented")
 }
 
-func (back *RemoteBackend) Integrity(_ context.Context) error {
+func (back *RemoteBackend) Integrity(_ context.Context, _ kv.Getter) error {
 	panic("not implemented")
 }
 
 func (back *RemoteBackend) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	panic("not implemented")
 }
+
 func (back *RemoteBackend) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
 	panic("not implemented")
 }
 
-func (back *RemoteBackend) FirstTxnNumNotInSnapshots() uint64 {
+func (back *RemoteBackend) FirstTxnNumNotInSnapshots(_ kv.Getter) uint64 {
 	panic("not implemented")
 }
 
 func (back *RemoteBackend) ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
 	panic("not implemented")
 }
+
 func (back *RemoteBackend) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
 	hash, ok, err := back.CanonicalHash(ctx, db, number)
 	if err != nil {
@@ -100,6 +106,7 @@ func (back *RemoteBackend) BlockByNumber(ctx context.Context, db kv.Tx, number u
 	block, _, err := back.BlockWithSenders(ctx, db, hash, number)
 	return block, err
 }
+
 func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error) {
 	number := rawdb.ReadHeaderNumber(db, hash)
 	if number == nil {
@@ -109,10 +116,9 @@ func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash commo
 	return block, err
 }
 func (back *RemoteBackend) TxsV3Enabled() bool { panic("not implemented") }
-func (back *RemoteBackend) Snapshots() services.BlockSnapshots {
+func (back *RemoteBackend) Snapshots() dbservices.BlockSnapshots {
 	return back.blockReader.Snapshots()
 }
-func (back *RemoteBackend) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
 
 func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 	return back.blockReader.Ready(ctx)
@@ -120,16 +126,26 @@ func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 
 func (back *RemoteBackend) AllTypes() []snaptype.Type { panic("not implemented") }
 func (back *RemoteBackend) FrozenBlocks() uint64      { return back.blockReader.FrozenBlocks() }
-func (back *RemoteBackend) FrozenBorBlocks(align bool) uint64 {
-	return back.blockReader.FrozenBorBlocks(align)
+func (back *RemoteBackend) FrozenBlocksObserved() (uint64, bool) {
+	return back.blockReader.FrozenBlocksObserved()
 }
-func (back *RemoteBackend) FrozenFiles() (list []string) { return back.blockReader.FrozenFiles() }
+
+func (back *RemoteBackend) IsFrozen(ctx context.Context, blockNum uint64) (bool, error) {
+	return back.blockReader.IsFrozen(ctx, blockNum)
+}
+
+func (back *RemoteBackend) FrozenBlocksInView(tx kv.Getter) uint64 {
+	return back.blockReader.FrozenBlocksInView(tx)
+}
+
 func (back *RemoteBackend) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	return back.blockReader.CanonicalBodyForStorage(ctx, tx, blockNum)
 }
+
 func (back *RemoteBackend) FreezingCfg() ethconfig.BlocksFreezing {
 	return back.blockReader.FreezingCfg()
 }
+
 func (back *RemoteBackend) EnsureVersionCompatibility() bool {
 	versionReply, err := back.remoteEthBackend.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
@@ -283,7 +299,7 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 	return nil
 }
 
-func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), requestor *atomic.Value) error {
+func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), onReady func(func(*remoteproto.ReceiptsFilterRequest) error)) error {
 	subscription, err := back.remoteEthBackend.SubscribeReceipts(ctx, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
@@ -291,7 +307,9 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 		}
 		return err
 	}
-	requestor.Store(subscription.Send)
+	if onReady != nil {
+		onReady(subscription.Send)
+	}
 	for {
 		receipts, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
@@ -309,49 +327,69 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
 	return back.blockReader.TxnLookup(ctx, tx, txnHash)
 }
+
 func (back *RemoteBackend) HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error) {
 	panic("HasSenders is low-level method, don't use it in RPCDaemon")
 }
+
 func (back *RemoteBackend) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockNum *uint64, err error) {
 	return back.blockReader.BadHeaderNumber(ctx, tx, hash)
 }
+
 func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error) {
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockNum)
 }
 
-func (back *RemoteBackend) IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error {
+func (back *RemoteBackend) IterateFrozenBodies(_ kv.Getter, _ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error {
 	panic("not implemented")
 }
 
 func (back *RemoteBackend) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, err error) {
 	return back.blockReader.BodyWithTransactions(ctx, tx, hash, blockNum)
 }
+
+func (back *RemoteBackend) BodyWithRawTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.RawBody, error) {
+	return back.blockReader.BodyWithRawTransactions(ctx, tx, hash, blockNum)
+}
+
 func (back *RemoteBackend) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error) {
 	return back.blockReader.BodyRlp(ctx, tx, hash, blockNum)
 }
+
 func (back *RemoteBackend) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, err error) {
 	return back.blockReader.Body(ctx, tx, hash, blockNum)
 }
+
 func (back *RemoteBackend) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error) {
 	return back.blockReader.Header(ctx, tx, hash, blockNum)
 }
+
 func (back *RemoteBackend) HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error) {
 	return back.blockReader.HeaderByNumber(ctx, tx, blockNum)
 }
+
 func (back *RemoteBackend) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	return back.blockReader.HeaderByHash(ctx, tx, hash)
 }
+
 func (back *RemoteBackend) CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, bool, error) {
 	return back.blockReader.CanonicalHash(ctx, tx, blockNum)
 }
+
 func (back *RemoteBackend) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
 	return back.blockReader.HeaderNumber(ctx, tx, hash)
 }
+
 func (back *RemoteBackend) IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error) {
 	return back.blockReader.IsCanonical(ctx, tx, hash, blockNum)
 }
-func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, error) {
+
+func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, bool, error) {
 	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
+}
+
+func (back *RemoteBackend) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum, txNum uint64, i int) (common.Hash, bool, error) {
+	return back.blockReader.TxnHashByIdxInBlock(ctx, tx, blockNum, txNum, i)
 }
 
 func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {
@@ -409,6 +447,30 @@ func (back *RemoteBackend) RemovePeer(ctx context.Context, request *remoteproto.
 	result, err := back.remoteEthBackend.RemovePeer(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("ETHBACKENDClient.RemovePeer() error: %w", err)
+	}
+	return result, nil
+}
+
+func (back *RemoteBackend) AddTrustedPeer(ctx context.Context, request *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error) {
+	result, err := back.remoteEthBackend.AddTrustedPeer(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("ETHBACKENDClient.AddTrustedPeer() error: %w", err)
+	}
+	return result, nil
+}
+
+func (back *RemoteBackend) RemoveTrustedPeer(ctx context.Context, request *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
+	result, err := back.remoteEthBackend.RemoveTrustedPeer(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("ETHBACKENDClient.RemoveTrustedPeer() error: %w", err)
+	}
+	return result, nil
+}
+
+func (back *RemoteBackend) SetHead(ctx context.Context, request *remoteproto.SetHeadRequest) (*remoteproto.SetHeadReply, error) {
+	result, err := back.remoteEthBackend.SetHead(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("ETHBACKENDClient.SetHead() error: %w", err)
 	}
 	return result, nil
 }

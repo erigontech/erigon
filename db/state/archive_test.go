@@ -18,24 +18,19 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"path/filepath"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/seg"
 )
 
 func TestArchiveWriter(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
+	t.Parallel()
 	tmp := t.TempDir()
 	logger := log.New()
 
@@ -46,15 +41,17 @@ func TestArchiveWriter(t *testing.T) {
 		file := filepath.Join(tmp, name)
 		compressCfg := seg.DefaultCfg
 		compressCfg.MinPatternScore = 8
-		comp, err := seg.NewCompressor(context.Background(), "", file, tmp, compressCfg, log.LvlDebug, logger)
+		comp, err := seg.NewCompressor(t.Context(), "", file, tmp, compressCfg, log.LvlDebug, logger)
 		require.NoError(tb, err)
-		return seg.NewWriter(comp, compFlags)
+		w := seg.NewWriter(comp, compFlags)
+		tb.Cleanup(w.Close)
+		return w
 	}
 	keys := make([][]byte, 0, len(td))
 	for k := range td {
 		keys = append(keys, []byte(k))
 	}
-	sort.Slice(keys, func(i, j int) bool { return bytes.Compare(keys[i], keys[j]) < 0 })
+	slices.SortFunc(keys, bytes.Compare)
 
 	writeLatest := func(tb testing.TB, w *seg.Writer, td map[string][]upd) {
 		tb.Helper()
@@ -143,17 +140,4 @@ func TestArchiveWriter(t *testing.T) {
 		r := seg.NewReader(decomp.MakeGetter(), seg.CompressVals)
 		checkLatest(t, r, td)
 	})
-
-}
-
-func TestPrunableProgress(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
-	SaveExecV3PrunableProgress(tx, []byte("test"), 100)
-	s, err := GetExecV3PrunableProgress(tx, []byte("test"))
-	require.NoError(t, err)
-	require.EqualValues(t, 100, s)
-	SaveExecV3PrunableProgress(tx, []byte("test"), 120)
-	s, err = GetExecV3PrunableProgress(tx, []byte("test"))
-	require.NoError(t, err)
-	require.EqualValues(t, 120, s)
 }

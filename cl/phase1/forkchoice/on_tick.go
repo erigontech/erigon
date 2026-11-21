@@ -17,34 +17,77 @@
 package forkchoice
 
 import (
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 )
 
-// OnTick executes on_tick operation for forkchoice.
-func (f *ForkChoiceStore) OnTick(time uint64) {
-	tickSlot := (time - f.genesisTime) / f.beaconCfg.SecondsPerSlot
-	for f.Slot() < tickSlot {
-		previousTime := f.genesisTime + (f.Slot()+1)*f.beaconCfg.SecondsPerSlot
-		f.onTickPerSlot(previousTime)
+// OnTick executes on_tick for a Unix time in milliseconds.
+func (f *ForkChoiceStore) OnTick(timeMs uint64) {
+	if timeMs <= f.timeMs.Load() {
+		return
 	}
-	f.onTickPerSlot(time)
+	startSlot := f.Slot()
+	justified, _ := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	tickSlot := f.slotAtTimeMs(timeMs)
+	for currentSlot := f.Slot(); currentSlot < tickSlot; currentSlot = f.Slot() {
+		nextSlotTimeMs := utils.SecondsToMilliseconds(f.genesisTime + (currentSlot+1)*f.beaconCfg.SecondsPerSlot)
+		f.onTickPerSlot(nextSlotTimeMs)
+	}
+	f.onTickPerSlot(timeMs)
+	next, _ := f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint)
+	if slot := f.Slot(); slot > startSlot && next.Epoch > justified.Epoch && f.nearChainTip(slot) {
+		go func() { _, _ = f.getCheckpointState(next) }()
+	}
 }
 
-// onTickPerSlot handles ticks
-func (f *ForkChoiceStore) onTickPerSlot(time uint64) {
-	previousSlot := f.Slot()
-	f.time.Store(time)
-	currentSlot := f.Slot()
-	if currentSlot <= previousSlot {
+// onTickPerSlot implements the spec's on_tick_per_slot (consensus-specs/fork_choice).
+func (f *ForkChoiceStore) onTickPerSlot(timeMs uint64) {
+	previousTimeMs := f.timeMs.Load()
+	for {
+		if timeMs <= previousTimeMs {
+			return
+		}
+		if f.timeMs.CompareAndSwap(previousTimeMs, timeMs) {
+			break
+		}
+		previousTimeMs = f.timeMs.Load()
+	}
+	currentSlot := f.slotAtTimeMs(timeMs)
+	if currentSlot <= f.slotAtTimeMs(previousTimeMs) {
 		return
 	}
 	f.mu.Lock()
+	defer f.drainQueuedWork()
+	defer f.mu.Unlock()
 	f.headHash = common.Hash{}
-	f.mu.Unlock()
-	// If this is a new slot, reset store.proposer_boost_root
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	f.proposerBoostRoot.Store(common.Hash{})
 	if f.computeSlotsSinceEpochStart(currentSlot) == 0 {
-		f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
+		// Only promote unrealized checkpoints when the node is synced (processing
+		// blocks at the chain tip).  During forward sync, the highest-seen slot lags
+		// far behind the wall clock.  Promoting unrealized finalization at that point
+		// can jump the realized finalized checkpoint ahead of the blocks the fork
+		// graph actually contains, causing Ancestor() to fail with
+		// ErrNotFinalizedDescendant for subsequent blocks.
+		if f.nearChainTip(currentSlot) {
+			f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
+		}
 	}
+}
+
+func (f *ForkChoiceStore) nearChainTip(slot uint64) bool {
+	return f.highestSeen.Load()+2*f.beaconCfg.SlotsPerEpoch >= slot
+}
+
+// SetTimeForSpecTest sets the store time without the monotonic guard of OnTick, because spec test
+// fixtures may move time backwards. Production code must use OnTick.
+func (f *ForkChoiceStore) SetTimeForSpecTest(timeMs uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.timeMs.Store(timeMs)
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.proposerBoostRoot.Store(common.Hash{})
 }

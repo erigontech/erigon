@@ -1,7 +1,6 @@
 package peerdasstate
 
 import (
-	"math/big"
 	"sync"
 	"sync/atomic"
 
@@ -24,8 +23,12 @@ type PeerDasState struct {
 	realCgc       uint64 // real custody group count
 	advertisedCgc uint64 // advertised custody group count
 
-	// earliest available slot
+	// earliestAvailableSlot is the floor of stored columns; GetEarliestAvailableSlot also
+	// applies custodyRaiseSlot.
 	earliestAvailableSlot atomic.Uint64
+	// custodyRaiseSlot is the first slot custodied with the current custody columns; older
+	// slots lack the columns of the groups that the last raise added.
+	custodyRaiseSlot atomic.Uint64
 
 	// cache
 	custodyColumnsCache atomic.Pointer[map[cltypes.CustodyIndex]bool] // map[cltypes.CustodyIndex]bool
@@ -42,7 +45,7 @@ func NewPeerDasState(beaconConfig *clparams.BeaconChainConfig, networkConfig *cl
 }
 
 func (s *PeerDasState) GetEarliestAvailableSlot() uint64 {
-	return s.earliestAvailableSlot.Load()
+	return max(s.earliestAvailableSlot.Load(), s.custodyRaiseSlot.Load())
 }
 
 func (s *PeerDasState) SetEarliestAvailableSlot(slot uint64) {
@@ -55,19 +58,49 @@ func (s *PeerDasState) GetRealCgc() uint64 {
 	return s.realCgc
 }
 
-func (s *PeerDasState) SetCustodyGroupCount(cgc uint64) bool {
+// SetCustodyGroupCount sets the real count and raises the advertised one. A raise that adds
+// custody columns moves the custody raise slot up to raiseSlot(), read after the new custody
+// columns are installed.
+func (s *PeerDasState) SetCustodyGroupCount(cgc uint64, raiseSlot func() uint64) bool {
 	s.cgcMutex.Lock()
 	defer s.cgcMutex.Unlock()
 	s.realCgc = cgc
+	custodied := s.custodiedGroupCountLocked()
+	if !s.raiseAdvertisedCgcLocked(cgc) {
+		return false
+	}
+	if s.custodiedGroupCountLocked() > custodied {
+		// The clock behind raiseSlot can step back.
+		s.custodyRaiseSlot.Store(max(raiseSlot(), s.custodyRaiseSlot.Load()))
+	}
+	return true
+}
+
+func (s *PeerDasState) GetCustodyRaiseSlot() uint64 {
+	return s.custodyRaiseSlot.Load()
+}
+
+func (s *PeerDasState) SetCustodyRaiseSlot(slot uint64) {
+	s.cgcMutex.Lock()
+	defer s.cgcMutex.Unlock()
+	s.custodyRaiseSlot.Store(max(slot, s.custodyRaiseSlot.Load()))
+}
+
+func (s *PeerDasState) RaiseAdvertisedCgc(cgc uint64) bool {
+	s.cgcMutex.Lock()
+	defer s.cgcMutex.Unlock()
+	return s.raiseAdvertisedCgcLocked(cgc)
+}
+
+func (s *PeerDasState) raiseAdvertisedCgcLocked(cgc uint64) bool {
+	// A decrease is deliberately not advertised: fulu/validator.md requires a node to
+	// keep advertising the previous (highest) count and to keep serving it.
 	if cgc > s.advertisedCgc {
 		if node := s.localNode.Load(); node != nil {
-			// update cgc
-			encodedCgc := new(big.Int).SetUint64(cgc).Bytes()
-			node.Set(enr.WithEntry(s.networkConfig.CgcKey, encodedCgc))
+			node.Set(enr.WithEntry(s.networkConfig.CgcKey, EncodeCgc(cgc)))
 		}
 		s.advertisedCgc = cgc
 		s.custodyColumnsCache.Store(nil) // clear the cache
-		// maybe need to update earliest available slot
 		log.Debug("SetCustodyGroupCount", "cgc", cgc)
 		return true
 	}
@@ -91,13 +124,18 @@ func (s *PeerDasState) GetMyCustodyColumns() (map[cltypes.CustodyIndex]bool, err
 		log.Warn("node ID is not set, return empty map")
 		return make(map[cltypes.CustodyIndex]bool), nil
 	}
-	sampleSize := max(clparams.GetBeaconConfig().SamplesPerSlot, s.GetAdvertisedCgc())
-	updatedCustodyColumns, err := peerdasutils.GetCustodyColumns(node.ID(), sampleSize)
+	s.cgcMutex.RLock()
+	defer s.cgcMutex.RUnlock()
+	updatedCustodyColumns, err := peerdasutils.GetCustodyColumns(node.ID(), s.custodiedGroupCountLocked())
 	if err != nil {
 		return nil, err
 	}
 	s.custodyColumnsCache.Store(&updatedCustodyColumns)
 	return updatedCustodyColumns, nil
+}
+
+func (s *PeerDasState) custodiedGroupCountLocked() uint64 {
+	return max(s.beaconConfig.SamplesPerSlot, s.advertisedCgc)
 }
 
 func (s *PeerDasState) SetLocalNodeID(localNode *enode.LocalNode) {

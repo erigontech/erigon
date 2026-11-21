@@ -30,12 +30,13 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 var (
 	contextType      = reflect.TypeFor[context.Context]()
-	jsonStreamType   = reflect.TypeFor[jsonstream.Stream]()
+	jsonStreamType   = reflect.TypeFor[*jsonstream.Stream]()
 	errorType        = reflect.TypeFor[error]()
 	subscriptionType = reflect.TypeFor[Subscription]()
 	stringType       = reflect.TypeFor[string]()
@@ -64,14 +65,25 @@ type callback struct {
 	isSubscribe bool           // true if this is a subscription callback
 	streamable  bool           // support JSON streaming (more efficient for large responses)
 	logger      log.Logger
+
+	timerSuccess metrics.Summary // pre-cached success timer, avoids per-call GetOrCreateSummary
+	timerFailure metrics.Summary // pre-cached failure timer
 }
 
-func (r *serviceRegistry) registerName(name string, rcvr any) error {
+func (r *serviceRegistry) registerName(name string, rcvr any, iface reflect.Type) error {
 	rcvrVal := reflect.ValueOf(rcvr)
 	if name == "" {
 		return fmt.Errorf("no service name for type %s", rcvrVal.Type().String())
 	}
-	callbacks := suitableCallbacks(rcvrVal, r.logger)
+	if iface != nil {
+		if iface.Kind() != reflect.Interface {
+			return fmt.Errorf("iface for service %s is %s, not an interface", rcvrVal.Type(), iface)
+		}
+		if !rcvrVal.Type().Implements(iface) {
+			return fmt.Errorf("service %s does not implement %s", rcvrVal.Type(), iface)
+		}
+	}
+	callbacks := suitableCallbacks(rcvrVal, iface, r.logger)
 	if len(callbacks) == 0 {
 		return fmt.Errorf("service %T doesn't have any suitable methods/subscriptions to expose", rcvr)
 	}
@@ -90,11 +102,16 @@ func (r *serviceRegistry) registerName(name string, rcvr any) error {
 		}
 		r.services[name] = svc
 	}
-	for name, cb := range callbacks {
+	for shortName, cb := range callbacks {
+		// Pre-cache metrics timers using the full "namespace_method" name so the
+		// hot call path never needs to call GetOrCreateSummary or fmt.Sprintf.
+		fullMethod := name + serviceMethodSeparator + shortName
+		cb.timerSuccess = newRPCServingTimerMS(fullMethod, true)
+		cb.timerFailure = newRPCServingTimerMS(fullMethod, false)
 		if cb.isSubscribe {
-			svc.subscriptions[name] = cb
+			svc.subscriptions[shortName] = cb
 		} else {
-			svc.callbacks[name] = cb
+			svc.callbacks[shortName] = cb
 		}
 	}
 	return nil
@@ -102,13 +119,13 @@ func (r *serviceRegistry) registerName(name string, rcvr any) error {
 
 // callback returns the callback corresponding to the given RPC method name.
 func (r *serviceRegistry) callback(method string) *callback {
-	elem := strings.SplitN(method, serviceMethodSeparator, 2)
-	if len(elem) != 2 {
+	svc, name, ok := strings.Cut(method, serviceMethodSeparator)
+	if !ok {
 		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.services[elem[0]].callbacks[elem[1]]
+	return r.services[svc].callbacks[name]
 }
 
 // subscription returns a subscription callback in the given service.
@@ -121,13 +138,15 @@ func (r *serviceRegistry) subscription(service, name string) *callback {
 // suitableCallbacks iterates over the methods of the given type. It determines if a method
 // satisfies the criteria for a RPC callback or a subscription callback and adds it to the
 // collection of callbacks. See server documentation for a summary of these criteria.
-func suitableCallbacks(receiver reflect.Value, logger log.Logger) map[string]*callback {
+func suitableCallbacks(receiver reflect.Value, iface reflect.Type, logger log.Logger) map[string]*callback {
 	typ := receiver.Type()
 	callbacks := make(map[string]*callback)
-	for m := 0; m < typ.NumMethod(); m++ {
-		method := typ.Method(m)
+	for method := range typ.Methods() {
 		if method.PkgPath != "" {
 			continue // method not exported
+		}
+		if !servedByIface(iface, method.Name) {
+			continue // not part of the served interface
 		}
 		name := formatName(method.Name)
 		cb := newCallback(receiver, method.Func, name, logger)
@@ -168,7 +187,7 @@ func newCallback(receiver, fn reflect.Value, name string, logger log.Logger) *ca
 		}
 		c.errPos = 1
 	}
-	// If there is only one return value (error), and the last argument is jsonstream.Stream, mark it as streamable
+	// If there is only one return value (error), and the last argument is *jsonstream.Stream, mark it as streamable
 	if len(outs) != 1 && c.streamable {
 		log.Warn(fmt.Sprintf("Cannot register RPC callback [%s] - streamable method may only return 1 value (error)", name))
 		return nil
@@ -202,18 +221,18 @@ func (c *callback) makeArgTypes() {
 }
 
 // call invokes the callback.
-func (c *callback) call(ctx context.Context, method string, args []reflect.Value, stream jsonstream.Stream) (res any, errRes error) {
+func (c *callback) call(ctx context.Context, method string, args []reflect.Value, stream *jsonstream.Stream) (res any, errRes error) {
 	// Create the argument slice.
 	fullargs := make([]reflect.Value, 0, 2+len(args))
 	if c.rcvr.IsValid() {
 		fullargs = append(fullargs, c.rcvr)
 	}
 	if c.hasCtx {
-		fullargs = append(fullargs, reflect.ValueOf(ctx))
+		fullargs = append(fullargs, reflect.ValueOf(&ctx).Elem())
 	}
 	fullargs = append(fullargs, args...)
 	if c.streamable {
-		fullargs = append(fullargs, reflect.ValueOf(stream))
+		fullargs = append(fullargs, reflect.ValueOf(&stream).Elem())
 	}
 
 	// Catch panic while running the callback.
@@ -228,20 +247,19 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 	if len(results) == 0 {
 		return nil, nil
 	}
-	if dbg.RpcDropResponse {
-		return nil, nil
-	}
 	if c.errPos >= 0 && !results[c.errPos].IsNil() {
-		// Method has returned non-nil error value.
 		err := results[c.errPos].Interface().(error)
 		return reflect.Value{}, err
+	}
+	if dbg.RpcDropResponse {
+		return nil, nil
 	}
 	return results[0].Interface(), nil
 }
 
 // Is t context.Context or *context.Context?
 func isContextType(t reflect.Type) bool {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return t == contextType
@@ -249,7 +267,7 @@ func isContextType(t reflect.Type) bool {
 
 // Does t satisfy the error interface?
 func isErrorType(t reflect.Type) bool {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return t.Implements(errorType)
@@ -257,7 +275,7 @@ func isErrorType(t reflect.Type) bool {
 
 // Is t Subscription or *Subscription?
 func isSubscriptionType(t reflect.Type) bool {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return t == subscriptionType
@@ -273,6 +291,15 @@ func isPubSub(methodType reflect.Type) bool {
 	return isContextType(methodType.In(1)) &&
 		isSubscriptionType(methodType.Out(0)) &&
 		isErrorType(methodType.Out(1))
+}
+
+// servedByIface reports whether an Iface restriction admits a method. A nil iface admits all.
+func servedByIface(iface reflect.Type, method string) bool {
+	if iface == nil {
+		return true
+	}
+	_, declared := iface.MethodByName(method)
+	return declared
 }
 
 // formatName converts to first character of name to lowercase.

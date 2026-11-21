@@ -35,19 +35,13 @@ var (
 	Snapshots SyncStage = "OtterSync" // Snapshots
 	Headers   SyncStage = "Headers"   // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
 
-	BlockHashes       SyncStage = "BlockHashes"       // Headers Number are written, fills blockHash => number bucket
-	Bodies            SyncStage = "Bodies"            // Block bodies are downloaded, TxHash and UncleHash are getting verified
-	Senders           SyncStage = "Senders"           // "From" recovered from signatures, bodies re-written
-	Execution         SyncStage = "Execution"         // Executing each block w/o building a trie
-	CustomTrace       SyncStage = "CustomTrace"       // Executing each block w/o building a trie
-	Translation       SyncStage = "Translation"       // Translation each marked for translation contract (from EVM to TEVM)
-	WitnessProcessing SyncStage = "WitnessProcessing" // Process buffered witness data for Polygon chains
-	TxLookup          SyncStage = "TxLookup"          // Generating transactions lookup index
-	Finish            SyncStage = "Finish"            // Nominal stage after all other stages
-
-	MiningCreateBlock SyncStage = "MiningCreateBlock"
-	MiningExecution   SyncStage = "MiningExecution"
-	MiningFinish      SyncStage = "MiningFinish"
+	BlockHashes SyncStage = "BlockHashes" // Headers Number are written, fills blockHash => number bucket
+	Bodies      SyncStage = "Bodies"      // Block bodies are downloaded, TxHash and UncleHash are getting verified
+	Senders     SyncStage = "Senders"     // "From" recovered from signatures, bodies re-written
+	Execution   SyncStage = "Execution"   // Executing each block w/o building a trie
+	CustomTrace SyncStage = "CustomTrace" // Executing each block w/o building a trie
+	TxLookup    SyncStage = "TxLookup"    // Generating transactions lookup index
+	Finish      SyncStage = "Finish"      // Nominal stage after all other stages
 )
 
 var AllStages = []SyncStage{
@@ -58,7 +52,6 @@ var AllStages = []SyncStage{
 	Senders,
 	Execution,
 	CustomTrace,
-	Translation,
 	TxLookup,
 	Finish,
 }
@@ -70,6 +63,33 @@ func GetStageProgress(db kv.Getter, stage SyncStage) (uint64, error) {
 		return 0, err
 	}
 	return unmarshalData(v)
+}
+
+// GetStageProgress retrieves saved progress of given sync stage from the database
+func GetStageProgressIfAllEqual(db kv.Getter, stage ...SyncStage) (progress uint64, equal bool, err error) {
+	if len(stage) == 0 {
+		panic("GetStageProgressIfAllEqual should be called with at least one stage")
+	}
+	currentProgress := int64(-1)
+	for _, s := range stage {
+		v, err := db.GetOne(kv.SyncStageProgress, []byte(s))
+		if err != nil {
+			return 0, false, err
+		}
+		progressU64, err := unmarshalData(v)
+		if err != nil {
+			return 0, false, err
+		}
+		if currentProgress == -1 {
+			currentProgress = int64(progressU64)
+			continue
+		}
+		if currentProgress != int64(progressU64) {
+			return 0, false, nil
+		}
+	}
+
+	return uint64(currentProgress), true, nil
 }
 
 func SaveStageProgress(db kv.Putter, stage SyncStage, progress uint64) error {

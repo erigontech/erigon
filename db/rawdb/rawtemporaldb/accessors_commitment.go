@@ -10,19 +10,19 @@ import (
 )
 
 func CanUnwindToBlockNum(tx kv.TemporalTx) (uint64, error) {
-	minUnwindale, err := changeset.ReadLowestUnwindableBlock(tx)
+	minUnwindable, err := changeset.ReadLowestUnwindableBlock(tx)
 	if err != nil {
 		return 0, err
 	}
-	if minUnwindale == math.MaxUint64 { // no unwindable block found
-		minUnwindale, err = commitmentdb.LatestBlockNumWithCommitment(tx)
-		log.Warn("no unwindable block found from changesets, falling back to latest with commitment", "block", minUnwindale, "err", err)
-		return minUnwindale, err
+	if minUnwindable == math.MaxUint64 { // no unwindable block found
+		minUnwindable, err = commitmentdb.LatestBlockNumWithCommitment(tx)
+		log.Warn("no unwindable block found from changesets, falling back to latest with commitment", "block", minUnwindable, "err", err)
+		return minUnwindable, err
 	}
-	if minUnwindale > 0 {
-		minUnwindale-- // UnwindTo is exclusive, i.e. (unwindPoint,tip] get unwound
+	if minUnwindable > 0 {
+		minUnwindable-- // UnwindTo is exclusive, i.e. (unwindPoint,tip] get unwound
 	}
-	return minUnwindale, nil
+	return minUnwindable, nil
 }
 
 func CanUnwindBeforeBlockNum(blockNum uint64, tx kv.TemporalTx) (unwindableBlockNum uint64, ok bool, err error) {

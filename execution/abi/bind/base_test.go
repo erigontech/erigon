@@ -26,7 +26,8 @@ import (
 	"strings"
 	"testing"
 
-	ethereum "github.com/erigontech/erigon"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -37,18 +38,18 @@ import (
 )
 
 type mockCaller struct {
-	codeAtBlockNumber         *big.Int
-	callContractBlockNumber   *big.Int
+	codeAtBlockNumber         *uint256.Int
+	callContractBlockNumber   *uint256.Int
 	pendingCodeAtCalled       bool
 	pendingCallContractCalled bool
 }
 
-func (mc *mockCaller) CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error) {
+func (mc *mockCaller) CodeAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) ([]byte, error) {
 	mc.codeAtBlockNumber = blockNumber
 	return []byte{1, 2, 3}, nil
 }
 
-func (mc *mockCaller) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+func (mc *mockCaller) CallContract(ctx context.Context, call bind.CallMsg, blockNumber *uint256.Int) ([]byte, error) {
 	mc.callContractBlockNumber = blockNumber
 	return nil, nil
 }
@@ -58,12 +59,12 @@ func (mc *mockCaller) PendingCodeAt(ctx context.Context, contract common.Address
 	return nil, nil
 }
 
-func (mc *mockCaller) PendingCallContract(ctx context.Context, call ethereum.CallMsg) ([]byte, error) {
+func (mc *mockCaller) PendingCallContract(ctx context.Context, call bind.CallMsg) ([]byte, error) {
 	mc.pendingCallContractCalled = true
 	return nil, nil
 }
-func TestPassingBlockNumber(t *testing.T) {
 
+func TestPassingBlockNumber(t *testing.T) {
 	mc := &mockCaller{}
 
 	bc := bind.NewBoundContract(common.HexToAddress("0x0"), abi.ABI{
@@ -75,7 +76,7 @@ func TestPassingBlockNumber(t *testing.T) {
 		},
 	}, mc, nil, nil)
 
-	blockNumber := big.NewInt(42)
+	blockNumber := uint256.NewInt(42)
 
 	bc.Call(&bind.CallOpts{BlockNumber: blockNumber}, nil, "something") //nolint:errcheck
 
@@ -184,10 +185,12 @@ func TestUnpackIndexedArrayTyLogIntoMap(t *testing.T) {
 
 func TestUnpackIndexedFuncTyLogIntoMap(t *testing.T) {
 	mockAddress := common.HexToAddress("0x376c47978271565f56DEB45495afa69E59c16Ab2")
-	addrBytes := mockAddress.Bytes()
+	addrBytes := mockAddress[:]
 	hash := crypto.Keccak256Hash([]byte("mockFunction(address,uint)"))
 	functionSelector := hash[:4]
-	functionTyBytes := append(addrBytes, functionSelector...)
+	functionTyBytes := make([]byte, 0, len(addrBytes)+len(functionSelector))
+	functionTyBytes = append(functionTyBytes, addrBytes...)
+	functionTyBytes = append(functionTyBytes, functionSelector...)
 	var functionTy [24]byte
 	copy(functionTy[:], functionTyBytes[0:24])
 	topics := []common.Hash{
@@ -251,7 +254,7 @@ func newMockLog(topics []common.Hash, txHash common.Hash) types.Log {
 		Address:     common.HexToAddress("0x0"),
 		Topics:      topics,
 		Data:        hexutil.MustDecode(hexData),
-		BlockNumber: uint64(26),
+		BlockNumber: 26,
 		TxHash:      txHash,
 		TxIndex:     111,
 		BlockHash:   common.BytesToHash([]byte{1, 2, 3, 4, 5}),

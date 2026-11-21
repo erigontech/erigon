@@ -22,12 +22,11 @@ package rpc
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
+	"context"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +56,13 @@ func TestServerRegisterName(t *testing.T) {
 	wantCallbacks := 10
 	if len(svc.callbacks) != wantCallbacks {
 		t.Errorf("Expected %d callbacks for service 'service', got %d", wantCallbacks, len(svc.callbacks))
+	}
+}
+
+func TestNewServerClampsZeroBatchConcurrency(t *testing.T) {
+	server := NewServer(0, false /* traceRequests */, false /* debugSingleRequests */, true, log.New(), 100)
+	if server.batchConcurrency != minBatchConcurrency {
+		t.Fatalf("expected batch concurrency %d, got %d", minBatchConcurrency, server.batchConcurrency)
 	}
 }
 
@@ -98,7 +104,9 @@ func runTestScript(t *testing.T, file string, logger log.Logger) {
 		case strings.HasPrefix(line, "--> "):
 			t.Log(line)
 			// write to connection
-			clientConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if err := clientConn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatalf("set write deadline error: %v", err)
+			}
 			if _, err := io.WriteString(clientConn, line[4:]+"\n"); err != nil {
 				t.Fatalf("write error: %v", err)
 			}
@@ -106,32 +114,14 @@ func runTestScript(t *testing.T, file string, logger log.Logger) {
 			t.Log(line)
 			want := line[4:]
 			// read line from connection and compare text
-			clientConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			if err := clientConn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatalf("set read deadline error: %v", err)
+			}
 			sent, err := readbuf.ReadString('\n')
 			if err != nil {
 				t.Fatalf("read error: %v", err)
 			}
 			sent = strings.TrimRight(sent, "\r\n")
-			msgs, batch, _ := parseMessage(json.RawMessage(sent))
-			if batch {
-				sort.Slice(msgs, func(i, j int) bool {
-					return string(msgs[i].ID) < string(msgs[j].ID)
-				})
-				b, err := json.Marshal(msgs)
-				if err != nil {
-					panic(err)
-				}
-				sent = string(b)
-				msgs, _, _ = parseMessage(json.RawMessage(want))
-				sort.Slice(msgs, func(i, j int) bool {
-					return string(msgs[i].ID) < string(msgs[j].ID)
-				})
-				b, err = json.Marshal(msgs)
-				if err != nil {
-					panic(err)
-				}
-				want = string(b)
-			}
 			if sent != want {
 				t.Errorf("wrong line from server\ngot:  %s\nwant: %s", sent, want)
 			}
@@ -148,36 +138,88 @@ func TestServerShortLivedConn(t *testing.T) {
 	server := newTestServer(logger)
 	defer server.Stop()
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
 	if err != nil {
 		t.Fatal("can't listen:", err)
 	}
 	defer listener.Close()
-	go server.ServeListener(listener)
+	go func() { _ = server.ServeListener(listener) }()
 
 	var (
 		request  = `{"jsonrpc":"2.0","id":1,"method":"rpc_modules"}` + "\n"
 		wantResp = `{"jsonrpc":"2.0","id":1,"result":{"nftest":"1.0","rpc":"1.0","test":"1.0"}}` + "\n"
 		deadline = time.Now().Add(10 * time.Second)
 	)
-	for i := 0; i < 20; i++ {
-		conn, err := net.Dial("tcp", listener.Addr().String())
+	var dialer net.Dialer
+	for range 20 {
+		conn, err := dialer.DialContext(t.Context(), "tcp", listener.Addr().String())
 		if err != nil {
 			t.Fatal("can't dial:", err)
 		}
-		defer conn.Close()
-		conn.SetDeadline(deadline)
+		if err := conn.SetDeadline(deadline); err != nil {
+			t.Fatal("set deadline error:", err)
+		}
 		// Write the request, then half-close the connection so the server stops reading.
-		conn.Write([]byte(request))
-		conn.(*net.TCPConn).CloseWrite()
+		if _, err := conn.Write([]byte(request)); err != nil {
+			t.Fatal("write error:", err)
+		}
+		if err := conn.(*net.TCPConn).CloseWrite(); err != nil {
+			t.Fatal("close write error:", err)
+		}
 		// Now try to get the response.
 		buf := make([]byte, 2000)
 		n, err := conn.Read(buf)
 		if err != nil {
+			conn.Close()
 			t.Fatal("read error:", err)
 		}
 		if !bytes.Equal(buf[:n], []byte(wantResp)) {
+			conn.Close()
 			t.Fatalf("wrong response: %s", buf[:n])
 		}
+		conn.Close()
 	}
+}
+
+type waitService struct {
+	started chan struct{}
+	done    chan struct{}
+}
+
+func newWaitService() *waitService {
+	return &waitService{started: make(chan struct{}), done: make(chan struct{})}
+}
+
+func (s *waitService) Wait(ctx context.Context) error {
+	close(s.started)
+	<-ctx.Done()
+	close(s.done)
+	return ctx.Err()
+}
+
+func (s *waitService) awaitDone(t *testing.T) {
+	t.Helper()
+	select {
+	case <-s.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("call context not canceled after the connection was closed")
+	}
+}
+
+// A call still running on a persistent connection is canceled when the client
+// disconnects.
+func TestServerCancelCallsOnDisconnect(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	svc := newWaitService()
+	server := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
+	defer server.Stop()
+	if err := server.RegisterName("test", svc); err != nil {
+		t.Fatal(err)
+	}
+	client := DialInProc(server, logger)
+	go func() { _ = client.Call(nil, "test_wait") }()
+	<-svc.started
+	client.Close()
+	svc.awaitDone(t)
 }

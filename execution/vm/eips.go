@@ -24,13 +24,12 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 var activators = map[int]func(*JumpTable){
+	8024: enable8024,
 	7702: enable7702,
 	7516: enable7516,
 	6780: enable6780,
@@ -64,8 +63,9 @@ func ValidEip(eipNum int) bool {
 	_, ok := activators[eipNum]
 	return ok
 }
+
 func ActivateableEips() []string {
-	var nums []string //nolint:prealloc
+	nums := make([]string, 0, len(activators))
 	for k := range activators {
 		nums = append(nums, strconv.Itoa(k))
 	}
@@ -85,7 +85,7 @@ func enable1884(jt *JumpTable) {
 	jt[EXTCODEHASH].constantGas = params.ExtcodeHashGasEIP1884
 
 	// New opcode
-	jt[SELFBALANCE] = &operation{
+	jt[SELFBALANCE] = operation{
 		execute:     opSelfBalance,
 		constantGas: GasFastStep,
 		numPop:      0,
@@ -93,12 +93,16 @@ func enable1884(jt *JumpTable) {
 	}
 }
 
-func opSelfBalance(pc uint64, interpreter *EVMInterpreter, callContext *CallContext) (uint64, []byte, error) {
-	balance, err := interpreter.evm.IntraBlockState().GetBalance(callContext.Contract.Address())
-	if err != nil {
-		return pc, nil, err
+func opSelfBalance(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error) {
+	if !callContext.Contract.selfBalanceCached {
+		balance, err := evm.IntraBlockState().GetBalance(callContext.Contract.addr)
+		if err != nil {
+			return pc, nil, err
+		}
+		callContext.Contract.selfBalance = balance
+		callContext.Contract.selfBalanceCached = true
 	}
-	callContext.Stack.push(balance)
+	callContext.Stack.push(callContext.Contract.selfBalance)
 	return pc, nil, nil
 }
 
@@ -106,7 +110,7 @@ func opSelfBalance(pc uint64, interpreter *EVMInterpreter, callContext *CallCont
 // - Adds an opcode that returns the current chain’s EIP-155 unique identifier
 func enable1344(jt *JumpTable) {
 	// New opcode
-	jt[CHAINID] = &operation{
+	jt[CHAINID] = operation{
 		execute:     opChainID,
 		constantGas: GasQuickStep,
 		numPop:      0,
@@ -115,9 +119,9 @@ func enable1344(jt *JumpTable) {
 }
 
 // opChainID implements CHAINID opcode
-func opChainID(pc uint64, interpreter *EVMInterpreter, callContext *CallContext) (uint64, []byte, error) {
-	chainId, _ := uint256.FromBig(interpreter.evm.ChainRules().ChainID)
-	callContext.Stack.push(*chainId)
+func opChainID(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error) {
+	chainId := evm.ChainRules().ChainID
+	callContext.Stack.pushRef().Set(chainId)
 	return pc, nil, nil
 }
 
@@ -174,7 +178,7 @@ func enable3529(jt *JumpTable) {
 // - Adds an opcode that returns the current block's base fee.
 func enable3198(jt *JumpTable) {
 	// New opcode
-	jt[BASEFEE] = &operation{
+	jt[BASEFEE] = operation{
 		execute:     opBaseFee,
 		constantGas: GasQuickStep,
 		numPop:      0,
@@ -186,14 +190,14 @@ func enable3198(jt *JumpTable) {
 // - Adds TLOAD that reads from transient storage
 // - Adds TSTORE that writes to transient storage
 func enable1153(jt *JumpTable) {
-	jt[TLOAD] = &operation{
+	jt[TLOAD] = operation{
 		execute:     opTload,
 		constantGas: params.WarmStorageReadCostEIP2929,
 		numPop:      1,
 		numPush:     1,
 	}
 
-	jt[TSTORE] = &operation{
+	jt[TSTORE] = operation{
 		execute:     opTstore,
 		constantGas: params.WarmStorageReadCostEIP2929,
 		numPop:      2,
@@ -202,28 +206,26 @@ func enable1153(jt *JumpTable) {
 }
 
 // opTload implements TLOAD opcode
-func opTload(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
+func opTload(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	loc := scope.Stack.peek()
-	key := accounts.InternKey(loc.Bytes32())
-	val := interpreter.evm.IntraBlockState().GetTransientState(scope.Contract.Address(), key)
-	loc.SetBytes(val.Bytes())
+	*loc = evm.IntraBlockState().GetTransientState(scope.Contract.Address(), state.TransientKey(*loc))
 	return pc, nil, nil
 }
 
 // opTstore implements TSTORE opcode
-func opTstore(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	if interpreter.readOnly {
+func opTstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	loc := scope.Stack.pop()
+	key := scope.Stack.pop()
 	val := scope.Stack.pop()
-	interpreter.evm.IntraBlockState().SetTransientState(scope.Contract.Address(), accounts.InternKey(loc.Bytes32()), val)
+	evm.IntraBlockState().SetTransientState(scope.Contract.Address(), (*state.TransientKey)(key), val)
 	return pc, nil, nil
 }
 
 // opBaseFee implements BASEFEE opcode
-func opBaseFee(pc uint64, interpreter *EVMInterpreter, callContext *CallContext) (uint64, []byte, error) {
-	baseFee := interpreter.evm.Context.BaseFee
+func opBaseFee(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error) {
+	baseFee := evm.Context.BaseFee
 	callContext.Stack.push(baseFee)
 	return pc, nil, nil
 }
@@ -231,7 +233,7 @@ func opBaseFee(pc uint64, interpreter *EVMInterpreter, callContext *CallContext)
 // enable3855 applies EIP-3855 (PUSH0 opcode)
 func enable3855(jt *JumpTable) {
 	// New opcode
-	jt[PUSH0] = &operation{
+	jt[PUSH0] = operation{
 		execute:     opPush0,
 		constantGas: GasQuickStep,
 		numPop:      0,
@@ -240,8 +242,8 @@ func enable3855(jt *JumpTable) {
 }
 
 // opPush0 implements the PUSH0 opcode
-func opPush0(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.push(uint256.Int{})
+func opPush0(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.pushRef().Clear()
 	return pc, nil, nil
 }
 
@@ -255,7 +257,7 @@ func enable3860(jt *JumpTable) {
 // enable4844 applies mini-danksharding (BLOBHASH opcode)
 // - Adds an opcode that returns the versioned blob hash of the txn at a index.
 func enable4844(jt *JumpTable) {
-	jt[BLOBHASH] = &operation{
+	jt[BLOBHASH] = operation{
 		execute:     opBlobHash,
 		constantGas: GasFastestStep,
 		numPop:      1,
@@ -264,18 +266,18 @@ func enable4844(jt *JumpTable) {
 }
 
 // opBlobHash implements the BLOBHASH opcode
-func opBlobHash(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
+func opBlobHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	idx := scope.Stack.peek()
-	if idx.LtUint64(uint64(len(interpreter.evm.BlobHashes))) {
-		hash := interpreter.evm.BlobHashes[idx.Uint64()]
-		idx.SetBytes(hash.Bytes())
+	if idx.LtUint64(uint64(len(evm.BlobHashes))) {
+		hash := evm.BlobHashes[idx.Uint64()]
+		idx.SetBytes32(hash[:])
 	} else {
 		idx.Clear()
 	}
 	return pc, nil, nil
 }
 
-func opCLZ(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
+func opCLZ(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x := scope.Stack.peek()
 	// count leading zero bits in x
 	x.SetUint64(256 - uint64(x.BitLen()))
@@ -285,7 +287,7 @@ func opCLZ(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, 
 // enable5656 enables EIP-5656 (MCOPY opcode)
 // https://eips.ethereum.org/EIPS/eip-5656
 func enable5656(jt *JumpTable) {
-	jt[MCOPY] = &operation{
+	jt[MCOPY] = operation{
 		execute:     opMcopy,
 		constantGas: GasFastestStep,
 		dynamicGas:  gasMcopy,
@@ -295,27 +297,14 @@ func enable5656(jt *JumpTable) {
 	}
 }
 
-// opMcopy implements the MCOPY opcode (https://eips.ethereum.org/EIPS/eip-5656)
-func opMcopy(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	var (
-		dst    = scope.Stack.pop()
-		src    = scope.Stack.pop()
-		length = scope.Stack.pop()
-	)
-	// These values are checked for overflow during memory expansion calculation
-	// (the memorySize function on the opcode).
-	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
-	return pc, nil, nil
-}
-
 // enable6780 applies EIP-6780 (deactivate SELFDESTRUCT)
 func enable6780(jt *JumpTable) {
 	jt[SELFDESTRUCT].execute = opSelfdestruct6780
 }
 
 // opBlobBaseFee implements the BLOBBASEFEE opcode
-func opBlobBaseFee(pc uint64, interpreter *EVMInterpreter, callContext *CallContext) (uint64, []byte, error) {
-	blobBaseFee := interpreter.evm.Context.BlobBaseFee
+func opBlobBaseFee(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error) {
+	blobBaseFee := evm.Context.BlobBaseFee
 	callContext.Stack.push(blobBaseFee)
 	return pc, nil, nil
 }
@@ -323,7 +312,7 @@ func opBlobBaseFee(pc uint64, interpreter *EVMInterpreter, callContext *CallCont
 // enable7516 applies EIP-7516 (BLOBBASEFEE opcode)
 // - Adds an opcode that returns the current block's blob base fee.
 func enable7516(jt *JumpTable) {
-	jt[BLOBBASEFEE] = &operation{
+	jt[BLOBBASEFEE] = operation{
 		execute:     opBlobBaseFee,
 		constantGas: GasQuickStep,
 		numPop:      0,
@@ -339,10 +328,56 @@ func enable7702(jt *JumpTable) {
 }
 
 func enable7939(jt *JumpTable) {
-	jt[CLZ] = &operation{
+	jt[CLZ] = operation{
 		execute:     opCLZ,
 		constantGas: GasFastStep,
 		numPop:      1,
 		numPush:     1,
 	}
+}
+
+// enable8024 applies EIP-8024 (DUPN, SWAPN, EXCHANGE)
+func enable8024(jt *JumpTable) {
+	jt[DUPN] = operation{
+		execute:     opDupN,
+		constantGas: GasFastestStep,
+		numPop:      0,
+		numPush:     1,
+	}
+	jt[SWAPN] = operation{
+		execute:     opSwapN,
+		constantGas: GasFastestStep,
+		numPop:      0,
+		numPush:     0,
+	}
+	jt[EXCHANGE] = operation{
+		execute:     opExchange,
+		constantGas: GasFastestStep,
+		numPop:      0,
+		numPush:     0,
+	}
+}
+
+// enable7843 applies EIP-7843 (SLOTNUM)
+func enable7843(jt *JumpTable) {
+	jt[SLOTNUM] = operation{
+		execute:     opSlotNum,
+		constantGas: GasQuickStep,
+		numPop:      0,
+		numPush:     1,
+	}
+}
+
+// enable8037 applies EIP-8037 (State Creation Gas Cost Increase)
+func enable8037(jt *JumpTable) {
+	jt[CREATE].constantGas = params.CreateGasEIP8037
+	jt[CREATE2].constantGas = params.Create2GasEIP8037
+}
+
+// enable8038 applies EIP-8038 (State-access gas cost update)
+func enable8038(jt *JumpTable) {
+	jt[EXTCODESIZE].constantGas = params.ExtCodeWarmAccessGasEIP8038
+	jt[EXTCODECOPY].constantGas = params.ExtCodeWarmAccessGasEIP8038
+	jt[CREATE].constantGas = params.CreateAccessEIP8038
+	jt[CREATE2].constantGas = params.CreateAccessEIP8038
 }

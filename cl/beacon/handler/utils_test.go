@@ -17,8 +17,9 @@
 package handler
 
 import (
+	"bytes"
 	"context"
-	"math"
+	"sync"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
@@ -46,33 +48,69 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
+
+func TestMain(m *testing.M) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.InitGlobalStaticConfig(&cfg)
+	m.Run()
+}
+
+var testGenesisClock = sync.OnceValues(func() (uint64, common.Hash) {
+	genesis, err := initial_state.GetGenesisState(context.Background(), chainspec.MainnetChainID)
+	if err != nil {
+		panic(err)
+	}
+	return genesis.GenesisTime(), genesis.GenesisValidatorsRoot()
+})
+
+type handlerFixtureRow struct {
+	key, value []byte
+}
+
+var handlerChainFixtures [clparams.ElectraVersion + 1]struct {
+	once   sync.Once
+	tables map[string][]handlerFixtureRow
+	err    error
+}
 
 func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger, useRealSyncDataMgr bool) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData synced_data.SyncedData, fcu *mock_services2.ForkChoiceStorageMock, vp *validator_params.ValidatorParams) {
 	ctrl := gomock.NewController(t)
 	bcfg := clparams.MainnetBeaconConfig
-	if v == clparams.Phase0Version {
+	switch v {
+	case clparams.Phase0Version:
 		blocks, preState, postState = tests.GetPhase0Random()
-	} else if v == clparams.BellatrixVersion {
+	case clparams.BellatrixVersion:
 		bcfg.AltairForkEpoch = 1
 		bcfg.BellatrixForkEpoch = 1
 		blocks, preState, postState = tests.GetBellatrixRandom()
-	} else if v == clparams.CapellaVersion {
+	case clparams.CapellaVersion:
 		bcfg.AltairForkEpoch = 1
 		bcfg.BellatrixForkEpoch = 1
 		bcfg.CapellaForkEpoch = 1
 		blocks, preState, postState = tests.GetCapellaRandom()
+	case clparams.ElectraVersion:
+		bcfg.AltairForkEpoch = 1
+		bcfg.BellatrixForkEpoch = 1
+		bcfg.CapellaForkEpoch = 1
+		bcfg.DenebForkEpoch = 1
+		bcfg.ElectraForkEpoch = 1
+		blocks, preState, postState = tests.GetElectraRandom()
 	}
 	fcu = mock_services2.NewForkChoiceStorageMock(t)
-	db = memdb.NewTestDB(t, dbcfg.ChainDB)
-	blobDb := memdb.NewTestDB(t, dbcfg.ChainDB)
-	reader := tests.LoadChain(blocks, postState, db, t)
+	db = mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	reader := tests.NewMockBlockReader()
+	for _, block := range blocks {
+		reader.U[block.Block.Slot] = block
+	}
 	firstBlockRoot, _ := blocks[0].Block.HashSSZ()
 	firstBlockHeader := blocks[0].SignedBeaconBlockHeader()
 
@@ -80,25 +118,75 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 
 	if useRealSyncDataMgr {
 		syncedData = synced_data.NewSyncedDataManager(&bcfg, true)
-		syncedData.OnHeadState(postState)
+		require.NoError(t, syncedData.OnHeadState(postState))
 	} else {
 		syncedData = sync_mock_services.NewMockSyncedData(ctrl)
 	}
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, nil, reader, syncedData, logger, true, true, false, false, nil)
-	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
+	fixture := &handlerChainFixtures[v]
+	antiquaryDir := t.TempDir()
+	// Nothing inside once.Do may stop the test: a done Once would hand later callers an empty fixture.
+	fixture.once.Do(func() {
+		fixture.err = db.Update(ctx, func(tx kv.RwTx) error {
+			for _, block := range blocks {
+				if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+					return err
+				}
+				if err := beacon_indicies.WriteHighestFinalized(tx, block.Block.Slot+64); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if fixture.err != nil {
+			return
+		}
+		a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New(antiquaryDir), nil, db, nil, nil, reader, syncedData, logger, true, true, false, false, nil)
+		if fixture.err = a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33); fixture.err != nil {
+			return
+		}
+		tables := make(map[string][]handlerFixtureRow)
+		fixture.err = db.View(ctx, func(tx kv.Tx) error {
+			names, err := tx.ListTables()
+			if err != nil {
+				return err
+			}
+			for _, table := range names {
+				if err := tx.ForEach(table, nil, func(k, v []byte) error {
+					tables[table] = append(tables[table], handlerFixtureRow{bytes.Clone(k), bytes.Clone(v)})
+					return nil
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		fixture.tables = tables
+	})
+	require.NoError(t, fixture.err)
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		for table, rows := range fixture.tables {
+			for _, row := range rows {
+				if err := tx.Put(table, row.key, row.value); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}))
+	vt = state_accessors.NewStaticValidatorTable()
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error { return state_accessors.ReadValidatorsTable(tx, vt) }))
 	// historical states reader below
 	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, preState, nil, syncedData)
 	opPool = pool.NewOperationsPool(&bcfg)
 	fcu.Pool = opPool
 
-	genesis, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
-	require.NoError(t, err)
-	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
-	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, &bcfg, ethClock)
+	genesisTime, genesisRoot := testGenesisClock()
+	ethClock := eth_clock.NewEthereumClock(genesisTime, genesisRoot, &bcfg)
+	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs())
 	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
-	blobStorage.WriteBlobSidecars(ctx, firstBlockRoot, []*cltypes.BlobSidecar{
+	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, firstBlockRoot, []*cltypes.BlobSidecar{
 		{
 			Index:                    0,
 			Blob:                     cltypes.Blob{byte(1)},
@@ -113,18 +201,29 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			KzgCommitment:            [48]byte{1},
 			CommitmentInclusionProof: solid.NewHashVector(17),
 		},
-	})
+	}))
 	syncCommitteeMessagesService := mock_services.NewMockSyncCommitteeMessagesService(ctrl)
 	syncContributionService := mock_services.NewMockSyncContributionService(ctrl)
 	aggregateAndProofsService := mock_services.NewMockAggregateAndProofService(ctrl)
 	voluntaryExitService := mock_services.NewMockVoluntaryExitService(ctrl)
 	blsToExecutionChangeService := mock_services.NewMockBLSToExecutionChangeService(ctrl)
 	proposerSlashingService := mock_services.NewMockProposerSlashingService(ctrl)
+	blockService := mock_services.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	blockService.EXPECT().CommitGossipReservation(gomock.Any()).AnyTimes()
+	blockService.EXPECT().ReleaseGossipReservation(gomock.Any()).AnyTimes()
+	blockService.EXPECT().ScheduleBlockForLaterProcessing(gomock.Any()).AnyTimes()
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) services.PublishedBlockJob {
+			return completedPublishedBlockJob{err: store(context.Background())}
+		},
+	).AnyTimes()
 
 	// ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error
 	syncCommitteeMessagesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *services.SyncCommitteeMessageForGossip) error {
 		return h.syncMessagePool.AddSyncCommitteeMessage(postState, *subnetID, msg.SyncCommitteeMessage)
 	}).AnyTimes()
+	syncCommitteeMessagesService.EXPECT().MarkPublished(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 
 	syncContributionService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *services.SignedContributionAndProofForGossip) error {
 		return h.syncMessagePool.AddSyncContribution(postState, msg.SignedContributionAndProof.Message.Contribution)
@@ -148,6 +247,8 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
 	gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	gossipManager.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	gossipManager.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	gossipManager.EXPECT().SubscribeWithExpiry(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 	vp = validator_params.NewValidatorParams()
@@ -180,12 +281,18 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		voluntaryExitService,
 		blsToExecutionChangeService,
 		proposerSlashingService,
+		blockService,
 		nil,
 		nil,
 		gossipManager,
 		false,
 		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
 	) // TODO: add tests
-	h.Init()
+	h.o.Do(h.init)
 	return
 }

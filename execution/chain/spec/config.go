@@ -25,7 +25,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -41,9 +42,11 @@ func init() {
 	RegisterChainSpec(networkname.Gnosis, Gnosis)
 	RegisterChainSpec(networkname.Chiado, Chiado)
 	RegisterChainSpec(networkname.Test, Test)
+	RegisterChainSpec(networkname.Bloatnet, Bloatnet)
 
 	// verify registered chains
-	for _, spec := range registeredChainsByName {
+	for name := range registeredChainsByName {
+		spec := registeredChainsByName[name]
 		if spec.IsEmpty() {
 			panic("chain spec is empty for chain " + spec.Name)
 		}
@@ -55,14 +58,12 @@ func init() {
 		}
 		if spec.GenesisStateRoot == (common.Hash{}) {
 			spec.GenesisStateRoot = empty.RootHash
+			registeredChainsByName[name] = spec
 		}
 
 		if spec.Config == nil {
 			panic("chain config is not set for chain " + spec.Name)
 		}
-
-		registeredChainsByName[spec.Name] = spec
-		registeredChainsByGenesisHash[spec.GenesisHash] = spec
 	}
 
 	for _, name := range chainNamesPoS {
@@ -105,24 +106,32 @@ func ChainSpecByName(chainName string) (Spec, error) {
 	return spec, nil
 }
 
-// ChainSpecByGenesisHash returns the chain spec for the given genesis hash
-func ChainSpecByGenesisHash(genesisHash common.Hash) (Spec, error) {
-	spec, ok := registeredChainsByGenesisHash[genesisHash]
-	if !ok || spec.IsEmpty() {
-		return Spec{}, fmt.Errorf("%w with genesis %x", ErrChainSpecUnknown, genesisHash)
+// ChainSpecsByGenesisHash returns all chain specs matching the given genesis hash.
+// Multiple chains can share a genesis hash (e.g. mainnet and bloatnet).
+//
+// ONLY USED FOR ERROR LOGGING.
+func ChainSpecsByGenesisHash(genesisHash common.Hash) []Spec {
+	var result []Spec
+	for name := range registeredChainsByName {
+		spec := registeredChainsByName[name]
+		if spec.GenesisHash == genesisHash {
+			result = append(result, spec)
+		}
 	}
-	return spec, nil
+	return result
 }
 
 // RegisterChainSpec registers a new chain spec with the given name and spec.
 // If the name already exists, it will be overwritten.
 func RegisterChainSpec(name string, spec Spec) {
 	registeredChainsByName[name] = spec
-	NetworkNameByID[spec.Config.ChainID.Uint64()] = name
 
-	if spec.GenesisHash != (common.Hash{}) {
-		registeredChainsByGenesisHash[spec.GenesisHash] = spec
+	// Use custom NetworkID if specified, otherwise use ChainID
+	networkID := spec.NetworkID
+	if networkID == 0 {
+		networkID = spec.Config.ChainID.Uint64()
 	}
+	NetworkNameByID[networkID] = name
 }
 
 type Spec struct {
@@ -133,6 +142,7 @@ type Spec struct {
 	Config           *chain.Config
 	Bootnodes        []string // list of bootnodes for the chain, if any
 	DNSNetwork       string   // address of a public DNS-based node list. See https://github.com/ethereum/discv4-dns-lists for more information.
+	NetworkID        uint64   // Optional custom network ID (defaults to ChainID if 0)
 }
 
 func (cs Spec) IsEmpty() bool {
@@ -140,14 +150,11 @@ func (cs Spec) IsEmpty() bool {
 }
 
 var ( // listings filled by init()
-	// mapping of chain genesis hashes to chain specs.
-	registeredChainsByGenesisHash = map[common.Hash]Spec{}
-
 	// mapping of chain names to chain specs.
 	registeredChainsByName = map[string]Spec{}
 
 	// list of chain IDs that are considered Proof of Stake (PoS) chains
-	chainIdsPoS = []*big.Int{}
+	chainIdsPoS = []*uint256.Int{}
 )
 
 var (
@@ -200,9 +207,19 @@ var (
 		Name:             networkname.Test,
 		GenesisHash:      common.HexToHash("0x6116de25352c93149542e950162c7305f207bbc17b0eb725136b78c80aed79cc"),
 		GenesisStateRoot: empty.RootHash,
-		Config:           chain.TestChainConfig,
-		//Bootnodes:   TestBootnodes,
+		Config:           chain.TestChainBerlinConfig,
+		// Bootnodes:   TestBootnodes,
 		Genesis: TestGenesisBlock(),
+	}
+
+	Bloatnet = Spec{
+		Name:        networkname.Bloatnet,
+		GenesisHash: common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"), // Same as mainnet
+		Bootnodes:   bloatnetBootnodes,
+		Config:      ReadChainConfig(chainspecs, "chainspecs/bloatnet.json"),
+		Genesis:     BloatnetGenesisBlock(),
+		DNSNetwork:  "", // No DNS discovery
+		NetworkID:   12159,
 	}
 )
 
@@ -212,13 +229,14 @@ var chainNamesPoS = []string{
 	networkname.Hoodi,
 	networkname.Gnosis,
 	networkname.Chiado,
+	networkname.Bloatnet,
 }
 
-func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {
+func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *uint256.Int) bool {
 	return isChainIDPoS(chainConfig.ChainID) || hasChainPassedTerminalTD(chainConfig, currentTDProvider)
 }
 
-func isChainIDPoS(chainID *big.Int) bool {
+func isChainIDPoS(chainID *uint256.Int) bool {
 	for _, id := range chainIdsPoS {
 		if id.Cmp(chainID) == 0 {
 			return true
@@ -227,7 +245,7 @@ func isChainIDPoS(chainID *big.Int) bool {
 	return false
 }
 
-func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {
+func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func() *uint256.Int) bool {
 	if chainConfig.TerminalTotalDifficultyPassed {
 		return true
 	}

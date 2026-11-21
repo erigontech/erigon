@@ -21,7 +21,7 @@ package runtime
 
 import (
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -31,18 +31,17 @@ func NewEnv(cfg *Config) *vm.EVM {
 		Origin:   cfg.Origin,
 		GasPrice: cfg.GasPrice,
 	}
-
 	blockContext := evmtypes.BlockContext{
 		CanTransfer: protocol.CanTransfer,
-		Transfer:    rules.Transfer,
+		Transfer:    misc.Transfer,
 		GetHash:     cfg.GetHashFn,
 		Coinbase:    cfg.Coinbase,
-		BlockNumber: cfg.BlockNumber.Uint64(),
-		Time:        cfg.Time.Uint64(),
-		Difficulty:  cfg.Difficulty,
+		BlockNumber: cfg.BlockNumber,
+		Time:        cfg.Time,
+		Difficulty:  *cfg.Difficulty,
 		GasLimit:    cfg.GasLimit,
 		BaseFee:     cfg.BaseFee,
+		L2Version:   cfg.L2Version,
 	}
-
 	return vm.NewEVM(blockContext, txContext, cfg.State, cfg.ChainConfig, cfg.EVMConfig)
 }

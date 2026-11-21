@@ -1,0 +1,31 @@
+name: Save Go build cache
+description: Save Go build cache using the provided key
+
+inputs:
+  gocache:
+    description: "GOCACHE path"
+    required: true
+  key:
+    description: "Cache key to save under (from restore-build-cache outputs.primary-key)"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Show build cache size
+      if: ${{ always() }}
+      shell: bash
+      env:
+        GOCACHE_PATH: ${{ inputs.gocache }}
+      run: time du -hs "$GOCACHE_PATH" || true
+
+    - name: Display free disk space before saving build cache
+      if: ${{ always() }}
+      shell: bash
+      run: df -h
+
+    - uses: actions/cache/save@v5
+      if: ${{ always() }}
+      with:
+        path: ${{ inputs.gocache }}
+        key: ${{ inputs.key }}

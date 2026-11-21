@@ -32,40 +32,50 @@ func (ref *RebasedEliasFano) Count() uint64 {
 	return ref.ef.Count()
 }
 
-func (ref *RebasedEliasFano) Reset(baseNum uint64, raw []byte) {
+func (ref *RebasedEliasFano) Reset(baseNum uint64, raw []byte) { // no `return parameter` to avoid heap-allocation of `ref` object
 	ref.baseNum = baseNum
 	ref.ef.Reset(raw)
 }
 
-func (ref *RebasedEliasFano) Seek(v uint64) (uint64, bool) {
+func (ref *RebasedEliasFano) Seek(v uint64) (uint64, uint64, bool) {
 	if v < ref.baseNum {
 		v = ref.baseNum
 	}
 
-	n, found := ref.ef.Seek(v - ref.baseNum)
-	return ref.baseNum + n, found
+	n, pos, found := ref.ef.Seek(v - ref.baseNum)
+	return ref.baseNum + n, pos, found
+}
+
+func (ref *RebasedEliasFano) Has(v uint64) bool {
+	n, _, ok := ref.Seek(v)
+	return ok && n == v
 }
 
 func (ref *RebasedEliasFano) Iterator() *RebasedIterWrapper {
-	return &RebasedIterWrapper{
-		baseNum: ref.baseNum,
-		it:      ref.ef.Iterator(),
-		reverse: false,
-	}
+	it := &RebasedIterWrapper{}
+	it.Reset(ref, false)
+	return it
 }
 
 func (ref *RebasedEliasFano) ReverseIterator() *RebasedIterWrapper {
-	return &RebasedIterWrapper{
-		baseNum: ref.baseNum,
-		it:      ref.ef.ReverseIterator(),
-		reverse: true,
-	}
+	it := &RebasedIterWrapper{}
+	it.Reset(ref, true)
+	return it
 }
 
 type RebasedIterWrapper struct {
 	baseNum uint64
 	it      *EliasFanoIter
 	reverse bool
+}
+
+func (it *RebasedIterWrapper) Reset(ref *RebasedEliasFano, reverse bool) {
+	it.baseNum = ref.baseNum
+	if it.it == nil {
+		it.it = &EliasFanoIter{}
+	}
+	it.it.Reset(&ref.ef, reverse)
+	it.reverse = reverse
 }
 
 func (it *RebasedIterWrapper) HasNext() bool {
@@ -82,7 +92,7 @@ func (it *RebasedIterWrapper) Seek(v uint64) {
 		it.it.Seek(0)
 		if it.reverse {
 			// force exhaustion as we are seeking before the first elem
-			it.it.Next()
+			_, _ = it.it.Next()
 		}
 		return
 	}

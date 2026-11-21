@@ -22,9 +22,7 @@ import (
 	"fmt"
 )
 
-var (
-	errNotEnoughPeers = errors.New("not enough peers")
-)
+var errNotEnoughPeers = errors.New("not enough peers")
 
 func checkMinPeers(ctx context.Context, minPeerCount uint, api NetAPI) error {
 	if api == nil {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
@@ -66,14 +67,18 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 		return err
 	}
 
-	a.AddDependencyBtwnDomains(kv.AccountsDomain, kv.CommitmentDomain)
-	a.AddDependencyBtwnDomains(kv.StorageDomain, kv.CommitmentDomain)
+	for _, pair := range DomainDependencies() {
+		a.AddDependencyBtwnDomains(pair[0], pair[1])
+	}
 
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 	return nil
 }
 
-const AggregatorSqueezeCommitmentValues = true
+func DomainDependencies() [2][2]kv.Domain {
+	return [2][2]kv.Domain{{kv.AccountsDomain, kv.CommitmentDomain}, {kv.StorageDomain, kv.CommitmentDomain}}
+}
+
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
 var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
@@ -83,6 +88,23 @@ func init() {
 		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
 	}
 	InitSchemas()
+	legacyCommitmentDomain = Schema.CommitmentDomain
+	if ExperimentalCommitmentV3 {
+		EnableCommitmentV3Records(&Schema.CommitmentDomain)
+	}
+}
+
+var legacyCommitmentDomain DomainCfg
+
+func SetCommitmentV3(on bool) (restore func()) {
+	schema, v3 := Schema, ExperimentalCommitmentV3
+	ExperimentalCommitmentV3 = on
+	if on {
+		EnableCommitmentV3Records(&Schema.CommitmentDomain)
+	} else {
+		Schema.CommitmentDomain = legacyCommitmentDomain
+	}
+	return func() { Schema, ExperimentalCommitmentV3 = schema, v3 }
 }
 
 type SchemaGen struct {
@@ -187,7 +209,24 @@ func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
 	return v
 }
 
-var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
+// commitmentKVWriteVersion stamps v2.1 on referenced commitment files (matching main's referenced
+// default) and v2.2 on plain ones; the read ceiling (DataKV.Current = v2.2) accepts both.
+func commitmentKVWriteVersion(c *DomainCfg) version.Version {
+	if c.CommitmentV3Records {
+		return version.V3_0
+	}
+	if c.ReferencesInCommitmentBranches {
+		return version.V2_1
+	}
+	return version.V2_2
+}
+
+const DefaultCommitmentV3 = false
+
+var ExperimentalCommitmentV3 = dbg.EnvBool("COMMITMENT_V3", DefaultCommitmentV3)
+
+const MixedCommitmentAdvice = "roll the conversion back with `integration commitment convert --restore`, " +
+	"or run `erigon seg reset` and restart erigon to download v3 files from the seeders"
 
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
@@ -198,13 +237,14 @@ var Schema = SchemaGen{
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblAccountHistoryVals,
-			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultCfg.WithValuesOnCompressedPage(64), Compression: seg.CompressNone,
 			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: false,
 			HistoryIdx:         kv.AccountsHistoryIdx,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.AccountsDomain.String(), KeysTable: kv.TblAccountHistoryKeys, ValuesTable: kv.TblAccountIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -226,6 +266,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.StorageHistoryIdx,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.StorageDomain.String(), KeysTable: kv.TblStorageHistoryKeys, ValuesTable: kv.TblStorageIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -248,6 +289,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.CodeHistoryIdx,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.CodeDomain.String(), KeysTable: kv.TblCodeHistoryKeys, ValuesTable: kv.TblCodeIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -258,8 +300,9 @@ var Schema = SchemaGen{
 		Name: kv.CommitmentDomain, ValuesTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		Accessors:           AccessorHashMap,
-		ReplaceKeysInValues: AggregatorSqueezeCommitmentValues, // when true, keys are replaced in values during merge once file range reaches threshold
+		Accessors:                      AccessorHashMap,
+		ReferencesInCommitmentBranches: config3.DefaultReferencesInCommitmentBranches, // when true, keys are replaced in values during merge once file range reaches threshold
+		KVWriteVersion:                 commitmentKVWriteVersion,
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblCommitmentHistoryVals,
@@ -274,6 +317,7 @@ var Schema = SchemaGen{
 			HistoryDisabled:   true,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.CommitmentDomain.String(), KeysTable: kv.TblCommitmentHistoryKeys, ValuesTable: kv.TblCommitmentIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -296,6 +340,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.ReceiptHistoryIdx,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.ReceiptDomain.String(), KeysTable: kv.TblReceiptHistoryKeys, ValuesTable: kv.TblReceiptIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -307,11 +352,11 @@ var Schema = SchemaGen{
 		LargeValues: true,
 
 		Accessors:   AccessorHashMap,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblRCacheHistoryVals,
-			CompressorCfg: seg.Cfg{ValuesOnCompressedPage: 16}, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+			CompressorCfg: seg.Cfg{ValuesOnCompressedPage: 16}, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: true,
@@ -321,7 +366,7 @@ var Schema = SchemaGen{
 			HistoryValuesOnCompressedPage: 16,
 
 			IiCfg: InvIdxCfg{
-				Disable:      true, // disable everything by default
+				Enabled:      false, // rcache domain is opt-in via EnableHistoricalRCache
 				FilenameBase: kv.RCacheDomain.String(), KeysTable: kv.TblRCacheHistoryKeys, ValuesTable: kv.TblRCacheIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -330,6 +375,7 @@ var Schema = SchemaGen{
 	},
 
 	LogAddrIdx: InvIdxCfg{
+		Enabled:      true,
 		FilenameBase: kv.FileLogAddressIdx, KeysTable: kv.TblLogAddressKeys, ValuesTable: kv.TblLogAddressIdx,
 
 		Compression: seg.CompressNone,
@@ -337,6 +383,7 @@ var Schema = SchemaGen{
 		Accessors:   AccessorHashMap,
 	},
 	LogTopicIdx: InvIdxCfg{
+		Enabled:      true,
 		FilenameBase: kv.FileLogTopicsIdx, KeysTable: kv.TblLogTopicsKeys, ValuesTable: kv.TblLogTopicsIdx,
 
 		Compression: seg.CompressNone,
@@ -344,6 +391,7 @@ var Schema = SchemaGen{
 		Accessors:   AccessorHashMap,
 	},
 	TracesFromIdx: InvIdxCfg{
+		Enabled:      true,
 		FilenameBase: kv.FileTracesFromIdx, KeysTable: kv.TblTracesFromKeys, ValuesTable: kv.TblTracesFromIdx,
 
 		Compression: seg.CompressNone,
@@ -351,12 +399,38 @@ var Schema = SchemaGen{
 		Accessors:   AccessorHashMap,
 	},
 	TracesToIdx: InvIdxCfg{
+		Enabled:      true,
 		FilenameBase: kv.FileTracesToIdx, KeysTable: kv.TblTracesToKeys, ValuesTable: kv.TblTracesToIdx,
 
 		Compression: seg.CompressNone,
 		Name:        kv.TracesToIdx,
 		Accessors:   AccessorHashMap,
 	},
+}
+
+const CommitmentV3Accessors = AccessorBTree | AccessorExistence
+
+func EnableCommitmentV3Records(c *DomainCfg) {
+	c.CommitmentV3Records = true
+	c.Accessors = CommitmentV3Accessors
+	c.FileVersion.DataKV = version.Versions{Current: version.V3_0, MinSupported: version.V3_0}
+	c.FileVersion.AccessorBT = version.Versions{Current: version.V2_0, MinSupported: version.V1_0}
+	c.FileVersion.AccessorKVEI = version.Versions{Current: version.V1_2, MinSupported: version.V1_0}
+	c.Hist.FileVersion.DataV = version.Versions{Current: version.V3_0, MinSupported: version.V3_0}
+}
+
+func SetCommitmentFileVersions(domainV3, historyV3 bool) {
+	cfg := Schema.CommitmentDomain
+	d, h := legacyCommitmentDomain, legacyCommitmentDomain
+	if domainV3 {
+		EnableCommitmentV3Records(&d)
+	}
+	if historyV3 {
+		EnableCommitmentV3Records(&h)
+	}
+	cfg.CommitmentV3Records, cfg.Accessors, cfg.FileVersion = d.CommitmentV3Records, d.Accessors, d.FileVersion
+	cfg.Hist.FileVersion.DataV = h.Hist.FileVersion.DataV
+	Schema.CommitmentDomain = cfg
 }
 
 func EnableHistoricalCommitment() {
@@ -442,7 +516,7 @@ var HistoryCompressCfg = seg.Cfg{
 
 func EnableHistoricalRCache() {
 	cfg := Schema.RCacheDomain
-	cfg.Hist.IiCfg.Disable = false
+	cfg.Hist.IiCfg.Enabled = true
 	cfg.Hist.HistoryDisabled = false
 	cfg.Hist.SnapshotsDisabled = false
 	Schema.RCacheDomain = cfg

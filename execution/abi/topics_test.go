@@ -22,6 +22,7 @@ package abi
 import (
 	"math/big"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
@@ -45,6 +46,18 @@ func TestMakeTopics(t *testing.T) {
 			false,
 		},
 		{
+			"support fixed byte boundary type of 32 bytes",
+			args{[][]any{{[32]byte{0: 1, 31: 2}}}},
+			[][]common.Hash{{common.Hash{0: 1, 31: 2}}},
+			false,
+		},
+		{
+			"reject fixed byte types longer than 32 bytes",
+			args{[][]any{{[33]byte{1}}}},
+			nil,
+			true,
+		},
+		{
 			"support common.Hash types in topics",
 			args{[][]any{{common.Hash{1, 2, 3, 4, 5}}}},
 			[][]common.Hash{{common.Hash{1, 2, 3, 4, 5}}},
@@ -60,6 +73,30 @@ func TestMakeTopics(t *testing.T) {
 			"support *big.Int types in topics",
 			args{[][]any{{big.NewInt(1).Lsh(big.NewInt(2), 254)}}},
 			[][]common.Hash{{common.Hash{128}}},
+			false,
+		},
+		{
+			"support negative *big.Int types in topics",
+			args{[][]any{{big.NewInt(-1)}}},
+			[][]common.Hash{{common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")}},
+			false,
+		},
+		{
+			"support minimum int256 boundary in topics",
+			args{[][]any{{new(big.Int).Lsh(big.NewInt(-1), 255)}}},
+			[][]common.Hash{{common.HexToHash("0x8000000000000000000000000000000000000000000000000000000000000000")}},
+			false,
+		},
+		{
+			"support maximum int256 boundary in topics",
+			args{[][]any{{new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(1))}}},
+			[][]common.Hash{{common.HexToHash("0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")}},
+			false,
+		},
+		{
+			"truncate values exceeding 256 bits in topics",
+			args{[][]any{{new(big.Int).Lsh(big.NewInt(1), 256)}}},
+			[][]common.Hash{{common.Hash{}}},
 			false,
 		},
 		{
@@ -207,8 +244,10 @@ func setupTopicsTests() []topicTest {
 					Indexed: true,
 				}},
 				topics: []common.Hash{
-					{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+					{
+						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+					},
 				},
 			},
 			wantErr: false,
@@ -227,8 +266,10 @@ func setupTopicsTests() []topicTest {
 					Indexed: true,
 				}},
 				topics: []common.Hash{
-					{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+					{
+						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+					},
 				},
 			},
 			wantErr: false,
@@ -257,12 +298,16 @@ func setupTopicsTests() []topicTest {
 			args: args{
 				createObj: func() any { return &funcStruct{} },
 				resultObj: func() any {
-					return &funcStruct{[24]byte{255, 255, 255, 255, 255, 255, 255, 255,
-						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}}
+					return &funcStruct{[24]byte{
+						255, 255, 255, 255, 255, 255, 255, 255,
+						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+					}}
 				},
 				resultMap: func() map[string]any {
-					return map[string]any{"funcValue": [24]byte{255, 255, 255, 255, 255, 255, 255, 255,
-						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}}
+					return map[string]any{"funcValue": [24]byte{
+						255, 255, 255, 255, 255, 255, 255, 255,
+						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+					}}
 				},
 				fields: Arguments{Argument{
 					Name:    "funcValue",
@@ -270,8 +315,10 @@ func setupTopicsTests() []topicTest {
 					Indexed: true,
 				}},
 				topics: []common.Hash{
-					{0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255,
-						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+					{
+						0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255,
+						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+					},
 				},
 			},
 			wantErr: false,
@@ -303,8 +350,10 @@ func setupTopicsTests() []topicTest {
 					Indexed: false,
 				}},
 				topics: []common.Hash{
-					{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+					{
+						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+					},
 				},
 			},
 			wantErr: true,
@@ -338,8 +387,10 @@ func setupTopicsTests() []topicTest {
 					Indexed: true,
 				}},
 				topics: []common.Hash{
-					{0, 0, 0, 0, 0, 0, 0, 128, 255, 255, 255, 255, 255, 255, 255, 255,
-						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+					{
+						0, 0, 0, 0, 0, 0, 0, 128, 255, 255, 255, 255, 255, 255, 255, 255,
+						255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+					},
 				},
 			},
 			wantErr: true,
@@ -366,6 +417,50 @@ func TestParseTopics(t *testing.T) {
 	}
 }
 
+func TestParseTopicsInvalidOutput(t *testing.T) {
+	int8Type, _ := NewType("int8", "", nil)
+	fields := Arguments{Argument{
+		Name:    "int8Value",
+		Type:    int8Type,
+		Indexed: true,
+	}}
+	topics := []common.Hash{{0}}
+
+	tests := []struct {
+		name    string
+		out     any
+		wantErr string
+	}{
+		{
+			name:    "missing struct field",
+			out:     &struct{ Other int8 }{},
+			wantErr: "can't be found",
+		},
+		{
+			name:    "incompatible struct field type",
+			out:     &struct{ Int8Value string }{},
+			wantErr: "cannot unmarshal int8 in to string",
+		},
+		{
+			name:    "non-pointer output",
+			out:     int8Struct{},
+			wantErr: "cannot unmarshal indexed event fields",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ParseTopics(tt.out, fields, topics)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestParseTopicsIntoMap(t *testing.T) {
 	tests := setupTopicsTests()
 
@@ -380,5 +475,21 @@ func TestParseTopicsIntoMap(t *testing.T) {
 				t.Errorf("parseTopicsIntoMap() = %v, want %v", outMap, resultMap)
 			}
 		})
+	}
+}
+
+func TestParseTopicsIntoMapNilMap(t *testing.T) {
+	int8Type, _ := NewType("int8", "", nil)
+	fields := Arguments{Argument{
+		Name:    "int8Value",
+		Type:    int8Type,
+		Indexed: true,
+	}}
+	err := ParseTopicsIntoMap(nil, fields, []common.Hash{{0}})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "abi: cannot unpack into a nil map" {
+		t.Fatalf("error = %v", err)
 	}
 }

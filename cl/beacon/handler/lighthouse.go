@@ -39,11 +39,12 @@ type LighthouseValidatorInclusionGlobal struct {
 
 // the block root hash of the highest numbered slot that actually exists
 func (a *ApiHandler) findEpochRoot(tx kv.Tx, epoch uint64) (common.Hash, error) {
+	firstSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	var currentBlockRoot common.Hash
 	var err error
-	for i := (epoch+1)*a.beaconChainCfg.SlotsPerEpoch - 1; i >= epoch*a.beaconChainCfg.SlotsPerEpoch; i-- {
+	for remaining := a.beaconChainCfg.SlotsPerEpoch; remaining > 0; remaining-- {
 		// read the block roots from the back
-		currentBlockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, i)
+		currentBlockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, firstSlot+remaining-1)
 		if err != nil {
 			return common.Hash{}, err
 		}
@@ -60,6 +61,9 @@ func (a *ApiHandler) GetLighthouseValidatorInclusionGlobal(w http.ResponseWriter
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	if epochSlotOverflows(epoch, a.beaconChainCfg.SlotsPerEpoch) {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch slot range overflows"))
 	}
 	ret, ok := a.lighthouseInclusionCache.Load(epoch)
 	if ok {
@@ -217,6 +221,9 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	if epochSlotOverflows(epoch, a.beaconChainCfg.SlotsPerEpoch) {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch slot range overflows"))
+	}
 	tx, err := a.indiciesDB.BeginRo(r.Context())
 	if err != nil {
 		return nil, err
@@ -250,12 +257,10 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 		if err != nil {
 			return nil, err
 		}
-		activeBalance, ok := a.forkchoiceStore.TotalActiveBalance(root)
-		if !ok {
+		if _, ok := a.forkchoiceStore.TotalActiveBalance(root); !ok {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("active balance not found for current epoch"))
 		}
-		prevActiveBalance, ok := a.forkchoiceStore.TotalActiveBalance(prevRoot)
-		if !ok {
+		if _, ok := a.forkchoiceStore.TotalActiveBalance(prevRoot); !ok {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("active balance not found for previous epoch"))
 		}
 		validatorSet, err := a.forkchoiceStore.GetValidatorSet(root)
@@ -279,7 +284,11 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 		if previousEpochParticipation == nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("participation not found for previous epoch"))
 		}
-		return newBeaconResponse(a.computeLighthouseValidatorInclusion(int(validatorIndex), prevEpoch, epoch, activeBalance, prevActiveBalance, validatorSet, currentEpochParticipation, previousEpochParticipation)), nil
+		inclusion, err := a.computeLighthouseValidatorInclusion(int(validatorIndex), prevEpoch, epoch, validatorSet, currentEpochParticipation, previousEpochParticipation)
+		if err != nil {
+			return nil, err
+		}
+		return newBeaconResponse(inclusion), nil
 	}
 
 	snRoTx := a.caplinStateSnapshots.View()
@@ -318,25 +327,21 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 	if previousEpochParticipation == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("participation not found for previous epoch"))
 	}
-	return newBeaconResponse(a.computeLighthouseValidatorInclusion(int(validatorIndex), prevEpoch, epoch, epochData.TotalActiveBalance, prevEpochData.TotalActiveBalance, validatorSet, currentEpochParticipation, previousEpochParticipation)), nil
+	inclusion, err := a.computeLighthouseValidatorInclusion(int(validatorIndex), prevEpoch, epoch, validatorSet, currentEpochParticipation, previousEpochParticipation)
+	if err != nil {
+		return nil, err
+	}
+	return newBeaconResponse(inclusion), nil
 }
 
-func (a *ApiHandler) computeLighthouseValidatorInclusion(idx int, prevEpoch, epoch, currentActiveGwei, previousActiveGwei uint64, validatorSet *solid.ValidatorSet, currentEpochParticipation, previousEpochParticipation *solid.ParticipationBitList) *LighthouseValidatorInclusion {
-	var currentEpochTargetAttestingGwei, previousEpochTargetAttestingGwei, previousEpochHeadAttestingGwei uint64
-	for i := 0; i < validatorSet.Length(); i++ {
-		validatorBalance := validatorSet.Get(i).EffectiveBalance()
-		prevFlags := cltypes.ParticipationFlags(previousEpochParticipation.Get(i))
-		currFlags := cltypes.ParticipationFlags(currentEpochParticipation.Get(i))
-		if prevFlags.HasFlag(int(a.beaconChainCfg.TimelyHeadFlagIndex)) {
-			previousEpochHeadAttestingGwei += validatorBalance
-		}
-		if currFlags.HasFlag(int(a.beaconChainCfg.TimelyTargetFlagIndex)) {
-			currentEpochTargetAttestingGwei += validatorBalance
-		}
-		if prevFlags.HasFlag(int(a.beaconChainCfg.TimelyTargetFlagIndex)) {
-			previousEpochTargetAttestingGwei += validatorBalance
-		}
+func (a *ApiHandler) computeLighthouseValidatorInclusion(idx int, prevEpoch, epoch uint64, validatorSet *solid.ValidatorSet, currentEpochParticipation, previousEpochParticipation *solid.ParticipationBitList) (*LighthouseValidatorInclusion, error) {
+	if idx < 0 || idx >= validatorSet.Length() {
+		return nil, nil
 	}
+	if idx >= currentEpochParticipation.Length() || idx >= previousEpochParticipation.Length() {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("participation data inconsistent with validator set"))
+	}
+
 	validator := validatorSet.Get(idx)
 	prevFlags := cltypes.ParticipationFlags(previousEpochParticipation.Get(idx))
 	currFlags := cltypes.ParticipationFlags(currentEpochParticipation.Get(idx))
@@ -350,5 +355,5 @@ func (a *ApiHandler) computeLighthouseValidatorInclusion(idx int, prevEpoch, epo
 		IsCurrentEpochTargetAttester:     currFlags.HasFlag(int(a.beaconChainCfg.TimelyTargetFlagIndex)),
 		IsPreviousEpochTargetAttester:    prevFlags.HasFlag(int(a.beaconChainCfg.TimelyTargetFlagIndex)),
 		IsPreviousEpochHeadAttester:      prevFlags.HasFlag(int(a.beaconChainCfg.TimelyHeadFlagIndex)),
-	}
+	}, nil
 }

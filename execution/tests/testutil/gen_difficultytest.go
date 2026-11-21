@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common/math"
 )
 
@@ -23,11 +25,11 @@ func (d DifficultyTest) MarshalJSON() ([]byte, error) {
 	}
 	var enc DifficultyTest
 	enc.ParentTimestamp = math.HexOrDecimal64(d.ParentTimestamp)
-	enc.ParentDifficulty = (*math.HexOrDecimal256)(d.ParentDifficulty)
+	enc.ParentDifficulty = (*math.HexOrDecimal256)(d.ParentDifficulty.ToBig())
 	enc.ParentUncles = math.HexOrDecimal64(d.ParentUncles)
 	enc.CurrentTimestamp = math.HexOrDecimal64(d.CurrentTimestamp)
 	enc.CurrentBlockNumber = math.HexOrDecimal64(d.CurrentBlockNumber)
-	enc.CurrentDifficulty = (*math.HexOrDecimal256)(d.CurrentDifficulty)
+	enc.CurrentDifficulty = (*math.HexOrDecimal256)(d.CurrentDifficulty.ToBig())
 	return json.Marshal(&enc)
 }
 
@@ -49,7 +51,7 @@ func (d *DifficultyTest) UnmarshalJSON(input []byte) error {
 		d.ParentTimestamp = uint64(*dec.ParentTimestamp)
 	}
 	if dec.ParentDifficulty != nil {
-		d.ParentDifficulty = (*big.Int)(dec.ParentDifficulty)
+		d.ParentDifficulty = *uint256.MustFromBig((*big.Int)(dec.ParentDifficulty))
 	}
 	if dec.ParentUncles != nil {
 		d.ParentUncles = uint64(*dec.ParentUncles)
@@ -61,7 +63,7 @@ func (d *DifficultyTest) UnmarshalJSON(input []byte) error {
 		d.CurrentBlockNumber = uint64(*dec.CurrentBlockNumber)
 	}
 	if dec.CurrentDifficulty != nil {
-		d.CurrentDifficulty = (*big.Int)(dec.CurrentDifficulty)
+		d.CurrentDifficulty = *uint256.MustFromBig((*big.Int)(dec.CurrentDifficulty))
 	}
 	return nil
 }

@@ -37,7 +37,6 @@
 package enr
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -53,6 +52,7 @@ var (
 	errNotSorted      = errors.New("record key/value pairs are not sorted by key")
 	errDuplicateKey   = errors.New("record contains duplicate key")
 	errIncompletePair = errors.New("record contains incomplete k/v pair")
+	errIncompleteList = errors.New("record contains less than two list elements")
 	errTooBig         = fmt.Errorf("record bigger than %d bytes", SizeLimit)
 	errEncodeUnsigned = errors.New("can't encode unsigned record")
 	errNotFound       = errors.New("no such key in record")
@@ -96,6 +96,24 @@ type Record struct {
 type pair struct {
 	k string
 	v rlp.RawValue
+}
+
+// Size returns the encoded size of the record.
+func (r *Record) Size() uint64 {
+	if r.raw != nil {
+		return uint64(len(r.raw))
+	}
+	return computeSize(r)
+}
+
+func computeSize(r *Record) uint64 {
+	size := rlp.U64Len(r.seq)
+	size += rlp.StringLen(r.signature)
+	for _, p := range r.pairs {
+		size += rlp.StringLen([]byte(p.k))
+		size += len(p.v)
+	}
+	return uint64(rlp.ListLen(size))
 }
 
 // Seq returns the sequence number.
@@ -148,12 +166,12 @@ func (r *Record) Set(e Entry) {
 	case i < len(r.pairs):
 		// insert pair before i-th elem
 		el := pair{e.ENRKey(), blob}
-		pairs = append(pairs, pair{})
+		pairs = append(pairs, pair{}) //nolint:makezero
 		copy(pairs[i+1:], pairs[i:])
 		pairs[i] = el
 	default:
 		// element should be placed at the end of r.pairs
-		pairs = append(pairs, pair{e.ENRKey(), blob})
+		pairs = append(pairs, pair{e.ENRKey(), blob}) //nolint:makezero
 	}
 	r.pairs = pairs
 }
@@ -207,28 +225,38 @@ func decodeRecord(s *rlp.Stream) (dec Record, raw []byte, err error) {
 	}
 
 	// Decode the RLP container.
-	s = rlp.NewStream(bytes.NewReader(raw), 0)
-	if _, e := s.List(); e != nil {
-		return dec, raw, e
+	rs := rlp.NewBytesStream(raw)
+	defer rlp.PutStream(rs)
+	if _, err := rs.List(); err != nil {
+		return dec, raw, err
 	}
-	if e := s.Decode(&dec.signature); e != nil {
-		return dec, raw, e
+	if dec.signature, err = rs.Bytes(); err != nil {
+		if err == rlp.EOL { //nolint:errorlint // intentional bare sentinel check
+			err = errIncompleteList
+		}
+		return dec, raw, err
 	}
-	if e := s.Decode(&dec.seq); e != nil {
-		return dec, raw, e
+	if dec.seq, err = rs.Uint64(); err != nil {
+		if err == rlp.EOL { //nolint:errorlint // intentional bare sentinel check
+			err = errIncompleteList
+		}
+		return dec, raw, err
 	}
 	// The rest of the record contains sorted k/v pairs.
+	pairsLen := rs.Remaining() / (1 + 1)                // shortest pair: 1-byte key + 1-byte value
+	dec.pairs = make([]pair, 0, int(min(16, pairsLen))) // cap the prealloc, since a record of many tiny pairs would over-reserve
 	var prevkey string
 	for i := 0; ; i++ {
-		var kv pair
-		if err := s.Decode(&kv.k); err != nil {
-			if errors.Is(err, rlp.EOL) {
+		key, err := rs.ViewBytes()
+		if err != nil {
+			if err == rlp.EOL { //nolint:errorlint // intentional bare sentinel check
 				break
 			}
 			return dec, raw, err
 		}
-		if err := s.Decode(&kv.v); err != nil {
-			if errors.Is(err, rlp.EOL) {
+		kv := pair{k: string(key)}
+		if kv.v, err = rs.Raw(); err != nil {
+			if err == rlp.EOL { //nolint:errorlint // intentional bare sentinel check
 				return dec, raw, errIncompletePair
 			}
 			return dec, raw, err
@@ -244,13 +272,13 @@ func decodeRecord(s *rlp.Stream) (dec Record, raw []byte, err error) {
 		dec.pairs = append(dec.pairs, kv)
 		prevkey = kv.k
 	}
-	return dec, raw, s.ListEnd()
+	return dec, raw, rs.ListEnd()
 }
 
 // IdentityScheme returns the name of the identity scheme in the record.
 func (r *Record) IdentityScheme() string {
 	var id ID
-	r.Load(&id)
+	_ = r.Load(&id)
 	return string(id)
 }
 
@@ -291,7 +319,7 @@ func (r *Record) SetSig(s IdentityScheme, sig []byte) error {
 }
 
 // AppendElements appends the sequence number and entries to the given slice.
-func (r *Record) AppendElements(list []interface{}) []interface{} {
+func (r *Record) AppendElements(list []any) []any {
 	list = append(list, r.seq)
 	for _, p := range r.pairs {
 		list = append(list, p.k, p.v)
@@ -300,7 +328,7 @@ func (r *Record) AppendElements(list []interface{}) []interface{} {
 }
 
 func (r *Record) encode(sig []byte) (raw []byte, err error) {
-	list := make([]interface{}, 1, 2*len(r.pairs)+1)
+	list := make([]any, 1, 2*len(r.pairs)+2)
 	list[0] = sig
 	list = r.AppendElements(list)
 	if raw, err = rlp.EncodeToBytes(list); err != nil {

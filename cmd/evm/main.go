@@ -21,21 +21,21 @@
 package main
 
 import (
-	"fmt"
+	"context"
 	"math/big"
 	"os"
+	"time"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
+	_ "github.com/erigontech/erigon/cmd/evm/internal/stderrlog" // before any package logs
 	"github.com/erigontech/erigon/cmd/evm/internal/t8ntool"
 	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/version"
 	cli2 "github.com/erigontech/erigon/node/cli"
 )
 
 var (
-	app = cli2.NewApp(version.GitCommit, "the evm command line interface")
+	app = cli2.NewApp("the evm command line interface")
 
 	DebugFlag = cli.BoolFlag{
 		Name:  "debug",
@@ -96,6 +96,10 @@ var (
 		Name:  "bench",
 		Usage: "benchmark the execution",
 	}
+	TimeFlag = cli.BoolFlag{
+		Name:  "time",
+		Usage: "record per-test wall time and memstats on a single execution (cheaper than --bench)",
+	}
 	CreateFlag = cli.BoolFlag{
 		Name:  "create",
 		Usage: "indicates the action should be create rather than call",
@@ -131,6 +135,41 @@ var (
 	DisableReturnDataFlag = cli.BoolFlag{
 		Name:  "noreturndata",
 		Usage: "disable return data output",
+	}
+	RunFlag = cli.StringFlag{
+		Name:  "run",
+		Value: ".*",
+		Usage: "Run only those tests matching the regular expression.",
+	}
+	ExcludeFlag = cli.StringSliceFlag{
+		Name:  "exclude",
+		Usage: "Exclude tests whose fixture path or path::test identifier matches a regular expression.",
+	}
+	WorkersFlag = cli.Uint64Flag{
+		Name:  "workers",
+		Value: 1,
+		Usage: "Number of workers to execute tests in parallel (must be >= 1)",
+	}
+	BALReportFlag = cli.BoolFlag{
+		Name:  "bal-report",
+		Usage: "Print how each block was executed (parallel or sequential, and why) as one JSON line per block on stderr",
+	}
+	BALSequentialFlag = cli.BoolFlag{
+		Name:  "bal-sequential",
+		Usage: "Execute every block on a single exec worker instead of the parallel executor",
+	}
+	BALWithholdFlag = cli.BoolFlag{
+		Name:  "bal-withhold",
+		Usage: "Execute every block without its access list, as IGNORE_BAL does",
+	}
+	SyncingTimeoutFlag = cli.DurationFlag{
+		Name:  "syncing-timeout",
+		Value: time.Minute,
+		Usage: "Fail an engine test whose newPayload or forkchoiceUpdated still answers SYNCING after this long",
+	}
+	JSONOutputFlag = cli.BoolFlag{
+		Name:  "jsonout",
+		Usage: "Output results as JSON array instead of human-readable format",
 	}
 )
 
@@ -188,21 +227,20 @@ func init() {
 		&disasmCommand,
 		&runCommand,
 		&blockTestCommand,
+		&engineTestCommand,
+		&engineXTestCommand,
+		&zkevmTestCommand,
 		&stateTestCommand,
+		&rlpTestCommand,
+		&transactionTestCommand,
+		&difficultyTestCommand,
 		&stateTransitionCommand,
+		&fixtureCommand,
 	}
 }
 
 func main() {
-	if err := app.Run(os.Args); err != nil {
-		code := 1
-		if ec, ok := err.(*t8ntool.NumberedError); ok {
-			code = ec.ExitCode()
-		}
-		_, printErr := fmt.Fprintln(os.Stderr, err)
-		if printErr != nil {
-			log.Warn("print error", "err", printErr)
-		}
-		os.Exit(code)
+	if err := app.Run(context.Background(), os.Args); err != nil {
+		os.Exit(1) // fallback: NewApp's ExitErrHandler normally prints and exits first
 	}
 }

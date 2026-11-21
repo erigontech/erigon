@@ -76,7 +76,7 @@ func parseTags(s string) (prometheus.Labels, error) {
 		}
 		s = s[1:]
 
-		value := ""
+		var valueBuilder strings.Builder
 
 		for {
 			n = strings.IndexByte(s, '"')
@@ -88,15 +88,15 @@ func parseTags(s string) (prometheus.Labels, error) {
 				m--
 			}
 			if (n-m)%2 == 1 {
-				value = value + s[:n]
+				valueBuilder.WriteString(s[:n])
 				s = s[n+1:]
 				continue
 			}
-			value = value + s[:n]
+			valueBuilder.WriteString(s[:n])
 			if labels == nil {
 				labels = prometheus.Labels{}
 			}
-			labels[ident] = value
+			labels[ident] = valueBuilder.String()
 			s = s[n+1:]
 			if len(s) == 0 {
 				return labels, nil

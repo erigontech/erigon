@@ -18,11 +18,12 @@ package p2p
 
 import (
 	"context"
-	"math/big"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
@@ -179,84 +180,80 @@ func TestTrackingFetcherFetchHeadersBackwardsUpdatesPeerTracker(t *testing.T) {
 }
 
 func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
+	synctest.Test(t, func(t *testing.T) {
+		peerId1 := PeerIdFromUint64(1)
+		peerId2 := PeerIdFromUint64(2)
+		requestId1 := uint64(1234)
+		requestId2 := uint64(1235)
+		requestId3 := uint64(1236)
+		mockHeaders := []*types.Header{{Number: *uint256.NewInt(1)}}
+		mockHashes := []common.Hash{mockHeaders[0].Hash()}
+		mockInboundMessages1 := []*sentryproto.InboundMessage{
+			{
+				Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+				PeerId: peerId1.H512(),
+				Data:   newMockBlockBodiesPacketBytes(t, requestId1),
+			},
+		}
+		mockRequestResponse1 := requestResponseMock{
+			requestId:                   requestId1,
+			mockResponseInboundMessages: mockInboundMessages1,
+			wantRequestPeerId:           peerId1,
+			wantRequestHashes:           mockHashes,
+		}
+		mockInboundMessages2 := []*sentryproto.InboundMessage{
+			{
+				Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+				PeerId: peerId2.H512(),
+				Data:   nil, // response timeout
+			},
+		}
+		mockRequestResponse2 := requestResponseMock{
+			requestId:                   requestId2,
+			mockResponseInboundMessages: mockInboundMessages2,
+			wantRequestPeerId:           peerId2,
+			wantRequestHashes:           mockHashes,
+			responseDelay:               600 * time.Millisecond,
+		}
+		mockInboundMessages3 := []*sentryproto.InboundMessage{
+			{
+				Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+				PeerId: peerId2.H512(),
+				Data:   nil, // response timeout
+			},
+		}
+		mockRequestResponse3 := requestResponseMock{
+			requestId:                   requestId3,
+			mockResponseInboundMessages: mockInboundMessages3,
+			wantRequestPeerId:           peerId2,
+			wantRequestHashes:           mockHashes,
+			responseDelay:               600 * time.Millisecond,
+		}
 
-	t.Parallel()
+		test := newTrackingFetcherTest(t, newMockRequestGenerator(requestId1, requestId2, requestId3))
+		test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2, mockRequestResponse3)
+		test.run(func(ctx context.Context, t *testing.T) {
+			test.simulateDefaultPeerEvents()
+			var peerIds []*PeerId // peers which may have block 1
+			require.Eventuallyf(t, func() bool {
+				peerIds = test.peerTracker.ListPeersMayHaveBlockNum(1)
+				return len(peerIds) == 2
+			}, time.Second, 100*time.Millisecond, "expected number of initial peers never satisfied: want=2, have=%d", len(peerIds))
 
-	peerId1 := PeerIdFromUint64(1)
-	peerId2 := PeerIdFromUint64(2)
-	requestId1 := uint64(1234)
-	requestId2 := uint64(1235)
-	requestId3 := uint64(1236)
-	mockHeaders := []*types.Header{{Number: big.NewInt(1)}}
-	mockHashes := []common.Hash{mockHeaders[0].Hash()}
-	mockInboundMessages1 := []*sentryproto.InboundMessage{
-		{
-			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
-			PeerId: peerId1.H512(),
-			Data:   newMockBlockBodiesPacketBytes(t, requestId1),
-		},
-	}
-	mockRequestResponse1 := requestResponseMock{
-		requestId:                   requestId1,
-		mockResponseInboundMessages: mockInboundMessages1,
-		wantRequestPeerId:           peerId1,
-		wantRequestHashes:           mockHashes,
-	}
-	mockInboundMessages2 := []*sentryproto.InboundMessage{
-		{
-			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
-			PeerId: peerId2.H512(),
-			Data:   nil, // response timeout
-		},
-	}
-	mockRequestResponse2 := requestResponseMock{
-		requestId:                   requestId2,
-		mockResponseInboundMessages: mockInboundMessages2,
-		wantRequestPeerId:           peerId2,
-		wantRequestHashes:           mockHashes,
-		responseDelay:               600 * time.Millisecond,
-	}
-	mockInboundMessages3 := []*sentryproto.InboundMessage{
-		{
-			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
-			PeerId: peerId2.H512(),
-			Data:   nil, // response timeout
-		},
-	}
-	mockRequestResponse3 := requestResponseMock{
-		requestId:                   requestId3,
-		mockResponseInboundMessages: mockInboundMessages3,
-		wantRequestPeerId:           peerId2,
-		wantRequestHashes:           mockHashes,
-		responseDelay:               600 * time.Millisecond,
-	}
+			bodies, err := test.trackingFetcher.FetchBodies(ctx, mockHeaders, peerId1)
+			require.ErrorIs(t, err, &ErrMissingBodies{})
+			require.Nil(t, bodies.Data)
 
-	test := newTrackingFetcherTest(t, newMockRequestGenerator(requestId1, requestId2, requestId3))
-	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2, mockRequestResponse3)
-	test.run(func(ctx context.Context, t *testing.T) {
-		test.simulateDefaultPeerEvents()
-		var peerIds []*PeerId // peers which may have block 1
-		require.Eventuallyf(t, func() bool {
-			peerIds = test.peerTracker.ListPeersMayHaveBlockNum(1)
-			return len(peerIds) == 2
-		}, time.Second, 100*time.Millisecond, "expected number of initial peers never satisfied: want=2, have=%d", len(peerIds))
+			peerIds = test.peerTracker.ListPeersMayHaveBlockNum(1) // only peerId2 may have block 1, peerId does not
+			require.Len(t, peerIds, 1)
 
-		bodies, err := test.trackingFetcher.FetchBodies(ctx, mockHeaders, peerId1)
-		require.ErrorIs(t, err, &ErrMissingBodies{})
-		require.Nil(t, bodies.Data)
+			bodies, err = test.trackingFetcher.FetchBodies(ctx, mockHeaders, peerId2)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.Nil(t, bodies.Data)
 
-		peerIds = test.peerTracker.ListPeersMayHaveBlockNum(1) // only peerId2 may have block 1, peerId does not
-		require.Len(t, peerIds, 1)
-
-		bodies, err = test.trackingFetcher.FetchBodies(ctx, mockHeaders, peerId2)
-		require.ErrorIs(t, err, context.DeadlineExceeded)
-		require.Nil(t, bodies.Data)
-
-		peerIds = test.peerTracker.ListPeersMayHaveBlockNum(1) // neither peerId1 nor peerId2 have block num 1
-		require.Empty(t, peerIds)
+			peerIds = test.peerTracker.ListPeersMayHaveBlockNum(1) // neither peerId1 nor peerId2 have block num 1
+			require.Empty(t, peerIds)
+		})
 	})
 }
 
@@ -281,36 +278,32 @@ type trackingFetcherTest struct {
 
 func (tft *trackingFetcherTest) run(f func(ctx context.Context, t *testing.T)) {
 	var done atomic.Bool
-	tft.t.Run("start", func(t *testing.T) {
-		go func() {
-			defer done.Store(true)
-			eg, ctx := errgroup.WithContext(tft.ctx)
-			eg.Go(func() error {
-				return tft.peerTracker.Run(ctx)
-			})
-			eg.Go(func() error {
-				return tft.messageListener.Run(ctx)
-			})
-			err := eg.Wait()
-			require.ErrorIs(t, err, context.Canceled)
-		}()
-		waitCond := func() bool {
-			// wait for the tracker to be initialised before simulating peer events,
-			// otherwise the tests may be flake-y because simulated test events in each test
-			// may be consumed by the listener background loop before the tracker has
-			// registered its peer event observer which makes the test unreliable
-			// == 2 since there is one for the background loop and one for the new observer with replay=true
-			return tft.peerEventsSubsCount() == 2
-		}
-		require.Eventually(t, waitCond, time.Second, 100*time.Millisecond, "expected peer tracker to be initialised")
-	})
-
-	tft.t.Run("test", func(t *testing.T) {
-		f(tft.ctx, t)
-	})
-
-	tft.t.Run("stop", func(t *testing.T) {
+	go func() {
+		defer done.Store(true)
+		eg, ctx := errgroup.WithContext(tft.ctx)
+		eg.Go(func() error {
+			return tft.peerTracker.Run(ctx)
+		})
+		eg.Go(func() error {
+			return tft.messageListener.Run(ctx)
+		})
+		err := eg.Wait()
+		require.ErrorIs(tft.t, err, context.Canceled)
+	}()
+	// Deferred so the shutdown also runs when f fails fatally.
+	defer func() {
 		tft.ctxCancel()
-		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
-	})
+		require.Eventually(tft.t, done.Load, time.Second, 5*time.Millisecond)
+	}()
+	waitCond := func() bool {
+		// wait for the tracker to be initialised before simulating peer events,
+		// otherwise the tests may be flake-y because simulated test events in each test
+		// may be consumed by the listener background loop before the tracker has
+		// registered its peer event observer which makes the test unreliable
+		// == 2 since there is one for the background loop and one for the new observer with replay=true
+		return tft.peerEventsSubsCount() == 2
+	}
+	require.Eventually(tft.t, waitCond, time.Second, 100*time.Millisecond, "expected peer tracker to be initialised")
+
+	f(tft.ctx, tft.t)
 }

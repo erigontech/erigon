@@ -20,17 +20,16 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
+
+	cli2 "github.com/erigontech/erigon/node/cli"
 
 	"github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/logging"
@@ -40,9 +39,7 @@ func main() {
 	logging.LogVerbosityFlag.Value = log.LvlError.String()
 	logging.LogConsoleVerbosityFlag.Value = log.LvlError.String()
 
-	app := cli.NewApp()
-	app.Name = "snapshots"
-	app.Version = version.VersionWithCommit(version.GitCommit)
+	app := cli2.NewApp("snapshots")
 
 	app.Commands = []*cli.Command{
 		&genfromrpc.Command,
@@ -52,75 +49,60 @@ func main() {
 
 	app.UsageText = app.Name + ` [command] [flags]`
 
-	app.Action = func(context *cli.Context) error {
-		if context.Args().Present() {
+	app.Action = func(ctx context.Context, cmd *cli.Command) error {
+		if cmd.Args().Present() {
 			goodNames := make([]string, 0, len(app.VisibleCommands()))
 			for _, c := range app.VisibleCommands() {
 				goodNames = append(goodNames, c.Name)
 			}
-			_, _ = fmt.Fprintf(os.Stderr, "Command '%s' not found. Available commands: %s\n", context.Args().First(), goodNames)
-			cli.ShowAppHelpAndExit(context, 1)
+			_, _ = fmt.Fprintf(os.Stderr, "Command '%s' not found. Available commands: %s\n", cmd.Args().First(), goodNames)
+			return cli.Exit("", 1) // Exit with error code but no additional output
 		}
 
 		return nil
 	}
 
 	for _, command := range app.Commands {
-		command.Before = func(ctx *cli.Context) error {
+		command.Before = func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			debug.RaiseFdLimit()
 
-			logger, err := setupLogger(ctx)
-
+			logger, err := setupLogger(cmd)
 			if err != nil {
-				return err
+				return ctx, err
 			}
 
-			var cancel context.CancelFunc
-
-			ctx.Context, cancel = context.WithCancel(ctx.Context) //nolint
+			ctx, cancel := context.WithCancel(ctx)
 
 			// setup periodic logging and prometheus updates
-			go mem.LogMemStats(ctx.Context, logger)
-			go disk.UpdateDiskStats(ctx.Context, logger)
+			go mem.LogMemStats(ctx, logger)
+			go disk.UpdateDiskStats(ctx, logger)
 
 			go handleTerminationSignals(cancel, logger)
 
-			return nil
+			return ctx, nil
 		}
 	}
 
-	if err := app.Run(os.Args); err != nil {
+	if err := app.Run(context.Background(), os.Args); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func setupLogger(ctx *cli.Context) (log.Logger, error) {
+func setupLogger(ctx *cli.Command) (log.Logger, error) {
 	dataDir := ctx.String(utils.DataDirFlag.Name)
 
 	if len(dataDir) > 0 {
 		logsDir := filepath.Join(dataDir, "logs")
 
-		if err := os.MkdirAll(logsDir, 0755); err != nil {
+		if err := os.MkdirAll(logsDir, 0o755); err != nil {
 			return nil, err
 		}
 	}
 
-	logger := logging.SetupLoggerCtx("snapshots-"+ctx.Command.Name, ctx, log.LvlError, log.LvlInfo, false)
+	logger := logging.SetupLoggerCtx("snapshots-"+ctx.Name, ctx, log.LvlError, log.LvlInfo, false)
 
 	return logger, nil
 }
 
-func handleTerminationSignals(stopFunc func(), logger log.Logger) {
-	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
-
-	switch s := <-signalCh; s {
-	case syscall.SIGTERM:
-		logger.Info("Stopping")
-		stopFunc()
-	case syscall.SIGINT:
-		logger.Info("Terminating")
-		os.Exit(-int(syscall.SIGINT))
-	}
-}
+var handleTerminationSignals = utils.HandleTerminationSignals

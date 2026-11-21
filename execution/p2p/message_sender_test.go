@@ -18,9 +18,9 @@ package p2p
 
 import (
 	"context"
-	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
@@ -194,7 +194,7 @@ func TestMessageSenderSendNewBlockHashesErrPeerNotFound(t *testing.T) {
 func TestMessageSenderSendNewBlock(t *testing.T) {
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	header := &types.Header{Number: big.NewInt(123)}
+	header := &types.Header{Number: *uint256.NewInt(123)}
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	sentryClient.EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
@@ -216,8 +216,8 @@ func TestMessageSenderSendNewBlock(t *testing.T) {
 
 	messageSender := NewMessageSender(sentryClient)
 	err := messageSender.SendNewBlock(ctx, PeerIdFromUint64(123), eth.NewBlockPacket{
-		Block: types.NewBlockWithHeader(header),
-		TD:    big.NewInt(2),
+		Block: types.NewBlockWithHeader(header, nil),
+		TD:    *uint256.NewInt(2),
 	})
 	require.NoError(t, err)
 }
@@ -225,7 +225,7 @@ func TestMessageSenderSendNewBlock(t *testing.T) {
 func TestMessageSenderSendNewBlockErrPeerNotFound(t *testing.T) {
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	header := &types.Header{Number: big.NewInt(123)}
+	header := &types.Header{Number: *uint256.NewInt(123)}
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	sentryClient.EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
@@ -234,8 +234,8 @@ func TestMessageSenderSendNewBlockErrPeerNotFound(t *testing.T) {
 
 	messageSender := NewMessageSender(sentryClient)
 	err := messageSender.SendNewBlock(ctx, PeerIdFromUint64(123), eth.NewBlockPacket{
-		Block: types.NewBlockWithHeader(header),
-		TD:    big.NewInt(2),
+		Block: types.NewBlockWithHeader(header, nil),
+		TD:    *uint256.NewInt(2),
 	})
 	require.ErrorIs(t, err, ErrPeerNotFound)
 }

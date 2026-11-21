@@ -51,7 +51,7 @@ func readEncodedListInput(input string, requiredLen int64, lineIndex int) ([]uin
 	if int64(len(itemStrs)) != requiredLen {
 		return nil, fmt.Errorf("expected outputs length does not match list size on line %d\n", lineIndex)
 	}
-	items := make([]uint64, len(itemStrs), len(itemStrs))
+	items := make([]uint64, len(itemStrs))
 	for i, itemStr := range itemStrs {
 		item, err := strconv.ParseInt(itemStr, 10, 64)
 		if err != nil {
@@ -64,9 +64,8 @@ func readEncodedListInput(input string, requiredLen int64, lineIndex int) ([]uin
 
 func TestAgainstSpec(t *testing.T) {
 	if testing.Short() {
-		t.Skip()
+		t.Skip("slow test")
 	}
-
 	// Open CSV file
 	f, err := os.Open("spec/tests.csv")
 	if err != nil {
@@ -109,7 +108,7 @@ func TestAgainstSpec(t *testing.T) {
 				hashFn := getStandardHashFn()
 
 				st.Run("PermuteIndex", func(it *testing.T) {
-					for i := uint64(0); i < listSize; i++ {
+					for i := range listSize {
 						// calculate the permuted index. (i.e. shuffle single index)
 						permuted := eth2shuffle.PermuteIndex(hashFn, rounds, i, listSize, seed)
 						// compare with expectation
@@ -121,7 +120,7 @@ func TestAgainstSpec(t *testing.T) {
 
 				st.Run("UnpermuteIndex", func(it *testing.T) {
 					// for each index, test un-permuting
-					for i := uint64(0); i < listSize; i++ {
+					for i := range listSize {
 						// calculate the un-permuted index. (i.e. un-shuffle single index)
 						unpermuted := eth2shuffle.UnpermuteIndex(hashFn, rounds, i, listSize, seed)
 						// compare with expectation
@@ -133,12 +132,12 @@ func TestAgainstSpec(t *testing.T) {
 
 				st.Run("ShuffleList", func(it *testing.T) {
 					// create input, this slice will be shuffled.
-					testInput := make([]uint64, listSize, listSize)
+					testInput := make([]uint64, listSize)
 					copy(testInput, shuffleIn)
 					// shuffle!
 					eth2shuffle.ShuffleList(hashFn, testInput, rounds, seed)
 					// compare shuffled list to expected output
-					for i := uint64(0); i < listSize; i++ {
+					for i := range listSize {
 						if testInput[i] != shuffleOut[i] {
 							it.FailNow()
 						}
@@ -147,12 +146,12 @@ func TestAgainstSpec(t *testing.T) {
 
 				st.Run("UnshuffleList", func(it *testing.T) {
 					// create input, this slice will be un-shuffled.
-					testInput := make([]uint64, listSize, listSize)
+					testInput := make([]uint64, listSize)
 					copy(testInput, shuffleOut)
 					// un-shuffle!
 					eth2shuffle.UnshuffleList(hashFn, testInput, rounds, seed)
 					// compare shuffled list to original input
-					for i := uint64(0); i < listSize; i++ {
+					for i := range listSize {
 						if testInput[i] != shuffleIn[i] {
 							it.FailNow()
 						}

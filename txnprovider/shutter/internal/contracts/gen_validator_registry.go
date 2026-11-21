@@ -9,19 +9,17 @@ import (
 	"reflect"
 	"strings"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/p2p/event"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
 var (
 	_ = big.NewInt
 	_ = strings.NewReader
-	_ = ethereum.NotFound
 	_ = bind.Bind
 	_ = common.Big1
 	_ = types.BloomLookup
@@ -164,7 +162,7 @@ func bindValidatorRegistry(address common.Address, caller bind.ContractCaller, t
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_ValidatorRegistry *ValidatorRegistryRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_ValidatorRegistry *ValidatorRegistryRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _ValidatorRegistry.Contract.ValidatorRegistryCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -175,7 +173,7 @@ func (_ValidatorRegistry *ValidatorRegistryRaw) Transfer(opts *bind.TransactOpts
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_ValidatorRegistry *ValidatorRegistryRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_ValidatorRegistry *ValidatorRegistryRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _ValidatorRegistry.Contract.ValidatorRegistryTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -183,7 +181,7 @@ func (_ValidatorRegistry *ValidatorRegistryRaw) Transact(opts *bind.TransactOpts
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_ValidatorRegistry *ValidatorRegistryCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_ValidatorRegistry *ValidatorRegistryCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _ValidatorRegistry.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -194,7 +192,7 @@ func (_ValidatorRegistry *ValidatorRegistryTransactorRaw) Transfer(opts *bind.Tr
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_ValidatorRegistry *ValidatorRegistryTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_ValidatorRegistry *ValidatorRegistryTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _ValidatorRegistry.Contract.contract.Transact(opts, method, params...)
 }
 
@@ -202,7 +200,7 @@ func (_ValidatorRegistry *ValidatorRegistryTransactorRaw) Transact(opts *bind.Tr
 //
 // Solidity: function getNumUpdates() view returns(uint256)
 func (_ValidatorRegistry *ValidatorRegistryCaller) GetNumUpdates(opts *bind.CallOpts) (*big.Int, error) {
-	var out []interface{}
+	var out []any
 	err := _ValidatorRegistry.contract.Call(opts, &out, "getNumUpdates")
 
 	if err != nil {
@@ -233,7 +231,7 @@ func (_ValidatorRegistry *ValidatorRegistryCallerSession) GetNumUpdates() (*big.
 //
 // Solidity: function getUpdate(uint256 i) view returns((bytes,bytes))
 func (_ValidatorRegistry *ValidatorRegistryCaller) GetUpdate(opts *bind.CallOpts, i *big.Int) (IValidatorRegistryUpdate, error) {
-	var out []interface{}
+	var out []any
 	err := _ValidatorRegistry.contract.Call(opts, &out, "getUpdate", i)
 
 	if err != nil {
@@ -327,10 +325,10 @@ type ValidatorRegistryUpdatedIterator struct {
 	contract *bind.BoundContract // Generic contract to use for unpacking event data
 	event    string              // Event name to use for unpacking event data
 
-	logs chan types.Log        // Log channel receiving the found contract events
-	sub  ethereum.Subscription // Subscription for errors, completion and termination
-	done bool                  // Whether the subscription completed delivering logs
-	fail error                 // Occurred error to stop iteration
+	logs chan types.Log     // Log channel receiving the found contract events
+	sub  event.Subscription // Subscription for errors, completion and termination
+	done bool               // Whether the subscription completed delivering logs
+	fail error              // Occurred error to stop iteration
 }
 
 // Next advances the iterator to the subsequent event, returning whether there

@@ -36,16 +36,18 @@ func (c *ConsensusHandlers) optimisticLightClientUpdateHandler(s network.Stream)
 		return err
 	}
 
-	prefix := append([]byte{SuccessfulResponsePrefix}, forkDigest[:]...)
+	var prefix [5]byte
+	prefix[0] = SuccessfulResponsePrefix
+	copy(prefix[1:], forkDigest[:])
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.LightClientOptimisticUpdate{
 		AttestedHeader: lc.AttestedHeader,
 		SyncAggregate:  lc.SyncAggregate,
 		SignatureSlot:  lc.SignatureSlot,
-	}, prefix...)
+	}, prefix[:]...)
 }
 
 func (c *ConsensusHandlers) finalityLightClientUpdateHandler(s network.Stream) error {
-	lc := c.forkChoiceReader.NewestLightClientUpdate()
+	lc := c.forkChoiceReader.NewestLightClientFinalityUpdate()
 	if lc == nil {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
@@ -54,19 +56,21 @@ func (c *ConsensusHandlers) finalityLightClientUpdateHandler(s network.Stream) e
 	if err != nil {
 		return err
 	}
-	prefix := append([]byte{SuccessfulResponsePrefix}, forkDigest[:]...)
+	var prefix [5]byte
+	prefix[0] = SuccessfulResponsePrefix
+	copy(prefix[1:], forkDigest[:])
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.LightClientFinalityUpdate{
 		AttestedHeader:  lc.AttestedHeader,
 		SyncAggregate:   lc.SyncAggregate,
 		FinalizedHeader: lc.FinalizedHeader,
 		FinalityBranch:  lc.FinalityBranch,
 		SignatureSlot:   lc.SignatureSlot,
-	}, prefix...)
+	}, prefix[:]...)
 }
 
 func (c *ConsensusHandlers) lightClientBootstrapHandler(s network.Stream) error {
 	root := &cltypes.Root{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, root, clparams.Phase0Version); err != nil {
+	if err := ssz_snappy.DecodeAndReadFixedSizeNoForkDigest(s, root, clparams.Phase0Version); err != nil {
 		return err
 	}
 
@@ -80,35 +84,41 @@ func (c *ConsensusHandlers) lightClientBootstrapHandler(s network.Stream) error 
 		return err
 	}
 
-	prefix := append([]byte{SuccessfulResponsePrefix}, forkDigest[:]...)
-	return ssz_snappy.EncodeAndWrite(s, lc, prefix...)
+	var prefix [5]byte
+	prefix[0] = SuccessfulResponsePrefix
+	copy(prefix[1:], forkDigest[:])
+	return ssz_snappy.EncodeAndWrite(s, lc, prefix[:]...)
 }
 
 func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) error {
 	req := &cltypes.LightClientUpdatesByRangeRequest{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
+	if err := ssz_snappy.DecodeAndReadFixedSizeNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err
+	}
+	endPeriod := req.StartPeriod + req.Count
+	if endPeriod < req.StartPeriod {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+	}
+
+	if cost := requestCost(req.Count, 1, maxLightClientsPerRequest); !c.consumeRateLimit(s, cost) {
+		return nil
 	}
 
 	lightClientUpdates := make([]*cltypes.LightClientUpdate, 0, maxLightClientsPerRequest)
 
-	endPeriod := req.StartPeriod + req.Count
 	currentSlot := c.ethClock.GetCurrentSlot()
 	if endPeriod > c.beaconConfig.SyncCommitteePeriod(currentSlot) {
 		endPeriod = c.beaconConfig.SyncCommitteePeriod(currentSlot) + 1
 	}
 
-	notFoundPrev := false
-	// Fetch from [start_period, start_period + count]
-	for i := req.StartPeriod; i < endPeriod; i++ {
-		update, has := c.forkChoiceReader.GetLightClientUpdate(i)
-		if !has {
-			notFoundPrev = true
+	// The response must include the earliest available update and use consecutive periods.
+	// Skip leading gaps, but stop once a gap would split the response.
+	for _, update := range c.forkChoiceReader.GetLightClientUpdates(req.StartPeriod, endPeriod) {
+		if update == nil {
+			if len(lightClientUpdates) > 0 {
+				break
+			}
 			continue
-		}
-		if notFoundPrev {
-			lightClientUpdates = lightClientUpdates[0:]
-			notFoundPrev = false
 		}
 
 		lightClientUpdates = append(lightClientUpdates, update)

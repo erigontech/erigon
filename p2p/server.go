@@ -22,14 +22,13 @@ package p2p
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
 	"net"
+	"net/netip"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -40,12 +39,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/p2p/discover"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/p2p/event"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/p2p/netutil"
 )
@@ -224,6 +223,11 @@ func (srv *Server) LocalNode() *enode.LocalNode {
 	return srv.localnode
 }
 
+// DiscV5 returns the UDPv5 discovery protocol instance, or nil if not running.
+func (srv *Server) DiscV5() *discover.UDPv5 {
+	return srv.discv5
+}
+
 // Peers returns all connected peers.
 func (srv *Server) Peers() []*Peer {
 	var ps []*Peer
@@ -319,14 +323,13 @@ func (srv *Server) Self() (ln *enode.Node) {
 // It blocks until all active connections have been closed.
 func (srv *Server) Stop() {
 	srv.lock.Lock()
-	if !srv.running.Load() {
+	if !srv.running.CompareAndSwap(true, false) {
 		if srv.nodedb != nil {
 			srv.nodedb.Close()
 		}
 		srv.lock.Unlock()
 		return
 	}
-	srv.running.Store(false)
 	srv.quitFunc()
 	if srv.listener != nil {
 		// this unblocks listener Accept
@@ -346,11 +349,11 @@ type sharedUDPConn struct {
 	unhandled chan discover.ReadPacket
 }
 
-// ReadFromUDP implements discover.UDPConn
-func (s *sharedUDPConn) ReadFromUDP(b []byte) (n int, addr *net.UDPAddr, err error) {
+// ReadFromUDPAddrPort implements discover.UDPConn
+func (s *sharedUDPConn) ReadFromUDPAddrPort(b []byte) (n int, addr netip.AddrPort, err error) {
 	packet, ok := <-s.unhandled
 	if !ok {
-		return 0, nil, errors.New("connection was closed")
+		return 0, netip.AddrPort{}, errors.New("connection was closed")
 	}
 	l := min(len(packet.Data), len(b))
 	copy(b[:l], packet.Data[:l])
@@ -364,12 +367,19 @@ func (s *sharedUDPConn) Close() error {
 
 // Start starts running the server.
 // Servers can not be re-used after stopping.
-func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
+func (srv *Server) Start(ctx context.Context, logger log.Logger) (err error) {
 	if srv.running.Load() {
 		return errors.New("server already running")
 	}
 	srv.lock.Lock()
 	defer srv.lock.Unlock()
+
+	srv.running.Store(true)
+	defer func() {
+		if err != nil {
+			srv.running.Store(false)
+		}
+	}()
 
 	srv.logger = logger
 	if srv.clock == nil {
@@ -406,7 +416,7 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 	if srv.ListenAddr != "" {
-		if err := srv.setupListening(srv.quitCtx); err != nil {
+		if err := srv.setupListening(); err != nil {
 			return err
 		}
 	}
@@ -415,18 +425,17 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
 	}
 	srv.logger.Info("Setup P2P discovery", "v4", srv.discv4 != nil, "v5", srv.discv5 != nil)
 	srv.setupDialScheduler()
+	srv.startListenLoop(srv.quitCtx)
 
-	srv.running.Store(true)
-	srv.loopWG.Add(1)
-	go srv.run()
+	srv.loopWG.Go(srv.run)
 	return nil
 }
 
 func (srv *Server) updateLocalNodeStaticAddrCache() {
 	localNodeAddr := srv.localnode.Node().URLv4()
 	srv.localnodeAddrCache.Store(&localNodeAddr)
-
 }
+
 func (srv *Server) setupLocalNode() error {
 	// Create the devp2p handshake.
 	pubkey := crypto.MarshalPubkey(&srv.PrivateKey.PublicKey)
@@ -436,13 +445,13 @@ func (srv *Server) setupLocalNode() error {
 	}
 	sort.Sort(capsByNameAndVersion(srv.ourHandshake.Caps))
 	// Create the local node
-	db, err := enode.OpenDB(srv.quitCtx, srv.Config.NodeDatabase, srv.Config.TmpDir, srv.logger)
+	db, err := enode.OpenDBEx(srv.quitCtx, srv.Config.NodeDatabase, srv.Config.TmpDir, srv.logger)
 	if err != nil {
 		return err
 	}
 	srv.nodedb = db
 
-	srv.localnode = enode.NewLocalNode(db, srv.PrivateKey, srv.logger)
+	srv.localnode = enode.NewLocalNode(db, srv.PrivateKey)
 	srv.localnode.SetFallbackIP(net.IP{127, 0, 0, 1})
 
 	// TODO: check conflicts
@@ -462,13 +471,25 @@ func (srv *Server) setupLocalNode() error {
 		ip, _ := srv.NAT.ExternalIP()
 		srv.localnode.SetStaticIP(ip)
 		srv.updateLocalNodeStaticAddrCache()
+	case nat.STUN:
+		// STUN-discovered IPs can change while running, so keep re-resolving.
+		tracker := &externalIPTracker{
+			nat: srv.NAT,
+			set: func(ip net.IP) {
+				srv.localnode.SetStaticIP(ip)
+				srv.updateLocalNodeStaticAddrCache()
+			},
+			logger: srv.logger,
+		}
+		srv.loopWG.Go(func() {
+			defer dbg.LogPanic()
+			tracker.run(srv.quit, externalIPRefreshInterval)
+		})
 	default:
 		// Ask the router about the IP. This takes a while and blocks startup,
 		// do it in the background.
-		srv.loopWG.Add(1)
-		go func() {
+		srv.loopWG.Go(func() {
 			defer dbg.LogPanic()
-			defer srv.loopWG.Done()
 			if ip, err := srv.NAT.ExternalIP(); err == nil {
 				srv.logger.Info("NAT ExternalIP resolved", "ip", ip)
 				srv.localnode.SetStaticIP(ip)
@@ -476,7 +497,7 @@ func (srv *Server) setupLocalNode() error {
 			} else {
 				srv.logger.Warn("NAT ExternalIP resolution has failed, try to pass a different --nat option", "err", err)
 			}
-		}()
+		})
 	}
 	return nil
 }
@@ -513,12 +534,10 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 	srv.logger.Trace("UDP listener up", "addr", realaddr)
 	if srv.NAT != nil {
 		if !realaddr.IP.IsLoopback() && srv.NAT.SupportsMapping() {
-			srv.loopWG.Add(1)
-			go func() {
+			srv.loopWG.Go(func() {
 				defer dbg.LogPanic()
-				defer srv.loopWG.Done()
 				nat.Map(srv.NAT, srv.quit, "udp", realaddr.Port, realaddr.Port, "ethereum discovery", srv.logger)
-			}()
+			})
 		}
 	}
 	srv.localnode.SetFallbackUDP(realaddr.Port)
@@ -533,7 +552,7 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 			Unhandled:   unhandled,
 			Log:         srv.logger,
 		}
-		ntab, err := discover.ListenV4(ctx, strconv.FormatUint(uint64(srv.Config.Protocols[0].Version), 10), conn, srv.localnode, cfg)
+		ntab, err := discover.ListenV4(conn, srv.localnode, cfg)
 		if err != nil {
 			return err
 		}
@@ -546,12 +565,11 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 			Bootnodes:   srv.BootstrapNodesV5,
 			Log:         srv.logger,
 		}
-		version := uint64(srv.Config.Protocols[0].Version)
 		var err error
 		if sconn != nil {
-			srv.discv5, err = discover.ListenV5(ctx, strconv.FormatUint(version, 10), sconn, srv.localnode, cfg)
+			srv.discv5, err = discover.ListenV5(ctx, sconn, srv.localnode, cfg)
 		} else {
-			srv.discv5, err = discover.ListenV5(ctx, strconv.FormatUint(version, 10), conn, srv.localnode, cfg)
+			srv.discv5, err = discover.ListenV5(ctx, conn, srv.localnode, cfg)
 		}
 		if err != nil {
 			// Clean up v4 if v5 setup fails.
@@ -597,7 +615,13 @@ func (srv *Server) setupDialScheduler() {
 		dialer:         srv.Dialer,
 		clock:          srv.clock,
 	}
-	config.resolver = cmp.Or[nodeResolver](srv.discv5, srv.discv4)
+	// NOTE: cmp.Or cannot be used here because wrapping a nil concrete pointer
+	// in an interface produces a non-nil interface value (Go nil interface trap).
+	if srv.discv5 != nil {
+		config.resolver = srv.discv5
+	} else if srv.discv4 != nil {
+		config.resolver = srv.discv4
+	}
 	if config.dialer == nil {
 		config.dialer = tcpDialer{&net.Dialer{Timeout: defaultDialTimeout}}
 	}
@@ -630,7 +654,7 @@ func (srv *Server) maxDialedConns() (limit int) {
 	return limit
 }
 
-func (srv *Server) setupListening(ctx context.Context) error {
+func (srv *Server) setupListening() error {
 	// Launch the listener.
 	listener, err := srv.listenFunc("tcp", srv.ListenAddr)
 	if err != nil {
@@ -645,22 +669,23 @@ func (srv *Server) setupListening(ctx context.Context) error {
 		srv.updateLocalNodeStaticAddrCache()
 
 		if !tcp.IP.IsLoopback() && (srv.NAT != nil) && srv.NAT.SupportsMapping() {
-			srv.loopWG.Add(1)
-			go func() {
+			srv.loopWG.Go(func() {
 				defer dbg.LogPanic()
-				defer srv.loopWG.Done()
 				nat.Map(srv.NAT, srv.quit, "tcp", tcp.Port, tcp.Port, "ethereum p2p", srv.logger)
-			}()
+			})
 		}
 	}
-
-	srv.loopWG.Add(1)
-	go func() {
-		defer dbg.LogPanic()
-		defer srv.loopWG.Done()
-		srv.listenLoop(ctx)
-	}()
 	return nil
+}
+
+func (srv *Server) startListenLoop(ctx context.Context) {
+	if srv.listener == nil {
+		return
+	}
+	srv.loopWG.Go(func() {
+		defer dbg.LogPanic()
+		srv.listenLoop(ctx)
+	})
 }
 
 // doPeerOp runs fn on the main loop.
@@ -678,7 +703,6 @@ func (srv *Server) run() {
 	if len(srv.Config.Protocols) > 0 {
 		srv.logger.Info("Started P2P networking", "version", srv.Config.Protocols[0].Version, "self", *srv.localnodeAddrCache.Load(), "name", srv.Name)
 	}
-	defer srv.loopWG.Done()
 	defer srv.nodedb.Close()
 	defer srv.discmix.Close()
 	defer srv.dialsched.stop()
@@ -733,6 +757,11 @@ running:
 				// Ensure that the trusted flag is set before checking against MaxPeers.
 				c.flags |= trustedConn
 			}
+			if c.flags&inboundConn != 0 {
+				// Once the peer ID is known, suppress outbound dials to the same node
+				// until this inbound setup completes or fails.
+				srv.dialsched.inboundPending(c.node.ID())
+			}
 			c.cont <- nil
 
 		case c := <-srv.checkpointAddPeer:
@@ -761,9 +790,8 @@ running:
 				inboundCount--
 			}
 		case <-logTimer.C:
-			vals := []interface{}{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
-			vals = append(vals, srv.listErrors()...)
-
+			vals := []any{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
+			vals = append(vals, srv.listAndResetErrors()...)
 			srv.logger.Debug("[p2p] Server", vals...)
 		}
 	}
@@ -813,8 +841,6 @@ func (srv *Server) postHandshakeChecks(peers map[enode.ID]*Peer, inboundCount in
 func (srv *Server) listenLoop(ctx context.Context) {
 	srv.logger.Trace("TCP listener up", "addr", srv.listener.Addr())
 
-	srv.resetErrors()
-
 	// The slots limit accepts of new connections.
 	slots := semaphore.NewWeighted(int64(srv.MaxPendingPeers))
 
@@ -860,19 +886,15 @@ func (srv *Server) listenLoop(ctx context.Context) {
 			break
 		}
 
-		remoteIP := netutil.AddrIP(fd.RemoteAddr())
-		if err := srv.checkInboundConn(fd, remoteIP); err != nil {
+		remoteIP := netutil.AddrAddr(fd.RemoteAddr())
+		if err := srv.checkInboundConn(remoteIP); err != nil {
 			srv.logger.Trace("Rejected inbound connection", "addr", fd.RemoteAddr(), "err", err)
 			_ = fd.Close()
 			slots.Release(1)
 			continue
 		}
-		if remoteIP != nil {
-			var addr *net.TCPAddr
-			if tcp, ok := fd.RemoteAddr().(*net.TCPAddr); ok {
-				addr = tcp
-			}
-			fd = newMeteredConn(fd, true, addr)
+		if remoteIP.IsValid() {
+			fd = newMeteredConn(fd, true)
 			srv.logger.Trace("Accepted connection", "addr", fd.RemoteAddr())
 		}
 		go func() {
@@ -884,18 +906,18 @@ func (srv *Server) listenLoop(ctx context.Context) {
 	}
 }
 
-func (srv *Server) checkInboundConn(fd net.Conn, remoteIP net.IP) error {
-	if remoteIP == nil {
+func (srv *Server) checkInboundConn(remoteIP netip.Addr) error {
+	if !remoteIP.IsValid() {
 		return nil
 	}
 	// Reject connections that do not match NetRestrict.
-	if srv.NetRestrict != nil && !srv.NetRestrict.Contains(remoteIP) {
+	if srv.NetRestrict != nil && !srv.NetRestrict.ContainsAddr(remoteIP) {
 		return errors.New("not whitelisted in NetRestrict")
 	}
 	// Reject Internet peers that try too often.
 	now := srv.clock.Now()
 	srv.inboundHistory.expire(now, nil)
-	if !netutil.IsLAN(remoteIP) && srv.inboundHistory.contains(remoteIP.String()) {
+	if !netutil.AddrIsLAN(remoteIP) && srv.inboundHistory.contains(remoteIP.String()) {
 		return errors.New("too many attempts")
 	}
 	srv.inboundHistory.add(remoteIP.String(), now.Add(inboundThrottleTime))
@@ -907,20 +929,25 @@ func (srv *Server) checkInboundConn(fd net.Conn, remoteIP net.IP) error {
 // or the handshakes have failed.
 func (srv *Server) SetupConn(fd net.Conn, flags connFlag, dialDest *enode.Node) error {
 	c := &conn{fd: fd, flags: flags, cont: make(chan error)}
+	defer func() {
+		if c.is(inboundConn) && c.node != nil {
+			srv.dialsched.inboundCompleted(c.node.ID())
+		}
+	}()
 	if dialDest == nil {
 		c.transport = srv.newTransport(fd, nil)
 	} else {
 		c.transport = srv.newTransport(fd, dialDest.Pubkey())
 	}
 
-	err := srv.setupConn(c, flags, dialDest)
+	err := srv.setupConn(c, dialDest)
 	if err != nil {
 		c.close(err)
 	}
 	return err
 }
 
-func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) error {
+func (srv *Server) setupConn(c *conn, dialDest *enode.Node) error {
 	// Prevent leftover pending conns from entering the handshake.
 	if !srv.running.Load() {
 		return errServerStopped
@@ -948,12 +975,29 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	if dialDest != nil {
 		c.node = dialDest
 	} else {
-		c.node = nodeFromConn(remotePubkey, c.fd)
+		// Inbound connection: there's no dial-time enode, so by default
+		// nodeFromConn fabricates a stub from pubkey + remote addr. That
+		// stub is missing any ENR entries the remote advertises. If the
+		// remote is a configured static peer we already hold its full
+		// enode, so prefer that — keeps custom ENR entries intact across
+		// inbound handshakes without requiring discv5 / discovery v5
+		// ENR resolution. Pure-discovery deployments (no static peers)
+		// keep the stub fallback.
+		c.node = nil
+		if srv.dialsched != nil {
+			id := enode.PubkeyToIDV4(remotePubkey)
+			if static := srv.dialsched.lookupStatic(id); static != nil {
+				c.node = static
+			}
+		}
+		if c.node == nil {
+			c.node = nodeFromConn(remotePubkey, c.fd)
+		}
 	}
 	clog := srv.logger.New("id", c.node.ID(), "addr", c.fd.RemoteAddr(), "conn", c.flags)
 	err = srv.checkpoint(c, srv.checkpointPostHandshake)
 	if err != nil {
-		clog.Trace("Rejected peer", "err", err)
+		clog.Trace("[p2p] Rejected peer", "err", err)
 		return err
 	}
 
@@ -961,17 +1005,17 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	phs, err := c.doProtoHandshake(srv.ourHandshake)
 	if err != nil {
 		srv.addError(err)
-		clog.Trace("Failed p2p handshake", "err", err)
+		clog.Trace("[p2p] Failed p2p handshake", "err", err)
 		return err
 	}
 	if id := c.node.ID(); !bytes.Equal(crypto.Keccak256(phs.Pubkey), id[:]) {
-		clog.Trace("Wrong devp2p handshake identity", "phsid", hex.EncodeToString(phs.Pubkey))
+		clog.Trace("[p2p] Wrong devp2p handshake identity", "phsid", hex.EncodeToString(phs.Pubkey))
 		return DiscUnexpectedIdentity
 	}
 	c.caps, c.name = phs.Caps, phs.Name
 	err = srv.checkpoint(c, srv.checkpointAddPeer)
 	if err != nil {
-		clog.Trace("Rejected peer", "err", err)
+		clog.Trace("[p2p] Rejected peer", "err", err)
 		return err
 	}
 
@@ -1055,8 +1099,8 @@ type NodeInfo struct {
 		Discovery int `json:"discovery"` // UDP listening port for discovery protocol
 		Listener  int `json:"listener"`  // TCP listening port for RLPx
 	} `json:"ports"`
-	ListenAddr string                 `json:"listenAddr"`
-	Protocols  map[string]interface{} `json:"protocols"`
+	ListenAddr string         `json:"listenAddr"`
+	Protocols  map[string]any `json:"protocols"`
 }
 
 // NodeInfo gathers and returns a collection of metadata known about the host.
@@ -1069,7 +1113,7 @@ func (srv *Server) NodeInfo() *NodeInfo {
 		ID:         node.ID().String(),
 		IP:         node.IP().String(),
 		ListenAddr: srv.ListenAddr,
-		Protocols:  make(map[string]interface{}),
+		Protocols:  make(map[string]any),
 	}
 	info.Ports.Discovery = node.UDP()
 	info.Ports.Listener = node.TCP()
@@ -1078,7 +1122,7 @@ func (srv *Server) NodeInfo() *NodeInfo {
 	// Gather all the running protocol infos (only once per protocol type)
 	for _, proto := range srv.Protocols {
 		if _, ok := info.Protocols[proto.Name]; !ok {
-			nodeInfo := interface{}("unknown")
+			nodeInfo := any("unknown")
 			if query := proto.NodeInfo; query != nil {
 				nodeInfo = proto.NodeInfo()
 			}
@@ -1120,20 +1164,15 @@ func (srv *Server) addError(err error) {
 	srv.errors[cleanError(err.Error())]++
 }
 
-func (srv *Server) resetErrors() {
-	srv.errorsMu.Lock()
-	srv.errors = map[string]uint{}
-	srv.errorsMu.Unlock()
-}
-
-func (srv *Server) listErrors() []interface{} {
+func (srv *Server) listAndResetErrors() []any {
 	srv.errorsMu.Lock()
 	defer srv.errorsMu.Unlock()
 
-	list := make([]interface{}, 0, len(srv.errors)*2)
+	list := make([]any, 0, len(srv.errors)*2)
 	for err, count := range srv.errors {
 		list = append(list, err, count)
 	}
+	clear(srv.errors)
 	return list
 }
 
@@ -1145,6 +1184,12 @@ func cleanError(err string) string {
 		return "closed by remote"
 	case strings.HasSuffix(err, "connection reset by peer"):
 		return "closed by remote"
+	case strings.Contains(err, "broken pipe"):
+		return "broken pipe"
+	case strings.Contains(err, "connection refused"):
+		return "connection refused"
+	case strings.Contains(err, "no route to host"):
+		return "no route to host"
 	default:
 		return err
 	}

@@ -19,11 +19,11 @@ package utils_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestSSZSnappy(t *testing.T) {
@@ -49,6 +49,20 @@ func TestPlainSnappy(t *testing.T) {
 
 func TestLiteralConverters(t *testing.T) {
 	require.Equal(t, [4]byte{0x0, 0x0, 0x2, 0x58}, utils.Uint32ToBytes4(600))
-	require.Equal(t, [4]byte{10, 23, 56, 7}, utils.BytesToBytes4([]byte{10, 23, 56, 7, 8, 5}))
 	require.Equal(t, []byte{0x58, 0x2, 0x0, 0x0, 0x0, 0x0, 0x00, 0x00}, utils.Uint64ToLE(600))
+}
+
+func TestDecompressSnappyWithLimit(t *testing.T) {
+	payload := make([]byte, 1024)
+	compressed := utils.CompressSnappy(payload)
+
+	decoded, err := utils.DecompressSnappyWithLimit(compressed, 1024)
+	require.NoError(t, err)
+	require.Equal(t, payload, decoded)
+
+	_, err = utils.DecompressSnappyWithLimit(compressed, 1023)
+	require.Error(t, err)
+	require.Zero(t, testing.AllocsPerRun(10, func() {
+		_, _ = utils.DecompressSnappyWithLimit(compressed, 1023)
+	}), "an oversized declared length must be rejected before allocating")
 }

@@ -18,8 +18,11 @@ package solid
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type uint64VectorSSZ struct {
@@ -30,19 +33,26 @@ func NewUint64VectorSSZ(size int) Uint64VectorSSZ {
 	o := &byteBasedUint64Slice{
 		c: size,
 		l: size,
-		u: make([]byte, size*8),
+		u: make([]byte, ((size+3)/4)*length.Hash),
 	}
 	return &uint64VectorSSZ{
 		u: o,
 	}
 }
 
-func (h uint64VectorSSZ) MarshalJSON() ([]byte, error) {
-	return json.Marshal(h.u)
+func (arr uint64VectorSSZ) MarshalJSON() ([]byte, error) {
+	return json.Marshal(arr.u)
 }
 
-func (h *uint64VectorSSZ) UnmarshalJSON(buf []byte) error {
-	return json.Unmarshal(buf, h.u)
+func (arr *uint64VectorSSZ) UnmarshalJSON(buf []byte) error {
+	values, err := unmarshalUint64StringsJSON(buf)
+	if err != nil {
+		return err
+	}
+	if len(values) != arr.Cap() {
+		return fmt.Errorf("uint64 vector length mismatch: %d != %d", len(values), arr.Cap())
+	}
+	return arr.u.replace(values)
 }
 
 func (arr *uint64VectorSSZ) Clear() {
@@ -95,6 +105,9 @@ func (arr *uint64VectorSSZ) EncodeSSZ(buf []byte) (dst []byte, err error) {
 }
 
 func (arr *uint64VectorSSZ) DecodeSSZ(buf []byte, version int) error {
+	if len(buf) < arr.Length()*8 {
+		return ssz.ErrLowBufferSize
+	}
 	return arr.u.DecodeSSZ(buf[:arr.Length()*8], version)
 }
 

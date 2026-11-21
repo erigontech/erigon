@@ -19,7 +19,11 @@ package rpctest
 import (
 	"fmt"
 	"math/rand"
+	"sort"
+	"sync"
 	"time"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // BenchEthGetBalance compares response of Erigon with Geth
@@ -27,7 +31,7 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//	use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//	use false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
 func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64) error {
 	setRoutes(erigonURL, gethURL)
 
@@ -38,46 +42,40 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_getBalance"}, resultsCh)
+		go writePattern(true, []string{"eth_getBalance"}, resultsCh)
 	}
 
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
-	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+	if _, err := reqGen.latestBlockNumber(); err != nil {
+		return err
 	}
 	for bn := blockFrom; bn <= blockTo; bn++ {
 
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
+			return fmt.Errorf("could not retrieve block (Erigon) %d: %w", bn, res.Err)
 		}
 
 		if b.Error != nil {
-			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
+			return fmt.Errorf("error retrieving block (Erigon): %d %s", b.Error.Code, b.Error.Message)
 		}
 
 		if needCompare {
 			var bg EthBlockByNumber
 			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &bg)
 			if res.Err != nil {
-				return fmt.Errorf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
+				return fmt.Errorf("could not retrieve block (geth) %d: %w", bn, res.Err)
 			}
 			if bg.Error != nil {
-				return fmt.Errorf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
+				return fmt.Errorf("error retrieving block (geth): %d %s", bg.Error.Code, bg.Error.Message)
 			}
 			if !compareBlocks(&b, &bg) {
-				return fmt.Errorf("Block difference for %d\n", bn)
+				return fmt.Errorf("block difference for %d", bn)
 			}
 		}
 
-		for txn := range b.Result.Transactions {
-
-			tx := b.Result.Transactions[txn]
+		for i := range b.Result.Transactions {
+			tx := &b.Result.Transactions[i]
 			var balance EthBalance
 			account := tx.From
 
@@ -86,22 +84,22 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 				resultsCh <- res
 			}
 			if res.Err != nil {
-				return fmt.Errorf("Could not get account balance (Erigon): %v\n", res.Err)
+				return fmt.Errorf("could not get account balance (Erigon): %w", res.Err)
 			}
 			if balance.Error != nil {
-				return fmt.Errorf("Error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message)
+				return fmt.Errorf("error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message)
 			}
 			if needCompare {
 				var balanceg EthBalance
 				res = reqGen.Geth("eth_getBalance", reqGen.getBalance(account, bn), &balanceg)
 				if res.Err != nil {
-					return fmt.Errorf("Could not get account balance (geth): %v\n", res.Err)
+					return fmt.Errorf("could not get account balance (geth): %w", res.Err)
 				}
 				if balanceg.Error != nil {
-					return fmt.Errorf("Error getting account balance (geth): %d %s\n", balanceg.Error.Code, balanceg.Error.Message)
+					return fmt.Errorf("error getting account balance (geth): %d %s", balanceg.Error.Code, balanceg.Error.Message)
 				}
 				if !compareBalances(&balance, &balanceg) {
-					return fmt.Errorf("Account %x balance difference for block %d\n", account, bn)
+					return fmt.Errorf("account %x balance difference for block %d", account, bn)
 				}
 			}
 		}
@@ -109,59 +107,105 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 	return nil
 }
 
-func BenchEthGetBalanceRandomAccount(erigonURL string, blocksToProcess int) error {
+func BenchEthGetBalanceRandomAccount(erigonURL string, concurentRequests int) error {
 	setRoutes(erigonURL, "")
 
 	reqGen := &RequestGenerator{}
 
-	var res CallResult
-
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
-	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
 
-	processedAccounts := 0
-	timeStart := time.Now()
+	latencyLen := 1000
+	latency := make([]int, 0, latencyLen)
+	var m sync.Mutex
+	var finishedRequests uint64
 
-	for i := 0; i < blocksToProcess; i++ {
+	go func() {
+		lastPrint := time.Now()
+		p50 := float64(0)
+		p90 := float64(0)
+		p99 := float64(0)
+		rps := float64(0)
+
+		for {
+
+			time.Sleep(time.Second)
+			m.Lock()
+
+			if len(latency) > 0 {
+				sort.Ints(latency)
+
+				p50 = float64(latency[len(latency)/2]) / 1000 // convert to ms
+				p90 = float64(latency[len(latency)/10*9]) / 1000
+				p99 = float64(latency[len(latency)/100*99]) / 1000
+				rps = float64(finishedRequests) / float64(time.Since(lastPrint).Seconds())
+
+				lastPrint = time.Now()
+				finishedRequests = 0
+			}
+
+			m.Unlock()
+
+			fmt.Printf(
+				"Latency 50p: %.2fms 90p: %.2fms 99p: %.2fms RPS: %.2f req/s\n",
+				p50,
+				p90,
+				p99,
+				rps,
+			)
+
+		}
+	}()
+
+	reqQueue := make(chan struct{}, concurentRequests)
+
+	for {
 		bn := uint64(rand.Intn(
-			int(blockNumber.Number.Uint64()),
+			int(lastBlock),
 		))
 
 		var b EthBlockByNumber
-		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
+		res := reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
+			return fmt.Errorf("could not retrieve block (Erigon) %d: %w", bn, res.Err)
 		}
 
 		if b.Error != nil {
-			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
+			return fmt.Errorf("error retrieving block (Erigon): %d %s", b.Error.Code, b.Error.Message)
 		}
 
-		processedAccounts += len(b.Result.Transactions)
-
-		for txn := range b.Result.Transactions {
-			tx := b.Result.Transactions[txn]
-			var balance EthBalance
+		for i := range b.Result.Transactions {
+			tx := &b.Result.Transactions[i]
 			account := tx.From
 
-			res = reqGen.Erigon("eth_getBalance", reqGen.getBalance(account, bn), &balance)
-			if res.Err != nil {
-				return fmt.Errorf("Could not get account balance (Erigon): %v\n", res.Err)
-			}
-			if balance.Error != nil {
-				return fmt.Errorf("Error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message)
-			}
+			reqQueue <- struct{}{}
+
+			go func(account common.Address, bn uint64, launchedAt time.Time) {
+				var balance EthBalance
+
+				res := reqGen.Erigon("eth_getBalance", reqGen.getBalance(account, bn), &balance)
+				if res.Err != nil {
+					panic(fmt.Errorf("could not get account balance (Erigon): %w", res.Err))
+				}
+				if balance.Error != nil {
+					panic(fmt.Errorf("error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message))
+				}
+
+				reqLatency := int(time.Since(launchedAt).Microseconds())
+				<-reqQueue
+
+				m.Lock()
+				finishedRequests += 1
+
+				if len(latency) == latencyLen {
+					latency = latency[1:]
+				}
+
+				latency = append(latency, reqLatency)
+				m.Unlock()
+			}(account, bn, time.Now())
 		}
 	}
-
-	perAcc := float64(time.Since(timeStart)) / float64(time.Millisecond) / float64(processedAccounts)
-	fmt.Printf("Processed accounts: %d took %dms perTx %.2fms\n", processedAccounts, time.Since(timeStart)/time.Millisecond, perAcc)
-
-	return nil
 }

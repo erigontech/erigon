@@ -24,134 +24,17 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
+	"net/netip"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/c2h5oh/datasize"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
+	"github.com/erigontech/erigon/p2p/enr"
 )
-
-// BenchmarkNodeDBGeometry for `dbSyncBytesThreshold` constant
-//   - must use `-cpu=` because even 1-core overloading disk write IO. Multi-core bench is unreliable here (degradating with time).
-//   - same about `-benchtime=30s` and -benchtime can't be smaller than SyncPeriod
-//   - target is: to improve throughput without big ms_worst
-//   - params to choose: pageSize, syncPeriod, syncBytes
-//
-// go test -bench=BenchmarkNodeDBGeometry/20kb      -run=BenchmarkNodeDBGeometry -cpu=1 -count=1 -benchtime=10s ./p2p/enode > old.txt
-// go test -bench=BenchmarkNodeDBGeometry/10mb_1sec -run=BenchmarkNodeDBGeometry -cpu=1 -count=1 -benchtime=10s ./p2p/enode > new.txt
-// benchstat old.txt new.txt
-func BenchmarkNodeDBGeometry(b *testing.B) {
-	keys, vals := make([][]byte, 100_000), make([][]byte, 100_000)
-	for i := range keys {
-		keys[i] = fmt.Appendf(nil, "key %d", i)
-		vals[i] = fmt.Appendf(nil, "val %d", i)
-	}
-	cfg := mdbx.New(dbcfg.ChainDB, log.New()).
-		PageSize(4 * datasize.KB).
-		MapSize(8 * datasize.GB).
-		GrowthStep(2 * datasize.MB).
-		Flags(func(f uint) uint {
-			return mdbxgo.SafeNoSync | mdbxgo.WriteMap
-		}).
-		SyncBytes(20 * datasize.MB).
-		SyncPeriod(2 * time.Second).
-		DirtySpace(uint64(32 * datasize.MB))
-
-	doBench := func(b *testing.B, db kv.RwDB) {
-		//b.ReportAllocs()
-		time.Sleep(200 * time.Millisecond) // give for OS a bit time between bench runs - to reduce cumulative effect
-		b.ResetTimer()
-		var worst time.Duration
-		var i int
-		for b.Loop() {
-			i++
-			tx, _ := db.BeginRw(context.Background())
-
-			v := vals[i%len(vals)]
-			v[0]++ // modify value a bit on every update
-			_ = tx.Put(kv.Headers, keys[i%len(keys)], v)
-			t := time.Now()
-			_ = tx.Commit()
-			worst = max(worst, time.Since(t))
-		}
-		b.ReportMetric(float64(worst.Milliseconds()), "ms_worst")
-		db.Close()
-		os.RemoveAll(db.Path())
-	}
-
-	b.Run("20kb", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.KB).SyncPeriod(1 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-	b.Run("200kb", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(200 * datasize.KB).SyncPeriod(1 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-	b.Run("1mb 1sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(1 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-	b.Run("1mb 2sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(1 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-	b.Run("5mb 1sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(5 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-	b.Run("5mb 2sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(5 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-
-	b.Run("10mb 1sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-
-	b.Run("10mb 2sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-	b.Run("10mb 5sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).SyncPeriod(5 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-
-	b.Run("20mb 1sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-
-	b.Run("20mb 2sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-	b.Run("20mb 5sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).SyncPeriod(5 * time.Second).MustOpen()
-		defer db.Close()
-		doBench(b, db)
-	})
-}
 
 var keytestID = HexID("51232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439")
 
@@ -175,7 +58,7 @@ func TestDBNodeKey(t *testing.T) {
 }
 
 func TestDBNodeItemKey(t *testing.T) {
-	wantIP := net.IP{127, 0, 0, 3}
+	wantIP := netip.AddrFrom4([4]byte{127, 0, 0, 3})
 	wantField := "foobar"
 	enc := nodeItemKey(keytestID, wantIP, wantField)
 	want := []byte{
@@ -196,7 +79,7 @@ func TestDBNodeItemKey(t *testing.T) {
 	if id != keytestID {
 		t.Errorf("splitNodeItemKey returned wrong ID: %v", id)
 	}
-	if !ip.Equal(wantIP) {
+	if ip != wantIP {
 		t.Errorf("splitNodeItemKey returned wrong IP: %v", ip)
 	}
 	if field != wantField {
@@ -214,21 +97,20 @@ var nodeDBInt64Tests = []struct {
 }
 
 func TestDBInt64(t *testing.T) {
-	tmpDir := t.TempDir()
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+	db, err := OpenDB("")
 	if err != nil {
 		panic(err)
 	}
 	defer db.Close()
 
 	tests := nodeDBInt64Tests
-	for i := 0; i < len(tests); i++ {
+	for i := range tests {
 		// Insert the next value
 		if err := db.storeInt64(tests[i].key, tests[i].value); err != nil {
 			t.Errorf("test %d: failed to store value: %v", i, err)
 		}
 		// Check all existing and non existing values
-		for j := 0; j < len(tests); j++ {
+		for j := range tests {
 			num := db.fetchInt64(tests[j].key)
 			switch {
 			case j <= i && num != tests[j].value:
@@ -247,44 +129,44 @@ func TestDBFetchStore(t *testing.T) {
 		30303,
 		30303,
 	)
-	tmpDir := t.TempDir()
 	inst := time.Now()
 	num := 314
 
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+	db, err := OpenDB("")
 	if err != nil {
 		panic(err)
 	}
 	defer db.Close()
 
+	ip := node.IPAddr()
 	// Check fetch/store operations on a node ping object
-	if stored := db.LastPingReceived(node.ID(), node.IP()); stored.Unix() != 0 {
+	if stored := db.LastPingReceived(node.ID(), ip); stored.Unix() != 0 {
 		t.Errorf("ping: non-existing object: %v", stored)
 	}
-	if err := db.UpdateLastPingReceived(node.ID(), node.IP(), inst); err != nil {
+	if err := db.UpdateLastPingReceived(node.ID(), ip, inst); err != nil {
 		t.Errorf("ping: failed to update: %v", err)
 	}
-	if stored := db.LastPingReceived(node.ID(), node.IP()); stored.Unix() != inst.Unix() {
+	if stored := db.LastPingReceived(node.ID(), ip); stored.Unix() != inst.Unix() {
 		t.Errorf("ping: value mismatch: have %v, want %v", stored, inst)
 	}
 	// Check fetch/store operations on a node pong object
-	if stored := db.LastPongReceived(node.ID(), node.IP()); stored.Unix() != 0 {
+	if stored := db.LastPongReceived(node.ID(), ip); stored.Unix() != 0 {
 		t.Errorf("pong: non-existing object: %v", stored)
 	}
-	if err := db.UpdateLastPongReceived(node.ID(), node.IP(), inst); err != nil {
+	if err := db.UpdateLastPongReceived(node.ID(), ip, inst); err != nil {
 		t.Errorf("pong: failed to update: %v", err)
 	}
-	if stored := db.LastPongReceived(node.ID(), node.IP()); stored.Unix() != inst.Unix() {
+	if stored := db.LastPongReceived(node.ID(), ip); stored.Unix() != inst.Unix() {
 		t.Errorf("pong: value mismatch: have %v, want %v", stored, inst)
 	}
 	// Check fetch/store operations on a node findnode-failure object
-	if stored := db.FindFails(node.ID(), node.IP()); stored != 0 {
+	if stored := db.FindFails(node.ID(), ip); stored != 0 {
 		t.Errorf("find-node fails: non-existing object: %v", stored)
 	}
-	if err := db.UpdateFindFails(node.ID(), node.IP(), num); err != nil {
+	if err := db.UpdateFindFails(node.ID(), ip, num); err != nil {
 		t.Errorf("find-node fails: failed to update: %v", err)
 	}
-	if stored := db.FindFails(node.ID(), node.IP()); stored != num {
+	if stored := db.FindFails(node.ID(), ip); stored != num {
 		t.Errorf("find-node fails: value mismatch: have %v, want %v", stored, num)
 	}
 	// Check fetch/store operations on an actual node object
@@ -382,9 +264,8 @@ func TestDBSeedQuery(t *testing.T) {
 	// times to avoid flakes.
 	const attempts = 15
 	var err error
-	tmpDir := t.TempDir()
-	for i := 0; i < attempts; i++ {
-		if err = testSeedQuery(tmpDir); err == nil {
+	for range attempts {
+		if err = testSeedQuery(); err == nil {
 			return
 		}
 	}
@@ -393,8 +274,8 @@ func TestDBSeedQuery(t *testing.T) {
 	}
 }
 
-func testSeedQuery(tmpDir string) error {
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+func testSeedQuery() error {
+	db, err := OpenDB("")
 	if err != nil {
 		panic(err)
 	}
@@ -405,7 +286,7 @@ func testSeedQuery(tmpDir string) error {
 		if err := db.UpdateNode(seed.node); err != nil {
 			return fmt.Errorf("node %d: failed to insert: %w", i, err)
 		}
-		if err := db.UpdateLastPongReceived(seed.node.ID(), seed.node.IP(), seed.pong); err != nil {
+		if err := db.UpdateLastPongReceived(seed.node.ID(), seed.node.IPAddr(), seed.pong); err != nil {
 			return fmt.Errorf("node %d: failed to insert bondTime: %w", i, err)
 		}
 	}
@@ -444,7 +325,7 @@ func TestDBPersistency(t *testing.T) {
 	)
 
 	// Create a persistent database and store some values
-	db, err := OpenDB(context.Background(), filepath.Join(root, "database"), root, log.Root())
+	db, err := OpenDBEx(context.Background(), filepath.Join(root, "database"), root, log.Root())
 	if err != nil {
 		t.Fatalf("failed to create persistent database: %v", err)
 	}
@@ -455,7 +336,7 @@ func TestDBPersistency(t *testing.T) {
 	db.Close()
 
 	// OpenSegments the database and check the value
-	db, err = OpenDB(context.Background(), filepath.Join(root, "database"), root, log.Root())
+	db, err = OpenDBEx(context.Background(), filepath.Join(root, "database"), root, log.Root())
 	if err != nil {
 		t.Fatalf("failed to open persistent database: %v", err)
 	}
@@ -466,112 +347,125 @@ func TestDBPersistency(t *testing.T) {
 	db.Close()
 }
 
-var nodeDBExpirationNodes = []struct {
+// makeDBExpirationNodes returns test data with pong timestamps computed relative
+// to the current time. This must be a function (not a package-level var) because
+// package-level vars are evaluated at init time; any delay between init and test
+// execution would erode the 1-minute margin, causing surviving nodes to expire.
+func makeDBExpirationNodes() []struct {
 	node      *Node
 	pong      time.Time
 	storeNode bool
 	exp       bool
-}{
-	// Node has new enough pong time and isn't expired:
-	{
-		node: NewV4(
-			hexPubkey("8d110e2ed4b446d9b5fb50f117e5f37fb7597af455e1dab0e6f045a6eeaa786a6781141659020d38bdc5e698ed3d4d2bafa8b5061810dfa63e8ac038db2e9b67"),
-			net.IP{127, 0, 0, 1},
-			30303,
-			30303,
-		),
-		storeNode: true,
-		pong:      time.Now().Add(-dbNodeExpiration + time.Minute),
-		exp:       false,
-	},
-	// Node with pong time before expiration is removed:
-	{
-		node: NewV4(
-			hexPubkey("913a205579c32425b220dfba999d215066e5bdbf900226b11da1907eae5e93eb40616d47412cf819664e9eacbdfcca6b0c6e07e09847a38472d4be46ab0c3672"),
-			net.IP{127, 0, 0, 2},
-			30303,
-			30303,
-		),
-		storeNode: true,
-		pong:      time.Now().Add(-dbNodeExpiration - time.Minute),
-		exp:       true,
-	},
-	// Just pong time, no node stored:
-	{
-		node: NewV4(
-			hexPubkey("b56670e0b6bad2c5dab9f9fe6f061a16cf78d68b6ae2cfda3144262d08d97ce5f46fd8799b6d1f709b1abe718f2863e224488bd7518e5e3b43809ac9bd1138ca"),
-			net.IP{127, 0, 0, 3},
-			30303,
-			30303,
-		),
-		storeNode: false,
-		pong:      time.Now().Add(-dbNodeExpiration - time.Minute),
-		exp:       true,
-	},
-	// Node with multiple pong times, all older than expiration.
-	{
-		node: NewV4(
-			hexPubkey("29f619cebfd32c9eab34aec797ed5e3fe15b9b45be95b4df3f5fe6a9ae892f433eb08d7698b2ef3621568b0fb70d57b515ab30d4e72583b798298e0f0a66b9d1"),
-			net.IP{127, 0, 0, 4},
-			30303,
-			30303,
-		),
-		storeNode: true,
-		pong:      time.Now().Add(-dbNodeExpiration - time.Minute),
-		exp:       true,
-	},
-	{
-		node: NewV4(
-			hexPubkey("29f619cebfd32c9eab34aec797ed5e3fe15b9b45be95b4df3f5fe6a9ae892f433eb08d7698b2ef3621568b0fb70d57b515ab30d4e72583b798298e0f0a66b9d1"),
-			net.IP{127, 0, 0, 5},
-			30303,
-			30303,
-		),
-		storeNode: false,
-		pong:      time.Now().Add(-dbNodeExpiration - 2*time.Minute),
-		exp:       true,
-	},
-	// Node with multiple pong times, one newer, one older than expiration.
-	{
-		node: NewV4(
-			hexPubkey("3b73a9e5f4af6c4701c57c73cc8cfa0f4802840b24c11eba92aac3aef65644a3728b4b2aec8199f6d72bd66be2c65861c773129039bd47daa091ca90a6d4c857"),
-			net.IP{127, 0, 0, 6},
-			30303,
-			30303,
-		),
-		storeNode: true,
-		pong:      time.Now().Add(-dbNodeExpiration + time.Minute),
-		exp:       false,
-	},
-	{
-		node: NewV4(
-			hexPubkey("3b73a9e5f4af6c4701c57c73cc8cfa0f4802840b24c11eba92aac3aef65644a3728b4b2aec8199f6d72bd66be2c65861c773129039bd47daa091ca90a6d4c857"),
-			net.IP{127, 0, 0, 7},
-			30303,
-			30303,
-		),
-		storeNode: false,
-		pong:      time.Now().Add(-dbNodeExpiration - time.Minute),
-		exp:       true,
-	},
+} {
+	now := time.Now()
+	return []struct {
+		node      *Node
+		pong      time.Time
+		storeNode bool
+		exp       bool
+	}{
+		// Node has new enough pong time and isn't expired:
+		{
+			node: NewV4(
+				hexPubkey("8d110e2ed4b446d9b5fb50f117e5f37fb7597af455e1dab0e6f045a6eeaa786a6781141659020d38bdc5e698ed3d4d2bafa8b5061810dfa63e8ac038db2e9b67"),
+				net.IP{127, 0, 0, 1},
+				30303,
+				30303,
+			),
+			storeNode: true,
+			pong:      now.Add(-dbNodeExpiration + time.Minute),
+			exp:       false,
+		},
+		// Node with pong time before expiration is removed:
+		{
+			node: NewV4(
+				hexPubkey("913a205579c32425b220dfba999d215066e5bdbf900226b11da1907eae5e93eb40616d47412cf819664e9eacbdfcca6b0c6e07e09847a38472d4be46ab0c3672"),
+				net.IP{127, 0, 0, 2},
+				30303,
+				30303,
+			),
+			storeNode: true,
+			pong:      now.Add(-dbNodeExpiration - time.Minute),
+			exp:       true,
+		},
+		// Just pong time, no node stored:
+		{
+			node: NewV4(
+				hexPubkey("b56670e0b6bad2c5dab9f9fe6f061a16cf78d68b6ae2cfda3144262d08d97ce5f46fd8799b6d1f709b1abe718f2863e224488bd7518e5e3b43809ac9bd1138ca"),
+				net.IP{127, 0, 0, 3},
+				30303,
+				30303,
+			),
+			storeNode: false,
+			pong:      now.Add(-dbNodeExpiration - time.Minute),
+			exp:       true,
+		},
+		// Node with multiple pong times, all older than expiration.
+		{
+			node: NewV4(
+				hexPubkey("29f619cebfd32c9eab34aec797ed5e3fe15b9b45be95b4df3f5fe6a9ae892f433eb08d7698b2ef3621568b0fb70d57b515ab30d4e72583b798298e0f0a66b9d1"),
+				net.IP{127, 0, 0, 4},
+				30303,
+				30303,
+			),
+			storeNode: true,
+			pong:      now.Add(-dbNodeExpiration - time.Minute),
+			exp:       true,
+		},
+		{
+			node: NewV4(
+				hexPubkey("29f619cebfd32c9eab34aec797ed5e3fe15b9b45be95b4df3f5fe6a9ae892f433eb08d7698b2ef3621568b0fb70d57b515ab30d4e72583b798298e0f0a66b9d1"),
+				net.IP{127, 0, 0, 5},
+				30303,
+				30303,
+			),
+			storeNode: false,
+			pong:      now.Add(-dbNodeExpiration - 2*time.Minute),
+			exp:       true,
+		},
+		// Node with multiple pong times, one newer, one older than expiration.
+		{
+			node: NewV4(
+				hexPubkey("3b73a9e5f4af6c4701c57c73cc8cfa0f4802840b24c11eba92aac3aef65644a3728b4b2aec8199f6d72bd66be2c65861c773129039bd47daa091ca90a6d4c857"),
+				net.IP{127, 0, 0, 6},
+				30303,
+				30303,
+			),
+			storeNode: true,
+			pong:      now.Add(-dbNodeExpiration + time.Minute),
+			exp:       false,
+		},
+		{
+			node: NewV4(
+				hexPubkey("3b73a9e5f4af6c4701c57c73cc8cfa0f4802840b24c11eba92aac3aef65644a3728b4b2aec8199f6d72bd66be2c65861c773129039bd47daa091ca90a6d4c857"),
+				net.IP{127, 0, 0, 7},
+				30303,
+				30303,
+			),
+			storeNode: false,
+			pong:      now.Add(-dbNodeExpiration - time.Minute),
+			exp:       true,
+		},
+	}
 }
 
 func TestDBExpiration(t *testing.T) {
-	tmpDir := t.TempDir()
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+	db, err := OpenDB("")
 	if err != nil {
 		panic(err)
 	}
 	defer db.Close()
 
+	seeds := makeDBExpirationNodes()
+
 	// Add all the test nodes and set their last pong time.
-	for i, seed := range nodeDBExpirationNodes {
+	for i, seed := range seeds {
 		if seed.storeNode {
 			if err := db.UpdateNode(seed.node); err != nil {
 				t.Fatalf("node %d: failed to insert: %v", i, err)
 			}
 		}
-		if err := db.UpdateLastPongReceived(seed.node.ID(), seed.node.IP(), seed.pong); err != nil {
+		if err := db.UpdateLastPongReceived(seed.node.ID(), seed.node.IPAddr(), seed.pong); err != nil {
 			t.Fatalf("node %d: failed to update bondTime: %v", i, err)
 		}
 	}
@@ -580,9 +474,9 @@ func TestDBExpiration(t *testing.T) {
 
 	// Check that expired entries have been removed.
 	unixZeroTime := time.Unix(0, 0)
-	for i, seed := range nodeDBExpirationNodes {
+	for i, seed := range seeds {
 		node := db.Node(seed.node.ID())
-		pong := db.LastPongReceived(seed.node.ID(), seed.node.IP())
+		pong := db.LastPongReceived(seed.node.ID(), seed.node.IPAddr())
 		if seed.exp {
 			if seed.storeNode && node != nil {
 				t.Errorf("node %d (%s) shouldn't be present after expiration", i, seed.node.ID().TerminalString())
@@ -604,14 +498,118 @@ func TestDBExpiration(t *testing.T) {
 // This test checks that expiration works when discovery v5 data is present
 // in the database.
 func TestDBExpireV5(t *testing.T) {
-	tmpDir := t.TempDir()
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+	db, err := OpenDB("")
 	if err != nil {
 		panic(err)
 	}
 	defer db.Close()
 
-	ip := net.IP{127, 0, 0, 1}
-	db.UpdateFindFailsV5(ID{}, ip, 4)
+	ip := netip.AddrFrom4([4]byte{127, 0, 0, 1})
+	if err := db.UpdateFindFailsV5(ID{}, ip, 4); err != nil {
+		t.Fatal(err)
+	}
 	db.expireNodes()
+}
+
+// This test checks that the pong time of a node whose first stored item is its
+// pong is not attributed to the node stored before it.
+func TestDBExpirationNextNodePong(t *testing.T) {
+	db, err := OpenDB("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now()
+	stale := SignNull(new(enr.Record), ID{1})
+	fresh := SignNull(new(enr.Record), ID{2})
+	staleIP := netip.AddrFrom4([4]byte{127, 0, 0, 1})
+	freshIP := netip.AddrFrom4([4]byte{127, 0, 0, 2})
+
+	if err := db.UpdateNode(stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateLastPongReceived(stale.ID(), staleIP, now.Add(-dbNodeExpiration-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateLastPongReceived(fresh.ID(), freshIP, now); err != nil {
+		t.Fatal(err)
+	}
+
+	db.expireNodes()
+
+	if db.Node(stale.ID()) != nil {
+		t.Error("stale node should be removed")
+	}
+	if pong := db.LastPongReceived(fresh.ID(), freshIP); !pong.Equal(now.Truncate(time.Second)) {
+		t.Errorf("fresh pong time should be kept, got %v", pong)
+	}
+}
+
+// An unbonded node only ever has a ping row, so without a pong it must still expire.
+func TestDBExpiresNodeWithOnlyAPingRow(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	ip := netip.AddrFrom4([4]byte{127, 0, 0, 1})
+	now := time.Now()
+	stale, fresh := ID{1}, ID{2}
+	require.NoError(t, db.UpdateLastPingReceived(stale, ip, now.Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(fresh, ip, now))
+
+	db.expireNodes()
+
+	require.Zero(t, db.LastPingReceived(stale, ip).Unix(), "the stale ping row is deleted")
+	require.Equal(t, now.Unix(), db.LastPingReceived(fresh, ip).Unix())
+}
+
+func TestDBExpiredPongDecidesOverFreshPing(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	id := ID{1}
+	ponged, pinged := netip.AddrFrom4([4]byte{127, 0, 0, 1}), netip.AddrFrom4([4]byte{127, 0, 0, 2})
+	require.NoError(t, db.UpdateLastPongReceived(id, ponged, time.Now().Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(id, pinged, time.Now()))
+
+	db.expireNodes()
+
+	require.Zero(t, db.LastPongReceived(id, ponged).Unix())
+	require.Zero(t, db.LastPingReceived(id, pinged).Unix(), "a pong row decides the expiry, not a newer ping")
+}
+
+func TestDBExpiresStalePingRowOfALiveNode(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	id, oldIP, newIP := ID{1}, netip.AddrFrom4([4]byte{127, 0, 0, 1}), netip.AddrFrom4([4]byte{127, 0, 0, 2})
+	now := time.Now()
+	require.NoError(t, db.UpdateLastPingReceived(id, oldIP, now.Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(id, newIP, now))
+
+	db.expireNodes()
+
+	require.Zero(t, db.LastPingReceived(id, oldIP).Unix(), "a source IP that stopped pinging must not stay")
+	require.Equal(t, now.Unix(), db.LastPingReceived(id, newIP).Unix())
+}
+
+func TestDBExpiresNodeRecordByItsPing(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	seeds := makeDBExpirationNodes()
+	stale, fresh := seeds[0].node, seeds[1].node
+	require.NoError(t, db.UpdateNode(stale))
+	require.NoError(t, db.UpdateNode(fresh))
+	require.NoError(t, db.UpdateLastPingReceived(stale.ID(), stale.IPAddr(), time.Now().Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(fresh.ID(), fresh.IPAddr(), time.Now()))
+
+	db.expireNodes()
+
+	require.Nil(t, db.Node(stale.ID()), "a node whose only proof is a stale ping must be deleted")
+	require.NotNil(t, db.Node(fresh.ID()))
 }

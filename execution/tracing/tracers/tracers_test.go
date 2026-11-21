@@ -33,9 +33,9 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/tests/mock"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -56,7 +56,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err %v", err)
 	}
-	signer := types.LatestSignerForChainID(big.NewInt(1))
+	signer := types.LatestSignerForChainID(uint256.NewInt(1))
 	txn, err := types.SignTx(unsignedTx, *signer, privateKeyECDSA)
 	if err != nil {
 		t.Fatalf("err %v", err)
@@ -77,11 +77,11 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: protocol.CanTransfer,
-		Transfer:    rules.Transfer,
+		Transfer:    misc.Transfer,
 		Coinbase:    accounts.ZeroAddress,
 		BlockNumber: 8000000,
 		Time:        5,
-		Difficulty:  big.NewInt(0x30000),
+		Difficulty:  *uint256.NewInt(0x30000),
 		GasLimit:    uint64(6000000),
 		BaseFee:     uint256.Int{},
 		BlobBaseFee: *uint256.NewInt(50000),
@@ -101,12 +101,12 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Balance: big.NewInt(500000000000000),
 	}
 
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	rules := context.Rules(chain.AllProtocolChanges)
-	statedb, _ := testutil.MakePreState(rules, tx, alloc, context.BlockNumber)
+	statedb, _ := testutil.MakePreState(rules, m.DB, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
 	tracer, err := tracers.New("prestateTracer", new(tracers.Context), json.RawMessage("{}"))
@@ -121,12 +121,12 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 
 	tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
-	st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas()))
-	exeRes, err := st.TransitionDb(false, false)
+	st := protocol.NewTxnExecutor(evm, msg, new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas()))
+	exeRes, err := st.Execute(false, false)
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: exeRes.GasUsed}, nil)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: exeRes.ReceiptGasUsed}, exeRes.TxnGasUsage, nil)
 	// Retrieve the trace result and compare against the etalon
 	res, err := tracer.GetResult()
 	if err != nil {
@@ -138,5 +138,25 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 	if _, has := ret["0x60f3f640a8508fc6a86d45df051962668e1e8ac7"]; has {
 		t.Fatalf("Expected NOT present 0x60f3f640a8508fc6a86d45df051962668e1e8ac7 in result because empty")
+	}
+}
+
+// A js tracer that is rejected must show why, instead of a bare "tracer not found".
+func TestNewReportsJSTracerError(t *testing.T) {
+	cases := []struct {
+		name, code, want string
+	}{
+		{"null", "null", "Cannot convert undefined or null to object"},
+		{"throwing getter", "{get result() { throw 1 }, fault: function() {}}", "1 at result"},
+		{"typo in native name", "callTracr", "ReferenceError: callTracr is not defined"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr, err := tracers.New(tc.code, &tracers.Context{}, json.RawMessage("{}"))
+			require.Nil(t, tr)
+			require.Error(t, err)
+			require.ErrorContains(t, err, "tracer not found")
+			require.ErrorContains(t, err, tc.want)
+		})
 	}
 }

@@ -17,26 +17,21 @@
 package gaspricecfg
 
 import (
-	"math/big"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 )
 
-var DefaultIgnorePrice = big.NewInt(2 * common.Wei)
+var DefaultIgnorePrice = uint256.NewInt(2 * common.Wei)
 
-// BorDefaultGpoIgnorePrice defines the minimum gas price below which bor gpo will ignore transactions.
-var BorDefaultGpoIgnorePrice = big.NewInt(25 * common.Wei)
-
-var (
-	DefaultMaxPrice = big.NewInt(500 * common.GWei)
-)
+var DefaultMaxPrice = uint256.NewInt(500 * common.GWei)
 
 type Config struct {
 	Blocks           int
 	Percentile       int
 	MaxHeaderHistory int
 	MaxBlockHistory  int
-	Default          *big.Int `toml:",omitempty"`
-	MaxPrice         *big.Int `toml:",omitempty"`
-	IgnorePrice      *big.Int `toml:",omitempty"`
+	Default          *uint256.Int `toml:",omitempty"`
+	MaxPrice         *uint256.Int `toml:",omitempty"`
+	IgnorePrice      *uint256.Int `toml:",omitempty"`
 }

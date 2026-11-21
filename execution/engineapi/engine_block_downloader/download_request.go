@@ -18,7 +18,7 @@ type BackwardDownloadRequest struct {
 func (r BackwardDownloadRequest) LogArgs() []any {
 	args := []any{"hash", r.MissingHash, "trigger", r.Trigger}
 	if r.ValidateChainTip != nil {
-		args = append(args, "chainTipNum", r.ValidateChainTip.Number().Uint64(), "chainTipHash", r.ValidateChainTip.Hash())
+		args = append(args, "chainTipNum", r.ValidateChainTip.NumberU64(), "chainTipHash", r.ValidateChainTip.Hash())
 	}
 	return args
 }

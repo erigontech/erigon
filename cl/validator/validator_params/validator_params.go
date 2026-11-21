@@ -18,12 +18,15 @@ package validator_params
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
 )
 
 type ValidatorParams struct {
-	feeRecipients sync.Map
+	feeRecipients      sync.Map
+	attachedValidators sync.Map
+	generation         atomic.Uint64
 }
 
 func NewValidatorParams() *ValidatorParams {
@@ -31,7 +34,23 @@ func NewValidatorParams() *ValidatorParams {
 }
 
 func (vp *ValidatorParams) SetFeeRecipient(validatorIndex uint64, feeRecipient common.Address) {
-	vp.feeRecipients.Store(validatorIndex, feeRecipient)
+	// Validator clients re-register unchanged on a schedule, so only a real change counts: a
+	// generation that moved on every call would be useless to anyone caching a lookup.
+	if previous, loaded := vp.feeRecipients.Swap(validatorIndex, feeRecipient); !loaded || previous.(common.Address) != feeRecipient {
+		vp.generation.Add(1)
+	}
+	vp.AddAttachedValidator(validatorIndex)
+}
+
+func (vp *ValidatorParams) AddAttachedValidator(validatorIndex uint64) {
+	vp.attachedValidators.Store(validatorIndex, struct{}{})
+}
+
+// Generation changes whenever a registration is added or its fee recipient changes, and is zero
+// until the first one arrives. A consumer caching a lookup can compare it to find out whether a
+// later registration could have changed the answer.
+func (vp *ValidatorParams) Generation() uint64 {
+	return vp.generation.Load()
 }
 
 func (vp *ValidatorParams) GetFeeRecipient(validatorIndex uint64) (common.Address, bool) {
@@ -42,9 +61,14 @@ func (vp *ValidatorParams) GetFeeRecipient(validatorIndex uint64) (common.Addres
 	return val.(common.Address), true
 }
 
+func (vp *ValidatorParams) HasAttachedValidator(validatorIndex uint64) bool {
+	_, ok := vp.attachedValidators.Load(validatorIndex)
+	return ok
+}
+
 func (vp *ValidatorParams) GetValidators() []uint64 {
 	validators := []uint64{}
-	vp.feeRecipients.Range(func(key, value any) bool {
+	vp.attachedValidators.Range(func(key, value any) bool {
 		validators = append(validators, key.(uint64))
 		return true
 	})

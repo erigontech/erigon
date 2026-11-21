@@ -21,7 +21,6 @@ package protocol
 
 import (
 	"fmt"
-	"math/big"
 	"sync"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -40,33 +39,22 @@ import (
 
 // NewEVMBlockContext creates a new context for use in the EVM.
 func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (common.Hash, error),
-	engine rules.EngineReader, author accounts.Address, config *chain.Config) evmtypes.BlockContext {
+	engine rules.EngineReader, author accounts.Address, config *chain.Config,
+) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary accounts.Address
 	if author.IsNil() {
-		if config.Bor != nil && config.Bor.IsRio(header.Number.Uint64()) {
-			beneficiary = config.Bor.CalculateCoinbase(header.Number.Uint64())
-
-			// In case the coinbase is not set post Rio, use the default coinbase
-			if beneficiary.IsNil() {
-				beneficiary, _ = engine.Author(header)
-			}
-		} else {
-			beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
-		}
+		beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
 	} else {
 		beneficiary = author
 	}
 	var baseFee uint256.Int
 	if header.BaseFee != nil {
-		overflow := baseFee.SetFromBig(header.BaseFee)
-		if overflow {
-			panic("header.BaseFee higher than 2^256-1")
-		}
+		baseFee.Set(header.BaseFee)
 	}
 
 	var prevRandDao *common.Hash
-	if header.Difficulty != nil && header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
+	if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
 		// EIP-4399. We use ProofOfStakeDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
 		prevRandDao = new(common.Hash)
 		*prevRandDao = header.MixDigest
@@ -87,9 +75,14 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		transferFunc = engine.GetTransferFunc()
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
-		transferFunc = rules.Transfer
-		postApplyMessageFunc = nil
+		transferFunc = misc.Transfer
 	}
+
+	var slotNumber uint64
+	if header.SlotNumber != nil {
+		slotNumber = *header.SlotNumber
+	}
+
 	blockContext := evmtypes.BlockContext{
 		CanTransfer:      CanTransfer,
 		Transfer:         transferFunc,
@@ -98,13 +91,12 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		Coinbase:         beneficiary,
 		BlockNumber:      header.Number.Uint64(),
 		Time:             header.Time,
+		Difficulty:       header.Difficulty,
 		BaseFee:          baseFee,
 		GasLimit:         header.GasLimit,
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
-	}
-	if header.Difficulty != nil {
-		blockContext.Difficulty = new(big.Int).Set(header.Difficulty)
+		SlotNumber:       slotNumber,
 	}
 	return blockContext
 }
@@ -120,7 +112,8 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
 func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) (*types.Header, error)) func(n uint64) (common.Hash, error) {
-	refNumber := ref.Number.Uint64() - 1
+	blockNumber := ref.Number.Uint64()
+	refNumber := blockNumber - 1
 	refHash := ref.ParentHash
 	lastKnownNumber := refNumber
 	lastKnownHash := refHash
@@ -131,6 +124,9 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 	hashLookupCache.Add(refNumber, refHash)
 
 	return func(n uint64) (common.Hash, error) {
+		if n >= blockNumber {
+			return common.Hash{}, nil
+		}
 		hashLookupCacheLock.Lock()
 		defer hashLookupCacheLock.Unlock()
 
@@ -150,9 +146,6 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 		}
 
 		if n > lastKnownNumber {
-			if n > refNumber {
-				return common.Hash{}, fmt.Errorf("block number out of range: max=%d", refNumber)
-			}
 			lastKnownNumber = refNumber
 			lastKnownHash = refHash
 		}
@@ -166,25 +159,27 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 				}
 
 				lastKnownHash = hash
-				lastKnownNumber = lastKnownNumber - 1
+				lastKnownNumber--
 				if n == lastKnownNumber {
 					//fmt.Println("GH-CA1", lastKnownNumber, lastKnownHash)
 					return lastKnownHash, nil
 				}
 			}
 
+			hash, num := lastKnownHash, lastKnownNumber
 			header, err := func() (*types.Header, error) {
-				hash, num := lastKnownHash, lastKnownNumber
 				hashLookupCacheLock.Unlock()
 				defer hashLookupCacheLock.Lock()
 				return getHeader(hash, num)
 			}()
-
 			if err != nil {
 				return common.Hash{}, err
 			}
 			if header == nil {
-				break
+				return common.Hash{}, fmt.Errorf("header %d %x not found", num, hash)
+			}
+			if header.Number.Uint64() != num {
+				return common.Hash{}, fmt.Errorf("header %x has number %d, want %d", hash, header.Number.Uint64(), num)
 			}
 			lastKnownHash = header.ParentHash
 			lastKnownNumber = header.Number.Uint64() - 1
@@ -195,8 +190,6 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 				return lastKnownHash, nil
 			}
 		}
-
-		return common.Hash{}, nil
 	}
 }
 
@@ -206,10 +199,11 @@ func CanTransfer(db evmtypes.IntraBlockState, addr accounts.Address, amount uint
 	balance, err := db.GetBalance(addr)
 
 	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr.Handle()) {
+		amount := amount   // avoid capture allocation unless we're tracing
 		balance := balance // avoid capture allocation unless we're tracing
 		defer func() {
 			if !can {
-				fmt.Printf("%d (%d.%d) Can't transfer %d from %x: %d\n", db.BlockNumber(), db.TxIndex(), db.Incarnation(), amount, addr, &balance)
+				fmt.Printf("%d (%d.%d) Can't transfer %s from %x: %s\n", db.BlockNumber(), db.TxIndex(), db.Incarnation(), amount.String(), addr, balance.String())
 			}
 		}()
 	}

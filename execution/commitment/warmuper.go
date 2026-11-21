@@ -19,7 +19,9 @@ package commitment
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,13 +29,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// TrieContextFactory creates new PatriciaContext instances for parallel warmup.
-type TrieContextFactory func() (PatriciaContext, func())
+type TrieContextFactory func(ctx context.Context) (PatriciaContext, func())
 
-// WarmupConfig contains configuration for pre-warming MDBX page cache
-// during commitment processing.
 type WarmupConfig struct {
 	Enabled    bool
 	CtxFactory TrieContextFactory
@@ -42,15 +42,13 @@ type WarmupConfig struct {
 	LogPrefix  string
 }
 
-const WarmupMaxDepth = 128 // covers full key paths for both account keys (64 nibbles) and storage keys (128 nibbles)
+const WarmupMaxDepth = 128
 
-// WarmupStats contains statistics about the warmup phase.
 type WarmupStats struct {
 	KeysProcessed uint64
 	Duration      time.Duration
 }
 
-// Warmuper manages parallel warmup of MDBX page cache by pre-reading trie data.
 type Warmuper struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -59,16 +57,16 @@ type Warmuper struct {
 	numWorkers int
 	logPrefix  string
 
-	// Work channel for incoming keys
 	work chan warmupWorkItem
-	// Worker group
-	g *errgroup.Group
+	g    *errgroup.Group
 
-	// Stats
 	keysProcessed atomic.Uint64
 	startTime     time.Time
 
-	// State
+	outstanding [arenaRingSize]atomic.Int64
+	mu          sync.Mutex
+	cond        *sync.Cond
+
 	started atomic.Bool
 	closed  atomic.Bool
 }
@@ -76,12 +74,12 @@ type Warmuper struct {
 type warmupWorkItem struct {
 	hashedKey  []byte
 	startDepth int
+	gen        uint64
 }
 
-// NewWarmuper creates a new Warmuper instance.
 func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 	ctx, cancel := context.WithCancel(ctx)
-	return &Warmuper{
+	w := &Warmuper{
 		ctx:        ctx,
 		cancel:     cancel,
 		ctxFactory: cfg.CtxFactory,
@@ -89,57 +87,72 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 		numWorkers: cfg.NumWorkers,
 		logPrefix:  cfg.LogPrefix,
 	}
+	w.cond = sync.NewCond(&w.mu)
+	return w
 }
 
-// Start initializes and starts the warmup workers.
 func (w *Warmuper) Start() {
 	if w.started.Swap(true) {
-		return // Already started
+		return
 	}
 	if w.numWorkers <= 0 {
 		return
 	}
 
-	w.startTime = time.Now()
-	w.work = make(chan warmupWorkItem, 50_000)
+	w.work = make(chan warmupWorkItem, w.numWorkers*64)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
 
 	for i := 0; i < w.numWorkers; i++ {
 		w.g.Go(func() error {
-			trieCtx, cleanup := w.ctxFactory()
+			trieCtx, cleanup := w.ctxFactory(w.ctx)
 			if cleanup != nil {
 				defer cleanup()
 			}
+			if trieCtx == nil {
+				if err := w.ctx.Err(); err != nil {
+					return err
+				}
+				return errors.New("warmup trie context factory returned nil PatriciaContext")
+			}
 
-			for item := range w.work {
+			for {
 				select {
 				case <-w.ctx.Done():
 					return w.ctx.Err()
-				default:
+				case item, ok := <-w.work:
+					if !ok {
+						return nil
+					}
+					w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
+					w.keysProcessed.Add(1)
+					w.releaseGen(item.gen)
 				}
-
-				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
-				w.keysProcessed.Add(1)
 			}
-			return nil
 		})
 	}
+
+	// Wake WaitBufferFree on shutdown to avoid hanging on undrained items.
+	w.g.Go(func() error {
+		<-w.ctx.Done()
+		w.mu.Lock()
+		w.cond.Broadcast()
+		w.mu.Unlock()
+		return nil
+	})
 }
 
-// warmupKey performs the actual warmup for a single key by reading data to warm MDBX page cache.
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
+	var compactBuf [maxCompactKeyLen]byte
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
-		prefix := HexNibblesToCompactBytes(hashedKey[:depth])
+		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
 
-		// Read branch data to warm the MDBX page cache
 		branchData, _, err := trieCtx.Branch(prefix)
 		if err != nil {
 			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 				"prefix", common.Bytes2Hex(prefix), "error", err)
 		}
 
-		// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
 		if len(branchData) < 4 {
 			break
 		}
@@ -148,23 +161,6 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 			break
 		}
 		nextNibble := int(hashedKey[depth])
-
-		// Extract and prefetch account/storage addresses to warm page cache
-		cellAccounts, cellStorages := extractBranchCellAddresses(branchData, nextNibble)
-		for _, addr := range cellAccounts {
-			_, err := trieCtx.Account(addr)
-			if err != nil {
-				log.Debug(fmt.Sprintf("[%s][warmup] failed to get account", w.logPrefix),
-					"addr", common.Bytes2Hex(addr), "error", err)
-			}
-		}
-		for _, addr := range cellStorages {
-			_, err := trieCtx.Storage(addr)
-			if err != nil {
-				log.Debug(fmt.Sprintf("[%s][warmup] failed to get storage", w.logPrefix),
-					"addr", common.Bytes2Hex(addr), "error", err)
-			}
-		}
 
 		branchData = branchData[2:] // skip touch map
 
@@ -175,9 +171,8 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 			break
 		}
 
-		// Find position of our child's data
 		pos := 2
-		for n := 0; n < nextNibble; n++ {
+		for n := range nextNibble {
 			if bitmap&(uint16(1)<<n) != 0 {
 				if pos >= len(branchData) {
 					break
@@ -195,53 +190,62 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		fieldBits := branchData[pos]
 		pos++
 
-		// Check if child has extension
-		hasExtension := (fieldBits & 1) != 0
-		if hasExtension && pos < len(branchData) {
-			extLen, n := binary.Uvarint(branchData[pos:])
-			if n > 0 && extLen > 0 {
-				depth += int(extLen)
-				continue
+		fields := cellFields(fieldBits)
+		extLen := 0
+		if fields&fieldExtension != 0 {
+			if l, n := binary.Uvarint(branchData[pos:]); n > 0 {
+				extLen = int(l)
 			}
 		}
-
-		depth++
+		switch {
+		case fields&(fieldAccountAddr|fieldStorageAddr|fieldHash) == fieldAccountAddr|fieldHash && depth < 64 && len(hashedKey) > 64:
+			depth = 64 + extLen
+		case fields&(fieldAccountAddr|fieldStorageAddr) != 0:
+			return
+		default:
+			depth += 1 + extLen
+		}
 	}
 }
 
-// WarmKey submits a hashed key for warming. Call Start() first.
-// startDepth indicates the depth from which to start warming (based on divergence from previous key).
-func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
+func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int, gen uint64) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return
 	}
+	w.outstanding[gen%arenaRingSize].Add(1)
 	select {
-	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
+	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth, gen: gen}:
 	case <-w.ctx.Done():
+		w.releaseGen(gen)
 	}
 }
 
-// Wait waits for all warmup work to complete.
-func (w *Warmuper) Wait() error {
-	if !w.started.Load() || w.numWorkers <= 0 {
+func (w *Warmuper) releaseGen(gen uint64) {
+	if w.outstanding[gen%arenaRingSize].Add(-1) == 0 {
+		w.mu.Lock()
+		w.cond.Broadcast()
+		w.mu.Unlock()
+	}
+}
+
+func (w *Warmuper) WaitBufferFree(slot int) error {
+	if slot < 0 || slot >= arenaRingSize {
+		return fmt.Errorf("invalid arena slot %d", slot)
+	}
+	if w.outstanding[slot].Load() == 0 {
 		return nil
 	}
-
-	// Only close the channel once
-	close(w.work)
-	err := w.g.Wait()
-
-	log.Debug(fmt.Sprintf("[%s][warmup] completed", w.logPrefix),
-		"keys", common.PrettyCounter(int(w.keysProcessed.Load())),
-		"maxDepth", w.maxDepth,
-		"workers", w.numWorkers,
-		"spent", time.Since(w.startTime),
-	)
-
-	return err
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for w.outstanding[slot].Load() != 0 {
+		if err := w.ctx.Err(); err != nil {
+			return err
+		}
+		w.cond.Wait()
+	}
+	return nil
 }
 
-// Stats returns statistics about the warmup.
 func (w *Warmuper) Stats() WarmupStats {
 	duration := time.Duration(0)
 	if !w.startTime.IsZero() {
@@ -253,32 +257,32 @@ func (w *Warmuper) Stats() WarmupStats {
 	}
 }
 
-// DrainPending drains all pending work items from the work channel without processing them.
 func (w *Warmuper) DrainPending() {
 	if !w.started.Load() || w.numWorkers <= 0 {
 		return
 	}
 	for {
 		select {
-		case <-w.work:
+		case item := <-w.work:
+			w.releaseGen(item.gen)
 		default:
 			return
 		}
 	}
 }
 
-// WaitAndClose waits for all warmup work to complete and then closes the warmuper.
-func (w *Warmuper) WaitAndClose() error {
-	err := w.Wait()
+func (w *Warmuper) CloseAndWait() {
 	w.Close()
-	return err
+	if w.g != nil {
+		_ = w.g.Wait()
+	}
 }
 
-// Close cancels all warmup work and releases resources.
 func (w *Warmuper) Close() {
 	if w.closed.Swap(true) {
-		return // Already closed
+		return
 	}
+	// w.work is never closed: that would race a concurrent WarmKey send into a
+	// panic and make DrainPending spin. ctx cancellation is the sole shutdown signal.
 	w.cancel()
-	close(w.work)
 }

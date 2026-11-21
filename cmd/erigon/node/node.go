@@ -26,7 +26,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -45,27 +45,24 @@ import (
 // ErigonNode represents a single node, that runs sync and p2p network.
 // it also can export the private endpoint for RPC daemon, etc.
 type ErigonNode struct {
+	ctx     context.Context
 	stack   *node.Node
 	backend *eth.Ethereum
 }
 
-// Serve runs the node and blocks the execution. It returns when the node is existed.
+// Serve runs the node and blocks until it is closed; the end of ctx, which a shutdown signal brings, closes it.
 func (eri *ErigonNode) Serve() error {
 	defer eri.Close()
 
 	eri.run()
+	// Only after Start: closing a node that has not started skips its lifecycles' Stop, and the backend already started
+	// work when it was created.
+	stop := context.AfterFunc(eri.ctx, eri.Close)
+	defer stop()
 
 	eri.stack.Wait()
 
 	return nil
-}
-
-func (eri *ErigonNode) Backend() *eth.Ethereum {
-	return eri.backend
-}
-
-func (eri *ErigonNode) Node() *node.Node {
-	return eri.stack
 }
 
 func (eri *ErigonNode) Close() {
@@ -88,7 +85,7 @@ type Params struct {
 	CustomBuckets kv.TableCfg
 }
 
-func NewNodConfigUrfave(ctx *cli.Context, debugMux *http.ServeMux, logger log.Logger) (*nodecfg.Config, error) {
+func NewNodConfigUrfave(ctx *cli.Command, debugMux *http.ServeMux, logger log.Logger) (*nodecfg.Config, error) {
 	// If we're running a known preset, log it for convenience.
 	chain := ctx.String(utils.ChainFlag.Name)
 	switch chain {
@@ -98,14 +95,6 @@ func NewNodConfigUrfave(ctx *cli.Context, debugMux *http.ServeMux, logger log.Lo
 		logger.Info("Starting Erigon on Hoodi testnet...")
 	case networkname.Dev:
 		logger.Info("Starting Erigon in ephemeral dev mode...")
-	case networkname.Mumbai:
-		logger.Info("Starting Erigon on Mumbai testnet...")
-	case networkname.Amoy:
-		logger.Info("Starting Erigon on Amoy testnet...")
-	case networkname.BorMainnet:
-		logger.Info("Starting Erigon on Bor Mainnet...")
-	case networkname.BorDevnet:
-		logger.Info("Starting Erigon on Bor Devnet...")
 	case networkname.Gnosis:
 		logger.Info("Starting Erigon on Gnosis Mainnet...")
 	case networkname.Chiado:
@@ -119,7 +108,8 @@ func NewNodConfigUrfave(ctx *cli.Context, debugMux *http.ServeMux, logger log.Lo
 	}
 
 	nodeConfig := NewNodeConfig(debugMux)
-	if err := utils.SetNodeConfig(ctx, nodeConfig, logger); err != nil {
+	err := utils.SetNodeConfig(ctx, nodeConfig, logger)
+	if err != nil {
 		return nil, err
 	}
 	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig, logger)
@@ -131,18 +121,13 @@ func NewNodConfigUrfave(ctx *cli.Context, debugMux *http.ServeMux, logger log.Lo
 	return nodeConfig, nil
 }
 
-func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
+func NewEthConfigUrfave(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
 	ethConfig := ethconfig.Defaults // Needs to be a copy, not pointer
-	utils.SetEthConfig(ctx, nodeConfig, &ethConfig, logger)
-	erigoncli.ApplyFlagsForEthConfig(ctx, &ethConfig, logger)
-
+	erigoncli.BuildEthConfig(nodeCtx, ctx, nodeConfig, &ethConfig, logger)
 	return &ethConfig
 }
 
 // New creates a new `ErigonNode`.
-// * ctx - `*cli.Context` from the main function. Necessary to be able to configure the node based on the command-line flags
-// * sync - `stagedsync.StagedSync`, an instance of staged sync, setup just as needed.
-// * optionalParams - additional parameters for running a node.
 func New(
 	ctx context.Context,
 	nodeConfig *nodecfg.Config,
@@ -160,11 +145,11 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	err = ethereum.Init(node, ethConfig, ethereum.ChainConfig())
+	err = ethereum.Init(node, ethConfig)
 	if err != nil {
 		return nil, err
 	}
-	return &ErigonNode{stack: node, backend: ethereum}, nil
+	return &ErigonNode{ctx: ctx, stack: node, backend: ethereum}, nil
 }
 
 func NewNodeConfig(debugMux *http.ServeMux) *nodecfg.Config {

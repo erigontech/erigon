@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"reflect"
 	"testing"
 	"testing/quick"
 )
@@ -44,9 +43,9 @@ func TestCountValues(t *testing.T) {
 		{"820101 820202 8403030303 04", 4, nil},
 
 		// size errors
-		{"8142", 0, ErrCanonSize},
-		{"01 01 8142", 0, ErrCanonSize},
-		{"02 84020202", 0, ErrValueTooLarge},
+		{"8142", 1, ErrCanonSize},
+		{"01 01 8142", 3, ErrCanonSize},
+		{"02 84020202", 2, ErrValueTooLarge},
 
 		{
 			input: "A12000BF49F440A1CD0527E4D06E2765654C0F56452257516D793A9B8D604DCFDF2AB853F851808D10000000000000000000000000A056E81F171BCC55A6FF8345E692C0F86E5B48E01B996CADC001622FB5E363B421A0C5D2460186F7233C927E7DB2DCC703C0E500B653CA82273B7BFAD8045D85A470",
@@ -58,21 +57,41 @@ func TestCountValues(t *testing.T) {
 		if count != test.count {
 			t.Errorf("test %d: count mismatch, got %d want %d\ninput: %s", i, count, test.count, test.input)
 		}
-		if !reflect.DeepEqual(err, test.err) {
+		if !errors.Is(err, test.err) {
 			t.Errorf("test %d: err mismatch, got %q want %q\ninput: %s", i, err, test.err, test.input)
 		}
 	}
 }
 
-func TestSplitTypes(t *testing.T) {
-	if _, _, err := SplitString(unhex("C100")); !errors.Is(err, ErrExpectedString) {
-		t.Errorf("SplitString returned %q, want %q", err, ErrExpectedString)
+func TestSplitString(t *testing.T) {
+	for i, test := range []string{
+		"C0",
+		"C100",
+		"C3010203",
+		"C88363617483646F67",
+		"F8384C6F72656D20697073756D20646F6C6F722073697420616D65742C20636F6E7365637465747572206164697069736963696E6720656C6974",
+	} {
+		if _, _, err := SplitString(unhex(test)); !errors.Is(err, ErrExpectedString) {
+			t.Errorf("test %d: error mismatch: have %q, want %q", i, err, ErrExpectedString)
+		}
 	}
-	if _, _, err := SplitList(unhex("01")); !errors.Is(err, ErrExpectedList) {
-		t.Errorf("SplitString returned %q, want %q", err, ErrExpectedList)
-	}
-	if _, _, err := SplitList(unhex("81FF")); !errors.Is(err, ErrExpectedList) {
-		t.Errorf("SplitString returned %q, want %q", err, ErrExpectedList)
+}
+
+func TestSplitList(t *testing.T) {
+	for i, test := range []string{
+		"80",
+		"00",
+		"01",
+		"8180",
+		"81FF",
+		"820400",
+		"83636174",
+		"83646F67",
+		"B8384C6F72656D20697073756D20646F6C6F722073697420616D65742C20636F6E7365637465747572206164697069736963696E6720656C6974",
+	} {
+		if _, _, err := SplitList(unhex(test)); !errors.Is(err, ErrExpectedList) {
+			t.Errorf("test %d: error mismatch: have %q, want %q", i, err, ErrExpectedList)
+		}
 	}
 }
 
@@ -268,10 +287,10 @@ func TestAppendUint64(t *testing.T) {
 			t.Errorf("AppendUint64(%v, %d): got %x, want %s", test.slice, test.input, x, test.output)
 		}
 
-		// Check that IntSize returns the appended size.
+		// Check that U64Len returns the appended size.
 		length := len(x) - len(test.slice)
-		if s := IntSize(test.input); s != length {
-			t.Errorf("IntSize(%d): got %d, want %d", test.input, s, length)
+		if s := U64Len(test.input); s != length {
+			t.Errorf("U64Len(%d): got %d, want %d", test.input, s, length)
 		}
 	}
 }
@@ -285,5 +304,34 @@ func TestAppendUint64Random(t *testing.T) {
 	config := quick.Config{MaxCountScale: 50}
 	if err := quick.Check(fn, &config); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStringLen(t *testing.T) {
+	tests := []struct {
+		v   []byte
+		len int
+	}{
+		{v: []byte{}, len: 1},
+		{v: []byte{0x1}, len: 1},
+		{v: []byte{0x7E}, len: 1},
+		{v: []byte{0x7F}, len: 1},
+		{v: []byte{0x80}, len: 2},
+		{v: []byte{0xFF}, len: 2},
+		{v: []byte{0xFF, 0xF0}, len: 3},
+		{v: make([]byte, 55), len: 56},
+		{v: make([]byte, 56), len: 58},
+	}
+
+	for _, test := range tests {
+		s := StringLen(test.v)
+		if s != test.len {
+			t.Errorf("StringLen(%#x) -> %d, want %d", test.v, s, test.len)
+		}
+		// Sanity check:
+		enc, _ := EncodeToBytes(test.v)
+		if len(enc) != test.len {
+			t.Errorf("len(EncodeToBytes(%#x)) -> %d, test says %d", test.v, len(enc), test.len)
+		}
 	}
 }

@@ -17,42 +17,14 @@
 package stagedsync
 
 import (
-	"context"
 	"fmt"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
-type BlockHashesCfg struct {
-	db     kv.RwDB
-	tmpDir string
-	cc     *chain.Config
-
-	headerWriter *blockio.BlockWriter
-}
-
-func StageBlockHashesCfg(db kv.RwDB, tmpDir string, cc *chain.Config, headerWriter *blockio.BlockWriter) BlockHashesCfg {
-	return BlockHashesCfg{
-		db:           db,
-		tmpDir:       tmpDir,
-		cc:           cc,
-		headerWriter: headerWriter,
-	}
-}
-
-func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context, logger log.Logger) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
+// SpawnBlockHashStage only advances progress: rawdb.WriteHeader indexes each header's hash as it is written.
+func SpawnBlockHashStage(s *StageState, tx kv.RwTx) error {
 	headNumber, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return fmt.Errorf("getting headers progress: %w", err)
@@ -60,40 +32,9 @@ func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx cont
 	if s.BlockNumber == headNumber {
 		return nil
 	}
-
-	// etl.Tranform uses ExractEndKey as exclusive bound, therefore +1
-	if err := cfg.headerWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, cfg.tmpDir, s.BlockNumber, headNumber+1, ctx, logger); err != nil {
-		return err
-	}
-
-	if err = s.Update(tx, headNumber); err != nil {
-		return err
-	}
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.Update(tx, headNumber)
 }
 
-func UnwindBlockHashStage(u *UnwindState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
-	if err = u.Done(tx); err != nil {
-		return fmt.Errorf(" reset: %w", err)
-	}
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("failed to write db commit: %w", err)
-		}
-	}
-	return nil
+func UnwindBlockHashStage(u *UnwindState, tx kv.RwTx) error {
+	return u.Done(tx)
 }

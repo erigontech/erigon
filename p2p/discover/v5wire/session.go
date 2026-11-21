@@ -23,11 +23,11 @@ import (
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"encoding/binary"
+	"net/netip"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2/simplelru"
-
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/lru"
 	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/p2p/enode"
 )
@@ -37,8 +37,9 @@ const handshakeTimeout = time.Second
 // The SessionCache keeps negotiated encryption keys and
 // state for in-progress handshakes in the Discovery v5 wire protocol.
 type SessionCache struct {
-	sessions   *simplelru.LRU[sessionID, *session]
+	sessions   lru.BasicLRU[sessionID, *session]
 	handshakes map[sessionID]*Whoareyou
+	sent       []sentHandshake // handshakes in the order they were sent, for GC
 	clock      mclock.Clock
 
 	// hooks for overriding randomness.
@@ -50,7 +51,13 @@ type SessionCache struct {
 // sessionID identifies a session or handshake.
 type sessionID struct {
 	id   enode.ID
-	addr string
+	addr netip.AddrPort
+}
+
+// sentHandshake is an entry of the handshake send order.
+type sentHandshake struct {
+	key  sessionID
+	time mclock.AbsTime
 }
 
 // session contains session information
@@ -58,20 +65,17 @@ type session struct {
 	writeKey     []byte
 	readKey      []byte
 	nonceCounter uint32
+	node         *enode.Node
 }
 
 // keysFlipped returns a copy of s with the read and write keys flipped.
 func (s *session) keysFlipped() *session {
-	return &session{s.readKey, s.writeKey, s.nonceCounter}
+	return &session{s.readKey, s.writeKey, s.nonceCounter, s.node}
 }
 
 func NewSessionCache(maxItems int, clock mclock.Clock) *SessionCache {
-	cache, err := simplelru.NewLRU[sessionID, *session](maxItems, nil)
-	if err != nil {
-		panic("can't create session cache")
-	}
 	return &SessionCache{
-		sessions:        cache,
+		sessions:        lru.NewBasicLRU[sessionID, *session](maxItems),
 		handshakes:      make(map[sessionID]*Whoareyou),
 		clock:           clock,
 		nonceGen:        generateNonce,
@@ -98,49 +102,68 @@ func (sc *SessionCache) nextNonce(s *session) (Nonce, error) {
 }
 
 // session returns the current session for the given node, if any.
-func (sc *SessionCache) session(id enode.ID, addr string) *session {
-	item, ok := sc.sessions.Get(sessionID{id, addr})
-	if !ok {
-		return nil
-	}
+func (sc *SessionCache) session(id enode.ID, addr netip.AddrPort) *session {
+	item, _ := sc.sessions.Get(sessionID{id, addr})
 	return item
 }
 
 // readKey returns the current read key for the given node.
-func (sc *SessionCache) readKey(id enode.ID, addr string) []byte {
+func (sc *SessionCache) readKey(id enode.ID, addr netip.AddrPort) []byte {
 	if s := sc.session(id, addr); s != nil {
 		return s.readKey
 	}
 	return nil
 }
 
+func (sc *SessionCache) readNode(id enode.ID, addr netip.AddrPort) *enode.Node {
+	if s := sc.session(id, addr); s != nil {
+		return s.node
+	}
+	return nil
+}
+
 // storeNewSession stores new encryption keys in the cache.
-func (sc *SessionCache) storeNewSession(id enode.ID, addr string, s *session) {
+func (sc *SessionCache) storeNewSession(id enode.ID, addr netip.AddrPort, s *session, n *enode.Node) {
+	if n == nil {
+		panic("nil node in storeNewSession")
+	}
+	s.node = n
 	sc.sessions.Add(sessionID{id, addr}, s)
 }
 
 // getHandshake gets the handshake challenge we previously sent to the given remote node.
-func (sc *SessionCache) getHandshake(id enode.ID, addr string) *Whoareyou {
+func (sc *SessionCache) getHandshake(id enode.ID, addr netip.AddrPort) *Whoareyou {
 	return sc.handshakes[sessionID{id, addr}]
 }
 
 // storeSentHandshake stores the handshake challenge sent to the given remote node.
-func (sc *SessionCache) storeSentHandshake(id enode.ID, addr string, challenge *Whoareyou) {
+func (sc *SessionCache) storeSentHandshake(id enode.ID, addr netip.AddrPort, challenge *Whoareyou) {
+	key := sessionID{id, addr}
 	challenge.sent = sc.clock.Now()
-	sc.handshakes[sessionID{id, addr}] = challenge
+	sc.handshakes[key] = challenge
+	sc.sent = append(sc.sent, sentHandshake{key, challenge.sent})
 }
 
 // deleteHandshake deletes handshake data for the given node.
-func (sc *SessionCache) deleteHandshake(id enode.ID, addr string) {
+func (sc *SessionCache) deleteHandshake(id enode.ID, addr netip.AddrPort) {
 	delete(sc.handshakes, sessionID{id, addr})
 }
 
-// handshakeGC deletes timed-out handshakes.
+// handshakeGC deletes timed-out handshakes. Handshakes are visited in the order
+// they were sent (the clock is monotonic), so only the timed-out ones are visited.
 func (sc *SessionCache) handshakeGC() {
 	deadline := sc.clock.Now().Add(-handshakeTimeout)
-	for key, challenge := range sc.handshakes {
-		if challenge.sent < deadline {
-			delete(sc.handshakes, key)
+	n := 0
+	for ; n < len(sc.sent) && sc.sent[n].time < deadline; n++ {
+		e := sc.sent[n]
+		if c := sc.handshakes[e.key]; c != nil && c.sent == e.time {
+			delete(sc.handshakes, e.key)
 		}
+		sc.sent[n] = sentHandshake{}
+	}
+	if n == len(sc.sent) {
+		sc.sent = nil
+	} else {
+		sc.sent = sc.sent[n:]
 	}
 }

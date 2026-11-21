@@ -21,21 +21,27 @@
 package tracers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
-	"math/big"
+	"fmt"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // Context contains some contextual infos for a transaction execution that is not
 // available from within the EVM object.
 type Context struct {
-	BlockHash   common.Hash // Hash of the block the txn is contained within (zero if dangling txn or call)
-	TxIndex     int         // Index of the transaction within a block (zero if dangling txn or call)
-	TxHash      common.Hash // Hash of the transaction being traced (zero if dangling call)
-	BlockNumber *big.Int    // Number of the block (nil if dangling txn or call)
+	BlockHash   common.Hash  // Hash of the block the txn is contained within (zero if dangling txn or call)
+	TxIndex     int          // Index of the transaction within a block (zero if dangling txn or call)
+	TxHash      common.Hash  // Hash of the transaction being traced (zero if dangling call)
+	BlockNumber *uint256.Int // Number of the block (nil if dangling txn or call)
+
+	Ctx context.Context // Cancelled to stop a tracer constructor that runs client code (nil if it never stops)
 }
 
 // Tracer interface extends vm.EVMLogger and additionally
@@ -43,15 +49,16 @@ type Context struct {
 type Tracer struct {
 	*tracing.Hooks
 	GetResult func() (json.RawMessage, error)
+	// MarshalFastJSONTo, when set, streams what GetResult would return. On error it leaves the
+	// stream untouched, so the caller can take back the result field it opened.
+	MarshalFastJSONTo func(*jsonstream.Stream) error
 	// Stop terminates execution of the tracer at the first opportune moment.
 	Stop func(err error)
 }
 
 type lookupFunc func(string, *Context, json.RawMessage) (*Tracer, error)
 
-var (
-	lookups []lookupFunc
-)
+var lookups []lookupFunc
 
 // RegisterLookup registers a method as a lookup for tracers, meaning that
 // users can invoke a named tracer through that lookup. If 'wildcard' is true,
@@ -66,12 +73,20 @@ func RegisterLookup(wildcard bool, lookup lookupFunc) {
 }
 
 // New returns a new instance of a tracer, by iterating through the
-// registered lookups.
+// registered lookups. If none accepts the code, the error of the last one (the
+// wildcard js lookup) is attached to "tracer not found", so the caller can see
+// why a js tracer was rejected.
 func New(code string, ctx *Context, cfg json.RawMessage) (*Tracer, error) {
+	var lastErr error
 	for _, lookup := range lookups {
-		if tracer, err := lookup(code, ctx, cfg); err == nil {
+		tracer, err := lookup(code, ctx, cfg)
+		if err == nil {
 			return tracer, nil
 		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("tracer not found: %w", lastErr)
 	}
 	return nil, errors.New("tracer not found")
 }

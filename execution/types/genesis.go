@@ -22,10 +22,12 @@ package types
 import (
 	"bytes"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
+
+	"github.com/holiman/uint256"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -47,10 +49,10 @@ type Genesis struct {
 	Timestamp  uint64         `json:"timestamp"`
 	ExtraData  []byte         `json:"extraData"`
 	GasLimit   uint64         `json:"gasLimit"   gencodec:"required"`
-	Difficulty *big.Int       `json:"difficulty" gencodec:"required"`
+	Difficulty *uint256.Int   `json:"difficulty" gencodec:"required"`
 	Mixhash    common.Hash    `json:"mixHash"`
 	Coinbase   common.Address `json:"coinbase"`
-	Alloc      GenesisAlloc   `json:"alloc"      gencodec:"required"`
+	Alloc      GenesisAlloc   `json:"alloc"`
 
 	AuRaSeal *AuRaSeal `json:"seal"`
 
@@ -61,12 +63,13 @@ type Genesis struct {
 	ParentHash common.Hash `json:"parentHash"`
 
 	// Header fields added in London and later hard forks
-	BaseFee               *big.Int     `json:"baseFeePerGas"`         // EIP-1559
+	BaseFee               *uint256.Int `json:"baseFeePerGas"`         // EIP-1559
 	BlobGasUsed           *uint64      `json:"blobGasUsed"`           // EIP-4844
 	ExcessBlobGas         *uint64      `json:"excessBlobGas"`         // EIP-4844
 	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 	RequestsHash          *common.Hash `json:"requestsHash"`          // EIP-7685
 	BlockAccessListHash   *common.Hash `json:"blockAccessListHash"`   // EIP-7928
+	SlotNumber            *uint64      `json:"slotNumber"`            // EIP-7843
 }
 
 type AuRaSeal struct {
@@ -88,7 +91,7 @@ type GenesisAlloc map[common.Address]GenesisAccount
 
 func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 	m := make(map[common.UnprefixedAddress]GenesisAccount)
-	if err := json.Unmarshal(data, &m); err != nil {
+	if err := jsoniter.ConfigFastest.Unmarshal(data, &m); err != nil {
 		return err
 	}
 	*ga = make(GenesisAlloc)
@@ -101,12 +104,12 @@ func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 func DecodeGenesisAlloc(i any) (GenesisAlloc, error) {
 	var alloc GenesisAlloc
 
-	b, err := json.Marshal(i)
+	b, err := jsoniter.ConfigFastest.Marshal(i)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := json.Unmarshal(b, &alloc); err != nil {
+	if err := jsoniter.ConfigFastest.Unmarshal(b, &alloc); err != nil {
 		return nil, err
 	}
 
@@ -136,6 +139,7 @@ type genesisSpecMarshaling struct {
 	BaseFee       *math.HexOrDecimal256
 	BlobGasUsed   *math.HexOrDecimal64
 	ExcessBlobGas *math.HexOrDecimal64
+	SlotNumber    *math.HexOrDecimal64
 	Alloc         map[common.UnprefixedAddress]GenesisAccount
 }
 

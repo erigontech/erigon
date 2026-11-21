@@ -19,18 +19,20 @@ package state
 import (
 	"bytes"
 
-	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
 )
 
 // Algorithms for reconstituting the state from state history
 
 type ReconItem struct {
-	g          stream.KV
-	key, val   []byte
-	txNum      uint64
-	startTxNum uint64
-	endTxNum   uint64
+	g           *seg.Reader
+	key, val    []byte
+	txNum       uint64
+	startTxNum  uint64
+	endTxNum    uint64
+	histFileIdx int // index into HistoryRoTx.files; -1 if not found
+	// position of `key` in the .ef file, which addresses the .vi accessor
+	keyOrdinal uint64
 }
 
 type ReconHeap []*ReconItem
@@ -73,54 +75,4 @@ func (rh *ReconHeap) Pop() any {
 	old[n-1] = nil
 	*rh = old[0 : n-1]
 	return x
-}
-
-type ReconHeapOlderFirst struct {
-	ReconHeap
-}
-
-func (rh ReconHeapOlderFirst) Less(i, j int) bool {
-	c := bytes.Compare(rh.ReconHeap[i].key, rh.ReconHeap[j].key)
-	if c == 0 {
-		return rh.ReconHeap[i].txNum >= rh.ReconHeap[j].txNum
-	}
-	return c < 0
-}
-
-// SegReaderWrapper wraps seg.ReaderI to satisfy stream.KV interface
-type SegReaderWrapper struct {
-	reader seg.ReaderI
-}
-
-// NewSegReaderWrapper creates a new wrapper for seg.ReaderI to satisfy stream.KV interface
-func NewSegReaderWrapper(reader seg.ReaderI) stream.KV {
-	return &SegReaderWrapper{reader: reader}
-}
-
-// Next returns key and value by calling the underlying getter twice
-func (w *SegReaderWrapper) Next() ([]byte, []byte, error) {
-	if !w.reader.HasNext() {
-		return nil, nil, stream.ErrIteratorExhausted
-	}
-
-	// First call: get the key
-	key, _ := w.reader.Next(nil)
-
-	// Second call: get the value
-	var value []byte
-	if w.reader.HasNext() {
-		value, _ = w.reader.Next(nil)
-	}
-
-	return key, value, nil
-}
-
-// HasNext delegates to the underlying reader
-func (w *SegReaderWrapper) HasNext() bool {
-	return w.reader.HasNext()
-}
-
-// Close is a no-op as seg.ReaderI doesn't have Close method
-func (w *SegReaderWrapper) Close() {
-	// No-op
 }

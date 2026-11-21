@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"math/big"
+	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -42,7 +42,7 @@ import (
 
 // Constants for The Merge as specified by EIP-3675: Upgrade consensus to Proof-of-Stake
 var (
-	ProofOfStakeDifficulty = common.Big0        // PoS block's difficulty is always 0
+	ProofOfStakeDifficulty = common.Num0        // PoS block's difficulty is always 0
 	ProofOfStakeNonce      = types.BlockNonce{} // PoS block's have all-zero nonces
 )
 
@@ -66,7 +66,11 @@ var (
 //
 // Note: After the Merge the work is mostly done on the Consensus Layer, so nothing much is to be added on this side.
 type Merge struct {
-	eth1Engine rules.Engine // Original rules engine used in eth1, e.g. ethash or clique
+	eth1Engine rules.Engine // Original rules engine used in eth1, e.g. ethash
+
+	// Reusable buffer for collecting logs in Finalize - protected by logsBufMu
+	logsBufMu sync.Mutex
+	logsBuf   types.Logs
 }
 
 // New creates a new instance of the Merge Engine with the given embedded eth1 engine.
@@ -112,7 +116,7 @@ func (s *Merge) VerifyHeader(chain rules.ChainHeaderReader, header *types.Header
 		return rules.ErrUnknownAncestor
 	}
 
-	return s.verifyHeader(chain, header, parent)
+	return VerifyHeaderWithParent(chain.Config(), header, parent)
 }
 
 // VerifyUncles implements rules.Engine, always returning an error for any
@@ -128,15 +132,15 @@ func (s *Merge) VerifyUncles(chain rules.ChainReader, header *types.Header, uncl
 }
 
 // Prepare makes sure difficulty and nonce are correct
-func (s *Merge) Prepare(chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
+func (s *Merge) Prepare(chain rules.ChainHeaderReader, header *types.Header) error {
 	reached, err := IsTTDReached(chain, header.ParentHash, header.Number.Uint64()-1)
 	if err != nil {
 		return err
 	}
 	if !reached {
-		return s.eth1Engine.Prepare(chain, header, state)
+		return s.eth1Engine.Prepare(chain, header)
 	}
-	header.Difficulty = ProofOfStakeDifficulty
+	header.Difficulty = *ProofOfStakeDifficulty
 	header.Nonce = ProofOfStakeNonce
 	return nil
 }
@@ -151,11 +155,11 @@ func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, unc
 }
 
 func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
 	if !misc.IsPoSHeader(header) {
-		return s.eth1Engine.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, skipReceiptsEval, logger)
+		return s.eth1Engine.Finalize(config, header, state, uncles, receipts, withdrawals, chain, syscall, skipReceiptsEval, logger)
 	}
 
 	rewards, err := s.CalculateRewards(config, header, uncles, syscall)
@@ -163,13 +167,17 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		return nil, err
 	}
 	for _, r := range rewards {
+		var err error
 		switch r.Kind {
 		case rules.RewardAuthor:
-			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock)
+			err = state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock)
 		case rules.RewardUncle:
-			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineUncle)
+			err = state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineUncle)
 		default:
-			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceChangeUnspecified)
+			err = state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceChangeUnspecified)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("applying reward kind %d to %x: %w", r.Kind, r.Beneficiary, err)
 		}
 	}
 
@@ -180,42 +188,85 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			}
 		} else {
 			for _, w := range withdrawals {
-				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
-				state.AddBalance(accounts.InternAddress(w.Address), *amountInWei, tracing.BalanceIncreaseWithdrawal)
+				amountInWei := new(uint256.Int).Mul(uint256.NewInt(uint64(w.Amount)), uint256.NewInt(common.GWei))
+				if err := state.AddBalance(accounts.InternAddress(w.Address), *amountInWei, tracing.BalanceIncreaseWithdrawal); err != nil {
+					return nil, fmt.Errorf("crediting withdrawal %d to %x: %w", w.Index, w.Address, err)
+				}
 			}
 		}
 	}
 
 	var rs types.FlatRequests
 	if config.IsPrague(header.Time) && !skipReceiptsEval {
-		rs = make(types.FlatRequests, 0)
-		allLogs := make(types.Logs, 0)
+		reqCap := 3
+		if config.IsAmsterdam(header.Time) {
+			reqCap = 5
+		}
+		rs = make(types.FlatRequests, 0, reqCap) // deposit, withdrawal, consolidation, plus builder_deposit, builder_exit if Amsterdam is active
+
+		// Try to reuse buffer, fall back to allocation if concurrent access
+		var allLogs types.Logs
+		reuseBuffer := s.logsBufMu.TryLock()
+		if reuseBuffer {
+			allLogs = s.logsBuf[:0]
+		} else {
+			allLogs = make(types.Logs, 0, len(receipts)*4)
+		}
+
 		for i, rec := range receipts {
 			if rec == nil {
+				if reuseBuffer {
+					s.logsBuf = allLogs
+					s.logsBufMu.Unlock()
+				}
 				return nil, fmt.Errorf("nil receipt: block %d, txId %d, receipts %s", header.Number, i, receipts)
 			}
 			allLogs = append(allLogs, rec.Logs...)
 		}
 		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
+		if reuseBuffer {
+			s.logsBuf = allLogs // save back (might have grown)
+			s.logsBufMu.Unlock()
+		}
 		if err != nil {
-			return nil, fmt.Errorf("error: could not parse requests logs: %v", err)
+			return nil, fmt.Errorf("error: could not parse requests logs: %w", err)
 		}
 		if depositReqs != nil {
 			rs = append(rs, *depositReqs)
 		}
-		withdrawalReq, err := misc.DequeueWithdrawalRequests7002(syscall, state)
+		withdrawalReq, err := misc.DequeueWithdrawalRequests7002(syscall, state, config.GetWithdrawalRequestContract())
 		if err != nil {
 			return nil, err
 		}
 		if withdrawalReq != nil {
 			rs = append(rs, *withdrawalReq)
 		}
-		consolidations, err := misc.DequeueConsolidationRequests7251(syscall, state)
+		consolidations, err := misc.DequeueConsolidationRequests7251(syscall, state, config.GetConsolidationRequestContract())
 		if err != nil {
 			return nil, err
 		}
 		if consolidations != nil {
 			rs = append(rs, *consolidations)
+		}
+
+		if config.IsAmsterdam(header.Time) {
+			// EIP-8282
+			builderDepositReq, err := misc.DequeueBuilderDepositRequests(syscall, state, config.GetBuilderDepositContract())
+			if err != nil {
+				return nil, err
+			}
+			if builderDepositReq != nil {
+				rs = append(rs, *builderDepositReq)
+			}
+
+			// EIP-8282
+			builderExitReq, err := misc.DequeueBuilderExitRequests(syscall, state, config.GetBuilderExitContract())
+			if err != nil {
+				return nil, err
+			}
+			if builderExitReq != nil {
+				rs = append(rs, *builderExitReq)
+			}
 		}
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
@@ -235,39 +286,38 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, call, logger)
 	}
 	header.RequestsHash = nil
-	outRequests, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, false, logger)
+	outRequests, err := s.Finalize(config, header, state, uncles, receipts, withdrawals, chain, syscall, false, logger)
 	if err != nil {
 		return nil, nil, err
 	}
 	if config.IsPrague(header.Time) {
 		header.RequestsHash = outRequests.Hash()
 	}
-	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals), outRequests, nil
+	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals, nil), outRequests, nil
 }
 
 func (s *Merge) SealHash(header *types.Header) (hash common.Hash) {
 	return s.eth1Engine.SealHash(header)
 }
 
-func (s *Merge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int {
+func (s *Merge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) uint256.Int {
 	reached, err := IsTTDReached(chain, parentHash, parentNumber)
 	if err != nil {
-		return nil
+		return *ProofOfStakeDifficulty
 	}
 	if !reached {
 		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentAuRaStep)
 	}
-	return ProofOfStakeDifficulty
+	return *ProofOfStakeDifficulty
 }
 
-func (c *Merge) TxDependencies(h *types.Header) [][]int {
+func (s *Merge) TxDependencies(h *types.Header) [][]int {
 	return nil
 }
 
-// verifyHeader checks whether a Proof-of-Stake header conforms to the consensus rules of the
+// VerifyHeaderWithParent checks whether a Proof-of-Stake header conforms to the consensus rules of the
 // stock Ethereum rules engine with EIP-3675 modifications.
-func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *types.Header) error {
-
+func VerifyHeaderWithParent(config *chain.Config, header, parent *types.Header) error {
 	if uint64(len(header.Extra)) > params.MaximumExtraDataSize {
 		return fmt.Errorf("extra-data longer than %d bytes (%d)", params.MaximumExtraDataSize, len(header.Extra))
 	}
@@ -294,7 +344,7 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 	}
 
 	// Verify that the block number is parent's +1
-	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(common.Big1) != 0 {
+	if diff, overflow := new(uint256.Int).SubOverflow(&header.Number, &parent.Number); overflow || diff.CmpUint64(1) != 0 {
 		return rules.ErrInvalidNumber
 	}
 
@@ -302,12 +352,15 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 		return errInvalidUncleHash
 	}
 
-	if err := misc.VerifyEip1559Header(chain.Config(), parent, header, false); err != nil {
+	if err := misc.VerifyEip1559Header(config, parent, header); err != nil {
+		return err
+	}
+	if err := misc.VerifyParentGasLimit(config, parent, header); err != nil {
 		return err
 	}
 
 	// Verify existence / non-existence of withdrawalsHash
-	shanghai := chain.Config().IsShanghai(header.Time)
+	shanghai := config.IsShanghai(header.Time)
 	if shanghai && header.WithdrawalsHash == nil {
 		return errors.New("missing withdrawalsHash")
 	}
@@ -315,19 +368,19 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 		return rules.ErrUnexpectedWithdrawals
 	}
 
-	if !chain.Config().IsCancun(header.Time) {
+	if !config.IsCancun(header.Time) {
 		return misc.VerifyAbsenceOfCancunHeaderFields(header)
 	}
 	if err := misc.VerifyPresenceOfCancunHeaderFields(header); err != nil {
 		return err
 	}
-	expectedExcessBlobGas := misc.CalcExcessBlobGas(chain.Config(), parent, header.Time)
+	expectedExcessBlobGas := misc.CalcExcessBlobGas(config, parent, header.Time)
 	if *header.ExcessBlobGas != expectedExcessBlobGas {
 		return fmt.Errorf("invalid excessBlobGas: have %d, want %d", *header.ExcessBlobGas, expectedExcessBlobGas)
 	}
 
 	// Verify existence / non-existence of requestsHash
-	prague := chain.Config().IsPrague(header.Time)
+	prague := config.IsPrague(header.Time)
 	if prague && header.RequestsHash == nil {
 		return errors.New("missing requestsHash")
 	}
@@ -335,6 +388,25 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 		return rules.ErrUnexpectedRequests
 	}
 
+	// Verify existence / non-existence of slotNumber & blockAccessListHash
+	amsterdam := config.IsAmsterdam(header.Time)
+	if amsterdam {
+		if header.SlotNumber == nil {
+			return rules.ErrMissingSlotNumber
+		}
+		if config.IsEIPEnabled(7928, header.Time) {
+			if header.BlockAccessListHash == nil {
+				return rules.ErrMissingBlockAccessListHash
+			}
+		}
+	} else {
+		if header.SlotNumber != nil {
+			return rules.ErrUnexpectedSlotNumber
+		}
+		if header.BlockAccessListHash != nil {
+			return rules.ErrUnexpectedBlockAccessListHash
+		}
+	}
 	return nil
 }
 
@@ -342,6 +414,7 @@ func (s *Merge) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Blo
 	block := blockWithReceipts.Block
 	receipts := blockWithReceipts.Receipts
 	requests := blockWithReceipts.Requests
+	blockAccessList := blockWithReceipts.BlockAccessList
 	if !misc.IsPoSHeader(block.HeaderNoCopy()) {
 		return s.eth1Engine.Seal(chain, blockWithReceipts, results, stop)
 	}
@@ -350,7 +423,7 @@ func (s *Merge) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Blo
 	header.Nonce = ProofOfStakeNonce
 
 	select {
-	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts, Requests: requests}:
+	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts, Requests: requests, BlockAccessList: blockAccessList}:
 	default:
 		log.Warn("Sealing result is not read", "sealhash", block.Hash())
 	}
@@ -369,29 +442,50 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 		return s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 	}
 
-	cfg := chain.Config()
-
 	// See https://hackmd.io/@filoozom/rycoQITlWl
-	if cfg.BalancerTime != nil && header.Time >= cfg.BalancerTime.Uint64() {
+	if config.BalancerTime != nil && header.Time >= *config.BalancerTime {
 		parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 		if parent == nil {
 			return rules.ErrUnknownAncestor
 		}
-		if parent.Time < cfg.BalancerTime.Uint64() { // first Balancer HF block
-			for address, rewrittenCode := range cfg.BalancerRewriteBytecode {
-				state.SetCode(accounts.InternAddress(address), rewrittenCode)
+		if parent.Time < *config.BalancerTime { // first Balancer HF block
+			for address, rewrittenCode := range config.BalancerRewriteBytecode {
+				if err := state.SetCode(accounts.InternAddress(address), rewrittenCode, tracing.CodeChangeUnspecified); err != nil {
+					return err
+				}
 			}
 		}
 	}
 
-	if cfg.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
+	// Only allocate VMContext when a tracer is attached; this avoids a
+	// heap allocation on every block during normal (un-traced) import.
+	var vmContext *tracing.VMContext
+	if tracer != nil {
+		random := header.MixDigest
+		execCtx := evmtypes.BlockContext{BlockNumber: header.Number.Uint64(), Time: header.Time}
+		// GasPrice is intentionally zero — system calls have no gas price.
+		vmContext = &tracing.VMContext{
+			Coinbase:        accounts.InternAddress(header.Coinbase),
+			BlockNumber:     header.Number.Uint64(),
+			Time:            header.Time,
+			Random:          &random,
+			ChainConfig:     config,
+			IntraBlockState: state,
+			Rules:           execCtx.Rules(config),
+		}
+	}
+	if config.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr accounts.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
-		}, tracer)
+		}, tracer, vmContext)
 	}
-	if cfg.IsPrague(header.Time) {
-		if err := misc.StoreBlockHashesEip2935(header, state); err != nil {
-			return err
+	if config.IsPrague(header.Time) && header.Number.Sign() != 0 {
+		tracer.EmitSystemCallStart(vmContext)
+		if tracer != nil && tracer.OnSystemCallEnd != nil {
+			defer tracer.OnSystemCallEnd()
+		}
+		if _, err := syscall(params.HistoryStorageAddress, header.ParentHash[:], state, header, false /* constCall */); err != nil {
+			logger.Warn("Failed to call history storage contract", "err", err)
 		}
 	}
 	return nil
@@ -407,6 +501,13 @@ func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {
 
 func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return s.eth1Engine.GetPostApplyMessageFunc()
+}
+
+func (s *Merge) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
+	return rules.DefaultBlockPostValidation(header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 func (s *Merge) Close() error {

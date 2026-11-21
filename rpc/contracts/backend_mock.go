@@ -14,9 +14,11 @@ import (
 	big "math/big"
 	reflect "reflect"
 
-	ethereum "github.com/erigontech/erigon"
 	common "github.com/erigontech/erigon/common"
+	event "github.com/erigontech/erigon/common/event"
+	bind "github.com/erigontech/erigon/execution/abi/bind"
 	types "github.com/erigontech/erigon/execution/types"
+	uint256 "github.com/holiman/uint256"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -45,7 +47,7 @@ func (m *MockBackend) EXPECT() *MockBackendMockRecorder {
 }
 
 // CallContract mocks base method.
-func (m *MockBackend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+func (m *MockBackend) CallContract(ctx context.Context, callMsg bind.CallMsg, blockNumber *uint256.Int) ([]byte, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CallContract", ctx, callMsg, blockNumber)
 	ret0, _ := ret[0].([]byte)
@@ -72,19 +74,19 @@ func (c *MockBackendCallContractCall) Return(arg0 []byte, arg1 error) *MockBacke
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBackendCallContractCall) Do(f func(context.Context, ethereum.CallMsg, *big.Int) ([]byte, error)) *MockBackendCallContractCall {
+func (c *MockBackendCallContractCall) Do(f func(context.Context, bind.CallMsg, *uint256.Int) ([]byte, error)) *MockBackendCallContractCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBackendCallContractCall) DoAndReturn(f func(context.Context, ethereum.CallMsg, *big.Int) ([]byte, error)) *MockBackendCallContractCall {
+func (c *MockBackendCallContractCall) DoAndReturn(f func(context.Context, bind.CallMsg, *uint256.Int) ([]byte, error)) *MockBackendCallContractCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // CodeAt mocks base method.
-func (m *MockBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error) {
+func (m *MockBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) ([]byte, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CodeAt", ctx, contract, blockNumber)
 	ret0, _ := ret[0].([]byte)
@@ -111,19 +113,19 @@ func (c *MockBackendCodeAtCall) Return(arg0 []byte, arg1 error) *MockBackendCode
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBackendCodeAtCall) Do(f func(context.Context, common.Address, *big.Int) ([]byte, error)) *MockBackendCodeAtCall {
+func (c *MockBackendCodeAtCall) Do(f func(context.Context, common.Address, *uint256.Int) ([]byte, error)) *MockBackendCodeAtCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBackendCodeAtCall) DoAndReturn(f func(context.Context, common.Address, *big.Int) ([]byte, error)) *MockBackendCodeAtCall {
+func (c *MockBackendCodeAtCall) DoAndReturn(f func(context.Context, common.Address, *uint256.Int) ([]byte, error)) *MockBackendCodeAtCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // EstimateGas mocks base method.
-func (m *MockBackend) EstimateGas(ctx context.Context, callMsg ethereum.CallMsg) (uint64, error) {
+func (m *MockBackend) EstimateGas(ctx context.Context, callMsg bind.CallMsg) (uint64, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "EstimateGas", ctx, callMsg)
 	ret0, _ := ret[0].(uint64)
@@ -150,19 +152,19 @@ func (c *MockBackendEstimateGasCall) Return(gas uint64, err error) *MockBackendE
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBackendEstimateGasCall) Do(f func(context.Context, ethereum.CallMsg) (uint64, error)) *MockBackendEstimateGasCall {
+func (c *MockBackendEstimateGasCall) Do(f func(context.Context, bind.CallMsg) (uint64, error)) *MockBackendEstimateGasCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBackendEstimateGasCall) DoAndReturn(f func(context.Context, ethereum.CallMsg) (uint64, error)) *MockBackendEstimateGasCall {
+func (c *MockBackendEstimateGasCall) DoAndReturn(f func(context.Context, bind.CallMsg) (uint64, error)) *MockBackendEstimateGasCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // FilterLogs mocks base method.
-func (m *MockBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
+func (m *MockBackend) FilterLogs(ctx context.Context, query bind.FilterQuery) ([]types.Log, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FilterLogs", ctx, query)
 	ret0, _ := ret[0].([]types.Log)
@@ -189,13 +191,13 @@ func (c *MockBackendFilterLogsCall) Return(arg0 []types.Log, arg1 error) *MockBa
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBackendFilterLogsCall) Do(f func(context.Context, ethereum.FilterQuery) ([]types.Log, error)) *MockBackendFilterLogsCall {
+func (c *MockBackendFilterLogsCall) Do(f func(context.Context, bind.FilterQuery) ([]types.Log, error)) *MockBackendFilterLogsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBackendFilterLogsCall) DoAndReturn(f func(context.Context, ethereum.FilterQuery) ([]types.Log, error)) *MockBackendFilterLogsCall {
+func (c *MockBackendFilterLogsCall) DoAndReturn(f func(context.Context, bind.FilterQuery) ([]types.Log, error)) *MockBackendFilterLogsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -317,10 +319,10 @@ func (c *MockBackendSendTransactionCall) DoAndReturn(f func(context.Context, typ
 }
 
 // SubscribeFilterLogs mocks base method.
-func (m *MockBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
+func (m *MockBackend) SubscribeFilterLogs(ctx context.Context, query bind.FilterQuery, ch chan<- types.Log) (event.Subscription, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "SubscribeFilterLogs", ctx, query, ch)
-	ret0, _ := ret[0].(ethereum.Subscription)
+	ret0, _ := ret[0].(event.Subscription)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -338,19 +340,19 @@ type MockBackendSubscribeFilterLogsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBackendSubscribeFilterLogsCall) Return(arg0 ethereum.Subscription, arg1 error) *MockBackendSubscribeFilterLogsCall {
+func (c *MockBackendSubscribeFilterLogsCall) Return(arg0 event.Subscription, arg1 error) *MockBackendSubscribeFilterLogsCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBackendSubscribeFilterLogsCall) Do(f func(context.Context, ethereum.FilterQuery, chan<- types.Log) (ethereum.Subscription, error)) *MockBackendSubscribeFilterLogsCall {
+func (c *MockBackendSubscribeFilterLogsCall) Do(f func(context.Context, bind.FilterQuery, chan<- types.Log) (event.Subscription, error)) *MockBackendSubscribeFilterLogsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBackendSubscribeFilterLogsCall) DoAndReturn(f func(context.Context, ethereum.FilterQuery, chan<- types.Log) (ethereum.Subscription, error)) *MockBackendSubscribeFilterLogsCall {
+func (c *MockBackendSubscribeFilterLogsCall) DoAndReturn(f func(context.Context, bind.FilterQuery, chan<- types.Log) (event.Subscription, error)) *MockBackendSubscribeFilterLogsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

@@ -1,4 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 *.txt text eol=lf
+# Force LF so hashFiles('go.sum') produces consistent CI cache keys across OSes
+go.sum text eol=lf
 *.sol linguist-language=Solidity
+
+.github/workflows/*.lock.yml linguist-generated=true merge=ours

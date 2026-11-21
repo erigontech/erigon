@@ -44,11 +44,12 @@ func BenchmarkWebsocketEmptyCall(b *testing.B) {
 	defer client.Close()
 
 	for b.Loop() {
-		if err := client.Call(nil, "test_ping"); err != nil {
+		if err := client.Call(nil, "test_noArgsRets"); err != nil {
 			panic(err)
 		}
 	}
 }
+
 func BenchmarkWebsocket16kb(b *testing.B) {
 	logger := log.New()
 

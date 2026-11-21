@@ -18,7 +18,6 @@ package seg
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"math/rand"
 	"path/filepath"
@@ -42,13 +41,13 @@ func FuzzDecompressMatch(f *testing.F) {
 			if pos[i] == 0 {
 				continue
 			}
-			next := min(j+int(pos[i]*10), len(x)-1)
+			next := min(j+int(pos[i])*10, len(x)-1)
 			bbb := x[j:next]
 			a = append(a, bbb)
 			j = next
 		}
 
-		ctx := context.Background()
+		ctx := t.Context()
 		tmpDir := t.TempDir()
 		file := filepath.Join(tmpDir, fmt.Sprintf("compressed-%d", rand.Int31()))
 		cfg := DefaultCfg
@@ -110,5 +109,4 @@ func FuzzDecompressMatch(f *testing.F) {
 			word_idx++
 		}
 	})
-
 }

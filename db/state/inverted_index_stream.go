@@ -18,12 +18,7 @@ package state
 
 import (
 	"bytes"
-	"encoding/binary"
 
-	"github.com/RoaringBitmap/roaring/v2/roaring64"
-
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/bitmapdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
@@ -48,7 +43,7 @@ type InvertedIdxStreamFiles struct {
 	hasNext bool
 	err     error
 
-	seq       *multiencseq.SequenceReader
+	seq       multiencseq.SequenceReader
 	accessors statecfg.Accessors
 	ii        *InvertedIndexRoTx
 }
@@ -84,6 +79,59 @@ func (it *InvertedIdxStreamFiles) next() uint64 {
 	return n
 }
 
+func (it *InvertedIdxStreamFiles) CanSeek() bool { return it.limit < 0 }
+
+// seekLinearSteps is how many elements Seek steps over instead of searching: a search in an Elias-Fano
+// sequence costs more than a few steps, and targets that close are common when both inputs are dense.
+const seekLinearSteps = 16
+
+func (it *InvertedIdxStreamFiles) before(v uint64) bool {
+	asc := bool(it.orderAscend)
+	return it.err == nil && it.hasNext && (asc && it.nextN < v || !asc && it.nextN > v)
+}
+
+// near estimates from the density of the current file whether v is at most seekLinearSteps elements
+// ahead. A v past the file is never near: stepping there would look the key up in files Seek drops.
+func (it *InvertedIdxStreamFiles) near(v uint64) bool {
+	if it.seqIt == nil {
+		return false
+	}
+	lo, hi := it.seq.Min(), it.seq.Max()
+	asc := bool(it.orderAscend)
+	if asc && v > hi || !asc && v < lo {
+		return false
+	}
+	dist := max(v, it.nextN) - min(v, it.nextN)
+	return dist <= seekLinearSteps*(hi-lo+1)/it.seq.Count()
+}
+
+// Seek drops the files that end before v without looking the key up in them, then seeks inside the current file.
+func (it *InvertedIdxStreamFiles) Seek(v uint64) error {
+	if it.near(v) {
+		for i := 0; i < seekLinearSteps && it.before(v); i++ {
+			it.advanceInFiles()
+		}
+	}
+	if !it.before(v) {
+		return it.err
+	}
+	it.startTxNum = int(v)
+	asc := bool(it.orderAscend)
+	for len(it.stack) > 0 {
+		top := it.stack[len(it.stack)-1]
+		if asc && top.endTxNum > v || !asc && top.startTxNum <= v {
+			break
+		}
+		top.reader.Close()
+		it.stack = it.stack[:len(it.stack)-1]
+	}
+	if it.seqIt != nil {
+		it.seqIt.(interface{ Seek(uint64) }).Seek(v)
+	}
+	it.advanceInFiles()
+	return it.err
+}
+
 func (it *InvertedIdxStreamFiles) advanceInFiles() {
 	for {
 		for it.seqIt == nil {
@@ -115,8 +163,8 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 			it.seqIt = seqIt
 		}
 
-		//Asc:  [from, to) AND from < to
-		//Desc: [from, to) AND from > to
+		// Asc:  [from, to) AND from < to
+		// Desc: [from, to) AND from > to
 		if it.orderAscend {
 			for it.seqIt.HasNext() {
 				n, err := it.seqIt.Next()
@@ -125,7 +173,7 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 					return
 				}
 				isBeforeRange := int(n) < it.startTxNum
-				if isBeforeRange { //skip
+				if isBeforeRange { // skip
 					continue
 				}
 				isAfterRange := it.endTxNum >= 0 && int(n) >= it.endTxNum
@@ -145,7 +193,7 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 					return
 				}
 				isAfterRange := it.startTxNum >= 0 && int(n) > it.startTxNum
-				if isAfterRange { //skip
+				if isAfterRange { // skip
 					continue
 				}
 				isBeforeRange := it.endTxNum >= 0 && int(n) <= it.endTxNum
@@ -160,150 +208,4 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 		}
 		it.seqIt = nil // Exhausted this iterator
 	}
-}
-
-// RecentInvertedIdxIter allows iteration over range of txn numbers
-// Iteration is not implemented via callback function, because there is often
-// a requirement for interators to be composable (for example, to implement AND and OR for indices)
-type RecentInvertedIdxIter struct {
-	key                  []byte
-	startTxNum, endTxNum int
-	limit                int
-	orderAscend          order.By
-
-	roTx       kv.Tx
-	cursor     kv.CursorDupSort
-	indexTable string
-
-	nextN   uint64
-	hasNext bool
-	err     error
-
-	bm *roaring64.Bitmap
-}
-
-func (it *RecentInvertedIdxIter) Close() {
-	if it.cursor != nil {
-		it.cursor.Close()
-	}
-	bitmapdb.ReturnToPool64(it.bm)
-}
-
-func (it *RecentInvertedIdxIter) advanceInDB() {
-	var v []byte
-	var err error
-	if it.cursor == nil {
-		if it.cursor, err = it.roTx.CursorDupSort(it.indexTable); err != nil { //nolint:gocritic
-			// TODO pass error properly around
-			panic(err)
-		}
-		var k []byte
-		if k, _, err = it.cursor.SeekExact(it.key); err != nil {
-			panic(err)
-		}
-		if k == nil {
-			it.hasNext = false
-			return
-		}
-		//Asc:  [from, to) AND from < to
-		//Desc: [from, to) AND from > to
-		var keyBytes [8]byte
-		if it.startTxNum > 0 {
-			binary.BigEndian.PutUint64(keyBytes[:], uint64(it.startTxNum))
-		}
-		if v, err = it.cursor.SeekBothRange(it.key, keyBytes[:]); err != nil {
-			panic(err)
-		}
-		if v == nil {
-			if !it.orderAscend {
-				_, v, err = it.cursor.PrevDup()
-				if err != nil {
-					panic(err)
-				}
-			}
-			if v == nil {
-				it.hasNext = false
-				return
-			}
-		}
-	} else {
-		if it.orderAscend {
-			_, v, err = it.cursor.NextDup()
-			if err != nil {
-				// TODO pass error properly around
-				panic(err)
-			}
-		} else {
-			_, v, err = it.cursor.PrevDup()
-			if err != nil {
-				panic(err)
-			}
-		}
-	}
-
-	//Asc:  [from, to) AND from < to
-	//Desc: [from, to) AND from > to
-	if it.orderAscend {
-		for ; v != nil; _, v, err = it.cursor.NextDup() {
-			if err != nil {
-				// TODO pass error properly around
-				panic(err)
-			}
-			n := binary.BigEndian.Uint64(v)
-			if it.endTxNum >= 0 && int(n) >= it.endTxNum {
-				it.hasNext = false
-				return
-			}
-			if int(n) >= it.startTxNum {
-				it.hasNext = true
-				it.nextN = n
-				return
-			}
-		}
-	} else {
-		for ; v != nil; _, v, err = it.cursor.PrevDup() {
-			if err != nil {
-				// TODO pass error properly around
-				panic(err)
-			}
-			n := binary.BigEndian.Uint64(v)
-			if int(n) <= it.endTxNum {
-				it.hasNext = false
-				return
-			}
-			if it.startTxNum >= 0 && int(n) <= it.startTxNum {
-				it.hasNext = true
-				it.nextN = n
-				return
-			}
-		}
-	}
-
-	it.hasNext = false
-}
-
-func (it *RecentInvertedIdxIter) advance() {
-	if it.hasNext {
-		it.advanceInDB()
-	}
-}
-
-func (it *RecentInvertedIdxIter) HasNext() bool {
-	if it.err != nil { // always true, then .Next() call will return this error
-		return true
-	}
-	if it.limit == 0 { // limit reached
-		return false
-	}
-	return it.hasNext
-}
-
-func (it *RecentInvertedIdxIter) Next() (uint64, error) {
-	if it.err != nil {
-		return 0, it.err
-	}
-	it.limit--
-	n := it.nextN
-	it.advance()
-	return n, nil
 }

@@ -20,10 +20,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"sync"
-	"time"
-	"unsafe"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -31,92 +30,132 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type StateChangeSet struct {
-	Diffs [kv.DomainLen]kv.DomainDiff // there are 4 domains of state changes
+	Diffs [kv.DomainLen]kv.DomainDiff
 }
 
-func (s *StateChangeSet) Copy() *StateChangeSet {
-	res := *s
-	for i := range s.Diffs {
-		res.Diffs[i] = *s.Diffs[i].Copy()
-	}
-	return &res
-}
 func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
+	out = slices.Grow(out, serializeDiffSetBufLen(diffSet))
+
+	// Version prefix: [0, 1]. Two bytes so we can distinguish from the old format where
+	// byte[0] is dictLen (>=1 for non-empty, 0 only when diffSetLen is also 0).
+	// New format: byte[0]==0, byte[1]>0 (version). Old format: byte[0]>=1 or both bytes==0.
+	out = append(out, 0, 1)
+
+	if len(diffSet) == 0 {
+		return append(out, 0, 0, 0, 0) // diffSet len (4) = 0
+	}
 	ret := out
-	// Write a small dictionary for prevStepBytes
-	dict := make(map[string]byte)
-	id := byte(0x00)
-	for _, diff := range diffSet {
-		prevStepS := toStringZeroCopy(diff.PrevStepBytes)
-		if _, ok := dict[prevStepS]; ok {
-			continue
+
+	// Write diffSet length
+	ret = binary.BigEndian.AppendUint32(ret, uint32(len(diffSet)))
+
+	for i := range diffSet {
+		// write key
+		ret = binary.BigEndian.AppendUint32(ret, uint32(len(diffSet[i].Key)))
+		ret = append(ret, diffSet[i].Key...)
+		// write hasValue flag + optional value
+		if diffSet[i].Value == nil {
+			ret = append(ret, 0) // delete only
+		} else {
+			ret = append(ret, 1) // has value to restore
+			ret = binary.BigEndian.AppendUint32(ret, uint32(len(diffSet[i].Value)))
+			ret = append(ret, diffSet[i].Value...)
 		}
-		dict[prevStepS] = id
-		id++
-	}
-	// Write the dictionary
-	ret = append(ret, byte(len(dict)))
-	for k, v := range dict {
-		ret = append(ret, []byte(k)...) // k is always 8 bytes
-		ret = append(ret, v)            // v is always 1 byte
-	}
-	// Write the diffSet
-	var tmp [4]byte
-	binary.BigEndian.PutUint32(tmp[:], uint32(len(diffSet)))
-	ret = append(ret, tmp[:]...)
-	for _, diff := range diffSet {
-		// write uint32(len(key)) + key + uint32(len(value)) + value + prevStepBytes
-		binary.BigEndian.PutUint32(tmp[:], uint32(len(diff.Key)))
-		ret = append(ret, tmp[:]...)
-		ret = append(ret, diff.Key...)
-		binary.BigEndian.PutUint32(tmp[:], uint32(len(diff.Value)))
-		ret = append(ret, tmp[:]...)
-		ret = append(ret, diff.Value...)
-		ret = append(ret, dict[toStringZeroCopy(diff.PrevStepBytes)])
 	}
 	return ret
 }
 
 func serializeDiffSetBufLen(diffSet []kv.DomainEntryDiff) int {
-	// Write a small dictionary for prevStepBytes
-	dict := make(map[string]byte)
-	id := byte(0x00)
-	for _, diff := range diffSet {
-		prevStepS := toStringZeroCopy(diff.PrevStepBytes)
-		if _, ok := dict[prevStepS]; ok {
-			continue
+	totalSize := 2 + 4 // version prefix + uint32 length prefix
+	for i := range diffSet {
+		totalSize += 4 + len(diffSet[i].Key) + 1 // keyLen + key + hasValue flag
+		if diffSet[i].Value != nil {
+			totalSize += 4 + len(diffSet[i].Value) // valLen + val
 		}
-		dict[prevStepS] = id
-		id++
 	}
-	// Write the dictionary
-	ret := 1 + 9*len(dict)
-	// Write the diffSet
-	ret += 4
-	for _, diff := range diffSet {
-		ret += 4 + len(diff.Key) + 4 + len(diff.Value) + 1
-	}
-	return ret
+	return totalSize
 }
 
 func DeserializeDiffSet(in []byte) []kv.DomainEntryDiff {
-	if len(in) == 0 {
+	if len(in) < 2 {
 		return nil
 	}
-	dictLen := int(in[0])
-	in = in[1:]
-	dict := make(map[byte][]byte)
-	for i := 0; i < dictLen; i++ {
-		key := in[:8]
-		value := in[8]
-		dict[value] = key
-		in = in[9:]
+
+	// Format detection:
+	//   New versioned format starts with [0, version] where version > 0
+	//   Old empty format: [0, 0, 0, 0, 0] (dictLen=0, diffSetLen=0)
+	//   Old dictionary format: first byte >= 1 (dictLen >= 1)
+	if in[0] == 0 && in[1] > 0 {
+		// New versioned format: in[1] is the version number
+		return deserializeDiffSetV1(in[2:])
+	}
+	if in[0] == 0 {
+		// Old empty format (dictLen=0 implies diffSetLen=0)
+		return nil
+	}
+	// Old dictionary format (dictLen >= 1)
+	return deserializeDiffSetV0(in)
+}
+
+// deserializeDiffSetV1 parses the current format (without version prefix):
+// uint32(diffSetLen) + per entry: uint32(keyLen) + key + uint8(hasValue) + [uint32(valLen) + val]
+func deserializeDiffSetV1(in []byte) []kv.DomainEntryDiff {
+	if len(in) < 4 {
+		return nil
 	}
 	diffSetLen := binary.BigEndian.Uint32(in)
 	in = in[4:]
+	if diffSetLen == 0 {
+		return nil
+	}
+	diffSet := make([]kv.DomainEntryDiff, diffSetLen)
+	for i := 0; i < int(diffSetLen); i++ {
+		keyLen := binary.BigEndian.Uint32(in)
+		in = in[4:]
+		key := in[:keyLen]
+		in = in[keyLen:]
+		hasValue := in[0]
+		in = in[1:]
+		if hasValue == 1 {
+			valueLen := binary.BigEndian.Uint32(in)
+			in = in[4:]
+			value := in[:valueLen]
+			in = in[valueLen:]
+			diffSet[i] = kv.DomainEntryDiff{
+				Key:   common.ToStringZeroCopy(key),
+				Value: value,
+			}
+		} else {
+			diffSet[i] = kv.DomainEntryDiff{
+				Key:   common.ToStringZeroCopy(key),
+				Value: nil, // delete only
+			}
+		}
+	}
+	return diffSet
+}
+
+// deserializeDiffSetV0 parses the old dictionary-based format:
+// uint8(dictLen) + dictLen * (8 bytes step + 1 byte dictIdx) +
+// uint32(diffSetLen) + per entry: uint32(keyLen) + key + uint32(valLen) + val + uint8(dictIdx)
+func deserializeDiffSetV0(in []byte) []kv.DomainEntryDiff {
+	dictLen := int(in[0])
+	in = in[1:]
+	// Skip dictionary entries: each is 8 bytes (step) + 1 byte (unused)
+	in = in[dictLen*9:]
+
+	if len(in) < 4 {
+		return nil
+	}
+	diffSetLen := binary.BigEndian.Uint32(in)
+	in = in[4:]
+	if diffSetLen == 0 {
+		return nil
+	}
 	diffSet := make([]kv.DomainEntryDiff, diffSetLen)
 	for i := 0; i < int(diffSetLen); i++ {
 		keyLen := binary.BigEndian.Uint32(in)
@@ -125,14 +164,16 @@ func DeserializeDiffSet(in []byte) []kv.DomainEntryDiff {
 		in = in[keyLen:]
 		valueLen := binary.BigEndian.Uint32(in)
 		in = in[4:]
-		value := in[:valueLen]
-		in = in[valueLen:]
-		prevStepBytes := dict[in[0]]
+		var value []byte
+		if valueLen > 0 {
+			value = in[:valueLen]
+			in = in[valueLen:]
+		}
+		// Skip dictIdx (1 byte) — PrevStepBytes is discarded
 		in = in[1:]
 		diffSet[i] = kv.DomainEntryDiff{
-			Key:           toStringZeroCopy(key),
-			Value:         value,
-			PrevStepBytes: prevStepBytes,
+			Key:   common.ToStringZeroCopy(key),
+			Value: value, // nil when valueLen == 0 (don't restore)
 		}
 	}
 	return diffSet
@@ -150,14 +191,15 @@ func MergeDiffSets(newer, older []kv.DomainEntryDiff) []kv.DomainEntryDiff {
 	i, j := 0, 0
 	for i < len(newer) && j < len(older) {
 		cmp := strings.Compare(older[j].Key, newer[i].Key)
-		if cmp < 0 {
+		switch {
+		case cmp < 0:
 			result = append(result, older[j])
 			j++
-		} else if cmp == 0 {
+		case cmp == 0:
 			result = append(result, older[j])
 			i++
 			j++
-		} else {
+		default:
 			result = append(result, newer[i])
 			i++
 		}
@@ -173,12 +215,12 @@ func MergeDiffSets(newer, older []kv.DomainEntryDiff) []kv.DomainEntryDiff {
 	return result
 }
 
-func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
+func (s *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 	// Do  diff_length + diffSet
 	ret := out
 	tmp := make([]byte, 4)
-	for i := range d.Diffs {
-		diffSet := d.Diffs[i].GetDiffSet()
+	for i := range s.Diffs {
+		diffSet := s.Diffs[i].GetDiffSet()
 		binary.BigEndian.PutUint32(tmp, uint32(serializeDiffSetBufLen(diffSet)))
 		ret = append(ret, tmp...)
 
@@ -187,22 +229,16 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 				for _, entry := range diffSet {
 					address := entry.Key[:len(entry.Key)-8]
 					keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-					prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
-					if len(entry.Value) > 0 {
+					switch {
+					case len(entry.Value) > 0:
 						var account accounts.Account
 						if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
 							fmt.Printf("diffset (Block:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockNumber, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
 						}
-					} else {
-						if keyStep != prevStep {
-							if prevStep == 0 {
-								fmt.Printf("diffset (Block:%d): acc %x: [empty], step: %d\n", blockNumber, address, keyStep)
-							} else {
-								fmt.Printf("diffset (Block:%d): acc: %x, in prev step: {key: %d, prev: %d}\n", blockNumber, address, keyStep, prevStep)
-							}
-						} else {
-							fmt.Printf("diffset (Block:%d): del acc: %x, step: %d\n", blockNumber, address, keyStep)
-						}
+					case entry.Value == nil:
+						fmt.Printf("diffset (Block:%d): acc %x: [different step], step: %d\n", blockNumber, address, keyStep)
+					default:
+						fmt.Printf("diffset (Block:%d): del acc: %x, step: %d\n", blockNumber, address, keyStep)
 					}
 				}
 			}
@@ -213,19 +249,13 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 					copy(address[:], entry.Key[:length.Addr])
 					copy(location[:], entry.Key[length.Addr:len(entry.Key)-8])
 					keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-					prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
-					if len(entry.Value) > 0 {
+					switch {
+					case len(entry.Value) > 0:
 						fmt.Printf("diffset (Block:%d): storage [%x %x] => [%x]\n", blockNumber, address, location, entry.Value)
-					} else {
-						if keyStep != prevStep {
-							if prevStep == 0 {
-								fmt.Printf("diffset (Block:%d): storage [%x %x] => [empty], step: %d\n", blockNumber, address, location, keyStep)
-							} else {
-								fmt.Printf("diffset (Block:%d): storage [%x %x], in prev step: {key: %d, prev: %d}\n", blockNumber, address, location, keyStep, prevStep)
-							}
-						} else {
-							fmt.Printf("diffset (Block:%d): storage [%x %x] => [empty], step: %d\n", blockNumber, address, location, keyStep)
-						}
+					case entry.Value == nil:
+						fmt.Printf("diffset (Block:%d): storage [%x %x] => [different step], step: %d\n", blockNumber, address, location, keyStep)
+					default:
+						fmt.Printf("diffset (Block:%d): storage [%x %x] => [empty], step: %d\n", blockNumber, address, location, keyStep)
 					}
 				}
 			}
@@ -260,7 +290,10 @@ func deserializeKeys(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {
 }
 
 const DiffChunkKeyLen = 48
-const DiffChunkLen = 4*1024 - 32
+
+// DiffChunkLen keeps 2 chunks inline in one mdbx leaf page - values bigger than half a page go to
+// overflow pages, which cost extra FreeList maintenance. See TestNoOverflowPages.
+const DiffChunkLen = int(ethconfig.DefaultChainDBPageSize)/2 - DiffChunkKeyLen - 32
 
 type threadSafeBuf struct {
 	b []byte
@@ -272,24 +305,15 @@ var writeDiffsetBuf = &threadSafeBuf{}
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
 	writeDiffsetBuf.Lock()
 	defer writeDiffsetBuf.Unlock()
-	if dbg.TraceUnwinds {
-		var diffStats strings.Builder
-		if diffSet != nil {
-			first := true
-			for d, diff := range &diffSet.Diffs {
-				if first {
-					diffStats.WriteString(" ")
-					first = false
-				} else {
-					diffStats.WriteString(", ")
-				}
-				diffStats.WriteString(fmt.Sprintf("%s: %d", kv.Domain(d), diff.Len()))
-			}
-		}
-		fmt.Printf("diffset (Block:%d) %x:%s %s\n", blockNumber, blockHash, diffStats.String(), dbg.Stack())
-	}
+
 	writeDiffsetBuf.b = diffSet.serializeKeys(writeDiffsetBuf.b[:0], blockNumber)
 	keys := writeDiffsetBuf.b
+
+	c, err := tx.RwCursor(kv.ChangeSets3)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
 
 	chunkCount := (len(keys) + DiffChunkLen - 1) / DiffChunkLen
 	// Data Format
@@ -304,14 +328,31 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	binary.BigEndian.PutUint64(key, blockNumber)
 	copy(key[8:], blockHash[:])
 
-	for i := 0; i < chunkCount; i++ {
+	for i := range chunkCount {
 		start := i * DiffChunkLen
 		end := min((i+1)*DiffChunkLen, len(keys))
 		binary.BigEndian.PutUint64(key[40:], uint64(i))
 
-		if err := tx.Put(kv.ChangeSets3, key, keys[start:end]); err != nil {
+		if err := c.Put(key, keys[start:end]); err != nil {
 			return err
 		}
+	}
+
+	if dbg.TraceUnwinds {
+		var diffStats strings.Builder
+		if diffSet != nil {
+			first := true
+			for d, diff := range &diffSet.Diffs {
+				if first {
+					diffStats.WriteString(" ")
+					first = false
+				} else {
+					diffStats.WriteString(", ")
+				}
+				diffStats.WriteString(fmt.Sprintf("%s: %d", kv.Domain(d), diff.Len()))
+			}
+		}
+		fmt.Printf("[dbg] diffset (Block:%d) %x:%s chunkCount: %d, %s\n", blockNumber, blockHash, diffStats.String(), chunkCount, dbg.Stack())
 	}
 	return nil
 }
@@ -331,8 +372,8 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 	}
 
 	key := make([]byte, 48)
-	val := make([]byte, 0, DiffChunkLen*chunkCount)
-	for i := uint64(0); i < chunkCount; i++ {
+	val := make([]byte, 0, DiffChunkLen*int(chunkCount))
+	for i := range chunkCount {
 		binary.BigEndian.PutUint64(key, blockNumber)
 		copy(key[8:], blockHash[:])
 		binary.BigEndian.PutUint64(key[40:], i)
@@ -348,8 +389,9 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 
 	return deserializeKeys(val), true, nil
 }
+
 func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
-	//TODO: move this function somewhere from `commitment`/`state` pkg
+	// TODO: move this function somewhere from `commitment`/`state` pkg
 	changesetsCursor, err := tx.Cursor(kv.ChangeSets3)
 	if err != nil {
 		return 0, err
@@ -383,87 +425,4 @@ func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 		return 0, err
 	}
 	return blockNumber, nil
-
-}
-func toStringZeroCopy(v []byte) string {
-	if len(v) == 0 {
-		return ""
-	}
-	return unsafe.String(&v[0], len(v))
-}
-
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
-
-type DomainIOMetrics struct {
-	CacheReadCount    int64
-	CacheReadDuration time.Duration
-	CacheGetCount     int64
-	CachePutCount     int64
-	CacheGetSize      int
-	CacheGetKeySize   int
-	CacheGetValueSize int
-	CachePutSize      int
-	CachePutKeySize   int
-	CachePutValueSize int
-	DbReadCount       int64
-	DbReadDuration    time.Duration
-	FileReadCount     int64
-	FileReadDuration  time.Duration
-}
-
-type DomainMetrics struct {
-	sync.RWMutex
-	DomainIOMetrics
-	Domains map[kv.Domain]*DomainIOMetrics
-}
-
-func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.CacheReadCount++
-	readDuration := time.Since(start)
-	dm.CacheReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.CacheReadCount++
-		d.CacheReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			CacheReadCount:    1,
-			CacheReadDuration: readDuration,
-		}
-	}
-}
-
-func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.DbReadCount++
-	readDuration := time.Since(start)
-	dm.DbReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.DbReadCount++
-		d.DbReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			DbReadCount:    1,
-			DbReadDuration: readDuration,
-		}
-	}
-}
-
-func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.FileReadCount++
-	readDuration := time.Since(start)
-	dm.FileReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.FileReadCount++
-		d.FileReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			FileReadCount:    1,
-			FileReadDuration: readDuration,
-		}
-	}
 }

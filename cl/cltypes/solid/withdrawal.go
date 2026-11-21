@@ -25,7 +25,7 @@ const (
 type WithdrawalRequest struct {
 	SourceAddress   common.Address `json:"source_address"`
 	ValidatorPubKey common.Bytes48 `json:"validator_pubkey"` // BLS public key
-	Amount          uint64         `json:"amount"`           // Gwei
+	Amount          uint64         `json:"amount,string"`    // Gwei
 }
 
 func (p *WithdrawalRequest) EncodingSizeSSZ() int {
@@ -53,9 +53,9 @@ func (p *WithdrawalRequest) Static() bool {
 }
 
 type PendingPartialWithdrawal struct {
-	ValidatorIndex    uint64 `json:"validator_index"`    // validator index
-	Amount            uint64 `json:"amount"`             // Gwei
-	WithdrawableEpoch uint64 `json:"withdrawable_epoch"` // epoch when the withdrawal can be processed
+	ValidatorIndex    uint64 `json:"validator_index,string"`    // validator index
+	Amount            uint64 `json:"amount,string"`             // Gwei
+	WithdrawableEpoch uint64 `json:"withdrawable_epoch,string"` // epoch when the withdrawal can be processed
 }
 
 func (p *PendingPartialWithdrawal) EncodingSizeSSZ() int {

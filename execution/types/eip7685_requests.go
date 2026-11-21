@@ -22,14 +22,20 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-const DepositRequestType byte = 0x00
-const WithdrawalRequestType byte = 0x01
-const ConsolidationRequestType byte = 0x02
-const DepositRequestDataLen = 192       // BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8
-const WithdrawalRequestDataLen = 76     // addr + pubkey + amt
-const ConsolidationRequestDataLen = 116 // addr + sourcePubkey + targetPubkey
+const (
+	DepositRequestType           byte = 0x00
+	WithdrawalRequestType        byte = 0x01
+	ConsolidationRequestType     byte = 0x02
+	BuilderDepositRequestType    byte = 0x03
+	BuilderExitRequestType       byte = 0x04
+	DepositRequestDataLen             = 192 // BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8
+	WithdrawalRequestDataLen          = 76  // addr + pubkey + amt
+	ConsolidationRequestDataLen       = 116 // addr + sourcePubkey + targetPubkey
+	BuilderDepositRequestDataLen      = 184
+	BuilderExitRequestDataLen         = 68
+)
 
-var KnownRequestTypes = []byte{DepositRequestType, WithdrawalRequestType, ConsolidationRequestType}
+var KnownRequestTypes = []byte{DepositRequestType, WithdrawalRequestType, ConsolidationRequestType, BuilderDepositRequestType, BuilderExitRequestType}
 
 // FlatRequest carries serialized (flat) request data from any known Request type
 // The RequestData slice can contain collated data for more than one request of the same type
@@ -42,7 +48,12 @@ type FlatRequest struct {
 func (f *FlatRequest) RequestType() byte { return f.Type }
 
 // Encodes flat encoding of request the way it should be serialized
-func (f *FlatRequest) Encode() []byte { return append([]byte{f.Type}, f.RequestData...) }
+func (f *FlatRequest) Encode() []byte {
+	buf := make([]byte, 1+len(f.RequestData))
+	buf[0] = f.Type
+	copy(buf[1:], f.RequestData)
+	return buf
+}
 
 type FlatRequests []FlatRequest
 
@@ -55,7 +66,10 @@ func (r FlatRequests) Hash() *common.Hash {
 		if len(t.RequestData) == 0 {
 			continue
 		}
-		hi := sha256.Sum256(append([]byte{t.Type}, r[i].RequestData...))
+		buf := make([]byte, 1+len(r[i].RequestData))
+		buf[0] = t.Type
+		copy(buf[1:], r[i].RequestData)
+		hi := sha256.Sum256(buf)
 		sha.Write(hi[:])
 	}
 	h := common.BytesToHash(sha.Sum(nil))

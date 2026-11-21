@@ -21,7 +21,6 @@ package rawdb_test
 
 import (
 	"context"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -29,16 +28,19 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/execution/tests/mock"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 // Tests that positional lookup metadata can be stored and retrieved.
 func TestLookupStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	tests := []struct {
 		name                 string
@@ -56,7 +58,7 @@ func TestLookupStorage(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			m := mock.Mock(t)
+			m := execmoduletester.New(t)
 			br := m.BlockReader
 			tx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
@@ -67,7 +69,7 @@ func TestLookupStorage(t *testing.T) {
 			tx3 := types.NewTransaction(3, common.BytesToAddress([]byte{0x33}), uint256.NewInt(333), 3333, uint256.NewInt(33333), []byte{0x33, 0x33, 0x33})
 			txs := []types.Transaction{tx1, tx2, tx3}
 
-			block := types.NewBlock(&types.Header{Number: big.NewInt(314)}, txs, nil, nil, nil)
+			block := types.NewBlock(&types.Header{Number: *uint256.NewInt(314)}, txs, nil, nil, nil, nil)
 
 			// Check that no transactions entries are in a pristine database
 			for i, txn := range txs {
@@ -85,7 +87,7 @@ func TestLookupStorage(t *testing.T) {
 			if err := rawdb.WriteSenders(tx, block.Hash(), block.NumberU64(), block.Body().SendersFromTxs()); err != nil {
 				t.Fatal(err)
 			}
-			txNumMin, err := rawdbv3.TxNums.Min(context.Background(), tx, block.NumberU64())
+			txNumMin, err := rawdbv3.TxNums.Min(t.Context(), tx, block.NumberU64())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -109,7 +111,8 @@ func TestLookupStorage(t *testing.T) {
 			}
 			// Delete the transactions and check purge
 			for i, txn := range txs {
-				if err := rawdb.DeleteTxLookupEntry(tx, txn.Hash()); err != nil {
+				h := txn.Hash()
+				if err := tx.Delete(kv.TxLookup, h[:]); err != nil {
 					t.Fatal(err)
 				}
 				if txn2, _, _, _, _, _ := readTransactionByHash(tx, txn.Hash(), br); txn2 != nil {
@@ -122,7 +125,7 @@ func TestLookupStorage(t *testing.T) {
 
 // ReadTransactionByHash retrieves a specific transaction from the database, along with
 // its added positional metadata.
-func readTransactionByHash(db kv.Tx, hash common.Hash, br services.FullBlockReader) (txn types.Transaction, blockHash common.Hash, blockNumber uint64, txNum uint64, txIndex uint64, err error) {
+func readTransactionByHash(db kv.Tx, hash common.Hash, br dbservices.FullBlockReader) (txn types.Transaction, blockHash common.Hash, blockNumber uint64, txNum uint64, txIndex uint64, err error) {
 	blockNumberPtr, txNumPtr, err := rawdb.ReadTxLookupEntry(db, hash)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, 0, err

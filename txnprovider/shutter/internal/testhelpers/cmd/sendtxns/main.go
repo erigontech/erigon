@@ -30,12 +30,18 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	executiontests "github.com/erigontech/erigon/execution/tests"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/requests"
 )
 
 func main() {
+	if err := run(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	fromPkFile := flag.String("fromPkFile", "", "path to the private key file")
 	from := flag.String("from", "", "sender address")
 	to := flag.String("to", "", "receiver address")
@@ -73,8 +79,9 @@ func main() {
 	err := sendTxns(ctx, logger, *fromPkFile, *from, *to, *amount, *rpcUrl, *numTxn, *chain)
 	if err != nil {
 		logger.Error("failed to send transactions", "err", err)
-		os.Exit(1)
+		return err
 	}
+	return nil
 }
 
 func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr, amountStr, url, countStr, chain string) error {
@@ -85,7 +92,7 @@ func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr
 	chainId := spec.Config.ChainID
 
 	rpcClient := requests.NewRequestGenerator(url, logger)
-	transactor := executiontests.NewTransactor(rpcClient, chainId)
+	transactor := engineapitester.NewTransactor(rpcClient, chainId)
 	amount, _ := new(big.Int).SetString(amountStr, 10)
 	to := common.HexToAddress(toStr)
 	count, err := strconv.Atoi(countStr)
@@ -104,7 +111,7 @@ func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr
 	if fromStr != crypto.PubkeyToAddress(from.PublicKey).String() {
 		panic(fmt.Sprintf("from address mismatch: %s != %s", fromStr, crypto.PubkeyToAddress(from.PublicKey).String()))
 	}
-	for i := 0; i < count; i++ {
+	for range count {
 		txn, err := transactor.SubmitSimpleTransfer(from, to, amount)
 		if err != nil {
 			if strings.Contains(err.Error(), "failed to get transaction count: Invalid params") {

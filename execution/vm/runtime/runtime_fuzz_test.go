@@ -20,14 +20,14 @@
 package runtime
 
 import (
-	"os"
 	"testing"
 )
 
 func FuzzVmRuntime(f *testing.F) {
 	f.Fuzz(func(t *testing.T, code, input []byte) {
-		Execute(code, input, &Config{
+		// Fuzzed bytecode is expected to fail; this target looks for panics.
+		_, _, _ = Execute(code, input, &Config{
 			GasLimit: 12000000,
-		}, os.TempDir())
+		})
 	})
 }

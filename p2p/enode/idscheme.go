@@ -1,6 +1,6 @@
 // Copyright 2018 The go-ethereum Authors
 // (original work)
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // (modifications)
 // This file is part of Erigon.
 //
@@ -24,19 +24,20 @@ import (
 	"errors"
 	"io"
 
-	"golang.org/x/crypto/sha3"
+	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/p2p/discover/v4wire"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
-// List of known secure identity schemes.
+// ValidSchemes is a List of known secure identity schemes.
 var ValidSchemes = enr.SchemeMap{
 	"v4": V4ID{},
 }
 
+// ValidSchemesForTesting is a List of identity schemes for testing.
 var ValidSchemesForTesting = enr.SchemeMap{
 	"v4":   V4ID{},
 	"null": NullID{},
@@ -52,8 +53,8 @@ func SignV4(r *enr.Record, privkey *ecdsa.PrivateKey) error {
 	cpy.Set(enr.ID("v4"))
 	cpy.Set(Secp256k1(privkey.PublicKey))
 
-	h := sha3.NewLegacyKeccak256()
-	rlp.Encode(h, cpy.AppendElements(nil))
+	h := keccak.NewFastKeccak()
+	_ = rlp.Encode(h, cpy.AppendElements(nil))
 	sig, err := crypto.Sign(h.Sum(nil), privkey)
 	if err != nil {
 		return err
@@ -73,8 +74,8 @@ func (V4ID) Verify(r *enr.Record, sig []byte) error {
 		return errors.New("invalid public key")
 	}
 
-	h := sha3.NewLegacyKeccak256()
-	rlp.Encode(h, r.AppendElements(nil))
+	h := keccak.NewFastKeccak()
+	_ = rlp.Encode(h, r.AppendElements(nil))
 	if !crypto.VerifySignature(entry, h.Sum(nil), sig) {
 		return enr.ErrInvalidSig
 	}
@@ -87,20 +88,10 @@ func (V4ID) NodeAddr(r *enr.Record) []byte {
 	if err != nil {
 		return nil
 	}
-	id := PubkeyToIDV4((*ecdsa.PublicKey)(&pubkey))
-	return id[:]
-}
-
-// PubkeyToIDV4 derives the v4 node address from the given public key.
-func PubkeyToIDV4(key *ecdsa.PublicKey) ID {
-	return PubkeyEncoded(v4wire.EncodePubkey(key)).ID()
-}
-
-type PubkeyEncoded v4wire.Pubkey
-
-// ID returns the node ID corresponding to the public key.
-func (e PubkeyEncoded) ID() ID {
-	return ID(crypto.Keccak256Hash(e[:]))
+	buf := make([]byte, 64)
+	math.ReadBits(pubkey.X, buf[:32])
+	math.ReadBits(pubkey.Y, buf[32:])
+	return crypto.Keccak256(buf)
 }
 
 // Secp256k1 is the "secp256k1" key, which holds a public key.
@@ -123,7 +114,7 @@ func (v *Secp256k1) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	*v = (Secp256k1)(*pk)
+	*v = Secp256k1(*pk)
 	return nil
 }
 
@@ -160,7 +151,9 @@ func (NullID) Verify(r *enr.Record, sig []byte) error {
 
 func (NullID) NodeAddr(r *enr.Record) []byte {
 	var id ID
-	r.Load(enr.WithEntry("nulladdr", &id))
+	if err := r.Load(enr.WithEntry("nulladdr", &id)); err != nil {
+		return nil
+	}
 	return id[:]
 }
 
@@ -170,5 +163,5 @@ func SignNull(r *enr.Record, id ID) *Node {
 	if err := r.SetSig(NullID{}, []byte{}); err != nil {
 		panic(err)
 	}
-	return &Node{r: *r, id: id}
+	return newNodeWithID(r, id)
 }

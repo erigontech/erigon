@@ -33,10 +33,9 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	rnd := rand.New(rand.NewSource(133777))
 	keysCount := rnd.Intn(100_0000)
 
-	// generate updates
 	b.Logf("keys count: %d", keysCount)
 	builder := NewUpdateBuilder()
-	for i := 0; i < keysCount; i++ {
+	for range keysCount {
 		key := make([]byte, length.Addr)
 		rnd.Read(key)
 
@@ -44,12 +43,11 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	}
 	pk, updates := builder.Build()
 	b.Logf("%d keys generated", keysCount)
-	ms := NewMockState(&testing.T{})
+	ms := NewMockState(b)
 	err := ms.applyPlainUpdates(pk, updates)
 	require.NoError(b, err)
 
-	hph := NewHexPatriciaHashed(length.Addr, ms)
-	hph.EnableCsvMetrics("./ericom")
+	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	upds := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, nil, nil)
 	defer upds.Close()
 
@@ -62,5 +60,13 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 		WrapKeyUpdatesInto(b, upds, pk[i:i+5], updates[i:i+5])
 		_, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 		require.NoError(b, err)
+	}
+}
+
+func BenchmarkStateEncode(b *testing.B) {
+	s := state{Root: make([]byte, 128), RootPresent: true, RootChecked: true}
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = s.Encode(nil)
 	}
 }

@@ -21,14 +21,16 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
+
+	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -39,8 +41,8 @@ import (
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type seenSyncCommitteeContribution struct {
@@ -53,7 +55,7 @@ type syncContributionService struct {
 	syncedDataManager              *synced_data.SyncedDataManager
 	beaconCfg                      *clparams.BeaconChainConfig
 	syncContributionPool           sync_contribution_pool.SyncContributionPool
-	seenSyncCommitteeContributions sync.Map //  map[seenSyncCommitteeContribution]struct{}
+	seenSyncCommitteeContributions *lru.Cache[seenSyncCommitteeContribution, struct{}]
 	emitters                       *beaconevents.EventEmitter
 	ethClock                       eth_clock.EthereumClock
 	batchSignatureVerifier         *BatchSignatureVerifier
@@ -72,6 +74,10 @@ type SignedContributionAndProofForGossip struct {
 }
 
 // NewSyncContributionService creates a new sync contribution service
+// seenContributionSlots sizes the seen set in slots of SyncCommitteeSize keys each: a key stays
+// admitted while the clock admits its slot and the two adjacent ones, plus one slot of margin.
+const seenContributionSlots = 4
+
 func NewSyncContributionService(
 	syncedDataManager *synced_data.SyncedDataManager,
 	beaconCfg *clparams.BeaconChainConfig,
@@ -86,11 +92,15 @@ func NewSyncContributionService(
 	if err != nil {
 		panic(err)
 	}
+	seenSyncCommitteeContributions, err := lru.New[seenSyncCommitteeContribution, struct{}]("seenSyncCommitteeContributions", int(beaconCfg.SyncCommitteeSize)*seenContributionSlots)
+	if err != nil {
+		panic(err)
+	}
 	return &syncContributionService{
 		syncedDataManager:              syncedDataManager,
 		beaconCfg:                      beaconCfg,
 		syncContributionPool:           syncContributionPool,
-		seenSyncCommitteeContributions: sync.Map{},
+		seenSyncCommitteeContributions: seenSyncCommitteeContributions,
 		ethClock:                       ethClock,
 		emitters:                       emitters,
 		batchSignatureVerifier:         batchSignatureVerifier,
@@ -144,11 +154,20 @@ func (s *syncContributionService) isLocalValidatorProposer(headState *state.Cach
 }
 
 func (s *syncContributionService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*SignedContributionAndProofForGossip, error) {
+	// Pre-allocate with config-aware aggregation bits size so DecodeSSZ uses the
+	// correct byte length for the current preset (minimal: 1 byte, mainnet: 16 bytes).
+	aggBitsSize := int(s.beaconCfg.SyncCommitteeSize / s.beaconCfg.SyncCommitteeSubnetCount / 8)
+	contrib := &cltypes.Contribution{}
+	contrib.SetAggregationBitsSize(aggBitsSize)
 	obj := &SignedContributionAndProofForGossip{
-		Receiver:                   &sentinelproto.Peer{Pid: pid.String()},
-		SignedContributionAndProof: &cltypes.SignedContributionAndProof{},
+		Receiver: &sentinelproto.Peer{Pid: pid.String()},
+		SignedContributionAndProof: &cltypes.SignedContributionAndProof{
+			Message: &cltypes.ContributionAndProof{
+				Contribution: contrib,
+			},
+		},
 	}
-	if err := obj.SignedContributionAndProof.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj.SignedContributionAndProof, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -164,7 +183,6 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 	aggregationBits := contributionAndProof.Contribution.AggregationBits
 
 	return s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-
 		// [IGNORE] The contribution's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. contribution.slot == current_slot.
 		if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(contributionAndProof.Contribution.Slot) {
 			return ErrIgnore
@@ -176,26 +194,31 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 		}
 
 		// [REJECT] The subcommittee index is in the allowed range, i.e. contribution.subcommittee_index < SYNC_COMMITTEE_SUBNET_COUNT.
-		if contributionAndProof.Contribution.SubcommitteeIndex >= clparams.MainnetBeaconConfig.SyncCommitteeSubnetCount {
+		if contributionAndProof.Contribution.SubcommitteeIndex >= s.beaconCfg.SyncCommitteeSubnetCount {
 			return errors.New("subcommittee index is out of range")
+		}
+
+		// [REJECT] The selection proof selects the validator as an aggregator for the slot. It does not
+		// depend on the state, so it runs before the committee lookup.
+		modulo := max(1, s.beaconCfg.SyncCommitteeSize/s.beaconCfg.SyncCommitteeSubnetCount/s.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
+		hashSignature := crypto.Sha256(selectionProof[:])
+		if !s.test && binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
+			return errors.New("selects the validator as an aggregator")
 		}
 
 		aggregatorPubKey, err := headState.ValidatorPublicKey(int(contributionAndProof.AggregatorIndex))
 		if err != nil {
 			return err
 		}
-		subcommiteePubsKeys, err := s.getSyncSubcommitteePubkeys(headState, contributionAndProof.Contribution.SubcommitteeIndex)
+		subcommiteePubsKeys, err := s.getSyncSubcommitteePubkeys(headState, contributionAndProof.Contribution.Slot, contributionAndProof.Contribution.SubcommitteeIndex)
+		if errors.Is(err, state.ErrSyncCommitteeNotInState) {
+			return fmt.Errorf("%w: %w", ErrIgnore, err)
+		}
 		if err != nil {
 			return err
 		}
 
-		modulo := max(1, s.beaconCfg.SyncCommitteeSize/s.beaconCfg.SyncCommitteeSubnetCount/s.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
-		hashSignature := utils.Sha256(selectionProof[:])
-		if !s.test && binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
-			return errors.New("selects the validator as an aggregator")
-		}
-
-		// [REJECT] The aggregator's validator index is in the declared subcommittee of the current sync committee -- i.e. state.validators[contribution_and_proof.aggregator_index].pubkey in get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index).
+		// [REJECT] The aggregator's validator index is in the declared subcommittee of the sync committee that signs for the contribution slot -- i.e. state.validators[contribution_and_proof.aggregator_index].pubkey in get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index).
 		if !slices.Contains(subcommiteePubsKeys, aggregatorPubKey) {
 			return errors.New("aggregator's validator index is not in subcommittee")
 		}
@@ -227,7 +250,6 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 
 		// further processing will be done after async signature verification
 		aggregateVerificationData.F = func() {
-
 			// mark the valid contribution as seen
 			s.markContributionAsSeen(contributionAndProof)
 
@@ -260,8 +282,8 @@ func (s *syncContributionService) GetSignaturesOnContributionSignatures(
 	headState *state.CachingBeaconState,
 	contributionAndProof *cltypes.ContributionAndProof,
 	signedContribution *SignedContributionAndProofForGossip,
-	subcommiteePubsKeys []common.Bytes48) (*AggregateVerificationData, error) {
-
+	subcommiteePubsKeys []common.Bytes48,
+) (*AggregateVerificationData, error) {
 	// [REJECT] The contribution_and_proof.selection_proof is a valid signature of the SyncAggregatorSelectionData derived from the contribution by the validator with index contribution_and_proof.aggregator_index.
 	signature1, signatureRoot1, pubKey1, err := verifySyncContributionSelectionProof(headState, contributionAndProof)
 	if !s.test && err != nil {
@@ -287,27 +309,12 @@ func (s *syncContributionService) GetSignaturesOnContributionSignatures(
 	}, nil
 }
 
-// def get_sync_subcommittee_pubkeys(state: BeaconState, subcommittee_index: uint64) -> Sequence[BLSPubkey]:
-//
-//	# Committees assigned to `slot` sign for `slot - 1`
-//	# This creates the exceptional logic below when transitioning between sync committee periods
-//	next_slot_epoch = compute_epoch_at_slot(Slot(state.slot + 1))
-//	if compute_sync_committee_period(get_current_epoch(state)) == compute_sync_committee_period(next_slot_epoch):
-//	    sync_committee = state.current_sync_committee
-//	else:
-//	    sync_committee = state.next_sync_committee
-//	# Return pubkeys for the subcommittee index
-//	sync_subcommittee_size = SYNC_COMMITTEE_SIZE // SYNC_COMMITTEE_SUBNET_COUNT
-//	i = subcommittee_index * sync_subcommittee_size
-//	return sync_committee.pubkeys[i:i + sync_subcommittee_size]
-
-// getSyncSubcommitteePubkeys returns the public keys of the validators in the given subcommittee.
-func (s *syncContributionService) getSyncSubcommitteePubkeys(st *state.CachingBeaconState, subcommitteeIndex uint64) ([]common.Bytes48, error) {
-	var syncCommittee *solid.SyncCommittee
-	if s.beaconCfg.SyncCommitteePeriod(st.Slot()) == s.beaconCfg.SyncCommitteePeriod(st.Slot()+1) {
-		syncCommittee = st.CurrentSyncCommittee()
-	} else {
-		syncCommittee = st.NextSyncCommittee()
+// getSyncSubcommitteePubkeys returns the public keys of the given subcommittee of the committee that signs for slot
+// (get_sync_subcommittee_pubkeys, with the committee chosen by state.SyncCommitteeForMessageSlot).
+func (s *syncContributionService) getSyncSubcommitteePubkeys(st *state.CachingBeaconState, slot, subcommitteeIndex uint64) ([]common.Bytes48, error) {
+	syncCommittee, err := state.SyncCommitteeForMessageSlot(st, slot)
+	if err != nil {
+		return nil, err
 	}
 	syncSubcommitteeSize := s.beaconCfg.SyncCommitteeSize / s.beaconCfg.SyncCommitteeSubnetCount
 	i := subcommitteeIndex * syncSubcommitteeSize
@@ -322,18 +329,21 @@ func (s *syncContributionService) wasContributionSeen(contribution *cltypes.Cont
 		subCommitteeIndex: contribution.Contribution.SubcommitteeIndex,
 	}
 
-	_, ok := s.seenSyncCommitteeContributions.Load(key)
-	return ok
+	return s.seenSyncCommitteeContributions.Contains(key)
 }
 
-// markContributionAsSeen marks the contribution as seen.
+// markContributionAsSeen marks the contribution as seen. A late verification callback for a
+// slot the clock no longer admits is skipped, so it cannot evict a key that is still live.
 func (s *syncContributionService) markContributionAsSeen(contribution *cltypes.ContributionAndProof) {
+	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(contribution.Contribution.Slot) {
+		return
+	}
 	key := seenSyncCommitteeContribution{
 		aggregatorIndex:   contribution.AggregatorIndex,
 		slot:              contribution.Contribution.Slot,
 		subCommitteeIndex: contribution.Contribution.SubcommitteeIndex,
 	}
-	s.seenSyncCommitteeContributions.Store(key, struct{}{})
+	s.seenSyncCommitteeContributions.Add(key, struct{}{})
 }
 
 // verifySyncContributionProof verifies the sync contribution proof.
@@ -349,7 +359,8 @@ func verifySyncContributionSelectionProof(st *state.CachingBeaconState, contribu
 		return nil, nil, nil, err
 	}
 
-	domain, err := st.GetDomain(st.BeaconConfig().DomainSyncCommitteeSelectionProof, state.GetEpochAtSlot(st.BeaconConfig(), contributionAndProof.Contribution.Slot))
+	cfg := st.BeaconConfig()
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainSyncCommitteeSelectionProof, state.GetEpochAtSlot(cfg, contributionAndProof.Contribution.Slot), st.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -364,17 +375,18 @@ func verifySyncContributionSelectionProof(st *state.CachingBeaconState, contribu
 
 // verifySyncContributionProof verifies the contribution aggregated signature.
 func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState, contribution *cltypes.Contribution, subCommitteeKeys []common.Bytes48) ([]byte, []byte, []byte, error) {
-	domain, err := s.GetDomain(s.BeaconConfig().DomainSyncCommittee, state.Epoch(s))
+	cfg := s.BeaconConfig()
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainSyncCommittee, state.GetEpochAtSlot(cfg, contribution.Slot), s.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	msg := utils.Sha256(contribution.BeaconBlockRoot[:], domain)
+	msg := crypto.Sha256(contribution.BeaconBlockRoot[:], domain)
 	// only use the ones pertaining to the aggregation bits
 	subCommitteePubsKeys := make([][]byte, 0, len(subCommitteeKeys))
 	for i, key := range subCommitteeKeys {
 		if utils.IsBitOn(contribution.AggregationBits, i) {
-			subCommitteePubsKeys = append(subCommitteePubsKeys, common.Copy(key[:]))
+			subCommitteePubsKeys = append(subCommitteePubsKeys, bytes.Clone(key[:]))
 		}
 	}
 
@@ -388,7 +400,8 @@ func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState,
 
 func verifyAggregatorSignatureForSyncContribution(s *state.CachingBeaconState, signedContributionAndProof *cltypes.SignedContributionAndProof) ([]byte, []byte, []byte, error) {
 	contribution := signedContributionAndProof.Message.Contribution
-	domain, err := s.GetDomain(s.BeaconConfig().DomainContributionAndProof, contribution.Slot/s.BeaconConfig().SlotsPerEpoch)
+	cfg := s.BeaconConfig()
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainContributionAndProof, state.GetEpochAtSlot(cfg, contribution.Slot), s.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, err
 	}

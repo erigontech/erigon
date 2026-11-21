@@ -20,6 +20,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,20 +28,19 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/compiler"
 	cli2 "github.com/erigontech/erigon/node/cli"
 )
 
 var (
-	app *cli.App
+	app *cli.Command
 
 	// Flags needed by abigen
 	abiFlag = cli.StringFlag{
@@ -83,7 +83,7 @@ var (
 )
 
 func init() {
-	app = cli2.NewApp(version.GitCommit, "ethereum checkpoint helper tool")
+	app = cli2.NewApp("ethereum checkpoint helper tool")
 	app.Flags = []cli.Flag{
 		&abiFlag,
 		&binFlag,
@@ -98,7 +98,7 @@ func init() {
 	app.Action = abigen
 }
 
-func abigen(c *cli.Context) error {
+func abigen(_ context.Context, c *cli.Command) error {
 	utils.CheckExclusive(c, &abiFlag, &jsonFlag) // Only one source can be selected.
 	if c.String(pkgFlag.Name) == "" {
 		utils.Fatalf("No destination package specified (--pkg)")
@@ -216,7 +216,7 @@ func abigen(c *cli.Context) error {
 		fmt.Printf("%s\n", code)
 		return nil
 	}
-	if err := os.WriteFile(c.String(outFlag.Name), []byte(code), 0600); err != nil {
+	if err := os.WriteFile(c.String(outFlag.Name), []byte(code), 0o600); err != nil {
 		utils.Fatalf("Failed to write ABI binding: %v", err)
 	}
 	return nil
@@ -225,7 +225,7 @@ func abigen(c *cli.Context) error {
 func main() {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	if err := app.Run(os.Args); err != nil {
+	if err := app.Run(context.Background(), os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

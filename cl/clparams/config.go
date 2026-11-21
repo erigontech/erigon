@@ -17,20 +17,17 @@
 package clparams
 
 import (
-	"crypto/rand"
+	"cmp"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	mathrand "math/rand"
 	"os"
-	"path"
-	"sort"
-	"strconv"
+	"slices"
 	"time"
 
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 
 	"github.com/c2h5oh/datasize"
 
@@ -39,9 +36,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	executiontypes "github.com/erigontech/erigon/execution/types"
 )
 
-var LatestStateFileName = "latest.ssz_snappy"
+// LatestFinalizedStateFileName holds the node's own most-recently-finalized beacon state, used to
+// resume from a locally-provable finalized anchor on restart.
+var LatestFinalizedStateFileName = "finalized.ssz_snappy"
 
 type CaplinConfig struct {
 	// Archive related config
@@ -50,14 +50,34 @@ type CaplinConfig struct {
 	ArchiveStates             bool
 	ImmediateBlobsBackfilling bool
 	BlobPruningDisabled       bool
-	SnapshotGenerationEnabled bool
+	// BlobsArchiveFromSlot bounds ArchiveBlobs: blob sidecars are kept from the lower of this
+	// slot and the spec serving-window floor, and dropped below it. Zero keeps the whole
+	// history since Deneb.
+	BlobsArchiveFromSlot uint64
+	// BlobsBackfillEndpoints are beacon API endpoints the blob backfill asks for a block's blobs before peers;
+	// BlobsBackfillEndpointWorkers bounds the missing KZG proofs computed at a time, and twice as many blocks are fetched.
+	BlobsBackfillEndpoints       []string
+	BlobsBackfillEndpointWorkers int
+	SnapshotGenerationEnabled    bool
+	// ColumnKeepSlots is the number of slots to keep PeerDAS data column sidecars.
+	// Zero resolves to the active chain's spec window, MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS *
+	// SLOTS_PER_EPOCH, which differs per chain because SLOTS_PER_EPOCH does.
+	// Increase for DA oracle nodes or rollups that need longer history; decrease only if disk is constrained
+	// and spec compliance for column serving is not required.
+	ColumnKeepSlots uint64
 	// Network related config
 	NetworkId NetworkType
 	// DisableCheckpointSync is optional and is used to disable checkpoint sync used by default in the node
 	DisabledCheckpointSync bool
+	// ResumeMaxStalenessEpochs bounds how stale a locally-finalized state may be to resume from it
+	// on restart instead of remote checkpoint syncing. 0 = computed default; values above the active
+	// fork's sidecar-retention window are clamped down (see resolveResumeHorizonSlots).
+	ResumeMaxStalenessEpochs uint64
 	// CaplinMeVRelayUrl is optional and is used to connect to the external builder service.
 	// If it's set, the node will start in builder mode
 	MevRelayUrl string
+	// AllowPrivateBuilderURLs permits validator-configured builder URLs to resolve to private addresses.
+	AllowPrivateBuilderURLs bool
 	// EnableValidatorMonitor is used to enable the validator monitor metrics and corresponding logs
 	EnableValidatorMonitor bool
 
@@ -65,15 +85,24 @@ type CaplinConfig struct {
 	CustomConfigPath       string
 	CustomGenesisStatePath string
 
+	// Dev validator (embedded VC for --chain=dev)
+	DevValidatorSeed  string // deterministic BLS key seed; empty = disabled
+	DevValidatorCount int    // number of validators (default 64)
+
 	// Network stuff
 	CaplinDiscoveryAddr         string
 	CaplinDiscoveryPort         uint64
 	CaplinDiscoveryTCPPort      uint64
+	CaplinDiscoveryQUICPort     uint64
+	CaplinDisableQUIC           bool
 	SentinelAddr                string
 	SentinelPort                uint64
 	SubscribeAllTopics          bool
 	MaxPeerCount                uint64
+	DisableIPBlockLimits        bool
+	TrustedCIDRs                []string
 	EnableUPnP                  bool
+	CaplinNAT                   string // NAT mode for Caplin P2P (extip:<IP>|stun|upnp|pmp|none)
 	MaxInboundTrafficPerPeer    datasize.ByteSize
 	MaxOutboundTrafficPerPeer   datasize.ByteSize
 	AdptableTrafficRequirements bool
@@ -82,6 +111,7 @@ type CaplinConfig struct {
 	// Beacon API router configuration
 	BeaconAPIRouter beacon_router_configuration.RouterConfiguration
 
+	LocalDiscovery bool
 	BootstrapNodes []string
 	StaticPeers    []string
 
@@ -90,15 +120,51 @@ type CaplinConfig struct {
 }
 
 func (c CaplinConfig) IsDevnet() bool {
-	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != ""
+	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != "" || c.DevValidatorSeed != ""
+}
+
+// SnapshotBlobsFromSlot is the cutoff for filtering blob snapshot downloads. The download filter
+// sizes the serving window from the built-in config of the chain, so a custom beacon config,
+// whose window may be longer, downloads every blob segment and leaves the cut to pruning.
+func (c CaplinConfig) SnapshotBlobsFromSlot() uint64 {
+	if c.IsDevnet() {
+		return 0
+	}
+	return c.BlobsArchiveFromSlot
 }
 
 func (c CaplinConfig) HaveInvalidDevnetParams() bool {
 	return c.CustomConfigPath == "" || c.CustomGenesisStatePath == ""
 }
 
+func (c CaplinConfig) ApplyNetworkOverrides(networkConfig *NetworkConfig) {
+	if len(c.BootstrapNodes) > 0 {
+		networkConfig.BootNodes = c.BootstrapNodes
+	}
+	if c.StaticPeers != nil {
+		networkConfig.StaticPeers = c.StaticPeers
+	}
+}
+
 func (c CaplinConfig) RelayUrlExist() bool {
 	return c.MevRelayUrl != ""
+}
+
+func MinBlobRetentionFloor(fromSlot, serveFloor uint64) uint64 {
+	return min(fromSlot, serveFloor)
+}
+
+// BlobRetentionFloor returns the lowest slot whose blob sidecars are kept at currentSlot.
+// A bounded archive never drops below the spec serving window.
+func (c CaplinConfig) BlobRetentionFloor(beaconCfg *BeaconChainConfig, currentSlot uint64) uint64 {
+	if c.BlobPruningDisabled {
+		return 0
+	}
+	serveFloor := beaconCfg.BlobSidecarServeRangeStartSlot(currentSlot)
+	if c.ArchiveBlobs {
+		return MinBlobRetentionFloor(c.BlobsArchiveFromSlot, serveFloor)
+	}
+	return serveFloor
 }
 
 type NetworkType int
@@ -109,8 +175,12 @@ const (
 	MaxDialTimeout               = 15 * time.Second
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 15 * 1024 * 1024
+	MaxPayloadSize uint64        = 10 * 1024 * 1024
 	ReqTimeout     time.Duration = 5 * time.Second
 	RespTimeout    time.Duration = 10 * time.Second
+	// ExecutionPayload transactions bounds from consensus specs.
+	MaxBytesPerTransactionDefault    uint64 = 1 << 30
+	MaxTransactionsPerPayloadDefault uint64 = 1 << 20
 )
 
 const (
@@ -130,15 +200,16 @@ var (
 		"enr:-Jq4QItoFUuug_n_qbYbU0OY04-np2wT8rUCauOOXNi0H3BWbDj-zbfZb7otA7jZ6flbBpx1LNZK2TDebZ9dEKx84LYBhGV0aDKQtTA_KgEAAAD__________4JpZIJ2NIJpcISsaa0ZiXNlY3AyNTZrMaEDHAD2JKYevx89W0CcFJFiskdcEzkH_Wdv9iW42qLK79ODdWRwgiMo",
 		"enr:-Jq4QN_YBsUOqQsty1OGvYv48PMaiEt1AzGD1NkYQHaxZoTyVGqMYXg0K9c0LPNWC9pkXmggApp8nygYLsQwScwAgfgBhGV0aDKQtTA_KgEAAAD__________4JpZIJ2NIJpcISLosQxiXNlY3AyNTZrMaEDBJj7_dLFACaxBfaI8KZTh_SSJUjhyAyfshimvSqo22WDdWRwgiMo",
 		// EF bootnodes
-		"enr:-Ku4QHqVeJ8PPICcWk1vSn_XcSkjOkNiTg6Fmii5j6vUQgvzMc9L1goFnLKgXqBJspJjIsB91LTOleFmyWWrFVATGngBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhAMRHkWJc2VjcDI1NmsxoQKLVXFOhp2uX6jeT0DvvDpPcU8FWMjQdR4wMuORMhpX24N1ZHCCIyg",
-		"enr:-Ku4QG-2_Md3sZIAUebGYT6g0SMskIml77l6yR-M_JXc-UdNHCmHQeOiMLbylPejyJsdAPsTHJyjJB2sYGDLe0dn8uYBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhBLY-NyJc2VjcDI1NmsxoQORcM6e19T1T9gi7jxEZjk_sjVLGFscUNqAY9obgZaxbIN1ZHCCIyg",
-		"enr:-Ku4QPn5eVhcoF1opaFEvg1b6JNFD2rqVkHQ8HApOKK61OIcIXD127bKWgAtbwI7pnxx6cDyk_nI88TrZKQaGMZj0q0Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhDayLMaJc2VjcDI1NmsxoQK2sBOLGcUb4AwuYzFuAVCaNHA-dy24UuEKkeFNgCVCsIN1ZHCCIyg",
-		"enr:-Ku4QEWzdnVtXc2Q0ZVigfCGggOVB2Vc1ZCPEc6j21NIFLODSJbvNaef1g4PxhPwl_3kax86YPheFUSLXPRs98vvYsoBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhDZBrP2Jc2VjcDI1NmsxoQM6jr8Rb1ktLEsVcKAPa08wCsKUmvoQ8khiOl_SLozf9IN1ZHCCIyg",
+		"enr:-KG4QIH7EyRfHFmXLZaG6j0bMvow18k63nKWPfppuKh6iBHMPGM93HX3W3hl7jZdv_Hz8yd_jXVHX2loStJKOZqNRu0BgmlkgnY0gmlwhNRj2kKDaXA2kCoAHKALAA0CAAAAAAAAAF6Jc2VjcDI1NmsxoQMngQgKvKJR49-jugrZ_05LhAHbUlSCwZ_HyqVCb3SXYoN1ZHCCTrqEdWRwNoJOug",
+		"enr:-KG4QJIyNiCpvXrnK8dugxmFckcIduvuQraNlX0GlKwF-XyPeZ-ZG7_yHhsr08K85X1utedECuRXhXiPYJoMogs8ai4BgmlkgnY0gmlwhIHUpj2DaXA2kCYEqIAABAHQAAAAA2GdUACJc2VjcDI1NmsxoQNQbzy36fddhPGH1I6D5rQyj8zUDGWQAkkWS37qBLB_yIN1ZHCCIyiEdWRwNoIjKA",
+		"enr:-KG4QDU7s2q7Cl_qGr2BucsrhN1bKywwstBqMLUtR6f_pOejVAjXLAQsFBOCSgALH_Oy7eshQ2ic7CbFwRZIxZGIMMsBgmlkgnY0gmlwhJB-_BiDaXA2kCQAYYABAADQAAAAAYEgYAGJc2VjcDI1NmsxoQLACT5Njs8OjnCiL4_11wgqunT0BPxQ5PndoKoF6ICNWYN1ZHCCIyiEdWRwNoIjKA",
+		"enr:-KG4QD_qJswcSJKmI_kjUZ-QbUuLUzniIakQbJKgh4YFzluGEKikFzaVoIbS7jpbw2K9hjmWTn7Ha3zyNIm0Ysu-dSgBgmlkgnY0gmlwhLKc14yDaXA2kCoBBP8A9DxKAAAAAAAAAAGJc2VjcDI1NmsxoQOVp1YSg2ZkGenRZi4iGebFira2xZrER7F_WW55-Rd3boN1ZHCCIyiEdWRwNoIjKA",
+		"enr:-KG4QIFbm7kLOmOeiDwjSxLXEN0Ms4advV742CYLpGUCndm2XvAnM9uKVdWpydb8Gpstk44eFDlZlPDyV2gX7uH7KHgBgmlkgnY0gmlwhAXfXlGDaXA2kCoBBP8C8BytAAAAAAAAAAGJc2VjcDI1NmsxoQIAizAK-MKs-s08GzGzoPVIaBmfdKqosqxSkwxUuV2UnIN1ZHCCIyiEdWRwNoIjKA",
 		// Nimbus bootnodes
 		"enr:-LK4QA8FfhaAjlb_BXsXxSfiysR7R52Nhi9JBt4F8SPssu8hdE1BXQQEtVDC3qStCW60LSO7hEsVHv5zm8_6Vnjhcn0Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhAN4aBKJc2VjcDI1NmsxoQJerDhsJ-KxZ8sHySMOCmTO6sHM3iCFQ6VMvLTe948MyYN0Y3CCI4yDdWRwgiOM",
 		"enr:-LK4QKWrXTpV9T78hNG6s8AM6IO4XH9kFT91uZtFg1GcsJ6dKovDOr1jtAAFPnS2lvNltkOGA9k29BUN7lFh_sjuc9QBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhANAdd-Jc2VjcDI1NmsxoQLQa6ai7y9PMN5hpLe5HmiJSlYzMuzP7ZhwRiwHvqNXdoN0Y3CCI4yDdWRwgiOM",
 	}
-	SepoliaBootstrapNodes = append(MainnetBootstrapNodes,
+	SepoliaBootstrapNodes = []string{
 		"enr:-Iq4QMCTfIMXnow27baRUb35Q8iiFHSIDBJh6hQM5Axohhf4b6Kr_cOCu0htQ5WvVqKvFgY28893DHAg8gnBAXsAVqmGAX53x8JggmlkgnY0gmlwhLKAlv6Jc2VjcDI1NmsxoQK6S-Cii_KmfFdUJL2TANL3ksaKUnNXvTCv1tLwXs0QgIN1ZHCCIyk",
 		"enr:-KG4QE5OIg5ThTjkzrlVF32WT_-XT14WeJtIz2zoTqLLjQhYAmJlnk4ItSoH41_2x0RX0wTFIe5GgjRzU2u7Q1fN4vADhGV0aDKQqP7o7pAAAHAyAAAAAAAAAIJpZIJ2NIJpcISlFsStiXNlY3AyNTZrMaEC-Rrd_bBZwhKpXzFCrStKp1q_HmGOewxY3KwM8ofAj_ODdGNwgiMog3VkcIIjKA",
 		"enr:-L64QC9Hhov4DhQ7mRukTOz4_jHm4DHlGL726NWH4ojH1wFgEwSin_6H95Gs6nW2fktTWbPachHJ6rUFu0iJNgA0SB2CARqHYXR0bmV0c4j__________4RldGgykDb6UBOQAABx__________-CaWSCdjSCaXCEA-2vzolzZWNwMjU2azGhA17lsUg60R776rauYMdrAz383UUgESoaHEzMkvm4K6k6iHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
@@ -147,13 +218,13 @@ var (
 		// Lodestar bootnode
 		"enr:-KG4QJejf8KVtMeAPWFhN_P0c4efuwu1pZHELTveiXUeim6nKYcYcMIQpGxxdgT2Xp9h-M5pr9gn2NbbwEAtxzu50Y8BgmlkgnY0gmlwhEEVkQCDaXA2kCoBBPnAEJg4AAAAAAAAAAGJc2VjcDI1NmsxoQLEh_eVvk07AQABvLkTGBQTrrIOQkzouMgSBtNHIRUxOIN1ZHCCIyiEdWRwNoIjKA",
 		// EF bootnodes
-		"enr:-Ku4QDZ_rCowZFsozeWr60WwLgOfHzv1Fz2cuMvJqN5iJzLxKtVjoIURY42X_YTokMi3IGstW5v32uSYZyGUXj9Q_IECh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhIpEe5iJc2VjcDI1NmsxoQNHTpFdaNSCEWiN_QqT396nb0PzcUpLe3OVtLph-AciBYN1ZHCCIy0",
-		"enr:-Ku4QHRyRwEPT7s0XLYzJ_EeeWvZTXBQb4UCGy1F_3m-YtCNTtDlGsCMr4UTgo4uR89pv11uM-xq4w6GKfKhqU31hTgCh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhIrFM7WJc2VjcDI1NmsxoQI4diTwChN3zAAkarf7smOHCdFb1q3DSwdiQ_Lc_FdzFIN1ZHCCIy0",
-		"enr:-Ku4QOkvvf0u5Hg4-HhY-SJmEyft77G5h3rUM8VF_e-Hag5cAma3jtmFoX4WElLAqdILCA-UWFRN1ZCDJJVuEHrFeLkDh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhJK-AWeJc2VjcDI1NmsxoQLFcT5VE_NMiIC8Ll7GypWDnQ4UEmuzD7hF_Hf4veDJwIN1ZHCCIy0",
-		"enr:-Ku4QH6tYsHKITYeHUu5kdfXgEZWI18EWk_2RtGOn1jBPlx2UlS_uF3Pm5Dx7tnjOvla_zs-wwlPgjnEOcQDWXey51QCh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhIs7Mc6Jc2VjcDI1NmsxoQIET4Mlv9YzhrYhX_H9D7aWMemUrvki6W4J2Qo0YmFMp4N1ZHCCIy0",
-		"enr:-Ku4QDmz-4c1InchGitsgNk4qzorWMiFUoaPJT4G0IiF8r2UaevrekND1o7fdoftNucirj7sFFTTn2-JdC2Ej0p1Mn8Ch2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhKpA-liJc2VjcDI1NmsxoQMpHP5U1DK8O_JQU6FadmWbE42qEdcGlllR8HcSkkfWq4N1ZHCCIy0")
-
-	GnosisBootstrapNodes = append(MainnetBootstrapNodes, []string{
+		"enr:-KG4QCK5YeEoL55e2hoS6nCregwx0Zd6NQ3rhVDfeg5Q8ozUNmUYTskpmuqo2WYFo3z24-cWC9qrU3yYKDSJ299lh8sBgmlkgnY0gmlwhNRj2kKDaXA2kCoAHKALAA0CAAAAAAAAAF6Jc2VjcDI1NmsxoQLzqnTxu_nlM8V_semraAjfbH9HZpcbVUCXH2qanVPsroN1ZHCCTruEdWRwNoJOuw",
+		"enr:-KG4QF0FvRL7Eqc4oURFhOkS0V6guntLnw54dYgTruM7z9TAMWhRpCrxZ7Pd536-q4qlwdW13czht8_UEWwGyJesu1gBgmlkgnY0gmlwhIHUpj2DaXA2kCYEqIAABAHQAAAAA2GdUACJc2VjcDI1NmsxoQL5iA7gNCs4SDmnXz8Isacq0EJbJfvV_uJlccoHxHU5ZYN1ZHCCI4yEdWRwNoIjjA",
+		"enr:-KG4QI4reJ1D_BwCwg6EKAuo2HEWoIVVNjphtOTJP2gzPVLSTYM3NFwp39TAKw-7QiQ2NVts7DK4rjJR2BEcAwh3BckBgmlkgnY0gmlwhJB-_BiDaXA2kCQAYYABAADQAAAAAYEgYAGJc2VjcDI1NmsxoQLXzHa5K0M3F4pqErIhleMByA8votAUhUXylRT6SWX2HoN1ZHCCI4yEdWRwNoIjjA",
+		"enr:-KG4QI1KOrogxK8u3Oc0QLdgkNTbAPuAMtixa6Vx05N-Bl7IOCVURUvqZ2N6JA97ts7YG1B4D3hQvZ9uQlCPYVjy1DABgmlkgnY0gmlwhLKc14yDaXA2kCoBBP8A9DxKAAAAAAAAAAGJc2VjcDI1NmsxoQLB0ZhHGRmVwXja_4o-GRN1VVJYRI11F45CTAlu1s00Q4N1ZHCCI4yEdWRwNoIjjA",
+		"enr:-KG4QKU4YfXfB3_BVI7u0VvXnSJI6cqo-tCRm-Ggh3XxBImcYvrUoKUDbIjJjG9-QphuH6gzScdf69t597M0nHut4kABgmlkgnY0gmlwhAXfXlGDaXA2kCoBBP8C8BytAAAAAAAAAAGJc2VjcDI1NmsxoQL0y83XKpPgvY7XReWg9S8bdI2UUIe5dE0N7rjOIIj4xYN1ZHCCI4yEdWRwNoIjjA",
+	}
+	GnosisBootstrapNodes = []string{
 		"enr:-Ly4QIAhiTHk6JdVhCdiLwT83wAolUFo5J4nI5HrF7-zJO_QEw3cmEGxC1jvqNNUN64Vu-xxqDKSM528vKRNCehZAfEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhEFtZ5SJc2VjcDI1NmsxoQJwgL5C-30E8RJmW8gCb7sfwWvvfre7wGcCeV4X1G2wJYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QDhEjlkf8fwO5uWAadexy88GXZneTuUCIPHhv98v8ZfXMtC0S1S_8soiT0CMEgoeLe9Db01dtkFQUnA9YcnYC_8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhEFtZ5WJc2VjcDI1NmsxoQMRSho89q2GKx_l2FZhR1RmnSiQr6o_9hfXfQUuW6bjMohzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QLKgv5M2D4DYJgo6s4NG_K4zu4sk5HOLCfGCdtgoezsbfRbfGpQ4iSd31M88ec3DHA5FWVbkgIas9EaJeXia0nwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhI1eYRaJc2VjcDI1NmsxoQLpK_A47iNBkVjka9Mde1F-Kie-R0sq97MCNKCxt2HwOIhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
@@ -161,31 +232,35 @@ var (
 		"enr:-Ly4QCD5D99p36WafgTSxB6kY7D2V1ca71C49J4VWI2c8UZCCPYBvNRWiv0-HxOcbpuUdwPVhyWQCYm1yq2ZH0ukCbQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhI1eYVSJc2VjcDI1NmsxoQJJMSV8iSZ8zvkgbi8cjIGEUVJeekLqT0LQha_co-siT4hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-KK4QKXJq1QOVWuJAGige4uaT8LRPQGCVRf3lH3pxjaVScMRUfFW1eiiaz8RwOAYvw33D4EX-uASGJ5QVqVCqwccxa-Bi4RldGgykCGm-DYDAABk__________-CaWSCdjSCaXCEM0QnzolzZWNwMjU2azGhAhNvrRkpuK4MWTf3WqiOXSOePL8Zc-wKVpZ9FQx_BDadg3RjcIIjKIN1ZHCCIyg",
 		"enr:-LO4QO87Rn2ejN3SZdXkx7kv8m11EZ3KWWqoIN5oXwQ7iXR9CVGd1dmSyWxOL1PGsdIqeMf66OZj4QGEJckSi6okCdWBpIdhdHRuZXRziAAAAABgAAAAhGV0aDKQPr_UhAQAAGT__________4JpZIJ2NIJpcIQj0iX1iXNlY3AyNTZrMaEDd-_eqFlWWJrUfEp8RhKT9NxdYaZoLHvsp3bbejPyOoeDdGNwgiMog3VkcIIjKA",
-		"enr:-LK4QIJUAxX9uNgW4ACkq8AixjnSTcs9sClbEtWRq9F8Uy9OEExsr4ecpBTYpxX66cMk6pUHejCSX3wZkK2pOCCHWHEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpA-v9SEBAAAZP__________gmlkgnY0gmlwhCPSnDuJc2VjcDI1NmsxoQNuaAjFE-ANkH3pbeBdPiEIwjR5kxFuKaBWxHkqFuPz5IN0Y3CCIyiDdWRwgiMo"}...)
-	ChiadoBootstrapNodes = append(MainnetBootstrapNodes, []string{
-		"enr:-L64QOijsdi9aVIawMb5h5PWueaPM9Ai6P17GNPFlHzz7MGJQ8tFMdYrEx8WQitNKLG924g2Q9cCdzg54M0UtKa3QIKCMxaHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5AaWYlzZWNwMjU2azGhA8CjTkD4m1s8FbKCN18LgqlYcE65jrT148vFtwd9U62SiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
-		"enr:-L64QKYKGQj5ybkfBxyFU5IEVzP7oJkGHJlie4W8BCGAYEi4P0mmMksaasiYF789mVW_AxYVNVFUjg9CyzmdvpyWQ1KCMlmHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5CtNolzZWNwMjU2azGhAuA7BAwIijy1z81AO9nz_MOukA1ER68rGA67PYQ5pF1qiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
-		"enr:-Ly4QJJUnV9BxP_rw2Bv7E9iyw4sYS2b4OQZIf4Mu_cA6FljJvOeSTQiCUpbZhZjR4R0VseBhdTzrLrlHrAuu_OeZqgJh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQGnOJc2VjcDI1NmsxoQPT_u3IjDtB2r-nveH5DhUmlM8F2IgLyxhmwmqW4L5k3ohzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
-		"enr:-MK4QCkOyqOTPX1_-F-5XVFjPclDUc0fj3EeR8FJ5-hZjv6ARuGlFspM0DtioHn1r6YPUXkOg2g3x6EbeeKdsrvVBYmGAYQKrixeh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQGlWJc2VjcDI1NmsxoQKdW3-DgLExBkpLGMRtuM88wW_gZkC7Yeg0stYDTrlynYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QLYLNqrjvSxD3lpAPBUNlxa6cIbe79JqLZLFcZZjWoCjZcw-85agLUErHiygG2weRSCLnd5V460qTbLbwJQsfZkoh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhKq7mu-Jc2VjcDI1NmsxoQP900YAYa9kdvzlSKGjVo-F3XVzATjOYp3BsjLjSophO4hzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QCGeYvTCNOGKi0mKRUd45rLj96b4pH98qG7B9TCUGXGpHZALtaL2-XfjASQyhbCqENccI4PGXVqYTIehNT9KJMQgh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQrVSJc2VjcDI1NmsxoQP9iDchx2PGl3JyJ29B9fhLCvVMN6n23pPAIIeFV-sHOIhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QAtr21x5Ps7HYhdZkIBRBgcBkvlIfEel1YNjtFWf4cV3au2LgBGICz9PtEs9-p2HUl_eME8m1WImxTxSB3AkCMwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANHhOeJc2VjcDI1NmsxoQNLp1QPV8-pyMCohOtj6xGtSBM_GtVTqzlbvNsCF4ezkYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QLgn8Bx6faigkKUGZQvd1HDToV2FAxZIiENK-lczruzQb90qJK-4E65ADly0s4__dQOW7IkLMW7ZAyJy2vtiLy8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANFIw2Jc2VjcDI1NmsxoQMa-fWEy9UJHfOl_lix3wdY5qust78sHAqZnWwEiyqKgYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-		"enr:-KG4QF7z4LUdMfgwvh-fS-MDv_1hPSUCqGfyOWGLNJuoBHKFAMSHz8geQn8v3qDDbuSQKud3WIAjKqR4gqJoLBUEJ08ZhGV0aDKQDc1ElgAAAG___________4JpZIJ2NIJpcIQjzq5ciXNlY3AyNTZrMaECt7YO363pV54d3QdgnluL5kxzhCR_k0yM9C-G6bqMGoKDdGNwgiMog3VkcIIjKA",
-		"enr:-LK4QCUTEmZrT1AgCKdyVgwnHL5J0VSoxsyjruAtwo-owBTBVEOyAnQRVNXlcW5aL-ycntk5oHDrKCR-DXZAlUAKpjEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCdM7Z1BAAAb___________gmlkgnY0gmlwhCPSfheJc2VjcDI1NmsxoQNpdf8U9pzsU9m6Hzgd1rmTI-On-QImJnkZBGqDp4org4N0Y3CCIyiDdWRwgiMo",
-	}...)
+		"enr:-LK4QIJUAxX9uNgW4ACkq8AixjnSTcs9sClbEtWRq9F8Uy9OEExsr4ecpBTYpxX66cMk6pUHejCSX3wZkK2pOCCHWHEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpA-v9SEBAAAZP__________gmlkgnY0gmlwhCPSnDuJc2VjcDI1NmsxoQNuaAjFE-ANkH3pbeBdPiEIwjR5kxFuKaBWxHkqFuPz5IN0Y3CCIyiDdWRwgiMo",
+	}
+	ChiadoBootstrapNodes = []string{
+		"enr:-IS4QC9xcSNOKeUBrjOX1-qwcPDGOvRK-Aql_YnRfuYsuXElQawANMLTOz1YfrZTMI07B7DAl9hmk3ic5G7ZHQbq4HsUgmlkgnY0gmlwhDNL9gKJc2VjcDI1NmsxoQOzB8HdKe07eQBOxu5nexAWECV47zxlau23oEYqoToy9YN1ZHCCIyg",
+		"enr:-IS4QMpCWNqXmqbtXg7vQyYBwV2xTDpgTNpgAz060TY5cpJ3JdjuwAkLG01Vf9Vlfb0jtRhJEpj0CfteG-3K_V36bmECgmlkgnY0gmlwhDmBRt6Jc2VjcDI1NmsxoQNkoifSsk1ijP3-OR9pcL2VWCSfD5_syapyrXA83GcAvYN1ZHCCIyg",
+		"enr:-IS4QBa3hl_BcjrY4z_OvhRBx7qUMBFGkjkoedGNMXgC_fzLRBsg161SipeHWAkUnSuvBg_7529-Qfxcc7CAbokn4fMCgmlkgnY0gmlwhDmA_HuJc2VjcDI1NmsxoQL8xX-V_pyU_l3AIfVokHKMN1OMUG02vcy4AMOxdyi5jIN1ZHCCIyg",
+		"enr:-IS4QEuUku9zL0V3hFHt41fqmEdvphEvrOg0D4K_TgiiaePCDH2IPzt6B3O6NLHtgJNXk3UW68DL6KVBD4rjoW-nW9ACgmlkgnY0gmlwhDYnlGKJc2VjcDI1NmsxoQP3W66lisn2YOJF4B0QDEnURZ6tqzpi5gBy9rbMfpC70YN1ZHCCIyg",
+	}
 	HoodiBootstrapNodes = []string{
-		"enr:-Mq4QLkmuSwbGBUph1r7iHopzRpdqE-gcm5LNZfcE-6T37OCZbRHi22bXZkaqnZ6XdIyEDTelnkmMEQB8w6NbnJUt9GGAZWaowaYh2F0dG5ldHOIABgAAAAAAACEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhNEmfKCEcXVpY4IyyIlzZWNwMjU2azGhA0hGa4jZJZYQAS-z6ZFK-m4GCFnWS8wfjO0bpSQn6hyEiHN5bmNuZXRzAIN0Y3CCIyiDdWRwgiMo",
-		"enr:-Ku4QLVumWTwyOUVS4ajqq8ZuZz2ik6t3Gtq0Ozxqecj0qNZWpMnudcvTs-4jrlwYRQMQwBS8Pvtmu4ZPP2Lx3i2t7YBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhNEmfKCJc2VjcDI1NmsxoQLdRlI8aCa_ELwTJhVN8k7km7IDc3pYu-FMYBs5_FiigIN1ZHCCIyk",
-		"enr:-LK4QAYuLujoiaqCAs0-qNWj9oFws1B4iy-Hff1bRB7wpQCYSS-IIMxLWCn7sWloTJzC1SiH8Y7lMQ5I36ynGV1ASj4Eh2F0dG5ldHOIYAAAAAAAAACEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhIbRilSJc2VjcDI1NmsxoQOmI5MlAu3f5WEThAYOqoygpS2wYn0XS5NV2aYq7T0a04N0Y3CCIyiDdWRwgiMo",
-		"enr:-Ku4QIC89sMC0o-irosD4_23lJJ4qCGOvdUz7SmoShWx0k6AaxCFTKviEHa-sa7-EzsiXpDp0qP0xzX6nKdXJX3X-IQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhIbRilSJc2VjcDI1NmsxoQK_m0f1DzDc9Cjrspm36zuRa7072HSiMGYWLsKiVSbP34N1ZHCCIyk",
-		"enr:-Ku4QNkWjw5tNzo8DtWqKm7CnDdIq_y7xppD6c1EZSwjB8rMOkSFA1wJPLoKrq5UvA7wcxIotH6Usx3PAugEN2JMncIBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhIbHuBeJc2VjcDI1NmsxoQP3FwrhFYB60djwRjAoOjttq6du94DtkQuaN99wvgqaIYN1ZHCCIyk",
-		"enr:-OS4QMJGE13xEROqvKN1xnnt7U-noc51VXyM6wFMuL9LMhQDfo1p1dF_zFdS4OsnXz_vIYk-nQWnqJMWRDKvkSK6_CwDh2F0dG5ldHOIAAAAADAAAACGY2xpZW502IpMaWdodGhvdXNljDcuMC4wLWJldGEuM4RldGgykNLxmX9gAAkQAAgAAAAAAACCaWSCdjSCaXCEhse4F4RxdWljgiMqiXNlY3AyNTZrMaECef77P8k5l3PC_raLw42OAzdXfxeQ-58BJriNaqiRGJSIc3luY25ldHMAg3RjcIIjKIN1ZHCCIyg",
+		"enr:-KG4QEfvG40PslpTF5F0SAnDMHYwQu7u9dMxVmglDyR0iKEsTUr0MilWHWKPh_Cyo0cHt0muy2SsrWpiC2sC_TRPiMcBgmlkgnY0gmlwhNRj2kKDaXA2kCoAHKALAA0CAAAAAAAAAF6Jc2VjcDI1NmsxoQIM-dQNDiL8ldy7S8t_bkW9awktKz1HHSF2Qups_K5S64N1ZHCCTryEdWRwNoJOvA",
+		"enr:-KG4QDNae3UVXdwSvWbZYotO9IpGRiBDzXr4owQ1_ONk_sOtIuZoI55Ja8EGtD-kzY5I_0bTaYpVefgRK2q2hD1T8sABgmlkgnY0gmlwhIHUpj2DaXA2kCYEqIAABAHQAAAAA2GdUACJc2VjcDI1NmsxoQMu3GRf_l288UJNQcXiLp4NbOQmigxSx14ddTal4tBp9IN1ZHCCI_CEdWRwNoIj8A",
+		"enr:-KG4QOOHORt2Kmo3lgoRTcqJnxH07aELtuidFEuBzN8Xdbzkfb4MblrUOXJnDEJ8RzXpTXWBEqM3q0DRphMm8xOIVbIBgmlkgnY0gmlwhJB-_BiDaXA2kCQAYYABAADQAAAAAYEgYAGJc2VjcDI1NmsxoQOf6T6A1lri5bTBzvb3sAb42Ki9L1pSqQsNzqvBUr7BjoN1ZHCCI_CEdWRwNoIj8A",
+		"enr:-KG4QM0TIrjoocAJvIY2XYOa1UzeSM1c2d3rBf1QzyxchGmzJ3OPdLKUFrjBRCPDYHhq69pEB5YKmFtKOBuF63k1pB4BgmlkgnY0gmlwhLKc14yDaXA2kCoBBP8A9DxKAAAAAAAAAAGJc2VjcDI1NmsxoQNFCY3Kl3VQfYl3lqOTN8YG0598xcIrlg1mmqKzdpLm5IN1ZHCCI_CEdWRwNoIj8A",
+		"enr:-KG4QLBt5eeWOp11A7l2WfR-sC5j3SYybU0PeEepotPzpt4kZE0nDFFZCy8NPjun3dcM8D4_xmYxZCB0WTnitKj7dAMBgmlkgnY0gmlwhAXfXlGDaXA2kCoBBP8C8BytAAAAAAAAAAGJc2VjcDI1NmsxoQLhrnwm2X7ZcxLideAlCmQvGkyHXMl7KXL0K-WDOdAoLIN1ZHCCI_CEdWRwNoIj8A",
+	}
+	BloatnetBootstrapNodes = []string{
+		"enr:-Iq4QO5d3m9DzBlj1PLCovLotwN8b9mFp_MrCx-KiNjzltphcYYT7oeD-VU7qyuNJd50X3wlJwjd6C989B3DkVcQ3tiGAZfpKz9kgmlkgnY0gmlwhJ20DuWJc2VjcDI1NmsxoQJJ3h8aUO3GJHv-bdvHtsQZ2OEisutelYfGjXO4lSg8BYN1ZHCCIzI",
+		"enr:-LK4QL8T5e1VWIkPmwdj_tYp0aR-GAqiKg2dO6azs25df44IT6TTZt-iybpRpAblEWEARfYKr3LWglSS0TNzlQ243nUEh2F0dG5ldHOIAAAAAAAAAAyEZXRoMpCpeSKMYDZEaf__________gmlkgnY0gmlwhJ20DuWJc2VjcDI1NmsxoQPlfW3XDntHy35jQwan5Cyesx4lrVVXDdyfOlcsnBL6S4N0Y3CCIyiDdWRwgiMo",
+		"enr:-N24QFEzQ_JIL0cEz4HROg-YhNJgX75kjiawDIhTt3DGKU-sYnxnTfOuCeO6B3mS0nl7-aNSPMXPzl8Gi4knbOjbGkkDh2F0dG5ldHOIAAAAAAAABgCGY2xpZW500YpMaWdodGhvdXNlhTguMS4whGV0aDKQqXkijGA2RGn__________4JpZIJ2NIJpcITOvTovhHF1aWOCIymJc2VjcDI1NmsxoQL8higsdFOIx759KuDWcM09KXKQvMqTARVKnN6S5qELUohzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-N24QPb7SqEEvJK5ws9HxJWC4K0kcSJW5ZwlWDRo7TEM2w0xIXQMRJjT8hYVlYx5e_KWZa2JMEF6kNfQ0XVijo_5a5IDh2F0dG5ldHOIAAAAYAAAAACGY2xpZW500YpMaWdodGhvdXNlhTguMS4whGV0aDKQqXkijGA2RGn__________4JpZIJ2NIJpcISdtA7mhHF1aWOCIymJc2VjcDI1NmsxoQJMmRIjDEBzk1RE01Bvb_fIXG9ZfxKs92CypoBJTE6y44hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-N24QHsp9pbbf-6tYpyaUP1eaXNbUKgkQ_kkVOqxAgF3vOrIHjDbeqVltdhkHVVzD4C4lC9zhP5HbLplCZrw5c9idNsDh2F0dG5ldHOIAAAAAMAAAACGY2xpZW500YpMaWdodGhvdXNlhTguMS4whGV0aDKQqXkijGA2RGn__________4JpZIJ2NIJpcISdtA7jhHF1aWOCIymJc2VjcDI1NmsxoQJMAIcNubXwQuD9RYFo4rcOc58C5YqexXLAS5sFzWJNTohzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Le4QGFJJPou4aP5ghuvjc_aIohwh1-hE2f2M3Ec5Qn4CJbQTMCMmzEDA8L5eiv9pLwjmrR9xcPky9S-U1YFTUo2_7cDh2F0dG5ldHOIAAADAAAAAACDY2djBIRldGgykKl5IoxgNkRp__________-CaWSCdjSCaXCEnbQO4olzZWNwMjU2azGhAlvTDd_xk8EfKIqq0uqh7RYxTkVq4KjYoE0rB75SyzGqg3RjcIIjKIN1ZHCCIyg",
+		"enr:-Mq4QGYx7TrWf9SO6dJUxcON0pT6G3LsoeHXxl7FvEOlPQpSK-pc6jqWk3REApaO5mIUzLcz9SK29Zj0naftKvJg-6eGAZxwhJQCh2F0dG5ldHOIAAAAAAAAAAyEZXRoMpCpeSKMcAAAAP__________gmlkgnY0gmlwhJ20DuGEcXVpY4IyyIlzZWNwMjU2azGhA3rJ9h5udMo-Bz4vMDH1h1YSDoKRiE4oYK6xOMictvbziHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
+		"enr:-LK4QFs_NfU-2-9t1yjePgJFVsZZoVsEx_mXN8BkKgo5f30CIUtZcxAfcDL5bE33Y77fD4rcOXD9OGbO360Vvpk9oZcEh2F0dG5ldHOIDAAAAAAAAACEZXRoMpCpeSKMYDZEaf__________gmlkgnY0gmlwhJ20DuSJc2VjcDI1NmsxoQIwulbHaiOcC3DFsV7btzBVbU1jBIM0BpwsunpYg-t8OoN0Y3CCIyiDdWRwgiMo",
 	}
 )
 
 type NetworkConfig struct {
-	GossipMaxSize                   uint64             `yaml:"GOSSIP_MAX_SIZE" json:"GOSSIP_MAX_SIZE,string"`                                       // The maximum allowed size of uncompressed gossip messages.
+	GossipMaxSize                   uint64             `yaml:"MAX_PAYLOAD_SIZE" json:"MAX_PAYLOAD_SIZE,string"`                                     // The maximum allowed size of uncompressed gossip messages.
 	GossipMaxSizeBellatrix          uint64             `yaml:"GOSSIP_MAX_SIZE_BELLATRIX" json:"GOSSIP_MAX_SIZE_BELLATRIX,string"`                   // The maximum allowed size of bellatrix uncompressed gossip messages.
 	MaxChunkSize                    uint64             `yaml:"MAX_CHUNK_SIZE" json:"MAX_CHUNK_SIZE,string"`                                         // The maximum allowed size of uncompressed req/resp chunked responses.
 	AttestationSubnetCount          uint64             `yaml:"ATTESTATION_SUBNET_COUNT" json:"ATTESTATION_SUBNET_COUNT,string"`                     // The number of attestation subnets used in the gossipsub protocol.
@@ -193,7 +268,7 @@ type NetworkConfig struct {
 	AttestationSubnetPrefixBits     uint64             `yaml:"ATTESTATION_SUBNET_PREFIX_BITS" json:"ATTESTATION_SUBNET_PREFIX_BITS,string"`         // The number of bits in the subnet prefix.
 	MessageDomainInvalidSnappy      ConfigHex4Bytes    `yaml:"-" json:"MESSAGE_DOMAIN_INVALID_SNAPPY"`                                              // 4-byte domain for gossip message-id isolation of invalid snappy messages
 	MessageDomainValidSnappy        ConfigHex4Bytes    `yaml:"-" json:"MESSAGE_DOMAIN_VALID_SNAPPY"`                                                // 4-byte domain for gossip message-id isolation of valid snappy messages
-	MaximumGossipClockDisparity     ConfigDurationMSec `yaml:"-" json:"MAXIMUM_GOSSIP_CLOCK_DISPARITY_MILLIS"`                                      // The maximum milliseconds of clock disparity assumed between honest nodes.
+	MaximumGossipClockDisparity     ConfigDurationMSec `yaml:"-" json:"MAXIMUM_GOSSIP_CLOCK_DISPARITY"`                                             // The maximum milliseconds of clock disparity assumed between honest nodes.
 	TtfbTimeout                     ConfigDurationSec  `yaml:"-" json:"TTFB_TIMEOUT"`                                                               // The maximum time to wait for first byte of request response (time-to-first-byte).
 	RespTimeout                     ConfigDurationSec  `yaml:"-" json:"RESP_TIMEOUT"`                                                               // The maximum time for complete response transfer.
 
@@ -209,6 +284,18 @@ type NetworkConfig struct {
 	StaticPeers []string `yaml:"-" json:"-"`
 }
 
+// MaxCompressedPayloadSize is the spec's max_compressed_len(MAX_PAYLOAD_SIZE): the largest
+// snappy encoding of a payload within the uncompressed limit.
+func (n *NetworkConfig) MaxCompressedPayloadSize() uint64 {
+	return 32 + n.GossipMaxSize + n.GossipMaxSize/6
+}
+
+// MaxGossipMessageSize is the spec's max_message_size(): the largest gossipsub RPC frame
+// a peer may send, max_compressed_len(payload) plus 1024 bytes of framing, at least 1 MiB.
+func (n *NetworkConfig) MaxGossipMessageSize() uint64 {
+	return max(n.MaxCompressedPayloadSize()+1024, 1<<20)
+}
+
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
 	chainspec.MainnetChainID: {
 		GossipMaxSize:                   10485760,
@@ -220,8 +307,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
-		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
-		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		MessageDomainInvalidSnappy:      [4]byte{0o0, 0o0, 0o0, 0o0},
+		MessageDomainValidSnappy:        [4]byte{0o1, 0o0, 0o0, 0o0},
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -241,8 +328,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
-		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
-		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		MessageDomainInvalidSnappy:      [4]byte{0o0, 0o0, 0o0, 0o0},
+		MessageDomainValidSnappy:        [4]byte{0o1, 0o0, 0o0, 0o0},
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -262,8 +349,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
-		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
-		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		MessageDomainInvalidSnappy:      [4]byte{0o0, 0o0, 0o0, 0o0},
+		MessageDomainValidSnappy:        [4]byte{0o1, 0o0, 0o0, 0o0},
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -283,8 +370,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
-		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
-		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		MessageDomainInvalidSnappy:      [4]byte{0o0, 0o0, 0o0, 0o0},
+		MessageDomainValidSnappy:        [4]byte{0o1, 0o0, 0o0, 0o0},
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -304,8 +391,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
-		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
-		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		MessageDomainInvalidSnappy:      [4]byte{0o0, 0o0, 0o0, 0o0},
+		MessageDomainValidSnappy:        [4]byte{0o1, 0o0, 0o0, 0o0},
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -313,6 +400,27 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		NfdKey:                          "nfd",
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       HoodiBootstrapNodes,
+	},
+
+	chainspec.BloatnetNetworkID: { // Bloatnet - uses mainnet config
+		GossipMaxSize:                   10485760,
+		GossipMaxSizeBellatrix:          15728640,
+		MaxChunkSize:                    MaxChunkSize,
+		AttestationSubnetCount:          64,
+		AttestationPropagationSlotRange: 32,
+		AttestationSubnetPrefixBits:     6,
+		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
+		RespTimeout:                     ConfigDurationSec(RespTimeout),
+		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
+		MessageDomainInvalidSnappy:      [4]byte{0o0, 0o0, 0o0, 0o0},
+		MessageDomainValidSnappy:        [4]byte{0o1, 0o0, 0o0, 0o0},
+		Eth2key:                         "eth2",
+		AttSubnetKey:                    "attnets",
+		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
+		MinimumPeersInSubnetSearch:      20,
+		BootNodes:                       BloatnetBootstrapNodes,
 	},
 }
 
@@ -341,19 +449,61 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://checkpoint-sync.hoodi.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 		"https://hoodi-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
 	},
+	chainspec.BloatnetNetworkID: {
+		"https://checkpoint-sync.perf-devnet-3.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
+	},
 }
 
 // ConfigurableCheckpointsURLs is customized by the user to specify the checkpoint sync endpoints.
 var ConfigurableCheckpointsURLs = []string{}
 
-// MinEpochsForBlockRequests  equal to MIN_VALIDATOR_WITHDRAWABILITY_DELAY + CHURN_LIMIT_QUOTIENT / 2
+// MinEpochsForBlockRequests returns the configured block-serving window.
+// Configurations without the field use the consensus-spec default formula.
 func (b *BeaconChainConfig) MinEpochsForBlockRequests() uint64 {
-	return b.MinValidatorWithdrawabilityDelay + (b.ChurnLimitQuotient)/2
+	if b.MinEpochsForBlockRequestsConfig != 0 {
+		return b.MinEpochsForBlockRequestsConfig
+	}
+	return b.MinValidatorWithdrawabilityDelay + b.ChurnLimitQuotient/2
 }
 
-// MinSlotsForBlobRequests  equal to MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS * SLOTS_PER_EPOCH
+// MinSlotsForBlobsSidecarsRequest returns the configured blob-serving window in slots.
 func (b *BeaconChainConfig) MinSlotsForBlobsSidecarsRequest() uint64 {
 	return b.MinEpochsForBlobSidecarsRequests * b.SlotsPerEpoch
+}
+
+// BlockServeRangeStartSlot returns the first slot in the mandatory block-serving range.
+func (b *BeaconChainConfig) BlockServeRangeStartSlot(currentSlot uint64) uint64 {
+	return serveRangeStartSlot(currentSlot, b.SlotsPerEpoch, b.MinEpochsForBlockRequests(), 0)
+}
+
+// BlobSidecarServeRangeStartSlot returns the first slot in the mandatory blob-serving range.
+func (b *BeaconChainConfig) BlobSidecarServeRangeStartSlot(currentSlot uint64) uint64 {
+	return serveRangeStartSlot(currentSlot, b.SlotsPerEpoch, b.MinEpochsForBlobSidecarsRequests, b.DenebForkEpoch)
+}
+
+// DataColumnSidecarServeRangeStartSlot returns the first slot in the mandatory data-column-serving range.
+func (b *BeaconChainConfig) DataColumnSidecarServeRangeStartSlot(currentSlot uint64) uint64 {
+	return serveRangeStartSlot(currentSlot, b.SlotsPerEpoch, b.MinEpochsForDataColumnSidecarsRequests, b.FuluForkEpoch)
+}
+
+func serveRangeStartSlot(currentSlot, slotsPerEpoch, minEpochs, forkEpoch uint64) uint64 {
+	if slotsPerEpoch == 0 {
+		return 0
+	}
+	currentEpoch := currentSlot / slotsPerEpoch
+	if currentEpoch < forkEpoch {
+		return 0
+	}
+	return max(forkEpoch, currentEpoch-min(currentEpoch, minEpochs)) * slotsPerEpoch
+}
+
+// MaxRequestPayloadsLimit falls back to MAX_REQUEST_BLOCKS_DENEB for configs
+// predating MAX_REQUEST_PAYLOADS.
+func (b *BeaconChainConfig) MaxRequestPayloadsLimit() uint64 {
+	if b.MaxRequestPayloads != 0 {
+		return b.MaxRequestPayloads
+	}
+	return b.MaxRequestBlocksDeneb
 }
 
 type ConfigDurationSec time.Duration
@@ -396,6 +546,11 @@ type BlobParameters struct {
 	MaxBlobsPerBlock uint64 `yaml:"MAX_BLOBS_PER_BLOCK" json:"MAX_BLOBS_PER_BLOCK,string"`
 }
 
+type GasLimitScheduleEntry struct {
+	Epoch    uint64 `yaml:"EPOCH" json:"EPOCH,string"`
+	GasLimit uint64 `yaml:"GAS_LIMIT" json:"GAS_LIMIT,string"`
+}
+
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
 type BeaconChainConfig struct {
 	// Constants (non-configurable)
@@ -424,6 +579,7 @@ type BeaconChainConfig struct {
 	HysteresisDownwardMultiplier     uint64     `yaml:"HYSTERESIS_DOWNWARD_MULTIPLIER" spec:"true" json:"HYSTERESIS_DOWNWARD_MULTIPLIER,string"`               // HysteresisDownwardMultiplier defines the hysteresis downward multiplier for effective balance calculations.
 	HysteresisUpwardMultiplier       uint64     `yaml:"HYSTERESIS_UPWARD_MULTIPLIER" spec:"true" json:"HYSTERESIS_UPWARD_MULTIPLIER,string"`                   // HysteresisUpwardMultiplier defines the hysteresis upward multiplier for effective balance calculations.
 	MinEpochsForBlobSidecarsRequests uint64     `yaml:"MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS" spec:"true" json:"MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS,string"` // MinEpochsForBlobSidecarsRequests defines the minimum number of epochs to wait before requesting blobs sidecars.
+	MinEpochsForBlockRequestsConfig  uint64     `yaml:"MIN_EPOCHS_FOR_BLOCK_REQUESTS" spec:"true" json:"MIN_EPOCHS_FOR_BLOCK_REQUESTS,string"`                 // MinEpochsForBlockRequestsConfig defines the minimum epoch range over which a node must serve blocks.
 	FieldElementsPerBlob             uint64     `yaml:"FIELD_ELEMENTS_PER_BLOB" spec:"true" json:"FIELD_ELEMENTS_PER_BLOB,string"`                             // FieldElementsPerBlob defines the number of field elements per blob.
 	MaxBytesPerTransaction           uint64     `yaml:"MAX_BYTES_PER_TRANSACTION" spec:"true" json:"MAX_BYTES_PER_TRANSACTION,string"`                         // MaxBytesPerTransaction defines the maximum number of bytes per transaction.
 	MaxExtraDataBytes                uint64     `yaml:"MAX_EXTRA_DATA_BYTES" spec:"true" json:"MAX_EXTRA_DATA_BYTES,string"`                                   // MaxExtraDataBytes defines the maximum number of bytes in the extra data field.
@@ -431,6 +587,7 @@ type BeaconChainConfig struct {
 	MaxRequestBlobSidecarsElectra    uint64     `yaml:"MAX_REQUEST_BLOB_SIDECARS_ELECTRA" spec:"true" json:"MAX_REQUEST_BLOB_SIDECARS_ELECTRA,string"`         // MaxRequestBlobSidecarsElectra defines the maximum number of blob sidecars to request in Electra.
 	MaxRequestBlocks                 uint64     `yaml:"MAX_REQUEST_BLOCKS" spec:"true" json:"MAX_REQUEST_BLOCKS,string"`                                       // Maximum number of blocks in a single request
 	MaxRequestBlocksDeneb            uint64     `yaml:"MAX_REQUEST_BLOCKS_DENEB" spec:"true" json:"MAX_REQUEST_BLOCKS_DENEB,string"`                           // Maximum number of blocks in a single request
+	MaxRequestPayloads               uint64     `yaml:"MAX_REQUEST_PAYLOADS" spec:"true" json:"MAX_REQUEST_PAYLOADS,string"`                                   // Maximum number of execution payload envelopes in a single request
 	MaxTransactionsPerPayload        uint64     `yaml:"MAX_TRANSACTIONS_PER_PAYLOAD" spec:"true" json:"MAX_TRANSACTIONS_PER_PAYLOAD,string"`                   // MaxTransactionsPerPayload defines the maximum number of transactions in a single payload.
 	SubnetsPerNode                   uint64     `yaml:"SUBNETS_PER_NODE" spec:"true" json:"SUBNETS_PER_NODE,string"`                                           // SubnetsPerNode defines the number of subnets a node can subscribe to.
 	VersionedHashVersionKzg          ConfigByte `yaml:"VERSIONED_HASH_VERSION_KZG" spec:"true" json:"VERSIONED_HASH_VERSION_KZG"`                              // VersionedHashVersionKzg is the version of the versioned hash used in KZG commitments.
@@ -465,8 +622,18 @@ type BeaconChainConfig struct {
 	SecondsPerETH1Block                       uint64 `yaml:"SECONDS_PER_ETH1_BLOCK" spec:"true" json:"SECONDS_PER_ETH1_BLOCK,string"`                           // SecondsPerETH1Block is the approximate time for a single eth1 block to be produced.
 
 	// Fork choice algorithm constants.
-	ProposerScoreBoost uint64 `yaml:"PROPOSER_SCORE_BOOST" spec:"true" json:"PROPOSER_SCORE_BOOST,string"` // ProposerScoreBoost defines a value that is a % of the committee weight for fork-choice boosting.
-	IntervalsPerSlot   uint64 `yaml:"INTERVALS_PER_SLOT" spec:"true" json:"INTERVALS_PER_SLOT,string"`     // IntervalsPerSlot defines the number of fork choice intervals in a slot defined in the fork choice spec.
+	ProposerScoreBoost       uint64 `yaml:"PROPOSER_SCORE_BOOST" spec:"true" json:"PROPOSER_SCORE_BOOST,string"` // ProposerScoreBoost defines a value that is a % of the committee weight for fork-choice boosting.
+	IntervalsPerSlot         uint64 `yaml:"INTERVALS_PER_SLOT" spec:"true" json:"INTERVALS_PER_SLOT,string"`     // IntervalsPerSlot defines the number of fork choice intervals in a slot defined in the fork choice spec.
+	ReorgHeadWeightThreshold uint64 `yaml:"REORG_HEAD_WEIGHT_THRESHOLD" json:"REORG_HEAD_WEIGHT_THRESHOLD,string"`
+	AttestationDueBps        uint64 `yaml:"ATTESTATION_DUE_BPS" json:"ATTESTATION_DUE_BPS,string"`
+	AggregateDueBps          uint64 `yaml:"AGGREGATE_DUE_BPS" json:"AGGREGATE_DUE_BPS,string"`
+	SyncMessageDueBps        uint64 `yaml:"SYNC_MESSAGE_DUE_BPS" json:"SYNC_MESSAGE_DUE_BPS,string"`
+	ContributionDueBps       uint64 `yaml:"CONTRIBUTION_DUE_BPS" json:"CONTRIBUTION_DUE_BPS,string"`
+	AttestationDueBpsGloas   uint64 `yaml:"ATTESTATION_DUE_BPS_GLOAS" json:"ATTESTATION_DUE_BPS_GLOAS,string"`
+	AggregateDueBpsGloas     uint64 `yaml:"AGGREGATE_DUE_BPS_GLOAS" json:"AGGREGATE_DUE_BPS_GLOAS,string"`
+	SyncMessageDueBpsGloas   uint64 `yaml:"SYNC_MESSAGE_DUE_BPS_GLOAS" json:"SYNC_MESSAGE_DUE_BPS_GLOAS,string"`
+	ContributionDueBpsGloas  uint64 `yaml:"CONTRIBUTION_DUE_BPS_GLOAS" json:"CONTRIBUTION_DUE_BPS_GLOAS,string"`
+	PayloadAttestationDueBps uint64 `yaml:"PAYLOAD_ATTESTATION_DUE_BPS" json:"PAYLOAD_ATTESTATION_DUE_BPS,string"`
 
 	// Ethereum PoW parameters.
 	DepositChainID         uint64 `yaml:"DEPOSIT_CHAIN_ID" spec:"true" json:"DEPOSIT_CHAIN_ID,string"`          // DepositChainID of the eth1 network. This used for replay protection.
@@ -501,7 +668,7 @@ type BeaconChainConfig struct {
 	MaxVoluntaryExits                uint64 `yaml:"MAX_VOLUNTARY_EXITS" spec:"true" json:"MAX_VOLUNTARY_EXITS,string"`                                   // MaxVoluntaryExits defines the maximum number of validator exits in a block.
 	MaxWithdrawalsPerPayload         uint64 `yaml:"MAX_WITHDRAWALS_PER_PAYLOAD" spec:"true" json:"MAX_WITHDRAWALS_PER_PAYLOAD,string"`                   // MaxWithdrawalsPerPayload defines the maximum number of withdrawals in a block.
 	MaxBlsToExecutionChanges         uint64 `yaml:"MAX_BLS_TO_EXECUTION_CHANGES" spec:"true" json:"MAX_BLS_TO_EXECUTION_CHANGES,string"`                 // MaxBlsToExecutionChanges defines the maximum number of BLS-to-execution-change objects in a block.
-	MaxValidatorsPerWithdrawalsSweep uint64 `yaml:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP,string"` //MaxValidatorsPerWithdrawalsSweep bounds the size of the sweep searching for withdrawals per slot.
+	MaxValidatorsPerWithdrawalsSweep uint64 `yaml:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP,string"` // MaxValidatorsPerWithdrawalsSweep bounds the size of the sweep searching for withdrawals per slot.
 	MaxBlobCommittmentsPerBlock      uint64 `yaml:"MAX_BLOB_COMMITMENTS_PER_BLOCK" spec:"true" json:"MAX_BLOB_COMMITMENTS_PER_BLOCK,string"`             // MaxBlobsCommittmentsPerBlock defines the maximum number of blobs commitments in a block.
 	// BLS domain values.
 	DomainBeaconProposer              common.Bytes4 `yaml:"DOMAIN_BEACON_PROPOSER" spec:"true" json:"DOMAIN_BEACON_PROPOSER"`                               // DomainBeaconProposer defines the BLS signature domain for beacon proposal verification.
@@ -516,8 +683,12 @@ type BeaconChainConfig struct {
 	DomainContributionAndProof        common.Bytes4 `yaml:"DOMAIN_CONTRIBUTION_AND_PROOF" spec:"true" json:"DOMAIN_CONTRIBUTION_AND_PROOF"`                 // DomainAggregateAndProof defines the BLS signature domain for contribution and proof.
 	DomainApplicationMask             common.Bytes4 `yaml:"DOMAIN_APPLICATION_MASK" spec:"true" json:"DOMAIN_APPLICATION_MASK"`                             // DomainApplicationMask defines the BLS signature domain for application mask.
 	DomainApplicationBuilder          common.Bytes4 `json:"-"`                                                                                              // DomainApplicationBuilder defines the BLS signature domain for application builder.
-	DomainBLSToExecutionChange        common.Bytes4 `json:"-"`                                                                                              // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
+	DomainBLSToExecutionChange        common.Bytes4 `json:"DOMAIN_BLS_TO_EXECUTION_CHANGE"`                                                                 // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
 	DomainBlobSideCar                 common.Bytes4 `yaml:"DOMAIN_BLOB_SIDECAR" spec:"true" json:"DOMAIN_BLOB_SIDECAR"`                                     // DomainBlobSideCar defines the BLS signature domain for blob sidecar verification
+	DomainBeaconBuilder               common.Bytes4 `json:"DOMAIN_BEACON_BUILDER"`                                                                          // DomainBeaconBuilder defines the BLS signature domain for beacon builder.
+	DomainPtcAttester                 common.Bytes4 `json:"DOMAIN_PTC_ATTESTER"`                                                                            // DomainPtcAttester defines the BLS signature domain for proto-danksharding attestation verification.
+	DomainProposerPreferences         common.Bytes4 `json:"DOMAIN_PROPOSER_PREFERENCES"`                                                                    // DomainProposerPreferences defines the BLS signature domain for proposer preferences.
+	DomainBuilderDeposit              common.Bytes4 `json:"DOMAIN_BUILDER_DEPOSIT"`                                                                         // DomainBuilderDeposit defines the BLS signature domain for builder deposits.
 
 	// Slasher constants.
 	PruneSlasherStoragePeriod uint64 `json:"-"` // PruneSlasherStoragePeriod defines the time period expressed in number of epochs were proof of stake network should prune attestation and block header store.
@@ -539,6 +710,8 @@ type BeaconChainConfig struct {
 	ElectraForkEpoch     uint64            `yaml:"ELECTRA_FORK_EPOCH" spec:"true" json:"ELECTRA_FORK_EPOCH,string"`     // ElectraForkEpoch is used to represent the assigned fork epoch for Electra.
 	FuluForkVersion      ConfigForkVersion `yaml:"FULU_FORK_VERSION" spec:"true" json:"FULU_FORK_VERSION"`              // FuluForkVersion is used to represent the fork version for Fulu.
 	FuluForkEpoch        uint64            `yaml:"FULU_FORK_EPOCH" spec:"true" json:"FULU_FORK_EPOCH,string"`           // FuluForkEpoch is used to represent the assigned fork epoch for Fulu.
+	GloasForkVersion     ConfigForkVersion `yaml:"GLOAS_FORK_VERSION" spec:"true" json:"GLOAS_FORK_VERSION"`            // GloasForkVersion is used to represent the fork version for Gloas (Glamsterdam).
+	GloasForkEpoch       uint64            `yaml:"GLOAS_FORK_EPOCH" spec:"true" json:"GLOAS_FORK_EPOCH,string"`         // GloasForkEpoch is used to represent the assigned fork epoch for Gloas (Glamsterdam).
 
 	ForkVersionSchedule map[common.Bytes4]VersionScheduleEntry `json:"-"` // Schedule of fork epochs by version.
 
@@ -614,15 +787,17 @@ type BeaconChainConfig struct {
 	MaxDepositRequestsPerPayload          uint64 `yaml:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD,string"`                     // MaxDepositRequestsPerPayload defines the maximum number of deposit requests in a block.
 	MaxWithdrawalRequestsPerPayload       uint64 `yaml:"MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD,string"`               // MaxWithdrawalRequestsPerPayload defines the maximum number of withdrawal requests in a block.
 	MaxConsolidationRequestsPerPayload    uint64 `yaml:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD,string"`         // MaxConsolidationRequestsPerPayload defines the maximum number of consolidation requests in a block.
+	MaxBuilderDepositRequestsPerPayload   uint64 `yaml:"MAX_BUILDER_DEPOSIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_BUILDER_DEPOSIT_REQUESTS_PER_PAYLOAD,string"`     // MaxBuilderDepositRequestsPerPayload defines the maximum number of builder deposit requests in a block.
+	MaxBuilderExitRequestsPerPayload      uint64 `yaml:"MAX_BUILDER_EXIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_BUILDER_EXIT_REQUESTS_PER_PAYLOAD,string"`           // MaxBuilderExitRequestsPerPayload defines the maximum number of builder exit requests in a block.
 	MinSlashingPenaltyQuotientElectra     uint64 `yaml:"MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA" spec:"true" json:"MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA,string"`           // MinSlashingPenaltyQuotientElectra for slashing penalties post Electra hard fork.
 	WhistleBlowerRewardQuotientElectra    uint64 `yaml:"WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA" spec:"true" json:"WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA,string"`           // WhistleBlowerRewardQuotientElectra is used to calculate whistle blower reward post Electra hard fork.
 	MaxPendingPartialsPerWithdrawalsSweep uint64 `yaml:"MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP,string"` // MaxPendingPartialsPerWithdrawalsSweep bounds the size of the sweep searching for pending partials per slot.
 	MaxPendingDepositsPerEpoch            uint64 `yaml:"MAX_PENDING_DEPOSITS_PER_EPOCH" spec:"true" json:"MAX_PENDING_DEPOSITS_PER_EPOCH,string"`                         // MaxPendingDepositsPerEpoch defines the maximum number of pending deposits per epoch.
-	PendingDepositLimits                  uint64 `yaml:"PENDING_DEPOSITS_LIMIT" spec:"true" json:"PENDING_DEPOSIT_LIMIT,string"`                                          // PendingDepositLimit defines the maximum number of pending deposits.
-	PendingPartialWithdrawalsLimit        uint64 `yaml:"PENDING_PARTIAL_WITHDRAWALS_LIMIT" spec:"true" json:"PENDING_PARTIAL_WITHDRAWALS_LIMIT,string"`                   // PendingPartialWithdrawalsLimit defines the maximum number of pending partial withdrawals.
-	PendingConsolidationsLimit            uint64 `yaml:"PENDING_CONSOLIDATIONS_LIMIT" spec:"true" json:"PENDING_CONSOLIDATIONS_LIMIT,string"`                             // PendingConsolidationsLimit defines the maximum number of pending consolidations.
-	MaxBlobsPerBlockElectra               uint64 `yaml:"MAX_BLOBS_PER_BLOCK_ELECTRA" spec:"true" json:"MAX_BLOBS_PER_BLOCK_ELECTRA,string"`                               // MaxBlobsPerBlockElectra defines the maximum number of blobs per block for Electra.
-	BlobSidecarSubnetCountElectra         uint64 `yaml:"BLOB_SIDECAR_SUBNET_COUNT_ELECTRA" spec:"true" json:"BLOB_SIDECAR_SUBNET_COUNT_ELECTRA,string"`                   // BlobSidecarSubnetCountElectra defines the number of sidecars in the blob subnet for Electra.
+	PendingDepositLimits                  uint64 `yaml:"PENDING_DEPOSITS_LIMIT" spec:"true" json:"PENDING_DEPOSITS_LIMIT,string"`
+	PendingPartialWithdrawalsLimit        uint64 `yaml:"PENDING_PARTIAL_WITHDRAWALS_LIMIT" spec:"true" json:"PENDING_PARTIAL_WITHDRAWALS_LIMIT,string"` // PendingPartialWithdrawalsLimit defines the maximum number of pending partial withdrawals.
+	PendingConsolidationsLimit            uint64 `yaml:"PENDING_CONSOLIDATIONS_LIMIT" spec:"true" json:"PENDING_CONSOLIDATIONS_LIMIT,string"`           // PendingConsolidationsLimit defines the maximum number of pending consolidations.
+	MaxBlobsPerBlockElectra               uint64 `yaml:"MAX_BLOBS_PER_BLOCK_ELECTRA" spec:"true" json:"MAX_BLOBS_PER_BLOCK_ELECTRA,string"`             // MaxBlobsPerBlockElectra defines the maximum number of blobs per block for Electra.
+	BlobSidecarSubnetCountElectra         uint64 `yaml:"BLOB_SIDECAR_SUBNET_COUNT_ELECTRA" spec:"true" json:"BLOB_SIDECAR_SUBNET_COUNT_ELECTRA,string"` // BlobSidecarSubnetCountElectra defines the number of sidecars in the blob subnet for Electra.
 
 	// Constants for the Electra fork.
 	UnsetDepositRequestsStartIndex uint64     `yaml:"UNSET_DEPOSIT_REQUESTS_START_INDEX" spec:"true" json:"UNSET_DEPOSIT_REQUESTS_START_INDEX,string"` // UnsetDepositRequestsStartIndex defines the start index for unset deposit requests.
@@ -631,19 +806,37 @@ type BeaconChainConfig struct {
 	DepositRequestType             ConfigByte `yaml:"DEPOSIT_REQUEST_TYPE" spec:"true" json:"DEPOSIT_REQUEST_TYPE"`                                    // DepositRequestType is the type for deposit requests.
 	WithdrawalRequestType          ConfigByte `yaml:"WITHDRAWAL_REQUEST_TYPE" spec:"true" json:"WITHDRAWAL_REQUEST_TYPE"`                              // WithdrawalRequestType is the type for withdrawal requests.
 	ConsolidationRequestType       ConfigByte `yaml:"CONSOLIDATION_REQUEST_TYPE" spec:"true" json:"CONSOLIDATION_REQUEST_TYPE"`                        // ConsolidationRequestType is the type for consolidation requests.
+	BuilderDepositRequestType      ConfigByte `yaml:"BUILDER_DEPOSIT_REQUEST_TYPE" spec:"true" json:"BUILDER_DEPOSIT_REQUEST_TYPE"`                    // BuilderDepositRequestType is the type for builder deposit requests.
+	BuilderExitRequestType         ConfigByte `yaml:"BUILDER_EXIT_REQUEST_TYPE" spec:"true" json:"BUILDER_EXIT_REQUEST_TYPE"`                          // BuilderExitRequestType is the type for builder exit requests.
+	PayloadBuilderVersion          uint8      `yaml:"PAYLOAD_BUILDER_VERSION" spec:"true" json:"PAYLOAD_BUILDER_VERSION,string"`                       // PayloadBuilderVersion is the version for execution payload builders.
 
 	// EIP7892 - Blob Schedule
 	BlobSchedule []BlobParameters `yaml:"BLOB_SCHEDULE" spec:"true" json:"BLOB_SCHEDULE"` // Schedule of blob limits per epoch
+
+	GasLimitSchedule []GasLimitScheduleEntry `yaml:"GAS_LIMIT_SCHEDULE" spec:"true" json:"GAS_LIMIT_SCHEDULE"`
+
 	// Fulu
 	ValidatorCustodyRequirement      uint64 `yaml:"VALIDATOR_CUSTODY_REQUIREMENT" spec:"true" json:"VALIDATOR_CUSTODY_REQUIREMENT,string"`               // ValidatorCustodyRequirement defines the custody requirement for validators.
 	BalancePerAdditionalCustodyGroup uint64 `yaml:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP" spec:"true" json:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP,string"` // BalancePerAdditionalCustodyGroup defines the balance required per additional custody group.
+
+	// Gloas
+	ChurnLimitQuotientGloas              uint64     `yaml:"CHURN_LIMIT_QUOTIENT_GLOAS" spec:"true" json:"CHURN_LIMIT_QUOTIENT_GLOAS,string"`                                 // ChurnLimitQuotientGloas replaces ChurnLimitQuotient for balance churn calculation in GLOAS+.
+	ConsolidationChurnLimitQuotient      uint64     `yaml:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT" spec:"true" json:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT,string"`                 // ConsolidationChurnLimitQuotient is the independent quotient for consolidation churn in GLOAS+.
+	MaxPerEpochActivationChurnLimitGloas uint64     `yaml:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT_GLOAS" spec:"true" json:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT_GLOAS,string"` // MaxPerEpochActivationChurnLimitGloas caps activation churn per epoch in GLOAS+ (EIP8061).
+	BuilderWithdrawalPrefix              ConfigByte `yaml:"-" json:"-"`
+	PayloadDueBps                        uint64     `yaml:"PAYLOAD_DUE_BPS" spec:"true" json:"PAYLOAD_DUE_BPS,string"`
+	PtcSize                              uint64     `yaml:"PTC_SIZE" spec:"true" json:"PTC_SIZE,string"`                                                     // PtcSize is the number of validators in the Payload Timeliness Committee (preset: 512 mainnet, 16 minimal).
+	MaxPayloadAttestations               uint64     `yaml:"MAX_PAYLOAD_ATTESTATIONS" spec:"true" json:"MAX_PAYLOAD_ATTESTATIONS,string"`                     // MaxPayloadAttestations defines the maximum number of payload attestations in a block.
+	BuilderRegistryLimit                 uint64     `yaml:"BUILDER_REGISTRY_LIMIT" spec:"true" json:"BUILDER_REGISTRY_LIMIT,string"`                         // BuilderRegistryLimit defines the upper bound of builders can participate in eth2.
+	BuilderPendingWithdrawalsLimit       uint64     `yaml:"BUILDER_PENDING_WITHDRAWALS_LIMIT" spec:"true" json:"BUILDER_PENDING_WITHDRAWALS_LIMIT,string"`   // BuilderPendingWithdrawalsLimit defines the maximum number of pending withdrawals for builders.
+	MaxBuildersPerWithdrawalsSweep       uint64     `yaml:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP,string"` // MaxBuildersPerWithdrawalsSweep bounds the size of the sweep searching for builder withdrawals per slot.
+	MinBuilderWithdrawabilityDelay       uint64     `yaml:"MIN_BUILDER_WITHDRAWABILITY_DELAY" spec:"true" json:"MIN_BUILDER_WITHDRAWABILITY_DELAY,string"`   // MinBuilderWithdrawabilityDelay is the shortest amount of time a builder has to wait to withdraw.
 }
 
 // GetBlobParameters returns the blob parameters at a given epoch
 func (b *BeaconChainConfig) GetBlobParameters(epoch uint64) BlobParameters {
 	// Iterate through schedule in desc order
-	for i := len(b.BlobSchedule) - 1; i >= 0; i-- {
-		entry := b.BlobSchedule[i]
+	for _, entry := range slices.Backward(b.BlobSchedule) {
 		if epoch >= entry.Epoch {
 			return entry
 		}
@@ -654,6 +847,18 @@ func (b *BeaconChainConfig) GetBlobParameters(epoch uint64) BlobParameters {
 		Epoch:            b.ElectraForkEpoch,
 		MaxBlobsPerBlock: b.MaxBlobsPerBlockElectra,
 	}
+}
+
+func (b *BeaconChainConfig) GetScheduledGasLimit(epoch uint64) (uint64, bool) {
+	if epoch < b.GloasForkEpoch {
+		return 0, false
+	}
+	for _, entry := range slices.Backward(b.GasLimitSchedule) {
+		if epoch >= entry.Epoch {
+			return entry.GasLimit, true
+		}
+	}
+	return 0, false
 }
 
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
@@ -669,6 +874,40 @@ func (b *BeaconChainConfig) SyncCommitteePeriod(slot uint64) uint64 {
 	return slot / (b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod)
 }
 
+// SyncCommitteeAggregationBitsSize returns the byte length of the aggregation bits
+// in a sync committee Contribution: SyncCommitteeSize / SyncCommitteeSubnetCount / 8.
+func (b *BeaconChainConfig) SyncCommitteeAggregationBitsSize() int {
+	return int(b.SyncCommitteeSize) / int(b.SyncCommitteeSubnetCount) / 8
+}
+
+func (b *BeaconChainConfig) ValidateExecutionRequestTypeConstants() error {
+	expected := []struct {
+		name string
+		got  ConfigByte
+		want byte
+		fork uint64
+	}{
+		{name: "DEPOSIT_REQUEST_TYPE", got: b.DepositRequestType, want: executiontypes.DepositRequestType, fork: b.ElectraForkEpoch},
+		{name: "WITHDRAWAL_REQUEST_TYPE", got: b.WithdrawalRequestType, want: executiontypes.WithdrawalRequestType, fork: b.ElectraForkEpoch},
+		{name: "CONSOLIDATION_REQUEST_TYPE", got: b.ConsolidationRequestType, want: executiontypes.ConsolidationRequestType, fork: b.ElectraForkEpoch},
+		{name: "BUILDER_DEPOSIT_REQUEST_TYPE", got: b.BuilderDepositRequestType, want: executiontypes.BuilderDepositRequestType, fork: b.GloasForkEpoch},
+		{name: "BUILDER_EXIT_REQUEST_TYPE", got: b.BuilderExitRequestType, want: executiontypes.BuilderExitRequestType, fork: b.GloasForkEpoch},
+	}
+	for _, item := range expected {
+		active := item.fork != b.FarFutureEpoch
+		if item.fork == b.ElectraForkEpoch && b.GloasForkEpoch != b.FarFutureEpoch {
+			active = true
+		}
+		if !active {
+			continue
+		}
+		if byte(item.got) != item.want {
+			return fmt.Errorf("%s mismatch: beacon config has %#x, execution layer uses %#x", item.name, byte(item.got), item.want)
+		}
+	}
+	return nil
+}
+
 func (b *BeaconChainConfig) RoundSlotToVotePeriod(slot uint64) uint64 {
 	p := b.SlotsPerEpoch * b.EpochsPerEth1VotingPeriod
 	return slot - (slot % p)
@@ -682,6 +921,7 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 		b.DenebForkEpoch,
 		b.ElectraForkEpoch,
 		b.FuluForkEpoch,
+		b.GloasForkEpoch,
 	}
 	stateVersion := Phase0Version
 	for _, forkEpoch := range forkEpochList {
@@ -693,12 +933,44 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 	return stateVersion
 }
 
+// ForkSchemaMatchesSlot reports whether an object decoded with decodedVersion is
+// consistent with the fork implied by slot. A peer picks the response fork digest,
+// so the two are independent inputs; Gloas changed which fields BeaconBody and
+// DataColumnSidecar carry, so a disagreement reaches a field left unset.
+func (b *BeaconChainConfig) ForkSchemaMatchesSlot(slot uint64, decodedVersion StateVersion) bool {
+	slotIsGloas := b.GetCurrentStateVersion(slot/b.SlotsPerEpoch) >= GloasVersion
+	return slotIsGloas == (decodedVersion >= GloasVersion)
+}
+
+// AttestationDueMs returns the attestation deadline in milliseconds from slot start.
+func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
+	if b == nil || b.SecondsPerSlot == 0 {
+		return 0
+	}
+	if gloas {
+		return b.BpsToMs(b.AttestationDueBpsGloas)
+	}
+	return b.BpsToMs(b.AttestationDueBps)
+}
+
+func (b *BeaconChainConfig) BpsToMs(bps uint64) uint64 {
+	return b.SecondsPerSlot * bps / (BpsFactor / 1000)
+}
+
+// PayloadAttestationDueMs returns the Gloas PTC deadline in milliseconds from slot start.
+func (b *BeaconChainConfig) PayloadAttestationDueMs() uint64 {
+	return b.BpsToMs(b.PayloadAttestationDueBps)
+}
+
 // InitializeForkSchedule initializes the schedules forks baked into the config.
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
 	// sort blob schedule by epoch in ascending order
-	sort.Slice(b.BlobSchedule, func(i, j int) bool {
-		return b.BlobSchedule[i].Epoch < b.BlobSchedule[j].Epoch
+	slices.SortFunc(b.BlobSchedule, func(a, b BlobParameters) int {
+		return cmp.Compare(a.Epoch, b.Epoch)
+	})
+	slices.SortFunc(b.GasLimitSchedule, func(a, b GasLimitScheduleEntry) int {
+		return cmp.Compare(a.Epoch, b.Epoch)
 	})
 }
 
@@ -711,6 +983,7 @@ func configForkSchedule(b *BeaconChainConfig) map[common.Bytes4]VersionScheduleE
 	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = VersionScheduleEntry{b.DenebForkEpoch, DenebVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = VersionScheduleEntry{b.ElectraForkEpoch, ElectraVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.FuluForkVersion))] = VersionScheduleEntry{b.FuluForkEpoch, FuluVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.GloasForkVersion))] = VersionScheduleEntry{b.GloasForkEpoch, GloasVersion}
 	return fvs
 }
 
@@ -746,13 +1019,14 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	HysteresisUpwardMultiplier:       5,
 	MinEpochsForBlobSidecarsRequests: 4096,
 	FieldElementsPerBlob:             4096,
-	MaxBytesPerTransaction:           1073741824, // 1GB
+	MaxBytesPerTransaction:           MaxBytesPerTransactionDefault,
 	MaxExtraDataBytes:                32,
 	MaxRequestBlobSidecars:           768,
 	MaxRequestBlobSidecarsElectra:    1152, // MAX_REQUEST_BLOCKS_DENEB * MAX_BLOBS_PER_BLOCK_ELECTRA
 	MaxRequestBlocks:                 1024,
 	MaxRequestBlocksDeneb:            128,
-	MaxTransactionsPerPayload:        1048576,
+	MaxRequestPayloads:               128,
+	MaxTransactionsPerPayload:        MaxTransactionsPerPayloadDefault,
 	SubnetsPerNode:                   2,
 	VersionedHashVersionKzg:          ConfigByte(1),
 
@@ -771,6 +1045,16 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Time parameter constants.
 	MinAttestationInclusionDelay:     1,
 	SecondsPerSlot:                   12,
+	AttestationDueBps:                AttestationDueBps,
+	AggregateDueBps:                  AggregateDueBps,
+	SyncMessageDueBps:                SyncMessageDueBps,
+	ContributionDueBps:               ContributionDueBps,
+	AttestationDueBpsGloas:           AttestationDueBpsGloas,
+	AggregateDueBpsGloas:             AggregateDueBpsGloas,
+	SyncMessageDueBpsGloas:           SyncMessageDueBpsGloas,
+	ContributionDueBpsGloas:          ContributionDueBpsGloas,
+	PayloadAttestationDueBps:         PayloadAttestationDueBps,
+	ReorgHeadWeightThreshold:         ReorgHeadWeightThreshold,
 	SlotsPerEpoch:                    32,
 	MinSeedLookahead:                 1,
 	MaxSeedLookahead:                 4,
@@ -844,6 +1128,10 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DomainApplicationMask:             utils.Uint32ToBytes4(0x00000001),
 	DomainApplicationBuilder:          utils.Uint32ToBytes4(0x00000001),
 	DomainBLSToExecutionChange:        utils.Uint32ToBytes4(0x0A000000),
+	DomainBeaconBuilder:               utils.Uint32ToBytes4(0x0B000000),
+	DomainPtcAttester:                 utils.Uint32ToBytes4(0x0C000000),
+	DomainProposerPreferences:         utils.Uint32ToBytes4(0x0D000000),
+	DomainBuilderDeposit:              utils.Uint32ToBytes4(0x0E000000),
 
 	// Prysm constants.
 	ConfigName: "mainnet",
@@ -867,6 +1155,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ElectraForkEpoch:     364032,
 	FuluForkVersion:      0x06000000,
 	FuluForkEpoch:        411392,
+	GloasForkVersion:     0x07000000,
+	GloasForkEpoch:       math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -938,6 +1228,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxDepositRequestsPerPayload:          8192,
 	MaxWithdrawalRequestsPerPayload:       16,
 	MaxConsolidationRequestsPerPayload:    2,
+	MaxBuilderDepositRequestsPerPayload:   64,
+	MaxBuilderExitRequestsPerPayload:      16,
 	MinSlashingPenaltyQuotientElectra:     4096,
 	WhistleBlowerRewardQuotientElectra:    4096,
 	MaxPendingPartialsPerWithdrawalsSweep: 8,
@@ -954,6 +1246,9 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DepositRequestType:             0x00,
 	WithdrawalRequestType:          0x01,
 	ConsolidationRequestType:       0x02,
+	BuilderDepositRequestType:      0x03,
+	BuilderExitRequestType:         0x04,
+	PayloadBuilderVersion:          0,
 
 	// Fulu
 	ValidatorCustodyRequirement:      8,
@@ -962,6 +1257,20 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 		{412672, 15},
 		{419072, 21},
 	},
+	GasLimitSchedule: []GasLimitScheduleEntry{},
+
+	// Gloas
+	ChurnLimitQuotientGloas:              1 << 15,
+	ConsolidationChurnLimitQuotient:      1 << 16,
+	MaxPerEpochActivationChurnLimitGloas: 256_000_000_000,
+	BuilderWithdrawalPrefix:              0xB0,
+	PayloadDueBps:                        5000,
+	PtcSize:                              512,
+	MaxPayloadAttestations:               4,
+	BuilderRegistryLimit:                 1 << 40,
+	BuilderPendingWithdrawalsLimit:       1 << 20,
+	MaxBuildersPerWithdrawalsSweep:       1 << 14,
+	MinBuilderWithdrawabilityDelay:       64,
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -977,17 +1286,112 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
 
+	// Detect PRESET_BASE to use the correct base config.
+	// The minimal preset has different SSZ vector sizes, committee sizes, etc.
+	var presetProbe struct {
+		PresetBase string `yaml:"PRESET_BASE"`
+	}
+	if err := yaml.Unmarshal(b, &presetProbe); err != nil {
+		return BeaconChainConfig{}, NetworkConfig{}, err
+	}
+	if presetProbe.PresetBase == "minimal" {
+		ApplyMinimalPreset(beaconCfg)
+	}
+
 	// setup beacon chain config
 	if err := yaml.Unmarshal(b, &beaconCfg); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
+	if beaconCfg.GasLimitSchedule == nil {
+		beaconCfg.GasLimitSchedule = []GasLimitScheduleEntry{}
+	}
+
+	// Forks absent from a custom config are unscheduled (far-future), as in other
+	// clients, rather than inheriting the mainnet base config's finite epochs.
+	var rawCfg map[string]any
+	if err := yaml.Unmarshal(b, &rawCfg); err != nil {
+		return BeaconChainConfig{}, NetworkConfig{}, err
+	}
+	forkEpochs := map[string]*uint64{
+		"ALTAIR_FORK_EPOCH":    &beaconCfg.AltairForkEpoch,
+		"BELLATRIX_FORK_EPOCH": &beaconCfg.BellatrixForkEpoch,
+		"CAPELLA_FORK_EPOCH":   &beaconCfg.CapellaForkEpoch,
+		"DENEB_FORK_EPOCH":     &beaconCfg.DenebForkEpoch,
+		"ELECTRA_FORK_EPOCH":   &beaconCfg.ElectraForkEpoch,
+		"FULU_FORK_EPOCH":      &beaconCfg.FuluForkEpoch,
+		"GLOAS_FORK_EPOCH":     &beaconCfg.GloasForkEpoch,
+	}
+	for key, epoch := range forkEpochs {
+		if _, ok := rawCfg[key]; !ok {
+			*epoch = math.MaxUint64
+		}
+	}
+
 	beaconCfg.InitializeForkSchedule()
+	if err := beaconCfg.ValidateExecutionRequestTypeConstants(); err != nil {
+		return BeaconChainConfig{}, NetworkConfig{}, err
+	}
+	if beaconCfg.MaxCommitteesPerSlot > MaxSupportedCommitteesPerSlot {
+		return BeaconChainConfig{}, NetworkConfig{}, fmt.Errorf("MAX_COMMITTEES_PER_SLOT exceeds supported limit: %d > %d", beaconCfg.MaxCommitteesPerSlot, MaxSupportedCommitteesPerSlot)
+	}
+	if beaconCfg.MaxValidatorsPerCommittee > MaxSupportedValidatorsPerCommittee {
+		return BeaconChainConfig{}, NetworkConfig{}, fmt.Errorf("MAX_VALIDATORS_PER_COMMITTEE exceeds supported limit: %d > %d", beaconCfg.MaxValidatorsPerCommittee, uint64(MaxSupportedValidatorsPerCommittee))
+	}
 
 	// setup network config
 	if err := yaml.Unmarshal(b, &networkConfig); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
 	return *beaconCfg, *networkConfig, nil
+}
+
+// ApplyMinimalPreset overrides the mainnet base config with values from the
+// Ethereum consensus-specs "minimal" preset. Only fields that differ from
+// mainnet are changed. Reference:
+// https://github.com/ethereum/consensus-specs/tree/dev/presets/minimal
+func ApplyMinimalPreset(cfg *BeaconChainConfig) {
+	cfg.PresetBase = "minimal"
+
+	// Phase0 preset differences
+	cfg.SecondsPerSlot = 6
+	cfg.TargetCommitteeSize = 4
+	cfg.MaxCommitteesPerSlot = 4
+	cfg.ShuffleRoundCount = 10
+	cfg.MinGenesisActiveValidatorCount = 64
+	cfg.Eth1FollowDistance = 16
+	cfg.SlotsPerEpoch = 8
+	cfg.SlotsPerHistoricalRoot = 64
+	cfg.EpochsPerHistoricalVector = 64
+	cfg.EpochsPerSlashingsVector = 64
+	cfg.EpochsPerEth1VotingPeriod = 4
+	cfg.GenesisDelay = 300
+
+	// Altair preset differences
+	cfg.SyncCommitteeSize = 32
+	cfg.EpochsPerSyncCommitteePeriod = 8
+
+	// Capella preset differences
+	cfg.MaxWithdrawalsPerPayload = 4
+	cfg.MaxValidatorsPerWithdrawalsSweep = 16
+
+	// Electra preset differences
+	cfg.PendingPartialWithdrawalsLimit = 64
+	cfg.PendingConsolidationsLimit = 64
+	cfg.MaxPendingPartialsPerWithdrawalsSweep = 2
+
+	// Electra preset differences
+	cfg.PendingPartialWithdrawalsLimit = 64
+	cfg.PendingConsolidationsLimit = 64
+	cfg.MaxPendingPartialsPerWithdrawalsSweep = 2
+
+	// Phase0 preset differences (rewards/penalties that differ from mainnet)
+	cfg.InactivityPenaltyQuotient = 33554432
+	cfg.MinSlashingPenaltyQuotient = 64
+	cfg.ProportionalSlashingMultiplier = 2
+
+	// Gloas preset differences
+	cfg.PtcSize = 16
+	cfg.MaxBuildersPerWithdrawalsSweep = 16
 }
 
 func sepoliaConfig() BeaconChainConfig {
@@ -1013,12 +1417,17 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.ElectraForkVersion = 0x90000074
 	cfg.FuluForkEpoch = 272640
 	cfg.FuluForkVersion = 0x90000075
+	cfg.GloasForkEpoch = 353024
+	cfg.GloasForkVersion = 0x90000076
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
 
 	cfg.BlobSchedule = []BlobParameters{
 		{274176, 15},
 		{275712, 21},
+	}
+	cfg.GasLimitSchedule = []GasLimitScheduleEntry{
+		{Epoch: 353024, GasLimit: 200_000_000},
 	}
 
 	cfg.InitializeForkSchedule()
@@ -1074,7 +1483,63 @@ func hoodiConfig() BeaconChainConfig {
 
 	cfg.InitializeForkSchedule()
 	return cfg
+}
 
+func bloatnetConfig() BeaconChainConfig {
+	cfg := MainnetBeaconConfig
+	cfg.ConfigName = "testnet"
+	cfg.MinGenesisActiveValidatorCount = 500
+	cfg.MinGenesisTime = 1771423200 // 2026-Feb-19 02:00:00 AM UTC
+	cfg.GenesisForkVersion = 0x10364469
+	cfg.GenesisDelay = 60
+
+	// Time parameters
+	cfg.SecondsPerSlot = 12
+	cfg.SecondsPerETH1Block = 12
+	cfg.Eth1FollowDistance = 2048
+	cfg.MinValidatorWithdrawabilityDelay = 2
+	cfg.ShardCommitteePeriod = 256
+
+	// Validator cycle
+	cfg.InactivityScoreBias = 4
+	cfg.InactivityScoreRecoveryRate = 16
+	cfg.EjectionBalance = 16000000000
+	cfg.MinPerEpochChurnLimit = 4
+	cfg.ChurnLimitQuotient = 128
+	cfg.MaxPerEpochActivationChurnLimit = 8
+
+	// Forking - all forks at epoch 0 except Fulu
+	cfg.AltairForkEpoch = 0
+	cfg.AltairForkVersion = 0x20364469
+	cfg.BellatrixForkEpoch = 0
+	cfg.BellatrixForkVersion = 0x30364469
+	cfg.CapellaForkEpoch = 0
+	cfg.CapellaForkVersion = 0x40364469
+	cfg.DenebForkEpoch = 0
+	cfg.DenebForkVersion = 0x50364469
+	cfg.ElectraForkEpoch = 0
+	cfg.ElectraForkVersion = 0x60364469
+	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkVersion = 0x70000000
+	cfg.TerminalTotalDifficulty = "58750000000000000000000"
+	cfg.TerminalBlockHash = [32]byte{}
+	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
+
+	// Deposit contract (same as mainnet)
+	cfg.DepositContractAddress = "0x00000000219ab540356cBB839Cbe05303d7705Fa"
+	cfg.DepositChainID = chainspec.MainnetChainID
+	cfg.DepositNetworkID = chainspec.MainnetChainID
+
+	// Blob parameters
+	cfg.MaxBlobsPerBlock = 6
+	cfg.MaxBlobsPerBlockElectra = 9
+	cfg.BlobSidecarSubnetCountElectra = 9
+
+	// Clear BlobSchedule since Fulu/Osaka is disabled on bloatnet
+	cfg.BlobSchedule = []BlobParameters{}
+
+	cfg.InitializeForkSchedule()
+	return cfg
 }
 
 func gnosisConfig() BeaconChainConfig {
@@ -1087,6 +1552,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.Eth1FollowDistance = 1024
 	cfg.ConfigName = "gnosis"
 	cfg.ChurnLimitQuotient = 1 << 12
+	cfg.MinEpochsForBlockRequestsConfig = 33_024
 	cfg.GenesisForkVersion = 0x00000064
 	cfg.SecondsPerETH1Block = 6
 	cfg.DepositChainID = chainspec.GnosisChainID
@@ -1101,7 +1567,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x04000064
 	cfg.ElectraForkEpoch = 1337856
 	cfg.ElectraForkVersion = 0x05000064
-	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkEpoch = 1714688
 	cfg.FuluForkVersion = 0x06000064
 	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
 	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
@@ -1116,6 +1582,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.MaxBlobsPerBlockElectra = 2
 	cfg.BlobSidecarSubnetCountElectra = 2
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
+	cfg.MinEpochsForDataColumnSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.MaxRequestBlobSidecarsElectra = 256
@@ -1128,6 +1595,7 @@ func gnosisConfig() BeaconChainConfig {
 func chiadoConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
 	cfg.PresetBase = "gnosis"
+	cfg.MaxPendingPartialsPerWithdrawalsSweep = 6
 	cfg.MinGenesisTime = 1665396000
 	cfg.MinGenesisActiveValidatorCount = 6000
 	cfg.GenesisDelay = 300
@@ -1135,6 +1603,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.Eth1FollowDistance = 1024
 	cfg.ConfigName = "chiado"
 	cfg.ChurnLimitQuotient = 1 << 12
+	cfg.MinEpochsForBlockRequestsConfig = 33_024
 	cfg.GenesisForkVersion = 0x0000006f
 	cfg.SecondsPerETH1Block = 6
 	cfg.DepositChainID = chainspec.ChiadoChainID
@@ -1149,7 +1618,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x0400006f
 	cfg.ElectraForkEpoch = 948224
 	cfg.ElectraForkVersion = 0x0500006f
-	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkEpoch = 1353216
 	cfg.FuluForkVersion = 0x0600006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
@@ -1162,6 +1631,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.MaxBlobsPerBlockElectra = 2
 	cfg.BlobSidecarSubnetCountElectra = 2
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
+	cfg.MinEpochsForDataColumnSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.MaxRequestBlobSidecarsElectra = 256
@@ -1182,7 +1652,7 @@ func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) 
 		return b.MinSlashingPenaltyQuotientBellatrix
 	case DenebVersion:
 		return b.MinSlashingPenaltyQuotientBellatrix
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.MinSlashingPenaltyQuotientElectra
 	default:
 		panic("not implemented")
@@ -1202,7 +1672,7 @@ func (b *BeaconChainConfig) GetProportionalSlashingMultiplier(version StateVersi
 		return b.ProportionalSlashingMultiplier
 	case AltairVersion:
 		return b.ProportionalSlashingMultiplierAltair
-	case BellatrixVersion, CapellaVersion, DenebVersion, ElectraVersion, FuluVersion:
+	case BellatrixVersion, CapellaVersion, DenebVersion, ElectraVersion, FuluVersion, GloasVersion:
 		return b.ProportionalSlashingMultiplierBellatrix
 	default:
 		panic("not implemented")
@@ -1221,7 +1691,7 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 		return b.InactivityPenaltyQuotientBellatrix
 	case DenebVersion:
 		return b.InactivityPenaltyQuotientBellatrix
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.InactivityPenaltyQuotientBellatrix
 	default:
 		panic("not implemented")
@@ -1230,11 +1700,12 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 
 // Beacon configs
 var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChainConfig{
-	chainspec.MainnetChainID: mainnetConfig(),
-	chainspec.SepoliaChainID: sepoliaConfig(),
-	chainspec.HoodiChainID:   hoodiConfig(),
-	chainspec.GnosisChainID:  gnosisConfig(),
-	chainspec.ChiadoChainID:  chiadoConfig(),
+	chainspec.MainnetChainID:    mainnetConfig(),
+	chainspec.SepoliaChainID:    sepoliaConfig(),
+	chainspec.HoodiChainID:      hoodiConfig(),
+	chainspec.GnosisChainID:     gnosisConfig(),
+	chainspec.ChiadoChainID:     chiadoConfig(),
+	chainspec.BloatnetNetworkID: bloatnetConfig(),
 }
 
 // Eth1DataVotesLength returns the maximum length of the votes on the Eth1 data,
@@ -1261,7 +1732,7 @@ func (b *BeaconChainConfig) MaxEffectiveBalanceForVersion(version StateVersion) 
 	switch version {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.MaxEffectiveBalance
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.MaxEffectiveBalanceElectra
 	default:
 		panic("invalid version")
@@ -1272,18 +1743,28 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockByVersion(v StateVersion) uint64 {
 	switch v {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.MaxBlobsPerBlock
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.MaxBlobsPerBlockElectra
 	}
 	panic("invalid version")
 }
 
+// MaxBlobsPerBlockUpperBound returns the largest blobs-per-block limit across every fork
+// and BPO schedule entry, so it safely upper-bounds the blob count of any block.
+func (b *BeaconChainConfig) MaxBlobsPerBlockUpperBound() uint64 {
+	m := max(b.MaxBlobsPerBlock, b.MaxBlobsPerBlockElectra)
+	for _, p := range b.BlobSchedule {
+		m = max(m, p.MaxBlobsPerBlock)
+	}
+	return m
+}
+
 func (b *BeaconChainConfig) MaxRequestBlobSidecarsByVersion(v StateVersion) int {
-	switch v {
-	case DenebVersion:
-		return int(b.MaxRequestBlobSidecars)
-	case ElectraVersion, FuluVersion:
+	if v >= ElectraVersion {
 		return int(b.MaxRequestBlobSidecarsElectra)
+	}
+	if v == DenebVersion {
+		return int(b.MaxRequestBlobSidecars)
 	}
 	panic("invalid version")
 }
@@ -1292,7 +1773,7 @@ func (b *BeaconChainConfig) BlobSidecarSubnetCountByVersion(v StateVersion) uint
 	switch v {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.BlobSidecarSubnetCount
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.BlobSidecarSubnetCountElectra
 	}
 	panic("invalid version")
@@ -1314,6 +1795,8 @@ func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 		return uint32(b.ElectraForkVersion)
 	case FuluVersion:
 		return uint32(b.FuluForkVersion)
+	case GloasVersion:
+		return uint32(b.GloasForkVersion)
 	}
 	panic("invalid version")
 }
@@ -1334,6 +1817,8 @@ func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
 		return b.ElectraForkEpoch
 	case FuluVersion:
 		return b.FuluForkEpoch
+	case GloasVersion:
+		return b.GloasForkEpoch
 	}
 	panic("invalid version")
 }
@@ -1361,10 +1846,15 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 	case networkname.Hoodi:
 		networkCfg, beaconCfg := GetConfigsByNetwork(chainspec.HoodiChainID)
 		return networkCfg, beaconCfg, chainspec.HoodiChainID, nil
+	case networkname.Bloatnet:
+		// Bloatnet uses mainnet CL config but on isolated network
+		networkCfg, beaconCfg := GetConfigsByNetwork(chainspec.MainnetChainID)
+		return networkCfg, beaconCfg, chainspec.MainnetChainID, nil
 	default:
 		return nil, nil, chainspec.MainnetChainID, errors.New("chain not found")
 	}
 }
+
 func GetAllCheckpointSyncEndpoints(net NetworkType) []string {
 	shuffle := func(urls []string) []string {
 		if len(urls) <= 1 {
@@ -1390,48 +1880,20 @@ func GetAllCheckpointSyncEndpoints(net NetworkType) []string {
 	return urls
 }
 
-func GetCheckpointSyncEndpoint(net NetworkType) string {
-	randomOne := func(checkpoints []string) string {
-		if len(checkpoints) == 1 {
-			return checkpoints[0]
-		}
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(checkpoints))))
-		if err != nil {
-			panic(err)
-		}
-		return checkpoints[n.Int64()]
-	}
-	// Check if the user has configured a custom checkpoint sync endpoint
-	if len(ConfigurableCheckpointsURLs) > 0 {
-		return randomOne(ConfigurableCheckpointsURLs)
-	}
-
-	// Otherwise, use the default endpoints
-	checkpoints, ok := CheckpointSyncEndpoints[net]
-	if !ok {
-		return ""
-	}
-	return randomOne(checkpoints)
-}
-
 // Check if chain with a specific ID is supported or not
-func EmbeddedSupported(id uint64) bool {
-	return id == chainspec.MainnetChainID ||
-		id == chainspec.SepoliaChainID ||
-		id == chainspec.GnosisChainID ||
-		id == chainspec.ChiadoChainID ||
-		id == chainspec.HoodiChainID
-}
-
-func SupportBackfilling(networkId uint64) bool {
+//
+// note: the following code uses chainID constants because they are usually the same as the network ID,
+// but the context of usage is they are checked against network ID. Shadowforks like bloatnet make
+// this evident (same chainID as mainnet, but different network ID))
+func EmbeddedSupported(networkId uint64) bool {
 	return networkId == chainspec.MainnetChainID ||
 		networkId == chainspec.SepoliaChainID ||
 		networkId == chainspec.GnosisChainID ||
 		networkId == chainspec.ChiadoChainID ||
-		networkId == chainspec.HoodiChainID
+		networkId == chainspec.HoodiChainID ||
+		networkId == chainspec.BloatnetNetworkID
 }
 
-func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {
-	folderPath := path.Clean(strconv.FormatUint(slot/SubDivisionFolderSize, 10))
-	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
+func SupportBackfilling(networkId uint64) bool {
+	return EmbeddedSupported(networkId)
 }

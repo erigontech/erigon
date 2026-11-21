@@ -17,20 +17,20 @@
 package recsplit
 
 import (
-	"bufio"
-	"context"
 	"fmt"
-	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/version"
 )
 
-func TestReWriteIndex(t *testing.T) {
+func TestExtractOffsets(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
@@ -47,39 +47,66 @@ func TestReWriteIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rs.Close()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := rs.Build(context.Background()); err != nil {
+	if err := rs.Build(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	idx := MustOpen(indexFile)
 	defer idx.Close()
 	offsets := idx.ExtractOffsets()
-	for i := 0; i < 100; i++ {
+	require.Len(t, offsets, 100)
+	for i := range 100 {
 		_, ok := offsets[uint64(i*17)]
 		require.True(t, ok)
-		offsets[uint64(i*17)] = uint64(i * 3965)
 	}
-	reindexFile := filepath.Join(tmpDir, "reindex")
-	f, err := os.Create(reindexFile)
-	require.NoError(t, err)
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	err = idx.RewriteWithOffsets(w, offsets)
-	require.NoError(t, err)
-	require.NoError(t, w.Flush())
-	require.NoError(t, f.Close())
-	reidx := MustOpen(reindexFile)
-	defer reidx.Close()
-	for i := 0; i < 100; i++ {
-		reader := NewIndexReader(reidx)
-		offset, _ := reader.Lookup(fmt.Appendf(nil, "key %d", i))
-		if offset != uint64(i*3965) {
-			t.Errorf("expected offset: %d, looked up: %d", i*3965, offset)
-		}
+}
+
+func TestForceHashInRAM(t *testing.T) {
+	// the commitment .kvi layout: no enums, existence filter, version 0 for v1.0 files and the current version after
+	for _, v := range []version.DataStructureVersion{0, ExistenceFilterVersion} {
+		t.Run(fmt.Sprintf("version %d", v), func(t *testing.T) {
+			tmpDir := t.TempDir()
+			indexFile := filepath.Join(tmpDir, "index")
+			salt := uint32(1)
+			const keys = 1000
+			rs, err := NewRecSplit(RecSplitArgs{
+				KeyCount:           keys,
+				BucketSize:         100,
+				Salt:               &salt,
+				TmpDir:             tmpDir,
+				IndexFile:          indexFile,
+				LeafSize:           8,
+				Version:            v,
+				LessFalsePositives: true,
+			}, log.New())
+			require.NoError(t, err)
+			defer rs.Close()
+			for i := range keys {
+				require.NoError(t, rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)))
+			}
+			require.NoError(t, rs.Build(t.Context()))
+
+			idx := MustOpen(indexFile)
+			defer idx.Close()
+			require.Positive(t, idx.ForceHashInRAM())
+
+			mapStart := uintptr(unsafe.Pointer(&idx.mmapHandle1[0]))
+			mapEnd := mapStart + uintptr(len(idx.mmapHandle1))
+			mapped := func(p uintptr) bool { return p >= mapStart && p < mapEnd }
+			require.False(t, mapped(uintptr(unsafe.Pointer(&idx.grData[0]))), "Golomb-Rice codes still read from the mapped file")
+			require.False(t, mapped(reflect.ValueOf(&idx.ef).Elem().FieldByName("data").Pointer()), "bucket directory still read from the mapped file")
+
+			reader := NewIndexReader(idx)
+			for i := range keys {
+				offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
+				require.True(t, ok)
+				require.Equal(t, uint64(i*17), offset)
+			}
+		})
 	}
 }
 
@@ -93,11 +120,11 @@ func TestForwardCompatibility(t *testing.T) {
 		features := No | Enums
 		err := onlyKnownFeatures(features)
 		require.NoError(t, err)
-		assert.Equal(t, No|Enums, features) //no side-effects
+		assert.Equal(t, No|Enums, features) // no side-effects
 	})
 	t.Run("disallow_unknown", func(t *testing.T) {
 		features := Features(0xff)
 		err := onlyKnownFeatures(features)
-		assert.ErrorIs(t, err, IncompatibleErr)
+		assert.ErrorIs(t, err, ErrIncompatible)
 	})
 }

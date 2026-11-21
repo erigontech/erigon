@@ -21,19 +21,20 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
-	"math"
-	"math/big"
 	"reflect"
+	"sync"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -42,7 +43,10 @@ func TestDecodeEmptyTypedReceipt(t *testing.T) {
 	input := []byte{0x80}
 	var r Receipt
 	err := rlp.DecodeBytes(input, &r)
-	if !errors.Is(err, rlp.EOL) {
+	// An empty typed receipt is invalid and must surface a real error.
+	// It must NOT return rlp.EOL: as a slice element that sentinel would be
+	// read as end-of-list and silently drop the receipt (see FuzzRLP).
+	if !errors.Is(err, errShortTypedReceipt) {
 		t.Fatal("wrong error:", err)
 	}
 }
@@ -81,7 +85,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 		TxHash:          tx.Hash(),
 		ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
-		BlockNumber:     big.NewInt(1),
+		BlockNumber:     uint256.NewInt(1),
 	}
 	receipt.Bloom = CreateBloom(Receipts{receipt})
 
@@ -124,7 +128,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 
 func encodeAsStoredReceiptRLP(want *Receipt) ([]byte, error) {
 	w := bytes.NewBuffer(nil)
-	casted := ReceiptForStorage(*want)
+	casted := (*ReceiptForStorage)(want)
 	err := casted.EncodeRLP(w)
 	if err != nil {
 		return nil, err
@@ -132,216 +136,11 @@ func encodeAsStoredReceiptRLP(want *Receipt) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// Tests that receipt data can be correctly derived from the contextual infos
-func TestDeriveFields(t *testing.T) {
-	t.Parallel()
-	// Create a few transactions to have receipts for
-	to2 := common.HexToAddress("0x2")
-	to3 := common.HexToAddress("0x3")
-	txs := Transactions{
-		&LegacyTx{
-			CommonTx: CommonTx{
-				Nonce:    1,
-				Value:    &u256.Num1,
-				GasLimit: 1,
-			},
-			GasPrice: &u256.Num1,
-		},
-		&LegacyTx{
-			CommonTx: CommonTx{
-				To:       &to2,
-				Nonce:    2,
-				Value:    &u256.Num2,
-				GasLimit: 2,
-			},
-			GasPrice: &u256.Num2,
-		},
-		&AccessListTx{
-			LegacyTx: LegacyTx{
-				CommonTx: CommonTx{
-					To:       &to3,
-					Nonce:    3,
-					Value:    uint256.NewInt(3),
-					GasLimit: 3,
-				},
-				GasPrice: uint256.NewInt(3),
-			},
-		},
-	}
-	// Create the corresponding receipts
-	receipts := Receipts{
-		&Receipt{
-			Status:            ReceiptStatusFailed,
-			CumulativeGasUsed: 1,
-			Logs: []*Log{
-				{Address: common.BytesToAddress([]byte{0x11})},
-				{Address: common.BytesToAddress([]byte{0x01, 0x11})},
-			},
-			TxHash:                   txs[0].Hash(),
-			ContractAddress:          common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
-			GasUsed:                  1,
-			FirstLogIndexWithinBlock: 0,
-		},
-		&Receipt{
-			PostState:         common.Hash{2}.Bytes(),
-			CumulativeGasUsed: 3,
-			Logs: []*Log{
-				{Address: common.BytesToAddress([]byte{0x22})},
-				{Address: common.BytesToAddress([]byte{0x02, 0x22})},
-			},
-			TxHash:                   txs[1].Hash(),
-			ContractAddress:          common.BytesToAddress([]byte{0x02, 0x22, 0x22}),
-			GasUsed:                  2,
-			FirstLogIndexWithinBlock: 2,
-		},
-		&Receipt{
-			Type:              AccessListTxType,
-			PostState:         common.Hash{3}.Bytes(),
-			CumulativeGasUsed: 6,
-			Logs: []*Log{
-				{Address: common.BytesToAddress([]byte{0x33})},
-				{Address: common.BytesToAddress([]byte{0x03, 0x33})},
-			},
-			TxHash:                   txs[2].Hash(),
-			ContractAddress:          common.BytesToAddress([]byte{0x03, 0x33, 0x33}),
-			GasUsed:                  3,
-			FirstLogIndexWithinBlock: 4,
-		},
-	}
-	// Clear all the computed fields and re-derive them
-	number := big.NewInt(1)
-	hash := common.BytesToHash([]byte{0x03, 0x14})
-
-	t.Run("DeriveV1", func(t *testing.T) {
-		clearComputedFieldsOnReceipts(t, receipts)
-		if err := receipts.DeriveFields(hash, number.Uint64(), txs, []common.Address{common.BytesToAddress([]byte{0x0}), common.BytesToAddress([]byte{0x0}), common.BytesToAddress([]byte{0x0})}); err != nil {
-			t.Fatalf("DeriveFields(...) = %v, want <nil>", err)
-		}
-		// Iterate over all the computed fields and check that they're correct
-		signer := MakeSigner(chain.TestChainConfig, number.Uint64(), 0)
-
-		logIndex := uint(0)
-		for i, r := range receipts {
-			if r.Type != txs[i].Type() {
-				t.Errorf("receipts[%d].Type = %d, want %d", i, r.Type, txs[i].Type())
-			}
-			if r.TxHash != txs[i].Hash() {
-				t.Errorf("receipts[%d].TxHash = %s, want %s", i, r.TxHash.String(), txs[i].Hash().String())
-			}
-			if r.BlockHash != hash {
-				t.Errorf("receipts[%d].BlockHash = %s, want %s", i, r.BlockHash.String(), hash.String())
-			}
-			if r.BlockNumber.Cmp(number) != 0 {
-				t.Errorf("receipts[%c].BlockNumber = %s, want %s", i, r.BlockNumber.String(), number.String())
-			}
-			if r.TransactionIndex != uint(i) {
-				t.Errorf("receipts[%d].TransactionIndex = %d, want %d", i, r.TransactionIndex, i)
-			}
-			if r.GasUsed != txs[i].GetGasLimit() {
-				t.Errorf("receipts[%d].GasUsed = %d, want %d", i, r.GasUsed, txs[i].GetGasLimit())
-			}
-			if txs[i].GetTo() != nil && r.ContractAddress != (common.Address{}) {
-				t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), (common.Address{}).String())
-			}
-			from, _ := txs[i].Sender(*signer)
-			contractAddress := CreateAddress(from.Value(), txs[i].GetNonce())
-			if txs[i].GetTo() == nil && r.ContractAddress != contractAddress {
-				t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), contractAddress.String())
-			}
-			for j := range r.Logs {
-				if r.Logs[j].BlockNumber != number.Uint64() {
-					t.Errorf("receipts[%d].Logs[%d].BlockNumber = %d, want %d", i, j, r.Logs[j].BlockNumber, number.Uint64())
-				}
-				if r.Logs[j].BlockHash != hash {
-					t.Errorf("receipts[%d].Logs[%d].BlockHash = %s, want %s", i, j, r.Logs[j].BlockHash.String(), hash.String())
-				}
-				if r.Logs[j].TxHash != txs[i].Hash() {
-					t.Errorf("receipts[%d].Logs[%d].TxHash = %s, want %s", i, j, r.Logs[j].TxHash.String(), txs[i].Hash().String())
-				}
-				if r.Logs[j].TxHash != txs[i].Hash() {
-					t.Errorf("receipts[%d].Logs[%d].TxHash = %s, want %s", i, j, r.Logs[j].TxHash.String(), txs[i].Hash().String())
-				}
-				if r.Logs[j].TxIndex != uint(i) {
-					t.Errorf("receipts[%d].Logs[%d].TransactionIndex = %d, want %d", i, j, r.Logs[j].TxIndex, i)
-				}
-				if r.Logs[j].Index != logIndex {
-					t.Errorf("receipts[%d].Logs[%d].Index = %d, want %d", i, j, r.Logs[j].Index, logIndex)
-				}
-				logIndex++
-			}
-		}
-	})
-
-	//t.Run("DeriveV3", func(t *testing.T) {
-	//	clearComputedFieldsOnReceipts(t, receipts)
-	//	// Iterate over all the computed fields and check that they're correct
-	//	signer := MakeSigner(chain.TestChainConfig, number.Uint64(), 0)
-	//
-	//	logIndex := uint(0)
-	//	for i := range receipts {
-	//		txs[i].SetSender(common.BytesToAddress([]byte{0x0}))
-	//		r, err := receipts.DeriveFieldsV3ForSingleReceipt(i, hash, number.Uint64(), txs[i])
-	//		if err != nil {
-	//			panic(err)
-	//		}
-	//
-	//		if r.Type != txs[i].Type() {
-	//			t.Errorf("receipts[%d].Type = %d, want %d", i, r.Type, txs[i].Type())
-	//		}
-	//		if r.TxHash != txs[i].Hash() {
-	//			t.Errorf("receipts[%d].TxHash = %s, want %s", i, r.TxHash.String(), txs[i].Hash().String())
-	//		}
-	//		if r.BlockHash != hash {
-	//			t.Errorf("receipts[%d].BlockHash = %s, want %s", i, r.BlockHash.String(), hash.String())
-	//		}
-	//		if r.BlockNumber.Cmp(number) != 0 {
-	//			t.Errorf("receipts[%c].BlockNumber = %s, want %s", i, r.BlockNumber.String(), number.String())
-	//		}
-	//		if r.TransactionIndex != uint(i) {
-	//			t.Errorf("receipts[%d].TransactionIndex = %d, want %d", i, r.TransactionIndex, i)
-	//		}
-	//		if r.GasUsed != txs[i].GetGasLimit() {
-	//			t.Errorf("receipts[%d].GasUsed = %d, want %d", i, r.GasUsed, txs[i].GetGasLimit())
-	//		}
-	//		if txs[i].GetTo() != nil && r.ContractAddress != (common.Address{}) {
-	//			t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), (common.Address{}).String())
-	//		}
-	//		from, _ := txs[i].Sender(*signer)
-	//		contractAddress := crypto.CreateAddress(from, txs[i].GetNonce())
-	//		if txs[i].GetTo() == nil && r.ContractAddress != contractAddress {
-	//			t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), contractAddress.String())
-	//		}
-	//		for j := range r.Logs {
-	//			if r.Logs[j].BlockNumber != number.Uint64() {
-	//				t.Errorf("receipts[%d].Logs[%d].BlockNumber = %d, want %d", i, j, r.Logs[j].BlockNumber, number.Uint64())
-	//			}
-	//			if r.Logs[j].BlockHash != hash {
-	//				t.Errorf("receipts[%d].Logs[%d].BlockHash = %s, want %s", i, j, r.Logs[j].BlockHash.String(), hash.String())
-	//			}
-	//			if r.Logs[j].TxHash != txs[i].Hash() {
-	//				t.Errorf("receipts[%d].Logs[%d].TxHash = %s, want %s", i, j, r.Logs[j].TxHash.String(), txs[i].Hash().String())
-	//			}
-	//			if r.Logs[j].TxHash != txs[i].Hash() {
-	//				t.Errorf("receipts[%d].Logs[%d].TxHash = %s, want %s", i, j, r.Logs[j].TxHash.String(), txs[i].Hash().String())
-	//			}
-	//			if r.Logs[j].TxIndex != uint(i) {
-	//				t.Errorf("receipts[%d].Logs[%d].TransactionIndex = %d, want %d", i, j, r.Logs[j].TxIndex, i)
-	//			}
-	//			if r.Logs[j].Index != logIndex {
-	//				t.Errorf("receipts[%d].Logs[%d].Index = %d, want %d", i, j, r.Logs[j].Index, logIndex)
-	//			}
-	//			logIndex++
-	//		}
-	//	}
-	//})
-
-}
-
 // TestTypedReceiptEncodingDecoding reproduces a flaw that existed in the receipt
 // rlp decoder, which failed due to a shadowing error.
 func TestTypedReceiptEncodingDecoding(t *testing.T) {
 	t.Parallel()
-	var payload = common.FromHex("f9043eb9010c01f90108018262d4b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0b9010c01f901080182cd14b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0b9010d01f901090183013754b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0b9010d01f90109018301a194b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0")
+	payload := common.FromHex("f9043eb9010c01f90108018262d4b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0b9010c01f901080182cd14b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0b9010d01f901090183013754b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0b9010d01f90109018301a194b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0")
 	check := func(bundle []*Receipt) {
 		t.Helper()
 		for i, receipt := range bundle {
@@ -366,45 +165,6 @@ func TestTypedReceiptEncodingDecoding(t *testing.T) {
 		}
 		check(bundle)
 	}
-}
-
-func clearComputedFieldsOnReceipts(t *testing.T, receipts Receipts) {
-	t.Helper()
-
-	for _, receipt := range receipts {
-		clearComputedFieldsOnReceipt(t, receipt)
-	}
-}
-
-func clearComputedFieldsOnReceipt(t *testing.T, receipt *Receipt) {
-	t.Helper()
-
-	receipt.TxHash = common.Hash{}
-	receipt.BlockHash = common.Hash{}
-	receipt.BlockNumber = big.NewInt(math.MaxUint32)
-	receipt.TransactionIndex = math.MaxUint32
-	receipt.ContractAddress = common.Address{}
-	receipt.GasUsed = 0
-
-	clearComputedFieldsOnLogs(t, receipt.Logs)
-}
-
-func clearComputedFieldsOnLogs(t *testing.T, logs []*Log) {
-	t.Helper()
-
-	for _, log := range logs {
-		clearComputedFieldsOnLog(t, log)
-	}
-}
-
-func clearComputedFieldsOnLog(t *testing.T, log *Log) {
-	t.Helper()
-
-	log.BlockNumber = math.MaxUint32
-	log.BlockHash = common.Hash{}
-	log.TxHash = common.Hash{}
-	log.TxIndex = math.MaxUint32
-	log.Index = math.MaxUint32
 }
 
 func TestReceiptUnmarshalBinary(t *testing.T) {
@@ -559,6 +319,184 @@ func TestReceiptUnmarshalBinary(t *testing.T) {
 	})
 }
 
+// TestReceiptEncodeRLP69_AllTypesAreList verifies that EncodeRLP69 produces a flat RLP
+// list [tx-type, post-state-or-status, cumulative-gas, logs] for every transaction type,
+// conforming to the ETH69 spec. In particular, typed receipts must NOT use the old
+// type_byte || rlp(data) byte-string envelope from ETH68.
+func TestReceiptEncodeRLP69_AllTypesAreList(t *testing.T) {
+	t.Parallel()
+
+	logs := []*Log{
+		{
+			Address: common.BytesToAddress([]byte{0x11}),
+			Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
+			Data:    []byte{0x01, 0x00, 0xff},
+		},
+	}
+
+	txTypes := []struct {
+		name   string
+		txType uint8
+	}{
+		{"Legacy", LegacyTxType},
+		{"AccessList", AccessListTxType},
+		{"DynamicFee", DynamicFeeTxType},
+		{"Blob", BlobTxType},
+		{"SetCode", SetCodeTxType},
+	}
+
+	for _, tt := range txTypes {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			receipt := &Receipt{
+				Type:              tt.txType,
+				Status:            ReceiptStatusSuccessful,
+				CumulativeGasUsed: 50000,
+				Logs:              logs,
+			}
+
+			var buf bytes.Buffer
+			err := receipt.EncodeRLP69(&buf)
+			require.NoError(t, err)
+			encoded := buf.Bytes()
+			require.NotEmpty(t, encoded)
+
+			// The first byte must indicate an RLP list (0xc0..0xf7 for short lists,
+			// 0xf8..0xff for long lists), NOT a byte string (0x80..0xbf).
+			firstByte := encoded[0]
+			assert.True(t, firstByte >= 0xc0,
+				"expected RLP list prefix (>= 0xc0), got 0x%02x — typed receipt was likely wrapped as byte string", firstByte)
+
+			// Decode back using the receiptRLP69 struct to verify all 4 fields.
+			var decoded receiptRLP69
+			err = rlp.DecodeBytes(encoded, &decoded)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.txType, decoded.Type, "Type mismatch")
+			assert.Equal(t, receiptStatusSuccessfulRLP, decoded.PostStateOrStatus, "PostStateOrStatus mismatch")
+			assert.Equal(t, uint64(50000), decoded.CumulativeGasUsed, "CumulativeGasUsed mismatch")
+			require.Len(t, decoded.Logs, 1)
+			assert.Equal(t, logs[0].Address, decoded.Logs[0].Address)
+		})
+	}
+}
+
+// TestReceiptEncodeRLP69_NoBloom confirms that the ETH69 encoding omits the bloom filter.
+func TestReceiptEncodeRLP69_NoBloom(t *testing.T) {
+	t.Parallel()
+
+	receipt := &Receipt{
+		Type:              DynamicFeeTxType,
+		Status:            ReceiptStatusSuccessful,
+		CumulativeGasUsed: 21000,
+		Bloom:             CreateBloom(Receipts{{Status: ReceiptStatusSuccessful, Logs: []*Log{{Address: common.BytesToAddress([]byte{0x11})}}}}),
+		Logs:              []*Log{},
+	}
+
+	var buf bytes.Buffer
+	err := receipt.EncodeRLP69(&buf)
+	require.NoError(t, err)
+
+	// Decode using the 4-field struct; if a bloom was incorrectly included,
+	// the RLP decoder would either fail or produce wrong field values.
+	var decoded receiptRLP69
+	err = rlp.DecodeBytes(buf.Bytes(), &decoded)
+	require.NoError(t, err)
+	assert.Equal(t, uint8(DynamicFeeTxType), decoded.Type)
+	assert.Equal(t, uint64(21000), decoded.CumulativeGasUsed)
+}
+
+// TestReceiptsEncodeRLP69_MixedTypes verifies that Receipts.EncodeRLP69 correctly
+// encodes a batch of mixed-type receipts.
+func TestReceiptsEncodeRLP69_MixedTypes(t *testing.T) {
+	t.Parallel()
+
+	receipts := Receipts{
+		{
+			Type:              LegacyTxType,
+			Status:            ReceiptStatusSuccessful,
+			CumulativeGasUsed: 21000,
+			Logs:              []*Log{},
+		},
+		{
+			Type:              AccessListTxType,
+			Status:            ReceiptStatusFailed,
+			CumulativeGasUsed: 42000,
+			Logs:              []*Log{},
+		},
+		{
+			Type:              DynamicFeeTxType,
+			Status:            ReceiptStatusSuccessful,
+			CumulativeGasUsed: 63000,
+			Logs:              []*Log{},
+		},
+		{
+			Type:              BlobTxType,
+			Status:            ReceiptStatusSuccessful,
+			CumulativeGasUsed: 84000,
+			Logs:              []*Log{},
+		},
+	}
+
+	var buf bytes.Buffer
+	err := receipts.EncodeRLP69(&buf)
+	require.NoError(t, err)
+
+	// Decode the outer list of receipt lists.
+	var decodedList []receiptRLP69
+	err = rlp.DecodeBytes(buf.Bytes(), &decodedList)
+	require.NoError(t, err)
+	require.Len(t, decodedList, 4)
+
+	assert.Equal(t, uint8(LegacyTxType), decodedList[0].Type)
+	assert.Equal(t, uint64(21000), decodedList[0].CumulativeGasUsed)
+
+	assert.Equal(t, uint8(AccessListTxType), decodedList[1].Type)
+	assert.Equal(t, receiptStatusFailedRLP, decodedList[1].PostStateOrStatus)
+
+	assert.Equal(t, uint8(DynamicFeeTxType), decodedList[2].Type)
+	assert.Equal(t, uint64(63000), decodedList[2].CumulativeGasUsed)
+
+	assert.Equal(t, uint8(BlobTxType), decodedList[3].Type)
+	assert.Equal(t, uint64(84000), decodedList[3].CumulativeGasUsed)
+}
+
+// TestReceiptEncodeRLP69_DiffersFromETH68 ensures that the ETH69 encoding
+// is structurally different from the ETH68 encoding for typed receipts.
+func TestReceiptEncodeRLP69_DiffersFromETH68(t *testing.T) {
+	t.Parallel()
+
+	receipt := &Receipt{
+		Type:              DynamicFeeTxType,
+		Status:            ReceiptStatusSuccessful,
+		CumulativeGasUsed: 21000,
+		Bloom:             CreateBloom(Receipts{{Status: ReceiptStatusSuccessful, Logs: []*Log{}}}),
+		Logs:              []*Log{},
+	}
+
+	// ETH68 encoding
+	var buf68 bytes.Buffer
+	err := receipt.EncodeRLP(&buf68)
+	require.NoError(t, err)
+
+	// ETH69 encoding
+	var buf69 bytes.Buffer
+	err = receipt.EncodeRLP69(&buf69)
+	require.NoError(t, err)
+
+	// They must differ: ETH68 wraps typed receipts as byte strings; ETH69 uses flat lists.
+	assert.False(t, bytes.Equal(buf68.Bytes(), buf69.Bytes()),
+		"ETH68 and ETH69 typed receipt encodings should differ")
+
+	// ETH69 result must be a list (first byte >= 0xc0).
+	assert.True(t, buf69.Bytes()[0] >= 0xc0,
+		"ETH69 encoding should be an RLP list, got first byte 0x%02x", buf69.Bytes()[0])
+
+	// ETH68 result for typed receipt is a byte string (first byte < 0xc0).
+	assert.True(t, buf68.Bytes()[0] < 0xc0,
+		"ETH68 typed receipt encoding should be an RLP byte string, got first byte 0x%02x", buf68.Bytes()[0])
+}
+
 func TestReceiptEncode(t *testing.T) {
 	t.Run("Enc.FirstLogIndexWithinBlock", func(t *testing.T) {
 		r1 := &ReceiptForStorage{FirstLogIndexWithinBlock: 1}
@@ -583,7 +521,8 @@ func TestReceiptEncode(t *testing.T) {
 	})
 
 	t.Run("Enc.EmptyLogs", func(t *testing.T) {
-		r1 := &ReceiptForStorage{FirstLogIndexWithinBlock: 1,
+		r1 := &ReceiptForStorage{
+			FirstLogIndexWithinBlock: 1,
 			Logs: Logs{
 				&Log{Index: 1},
 			},
@@ -597,7 +536,7 @@ func TestReceiptEncode(t *testing.T) {
 	})
 	t.Run("Enc.List", func(t *testing.T) {
 		r1 := &ReceiptForStorage{FirstLogIndexWithinBlock: 1}
-		for i := 0; i < 13; i++ {
+		for range 13 {
 			r1.Logs = append(r1.Logs, &Log{Topics: make([]common.Hash, 300)})
 		}
 
@@ -610,4 +549,130 @@ func TestReceiptEncode(t *testing.T) {
 		require.Equal(t, len(r1.Logs), len(r2.Logs))
 		require.Equal(t, len(r1.Logs[0].Topics), len(r2.Logs[0].Topics))
 	})
+}
+
+// TestTypedReceiptDecodersAgree pins UnmarshalBinary and DecodeRLP to the same
+// verdict on a typed envelope. They are separate implementations over the same
+// bytes, so a guard added to one and not the other is a decoder split: the same
+// receipt is accepted on one path and rejected on the other.
+func TestTypedReceiptDecodersAgree(t *testing.T) {
+	t.Parallel()
+
+	envelope := func(t *testing.T, b []byte) []byte {
+		t.Helper()
+		enveloped, err := rlp.EncodeToBytes(b)
+		require.NoError(t, err)
+		return enveloped
+	}
+
+	t.Run("a bare type byte is too short on both", func(t *testing.T) {
+		b := []byte{DynamicFeeTxType}
+		require.ErrorIs(t, new(Receipt).UnmarshalBinary(b), errShortTypedReceipt)
+		// Hand-built: EncodeToBytes collapses a single sub-0x80 byte to itself,
+		// which the stream reads as rlp.Byte and never offers to DecodeRLP.
+		require.ErrorIs(t, rlp.DecodeBytes([]byte{0x81, DynamicFeeTxType}, new(Receipt)), errShortTypedReceipt)
+	})
+
+	t.Run("an out-of-range status is rejected on both", func(t *testing.T) {
+		payload, err := rlp.EncodeToBytes(&receiptRLP{[]byte{1, 2, 3, 4, 5}, 21000, Bloom{}, nil})
+		require.NoError(t, err)
+		b := append([]byte{DynamicFeeTxType}, payload...)
+
+		require.ErrorContains(t, new(Receipt).UnmarshalBinary(b), "invalid receipt status")
+		require.ErrorContains(t, rlp.DecodeBytes(envelope(t, b), new(Receipt)), "invalid receipt status")
+	})
+
+	t.Run("a rejected type leaves the receipt untouched on both", func(t *testing.T) {
+		const unsupported = 0x7f
+		payload, err := rlp.EncodeToBytes(&receiptRLP{[]byte{1}, 21000, Bloom{}, nil})
+		require.NoError(t, err)
+		b := append([]byte{unsupported}, payload...)
+
+		for _, decode := range []func(*Receipt) error{
+			func(r *Receipt) error { return r.UnmarshalBinary(b) },
+			func(r *Receipt) error { return rlp.DecodeBytes(envelope(t, b), r) },
+		} {
+			r := &Receipt{Type: BlobTxType, CumulativeGasUsed: 7}
+			require.ErrorIs(t, decode(r), ErrTxTypeNotSupported)
+			require.Equal(t, byte(BlobTxType), r.Type, "a rejected decode must not half-overwrite the target")
+			require.Equal(t, uint64(7), r.CumulativeGasUsed)
+		}
+	})
+}
+
+func TestReceiptSizeCountsLogs(t *testing.T) {
+	r := &Receipt{Logs: Logs{{Topics: make([]common.Hash, 2), Data: make([]byte, 100)}}}
+	withLog := r.Size()
+	require.Greater(t, withLog, (&Receipt{}).Size())
+
+	r.Logs[0].Data = make([]byte, 1100)
+	r.Logs[0].Topics = append(r.Logs[0].Topics, common.Hash{})
+	require.Equal(t, withLog+1000+length.Hash, r.Size())
+}
+
+func TestReceiptSizeCountsRetainedPointers(t *testing.T) {
+	empty := (&Receipt{}).Size()
+	require.Equal(t, empty+int(unsafe.Sizeof(common.Address{})), (&Receipt{Payer: new(common.Address)}).Size())
+	require.Equal(t, empty+int(unsafe.Sizeof(FrameReceipt{})), (&Receipt{FrameReceipts: []FrameReceipt{{}}}).Size())
+	require.Equal(t, empty+int(unsafe.Sizeof(uint256.Int{})), (&Receipt{BlockNumber: new(uint256.Int)}).Size())
+	require.Equal(t, empty+int(unsafe.Sizeof(Log{}))+int(unsafe.Sizeof((*Log)(nil))), (&Receipt{Logs: Logs{{}}}).Size())
+}
+
+func TestReceiptLogsBloomCachesDerivedBloom(t *testing.T) {
+	t.Parallel()
+	r := &Receipt{Logs: Logs{{Address: common.Address{1}, Topics: []common.Hash{{2}}}}}
+	want := CreateBloom(Receipts{r})
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() { assert.Equal(t, want, *r.LogsBloom()) })
+	}
+	wg.Wait()
+	require.True(t, r.Bloom.IsEmpty(), "LogsBloom must not write the shared Bloom field")
+
+	r.Logs[0].Topics[0] = common.Hash{3}
+	require.Equal(t, want, *r.LogsBloom(), "a derived bloom is cached")
+
+	withBloom := &Receipt{Bloom: Bloom{1}, Logs: r.Logs}
+	require.Equal(t, Bloom{1}, *withBloom.LogsBloom())
+}
+
+func TestReceiptDecodeClearsDerivedBloom(t *testing.T) {
+	t.Parallel()
+	next := &Receipt{
+		Status: ReceiptStatusSuccessful, TxHash: common.Hash{9},
+		Logs: Logs{{Address: common.Address{2}, Topics: []common.Hash{{3}}, Data: []byte{}}},
+	}
+	rlpEnc, err := rlp.EncodeToBytes(next)
+	require.NoError(t, err)
+	binEnc, err := next.MarshalBinary()
+	require.NoError(t, err)
+	jsonEnc, err := json.Marshal(next)
+	require.NoError(t, err)
+
+	for name, decode := range map[string]func(*Receipt) error{
+		"DecodeRLP":       func(r *Receipt) error { return rlp.DecodeBytes(rlpEnc, r) },
+		"UnmarshalBinary": func(r *Receipt) error { return r.UnmarshalBinary(binEnc) },
+		"UnmarshalJSON":   func(r *Receipt) error { return json.Unmarshal(jsonEnc, r) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			r := &Receipt{Logs: Logs{{Address: common.Address{1}}}}
+			_ = r.LogsBloom()
+			require.NoError(t, decode(r))
+			require.Equal(t, CreateBloom(Receipts{next}), *r.LogsBloom(), "a decode must not keep the bloom derived for the old logs")
+		})
+	}
+}
+
+func TestReceiptJSONBlockNumber(t *testing.T) {
+	enc, err := json.Marshal(&Receipt{BlockNumber: uint256.NewInt(0x1234)})
+	require.NoError(t, err)
+	require.Contains(t, string(enc), `"blockNumber":"0x1234"`)
+	enc, err = json.Marshal(&Receipt{BlockNumber: new(uint256.Int)})
+	require.NoError(t, err)
+	require.Contains(t, string(enc), `"blockNumber":"0x0"`)
+	enc, err = json.Marshal(&Receipt{})
+	require.NoError(t, err)
+	require.NotContains(t, string(enc), "blockNumber")
 }

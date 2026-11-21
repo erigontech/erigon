@@ -28,11 +28,10 @@ import (
 	"fmt"
 	"hash"
 
-	"golang.org/x/crypto/hkdf"
-
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/p2p/enode"
+	"golang.org/x/crypto/hkdf"
 )
 
 const (
@@ -70,10 +69,10 @@ func DecodePubkey(curve elliptic.Curve, e []byte) (*ecdsa.PublicKey, error) {
 // idNonceHash computes the ID signature hash used in the handshake.
 func idNonceHash(h hash.Hash, challenge, ephkey []byte, destID enode.ID) []byte {
 	h.Reset()
-	h.Write([]byte("discovery v5 identity proof")) //nolint:errcheck
-	h.Write(challenge)                             //nolint:errcheck
-	h.Write(ephkey)                                //nolint:errcheck
-	h.Write(destID[:])                             //nolint:errcheck
+	h.Write([]byte("discovery v5 identity proof"))
+	h.Write(challenge)
+	h.Write(ephkey)
+	h.Write(destID[:])
 	return h.Sum(nil)
 }
 
@@ -120,7 +119,7 @@ type hashFn func() hash.Hash
 // deriveKeys creates the session keys.
 func deriveKeys(hash hashFn, priv *ecdsa.PrivateKey, pub *ecdsa.PublicKey, n1, n2 enode.ID, challenge []byte) *session {
 	const text = "discovery v5 key agreement"
-	var info = make([]byte, 0, len(text)+len(n1)+len(n2))
+	info := make([]byte, 0, len(text)+len(n1)+len(n2))
 	info = append(info, text...)
 	info = append(info, n1[:]...)
 	info = append(info, n2[:]...)
@@ -131,6 +130,8 @@ func deriveKeys(hash hashFn, priv *ecdsa.PrivateKey, pub *ecdsa.PublicKey, n1, n
 	}
 	kdf := hkdf.New(hash, eph, challenge, info)
 	sec := session{writeKey: make([]byte, aesKeySize), readKey: make([]byte, aesKeySize)}
+	// hkdf.Read only errors past its entropy limit (255x the hash output length); this
+	// reads a fixed, small amount from a freshly created kdf, far under that.
 	kdf.Read(sec.writeKey) //nolint:errcheck
 	kdf.Read(sec.readKey)  //nolint:errcheck
 	clear(eph)
@@ -152,7 +153,6 @@ func ecdh(privkey *ecdsa.PrivateKey, pubkey *ecdsa.PublicKey) []byte {
 // encryptGCM encrypts pt using AES-GCM with the given key and nonce. The ciphertext is
 // appended to dest, which must not overlap with plaintext. The resulting ciphertext is 16
 // bytes longer than plaintext because it contains an authentication tag.
-// nolint:unparam
 func encryptGCM(dest, key, nonce, plaintext, authData []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -169,14 +169,14 @@ func encryptGCM(dest, key, nonce, plaintext, authData []byte) ([]byte, error) {
 func decryptGCM(key, nonce, ct, authData []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, fmt.Errorf("can't create block cipher: %v", err)
+		return nil, fmt.Errorf("can't create block cipher: %w", err)
 	}
 	if len(nonce) != gcmNonceSize {
 		return nil, fmt.Errorf("invalid GCM nonce size: %d", len(nonce))
 	}
 	aesgcm, err := cipher.NewGCMWithNonceSize(block, gcmNonceSize)
 	if err != nil {
-		return nil, fmt.Errorf("can't create GCM: %v", err)
+		return nil, fmt.Errorf("can't create GCM: %w", err)
 	}
 	pt := make([]byte, 0, len(ct))
 	return aesgcm.Open(pt, nonce, ct, authData)

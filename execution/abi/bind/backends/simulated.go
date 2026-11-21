@@ -30,32 +30,34 @@ import (
 
 	"github.com/holiman/uint256"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/p2p/event"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
 // This nil assignment ensures at compile time that SimulatedBackend implements bind.ContractBackend.
@@ -69,11 +71,8 @@ var (
 
 // SimulatedBackend implements bind.ContractBackend, simulating a blockchain in
 // the background. Its main purpose is to allow for easy testing of contract bindings.
-// Simulated backend implements the following interfaces:
-// ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
-// DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	m         *mock.MockSentry
+	m         *execmoduletester.ExecModuleTester
 	getHeader func(hash common.Hash, number uint64) (*types.Header, error)
 
 	mu              sync.Mutex
@@ -81,21 +80,26 @@ type SimulatedBackend struct {
 	pendingReceipts types.Receipts
 	pendingHeader   *types.Header
 	gasPool         *protocol.GasPool
-	pendingBlock    *types.Block // Currently pending block that will be imported on request
+	pendingGasUsed  *protocol.GasUsed // EIP-8037: cumulative per-dimension gas
+	pendingBlock    *types.Block      // Currently pending block that will be imported on request
 	pendingReader   state.StateReader
 	pendingReaderTx kv.TemporalTx
 	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
 
-	rmLogsFeed event.Feed
-	chainFeed  event.Feed
-	logsFeed   event.Feed
+	logsFeed event.Feed
 }
 
 func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
-	engine := ethash.NewFaker()
-	//SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
-	m := mock.MockWithGenesisEngine(t, &genesis, engine, false)
+	var engine rules.Engine
+	switch {
+	case config.TerminalTotalDifficultyPassed:
+		engine = merge.NewFaker(ethash.NewFaker())
+	default:
+		engine = ethash.NewFaker()
+	}
+	// SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&genesis), execmoduletester.WithEngine(engine))
 
 	backend := &SimulatedBackend{
 		m:            m,
@@ -117,19 +121,26 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 
 // NewSimulatedBackend A simulated backend always uses chainID 1337.
 func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	b := NewSimulatedBackendWithConfig(t, alloc, chain.TestChainConfig, gasLimit)
+	b := NewSimulatedBackendWithConfig(t, alloc, chain.TestChainBerlinConfig, gasLimit)
 	return b
 }
 
-func (b *SimulatedBackend) DB() kv.TemporalRwDB                   { return b.m.DB }
-func (b *SimulatedBackend) HistoryV3() bool                       { return b.m.HistoryV3 }
-func (b *SimulatedBackend) Engine() rules.Engine                  { return b.m.Engine }
-func (b *SimulatedBackend) BlockReader() services.FullBlockReader { return b.m.BlockReader }
+func (b *SimulatedBackend) DB() kv.TemporalRwDB                     { return b.m.DB }
+func (b *SimulatedBackend) HistoryV3() bool                         { return b.m.HistoryV3 }
+func (b *SimulatedBackend) Engine() rules.Engine                    { return b.m.Engine }
+func (b *SimulatedBackend) BlockReader() dbservices.FullBlockReader { return b.m.BlockReader }
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
+		b.pendingReaderTx = nil
+	}
+	if b.pendingState != nil {
+		b.pendingState.Close()
+		b.pendingState = nil
 	}
 	b.m.Close()
 }
@@ -165,13 +176,17 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	blockChain, _ := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *blockgen.BlockGen) {})
+	blockChain, _ := b.m.GenerateChainFrom(b.prependBlock, 1, func(int, *blockgen.BlockGen) {})
 	b.pendingBlock = blockChain.Blocks[0]
 	b.pendingReceipts = blockChain.Receipts[0]
 	b.pendingHeader = blockChain.Headers[0]
 	b.gasPool = new(protocol.GasPool).AddGas(b.pendingHeader.GasLimit).AddBlobGas(b.m.ChainConfig.GetMaxBlobGasPerBlock(b.pendingHeader.Time))
+	b.pendingGasUsed = new(protocol.GasUsed)
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
+	}
+	if b.pendingState != nil {
+		b.pendingState.Close()
 	}
 	tx, err := b.m.DB.BeginTemporalRo(context.Background()) //nolint:gocritic
 	if err != nil {
@@ -179,19 +194,26 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	}
 	b.pendingReaderTx = tx
 	b.pendingReader = b.m.NewStateReader(b.pendingReaderTx)
-	b.pendingState = state.New(b.pendingReader)
+	b.pendingState = state.NewWithVersionMap(b.pendingReader, state.NewVersionMap(nil))
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
-func (b *SimulatedBackend) stateByBlockNumber(db kv.TemporalTx, blockNumber *big.Int) *state.IntraBlockState {
-	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
-		return state.New(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
+func (b *SimulatedBackend) stateByBlockNumber(db kv.TemporalTx, blockNumber *uint256.Int) *state.IntraBlockState {
+	if blockNumber == nil {
+		return newCallState(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
 	}
-	return state.New(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
+	return newCallState(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
+}
+
+// newCallState puts a one-shot read or call on the versioned state, like the RPC call sites.
+func newCallState(r state.StateReader) *state.IntraBlockState {
+	s := state.NewWithVersionMap(r, state.NewVersionMap(nil))
+	s.SetNoConflictDetection()
+	return s
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
-func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error) {
+func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	tx, err := b.m.DB.BeginTemporalRo(context.Background())
@@ -204,7 +226,7 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, 
 }
 
 // BalanceAt returns the wei balance of a certain account in the blockchain.
-func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Address, blockNumber *big.Int) (*uint256.Int, error) {
+func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) (*uint256.Int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	tx, err := b.m.DB.BeginTemporalRo(context.Background())
@@ -218,7 +240,7 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Addres
 }
 
 // NonceAt returns the nonce of a certain account in the blockchain.
-func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address, blockNumber *big.Int) (uint64, error) {
+func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) (uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	tx, err := b.m.DB.BeginTemporalRo(context.Background())
@@ -232,7 +254,7 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address,
 }
 
 // StorageAt returns the value of key in the storage of an account in the blockchain.
-func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Address, key common.Hash, blockNumber *big.Int) ([]byte, error) {
+func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Address, key common.Hash, blockNumber *uint256.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	tx, err := b.m.DB.BeginTemporalRo(context.Background())
@@ -273,8 +295,12 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 		return nil, err
 	}
 
+	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	if err != nil {
+		return nil, err
+	}
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts, err := b.m.ReceiptsReader.GetReceipts(ctx, b.m.ChainConfig, tx, block)
+	receipts, err := b.m.ReceiptsReader.GetReceipts(ctx, b.m.ChainConfig, tx, block, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled})
 	if err != nil {
 		panic(err)
 	}
@@ -309,28 +335,28 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.
 		return nil, false, err
 	}
 	if !ok {
-		return nil, false, ethereum.NotFound
+		return nil, false, bind.ErrNotFound
 	}
 	blockHash, ok, err := b.BlockReader().CanonicalHash(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, false, err
 	}
 	if !ok {
-		return nil, false, ethereum.NotFound
+		return nil, false, bind.ErrNotFound
 	}
 	body, err := b.BlockReader().BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, false, err
 	}
 	if body == nil {
-		return nil, false, ethereum.NotFound
+		return nil, false, bind.ErrNotFound
 	}
 	for _, txn = range body.Transactions {
 		if txn.Hash() == txHash {
 			return txn, false, nil
 		}
 	}
-	return nil, false, ethereum.NotFound
+	return nil, false, bind.ErrNotFound
 }
 
 // BlockByHash retrieves a block based on the block hash.
@@ -360,7 +386,7 @@ func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash common.Hash) (*
 
 // BlockByNumber retrieves a block from the database by number, caching it
 // (associated with its hash) if found.
-func (b *SimulatedBackend) BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error) {
+func (b *SimulatedBackend) BlockByNumber(ctx context.Context, number *uint256.Int) (*types.Block, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -369,8 +395,9 @@ func (b *SimulatedBackend) BlockByNumber(ctx context.Context, number *big.Int) (
 
 // blockByNumberNoLock retrieves a block from the database by number, caching it
 // (associated with its hash) if found without Lock.
-func (b *SimulatedBackend) blockByNumberNoLock(ctx context.Context, number *big.Int) (*types.Block, error) {
-	if number == nil || number.Cmp(b.prependBlock.Number()) == 0 {
+func (b *SimulatedBackend) blockByNumberNoLock(ctx context.Context, number *uint256.Int) (*types.Block, error) {
+	prependBlockNum := b.prependBlock.Number()
+	if number == nil || number.Cmp(&prependBlockNum) == 0 {
 		return b.prependBlock, nil
 	}
 
@@ -422,7 +449,7 @@ func (b *SimulatedBackend) HeaderByHash(ctx context.Context, hash common.Hash) (
 
 // HeaderByNumber returns a block header from the current canonical chain. If number is
 // nil, the latest known header is returned.
-func (b *SimulatedBackend) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
+func (b *SimulatedBackend) HeaderByNumber(ctx context.Context, number *uint256.Int) (*types.Header, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	tx, err := b.m.DB.BeginRo(context.Background())
@@ -431,7 +458,8 @@ func (b *SimulatedBackend) HeaderByNumber(ctx context.Context, number *big.Int) 
 	}
 	defer tx.Rollback()
 
-	if number == nil || number.Cmp(b.prependBlock.Number()) == 0 {
+	prependBlockNum := b.prependBlock.Number()
+	if number == nil || number.Cmp(&prependBlockNum) == 0 {
 		return b.prependBlock.Header(), nil
 	}
 	header, err := b.BlockReader().HeaderByNumber(ctx, tx, number.Uint64())
@@ -548,16 +576,19 @@ func (e *revertError) ErrorData() any {
 }
 
 // CallContract executes a contract call.
-func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+func (b *SimulatedBackend) CallContract(ctx context.Context, call bind.CallMsg, blockNumber *uint256.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if blockNumber != nil && blockNumber.Cmp(b.pendingBlock.Number()) != 0 {
+	pendingBlockNum := b.pendingBlock.Number()
+	if blockNumber != nil && blockNumber.Cmp(&pendingBlockNum) != 0 {
 		return nil, errBlockNumberUnsupported
 	}
 	var res *evmtypes.ExecutionResult
 	if err := b.m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) (err error) {
-		s := state.New(b.m.NewStateReader(tx))
+		s := newCallState(b.m.NewStateReader(tx))
+		defer s.Close()
+		s.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions()))
 		res, err = b.callContract(ctx, call, b.pendingBlock, s)
 		if err != nil {
 			return err
@@ -574,7 +605,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 }
 
 // PendingCallContract executes a contract call on the pending state.
-func (b *SimulatedBackend) PendingCallContract(ctx context.Context, call ethereum.CallMsg) ([]byte, error) {
+func (b *SimulatedBackend) PendingCallContract(ctx context.Context, call bind.CallMsg) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	snapshot := b.pendingState.PushSnapshot()
@@ -609,17 +640,18 @@ func (b *SimulatedBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error
 
 // EstimateGas executes the requested code against the currently pending block/state and
 // returns the used amount of gas.
-func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error) {
+func (b *SimulatedBackend) EstimateGas(ctx context.Context, call bind.CallMsg) (uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	// Determine the lowest and highest possible gas limits to binary search in between
+	minTxGas := mdgas.MinTxGas(b.m.ChainConfig.IsAmsterdam(b.pendingBlock.Time()))
 	var (
-		lo     = params.TxGas - 1
+		lo     = minTxGas - 1
 		hi     uint64
 		gasCap uint64
 	)
-	if call.Gas >= params.TxGas {
+	if call.Gas >= minTxGas {
 		hi = call.Gas
 	} else {
 		hi = b.pendingBlock.GasLimit()
@@ -670,13 +702,13 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 			}
 			return true, nil, err // Bail out
 		}
-		return res.Failed(), res, nil
+		failed := res.Failed()
+		return failed, res, nil
 	}
 	// Execute the binary search and hone in on an executable gas limit
 	for lo+1 < hi {
 		mid := (hi + lo) / 2
 		failed, _, err := executable(mid)
-
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
 		// assigned. Return the error directly, don't struggle any more
@@ -696,7 +728,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 			return 0, err
 		}
 		if failed {
-			if result != nil && result.Err != vm.ErrOutOfGas {
+			if result != nil && !errors.Is(result.Err, vm.ErrOutOfGas) {
 				if len(result.Revert()) > 0 {
 					return 0, newRevertError(result)
 				}
@@ -711,8 +743,9 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 
 // callContract implements common code between normal and pending contract calls.
 // state is modified during execution, make sure to copy it if necessary.
-func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*evmtypes.ExecutionResult, error) {
+func (b *SimulatedBackend) callContract(_ context.Context, call bind.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*evmtypes.ExecutionResult, error) {
 	const baseFeeUpperLimit = 880000000
+	const defaultCallGas = 50000000
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
 		call.GasPrice = &u256.Num1
@@ -724,17 +757,25 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 		call.TipCap = uint256.NewInt(baseFeeUpperLimit)
 	}
 	if call.Gas == 0 {
-		call.Gas = 50000000
+		call.Gas = defaultCallGas
+		if call.Gas > params.MaxTxnGasLimit &&
+			b.m.ChainConfig.IsOsaka(block.Time()) &&
+			!b.m.ChainConfig.IsAmsterdam(block.Time()) {
+			// Cap the maximum gas allowance according to EIP-7825 if Osaka (but not Amsterdam).
+			// In Amsterdam (EIP-8037), transactions can provide state gas via a total gas limit > MaxTxnGasLimit.
+			call.Gas = params.MaxTxnGasLimit
+		}
 	}
 	if call.Value == nil {
 		call.Value = new(uint256.Int)
 	}
+	if call.MaxFeePerBlobGas == nil {
+		call.MaxFeePerBlobGas = new(uint256.Int)
+	}
 	// Set infinite balance to the fake caller account.
-	from, err := statedb.GetOrNewStateObject(accounts.InternAddress(call.From))
-	if err != nil {
+	if err := statedb.SetBalance(accounts.InternAddress(call.From), *(&uint256.Int{}).SetAllOne(), tracing.BalanceChangeUnspecified); err != nil {
 		return nil, err
 	}
-	from.SetBalance(*(&uint256.Int{}).SetAllOne(), true, tracing.BalanceChangeUnspecified)
 	// Execute the call.
 	msg := callMsg{call}
 
@@ -746,7 +787,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
 	gasPool := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 
-	return protocol.NewStateTransition(vmEnv, msg, gasPool).TransitionDb(true /* refunds */, false /* gasBailout */)
+	return protocol.NewTxnExecutor(vmEnv, msg, gasPool).Execute(true /* refunds */, false /* gasBailout */)
 }
 
 // SendTransaction updates the pending block to include the given transaction.
@@ -776,12 +817,22 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 		accounts.InternAddress(b.pendingHeader.Coinbase), b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, txn,
-		&b.pendingHeader.GasUsed, b.pendingHeader.BlobGasUsed,
-		vm.Config{}); err != nil {
+		b.pendingGasUsed,
+		vm.Config{},
+	); err != nil {
 		return err
 	}
+	blockContext := protocol.NewEVMBlockContext(b.pendingHeader, protocol.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine, accounts.InternAddress(b.pendingHeader.Coinbase), b.m.ChainConfig)
+	writes, err := b.pendingState.FinalizedWrites(blockContext.Rules(b.m.ChainConfig))
+	if err != nil {
+		return err
+	}
+	b.pendingState.FlushWritesToVersionMap(writes)
+	b.pendingState.ResetVersionedIO()
+	b.pendingState.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions())+1)
+	protocol.SetGasUsed(b.pendingHeader, b.pendingGasUsed)
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
-	chain, err := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *blockgen.BlockGen) {
+	chain, err := b.m.GenerateChainFrom(b.prependBlock, 1, func(number int, block *blockgen.BlockGen) {
 		for _, txn := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
 		}
@@ -801,18 +852,18 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 // returning all the results in one batch.
 //
 // TODO(karalabe): Deprecate when the subscription one can return past data too.
-func (b *SimulatedBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
+func (b *SimulatedBackend) FilterLogs(ctx context.Context, query bind.FilterQuery) ([]types.Log, error) {
 	return nil, nil
 }
 
 // SubscribeFilterLogs creates a background log filtering operation, returning a
 // subscription immediately, which can be used to stream the found events.
-func (b *SimulatedBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
+func (b *SimulatedBackend) SubscribeFilterLogs(ctx context.Context, query bind.FilterQuery, ch chan<- types.Log) (event.Subscription, error) {
 	return nil, nil
 }
 
 // SubscribeNewHead returns an event subscription for a new header.
-func (b *SimulatedBackend) SubscribeNewHead(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error) {
+func (b *SimulatedBackend) SubscribeNewHead(ctx context.Context, ch chan<- *types.Header) (event.Subscription, error) {
 	return nil, nil
 }
 
@@ -826,7 +877,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 		return errors.New("could not adjust time on non-empty block")
 	}
 
-	chain, err := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *blockgen.BlockGen) {
+	chain, err := b.m.GenerateChainFrom(b.prependBlock, 1, func(number int, block *blockgen.BlockGen) {
 		for _, txn := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
 		}
@@ -843,7 +894,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 
 // callMsg implements protocol.Message to allow passing it as a transaction simulator.
 type callMsg struct {
-	ethereum.CallMsg
+	bind.CallMsg
 }
 
 func (m callMsg) From() accounts.Address { return accounts.InternAddress(m.CallMsg.From) }
@@ -861,12 +912,16 @@ func (m callMsg) FeeCap() *uint256.Int                  { return m.CallMsg.FeeCa
 func (m callMsg) TipCap() *uint256.Int                  { return m.CallMsg.TipCap }
 func (m callMsg) Gas() uint64                           { return m.CallMsg.Gas }
 func (m callMsg) CheckGas() bool                        { return true }
+func (m callMsg) SkipExecutionGasCap() bool             { return false }
 func (m callMsg) Value() *uint256.Int                   { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                          { return m.CallMsg.Data }
 func (m callMsg) AccessList() types.AccessList          { return m.CallMsg.AccessList }
 func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
+func (m callMsg) DynamicFeeArgs() bool                  { return false }
 func (m callMsg) IsFree() bool                          { return false }
 func (m callMsg) SetIsFree(_ bool)                      {}
+
+func (m callMsg) Authorities(*uint256.Int) *types.RecoveredAuthorities { return nil }
 
 func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }
 func (m callMsg) MaxFeePerBlobGas() *uint256.Int { return m.CallMsg.MaxFeePerBlobGas }

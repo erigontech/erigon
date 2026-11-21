@@ -20,22 +20,14 @@ import (
 	"math/big"
 
 	blst "github.com/supranational/blst/bindings/go"
-	"golang.org/x/crypto/sha3"
+
+	erigoncrypto "github.com/erigontech/erigon/common/crypto"
 )
 
 const HashToG1DST = "SHUTTER_V01_BLS12381G1_XMD:SHA-256_SSWU_RO_"
 
-func keccak256(ds ...[]byte) []byte {
-	state := sha3.NewLegacyKeccak256()
-	for _, d := range ds {
-		state.Write(d)
-	}
-	h := []byte{}
-	return state.Sum(h)
-}
-
 func hashWithPrefix(p byte, b []byte) []byte {
-	return keccak256(append([]byte{p}, b...))
+	return erigoncrypto.Keccak256([]byte{p}, b)
 }
 
 func Hash1(b []byte) *blst.P1Affine {

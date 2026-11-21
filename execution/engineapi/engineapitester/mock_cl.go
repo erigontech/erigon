@@ -1,0 +1,479 @@
+// Copyright 2025 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package engineapitester
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/cenkalti/backoff/v4"
+	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
+	"github.com/erigontech/erigon/execution/types"
+)
+
+type MockClOption func(*MockCl)
+
+func WithMockClState(state *MockClState) MockClOption {
+	return func(cl *MockCl) {
+		cl.state = state
+	}
+}
+
+type MockCl struct {
+	logger                log.Logger
+	engineApiClient       *engineapi.JsonRpcClient
+	suggestedFeeRecipient common.Address
+	genesis               common.Hash
+	genesisGasLimit       uint64
+	state                 *MockClState
+	chainConfig           *chain.Config
+	waitForTxPool         func(context.Context, common.Hash) error
+}
+
+func NewMockCl(logger log.Logger, elClient *engineapi.JsonRpcClient, genesis *types.Block, chainConfig *chain.Config, opts ...MockClOption) *MockCl {
+	mcl := &MockCl{
+		logger:                logger,
+		engineApiClient:       elClient,
+		suggestedFeeRecipient: genesis.Coinbase(),
+		genesis:               genesis.Hash(),
+		genesisGasLimit:       genesis.GasLimit(),
+		chainConfig:           chainConfig,
+		state: &MockClState{
+			ParentElBlock:     genesis.Hash(),
+			ParentElTimestamp: genesis.Time(),
+			ParentClBlockRoot: *uint256.NewInt(999_999_999),
+			ParentRandao:      uint256.Int{},
+		},
+	}
+	for _, opt := range opts {
+		opt(mcl)
+	}
+	return mcl
+}
+
+// BuildCanonicalBlock builds a new block and sets it as canonical.
+func (cl *MockCl) BuildCanonicalBlock(ctx context.Context, opts ...BlockBuildingOption) (clPayload *MockClPayload, err error) {
+	clPayload, err = cl.BuildNewPayload(ctx, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("build new payload failed: %w", err)
+	}
+	status, err := cl.InsertNewPayload(ctx, clPayload)
+	if err != nil {
+		return nil, fmt.Errorf("insert new payload failed: %w", err)
+	}
+	if status.Status != enginetypes.ValidStatus {
+		return nil, fmt.Errorf("unexpected status when inserting payload for canonical block: %s", status.Status)
+	}
+	err = cl.UpdateForkChoice(ctx, clPayload)
+	if err != nil {
+		return nil, fmt.Errorf("update fork choice failed: %w", err)
+	}
+	return clPayload, nil
+}
+
+// StartBuilding issues a block-building forkChoiceUpdated on top of the lastNode canonical block (the
+// parent can be overridden via an option) and returns the resulting payload id and the payload
+// attributes used. It is the first half of BuildNewPayload.
+func (cl *MockCl) StartBuilding(ctx context.Context, opts ...BlockBuildingOption) (hexutil.Bytes, enginetypes.PayloadAttributes, error) {
+	forkChoiceState, payloadAttributes, err := cl.nextPayloadBuildInputs(ctx, opts...)
+	if err != nil {
+		return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("start building: %w", err)
+	}
+	fcuRes, err := RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
+		func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
+			var r *enginetypes.ForkChoiceUpdatedResponse
+			var err error
+			if cl.chainConfig.AmsterdamTime != nil {
+				r, err = cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, &payloadAttributes, nil)
+			} else {
+				r, err = cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, &payloadAttributes)
+			}
+			if err != nil {
+				return nil, "", err
+			}
+			return r, r.PayloadStatus.Status, err
+		})
+	if err != nil {
+		return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("start building: fcu error: %w", err)
+	}
+	if fcuRes.PayloadStatus.Status != enginetypes.ValidStatus {
+		return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("payload status of block building fcu is not valid: %s", fcuRes.PayloadStatus.Status)
+	}
+	if fcuRes.PayloadId == nil {
+		return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("forkchoiceUpdated for block building returned no payload id")
+	}
+	if cl.waitForTxPool != nil {
+		if err := cl.waitForTxPool(ctx, forkChoiceState.HeadHash); err != nil {
+			return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("start building: wait for txpool: %w", err)
+		}
+	}
+	return *fcuRes.PayloadId, payloadAttributes, nil
+}
+
+func (cl *MockCl) nextPayloadBuildInputs(ctx context.Context, opts ...BlockBuildingOption) (enginetypes.ForkChoiceState, enginetypes.PayloadAttributes, error) {
+	options := cl.applyBlockBuildingOptions(opts...)
+	forkChoiceState := enginetypes.ForkChoiceState{
+		HeadHash:           cl.state.ParentElBlock,
+		SafeBlockHash:      cl.genesis,
+		FinalizedBlockHash: cl.genesis,
+	}
+	var timestamp uint64
+	if options.timestamp != nil {
+		timestamp = *options.timestamp
+	} else {
+		timestamp = cl.state.ParentElTimestamp + 1
+	}
+	if options.waitUntilTimestamp {
+		waitDuration := time.Until(time.Unix(int64(timestamp), 0)) + 100*time.Millisecond
+		cl.logger.Debug("[mock-cl] waiting until", "time", timestamp, "duration", waitDuration)
+		err := common.Sleep(ctx, waitDuration)
+		if err != nil {
+			return enginetypes.ForkChoiceState{}, enginetypes.PayloadAttributes{}, fmt.Errorf("wait error: %w", err)
+		}
+	}
+	parentBeaconBlockRoot := common.U256ToHash(cl.state.ParentClBlockRoot)
+	slotNumber := cl.state.NextSlotNumber()
+	withdrawals := make([]*types.Withdrawal, 0)
+	if options.withdrawals != nil {
+		withdrawals = options.withdrawals
+	}
+	payloadAttributes := enginetypes.PayloadAttributes{
+		Timestamp:             hexutil.Uint64(timestamp),
+		PrevRandao:            common.U256ToHash(cl.state.ParentRandao),
+		SuggestedFeeRecipient: cl.suggestedFeeRecipient,
+		Withdrawals:           withdrawals,
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+	}
+	if cl.chainConfig.AmsterdamTime != nil {
+		payloadAttributes.SlotNumber = (*hexutil.Uint64)(&slotNumber)
+		targetGasLimit := hexutil.Uint64(cl.genesisGasLimit)
+		payloadAttributes.TargetGasLimit = &targetGasLimit
+	}
+	cl.logger.Debug("[mock-cl] building block", "timestamp", timestamp)
+	return forkChoiceState, payloadAttributes, nil
+}
+
+// BuildEmptyPayload builds a payload with an explicit empty transaction list.
+func (cl *MockCl) BuildEmptyPayload(
+	ctx context.Context,
+	call func(context.Context, any, string, ...any) error,
+	opts ...BlockBuildingOption,
+) (*MockClPayload, error) {
+	forkChoiceState, payloadAttributes, err := cl.nextPayloadBuildInputs(ctx, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("build empty payload: %w", err)
+	}
+	emptyTransactions := []hexutil.Bytes{}
+	var response enginetypes.GetPayloadResponse
+	if err := call(
+		ctx,
+		&response,
+		"testing_buildBlockV1",
+		forkChoiceState.HeadHash,
+		&payloadAttributes,
+		&emptyTransactions,
+		nil,
+	); err != nil {
+		return nil, fmt.Errorf("build empty payload: %w", err)
+	}
+	if response.ExecutionPayload == nil {
+		return nil, errors.New("build empty payload: response has no execution payload")
+	}
+	if len(response.ExecutionPayload.Transactions) != 0 {
+		return nil, fmt.Errorf("build empty payload: response has %d transactions", len(response.ExecutionPayload.Transactions))
+	}
+	return &MockClPayload{
+		GetPayloadResponse:    &response,
+		ParentBeaconBlockRoot: payloadAttributes.ParentBeaconBlockRoot,
+	}, nil
+}
+
+// GetBuiltPayload fetches the payload being built under the given id using the fork-appropriate
+// engine_getPayload version. It is the second half of BuildNewPayload.
+func (cl *MockCl) GetBuiltPayload(ctx context.Context, payloadId hexutil.Bytes) (*enginetypes.GetPayloadResponse, error) {
+	return RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, []error{&engine_helpers.UnknownPayloadErr},
+		func() (*enginetypes.GetPayloadResponse, enginetypes.EngineStatus, error) {
+			var r *enginetypes.GetPayloadResponse
+			var err error
+			switch {
+			case cl.chainConfig.AmsterdamTime != nil:
+				r, err = cl.engineApiClient.GetPayloadV6(ctx, payloadId)
+			case cl.chainConfig.OsakaTime != nil:
+				r, err = cl.engineApiClient.GetPayloadV5(ctx, payloadId)
+			default:
+				r, err = cl.engineApiClient.GetPayloadV4(ctx, payloadId)
+			}
+			if err != nil {
+				return nil, "", err
+			}
+			return r, "", err
+		})
+}
+
+// BuildNewPayload builds a new payload on top of the lastNode canonical block. To help with testing forking, the parent
+// block can be overridden by passing an option.
+func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOption) (*MockClPayload, error) {
+	payloadId, payloadAttributes, err := cl.StartBuilding(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	newPayload, err := cl.GetBuiltPayload(ctx, payloadId)
+	if err != nil {
+		return nil, fmt.Errorf("build new payload: get payload error: %w", err)
+	}
+	return &MockClPayload{newPayload, payloadAttributes.ParentBeaconBlockRoot}, nil
+}
+
+// InsertNewPayload validates a new payload and inserts it into the engine. Note it does not update the fork choice.
+func (cl *MockCl) InsertNewPayload(ctx context.Context, p *MockClPayload) (*enginetypes.PayloadStatus, error) {
+	elPayload := p.ExecutionPayload
+	clParentBlockRoot := p.ParentBeaconBlockRoot
+	// Forward execution requests from GetPayload to NewPayload.
+	// Without this, blocks containing real execution requests (e.g. withdrawal
+	// requests from EIP-7002) would fail validation due to requestsHash mismatch.
+	executionRequests := p.ExecutionRequests
+	if executionRequests == nil {
+		executionRequests = []hexutil.Bytes{}
+	}
+	return RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
+		func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
+			var r *enginetypes.PayloadStatus
+			var err error
+			if cl.chainConfig.AmsterdamTime != nil {
+				r, err = cl.engineApiClient.NewPayloadV5(ctx, elPayload, []common.Hash{}, clParentBlockRoot, executionRequests)
+			} else {
+				r, err = cl.engineApiClient.NewPayloadV4(ctx, elPayload, []common.Hash{}, clParentBlockRoot, executionRequests)
+			}
+			if err != nil {
+				return nil, "", err
+			}
+			return r, r.Status, err
+		})
+}
+
+// UpdateForkChoice updates the fork choice to the given block. Genesis is always set as safe and finalised.
+func (cl *MockCl) UpdateForkChoice(ctx context.Context, p *MockClPayload) error {
+	if err := cl.UpdateForkChoiceByHash(ctx, p.ExecutionPayload.BlockHash); err != nil {
+		return err
+	}
+	cl.state.ParentElBlock = p.ExecutionPayload.BlockHash
+	cl.state.ParentElTimestamp = p.ExecutionPayload.Timestamp.Uint64()
+	cl.state.ParentClBlockRoot = p.ParentBeaconBlockRoot.U256()
+	cl.state.ParentClBlockRoot.AddUint64(&cl.state.ParentClBlockRoot, 1)
+	cl.state.ParentRandao = p.ExecutionPayload.PrevRandao.U256()
+	cl.state.ParentRandao.AddUint64(&cl.state.ParentRandao, 1)
+	return nil
+}
+
+// UpdateForkChoiceByHash sets the head, with genesis as safe and finalised.
+// It does not change block-building state, which requires the full payload.
+func (cl *MockCl) UpdateForkChoiceByHash(ctx context.Context, head common.Hash) error {
+	forkChoiceState := enginetypes.ForkChoiceState{
+		HeadHash:           head,
+		SafeBlockHash:      cl.genesis,
+		FinalizedBlockHash: cl.genesis,
+	}
+	fcuRes, err := RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
+		func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
+			var r *enginetypes.ForkChoiceUpdatedResponse
+			var err error
+			if cl.chainConfig.AmsterdamTime != nil {
+				r, err = cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, nil, nil)
+			} else {
+				r, err = cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, nil)
+			}
+			if err != nil {
+				return nil, "", err
+			}
+			return r, r.PayloadStatus.Status, err
+		})
+	if err != nil {
+		return err
+	}
+	if fcuRes.PayloadStatus.Status != enginetypes.ValidStatus {
+		return fmt.Errorf("payload status of fcu is not valid: %s", fcuRes.PayloadStatus.Status)
+	}
+	return nil
+}
+
+func (cl *MockCl) State() *MockClState {
+	return cl.state
+}
+
+func (cl *MockCl) applyBlockBuildingOptions(opts ...BlockBuildingOption) blockBuildingOptions {
+	defaultOptions := blockBuildingOptions{}
+	for _, opt := range opts {
+		opt(&defaultOptions)
+	}
+	return defaultOptions
+}
+
+type BlockBuildingOption func(*blockBuildingOptions)
+
+func WithTimestamp(timestamp uint64) BlockBuildingOption {
+	return func(opts *blockBuildingOptions) {
+		opts.timestamp = &timestamp
+	}
+}
+
+func WithWaitUntilTimestamp() BlockBuildingOption {
+	return func(opts *blockBuildingOptions) {
+		opts.waitUntilTimestamp = true
+	}
+}
+
+func WithWithdrawals(withdrawals []*types.Withdrawal) BlockBuildingOption {
+	return func(opts *blockBuildingOptions) {
+		opts.withdrawals = withdrawals
+	}
+}
+
+type blockBuildingOptions struct {
+	timestamp          *uint64
+	waitUntilTimestamp bool
+	withdrawals        []*types.Withdrawal
+}
+
+func RetryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineStatus, retryErrors []error,
+	f func() (*T, enginetypes.EngineStatus, error),
+) (*T, error) {
+	operation := func() (*T, error) {
+		res, status, err := f()
+		if err != nil {
+			for _, retryErr := range retryErrors {
+				if strings.Contains(err.Error(), retryErr.Error()) {
+					return nil, err
+				}
+			}
+
+			return nil, backoff.Permanent(err) // do not retry
+		}
+
+		for _, retryStatus := range retryStatuses {
+			if status == retryStatus {
+				return nil, fmt.Errorf("engine needs rerty: %s", retryStatus) // retry
+			}
+		}
+		return res, nil
+	}
+	// Honour the caller's deadline if it has one (test contexts carry
+	// the -timeout flag). Without this, slow CI environments — especially
+	// -race + GOMAXPROCS<=2 on the 4-vCPU GHA runner — hit the cap on
+	// high-mgas blocks before the engine returns Valid. Absent any caller
+	// deadline, cap at 30 min so a stuck engine still fails the test
+	// rather than hanging.
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Minute)
+		defer cancel()
+	}
+	var backOff backoff.BackOff
+	backOff = backoff.NewConstantBackOff(50 * time.Millisecond)
+	backOff = backoff.WithContext(backOff, ctx)
+	return backoff.RetryWithData(operation, backOff)
+}
+
+type MockClPayload struct {
+	*enginetypes.GetPayloadResponse
+	ParentBeaconBlockRoot *common.Hash
+}
+
+type MockClState struct {
+	ParentElBlock     common.Hash
+	ParentElTimestamp uint64
+	ParentClBlockRoot uint256.Int
+	ParentRandao      uint256.Int
+	SlotNumber        uint64
+}
+
+func (cl *MockClState) NextSlotNumber() uint64 {
+	slotNumber := cl.SlotNumber
+	cl.SlotNumber++
+	return slotNumber
+}
+
+func TamperMockClPayloadStateRoot(p *MockClPayload, stateRoot common.Hash) *MockClPayload {
+	var pCopy MockClPayload
+	err := copier.CopyWithOption(&pCopy, p, copier.Option{DeepCopy: true})
+	if err != nil {
+		panic(fmt.Sprintf("could not copy mock cl payload when trying to tamper it: %s", err))
+	}
+	pCopy.ExecutionPayload.StateRoot = stateRoot
+	h := MockClPayloadToHeader(&pCopy)
+	pCopy.ExecutionPayload.BlockHash = h.Hash()
+	return &pCopy
+}
+
+func MockClPayloadToHeader(p *MockClPayload) *types.Header {
+	elPayload := p.GetPayloadResponse.ExecutionPayload
+	var bloom types.Bloom
+	copy(bloom[:], elPayload.LogsBloom)
+	txns := make(types.BinaryTransactions, len(elPayload.Transactions))
+	for i, txn := range elPayload.Transactions {
+		txns[i] = txn
+	}
+	var baseFee *uint256.Int // a null baseFeePerGas stays nil and fails validation
+	if elPayload.BaseFeePerGas != nil {
+		baseFee = new(uint256.Int).Set((*uint256.Int)(elPayload.BaseFeePerGas))
+	}
+	header := &types.Header{
+		ParentHash:            elPayload.ParentHash,
+		Coinbase:              elPayload.FeeRecipient,
+		Root:                  elPayload.StateRoot,
+		Bloom:                 bloom,
+		BaseFee:               baseFee,
+		Extra:                 elPayload.ExtraData,
+		Number:                *uint256.NewInt(elPayload.BlockNumber.Uint64()),
+		GasUsed:               uint64(elPayload.GasUsed),
+		GasLimit:              uint64(elPayload.GasLimit),
+		Time:                  uint64(elPayload.Timestamp),
+		MixDigest:             elPayload.PrevRandao,
+		UncleHash:             empty.UncleHash,
+		Difficulty:            *merge.ProofOfStakeDifficulty,
+		Nonce:                 merge.ProofOfStakeNonce,
+		ReceiptHash:           elPayload.ReceiptsRoot,
+		TxHash:                types.DeriveSha(txns),
+		BlobGasUsed:           (*uint64)(elPayload.BlobGasUsed),
+		ExcessBlobGas:         (*uint64)(elPayload.ExcessBlobGas),
+		ParentBeaconBlockRoot: p.ParentBeaconBlockRoot,
+		SlotNumber:            (*uint64)(elPayload.SlotNumber),
+	}
+	if elPayload.Withdrawals != nil {
+		wh := types.DeriveSha(types.Withdrawals(elPayload.Withdrawals))
+		header.WithdrawalsHash = &wh
+	}
+	requests := make(types.FlatRequests, 0, len(p.ExecutionRequests))
+	for _, r := range p.ExecutionRequests {
+		requests = append(requests, types.FlatRequest{Type: r[0], RequestData: r[1:]})
+	}
+	header.RequestsHash = requests.Hash()
+	return header
+}

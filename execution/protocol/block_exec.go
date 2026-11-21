@@ -20,14 +20,9 @@
 package protocol
 
 import (
-	"cmp"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"slices"
-	"strings"
 	"time"
-
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -36,8 +31,9 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -45,12 +41,9 @@ import (
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
-var (
-	blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
-)
+var blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
 
 type SyncMode string
 
@@ -60,23 +53,22 @@ const (
 )
 
 type RejectedTx struct {
-	Index int    `json:"index"    gencodec:"required"`
-	Err   string `json:"error"    gencodec:"required"`
+	Index int    `json:"index"`
+	Err   string `json:"error"`
 }
 
 type RejectedTxs []*RejectedTx
 
 type EphemeralExecResult struct {
-	StateRoot        common.Hash           `json:"stateRoot"`
-	TxRoot           common.Hash           `json:"txRoot"`
-	ReceiptRoot      common.Hash           `json:"receiptsRoot"`
-	LogsHash         common.Hash           `json:"logsHash"`
-	Bloom            types.Bloom           `json:"logsBloom"        gencodec:"required"`
-	Receipts         types.Receipts        `json:"receipts"`
-	Rejected         RejectedTxs           `json:"rejected,omitempty"`
-	Difficulty       *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
-	GasUsed          math.HexOrDecimal64   `json:"gasUsed"`
-	StateSyncReceipt *types.Receipt        `json:"-"`
+	StateRoot   common.Hash           `json:"stateRoot"`
+	TxRoot      common.Hash           `json:"txRoot"`
+	ReceiptRoot common.Hash           `json:"receiptsRoot"`
+	LogsHash    common.Hash           `json:"logsHash"`
+	Bloom       types.Bloom           `json:"logsBloom"`
+	Receipts    types.Receipts        `json:"receipts"`
+	Rejected    RejectedTxs           `json:"rejected,omitempty"`
+	Difficulty  *math.HexOrDecimal256 `json:"currentDifficulty"`
+	GasUsed     math.HexOrDecimal64   `json:"gasUsed"`
 }
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
@@ -90,20 +82,39 @@ func ExecuteBlockEphemerally(
 	logger log.Logger,
 ) (res *EphemeralExecResult, executeBlockErr error) {
 	defer blockExecutionTimer.ObserveDuration(time.Now())
-	ibs := state.New(stateReader)
+	ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+	defer ibs.Close()
 	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
+	blockNum := block.NumberU64()
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
+	blockRules := blockContext.Rules(chainConfig)
+	_, noopWriter := stateWriter.(*state.NoopWriter)
+	writesState := stateWriter != nil && !noopWriter
+	// endPhase writes the finished phase to stateWriter and publishes it to the version map for the next one.
+	endPhase := func() error {
+		writes, err := ibs.FinalizedWrites(blockRules)
+		if err != nil {
+			return err
+		}
+		ibs.FlushWritesToVersionMap(writes)
+		if writesState {
+			if err := ibs.WriteFlushedTo(writes, stateWriter); err != nil {
+				return err
+			}
+		}
+		ibs.ResetVersionedIO()
+		return nil
+	}
 
-	gasUsed := new(uint64)
-	usedBlobGas := new(uint64)
+	gasUsed := new(GasUsed)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time()))
 
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnBlockStart != nil {
-		td := chainReader.GetTd(block.ParentHash(), block.NumberU64()-1)
 		vmConfig.Tracer.OnBlockStart(tracing.BlockEvent{
 			Block:     block,
-			TD:        td,
+			TD:        chainReader.GetTd(block.ParentHash(), block.NumberU64()-1),
 			Finalized: chainReader.CurrentFinalizedHeader(),
 			Safe:      chainReader.CurrentSafeHeader(),
 		})
@@ -115,14 +126,17 @@ func ExecuteBlockEphemerally(
 		}()
 	}
 
+	ibs.SetTxContext(blockNum, -1)
 	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, stateWriter, logger, vmConfig.Tracer); err != nil {
 		return nil, err
+	}
+	if err := endPhase(); err != nil {
+		return nil, fmt.Errorf("init of block %d: %w", blockNum, err)
 	}
 
 	var rejectedTxs []*RejectedTx
 	includedTxs := make(types.Transactions, 0, block.Transactions().Len())
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
-	blockNum := block.NumberU64()
 
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(blockNum, i)
@@ -135,18 +149,22 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		receipt, err := ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, stateWriter, header, txn, gasUsed, usedBlobGas, *vmConfig)
+		receipt, err := ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, stateWriter, header, txn, gasUsed, *vmConfig)
 		if writeTrace && vmConfig.Tracer != nil && vmConfig.Tracer.Flush != nil {
 			vmConfig.Tracer.Flush(txn)
 			vmConfig.Tracer = nil
 		}
 
 		if err != nil {
-			if !vmConfig.StatelessExec {
+			if !vmConfig.StatelessExec || errors.Is(err, ErrExecPanic) {
 				return nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)
 			}
+			ibs.ResetVersionedIO()
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
 		} else {
+			if err := endPhase(); err != nil {
+				return nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, blockNum, txn.Hash().Hex(), err)
+			}
 			includedTxs = append(includedTxs, txn)
 			if !vmConfig.NoReceipts {
 				receipts = append(receipts, receipt)
@@ -157,23 +175,28 @@ func ExecuteBlockEphemerally(
 	receiptSha := types.DeriveSha(receipts)
 	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
 		if dbg.LogHashMismatchReason() {
-			logReceipts(receipts, includedTxs, chainConfig, header, logger)
+			ethutils.LogReceipts(log.LvlWarn, "receipt hash mismatch in ExecuteBlockEphemerally", receipts, includedTxs, chainConfig, header, logger)
 		}
 
 		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
 	}
 
-	if !vmConfig.StatelessExec && *gasUsed != header.GasUsed {
-		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *gasUsed, header.GasUsed)
+	// EIP-8037: compute block-level Bottleneck for Amsterdam.
+	// Pre-Amsterdam: blockStateGasUsed is 0, so this is a no-op.
+	blockGasUsed := gasUsed.BlockGasUsed()
+	if !vmConfig.StatelessExec && blockGasUsed != header.GasUsed {
+		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", blockGasUsed, header.GasUsed)
 	}
 
-	if header.BlobGasUsed != nil && *usedBlobGas != *header.BlobGasUsed {
-		return nil, fmt.Errorf("blob gas used by execution: %d, in header: %d", *usedBlobGas, *header.BlobGasUsed)
+	if header.BlobGasUsed != nil && gasUsed.Blob != *header.BlobGasUsed {
+		return nil, fmt.Errorf("blob gas used by execution: %d, in header: %d", gasUsed.Blob, *header.BlobGasUsed)
 	}
 
 	var bloom types.Bloom
 	if !vmConfig.NoReceipts {
-		bloom = types.CreateBloom(receipts)
+		// ApplyTransaction populated each receipt's Bloom, so merge those
+		// instead of hashing all logs again.
+		bloom = receipts.MergedBloom()
 		if !vmConfig.StatelessExec && bloom != header.Bloom {
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
@@ -182,101 +205,56 @@ func ExecuteBlockEphemerally(
 	var err error
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		newBlock, _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, vmConfig.Tracer)
+		ibs.SetTxContext(blockNum, len(txs))
+		newBlock, _, err = FinalizeBlockExecution(engine, block.Header(), txs, block.Uncles(), chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger)
 		if err != nil {
 			return nil, err
 		}
+		if err := endPhase(); err != nil {
+			return nil, fmt.Errorf("finalize of block %d: %w", blockNum, err)
+		}
 	}
-	blockLogs := ibs.Logs()
 	newRoot := newBlock.Root()
 	execRs := &EphemeralExecResult{
 		StateRoot:   newRoot,
 		TxRoot:      types.DeriveSha(includedTxs),
 		ReceiptRoot: receiptSha,
 		Bloom:       bloom,
-		LogsHash:    rlpHash(blockLogs),
+		LogsHash:    ibs.LogsRlpHash(),
 		Receipts:    receipts,
-		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty),
-		GasUsed:     math.HexOrDecimal64(*gasUsed),
+		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty.ToBig()),
+		GasUsed:     math.HexOrDecimal64(blockGasUsed),
 		Rejected:    rejectedTxs,
-	}
-
-	if chainConfig.Bor != nil {
-		var logs []*types.Log
-		for _, receipt := range receipts {
-			logs = append(logs, receipt.Logs...)
-		}
-
-		stateSyncReceipt := &types.Receipt{}
-		if chainConfig.Rules == chain.BorRules && len(blockLogs) > 0 {
-			slices.SortStableFunc(blockLogs, func(i, j *types.Log) int { return cmp.Compare(i.Index, j.Index) })
-
-			if len(blockLogs) > len(logs) {
-				stateSyncReceipt.Logs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
-
-				// fill the state sync with the correct information
-				bortypes.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
-				stateSyncReceipt.Status = types.ReceiptStatusSuccessful
-			}
-		}
-
-		execRs.StateSyncReceipt = stateSyncReceipt
 	}
 
 	return execRs, nil
 }
 
-func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) string {
-	if len(receipts) == 0 {
-		// no-op, can happen if vmConfig.NoReceipts=true or vmConfig.StatelessExec=true
-		return ""
-	}
-
-	// note we do not return errors from this func since this is a debug-only
-	// informative feature that is best-effort and should not interfere with execution
-	if len(receipts) != len(txns) {
-		logger.Error("receipts and txns sizes differ", "receiptsLen", receipts.Len(), "txnsLen", txns.Len())
-		return ""
-	}
-
-	marshalled := make([]map[string]any, 0, len(receipts))
-	for i, receipt := range receipts {
-		txn := txns[i]
-		marshalled = append(marshalled, ethutils.MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true, false))
-	}
-
-	result, err := json.Marshal(marshalled)
-	if err != nil {
-		logger.Error("marshalling error when logging receipts", "err", err)
-		return ""
-	}
-
-	return string(result)
-}
-
-func rlpHash(x any) (h common.Hash) {
-	hw := sha3.NewLegacyKeccak256()
-	rlp.Encode(hw, x) //nolint:errcheck
-	hw.Sum(h[:0])
-	return h
-}
-
 func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
-	isBor := chainConfig.Bor != nil
-	var author accounts.Address
-	if isBor {
-		author = accounts.InternAddress(header.Coinbase)
-	} else {
-		author = state.SystemAddress
-	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
-	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
+	return SysCallContractWithEVM(nil, contract, data, chainConfig, ibs, header, engine, constCall, vmCfg)
 }
 
 func SysCallContractWithBlockContext(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
-	isBor := chainConfig.Bor != nil
+	return sysCallContract(nil, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
+}
+
+// NewSysCallEVM builds an EVM for SysCallContractWithEVM to reuse.
+func NewSysCallEVM(chainConfig *chain.Config, vmCfg vm.Config) *vm.EVM {
+	return vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vmCfg)
+}
+
+// SysCallContractWithEVM runs a system call on an EVM owned by the caller.
+// Reuse preserves cancellation but replaces the block and transaction contexts,
+// intra-block state and VM configuration. The EVM must not execute other calls concurrently.
+// A nil EVM or one with a different chainConfig is replaced for this call.
+func SysCallContractWithEVM(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
+	return sysCallContract(evm, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
+}
+
+func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	msg := types.NewMessage(
-		state.SystemAddress,
+		params.SystemAddress,
 		contract,
 		0, &u256.Num0,
 		SysCallGasLimit,
@@ -290,30 +268,32 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		nil,   // maxFeePerBlobGas
 	)
 	vmConfig := vmCfg
-	vmConfig.NoReceipts = true
 	vmConfig.RestoreState = constCall
 	vmConfig.Tracer = nil // set to nil to avoid trace sysCallContract
 	// Create a new context to be used in the EVM environment
-	var txContext evmtypes.TxContext
-	if isBor {
-		txContext = evmtypes.TxContext{}
+	txContext := NewEVMTxContext(msg)
+	if evm == nil || evm.ChainConfig() != chainConfig {
+		evm = vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	} else {
-		txContext = NewEVMTxContext(msg)
+		evm.ResetForSystemCall(blockContext, txContext, ibs, vmConfig, blockContext.Rules(chainConfig))
 	}
-	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
-
-	ret, _, err := evm.Call(
+	mdGas := mdgas.MdGas{
+		Execution: msg.Gas(),
+		State:     0, // pre-Amsterdam: state-gas reservoir not used; spills into execution gas
+	}
+	if evm.ChainRules().IsAmsterdam {
+		// EIP-8037: extra state-gas reservoir on top of the 30M execution budget
+		// so system calls keep their pre-EIP-8037 execution margin.
+		mdGas.State = params.StateGasSystemMaxSstores
+	}
+	ret, _, _, err := evm.Call(
 		msg.From(),
 		msg.To(),
 		msg.Data(),
-		msg.Gas(),
+		mdGas,
 		*msg.Value(),
 		false,
 	)
-	if isBor && err != nil {
-		return nil, nil
-	}
-
 	return ret, err
 }
 
@@ -333,17 +313,19 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 		true,  // isFree
 		nil,   // maxFeePerBlobGas
 	)
-	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
 	author := contract
 	txContext := NewEVMTxContext(msg)
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
-	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
-
+	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vm.Config{})
+	mdGas := mdgas.MdGas{
+		Execution: msg.Gas(),
+		State:     0, // state gas reservoir will consume from execution gas for sys calls
+	}
 	ret, _, err := evm.SysCreate(
 		msg.From(),
 		msg.Data(),
-		msg.Gas(),
+		mdGas,
 		*msg.Value(),
 		contract,
 	)
@@ -351,34 +333,32 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 }
 
 func FinalizeBlockExecution(
-	engine rules.Engine, stateReader state.StateReader,
+	engine rules.Engine,
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
-	stateWriter state.StateWriter, cc *chain.Config,
+	cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
 	withdrawals []*types.Withdrawal, chainReader rules.ChainReader,
 	isMining bool,
 	logger log.Logger,
-	tracer *tracing.Hooks,
 ) (newBlock *types.Block, retRequests types.FlatRequests, err error) {
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, vm.Config{})
 		return ret, err
 	}
 
+	if !ibs.IsVersioned() {
+		return nil, nil, errors.New("block state has no version map")
+	}
+	ibs.StartAccessRecording()
+
 	if isMining {
 		newBlock, retRequests, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, nil, logger)
 	} else {
-		retRequests, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, false, logger)
+		retRequests, err = engine.Finalize(cc, header, ibs, uncles, receipts, withdrawals, chainReader, syscall, false, logger)
 	}
 	if err != nil {
 		return nil, nil, err
 	}
-
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
-	if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
-		return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
-	}
-
 	return newBlock, retRequests, nil
 }
 
@@ -397,57 +377,4 @@ func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader
 	}
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
 	return ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
-}
-
-var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
-
-func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, isMining bool, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
-	if gasUsed != h.GasUsed {
-		var txgas strings.Builder
-		sep := ""
-		for _, receipt := range receipts {
-			txgas.WriteString(fmt.Sprintf("%s%d=%d", sep, receipt.TransactionIndex, receipt.GasUsed))
-			sep = ", "
-		}
-		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", gasUsed, "txgas", txgas.String())
-		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
-			gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
-	}
-
-	if h.BlobGasUsed != nil && blobGasUsed != *h.BlobGasUsed {
-		return fmt.Errorf("blobGasUsed by execution: %d, in header: %d, headerNum=%d, %x",
-			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
-	}
-
-	if checkReceipts && !alwaysSkipReceiptCheck {
-		for _, r := range receipts {
-			r.Bloom = types.CreateBloom(types.Receipts{r})
-		}
-		receiptHash := types.DeriveSha(receipts)
-		if receiptHash != h.ReceiptHash {
-			if isMining {
-				h.ReceiptHash = receiptHash
-				return nil
-			}
-			if dbg.LogHashMismatchReason() {
-				if result := logReceipts(receipts, txns, chainConfig, h, logger); len(result) > 0 {
-					logger.Info("marshalled receipts", "block", h.Number.Uint64(), "result", string(result))
-				}
-			}
-			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
-				receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())
-		}
-
-		lbloom := types.CreateBloom(receipts)
-		if lbloom != h.Bloom {
-			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", h.Bloom, lbloom)
-		}
-	}
-
-	if dbg.TraceLogs && dbg.TraceBlock(h.Number.Uint64()) {
-		result := logReceipts(receipts, txns, chainConfig, h, logger)
-		fmt.Println(h.Number.Uint64(), "receipts", result)
-	}
-
-	return nil
 }

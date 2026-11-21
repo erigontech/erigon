@@ -40,6 +40,16 @@ type (
 	MessageHandler[T any] func(context.Context, T, sentryproto.SentryClient) error
 )
 
+// contextSleep sleeps for the given duration but returns early if ctx is cancelled.
+func contextSleep(ctx context.Context, d time.Duration) {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+}
+
 func ReconnectAndPumpStreamLoop[TMessage any](
 	ctx context.Context,
 	sentryClient sentryproto.SentryClient,
@@ -57,19 +67,18 @@ func ReconnectAndPumpStreamLoop[TMessage any](
 				continue
 			}
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				contextSleep(ctx, 3*time.Second)
 				continue
 			}
 			logger.Warn("HandShake error, sentry not ready yet", "stream", streamName, "err", err)
-			time.Sleep(time.Second)
+			contextSleep(ctx, time.Second)
 			continue
 		}
 
 		statusData, err := statusDataFactory(ctx)
-
 		if err != nil {
 			logger.Error("SentryReconnectAndPumpStreamLoop: statusDataFactory error", "stream", streamName, "err", err)
-			time.Sleep(time.Second)
+			contextSleep(ctx, time.Second)
 			continue
 		}
 
@@ -78,11 +87,11 @@ func ReconnectAndPumpStreamLoop[TMessage any](
 				continue
 			}
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				contextSleep(ctx, 3*time.Second)
 				continue
 			}
 			logger.Warn("Status error, sentry not ready yet", "stream", streamName, "err", err)
-			time.Sleep(time.Second)
+			contextSleep(ctx, time.Second)
 			continue
 		}
 
@@ -94,7 +103,7 @@ func ReconnectAndPumpStreamLoop[TMessage any](
 				continue
 			}
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				contextSleep(ctx, 3*time.Second)
 				continue
 			}
 			logger.Warn("pumpStreamLoop failure", "stream", streamName, "err", err)
@@ -130,26 +139,6 @@ func pumpStreamLoop[TMessage any](
 		defer disconnectedMarker.MarkDisconnected()
 	}
 
-	// need to read all messages from Sentry as fast as we can, then:
-	// - can group them or process in batch
-	// - can have slow processing
-	reqs := make(chan TMessage, 256)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case req := <-reqs:
-				if err := handleInboundMessage(ctx, req, sentry); err != nil {
-					logger.Debug("Handling incoming message", "stream", streamName, "err", err)
-				}
-				if wg != nil {
-					wg.Done()
-				}
-			}
-		}
-	}()
-
 	stream, err := streamFactory(ctx, sentry)
 	if err != nil {
 		return err
@@ -162,9 +151,14 @@ func pumpStreamLoop[TMessage any](
 			return err
 		}
 
-		select {
-		case reqs <- req:
-		case <-ctx.Done():
+		// Handle before reading again so slow consumers leave the backlog upstream.
+		// Read-ahead would retain payload copies after the upstream queues release
+		// their byte budget, bypassing the queue limits.
+		if err := handleInboundMessage(ctx, req, sentry); err != nil {
+			logger.Debug("Handling incoming message", "stream", streamName, "err", err)
+		}
+		if wg != nil {
+			wg.Done()
 		}
 	}
 

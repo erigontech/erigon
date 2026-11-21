@@ -1,12 +1,14 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 
 	g "github.com/anacrolix/generics"
-	"github.com/anacrolix/missinggo/v2/panicif"
+	"github.com/urfave/cli/v3"
+
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir/reset"
 	"github.com/erigontech/erigon/db/kv"
@@ -14,7 +16,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -25,9 +26,22 @@ import (
 var (
 	removeLocalFlag = cli.BoolFlag{
 		Name:     "local",
-		Usage:    "Remove files not described in snapshot set (probably generated locally).",
+		Usage:    "(DEPRECATED: use --keep-local-snapshots) --local=false keeps files not described in snapshot set. Chaindata is removed either way.",
 		Value:    true,
 		Aliases:  []string{"l"},
+		Category: "Reset",
+		Hidden:   true,
+	}
+	keepLocalSnapshotsFlag = cli.BoolFlag{
+		Name:     "keep-local-snapshots",
+		Usage:    "Keep snapshot files not described in snapshot set (probably generated locally). Chaindata is removed either way.",
+		Value:    false,
+		Category: "Reset",
+	}
+	allowMixedStateFlag = cli.BoolFlag{
+		Name:     "allow-mixed-state",
+		Usage:    "Proceed even when a step range would keep its commitment and accounts/storage files from different builds.",
+		Value:    false,
 		Category: "Reset",
 	}
 	dryRunFlag = cli.BoolFlag{
@@ -37,18 +51,12 @@ var (
 		Aliases:  []string{"n"},
 		Category: "Reset",
 	}
-	preverifiedFlag = cli.StringFlag{
-		Name:     "preverified",
-		Category: "Reset",
-		Usage:    "preverified to use (remote, local, embedded)",
-		Value:    "remote",
-	}
 )
 
 // Checks if a value was explicitly set in the given CLI command context or any of its parents. In
 // urfave/cli@v2, you must check the lineage to see if a flag was set in any context. It may be
 // different in v3.
-func isSetLineage(cliCtx *cli.Context, flagName string) bool {
+func isSetLineage(cliCtx *cli.Command, flagName string) bool {
 	for _, ctx := range cliCtx.Lineage() {
 		if ctx.IsSet(flagName) {
 			return true
@@ -57,19 +65,36 @@ func isSetLineage(cliCtx *cli.Context, flagName string) bool {
 	return false
 }
 
-func resetCliAction(cliCtx *cli.Context) (err error) {
+func keepLocalSnapshots(cliCtx *cli.Command) (bool, error) {
+	if !isSetLineage(cliCtx, removeLocalFlag.Name) {
+		return cliCtx.Bool(keepLocalSnapshotsFlag.Name), nil
+	}
+	if isSetLineage(cliCtx, keepLocalSnapshotsFlag.Name) {
+		return false, fmt.Errorf("--%s is deprecated, pass only --%s", removeLocalFlag.Name, keepLocalSnapshotsFlag.Name)
+	}
+	return !cliCtx.Bool(removeLocalFlag.Name), nil
+}
+
+func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	// This is set up in snapshots cli.Command.Before.
 	logger := log.Root()
-	removeLocal := removeLocalFlag.Get(cliCtx)
-	dryRun := dryRunFlag.Get(cliCtx)
+	keepLocal, err := keepLocalSnapshots(cliCtx)
+	if err != nil {
+		return err
+	}
+	if isSetLineage(cliCtx, removeLocalFlag.Name) {
+		logger.Warn("--local is deprecated, use --keep-local-snapshots; chaindata is removed either way")
+	}
+	allowMixedState := cliCtx.Bool(allowMixedStateFlag.Name)
+	dryRun := cliCtx.Bool(dryRunFlag.Name)
 	dataDirPath := cliCtx.String(utils.DataDirFlag.Name)
 	logger.Info("resetting datadir", "path", dataDirPath)
 
 	dirs := datadir.Open(dataDirPath)
 
-	configChainName, chainNameErr := getChainNameFromChainData(cliCtx, logger, dirs.Chaindata)
+	configChainName, chainNameErr := getChainNameFromChainData(ctx, logger, dirs.Chaindata)
 
-	chainName := utils.ChainFlag.Get(cliCtx)
+	chainName := cliCtx.String(utils.ChainFlag.Name)
 	// Check the lineage, we don't want to use the mainnet default, but due to how urfave/cli@v2
 	// works we shouldn't randomly re-add the chain flag in the current command context.
 	if isSetLineage(cliCtx, utils.ChainFlag.Name) {
@@ -84,7 +109,8 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		}
 		if !configChainName.Ok {
 			return errors.New(
-				"chain flag not set and chain name not found in chaindata. datadir is ready for sync, invalid, or requires chain flag to reset")
+				"chain flag not set and chain name not found in chaindata. datadir is ready for sync, invalid, or requires chain flag to reset",
+			)
 		}
 		chainName = configChainName.Unwrap()
 		logger.Info("read chain name from config", "chain", chainName)
@@ -96,21 +122,8 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	}
 	defer unlock()
 
-	switch value := preverifiedFlag.Get(cliCtx); value {
-	case "local":
-		panicif.Err(os.Setenv(snapcfg.RemotePreverifiedEnvKey, dirs.PreverifiedPath()))
-		fallthrough
-	case "remote":
-		err = snapcfg.LoadRemotePreverified(cliCtx.Context)
-		if err != nil {
-			// TODO: Check if we should continue? What if we ask for a git revision and
-			// can't get it? What about a branch? Can we reset to the embedded snapshot hashes?
-			return fmt.Errorf("loading remote preverified snapshots: %w", err)
-		}
-	case "embedded":
-		// Should already be loaded.
-	default:
-		err = fmt.Errorf("invalid preverified flag value %q", value)
+	err = snapcfg.LoadPreverified(ctx, cliCtx.String(PreverifiedFlag.Name), &dirs, chainName, "")
+	if err != nil {
 		return
 	}
 
@@ -138,10 +151,11 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	//}
 
 	r := reset.Reset{
-		Dirs:                 &dirs,
-		RemoveUnknown:        removeLocal,
-		Logger:               logger,
-		PreverifiedSnapshots: cfg.Preverified.Items,
+		Dirs:                  &dirs,
+		RemoveUnknown:         !keepLocal,
+		AllowMixedStateBuilds: allowMixedState,
+		Logger:                logger,
+		PreverifiedSnapshots:  cfg.Preverified.Items,
 		RemoveFunc: func(osName reset.OsFilePath) error {
 			if dryRun {
 				println(osName)
@@ -162,14 +176,19 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	return
 }
 
-func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {
+func getChainNameFromChainData(ctx context.Context, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {
 	_, err = os.Stat(chainDataDir)
 	if err != nil {
 		return
 	}
-	ctx := cliCtx.Context
 	var db kv.RoDB
-	db, err = mdbx.New(dbcfg.ChainDB, logger).Path(chainDataDir).Accede(true).Readonly(true).Open(ctx)
+	// Open with only the tables we actually need. Using the full ChaindataTablesCfg
+	// would fail in Accede+Readonly mode if the database was created by an older version
+	// that is missing tables added since then (e.g. GLOAS/ePBS tables added in v3.5.0).
+	db, err = mdbx.New(dbcfg.ChainDB, logger).Path(chainDataDir).
+		Accede(true).
+		WithTableCfg(ChaindataSchemaForGenesis).
+		Open(ctx)
 	if err != nil {
 		err = fmt.Errorf("opening chaindata database: %w", err)
 		return
@@ -199,4 +218,11 @@ func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainData
 		return
 	}
 	return g.Some(chainCfg.ChainName), nil
+}
+
+func ChaindataSchemaForGenesis(_ kv.TableCfg) kv.TableCfg {
+	return kv.TableCfg{
+		kv.HeaderCanonical: {},
+		kv.ConfigTable:     {},
+	}
 }

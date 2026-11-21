@@ -16,17 +16,19 @@
 
 package utils
 
-import "github.com/erigontech/erigon/common"
+import (
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+)
 
 const VERSIONED_HASH_VERSION_KZG byte = byte(1)
 
 func KzgCommitmentToVersionedHash(kzgCommitment common.Bytes48) (common.Hash, error) {
 	versionedHash := [32]byte{}
-	kzgCommitmentHash := Sha256(kzgCommitment[:])
+	kzgCommitmentHash := crypto.Sha256(kzgCommitment[:])
 
-	buf := append([]byte{}, VERSIONED_HASH_VERSION_KZG)
-	buf = append(buf, kzgCommitmentHash[1:]...)
-	copy(versionedHash[:], buf)
+	versionedHash[0] = VERSIONED_HASH_VERSION_KZG
+	copy(versionedHash[1:], kzgCommitmentHash[1:])
 
 	return versionedHash, nil
 }

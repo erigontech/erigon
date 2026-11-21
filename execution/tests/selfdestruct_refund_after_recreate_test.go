@@ -1,0 +1,182 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package executiontests
+
+import (
+	"bytes"
+	"math/big"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
+)
+
+// Before London, one block: a CREATE2 deploys X, whose constructor writes
+// slot 1. The next tx makes X destroy itself, another contract's SELFDESTRUCT
+// sends 3 wei to X, and the same CREATE2, now with 1 wei, deploys X again.
+// This time the constructor reads slot 1 and destroys X, which earns the
+// SELFDESTRUCT refund: X has not destroyed itself before in that tx.
+func TestSelfdestructRefundAfterRecreate(t *testing.T) {
+	runtime := program.New().Op(vm.CALLER, vm.SELFDESTRUCT).Bytes()
+	beneficiary := common.HexToAddress("0xbeef")
+	// The constructor stores SLOAD(1)+1 in slot 2 and 7 in slot 1, then
+	// destroys X when called with 1 wei and deploys runtime otherwise.
+	initCode := func(skip uint64) *program.Program {
+		p := program.New().Push(1).Op(vm.SLOAD).Push(1).Op(vm.ADD).Push(2).Op(vm.SSTORE).Sstore(1, 7)
+		p.Push(1).Op(vm.CALLVALUE, vm.EQ, vm.ISZERO, vm.PUSH1).Append([]byte{byte(skip)}).Op(vm.JUMPI)
+		return p.Selfdestruct(beneficiary)
+	}
+	_, deploy := initCode(0).Jumpdest()
+	init, _ := initCode(deploy).Jumpdest()
+	init.ReturnViaCodeCopy(runtime)
+
+	factory := common.HexToAddress("0xfac7")
+	x := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(init.Bytes())))
+	donor := common.HexToAddress("0xd040")
+	factoryCode := program.New().Mstore(init.Bytes(), 0).Push(0).Push(len(init.Bytes())).Push(0).Op(vm.CALLVALUE, vm.CREATE2, vm.STOP).Bytes()
+
+	petersburg := chain.TestChainBerlinConfig.Copy()
+	petersburg.IstanbulBlock, petersburg.MuirGlacierBlock, petersburg.BerlinBlock = nil, nil, nil
+	for _, fork := range []struct {
+		name   string
+		config *chain.Config
+		gas    uint64
+	}{{"petersburg", petersburg, 99_373}, {"berlin", chain.TestChainBerlinConfig, 105_973}} {
+		t.Run(fork.name, func(t *testing.T) {
+			alloc := types.GenesisAlloc{
+				factory: {Code: factoryCode},
+				donor:   {Code: program.New().Selfdestruct(x).Bytes(), Balance: big.NewInt(3)},
+			}
+			keys := revivalKeys(t, alloc, 4)
+			gspec := &types.Genesis{Config: fork.config, GasLimit: 30_000_000, Alloc: alloc}
+			chainPack := buildBlockSerially(t, gspec, keys, common.Address{1}, 10_000_000_000, []revivalCall{
+				{to: factory},
+				{to: x},
+				{to: donor},
+				{to: factory, value: 1},
+			})
+			require.Equal(t, fork.gas, chainPack.Receipts[0][3].GasUsed, "the re-created X earns the SELFDESTRUCT refund")
+			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				exists, err := st.Exist(accounts.InternAddress(x))
+				require.NoError(t, err)
+				require.False(t, exists)
+			})
+		})
+	}
+}
+
+// Before London, one block: X destroys itself, another contract's SELFDESTRUCT
+// sends 3 wei to X, and the same CREATE2 deploys X again. In the next tx X reads
+// slot 1 and destroys itself, which earns the SELFDESTRUCT refund as its first
+// destruct did: X has not destroyed itself before in that tx.
+func TestSelfdestructRefundInTxAfterRecreate(t *testing.T) {
+	runtime := program.New().Push(1).Op(vm.SLOAD, vm.POP, vm.CALLER, vm.SELFDESTRUCT).Bytes()
+	init := program.New().ReturnViaCodeCopy(runtime)
+	factory := common.HexToAddress("0xfac7")
+	x := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(init.Bytes())))
+	donor := common.HexToAddress("0xd040")
+
+	petersburg := chain.TestChainBerlinConfig.Copy()
+	petersburg.IstanbulBlock, petersburg.MuirGlacierBlock, petersburg.BerlinBlock = nil, nil, nil
+	for _, fork := range []struct {
+		name   string
+		config *chain.Config
+	}{{"petersburg", petersburg}, {"berlin", chain.TestChainBerlinConfig}} {
+		t.Run(fork.name, func(t *testing.T) {
+			alloc := types.GenesisAlloc{
+				factory: {Code: program.New().Create2(init.Bytes(), 0).Op(vm.STOP).Bytes()},
+				donor:   {Code: program.New().Selfdestruct(x).Bytes(), Balance: big.NewInt(3)},
+			}
+			keys := revivalKeys(t, alloc, 5)
+			gspec := &types.Genesis{Config: fork.config, GasLimit: 30_000_000, Alloc: alloc}
+			chainPack := buildBlockSerially(t, gspec, keys, common.Address{1}, 10_000_000_000, []revivalCall{
+				{to: factory},
+				{to: x},
+				{to: donor},
+				{to: factory},
+				{to: x},
+			})
+			receipts := chainPack.Receipts[0]
+			require.Equal(t, receipts[1].GasUsed, receipts[4].GasUsed, "the re-created X earns the SELFDESTRUCT refund")
+			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				exists, err := st.Exist(accounts.InternAddress(x))
+				require.NoError(t, err)
+				require.False(t, exists)
+			})
+		})
+	}
+}
+
+// Before London, one block: X destroys itself twice in one tx, another
+// contract's SELFDESTRUCT sends 3 wei to X, and the same CREATE2 deploys X
+// again. In the next tx X's first SELFDESTRUCT runs in a reverted call, and X
+// is then deployed again and destroys itself twice in one tx. Each tx earns
+// one SELFDESTRUCT refund; its calldata lifts the refund cap above two.
+func TestSelfdestructRefundOncePerTx(t *testing.T) {
+	runtime := program.New().Op(vm.CALLER, vm.SELFDESTRUCT).Bytes()
+	init := program.New().ReturnViaCodeCopy(runtime)
+	factory := common.HexToAddress("0xfac7")
+	x := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(init.Bytes())))
+	donor := common.HexToAddress("0xd040")
+	twice := common.HexToAddress("0x7e1ce")
+	reverter := common.HexToAddress("0x2e7e2")
+	afterRevert := common.HexToAddress("0xaf7e2")
+	burn := bytes.Repeat([]byte{0xff}, 6000)
+
+	petersburg := chain.TestChainBerlinConfig.Copy()
+	petersburg.IstanbulBlock, petersburg.MuirGlacierBlock, petersburg.BerlinBlock = nil, nil, nil
+	for _, fork := range []struct {
+		name   string
+		config *chain.Config
+	}{{"petersburg", petersburg}, {"berlin", chain.TestChainBerlinConfig}} {
+		t.Run(fork.name, func(t *testing.T) {
+			alloc := types.GenesisAlloc{
+				factory:     {Code: program.New().Create2(init.Bytes(), 0).Op(vm.STOP).Bytes()},
+				donor:       {Code: program.New().Selfdestruct(x).Bytes(), Balance: big.NewInt(3)},
+				twice:       {Code: program.New().Call(nil, x, 0, 0, 0, 0, 0).Op(vm.POP).Call(nil, x, 0, 0, 0, 0, 0).Op(vm.STOP).Bytes()},
+				reverter:    {Code: program.New().Call(nil, x, 0, 0, 0, 0, 0).Push(0).Push(0).Op(vm.REVERT).Bytes()},
+				afterRevert: {Code: program.New().Call(nil, reverter, 0, 0, 0, 0, 0).Op(vm.POP).Call(nil, x, 0, 0, 0, 0, 0).Op(vm.STOP).Bytes()},
+			}
+			keys := revivalKeys(t, alloc, 7)
+			gspec := &types.Genesis{Config: fork.config, GasLimit: 30_000_000, Alloc: alloc}
+			chainPack := buildBlockSerially(t, gspec, keys, common.Address{1}, 10_000_000_000, []revivalCall{
+				{to: factory},
+				{to: twice, data: burn},
+				{to: donor},
+				{to: factory},
+				{to: afterRevert, data: burn},
+				{to: factory},
+				{to: twice, data: burn},
+			})
+			receipts := chainPack.Receipts[0]
+			require.Equal(t, receipts[1].GasUsed, receipts[6].GasUsed, "the re-created X earns one refund, as the first did")
+			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				exists, err := st.Exist(accounts.InternAddress(x))
+				require.NoError(t, err)
+				require.False(t, exists)
+			})
+		})
+	}
+}

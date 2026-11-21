@@ -45,12 +45,12 @@ func TestSequence(t *testing.T) {
 	}
 
 	writeDBs, _ := setupDatabases(t, log.New())
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, db := range writeDBs {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 
 		i, err := tx.ReadSequence(kv.ChaindataTables[0])
 		require.NoError(t, err)
@@ -92,21 +92,25 @@ func TestManagedTx(t *testing.T) {
 		kv.ChaindataTablesCfg = defaultConfig
 	}()
 
-	bucketID := 0
-	bucket1 := kv.ChaindataTables[bucketID]
-	bucket2 := kv.ChaindataTables[bucketID+1]
+	// Pick two tables with matching flags so the cursors on bucket1 and
+	// bucket2 are expected to behave identically across all operations
+	// (Append, Put on an existing key, etc.). Using the first two entries
+	// of the (alphabetically sorted) ChaindataTables list is fragile —
+	// the relative ordering changes when tables are added or removed.
+	bucket1 := kv.TblAccountVals
+	bucket2 := kv.TblStorageVals
 	writeDBs, readDBs := setupDatabases(t, logger)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, db := range writeDBs {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 
-		c, err := tx.RwCursor(bucket1)
+		c, err := tx.RwCursor(bucket1) //nolint:gocritic
 		require.NoError(t, err)
-		c1, err := tx.RwCursor(bucket2)
+		c1, err := tx.RwCursor(bucket2) //nolint:gocritic
 		require.NoError(t, err)
 		require.NoError(t, c.Append([]byte{0}, []byte{1}))
 		require.NoError(t, c1.Append([]byte{0}, []byte{1}))
@@ -122,6 +126,8 @@ func TestManagedTx(t *testing.T) {
 		}
 		require.NoError(t, c.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
 		require.NoError(t, c1.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
+		c.Close()
+		c1.Close()
 		err = tx.Commit()
 		require.NoError(t, err)
 	}
@@ -147,14 +153,14 @@ func TestRemoteKvVersion(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	writeDB := temporaltest.NewTestDB(t, dirs)
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	go func() {
-		remoteproto.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger))
+		remoteproto.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDB, nil, nil, logger))
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}
@@ -194,10 +200,10 @@ func TestRemoteKvRange(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	writeDB := temporaltest.NewTestDB(t, dirs)
-	ctx := context.Background()
+	ctx := t.Context()
 	grpcServer, conn := grpc.NewServer(), bufconn.Listen(1024*1024)
 	go func() {
-		kvServer := remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger)
+		kvServer := remotedbserver.NewKvServer(ctx, writeDB, nil, nil, logger)
 		remoteproto.RegisterKVServer(grpcServer, kvServer)
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
@@ -214,6 +220,7 @@ func TestRemoteKvRange(t *testing.T) {
 	require.NoError(writeDB.Update(ctx, func(tx kv.RwTx) error {
 		wc, err := tx.RwCursorDupSort(kv.TblAccountVals)
 		require.NoError(err)
+		defer wc.Close()
 		require.NoError(wc.Append([]byte{1}, []byte{1}))
 		require.NoError(wc.Append([]byte{1}, []byte{2}))
 		require.NoError(wc.Append([]byte{2}, []byte{1}))
@@ -224,6 +231,7 @@ func TestRemoteKvRange(t *testing.T) {
 	require.NoError(db.View(ctx, func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.TblAccountVals)
 		require.NoError(err)
+		defer c.Close()
 
 		k, v, err := c.First()
 		require.NoError(err)
@@ -321,21 +329,21 @@ func TestRemoteKvRange(t *testing.T) {
 
 func setupDatabases(t *testing.T, logger log.Logger) (writeDBs []kv.TemporalRwDB, readDBs []kv.RwDB) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	dirs1 := datadir.New(t.TempDir())
 	dirs2 := datadir.New(t.TempDir())
 	writeDBs = []kv.TemporalRwDB{
 		temporaltest.NewTestDB(t, dirs1),
 		temporaltest.NewTestDB(t, dirs2),
-		//mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen(),
-		//mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen(), // for remote db
+		// mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), "").MustOpen(),
+		// mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), "").MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)
 
 	grpcServer := grpc.NewServer()
 	f2 := func() {
-		remoteproto.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDBs[1], nil, nil, nil, logger))
+		remoteproto.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDBs[1], nil, nil, logger))
 		if err := grpcServer.Serve(conn); err != nil {
 			logger.Error("private RPC server fail", "err", err)
 		}
@@ -366,14 +374,13 @@ func setupDatabases(t *testing.T, logger log.Logger) (writeDBs []kv.TemporalRwDB
 		for _, db := range writeDBs {
 			db.Close()
 		}
-
 	})
 	return writeDBs, readDBs
 }
 
 func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 	t.Helper()
-	assert, ctx := assert.New(t), context.Background()
+	assert, ctx := assert.New(t), t.Context()
 	require := require.New(t)
 
 	if err := db.View(ctx, func(tx kv.Tx) error {
@@ -381,10 +388,12 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 		if err != nil {
 			return err
 		}
+		defer c1.Close()
 		c2, err := tx.Cursor(bucket2)
 		if err != nil {
 			return err
 		}
+		defer c2.Close()
 
 		k1, v1, err := c1.First()
 		require.NoError(err)
@@ -472,7 +481,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //	writeDBs, readDBs, closeAll := setupDatabases(ethdb.WithChaindataTables)
 //	defer closeAll()
 //
-//	ctx := context.Background()
+//	ctx := t.Context()
 //
 //	for _, db := range writeDBs {
 //		db := db
@@ -550,7 +559,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //	writeDBs, _, closeAll := setupDatabases(ethdb.WithChaindataTables)
 //	defer closeAll()
 //
-//	ctx := context.Background()
+//	ctx := t.Context()
 //
 //	for _, db := range writeDBs {
 //		db := db

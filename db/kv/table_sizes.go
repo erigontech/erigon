@@ -1,10 +1,13 @@
 package kv
 
 import (
+	"cmp"
 	"context"
-	"sort"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -35,9 +38,8 @@ func CollectTableSizes(ctx context.Context, db RoDB) ([]TableSize, error) {
 	}
 
 	var freeListSize uint64
-	var err error
 	tableSizes := make([]TableSize, 0, len(allTables))
-	err = db.View(ctx, func(tx Tx) error {
+	if err := db.View(ctx, func(tx Tx) error {
 		for _, table := range allTables {
 			sz, err := tx.BucketSize(table)
 			if err != nil {
@@ -47,15 +49,15 @@ func CollectTableSizes(ctx context.Context, db RoDB) ([]TableSize, error) {
 			tableSizes = append(tableSizes, TableSize{Name: table, Size: sz})
 		}
 
-		freeListSize, err = tx.BucketSize("freelist")
+		sz, err := tx.BucketSize("freelist")
 		if err != nil {
 			return err
 		}
+		freeListSize = sz
 
 		tableSizes = append(tableSizes, TableSize{Name: "Freelist", Size: freeListSize})
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, err
 	}
 
@@ -65,8 +67,8 @@ func CollectTableSizes(ctx context.Context, db RoDB) ([]TableSize, error) {
 		Size: amountOfFreePagesInDb * db.PageSize().Bytes(),
 	})
 
-	sort.Slice(tableSizes, func(i, j int) bool {
-		return tableSizes[i].Size > tableSizes[j].Size
+	slices.SortFunc(tableSizes, func(a, b TableSize) int {
+		return cmp.Compare(b.Size, a.Size)
 	})
 
 	return tableSizes, nil
@@ -88,12 +90,18 @@ func CollectTableSizesPeriodically(ctx context.Context, db TemporalRoDB, label L
 		case <-ticker.C:
 			tableSizes, err := CollectTableSizes(ctx, db)
 			if err != nil {
+				if ctx.Err() != nil { // graceful shutdown mid-collect, not a real failure
+					return
+				}
 				logger.Error("[kv] failed to collect table sizes", "err", err)
 				continue
 			}
 
 			var sb strings.Builder
 			for _, t := range tableSizes {
+				if t.Size < (1 * datasize.MB).Bytes() {
+					continue
+				}
 				dbTableSizeBytes.WithLabelValues(string(label), t.Name).Set(float64(t.Size))
 				if t.Size == 0 || !debugLogging {
 					continue

@@ -65,12 +65,15 @@ type bbdRequestConfig struct {
 	chainLengthLimit             uint64
 	chainLengthCurrentHead       *uint64
 	maxParallelBodyDownloads     int
+	maxParallelHeaderDownloads   int
 	initialHeaderFetchTimeout    time.Duration
 	initialHeaderFetchRetries    uint64
 	headerChainBatchFetchTimeout time.Duration
 	headerChainBatchFetchRetries uint64
 	bodiesBatchFetchTimeout      time.Duration
 	bodiesBatchFetchRetries      uint64
+	balsBatchFetchTimeout        time.Duration
+	balsRequestTimeout           time.Duration
 }
 
 var defaultBbdRequestConfig = bbdRequestConfig{
@@ -78,10 +81,13 @@ var defaultBbdRequestConfig = bbdRequestConfig{
 	blocksBatchSize:              500,
 	chainLengthLimit:             math.MaxUint64,
 	maxParallelBodyDownloads:     10,
+	maxParallelHeaderDownloads:   10,
 	initialHeaderFetchTimeout:    time.Second, // note we want initial header fetch to be quick, so we terminate quickly
 	initialHeaderFetchRetries:    0,           // in case of chainLengthLimit+chainLengthCurrentHead early termination
 	headerChainBatchFetchTimeout: 10 * time.Second,
 	headerChainBatchFetchRetries: 1,
-	bodiesBatchFetchTimeout:      30 * time.Second,
+	bodiesBatchFetchTimeout:      time.Minute,
 	bodiesBatchFetchRetries:      1,
+	balsBatchFetchTimeout:        time.Minute,
+	balsRequestTimeout:           10 * time.Second,
 }

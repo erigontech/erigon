@@ -32,8 +32,7 @@ type StateDiffClient interface {
 
 var _ StateDiffClient = (*StateDiffClientDirect)(nil) // compile-time interface check
 
-// SentryClientDirect implements SentryClient interface by connecting the instance of the client directly with the corresponding
-// instance of SentryServer
+// StateDiffClientDirect calls an in-process KV server without gRPC transport.
 type StateDiffClientDirect struct {
 	server remoteproto.KVServer
 }
@@ -49,19 +48,24 @@ func (c *StateDiffClientDirect) Snapshots(ctx context.Context, in *remoteproto.S
 // -- start StateChanges
 
 func (c *StateDiffClientDirect) StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
-	ch := make(chan *stateDiffReply, 16384)
-	streamServer := &StateDiffStreamS{ch: ch, ctx: ctx}
-	// there is a timing hole on startup which breaks tests
-	// really we need a subscribed event so the subscriber
-	// can ensure that the subcription is complete before it
-	// starts processing - this just shortens the gap
-	started := make(chan *struct{}, 1)
+	// One slot lets setup errors return before the first Recv. Further backlog
+	// belongs in the server's bounded queue, which detects gaps.
+	ch := make(chan *stateDiffReply, 1)
+	subscribed := make(chan struct{})
+	done := make(chan struct{})
+	streamServer := &StateDiffStreamS{ch: ch, ctx: ctx, subscribed: subscribed}
 	go func() {
+		defer close(done)
 		defer close(ch)
-		started <- nil
 		streamServer.Err(c.server.StateChanges(in, streamServer))
 	}()
-	<-started
+	select {
+	case <-subscribed:
+	case <-done:
+		// Setup can fail before the server registers the subscription.
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	return &StateDiffStreamC{ch: ch, ctx: ctx}, nil
 }
 
@@ -77,31 +81,50 @@ type StateDiffStreamC struct {
 }
 
 func (c *StateDiffStreamC) Recv() (*remoteproto.StateChangeBatch, error) {
-	m, ok := <-c.ch
-	if !ok || m == nil {
-		return nil, io.EOF
+	if err := c.ctx.Err(); err != nil {
+		return nil, err
 	}
-	return m.r, m.err
+	select {
+	case m, ok := <-c.ch:
+		if !ok || m == nil {
+			return nil, io.EOF
+		}
+		return m.r, m.err
+	case <-c.ctx.Done():
+		return nil, c.ctx.Err()
+	}
 }
 func (c *StateDiffStreamC) Context() context.Context { return c.ctx }
 
-// StateDiffStreamS implements proto_sentry.Sentry_ReceiveMessagesServer
+// StateDiffStreamS implements remoteproto.KV_StateChangesServer.
 type StateDiffStreamS struct {
-	ch  chan *stateDiffReply
-	ctx context.Context
+	ch         chan *stateDiffReply
+	ctx        context.Context
+	subscribed chan struct{}
 	grpc.ServerStream
 }
 
+func (s *StateDiffStreamS) NotifySubscribed() {
+	close(s.subscribed)
+}
+
 func (s *StateDiffStreamS) Send(m *remoteproto.StateChangeBatch) error {
-	s.ch <- &stateDiffReply{r: m}
-	return nil
+	select {
+	case s.ch <- &stateDiffReply{r: m}:
+		return nil
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
 }
 func (s *StateDiffStreamS) Context() context.Context { return s.ctx }
 func (s *StateDiffStreamS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- &stateDiffReply{err: err}
+	select {
+	case s.ch <- &stateDiffReply{err: err}:
+	case <-s.ctx.Done():
+	}
 }
 
 // -- end StateChanges

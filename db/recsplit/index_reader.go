@@ -17,18 +17,14 @@
 package recsplit
 
 import (
-	"sync"
-
-	"github.com/spaolacci/murmur3"
+	"github.com/erigontech/erigon/common/mmap"
+	"github.com/erigontech/erigon/common/murmur3"
 )
 
 // IndexReader encapsulates Hash128 to allow concurrent access to Index
 type IndexReader struct {
 	index *Index
 	salt  uint32
-
-	bufLock sync.RWMutex
-	buf     []byte
 }
 
 // NewIndexReader creates new IndexReader
@@ -40,8 +36,6 @@ func NewIndexReader(index *Index) *IndexReader {
 }
 
 func (r *IndexReader) Sum(key []byte) (uint64, uint64) {
-	// this inlinable alloc-free version, it's faster than pre-allocated `hasher` object
-	// because `hasher` object is interface and need call many methods on it
 	return murmur3.Sum128WithSeed(key, r.salt)
 }
 
@@ -51,12 +45,9 @@ func (r *IndexReader) Lookup(key []byte) (uint64, bool) {
 	return r.index.Lookup(bucketHash, fingerprint)
 }
 
+// Lookup2 looks up the concatenation key1||key2 without materializing it
 func (r *IndexReader) Lookup2(key1, key2 []byte) (uint64, bool) {
-	r.bufLock.Lock()
-	// hash of 2 concatenated keys is equal to 2 separated calls of `.Write`
-	r.buf = append(append(r.buf[:0], key1...), key2...)
-	bucketHash, fingerprint := murmur3.Sum128WithSeed(r.buf, r.salt)
-	r.bufLock.Unlock()
+	bucketHash, fingerprint := murmur3.Sum128PairWithSeed(key1, key2, r.salt)
 	return r.index.Lookup(bucketHash, fingerprint)
 }
 
@@ -64,12 +55,8 @@ func (r *IndexReader) Empty() bool {
 	return r.index.Empty()
 }
 
-func (r *IndexReader) Close() {
-	if r == nil || r.index == nil {
-		return
-	}
-	r.index.readers.Put(r)
-}
+// Close is a no-op kept for API compatibility: readers are stateless and shared
+func (r *IndexReader) Close() {}
 
 func (r *IndexReader) OrdinalLookup(id uint64) uint64 { return r.index.OrdinalLookup(id) }
 func (r *IndexReader) twoLayerLookup(key []byte) (uint64, bool) {
@@ -83,25 +70,44 @@ func (r *IndexReader) twoLayerLookup(key []byte) (uint64, bool) {
 	}
 	return r.OrdinalLookup(id), true
 }
-func (r *IndexReader) twoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
+
+func (r *IndexReader) twoLayerLookupByHash(hi, lo uint64, pr *mmap.Probe) (offset, ordinal uint64, ok bool) {
 	if r.index.Empty() {
-		return 0, false
+		return 0, 0, false
 	}
-	id, ok := r.index.Lookup(hi, lo)
+	ordinal, ok = r.index.LookupProbe(hi, lo, pr)
 	if !ok {
-		return 0, false
+		return 0, 0, false
 	}
-	return r.index.OrdinalLookup(id), true
+	if pr == nil {
+		return r.index.OrdinalLookup(ordinal), ordinal, true
+	}
+	return r.index.offsetEf.GetProbe(ordinal, pr), ordinal, true
 }
 func (r *IndexReader) BaseDataID() uint64 { return r.index.BaseDataID() }
 
 // TwoLayerLookupByHash high-level methods. allow to turn-off `enum` in future
 func (r *IndexReader) TwoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
-	enums := r.index.Enums()
-	if enums {
-		return r.twoLayerLookupByHash(hi, lo)
+	return r.TwoLayerLookupByHashProbe(hi, lo, nil)
+}
+
+// TwoLayerLookupByHashProbe is TwoLayerLookupByHash with pr touching the pages it reads.
+func (r *IndexReader) TwoLayerLookupByHashProbe(hi, lo uint64, pr *mmap.Probe) (uint64, bool) {
+	if !r.index.Enums() {
+		return r.index.LookupProbe(hi, lo, pr)
 	}
-	return r.index.Lookup(hi, lo)
+	offset, _, ok := r.twoLayerLookupByHash(hi, lo, pr)
+	return offset, ok
+}
+
+// TwoLayerLookupByHashWithOrdinal also returns the key's ordinal in the indexed
+// file, which the two-layer lookup computes on the way to the offset. Requires
+// an index built with Enums, otherwise no ordinal exists.
+func (r *IndexReader) TwoLayerLookupByHashWithOrdinal(hi, lo uint64) (offset, ordinal uint64, ok bool) {
+	if !r.index.Enums() {
+		return 0, 0, false
+	}
+	return r.twoLayerLookupByHash(hi, lo, nil)
 }
 
 // TwoLayerLookup high-level methods. allow to turn-off `enum` in future

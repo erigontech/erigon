@@ -21,7 +21,9 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 )
 
@@ -61,7 +63,9 @@ func (b *CachingBeaconState) SlashValidator(slashedInd uint64, whistleblowerInd 
 		return 0, err
 	}
 
-	b.SetSlashingSegmentAt(slashingsIndex, b.SlashingSegmentAt(slashingsIndex)+currentEffectiveBalance)
+	if err := b.SetSlashingSegmentAt(slashingsIndex, b.SlashingSegmentAt(slashingsIndex)+currentEffectiveBalance); err != nil {
+		return 0, err
+	}
 	newEffectiveBalance, err := b.ValidatorEffectiveBalance(int(slashedInd))
 	if err != nil {
 		return 0, err
@@ -71,7 +75,7 @@ func (b *CachingBeaconState) SlashValidator(slashedInd uint64, whistleblowerInd 
 	}
 	proposerInd, err := b.GetBeaconProposerIndex()
 	if err != nil {
-		return 0, fmt.Errorf("unable to get beacon proposer index: %v", err)
+		return 0, fmt.Errorf("unable to get beacon proposer index: %w", err)
 	}
 	if whistleblowerInd == nil {
 		whistleblowerInd = new(uint64)
@@ -82,7 +86,22 @@ func (b *CachingBeaconState) SlashValidator(slashedInd uint64, whistleblowerInd 
 	if err := IncreaseBalance(b, proposerInd, proposerReward); err != nil {
 		return 0, err
 	}
-	return proposerReward, IncreaseBalance(b, *whistleblowerInd, whistleBlowerReward-proposerReward)
+	if err := IncreaseBalance(b, *whistleblowerInd, whistleBlowerReward-proposerReward); err != nil {
+		return proposerReward, err
+	}
+	if b.Version() >= clparams.GloasVersion {
+		payments := b.GetBuilderPendingPayments()
+		if payments != nil {
+			for i := range payments.Length() {
+				payment := payments.Get(i)
+				if payment != nil && payment.ProposerIndex == slashedInd {
+					payments.Set(i, &cltypes.BuilderPendingPayment{Withdrawal: &cltypes.BuilderPendingWithdrawal{}})
+				}
+			}
+			b.SetBuilderPendingPayments(payments)
+		}
+	}
+	return proposerReward, nil
 }
 
 func (b *CachingBeaconState) InitiateValidatorExit(index uint64) error {
@@ -130,9 +149,10 @@ func (b *CachingBeaconState) InitiateValidatorExit(index uint64) error {
 	if newWithdrawableEpoch, overflow = math.SafeAdd(exitQueueEpoch, b.BeaconConfig().MinValidatorWithdrawabilityDelay); overflow {
 		return errors.New("withdrawable epoch is too big")
 	}
-	b.SetExitEpochForValidatorAtIndex(int(index), exitQueueEpoch)
-	b.SetWithdrawableEpochForValidatorAtIndex(int(index), newWithdrawableEpoch)
-	return nil
+	if err := b.SetExitEpochForValidatorAtIndex(int(index), exitQueueEpoch); err != nil {
+		return err
+	}
+	return b.SetWithdrawableEpochForValidatorAtIndex(int(index), newWithdrawableEpoch)
 }
 
 // def compute_exit_epoch_and_update_churn(state: BeaconState, exit_balance: Gwei) -> Epoch
@@ -142,6 +162,9 @@ func (b *CachingBeaconState) ComputeExitEpochAndUpdateChurn(exitBalance uint64) 
 		ComputeActivationExitEpoch(b.BeaconConfig(), Epoch(b)),
 	)
 	perEpochChurn := GetActivationExitChurnLimit(b)
+	if b.Version() >= clparams.GloasVersion {
+		perEpochChurn = GetExitChurnLimit(b)
+	}
 
 	var exitBalanceToConsume uint64
 	if b.EarliestExitEpoch() < earliestExitEpoch {
@@ -160,4 +183,32 @@ func (b *CachingBeaconState) ComputeExitEpochAndUpdateChurn(exitBalance uint64) 
 	b.SetExitBalanceToConsume(exitBalanceToConsume - exitBalance)
 	b.SetEarliestExitEpoch(earliestExitEpoch)
 	return earliestExitEpoch
+}
+
+// InitiateBuilderExit initiates the exit of a builder by setting its withdrawable epoch.
+// If the builder has already initiated exit (withdrawable_epoch != FAR_FUTURE_EPOCH), this is a no-op.
+func (b *CachingBeaconState) InitiateBuilderExit(builderIndex uint64) {
+	builders := b.GetBuilders()
+	if builders == nil {
+		log.Debug("builders is nil")
+		return
+	}
+	if int(builderIndex) >= builders.Len() {
+		log.Debug("builder index out of range", "builderIndex", builderIndex, "len", builders.Len())
+		return
+	}
+	builder := builders.Get(int(builderIndex))
+	if builder == nil {
+		log.Debug("builder is nil", "builderIndex", builderIndex)
+		return
+	}
+	if builder.WithdrawableEpoch != b.BeaconConfig().FarFutureEpoch {
+		return
+	}
+	// Copy-on-write: create a new Builder to avoid mutating a shared pointer
+	// (ShallowCopy shares *Builder pointers across state copies).
+	newBuilder := *builder
+	newBuilder.WithdrawableEpoch = Epoch(b) + b.BeaconConfig().MinBuilderWithdrawabilityDelay
+	builders.Set(int(builderIndex), &newBuilder)
+	b.SetBuilders(builders)
 }
