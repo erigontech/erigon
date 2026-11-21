@@ -332,18 +332,14 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// (balance/nonce/…) prune themselves on revert; the account-record writes
 		// createObject emits (address/codeHash/…) have no field-level journal entry,
 		// so drop them here to keep versionedWrites in step with the journal.
-		if s.versionMap != nil {
-			s.versionedWrites.deleteAddr(je.account)
-		}
+		s.versionedWrites.deleteAddr(je.account)
 		return nil
 
 	case kindResetObject:
 		// Restore the account-record writes the recreation overwrote back to the
 		// snapshot taken before it ran, so versionedWrites reflects prev's state
 		// again (the field-level entries handle the fields creation doesn't write).
-		if s.versionMap != nil {
-			s.versionedWrites.restoreCreateFields(je.account, je.extra.prevWrites)
-		}
+		s.versionedWrites.restoreCreateFields(je.account, je.extra.prevWrites)
 		return nil
 
 	case kindSelfdestruct:
@@ -447,7 +443,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// touch outlives the revert and EIP-161 still sweeps it. Undoing the write
 		// here would drop that sweep on the versioned path only, leaving the
 		// account in the trie and diverging from serial's root.
-		if s.versionMap != nil && je.account != ripemd {
+		if je.account != ripemd {
 			if je.committed() {
 				s.versionedWrites.DelBalance(je.account)
 			} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {
