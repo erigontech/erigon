@@ -1194,8 +1194,8 @@ func TestFramePoolAdmissionWaitsForHeadNotification(t *testing.T) {
 			name = "local"
 		}
 		t.Run(name, func(t *testing.T) {
-			_, pool, sender := keyedFramePoolEnv(t)
 			synctest.Test(t, func(t *testing.T) {
+				_, pool, sender := keyedFramePoolEnv(t)
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				oldHead, newHead := common.Hash{1}, common.Hash{2}
@@ -1358,17 +1358,18 @@ func TestFramePoolStaleBatchPreservesSenderConflict(t *testing.T) {
 }
 
 func TestFramePoolHeadNotificationTimeout(t *testing.T) {
-	_, pool, sender := keyedFramePoolEnv(t)
-	backend := pool.ethBackend.(*frameValidationBackend)
-	backend.err = status.Error(codes.Aborted, "frame validation head changed")
-	var txns TxnSlots
-	for _, address := range []common.Address{sender, {2}} {
-		txns.Append(framePoolSlot(t, address, 1, 2, uint256.Int{1}), address[:], true)
-	}
-	ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
-	ordinary.IDHash[0] = 2
-	txns.Append(ordinary, sender[:], true)
 	synctest.Test(t, func(t *testing.T) {
+		_, pool, sender := keyedFramePoolEnv(t)
+		backend := pool.ethBackend.(*frameValidationBackend)
+		backend.err = status.Error(codes.Aborted, "frame validation head changed")
+		var txns TxnSlots
+		for _, address := range []common.Address{sender, {2}} {
+			txns.Append(framePoolSlot(t, address, 1, 2, uint256.Int{1}), address[:], true)
+		}
+		ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
+		ordinary.IDHash[0] = 2
+		txns.Append(ordinary, sender[:], true)
+
 		started := time.Now()
 		reasons, err := pool.AddLocalTxns(t.Context(), txns)
 		require.NoError(t, err)
@@ -1890,22 +1891,22 @@ func TestFramePoolReloadRestoresNonceChain(t *testing.T) {
 }
 
 func TestFramePoolReloadValidationBudgets(t *testing.T) {
-	ctx, pool, sender := keyedFramePoolEnv(t)
-	pool.chainID.SetUint64(1)
-	backend := pool.ethBackend.(*frameValidationBackend)
-	var frames []*TxnSlot
-	require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
-		for _, address := range []common.Address{sender, {2}} {
-			frame := framePoolSlot(t, address, 1, 2, uint256.Int{1})
-			frames = append(frames, frame)
-			if err := tx.Put(kv.PoolTransaction, frame.IDHash[:], append(address[:], frame.Rlp...)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}))
-
 	synctest.Test(t, func(t *testing.T) {
+		ctx, pool, sender := keyedFramePoolEnv(t)
+		pool.chainID.SetUint64(1)
+		backend := pool.ethBackend.(*frameValidationBackend)
+		var frames []*TxnSlot
+		require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
+			for _, address := range []common.Address{sender, {2}} {
+				frame := framePoolSlot(t, address, 1, 2, uint256.Int{1})
+				frames = append(frames, frame)
+				if err := tx.Put(kv.PoolTransaction, frame.IDHash[:], append(address[:], frame.Rlp...)); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+
 		pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
 			// Each validation fits its own budget, but together they exceed one budget.
 			select {

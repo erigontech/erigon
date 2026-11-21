@@ -345,6 +345,7 @@ func (w failingAccountWriter) UpdateAccountData(accounts.Address, *accounts.Acco
 func TestExecuteReportsFailedWriteSetAsOperational(t *testing.T) {
 	want := errors.New("disk error")
 	ibs := state.New(state.NewNoopReader())
+	ibs.SetVersionMap(nil)
 	defer ibs.Close()
 	require.NoError(t, ibs.AddBalance(accounts.InternAddress(common.HexToAddress("0xaa")), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 

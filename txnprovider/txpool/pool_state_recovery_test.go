@@ -81,23 +81,24 @@ func (db *startupReadDB) View(ctx context.Context, f func(kv.Tx) error) error {
 func TestPoolStartupWaitsWithoutDatabaseReader(t *testing.T) {
 	for _, staleAtStart := range []bool{true, false} {
 		t.Run(fmt.Sprintf("staleAtStart=%t", staleAtStart), func(t *testing.T) {
-			_, pool, poolDB, _ := newTestPool(t)
-			pool.started.Store(false)
-			db := &startupReadDB{RwDB: poolDB}
-			pool.poolDB = db
-			markStale := sync.OnceFunc(pool.MarkStateStale)
-			if staleAtStart {
-				markStale()
-			}
-			db.beforeRead = func() error {
-				if !pool.lock.TryLock() {
-					return errors.New("opening a database reader must not hold the pool lock")
-				}
-				pool.lock.Unlock()
-				markStale()
-				return nil
-			}
 			synctest.Test(t, func(t *testing.T) {
+				_, pool, poolDB, _ := newTestPool(t)
+				pool.started.Store(false)
+				db := &startupReadDB{RwDB: poolDB}
+				pool.poolDB = db
+				markStale := sync.OnceFunc(pool.MarkStateStale)
+				if staleAtStart {
+					markStale()
+				}
+				db.beforeRead = func() error {
+					if !pool.lock.TryLock() {
+						return errors.New("opening a database reader must not hold the pool lock")
+					}
+					pool.lock.Unlock()
+					markStale()
+					return nil
+				}
+
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				done := make(chan error, 1)
@@ -120,20 +121,21 @@ func TestPoolStartupWaitsWithoutDatabaseReader(t *testing.T) {
 }
 
 func TestLocalAdmissionRejectsBeforeStartupRestore(t *testing.T) {
-	ctx, pool, poolDB, coreDB := newTestPool(t)
-	pool.started.Store(false)
-	sender := common.Address{1}
-	account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
-	writeTestSenderState(t, ctx, coreDB, pool.logger, sender, accounts.SerialiseV3(&account), 1)
-	original := encodeRemoteTxn(t, newTestTxnSlot(0, 0, 100, 200, 21_000))
-	replacement := encodeRemoteTxn(t, newTestTxnSlot(0, 0, 101, 202, 21_000))
-	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
-		return tx.Put(kv.PoolTransaction, original.IDHash[:], append(sender[:], original.Rlp...))
-	}))
-	pool.MarkStateStale()
 	synctest.Test(t, func(t *testing.T) {
+		_, pool, poolDB, coreDB := newTestPool(t)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
+		pool.started.Store(false)
+		sender := common.Address{1}
+		account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+		writeTestSenderState(t, ctx, coreDB, pool.logger, sender, accounts.SerialiseV3(&account), 1)
+		original := encodeRemoteTxn(t, newTestTxnSlot(0, 0, 100, 200, 21_000))
+		replacement := encodeRemoteTxn(t, newTestTxnSlot(0, 0, 101, 202, 21_000))
+		require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+			return tx.Put(kv.PoolTransaction, original.IDHash[:], append(sender[:], original.Rlp...))
+		}))
+		pool.MarkStateStale()
+
 		reading, resume := make(chan struct{}), make(chan struct{})
 		unblock := sync.OnceFunc(func() { close(resume) })
 		defer unblock()
@@ -561,10 +563,10 @@ func TestFramePoolRecoveryDuringAdmission(t *testing.T) {
 			name = "local"
 		}
 		t.Run(name, func(t *testing.T) {
-			_, pool, sender := keyedFramePoolEnv(t)
-			backend := pool.ethBackend.(*frameValidationBackend)
-			backend.onValidate = sync.OnceFunc(pool.MarkStateStale)
 			synctest.Test(t, func(t *testing.T) {
+				_, pool, sender := keyedFramePoolEnv(t)
+				backend := pool.ethBackend.(*frameValidationBackend)
+				backend.onValidate = sync.OnceFunc(pool.MarkStateStale)
 				ctx := t.Context()
 				frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
 				var txns TxnSlots

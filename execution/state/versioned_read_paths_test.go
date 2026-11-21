@@ -182,6 +182,7 @@ func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, 
 		ibs = NewWithVersionMap(reader, NewVersionMap(nil))
 	} else {
 		ibs = New(reader)
+		ibs.SetVersionMap(nil)
 	}
 	t.Cleanup(ibs.Close)
 	ibs.SetTxContext(1, 5)
@@ -1497,6 +1498,7 @@ func TestVersionedRead_CodeSizeServedBySharedStore(t *testing.T) {
 func TestVersionedRead_MaterializedObjectFailsTheRead(t *testing.T) {
 	t.Parallel()
 	ibs := New(NewNoopReader())
+	ibs.SetVersionMap(nil)
 	addr := accounts.InternAddress(common.HexToAddress("0xab"))
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	ibs.SetVersionMap(NewVersionMap(nil))
