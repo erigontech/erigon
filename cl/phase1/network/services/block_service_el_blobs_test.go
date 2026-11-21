@@ -948,6 +948,7 @@ func TestProcessMessageStartsFuluELColumnsImportBeforeAdmission(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
+	waitForGossipImports(t, service)
 
 	require.Equal(t, []elImportStart{{root: root, admitted: false}}, *starts)
 	require.Equal(t, int32(1), processing.calls.Load())

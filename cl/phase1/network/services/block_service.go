@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var (
@@ -55,7 +57,18 @@ var (
 
 var publishedBlockJobSequence atomic.Uint64
 
-const maxConcurrentBlockValidationContexts = 4
+const (
+	maxConcurrentBlockValidationContexts = 4
+	maxConcurrentGossipBlockImports      = 8
+)
+
+var gossipBlockImportAfterAcceptCounter = metrics.GetOrCreateCounterVec(
+	"caplin_gossip_block_import_after_accept_total",
+	[]string{"result"},
+	"Total outcomes of pre-Gloas gossip block imports that run after the block was accepted",
+)
+
+var gossipBlockImportInlineCounter = metrics.GetOrCreateCounter("caplin_gossip_block_import_inline_total")
 
 // AcceptedBlockWriteError carries the exact signed copy accepted by fork choice
 // so a failed database write can be retried even after its header is pruned.
@@ -214,10 +227,14 @@ type elColumnsPublisher interface {
 }
 
 type blockService struct {
+	// ctx is independent of the gossip validator's context.
+	ctx                  context.Context
 	forkchoiceStore      forkchoice.ForkChoiceStorage
 	engine               execution_client.ExecutionEngine
 	dataColumns          elColumnsPublisher
 	startELColumnsImport func(context.Context, *cltypes.SignedBeaconBlock)
+	startGossipImport    func(func())
+	importSlots          chan struct{}
 	syncedData           *synced_data.SyncedDataManager
 	ethClock             eth_clock.EthereumClock
 	beaconCfg            *clparams.BeaconChainConfig
@@ -258,6 +275,7 @@ func NewBlockService(
 	emitter *beaconevents.EventEmitter,
 ) BlockService {
 	b := newBlockService(db, forkchoiceStore, syncedData, ethClock, beaconCfg, emitter)
+	b.ctx = ctx
 	b.engine = engine
 	b.dataColumns = dataColumns
 	go b.stopPublishedBlockJobsOnContext(ctx)
@@ -290,6 +308,7 @@ func newBlockService(
 		panic(err)
 	}
 	b := &blockService{
+		ctx:              context.Background(),
 		forkchoiceStore:  forkchoiceStore,
 		syncedData:       syncedData,
 		ethClock:         ethClock,
@@ -299,6 +318,7 @@ func newBlockService(
 		validationCache:  validationCache,
 		validationCalls:  make(map[blockValidationContextKey]*blockValidationContextCall),
 		validationSlots:  make(chan struct{}, maxConcurrentBlockValidationContexts),
+		importSlots:      make(chan struct{}, maxConcurrentGossipBlockImports),
 		elImportsStarted: elImportsStarted,
 		elBlobRetryRoots: elBlobRetryRoots,
 		emitter:          emitter,
@@ -309,6 +329,7 @@ func newBlockService(
 	b.startELColumnsImport = func(ctx context.Context, block *cltypes.SignedBeaconBlock) {
 		go b.importColumnsFromELBlobs(context.WithoutCancel(ctx), block)
 	}
+	b.startGossipImport = func(f func()) { go f() }
 	return b
 }
 
@@ -340,12 +361,66 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return err
 	}
 	b.publishBlockGossipEvent(msg)
-	afterAdmission := startsELColumnsImportAfterAdmission(msg)
-	if !afterAdmission {
+	if !startsELColumnsImportAfterAdmission(msg) {
 		b.startELColumnsImportOnce(ctx, msg)
 	}
+	if msg.Version() < clparams.GloasVersion {
+		b.importAfterAccept(msg)
+		return nil
+	}
+	_, err := b.importGossipBlock(ctx, msg)
+	return err
+}
+
+type gossipImportResult string
+
+const (
+	gossipImportImported gossipImportResult = "imported"
+	gossipImportWaiting  gossipImportResult = "waiting"
+	gossipImportRetry    gossipImportResult = "retry"
+	gossipImportInvalid  gossipImportResult = "invalid"
+	gossipImportFailed   gossipImportResult = "failed"
+	gossipImportPanic    gossipImportResult = "panic"
+)
+
+// importAfterAccept imports a block the gossip validator has already accepted. It never drops a block: without a free
+// import slot the import runs on the caller.
+func (b *blockService) importAfterAccept(msg *cltypes.SignedBeaconBlock) {
+	finishPayloadImport := b.forkchoiceStore.BeginPayloadImport(msg.Block.Slot)
+	select {
+	case b.importSlots <- struct{}{}:
+		b.startGossipImport(func() {
+			defer func() { <-b.importSlots }()
+			b.runAcceptedImport(msg, finishPayloadImport)
+		})
+	default:
+		gossipBlockImportInlineCounter.Inc()
+		b.runAcceptedImport(msg, finishPayloadImport)
+	}
+}
+
+func (b *blockService) runAcceptedImport(msg *cltypes.SignedBeaconBlock, finishPayloadImport func()) {
+	defer finishPayloadImport()
+	defer func() {
+		if r := recover(); r != nil {
+			gossipBlockImportAfterAcceptCounter.WithLabelValues(string(gossipImportPanic)).Inc()
+			log.Error("Panic while importing an accepted gossip block", "slot", msg.Block.Slot, "proposer", msg.Block.ProposerIndex, "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	result, err := b.importGossipBlock(b.ctx, msg)
+	gossipBlockImportAfterAcceptCounter.WithLabelValues(string(result)).Inc()
+	switch {
+	case result == gossipImportInvalid:
+		root, _ := msg.Block.HashSSZ()
+		log.Warn("Accepted gossip block failed import", "slot", msg.Block.Slot, "root", common.Hash(root), "proposer", msg.Block.ProposerIndex, "err", err)
+	case result == gossipImportFailed:
+		log.Debug("Accepted gossip block was not imported", "slot", msg.Block.Slot, "proposer", msg.Block.ProposerIndex, "err", err)
+	}
+}
+
+func (b *blockService) importGossipBlock(ctx context.Context, msg *cltypes.SignedBeaconBlock) (gossipImportResult, error) {
 	accepted, err := b.processAndStoreBlock(ctx, msg, false)
-	if accepted && afterAdmission {
+	if accepted && startsELColumnsImportAfterAdmission(msg) {
 		b.startELColumnsImportOnce(ctx, msg)
 	}
 	if err != nil {
@@ -360,23 +435,23 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 					b.emitter.NotifyDataColumnStored(root)
 				}
 			}
-			return nil
+			return gossipImportWaiting, nil
 		}
 		// Retain canceled imports too: gossip validation has already marked the block as seen.
 		if shouldBackOffBlockRetry(err) || isCallerCancellation(ctx, err) {
 			job, _ := b.scheduleBlockForLaterProcessing(msg, nil, true, accepted)
 			job.logStorageErrorOnce(err)
 			if accepted {
-				return nil
+				return gossipImportRetry, nil
 			}
-			return fmt.Errorf("%w: %w", ErrIgnore, err)
+			return gossipImportRetry, fmt.Errorf("%w: %w", ErrIgnore, err)
 		}
 		if errors.Is(err, forkchoice.ErrBlockInvalid) {
-			return err
+			return gossipImportInvalid, err
 		}
-		return fmt.Errorf("%w: %w", ErrIgnore, err)
+		return gossipImportFailed, fmt.Errorf("%w: %w", ErrIgnore, err)
 	}
-	return nil
+	return gossipImportImported, nil
 }
 
 // startsELColumnsImportAfterAdmission reports whether the EL column import waits for fork choice to admit the block:

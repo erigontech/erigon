@@ -41,6 +41,7 @@ func TestProcessMessageRetriesWhenStoredColumnArrives(t *testing.T) {
 		}).Times(2)
 
 		require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
+		synctest.Wait()
 		job := serviceJob(t, service, root)
 		job.mu.Lock()
 		require.True(t, job.waitsForColumns)
@@ -82,6 +83,16 @@ func TestArchiveColumnRetryDoesNotWaitForOperationFeed(t *testing.T) {
 	}).AnyTimes()
 
 	require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
+	require.Eventually(t, func() bool {
+		queued, ok := service.blocksScheduledForLaterExecution.Load(root)
+		if !ok {
+			return false
+		}
+		job := queued.(*blockJob)
+		job.mu.Lock()
+		defer job.mu.Unlock()
+		return job.waitsForColumns
+	}, acceptTestTimeout, time.Millisecond)
 	handle := &publishedBlockJobHandle{job: serviceJob(t, service, root)}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*blockJobExpiry)
 	defer cancel()
@@ -134,6 +145,7 @@ func TestProcessMessageRetriesWhenLastColumnArrivesBeforeJobWaits(t *testing.T) 
 			processing.err = nil
 		}}
 
+		service.startGossipImport = func(f func()) { f() }
 		start := time.Now()
 		require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
 		synctest.Wait()
