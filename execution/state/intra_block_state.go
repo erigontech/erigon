@@ -290,8 +290,12 @@ func (ibs *IntraBlockState) CodeReadCount() int64 {
 	return ibs.codeReadCount
 }
 
-// SetVersionMap binds the IBS to a versionMap.
+// SetVersionMap binds the IBS to a non-nil version map. The IBS always reads and
+// writes through a version map; a nil map is an invariant violation, not a state.
 func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
+	if versionMap == nil {
+		panic("IntraBlockState requires a non-nil version map")
+	}
 	ibs.stateUpdates = versionMap
 }
 
