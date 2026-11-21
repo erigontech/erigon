@@ -514,12 +514,15 @@ func (s *simulator) sanitizeCall(
 			args.GasPrice = new(hexutil.U256)
 		}
 	} else {
-		// A base fee is provided, requiring 1559-type execution
-		if args.MaxFeePerGas == nil {
-			args.MaxFeePerGas = new(hexutil.U256)
-		}
-		if args.MaxPriorityFeePerGas == nil {
-			args.MaxPriorityFeePerGas = new(hexutil.U256)
+		// A base fee is provided, requiring 1559-type execution. A call that names gasPrice is
+		// left as a legacy call, as in eth_call; filling zero fees would make it ambiguous.
+		if args.GasPrice == nil {
+			if args.MaxFeePerGas == nil {
+				args.MaxFeePerGas = new(hexutil.U256)
+			}
+			if args.MaxPriorityFeePerGas == nil {
+				args.MaxPriorityFeePerGas = new(hexutil.U256)
+			}
 		}
 	}
 	if args.BlobVersionedHashes == nil {

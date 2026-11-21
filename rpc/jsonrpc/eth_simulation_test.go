@@ -577,6 +577,63 @@ func TestSanitizeCallBaseFeeSet(t *testing.T) {
 	assert.Nil(t, args.GasPrice, "GasPrice should not be set when baseFee is provided")
 }
 
+// TestSanitizeCallBaseFeeSetGasPrice verifies that a call with gasPrice keeps the
+// dynamic fee fields unset after London, so it runs as a legacy call like in eth_call.
+func TestSanitizeCallBaseFeeSetGasPrice(t *testing.T) {
+	sim := newTestSimulator(uint256.NewInt(1))
+	args := callArgs()
+	gasPrice := hexutil.U256(*uint256.NewInt(2_000_000_000))
+	args.GasPrice = &gasPrice
+	bc := blockCtx(30_000_000)
+	baseFee := uint256.NewInt(1_000_000_000)
+
+	err := sim.sanitizeCall(&args, nil, &bc, baseFee, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
+	require.NoError(t, err)
+	assert.Nil(t, args.MaxFeePerGas)
+	assert.Nil(t, args.MaxPriorityFeePerGas)
+	assert.Equal(t, &gasPrice, args.GasPrice)
+
+	msg, err := args.ToMessage(50_000_000, baseFee)
+	require.NoError(t, err)
+	assert.Equal(t, uint256.NewInt(2_000_000_000), msg.FeeCap())
+}
+
+// TestSanitizeCallBaseFeeSetDynamicFeeOnly verifies that a call with only one dynamic fee
+// field still gets the other one filled with zero after London.
+func TestSanitizeCallBaseFeeSetDynamicFeeOnly(t *testing.T) {
+	sim := newTestSimulator(uint256.NewInt(1))
+	args := callArgs()
+	maxFee := hexutil.U256(*uint256.NewInt(3_000_000_000))
+	args.MaxFeePerGas = &maxFee
+	bc := blockCtx(30_000_000)
+	baseFee := uint256.NewInt(1_000_000_000)
+
+	err := sim.sanitizeCall(&args, nil, &bc, baseFee, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
+	require.NoError(t, err)
+	assert.Equal(t, &maxFee, args.MaxFeePerGas)
+	require.NotNil(t, args.MaxPriorityFeePerGas)
+	assert.True(t, (*uint256.Int)(args.MaxPriorityFeePerGas).IsZero())
+	assert.Nil(t, args.GasPrice)
+}
+
+// TestSanitizeCallGasPriceWithDynamicFee verifies that gasPrice together with a dynamic fee
+// field is still rejected after London.
+func TestSanitizeCallGasPriceWithDynamicFee(t *testing.T) {
+	sim := newTestSimulator(uint256.NewInt(1))
+	args := callArgs()
+	gasPrice := hexutil.U256(*uint256.NewInt(2_000_000_000))
+	maxFee := hexutil.U256(*uint256.NewInt(3_000_000_000))
+	args.GasPrice = &gasPrice
+	args.MaxFeePerGas = &maxFee
+	bc := blockCtx(30_000_000)
+	baseFee := uint256.NewInt(1_000_000_000)
+
+	err := sim.sanitizeCall(&args, nil, &bc, baseFee, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
+	require.NoError(t, err)
+	_, err = args.ToMessage(50_000_000, baseFee)
+	require.ErrorContains(t, err, "both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
+}
+
 // TestSanitizeCallBlobGas verifies that MaxFeePerBlobGas is set when BlobVersionedHashes is provided.
 func TestSanitizeCallBlobGas(t *testing.T) {
 	sim := newTestSimulator(uint256.NewInt(1))
