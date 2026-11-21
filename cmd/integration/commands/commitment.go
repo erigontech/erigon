@@ -598,7 +598,7 @@ Examples:
 		if convertRestore && convertContinue {
 			return errors.New("--continue is mutually exclusive with --restore")
 		}
-		if statecfg.ExperimentalCommitmentV3 {
+		if statecfg.ExperimentalCommitmentV3 && !convertV3 { // --v3 opens the files at their on-disk version
 			return errors.New("commitment convert opens legacy commitment files; run it without ERIGON_COMMITMENT_V3=true")
 		}
 		if convertRestore {

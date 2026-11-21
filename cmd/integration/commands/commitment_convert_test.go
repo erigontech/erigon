@@ -93,10 +93,6 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 
 	convertRestore, convertContinue = false, false
 	statecfg.ExperimentalCommitmentV3 = true
-	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--v3"})
-	require.ErrorContains(t, root.ExecuteContext(t.Context()), "without ERIGON_COMMITMENT_V3=true")
-
-	convertV3 = false
 	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--restore"})
 	require.ErrorContains(t, root.ExecuteContext(t.Context()), "without ERIGON_COMMITMENT_V3=true")
 

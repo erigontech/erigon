@@ -211,6 +211,25 @@ func TestStageExecResetAfterConvertWithoutChaindata(t *testing.T) {
 	require.NoDirExists(t, dirs.Chaindata)
 }
 
+// convert is the migration to v3, so it also runs when v3 is already the default: it
+// opens the commitment files at their on-disk version.
+func TestCommitmentConvertWithV3On(t *testing.T) {
+	dirs, stepSize, lastTxNum, roots := legacyDatadirWithoutChaindata(t)
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+
+	require.NoError(t, runCommitmentConvert(t, dirs, "--v3"))
+
+	requireCommitmentKVPrefix(t, dirs, "v3.")
+	require.NoError(t, state.MatchCommitmentSchemaToFiles(dirs))
+	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(t.Context())
+	t.Cleanup(agg.Close)
+	require.NoError(t, agg.OpenFolder(nil))
+	c, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
+	require.NoError(t, err)
+	require.Equal(t, lastTxNum, c.TxNum)
+	require.Equal(t, roots[lastTxNum], common.Hash(c.Root))
+}
+
 func TestCommitmentConvertModesWithoutChaindata(t *testing.T) {
 	for _, mode := range []struct {
 		name, kvPrefix string
