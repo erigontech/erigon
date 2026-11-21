@@ -20,6 +20,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -38,6 +39,10 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 	}
 	if oldTxn.HasBlobs() && !newTxn.HasBlobs() {
 		return replacementDecision{reason: txpoolcfg.BlobTxReplace}
+	}
+	if newTxn.TxType() == FrameTxnType && oldTxn.TxType() == FrameTxnType {
+		// Frame replacements compare total budgets, not derived per-gas caps.
+		return replacementDecision{}
 	}
 	priceBump := p.cfg.PriceBump
 
@@ -81,11 +86,26 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 // Frame replacements must strictly increase fees, even when the configured
 // percentage would round down to no increase.
 func validateFrameReplacement(previous, replacement *TxnSlot, priceBump, blobPriceBump uint64) txpoolcfg.DiscardReason {
-	if !frameReplacementFee(previous.GetTipCap(), replacement.GetTipCap(), priceBump) || !frameReplacementFee(previous.GetFeeCap(), replacement.GetFeeCap(), priceBump) {
+	oldFrame, oldIsFrame := previous.Txn.(*types.FrameTransaction)
+	newFrame, newIsFrame := replacement.Txn.(*types.FrameTransaction)
+	bothFrames := oldIsFrame && newIsFrame
+	var oldCap, newCap *uint256.Int
+	if bothFrames {
+		oldCap, newCap = &oldFrame.Fees.MaxFee, &newFrame.Fees.MaxFee
+	} else {
+		oldCap, newCap = previous.GetFeeCap(), replacement.GetFeeCap()
+	}
+	if !frameReplacementFee(previous.GetTipCap(), replacement.GetTipCap(), priceBump) || !frameReplacementFee(oldCap, newCap, priceBump) {
 		return txpoolcfg.NotReplaced
 	}
-	if replacement.HasBlobs() && previous.HasBlobs() && !frameReplacementFee(previous.GetBlobFeeCap(), replacement.GetBlobFeeCap(), blobPriceBump) {
-		return txpoolcfg.ReplaceUnderpriced
+	if replacement.HasBlobs() && previous.HasBlobs() {
+		oldBlobCap, newBlobCap := oldCap, newCap
+		if !bothFrames {
+			oldBlobCap, newBlobCap = previous.GetBlobFeeCap(), replacement.GetBlobFeeCap()
+		}
+		if !frameReplacementFee(oldBlobCap, newBlobCap, blobPriceBump) {
+			return txpoolcfg.ReplaceUnderpriced
+		}
 	}
 	return txpoolcfg.Success
 }

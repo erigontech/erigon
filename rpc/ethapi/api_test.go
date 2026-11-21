@@ -26,7 +26,7 @@ func TestNewRPCTransaction_NullSignature(t *testing.T) {
 			To:       &to,
 		},
 	}
-	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)
 	require.Nil(t, result.V)
 	require.Nil(t, result.R)
 	require.Nil(t, result.S)
@@ -45,7 +45,7 @@ func TestNewRPCTransaction_SignedLegacy(t *testing.T) {
 			S:        *uint256.NewInt(2),
 		},
 	}
-	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)
 	require.NotNil(t, result.V)
 	require.NotNil(t, result.R)
 	require.NotNil(t, result.S)
@@ -59,7 +59,7 @@ func TestNewRPCTransaction_SignedLegacyEIP155(t *testing.T) {
 	chainID := uint256.NewInt(1)
 	tx, err := types.SignTx(types.NewTransaction(1, to, uint256.NewInt(0), 21000, uint256.NewInt(1), nil), *types.LatestSignerForChainID(chainID), key)
 	require.NoError(t, err)
-	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)
 	// from is recovered with the chain id derived from the EIP-155 v value.
 	require.Equal(t, from, result.From)
 	require.NotNil(t, result.ChainID)
@@ -81,7 +81,7 @@ func TestNewRPCTransaction_EIP1559_YParityZero(t *testing.T) {
 		},
 		ChainID: *chainID,
 	}
-	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)
 	require.NotNil(t, result.V)
 	require.NotNil(t, result.R)
 	require.NotNil(t, result.S)
@@ -100,7 +100,7 @@ func TestNewRPCTransaction_EIP1559_AllZeroSig(t *testing.T) {
 		},
 		ChainID: *chainID,
 	}
-	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)
 	require.NotNil(t, result.V)
 	require.NotNil(t, result.R)
 	require.NotNil(t, result.S)
@@ -160,7 +160,7 @@ func TestSignTransactionResultMarshalJSON_EIP1559(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, tx.MarshalBinary(&buf))
 
-	fields := txFields(t, SignTransactionResult{Raw: buf.Bytes(), Tx: NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)})
+	fields := txFields(t, SignTransactionResult{Raw: buf.Bytes(), Tx: NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)})
 
 	// EIP-1559 without known baseFee: gasPrice is null (matching Geth).
 	require.Equal(t, "null", string(fields["gasPrice"]), "gasPrice must be null when baseFee is unknown")
@@ -194,7 +194,7 @@ func TestSignTransactionResultMarshalJSON_Legacy(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, tx.MarshalBinary(&buf))
 
-	fields := txFields(t, SignTransactionResult{Raw: buf.Bytes(), Tx: NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)})
+	fields := txFields(t, SignTransactionResult{Raw: buf.Bytes(), Tx: NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)})
 
 	// Legacy: gasPrice must be set.
 	gasPrice, ok := fields["gasPrice"]
@@ -231,7 +231,7 @@ func TestNewRPCTransaction_AccessList_AllZeroSig(t *testing.T) {
 		},
 		ChainID: *chainID,
 	}
-	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)
 	require.NotNil(t, result.V)
 	require.NotNil(t, result.R)
 	require.NotNil(t, result.S)
@@ -520,7 +520,7 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	base := func() *RPCTransaction {
 		return &RPCTransaction{
 			BlockHash: &hash, BlockNumber: u(0x1234), BlockTimestamp: q(0x64),
-			From: to, Gas: 0x5208, GasPrice: *u(0x9), Hash: hash,
+			From: to, Gas: 0x5208, GasPrice: u(0x9), Hash: hash,
 			Input: hexutil.Bytes{0xde, 0xad}, Nonce: 3, To: &to,
 			TransactionIndex: q(2), Value: u(0x100), Type: 0,
 			V: u(0x1b), R: u(0xaa), S: u(0xbb),

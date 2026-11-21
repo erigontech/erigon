@@ -8093,7 +8093,7 @@ Replays the transaction that deployed a contract using replacement initcode at t
 { "code": "0x<runtime_bytecode>" }
 ```
 
-A successful deployment returns `null` if its runtime code is empty, the factory reverts it, or `SELFDESTRUCT` deletes it in the same transaction. A failed `POST_TX` assertion also returns `null` for deployments it rolls back in the transaction body. Deployments from the payment-approval frame survive that rollback.
+A successful deployment returns `null` if its runtime code is empty, the factory reverts it, or `SELFDESTRUCT` deletes it in the same transaction. If an `ASSERT` frame fails, the method returns `null` for deployments rolled back with the transaction body. Deployments from the payment-approval frame survive that rollback.
 
 If an accepted transaction never reaches the target creation during replay, the RPC returns `null`. For example, the factory may run out of gas before it executes `CREATE` or `CREATE2`.
 

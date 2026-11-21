@@ -19,7 +19,6 @@ package protocol
 import (
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/holiman/uint256"
 
@@ -54,9 +53,6 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	if err != nil {
 		return nil, err
 	}
-	if tx.Nonce == math.MaxUint64 {
-		return nil, ErrNonceMax
-	}
 	if !tx.UsesLegacyNonce() {
 		// EIP-8250 requires the manager to be predeployed. Otherwise nonce writes
 		// create an empty account that finalization deletes, allowing replay.
@@ -81,6 +77,12 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			if err != nil {
 				return nil, err
 			}
+			if tx.UsesSingleUseNonce() {
+				if !sequence.IsZero() {
+					return nil, fmt.Errorf("%w: single-use key %s is already used", ErrNonceTooLow, key.String())
+				}
+				continue
+			}
 			if sequence.LtUint64(tx.Nonce) {
 				return nil, fmt.Errorf("%w: key %s, tx: %d state: %s", ErrNonceTooHigh, key.String(), tx.Nonce, sequence.String())
 			}
@@ -89,30 +91,16 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			}
 		}
 	}
-	skipFeeCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
-	if !skipFeeCheck {
-		if err := CheckEip1559TxGasFeeCap(sender, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.isFree); err != nil {
-			return nil, err
-		}
+	baseFee, blobBaseFee := st.evm.Context.BaseFee, st.evm.Context.BlobBaseFee
+	if st.isFree || st.evm.Config().NoBaseFee && tx.Fees.MaxFee.IsZero() && tx.Fees.TipCap.IsZero() {
+		baseFee.Clear()
 	}
-	skipBlobCheck := st.evm.Config().NoBaseFee && tx.Fees.BlobFeeCap.IsZero()
-	if tx.GetBlobGas() > 0 && !skipBlobCheck && tx.Fees.BlobFeeCap.Lt(&st.evm.Context.BlobBaseFee) {
-		return nil, ErrMaxFeePerBlobGas
+	if st.evm.Config().NoBaseFee && tx.Fees.MaxFee.IsZero() {
+		blobBaseFee.Clear()
 	}
-	// Execution and state gas are reserved at the fee cap; blob gas uses the
-	// current blob base fee. Approval debits this budget, and settlement returns
-	// unused gas and the difference from the effective execution gas price.
-	maxCost, overflow := u256.MulOverflow(u256.U64(limits.Total()), tx.Fees.FeeCap)
-	if overflow {
-		return nil, errors.New("frame transaction gas cost overflow")
-	}
-	blobCost, overflow := u256.MulOverflow(u256.U64(tx.GetBlobGas()), st.evm.Context.BlobBaseFee)
-	if overflow {
-		return nil, ErrInsufficientFunds
-	}
-	maxCost, overflow = u256.AddOverflow(maxCost, blobCost)
-	if overflow {
-		return nil, ErrInsufficientFunds
+	budget, err := tx.Fees.Budget(limits.Total(), tx.GetBlobGas(), &baseFee, &blobBaseFee)
+	if err != nil {
+		return nil, err
 	}
 	st.state.Prepare(rules, sender, st.evm.Context.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
 	if st.evm.Config().NoBAL {
@@ -120,20 +108,20 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	}
 	snapshot := st.state.PushSnapshot()
 	defer st.state.PopSnapshot(snapshot)
-	ctx := st.state.NewFrameContext(tx, maxCost)
+	ctx := st.state.NewFrameContext(tx, budget.MaxCost)
 	ctx.LegacyNonce = nonce
 	st.evm.FrameContext = ctx
 	defer func() {
 		st.evm.FrameContext = nil
 		// Transaction rejection and mempool simulation undo every frame's changes.
 		// A failure within an accepted transaction uses a frame, atomic batch or
-		// POST_TX body snapshot, preserving changes before that boundary.
+		// ASSERT body snapshot, preserving changes before that boundary.
 		if err != nil || validation != nil {
 			st.state.RevertToSnapshot(snapshot, err)
 		}
 	}()
 	st.evm.BlobHashes = tx.BlobVersionedHashes
-	st.evm.GasPrice = *st.msg.GasPrice()
+	st.evm.GasPrice = budget.GasPrice
 	// Tracers need one transaction root with frames as ordered children. This
 	// synthetic call emits hooks only; it does not execute code or add EVM depth.
 	if tracer := st.evm.Config().Tracer; tracer.HasEnterHook() || tracer.HasExitHook() {
@@ -148,7 +136,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			tracer.EmitExit(0, nil, gasUsed, vm.VMErrorFromErr(traceErr), err != nil)
 		}()
 	}
-	hasPostTx := len(tx.Frames) > 0 && tx.Frames[len(tx.Frames)-1].Mode == types.FramePostTx
+	hasAssertions := len(tx.Frames) > 0 && tx.Frames[len(tx.Frames)-1].Mode == types.FrameAssert
 	var lastErr error
 	batchStart, batchSnapshot := -1, -1
 	bodyStart, bodySnapshot := -1, -1
@@ -214,7 +202,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 				return nil, nil
 			}
 		}
-		if frame.Mode == types.FramePostTx && frameErr != nil {
+		if frame.Mode == types.FrameAssert && frameErr != nil {
 			if bodySnapshot < 0 {
 				return nil, errors.New("frame transaction without payment approval")
 			}
@@ -251,7 +239,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 				batchStart, batchSnapshot = -1, -1
 			}
 		}
-		if hasPostTx && bodySnapshot < 0 && !ctx.Payer.IsNil() {
+		if hasAssertions && bodySnapshot < 0 && !ctx.Payer.IsNil() {
 			bodyStart, bodySnapshot = i+1, st.state.PushSnapshot()
 		}
 	}
@@ -276,16 +264,16 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		paidExecution = max(used.Execution-refund, floor)
 	}
 	paid := paidExecution + used.State
-	fee := u256.Mul(u256.U64(paid), *st.gasPrice)
-	change := u256.Sub(maxCost, u256.Add(fee, blobCost))
+	gasFee, tipPaid := budget.Settle(paid, &baseFee, &tx.Fees.TipCap)
+	change := u256.Sub(budget.MaxCost, u256.Add(gasFee, budget.BlobCost))
 	if err := st.state.AddBalance(ctx.Payer, change, tracing.BalanceIncreaseGasReturn); err != nil {
 		return nil, err
 	}
-	tipped, err := st.payCoinbase(paid)
+	tipped, err := st.payCoinbaseAmount(tipPaid)
 	if err != nil {
 		return nil, err
 	}
-	burned, burnAddress, err := st.burnFees(paid, blobCost)
+	burned, burnAddress, err := st.burnFees(paid, budget.BlobCost)
 	if err != nil {
 		return nil, err
 	}
