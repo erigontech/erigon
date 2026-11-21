@@ -2,7 +2,9 @@
 package keccakx4
 
 import (
+	"encoding/binary"
 	"slices"
+	"sync"
 
 	keccak "github.com/erigontech/fastkeccak"
 )
@@ -30,24 +32,32 @@ const rate = 136
 
 var zeroBlock [rate]byte
 
+// x4State is the working memory of sumManyX4. It is pooled because x4 is called through a
+// function value, so the compiler cannot keep it on the stack.
+type x4State struct {
+	a      [100]uint64
+	blocks [4]*byte
+	pad    [4 * rate]byte
+	order  []int
+}
+
+var x4StatePool = sync.Pool{New: func() any { return new(x4State) }}
+
 // sumManyX4 runs four messages at once; a lane that finishes takes the next message, so
 // messages of different lengths do not leave lanes idle. The longest messages go first so
 // the lanes run out together.
 func sumManyX4(permute func(a *[100]uint64, blocks *[4]*byte), msgs [][]byte, out [][32]byte) {
-	order := longestFirst(msgs)
-	var (
-		a      [100]uint64
-		blocks [4]*byte
-		padBuf [4 * rate]byte
-		cur    [4]int
-		pos    [4]int
-		next   int
-		active int
-	)
+	st := x4StatePool.Get().(*x4State)
+	defer x4StatePool.Put(st)
+	st.a = [100]uint64{}
+	st.order = longestFirst(st.order, msgs)
+	order := st.order
+	var cur, pos [4]int
+	next, active := 0, 0
 	take := func(lane int) {
 		if next == len(order) {
 			cur[lane] = -1
-			blocks[lane] = &zeroBlock[0]
+			st.blocks[lane] = &zeroBlock[0]
 			return
 		}
 		cur[lane], pos[lane] = order[next], 0
@@ -64,17 +74,17 @@ func sumManyX4(permute func(a *[100]uint64, blocks *[4]*byte), msgs [][]byte, ou
 			}
 			rest := msgs[cur[lane]][pos[lane]:]
 			if len(rest) >= rate {
-				blocks[lane] = &rest[0]
+				st.blocks[lane] = &rest[0]
 				continue
 			}
-			p := padBuf[lane*rate : (lane+1)*rate]
+			p := st.pad[lane*rate : (lane+1)*rate]
 			clear(p)
 			n := copy(p, rest)
 			p[n] ^= 0x01
 			p[rate-1] ^= 0x80
-			blocks[lane] = &p[0]
+			st.blocks[lane] = &p[0]
 		}
-		permute(&a, &blocks)
+		permute(&st.a, &st.blocks)
 		for lane := range 4 {
 			if cur[lane] < 0 {
 				continue
@@ -85,34 +95,23 @@ func sumManyX4(permute func(a *[100]uint64, blocks *[4]*byte), msgs [][]byte, ou
 			}
 			o := &out[cur[lane]]
 			for k := range 4 {
-				putUint64LE(o[8*k:], a[4*k+lane])
+				binary.LittleEndian.PutUint64(o[8*k:], st.a[4*k+lane])
 			}
 			for k := range 25 {
-				a[4*k+lane] = 0
+				st.a[4*k+lane] = 0
 			}
 			active--
 			take(lane)
 		}
 	}
+	st.blocks = [4]*byte{}
 }
 
-func longestFirst(msgs [][]byte) []int {
-	order := make([]int, len(msgs))
+func longestFirst(order []int, msgs [][]byte) []int {
+	order = slices.Grow(order[:0], len(msgs))[:len(msgs)]
 	for i := range order {
 		order[i] = i
 	}
 	slices.SortFunc(order, func(i, j int) int { return len(msgs[j]) - len(msgs[i]) })
 	return order
-}
-
-func putUint64LE(b []byte, v uint64) {
-	_ = b[7]
-	b[0] = byte(v)
-	b[1] = byte(v >> 8)
-	b[2] = byte(v >> 16)
-	b[3] = byte(v >> 24)
-	b[4] = byte(v >> 32)
-	b[5] = byte(v >> 40)
-	b[6] = byte(v >> 48)
-	b[7] = byte(v >> 56)
 }

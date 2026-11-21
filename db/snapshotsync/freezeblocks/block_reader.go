@@ -1301,7 +1301,11 @@ func BodyForStorageFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegm
 func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSegment, buf []byte, txnHashes bool) (txs []types.Transaction, senders []common.Address, err error) {
 	txs = make([]types.Transaction, txCount)
 	senders = make([]common.Address, txCount)
-	var encodings types.TxnEncodings
+	var encodings *types.TxnEncodings
+	if txnHashes {
+		encodings = types.NewTxnEncodings()
+		defer encodings.Release()
+	}
 	ok, err := frozenTxns(baseTxnID, txCount, txsSeg, buf, func(i uint32, sender, txRlp []byte) error {
 		senders[i].SetBytes(sender)
 		var err error

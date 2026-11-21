@@ -474,7 +474,11 @@ func canonicalTransactions(db kv.Getter, txnID uint64, amount uint32, txnHashes 
 		return []types.Transaction{}, nil
 	}
 	txs := make([]types.Transaction, amount)
-	var encodings types.TxnEncodings
+	var encodings *types.TxnEncodings
+	if txnHashes {
+		encodings = types.NewTxnEncodings()
+		defer encodings.Release()
+	}
 	i := uint32(0)
 	if err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(txnID), amount, func(k, v []byte) error {
 		var err error
