@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -39,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -336,13 +338,17 @@ func TestWarmBALPropagatesWorkerCancellation(t *testing.T) {
 
 type prefetchRecordingTx struct {
 	commitmentRecordingTx
+	commitmentKeys [][]byte
 }
 
 func (tx *prefetchRecordingTx) AggTx() any { return tx }
 
-func (tx *prefetchRecordingTx) PrefetchLatest(_ context.Context, domain kv.Domain, _ [][]byte) (int, error) {
+func (tx *prefetchRecordingTx) PrefetchLatest(_ context.Context, domain kv.Domain, keys [][]byte) (int, error) {
 	tx.mu.Lock()
 	tx.domains = append(tx.domains, domain)
+	if domain == kv.CommitmentDomain {
+		tx.commitmentKeys = append(tx.commitmentKeys, keys...)
+	}
 	tx.mu.Unlock()
 	return 0, nil
 }
@@ -362,7 +368,16 @@ func TestWarmBALSkipsCommitmentWarmupOnV3(t *testing.T) {
 
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
-	require.NotContains(t, tx.domains, kv.CommitmentDomain, "the HPH-keyed BAL commitment warmup finds nothing on a v3 trie")
+	v3Keys := map[string]struct{}{}
+	for _, k := range v3TrieKeys(balCommitmentWarmupKeys(bal)) {
+		v3Keys[string(k)] = struct{}{}
+	}
+	for _, k := range tx.commitmentKeys {
+		require.Contains(t, v3Keys, string(k), "the HPH-keyed BAL commitment warmup finds nothing on a v3 trie")
+	}
+	if mmap.NewProbe() != nil {
+		require.NotEmpty(t, tx.commitmentKeys, "the v3 trie paths get their own batch prefetch")
+	}
 }
 
 func TestWarmBALContinuesAfterReadError(t *testing.T) {
@@ -1245,4 +1260,10 @@ func TestCachePopulatingGetterBoundedReadSkipsAVisibleEntry(t *testing.T) {
 	got, _, err := cpg.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{}.WithMaxStep(0))
 	require.NoError(t, err)
 	require.Equal(t, historical, got)
+}
+
+func TestBALHexTrieWarmupsByVariant(t *testing.T) {
+	require.True(t, balHexTrieWarmups(commitment.VariantParallelHexPatricia))
+	require.True(t, balHexTrieWarmups(commitment.VariantHexPatriciaTrie))
+	require.False(t, balHexTrieWarmups(commitment.VariantCommitmentV3))
 }
