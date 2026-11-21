@@ -2,6 +2,7 @@ package execmodule
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -74,70 +76,108 @@ func TestFilterCandidatesByNonce_DropsStaleKeepsApplicableRequeuesFuture(t *test
 	require.Equal(t, uint64(6), out[1].GetNonce())
 }
 
-// A SENDER'S CONSECUTIVE NONCES MUST SURVIVE ARRIVING OUT OF ORDER.
-//
-// The round's batch comes in DAG COMMIT order, which says nothing about nonces, so a sender that
-// submits N and N+1 together can be offered N+1 first. Judged in that order, N+1 is `future` against
-// a state still expecting N, and it is refused — then it goes back through the pool and the DAG and
-// lands a block later. Measured on live225, one round of a four-order burst:
-//
-//	[TRACE-filter] round  block=262  in=2  kept=1  future=1
-//
-// Two consecutive nonces from one sender, one kept and one refused. Placement costs 40ms when
-// nothing is queued behind it, so each refusal cost roughly fifty times the work it was waiting on.
-func TestOrderBySenderNonce_RestoresOneSendersSequence(t *testing.T) {
+func signedRLP(t *testing.T, signer *types.Signer, k *ecdsa.PrivateKey, nonce uint64) []byte {
+	t.Helper()
+	tx := types.NewTransaction(nonce, common.Address{0xaa}, uint256.NewInt(0), 21000, uint256.NewInt(0), nil)
+	signed, err := types.SignTx(tx, *signer, k)
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	require.NoError(t, signed.MarshalBinary(&buf))
+	return buf.Bytes()
+}
+
+func TestJudgeInCommitOrder_AGappedNonceIsDroppedWhereTheDAGPutIt(t *testing.T) {
 	signer := types.LatestSignerForChainID(chain.AllProtocolChanges.ChainID)
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	rlpOf := func(nonce uint64) []byte {
-		tx := types.NewTransaction(nonce, common.Address{0xaa}, uint256.NewInt(0), 21000, uint256.NewInt(0), nil)
-		signed, serr := types.SignTx(tx, *signer, key)
-		require.NoError(t, serr)
-		var buf bytes.Buffer
-		require.NoError(t, signed.MarshalBinary(&buf))
-		return buf.Bytes()
-	}
-
-	// Offered 9, 7, 8 — the shape the DAG actually produces for a burst from one sponsor.
-	cands, bad := orderBySenderNonce([][]byte{rlpOf(9), rlpOf(7), rlpOf(8)}, signer)
+	cands, bad := decodeCandidates([][]byte{signedRLP(t, signer, key, 9), signedRLP(t, signer, key, 7), signedRLP(t, signer, key, 8)}, signer)
 	require.Zero(t, bad)
-	require.Len(t, cands, 3)
-	require.Equal(t, []uint64{7, 8, 9}, []uint64{cands[0].nonce, cands[1].nonce, cands[2].nonce},
-		"a sender's own nonces have exactly one valid order and the filter must see them in it")
+
+	v := judgeInCommitOrder(cands, func(accounts.Address) uint64 { return 7 }, map[snKeyExec]bool{}, nil)
+
+	require.Len(t, v.kept, 2)
+	require.Equal(t, []uint64{7, 8}, []uint64{v.kept[0].nonce, v.kept[1].nonce})
+	require.Empty(t, v.dropped)
+	require.Equal(t, []common.Hash{cands[0].hash}, v.deferred, "nonce 9 came before 7 in commit order")
+	require.Equal(t, []common.Hash{cands[0].hash}, v.decidedAgainst(true), "commit-order execution decides a gapped nonce")
+	require.Empty(t, v.decidedAgainst(false), "otherwise a gapped nonce waits for its predecessor")
+	require.Equal(t, 1, v.future)
 }
 
-// ⚠ AND SENDERS ARE NOT REORDERED AGAINST EACH OTHER. Only a sender's own sequence is restored;
-// whose transaction came first in the round is the DAG's decision, not this function's.
-func TestOrderBySenderNonce_KeepsSendersInArrivalOrder(t *testing.T) {
+func TestJudgeInCommitOrder_KeepsTheOfferedOrderAcrossSenders(t *testing.T) {
 	signer := types.LatestSignerForChainID(chain.AllProtocolChanges.ChainID)
 	keyA, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	keyB, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	rlpOf := func(k *ecdsa.PrivateKey, nonce uint64) []byte {
-		tx := types.NewTransaction(nonce, common.Address{0xaa}, uint256.NewInt(0), 21000, uint256.NewInt(0), nil)
-		signed, serr := types.SignTx(tx, *signer, k)
-		require.NoError(t, serr)
-		var buf bytes.Buffer
-		require.NoError(t, signed.MarshalBinary(&buf))
-		return buf.Bytes()
-	}
-
-	// B arrives first with a HIGH nonce; A follows with a low one. B must stay first.
-	cands, bad := orderBySenderNonce([][]byte{rlpOf(keyB, 5), rlpOf(keyA, 1), rlpOf(keyB, 4)}, signer)
+	cands, bad := decodeCandidates([][]byte{signedRLP(t, signer, keyB, 4), signedRLP(t, signer, keyA, 1), signedRLP(t, signer, keyB, 5)}, signer)
 	require.Zero(t, bad)
-	require.Len(t, cands, 3)
-	addrB, aerr := signer.Sender(func() types.Transaction {
-		tx := types.NewTransaction(5, common.Address{0xaa}, uint256.NewInt(0), 21000, uint256.NewInt(0), nil)
-		signed, serr := types.SignTx(tx, *signer, keyB)
-		require.NoError(t, serr)
-		return signed
-	}())
-	require.NoError(t, aerr)
+	expected := map[accounts.Address]uint64{cands[0].sender: 4, cands[1].sender: 1}
 
-	require.Equal(t, addrB, cands[0].sender, "the sender that arrived first stays first")
-	require.Equal(t, uint64(4), cands[0].nonce, "but its own nonces are in order")
-	require.Equal(t, addrB, cands[1].sender)
-	require.Equal(t, uint64(5), cands[1].nonce)
-	require.NotEqual(t, addrB, cands[2].sender, "the later sender stays later")
+	v := judgeInCommitOrder(cands, func(a accounts.Address) uint64 { return expected[a] }, map[snKeyExec]bool{}, nil)
+
+	require.Len(t, v.kept, 3)
+	for i := range cands {
+		require.Equal(t, cands[i].hash, v.kept[i].hash)
+	}
+	require.Empty(t, v.dropped)
+}
+
+func TestJudgeInCommitOrder_ADecidedPairIsNotJudgedAgain(t *testing.T) {
+	signer := types.LatestSignerForChainID(chain.AllProtocolChanges.ChainID)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	cands, _ := decodeCandidates([][]byte{signedRLP(t, signer, key, 3), signedRLP(t, signer, key, 2)}, signer)
+	seen := map[snKeyExec]bool{}
+
+	first := judgeInCommitOrder(cands, func(accounts.Address) uint64 { return 2 }, seen, nil)
+	require.Len(t, first.kept, 1)
+	require.False(t, seen[snKeyExec{addr: cands[0].sender, nonce: 3}], "a gapped nonce is not decided, so it may be offered again")
+
+	again := judgeInCommitOrder(cands[1:], func(accounts.Address) uint64 { return 3 }, seen, nil)
+	require.Empty(t, again.kept)
+	require.Equal(t, 1, again.seen)
+}
+
+func TestOrderBySenderNonce_RestoresEachSendersSequenceAndKeepsSendersInArrivalOrder(t *testing.T) {
+	signer := types.LatestSignerForChainID(chain.AllProtocolChanges.ChainID)
+	keyA, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	keyB, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	cands, _ := decodeCandidates([][]byte{signedRLP(t, signer, keyB, 5), signedRLP(t, signer, keyA, 1), signedRLP(t, signer, keyB, 4)}, signer)
+
+	got := orderBySenderNonce(cands)
+
+	require.Equal(t, []common.Hash{cands[2].hash, cands[0].hash, cands[1].hash}, []common.Hash{got[0].hash, got[1].hash, got[2].hash})
+}
+
+func TestJudge_SenderNonceOrderKeepsARoundWhoseNoncesArriveOutOfOrder(t *testing.T) {
+	signer := types.LatestSignerForChainID(chain.AllProtocolChanges.ChainID)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	cands, _ := decodeCandidates([][]byte{signedRLP(t, signer, key, 9), signedRLP(t, signer, key, 7), signedRLP(t, signer, key, 8)}, signer)
+
+	v := judgeInCommitOrder(orderBySenderNonce(cands), func(accounts.Address) uint64 { return 7 }, map[snKeyExec]bool{}, nil)
+
+	require.Len(t, v.kept, 3)
+	require.Empty(t, v.deferred)
+}
+
+type plainAssembler struct{}
+
+func (plainAssembler) NewPayloadAttrs(context.Context, *builder.Parameters) error   { return nil }
+func (plainAssembler) AssembleBlock(context.Context, *builder.Parameters) error     { return nil }
+func (plainAssembler) GetAssembledBlock(context.Context, *builder.Parameters) error { return nil }
+
+type commitOrderAssembler struct{ plainAssembler }
+
+func (commitOrderAssembler) CommitOrderExecution() bool { return true }
+
+func TestAnAssemblerChoosesCommitOrderExecution(t *testing.T) {
+	e := &ExecModule{}
+	e.SetBlockAssembler(plainAssembler{})
+	require.False(t, e.flash.commitOrder, "an assembler that does not ask keeps sender-nonce order")
+	e.SetBlockAssembler(commitOrderAssembler{})
+	require.True(t, e.flash.commitOrder)
 }

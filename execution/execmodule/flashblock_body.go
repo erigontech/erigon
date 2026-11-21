@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -137,12 +138,13 @@ type flashBodyState struct {
 	// can tell whether a tx it is about to keep actually continues the body it is appending to. The frontier
 	// SD answers "what nonce comes next in STATE"; the two must agree, and this is what catches them
 	// disagreeing at the moment the gap is created rather than at replay time.
-	bodyNonce map[accounts.Address]uint64
-	valid     bool             // a PreExecute has validated for this in-progress block
-	built     FlashblockInputs // the header inputs the current in-progress header was built under (attrs compare)
-	hash      common.Hash      // the current in-progress header hash
-	root      common.Hash      // last pre-exec computed state root (per-round; seal recomputes the final)
-	receipts  int              // receipts accumulated across rounds (== body txs)
+	bodyNonce   map[accounts.Address]uint64
+	commitOrder bool
+	valid       bool             // a PreExecute has validated for this in-progress block
+	built       FlashblockInputs // the header inputs the current in-progress header was built under (attrs compare)
+	hash        common.Hash      // the current in-progress header hash
+	root        common.Hash      // last pre-exec computed state root (per-round; seal recomputes the final)
+	receipts    int              // receipts accumulated across rounds (== body txs)
 }
 
 // AssembleInProgress seals the CURRENT in-progress flashblock — block-end over its maintained SD (ValidateChain,
@@ -556,23 +558,8 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 	defer closeReader()
 	signer := types.LatestSignerForChainID(e.config.ChainID)
 
-	// Base nonce per sender: the frontier account nonce, advanced by whatever this in-progress body ALREADY
-	// HOLDS for that sender — those transactions execute before these.
-	//
-	// ⚠ THE BODY'S OWN NONCES WERE NOT CONSULTED. next[] is built fresh on every call, so the advancement a
-	// round made was thrown away when it returned, and the following round fell back to the frontier — which
-	// is the last SEALED block and knows nothing of the body being accumulated. Round 1 kept its 128 and set
-	// next=N+128; round 2 was offered N+128.. , compared them against N, and deferred every one as FUTURE.
-	// Measured on live356 during a 4,800-order burst: `in=128 kept=0 stale=0 future=128` round after round,
-	// drains offered 1,000-1,800 transactions and deferring nearly all of them, and blocks alternating
-	// 0, 41, 0, 156, 0, 0, 89 — one round's worth per block at best. e.flash.bodyNonce is exactly this
-	// record, maintained across rounds and rebuilt on rollback and re-open; it was only ever read by the
-	// continuity audit below.
-	next := make(map[accounts.Address]uint64)
+	// The frontier nonce, advanced by what this in-progress body already holds for the sender.
 	nextNonce := func(a accounts.Address) uint64 {
-		if n, ok := next[a]; ok {
-			return n
-		}
 		if n, ok := e.flash.bodyNonce[a]; ok {
 			return n + 1
 		}
@@ -582,34 +569,17 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 		return 0
 	}
 
-	var nStale, nFuture, nSeen int
-	cands, nBad := orderBySenderNonce(newTxRLPs, signer)
-	survivors := make([][]byte, 0, len(cands))
-	// WHICH transactions were kept, not just how many. The filter reorders by sender and nonce and keeps a
-	// SUBSET, so a caller that assumes a prefix of what it offered takes the wrong ones off its backlog and
-	// re-offers the ones already in the body — which come straight back as `seen`, forever.
-	keptHashes := make([]common.Hash, 0, len(cands))
-	// DECIDED AGAINST, as opposed to merely deferred. A stale or already-seen transaction will never be
-	// reconsidered, so the caller must stop offering it; a FUTURE one has only been told to wait for its
-	// predecessor and must keep coming back. Collapsing the two either loses transactions or loops on them.
-	droppedHashes := make([]common.Hash, 0, 8)
+	cands, nBad := decodeCandidates(newTxRLPs, signer)
+	if !e.flash.commitOrder {
+		cands = orderBySenderNonce(cands)
+	}
 	traceOn := txtrace.On()
-	for _, c := range cands {
-		rlp, s := c.rlp, c.sender
-		if traceOn && txtrace.Tracks(s.Value().String()) {
-			txtrace.Record(txtrace.ExecOffered, c.nonce, c.hash, nextNonce(s), 2)
-		}
-		k := snKeyExec{addr: s, nonce: c.nonce}
-		if e.flash.seen[k] {
-			nSeen++
-			droppedHashes = append(droppedHashes, c.hash)
-			continue // already decided (kept or dropped) — never reconsider
-		}
-		exp := nextNonce(s)
-		if c.nonce < exp {
-			e.flash.seen[k] = true
-			nStale++
-			if traceOn && txtrace.Tracks(s.Value().String()) {
+	v := judgeInCommitOrder(cands, nextNonce, e.flash.seen, func(c txCandidate, outcome judgement, exp uint64) {
+		s := c.sender
+		tracked := traceOn && txtrace.Tracks(s.Value().String())
+		switch outcome {
+		case judgedStale:
+			if tracked {
 				txtrace.Record(txtrace.ExecStale, c.nonce, c.hash, exp, 2)
 			}
 			srcKind, srcBlock := "canonical", uint64(0)
@@ -618,51 +588,30 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 			}
 			e.logger.Warn("[TRACE-filter] STALE drop", "block", e.flash.num, "sender", s,
 				"nonce", c.nonce, "exp", exp, "src", srcKind, "srcBlock", srcBlock)
-			droppedHashes = append(droppedHashes, c.hash)
-			continue // stale: already sealed on the frontier — dropped (and now remembered)
-		}
-		if c.nonce > exp {
-			// ⚠ FUTURE IS DEFERRED, NOT DECIDED — so it is NOT marked seen.
-			//
-			// It used to be, on the reasoning that the exact (sender,nonce) should not be re-judged
-			// within a block. But a future nonce has not been judged: it has been told to wait for
-			// its predecessor, and that predecessor may well land in a LATER ROUND OF THIS SAME
-			// BLOCK — the drain feeds one transaction at a time and goes back for more for the whole
-			// fill window. Marking it seen made the wait last until the next block regardless, so a
-			// sender's second transaction cost a full DAG cycle:
-			//
-			//	[intra-block] block sealed num=197 sealedTxs=1 fed=3 backlog=0
-			//	[DAG-DIAG] feedPendingToDAG poolPending=2 added=2 inFlight=0
-			//
-			// Three fed, one sealed, nothing requeued — the other two went back round through the
-			// pool and arrived a block later.
-			//
-			// Not marking it costs one map lookup and a nonce comparison per re-offer, and `seen`
-			// still stops anything DECIDED from being reconsidered.
-			if traceOn && txtrace.Tracks(s.Value().String()) {
+		case judgedFuture:
+			if tracked {
 				txtrace.Record(txtrace.ExecFuture, c.nonce, c.hash, exp, 2)
 			}
-			nFuture++
-			continue
+		case judgedKept:
+			if prev, have := e.flash.bodyNonce[s]; have && c.nonce != prev+1 {
+				e.logger.Error("[BODY-AUDIT] filter kept a tx that does not continue the body",
+					"block", e.flash.num, "sender", s, "lastInBody", prev, "keeping", c.nonce,
+					"stateNext", exp, "bodyLen", len(e.flash.body))
+			}
+			if tracked {
+				txtrace.Record(txtrace.ExecFiltered, c.nonce, c.hash, uint64(e.flash.num), 1)
+			}
+			e.flash.bodyNonce[s] = c.nonce
 		}
-		e.flash.seen[k] = true
-		// The tx passes against STATE (nonce == the frontier SD's next). Check it also continues the BODY it
-		// is being appended to: if the body already holds a lower, non-adjacent nonce for this sender, state
-		// and body have diverged — the SD applied transactions this body does not record — and appending here
-		// is what mints a body that cannot be re-executed. Log where it happens; do not silently paper over it.
-		if prev, have := e.flash.bodyNonce[s]; have && c.nonce != prev+1 {
-			e.logger.Error("[BODY-AUDIT] filter kept a tx that does not continue the body",
-				"block", e.flash.num, "sender", s, "lastInBody", prev, "keeping", c.nonce,
-				"stateNext", exp, "bodyLen", len(e.flash.body))
-		}
-		if traceOn && txtrace.Tracks(s.Value().String()) {
-			txtrace.Record(txtrace.ExecFiltered, c.nonce, c.hash, uint64(e.flash.num), 1)
-		}
-		e.flash.bodyNonce[s] = c.nonce
-		survivors = append(survivors, rlp)
+	})
+	nStale, nFuture, nSeen := v.stale, v.future, v.seen
+	survivors := make([][]byte, 0, len(v.kept))
+	keptHashes := make([]common.Hash, 0, len(v.kept))
+	for _, c := range v.kept {
+		survivors = append(survivors, c.rlp)
 		keptHashes = append(keptHashes, c.hash)
-		next[s] = exp + 1
 	}
+	droppedHashes := v.decidedAgainst(e.flash.commitOrder)
 	if nStale+nFuture+nSeen+nBad > 0 {
 		// ⚠ IS THE STREAM ORDERED? A contiguous sequence from one sender, delivered in order, must produce
 		// no future nonces at all. These name what the round was actually offered against what execution
@@ -852,43 +801,22 @@ func (e *ExecModule) frontierStateReader(ctx context.Context) (state.StateReader
 	return state.NewReaderV3(sd.AsGetter(roTx)), func() { roTx.Rollback() }, nil
 }
 
-// txCandidate is one decoded transaction awaiting a nonce verdict, with its sender resolved once.
 type txCandidate struct {
 	rlp    []byte
 	hash   common.Hash
 	sender accounts.Address
 	nonce  uint64
-	rank   int // the sender's first appearance, so senders keep the order they arrived in
 }
 
-// orderBySenderNonce decodes a round's candidates and puts EACH SENDER'S OWN transactions back into
-// nonce order, returning them and the count that could not be decoded or attributed.
-//
-// ⚠ THIS IS WHY A BURST USED TO ENTER ONE PER BLOCK.
-//
-// The batch arrives in DAG COMMIT order, which says nothing about nonces. A sender that submits N
-// and N+1 together can be offered N+1 first — and N+1 judged against a state that still expects N is
-// `future`, so it is refused, goes back round through the pool and the DAG, and lands a block later.
-// Measured on live225, one round of a four-order burst:
-//
-//	[TRACE-filter] round  block=262  in=2  kept=1  future=1
-//
-// Two consecutive nonces from one sender, one kept and one refused — which can only happen that way
-// round. Placement costs 40ms when nothing is queued behind it; those orders cost a block each.
-//
-// Senders keep their arrival order relative to each other, so this does not reorder the block between
-// parties. Only a sender's own sequence is restored, and for that the order is not a choice: a nonce
-// sequence has exactly one valid order, and presenting it in another throws away what the sender
-// already told us.
-func orderBySenderNonce(newTxRLPs [][]byte, signer *types.Signer) ([]txCandidate, int) {
+// decodeCandidates decodes a round's transactions in the order offered, counting those it cannot decode or attribute.
+func decodeCandidates(newTxRLPs [][]byte, signer *types.Signer) ([]txCandidate, int) {
 	cands := make([]txCandidate, 0, len(newTxRLPs))
-	rankOf := make(map[accounts.Address]int, len(newTxRLPs))
 	bad := 0
 	for _, rlp := range newTxRLPs {
 		tx, derr := types.DecodeTransaction(rlp)
 		if derr != nil {
 			bad++
-			continue // undecodable — drop
+			continue
 		}
 		s, ok := tx.GetSender()
 		if !ok {
@@ -898,22 +826,70 @@ func orderBySenderNonce(newTxRLPs [][]byte, signer *types.Signer) ([]txCandidate
 		}
 		if !ok {
 			bad++
-			continue // unrecoverable sender — drop
+			continue
 		}
-		r, known := rankOf[s]
-		if !known {
-			r = len(rankOf)
-			rankOf[s] = r
-		}
-		cands = append(cands, txCandidate{rlp: rlp, hash: tx.Hash(), sender: s, nonce: tx.GetNonce(), rank: r})
+		cands = append(cands, txCandidate{rlp: rlp, hash: tx.Hash(), sender: s, nonce: tx.GetNonce()})
 	}
-	sort.SliceStable(cands, func(i, j int) bool {
-		if cands[i].rank != cands[j].rank {
-			return cands[i].rank < cands[j].rank
-		}
-		return cands[i].nonce < cands[j].nonce
-	})
 	return cands, bad
+}
+
+type judgement int
+
+const (
+	judgedKept judgement = iota
+	judgedStale
+	judgedFuture
+	judgedSeen
+)
+
+type commitOrderVerdict struct {
+	kept                []txCandidate
+	dropped             []common.Hash
+	deferred            []common.Hash
+	stale, future, seen int
+}
+
+// judgeInCommitOrder judges candidates strictly in the order given, so every node reaches the same body from the
+// same commit order. A gapped nonce is deferred and left out of seen, so it may be offered again after its predecessor.
+func judgeInCommitOrder(cands []txCandidate, expected func(accounts.Address) uint64, seen map[snKeyExec]bool,
+	note func(txCandidate, judgement, uint64)) commitOrderVerdict {
+	var v commitOrderVerdict
+	next := make(map[accounts.Address]uint64)
+	expect := func(a accounts.Address) uint64 {
+		if n, ok := next[a]; ok {
+			return n
+		}
+		return expected(a)
+	}
+	for _, c := range cands {
+		k := snKeyExec{addr: c.sender, nonce: c.nonce}
+		exp := expect(c.sender)
+		outcome := judgedKept
+		switch {
+		case seen[k]:
+			outcome = judgedSeen
+			v.seen++
+		case c.nonce < exp:
+			outcome = judgedStale
+			seen[k] = true
+			v.stale++
+		case c.nonce > exp:
+			outcome = judgedFuture
+			v.future++
+			v.deferred = append(v.deferred, c.hash)
+		default:
+			seen[k] = true
+			next[c.sender] = exp + 1
+			v.kept = append(v.kept, c)
+		}
+		if outcome == judgedStale || outcome == judgedSeen {
+			v.dropped = append(v.dropped, c.hash)
+		}
+		if note != nil {
+			note(c, outcome, exp)
+		}
+	}
+	return v
 }
 
 // BuilderNonces is the highest nonce per sender that the in-progress block body already holds. The txpool
@@ -976,4 +952,31 @@ func (e *ExecModule) censusBySenderSummary(n int) string {
 		return "none"
 	}
 	return b.String()
+}
+
+// decidedAgainst names the candidates the caller must stop offering; under commit-order execution a gapped nonce
+// is among them, since its place in the order has passed.
+func (v commitOrderVerdict) decidedAgainst(commitOrder bool) []common.Hash {
+	if !commitOrder {
+		return v.dropped
+	}
+	return append(slices.Clone(v.dropped), v.deferred...)
+}
+
+// orderBySenderNonce puts each sender's transactions in nonce order, keeping senders in the order they first appear.
+func orderBySenderNonce(cands []txCandidate) []txCandidate {
+	rank := make(map[accounts.Address]int, len(cands))
+	for _, c := range cands {
+		if _, ok := rank[c.sender]; !ok {
+			rank[c.sender] = len(rank)
+		}
+	}
+	out := slices.Clone(cands)
+	sort.SliceStable(out, func(i, j int) bool {
+		if rank[out[i].sender] != rank[out[j].sender] {
+			return rank[out[i].sender] < rank[out[j].sender]
+		}
+		return out[i].nonce < out[j].nonce
+	})
+	return out
 }

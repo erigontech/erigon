@@ -62,10 +62,20 @@ type BlockAssembler interface {
 	GetAssembledBlock(ctx context.Context, params *builder.Parameters) error
 }
 
+// CommitOrderAssembler is a BlockAssembler whose ordering layer fixes the order of every round's transactions;
+// when it reports true, a round is judged in the order offered and a gapped nonce is decided against.
+type CommitOrderAssembler interface {
+	CommitOrderExecution() bool
+}
+
 // SetBlockAssembler installs the DAG-L2 boundary assembler (see BlockAssembler). Called at wiring
 // time by the cocoon node for a chain whose builder is the incremental/DAG model.
 func (e *ExecModule) SetBlockAssembler(ba BlockAssembler) {
 	e.blockAssembler = ba
+	co, ok := ba.(CommitOrderAssembler)
+	e.flash.mu.Lock()
+	e.flash.commitOrder = ok && co.CommitOrderExecution()
+	e.flash.mu.Unlock()
 }
 
 // NewPayloadAttrs forwards the CL-delivered next-block payload attributes to the DAG boundary assembler so it

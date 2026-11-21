@@ -91,12 +91,12 @@ type ValidationResult struct {
 	// transaction per block. It cannot be reconstructed from the returned body either: that is handed back
 	// BEFORE a round that does not commit is rolled back out of it.
 	RoundKept int
-	// RoundKeptHashes names them, in the order they went into the body. The filter reorders by sender and
-	// nonce and keeps a SUBSET, so the caller cannot take a prefix of what it offered.
+	// RoundKeptHashes names them, in the order they went into the body; the filter keeps a SUBSET, and unless
+	// commit-order execution is on it restores each sender's nonce order, so the caller cannot take a prefix.
 	RoundKeptHashes []common.Hash
 	// RoundDroppedHashes names the ones DECIDED AGAINST — already sealed on the frontier, or already judged
-	// in this block. They will never be reconsidered, so the caller stops offering them. Anything offered
-	// that is in neither list was DEFERRED (its nonce is ahead of the frontier) and must be offered again.
+	// in this block, and under commit-order execution also a nonce ahead of the sender's next one. Anything
+	// offered that is in neither list was deferred or not reached and must be offered again.
 	RoundDroppedHashes []common.Hash
 	// GasFull reports a round that ended because the BLOCK ran out of gas room, not because its
 	// caller stopped it. The transaction that did not fit is excluded and is the caller's to re-offer.
