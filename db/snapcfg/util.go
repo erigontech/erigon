@@ -21,13 +21,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
@@ -553,21 +556,69 @@ func GetEmbeddedWebseeds(chain string) ([]string, bool) {
 	return s, ok
 }
 
+// Webseeds returns the webseeds of the snapshot branch the manifest comes from (SNAPS_GIT_BRANCH).
+func Webseeds(ctx context.Context, chain string) ([]string, bool) {
+	return webseedsFrom(ctx, snapshotGitBranch, chain, fetchWebseeds)
+}
+
+var fetchWebseeds = func(ctx context.Context, branch, chain string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, webseedsFetchTimeout)
+	defer cancel()
+	return fetchSnapshotFile(ctx, WebseedTomlGitHubURL(branch, chain), false)
+}
+
+// webseedsFetchTimeout bounds the fetch: it runs on every startup, even when preverified.toml makes the manifest fetch unnecessary.
+const webseedsFetchTimeout = 10 * time.Second
+
+func webseedsFrom(ctx context.Context, branch, chain string, fetch func(ctx context.Context, branch, chain string) ([]byte, error)) ([]string, bool) {
+	embedded, ok := GetEmbeddedWebseeds(chain)
+	if branch == ver.DefaultSnapshotGitBranch { // the embedded list is the default branch's
+		return embedded, ok
+	}
+	b, err := fetch(ctx, branch, chain)
+	if err == nil {
+		var named map[string]string
+		if err = toml.Unmarshal(b, &named); err == nil && len(named) > 0 {
+			if err = validWebseeds(named); err == nil {
+				return slices.Sorted(maps.Values(named)), true
+			}
+		}
+	}
+	log.Warn("[snapshots] no webseed list on the snapshot branch, using the embedded one", "branch", branch, "chain", chain, "err", err)
+	return embedded, ok
+}
+
+func validWebseeds(named map[string]string) error {
+	for _, w := range named {
+		s, err := WebseedToUrl(w)
+		if err != nil {
+			return err
+		}
+		if u, err := url.Parse(s); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+			return fmt.Errorf("webseed %q is not an HTTP(S) URL with a host", w)
+		}
+	}
+	return nil
+}
+
 const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
 
 // FetchChainToml fetches a single chain's TOML file from the snapshot CDN.
 func FetchChainToml(ctx context.Context, source SnapshotSource, branch, chain string) ([]byte, error) {
-	var url string
+	url := ChainTomlGitHubURL(branch, chain)
 	if source == R2 {
 		url = ChainTomlR2URL(branch, chain)
-	} else {
-		url = ChainTomlGitHubURL(branch, chain)
 	}
+	return fetchSnapshotFile(ctx, url, source == R2)
+}
+
+// fetchSnapshotFile fetches a file of the snapshot repository, with the CDN headers for R2.
+func fetchSnapshotFile(ctx context.Context, url string, cloudflare bool) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	if source == R2 {
+	if cloudflare {
 		InsertCloudflareHeaders(req)
 	}
 	resp, err := http.DefaultClient.Do(req)
@@ -576,7 +627,7 @@ func FetchChainToml(ctx context.Context, source SnapshotSource, branch, chain st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch snapshot hashes by %q: status code %d %s", url, resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("failed to fetch %q: status code %d %s", url, resp.StatusCode, resp.Status)
 	}
 	res, err := io.ReadAll(resp.Body)
 	if err != nil {
