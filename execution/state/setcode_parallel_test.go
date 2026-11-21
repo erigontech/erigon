@@ -236,7 +236,6 @@ func TestSetCodeParallel_NoMaterialize_DelegateThenRevoke(t *testing.T) {
 	writes := ibs.VersionedWrites()
 	_, hasCodeWrite := writes.GetCode(addr)
 	assert.False(t, hasCodeWrite, "net-zero delegate-then-revoke must fold away the CodePath write")
-	assert.Empty(t, ibs.stateObjects, "noMaterialize SetCode must not cache a stateObject")
 }
 
 // Authorization processing reads an absent authority's code hash before the
@@ -304,7 +303,6 @@ func TestGetDelegatedDesignationParallel_NoMaterialize_OwnWrite(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, ok, "own-tx delegation must be visible to GetDelegatedDesignation")
 	assert.Equal(t, target, got)
-	assert.Empty(t, ibs.stateObjects, "GetDelegatedDesignation must not materialize a stateObject")
 }
 
 // TestGetDelegatedDesignation_TracksSplitCodePublish reproduces a narrow

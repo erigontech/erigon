@@ -51,27 +51,33 @@ func TestReproduceCrash(t *testing.T) {
 
 	_, tx, sd := state.NewTestRwTx(t)
 
-	txNum := uint64(1)
-	tsw := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	rules := &chain.Rules{}
+	blockNum := uint64(1)
 	tsr := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+
+	finalize := func(txNum uint64, ibs *state.IntraBlockState, msg string) {
+		writes, err := ibs.FinalizedWrites(rules)
+		require.NoError(t, err, msg)
+		require.NoError(t, state.ApplyWrites(writes, sd, tx, blockNum, txNum, false), msg)
+	}
 
 	intraBlockState := state.New(tsr)
 	defer intraBlockState.Close()
 	// Start the 1st transaction
 	require.NoError(t, intraBlockState.CreateAccount(contract, true))
-	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 1st tx")
+	finalize(1, intraBlockState, "finalising 1st tx")
 	// Start the 2nd transaction
 	require.NoError(t, intraBlockState.SetState(contract, storageKey1, *value1))
-	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 2nd tx")
+	finalize(2, intraBlockState, "finalising 2nd tx")
 	// Start the 3rd transaction
 	require.NoError(t, intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
 	require.NoError(t, intraBlockState.SetState(contract, storageKey2, *value2))
-	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 3rd tx")
+	finalize(3, intraBlockState, "finalising 3rd tx")
 	// Start the 4th transaction - clearing both storage cells
 	require.NoError(t, intraBlockState.SubBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
 	require.NoError(t, intraBlockState.SetState(contract, storageKey1, *value0))
 	require.NoError(t, intraBlockState.SetState(contract, storageKey2, *value0))
-	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 4th tx")
+	finalize(4, intraBlockState, "finalising 4th tx")
 }
 
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {

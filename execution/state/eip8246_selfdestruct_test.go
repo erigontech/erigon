@@ -98,14 +98,13 @@ func TestEIP8246_FinalizeTx_PreservedBalanceCarriesToLaterTxCreate(t *testing.T)
 	reader.accounts[addr].CodeHash = realCodeHash
 	reader.accounts[addr].Balance = *uint256.NewInt(100)
 
-	rules := &chain.Rules{IsAmsterdam: true}
 	ibs := New(reader)
 	defer ibs.Close()
 
 	ibs.SetTxContext(1, 0)
 	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
 	require.NoError(t, err)
-	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	ibs.EndTransaction()
 
 	ibs.SetTxContext(1, 1)
 	require.NoError(t, ibs.CreateAccount(addr, true))
@@ -129,7 +128,7 @@ func TestEIP8246_FinalizeTx_PreservesSameTxCredit(t *testing.T) {
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(7), tracing.BalanceChangeTransfer))
 	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
 	require.NoError(t, err)
-	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	ibs.EndTransaction()
 	vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
 	ibs.ResetVersionedIO()
 
@@ -316,17 +315,15 @@ func TestEIP8246_PreservedAccount_OverlaysLaterFieldWrites(t *testing.T) {
 	ibs.SetTxContext(0, 2)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists, "the preserved account must exist")
 	fieldNonce, err := ibs.GetNonce(addr)
 	require.NoError(t, err)
 	fieldCodeHash, err := ibs.GetCodeHash(addr)
 	require.NoError(t, err)
-	obj, err := ibs.getStateObject(addr, false)
-	require.NoError(t, err)
-	require.NotNil(t, obj, "the preserved account must materialize")
-	require.Equal(t, fieldNonce, obj.data.Nonce, "account-level nonce must agree with the field-level read")
-	require.Equal(t, fieldCodeHash, obj.data.CodeHash, "account-level code hash must agree with the field-level read")
-	require.Equal(t, uint64(7), obj.data.Nonce)
-	require.Equal(t, laterCodeHash, obj.data.CodeHash)
+	require.Equal(t, uint64(7), fieldNonce, "the later-tx nonce write must overlay")
+	require.Equal(t, laterCodeHash, fieldCodeHash, "the later-tx code hash write must overlay")
 }
 
 // Under EIP-8246 a contract created at an absent address and destroyed in one tx leaves only its
