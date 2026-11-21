@@ -1539,3 +1539,8 @@ func (w *finalStateWriter) WriteAccountStorage(address accounts.Address, _ uint6
 }
 
 func (w *finalStateWriter) CreateContract(accounts.Address) error { return nil }
+
+func TestSetVersionMapRejectsNil(t *testing.T) {
+	ibs := New(NewNoopReader())
+	require.Panics(t, func() { ibs.SetVersionMap(nil) }, "a nil version map is an invariant violation")
+}

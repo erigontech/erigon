@@ -295,11 +295,14 @@ func (ibs *IntraBlockState) CodeReadCount() int64 {
 	return ibs.codeReadCount
 }
 
-// SetVersionMap binds the IBS to a versionMap; noMaterialize follows versionMap presence.
+// SetVersionMap binds the IBS to a non-nil version map. The IBS always reads and
+// writes through a version map; a nil map is an invariant violation, not a state.
 func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
-	noMaterialize := versionMap != nil
+	if versionMap == nil {
+		panic("IntraBlockState requires a non-nil version map")
+	}
 	ibs.versionMap = versionMap
-	ibs.noMaterialize = noMaterialize
+	ibs.noMaterialize = true
 }
 
 // StateReader returns the committed-base reader. The parallel executor uses it to

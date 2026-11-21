@@ -59,7 +59,6 @@ func frameTraceTestEnv(t *testing.T) (*vm.EVM, *types.FrameTransaction) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
 	ibs := state.New(state.NewNoopReader())
-	ibs.SetVersionMap(nil)
 	t.Cleanup(ibs.Close)
 	ibs.SetTxContext(1, 0)
 	sender, target := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
