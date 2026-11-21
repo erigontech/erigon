@@ -19,6 +19,7 @@ package logger
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"maps"
 	"slices"
 
@@ -55,6 +56,27 @@ type JsonStreamLogger struct {
 	locations common.Hashes // For sorting
 	storage   map[accounts.Address]Storage
 	env       *tracing.VMContext
+
+	// The last captured step is written at the next event, so that a halt found while its
+	// opcode runs (OnFaultV2) can still mark it. What the opcode may change before then is
+	// kept from the capture: the stack encoding, and copies of memory and return data.
+	pending    pendingStep
+	memory     []byte
+	returnData []byte
+}
+
+type pendingStep struct {
+	ok       bool
+	pc       uint64
+	op       vm.OpCode
+	gas      mdgas.MdGas
+	cost     mdgas.MdGasCost
+	depth    int
+	refund   uint64
+	err      error
+	stack    []byte // the stack.encode result, valid until the next step is captured
+	contract accounts.Address
+	storage  bool
 }
 
 // NewStructLogger returns a new logger
@@ -78,6 +100,7 @@ func (l *JsonStreamLogger) Tracer() *tracers.Tracer {
 			OnSystemCallStartV2: l.OnSystemCallStartV2,
 			OnExitV2:            l.OnExitV2,
 			OnOpcodeV2:          l.OnOpcodeV2,
+			OnFaultV2:           l.OnFaultV2,
 		},
 	}
 }
@@ -141,7 +164,16 @@ func (l *JsonStreamLogger) writeWord(word []byte) {
 }
 
 func (l *JsonStreamLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
+	l.writePending()
 	l.writePrologueOnce()
+}
+
+// OnFaultV2 marks the pending step with the exceptional halt of its opcode. A REVERT that
+// completes also ends with an error here, but it is not a halt.
+func (l *JsonStreamLogger) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, depth int, err error) {
+	if p := &l.pending; p.pc == pc && p.op == vm.OpCode(op) && p.depth == depth && !errors.Is(err, vm.ErrExecutionReverted) {
+		p.err = err
+	}
 }
 
 // writePrologueOnce opens the response object and the structLogs array. Every
@@ -159,6 +191,7 @@ func (l *JsonStreamLogger) writePrologueOnce() {
 
 // OnOpcodeV2 also tracks SLOAD/SSTORE ops to track storage change.
 func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
+	l.writePending()
 	contractAddr := scope.Address()
 	memory := scope.MemoryData()
 	stack := scope.StackData()
@@ -204,6 +237,35 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost
 			outputStorage = true
 		}
 	}
+	l.pending = pendingStep{
+		ok: true, pc: pc, op: op, gas: gas, cost: cost, depth: depth,
+		refund: l.env.IntraBlockState.GetRefund(), err: err, contract: contractAddr, storage: outputStorage,
+	}
+	if !l.cfg.DisableStack {
+		l.pending.stack = l.stack.encode(stack)
+	}
+	if l.cfg.EnableMemory {
+		l.memory = append(l.memory[:0], memory...)
+	}
+	if l.cfg.EnableReturnData {
+		l.returnData = append(l.returnData[:0], rData...)
+	}
+}
+
+// writePending writes the entry of the pending step, if any. The storage of its contract
+// changes only when a later step is captured, so it is read here.
+func (l *JsonStreamLogger) writePending() {
+	p := &l.pending
+	if !p.ok {
+		return
+	}
+	p.ok = false
+	pc, op, gas, cost, depth, refund, err, stack := p.pc, p.op, p.gas, p.cost, p.depth, p.refund, p.err, p.stack
+	memory, rData, contractAddr, outputStorage := l.memory, l.returnData, p.contract, p.storage
+	if err != nil {
+		// A step that halts exceptionally reports no cost.
+		cost = mdgas.MdGasCost{}
+	}
 	// create a new snapshot of the EVM.
 	l.stream.WriteObjectStart()
 	l.stream.Field("pc")
@@ -224,7 +286,6 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost
 	}
 	l.stream.Field("depth")
 	l.stream.Int(int64(depth))
-	refund := l.env.IntraBlockState.GetRefund()
 	if refund != 0 {
 		l.stream.Field("refund")
 		l.stream.Uint(refund)
@@ -236,7 +297,7 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost
 	}
 	if !l.cfg.DisableStack {
 		l.stream.Field("stack")
-		l.stream.WriteRawBytes(l.stack.encode(stack))
+		l.stream.WriteRawBytes(stack)
 	}
 	if l.cfg.EnableMemory && len(memory) > 0 {
 		l.stream.Field("memory")
