@@ -18,6 +18,7 @@ package rpchelper
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -69,6 +70,15 @@ func newExecutedChainTx(t *testing.T) kv.TemporalRwTx {
 	require.NoError(t, rawdb.WriteHeaderNumber(tx, sideHash, 2))
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 3))
 	return tx
+}
+
+type failingBlockReader struct {
+	rawdbBlockReader
+	err error
+}
+
+func (r failingBlockReader) CanonicalHash(context.Context, kv.Getter, uint64) (common.Hash, bool, error) {
+	return common.Hash{}, false, r.err
 }
 
 func TestResolveExecutedBlock(t *testing.T) {
@@ -160,4 +170,15 @@ func TestResolveExecutedBlockReadsOnlyGivenTx(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(5), number)
 	require.True(t, latest)
+}
+
+func TestResolveExecutedBlockKeepsReaderError(t *testing.T) {
+	tx := newExecutedChainTx(t)
+	readerErr := errors.New("block reader failure")
+
+	_, _, _, err := ResolveExecutedBlock(t.Context(), true, byNumber(2), tx, failingBlockReader{err: readerErr})
+	require.ErrorIs(t, err, readerErr)
+	require.NotErrorAs(t, err, &rpc.BlockNotFoundErr{})
+	var notExecuted *BlockNotExecutedError
+	require.NotErrorAs(t, err, &notExecuted)
 }
