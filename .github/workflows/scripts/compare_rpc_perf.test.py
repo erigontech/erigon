@@ -447,7 +447,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("errors in a fan-out measure make the client err", row == ["500", "5.00*", "err", "dead", "🟢"], md)
     check("a measure with copies per class has no overview row of its own",
           "eth_subscribe_classes newHeads fan-out 500" not in " ".join(md.split()), md)
-    check("the latency measures have no overview row", "newHeads latency" not in md, md)
+    check("the latency copies per class have no overview row", "newHeads latency" not in md, md)
     md90 = mod.render_overview(mod.overview_results(res), "p90")
     check("the p90 overview has the fan-out rows",
           fanout_row(md90, "eth_subscribe_classes newHeads fan-out wallet", "500")[:3] == ["500", "30.00", "15.00*"], md90)
@@ -455,6 +455,23 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the fan-out measures have no details section of their own", details.count("<details>") == 1, details)
     check("a dead client shows only the first line of its error",
           "| 500 | reth | dead: dial: bad handshake | | | | |" in details, details)
+
+# --- eth_subscribe: newHeads latency gets one overview row, for all the classes ---
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "newHeads latency": api(2087, 3384, 3500, 1000, p90_ms=3300),
+        "newHeads latency wallet": api(2087, 3384, 3500, 900, p90_ms=3300),
+        "logs latency dapp": api(3086, 3485, 3500, 60, p90_ms=3400)})]}])
+    write_result(tmp, "geth", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "newHeads latency": api(1971, 3295, 3450, 1000, p90_ms=3200),
+        "newHeads latency wallet": api(1971, 3295, 3450, 900, p90_ms=3200),
+        "logs latency dapp": api(2982, 3432, 3450, 60, p90_ms=3400)})]}])
+    md = mod.render_overview(mod.overview_results(mod.load_results(tmp)), "p50")
+    check("newHeads latency has one overview row",
+          fanout_row(md, "eth_subscribe_classes newHeads latency", "500") == ["500", "2087.00", "1971.00*", "🟡"], md)
+    check("the newHeads latency copies per class have no overview row", "newHeads latency wallet" not in md, md)
+    check("the logs and receipts latency measures have no overview row", "logs latency" not in md, md)
 
 # --- eth_subscribe: the vs first newHeads rows get an overview row, the vs newHeads rows do not ---
 

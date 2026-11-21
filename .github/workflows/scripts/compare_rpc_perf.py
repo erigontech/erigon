@@ -10,7 +10,9 @@ The fan-out measures of eth_subscribe (how long the node takes to send one notif
 to every connection) and its vs first newHeads measures (how long after the first head of the
 block a log or receipt of the block reaches a connection) also get overview rows, one per client
 class when the pattern has them, since the latency of the test itself is mostly the block import
-time, the same for all clients. The vs newHeads measures (after the head on the same connection)
+time. The newHeads latency (from the block timestamp, so with the consensus
+client and the block execution) gets one overview row for all the classes: it is the wait a user sees.
+The vs newHeads measures (after the head on the same connection)
 are only in the class table: a node that sends the heads late looks fast there. The receipts measures of a client that sends the receipts of a block one
 notification each, instead of one list per block, are marked with !.
 A test whose pattern splits the connections into client classes gets, after the overviews,
@@ -102,15 +104,21 @@ def load_apis(repetitions):
     return apis
 
 
+# All the classes get the head of a block at the same time, so the overview has only the row of all the connections.
+NEWHEADS_LATENCY = "newHeads latency"
+
+
 def overview_results(results):
-    """Add to the results a test per fan-out or vs first newHeads measure, as "<label> <measure>", for the overview only."""
+    """Add to the results a test per fan-out or vs first newHeads measure and one for newHeads latency,
+    as "<label> <measure>", for the overview only."""
     out = dict(results)
     for label, clients in results.items():
         names = {n for steps in clients.values() for s in steps.values() for n in s.get("apis", {})
                  if "fan-out" in n or "vs first newHeads" in n}
-        for name in names:
-            if any(other.startswith(name + " ") for other in names):
-                continue
+        picked = [n for n in names if not any(other.startswith(n + " ") for other in names)]
+        if any(NEWHEADS_LATENCY in s.get("apis", {}) for steps in clients.values() for s in steps.values()):
+            picked.append(NEWHEADS_LATENCY)
+        for name in picked:
             out[f"{label} {name}"] = {c: {qps: measure_step(s, name) for qps, s in steps.items()}
                                       for c, steps in clients.items()}
     return out
