@@ -25,6 +25,7 @@ const acceptedWorkflows = [
     '.github/workflows/qa-txpool-performance-test.yml',
     '.github/workflows/test-all-erigon-race.yml',
     '.github/workflows/test-hive.yml',
+    '.github/workflows/test-hive-eest.yml',
     '.github/workflows/test-fuzz.yml',
     '.github/workflows/test-integration-caplin.yml',
     '.github/workflows/test-kurtosis-assertoor.yml'
@@ -273,6 +274,7 @@ export async function run() {
                         owner,
                         repo,
                         run_id: run.id,
+                        per_page: 100,
                     });
 
                     // Iterate through the jobs in the workflow run
