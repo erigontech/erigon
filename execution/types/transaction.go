@@ -116,6 +116,11 @@ func (t *TransactionMisc) cachedSender() (sender accounts.Address, ok bool) {
 	return s, true
 }
 
+// SetCachedHash stores a hash known to match the transaction, so Hash() skips the keccak.
+func (t *TransactionMisc) SetCachedHash(h common.Hash) {
+	t.hash.Store(&h)
+}
+
 func (t *TransactionMisc) GetSender() (accounts.Address, bool) {
 	return t.cachedSender()
 }

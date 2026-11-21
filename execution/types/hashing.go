@@ -174,6 +174,40 @@ func TransactionHashFromEncoding(enc []byte) (common.Hash, error) {
 	return crypto.Keccak256Hash(binary), nil
 }
 
+// TxnEncodings collects the stored encodings of a block's transactions, so their hashes are
+// computed in one batch instead of by a re-encode per Hash() call.
+type TxnEncodings struct {
+	buf  []byte
+	ends []int
+}
+
+// Add copies the hashed part of stored, the encoding of the next transaction.
+func (e *TxnEncodings) Add(stored []byte) error {
+	binary, err := BinaryFromStoredTxn(stored)
+	if err != nil {
+		return err
+	}
+	e.buf = append(e.buf, binary...)
+	e.ends = append(e.ends, len(e.buf))
+	return nil
+}
+
+// CacheHashes sets the cached hash of txs[i] to the hash of the i-th added encoding.
+func (e *TxnEncodings) CacheHashes(txs []Transaction) {
+	msgs := make([][]byte, len(e.ends))
+	start := 0
+	for i, end := range e.ends {
+		msgs[i], start = e.buf[start:end], end
+	}
+	hashes := make([][32]byte, len(msgs))
+	crypto.Keccak256Many(msgs, hashes)
+	for i, txn := range txs[:len(hashes)] {
+		if c, ok := txn.(interface{ SetCachedHash(common.Hash) }); ok {
+			c.SetCachedHash(hashes[i])
+		}
+	}
+}
+
 func RlpHash(x any) common.Hash {
 	sha := crypto.NewKeccakState()
 	rlp.Encode(sha, x) //nolint:errcheck

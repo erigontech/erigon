@@ -826,7 +826,7 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
 	return readBody(ctx, r, tx, hash, blockHeight, rawdb.ReadBodyWithTransactions,
 		func(body *types.Body, baseTxnID uint64, txCount uint32, txnSeg *snapshotsync.VisibleSegment, buf []byte) (*types.Body, error) {
-			txs, senders, err := r.txsFromSnapshot(baseTxnID, txCount, txnSeg, buf)
+			txs, senders, err := r.txsFromSnapshot(baseTxnID, txCount, txnSeg, buf, false)
 			if err != nil || txs == nil {
 				return nil, err
 			}
@@ -997,7 +997,13 @@ func (r *BlockReader) HasSenders(ctx context.Context, tx kv.Getter, hash common.
 }
 
 func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
-	return r.blockWithSenders(ctx, tx, hash, blockHeight, false)
+	return r.blockWithSenders(ctx, tx, hash, blockHeight, false, false)
+}
+
+// BlockWithSendersAndTxnHashes is BlockWithSenders for callers that read every txn hash: a txn
+// read from the files gets its hash from the stored encoding instead of a re-encode on Hash().
+func (r *BlockReader) BlockWithSendersAndTxnHashes(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
+	return r.blockWithSenders(ctx, tx, hash, blockHeight, false, true)
 }
 
 func (r *BlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.BodyForStorage, error) {
@@ -1018,7 +1024,7 @@ func (r *BlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter,
 	return b, err
 }
 
-func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []common.Address, err error) {
+func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64, forceCanonical, txnHashes bool) (block *types.Block, senders []common.Address, err error) {
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
 	if dbgLogs {
@@ -1040,7 +1046,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			}
 		}
 
-		block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
+		block, senders, err = rawdb.ReadBlockWithSendersOpt(tx, hash, blockHeight, txnHashes)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1082,7 +1088,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		if dbgLogs {
 			log.Info(dbgPrefix + fmt.Sprintf("requested hash does not match header %x held at this height", h.Hash()))
 		}
-		return rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
+		return rawdb.ReadBlockWithSendersOpt(tx, hash, blockHeight, txnHashes)
 	}
 
 	var b *types.Body
@@ -1115,7 +1121,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			err = fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailableInView=%d", blockHeight, maxBlockNumInFiles)
 			return nil, nil, err
 		}
-		txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf)
+		txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf, txnHashes)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1292,9 +1298,10 @@ func BodyForStorageFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegm
 	return b, buf, nil
 }
 
-func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSegment, buf []byte) (txs []types.Transaction, senders []common.Address, err error) {
+func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSegment, buf []byte, txnHashes bool) (txs []types.Transaction, senders []common.Address, err error) {
 	txs = make([]types.Transaction, txCount)
 	senders = make([]common.Address, txCount)
+	var encodings types.TxnEncodings
 	ok, err := frozenTxns(baseTxnID, txCount, txsSeg, buf, func(i uint32, sender, txRlp []byte) error {
 		senders[i].SetBytes(sender)
 		var err error
@@ -1302,10 +1309,16 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 			return err
 		}
 		txs[i].SetSender(accounts.InternAddress(senders[i]))
+		if txnHashes {
+			return encodings.Add(txRlp)
+		}
 		return nil
 	})
 	if err != nil || !ok {
 		return nil, nil, err
+	}
+	if txnHashes {
+		encodings.CacheHashes(txs)
 	}
 	return txs, senders, nil
 }
@@ -1659,7 +1672,7 @@ func (r *BlockReader) CurrentBlock(tx kv.Tx) (*types.Block, error) {
 	if headNumber == nil {
 		return nil, nil
 	}
-	block, _, err := r.blockWithSenders(context.Background(), tx, headHash, *headNumber, true)
+	block, _, err := r.blockWithSenders(context.Background(), tx, headHash, *headNumber, true, false)
 	return block, err
 }
 
