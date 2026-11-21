@@ -156,7 +156,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	}
 
 	if (storedHash == common.Hash{}) {
-		block, err1 := write(tx, genesis, dirs, logger)
+		block, err1 := write(tx, genesis)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -338,7 +338,7 @@ func headTimestamp(tx kv.Tx, hash common.Hash, number uint64, chainName string, 
 	return head.Time, nil
 }
 
-func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, error) {
+func WriteGenesisState(g *types.Genesis) (*types.Block, error) {
 	block, statedb, err := GenesisToBlock(g)
 	if err != nil {
 		return nil, err
@@ -358,13 +358,13 @@ func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 	return block, nil
 }
 
-func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger log.Logger) *types.Block {
+func MustCommitGenesis(g *types.Genesis, db kv.RwDB) *types.Block {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		panic(err)
 	}
 	defer tx.Rollback()
-	block, err := write(tx, g, dirs, logger)
+	block, err := write(tx, g)
 	if err != nil {
 		panic(err)
 	}
@@ -377,8 +377,8 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger l
 
 // Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, error) {
-	block, err := WriteGenesisState(g, dirs, logger)
+func write(tx kv.RwTx, g *types.Genesis) (*types.Block, error) {
+	block, err := WriteGenesisState(g)
 	if err != nil {
 		return block, err
 	}
@@ -506,12 +506,8 @@ func GenesisState(g *types.Genesis, head *types.Header) (*state.IntraBlockState,
 		if err != nil {
 			return nil, nil, err
 		}
-		storage := account.Storage
-		if len(account.Constructor) > 0 {
-			storage = nil // the constructor's CreateAccount wipes the alloc storage
-		}
 		var slotVal uint256.Int
-		for key, value := range storage {
+		for key, value := range account.Storage {
 			slotVal.SetBytes(value[:])
 			err = statedb.SetState(address, accounts.InternKey(key), slotVal)
 			if err != nil {
@@ -522,6 +518,20 @@ func GenesisState(g *types.Genesis, head *types.Header) (*state.IntraBlockState,
 		if len(account.Constructor) > 0 {
 			if _, err := protocol.SysCreate(address, account.Constructor, g.Config, statedb, head); err != nil {
 				return nil, nil, err
+			}
+			// The constructor reads the alloc storage, but deploys over a fresh account:
+			// only the slots it changed stay.
+			for key, value := range account.Storage {
+				slotVal.SetBytes(value[:])
+				cur, err := statedb.GetState(address, accounts.InternKey(key))
+				if err != nil {
+					return nil, nil, err
+				}
+				if cur == slotVal {
+					if err := statedb.SetState(address, accounts.InternKey(key), uint256.Int{}); err != nil {
+						return nil, nil, err
+					}
+				}
 			}
 		}
 

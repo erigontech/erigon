@@ -2871,7 +2871,8 @@ func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 }
 
 // BurnSelfDestructs makes every self-destruct of this state delete its account, also one
-// that ran with balance-preserving (EIP-8246) rules. Genesis finalizes without EIP-8246.
+// that ran with balance-preserving (EIP-8246) rules. For genesis only, which finalizes
+// without EIP-8246: a block keeps the balance that EIP-8246 preserves.
 func (ibs *IntraBlockState) BurnSelfDestructs() {
 	for addr, sd := range ibs.versionedWrites.SelfDestructs() {
 		if b, ok := ibs.versionedWrites.GetBalance(addr); sd.Val && ok && !b.Deletes() {
