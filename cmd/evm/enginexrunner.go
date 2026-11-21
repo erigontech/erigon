@@ -46,8 +46,8 @@ var engineXTestCommand = cli.Command{
 	Name:      "enginextest",
 	Usage:     "Executes engine-x test fixtures using the existing EngineXTestRunner",
 	ArgsUsage: "<path>",
-	Description: "Each test runs in its own short-lived Erigon node whose datadir lives\n" +
-		"under $TMPDIR (default /tmp). On a journaled filesystem like ext4 the\n" +
+	Description: "Tests with the same fork and pre-alloc hash share a short-lived Erigon\n" +
+		"node whose datadir lives under $TMPDIR (default /tmp). On a journaled filesystem like ext4 the\n" +
 		"per-tester create/unlink work serialises through the journal and\n" +
 		"dominates wall time. Pointing $TMPDIR at a RAM-backed filesystem cuts\n" +
 		"wall time by ~2× on Linux. Easiest cross-platform setup:\n" +
@@ -87,10 +87,15 @@ type engineXNamedTest struct {
 	file   string
 	offset int64
 	size   int
+	raw    json.RawMessage // the test itself, from a file that cannot be read again, such as a pipe
 }
 
 func (t engineXNamedTest) definition() (engineapitester.EngineXTestDefinition, error) {
 	var def engineapitester.EngineXTestDefinition
+	if t.raw != nil {
+		err := json.Unmarshal(t.raw, &def)
+		return def, err
+	}
 	f, err := os.Open(t.file)
 	if err != nil {
 		return def, err
@@ -198,11 +203,19 @@ func engineXTestCmd(ctx context.Context, cliCtx *cli.Command) error {
 	resultCh := make(chan testResult, totalTests)
 
 	timeIt := cliCtx.Bool(TimeFlag.Name)
-	var wg sync.WaitGroup
+	var (
+		wg       sync.WaitGroup
+		readMu   sync.Mutex
+		readErrs []error
+	)
 	for w := uint64(0); w < workers; w++ {
 		wg.Go(func() {
 			for key := range groupCh {
-				runEngineXGroup(ctx, runner, key, groups[key], timeIt, resultCh)
+				if err := runEngineXGroup(ctx, runner, key, groups[key], timeIt, resultCh); err != nil {
+					readMu.Lock()
+					readErrs = append(readErrs, err)
+					readMu.Unlock()
+				}
 			}
 		})
 	}
@@ -234,7 +247,7 @@ func engineXTestCmd(ctx context.Context, cliCtx *cli.Command) error {
 	if timeIt {
 		printTimings(results)
 	}
-	return nil
+	return errors.Join(readErrs...)
 }
 
 // printTimings writes per-test wall-time to stderr sorted descending by Time.
@@ -265,8 +278,8 @@ func printTimings(results []testResult) {
 // Files under any pre_alloc/ directory are skipped: those are pre-allocation
 // inputs (consumed via --pre-alloc-dir), not test fixtures, and they don't
 // follow the engine-x JSON schema. Every other JSON in the tree is expected
-// to be a valid engine-x fixture: malformed JSON is a hard failure, and a test
-// whose body does not decode fails when it runs.
+// to be a valid engine-x fixture; a test that does not decode, also one the
+// filter skips, is a hard failure rather than silently skipped.
 func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]engineXNamedTest, int, error) {
 	files, err := collectFiles(path)
 	if err != nil {
@@ -278,19 +291,29 @@ func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]en
 		if isUnderPreAlloc(fname) {
 			continue
 		}
-		err := decodeFixtures(fname, func(name string, raw json.RawMessage, offset int64) error {
-			if !re.MatchString(name) {
-				return nil
+		info, err := os.Stat(fname)
+		if err != nil {
+			return nil, 0, err
+		}
+		err = decodeFixtures(fname, func(name string, dec *json.Decoder) error {
+			var raw json.RawMessage
+			if err := dec.Decode(&raw); err != nil {
+				return err
 			}
-			var def struct {
-				Fork         engineapitester.Fork         `json:"network"`
-				PreAllocHash engineapitester.PreAllocHash `json:"preHash"`
-			}
+			offset := dec.InputOffset() - int64(len(raw))
+			var def engineapitester.EngineXTestDefinition
 			if err := json.Unmarshal(raw, &def); err != nil {
 				return err
 			}
+			if !re.MatchString(name) {
+				return nil
+			}
+			test := engineXNamedTest{name: name, file: fname, offset: offset, size: len(raw)}
+			if !info.Mode().IsRegular() {
+				test.raw = raw
+			}
 			key := engineXGroupKey{fork: def.Fork, hash: def.PreAllocHash}
-			groups[key] = append(groups[key], engineXNamedTest{name: name, file: fname, offset: offset, size: len(raw)})
+			groups[key] = append(groups[key], test)
 			total++
 			return nil
 		})
@@ -325,7 +348,7 @@ func runEngineXGroup(
 	tests []engineXNamedTest,
 	timeIt bool,
 	resultCh chan<- testResult,
-) {
+) (readErr error) {
 	defer func() {
 		err := runner.Evict(key.fork, key.hash)
 		if err != nil {
@@ -342,6 +365,9 @@ func runEngineXGroup(
 		// re-executing.
 		testCtx := engineapitester.ContextWithTestName(ctx, t.name)
 		def, err := t.definition()
+		if err != nil && readErr == nil {
+			readErr = fmt.Errorf("test %s: %w", t.name, err)
+		}
 		if err == nil && timeIt {
 			var stats execStats
 			_, stats, err = timedExec(false, func() ([]byte, uint64, error) {
@@ -359,6 +385,7 @@ func runEngineXGroup(
 		}
 		resultCh <- r
 	}
+	return readErr
 }
 
 // safeFilenameRe matches characters that are unsafe in filenames across

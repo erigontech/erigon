@@ -312,12 +312,13 @@ type fixture interface {
 func runFixtures(ctx *cli.Command, fname string, filter testFilter, reportPath func(ethconfig.BlockExecutionPath), newTest func() (fixture, *testutil.BlockTest)) ([]testResult, error) {
 	results := []testResult{}
 	var unreadable []error
-	err := decodeFixtures(fname, func(name string, raw json.RawMessage, _ int64) error {
+	err := decodeFixtures(fname, func(name string, dec *json.Decoder) error {
 		if !filter.includeCase(fname, name) {
-			return nil
+			var skipped json.RawMessage
+			return dec.Decode(&skipped)
 		}
 		test, bt := newTest()
-		if err := json.Unmarshal(raw, test); err != nil {
+		if err := dec.Decode(test); err != nil {
 			results = append(results, unreadableFixture(name, err))
 			unreadable = append(unreadable, fmt.Errorf("fixture %s: %w", name, err))
 			return nil
