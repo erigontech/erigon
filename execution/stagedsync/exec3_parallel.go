@@ -2740,10 +2740,8 @@ type addrReader struct {
 	paths uint16
 }
 
-// A path of 16 or more would make pathBit 0 and hide its readers from every writer.
+// A path of 16 or more would make its path bit 0 and hide its readers from every writer.
 const _ uint16 = 1 << state.CreateContractPath
-
-func pathBit(p state.AccountPath) uint16 { return 1 << p }
 
 func cmpReaderTx(r addrReader, tx int) int { return cmp.Compare(r.tx, tx) }
 
@@ -2767,33 +2765,18 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet, addr
 	if ws == nil {
 		return
 	}
-	if addrs != nil {
-		for _, e := range addrs {
-			be.markAddrReadersDirty(writerTx, ws, e.Addr, e.Paths)
+	if addrs == nil {
+		addrs = ws.AddrPaths()
+	}
+	for _, e := range addrs {
+		readers := readersAbove(be.readerByAddr[e.Addr], writerTx)
+		if len(readers) == 0 || be.versionMap.WritesAlreadySeeded(e.Addr, ws) {
+			continue
 		}
-		return
-	}
-	written := map[accounts.Address]uint16{}
-	for h := range ws.AllHeaders() {
-		if h.Path.AffectsAccountLifecycle() {
-			written[h.Address] = ^uint16(0) // invalidates a read of any path at the address
-		} else {
-			written[h.Address] |= pathBit(h.Path)
-		}
-	}
-	for addr, paths := range written {
-		be.markAddrReadersDirty(writerTx, ws, addr, paths)
-	}
-}
-
-func (be *blockExecutor) markAddrReadersDirty(writerTx int, ws *state.WriteSet, addr accounts.Address, paths uint16) {
-	readers := readersAbove(be.readerByAddr[addr], writerTx)
-	if len(readers) == 0 || be.versionMap.WritesAlreadySeeded(addr, ws) {
-		return
-	}
-	for _, r := range readers {
-		if r.paths&paths != 0 && !be.revalidate[r.tx] && be.blockIO.ReadSet(be.tasks[r.tx].Task.Version().TxIndex).DependsOnAt(ws, addr) {
-			be.revalidate[r.tx] = true
+		for _, r := range readers {
+			if r.paths&e.Paths != 0 && !be.revalidate[r.tx] && be.blockIO.ReadSet(be.tasks[r.tx].Task.Version().TxIndex).DependsOnAt(ws, e.Addr) {
+				be.revalidate[r.tx] = true
+			}
 		}
 	}
 }
