@@ -144,7 +144,7 @@ func loadZkevmWitnesses(files []string) (map[zkevmWitnessKey]*testutil.ExpectedW
 	differs := make(map[zkevmWitnessKey]bool)
 	tm := newZkevmFailMatcher()
 	for _, fname := range files {
-		err := decodeFixtures(fname, func(name string, raw json.RawMessage) error {
+		err := decodeFixtures(fname, func(name string, dec *json.Decoder) error {
 			excluded := tm.CheckFailureForName(filepath.ToSlash(fname)+"/"+name, nil) != nil
 			var test struct {
 				Network string
@@ -155,7 +155,7 @@ func loadZkevmWitnesses(files []string) (map[zkevmWitnessKey]*testutil.ExpectedW
 					Witness         *testutil.ExpectedWitness `json:"executionWitness"`
 				}
 			}
-			if err := json.Unmarshal(raw, &test); err != nil {
+			if err := dec.Decode(&test); err != nil {
 				return err
 			}
 			for _, block := range test.Blocks {
@@ -284,14 +284,15 @@ func runZkevmTestsParallel(root string, files []string, re *regexp.Regexp, witne
 func runZkevmTestFile(root, fname string, re *regexp.Regexp, witnesses map[zkevmWitnessKey]*testutil.ExpectedWitness) ([]testResult, error) {
 	relPath := relName(root, fname)
 	var results []testResult
-	err := decodeFixtures(fname, func(key string, raw json.RawMessage) error {
+	err := decodeFixtures(fname, func(key string, dec *json.Decoder) error {
+		// Decode a test the filter skips too: a fixture that does not decode fails the file.
+		test := new(testutil.WitnessBlockTest)
+		if err := dec.Decode(test); err != nil {
+			return err
+		}
 		name := relPath + "/" + key
 		if !re.MatchString(name) {
 			return nil
-		}
-		test := new(testutil.WitnessBlockTest)
-		if err := json.Unmarshal(raw, test); err != nil {
-			return err
 		}
 		result := testResult{Name: name, Pass: true}
 		if err := runWitnessTest(test, witnesses, name); err != nil {
@@ -310,8 +311,9 @@ func runZkevmTestFile(root, fname string, re *regexp.Regexp, witnesses map[zkevm
 
 // decodeFixtures streams the fixtures of fname to fn one at a time: some
 // fixture files are hundreds of MB, and decoding a whole file at once would
-// keep every fixture of every worker's current file in memory.
-func decodeFixtures(fname string, fn func(name string, raw json.RawMessage) error) error {
+// keep every fixture of every worker's current file in memory. fn must decode
+// exactly one value from dec, the fixture.
+func decodeFixtures(fname string, fn func(name string, dec *json.Decoder) error) error {
 	f, err := os.Open(fname)
 	if err != nil {
 		return err
@@ -329,16 +331,16 @@ func decodeFixtures(fname string, fn func(name string, raw json.RawMessage) erro
 		if err != nil {
 			return err
 		}
-		if _, ok := seen[tok.(string)]; ok {
-			return fmt.Errorf("duplicate fixture %s", tok)
+		name, ok := tok.(string)
+		if !ok {
+			return errors.New("not a JSON object of fixtures")
 		}
-		seen[tok.(string)] = struct{}{}
-		var raw json.RawMessage
-		if err := dec.Decode(&raw); err != nil {
-			return err
+		if _, ok := seen[name]; ok {
+			return fmt.Errorf("duplicate fixture %s", name)
 		}
-		if err := fn(tok.(string), raw); err != nil {
-			return fmt.Errorf("fixture %s: %w", tok, err)
+		seen[name] = struct{}{}
+		if err := fn(name, dec); err != nil {
+			return fmt.Errorf("fixture %s: %w", name, err)
 		}
 	}
 	if _, err := dec.Token(); err != nil {

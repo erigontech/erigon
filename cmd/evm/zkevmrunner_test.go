@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -51,14 +52,14 @@ func TestDecodeFixturesRejectsTrailingData(t *testing.T) {
 	for _, trailer := range []string{` {"second":{}}`, ` garbage`} {
 		path := filepath.Join(t.TempDir(), "fixtures.json")
 		require.NoError(t, os.WriteFile(path, []byte(`{"first":{}}`+trailer), 0o600))
-		require.Error(t, decodeFixtures(path, func(string, json.RawMessage) error { return nil }), trailer)
+		require.Error(t, decodeFixtures(path, func(_ string, dec *json.Decoder) error { var raw json.RawMessage; return dec.Decode(&raw) }), trailer)
 	}
 }
 
 func TestDecodeFixturesRejectsDuplicateNames(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fixtures.json")
 	require.NoError(t, os.WriteFile(path, []byte(`{"a":{},"a":{}}`), 0o600))
-	require.Error(t, decodeFixtures(path, func(string, json.RawMessage) error { return nil }))
+	require.Error(t, decodeFixtures(path, func(_ string, dec *json.Decoder) error { var raw json.RawMessage; return dec.Decode(&raw) }))
 }
 
 func TestLoadZkevmWitnessesKeepsReferenceWhenExcludedFixtureDiffers(t *testing.T) {
@@ -77,4 +78,21 @@ func TestLoadZkevmWitnessesKeepsReferenceWhenExcludedFixtureDiffers(t *testing.T
 	witnesses, err := loadZkevmWitnesses([]string{valid, excluded})
 	require.NoError(t, err)
 	require.Equal(t, []hexutil.Bytes{{1}}, witnesses[zkevmWitnessKey{"Amsterdam", hash}].State)
+}
+
+// A fixture the filter skips still has to decode: a fixture that does not decode
+// fails the file.
+func TestRunZkevmTestFileDecodesFilteredFixtures(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fixtures.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"bad": {"network":"Amsterdam","genesisBlockHeader":{"gasLimit":"zz"}}}`), 0o600))
+	_, err := runZkevmTestFile(dir, path, regexp.MustCompile("^none$"), nil)
+	require.ErrorContains(t, err, "fixture bad")
+}
+
+// A callback that does not decode the fixture gets an error, not a panic.
+func TestDecodeFixturesRejectsUnconsumedFixture(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fixtures.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"a":{},"b":{}}`), 0o600))
+	require.Error(t, decodeFixtures(path, func(string, *json.Decoder) error { return nil }))
 }
