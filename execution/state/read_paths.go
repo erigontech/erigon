@@ -1641,35 +1641,6 @@ func readAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Account, 
 	return readAccountInternal(s, addr)
 }
 
-// refreshAccount is the in-memory-only variant for AddressPath.
-func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Account, ReadSource, Version, error) {
-	var r readPathResult
-	versionedReadCore(s, addr, AddressPath, accounts.NilKey, false, true, &r)
-	if r.err != nil {
-		return nil, r.source, r.version, r.err
-	}
-	switch r.outcome {
-	case outcomeWriteSetHit:
-		return r.vwAddress.Val, r.source, r.version, nil
-	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetAddress(addr)
-		if tr.Val != nil {
-			return tr.Val.Account(), r.source, r.version, nil
-		}
-		return nil, r.source, r.version, nil
-	case outcomeMapDone:
-		return r.mapAddressVal, r.source, r.version, nil
-	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
-		if r.recordVR {
-			// AddressPath defaultV is nil.
-			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: r.hdr})
-		}
-		return nil, r.source, r.version, nil
-	default:
-		panic(fmt.Sprintf("refreshAccount: unexpected outcome %d for %x", r.outcome, addr))
-	}
-}
-
 // ReadStamp is the token the vm's frame slot cache uses to detect state changes
 // between storage reads. journalLen and epoch cover the frame's own writes and
 // reverts. A change in either field invalidates the cached slot on the next

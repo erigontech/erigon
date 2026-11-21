@@ -1000,15 +1000,6 @@ func (ibs *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 	return ibs.writeBalanceVersioned(addr, &prev, update, wasCommited, reason)
 }
 
-func (ibs *IntraBlockState) touchAccount(addr accounts.Address) {
-	ibs.journal.touchAccount(addr, false, uint256.Int{})
-	if addr == ripemd {
-		// Explicitly put it in the dirty-cache, which is otherwise generated from
-		// flattened journals.
-		ibs.journal.dirty(addr)
-	}
-}
-
 // TouchAccount materializes an empty account and records the zero-balance touch
 // needed for state clearing and trie consistency.
 func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
