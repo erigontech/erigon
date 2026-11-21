@@ -72,7 +72,7 @@ func TestWebseedsFollowTheManifestBranch(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, EmbeddedWebseeds[networkname.Mainnet], got, "a webseed this version cannot parse falls back to the embedded list")
 
-	for _, bad := range []string{"v1:", "v1:erigon310-v1-snapshots-mainnet.erigon.network", "v1:ftp://erigon310-v1-snapshots-mainnet.erigon.network"} {
+	for _, bad := range []string{"v1:", "v1:https://:443", "v1:erigon310-v1-snapshots-mainnet.erigon.network", "v1:ftp://erigon310-v1-snapshots-mainnet.erigon.network"} {
 		badURL := func(context.Context, string, string) ([]byte, error) {
 			return []byte(`"e3-v1-pub" = "` + bad + `"`), nil
 		}

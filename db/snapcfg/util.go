@@ -594,7 +594,7 @@ func validWebseeds(named map[string]string) error {
 		if err != nil {
 			return err
 		}
-		if u, err := url.Parse(s); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		if u, err := url.Parse(s); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
 			return fmt.Errorf("webseed %q is not an HTTP(S) URL with a host", w)
 		}
 	}
