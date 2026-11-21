@@ -627,7 +627,7 @@ func (a *Aggregator) checkFilesDBGap(db kv.RoDB) error {
 }
 
 func (a *Aggregator) hasAccessorsToBuild() bool {
-	dirty := a.DebugBeginDirtyFilesRo()
+	dirty := a.debugBeginDirtyFilesRo()
 	defer dirty.Close()
 	missed := dirty.FilesWithMissedAccessors()
 	dirty.dropCovered(missed) // startup builds with kv.SkipCoveredAccessors
@@ -978,7 +978,7 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 }
 
 func (a *Aggregator) BuildMissedAccessors(ctx context.Context, db kv.RoDB, workers int, opts ...kv.BuildAccessorsOption) error {
-	rotx := a.DebugBeginDirtyFilesRo()
+	rotx := a.debugBeginDirtyFilesRo()
 	defer rotx.Close()
 
 	missedFilesItems := rotx.FilesWithMissedAccessors()
@@ -1163,7 +1163,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	a.logger.Debug("[agg] collate-build", "step", step, "collate_workers", a.workers.getCollateAndBuild(), "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers, "took", time.Since(stepStartedAt))
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.observeMaintenance(ctx, MaintenanceEvent{Point: MaintenanceFilesBuilt})
-	a.IntegrateDirtyFiles(static, txFrom, txTo)
+	a.integrateDirtyFiles(static, txFrom, txTo)
 	a.observeMaintenance(ctx, MaintenanceEvent{Point: MaintenanceFilesPublished})
 	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt), "workers", a.workers.getCollateAndBuild())
 
@@ -1355,7 +1355,7 @@ func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 	}
 }
 
-func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumTo uint64) {
+func (a *Aggregator) integrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumTo uint64) {
 	defer a.onFilesChange(nil) // TODO: add relative file paths
 
 	a.dirtyFilesLock.Lock()

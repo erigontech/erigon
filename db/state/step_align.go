@@ -33,7 +33,7 @@ import (
 )
 
 func (a *Aggregator) StepAlignedEnd(stepSize uint64) (uint64, error) {
-	dirty := a.DebugBeginDirtyFilesRo()
+	dirty := a.debugBeginDirtyFilesRo()
 	defer dirty.Close()
 	at := a.BeginFilesRo()
 	defer at.Close()
