@@ -248,6 +248,7 @@ func TestRevertedSelfdestructKeepsEarlierTxOrigin(t *testing.T) {
 	x, _, k5, reader := slotsBeforeTheBlock()
 	rules := &chain.Rules{}
 	ibs := New(reader)
+	ibs.SetVersionMap(nil)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 0)
 	require.NoError(t, ibs.CreateAccount(x, true))
@@ -272,6 +273,7 @@ func TestRevertedSelfdestructCommitsSlotEqualToPreCreationValue(t *testing.T) {
 	x, _, k5, reader := slotsBeforeTheBlock()
 	rules := &chain.Rules{}
 	ibs := New(reader)
+	ibs.SetVersionMap(nil)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 0)
 	require.NoError(t, ibs.CreateAccount(x, true))
