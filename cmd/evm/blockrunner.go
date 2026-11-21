@@ -310,7 +310,7 @@ type fixture interface {
 // newTest. Its error names a fixture that cannot be decoded, which also gets a
 // failed result, or the file itself.
 func runFixtures(ctx *cli.Command, fname string, filter testFilter, reportPath func(ethconfig.BlockExecutionPath), newTest func() (fixture, *testutil.BlockTest)) ([]testResult, error) {
-	var results []testResult
+	results := []testResult{}
 	var unreadable []error
 	err := decodeFixtures(fname, func(name string, raw json.RawMessage, _ int64) error {
 		if !filter.includeCase(fname, name) {
