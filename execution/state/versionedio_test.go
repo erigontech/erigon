@@ -539,8 +539,8 @@ func TestVersionedIO_RemovedDependencyFallsThroughToStorage(t *testing.T) {
 	// The recorded MapRead points at Tx1's now-removed cell, so at commit it
 	// resolves to MVReadResultNone and must be invalidated (which re-executes the
 	// tx so it falls through to storage). Without this the stale read commits.
-	_, live, _, _ := liveStorageValue(ibs.versionMap, addr, key, 2)
-	valid := ibs.versionMap.validateReadImpl(2, addr, StoragePath, key, MapRead,
+	_, live, _, _ := liveStorageValue(ibs.stateUpdates, addr, key, 2)
+	valid := ibs.stateUpdates.validateReadImpl(2, addr, StoragePath, key, MapRead,
 		Version{TxIndex: 1, Incarnation: 0}, live,
 		func(rv, wv Version) VersionValidity { return VersionValid }, false, "", false)
 	require.Equal(t, VersionInvalid, valid,
