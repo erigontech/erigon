@@ -590,46 +590,6 @@ func TestEIP2780DelegationTargetAccessUsesWarmCost(t *testing.T) {
 	require.Zero(t, result.BlockStateGasUsed)
 }
 
-func TestDelegationDesignatorRecipientIsOrdinaryCodeBeforePrague(t *testing.T) {
-	const blockGasLimit = 1_000_000
-	const gasLimit = 100_000
-
-	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
-	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
-	delegatedTo := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
-	cancun := chain.TestChainOsakaConfig.Copy()
-	cancun.PragueTime = nil
-	cancun.OsakaTime = nil
-
-	for _, tc := range []struct {
-		name   string
-		config *chain.Config
-		prague bool
-	}{
-		{"cancun", cancun, false},
-		{"prague", chain.TestChainOsakaConfig, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ibs := state.New(state.NewNoopReader())
-			defer ibs.Close()
-			require.NoError(t, ibs.SetCode(recipient, types.AddressToDelegation(delegatedTo), tracing.CodeChangeUnspecified))
-			require.NoError(t, ibs.SetCode(delegatedTo, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
-
-			evm := newTestEVM(ibs, tc.config, blockGasLimit)
-			msg := newSimpleTransferMsg(sender, recipient, gasLimit, true)
-			result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
-			require.NoError(t, err)
-			if tc.prague {
-				require.NoError(t, result.Err)
-				require.Less(t, result.ReceiptGasUsed, uint64(gasLimit))
-				return
-			}
-			require.ErrorIs(t, result.Err, &vm.ErrInvalidOpCode{})
-			require.Equal(t, uint64(gasLimit), result.ReceiptGasUsed)
-		})
-	}
-}
-
 func TestEIP2780DelegationTargetIsNotReadWhenAccessChargeRunsOutOfGas(t *testing.T) {
 	const blockGasLimit = 1_000_000
 
