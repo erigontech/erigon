@@ -142,7 +142,7 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 	require.Equal(t, codeHash, view.CodeHash)
 	require.True(t, view.Balance.IsZero(), "destroyed balance is gone; the recreate starts fresh")
 
-	resolved, err := ibs.ResolveCode(addr)
+	resolved, err := ibs.ResolveCode(addr, true)
 	require.NoError(t, err)
 	require.Equal(t, code, resolved.Bytes)
 	require.NoError(t, ibs.TouchAccount(addr))
