@@ -298,3 +298,15 @@ func TestBatchRefuses(t *testing.T) {
 		})
 	}
 }
+
+// TestBatchSelectsEveryProofSystem: a batch is built selecting each of the
+// configured proof systems, in order.
+func TestBatchSelectsEveryProofSystem(t *testing.T) {
+	blocks, mined, _ := window(t, "captured-devnet-anchor-402")
+	b := devnetBatcher(common.Address{0xa})
+	b.ProofSystems = []common.Address{{0xa}, {0xb}, {0xc}}
+	got, err := b.AnchorBatch(mined.Entries[0].RollupUpdates[0].CurrentRoot, blocks)
+	require.NoError(t, err)
+	require.Equal(t, b.ProofSystems, got.ProofSystems)
+	require.Equal(t, []uint64{0, 1, 2}, got.RollupIDsWithProofSystems[0].ProofSystemIndexes)
+}

@@ -291,5 +291,15 @@ func TestPostBatchGasPerProofSystem(t *testing.T) {
 	three.RollupIDsWithProofSystems = []protocol.RollupIDWithProofSystems{{RollupID: mined.RollupIDsWithProofSystems[0].RollupID, ProofSystemIndexes: []uint64{0, 1, 2}}}
 	got, err := PostBatchGas(&three)
 	require.NoError(t, err)
-	require.Greater(t, got, one+2*proofSystemGas+2*16*uint64(len(proofPlaceholder)))
+	require.Greater(t, got, one+2*14_000+2*16*128)
+
+	// The drain's window budget prices each further proof system.
+	blocks, _, _ := window(t, "captured-devnet-anchor-402")
+	batcher := devnetBatcher(common.Address{0xa})
+	single, err := windowBudget(batcher, MaxPostBatchGas, 0, blocks)
+	require.NoError(t, err)
+	batcher.ProofSystems = three.ProofSystems
+	triple, err := windowBudget(batcher, MaxPostBatchGas, 0, blocks)
+	require.NoError(t, err)
+	require.Greater(t, triple.projected-single.projected, uint64(2*14_000+2*16*128))
 }

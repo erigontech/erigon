@@ -217,3 +217,61 @@ func TestQuorumGrace(t *testing.T) {
 	require.Less(t, time.Since(begin), 2*time.Second, "the stuck member is cancelled")
 	require.True(t, slices.IsSortedFunc(atts, func(x, y Attestation) int { return x.ProofSystem.Cmp(y.ProofSystem) }))
 }
+
+// TestQuorumErrorStatus: the status of a failed quorum, whatever order the
+// members failed in: a refusal only when the refusals alone keep the
+// threshold out of reach; else the node's when a member's failure is the
+// node's; else the transient failure's.
+func TestQuorumErrorStatus(t *testing.T) {
+	refused := status.Error(codes.InvalidArgument, "window refused")
+	down := status.Error(codes.Unavailable, "down")
+	local := errors.New("window block 9: no witness")
+	for _, c := range []struct {
+		name      string
+		usable    int
+		threshold uint64
+		errs      []error
+		want      codes.Code
+	}{
+		{"refusals blocking", 2, 2, []error{refused, local}, codes.InvalidArgument},
+		{"refusals blocking, other order", 2, 2, []error{local, refused}, codes.InvalidArgument},
+		{"a refusal not blocking, a node failure", 3, 2, []error{refused, local}, codes.Unknown},
+		{"a refusal not blocking, other order", 3, 2, []error{local, refused}, codes.Unknown},
+		{"a refusal not blocking, an outage", 3, 2, []error{refused, down}, codes.Unavailable},
+		{"an outage, then a blocking refusal", 2, 2, []error{down, refused}, codes.InvalidArgument},
+		{"outages", 2, 2, []error{down, down}, codes.Unavailable},
+		{"cancelled", 2, 2, []error{status.Error(codes.Canceled, "stopping"), down}, codes.Unknown},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := &QuorumError{Threshold: c.threshold, Usable: c.usable}
+			for i, err := range c.errs {
+				e.Failures = append(e.Failures, MemberFailure{ProofSystem: common.Address{byte(i + 1)}, Err: err})
+			}
+			require.Equal(t, c.want, status.Code(e))
+		})
+	}
+}
+
+// TestQuorumGivesUp: once the members left cannot reach the threshold, the
+// quorum fails without waiting for them.
+func TestQuorumGivesUp(t *testing.T) {
+	refusing := newAttester(t, 0xa, 0, status.Error(codes.InvalidArgument, "window refused"))
+	down := newAttester(t, 0xb, 0, status.Error(codes.Unavailable, "down"))
+	begin := time.Now()
+	_, err := (&Quorum{Members: members(refusing, down), Register: registered(2, refusing, down)}).
+		ProveBy(t.Context(), quorumWindow(t, refusing.ps, down.ps), time.Now().Add(3*time.Second), 0)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Less(t, time.Since(begin), time.Second)
+}
+
+// TestQuorumGraceEndsAtTheDeadline: the grace never runs past the time the
+// proof must be ready by; a threshold of zero needs one attestation.
+func TestQuorumGraceEndsAtTheDeadline(t *testing.T) {
+	a, slow := newAttester(t, 0xa, 0, nil), newAttester(t, 0xb, 2*time.Second, nil)
+	begin := time.Now()
+	atts, err := (&Quorum{Members: members(a, slow), Register: registered(0, a, slow), Grace: 5 * time.Second}).
+		ProveBy(t.Context(), quorumWindow(t, a.ps, slow.ps), time.Now().Add(300*time.Millisecond), 0)
+	require.NoError(t, err)
+	require.Equal(t, []common.Address{a.ps}, proofSystemsOf(atts))
+	require.Less(t, time.Since(begin), time.Second)
+}

@@ -765,9 +765,11 @@ func (c *Composer) attribute(cursor uint64) {
 		c.attributing, c.attributed = true, cursor
 		return
 	}
-	for n := c.attributed + 1; n <= cursor; {
+	n := c.attributed + 1
+	// A settlement derivation has yet to pass whole waits for a later call.
+	for n <= cursor {
 		r, ok := c.settlement(n)
-		if !ok || r.LastL2Block < n {
+		if !ok || r.LastL2Block > cursor {
 			break
 		}
 		n = r.LastL2Block + 1
@@ -777,7 +779,7 @@ func (c *Composer) attribute(cursor uint64) {
 		}
 		c.wg.Go(func() { c.attributeAfar(r) })
 	}
-	c.attributed = cursor
+	c.attributed = n - 1
 }
 
 // attributeAfar attributes r, a settlement the ledger did not post, by the

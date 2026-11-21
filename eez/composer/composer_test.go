@@ -1877,3 +1877,28 @@ func TestComposerPostsTheQuorum(t *testing.T) {
 	require.Equal(t, []uint64{0, 1}, posted.RollupIDsWithProofSystems[0].ProofSystemIndexes)
 	require.Equal(t, [][]byte{append(bytes.Clone(testProof), 0xa), append(bytes.Clone(testProof), 0xc)}, posted.Proofs)
 }
+
+// TestComposerAttributesEachSettlementOnce: a settlement is attributed once,
+// when derivation has passed all of it; those before the first call are
+// not.
+func TestComposerAttributesEachSettlementOnce(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 12), 12, senders{from: map[common.Hash]common.Address{}})
+	h.c.Settlements(settlements(
+		deriver.Record{TxHash: common.Hash{0x4}, LastL2Block: 4},
+		deriver.Record{TxHash: common.Hash{0x8}, LastL2Block: 8},
+		deriver.Record{TxHash: common.Hash{0xc}, LastL2Block: 12},
+	))
+	for _, height := range []uint64{4, 8, 12} {
+		h.c.ledger.Begin(Posted[*Held]{Height: height, Post: common.Hash{byte(height)}})
+	}
+	lines := captureLogs(h.c)
+	for _, cursor := range []uint64{4, 6, 12, 12} {
+		h.cursor.Store(cursor)
+		h.c.RecoverFailed(t.Context())
+	}
+	h.c.Close()
+	out := lines.String()
+	require.NotContains(t, out, "event=eez.composer.batch.confirmed to=4 ", "before the first call")
+	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.confirmed to=8 "), out)
+	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.confirmed to=12 "), out)
+}

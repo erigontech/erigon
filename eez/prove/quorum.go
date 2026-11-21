@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -33,8 +34,7 @@ import (
 )
 
 // DefaultGrace is how long a quorum keeps collecting once it has enough
-// attestations: more proofs than the threshold cost little gas and keep a
-// batch valid should a member's key rotate before it lands.
+// attestations, so members answering together all count.
 const DefaultGrace = 250 * time.Millisecond
 
 // ErrQuorumUnreachable reports a threshold the members the manager keys
@@ -89,30 +89,42 @@ func (q *Quorum) ProveBy(ctx context.Context, w *Window, start time.Time, per ti
 		err   error
 	}
 	actx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	// Members cut off by the grace or a lost quorum stop reading the window
+	// before it returns.
+	defer wg.Wait()
 	defer cancel()
 	answers := make(chan answer, len(usable))
 	for _, m := range usable {
 		mw := alone(w, m.ProofSystem, reg.Keys[m.ProofSystem].VKey)
-		go func() {
+		wg.Go(func() {
 			proof, err := m.Client.ProveBy(actx, mw, start, per)
 			answers <- answer{m, proof, err}
-		}()
+		})
 	}
 	var atts []Attestation
-	failed := &QuorumError{Threshold: threshold}
+	failed := &QuorumError{Threshold: threshold, Usable: len(usable)}
 	var grace <-chan time.Time
+	var timer *time.Timer
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 	for pending := len(usable); pending > 0; {
 		select {
 		case a := <-answers:
 			pending--
 			if a.err != nil {
 				failed.Failures = append(failed.Failures, MemberFailure{ProofSystem: a.m.ProofSystem, Err: a.err})
+				if uint64(len(atts)+pending) < threshold {
+					pending = 0
+				}
 				continue
 			}
 			atts = append(atts, Attestation{ProofSystem: a.m.ProofSystem, Proof: a.proof})
 			if uint64(len(atts)) == threshold && pending > 0 {
-				timer := time.NewTimer(q.Grace)
-				defer timer.Stop()
+				timer = time.NewTimer(q.Grace)
 				grace = timer.C
 			}
 		case <-grace:
@@ -148,7 +160,9 @@ type MemberFailure struct {
 // QuorumError reports a batch fewer members than the threshold attested.
 type QuorumError struct {
 	Threshold uint64
-	Failures  []MemberFailure
+	// Usable is the number of members asked.
+	Usable   int
+	Failures []MemberFailure
 }
 
 func (e *QuorumError) Error() string {
@@ -167,23 +181,31 @@ func (e *QuorumError) Unwrap() []error {
 	return errs
 }
 
-// GRPCStatus is the provers' answer when every failed member answered with
-// a status, a refusal before a transient failure; else Unknown, a failure
-// that lies with the node.
+// GRPCStatus is a refusal's status when the refusals alone keep the
+// threshold out of reach; else Unknown, a failure that lies with the node,
+// when a member's failure has no prover status; else a transient failure's.
 func (e *QuorumError) GRPCStatus() *status.Status {
-	var transient *status.Status
-	for _, f := range e.Failures {
+	failures := slices.SortedFunc(slices.Values(e.Failures), func(x, y MemberFailure) int { return x.ProofSystem.Cmp(y.ProofSystem) })
+	var refusal, transient *status.Status
+	refusals, node := 0, false
+	for _, f := range failures {
 		s, ok := status.FromError(f.Err)
 		switch {
 		case !ok || s.Code() == codes.Unknown || s.Code() == codes.Canceled:
-			return status.New(codes.Unknown, e.Error())
+			node = true
 		case !Retryable(f.Err):
-			return status.New(s.Code(), e.Error())
+			refusals++
+			if refusal == nil {
+				refusal = status.New(s.Code(), e.Error())
+			}
 		case transient == nil:
 			transient = status.New(s.Code(), e.Error())
 		}
 	}
-	if transient == nil {
+	switch {
+	case uint64(refusals) > uint64(e.Usable)-min(e.Threshold, uint64(e.Usable)):
+		return refusal
+	case node || transient == nil:
 		return status.New(codes.Unknown, e.Error())
 	}
 	return transient

@@ -575,6 +575,19 @@ func TestComposerFlags(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, cfg.Sequencer.Composer)
 
+	attesterKey := filepath.Join(dir, "attester")
+	attesterSecret, err := crypto.HexToECDSA("59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(attesterKey, []byte(hex.EncodeToString(crypto.FromECDSA(attesterSecret))), 0o600))
+	without := func(flags ...string) []string {
+		var out []string
+		for _, a := range composer {
+			if !slices.ContainsFunc(flags, func(f string) bool { return strings.HasPrefix(a, f) }) {
+				out = append(out, a)
+			}
+		}
+		return out
+	}
 	const second = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 	quorum := "--eez.attesters=http://127.0.0.1:50061=" + attester + "=" + proofSystem + ",https://attester.example:443=" + second + "=0x0000000000000000000000000000000000000042"
 	listed := func(extra ...string) []string {
@@ -610,25 +623,14 @@ func TestComposerFlags(t *testing.T) {
 		"entry with a bad address": {append(listed()[:len(listed())-1], "--eez.attesters=http://a:1=0x12="+proofSystem), "--eez.attesters"},
 		"entry with a bad URL":     {append(listed()[:len(listed())-1], "--eez.attesters=a:1="+attester+"="+proofSystem), "--eez.attesters"},
 		"seventeen attesters":      {append(listed()[:len(listed())-1], seventeen), "16"},
+		"zero attester":            {append(listed()[:len(listed())-1], "--eez.attesters=http://a:1=0x0000000000000000000000000000000000000000="+proofSystem), "--eez.attesters"},
+		"poster is a listed one":   {append(without("--eez.poster.keyfile", "--eez.attesters", "--eez.attester.address", "--eez.proofsystem"), "--eez.poster.keyfile="+attesterKey, "--eez.attesters=http://b:2="+second+"=0x0000000000000000000000000000000000000042,http://a:1="+attester+"="+proofSystem), "attester's key"},
 	} {
 		_, err := parse(t, c.args...)
 		require.ErrorIs(t, err, ErrConfig, name)
 		require.ErrorContains(t, err, c.want, name)
 	}
 
-	attesterKey := filepath.Join(dir, "attester")
-	attesterSecret, err := crypto.HexToECDSA("59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d")
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(attesterKey, []byte(hex.EncodeToString(crypto.FromECDSA(attesterSecret))), 0o600))
-	without := func(flags ...string) []string {
-		var out []string
-		for _, a := range composer {
-			if !slices.ContainsFunc(flags, func(f string) bool { return strings.HasPrefix(a, f) }) {
-				out = append(out, a)
-			}
-		}
-		return out
-	}
 	cfg, err = parse(t, append([]string{"--eez.enabled", "--eez.l1.rpc=ws://l1:8546", "--eez.l1.builder=http://builder"}, without("--eez.enabled", "--eez.l1.rpc")...)...)
 	require.NoError(t, err)
 	require.Equal(t, "http://builder", cfg.Sequencer.Composer.Builder)
