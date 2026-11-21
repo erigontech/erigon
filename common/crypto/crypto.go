@@ -38,6 +38,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/keccakx4"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
 )
@@ -165,6 +166,12 @@ func keccak256Joined(data [][]byte) common.Hash {
 	out := keccak.Sum256(buf)
 	putJoinBuf(p, buf)
 	return out
+}
+
+// Keccak256Many sets out[i] to the Keccak256 hash of data[i]. With several inputs it is faster
+// than hashing them one by one on CPUs with AVX2 or AVX-512.
+func Keccak256Many(data [][]byte, out [][32]byte) {
+	keccakx4.SumMany256(data, out)
 }
 
 // Keccak512 calculates and returns the Keccak512 hash of the input data.

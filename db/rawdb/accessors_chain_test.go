@@ -1648,3 +1648,31 @@ func TestRaiseCaplinBlobsArchiveFromSlotKeepsHighest(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(3_000_000), got)
 }
+
+func TestReadBlockWithSendersTxnHashes(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+	defer tx.Rollback()
+
+	to := common.HexToAddress("0x1234")
+	txs := []types.Transaction{
+		types.NewTransaction(0, to, uint256.NewInt(100), 21000, uint256.NewInt(1000000000), []byte("legacy")),
+		&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 21000, Data: []byte("dynamic fee")},
+			ChainID:  u256.Num1,
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(2),
+		},
+	}
+	block := types.NewBlock(&types.Header{Number: *common.Num1, Extra: []byte("txn hashes")}, txs, nil, nil, nil, nil)
+	require.NoError(t, rawdb.WriteBlock(tx, block))
+
+	for _, txnHashes := range []bool{false, true} {
+		read, _, err := rawdb.ReadBlockWithSendersOpt(tx, block.Hash(), block.NumberU64(), txnHashes)
+		require.NoError(t, err)
+		require.NotNil(t, read)
+		require.Len(t, read.Transactions(), len(txs))
+		for i, txn := range read.Transactions() {
+			require.Equal(t, txs[i].Hash(), txn.Hash(), "txn %d, txnHashes=%t", i, txnHashes)
+		}
+	}
+}

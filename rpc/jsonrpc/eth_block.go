@@ -235,7 +235,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		if err := api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum); err != nil {
 			return nil, err
 		}
-		b, err = api.blockByNumber(ctx, rpc.BlockNumber(blockNum), tx)
+		b, err = api.blockByNumberWithTxnHashes(ctx, api.filters.WithOverlay(tx), blockNum)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
@@ -327,7 +327,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		return nil, err
 	}
 
-	block, err := api.blockByHashWithSenders(ctx, tx, hash)
+	block, err := api.blockByHashWithTxnHashes(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}

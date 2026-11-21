@@ -466,15 +466,25 @@ func TxnRlpByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, tx
 }
 
 func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.Transaction, error) {
+	return canonicalTransactions(db, txnID, amount, false)
+}
+
+func canonicalTransactions(db kv.Getter, txnID uint64, amount uint32, txnHashes bool) ([]types.Transaction, error) {
 	if amount == 0 {
 		return []types.Transaction{}, nil
 	}
 	txs := make([]types.Transaction, amount)
+	var encodings types.TxnEncodings
 	i := uint32(0)
 	if err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(txnID), amount, func(k, v []byte) error {
 		var err error
 		if txs[i], err = types.UnmarshalTransactionFromBinary(v, false /* blobTxnsAreWrappedWithBlobs */); err != nil {
 			return err
+		}
+		if txnHashes {
+			if err := encodings.Add(v); err != nil {
+				return err
+			}
 		}
 		i++
 		return nil
@@ -482,6 +492,9 @@ func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.T
 		return nil, err
 	}
 	txs = txs[:i] // user may request big "amount", but db can return small "amount". Return as much as we found.
+	if txnHashes {
+		encodings.CacheHashes(txs)
+	}
 	return txs, nil
 }
 
@@ -520,12 +533,16 @@ func WriteBodyForStorage(db kv.Putter, hash common.Hash, number uint64, body *ty
 }
 
 func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*types.Body, error) {
+	return readBodyWithTransactions(db, hash, number, false)
+}
+
+func readBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64, txnHashes bool) (*types.Body, error) {
 	body, firstTxId, txCount := ReadBody(db, hash, number)
 	if body == nil {
 		return nil, nil
 	}
 	var err error
-	body.Transactions, err = CanonicalTransactions(db, firstTxId, txCount)
+	body.Transactions, err = canonicalTransactions(db, firstTxId, txCount, txnHashes)
 	if err != nil {
 		return nil, err
 	}
@@ -841,12 +858,12 @@ func TruncateTd(tx kv.RwTx, blockFrom uint64) error {
 	return nil
 }
 
-func readBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
+func readBlock(tx kv.Getter, hash common.Hash, number uint64, txnHashes bool) *types.Block {
 	header := ReadHeader(tx, hash, number)
 	if header == nil {
 		return nil
 	}
-	body, _ := ReadBodyWithTransactions(tx, hash, number)
+	body, _ := readBodyWithTransactions(tx, hash, number, txnHashes)
 	if body == nil {
 		return nil
 	}
@@ -856,7 +873,7 @@ func readBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 // ReadBlock retrieves an entire block corresponding to the hash, assembling it
 // back from the stored header and body. If either part is unavailable, it returns nil.
 func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
-	return readBlock(tx, hash, number)
+	return readBlock(tx, hash, number, false)
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.
@@ -867,7 +884,13 @@ func HasBlock(db kv.Getter, hash common.Hash, number uint64) bool {
 }
 
 func ReadBlockWithSenders(db kv.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
-	block := readBlock(db, hash, number)
+	return ReadBlockWithSendersOpt(db, hash, number, false)
+}
+
+// ReadBlockWithSendersOpt is ReadBlockWithSenders; with txnHashes each txn caches the hash of its
+// stored encoding, for callers that read every txn hash.
+func ReadBlockWithSendersOpt(db kv.Getter, hash common.Hash, number uint64, txnHashes bool) (*types.Block, []common.Address, error) {
+	block := readBlock(db, hash, number, txnHashes)
 	if block == nil {
 		return nil, nil, nil
 	}

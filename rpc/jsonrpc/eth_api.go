@@ -417,6 +417,15 @@ func (api *BaseAPI) txnIndexInBlock(ctx context.Context, tx kv.Tx, blockNum, txN
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
+	return api.readBlockByNumber(ctx, tx, number, false)
+}
+
+// blockByNumberWithTxnHashes is for callers that return every txn hash, see BlockWithSendersAndTxnHashes.
+func (api *BaseAPI) blockByNumberWithTxnHashes(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
+	return api.readBlockByNumber(ctx, tx, number, true)
+}
+
+func (api *BaseAPI) readBlockByNumber(ctx context.Context, tx kv.Tx, number uint64, txnHashes bool) (*types.Block, error) {
 	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, number)
 	if err != nil {
 		return nil, err
@@ -424,10 +433,19 @@ func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, numb
 	if !ok {
 		return nil, nil
 	}
-	return api.blockWithSenders(ctx, tx, hash, number)
+	return api.readBlock(ctx, tx, hash, number, txnHashes)
 }
 
 func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
+	return api.readBlockByHash(ctx, tx, hash, false)
+}
+
+// blockByHashWithTxnHashes is for callers that return every txn hash, see BlockWithSendersAndTxnHashes.
+func (api *BaseAPI) blockByHashWithTxnHashes(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
+	return api.readBlockByHash(ctx, tx, hash, true)
+}
+
+func (api *BaseAPI) readBlockByHash(ctx context.Context, tx kv.Tx, hash common.Hash, txnHashes bool) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
 			return it, nil
@@ -441,16 +459,30 @@ func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash c
 		return nil, nil
 	}
 
-	return api.blockWithSenders(ctx, tx, hash, *number)
+	return api.readBlock(ctx, tx, hash, *number, txnHashes)
 }
 
 func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
+	return api.readBlock(ctx, tx, hash, number, false)
+}
+
+type txnHashesBlockReader interface {
+	BlockWithSendersAndTxnHashes(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Block, []common.Address, error)
+}
+
+func (api *BaseAPI) readBlock(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64, txnHashes bool) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
 			return it, nil
 		}
 	}
-	block, _, err := api._blockReader.BlockWithSenders(ctx, tx, hash, number)
+	var block *types.Block
+	var err error
+	if r, ok := api._blockReader.(txnHashesBlockReader); ok && txnHashes {
+		block, _, err = r.BlockWithSendersAndTxnHashes(ctx, tx, hash, number)
+	} else {
+		block, _, err = api._blockReader.BlockWithSenders(ctx, tx, hash, number)
+	}
 	if err != nil {
 		return nil, err
 	}
