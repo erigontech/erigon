@@ -28,6 +28,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -289,6 +290,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 				c.addCode(k[:], sc.Changes[i].Code, r, id)
 			case remoteproto.Action_REMOVE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
+				c.evictStorage(addr[:], r)
 				c.add(addr[:], nil, r, id)
 			case remoteproto.Action_STORAGE:
 				// skip, will check later
@@ -428,6 +430,16 @@ func (c *Coherent) evictKey(k []byte, r *CoherentRoot) {
 	if e, ok := r.cache.Delete(&Element{K: k}); ok {
 		c.stateEvict.Remove(e)
 	}
+}
+
+func (c *Coherent) evictStorage(address []byte, r *CoherentRoot) {
+	first := append(bytes.Clone(address), make([]byte, length.Hash)...)
+	last := append(bytes.Clone(address), bytes.Repeat([]byte{0xff}, length.Hash)...)
+	deleted := r.cache.DeleteRange(&Element{K: first}, &Element{K: last}, &btree2.DeleteRangeOptions{MaxInclusive: true})
+	deleted.Scan(func(e *Element) bool {
+		c.stateEvict.Remove(e)
+		return true
+	})
 }
 
 func (c *Coherent) removeOldest(r *CoherentRoot) {
