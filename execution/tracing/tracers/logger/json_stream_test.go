@@ -70,6 +70,14 @@ func (m *mockIBS) Exist(accounts.Address) (bool, error)             { return fal
 func (m *mockIBS) HasSelfdestructed(accounts.Address) (bool, error) { return false, nil }
 func (m *mockIBS) GetRefund() uint64                                { return 0 }
 
+// refundIBS is a mockIBS whose refund counter a test can change between steps.
+type refundIBS struct {
+	mockIBS
+	refund uint64
+}
+
+func (m *refundIBS) GetRefund() uint64 { return m.refund }
+
 // captureOnOpcode runs a single OnOpcodeV2 call and returns the parsed structLog entry.
 // It closes the stream the same way ExecuteTraceTx does after execution.
 // storageKey/storageVal are pushed onto the stack for SSTORE (top=key, below=val).
@@ -742,15 +750,18 @@ func TestJsonStreamLogger_HaltedStepHasErrorAndNoCost(t *testing.T) {
 			var buf bytes.Buffer
 			stream := jsonstream.New(&buf)
 			l := NewJsonStreamLogger(&LogConfig{Limit: tc.limit, DisableStorage: true, EnableMemory: true, EnableReturnData: true}, t.Context(), stream)
-			l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+			ibs := &refundIBS{refund: 4}
+			l.env = &tracing.VMContext{IntraBlockState: ibs}
 
 			rData := []byte{0x22}
 			scope := &mockOpContext{stack: []uint256.Int{*uint256.NewInt(5)}, memory: bytes.Repeat([]byte{0x11}, 32)}
 			l.OnOpcodeV2(0, byte(vm.PUSH1), mdgas.MdGas{Execution: 100, State: 50}, mdgas.MdGasCost{Execution: 3}, scope, rData, 1, nil)
+			ibs.refund = 7
 			l.OnOpcodeV2(1, byte(tc.op), mdgas.MdGas{Execution: 97, State: 50}, mdgas.MdGasCost{Execution: 8, State: 20}, scope, rData, 1, tc.stepErr)
-			// The opcode changes the stack, memory and return data in place, which must not reach the entry.
+			// What the opcode changes after the capture must not reach the entry.
 			scope.stack = nil
 			scope.memory[0], rData[0] = 0xff, 0xff
+			ibs.refund = 9
 			if tc.fault != nil {
 				l.OnFaultV2(tc.faultPc, byte(tc.faultOp), mdgas.MdGas{}, mdgas.MdGasCost{}, scope, tc.faultDepth, vm.VMErrorFromErr(tc.fault))
 			}
@@ -764,11 +775,13 @@ func TestJsonStreamLogger_HaltedStepHasErrorAndNoCost(t *testing.T) {
 			require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.Bytes())
 			require.Len(t, result.StructLogs, tc.wantLogs)
 			require.JSONEq(t, `3`, string(result.StructLogs[0]["gasCost"]))
+			require.JSONEq(t, `4`, string(result.StructLogs[0]["refund"]))
 			require.NotContains(t, result.StructLogs[0], "error")
 			if tc.wantLogs == 1 {
 				return
 			}
 			step := result.StructLogs[1]
+			require.JSONEq(t, `7`, string(step["refund"]))
 			require.JSONEq(t, `["0x5"]`, string(step["stack"]))
 			require.JSONEq(t, `["0x`+strings.Repeat("11", 32)+`"]`, string(step["memory"]))
 			require.JSONEq(t, `"0x22"`, string(step["returnData"]))

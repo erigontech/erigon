@@ -171,12 +171,9 @@ func (l *JsonStreamLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGa
 // OnFaultV2 marks the pending step with the exceptional halt of its opcode. A REVERT that
 // completes also ends with an error here, but it is not a halt.
 func (l *JsonStreamLogger) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, depth int, err error) {
-	p := &l.pending
-	if !p.ok || err == nil || errors.Is(err, vm.ErrExecutionReverted) || p.pc != pc || p.op != vm.OpCode(op) || p.depth != depth {
-		return
+	if p := &l.pending; p.pc == pc && p.op == vm.OpCode(op) && p.depth == depth && !errors.Is(err, vm.ErrExecutionReverted) {
+		p.err = err
 	}
-	p.err = err
-	p.cost = mdgas.MdGasCost{}
 }
 
 // writePrologueOnce opens the response object and the structLogs array. Every
@@ -240,10 +237,6 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost
 			outputStorage = true
 		}
 	}
-	if err != nil {
-		// A step that halts exceptionally reports no cost.
-		cost = mdgas.MdGasCost{}
-	}
 	l.pending = pendingStep{
 		ok: true, pc: pc, op: op, gas: gas, cost: cost, depth: depth,
 		refund: l.env.IntraBlockState.GetRefund(), err: err, contract: contractAddr, storage: outputStorage,
@@ -267,55 +260,62 @@ func (l *JsonStreamLogger) writePending() {
 		return
 	}
 	p.ok = false
+	pc, op, gas, cost, depth, refund, err, stack := p.pc, p.op, p.gas, p.cost, p.depth, p.refund, p.err, p.stack
+	memory, rData, contractAddr, outputStorage := l.memory, l.returnData, p.contract, p.storage
+	if err != nil {
+		// A step that halts exceptionally reports no cost.
+		cost = mdgas.MdGasCost{}
+	}
 	// create a new snapshot of the EVM.
 	l.stream.WriteObjectStart()
 	l.stream.Field("pc")
-	l.stream.Uint(p.pc)
+	l.stream.Uint(pc)
 	l.stream.Field("op")
-	l.stream.WriteString(p.op.String())
+	l.stream.WriteString(op.String())
 	l.stream.Field("gas")
-	l.stream.Uint(p.gas.Execution)
+	l.stream.Uint(gas.Execution)
 	l.stream.Field("gasCost")
-	l.stream.Uint(p.cost.Execution)
-	if p.cost.State != 0 {
+	l.stream.Uint(cost.Execution)
+	if cost.State != 0 {
 		l.stream.Field("stateGasCost")
-		l.stream.Int(p.cost.State)
+		l.stream.Int(cost.State)
 	}
-	if p.gas.State != 0 {
+	if gas.State != 0 {
 		l.stream.Field("stateGasReservoir")
-		l.stream.Uint(p.gas.State)
+		l.stream.Uint(gas.State)
 	}
 	l.stream.Field("depth")
-	l.stream.Int(int64(p.depth))
-	if p.refund != 0 {
+	l.stream.Int(int64(depth))
+	if refund != 0 {
 		l.stream.Field("refund")
-		l.stream.Uint(p.refund)
+		l.stream.Uint(refund)
 	}
-	if p.err != nil {
+
+	if err != nil {
 		l.stream.Field("error")
-		l.stream.WriteString(p.err.Error())
+		l.stream.WriteString(err.Error())
 	}
-	if p.stack != nil {
+	if !l.cfg.DisableStack {
 		l.stream.Field("stack")
-		l.stream.WriteRawBytes(p.stack)
+		l.stream.WriteRawBytes(stack)
 	}
-	if l.cfg.EnableMemory && len(l.memory) > 0 {
+	if l.cfg.EnableMemory && len(memory) > 0 {
 		l.stream.Field("memory")
 		l.stream.WriteArrayStart()
-		for i := 0; i < len(l.memory); i += 32 {
-			end := min(i+32, len(l.memory))
-			l.writeWord(l.memory[i:end])
+		for i := 0; i < len(memory); i += 32 {
+			end := min(i+32, len(memory))
+			l.writeWord(memory[i:end])
 		}
 		l.stream.WriteArrayEnd()
 	}
-	if l.cfg.EnableReturnData && len(l.returnData) > 0 {
-		ethjson.Data(l.stream, "returnData", l.returnData)
+	if l.cfg.EnableReturnData && len(rData) > 0 {
+		ethjson.Data(l.stream, "returnData", rData)
 	}
-	if p.storage {
+	if outputStorage {
 		l.stream.Field("storage")
 		l.stream.WriteObjectStart()
 		// Sorted by location for easier comparison with geth
-		s := l.storage[p.contract]
+		s := l.storage[contractAddr]
 		l.locations = slices.AppendSeq(l.locations[:0], maps.Keys(s))
 		l.locations.Sort()
 		for i := range l.locations {
