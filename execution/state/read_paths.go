@@ -261,7 +261,7 @@ func wipedFieldOutcome(s *IntraBlockState, addr accounts.Address) readPathOutcom
 	state, destructDep := s.versionMap.AccountLifecycleWithDestructDep(addr, s.txIndex)
 	// A destruct back in flight is not counted by the lifecycle, so the verdict may be stale.
 	if destructDep != UnknownDep {
-		s.dep = max(s.dep, destructDep)
+		s.noteDep(destructDep)
 	}
 	if state == LifecycleRevived {
 		return outcomeReturnEmpty
@@ -343,7 +343,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	destructed, sdRes, ok := s.readSelfDestructMemo(addr)
 	// An in-flight self-destruct may burn a field whose own cell already reads as Done.
 	if ok && sdRes.Status() == MVReadResultDependency {
-		s.dep = max(s.dep, sdRes.DepIdx())
+		s.noteDep(sdRes.DepIdx())
 	}
 	if ok && sdRes.resolved() && destructed {
 		destructTxIndex := sdRes.DepIdx()
@@ -458,7 +458,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			if res.Status() == MVReadResultDone {
 				if prHeader, prOK := s.versionedReads.getHeader(addr, path, key); prOK {
 					if hdr.Version.TxIndex > destructedVersion.TxIndex && hdr.Version != prHeader.Version {
-						s.dep = max(s.dep, hdr.Version.TxIndex)
+						s.noteDep(hdr.Version.TxIndex)
 						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d (%d.%d) WR DEP (%d.%d)!=(%d.%d) %x %s\n",
 								s.blockNum, s.txIndex, s.version,
@@ -563,7 +563,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 		// The predecessor write is in flight (Estimate): record the dependency verdict
 		// and fall back to the in-flight value.
-		s.dep = max(s.dep, res.DepIdx())
+		s.noteDep(res.DepIdx())
 		hdr.Source = MapRead
 		s.versionedReads.SetHeader(addr, path, key, hdr)
 		r.outcome = outcomeMapDone
@@ -610,7 +610,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					// on the vanished writer to force re-execution rather than committing a
 					// torn result the version-only validator can't catch. Only a real (>=0)
 					// writer forces the re-exec.
-					s.dep = max(s.dep, prHeader.Version.TxIndex)
+					s.noteDep(prHeader.Version.TxIndex)
 					// Fall through to storage read.
 				}
 			}
@@ -1276,7 +1276,7 @@ func recordWipedSelfDestruct(s *IntraBlockState, addr accounts.Address, life lif
 // read depends on it.
 func readClearedByCreate(s *IntraBlockState, hdr ReadHeader, r *readPathResult) {
 	if r.life.createInc < 0 {
-		s.dep = max(s.dep, r.life.createdAt)
+		s.noteDep(r.life.createdAt)
 	}
 	hdr.Source = MapRead
 	hdr.Version = Version{TxIndex: r.life.createdAt, Incarnation: r.life.createInc}

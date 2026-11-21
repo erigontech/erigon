@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
@@ -18,6 +19,17 @@ const (
 	psRecheck
 )
 
+const (
+	rerunAbort       = iota // the run read an in-flight value
+	rerunInvalid            // the apply loop rejected a sent result
+	rerunPoolInvalid        // the worker's own validation failed
+	rerunError              // a speculative run failed
+	rerunSender             // a deferred-charge run failed or touched its sender
+	rerunCauses
+)
+
+var rerunReasons = [rerunCauses]string{"abort", "invalid", "pool_invalid", "error", "sender"}
+
 type poolTask struct {
 	be         *blockExecutor
 	tv         *taskVersion
@@ -25,6 +37,9 @@ type poolTask struct {
 	prevWrites *state.WriteSet
 	result     *exec.TxResult
 	reruns     int
+	lastRunNs  int64
+	lastVoidNs int64 // the part of the last run after its first read of an unfinished write
+	rerunCause int
 
 	mu      sync.Mutex
 	parked  bool
@@ -175,7 +190,8 @@ func (pt *poolTask) waitThen(t, next int) bool {
 
 const poolNamedReruns = 3
 
-func (pt *poolTask) rerunAfter(named int) bool {
+func (pt *poolTask) rerunAfter(named, cause int) bool {
+	pt.rerunCause = cause
 	t := pt.tv.index - 1
 	if pt.reruns < poolNamedReruns {
 		t = named
@@ -202,7 +218,7 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 		case psRecheck:
 			valid, _, blocker := be.selfLoopEvaluate(tv, pt.result)
 			if !valid {
-				if !pt.rerunAfter(blocker) {
+				if !pt.rerunAfter(blocker, rerunPoolInvalid) {
 					return
 				}
 				continue
@@ -216,6 +232,13 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 			}
 		}
 	}
+}
+
+// countRerun adds a re-run, the time of the run it replaces and that run's void tail to the totals.
+func (pt *poolTask) countRerun(pe *parallelExecutor) {
+	pe.reruns[pt.rerunCause].Add(1)
+	pe.wastedNs[pt.rerunCause].Add(pt.lastRunNs)
+	pe.voidTailNs.Add(pt.lastVoidNs)
 }
 
 func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
@@ -238,27 +261,42 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if poolOnRun != nil {
 		poolOnRun(int(tv.version.Incarnation) + 1)
 	}
+	if tv.version.Incarnation > 0 {
+		pt.countRerun(p.pe)
+	}
+	be.cntExec.Add(1)
+	p.pe.execCount.Add(1)
+	tv.firstDepReadAt = time.Time{}
+	runStart := time.Now()
 	result := wk.w.RunTxTask(tv)
+	runEnd := time.Now()
+	pt.lastRunNs = runEnd.Sub(runStart).Nanoseconds()
+	errCause := rerunError
+	pt.lastVoidNs = 0
+	if !tv.firstDepReadAt.IsZero() {
+		errCause = rerunAbort
+		pt.lastVoidNs = runEnd.Sub(tv.firstDepReadAt).Nanoseconds()
+	}
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
 		(result.Err != nil || touchedSenderAccount(txTask, result)) {
-		return pt.rerunAfter(tv.index - 1)
+		return pt.rerunAfter(tv.index-1, rerunSender)
 	}
 	if result.Err != nil {
 		if finalExec {
 			pt.send(p, result)
 			return false
 		}
-		return pt.rerunAfter(tv.index - 1)
+		return pt.rerunAfter(tv.index-1, errCause)
 	}
 	if result.Dep >= 0 {
-		return pt.rerunAfter(be.taskIndexOf(result.Dep))
+		return pt.rerunAfter(be.taskIndexOf(result.Dep), rerunAbort)
 	}
 	be.selfLoopFlush(tv.version, result, pt.prevWrites)
 	pt.prevWrites = result.TxOut
 
 	valid, target, blocker := be.selfLoopEvaluate(tv, result)
 	if !valid {
-		return pt.rerunAfter(blocker)
+		return pt.rerunAfter(blocker, rerunPoolInvalid)
 	}
 	return pt.settle(p, result, target)
 }
@@ -275,11 +313,12 @@ func (pt *poolTask) publish(p *taskPool) bool {
 	pt.send(p, pt.result)
 	pt.result = nil
 	pt.next = psReexec
+	pt.rerunCause = rerunInvalid
 	pt.mu.Lock()
 	if pt.pending {
 		pt.pending = false
 		pt.mu.Unlock()
-		return pt.rerunAfter(pt.tv.index - 1)
+		return pt.rerunAfter(pt.tv.index-1, rerunInvalid)
 	}
 	pt.parked = true
 	pt.mu.Unlock()
