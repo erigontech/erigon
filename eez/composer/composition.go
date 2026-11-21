@@ -136,7 +136,7 @@ func (k *composition) add(h *Held) error {
 	case h.Nonce < onChain:
 		c.logger.Warn("[eez] held transaction dropped: its nonce is spent", "event", "eez.composer.cc_compose.stale_nonce_evicted",
 			"hash", h.Hash, "sender", h.Sender, "direction", h.Direction, "nonce", h.Nonce, "onChain", onChain)
-		c.x.Pool.Release([]*Held{h})
+		c.x.Pool.Drop([]*Held{h})
 		return nil
 	case h.Nonce > onChain:
 		// Admitted on a pending nonce: a predecessor sent elsewhere has yet

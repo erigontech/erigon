@@ -614,3 +614,30 @@ func TestHeldPoolPrune(t *testing.T) {
 	require.NoError(t, p.Prune(nonce, 7))
 	require.False(t, p.Holds(c.Hash))
 }
+
+// TestHeldPoolKeepsComposedOutbound: an outbound transaction composed once
+// stays held when a queued replacement takes its nonce, and a stale one,
+// whose nonce is spent, is let go; an inbound one is not held once released.
+func TestHeldPoolKeepsComposedOutbound(t *testing.T) {
+	p := NewHeldPool()
+	x := held(addr(0xa), 0, Outbound, 1)
+	require.NoError(t, p.Push(x, 0))
+	p.Release(p.PopN(1))
+	y := held(addr(0xa), 0, Outbound, 2)
+	y.MaxFee.SetUint64(100)
+	y.Tip.SetUint64(100)
+	require.NoError(t, p.Push(y, 0))
+	p.PushFront([]*Held{x})
+	require.True(t, p.Holds(x.Hash), "dropped for the replacement, still composed")
+	require.Equal(t, []*Held{y}, p.PopN(math.MaxInt))
+
+	stale := held(addr(0xb), 0, Outbound, 3)
+	require.NoError(t, p.Push(stale, 0))
+	p.Drop(p.PopN(1))
+	require.False(t, p.Holds(stale.Hash))
+
+	in := held(addr(0xc), 0, Inbound, 4)
+	require.NoError(t, p.Push(in, 0))
+	p.Release(p.PopN(1))
+	require.False(t, p.Holds(in.Hash))
+}

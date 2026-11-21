@@ -905,6 +905,7 @@ func TestComposedSyncBlockFailureCharges(t *testing.T) {
 		{name: "a posting over its gas", maxGas: 900_000},
 		{name: "an unreachable prover", err: status.Error(codes.Unavailable, "down")},
 		{name: "a proof past its deadline", err: status.Error(codes.DeadlineExceeded, "too late")},
+		{name: "a proof too late to start", err: prove.ErrTooLate, skipped: true},
 		{name: "a cancelled proof", err: status.Error(codes.Canceled, "stopping"), skipped: true},
 		{name: "a malformed attestation", err: prove.ErrAttestation, skipped: true},
 		{name: "an anchor header unread", unread: true, skipped: true},

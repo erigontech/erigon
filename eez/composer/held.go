@@ -326,11 +326,11 @@ func (p *HeldPool) PushFront(recovered []*Held) {
 	front := make([]*Held, 0, len(recovered))
 	for _, tx := range recovered {
 		delete(p.inFlight, tx.Hash)
-		delete(p.settled, tx.Hash)
 		if n, ok := conflict[tx.chainKey()]; ok && tx.Nonce >= n {
 			p.tomb(tx.Hash, tx.chainKey(), tx.Nonce, tx.sync)
 			continue
 		}
+		delete(p.settled, tx.Hash)
 		if p.resubmitted(tx) {
 			continue
 		}
@@ -403,8 +403,8 @@ func (p *HeldPool) Reserve(txs []*Held) {
 	}
 }
 
-// Release ends the reservations of txs, whose batch settled; an outbound
-// one stays held until Forget.
+// Release ends the reservations of txs, which a batch settled or a failed
+// one spent; an outbound one stays held until Forget.
 func (p *HeldPool) Release(txs []*Held) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -413,6 +413,15 @@ func (p *HeldPool) Release(txs []*Held) {
 		if tx.Direction == Outbound {
 			p.settled[tx.Hash] = true
 		}
+	}
+}
+
+// Drop ends the reservations of txs, whose nonces are spent elsewhere.
+func (p *HeldPool) Drop(txs []*Held) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, tx := range txs {
+		delete(p.inFlight, tx.Hash)
 	}
 }
 

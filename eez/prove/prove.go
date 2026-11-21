@@ -353,6 +353,10 @@ func blockChunk(ctx context.Context, w *Window, n uint64, parent common.Hash) (*
 	}, block.Root(), nil
 }
 
+// ErrTooLate reports a proof request whose start passed before it could be
+// sent: the node's delay, not the window's.
+var ErrTooLate = errors.New("too late to start a proof request")
+
 // ProveBy proves w, repeating the request after a transient failure while a
 // request can start by start. Each request has per, or with per zero what is
 // left before start.
@@ -372,7 +376,7 @@ func Retryable(err error) bool {
 
 func retry(ctx context.Context, start time.Time, per time.Duration, attempt func(context.Context) ([]byte, error)) ([]byte, error) {
 	if time.Now().After(start) {
-		return nil, status.Error(codes.DeadlineExceeded, "too late to start a proof request")
+		return nil, ErrTooLate
 	}
 	for n := 1; ; n++ {
 		limit := per

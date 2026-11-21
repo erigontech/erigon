@@ -707,10 +707,6 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 		if !ok {
 			break
 		}
-		if len(p.Txs) == 0 {
-			c.ledger.ClaimPartial(p.Height, p.Post, nil)
-			continue
-		}
 		if !c.disposePartial(ctx, p) {
 			break
 		}
@@ -954,10 +950,7 @@ func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
 			rest = append(rest, tx)
 		}
 	}
-	// A reorg during the reads may have taken the batch and requeued it.
-	if !c.ledger.ClaimPartial(p.Height, p.Post, ran) {
-		return true
-	}
+	c.ledger.ClaimPartial(p.Height, p.Post, ran)
 	culprit, charged := partialCulprit(p.Txs, spent), common.Hash{}
 	if culprit != nil {
 		charged = culprit.Hash

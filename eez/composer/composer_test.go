@@ -1759,3 +1759,91 @@ func TestComposerEvents(t *testing.T) {
 		require.Regexp(t, `event=eez.composer.emission.historical_chunk .*to=4`, lines.String())
 	})
 }
+
+// TestComposerRollsOutADisposedPartialBatch: the rest of a disposed partial
+// batch requeues in drain order; the transactions that ran stay held until
+// an L1 reorg rolls the batch out, and once its posting has left L1 for
+// good recovery requeues exactly them, uncharged.
+func TestComposerRollsOutADisposedPartialBatch(t *testing.T) {
+	chain := newTestChain(t, 8, 8)
+	ran := held(addr(0xa), 0, Outbound, 1)
+	ran.Hash = chain.blocks[8].Transactions()[0].Hash()
+	cut, landed := held(addr(0xb), 0, Outbound, 2), held(addr(0xc), 0, Inbound, 3)
+	dropped := held(addr(0xd), 0, Inbound, 4)
+	node := &reorged{landed: map[common.Hash]bool{landed.Hash: true}}
+	node.head.Store(1)
+	h := newHarness(t, chain, 8, node)
+	pool := NewHeldPool()
+	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+	for _, tx := range []*Held{ran, cut, landed, dropped} {
+		require.NoError(t, pool.Push(tx, 0))
+	}
+	h.cursor.Store(5)
+	h.c.RecoverFailed(t.Context())
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(math.MaxInt)})
+	h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
+	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	require.Equal(t, []*Held{cut, dropped}, pool.PopN(math.MaxInt))
+	require.True(t, pool.Holds(ran.Hash), "ran, not final")
+	node.dropped.Store(true)
+	h.cursor.Store(4)
+	h.c.RecoverFailed(t.Context())
+	require.Eventually(t, func() bool {
+		node.head.Add(1)
+		h.c.RecoverFailed(t.Context())
+		_, ok := h.resolution(8)
+		return !ok
+	}, 5*time.Second, time.Millisecond)
+	require.Equal(t, []*Held{ran, landed}, pool.PopN(math.MaxInt))
+	require.Zero(t, ran.Attempts+landed.Attempts)
+}
+
+// reorged is a rolling L1 on which the transactions in landed have
+// receipts until an L1 reorg drops them.
+type reorged struct {
+	rolling
+	landed  map[common.Hash]bool
+	dropped atomic.Bool
+}
+
+func (r *reorged) Receipt(_ context.Context, h common.Hash) (*l1.Receipt, error) {
+	if !r.dropped.Load() && r.landed[h] {
+		return &l1.Receipt{Status: 1}, nil
+	}
+	return nil, nil
+}
+
+// TestComposerKeepsAPartialBatchItCannotRead: a partial batch whose rebuilt
+// block cannot be read waits for the next call.
+func TestComposerKeepsAPartialBatchItCannotRead(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 8), 8, &triggers{landed: map[common.Hash]bool{}})
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	require.NoError(t, pool.Push(held(addr(0xa), 0, Outbound, 1), 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 9, Post: common.Hash{0xf}, Txs: pool.PopN(1)})
+	h.c.ledger.MarkSettledPartial(9, common.Hash{0xf})
+	h.cursor.Store(9)
+	h.c.RecoverFailed(t.Context())
+	r, _ := h.resolution(9)
+	require.Equal(t, SettledPartial, r)
+	require.Zero(t, pool.Len())
+}
+
+// TestComposerAuditFailureLetsGo: a finality audit that cannot read L1 lets
+// the settlement's transactions go.
+func TestComposerAuditFailureLetsGo(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 8), 8, &triggers{failed: errors.New("node down")})
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	out := held(addr(0xa), 0, Outbound, 1)
+	require.NoError(t, pool.Push(out, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Txs: pool.PopN(1)})
+	h.c.ledger.MarkSettled(8, common.Hash{0xf})
+	h.cursor.Store(8)
+	h.final.Store(8)
+	h.c.RecoverFailed(t.Context())
+	h.c.Close()
+	require.False(t, pool.Holds(out.Hash))
+	require.Zero(t, pool.Len())
+}

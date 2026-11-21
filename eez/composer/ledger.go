@@ -225,7 +225,7 @@ func (e *entry[T]) mark(r Resolution, slotSkipped bool) {
 
 // PartialToDispose returns the lowest SettledPartial batch at or below
 // cursor, left in place until ClaimPartial: derivation has rebuilt its
-// block, whose nonces show which transactions ran.
+// block, which shows which transactions ran.
 func (l *Ledger[T]) PartialToDispose(cursor uint64) (Posted[T], bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
