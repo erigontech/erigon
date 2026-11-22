@@ -2409,7 +2409,7 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 type taskVersion struct {
 	*execTask
 	version      state.Version
-	versionMap   *state.VersionMap
+	blockState   *state.BlockState
 	profile      bool
 	stats        map[int]ExecutionStat
 	statsMutex   *sync.Mutex
@@ -2475,7 +2475,7 @@ func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer
 	if err := ev.execTask.Reset(evm, ibs, callTracer); err != nil {
 		return err
 	}
-	ibs.RebindVersionMap(ev.versionMap)
+	ibs.RebindVersionMap(ev.blockState.VersionMap)
 	// Point the per-task reader at this task's block: it reads finished-but-uncommitted
 	// blocks < this one in front of the raw base.
 	if r, ok := ibs.StateReader().(*state.PrevBlockReader); ok {
@@ -3659,7 +3659,7 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 
 			tv := &taskVersion{
 				execTask:     execTask,
-				versionMap:   be.blockState.VersionMap,
+				blockState:   be.blockState,
 				profile:      be.profile,
 				stats:        be.stats,
 				statsMutex:   &be.Mutex,

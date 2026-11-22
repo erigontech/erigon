@@ -122,7 +122,7 @@ func newParallelResultTestBlock(t *testing.T, pe *parallelExecutor, config *chai
 	task := &taskVersion{
 		execTask:   eTask,
 		version:    state.Version{BlockNum: 1, TxNum: 1, TxIndex: 0},
-		versionMap: be.blockState.VersionMap,
+		blockState: be.blockState,
 	}
 	return be, task
 }

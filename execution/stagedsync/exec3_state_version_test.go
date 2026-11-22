@@ -83,7 +83,7 @@ func TestHistoryTaskSeedsTheFirstTaskOrigin(t *testing.T) {
 			task := &taskVersion{
 				execTask:   &execTask{Task: &exec.TxTask{Header: &types.Header{Number: *uint256.NewInt(1)}, TxIndex: -1, Logger: log.New()}, index: txIndex - c.firstTask},
 				version:    state.Version{BlockNum: 1, TxNum: blockStart + uint64(txIndex) + 1, TxIndex: txIndex},
-				versionMap: versionMap,
+				blockState: &state.BlockState{VersionMap: versionMap},
 			}
 			reader.SetTxNum(task.version.TxNum)
 			require.NoError(t, task.Reset(&vm.EVM{}, ibs, nil))
