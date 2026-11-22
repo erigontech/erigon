@@ -61,7 +61,7 @@ func TestDecide(t *testing.T) {
 		want         emission
 	}{
 		{"steady", 0, 8, sequencer.ModeSteady, target, false, emission{kind: emitAnchor, cursor: 0, sync: 8, target: post.Target{Block: target, Time: ts}}},
-		{"catch-up", 0, 8, sequencer.ModeCatchup, target, false, emission{kind: emitAnchor, cursor: 0, sync: 8}},
+		{"catch-up", 0, 8, sequencer.ModeCatchup, target, false, emission{kind: emitAnchor, cursor: 0, sync: 8, target: post.Target{Block: target}}},
 		{"empty", 0, 8, sequencer.ModeEmpty, 0, false, emission{}},
 		{"in flight", 0, 8, sequencer.ModeSteady, target, true, emission{}},
 		{"cap", 4, 12, sequencer.ModeSteady, target, false, emission{kind: emitAnchor, cursor: 4, sync: 12, target: post.Target{Block: target, Time: ts}}},
@@ -395,7 +395,7 @@ func TestComposerCatchup(t *testing.T) {
 	h := newHarness(t, newTestChain(t, 8), 8, nil)
 	before := time.Now()
 	h.slot(t, 8, 50, sequencer.ModeCatchup)
-	h.requireWindow(t, 0, 1, 8, post.Target{})
+	h.requireWindow(t, 0, 1, 8, post.Target{Block: 50})
 	p := h.prover.proven[0]
 	require.Zero(t, p.per)
 	require.WithinRange(t, p.start, before.Add(time.Second), time.Now().Add(time.Second))
@@ -424,7 +424,7 @@ func TestComposerChunk(t *testing.T) {
 }
 
 // TestComposerFallsBackToAChunk: an anchor over the gas limit gives way to
-// the largest chunk within it, unpinned.
+// the largest chunk within it, unpinned at the slot's L1 block.
 func TestComposerFallsBackToAChunk(t *testing.T) {
 	chain := newTestChain(t, 12, 9, 10, 11)
 	h := newHarness(t, chain, 12, nil)
@@ -436,7 +436,7 @@ func TestComposerFallsBackToAChunk(t *testing.T) {
 	require.Len(t, h.targets(t), 1)
 	p := h.prover.proven[0]
 	require.Equal(t, [2]uint64{1, 8}, [2]uint64{p.from, p.to})
-	require.Equal(t, post.Target{}, h.targets(t)[0])
+	require.Equal(t, post.Target{Block: 50}, h.targets(t)[0])
 	require.Equal(t, h.c.cfg.MaxGas, h.poster.gas[0])
 }
 

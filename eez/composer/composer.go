@@ -196,7 +196,10 @@ type emission struct {
 // decide returns the posting of the Sync slot at sync on cursor: none while
 // a batch is in flight; a chunk when the backlog exceeds MaxBlocks, which an
 // empty slot posts too; else an anchor, unpinned in a catch-up slot. target
-// is the L1 block the sequencer aims the slot at, zero for any.
+// is the L1 block the sequencer aims the slot at, zero for any. A catch-up
+// anchor aims at it too: a builder bidding only on blocks built late in
+// their slot never bids on a bundle queued before its block's slot opened,
+// unless more orders arrive.
 func (c *Composer) decide(cursor, sync, ts, target uint64, mode sequencer.Mode, inFlight bool) emission {
 	switch {
 	case inFlight:
@@ -206,7 +209,7 @@ func (c *Composer) decide(cursor, sync, ts, target uint64, mode sequencer.Mode, 
 	case mode == sequencer.ModeEmpty:
 		return emission{}
 	case mode == sequencer.ModeCatchup:
-		return emission{kind: emitAnchor, cursor: cursor, sync: sync}
+		return emission{kind: emitAnchor, cursor: cursor, sync: sync, target: post.Target{Block: target}}
 	}
 	return emission{kind: emitAnchor, cursor: cursor, sync: sync, target: post.Target{Block: target, Time: ts}}
 }
@@ -274,7 +277,7 @@ func (c *Composer) SyncCommitted(ctx context.Context, sync *types.Header) {
 		errors.As(err, &unproven)
 		c.logger.Warn("[eez] anchor batch not posted, posting a chunk", "event", "eez.composer.anchor.failed",
 			"cursor", e.cursor, "sync", e.sync, "err", err)
-		e.cursor, e.target = c.cursor(), post.Target{}
+		e.cursor, e.target = c.cursor(), post.Target{Block: e.target.Block}
 	}
 	if err := c.chunk(ctx, e.cursor, e.sync, e.target); err != nil {
 		if unproven == nil {
