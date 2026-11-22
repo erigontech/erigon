@@ -1231,7 +1231,7 @@ func checkCommitmentTrieMatchesFiles() error {
 	cfg := statecfg.Schema.CommitmentDomain
 	if cfg.CommitmentV3Records != statecfg.ExperimentalCommitmentV3 {
 		if statecfg.ExperimentalCommitmentV3 {
-			return errors.New("commitment domain files are legacy and ERIGON_COMMITMENT_V3=true; run `integration commitment convert --v3` without it first")
+			return errors.New("commitment domain files are legacy and ERIGON_COMMITMENT_V3=true; run `integration commitment convert --v3` first")
 		}
 		return errors.New("commitment domain files are v3 and ERIGON_COMMITMENT_V3 is off; set ERIGON_COMMITMENT_V3=true")
 	}

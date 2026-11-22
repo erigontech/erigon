@@ -97,13 +97,24 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 	return g.Wait()
 }
 
-func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, workers, fanOutMin int) ([32]byte, deltaParts, error) {
-	storageWorkers, accountWorkers := workers, workers
-	if workers <= 0 {
-		workers = runtime.GOMAXPROCS(0)
-		storageWorkers = workers * storageOversubscribe
-		accountWorkers = min(workers, accountPlaneFanout)
+// storageWorkerCount is the storage phase's worker count: workers when set, else procs oversubscribed, at most maxWorkers when set.
+func storageWorkerCount(workers, procs, maxWorkers int) int {
+	n := workers
+	if n <= 0 {
+		n = procs * storageOversubscribe
 	}
+	if maxWorkers > 0 {
+		n = min(n, maxWorkers)
+	}
+	return n
+}
+
+func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, workers, storageWorkersMax, fanOutMin int) ([32]byte, deltaParts, error) {
+	accountWorkers := workers
+	if workers <= 0 {
+		accountWorkers = min(runtime.GOMAXPROCS(0), accountPlaneFanout)
+	}
+	storageWorkers := storageWorkerCount(workers, runtime.GOMAXPROCS(0), storageWorkersMax)
 	storageRoots := make([][32]byte, len(storage))
 	storageParts := make([]deltaParts, len(storage))
 	accountFold := foldPlan{ctx: ctx, factory: factory, workers: accountWorkers}

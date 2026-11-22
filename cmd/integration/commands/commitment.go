@@ -62,6 +62,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -330,6 +331,8 @@ var cmdCommitmentRebuild = &cobra.Command{
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		defer debug.Exit()
 		skipFilesDBGapCheck = statecfg.ExperimentalCommitmentV3
+		// The rebuild writes a file per shard and per merge; in-memory existence filters and hash indexes of those files grow the heap until the run ends.
+		statecfg.Schema.CommitmentDomain.ExistenceFilter = statecfg.ExistenceFilterRandom
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			return fmt.Errorf("opening DB: %w", err)
@@ -500,6 +503,27 @@ var cmdCommitmentPrint = &cobra.Command{
 	},
 }
 
+// commitmentFileState describes the commitment state record of the .kv file whose last txNum is maxTxNum.
+func commitmentFileState(acRo *dbstate.AggregatorRoTx, maxTxNum uint64) (string, error) {
+	v3 := statecfg.Schema.CommitmentDomain.CommitmentV3Records
+	key := commitment.KeyCommitmentState
+	if v3 {
+		key = commitment.KeyCommitmentV3State
+	}
+	record, found, _, fileEnd, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, key, maxTxNum)
+	if err != nil {
+		return "", fmt.Errorf("failed to get the commitment state from files: %w", err)
+	}
+	if !found || fileEnd != maxTxNum+1 { // an older file's record is not this file's state
+		return "no state record", nil
+	}
+	if !v3 {
+		return commitment.HexTrieStateToShortString(record)
+	}
+	blockNum, txNum, root, err := commitment.DecodeCommitmentV3State(record)
+	return fmt.Sprintf("block: %d txn: %d rootHash: %x", blockNum, txNum, root), err
+}
+
 func printCommitment(db kv.TemporalRwDB, ctx context.Context) error {
 	if err := checkCommitmentTrieMatchesFiles(); err != nil {
 		return err
@@ -522,14 +546,9 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context) error {
 	for _, f := range commitmentFiles {
 		name := filepath.Base(f.Fullpath())
 		count := acRo.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
-		rootNodePrefix := []byte("state")
-		rootNode, _, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, rootNodePrefix, f.EndRootNum()-1)
+		rootString, err := commitmentFileState(acRo, f.EndRootNum()-1)
 		if err != nil {
-			return fmt.Errorf("failed to get root node from files: %w", err)
-		}
-		rootString, err := commitment.HexTrieStateToShortString(rootNode)
-		if err != nil {
-			return fmt.Errorf("failed to extract state root from root node: %w", err)
+			return fmt.Errorf("%s: %w", name, err)
 		}
 		fmt.Printf("%28s: prefixes %8s %s\n", name, common.PrettyCounter(count), rootString)
 	}
@@ -598,7 +617,7 @@ Examples:
 		if convertRestore && convertContinue {
 			return errors.New("--continue is mutually exclusive with --restore")
 		}
-		if statecfg.ExperimentalCommitmentV3 {
+		if statecfg.ExperimentalCommitmentV3 && !convertV3 && !convertRestore { // --v3 opens the files at their on-disk version; --restore opens none
 			return errors.New("commitment convert opens legacy commitment files; run it without ERIGON_COMMITMENT_V3=true")
 		}
 		if convertRestore {
@@ -703,10 +722,12 @@ Examples:
   integration commitment visualize /path/to/commitment.kv
   integration commitment visualize --output /tmp/analysis /path/to/*.kv
   integration commitment visualize --state /path/to/commitment.kv  # print state only`,
-	Args: cobra.MinimumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	Args:         cobra.MinimumNArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		_ = debug.SetupCobra(cmd, "integration")
-		visualizeCommitmentFiles(args)
+		defer debug.Exit()
+		return visualizeCommitmentFiles(args)
 	},
 }
 
@@ -1406,7 +1427,7 @@ func printBenchResults(name string, stats BenchStats, totalSize int64, keyCount 
 	fmt.Println()
 }
 
-func visualizeCommitmentFiles(files []string) {
+func visualizeCommitmentFiles(files []string) error {
 	sema := make(chan struct{}, visualizeConcurrency)
 	for i := 0; i < cap(sema); i++ {
 		sema <- struct{}{}
@@ -1414,6 +1435,7 @@ func visualizeCommitmentFiles(files []string) {
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	var failed []error
 
 	page := components.NewPage()
 	page.SetLayout(components.PageFlexLayout)
@@ -1432,6 +1454,9 @@ func visualizeCommitmentFiles(files []string) {
 			stat, err := processCommitmentFile(fpath)
 			if err != nil {
 				fmt.Printf("processing failed: %v", err)
+				mu.Lock()
+				failed = append(failed, err)
+				mu.Unlock()
 				return
 			}
 
@@ -1447,8 +1472,8 @@ func visualizeCommitmentFiles(files []string) {
 	}
 	wg.Wait()
 	fmt.Println()
-	if visualizePrintState {
-		return
+	if visualizePrintState || len(failed) == len(files) {
+		return errors.Join(failed...)
 	}
 
 	dir := filepath.Dir(files[0])
@@ -1478,6 +1503,7 @@ func visualizeCommitmentFiles(files []string) {
 	if err := page.Render(io.MultiWriter(f)); err != nil {
 		panic(err)
 	}
+	return errors.Join(failed...)
 }
 
 type visualizeOverallStat struct {
@@ -1548,8 +1574,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		}
 		stat := commitment.DecodeBranchAndCollectStat(key, val, tv)
 		if stat == nil {
-			err := fmt.Errorf("failed to decode branch: %x %x", key, val)
-			panic(err)
+			return fmt.Errorf("failed to decode branch: %x %x", key, val)
 		}
 		keysSink <- *stat
 	}
@@ -1557,15 +1582,12 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 }
 
 func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
+	if v, _ := version.ParseVersion(filepath.Base(fpath)); v.Major >= 3 {
+		return nil, fmt.Errorf("%s holds v3 commitment records; visualize decodes legacy branches only", filepath.Base(fpath))
+	}
 	stats := make(chan commitment.BranchStat, 8)
-	errch := make(chan error)
-	go func() {
-		err := extractKVPairFromCompressed(fpath, stats)
-		if err != nil {
-			errch <- err
-		}
-		close(errch)
-	}()
+	errch := make(chan error, 1)
+	go func() { errch <- extractKVPairFromCompressed(fpath, stats) }()
 
 	totals := newVisualizeOverallStat()
 	for s := range stats {
@@ -1585,12 +1607,8 @@ func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
 		totals.prefixes[s.KeySize] = ps
 	}
 
-	select {
-	case err := <-errch:
-		if err != nil {
-			return nil, err
-		}
-	default:
+	if err := <-errch; err != nil {
+		return nil, err
 	}
 	return totals, nil
 }
