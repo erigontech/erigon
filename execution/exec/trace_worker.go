@@ -75,7 +75,7 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine rules.EngineReade
 		tracer:       tracer,
 		evm:          vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, cc, vm.Config{}),
 		vmConfig:     &vm.Config{NoBaseFee: true},
-		ibs:          state.NewVersionedCall(stateReader),
+		ibs:          state.New(stateReader),
 	}
 	if tracer != nil {
 		ie.vmConfig.Tracer = tracer.TracingHooks()
