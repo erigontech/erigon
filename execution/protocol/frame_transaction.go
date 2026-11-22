@@ -38,7 +38,8 @@ import (
 // and causes all simulated changes to be reverted.
 func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refunds bool, validation *frameValidationTracer) (result *evmtypes.ExecutionResult, err error) {
 	rules := st.evm.ChainRules()
-	if !rules.IsBogota {
+	// Frame fee accounting uses the block's execution base fee, which AuRa can waive for certified senders.
+	if !rules.IsBogota || rules.IsAura {
 		return nil, types.ErrTxTypeNotSupported
 	}
 	intrinsic, floor, limits, err := tx.GasLimits()

@@ -414,13 +414,13 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 		free      bool
 		service   bool
 		feeCap    uint64
-		wantError bool
+		wantErr   error
 	}{
-		{name: "normal validation", wantError: true},
+		{name: "normal validation", wantErr: types.ErrFrameFeeBudget},
 		{name: "unpriced call", noBaseFee: true},
-		{name: "priced call", noBaseFee: true, feeCap: 1, wantError: true},
+		{name: "priced call", noBaseFee: true, feeCap: 1, wantErr: types.ErrFrameFeeBudget},
 		{name: "free message", free: true},
-		{name: "service transaction", service: true},
+		{name: "AuRa service transaction", service: true, wantErr: types.ErrTxTypeNotSupported},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			evm, tx := frameTestEnv(t)
@@ -432,7 +432,10 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 			blockCtx, config := evm.Context, evm.Config()
 			blockCtx.BaseFee.SetUint64(100)
 			config.NoBaseFee = test.noBaseFee
-			evm.ResetBetweenBlocks(blockCtx, evm.TxContext, ibs, config, evm.ChainRules())
+			if test.service {
+				evm.ChainConfig().Aura = &chain.AuRaConfig{}
+			}
+			evm.ResetBetweenBlocks(blockCtx, evm.TxContext, ibs, config, blockCtx.Rules(evm.ChainConfig()))
 			burn := common.HexToAddress("0xb000")
 			if test.free || test.service {
 				evm.ChainConfig().BurntContract = map[string]common.Address{"0": burn}
@@ -442,14 +445,14 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 			msg.SetIsFree(test.free)
 			result, err := ApplyMessage(evm, msg, NewGasPool(30_000_000, 0), true, false, &serviceTxEngine{service: test.service})
 			require.Equal(t, test.free, msg.IsFree())
-			if test.wantError {
-				require.ErrorIs(t, err, types.ErrFrameFeeBudget)
+			if test.wantErr != nil {
+				require.ErrorIs(t, err, test.wantErr)
 				return
 			}
 			require.NoError(t, err)
 			require.NoError(t, result.Err)
 			require.True(t, msg.GasPrice().IsZero())
-			if test.free || test.service {
+			if test.free {
 				require.True(t, result.BurntContractAddress.IsNil())
 			}
 			balance, err := ibs.GetBalance(sender)

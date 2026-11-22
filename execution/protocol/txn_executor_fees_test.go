@@ -114,6 +114,12 @@ func TestTransactionFeeDistribution(t *testing.T) {
 					executor := NewTxnExecutor(evm, msg, NewGasPool(blockGas, params.GasPerBlob))
 					executor.noFeeBurnAndTip = deferred
 					result, err := executor.Execute(true, false)
+					if kind == "frame" && test.aura {
+						require.ErrorIs(t, err, types.ErrTxTypeNotSupported)
+						_, err = ValidateFrameTransaction(evm, msg.FrameTransaction())
+						require.ErrorIs(t, err, types.ErrTxTypeNotSupported)
+						return
+					}
 					require.NoError(t, err)
 					require.NoError(t, result.Err)
 					wantTip := result.ReceiptGasUsed * test.wantTip
