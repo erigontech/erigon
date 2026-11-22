@@ -654,7 +654,7 @@ func TestComposerFlags(t *testing.T) {
 		"no sequencer":              {without("--eez.sequencer", "--eez.proof.time"), "--eez.composer requires --eez.sequencer"},
 		"flag without composer":     {append(slices.Clone(sequencer), "--eez.batch.maxblocks=120"), "--eez.batch.maxblocks requires --eez.composer"},
 		"no poster key":             {without("--eez.poster.keyfile"), "--eez.poster.keyfile"},
-		"no prover":                 {without("--eez.attesters"), "--eez.attesters"},
+		"no prover":                 {without("--eez.attesters"), "--eez.composer requires --eez.attesters"},
 		"no attester":               {without("--eez.attester.address"), "--eez.attester.address"},
 		"no proof system":           {without("--eez.proofsystem"), "--eez.proofsystem"},
 		"no L1 node":                {append([]string{"--eez.enabled", "--eez.l1.kv=127.0.0.1:9090"}, without("--eez.enabled", "--eez.l1.rpc")...), "--eez.l1.rpc"},

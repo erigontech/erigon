@@ -56,20 +56,23 @@ func TestReadRegistration(t *testing.T) {
 	_, err = l1.ReadRegistration(t.Context(), c, registry, 2, []common.Address{a, b}, at)
 	require.ErrorIs(t, err, l1.ErrNoManager)
 
-	for name, edit := range map[string]func([]recording.CallResult) []recording.CallResult{
-		"a read unanswered": func(rs []recording.CallResult) []recording.CallResult { return rs[:len(rs)-1] },
-		"a threshold above 64 bits": func(rs []recording.CallResult) []recording.CallResult {
+	for name, c := range map[string]struct {
+		edit func([]recording.CallResult) []recording.CallResult
+		want string
+	}{
+		"a read unanswered": {func(rs []recording.CallResult) []recording.CallResult { return rs[:len(rs)-1] }, "signer of"},
+		"a threshold above 64 bits": {func(rs []recording.CallResult) []recording.CallResult {
 			rs[1].Return = word([]byte{1, 0, 0, 0, 0, 0, 0, 0, 0})
 			return rs
-		},
-		"a signer word with high bytes": func(rs []recording.CallResult) []recording.CallResult {
+		}, "threshold return above 64 bits"},
+		"a signer word with high bytes": {func(rs []recording.CallResult) []recording.CallResult {
 			rs[4].Return = append([]byte{1}, make([]byte, 31)...)
 			return rs
-		},
+		}, "signer return is not an address"},
 	} {
-		c, err := recording.NewMemoryChain(1, &recording.Block{Header: l1.Header{Hash: at}, Calls: edit(calls(manager))})
+		chain, err := recording.NewMemoryChain(1, &recording.Block{Header: l1.Header{Hash: at}, Calls: c.edit(calls(manager))})
 		require.NoError(t, err, name)
-		_, err = l1.ReadRegistration(t.Context(), c, registry, 2, []common.Address{a, b}, at)
-		require.Error(t, err, name)
+		_, err = l1.ReadRegistration(t.Context(), chain, registry, 2, []common.Address{a, b}, at)
+		require.ErrorContains(t, err, c.want, name)
 	}
 }
