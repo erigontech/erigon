@@ -106,6 +106,8 @@ type journalEntry struct {
 // exception or revertal request.
 type journal struct {
 	dirties map[accounts.Address]int // Dirty accounts and the number of changes
+	// lastDirty is the last address a lookup found in dirties. Only Reset and revert remove entries, so they reset it.
+	lastDirty accounts.Address
 	entries []journalEntry           // Current changes tracked by the journal
 	epoch   uint64                   // Moves on every revert, reset and unjournalled state change
 }
@@ -126,6 +128,7 @@ func (j *journal) Reset() {
 	clear(j.entries)
 	j.entries = j.entries[:0]
 	clear(j.dirties)
+	j.lastDirty = accounts.NilAddress
 }
 
 // push appends e, doubling the capacity when it is full: append grows a large slice by
@@ -156,6 +159,9 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 		if addr, isdirty := j.entries[i].dirtied(); isdirty {
 			if j.dirties[addr]--; j.dirties[addr] == 0 {
 				delete(j.dirties, addr)
+				if j.lastDirty == addr {
+					j.lastDirty = accounts.NilAddress
+				}
 			}
 		}
 	}
@@ -612,4 +618,16 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 	}
 	panic(fmt.Sprintf("revert: unknown journal entry kind %d", je.kind))
+}
+
+// isDirty reports whether addr has a journalled change; the last address found dirty skips the map lookup.
+func (j *journal) isDirty(addr accounts.Address) bool {
+	if addr == j.lastDirty && addr != accounts.NilAddress {
+		return true
+	}
+	if _, ok := j.dirties[addr]; ok {
+		j.lastDirty = addr
+		return true
+	}
+	return false
 }

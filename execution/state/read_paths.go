@@ -996,8 +996,7 @@ func warmSource(src ReadSource) bool { return src == MapRead || src == StorageRe
 // of it is a stable snapshot the read-once fast path can serve (own writes take
 // precedence and must go through the full path). Same gate as versionedWriteHit.
 func (ibs *IntraBlockState) warmReadable(addr accounts.Address) bool {
-	_, dirty := ibs.journal.dirties[addr]
-	return !dirty
+	return !ibs.journal.isDirty(addr)
 }
 
 // warmField serves a repeat read of an account field without the version-map
