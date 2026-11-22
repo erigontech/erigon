@@ -44,7 +44,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/app"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -141,8 +143,8 @@ func init() {
 	withConvertFlags(cmdCommitmentConvert)
 	commitmentCmd.AddCommand(cmdCommitmentConvert)
 
-	withChain(cmdCommitmentVerify)
-	withDataDir2(cmdCommitmentVerify)
+	flags.DirVar(cmdCommitmentVerify.Flags(), &datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
+	must(cmdCommitmentVerify.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmdCommitmentVerify.Flags().UintSliceVar(&verifyAsOf, "asof", nil, "also fold the records as of these txNums")
 	commitmentCmd.AddCommand(cmdCommitmentVerify)
 
@@ -654,9 +656,11 @@ func commitmentConvert(agg *dbstate.Aggregator, ctx context.Context, logger log.
 	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
 }
 
-// openStateFiles opens the state snapshot files of dirs without chaindata.
 func openStateFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*dbstate.Aggregator, error) {
 	if err := dbstate.CheckSnapshotFileVersions(dirs); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dirs.Tmp, dir.DirPerm); err != nil { // sorts and folds spill there
 		return nil, err
 	}
 	settings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
@@ -690,9 +694,6 @@ func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, o
 		if hasHistory {
 			statecfg.EnableHistoricalCommitment()
 		}
-	}
-	if err := os.MkdirAll(dirs.Tmp, dir.DirPerm); err != nil { // the converter's sorts spill there
-		return err
 	}
 	agg, err := openStateFiles(ctx, dirs, logger)
 	if err != nil {
