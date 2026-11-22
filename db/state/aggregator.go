@@ -1846,26 +1846,10 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return ceiling
 }
 
-// AssertFilesGap reports a gap in the files on disk: visible files then stop before the files end.
+// AssertFilesGap reports a gap in the files on disk: the visible files of this tx stop before the files end.
 func (at *AggregatorRoTx) AssertFilesGap() error {
-	a := at.a
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	filesEnd := a.dirtyFilesEndTxNumMinimax()
-	v := a.visible.Load()
-	var visibleEnd uint64 // every visible list is cut at the same end, so the longest one shows it
-	for _, d := range v.d {
-		if d != nil {
-			visibleEnd = max(visibleEnd, d.files.EndTxNum())
-		}
-	}
-	for _, ii := range v.iis {
-		if ii != nil {
-			visibleEnd = max(visibleEnd, ii.files.EndTxNum())
-		}
-	}
-	if visibleEnd < filesEnd {
-		return fmt.Errorf("a gap in files: visible files end at txNum %d, files reach %d", visibleEnd, filesEnd)
+	if v := at.visible; v.visibleEnd < v.filesEnd {
+		return fmt.Errorf("a gap in files: visible files end at txNum %d, files reach %d", v.visibleEnd, v.filesEnd)
 	}
 	return nil
 }
@@ -1884,6 +1868,8 @@ type aggregatorVisible struct {
 	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
+	visibleEnd   uint64                          // every list is cut here; below filesEnd means a gap
+	filesEnd     uint64                          // dirtyFilesEndTxNumMinimax when this generation was built
 
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
@@ -1957,6 +1943,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 		a.logger.Warn("[agg] a gap in files: every list stops at the first one that stops", "visibleEnd", toTxNum, "filesEnd", dirtyEnd)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
+	next.visibleEnd, next.filesEnd = toTxNum, dirtyEnd
 
 	if a.visibilityLoweringForbidden.Load() {
 		prev := a.visible.Load()

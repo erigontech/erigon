@@ -22,10 +22,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -33,42 +31,35 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestCheckCommitmentRootFailsWithoutVisibleCommitmentFile(t *testing.T) {
 	testCheckCommitmentRootFailsOnAGap(t, 2, "-commitment.")
 }
 
-// A gap after the first files also fails: the visible files stop before it.
 func TestCheckCommitmentRootFailsOnAGapAfterTheFirstFiles(t *testing.T) {
 	testCheckCommitmentRootFailsOnAGap(t, 7, "-commitment.4-6.")
 }
 
-func testCheckCommitmentRootFailsOnAGap(t *testing.T, steps uint64, removed string) {
-	ctx, logger := t.Context(), log.New()
+func TestAssertFilesGapPassesOnFilesWithoutAGap(t *testing.T) {
+	db, _, _ := buildCommitmentFiles(t, 7)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, state.AggTx(tx).AssertFilesGap())
+}
+
+func buildCommitmentFiles(t *testing.T, steps uint64) (kv.TemporalRwDB, *state.Aggregator, datadir.Dirs) {
 	const stepSize = uint64(10)
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	writeAndBuild(t, t.Context(), db, agg, steps*stepSize)
+	return db, agg, dirs
+}
 
-	tx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
-	require.NoError(t, err)
-	defer sd.Close()
-	for txNum := uint64(1); txNum <= steps*stepSize; txNum++ {
-		acc := accounts.NewAccount()
-		acc.Balance = *uint256.NewInt(txNum)
-		addr := common.BigToAddress(uint256.NewInt(txNum).ToBig())
-		require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&acc), txNum, nil))
-	}
-	require.NoError(t, sd.Flush(ctx, tx))
-	require.NoError(t, tx.Commit())
-	require.NoError(t, agg.BuildFiles(db, steps*stepSize, unboundedFinalityCtx))
-
+func testCheckCommitmentRootFailsOnAGap(t *testing.T, steps uint64, removed string) {
+	db, agg, dirs := buildCommitmentFiles(t, steps)
 	agg.CloseFilesNoReopen()
 	entries, err := os.ReadDir(dirs.SnapDomain)
 	require.NoError(t, err)
@@ -82,7 +73,7 @@ func testCheckCommitmentRootFailsOnAGap(t *testing.T, steps uint64, removed stri
 	require.NotZero(t, n, "no %s file to remove", removed)
 	require.NoError(t, agg.ReloadFiles())
 
-	err = integrity.CheckCommitmentRoot(ctx, db, nil, true, logger)
+	err = integrity.CheckCommitmentRoot(t.Context(), db, nil, true, log.New())
 	require.ErrorIs(t, err, integrity.ErrIntegrity)
 	require.ErrorContains(t, err, "a gap in files")
 }
