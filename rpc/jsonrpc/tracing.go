@@ -336,6 +336,9 @@ func prepareTraceCallState[I int | hexutil.Uint](ctx context.Context, api *Debug
 		var result traceCallState
 		blockNumber, hash, isLatest, err := rpchelper.ResolveExecutedBlock(ctx, true, block, tx, canonicalViewReader{api._blockReader})
 		if err != nil {
+			if _, ok := errors.AsType[*rpchelper.BlockNotExecutedError](err); ok {
+				return result, err
+			}
 			return result, fmt.Errorf("get block number: %w", err)
 		}
 		var minTxNum uint64
