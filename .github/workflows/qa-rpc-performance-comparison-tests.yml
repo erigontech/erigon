@@ -909,7 +909,7 @@ jobs:
             "$RUN_ID-eth_createAccessList_gen" "$RUN_ID-eth_getLogs_gen" "$RUN_ID-eth_getLogs_head" "$RUN_ID-eth_getLogs_topics" \
             "$RUN_ID-eth_getLogs_wide" "$RUN_ID-eth_getLogs_latest" "$RUN_ID-eth_getBlockReceipts_latest" \
             "$RUN_ID-eth_getBlockByNumber_latest" "$RUN_ID-eth_getBlockReceipts_gen" "$RUN_ID-eth_getBlockByNumber_gen" \
-            "$RUN_ID-eth_subscribe_newHeads" "$RUN_ID-eth_subscribe"; do
+            "$RUN_ID-eth_subscribe_newHeads" "$RUN_ID-eth_subscribe_classes"; do
             python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$run_id" --chain "$NETWORK" --signal-error "workflow failed"
           done
 

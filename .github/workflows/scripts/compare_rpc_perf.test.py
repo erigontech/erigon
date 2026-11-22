@@ -529,6 +529,17 @@ with tempfile.TemporaryDirectory() as tmp:
 
 with tempfile.TemporaryDirectory() as tmp:
     write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "transactionReceipts fan-out indexer": api(0.63, 2, 3, 10),
+        "transactionReceipts vs first newHeads indexer": api(4, 8, 9, 10)})]}])
+    write_result(tmp, "nethermind", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "transactionReceipts fan-out indexer": api(0.62, 2, 3, 10),
+        "transactionReceipts per receipt indexer": api(5, 9, 12, 10)})]}])
+    md = mod.render_classes(mod.load_results(tmp), {"eth_subscribe_classes": CLASSES})
+    check("a client that sends one notification per receipt and lacks a receipts measure shows -",
+          "| indexer | transactionReceipts vs first newHeads | 4.00* / 8.00 | - |" in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
         "transactionReceipts fan-out indexer": api(0.63, 2, 3, 10)})]}])
     md = mod.render_overview(mod.overview_results(mod.load_results(tmp)), "p50")
     check("without a client that sends one notification per receipt the legend has no ( )!", "( )!" not in md, md)
@@ -545,18 +556,10 @@ with tempfile.TemporaryDirectory() as tmp:
     patterns = mod.load_patterns(tmp)
     check("the pattern of a test with client classes is loaded", list(patterns) == ["eth_subscribe_classes"], patterns)
     md = mod.render_classes(mod.load_results(tmp), patterns)
-    check("the legend says that the classes split the connections and what each one subscribes to",
-          "The connections are split into 3 classes of clients, by share of the total (90% + 9% + 1% = 100%):" in md
-          and "- **wallet**, 90% of the connections. Each one subscribes to `newHeads`: one notification per new block, "
-              "with its header." in md
-          and "- **dapp**, 9% of the connections. Each one subscribes to `newHeads` and to `logs` filtered by one contract "
-              "address, a different one per connection, taken in turn from 50 addresses active in recent blocks." in md
-          and "- **indexer**, 1% of the connections. Each one subscribes to `newHeads`, to `logs` with no filter (every log "
-              "of every block) and to `transactionReceipts` (all the receipts of a block in one notification)." in md, md)
-    check("each table says how many connections each class has", "500 connections: 450 wallet, 45 dapp, 5 indexer" in md, md)
-    check("the split of the connections is by largest remainder with at least one per class",
-          mod.split_connections(10, [90, 9, 1]) == [8, 1, 1] and mod.split_connections(500, [90, 9, 1]) == [450, 45, 5],
-          mod.split_connections(10, [90, 9, 1]))
+    check("the legend gives the share of each class and the pattern description as rpc_perf writes it",
+          "Client classes, share of the connections: wallet 90%, dapp 9%, indexer 1%." in md
+          and "Pattern: " + CLASSES["description"] in md, md)
+    check("each table says how many connections it has", "\n500 connections\n" in md, md)
     check("the legend explains the four measures",
           "**latency**" in md and "**fan-out**" in md and "**vs first newHeads**" in md and "**vs newHeads**" in md, md)
     check("the table has the measures of each class, p50 / p95 per client, the fastest p50 marked",
