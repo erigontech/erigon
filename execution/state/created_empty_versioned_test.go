@@ -79,7 +79,7 @@ func TestEncodeExistingEmptyRemovals_CreatedSelfDestructSkipsBaseRead(t *testing
 	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, &failingBaseReader{err: errors.New("domain read failed")}))
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
+	ibs.setVersionMap(vm)
 	ver := ibs.Version()
 	writes := newWriteSet(
 		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: ver}, Val: true},

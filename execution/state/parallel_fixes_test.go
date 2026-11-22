@@ -289,7 +289,7 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 
 	ibs := New(&emptyReader{})
 	defer ibs.Close()
-	ibs.SetVersionMap(vm)
+	ibs.setVersionMap(vm)
 	ibs.SetTxContext(100, 0)
 	ibs.SetVersion(0)
 

@@ -91,7 +91,6 @@ func rederiveCall(t *testing.T, code []byte, storageErr error, getHeader GetHead
 		storageErr: storageErr,
 	})
 	defer ibs.Close()
-	ibs.SetVersionMap(state.NewVersionMap(nil))
 
 	config := chain.TestChainBerlinConfig
 	header := &types.Header{Number: *uint256.NewInt(5), GasLimit: 10_000_000, Difficulty: *uint256.NewInt(1)}

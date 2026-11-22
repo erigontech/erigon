@@ -324,7 +324,6 @@ func TestBlockAssemblerRemovesTouchedEmptyAccountBeforeNextTx(t *testing.T) {
 		domains.SetTxNum(2)
 		ibs := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 		defer ibs.Close()
-		ibs.SetVersionMap(state.NewVersionMap(nil))
 		ibs.SetTxContext(1, -1)
 
 		header := types.NewEmptyHeaderForAssembling()

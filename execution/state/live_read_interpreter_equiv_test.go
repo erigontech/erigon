@@ -96,7 +96,7 @@ func TestLiveReadMatchesInterpreter(t *testing.T) {
 			defer ibs.Close()
 			ibs.SetTxContext(0, txIdx)
 			ibs.SetVersion(0)
-			ibs.SetVersionMap(vmLive)
+			ibs.setVersionMap(vmLive)
 
 			liveExists, err := ibs.Exist(addr)
 			require.NoError(t, err)

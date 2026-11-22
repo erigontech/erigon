@@ -310,7 +310,6 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 	stateReader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	ibs := state.New(stateReader)
 	defer ibs.Close()
-	ibs.SetVersionMap(state.NewVersionMap(nil))
 	ibs.SetTxContext(header.Number.Uint64(), -1)
 
 	ba := exec.NewBlockAssembler(exec.AssemblerCfg{ChainConfig: fx.config, Engine: fx.engine}, &exec.AssembledBlock{

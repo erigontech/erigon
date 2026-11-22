@@ -47,7 +47,7 @@ func newNoMaterializeIBS(reader StateReader) (*IntraBlockState, *VersionMap) {
 
 func startNoMaterializeTx(ibs *IntraBlockState, vm *VersionMap, txIndex int) {
 	ibs.Reset()
-	ibs.SetVersionMap(vm)
+	ibs.setVersionMap(vm)
 	ibs.SetTxContext(1, txIndex)
 }
 

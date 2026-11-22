@@ -144,7 +144,6 @@ func TestStateOverridesBalanceDecoding(t *testing.T) {
 
 func newVersionedCallState(reader state.StateReader) *state.IntraBlockState {
 	ibs := state.New(reader)
-	ibs.SetVersionMap(state.NewVersionMap(nil))
 	ibs.SetNoConflictDetection()
 	ibs.SetTxContext(0, 0)
 	return ibs
@@ -288,7 +287,6 @@ func TestFinalizeCallTxRemovesTouchedEmptyAccount(t *testing.T) {
 			addr := accounts.InternAddress(common.HexToAddress("0x0202"))
 			ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
 			defer ibs.Close()
-			ibs.SetVersionMap(state.NewVersionMap(nil))
 			ibs.SetNoConflictDetection()
 			ibs.SetTxContext(block, 0)
 			exists, err := ibs.Exist(addr)
@@ -313,7 +311,6 @@ func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
 			addr := accounts.InternAddress(common.HexToAddress("0x0203"))
 			ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
 			defer ibs.Close()
-			ibs.SetVersionMap(state.NewVersionMap(nil))
 			ibs.SetNoConflictDetection()
 			rules := &chain.Rules{IsSpuriousDragon: true}
 

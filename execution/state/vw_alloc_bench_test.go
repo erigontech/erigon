@@ -319,7 +319,7 @@ func BenchmarkCreatedContractSetCode(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		ibs := NewPooled(reader)
-		ibs.SetVersionMap(NewVersionMap(nil))
+		ibs.setVersionMap(NewVersionMap(nil))
 		ibs.SetTxContext(1, 0)
 		for _, a := range addrs {
 			if err := ibs.CreateAccount(a, true); err != nil {
