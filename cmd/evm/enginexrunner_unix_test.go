@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 )
 
 // Fixtures from a pipe are read once: a pipe cannot be read again or at an offset.
@@ -40,7 +41,7 @@ func TestLoadEngineXGroupsReadsAPipeOnce(t *testing.T) {
 	groups, total, err := loadEngineXGroups(fifo, regexp.MustCompile(""))
 	require.NoError(t, err)
 	require.Equal(t, 1, total)
-	require.NoError(t, os.Remove(fifo))
+	require.NoError(t, dir.RemoveFile(fifo))
 	for _, tests := range groups {
 		def, err := tests[0].definition()
 		require.NoError(t, err)
