@@ -253,6 +253,103 @@ func TestJournalRevert_FrameTransient(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(55), ibs.GetTransientState(addr, key), "revert restores transient storage after a frame reset")
 }
 
+func TestJournalRevert_BalanceCreateOnAbsent(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xba, 0x09})
+	ibs := versionedRevertIBS(&emptyReader{})
+
+	snap := ibs.PushSnapshot()
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeUnspecified))
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists, "AddBalance created the absent account")
+
+	ibs.RevertToSnapshot(snap, nil)
+	exists, err = ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists, "revert removes the account created on the balance path")
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.True(t, bal.IsZero(), "revert restores the absent balance")
+}
+
+func TestJournalRevert_NonceCreateOnAbsent(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xba, 0x0a})
+	ibs := versionedRevertIBS(&emptyReader{})
+
+	snap := ibs.PushSnapshot()
+	require.NoError(t, ibs.SetNonce(addr, 3, tracing.NonceChangeUnspecified))
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists, "SetNonce created the absent account")
+
+	ibs.RevertToSnapshot(snap, nil)
+	exists, err = ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists, "revert removes the account created on the nonce path")
+	nonce, err := ibs.GetNonce(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), nonce, "revert restores the absent nonce")
+}
+
+// A pre-6780 SELFDESTRUCT marks a live contract for end-of-tx deletion but leaves
+// its record readable for the rest of the tx. A same-tx balance or nonce write must
+// not resurrect it as a fresh account: the create path runs only for an absent base,
+// so the code hash and nonce stay the live contract's, not an empty account's.
+func TestSelfdestructThenBalanceKeepsRecord(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xba, 0x0b})
+	code := []byte{0x60, 0x01}
+	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	ibs := versionedRevertIBS(committedAccountReader(addr, 7, 1000, code))
+
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+
+	snap := ibs.PushSnapshot()
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeUnspecified))
+	hash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, codeHash, hash, "a same-tx balance write keeps the destructed contract's code hash")
+	nonce, err := ibs.GetNonce(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), nonce, "a same-tx balance write keeps the destructed contract's nonce")
+
+	ibs.RevertToSnapshot(snap, nil)
+	hash, err = ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, codeHash, hash, "revert leaves the code hash unchanged")
+	nonce, err = ibs.GetNonce(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), nonce, "revert leaves the nonce unchanged")
+}
+
+func TestSelfdestructThenNonceKeepsRecord(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xba, 0x0c})
+	code := []byte{0x60, 0x01}
+	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	ibs := versionedRevertIBS(committedAccountReader(addr, 7, 1000, code))
+
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+
+	snap := ibs.PushSnapshot()
+	require.NoError(t, ibs.SetNonce(addr, 9, tracing.NonceChangeUnspecified))
+	hash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, codeHash, hash, "a same-tx nonce write keeps the destructed contract's code hash")
+
+	ibs.RevertToSnapshot(snap, nil)
+	hash, err = ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, codeHash, hash, "revert leaves the code hash unchanged")
+	nonce, err := ibs.GetNonce(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), nonce, "revert restores the pre-write nonce")
+}
+
 // journalKindRevertCoverage maps every journal entry kind to the test that pins its
 // revert behaviour (or the reason it needs none). TestJournalRevertCoverageComplete
 // asserts the map covers every kind in [0, kindEnd) so a newly added kind cannot land
