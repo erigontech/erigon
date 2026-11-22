@@ -16,18 +16,20 @@ import (
 // keeps the target block's state. The limit accounts for state value files and
 // the oldest retained changeset (the latest commitment block if none remain).
 func CanUnwindToBlockNum(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
-	minUnwindable, err := changeset.ReadLowestUnwindableBlock(tx)
+	oldestChangesetBlock, err := changeset.ReadLowestUnwindableBlock(tx)
 	if err != nil {
 		return 0, err
 	}
-	if minUnwindable == math.MaxUint64 { // no unwindable block found
-		minUnwindable, err = commitmentdb.LatestBlockNumWithCommitment(tx)
-		log.Warn("no unwindable block found from changesets, falling back to latest with commitment", "block", minUnwindable, "err", err)
+	var earliestTarget uint64
+	if oldestChangesetBlock == math.MaxUint64 { // no unwindable block found
+		earliestTarget, err = commitmentdb.LatestBlockNumWithCommitment(tx)
+		log.Warn("no unwindable block found from changesets, falling back to latest with commitment", "block", earliestTarget, "err", err)
 		if err != nil {
 			return 0, err
 		}
-	} else if minUnwindable > 0 {
-		minUnwindable-- // Undoing the block with the oldest changeset restores its parent's state.
+	} else if oldestChangesetBlock > 0 {
+		// Undoing the block with the oldest changeset restores its parent's state.
+		earliestTarget = oldestChangesetBlock - 1
 	}
 	var filesEnd uint64
 	for domain := range kv.DomainLen {
@@ -36,27 +38,27 @@ func CanUnwindToBlockNum(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader) (u
 	if filesEnd > 0 {
 		// Files cover [0, filesEnd). Keep the block containing their last tx,
 		// even when changesets for older blocks are still retained.
-		block, ok, err := txNumsReader.FindBlockNum(context.Background(), tx, filesEnd-1)
+		lastFileBlock, ok, err := txNumsReader.FindBlockNum(context.Background(), tx, filesEnd-1)
 		if err != nil {
 			return 0, err
 		}
 		if !ok {
 			return 0, fmt.Errorf("%w: no block for snapshot tx %d", commitmentdb.ErrBehindCommitment, filesEnd-1)
 		}
-		minUnwindable = max(minUnwindable, block)
+		earliestTarget = max(earliestTarget, lastFileBlock)
 	}
-	return minUnwindable, nil
+	return earliestTarget, nil
 }
 
 // CanUnwindBeforeBlockNum returns blockNum and true if it meets the lower bound
 // from [CanUnwindToBlockNum]. For an older block it returns that bound and false.
 func CanUnwindBeforeBlockNum(blockNum uint64, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader) (unwindableBlockNum uint64, ok bool, err error) {
-	_minUnwindableBlockNum, err := CanUnwindToBlockNum(tx, txNumsReader)
+	earliestTarget, err := CanUnwindToBlockNum(tx, txNumsReader)
 	if err != nil {
 		return 0, false, err
 	}
-	if blockNum < _minUnwindableBlockNum {
-		return _minUnwindableBlockNum, false, nil
+	if blockNum < earliestTarget {
+		return earliestTarget, false, nil
 	}
 	return blockNum, true, nil
 }

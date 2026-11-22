@@ -369,9 +369,8 @@ func (e *ExecModule) unwindIfNeeded(
 	if errLast != nil {
 		return nil, nil, errLast
 	}
-	needsUnwind := unwindTarget < lastCanonicalBlock
-	if needsUnwind {
-		resentTipAheadOfState := isDomainAheadOfBlocks && canonicalHash == blockHash && fcuHeader.Number.Uint64() == lastCanonicalBlock
+	var needsUnwind bool
+	if unwindTarget < lastCanonicalBlock {
 		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx, e.blockReader.TxnumReader())
 		if err != nil && !errors.Is(err, commitmentdb.ErrBehindCommitment) {
 			return nil, nil, err
@@ -381,7 +380,9 @@ func (e *ExecModule) unwindIfNeeded(
 		// tip can return TooFarAway again without unwinding. A higher head on the
 		// same chain can extend the index.
 		needsUnwind = err == nil && unwindTarget >= minUnwindableBlock
-		if !needsUnwind && !resentTipAheadOfState {
+		canSkipUnwindForResentTip := isDomainAheadOfBlocks &&
+			canonicalHash == blockHash && fcuHeader.Number.Uint64() == lastCanonicalBlock
+		if !needsUnwind && !canSkipUnwindForResentTip {
 			if err != nil {
 				e.logger.Warn("reorg target below unindexed snapshot boundary", "unwindTarget", unwindTarget, "err", err)
 			} else {

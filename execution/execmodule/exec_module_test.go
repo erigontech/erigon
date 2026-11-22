@@ -861,21 +861,26 @@ func TestUpdateForkChoiceBelowSnapshotState(t *testing.T) {
 		return nil
 	}))
 	truncateTxNumsBelowCommitment(t, m, false, false)
-	head := chainPack.Blocks[6].Header()
-	for range 2 {
-		result, err := m.UpdateForkChoice(t.Context(), head)
-		require.NoError(t, err)
-		require.Equal(t, execmodule.ExecutionStatusTooFarAway, result.Status)
+	parent, tip := chainPack.Headers[5], chainPack.Headers[6]
+	for _, step := range []struct {
+		name       string
+		head       *types.Header
+		wantStatus execmodule.ExecutionStatus
+	}{
+		{"advance the index", tip, execmodule.ExecutionStatusTooFarAway},
+		{"resend the indexed tip", tip, execmodule.ExecutionStatusTooFarAway},
+		{"request the tip's parent", parent, execmodule.ExecutionStatusReorgTooDeep},
+	} {
+		result, err := m.UpdateForkChoice(t.Context(), step.head)
+		require.NoError(t, err, step.name)
+		require.Equal(t, step.wantStatus, result.Status, step.name)
+		require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+			indexedTip, _, err := rawdbv3.TxNums.Last(tx)
+			require.NoError(t, err, step.name)
+			require.Equal(t, tip.Number.Uint64(), indexedTip, "%s: indexed tip", step.name)
+			return nil
+		}), step.name)
 	}
-	result, err := m.UpdateForkChoice(t.Context(), chainPack.Blocks[5].Header())
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusReorgTooDeep, result.Status)
-	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-		last, _, err := rawdbv3.TxNums.Last(tx)
-		require.NoError(t, err)
-		require.Equal(t, head.Number.Uint64(), last, "rejecting the ancestor must preserve the indexed tip")
-		return nil
-	}))
 }
 
 func truncateTxNumsBelowCommitment(t *testing.T, m *execmoduletester.ExecModuleTester, invalidExecutionProgress, keepChangesets bool) uint64 {
