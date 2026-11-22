@@ -17,6 +17,7 @@
 package prove
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"slices"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/eez/prove/provepb"
@@ -169,9 +171,14 @@ func TestQuorumThreshold(t *testing.T) {
 		r.Keys[rotated.ps] = l1.Key{VKey: rotated.vkey, Signer: common.Address{0xff}}
 		return r, err
 	}
-	_, err = (&Quorum{Members: members(a, unkeyed, rotated), Register: register}).
+	var lines bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&lines, log.TerminalFormatNoColor()))
+	_, err = (&Quorum{Members: members(a, unkeyed, rotated), Register: register, Logger: logger}).
 		ProveBy(t.Context(), quorumWindow(t, a.ps, unkeyed.ps, rotated.ps), time.Now().Add(5*time.Second), 0)
 	require.ErrorIs(t, err, ErrQuorumUnreachable)
+	require.Regexp(t, `WARN.*event=eez.composer.attestation.member_skipped proofSystem=`+unkeyed.ps.Hex()+` .*reason="its proof system is not registered`, lines.String())
+	require.Regexp(t, `WARN.*event=eez.composer.attestation.member_skipped proofSystem=`+rotated.ps.Hex()+` .*reason="its proof system accepts another signer`, lines.String())
 	for _, x := range []*attester{a, unkeyed, rotated} {
 		calls, _ := x.p.last()
 		require.Zero(t, calls, "nobody asked")

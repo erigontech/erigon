@@ -350,7 +350,7 @@ func newComposer(ctx context.Context, chainConfig *chain.Config, cfg *eez.Sequen
 	if id := poster.ChainID(); id != l2.L1ChainID {
 		return nil, nil, nil, nil, fmt.Errorf("%w: --%s is chain %d, not the L1 %d", eez.ErrConfig, eez.L1RPCFlag.Name, id, l2.L1ChainID)
 	}
-	prover, proofSystems := &prove.Quorum{Grace: prove.DefaultGrace}, make([]common.Address, 0, len(c.Attesters))
+	prover, proofSystems := &prove.Quorum{Grace: prove.DefaultGrace, Logger: logger}, make([]common.Address, 0, len(c.Attesters))
 	closeProvers := func() {
 		for _, m := range prover.Members {
 			_ = m.Client.Close()

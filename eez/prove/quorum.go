@@ -29,6 +29,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/protocol"
 )
@@ -61,6 +62,8 @@ type Quorum struct {
 	// systems.
 	Register func(ctx context.Context) (l1.Registration, error)
 	Grace    time.Duration
+	// Logger, when set, takes the members left out of a batch.
+	Logger log.Logger
 }
 
 // ProveBy returns the attestations of w's batch by the members the manager
@@ -78,7 +81,13 @@ func (q *Quorum) ProveBy(ctx context.Context, w *Window, start time.Time, per ti
 	threshold := max(reg.Threshold, 1)
 	var usable []*Member
 	for _, m := range q.Members {
-		if k, ok := reg.Keys[m.ProofSystem]; ok && k.Signer == m.Attester {
+		k, ok := reg.Keys[m.ProofSystem]
+		switch {
+		case !ok:
+			q.skipped(m, "its proof system is not registered on the rollup manager")
+		case k.Signer != m.Attester:
+			q.skipped(m, "its proof system accepts another signer", "signer", k.Signer)
+		default:
 			usable = append(usable, m)
 		}
 	}
@@ -185,6 +194,17 @@ func (e *QuorumError) Error() string {
 		msg += fmt.Sprintf("; refusing %v", *e.Refused)
 	}
 	return msg
+}
+
+// skipped logs m, left out of a batch for reason.
+func (q *Quorum) skipped(m *Member, reason string, ctx ...any) {
+	if q.Logger == nil {
+		return
+	}
+	q.Logger.Warn("[eez] attester not asked for this batch", append([]any{
+		"event", "eez.composer.attestation.member_skipped",
+		"proofSystem", m.ProofSystem, "attester", m.Attester, "reason", reason,
+	}, ctx...)...)
 }
 
 // blocking is how many of the members it takes to keep the threshold out
