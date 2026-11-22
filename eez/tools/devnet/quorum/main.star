@@ -16,7 +16,6 @@ FOLLOWER_P2P_PORT = 31640
 SECOND_SIGNER_KEY = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"
 
 
-
 def run(plan, args):
     eez = args.get("eez", {})
     eth_args = args["ethereum_package"]
