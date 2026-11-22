@@ -669,7 +669,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// here for both producer and follower: newPayload has already put the right SharedDomains in the
 	// validation slot — executing the payload for a follower, adopting the pre-executed generation for a
 	// block this node produced (see ValidatePayload's bridge) — so the FCU need not know which it was.
-	mergeExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash()
+	mergeExtendingFork := e.forkValidator.ReadoptValidated(blockHash, fcuHeader.Number.Uint64())
 	stateFlushingInParallel := mergeExtendingFork && e.syncCfg.ParallelStateFlushing
 	if mergeExtendingFork {
 		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")

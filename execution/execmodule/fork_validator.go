@@ -423,6 +423,20 @@ func (fv *ForkValidator) AdoptPreExecuted(hash common.Hash, number uint64) bool 
 	return fv.adoptPreExecutedLocked(hash, number)
 }
 
+// ReadoptValidated makes the pre-executed generation of an already-validated block the candidate again, for a fork
+// choice that reaches it after a later newPayload took the slot.
+func (fv *ForkValidator) ReadoptValidated(hash common.Hash, number uint64) bool {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	if hash == fv.extendingForkHeadHash {
+		return true
+	}
+	if _, ok := fv.validHashes.Get(hash); !ok {
+		return false
+	}
+	return fv.adoptPreExecutedLocked(hash, number)
+}
+
 // adoptPreExecutedLocked is AdoptPreExecuted with fv.lock held. The generation is LENT, not transferred: the
 // frontier still owns the SharedDomains and is still building the block above it, so every place that would
 // close fv.sharedDom asks preExec.Owns first.
