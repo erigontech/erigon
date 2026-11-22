@@ -1651,11 +1651,7 @@ func (tx *MdbxTx) ResetSequence(bucket string, newValue uint64) error {
 }
 
 func (tx *MdbxTx) ReadSequence(bucket string) (uint64, error) {
-	c, err := tx.statelessCursor(kv.Sequence)
-	if err != nil {
-		return 0, err
-	}
-	_, v, err := c.SeekExact([]byte(bucket))
+	v, err := tx.GetOne(kv.Sequence, []byte(bucket))
 	if err != nil {
 		return 0, err
 	}
