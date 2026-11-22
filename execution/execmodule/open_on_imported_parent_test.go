@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -78,4 +79,49 @@ func TestABlockOpenedOnAnImportedChainDoesNotSeeTheReplicasOwnSealedFork(t *test
 	br, err := replica.m.ExecModule.SealBlock(replica.ctx, params3, false)
 	require.NoError(t, err)
 	require.Equal(t, proposed3.Hash(), br.Block.Hash(), "the replica builds the proposer's next block")
+}
+
+// Once the abandoned block is dropped the round reads the canonical context, which newPayload rebinds under the
+// module semaphore; the round holds only its own lock, so the two must not share a read transaction.
+func TestARoundAfterAnAbandonedBlockRunsBesideNewPayload(t *testing.T) {
+	replica := newRoundHarness(t)
+	proposer := newRoundHarnessWithKeys(t, replica.keys)
+	head, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
+	require.NoError(t, err)
+
+	first := [][][]byte{{replica.signed(0, 0, nil, 200_000, counterInit)}}
+	paramsP, inP := proposer.attrs(head)
+	proposed1 := proposer.sealRounds(paramsP, inP, first)
+	ur, err := forkChoiceTo(proposer.ctx, proposer.m.ExecModule, proposed1.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status, ur.ValidationError)
+	var siblings []*types.Block
+	for n := uint64(0); n < 200; n++ {
+		p, in := proposer.attrs(proposed1.Header())
+		p.Timestamp += n + 1
+		in.Timestamp = p.Timestamp
+		to := common.Address{0x42}
+		siblings = append(siblings, proposer.sealRounds(p, in, [][][]byte{{replica.signed(1, 0, &to, 50_000, nil)}}))
+		proposer.m.ExecModule.ResetFlashBodyForTest(0)
+	}
+
+	_, in := replica.attrs(head)
+	_, _, _, err = replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in, first[0])
+	require.NoError(t, err)
+	require.NoError(t, insertValidateAndUfc1By1(replica.ctx, replica.m.ExecModule, []*types.Block{proposed1}))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for _, b := range siblings {
+			_, _ = insertBlocks(replica.ctx, replica.m.ExecModule, []*types.Block{b})
+			_, _ = validateChain(replica.ctx, replica.m.ExecModule, b)
+		}
+	}()
+	_, in2 := replica.attrs(proposed1.Header())
+	future := replica.signed(0, 1000, nil, 200_000, counterInit)
+	for range 2000 {
+		_, _, _, _ = replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in2, [][]byte{future})
+	}
+	<-done
 }

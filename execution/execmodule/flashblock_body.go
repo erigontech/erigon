@@ -239,6 +239,14 @@ func (e *ExecModule) PreExecuteFlashblock(ctx context.Context, inputs Flashblock
 	e.roundMu.Lock()
 	lockWait := time.Since(lockStart)
 	defer e.roundMu.Unlock()
+	// A round that reads or replaces the canonical context shares it with newPayload and fork choice, which hold the
+	// module semaphore; taken without waiting, since the semaphore is ordered before roundMu.
+	if e.roundReachesCanonicalLocked(ctx, inputs) {
+		if !e.semaphore.TryAcquire(1) {
+			return nil, common.Hash{}, ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil
+		}
+		defer e.semaphore.Release(1)
+	}
 	workStart := time.Now()
 	body, h, vr, err := e.preExecuteFlashblockLocked(ctx, inputs, newTxRLPs)
 	work := time.Since(workStart)
@@ -247,6 +255,20 @@ func (e *ExecModule) PreExecuteFlashblock(ctx context.Context, inputs Flashblock
 			"lockMs", lockWait.Milliseconds(), "workMs", work.Milliseconds(), "txs", len(newTxRLPs))
 	}
 	return body, h, vr, err
+}
+
+func (e *ExecModule) roundReachesCanonicalLocked(ctx context.Context, inputs FlashblockInputs) bool {
+	if _, _, sd := e.preExec.Active(); sd == nil {
+		return true
+	}
+	e.flash.mu.Lock()
+	open := e.flash.num
+	e.flash.mu.Unlock()
+	if open != 0 && open < inputs.Number {
+		return true
+	}
+	sealed := e.sealedAtLocked(ctx, inputs.Number)
+	return sealed != nil && (sealed.ParentHash != inputs.Parent || sealed.Time != inputs.Timestamp)
 }
 
 // preExecuteFlashblockLocked is PreExecuteFlashblock's body with the caller ALREADY holding the round
