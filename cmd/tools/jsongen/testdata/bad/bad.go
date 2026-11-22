@@ -59,3 +59,26 @@ type OmitemptyObjects struct {
 type selfWriter struct{}
 
 func (selfWriter) MarshalFastJSONTo(*jsonstream.Stream) error { return nil }
+
+// A string has no length bound, so its group could not be held in a fixed buffer.
+type SharedString struct {
+	Name string `json:"name" ethjson:"string,shared"`
+}
+
+type SharedStrings []*SharedString
+
+type UnknownFormOption struct {
+	Count uint64 `json:"count" ethjson:"quantity,cached"`
+}
+
+// Without -slice nothing would read the shared option.
+type SharedWithoutSlice struct {
+	Count uint64 `json:"count" ethjson:"quantity,shared"`
+}
+
+// The slice method has to be able to hand each element to the struct's encoder.
+type SliceOfValues struct {
+	Count uint64 `json:"count" ethjson:"quantity,shared"`
+}
+
+type SlicesOfValues []SliceOfValues

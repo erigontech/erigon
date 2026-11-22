@@ -80,14 +80,15 @@ func ExpectedJSON(v any, computed ...Computed) ([]byte, error) {
 		}
 		// The form is checked before anything that could return early, so a field left out of
 		// a fixture cannot pass with no tag at all.
-		if _, err := formOf(field); err != nil {
+		form, err := formOf(field)
+		if err != nil {
 			return nil, fmt.Errorf("%s.%s: %w", typ.Name(), field.Name, err)
 		}
 		value := rv.Field(i)
 		if strings.Contains(opts, "omitempty") && isEmpty(value) {
 			continue
 		}
-		encoded, err := jsonrpcValue(value, field.Tag.Get("ethjson"))
+		encoded, err := jsonrpcValue(value, form)
 		if err != nil {
 			return nil, fmt.Errorf("%s.%s: %w", typ.Name(), field.Name, err)
 		}
@@ -99,9 +100,12 @@ func ExpectedJSON(v any, computed ...Computed) ([]byte, error) {
 	return append(buf, '}'), nil
 }
 
-// formOf reports the field's declared form, and refuses a field that names none.
+// formOf reports the field's declared form, and refuses a field that names none. An option
+// after the form, such as shared, says how a generated encoder caches the field, not what it
+// writes.
 func formOf(field reflect.StructField) (string, error) {
-	form, ok := field.Tag.Lookup("ethjson")
+	tag, ok := field.Tag.Lookup("ethjson")
+	form, _, _ := strings.Cut(tag, ",")
 	if !ok || form == "" {
 		return "", errors.New("no ethjson tag")
 	}
