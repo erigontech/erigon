@@ -865,7 +865,6 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
-	version := b.Version
 	if err := rejectNullBodyFields("beacon body",
 		requiredBodyField{"eth1 data", tmp.Eth1Data == nil},
 		requiredBodyField{"proposer slashings", tmp.ProposerSlashings == nil},
@@ -873,11 +872,11 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 		requiredBodyField{"attestations", tmp.Attestations == nil},
 		requiredBodyField{"deposits", tmp.Deposits == nil},
 		requiredBodyField{"voluntary exits", tmp.VoluntaryExits == nil},
-		requiredBodyField{"sync aggregate", version >= clparams.AltairVersion && tmp.SyncAggregate == nil},
-		requiredBodyField{"execution payload", version >= clparams.BellatrixVersion && version < clparams.GloasVersion && tmp.ExecutionPayload == nil},
-		requiredBodyField{"bls to execution changes", version >= clparams.CapellaVersion && tmp.ExecutionChanges == nil},
-		requiredBodyField{"blob kzg commitments", version >= clparams.DenebVersion && version < clparams.GloasVersion && tmp.BlobKzgCommitments == nil},
-		requiredBodyField{"execution requests", version >= clparams.ElectraVersion && version < clparams.GloasVersion && tmp.ExecutionRequests == nil},
+		requiredBodyField{"sync aggregate", b.Version >= clparams.AltairVersion && tmp.SyncAggregate == nil},
+		requiredBodyField{"execution payload", b.Version >= clparams.BellatrixVersion && b.Version < clparams.GloasVersion && tmp.ExecutionPayload == nil},
+		requiredBodyField{"bls to execution changes", b.Version >= clparams.CapellaVersion && tmp.ExecutionChanges == nil},
+		requiredBodyField{"blob kzg commitments", b.Version >= clparams.DenebVersion && b.Version < clparams.GloasVersion && tmp.BlobKzgCommitments == nil},
+		requiredBodyField{"execution requests", b.Version >= clparams.ElectraVersion && b.Version < clparams.GloasVersion && tmp.ExecutionRequests == nil},
 	); err != nil {
 		return err
 	}
