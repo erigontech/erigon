@@ -346,13 +346,9 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 }
 
 func (sdc *SharedDomainsCommitmentContext) TouchKeyFromState(tx kv.TemporalTx, plainKey []byte) error {
-	d := kv.AccountsDomain
-	switch len(plainKey) {
-	case length.Addr:
-	case length.Addr + length.Hash:
-		d = kv.StorageDomain
-	default:
-		return fmt.Errorf("touch key from state: unexpected key length %d (%x)", len(plainKey), plainKey)
+	d, err := plainKeyDomain(plainKey)
+	if err != nil {
+		return err
 	}
 	if sdc.updates.Mode() != commitment.ModeCollect {
 		sdc.TouchKey(d, string(plainKey), nil)
@@ -366,8 +362,28 @@ func (sdc *SharedDomainsCommitmentContext) TouchKeyFromState(tx kv.TemporalTx, p
 	if err != nil {
 		return err
 	}
+	return sdc.TouchKeyValue(plainKey, val)
+}
+
+// TouchKeyValue is TouchKeyFromState for a caller that already holds the key's latest value.
+func (sdc *SharedDomainsCommitmentContext) TouchKeyValue(plainKey, val []byte) error {
+	d, err := plainKeyDomain(plainKey)
+	if err != nil {
+		return err
+	}
 	sdc.TouchKey(d, string(plainKey), val)
 	return nil
+}
+
+func plainKeyDomain(plainKey []byte) (kv.Domain, error) {
+	switch len(plainKey) {
+	case length.Addr:
+		return kv.AccountsDomain, nil
+	case length.Addr + length.Hash:
+		return kv.StorageDomain, nil
+	default:
+		return 0, fmt.Errorf("touch key: unexpected plain key length %d (%x)", len(plainKey), plainKey)
+	}
 }
 
 // TouchHashedKey touches a hashed key which can be anywhere from 1 to 128 nibbles
