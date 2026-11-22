@@ -116,7 +116,8 @@ def overview_results(results):
         names = {n for steps in clients.values() for s in steps.values() for n in s.get("apis", {})
                  if "fan-out" in n or "vs first newHeads" in n}
         picked = [n for n in names if not any(other.startswith(n + " ") for other in names)]
-        if any(NEWHEADS_LATENCY in s.get("apis", {}) for steps in clients.values() for s in steps.values()):
+        if any(NEWHEADS_LATENCY in s.get("apis", {}) and any(not n.startswith("newHeads ") for n in s["apis"])
+               for steps in clients.values() for s in steps.values()):
             picked.append(NEWHEADS_LATENCY)
         for name in picked:
             out[f"{label} {name}"] = {c: {qps: measure_step(s, name) for qps, s in steps.items()}
@@ -198,8 +199,13 @@ def render_classes(results, patterns):
                 for measure in sorted(measures, key=measure_rank):
                     rows = {c: a.get(f"{measure} {cls}") for c, a in apis.items()}
                     per_receipt = {c for c, r in rows.items() if r and is_per_receipt(steps[c], measure)}
-                    best = min((r["p50"] for c, r in rows.items() if r and c not in per_receipt), default=None)
+                    rpc_success = {c: 1 - r["errors"] / max(r["requests"], 1) for c, r in rows.items() if r}
+                    best_rpc = max(rpc_success.values(), default=1)
+                    erred = {c for c, ok in rpc_success.items() if ok < best_rpc - RPC_TOLERANCE}
+                    best = min((r["p50"] for c, r in rows.items() if r and c not in per_receipt | erred),
+                               default=None)
                     cells = [steps[c]["failed"] if is_failed(steps[c]) else
+                             "err" if c in erred else
                              f"({r['p50']:.2f})! / ({r['p95']:.2f})" if c in per_receipt else
                              f"{r['p50']:.2f}{'*' if r['p50'] == best else ''} / {r['p95']:.2f}" if r else "-"
                              for c, r in rows.items()]

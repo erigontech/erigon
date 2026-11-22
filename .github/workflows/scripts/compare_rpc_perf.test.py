@@ -473,6 +473,14 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the newHeads latency copies per class have no overview row", "newHeads latency wallet" not in md, md)
     check("the logs and receipts latency measures have no overview row", "logs latency" not in md, md)
 
+with tempfile.TemporaryDirectory() as tmp:
+    for client, p50 in (("erigon", 2087), ("geth", 1971)):
+        write_result(tmp, client, "eth_subscribe_newHeads", [{"qps": "500", "testRepetitions": [rep_apis({
+            "newHeads latency": api(p50, 3384, 3500, 1000)})]}])
+    md = mod.render_overview(mod.overview_results(mod.load_results(tmp)), "p50")
+    check("a test with only newHeads measures has no newHeads latency row, it repeats the row of the test",
+          "newHeads latency" not in md, md)
+
 # --- eth_subscribe: the vs first newHeads rows get an overview row, the vs newHeads rows do not ---
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -537,6 +545,15 @@ with tempfile.TemporaryDirectory() as tmp:
     md = mod.render_classes(mod.load_results(tmp), {"eth_subscribe_classes": CLASSES})
     check("a client that sends one notification per receipt and lacks a receipts measure shows -",
           "| indexer | transactionReceipts vs first newHeads | 4.00* / 8.00 | - |" in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "logs latency dapp": api(3086, 3485, 3500, 60)})]}])
+    write_result(tmp, "geth", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "logs latency dapp": api(0, 0, 0, 60, 60)})]}])
+    md = mod.render_classes(mod.load_results(tmp), {"eth_subscribe_classes": CLASSES})
+    check("a client with more errors than the best one shows err and is not the fastest",
+          "| dapp | logs latency | 3086.00* / 3485.00 | err |" in md, md)
 
 with tempfile.TemporaryDirectory() as tmp:
     write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
