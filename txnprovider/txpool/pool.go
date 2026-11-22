@@ -1072,8 +1072,8 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 		}
 
 		// The gas limits determine whether a transaction fits. Until it executes,
-		// use its intrinsic gas to estimate the execution gas left for later
-		// candidates. From Prague onward, the calldata floor also applies.
+		// estimate the execution gas left for later candidates by deducting its
+		// intrinsic cost. From Prague onward, use the gas floor if it is higher.
 		if !isFrame {
 			to := mt.TxnSlot.Txn.GetTo()
 			isSelfTransfer := to != nil && *to == sender

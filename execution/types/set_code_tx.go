@@ -41,7 +41,9 @@ var (
 	ErrSetCodeEmptyAuthorizations = errors.New("SetCode transaction must have at least one authorization")
 )
 
-// ValidateSetCodePrerequisites treats a nil authorization list as an empty SetCode list.
+// ValidateSetCodePrerequisites checks that SetCode is active and the transaction
+// has a recipient and at least one authorization. Callers must first identify
+// the transaction as SetCode because a nil authorization list counts as empty.
 func ValidateSetCodePrerequisites(auths []Authorization, contractCreation, isPrague bool) error {
 	if !isPrague {
 		return ErrSetCodePrePrague

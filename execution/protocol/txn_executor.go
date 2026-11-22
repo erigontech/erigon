@@ -345,8 +345,9 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsic mdgas.IntrinsicGasCal
 			ErrIntrinsicGas, intrinsic.RequiredGas(), params.MaxTxnGasLimit)
 	}
 
-	// Match geth's EIP-7702 prerequisite precedence: after fee caps, before
-	// affordability and intrinsic gas.
+	// Fee and gas caps take precedence here. To match geth's EIP-7702 error
+	// order, report SetCode prerequisite errors before checking the sender's
+	// funds or whether the gas limit covers the intrinsic cost.
 	if auths := st.msg.Authorizations(); auths != nil {
 		if err := types.ValidateSetCodePrerequisites(auths, st.msg.To().IsNil(), rules.IsPrague); err != nil {
 			return upfrontTxnFees{}, err
@@ -706,7 +707,9 @@ func RecipientCreditedAtValidation(from, to, coinbase accounts.Address, value ui
 	return err == nil && acc != nil && acc.CodeHash.IsEmpty()
 }
 
-// verifyAuthorities updates account code and nonces after types.ValidateSetCodePrerequisites checks the list.
+// verifyAuthorities applies individual EIP-7702 authorizations after
+// types.ValidateSetCodePrerequisites checks the transaction. It skips invalid
+// tuples and updates the authority's code and nonce for each accepted tuple.
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *uint256.Int, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
 	var gasUsed mdgas.MdGasUsage
 	if auths == nil {

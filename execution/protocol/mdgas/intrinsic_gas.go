@@ -49,6 +49,8 @@ type IntrinsicGasCalcResult struct {
 	FloorGasCost uint64
 }
 
+// RequiredGas is the minimum gas limit for the intrinsic gas check. The gas
+// floor can raise this minimum above the execution cost charged up front.
 func (r IntrinsicGasCalcResult) RequiredGas() uint64 {
 	return max(r.ExecutionGas, r.FloorGasCost)
 }
@@ -57,7 +59,9 @@ func (r IntrinsicGasCalcResult) ExceedsGasLimit(gasLimit uint64) bool {
 	return r.RequiredGas() > gasLimit
 }
 
-// ExceedsExecutionGasCap applies the EIP-8037 rule that state gas cannot pay for intrinsic gas.
+// ExceedsExecutionGasCap reports whether the intrinsic execution cost or the gas
+// floor exceeds Amsterdam's execution gas cap. EIP-8037 reserves gas above
+// that cap for state operations.
 func (r IntrinsicGasCalcResult) ExceedsExecutionGasCap(isAmsterdam bool) bool {
 	return isAmsterdam && r.ExceedsGasLimit(params.MaxTxnGasLimit)
 }
