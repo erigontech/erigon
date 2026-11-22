@@ -177,11 +177,9 @@ func TestEngineApiUnwindToSnapshotBoundaryPreservesDeletedSlots(t *testing.T) {
 		payloads, _, churn, sums := buildChurnChain(ctx, t, eat, pokes, func(k int) int64 { return int64(k) })
 
 		waitForDomainFilesSettled(ctx, t, eat.StateAgg)
-		// The last background build may have finished after the final forkchoice,
-		// so no prune pass has evacuated the freshly filed range from MDBX yet —
-		// and lingering MDBX entries (including original deletion tombstones)
-		// would shadow the file reads this test is about. A few more forkchoice
-		// cycles let the foreground collate+prune catch up.
+		// Latest-state reads already ignore MDBX rows for steps fully covered by
+		// value files. The extra forkchoices give pruning a chance to remove those
+		// rows even if the files appeared after the last prune pass.
 		extraPayloads, extraSums := churnAndAssert(ctx, t, eat, churn, 6, func(k int) int64 { return int64(9_000 + k) })
 		payloads = append(payloads, extraPayloads...)
 		sums = append(sums, extraSums...)
@@ -204,9 +202,9 @@ func TestEngineApiUnwindToSnapshotBoundaryPreservesDeletedSlots(t *testing.T) {
 			return nil
 		}))
 
-		// Forkchoice unwinds to the parent of the requested head. Selecting the
-		// child of the last block in the files keeps that block. Selecting the
-		// block itself would undo it.
+		// Both requested heads are older canonical blocks, so forkchoice uses
+		// each head's parent as its unwind target. Selecting the child of
+		// lastFileBlock keeps the boundary block. Selecting lastFileBlock would undo it.
 		firstBlock := payloads[0].ExecutionPayload.BlockNumber.Uint64()
 		require.GreaterOrEqual(t, lastFileBlock, firstBlock)
 		boundaryIndex := lastFileBlock - firstBlock

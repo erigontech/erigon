@@ -206,7 +206,8 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	defer mxState3Unwind.ObserveDuration(t)
 
 	var changeSet *[kv.DomainLen][]kv.DomainEntryDiff
-	// collect and merge diffsets of blocks [dropStateFromBlockNum, u.CurrentBlockNumber]
+	// Each executed block in the range needs a changeset, even if it is empty.
+	// Skipping a missing record could leave state changes from an unwound block.
 	for currentBlock := u.CurrentBlockNumber; currentBlock >= dropStateFromBlockNum; currentBlock-- {
 		currentKeys, executedHash, found, err := findExecutedDiffsetAtHeight(ctx, rwTx, br, doms, currentBlock)
 		if err != nil {

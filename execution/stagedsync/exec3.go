@@ -736,7 +736,8 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 		return fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, blockNumber-1, unwindToLimit)
 	}
 
-	// Bisect the range to narrow down where the state root first diverged.
+	// Aim halfway back to narrow down where the state root diverged. Rewind at
+	// least one block to make progress and cap each jump to limit re-execution.
 	minBlockNum := max(s.BlockNumber, unwindToLimit)
 	jump := min(maxUnwindJumpAllowance, max(1, (blockNumber-minBlockNum)/2))
 	unwindTo := blockNumber - jump

@@ -12,6 +12,9 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
+// CanUnwindToBlockNum returns the earliest allowed unwind target. An unwind
+// keeps the target block's state. The limit accounts for state value files and
+// the oldest retained changeset (the latest commitment block if none remain).
 func CanUnwindToBlockNum(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
 	minUnwindable, err := changeset.ReadLowestUnwindableBlock(tx)
 	if err != nil {
@@ -24,7 +27,7 @@ func CanUnwindToBlockNum(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader) (u
 			return 0, err
 		}
 	} else if minUnwindable > 0 {
-		minUnwindable-- // UnwindTo is exclusive, i.e. (unwindPoint,tip] get unwound
+		minUnwindable-- // Undoing the block with the oldest changeset restores its parent's state.
 	}
 	var filesEnd uint64
 	for domain := range kv.DomainLen {
@@ -45,6 +48,8 @@ func CanUnwindToBlockNum(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader) (u
 	return minUnwindable, nil
 }
 
+// CanUnwindBeforeBlockNum returns blockNum and true if it meets the lower bound
+// from [CanUnwindToBlockNum]. For an older block it returns that bound and false.
 func CanUnwindBeforeBlockNum(blockNum uint64, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader) (unwindableBlockNum uint64, ok bool, err error) {
 	_minUnwindableBlockNum, err := CanUnwindToBlockNum(tx, txNumsReader)
 	if err != nil {

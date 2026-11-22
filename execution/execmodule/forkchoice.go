@@ -377,7 +377,9 @@ func (e *ExecModule) unwindIfNeeded(
 			return nil, nil, err
 		}
 		// Until the last transaction in the state files is indexed, every indexed
-		// unwind target is too old. A re-sent tip can advance the index without unwinding.
+		// unwind target is too old. While state is ahead, re-sending the indexed
+		// tip can return TooFarAway again without unwinding. A higher head on the
+		// same chain can extend the index.
 		needsUnwind = err == nil && unwindTarget >= minUnwindableBlock
 		if !needsUnwind && !resentTipAheadOfState {
 			if err != nil {
