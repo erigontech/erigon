@@ -307,21 +307,22 @@ func (e *ExecModule) unwindIfNeeded(
 	if needsUnwind {
 		resentTipAheadOfState := isDomainAheadOfBlocks && canonicalHash == blockHash && fcuHeader.Number.Uint64() == lastCanonicalBlock
 		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx, e.blockReader.TxnumReader())
-		switch {
-		case errors.Is(err, commitmentdb.ErrBehindCommitment) && resentTipAheadOfState:
-			// A re-sent tip may extend the block index toward downloaded state files.
-			// It does not require unwinding files whose block mapping is still missing.
-			needsUnwind = false
-		case err != nil:
+		if err != nil && !errors.Is(err, commitmentdb.ErrBehindCommitment) {
 			return nil, nil, err
-		case unwindTarget < minUnwindableBlock && !resentTipAheadOfState:
-			e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
+		}
+		// Until the last transaction in the state files is indexed, every indexed
+		// unwind target is too old. A re-sent tip can advance the index without unwinding.
+		needsUnwind = err == nil && unwindTarget >= minUnwindableBlock
+		if !needsUnwind && !resentTipAheadOfState {
+			if err != nil {
+				e.logger.Warn("reorg target below unindexed snapshot boundary", "unwindTarget", unwindTarget, "err", err)
+			} else {
+				e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
+			}
 			return &ForkChoiceResult{
 				LatestValidHash: common.Hash{},
 				Status:          ExecutionStatusReorgTooDeep,
 			}, nil, nil
-		default:
-			needsUnwind = unwindTarget >= minUnwindableBlock
 		}
 	}
 	var unwindPoint *uint64
@@ -412,6 +413,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if restoreStateChanges != nil {
 			restoreStateChanges()
 		}
+		// A sync cycle can yield with an unwind pending and then fail to commit.
 		e.pipelineExecutor.Sync().CancelUnwind()
 		e.currentContext.ResetPendingUpdates()
 		e.forkValidator.ClearWithUnwind()

@@ -499,9 +499,11 @@ func TestUnwind(t *testing.T) {
 	// check that at unwind disabled stage not appear
 	flow = flow[:0]
 	state.unwindOrder = []*Stage{s[2], s[1], s[0]}
-	_ = state.UnwindTo(100, UnwindReason{}, tx)
+	unwindPoint := uint64(100)
+	require.NoError(t, state.UnwindTo(unwindPoint, UnwindReason{}, tx))
 	_, err = state.Run(nil, tx, true /* initialCycle */, false)
 	require.NoError(t, err)
+	require.Equal(t, &unwindPoint, state.PrevUnwindPoint())
 
 	expectedFlow = []stages.SyncStage{
 		unwindOf(stages.Senders), unwindOf(stages.Bodies), unwindOf(stages.Headers),

@@ -1180,35 +1180,37 @@ func testRandomReorgs(t *testing.T, config *chain.Config, seed uint64) {
 	}
 }
 
-func TestFailedForkchoiceUnwindAllowsCanonicalExtension(t *testing.T) {
+func TestForkchoiceWithMissingTipChangesetKeepsCanonicalHead(t *testing.T) {
+	ctx := t.Context()
 	m, canonical, side := newReorgChains(t, 4, 3)
-	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks[:3]))
-	m.ExecModule.WaitIdle(t.Context())
-	status, err := m.InsertBlocks(t.Context(), side.Blocks)
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, canonical.Blocks[:3]))
+	m.ExecModule.WaitIdle(ctx)
+	status, err := m.InsertBlocks(ctx, side.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	missing := dbutils.BlockBodyKey(2, canonical.Blocks[1].Hash())
-	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+	tip := canonical.Blocks[2]
+	missing := dbutils.BlockBodyKey(tip.NumberU64(), tip.Hash())
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
 		value, err := tx.GetOne(kv.ChangeSets3, missing)
 		require.NoError(t, err)
 		require.NotEmpty(t, value)
 		return tx.Delete(kv.ChangeSets3, missing)
 	}))
-	_, err = m.UpdateForkChoice(t.Context(), side.TopBlock.Header())
-	require.ErrorContains(t, err, "missing diffset for executed block 2")
-	m.ExecModule.WaitIdle(t.Context())
-	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-		require.Equal(t, canonical.Blocks[2].Hash(), rawdb.ReadHeadBlockHash(tx))
+	_, forkchoiceErr := m.UpdateForkChoice(ctx, side.TopBlock.Header())
+	m.ExecModule.WaitIdle(ctx)
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		require.Equal(t, tip.Hash(), rawdb.ReadHeadBlockHash(tx), "a failed unwind must keep the canonical tip")
 		return nil
 	}))
-	status, err = m.InsertBlocks(t.Context(), canonical.Blocks[3:])
+	require.Error(t, forkchoiceErr)
+	status, err = m.InsertBlocks(ctx, canonical.Blocks[3:])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	result, err := m.UpdateForkChoice(t.Context(), canonical.TopBlock.Header())
+	result, err := m.UpdateForkChoice(ctx, canonical.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
-	m.ExecModule.WaitIdle(t.Context())
-	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+	m.ExecModule.WaitIdle(ctx)
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
 		require.Equal(t, canonical.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 		value, err := tx.GetOne(kv.ChangeSets3, missing)
 		require.NoError(t, err)

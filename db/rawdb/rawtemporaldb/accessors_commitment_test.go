@@ -86,18 +86,27 @@ func TestMinimumUnwindKeepsImmutableTransactions(t *testing.T) {
 	}
 }
 
-func TestMinimumUnwindUsesValueFiles(t *testing.T) {
+func TestMinimumUnwindUsesValueFilesAndRetainedChangesets(t *testing.T) {
 	_, tx := temporaltest.NewTestTx(t)
 	for block := range uint64(5) {
 		require.NoError(t, rawdbv3.TxNums.Append(tx, block, 3*block+2))
 	}
 	diff := &changeset.StateChangeSet{}
 	diff.Diffs[kv.AccountsDomain].DomainUpdate([]byte{1}, 0, nil)
-	require.NoError(t, changeset.WriteDiffSet(tx, 1, common.Hash{1}, diff))
-	view := unwindFilesTx{TemporalTx: tx, domain: kv.AccountsDomain, end: 6, historyEnd: 12}
-	got, err := rawtemporaldb.CanUnwindToBlockNum(view, rawdbv3.TxNums)
-	require.NoError(t, err)
-	require.Equal(t, uint64(1), got)
+	for block := uint64(3); block <= 4; block++ {
+		require.NoError(t, changeset.WriteDiffSet(tx, block, common.Hash{byte(block)}, diff))
+	}
+	// Changesets for blocks 3 and 4 allow a return to block 2. Only value
+	// files that cover a later block can raise that minimum.
+	for _, tc := range []struct{ valueEnd, historyEnd, wantBlock uint64 }{
+		{6, 6, 2},   // value files end in block 1
+		{10, 15, 3}, // value files end in block 3, history in block 4
+	} {
+		view := unwindFilesTx{TemporalTx: tx, domain: kv.AccountsDomain, end: tc.valueEnd, historyEnd: tc.historyEnd}
+		got, err := rawtemporaldb.CanUnwindToBlockNum(view, rawdbv3.TxNums)
+		require.NoError(t, err)
+		require.Equal(t, tc.wantBlock, got, "value files end at tx %d, history at %d (exclusive)", tc.valueEnd, tc.historyEnd)
+	}
 }
 
 type snapshotTxIndex struct {

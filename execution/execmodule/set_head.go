@@ -131,7 +131,6 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}()
 
 	// Set the unwind point and run the unwind
-	defer e.pipelineExecutor.Sync().CancelUnwind()
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {
 		return fmt.Errorf("failed to set unwind point: %w", err)
 	}

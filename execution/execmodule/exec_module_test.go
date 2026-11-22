@@ -849,7 +849,7 @@ func newExecutedTransferChain(t *testing.T, opts ...execmoduletester.Option) (*e
 	return m, chainPack
 }
 
-func TestUpdateForkChoiceResentHeadBelowSnapshotState(t *testing.T) {
+func TestUpdateForkChoiceBelowSnapshotState(t *testing.T) {
 	m, chainPack := newExecutedTransferChain(t, execmoduletester.WithStepSize(8))
 	m.ExecModule.Drain()
 	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
@@ -867,6 +867,15 @@ func TestUpdateForkChoiceResentHeadBelowSnapshotState(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusTooFarAway, result.Status)
 	}
+	result, err := m.UpdateForkChoice(t.Context(), chainPack.Blocks[5].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusReorgTooDeep, result.Status)
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		last, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.Equal(t, head.Number.Uint64(), last, "rejecting the ancestor must preserve the indexed tip")
+		return nil
+	}))
 }
 
 func truncateTxNumsBelowCommitment(t *testing.T, m *execmoduletester.ExecModuleTester, invalidExecutionProgress, keepChangesets bool) uint64 {
