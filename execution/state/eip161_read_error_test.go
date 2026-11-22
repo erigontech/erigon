@@ -55,7 +55,7 @@ func TestEncodeExistingEmptyRemovals_BailsOnBaseReadError(t *testing.T) {
 	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader))
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
+	ibs.setVersionMap(vm)
 
 	// A storage write puts the account in the write set without carrying any
 	// balance/nonce/codeHash cell, so emptiness is decided from the base read.

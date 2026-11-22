@@ -228,16 +228,16 @@ func New(stateReader StateReader) *IntraBlockState {
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
 	// The IBS is always versioned: it reads through the version-map view and never
-	// materializes a stateObject. Callers that need a shared block-level map rebind
-	// it via SetVersionMap (NewWithVersionMap); the rest get a private empty map.
-	ibs.SetVersionMap(NewVersionMap(nil))
+	// materializes a stateObject. Callers that need a shared block-level map construct
+	// with NewWithVersionMap; the rest get a private empty map.
+	ibs.setVersionMap(NewVersionMap(nil))
 	ibs.SetTxContext(0, 0)
 	return ibs
 }
 
 func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockState {
 	ibs := New(stateReader)
-	ibs.SetVersionMap(mvhm)
+	ibs.setVersionMap(mvhm)
 	return ibs
 }
 
@@ -290,13 +290,21 @@ func (ibs *IntraBlockState) CodeReadCount() int64 {
 	return ibs.codeReadCount
 }
 
-// SetVersionMap binds the IBS to a non-nil version map. The IBS always reads and
-// writes through a version map; a nil map is an invariant violation, not a state.
-func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
+// setVersionMap binds the IBS to a non-nil version map at construction. The IBS always
+// reads and writes through a version map; a nil map is an invariant violation, not a state.
+func (ibs *IntraBlockState) setVersionMap(versionMap *VersionMap) {
 	if versionMap == nil {
 		panic("IntraBlockState requires a non-nil version map")
 	}
 	ibs.stateUpdates = versionMap
+}
+
+// RebindVersionMap points a reused worker IBS at the block's shared version map. It is
+// the one remaining version-map binder outside construction: the parallel executor reuses
+// a single IBS across tasks of different blocks. It is removed once the worker constructs
+// its state per run instead of reusing one; no other caller should use it.
+func (ibs *IntraBlockState) RebindVersionMap(versionMap *VersionMap) {
+	ibs.setVersionMap(versionMap)
 }
 
 // StateReader returns the committed-base reader. The parallel executor uses it to
@@ -331,7 +339,7 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.sdProbeEpoch++
 	ibs.accessList.Reset()
 	clear(ibs.transientStorage)
-	ibs.SetVersionMap(NewVersionMap(nil))
+	ibs.setVersionMap(NewVersionMap(nil))
 	ibs.noConflictDetection = false
 	ibs.codeByHash = nil
 	clear(ibs.committedBase)
@@ -373,7 +381,7 @@ func NewPooled(stateReader StateReader) *IntraBlockState {
 	}
 	ibs.stateReader = stateReader
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
-	ibs.SetVersionMap(NewVersionMap(nil))
+	ibs.setVersionMap(NewVersionMap(nil))
 	ibs.SetTxContext(0, 0)
 	ibs.SetNoConflictDetection()
 	return ibs

@@ -1517,10 +1517,9 @@ func (r *failingAccountReader) ReadAccountData(addr accounts.Address) (*accounts
 func TestFinalizedBlockWritesReturnsStateReadError(t *testing.T) {
 	reader := &failingAccountReader{mapStateReader: newMapStateReader()}
 	vm := state.NewVersionMap(nil)
-	ibs := state.New(state.NewVersionedStateReader(0, state.ReadSet{}, vm, reader))
+	ibs := state.NewWithVersionMap(state.NewVersionedStateReader(0, state.ReadSet{}, vm, reader), vm)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 0)
-	ibs.SetVersionMap(vm)
 
 	// A storage-only write carries no balance, nonce or code hash, so emptiness comes from the base read.
 	addr := accounts.InternAddress(common.HexToAddress("0x01"))

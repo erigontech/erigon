@@ -208,9 +208,9 @@ func VersionedCallState(ibs *state.IntraBlockState) {
 
 // VersionedBlockState is VersionedCallState for a state that runs several txs in order:
 // a later tx may re-create an account an earlier one destroyed, so CreateAccount keeps
-// the read that carries the balance it was given in between.
+// the read that carries the balance it was given in between. The caller establishes the
+// fresh version map (via New/NewPooled or Reset) before calling this.
 func VersionedBlockState(ibs *state.IntraBlockState) {
-	ibs.SetVersionMap(state.NewVersionMap(nil))
 	ibs.SetTxContext(0, 0)
 }
 
