@@ -1284,12 +1284,13 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 	auths := txn.Txn.GetAuthorizations()
 	if txn.TxType() == SetCodeTxnType {
 		if err := types.ValidateSetCodePrerequisites(auths, txn.IsCreation(), isPrague); err != nil {
-			switch {
-			case errors.Is(err, types.ErrSetCodePrePrague):
+			//nolint:errorlint // ValidateSetCodePrerequisites returns these errors directly.
+			switch err {
+			case types.ErrSetCodePrePrague:
 				return txpoolcfg.TypeNotActivated, nil
-			case errors.Is(err, types.ErrSetCodeContractCreation):
+			case types.ErrSetCodeContractCreation:
 				return txpoolcfg.InvalidCreateTxn, nil
-			case errors.Is(err, types.ErrSetCodeEmptyAuthorizations):
+			case types.ErrSetCodeEmptyAuthorizations:
 				return txpoolcfg.NoAuthorizations, nil
 			}
 			return txpoolcfg.NotSet, err
