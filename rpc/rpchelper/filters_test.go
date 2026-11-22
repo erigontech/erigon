@@ -884,17 +884,37 @@ func TestFilters_SubscriptionWithSeveralAddressesReceivesLogOnce(t *testing.T) {
 	require.Len(t, ch, 1)
 }
 
-func TestFilters_UnsubscribedAddressFilterReceivesNoLog(t *testing.T) {
+func TestFilters_UnsubscribeRemovesAddressFilterFromIndex(t *testing.T) {
 	t.Parallel()
 	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
 	criteria := filters.FilterCriteria{Addresses: []common.Address{address1}}
-	_, id, _ := f.SubscribeLogs(256, criteria, "")
-	kept, _, _ := f.SubscribeLogs(256, criteria, "")
-	require.True(t, f.UnsubscribeLogs(id))
+	_, removed, _ := f.SubscribeLogs(256, criteria, "")
+	kept, keptID, _ := f.SubscribeLogs(256, criteria, "")
+
+	require.True(t, f.UnsubscribeLogs(removed))
+	require.Len(t, f.logsSubs.filtersByAddr[address1], 1)
 
 	lg := createLog()
 	lg.Address = address1H160
 	f.OnNewLogs(lg)
-
 	require.Len(t, kept, 1)
+
+	require.True(t, f.UnsubscribeLogs(keptID))
+	require.Empty(t, f.logsSubs.filtersByAddr)
+}
+
+func TestFilters_UnsubscribeRemovesNoAddressFilterFromIndex(t *testing.T) {
+	t.Parallel()
+	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
+	_, removed, _ := f.SubscribeLogs(256, filters.FilterCriteria{}, "")
+	kept, keptID, _ := f.SubscribeLogs(256, filters.FilterCriteria{}, "")
+
+	require.True(t, f.UnsubscribeLogs(removed))
+	require.Len(t, f.logsSubs.anyAddrFilters, 1)
+
+	f.OnNewLogs(createLog())
+	require.Len(t, kept, 1)
+
+	require.True(t, f.UnsubscribeLogs(keptID))
+	require.Empty(t, f.logsSubs.anyAddrFilters)
 }
