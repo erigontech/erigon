@@ -501,6 +501,27 @@ var cmdCommitmentPrint = &cobra.Command{
 	},
 }
 
+// commitmentFileState describes the commitment state record of the .kv file whose last txNum is maxTxNum.
+func commitmentFileState(acRo *dbstate.AggregatorRoTx, maxTxNum uint64) (string, error) {
+	v3 := statecfg.Schema.CommitmentDomain.CommitmentV3Records
+	key := commitment.KeyCommitmentState
+	if v3 {
+		key = commitment.KeyCommitmentV3State
+	}
+	record, found, _, fileEnd, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, key, maxTxNum)
+	if err != nil {
+		return "", fmt.Errorf("failed to get the commitment state from files: %w", err)
+	}
+	if !found || fileEnd != maxTxNum+1 { // an older file's record is not this file's state
+		return "no state record", nil
+	}
+	if !v3 {
+		return commitment.HexTrieStateToShortString(record)
+	}
+	blockNum, txNum, root, err := commitment.DecodeCommitmentV3State(record)
+	return fmt.Sprintf("block: %d txn: %d rootHash: %x", blockNum, txNum, root), err
+}
+
 func printCommitment(db kv.TemporalRwDB, ctx context.Context) error {
 	if err := checkCommitmentTrieMatchesFiles(); err != nil {
 		return err
@@ -523,14 +544,9 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context) error {
 	for _, f := range commitmentFiles {
 		name := filepath.Base(f.Fullpath())
 		count := acRo.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
-		rootNodePrefix := []byte("state")
-		rootNode, _, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, rootNodePrefix, f.EndRootNum()-1)
+		rootString, err := commitmentFileState(acRo, f.EndRootNum()-1)
 		if err != nil {
-			return fmt.Errorf("failed to get root node from files: %w", err)
-		}
-		rootString, err := commitment.HexTrieStateToShortString(rootNode)
-		if err != nil {
-			return fmt.Errorf("failed to extract state root from root node: %w", err)
+			return fmt.Errorf("%s: %w", name, err)
 		}
 		fmt.Printf("%28s: prefixes %8s %s\n", name, common.PrettyCounter(count), rootString)
 	}
