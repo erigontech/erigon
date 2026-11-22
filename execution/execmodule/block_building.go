@@ -872,7 +872,11 @@ func (e *ExecModule) reanchorFrontierForBlockLocked(ctx context.Context, params 
 // their state, their maintained body and any sealed copy waiting for GetPayload — left behind, the height
 // re-opens into the orphan's state and can never be produced again. Caller holds e.semaphore.
 func (e *ExecModule) orphanFromLocked(parent *types.Header) {
-	from := parent.Number.Uint64() + 1
+	e.orphanAboveLocked(parent, parent.Number.Uint64()+1)
+}
+
+// orphanAboveLocked drops every pre-executed block from height `from` and continues the frontier from parent.
+func (e *ExecModule) orphanAboveLocked(parent *types.Header, from uint64) {
 	e.forkValidator.ReleaseOrphanedPreExec(from)
 	dropped := e.preExec.DropFrom(from)
 	e.flash.mu.Lock()

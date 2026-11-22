@@ -272,6 +272,15 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 			e.orphanFromLocked(parent)
 		}
 	}
+	// A round above the open block means that block was never sealed and the chain moved past it on another one.
+	e.flash.mu.Lock()
+	open := e.flash.num
+	e.flash.mu.Unlock()
+	if open != 0 && open < inputs.Number {
+		if parent := e.headerByHashLocked(ctx, inputs.Parent); parent != nil {
+			e.orphanAboveLocked(parent, open)
+		}
+	}
 	e.flash.mu.Lock()
 	if e.flash.num != inputs.Number {
 		e.flash.resetLocked(inputs.Number)
