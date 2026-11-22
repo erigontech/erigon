@@ -160,8 +160,7 @@ func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Ad
 	}
 	defer tx.Rollback()
 
-	blockNrOrHash.RequireCanonical = true
-	blockNumber, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, api._blockReader)
+	blockNumber, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}

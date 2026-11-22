@@ -99,7 +99,7 @@ func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberO
 // GetBlockNumber without requireCanonical) and then checks it like
 // CheckBlockExecuted, both against a single read of the execution progress in tx.
 func ResolveExecutedBlock(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader) (uint64, common.Hash, bool, error) {
-	executed, err := readExecutionProgress(tx)
+	executed, err := GetLatestExecutedBlockNumber(tx)
 	if err != nil {
 		return 0, common.Hash{}, false, err
 	}
@@ -116,16 +116,8 @@ func ResolveExecutedBlock(ctx context.Context, requireCanonical bool, blockNrOrH
 	return bn, bh, latest, nil
 }
 
-func readExecutionProgress(tx kv.Tx) (uint64, error) {
-	executed, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return 0, fmt.Errorf("getting plain state block number: %w", err)
-	}
-	return executed, nil
-}
-
 func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
-	plainStateBlockNumber, err := readExecutionProgress(tx)
+	plainStateBlockNumber, err := GetLatestExecutedBlockNumber(tx)
 	if err != nil {
 		return 0, common.Hash{}, false, false, err
 	}
