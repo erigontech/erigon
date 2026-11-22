@@ -1279,7 +1279,7 @@ func (pe *parallelExecutor) processRequest(execRequest *execRequest, applyTx kv.
 		executor.tasks = append(executor.tasks, t)
 		if len(executor.tasks) == 1 {
 			v := t.Version()
-			executor.versionMap.SetBaseTxNum(v.TxNum - uint64(v.TxIndex) - 1)
+			executor.blockState.SetBaseTxNum(v.TxNum - uint64(v.TxIndex) - 1)
 		}
 		executor.results = append(executor.results, nil)
 		executor.execFailed = append(executor.execFailed, 0)
@@ -1377,13 +1377,13 @@ func (pe *parallelExecutor) processRequest(execRequest *execRequest, applyTx kv.
 }
 
 func (pe *parallelExecutor) startBlock(be *blockExecutor) error {
-	if be.execStarted.IsZero() && be.versionMap.HasBAL {
+	if be.execStarted.IsZero() && be.blockState.HasBAL {
 		var reader state.StateReader = state.NewReaderV3(pe.domainsRead().AsGetter(pe.applyTx))
 		if first := be.tasks[0]; first.IsHistoric() {
 			reader = state.NewHistoryReaderV3WithSharedDomains(pe.applyTx, pe.domainsRead(), first.Version().TxNum)
 		}
 		base := pe.prevBlockBase(reader, be.blockNum)
-		if err := be.versionMap.SeedEmptyRemovals(
+		if err := be.blockState.SeedEmptyRemovals(
 			be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum),
 			pe.cfg.chainConfig.Aura != nil,
 			base); err != nil {
@@ -1392,9 +1392,9 @@ func (pe *parallelExecutor) startBlock(be *blockExecutor) error {
 	}
 	if be.execStarted.IsZero() {
 		if pe.workerCount <= 1 {
-			pe.reportExecutionPath(be.blockNum, be.blockHash, "sequential", "disabled", be.versionMap.HasBAL)
+			pe.reportExecutionPath(be.blockNum, be.blockHash, "sequential", "disabled", be.blockState.HasBAL)
 		} else {
-			pe.reportExecutionPath(be.blockNum, be.blockHash, "parallel", "", be.versionMap.HasBAL)
+			pe.reportExecutionPath(be.blockNum, be.blockHash, "parallel", "", be.blockState.HasBAL)
 		}
 	}
 	be.execStarted = time.Now()
@@ -1760,7 +1760,7 @@ func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxRes
 	}
 	// Flush as ESTIMATE (complete=false) so a downstream read observes the in-flight
 	// dependency and pauses until this tx commits.
-	be.versionMap.FlushWrites(result.TxOut, false)
+	be.blockState.FlushWrites(result.TxOut, false)
 }
 
 // dropUnwritten drops the writes that an earlier run made and the run at version does not (see
@@ -1769,7 +1769,7 @@ func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxRes
 func (be *blockExecutor) dropUnwritten(version state.Version, prev, cur *state.WriteSet) (dropped bool) {
 	for h := range prev.AllHeaders() {
 		if !cur.Has(h) {
-			be.versionMap.DropWrite(h.Address, h.Path, h.Key, version)
+			be.blockState.DropWrite(h.Address, h.Path, h.Key, version)
 			dropped = true
 		}
 	}
@@ -1791,7 +1791,7 @@ func (be *blockExecutor) taskIndexOf(versionTxIndex int) int {
 // re-exec; blocker is the highest stale writer to wait for.
 func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult) (valid bool, target int, blocker int) {
 	blocker = -1
-	v := be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn,
+	v := be.blockState.ValidateReadSet(tv.version.TxIndex, result.TxIn,
 		func(rv, wv state.Version) state.VersionValidity {
 			if rv != wv {
 				// A same-writer re-publication (same TxIndex, new incarnation) names no
@@ -1820,7 +1820,7 @@ func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult
 			// it — re-executing now would re-read the estimate and busy-loop. Validation
 			// also cross-checks the account's AddressPath and SelfDestructPath.
 			noteEstimate := func(a accounts.Address, p state.AccountPath, k accounts.StorageKey) {
-				rr := be.versionMap.ReadStatus(a, p, k, tv.version.TxIndex)
+				rr := be.blockState.ReadStatus(a, p, k, tv.version.TxIndex)
 				if rr.Status() == state.MVReadResultDependency {
 					if b := be.taskIndexOf(rr.DepIdx()); b > blocker && b < tv.index {
 						blocker = b
@@ -2547,7 +2547,7 @@ type blockExecutor struct {
 	publishTasks execStatusList
 
 	// Multi-version map
-	versionMap *state.VersionMap
+	blockState *state.BlockState
 
 	// Stores the inputs and outputs of the last incarnation of all transactions
 	blockIO *state.VersionedIO
@@ -2654,8 +2654,8 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
-	versionMap := state.NewVersionMap(accessList)
-	versionMap.SeedAddresses()
+	blockState := state.NewBlockState(accessList)
+	blockState.SeedAddresses()
 	be := &blockExecutor{
 		blockNum:            blockNum,
 		blockHash:           blockHash,
@@ -2663,7 +2663,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		stats:               map[int]ExecutionStat{},
 		finalizedResults:    map[int]*execResult{},
 		blockIO:             &state.VersionedIO{},
-		versionMap:          versionMap,
+		blockState:          blockState,
 		profile:             profile,
 		consumers:           consumers,
 		gasPool:             gasPool,
@@ -2736,7 +2736,7 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 	}
 	for addr, paths := range written {
 		readers := readersAbove(be.readerByAddr[addr], writerTx)
-		if len(readers) == 0 || be.versionMap.WritesAlreadySeeded(addr, ws) {
+		if len(readers) == 0 || be.blockState.WritesAlreadySeeded(addr, ws) {
 			continue
 		}
 		for _, r := range readers {
@@ -2856,7 +2856,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 		}
 	}
 
-	_, addReads, finalizeWrites, err := txResult.finalize(cumulativeGasUsed, firstLogIndex, pe.cfg.engine, be.versionMap, *stateReader)
+	_, addReads, finalizeWrites, err := txResult.finalize(cumulativeGasUsed, firstLogIndex, pe.cfg.engine, be.blockState.VersionMap, *stateReader)
 	if err != nil {
 		return nil, err
 	}
@@ -2876,17 +2876,17 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 
 		// Flush the merged writes (including fee changes) so subsequent per-tx
 		// finalizations see the full post-tx state via the versionMap fallback chain.
-		be.versionMap.FlushWrites(merged, true)
+		be.blockState.FlushWrites(merged, true)
 		be.markReadersDirty(tx, merged)
 	}
 
 	// A read-only versionMap-slice view over the tx's raw write-set; apply and
 	// the calculator resolve each account's base from the versionMap.
-	rawWrites, err := state.WithoutVanished(be.blockIO.WriteSet(txVersion.TxIndex), be.versionMap, txVersion.TxIndex, txTask.Rules().IsAmsterdam, *stateReader)
+	rawWrites, err := state.WithoutVanished(be.blockIO.WriteSet(txVersion.TxIndex), be.blockState.VersionMap, txVersion.TxIndex, txTask.Rules().IsAmsterdam, *stateReader)
 	if err != nil {
 		return nil, err
 	}
-	txResult.writes = state.NewVersionMapWriteView(rawWrites, be.versionMap, txVersion.TxIndex)
+	txResult.writes = state.NewVersionMapWriteView(rawWrites, be.blockState.VersionMap, txVersion.TxIndex)
 
 	// Snapshot before pushing so the publish loop can't see a later incarnation if
 	// be.results[tx] is overwritten by a concurrent worker.
@@ -2945,7 +2945,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 			}
 			var ownedWrites *state.WriteSet // a copy this loop made, so it can be extended in place, unlike the worker's TxOut
 			if chainTx, ok := txTask.(*exec.TxTask); ok && chainTx.ChargesSenderAtValidation(int(txVersion.Incarnation)) {
-				senderWrites, charged, err := chargeSenderAtValidation(chainTx, txResult, txVersion, be.versionMap, *stateReader)
+				senderWrites, charged, err := chargeSenderAtValidation(chainTx, txResult, txVersion, be.blockState.VersionMap, *stateReader)
 				if err != nil {
 					return nil, err
 				}
@@ -2962,7 +2962,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					reads.SetNonce(sender, state.VersionedRead[uint64]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: charged.Nonce})
 				}
 				be.blockIO.RecordReads(txVersion, reads)
-				be.versionMap.FlushWrites(senderWrites, false)
+				be.blockState.FlushWrites(senderWrites, false)
 				ownedWrites = be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites)
 				be.blockIO.RecordWrites(txVersion, ownedWrites)
 				be.markReadersDirty(tx, senderWrites)
@@ -2971,14 +2971,14 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				// the fee onto the stale pre-charge balance when the sender is the fee recipient.
 				txResult.TxOut = ownedWrites
 			}
-			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
+			tipWrites, err := txResult.calcFees(taskVer, be.blockState.VersionMap, *stateReader, txTask.Rules())
 			if err != nil {
 				return nil, err
 			}
 			if !tipWrites.IsEmpty() {
 				// Flush the tip as an Estimate; the whole tx is promoted to Done at the
 				// seal point below.
-				be.versionMap.FlushWrites(tipWrites, false)
+				be.blockState.FlushWrites(tipWrites, false)
 				if ownedWrites != nil {
 					ownedWrites.MergeFrom(tipWrites)
 				} else {
@@ -2993,8 +2993,8 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		// Done cell a reader already consumed, and a later write to a sealed cell trips
 		// assertUnsealed. System/init and block-end txs are seal-exempt (final already).
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() {
-			be.versionMap.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
-			be.versionMap.SealUpTo(txVersion.TxIndex)
+			be.blockState.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
+			be.blockState.SealUpTo(txVersion.TxIndex)
 		}
 
 		if r, ferr := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, stateReader); ferr != nil || r != nil {
@@ -3159,13 +3159,13 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 	// A BAL-seeded cell the tx still writes already holds its final value, so a reader of
 	// it stays valid; a wrong BAL fails the block. A dropped write may not be in the BAL,
 	// so its readers are always re-checked.
-	add(newWrites, be.versionMap.HasBAL)
+	add(newWrites, be.blockState.HasBAL)
 	add(oldWrites, false)
 	return slices.Sorted(maps.Keys(set))
 }
 
 func (be *blockExecutor) validateNow(txIdx int) bool {
-	return be.versionMap.ValidateVersion(txIdx, be.blockIO,
+	return be.blockState.ValidateVersion(txIdx, be.blockIO,
 		func(rv, wv state.Version) state.VersionValidity {
 			if rv != wv {
 				return state.VersionInvalid
@@ -3209,9 +3209,9 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 				// in-order seal promotes them to Done. System and block-end txs are
 				// seal-exempt and final now.
 				if txVersion.TxIndex < 0 || be.tasks[tx].Task.IsBlockEnd() {
-					be.versionMap.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
+					be.blockState.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
 				} else {
-					be.versionMap.MarkWritesValidated(be.blockIO.WriteSet(txVersion.TxIndex), be.isFeeRecipient(txResult))
+					be.blockState.MarkWritesValidated(be.blockIO.WriteSet(txVersion.TxIndex), be.isFeeRecipient(txResult))
 				}
 				be.validateTasks.markComplete(tx)
 				// Validated against current state; only a later write to one of its
@@ -3394,7 +3394,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
-			applyResult.versionMap = be.versionMap
+			applyResult.versionMap = be.blockState.VersionMap
 			if result.writes != nil {
 				applyResult.writes = result.writes
 				be.applyCount += applyResult.writes.Count()
@@ -3504,7 +3504,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 			pe.RUnlock()
 
-			ibs := state.NewWithVersionMap(reader, be.versionMap)
+			ibs := state.NewWithVersionMap(reader, be.blockState.VersionMap)
 			defer ibs.Close()
 			ibs.SetVersion(finalVersion.Incarnation)
 			ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
@@ -3557,11 +3557,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 				if !ivw.IsEmpty() {
 					be.blockIO.RecordWrites(finalVersion, ivw)
-					be.versionMap.FlushWrites(ivw, true)
+					be.blockState.FlushWrites(ivw, true)
 				}
 
 				// A read-only versionMap-slice view over the finalize write-set.
-				finalizeWrites = state.NewVersionMapWriteView(ivw, be.versionMap, finalVersion.TxIndex)
+				finalizeWrites = state.NewVersionMapWriteView(ivw, be.blockState.VersionMap, finalVersion.TxIndex)
 				be.applyCount += finalizeWrites.Count()
 			}
 		}
@@ -3580,7 +3580,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txNum:      txTask.Version().TxNum,
 				rules:      lastResult.Rules(),
 				writes:     finalizeWrites,
-				versionMap: be.versionMap,
+				versionMap: be.blockState.VersionMap,
 				logs:       blockEndLogs,
 				isFinalize: true,
 			}, false); err != nil {
@@ -3588,7 +3588,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		pe.prevBlocks.PushHead(be.blockNum, txTask.Version().TxNum, be.versionMap)
+		pe.prevBlocks.PushHead(be.blockNum, txTask.Version().TxNum, be.blockState.VersionMap)
 
 		be.result = &blockResult{
 			BlockNum:         be.blockNum,
@@ -3659,7 +3659,7 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 
 			tv := &taskVersion{
 				execTask:     execTask,
-				versionMap:   be.versionMap,
+				versionMap:   be.blockState.VersionMap,
 				profile:      be.profile,
 				stats:        be.stats,
 				statsMutex:   &be.Mutex,

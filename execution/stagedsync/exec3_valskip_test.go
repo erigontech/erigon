@@ -45,7 +45,7 @@ func newArrivalExecutor(t *testing.T) (*blockExecutor, *exec.TxResult) {
 	io := state.NewVersionedIO(arrivalReader + 2)
 	io.RecordReads(state.Version{TxIndex: arrivalReader}, rs)
 	be := &blockExecutor{
-		versionMap: vm,
+		blockState: &state.BlockState{VersionMap: vm},
 		blockIO:    io,
 		tasks:      []*execTask{{Task: &exec.TxTask{TxIndex: -1}, index: 0}},
 	}
@@ -71,6 +71,6 @@ func TestArrivalValidRejectsStaleRead(t *testing.T) {
 	dbg.AssertEnabled = false
 	t.Cleanup(func() { dbg.AssertEnabled = prev })
 	be, _ := newArrivalExecutor(t)
-	writeBalanceBelowReader(be.versionMap)
+	writeBalanceBelowReader(be.blockState.VersionMap)
 	require.False(t, be.validateNow(arrivalReader))
 }

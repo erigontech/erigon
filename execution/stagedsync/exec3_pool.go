@@ -265,7 +265,7 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 
 func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) bool {
 	pt.result = result
-	if !pt.be.versionMap.HasBAL {
+	if !pt.be.blockState.HasBAL {
 		return pt.waitThen(target, psRecheck)
 	}
 	return pt.publish(p)

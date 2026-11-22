@@ -373,7 +373,7 @@ func TestPoolBALSeededBlockMatchesUnseeded(t *testing.T) {
 func TestPoolSettleWaitsForReadTargetUnlessBAL(t *testing.T) {
 	for _, hasBAL := range []bool{false, true} {
 		pe, be := newPoolUnit(t, 3)
-		be.versionMap.HasBAL = hasBAL
+		be.blockState.HasBAL = hasBAL
 		pt := newPoolUnitTask(be, 2)
 
 		require.False(t, pt.settle(pe.pool, &exec.TxResult{}, 0))

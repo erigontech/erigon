@@ -1887,7 +1887,7 @@ func TestParallelNextResultKeepsTheSeedOfADroppedWrite(t *testing.T) {
 
 	earlier := state.Version{BlockNum: 1, TxIndex: 0}
 	earlierWrites := newWS().bal(addr, earlier, *uint256.NewInt(8)).build()
-	be.versionMap.FlushWrites(earlierWrites, false)
+	be.blockState.FlushWrites(earlierWrites, false)
 	be.blockIO.RecordWrites(earlier, earlierWrites)
 
 	dropping := state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 2}
@@ -1898,7 +1898,7 @@ func TestParallelNextResultKeepsTheSeedOfADroppedWrite(t *testing.T) {
 	}
 	_, _ = be.nextResult(context.Background(), pe, rerun, roTx)
 
-	bal7, res, ok := be.versionMap.ReadBalance(addr, 1)
+	bal7, res, ok := be.blockState.ReadBalance(addr, 1)
 	require.True(t, ok)
 	require.Equal(t, *uint256.NewInt(7), bal7)
 	require.Equal(t, state.MVReadResultDone, res.Status())
@@ -1928,7 +1928,7 @@ func TestParallelNextResultRevalidatesTheReaderOfADroppedWrite(t *testing.T) {
 
 	earlier := state.Version{BlockNum: 1, TxIndex: 0}
 	earlierWrites := newWS().bal(addr, earlier, *uint256.NewInt(8)).build()
-	be.versionMap.FlushWrites(earlierWrites, false)
+	be.blockState.FlushWrites(earlierWrites, false)
 	be.blockIO.RecordWrites(earlier, earlierWrites)
 
 	reads := state.ReadSet{}
@@ -2020,12 +2020,12 @@ func TestStartBlockSeedsRemovalsOnce(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	require.NoError(t, pe.processRequest(&execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, roTx))
 	be := pe.blockExecutors[1]
-	lc, _, _, _ := be.versionMap.AccountLifecycleAt(addr, 1)
+	lc, _, _, _ := be.blockState.AccountLifecycleAt(addr, 1)
 	require.NotEqual(t, state.LifecycleLive, lc, "first start seeds the removal")
 
-	be.versionMap = state.NewVersionMap(bal)
+	be.blockState = state.NewBlockState(bal)
 	require.NoError(t, pe.startBlock(be))
-	lc, _, _, _ = be.versionMap.AccountLifecycleAt(addr, 1)
+	lc, _, _, _ = be.blockState.AccountLifecycleAt(addr, 1)
 	require.Equal(t, state.LifecycleLive, lc, "a restart must not seed again")
 }
 
@@ -2070,7 +2070,7 @@ func TestStartBlockSeedsHistoricBlockAgainstHistory(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	task := &exec.TxTask{Header: header, Config: config, TxNum: 1, HistoryExecution: true}
 	require.NoError(t, pe.processRequest(&execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
-	lc, _, _, _ := pe.blockExecutors[1].versionMap.AccountLifecycleAt(addr, 1)
+	lc, _, _, _ := pe.blockExecutors[1].blockState.AccountLifecycleAt(addr, 1)
 	require.NotEqual(t, state.LifecycleLive, lc)
 }
 
@@ -2102,7 +2102,7 @@ func TestStartBlockSeedsAgainstUncommittedPrevBlock(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(2)}
 	task := &exec.TxTask{Header: header, Config: config, TxNum: 4}
 	require.NoError(t, pe.processRequest(&execRequest{blockNum: 2, accessList: bal, tasks: []exec.Task{task}}, roTx))
-	lc, _, _, _ := pe.blockExecutors[2].versionMap.AccountLifecycleAt(addr, 1)
+	lc, _, _, _ := pe.blockExecutors[2].blockState.AccountLifecycleAt(addr, 1)
 	require.Equal(t, state.LifecycleLive, lc)
 }
 
@@ -2123,12 +2123,12 @@ func TestProcessRequestSetsVersionMapBase(t *testing.T) {
 	require.NoError(t, pe.processRequest(&execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
 
 	const edgeTxNum = 15
-	view := pe.blockExecutors[1].versionMap.View(edgeTxNum, state.NewNoopReader())
+	view := pe.blockExecutors[1].blockState.View(edgeTxNum, state.NewNoopReader())
 	acc, ok, _ := view.GetAccount(addr)
 	require.NoError(t, view.Err())
 	require.True(t, ok)
 	require.Equal(t, uint64(100), acc.Balance.Uint64(), "view at the step edge must not include the write at txNum 16")
-	acc, ok, _ = pe.blockExecutors[1].versionMap.View(edgeTxNum+1, state.NewNoopReader()).GetAccount(addr)
+	acc, ok, _ = pe.blockExecutors[1].blockState.View(edgeTxNum+1, state.NewNoopReader()).GetAccount(addr)
 	require.True(t, ok)
 	require.Equal(t, uint64(600), acc.Balance.Uint64(), "view past txNum 16 includes its write")
 }
@@ -2146,7 +2146,7 @@ func TestDispatchLimitBoundsEveryBlock(t *testing.T) {
 		{"access list", types.BlockAccessList{{Address: addr, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			be := &blockExecutor{versionMap: state.NewVersionMap(tc.bal), tasks: make([]*execTask, 100)}
+			be := &blockExecutor{blockState: state.NewBlockState(tc.bal), tasks: make([]*execTask, 100)}
 			be.committedFrontier.Store(-1)
 			require.Equal(t, dispatchWindow(4)-1, be.dispatchLimit(4))
 			be.committedFrontier.Store(90)

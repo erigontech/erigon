@@ -291,7 +291,7 @@ func TestSelfLoopEvaluateBlockerTaskSpaceOnPartialBlock(t *testing.T) {
 	})
 
 	be := &blockExecutor{
-		versionMap: vm,
+		blockState: &state.BlockState{VersionMap: vm},
 		tasks:      []*execTask{{Task: &exec.TxTask{TxIndex: startTxIndex}, index: 0}},
 	}
 	// The reader is task (readerTxIndex - startTxIndex) in dense task-list space;
@@ -325,7 +325,7 @@ func TestSelfLoopEvaluateBlockerOnSelfDestructEstimate(t *testing.T) {
 		Val:        state.NewAccountView(&accounts.Account{}),
 	})
 	be := &blockExecutor{
-		versionMap: vm,
+		blockState: &state.BlockState{VersionMap: vm},
 		tasks:      []*execTask{{Task: &exec.TxTask{TxIndex: -1}, index: 0}},
 	}
 	tv := &taskVersion{execTask: &execTask{index: 2}, version: state.Version{TxIndex: 1}}

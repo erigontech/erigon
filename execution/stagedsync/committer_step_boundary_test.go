@@ -88,7 +88,7 @@ func newTestBlockResult(blockNum uint64, blockHash common.Hash, lastTxNum uint64
 }
 
 // newRawViewVM builds a raw-view (no-BAL) version map for one block whose base maps
-// the block's first txNum to TxIndex 0, as exec's per-block be.versionMap does.
+// the block's first txNum to TxIndex 0, as exec's per-block be.blockState.VersionMap does.
 func newRawViewVM(firstTxNum uint64) *state.VersionMap {
 	vm := state.NewVersionMap(nil)
 	vm.SetBaseTxNum(firstTxNum - 1)

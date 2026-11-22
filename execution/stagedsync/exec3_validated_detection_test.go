@@ -33,7 +33,7 @@ func newDetExecutor(t *testing.T, n int) *blockExecutor {
 	return &blockExecutor{
 		tasks:               tasks,
 		blockIO:             &state.VersionedIO{},
-		versionMap:          state.NewVersionMap(nil),
+		blockState:          state.NewBlockState(nil),
 		readerByAddr:        map[accounts.Address][]addrReader{},
 		finalizedResults:    map[int]*execResult{},
 		coinbaseFlushedUpTo: -1,
@@ -66,8 +66,8 @@ func TestValidated_ReaderReExecutedWhenWriterChangesAfterReaderCommits(t *testin
 	// W (tx0) writes key=v1, Validated at (0,0).
 	wWrites := newWS().stor(addr, key, state.Version{TxIndex: 0, Incarnation: 0}, v1).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 0, Incarnation: 0}, wWrites)
-	be.versionMap.FlushWrites(wWrites, false)
-	be.versionMap.MarkWritesValidated(wWrites, nil)
+	be.blockState.FlushWrites(wWrites, false)
+	be.blockState.MarkWritesValidated(wWrites, nil)
 
 	// R (tx1) early-broke on W's Validated value, recorded the dep at (0,0), and
 	// is validated (committed) early.
@@ -82,7 +82,7 @@ func TestValidated_ReaderReExecutedWhenWriterChangesAfterReaderCommits(t *testin
 	// W re-executes (the minority): key -> v2 at a new incarnation.
 	newW := newWS().stor(addr, key, state.Version{TxIndex: 0, Incarnation: 1}, v2).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 0, Incarnation: 1}, newW)
-	be.versionMap.WriteStorage(addr, key, state.Version{TxIndex: 0, Incarnation: 1}, v2, false)
+	be.blockState.WriteStorage(addr, key, state.Version{TxIndex: 0, Incarnation: 1}, v2, false)
 
 	be.revalidateCommittedDependents(0, wWrites)
 
@@ -105,8 +105,8 @@ func TestValidated_CrossPathLifecycleWriteReExecutesReader(t *testing.T) {
 	// Base: addr live with a balance at (0,0), Validated.
 	baseW := newWS().bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, baseBal).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 0, Incarnation: 0}, baseW)
-	be.versionMap.FlushWrites(baseW, false)
-	be.versionMap.MarkWritesValidated(baseW, nil)
+	be.blockState.FlushWrites(baseW, false)
+	be.blockState.MarkWritesValidated(baseW, nil)
 
 	// R (tx2) read addr.BALANCE at (0,0) while live, recorded the dep, committed early.
 	rReads := state.ReadSet{}
@@ -120,8 +120,8 @@ func TestValidated_CrossPathLifecycleWriteReExecutesReader(t *testing.T) {
 	// W1 (tx1) self-destructs addr — writes SelfDestructPath only, never BalancePath.
 	sdW := newWS().selfDestruct(addr, state.Version{TxIndex: 1, Incarnation: 0}, true).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 1, Incarnation: 0}, sdW)
-	be.versionMap.FlushWrites(sdW, false)
-	be.versionMap.MarkWritesValidated(sdW, nil)
+	be.blockState.FlushWrites(sdW, false)
+	be.blockState.MarkWritesValidated(sdW, nil)
 
 	be.revalidateCommittedDependents(1, nil)
 
@@ -145,8 +145,8 @@ func TestValidated_ReaderCommittingAfterWriterChange(t *testing.T) {
 	// W (tx0) Validated at (0,0)=v1.
 	wWrites := newWS().stor(addr, key, state.Version{TxIndex: 0, Incarnation: 0}, v1).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 0, Incarnation: 0}, wWrites)
-	be.versionMap.FlushWrites(wWrites, false)
-	be.versionMap.MarkWritesValidated(wWrites, nil)
+	be.blockState.FlushWrites(wWrites, false)
+	be.blockState.MarkWritesValidated(wWrites, nil)
 
 	// R executed against v1 and recorded the dep at (0,0) — but hasn't committed yet.
 	rReads := state.ReadSet{}
@@ -158,14 +158,14 @@ func TestValidated_ReaderCommittingAfterWriterChange(t *testing.T) {
 	// W re-executes to v2 BEFORE R commits; revalidate fires now (R not committed).
 	newW := newWS().stor(addr, key, state.Version{TxIndex: 0, Incarnation: 1}, v2).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 0, Incarnation: 1}, newW)
-	be.versionMap.WriteStorage(addr, key, state.Version{TxIndex: 0, Incarnation: 1}, v2, false)
+	be.blockState.WriteStorage(addr, key, state.Version{TxIndex: 0, Incarnation: 1}, v2, false)
 	be.revalidateCommittedDependents(0, wWrites) // R is not complete yet -> not re-checked
 
 	// R now commits early, trusting a worker verdict computed against the stale v1.
 	markValidated(be, 1)
 
 	// Is R's stale read noticed? Validate R against the current versionMap.
-	got := be.versionMap.ValidateVersion(1, be.blockIO,
+	got := be.blockState.ValidateVersion(1, be.blockIO,
 		func(rv, wv state.Version) state.VersionValidity {
 			if rv != wv {
 				return state.VersionInvalid
@@ -182,7 +182,7 @@ func TestValidated_ReaderCommittingAfterWriterChange(t *testing.T) {
 // skip must not hide the readers of that dropped cell.
 func TestRevalCandidates_BALKeepsReadersOfDroppedWrite(t *testing.T) {
 	be := newDetExecutor(t, 2)
-	be.versionMap.HasBAL = true
+	be.blockState.HasBAL = true
 	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
 	key := accounts.InternKey(common.HexToHash("0x01"))
 
@@ -196,7 +196,7 @@ func TestRevalCandidates_BALKeepsReadersOfDroppedWrite(t *testing.T) {
 
 func TestFinalizeFlushFlagsTheReaderOfAChangedCell(t *testing.T) {
 	be := newDetExecutor(t, 4)
-	be.versionMap.HasBAL = true
+	be.blockState.HasBAL = true
 	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
 	slot := accounts.InternKey(common.HexToHash("0x01"))
 	reads := state.ReadSet{}
@@ -205,7 +205,7 @@ func TestFinalizeFlushFlagsTheReaderOfAChangedCell(t *testing.T) {
 	be.indexReads(2, reads)
 
 	ws := newWS().stor(addr, slot, state.Version{TxIndex: 1}, *uint256.NewInt(1)).build()
-	be.versionMap.FlushWrites(ws, true)
+	be.blockState.FlushWrites(ws, true)
 	be.markReadersDirty(1, ws)
 
 	require.Equal(t, map[int]bool{2: true}, be.revalidate)
@@ -258,7 +258,7 @@ func TestMarkReadersDirtyOnBALSeededAccountPaths(t *testing.T) {
 			be := newDetExecutor(t, 4)
 			seed := c.seed
 			seed.Address = addr.Value()
-			be.versionMap = state.NewVersionMap(types.BlockAccessList{seed})
+			be.blockState.VersionMap = state.NewVersionMap(types.BlockAccessList{seed})
 			rs := state.ReadSet{}
 			key := accounts.NilKey
 			if c.path == state.StoragePath {
@@ -270,7 +270,7 @@ func TestMarkReadersDirtyOnBALSeededAccountPaths(t *testing.T) {
 			return be
 		}
 		valid := func(be *blockExecutor) state.VersionValidity {
-			return be.versionMap.ValidateVersion(2, be.blockIO, func(rv, wv state.Version) state.VersionValidity {
+			return be.blockState.ValidateVersion(2, be.blockIO, func(rv, wv state.Version) state.VersionValidity {
 				if rv != wv {
 					return state.VersionInvalid
 				}
@@ -280,7 +280,7 @@ func TestMarkReadersDirtyOnBALSeededAccountPaths(t *testing.T) {
 		t.Run(c.name+" seed left untouched", func(t *testing.T) {
 			be := newBE()
 			require.Equal(t, state.VersionValid, valid(be))
-			be.versionMap.FlushWrites(c.same, true)
+			be.blockState.FlushWrites(c.same, true)
 			be.markReadersDirty(1, c.same)
 			require.Empty(t, be.revalidate)
 			require.Equal(t, state.VersionValid, valid(be))
@@ -376,7 +376,7 @@ func TestSelfLoopFlushKeepsTheSeedOfADroppedWrite(t *testing.T) {
 				be := newDetExecutor(t, 3)
 				seed := c.seed(at.index)
 				seed.Address = addr.Value()
-				be.versionMap = state.NewVersionMap(types.BlockAccessList{seed})
+				be.blockState.VersionMap = state.NewVersionMap(types.BlockAccessList{seed})
 				run := &exec.TxResult{Task: be.tasks[1].Task, TxOut: c.earlier}
 				be.selfLoopFlush(earlier, run, nil)
 				be.selfLoopFlush(dropping, &exec.TxResult{Task: be.tasks[1].Task, TxOut: &state.WriteSet{}}, run.TxOut)
@@ -386,12 +386,12 @@ func TestSelfLoopFlushKeepsTheSeedOfADroppedWrite(t *testing.T) {
 					key = slot
 				}
 				for _, path := range c.paths {
-					res := be.versionMap.ReadStatus(addr, path, key, 2)
+					res := be.blockState.ReadStatus(addr, path, key, 2)
 					require.Equal(t, state.MVReadResultDone, res.Status(), path)
 					require.Equal(t, at.want, res.Version(), path)
 					require.NotEqual(t, state.ValueDeleted, res.ValStatus(), path)
 				}
-				require.Equal(t, c.want, c.value(be.versionMap))
+				require.Equal(t, c.want, c.value(be.blockState.VersionMap))
 			})
 		}
 	}
@@ -435,41 +435,41 @@ func TestMarkReadersDirty(t *testing.T) {
 	seeded := types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot1, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(1)}}}}}}
 	t.Run("a write the BAL already holds leaves the readers clean", func(t *testing.T) {
 		be := newBE()
-		be.versionMap = state.NewVersionMap(seeded)
+		be.blockState.VersionMap = state.NewVersionMap(seeded)
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Empty(t, be.revalidate)
 	})
 	t.Run("a write the BAL holds leaves the readers clean after validation", func(t *testing.T) {
 		be := newBE()
-		be.versionMap = state.NewVersionMap(seeded)
+		be.blockState.VersionMap = state.NewVersionMap(seeded)
 		ws := newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build()
-		be.versionMap.FlushWrites(ws, false)
-		be.versionMap.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
+		be.blockState.FlushWrites(ws, false)
+		be.blockState.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
 		be.markReadersDirty(1, ws)
 		require.Empty(t, be.revalidate)
 	})
 	t.Run("a Done cell a re-run left with the BAL value flags the readers", func(t *testing.T) {
 		be := newBE()
-		be.versionMap = state.NewVersionMap(seeded)
-		be.versionMap.WriteStorage(addr, slot1, state.Version{TxIndex: 1, Incarnation: 2}, *uint256.NewInt(1), true)
+		be.blockState.VersionMap = state.NewVersionMap(seeded)
+		be.blockState.WriteStorage(addr, slot1, state.Version{TxIndex: 1, Incarnation: 2}, *uint256.NewInt(1), true)
 		be.markReadersDirty(1, newWS().stor(addr, slot1, state.Version{TxIndex: 1, Incarnation: 3}, *uint256.NewInt(1)).build())
 		require.Equal(t, map[int]bool{2: true}, be.revalidate)
 	})
 	t.Run("a write the BAL does not hold flags the readers", func(t *testing.T) {
 		be := newBE()
-		be.versionMap = state.NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot2, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(1)}}}}}})
+		be.blockState.VersionMap = state.NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot2, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(1)}}}}}})
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Equal(t, map[int]bool{2: true}, be.revalidate)
 	})
 	t.Run("a write that differs from the BAL flags the readers", func(t *testing.T) {
 		be := newBE()
-		be.versionMap = state.NewVersionMap(seeded)
+		be.blockState.VersionMap = state.NewVersionMap(seeded)
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(2)).build())
 		require.Equal(t, map[int]bool{2: true}, be.revalidate)
 	})
 	t.Run("a BAL block still flags readers of a lifecycle write", func(t *testing.T) {
 		be := newBE()
-		be.versionMap = state.NewVersionMap(seeded)
+		be.blockState.VersionMap = state.NewVersionMap(seeded)
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).selfDestruct(addr, writer, true).build())
 		require.Equal(t, map[int]bool{2: true, 3: true}, be.revalidate)
 	})
