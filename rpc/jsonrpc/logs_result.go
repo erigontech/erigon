@@ -55,11 +55,15 @@ func (r LogsResult) MarshalJSON() ([]byte, error) {
 // on the block is answered without reading receipts or encoding again.
 type headBlockLogs struct {
 	hash    common.Hash
+	num     uint64
 	logs    types.Logs
 	encoded [][]byte
+	// tooMany marks a block with more logs than rpc.logs.maxresults: its logs are not kept, and
+	// queries on it read the block with their own filter.
+	tooMany bool
 }
 
-func newHeadBlockLogs(hash common.Hash, logs types.Logs) (*headBlockLogs, error) {
+func newHeadBlockLogs(hash common.Hash, num uint64, logs types.Logs) (*headBlockLogs, error) {
 	encoded := make([][]byte, len(logs))
 	for i, l := range logs {
 		e, err := jsonstream.Marshal(types.Logs{l})
@@ -68,7 +72,7 @@ func newHeadBlockLogs(hash common.Hash, logs types.Logs) (*headBlockLogs, error)
 		}
 		encoded[i] = e[1 : len(e)-1]
 	}
-	return &headBlockLogs{hash: hash, logs: logs, encoded: encoded}, nil
+	return &headBlockLogs{hash: hash, num: num, logs: logs, encoded: encoded}, nil
 }
 
 // filter returns the logs matching f, in block order, with their JSON.

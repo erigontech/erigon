@@ -93,10 +93,29 @@ func TestGetLogsHeadBlockMaxResultsCountsMatches(t *testing.T) {
 	res, err := api.GetLogs(m.Ctx, one)
 	require.NoError(t, err)
 	require.Len(t, res.Logs, 1)
-	require.True(t, api.headLogs.Load() == nil, "a block with more logs than the cap must not be cached")
+	marker := api.headLogs.Load()
+	require.NotNil(t, marker, "a block with more logs than the cap must be marked once")
+	require.True(t, marker.tooMany)
+	require.Empty(t, marker.logs)
 
 	_, err = api.GetLogs(m.Ctx, crit)
 	require.ErrorContains(t, err, errExceedLogResults)
+	require.Same(t, marker, api.headLogs.Load())
+}
+
+// TestGetLogsHeadBlockFillKeepsNewerHead pins that a query whose transaction still sees an older
+// head does not replace the cached logs of a newer head.
+func TestGetLogsHeadBlockFillKeepsNewerHead(t *testing.T) {
+	t.Parallel()
+	m := newLatestLogsTestChain(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	newer := &headBlockLogs{hash: common.Hash{0xaa}, num: 2}
+	api.headLogs.Store(newer)
+
+	res, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)})
+	require.NoError(t, err)
+	require.Len(t, res.Logs, 3)
+	require.Same(t, newer, api.headLogs.Load())
 }
 
 // TestGetLogsHeadBlockConcurrentQueriesShareOneFill pins that concurrent queries on a new head
