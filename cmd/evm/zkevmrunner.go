@@ -339,8 +339,12 @@ func decodeFixtures(fname string, fn func(name string, dec *json.Decoder) error)
 			return fmt.Errorf("duplicate fixture %s", name)
 		}
 		seen[name] = struct{}{}
+		start := dec.InputOffset()
 		if err := fn(name, dec); err != nil {
 			return fmt.Errorf("fixture %s: %w", name, err)
+		}
+		if dec.InputOffset() == start {
+			return fmt.Errorf("fixture %s: not decoded", name)
 		}
 	}
 	if _, err := dec.Token(); err != nil {
