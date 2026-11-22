@@ -84,6 +84,10 @@ type Window struct {
 	// Anchor is block From-1, the parent the batch settles from.
 	Anchor   *types.Header
 	From, To uint64
+	// L1Parent and Time are, for a live batch, the parent's hash and the
+	// timestamp of the L1 block it lands in, the terminal block's.
+	L1Parent common.Hash
+	Time     uint64
 	// Block returns window block n with its witness.
 	Block func(ctx context.Context, n uint64) (*types.Block, *Witness, error)
 }
@@ -154,16 +158,22 @@ func (c *Client) Prove(ctx context.Context, w *Window) ([]byte, error) {
 	if w.Anchor == nil || w.Anchor.Number.Uint64() != w.From-1 {
 		return nil, fmt.Errorf("window %d..%d without block %d as its anchor", w.From, w.To, w.From-1)
 	}
-	if w.Batch.BlockNumber != 0 {
-		return nil, fmt.Errorf("batch of blockNumber %d: only timeless batches are proven", w.Batch.BlockNumber)
-	}
-	unproven := *w.Batch
-	unproven.Proofs = nil
-	calldata, err := protocol.EncodePostAndVerifyBatch(&unproven)
+	custom, err := protocol.SettlementCustomData(w.Batch.BlockNumber, w.Time, w.L1Parent)
 	if err != nil {
 		return nil, err
 	}
-	want, err := publicInputsHash(&unproven, c.vkey)
+	settlement := &provepb.SettlementInput{}
+	if custom != nil {
+		// Rollup0's conditional proofs leave the chain ID and the parent's
+		// number zero (SPEC §3).
+		settlement.PostingContext = &provepb.L1PostingContext{TargetTimestamp: w.Time, ParentHash: w.L1Parent[:]}
+	}
+	unproven := *w.Batch
+	unproven.Proofs = nil
+	if settlement.AbiCalldata, err = protocol.EncodePostAndVerifyBatch(&unproven); err != nil {
+		return nil, err
+	}
+	want, err := publicInputsHash(&unproven, c.vkey, custom)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +203,7 @@ func (c *Client) Prove(ctx context.Context, w *Window) ([]byte, error) {
 		}
 		parent = common.BytesToHash(chunk.Hash)
 	}
-	proof, err := s.finalize(&provepb.Finalize{FromBlock: w.From, ToBlock: w.To, TerminalHash: parent[:], Settlement: &provepb.SettlementInput{AbiCalldata: calldata}})
+	proof, err := s.finalize(&provepb.Finalize{FromBlock: w.From, ToBlock: w.To, TerminalHash: parent[:], Settlement: settlement})
 	if err != nil {
 		return nil, err
 	}
@@ -430,17 +440,19 @@ func attest(sig, hash []byte, attester common.Address) (common.Hash, error) {
 }
 
 // publicInputsHash is the hash the attester signs for b, whose one proof
-// system has verification key vkey.
-func publicInputsHash(b *protocol.ProofSystemBatch, vkey common.Hash) (common.Hash, error) {
+// system has verification key vkey, binding custom, the manager's custom
+// data of the batch.
+func publicInputsHash(b *protocol.ProofSystemBatch, vkey common.Hash, custom []byte) (common.Hash, error) {
 	if b.BindMsgSenderInPublicInput {
 		return common.Hash{}, errors.New("batch binds its sender, which is the poster's to set")
 	}
 	n := len(b.RollupIDsWithProofSystems)
-	vkeys := make([][]common.Hash, n)
+	vkeys, customs := make([][]common.Hash, n), make([][]byte, n)
 	for i, r := range b.RollupIDsWithProofSystems {
 		vkeys[i] = slices.Repeat([]common.Hash{vkey}, len(r.ProofSystemIndexes))
+		customs[i] = custom
 	}
-	p, err := protocol.NewPublicInputs(b, nil, make([][]byte, n), vkeys, common.Address{})
+	p, err := protocol.NewPublicInputs(b, nil, customs, vkeys, common.Address{})
 	if err != nil {
 		return common.Hash{}, err
 	}
