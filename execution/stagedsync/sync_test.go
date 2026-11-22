@@ -48,9 +48,7 @@ func (filesAheadView) TxNumsInFiles(...kv.Domain) uint64 { return 100 }
 
 func TestUnwindToReportsUnknownSnapshotBoundary(t *testing.T) {
 	_, tx := temporaltest.NewTestTx(t)
-	diff := &changeset.StateChangeSet{}
-	diff.Diffs[kv.AccountsDomain].DomainUpdate([]byte{1}, 0, nil)
-	require.NoError(t, changeset.WriteDiffSet(tx, 1, common.Hash{1}, diff))
+	require.NoError(t, changeset.WriteDiffSet(tx, 1, common.Hash{1}, &changeset.StateChangeSet{}))
 	sync := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, nil, nil, nil, log.New(), stages.ModeApplyingBlocks)
 	err := sync.UnwindTo(1, ForkChoice, filesAheadTx{tx})
 	require.ErrorIs(t, err, commitmentdb.ErrBehindCommitment)

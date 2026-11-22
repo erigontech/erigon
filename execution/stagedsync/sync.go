@@ -143,17 +143,13 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 
 func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
 func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error {
-	if tx != nil {
-		if ttx, ok := tx.(kv.TemporalTx); ok {
-			// protect from too far unwind
-			unwindPointWithCommitment, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindPoint, ttx, s.txNumsReader)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
-			}
-			unwindPoint = unwindPointWithCommitment
+	if temporalTx, ok := tx.(kv.TemporalTx); ok {
+		earliestBlock, err := rawtemporaldb.CanUnwindToBlockNum(temporalTx, s.txNumsReader)
+		if err != nil {
+			return err
+		}
+		if unwindPoint < earliestBlock {
+			return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, earliestBlock)
 		}
 	}
 

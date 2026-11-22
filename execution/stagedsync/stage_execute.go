@@ -562,12 +562,12 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	// would flush stale branch data that doesn't match the unwound state.
 	doms.ResetPendingUpdates()
 
-	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx, cfg.blockReader.TxnumReader())
+	earliestBlock, err := rawtemporaldb.CanUnwindToBlockNum(rwTx, cfg.blockReader.TxnumReader())
 	if err != nil {
 		return err
 	}
-	if !ok {
-		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
+	if u.UnwindPoint < earliestBlock {
+		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, earliestBlock)
 	}
 
 	var accumulator *shards.Accumulator

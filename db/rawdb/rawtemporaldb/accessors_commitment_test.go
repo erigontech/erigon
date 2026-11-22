@@ -61,9 +61,7 @@ func TestMinimumUnwindKeepsImmutableTransactions(t *testing.T) {
 			for block := range uint64(5) {
 				require.NoError(t, rawdbv3.TxNums.Append(tx, block, 3*block+2))
 				if block > 0 {
-					diff := &changeset.StateChangeSet{}
-					diff.Diffs[kv.AccountsDomain].DomainUpdate([]byte{1}, 0, nil)
-					require.NoError(t, changeset.WriteDiffSet(tx, block, common.Hash{byte(block)}, diff))
+					require.NoError(t, changeset.WriteDiffSet(tx, block, common.Hash{byte(block)}, &changeset.StateChangeSet{}))
 				}
 			}
 			for _, tc := range []struct{ end, want uint64 }{{0, 0}, {6, 1}, {7, 2}, {9, 2}, {10, 3}} {
@@ -91,10 +89,8 @@ func TestMinimumUnwindUsesValueFilesAndRetainedChangesets(t *testing.T) {
 	for block := range uint64(5) {
 		require.NoError(t, rawdbv3.TxNums.Append(tx, block, 3*block+2))
 	}
-	diff := &changeset.StateChangeSet{}
-	diff.Diffs[kv.AccountsDomain].DomainUpdate([]byte{1}, 0, nil)
 	for block := uint64(3); block <= 4; block++ {
-		require.NoError(t, changeset.WriteDiffSet(tx, block, common.Hash{byte(block)}, diff))
+		require.NoError(t, changeset.WriteDiffSet(tx, block, common.Hash{byte(block)}, &changeset.StateChangeSet{}))
 	}
 	// Changesets for blocks 3 and 4 allow a return to block 2. Only value
 	// files that cover a later block can raise that minimum.
@@ -121,9 +117,7 @@ func (index snapshotTxIndex) BlockNumber(_ context.Context, _ kv.Tx, txNum uint6
 
 func TestMinimumUnwindUsesSnapshotBlockIndex(t *testing.T) {
 	_, tx := temporaltest.NewTestTx(t)
-	diff := &changeset.StateChangeSet{}
-	diff.Diffs[kv.AccountsDomain].DomainUpdate([]byte{1}, 0, nil)
-	require.NoError(t, changeset.WriteDiffSet(tx, 1, common.Hash{1}, diff))
+	require.NoError(t, changeset.WriteDiffSet(tx, 1, common.Hash{1}, &changeset.StateChangeSet{}))
 	view := unwindFilesTx{TemporalTx: tx, domain: kv.AccountsDomain, end: 12}
 	reader := rawdbv3.TxNums.WithCustomReadTxNumFunc(snapshotTxIndex{t: t})
 	got, err := rawtemporaldb.CanUnwindToBlockNum(view, reader)

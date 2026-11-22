@@ -204,10 +204,8 @@ func TestUnwindExec3RequiresExecutedDiffsets(t *testing.T) {
 				require.NoError(t, rawdbv3.TxNums.Append(tx, number, number*3+2))
 			}
 			for _, number := range test.stored {
-				cs := &changeset.StateChangeSet{}
-				address := common.Address{1}
-				cs.Diffs[kv.AccountsDomain].DomainUpdate(address[:], kv.Step(0), nil)
-				require.NoError(t, changeset.WriteDiffSet(tx, number, makeHeader(number, common.Hash{1}).Hash(), cs))
+				hash := makeHeader(number, common.Hash{1}).Hash()
+				require.NoError(t, changeset.WriteDiffSet(tx, number, hash, &changeset.StateChangeSet{}))
 			}
 			doms.SetTxNum(11)
 			err := unwindExec3(
