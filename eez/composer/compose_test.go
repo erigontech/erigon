@@ -1287,13 +1287,14 @@ func TestComposeOutboundRefuses(t *testing.T) {
 	}
 	t.Run("a spent nonce", func(t *testing.T) {
 		f := newCrossFixture(t)
-		f.holdOut(t, 0, outboundProxies[1], 0, nil)
+		stale := f.holdOut(t, 0, outboundProxies[1], 0, nil)
 		next := f.holdOut(t, 1, outboundProxies[1], 0, nil)
 		f.l2.accounts[crypto.PubkeyToAddress(f.l2Key.PublicKey)].Nonce = 1
 		fx := f.compose(t)
 		require.NotNil(t, fx)
 		require.Equal(t, []*Held{next}, fx.held)
 		require.Len(t, fx.txs, 2)
+		require.False(t, f.pool.Holds(stale.Hash), "never composed, it is let go")
 	})
 }
 

@@ -622,7 +622,9 @@ func TestHeldPoolKeepsComposedOutbound(t *testing.T) {
 	p := NewHeldPool()
 	x := held(addr(0xa), 0, Outbound, 1)
 	require.NoError(t, p.Push(x, 0))
-	p.Release(p.PopN(1))
+	settled := p.PopN(1)
+	p.Composed(settled, 1)
+	p.Release(settled)
 	y := held(addr(0xa), 0, Outbound, 2)
 	y.MaxFee.SetUint64(100)
 	y.Tip.SetUint64(100)
@@ -630,6 +632,11 @@ func TestHeldPoolKeepsComposedOutbound(t *testing.T) {
 	p.PushFront([]*Held{x})
 	require.True(t, p.Holds(x.Hash), "dropped for the replacement, still composed")
 	require.Equal(t, []*Held{y}, p.PopN(math.MaxInt))
+	p.mu.Lock()
+	_, tombed := p.discarded[x.Hash]
+	require.True(t, tombed, "tombstoned")
+	require.False(t, p.settled[x.Hash], "no ledger entry is left to forget it")
+	p.mu.Unlock()
 
 	stale := held(addr(0xb), 0, Outbound, 3)
 	require.NoError(t, p.Push(stale, 0))

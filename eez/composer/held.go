@@ -327,6 +327,8 @@ func (p *HeldPool) PushFront(recovered []*Held) {
 	for _, tx := range recovered {
 		delete(p.inFlight, tx.Hash)
 		if n, ok := conflict[tx.chainKey()]; ok && tx.Nonce >= n {
+			// Its ledger entry is gone: nothing would forget it as settled.
+			delete(p.settled, tx.Hash)
 			p.tomb(tx.Hash, tx.chainKey(), tx.Nonce, tx.sync)
 			continue
 		}
