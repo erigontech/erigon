@@ -500,7 +500,7 @@ var cmdCommitmentPrint = &cobra.Command{
 	},
 }
 
-// commitmentFileState describes the commitment state record of the file that ends at maxTxNum.
+// commitmentFileState describes the commitment state record of the .kv file whose last txNum is maxTxNum.
 func commitmentFileState(acRo *dbstate.AggregatorRoTx, maxTxNum uint64) (string, error) {
 	v3 := statecfg.Schema.CommitmentDomain.CommitmentV3Records
 	key := commitment.KeyCommitmentState
@@ -545,7 +545,7 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context) error {
 		count := acRo.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
 		rootString, err := commitmentFileState(acRo, f.EndRootNum()-1)
 		if err != nil {
-			return fmt.Errorf("%s: failed to decode the commitment state: %w", name, err)
+			return fmt.Errorf("%s: %w", name, err)
 		}
 		fmt.Printf("%28s: prefixes %8s %s\n", name, common.PrettyCounter(count), rootString)
 	}
