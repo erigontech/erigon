@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -29,13 +30,9 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// Characterization suite pinning the observable revert behaviour of every journal
-// entry kind on the versioned path: snapshot, mutate through the public IBS API,
-// assert the EVM-observable state changed, revert, assert it is restored exactly.
-// Observables (not internal cells) are asserted on purpose — the cell bookkeeping is
-// what later changes when the journal becomes cell-aware and the stateObject path is
-// removed, so this suite must stay green across that change as proof of no behaviour
-// change. See TestJournalDirtySymmetry for the complementary per-kind dirty accounting.
+// Characterization suite pinning the EVM-observable revert of every journal entry
+// kind on the versioned path. See TestJournalDirtySymmetry for the complementary
+// per-kind dirty accounting.
 
 func versionedRevertIBS(reader StateReader) *IntraBlockState {
 	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
@@ -253,6 +250,56 @@ func TestJournalRevert_FrameTransient(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(55), ibs.GetTransientState(addr, key), "revert restores transient storage after a frame reset")
 }
 
+// A storage charge records the frame that owns the refund. Reverting the owner
+// change has two branches: a freshly installed owner (no prior owner) is removed,
+// and an owner that overwrote an earlier frame's is restored to that earlier frame
+// so a later RefillStorageGas returns the gas to the frame that first charged it.
+func TestJournalRevert_FrameStorageOwner(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xfa, 0x04})
+	key := accounts.InternKey(common.Hash{31: 0x07})
+
+	t.Run("install_then_revert_removes_owner", func(t *testing.T) {
+		t.Parallel()
+		ibs := versionedRevertIBS(&emptyReader{})
+		ctx := ibs.NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{{Limits: mdgas.MdGas{State: 100}}}}, uint256.Int{})
+
+		snap := ibs.PushSnapshot()
+		ctx.RecordStorageCharge(addr, key)
+		require.Equal(t, uint8(1), ctx.storageOwners[frameStorageSlot{addr, key}], "charge installs the current frame as owner")
+
+		ibs.RevertToSnapshot(snap, nil)
+		_, ok := ctx.storageOwners[frameStorageSlot{addr, key}]
+		require.False(t, ok, "revert removes a newly installed storage owner")
+	})
+
+	t.Run("overwrite_then_revert_refunds_outer_frame", func(t *testing.T) {
+		t.Parallel()
+		ibs := versionedRevertIBS(&emptyReader{})
+		ctx := ibs.NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{
+			{Limits: mdgas.MdGas{State: 100}},
+			{Limits: mdgas.MdGas{State: 100}},
+		}}, uint256.Int{})
+
+		ctx.Index = 0
+		require.True(t, ctx.ChargeStateGas(40))
+		ctx.RecordStorageCharge(addr, key)
+		require.Equal(t, uint8(1), ctx.storageOwners[frameStorageSlot{addr, key}], "outer frame owns the slot")
+
+		ctx.Index = 1
+		snap := ibs.PushSnapshot()
+		ctx.RecordStorageCharge(addr, key)
+		require.Equal(t, uint8(2), ctx.storageOwners[frameStorageSlot{addr, key}], "inner frame overwrites ownership")
+
+		ibs.RevertToSnapshot(snap, nil)
+		require.Equal(t, uint8(1), ctx.storageOwners[frameStorageSlot{addr, key}], "revert restores the outer frame's ownership")
+
+		ctx.RefillStorageGas(addr, key, 40)
+		require.Equal(t, uint64(0), ctx.Receipts[0].GasUsed.State, "refill returns the gas to the outer owner frame")
+		require.Equal(t, uint64(0), ctx.Receipts[1].GasUsed.State, "the inner frame is not credited the outer frame's charge")
+	})
+}
+
 func TestJournalRevert_BalanceCreateOnAbsent(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xba, 0x09})
@@ -263,6 +310,8 @@ func TestJournalRevert_BalanceCreateOnAbsent(t *testing.T) {
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
 	require.True(t, exists, "AddBalance created the absent account")
+	require.True(t, ibs.hasWrite(addr, AddressPath, accounts.NilKey), "create records the AddressPath write OCC needs")
+	require.True(t, ibs.hasWrite(addr, BalancePath, accounts.NilKey), "the balance write is recorded")
 
 	ibs.RevertToSnapshot(snap, nil)
 	exists, err = ibs.Exist(addr)
@@ -271,6 +320,8 @@ func TestJournalRevert_BalanceCreateOnAbsent(t *testing.T) {
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.True(t, bal.IsZero(), "revert restores the absent balance")
+	require.False(t, ibs.hasWrite(addr, AddressPath, accounts.NilKey), "revert drops the created AddressPath write")
+	require.False(t, ibs.hasWrite(addr, BalancePath, accounts.NilKey), "revert drops the balance write")
 }
 
 func TestJournalRevert_NonceCreateOnAbsent(t *testing.T) {
@@ -283,6 +334,8 @@ func TestJournalRevert_NonceCreateOnAbsent(t *testing.T) {
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
 	require.True(t, exists, "SetNonce created the absent account")
+	require.True(t, ibs.hasWrite(addr, AddressPath, accounts.NilKey), "create records the AddressPath write OCC needs")
+	require.True(t, ibs.hasWrite(addr, NoncePath, accounts.NilKey), "the nonce write is recorded")
 
 	ibs.RevertToSnapshot(snap, nil)
 	exists, err = ibs.Exist(addr)
@@ -291,6 +344,8 @@ func TestJournalRevert_NonceCreateOnAbsent(t *testing.T) {
 	nonce, err := ibs.GetNonce(addr)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), nonce, "revert restores the absent nonce")
+	require.False(t, ibs.hasWrite(addr, AddressPath, accounts.NilKey), "revert drops the created AddressPath write")
+	require.False(t, ibs.hasWrite(addr, NoncePath, accounts.NilKey), "revert drops the nonce write")
 }
 
 // A pre-6780 SELFDESTRUCT marks a live contract for end-of-tx deletion but leaves
@@ -353,8 +408,7 @@ func TestSelfdestructThenNonceKeepsRecord(t *testing.T) {
 // journalKindRevertCoverage maps every journal entry kind to the test that pins its
 // revert behaviour (or the reason it needs none). TestJournalRevertCoverageComplete
 // asserts the map covers every kind in [0, kindEnd) so a newly added kind cannot land
-// without a revert test — the guard that keeps the stateObject removal verifiable by
-// fast unit tests rather than a long integration pass.
+// without a revert test.
 var journalKindRevertCoverage = map[entryKind]string{
 	kindBalance:                 "TestJournalRevert_Balance",
 	kindNonce:                   "TestJournalRevert_Nonce",
@@ -371,7 +425,7 @@ var journalKindRevertCoverage = map[entryKind]string{
 	kindFrameApproval:           "TestJournalRevert_FrameApproval",
 	kindFrameStateGas:           "TestJournalRevert_FrameStateGas",
 	kindFrameTransient:          "TestJournalRevert_FrameTransient",
-	kindFrameStorageOwner:       "TestJournalDirtySymmetry (frame cell; dirty-symmetry covered)",
+	kindFrameStorageOwner:       "TestJournalRevert_FrameStorageOwner",
 	kindBalanceIncrease:         "none: materialized-only, deleted with the stateObject path",
 	kindBalanceIncreaseTransfer: "none: materialized-only, deleted with the stateObject path",
 	kindFakeStorage:             "none: materialized-only (stateObject.setFakeStorage), deleted with the path",

@@ -27,11 +27,9 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// Characterization of CreateAccount's EVM-observable semantics on the versioned path,
-// pinned before the stateObject crutch is removed: the version map must carry enough
-// lifecycle information (existence, carried balance, incarnation, self-destruct clear)
-// to reproduce these outcomes without a transient stateObject. If a version-map-only
-// rewrite breaks one of these, the map lacked that hint and the test says which.
+// Characterization of CreateAccount's EVM-observable semantics on the versioned path:
+// existence, carried balance, incarnation and self-destruct clear across create and
+// revert.
 
 func requireAccount(t *testing.T, ibs *IntraBlockState, addr accounts.Address, balance uint64, nonce uint64, codeHash accounts.CodeHash) {
 	t.Helper()
@@ -113,6 +111,13 @@ func TestCreateAccount_OverExistingContractResetsAndCarriesBalance(t *testing.T)
 	ch, err := ibs.GetCodeHash(addr)
 	require.NoError(t, err)
 	require.Equal(t, acc.CodeHash, ch, "revert restores the prior contract's code hash")
+	// Incarnation is not restored to the prior 2: CreateAccount stamps a synthetic
+	// incarnation read that the revert does not drop. The EVM's CREATE collision check
+	// keeps this fixture from reaching CreateAccount, so only direct IBS callers observe
+	// it; pinned here so the characterization records the current value rather than hiding it.
+	inc, err := ibs.GetIncarnation(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), inc, "incarnation is not restored on revert")
 }
 
 func TestCreateAccount_CarriesSameTxCreditToAbsentAddress(t *testing.T) {
