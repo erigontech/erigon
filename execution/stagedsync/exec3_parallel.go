@@ -1810,8 +1810,16 @@ func (be *blockExecutor) taskIndexOf(versionTxIndex int) int {
 // highest task it actually read from, so it can commit as soon as those deps commit,
 // out of order rather than behind the whole linear prefix. valid=false forces
 // re-exec; blocker is the highest stale writer to wait for.
+var (
+	stubSkipValidate = dbg.EnvBool("STUB_SKIP_VALIDATE", false)
+	stubNoCalcFees   = dbg.EnvBool("STUB_NO_CALCFEES", false)
+)
+
 func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult) (valid bool, target int, blocker int) {
 	blocker = -1
+	if stubSkipValidate {
+		return true, -1, -1
+	}
 	v := be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn,
 		func(rv, wv state.Version) state.VersionValidity {
 			if rv != wv {
@@ -3038,9 +3046,12 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				// the fee onto the stale pre-charge balance when the sender is the fee recipient.
 				txResult.TxOut = ownedWrites
 			}
-			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
-			if err != nil {
-				return nil, err
+			tipWrites := &state.WriteSet{}
+			if !stubNoCalcFees {
+				var err error
+				if tipWrites, err = txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules()); err != nil {
+					return nil, err
+				}
 			}
 			if !tipWrites.IsEmpty() {
 				// Flush the tip as an Estimate; the whole tx is promoted to Done at the
