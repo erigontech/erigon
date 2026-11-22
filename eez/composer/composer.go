@@ -602,7 +602,7 @@ const maxAttempts = 3
 // go, the rest go back to the front of the pool.
 func (c *Composer) recoverHeld(ctx context.Context, p Posted[*Held]) {
 	// An outbound transaction lands in the Sync block replaced.
-	landed, err := c.landed(ctx, bundled(p.Txs))
+	landed, _, err := c.landed(ctx, bundled(p.Txs))
 	if err != nil {
 		c.ledger.ReinsertFailed(p)
 		return
@@ -873,7 +873,7 @@ func (c *Composer) audit(p Posted[*Held]) {
 	switch {
 	case err != nil:
 		c.logger.Error("[eez] finality audit failed", "event", "eez.composer.finality_audit.check_failed", "to", p.Height, "post", p.Post, "err", err)
-	case r == nil && c.superseded(p):
+	case r == nil && (p.Superseded || c.superseded(p)):
 		// Another posting settled the height; what ran of p is final in it.
 	case r == nil:
 		c.logger.Error("[eez] finalized settlement's posting is not on L1", "event", "eez.composer.finality_audit.rolled_out", "to", p.Height, "post", p.Post,
@@ -891,30 +891,31 @@ func (c *Composer) audit(p Posted[*Held]) {
 // receiptReads bounds the receipt reads a recovery runs at once.
 const receiptReads = 16
 
-// landed reports which of txs have an L1 receipt, read receiptReads at a
-// time, all within one L1Read: the sequencer waits on L1 for one L1Read at
-// most, and a node answering each read in time is not held to all of them.
-func (c *Composer) landed(ctx context.Context, txs []*Held) (map[common.Hash]bool, error) {
+// landed reports which of txs have an L1 receipt, and whether one of those
+// reverted, read receiptReads at a time, all within one L1Read: the
+// sequencer waits on L1 for one L1Read at most, and a node answering each
+// read in time is not held to all of them.
+func (c *Composer) landed(ctx context.Context, txs []*Held) (map[common.Hash]bool, bool, error) {
 	rctx, cancel := context.WithTimeout(ctx, c.cfg.L1Read)
 	defer cancel()
 	g, gctx := errgroup.WithContext(rctx)
 	g.SetLimit(receiptReads)
-	has := make([]bool, len(txs))
+	has, failed := make([]bool, len(txs)), make([]bool, len(txs))
 	for i, tx := range txs {
 		g.Go(func() error {
 			r, err := c.observer.Node.Receipt(gctx, tx.Hash)
-			has[i] = r != nil
+			has[i], failed[i] = r != nil, r != nil && r.Status != 1
 			return err
 		})
 	}
 	if err := g.Wait(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out := make(map[common.Hash]bool, len(txs))
 	for i, tx := range txs {
 		out[tx.Hash] = has[i]
 	}
-	return out, nil
+	return out, slices.Contains(failed, true), nil
 }
 
 // bundled returns the transactions of txs a bundle carries to L1: an
@@ -955,10 +956,11 @@ func partialCulprit(txs []*Held, spent map[common.Hash]bool) *Held {
 // the triggers L1 has are spent and let go, kept with p for a later reorg;
 // the rest return to the pool, the one where L1 stopped charged. A batch
 // the provers refused was never posted: its culprit, unless it ran, is
-// ejected instead, and no other is charged. False leaves p for the next
-// call, a read having failed.
+// ejected instead, and no other is charged. A batch its own posting settled
+// whole, derivation passing it before its verdict, is only released. False
+// leaves p for the next call, a read having failed.
 func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
-	spent, err := c.landed(ctx, bundled(p.Txs))
+	spent, reverted, err := c.landed(ctx, bundled(p.Txs))
 	if err != nil {
 		return false
 	}
@@ -985,7 +987,21 @@ func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
 			rest = append(rest, tx)
 		}
 	}
-	c.ledger.ClaimPartial(p.Height, p.Post, ran)
+	var settler deriver.Record
+	derived := false
+	if c.settlement != nil {
+		settler, derived = c.settlement(p.Height)
+	}
+	own := derived && settler.TxHash == p.Post
+	// A reorg during the reads may have taken the batch and requeued it.
+	if !c.ledger.ClaimPartial(p.Height, p.Post, ran, derived && !own) {
+		return true
+	}
+	if own && len(rest) == 0 && !reverted {
+		// Derivation passed the batch before its verdict: it settled whole.
+		c.release(ran)
+		return true
+	}
 	var culprit *Held
 	if p.Culprit == nil {
 		culprit = partialCulprit(p.Txs, spent)

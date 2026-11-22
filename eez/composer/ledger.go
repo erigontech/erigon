@@ -74,6 +74,9 @@ type Posted[T any] struct {
 	// Culprit, when set, is the one of Txs the provers refused the batch
 	// for.
 	Culprit T
+	// Superseded reports a batch another posting settled: no posting of it
+	// is looked for at finality.
+	Superseded bool
 }
 
 type entry[T any] struct {
@@ -244,15 +247,16 @@ func (l *Ledger[T]) PartialToDispose(cursor uint64) (Posted[T], bool) {
 }
 
 // ClaimPartial settles post's partial batch, keeping spent, the
-// transactions that ran; false when a reorg or a rebuild took it first.
-func (l *Ledger[T]) ClaimPartial(height uint64, post common.Hash, spent []T) bool {
+// transactions that ran, and whether another posting settled it; false
+// when a reorg or a rebuild took it first.
+func (l *Ledger[T]) ClaimPartial(height uint64, post common.Hash, spent []T, superseded bool) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	e := l.find(height, post)
 	if e == nil {
 		return false
 	}
-	e.Txs, e.resolution, e.confirmed = spent, Settled, true
+	e.Txs, e.resolution, e.confirmed, e.Superseded = spent, Settled, true, superseded
 	return true
 }
 
@@ -297,13 +301,13 @@ func (l *Ledger[T]) Unsettle(height uint64, post common.Hash) bool {
 }
 
 // Repend turns post's Settled or SettledPartial batch back to Pending and
-// returns its new watch: L1 dropped the block that settled it, and the
-// posting may land again.
+// returns its new watch: L1 dropped the block that settled it, the posting
+// may land again, and what settled the height is unknown again.
 func (l *Ledger[T]) Repend(height uint64, post common.Hash) (uint64, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if e := l.find(height, post); e != nil && (e.resolution == Settled || e.resolution == SettledPartial) {
-		e.resolution, e.confirmed, e.Landed = Pending, false, false
+		e.resolution, e.confirmed, e.Landed, e.Superseded = Pending, false, false, false
 		l.watches++
 		e.watch = l.watches
 		return e.watch, true

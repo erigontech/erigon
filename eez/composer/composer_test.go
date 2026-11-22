@@ -1782,6 +1782,63 @@ func TestComposerAuditsASupersededPosting(t *testing.T) {
 	require.False(t, pool.Holds(out.Hash), "final in the rival's block")
 }
 
+// TestComposerAuditsAPostingSupersededAndPruned: a posting another poster
+// superseded is not looked for at finality, when derivation has pruned the
+// settlement that superseded it.
+func TestComposerAuditsAPostingSupersededAndPruned(t *testing.T) {
+	chain := newTestChain(t, 8, 8)
+	node := &triggers{landed: map[common.Hash]bool{}}
+	h := newHarness(t, chain, 8, node)
+	var pruned atomic.Bool
+	rival := settlements(deriver.Record{TxHash: common.Hash{0xe}, LastL2Block: 8})
+	h.c.Settlements(func(n uint64) (deriver.Record, bool) {
+		if pruned.Load() {
+			return deriver.Record{}, false
+		}
+		return rival(n)
+	})
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	out := held(addr(0xa), 0, Outbound, 1)
+	out.Hash = chain.blocks[8].Transactions()[0].Hash()
+	require.NoError(t, pool.Push(out, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
+	lines := captureLogs(h.c)
+	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	pruned.Store(true)
+	h.final.Store(8)
+	h.c.RecoverFailed(t.Context())
+	h.c.Close()
+	require.Empty(t, h.c.ledger.entries)
+	require.NotContains(t, lines.String(), "finality_audit.rolled_out")
+	require.Zero(t, pool.Len())
+	require.False(t, pool.Holds(out.Hash), "final in the rival's block")
+}
+
+// TestComposerReleasesItsOwnSettlementQuietly: a batch derivation passed
+// before its verdict, settled whole by its own posting, is no partial one.
+func TestComposerReleasesItsOwnSettlementQuietly(t *testing.T) {
+	chain := newTestChain(t, 8, 8)
+	h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
+	h.c.Settlements(settlements(deriver.Record{TxHash: common.Hash{0xf}, LastL2Block: 8}))
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	out := held(addr(0xa), 0, Outbound, 1)
+	out.Hash = chain.blocks[8].Transactions()[0].Hash()
+	require.NoError(t, pool.Push(out, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
+	lines := captureLogs(h.c)
+	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	h.c.Close()
+	r, _ := h.resolution(8)
+	require.Equal(t, Settled, r)
+	require.NotContains(t, lines.String(), "recovery.settled_partial")
+	require.NotContains(t, lines.String(), "recovery.nonce_burned")
+	require.True(t, pool.Holds(out.Hash), "settled, not final")
+}
+
 // TestComposerEvents: a slot logs its invocation, and each posting its kind
 // as dispatched and its verdict as observed.
 func TestComposerEvents(t *testing.T) {
