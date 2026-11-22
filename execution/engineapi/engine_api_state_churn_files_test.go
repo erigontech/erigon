@@ -29,7 +29,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -146,13 +149,9 @@ func TestEngineApiUnwindAcrossDomainStepBoundaries(t *testing.T) {
 	})
 }
 
-// TestEngineApiUnwindToSnapshotBoundaryPreservesDeletedSlots unwinds to just
-// above the visible snapshot-file boundary, after pruning has evacuated the
-// filed range from MDBX. Post-unwind reads of the churned slots must then
-// resolve through the snapshot files — the state the shallower unwind of
-// TestEngineApiUnwindAcrossDomainStepBoundaries never reaches because MDBX
-// still holds every pre-range value there. Any domain read path that
-// mishandles file-resident values or deletion markers surfaces here.
+// At the earliest legal unwind point, pruned storage slots must still read
+// correctly from snapshot files. An unwind one block deeper must leave that
+// head and its storage usable for the next block.
 func TestEngineApiUnwindToSnapshotBoundaryPreservesDeletedSlots(t *testing.T) {
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlError)
@@ -176,7 +175,6 @@ func TestEngineApiUnwindToSnapshotBoundaryPreservesDeletedSlots(t *testing.T) {
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		const pokes = 300
 		payloads, _, churn, sums := buildChurnChain(ctx, t, eat, pokes, func(k int) int64 { return int64(k) })
-		tip := uint64(2 + pokes)
 
 		waitForDomainFilesSettled(ctx, t, eat.StateAgg)
 		// The last background build may have finished after the final forkchoice,
@@ -187,46 +185,42 @@ func TestEngineApiUnwindToSnapshotBoundaryPreservesDeletedSlots(t *testing.T) {
 		extraPayloads, extraSums := churnAndAssert(ctx, t, eat, churn, 6, func(k int) int64 { return int64(9_000 + k) })
 		payloads = append(payloads, extraPayloads...)
 		sums = append(sums, extraSums...)
-		tip += 6
 		<-eat.StateAgg.WaitForBuildAndMerge(ctx)
-		boundaryTxNum := eat.StateAgg.EndTxNumMinimax()
-		t.Logf("domain files settled: %v, boundary txNum: %d", eat.StateAgg.FilesAmount(), boundaryTxNum)
 
-		// Locate the first block fully above the visible-files boundary. Each
-		// block spans len(txs)+2 txNums (block-begin + txns + block-end); the
-		// +2 slack below absorbs the genesis anchoring.
-		cum := uint64(2) // genesis
-		cum += 2         // block 1, the tester's initial empty block
-		target := uint64(0)
-		for i, p := range payloads {
-			cum += uint64(len(p.ExecutionPayload.Transactions)) + 2
-			if cum > boundaryTxNum {
-				target = uint64(i) + 2 // payloads[i] is height i+2
-				break
+		var lastFileBlock uint64
+		require.NoError(t, eat.ChainDB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+			var filesEnd uint64
+			for domain := range kv.DomainLen {
+				filesEnd = max(filesEnd, tx.Debug().TxNumsInFiles(domain))
 			}
-		}
-		require.NotZero(t, target, "no block above the files boundary — files cover the whole chain?")
-		target += 2 // slack for the genesis/system-txn anchoring above
-		require.Greater(t, target, uint64(2), "target must stay above the deploy block")
-		require.Less(t, target, tip, "target must be a real unwind")
-		t.Logf("unwinding to block %d (tip %d, depth %d)", target, tip, tip-target)
+			require.Positive(t, filesEnd, "expected state value files")
+			block, found, err := rawdbv3.TxNums.FindBlockNum(ctx, tx, filesEnd-1)
+			require.NoError(t, err)
+			require.True(t, found, "no canonical block for snapshot transaction %d", filesEnd-1)
+			lastFileBlock = block
+			oldestChangeset, err := changeset.ReadLowestUnwindableBlock(tx)
+			require.NoError(t, err)
+			require.LessOrEqual(t, oldestChangeset, block, "changesets must cover both unwind requests")
+			return nil
+		}))
 
-		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payloads[target-2]))
-		assertChurnState(ctx, t, eat, churn, payloads[target-2], sums[target-2])
+		// Forkchoice unwinds to the parent of the requested head. Selecting the
+		// child of the last block in the files keeps that block. Selecting the
+		// block itself would undo it.
+		firstBlock := payloads[0].ExecutionPayload.BlockNumber.Uint64()
+		require.GreaterOrEqual(t, lastFileBlock, firstBlock)
+		boundaryIndex := lastFileBlock - firstBlock
+		require.Less(t, boundaryIndex+1, uint64(len(payloads)-1), "both heads must be below the tip")
+		head, headSum := payloads[boundaryIndex+1], sums[boundaryIndex+1]
+		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, head), "unwind to block %d", lastFileBlock)
+		assertChurnState(ctx, t, eat, churn, head, headSum)
 
-		// Keep churning: every poke re-reads its ring slots from MDBX+files.
-		continued, continuedSums := churnAndAssert(ctx, t, eat, churn, 4, func(k int) int64 { return int64(5_000 + k) })
-		head := continued[len(continued)-1]
-		headSum := continuedSums[len(continuedSums)-1]
-
-		// Retained changesets cannot make immutable snapshot state unwindable.
-		// Rejection must leave both reads and subsequent payload building usable.
-		err = eat.MockCl.UpdateForkChoice(ctx, payloads[18]) // block 20
+		err := eat.MockCl.UpdateForkChoice(ctx, payloads[boundaryIndex])
 		var rpcErr rpc.Error
 		require.ErrorAs(t, err, &rpcErr)
 		require.Equal(t, -38006, rpcErr.ErrorCode())
 		assertChurnState(ctx, t, eat, churn, head, headSum)
 		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, head))
-		churnAndAssert(ctx, t, eat, churn, 3, func(k int) int64 { return int64(6_000 + k) })
+		churnAndAssert(ctx, t, eat, churn, 4, func(k int) int64 { return int64(5_000 + k) })
 	})
 }
