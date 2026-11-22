@@ -190,6 +190,10 @@ func PreconfirmedView(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.B
 	if !ok {
 		return nil, false
 	}
+	if executed, err := GetLatestExecutedBlockNumber(tx); err != nil || number <= executed {
+		release()
+		return nil, false
+	}
 	context.AfterFunc(ctx, release)
 
 	p := &Preconfirmed{
