@@ -23,11 +23,48 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/execution/stagedsync"
 )
+
+func TestResolveExecUnwindTarget(t *testing.T) {
+	db, _, _ := dbWithState(t, true)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, changeset.WriteDiffSet(tx, 1, common.Hash{}, &changeset.StateChangeSet{}))
+
+	// This chain has one transaction per block. The block containing the last
+	// transaction in the files must be retained even with older changesets in MDBX.
+	filesEnd := tx.Debug().TxNumsInFiles(kv.AccountsDomain)
+	require.Greater(t, filesEnd, uint64(2))
+	floor := filesEnd - 1
+	for _, tc := range []struct {
+		name                           string
+		progress, distance, wantTarget uint64
+		wantErr                        error
+	}{
+		{"above file boundary", floor + 2, 1, floor + 1, nil},
+		{"to file boundary", floor + 2, 2, floor, nil},
+		{"part of the rewind is possible", floor + 2, 3, floor, nil},
+		{"execution at file boundary", floor, 1, 0, stagedsync.ErrTooDeepUnwind},
+		{"execution below file boundary", floor - 1, 1, 0, stagedsync.ErrTooDeepUnwind},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target, err := resolveExecUnwindTarget(tx, rawdbv3.TxNums, tc.progress, tc.distance)
+			require.ErrorIs(t, err, tc.wantErr)
+			require.Equal(t, tc.wantTarget, target)
+		})
+	}
+	_, err = resolveExecUnwindTarget(tx, rawdbv3.TxNums, floor, floor+1)
+	require.ErrorContains(t, err, "cannot unwind past 0")
+}
 
 func TestRunMigrationsForDBRejectsMissingChaindataWithoutPendingMigration(t *testing.T) {
 	logger := log.New()

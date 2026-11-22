@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -10,11 +9,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 )
 
@@ -195,25 +193,35 @@ func TestRenderExecOutcome(t *testing.T) {
 		require.Empty(t, u.calls, "must not schedule an unwind on the initial cycle")
 	})
 
-	t.Run("wrong root on non-initial cycle schedules the binary-search unwind", func(t *testing.T) {
-		// Implicated block 15 > s.BlockNumber 5 takes the scheduled-unwind branch:
-		// UnwindTo(15 - (15-5)/2). The ChangeSets3 key at block 4 keeps the target
-		// unwindable, so it is not clamped.
-		dirs := datadir.New(t.TempDir())
-		db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(10_000))
-		tx, err := db.BeginTemporalRw(context.Background())
-		require.NoError(t, err)
-		defer tx.Rollback()
-		require.NoError(t, tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(4, common.Hash{0x01}), []byte{0x01}))
-
-		u := &recordingUnwinder{}
-		s := &StageState{BlockNumber: 5}
-		s.CurrentSyncCycle.IsInitialCycle = false
-		out := execV3Outcome{verdict: &blockVerdict{blockNum: 15, blockHash: common.HexToHash("0xf00d"), err: wrongRoot}, applyTx: tx}
+	t.Run("wrong root on non-initial cycle respects unwind bounds", func(t *testing.T) {
+		_, tx := temporaltest.NewTestTx(t)
+		// The oldest changeset undoes block 4, so block 3 is the earliest possible target.
+		require.NoError(t, changeset.WriteDiffSet(tx, 4, common.Hash{}, &changeset.StateChangeSet{}))
 		cfg := ExecuteBlockCfg{blockReader: freezeblocks.NewBlockReader(nil)}
-		got := renderExecOutcome(nil, out, cfg, s, u, logger)
-		require.NoError(t, got)
-		require.Len(t, u.calls, 1)
-		require.Equal(t, uint64(10), u.calls[0].point, "unwind target = implicated - (implicated-s.BlockNumber)/2")
+		for _, tc := range []struct {
+			name                           string
+			progress, badBlock, wantTarget uint64
+			wantErr                        error
+		}{
+			{"bisect from stage progress", 5, 15, 10, nil},
+			{"bisect from earliest target", 1, 9, 6, nil},
+			{"rewind to earliest target", 1, 4, 3, nil},
+			{"bad block at earliest target", 1, 3, 0, ErrTooDeepUnwind},
+			{"bad block below earliest target", 1, 2, 0, ErrTooDeepUnwind},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				u := &recordingUnwinder{}
+				s := &StageState{BlockNumber: tc.progress}
+				out := execV3Outcome{verdict: &blockVerdict{blockNum: tc.badBlock, err: wrongRoot}, applyTx: tx}
+				err := renderExecOutcome(nil, out, cfg, s, u, logger)
+				require.ErrorIs(t, err, tc.wantErr)
+				if tc.wantErr != nil {
+					require.Empty(t, u.calls)
+					return
+				}
+				require.Len(t, u.calls, 1)
+				require.Equal(t, tc.wantTarget, u.calls[0].point)
+			})
+		}
 	})
 }

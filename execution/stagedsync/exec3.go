@@ -723,8 +723,7 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 	if cfg.badBlockHalt {
 		return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNumber)
 	}
-	minBlockNum := s.BlockNumber
-	if blockNumber <= minBlockNum {
+	if blockNumber <= s.BlockNumber {
 		return nil
 	}
 
@@ -732,17 +731,15 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 	if err != nil {
 		return err
 	}
-	minBlockNum = max(minBlockNum, unwindToLimit)
+	// Recovery must undo at least the block with the wrong root.
+	if blockNumber <= unwindToLimit {
+		return fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, blockNumber-1, unwindToLimit)
+	}
 
 	// Bisect the range to narrow down where the state root first diverged.
+	minBlockNum := max(s.BlockNumber, unwindToLimit)
 	jump := min(maxUnwindJumpAllowance, max(1, (blockNumber-minBlockNum)/2))
 	unwindTo := blockNumber - jump
-
-	// If the block with the wrong root is at the unwind limit, even the
-	// minimum one-block jump is too deep.
-	if unwindTo < unwindToLimit {
-		return fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, unwindToLimit)
-	}
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
 	if u != nil {
 		if err := u.UnwindTo(unwindTo, BadBlock(blockHash, ErrInvalidStateRootHash), applyTx); err != nil {
