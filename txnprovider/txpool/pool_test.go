@@ -326,6 +326,34 @@ func TestFlushSenderActivity(t *testing.T) {
 	}
 }
 
+func TestPoolDeclaredGasCap(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config *chain.Config
+		cap    uint64
+	}{
+		{"before Osaka", testforks.Forks["Prague"], params.MaxTxnGasLimit},
+		{"Amsterdam", chain.AllProtocolChanges, math.MaxUint32},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, tc.config)
+			pool.blockGasLimit.Store(2 * tc.cap)
+			var txns TxnSlots
+			for i, gas := range []uint64{tc.cap, tc.cap + 1} {
+				slot := newTestTxnSlot(uint64(i), 0, 1, 2, gas)
+				slot.IDHash[0] = byte(i + 1)
+				txns.Append(slot, sender[:], true)
+			}
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.GasLimitTooHigh}, reasons)
+			pending, baseFee, queued := pool.CountContent()
+			require.Equal(t, 1, pending+baseFee+queued)
+			require.NotContains(t, pool.byHash, string(txns.Txns[1].IDHash[:]))
+		})
+	}
+}
+
 func TestAddLocalTxnsRejectsTipAboveFeeCap(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 
@@ -1802,34 +1830,6 @@ func TestShanghaiValidateTxn(t *testing.T) {
 	}
 }
 
-func TestPoolDeclaredGasCap(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		config *chain.Config
-		cap    uint64
-	}{
-		{"before Osaka", testforks.Forks["Prague"], params.MaxTxnGasLimit},
-		{"Amsterdam", chain.AllProtocolChanges, math.MaxUint32},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, tc.config)
-			pool.blockGasLimit.Store(2 * tc.cap)
-			var txns TxnSlots
-			for i, gas := range []uint64{tc.cap, tc.cap + 1} {
-				slot := newTestTxnSlot(uint64(i), 0, 1, 2, gas)
-				slot.IDHash[0] = byte(i + 1)
-				txns.Append(slot, sender[:], true)
-			}
-			reasons, err := pool.AddLocalTxns(ctx, txns)
-			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.GasLimitTooHigh}, reasons)
-			pending, baseFee, queued := pool.CountContent()
-			require.Equal(t, 1, pending+baseFee+queued)
-			require.NotContains(t, pool.byHash, string(txns.Txns[1].IDHash[:]))
-		})
-	}
-}
-
 func TestPoolIntrinsicGasAdmission(t *testing.T) {
 	for _, tc := range []struct {
 		name, fork      string
@@ -1850,9 +1850,6 @@ func TestPoolIntrinsicGasAdmission(t *testing.T) {
 			txn := slot.Txn.(*types.DynamicFeeTransaction)
 			txn.Data = bytes.Repeat([]byte{1}, tc.nonZeroBytes)
 			txn.AccessList = make(types.AccessList, tc.accessListAddrs)
-			for i := range txn.AccessList {
-				txn.AccessList[i].Address = common.Address{byte(i >> 8), byte(i)}
-			}
 			var txns TxnSlots
 			txns.Append(slot, sender[:], true)
 			reasons, err := pool.AddLocalTxns(ctx, txns)
