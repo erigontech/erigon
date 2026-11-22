@@ -176,7 +176,9 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 			}
 		}
 
-		dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, true)
+		// The PTC of the Gloas fork epoch is computed at the fork, so its duties depend on the last block
+		// before the fork, as the proposer duties do; later epochs follow the attester rule.
+		dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, epoch != a.beaconChainCfg.GloasForkEpoch)
 		if dependentRootSlot == headSlot {
 			dependentRoot = headRoot
 			return nil

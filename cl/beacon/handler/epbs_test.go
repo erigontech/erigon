@@ -311,7 +311,6 @@ type ptcForkEpochDutiesFixture struct {
 	syncedData       *synced_data.SyncedDataManager
 	forkEpoch        uint64
 	headRoot         common.Hash
-	dependentRoot    common.Hash
 	predictedPtc     []uint64
 	advancedPtc      []uint64
 	wantDuties       map[[2]uint64]struct{}
@@ -340,9 +339,6 @@ func newPtcForkEpochDutiesFixture(t *testing.T, clockEpoch uint64) ptcForkEpochD
 	forkEpoch := cfg.GloasForkEpoch
 	headSlot := forkEpoch*cfg.SlotsPerEpoch - 1
 	require.NoError(t, transition.DefaultMachine.ProcessSlots(headState, headSlot))
-	dependentRoot := common.Hash{0x81}
-	dependentRootSlot := forkEpoch*cfg.SlotsPerEpoch - cfg.SlotsPerEpoch - 1
-	require.NoError(t, headState.SetBlockRootAt(int(dependentRootSlot), dependentRoot))
 
 	predictedPtc, err := headState.ComputePTC(forkEpoch * cfg.SlotsPerEpoch)
 	require.NoError(t, err)
@@ -396,7 +392,6 @@ func newPtcForkEpochDutiesFixture(t *testing.T, clockEpoch uint64) ptcForkEpochD
 		syncedData:       syncedData,
 		forkEpoch:        forkEpoch,
 		headRoot:         headRoot,
-		dependentRoot:    dependentRoot,
 		predictedPtc:     predictedPtc,
 		advancedPtc:      advancedPtc,
 		wantDuties:       wantDuties,
@@ -425,7 +420,8 @@ func TestPostPtcDutiesForkEpochUsesAdvancedFuluState(t *testing.T) {
 		Data          []ptcDutyResponse `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	require.Equal(t, fixture.dependentRoot, response.DependentRoot)
+	// The head is the last block before the fork, so it is the dependent root of the fork epoch.
+	require.Equal(t, fixture.headRoot, response.DependentRoot)
 	gotDuties := make(map[[2]uint64]struct{}, len(response.Data))
 	for _, duty := range response.Data {
 		gotDuties[[2]uint64{duty.ValidatorIndex, duty.Slot}] = struct{}{}
