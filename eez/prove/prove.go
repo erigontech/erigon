@@ -414,9 +414,9 @@ func charged(err error) bool {
 	return true
 }
 
-// SentError is an UNKNOWN or CANCELLED a prover sent, codes the node's own
-// failures and cancellations also carry: sent, it is the prover's
-// rejection of the request.
+// SentError is an UNKNOWN or CANCELLED received while the request still ran:
+// the prover's rejection, unlike the node's failures of the same codes. A
+// closing connection or a non-gRPC intermediary is read as the prover too.
 type SentError struct{ Status *status.Status }
 
 func (e *SentError) Error() string { return e.Status.Err().Error() }

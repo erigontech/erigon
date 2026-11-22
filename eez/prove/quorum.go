@@ -197,24 +197,23 @@ func (e *QuorumError) Error() string {
 }
 
 // skipped logs m, left out of a batch for reason.
-func (q *Quorum) skipped(m *Member, reason string, ctx ...any) {
+func (q *Quorum) skipped(m *Member, reason string, kv ...any) {
 	if q.Logger == nil {
 		return
 	}
 	q.Logger.Warn("[eez] attester not asked for this batch", append([]any{
 		"event", "eez.composer.attestation.member_skipped",
 		"proofSystem", m.ProofSystem, "attester", m.Attester, "reason", reason,
-	}, ctx...)...)
+	}, kv...)...)
 }
 
 // blocking is how many of the members it takes to keep the threshold out
 // of reach.
 func (e *QuorumError) blocking() int { return e.Usable - int(min(e.Threshold, uint64(e.Usable))) + 1 }
 
-// named returns the effect the most of the failures so far refused the
-// window for, and how many; on a tie, the one the lowest proof system
-// names. Collection stops once one effect blocks the threshold, so between
-// effects that each could, the members answering first decide.
+// named returns the effect most failures so far name, and how many; a tie
+// goes to the lowest proof system. Collection stops at the first effect to
+// block the threshold, so arrival order decides between such effects.
 func (e *QuorumError) named() (Refused, int) {
 	failures := slices.SortedFunc(slices.Values(e.Failures), func(x, y MemberFailure) int { return x.ProofSystem.Cmp(y.ProofSystem) })
 	counts := map[Refused]int{}

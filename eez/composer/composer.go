@@ -197,9 +197,8 @@ type emission struct {
 // a batch is in flight; a chunk when the backlog exceeds MaxBlocks, which an
 // empty slot posts too; else an anchor, unpinned in a catch-up slot. target
 // is the L1 block the sequencer aims the slot at, zero for any. A catch-up
-// anchor aims at it too: a builder bidding only on blocks built late in
-// their slot never bids on a bundle queued before its block's slot opened,
-// unless more orders arrive.
+// anchor aims at target too: an idle builder bids on no bundle queued before
+// its block's building started, as one for a later block is.
 func (c *Composer) decide(cursor, sync, ts, target uint64, mode sequencer.Mode, inFlight bool) emission {
 	switch {
 	case inFlight:
