@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type failingDeleteTx struct {
@@ -42,9 +43,10 @@ func (tx failingDeleteTx) Delete(table string, k []byte) error {
 
 // A failed delete fails the purge, so the caller rolls back instead of committing half of it.
 func TestDeleteBadBlockReturnsEveryDeleteError(t *testing.T) {
-	for _, table := range []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers, kv.HeaderTD, kv.HeaderNumber} {
+	for _, table := range []string{kv.EthTx, kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers, kv.HeaderTD, kv.HeaderNumber} {
 		t.Run(table, func(t *testing.T) {
 			_, tx := mdbxtest.NewTestTx(t)
+			require.NoError(t, rawdb.WriteBodyForStorage(tx, common.Hash{1}, 1, &types.BodyForStorage{BaseTxnID: 1, TxCount: 2}))
 			err := rawdb.DeleteBadBlock(failingDeleteTx{RwTx: tx, table: table}, common.Hash{1}, 1)
 			require.ErrorContains(t, err, "delete failed")
 		})
