@@ -348,7 +348,7 @@ func attesters(cmd *cli.Command) ([]Attester, error) {
 	v := cmd.String(AttestersFlag.Name)
 	listed := strings.Contains(v, "=")
 	if !listed {
-		for _, f := range []*cli.StringFlag{&AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag} {
+		for _, f := range []*cli.StringFlag{&AttesterAddressFlag, &ProofSystemFlag} {
 			if !cmd.IsSet(f.Name) {
 				return nil, fmt.Errorf("%w: --%s requires --%s", ErrConfig, ComposerFlag.Name, f.Name)
 			}
@@ -370,6 +370,9 @@ func attesters(cmd *cli.Command) ([]Attester, error) {
 		parts := strings.Split(e, "=")
 		if len(parts) != 3 {
 			return nil, fmt.Errorf("%w: --%s entry %d is not url=attester=proofsystem", ErrConfig, AttestersFlag.Name, i+1)
+		}
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
 		}
 		if _, _, err := prove.Target(parts[0]); err != nil {
 			return nil, fmt.Errorf("%w: --%s: %w", ErrConfig, AttestersFlag.Name, err)

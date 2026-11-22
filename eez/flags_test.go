@@ -605,13 +605,25 @@ func TestComposerFlags(t *testing.T) {
 		{URL: "http://127.0.0.1:50061", Address: common.HexToAddress(attester), ProofSystem: common.HexToAddress(proofSystem)},
 		{URL: "https://attester.example:443", Address: common.HexToAddress(second), ProofSystem: common.HexToAddress("0x42")},
 	}, cfg.Sequencer.Composer.Attesters)
-	seventeen := "--eez.attesters="
-	for i := range 17 {
-		if i > 0 {
-			seventeen += ","
+	spaced := "--eez.attesters= http://127.0.0.1:50061 = " + attester + " =" + proofSystem + " , https://attester.example:443=" + second + "= 0x0000000000000000000000000000000000000042 "
+	cfg, err = parse(t, append(listed()[:len(listed())-1], spaced)...)
+	require.NoError(t, err)
+	require.Len(t, cfg.Sequencer.Composer.Attesters, 2)
+	require.Equal(t, "http://127.0.0.1:50061", cfg.Sequencer.Composer.Attesters[0].URL)
+	entries := func(n int) string {
+		v := "--eez.attesters="
+		for i := range n {
+			if i > 0 {
+				v += ","
+			}
+			v += fmt.Sprintf("http://127.0.0.1:%d=%s=0x%040x", 50000+i, second, i+1)
 		}
-		seventeen += fmt.Sprintf("http://127.0.0.1:%d=%s=0x%040x", 50000+i, second, i+1)
+		return v
 	}
+	cfg, err = parse(t, append(listed()[:len(listed())-1], entries(16))...)
+	require.NoError(t, err)
+	require.Len(t, cfg.Sequencer.Composer.Attesters, 16)
+	seventeen := entries(17)
 	for name, c := range map[string]struct {
 		args []string
 		want string
