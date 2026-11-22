@@ -287,8 +287,6 @@ func (b *BlindedBeaconBody) UnmarshalJSON(buf []byte) error {
 	if err := json.Unmarshal(buf, (*bodyJSON)(b)); err != nil {
 		return err
 	}
-	// execution_payload_header is left out: callers that require it reset it to
-	// nil before decoding, so nil cannot tell an explicit null from an omitted key.
 	if err := rejectNullBodyFields("blinded beacon body",
 		requiredBodyField{"eth1 data", b.Eth1Data == nil},
 		requiredBodyField{"proposer slashings", b.ProposerSlashings == nil},
@@ -297,6 +295,7 @@ func (b *BlindedBeaconBody) UnmarshalJSON(buf []byte) error {
 		requiredBodyField{"deposits", b.Deposits == nil},
 		requiredBodyField{"voluntary exits", b.VoluntaryExits == nil},
 		requiredBodyField{"sync aggregate", b.Version >= clparams.AltairVersion && b.SyncAggregate == nil},
+		requiredBodyField{"execution payload header", b.Version >= clparams.BellatrixVersion && b.ExecutionPayload == nil},
 		requiredBodyField{"bls to execution changes", b.Version >= clparams.CapellaVersion && b.ExecutionChanges == nil},
 		requiredBodyField{"blob kzg commitments", b.Version >= clparams.DenebVersion && b.BlobKzgCommitments == nil},
 		requiredBodyField{"execution requests", b.Version >= clparams.ElectraVersion && b.ExecutionRequests == nil},

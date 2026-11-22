@@ -177,7 +177,7 @@ func TestBlindedBeaconBodyJSONRejectsNullOperationLists(t *testing.T) {
 }
 
 func TestBlindedBeaconBodyJSONRejectsNullRequiredFields(t *testing.T) {
-	bellatrix := []string{"eth1_data", "proposer_slashings", "attester_slashings", "attestations", "deposits", "voluntary_exits", "sync_aggregate"}
+	bellatrix := []string{"eth1_data", "proposer_slashings", "attester_slashings", "attestations", "deposits", "voluntary_exits", "sync_aggregate", "execution_payload_header"}
 	capella := slices.Concat(bellatrix, []string{"bls_to_execution_changes"})
 	deneb := slices.Concat(capella, []string{"blob_kzg_commitments"})
 	electra := slices.Concat(deneb, []string{"execution_requests"})
