@@ -803,6 +803,8 @@ func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOfTxNum uint64) (Com
 	if asOfTxNum != math.MaxUint64 {
 		dt.ht.files.EnableReadAhead()
 		defer dt.ht.files.DisableReadAhead()
+		dt.ht.iit.files.EnableReadAhead()
+		defer dt.ht.iit.files.DisableReadAhead()
 		hist := &HistoryRangeAsOfFiles{hc: dt.ht, startTxNum: asOfTxNum, limit: kv.Unlim, orderAscend: order.Asc, ctx: ctx, logger: dt.ht.h.logger}
 		if err = hist.init(dt.ht.iit.files); err != nil {
 			hist.Close()
