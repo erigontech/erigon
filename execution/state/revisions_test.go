@@ -45,7 +45,7 @@ func TestVersionedRevertFirstStorageWriteAfterRead(t *testing.T) {
 			ibs := New(newAccountStateReader())
 			ibs.SetTxContext(0, 0)
 			ibs.SetVersion(0)
-			ibs.SetVersionMap(NewVersionMap(nil))
+			ibs.setVersionMap(NewVersionMap(nil))
 
 			_, err := ibs.GetState(addr, keyA)
 			require.NoError(t, err)

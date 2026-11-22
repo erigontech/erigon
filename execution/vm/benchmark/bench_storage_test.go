@@ -100,10 +100,8 @@ func BenchmarkSLOADCommitted(b *testing.B) {
 	v, err := statedb.GetState(addrContract, accounts.InternKey(uint256.NewInt(1).Bytes32()))
 	require.NoError(b, err)
 	require.EqualValues(b, 0xDEAD, v.Uint64(), "storage must come from the DB")
-	versionMap := state.NewVersionMap(nil)
 	for b.Loop() {
 		statedb.Reset()
-		statedb.SetVersionMap(versionMap)
 		statedb.SetNoConflictDetection()
 		if _, _, err := prepareAndCall(vmenv, addrContract, nil); err != nil {
 			b.Fatal(err)

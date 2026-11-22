@@ -750,7 +750,7 @@ func TestAccountRead_BalancePathPromotion_DoesNotInvalidate(t *testing.T) {
 	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader))
 	ibs.SetTxContext(0, 1)
 	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
+	ibs.setVersionMap(vm)
 
 	// Simulate the per-field account refresh's promoted return value:
 	// BalancePath at (0,0) bumped (source, version) above the
@@ -801,7 +801,7 @@ func TestCreateAccount_SyntheticIncarnationStamp_DoesNotInvalidate(t *testing.T)
 	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader))
 	ibs.SetTxContext(0, 1)
 	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
+	ibs.setVersionMap(vm)
 
 	require.NoError(t, ibs.CreateAccount(addr, false))
 	ibs.PublishOrigins()
@@ -853,7 +853,7 @@ func TestGetVersionedAccount_PriorTxSelfDestruct_ReturnsNil(t *testing.T) {
 	ibs := New(reader)
 	ibs.SetTxContext(0, 4)
 	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
+	ibs.setVersionMap(vm)
 
 	account, _, _, err := ibs.getAccount(addr, true)
 	require.NoError(t, err)
@@ -898,7 +898,7 @@ func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing
 	ibs := New(NewVersionedStateReader(4, ReadSet{}, vm, reader))
 	ibs.SetTxContext(0, 4)
 	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
+	ibs.setVersionMap(vm)
 
 	account, _, _, err := ibs.getAccount(addr, true)
 	require.NoError(t, err)
@@ -930,7 +930,7 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 		tx3 := New(reader)
 		tx3.SetTxContext(0, 3)
 		tx3.SetVersion(0)
-		tx3.SetVersionMap(vm)
+		tx3.setVersionMap(vm)
 		require.NoError(t, tx3.CreateAccount(addr, true))
 		require.NoError(t, tx3.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
 		require.NoError(t, tx3.SetCode(addr, []byte("deployed runtime code"), tracing.CodeChangeUnspecified))
@@ -943,7 +943,7 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 		ibs := New(reader)
 		ibs.SetTxContext(0, 4)
 		ibs.SetVersion(0)
-		ibs.SetVersionMap(vm)
+		ibs.setVersionMap(vm)
 		return ibs
 	}
 
@@ -1368,7 +1368,7 @@ func TestCreateAccount_FundedThenCreated_SyntheticReadKeepsPreTxBalance(t *testi
 	t.Parallel()
 
 	ibs := New(&minimalStateReader{})
-	ibs.SetVersionMap(NewVersionMap(nil))
+	ibs.setVersionMap(NewVersionMap(nil))
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
 
@@ -1392,7 +1392,7 @@ func TestCreateAccount_InternalBalanceReadPromotedOnCreate_NoSpuriousBalanceChan
 	reader.accounts[addr].Balance = *uint256.NewInt(7)
 
 	ibs := New(reader)
-	ibs.SetVersionMap(NewVersionMap(nil))
+	ibs.setVersionMap(NewVersionMap(nil))
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
 
@@ -2061,7 +2061,7 @@ func TestCreateAccount_RecordsSelfDestructReadForOrdering(t *testing.T) {
 	defer ibs.Release(false)
 	ibs.SetTxContext(0, 5)
 	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
+	ibs.setVersionMap(vm)
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	reads := ibs.Reads()
 	_, tracked := reads.GetSelfDestruct(addr)

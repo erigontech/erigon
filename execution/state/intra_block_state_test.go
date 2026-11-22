@@ -1542,5 +1542,5 @@ func (w *finalStateWriter) CreateContract(accounts.Address) error { return nil }
 
 func TestSetVersionMapRejectsNil(t *testing.T) {
 	ibs := New(NewNoopReader())
-	require.Panics(t, func() { ibs.SetVersionMap(nil) }, "a nil version map is an invariant violation")
+	require.Panics(t, func() { ibs.setVersionMap(nil) }, "a nil version map is an invariant violation")
 }

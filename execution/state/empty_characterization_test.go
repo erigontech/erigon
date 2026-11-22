@@ -35,7 +35,7 @@ func emptyCharIBS(reader *accountStateReader, vm *VersionMap, txIndex int) *Intr
 	ibs := New(NewVersionedStateReader(txIndex, ReadSet{}, vm, reader))
 	ibs.SetTxContext(0, txIndex)
 	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
+	ibs.setVersionMap(vm)
 	return ibs
 }
 

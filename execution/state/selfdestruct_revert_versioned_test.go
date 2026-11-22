@@ -26,7 +26,7 @@ func TestSelfdestructVersioned_RevertPreservesPriorBalanceWrite(t *testing.T) {
 	ibs := New(reader)
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
+	ibs.setVersionMap(vm)
 
 	// Balance written BEFORE the snapshot; no prior SelfDestructPath write, so the
 	// revert takes the wasCommited branch that previously deleted the balance cell.
@@ -61,7 +61,7 @@ func TestEIP8246_SelfdestructVersioned_PreservesBumpedNonce(t *testing.T) {
 	ibs := New(reader)
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
+	ibs.setVersionMap(vm)
 
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	require.NoError(t, ibs.SetCode(addr, []byte("twenty-two-byte-code!!"), tracing.CodeChangeUnspecified))

@@ -363,9 +363,8 @@ func TestExecuteReportsFailedWriteSetAsOperational(t *testing.T) {
 	to := common.HexToAddress("0xbb")
 	reader := failingAccountReader{state.NewNoopReader(), sender, accounts.InternAddress(to), want}
 	versionMap := state.NewVersionMap(nil)
-	ibs := state.New(state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, reader))
+	ibs := state.NewWithVersionMap(state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, reader), versionMap)
 	defer ibs.Close()
-	ibs.SetVersionMap(versionMap)
 	ibs.SetTxContext(1, 0)
 
 	engine := ethash.NewFaker()
