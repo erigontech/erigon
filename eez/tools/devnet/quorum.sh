@@ -31,7 +31,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 lower() { tr '[:upper:]' '[:lower:]'; }
 
 rpc() {
-	curl -sf -X POST -H 'content-type: application/json' \
+	curl -sf --max-time 10 -X POST -H 'content-type: application/json' \
 		--data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$2\",\"params\":$3}" "$1"
 }
 
@@ -108,7 +108,12 @@ fi
 rm -rf "$OUT/deployments" "$OUT/quorum"
 kurtosis files download "$ENCLAVE" eez-deployments "$OUT/deployments" > /dev/null
 kurtosis files download "$ENCLAVE" eez-quorum "$OUT/quorum" > /dev/null
-env_value() { grep -E "^$2=" "$1" | head -1 | cut -d= -f2- | tr -d '"'; }
+env_value() {
+	local v
+	v=$(grep -E "^$2=" "$1" | head -1 | cut -d= -f2- | tr -d '"') || true
+	[ -n "$v" ] || fail "$1 lacks $2"
+	echo "$v"
+}
 deployments=$OUT/deployments/deployments.env
 registry=$(env_value "$deployments" EEZ_REGISTRY_ADDRESS)
 deploy_block=$(env_value "$deployments" EEZ_REGISTRY_DEPLOY_BLOCK)
@@ -184,10 +189,12 @@ log "erigon up"
 
 # commitment prints the L2 block hash L1 settled the rollup at.
 commitment() { cast call --rpc-url "$L1" "$registry" 'rollups(uint64)(address,bytes32,uint256)' "$rollup_id" | sed -n 2p | lower; }
-# settled_number prints the number of the L2 block L1 settled the rollup at.
+# settled_number prints the number of the L2 block L1 settled the rollup at,
+# failing when Erigon does not know that block.
 settled_number() {
-	local n
-	n=$(rpc "$ERIGON_RPC" eth_getBlockByHash "[\"$(commitment)\",false]" | jq -r '.result.number // "0x0"') || n=0x0
+	local h n
+	h=$(commitment) || return 1
+	n=$(rpc "$ERIGON_RPC" eth_getBlockByHash "[\"$h\",false]" | jq -re '.result.number') || return 1
 	printf '%d\n' "$n"
 }
 # settled_past succeeds once Erigon's safe block is at least $1 and is the
@@ -250,7 +257,7 @@ docker pause "$signer2" > /dev/null
 PAUSED=$signer2
 paused_at=$(head_number)
 for _ in $(seq $((2 * l1_s))); do
-	settled=$(settled_number)
+	settled=$(settled_number) || fail "L1's commitment is no block Erigon knows"
 	[ "$settled" -le "$paused_at" ] || fail "L1 settled block $settled, past $paused_at, with one attester of a threshold-2 manager"
 	sleep 2
 done
