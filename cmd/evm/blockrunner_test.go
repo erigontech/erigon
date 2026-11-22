@@ -19,6 +19,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,4 +35,12 @@ func TestRunBlockTestWithoutFixturesHasEmptyResults(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, results)
 	require.Empty(t, results)
+}
+
+func TestRunBlockTestNamesAFixtureWithASyntaxError(t *testing.T) {
+	fname := filepath.Join(t.TempDir(), "bad.json")
+	require.NoError(t, os.WriteFile(fname, []byte(`{"a": {"network": tru}, "b": {}}`), 0o600))
+	_, err := runBlockTest(&cli.Command{}, fname, testFilter{run: regexp.MustCompile("")}, nil)
+	require.ErrorContains(t, err, "fixture a: ")
+	require.ErrorContains(t, err, "invalid character")
 }
