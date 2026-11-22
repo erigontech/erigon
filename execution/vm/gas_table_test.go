@@ -22,6 +22,7 @@ package vm_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"testing"
@@ -48,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/program"
+	"github.com/erigontech/erigon/execution/vm/runtime"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -126,6 +128,7 @@ func TestEIP2200(t *testing.T) {
 
 			r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
+			s.SetVersionMap(nil)
 			defer s.Close()
 
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
@@ -228,6 +231,7 @@ func TestEIP8038SStore(t *testing.T) {
 			require.NoError(t, err)
 			r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
+			s.SetVersionMap(nil)
 			defer s.Close()
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 			require.NoError(t, s.CreateAccount(address, true))
@@ -383,6 +387,7 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 			require.NoError(t, err)
 			r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
+			s.SetVersionMap(nil)
 			defer s.Close()
 			caller := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 			require.NoError(t, s.CreateAccount(caller, true))
@@ -415,6 +420,7 @@ func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
 	require.NoError(t, err)
 	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	s := state.New(r)
+	s.SetVersionMap(nil)
 	defer s.Close()
 	initCode := program.New().Push(0).Push(400_000).Op(vm.MSTORE).Return(0, 0).Bytes()
 	salt := uint256.NewInt(0)
@@ -484,6 +490,7 @@ func TestCreate2OntoStorageOnlyAccountChargesNewAccountAndClearsStorage(t *testi
 			r := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 			w := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
+			s.SetVersionMap(nil)
 			defer s.Close()
 
 			initCode := []byte{byte(vm.STOP)}
@@ -553,6 +560,7 @@ func TestCreateTraceOnEarlyFailure(t *testing.T) {
 				require.NoError(t, err)
 				r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
+				s.SetVersionMap(nil)
 				defer s.Close()
 				initCode := program.New().Push(0).Return(0, 0).Bytes()
 				salt := uint256.NewInt(0)
@@ -648,6 +656,7 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 				require.NoError(t, err)
 				r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
+				s.SetVersionMap(nil)
 				defer s.Close()
 				initCode := program.New().Push(0xaa).Push(0).Op(vm.MSTORE8).Return(0, 1).Bytes()
 				salt := uint256.NewInt(0)
@@ -695,73 +704,79 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 	}
 }
 
-var createGasTests = []struct {
-	code    string
-	eip3860 bool
-	gasUsed uint64
-}{
-	// create(0, 0, 0xc000)
-	{"0x61C00060006000f0", false, 41225},
-	// create(0, 0, 0xc000)
-	{"0x61C00060006000f0", true, 44297},
-	// create2(0, 0, 0xc000, 0)
-	{"0x600061C00060006000f5", false, 50444},
-	// create2(0, 0, 0xc000, 0)
-	{"0x600061C00060006000f5", true, 53516},
-}
-
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	for i, tt := range createGasTests {
-		func() {
-			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
-
-			domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-			require.NoError(t, err)
-			defer domains.Close()
-
-			stateReader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-			stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
-
-			s := state.New(stateReader)
-			defer s.Close()
-			require.NoError(t, s.CreateAccount(address, true))
-			require.NoError(t, s.SetCode(address, hexutil.MustDecode(tt.code), tracing.CodeChangeUnspecified))
-
-			vmctx := evmtypes.BlockContext{
-				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
-				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
-					return nil
-				},
-			}
-			//
-			// TODO revis BlockContext and add test for eip8037?
-			//
-			_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), stateWriter)
-			config := vm.Config{}
-			if tt.eip3860 {
-				config.ExtraEips = []int{3860}
-			}
-
-			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, config)
-			startGas := mdgas.MdGas{
-				Execution: math.MaxUint64,
-			}
-			_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
-			if err != nil {
-				t.Errorf("test %d execution failed: %v", i, err)
-			}
-			if gasUsed := startGas.Execution - gas.Execution; gasUsed != tt.gasUsed {
-				t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
-			}
-		}()
+	const gasLimit = uint64(math.MaxUint64)
+	eip3860 := []int{3860}
+	factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
+	tests := []struct {
+		op        vm.OpCode
+		size      int
+		extraEips []int
+		gasUsed   uint64
+		wantErr   error
+	}{
+		{vm.CREATE, params.MaxInitCodeSize, nil, 41225, nil},
+		{vm.CREATE, params.MaxInitCodeSize, eip3860, 44297, nil},
+		{vm.CREATE, params.MaxInitCodeSize + 1, nil, 41234, nil},
+		{vm.CREATE, params.MaxInitCodeSize + 1, eip3860, gasLimit, vm.ErrMaxInitCodeSizeExceeded},
+		{vm.CREATE2, params.MaxInitCodeSize, nil, 50444, nil},
+		{vm.CREATE2, params.MaxInitCodeSize, eip3860, 53516, nil},
+		{vm.CREATE2, params.MaxInitCodeSize + 1, nil, 50459, nil},
+		{vm.CREATE2, params.MaxInitCodeSize + 1, eip3860, gasLimit, vm.ErrMaxInitCodeSizeExceeded},
 	}
-	tx.Rollback()
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s/size=%d/extraEips=%v", tt.op, tt.size, tt.extraEips), func(t *testing.T) {
+			code := program.New()
+			if tt.op == vm.CREATE2 {
+				code.Push(0) // salt
+			}
+			code.Push(tt.size).Push(0).Push(0).Op(tt.op)
+			statedb := state.New(state.NewNoopReader())
+			defer statedb.Close()
+			require.NoError(t, statedb.SetCode(factory, code.Bytes(), tracing.CodeChangeUnspecified))
+
+			_, left, err := runtime.Call(factory, nil, &runtime.Config{
+				ChainConfig: chain.TestChainBerlinConfig,
+				EVMConfig:   vm.Config{ExtraEips: tt.extraEips},
+				GasLimit:    gasLimit,
+				State:       statedb,
+			})
+			require.ErrorIs(t, err, tt.wantErr)
+			require.Equal(t, tt.gasUsed, gasLimit-left.Execution)
+		})
+	}
+}
+
+// Amsterdam raises the initcode limit, and a CREATE within it charges state gas for the new account.
+func TestCreateInitCodeLimitAmsterdam(t *testing.T) {
+	t.Parallel()
+	factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
+	create := func(t *testing.T, op vm.OpCode, size int) (mdgas.MdGas, error) {
+		code := program.New()
+		if op == vm.CREATE2 {
+			code.Push(0) // salt
+		}
+		code.Push(size).Push(0).Push(0).Op(op)
+		statedb := state.New(state.NewNoopReader())
+		defer statedb.Close()
+		require.NoError(t, statedb.SetCode(factory, code.Bytes(), tracing.CodeChangeUnspecified))
+		_, left, err := runtime.Call(factory, nil, &runtime.Config{
+			ChainConfig: chain.AllProtocolChanges,
+			GasLimit:    100_000_000,
+			State:       statedb,
+		})
+		return left, err
+	}
+	for _, op := range []vm.OpCode{vm.CREATE, vm.CREATE2} {
+		t.Run(op.String(), func(t *testing.T) {
+			created, err := create(t, op, params.MaxInitCodeSizeAmsterdam)
+			require.NoError(t, err)
+			refused, err := create(t, op, params.MaxInitCodeSizeAmsterdam+1)
+			require.ErrorIs(t, err, vm.ErrMaxInitCodeSizeExceeded)
+			require.Equal(t, uint64(params.StateGasNewAccount), refused.State-created.State)
+		})
+	}
 }
 
 // TestSystemCallZeroValueSkipsTransferChecks verifies that zero-value system

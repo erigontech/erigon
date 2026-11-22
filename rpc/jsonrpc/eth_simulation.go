@@ -685,7 +685,7 @@ func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateR
 			}
 		}
 	}
-	overrides := state.NewWithVersionMap(base, state.NewVersionMap(nil))
+	overrides := state.NewVersionedBlock(base)
 	if err := stateOverrides.OverrideTo(overrides, precompiles, rules, stateWriter); err != nil {
 		overrides.Close()
 		return nil, err
@@ -819,7 +819,7 @@ func (s *simulator) simulateBlock(
 		defer overrideReader.Close()
 		stateReader = overrideReader
 	}
-	intraBlockState := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+	intraBlockState := state.NewVersionedBlock(stateReader)
 	defer intraBlockState.Close()
 	intraBlockState.SetTxContext(blockNumber, -1)
 

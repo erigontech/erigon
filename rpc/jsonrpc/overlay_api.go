@@ -192,7 +192,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	statedb := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+	statedb := state.NewVersionedBlock(stateReader)
 	defer statedb.Close()
 
 	header := block.HeaderNoCopy()
@@ -341,7 +341,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 					continue
 				}
-				statedb := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+				statedb := state.NewVersionedBlock(stateReader)
 				func() {
 					defer statedb.Close()
 					blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx, stateOverride)

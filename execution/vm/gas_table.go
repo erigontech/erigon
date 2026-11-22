@@ -331,77 +331,48 @@ func gasCreate(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 }
 
 func gasCreate2(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
-	if evm.readOnly {
-		return mdgas.MdGasCost{}, ErrWriteProtection
-	}
-	gas, err := memoryGasCost(callContext, memorySize)
-	if err != nil {
-		return mdgas.MdGasCost{}, err
-	}
-	size, overflow := callContext.Stack.back(2).Uint64WithOverflow()
-	if overflow {
-		return mdgas.MdGasCost{}, ErrGasUintOverflow
-	}
-	numWords := ToWordSize(size)
-	wordGas, overflow := math.SafeMul(numWords, params.Keccak256WordGas)
-	if overflow {
-		return mdgas.MdGasCost{}, ErrGasUintOverflow
-	}
-	gas, overflow = math.SafeAdd(gas, wordGas)
-	if overflow {
-		return mdgas.MdGasCost{}, ErrGasUintOverflow
-	}
-	return mdgas.MdGasCost{Execution: gas}, nil
+	return initCodeGas(evm, callContext, availableGas, memorySize, CREATE2, false)
 }
 
-func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGasCost, err error) {
-	if evm.readOnly {
-		return mdgas.MdGasCost{}, ErrWriteProtection
-	}
-	gas.Execution, err = memoryGasCost(callContext, memorySize)
+func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+	return initCodeGas(evm, callContext, availableGas, memorySize, CREATE, true)
+}
+
+func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+	return initCodeGas(evm, callContext, availableGas, memorySize, CREATE2, true)
+}
+
+func initCodeGas(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, op OpCode, eip3860 bool) (mdgas.MdGasCost, error) {
+	gas, err := gasCreate(evm, callContext, availableGas, memorySize)
 	if err != nil {
-		return mdgas.MdGasCost{}, err
+		return gas, err
 	}
 	size, overflow := callContext.Stack.back(2).Uint64WithOverflow()
 	if overflow {
 		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
-	if err := CheckMaxInitCodeSize(size, evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
-		return mdgas.MdGasCost{}, err
+	var gasPerWord uint64
+	if op == CREATE2 {
+		gasPerWord = params.Keccak256WordGas
 	}
-	numWords := ToWordSize(size)
-	// Since size <= params.MaxInitCodeSize(Amsterdam), this multiplication cannot overflow
-	wordGas := params.InitCodeWordGas * numWords
+	// EnableEIP can install the EIP-3860 gas handler before Shanghai.
+	if eip3860 {
+		if err := CheckMaxInitCodeSize(size, true, evm.chainRules.IsAmsterdam); err != nil {
+			return mdgas.MdGasCost{}, err
+		}
+		gasPerWord += params.InitCodeWordGas
+	}
+	// A uint64 byte length rounds up to at most 2^59 words of 32 bytes. Even
+	// at 8 gas per word (CREATE2 with EIP-3860), the product fits in uint64.
+	wordGas := ToWordSize(size) * gasPerWord
 	gas.Execution, overflow = math.SafeAdd(gas.Execution, wordGas)
 	if overflow {
 		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
-	return gasCreateAccount(evm, callContext, availableGas, gas, false)
-}
-
-func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGasCost, err error) {
-	if evm.readOnly {
-		return mdgas.MdGasCost{}, ErrWriteProtection
+	if !eip3860 {
+		return gas, nil
 	}
-	gas.Execution, err = memoryGasCost(callContext, memorySize)
-	if err != nil {
-		return mdgas.MdGasCost{}, err
-	}
-	size, overflow := callContext.Stack.back(2).Uint64WithOverflow()
-	if overflow {
-		return mdgas.MdGasCost{}, ErrGasUintOverflow
-	}
-	if err := CheckMaxInitCodeSize(size, evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
-		return mdgas.MdGasCost{}, err
-	}
-	numWords := ToWordSize(size)
-	// Since size <= params.MaxInitCodeSize(Amsterdam), this multiplication cannot overflow
-	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * numWords
-	gas.Execution, overflow = math.SafeAdd(gas.Execution, wordGas)
-	if overflow {
-		return mdgas.MdGasCost{}, ErrGasUintOverflow
-	}
-	return gasCreateAccount(evm, callContext, availableGas, gas, true)
+	return gasCreateAccount(evm, callContext, availableGas, gas, op, size)
 }
 
 type createGasPreparation struct {
@@ -471,7 +442,9 @@ func (evm *EVM) reportCreateError(scope *CallContext, err error) {
 	}
 }
 
-func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, gas mdgas.MdGasCost, create2 bool) (mdgas.MdGasCost, error) {
+// gasCreateAccount prepares the target in the call context, where the opcode
+// reads it and any preparation error when it executes.
+func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, gas mdgas.MdGasCost, op OpCode, size uint64) (mdgas.MdGasCost, error) {
 	override := evm.config.OverrideInitCode
 	if override == nil && (!evm.chainRules.IsAmsterdam || availableGas.Execution < gas.Execution) {
 		return gas, nil
@@ -479,9 +452,8 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	prepared := &callContext.create
 	*prepared = createGasPreparation{ready: true}
 	caller := callContext.Contract.Address()
-	if create2 {
+	if op == CREATE2 {
 		offset := callContext.Stack.back(1).Uint64()
-		size := callContext.Stack.back(2).Uint64()
 		if size > 0 {
 			prepared.initCode = getData(callContext.Memory.Data(), offset, size)
 		}
@@ -507,13 +479,15 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 		}
 		// Memory expansion and CREATE2 hashing use the original input.
 		// The EIP-3860 analysis charge uses the replacement's length.
-		gas.Execution -= params.InitCodeWordGas * ToWordSize(callContext.Stack.back(2).Uint64())
+		gas.Execution -= params.InitCodeWordGas * ToWordSize(size)
 		var overflow bool
 		gas.Execution, overflow = math.SafeAdd(gas.Execution, params.InitCodeWordGas*ToWordSize(uint64(len(replacement))))
 		if overflow {
 			return mdgas.MdGasCost{}, ErrGasUintOverflow
 		}
 	}
+	// Preparing the target can add it to the block access list. First check
+	// that execution gas covers memory expansion and the per-word charge.
 	if !evm.chainRules.IsAmsterdam || availableGas.Execution < gas.Execution {
 		return gas, nil
 	}

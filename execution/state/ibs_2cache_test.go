@@ -282,6 +282,7 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 	// — Block N: write state then commit to domains via Writer —
 	{
 		ibsN := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+		ibsN.SetVersionMap(nil)
 		defer ibsN.Close()
 		ibsN.SetTxContext(1, 0)
 
@@ -299,6 +300,7 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 
 	// — Block N+1: fresh IBS reads state that block N wrote to domains —
 	ibsN1 := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	ibsN1.SetVersionMap(nil)
 	defer ibsN1.Close()
 
 	gotBal, err := ibsN1.GetBalance(addr)
@@ -350,6 +352,7 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 
 	// — Step 2: apply VersionedWrites through existing round-trip path —
 	ibsApply := New(reader)
+	ibsApply.SetVersionMap(nil)
 	defer ibsApply.Close()
 	err = ibsApply.ApplyVersionedWrites(writes)
 	require.NoError(t, err)
@@ -360,6 +363,7 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 
 	// — Step 3: read back from domains, assert correct state —
 	ibsRead := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	ibsRead.SetVersionMap(nil)
 	defer ibsRead.Close()
 
 	gotBal, err := ibsRead.GetBalance(addr)
