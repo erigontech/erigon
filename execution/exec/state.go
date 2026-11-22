@@ -375,14 +375,13 @@ func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
 }
 
 // newRunState builds the committed-base reader for this worker and acquires a pooled
-// per-run state over it. The task binds the block's shared store onto the state in its
-// Reset; release with state.ReleaseExec.
-func (rw *WorkerContext) newRunState() *state.IntraBlockState {
+// per-run state over it, bound to the task's block store; release with state.ReleaseExec.
+func (rw *WorkerContext) newRunState(txTask Task) *state.IntraBlockState {
 	reader := rw.stateReader
 	if rw.prevBlockReg != nil {
 		reader = state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg)
 	}
-	return state.AcquireExec(reader)
+	return state.AcquireExec(reader, txTask.BlockState())
 }
 
 func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
@@ -418,7 +417,7 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 	// The per-run state is pooled and released after the run. result.TxIn escapes its
 	// read set, so the release hands those maps over (Reset rebinds fresh) rather than
 	// reusing them; the read metrics are captured before the release clears them.
-	ibs := rw.newRunState()
+	ibs := rw.newRunState(txTask)
 	defer func() {
 		rw.ibsRead = readCountersOf(ibs)
 		state.ReleaseExec(ibs)

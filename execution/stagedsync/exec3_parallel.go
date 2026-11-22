@@ -2471,11 +2471,12 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	return result
 }
 
+func (ev *taskVersion) BlockState() *state.BlockState { return ev.blockState }
+
 func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
 	if err := ev.execTask.Reset(evm, ibs, callTracer); err != nil {
 		return err
 	}
-	ibs.RebindVersionMap(ev.blockState.VersionMap)
 	// Point the per-task reader at this task's block: it reads finished-but-uncommitted
 	// blocks < this one in front of the raw base.
 	if r, ok := ibs.StateReader().(*state.PrevBlockReader); ok {

@@ -55,7 +55,9 @@ type Task interface {
 		calcFees bool) *TxResult
 
 	Version() state.Version
-	VersionMap() *state.VersionMap
+	// BlockState returns the block's shared store the per-run state is constructed over,
+	// or nil for a standalone run that uses a private store.
+	BlockState() *state.BlockState
 	Reads(ibs *state.IntraBlockState) state.ReadSet
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
 
@@ -427,8 +429,13 @@ func (t *TxTask) IsHistoric() bool {
 	return t.HistoryExecution
 }
 
+// BlockState is nil for a base task: it runs over a private store. The parallel
+// taskVersion overrides this with the block's shared store.
+func (t *TxTask) BlockState() *state.BlockState { return nil }
+
+// Reset configures evm/ibs for this task. The per-run state is acquired clean, so it is
+// not reset here; it only receives this task's context and EVM block/tx setup.
 func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
-	ibs.Reset()
 	ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
 
 	if t.TxIndex != -1 && !t.IsBlockEnd() {

@@ -297,14 +297,6 @@ func (ibs *IntraBlockState) setVersionMap(versionMap *VersionMap) {
 	ibs.blockState = &BlockState{VersionMap: versionMap}
 }
 
-// RebindVersionMap points a reused worker IBS at the block's shared version map. It is
-// the one remaining version-map binder outside construction: the parallel executor reuses
-// a single IBS across tasks of different blocks. It is removed once the worker constructs
-// its state per run instead of reusing one; no other caller should use it.
-func (ibs *IntraBlockState) RebindVersionMap(versionMap *VersionMap) {
-	ibs.setVersionMap(versionMap)
-}
-
 // StateReader returns the committed-base reader. The parallel executor uses it to
 // retune a per-task overlay (PrevBlockReader.SetBlock) without rebuilding the IBS.
 func (ibs *IntraBlockState) StateReader() StateReader {
@@ -399,18 +391,22 @@ func ReleasePooled(ibs *IntraBlockState) {
 }
 
 // AcquireExec returns a pooled state for one transaction's execution on the parallel
-// path (conflict detection on, unlike NewPooled). The block's shared store is bound onto
-// it by the task's Reset; release with ReleaseExec once the result's reads/writes are
-// extracted.
-func AcquireExec(stateReader StateReader) *IntraBlockState {
+// path (conflict detection on, unlike NewPooled), bound to the block's shared store bs
+// (a private empty store when bs is nil). Release it with ReleaseExec once the result's
+// reads/writes are extracted.
+func AcquireExec(stateReader StateReader, bs *BlockState) *IntraBlockState {
+	if bs == nil {
+		bs = NewBlockState(nil)
+	}
 	ibs, ok := ibsPool.Get().(*IntraBlockState)
 	if !ok {
-		return New(stateReader)
+		ibs = New(stateReader)
+	} else {
+		ibs.stateReader = stateReader
+		ibs.codeAccess, _ = stateReader.(codeAccessTracker)
+		ibs.SetTxContext(0, 0)
 	}
-	ibs.stateReader = stateReader
-	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
-	ibs.setVersionMap(NewVersionMap(nil))
-	ibs.SetTxContext(0, 0)
+	ibs.blockState = bs
 	return ibs
 }
 
