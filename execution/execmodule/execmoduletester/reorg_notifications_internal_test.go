@@ -1203,13 +1203,10 @@ func TestForkchoiceWithMissingTipChangesetKeepsCanonicalHead(t *testing.T) {
 		return nil
 	}))
 	require.Error(t, forkchoiceErr)
-	status, err = m.InsertBlocks(ctx, canonical.Blocks[3:])
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	result, err := m.UpdateForkChoice(ctx, canonical.TopBlock.Header())
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
-	m.ExecModule.WaitIdle(ctx)
+
+	// Extending the canonical tip needs no unwind. Leave its changeset missing
+	// so retrying the rejected unwind would fail on this forkchoice.
+	insertAndSwitchTo(t, m, canonical.Blocks[3:])
 	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
 		require.Equal(t, canonical.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 		value, err := tx.GetOne(kv.ChangeSets3, missing)

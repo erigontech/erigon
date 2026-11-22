@@ -38,55 +38,6 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-func TestFailedUnwindDoesNotLeakIntoNextRun(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		run  func(*Sync, kv.TemporalRwTx) error
-	}{
-		{name: "Run", run: func(sync *Sync, tx kv.TemporalRwTx) error {
-			_, err := sync.Run(nil, tx, false, false)
-			return err
-		}},
-		{name: "RunNoInterrupt", run: func(sync *Sync, tx kv.TemporalRwTx) error {
-			_, err := sync.RunNoInterrupt(nil, tx)
-			return err
-		}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			_, tx := temporaltest.NewTestTx(t)
-			cause := errors.New("unwind failed")
-			var forwardStages []stages.SyncStage
-			forward := func(_ bool, s *StageState, _ Unwinder, _ *execctx.SharedDomains, _ kv.TemporalRwTx, _ log.Logger) error {
-				forwardStages = append(forwardStages, s.ID)
-				return nil
-			}
-			unwindRuns := 0
-			stage := &Stage{
-				ID:      stages.Execution,
-				Forward: forward,
-				Unwind: func(*UnwindState, *StageState, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error {
-					unwindRuns++
-					return cause
-				},
-			}
-			stageList := []*Stage{{ID: stages.Headers, Forward: forward}, stage}
-			sync := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, stageList, UnwindOrder{stage.ID}, nil, log.New(), stages.ModeApplyingBlocks)
-			require.NoError(t, stages.SaveStageProgress(tx, stage.ID, 2))
-			reason := BadBlock(common.Hash{1}, errors.New("invalid block"))
-			require.NoError(t, sync.UnwindTo(1, reason, nil))
-			require.ErrorIs(t, test.run(sync, tx), cause)
-			assert.False(t, sync.HasUnwindPoint())
-			assert.Empty(t, sync.UnwindReason())
-			assert.Nil(t, sync.PrevUnwindPoint(), "a failed unwind must not be reported as completed")
-			assert.Zero(t, sync.currentStage)
-			_, err := sync.Run(nil, tx, false, false)
-			require.NoError(t, err, "a failed request must not become the next request's unwind")
-			require.Equal(t, 1, unwindRuns)
-			require.Equal(t, []stages.SyncStage{stages.Headers, stages.Execution}, forwardStages)
-		})
-	}
-}
-
 type (
 	filesAheadTx   struct{ kv.TemporalTx }
 	filesAheadView struct{ kv.TemporalDebugTx }
@@ -278,60 +229,70 @@ func TestRunStartsAtFirstStageAfterPruneError(t *testing.T) {
 	require.Equal(t, []stages.SyncStage{stages.Headers, stages.Bodies}, flow)
 }
 
-// A reused Sync (fork validation) must not replay an unwind whose RunUnwind
-// failed on an earlier, rolled-back transaction, whether the stage returned an
-// error or panicked and StateStep recovered it.
+// Rolling back the transaction restores stage progress in the database. The caller
+// reuses the same Sync, even after recovering a stage panic, so the next run must
+// start at the first forward stage without replaying the failed unwind.
 func TestFailedRunUnwindDoesNotLeakIntoNextRun(t *testing.T) {
-	unwindErr := errors.New("unwind failed")
-	for _, panics := range []bool{false, true} {
-		t.Run(fmt.Sprintf("panic=%t", panics), func(t *testing.T) {
+	run := func(s *Sync, tx kv.TemporalRwTx) error {
+		_, err := s.Run(nil, tx, false, false)
+		return err
+	}
+	runNoInterrupt := func(s *Sync, tx kv.TemporalRwTx) error {
+		_, err := s.RunNoInterrupt(nil, tx)
+		return err
+	}
+	runUnwind := func(s *Sync, tx kv.TemporalRwTx) error { return s.RunUnwind(nil, tx) }
+	for _, tc := range []struct {
+		name        string
+		mode        stages.Mode
+		run, resume func(*Sync, kv.TemporalRwTx) error
+		panics      bool
+	}{
+		{"RunUnwind/error", stages.ModeForkValidation, runUnwind, runNoInterrupt, false},
+		{"RunUnwind/panic", stages.ModeForkValidation, runUnwind, runNoInterrupt, true},
+		{"Run/error", stages.ModeApplyingBlocks, run, run, false},
+		{"Run/panic", stages.ModeApplyingBlocks, run, run, true},
+		{"RunNoInterrupt/error", stages.ModeApplyingBlocks, runNoInterrupt, run, false},
+		{"RunNoInterrupt/panic", stages.ModeApplyingBlocks, runNoInterrupt, run, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			unwindErr := errors.New("unwind failed")
 			var flow []stages.SyncStage
-			stage := func(id stages.SyncStage, unwindFails bool) *Stage {
-				return &Stage{
-					ID: id,
-					Forward: func(_ bool, s *StageState, _ Unwinder, _ *execctx.SharedDomains, _ kv.TemporalRwTx, _ log.Logger) error {
-						flow = append(flow, s.ID)
-						return nil
-					},
-					Unwind: func(*UnwindState, *StageState, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error {
-						flow = append(flow, unwindOf(id))
-						if unwindFails && panics {
-							panic(unwindErr)
-						}
-						if unwindFails {
-							return unwindErr
-						}
-						return nil
-					},
+			forward := func(_ bool, s *StageState, _ Unwinder, _ *execctx.SharedDomains, _ kv.TemporalRwTx, _ log.Logger) error {
+				flow = append(flow, s.ID)
+				return nil
+			}
+			fail := func(*UnwindState, *StageState, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error {
+				flow = append(flow, unwindOf(stages.Bodies))
+				if tc.panics {
+					panic(unwindErr)
 				}
+				return unwindErr
 			}
-			state := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, []*Stage{stage(stages.Headers, false), stage(stages.Bodies, true)},
-				UnwindOrder{stages.Bodies, stages.Headers}, nil, log.New(), stages.ModeForkValidation)
+			state := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, []*Stage{
+				{ID: stages.Headers, Forward: forward},
+				{ID: stages.Bodies, Forward: forward, Unwind: fail},
+			}, UnwindOrder{stages.Bodies}, nil, log.New(), tc.mode)
+			db, setup := temporaltest.NewTestTx(t)
+			require.NoError(t, stages.SaveStageProgress(setup, stages.Bodies, 2))
+			require.NoError(t, setup.Commit())
 
-			_, tx := temporaltest.NewTestTx(t)
-			for _, id := range []stages.SyncStage{stages.Headers, stages.Bodies} {
-				require.NoError(t, stages.SaveStageProgress(tx, id, 2000))
+			require.NoError(t, state.UnwindTo(1, BadBlock(common.Hash{1}, errors.New("invalid block")), nil))
+			attempt := func(tx kv.TemporalRwTx) error { return tc.run(state, tx) }
+			if tc.panics {
+				require.PanicsWithValue(t, unwindErr, func() { _ = db.UpdateTemporal(t.Context(), attempt) })
+			} else {
+				require.ErrorIs(t, db.UpdateTemporal(t.Context(), attempt), unwindErr)
 			}
-			require.NoError(t, state.UnwindTo(100, StagedUnwind, nil))
-			runUnwind := func() (err error) {
-				defer func() {
-					if rec := recover(); rec != nil {
-						err = rec.(error)
-					}
-				}()
-				return state.RunUnwind(nil, tx)
-			}
-			require.ErrorIs(t, runUnwind(), unwindErr)
 			require.False(t, state.HasUnwindPoint())
+			require.Empty(t, state.UnwindReason())
+			require.Nil(t, state.PrevUnwindPoint(), "a failed unwind must not be reported as completed")
+			require.Zero(t, state.currentStage)
 
-			flow = nil
-			_, tx2 := temporaltest.NewTestTx(t)
-			for _, id := range []stages.SyncStage{stages.Headers, stages.Bodies} {
-				require.NoError(t, stages.SaveStageProgress(tx2, id, 2000))
-			}
-			_, err := state.RunNoInterrupt(nil, tx2)
-			require.NoError(t, err)
-			require.Equal(t, []stages.SyncStage{stages.Headers, stages.Bodies}, flow)
+			require.NoError(t, db.UpdateTemporal(t.Context(), func(tx kv.TemporalRwTx) error {
+				return tc.resume(state, tx)
+			}))
+			require.Equal(t, []stages.SyncStage{unwindOf(stages.Bodies), stages.Headers, stages.Bodies}, flow)
 		})
 	}
 }

@@ -734,21 +734,18 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 	}
 	minBlockNum = max(minBlockNum, unwindToLimit)
 
-	// Binary search, but not too deep
+	// Bisect the range to narrow down where the state root first diverged.
 	jump := min(maxUnwindJumpAllowance, max(1, (blockNumber-minBlockNum)/2))
 	unwindTo := blockNumber - jump
 
-	// protect from too far unwind
-	allowedUnwindTo, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindTo, applyTx, cfg.blockReader.TxnumReader())
-	if err != nil {
-		return err
+	// If the block with the wrong root is at the unwind limit, even the
+	// minimum one-block jump is too deep.
+	if unwindTo < unwindToLimit {
+		return fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, unwindToLimit)
 	}
-	if !ok {
-		return fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, allowedUnwindTo)
-	}
-	logger.Warn("Unwinding due to incorrect root hash", "to", allowedUnwindTo)
+	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
 	if u != nil {
-		if err := u.UnwindTo(allowedUnwindTo, BadBlock(blockHash, ErrInvalidStateRootHash), applyTx); err != nil {
+		if err := u.UnwindTo(unwindTo, BadBlock(blockHash, ErrInvalidStateRootHash), applyTx); err != nil {
 			return err
 		}
 	}
