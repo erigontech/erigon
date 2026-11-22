@@ -1816,6 +1816,34 @@ func TestComposerAuditsAPostingSupersededAndPruned(t *testing.T) {
 	require.False(t, pool.Holds(out.Hash), "final in the rival's block")
 }
 
+// TestComposerAttributesPastPrunedSettlements: settlements derivation pruned
+// before they were attributed are skipped, not waited for.
+func TestComposerAttributesPastPrunedSettlements(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 12), 12, senders{from: map[common.Hash]common.Address{}})
+	var from atomic.Uint64
+	all := settlements(
+		deriver.Record{TxHash: common.Hash{0x4}, LastL2Block: 4},
+		deriver.Record{TxHash: common.Hash{0x8}, LastL2Block: 8},
+		deriver.Record{TxHash: common.Hash{0xc}, LastL2Block: 12},
+	)
+	h.c.Settlements(func(n uint64) (deriver.Record, bool) {
+		if n < from.Load() {
+			return deriver.Record{}, false
+		}
+		return all(n)
+	})
+	h.c.ledger.Begin(Posted[*Held]{Height: 12, Post: common.Hash{0xc}})
+	lines := captureLogs(h.c)
+	h.cursor.Store(4)
+	h.c.RecoverFailed(t.Context())
+	from.Store(9)
+	h.cursor.Store(12)
+	h.c.RecoverFailed(t.Context())
+	h.c.Close()
+	out := lines.String()
+	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.confirmed to=12 "), out)
+}
+
 // TestComposerReleasesItsOwnSettlementQuietly: a batch derivation passed
 // before its verdict, settled whole by its own posting, is no partial one.
 func TestComposerReleasesItsOwnSettlementQuietly(t *testing.T) {

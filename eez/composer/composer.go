@@ -800,7 +800,22 @@ func (c *Composer) attribute(cursor uint64) {
 	// A settlement derivation has yet to pass whole waits for a later call.
 	for n <= cursor {
 		r, ok := c.settlement(n)
-		if !ok || r.LastL2Block > cursor {
+		if !ok {
+			// Derivation prunes final settlements: attribution resumes at
+			// the first it keeps.
+			m := n + 1
+			for ; m <= cursor; m++ {
+				if _, ok := c.settlement(m); ok {
+					break
+				}
+			}
+			if m > cursor {
+				break
+			}
+			n = m
+			continue
+		}
+		if r.LastL2Block > cursor {
 			break
 		}
 		n = r.LastL2Block + 1
