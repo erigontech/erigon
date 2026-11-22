@@ -921,13 +921,13 @@ func (ibs *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath,
 	return ibs.stateUpdates.ReadStatus(addr, path, key, txIdx)
 }
 
-// writeBalance records a balance change on the versionMap write-set and
-// the journal without materializing the stateObject on the common existing-alive
-// path; an already-materialized one is kept in step. An absent or
-// destroyed-no-revival account is materialized via GetOrNewStateObject so
-// createObject records the AddressPath write OCC needs; the create path never
-// reads balance (matching the old stateObject path). The journal prev comes from a
-// caller that already read the balance, or, when nil, is read only in the existing
+// writeBalance records a balance change on the versionMap write-set and the
+// journal. An absent account (base == nil) is created via create, which records
+// the AddressPath write OCC needs; the create path never reads balance, so its
+// journal prev is the fresh account's zero. A live account — including one with
+// an in-block lifecycle event such as a SELFDESTRUCT — keeps its record and
+// journals its own balance as prev. The journal prev comes from a caller that
+// already read the balance, or, when nil, is read only in the live
 // branch so a create does not widen the OCC read-set with a spurious BalancePath
 // read.
 func (ibs *IntraBlockState) writeBalance(addr accounts.Address, prev *uint256.Int, update uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) error {
@@ -1333,10 +1333,11 @@ func (ibs *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64, reason
 	return ibs.writeNonce(addr, nonce, wasCommited, reason)
 }
 
-// writeNonce records a nonce write on the parallel (versionMap) path
-// without materializing a stateObject for an existing, live account. A nonce SET
-// does not depend on the prior value, so prev is read WITHOUT recording an OCC
-// read. Absent/destroyed accounts still materialize (account creation).
+// writeNonce records a nonce write on the parallel (versionMap) path without
+// materializing a stateObject. A nonce SET does not depend on the prior value,
+// so prev is read WITHOUT recording an OCC read. An absent account (base == nil)
+// is created via create with no stateObject; a live account with an in-block
+// lifecycle event keeps its record and code.
 func (ibs *IntraBlockState) writeNonce(addr accounts.Address, nonce uint64, wasCommited bool, reason tracing.NonceChangeReason) error {
 	base, _, _, err := ibs.accountBase(addr, true)
 	if err != nil {
