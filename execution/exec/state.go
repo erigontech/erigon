@@ -122,7 +122,9 @@ type WorkerContext struct {
 	chain      rules.ChainReader
 
 	evm *vm.EVM
-	ibs *state.IntraBlockState
+	// ibsRead holds the last run's per-tx read metrics, captured before the pooled
+	// per-run state is released so RunTxTask's deferred metrics can still read them.
+	ibsRead ibsReadCounters
 
 	dirs datadir.Dirs
 
@@ -133,6 +135,26 @@ type WorkerContext struct {
 	// a non-blocking TrySend hands them off; Close flushes the rest.
 	collectorAcc *kvmetrics.DomainMetrics
 	codeBuf      []byte
+}
+
+// ibsReadCounters snapshots a per-run state's read metrics at the end of a run, before
+// the pooled state is released.
+type ibsReadCounters struct {
+	readDuration, accountDuration, storageDuration, codeDuration time.Duration
+	readCount, accountCount, storageCount, codeCount             int64
+}
+
+func readCountersOf(ibs *state.IntraBlockState) ibsReadCounters {
+	return ibsReadCounters{
+		readDuration:    ibs.ReadDuration(),
+		accountDuration: ibs.AccountReadDuration(),
+		storageDuration: ibs.StorageReadDuration(),
+		codeDuration:    ibs.CodeReadDuration(),
+		readCount:       ibs.ReadCount(),
+		accountCount:    ibs.AccountReadCount(),
+		storageCount:    ibs.StorageReadCount(),
+		codeCount:       ibs.CodeReadCount(),
+	}
 }
 
 // installWorkerGetHash points the EVM's BLOCKHASH lookup at the worker's own
@@ -172,7 +194,6 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 		readMetrics:  kvmetrics.NewDomainMetrics(),
 		collectorAcc: kvmetrics.NewDomainMetrics(),
 	}
-	w.ibs = state.New(w.stateReader)
 	w.stopCancel = context.AfterFunc(ctx, w.evm.Cancel)
 	return w
 }
@@ -200,7 +221,6 @@ func (rw *WorkerContext) Close() {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.stopCancel()
-	rw.ibs.Close()
 	_ = rw.bindTx(nil)
 	if dbg.KVReadLevelledMetrics && rw.rs != nil {
 		if c := rw.rs.Domains().Collector(); c != nil {
@@ -275,15 +295,15 @@ func (rw *WorkerContext) RunTxTask(txTask Task) (result *TxResult) {
 		start := time.Now()
 		defer func() {
 			rw.metrics.Duration.Add(time.Since(start))
-			if readDuration := rw.ibs.ReadDuration(); readDuration > 0 {
-				rw.metrics.ReadDuration.Add(rw.ibs.ReadDuration())
-				rw.metrics.ReadCount.Add(rw.ibs.ReadCount())
-				rw.metrics.AccountReadDuration.Add(rw.ibs.AccountReadDuration())
-				rw.metrics.AccountReadCount.Add(rw.ibs.AccountReadCount())
-				rw.metrics.StorageReadDuration.Add(rw.ibs.StorageReadDuration())
-				rw.metrics.StorageReadCount.Add(rw.ibs.StorageReadCount())
-				rw.metrics.CodeReadDuration.Add(rw.ibs.CodeReadDuration())
-				rw.metrics.CodeReadCount.Add(rw.ibs.CodeReadCount())
+			if rw.ibsRead.readDuration > 0 {
+				rw.metrics.ReadDuration.Add(rw.ibsRead.readDuration)
+				rw.metrics.ReadCount.Add(rw.ibsRead.readCount)
+				rw.metrics.AccountReadDuration.Add(rw.ibsRead.accountDuration)
+				rw.metrics.AccountReadCount.Add(rw.ibsRead.accountCount)
+				rw.metrics.StorageReadDuration.Add(rw.ibsRead.storageDuration)
+				rw.metrics.StorageReadCount.Add(rw.ibsRead.storageCount)
+				rw.metrics.CodeReadDuration.Add(rw.ibsRead.codeDuration)
+				rw.metrics.CodeReadCount.Add(rw.ibsRead.codeCount)
 			}
 			if result != nil {
 				// EIP-8037: per-tx max(regular, state) overestimates vs the true block gas
@@ -334,12 +354,6 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
-	rw.ibs.Close()
-	if rw.prevBlockReg != nil {
-		rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg))
-	} else {
-		rw.ibs = state.New(rw.stateReader)
-	}
 
 	switch reader.(type) {
 	case *state.HistoryReaderV3:
@@ -358,8 +372,17 @@ func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.prevBlockReg = reg
-	rw.ibs.Close()
-	rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, reg))
+}
+
+// newRunState builds the committed-base reader for this worker and acquires a pooled
+// per-run state over it. The task binds the block's shared store onto the state in its
+// Reset; release with state.ReleaseExec.
+func (rw *WorkerContext) newRunState() *state.IntraBlockState {
+	reader := rw.stateReader
+	if rw.prevBlockReg != nil {
+		reader = state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg)
+	}
+	return state.AcquireExec(reader)
 }
 
 func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
@@ -392,7 +415,16 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 
 	rw.resetTxNum(txTask.Version().TxNum)
 
-	if err := txTask.Reset(rw.evm, rw.ibs, callTracer); err != nil {
+	// The per-run state is pooled and released after the run. result.TxIn escapes its
+	// read set, so the release hands those maps over (Reset rebinds fresh) rather than
+	// reusing them; the read metrics are captured before the release clears them.
+	ibs := rw.newRunState()
+	defer func() {
+		rw.ibsRead = readCountersOf(ibs)
+		state.ReleaseExec(ibs)
+	}()
+
+	if err := txTask.Reset(rw.evm, ibs, callTracer); err != nil {
 		return &TxResult{
 			Task: txTask,
 			Err:  err,
@@ -407,7 +439,7 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 		rw.installWorkerGetHash(txTask)
 	}
 
-	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, rw.chainConfig, rw.chain, rw.dirs, true)
+	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, ibs, rw.chainConfig, rw.chain, rw.dirs, true)
 	// The EVM can return a nil error after cancellation; reject that result.
 	if err := rw.ctx.Err(); err != nil {
 		return &TxResult{Task: txTask, Err: err, Operational: true}

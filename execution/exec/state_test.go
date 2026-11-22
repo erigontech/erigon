@@ -81,7 +81,7 @@ func TestWorkerCancellationStopsRunningEVM(t *testing.T) {
 					}}
 				}
 				blockCtx := evmtypes.BlockContext{}
-				w.evm.ResetBetweenBlocks(blockCtx, evmtypes.TxContext{}, w.ibs, vmConfig, blockCtx.Rules(chain.AllProtocolChanges))
+				w.evm.ResetBetweenBlocks(blockCtx, evmtypes.TxContext{}, state.New(state.NewNoopReader()), vmConfig, blockCtx.Rules(chain.AllProtocolChanges))
 				var executionErr error
 				result := w.RunTxTask(&workerTestTask{
 					TxTask: TxTask{TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1)}},

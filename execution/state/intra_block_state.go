@@ -391,7 +391,37 @@ func ReleasePooled(ibs *IntraBlockState) {
 	if ibs.journal == nil { // closed
 		return
 	}
-	if ibs.resetForPool() {
+	if ibs.resetForPool(true) {
+		ibsPool.Put(ibs)
+		return
+	}
+	ibs.Close()
+}
+
+// AcquireExec returns a pooled state for one transaction's execution on the parallel
+// path (conflict detection on, unlike NewPooled). The block's shared store is bound onto
+// it by the task's Reset; release with ReleaseExec once the result's reads/writes are
+// extracted.
+func AcquireExec(stateReader StateReader) *IntraBlockState {
+	ibs, ok := ibsPool.Get().(*IntraBlockState)
+	if !ok {
+		return New(stateReader)
+	}
+	ibs.stateReader = stateReader
+	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
+	ibs.setVersionMap(NewVersionMap(nil))
+	ibs.SetTxContext(0, 0)
+	return ibs
+}
+
+// ReleaseExec returns an AcquireExec state to the pool. Unlike ReleasePooled it does not
+// reuse the read-set maps: the executor's result escapes them (result.TxIn is ibs.reads),
+// so Reset hands them over and the next acquire starts fresh.
+func ReleaseExec(ibs *IntraBlockState) {
+	if ibs.journal == nil { // closed
+		return
+	}
+	if ibs.resetForPool(false) {
 		ibsPool.Put(ibs)
 		return
 	}
@@ -404,17 +434,20 @@ const maxPooledEntries = 16 * 1024
 
 // resetForPool clears everything one call left and reports whether ibs is
 // small enough to pool.
-func (ibs *IntraBlockState) resetForPool() bool {
+func (ibs *IntraBlockState) resetForPool(reuseReads bool) bool {
 	reads := ibs.reads
 	poolable := ibs.accessList.entries()+reads.entries() <= maxPooledEntries
 	ibs.Reset()
 	if !poolable {
 		return false
 	}
-	// One call never hands its read set out, so the maps keep their capacity
-	// instead of the empty set Reset installs.
-	reads.clearForReuse()
-	ibs.reads = reads
+	// An eth_call never hands its read set out, so the maps keep their capacity
+	// instead of the empty set Reset installs. An executor run's reads escape into
+	// result.TxIn, so Reset's fresh empty set hands them over and this is skipped.
+	if reuseReads {
+		reads.clearForReuse()
+		ibs.reads = reads
+	}
 	// Reset only bumps the probe epoch; a pooled ibs would collect every
 	// address later calls touch.
 	clear(ibs.sdProbe)
