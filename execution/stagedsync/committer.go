@@ -448,6 +448,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			pb.txSeen = true
 		}
 		cc.maybeComputeAhead(ctx, r.blockNum)
+		if j := cc.ahead; j != nil && j.blockNum == r.blockNum {
+			j.skipped = append(j.skipped, r)
+			return
+		}
 		if pb != nil && pb.failed {
 			return
 		}
