@@ -467,6 +467,11 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 	return api.readBlock(ctx, tx, hash, number, false)
 }
 
+// blockWithTxnHashes is for callers that use every txn hash, see BlockWithSendersAndTxnHashes.
+func (api *BaseAPI) blockWithTxnHashes(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
+	return api.readBlock(ctx, tx, hash, number, true)
+}
+
 type txnHashesBlockReader interface {
 	BlockWithSendersAndTxnHashes(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Block, []common.Address, error)
 }

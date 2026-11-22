@@ -638,7 +638,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		defer prefetch.Close()
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
+	block, err := api.blockWithTxnHashes(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
