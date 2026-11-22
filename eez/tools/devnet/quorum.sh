@@ -254,7 +254,7 @@ for _ in $(seq $((2 * l1_s))); do
 	[ "$settled" -le "$paused_at" ] || fail "L1 settled block $settled, past $paused_at, with one attester of a threshold-2 manager"
 	sleep 2
 done
-tail -n +$((mark + 1)) "$OUT/erigon.log" | grep -q "quorum of 2 not reached: .*$(lower <<< "${ps2#0x}"):" \
+grep -q "quorum of 2 not reached: .*$(lower <<< "${ps2#0x}"):" < <(tail -n +$((mark + 1)) "$OUT/erigon.log") \
 	|| fail "no quorum failure naming $ps2 logged during the outage"
 docker unpause "$signer2" > /dev/null
 PAUSED=
