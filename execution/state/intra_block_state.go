@@ -1103,41 +1103,22 @@ func (ibs *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath,
 // AddressPath write OCC needs with no stateObject; the create path never reads
 // balance, so its journal prev is the fresh account's zero. A live account —
 // including one with an in-block lifecycle event such as a SELFDESTRUCT — keeps
-// its record and journals its own balance as prev. The journal prev comes from a
-// caller that already read the balance, or, when nil, is read only in the live
-// branch so a create does not widen the OCC read-set with a spurious BalancePath
-// read.
+// its record and journals its own balance, read from the caller or, when nil,
+// here so a create does not widen the OCC read-set with a spurious balance read.
 func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *uint256.Int, update uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) error {
 	base, _, _, err := ibs.versionedAccountBase(addr, true)
 	if err != nil {
 		return err
 	}
-	if base != nil && prev == nil {
+	if base == nil {
+		ibs.createVersioned(addr, false)
+		prev = &uint256.Int{}
+	} else if prev == nil {
 		cur, _, err := ibs.getBalance(addr)
 		if err != nil {
 			return err
 		}
 		prev = &cur
-	}
-	if base == nil || ibs.accountLifecycle(addr) {
-		// The lifecycle case (base != nil) journals *prev, the account's own balance,
-		// so a revert restores it; the create case never read balance, so its prev is
-		// the fresh account's zero.
-		var prevBal uint256.Int
-		if base != nil {
-			prevBal = *prev
-		}
-		// Only an absent account is created here; a live account with an in-block
-		// lifecycle event (accountLifecycle) keeps its record and code.
-		if base == nil {
-			ibs.createVersioned(addr, false)
-		}
-		ibs.journal.balanceChange(addr, prevBal, wasCommited, ibs.versionedWrites.balanceDeleted(addr))
-		if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
-			ibs.tracingHooks.OnBalanceChange(addr, prevBal, update, reason)
-		}
-		ibs.recordWriteBalance(addr, update)
-		return nil
 	}
 	ibs.journal.balanceChange(addr, *prev, wasCommited, ibs.versionedWrites.balanceDeleted(addr))
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
@@ -1636,41 +1617,20 @@ func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uin
 	if err != nil {
 		return err
 	}
-	if base == nil || ibs.accountLifecycle(addr) {
-		// The journal prev is this tx's own nonce cell when present (it can lead the
-		// base record), else the live account's nonce, else the fresh account's zero.
-		prev := uint64(0)
-		if base != nil {
-			prev = base.Nonce
+	// The journal prev is the fresh account's zero on a create, else the live
+	// account's nonce, kept in step with an already-materialized stateObject (whose
+	// so.data the genesis/RPC commit paths read), finally overridden by this tx's
+	// own nonce cell, which is authoritative when it leads the base record.
+	prev := uint64(0)
+	if base == nil {
+		ibs.createVersioned(addr, false)
+	} else {
+		prev = base.Nonce
+		if so, ok := ibs.stateObjects[addr]; ok {
+			prev = so.data.Nonce
+			so.setNonce(nonce)
 		}
-		if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
-			prev = vw.Val
-		}
-		// Only an absent/destroyed account is created here; a live account with an
-		// in-block lifecycle event (accountLifecycle) keeps its record and code.
-		if base == nil {
-			ibs.createVersioned(addr, false)
-		}
-		ibs.journal.nonceChange(addr, prev, wasCommited)
-		if ibs.tracingHooks != nil {
-			if ibs.tracingHooks.OnNonceChangeV2 != nil {
-				ibs.tracingHooks.OnNonceChangeV2(addr, prev, nonce, reason)
-			} else if ibs.tracingHooks.OnNonceChange != nil {
-				ibs.tracingHooks.OnNonceChange(addr, prev, nonce)
-			}
-		}
-		ibs.recordWriteNonce(addr, nonce, reason)
-		return nil
 	}
-	prev := base.Nonce
-	// Keep an already-materialized stateObject's so.data in step so the
-	// so.data-based commit paths (genesis FinalizeTx, RPC) stay correct.
-	if so, ok := ibs.stateObjects[addr]; ok {
-		prev = so.data.Nonce
-		so.setNonce(nonce)
-	}
-	// The tx's own nonce cell is authoritative for the journal prev: so.data can
-	// lag if the object was materialized after this tx's earlier writes.
 	if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
 		prev = vw.Val
 	}
@@ -2428,52 +2388,50 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	if !ibs.noMaterialize {
 		ibs.setStateObject(addr, newobj)
 	}
-	ibs.recordWriteAddress(addr, &newobj.data)
-	// Write CodeHashPath so that any stale versionedReads cache entry
-	// (e.g. from the pre-creation GetCodeHash check in EVM create()) is
-	// invalidated.  newObject normalises the zero-value CodeHash to
-	// EmptyCodeHash, so this records keccak256("") for a fresh account.
-	ibs.recordWriteCodeHash(addr, newobj.data.CodeHash)
-	// Write NoncePath only when a prior incarnation's nonce still sits in the version-map
-	// floor, which a commitment read would otherwise resurrect. A genuinely fresh account
-	// has no floor, so a nonce=0 write there is a net-zero change the BAL wrongly reports.
-	if previous != nil {
-		ibs.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
-	} else if ibs.versionMap != nil {
-		if _, res, ok := ibs.versionMap.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
+	if ibs.versionMap != nil && previous == nil {
+		ibs.recordVersionedCreateCells(addr, &newobj.data)
+	} else {
+		ibs.recordWriteAddress(addr, &newobj.data)
+		ibs.recordWriteCodeHash(addr, newobj.data.CodeHash)
+		if previous != nil {
 			ibs.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
 		}
-		// The balance is written unconditionally: a lower tx's removal of the account can be
-		// flushed after this tx ran, and its deleted balance would then decide the account.
-		ibs.recordWriteBalance(addr, newobj.data.Balance)
 	}
 	return newobj
 }
 
 // createVersioned records the creation of addr into the version map and journal on the
-// versioned path with no stateObject (createObject's versioned recording, extracted).
-// hadPrevious is createObject's previous!=nil: the account resolved to a live record
-// (getStateObject returns nil for a cross-tx-destructed account on this path), so the
-// create is a reset whose fields the journal snapshots for revert rather than a fresh
-// createObject entry.
+// versioned path with no stateObject. hadPrevious marks a recreate over a live record (a
+// reset whose fields the journal snapshots for revert) rather than a fresh createObject.
 func (ibs *IntraBlockState) createVersioned(addr accounts.Address, hadPrevious bool) {
 	account := accounts.NewAccount() // Root=empty.RootHash, CodeHash=EmptyCodeHash: newObject's normalized output
 	if !hadPrevious {
 		ibs.journal.createObjectChange(addr)
-	} else {
-		prevWrites := ibs.versionedWrites.snapshotCreateFields(addr)
-		ibs.journal.resetObjectChange(addr, nil, prevWrites)
+		ibs.recordVersionedCreateCells(addr, &account)
+		return
 	}
+	prevWrites := ibs.versionedWrites.snapshotCreateFields(addr)
+	ibs.journal.resetObjectChange(addr, nil, prevWrites)
 	ibs.recordWriteAddress(addr, &account)
 	ibs.recordWriteCodeHash(addr, account.CodeHash)
-	if hadPrevious {
+	ibs.recordWriteNonce(addr, account.Nonce, tracing.NonceChangeNewContract)
+}
+
+// recordVersionedCreateCells records the version-map cells a fresh account's creation
+// emits, without journaling — the caller records the journal entry. Address and code
+// hash are always written (the code-hash write invalidates any stale pre-create
+// GetCodeHash read); the nonce only when a prior incarnation's nonce still sits in the
+// version-map floor, which a commitment read would otherwise resurrect — a genuinely
+// fresh account has no floor, so a nonce=0 write there is a net-zero change the BAL
+// wrongly reports; the balance unconditionally, since a lower tx's removal of the
+// account can be flushed after this tx ran and its deleted balance would then decide it.
+func (ibs *IntraBlockState) recordVersionedCreateCells(addr accounts.Address, account *accounts.Account) {
+	ibs.recordWriteAddress(addr, account)
+	ibs.recordWriteCodeHash(addr, account.CodeHash)
+	if _, res, ok := ibs.versionMap.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
 		ibs.recordWriteNonce(addr, account.Nonce, tracing.NonceChangeNewContract)
-	} else {
-		if _, res, ok := ibs.versionMap.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
-			ibs.recordWriteNonce(addr, account.Nonce, tracing.NonceChangeNewContract)
-		}
-		ibs.recordWriteBalance(addr, account.Balance)
 	}
+	ibs.recordWriteBalance(addr, account.Balance)
 }
 
 // createAccountVersioned is CreateAccount on the versioned path: it resolves the
