@@ -836,3 +836,26 @@ func TestConcurrentAccess(t *testing.T) {
 		assert.True(t, exists)
 	}
 }
+
+func TestWriteColumnSidecarsWithoutEventNotifiesStoredButSendsNoEvent(t *testing.T) {
+	emitters := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 2)
+	subscription := emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	storage := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, emitters)
+	root := common.HexToHash("0x1234567890abcdef")
+	sidecar := createTestDataColumnSidecar(1000, 1)
+
+	require.NoError(t, storage.WriteColumnSidecarsWithoutEvent(t.Context(), root, 1, sidecar))
+
+	require.Empty(t, events)
+	select {
+	case notifiedRoot := <-emitters.DataColumnStored():
+		require.Equal(t, root, notifiedRoot)
+	default:
+		t.Fatal("new column write did not notify its block root")
+	}
+	exists, err := storage.ColumnSidecarExists(t.Context(), 1000, root, 1)
+	require.NoError(t, err)
+	require.True(t, exists)
+}

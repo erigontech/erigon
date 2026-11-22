@@ -107,6 +107,8 @@ type dataColumnSidecarService struct {
 	emitters             *beaconevents.EventEmitter
 	gossipManager        gossipmgr.Gossip
 	expectedProposer     func(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error)
+	ctx                  context.Context
+	backgroundWrites     chan struct{}
 
 	// Key by the full sidecar root so an unverified candidate cannot suppress
 	// another candidate for the same block and column.
@@ -197,6 +199,8 @@ func NewDataColumnSidecarService(
 		columnSidecarStorage: columnSidecarStorage,
 		emitters:             emitters,
 		gossipManager:        gossipManager,
+		ctx:                  ctx,
+		backgroundWrites:     make(chan struct{}, cfg.NumberOfColumns),
 		pendingQuota: pendingSidecarQuota{
 			limit: pendingGloasSidecarQuota(cfg),
 			used:  make(map[pendingSidecarSource]int),
@@ -387,22 +391,39 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	if seen, _ := s.seenSidecar.ContainsOrAdd(seenKey, struct{}{}); seen {
 		return ErrIgnore
 	}
+	msg.BlockRoot = blockRoot
+	msg.Slot = blockHeader.Slot
+	s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(msg))
 	if !store {
-		// Storage sends the data_column_sidecar event for a stored column, so a column that is not stored gets it here.
-		msg.BlockRoot = blockRoot
-		msg.Slot = blockHeader.Slot
-		s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(msg))
 		return nil
 	}
-	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
+	select {
+	case s.backgroundWrites <- struct{}{}:
+		go func() {
+			defer func() { <-s.backgroundWrites }()
+			if err := s.storeFuluSidecar(seenKey, blockRoot, msg); err != nil {
+				log.Debug("[dataColumnSidecarService] failed to store accepted data column sidecar", "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String(), "index", msg.Index, "err", err)
+			}
+		}()
+		return nil
+	default:
+		return s.storeFuluSidecar(seenKey, blockRoot, msg)
+	}
+}
+
+// storeFuluSidecar writes a column whose data_column_sidecar event is already sent. A failed write releases the seen
+// key so the column can be fetched again.
+func (s *dataColumnSidecarService) storeFuluSidecar(seenKey seenSidecarKey, blockRoot common.Hash, msg *cltypes.DataColumnSidecar) error {
+	slot := msg.Slot
+	if err := s.columnSidecarStorage.WriteColumnSidecarsWithoutEvent(s.ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		s.seenSidecar.Remove(seenKey)
 		return fmt.Errorf("%w: failed to write data column sidecar: %w", ErrIgnore, err)
 	}
 
-	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
-		log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String())
+	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(slot, blockRoot); err != nil {
+		log.Warn("failed to schedule recover", "err", err, "slot", slot, "blockRoot", blockRoot.String())
 	}
-	log.Trace("[dataColumnSidecarService] processed fulu data column sidecar", "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String(), "index", msg.Index)
+	log.Trace("[dataColumnSidecarService] processed fulu data column sidecar", "slot", slot, "blockRoot", blockRoot.String(), "index", msg.Index)
 	return nil
 }
 

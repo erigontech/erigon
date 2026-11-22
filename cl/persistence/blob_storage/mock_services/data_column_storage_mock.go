@@ -356,6 +356,44 @@ func (c *MockDataColumnStorageWriteColumnSidecarsBatchCall) DoAndReturn(f func(c
 	return c
 }
 
+// WriteColumnSidecarsWithoutEvent mocks base method.
+func (m *MockDataColumnStorage) WriteColumnSidecarsWithoutEvent(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "WriteColumnSidecarsWithoutEvent", ctx, blockRoot, columnIndex, columnData)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// WriteColumnSidecarsWithoutEvent indicates an expected call of WriteColumnSidecarsWithoutEvent.
+func (mr *MockDataColumnStorageMockRecorder) WriteColumnSidecarsWithoutEvent(ctx, blockRoot, columnIndex, columnData any) *MockDataColumnStorageWriteColumnSidecarsWithoutEventCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteColumnSidecarsWithoutEvent", reflect.TypeOf((*MockDataColumnStorage)(nil).WriteColumnSidecarsWithoutEvent), ctx, blockRoot, columnIndex, columnData)
+	return &MockDataColumnStorageWriteColumnSidecarsWithoutEventCall{Call: call}
+}
+
+// MockDataColumnStorageWriteColumnSidecarsWithoutEventCall wrap *gomock.Call
+type MockDataColumnStorageWriteColumnSidecarsWithoutEventCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockDataColumnStorageWriteColumnSidecarsWithoutEventCall) Return(arg0 error) *MockDataColumnStorageWriteColumnSidecarsWithoutEventCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockDataColumnStorageWriteColumnSidecarsWithoutEventCall) Do(f func(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error) *MockDataColumnStorageWriteColumnSidecarsWithoutEventCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockDataColumnStorageWriteColumnSidecarsWithoutEventCall) DoAndReturn(f func(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error) *MockDataColumnStorageWriteColumnSidecarsWithoutEventCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // WriteStream mocks base method.
 func (m *MockDataColumnStorage) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
 	m.ctrl.T.Helper()

@@ -32,6 +32,8 @@ const (
 //go:generate mockgen -typed=true -destination=./mock_services/data_column_storage_mock.go -package=mock_services . DataColumnStorage
 type DataColumnStorage interface {
 	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
+	// WriteColumnSidecarsWithoutEvent is WriteColumnSidecars for callers that send the data_column_sidecar event themselves.
+	WriteColumnSidecarsWithoutEvent(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
 	WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error
 	RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error
 	ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error)
@@ -81,10 +83,18 @@ func sidecarSlot(sidecar *cltypes.DataColumnSidecar) uint64 {
 }
 
 func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
+	return s.writeColumn(blockRoot, columnIndex, columnData, true)
+}
+
+func (s *dataColumnStorageImpl) WriteColumnSidecarsWithoutEvent(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
+	return s.writeColumn(blockRoot, columnIndex, columnData, false)
+}
+
+func (s *dataColumnStorageImpl) writeColumn(blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar, sendEvent bool) error {
 	slot := sidecarSlot(columnData)
 	columnData.BlockRoot = blockRoot
 	columnData.Slot = slot
-	return s.writeColumns(blockRoot, slot, []batchEntry{{idx: uint64(columnIndex), v: columnData}}, []*cltypes.DataColumnSidecar{columnData})
+	return s.writeColumns(blockRoot, slot, []batchEntry{{idx: uint64(columnIndex), v: columnData}}, []*cltypes.DataColumnSidecar{columnData}, sendEvent)
 }
 
 // WriteColumnSidecarsBatch stores the sidecars of one block: it validates them all first, skips
@@ -116,10 +126,10 @@ func (s *dataColumnStorageImpl) WriteColumnSidecarsBatch(ctx context.Context, bl
 		sidecar.BlockRoot = blockRoot
 		sidecar.Slot = slot
 	}
-	return s.writeColumns(blockRoot, slot, entries, sidecars)
+	return s.writeColumns(blockRoot, slot, entries, sidecars, true)
 }
 
-func (s *dataColumnStorageImpl) writeColumns(blockRoot common.Hash, slot uint64, entries []batchEntry, sidecars []*cltypes.DataColumnSidecar) error {
+func (s *dataColumnStorageImpl) writeColumns(blockRoot common.Hash, slot uint64, entries []batchEntry, sidecars []*cltypes.DataColumnSidecar, sendEvent bool) error {
 	created, err := func() ([]int, error) {
 		lock := s.forRoot(blockRoot)
 		lock.Lock()
@@ -138,7 +148,9 @@ func (s *dataColumnStorageImpl) writeColumns(blockRoot common.Hash, slot uint64,
 	if len(created) > 0 {
 		s.emitters.NotifyDataColumnStored(blockRoot)
 		for _, i := range created {
-			s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(sidecars[i]))
+			if sendEvent {
+				s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(sidecars[i]))
+			}
 			log.Trace("wrote data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", entries[i].idx)
 		}
 	}
