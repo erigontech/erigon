@@ -2918,6 +2918,37 @@ func TestBlobFrameReplacementRequiresBlobPriceBump(t *testing.T) {
 	require.Equal(t, txpoolcfg.Success, validateFrameReplacement(previous, slot(11, 200), 10, 100))
 }
 
+func TestMixedBlobReplacement(t *testing.T) {
+	hashes := []common.Hash{{1}}
+	frame := &TxnSlot{Txn: &types.FrameTransaction{
+		Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 80_000}}},
+		BlobVersionedHashes: hashes,
+		Fees:                types.FrameFees{TipCap: uint256.Int{11}, MaxFee: uint256.Int{200 * params.GasPerBlob}},
+	}}
+	blob := func(tip, feeCap uint64) *TxnSlot {
+		slot := newTestBlobTxnSlot(0, 0, tip, feeCap, frame.GetGas())
+		tx := slot.Txn.(*types.BlobTx)
+		tx.BlobVersionedHashes = hashes
+		tx.MaxFeePerBlobGas.SetUint64(feeCap)
+		return slot
+	}
+	pool := &TxPool{cfg: txpoolcfg.DefaultConfig}
+	// Each candidate clears both fee bumps if the frame budget is counted twice.
+	for _, tc := range []struct {
+		name                  string
+		previous, replacement *TxnSlot
+	}{
+		{"blob to frame", blob(10, 100), frame},
+		{"frame to blob", frame, blob(22, 1_000)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := pool.checkReplacement(newMetaTxn(tc.replacement, true, 0), newMetaTxn(tc.previous, true, 0))
+			require.Equal(t, txpoolcfg.BlobReplacementTypeMismatch, decision.reason)
+			require.Equal(t, txpoolproto.ImportResult_INVALID, mapDiscardReasonToProto(decision.reason))
+		})
+	}
+}
+
 func TestFramePoolReplacementIncreasesGasBudget(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	pool.ethBackend.(*frameValidationBackend).balance = common.Ether

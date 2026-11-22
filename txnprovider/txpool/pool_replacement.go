@@ -83,29 +83,28 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 	return replacementDecision{}
 }
 
-// Frame replacements must strictly increase fees, even when the configured
-// percentage would round down to no increase.
+// validateFrameReplacement checks replacements involving at least one frame.
+// Fees must increase even when the configured percentage would round down to no increase.
 func validateFrameReplacement(previous, replacement *TxnSlot, priceBump, blobPriceBump uint64) txpoolcfg.DiscardReason {
 	oldFrame, oldIsFrame := previous.Txn.(*types.FrameTransaction)
 	newFrame, newIsFrame := replacement.Txn.(*types.FrameTransaction)
-	bothFrames := oldIsFrame && newIsFrame
+	bothHaveBlobs := previous.HasBlobs() && replacement.HasBlobs()
 	var oldCap, newCap *uint256.Int
-	if bothFrames {
+	switch {
+	case oldIsFrame && newIsFrame:
 		oldCap, newCap = &oldFrame.Fees.MaxFee, &newFrame.Fees.MaxFee
-	} else {
+	case bothHaveBlobs:
+		// Comparing a frame's budget with each type-3 fee cap separately would
+		// count the same wei toward both the execution and blob fee bumps.
+		return txpoolcfg.BlobReplacementTypeMismatch
+	default:
 		oldCap, newCap = previous.GetFeeCap(), replacement.GetFeeCap()
 	}
 	if !frameReplacementFee(previous.GetTipCap(), replacement.GetTipCap(), priceBump) || !frameReplacementFee(oldCap, newCap, priceBump) {
 		return txpoolcfg.NotReplaced
 	}
-	if replacement.HasBlobs() && previous.HasBlobs() {
-		oldBlobCap, newBlobCap := oldCap, newCap
-		if !bothFrames {
-			oldBlobCap, newBlobCap = previous.GetBlobFeeCap(), replacement.GetBlobFeeCap()
-		}
-		if !frameReplacementFee(oldBlobCap, newBlobCap, blobPriceBump) {
-			return txpoolcfg.ReplaceUnderpriced
-		}
+	if bothHaveBlobs && !frameReplacementFee(oldCap, newCap, blobPriceBump) {
+		return txpoolcfg.ReplaceUnderpriced
 	}
 	return txpoolcfg.Success
 }
