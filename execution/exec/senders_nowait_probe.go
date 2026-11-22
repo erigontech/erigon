@@ -2,6 +2,7 @@ package exec
 
 import (
 	"os"
+	"runtime"
 	"slices"
 	"sync/atomic"
 
@@ -12,6 +13,7 @@ import (
 
 var (
 	sendersNoWait           = os.Getenv("SENDERS_NOWAIT") == "1"
+	sendersSlotWait         = os.Getenv("SENDERS_SLOTWAIT") == "1" // exec waits for its own sender slot instead of recovering it
 	detachedSendersRecovery atomic.Pointer[SendersRecovery]
 )
 
@@ -36,6 +38,17 @@ func detachedSender(txn types.Transaction, i int) (accounts.Address, bool) {
 	r := detachedSendersRecovery.Load()
 	if r == nil || i >= len(r.cachedTxns) || r.cachedTxns[i] != txn {
 		return accounts.NilAddress, false
+	}
+	if !r.ready[i].Load() && sendersSlotWait {
+		for !r.ready[i].Load() {
+			select {
+			case <-r.done:
+			default:
+				runtime.Gosched()
+				continue
+			}
+			break
+		}
 	}
 	if !r.ready[i].Load() {
 		r.lazy.Add(1)
