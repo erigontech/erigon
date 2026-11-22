@@ -34,7 +34,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -222,6 +224,9 @@ type prover struct {
 	// reply, when set, replaces the reply to request i of a stream; nil
 	// sends none, errEnd ends the stream with no status.
 	reply func(i int, f *provepb.ClientFrame, r *provepb.ServerFrame) (*provepb.ServerFrame, error)
+	// details, when set, go unwrapped in the trailer of a status that ends
+	// the stream.
+	details []byte
 }
 
 var errEnd = errors.New("end the stream")
@@ -267,6 +272,9 @@ func (p *prover) ProveStream(s provepb.Prover_ProveStreamServer) error {
 			p.mu.Unlock()
 			proof, rej, err := p.answer(call)
 			if err != nil {
+				if p.details != nil {
+					s.SetTrailer(metadata.Pairs(detailsTrailer, string(p.details)))
+				}
 				return err
 			}
 			if rej != nil {
@@ -785,6 +793,69 @@ func TestProveRefusesAnUnprovableRequest(t *testing.T) {
 				return p.streams > 0
 			}, 200*time.Millisecond, 10*time.Millisecond, "a stream reached the prover")
 		})
+	}
+}
+
+// TestProveNamesTheRefusedEffect: a FAILED_PRECONDITION whose details name
+// one effect by a 32-byte hash refuses it, in a Rejected frame or unwrapped
+// in the trailer of a status ending the stream, whatever grpc-go makes of
+// details that are not a google.rpc.Status; details with another status or
+// malformed name nothing, and the status stands.
+func TestProveNamesTheRefusedEffect(t *testing.T) {
+	f := anchor402(t)
+	binary, ascii := make([]byte, 32), bytes.Repeat([]byte{0x11}, 32)
+	for i := range binary {
+		binary[i] = 0xf0 + byte(i%16)
+	}
+	encode := func(pf *provepb.ProveFailure) []byte {
+		raw, err := proto.Marshal(pf)
+		require.NoError(t, err)
+		return raw
+	}
+	outbound := func(index uint32, hash []byte) []byte {
+		return encode(&provepb.ProveFailure{ActionableFailure: &provepb.ProveFailure_Outbound{Outbound: &provepb.OutboundFailure{TransactionIndex: index, TransactionHash: hash}}})
+	}
+	inbound := func(index uint32, hash []byte) []byte {
+		return encode(&provepb.ProveFailure{ActionableFailure: &provepb.ProveFailure_Inbound{Inbound: &provepb.InboundFailure{EntryIndex: index, EntryHash: hash}}})
+	}
+	for _, c := range []struct {
+		name    string
+		code    codes.Code
+		details []byte
+		want    *Refused
+	}{
+		{"outbound", codes.FailedPrecondition, outbound(3, binary), &Refused{Outbound: true, Index: 3, Hash: common.BytesToHash(binary)}},
+		{"outbound, a text-like hash", codes.FailedPrecondition, outbound(3, ascii), &Refused{Outbound: true, Index: 3, Hash: common.BytesToHash(ascii)}},
+		{"inbound", codes.FailedPrecondition, inbound(2, binary), &Refused{Index: 2, Hash: common.BytesToHash(binary)}},
+		{"inbound, a text-like hash", codes.FailedPrecondition, inbound(2, ascii), &Refused{Index: 2, Hash: common.BytesToHash(ascii)}},
+		{"no details", codes.FailedPrecondition, nil, nil},
+		{"a short hash", codes.FailedPrecondition, outbound(3, binary[:31]), nil},
+		{"undecodable", codes.FailedPrecondition, []byte{0xff}, nil},
+		{"another status, outbound", codes.Internal, outbound(3, binary), nil},
+		{"another status, inbound", codes.InvalidArgument, inbound(2, binary), nil},
+		{"another status, a text-like hash", codes.InvalidArgument, inbound(2, ascii), nil},
+		{"a transient status, a text-like hash", codes.Unavailable, inbound(2, ascii), nil},
+	} {
+		for path, p := range map[string]*prover{
+			"rejected": {answer: func(int) (*provepb.Proof, *provepb.Rejected, error) {
+				return nil, &provepb.Rejected{Code: int32(c.code), Message: "prover says no", Details: c.details}, nil
+			}},
+			"ended": {details: c.details, answer: func(int) (*provepb.Proof, *provepb.Rejected, error) {
+				return nil, nil, status.Error(c.code, "prover says no")
+			}},
+		} {
+			t.Run(c.name+", "+path, func(t *testing.T) {
+				_, err := dial(t, serve(t, p), f).ProveBy(t.Context(), f.window(), time.Now().Add(time.Second), 0)
+				require.Equal(t, c.code, status.Code(err), "%v", err)
+				r, ok := Refusal(err)
+				if c.want == nil {
+					require.False(t, ok, "%v", r)
+					return
+				}
+				require.True(t, ok)
+				require.Equal(t, *c.want, r)
+			})
+		}
 	}
 }
 

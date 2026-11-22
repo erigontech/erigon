@@ -1520,8 +1520,12 @@ func TestComposerRecoversHeldTransactions(t *testing.T) {
 		queued   map[common.Hash]uint32
 		replaced bool
 		kept     bool // the failure stays for the next trigger
+		// culprit names the transaction the provers refused the batch for.
+		culprit common.Hash
 	}{
 		{name: "requeued, charged", queued: map[common.Hash]uint32{{1}: 1, {2}: 0, {3}: 1}, replaced: true},
+		{name: "a refused transaction goes with its chain, the rest free", culprit: common.Hash{1}, queued: map[common.Hash]uint32{{3}: 0}, replaced: true},
+		{name: "a refused transaction goes alone, the rest free", attempts: 2, culprit: common.Hash{3}, queued: map[common.Hash]uint32{{1}: 2, {2}: 0}, replaced: true},
 		{name: "a skipped slot is free", skipped: true, queued: map[common.Hash]uint32{{1}: 0, {2}: 0, {3}: 0}, replaced: true},
 		{name: "a landed trigger is released", landed: true, queued: map[common.Hash]uint32{{2}: 0, {3}: 1}, replaced: true},
 		{name: "the third failure evicts the chain", attempts: 2, queued: map[common.Hash]uint32{{3}: 1}, replaced: true},
@@ -1552,7 +1556,13 @@ func TestComposerRecoversHeldTransactions(t *testing.T) {
 			if c.landed {
 				node.landed[txA.Hash] = true
 			}
-			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: inBatch})
+			var culprit *Held
+			for _, tx := range inBatch {
+				if tx.Hash == c.culprit {
+					culprit = tx
+				}
+			}
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: inBatch, Culprit: culprit})
 			h.c.ledger.MarkFailed(8, common.Hash{0xf}, c.skipped)
 
 			h.c.RecoverFailed(t.Context())
@@ -1763,6 +1773,24 @@ func TestComposerEvents(t *testing.T) {
 		require.Regexp(t, `event=eez.composer.sync_slot.invoked .*mode=steady`, out)
 		require.Regexp(t, `event=eez.composer.phase1.bundle.dispatched .*to=8`, out)
 		require.Regexp(t, `INFO.*event=eez.composer.bundle.observed .*verdict=settled`, out)
+	})
+	t.Run("refused", func(t *testing.T) {
+		h := newHarness(t, newTestChain(t, 8), 8, &triggers{landed: map[common.Hash]bool{}})
+		lines := captureLogs(h.c)
+		pool := NewHeldPool()
+		h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+		for n := range uint64(3) {
+			require.NoError(t, pool.Push(held(addr(0xa), n, Inbound, byte(n+1)), 0))
+		}
+		inBatch := pool.PopN(2)
+		h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: inBatch, Culprit: inBatch[0]})
+		h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
+		h.c.RecoverFailed(t.Context())
+		out := lines.String()
+		require.Regexp(t, `EROR.*event=eez.composer.prover.poison_ejected .*nonce=0`, out)
+		require.Regexp(t, `EROR.*event=eez.composer.prover.poison_in_flight_evicted .*nonce=1`, out)
+		require.Regexp(t, `EROR.*event=eez.composer.prover.poison_queued_evicted .*nonce=2`, out)
+		require.Empty(t, pool.PopN(math.MaxInt))
 	})
 	t.Run("chunk", func(t *testing.T) {
 		h := newHarness(t, newTestChain(t, 12, 2, 8), 8, nil)

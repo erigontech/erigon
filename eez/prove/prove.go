@@ -34,6 +34,7 @@ import (
 	"net"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -42,10 +43,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/eez/prove/provepb"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -314,10 +318,13 @@ func (s *session) send(f *provepb.ClientFrame) (*provepb.ServerFrame, error) {
 	}
 	// After io.EOF from Send, Recv returns the status that ended the stream.
 	r, err := s.stream.Recv()
-	if errors.Is(err, io.EOF) {
+	switch {
+	case errors.Is(err, io.EOF):
 		return nil, status.Errorf(codes.Unavailable, "stream ended before the reply to request %d", f.RequestId)
+	case err != nil:
+		return nil, received(err, s.stream.Trailer())
 	}
-	return r, err
+	return r, nil
 }
 
 // rejection is the status of a rejected request. A session the prover no
@@ -330,7 +337,13 @@ func rejection(r *provepb.Rejected) error {
 	if code == codes.NotFound {
 		return status.Errorf(codes.Aborted, "session lost: %s", r.Message)
 	}
-	return status.Error(code, r.Message)
+	s := status.New(code, r.Message)
+	if code == codes.FailedPrecondition && len(r.Details) > 0 {
+		if named, ok := named([]string{string(r.Details)}); ok {
+			return &RefusedError{Refused: named, Status: s}
+		}
+	}
+	return s.Err()
 }
 
 // blockChunk is window block n, the child of parent, with its state root.
@@ -475,4 +488,116 @@ func publicInputsHash(b *protocol.ProofSystemBatch, vkey common.Hash, custom []b
 		return common.Hash{}, fmt.Errorf("batch of %d proof systems, not one", len(hashes))
 	}
 	return hashes[0], nil
+}
+
+// detailsTrailer carries a status's details: for a refusal, a ProveFailure
+// unwrapped.
+const detailsTrailer = "grpc-status-details-bin"
+
+// mismatch begins the message of the INTERNAL status grpc-go reports when a
+// status's details decode as a google.rpc.Status of another code, as a
+// ProveFailure may; the code sent follows it.
+const mismatch = "grpc-status-details-bin mismatch: grpc-status="
+
+// Refused names the effect a prover refused a window for: an outbound
+// transaction by its index and hash in the terminal block, or an inbound
+// effect by the index and hash of its entry in the batch.
+type Refused struct {
+	Outbound bool
+	Index    uint32
+	Hash     common.Hash
+}
+
+func (r Refused) String() string {
+	if r.Outbound {
+		return fmt.Sprintf("outbound transaction %d %x", r.Index, r.Hash)
+	}
+	return fmt.Sprintf("entry %d %x", r.Index, r.Hash)
+}
+
+// RefusedError is a prover's refusal of a window for the effect it names.
+type RefusedError struct {
+	Refused
+	Status *status.Status
+}
+
+func (e *RefusedError) Error() string {
+	return fmt.Sprintf("%v, refusing %v", e.Status.Err(), e.Refused)
+}
+
+func (e *RefusedError) GRPCStatus() *status.Status { return e.Status }
+
+// Refusal returns the effect err refuses a window for: a lone prover's, or
+// the one a failed quorum's members agree on, never a single member's.
+func Refusal(err error) (Refused, bool) {
+	if q, ok := errors.AsType[*QuorumError](err); ok {
+		if q.Refused == nil {
+			return Refused{}, false
+		}
+		return *q.Refused, true
+	}
+	if e, ok := errors.AsType[*RefusedError](err); ok {
+		return e.Refused, true
+	}
+	return Refused{}, false
+}
+
+// received returns err, the failure of a request, with the code the prover
+// sent: a RefusedError when it is FAILED_PRECONDITION and trailer's details
+// name one effect.
+func received(err error, trailer metadata.MD) error {
+	s, ok := status.FromError(err)
+	if !ok {
+		return err
+	}
+	if code, ok := sent(s); ok {
+		s = status.New(code, s.Message())
+		err = s.Err()
+	}
+	if s.Code() != codes.FailedPrecondition {
+		return err
+	}
+	r, ok := named(trailer.Get(detailsTrailer))
+	if !ok {
+		return err
+	}
+	return &RefusedError{Refused: r, Status: s}
+}
+
+// sent returns the code of a status grpc-go reports as INTERNAL, its details
+// not a google.rpc.Status of that code.
+func sent(s *status.Status) (codes.Code, bool) {
+	rest, ok := strings.CutPrefix(s.Message(), mismatch)
+	if s.Code() != codes.Internal || !ok {
+		return 0, false
+	}
+	for c := codes.OK; c <= codes.Unauthenticated; c++ {
+		if strings.HasPrefix(rest, c.String()+",") {
+			return c, true
+		}
+	}
+	return 0, false
+}
+
+// named returns the effect details, one ProveFailure, name by an index and
+// a 32-byte hash.
+func named(details []string) (Refused, bool) {
+	if len(details) != 1 {
+		return Refused{}, false
+	}
+	var f provepb.ProveFailure
+	if proto.Unmarshal([]byte(details[0]), &f) != nil {
+		return Refused{}, false
+	}
+	switch {
+	case f.GetOutbound() != nil:
+		if h := f.GetOutbound().GetTransactionHash(); len(h) == length.Hash {
+			return Refused{Outbound: true, Index: f.GetOutbound().GetTransactionIndex(), Hash: common.BytesToHash(h)}, true
+		}
+	case f.GetInbound() != nil:
+		if h := f.GetInbound().GetEntryHash(); len(h) == length.Hash {
+			return Refused{Index: f.GetInbound().GetEntryIndex(), Hash: common.BytesToHash(h)}, true
+		}
+	}
+	return Refused{}, false
 }

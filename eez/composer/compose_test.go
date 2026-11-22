@@ -945,6 +945,126 @@ func TestComposedSyncBlockFailureCharges(t *testing.T) {
 	}
 }
 
+// TestComposedSyncBlockRefusedForOne: a refusal naming one effect fails the
+// batch on that held transaction once the name matches the request: an
+// outbound transaction by its index and hash in the Sync block, an inbound
+// one by its batch entry's. Any other name, or a member's the quorum does
+// not agree on, fails it on all.
+func TestComposedSyncBlockRefusedForOne(t *testing.T) {
+	f := newCrossFixture(t)
+	entryHash := func(i int) common.Hash {
+		h, err := protocol.ExecutionEntryHash(&f.w.batch.Entries[i])
+		require.NoError(t, err)
+		return h
+	}
+	refused := func(r prove.Refused) error {
+		return &prove.RefusedError{Refused: r, Status: status.New(codes.FailedPrecondition, "effect refused")}
+	}
+	load := f.w.sync.Transactions()[0].Hash()
+	for _, c := range []struct {
+		name string
+		err  func(first, second, trigger *Held) error
+		want func(first, second, trigger *Held) *Held
+		// event is logged for a name that does not match the request.
+		event string
+	}{
+		{
+			name: "an outbound transaction",
+			err: func(first, _, _ *Held) error {
+				return refused(prove.Refused{Outbound: true, Index: 1, Hash: first.Hash})
+			},
+			want: func(first, _, _ *Held) *Held { return first },
+		},
+		{
+			name: "a later outbound transaction",
+			err: func(_, second, _ *Held) error {
+				return refused(prove.Refused{Outbound: true, Index: 3, Hash: second.Hash})
+			},
+			want: func(_, second, _ *Held) *Held { return second },
+		},
+		{
+			name: "an inbound transaction",
+			err:  func(_, _, _ *Held) error { return refused(prove.Refused{Index: 3, Hash: entryHash(3)}) },
+			want: func(_, _, trigger *Held) *Held { return trigger },
+		},
+		{
+			name: "a quorum's refusal",
+			err: func(first, _, _ *Held) error {
+				return &prove.QuorumError{Threshold: 2, Usable: 2, Refused: &prove.Refused{Outbound: true, Index: 1, Hash: first.Hash}}
+			},
+			want: func(first, _, _ *Held) *Held { return first },
+		},
+		{
+			name: "a member's refusal the quorum does not agree on",
+			err: func(first, _, _ *Held) error {
+				return &prove.QuorumError{Threshold: 2, Usable: 3, Failures: []prove.MemberFailure{
+					{ProofSystem: common.Address{1}, Err: refused(prove.Refused{Outbound: true, Index: 1, Hash: first.Hash})},
+					{ProofSystem: common.Address{2}, Err: status.Error(codes.InvalidArgument, "window refused")},
+				}}
+			},
+		},
+		{
+			name: "a hash not at the index", event: "actionable_invalid",
+			err: func(_, second, _ *Held) error {
+				return refused(prove.Refused{Outbound: true, Index: 1, Hash: second.Hash})
+			},
+		},
+		{
+			name: "an index past the block", event: "actionable_invalid",
+			err: func(first, _, _ *Held) error {
+				return refused(prove.Refused{Outbound: true, Index: 9, Hash: first.Hash})
+			},
+		},
+		{
+			name: "a load transaction", event: "actionable_unresolved",
+			err: func(_, _, _ *Held) error { return refused(prove.Refused{Outbound: true, Index: 0, Hash: load}) },
+		},
+		{
+			name: "an outbound entry", event: "actionable_unresolved",
+			err: func(_, _, _ *Held) error { return refused(prove.Refused{Index: 1, Hash: entryHash(1)}) },
+		},
+		{
+			name: "the anchor entry", event: "actionable_unresolved",
+			err: func(_, _, _ *Held) error { return refused(prove.Refused{Index: 0, Hash: entryHash(0)}) },
+		},
+		{
+			name: "an entry hash not at the index", event: "actionable_invalid",
+			err: func(_, _, _ *Held) error { return refused(prove.Refused{Index: 3, Hash: entryHash(2)}) },
+		},
+		{
+			name: "an entry past the batch", event: "actionable_invalid",
+			err: func(_, _, _ *Held) error { return refused(prove.Refused{Index: 4, Hash: entryHash(3)}) },
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newCrossFixture(t)
+			trigger := f.hold(t, 0, f.call.Source, f.call.Data)
+			first, second := f.holdOutbound(t, 0), f.holdOutbound(t, 1)
+			comp, prover, _, chain := f.poster(t, nil)
+			lines := captureLogs(comp)
+			prover.err = c.err(first, second, trigger)
+			composed := comp.ComposeSyncSlot(t.Context(), chain[467].Header(), f.w.sync.Time(), 101, sequencer.ModeSteady)
+			require.Len(t, composed.Txs, 5)
+			sync := f.sealed(t, composed.Txs)
+			chain[sync.NumberU64()] = sync
+			comp.SyncCommitted(t.Context(), sync.Header())
+			p, ok := comp.ledger.TakeFailed(0)
+			require.True(t, ok)
+			require.False(t, p.SlotSkipped)
+			var want *Held
+			if c.want != nil {
+				want = c.want(first, second, trigger)
+			}
+			require.Equal(t, want, p.Culprit)
+			if c.event != "" {
+				require.Regexp(t, `EROR.*event=eez.composer.prover.`+c.event, lines.String())
+			} else {
+				require.NotContains(t, lines.String(), "eez.composer.prover.actionable")
+			}
+		})
+	}
+}
+
 // holdOutbound holds the window's recorded outbound transaction i.
 func (f *crossFixture) holdOutbound(t *testing.T, i int) *Held {
 	t.Helper()

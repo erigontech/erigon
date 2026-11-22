@@ -625,14 +625,39 @@ func (c *Composer) recoverHeld(ctx context.Context, p Posted[*Held]) {
 	}
 	c.burned(spent)
 	c.pool.Release(spent)
-	if !p.SlotSkipped {
+	switch {
+	case p.Culprit != nil:
+		keep = c.eject(keep, p.Culprit)
+	case !p.SlotSkipped:
 		keep = c.charge(c.pool, keep)
 	}
 	c.pool.PushFront(keep)
 }
 
-// charge counts a failed attempt against each of charged, by default all
-// of txs, and returns those of txs left: one at maxAttempts is evicted from
+// eject evicts culprit, the transaction the provers refused a batch for,
+// and the rest of its nonce chain, among txs, the batch's recovered
+// transactions, and in the pool. The others of txs are returned uncharged:
+// the refusal is not theirs.
+func (c *Composer) eject(txs []*Held, culprit *Held) []*Held {
+	in := func(tx *Held) bool { return tx.chainKey() == culprit.chainKey() && tx.Nonce >= culprit.Nonce }
+	rest := slices.DeleteFunc(slices.Clone(txs), in)
+	c.logger.Error("[eez] held transaction evicted: the provers refused its batch for it", "event", "eez.composer.prover.poison_ejected",
+		"hash", culprit.Hash, "sender", culprit.Sender, "direction", culprit.Direction, "nonce", culprit.Nonce, "retrying", len(rest))
+	for _, tx := range txs {
+		if tx != culprit && in(tx) {
+			c.logger.Error("[eez] held transaction evicted behind a refused one", "event", "eez.composer.prover.poison_in_flight_evicted",
+				"hash", tx.Hash, "sender", tx.Sender, "direction", tx.Direction, "nonce", tx.Nonce, "gapAt", culprit.Nonce)
+		}
+	}
+	for _, tx := range c.pool.Evict(culprit.Sender, culprit.Direction, culprit.Nonce) {
+		c.logger.Error("[eez] queued transaction evicted behind a refused one", "event", "eez.composer.prover.poison_queued_evicted",
+			"hash", tx.Hash, "sender", tx.Sender, "direction", tx.Direction, "nonce", tx.Nonce, "gapAt", culprit.Nonce)
+	}
+	return rest
+}
+
+// charge counts a failed attempt against each of charged, by default all of
+// txs, and returns those of txs left: one at maxAttempts is evicted from
 // pool with the rest of its nonce chain.
 func (c *Composer) charge(pool *HeldPool, txs []*Held, charged ...*Held) []*Held {
 	type root struct {

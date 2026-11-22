@@ -67,7 +67,9 @@ type Quorum struct {
 // keys with the signer each is configured with, at least its threshold, in
 // ascending proof-system order. Each member proves the batch listing its
 // proof system alone, under the manager's key: the hash it signs is the one
-// its proof system verifies in the assembled batch.
+// its proof system verifies in the assembled batch. A failed quorum refuses
+// an effect when as many members name it as it takes to block the
+// threshold, waiting for the members that could still make up that many.
 func (q *Quorum) ProveBy(ctx context.Context, w *Window, start time.Time, per time.Duration) ([]Attestation, error) {
 	reg, err := q.Register(ctx)
 	if err != nil {
@@ -117,7 +119,7 @@ func (q *Quorum) ProveBy(ctx context.Context, w *Window, start time.Time, per ti
 			pending--
 			if a.err != nil {
 				failed.Failures = append(failed.Failures, MemberFailure{ProofSystem: a.m.ProofSystem, Err: a.err})
-				if uint64(len(atts)+pending) < threshold {
+				if failed.lost(len(atts), pending) {
 					pending = 0
 				}
 				continue
@@ -132,6 +134,9 @@ func (q *Quorum) ProveBy(ctx context.Context, w *Window, start time.Time, per ti
 		}
 	}
 	if uint64(len(atts)) < threshold {
+		if r, n := failed.named(); n >= failed.blocking() {
+			failed.Refused = &r
+		}
 		return nil, failed
 	}
 	slices.SortFunc(atts, func(x, y Attestation) int { return x.ProofSystem.Cmp(y.ProofSystem) })
@@ -163,6 +168,8 @@ type QuorumError struct {
 	// Usable is the number of members asked.
 	Usable   int
 	Failures []MemberFailure
+	// Refused is the effect enough members name to block the threshold.
+	Refused *Refused
 }
 
 func (e *QuorumError) Error() string {
@@ -170,7 +177,46 @@ func (e *QuorumError) Error() string {
 	for i, f := range e.Failures {
 		parts[i] = fmt.Sprintf("%x: %v", f.ProofSystem, f.Err)
 	}
-	return fmt.Sprintf("quorum of %d not reached: %s", e.Threshold, strings.Join(parts, "; "))
+	msg := fmt.Sprintf("quorum of %d not reached: %s", e.Threshold, strings.Join(parts, "; "))
+	if e.Refused != nil {
+		msg += fmt.Sprintf("; refusing %v", *e.Refused)
+	}
+	return msg
+}
+
+// blocking is how many of the members it takes to keep the threshold out
+// of reach.
+func (e *QuorumError) blocking() int { return e.Usable - int(min(e.Threshold, uint64(e.Usable))) + 1 }
+
+// named returns the effect the most members refused the window for, and
+// how many; on a tie, the one the lowest proof system names.
+func (e *QuorumError) named() (Refused, int) {
+	failures := slices.SortedFunc(slices.Values(e.Failures), func(x, y MemberFailure) int { return x.ProofSystem.Cmp(y.ProofSystem) })
+	counts := map[Refused]int{}
+	for _, f := range failures {
+		if r, ok := Refusal(f.Err); ok {
+			counts[r]++
+		}
+	}
+	var most Refused
+	n := 0
+	for _, f := range failures {
+		if r, ok := Refusal(f.Err); ok && counts[r] > n {
+			most, n = r, counts[r]
+		}
+	}
+	return most, n
+}
+
+// lost reports a threshold out of reach whose verdict the pending members
+// cannot change: enough members name one effect to block the threshold, or
+// the pending ones are too few to make up that many.
+func (e *QuorumError) lost(attested, pending int) bool {
+	if uint64(attested+pending) >= e.Threshold {
+		return false
+	}
+	_, n := e.named()
+	return n >= e.blocking() || n+pending < e.blocking()
 }
 
 func (e *QuorumError) Unwrap() []error {
@@ -181,10 +227,14 @@ func (e *QuorumError) Unwrap() []error {
 	return errs
 }
 
-// GRPCStatus is a refusal's status when the refusals alone keep the
-// threshold out of reach; else Unknown, a failure that lies with the node,
-// when a member's failure has no prover status; else a transient failure's.
+// GRPCStatus is FAILED_PRECONDITION when the members refuse one effect; else
+// a refusal's status when the refusals alone keep the threshold out of
+// reach; else Unknown, a failure that lies with the node, when a member's
+// failure has no prover status; else a transient failure's.
 func (e *QuorumError) GRPCStatus() *status.Status {
+	if e.Refused != nil {
+		return status.New(codes.FailedPrecondition, e.Error())
+	}
 	failures := slices.SortedFunc(slices.Values(e.Failures), func(x, y MemberFailure) int { return x.ProofSystem.Cmp(y.ProofSystem) })
 	var refusal, transient *status.Status
 	refusals, node := 0, false

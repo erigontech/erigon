@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -45,6 +46,12 @@ type attester struct {
 
 func newAttester(t *testing.T, ps byte, delay time.Duration, refusal error) *attester {
 	t.Helper()
+	return newRefusingAttester(t, ps, delay, refusal, nil)
+}
+
+// newRefusingAttester is newAttester whose refusal carries details.
+func newRefusingAttester(t *testing.T, ps byte, delay time.Duration, refusal error, details []byte) *attester {
+	t.Helper()
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	a := &attester{ps: common.Address{ps}, signer: crypto.PubkeyToAddress(key.PublicKey), vkey: common.Hash{ps, 0x77}}
@@ -54,6 +61,9 @@ func newAttester(t *testing.T, ps byte, delay time.Duration, refusal error) *att
 			time.Sleep(delay)
 		}
 		if refusal != nil {
+			if details != nil {
+				return nil, &provepb.Rejected{Code: int32(status.Code(refusal)), Message: status.Convert(refusal).Message(), Details: details}, nil
+			}
 			return nil, nil, refusal
 		}
 		b, err := protocol.DecodePostAndVerifyBatch(a.p.finalized().GetSettlement().GetAbiCalldata())
@@ -252,16 +262,86 @@ func TestQuorumErrorStatus(t *testing.T) {
 	}
 }
 
-// TestQuorumGivesUp: once the members left cannot reach the threshold, the
-// quorum fails without waiting for them.
+// TestQuorumGivesUp: once the members left can neither reach the threshold
+// nor name an effect with enough of the rest to block it, the quorum fails
+// without waiting for them.
 func TestQuorumGivesUp(t *testing.T) {
 	refusing := newAttester(t, 0xa, 0, status.Error(codes.InvalidArgument, "window refused"))
-	down := newAttester(t, 0xb, 0, status.Error(codes.Unavailable, "down"))
+	failing := newAttester(t, 0xb, 0, status.Error(codes.Internal, "prover fault"))
+	stuck := newAttester(t, 0xc, 3*time.Second, nil)
 	begin := time.Now()
-	_, err := (&Quorum{Members: members(refusing, down), Register: registered(2, refusing, down)}).
-		ProveBy(t.Context(), quorumWindow(t, refusing.ps, down.ps), time.Now().Add(3*time.Second), 0)
+	_, err := (&Quorum{Members: members(refusing, failing, stuck), Register: registered(2, refusing, failing, stuck)}).
+		ProveBy(t.Context(), quorumWindow(t, refusing.ps, failing.ps, stuck.ps), time.Now().Add(10*time.Second), 0)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Less(t, time.Since(begin), time.Second)
+	require.Less(t, time.Since(begin), 1500*time.Millisecond)
+}
+
+// refusalDetails encodes r as a prover's refusal details.
+func refusalDetails(t *testing.T, r Refused) []byte {
+	t.Helper()
+	pf := &provepb.ProveFailure{ActionableFailure: &provepb.ProveFailure_Inbound{Inbound: &provepb.InboundFailure{EntryIndex: r.Index, EntryHash: r.Hash[:]}}}
+	if r.Outbound {
+		pf.ActionableFailure = &provepb.ProveFailure_Outbound{Outbound: &provepb.OutboundFailure{TransactionIndex: r.Index, TransactionHash: r.Hash[:]}}
+	}
+	raw, err := proto.Marshal(pf)
+	require.NoError(t, err)
+	return raw
+}
+
+// TestQuorumNamesTheRefusedEffect: a failed quorum refuses an effect only
+// when as many members name it as it takes to block the threshold, waiting
+// for the members that could still do so.
+func TestQuorumNamesTheRefusedEffect(t *testing.T) {
+	poison := Refused{Index: 1, Hash: common.Hash{0x11}}
+	other := Refused{Outbound: true, Index: 3, Hash: common.Hash{0x22}}
+	type member struct {
+		delay     time.Duration
+		named     *Refused // nil signs, unless rejecting
+		rejecting bool
+	}
+	for _, c := range []struct {
+		name      string
+		threshold uint64
+		members   []member
+		want      *Refused
+	}{
+		{"a blocking set names it", 2, []member{{named: &poison}, {delay: 10 * time.Millisecond, named: &poison}, {}}, &poison},
+		{"one alone cannot", 2, []member{{named: &poison}, {rejecting: true}, {}}, nil},
+		{"members disagree", 2, []member{{named: &poison}, {named: &other}, {}}, nil},
+		{"waits for a member that could still name it", 3, []member{{named: &poison}, {rejecting: true}, {delay: 100 * time.Millisecond, named: &poison}, {}}, &poison},
+		{"waits for a first name", 2, []member{{rejecting: true}, {delay: 100 * time.Millisecond, named: &poison}}, &poison},
+		{"a lone member", 1, []member{{named: &other}}, &other},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var as []*attester
+			for i, m := range c.members {
+				var refusal error
+				var details []byte
+				switch {
+				case m.named != nil:
+					refusal, details = status.Error(codes.FailedPrecondition, "effect refused"), refusalDetails(t, *m.named)
+				case m.rejecting:
+					refusal = status.Error(codes.InvalidArgument, "window refused")
+				}
+				as = append(as, newRefusingAttester(t, byte(0xa+i), m.delay, refusal, details))
+			}
+			var pss []common.Address
+			for _, a := range as {
+				pss = append(pss, a.ps)
+			}
+			_, err := (&Quorum{Members: members(as...), Register: registered(c.threshold, as...)}).
+				ProveBy(t.Context(), quorumWindow(t, pss...), time.Now().Add(3*time.Second), 0)
+			require.Error(t, err)
+			r, ok := Refusal(err)
+			if c.want == nil {
+				require.False(t, ok, "%v", r)
+				return
+			}
+			require.True(t, ok, "%v", err)
+			require.Equal(t, *c.want, r)
+			require.Equal(t, codes.FailedPrecondition, status.Code(err))
+		})
+	}
 }
 
 // TestQuorumGraceEndsAtTheDeadline: the grace never runs past the time the

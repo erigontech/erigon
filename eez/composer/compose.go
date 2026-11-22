@@ -87,7 +87,10 @@ type effects struct {
 	held       []*Held
 	outbound   []protocol.ExecutionEntry
 	deliveries []*Delivery
-	txs        []types.Transaction
+	// owners are the held transactions the deliveries are made for, one
+	// per delivery.
+	owners []*Held
+	txs    []types.Transaction
 	// anchor is the L1 block the transactions were simulated on, the parent
 	// of the one the bundle aims at.
 	anchor common.Hash
@@ -234,7 +237,11 @@ func (c *Composer) postEffects(ctx context.Context, e emission, sync *types.Head
 	}
 	c.logger.Warn("[eez] composed Sync block not posted, it will be replaced", "event", "eez.composer.effects.failed",
 		"sync", e.sync, "err", err)
-	watch := c.ledger.Begin(Posted[*Held]{Height: e.sync, Terminal: sync, Txs: e.fx.held})
+	var culprit *Held
+	if r, ok := errors.AsType[*refusal](err); ok {
+		culprit = r.culprit
+	}
+	watch := c.ledger.Begin(Posted[*Held]{Height: e.sync, Terminal: sync, Txs: e.fx.held, Culprit: culprit})
 	c.ledger.Report(e.sync, common.Hash{}, watch, Failed, !owed(err))
 	if unproven := (*missingWitness)(nil); errors.As(err, &unproven) {
 		// Rebuilt, the block's witness is captured again.
@@ -258,6 +265,73 @@ func nodeFault(err error) error { return &nodeFailure{err} }
 func owed(err error) bool {
 	_, ok := errors.AsType[*nodeFailure](err)
 	return !ok
+}
+
+// refusal is the provers' refusal of a composition for culprit, one of its
+// held transactions.
+type refusal struct {
+	culprit *Held
+	err     error
+}
+
+func (e *refusal) Error() string { return e.err.Error() }
+func (e *refusal) Unwrap() error { return e.err }
+
+// errUnresolved reports a refused effect no held transaction made.
+var errUnresolved = errors.New("no held transaction made the effect")
+
+// culprit returns the held transaction r names in the request proving
+// batch, whose terminal block is terminal: an outbound one by its index and
+// hash in terminal, an inbound one by the index and hash of its entry in
+// batch, anchor first, then the outbound entries.
+func (fx *effects) culprit(r prove.Refused, terminal *types.Block, batch *protocol.ProofSystemBatch) (*Held, error) {
+	if r.Outbound {
+		txs := terminal.Transactions()
+		if int(r.Index) >= len(txs) {
+			return nil, fmt.Errorf("transaction %d of %d", r.Index, len(txs))
+		}
+		if h := txs[r.Index].Hash(); h != r.Hash {
+			return nil, fmt.Errorf("transaction %d is %x", r.Index, h)
+		}
+		for _, h := range fx.held {
+			if h.Direction == Outbound && h.Hash == r.Hash {
+				return h, nil
+			}
+		}
+		return nil, errUnresolved
+	}
+	if int(r.Index) >= len(batch.Entries) {
+		return nil, fmt.Errorf("entry %d of %d", r.Index, len(batch.Entries))
+	}
+	h, err := protocol.ExecutionEntryHash(&batch.Entries[r.Index])
+	switch {
+	case err != nil:
+		return nil, err
+	case h != r.Hash:
+		return nil, fmt.Errorf("entry %d is %x", r.Index, h)
+	}
+	if i := int(r.Index) - 1 - len(fx.outbound); i >= 0 && i < len(fx.owners) {
+		return fx.owners[i], nil
+	}
+	return nil, errUnresolved
+}
+
+// refused returns err, the provers' refusal of e's window naming r, as a
+// refusal for the held transaction r names, or as it is when r does not
+// match the request.
+func (c *Composer) refused(err error, r prove.Refused, e emission, terminal *types.Block, batch *protocol.ProofSystemBatch) error {
+	culprit, cerr := e.fx.culprit(r, terminal, batch)
+	switch {
+	case errors.Is(cerr, errUnresolved):
+		c.logger.Error("[eez] refused effect matches no held transaction, all are charged", "event", "eez.composer.prover.actionable_unresolved",
+			"sync", e.sync, "refused", r)
+		return err
+	case cerr != nil:
+		c.logger.Error("[eez] refused effect does not match the request, all are charged", "event", "eez.composer.prover.actionable_invalid",
+			"sync", e.sync, "refused", r, "err", cerr)
+		return err
+	}
+	return &refusal{culprit: culprit, err: err}
 }
 
 // proverFailed reports a window the prover refused or could not prove
@@ -326,6 +400,8 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 	if err != nil {
 		if !proverFailed(err) {
 			err = nodeFault(err)
+		} else if r, ok := prove.Refusal(err); ok {
+			err = c.refused(err, r, e, block, batch)
 		}
 		return fmt.Errorf("prove %d..%d: %w", e.cursor+1, e.sync, err)
 	}

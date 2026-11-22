@@ -232,7 +232,7 @@ func (k *composition) drop(h *Held) {
 	k.rest, k.deferred = slices.DeleteFunc(k.rest, behind), slices.DeleteFunc(k.deferred, behind)
 }
 
-// inbound delivers the calls tx, an L1 transaction, makes into the rollup.
+// inbound delivers the calls tx, h's L1 transaction, makes into the rollup.
 func (k *composition) inbound(h *Held, tx types.Transaction) error {
 	ds, err := NewDeliveries(k.c.x.Sync, k.draft)
 	if err != nil {
@@ -252,6 +252,7 @@ func (k *composition) inbound(h *Held, tx types.Transaction) error {
 	k.gas.take(cost)
 	k.draft = ds.fork
 	k.fx.deliveries = append(k.fx.deliveries, ds.Delivered...)
+	k.fx.owners = append(k.fx.owners, slices.Repeat([]*Held{h}, len(ds.Delivered))...)
 	return nil
 }
 

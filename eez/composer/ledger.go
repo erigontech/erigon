@@ -71,6 +71,9 @@ type Posted[T any] struct {
 	SlotSkipped bool
 	// Landed reports a posting whose receipt showed it settling.
 	Landed bool
+	// Culprit, when set, is the one of Txs the provers refused the batch
+	// for.
+	Culprit T
 }
 
 type entry[T any] struct {
