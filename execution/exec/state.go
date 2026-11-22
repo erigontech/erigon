@@ -174,7 +174,7 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 		readMetrics:  kvmetrics.NewDomainMetrics(),
 		collectorAcc: kvmetrics.NewDomainMetrics(),
 	}
-	w.ibs = state.NewVersionedBlock(w.stateReader)
+	w.ibs = state.New(w.stateReader)
 	w.stopCancel = context.AfterFunc(ctx, w.evm.Cancel)
 	return w
 }
@@ -358,9 +358,9 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 	}
 	rw.ibs.Close()
 	if rw.prevBlockReg != nil {
-		rw.ibs = state.NewVersionedBlock(state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg))
+		rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg))
 	} else {
-		rw.ibs = state.NewVersionedBlock(rw.stateReader)
+		rw.ibs = state.New(rw.stateReader)
 	}
 
 	switch reader.(type) {
@@ -381,7 +381,7 @@ func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
 	defer rw.lock.Unlock()
 	rw.prevBlockReg = reg
 	rw.ibs.Close()
-	rw.ibs = state.NewVersionedBlock(state.NewPrevBlockReader(rw.stateReader, reg))
+	rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, reg))
 }
 
 func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
