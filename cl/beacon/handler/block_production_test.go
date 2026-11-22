@@ -3343,7 +3343,9 @@ func TestPublishBlockContentType(t *testing.T) {
 			{"application/json; charset=utf-8", jsonBody, 0},
 			{"", jsonBody, 0},
 			{"application/octet-stream", sszBody, 0},
+			{"Application/Octet-Stream; foo=bar", sszBody, 0},
 			{"text/plain", jsonBody, http.StatusUnsupportedMediaType},
+			{"application/octet-stream; bad", sszBody, http.StatusUnsupportedMediaType},
 		} {
 			name := tc.contentType
 			if name == "" {
