@@ -1846,6 +1846,14 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return ceiling
 }
 
+// AssertFilesGap reports a gap in the files on disk: the visible files of this tx stop before the files end.
+func (at *AggregatorRoTx) AssertFilesGap() error {
+	if v := at.visible; v.visibleEnd < v.filesEnd {
+		return fmt.Errorf("a gap in files: visible files end at txNum %d, files reach %d", v.visibleEnd, v.filesEnd)
+	}
+	return nil
+}
+
 // aggregatorVisible immutable visible-for-application files (no gaps, no overlaps, indexed)
 // See also
 //
@@ -1860,6 +1868,8 @@ type aggregatorVisible struct {
 	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
+	visibleEnd   uint64                          // every list is cut here; below filesEnd means a gap
+	filesEnd     uint64                          // dirtyFilesEndTxNumMinimax when this generation was built
 
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
@@ -1933,6 +1943,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 		a.logger.Warn("[agg] a gap in files: every list stops at the first one that stops", "visibleEnd", toTxNum, "filesEnd", dirtyEnd)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
+	next.visibleEnd, next.filesEnd = toTxNum, dirtyEnd
 
 	if a.visibilityLoweringForbidden.Load() {
 		prev := a.visible.Load()
