@@ -21,6 +21,13 @@ func TestAttestationJSONAcceptsEmptyAggregationBits(t *testing.T) {
 	}
 }
 
+func TestAttestationJSONWithoutCommitteeBitsKeepsCommitteeBits(t *testing.T) {
+	committeeBits := NewBitVector(64)
+	attestation := &Attestation{CommitteeBits: committeeBits}
+	require.NoError(t, attestation.UnmarshalJSON([]byte(`{"aggregation_bits":"0x01","data":{}}`)))
+	require.Same(t, committeeBits, attestation.CommitteeBits)
+}
+
 // TestSingleAttestationToAttestationRejectsOutOfRangeCommitteeIndex pins that
 // a CommitteeIndex at or beyond maxCommittees is rejected instead of silently
 // producing an Attestation with an empty CommitteeBits.
