@@ -953,8 +953,10 @@ func partialCulprit(txs []*Held, spent map[common.Hash]bool) *Held {
 // disposePartial disposes of p, a batch L1 kept part of, by what ran: the
 // outbound transactions in the block derivation rebuilt at its height and
 // the triggers L1 has are spent and let go, kept with p for a later reorg;
-// the rest return to the pool, the one where L1 stopped charged. False
-// leaves p for the next call, a read having failed.
+// the rest return to the pool, the one where L1 stopped charged. A batch
+// the provers refused was never posted: its culprit, unless it ran, is
+// ejected instead, and no other is charged. False leaves p for the next
+// call, a read having failed.
 func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
 	spent, err := c.landed(ctx, bundled(p.Txs))
 	if err != nil {
@@ -984,7 +986,11 @@ func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
 		}
 	}
 	c.ledger.ClaimPartial(p.Height, p.Post, ran)
-	culprit, charged := partialCulprit(p.Txs, spent), common.Hash{}
+	var culprit *Held
+	if p.Culprit == nil {
+		culprit = partialCulprit(p.Txs, spent)
+	}
+	charged := common.Hash{}
 	if culprit != nil {
 		charged = culprit.Hash
 	}
@@ -992,7 +998,10 @@ func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
 		"to", p.Height, "post", p.Post, "txs", len(p.Txs), "spent", len(ran), "charged", charged)
 	c.burned(ran)
 	c.release(ran)
-	if culprit != nil {
+	switch {
+	case p.Culprit != nil && !spent[p.Culprit.Hash]:
+		rest = c.eject(rest, p.Culprit)
+	case culprit != nil:
 		rest = c.charge(c.pool, rest, culprit)
 	}
 	if len(rest) > 0 {

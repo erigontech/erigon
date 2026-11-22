@@ -1895,6 +1895,48 @@ func TestComposerKeepsAPartialBatchItCannotRead(t *testing.T) {
 	require.Zero(t, pool.Len())
 }
 
+// TestComposerEjectsARefusedCulpritL1Settled: a batch the provers refused
+// whose height L1 settled after all ejects its culprit unless the culprit
+// ran; the rest requeue uncharged, the batch never having been posted.
+func TestComposerEjectsARefusedCulpritL1Settled(t *testing.T) {
+	for _, ran := range []bool{false, true} {
+		t.Run(fmt.Sprintf("ran=%v", ran), func(t *testing.T) {
+			chain := newTestChain(t, 8, 8)
+			h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
+			pool := NewHeldPool()
+			h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, follower.ErrBelowSafe })
+			innocent, culprit := held(addr(0xa), 0, Outbound, 1), held(addr(0xb), 0, Outbound, 2)
+			if ran {
+				culprit.Hash = chain.blocks[8].Transactions()[0].Hash()
+			}
+			behind := held(addr(0xb), 1, Outbound, 3)
+			for _, tx := range []*Held{innocent, culprit, behind} {
+				require.NoError(t, pool.Push(tx, 0))
+			}
+			inBatch := pool.PopN(2)
+			pool.Composed(inBatch, 8)
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: inBatch, Culprit: culprit})
+			h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
+			h.c.RecoverFailed(t.Context())
+			h.cursor.Store(8)
+			h.c.RecoverFailed(t.Context())
+			want := []*Held{innocent}
+			if ran {
+				want = append(want, behind)
+			}
+			require.Equal(t, want, pool.PopN(math.MaxInt))
+			require.Zero(t, innocent.Attempts)
+			pool.mu.Lock()
+			defer pool.mu.Unlock()
+			require.Equal(t, ran, pool.settled[culprit.Hash], "a culprit that ran stays held until final")
+			_, tombed := pool.discarded[culprit.Hash]
+			require.Equal(t, !ran, tombed)
+			_, tombed = pool.discarded[behind.Hash]
+			require.False(t, tombed, "never composed")
+		})
+	}
+}
+
 // TestComposerAuditFailureLetsGo: a finality audit that cannot read L1 lets
 // the settlement's transactions go.
 func TestComposerAuditFailureLetsGo(t *testing.T) {
