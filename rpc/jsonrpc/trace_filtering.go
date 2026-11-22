@@ -70,7 +70,8 @@ type withdrawalBalanceDiff struct {
 }
 
 // Transaction implements trace_transaction
-func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, traceConfig *config.TraceConfig) (ParityTraces, error) {
+func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, traceConfig *config.TraceConfig) (_ ParityTraces, err error) {
+	defer func() { err = prunedHistoryError(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -177,7 +178,8 @@ func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Addres
 }
 
 // Block implements trace_block
-func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, traceConfig *config.TraceConfig) (ParityTraces, error) {
+func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, traceConfig *config.TraceConfig) (_ ParityTraces, err error) {
+	defer func() { err = prunedHistoryError(err) }()
 	if err := rejectPendingNumber(blockNr); err != nil {
 		return nil, err
 	}
@@ -296,7 +298,8 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // Filter implements trace_filter
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
-func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, traceConfig *config.TraceConfig, stream *jsonstream.Stream) error {
+func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, traceConfig *config.TraceConfig, stream *jsonstream.Stream) (err error) {
+	defer func() { err = prunedHistoryError(err) }()
 	if req.BlockHash != nil && (req.FromBlock != nil || req.ToBlock != nil) {
 		return &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
 	}
@@ -410,6 +413,21 @@ func callBlockError(err error, block rpc.BlockNumberOrHash) error {
 		return &rpc.CustomError{Code: 4444, Message: err.Error()}
 	}
 	return unknownBlockAsResourceNotFound(err)
+}
+
+// prunedHistoryErr is a state.ErrPruned rejection with the execution-apis
+// "Pruned history unavailable" code and the original message.
+type prunedHistoryErr struct{ err error }
+
+func (e *prunedHistoryErr) Error() string  { return e.err.Error() }
+func (e *prunedHistoryErr) ErrorCode() int { return 4444 }
+func (e *prunedHistoryErr) Unwrap() error  { return e.err }
+
+func prunedHistoryError(err error) error {
+	if errors.Is(err, state.ErrPruned) {
+		return &prunedHistoryErr{err: err}
+	}
+	return err
 }
 
 func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsonstream.Stream, traceConfig *config.TraceConfig) error {
