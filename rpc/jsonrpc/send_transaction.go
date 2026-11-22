@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -182,13 +181,9 @@ func checkTxFee(txn types.Transaction, capEther float64) error {
 	} else {
 		feeWei = new(big.Int).Mul(txn.GetFeeCap().ToBig(), new(big.Int).SetUint64(txn.GetGasLimit()))
 	}
-	// Read the float64 setting as a decimal ether amount so a cap such as 0.3
-	// compares exactly. Rounding the fee to float64 could hide a one-wei excess.
-	feeEther := new(big.Rat).SetFrac(feeWei, big.NewInt(common.Ether))
-	limit, finite := new(big.Rat).SetString(strconv.FormatFloat(capEther, 'g', -1, 64))
-	// SetString rejects infinities and NaN. Of those, only -Inf is smaller than a fee.
-	if capEther < 0 || finite && feeEther.Cmp(limit) > 0 {
-		return fmt.Errorf("tx fee (%s ether) exceeds the configured cap (%g ether)", feeEther.FloatString(18), capEther)
+	feeEther := new(big.Float).Quo(new(big.Float).SetInt(feeWei), new(big.Float).SetInt64(common.Ether))
+	if fee, _ := feeEther.Float64(); fee > capEther {
+		return fmt.Errorf("tx fee (%.2f ether) exceeds the configured cap (%.2f ether)", fee, capEther)
 	}
 	return nil
 }

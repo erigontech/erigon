@@ -168,7 +168,9 @@ func TestSendRawTransactionFrameFeeCap(t *testing.T) {
 		return err
 	}
 	require.NoError(t, send())
-	frame.Fees.MaxFee.AddUint64(&frame.Fees.MaxFee, 1)
+	perGasAtCap := *frame.GetFeeCap()
+	frame.Fees.MaxFee.AddUint64(&frame.Fees.MaxFee, 1_000)
+	require.Equal(t, perGasAtCap, *frame.GetFeeCap(), "the signed budget increased, but the per-gas cap rounded down")
 	require.ErrorContains(t, send(), "exceeds the configured cap")
 	require.Equal(t, 1, admitted)
 }

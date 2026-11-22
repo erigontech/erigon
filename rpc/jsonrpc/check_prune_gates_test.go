@@ -2621,20 +2621,21 @@ func TestCheckTxFee(t *testing.T) {
 		name     string
 		txn      types.Transaction
 		capEther float64
-		wantErr  bool
+		wantErr  string
 	}{
-		{"no_cap", oneEther, 0, false},
-		{"under_cap", oneEther, 2, false},
-		{"at_cap", oneEther, 1, false},
-		{"over_cap", twoEther, 1, true},
-		{"zero_fee", &types.LegacyTx{}, 1, false},
-		{"wrapped_frame_over_cap", wrappedFrame, 1, true},
+		{"no_cap", oneEther, 0, ""},
+		{"under_cap", oneEther, 2, ""},
+		{"at_cap", oneEther, 1, ""},
+		{"over_cap", twoEther, 1, "tx fee (2.00 ether) exceeds the configured cap (1.00 ether)"},
+		{"zero_fee", &types.LegacyTx{}, 1, ""},
+		{"wrapped_frame_rounds_to_cap", wrappedFrame, 1, ""},
+		{"wrapped_frame_over_cap", wrappedFrame, 0.5, "tx fee (1.00 ether) exceeds the configured cap (0.50 ether)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			err := checkTxFee(tc.txn, tc.capEther)
-			if tc.wantErr {
-				require.ErrorContains(t, err, "exceeds the configured cap")
+			if tc.wantErr != "" {
+				require.EqualError(t, err, tc.wantErr)
 			} else {
 				require.NoError(t, err)
 			}
