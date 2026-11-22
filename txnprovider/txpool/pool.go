@@ -1311,7 +1311,7 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 
 	txnSender, senderOk := txn.Txn.GetSender()
 	to := txn.Txn.GetTo()
-	intrinsicGasResult, overflow := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+	intrinsic, overflow := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 		Data:               make([]byte, txn.GetDataLen()),
 		DataNonZeroLen:     uint64(txn.GetDataNonZeroLen()),
 		AuthorizationsLen:  uint64(len(auths)),
@@ -1329,10 +1329,9 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		IsEIP2780:          isAmsterdam,
 	})
 	gasLimit := txn.GetGas()
-	requiredIntrinsicGas, coversIntrinsicGas := intrinsicGasResult.CheckGasLimit(gasLimit)
 
 	if txn.Traced {
-		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, requiredIntrinsicGas))
+		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, intrinsic.RequiredGas()))
 	}
 	if overflow {
 		if txn.Traced {
@@ -1340,9 +1339,9 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		}
 		return txpoolcfg.GasUintOverflow, nil
 	}
-	if !coversIntrinsicGas {
+	if intrinsic.ExceedsGasLimit(gasLimit) {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, requiredIntrinsicGas, gasLimit))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, intrinsic.RequiredGas(), gasLimit))
 		}
 		return txpoolcfg.IntrinsicGas, nil
 	}
@@ -1353,9 +1352,9 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		return txpoolcfg.GasLimitTooHigh, nil
 	}
 	// The pool applies the declared gas cap even before Osaka.
-	if mdgas.ExceedsTxnGasLimit(gasLimit, isAmsterdam) || mdgas.ExceedsExecutionGasCap(requiredIntrinsicGas, isAmsterdam) {
+	if mdgas.ExceedsTxnGasLimit(gasLimit, isAmsterdam) || intrinsic.ExceedsExecutionGasCap(isAmsterdam) {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx gas cap exceeded idHash=%x gas=%d intrinsicGas=%d", txn.IDHash, gasLimit, requiredIntrinsicGas))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx gas cap exceeded idHash=%x gas=%d intrinsicGas=%d", txn.IDHash, gasLimit, intrinsic.RequiredGas()))
 		}
 		return txpoolcfg.GasLimitTooHigh, nil
 	}

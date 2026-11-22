@@ -245,7 +245,7 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 // preCheck validates the transaction and computes the fees for buyGas without
 // mutating state or reserving block gas.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) (upfrontTxnFees, error) {
+func (st *TxnExecutor) preCheck(gasBailout bool, intrinsic mdgas.IntrinsicGasCalcResult) (upfrontTxnFees, error) {
 	rules := st.evm.ChainRules()
 	from := st.msg.From()
 
@@ -340,10 +340,9 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	if st.msg.CheckGas() && rules.IsOsaka && mdgas.ExceedsTxnGasLimit(gas, rules.IsAmsterdam) {
 		return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
 	}
-	requiredIntrinsicGas, coversIntrinsicGas := intrinsicGasResult.CheckGasLimit(gas)
-	if mdgas.ExceedsExecutionGasCap(requiredIntrinsicGas, rules.IsAmsterdam) && !st.msg.SkipExecutionGasCap() {
+	if intrinsic.ExceedsExecutionGasCap(rules.IsAmsterdam) && !st.msg.SkipExecutionGasCap() {
 		return upfrontTxnFees{}, fmt.Errorf("%w: execution gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
-			ErrIntrinsicGas, requiredIntrinsicGas, params.MaxTxnGasLimit)
+			ErrIntrinsicGas, intrinsic.RequiredGas(), params.MaxTxnGasLimit)
 	}
 
 	// Match geth's EIP-7702 prerequisite precedence: after fee caps, before
@@ -401,8 +400,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	if !coversIntrinsicGas {
-		return upfrontTxnFees{}, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, gas, requiredIntrinsicGas)
+	if intrinsic.ExceedsGasLimit(gas) {
+		return upfrontTxnFees{}, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, gas, intrinsic.RequiredGas())
 	}
 
 	if st.msg.To().IsNil() {
@@ -707,7 +706,7 @@ func RecipientCreditedAtValidation(from, to, coinbase accounts.Address, value ui
 	return err == nil && acc != nil && acc.CodeHash.IsEmpty()
 }
 
-// verifyAuthorities applies an authorization list checked by types.ValidateSetCodePrerequisites.
+// verifyAuthorities updates account code and nonces after types.ValidateSetCodePrerequisites checks the list.
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *uint256.Int, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
 	var gasUsed mdgas.MdGasUsage
 	if auths == nil {

@@ -994,8 +994,8 @@ func checkIntrinsicGas(msg *types.Message, chainRules *chain.Rules) error {
 	if overflow {
 		return protocol.ErrGasUintOverflow
 	}
-	if required, ok := intrinsic.CheckGasLimit(msg.Gas()); !ok {
-		return fmt.Errorf("%w: have %d, want %d", protocol.ErrIntrinsicGas, msg.Gas(), required)
+	if intrinsic.ExceedsGasLimit(msg.Gas()) {
+		return fmt.Errorf("%w: have %d, want %d", protocol.ErrIntrinsicGas, msg.Gas(), intrinsic.RequiredGas())
 	}
 	return nil
 }

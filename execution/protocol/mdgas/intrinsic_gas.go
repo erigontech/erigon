@@ -49,10 +49,17 @@ type IntrinsicGasCalcResult struct {
 	FloorGasCost uint64
 }
 
-// CheckGasLimit returns the minimum gas required and whether the transaction covers it.
-func (r IntrinsicGasCalcResult) CheckGasLimit(gasLimit uint64) (required uint64, ok bool) {
-	required = max(r.ExecutionGas, r.FloorGasCost)
-	return required, gasLimit >= required
+func (r IntrinsicGasCalcResult) RequiredGas() uint64 {
+	return max(r.ExecutionGas, r.FloorGasCost)
+}
+
+func (r IntrinsicGasCalcResult) ExceedsGasLimit(gasLimit uint64) bool {
+	return r.RequiredGas() > gasLimit
+}
+
+// ExceedsExecutionGasCap applies the EIP-8037 rule that state gas cannot pay for intrinsic gas.
+func (r IntrinsicGasCalcResult) ExceedsExecutionGasCap(isAmsterdam bool) bool {
+	return isAmsterdam && r.ExceedsGasLimit(params.MaxTxnGasLimit)
 }
 
 type FrameIntrinsicGasCalcArgs struct {
