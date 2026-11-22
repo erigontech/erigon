@@ -581,3 +581,34 @@ func TestV3TrieKeysAreDistinctAndCoverEveryPath(t *testing.T) {
 		require.Truef(t, seen[string(k)], "account path key %x of a storage-only account missing", k)
 	}
 }
+
+func TestPrefetchBALCommitmentV3BatchesAllKeysWhenTheSampleIsCold(t *testing.T) {
+	var hashed [][]byte
+	for i := range residencySampleKeys + 50 {
+		addr := make([]byte, 20)
+		addr[18], addr[19] = byte(i>>8), byte(i)
+		hashed = append(hashed, commitment.KeyToHexNibbleHash(addr))
+	}
+	tx := &prefetchRecordingTx{coldPagesPerCall: 1 << 20}
+	prefetchBALCommitmentV3(t.Context(), &singleTxRoDB{tx: tx}, hashed)
+
+	got := map[string]bool{}
+	for _, k := range tx.commitmentKeys {
+		got[string(k)] = true
+	}
+	for _, k := range v3TrieKeys(hashed) {
+		require.Truef(t, got[string(k)], "node key %x of a cold trie was not batch-prefetched", k)
+	}
+}
+
+func TestPrefetchBALCommitmentV3SkipsAWarmTrie(t *testing.T) {
+	var hashed [][]byte
+	for i := range residencySampleKeys + 50 {
+		addr := make([]byte, 20)
+		addr[18], addr[19] = byte(i>>8), byte(i)
+		hashed = append(hashed, commitment.KeyToHexNibbleHash(addr))
+	}
+	tx := &prefetchRecordingTx{}
+	prefetchBALCommitmentV3(t.Context(), &singleTxRoDB{tx: tx}, hashed)
+	require.Less(t, len(tx.commitmentKeys), len(v3TrieKeys(hashed)), "a warm sample stops before the full batch")
+}

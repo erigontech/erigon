@@ -416,19 +416,20 @@ func prefetchBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte) {
 // the committer's per-key branch prefetch finds them resident.
 func prefetchBALCommitmentV3(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) {
 	started := time.Now()
-	keys := v3TrieKeys(hashedKeys)
+	var keys [][]byte
 	var err error
 	txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) {
 		p, ok := ttx.AggTx().(latestPrefetcher)
 		if !ok {
 			return
 		}
-		sample := sampleEvenly(keys, residencySampleKeys)
-		cold, sampleErr := sampleCold(ctx, p, kv.CommitmentDomain, sample)
+		sampled := sampleEvenly(hashedKeys, residencySampleKeys)
+		cold, sampleErr := sampleCold(ctx, p, kv.CommitmentDomain, v3TrieKeys(sampled))
 		logSampleFailure(kv.CommitmentDomain, sampleErr)
-		if sampleErr != nil || !cold || len(sample) == len(keys) {
+		if sampleErr != nil || !cold || len(sampled) == len(hashedKeys) {
 			return
 		}
+		keys = v3TrieKeys(hashedKeys)
 		err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, keys)
 	})
 	logBatchPrefetch(ctx, "trie", len(keys), started, cmp.Or(txErr, err))
@@ -436,18 +437,12 @@ func prefetchBALCommitmentV3(ctx context.Context, db kv.RoDB, hashedKeys [][]byt
 
 // v3TrieKeys returns the distinct v3 node keys of the flat levels of the paths of hashedKeys.
 func v3TrieKeys(hashedKeys [][]byte) [][]byte {
-	seen := map[string]struct{}{}
-	var keys, path [][]byte
+	var keys [][]byte
 	for _, hk := range hashedKeys {
-		path = commitmentv3.PathNodeKeys(path[:0], hk, prefetchFlatDepth)
-		for _, k := range path {
-			if _, ok := seen[string(k)]; !ok {
-				seen[string(k)] = struct{}{}
-				keys = append(keys, k)
-			}
-		}
+		keys = commitmentv3.PathNodeKeys(keys, hk, prefetchFlatDepth)
 	}
-	return keys
+	slices.SortFunc(keys, bytes.Compare)
+	return slices.CompactFunc(keys, bytes.Equal)
 }
 
 func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte) error {

@@ -338,10 +338,21 @@ func TestWarmBALPropagatesWorkerCancellation(t *testing.T) {
 
 type prefetchRecordingTx struct {
 	commitmentRecordingTx
-	commitmentKeys [][]byte
+	commitmentKeys   [][]byte
+	commitmentReads  int // GetLatest calls on the commitment domain
+	coldPagesPerCall int
 }
 
 func (tx *prefetchRecordingTx) AggTx() any { return tx }
+
+func (tx *prefetchRecordingTx) GetLatest(domain kv.Domain, k []byte, o kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if domain == kv.CommitmentDomain {
+		tx.mu.Lock()
+		tx.commitmentReads++
+		tx.mu.Unlock()
+	}
+	return tx.commitmentRecordingTx.GetLatest(domain, k, o)
+}
 
 func (tx *prefetchRecordingTx) PrefetchLatest(_ context.Context, domain kv.Domain, keys [][]byte) (int, error) {
 	tx.mu.Lock()
@@ -350,7 +361,7 @@ func (tx *prefetchRecordingTx) PrefetchLatest(_ context.Context, domain kv.Domai
 		tx.commitmentKeys = append(tx.commitmentKeys, keys...)
 	}
 	tx.mu.Unlock()
-	return 0, nil
+	return tx.coldPagesPerCall, nil
 }
 
 func TestWarmBALSkipsCommitmentWarmupOnV3(t *testing.T) {
@@ -375,6 +386,7 @@ func TestWarmBALSkipsCommitmentWarmupOnV3(t *testing.T) {
 	for _, k := range tx.commitmentKeys {
 		require.Contains(t, v3Keys, string(k), "the HPH-keyed BAL commitment warmup finds nothing on a v3 trie")
 	}
+	require.Zero(t, tx.commitmentReads, "the hex-patricia BAL trie warmup is off on a v3 trie")
 	if mmap.NewProbe() != nil {
 		require.NotEmpty(t, tx.commitmentKeys, "the v3 trie paths get their own batch prefetch")
 	}
