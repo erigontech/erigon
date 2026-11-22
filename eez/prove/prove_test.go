@@ -224,8 +224,9 @@ type prover struct {
 	// reply, when set, replaces the reply to request i of a stream; nil
 	// sends none, errEnd ends the stream with no status.
 	reply func(i int, f *provepb.ClientFrame, r *provepb.ServerFrame) (*provepb.ServerFrame, error)
-	// details, when set, go unwrapped in the stream's trailer, as the
-	// reference prover sends a refusal's.
+	// details, when set, go unwrapped in the stream's trailer, where a
+	// status ending the stream carries a refusal's ProveFailure; control-RPC
+	// SPEC §5 puts it in Rejected.details.
 	details []byte
 }
 
