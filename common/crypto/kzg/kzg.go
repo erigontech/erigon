@@ -59,6 +59,11 @@ func SetTrustedSetupFilePath(path string) {
 	trustedSetupFile = path
 }
 
+// TrustedSetupFilePath returns the path set by SetTrustedSetupFilePath, or "" for the default mainnet setup.
+func TrustedSetupFilePath() string {
+	return trustedSetupFile
+}
+
 // InitKZGCtx initializes the global context object returned via CryptoCtx
 func InitKZGCtx() {
 	initCryptoCtx.Do(func() {

@@ -203,8 +203,16 @@ func completeRow(row []*cltypes.MatrixEntry) []cltypes.MatrixEntry {
 	return ordered
 }
 
-// RecoverCellsAndKZGProofs uses the go-eth-kzg library to recover the cells and proofs.
+// RecoverCellsAndKZGProofs recovers the cells and proofs with c-kzg, or with go-eth-kzg if the c-kzg settings failed to load.
+// The cell indices must be strictly ascending.
 func RecoverCellsAndKZGProofs(cellIndices []ColumnIndex, cells []cltypes.Cell) ([]cltypes.Cell, []cltypes.KZGProof, error) {
+	if ckzgReady() != nil {
+		return recoverWithGoEthKZG(cellIndices, cells)
+	}
+	return recoverWithCkzg(cellIndices, cells)
+}
+
+func recoverWithGoEthKZG(cellIndices []ColumnIndex, cells []cltypes.Cell) ([]cltypes.Cell, []cltypes.KZGProof, error) {
 	ckzgCells := make([]*goethkzg.Cell, len(cells))
 	for i := range cells {
 		ckzgCells[i] = (*goethkzg.Cell)(&cells[i])

@@ -220,6 +220,9 @@ func (d *peerdas) Start(ctx context.Context) {
 				d.state.SetCustodyRaiseSlot(raiseSlot)
 			}
 		}
+		if d.IsArchivedMode() || d.state.IsSupernode() {
+			peerdasutils.WarmUpRecovery()
+		}
 		d.resubscribeGossip()
 		for range numOfBlobRecoveryWorkers {
 			go d.blobsRecoverWorker(ctx)
