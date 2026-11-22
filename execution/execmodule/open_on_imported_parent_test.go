@@ -125,3 +125,41 @@ func TestARoundAfterAnAbandonedBlockRunsBesideNewPayload(t *testing.T) {
 	}
 	<-done
 }
+
+// A replica still taking rounds into its own block N while the proposer's N and N+1 are imported and canonicalised:
+// the fork choice retires the replica's generation for N, which the round is executing into.
+func TestARoundIntoABlockTheImportOvertakesRunsBesideItsRetirement(t *testing.T) {
+	replica := newRoundHarness(t)
+	proposer := newRoundHarnessWithKeys(t, replica.keys)
+	parent, err := proposer.m.ExecModule.CurrentHeader(proposer.ctx)
+	require.NoError(t, err)
+	to := common.Address{0x42}
+	var chain []*types.Block
+	for n := uint64(0); n < 60; n++ {
+		p, in := proposer.attrs(parent)
+		b := proposer.sealRounds(p, in, [][][]byte{{replica.signed(1, n, &to, 50_000, nil)}})
+		ur, err := forkChoiceTo(proposer.ctx, proposer.m.ExecModule, b.Header())
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status, ur.ValidationError)
+		chain = append(chain, b)
+		parent = b.Header()
+	}
+
+	head, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
+	require.NoError(t, err)
+	for i := 0; i+1 < len(chain); i += 2 {
+		_, in := replica.attrs(head)
+		_, _, _, err = replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in, [][]byte{replica.signed(0, 0, &to, 50_000, nil)})
+		require.NoError(t, err)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for nonce := uint64(1); nonce < 30; nonce++ {
+				_, _, _, _ = replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in, [][]byte{replica.signed(0, nonce, &to, 50_000, nil)})
+			}
+		}()
+		require.NoError(t, insertValidateAndUfc1By1(replica.ctx, replica.m.ExecModule, chain[i:i+2]))
+		<-done
+		head = chain[i+1].Header()
+	}
+}

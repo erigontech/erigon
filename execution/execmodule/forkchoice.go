@@ -691,8 +691,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}, false)
 			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", true)
 		}
-		if err := e.forkValidator.MergeExtendingFork(ctx, tx, currentContext, e.accum); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		// The merge flushes and retires frontier generations a round may be executing into or reading through.
+		e.roundMu.Lock()
+		mergeErr := e.forkValidator.MergeExtendingFork(ctx, tx, currentContext, e.accum)
+		e.roundMu.Unlock()
+		if mergeErr != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, mergeErr, stateFlushingInParallel)
 		}
 		rawdb.WriteHeadBlockHash(tx, blockHash)
 	}
