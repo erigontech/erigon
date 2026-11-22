@@ -55,4 +55,21 @@ func TestReadRegistration(t *testing.T) {
 	require.NoError(t, err)
 	_, err = l1.ReadRegistration(t.Context(), c, registry, 2, []common.Address{a, b}, at)
 	require.ErrorIs(t, err, l1.ErrNoManager)
+
+	for name, edit := range map[string]func([]recording.CallResult) []recording.CallResult{
+		"a read unanswered": func(rs []recording.CallResult) []recording.CallResult { return rs[:len(rs)-1] },
+		"a threshold above 64 bits": func(rs []recording.CallResult) []recording.CallResult {
+			rs[1].Return = word([]byte{1, 0, 0, 0, 0, 0, 0, 0, 0})
+			return rs
+		},
+		"a signer word with high bytes": func(rs []recording.CallResult) []recording.CallResult {
+			rs[4].Return = append([]byte{1}, make([]byte, 31)...)
+			return rs
+		},
+	} {
+		c, err := recording.NewMemoryChain(1, &recording.Block{Header: l1.Header{Hash: at}, Calls: edit(calls(manager))})
+		require.NoError(t, err, name)
+		_, err = l1.ReadRegistration(t.Context(), c, registry, 2, []common.Address{a, b}, at)
+		require.Error(t, err, name)
+	}
 }

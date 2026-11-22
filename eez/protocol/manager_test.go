@@ -22,17 +22,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
-func selector(signature string) []byte { return crypto.Keccak256([]byte(signature))[:4] }
-
 func TestManagerCalls(t *testing.T) {
-	require.Equal(t, selector("threshold()"), EncodeThreshold())
-	require.Equal(t, selector("signer()"), EncodeSigner())
+	require.Equal(t, hexutil.MustDecode("0x42cde4e8"), EncodeThreshold(), "threshold()")
+	require.Equal(t, hexutil.MustDecode("0x238ac933"), EncodeSigner(), "signer()")
 	ps := common.HexToAddress("0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512")
-	require.Equal(t, append(selector("verificationKey(address)"), common.LeftPadBytes(ps[:], 32)...), EncodeVerificationKey(ps))
+	require.Equal(t, hexutil.MustDecode("0xeea5eec7000000000000000000000000e7f1725e7734ce288f8367e1bb143e90bb3f0512"), EncodeVerificationKey(ps), "verificationKey(address)")
 }
 
 func TestDecodeManagerReturns(t *testing.T) {
