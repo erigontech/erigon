@@ -651,19 +651,20 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		cc.dropPendingUpdate(req.blockNum)
 		cc.fail(ctx, br, err)
 	}
-	vm := state.NewVersionMap(req.bal)
+	balAddrs := state.InternBALAddresses(req.bal)
+	vm := state.NewBALVersionMap(req.bal, balAddrs)
 	vm.SetBaseTxNum(req.firstTxNum)
 	eip161Enabled := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
 	isAura := cc.chainConfig.Aura != nil
 	base := cc.asOfReader.dr.StateReaderAt(req.firstTxNum)
-	if ambiguous, err := vm.HasAmbiguousBaseAccount(eip161Enabled, isAura, base); err != nil {
+	if ambiguous, err := vm.HasAmbiguousBaseAccount(eip161Enabled, isAura, base, balAddrs); err != nil {
 		fail(fmt.Errorf("BAL-driven compute-ahead block %d: base read: %w", req.blockNum, err))
 		return
 	} else if ambiguous {
 		pb.mode = calcModeIncremental
 		return
 	}
-	if err := vm.SeedEmptyRemovals(eip161Enabled, isAura, base); err != nil {
+	if err := vm.SeedEmptyRemovals(eip161Enabled, isAura, base, balAddrs); err != nil {
 		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	}
