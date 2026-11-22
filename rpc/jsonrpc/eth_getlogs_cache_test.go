@@ -18,9 +18,11 @@ package jsonrpc
 
 import (
 	"math/big"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -91,21 +93,51 @@ func TestGetLogsHeadBlockMaxResultsCountsMatches(t *testing.T) {
 	res, err := api.GetLogs(m.Ctx, one)
 	require.NoError(t, err)
 	require.Len(t, res.Logs, 1)
+	require.True(t, api.headLogs.Load() == nil, "a block with more logs than the cap must not be cached")
 
 	_, err = api.GetLogs(m.Ctx, crit)
 	require.ErrorContains(t, err, errExceedLogResults)
 }
 
+// TestGetLogsHeadBlockConcurrentQueriesShareOneFill pins that concurrent queries on a new head
+// block wait for one fill of the cache instead of each reading the block.
+func TestGetLogsHeadBlockConcurrentQueriesShareOneFill(t *testing.T) {
+	t.Parallel()
+	m := newLatestLogsTestChain(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	crit := filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}
+
+	const n = 16
+	results := make([]LogsResult, n)
+	var start, done sync.WaitGroup
+	start.Add(1)
+	for i := range n {
+		done.Go(func() {
+			start.Wait()
+			res, err := api.GetLogs(m.Ctx, crit)
+			assert.NoError(t, err)
+			results[i] = res
+		})
+	}
+	start.Done()
+	done.Wait()
+
+	for _, res := range results {
+		require.Len(t, res.Logs, 3)
+		require.Same(t, &results[0].encoded[0][0], &res.encoded[0][0])
+	}
+}
+
 // TestGetLogsSingleBlockAfterReorg pins that a cached head result is not served for the block that
-// a reorg replaced at its height.
+// a reorg replaced at the same height.
 func TestGetLogsSingleBlockAfterReorg(t *testing.T) {
 	t.Parallel()
 	m := newLogsTestModule(t)
-	short, err := m.GenerateChain(2, logTopicAt(t, -1, common.Hash{0x11}))
+	orig, err := m.GenerateChain(2, logTopicAt(t, -1, common.Hash{0x11}))
 	require.NoError(t, err)
-	long, err := m.GenerateChain(3, logTopicAt(t, -1, common.Hash{0x22}))
+	fork, err := m.GenerateChain(2, logTopicAt(t, -1, common.Hash{0x22}))
 	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(short))
+	require.NoError(t, m.InsertChain(orig))
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	crit := filters.FilterCriteria{FromBlock: big.NewInt(2), ToBlock: big.NewInt(2)}
@@ -113,14 +145,16 @@ func TestGetLogsSingleBlockAfterReorg(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, before.Logs, 1)
 	require.Equal(t, common.Hash{0x11}, before.Logs[0].Topics[0])
+	require.NotNil(t, before.encoded)
 
-	require.NoError(t, m.InsertChain(long))
+	require.NoError(t, m.InsertChain(fork))
 
 	after, err := api.GetLogs(m.Ctx, crit)
 	require.NoError(t, err)
 	require.Len(t, after.Logs, 1)
 	require.Equal(t, common.Hash{0x22}, after.Logs[0].Topics[0])
-	require.Equal(t, long.Blocks[1].Hash(), after.Logs[0].BlockHash)
+	require.Equal(t, fork.Blocks[1].Hash(), after.Logs[0].BlockHash)
+	require.NotNil(t, after.encoded)
 }
 
 // TestGetLogsSingleBlockBelowHeadIsNotCached pins that only the latest executed block is cached.

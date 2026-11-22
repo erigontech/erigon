@@ -21,14 +21,11 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -37,21 +34,10 @@ const benchLogsPerBlock = 40
 
 // newGetLogsBenchAPI builds two blocks with benchLogsPerBlock logs each, so block 2 is the head.
 func newGetLogsBenchAPI(b *testing.B) (*APIImpl, *execmoduletester.ExecModuleTester) {
-	m := execmoduletester.New(b,
-		execmoduletester.WithGenesisSpec(&types.Genesis{
-			Config: chain.TestChainBerlinConfig,
-			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000_000)}},
-		}),
-		execmoduletester.WithKey(testKey),
-	)
-	signer := types.LatestSignerForChainID(nil)
-	c, err := m.GenerateChain(2, func(_ int, block *blockgen.BlockGen) {
+	m := newLogsTestModule(b)
+	c, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
 		for k := range benchLogsPerBlock {
-			topic := common.Hash{byte(k)}
-			logOnCreate := append(append([]byte{0x7f}, topic[:]...), 0x60, 0x00, 0x60, 0x00, 0xa1, 0x00) // PUSH32 topic PUSH1 0 PUSH1 0 LOG1 STOP
-			txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate), *signer, testKey)
-			require.NoError(b, err)
-			block.AddTx(txn)
+			logTopicAt(b, -1, common.Hash{byte(k)})(i, block)
 		}
 	})
 	require.NoError(b, err)

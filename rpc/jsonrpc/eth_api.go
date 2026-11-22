@@ -31,6 +31,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
@@ -1318,6 +1319,7 @@ type APIImpl struct {
 	logger                      log.Logger
 	gasOracleLogger             log.Logger
 	headLogs                    atomic.Pointer[headBlockLogs]
+	headLogsFill                singleflight.Group
 }
 
 // NewEthAPI returns APIImpl instance

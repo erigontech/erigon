@@ -290,22 +290,53 @@ func (api *APIImpl) headLogsResult(ctx context.Context, tx kv.TemporalTx, blockN
 		logs, err := api.getLogsV3(ctx, tx, blockNum, blockNum, crit, api.BaseAPI.blockRangeLimit, api.BaseAPI.getLogsMaxResults)
 		return LogsResult{Logs: logs}, err
 	}
-	head := api.headLogs.Load()
-	if head == nil || head.hash != hash {
-		logs, err := api.getLogsV3(ctx, tx, blockNum, blockNum, filters.FilterCriteria{}, 0, 0)
-		if err != nil {
-			return LogsResult{}, err
-		}
-		if head, err = newHeadBlockLogs(hash, logs); err != nil {
-			return LogsResult{}, err
-		}
-		api.headLogs.Store(head)
+	head, err := api.loadHeadLogs(ctx, tx, blockNum, hash)
+	if err != nil {
+		return LogsResult{}, err
+	}
+	if head == nil {
+		logs, err := api.getLogsV3(ctx, tx, blockNum, blockNum, crit, api.BaseAPI.blockRangeLimit, api.BaseAPI.getLogsMaxResults)
+		return LogsResult{Logs: logs}, err
 	}
 	res := head.filter(types.NewLogFilter(crit.Addresses, crit.Topics))
 	if limit := api.BaseAPI.getLogsMaxResults; limit != 0 && len(res.Logs) > limit {
 		return LogsResult{}, &rpc.InvalidParamsError{Message: fmt.Sprintf("%s: %d", errExceedLogResults, limit)}
 	}
 	return res, nil
+}
+
+// loadHeadLogs returns the cached logs of the head block, filling the cache once for all the
+// concurrent callers. It returns nil when the block has more logs than rpc.logs.maxresults: such a
+// block is not cached, so the cap still bounds the work of a query.
+func (api *APIImpl) loadHeadLogs(ctx context.Context, tx kv.TemporalTx, blockNum uint64, hash common.Hash) (*headBlockLogs, error) {
+	if head := api.headLogs.Load(); head != nil && head.hash == hash {
+		return head, nil
+	}
+	v, err, _ := api.headLogsFill.Do(hash.String(), func() (any, error) {
+		prev := api.headLogs.Load()
+		if prev != nil && prev.hash == hash {
+			return prev, nil
+		}
+		// Callers that share the fill must not fail because the first one was cancelled.
+		logs, err := api.getLogsV3(context.WithoutCancel(ctx), tx, blockNum, blockNum, filters.FilterCriteria{}, 0, api.BaseAPI.getLogsMaxResults)
+		if _, tooMany := errors.AsType[*rpc.InvalidParamsError](err); tooMany {
+			return (*headBlockLogs)(nil), nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		head, err := newHeadBlockLogs(hash, logs)
+		if err != nil {
+			return nil, err
+		}
+		// A fill that loses the race to a newer head must not replace it.
+		api.headLogs.CompareAndSwap(prev, head)
+		return head, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*headBlockLogs), nil
 }
 
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {
