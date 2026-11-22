@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,18 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/node/debug"
 )
-
-// visualize decodes legacy branches: a file of v3 records is refused, not a panic.
-func TestCommitmentVisualizeRefusesV3Files(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(true))
-	_, dirs, _ := dbWithState(t, true)
-	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "v3.*-commitment.*.kv"))
-	require.NoError(t, err)
-	require.NotEmpty(t, files)
-	_, err = processCommitmentFile(files[0])
-	require.ErrorContains(t, err, "v3 commitment records")
-}
 
 func TestCommitmentVisualizeReadsLegacyFiles(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
@@ -63,7 +54,8 @@ func TestCommitmentVisualizeFailsOnAnUnnamedV3File(t *testing.T) {
 	require.ErrorContains(t, err, "failed to decode branch")
 }
 
-// A file that cannot be charted fails the command, and no empty page is written.
+// A file that cannot be charted fails the command with no usage text, no empty page
+// is written, and profiling stops.
 func TestCommitmentVisualizeCommandFailsOnAV3File(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(true))
 	_, dirs, _ := dbWithState(t, true)
@@ -75,7 +67,19 @@ func TestCommitmentVisualizeCommandFailsOnAV3File(t *testing.T) {
 	t.Cleanup(func() { visualizeOutputDir = prevOutput })
 	root := integrationRoot()
 	cmdCommitmentVisualize.SetContext(t.Context())
-	root.SetArgs([]string{"--log.dir.disable", "commitment", "visualize", "--output", out, files[0]})
+	root.SetArgs([]string{"--log.dir.disable", "--pprof.cpuprofile", filepath.Join(t.TempDir(), "cpu.out"), "commitment", "visualize", "--output", out, files[0]})
+	var output bytes.Buffer
+	root.SetOut(&output)
+	root.SetErr(&output)
+	t.Cleanup(func() {
+		root.SetOut(nil)
+		root.SetErr(nil)
+		cpu := root.PersistentFlags().Lookup("pprof.cpuprofile")
+		_ = cpu.Value.Set("")
+		cpu.Changed = false
+	})
 	require.ErrorContains(t, root.ExecuteContext(t.Context()), "v3 commitment records")
+	require.NotContains(t, output.String(), "Usage:")
+	require.ErrorContains(t, debug.Handler.StopCPUProfile(), "not in progress")
 	require.NoFileExists(t, filepath.Join(out, "analysis.html"))
 }

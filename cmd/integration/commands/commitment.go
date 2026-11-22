@@ -704,9 +704,11 @@ Examples:
   integration commitment visualize /path/to/commitment.kv
   integration commitment visualize --output /tmp/analysis /path/to/*.kv
   integration commitment visualize --state /path/to/commitment.kv  # print state only`,
-	Args: cobra.MinimumNArgs(1),
+	Args:         cobra.MinimumNArgs(1),
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_ = debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 		return visualizeCommitmentFiles(args)
 	},
 }
@@ -1416,7 +1418,6 @@ func visualizeCommitmentFiles(files []string) error {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var failed []error
-	var charted int
 
 	page := components.NewPage()
 	page.SetLayout(components.PageFlexLayout)
@@ -1442,7 +1443,6 @@ func visualizeCommitmentFiles(files []string) error {
 			}
 
 			mu.Lock()
-			charted++
 			page.AddCharts(
 				prefixLenCountChart(fpath, stat),
 				countersChart(fpath, stat),
@@ -1454,7 +1454,7 @@ func visualizeCommitmentFiles(files []string) error {
 	}
 	wg.Wait()
 	fmt.Println()
-	if visualizePrintState || charted == 0 {
+	if visualizePrintState || len(failed) == len(files) {
 		return errors.Join(failed...)
 	}
 
