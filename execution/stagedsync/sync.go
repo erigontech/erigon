@@ -533,6 +533,9 @@ func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.Tempo
 func (s *Sync) logRunStageDone(stageState *StageState, start time.Time) {
 	took := time.Since(start)
 	logPrefix := s.LogPrefix()
+	if logNpPhases {
+		s.logger.Info("[np-phase] syncstage", "stage", logPrefix, "npStage", took)
+	}
 	if took > 60*time.Second {
 		s.logger.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", took, "block", stageState.BlockNumber)
 	} else {
