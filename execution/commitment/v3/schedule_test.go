@@ -14,18 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state
+package v3
 
 import (
 	"testing"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 )
 
-func TestRebuildStorageWorkersMax(t *testing.T) {
-	require.Equal(t, 1, rebuildStorageWorkersMax(0))
-	require.Equal(t, 1, rebuildStorageWorkersMax(uint64(3*datasize.GB)))
-	require.Equal(t, 15, rebuildStorageWorkersMax(uint64(62*datasize.GB)))
-	require.Equal(t, 47, rebuildStorageWorkersMax(uint64(188*datasize.GB)))
+func TestStorageWorkerCountHonoursTheCap(t *testing.T) {
+	require.Equal(t, 16*storageOversubscribe, storageWorkerCount(0, 16, 0), "no cap: procs oversubscribed")
+	require.Equal(t, 15, storageWorkerCount(0, 16, 15), "the cap bounds the oversubscribed count")
+	require.Equal(t, 4, storageWorkerCount(4, 16, 15), "explicit workers below the cap")
+	require.Equal(t, 2, storageWorkerCount(4, 16, 2), "the cap bounds explicit workers")
 }
