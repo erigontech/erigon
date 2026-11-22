@@ -211,8 +211,10 @@ func (q *Quorum) skipped(m *Member, reason string, ctx ...any) {
 // of reach.
 func (e *QuorumError) blocking() int { return e.Usable - int(min(e.Threshold, uint64(e.Usable))) + 1 }
 
-// named returns the effect the most members refused the window for, and
-// how many; on a tie, the one the lowest proof system names.
+// named returns the effect the most of the failures so far refused the
+// window for, and how many; on a tie, the one the lowest proof system
+// names. Collection stops once one effect blocks the threshold, so between
+// effects that each could, the members answering first decide.
 func (e *QuorumError) named() (Refused, int) {
 	failures := slices.SortedFunc(slices.Values(e.Failures), func(x, y MemberFailure) int { return x.ProofSystem.Cmp(y.ProofSystem) })
 	counts := map[Refused]int{}

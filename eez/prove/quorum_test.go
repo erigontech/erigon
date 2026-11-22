@@ -330,6 +330,7 @@ func TestQuorumNamesTheRefusedEffect(t *testing.T) {
 		{"waits for a member that could still name it", 3, []member{{named: &poison}, {rejecting: true}, {delay: 100 * time.Millisecond, named: &poison}, {}}, &poison},
 		{"waits for a first name", 2, []member{{rejecting: true}, {delay: 100 * time.Millisecond, named: &poison}}, &poison},
 		{"a lone member", 1, []member{{named: &other}}, &other},
+		{"the first to block decides", 2, []member{{delay: 300 * time.Millisecond, named: &poison}, {named: &other}}, &other},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			var as []*attester
