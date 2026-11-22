@@ -156,6 +156,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		ethClock: ethClock,
 	}
 	host.Network().Notify(p.useful)
+	p.useful.addConnected(host.Network())
 	p2pCtx, cancel := context.WithCancel(ctx)
 	initialized := false
 	defer func() {

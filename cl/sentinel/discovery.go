@@ -322,7 +322,26 @@ func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCoun
 	return coverage, subnetToPeers
 }
 
-// MarkPeerUseful records that pid answered one of our data requests.
+// subnetsOfConnectedPeers returns the attestation subnets of each connected peer and how many connected
+// peers each subnet has. Gossipsub forgets a closed peer asynchronously, so its topic peers can include
+// peers that are gone.
+func subnetsOfConnectedPeers(subnetToPeers *[attestationSubnetCount][]peer.ID, connected []peer.ID) (coverage [attestationSubnetCount]int, peerToSubnets map[peer.ID][]int) {
+	peerToSubnets = make(map[peer.ID][]int, len(connected))
+	for _, pid := range connected {
+		peerToSubnets[pid] = nil
+	}
+	for subnet, pids := range subnetToPeers {
+		for _, pid := range pids {
+			if subnets, ok := peerToSubnets[pid]; ok {
+				peerToSubnets[pid] = append(subnets, subnet)
+				coverage[subnet]++
+			}
+		}
+	}
+	return coverage, peerToSubnets
+}
+
+// MarkPeerUseful records that pid gave a non-empty answer to one of our data requests.
 func (s *Sentinel) MarkPeerUseful(pid peer.ID) {
 	s.p2p.MarkPeerUseful(pid)
 }
@@ -431,13 +450,8 @@ func (s *Sentinel) pruneExcessPeers() {
 	}
 	log.Debug("[Sentinel] Pruning excess peers", "current", counts.total(), "inbound", counts.inbound, "outbound", counts.outbound, "toRemove", toRemove)
 
-	coverage, subnetToPeers := s.getSubnetCoverageWithPeers()
-	peerToSubnets := make(map[peer.ID][]int)
-	for i := range attestationSubnetCount {
-		for _, pid := range subnetToPeers[i] {
-			peerToSubnets[pid] = append(peerToSubnets[pid], i)
-		}
-	}
+	_, subnetToPeers := s.getSubnetCoverageWithPeers()
+	coverage, peerToSubnets := subnetsOfConnectedPeers(&subnetToPeers, peers)
 	for i := range candidates {
 		candidates[i].subnets = peerToSubnets[candidates[i].pid]
 	}

@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	// peerIdleWindow is how long a peer may go without giving us anything we kept before it can be
-	// evicted at the peer cap. Peers that deliver first copies at all rarely go quiet for this long.
+	// peerIdleWindow is how long a peer may go without giving us anything useful before it can be
+	// evicted while new peers are refused. Peers that deliver first copies at all rarely go quiet for this long.
 	peerIdleWindow = time.Hour
 	// maxIdleEvictionsPerPass bounds the churn of one pruning pass.
 	maxIdleEvictionsPerPass = 2
@@ -22,15 +22,19 @@ const (
 type idleCandidate struct {
 	pid     peer.ID
 	idleFor time.Duration
+	inbound bool
 	subnets []int
 }
 
 // selectIdlePeers returns up to limit peers idle for at least window, the longest idle first,
 // skipping any peer whose removal would take one of its subnets below minimumPeersPerSubnet.
-func selectIdlePeers(candidates []idleCandidate, coverage [attestationSubnetCount]int, window time.Duration, limit int) []peer.ID {
-	candidates = slices.DeleteFunc(slices.Clone(candidates), func(c idleCandidate) bool { return c.idleFor < window })
+// With inboundOnly, only inbound peers are selected.
+func selectIdlePeers(candidates []idleCandidate, coverage [attestationSubnetCount]int, window time.Duration, limit int, inboundOnly bool) []idleCandidate {
+	candidates = slices.DeleteFunc(slices.Clone(candidates), func(c idleCandidate) bool {
+		return c.idleFor < window || inboundOnly && !c.inbound
+	})
 	slices.SortFunc(candidates, func(a, b idleCandidate) int { return cmp.Compare(b.idleFor, a.idleFor) })
-	var selected []peer.ID
+	var selected []idleCandidate
 	for _, c := range candidates {
 		if len(selected) == limit {
 			break
@@ -41,7 +45,7 @@ func selectIdlePeers(candidates []idleCandidate, coverage [attestationSubnetCoun
 		for _, subnet := range c.subnets {
 			coverage[subnet]--
 		}
-		selected = append(selected, c.pid)
+		selected = append(selected, c)
 	}
 	return selected
 }
@@ -49,51 +53,63 @@ func selectIdlePeers(candidates []idleCandidate, coverage [attestationSubnetCoun
 func staticPeerIDs(nodes []string) map[peer.ID]struct{} {
 	ids := make(map[peer.ID]struct{})
 	for _, node := range nodes {
-		addrs, err := p2p.ParseStaticPeerAddrs(node)
+		addr, err := p2p.ParseStaticPeer(node)
 		if err != nil {
 			continue
 		}
-		infos, err := peer.AddrInfosFromP2pAddrs(addrs...)
+		info, err := peer.AddrInfoFromP2pAddr(addr)
 		if err != nil {
 			continue
 		}
-		for _, info := range infos {
-			ids[info.ID] = struct{}{}
-		}
+		ids[info.ID] = struct{}{}
 	}
 	return ids
 }
 
-// evictIdlePeers frees slots held by idle peers when the peer cap is reached, so new peers that
-// would be useful are not refused. Static peers are never evicted.
+// idleEvictionScope reports whether new peers are refused, and whether only evicting an inbound peer
+// frees a slot for them: below the total cap, only the inbound share can be full.
+func idleEvictionScope(c peerCounts, maxPeers int) (evict, inboundOnly bool) {
+	return !canAcceptInbound(c, maxPeers), c.total() < maxPeers
+}
+
+// evictIdlePeers frees slots held by idle peers when new peers would be refused, so new peers that
+// would be useful can connect. When only the inbound share is full, only inbound peers are evicted,
+// as only they free an inbound slot. Static peers are never evicted.
 func (s *Sentinel) evictIdlePeers(now time.Time) {
+	maxPeers := int(s.cfg.MaxPeerCount)
 	peers := s.p2p.Host().Network().Peers()
-	if len(peers) < int(s.cfg.MaxPeerCount) {
-		return
-	}
-	_, subnetToPeers := s.getSubnetCoverageWithPeers()
-	var coverage [attestationSubnetCount]int
-	peerToSubnets := make(map[peer.ID][]int)
-	for subnet, pids := range &subnetToPeers {
-		coverage[subnet] = len(pids)
-		for _, pid := range pids {
-			peerToSubnets[pid] = append(peerToSubnets[pid], subnet)
-		}
-	}
 	candidates := make([]idleCandidate, 0, len(peers))
+	var counts peerCounts
 	for _, pid := range peers {
+		conns := s.p2p.Host().Network().ConnsToPeer(pid)
+		if len(conns) == 0 {
+			continue
+		}
+		inbound := peerIsInbound(conns)
+		if inbound {
+			counts.inbound++
+		} else {
+			counts.outbound++
+		}
 		if _, static := s.staticPeers[pid]; static {
 			continue
 		}
-		last, ok := s.p2p.PeerLastUseful(pid)
-		if !ok {
-			continue
+		if last, ok := s.p2p.PeerLastUseful(pid); ok {
+			candidates = append(candidates, idleCandidate{pid: pid, idleFor: now.Sub(last), inbound: inbound})
 		}
-		candidates = append(candidates, idleCandidate{pid: pid, idleFor: now.Sub(last), subnets: peerToSubnets[pid]})
 	}
-	for _, pid := range selectIdlePeers(candidates, coverage, peerIdleWindow, maxIdleEvictionsPerPass) {
-		log.Debug("[Sentinel] Evicting idle peer", "peer", pid)
-		s.closePeer(pid)
-		s.p2p.Host().Peerstore().RemovePeer(pid)
+	evict, inboundOnly := idleEvictionScope(counts, maxPeers)
+	if !evict {
+		return
+	}
+	_, subnetToPeers := s.getSubnetCoverageWithPeers()
+	coverage, peerToSubnets := subnetsOfConnectedPeers(&subnetToPeers, peers)
+	for i := range candidates {
+		candidates[i].subnets = peerToSubnets[candidates[i].pid]
+	}
+	for _, c := range selectIdlePeers(candidates, coverage, peerIdleWindow, maxIdleEvictionsPerPass, inboundOnly) {
+		log.Debug("[Sentinel] Evicting idle peer", "peer", c.pid, "idleFor", c.idleFor.Round(time.Second))
+		s.closePeer(c.pid)
+		s.p2p.Host().Peerstore().RemovePeer(c.pid)
 	}
 }

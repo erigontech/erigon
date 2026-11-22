@@ -9,8 +9,9 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 )
 
-// peerUsefulness remembers when each connected peer last gave us something we kept. A peer starts
-// at its connection time, so a new peer gets a full window before it can count as idle.
+// peerUsefulness remembers when each connected peer last gave us something useful. A peer starts
+// at its connection time, so a new peer gets a full window before it can count as idle. Only a
+// connection creates an entry: a mark can arrive after the last connection closed.
 type peerUsefulness struct {
 	mu   sync.Mutex
 	last map[peer.ID]time.Time
@@ -24,7 +25,9 @@ func newPeerUsefulness() *peerUsefulness {
 func (u *peerUsefulness) mark(pid peer.ID) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.last[pid] = u.now()
+	if _, ok := u.last[pid]; ok {
+		u.last[pid] = u.now()
+	}
 }
 
 func (u *peerUsefulness) lastUseful(pid peer.ID) (time.Time, bool) {
@@ -37,18 +40,34 @@ func (u *peerUsefulness) lastUseful(pid peer.ID) (time.Time, bool) {
 func (u *peerUsefulness) Connected(_ network.Network, c network.Conn) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if _, ok := u.last[c.RemotePeer()]; !ok {
-		u.last[c.RemotePeer()] = u.now()
+	u.addLocked(c.RemotePeer())
+}
+
+// addConnected adds the peers that connected before u was registered for notifications.
+func (u *peerUsefulness) addConnected(n network.Network) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for _, pid := range n.Peers() {
+		if n.Connectedness(pid) == network.Connected {
+			u.addLocked(pid)
+		}
 	}
 }
 
-func (u *peerUsefulness) Disconnected(n network.Network, c network.Conn) {
-	if n.Connectedness(c.RemotePeer()) == network.Connected {
-		return
+func (u *peerUsefulness) addLocked(pid peer.ID) {
+	if _, ok := u.last[pid]; !ok {
+		u.last[pid] = u.now()
 	}
+}
+
+// Disconnected checks connectedness under u.mu, so a Connected notification of a reconnect runs
+// either before the check, which then keeps the entry, or after the delete, which then adds it back.
+func (u *peerUsefulness) Disconnected(n network.Network, c network.Conn) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	delete(u.last, c.RemotePeer())
+	if n.Connectedness(c.RemotePeer()) != network.Connected {
+		delete(u.last, c.RemotePeer())
+	}
 }
 
 func (u *peerUsefulness) Listen(network.Network, ma.Multiaddr)      {}

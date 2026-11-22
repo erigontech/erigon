@@ -287,7 +287,7 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		}
 		return nil, err
 	}
-	if isDataRequest(requestType) {
+	if isDataRequest(requestType) && len(data) > 0 {
 		s.peerRequestBackend.MarkPeerUseful(pid)
 	}
 	ans := &sentinelproto.ResponseData{
