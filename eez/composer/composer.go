@@ -464,7 +464,7 @@ func (c *Composer) send(kind emitKind, cursor uint64, terminal *types.Header, ba
 			return
 		default:
 			c.logger.Info("[eez] batch posted", "event", dispatched[kind], "from", cursor+1, "to", to, "post", hash,
-				"l1Block", sent.Block, "pinned", sent.Time != 0, "triggers", len(held))
+				"l1Block", sent.Block, "pinned", sent.Time != 0, "triggers", len(bundle)-1)
 		}
 		c.observe(to, hash, watch, batch, terminal, sent, false)
 	})

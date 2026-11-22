@@ -25,6 +25,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -1168,6 +1169,7 @@ func TestComposedWindowPosts(t *testing.T) {
 	trigger := f.hold(t, 0, f.call.Source, f.call.Data)
 	first, second := f.holdOutbound(t, 0), f.holdOutbound(t, 1)
 	c, prover, poster, chain := f.poster(t, nil)
+	lines := captureLogs(c)
 	composed := c.ComposeSyncSlot(t.Context(), chain[467].Header(), f.w.sync.Time(), 101, sequencer.ModeSteady)
 	require.Len(t, composed.Txs, 5)
 	sync := f.sealed(t, composed.Txs)
@@ -1194,6 +1196,9 @@ func TestComposedWindowPosts(t *testing.T) {
 	}
 	require.Eventually(t, func() bool { return len(bundles()) == 1 }, 5*time.Second, time.Millisecond)
 	require.Equal(t, []common.Hash{poster.txs[0].Hash(), trigger.Hash}, bundles()[0])
+	dispatched := regexp.MustCompile(`event=eez.composer.bundle.dispatched .*triggers=(\d+)`)
+	require.Eventually(t, func() bool { return dispatched.MatchString(lines.String()) }, 5*time.Second, time.Millisecond)
+	require.Equal(t, "1", dispatched.FindStringSubmatch(lines.String())[1], "the outbound transactions are no triggers")
 	c.ledger.mu.Lock()
 	e := c.ledger.entries[sync.NumberU64()]
 	c.ledger.mu.Unlock()
