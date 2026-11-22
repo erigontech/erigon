@@ -24,11 +24,11 @@ import (
 	"regexp"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 )
 
 // Fixtures from a pipe are read once: a pipe cannot be read again or at an offset.
@@ -41,21 +41,10 @@ func TestLoadEngineXGroupsReadsAPipeOnce(t *testing.T) {
 	groups, total, err := loadEngineXGroups(fifo, regexp.MustCompile(""))
 	require.NoError(t, err)
 	require.Equal(t, 1, total)
-
-	done := make(chan error, 1)
+	require.NoError(t, dir.RemoveFile(fifo))
 	for _, tests := range groups {
-		go func() {
-			def, err := tests[0].definition()
-			if err == nil && *def.LastBlockHash != common.HexToHash("0x0a") {
-				err = os.ErrInvalid
-			}
-			done <- err
-		}()
-	}
-	select {
-	case err := <-done:
+		def, err := tests[0].definition()
 		require.NoError(t, err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("definition reopened the pipe")
+		require.Equal(t, common.HexToHash("0x0a"), *def.LastBlockHash)
 	}
 }

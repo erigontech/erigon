@@ -80,8 +80,6 @@ func TestLoadZkevmWitnessesKeepsReferenceWhenExcludedFixtureDiffers(t *testing.T
 	require.Equal(t, []hexutil.Bytes{{1}}, witnesses[zkevmWitnessKey{"Amsterdam", hash}].State)
 }
 
-// A fixture the filter skips still has to decode: a fixture that does not decode
-// fails the file.
 func TestRunZkevmTestFileDecodesFilteredFixtures(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "fixtures.json")
@@ -90,9 +88,10 @@ func TestRunZkevmTestFileDecodesFilteredFixtures(t *testing.T) {
 	require.ErrorContains(t, err, "fixture bad")
 }
 
-// A callback that does not decode the fixture gets an error, not a panic.
 func TestDecodeFixturesRejectsUnconsumedFixture(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "fixtures.json")
-	require.NoError(t, os.WriteFile(path, []byte(`{"a":{},"b":{}}`), 0o600))
-	require.Error(t, decodeFixtures(path, func(string, *json.Decoder) error { return nil }))
+	for _, body := range []string{`{"a":{},"b":{}}`, `{"a":"x"}`} {
+		path := filepath.Join(t.TempDir(), "fixtures.json")
+		require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+		require.Error(t, decodeFixtures(path, func(string, *json.Decoder) error { return nil }), body)
+	}
 }
