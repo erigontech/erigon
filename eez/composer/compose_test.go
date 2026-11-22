@@ -261,7 +261,7 @@ var (
 
 // registerL1Proxy deploys and registers on L1 the proxy of a, a rollup
 // account: EEZL2's code, the manager's here, refuses to create it.
-func (f *crossFixture) registerL1Proxy(t *testing.T, a common.Address) {
+func (f *crossFixture) registerL1Proxy(t *testing.T, a common.Address) common.Address {
 	t.Helper()
 	header := &types.Header{Number: *uint256.NewInt(100), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Extra: []byte{}}
 	src := NewSource(chain.TestChainOsakaConfig, header, f.l1.m, func(uint64) (common.Hash, error) { return common.Hash{}, nil }, protocol.EEZL2Address, 0)
@@ -271,6 +271,7 @@ func (f *crossFixture) registerL1Proxy(t *testing.T, a common.Address) {
 	require.NoError(t, err)
 	f.l1.m.deploy(p, f.l1.m.code[senderProxy])
 	f.l1.m.set(protocol.EEZL2Address, protocol.ProxyKey(p), proxyWord(a, 1))
+	return p
 }
 
 // holdOut holds a rollup transaction of l2Key's, of nonce, calling to.
@@ -1110,6 +1111,44 @@ func TestEffectsCulprit(t *testing.T) {
 		}
 	}
 }
+
+// TestComposedEntriesNameTheirTrigger: a trigger making two deliveries owns
+// both of their entries in the batch, the next trigger the entry after
+// them; each resolves by its index and hash.
+func TestComposedEntriesNameTheirTrigger(t *testing.T) {
+	f := newCrossFixture(t)
+	f.l2.deploy(l2Sink, []byte{0x60, 0x20, 0x5f, 0xf3})
+	sink := f.registerL1Proxy(t, l2Sink)
+	// The recorded source, given calldata, forwards it as recorded and then
+	// calls the sink; given none, it calls the sink alone.
+	forwarded := slices.Concat([]byte{0x36, 0x5f, 0x5f, 0x37, 0x60, 0x20, 0x5f, 0x36, 0x5f, 0x34}, push20(crossProxy), []byte{0x5a, 0xf1, 0x50})
+	skip := byte(5 + len(forwarded))
+	f.l1.m.deploy(f.call.Source, slices.Concat([]byte{0x36, 0x15, 0x60, skip, 0x57}, forwarded, []byte{0x5b}, callTo(sink), []byte{0x60, 0x20, 0x5f, 0xf3}))
+	first := f.hold(t, 0, f.call.Source, f.call.Data)
+	second := f.hold(t, 1, f.call.Source, nil)
+	lines := captureLogs(f.c)
+	fx := f.compose(t)
+	require.NotNil(t, fx, lines.String())
+	owners := []*Held{first, first, second}
+	require.Len(t, fx.deliveries, len(owners), lines.String())
+	require.Equal(t, owners, fx.owners)
+	batch := &protocol.ProofSystemBatch{Entries: []protocol.ExecutionEntry{{ReturnData: []byte{}}}}
+	batch.Entries = append(batch.Entries, fx.outbound...)
+	for _, d := range fx.deliveries {
+		batch.Entries = append(batch.Entries, inboundEntry(d.Sidecar))
+	}
+	for i, want := range owners {
+		index := 1 + len(fx.outbound) + i
+		h, err := protocol.ExecutionEntryHash(&batch.Entries[index])
+		require.NoError(t, err)
+		got, err := fx.culprit(prove.Refused{Index: uint32(index), Hash: h}, nil, batch)
+		require.NoError(t, err, "entry %d", index)
+		require.Same(t, want, got, "entry %d", index)
+	}
+}
+
+// l2Sink returns a zero word to any call.
+var l2Sink = common.HexToAddress("0xb000000000000000000000000000000000000004")
 
 // holdOutbound holds the window's recorded outbound transaction i.
 func (f *crossFixture) holdOutbound(t *testing.T, i int) *Held {
