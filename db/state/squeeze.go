@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -1071,9 +1072,12 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if rebuildTrieCfg.Variant == commitment.VariantParallelHexPatricia {
+			switch rebuildTrieCfg.Variant {
+			case commitment.VariantParallelHexPatricia, commitment.VariantCommitmentV3:
 				domains.EnableParaTrieDB(rwDb)
 			}
+			// A top-level v3 storage fold worker measured ~0.35 GB of heap; 2 GB each in half the memory leaves room for the rest of the rebuild.
+			domains.SetStorageWorkersMax(estimate.EstimatedRamPerWorker(2 * datasize.GB).WorkersByRAMOnly())
 
 			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
