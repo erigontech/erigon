@@ -31,6 +31,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -198,8 +199,13 @@ func (sd *TemporalMemBatch) runlockAllDomains() {
 	}
 }
 
+var stubNoHistoryPut = dbg.EnvBool("STUB_NO_HISTORY_PUT", false)
+
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
 	sameTxNumUpdate := sd.putLatest(domain, k, v, txNum)
+	if stubNoHistoryPut && domain != kv.CommitmentDomain {
+		return nil
+	}
 	return sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval, sameTxNumUpdate)
 }
 
