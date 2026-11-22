@@ -921,46 +921,26 @@ func (ibs *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath,
 	return ibs.stateUpdates.ReadStatus(addr, path, key, txIdx)
 }
 
-// writeBalance records a balance change on the versionMap write-set and the
-// journal. An absent account (base == nil) is created via create, which records
-// the AddressPath write OCC needs; the create path never reads balance, so its
-// journal prev is the fresh account's zero. A live account — including one with
-// an in-block lifecycle event such as a SELFDESTRUCT — keeps its record and
-// journals its own balance as prev. The journal prev comes from a caller that
-// already read the balance, or, when nil, is read only in the live
-// branch so a create does not widen the OCC read-set with a spurious BalancePath
-// read.
+// writeBalance records a balance change on the versionMap write-set and the journal.
+// An absent account (base == nil) is created via create, which records the AddressPath
+// write OCC needs; the create path never reads balance, so its journal prev is the fresh
+// account's zero. A live account — including one with an in-block lifecycle event such as
+// a SELFDESTRUCT — keeps its record and journals its own balance, read from the caller
+// or, when nil, here so a create does not widen the OCC read-set with a spurious balance read.
 func (ibs *IntraBlockState) writeBalance(addr accounts.Address, prev *uint256.Int, update uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) error {
 	base, _, _, err := ibs.accountBase(addr, true)
 	if err != nil {
 		return err
 	}
-	if base != nil && prev == nil {
+	if base == nil {
+		ibs.create(addr, false)
+		prev = &uint256.Int{}
+	} else if prev == nil {
 		cur, _, err := ibs.getBalance(addr)
 		if err != nil {
 			return err
 		}
 		prev = &cur
-	}
-	if base == nil || ibs.accountLifecycle(addr) {
-		// The lifecycle case (base != nil) journals *prev, the account's own balance,
-		// so a revert restores it; the create case never read balance, so its prev is
-		// the fresh account's zero.
-		var prevBal uint256.Int
-		if base != nil {
-			prevBal = *prev
-		}
-		// Only an absent account is created here; a live account with an in-block
-		// lifecycle event (accountLifecycle) keeps its record and code.
-		if base == nil {
-			ibs.create(addr, false)
-		}
-		ibs.journal.balanceChange(addr, prevBal, wasCommited, ibs.writes.balanceDeleted(addr))
-		if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
-			ibs.tracingHooks.OnBalanceChange(addr, prevBal, update, reason)
-		}
-		ibs.recordWriteBalance(addr, update)
-		return nil
 	}
 	ibs.journal.balanceChange(addr, *prev, wasCommited, ibs.writes.balanceDeleted(addr))
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
@@ -1343,34 +1323,15 @@ func (ibs *IntraBlockState) writeNonce(addr accounts.Address, nonce uint64, wasC
 	if err != nil {
 		return err
 	}
-	if base == nil || ibs.accountLifecycle(addr) {
-		// The journal prev is this tx's own nonce cell when present (it can lead the
-		// base record), else the live account's nonce, else the fresh account's zero.
-		prev := uint64(0)
-		if base != nil {
-			prev = base.Nonce
-		}
-		if vw, ok := ibs.writes.GetNonce(addr); ok {
-			prev = vw.Val
-		}
-		// Only an absent/destroyed account is created here; a live account with an
-		// in-block lifecycle event (accountLifecycle) keeps its record and code.
-		if base == nil {
-			ibs.create(addr, false)
-		}
-		ibs.journal.nonceChange(addr, prev, wasCommited)
-		if ibs.tracingHooks != nil {
-			if ibs.tracingHooks.OnNonceChangeV2 != nil {
-				ibs.tracingHooks.OnNonceChangeV2(addr, prev, nonce, reason)
-			} else if ibs.tracingHooks.OnNonceChange != nil {
-				ibs.tracingHooks.OnNonceChange(addr, prev, nonce)
-			}
-		}
-		ibs.recordWriteNonce(addr, nonce, reason)
-		return nil
+	// The journal prev is the fresh account's zero on a create, else the live account's
+	// nonce, finally overridden by this tx's own nonce cell, which is authoritative when
+	// it leads the base record.
+	prev := uint64(0)
+	if base == nil {
+		ibs.create(addr, false)
+	} else {
+		prev = base.Nonce
 	}
-	prev := base.Nonce
-	// The tx's own nonce cell is authoritative for the journal prev.
 	if vw, ok := ibs.writes.GetNonce(addr); ok {
 		prev = vw.Val
 	}
@@ -1811,20 +1772,31 @@ func (ibs *IntraBlockState) create(addr accounts.Address, hadPrevious bool) {
 	account := accounts.NewAccount() // Root=empty.RootHash, CodeHash=EmptyCodeHash: newObject's normalized output
 	if !hadPrevious {
 		ibs.journal.createObjectChange(addr)
-	} else {
-		prevWrites := ibs.writes.snapshotCreateFields(addr)
-		ibs.journal.resetObjectChange(addr, prevWrites)
+		ibs.recordCreateCells(addr, &account)
+		return
 	}
+	prevWrites := ibs.writes.snapshotCreateFields(addr)
+	ibs.journal.resetObjectChange(addr, prevWrites)
 	ibs.recordWriteAddress(addr, &account)
 	ibs.recordWriteCodeHash(addr, account.CodeHash)
-	if hadPrevious {
+	ibs.recordWriteNonce(addr, account.Nonce, tracing.NonceChangeNewContract)
+}
+
+// recordCreateCells records the version-map cells a fresh account's creation emits,
+// without journaling — the caller records the journal entry. Address and code hash are
+// always written (the code-hash write invalidates any stale pre-create GetCodeHash read);
+// the nonce only when a prior incarnation's nonce still sits in the version-map floor,
+// which a commitment read would otherwise resurrect — a genuinely fresh account has no
+// floor, so a nonce=0 write there is a net-zero change the BAL wrongly reports; the
+// balance unconditionally, since a lower tx's removal of the account can be flushed after
+// this tx ran and its deleted balance would then decide it.
+func (ibs *IntraBlockState) recordCreateCells(addr accounts.Address, account *accounts.Account) {
+	ibs.recordWriteAddress(addr, account)
+	ibs.recordWriteCodeHash(addr, account.CodeHash)
+	if _, res, ok := ibs.stateUpdates.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
 		ibs.recordWriteNonce(addr, account.Nonce, tracing.NonceChangeNewContract)
-	} else {
-		if _, res, ok := ibs.stateUpdates.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
-			ibs.recordWriteNonce(addr, account.Nonce, tracing.NonceChangeNewContract)
-		}
-		ibs.recordWriteBalance(addr, account.Balance)
 	}
+	ibs.recordWriteBalance(addr, account.Balance)
 }
 
 // createAccount is CreateAccount on the versioned path: it resolves the
