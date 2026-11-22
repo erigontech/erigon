@@ -59,6 +59,13 @@ func init() {
 // hex strings into big ints.
 var bigIntProgram = goja.MustCompile("bigInt", bigIntegerJS, false)
 
+// maxCallStackSize leaves room for a tracer that recurses once per EVM call frame (up to 1024),
+// and stops runaway recursion before it exhausts memory or the Go stack. Recursion through JS
+// getters costs quadratic time in goja, so a much larger limit makes such a tracer run for seconds.
+const maxCallStackSize = 2048
+
+var errStackOverflow = fmt.Errorf("tracer exceeded the maximum call stack size of %d", maxCallStackSize)
+
 type (
 	toBigFn   = func(vm *goja.Runtime, val string) (goja.Value, error)
 	toBufFn   = func(vm *goja.Runtime, val []byte) (goja.Value, error)
@@ -141,18 +148,21 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (tracer
 		code = c
 	}
 	vm := goja.New()
+	vm.SetMaxCallStackSize(maxCallStackSize)
+	// A timeout or a stack overflow inside a JS getter reaches Go as a panic from Object.Get.
+	defer func() {
+		if r := recover(); r != nil {
+			switch r.(type) {
+			case *goja.InterruptedError, *goja.StackOverflowError:
+				tracer, err = nil, r.(error)
+			default:
+				panic(r)
+			}
+		}
+		err = describeStackOverflow(err)
+	}()
 	if ctx != nil && ctx.Ctx != nil {
 		defer context.AfterFunc(ctx.Ctx, func() { vm.Interrupt("execution timeout") })()
-		// A timeout inside a JS getter reaches Go as a panic from Object.Get.
-		defer func() {
-			if r := recover(); r != nil {
-				interrupted, ok := r.(*goja.InterruptedError)
-				if !ok {
-					panic(r)
-				}
-				tracer, err = nil, interrupted
-			}
-		}()
 	}
 	// By default field names are exported to JS as is, i.e. capitalized.
 	vm.SetFieldNameMapper(goja.UncapFieldNameMapper())
@@ -462,7 +472,15 @@ func (t *jsTracer) onError(context string, err error) {
 }
 
 func wrapError(context string, err error) error {
-	return fmt.Errorf("%w    in server-side tracer function '%v'", err, context)
+	return fmt.Errorf("%w    in server-side tracer function '%v'", describeStackOverflow(err), context)
+}
+
+// describeStackOverflow replaces goja's StackOverflowError, whose message is "<nil>".
+func describeStackOverflow(err error) error {
+	if _, ok := errors.AsType[*goja.StackOverflowError](err); ok {
+		return errStackOverflow
+	}
+	return err
 }
 
 // setBuiltinFunctions injects Go functions which are available to tracers into the environment.
