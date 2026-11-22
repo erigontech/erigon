@@ -355,8 +355,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchKeyFromState(tx kv.TemporalTx, p
 	if err != nil {
 		return err
 	}
-	sdc.TouchKey(d, string(plainKey), val)
-	return nil
+	return sdc.TouchKeyValue(plainKey, val)
 }
 
 // TouchKeyValue is TouchKeyFromState for a caller that already holds the key's latest value.
@@ -364,9 +363,6 @@ func (sdc *SharedDomainsCommitmentContext) TouchKeyValue(plainKey, val []byte) e
 	d, err := plainKeyDomain(plainKey)
 	if err != nil {
 		return err
-	}
-	if sdc.updates.Mode() != commitment.ModeCollect {
-		val = nil
 	}
 	sdc.TouchKey(d, string(plainKey), val)
 	return nil
