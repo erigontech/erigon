@@ -196,7 +196,7 @@ func (c *Client) Prove(ctx context.Context, w *Window) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &session{stream: stream, cancel: cancel}
+	s := &session{ctx: ctx, stream: stream, cancel: cancel}
 	parent, root := w.Anchor.Hash(), w.Anchor.Root
 	if err := s.begin(w.RollupID, w.From-1, parent, root); err != nil {
 		return nil, err
@@ -230,6 +230,9 @@ func (c *Client) Prove(ctx context.Context, w *Window) ([]byte, error) {
 
 // session is one stream's binding to the prover, request by request.
 type session struct {
+	// ctx is the request's, which cancel ends; the stream's own ends with
+	// the stream.
+	ctx     context.Context
 	stream  grpc.BidiStreamingClient[provepb.ClientFrame, provepb.ServerFrame]
 	cancel  context.CancelFunc
 	id      []byte
@@ -322,7 +325,12 @@ func (s *session) send(f *provepb.ClientFrame) (*provepb.ServerFrame, error) {
 	case errors.Is(err, io.EOF):
 		return nil, status.Errorf(codes.Unavailable, "stream ended before the reply to request %d", f.RequestId)
 	case err != nil:
-		return nil, received(err, s.stream.Trailer())
+		err = received(err, s.stream.Trailer())
+		// A status received while the request still ran is the prover's.
+		if s.ctx.Err() == nil {
+			err = sentByProver(err)
+		}
+		return nil, err
 	}
 	return r, nil
 }
@@ -343,7 +351,7 @@ func rejection(r *provepb.Rejected) error {
 			return &RefusedError{Refused: named, Status: s}
 		}
 	}
-	return s.Err()
+	return sentByProver(s.Err())
 }
 
 // blockChunk is window block n, the child of parent, with its state root.
@@ -382,6 +390,46 @@ var ErrTooLate = errors.New("too late to start a proof request")
 // left before start.
 func (c *Client) ProveBy(ctx context.Context, w *Window, start time.Time, per time.Duration) ([]byte, error) {
 	return retry(ctx, start, per, func(ctx context.Context) ([]byte, error) { return c.Prove(ctx, w) })
+}
+
+// Charged reports a failure of a request its composition answers for: a
+// status a prover sent, a transient failure outlasting its retries, or a
+// quorum's verdict on its members' failures; not one the node met.
+func Charged(err error) bool {
+	if q, ok := errors.AsType[*QuorumError](err); ok {
+		_, c := q.verdict()
+		return c
+	}
+	return charged(err)
+}
+
+func charged(err error) bool {
+	if _, ok := errors.AsType[*SentError](err); ok {
+		return true
+	}
+	switch status.Code(err) {
+	case codes.OK, codes.Unknown, codes.Canceled:
+		return false
+	}
+	return true
+}
+
+// SentError is an UNKNOWN or CANCELLED a prover sent, codes the node's own
+// failures and cancellations also carry: sent, it is the prover's
+// rejection of the request.
+type SentError struct{ Status *status.Status }
+
+func (e *SentError) Error() string { return e.Status.Err().Error() }
+
+func (e *SentError) GRPCStatus() *status.Status { return e.Status }
+
+// sentByProver marks err, a status received while the request still ran,
+// as the prover's.
+func sentByProver(err error) error {
+	if s, ok := status.FromError(err); ok && (s.Code() == codes.Unknown || s.Code() == codes.Canceled) {
+		return &SentError{Status: s}
+	}
+	return err
 }
 
 // Retryable reports a transient failure, which the same request may not meet

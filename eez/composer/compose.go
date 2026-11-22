@@ -23,8 +23,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/eez/internal/stateless"
@@ -334,17 +332,6 @@ func (c *Composer) refused(err error, r prove.Refused, e emission, terminal *typ
 	return &refusal{culprit: culprit, err: err}
 }
 
-// proverFailed reports a window the prover refused or could not prove
-// within its retries, which the composition is charged for; a failure with
-// no prover status is the node's, as is a cancelled request.
-func proverFailed(err error) bool {
-	switch status.Code(err) {
-	case codes.OK, codes.Unknown, codes.Canceled:
-		return false
-	}
-	return true
-}
-
 func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.Header) error {
 	block, err := c.block(ctx, e.sync)
 	if err != nil {
@@ -398,7 +385,7 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 	}
 	atts, err := c.prover.ProveBy(ctx, w2, start, c.cfg.Proof)
 	if err != nil {
-		if !proverFailed(err) {
+		if !prove.Charged(err) {
 			err = nodeFault(err)
 		} else if r, ok := prove.Refusal(err); ok {
 			err = c.refused(err, r, e, block, batch)

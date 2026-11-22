@@ -435,6 +435,7 @@ func TestProveRefusesAForeignAttestation(t *testing.T) {
 
 // TestProveStatus: only an unavailable prover, a timeout and an abort are
 // worth the same request again; a session the prover lost is an abort.
+// Whatever a prover sends is charged, a request cancelled here is not.
 func TestProveStatus(t *testing.T) {
 	f := anchor402(t)
 	retryable := map[codes.Code]bool{codes.Unavailable: true, codes.DeadlineExceeded: true, codes.Aborted: true, codes.NotFound: true}
@@ -448,6 +449,7 @@ func TestProveStatus(t *testing.T) {
 			require.Error(t, err)
 			require.Equal(t, want, status.Code(err), err)
 			require.Equal(t, retryable[code], Retryable(err))
+			require.True(t, Charged(err), "sent by the prover")
 		})
 		if code == codes.NotFound {
 			continue
@@ -460,11 +462,27 @@ func TestProveStatus(t *testing.T) {
 			require.Error(t, err)
 			require.Equal(t, code, status.Code(err), err)
 			require.Equal(t, retryable[code], Retryable(err))
+			require.True(t, Charged(err), "sent by the prover")
 		})
 	}
 	t.Run("rejected OK", func(t *testing.T) {
 		_, err := dial(t, serve(t, &prover{answer: rejects(codes.OK)}), f).Prove(t.Context(), f.window())
 		require.Equal(t, codes.Unknown, status.Code(err), err)
+		require.True(t, Charged(err), "sent by the prover")
+	})
+	t.Run("cancelled here", func(t *testing.T) {
+		release := make(chan struct{})
+		p := &prover{answer: func(int) (*provepb.Proof, *provepb.Rejected, error) {
+			<-release
+			return nil, nil, status.Error(codes.Internal, "released")
+		}}
+		url := serve(t, p)
+		t.Cleanup(func() { close(release) })
+		ctx, cancel := context.WithCancel(t.Context())
+		time.AfterFunc(200*time.Millisecond, cancel)
+		_, err := dial(t, url, f).Prove(ctx, f.window())
+		require.Equal(t, codes.Canceled, status.Code(err))
+		require.False(t, Charged(err))
 	})
 	t.Run("no prover", func(t *testing.T) {
 		lis, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")

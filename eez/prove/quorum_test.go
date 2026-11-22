@@ -185,6 +185,50 @@ func TestQuorumThreshold(t *testing.T) {
 	}
 }
 
+// TestQuorumStopsWithItsContext: a request cancelled mid-quorum ends it at
+// once, waiting for no member, as a cancellation no prover is charged for.
+func TestQuorumStopsWithItsContext(t *testing.T) {
+	a, b := newAttester(t, 0xa, 0, nil), newAttester(t, 0xb, 3*time.Second, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	begin := time.Now()
+	_, err := (&Quorum{Members: members(a, b), Register: registered(2, a, b)}).
+		ProveBy(ctx, quorumWindow(t, a.ps, b.ps), time.Now().Add(5*time.Second), 0)
+	require.Error(t, err)
+	require.Less(t, time.Since(begin), time.Second)
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, Charged(err))
+}
+
+// TestQuorumChargesWhatProversSent: an UNKNOWN a member sent is its
+// refusal, which with another blocks the threshold; the registration, a
+// threshold the members cannot reach and a request too late to start are
+// the node's.
+func TestQuorumChargesWhatProversSent(t *testing.T) {
+	unknown := newAttester(t, 0xa, 0, status.Error(codes.Unknown, "prover failed"))
+	invalid := newAttester(t, 0xb, 0, status.Error(codes.InvalidArgument, "window refused"))
+	signing := newAttester(t, 0xc, 0, nil)
+	_, err := (&Quorum{Members: members(unknown, invalid, signing), Register: registered(2, unknown, invalid, signing)}).
+		ProveBy(t.Context(), quorumWindow(t, unknown.ps, invalid.ps, signing.ps), time.Now().Add(5*time.Second), 0)
+	require.Error(t, err)
+	require.True(t, Charged(err), "%v", err)
+
+	a := newAttester(t, 0xa, 0, nil)
+	unreadable := func(context.Context) (l1.Registration, error) { return l1.Registration{}, errors.New("L1 down") }
+	for name, q := range map[string]*Quorum{
+		"registration": {Members: members(a), Register: unreadable},
+		"unreachable":  {Members: members(a), Register: registered(2, a)},
+	} {
+		_, err := q.ProveBy(t.Context(), quorumWindow(t, a.ps), time.Now().Add(5*time.Second), 0)
+		require.Error(t, err, name)
+		require.False(t, Charged(err), name)
+	}
+	_, err = (&Quorum{Members: members(a), Register: registered(1, a)}).
+		ProveBy(t.Context(), quorumWindow(t, a.ps), time.Now().Add(-time.Second), 0)
+	require.ErrorIs(t, err, ErrTooLate)
+	require.False(t, Charged(err))
+}
+
 // TestQuorumKeysEachMember: a member signing under any key but the
 // manager's, as its address padded, does not count.
 func TestQuorumKeysEachMember(t *testing.T) {

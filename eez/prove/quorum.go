@@ -257,16 +257,24 @@ func (e *QuorumError) Unwrap() []error {
 // reach; else Unknown, a failure that lies with the node, when a member's
 // failure has no prover status; else a transient failure's.
 func (e *QuorumError) GRPCStatus() *status.Status {
+	s, _ := e.verdict()
+	return s
+}
+
+// verdict returns the failed quorum's status and whether the request's
+// composition answers for it: refusals alone keeping the threshold out of
+// reach, or a transient failure; a member failure the node met is not.
+func (e *QuorumError) verdict() (*status.Status, bool) {
 	if e.Refused != nil {
-		return status.New(codes.FailedPrecondition, e.Error())
+		return status.New(codes.FailedPrecondition, e.Error()), true
 	}
 	failures := slices.SortedFunc(slices.Values(e.Failures), func(x, y MemberFailure) int { return x.ProofSystem.Cmp(y.ProofSystem) })
 	var refusal, transient *status.Status
 	refusals, node := 0, false
 	for _, f := range failures {
-		s, ok := status.FromError(f.Err)
+		s := status.Convert(f.Err)
 		switch {
-		case !ok || s.Code() == codes.Unknown || s.Code() == codes.Canceled:
+		case !charged(f.Err):
 			node = true
 		case !Retryable(f.Err):
 			refusals++
@@ -279,9 +287,9 @@ func (e *QuorumError) GRPCStatus() *status.Status {
 	}
 	switch {
 	case uint64(refusals) > uint64(e.Usable)-min(e.Threshold, uint64(e.Usable)):
-		return refusal
+		return refusal, true
 	case node || transient == nil:
-		return status.New(codes.Unknown, e.Error())
+		return status.New(codes.Unknown, e.Error()), false
 	}
-	return transient
+	return transient, true
 }

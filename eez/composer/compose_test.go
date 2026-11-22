@@ -909,6 +909,8 @@ func TestComposedSyncBlockFailureCharges(t *testing.T) {
 		{name: "a proof past its deadline", err: status.Error(codes.DeadlineExceeded, "too late")},
 		{name: "a proof too late to start", err: prove.ErrTooLate, skipped: true},
 		{name: "a cancelled proof", err: status.Error(codes.Canceled, "stopping"), skipped: true},
+		{name: "an UNKNOWN the prover sent", err: &prove.SentError{Status: status.New(codes.Unknown, "prover failed")}},
+		{name: "a CANCELLED the prover sent", err: &prove.SentError{Status: status.New(codes.Canceled, "prover stopping")}},
 		{name: "a malformed attestation", err: prove.ErrAttestation, skipped: true},
 		{name: "an anchor header unread", unread: true, skipped: true},
 		{name: "a witness that does not execute", witnesses: emptyWitness{}, skipped: true},
