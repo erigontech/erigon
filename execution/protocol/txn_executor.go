@@ -337,7 +337,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsic mdgas.IntrinsicGasCal
 		}
 	}
 
-	if st.msg.CheckGas() && rules.IsOsaka && mdgas.ExceedsTxnGasLimit(gas, rules.IsAmsterdam) {
+	if st.msg.CheckGas() && rules.IsOsaka && mdgas.ExceedsDeclaredGasCap(gas, rules.IsAmsterdam) {
 		return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
 	}
 	if intrinsic.ExceedsExecutionGasCap(rules.IsAmsterdam) && !st.msg.SkipExecutionGasCap() {

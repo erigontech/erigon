@@ -1344,7 +1344,7 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		return txpoolcfg.GasLimitTooHigh, nil
 	}
 	// The pool applies the declared gas cap even before Osaka.
-	if mdgas.ExceedsTxnGasLimit(gasLimit, isAmsterdam) || intrinsic.ExceedsExecutionGasCap(isAmsterdam) {
+	if mdgas.ExceedsDeclaredGasCap(gasLimit, isAmsterdam) || intrinsic.ExceedsExecutionGasCap(isAmsterdam) {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx gas cap exceeded idHash=%x gas=%d intrinsicGas=%d", txn.IDHash, gasLimit, intrinsic.RequiredGas()))
 		}

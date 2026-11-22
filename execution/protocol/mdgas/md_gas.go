@@ -149,8 +149,9 @@ func (t MdGasType) String() string {
 	}
 }
 
-// ExceedsTxnGasLimit checks the EIP-7825 cap. Amsterdam raises the declared limit to include state gas.
-func ExceedsTxnGasLimit(gasLimit uint64, isAmsterdam bool) bool {
+// ExceedsDeclaredGasCap checks the EIP-7825 cap on a transaction's declared gas
+// limit. Amsterdam raises the cap to allow for state gas.
+func ExceedsDeclaredGasCap(gasLimit uint64, isAmsterdam bool) bool {
 	if isAmsterdam {
 		return gasLimit > params.MaxTxnTotalGasLimit
 	}
