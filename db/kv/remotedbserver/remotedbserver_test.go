@@ -536,7 +536,13 @@ func TestKvServerRollbackOfRenewingTxDoesNotBlockOtherRollbacks(t *testing.T) {
 
 	renewDone := make(chan error, 1)
 	go func() { renewDone <- s.renew(ctx, renewed) }()
-	other := <-otherID
+	var other uint64
+	select {
+	case other = <-otherID:
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("renew blocked the begin that waits for the read-tx slot")
+	}
 	<-db.begins
 
 	renewedRollbackDone := make(chan struct{})
