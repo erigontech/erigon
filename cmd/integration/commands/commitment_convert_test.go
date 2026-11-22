@@ -92,8 +92,6 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 	require.ErrorContains(t, root.ExecuteContext(t.Context()), "--continue is mutually exclusive with --restore")
 
 	convertRestore, convertContinue = false, false
-	statecfg.ExperimentalCommitmentV3 = false
-	convertV3 = false
 	statecfg.ExperimentalCommitmentV3 = true
 	for _, mode := range [][]string{nil, {"--squeeze=true"}, {"--nibbles.v2=true"}} {
 		root.SetArgs(append([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet"}, mode...))

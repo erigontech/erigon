@@ -203,6 +203,24 @@ func TestCommitmentConvertWithoutChaindata(t *testing.T) {
 	}
 }
 
+// The next step that convert advertises also runs without chaindata: with no DB there
+// is no execution state to reset, so only the marker goes.
+func TestStageExecResetAfterConvertWithoutChaindata(t *testing.T) {
+	dirs, _, _, _ := legacyDatadirWithoutChaindata(t)
+	require.NoError(t, runCommitmentConvert(t, dirs, "--v3"))
+	require.Error(t, state.CheckExecResetDone(dirs))
+
+	previousChaindata, previousReset := chaindata, reset
+	t.Cleanup(func() { chaindata, reset = previousChaindata, previousReset })
+	chaindata = ""
+	root := integrationRoot()
+	cmdStageExec.SetContext(t.Context())
+	root.SetArgs([]string{"--log.dir.disable", "stage_exec", "--reset", "--datadir", dirs.DataDir, "--chain", networkname.Test})
+	require.NoError(t, root.ExecuteContext(t.Context()))
+	require.NoError(t, state.CheckExecResetDone(dirs))
+	require.NoDirExists(t, dirs.Chaindata)
+}
+
 // The rollback of a conversion also runs with v3 on: convert's own errors advise it.
 func TestCommitmentConvertV3RestoreWithV3On(t *testing.T) {
 	dirs, _, _, _ := legacyDatadirWithoutChaindata(t)
