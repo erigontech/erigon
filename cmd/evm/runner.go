@@ -190,7 +190,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		genesiswrite.MustCommitGenesis(gen, db, datadir.New(tmpDir), log.Root())
+		genesiswrite.MustCommitGenesis(gen, db)
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {

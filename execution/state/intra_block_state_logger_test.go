@@ -116,6 +116,7 @@ func TestStateLogger(t *testing.T) {
 			defer mockCtl.Finish()
 			mt := mockTracer{}
 			state := New(NewReaderV3(execctx.NewTemporalTxStateGetter(tx)))
+			state.SetVersionMap(nil)
 			defer state.Close()
 			state.SetHooks(mt.Hooks())
 

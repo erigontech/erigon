@@ -369,7 +369,9 @@ type rlpStorageLog struct {
 
 // EncodeRLP implements rlp.Encoder.
 func (l *Log) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, &rlpLog{Address: l.Address, Topics: l.Topics, Data: l.Data})
+	buf := rlp.NewEncodingBuf()
+	defer buf.Release()
+	return l.encodeRLP(w, buf[:])
 }
 
 func (l *Log) payloadSize() int {
