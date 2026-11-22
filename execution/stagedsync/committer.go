@@ -80,6 +80,10 @@ func ResetComputedAheadForTest()       { computedAheadCount.Store(0) }
 // every blockResult. It owns its own commitment.Updates buffer and reads
 // block-boundary state from sd.mem (the execLoop flushes before each blockResult).
 type commitmentCalculator struct {
+	// asyncAhead runs compute-ahead off the loop goroutine, so tx results keep draining while the block's root folds.
+	// Only loop sets it; callers that drive the handlers directly keep the synchronous path.
+	asyncAhead  bool
+	ahead       *aheadJob
 	doms        *execctx.SharedDomains
 	db          kv.TemporalRoDB
 	chainConfig *chain.Config
@@ -316,6 +320,9 @@ func (cc *commitmentCalculator) Start(ctx context.Context) {
 func (cc *commitmentCalculator) Stop() {
 	close(cc.done)
 	cc.wg.Wait()
+	if j := cc.ahead; j != nil {
+		<-j.done
+	}
 	if p := cc.branchPrefetch; p != nil {
 		p.close()
 		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(), "dropped", p.dropped.Load())
@@ -345,6 +352,8 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	// heads-up, not a gate, so it is set to nil once closed rather than drained.
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+	defer cc.joinAhead(ctx)
+	cc.asyncAhead = true
 	in, reqs := cc.in, cc.blockRequests
 	for in != nil {
 		select {
@@ -414,6 +423,13 @@ func (cc *commitmentCalculator) ownsChangeset(n uint64) bool {
 // message in the stream.
 
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
+	if j := cc.ahead; j != nil {
+		if tr, ok := msg.(*txResult); ok && tr.blockNum == j.blockNum {
+			j.skipped = append(j.skipped, tr)
+			return
+		}
+		cc.joinAhead(ctx)
+	}
 	switch r := msg.(type) {
 	case *txResult:
 		var base state.StateReader
@@ -560,6 +576,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 // BALDrivenCommitment is set, else incremental — then tries to compute the
 // block ahead of its result stream (maybeComputeAhead).
 func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blockRequest) {
+	cc.joinAhead(ctx)
 	// Record the batch's first block before the drop-guard: if blockResult(n)
 	// arrives before blockRequest(n), a dropped first request must still set
 	// firstBlockNum to n, else n+1 claims it and computes ahead on a baseline
@@ -631,7 +648,38 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 	if n != cc.firstBlockNum && !(cc.hasComputed && cc.lastComputedBlock == n-1) {
 		return
 	}
-	cc.computeBlockFromBAL(ctx, pb)
+	if !cc.asyncAhead {
+		cc.computeBlockFromBAL(ctx, pb)
+		return
+	}
+	j := &aheadJob{blockNum: n, done: make(chan struct{})}
+	cc.ahead = j
+	go func() {
+		defer close(j.done)
+		cc.computeBlockFromBAL(ctx, pb)
+	}()
+}
+
+// aheadJob is a compute-ahead running off the committer goroutine; only its own block's tx results skip the join.
+type aheadJob struct {
+	blockNum uint64
+	done     chan struct{}
+	skipped  []*txResult // replayed when the job did not compute the block
+}
+
+func (cc *commitmentCalculator) joinAhead(ctx context.Context) {
+	j := cc.ahead
+	if j == nil {
+		return
+	}
+	<-j.done
+	cc.ahead = nil
+	if cc.computedAhead[j.blockNum] {
+		return
+	}
+	for _, tr := range j.skipped {
+		cc.handleMessage(ctx, tr)
+	}
 }
 
 // computeBlockFromBAL computes block pb's commitment from its BAL, ahead of the

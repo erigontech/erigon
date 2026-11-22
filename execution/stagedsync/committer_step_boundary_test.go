@@ -1932,3 +1932,31 @@ func TestAsOfStateReaderReadsPrevBlockCode(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, newCode, code, "code written by an earlier block not yet in the domain")
 }
+
+func TestJoinAheadReplaysSkippedTxResultsOnlyWhenTheBlockWasNotComputed(t *testing.T) {
+	for _, computed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("computed=%t", computed), func(t *testing.T) {
+			ctx := context.Background()
+			db, _, doms := setupStepTest(t)
+			in := make(chan applyResult, 4)
+			out := make(chan commitmentResult, 4)
+			cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+			require.NoError(t, err)
+			defer cc.Stop()
+
+			addr := accounts.InternAddress(common.Address{19: 7})
+			ws := newWS().nonce(addr, state.Version{TxIndex: 0}, 1).build()
+			tr := recordTx(newRawViewVM(11), 2, common.Hash{0x02}, 11, nil, ws)
+			done := make(chan struct{})
+			close(done)
+			cc.computedAhead[2] = computed
+			cc.ahead = &aheadJob{blockNum: 2, done: done, skipped: []*txResult{tr}}
+
+			cc.joinAhead(ctx)
+
+			require.Nil(t, cc.ahead)
+			_, touched := cc.touchedAccounts[addr]
+			require.Equal(t, !computed, touched, "a block the job did not compute folds its buffered tx results; a computed one drops them")
+		})
+	}
+}
