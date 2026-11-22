@@ -2566,7 +2566,7 @@ func (at *AggregatorRoTx) AssertRetired(tx kv.Tx) error {
 		inDB = max(inDB, a.d[d].maxStepInDB(tx))
 	}
 	if inDB > filesEnd {
-		return fmt.Errorf("the DB holds steps %d-%d that are not in files: run `erigon seg retire` first", filesEnd, inDB)
+		return fmt.Errorf("the DB holds steps %d-%d that are not in files: run `erigon seg retire` first (it builds a step only after the step's last block is final)", filesEnd, inDB)
 	}
 	return nil
 }

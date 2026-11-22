@@ -111,8 +111,8 @@ func requireExecutionReset(t *testing.T, db kv.TemporalRwDB, countTail func() ui
 	require.Zero(t, progress)
 }
 
-func TestCommitmentRebuildWithoutHistoryDropsTheDBTail(t *testing.T) {
-	db, dirs, countTail := dbWithState(t, true)
+// useTestBlockReader keeps blocksIO off allSnapshots, which needs a DB with a genesis.
+func useTestBlockReader(t *testing.T, dirs datadir.Dirs) {
 	snapCfg := ethconfig.Defaults.Snapshot
 	snapCfg.ChainName = networkname.Test
 	blockSnaps := blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, log.Root())
@@ -120,6 +120,11 @@ func TestCommitmentRebuildWithoutHistoryDropsTheDBTail(t *testing.T) {
 	openBlockReaderOnce.Do(func() {
 		_blockReaderSingleton, _blockWriterSingleton = freezeblocks.NewBlockReader(blockSnaps), blockio.NewBlockWriter()
 	})
+}
+
+func TestCommitmentRebuildWithoutHistoryDropsTheDBTail(t *testing.T) {
+	db, dirs, countTail := dbWithState(t, true)
+	useTestBlockReader(t, dirs)
 	prevDatadir, prevNoHistory, prevYes := datadirCli, noHistory, yes
 	t.Cleanup(func() { datadirCli, noHistory, yes = prevDatadir, prevNoHistory, prevYes })
 	datadirCli, noHistory, yes = dirs.DataDir, true, true
@@ -130,6 +135,7 @@ func TestCommitmentRebuildWithoutHistoryDropsTheDBTail(t *testing.T) {
 
 func TestCommitmentRebuildRefusesUnretiredSteps(t *testing.T) {
 	db, dirs, countTail := dbWithState(t, false)
+	useTestBlockReader(t, dirs)
 	prevDatadir, prevNoHistory, prevYes := datadirCli, noHistory, yes
 	t.Cleanup(func() { datadirCli, noHistory, yes = prevDatadir, prevNoHistory, prevYes })
 	datadirCli, noHistory, yes = dirs.DataDir, true, true
