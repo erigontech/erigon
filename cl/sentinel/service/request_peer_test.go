@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -115,15 +116,23 @@ func (p peerRequestBackendStub) ReqRespHandler() http.Handler { return p.handler
 // would close the connection it still has.
 func TestFailedRequestKeepsAPeerThatJustLostADuplicateConnection(t *testing.T) {
 	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{active: 1}}
-	require.True(t, server.dropOnFailure(peer.ID("peer")))
+	require.True(t, server.dropOnFailure(peer.ID("peer"), nil))
 	lost := &atomic.Bool{}
 	lost.Store(true)
 	server.peerRequestBackend = peerRequestBackendStub{active: 0, lostDuplicate: lost}
-	require.False(t, server.dropOnFailure(peer.ID("peer")), "below the peer limit failures never drop")
+	require.False(t, server.dropOnFailure(peer.ID("peer"), nil), "below the peer limit failures never drop")
 	require.True(t, lost.Load(), "a failure that drops nothing leaves the loss for the next one")
 	server.peerRequestBackend = peerRequestBackendStub{active: 1, lostDuplicate: lost}
-	require.False(t, server.dropOnFailure(peer.ID("peer")))
-	require.True(t, server.dropOnFailure(peer.ID("peer")), "one loss excuses one failure")
+	require.False(t, server.dropOnFailure(peer.ID("peer"), nil))
+	require.True(t, server.dropOnFailure(peer.ID("peer"), nil), "one loss excuses one failure")
+}
+
+func TestOverCapResponseIsNotExcusedByADuplicateLoss(t *testing.T) {
+	lost := &atomic.Bool{}
+	lost.Store(true)
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{active: 1, lostDuplicate: lost}}
+	require.True(t, server.dropOnFailure(peer.ID("peer"), fmt.Errorf("read body: %w", httpreqresp.ErrResponseTooLarge)))
+	require.True(t, lost.Load(), "the loss stays for a failure it can excuse")
 }
 
 // The duplicate can close while the request runs, so the drop decision is taken when the request

@@ -143,6 +143,15 @@ func TestDedupKeepsANewConnectionWhenThePreferredOneIsOld(t *testing.T) {
 	require.False(t, preferred.IsClosed())
 }
 
+// A preferred connection newer than this one closes it from its own timer, once its grace period
+// shows the remote kept it.
+func TestDedupLeavesAnOlderConnectionToTheNewerPreferredOne(t *testing.T) {
+	d, preferred, other := newDialerDedupFixture(-time.Second)
+	d.resolve(other)
+	require.False(t, other.IsClosed())
+	require.False(t, preferred.IsClosed())
+}
+
 func TestDedupKeepsTheOtherConnectionWhenThePreferredOneClosed(t *testing.T) {
 	d, preferred, other := newDialerDedupFixture(time.Second)
 	preferred.closed.Store(true)
@@ -196,74 +205,93 @@ func TestDedupKeepsAReconnectionOpenedAfterThePreferredConnection(t *testing.T) 
 	require.False(t, preferred.IsClosed())
 }
 
-func TestDedupRecordsTheLossOfASimultaneousPairOnce(t *testing.T) {
-	d, preferred, other := newDedupFixture(time.Second)
-	n := d.net.(*fakeNetwork)
-	n.conns = []network.Conn{preferred}
-	d.Disconnected(n, other)
-	require.True(t, d.ConsumeDuplicateLoss(highID))
-	require.False(t, d.ConsumeDuplicateLoss(highID), "the record is consumed by its first use")
-
-	d.Disconnected(n, other)
-	d.lossTolerance = 0
-	time.Sleep(time.Millisecond)
-	require.False(t, d.ConsumeDuplicateLoss(highID), "the record expires")
+// A duplicate that stays busy is left open: closing it would cut more requests than one excuse covers.
+func TestDedupLeavesABusyDuplicateOpen(t *testing.T) {
+	d, preferred, other := newDedupFixture(-time.Second)
+	d.maxIdleWait = 20 * time.Millisecond
+	other.setStreams("/eth2/beacon_chain/req/beacon_blocks_by_range/2/ssz_snappy")
+	d.resolve(preferred)
+	require.False(t, other.IsClosed())
 }
 
-// A peer that keeps one connection and opens and closes another must not earn an exemption.
-func TestDedupIgnoresTheLossOfAConnectionNotPairedWithARemainingOne(t *testing.T) {
-	d, preferred, other := newDedupFixture(time.Minute)
+func TestDedupStopsWaitingWhenThePreferredConnectionCloses(t *testing.T) {
+	d, preferred, other := newDedupFixture(-time.Second)
+	d.maxIdleWait = time.Minute
+	other.setStreams("/eth2/beacon_chain/req/status/2/ssz_snappy")
+	done := make(chan struct{})
+	go func() { d.resolve(preferred); close(done) }()
+	preferred.closed.Store(true)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("still waiting for a duplicate of a connection that closed")
+	}
+	require.False(t, other.IsClosed())
+}
+
+// trackedDeduper is newDedupFixture with both connections registered and resolve not scheduled.
+func trackedDeduper(after time.Duration) (*connDeduper, *fakeConn, *fakeConn) {
+	d, preferred, other := newDedupFixture(after)
+	d.grace = time.Hour
+	d.Connected(d.net, preferred)
+	d.Connected(d.net, other)
+	return d, preferred, other
+}
+
+// The excuse counts from when the pair registered: a stream on a duplicate the remote closes fails
+// before this side is notified.
+func TestDedupExcusesOneFailurePerDuplicatePair(t *testing.T) {
+	d, _, _ := trackedDeduper(time.Second)
+	require.True(t, d.ConsumeDuplicateLoss(highID))
+	require.False(t, d.ConsumeDuplicateLoss(highID), "one pair excuses one failure")
+
+	d, preferred, other := trackedDeduper(time.Second)
 	n := d.net.(*fakeNetwork)
 	n.conns = []network.Conn{preferred}
 	d.Disconnected(n, other)
+	require.True(t, d.ConsumeDuplicateLoss(highID), "a closed duplicate still excuses a failure")
+
+	d, preferred, other = trackedDeduper(time.Second)
+	n = d.net.(*fakeNetwork)
+	n.conns = []network.Conn{preferred}
+	d.lossTolerance = 0
+	d.Disconnected(n, other)
+	time.Sleep(time.Millisecond)
+	require.False(t, d.ConsumeDuplicateLoss(highID), "the excuse expires after the close")
+}
+
+// The preferred connection replaces an older non-preferred one of any age, so that close is excused.
+// A non-preferred connection opened well after the preferred one is kept, so it excuses nothing.
+func TestDedupExcusesOnlyConnectionsItWouldClose(t *testing.T) {
+	d, _, _ := trackedDeduper(-time.Hour)
+	require.True(t, d.ConsumeDuplicateLoss(highID))
+
+	d, _, _ = trackedDeduper(simultaneousDialWindow + time.Second)
 	require.False(t, d.ConsumeDuplicateLoss(highID))
 
+	d, preferred, _ := trackedDeduper(time.Second)
+	d.conns[highID] = d.conns[highID][:1]
+	d.Connected(d.net, &fakeConn{remote: highID, dir: network.DirOutbound, opened: preferred.opened})
+	require.False(t, d.ConsumeDuplicateLoss(highID), "two preferred connections are never deduplicated")
+}
+
+func TestDedupForgetsAPeerWithNoConnectionLeft(t *testing.T) {
+	d, preferred, other := trackedDeduper(time.Second)
+	n := d.net.(*fakeNetwork)
 	n.conns = nil
 	d.Disconnected(n, preferred)
-	require.False(t, d.ConsumeDuplicateLoss(highID), "the last connection closing is a disconnect")
-}
-
-type closingNetwork struct {
-	fakeNetwork
-	calls int
-}
-
-// ConnsToPeer reports the remaining connection once, then none, as when ClosePeer closes both in parallel.
-func (n *closingNetwork) ConnsToPeer(peer.ID) []network.Conn {
-	n.calls++
-	if n.calls == 1 {
-		return n.conns
-	}
-	return nil
-}
-
-func TestDedupDoesNotKeepARecordForAPeerThatIsGone(t *testing.T) {
-	d, preferred, other := newDedupFixture(time.Second)
-	n := &closingNetwork{fakeNetwork: fakeNetwork{conns: []network.Conn{preferred}}}
+	require.Empty(t, d.conns)
 	d.Disconnected(n, other)
-	require.Empty(t, d.lost)
+	require.Empty(t, d.conns, "a later notification of a concurrent close adds nothing back")
 
-	d.lost[lowID] = time.Now().Add(-time.Hour)
-	d.recordLoss(highID)
-	require.NotContains(t, d.lost, lowID, "expired records are swept on insert")
-}
-
-type recordingCloseConn struct {
-	*fakeConn
-	onClose func()
-}
-
-func (c *recordingCloseConn) Close() error { c.onClose(); return c.fakeConn.Close() }
-
-// Closing resets the streams before the Disconnected notification, so the loss is recorded first.
-func TestDedupRecordsTheLossBeforeClosingADuplicate(t *testing.T) {
-	d, preferred, other := newDedupFixture(-time.Second)
-	recordedAtClose := false
-	dup := &recordingCloseConn{fakeConn: other, onClose: func() { _, recordedAtClose = d.lost[highID] }}
-	d.net.(*fakeNetwork).conns = []network.Conn{preferred, dup}
-	d.resolve(preferred)
-	require.True(t, other.IsClosed())
-	require.True(t, recordedAtClose)
+	d, preferred, other = trackedDeduper(-time.Hour)
+	n = d.net.(*fakeNetwork)
+	n.conns = []network.Conn{preferred}
+	d.lossTolerance = 0
+	d.Disconnected(n, other)
+	time.Sleep(time.Millisecond)
+	d.Disconnected(n, &fakeConn{remote: highID})
+	require.Len(t, d.conns[highID], 1, "expired connections are dropped")
 }
 
 // barrierGater holds each secured checkpoint until the host has reached it for both its outbound
@@ -358,18 +386,23 @@ func (h *dedupHost) addrInfo(t *testing.T, transport string) peer.AddrInfo {
 	return peer.AddrInfo{}
 }
 
+func dialEachOther(t *testing.T, a, b *dedupHost, transports [2]string) {
+	t.Helper()
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	go func() { <-start; errs <- a.Connect(t.Context(), b.addrInfo(t, transports[0])) }()
+	go func() { <-start; errs <- b.Connect(t.Context(), a.addrInfo(t, transports[1])) }()
+	close(start)
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+}
+
 func TestDedupSimultaneousDialKeepsExactlyOneConnection(t *testing.T) {
 	for _, transports := range [][2]string{{"tcp", "tcp"}, {"quic", "quic"}, {"tcp", "quic"}, {"quic", "tcp"}} {
 		t.Run(transports[0]+"-"+transports[1], func(t *testing.T) {
 			for range 3 {
 				a, b := newDedupHost(t), newDedupHost(t)
-				start := make(chan struct{})
-				errs := make(chan error, 2)
-				go func() { <-start; errs <- a.Connect(t.Context(), b.addrInfo(t, transports[0])) }()
-				go func() { <-start; errs <- b.Connect(t.Context(), a.addrInfo(t, transports[1])) }()
-				close(start)
-				require.NoError(t, <-errs)
-				require.NoError(t, <-errs)
+				dialEachOther(t, a, b, transports)
 
 				require.Eventually(t, func() bool {
 					return len(a.Network().ConnsToPeer(b.ID())) == 1 && len(b.Network().ConnsToPeer(a.ID())) == 1
@@ -380,6 +413,44 @@ func TestDedupSimultaneousDialKeepsExactlyOneConnection(t *testing.T) {
 				require.True(t, b.deduper.preferred(cb))
 				require.True(t, ca.LocalMultiaddr().Equal(cb.RemoteMultiaddr()), "both sides keep the same connection")
 				require.Zero(t, a.zeroConns.Load()+b.zeroConns.Load(), "a peer must never be left without a connection")
+			}
+		})
+	}
+}
+
+// When the remote closes a duplicate, a stream on it fails before the Disconnected notification, and
+// on QUIC before the connection reports closed, so the failure must be excused without either.
+func TestDedupExcusesAStreamCutByTheRemoteClosingADuplicate(t *testing.T) {
+	for _, transports := range [][2]string{{"tcp", "tcp"}, {"quic", "quic"}, {"tcp", "quic"}, {"quic", "tcp"}} {
+		t.Run(transports[0]+"-"+transports[1], func(t *testing.T) {
+			for range 5 {
+				a, b := newDedupHost(t), newDedupHost(t)
+				a.deduper.grace, b.deduper.grace = time.Hour, time.Hour
+				dialEachOther(t, a, b, transports)
+				require.Eventually(t, func() bool {
+					return len(a.Network().ConnsToPeer(b.ID())) == 2 && len(b.Network().ConnsToPeer(a.ID())) == 2
+				}, 5*time.Second, 10*time.Millisecond)
+
+				var dupA, dupB network.Conn
+				for _, c := range a.Network().ConnsToPeer(b.ID()) {
+					if !a.deduper.preferred(c) {
+						dupA = c
+					}
+				}
+				for _, c := range b.Network().ConnsToPeer(a.ID()) {
+					if !b.deduper.preferred(c) {
+						dupB = c
+					}
+				}
+				s, err := dupA.NewStream(t.Context())
+				require.NoError(t, err)
+				excused := make(chan bool, 1)
+				go func() {
+					_, err := s.Read(make([]byte, 1))
+					excused <- err != nil && a.deduper.ConsumeDuplicateLoss(b.ID())
+				}()
+				require.NoError(t, dupB.Close())
+				require.True(t, <-excused)
 			}
 		})
 	}

@@ -174,17 +174,20 @@ func (s *SentinelServer) BanPeerForInvalidData(_ context.Context, p *sentinelpro
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
-// dropOnFailure reports whether a failed request drops pid: only at the peer limit, and not right
-// after one of its duplicate connections closed, which can cut the request. It is asked when the
-// request fails, because the duplicate can close while the request runs, and it uses up the loss
-// only when the peer would otherwise be dropped.
-func (s *SentinelServer) dropOnFailure(pid peer.ID) bool {
+// dropOnFailure reports whether a request that failed with err drops pid: only at the peer limit,
+// unless the failure is excused by a duplicate loss. It is asked when the request fails, as the
+// duplicate can close while it runs, and uses up the loss only when the peer would otherwise be
+// dropped. A cut stream cannot exceed the response cap, so an over-cap response is never excused.
+func (s *SentinelServer) dropOnFailure(pid peer.ID, err error) bool {
 	activePeers, _, _ := s.peerRequestBackend.GetPeersCount()
-	return activePeers >= int(s.peerRequestBackend.Config().MaxPeerCount) && !s.peerRequestBackend.ConsumeDuplicateLoss(pid)
+	if activePeers < int(s.peerRequestBackend.Config().MaxPeerCount) {
+		return false
+	}
+	return errors.Is(err, httpreqresp.ErrResponseTooLarge) || !s.peerRequestBackend.ConsumeDuplicateLoss(pid)
 }
 
-func (s *SentinelServer) dropFailedPeer(pid peer.ID) {
-	if s.dropOnFailure(pid) {
+func (s *SentinelServer) dropFailedPeer(pid peer.ID, err error) {
+	if s.dropOnFailure(pid, err) {
 		s.dropPeer(pid)
 	}
 }
@@ -244,7 +247,7 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		// don't ban the peer.
 		//	return nil, errorMessage
 		//}
-		s.dropFailedPeer(pid)
+		s.dropFailedPeer(pid, errorMessage)
 		return nil, errorMessage
 	}
 	// we should never get an invalid response to this. our responder should always set it on non-error response
@@ -264,11 +267,11 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			s.dropFailedPeer(pid)
+			s.dropFailedPeer(pid, err)
 			return nil, err
 		}
 		if responseCode != httpreqresp.ResponseCodeResourceUnavailable {
-			s.dropFailedPeer(pid)
+			s.dropFailedPeer(pid, nil)
 		}
 		return nil, &PeerResponseError{
 			Code:    responseCode,
@@ -285,7 +288,7 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		// An over-cap flood surfaces here as ErrResponseTooLarge rather than a non-2xx status, so
 		// drop the peer as the status path above would.
 		if errors.Is(err, httpreqresp.ErrResponseTooLarge) {
-			s.dropFailedPeer(pid)
+			s.dropFailedPeer(pid, err)
 		}
 		return nil, err
 	}

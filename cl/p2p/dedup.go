@@ -7,7 +7,6 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
 )
 
 const (
@@ -24,16 +23,25 @@ const (
 // rejects a connection and never closes a preferred one, so a dead connection cannot block a new one
 // and a peer is not left with no connection.
 type connDeduper struct {
+	network.NoopNotifiee
+
 	local         peer.ID
 	net           network.Network
 	grace         time.Duration // a preferred connection must stay open this long before the others close
-	window        time.Duration // connections opened this close together come from a simultaneous dial
 	idlePoll      time.Duration
 	maxIdleWait   time.Duration
 	lossTolerance time.Duration
 
-	mu   sync.Mutex
-	lost map[peer.ID]time.Time // when a peer last lost a duplicate of a connection it kept
+	mu    sync.Mutex
+	conns map[peer.ID][]*trackedConn
+}
+
+// trackedConn is a connection between its Connected notification and lossTolerance after its
+// Disconnected one.
+type trackedConn struct {
+	conn     network.Conn
+	closedAt time.Time
+	excused  bool
 }
 
 func newConnDeduper(local peer.ID, n network.Network) *connDeduper {
@@ -41,17 +49,22 @@ func newConnDeduper(local peer.ID, n network.Network) *connDeduper {
 		local:         local,
 		net:           n,
 		grace:         duplicateConnGrace,
-		window:        simultaneousDialWindow,
 		idlePoll:      duplicateConnIdlePoll,
 		maxIdleWait:   duplicateConnMaxIdleWait,
 		lossTolerance: duplicateLossTolerance,
-		lost:          make(map[peer.ID]time.Time),
+		conns:         make(map[peer.ID][]*trackedConn),
 	}
 }
 
 // preferred reports whether c was dialled by the peer with the lower ID.
 func (d *connDeduper) preferred(c network.Conn) bool {
 	return (c.Stat().Direction == network.DirOutbound) == (d.local < c.RemotePeer())
+}
+
+// duplicateOf reports whether resolve closes dup to keep keep, on the side that applies the rule:
+// a non-preferred connection opened before a preferred one, or shortly after it.
+func (d *connDeduper) duplicateOf(dup, keep network.Conn) bool {
+	return !d.preferred(dup) && d.preferred(keep) && dup.Stat().Opened.Sub(keep.Stat().Opened) <= simultaneousDialWindow
 }
 
 // resolve closes the duplicates that the arrival of c makes redundant. A new preferred connection
@@ -74,31 +87,28 @@ func (d *connDeduper) resolve(c network.Conn) {
 	if c.Stat().Direction != network.DirOutbound {
 		return
 	}
-	opened := c.Stat().Opened
 	for _, other := range conns {
-		if !d.preferred(other) {
-			continue
-		}
-		if age := opened.Sub(other.Stat().Opened); age >= 0 && age <= d.window {
+		if !other.Stat().Opened.After(c.Stat().Opened) && d.duplicateOf(c, other) {
 			d.closeWhenIdle(c, other)
 			return
 		}
 	}
 }
 
-// closeWhenIdle closes dup once it carries no request streams, or after maxIdleWait, unless keep
-// has closed in the meantime. Gossipsub streams do not count: gossipsub reopens them on the
-// remaining connection.
+// closeWhenIdle closes dup once it carries no request streams, unless keep closes first. A duplicate
+// that stays busy for maxIdleWait is left open. Gossipsub streams do not count: gossipsub reopens
+// them on the remaining connection.
 func (d *connDeduper) closeWhenIdle(dup, keep network.Conn) {
 	deadline := time.Now().Add(d.maxIdleWait)
-	for hasRequestStreams(dup) && time.Now().Before(deadline) {
+	for hasRequestStreams(dup) {
+		if keep.IsClosed() || !time.Now().Before(deadline) {
+			return
+		}
 		time.Sleep(d.idlePoll)
 	}
 	if keep.IsClosed() || dup.IsClosed() {
 		return
 	}
-	// Close resets the streams before the Disconnected notification, so the loss is recorded first.
-	d.recordLoss(dup.RemotePeer())
 	_ = dup.Close()
 }
 
@@ -111,56 +121,60 @@ func hasRequestStreams(c network.Conn) bool {
 	return false
 }
 
-// ConsumeDuplicateLoss reports whether pid lost a duplicate connection within the tolerance, and
-// forgets it, so one closed duplicate excuses one failure. A request or handshake cut by that close is
-// not the peer's fault.
+// ConsumeDuplicateLoss reports whether a failure with pid may come from closing one of its duplicate
+// connections, and uses that up: each duplicate pair excuses one failure. A request or handshake cut
+// by that close is not the peer's fault. The pair counts from when both connections registered, not
+// from the close, because a stream on a connection the remote closes can fail before this side sees
+// the close.
 func (d *connDeduper) ConsumeDuplicateLoss(pid peer.ID) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	at, ok := d.lost[pid]
-	delete(d.lost, pid)
-	return ok && time.Since(at) <= d.lossTolerance
-}
-
-func (d *connDeduper) recordLoss(pid peer.ID) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
 	now := time.Now()
-	for p, at := range d.lost {
-		if now.Sub(at) > d.lossTolerance {
-			delete(d.lost, p)
+	conns := d.conns[pid]
+	for _, dup := range conns {
+		if dup.excused || d.expired(dup, now) {
+			continue
+		}
+		for _, keep := range conns {
+			if !d.expired(keep, now) && d.duplicateOf(dup.conn, keep.conn) {
+				dup.excused = true
+				return true
+			}
 		}
 	}
-	d.lost[pid] = now
+	return false
+}
+
+func (d *connDeduper) expired(c *trackedConn, now time.Time) bool {
+	return !c.closedAt.IsZero() && now.Sub(c.closedAt) > d.lossTolerance
 }
 
 func (d *connDeduper) Connected(_ network.Network, c network.Conn) {
+	d.mu.Lock()
+	pid := c.RemotePeer()
+	d.conns[pid] = append(d.conns[pid], &trackedConn{conn: c})
+	d.mu.Unlock()
 	time.AfterFunc(d.grace, func() { d.resolve(c) })
 }
 
-// Disconnected records the loss of c only when a remaining connection was opened within the
-// simultaneous-dial window of it. A peer that keeps an older connection and closes a newer one gets
-// no exemption.
 func (d *connDeduper) Disconnected(n network.Network, c network.Conn) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	pid := c.RemotePeer()
-	opened := c.Stat().Opened
-	paired := false
-	for _, other := range n.ConnsToPeer(pid) {
-		if gap := opened.Sub(other.Stat().Opened); gap >= -d.window && gap <= d.window {
-			paired = true
-			break
+	// Checked under the lock, so of the connections closing concurrently the last one sees none left.
+	if len(n.ConnsToPeer(pid)) == 0 {
+		delete(d.conns, pid)
+		return
+	}
+	now := time.Now()
+	kept := d.conns[pid][:0]
+	for _, t := range d.conns[pid] {
+		if t.conn == c {
+			t.closedAt = now
+		}
+		if !d.expired(t, now) {
+			kept = append(kept, t)
 		}
 	}
-	if paired {
-		d.recordLoss(pid)
-	}
-	// The other connections may be closing concurrently; a peer left with none keeps no record.
-	if len(n.ConnsToPeer(pid)) == 0 {
-		d.mu.Lock()
-		delete(d.lost, pid)
-		d.mu.Unlock()
-	}
+	d.conns[pid] = kept
 }
-
-func (d *connDeduper) Listen(network.Network, ma.Multiaddr)      {}
-func (d *connDeduper) ListenClose(network.Network, ma.Multiaddr) {}

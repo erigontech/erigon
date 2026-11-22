@@ -169,6 +169,17 @@ func TestStatusReadCutByADuplicateCloseIsRetried(t *testing.T) {
 	require.False(t, kept, "a fork mismatch on the retry still disconnects the peer")
 }
 
+// A duplicate close leaves the peer connected, so a peer with no connection left is not excused.
+func TestDuplicateLossDoesNotExcuseAPeerThatIsGone(t *testing.T) {
+	local, remote := connectedPair(t)
+	s := testSentinel(t, local)
+	s.p2p = stubP2P{host: local, lostDuplicate: true}
+	require.True(t, s.ConsumeDuplicateLoss(remote.ID()))
+	require.NoError(t, local.Network().ClosePeer(remote.ID()))
+	waitDisconnected(t, local, remote.ID())
+	require.False(t, s.ConsumeDuplicateLoss(remote.ID()))
+}
+
 func TestOnConnectionLogsActualTransport(t *testing.T) {
 	tests := []struct {
 		name       string
