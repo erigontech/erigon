@@ -133,6 +133,8 @@ FOLLOWER=$(url eez-follower l2-rpc)
 # Kurtosis names a service's container after the service and its UUID.
 signer2_uuid=$(awk '$2 == "eez-proof-signer-2" {print $1}' <<< "$services")
 [[ $signer2_uuid =~ ^[0-9a-f]{32}$ ]] || fail "no UUID of eez-proof-signer-2"
+signer2=$(docker ps -q --filter "name=^eez-proof-signer-2--$signer2_uuid\$")
+[ -n "$signer2" ] && [ "$(wc -l <<< "$signer2")" -eq 1 ] || fail "no single container of eez-proof-signer-2"
 
 threshold=$(cast call --rpc-url "$L1" "$manager" 'threshold()(uint256)')
 [ "$threshold" = 2 ] || fail "manager threshold $threshold"
@@ -243,12 +245,10 @@ log "effects settled past $target"
 # A batch proven before the pause may still settle, up to the head at the
 # pause; none past it can.
 log "attester outage: pausing eez-proof-signer-2"
-signer2=$(docker ps -q --filter "name=^eez-proof-signer-2--$signer2_uuid\$")
-[ "$(wc -l <<< "$signer2")" -eq 1 ] && [ -n "$signer2" ] || fail "no single container of eez-proof-signer-2"
 mark=$(wc -l < "$OUT/erigon.log")
-paused_at=$(head_number)
 docker pause "$signer2" > /dev/null
 PAUSED=$signer2
+paused_at=$(head_number)
 for _ in $(seq $((2 * l1_s))); do
 	settled=$(settled_number)
 	[ "$settled" -le "$paused_at" ] || fail "L1 settled block $settled, past $paused_at, with one attester of a threshold-2 manager"
