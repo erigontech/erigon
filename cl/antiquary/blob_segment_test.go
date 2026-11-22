@@ -19,10 +19,25 @@ package antiquary
 import (
 	"testing"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // frozenSegments models the snapshot frontiers by where the last blob and block segments end.
@@ -81,4 +96,53 @@ func TestNextBlobSegmentKeepsTheBacklogForCompressionParallelism(t *testing.T) {
 	require.True(t, ok)
 	require.False(t, isBlobBacklog(from, to))
 	require.True(t, isBlobBacklog(from, backlogTo), "two pending segments are a catch-up")
+}
+
+// A sidecar file lost under a surviving count row is a hole: the segment waits for the file instead of failing the dump.
+func TestAntiquateBlobsWaitsForALostSidecarFile(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	const slot = uint64(7)
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	writeStateFixture(t, dirs.Snap, "beaconblocks", 0, limit, logger)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = 0
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &cfg, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	root := common.Hash{byte(slot)}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(tx, slot, root)
+	}))
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	block.Block.Slot = slot
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	reader := tests.NewMockBlockReader()
+	reader.U[slot] = block
+
+	fs := afero.NewMemMapFs()
+	storage := blob_storage.NewBlobStore(db, fs)
+	sidecar := &cltypes.BlobSidecar{
+		SignedBlockHeader:        &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: slot}},
+		CommitmentInclusionProof: solid.NewHashVector(cltypes.CommitmentBranchSize),
+	}
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{sidecar}))
+	require.NoError(t, fs.RemoveAll("0"))
+
+	a := NewAntiquary(t.Context(), storage, nil, nil, &cfg, dirs, nil, db, nil, sn, reader, nil, logger, false, false, true, true, nil)
+	blobSegment := snaptype.BlobSidecars.FileInfo(dirs.Snap, 0, limit).Path
+
+	require.NoError(t, a.antiquateBlobs())
+	require.NoFileExists(t, blobSegment)
+	require.Equal(t, slot, mxBlobRetirementGapSlot.GetValueUint64())
+
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{sidecar}))
+	require.NoError(t, a.antiquateBlobs())
+	require.FileExists(t, blobSegment)
+	require.Equal(t, uint64(limit), sn.FrozenBlobs())
+	count, err := storage.KzgCommitmentsCount(t.Context(), root)
+	require.NoError(t, err)
+	require.Zero(t, count, "the retired sidecars are pruned from the store")
 }
