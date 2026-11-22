@@ -43,3 +43,39 @@ func TestABlockOpenedOnAnImportedParentDoesNotSeeTheAbandonedPreExec(t *testing.
 	require.Len(t, br.Block.Transactions(), 2)
 	require.Equal(t, proposed2.Hash(), br.Block.Hash(), "the replica builds the proposer's next block")
 }
+
+// The same when the replica had also sealed its own, different, block below the one it abandons: the next block reads
+// the imported chain, not the replica's sealed block.
+func TestABlockOpenedOnAnImportedChainDoesNotSeeTheReplicasOwnSealedFork(t *testing.T) {
+	replica := newRoundHarness(t)
+	proposer := newRoundHarnessWithKeys(t, replica.keys)
+	genesis, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
+	require.NoError(t, err)
+
+	paramsR1, inR1 := replica.attrs(genesis)
+	own1 := replica.sealRounds(paramsR1, inR1, [][][]byte{{replica.signed(0, 0, nil, 200_000, counterInit)}})
+
+	paramsP1, inP1 := proposer.attrs(genesis)
+	proposed1 := proposer.sealRounds(paramsP1, inP1, [][][]byte{{replica.signed(0, 0, nil, 200_000, counterInit), replica.signed(1, 0, nil, 200_000, counterInit)}})
+	paramsP2, inP2 := proposer.attrs(proposed1.Header())
+	proposed2 := proposer.sealRounds(paramsP2, inP2, [][][]byte{{replica.signed(0, 1, nil, 200_000, counterInit)}})
+
+	_, inR2 := replica.attrs(own1.Header())
+	_, _, vr, err := replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, inR2, [][]byte{replica.signed(0, 1, nil, 200_000, counterInit)})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
+	require.NoError(t, insertValidateAndUfc1By1(replica.ctx, replica.m.ExecModule, []*types.Block{proposed1, proposed2}))
+
+	third := [][][]byte{{replica.signed(1, 1, nil, 200_000, counterInit)}}
+	paramsP3, inP3 := proposer.attrs(proposed2.Header())
+	proposed3 := proposer.sealRounds(paramsP3, inP3, third)
+
+	params3, in3 := replica.attrs(proposed2.Header())
+	_, _, vr, err = replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in3, third[0])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
+	require.Len(t, vr.RoundKeptHashes, 1)
+	br, err := replica.m.ExecModule.SealBlock(replica.ctx, params3, false)
+	require.NoError(t, err)
+	require.Equal(t, proposed3.Hash(), br.Block.Hash(), "the replica builds the proposer's next block")
+}
