@@ -163,7 +163,7 @@ jobs:
     name: quorum (pinned)
     needs: images
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: read
@@ -224,6 +224,12 @@ jobs:
           EEZ: ${{ github.workspace }}/build/bin/eez
           OUT: ${{ github.workspace }}/quorum
         run: bash eez/tools/devnet/quorum.sh
+
+      # The script dumps the enclave on exit; a job timeout skips that.
+      - name: Dump the enclave
+        if: always()
+        run: |
+          [ -d quorum/enclave ] || kurtosis enclave dump "$KURTOSIS_ENCLAVE" quorum/enclave > /dev/null 2>&1 || true
 
       - name: Upload logs
         if: always()
