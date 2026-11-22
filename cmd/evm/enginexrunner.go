@@ -80,8 +80,8 @@ var engineXTestCommand = cli.Command{
 	},
 }
 
-// engineXNamedTest locates a test in its fixture file. Workers decode it
-// only when they run it, so the corpus is never held in memory at once.
+// engineXNamedTest locates a test in its fixture file. Indexing decodes each
+// test once and keeps only its location; a worker decodes it again when it runs it.
 type engineXNamedTest struct {
 	name   string
 	file   string

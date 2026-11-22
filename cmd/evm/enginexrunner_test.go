@@ -32,6 +32,7 @@ func TestLoadEngineXGroupsReadsEachTestBack(t *testing.T) {
 		for _, test := range tests {
 			def, err := test.definition()
 			require.NoError(t, err)
+			require.Nil(t, test.raw)
 			require.Equal(t, key, engineXGroupKey{fork: def.Fork, hash: def.PreAllocHash})
 			lastBlocks[test.name] = *def.LastBlockHash
 			if test.name == "one" {
