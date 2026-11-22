@@ -30,6 +30,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/anacrolix/chansync"
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/go-stack/stack"
@@ -130,7 +131,7 @@ type TxPool struct {
 	_chainDB               kv.TemporalRoDB // remote db - use it wisely
 	_stateCache            kvcache.Cache
 	poolDB                 kv.RwDB
-	lock                   *sync.Mutex
+	lock                   sync.Mutex
 	recentlyConnectedPeers *recentlyConnectedPeers // all txns will be propagated to this peers eventually, and clear list
 	senders                *sendersBatch
 	// batch processing of remote transactions
@@ -161,7 +162,7 @@ type TxPool struct {
 	stateBlockHash          common.Hash      // Head of the pool's state view; pins frame validation to the same block
 	activation              bogotaActivation // Canonical-head activation, with crossings retained until an update succeeds
 	lastSeenBlock           atomic.Uint64
-	lastSeenCond            *sync.Cond
+	stateChanged            chansync.BroadcastCond
 	lastFinalizedBlock      atomic.Uint64
 	started                 atomic.Bool
 	pendingBaseFee          atomic.Uint64
@@ -253,11 +254,7 @@ func New(
 
 	configChainID := chainConfig.ChainID
 
-	lock := &sync.Mutex{}
-
 	res := &TxPool{
-		lock:                    lock,
-		lastSeenCond:            sync.NewCond(lock),
 		byHash:                  map[string]*metaTxn{},
 		isLocalLRU:              localsHistory,
 		discardReasonsLRU:       discardHistory,
@@ -338,7 +335,7 @@ func (p *TxPool) markStateStaleLocked() {
 	for _, mt := range p.all.senderIDFrameTxn {
 		p.parkFrameLocked(mt, "state recovery pending")
 	}
-	p.lastSeenCond.Broadcast()
+	p.stateChanged.Broadcast()
 	p.publishDepthMetrics()
 }
 
@@ -473,7 +470,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 			}
 			p.lastSeenBlock.Store(block)
 		}
-		p.lastSeenCond.Broadcast()
+		p.stateChanged.Broadcast()
 	}()
 
 	pendingPre := p.pending.Len()
@@ -934,73 +931,39 @@ func (p *TxPool) Started() bool {
 	return p.started.Load()
 }
 
+func (p *TxPool) waitForBlock(ctx context.Context, n int, onTopOf uint64, stop <-chan struct{}) bool {
+	last := p.lastSeenBlock.Load()
+	if last >= onTopOf {
+		return true
+	}
+	p.logger.Trace("[txpool] Waiting for block", "expecting", onTopOf, "lastSeen", last, "txRequested", n)
+	return p.waitForCondition(ctx, stop, func() bool {
+		return p.lastSeenBlock.Load() >= onTopOf
+	})
+}
+
+var errParentBlockRewound = errors.New("txpool head rewound below the requested parent")
+
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	parentBlockWaitStop <-chan struct{},
 	availableGas mdgas.FullMdGas,
 	yielded mapset.Set[[32]byte], availableRlpSpace int,
 ) (bool, int, error) {
-	// sync.Cond has no notion of a context, so a caller that goes away while parked below would
-	// sleep until the next block broadcast the condition, or forever while the chain is stalled.
-	// Broadcasting on cancellation or on a stopped wait wakes it; every waiter rechecks its own
-	// condition anyway. The broadcast takes the lock so it cannot land between the check below and
-	// the wait, which is the window where a wakeup would be lost.
-	watchParentBlockWaitStop := parentBlockWaitStop
-	// An already closed stop needs no watcher; its broadcast and join would contend on every later call.
-	select {
-	case <-watchParentBlockWaitStop:
-		watchParentBlockWaitStop = nil
-	default:
-	}
-	stopWatching, watcherDone := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(watcherDone)
-		select {
-		case <-ctx.Done():
-		case <-watchParentBlockWaitStop:
-		case <-stopWatching:
-			return
+	for p.waitForBlock(ctx, n, onTopOf, parentBlockWaitStop) {
+		onTime, count, err := p.selectBest(ctx, n, txns, onTopOf, availableGas, yielded, availableRlpSpace)
+		if !errors.Is(err, errParentBlockRewound) {
+			return onTime, count, err
 		}
-		p.lock.Lock()
-		p.lastSeenCond.Broadcast()
-		p.lock.Unlock()
-	}()
-	// Joined rather than merely told to stop: with the context already ended the watcher can pick
-	// either case, and one that picked cancellation would otherwise take the lock after this call
-	// had returned. Registered before the lock is taken, so it runs after the lock is released.
-	defer func() {
-		close(stopWatching)
-		<-watcherDone
-	}()
+	}
+	p.logger.Debug("[txpool] Parent block wait stopped", "expecting", onTopOf, "lastSeen", p.lastSeenBlock.Load())
+	return false, 0, ctx.Err()
+}
 
-	p.lock.Lock()
-	for last := p.lastSeenBlock.Load(); last < onTopOf; last = p.lastSeenBlock.Load() {
-		select {
-		case <-ctx.Done():
-			// Leaving with the lock held would stop every later pool operation, not just this one.
-			p.lock.Unlock()
-			return false, 0, ctx.Err()
-		case <-parentBlockWaitStop:
-			p.lock.Unlock()
-			p.logger.Debug("[txpool] Parent block wait stopped", "expecting", onTopOf, "lastSeen", last)
-			return false, 0, ctx.Err()
-		default:
-			// continue
-		}
-		p.logger.Trace("[txpool] Waiting for block", "expecting", onTopOf, "lastSeen", last, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
-		p.lastSeenCond.Wait()
-	}
-	// Important: poolDB.BeginRo has a RoTxsLimiter which is implemented using a weighted semaphore object. This means
-	// that we are dealing with 2 locks at a time. All other usages in the pool that use both p.lock and poolDB.BeginRo
-	// first acquire the RoTx and then acquire p.lock. However, here we do the opposite - we first acquire p.lock and
-	// then try to acquire a RoTx. This creates an opportunity for a deadlock if we've acquired p.lock but at the same
-	// time there has been a burst of goroutines (N=roTxsLimit) that have all acquired a RoTx and are now trying to
-	// acquire p.lock which we've acquired here (the goroutines processing announcements := <-p.newPendingTxns in p.Run
-	// are one example). One solution is to first acquire a RoTx here and then p.lock as everywhere else. However, this
-	// won't work well if we wait in the "Waiting for block" loop for a while since our RoTx will then see stale data.
-	// Instead, we can release p.lock once we're past "Waiting for block" -> try to acquire RoTx -> try to acquire
-	// p.lock again as everywhere else.
-	p.lock.Unlock()
+func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
+	availableGas mdgas.FullMdGas, yielded mapset.Set[[32]byte], availableRlpSpace int,
+) (bool, int, error) {
+	// Open a fresh snapshot after the wait. The read transaction limiter comes before the pool lock.
 	tx, err := p.poolDB.BeginRo(ctx)
 	if err != nil {
 		return false, 0, err
@@ -1009,6 +972,9 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
+	if p.lastSeenBlock.Load() < onTopOf {
+		return false, 0, errParentBlockRewound
+	}
 	if p.stateViewStale {
 		return false, 0, nil
 	}
@@ -1969,27 +1935,31 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 }
 
 func (p *TxPool) waitForStateRecovery(ctx context.Context) error {
-	if p.waitForCondition(ctx, func() bool { return !p.stateViewStale }) {
+	if p.waitForCondition(ctx, nil, func() bool {
+		p.lock.Lock()
+		defer p.lock.Unlock()
+		return !p.stateViewStale
+	}) {
 		return nil
 	}
 	return ctx.Err()
 }
 
-// The condition is evaluated with the pool lock held.
-func (p *TxPool) waitForCondition(ctx context.Context, ready func() bool) bool {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	// Serialize cancellation with Wait so its wakeup cannot be lost.
-	stop := context.AfterFunc(ctx, func() {
-		p.lock.Lock()
-		p.lastSeenCond.Broadcast()
-		p.lock.Unlock()
-	})
-	defer stop()
-	for !ready() && ctx.Err() == nil {
-		p.lastSeenCond.Wait()
+func (p *TxPool) waitForCondition(ctx context.Context, stop <-chan struct{}, ready func() bool) bool {
+	for {
+		// Subscribe before checking the condition so a concurrent update cannot be missed.
+		changed := p.stateChanged.Signaled()
+		if ready() {
+			return true
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return false
+		case <-stop:
+			return ready()
+		}
 	}
-	return ready()
 }
 
 // Head-change retries share one simulation deadline. Admission returns
@@ -2956,11 +2926,6 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 func (p *TxPool) Run(ctx context.Context) error {
 	defer p.logger.Info("[txpool] stopped")
 	defer p.poolDB.Close()
-	defer func() {
-		p.lock.Lock()
-		p.lastSeenCond.Broadcast() // to unblock .best() wait on cond
-		p.lock.Unlock()
-	}()
 	p.p2pFetcher.ConnectCore()
 	p.p2pFetcher.ConnectSentries()
 	defer p.p2pFetcher.Wait()

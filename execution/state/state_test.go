@@ -83,6 +83,7 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	domains.SetTxNum(txNum)
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	setup := New(NewReaderV3(domains.AsGetter(tx)))
+	setup.SetVersionMap(nil)
 	defer setup.Close()
 	require.NoError(t, setup.CreateAccount(addr, true))
 	require.NoError(t, setup.SetState(addr, key, valA))
@@ -93,6 +94,7 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 
 	// IBS for the next block — reads block-start state (slot=A) from domains.
 	ibs := New(NewReaderV3(domains.AsGetter(tx)))
+	ibs.SetVersionMap(nil)
 	defer ibs.Close()
 
 	// Tx1: A → B.
@@ -303,6 +305,8 @@ func TestSnapshot2(t *testing.T) {
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
 	state := New(NewReaderV3(domains.AsGetter(tx)))
+
+	state.SetVersionMap(nil)
 	defer state.Close()
 
 	stateobjaddr0 := toAddr([]byte("so0"))
@@ -382,6 +386,8 @@ func TestCodeResolve(t *testing.T) {
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
 	state := New(NewReaderV3(domains.AsGetter(tx)))
+
+	state.SetVersionMap(nil)
 	defer state.Close()
 
 	stateobjaddr0 := toAddr([]byte("so0"))
@@ -412,6 +418,7 @@ func TestCodeResolve(t *testing.T) {
 	require.NoError(t, err)
 
 	state1 := New(NewReaderV3(domains.AsGetter(tx)))
+
 	defer state1.Close()
 	state1.SetVersionMap(&VersionMap{})
 	state1.Prepare(&chain.Rules{}, accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, nil, nil)
@@ -422,7 +429,7 @@ func TestCodeResolve(t *testing.T) {
 	code, err := state1.GetCode(stateobjaddr0)
 	require.NoError(t, err)
 	require.Equal(t, del, code)
-	resolved, err := state1.ResolveCode(stateobjaddr0)
+	resolved, err := state1.ResolveCode(stateobjaddr0, true)
 	require.NoError(t, err)
 	require.Equal(t, target, resolved.Bytes)
 }
@@ -506,6 +513,8 @@ func TestDump(t *testing.T) {
 	require.NoError(t, err)
 
 	st := New(NewReaderV3(domains.AsGetter(tx)))
+
+	st.SetVersionMap(nil)
 	defer st.Close()
 
 	// generate a few entries
