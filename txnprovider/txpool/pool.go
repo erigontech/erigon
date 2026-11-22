@@ -1071,33 +1071,17 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 			}
 		}
 
-		// make sure we have enough gas in the caller to add this transaction.
-		// not an exact science using intrinsic gas but as close as we could hope for at
-		// this stage
+		// The gas limits determine whether a transaction fits. Until it executes,
+		// use its intrinsic gas to estimate the execution gas left for later
+		// candidates. From Prague onward, the calldata floor also applies.
 		if !isFrame {
-			authorizationLen := uint64(len(mt.TxnSlot.Txn.GetAuthorizations()))
 			to := mt.TxnSlot.Txn.GetTo()
-			intrinsicGasResult, _ = mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
-				Data:               make([]byte, mt.TxnSlot.GetDataLen()),
-				DataNonZeroLen:     uint64(mt.TxnSlot.GetDataNonZeroLen()),
-				AuthorizationsLen:  authorizationLen,
-				AccessListLen:      uint64(mt.TxnSlot.GetAccessListAddrCount()),
-				StorageKeysLen:     uint64(mt.TxnSlot.GetAccessListStorCount()),
-				IsContractCreation: mt.TxnSlot.IsCreation(),
-				IsSelfTransfer:     to != nil && *to == sender,
-				HasValue:           !mt.TxnSlot.GetValue().IsZero(),
-				IsEIP2:             true,
-				IsEIP2028:          true,
-				IsEIP3860:          isEIP3860,
-				IsEIP7623:          isEIP7623,
-				IsEIP7976:          isAmsterdam,
-				IsEIP7981:          isAmsterdam,
-				IsEIP2780:          isAmsterdam,
-			})
+			isSelfTransfer := to != nil && *to == sender
+			intrinsicGasResult, _ = poolIntrinsicGas(mt.TxnSlot.Txn, isSelfTransfer, isEIP3860, isEIP7623, isAmsterdam)
 		}
 		intrinsicGas := intrinsicGasResult.ExecutionGas
-		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
-			intrinsicGas = intrinsicGasResult.FloorGasCost
+		if isEIP7623 {
+			intrinsicGas = intrinsicGasResult.RequiredGas()
 		}
 		if intrinsicGas > availableGas.Execution {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
@@ -1251,6 +1235,32 @@ func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
 	return blobs
 }
 
+// poolIntrinsicGas takes isSelfTransfer from the caller because the pool may know
+// the sender even when the transaction's sender cache is empty. Only a known
+// match between sender and recipient qualifies for the lower EIP-2780 cost.
+func poolIntrinsicGas(txn types.Transaction, isSelfTransfer, isShanghai, isPrague, isAmsterdam bool) (mdgas.IntrinsicGasCalcResult, bool) {
+	accessList := txn.GetAccessList()
+	return mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+		Data: txn.GetData(),
+		// Use the on-tx authorization list length, not len(AuthAndNonces): per
+		// EIP-7702 the sender pays for every auth tuple regardless of validity,
+		// and AuthAndNonces only holds successfully-recovered entries.
+		AuthorizationsLen:  uint64(len(txn.GetAuthorizations())),
+		AccessListLen:      uint64(len(accessList)),
+		StorageKeysLen:     uint64(accessList.StorageKeys()),
+		IsContractCreation: txn.IsContractDeploy(),
+		IsSelfTransfer:     isSelfTransfer,
+		HasValue:           !txn.GetValue().IsZero(),
+		IsEIP2:             true,
+		IsEIP2028:          true,
+		IsEIP3860:          isShanghai,
+		IsEIP7623:          isPrague,
+		IsEIP7976:          isAmsterdam,
+		IsEIP7981:          isAmsterdam,
+		IsEIP2780:          isAmsterdam,
+	})
+}
+
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) (txpoolcfg.DiscardReason, error) {
 	return p.validateTxWithCells(txn, isLocal, stateCache, nil, false)
 }
@@ -1278,12 +1288,8 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		return txpoolcfg.Success, nil
 	}
 
-	// Use the on-tx authorization list length, not len(AuthAndNonces): per
-	// EIP-7702 the sender pays for every auth tuple regardless of validity,
-	// and AuthAndNonces only holds successfully-recovered entries.
-	auths := txn.Txn.GetAuthorizations()
 	if txn.TxType() == SetCodeTxnType {
-		if err := types.ValidateSetCodePrerequisites(auths, txn.IsCreation(), isPrague); err != nil {
+		if err := types.ValidateSetCodePrerequisites(txn.Txn.GetAuthorizations(), txn.IsCreation(), isPrague); err != nil {
 			//nolint:errorlint // ValidateSetCodePrerequisites returns these errors directly.
 			switch err {
 			case types.ErrSetCodePrePrague:
@@ -1312,23 +1318,8 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 
 	txnSender, senderOk := txn.Txn.GetSender()
 	to := txn.Txn.GetTo()
-	intrinsic, overflow := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
-		Data:               make([]byte, txn.GetDataLen()),
-		DataNonZeroLen:     uint64(txn.GetDataNonZeroLen()),
-		AuthorizationsLen:  uint64(len(auths)),
-		AccessListLen:      uint64(txn.GetAccessListAddrCount()),
-		StorageKeysLen:     uint64(txn.GetAccessListStorCount()),
-		IsContractCreation: txn.IsCreation(),
-		IsSelfTransfer:     senderOk && to != nil && txnSender.Value() == *to,
-		HasValue:           !txn.GetValue().IsZero(),
-		IsEIP2:             true,
-		IsEIP2028:          true,
-		IsEIP3860:          isEIP3860,
-		IsEIP7623:          isPrague,
-		IsEIP7976:          isAmsterdam,
-		IsEIP7981:          isAmsterdam,
-		IsEIP2780:          isAmsterdam,
-	})
+	isSelfTransfer := senderOk && to != nil && txnSender.Value() == *to
+	intrinsic, overflow := poolIntrinsicGas(txn.Txn, isSelfTransfer, isEIP3860, isPrague, isAmsterdam)
 	gasLimit := txn.GetGas()
 
 	if txn.Traced {
