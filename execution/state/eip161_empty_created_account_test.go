@@ -57,6 +57,7 @@ func runEmptiness(t *testing.T, mode emptinessMode, sc emptinessScenario, addr a
 		ibs = NewWithVersionMap(reader, NewVersionMap(nil))
 	} else {
 		ibs = New(reader)
+		ibs.SetVersionMap(nil)
 	}
 	defer ibs.Close()
 	ibs.SetTxContext(0, 0)
