@@ -20,6 +20,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -59,7 +60,8 @@ func requireGolden(t *testing.T, pkg, goldenPath, typeName, computed, slice stri
 	}
 	want, err := os.ReadFile(golden)
 	require.NoError(t, err)
-	require.Equal(t, string(want), string(got))
+	// A checkout may turn the golden file's line endings into CRLF, while the generator writes LF.
+	require.Equal(t, strings.ReplaceAll(string(want), "\r\n", "\n"), string(got))
 }
 
 // A field the generator cannot place must stop it, rather than produce a file that quietly
