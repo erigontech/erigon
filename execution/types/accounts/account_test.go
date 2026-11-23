@@ -512,7 +512,8 @@ func TestCanonTableKeepsIdentityAcrossGenerations(t *testing.T) {
 			for i := range 1000 {
 				var v common.Hash
 				v[0], v[1], v[2] = byte(g+1), byte(i), byte(i>>8)
-				require.Same(t, c.intern(v), c.intern(v))
+				first := c.intern(v)
+				require.Same(t, first, c.intern(v))
 				require.Same(t, held, c.intern(k))
 			}
 		})
