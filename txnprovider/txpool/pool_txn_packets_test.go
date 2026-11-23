@@ -354,6 +354,23 @@ func TestTransactionsPacket(t *testing.T) {
 	}
 }
 
+func TestPooledTransactionsSkipsSenderRecoveryFailure(t *testing.T) {
+	firstLegacy := hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)
+	dynamicFee := hexutil.MustDecodeHex(TxnParseMainnetTests[1].PayloadStr)
+	lastLegacy := hexutil.MustDecodeHex(TxnParseMainnetTests[3].PayloadStr)
+	packet := EncodePooledTransactions66([][]byte{firstLegacy, dynamicFee, lastLegacy}, 1, nil)
+
+	ctx := NewTxnParseContext(*uint256.NewInt(1))
+	ctx.signer = types.MakeFrontierSigner()
+	var slots TxnSlots
+	_, end, err := ParsePooledTransactions66(packet, 0, ctx, &slots, nil)
+	require.NoError(t, err)
+	require.Equal(t, len(packet), end)
+	require.Len(t, slots.Txns, 2)
+	require.Equal(t, firstLegacy, slots.Txns[0].Rlp)
+	require.Equal(t, lastLegacy, slots.Txns[1].Rlp)
+}
+
 func TestTransactionPacketCountLimit(t *testing.T) {
 	legacy := hexutil.MustDecodeHex("c98080808080801b0101")
 	txns := make([][]byte, maxTransactionsPerPacket+1)

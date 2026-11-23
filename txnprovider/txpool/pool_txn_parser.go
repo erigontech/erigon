@@ -459,7 +459,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 		addr, senderErr := txn.Sender(*signer)
 		if senderErr != nil {
-			return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, senderErr) //nolint
+			return p, fmt.Errorf("%w: %w: recovering sender from signature: %w", ErrRejected, ErrParseTxn, senderErr)
 		}
 		addrBytes := addr.Value()
 		copy(sender, addrBytes[:])
