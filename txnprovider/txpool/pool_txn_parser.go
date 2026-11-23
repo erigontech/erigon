@@ -495,7 +495,7 @@ type TxnSlot struct {
 	Traced   bool              // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
 	Size     uint32            // Byte length of the original Rlp, including any sidecar it carried. Stays valid after Rlp is cleared.
 
-	BlobBundles []PoolBlobBundle // Parsed blob bytes reference the input RLP
+	BlobBundles []PoolBlobBundle // Parsed blob bytes share the slot's copy of the network wrapper in Rlp.
 
 	// AuthAndNonces caches recovered authority/nonce pairs; nil means not recovered.
 	// Invalid tuples and authorizations for other chains are omitted.

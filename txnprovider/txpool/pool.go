@@ -745,6 +745,8 @@ func (p *TxPool) kickKZGOffenders(ctx context.Context, reasons []txpoolcfg.Disca
 	}()
 }
 
+// GetRlp returns the wire encoding for hash, or nil if it is unavailable.
+// Callers can keep or modify the returned bytes after tx ends.
 func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
 	var slot *TxnSlot
 	var raw []byte
@@ -757,12 +759,14 @@ func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
 	return readTxnRlp(tx, hash, slot, raw)
 }
 
-// readTxnRlp returns wire bytes owned by the caller. Capture slot and raw
-// under the pool lock so the database read and encoding can run after unlocking.
+// readTxnRlp returns caller-owned wire bytes. Capture raw with slot under the pool lock
+// because a flush can clear slot.Rlp as soon as the caller unlocks. The captured bytes
+// stay valid for copying, and the database read and encoding can run outside the lock.
 func readTxnRlp(tx kv.Tx, hash []byte, slot *TxnSlot, raw []byte) ([]byte, error) {
 	if raw != nil {
 		return bytes.Clone(raw), nil
 	}
+	// The snapshot may contain the row before the pool has restored the slot.
 	row, err := tx.GetOne(kv.PoolTransaction, hash)
 	if err != nil {
 		return nil, err
@@ -961,7 +965,9 @@ func (p *TxPool) waitForBlock(ctx context.Context, n int, onTopOf uint64, stop <
 	})
 }
 
-// best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
+// best fills txns with up to n pending transactions in priority order within the gas and RLP space budgets.
+// A true result means selection ran, even if the count is zero. With no error, false means
+// the parent wait stopped or the pool's state view was stale.
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	parentBlockWaitStop <-chan struct{},
 	availableGas mdgas.FullMdGas,
@@ -975,14 +981,13 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		if err := ctx.Err(); err != nil {
 			return false, 0, err
 		}
-		// Select from memory. A database snapshot opened before the pool lock can miss a flush,
-		// and waiting for a reader slot while holding the lock can deadlock with a reader.
+		// An unwind can lower the head after the wait returns. Recheck the height under
+		// the lock and keep it through selection so nothing is marked as yielded below
+		// the requested parent height.
 		p.lock.Lock()
 		if p.lastSeenBlock.Load() >= onTopOf {
 			break
 		}
-		// An unwind after the parent wait must send the caller back to the wait
-		// before any transactions are marked as yielded.
 		p.lock.Unlock()
 	}
 	defer p.lock.Unlock()
@@ -992,6 +997,9 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	return true, p.selectBestLocked(n, txns, onTopOf, availableGas, yielded, availableRlpSpace), nil
 }
 
+// selectBestLocked selects from memory while the caller holds the pool lock.
+// A snapshot opened before locking can miss rows written by a concurrent flush.
+// Waiting for a reader slot under the lock can deadlock with readers waiting for that same lock.
 func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 	availableGas mdgas.FullMdGas, yielded mapset.Set[[32]byte], availableRlpSpace int,
 ) int {
@@ -1172,6 +1180,8 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 	return txns, nil
 }
 
+// PeekBest fills txns with the selected wire encodings when it returns true and no error.
+// The bytes stay valid after return. Treat them as read-only because some share storage with the pool.
 func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error) {
 	onTime, _, err := p.best(ctx, n, txns, onTopOf, nil,
 		mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, math.MaxUint64), nil, math.MaxInt)
@@ -2384,8 +2394,6 @@ func (p *TxPool) sweepDormantQueued(ctx context.Context, currentBlock uint64, lo
 		dormancyBlocks = 1
 	}
 
-	// snapshot is populated inside the lock and persisted outside it, following the same
-	// pattern as flushLocked: hold the lock only for in-memory operations.
 	var snapshot map[uint64]uint64
 
 	func() {
@@ -2437,7 +2445,7 @@ func (p *TxPool) sweepDormantQueued(ctx context.Context, currentBlock uint64, lo
 
 		queuedLen = p.queued.Len()
 
-		// Snapshot the map for DB persistence while still holding the lock.
+		// Copy the map under the pool lock so later updates cannot change what this sweep writes.
 		snapshot = make(map[uint64]uint64, len(p.senderLastActivity))
 		maps.Copy(snapshot, p.senderLastActivity)
 	}()
@@ -3161,8 +3169,9 @@ func (p *TxPool) Run(ctx context.Context) error {
 func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	// Hold the pool lock through the commit so new database snapshots can see
-	// the rows whose in-memory encodings flushLocked released.
+	// Hold the pool lock through commit so other pool operations see the cleared encodings
+	// only after the write transaction ends. A snapshot opened before commit still sees
+	// the older database view after its reader takes the pool lock.
 	if err := p.poolDB.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		err = p.flushLocked(tx)
 		if err != nil {
