@@ -16,12 +16,13 @@ import (
 )
 
 func BenchmarkSeedEmptyRemovals(b *testing.B) {
-	for _, tc := range []struct{ balances, storage int }{
-		{32, 0},
-		{256, 0},
-		{1024, 0},
-		{2, 256},
-		{256, 256},
+	for _, tc := range []struct{ balances, storage, balanceStep, zeroEvery int }{
+		{balances: 32, balanceStep: 2, zeroEvery: 2},
+		{balances: 256, balanceStep: 2, zeroEvery: 2},
+		{balances: 1024, balanceStep: 2, zeroEvery: 2},
+		{balances: 2, storage: 256, balanceStep: 2, zeroEvery: 2},
+		{balances: 256, storage: 256, balanceStep: 2, zeroEvery: 2},
+		{balances: 768, storage: 3200, balanceStep: 1, zeroEvery: 385},
 	} {
 		b.Run(fmt.Sprintf("balances=%d/storage=%d", tc.balances, tc.storage), func(b *testing.B) {
 			bal := types.BlockAccessList{{
@@ -30,7 +31,7 @@ func BenchmarkSeedEmptyRemovals(b *testing.B) {
 			}}
 			for i := range tc.balances {
 				bal[0].BalanceChanges = append(bal[0].BalanceChanges, &types.BalanceChange{
-					Index: uint32(2*i + 1), Value: *uint256.NewInt(uint64((i + 1) % 2)),
+					Index: uint32(tc.balanceStep*i + 1), Value: *uint256.NewInt(uint64((i + 1) % tc.zeroEvery)),
 				})
 			}
 			if tc.storage > 0 {
@@ -41,12 +42,14 @@ func BenchmarkSeedEmptyRemovals(b *testing.B) {
 				bal[0].StorageChanges = []types.SlotChanges{{Slot: accounts.InternKey(common.Hash{31: 1}), Changes: changes}}
 			}
 			base := &countingAccountReader{}
+			var vm *VersionMap
 			for b.Loop() {
 				b.StopTimer()
-				vm := NewVersionMap(bal)
+				vm = NewVersionMap(bal)
 				b.StartTimer()
 				require.NoError(b, vm.SeedEmptyRemovals(true, false, base))
 			}
+			require.Len(b, vm.derivedRemovals, tc.balances/tc.zeroEvery)
 		})
 	}
 }

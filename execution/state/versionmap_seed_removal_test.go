@@ -403,6 +403,7 @@ func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 func TestSeedEmptyRemovalsRevivalIndexes(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0xd7a3"))
+	other := accounts.InternAddress(common.HexToAddress("0xd7a4"))
 	vm := NewVersionMap(types.BlockAccessList{{
 		Address: addr.Value(),
 		BalanceChanges: []*types.BalanceChange{
@@ -418,6 +419,15 @@ func TestSeedEmptyRemovalsRevivalIndexes(t *testing.T) {
 		},
 		NonceChanges: []*types.NonceChange{{Index: 13, Value: 1}},
 		CodeChanges:  []*types.CodeChange{{Index: 13, Bytecode: []byte{0x00}}},
+	}, {
+		Address: other.Value(),
+		BalanceChanges: []*types.BalanceChange{
+			{Index: 6}, {Index: 8, Value: *uint256.NewInt(1)}, {Index: 11}, {Index: 13, Value: *uint256.NewInt(2)},
+		},
+		StorageChanges: []types.SlotChanges{{
+			Slot:    accounts.InternKey(common.Hash{31: 1}),
+			Changes: []*types.StorageChange{{Index: 5, Value: *uint256.NewInt(1)}, {Index: 7, Value: *uint256.NewInt(2)}},
+		}},
 	}})
 	require.NoError(t, vm.SeedEmptyRemovals(true, false, &countingAccountReader{}))
 
@@ -434,6 +444,9 @@ func TestSeedEmptyRemovalsRevivalIndexes(t *testing.T) {
 	}
 	shared := requireDoneCell(t, balances, 9-1, 0)
 	require.Equal(t, *uint256.NewInt(5), shared.Value)
+	revival := requireDoneCell(t, vm.load(other).Balance, 7-1, 0)
+	require.Equal(t, ValueChanged, revival.valStatus)
+	require.True(t, revival.Value.IsZero())
 }
 
 func TestHasAmbiguousBaseAccount(t *testing.T) {

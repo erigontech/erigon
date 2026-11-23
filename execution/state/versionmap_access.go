@@ -336,6 +336,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 				candidates = append(candidates, c.Index)
 			}
 		}
+		singleNonFinalCandidate := len(candidates) == 1
 		candidates = append(candidates, maxIdx)
 		var revivals map[uint32]uint32
 		for _, idx := range candidates {
@@ -363,10 +364,19 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 			if idx == maxIdx {
 				continue
 			}
-			if revivals == nil {
-				revivals = balRevivalIndexes(ac)
+			var next uint32
+			if singleNonFinalCandidate {
+				next = balNextChangeIndex(ac, idx)
+				if _, hasBalance := balChangeAt(ac.BalanceChanges, (*types.BalanceChange).GetIndex, int(next)-1); hasBalance {
+					continue
+				}
+			} else {
+				if revivals == nil {
+					revivals = balRevivalIndexes(ac)
+				}
+				next = revivals[idx]
 			}
-			if next := revivals[idx]; next != 0 {
+			if next != 0 {
 				live := &WriteSet{}
 				live.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: int(next) - 1}}})
 				stamps = append(stamps, live)
@@ -400,12 +410,7 @@ type derivedRemovalKey struct {
 // the committed base for a base-present account's untouched fields.
 func (vm *VersionMap) SeedAddresses() {
 	for i := range vm.bal {
-		var minIdx uint32
-		balChangeIndexes(&vm.bal[i], func(idx uint32) {
-			if idx > 0 && (minIdx == 0 || idx < minIdx) {
-				minIdx = idx
-			}
-		})
+		minIdx := balNextChangeIndex(&vm.bal[i], 0)
 		if minIdx == 0 {
 			continue
 		}
@@ -436,6 +441,16 @@ func balNonBalanceChangeIndexes(ac *types.AccountChanges, fn func(uint32)) {
 			fn(c.Index)
 		}
 	}
+}
+
+func balNextChangeIndex(ac *types.AccountChanges, after uint32) uint32 {
+	var next uint32
+	balChangeIndexes(ac, func(idx uint32) {
+		if idx > after && (next == 0 || idx < next) {
+			next = idx
+		}
+	})
+	return next
 }
 
 // A removed account needs a zero balance at its first later change if that change
