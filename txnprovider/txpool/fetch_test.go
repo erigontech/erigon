@@ -1072,6 +1072,15 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 	frame.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1, Signature: make([]byte, 65)}}
 	var invalidFrame bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&invalidFrame))
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	emptyBlobHashes, err := types.SignTx(&types.BlobTx{
+		DynamicFeeTransaction: *types.NewEIP1559Transaction(u256.N1, 0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), uint256.NewInt(1e10), nil),
+		MaxFeePerBlobGas:      *uint256.NewInt(1),
+	}, *types.LatestSignerForChainID(&u256.N1), key)
+	require.NoError(t, err)
+	var emptyBlobHashesRlp bytes.Buffer
+	require.NoError(t, emptyBlobHashes.(*types.BlobTx).WithSidecar(&types.BlobTxWrapper{WrapperVersion: 1}).MarshalBinaryWrapped(&emptyBlobHashesRlp))
 
 	// Each sub-test sends a malformed message of a given type and asserts that PenalizePeer is called.
 	tests := []struct {
@@ -1098,6 +1107,11 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 			name: "invalid frame signature PooledTransactions66",
 			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
 			data: EncodePooledTransactions66([][]byte{invalidFrame.Bytes()}, 1, nil),
+		},
+		{
+			name: "empty blob hashes PooledTransactions66",
+			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+			data: EncodePooledTransactions66([][]byte{emptyBlobHashesRlp.Bytes()}, 1, nil),
 		},
 		{
 			name: "oversized Transactions66",
