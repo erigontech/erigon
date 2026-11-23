@@ -67,6 +67,9 @@ func sharedMember(ref, name, form string, t types.Type, omit bool) (*member, err
 			return nil, fmt.Errorf("shared data must be a fixed-size array, not %s", t)
 		}
 		m.appendFmt, m.size = "hexutil.AppendQuoted(b, %s[:])", len(`"0x"`)+2*int(a.Len())
+		if omit {
+			m.present = fmt.Sprintf("len(%s) > 0", ref)
+		}
 	default:
 		return nil, fmt.Errorf("ethjson:%q cannot be shared", form)
 	}

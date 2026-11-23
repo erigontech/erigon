@@ -32,6 +32,7 @@ type Position struct {
 type Item struct {
 	Position
 	Hash     common.Hash     `json:"hash" ethjson:"data,shared"`
+	Empty    [0]byte         `json:"empty,omitempty" ethjson:"data,shared"`
 	Index    uint64          `json:"index" ethjson:"quantity"`
 	Flag     bool            `json:"flag" ethjson:"bool,shared"`
 	Stamp    *hexutil.Uint64 `json:"stamp,omitempty" ethjson:"quantity,shared"`

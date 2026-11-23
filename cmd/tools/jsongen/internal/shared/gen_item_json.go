@@ -29,6 +29,9 @@ func (x *Item) MarshalFastJSONTo(s *jsonstream.Stream) error {
 func (x *Item) writeJSONFields(s *jsonstream.Stream) error {
 	ethjson.Quantity(s, "number", x.Position.Number)
 	ethjson.Data(s, "hash", x.Hash[:])
+	if len(x.Empty) > 0 {
+		ethjson.Data(s, "empty", x.Empty[:])
+	}
 	ethjson.Quantity(s, "index", x.Index)
 	s.Field("flag").WriteBool(x.Flag)
 	if x.Stamp != nil {
@@ -81,7 +84,7 @@ type itemsShared struct {
 	ok0  bool
 	key0 Item
 	len0 int
-	buf0 [105]byte
+	buf0 [118]byte
 	ok1  bool
 	key1 Item
 	len1 int
@@ -92,21 +95,27 @@ type itemsShared struct {
 	buf2 [61]byte
 }
 
-// group0 returns number, hash of x, encoded again only when they differ from the previous element's.
+// group0 returns number, hash, empty of x, encoded again only when they differ from the previous element's.
 func (c *itemsShared) group0(x *Item) []byte {
 	if c.ok0 &&
 		x.Position.Number == c.key0.Position.Number &&
-		x.Hash == c.key0.Hash {
+		x.Hash == c.key0.Hash &&
+		x.Empty == c.key0.Empty {
 		return c.buf0[:c.len0]
 	}
 	c.ok0 = true
 	c.key0.Position.Number = x.Position.Number
 	c.key0.Hash = x.Hash
+	c.key0.Empty = x.Empty
 	b := c.buf0[:0]
 	b = append(b, "\"number\":"...)
 	b = append(hexutil.AppendUint64(append(b, '"'), uint64(x.Position.Number)), '"')
 	b = append(b, ",\"hash\":"...)
 	b = hexutil.AppendQuoted(b, x.Hash[:])
+	if len(x.Empty) > 0 {
+		b = append(b, ",\"empty\":"...)
+		b = hexutil.AppendQuoted(b, x.Empty[:])
+	}
 	c.len0 = len(b)
 	return b
 }

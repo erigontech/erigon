@@ -33,22 +33,22 @@ var update = flag.Bool("update", false, "rewrite the golden files")
 // omitempty per kind, a pointer written as null, an embedded struct flattened, a promoted name
 // reached through its own selector, a json tag with no name, and the forms a field may declare.
 func TestGenerateSample(t *testing.T) {
-	requireGolden(t, "sample", "Sample", "writeComputedJSON", "")
+	requireGolden(t, "testdata/sample", "testdata/sample_golden.go.txt", "Sample", "writeComputedJSON", "")
 }
 
-// testdata/shared carries the shapes of a shared group: one that starts in an embedded struct,
-// one cut short by a field that is not shared, and one whose members may all be left out.
+// internal/shared carries the shapes of a shared group, and its golden file is its own generated
+// encoder, so that package's tests check the bytes this output writes.
 func TestGenerateShared(t *testing.T) {
-	requireGolden(t, "shared", "Item", "", "Items")
+	requireGolden(t, "internal/shared", "internal/shared/gen_item_json.go", "Item", "", "Items")
 }
 
-func requireGolden(t *testing.T, pkg, typeName, computed, slice string) {
+func requireGolden(t *testing.T, pkg, goldenPath, typeName, computed, slice string) {
 	t.Helper()
-	golden, err := filepath.Abs("testdata/" + pkg + "_golden.go.txt")
+	golden, err := filepath.Abs(goldenPath)
 	require.NoError(t, err)
 	out := filepath.Join(t.TempDir(), "gen_json.go")
 
-	t.Chdir("testdata/" + pkg)
+	t.Chdir(pkg)
 	require.NoError(t, run(typeName, out, computed, slice))
 	got, err := os.ReadFile(out)
 	require.NoError(t, err)
