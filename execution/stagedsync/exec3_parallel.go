@@ -3263,11 +3263,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			txResult := be.results[tx]
 			txVersion := txResult.Task.Version()
 
-			// Trust the worker's verdict only when no tx below this one wrote since it was
-			// stamped. Otherwise re-validate against the CURRENT versionMap: a predecessor
-			// may have changed or sealed since (including an in-flight Validated cell the
-			// reader early-broke on), so a stale verdict would commit against a value that
-			// has moved.
 			valid := be.arrivalValid(txVersion.TxIndex, txResult.ValStamp)
 
 			if valid {

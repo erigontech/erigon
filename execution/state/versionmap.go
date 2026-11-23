@@ -344,9 +344,7 @@ func (vm *VersionMap) mutEnd(txIdx int) {
 			}
 		}
 	}
-	for k := slot + 1; k <= st.n; k += k & -k {
-		st.inflight[k].Add(-1)
-	}
+	vm.mutAbort(txIdx)
 }
 
 // mutAbort ends a mutBegin that changed no verdict, so it leaves the write stamps as they were.
@@ -1697,10 +1695,9 @@ type cellMarks struct {
 	flag   statusFlag
 	fee    func(accounts.Address) bool
 	locked map[accounts.Address]struct{}
-	// A lock-free mark on a stamped map runs inside one mutBegin of wtx, which ends with a
-	// stamp only if a marked entry has lifecycle cells.
+	// A lock-free mark on a stamped map runs inside one mutBegin of the write set's tx, which
+	// ends with a stamp only if a marked entry has lifecycle cells.
 	stamping, lifecycle bool
-	wtx                 int
 }
 
 func (vm *VersionMap) markWrites(writes *WriteSet, flag statusFlag, isFeeRecipient func(accounts.Address) bool) {
@@ -1750,9 +1747,9 @@ func (vm *VersionMap) markWrites(writes *WriteSet, flag statusFlag, isFeeRecipie
 	}
 	if m.stamping {
 		if m.lifecycle {
-			vm.mutEnd(m.wtx)
+			vm.mutEnd(writes.txIndex())
 		} else {
-			vm.mutAbort(m.wtx)
+			vm.mutAbort(writes.txIndex())
 		}
 	}
 }
@@ -1768,7 +1765,7 @@ func markCell[T any](m *cellMarks, addr accounts.Address, vw *VersionedWrite[T])
 	}
 	if m.vm.stamps != nil && !m.stamping {
 		m.vm.mutBegin(vw.Version.TxIndex)
-		m.stamping, m.wtx = true, vw.Version.TxIndex
+		m.stamping = true
 	}
 	want := vw.Version.Incarnation
 	if m.flag == FlagDone {

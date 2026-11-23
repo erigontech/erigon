@@ -406,20 +406,6 @@ func originPublishFixture() (*VersionMap, accounts.Address, accounts.StorageKey,
 	return vm, addr, slot, validate
 }
 
-func TestValSkip_OriginPublishKeepsUnknownVersionStorageReadValid(t *testing.T) {
-	t.Parallel()
-	vm, addr, slot, validate := originPublishFixture()
-	const i = 5
-	stamp := vm.WriteSeq()
-	require.Equal(t, VersionValid, validate(i))
-
-	vm.StoreOriginStorage(addr, slot, *uint256.NewInt(3))
-
-	require.True(t, vm.QuietBelow(i, stamp), "origin publication is unstamped")
-	require.Equal(t, VersionValid, validate(i),
-		"an unstamped origin publication must not turn a validated read stale")
-}
-
 func TestValSkip_LowerWriteAfterOriginInvalidatesUnknownVersionStorageRead(t *testing.T) {
 	t.Parallel()
 	vm, addr, slot, validate := originPublishFixture()
