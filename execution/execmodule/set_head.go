@@ -64,6 +64,14 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 	defer resumeReadAhead()
 
+	// The transaction pins its snapshot files when it opens. Wait for builds
+	// first and keep them paused through commit so they cannot publish unwound state.
+	resumeFileBuilds, err := e.db.PauseStateFileBuilds(ctx)
+	if err != nil {
+		return fmt.Errorf("pause state file builds: %w", err)
+	}
+	defer resumeFileBuilds()
+
 	tx, err := e.db.BeginTemporalRw(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin rw transaction: %w", err)

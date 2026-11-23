@@ -102,8 +102,9 @@ type Aggregator struct {
 	buildsMissedAccessorsAfterOpen bool
 	workers                        workersCfg
 
-	// To keep DB small - need move data to small files ASAP.
-	// It means goroutine which creating small files - can't be locked by merge or indexing.
+	// Builds run independently of merges so new steps can be pruned promptly.
+	// A rewind also holds the gate, so waiters track actual builds separately.
+	fileBuildGate *semaphore.Weighted
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
 
@@ -148,6 +149,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*
 	a := &Aggregator{
 		ctx:                ctx,
 		ctxCancel:          ctxCancel,
+		fileBuildGate:      semaphore.NewWeighted(1),
 		observerCtx:        observerCtx,
 		observerCancel:     observerCancel,
 		onFilesChange:      func(frozenFileNames []string) {},
@@ -1201,6 +1203,34 @@ func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context, db kv.RoDB, maxR
 	return reorgSafeBlock, reorgSafeStep, ok
 }
 
+// PauseStateFileBuilds waits for any active build to finish and prevents new
+// state-file builds until the caller invokes the returned function.
+func (a *Aggregator) PauseStateFileBuilds(ctx context.Context) (func(), error) {
+	if err := a.fileBuildGate.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	return func() { a.fileBuildGate.Release(1) }, nil
+}
+
+func (a *Aggregator) startFileBuild(build func()) bool {
+	if !a.fileBuildGate.TryAcquire(1) {
+		a.logger.Debug("[snapshots] skipping file build: already building or paused")
+		return false
+	}
+	if !a.background.TryAdd() {
+		a.fileBuildGate.Release(1)
+		return false
+	}
+	a.buildingFiles.Store(true)
+	go func() {
+		defer a.background.Done()
+		defer a.fileBuildGate.Release(1)
+		defer a.buildingFiles.Store(false)
+		build()
+	}()
+	return true
+}
+
 func (a *Aggregator) BuildFiles(db kv.TemporalRoDB, toTxNum uint64, finalityCtx kv.FinalityContext) error {
 	finished, _ := a.buildFilesInBackground(db, toTxNum, true, finalityCtx)
 	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
@@ -1231,11 +1261,7 @@ Loop:
 
 // [from, to)
 func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
-	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
-		return nil
-	}
-	started := a.background.TryGo(func() {
-		defer a.buildingFiles.Store(false)
+	a.startFileBuild(func() {
 		if toStep > fromStep {
 			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
 		}
@@ -1261,9 +1287,6 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 			})
 		}
 	})
-	if !started {
-		a.buildingFiles.Store(false)
-	}
 	return nil
 }
 
@@ -2314,17 +2337,8 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		return fin, false
 	}
 
-	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
-		a.logger.Debug("[snapshots] buildFiles: already building")
-		close(fin)
-		return fin, false
-	}
-
-	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
-
-	started := a.background.TryGo(func() {
-		defer a.buildingFiles.Store(false)
-
+	started := a.startFileBuild(func() {
+		step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 		if a.snapshotBuildSema != nil {
 			// we are inside own goroutine - it's fine to block here
 			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil { // TODO: not sure if this ctx is correct
@@ -2451,7 +2465,6 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		}
 	})
 	if !started {
-		a.buildingFiles.Store(false)
 		close(fin)
 	}
 	return fin, started

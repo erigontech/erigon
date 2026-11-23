@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -881,6 +882,66 @@ func TestUpdateForkChoiceBelowSnapshotState(t *testing.T) {
 			return nil
 		}), step.name)
 	}
+}
+
+func TestSetHeadWaitsForStateFilePublication(t *testing.T) {
+	const stepSize = 16
+	m, chainPack := newExecutedTransferChain(t, execmoduletester.WithStepSize(stepSize), execmoduletester.WithAlwaysGenerateChangesets(true))
+	m.ExecModule.Drain()
+	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	agg.WaitForFiles()
+	var lastFileBlock uint64
+	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		require.Zero(t, tx.Debug().TxNumsInFiles(kv.AccountsDomain))
+		block, found, err := m.BlockReader.TxnumReader().FindBlockNum(t.Context(), tx, stepSize-1)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Positive(t, block)
+		lastFileBlock = block
+		return nil
+	}))
+
+	built, publish := make(chan struct{}), make(chan struct{})
+	allowPublication := sync.OnceFunc(func() { close(publish) })
+	agg.SetMaintenanceObserver(func(ctx context.Context, event dbstate.MaintenanceEvent) {
+		if event.Point == dbstate.MaintenanceFilesBuilt {
+			close(built)
+			select {
+			case <-publish:
+			case <-ctx.Done():
+			}
+		}
+	})
+	defer agg.SetMaintenanceObserver(nil)
+	defer allowPublication()
+	finality := execfinality.NewContext(chainPack.TopBlock.NumberU64(), lastFileBlock, 0, false, m.BlockReader.TxnumReader())
+	finished := m.DB.BuildFilesInBackground(finality)
+	select {
+	case <-built:
+	case <-finished:
+		t.Fatal("the build finished without producing the first snapshot step")
+	}
+
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		result := make(chan error, 1)
+		go func() { result <- m.ExecModule.SetHead(ctx, lastFileBlock-1) }()
+		synctest.Wait()
+		writer, err := m.DB.(*temporal.DB).BeginTemporalRwTry(t.Context())
+		require.NoError(t, err, "SetHead must wait before opening the transaction that pins the files")
+		writer.Rollback()
+		cancel()
+		require.ErrorIs(t, <-result, context.Canceled, "SetHead must wait while the snapshot is being built")
+	})
+	allowPublication()
+	<-finished
+	require.ErrorContains(t, m.ExecModule.SetHead(t.Context(), lastFileBlock-1), fmt.Sprintf("minimum unwindable block is %d", lastFileBlock))
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		require.Equal(t, chainPack.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
+		return nil
+	}))
+	require.NoError(t, m.ExecModule.SetHead(t.Context(), lastFileBlock))
 }
 
 func truncateTxNumsBelowCommitment(t *testing.T, m *execmoduletester.ExecModuleTester, invalidExecutionProgress, keepChangesets bool) uint64 {
