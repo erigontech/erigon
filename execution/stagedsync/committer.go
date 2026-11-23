@@ -742,7 +742,7 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 // checkpoints so the two can't drift. The BAL supplies the touched-key set; every value
 // (and the seeded EIP-161 removal) is read from the version map view.
 func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap, afterTxIndex int64, maxTxIndex uint32, t commitTarget) ([]byte, func() error, error) {
-	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1, dr: cc.asOfReader.dr, prefetched: cc.branchPrefetch}
+	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1, dr: cc.asOfReader.dr, prefetched: cc.branchPrefetch, cur: vm, curTxNum: t.lastTxNum}
 	if cc.balUpdates == nil {
 		cc.balUpdates = cc.updates.NewEmpty()
 		// ModeDirect must upgrade to ModeUpdate to carry the BAL values.
@@ -753,11 +753,16 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 		cc.balUpdates.Reset()
 	}
 	balUpdates := cc.balUpdates
-	cc.clearTouched()
+	// A block's later folds keep the touched set and storage wipes of its earlier ones, as the per-tx mid-block path does.
+	if afterTxIndex < 0 {
+		cc.clearTouched()
+	} else {
+		cc.clearFoldedKeys()
+	}
 	cc.balBlock = true
 	cc.accumulateTouched(bal.ToWriteSetAfter(req.bal, afterTxIndex, maxTxIndex), nil)
 	err := cc.emit(cc.foldView(vm, t.lastTxNum, reader.dr.StateReaderAt(reader.txNum)), balUpdates)
-	cc.clearTouched()
+	cc.clearFoldedKeys()
 	if err != nil {
 		return nil, nil, fmt.Errorf("base read: %w", err)
 	}
