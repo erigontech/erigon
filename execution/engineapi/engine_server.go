@@ -512,10 +512,11 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	minTxBlockGas := mdgas.MinTxBlockGas(e.config.IsLondon(header.Number.Uint64()), e.config.IsPrague(header.Time), e.config.IsAmsterdam(header.Time))
 	if uint64(len(req.Transactions)) > header.GasLimit/minTxBlockGas {
-		// A validated parent is the latest valid ancestor of this payload. Otherwise it cannot be
-		// determined here, and latestValidHash stays null.
+		// A validated parent is the latest valid ancestor of this payload, but only once the payload is
+		// well formed: latestValidHash must stay null for a zero-length or malformed transaction and for
+		// a wrong block hash. Otherwise it cannot be determined here, and it stays null too.
 		var latestValidHash common.Hash
-		if e.chainRW.IsValidated(req.ParentHash) {
+		if e.chainRW.IsValidated(req.ParentHash) && payloadIsWellFormed(&header, req.BlockHash, req.Transactions) {
 			latestValidHash = req.ParentHash
 		}
 		return &engine_types.PayloadStatus{
@@ -1307,6 +1308,24 @@ func ancestorRejected(ancestor common.Hash, ancestorErr string) string {
 		return ""
 	}
 	return fmt.Sprintf("ancestor %s rejected: %s", ancestor, ancestorErr)
+}
+
+// payloadIsWellFormed reports whether every transaction of a payload decodes and its block hash
+// matches the header built from the payload. It sets header.TxHash. It does not recover senders
+// or check gas.
+func payloadIsWellFormed(header *types.Header, blockHash common.Hash, raw []hexutil.Bytes) bool {
+	txs := make([][]byte, len(raw))
+	for i, transaction := range raw {
+		if len(transaction) == 0 || types.TypedTransactionMarshalledAsRlpString(transaction) {
+			return false
+		}
+		if _, err := types.UnmarshalTransactionFromBinary(transaction, false /* blobTxnsAreWrappedWithBlobs */); err != nil {
+			return false
+		}
+		txs[i] = transaction
+	}
+	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
+	return header.Hash() == blockHash
 }
 
 func latestValidOrNull(h common.Hash) *common.Hash {
