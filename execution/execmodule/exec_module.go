@@ -736,7 +736,9 @@ func (e *ExecModule) acceptSealed(ctx context.Context, sealed *types.Header) (bu
 		return true, nil
 	}
 	e.semTake("acceptSealed")
+	e.roundMu.Lock()
 	stageErr := e.stageSealedForCanonicalLocked(ctx, hash, number)
+	e.roundMu.Unlock()
 	e.semDrop()
 	e.semaphore.Release(1)
 	if stageErr != nil {

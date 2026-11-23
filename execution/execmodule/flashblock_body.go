@@ -1067,7 +1067,10 @@ func (e *ExecModule) AbandonFlashblock(ctx context.Context) error {
 	defer e.semaphore.Release(1)
 	e.roundMu.Lock()
 	defer e.roundMu.Unlock()
-	e.abandonExtendingForkLocked()
+	e.preExec.AbandonInProgress()
+	e.flash.mu.Lock()
+	e.flash.resetLocked(0)
+	e.flash.mu.Unlock()
 	return nil
 }
 

@@ -263,6 +263,21 @@ func (f *preExecFrontier) Abandon() {
 	f.txHashes = nil
 }
 
+// AbandonInProgress drops the newest generation only while its block is still being built.
+func (f *preExecFrontier) AbandonInProgress() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := len(f.gens)
+	if n == 0 || f.gens[n-1].sealed {
+		return
+	}
+	if g := f.gens[n-1]; g.sd != nil {
+		f.closeGen(g)
+	}
+	f.gens = f.gens[:n-1]
+	f.txHashes = nil
+}
+
 // DropFrom closes and drops every generation at or above number, sealed or not — blocks the consensus layer
 // did not build on. Returns how many were dropped.
 func (f *preExecFrontier) DropFrom(number uint64) int {

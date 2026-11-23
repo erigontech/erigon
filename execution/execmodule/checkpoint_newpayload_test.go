@@ -285,3 +285,42 @@ func TestAForkChoiceToABlockStillBeingPreExecutedLandsOnceItSeals(t *testing.T) 
 	require.Equal(t, proposed[1].Hash(), tip.Hash())
 	require.NoError(t, insertValidateAndUfc1By1(replica.ctx, replica.m.ExecModule, nil))
 }
+
+// Accepting a sealed block for the canonical path while the next block opens on it: both read the block's own
+// overlay, so they must not rebind its transaction under each other.
+func TestAcceptingASealedBlockRunsBesideTheNextBlocksOpen(t *testing.T) {
+	h := newRoundHarness(t)
+	head, err := h.m.ExecModule.CurrentHeader(h.ctx)
+	require.NoError(t, err)
+	params, in := h.attrs(head)
+	b := h.sealRounds(params, in, [][][]byte{{h.signed(0, 0, nil, 100_000, emitsALog)}})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 4000 {
+			_, _ = h.m.ExecModule.ValidateChain(h.ctx, b)
+		}
+	}()
+	_, in2 := h.attrs(b.Header())
+	for range 2000 {
+		require.NoError(t, h.m.ExecModule.AbandonFlashblock(h.ctx))
+		_, _, _, _ = h.m.ExecModule.PreExecuteFlashblock(h.ctx, in2, [][]byte{h.signed(1, 0, nil, 100_000, emitsALog)})
+	}
+	<-done
+}
+
+// Abandoning with no block in progress leaves the sealed blocks alone: the next block still opens on the last one.
+func TestAbandonWithNothingInProgressKeepsTheSealedBlock(t *testing.T) {
+	h := newRoundHarness(t)
+	head, err := h.m.ExecModule.CurrentHeader(h.ctx)
+	require.NoError(t, err)
+	params, in := h.attrs(head)
+	b := h.sealRounds(params, in, [][][]byte{{h.signed(0, 0, nil, 100_000, emitsALog)}})
+
+	require.NoError(t, h.m.ExecModule.AbandonFlashblock(h.ctx))
+	_, in2 := h.attrs(b.Header())
+	_, _, vr, err := h.m.ExecModule.PreExecuteFlashblock(h.ctx, in2, [][]byte{h.signed(1, 0, nil, 100_000, emitsALog)})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
+}
