@@ -120,6 +120,9 @@ var readDomains = &cobra.Command{
 }
 
 func requestDomains(stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
+	if err := checkCommitmentTrieMatchesFiles(); err != nil {
+		return err
+	}
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()

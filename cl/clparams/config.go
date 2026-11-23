@@ -53,8 +53,12 @@ type CaplinConfig struct {
 	// BlobsArchiveFromSlot bounds ArchiveBlobs: blob sidecars are kept from the lower of this
 	// slot and the spec serving-window floor, and dropped below it. Zero keeps the whole
 	// history since Deneb.
-	BlobsArchiveFromSlot      uint64
-	SnapshotGenerationEnabled bool
+	BlobsArchiveFromSlot uint64
+	// BlobsBackfillEndpoints are beacon API endpoints the blob backfill asks for a block's blobs before peers;
+	// BlobsBackfillEndpointWorkers bounds the missing KZG proofs computed at a time, and twice as many blocks are fetched.
+	BlobsBackfillEndpoints       []string
+	BlobsBackfillEndpointWorkers int
+	SnapshotGenerationEnabled    bool
 	// ColumnKeepSlots is the number of slots to keep PeerDAS data column sidecars.
 	// Zero resolves to the active chain's spec window, MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS *
 	// SLOTS_PER_EPOCH, which differs per chain because SLOTS_PER_EPOCH does.
@@ -1329,6 +1333,9 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	}
 	if beaconCfg.MaxCommitteesPerSlot > MaxSupportedCommitteesPerSlot {
 		return BeaconChainConfig{}, NetworkConfig{}, fmt.Errorf("MAX_COMMITTEES_PER_SLOT exceeds supported limit: %d > %d", beaconCfg.MaxCommitteesPerSlot, MaxSupportedCommitteesPerSlot)
+	}
+	if beaconCfg.MaxValidatorsPerCommittee > MaxSupportedValidatorsPerCommittee {
+		return BeaconChainConfig{}, NetworkConfig{}, fmt.Errorf("MAX_VALIDATORS_PER_COMMITTEE exceeds supported limit: %d > %d", beaconCfg.MaxValidatorsPerCommittee, uint64(MaxSupportedValidatorsPerCommittee))
 	}
 
 	// setup network config

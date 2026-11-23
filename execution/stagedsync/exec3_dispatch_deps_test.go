@@ -23,11 +23,24 @@ import (
 )
 
 type depsTest struct {
-	t         *testing.T
-	pe        *parallelExecutor
-	be        *blockExecutor
-	deliverTx func(tx, inc int, reads state.ReadSet)
-	stamp     bool
+	t            *testing.T
+	pe           *parallelExecutor
+	be           *blockExecutor
+	deliverTx    func(tx, inc int, reads state.ReadSet)
+	stamp        bool
+	accountReads map[common.Address]int
+}
+
+type accountReadsTx struct {
+	kv.TemporalTx
+	reads map[common.Address]int
+}
+
+func (tx *accountReadsTx) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if name == kv.AccountsDomain {
+		tx.reads[common.BytesToAddress(k)]++
+	}
+	return tx.TemporalTx.GetLatest(name, k, opts)
 }
 
 func valueTransfers(senders, recipients []accounts.Address) types.Transactions {
@@ -95,9 +108,10 @@ func newTracedDepsTest(t *testing.T, txs types.Transactions, hooks *tracing.Hook
 			Hooks:           hooks,
 		}
 	}
-	require.NoError(t, pe.processRequest(context.Background(), &execRequest{blockNum: 1, tasks: tasks}, roTx))
-	be.scheduleExecution(context.Background(), pe)
-	d := &depsTest{t: t, pe: pe, be: be}
+	readsTx := &accountReadsTx{TemporalTx: roTx, reads: map[common.Address]int{}}
+	require.NoError(t, pe.processRequest(&execRequest{blockNum: 1, tasks: tasks}, readsTx))
+	be.scheduleExecution(pe)
+	d := &depsTest{t: t, pe: pe, be: be, accountReads: readsTx.reads}
 	d.deliverTx = func(tx, inc int, reads state.ReadSet) {
 		res := &exec.TxResult{
 			Task: &taskVersion{
@@ -232,6 +246,19 @@ func TestChargedValueTransferDoesNotWaitForRecipient(t *testing.T) {
 			require.False(t, s.be.selfLoopDispatched[2])
 		})
 	}
+}
+
+func TestChargedValueTransferReadsRecipientOnlyAfterALowerTxTouchedIt(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xa0"))
+	b := accounts.InternAddress(common.HexToAddress("0xb1"))
+	c := accounts.InternAddress(common.HexToAddress("0xc2"))
+	d := accounts.InternAddress(common.HexToAddress("0xd3"))
+	f := accounts.InternAddress(common.HexToAddress("0xf5"))
+	s := newDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, d, d}))
+	require.Zero(t, s.accountReads[f.Value()])
+	require.NotZero(t, s.accountReads[d.Value()], "tx 2 decides from d whether it waits for tx 1")
+	require.False(t, s.be.execTasks.isBlocked(1))
+	require.False(t, s.be.execTasks.isBlocked(2))
 }
 
 // The run peeks at the recipient's code at block start; validation credits only a recipient that

@@ -45,7 +45,7 @@
   commitment-parallel: true
 - shard: statetests-devnet-parallel
   workers: 12
-  max-allowed-failures: 274 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
+  max-allowed-failures: 1032 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298: https://github.com/erigontech/erigon/issues/25241
   commitment-parallel: true
 - shard: transactiontests-stable-race
   workers: 12
@@ -54,7 +54,7 @@
   no-ramdisk: true
 - shard: transactiontests-devnet-race
   workers: 12
-  max-allowed-failures: 17 # Upstream frame intrinsic-gas expectations: https://github.com/erigontech/erigon/issues/25241
+  max-allowed-failures: 2 # Upstream keyed-nonce intrinsic-gas expectations: https://github.com/erigontech/erigon/issues/25241
   commitment-parallel: true
   no-ramdisk: true
 - shard: statetests-legacy-parallel
@@ -88,7 +88,7 @@
   commitment-parallel: true
 - shard: blocktests-devnet-parallel
   workers: 12
-  max-allowed-failures: 279 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
+  max-allowed-failures: 1608 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298: https://github.com/erigontech/erigon/issues/25241
   commitment-parallel: true
 - shard: blocktests-legacy-consensus-parallel
   workers: 12
@@ -217,8 +217,9 @@
   commitment-parallel: true
 - shard: enginextests-devnet-parallel
   workers: 8
-  max-allowed-failures: 279 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
+  max-allowed-failures: 1608 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298: https://github.com/erigontech/erigon/issues/25241
   commitment-parallel: true
+  no-ramdisk: true # Grouped EngineX databases exceed the default 2 GiB RAM disk
 - shard: enginextests-benchmark-1m-parallel
   workers: 1
   max-allowed-failures: 0
@@ -258,13 +259,13 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: true
-  expected-tests: 26687
+  expected-tests: 26853
 - shard: zkevm-witness-v3
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: false
   commitment-v3: true
-  expected-tests: 26687
+  expected-tests: 26853
 - shard: blocktests-stable-race-pre-cancun-parallel
   workers: 12
   max-allowed-failures: 0
@@ -294,9 +295,14 @@
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: true
-  run: 'fork_Amsterdam'
+  run: 'fork_Amsterdam(-|BPO|ToBPO)'
+- shard: blocktests-devnet-race-amsterdam-to-bogota-parallel
+  workers: 12
+  max-allowed-failures: 69 # Bogota transitions need EIPs 4758, 8151, 8253, 8298: https://github.com/erigontech/erigon/issues/25241
+  commitment-parallel: true
+  run: 'fork_AmsterdamToBogota'
 - shard: zkevm-witness-race
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: true
-  expected-tests: 26687
+  expected-tests: 26853

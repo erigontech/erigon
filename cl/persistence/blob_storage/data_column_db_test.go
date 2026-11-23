@@ -210,15 +210,25 @@ type panicCreateFs struct{ afero.Fs }
 func (panicCreateFs) Create(string) (afero.File, error) { panic("create") }
 
 func TestColumnWritePanicReleasesLocks(t *testing.T) {
-	storage := NewDataColumnStore(panicCreateFs{afero.NewMemMapFs()}, globalBeaconConfig, beaconevents.NewEventEmitter())
 	const slot = 1000
 	root := common.HexToHash("0x1234567890abcdef")
-	require.Panics(t, func() {
-		_ = storage.WriteColumnSidecars(t.Context(), root, 1, createTestDataColumnSidecar(slot, 1))
-	})
-	impl := storage.(*dataColumnStorageImpl)
-	require.True(t, impl.forRoot(root).TryLock())
-	require.True(t, impl.pruneMutex.TryLock())
+	writes := map[string]func(storage DataColumnStorage){
+		"single": func(storage DataColumnStorage) {
+			_ = storage.WriteColumnSidecars(t.Context(), root, 1, createTestDataColumnSidecar(slot, 1))
+		},
+		"batch": func(storage DataColumnStorage) {
+			_ = storage.WriteColumnSidecarsBatch(t.Context(), root, []*cltypes.DataColumnSidecar{createTestDataColumnSidecar(slot, 1), createTestDataColumnSidecar(slot, 2)})
+		},
+	}
+	for name, write := range writes {
+		t.Run(name, func(t *testing.T) {
+			storage := NewDataColumnStore(panicCreateFs{afero.NewMemMapFs()}, globalBeaconConfig, beaconevents.NewEventEmitter())
+			require.Panics(t, func() { write(storage) })
+			impl := storage.(*dataColumnStorageImpl)
+			require.True(t, impl.forRoot(root).TryLock())
+			require.True(t, impl.pruneMutex.TryLock())
+		})
+	}
 }
 
 func TestDataColumnWholeSlotOperationsDoNotInterleaveWithWrite(t *testing.T) {
@@ -363,6 +373,20 @@ func TestReadColumnSidecarByColumnIndex(t *testing.T) {
 	// Test reading non-existent file
 	_, err = storage.ReadColumnSidecarByColumnIndex(ctx, 1000, blockRoot, 999)
 	assert.Error(t, err)
+}
+
+func TestReadColumnSidecarRejectsAFileHoldingAnotherColumn(t *testing.T) {
+	storage, fs, _ := setupTestDataColumnStorage(t)
+	blockRoot := common.HexToHash("0x1234567890abcdef")
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), blockRoot, 2, createTestDataColumnSidecar(1000, 2)))
+	impl := storage.(*dataColumnStorageImpl)
+	_, holdsTwo := impl.path(1000, blockRoot, 2)
+	_, namedOne := impl.path(1000, blockRoot, 1)
+	require.NoError(t, fs.Rename(holdsTwo, namedOne))
+
+	_, err := storage.ReadColumnSidecarByColumnIndex(t.Context(), 1000, blockRoot, 1)
+
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestColumnSidecarExists(t *testing.T) {

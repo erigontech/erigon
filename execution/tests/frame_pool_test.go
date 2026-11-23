@@ -78,7 +78,7 @@ func TestFramePoolConsumedNonceReply(t *testing.T) {
 			poolDB := mdbxtest.NewTestPoolDB(t)
 			stateChanges := direct.NewStateDiffClientDirect(m.Notifications.StateChangesConsumer.(remoteproto.KVServer))
 			pool, err := txpool.New(ctx, make(chan txpool.Announcements, 1), poolDB, m.DB, txpoolcfg.DefaultConfig,
-				kvcache.NewLatestBatchCache(), cfg, nil, stateChanges, func() {}, nil, direct.NewEthBackendClientDirect(backend), logger, txpool.WithFeeCalculator(nil))
+				kvcache.NewLatestBatchCache(), cfg, nil, stateChanges, func() {}, nil, direct.NewEthBackendClientDirect(backend), logger)
 			require.NoError(t, err)
 			runDone := make(chan error, 1)
 			go func() { runDone <- pool.Run(ctx) }()
@@ -90,8 +90,11 @@ func TestFramePoolConsumedNonceReply(t *testing.T) {
 			frame := &types.FrameTransaction{
 				NonceKeys: []uint256.Int{tc.key}, ChainID: *cfg.ChainID, SenderAddress: sender,
 				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
-				Fees:   types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
 			}
+			if tc.key.IsZero() {
+				frame.NonceKeys = nil
+			}
+			frame.Fees.MaxFee.SetUint64(10 * common.GWei * frame.GetGasLimit())
 			var encoded bytes.Buffer
 			require.NoError(t, frame.MarshalBinary(&encoded))
 			server := txpool.NewGrpcServer(ctx, pool, poolDB, nil, *cfg.ChainID, logger)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"runtime"
 	"sync"
 	"time"
@@ -375,7 +376,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		if err != nil {
 			return nil, err
 		}
-		transactions.VersionedBlockState(genEnv.ibs)
 
 		minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
@@ -420,7 +420,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		if err != nil {
 			return nil, err
 		}
-		transactions.VersionedCallState(genEnv.ibs)
+		genEnv.ibs.SetNoConflictDetection()
 		stateWriter = genEnv.noopWriter
 	}
 
@@ -501,7 +501,12 @@ func PostStateCalculated(cfg *chain.Config, blockNum uint64, commitmentHistoryEn
 	return observed && frozen == 0
 }
 
-func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (_ types.Receipts, err error) {
+func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (types.Receipts, error) {
+	return g.GetReceiptsPrefetched(ctx, cfg, tx, block, opts, nil)
+}
+
+// GetReceiptsPrefetched is GetReceipts that takes the persisted receipts from prefetch when it has them.
+func (g *Generator) GetReceiptsPrefetched(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts, prefetch *ReceiptsPrefetch) (_ types.Receipts, err error) {
 	tx = g.filters.WithTemporalOverlay(tx)
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
@@ -542,7 +547,10 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	// If/when receipts are saved to the DB *with* the `postState` field,
 	// this check on `calculatePostState` should be removed to utilize the stored receipt.
 	if !rpcDisableRCache && !calculatePostState {
-		receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
+		receiptsFromDB = prefetch.Receipts(block)
+		if len(receiptsFromDB) == 0 {
+			receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -572,7 +580,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	if !calculatePostState {
 		// Fast path (post-Byzantium): use the shared derivation package.
 		// DeriveBlockReceipts sets BlockHash and FirstLogIndexWithinBlock.
-		transactions.VersionedBlockState(genEnv.ibs)
 		receipts, err = sharedreceipts.DeriveBlockReceipts(ctx, cfg, g.engine, block.HeaderNoCopy(), block.Transactions(), genEnv.ibs, genEnv.gp, genEnv.getHeader)
 		if err != nil {
 			return nil, err
@@ -620,7 +627,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			stateWriter = genEnv.noopWriter
 		}
 
-		transactions.VersionedBlockState(genEnv.ibs)
 		for i, txn := range block.Transactions() {
 			select {
 			case <-ctx.Done():
@@ -732,37 +738,157 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt, tx
 	}
 }
 
-func (g *Generator) GetReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, txNumsReader rawdbv3.TxNumsReader) (types.Receipts, error) {
-	tx = g.filters.WithTemporalOverlay(tx)
-	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
-		return receipts, nil
+// GetReceiptGasUsed requires the canonical header and its transaction at index.
+// It returns the gas used by that transaction, or zero if the block is ahead
+// of execution or the gas usage is no longer retained.
+func (g *Generator) GetReceiptGasUsed(ctx context.Context, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int) (uint64, error) {
+	receipts, err := g.receiptGasUsedForRange(ctx, tx, header, index, types.Transactions{txn})
+	if err != nil || len(receipts) == 0 || receipts[0] == nil {
+		return 0, err
 	}
+	return receipts[0].GasUsed, nil
+}
 
-	startTxNum, err := txNumsReader.Min(ctx, tx, block.NumberU64())
+// GetReceiptsGasUsed requires a canonical block. It returns nil if the block is
+// ahead of execution. Otherwise it returns one entry per transaction, with nil
+// entries where gas usage is unavailable. Only GasUsed is guaranteed in each
+// non-nil receipt.
+func (g *Generator) GetReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
+	return g.receiptGasUsedForRange(ctx, tx, block.HeaderNoCopy(), 0, block.Transactions())
+}
+
+func (g *Generator) receiptGasUsedForRange(ctx context.Context, tx kv.TemporalTx, header *types.Header, firstIndex int, txns types.Transactions) (types.Receipts, error) {
+	tx = g.filters.WithTemporalOverlay(tx)
+	blockNum := header.Number.Uint64()
+	executed, err := rpchelper.GetLatestExecutedBlockNumber(tx)
+	if err != nil || blockNum > executed {
+		return nil, err
+	}
+	if len(txns) == 0 {
+		return types.Receipts{}, nil
+	}
+	if receipts, ok := g.receiptsCache.Get(header.Hash()); ok {
+		return receipts[firstIndex : firstIndex+len(txns)], nil
+	}
+	startTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
-
-	receipts := make(types.Receipts, len(block.Transactions()))
-
-	var prevCumGasUsed uint64
-	currentTxNum := startTxNum + 1
-	for i := range block.Transactions() {
-		receipt := &types.Receipt{}
-		cumGasUsed, _, _, err := rawtemporaldb.ReceiptAsOf(tx, currentTxNum+1)
-		if err != nil {
-			return nil, fmt.Errorf("ReceiptGen.GetReceiptsGasUsed: at tx %d (block %d, index %d): %w",
-				currentTxNum, block.NumberU64(), i, err)
-		}
-
-		receipt.GasUsed = cumGasUsed - prevCumGasUsed
-		receipts[i] = receipt
-
-		prevCumGasUsed = cumGasUsed
-		currentTxNum++
+	historyStart, err := receiptGasHistoryStart(tx, startTxNum)
+	if err != nil {
+		return nil, err
 	}
-
+	reader := receiptGasReader{historyStart: historyStart}
+	receipts := make(types.Receipts, len(txns))
+	for i, txn := range txns {
+		index := firstIndex + i
+		txNum := startTxNum + 1 + uint64(index)
+		receipts[i], err = reader.read(g, tx, header, txn, txNum, index)
+		if err != nil {
+			return nil, fmt.Errorf("read gas used for block %d transaction %d: %w", blockNum, index, err)
+		}
+	}
 	return receipts, nil
+}
+
+type receiptGasReader struct {
+	historyStart uint64
+	// The block lookup reads transactions in order, so the last cumulative
+	// total is the starting value for the next transaction.
+	cumulative    uint64
+	hasCumulative bool
+}
+
+func receiptGasHistoryStart(tx kv.TemporalTx, blockStartTxNum uint64) (uint64, error) {
+	start, err := tx.Debug().HistoryStartFrom(kv.ReceiptDomain)
+	if err != nil {
+		return 0, err
+	}
+	// A retained creation record (empty previous value) covers the key from
+	// the start. Otherwise, other receipt fields can have older history.
+	key := rawtemporaldb.CumulativeGasUsedInBlockKey
+	first, ok, err := tx.HistorySeek(kv.ReceiptDomain, key, start)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		// The first receipts can still be in the execution overlay. Its
+		// after-values are visible only after the transaction that wrote them.
+		afterFirstTx := blockStartTxNum + 2
+		if afterFirstTx >= start {
+			if _, ok, err := tx.HistorySeek(kv.ReceiptDomain, key, afterFirstTx); ok || err != nil {
+				return afterFirstTx, err
+			}
+		}
+		return math.MaxUint64, nil
+	}
+	if len(first) == 0 {
+		return start, nil
+	}
+	return firstHistoryChange(tx, kv.ReceiptHistoryIdx, key, start)
+}
+
+func firstHistoryChange(tx kv.TemporalTx, index kv.InvertedIdx, key []byte, from uint64) (uint64, error) {
+	changes, err := tx.IndexRange(index, key, int(from), -1, order.Asc, 1)
+	if err != nil {
+		return 0, err
+	}
+	defer changes.Close()
+	if !changes.HasNext() {
+		return math.MaxUint64, nil
+	}
+	return changes.Next()
+}
+
+func (r *receiptGasReader) read(g *Generator, tx kv.TemporalTx, header *types.Header, txn types.Transaction, txNum uint64, index int) (*types.Receipt, error) {
+	firstRead := txNum
+	if index == 0 {
+		firstRead++ // the previous total is zero at the start of the block
+	}
+	if firstRead < r.historyStart {
+		// A cached or persisted receipt can still supply the exact gas used.
+		return g.readRetainedReceipt(tx, header, txn, txNum, index)
+	}
+	previous := r.cumulative
+	if index > 0 && !r.hasCumulative {
+		var err error
+		previous, err = rawtemporaldb.CumulativeGasUsedAsOf(tx, txNum)
+		if err != nil {
+			return nil, err
+		}
+	}
+	cumulative, err := rawtemporaldb.CumulativeGasUsedAsOf(tx, txNum+1)
+	if err != nil {
+		return nil, err
+	}
+	r.cumulative, r.hasCumulative = cumulative, true
+	return &types.Receipt{GasUsed: cumulative - previous}, nil
+}
+
+func (g *Generator) readRetainedReceipt(tx kv.TemporalTx, header *types.Header, txn types.Transaction, txNum uint64, index int) (*types.Receipt, error) {
+	hash := header.Hash()
+	if receipt, ok := g.TryGetCachedReceipt(hash, txNum, index); ok {
+		return receipt, nil
+	}
+	if !PersistedReceiptsServed() {
+		return nil, nil
+	}
+	// Each cache write records the previous receipt. A seek past the
+	// following transaction could return a receipt from a later block.
+	afterTx := txNum + 1
+	start, err := tx.Debug().HistoryStartFrom(kv.RCacheDomain)
+	if err != nil || afterTx < start {
+		return nil, err
+	}
+	next, err := firstHistoryChange(tx, kv.RCacheHistoryIdx, rawtemporaldb.ReceiptCacheKey, afterTx)
+	if err != nil || next != afterTx {
+		return nil, err
+	}
+	receipt, ok, err := readPersistedReceipt(tx, header.Number.Uint64(), hash, txn.Hash(), txNum)
+	if err != nil || !ok || receipt.TransactionIndex != uint(index) {
+		return nil, err
+	}
+	return receipt, nil
 }
 
 type loaderMutex[K comparable] struct {

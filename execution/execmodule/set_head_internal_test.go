@@ -108,3 +108,56 @@ func TestSetHeadFailedCommitPreservesPendingNotifications(t *testing.T) {
 	require.Len(t, accum.Accumulator.Changes(), 1, "only changes committed before SetHead may remain pending")
 	require.Equal(t, want, accum.Accumulator.Changes()[0].ToProto())
 }
+
+func TestSetHeadClearsSafeAndFinalizedAboveTarget(t *testing.T) {
+	const target = 2
+	for _, tc := range []struct {
+		name                    string
+		head, safe, finalized   uint64
+		wantSafe, wantFinalized uint64 // 0: the marker is cleared
+	}{
+		{"both above", 4, 4, 3, 0, 0},
+		{"only safe above", 4, 3, 2, 0, 2},
+		{"both at or below", 4, 2, 1, 2, 1},
+		{"retry at the current head", target, 4, 3, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			logger := log.New()
+			var hashes [5]common.Hash // hashes[0] stays zero: a cleared marker
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				for n := uint64(1); n <= 4; n++ {
+					header := &types.Header{Number: *uint256.NewInt(n), ParentHash: hashes[n-1]}
+					hashes[n] = header.Hash()
+					require.NoError(t, rawdb.WriteHeader(tx, header))
+					require.NoError(t, rawdb.WriteCanonicalHash(tx, hashes[n], n))
+				}
+				rawdb.WriteHeadBlockHash(tx, hashes[tc.head])
+				rawdb.WriteForkchoiceHead(tx, hashes[tc.head])
+				rawdb.WriteForkchoiceSafe(tx, hashes[tc.safe])
+				rawdb.WriteForkchoiceFinalized(tx, hashes[tc.finalized])
+				return stages.SaveStageProgress(tx, stages.Headers, tc.head)
+			}))
+			sync := stagedsync.New(ethconfig.Sync{}, []*stagedsync.Stage{{
+				ID: stages.Headers,
+				Unwind: func(u *stagedsync.UnwindState, _ *stagedsync.StageState, _ *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
+					return u.Done(tx)
+				},
+			}}, []stages.SyncStage{stages.Headers}, nil, logger, stages.ModeApplyingBlocks)
+			module := &ExecModule{
+				db:               db,
+				blockReader:      setHeadBlockReader{},
+				semaphore:        semaphore.NewWeighted(1),
+				pipelineExecutor: &PipelineExecutor{sync: sync},
+				logger:           logger,
+			}
+
+			require.NoError(t, module.SetHead(t.Context(), target))
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				require.Equal(t, hashes[tc.wantSafe], rawdb.ReadForkchoiceSafe(tx))
+				require.Equal(t, hashes[tc.wantFinalized], rawdb.ReadForkchoiceFinalized(tx))
+				return nil
+			}))
+		})
+	}
+}

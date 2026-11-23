@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -102,7 +101,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		return nil, err
 	}
 
-	return buildBlockResponse(ctx, api._blockReader, tx, blockNum, fullTx)
+	return api.buildBlockResponse(ctx, tx, blockNum, fullTx)
 }
 
 func (api *ErigonImpl) blockNumByTimestamp(ctx context.Context, tx kv.Tx, uintTimestamp uint64) (uint64, error) {
@@ -168,8 +167,8 @@ func (api *ErigonImpl) blockNumByTimestamp(ctx context.Context, tx kv.Tx, uintTi
 	return uint64(blockNum), nil
 }
 
-func buildBlockResponse(ctx context.Context, br dbservices.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (*ethapi.RPCBlock, error) {
-	header, err := br.HeaderByNumber(ctx, db, blockNum)
+func (api *ErigonImpl) buildBlockResponse(ctx context.Context, db kv.TemporalTx, blockNum uint64, fullTx bool) (*ethapi.RPCBlock, error) {
+	header, err := api._blockReader.HeaderByNumber(ctx, db, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +176,7 @@ func buildBlockResponse(ctx context.Context, br dbservices.FullBlockReader, db k
 		return nil, nil
 	}
 
-	block, _, err := br.BlockWithSenders(ctx, db, header.Hash(), blockNum)
+	block, _, err := api._blockReader.BlockWithSenders(ctx, db, header.Hash(), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +184,10 @@ func buildBlockResponse(ctx context.Context, br dbservices.FullBlockReader, db k
 		return nil, nil
 	}
 
-	response := ethapi.RPCMarshalBlock(block, true, fullTx)
+	response, err := api.marshalBlock(ctx, db, block, fullTx, true)
+	if err != nil {
+		return nil, err
+	}
 	if rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
 		response.MarkPending()
 	}

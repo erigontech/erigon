@@ -22,6 +22,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/holiman/uint256"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -50,7 +51,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 // EthBackendAPIVersion
@@ -571,9 +571,8 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	} else {
 		reader = state.NewHistoryReaderV3(tx, maxTxNum+1)
 	}
-	ibs := state.New(reader)
+	ibs := state.NewVersionedCall(reader)
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
 	// The validation hook rejects BLOCKHASH but does not stop the opcode from calling GetHash, where
 	// an error would be taken for the node's failure, not for an invalid transaction.
 	noBlockHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
@@ -595,11 +594,14 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	}
 	// Fee eligibility belongs to pool admission. Clamp fees here so low fee caps
 	// do not become cached failures of prefix validation.
-	if blockContext.BaseFee.Gt(frame.GetFeeCap()) {
-		blockContext.BaseFee.Set(frame.GetFeeCap())
+	if blobGas := frame.GetBlobGas(); blobGas != 0 {
+		maximum := new(uint256.Int).Div(&frame.Fees.MaxFee, uint256.NewInt(blobGas))
+		if blockContext.BlobBaseFee.Gt(maximum) {
+			blockContext.BlobBaseFee.Set(maximum)
+		}
 	}
-	if blockContext.BlobBaseFee.Gt(&frame.Fees.BlobFeeCap) {
-		blockContext.BlobBaseFee.Set(&frame.Fees.BlobFeeCap)
+	if cap := frame.ExecutionFeeCap(&blockContext.BlobBaseFee); blockContext.BaseFee.Gt(cap) {
+		blockContext.BaseFee.Set(cap)
 	}
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{})
 	defer context.AfterFunc(ctx, evm.Cancel)()
