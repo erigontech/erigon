@@ -637,6 +637,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
 
 			var txTasks []exec.Task
+			var senders *exec.SendersRecovery
+			if te.cfg.readAheader != nil {
+				senders = te.cfg.readAheader.RecoveringSenders(b.Hash(), txs)
+			}
 
 			blockStartTxNum := inputTxNum
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
@@ -660,6 +664,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					HistoryExecution: lastFrozenTxNum > 0 && blockStartTxNum <= lastFrozenTxNum,
 					Config:           te.cfg.chainConfig,
 					Engine:           te.cfg.engine,
+					Senders:          senders,
 					Trace:            dbg.TraceTx(blockNum, txIndex),
 					Hooks:            te.hooks,
 					Logger:           te.logger,

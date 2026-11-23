@@ -111,7 +111,10 @@ func DefaultStages(
 			Description: "Execute blocks w/o hash checks",
 			Disabled:    dbg.StagesOnlyBlocks,
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnExecuteBlocksStage(s, u, sd, tx, 0, ctx, exec, logger)
+				if err := SpawnExecuteBlocksStage(s, u, sd, tx, 0, ctx, exec, logger); err != nil {
+					return err
+				}
+				return WritePendingSenders(ctx, senders, u, tx, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)
@@ -215,7 +218,10 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, senders Senders
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnExecuteBlocksStage(s, u, sd, tx, 0, ctx, exec, logger)
+				if err := SpawnExecuteBlocksStage(s, u, sd, tx, 0, ctx, exec, logger); err != nil {
+					return err
+				}
+				return WritePendingSenders(ctx, senders, u, tx, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)
@@ -300,7 +306,10 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, send
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnExecuteBlocksStage(s, u, sd, tx, 0, ctx, exec, logger)
+				if err := SpawnExecuteBlocksStage(s, u, sd, tx, 0, ctx, exec, logger); err != nil {
+					return err
+				}
+				return WritePendingSenders(ctx, senders, u, tx, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)

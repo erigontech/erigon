@@ -281,9 +281,24 @@ func (bra *BlockReadAheader) WaitForWarmup(ctx context.Context) {
 
 type SendersRecovery struct {
 	done     chan struct{}
+	ready    []chan struct{} // ready[i] is closed once senders[i] is set
+	txns     types.Transactions
 	senders  []accounts.Address
 	err      error
 	failedTx int
+}
+
+func newSendersRecovery(txns types.Transactions) *SendersRecovery {
+	r := &SendersRecovery{done: make(chan struct{}), ready: make([]chan struct{}, len(txns)), txns: txns, senders: make([]accounts.Address, len(txns)), failedTx: -1}
+	for i := range r.ready {
+		r.ready[i] = make(chan struct{})
+	}
+	return r
+}
+
+func (r *SendersRecovery) publish(i int, sender accounts.Address) {
+	r.senders[i] = sender
+	close(r.ready[i])
 }
 
 type senderError struct {
@@ -303,7 +318,7 @@ func StartBatchSendersRecovery(ctx context.Context, signers []*types.Signer, txn
 }
 
 func startSendersRecovery(ctx context.Context, signerOf func(int) *types.Signer, txns types.Transactions) *SendersRecovery {
-	r := &SendersRecovery{done: make(chan struct{}), senders: make([]accounts.Address, len(txns)), failedTx: -1}
+	r := newSendersRecovery(txns)
 	go func() {
 		defer close(r.done)
 		var next atomic.Int64
@@ -319,7 +334,7 @@ func startSendersRecovery(ctx context.Context, signerOf func(int) *types.Signer,
 					if err != nil {
 						return &senderError{txIndex: i, err: fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, txns[i].Hash(), err)}
 					}
-					r.senders[i] = from
+					r.publish(i, from)
 				}
 				return nil
 			})
@@ -345,6 +360,26 @@ func (r *SendersRecovery) FailedTx() int {
 	return r.failedTx
 }
 
+// Sender waits for the sender of txns[i] only; ok is false if the recovery ended without it.
+func (r *SendersRecovery) Sender(i int) (sender accounts.Address, ok bool) {
+	select {
+	case <-r.ready[i]:
+		return r.senders[i], true
+	case <-r.done:
+	}
+	select {
+	case <-r.ready[i]:
+		return r.senders[i], true
+	default:
+		return accounts.NilAddress, false
+	}
+}
+
+// recovers reports whether r recovers these very transaction objects, not only equal ones.
+func (r *SendersRecovery) recovers(txns types.Transactions) bool {
+	return len(txns) > 0 && len(txns) == len(r.txns) && &txns[0] == &r.txns[0]
+}
+
 func (bra *BlockReadAheader) AddSendersRecovery(blockHash common.Hash, r *SendersRecovery) {
 	bra.recoveries.Add(blockHash, r)
 }
@@ -355,6 +390,14 @@ func (bra *BlockReadAheader) TakeSendersRecovery(blockHash common.Hash) (*Sender
 		bra.recoveries.Remove(blockHash)
 	}
 	return r, ok
+}
+
+// RecoveringSenders returns the recovery registered for blockHash if it recovers txns.
+func (bra *BlockReadAheader) RecoveringSenders(blockHash common.Hash, txns types.Transactions) *SendersRecovery {
+	if r, ok := bra.recoveries.Peek(blockHash); ok && r.recovers(txns) {
+		return r
+	}
+	return nil
 }
 
 func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal *types.BlockAccessListSidecar) {
@@ -703,9 +746,11 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 	if body == nil || !ok {
 		return nil, false
 	}
-	for _, txn := range body.Transactions {
-		if _, ok := txn.GetSender(); !ok {
-			return nil, false
+	if bra.RecoveringSenders(blockHash, body.Transactions) == nil {
+		for _, txn := range body.Transactions {
+			if _, ok := txn.GetSender(); !ok {
+				return nil, false
+			}
 		}
 	}
 	bal, _ := bra.bals.Get(blockHash)

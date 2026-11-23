@@ -45,6 +45,8 @@ type SendersCfg struct {
 	chainConfig  *chain.Config
 	blockReader  dbservices.FullBlockReader
 	readAheader  *exec.BlockReadAheader
+	// pending holds the blocks whose recovery exec reads while it runs; WritePendingSenders writes their rows.
+	pending *[]sendersBlock
 }
 
 func StageSendersCfg(chainCfg *chain.Config, badBlockHalt bool, tmpdir string, blockReader dbservices.FullBlockReader, readAheader *exec.BlockReadAheader) SendersCfg {
@@ -54,10 +56,12 @@ func StageSendersCfg(chainCfg *chain.Config, badBlockHalt bool, tmpdir string, b
 		chainConfig:  chainCfg,
 		blockReader:  blockReader,
 		readAheader:  readAheader,
+		pending:      new([]sendersBlock),
 	}
 }
 
 func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, logger log.Logger) error {
+	*cfg.pending = nil
 	if s.BlockNumber < cfg.blockReader.FrozenBlocks() {
 		s.BlockNumber = cfg.blockReader.FrozenBlocks()
 	}
@@ -153,20 +157,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	}
 
 	if bad != nil {
-		logger.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, bad.number, bad.hash, bad.err))
-		if cfg.badBlockHalt {
-			return bad.err
-		}
-		if to > s.BlockNumber {
-			unwindReason := OperationalErr(bad.err)
-			if errors.Is(bad.err, rules.ErrInvalidBlock) {
-				unwindReason = BadBlock(bad.hash, bad.err)
-			}
-			if err := u.UnwindTo(bad.number-1, unwindReason, tx); err != nil {
-				return err
-			}
-		}
-		return nil
+		return failSendersBlock(cfg, u, tx, bad, logPrefix, logger)
 	}
 
 	if err := collectorSenders.Load(tx, kv.Senders, etl.IdentityLoadFunc, etl.TransformArgs{
@@ -180,6 +171,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	if err := s.Update(tx, to); err != nil {
 		return err
 	}
+	*cfg.pending = batch.pending
 	log.Debug(fmt.Sprintf("[%s] Recovery done", logPrefix), "from", startFrom, "to", to, "blocks", to-startFrom+1, "took", time.Since(recoveryStart))
 	return nil
 }
@@ -208,6 +200,7 @@ type badSendersBlock struct {
 
 type sendersBatch struct {
 	blocks  []sendersBlock
+	pending []sendersBlock
 	txns    types.Transactions
 	signers []*types.Signer
 }
@@ -220,6 +213,11 @@ func (b *sendersBatch) add(cfg SendersCfg, header *types.Header, hash common.Has
 		body:   body,
 		cached: cached,
 		first:  len(b.txns),
+	}
+	if r := cfg.readAheader.RecoveringSenders(hash, body.Transactions); r != nil && cached {
+		blk.registered = r
+		b.pending = append(b.pending, blk)
+		return
 	}
 	if r, ok := cfg.readAheader.TakeSendersRecovery(hash); ok {
 		blk.registered = r
@@ -245,9 +243,7 @@ func (b *sendersBatch) flush(ctx context.Context, collector *etl.Collector) (*ba
 		var err error
 		switch {
 		case blk.registered != nil:
-			if senders, err = blk.registered.Wait(ctx); err != nil || len(senders) != n {
-				senders, err = exec.StartSendersRecovery(ctx, blk.signer, blk.body.Transactions).Wait(ctx)
-			}
+			senders, err = blk.registeredSenders(ctx)
 		case batchErr != nil:
 			if failed := recovery.FailedTx(); failed >= blk.first && failed < blk.first+n {
 				return &badSendersBlock{number: blk.number, hash: blk.hash, err: batchErr}, nil
@@ -277,6 +273,25 @@ func (b *sendersBatch) flush(ctx context.Context, collector *etl.Collector) (*ba
 	return nil, nil
 }
 
+func (blk *sendersBlock) registeredSenders(ctx context.Context) ([]accounts.Address, error) {
+	if senders, err := blk.registered.Wait(ctx); err == nil && len(senders) == len(blk.body.Transactions) {
+		return senders, nil
+	}
+	return exec.StartSendersRecovery(ctx, blk.signer, blk.body.Transactions).Wait(ctx)
+}
+
+func failSendersBlock(cfg SendersCfg, u Unwinder, tx kv.RwTx, bad *badSendersBlock, logPrefix string, logger log.Logger) error {
+	logger.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, bad.number, bad.hash, bad.err))
+	if cfg.badBlockHalt {
+		return bad.err
+	}
+	unwindReason := OperationalErr(bad.err)
+	if errors.Is(bad.err, rules.ErrInvalidBlock) {
+		unwindReason = BadBlock(bad.hash, bad.err)
+	}
+	return u.UnwindTo(bad.number-1, unwindReason, tx)
+}
+
 func sendersBytes(senders []accounts.Address) []byte {
 	if len(senders) == 0 {
 		return nil
@@ -293,6 +308,32 @@ func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg) (err error) 
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
 	if err := u.Done(tx); err != nil {
 		return err
+	}
+	return nil
+}
+
+// WritePendingSenders waits for the recoveries the Senders stage left running for exec and writes their kv.Senders rows.
+// Call it after exec, in the tx of the Senders stage, before that tx commits.
+func WritePendingSenders(ctx context.Context, cfg SendersCfg, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+	pending := *cfg.pending
+	*cfg.pending = nil
+	for _, blk := range pending {
+		senders, err := blk.registeredSenders(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if u.HasUnwindPoint() {
+				return nil
+			}
+			return failSendersBlock(cfg, u, tx, &badSendersBlock{number: blk.number, hash: blk.hash, err: err}, u.LogPrefix(), logger)
+		}
+		for i, txn := range blk.body.Transactions {
+			txn.SetSender(senders[i])
+		}
+		if err := tx.Put(kv.Senders, dbutils.BlockBodyKey(blk.number, blk.hash), sendersBytes(senders)); err != nil {
+			return err
+		}
 	}
 	return nil
 }

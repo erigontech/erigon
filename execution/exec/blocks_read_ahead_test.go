@@ -1104,6 +1104,44 @@ func TestStartSendersRecoveryCancelled(t *testing.T) {
 	require.Equal(t, -1, r.FailedTx())
 }
 
+func TestTxSenderWaitsOnlyForItsOwnSenderSlot(t *testing.T) {
+	txns := types.Transactions{
+		&types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 21_000}, GasPrice: *uint256.NewInt(1)},
+		&types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, GasLimit: 21_000}, GasPrice: *uint256.NewInt(1)},
+	}
+	r := newSendersRecovery(txns)
+	first, second := accounts.InternAddress(common.Address{0x01}), accounts.InternAddress(common.Address{0x02})
+	r.publish(0, first)
+	task := func(i int) *TxTask {
+		return &TxTask{Txs: txns, TxIndex: i, Senders: r, Header: &types.Header{}, Config: chain.TestChainBerlinConfig}
+	}
+
+	sender, err := task(0).TxSender()
+	require.NoError(t, err)
+	require.Equal(t, first, sender, "tx 0 reads its slot while the sender of tx 1 is not recovered yet")
+
+	got := make(chan accounts.Address, 1)
+	go func() {
+		sender, _ := task(1).TxSender()
+		got <- sender
+	}()
+	select {
+	case <-got:
+		t.Fatal("tx 1 did not wait for its slot")
+	case <-time.After(20 * time.Millisecond):
+	}
+	r.publish(1, second)
+	require.Equal(t, second, <-got)
+}
+
+func TestTxSenderFailsWhenTheRecoveryEndsWithoutItsSlot(t *testing.T) {
+	txns := types.Transactions{&types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 21_000}, GasPrice: *uint256.NewInt(1)}}
+	r := newSendersRecovery(txns)
+	close(r.done)
+	_, err := (&TxTask{Txs: txns, Senders: r, Header: &types.Header{}, Config: chain.TestChainBerlinConfig}).TxSender()
+	require.ErrorIs(t, err, rules.ErrInvalidBlock)
+}
+
 // Validation suspends warmup before an unwind and then executes; waiting for a running warmup must not wait for that suspension.
 func TestBlockReadAheaderWaitForRunningWarmup(t *testing.T) {
 	bra := NewBlockReadAheader()

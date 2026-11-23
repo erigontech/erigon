@@ -224,6 +224,9 @@ type TxTask struct {
 	Logger log.Logger
 	Trace  bool
 
+	// Senders, when set, recovers the senders of Txs while the block executes.
+	Senders *SendersRecovery
+
 	message      *types.Message
 	signer       *types.Signer
 	dependencies []int
@@ -267,7 +270,11 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	if t.TxIndex < 0 || t.TxIndex >= len(t.Txs) {
 		return accounts.NilAddress, nil
 	}
-	if sender, ok := t.Tx().GetSender(); ok {
+	if t.Senders != nil {
+		if sender, ok := t.Senders.Sender(t.TxIndex); ok {
+			return sender, nil
+		}
+	} else if sender, ok := t.Tx().GetSender(); ok {
 		return sender, nil
 	}
 	if t.signer == nil {
@@ -300,8 +307,12 @@ func (t *TxTask) ChargesSenderAtValidation(incarnation int) bool {
 func (t *TxTask) TxMessage() (*types.Message, error) {
 	if t.message == nil {
 		if tx := t.Tx(); tx != nil {
-			if _, err := t.TxSender(); err != nil {
+			sender, err := t.TxSender()
+			if err != nil {
 				return nil, err
+			}
+			if t.Senders != nil {
+				tx.SetSender(sender) // else AsMessage recovers it again
 			}
 			if t.signer == nil {
 				t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)

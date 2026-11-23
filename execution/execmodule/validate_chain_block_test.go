@@ -28,6 +28,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -78,6 +80,34 @@ func TestValidateChainExecutesTheGivenBlock(t *testing.T) {
 	body, ok := m.ReadAheader.ReadBodyWithTransactions(hash)
 	require.True(t, ok)
 	require.Same(t, &block.Transactions()[0], &body.Transactions[0], "validation copied the bare transaction slice")
+}
+
+func TestValidateChainWritesTheSendersOfARunningRecovery(t *testing.T) {
+	m, privKey, senderAddr := newMetricsTester(t)
+	pack, err := m.GenerateChain(1, sendTo(t, m, privKey, common.Address{0xaa}, 1))
+	require.NoError(t, err)
+	enc, err := rlp.EncodeToBytes(pack.Blocks[0])
+	require.NoError(t, err)
+	block := new(types.Block)
+	require.NoError(t, rlp.DecodeBytes(enc, block))
+
+	status, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	signer := types.MakeSigner(m.ChainConfig, block.NumberU64(), block.Time())
+	m.ExecModule.AddSendersRecovery(block.Hash(), exec.StartSendersRecovery(t.Context(), signer, block.Transactions()))
+	result, err := m.ValidateChain(t.Context(), block)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
+	_, err = m.UpdateForkChoice(t.Context(), block.Header())
+	require.NoError(t, err)
+
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		senders, err := rawdb.ReadSenders(tx, block.Hash(), block.NumberU64())
+		require.NoError(t, err)
+		require.Equal(t, []common.Address{senderAddr}, senders)
+		return nil
+	}))
 }
 
 func TestValidateChainReturnsMissingSegmentForUnreadableStoredHeader(t *testing.T) {

@@ -19,6 +19,7 @@ package stagedsync_test
 import (
 	"crypto/ecdsa"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestSenders(t *testing.T) {
@@ -262,12 +264,123 @@ func TestSendersAttachesSendersToCachedBody(t *testing.T) {
 
 	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, readAheader)
 	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New()))
+	require.NoError(t, stagedsync.WritePendingSenders(m.Ctx, cfg, &recordingUnwinder{}, tx, log.New()))
 
 	cached, ok := readAheader.ReadBodyWithTransactions(hash)
 	require.True(t, ok)
 	sender, ok := cached.Transactions[0].GetSender()
-	require.True(t, ok, "the cached body is what execution reads, so the stage must leave the senders on its txs")
+	require.True(t, ok, "the cached body is what execution reads, so the senders must be left on its txs")
 	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), sender.Value())
+}
+
+// gatedTx is a transaction whose sender recovery waits for its gate, so a test can hold a recovery running.
+type gatedTx struct {
+	*types.LegacyTx
+	gate chan struct{}
+	from accounts.Address
+}
+
+const gatedTxType = 0x7a
+
+func (tx *gatedTx) Type() byte { return gatedTxType }
+
+var registerGatedTx = sync.OnceFunc(func() {
+	types.RegisterTxType(gatedTxType, types.TxTypeSpec{
+		New: func() types.Transaction { return &gatedTx{LegacyTx: &types.LegacyTx{}} },
+		Sender: func(txn types.Transaction, _ types.Signer) (accounts.Address, error) {
+			g := txn.(*gatedTx)
+			<-g.gate
+			return g.from, nil
+		},
+	})
+})
+
+func TestSendersStageLetsExecStartBeforeTheRecoveryEnds(t *testing.T) {
+	registerGatedTx()
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	header := &types.Header{Number: *common.Num1}
+	hash, _ := writeSignedBlock(t, tx, header, key)
+
+	gate := make(chan struct{})
+	openGate := sync.OnceFunc(func() { close(gate) })
+	defer openGate()
+	want := []common.Address{{0x01}, {0x02}}
+	txns := make(types.Transactions, len(want))
+	for i, sender := range want {
+		txns[i] = &gatedTx{LegacyTx: &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i)}}, gate: gate, from: accounts.InternAddress(sender)}
+	}
+	readAheader := exec.NewBlockReadAheader()
+	readAheader.AddHeaderAndBody(m.Ctx, nil, nil, header, &types.Body{Transactions: txns})
+	readAheader.AddSendersRecovery(hash, exec.StartSendersRecovery(m.Ctx, types.MakeSigner(chain.TestChainBerlinConfig, 1, 0), txns))
+
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, readAheader)
+	done := make(chan error, 1)
+	go func() {
+		done <- stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New())
+	}()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		openGate()
+		<-done
+		t.Fatal("the Senders stage waited for the recovery to end")
+	}
+
+	block, ok := readAheader.ReadBlockWithSenders(hash)
+	require.True(t, ok, "exec reads the cached block while its senders are recovered")
+	senders := readAheader.RecoveringSenders(hash, block.Transactions())
+	require.NotNil(t, senders)
+	openGate()
+	for i, sender := range want {
+		task := &exec.TxTask{Txs: block.Transactions(), TxIndex: i, Senders: senders, Header: header, Config: chain.TestChainBerlinConfig}
+		got, err := task.TxSender()
+		require.NoError(t, err)
+		require.Equal(t, sender, got.Value())
+	}
+
+	require.NoError(t, stagedsync.WritePendingSenders(m.Ctx, cfg, &recordingUnwinder{}, tx, log.New()))
+	rows, err := rawdb.ReadSenders(tx, hash, 1)
+	require.NoError(t, err)
+	require.Equal(t, want, rows)
+	for i, txn := range txns {
+		sender, ok := txn.GetSender()
+		require.True(t, ok, "a later read of the cached block needs the senders on its txs")
+		require.Equal(t, want[i], sender.Value())
+	}
+}
+
+func TestPendingSendersUnwindBeforeABadSignature(t *testing.T) {
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	header := &types.Header{Number: *common.Num1}
+	hash, _ := writeSignedBlock(t, tx, header, key)
+	unsigned := types.Transactions{&types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 21_000}, GasPrice: u256.Num1}}
+	readAheader := exec.NewBlockReadAheader()
+	readAheader.AddHeaderAndBody(m.Ctx, nil, nil, header, &types.Body{Transactions: unsigned})
+	readAheader.AddSendersRecovery(hash, exec.StartSendersRecovery(m.Ctx, types.MakeSigner(chain.TestChainBerlinConfig, 1, 0), unsigned))
+
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, readAheader)
+	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New()))
+	u := &recordingUnwinder{}
+	require.NoError(t, stagedsync.WritePendingSenders(m.Ctx, cfg, u, tx, log.New()))
+
+	require.Equal(t, 1, u.calls)
+	require.Zero(t, u.point)
+	require.NotNil(t, u.reason.Block)
+	require.Equal(t, hash, *u.reason.Block)
+	has, err := m.BlockReader.HasSenders(m.Ctx, tx, hash, 1)
+	require.NoError(t, err)
+	require.False(t, has)
 }
 
 func TestSendersWritesBALBlockSenders(t *testing.T) {
@@ -300,6 +413,7 @@ func TestSendersWritesBALBlockSenders(t *testing.T) {
 
 	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, readAheader)
 	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New()))
+	require.NoError(t, stagedsync.WritePendingSenders(m.Ctx, cfg, &recordingUnwinder{}, tx, log.New()))
 
 	_, senders, err := m.BlockReader.BlockWithSenders(m.Ctx, tx, hash, 1)
 	require.NoError(t, err)
