@@ -77,6 +77,9 @@ func newTestReceiptsServer(ctx context.Context) *testReceiptsServer {
 }
 
 func (ts *testReceiptsServer) Send(m *remoteproto.SubscribeReceiptsReply) error {
+	if m.FilterApplied {
+		return nil
+	}
 	ts.sent = append(ts.sent, m)
 	return nil
 }
@@ -487,7 +490,10 @@ func TestFrameReceiptSubscription(t *testing.T) {
 
 type failingReceiptsServer struct{ *testReceiptsServer }
 
-func (failingReceiptsServer) Send(*remoteproto.SubscribeReceiptsReply) error {
+func (failingReceiptsServer) Send(m *remoteproto.SubscribeReceiptsReply) error {
+	if m.FilterApplied {
+		return nil
+	}
 	return errors.New("stream closed")
 }
 
@@ -495,10 +501,10 @@ func TestReceiptsFilter_FailedSendKeepsOtherSubscriberOfSameHash(t *testing.T) {
 	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
 	req := &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash1H256}}
 	failedID, _ := agg.insertReceiptsFilter(failingReceiptsServer{newTestReceiptsServer(t.Context())})
-	agg.updateReceiptsFilter(failedID, req)
+	require.NoError(t, agg.updateReceiptsFilter(failedID, req))
 	srv := newTestReceiptsServer(t.Context())
 	liveID, _ := agg.insertReceiptsFilter(srv)
-	agg.updateReceiptsFilter(liveID, req)
+	require.NoError(t, agg.updateReceiptsFilter(liveID, req))
 
 	agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1)})
 	agg.removeReceiptsFilter(failedID)
@@ -509,10 +515,10 @@ func TestReceiptsFilter_FailedSendKeepsOtherSubscriberOfSameHash(t *testing.T) {
 func TestReceiptsFilter_UpdateAfterFailedSendLeavesNoHashes(t *testing.T) {
 	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
 	id, _ := agg.insertReceiptsFilter(failingReceiptsServer{newTestReceiptsServer(t.Context())})
-	agg.updateReceiptsFilter(id, &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash1H256}})
+	require.NoError(t, agg.updateReceiptsFilter(id, &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash1H256}}))
 
 	agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1)})
-	agg.updateReceiptsFilter(id, &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash2H256}})
+	require.NoError(t, agg.updateReceiptsFilter(id, &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash2H256}}))
 	agg.removeReceiptsFilter(id)
 
 	require.Empty(t, agg.aggReceiptsFilter.txHashes)

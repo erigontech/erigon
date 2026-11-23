@@ -284,7 +284,11 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 		}
 		return err
 	}
-	requestor.Store(subscription.Send)
+	applied, done := make(chan struct{}, 1), make(chan struct{})
+	defer close(done)
+	requestor.Store(func(req *remoteproto.LogsFilterRequest) error {
+		return sendFilterUpdate(ctx, subscription.Send, req, applied, done)
+	})
 	for {
 		logs, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
@@ -293,6 +297,10 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 		}
 		if err != nil {
 			return err
+		}
+		if logs.FilterApplied {
+			applied <- struct{}{}
+			continue
 		}
 		onNewLogs(logs)
 	}
@@ -307,8 +315,12 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 		}
 		return err
 	}
+	applied, done := make(chan struct{}, 1), make(chan struct{})
+	defer close(done)
 	if onReady != nil {
-		onReady(subscription.Send)
+		onReady(func(req *remoteproto.ReceiptsFilterRequest) error {
+			return sendFilterUpdate(ctx, subscription.Send, req, applied, done)
+		})
 	}
 	for {
 		receipts, err := subscription.Recv()
@@ -319,9 +331,30 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 		if err != nil {
 			return err
 		}
+		if receipts.FilterApplied {
+			applied <- struct{}{}
+			continue
+		}
 		onNewReceipts(receipts)
 	}
 	return nil
+}
+
+// sendFilterUpdate returns once the server has applied req, so events published after it
+// are filtered by req. The server acks requests in order and callers send one request
+// at a time per stream, so the next ack belongs to req.
+func sendFilterUpdate[R any](ctx context.Context, send func(R) error, req R, applied, done <-chan struct{}) error {
+	if err := send(req); err != nil {
+		return err
+	}
+	select {
+	case <-applied:
+		return nil
+	case <-done:
+		return errors.New("filter subscription closed before the update was applied")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {

@@ -186,6 +186,7 @@ message SubscribeLogsReply {
   uint64 transaction_index = 8;
   bool removed = 9;
   uint64 block_timestamp = 10;
+  bool filter_applied = 11; // acks a LogsFilterRequest; carries no log
 }
 
 message ReceiptsFilterRequest {
@@ -217,6 +218,7 @@ message SubscribeReceiptsReply {
   types.H256 effective_gas_price = 21;
   types.H160 payer = 22;
   repeated FrameReceipt frame_receipts = 23;
+  bool filter_applied = 24; // acks a ReceiptsFilterRequest; carries no receipt
 }
 
 message FrameReceipt {

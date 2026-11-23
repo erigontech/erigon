@@ -234,9 +234,12 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 				ff.receiptsRequestor.Store(send)
 				ff.mu.Unlock()
 				if ff.pendingReceiptsUpdate.CompareAndSwap(true, false) {
-					if err := ff.sendReceiptsFilterUpdate(); err != nil {
-						logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
-					}
+					// The update waits for an ack that this stream reads only after onReady returns.
+					go func() {
+						if err := ff.sendReceiptsFilterUpdate(); err != nil {
+							logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
+						}
+					}()
 				}
 			})
 			ff.receiptsSubs.endStream()
