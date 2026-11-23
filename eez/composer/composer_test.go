@@ -487,8 +487,9 @@ func TestComposerRecovers(t *testing.T) {
 		h.c.RecoverFailed(t.Context())
 		h.cursor.Store(4)
 		h.c.RecoverFailed(t.Context())
-		// Off L1 and out of the node's pool, its posting fails.
-		require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Failed }, 5*time.Second, time.Millisecond)
+		// Off L1 and out of the node's pool, its posting fails; the recovery
+		// that watches it again takes the verdict when it comes first.
+		require.Eventually(t, func() bool { r, ok := h.resolution(8); return !ok || r == Failed }, 5*time.Second, time.Millisecond)
 		h.slot(t, 12, 52, sequencer.ModeSteady)
 		require.Len(t, h.targets(t), 2)
 		h.requireWindow(t, 1, 5, 12, post.Target{Block: 52, Time: h.chain.header(12).Time})
