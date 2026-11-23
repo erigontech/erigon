@@ -121,7 +121,6 @@ const (
 	SIGPARAM
 	SIGDATACOPY
 	TXTRACE
-	TXDIFF
 	EVENTDATACOPY
 )
 
@@ -318,7 +317,6 @@ var opCodeToString = map[OpCode]string{
 	SIGPARAM:      "SIGPARAM",
 	SIGDATACOPY:   "SIGDATACOPY",
 	TXTRACE:       "TXTRACE",
-	TXDIFF:        "TXDIFF",
 	EVENTDATACOPY: "EVENTDATACOPY",
 
 	// 0x50 range - 'storage' and execution.
@@ -491,7 +489,6 @@ var stringToOp = map[string]OpCode{
 	"SIGPARAM":       SIGPARAM,
 	"SIGDATACOPY":    SIGDATACOPY,
 	"TXTRACE":        TXTRACE,
-	"TXDIFF":         TXDIFF,
 	"EVENTDATACOPY":  EVENTDATACOPY,
 	"DELEGATECALL":   DELEGATECALL,
 	"STATICCALL":     STATICCALL,

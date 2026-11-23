@@ -312,7 +312,7 @@ func NewCodec(conn Conn) ServerCodec {
 
 // newJSONEncoder returns the writer side every JSON transport shares.
 func newJSONEncoder(conn Conn) func(v any) error {
-	enc := json.NewEncoder(conn)
+	var enc *json.Encoder
 	return func(v any) error {
 		switch r := v.(type) {
 		case rawResponse:
@@ -325,6 +325,9 @@ func newJSONEncoder(conn Conn) func(v any) error {
 			s.WriteRaw("\n")
 			return s.Flush()
 		default:
+			if enc == nil {
+				enc = json.NewEncoder(conn)
+			}
 			return enc.Encode(v)
 		}
 	}

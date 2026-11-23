@@ -148,7 +148,7 @@ func TestRPCTransactionJSONPinned(t *testing.T) {
 			if tt.block {
 				blockHash, blockTime, blockNumber, index = pinBlockHash, 1000, 100, 3
 			}
-			got, err := json.Marshal(NewRPCTransaction(tt.txn, blockHash, blockTime, blockNumber, index, tt.baseFee))
+			got, err := json.Marshal(NewRPCTransaction(tt.txn, blockHash, blockTime, blockNumber, index, tt.baseFee, nil, 0))
 			require.NoError(t, err)
 			require.Equal(t, tt.want, string(got))
 		})
