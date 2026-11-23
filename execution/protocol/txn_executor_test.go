@@ -1368,8 +1368,8 @@ func TestPreCheck_NilMaxFeePerBlobGas(t *testing.T) {
 }
 
 // TestType4Prereq_NoStateMutationOnReject verifies that SetCode prerequisites
-// take precedence over affordability and intrinsic gas, leaving sender state
-// unchanged on rejection.
+// take precedence over insufficient funds and a gas limit below the intrinsic
+// cost. Rejection must preserve the sender's balance and nonce.
 func TestType4Prereq_NoStateMutationOnReject(t *testing.T) {
 	t.Parallel()
 

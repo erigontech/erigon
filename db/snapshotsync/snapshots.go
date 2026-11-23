@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -620,11 +619,10 @@ func (s *BaseRoSnapshots) SetIndexBuilder(t snaptype.Type, indexBuilder snaptype
 }
 
 func (s *BaseRoSnapshots) LogStat(label string) {
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
+	alloc, sys := dbg.MemUsage()
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", label),
 		"blocks", common.PrettyExact(s.SegmentsMax()+1), "indices", common.PrettyExact(s.IndicesMax()+1),
-		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 }
 
 func (s *BaseRoSnapshots) Types() []snaptype.Type { return s.types }
@@ -1817,10 +1815,9 @@ func (s *BaseRoSnapshots) IndexMissed(ctx context.Context, logPrefix, tmpDir str
 		for {
 			select {
 			case <-logEvery.C:
-				var m runtime.MemStats
-				dbg.ReadMemStats(&m)
-				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
-				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				alloc, sys := dbg.MemUsage()
+				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), alloc, sys)
+				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 			case <-finish:
 				return
 			case <-ctx.Done():

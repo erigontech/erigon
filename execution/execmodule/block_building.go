@@ -27,7 +27,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -225,19 +227,16 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 }
 
 // blockValue computes the expected value received by the fee recipient in wei.
-func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int {
-	blockValue := uint256.NewInt(0)
-	txs := br.Block.Transactions()
-	var gas, txValue uint256.Int
-	for i := range txs {
-		gas.SetUint64(br.Receipts[i].GasUsed)
-
-		effectiveTip := txs[i].GetEffectiveGasTip(baseFee)
-
-		txValue.Mul(&gas, &effectiveTip)
-		blockValue.Add(blockValue, &txValue)
+func blockValue(br *types.BlockWithReceipts, baseFee, blobBaseFee *uint256.Int) (*uint256.Int, error) {
+	value := new(uint256.Int)
+	for i, txn := range br.Block.Transactions() {
+		tip, err := ethutils.GasTipPaid(txn, br.Receipts[i].GasUsed, baseFee, blobBaseFee)
+		if err != nil {
+			return nil, err
+		}
+		value.Add(value, &tip)
 	}
-	return blockValue
+	return value, nil
 }
 
 func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error) {
@@ -276,8 +275,17 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 	}
 
 	header := blockWithReceipts.Block.Header()
-	baseFee := header.BaseFee
-	value := blockValue(blockWithReceipts, baseFee)
+	var blobBaseFee uint256.Int
+	if header.ExcessBlobGas != nil {
+		blobBaseFee, err = misc.GetBlobGasPrice(e.config, *header.ExcessBlobGas, header.Time)
+		if err != nil {
+			return AssembledBlockResult{}, err
+		}
+	}
+	value, err := blockValue(blockWithReceipts, header.BaseFee, &blobBaseFee)
+	if err != nil {
+		return AssembledBlockResult{}, err
+	}
 
 	return AssembledBlockResult{
 		Block:      blockWithReceipts,
