@@ -84,11 +84,21 @@ func TestBestKeepsPendingBlobTxnWithMissingWrapper(t *testing.T) {
 	wrapper := slot.Rlp
 	slot.Rlp = nil
 
+	reader, err := pool.poolDB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer reader.Rollback()
+	raw, err := pool.GetRlp(reader, slot.IDHash[:])
+	require.NoError(t, err)
+	require.Nil(t, raw, "the inner body cannot supply the missing blob sidecar")
 	require.Zero(t, bestOf(t, pool))
 	require.Equal(t, 1, pool.pending.Len())
 	require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 
 	slot.Rlp = wrapper
+	raw, err = pool.GetRlp(reader, slot.IDHash[:])
+	require.NoError(t, err)
+	require.Equal(t, wrapper, raw)
+	require.NotSame(t, &wrapper[0], &raw[0])
 	provided, err := pool.ProvideTxns(ctx)
 	require.NoError(t, err)
 	require.Len(t, provided, 1)

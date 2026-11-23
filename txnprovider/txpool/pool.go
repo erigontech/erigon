@@ -746,16 +746,40 @@ func (p *TxPool) kickKZGOffenders(ctx context.Context, reasons []txpoolcfg.Disca
 }
 
 func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
+	var slot *TxnSlot
+	var raw []byte
 	p.lock.Lock()
-	defer p.lock.Unlock()
-	if mt := p.byHash[string(hash)]; mt != nil && mt.TxnSlot.Rlp != nil {
-		return bytes.Clone(mt.TxnSlot.Rlp), nil
+	if mt := p.byHash[string(hash)]; mt != nil {
+		slot = mt.TxnSlot
+		raw = slot.Rlp
 	}
-	v, err := tx.GetOne(kv.PoolTransaction, hash)
-	if err != nil || v == nil {
+	p.lock.Unlock()
+	return readTxnRlp(tx, hash, slot, raw)
+}
+
+// readTxnRlp returns wire bytes owned by the caller. Capture slot and raw
+// under the pool lock so the database read and encoding can run after unlocking.
+func readTxnRlp(tx kv.Tx, hash []byte, slot *TxnSlot, raw []byte) ([]byte, error) {
+	if raw != nil {
+		return bytes.Clone(raw), nil
+	}
+	row, err := tx.GetOne(kv.PoolTransaction, hash)
+	if err != nil {
 		return nil, err
 	}
-	return bytes.Clone(v[length.Addr:]), nil
+	if row != nil {
+		return bytes.Clone(row[length.Addr:]), nil
+	}
+	// The caller's snapshot may predate the flush. The parsed body can reproduce
+	// the full wire encoding only for transactions without blob sidecars.
+	if slot == nil || slot.HasBlobs() {
+		return nil, nil
+	}
+	var buf bytes.Buffer
+	if err := slot.Txn.MarshalBinary(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func (p *TxPool) AppendAllAnnouncements(types []byte, sizes []uint32, hashes []byte) ([]byte, []uint32, []byte) {
@@ -3466,15 +3490,19 @@ func (p *TxPool) logStats() {
 	p.publishDepthMetrics()
 }
 
-// Deprecated need switch to streaming-like
+// deprecatedForEach gives the callback an owned encoding outside the pool lock.
+//
+// Deprecated: replace the full-pool snapshot with a streaming API.
 func (p *TxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
-	var txns []*metaTxn
-	var senders []common.Address
-	var subPoolTypes []SubPoolType
-	var rlpValues [][]byte
+	type entry struct {
+		slot    *TxnSlot
+		rlp     []byte
+		sender  common.Address
+		subPool SubPoolType
+	}
 
 	p.lock.Lock()
-
+	entries := make([]entry, 0, len(p.byHash))
 	p.all.ascendAll(func(mt *metaTxn) bool {
 		if sender, found := p.senders.senderID2Addr[mt.TxnSlot.SenderID]; found {
 			subPool := mt.currentSubPool
@@ -3483,10 +3511,7 @@ func (p *TxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t S
 				// scheduling sub-pools until validation succeeds.
 				subPool = QueuedSubPool
 			}
-			txns = append(txns, mt)
-			senders = append(senders, sender)
-			subPoolTypes = append(subPoolTypes, subPool)
-			rlpValues = append(rlpValues, mt.TxnSlot.Rlp)
+			entries = append(entries, entry{mt.TxnSlot, mt.TxnSlot.Rlp, sender, subPool})
 		}
 
 		return true
@@ -3494,21 +3519,17 @@ func (p *TxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t S
 
 	p.lock.Unlock()
 
-	for i := range txns {
-		slotRlp := rlpValues[i]
+	for _, e := range entries {
+		slotRlp, err := readTxnRlp(tx, e.slot.IDHash[:], e.slot, e.rlp)
+		if err != nil {
+			p.logger.Warn("[txpool] foreach: read transaction", "hash", common.Hash(e.slot.IDHash), "err", err)
+			continue
+		}
 		if slotRlp == nil {
-			v, err := tx.GetOne(kv.PoolTransaction, txns[i].TxnSlot.IDHash[:])
-			if err != nil {
-				p.logger.Warn("[txpool] foreach: get txn from db", "err", err)
-				continue
-			}
-			if v == nil {
-				p.logger.Warn("[txpool] foreach: txn not found in db")
-				continue
-			}
-			slotRlp = v[20:]
+			p.logger.Warn("[txpool] foreach: transaction encoding unavailable", "hash", common.Hash(e.slot.IDHash))
+			continue
 		}
 
-		f(slotRlp, senders[i], subPoolTypes[i])
+		f(slotRlp, e.sender, e.subPool)
 	}
 }

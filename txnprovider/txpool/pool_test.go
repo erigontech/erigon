@@ -210,6 +210,47 @@ func TestUnwindRestoresTransactionsAboveAccountLimit(t *testing.T) {
 	require.Zero(t, pool.queued.Len())
 }
 
+func TestReadPooledTransactionAcrossFlush(t *testing.T) {
+	ctx, pool, db, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	slot := encodeRemoteTxn(t, newTestSenderTxnSlot(sender, 0))
+	want := slot.Rlp
+	var slots TxnSlots
+	slots.Append(slot, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	// The caller opens its snapshot before the flush moves the encoding out of memory.
+	tx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	_, err = pool.flushNoFsync(ctx)
+	require.NoError(t, err)
+	require.Nil(t, slot.Rlp)
+	row, err := tx.GetOne(kv.PoolTransaction, slot.IDHash[:])
+	require.NoError(t, err)
+	require.Nil(t, row)
+
+	t.Run("by hash", func(t *testing.T) {
+		got, err := pool.GetRlp(tx, slot.IDHash[:])
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		var unknown common.Hash
+		got, err = pool.GetRlp(tx, unknown[:])
+		require.NoError(t, err)
+		require.Nil(t, got)
+	})
+	t.Run("all", func(t *testing.T) {
+		var got [][]byte
+		pool.deprecatedForEach(func(raw []byte, from common.Address, subPool SubPoolType) {
+			require.Equal(t, sender, from)
+			require.Equal(t, PendingSubPool, subPool)
+			got = append(got, raw)
+		}, tx)
+		require.Equal(t, [][]byte{want}, got)
+	})
+}
+
 func TestIdHashKnownDiscardReasons(t *testing.T) {
 	ctx, pool, poolDB, _, _ := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	hash := common.Hash{1}
@@ -548,6 +589,12 @@ func TestFromDBRestoresPersistedTxnsAfterInitialReset(t *testing.T) {
 	require.NoError(t, txn.Txn.MarshalBinary(&encoded))
 	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded.Bytes()...))
+	}))
+	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+		got, err := pool.GetRlp(tx, hash[:])
+		require.NoError(t, err)
+		require.Equal(t, encoded.Bytes(), got, "hash lookup must also serve rows before pool restoration")
+		return nil
 	}))
 
 	reset := newBlockChangeForAccounts(common.Hash{1}, 0, sender)

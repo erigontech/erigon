@@ -487,7 +487,7 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 	}
 }
 
-func TestGrpcServerPendingOwnsFlushedTransactionBytes(t *testing.T) {
+func TestGrpcServerPendingAndAllOwnFlushedTransactionBytes(t *testing.T) {
 	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts3.EmptyCodeHash)
 	slot := encodeRemoteTxn(t, newTestSenderTxnSlot(sender, 0))
 	want := slot.Rlp
@@ -508,14 +508,21 @@ func TestGrpcServerPendingOwnsFlushedTransactionBytes(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, row, len(sender)+len(want))
 	storedRlp := row[len(sender):]
+	requireOwned := func(got []byte) {
+		t.Helper()
+		require.Equal(t, want, got)
+		require.NotSame(t, &storedRlp[0], &got[0], "an RPC reply can outlive the database reader")
+	}
 
 	server := NewGrpcServer(ctx, pool, poolDB, nil, pool.chainID, pool.logger)
-	reply, err := server.Pending(ctx, &emptypb.Empty{})
+	pending, err := server.Pending(ctx, &emptypb.Empty{})
 	require.NoError(t, err)
-	require.Len(t, reply.Txs, 1)
-	got := reply.Txs[0].RlpTx
-	require.Equal(t, want, got)
-	require.NotSame(t, &storedRlp[0], &got[0], "a Pending reply can outlive the database reader")
+	require.Len(t, pending.Txs, 1)
+	requireOwned(pending.Txs[0].RlpTx)
+	all, err := server.All(ctx, &txpoolproto.AllRequest{})
+	require.NoError(t, err)
+	require.Len(t, all.Txs, 1)
+	requireOwned(all.Txs[0].RlpTx)
 }
 
 func TestGrpcServerParkedFrame(t *testing.T) {
