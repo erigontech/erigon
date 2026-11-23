@@ -1026,7 +1026,8 @@ func (tx *MdbxTx) CollectMetrics() {
 	kv.MDBXGauges.DbPgopsWops.WithLabelValues(dbLabel).SetUint64(info.PageOps.Wops)
 	kv.MDBXGauges.UnsyncedBytes.WithLabelValues(dbLabel).SetUint64(uint64(info.UnsyncedBytes))
 
-	txInfo, err := tx.tx.Info(true)
+	// Write-transaction metrics do not use reader lag. Read-only dirty space depends on the scan.
+	txInfo, err := tx.tx.Info(tx.readOnly)
 	if err != nil {
 		return
 	}
