@@ -10,8 +10,8 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// A replica part-way through its own block N takes the proposer's N by newPayload and fork choice, then builds N+1 on
-// it: N+1 executes on the imported N, not on what the abandoned N had pre-executed.
+// A replica that sealed a different block N takes the proposer's N by newPayload and fork choice, then builds N+1 on
+// it: N+1 executes on the imported N, not on what the replica's own N had pre-executed.
 func TestABlockOpenedOnAnImportedParentDoesNotSeeTheAbandonedPreExec(t *testing.T) {
 	replica := newRoundHarness(t)
 	proposer := newRoundHarnessWithKeys(t, replica.keys)
@@ -25,10 +25,9 @@ func TestABlockOpenedOnAnImportedParentDoesNotSeeTheAbandonedPreExec(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status, ur.ValidationError)
 
-	_, in := replica.attrs(head)
-	_, _, vr, err := replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in, first[0])
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
+	params, in := replica.attrs(head)
+	own1 := replica.sealRounds(params, in, first[:1])
+	require.NotEqual(t, proposed1.Hash(), own1.Hash())
 	require.NoError(t, insertValidateAndUfc1By1(replica.ctx, replica.m.ExecModule, []*types.Block{proposed1}))
 
 	second := [][][]byte{{replica.signed(0, 1, nil, 200_000, counterInit), replica.signed(1, 1, nil, 200_000, counterInit)}}
@@ -36,7 +35,7 @@ func TestABlockOpenedOnAnImportedParentDoesNotSeeTheAbandonedPreExec(t *testing.
 	proposed2 := proposer.sealRounds(paramsP2, inP2, second)
 
 	params2, in2 := replica.attrs(proposed1.Header())
-	_, _, vr, err = replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in2, second[0])
+	_, _, vr, err := replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in2, second[0])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
 	br, err := replica.m.ExecModule.SealBlock(replica.ctx, params2, false)
@@ -81,8 +80,8 @@ func TestABlockOpenedOnAnImportedChainDoesNotSeeTheReplicasOwnSealedFork(t *test
 	require.Equal(t, proposed3.Hash(), br.Block.Hash(), "the replica builds the proposer's next block")
 }
 
-// Once the abandoned block is dropped the round reads the canonical context, which newPayload rebinds under the
-// module semaphore; the round holds only its own lock, so the two must not share a read transaction.
+// A round on the replica's own abandoned fork reads the canonical context, which newPayload rebinds under the module
+// semaphore; the round holds only its own lock, so the two must not share a read transaction.
 func TestARoundAfterAnAbandonedBlockRunsBesideNewPayload(t *testing.T) {
 	replica := newRoundHarness(t)
 	proposer := newRoundHarnessWithKeys(t, replica.keys)
@@ -105,9 +104,9 @@ func TestARoundAfterAnAbandonedBlockRunsBesideNewPayload(t *testing.T) {
 		proposer.m.ExecModule.ResetFlashBodyForTest(0)
 	}
 
-	_, in := replica.attrs(head)
-	_, _, _, err = replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in, first[0])
-	require.NoError(t, err)
+	params, in := replica.attrs(head)
+	own1 := replica.sealRounds(params, in, [][][]byte{{replica.signed(0, 0, &common.Address{0x43}, 50_000, nil)}})
+	require.NotEqual(t, proposed1.Hash(), own1.Hash())
 	require.NoError(t, insertValidateAndUfc1By1(replica.ctx, replica.m.ExecModule, []*types.Block{proposed1}))
 
 	done := make(chan struct{})
@@ -118,7 +117,7 @@ func TestARoundAfterAnAbandonedBlockRunsBesideNewPayload(t *testing.T) {
 			_, _ = validateChain(replica.ctx, replica.m.ExecModule, b)
 		}
 	}()
-	_, in2 := replica.attrs(proposed1.Header())
+	_, in2 := replica.attrs(own1.Header())
 	future := replica.signed(0, 1000, nil, 200_000, counterInit)
 	for range 2000 {
 		_, _, _, _ = replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in2, [][]byte{future})
@@ -126,8 +125,8 @@ func TestARoundAfterAnAbandonedBlockRunsBesideNewPayload(t *testing.T) {
 	<-done
 }
 
-// A replica still taking rounds into its own block N while the proposer's N and N+1 are imported and canonicalised:
-// the fork choice retires the replica's generation for N, which the round is executing into.
+// A replica still taking rounds into its own, different, block N while the proposer's N and N+1 are imported and
+// canonicalised: the fork choice retires the replica's generation for N, which the round is executing into.
 func TestARoundIntoABlockTheImportOvertakesRunsBesideItsRetirement(t *testing.T) {
 	replica := newRoundHarness(t)
 	proposer := newRoundHarnessWithKeys(t, replica.keys)
@@ -148,7 +147,7 @@ func TestARoundIntoABlockTheImportOvertakesRunsBesideItsRetirement(t *testing.T)
 	head, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
 	require.NoError(t, err)
 	for i := 0; i+1 < len(chain); i += 2 {
-		_, in := replica.attrs(head)
+		params, in := replica.attrs(head)
 		_, _, _, err = replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in, [][]byte{replica.signed(0, 0, &to, 50_000, nil)})
 		require.NoError(t, err)
 		done := make(chan struct{})
@@ -157,6 +156,7 @@ func TestARoundIntoABlockTheImportOvertakesRunsBesideItsRetirement(t *testing.T)
 			for nonce := uint64(1); nonce < 30; nonce++ {
 				_, _, _, _ = replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in, [][]byte{replica.signed(0, nonce, &to, 50_000, nil)})
 			}
+			_, _ = replica.m.ExecModule.SealBlock(replica.ctx, params, false)
 		}()
 		require.NoError(t, insertValidateAndUfc1By1(replica.ctx, replica.m.ExecModule, chain[i:i+2]))
 		<-done

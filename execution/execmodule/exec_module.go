@@ -659,9 +659,10 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 			return ValidationResult{ValidationStatus: ExecutionStatusSuccess, LatestValidHash: blockHash}, nil
 		}
 	}
-	e.pendingBlockMu.Lock()
-	sealed := e.sealedByHash[blockHash]
-	e.pendingBlockMu.Unlock()
+	sealed, err := e.awaitPreExecSeal(ctx, blockHash, blockNumber, block.ParentHash())
+	if err != nil {
+		return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil
+	}
 	if sealed != nil && sealed.Number.Uint64() == blockNumber {
 		// This is newPayload for a block THIS node produced, so it is where the pre-executed generation
 		// crosses into validation space — the FCU that follows canonicalises it through the ordinary merge
@@ -697,6 +698,34 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 	e.semTake("ValidateChain")
 	defer e.semDrop()
 	return e.validateChain(ctx, block, false)
+}
+
+// awaitPreExecSeal returns this node's sealed block for hash, first waiting out a pre-exec still building that height:
+// the payload's hash only exists once the local seal at that height has run.
+func (e *ExecModule) awaitPreExecSeal(ctx context.Context, hash common.Hash, number uint64, parent common.Hash) (*types.Header, error) {
+	for {
+		e.flash.mu.Lock()
+		changed := e.flash.changedLocked()
+		building := e.flash.num == number && e.flash.valid && e.flash.built.Parent == parent
+		e.flash.mu.Unlock()
+		e.pendingBlockMu.Lock()
+		sealed := e.sealedByHash[hash]
+		sealedAtHeight := sealed != nil
+		for _, h := range e.sealedByHash {
+			if !sealedAtHeight && h.Number.Uint64() == number {
+				sealedAtHeight = true
+			}
+		}
+		e.pendingBlockMu.Unlock()
+		if sealedAtHeight || !building {
+			return sealed, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-changed:
+		}
+	}
 }
 
 func (e *ExecModule) ValidateChainAndView(ctx context.Context, block *types.Block, wait time.Duration, fn BlockStateView) (ValidationResult, func() error, error) {
@@ -1200,6 +1229,9 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 	e.pendingBlockMu.Lock()
 	e.sealedByHash[newHash] = sealed
 	e.pendingBlockMu.Unlock()
+	e.flash.mu.Lock()
+	e.flash.signalLocked()
+	e.flash.mu.Unlock()
 	e.logger.Debug("[execmodule] flashblock sealed (newPayload ingest)",
 		"number", number, "deferredHash", oldHash, "sealedHash", newHash, "root", sealed.Root)
 	return nil

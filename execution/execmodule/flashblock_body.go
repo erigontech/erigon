@@ -145,6 +145,22 @@ type flashBodyState struct {
 	hash        common.Hash      // the current in-progress header hash
 	root        common.Hash      // last pre-exec computed state root (per-round; seal recomputes the final)
 	receipts    int              // receipts accumulated across rounds (== body txs)
+	changed     chan struct{}
+}
+
+// changedLocked returns a channel closed by the next reset or seal of the in-progress block.
+func (f *flashBodyState) changedLocked() <-chan struct{} {
+	if f.changed == nil {
+		f.changed = make(chan struct{})
+	}
+	return f.changed
+}
+
+func (f *flashBodyState) signalLocked() {
+	if f.changed != nil {
+		close(f.changed)
+		f.changed = nil
+	}
 }
 
 // AssembleInProgress seals the CURRENT in-progress flashblock — block-end over its maintained SD (ValidateChain,
@@ -219,6 +235,7 @@ func (f *flashBodyState) resetLocked(num uint64) {
 	f.hash = common.Hash{}
 	f.root = common.Hash{}
 	f.receipts = 0
+	f.signalLocked()
 }
 
 // PreExecuteFlashblock is the encapsulated execution half: the driver hands it the UNFILTERED committed tx
