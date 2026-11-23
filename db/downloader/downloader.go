@@ -1020,11 +1020,13 @@ func (d *Downloader) backgroundLogging(ctx context.Context) {
 			return
 		}
 		allActiveSnapshots := d.allActiveSnapshots()
-		stats = d.newStats(stats, allActiveSnapshots)
-		// Flexibility to add seeding and warn on unexpected behaviour in torrent client here. We
-		// should probably change the status message if downloading but nobody is actively waiting
-		// on sync. We can also report seeding if we see upload activity and everything is synced.
-		d.logStatsInner(log.LvlDebug, stats, "Idle", nil, false)
+		if d.logger.Enabled(ctx, log.LvlDebug) {
+			stats = d.newStats(stats, allActiveSnapshots)
+			// Flexibility to add seeding and warn on unexpected behaviour in torrent client here. We
+			// should probably change the status message if downloading but nobody is actively waiting
+			// on sync. We can also report seeding if we see upload activity and everything is synced.
+			d.logStatsInner(log.LvlDebug, stats, "Idle", nil, false)
+		}
 		// There are missing torrent infos but nobody is waiting on a download request to complete.
 		// Let me (anacrolix) know why this should happen.
 		d.logNoMetadata(log.LvlError, allActiveSnapshots)
@@ -1781,15 +1783,14 @@ func (d *Downloader) logStatsInner(
 		)
 	}
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
+	alloc, sys := dbg.MemUsage()
 
 	addCtx(
 		"peers", stats.PeersUnique,
 		"conns", stats.ConnectionsTotal,
 		"upload", fmt.Sprintf("%s/s", common.ByteCount(stats.UploadRate)),
-		"alloc", common.ByteCount(m.Alloc),
-		"sys", common.ByteCount(m.Sys),
+		"alloc", common.ByteCount(alloc),
+		"sys", common.ByteCount(sys),
 	)
 
 	d.log(level, msg, logCtx...)
@@ -1805,34 +1806,32 @@ func calculateTime(amountLeft, rate uint64) string {
 // Expose torrent client status to HTTP on the public/default serve mux used by GOPPROF=http, and
 // the provided "debug" mux if non-nil. Only do this if you have a single instance of a Downloader.
 func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// WriteStatus holds the client lock until it finishes. For large torrent counts, the output
-		// can be very large (90 MB).
-		var buf bytes.Buffer
-		gzW := gzip.NewWriter(&buf)
-		d.torrentClient.WriteStatus(gzW)
-		gzW.Close()
-		h := r.Header.Get("Accept-Encoding")
-		d.log(log.LvlDebug, "compressed torrent client status", "size", buf.Len(), "Accept-Encoding", h)
-		if strings.Contains(h, "gzip") {
-			w.Header().Set("Content-Encoding", "gzip")
-			_, _ = w.Write(buf.Bytes())
-		} else {
-			gzR, err := gzip.NewReader(&buf)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			_, _ = io.Copy(w, gzR)
-			gzR.Close()
-		}
-	})
+	h := torrentClientStatusHandler(d.torrentClient.WriteStatus)
 
 	// This is for gopprof.
 	defaultMux := http.DefaultServeMux
 	defaultMux.Handle(TorrentClientStatusPath, h)
 	if debugMux != nil && debugMux != defaultMux {
 		debugMux.Handle(TorrentClientStatusPath, h)
+	}
+}
+
+func torrentClientStatusHandler(writeStatus func(io.Writer)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// WriteStatus holds the client read lock. Collect the text before compressing or sending it.
+		var status bytes.Buffer
+		writeStatus(&status)
+
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Add("Vary", "Accept-Encoding")
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			gz := gzip.NewWriter(w)
+			_, _ = status.WriteTo(gz)
+			_ = gz.Close()
+			return
+		}
+		_, _ = status.WriteTo(w)
 	}
 }
 
