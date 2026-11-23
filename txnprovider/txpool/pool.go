@@ -1026,18 +1026,19 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 		}
 
 		mt := best.ms[i]
+		slot := mt.TxnSlot
 
-		if yielded != nil && yielded.Contains(mt.TxnSlot.IDHash) {
+		if yielded != nil && yielded.Contains(slot.IDHash) {
 			continue
 		}
 		var limits mdgas.MdGas
 		var intrinsicGasResult mdgas.IntrinsicGasCalcResult
 		var err error
-		frame, isFrame := mt.TxnSlot.Txn.(*types.FrameTransaction)
+		frame, isFrame := slot.Txn.(*types.FrameTransaction)
 		if isFrame {
 			intrinsicGasResult.ExecutionGas, intrinsicGasResult.FloorGasCost, limits, err = frame.GasLimits()
 		} else {
-			limits, err = protocol.TransactionGasLimits(mt.TxnSlot.Txn, isAmsterdam)
+			limits, err = protocol.TransactionGasLimits(slot.Txn, isAmsterdam)
 		}
 		if err != nil {
 			continue
@@ -1048,7 +1049,7 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 			toDemote = append(toDemote, mt)
 			continue
 		}
-		if !isFrame && mt.TxnSlot.GetGas() > p.blockGasLimit.Load() {
+		if !isFrame && slot.GetGas() > p.blockGasLimit.Load() {
 			continue
 		}
 		executionGas, stateGas := limits.Execution, limits.State
@@ -1059,9 +1060,9 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 			continue
 		}
 
-		wireSize := int64(mt.TxnSlot.Size)
+		wireSize := int64(slot.Size)
 		if wireSize == 0 {
-			p.logger.Error("[txpool] pending transaction has no encoded size", "hash", common.Hash(mt.TxnSlot.IDHash))
+			p.logger.Error("[txpool] pending transaction has no encoded size", "hash", common.Hash(slot.IDHash))
 			continue
 		}
 		if wireSize > int64(availableRlpSpace) {
@@ -1069,21 +1070,21 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 			continue
 		}
 
-		parsed := mt.TxnSlot.Txn
-		if mt.TxnSlot.HasBlobs() {
+		parsed := slot.Txn
+		if slot.HasBlobs() {
 			// The parsed body omits the sidecar. Keep a transaction with a missing wrapper
 			// pending until it is available, and return the full wrapper when selecting it.
-			if len(mt.TxnSlot.Rlp) == 0 {
+			if len(slot.Rlp) == 0 {
 				continue
 			}
 			parsed = nil
 		}
 
 		// Skip transactions that require more blob gas than is available
-		blobCount := uint64(len(mt.TxnSlot.GetBlobHashes()))
+		blobCount := uint64(len(slot.GetBlobHashes()))
 		if blobCount > 0 {
 			if p.isOsaka() {
-				proofs := mt.TxnSlot.Proofs()
+				proofs := slot.Proofs()
 				if len(proofs) != int(blobCount)*int(params.CellsPerExtBlob) { // cell_proofs contains exactly CELLS_PER_EXT_BLOB * len(blobs) cell proofs
 					toDiscard = append(toDiscard, mt)
 					continue
@@ -1094,14 +1095,14 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 			}
 		}
 
-		sender := p.senders.senderID2Addr[mt.TxnSlot.SenderID]
+		sender := p.senders.senderID2Addr[slot.SenderID]
 		// The gas limits determine whether a transaction fits. Until it executes,
 		// estimate the execution gas left for later candidates by deducting its
 		// intrinsic cost. From Prague onward, use the gas floor if it is higher.
 		if !isFrame {
-			to := mt.TxnSlot.Txn.GetTo()
+			to := slot.Txn.GetTo()
 			isSelfTransfer := to != nil && *to == sender
-			intrinsicGasResult, _ = poolIntrinsicGas(mt.TxnSlot.Txn, isSelfTransfer, isEIP3860, isEIP7623, isAmsterdam)
+			intrinsicGasResult, _ = poolIntrinsicGas(slot.Txn, isSelfTransfer, isEIP3860, isEIP7623, isAmsterdam)
 		}
 		intrinsicGas := intrinsicGasResult.ExecutionGas
 		if isEIP7623 {
@@ -1114,12 +1115,12 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 		availableGas.Execution -= intrinsicGas
 		availableGas.Blob -= blobCount * params.GasPerBlob
 		availableRlpSpace -= int(wireSize)
-		txns.Txns[count] = mt.TxnSlot.Rlp
+		txns.Txns[count] = slot.Rlp
 		txns.ParsedTxn[count] = parsed
 		copy(txns.Senders.At(count), sender[:])
 		txns.IsLocal[count] = mt.subPool&IsLocal != 0
 		if yielded != nil {
-			yielded.Add(mt.TxnSlot.IDHash)
+			yielded.Add(slot.IDHash)
 		}
 		count++
 	}
