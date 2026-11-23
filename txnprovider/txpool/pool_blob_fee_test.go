@@ -74,9 +74,9 @@ func TestBestDemotesABlobTxnBelowTheBlobFee(t *testing.T) {
 	require.Equal(t, 1, pool.baseFee.Len())
 }
 
-// best() reads RLPs through a snapshot taken before it retakes the pool lock, so a flush in between can move a txn's RLP
-// to a row the snapshot does not see. The txn stays pending and is offered on the next call.
-func TestBestKeepsATxnWhoseRlpTheSnapshotMisses(t *testing.T) {
+// Clear the in-memory RLP before it is flushed, so even a fresh snapshot has no row for it.
+// The transaction stays pending and can be selected once its RLP is available again.
+func TestBestKeepsPendingTxnWithMissingRlp(t *testing.T) {
 	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000)
 	mt := pool.pending.best.ms[0]
 	rlp := mt.TxnSlot.Rlp

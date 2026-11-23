@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
@@ -64,6 +65,38 @@ func provideTxnsAsync(ctx context.Context, pool *TxPool, opts ...txnprovider.Pro
 		done <- provideTxnsResult{txns, err}
 	}()
 	return done
+}
+
+type flushOnReadPoolDB struct {
+	kv.RwDB
+	flush func(context.Context) (uint64, error)
+}
+
+func (db *flushOnReadPoolDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	tx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic // the caller owns the read transaction
+	if err == nil && db.flush != nil {
+		_, err = db.flush(ctx)
+		db.flush = nil
+		if err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+	}
+	return tx, err
+}
+
+func TestProvideTxnsIncludesPendingTxnFlushedAfterSnapshot(t *testing.T) {
+	ctx := t.Context()
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, 100_000)
+	slot := pool.pending.best.ms[0].TxnSlot
+	// Flush after the first snapshot opens and before selection takes the pool lock.
+	pool.poolDB = &flushOnReadPoolDB{RwDB: pool.poolDB, flush: pool.flushNoFsync}
+
+	txns, err := pool.ProvideTxns(ctx)
+	require.NoError(t, err)
+	require.Nil(t, slot.Rlp, "flush must release the in-memory encoding")
+	require.Len(t, txns, 1, "the first selection must include the flushed transaction")
+	require.Equal(t, slot.Txn.Hash(), txns[0].Hash())
 }
 
 func TestProvideTxnsInterruptsParentBlockWaitWhilePoolIsLocked(t *testing.T) {

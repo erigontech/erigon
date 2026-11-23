@@ -154,6 +154,7 @@ type TxPool struct {
 	newPendingTxns          chan Announcements               // notifications about new txns in Pending sub-pool
 	all                     *BySenderAndNonce                // Ordered by sender ID, nonce domain (account or keyed), then nonce
 	deletedTxns             []*metaTxn                       // list of discarded txns since last db commit
+	flushGeneration         atomic.Uint64
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
@@ -946,7 +947,7 @@ func (p *TxPool) waitForBlock(ctx context.Context, n int, onTopOf uint64, stop <
 	})
 }
 
-var errParentBlockRewound = errors.New("txpool head rewound below the requested parent")
+var errRetrySelection = errors.New("transaction selection needs a fresh pool view")
 
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
@@ -956,7 +957,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 ) (bool, int, error) {
 	for p.waitForBlock(ctx, n, onTopOf, parentBlockWaitStop) {
 		onTime, count, err := p.selectBest(ctx, n, txns, onTopOf, availableGas, yielded, availableRlpSpace)
-		if !errors.Is(err, errParentBlockRewound) {
+		if !errors.Is(err, errRetrySelection) {
 			return onTime, count, err
 		}
 	}
@@ -967,7 +968,9 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	availableGas mdgas.FullMdGas, yielded mapset.Set[[32]byte], availableRlpSpace int,
 ) (bool, int, error) {
-	// Open a fresh snapshot after the wait. The read transaction limiter comes before the pool lock.
+	// Open a fresh snapshot after the parent wait. Waiting for a database reader slot
+	// while holding the pool lock could deadlock with a reader waiting for that lock.
+	flushGeneration := p.flushGeneration.Load()
 	tx, err := p.poolDB.BeginRo(ctx)
 	if err != nil {
 		return false, 0, err
@@ -976,8 +979,11 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	if p.lastSeenBlock.Load() < onTopOf {
-		return false, 0, errParentBlockRewound
+	// The head may have rewound since the wait. A flush can also move a pending transaction's
+	// RLP from memory to a row this snapshot cannot see. Retry before marking any transactions
+	// as yielded so they can still be returned in this request.
+	if p.lastSeenBlock.Load() < onTopOf || p.flushGeneration.Load() != flushGeneration {
+		return false, 0, errRetrySelection
 	}
 	if p.stateViewStale {
 		return false, 0, nil
@@ -1053,8 +1059,7 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 			return false, count, err
 		}
 		if len(rlpTxn) == 0 {
-			// The snapshot was taken before the pool lock was retaken; a flush in between moved the RLP to a row it does
-			// not see. The next call reads it.
+			// Keep the transaction pending so a later request can select it if its RLP becomes available.
 			continue
 		}
 
@@ -3135,7 +3140,8 @@ func (p *TxPool) Run(ctx context.Context) error {
 func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	// it's important that write db txn is done inside lock, to make last writes visible for all read operations
+	// Hold the pool lock through the commit and the generation update. A reader that
+	// sees the new generation before opening its snapshot will see this commit.
 	if err := p.poolDB.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		err = p.flushLocked(tx)
 		if err != nil {
@@ -3149,6 +3155,7 @@ func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	}); err != nil {
 		return 0, err
 	}
+	p.flushGeneration.Add(1)
 	return written, nil
 }
 
