@@ -398,7 +398,7 @@ func TestSeedEmptyRemovalsRevivalIndexes(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0xd7a3"))
 	other := accounts.InternAddress(common.HexToAddress("0xd7a4"))
-	vm := NewVersionMap(types.BlockAccessList{{
+	bal := types.BlockAccessList{{
 		Address: addr.Value(),
 		BalanceChanges: []*types.BalanceChange{
 			{Index: 0},
@@ -416,13 +416,21 @@ func TestSeedEmptyRemovalsRevivalIndexes(t *testing.T) {
 	}, {
 		Address: other.Value(),
 		BalanceChanges: []*types.BalanceChange{
-			{Index: 6}, {Index: 8, Value: *uint256.NewInt(1)}, {Index: 11}, {Index: 13, Value: *uint256.NewInt(2)},
+			{Index: 2},
+			{Index: 4, Value: *uint256.NewInt(3)},
+			{Index: 6},
+			{Index: 8, Value: *uint256.NewInt(1)},
+			{Index: 11},
+			{Index: 13, Value: *uint256.NewInt(2)},
 		},
+		NonceChanges: []*types.NonceChange{{Index: 2, Value: 1}, {Index: 6, Value: 0}},
 		StorageChanges: []types.SlotChanges{{
 			Slot:    accounts.InternKey(common.Hash{31: 1}),
 			Changes: []*types.StorageChange{{Index: 5, Value: *uint256.NewInt(1)}, {Index: 7, Value: *uint256.NewInt(2)}},
 		}},
-	}})
+	}}
+	require.NoError(t, bal.Validate())
+	vm := NewVersionMap(bal)
 	require.NoError(t, vm.SeedEmptyRemovals(true, false, &countingAccountReader{}))
 
 	balances := vm.load(addr).Balance
@@ -438,9 +446,14 @@ func TestSeedEmptyRemovalsRevivalIndexes(t *testing.T) {
 	}
 	shared := requireDoneCell(t, balances, 9-1, 0)
 	require.Equal(t, *uint256.NewInt(5), shared.Value)
-	revival := requireDoneCell(t, vm.load(other).Balance, 7-1, 0)
+
+	otherBalances := vm.load(other).Balance
+	require.Equal(t, ValueChanged, requireDoneCell(t, otherBalances, 2-1, 0).valStatus, "nonzero nonce keeps the account alive")
+	require.Equal(t, ValueDeleted, requireDoneCell(t, otherBalances, 6-1, 0).valStatus)
+	revival := requireDoneCell(t, otherBalances, 7-1, 0)
 	require.Equal(t, ValueChanged, revival.valStatus)
 	require.True(t, revival.Value.IsZero())
+	require.Equal(t, *uint256.NewInt(1), requireDoneCell(t, otherBalances, 8-1, 0).Value)
 }
 
 type countedBALChange struct {
