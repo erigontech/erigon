@@ -257,7 +257,9 @@ func TestBlockRPCFrameBlobFee(t *testing.T) {
 		ChainID: original.ChainID, SenderAddress: original.SenderAddress, Frames: original.Frames, Fees: original.Fees,
 		BlobVersionedHashes: []common.Hash{{1}},
 	}
-	// At one wei per blob gas the budget covers both base fees exactly.
+	// At one wei per blob gas, the budget covers both base fees exactly at the
+	// declared gas limit. The estimated tip is zero. Using less gas can leave
+	// room for a tip at settlement.
 	frame.Fees.MaxFee.AddUint64(&frame.Fees.MaxFee, frame.GetBlobGas())
 	writeBlock := func(t *testing.T, excessBlobGas uint64) common.Hash {
 		t.Helper()

@@ -454,8 +454,9 @@ func TestReceiptsFilter_SendsSettledBlobFrameGasPrice(t *testing.T) {
 	require.Equal(t, uint256.NewInt(4), gointerfaces.ConvertH256ToUint256Int(reply.EffectiveGasPrice))
 }
 
-// The blob fields are derived from the transaction, the chain config and the header, which the
-// RPC side does not have, and only a blob transaction reports them.
+// Any transaction carrying blobs, including a frame transaction, reports blob gas
+// used and, when available, the blob gas price. The backend derives these fields
+// from the transaction, header and chain config before sending the notification.
 func TestReceiptsFilter_SendsBlobFields(t *testing.T) {
 	chainConfig := chain.AllProtocolChanges
 	dynamicFee := func() types.DynamicFeeTransaction {

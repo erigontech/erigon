@@ -738,8 +738,9 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt, tx
 	}
 }
 
-// GetReceiptGasUsed returns zero when execution or retained receipts cannot
-// supply the gas used by this canonical transaction.
+// GetReceiptGasUsed requires the canonical header and its transaction at index.
+// It returns the gas used by that transaction, or zero if the block is ahead
+// of execution or the gas usage is no longer retained.
 func (g *Generator) GetReceiptGasUsed(ctx context.Context, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int) (uint64, error) {
 	receipts, err := g.receiptGasUsedForRange(ctx, tx, header, index, types.Transactions{txn})
 	if err != nil || len(receipts) == 0 || receipts[0] == nil {
@@ -748,8 +749,10 @@ func (g *Generator) GetReceiptGasUsed(ctx context.Context, tx kv.TemporalTx, hea
 	return receipts[0].GasUsed, nil
 }
 
-// GetReceiptsGasUsed returns nil for an unexecuted block. An executed block has
-// one entry per transaction, with nil entries where gas usage is no longer retained.
+// GetReceiptsGasUsed requires a canonical block. It returns nil if the block is
+// ahead of execution. Otherwise it returns one entry per transaction, with nil
+// entries where gas usage is unavailable. Only GasUsed is guaranteed in each
+// non-nil receipt.
 func (g *Generator) GetReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	return g.receiptGasUsedForRange(ctx, tx, block.HeaderNoCopy(), 0, block.Transactions())
 }

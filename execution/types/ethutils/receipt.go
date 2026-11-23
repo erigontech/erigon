@@ -303,8 +303,9 @@ func LogReceipts(level log.Lvl, msg string, receipts types.Receipts, txns types.
 	logger.Log(level, msg, "block", header.Number.Uint64(), "receipts", string(result))
 }
 
-// GasFeePaid excludes blob fees, which receipts report separately. Frame tips use
-// the budget left after actual base fees, not the lower bound returned by GASPRICE.
+// GasFeePaid returns the total non-blob gas fee in wei, including the proposer tip.
+// For frames, the EVM's GASPRICE uses the declared gas limit. Settlement uses
+// actual gas usage to determine how much of the budget is left for the tip.
 func GasFeePaid(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) (uint256.Int, error) {
 	if frame, ok := txn.Unwrap().(*types.FrameTransaction); ok {
 		fee, _, err := settledFrameGasFees(frame, gasUsed, baseFee, blobBaseFee)
@@ -371,6 +372,9 @@ func nonFrameGasPrice(txn types.Transaction, baseFee *uint256.Int) uint256.Int {
 	return u256.Add(*baseFee, txn.GetEffectiveGasTip(baseFee))
 }
 
+// ReceiptGasPrice returns the effective price in wei per gas. For frames, this
+// rate is rounded down, so multiplying it by gas used can understate the exact
+// total returned by [GasFeePaid].
 func ReceiptGasPrice(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) *uint256.Int {
 	if txn.Type() != types.FrameTxType {
 		price := nonFrameGasPrice(txn, baseFee)
