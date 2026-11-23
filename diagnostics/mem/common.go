@@ -38,17 +38,19 @@ var (
 	vmStatsRead time.Time
 )
 
-func RefreshVirtualMemStats(maxAge time.Duration) VirtualMemStat {
+// RefreshVirtualMemStats reports fresh only when this call read the stats successfully.
+func RefreshVirtualMemStats(maxAge time.Duration) (stats VirtualMemStat, fresh bool) {
 	vmStatsMu.Lock()
 	defer vmStatsMu.Unlock()
 	if time.Since(vmStatsRead) >= maxAge {
 		if vm, err := ReadVirtualMemStats(); err == nil {
 			vmStats = vm
 			UpdatePrometheusVirtualMemStats(vm)
+			fresh = true
 		}
 		vmStatsRead = time.Now()
 	}
-	return VirtualMemStat{vmStats}
+	return VirtualMemStat{vmStats}, fresh
 }
 
 type VirtualMemStat struct {
@@ -87,12 +89,15 @@ func LogMemStats(ctx context.Context, logger log.Logger) {
 		case <-ctx.Done():
 			return
 		case <-logEvery.C:
-			v := RefreshVirtualMemStats(VirtualMemStatsAge + 5*time.Minute)
+			v, fresh := RefreshVirtualMemStats(VirtualMemStatsAge + 5*time.Minute)
 
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
 
-			l := v.Fields()
+			var l []any
+			if fresh {
+				l = v.Fields()
+			}
 			l = append(l, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 			logger.Info("[mem] memory stats", l...)
