@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -1245,4 +1246,31 @@ func TestCachePopulatingGetterBoundedReadSkipsAVisibleEntry(t *testing.T) {
 	got, _, err := cpg.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{}.WithMaxStep(0))
 	require.NoError(t, err)
 	require.Equal(t, historical, got)
+}
+
+type oneBlockReader struct{ dbservices.FullBlockReader }
+
+func (oneBlockReader) BlockByNumber(context.Context, kv.Tx, uint64) (*types.Block, error) {
+	return types.NewBlockWithHeader(&types.Header{}, nil), nil
+}
+
+type emptyStateTx struct{ aggTxOnly }
+
+func (emptyStateTx) GetLatest(kv.Domain, []byte, kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	return nil, 0, nil
+}
+
+type authorOnlyEngine struct{ rules.Engine }
+
+func (authorOnlyEngine) Author(*types.Header) (accounts.Address, error) {
+	return accounts.ZeroAddress, nil
+}
+
+func TestBlocksReadAheadResetsRegionHitsPerBlock(t *testing.T) {
+	rec := &regionHitsRecorder{}
+	tx := emptyStateTx{aggTxOnly{agg: rec}}
+	for n := range uint64(3) {
+		require.NoError(t, blocksReadAheadFunc(t.Context(), tx, n+1, authorOnlyEngine{}, oneBlockReader{}))
+	}
+	require.Equal(t, 3, rec.resets)
 }
