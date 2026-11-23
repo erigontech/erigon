@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -774,9 +773,8 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return false, ctx.Err()
 		case <-logEvery.C:
 			if lvl >= log.LvlInfo {
-				var m runtime.MemStats
-				dbg.ReadMemStats(&m)
-				logger.Log(lvl, "[snapshots] Dumping txs", "blockNum", blockNum, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				alloc, sys := dbg.MemUsage()
+				logger.Log(lvl, "[snapshots] Dumping txs", "blockNum", blockNum, "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 			} else {
 				logger.Log(lvl, "[snapshots] Dumping txs", "blockNum", blockNum)
 			}
@@ -859,13 +857,13 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, 
 		case <-ctx.Done():
 			return false, ctx.Err()
 		case <-logEvery.C:
-			var m runtime.MemStats
+			var alloc, sys uint64
 			if lvl >= log.LvlInfo {
-				dbg.ReadMemStats(&m)
+				alloc, sys = dbg.MemUsage()
 			}
 			logger.Log(
 				lvl, "[snapshots] Dumping headers", "blockNum", blockNum,
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+				"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys),
 			)
 		default:
 		}
@@ -942,13 +940,13 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 		case <-ctx.Done():
 			return false, ctx.Err()
 		case <-logEvery.C:
-			var m runtime.MemStats
+			var alloc, sys uint64
 			if lvl >= log.LvlInfo {
-				dbg.ReadMemStats(&m)
+				alloc, sys = dbg.MemUsage()
 			}
 			logger.Log(
 				lvl, "[snapshots] Wrote into file", "blockNum", blockNum,
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+				"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys),
 			)
 		default:
 		}

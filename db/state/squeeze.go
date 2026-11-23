@@ -686,8 +686,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 		select {
 		case <-logEvery.C:
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
+			alloc, sys := dbg.MemUsage()
 			now := time.Now()
 			blkPerSec := float64(blockNum-lastLogBlock) / now.Sub(lastLogTime).Seconds()
 			lastLogTime = now
@@ -698,7 +697,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				"keys", common.PrettyCounter(totalKeysProcessed),
 				"root", hex.EncodeToString(rh),
 				"memBatch", common.ByteCount(domains.Size()),
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 		default:
 		}
 		return nil
