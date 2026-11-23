@@ -23,6 +23,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -135,12 +136,22 @@ func TestOverCapResponseIsNotExcusedByADuplicateLoss(t *testing.T) {
 	require.True(t, lost.Load(), "the loss stays for a failure it can excuse")
 }
 
-// A well-formed error response arrived complete, so a cut stream did not cause it.
-func TestPeerErrorResponseIsNotExcusedByADuplicateLoss(t *testing.T) {
+// A cut stream cannot send an error code, so a peer-sent error code drops the peer at the limit
+// without using up a duplicate loss. The server has no sentinel, so the drop panics.
+func TestPeerErrorCodeIsNotExcusedByADuplicateLoss(t *testing.T) {
 	lost := &atomic.Bool{}
 	lost.Store(true)
-	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{active: 1, lostDuplicate: lost}}
-	require.True(t, server.dropOnFailure(peer.ID("peer"), &PeerResponseError{Code: httpreqresp.ResponseCodeServerError}))
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		active:        1,
+		lostDuplicate: lost,
+		handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("REQRESP-RESPONSE-CODE", strconv.Itoa(int(httpreqresp.ResponseCodeServerError)))
+			_, _ = w.Write([]byte{0})
+		}),
+	}}
+	require.Panics(t, func() {
+		_, _ = server.requestPeer(t.Context(), peer.ID("peer"), &sentinelproto.RequestData{Data: []byte("request")})
+	})
 	require.True(t, lost.Load(), "the loss stays for a failure it can excuse")
 }
 

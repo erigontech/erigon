@@ -177,13 +177,13 @@ func (s *SentinelServer) BanPeerForInvalidData(_ context.Context, p *sentinelpro
 // dropOnFailure reports whether a request that failed with err drops pid: only at the peer limit,
 // unless the failure is excused by a duplicate loss. It is asked when the request fails, as the
 // duplicate can close while it runs, and uses up the loss only when the peer would otherwise be
-// dropped. A cut stream cannot exceed the response cap, so an over-cap response is never excused.
+// dropped. A cut stream can neither exceed the response cap nor send an error code, so an over-cap
+// response and a peer-sent error code are never excused.
 func (s *SentinelServer) dropOnFailure(pid peer.ID, err error) bool {
 	activePeers, _, _ := s.peerRequestBackend.GetPeersCount()
 	if activePeers < int(s.peerRequestBackend.Config().MaxPeerCount) {
 		return false
 	}
-	// A cut stream cannot produce an over-cap body or a complete error response.
 	var peerErr *PeerResponseError
 	return errors.Is(err, httpreqresp.ErrResponseTooLarge) || errors.As(err, &peerErr) ||
 		!s.peerRequestBackend.ConsumeDuplicateLoss(pid)

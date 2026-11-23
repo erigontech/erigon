@@ -241,13 +241,7 @@ func trackedDeduper(after time.Duration) (*connDeduper, *fakeConn, *fakeConn) {
 
 // The excuse counts from when the pair registered: a stream on a duplicate the remote closes fails
 // before this side is notified.
-func TestDedupExcusesOneFailurePerDuplicatePair(t *testing.T) {
-	d, _, _ := trackedDeduper(time.Second)
-	d.lossBurst = 0
-	require.True(t, d.ConsumeDuplicateLoss(highID))
-	time.Sleep(time.Millisecond)
-	require.False(t, d.ConsumeDuplicateLoss(highID), "one pair excuses one failure")
-
+func TestDedupExcusesAClosedDuplicateUntilItExpires(t *testing.T) {
 	d, preferred, other := trackedDeduper(time.Second)
 	n := d.net.(*fakeNetwork)
 	n.conns = []network.Conn{preferred}
@@ -261,24 +255,30 @@ func TestDedupExcusesOneFailurePerDuplicatePair(t *testing.T) {
 	d.Disconnected(n, other)
 	time.Sleep(time.Millisecond)
 	require.False(t, d.ConsumeDuplicateLoss(highID), "the excuse expires after the close")
+}
 
-	d, preferred, _ = trackedDeduper(time.Second)
-	n = d.net.(*fakeNetwork)
+func TestDedupDoesNotExcuseADuplicateLongAfterThePreferredConnectionClosed(t *testing.T) {
+	d, preferred, _ := trackedDeduper(time.Second)
+	n := d.net.(*fakeNetwork)
 	n.conns = []network.Conn{d.conns[highID][1].conn}
 	d.lossTolerance = 0
 	d.Disconnected(n, preferred)
 	time.Sleep(time.Millisecond)
-	require.False(t, d.ConsumeDuplicateLoss(highID), "a duplicate is not excused long after the preferred connection closed")
+	require.False(t, d.ConsumeDuplicateLoss(highID))
 }
 
 // Closing a duplicate cuts all of its streams at once, so the failures that follow the first
 // excused one closely are excused too.
 func TestDedupExcusesTheFailuresOfOneClose(t *testing.T) {
 	d, _, _ := trackedDeduper(time.Second)
-	d.lossBurst = 50 * time.Millisecond
+	d.lossBurst = time.Hour
 	require.True(t, d.ConsumeDuplicateLoss(highID))
 	require.True(t, d.ConsumeDuplicateLoss(highID), "a second stream cut by the same close")
-	time.Sleep(60 * time.Millisecond)
+	for _, c := range d.conns[highID] {
+		if !c.excusedAt.IsZero() {
+			c.excusedAt = c.excusedAt.Add(-2 * d.lossBurst)
+		}
+	}
 	require.False(t, d.ConsumeDuplicateLoss(highID), "a failure after the burst is the peer's")
 }
 
