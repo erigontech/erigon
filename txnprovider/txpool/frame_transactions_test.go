@@ -249,7 +249,7 @@ func TestFramePoolPrecheckPanicReleasesLock(t *testing.T) {
 	txns.Append(framePoolSlot(t, sender, 1, 2), sender[:], false)
 	// Force a panic during the locked policy checks.
 	pool.frameRejections = nil
-	require.Panics(t, func() { pool.prepareFrames(ctx, newAdmissionBatch(txns, nil)) })
+	require.Panics(t, func() { pool.prepareFrames(ctx, newAdmissionBatch(txns, nil).txns) })
 	unlocked := pool.lock.TryLock()
 	if unlocked {
 		pool.lock.Unlock()
@@ -1338,6 +1338,47 @@ func TestFramePoolUnavailableWithConsumedAccountNonce(t *testing.T) {
 	reasons, err := pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
+}
+
+func TestFramePoolUnavailableWithConsumedKeyedNonce(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	key := uint256.Int{7}
+	change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	change.StateVersionId = writeFrameNonceSequence(t, pool, sender, key, uint256.Int{1})
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	pool.ethBackend.(*frameValidationBackend).err = status.Error(codes.Unavailable, "backend unavailable")
+
+	var txns TxnSlots
+	for _, nonce := range []uint64{0, 1} {
+		txns.Append(framePoolSlotWithNonce(t, sender, nonce, 1, 2, key), sender[:], true)
+	}
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow, txpoolcfg.FrameValidationUnavailable}, reasons)
+}
+
+func TestFramePoolUnavailableWithNewSenderConflict(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	blocker := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var restored TxnSlots
+	restored.Append(blocker, sender[:], true)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.err = status.Error(codes.Unavailable, "backend unavailable")
+	backend.onValidate = func() {
+		pool.lock.Lock()
+		defer pool.lock.Unlock()
+		require.Len(t, pool.restoreFramesLocked(pool.lastSeenBlock.Load(), restored), 1)
+	}
+
+	candidate := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
+	var txns TxnSlots
+	txns.Append(candidate, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame}, reasons)
+	rejection, ok := pool.frameRejections.Peek(string(candidate.IDHash[:]))
+	require.True(t, ok)
+	require.Equal(t, common.Hash(blocker.IDHash), rejection.blocker)
 }
 
 func TestFramePoolRechecksSetCodePrecheckAfterStateChange(t *testing.T) {
@@ -2633,7 +2674,13 @@ func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 			require.NoError(t, pool.revalidateFrames(ctx, pending, generation, pool.stateBlockHash))
 			require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
 			require.Empty(t, pool.frameReservations)
+			backend.valid, backend.balance = true, 1_000_000
 			if failure == "invalid prefix" {
+				calls := len(backend.calls)
+				reasons, err = pool.AddLocalTxns(ctx, txns)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame}, reasons)
+				require.Len(t, backend.calls, calls, "the revalidation rejection applies until the head changes")
 				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			}
 			require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
@@ -2646,7 +2693,6 @@ func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 				return nil
 			}))
 
-			backend.valid, backend.balance = true, 1_000_000
 			txns.Txns[0] = framePoolSlot(t, sender, 1, 2, uint256.Int{1})
 			reasons, err = pool.AddLocalTxns(ctx, txns)
 			require.NoError(t, err)

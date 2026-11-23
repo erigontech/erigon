@@ -3739,6 +3739,32 @@ func TestProvideTxnsKeepsSenderNonceOrderForRemoteThenLocal(t *testing.T) {
 	require.Equal(t, []uint64{0, 1}, providedNonces(t, ctx, pool))
 }
 
+func TestRemoteAdmissionAboveAccountSlots(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.cfg.AccountSlots = 2
+	submit := func(txns ...*TxnSlot) []txpoolcfg.DiscardReason {
+		t.Helper()
+		var slots TxnSlots
+		for _, txn := range txns {
+			slots.Append(txn, sender[:], false)
+		}
+		pool.AddRemoteTxns(ctx, slots, nil, nil)
+		reasons, err := pool.processRemoteBatch(ctx)
+		require.NoError(t, err)
+		return reasons
+	}
+
+	reasons := submit(newTestSenderTxnSlot(sender, 0), newTestSenderTxnSlot(sender, 1), newTestSenderTxnSlot(sender, 2))
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, submit(newTestSenderTxnSlot(sender, 0)))
+	require.Len(t, pool.byHash, 3, "a duplicate must not trigger the sender penalty")
+
+	setCode := newTestSetCodeTxnSlot(3, 0, 1, 2, 100_000)
+	setCode.IDHash[0] = 4
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer}, submit(setCode))
+	require.Len(t, pool.byHash, 2, "the submitting transaction keeps its rejection after its penalty frees a slot")
+}
+
 func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

@@ -205,6 +205,24 @@ func TestLocalAdmissionDeadline(t *testing.T) {
 	}
 }
 
+func writeFrameNonceSequence(t *testing.T, pool *TxPool, sender common.Address, key, sequence uint256.Int) uint64 {
+	t.Helper()
+	ctx := t.Context()
+	coreDB := pool._chainDB.(kv.TemporalRwDB)
+	var stateVersion uint64
+	require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		domains, err := execctx.NewSharedDomains(ctx, tx, pool.logger)
+		require.NoError(t, err)
+		defer domains.Close()
+		slot := types.FrameNonceSlot(sender, key)
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, append(types.FrameNonceManager[:], slot[:]...), sequence.Bytes(), 1, nil))
+		require.NoError(t, domains.Flush(ctx, tx))
+		stateVersion, err = rawdb.GetStateVersion(tx)
+		return err
+	}))
+	return stateVersion
+}
+
 func TestFramePoolReconcilesMinedKeyedNonces(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -229,26 +247,9 @@ func TestFramePoolReconcilesMinedKeyedNonces(t *testing.T) {
 			reasons, err := pool.AddLocalTxns(ctx, txns)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-			coreDB := pool._chainDB.(kv.TemporalRwDB)
-			require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-				domains, err := execctx.NewSharedDomains(ctx, tx, pool.logger)
-				if err != nil {
-					return err
-				}
-				defer domains.Close()
-				slot := types.FrameNonceSlot(sender, tc.key)
-				if err := domains.DomainPut(kv.StorageDomain, tx, append(types.FrameNonceManager[:], slot[:]...), tc.sequence.Bytes(), 1, nil); err != nil {
-					return err
-				}
-				return domains.Flush(ctx, tx)
-			}))
 			reset := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+			reset.StateVersionId = writeFrameNonceSequence(t, pool, sender, tc.key, tc.sequence)
 			reset.StateChangesIncomplete = true
-			require.NoError(t, coreDB.View(ctx, func(tx kv.Tx) error {
-				var err error
-				reset.StateVersionId, err = rawdb.GetStateVersion(tx)
-				return err
-			}))
 			require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, txns))
 			_, present := pool.byHash[string(frame.IDHash[:])]
 			require.Equal(t, !tc.consumed, present)

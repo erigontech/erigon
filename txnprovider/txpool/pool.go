@@ -725,11 +725,11 @@ func (p *TxPool) removeProcessedRemoteTxns(n int) {
 // kickKZGOffenders drops the devp2p peer that delivered each KZG-failed blob txn.
 // Called with p.lock held; the actual PenalizePeer RPC is dispatched off-lock to
 // avoid blocking the pool on sentry I/O.
-func (p *TxPool) kickKZGOffenders(ctx context.Context, batch admissionBatch) {
+func (p *TxPool) kickKZGOffenders(ctx context.Context, txns []txnAdmission) {
 	var offenders []remoteSource
-	for i := range batch.txns {
-		src := batch.txns[i].source
-		if batch.txns[i].reason != txpoolcfg.UnmatchedBlobTxExt || src.peerID == nil || src.sentry == nil {
+	for i := range txns {
+		src := txns[i].source
+		if txns[i].reason != txpoolcfg.UnmatchedBlobTxExt || src.peerID == nil || src.sentry == nil {
 			continue
 		}
 		offenders = append(offenders, src)
@@ -1734,7 +1734,7 @@ func newAdmissionBatch(txns TxnSlots, sources []remoteSource) admissionBatch {
 }
 
 // Read the results under the pool lock, after all replacements and evictions.
-func (batch admissionBatch) reasons() []txpoolcfg.DiscardReason {
+func (batch *admissionBatch) reasons() []txpoolcfg.DiscardReason {
 	reasons := make([]txpoolcfg.DiscardReason, len(batch.txns))
 	for i := range batch.txns {
 		a := &batch.txns[i]
@@ -1858,10 +1858,10 @@ func (o *kzgOffenders) add(source remoteSource) {
 	}
 }
 
-func (p *TxPool) validateTxns(batch admissionBatch, stateCache kvcache.CacheView, cells blobCells) error {
+func (p *TxPool) validateTxns(txns []txnAdmission, stateCache kvcache.CacheView, cells blobCells) error {
 	var offenders kzgOffenders
-	for i := range batch.txns {
-		a := &batch.txns[i]
+	for i := range txns {
+		a := &txns[i]
 		if a.reason == txpoolcfg.NotSet {
 			if !a.local && offenders.skip(a.source) {
 				a.reason = txpoolcfg.SkippedAfterKZGFailure
@@ -1999,7 +1999,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			if stale {
 				return nil, errStateViewStale
 			}
-			frameGeneration = p.prepareFrames(simulationCtx, batch)
+			frameGeneration = p.prepareFrames(simulationCtx, batch.txns)
 			needFrameSimulation = false
 		}
 		var reasons []txpoolcfg.DiscardReason
@@ -2015,12 +2015,12 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			}
 			cells := batch.preparedCells
 			if batch.hasFrames {
-				if err := p.applyFrameValidation(simulationCtx, batch, frameGeneration, cacheView); err != nil {
+				if err := p.applyFrameValidation(simulationCtx, batch.txns, frameGeneration, cacheView); err != nil {
 					return err
 				}
 				cells = make(blobCells)
 			}
-			if err := p.validateTxns(batch, cacheView, cells); err != nil {
+			if err := p.validateTxns(batch.txns, cacheView, cells); err != nil {
 				return err
 			}
 			if batch.hasFrames {
@@ -2029,7 +2029,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			announcements, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, batch.txns, cells,
 				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), true)
 			if len(sources) != 0 {
-				p.kickKZGOffenders(ctx, batch)
+				p.kickKZGOffenders(ctx, batch.txns)
 			}
 			if err != nil {
 				return err

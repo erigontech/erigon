@@ -170,20 +170,37 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	}
 }
 
+type beforeAdmissionPool struct {
+	*TxPool
+	beforeAdd func()
+}
+
+func (p *beforeAdmissionPool) AddLocalTxns(ctx context.Context, txns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+	p.beforeAdd()
+	return p.TxPool.AddLocalTxns(ctx, txns)
+}
+
 func TestGrpcServerAddDuplicateDuringAdmission(t *testing.T) {
 	t.Parallel()
 
-	ctx := t.Context()
-	mockPool := &addMockTxPool{
-		knownByCall: []bool{false},
-		addReasons:  []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash},
-	}
-	server := NewGrpcServer(ctx, mockPool, mdbxtest.NewTestPoolDB(t), nil, uint256.Int{1}, log.New())
-	validRlp := hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)
-
-	reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{validRlp}})
+	ctx, pool, poolDB, _ := newTestPool(t)
+	fixture := TxnParseMainnetTests[1]
+	sender := common.HexToAddress(fixture.SenderStr)
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	request := &txpoolproto.AddRequest{RlpTxs: [][]byte{hexutil.MustDecodeHex(fixture.PayloadStr)}}
+	server := NewGrpcServer(ctx, pool, poolDB, nil, uint256.Int{1}, pool.logger)
+	// Pool membership and the block gas limit can both change between the RPC lookup and admission.
+	delayed := &beforeAdmissionPool{TxPool: pool, beforeAdd: func() {
+		admitted, err := server.Add(ctx, request)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, admitted.Imported)
+		change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+		change.BlockGasLimit = 20_000
+		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	}}
+	delayedServer := NewGrpcServer(ctx, delayed, poolDB, nil, uint256.Int{1}, pool.logger)
+	reply, err := delayedServer.Add(ctx, request)
 	require.NoError(t, err)
-	require.Equal(t, 1, mockPool.addLocalSlotsLen)
 	require.Equal(t, &txpoolproto.AddReply{
 		Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS},
 		Errors:   []string{"already known"},

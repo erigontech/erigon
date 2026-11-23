@@ -263,20 +263,24 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	require.NoError(t, pool.start(ctx))
 	a0, a1, a2 := [20]byte{1}, [20]byte{2}, [20]byte{3}
 
+	goodBlob := makeBlobSlot(0x61, false)
+	skipped := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	skipped.IDHash[0] = 0x62
 	pooled := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
 	pooled.IDHash[0] = 0x60
 	var local TxnSlots
+	local.Append(&goodBlob, a0[:], true)
+	local.Append(skipped, a1[:], true)
 	local.Append(pooled, a2[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, local)
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
 
 	bad := makeBlobSlot(0x61, true)
-	skipped := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
-	skipped.IDHash[0] = 0x62
+	skippedCopy := *skipped
 	var fromAttacker TxnSlots
 	fromAttacker.Append(&bad, a0[:], false)
-	fromAttacker.Append(skipped, a1[:], false)
+	fromAttacker.Append(&skippedCopy, a1[:], false)
 	pool.AddRemoteTxns(ctx, fromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), nil)
 
 	replacement := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
@@ -290,6 +294,7 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	require.Equal(t, []txpoolcfg.DiscardReason{
 		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure, txpoolcfg.NotReplaced,
 	}, reasons)
+	require.Same(t, &goodBlob, pool.byHash[string(bad.IDHash[:])].TxnSlot)
 }
 
 func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
@@ -343,7 +348,7 @@ func TestBlobKZGVerifiedOutsidePoolLock(t *testing.T) {
 		defer pool.lock.Unlock()
 		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
 		batch := newAdmissionBatch(slots, nil)
-		require.NoError(t, pool.validateTxns(batch, cacheView, nil))
+		require.NoError(t, pool.validateTxns(batch.txns, cacheView, nil))
 		assert.Equal(t, txpoolcfg.NotSet, batch.txns[0].reason)
 	})
 
