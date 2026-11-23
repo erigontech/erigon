@@ -389,7 +389,11 @@ func (c *Composer) RecoverFailed(ctx context.Context) {
 			"to", p.Height, "post", p.Post)
 	}
 	for _, p := range c.ledger.TakeFinalized(c.finalized()) {
-		c.wg.Go(func() { c.audit(p) })
+		// Derivation passing a posting that never landed confirms the height,
+		// not the posting.
+		if p.Landed {
+			c.wg.Go(func() { c.audit(p) })
+		}
 	}
 }
 

@@ -42,6 +42,32 @@ func blocking(t *testing.T, l *Ledger[int], cursor uint64) uint64 {
 }
 
 func TestLedger(t *testing.T) {
+	t.Run("finality hands out only landed postings as landed", func(t *testing.T) {
+		landed := func(f func(l *Ledger[int])) bool {
+			l := NewLedger[int]()
+			begin(l, 10, 0xa)
+			f(l)
+			l.ResolveBelowCursor(10)
+			if p, ok := l.PartialToDispose(10); ok {
+				require.True(t, l.ClaimPartial(p.Height, p.Post, nil))
+			}
+			out := l.TakeFinalized(10)
+			require.Len(t, out, 1)
+			return out[0].Landed
+		}
+		require.True(t, landed(func(l *Ledger[int]) { l.MarkSettled(10, posting(0xa)) }))
+		require.True(t, landed(func(l *Ledger[int]) { l.MarkSettledPartial(10, posting(0xa)) }))
+		require.True(t, landed(func(l *Ledger[int]) {
+			l.ResolveBelowCursor(10)
+			l.MarkSettledPartial(10, posting(0xa))
+		}), "a verdict after the cursor's")
+		require.False(t, landed(func(*Ledger[int]) {}), "the cursor passed a pending posting")
+		require.False(t, landed(func(l *Ledger[int]) { l.MarkFailed(10, posting(0xa), false) }))
+		require.False(t, landed(func(l *Ledger[int]) {
+			l.MarkSettled(10, posting(0xa))
+			require.True(t, l.Unsettle(10, posting(0xa)))
+		}), "L1 dropped it")
+	})
 	t.Run("the gate waits for the cursor even when settled", func(t *testing.T) {
 		l := NewLedger[int]()
 		begin(l, 10, 0xa, 1)

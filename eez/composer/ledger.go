@@ -69,6 +69,8 @@ type Posted[T any] struct {
 	Txs []T
 	// SlotSkipped reports a failure not owed to Txs.
 	SlotSkipped bool
+	// Landed reports a posting whose receipt showed it settling.
+	Landed bool
 }
 
 type entry[T any] struct {
@@ -106,7 +108,7 @@ func (l *Ledger[T]) heights(from, to uint64) []uint64 {
 func (l *Ledger[T]) Begin(p Posted[T]) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	p.SlotSkipped = false
+	p.SlotSkipped, p.Landed = false, false
 	l.entries[p.Height] = &entry[T]{Posted: p}
 }
 
@@ -156,7 +158,7 @@ func (l *Ledger[T]) MarkSettled(height uint64, post common.Hash) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if e := l.find(height, post); e != nil {
-		e.resolution = Settled
+		e.resolution, e.Landed = Settled, true
 	}
 }
 
@@ -164,8 +166,11 @@ func (l *Ledger[T]) MarkSettled(height uint64, post common.Hash) {
 func (l *Ledger[T]) MarkSettledPartial(height uint64, post common.Hash) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if e := l.find(height, post); e != nil && e.resolution == Pending {
-		e.resolution = SettledPartial
+	if e := l.find(height, post); e != nil {
+		e.Landed = true
+		if e.resolution == Pending {
+			e.resolution = SettledPartial
+		}
 	}
 }
 
@@ -242,7 +247,7 @@ func (l *Ledger[T]) Unsettle(height uint64, post common.Hash) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if e := l.find(height, post); e != nil && e.resolution == Settled && !e.confirmed {
-		e.resolution = Failed
+		e.resolution, e.Landed = Failed, false
 		return true
 	}
 	return false
@@ -272,7 +277,7 @@ func (l *Ledger[T]) TakeRolledOut(cursor uint64) []T {
 }
 
 // TakeFinalized removes and returns the Settled batches at or below
-// finalized for an audit of their postings.
+// finalized for an audit of the postings that landed.
 func (l *Ledger[T]) TakeFinalized(finalized uint64) []Posted[T] {
 	l.mu.Lock()
 	defer l.mu.Unlock()

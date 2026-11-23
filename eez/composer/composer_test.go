@@ -561,6 +561,38 @@ func TestComposerWaitsOnAPooledPosting(t *testing.T) {
 	h.requireWindow(t, 1, 1, 12, post.Target{Block: 52, Time: h.chain.header(12).Time})
 }
 
+// TestComposerAuditsLandedSettlements: finality audits the posting of a
+// settlement that landed, not one derivation passed without it.
+func TestComposerAuditsLandedSettlements(t *testing.T) {
+	t.Run("landed", func(t *testing.T) {
+		chain := newTestChain(t, 8)
+		node := newLanding(t, chain.blocks[8].Hash())
+		h := newHarness(t, chain, 8, node)
+		h.slot(t, 8, 50, sequencer.ModeSteady)
+		require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Settled }, 5*time.Second, time.Millisecond)
+		h.cursor.Store(8)
+		h.final.Store(8)
+		asked := node.asked.Load()
+		h.c.RecoverFailed(t.Context())
+		h.c.Close()
+		require.Equal(t, asked+1, node.asked.Load(), "audited")
+	})
+	t.Run("passed without landing", func(t *testing.T) {
+		node := &pooling{}
+		h := newHarness(t, newTestChain(t, 8), 8, node)
+		h.slot(t, 8, 50, sequencer.ModeSteady)
+		require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Failed }, 5*time.Second, time.Millisecond)
+		h.cursor.Store(8)
+		h.final.Store(8)
+		asked := node.asked.Load()
+		h.c.RecoverFailed(t.Context())
+		h.c.Close()
+		_, ok := h.resolution(8)
+		require.False(t, ok, "finalized")
+		require.Equal(t, asked, node.asked.Load(), "not audited")
+	})
+}
+
 // TestComposerFallsBackFromAFreshCursor: the chunk replacing a failed anchor
 // starts where derivation is when it is posted.
 func TestComposerFallsBackFromAFreshCursor(t *testing.T) {
