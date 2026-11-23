@@ -335,3 +335,24 @@ func TestScheduledForkDigestsFollowForksAndBlobParameters(t *testing.T) {
 		require.Contains(t, digests, hex.EncodeToString(digest[:]), "epoch %d", epoch)
 	}
 }
+
+func TestSeenMessagesTTLIsTwoEpochs(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		network string
+		ttl     time.Duration
+	}{
+		{"mainnet", 768 * time.Second},
+		{"sepolia", 768 * time.Second},
+		{"hoodi", 768 * time.Second},
+		{"gnosis", 160 * time.Second},
+		{"chiado", 160 * time.Second},
+	} {
+		t.Run(tc.network, func(t *testing.T) {
+			t.Parallel()
+			_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(tc.network)
+			require.NoError(t, err)
+			require.Equal(t, tc.ttl, seenMessagesTTL(beaconConfig))
+		})
+	}
+}

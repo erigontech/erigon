@@ -169,9 +169,6 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		host.Close()
 	}()
 	// pubsub
-	// seen_ttl of the consensus p2p spec: message IDs are kept for two epochs,
-	// the window in which an attestation stays valid since Deneb.
-	pubsub.TimeCacheDuration = 2 * time.Duration(cfg.BeaconConfig.SlotsPerEpoch*cfg.BeaconConfig.SecondsPerSlot) * time.Second
 	psOpts, err := p.pubsubOptions(cfg.BeaconConfig)
 	if err != nil {
 		return nil, err
