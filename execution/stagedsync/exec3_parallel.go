@@ -1153,7 +1153,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"busy", busy, "workers", pe.workerCount, "occ", fmt.Sprintf("%.2f", occ),
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
 						"spec", blockExecutor.cntSpecExec,
-						"valFail", blockExecutor.cntValidationFail,
+						"valFail", blockExecutor.cntValidationFail, "npCalcFees", blockExecutor.npCalcFees,
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
@@ -2601,6 +2601,7 @@ type execRequest struct {
 }
 
 type blockExecutor struct {
+	npCalcFees time.Duration // probe: calcFees time on the finalize spine
 	sync.Mutex
 	blockNum   uint64
 	blockHash  common.Hash
@@ -3049,7 +3050,10 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 			tipWrites := &state.WriteSet{}
 			if !stubNoCalcFees {
 				var err error
-				if tipWrites, err = txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules()); err != nil {
+				feesT0 := time.Now()
+				tipWrites, err = txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
+				be.npCalcFees += time.Since(feesT0)
+				if err != nil {
 					return nil, err
 				}
 			}
