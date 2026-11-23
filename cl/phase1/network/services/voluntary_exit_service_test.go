@@ -122,10 +122,28 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 			name: "validator already in pool",
 			mock: func() {
 				t.operationsPool.VoluntaryExitsPool.Insert(mockValidatorIndex, mockMsg.SignedVoluntaryExit)
+				_, st, _ := tests.GetBellatrixRandom()
+				t.Require().NoError(st.SetSlot(100 * clparams.MainnetBeaconConfig.SlotsPerEpoch))
+				mockValidator := solid.NewValidatorFromParameters(
+					[48]byte{},
+					[32]byte{},
+					0,
+					false,
+					0,
+					0,
+					curEpoch+1,
+					0,
+				)
+				st.ValidatorSet().Set(int(mockValidatorIndex), mockValidator)
+				t.Require().NoError(t.syncedData.OnHeadState(st))
+				t.beaconCfg.FarFutureEpoch = mockValidator.ExitEpoch()
+				computeSigningRoot = func(_ ssz.HashableSSZ, domain []byte) ([32]byte, error) {
+					return [32]byte{}, nil
+				}
+				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
 			},
 			msg:     mockMsg,
-			wantErr: true,
-			err:     ErrIgnore,
+			wantErr: false,
 		},
 		{
 			name: "state is nil",
@@ -300,8 +318,38 @@ func (t *voluntaryExitTestSuite) TestSeenValidatorIsIgnoredAfterPoolPrune() {
 	st.ValidatorSet().Set(int(validatorIndex), validator)
 	t.Require().NoError(t.syncedData.OnHeadState(st))
 
-	t.Require().ErrorIs(t.voluntaryExitService.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
+	t.Require().Error(t.voluntaryExitService.ProcessMessage(context.Background(), nil, msg))
+
+	gossipMsg := *msg
+	gossipMsg.ImmediateVerification = false
+	t.Require().ErrorIs(t.voluntaryExitService.ProcessMessage(context.Background(), nil, &gossipMsg), ErrIgnore)
 	t.Require().True(t.gomockCtrl.Satisfied())
+}
+
+func (t *voluntaryExitTestSuite) TestImmediateVerificationRejectsInvalidKnownExit() {
+	const validatorIndex = uint64(10)
+	curEpoch := uint64(100)
+	msg := &SignedVoluntaryExitForGossip{
+		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{
+			VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 1, ValidatorIndex: validatorIndex},
+		},
+		ImmediateVerification: true,
+	}
+	_, st, _ := tests.GetBellatrixRandom()
+	t.Require().NoError(st.SetSlot(100 * clparams.MainnetBeaconConfig.SlotsPerEpoch))
+	validator := solid.NewValidatorFromParameters(common.Bytes48{}, common.Hash{}, 0, false, 0, 0, curEpoch+1, 0)
+	st.ValidatorSet().Set(int(validatorIndex), validator)
+	t.Require().NoError(t.syncedData.OnHeadState(st))
+	t.beaconCfg.FarFutureEpoch = validator.ExitEpoch()
+	t.operationsPool.VoluntaryExitsPool.Insert(validatorIndex, msg.SignedVoluntaryExit)
+	computeSigningRoot = func(_ ssz.HashableSSZ, domain []byte) ([32]byte, error) {
+		return [32]byte{}, nil
+	}
+	t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).Times(2)
+
+	err := t.voluntaryExitService.ProcessMessage(context.Background(), nil, msg)
+	t.Require().Error(err)
+	t.Require().NotErrorIs(err, ErrIgnore)
 }
 
 func (t *voluntaryExitTestSuite) TestVoluntaryExitGossipNotAcceptedBeforeSignatureVerification() {

@@ -131,6 +131,14 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 			Signature: mockMsg.Header2.Signature,
 		},
 	}
+	malformedMsgFromSeenProposer := &cltypes.ProposerSlashing{
+		Header1: mockMsg.Header1,
+		Header2: &cltypes.SignedBeaconBlockHeader{
+			Header:    &cltypes.BeaconBlockHeader{Slot: 2, ProposerIndex: mockProposerIndex},
+			Signature: mockMsg.Header2.Signature,
+		},
+	}
+
 	tests := []struct {
 		name     string
 		mock     func()
@@ -140,13 +148,13 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 		errIsNot error
 	}{
 		{
-			name: "ignore proposer slashing",
+			name: "reject malformed slashing from a seen proposer",
 			mock: func() {
 				t.proposerSlashingService.seenProposers.Store(mockProposerIndex, struct{}{})
 			},
-			msg:     mockMsg,
-			wantErr: true,
-			errIs:   ErrIgnore,
+			msg:      malformedMsgFromSeenProposer,
+			wantErr:  true,
+			errIsNot: ErrIgnore,
 		},
 		{
 			name: "reject invalid headers with signatures already in pool",
@@ -292,14 +300,14 @@ func TestProposerSlashingServiceAcceptsSpecSignedHeaders(t *testing.T) {
 	require.True(t, operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(msg)))
 }
 
-func TestProposerSlashingServiceIgnoresMalformedAfterAccepted(t *testing.T) {
+func TestProposerSlashingServiceRejectsMalformedAfterAccepted(t *testing.T) {
 	service, operationsPool, proposerIndex, signedSlashing := newSpecSignedProposerSlashingTest(t, 1)
 	valid := signedSlashing(proposerIndex, common.Hash{1}, common.Hash{2})
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, valid))
 
 	malformed := signedSlashing(proposerIndex, common.Hash{3}, common.Hash{4})
 	malformed.Header2.Header.Slot++
-	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, malformed), ErrIgnore)
+	require.Error(t, service.ProcessMessage(context.Background(), nil, malformed))
 	require.Len(t, operationsPool.ProposerSlashingsPool.Raw(), 1)
 	require.True(t, operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(valid)))
 	require.False(t, operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(malformed)))

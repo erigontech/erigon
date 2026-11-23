@@ -77,11 +77,7 @@ func (s *proposerSlashingService) DecodeGossipMessage(_ peer.ID, data []byte, ve
 func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.ProposerSlashing) error {
 	// https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#proposer_slashing
 
-	// [IGNORE] The proposer slashing is the first valid proposer slashing received for the proposer with index proposer_slashing.signed_header_1.message.proposer_index
 	pIndex := msg.Header1.Header.ProposerIndex
-	if _, ok := s.seenProposers.Load(pIndex); ok {
-		return ErrIgnore
-	}
 	h1 := msg.Header1.Header
 	h2 := msg.Header2.Header
 

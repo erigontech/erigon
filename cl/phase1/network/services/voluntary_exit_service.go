@@ -114,14 +114,11 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	}
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
-	_, seen := s.seen.Get(voluntaryExit.ValidatorIndex)
-	if seen || s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
-		if msg.ImmediateVerification {
-			if err := s.syncedDataManager.ViewHeadState(checkPendingWithdrawals); err != nil {
-				return err
-			}
+	// A submission that asks for immediate verification is checked in full even when it is already known, so an invalid one is rejected instead of answered as a duplicate.
+	if !msg.ImmediateVerification {
+		if _, seen := s.seen.Get(voluntaryExit.ValidatorIndex); seen || s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
+			return ErrIgnore
 		}
-		return ErrIgnore
 	}
 
 	currentEpoch := uint64(0)
