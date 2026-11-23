@@ -158,21 +158,19 @@ func TestUDPv4_LookupIteratorClose(t *testing.T) {
 }
 
 func serveTestnet(test *udpTest, testnet *preminedTestnet) {
+	// Every reply may come back as errUnsolicitedReply: the reply matcher has a
+	// hard respTimeout deadline and this goroutine can be descheduled past it.
+	// Dropping a reply only costs the caller one lookup round.
 	for done := false; !done; {
 		done = test.waitPacketOut(func(p v4wire.Packet, to netip.AddrPort, hash []byte) {
 			n, key := testnet.nodeByAddr(to)
 			switch p.(type) {
 			case *v4wire.Ping:
-				// Tolerate errUnsolicitedReply for Pong: under CI load, the
-				// reply matcher's 500ms timeout can fire before serveTestnet
-				// gets scheduled to send the Pong back. A late Pong is
-				// harmless for the lookup test — the node will simply be
-				// re-pinged on the next round.
 				test.packetInFromTolerate(key, to, &v4wire.Pong{Expiration: futureExp, ReplyTok: hash}, errUnsolicitedReply)
 			case *v4wire.Findnode:
 				dist := enode.LogDist(n.ID(), testnet.target.ID())
 				nodes := testnet.nodesAtDistance(dist - 1)
-				test.packetInFrom(nil, key, to, &v4wire.Neighbors{Expiration: futureExp, Nodes: nodes})
+				test.packetInFromTolerate(key, to, &v4wire.Neighbors{Expiration: futureExp, Nodes: nodes}, errUnsolicitedReply)
 			}
 		})
 	}

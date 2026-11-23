@@ -189,6 +189,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotRebuildFlag,
+				&SnapshotNewSaltFlag,
 			}),
 		},
 		{
@@ -445,7 +446,7 @@ var snapshotCommand = cli.Command{
 				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (speeds up repeated runs)"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0); slow checks use 1/10000 of it", Value: 1.0},
-				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; each check gets (remaining / remaining_checks). 0 (default) means no limit"},
+				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; the run fails if it ends before every check has finished. 0 (default) means no limit"},
 			}),
 		},
 		{
@@ -584,14 +585,6 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:        "clearIndexing",
-			Action:      doClearIndexing,
-			Description: "Clear all indexing data",
-			Flags: joinFlags([]cli.Flag{
-				&utils.DataDirFlag,
-			}),
-		},
-		{
 			Name:        "compareIdx",
 			Action:      doCompareIdx,
 			Description: "compares to accessors (recsplit) files",
@@ -670,6 +663,11 @@ var (
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
 		Usage: "Force rebuild",
+	}
+	SnapshotNewSaltFlag = cli.BoolFlag{
+		Name: "new-salt",
+		Usage: "Regenerate block and state salts. Requires --rebuild and a completed initial snapshot download (preverified.toml). " +
+			"After seg reset --keep-local-snapshots, the next start restores the network salts.",
 	}
 	SnapshotFileFlag = cli.StringFlag{
 		Name:  "file",
@@ -1687,7 +1685,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		case integrity.CaplinStateRoots:
 			return integrity.CheckCaplinStateRoots(ctx, dirs, failFast, logger)
 		case integrity.CaplinBlobSidecars:
-			return integrity.CheckCaplinBlobSidecars(ctx, res.CaplinIndexDB, res.CaplinSnaps, res.BeaconConfig, blobsFromSlot, failFast, logger)
+			return integrity.CheckCaplinBlobSidecars(ctx, res.CaplinIndexDB, res.CaplinSnaps, res.BeaconConfig, blobsFromSlot, failFast, cache, logger)
 		case integrity.ReceiptsNoDups:
 			return integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast)
 		case integrity.RCacheNoDups:
@@ -1704,16 +1702,14 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 			return integrity.CheckCommitmentKvDeref(ctx, db, cache, failFast, logger)
 		case integrity.CommitmentHistVal:
 			if !commitmentHistoryEnabled {
-				logger.Info("[integrity] CommitmentHistVal skipped because commitment history is not enabled on this datadir")
-				return nil
+				return fmt.Errorf("%w: commitment history is not enabled on this datadir", integrity.ErrSkipped)
 			}
 			scCopy := sc
 			scCopy.SampleRatio /= 10_000 // it's very slow check
 			return integrity.CheckCommitmentHistVal(ctx, scCopy, db, blockReader, failFast, logger)
 		case integrity.StateRootVerifyByHistory:
 			if !commitmentHistoryEnabled {
-				logger.Info("[integrity] StateRootVerifyByHistory skipped because commitment history is not enabled on this datadir")
-				return nil
+				return fmt.Errorf("%w: commitment history is not enabled on this datadir", integrity.ErrSkipped)
 			}
 			to, err := stateFilesProgress(ctx, db, blockReader.TxnumReader())
 			if err != nil {
@@ -1735,53 +1731,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		}
 	}
 
-	var deadline time.Time
-	if budget := cliCtx.Duration("integrity.budget"); budget > 0 {
-		requestedChecks = integrity.SortChecksByCost(requestedChecks)
-		deadline = time.Now().Add(budget)
-		logger.Info("[integrity] budget", "total", budget, "perCheck", budget/time.Duration(len(requestedChecks)))
-	}
-
-	for i, chk := range requestedChecks {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		checkCtx := ctx
-		var cancel context.CancelFunc
-		if !deadline.IsZero() {
-			remaining := time.Until(deadline)
-			if remaining <= 0 {
-				logger.Info("[integrity] budget exhausted, skipping remaining", "skipped", len(requestedChecks)-i)
-				break
-			}
-			slice := remaining / time.Duration(len(requestedChecks)-i)
-			checkCtx, cancel = context.WithTimeout(ctx, slice)
-		}
-
-		logger.Info("[integrity] starting", "check", chk)
-		start := time.Now()
-		err := runCheck(checkCtx, chk)
-		elapsed := time.Since(start)
-		if cancel != nil {
-			cancel()
-		}
-
-		if err == nil {
-			logger.Info("[integrity] done", "check", chk, "elapsed", elapsed)
-			continue
-		}
-		if parentErr := ctx.Err(); parentErr != nil {
-			return parentErr
-		}
-		if integrity.BudgetExhausted(err) {
-			logger.Info("[integrity] budget exhausted, moving on", "check", chk, "elapsed", elapsed)
-			continue
-		}
-		return fmt.Errorf("%s: %w", chk, err)
-	}
-
-	return nil
+	return integrity.RunChecks(ctx, requestedChecks, cliCtx.Duration("integrity.budget"), runCheck, logger)
 }
 
 // stateFilesProgress returns the latest block fully covered by state-history files.
@@ -2629,14 +2579,17 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 }
 
 func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := state.CheckMixedCommitmentFiles(dat); err != nil {
+		return err
+	}
 	if chainDB == nil {
 		chainDB = dbCfg(dbcfg.ChainDB, dat.Chaindata).MustOpen()
 		defer chainDB.Close()
 	}
 
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
 		return err
@@ -2709,64 +2662,25 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 	return nil
 }
 
-func doClearIndexing(ctx context.Context, cliCtx *cli.Command) error {
-	dat, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
-	if err != nil {
-		return err
-	}
-	defer unlockDatadir(log.Root(), l)
-	accessorsDir := dat.SnapAccessors
-	domainDir := dat.SnapDomain
-	snapDir := dat.Snap
-
-	// Delete accessorsDir
-	if err := dir2.RemoveAll(accessorsDir); err != nil {
-		return fmt.Errorf("failed to delete accessorsDir: %w", err)
-	}
-
-	// Delete all files in domainDir with extensions .bt and .bt.torrent
-	if err := deleteFilesWithExtensions(domainDir, []string{".bt", ".bt.torrent", ".kvei", ".kvei.torrent", ".kvi", ".kvi.torrent"}); err != nil {
-		return fmt.Errorf("failed to delete files in domainDir: %w", err)
-	}
-
-	// Delete all files in snapDir with extensions .idx and .idx.torrent
-	if err := deleteFilesWithExtensions(snapDir, []string{".idx", ".idx.torrent"}); err != nil {
-		return fmt.Errorf("failed to delete files in snapDir: %w", err)
-	}
-
-	// remove salt-state.txt and salt-blocks.txt
-	for _, name := range []string{"salt-state.txt", "salt-state.txt.torrent", "salt-blocks.txt", "salt-blocks.txt.torrent"} {
-		if err := dir2.RemoveFile(filepath.Join(snapDir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("failed to remove %s: %w", name, err)
+// renewSnapshotSaltFilesForRebuild must run after removeAccessorsForRebuild: an accessor built with the old salt must never be opened with the new one.
+func renewSnapshotSaltFilesForRebuild(dirs datadir.Dirs, logger log.Logger) error {
+	for _, name := range []string{
+		"salt-state.txt", "salt-state.txt.torrent",
+		"salt.txt", "salt.txt.torrent", // legacy state salt; must not be migrated and reused
+		"salt-blocks.txt", "salt-blocks.txt.torrent",
+	} {
+		path := filepath.Join(dirs.Snap, name)
+		if err := dir2.RemoveFile(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("rebuild: remove %s: %w", path, err)
 		}
 	}
-
+	if _, err := snaptype.LoadSalt(dirs.Snap, true, logger); err != nil {
+		return fmt.Errorf("rebuild: generate block salt: %w", err)
+	}
+	if _, err := state.GetStateIndicesSalt(dirs, true, logger); err != nil {
+		return fmt.Errorf("rebuild: generate state salt: %w", err)
+	}
 	return nil
-}
-
-func deleteFilesWithExtensions(dir string, extensions []string) error {
-	return filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) { // it's ok if some file get removed during walk
-				return nil
-			}
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-
-		// Check file extensions and delete matching files
-		for _, ext := range extensions {
-			if strings.HasSuffix(info.Name(), ext) {
-				if err := dir2.RemoveFile(path); err != nil {
-					return err
-				}
-			}
-		}
-
-		return nil
-	})
 }
 
 func doBlkTxNum(ctx context.Context, cliCtx *cli.Command) error {
@@ -3037,6 +2951,19 @@ func removeAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger) error {
 	return nil
 }
 
+// The downloader may replace salt-state.txt until preverified.toml exists, which would orphan accessors built with a new salt.
+func requirePinnedSnapshotSet(dirs datadir.Dirs) error {
+	preverifiedPath := dirs.PreverifiedPath()
+	exists, err := dir2.FileExist(preverifiedPath)
+	if err != nil {
+		return fmt.Errorf("check initial snapshot download completion: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("--new-salt requires a completed initial snapshot download: %s is missing", preverifiedPath)
+	}
+	return nil
+}
+
 // indexAggOpts skip the startup gap check: `snapshots index` rebuilds the accessors whose absence makes it refuse.
 var indexAggOpts = []func(state.AggOpts) state.AggOpts{state.AggOpts.SkipFilesDBGapCheck}
 
@@ -3045,12 +2972,26 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	defer logger.Info("Done")
 
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
+	newSalt := cliCtx.Bool(SnapshotNewSaltFlag.Name)
+	if newSalt {
+		if !rebuild {
+			return errors.New("--new-salt requires --rebuild")
+		}
+		if err := requirePinnedSnapshotSet(dirs); err != nil {
+			return err
+		}
+	}
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	if rebuild {
 		if err := removeAccessorsForRebuild(dirs, logger); err != nil {
 			return err
+		}
+		if newSalt {
+			if err := renewSnapshotSaltFilesForRebuild(dirs, logger); err != nil {
+				return err
+			}
 		}
 	}
 

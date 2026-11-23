@@ -45,19 +45,20 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-func recentRootPoolSlot(t *testing.T, sender common.Address, rootSlot, fee uint64) *TxnSlot {
+func recentRootPoolSlot(t *testing.T, sender common.Address, rootSlot, feePerGas uint64) *TxnSlot {
 	t.Helper()
 	data := make([]byte, 72)
 	data[0], data[71] = 1, 2
 	binary.BigEndian.PutUint64(data[32:40], rootSlot)
 	tx := &types.FrameTransaction{
-		NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: sender,
+		NonceKeys: nil, ChainID: *uint256.NewInt(1), SenderAddress: sender,
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Target: &types.FrameRecentRootVerifier, Data: data, Limits: mdgas.MdGas{Execution: 20_000}},
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
 		},
-		Fees: types.FrameFees{TipCap: *uint256.NewInt(fee), FeeCap: *uint256.NewInt(fee)},
+		Fees: types.FrameFees{TipCap: *uint256.NewInt(feePerGas)},
 	}
+	tx.Fees.MaxFee.SetUint64(feePerGas * tx.GetGasLimit())
 	return framePoolSlotFromTransaction(t, tx)
 }
 
@@ -66,12 +67,12 @@ func TestFramePoolRecentRootAddressAsPaymaster(t *testing.T) {
 	backend := pool.ethBackend.(*frameValidationBackend)
 	backend.payer, backend.paymaster = types.FrameRecentRootVerifier, true
 	tx := &types.FrameTransaction{
-		NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: sender,
+		NonceKeys: nil, ChainID: *uint256.NewInt(1), SenderAddress: sender,
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveExecution, Limits: mdgas.MdGas{Execution: 100}},
 			{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &types.FrameRecentRootVerifier, Limits: mdgas.MdGas{Execution: 100}},
 		},
-		Fees: types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(1)},
+		Fees: types.FrameFees{TipCap: *uint256.NewInt(1), MaxFee: *uint256.NewInt(100_000)},
 	}
 	require.NoError(t, protocol.ValidateFrameTransactionPrefix(tx))
 	slot := framePoolSlotFromTransaction(t, tx)
@@ -222,7 +223,7 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 					require.Empty(t, pool.all.senderIDFrameTxn)
 				} else {
 					require.Contains(t, pool.byHash, string(slot.IDHash[:]))
-					require.Equal(t, slot.frameValidation.MaxCost, pool.frameReservations[sender].cost)
+					require.Equal(t, slot.Txn.(*types.FrameTransaction).Fees.MaxFee, pool.frameReservations[sender].cost)
 				}
 			})
 		})

@@ -125,6 +125,7 @@ type Aggregator struct {
 	maintenanceObserver atomic.Pointer[MaintenanceObserver]
 	observerCtx         context.Context
 	observerCancel      context.CancelFunc
+	closed              atomic.Bool
 
 	// next fields are set only if agg.doTraceCtx is true. can enable by env: TRACE_AGG=true
 	leakDetector *dbg.LeakDetector
@@ -733,16 +734,22 @@ func (a *Aggregator) WaitForFiles() {
 	}
 }
 
-func (a *Aggregator) Close() {
+// StopMaintenance refuses new background work and waits for the running work,
+// which may still use the database. Files stay open for live readers.
+func (a *Aggregator) StopMaintenance() {
 	a.observerCancel()
 	a.dirtyFilesLock.Lock()
 	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
 	a.dirtyFilesLock.Unlock()
-	// Every caller must wait for maintenance before it can safely close the database.
 	// Keep the aggregator context alive until that work finishes.
-	firstClose := a.background.BeginClose()
+	a.background.BeginClose()
 	a.background.Wait()
-	if !firstClose {
+}
+
+// Close unmaps the files: every reader must be gone, so close the database first.
+func (a *Aggregator) Close() {
+	a.StopMaintenance()
+	if !a.closed.CompareAndSwap(false, true) {
 		return
 	}
 	a.ctxCancel()
@@ -1839,6 +1846,14 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return ceiling
 }
 
+// AssertFilesGap reports a gap in the files on disk: the visible files of this tx stop before the files end.
+func (at *AggregatorRoTx) AssertFilesGap() error {
+	if v := at.visible; v.visibleEnd < v.filesEnd {
+		return fmt.Errorf("a gap in files: visible files end at txNum %d, files reach %d", v.visibleEnd, v.filesEnd)
+	}
+	return nil
+}
+
 // aggregatorVisible immutable visible-for-application files (no gaps, no overlaps, indexed)
 // See also
 //
@@ -1853,6 +1868,8 @@ type aggregatorVisible struct {
 	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
+	visibleEnd   uint64                          // every list is cut here; below filesEnd means a gap
+	filesEnd     uint64                          // dirtyFilesEndTxNumMinimax when this generation was built
 
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
@@ -1926,6 +1943,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 		a.logger.Warn("[agg] a gap in files: every list stops at the first one that stops", "visibleEnd", toTxNum, "filesEnd", dirtyEnd)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
+	next.visibleEnd, next.filesEnd = toTxNum, dirtyEnd
 
 	if a.visibilityLoweringForbidden.Load() {
 		prev := a.visible.Load()
@@ -2545,6 +2563,24 @@ type AggregatorRoTx struct {
 
 // Generation identifies the immutable file view pinned by this transaction.
 func (at *AggregatorRoTx) Generation() uint64 { return at.visible.generation }
+
+// AssertRetired reports a full step of state in the DB that the files on disk do
+// not cover yet, as `erigon seg retire` would build. The files on disk count, not
+// the visible ones: accounts are not visible without their commitment files.
+func (at *AggregatorRoTx) AssertRetired(tx kv.Tx) error {
+	a := at.a
+	a.dirtyFilesLock.Lock()
+	filesEnd := kv.Step(a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax() / a.StepSize())
+	a.dirtyFilesLock.Unlock()
+	var inDB kv.Step
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		inDB = max(inDB, a.d[d].maxStepInDB(tx))
+	}
+	if inDB > filesEnd {
+		return fmt.Errorf("the DB holds steps %d-%d that are not in files: run `erigon seg retire` first (it builds a step only after the step's last block is final)", filesEnd, inDB)
+	}
+	return nil
+}
 
 // CheckFilesDBGap detects a gap between the snapshot files and the DB. It can arise from
 // snapshot/DB management operations — e.g. `seg rm-state --latest` and then starting

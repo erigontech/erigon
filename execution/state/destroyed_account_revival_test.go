@@ -132,7 +132,17 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), nonce)
 
-	resolved, err := ibs.ResolveCode(addr)
+	// The whole-account interpreter must agree with the per-field live reads above:
+	// a recreate visible only through the BAL nonce/code cells reads as a present,
+	// fresh account, not absent on the destroy's stale balance ValueDeleted.
+	view, err := vm.ApplyView(2, reader).ReadAccountData(addr)
+	require.NoError(t, err)
+	require.NotNil(t, view, "interpreter must read the field-cell recreate as present")
+	require.Equal(t, uint64(1), view.Nonce)
+	require.Equal(t, codeHash, view.CodeHash)
+	require.True(t, view.Balance.IsZero(), "destroyed balance is gone; the recreate starts fresh")
+
+	resolved, err := ibs.ResolveCode(addr, true)
 	require.NoError(t, err)
 	require.Equal(t, code, resolved.Bytes)
 	require.NoError(t, ibs.TouchAccount(addr))

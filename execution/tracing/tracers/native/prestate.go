@@ -116,6 +116,7 @@ type prestateTracer struct {
 	pre       state
 	post      state
 	config    prestateTracerConfig
+	frameTx   *types.FrameTransaction
 	interrupt atomic.Bool           // Atomic flag to signal execution interruption
 	reason    atomic.Pointer[error] // Reason for the interruption, populated by Stop
 }
@@ -160,7 +161,7 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 	}, nil
 }
 
-// Capture the journaled status after all call and atomic batch rollbacks.
+// Capture the journaled status after call, atomic batch and ASSERT body rollbacks.
 // Finalization can clear these markers before OnTxEnd runs.
 func (t *prestateTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if depth != 0 || !t.config.DiffMode {
@@ -231,9 +232,10 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 
 func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	t.env = env
+	t.frameTx, _ = tx.Unwrap().(*types.FrameTransaction)
 	t.lookupAccount(from)
 	t.lookupAccount(env.Coinbase)
-	if frameTx, ok := tx.Unwrap().(*types.FrameTransaction); ok {
+	if frameTx := t.frameTx; frameTx != nil {
 		// Capture direct targets before any frame runs; earlier frames may change
 		// the account state or delegation that a later frame will observe.
 		for _, frame := range frameTx.Frames {
@@ -280,6 +282,7 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 
 func (t *prestateTracer) OnSystemCallStartV2(env *tracing.VMContext) {
 	t.env = env
+	t.frameTx = nil
 	t.lookupAccount(env.Coinbase)
 }
 

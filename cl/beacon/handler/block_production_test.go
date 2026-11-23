@@ -3313,6 +3313,75 @@ func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
 	require.ErrorContains(t, err, "unsupported content type")
 }
 
+func TestPublishBlockContentType(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	for _, route := range []struct {
+		name    string
+		version clparams.StateVersion
+		v2      bool
+	}{
+		{"v1/fulu", clparams.FuluVersion, false},
+		{"v2/fulu", clparams.FuluVersion, true},
+		{"v2/gloas", clparams.GloasVersion, true},
+	} {
+		var block interface{ EncodeSSZ([]byte) ([]byte, error) }
+		if route.version >= clparams.GloasVersion {
+			block = cltypes.NewSignedBeaconBlock(&cfg, route.version)
+		} else {
+			block = cltypes.NewDenebSignedBeaconBlock(&cfg, route.version)
+		}
+		jsonBody, err := json.Marshal(block)
+		require.NoError(t, err)
+		sszBody, err := block.EncodeSSZ(nil)
+		require.NoError(t, err)
+		for _, tc := range []struct {
+			contentType string
+			body        []byte
+			wantCode    int
+		}{
+			{"application/json", jsonBody, 0},
+			{"application/json; charset=utf-8", jsonBody, 0},
+			{"", jsonBody, 0},
+			{"application/octet-stream", sszBody, 0},
+			{"Application/Octet-Stream; foo=bar", sszBody, 0},
+			{"text/plain", jsonBody, http.StatusUnsupportedMediaType},
+			{"application/octet-stream; bad", sszBody, http.StatusUnsupportedMediaType},
+		} {
+			name := tc.contentType
+			if name == "" {
+				name = "no content type"
+			}
+			t.Run(route.name+"/"+name, func(t *testing.T) {
+				blockService := network_services_mock.NewMockBlockService(gomock.NewController(t))
+				decoded := errors.New("decoded block reached gossip validation")
+				if tc.wantCode == 0 {
+					blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(decoded)
+				}
+				h := &ApiHandler{beaconChainCfg: &cfg, blockService: blockService}
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(tc.body))
+				if tc.contentType != "" {
+					req.Header.Set("Content-Type", tc.contentType)
+				}
+				req.Header.Set("Eth-Consensus-Version", route.version.String())
+
+				publish := h.PostEthV1BeaconBlocks
+				if route.v2 {
+					publish = h.PostEthV2BeaconBlocks
+				}
+				_, err := publish(httptest.NewRecorder(), req)
+				if tc.wantCode == 0 {
+					require.ErrorIs(t, err, decoded)
+					return
+				}
+				var endpointErr *beaconhttp.EndpointError
+				require.ErrorAs(t, err, &endpointErr)
+				require.Equal(t, tc.wantCode, endpointErr.Code)
+				require.ErrorContains(t, err, "unsupported content type")
+			})
+		}
+	}
+}
+
 func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	builderClient := builder_mock.NewMockBuilderClient(ctrl)
@@ -3393,14 +3462,14 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 				require.NoError(t, err)
 				return encoded
 			},
-			wantErr: "missing execution payload header",
+			wantErr: "blinded beacon body contains null execution payload header",
 		},
 		{
 			name: "omitted execution payload header",
 			mutate: func(block *cltypes.SignedBlindedBeaconBlock) {
 				block.Block.Body.ExecutionPayload = nil
 			},
-			wantErr: "missing execution payload header",
+			wantErr: "blinded beacon body contains null execution payload header",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3423,8 +3492,38 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 
 			_, err = h.publishBlindedBlocks(req, 2)
 			require.ErrorContains(t, err, tc.wantErr)
+			var endpointErr *beaconhttp.EndpointError
+			require.ErrorAs(t, err, &endpointErr)
+			require.Equal(t, http.StatusBadRequest, endpointErr.Code)
 		})
 	}
+}
+
+func TestPublishBlindedBlocksRejectsNullAttestations(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	h := &ApiHandler{
+		beaconChainCfg: &clparams.MainnetBeaconConfig,
+		builderClient:  builderClient,
+	}
+	block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	var request map[string]any
+	require.NoError(t, json.Unmarshal(body, &request))
+	request["message"].(map[string]any)["body"].(map[string]any)["attestations"] = nil
+	body, err = json.Marshal(request)
+	require.NoError(t, err)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+
+	require.NotPanics(t, func() {
+		_, err = h.publishBlindedBlocks(req, 2)
+	})
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusBadRequest, endpointErr.Code)
 }
 
 func TestValidateBuilderPayload(t *testing.T) {
@@ -4508,8 +4607,10 @@ func TestProcessProducedBlockSelectsExternalBidWithoutLegacyBuilderBoost(t *test
 	require.Equal(t, fixture.externalBid.Message.BlockHash, selectedState.GetLatestExecutionPayloadBid().BlockHash)
 }
 
-func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
-	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
+// newGloasProductionHandler returns a handler that produces a block on the fixture's head: the
+// execution engine builds `builds` payloads worth localValueWei each.
+func newGloasProductionHandler(t *testing.T, fixture *gloasBidSelectionFixture, builds int, localValueWei *big.Int) (*ApiHandler, *forkchoice_mock.ForkChoiceStorageMock) {
+	t.Helper()
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg = fixture.block.Cfg
 	startBuilderHandoffWindow(handler, fixture.block.Slot)
@@ -4549,7 +4650,7 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 	syncPool := sync_pool_mock.NewMockSyncContributionPool(gomock.NewController(t))
 	syncPool.EXPECT().GetSyncAggregate(gomock.Any(), gomock.Any()).
 		Return(cltypes.NewSyncAggregateWithSize(int(handler.beaconChainCfg.SyncCommitteeSize/8)), nil).
-		Times(2)
+		Times(builds)
 	handler.syncMessagePool = syncPool
 
 	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
@@ -4566,23 +4667,22 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), clparams.GloasVersion).
 		Return([]byte{1}, nil).
-		Times(2)
+		Times(builds)
 	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
-		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil).
-		Times(2)
+		Return(payload, &engine_types.BlobsBundle{}, nil, localValueWei, nil).
+		Times(builds)
 	handler.engine = engine
 	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
+	return handler, forkchoiceStore
+}
+
+func TestPostEthV4ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
+	handler, _ := newGloasProductionHandler(t, &fixture, 2, big.NewInt(1))
 
 	produce := func() *cltypes.BeaconBlock {
-		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
-			"/eth/v3/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true&graffiti=0x01",
-			fixture.block.Slot,
-			(common.Bytes96{}).String(),
-		), http.NoBody)
-		routeContext := chi.NewRouteContext()
-		routeContext.URLParams.Add("slot", fmt.Sprint(fixture.block.Slot))
-		request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
-		response, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), request)
+		request := postV4BlockRequest(t.Context(), fixture.block.Slot, false, "&graffiti=0x01", v4RequestBody(0, 100))
+		response, err := handler.PostEthV4ValidatorBlock(httptest.NewRecorder(), request)
 		require.NoError(t, err)
 		producedBlock, ok := response.Data.(*cltypes.BeaconBlock)
 		require.True(t, ok)
@@ -4609,7 +4709,7 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 	require.True(t, found)
 }
 
-// produceAcrossAHeadChange runs GetEthV3ValidatorBlock while the head changes during the wait for
+// produceAcrossAHeadChange runs PostEthV4ValidatorBlock while the head changes during the wait for
 // the parked envelope of the old head. The new head's state is published only if publish is set,
 // and the request is cancelled while production waits for that state if cancel is set.
 func produceAcrossAHeadChange(t *testing.T, publish, cancel bool) (*beaconhttp.BeaconResponse, error, common.Hash) {
@@ -4712,15 +4812,8 @@ func produceAcrossAHeadChange(t *testing.T, publish, cancel bool) (*beaconhttp.B
 	handler.engine = engine
 	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
 
-	request := httptest.NewRequestWithContext(requestCtx, http.MethodGet, fmt.Sprintf(
-		"/eth/v3/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true",
-		fixture.block.Slot,
-		(common.Bytes96{}).String(),
-	), http.NoBody)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("slot", fmt.Sprint(fixture.block.Slot))
-	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
-	response, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), request)
+	request := postV4BlockRequest(requestCtx, fixture.block.Slot, false, "", v4RequestBody(0, 100))
+	response, err := handler.PostEthV4ValidatorBlock(httptest.NewRecorder(), request)
 	require.True(t, headChanged.Load(), "production waited for the parked envelope")
 	if publish {
 		require.NoError(t, <-published)
@@ -7007,7 +7100,8 @@ func TestGetEthV1ValidatorAttestationDataPinsOnlyFromElectra(t *testing.T) {
 func TestGetEthV3ValidatorBlockRejectsFarFutureSlot(t *testing.T) {
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
-	handler := &ApiHandler{ethClock: clock}
+	cfg := clparams.MainnetBeaconConfig
+	handler := &ApiHandler{ethClock: clock, beaconChainCfg: &cfg}
 
 	slot := fmt.Sprint(uint64(math.MaxUint64))
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,

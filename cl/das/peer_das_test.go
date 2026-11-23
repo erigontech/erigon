@@ -2917,7 +2917,7 @@ func forkToGloasAt(t *testing.T, r *recoveryRun, gloasForkEpoch uint64) {
 	r.d.gloasDataCache = gloasData
 }
 
-// scheduleCall is the interval in which a TryScheduleRecover call ran. The call records its column inside it.
+// scheduleCall is the interval in which a TryScheduleRecover call ran. The call takes its waitFrom time inside it.
 type scheduleCall struct{ begin, end time.Time }
 
 func (g *gossipRecovery) timedSchedule() (scheduleCall, error) {
@@ -2981,25 +2981,28 @@ func TestBlobRecoveryWaitsForGossipToGoQuietBeforeReadingColumns(t *testing.T) {
 	})
 }
 
-// Every column stored while the worker waits restarts the wait.
-func TestBlobRecoveryWaitRestartsWithEachStoredColumn(t *testing.T) {
+// A column stored while the worker waits does not extend the wait of a root that cannot hold for the by-root sync.
+func TestBlobRecoveryWaitIsNotRestartedByStoredColumns(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		g := startGossipRecovery(t, false)
 
-		calls := []scheduleCall{g.schedule(t)}
-		for range 3 {
+		first := g.schedule(t)
+		time.Sleep(wantQuietPeriod / 6)
+		second := g.schedule(t)
+		for range 2 {
 			time.Sleep(wantQuietPeriod / 6)
-			calls = append(calls, g.schedule(t))
+			g.schedule(t)
 		}
 		started := g.awaitFirstRead(t)
 
-		require.False(t, started.Before(earliestQuietEnd(calls)), "the worker started before the last column restarted the wait")
+		require.False(t, started.Before(first.begin.Add(wantQuietPeriod)), "the worker started before the quiet period of the first column passed")
+		require.True(t, started.Before(second.begin.Add(wantQuietPeriod)), "a later column extended the wait")
 	})
 }
 
-// A column stored after the worker claimed the request restarts the wait, even when the wait the worker claimed has
-// already passed.
-func TestBlobRecoveryWaitRestartsWithAColumnStoredAfterTheClaim(t *testing.T) {
+// A column stored after the worker claimed the request does not restart the wait of a root that cannot hold, so a
+// request whose wait has passed starts at once.
+func TestBlobRecoveryWaitIsNotRestartedByAColumnStoredAfterTheClaim(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		g := startGossipRecovery(t, true)
 
@@ -3014,24 +3017,9 @@ func TestBlobRecoveryWaitRestartsWithAColumnStoredAfterTheClaim(t *testing.T) {
 		g.releaseClock()
 		started := g.awaitFirstRead(t)
 
-		require.False(t, started.Before(second.begin.Add(wantQuietPeriod)), "the worker started before the column stored after the claim restarted the wait")
-		require.Less(t, started.Sub(second.end), wantQuietPeriod+startSlack)
+		require.False(t, started.Before(first.begin.Add(wantQuietPeriod)), "the worker started before the quiet period of the first column passed")
+		require.Less(t, started.Sub(second.end), wantQuietPeriod/2, "the column stored after the claim restarted the wait")
 	})
-}
-
-// earliestQuietEnd returns the earliest time the worker may start after the calls, which ran one after the other. A
-// call restarts the wait only if it ended within half the quiet period of the previous call's start; the other half
-// covers a worker that reads the request a little before it decides. Otherwise the worker may already have started, so
-// that call and the calls after it do not count.
-func earliestQuietEnd(calls []scheduleCall) time.Time {
-	last := calls[0]
-	for _, call := range calls[1:] {
-		if call.end.Sub(last.begin) > wantQuietPeriod/2 {
-			break
-		}
-		last = call
-	}
-	return last.begin.Add(wantQuietPeriod)
 }
 
 // A block whose remaining columns never arrive is recovered once gossip has gone quiet.
@@ -3074,9 +3062,9 @@ func TestBlobRecoveryFindsCompleteMatrixWhenGossipDeliversEveryColumn(t *testing
 	})
 }
 
-// Columns that keep arriving cannot hold the recovery past the deadline: a quarter of the slot before Gloas, and the
-// custody grace after the payload deadline from Gloas.
-func TestBlobRecoveryStartsAtSlotDeadlineWhileColumnsKeepArriving(t *testing.T) {
+// Columns that keep arriving do not extend the quiet period of the first column of a root that cannot hold. The slot
+// deadline caps it: a quarter of the slot before Gloas, and the custody grace after the payload deadline from Gloas.
+func TestBlobRecoveryStartsAtTheQuietPeriodOrTheSlotDeadlineWhileColumnsKeepArriving(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	slotEpoch := recoveryTestSlot / cfg.SlotsPerEpoch
 	slotDuration := time.Duration(cfg.SecondsPerSlot) * time.Second
@@ -3090,35 +3078,34 @@ func TestBlobRecoveryStartsAtSlotDeadlineWhileColumnsKeepArriving(t *testing.T) 
 		name           string
 		gloasForkEpoch uint64
 		deadline       time.Duration
-		slotAge        time.Duration
+		untilDeadline  time.Duration
 	}{
-		{"fulu deadline ahead", slotEpoch + 1, fuluDeadline, fuluDeadline - 500*time.Millisecond},
-		{"fulu deadline passed", slotEpoch + 1, fuluDeadline, fuluDeadline + time.Second},
-		{"gloas deadline ahead", slotEpoch, gloasDeadline, gloasDeadline - 500*time.Millisecond},
-		{"gloas deadline passed", slotEpoch, gloasDeadline, gloasDeadline + time.Second},
+		{"fulu deadline after the quiet period", slotEpoch + 1, fuluDeadline, time.Second},
+		{"fulu deadline inside the quiet period", slotEpoch + 1, fuluDeadline, wantQuietPeriod / 3},
+		{"fulu deadline passed", slotEpoch + 1, fuluDeadline, -time.Second},
+		{"gloas deadline after the quiet period", slotEpoch, gloasDeadline, time.Second},
+		{"gloas deadline inside the quiet period", slotEpoch, gloasDeadline, wantQuietPeriod / 3},
+		{"gloas deadline passed", slotEpoch, gloasDeadline, -time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				g := startGossipRecovery(t, false, func(r *recoveryRun) { forkToGloasAt(t, r, tc.gloasForkEpoch) })
-				scheduled := time.Now()
-				slotStart := scheduled.Add(-tc.slotAge)
+				slotStart := time.Now().Add(tc.untilDeadline - tc.deadline)
 				g.slotStart.Store(slotStart.UnixNano())
-				var calls []scheduleCall
+				first := g.schedule(t)
 				stop, stopped := make(chan struct{}), make(chan struct{})
 				stopProducer := sync.OnceFunc(func() { close(stop); <-stopped })
 				t.Cleanup(stopProducer)
 				go func() {
 					defer close(stopped)
 					for {
-						call, err := g.timedSchedule()
-						if err != nil {
-							t.Error(err)
-						}
-						calls = append(calls, call)
 						select {
 						case <-stop:
 							return
 						case <-time.After(wantQuietPeriod / 10):
+						}
+						if _, err := g.timedSchedule(); err != nil {
+							t.Error(err)
 						}
 					}
 				}()
@@ -3127,16 +3114,19 @@ func TestBlobRecoveryStartsAtSlotDeadlineWhileColumnsKeepArriving(t *testing.T) 
 				stopProducer()
 
 				deadline := slotStart.Add(tc.deadline)
-				startNotBefore := deadline
-				if quietEnd := earliestQuietEnd(calls); quietEnd.Before(startNotBefore) {
-					startNotBefore = quietEnd
+				earliest := first.begin.Add(wantQuietPeriod)
+				if deadline.Before(earliest) {
+					earliest = deadline
 				}
-				require.False(t, started.Before(startNotBefore), "the worker started before the slot deadline or the end of the quiet period")
-				slackFrom := scheduled
-				if deadline.After(slackFrom) {
-					slackFrom = deadline
+				latest := first.end.Add(wantQuietPeriod)
+				if deadline.Before(latest) {
+					latest = deadline
 				}
-				require.Less(t, started.Sub(slackFrom), startSlack)
+				if latest.Before(first.end) {
+					latest = first.end
+				}
+				require.False(t, started.Before(earliest), "the worker started before the quiet period of the first column or the slot deadline")
+				require.Less(t, started.Sub(latest), wantQuietPeriod/10, "the worker started after the quiet period of the first column or the slot deadline")
 			})
 		})
 	}
@@ -3189,7 +3179,7 @@ func TestBlobRecoveryStartsOnTimeBehindOverdueRetries(t *testing.T) {
 
 func claimedBlobRecovery(t *testing.T) (*peerdas, recoverBlobsRequest) {
 	t.Helper()
-	return claimedBlobRecoveryOf(t, recoverBlobsRequest{slot: 10, blockRoot: common.Hash{1}, lastColumn: time.Now().Add(time.Hour)})
+	return claimedBlobRecoveryOf(t, recoverBlobsRequest{slot: 10, blockRoot: common.Hash{1}, waitFrom: time.Now().Add(time.Hour)})
 }
 
 func claimedBlobRecoveryOf(t *testing.T, request recoverBlobsRequest) (*peerdas, recoverBlobsRequest) {
@@ -3217,12 +3207,13 @@ func TestParkBlobRecoveryDecidesOnTheNewestOwnedRequest(t *testing.T) {
 		parks    bool
 	}{
 		{"nothing newer", longAgo, nil, farDeadline, false},
-		{"newer column", longAgo, &recoverBlobsRequest{lastColumn: time.Now().Add(time.Hour)}, farDeadline, true},
+		{"later column does not replace the request", longAgo, &recoverBlobsRequest{waitFrom: time.Now().Add(time.Hour)}, farDeadline, false},
+		{"later holdable column replaces the request", longAgo, &recoverBlobsRequest{waitFrom: time.Now().Add(time.Hour), holdable: true}, farDeadline, true},
 		{"metadata replaces the request", time.Now(), &recoverBlobsRequest{metadata: &blobRecoveryMetadata{}}, farDeadline, false},
 		{"deadline passed", time.Now(), nil, longAgo, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			d, _ := claimedBlobRecoveryOf(t, recoverBlobsRequest{slot: 10, blockRoot: root, lastColumn: tc.claimed})
+			d, _ := claimedBlobRecoveryOf(t, recoverBlobsRequest{slot: 10, blockRoot: root, waitFrom: tc.claimed})
 			if tc.newest != nil {
 				tc.newest.slot, tc.newest.blockRoot = 10, root
 				require.NoError(t, d.enqueueBlobRecovery(*tc.newest))
@@ -3234,6 +3225,44 @@ func TestParkBlobRecoveryDecidesOnTheNewestOwnedRequest(t *testing.T) {
 			defer d.recoveringMutex.Unlock()
 			require.Equal(t, tc.parks, parked)
 			require.Equal(t, !tc.parks, d.isRecovering[root], "the claim after the decision")
+		})
+	}
+}
+
+// A later request without metadata replaces the owned one only for a holdable root, and only when it is newer. A request
+// with metadata is never replaced by one without.
+func TestEnqueueBlobRecoveryReplacesTheOwnedRequestOnlyForALaterHoldableColumn(t *testing.T) {
+	root := common.Hash{1}
+	first := time.Unix(1000, 0)
+	later := first.Add(time.Second)
+	for _, tc := range []struct {
+		name     string
+		owned    recoverBlobsRequest
+		incoming recoverBlobsRequest
+		replaced bool
+	}{
+		{"later holdable column", recoverBlobsRequest{waitFrom: first, holdable: true}, recoverBlobsRequest{waitFrom: later, holdable: true}, true},
+		{"later column of a root that cannot hold", recoverBlobsRequest{waitFrom: first}, recoverBlobsRequest{waitFrom: later}, false},
+		{"older holdable column", recoverBlobsRequest{waitFrom: later}, recoverBlobsRequest{waitFrom: first, holdable: true}, false},
+		{"holdable column after a column of a root that cannot hold", recoverBlobsRequest{waitFrom: first, holdable: false}, recoverBlobsRequest{waitFrom: later, holdable: true}, true},
+		{"column of a root that cannot hold after a holdable column", recoverBlobsRequest{waitFrom: first, holdable: true}, recoverBlobsRequest{waitFrom: later}, false},
+		{"holdable column after a request with metadata", recoverBlobsRequest{metadata: &blobRecoveryMetadata{}}, recoverBlobsRequest{waitFrom: later, holdable: true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.owned.slot, tc.owned.blockRoot = 10, root
+			tc.incoming.slot, tc.incoming.blockRoot = 10, root
+			d, _ := claimedBlobRecoveryOf(t, tc.owned)
+
+			require.NoError(t, d.enqueueBlobRecovery(tc.incoming))
+
+			d.recoveringMutex.Lock()
+			defer d.recoveringMutex.Unlock()
+			want := tc.owned
+			if tc.replaced {
+				want = tc.incoming
+			}
+			require.Equal(t, want, d.recoveryRequests[root])
+			require.Equal(t, uint64(1), d.recoveryGenerations[root], "a column bumped the generation")
 		})
 	}
 }
