@@ -1186,6 +1186,8 @@ func (s *simulator) simulateCall(
 	return &callResult, txn, receipt, nil
 }
 
+// simulatedChainReader lets block initialization read the timestamp of a parent
+// built earlier in the same simulation, even when it exists only in memory.
 type simulatedChainReader struct {
 	*consensuschain.Reader
 	parent *types.Header

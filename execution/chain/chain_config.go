@@ -81,8 +81,11 @@ type Config struct {
 	AmsterdamTime *uint64 `json:"amsterdamTime,omitempty"`
 	BogotaTime    *uint64 `json:"bogotaTime,omitempty"`
 
-	// EIP-8253: accounts with zero nonce, empty code and non-empty storage before Bogota.
-	// Each chain supplies its own list; activation sets these nonces to one unconditionally.
+	// ZeroNonceStorageAccounts lists this chain's accounts with zero nonce, empty code
+	// and non-empty storage immediately before the Bogota hardfork (EIP-8253).
+	// The first Bogota block with a pre-Bogota parent sets each listed nonce to one
+	// without rechecking those conditions. If Bogota is active at genesis, the
+	// genesis allocation supplies the nonces.
 	ZeroNonceStorageAccounts []common.Address `json:"zeroNonceStorageAccounts,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
@@ -648,8 +651,8 @@ func (c *Config) forkTimestamps() []forkTimestamp {
 	}
 }
 
-// SameTimestampRules compares fork schedules and their activation parameters.
-// Parameters of unscheduled forks do not affect compatibility.
+// SameTimestampRules reports whether the fork timestamps match and, if Bogota
+// is scheduled, both configs name the same set of EIP-8253 accounts.
 func (c *Config) SameTimestampRules(newcfg *Config) bool {
 	newTimes := newcfg.forkTimestamps()
 	for i, f := range c.forkTimestamps() {

@@ -395,8 +395,8 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 //
 // The generator function is called with a new block generator for
 // every block. Any transactions and uncles added to the generator
-// become part of the block. If gen is nil, the blocks will be empty
-// and their coinbase will be the zero address.
+// become part of the block. If gen is nil, each block has no transactions
+// or uncles and inherits its parent's coinbase.
 //
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or

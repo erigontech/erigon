@@ -551,8 +551,9 @@ type ExecutionWitnessResult struct {
 	// Keys holds the standalone preimages of every accessed account address (20B) and
 	// storage slot (32B), matching the reference legacy witness; populated in both modes.
 	Keys []hexutil.Bytes `json:"keys,omitempty"`
-	// Headers is the contiguous chain of RLP-encoded ancestor headers from the parent
-	// back to the oldest block reached via BLOCKHASH.
+	// Headers contains consecutive RLP-encoded headers from the oldest ancestor
+	// requested by BLOCKHASH through the parent, in ascending block order.
+	// With no such requests, it contains just the parent.
 	Headers []hexutil.Bytes `json:"headers,omitempty"`
 
 	// Header lookups for BLOCKHASH and stateless block initialization; not serialized.
@@ -1628,10 +1629,10 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	}, nil
 }
 
-// collectAccessedHeaders gathers the headers a stateless verifier needs to anchor
-// pre-state and resolve BLOCKHASH lookups. The headers form a contiguous chain
-// from the parent back to the oldest block reached via the BLOCKHASH opcode, so
-// each header can be validated against the next one's parentHash.
+// collectAccessedHeaders builds the witness header chain and indexes it by block
+// number. The parent anchors the pre-state and supplies the timestamp for hardfork
+// transitions. Intermediate headers let the verifier check older BLOCKHASH results
+// by following parent hashes.
 func (api *BaseAPI) collectAccessedHeaders(
 	ctx context.Context,
 	tx kv.TemporalTx,
