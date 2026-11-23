@@ -37,6 +37,9 @@ import (
 // errOverBudget reports a batch whose posting exceeds the gas limit.
 var errOverBudget = errors.New("posting over the gas limit")
 
+// DefaultL1Read is the default of Config.L1Read.
+const DefaultL1Read = 2 * time.Second
+
 // Chain is the local chain a composer settles; a height without a canonical
 // block reads as nil.
 type Chain interface {
@@ -72,6 +75,10 @@ type Config struct {
 	// Proof is the time a proof takes; Slack the time a bundle needs to
 	// reach the builder before its block.
 	Proof, Slack time.Duration
+	// L1Read bounds an L1 read on the sequencer's goroutine, so that a node
+	// that stops answering does not hold block production; zero is
+	// DefaultL1Read.
+	L1Read time.Duration
 }
 
 // Composer settles the sequencer's blocks on L1 with anchor-only batches:
@@ -107,6 +114,9 @@ var _ sequencer.SyncSlotComposer = (*Composer)(nil)
 // Close. headTo rewinds the chain below a block with no witness, which no
 // batch can prove.
 func New(cfg Config, chain Chain, witnesses Witnesses, prover Prover, poster Poster, observer *Observer, cursor, finalized func() uint64, headTo func(context.Context, common.Hash) error, logger log.Logger) *Composer {
+	if cfg.L1Read == 0 {
+		cfg.L1Read = DefaultL1Read
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Composer{
 		cfg: cfg, chain: chain, witnesses: witnesses, prover: prover, poster: poster, observer: observer,
@@ -335,7 +345,9 @@ func (c *Composer) postBlocks(ctx context.Context, cursor uint64, blocks []*type
 	if floor := FloorGas(input); floor > c.cfg.MaxGas {
 		return fmt.Errorf("%w: calldata floor %d over %d", errOverBudget, floor, c.cfg.MaxGas)
 	}
-	tx, err := c.poster.Sign(ctx, input, c.cfg.MaxGas)
+	sctx, cancel := context.WithTimeout(ctx, c.cfg.L1Read)
+	tx, err := c.poster.Sign(sctx, input, c.cfg.MaxGas)
+	cancel()
 	if err != nil {
 		return err
 	}
@@ -464,8 +476,10 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 		}
 	}
 	c.last = cursor
+	rctx, cancel := context.WithTimeout(ctx, c.cfg.L1Read)
+	defer cancel()
 	for _, p := range c.ledger.SettledAbove(cursor) {
-		r, err := c.observer.Node.Receipt(ctx, p.Post)
+		r, err := c.observer.Node.Receipt(rctx, p.Post)
 		switch {
 		case err != nil:
 		case r == nil:

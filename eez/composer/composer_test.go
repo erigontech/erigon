@@ -191,9 +191,15 @@ type testPoster struct {
 	err    error
 	// pooled has the postings sent through the mempool.
 	pooled bool
+	// hang has Sign wait for its context.
+	hang bool
 }
 
-func (p *testPoster) Sign(_ context.Context, input []byte, gas uint64) (types.Transaction, error) {
+func (p *testPoster) Sign(ctx context.Context, input []byte, gas uint64) (types.Transaction, error) {
+	if p.hang {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	to := common.Address{0xee}
@@ -647,6 +653,69 @@ func TestComposerWatchesAnUnsureSend(t *testing.T) {
 	require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Failed }, 5*time.Second, time.Millisecond)
 	h.slot(t, 12, 52, sequencer.ModeSteady)
 	require.Len(t, h.targets(t), 2)
+}
+
+// hung is an L1 node that answers no read before its context ends.
+type hung struct{}
+
+func (hung) Head(ctx context.Context) (*l1.Header, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (hung) Receipt(ctx context.Context, _ common.Hash) (*l1.Receipt, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (hung) HasTransaction(ctx context.Context, _ common.Hash) (bool, error) {
+	<-ctx.Done()
+	return false, ctx.Err()
+}
+
+// TestComposerOutlivesAHungL1: the L1 reads the composer makes on the
+// sequencer's goroutine end within L1Read, so a node that stops answering
+// does not hold block production.
+func TestComposerOutlivesAHungL1(t *testing.T) {
+	within := func(t *testing.T, f func()) {
+		t.Helper()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			f()
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the sequencer waits on L1")
+		}
+	}
+	t.Run("a settlement checked", func(t *testing.T) {
+		h := newHarness(t, newTestChain(t, 12), 12, hung{})
+		h.c.cfg.L1Read = 50 * time.Millisecond
+		h.slot(t, 8, 50, sequencer.ModeSteady)
+		h.targets(t)
+		h.c.ledger.MarkSettled(8, h.poster.txs[0].Hash())
+		ctx := t.Context()
+		within(t, func() {
+			h.c.RecoverFailed(ctx)
+			h.c.ComposeSyncSlot(ctx, h.chain.header(11), h.chain.header(12).Time, 52, sequencer.ModeSteady)
+		})
+		r, _ := h.resolution(8)
+		require.Equal(t, Settled, r, "an unanswered read changes nothing")
+	})
+	t.Run("a posting signed", func(t *testing.T) {
+		h := newHarness(t, newTestChain(t, 12), 12, hung{})
+		h.c.cfg.L1Read = 50 * time.Millisecond
+		h.poster.hang = true
+		ctx := t.Context()
+		within(t, func() {
+			h.c.ComposeSyncSlot(ctx, h.chain.header(7), h.chain.header(8).Time, 50, sequencer.ModeSteady)
+			h.c.SyncCommitted(ctx, h.chain.header(8))
+		})
+		_, ok := h.c.ledger.Blocking(0)
+		require.False(t, ok, "nothing posted")
+	})
 }
 
 // TestComposerFallsBackFromAFreshCursor: the chunk replacing a failed anchor
