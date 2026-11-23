@@ -486,12 +486,12 @@ type PoolBlobBundle struct {
 // and deletion records for rows rejected on reload (IDHash and SenderID).
 type TxnSlot struct {
 	Txn      types.Transaction // Sidecars for type-3 and frame transactions are stored in BlobBundles
-	Rlp      []byte            // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
+	Rlp      []byte            // Full network encoding. A flush moves ordinary encodings to the database for lookup by hash and keeps blob wrappers in memory.
 	SenderID uint64            // SenderID - require external mapping to it's address
 	Nonce    uint64            // Nonce of the transaction (kept as field for btree search sentinel)
 	IDHash   [32]byte          // Transaction hash for the purposes of using it as a transaction Id
 	Traced   bool              // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
-	Size     uint32            // Cached size of the RLP payload (persists after Rlp is set to nil)
+	Size     uint32            // Full network encoding size, including any sidecar. Stays valid after Rlp is cleared.
 
 	BlobBundles []PoolBlobBundle // Parsed blob bytes reference the input RLP
 
@@ -640,8 +640,8 @@ func (h Addresses) Len() int {
 }
 
 type TxnsRlp struct {
-	Txns      [][]byte
-	ParsedTxn []types.Transaction // populated by best() when slot.Txn is available
+	Txns      [][]byte            // Wire encodings when available. PeekBest fills in any missing encodings.
+	ParsedTxn []types.Transaction // A nil entry means the provider must decode the wrapper in Txns[i] to include the sidecar.
 	Senders   Addresses
 	IsLocal   []bool
 }

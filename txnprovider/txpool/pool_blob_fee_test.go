@@ -74,20 +74,29 @@ func TestBestDemotesABlobTxnBelowTheBlobFee(t *testing.T) {
 	require.Equal(t, 1, pool.baseFee.Len())
 }
 
-// Clear the in-memory RLP before it is flushed, so even a fresh snapshot has no row for it.
-// The transaction stays pending and can be selected once its RLP is available again.
-func TestBestKeepsPendingTxnWithMissingRlp(t *testing.T) {
-	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000)
-	mt := pool.pending.best.ms[0]
-	rlp := mt.TxnSlot.Rlp
-	mt.TxnSlot.Rlp = nil
+// The inner transaction alone cannot supply a blob sidecar. A transaction with a missing
+// network wrapper stays pending and can be selected once the full wrapper is available.
+func TestBestKeepsPendingBlobTxnWithMissingWrapper(t *testing.T) {
+	ctx, pool, slot, txns := newPoolWithBlobTxn(t, "Osaka")
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	wrapper := slot.Rlp
+	slot.Rlp = nil
 
 	require.Zero(t, bestOf(t, pool))
 	require.Equal(t, 1, pool.pending.Len())
-	require.Contains(t, pool.byHash, string(mt.TxnSlot.IDHash[:]))
+	require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 
-	mt.TxnSlot.Rlp = rlp
-	require.Equal(t, 1, bestOf(t, pool))
+	slot.Rlp = wrapper
+	provided, err := pool.ProvideTxns(ctx)
+	require.NoError(t, err)
+	require.Len(t, provided, 1)
+	require.IsType(t, &types.BlobTxWrapper{}, provided[0])
+	var pending TxnsRlp
+	_, err = pool.PeekBest(ctx, 1, &pending, 0)
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{wrapper}, pending.Txns)
 }
 
 // Removing a txn from the middle of pending swaps the last one into its place; best() must leave pending sorted.

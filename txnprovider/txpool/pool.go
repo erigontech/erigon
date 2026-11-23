@@ -154,7 +154,6 @@ type TxPool struct {
 	newPendingTxns          chan Announcements               // notifications about new txns in Pending sub-pool
 	all                     *BySenderAndNonce                // Ordered by sender ID, nonce domain (account or keyed), then nonce
 	deletedTxns             []*metaTxn                       // list of discarded txns since last db commit
-	flushGeneration         atomic.Uint64
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
@@ -746,26 +745,17 @@ func (p *TxPool) kickKZGOffenders(ctx context.Context, reasons []txpoolcfg.Disca
 	}()
 }
 
-func (p *TxPool) getRlpLocked(tx kv.Tx, hash []byte) (rlpTxn []byte, sender common.Address, isLocal bool, err error) {
-	txn, ok := p.byHash[string(hash)]
-	if ok && txn.TxnSlot.Rlp != nil {
-		return txn.TxnSlot.Rlp, p.senders.senderID2Addr[txn.TxnSlot.SenderID], txn.subPool&IsLocal > 0, nil
-	}
-	v, err := tx.GetOne(kv.PoolTransaction, hash)
-	if err != nil {
-		return nil, common.Address{}, false, err
-	}
-	if v == nil {
-		return nil, common.Address{}, false, nil
-	}
-	return v[20:], *(*[20]byte)(v[:20]), txn != nil && txn.subPool&IsLocal > 0, nil
-}
-
 func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	rlpTx, _, _, err := p.getRlpLocked(tx, hash)
-	return bytes.Clone(rlpTx), err
+	if mt := p.byHash[string(hash)]; mt != nil && mt.TxnSlot.Rlp != nil {
+		return bytes.Clone(mt.TxnSlot.Rlp), nil
+	}
+	v, err := tx.GetOne(kv.PoolTransaction, hash)
+	if err != nil || v == nil {
+		return nil, err
+	}
+	return bytes.Clone(v[length.Addr:]), nil
 }
 
 func (p *TxPool) AppendAllAnnouncements(types []byte, sizes []uint32, hashes []byte) ([]byte, []uint32, []byte) {
@@ -947,7 +937,7 @@ func (p *TxPool) waitForBlock(ctx context.Context, n int, onTopOf uint64, stop <
 	})
 }
 
-var errRetrySelection = errors.New("transaction selection needs a fresh pool view")
+var errParentBlockRewound = errors.New("txpool head rewound below the requested parent")
 
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
@@ -957,7 +947,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 ) (bool, int, error) {
 	for p.waitForBlock(ctx, n, onTopOf, parentBlockWaitStop) {
 		onTime, count, err := p.selectBest(ctx, n, txns, onTopOf, availableGas, yielded, availableRlpSpace)
-		if !errors.Is(err, errRetrySelection) {
+		if !errors.Is(err, errParentBlockRewound) {
 			return onTime, count, err
 		}
 	}
@@ -968,22 +958,18 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	availableGas mdgas.FullMdGas, yielded mapset.Set[[32]byte], availableRlpSpace int,
 ) (bool, int, error) {
-	// Open a fresh snapshot after the parent wait. Waiting for a database reader slot
-	// while holding the pool lock could deadlock with a reader waiting for that lock.
-	flushGeneration := p.flushGeneration.Load()
-	tx, err := p.poolDB.BeginRo(ctx)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return false, 0, err
 	}
-	defer tx.Rollback()
+	// Select from memory. A database snapshot opened before the pool lock can miss a flush,
+	// and waiting for a reader slot while holding the lock can deadlock with a reader.
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	// The head may have rewound since the wait. A flush can also move a pending transaction's
-	// RLP from memory to a row this snapshot cannot see. Retry before marking any transactions
-	// as yielded so they can still be returned in this request.
-	if p.lastSeenBlock.Load() < onTopOf || p.flushGeneration.Load() != flushGeneration {
-		return false, 0, errRetrySelection
+	// An unwind after the parent wait must send the caller back to the wait
+	// before any transactions are marked as yielded.
+	if p.lastSeenBlock.Load() < onTopOf {
+		return false, 0, errParentBlockRewound
 	}
 	if p.stateViewStale {
 		return false, 0, nil
@@ -1049,18 +1035,20 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 			continue
 		}
 
-		if int64(mt.TxnSlot.Size) > int64(availableRlpSpace) {
-			p.logger.Debug("[txpool] skipping txn bigger than available rlp space", "size", int64(mt.TxnSlot.Size), "available", int64(availableRlpSpace))
+		wireSize := int64(mt.TxnSlot.Size)
+		if wireSize == 0 || wireSize > int64(availableRlpSpace) {
+			p.logger.Debug("[txpool] skipping txn with unknown or oversized RLP", "size", wireSize, "available", availableRlpSpace)
 			continue
 		}
 
-		rlpTxn, sender, isLocal, err := p.getRlpLocked(tx, mt.TxnSlot.IDHash[:])
-		if err != nil {
-			return false, count, err
-		}
-		if len(rlpTxn) == 0 {
-			// Keep the transaction pending so a later request can select it if its RLP becomes available.
-			continue
+		parsed := mt.TxnSlot.Txn
+		if mt.TxnSlot.HasBlobs() {
+			// The parsed body omits the sidecar. Keep a transaction with a missing wrapper
+			// pending until it is available, and return the full wrapper when selecting it.
+			if len(mt.TxnSlot.Rlp) == 0 {
+				continue
+			}
+			parsed = nil
 		}
 
 		// Skip transactions that require more blob gas than is available
@@ -1078,6 +1066,7 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 			}
 		}
 
+		sender := p.senders.senderID2Addr[mt.TxnSlot.SenderID]
 		// The gas limits determine whether a transaction fits. Until it executes,
 		// estimate the execution gas left for later candidates by deducting its
 		// intrinsic cost. From Prague onward, use the gas floor if it is higher.
@@ -1096,16 +1085,11 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 		}
 		availableGas.Execution -= intrinsicGas
 		availableGas.Blob -= blobCount * params.GasPerBlob
-		availableRlpSpace -= len(rlpTxn)
-		txns.Txns[count] = rlpTxn
-		// For type-3 and frame transactions with blobs, Txn holds only the inner
-		// transaction. Leave ParsedTxn nil so the provider decodes the full wrapper
-		// and preserves its sidecar.
-		if !mt.TxnSlot.HasBlobs() {
-			txns.ParsedTxn[count] = mt.TxnSlot.Txn
-		}
+		availableRlpSpace -= int(wireSize)
+		txns.Txns[count] = mt.TxnSlot.Rlp
+		txns.ParsedTxn[count] = parsed
 		copy(txns.Senders.At(count), sender[:])
-		txns.IsLocal[count] = isLocal
+		txns.IsLocal[count] = mt.subPool&IsLocal != 0
 		if yielded != nil {
 			yielded.Add(mt.TxnSlot.IDHash)
 		}
@@ -1152,7 +1136,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 	txns := make([]types.Transaction, 0, len(txnsRlp.ParsedTxn))
 	for i, txn := range txnsRlp.ParsedTxn {
 		if txn == nil {
-			// Fallback: decode from RLP if parsed txn not available
+			// Type-3 and frame transactions with blobs carry their sidecars in the network wrapper.
 			var err error
 			txn, err = types.DecodeWrappedTransaction(txnsRlp.Txns[i])
 			if err != nil {
@@ -1160,9 +1144,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 			}
 		}
 
-		var sender common.Address
-		copy(sender[:], txnsRlp.Senders.At(i))
-		txn.SetSender(accounts.InternAddress(sender))
+		txn.SetSender(accounts.InternAddress(txnsRlp.Senders.AddressAt(i)))
 		txns = append(txns, txn)
 	}
 
@@ -1170,10 +1152,24 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 }
 
 func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error) {
-	set := mapset.NewThreadUnsafeSet[[32]byte]()
 	onTime, _, err := p.best(ctx, n, txns, onTopOf, nil,
-		mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, math.MaxUint64), set, math.MaxInt)
-	return onTime, err
+		mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, math.MaxUint64), nil, math.MaxInt)
+	if err != nil || !onTime {
+		return onTime, err
+	}
+	// A flush releases the encoding of an ordinary transaction. Only callers requesting
+	// wire bytes need to encode it again, and they can do that outside the pool lock.
+	var buf bytes.Buffer
+	for i, raw := range txns.Txns {
+		if len(raw) == 0 {
+			buf.Reset()
+			if err := txns.ParsedTxn[i].MarshalBinary(&buf); err != nil {
+				return false, err
+			}
+			txns.Txns[i] = bytes.Clone(buf.Bytes())
+		}
+	}
+	return true, nil
 }
 
 func (p *TxPool) CountContent() (int, int, int) {
@@ -2268,6 +2264,9 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 		}
 	}
 
+	if mt.TxnSlot.Size == 0 {
+		mt.TxnSlot.Size = uint32(len(mt.TxnSlot.Rlp))
+	}
 	hashStr := string(mt.TxnSlot.IDHash[:])
 	p.byHash[hashStr] = mt
 	p.reserveFrame(mt.TxnSlot)
@@ -3140,8 +3139,8 @@ func (p *TxPool) Run(ctx context.Context) error {
 func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	// Hold the pool lock through the commit and the generation update. A reader that
-	// sees the new generation before opening its snapshot will see this commit.
+	// Hold the pool lock through the commit so new database snapshots can see
+	// the rows whose in-memory encodings flushLocked released.
 	if err := p.poolDB.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		err = p.flushLocked(tx)
 		if err != nil {
@@ -3155,7 +3154,6 @@ func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	}); err != nil {
 		return 0, err
 	}
-	p.flushGeneration.Add(1)
 	return written, nil
 }
 

@@ -31,9 +31,12 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 func TestBestReleasesTheLockWhenTheCallerGivesUpWaitingForABlock(t *testing.T) {
@@ -67,36 +70,46 @@ func provideTxnsAsync(ctx context.Context, pool *TxPool, opts ...txnprovider.Pro
 	return done
 }
 
-type flushOnReadPoolDB struct {
-	kv.RwDB
-	flush func(context.Context) (uint64, error)
-}
+func TestSelectFlushedTransactionsWithoutDatabaseReader(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	readers := semaphore.NewWeighted(1)
+	opts := mdbx.New(dbcfg.TxPoolDB, log.New()).RoTxsLimiter(readers)
+	pool.poolDB = mdbxtest.InMem(t, opts, t.TempDir()).MustOpen()
+	t.Cleanup(pool.poolDB.Close)
 
-func (db *flushOnReadPoolDB) BeginRo(ctx context.Context) (kv.Tx, error) {
-	tx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic // the caller owns the read transaction
-	if err == nil && db.flush != nil {
-		_, err = db.flush(ctx)
-		db.flush = nil
-		if err != nil {
-			tx.Rollback()
-			return nil, err
-		}
+	var slots TxnSlots
+	var wantRlp [][]byte
+	for nonce := range uint64(2) {
+		slot := encodeRemoteTxn(t, newTestSenderTxnSlot(sender, nonce))
+		slots.Append(slot, sender[:], true)
+		wantRlp = append(wantRlp, slot.Rlp)
 	}
-	return tx, err
-}
-
-func TestProvideTxnsIncludesPendingTxnFlushedAfterSnapshot(t *testing.T) {
-	ctx := t.Context()
-	pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, 100_000)
-	slot := pool.pending.best.ms[0].TxnSlot
-	// Flush after the first snapshot opens and before selection takes the pool lock.
-	pool.poolDB = &flushOnReadPoolDB{RwDB: pool.poolDB, flush: pool.flushNoFsync}
-
-	txns, err := pool.ProvideTxns(ctx)
+	// A local caller may supply the wire bytes without filling the size cache.
+	slots.Txns[0].Size = 0
+	reasons, err := pool.AddLocalTxns(ctx, slots)
 	require.NoError(t, err)
-	require.Nil(t, slot.Rlp, "flush must release the in-memory encoding")
-	require.Len(t, txns, 1, "the first selection must include the flushed transaction")
-	require.Equal(t, slot.Txn.Hash(), txns[0].Hash())
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	_, err = pool.flushNoFsync(ctx)
+	require.NoError(t, err)
+	for _, slot := range slots.Txns {
+		require.Nil(t, slot.Rlp, "flush must release the in-memory encoding")
+	}
+
+	// Both callers must be able to select from the pool while all reader slots are in use.
+	require.NoError(t, readers.Acquire(ctx, 1))
+	defer readers.Release(1)
+	ctx = kv.WithNonBlockingAcquire(ctx)
+	txns, err := pool.ProvideTxns(ctx, txnprovider.WithAvailableRlpSpace(len(wantRlp[0])))
+	require.NoError(t, err)
+	require.Equal(t, []types.Transaction{slots.Txns[0].Txn}, txns, "the second transaction exceeds the remaining byte budget")
+
+	var pending TxnsRlp
+	onTime, err := pool.PeekBest(ctx, 2, &pending, 0)
+	require.NoError(t, err)
+	require.True(t, onTime)
+	require.Equal(t, wantRlp, pending.Txns)
+	require.Equal(t, slots.Senders, pending.Senders)
+	require.Equal(t, slots.IsLocal, pending.IsLocal)
 }
 
 func TestProvideTxnsInterruptsParentBlockWaitWhilePoolIsLocked(t *testing.T) {
@@ -170,10 +183,6 @@ func TestProvideTxnsRechecksParentAfterUnwind(t *testing.T) {
 		_, pool, _, _ := newTestPool(t)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		readers := semaphore.NewWeighted(1)
-		opts := mdbx.New(dbcfg.TxPoolDB, log.New()).RoTxsLimiter(readers)
-		pool.poolDB = mdbxtest.InMem(t, opts, t.TempDir()).MustOpen()
-		t.Cleanup(pool.poolDB.Close)
 
 		sender := common.Address{1}
 		update := func(height uint64, direction remoteproto.Direction) error {
@@ -188,26 +197,21 @@ func TestProvideTxnsRechecksParentAfterUnwind(t *testing.T) {
 		_, err := pool.AddLocalTxns(ctx, slots)
 		require.NoError(t, err)
 
-		// Queue the unwind first so it takes effect after both callers see the parent
-		// and before either caller can open its database snapshot.
-		require.NoError(t, readers.Acquire(ctx, 1))
-		unwound := make(chan error, 1)
-		go func() { unwound <- update(0, remoteproto.Direction_UNWIND) }()
-		synctest.Wait()
+		// Unwind between the parent wait and selection. The check under the pool lock
+		// must send the caller back to the wait before yielding any transactions.
+		require.True(t, pool.waitForBlock(ctx, 1, 1, nil))
+		require.NoError(t, update(0, remoteproto.Direction_UNWIND))
+		_, _, err = pool.selectBest(ctx, 1, &TxnsRlp{}, 1, mdgas.FullMdGas{}, nil, 0)
+		require.ErrorIs(t, err, errParentBlockRewound)
 		stop := make(chan struct{})
 		stopped := provideTxnsAsync(ctx, pool, txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockWaitStop(stop))
 		waiting := provideTxnsAsync(ctx, pool, txnprovider.WithParentBlockNum(1))
-		synctest.Wait()
-		readers.Release(1)
-		require.NoError(t, <-unwound)
 		synctest.Wait()
 		close(stop)
 		got := <-stopped
 		require.NoError(t, got.err)
 		require.Empty(t, got.txns, "stopped builder selected transactions below its requested parent")
 		require.Empty(t, waiting, "selection returned before the pool reached the parent again")
-		require.True(t, readers.TryAcquire(1), "waiting for the parent held a database reader")
-		readers.Release(1)
 
 		require.NoError(t, update(1, remoteproto.Direction_FORWARD))
 		got = <-waiting
