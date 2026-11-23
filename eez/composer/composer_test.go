@@ -73,8 +73,10 @@ func TestDecide(t *testing.T) {
 var testSigner = types.LatestSignerForChainID(uint256.NewInt(6290))
 
 // testChain is a chain of blocks 0..n, those in full carrying a transfer.
+// As the node's block reader does, it reads no block above its head.
 type testChain struct {
 	blocks []*types.Block
+	head   uint64
 }
 
 func newTestChain(t *testing.T, n uint64, full ...uint64) *testChain {
@@ -98,22 +100,23 @@ func newTestChain(t *testing.T, n uint64, full ...uint64) *testChain {
 		c.blocks = append(c.blocks, b)
 		parent = b.Hash()
 	}
+	c.head = n
 	return c
 }
 
 func (c *testChain) BlockByNumber(_ context.Context, n uint64) (*types.Block, error) {
-	if n >= uint64(len(c.blocks)) {
-		return nil, errors.New("no such block")
+	if n > c.head {
+		return nil, nil
 	}
 	return c.blocks[n], nil
 }
 
 func (c *testChain) HeaderByNumber(ctx context.Context, n uint64) (*types.Header, error) {
 	b, err := c.BlockByNumber(ctx, n)
-	if err != nil {
+	if b == nil {
 		return nil, err
 	}
-	return b.Header(), nil
+	return b.Header(), err
 }
 
 func (c *testChain) header(n uint64) *types.Header { return c.blocks[n].Header() }
@@ -142,9 +145,14 @@ type testProver struct {
 	mu     sync.Mutex
 	proven []proven
 	err    error
+	// before runs as a session begins.
+	before func()
 }
 
 func (p *testProver) ProveBy(ctx context.Context, w *prove.Window, start time.Time, per time.Duration) ([]byte, error) {
+	if p.before != nil {
+		p.before()
+	}
 	got := proven{from: w.From, to: w.To, batch: w.Batch, start: start, per: per}
 	if w.Anchor == nil || w.Anchor.Number.Uint64()+1 != w.From {
 		return nil, errors.New("window without its anchor")
@@ -418,6 +426,30 @@ func TestComposerPostsNothingItCannotProve(t *testing.T) {
 		h.c.ComposeSyncSlot(ctx, h.chain.header(7), h.chain.header(8).Time, 50, sequencer.ModeSteady)
 		h.c.SyncCommitted(ctx, h.chain.header(7))
 		require.Empty(t, h.prover.proven)
+	})
+}
+
+// TestComposerRewoundUnder: blocks a rewind took after the slot was decided
+// fail its posting, and none reads as a block without a witness.
+func TestComposerRewoundUnder(t *testing.T) {
+	t.Run("before the posting", func(t *testing.T) {
+		h := newHarness(t, newTestChain(t, 8), 8, nil)
+		ctx := t.Context()
+		h.c.ComposeSyncSlot(ctx, h.chain.header(7), h.chain.header(8).Time, 50, sequencer.ModeSteady)
+		h.chain.head = 2
+		h.c.SyncCommitted(ctx, h.chain.header(8))
+		require.Empty(t, h.prover.proven)
+		require.Empty(t, h.targets(t))
+		require.Empty(t, h.rewound)
+	})
+	t.Run("while proving", func(t *testing.T) {
+		h := newHarness(t, newTestChain(t, 8), 8, nil)
+		h.prover.before = func() { h.chain.head = 2 }
+		h.slot(t, 8, 50, sequencer.ModeSteady)
+		require.Len(t, h.prover.proven, 1)
+		require.ErrorContains(t, h.prover.proven[0].witnessErr, "no canonical block 3")
+		require.Empty(t, h.targets(t))
+		require.Empty(t, h.rewound)
 	})
 }
 

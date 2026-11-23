@@ -37,7 +37,8 @@ import (
 // errOverBudget reports a batch whose posting exceeds the gas limit.
 var errOverBudget = errors.New("posting over the gas limit")
 
-// Chain is the local chain a composer settles.
+// Chain is the local chain a composer settles; a height without a canonical
+// block reads as nil.
 type Chain interface {
 	BlockByNumber(ctx context.Context, number uint64) (*types.Block, error)
 	HeaderByNumber(ctx context.Context, number uint64) (*types.Header, error)
@@ -232,7 +233,7 @@ func (c *Composer) chunk(ctx context.Context, cursor, sync uint64, target post.T
 	}
 	down := make([]*types.Header, 0, boundary-cursor)
 	for n := boundary; n > cursor; n-- {
-		h, err := c.chain.HeaderByNumber(ctx, n)
+		h, err := c.header(ctx, n)
 		if err != nil {
 			return err
 		}
@@ -253,7 +254,7 @@ func (c *Composer) post(ctx context.Context, cursor uint64, terminal *types.Head
 	to := terminal.Number.Uint64()
 	blocks := make([]*types.Block, 0, to-cursor)
 	for n := cursor + 1; n <= to; n++ {
-		b, err := c.chain.BlockByNumber(ctx, n)
+		b, err := c.block(ctx, n)
 		if err != nil {
 			return err
 		}
@@ -274,11 +275,11 @@ func (c *Composer) post(ctx context.Context, cursor uint64, terminal *types.Head
 	if gas > c.cfg.MaxGas {
 		return fmt.Errorf("%w: %d over %d", errOverBudget, gas, c.cfg.MaxGas)
 	}
-	anchor, err := c.chain.HeaderByNumber(ctx, cursor)
+	anchor, err := c.header(ctx, cursor)
 	if err != nil {
 		return err
 	}
-	if anchor == nil || anchor.Hash() != blocks[0].ParentHash() {
+	if anchor.Hash() != blocks[0].ParentHash() {
 		return fmt.Errorf("block %d is not the parent %x of block %d", cursor, blocks[0].ParentHash(), cursor+1)
 	}
 	w := &prove.Window{RollupID: c.cfg.Batcher.RollupID, Batch: batch, Anchor: anchor, From: cursor + 1, To: to, Block: c.windowBlock}
@@ -327,9 +328,28 @@ func (c *Composer) post(ctx context.Context, cursor uint64, terminal *types.Head
 	return nil
 }
 
+// block returns block n, failing when it is not canonical: the follower may
+// have rewound the chain since the slot was decided.
+func (c *Composer) block(ctx context.Context, n uint64) (*types.Block, error) {
+	b, err := c.chain.BlockByNumber(ctx, n)
+	if err == nil && b == nil {
+		err = fmt.Errorf("no canonical block %d", n)
+	}
+	return b, err
+}
+
+// header returns the header of block n, failing as block does.
+func (c *Composer) header(ctx context.Context, n uint64) (*types.Header, error) {
+	h, err := c.chain.HeaderByNumber(ctx, n)
+	if err == nil && h == nil {
+		err = fmt.Errorf("no canonical block %d", n)
+	}
+	return h, err
+}
+
 // windowBlock returns block n with its witness from the store.
 func (c *Composer) windowBlock(ctx context.Context, n uint64) (*types.Block, *prove.Witness, error) {
-	b, err := c.chain.BlockByNumber(ctx, n)
+	b, err := c.block(ctx, n)
 	if err != nil {
 		return nil, nil, err
 	}
