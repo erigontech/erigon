@@ -889,23 +889,31 @@ func TestExecBlockStatelesslyEIP8253(t *testing.T) {
 }
 
 func TestExecBlockStatelesslyEIP8253RejectsInvalidParent(t *testing.T) {
-	for _, name := range []string{"missing", "wrong hash", "wrong number"} {
-		t.Run(name, func(t *testing.T) {
-			witness, block, config := eip8253ReplayWitness(t, 99, 0, 1)
-			header := block.Header()
-			switch name {
-			case "missing":
-				witness.headerByNumber = nil
-			case "wrong hash":
-				header.ParentHash[0] ^= 1
-			case "wrong number":
-				parent := types.CopyHeader(witness.headerByNumber[1])
-				parent.Number.SetUint64(2)
-				witness.headerByNumber[1] = parent
-				header.ParentHash = parent.Hash()
+	witness, block, config := eip8253ReplayWitness(t, 99, 0, 1)
+	parentNumber := block.NumberU64() - 1
+	parent := witness.headerByNumber[parentNumber]
+	parentAtWrongHeight := types.CopyHeader(parent)
+	parentAtWrongHeight.Number.SetUint64(block.NumberU64())
+
+	for _, tc := range []struct {
+		name          string
+		parent        *types.Header
+		requestedHash common.Hash
+	}{
+		{name: "missing", requestedHash: parent.Hash()},
+		{name: "wrong hash", parent: parent, requestedHash: common.Hash{}},
+		{name: "wrong number", parent: parentAtWrongHeight, requestedHash: parentAtWrongHeight.Hash()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testWitness := *witness
+			testWitness.headerByNumber = make(map[uint64]*types.Header)
+			if tc.parent != nil {
+				testWitness.headerByNumber[parentNumber] = tc.parent
 			}
-			block = types.NewBlockWithHeader(header, nil)
-			_, _, err := execBlockStatelessly(witness, block, config, merge.New(ethash.NewFaker()))
+			header := block.Header()
+			header.ParentHash = tc.requestedHash
+			testBlock := types.NewBlockWithHeader(header, nil)
+			_, _, err := execBlockStatelessly(&testWitness, testBlock, config, merge.New(ethash.NewFaker()))
 			require.ErrorIs(t, err, rules.ErrUnknownAncestor)
 		})
 	}

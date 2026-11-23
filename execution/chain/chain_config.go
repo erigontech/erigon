@@ -901,22 +901,24 @@ func uint64PtrStr(p *uint64) string {
 }
 
 func (err *ConfigCompatError) Error() string {
-	blocks := fmt.Sprintf("mismatching %s in database (have %s, want %s, rewindto %d)",
+	blockMessage := fmt.Sprintf("mismatching %s in database (have %s, want %s, rewindto %d)",
 		err.What, uint64PtrStr(err.StoredConfig), uint64PtrStr(err.NewConfig), err.RewindTo)
-	times := fmt.Sprintf("mismatching %s in database (have timestamp %s, want timestamp %s, rewindto timestamp %d)",
-		err.WhatTime, uint64PtrStr(err.StoredTime), uint64PtrStr(err.NewTime), err.RewindToTime)
+	if !err.HasTimestampConflict() {
+		return blockMessage
+	}
+
+	var timeMessage string
 	if numEqual(err.StoredTime, err.NewTime) {
-		times = fmt.Sprintf("mismatching %s in database (activation timestamp %s, rewindto timestamp %d)",
+		timeMessage = fmt.Sprintf("mismatching %s in database (activation timestamp %s, rewindto timestamp %d)",
 			err.WhatTime, uint64PtrStr(err.StoredTime), err.RewindToTime)
+	} else {
+		timeMessage = fmt.Sprintf("mismatching %s in database (have timestamp %s, want timestamp %s, rewindto timestamp %d)",
+			err.WhatTime, uint64PtrStr(err.StoredTime), uint64PtrStr(err.NewTime), err.RewindToTime)
 	}
-	switch {
-	case !err.HasTimestampConflict():
-		return blocks
-	case !err.HasBlockConflict():
-		return times
-	default:
-		return blocks + "; " + times
+	if err.HasBlockConflict() {
+		return blockMessage + "; " + timeMessage
 	}
+	return timeMessage
 }
 
 // HasBlockConflict reports whether a block-based fork conflicts.
