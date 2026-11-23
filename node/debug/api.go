@@ -40,7 +40,6 @@ import (
 
 	"github.com/grafana/pyroscope-go"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -77,13 +76,6 @@ func (*HandlerT) Vmodule(pattern string) error {
 func (*HandlerT) BacktraceAt(location string) error {
 	//return glogger.BacktraceAt(location)
 	return nil
-}
-
-// MemStats returns detailed runtime memory statistics.
-func (*HandlerT) MemStats() *runtime.MemStats {
-	s := new(runtime.MemStats)
-	dbg.ReadMemStats(s)
-	return s
 }
 
 // GcStats returns GC statistics.

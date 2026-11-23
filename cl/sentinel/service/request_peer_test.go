@@ -19,9 +19,11 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -93,8 +95,10 @@ func (b *blockingResponseBody) Close() error {
 var _ io.ReadCloser = (*blockingResponseBody)(nil)
 
 type peerRequestBackendStub struct {
-	handler http.Handler
-	useful  *[]peer.ID
+	handler       http.Handler
+	useful        *[]peer.ID
+	active        int
+	lostDuplicate *atomic.Bool
 }
 
 func (p peerRequestBackendStub) MarkPeerUseful(pid peer.ID) {
@@ -103,7 +107,11 @@ func (p peerRequestBackendStub) MarkPeerUseful(pid peer.ID) {
 	}
 }
 
-func (p peerRequestBackendStub) GetPeersCount() (int, int, int) { return 0, 0, 0 }
+func (p peerRequestBackendStub) GetPeersCount() (int, int, int) { return p.active, 0, 0 }
+func (p peerRequestBackendStub) ConsumeDuplicateLoss(peer.ID) bool {
+	return p.lostDuplicate != nil && p.lostDuplicate.CompareAndSwap(true, false)
+}
+
 func (p peerRequestBackendStub) Config() *sentinel.SentinelConfig {
 	config := &sentinel.SentinelConfig{}
 	config.MaxPeerCount = 1
@@ -141,6 +149,48 @@ func TestPeerAnsweringADataRequestIsUseful(t *testing.T) {
 			require.Empty(t, useful, name)
 		}
 	}
+}
+
+// A request cut by a duplicate connection closing is not the peer's fault, and dropping the peer
+// would close the connection it still has.
+func TestFailedRequestKeepsAPeerThatJustLostADuplicateConnection(t *testing.T) {
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{active: 1}}
+	require.True(t, server.dropOnFailure(peer.ID("peer"), nil))
+	lost := &atomic.Bool{}
+	lost.Store(true)
+	server.peerRequestBackend = peerRequestBackendStub{active: 0, lostDuplicate: lost}
+	require.False(t, server.dropOnFailure(peer.ID("peer"), nil), "below the peer limit failures never drop")
+	require.True(t, lost.Load(), "a failure that drops nothing leaves the loss for the next one")
+	server.peerRequestBackend = peerRequestBackendStub{active: 1, lostDuplicate: lost}
+	require.False(t, server.dropOnFailure(peer.ID("peer"), nil))
+	require.True(t, server.dropOnFailure(peer.ID("peer"), nil), "one loss excuses one failure")
+}
+
+func TestOverCapResponseIsNotExcusedByADuplicateLoss(t *testing.T) {
+	lost := &atomic.Bool{}
+	lost.Store(true)
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{active: 1, lostDuplicate: lost}}
+	require.True(t, server.dropOnFailure(peer.ID("peer"), fmt.Errorf("read body: %w", httpreqresp.ErrResponseTooLarge)))
+	require.True(t, lost.Load(), "the loss stays for a failure it can excuse")
+}
+
+// The duplicate can close while the request runs, so the drop decision is taken when the request
+// fails. The server has no sentinel, so a drop would panic.
+func TestRequestCutByADuplicateCloseKeepsThePeer(t *testing.T) {
+	lost := &atomic.Bool{}
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		active:        1,
+		lostDuplicate: lost,
+		handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			lost.Store(true)
+			w.WriteHeader(http.StatusBadRequest)
+		}),
+	}}
+	require.NotPanics(t, func() {
+		_, err := server.requestPeer(t.Context(), peer.ID("peer"), &sentinelproto.RequestData{Data: []byte("request")})
+		var httpErr *HTTPError
+		require.ErrorAs(t, err, &httpErr)
+	})
 }
 
 func receivePeerRequestTestValue[T any](t *testing.T, values <-chan T) T {

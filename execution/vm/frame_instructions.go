@@ -45,11 +45,7 @@ func opTxParam(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	case 3:
 		param.Set(&tx.Fees.TipCap)
 	case 4:
-		param.Set(&tx.Fees.FeeCap)
-	case 5:
-		param.Set(&tx.Fees.BlobFeeCap)
-	case 6:
-		param.Set(&ctx.MaxCost)
+		param.Set(&tx.Fees.MaxFee)
 	case 7:
 		param.SetUint64(uint64(len(tx.BlobVersionedHashes)))
 	case 8:
@@ -71,7 +67,10 @@ func opTxParam(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 		hash := ctx.NonceKeysHash()
 		param.SetBytes(hash[:])
 	case 16:
-		param.Set(&tx.NonceKeys[0])
+		param.Clear()
+		if len(tx.NonceKeys) != 0 {
+			param.Set(&tx.NonceKeys[0])
+		}
 	default:
 		return pc, nil, ErrFrameParameter
 	}

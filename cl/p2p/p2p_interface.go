@@ -24,4 +24,6 @@ type P2PManager interface {
 	MarkPeerUseful(pid peer.ID)
 	// PeerLastUseful returns when pid was last useful, counting its connection time as useful.
 	PeerLastUseful(pid peer.ID) (time.Time, bool)
+	// ConsumeDuplicateLoss reports whether a failure with pid may come from closing a duplicate connection, and uses that up.
+	ConsumeDuplicateLoss(pid peer.ID) bool
 }

@@ -18,6 +18,7 @@ package protocol
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -48,9 +49,7 @@ func TestFrameIntrospection(t *testing.T) {
 		"nonce":             {word(program.New().Push(1).Op(txparam)), *uint256.NewInt(7)},
 		"sender":            {word(program.New().Push(2).Op(txparam)), *uint256.NewInt(0x1000)},
 		"priority fee":      {word(program.New().Push(3).Op(txparam)), *uint256.NewInt(1)},
-		"fee cap":           {word(program.New().Push(4).Op(txparam)), *uint256.NewInt(2)},
-		"blob fee":          {word(program.New().Push(5).Op(txparam)), *uint256.NewInt(3)},
-		"max cost":          {word(program.New().Push(6).Op(txparam)), *uint256.NewInt(777)},
+		"max fee":           {word(program.New().Push(4).Op(txparam)), *uint256.NewInt(2)},
 		"blobs":             {word(program.New().Push(7).Op(txparam)), *uint256.NewInt(1)},
 		"frames":            {word(program.New().Push(9).Op(txparam)), *uint256.NewInt(2)},
 		"current frame":     {word(program.New().Push(10).Op(txparam)), *uint256.NewInt(1)},
@@ -95,6 +94,20 @@ func TestFrameIntrospection(t *testing.T) {
 		want := tx.SigningHash(nil)
 		require.Equal(t, want[:], got)
 	})
+	t.Run("empty nonce keys", func(t *testing.T) {
+		evm, tx := introspectionEnv(t, word(program.New().Push(16).Op(txparam)))
+		tx.NonceKeys = nil
+		got, _, err := evm.ExecuteTransactionFrame()
+		require.NoError(t, err)
+		require.Equal(t, make([]byte, 32), got)
+	})
+	for _, selector := range []int{5, 6} {
+		t.Run(fmt.Sprintf("undefined selector %d", selector), func(t *testing.T) {
+			evm, _ := introspectionEnv(t, word(program.New().Push(selector).Op(txparam)))
+			_, _, err := evm.ExecuteTransactionFrame()
+			require.ErrorIs(t, err, vm.ErrFrameParameter)
+		})
+	}
 }
 
 func introspectionEnv(t *testing.T, code []byte) (*vm.EVM, *types.FrameTransaction) {
@@ -102,7 +115,7 @@ func introspectionEnv(t *testing.T, code []byte) (*vm.EVM, *types.FrameTransacti
 	evm, tx := frameTestEnv(t)
 	tx.Nonce = 7
 	tx.NonceKeys = []uint256.Int{{1}, {2}}
-	tx.Fees = types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(2), BlobFeeCap: *uint256.NewInt(3)}
+	tx.Fees = types.FrameFees{TipCap: *uint256.NewInt(1), MaxFee: *uint256.NewInt(2)}
 	tx.BlobVersionedHashes = []common.Hash{{1}}
 	tx.Frames = []types.Frame{
 		{Mode: types.FrameSender, Flags: 1, Value: *uint256.NewInt(9), Limits: mdgas.MdGas{Execution: 55, State: 66}, Data: []byte{0xab, 0xcd}},

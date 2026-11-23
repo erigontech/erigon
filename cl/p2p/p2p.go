@@ -73,6 +73,7 @@ type p2pManager struct {
 	host     host.Host
 	gater    *Gater
 	useful   *peerUsefulness
+	deduper  *connDeduper
 	udpv5    *discover.UDPv5
 	ethClock eth_clock.EthereumClock
 }
@@ -152,11 +153,13 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		host:     host,
 		gater:    gater,
 		useful:   newPeerUsefulness(),
+		deduper:  newConnDeduper(host.ID(), host.Network()),
 		bwc:      bwc,
 		ethClock: ethClock,
 	}
 	host.Network().Notify(p.useful)
 	p.useful.addConnected(host.Network())
+	host.Network().Notify(p.deduper)
 	p2pCtx, cancel := context.WithCancel(ctx)
 	initialized := false
 	defer func() {
@@ -283,6 +286,10 @@ func (p *p2pManager) MarkPeerUseful(pid peer.ID) {
 
 func (p *p2pManager) PeerLastUseful(pid peer.ID) (time.Time, bool) {
 	return p.useful.lastUseful(pid)
+}
+
+func (p *p2pManager) ConsumeDuplicateLoss(pid peer.ID) bool {
+	return p.deduper.ConsumeDuplicateLoss(pid)
 }
 
 func (p *p2pManager) BandwidthCounter() *metrics.BandwidthCounter {
