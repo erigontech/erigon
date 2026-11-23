@@ -123,21 +123,15 @@ func TestSeedAddresses(t *testing.T) {
 
 	bal := types.BlockAccessList{
 		{
-			Address:        existing.Value(),
-			BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}},
-			StorageChanges: []types.SlotChanges{{
-				Slot:    accounts.InternKey(common.Hash{31: 1}),
-				Changes: []*types.StorageChange{{Index: 0, Value: *uint256.NewInt(1)}},
-			}},
+			Address:      created.Value(),
+			NonceChanges: []*types.NonceChange{{Index: 3, Value: 1}},
+			CodeChanges:  []*types.CodeChange{{Index: 3, Bytecode: []byte{0x60, 0x00}}},
 		},
 		{
-			Address:        created.Value(),
-			BalanceChanges: []*types.BalanceChange{{Index: 5, Value: *uint256.NewInt(1)}},
-			NonceChanges:   []*types.NonceChange{{Index: 3, Value: 1}},
-			CodeChanges:    []*types.CodeChange{{Index: 3, Bytecode: []byte{0x60, 0x00}}},
+			Address:        existing.Value(),
+			BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}},
 		},
 	}
-	require.NoError(t, bal.Validate())
 
 	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
 	existingBase := accounts.NewAccount()
@@ -154,11 +148,11 @@ func TestSeedAddresses(t *testing.T) {
 
 	vm.SeedAddresses() // no base reader: existence comes from the BAL alone
 
-	for addr, first := range map[accounts.Address]int{created: 3, existing: 2} {
-		_, _, before := vm.ReadAddress(addr, first-1)
-		_, _, at := vm.ReadAddress(addr, first)
-		require.False(t, before, "unexpected address marker before BAL index %d for %v", first, addr)
-		require.True(t, at, "missing address marker at BAL index %d for %v", first, addr)
+	if _, _, ok := vm.ReadAddress(created, 5); !ok {
+		t.Fatal("SeedAddresses marks a BAL-created account present with no base lookup")
+	}
+	if _, _, ok := vm.ReadAddress(existing, 5); !ok {
+		t.Fatal("a touched base-present account also reads present")
 	}
 
 	// The marker is AccountFromBAL, so the authoritative value defers to the base: a

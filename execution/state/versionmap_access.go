@@ -455,13 +455,13 @@ func balChangeIndexes(ac *types.AccountChanges, fn func(uint32)) {
 }
 
 func balNextChangeIndex(ac *types.AccountChanges, after uint32) uint32 {
-	var next uint32
+	var m uint32
 	balChangeIndexes(ac, func(idx uint32) {
-		if idx > after && (next == 0 || idx < next) {
-			next = idx
+		if idx > after && (m == 0 || idx < m) {
+			m = idx
 		}
 	})
-	return next
+	return m
 }
 
 func balLastChangeIndex[T interface{ GetIndex() uint32 }](changes []T) uint32 {
