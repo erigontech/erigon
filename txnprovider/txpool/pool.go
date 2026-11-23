@@ -1071,33 +1071,17 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 			}
 		}
 
-		// make sure we have enough gas in the caller to add this transaction.
-		// not an exact science using intrinsic gas but as close as we could hope for at
-		// this stage
+		// The gas limits determine whether a transaction fits. Until it executes,
+		// estimate the execution gas left for later candidates by deducting its
+		// intrinsic cost. From Prague onward, use the gas floor if it is higher.
 		if !isFrame {
-			authorizationLen := uint64(len(mt.TxnSlot.Txn.GetAuthorizations()))
 			to := mt.TxnSlot.Txn.GetTo()
-			intrinsicGasResult, _ = mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
-				Data:               make([]byte, mt.TxnSlot.GetDataLen()),
-				DataNonZeroLen:     uint64(mt.TxnSlot.GetDataNonZeroLen()),
-				AuthorizationsLen:  authorizationLen,
-				AccessListLen:      uint64(mt.TxnSlot.GetAccessListAddrCount()),
-				StorageKeysLen:     uint64(mt.TxnSlot.GetAccessListStorCount()),
-				IsContractCreation: mt.TxnSlot.IsCreation(),
-				IsSelfTransfer:     to != nil && *to == sender,
-				HasValue:           !mt.TxnSlot.GetValue().IsZero(),
-				IsEIP2:             true,
-				IsEIP2028:          true,
-				IsEIP3860:          isEIP3860,
-				IsEIP7623:          isEIP7623,
-				IsEIP7976:          isAmsterdam,
-				IsEIP7981:          isAmsterdam,
-				IsEIP2780:          isAmsterdam,
-			})
+			isSelfTransfer := to != nil && *to == sender
+			intrinsicGasResult, _ = poolIntrinsicGas(mt.TxnSlot.Txn, isSelfTransfer, isEIP3860, isEIP7623, isAmsterdam)
 		}
 		intrinsicGas := intrinsicGasResult.ExecutionGas
-		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
-			intrinsicGas = intrinsicGasResult.FloorGasCost
+		if isEIP7623 {
+			intrinsicGas = intrinsicGasResult.RequiredGas()
 		}
 		if intrinsicGas > availableGas.Execution {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
@@ -1251,6 +1235,32 @@ func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
 	return blobs
 }
 
+// poolIntrinsicGas takes isSelfTransfer from the caller because the pool may know
+// the sender even when the transaction's sender cache is empty. Only a known
+// match between sender and recipient qualifies for the lower EIP-2780 cost.
+func poolIntrinsicGas(txn types.Transaction, isSelfTransfer, isShanghai, isPrague, isAmsterdam bool) (mdgas.IntrinsicGasCalcResult, bool) {
+	accessList := txn.GetAccessList()
+	return mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+		Data: txn.GetData(),
+		// Use the on-tx authorization list length, not len(AuthAndNonces): per
+		// EIP-7702 the sender pays for every auth tuple regardless of validity,
+		// and AuthAndNonces only holds successfully-recovered entries.
+		AuthorizationsLen:  uint64(len(txn.GetAuthorizations())),
+		AccessListLen:      uint64(len(accessList)),
+		StorageKeysLen:     uint64(accessList.StorageKeys()),
+		IsContractCreation: txn.IsContractDeploy(),
+		IsSelfTransfer:     isSelfTransfer,
+		HasValue:           !txn.GetValue().IsZero(),
+		IsEIP2:             true,
+		IsEIP2028:          true,
+		IsEIP3860:          isShanghai,
+		IsEIP7623:          isPrague,
+		IsEIP7976:          isAmsterdam,
+		IsEIP7981:          isAmsterdam,
+		IsEIP2780:          isAmsterdam,
+	})
+}
+
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) (txpoolcfg.DiscardReason, error) {
 	return p.validateTxWithCells(txn, isLocal, stateCache, nil, false)
 }
@@ -1278,19 +1288,18 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		return txpoolcfg.Success, nil
 	}
 
-	// Use the on-tx authorization list length, not len(AuthAndNonces): per
-	// EIP-7702 the sender pays for every auth tuple regardless of validity,
-	// and AuthAndNonces only holds successfully-recovered entries.
-	authorizationLen := len(txn.Txn.GetAuthorizations())
 	if txn.TxType() == SetCodeTxnType {
-		if !isPrague {
-			return txpoolcfg.TypeNotActivated, nil
-		}
-		if txn.IsCreation() {
-			return txpoolcfg.InvalidCreateTxn, nil
-		}
-		if authorizationLen == 0 {
-			return txpoolcfg.NoAuthorizations, nil
+		if err := types.ValidateSetCodePrerequisites(txn.Txn.GetAuthorizations(), txn.IsCreation(), isPrague); err != nil {
+			//nolint:errorlint // ValidateSetCodePrerequisites returns these errors directly.
+			switch err {
+			case types.ErrSetCodePrePrague:
+				return txpoolcfg.TypeNotActivated, nil
+			case types.ErrSetCodeContractCreation:
+				return txpoolcfg.InvalidCreateTxn, nil
+			case types.ErrSetCodeEmptyAuthorizations:
+				return txpoolcfg.NoAuthorizations, nil
+			}
+			return txpoolcfg.NotSet, err
 		}
 	}
 
@@ -1309,30 +1318,12 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 
 	txnSender, senderOk := txn.Txn.GetSender()
 	to := txn.Txn.GetTo()
-	intrinsicGasResult, overflow := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
-		Data:               make([]byte, txn.GetDataLen()),
-		DataNonZeroLen:     uint64(txn.GetDataNonZeroLen()),
-		AuthorizationsLen:  uint64(authorizationLen),
-		AccessListLen:      uint64(txn.GetAccessListAddrCount()),
-		StorageKeysLen:     uint64(txn.GetAccessListStorCount()),
-		IsContractCreation: txn.IsCreation(),
-		IsSelfTransfer:     senderOk && to != nil && txnSender.Value() == *to,
-		HasValue:           !txn.GetValue().IsZero(),
-		IsEIP2:             true,
-		IsEIP2028:          true,
-		IsEIP3860:          isEIP3860,
-		IsEIP7623:          isPrague,
-		IsEIP7976:          isAmsterdam,
-		IsEIP7981:          isAmsterdam,
-		IsEIP2780:          isAmsterdam,
-	})
-	gas := intrinsicGasResult.ExecutionGas
-	if isPrague && intrinsicGasResult.FloorGasCost > gas {
-		gas = intrinsicGasResult.FloorGasCost
-	}
+	isSelfTransfer := senderOk && to != nil && txnSender.Value() == *to
+	intrinsic, overflow := poolIntrinsicGas(txn.Txn, isSelfTransfer, isEIP3860, isPrague, isAmsterdam)
+	gasLimit := txn.GetGas()
 
 	if txn.Traced {
-		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
+		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, intrinsic.RequiredGas()))
 	}
 	if overflow {
 		if txn.Traced {
@@ -1340,33 +1331,22 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		}
 		return txpoolcfg.GasUintOverflow, nil
 	}
-	if gas > txn.GetGas() {
+	if intrinsic.ExceedsGasLimit(gasLimit) {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, gas, txn.GetGas()))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, intrinsic.RequiredGas(), gasLimit))
 		}
 		return txpoolcfg.IntrinsicGas, nil
 	}
-	if txn.GetGas() > params.MaxTxnTotalGasLimit {
-		return txpoolcfg.GasLimitTooHigh, nil
-	}
-	if txn.GetGas() > p.blockGasLimit.Load() {
+	if blockGasLimit := p.blockGasLimit.Load(); gasLimit > blockGasLimit {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx txn.gas > block gas limit idHash=%x gas=%d, block gas limit=%d", txn.IDHash, txn.GetGas(), p.blockGasLimit.Load()))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx txn.gas > block gas limit idHash=%x gas=%d, block gas limit=%d", txn.IDHash, gasLimit, blockGasLimit))
 		}
 		return txpoolcfg.GasLimitTooHigh, nil
 	}
-	// EIP-7825: Transaction Gas Limit Cap.
-	// EIP-8037 (Amsterdam): TX_MAX_GAS_LIMIT applies to the execution gas dimension only.
-	// Pre-Amsterdam: cap = full tx gas limit.
-	var gasToCap uint64
-	if isAmsterdam {
-		gasToCap = max(intrinsicGasResult.ExecutionGas, intrinsicGasResult.FloorGasCost)
-	} else {
-		gasToCap = txn.GetGas()
-	}
-	if gasToCap > params.MaxTxnGasLimit {
+	// The pool applies the declared gas cap even before Osaka.
+	if mdgas.ExceedsDeclaredGasCap(gasLimit, isAmsterdam) || intrinsic.ExceedsExecutionGasCap(isAmsterdam) {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx gas cap exceeded idHash=%x gasToCap=%d, max=%d", txn.IDHash, gasToCap, params.MaxTxnGasLimit))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx gas cap exceeded idHash=%x gas=%d intrinsicGas=%d", txn.IDHash, gasLimit, intrinsic.RequiredGas()))
 		}
 		return txpoolcfg.GasLimitTooHigh, nil
 	}
