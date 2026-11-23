@@ -116,7 +116,7 @@ func TestBeaconBodyJSONRejectsOversizedAttesterSlashings(t *testing.T) {
 		version clparams.StateVersion
 		count   int
 	}{
-		{version: clparams.DenebVersion, count: attestingIndicesLimit + 1},
+		{version: clparams.DenebVersion, count: 3},
 		{version: clparams.ElectraVersion, count: 5},
 		{version: clparams.FuluVersion, count: 5},
 	} {
