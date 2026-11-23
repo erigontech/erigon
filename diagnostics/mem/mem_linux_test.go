@@ -18,23 +18,18 @@ package mem
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestRefreshVirtualMemStatsReadsAtMostOncePerMaxAge(t *testing.T) {
-	_, readErr := ReadVirtualMemStats()
-	_, fresh := RefreshVirtualMemStats(0)
-	first := vmStatsRead
-	require.False(t, first.IsZero())
-	require.Equal(t, readErr == nil, fresh, "fresh only after a successful read")
+func TestProcessMemGauges(t *testing.T) {
+	updateGaugesFromProcStatus("Name:\terigon\nVmRSS:\t28 kB\nVmSize:\t168 kB\nVmSwap:\t8 kB\n")
+	require.Equal(t, uint64(28*1024), memRssGauge.GetValueUint64())
+	require.Equal(t, uint64(168*1024), memSizeGauge.GetValueUint64())
+	require.Equal(t, uint64(8*1024), memSwapGauge.GetValueUint64())
 
-	_, fresh = RefreshVirtualMemStats(time.Hour)
-	require.Equal(t, first, vmStatsRead, "a read younger than maxAge, failed or not, is not repeated")
-	require.False(t, fresh, "a cached value is not fresh")
-
-	time.Sleep(time.Millisecond)
-	RefreshVirtualMemStats(0)
-	require.True(t, vmStatsRead.After(first), "maxAge 0 reads again")
+	updateGaugesFromProcStatus("VmRSS:\t32 kB\nVmSwap:\t0 kB\n")
+	require.Equal(t, uint64(32*1024), memRssGauge.GetValueUint64())
+	require.Equal(t, uint64(168*1024), memSizeGauge.GetValueUint64())
+	require.Zero(t, memSwapGauge.GetValueUint64())
 }
