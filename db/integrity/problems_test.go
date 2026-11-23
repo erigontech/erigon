@@ -19,11 +19,15 @@ package integrity
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -127,4 +131,137 @@ func TestParallelChunkCheckKeepsTheTallyWhenAChunkErrors(t *testing.T) {
 	err = parallelChunkCheck(context.Background(), sc.NewSampler(), 1, 500, nil, nil, false, "TestCheck", reportThenFail)
 	require.ErrorIs(t, err, opErr, "the operational failure must still surface")
 	require.Contains(t, err.Error(), "TestCheck", "and the problems already found must not be lost")
+}
+
+func TestRunChecksReportsACheckOwnDeadline(t *testing.T) {
+	run := func(ctx context.Context, chk Check) error {
+		if chk == HeaderNoGaps {
+			return fmt.Errorf("download: %w", context.DeadlineExceeded)
+		}
+		return nil
+	}
+
+	err := RunChecks(t.Context(), []Check{HeaderNoGaps, CommitmentRoot}, 0, run, log.New())
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorContains(t, err, string(HeaderNoGaps)+": download")
+	require.NotContains(t, err.Error(), "budget")
+}
+
+func TestRunChecksFailsWhenTheBudgetCutsACheck(t *testing.T) {
+	run := func(ctx context.Context, chk Check) error {
+		if chk == ReceiptRootIntegrity {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	}
+
+	err := RunChecks(t.Context(), []Check{HeaderNoGaps, ReceiptRootIntegrity, CommitmentRoot}, 50*time.Millisecond, run, log.New())
+	require.ErrorContains(t, err, string(ReceiptRootIntegrity))
+	require.ErrorContains(t, err, string(CommitmentRoot))
+}
+
+func TestRunChecksFailsWhenACheckSwallowsTheBudgetCut(t *testing.T) {
+	var ran []Check
+	run := func(ctx context.Context, chk Check) error {
+		ran = append(ran, chk)
+		if chk == HeaderNoGaps {
+			<-ctx.Done()
+		}
+		return nil
+	}
+
+	err := RunChecks(t.Context(), []Check{HeaderNoGaps, CommitmentRoot}, 50*time.Millisecond, run, log.New())
+	require.ErrorContains(t, err, string(HeaderNoGaps)+" cut")
+	require.ErrorContains(t, err, string(CommitmentRoot))
+	require.Equal(t, []Check{HeaderNoGaps}, ran)
+}
+
+func TestRunChecksDoesNotStartACheckAfterTheBudgetEnds(t *testing.T) {
+	var ran []Check
+	var budgetDone <-chan struct{}
+	run := func(ctx context.Context, chk Check) error {
+		ran = append(ran, chk)
+		budgetDone = ctx.Done()
+		return nil
+	}
+	logger := log.New()
+	logger.SetHandler(log.FilterHandler(func(r *log.Record) bool {
+		if r.Msg == "[integrity] done" {
+			<-budgetDone
+		}
+		return false
+	}, log.StreamHandler(io.Discard, log.LogfmtFormat())))
+
+	err := RunChecks(t.Context(), []Check{HeaderNoGaps, CommitmentRoot}, 50*time.Millisecond, run, logger)
+	require.ErrorContains(t, err, "not run: ["+string(CommitmentRoot)+"]")
+	require.Equal(t, []Check{HeaderNoGaps}, ran)
+}
+
+func TestRunChecksReportsAnIntegrityFailureCutByTheBudget(t *testing.T) {
+	var probs problems
+	require.NoError(t, probs.report(false, errChunk))
+	run := func(ctx context.Context, chk Check) error {
+		<-ctx.Done()
+		return errors.Join(ctx.Err(), probs.verdict("check"))
+	}
+
+	err := RunChecks(t.Context(), []Check{HeaderNoGaps, CommitmentRoot}, 50*time.Millisecond, run, log.New())
+	require.ErrorIs(t, err, ErrIntegrity)
+	require.ErrorContains(t, err, "not run: ["+string(CommitmentRoot)+"]")
+}
+
+func TestRunChecksReturnsTheParentErrorWhenTheLastCheckSwallowsIt(t *testing.T) {
+	for _, budget := range []time.Duration{0, time.Minute} {
+		ctx, cancel := context.WithCancel(t.Context())
+		run := func(context.Context, Check) error {
+			cancel()
+			return nil
+		}
+
+		require.ErrorIs(t, RunChecks(ctx, []Check{HeaderNoGaps}, budget, run, log.New()), context.Canceled, "budget %s", budget)
+	}
+}
+
+func TestRunChecksLetsAHeavyCheckUseTheWholeBudget(t *testing.T) {
+	run := func(ctx context.Context, chk Check) error {
+		if chk == HeaderNoGaps {
+			select {
+			case <-time.After(500 * time.Millisecond):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	}
+
+	require.NoError(t, RunChecks(t.Context(), []Check{HeaderNoGaps, Blocks, CommitmentRoot}, time.Second, run, log.New()))
+}
+
+func TestRunChecksReportsASkippedCheckApartFromADoneOne(t *testing.T) {
+	run := func(_ context.Context, chk Check) error {
+		if chk == StateVerify {
+			return fmt.Errorf("%w: legacy only", ErrSkipped)
+		}
+		return nil
+	}
+	var done, skipped []string
+	logger := log.New()
+	logger.SetHandler(log.FilterHandler(func(r *log.Record) bool {
+		for i := 0; i+1 < len(r.Ctx); i += 2 {
+			if r.Ctx[i] == "check" {
+				switch r.Msg {
+				case "[integrity] done":
+					done = append(done, fmt.Sprint(r.Ctx[i+1]))
+				case "[integrity] skipped":
+					skipped = append(skipped, fmt.Sprint(r.Ctx[i+1]))
+				}
+			}
+		}
+		return false
+	}, log.StreamHandler(io.Discard, log.LogfmtFormat())))
+
+	require.NoError(t, RunChecks(t.Context(), []Check{HeaderNoGaps, StateVerify}, 0, run, logger))
+	require.Equal(t, []string{string(HeaderNoGaps)}, done)
+	require.Equal(t, []string{string(StateVerify)}, skipped)
 }

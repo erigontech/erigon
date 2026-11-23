@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type errUnwindTx struct {
@@ -72,7 +73,7 @@ func TestTemporalMemBatch_FlushPropagatesUnwindError(t *testing.T) {
 	addr := make([]byte, 20)
 	addr[0] = 1
 	domains.SetTxNum(1)
-	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, addr, []byte{0x01}, 1, nil))
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, addr, accounts.SerialiseV3(&accounts.Account{Nonce: 1}), 1, nil))
 
 	var diffSet [kv.DomainLen][]kv.DomainEntryDiff
 	for idx, d := range stateChangeset.Diffs {

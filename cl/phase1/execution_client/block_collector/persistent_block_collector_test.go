@@ -25,16 +25,19 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -78,9 +81,11 @@ func blockHash(bb *cltypes.BeaconBlock) common.Hash {
 // flushTestHarness wires a PersistentBlockCollector to a gomock ExecutionEngine
 // that records every batch passed to InsertBlocks (and every FCU call).
 type flushTestHarness struct {
-	collector *PersistentBlockCollector
-	inserted  []*types.Block
-	fcuHeads  []common.Hash
+	collector    *PersistentBlockCollector
+	inserted     []*types.Block
+	fcuFinalized []common.Hash
+	fcuSafe      []common.Hash
+	fcuHeads     []common.Hash
 }
 
 // insertedNumbers returns the block numbers of every inserted block in call order.
@@ -107,7 +112,9 @@ func newFlushTestHarness(t *testing.T, frozen uint64) *flushTestHarness {
 	).AnyTimes()
 	engine.EXPECT().CurrentHeader(gomock.Any()).Return(nil, nil).AnyTimes()
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, _, _, head common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+		func(_ context.Context, finalized, safe, head common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			h.fcuFinalized = append(h.fcuFinalized, finalized)
+			h.fcuSafe = append(h.fcuSafe, safe)
 			h.fcuHeads = append(h.fcuHeads, head)
 			return nil, nil
 		},
@@ -155,6 +162,44 @@ func TestDecodeBlockRejectsShortPersistentValue(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := c.decodeBlock(utils.CompressSnappy(raw))
 			require.ErrorContains(t, err, "persistent block value too short")
+		})
+	}
+}
+
+func TestFlushTypedTransactionEncoding(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		wrapped bool
+	}{
+		{name: "canonical"},
+		{name: "wrapped", wrapped: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newFlushTestHarness(t, 0)
+			transactions, err := types.MarshalTransactionsBinary(types.Transactions{&types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Data: make([]byte, 64)},
+			}})
+			require.NoError(t, err)
+			block := makeBeaconBlock(t, 1, 'a', common.Hash{})
+			payload := block.Body.ExecutionPayload
+			if tc.wrapped {
+				transactions[0], err = rlp.EncodeToBytes(transactions[0])
+				require.NoError(t, err)
+			}
+			payload.Transactions = solid.NewTransactionsSSZFromTransactions(transactions)
+			payload.BlockHash, err = payload.ComputeBlockHash(&block.ParentRoot, common.Hash{}, nil)
+			require.NoError(t, err)
+
+			require.NoError(t, h.collector.AddBlock(block))
+			require.NoError(t, h.collector.Flush(t.Context()))
+			if tc.wrapped {
+				require.Empty(t, h.inserted)
+				require.Empty(t, h.fcuHeads)
+				return
+			}
+			require.Len(t, h.inserted, 1)
+			require.Equal(t, payload.BlockHash, h.inserted[0].Hash())
+			require.Equal(t, []common.Hash{payload.BlockHash}, h.fcuHeads)
 		})
 	}
 }
@@ -407,6 +452,28 @@ func TestFlushDrivesFCUPerBatch(t *testing.T) {
 	require.Equal(t, blockHash(blocks[6]), h.fcuHeads[2], "final FCU should target the last inserted block (block 7)")
 }
 
+func TestFlushDoesNotClaimSafeOrFinalized(t *testing.T) {
+	origBatchSize := batchSize
+	batchSize = 3
+	t.Cleanup(func() { batchSize = origBatchSize })
+
+	h := newFlushTestHarness(t, 0)
+
+	prev := common.Hash{}
+	blocks := make([]*cltypes.BeaconBlock, 4)
+	for i := range blocks {
+		blocks[i] = makeBeaconBlock(t, uint64(i+1), 'a', prev)
+		require.NoError(t, h.collector.AddBlock(blocks[i]))
+		prev = blockHash(blocks[i])
+	}
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+
+	require.Equal(t, []common.Hash{blockHash(blocks[2]), blockHash(blocks[3])}, h.fcuHeads)
+	require.Equal(t, []common.Hash{{}, {}}, h.fcuFinalized)
+	require.Equal(t, []common.Hash{{}, {}}, h.fcuSafe)
+}
+
 // TestFlushSingleFCUWhenBelowBatchSize verifies the baseline: when total
 // blocks fit in a single sub-batch (no per-batch FCU triggered), only the
 // final after-loop FCU fires.
@@ -431,4 +498,21 @@ func TestFlushSingleFCUWhenBelowBatchSize(t *testing.T) {
 	require.Equal(t, []uint64{1, 2, 3}, h.insertedNumbers())
 	require.Len(t, h.fcuHeads, 1, "with all blocks in a single sub-batch, only the final FCU fires")
 	require.Equal(t, blockHash(last), h.fcuHeads[0])
+}
+
+func TestPersistentBlockCollectorCloseLeavesNoGoroutine(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	c := NewPersistentBlockCollector(log.New(), nil, &clparams.MainnetBeaconConfig, t.TempDir())
+	require.NotNil(t, c)
+	require.NoError(t, c.Close())
+}
+
+// A collector whose database failed to open is a nil pointer behind the interface; closing it
+// on shutdown must not panic.
+func TestPersistentBlockCollectorCloseOnFailedOpen(t *testing.T) {
+	notADir := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(notADir, nil, 0o600))
+	var c BlockCollector = NewPersistentBlockCollector(log.New(), nil, &clparams.MainnetBeaconConfig, notADir)
+	require.Nil(t, c, "the open must fail on a regular file for this test to reach the guard")
+	require.NoError(t, c.Close())
 }

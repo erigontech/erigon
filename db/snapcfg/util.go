@@ -21,13 +21,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
@@ -238,6 +241,10 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			drops.unparsableItem(p.Name)
 			continue
 		}
+		if dot < lastSep {
+			drops.unparsableItem(p.Name)
+			continue
+		}
 
 		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		typeName := name[lastSep+1 : dot]
@@ -255,7 +262,11 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			if typeName == typ.Name() {
 				var versions ver.Versions
 				if strings.HasSuffix(p.Name, "idx") {
-					versions = typ.Indexes()[idxIndex].Version
+					indexes := typ.Indexes()
+					if idxIndex >= len(indexes) {
+						break
+					}
+					versions = indexes[idxIndex].Version
 				} else {
 					versions = typ.Versions()
 				}
@@ -392,13 +403,12 @@ func ExtractBlockFromName(name string, v ver.Version) (block uint64, err error) 
 	return block, nil
 }
 
-func fromToml(in []byte) PreverifiedItems {
+func fromToml(in []byte) (PreverifiedItems, error) {
 	var outMap map[string]string
 	if err := toml.Unmarshal(in, &outMap); err != nil {
-		panic(err)
+		return nil, err
 	}
-
-	return preverified.ItemsFromMap(outMap)
+	return preverified.ItemsFromMap(outMap), nil
 }
 
 func newCfg(networkName string, preverified Preverified) *Cfg {
@@ -447,6 +457,9 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	// Caplin entries are skipped below and no core entry can match a caplin enum, so the
 	// scan is a no-op for these types — and IsFrozen calls this per segment opened.
 	if snaptype.IsCaplinType(t) {
+		if t == snaptype.CaplinEnums.BeaconBlocks {
+			return snaptype.Erigon2MergeLimit
+		}
 		return snaptype.CaplinMergeLimit
 	}
 
@@ -525,9 +538,8 @@ func KnownCfgOrDevnet(networkName string) *Cfg {
 	return cfg
 }
 
-// EmbeddedWebseeds holds the public HTTP webseed URLs for each chain. Vendored
-// from erigon-snapshot/webseed, which used to ship one one-key TOML file per
-// chain; the only consumers want the URL list, so the TOML wrapper was dropped.
+// EmbeddedWebseeds holds the webseeds of the default snapshot branch. Webseeds falls back to it
+// when the branch the manifest comes from has no usable webseed/<chain>.toml.
 var EmbeddedWebseeds = map[string][]string{
 	networkname.Mainnet:  {"v1:https://erigon36-v1-snapshots-mainnet.erigon.network"},
 	networkname.Sepolia:  {"v1:https://erigon36-v1-snapshots-sepolia.erigon.network"},
@@ -537,27 +549,70 @@ var EmbeddedWebseeds = map[string][]string{
 	networkname.Bloatnet: {"v1:https://erigon36-v1-snapshots-bloatnet.erigon.network"},
 }
 
-// GetEmbeddedWebseeds returns the webseed URLs for a single chain.
-func GetEmbeddedWebseeds(chain string) ([]string, bool) {
-	s, ok := EmbeddedWebseeds[chain]
-	return s, ok
+// Webseeds returns the webseeds of the snapshot branch the manifest comes from (SNAPS_GIT_BRANCH).
+func Webseeds(ctx context.Context, chain string) ([]string, bool) {
+	embedded, ok := EmbeddedWebseeds[chain]
+	if snapshotGitBranch == ver.DefaultSnapshotGitBranch { // the embedded list is the default branch's
+		return embedded, ok
+	}
+	ctx, cancel := context.WithTimeout(ctx, webseedsFetchTimeout)
+	defer cancel()
+	b, err := fetchWebseeds(ctx, snapshotGitBranch, chain)
+	var named map[string]string
+	if err == nil {
+		err = toml.Unmarshal(b, &named)
+	}
+	if err == nil && len(named) == 0 {
+		err = errors.New("the file lists no webseeds")
+	}
+	if err == nil {
+		err = validWebseeds(named)
+	}
+	if err == nil {
+		return slices.Sorted(maps.Values(named)), true
+	}
+	log.Warn("[snapshots] cannot use the webseed list of the snapshot branch", "branch", snapshotGitBranch, "chain", chain, "err", err, "embedded", embedded)
+	return embedded, ok
+}
+
+var fetchWebseeds = func(ctx context.Context, branch, chain string) ([]byte, error) {
+	return fetchSnapshotFile(ctx, WebseedTomlGitHubURL(branch, chain), false)
+}
+
+// webseedsFetchTimeout bounds the fetch: it runs on every startup, even when preverified.toml makes the manifest fetch unnecessary.
+const webseedsFetchTimeout = 10 * time.Second
+
+func validWebseeds(named map[string]string) error {
+	for _, w := range named {
+		s, err := WebseedToUrl(w)
+		if err != nil {
+			return err
+		}
+		if u, err := url.Parse(s); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+			return fmt.Errorf("webseed %q is not an HTTP(S) URL with a host", w)
+		}
+	}
+	return nil
 }
 
 const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
 
 // FetchChainToml fetches a single chain's TOML file from the snapshot CDN.
 func FetchChainToml(ctx context.Context, source SnapshotSource, branch, chain string) ([]byte, error) {
-	var url string
+	url := ChainTomlGitHubURL(branch, chain)
 	if source == R2 {
 		url = ChainTomlR2URL(branch, chain)
-	} else {
-		url = ChainTomlGitHubURL(branch, chain)
 	}
+	return fetchSnapshotFile(ctx, url, source == R2)
+}
+
+// fetchSnapshotFile GETs url, with the CDN headers when cloudflare is set.
+func fetchSnapshotFile(ctx context.Context, url string, cloudflare bool) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	if source == R2 {
+	if cloudflare {
 		InsertCloudflareHeaders(req)
 	}
 	resp, err := http.DefaultClient.Do(req)
@@ -566,7 +621,7 @@ func FetchChainToml(ctx context.Context, source SnapshotSource, branch, chain st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch snapshot hashes by %q: status code %d %s", url, resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("failed to fetch %q: status code %d %s", url, resp.StatusCode, resp.Status)
 	}
 	res, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -574,31 +629,6 @@ func FetchChainToml(ctx context.Context, source SnapshotSource, branch, chain st
 	}
 	if len(res) == 0 {
 		return nil, fmt.Errorf("empty response from %s", url)
-	}
-	return res, nil
-}
-
-// FetchTomlFromURL fetches a chain.toml file from an arbitrary URL. Plain HTTP
-// GET, no CDN-specific headers. Used by the --snap.chaintoml-url override.
-func FetchTomlFromURL(ctx context.Context, url string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch snapshot hashes from overridden URL %q: status code %d %s", url, resp.StatusCode, resp.Status)
-	}
-	res, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if len(res) == 0 {
-		return nil, fmt.Errorf("empty response from overridden URL %s", url)
 	}
 	return res, nil
 }
@@ -625,7 +655,7 @@ func LoadRemotePreverified(ctx context.Context, chainName string, forceChainToml
 	case forceChainTomlURL != "":
 		log.Info("Loading snapshot hashes from forced URL", "chain", chainName, "url", forceChainTomlURL)
 
-		b, err := FetchTomlFromURL(ctx, forceChainTomlURL)
+		b, err := fetchSnapshotFile(ctx, forceChainTomlURL, false)
 		if err != nil {
 			return fmt.Errorf("fetching forced chain.toml URL %q: %w", forceChainTomlURL, err)
 		}
@@ -635,6 +665,9 @@ func LoadRemotePreverified(ctx context.Context, chainName string, forceChainToml
 
 		var err error
 		hashes, err = FetchChainToml(ctx, R2, snapshotGitBranch, chainName)
+		if err == nil {
+			_, err = fromToml(hashes) // a CDN error page can come back with HTTP 200
+		}
 		if err != nil {
 			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "chain", chainName, "err", err)
 
@@ -645,14 +678,24 @@ func LoadRemotePreverified(ctx context.Context, chainName string, forceChainToml
 		}
 	}
 
-	registry.Set(chainName, Preverified{Items: fromToml(hashes)}, hashes)
+	items, err := fromToml(hashes)
+	if err != nil {
+		return fmt.Errorf("parse snapshot hashes of %s: %w", chainName, err)
+	}
+	registry.Set(chainName, Preverified{Items: items}, hashes)
 	return nil
 }
 
-func SetToml(networkName string, toml []byte, local bool) {
-	if _, ok := knownChains[networkName]; ok {
-		registry.Set(networkName, Preverified{Local: local, Items: fromToml(toml)}, toml)
+func SetToml(networkName string, toml []byte, local bool) error {
+	if _, ok := knownChains[networkName]; !ok {
+		return nil
 	}
+	items, err := fromToml(toml)
+	if err != nil {
+		return fmt.Errorf("parse snapshot hashes of %s: %w", networkName, err)
+	}
+	registry.Set(networkName, Preverified{Local: local, Items: items}, toml)
+	return nil
 }
 
 func GetToml(networkName string) []byte {

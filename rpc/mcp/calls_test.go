@@ -177,6 +177,12 @@ func TestToolArgMapping(t *testing.T) {
 		},
 		{
 			tool:     "trace_filter",
+			args:     map[string]any{"blockHash": "0xabc", "fromAddress": "0xdef"},
+			result:   `[]`,
+			wantArgs: []any{map[string]any{"blockHash": "0xabc", "fromAddress": []string{"0xdef"}, "count": 100}},
+		},
+		{
+			tool:     "trace_filter",
 			args:     map[string]any{"fromBlock": "0x1", "count": 500},
 			result:   `[]`,
 			wantArgs: []any{map[string]any{"fromBlock": "0x1", "count": 500}},

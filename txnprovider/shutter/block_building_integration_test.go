@@ -238,8 +238,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		err := eat.Close()
-		require.NoError(t, err)
+		require.NoError(t, eat.Close())
 	})
 	// prepare shutter config for the next engine api tester
 	shutterPort, err := freeport.NextFreePort()
@@ -342,8 +341,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	decryptionKeySender, err := testhelpers.DialDecryptionKeysSender(ctx, logger, decryptionKeySenderPort, decryptionKeySenderP2pPrivKey)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		err := decryptionKeySender.Close()
-		require.NoError(t, err)
+		require.NoError(t, decryptionKeySender.Close())
 	})
 	// now that we've deployed all shutter contracts - we can restart erigon with shutter enabled
 	require.NoError(t, eat.Close())

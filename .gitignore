@@ -124,7 +124,8 @@ mdbx.lck
 
 .claude/projects/
 */**/*.local.json
-.claude/skills/
+.claude/skills/README.md
+.claude/skills/skill-rules.json
 
 # Prevent accidental commit of locally-built binaries: `go build ./cmd/<name>`
 # from the repo root drops them here, the real build writes to build/bin.
@@ -144,3 +145,6 @@ _artifacts
 gocache
 .claude/scheduled_tasks.lock
 test-fixtures-cache
+
+# build artifact from `make integration`
+/integration

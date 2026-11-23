@@ -70,7 +70,17 @@ const (
 	// already listening but SetStatus hasn't propagated yet.
 	awaitStatusTimeout = 10 * time.Second
 	maxPermitsPerPeer  = 4 // How many outstanding requests per peer we may have
+	// peerTasksQueueSize and peerTasksByteLimit bound the outbound messages
+	// waiting in each peer's queue. The message being written is outside the
+	// byte budget, which is above the largest eth message.
+	peerTasksQueueSize = 32
+	peerTasksByteLimit = 16 * 1024 * 1024
 )
+
+type peerTask struct {
+	run  func()
+	size int
+}
 
 // PeerInfo collects various extra bits of information about the peer,
 // for example deadlines that is used for regulating requests sent to the peer
@@ -92,9 +102,10 @@ type PeerInfo struct {
 	removeOnce   sync.Once
 
 	// each peer has own worker (goroutine) - all funcs from this queue will execute on this worker
-	// if this queue is full (means peer is slow) - old messages will be dropped
+	// if this queue is full by count or bytes (means peer is slow) - old messages will be dropped
 	// channel closed on peer remove
-	tasks chan func()
+	tasks       chan peerTask
+	queuedBytes atomic.Int64
 }
 
 type PeerRef struct {
@@ -145,7 +156,7 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 		peer:      peer,
 		rw:        rw,
 		removed:   make(chan struct{}),
-		tasks:     make(chan func(), 32),
+		tasks:     make(chan peerTask, peerTasksQueueSize),
 		ctx:       ctx,
 		ctxCancel: cancel,
 	}
@@ -155,8 +166,9 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 	p.lock.RUnlock()
 
 	go func() { // each peer has own worker, then slow
-		for f := range t {
-			f()
+		for task := range t {
+			p.queuedBytes.Add(-int64(task.size))
+			task.run()
 		}
 	}()
 	return p
@@ -287,31 +299,55 @@ func (pi *PeerInfo) Remove(reason *p2p.PeerError) {
 	})
 }
 
-func (pi *PeerInfo) Async(f func(), logger log.Logger) {
+// Async queues f on the peer's worker. size is the number of payload bytes f
+// keeps alive until it has run.
+func (pi *PeerInfo) Async(f func(), size int, logger log.Logger) {
 	pi.lock.Lock()
 	defer pi.lock.Unlock()
 	if pi.tasks == nil {
 		// Too late, the task channel has been closed
 		return
 	}
+	if size > peerTasksByteLimit {
+		logger.Debug("[sentry] dropping outbound message above the peer queue byte limit", "name", pi.peer.Name(), "size", size)
+		return
+	}
+	dropped := false
+	for pi.queuedBytes.Load()+int64(size) > peerTasksByteLimit && pi.dropOldestTask() {
+		dropped = true
+	}
+	pi.queuedBytes.Add(int64(size))
 	select {
 	case <-pi.removed: // noop if peer removed
+		pi.queuedBytes.Add(-int64(size))
 	case <-pi.ctx.Done():
+		pi.queuedBytes.Add(-int64(size))
 		if pi.tasks != nil {
 			close(pi.tasks)
 			// Setting this to nil because other functions detect the closure of the channel by checking pi.tasks == nil
 			pi.tasks = nil
 		}
-	case pi.tasks <- f:
+	case pi.tasks <- peerTask{run: f, size: size}:
 		if len(pi.tasks) == cap(pi.tasks) { // if channel full - discard old messages
 			for i := 0; i < cap(pi.tasks)/2; i++ {
-				select {
-				case <-pi.tasks:
-				default:
-				}
+				pi.dropOldestTask()
 			}
-			logger.Trace("[sentry] slow peer or too many requests, dropping its old requests", "name", pi.peer.Name())
+			dropped = true
 		}
+	}
+	if dropped {
+		logger.Trace("[sentry] slow peer or too many requests, dropping its old requests", "name", pi.peer.Name())
+	}
+}
+
+// dropOldestTask requires pi.lock to be held. It reports whether a queued task was dropped.
+func (pi *PeerInfo) dropOldestTask() bool {
+	select {
+	case task := <-pi.tasks:
+		pi.queuedBytes.Add(-int64(task.size))
+		return true
+	default:
+		return false
 	}
 }
 
@@ -355,9 +391,13 @@ const (
 	maxBlockHashesPerMsg = 4096
 	// maxNewBlockHashesBytes caps the wire bytes buffered before the entry count is checked, so an oversized packet is dropped before its payload is read.
 	maxNewBlockHashesBytes = maxBlockHashesPerMsg * 48
-	// newBlockHashesBurst and newBlockHashesRate bound how frequently one peer may send NewBlockHashes packets before it is disconnected.
-	newBlockHashesBurst            = 30
-	newBlockHashesRate  rate.Limit = 10
+	// Each peer gets independent limits for full blocks, block hashes and block range updates.
+	// Short bursts are allowed; sustained block announcement floods disconnect the peer, excess range updates are dropped.
+	blockAnnouncementsBurst            = 30
+	blockAnnouncementsRate  rate.Limit = 10
+
+	headerRequestsBurst            = 30
+	headerRequestsRate  rate.Limit = 10
 )
 
 // newBlockHashesExceedsCap reports whether the RLP NewBlockHashes payload holds more than maxBlockHashesPerMsg entries; malformed RLP returns false and is left to the decoding subscriber.
@@ -407,7 +447,10 @@ func runPeer(
 		}
 	}()
 
-	newBlockHashesLimiter := rate.NewLimiter(newBlockHashesRate, newBlockHashesBurst)
+	newBlockHashesLimiter := rate.NewLimiter(blockAnnouncementsRate, blockAnnouncementsBurst)
+	newBlockLimiter := rate.NewLimiter(blockAnnouncementsRate, blockAnnouncementsBurst)
+	blockRangeUpdateLimiter := rate.NewLimiter(blockAnnouncementsRate, blockAnnouncementsBurst)
+	headerRequestsLimiter := rate.NewLimiter(headerRequestsRate, headerRequestsBurst)
 
 	for {
 		if !peerPrinted {
@@ -433,6 +476,11 @@ func runPeer(
 			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
 		}
 
+		if protocol >= direct.ETH69 && (msg.Code == eth.NewBlockHashesMsg || msg.Code == eth.NewBlockMsg) {
+			msg.Discard()
+			return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: deprecated block announcement (code %d) on eth/%d", msg.Code, protocol))
+		}
+
 		givePermit := false
 		switch msg.Code {
 		case eth.StatusMsg:
@@ -440,6 +488,12 @@ func runPeer(
 			// Status messages should never arrive after the handshake
 			return p2p.NewPeerError(p2p.PeerErrorStatusUnexpected, p2p.DiscSubprotocolError, nil, "sentry.runPeer: unexpected status message")
 		case eth.GetBlockHeadersMsg:
+			// Fast sequential downloads can exceed the rate limit.
+			// Waiting keeps the connection open but also delays later ETH messages on it.
+			if err := headerRequestsLimiter.Wait(ctx); err != nil {
+				msg.Discard()
+				return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, err, "sentry.runPeer: waiting for header request allowance")
+			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -542,6 +596,10 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewBlockMsg:
+			if !newBlockLimiter.Allow() {
+				msg.Discard()
+				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, "sentry.runPeer: NewBlock rate limit exceeded")
+			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -592,6 +650,10 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockRangeUpdateMsg:
+			if !blockRangeUpdateLimiter.Allow() {
+				msg.Discard() // a later update carries the newer range
+				continue
+			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -602,7 +664,11 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		default:
-			logger.Error("[p2p] Unknown message code", "code", msg.Code, "peer", hex.EncodeToString(peerID[:]))
+			if _, known := eth.ToProto[protocol][msg.Code]; known {
+				logger.Error("[p2p] Message code has no handler", "code", msg.Code, "protocol", protocol)
+			}
+			msg.Discard()
+			return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: unknown message code %d", msg.Code))
 		}
 
 		if diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled() {
@@ -825,7 +891,7 @@ type GrpcServer struct {
 	statusReadyOnce      sync.Once
 	statusData           *sentryproto.StatusData
 	statusDataLock       sync.RWMutex
-	messageStreams       map[sentryproto.MessageId]map[uint64]chan *sentryproto.InboundMessage
+	messageStreams       map[sentryproto.MessageId]map[uint64]*libsentry.SentryStreamS[*sentryproto.InboundMessage]
 	messagesSubscriberID uint64
 	messageStreamsLock   sync.RWMutex
 	peersStreams         *PeersStreams
@@ -983,7 +1049,7 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sent
 		} else if ttl > 0 {
 			peerInfo.AddDeadline(time.Now().Add(ttl))
 		}
-	}, ss.logger)
+	}, len(data), ss.logger)
 }
 
 func (ss *GrpcServer) getBlockHeaders(ctx context.Context, bestHash common.Hash, peerID [64]byte) error {
@@ -1015,7 +1081,7 @@ func (ss *GrpcServer) PenalizePeer(_ context.Context, req *sentryproto.PenalizeP
 	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	peerInfo := ss.getPeer(peerID)
-	if ss.statusData != nil && peerInfo != nil && !peerInfo.peer.Info().Network.Static && !peerInfo.peer.Info().Network.Trusted {
+	if ss.GetStatus() != nil && peerInfo != nil && !peerInfo.peer.Info().Network.Static && !peerInfo.peer.Info().Network.Trusted {
 		ss.removePeer(peerID, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscRequested, nil, "penalized peer"))
 	}
 	return &emptypb.Empty{}, nil
@@ -1496,14 +1562,10 @@ func (ss *GrpcServer) send(msgID sentryproto.MessageId, peerID [64]byte, b []byt
 		Id:     msgID,
 		Data:   b,
 	}
+	// Only enqueue here: transport sends must stay outside messageStreamsLock
+	// so slow subscribers cannot block peer handlers or subscription changes.
 	for i := range ss.messageStreams[msgID] {
-		ch := ss.messageStreams[msgID][i]
-		ch <- req
-		before := len(ch)
-		libsentry.EvictOldestIfHalfFull(ch)
-		if before > cap(ch)/2 {
-			ss.logger.Debug("[sentry] consuming is slow, drop oldest 25% of messages", "msgID", msgID.String())
-		}
+		_ = ss.messageStreams[msgID][i].Send(req)
 	}
 }
 
@@ -1514,21 +1576,21 @@ func (ss *GrpcServer) hasSubscribers(msgID sentryproto.MessageId) bool {
 	//	log.Error("Sending msg to core P2P failed", "msg", sentryproto.MessageId_name[int32(streamMsg.msgId)], "err", err)
 }
 
-func (ss *GrpcServer) addMessagesStream(ids []sentryproto.MessageId, ch chan *sentryproto.InboundMessage) func() {
+func (ss *GrpcServer) addMessagesStream(ids []sentryproto.MessageId, stream *libsentry.SentryStreamS[*sentryproto.InboundMessage]) func() {
 	ss.messageStreamsLock.Lock()
 	defer ss.messageStreamsLock.Unlock()
 	if ss.messageStreams == nil {
-		ss.messageStreams = map[sentryproto.MessageId]map[uint64]chan *sentryproto.InboundMessage{}
+		ss.messageStreams = map[sentryproto.MessageId]map[uint64]*libsentry.SentryStreamS[*sentryproto.InboundMessage]{}
 	}
 
 	ss.messagesSubscriberID++
 	for _, id := range ids {
 		m, ok := ss.messageStreams[id]
 		if !ok {
-			m = map[uint64]chan *sentryproto.InboundMessage{}
+			m = map[uint64]*libsentry.SentryStreamS[*sentryproto.InboundMessage]{}
 			ss.messageStreams[id] = m
 		}
-		m[ss.messagesSubscriberID] = ch
+		m[ss.messagesSubscriberID] = stream
 	}
 
 	sID := ss.messagesSubscriberID
@@ -1543,22 +1605,23 @@ func (ss *GrpcServer) addMessagesStream(ids []sentryproto.MessageId, ch chan *se
 
 func (ss *GrpcServer) Messages(req *sentryproto.MessagesRequest, server sentryproto.Sentry_MessagesServer) error {
 	ss.logger.Trace("[Messages] new subscriber", "to", req.Ids)
-	ch := make(chan *sentryproto.InboundMessage, libsentry.MessagesQueueSize)
-	defer close(ch)
-	clean := ss.addMessagesStream(req.Ids, ch)
+	ctx, cancel := context.WithCancel(server.Context())
+	defer cancel()
+	stop := context.AfterFunc(ss.ctx, cancel)
+	defer stop()
+	streamServer, streamClient := libsentry.NewSentryStream[*sentryproto.InboundMessage](ctx)
+	defer streamServer.Close()
+	clean := ss.addMessagesStream(req.Ids, streamServer)
 	defer clean()
 
 	for {
-		select {
-		case <-ss.ctx.Done():
+		in, err := streamClient.Recv()
+		if err != nil {
 			return nil
-		case <-server.Context().Done():
-			return nil
-		case in := <-ch:
-			if err := server.Send(in); err != nil {
-				ss.logger.Warn("Sending msg to core P2P failed", "msg", in.Id.String(), "err", err)
-				return err
-			}
+		}
+		if err := server.Send(in); err != nil {
+			ss.logger.Warn("Sending msg to core P2P failed", "msg", in.Id.String(), "err", err)
+			return err
 		}
 	}
 }

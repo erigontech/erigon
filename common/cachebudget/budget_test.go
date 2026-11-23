@@ -62,3 +62,19 @@ func TestGlobalSizedFromMemory(t *testing.T) {
 		t.Fatalf("Global envelope must be positive, got %d", Global.Limit())
 	}
 }
+
+func TestReserveUpToTakesWhatIsFree(t *testing.T) {
+	b := New(10)
+	if got := b.ReserveUpTo(4); got != 4 {
+		t.Fatalf("ReserveUpTo(4) = %d, want 4", got)
+	}
+	if got := b.ReserveUpTo(8); got != 6 {
+		t.Fatalf("ReserveUpTo(8) = %d, want the 6 bytes left", got)
+	}
+	if got := b.ReserveUpTo(1); got != 0 {
+		t.Fatalf("ReserveUpTo on a full envelope = %d, want 0", got)
+	}
+	if b.Used() != 10 {
+		t.Fatalf("Used() = %d, want 10", b.Used())
+	}
+}

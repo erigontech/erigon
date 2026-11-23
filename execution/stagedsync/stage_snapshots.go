@@ -20,8 +20,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"time"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -56,6 +58,7 @@ type SnapshotsCfg struct {
 	notifier           *shards.Notifications
 	caplin             bool
 	blobs              bool
+	blobsFromSlot      uint64
 	caplinState        bool
 	syncConfig         ethconfig.Sync
 	prune              prune.Mode
@@ -84,6 +87,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	notifier *shards.Notifications,
 	caplin bool,
 	blobs bool,
+	blobsFromSlot uint64,
 	caplinState bool,
 	prune prune.Mode,
 	afterDownload func(ctx context.Context) error,
@@ -100,6 +104,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 		caplin:             caplin,
 		syncConfig:         syncConfig,
 		blobs:              blobs,
+		blobsFromSlot:      blobsFromSlot,
 		prune:              prune,
 		caplinState:        caplinState,
 		afterDownload:      afterDownload,
@@ -279,6 +284,16 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 	}
 }
 
+// snapshotBlobRetention resolves the blob serving window of the chain. An unknown chain keeps
+// an unbounded window, so no blob segment is skipped.
+func snapshotBlobRetention(cfg SnapshotsCfg) snapshotsync.BlobRetention {
+	r := snapshotsync.BlobRetention{SnapshotDir: cfg.dirs.Snap, FromSlot: cfg.blobsFromSlot, ServeWindowSlots: math.MaxUint64}
+	if _, beaconCfg, _, err := clparams.GetConfigsByNetworkName(cfg.chainConfig.ChainName); err == nil {
+		r.ServeWindowSlots = beaconCfg.MinSlotsForBlobsSidecarsRequest() + beaconCfg.SlotsPerEpoch
+	}
+	return r
+}
+
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
 	if !s.CurrentSyncCycle.IsFirstCycle {
 		return nil
@@ -324,6 +339,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		true, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
+		snapshotBlobRetention(cfg),
 		cfg.prune,
 		cstate,
 		tx,
@@ -332,6 +348,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 		agg.StepSize(),
+		cfg.dirs,
 	); err != nil {
 		return err
 	}
@@ -374,6 +391,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		false, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
+		snapshotBlobRetention(cfg),
 		cfg.prune,
 		cstate,
 		tx,
@@ -382,6 +400,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 		agg.StepSize(),
+		cfg.dirs,
 	); err != nil {
 		return err
 	}
@@ -406,6 +425,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
+	// a state file missing its accessor is excluded from the visible set, so E3 accessors
+	// must be rebuilt before execution and before RPCDaemon reopens files — there is no background rebuild path
+	if err := cfg.db.Debug().BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil {
+		return err
+	}
+
 	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
 	// hashes next time.
 	err = downloadercfg.SaveSnapshotHashes(cfg.dirs, cfg.chainConfig.ChainName)
@@ -424,12 +449,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if err := buildOrDeferE2Indices(ctx, s, cfg, headersProgress); err != nil {
-		return err
-	}
-
-	// a state file missing its accessor is excluded from the visible set, so E3 accessors
-	// must be rebuilt before execution — there is no background rebuild path
-	if err := cfg.db.Debug().BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil {
 		return err
 	}
 
@@ -465,16 +484,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// Plain assignment: the deferred stopReporter reads this variable, and a
 	// := here would shadow it and silently disable the handoff pin.
 	commitBlock = readCommitmentBlockFromDB(ctx, cfg.db)
-	if commitBlock > 0 {
-		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
-		if err != nil {
-			return fmt.Errorf("get Execution stage progress: %w", err)
-		}
-		if execProgress < commitBlock {
-			if err := stages.SaveStageProgress(tx, stages.Execution, commitBlock); err != nil {
-				return fmt.Errorf("advance Execution stage to snapshot commitment block: %w", err)
-			}
-		}
+	if err := cfg.advanceExecutionToSnapshot(tx, commitBlock); err != nil {
+		return err
 	}
 
 	{
@@ -487,6 +498,25 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		})
 	}
 
+	return nil
+}
+
+func (me *SnapshotsCfg) advanceExecutionToSnapshot(tx kv.RwTx, commitBlock uint64) error {
+	if commitBlock == 0 {
+		return nil
+	}
+	execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return fmt.Errorf("get Execution stage progress: %w", err)
+	}
+	if execProgress >= commitBlock {
+		return nil
+	}
+	if err := stages.SaveStageProgress(tx, stages.Execution, commitBlock); err != nil {
+		return fmt.Errorf("advance Execution stage to snapshot commitment block: %w", err)
+	}
+	// Installing snapshot state bypasses execution and its change notifications.
+	me.notifier.Accumulator.MarkIncomplete()
 	return nil
 }
 
@@ -521,7 +551,7 @@ func firstNonGenesisCheck(tx kv.RwTx, snapshots dbservices.BlockSnapshots, logPr
 	return nil
 }
 
-func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservices.FullBlockReader) error {
+func pruneCanonicalMarkers(tx kv.RwTx, blockReader dbservices.FullBlockReader) error {
 	pruneThreshold := rawdbreset.GetPruneMarkerSafeThreshold(blockReader)
 	if pruneThreshold == 0 {
 		return nil
@@ -559,10 +589,7 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservic
 }
 
 // SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
-func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
-	if dbg.NoPrune() {
-		return nil
-	}
+func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.ProduceE2 && !dbg.NoBackgroundMaintenance() {
 		if s.CurrentSyncCycle.IsInitialCycle {
@@ -577,7 +604,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			log.LvlDebug,
 			cfg.getSeederClient(),
 			func() error {
-				filesDeleted, err := retireBlockSnapshots(ctx, cfg, logger)
+				filesDeleted, err := retireBlockSnapshots(ctx, cfg)
 				if filesDeleted && cfg.notifier != nil {
 					cfg.notifier.Events.OnNewSnapshot()
 				}
@@ -594,23 +621,26 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		}
 	}
 
+	if dbg.NoPrune() {
+		return nil
+	}
 	pruneLimit := 10
 	pruneTimeout := 125 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
-		pruneLimit = 10_000
+		pruneLimit = 100_000
 		pruneTimeout = time.Hour
 	}
 	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
 		return err
 	}
-	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
+	if err := pruneCanonicalMarkers(tx, cfg.blockReader); err != nil {
 		return err
 	}
 	return nil
 }
 
-func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) (bool, error) {
-	if dbg.NoRetire() {
+func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg) (bool, error) {
+	if dbg.NoRetire() || dbg.NoPrune() {
 		return false, nil
 	}
 	tx, err := cfg.db.BeginRo(ctx)
@@ -642,16 +672,12 @@ func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logg
 // readCommitmentBlockFromDB reads the commitment domain's "state" key via a
 // temporary RO tx. The RwTx from the snapshot stage is not temporal, so we
 // need a separate temporal RO tx to read domain data from snapshot files.
-// The value format: txNum(8 bytes) + blockNum(8 bytes) + trie state.
 func readCommitmentBlockFromDB(ctx context.Context, db kv.TemporalRwDB) uint64 {
 	roTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0
 	}
 	defer roTx.Rollback()
-	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
-	if err != nil || len(v) < 16 {
-		return 0
-	}
-	return binary.BigEndian.Uint64(v[8:16])
+	n, _ := commitmentdb.LatestBlockNumWithCommitment(roTx)
+	return n
 }

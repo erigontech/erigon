@@ -56,15 +56,20 @@ func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 
 func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
 	runParallelBenchWith(b, pk, updates, workers,
-		func(ms *MockState) (TrieContextFactory, func()) { return mockTrieCtxFactory(ms), func() {} })
+		func(ms *MockState) (TrieContextFactory, func()) { return mockTrieCtxFactory(ms), func() {} }, false)
 }
 
 func runCollectingParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
-	runParallelBenchWith(b, pk, updates, workers, collectingTrieCtxFactory)
+	runParallelBenchWith(b, pk, updates, workers, collectingTrieCtxFactory, false)
+}
+
+func runCollectAndProcessBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
+	runParallelBenchWith(b, pk, updates, workers,
+		func(ms *MockState) (TrieContextFactory, func()) { return mockTrieCtxFactory(ms), func() {} }, true)
 }
 
 func runParallelBenchWith(b *testing.B, pk [][]byte, updates []Update, workers int,
-	newFactory func(*MockState) (TrieContextFactory, func()),
+	newFactory func(*MockState) (TrieContextFactory, func()), timeCollect bool,
 ) {
 	ctx := context.Background()
 	b.ReportAllocs()
@@ -88,9 +93,18 @@ func runParallelBenchWith(b *testing.B, pk [][]byte, updates []Update, workers i
 			pph.ResetContext(ms)
 		}
 		pph.RootTrie().Reset()
-		upds := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
+		var upds *Updates
+		if timeCollect {
+			upds = NewUpdates(ModeParallel, "", KeyToHexNibbleHash)
+		} else {
+			upds = WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
+			upds.parallel.Build()
+		}
 		b.StartTimer()
 
+		if timeCollect {
+			WrapKeyUpdatesInto(b, upds, pk, updates)
+		}
 		_, err := pph.Process(ctx, upds, "", nil, WarmupConfig{})
 
 		b.StopTimer()
@@ -405,6 +419,7 @@ func runParallelBenchGrain(b *testing.B, pk [][]byte, updates []Update, workers 
 		pph.SetForkGrain(grain)
 		pph.RootTrie().Reset()
 		upds := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
+		upds.parallel.Build()
 		b.StartTimer()
 
 		_, err := pph.Process(ctx, upds, "", nil, WarmupConfig{})
@@ -450,6 +465,7 @@ func runIncrementalParallelBenchGrain(b *testing.B, batch1, batch2 engineBatch, 
 
 		require.NoError(b, ms.applyPlainUpdates(batch2.keys, batch2.upds))
 		u2 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch2.keys, batch2.upds)
+		u2.parallel.Build()
 		b.StartTimer()
 
 		_, err = pph.Process(ctx, u2, "", nil, WarmupConfig{})
@@ -566,6 +582,7 @@ func runIncrementalParallelBench(b *testing.B, batch1, batch2 engineBatch, worke
 
 		require.NoError(b, ms.applyPlainUpdates(batch2.keys, batch2.upds))
 		u2 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch2.keys, batch2.upds)
+		u2.parallel.Build()
 		b.StartTimer()
 
 		_, err = pph.Process(ctx, u2, "", nil, WarmupConfig{})
@@ -623,4 +640,22 @@ func collectingTrieCtxFactory(ms *MockState) (TrieContextFactory, func()) {
 		made = nil
 	}
 	return f, drain
+}
+
+func Benchmark_ModeParallel_TouchAndProcess(b *testing.B) {
+	ncpu := runtime.NumCPU()
+	for _, c := range []struct {
+		name  string
+		build func(testing.TB) ([][]byte, []Update)
+	}{
+		{"100K-AccountsOnly", build100KAccountsCorpus},
+		{"500K-StorageHeavy", build500KStorageHeavyCorpus},
+	} {
+		pk, updates := c.build(b)
+		for _, w := range []int{4, ncpu} {
+			b.Run(fmt.Sprintf("%s/w%d", c.name, w), func(b *testing.B) {
+				runCollectAndProcessBench(b, pk, updates, w)
+			})
+		}
+	}
 }

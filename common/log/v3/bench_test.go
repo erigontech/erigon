@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -129,20 +128,6 @@ func BenchmarkDescendant8(b *testing.B) {
 	for b.Loop() {
 		lg.Info("test message")
 	}
-}
-
-// slowWriter simulates a slow I/O destination (e.g. network, overloaded disk).
-// With SyncHandler all goroutines serialize on the mutex and total time ≈ N × delay.
-// Without it goroutines write in parallel and total time ≈ delay.
-type slowWriter struct {
-	delay time.Duration
-	lines atomic.Int64
-}
-
-func (w *slowWriter) Write(p []byte) (int, error) {
-	time.Sleep(w.delay)
-	w.lines.Add(int64(bytes.Count(p, []byte{'\n'})))
-	return len(p), nil
 }
 
 // Copied from https://github.com/uber-go/zap/blob/master/benchmarks/log15_bench_test.go

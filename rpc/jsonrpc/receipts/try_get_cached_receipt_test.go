@@ -18,7 +18,9 @@ func newTestGenerator(t *testing.T) *Generator {
 	t.Helper()
 	rsc, err := lru.New[common.Hash, types.Receipts](256)
 	require.NoError(t, err)
-	return &Generator{receiptCache: newReceiptCache(datasize.MB), receiptsCache: rsc}
+	fc, err := lru.New[uint64, common.Hash](256)
+	require.NoError(t, err)
+	return &Generator{receiptCache: newReceiptCache(datasize.MB), receiptsCache: rsc, frozenCanonical: fc}
 }
 
 func TestTryGetCachedReceipt(t *testing.T) {

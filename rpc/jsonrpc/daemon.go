@@ -64,7 +64,6 @@ func NewDebugApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.DebugApiConfig {
 
 func NewTraceApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.TraceApiConfig {
 	return &rpccfg.TraceApiConfig{
-		MaxTraces:     cfg.MaxTraces,
 		GasCap:        cfg.Gascap,
 		Compatibility: cfg.TraceCompatibility,
 	}

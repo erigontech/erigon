@@ -139,67 +139,17 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			} else if err := json.Unmarshal(blob, test); err != nil {
 				t.Fatalf("failed to parse testcase: %v", err)
 			}
-			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
-			if err != nil {
-				t.Fatalf("failed to parse testcase input: %v", err)
-			}
-			// Configure a blockchain with the given prestate
-			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
-			context := evmtypes.BlockContext{
-				CanTransfer: protocol.CanTransfer,
-				Transfer:    misc.Transfer,
-				Coinbase:    accounts.InternAddress(test.Context.Miner),
-				BlockNumber: uint64(test.Context.Number),
-				Time:        uint64(test.Context.Time),
-				GasLimit:    uint64(test.Context.GasLimit),
-			}
-			if test.Context.Difficulty != nil {
-				context.Difficulty = *test.Context.Difficulty
-			}
-			if test.Context.BaseFee != nil {
-				baseFee := test.Context.BaseFee
-				context.BaseFee = *baseFee
-			}
-			rules := context.Rules(test.Genesis.Config)
-
-			m := execmoduletester.New(t)
-			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
-			require.NoError(t, err)
-			defer dbTx.Rollback()
-			statedb, err := testutil.MakePreState(rules, m.DB, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
-			require.NoError(t, err)
-			tracer, err := tracers.New(tracerName, new(tracers.Context), test.TracerConfig)
-			if err != nil {
-				t.Fatalf("failed to create call tracer: %v", err)
-			}
-			statedb.SetHooks(tracer.Hooks)
-			msg, err := tx.AsMessage(*signer, test.Context.BaseFee, rules)
-			if err != nil {
-				t.Fatalf("failed to prepare transaction for tracing: %v", err)
-			}
-			txContext := protocol.NewEVMTxContext(msg)
-			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Hooks})
-			tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
-			vmRet, err := protocol.ApplyMessage(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */, nil /* engine */)
-			if err != nil {
-				t.Fatalf("failed to execute transaction: %v", err)
-			}
-			tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
-			// Retrieve the trace result and compare against the expected.
-			res, err := tracer.GetResult()
-			if err != nil {
-				t.Fatalf("failed to retrieve trace result: %v", err)
-			}
+			tracer, res, vmRet := traceFixtureTx(t, tracerName, test.Genesis, test.Context, test.Input, test.TracerConfig)
 			// The legacy javascript calltracer marshals json in js, which
 			// is not deterministic (as opposed to the golang json encoder).
 			if isLegacy {
 				// This is a tweak to make it deterministic. Can be removed when
 				// we remove the legacy tracer.
 				var x callTrace
-				err = json.Unmarshal(res, &x)
+				require.NoError(t, json.Unmarshal(res, &x))
+				normalized, err := json.Marshal(x)
 				require.NoError(t, err)
-				res, err = json.Marshal(x)
-				require.NoError(t, err)
+				res = normalized
 			}
 			want, err := json.Marshal(test.Result)
 			if err != nil {
@@ -226,6 +176,49 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			}
 		})
 	}
+}
+
+// traceFixtureTx executes the fixture transaction on top of the genesis prestate and returns the tracer with its result.
+func traceFixtureTx(t *testing.T, tracerName string, genesis *types.Genesis, callCtx *callContext, input string, tracerConfig json.RawMessage) (*tracers.Tracer, json.RawMessage, *evmtypes.ExecutionResult) {
+	t.Helper()
+	tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(input), false /* blobTxnsAreWrappedWithBlobs */)
+	require.NoError(t, err)
+	signer := types.MakeSigner(genesis.Config, uint64(callCtx.Number), uint64(callCtx.Time))
+	context := evmtypes.BlockContext{
+		CanTransfer: protocol.CanTransfer,
+		Transfer:    misc.Transfer,
+		Coinbase:    accounts.InternAddress(callCtx.Miner),
+		BlockNumber: uint64(callCtx.Number),
+		Time:        uint64(callCtx.Time),
+		GasLimit:    uint64(callCtx.GasLimit),
+	}
+	if callCtx.Difficulty != nil {
+		context.Difficulty = *callCtx.Difficulty
+	}
+	if callCtx.BaseFee != nil {
+		context.BaseFee = *callCtx.BaseFee
+	}
+	rules := context.Rules(genesis.Config)
+
+	m := execmoduletester.New(t)
+	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
+	require.NoError(t, err)
+	defer dbTx.Rollback()
+	statedb, err := testutil.MakePreState(rules, m.DB, dbTx, genesis.Alloc, uint64(callCtx.Number))
+	require.NoError(t, err)
+	tracer, err := tracers.New(tracerName, new(tracers.Context), tracerConfig)
+	require.NoError(t, err)
+	statedb.SetHooks(tracer.Hooks)
+	msg, err := tx.AsMessage(*signer, callCtx.BaseFee, rules)
+	require.NoError(t, err)
+	evm := vm.NewEVM(context, protocol.NewEVMTxContext(msg), statedb, genesis.Config, vm.Config{Tracer: tracer.Hooks})
+	tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
+	vmRet, err := protocol.ApplyMessage(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */, nil /* engine */)
+	require.NoError(t, err)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
+	res, err := tracer.GetResult()
+	require.NoError(t, err)
+	return tracer, res, vmRet
 }
 
 // evmLog0 is a 5-byte EVM snippet that emits a zero-topic, zero-data LOG0.

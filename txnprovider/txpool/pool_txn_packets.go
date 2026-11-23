@@ -25,6 +25,8 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
+const maxTransactionsPerPacket = 5000
+
 // ParseHashesCount looks at the RLP length Prefix for list of 32-byte hashes
 // and returns number of hashes in the list to expect
 func ParseHashesCount(payload []byte, pos int) (count int, dataPos int, err error) {
@@ -174,6 +176,18 @@ func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *
 		return 0, err
 	}
 
+	for p, count := pos, 0; p < len(payload); count++ {
+		if count == maxTransactionsPerPacket {
+			return 0, fmt.Errorf("%w: too many transactions (limit %d)", ErrParseTxn, maxTransactionsPerPacket)
+		}
+		var dataPos, dataLen int
+		dataPos, dataLen, _, err = rlp.Prefix(payload, p)
+		if err != nil {
+			return 0, err
+		}
+		p = dataPos + dataLen
+	}
+
 	for i := 0; pos < len(payload); i++ {
 		txnSlots.Resize(uint(i + 1))
 		txnSlots.Txns[i] = &TxnSlot{}
@@ -190,6 +204,16 @@ func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *
 	return pos, nil
 }
 
+// pooledTransactions66RequestID reads a reply's request id without decoding its transactions.
+func pooledTransactions66RequestID(payload []byte) (uint64, error) {
+	p, _, err := rlp.ParseList(payload, 0)
+	if err != nil {
+		return 0, err
+	}
+	_, requestID, err := rlp.ParseU64(payload, p)
+	return requestID, err
+}
+
 func ParsePooledTransactions66(payload []byte, pos int, ctx *TxnParseContext, txnSlots *TxnSlots, validateHash func([]byte) error) (requestID uint64, newPos int, err error) {
 	p, _, err := rlp.ParseList(payload, pos)
 	if err != nil {
@@ -199,23 +223,6 @@ func ParsePooledTransactions66(payload []byte, pos int, ctx *TxnParseContext, tx
 	if err != nil {
 		return requestID, 0, err
 	}
-	p, _, err = rlp.ParseList(payload, p)
-	if err != nil {
-		return requestID, 0, err
-	}
-
-	for i := 0; p < len(payload); i++ {
-		txnSlots.Resize(uint(i + 1))
-		txnSlots.Txns[i] = &TxnSlot{}
-		p, err = ctx.ParseTransaction(payload, p, txnSlots.Txns[i], txnSlots.Senders.At(i), true /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash)
-		if err != nil {
-			if errors.Is(err, ErrRejected) {
-				txnSlots.Resize(uint(i))
-				i--
-				continue
-			}
-			return requestID, 0, err
-		}
-	}
-	return requestID, p, nil
+	newPos, err = ParseTransactions(payload, p, ctx, txnSlots, validateHash)
+	return requestID, newPos, err
 }

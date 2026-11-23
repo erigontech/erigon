@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"slices"
 	"strconv"
@@ -72,13 +73,14 @@ type handler struct {
 	logger         log.Logger
 	allowSubscribe bool
 	inlineCalls    bool // the caller waits for every answer, as a single HTTP request does
-	batchLimit     int
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
 	forbiddenList ForbiddenList
 
 	subLock             sync.Mutex
 	serverSubs          map[ID]*Subscription
+	subscriptionLimit   int // concurrent subscriptions a connection may hold; 0 = unlimited
+	pendingSubs         int // subscribe calls in flight, each holding one slot of subscriptionLimit
 	maxBatchConcurrency uint
 	traceRequests       bool
 
@@ -122,7 +124,7 @@ func newHandler(
 	conn jsonWriter,
 	idgen func() ID,
 	reg *serviceRegistry,
-	batchLimit int,
+	subscriptionLimit int,
 	allowList AllowList,
 	maxBatchConcurrency uint,
 	traceRequests bool,
@@ -141,12 +143,12 @@ func newHandler(
 		rootCtx:        rootCtx,
 		cancelRoot:     cancelRoot,
 		allowSubscribe: true,
-		batchLimit:     batchLimit,
 		serverSubs:     make(map[ID]*Subscription),
 		logger:         logger,
 		allowList:      allowList,
 		forbiddenList:  forbiddenList,
 
+		subscriptionLimit:   subscriptionLimit,
 		maxBatchConcurrency: maxBatchConcurrency,
 		traceRequests:       traceRequests,
 
@@ -168,9 +170,10 @@ func (h *handler) isRpcMethodNeedsCheck(method string) bool {
 
 // inOrderMethods change state that a later call of the same batch may depend on, such as a
 // sender's next nonce in the txpool. A batch holding one runs its calls one by one, in order.
+// eth_sendRawTransactionSync is left out: it holds its concurrency slot until its receipt,
+// so sends cannot overtake each other, and running them in order would wait for each receipt in turn.
 var inOrderMethods = map[string]struct{}{
 	"eth_sendRawTransaction":     {},
-	"eth_sendRawTransactionSync": {},
 	"graphql_sendRawTransaction": {},
 	"eth_uninstallFilter":        {},
 	"eth_getFilterChanges":       {},
@@ -220,31 +223,28 @@ func (h *handler) answerBatchCall(cp *callProc, msg *jsonrpcMessage) []byte {
 	return buf.Bytes()
 }
 
-// handleBatch executes all messages in a batch and returns the responses.
-func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
+// handleBatch handles a batch and calls done, when it is not nil, once the messages are
+// no longer needed.
+func (h *handler) handleBatch(msgs []*jsonrpcMessage, done func()) {
+	if done == nil {
+		done = func() {}
+	}
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
 			if err := h.conn.WriteJSON(cp.ctx, errorMessage(&invalidRequestError{"empty batch"})); err != nil {
 				h.logger.Debug("Failed to write RPC error response", "err", err)
 			}
-		})
+		}, done)
 		return
 	}
-	// Apply limit on total number of requests.
-	if h.batchLimit != 0 && len(msgs) > h.batchLimit {
-		h.startCallProc(func(cp *callProc) {
-			h.respondWithBatchTooLarge(cp, msgs)
-		})
-		return
-	}
-
 	// Handle non-call messages first:
 	calls := make([]*jsonrpcMessage, 0, len(msgs))
 	h.handleResponses(msgs, func(msg *jsonrpcMessage) {
 		calls = append(calls, msg)
 	})
 	if len(calls) == 0 {
+		done()
 		return
 	}
 
@@ -279,7 +279,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				h.logger.Debug("Failed to activate RPC notifier", "err", err)
 			}
 		}
-	})
+	}, done)
 }
 
 // sendBatchAnswers sends the answers in request order, leaving out calls that have none.
@@ -301,6 +301,9 @@ func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
 	defer jsonstream.Put(stream)
 
 	h.answerInto(cp, msg, stream)
+	if msg.isNotification() {
+		return
+	}
 	if err := h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer())); err != nil {
 		h.logger.Debug("Failed to write RPC response", "err", err)
 	}
@@ -316,26 +319,32 @@ func (h *handler) answerInto(cp *callProc, msg *jsonrpcMessage, stream *jsonstre
 	}
 }
 
-func (h *handler) respondWithBatchTooLarge(cp *callProc, batch []*jsonrpcMessage) {
-	reason := fmt.Sprintf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", h.batchLimit, len(batch))
-	resp := errorMessage(&invalidRequestError{reason})
-	// Find the first call and add its "id" field to the error.
-	// This is the best we can do, given that the protocol doesn't have a way
-	// of reporting an error for the entire batch.
-	for _, msg := range batch {
-		if msg.isCall() {
-			resp.ID = msg.ID
-			break
+// handleBatchTooLarge answers a batch the codec rejected for its size, and calls done, when
+// it is not nil, once the answer is written.
+func (h *handler) handleBatchTooLarge(tooLarge *batchTooLargeError, done func()) {
+	if done == nil {
+		done = func() {}
+	}
+	h.startCallProc(func(cp *callProc) {
+		resp := errorMessage(&invalidRequestError{tooLarge.Error()})
+		// The protocol has no error for a whole batch, so the error takes the first call's id.
+		if tooLarge.id != nil {
+			resp.ID = tooLarge.id
 		}
-	}
-	if err := h.conn.WriteJSON(cp.ctx, []*jsonrpcMessage{resp}); err != nil {
-		h.logger.Debug("Failed to write RPC batch-too-large response", "err", err)
-	}
+		if err := h.conn.WriteJSON(cp.ctx, []*jsonrpcMessage{resp}); err != nil {
+			h.logger.Debug("Failed to write RPC batch-too-large response", "err", err)
+		}
+	}, done)
 }
 
-// handleMsg handles a single message.
-func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsonstream.Stream) {
+// handleMsg handles a single message and calls done, when it is not nil, once the message
+// is no longer needed.
+func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsonstream.Stream, done func()) {
+	if done == nil {
+		done = func() {}
+	}
 	if ok := h.handleImmediate(msg); ok {
+		done()
 		return
 	}
 	h.startCallProc(func(cp *callProc) {
@@ -343,14 +352,16 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsonstream.Stream) {
 			h.answerBuffered(cp, msg)
 		} else {
 			h.answerInto(cp, msg, stream)
-			stream.WriteRaw("\n")
+			if !msg.isNotification() {
+				stream.WriteRaw("\n")
+			}
 		}
 		for _, n := range cp.notifiers {
 			if err := n.activate(); err != nil {
 				h.logger.Debug("Failed to activate RPC notifier", "err", err)
 			}
 		}
-	})
+	}, done)
 }
 
 // handleResponses processes method call responses.
@@ -456,10 +467,31 @@ func (h *handler) cancelAllRequests(err error, inflightReq *requestOp) {
 	}
 }
 
+// reserveSubscription takes a slot for a subscribe call about to run. Once the call has
+// returned, releaseSubscription gives the slot back when no subscription was created, and
+// addSubscriptions turns it into a registered subscription otherwise.
+func (h *handler) reserveSubscription() bool {
+	h.subLock.Lock()
+	defer h.subLock.Unlock()
+
+	if h.subscriptionLimit > 0 && len(h.serverSubs)+h.pendingSubs >= h.subscriptionLimit {
+		return false
+	}
+	h.pendingSubs++
+	return true
+}
+
+func (h *handler) releaseSubscription() {
+	h.subLock.Lock()
+	h.pendingSubs--
+	h.subLock.Unlock()
+}
+
 func (h *handler) addSubscriptions(nn []*RemoteNotifier) {
 	h.subLock.Lock()
 	defer h.subLock.Unlock()
 
+	h.pendingSubs -= len(nn)
 	for _, n := range nn {
 		if sub := n.takeSubscription(); sub != nil {
 			h.serverSubs[sub.ID] = sub
@@ -479,9 +511,11 @@ func (h *handler) cancelServerSubscriptions(err error) {
 	}
 }
 
-// startCallProc runs fn in a new goroutine tracked by h.callWG, or on the caller's goroutine when inlineCalls is set.
-func (h *handler) startCallProc(fn func(*callProc)) {
+// startCallProc runs fn in a new goroutine tracked by h.callWG, or on the caller's goroutine
+// when inlineCalls is set, and then done.
+func (h *handler) startCallProc(fn func(*callProc), done func()) {
 	run := func() {
+		defer done()
 		ctx, cancel := context.WithCancel(h.rootCtx)
 		defer cancel()
 		fn(&callProc{ctx: ctx})
@@ -555,7 +589,9 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *jsonstream.Stream) *jsonrpcMessage {
 	switch {
 	case msg.isNotification():
-		_, _ = h.handleCall(ctx, msg, stream)
+		discard := jsonstream.Get(io.Discard)
+		defer jsonstream.Put(discard)
+		_, _ = h.handleCall(ctx, msg, discard)
 		if h.traceRequests {
 			h.logger.Info("[rpc] served", "method", msg.Method, "params", string(msg.Params))
 		}
@@ -589,12 +625,12 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		if !errors.Is(ctx.ctx.Err(), context.Canceled) {
 			switch {
 			case answered != nil:
-				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", answered)
+				h.logger.Log(servedLvl(answered), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", answered)
 			case resp != nil && resp.Error != nil && resp.Error.Data != nil:
-				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
+				h.logger.Log(servedLvl(resp.Error), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
 			case resp != nil && resp.Error != nil:
-				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
+				h.logger.Log(servedLvl(resp.Error), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message)
 			}
 		}
@@ -681,12 +717,20 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 	}
 	args = args[1:]
 
+	if !h.reserveSubscription() {
+		reason := fmt.Sprintf("subscription limit %d per connection exceeded (can increase by --rpc.subscription.limit)", h.subscriptionLimit)
+		return msg.errorResponse(&CustomError{Code: ErrCodeServerOverloaded, Message: reason}), nil
+	}
 	// Install notifier in context so the subscription handler can find it.
 	n := &RemoteNotifier{h: h, namespace: namespace}
-	cp.notifiers = append(cp.notifiers, n)
 	ctx := ContextWithNotifier(cp.ctx, n)
-
-	return h.runMethod(ctx, msg, callb, args, stream)
+	answer, answered := h.runMethod(ctx, msg, callb, args, stream)
+	if n.takeSubscription() == nil {
+		h.releaseSubscription()
+		return answer, answered
+	}
+	cp.notifiers = append(cp.notifiers, n)
+	return answer, answered
 }
 
 // remapDBOverload converts kv.ErrReadTxLimitExceeded into a JSON-RPC -32005 error and sets
@@ -694,9 +738,23 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 func remapDBOverload(ctx context.Context, err error) error {
 	if errors.Is(err, kv.ErrReadTxLimitExceeded) {
 		SetOverloadedFlag(ctx)
-		return &CustomError{Code: ErrCodeServerOverloaded, Message: ErrMsgServerOverloaded}
+		return errServerOverloaded
 	}
 	return err
+}
+
+// servedLvl logs an error the handler coded as an answer, such as a revert, at trace. Uncoded errors may be
+// infrastructure failures, so they stay at warn with internal and overload errors.
+func servedLvl(err error) log.Lvl {
+	var coded Error
+	if !errors.As(err, &coded) {
+		return log.LvlWarn
+	}
+	switch coded.ErrorCode() {
+	case ErrCodeDefault, ErrCodeInternalError, ErrCodeServerOverloaded:
+		return log.LvlWarn
+	}
+	return log.LvlTrace
 }
 
 // runMethod runs the Go callback for an RPC method. It returns either a response for the caller to

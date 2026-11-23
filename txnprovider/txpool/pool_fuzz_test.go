@@ -334,7 +334,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		cfg := txpoolcfg.DefaultConfig
 		sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-		pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New())
 		require.NoError(err)
 
 		err = pool.start(ctx)
@@ -560,11 +560,15 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(p2pReceived, TxnSlots{}, "after_flush")
 		checkNotify(p2pReceived, TxnSlots{}, "after_flush")
 
-		p2, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		p2, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New())
 		require.NoError(err)
+		require.NoError(p2.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 		p2.senders = pool.senders // senders are not persisted
-		err = coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error { return p2.fromDB(ctx, tx, coreTx) })
+		err = p2.withLockedState(ctx, nil, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
+			var parked []*metaTxn
+			return p2.fromDBLocked(tx, coreTx, cacheView, &parked)
+		})
 		require.NoError(err)
 		for _, txn := range p2.byHash {
 			assert.Nil(txn.TxnSlot.Rlp)

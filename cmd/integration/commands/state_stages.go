@@ -72,7 +72,7 @@ Examples:
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		builderConfig := buildercfg.BuilderConfig{}
 		utils.SetupMinerCobra(cmd, &builderConfig)
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -101,7 +101,7 @@ var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -146,6 +146,9 @@ func init() {
 }
 
 func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig, ctx context.Context, logger1 log.Logger) error {
+	if err := checkCommitmentTrieMatchesFiles(); err != nil {
+		return err
+	}
 	dirs := datadir.New(datadirCli)
 	_, clean, engine, vmConfig, stateStages := newSync(ctx, db, &builderConfig, logger1)
 	defer clean()
@@ -336,6 +339,9 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 }
 
 func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
+	if err := checkCommitmentTrieMatchesFiles(); err != nil {
+		return err
+	}
 	chainConfig := fromdb.ChainConfig(db)
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 	_, clean, engine, vmConfig, sync := newSync(ctx, db, nil, logger)

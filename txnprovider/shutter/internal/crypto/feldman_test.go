@@ -64,7 +64,7 @@ func TestNewPolynomial(t *testing.T) {
 
 	for _, cs := range invalidCoefficients {
 		_, err := NewPolynomial(cs)
-		assert.NotEqual(t, err, nil)
+		assert.Error(t, err)
 	}
 }
 

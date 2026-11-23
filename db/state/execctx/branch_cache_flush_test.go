@@ -22,12 +22,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	_ "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
 type commitmentWrite struct {
@@ -85,11 +89,20 @@ func mergedCommitmentFileFixture(t *testing.T, stepSize uint64) (kv.TemporalRwDB
 	stepOneValue := []byte{0, 0, 0, 0, 2}
 	writeCommitmentRows(t, db, key, nil, commitmentWrite{txNum: 5, value: stepZeroValue})
 	writeCommitmentRows(t, db, key, stepZeroValue, commitmentWrite{txNum: 20, value: stepOneValue})
-	trieState, err := commitment.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig()).EncodeCurrentState(nil)
-	require.NoError(t, err)
-	commitmentState, err := commitmentdb.NewCommitmentState(20, 0, trieState).Encode()
-	require.NoError(t, err)
-	writeCommitmentRows(t, db, commitmentdb.KeyCommitmentState, nil, commitmentWrite{txNum: 20, value: commitmentState})
+	stateKey := commitment.KeyCommitmentState
+	var commitmentState []byte
+	if statecfg.ExperimentalCommitmentV3 {
+		stateKey = commitment.KeyCommitmentV3State
+		var err error
+		commitmentState, err = commitment.EncodeCommitmentV3State(empty.RootHash[:], 0, 20)
+		require.NoError(t, err)
+	} else {
+		trieState, err := commitment.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig()).EncodeCurrentState(nil)
+		require.NoError(t, err)
+		commitmentState, err = commitmentdb.NewCommitmentState(20, 0, trieState).Encode()
+		require.NoError(t, err)
+	}
+	writeCommitmentRows(t, db, stateKey, nil, commitmentWrite{txNum: 20, value: commitmentState})
 	writeAggregationGuard(t, db, 40)
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	require.NoError(t, agg.BuildFiles(db, 2*stepSize, unboundedFinalityCtx))
@@ -175,7 +188,40 @@ func TestBoundedGetLatestDoesNotPopulateBranchCache(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestSnapshotBranchCacheEntrySurvivesLegalUnwind(t *testing.T) {
+func TestBoundedGetLatestIgnoresBranchCache(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	const stepSize = uint64(16)
+	for _, source := range []string{"read_fill", "committed_write"} {
+		t.Run(source, func(t *testing.T) {
+			db, key, frozenValue := commitmentFileFixture(t, stepSize)
+			latestValue := []byte{0, 0, 0, 0, 2}
+			writeCommitmentRows(t, db, key, frozenValue, commitmentWrite{txNum: 20, value: latestValue})
+			roTx, err := db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer roTx.Rollback()
+			branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+			if source == "read_fill" {
+				branchCache.Clear()
+				_, _, err = roTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
+				require.NoError(t, err)
+			}
+			cached, _, ok := branchCache.Get(key)
+			require.True(t, ok)
+			require.Equal(t, latestValue, cached)
+
+			sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+			require.NoError(t, err)
+			defer sd.Close()
+			getter := sd.AsStateGetter(roTx, execctxapi.StateGetterOptions{})
+			got, _, err := getter.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithMaxStep(0))
+			require.NoError(t, err)
+			require.Equal(t, frozenValue, got)
+		})
+	}
+}
+
+func TestSnapshotBranchReadNeedsRefillAfterUnwind(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(16)
 	db, key, frozenValue := commitmentFileFixture(t, stepSize)
 	roTx, err := db.BeginTemporalRo(t.Context())
@@ -191,9 +237,14 @@ func TestSnapshotBranchCacheEntrySurvivesLegalUnwind(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, frozenValue, got)
 	require.Equal(t, kv.Step(1), step)
-	branchCache.Unwind(20)
-	got, _, ok := branchCache.Get(key)
+	cached, _, ok := branchCache.Get(key)
 	require.True(t, ok)
+	require.Equal(t, frozenValue, cached)
+	branchCache.Unwind(20)
+	_, _, ok = branchCache.Get(key)
+	require.False(t, ok)
+	got, _, err = sd.GetLatest(kv.CommitmentDomain, roTx, key)
+	require.NoError(t, err)
 	require.Equal(t, frozenValue, got)
 }
 
@@ -256,4 +307,125 @@ func TestLocalCacheUnwindDoesNotPopulateBranchCache(t *testing.T) {
 	require.NoError(t, err)
 	_, _, ok := branchCache.Get(key)
 	require.False(t, ok, "a speculative session must not seed the shared branch cache")
+}
+
+func TestV3SharedDomainsLeaveBranchCacheEmpty(t *testing.T) {
+	db, key, value := commitmentFileFixture(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	branchCache := rwTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache.Clear()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantCommitmentV3
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), execctx.WithTrieConfig(cfg))
+	require.NoError(t, err)
+	defer sd.Close()
+
+	got, _, err := sd.GetLatest(kv.CommitmentDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	written := []byte{0x0b, 0x0c}
+	require.NoError(t, sd.DomainPut(kv.CommitmentDomain, rwTx, written, []byte{0, 0, 0, 0, 2}, 30, nil))
+	require.NoError(t, sd.Commit(t.Context(), rwTx))
+
+	_, _, ok := branchCache.Get(key)
+	require.False(t, ok, "read-through filled the cache")
+	_, _, ok = branchCache.Get(written)
+	require.False(t, ok, "commit wrote through to the cache")
+}
+
+// unwindDeadFork commits an unwind of the step-2 branch written at txNum 40. during runs after the unwind is
+// staged and before it commits.
+func unwindDeadFork(t *testing.T, db kv.TemporalRwDB, key []byte, during func()) {
+	t.Helper()
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(2))
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	diffs[kv.CommitmentDomain] = []kv.DomainEntryDiff{{Key: string(key) + string(stepBytes), Value: nil}}
+	sd.Unwind(32, &diffs)
+	during()
+	require.NoError(t, sd.Commit(t.Context(), rwTx))
+}
+
+func latestCommitment(t *testing.T, db kv.TemporalRwDB, key []byte) []byte {
+	t.Helper()
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	v, _, err := sd.GetLatest(kv.CommitmentDomain, roTx, key)
+	require.NoError(t, err)
+	return v
+}
+
+// A read opened before the unwind commits still sees the dead fork; its fill must not survive the commit.
+func TestBranchCacheFillDuringUnwindCommitIsDropped(t *testing.T) {
+	const stepSize = uint64(16)
+	db, key, frozenValue := commitmentFileFixture(t, stepSize)
+	stepOneValue := []byte{0, 0, 0, 0, 2}
+	deadForkValue := []byte{0, 0, 0, 0, 3}
+	writeCommitmentRows(t, db, key, frozenValue, commitmentWrite{txNum: 20, value: stepOneValue}, commitmentWrite{txNum: 40, value: deadForkValue})
+	unwindDeadFork(t, db, key, func() {
+		roTx, err := db.BeginTemporalRo(t.Context())
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		got, _, err := roTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
+		require.NoError(t, err)
+		require.Equal(t, deadForkValue, got)
+	})
+	require.Equal(t, stepOneValue, latestCommitment(t, db, key))
+}
+
+// A view opened before the unwind still sees the dead fork after the commit; it must not fill the cache.
+func TestBranchCacheRejectsFillFromViewOpenedBeforeUnwind(t *testing.T) {
+	const stepSize = uint64(16)
+	db, key, frozenValue := commitmentFileFixture(t, stepSize)
+	stepOneValue := []byte{0, 0, 0, 0, 2}
+	deadForkValue := []byte{0, 0, 0, 0, 3}
+	writeCommitmentRows(t, db, key, frozenValue, commitmentWrite{txNum: 20, value: stepOneValue}, commitmentWrite{txNum: 40, value: deadForkValue})
+	oldTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer oldTx.Rollback()
+	unwindDeadFork(t, db, key, func() {})
+	got, _, err := oldTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
+	require.NoError(t, err)
+	require.Equal(t, deadForkValue, got)
+	oldTx.Rollback()
+	require.Equal(t, stepOneValue, latestCommitment(t, db, key))
+
+	newTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer newTx.Rollback()
+	_, _, err = newTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
+	require.NoError(t, err)
+	got, _, ok := newTx.AggTx().(commitment.BranchCacheProvider).BranchCache().Get(key)
+	require.True(t, ok, "a view opened after the unwind commit must still fill")
+	require.Equal(t, stepOneValue, got)
+}
+
+func TestBranchCacheRejectsFillFromViewOpenedBeforeCommit(t *testing.T) {
+	const stepSize = uint64(16)
+	db := newTestDb(t, stepSize)
+	key := []byte{0x0a, 0x0c}
+	oldValue := []byte{0, 0, 0, 0, 1}
+	newValue := []byte{0, 0, 0, 0, 2}
+	writeCommitmentRows(t, db, key, nil, commitmentWrite{txNum: 5, value: oldValue})
+	oldTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer oldTx.Rollback()
+	writeCommitmentRows(t, db, key, oldValue, commitmentWrite{txNum: 20, value: newValue})
+	got, _, err := oldTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
+	require.NoError(t, err)
+	require.Equal(t, oldValue, got)
+	oldTx.Rollback()
+	require.Equal(t, newValue, latestCommitment(t, db, key))
 }

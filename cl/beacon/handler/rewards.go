@@ -54,7 +54,7 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 	if err != nil {
 		return nil, err
 	}
-	root, err := a.rootFromBlockId(ctx, tx, blockId)
+	root, err := a.rootFromBlockId(tx, blockId)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 	defer snRoTx.Close()
 
 	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
-	slotData, err := state_accessors.ReadSlotData(stateGetter, slot, a.beaconChainCfg)
+	slotData, err := state_accessors.ReadSlotData(stateGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +139,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 	if err != nil {
 		return nil, err
 	}
-	root, err := a.rootFromBlockId(ctx, tx, blockId)
+	root, err := a.rootFromBlockId(tx, blockId)
 	if err != nil {
 		return nil, err
 	}

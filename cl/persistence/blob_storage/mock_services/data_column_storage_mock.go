@@ -82,6 +82,45 @@ func (c *MockDataColumnStorageColumnSidecarExistsCall) DoAndReturn(f func(contex
 	return c
 }
 
+// EarliestStoredSlot mocks base method.
+func (m *MockDataColumnStorage) EarliestStoredSlot() (uint64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EarliestStoredSlot")
+	ret0, _ := ret[0].(uint64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// EarliestStoredSlot indicates an expected call of EarliestStoredSlot.
+func (mr *MockDataColumnStorageMockRecorder) EarliestStoredSlot() *MockDataColumnStorageEarliestStoredSlotCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EarliestStoredSlot", reflect.TypeOf((*MockDataColumnStorage)(nil).EarliestStoredSlot))
+	return &MockDataColumnStorageEarliestStoredSlotCall{Call: call}
+}
+
+// MockDataColumnStorageEarliestStoredSlotCall wrap *gomock.Call
+type MockDataColumnStorageEarliestStoredSlotCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockDataColumnStorageEarliestStoredSlotCall) Return(arg0 uint64, arg1 error) *MockDataColumnStorageEarliestStoredSlotCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockDataColumnStorageEarliestStoredSlotCall) Do(f func() (uint64, error)) *MockDataColumnStorageEarliestStoredSlotCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockDataColumnStorageEarliestStoredSlotCall) DoAndReturn(f func() (uint64, error)) *MockDataColumnStorageEarliestStoredSlotCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // GetSavedColumnIndex mocks base method.
 func (m *MockDataColumnStorage) GetSavedColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash) ([]uint64, error) {
 	m.ctrl.T.Helper()
@@ -275,6 +314,44 @@ func (c *MockDataColumnStorageWriteColumnSidecarsCall) Do(f func(context.Context
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockDataColumnStorageWriteColumnSidecarsCall) DoAndReturn(f func(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error) *MockDataColumnStorageWriteColumnSidecarsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// WriteColumnSidecarsBatch mocks base method.
+func (m *MockDataColumnStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "WriteColumnSidecarsBatch", ctx, blockRoot, sidecars)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// WriteColumnSidecarsBatch indicates an expected call of WriteColumnSidecarsBatch.
+func (mr *MockDataColumnStorageMockRecorder) WriteColumnSidecarsBatch(ctx, blockRoot, sidecars any) *MockDataColumnStorageWriteColumnSidecarsBatchCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteColumnSidecarsBatch", reflect.TypeOf((*MockDataColumnStorage)(nil).WriteColumnSidecarsBatch), ctx, blockRoot, sidecars)
+	return &MockDataColumnStorageWriteColumnSidecarsBatchCall{Call: call}
+}
+
+// MockDataColumnStorageWriteColumnSidecarsBatchCall wrap *gomock.Call
+type MockDataColumnStorageWriteColumnSidecarsBatchCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockDataColumnStorageWriteColumnSidecarsBatchCall) Return(arg0 error) *MockDataColumnStorageWriteColumnSidecarsBatchCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockDataColumnStorageWriteColumnSidecarsBatchCall) Do(f func(context.Context, common.Hash, []*cltypes.DataColumnSidecar) error) *MockDataColumnStorageWriteColumnSidecarsBatchCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockDataColumnStorageWriteColumnSidecarsBatchCall) DoAndReturn(f func(context.Context, common.Hash, []*cltypes.DataColumnSidecar) error) *MockDataColumnStorageWriteColumnSidecarsBatchCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

@@ -142,3 +142,41 @@ func countSyncMap(m *sync.Map) int {
 	})
 	return count
 }
+
+// The block root does not cover the proposer signature, so a copy of a valid block with a bad
+// signature must not mark that root invalid.
+func TestForkGraphDoesNotMarkRootInvalidForBadProposerSignature(t *testing.T) {
+	decode := func(data []byte) *cltypes.SignedBeaconBlock {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+		require.NoError(t, utils.DecodeSSZSnappy(block, data, int(clparams.Phase0Version)))
+		return block
+	}
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	blockA := decode(block1)
+	_, status, err := graph.AddChainSegment(blockA, true)
+	require.NoError(t, err)
+	require.Equal(t, Success, status)
+
+	blockB := decode(block2)
+	root, err := blockB.Block.HashSSZ()
+	require.NoError(t, err)
+	otherSignature := decode(block2)
+	otherSignature.Signature = blockA.Signature
+	undecodableSignature := decode(block2)
+	undecodableSignature.Signature = common.Bytes96{0xff}
+	for _, forged := range []*cltypes.SignedBeaconBlock{otherSignature, undecodableSignature} {
+		_, status, err = graph.AddChainSegment(forged, true)
+		require.Error(t, err)
+		require.Equal(t, InvalidBlock, status)
+		require.False(t, graph.IsBlockInvalid(root))
+		_, stored := graph.GetBlock(common.Hash(root))
+		require.False(t, stored)
+	}
+
+	_, status, err = graph.AddChainSegment(blockB, true)
+	require.NoError(t, err)
+	require.Equal(t, Success, status)
+}

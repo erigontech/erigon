@@ -343,8 +343,7 @@ func TestMessages(t *testing.T) {
 		client := newClient(ctrl, i, nil)
 		client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
-				ch := make(chan libsentry.StreamReply[*sentryproto.InboundMessage], libsentry.MessagesQueueSize)
-				streamServer := &libsentry.SentryStreamS[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}
+				streamServer, streamClient := libsentry.NewSentryStream[*sentryproto.InboundMessage](ctx)
 
 				go func() {
 					for range 5 {
@@ -354,7 +353,7 @@ func TestMessages(t *testing.T) {
 					streamServer.Close()
 				}()
 
-				return &libsentry.SentryStreamC[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}, nil
+				return streamClient, nil
 			},
 		)
 
@@ -405,8 +404,7 @@ func TestPeers(t *testing.T) {
 		)
 		client.EXPECT().PeerEvents(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.PeerEventsRequest, opts ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error) {
-				ch := make(chan libsentry.StreamReply[*sentryproto.PeerEvent], libsentry.MessagesQueueSize)
-				streamServer := &libsentry.SentryStreamS[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}
+				streamServer, streamClient := libsentry.NewSentryStream[*sentryproto.PeerEvent](ctx)
 
 				go func() {
 					for range 5 {
@@ -416,7 +414,7 @@ func TestPeers(t *testing.T) {
 					streamServer.Close()
 				}()
 
-				return &libsentry.SentryStreamC[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}, nil
+				return streamClient, nil
 			},
 		)
 		client.EXPECT().PeerById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(

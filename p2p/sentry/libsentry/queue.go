@@ -16,31 +16,139 @@
 
 package libsentry
 
-// MessagesQueueSize bounds the per-subscriber channels that fan out inbound
-// P2P messages and peer events from a sentry to its stream consumers. Kept
-// small so that peer-driven traffic cannot push the process toward OOM via
-// the multi-MB ethp2p message size limit; paired with EvictOldestIfHalfFull
-// at fan-out writes so fresh messages are preferred when consumers fall
-// behind.
-const MessagesQueueSize = 1024
+import (
+	"context"
+	"fmt"
+	"io"
+	"sync"
 
-// EvictOldestIfHalfFull drops up to cap(ch)/4 oldest items from ch when it
-// is more than half full. Non-blocking: returns as soon as the drain target
-// is reached or ch becomes empty.
-//
-// Intended to be called right after a successful send on fan-out channels,
-// mirroring the eviction policy used by the per-subscriber Messages
-// channels in p2p/sentry.
-func EvictOldestIfHalfFull[T any](ch chan T) {
-	if len(ch) <= cap(ch)/2 {
-		return
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+
+	"github.com/erigontech/erigon/diagnostics/metrics"
+)
+
+const (
+	// MessagesQueueSize bounds bookkeeping overhead for small messages.
+	MessagesQueueSize = 1024
+	// MessagesQueueByteLimit bounds serialized data waiting in each queue.
+	// In-flight messages, transport buffers, and decoded objects are outside this budget.
+	MessagesQueueByteLimit = 64 * 1024 * 1024
+)
+
+var (
+	sentryQueueDroppedByBytes = metrics.GetOrCreateCounter(`p2p_sentry_queue_dropped_messages_total{limit="bytes"}`)
+	sentryQueueDroppedByCount = metrics.GetOrCreateCounter(`p2p_sentry_queue_dropped_messages_total{limit="count"}`)
+)
+
+type queuedMessage[T protoreflect.ProtoMessage] struct {
+	message T
+	size    int
+}
+
+// messageQueue keeps eviction and receiving under the same lock, so each
+// item releases its byte budget exactly once. All access to items, bytes,
+// and err holds mu.
+type messageQueue[T protoreflect.ProtoMessage] struct {
+	mu    sync.Mutex
+	items []queuedMessage[T]
+	ready chan struct{}
+	bytes int
+	err   error // nil while open, the terminal error while draining, then io.EOF.
+}
+
+func (q *messageQueue[T]) push(message T) error {
+	size := proto.Size(message)
+	if size > MessagesQueueByteLimit {
+		return fmt.Errorf("sentry message exceeds queue byte limit: %d", size)
 	}
-	drain := cap(ch) / 4
-	for range drain {
-		select {
-		case <-ch:
-		default:
-			return
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.err != nil {
+		return io.EOF
+	}
+	for q.bytes+size > MessagesQueueByteLimit {
+		q.pop()
+		sentryQueueDroppedByBytes.Inc()
+	}
+	q.items = append(q.items, queuedMessage[T]{message: message, size: size})
+	q.bytes += size
+	// Evict in batches so slow consumers see recent traffic and leave room
+	// for bursts. Use the fixed limit because popping entries changes the
+	// slice capacity.
+	if len(q.items) > MessagesQueueSize/2 {
+		for range MessagesQueueSize / 4 {
+			q.pop()
+			sentryQueueDroppedByCount.Inc()
 		}
+	}
+	q.notify()
+	return nil
+}
+
+// pop requires mu to be held and items to be non-empty. Clear the removed
+// slot so its payload can be collected while remaining entries share the array.
+func (q *messageQueue[T]) pop() queuedMessage[T] {
+	item := q.items[0]
+	q.items[0] = queuedMessage[T]{}
+	if len(q.items) == 1 {
+		// Reuse the last slot to avoid an allocation on the next push.
+		q.items = q.items[:0]
+	} else {
+		q.items = q.items[1:]
+	}
+	q.bytes -= item.size
+	return item
+}
+
+// notify coalesces wake-ups: ready is a hint to recheck items under mu.
+// A receiver must signal again if items remain. The caller must hold mu
+// to avoid signaling after close.
+func (q *messageQueue[T]) notify() {
+	if q.err == nil && len(q.items) > 0 {
+		select {
+		case q.ready <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (q *messageQueue[T]) recv(ctx context.Context) (T, error) {
+	var zero T
+	for {
+		select {
+		case <-ctx.Done():
+			return zero, ctx.Err()
+		case <-q.ready:
+		}
+		q.mu.Lock()
+		if len(q.items) > 0 {
+			item := q.pop()
+			q.notify()
+			q.mu.Unlock()
+			return item.message, nil
+		}
+		err := q.err
+		if err != nil {
+			q.err = io.EOF
+		}
+		q.mu.Unlock()
+		if err != nil {
+			return zero, err
+		}
+	}
+}
+
+// close stores the first terminal error outside items so eviction cannot drop it.
+// Closing ready wakes all receivers; recv drains items before reporting the error.
+func (q *messageQueue[T]) close(err error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.err == nil {
+		if err == nil {
+			err = io.EOF
+		}
+		q.err = err
+		close(q.ready)
 	}
 }

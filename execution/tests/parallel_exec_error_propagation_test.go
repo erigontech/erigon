@@ -19,12 +19,12 @@ package executiontests
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/dbg"
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -65,7 +65,7 @@ func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testin
 	require.ErrorIs(t, err, chaosErr,
 		"the pre-dispatch failure must surface as a hard error, wrapping the original")
 	var exhausted *stagedsync.ErrLoopExhausted
-	require.False(t, errors.As(err, &exhausted),
+	require.NotErrorAs(t, err, &exhausted,
 		"pre-dispatch failure classified as ErrLoopExhausted → runStage loops forever with zero progress")
 }
 
@@ -107,11 +107,6 @@ func runParallelExecV3WithContext(t *testing.T, ctx context.Context, m *execmodu
 
 func runParallelExecV3WithChaosGate(t *testing.T, ctx context.Context, m *execmoduletester.ExecModuleTester, maxBlockNum uint64, chaosMonkey, initialCycle bool) error {
 	t.Helper()
-
-	// Callers must not use t.Parallel: executor selection is process-wide.
-	previousParallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	defer func() { dbg.Exec3Parallel = previousParallel }()
 
 	syncCfg := m.Cfg().Sync
 	syncCfg.ChaosMonkey = chaosMonkey
@@ -168,7 +163,7 @@ func TestParallelExec_WorkerPoolDeath_SurfacesInsteadOfHanging(t *testing.T) {
 	require.ErrorIs(t, err, chaosErr,
 		"a dead worker pool must surface its error through the executor group")
 	var exhausted *stagedsync.ErrLoopExhausted
-	require.False(t, errors.As(err, &exhausted),
+	require.NotErrorAs(t, err, &exhausted,
 		"worker-pool death classified as ErrLoopExhausted → runStage retries forever with zero progress")
 }
 
@@ -264,8 +259,48 @@ func TestParallelExec_ExecLoopPanic_SurfacesInsteadOfRetrying(t *testing.T) {
 		"a recovered exec-loop panic must surface as a hard error")
 	require.ErrorContains(t, err, chaosErr.Error())
 	var exhausted *stagedsync.ErrLoopExhausted
-	require.False(t, errors.As(err, &exhausted),
+	require.NotErrorAs(t, err, &exhausted,
 		"exec-loop panic classified as ErrLoopExhausted → runStage retries forever with zero progress")
+}
+
+// A recovered loop panic keeps the panic value's message but not its identity,
+// so a value that wraps a verdict, an exhaustion boundary or a cancellation
+// cannot be classified as one upstream.
+func TestParallelExec_RecoveredPanicLosesErrorIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		faults chaos_monkey.Faults
+		check  func(t *testing.T, err error)
+	}{
+		{"apply loop panic with a verdict value", chaos_monkey.Faults{ApplyLoopPanic: fmt.Errorf("%w: bad root", rules.ErrInvalidBlock)}, func(t *testing.T, err error) {
+			require.ErrorContains(t, err, "apply loop panic")
+			require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+		}},
+		{"exec loop panic with a verdict value", chaos_monkey.Faults{ExecLoopPanic: fmt.Errorf("%w: bad root", rules.ErrInvalidBlock)}, func(t *testing.T, err error) {
+			require.ErrorContains(t, err, "exec loop panic")
+			require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+		}},
+		{"exec loop panic with an exhaustion value", chaos_monkey.Faults{ExecLoopPanic: &stagedsync.ErrLoopExhausted{From: 1, To: 2}}, func(t *testing.T, err error) {
+			require.ErrorContains(t, err, "exec loop panic")
+			var exhausted *stagedsync.ErrLoopExhausted
+			require.NotErrorAs(t, err, &exhausted)
+		}},
+		{"exec loop panic with context.Canceled", chaos_monkey.Faults{ExecLoopPanic: context.Canceled}, func(t *testing.T, err error) {
+			require.ErrorContains(t, err, "exec loop panic")
+			require.False(t, commonerrors.IsOnlyCanceled(err), "%v", err)
+		}},
+		{"apply loop panic with context.Canceled", chaos_monkey.Faults{ApplyLoopPanic: context.Canceled}, func(t *testing.T, err error) {
+			require.ErrorContains(t, err, "apply loop panic")
+			require.False(t, commonerrors.IsOnlyCanceled(err), "%v", err)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, b2 := tipWithUnexecutedBlock2(t)
+			err := runParallelExecV3(t, m, b2.NumberU64(), tc.faults)
+			require.Error(t, err)
+			tc.check(t, err)
+		})
+	}
 }
 
 // A panic inside a worker task is an executor fault, never a block verdict: it
@@ -282,6 +317,6 @@ func TestParallelExec_TaskPanic_SurfacesAsOperationalError(t *testing.T) {
 	require.ErrorContains(t, err, "exec task panic")
 	require.ErrorContains(t, err, chaosErr.Error())
 	var exhausted *stagedsync.ErrLoopExhausted
-	require.False(t, errors.As(err, &exhausted),
+	require.NotErrorAs(t, err, &exhausted,
 		"task panic classified as ErrLoopExhausted → runStage retries forever with zero progress")
 }

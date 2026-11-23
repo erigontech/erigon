@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/snappypool"
@@ -147,12 +146,11 @@ func setupBlocksByHeadTest(
 		store,
 		indiciesDB,
 		host,
-		peers.NewPool(host),
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, forkChoice, nil, nil, nil, true,
+		nil, forkChoice, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -195,6 +193,7 @@ func writeBlocksByHeadRequest(t *testing.T, stream network.Stream, root common.H
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&reqBuf, req))
 	_, err := stream.Write(bytes.Clone(reqBuf.Bytes()))
 	require.NoError(t, err)
+	require.NoError(t, stream.CloseWrite())
 }
 
 func readBlocksByHeadResponses(t *testing.T, stream network.Stream, count int) []*cltypes.SignedBeaconBlock {
@@ -215,7 +214,7 @@ func readBlocksByHeadResponses(t *testing.T, stream network.Stream, count int) [
 		_, err = io.ReadFull(stream, forkDigest)
 		require.NoError(t, err)
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)

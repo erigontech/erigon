@@ -38,10 +38,10 @@ func sais_16_32(text []uint16, textMax int, sa, tmp []int32) {
 	} else {
 		induceSubL_16_32(text, sa, freq, bucket)
 		induceSubS_16_32(text, sa, freq, bucket)
-		length_16_32(text, sa, numLMS)
+		length_16_32(text, sa)
 		maxID := assignID_16_32(text, sa, numLMS)
 		if maxID < numLMS {
-			map_32(sa, numLMS)
+			map_32(sa)
 			recurse_32(sa, tmp, numLMS, maxID)
 			unmap_16_32(text, sa, numLMS)
 		} else {
@@ -163,8 +163,8 @@ func induceSubS_16_32(text []uint16, sa, freq, bucket []int32) {
 	b := bucket[cB]
 
 	top := len(sa)
-	for i := len(sa) - 1; i >= 0; i-- {
-		j := int(sa[i])
+	for i, v := range slices.Backward(sa) {
+		j := int(v)
 		if j == 0 {
 			continue
 		}
@@ -192,7 +192,7 @@ func induceSubS_16_32(text []uint16, sa, freq, bucket []int32) {
 	}
 }
 
-func length_16_32(text []uint16, sa []int32, numLMS int) {
+func length_16_32(text []uint16, sa []int32) {
 	end := 0
 
 	c0, c1, isTypeS := uint16(0), uint16(0), false
@@ -281,7 +281,7 @@ func expand_16_32(text []uint16, freq, bucket, sa []int32, numLMS int) {
 	b := bucket[c] - 1
 	bucket[c] = b
 
-	for i := len(sa) - 1; i >= 0; i-- {
+	for i := range slices.Backward(sa) {
 		if i != int(b) {
 			sa[i] = 0
 			continue
@@ -342,8 +342,8 @@ func induceS_16_32(text []uint16, sa, freq, bucket []int32) {
 	cB := uint16(0)
 	b := bucket[cB]
 
-	for i := len(sa) - 1; i >= 0; i-- {
-		j := int(sa[i])
+	for i, v := range slices.Backward(sa) {
+		j := int(v)
 		if j >= 0 {
 			continue
 		}

@@ -20,22 +20,14 @@
 package runtime
 
 import (
-	"context"
 	"errors"
 	"math"
 	"math/big"
-	"os"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -62,7 +54,9 @@ type Config struct {
 	BaseFee     uint256.Int
 	L2Version   uint64
 
-	State     *state.IntraBlockState
+	State *state.IntraBlockState
+
+	ownState  *state.IntraBlockState // the State a run built because the caller gave none
 	GetHashFn func(n uint64) (common.Hash, error)
 }
 
@@ -115,30 +109,14 @@ func setDefaults(cfg *Config) {
 
 var contractAsAddress = accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
-func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.IntraBlockState, error) {
+func Execute(code, input []byte, cfg *Config) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
 	setDefaults(cfg)
 
-	externalState := cfg.State != nil
-	if !externalState {
-		dirs := datadir.New(tempdir)
-		db := temporaltest.NewTestDB(nil, dirs)
-		defer db.Close()
-
-		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-		if err != nil {
-			return nil, nil, err
-		}
-		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-		if err != nil {
-			return nil, nil, err
-		}
-		defer sd.Close()
-		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	if cfg.State == nil || cfg.State == cfg.ownState { // the versioned CreateAccount keeps earlier storage, so only a new state gives an empty contract
+		ownState(cfg)
 	}
 	var (
 		address = contractAsAddress
@@ -162,7 +140,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		sender,
 		contractAsAddress,
 		input,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false),
 		cfg.Value,
 		false, /* bailout */
 	)
@@ -172,41 +150,20 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 }
 
 // Create executes the code using the EVM create method
-func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, mdgas.MdGas, error) {
+func Create(input []byte, cfg *Config) ([]byte, common.Address, mdgas.MdGas, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
 	setDefaults(cfg)
 
-	externalState := cfg.State != nil
-	if !externalState {
-		tmp, err := os.MkdirTemp("", "erigon-create-vm-*")
-		if err != nil {
-			return nil, [20]byte{}, mdgas.MdGas{}, err
-		}
-		defer dir.RemoveAll(tmp) //nolint:errcheck
-
-		dirs := datadir.New(tmp)
-		db := temporaltest.NewTestDB(nil, dirs)
-		defer db.Close()
-		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-		if err != nil {
-			return nil, [20]byte{}, mdgas.MdGas{}, err
-		}
-		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-		if err != nil {
-			return nil, [20]byte{}, mdgas.MdGas{}, err
-		}
-		defer sd.Close()
-		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	if cfg.State == nil {
+		ownState(cfg)
 	}
 	var (
 		vmenv  = NewEnv(cfg)
 		sender = cfg.Origin
 		rules  = vmenv.ChainRules()
-		gas    = mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)
+		gas    = mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false)
 	)
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
 	if !rules.IsAmsterdam {
@@ -260,24 +217,28 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 
 	vmenv := NewEnv(cfg)
 
-	sender, err := cfg.State.GetOrNewStateObject(cfg.Origin)
-	if err != nil {
-		return nil, mdgas.MdGas{}, err
-	}
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
+	// Without EIP-161 an empty account survives in the post-state, and a
+	// zero-value transfer does not create the sender, so the origin has to
+	// exist for the dump and for CALL gas to match.
+	if !rules.IsEIP161Enabled() {
+		if _, err := statedb.GetOrNewStateObject(cfg.Origin); err != nil {
+			return nil, mdgas.MdGas{}, err
+		}
+	}
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
 		cfg.EVMConfig.Tracer.OnTxStart(vmenv.GetVMContext(), nil, accounts.ZeroAddress)
 	}
 
-	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)
+	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false)
 	leftOverGas, topLevelCallGasUsed, err := protocol.HandleRuntimeCall(vmenv, address, cfg.Value, gas)
 	var ret []byte
 	if err == nil {
 		ret, leftOverGas, _, err = vmenv.Call(
-			sender.Address(),
+			cfg.Origin,
 			address,
 			input,
 			leftOverGas,
@@ -286,7 +247,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 		)
 		protocol.RefillTopLevelGas(&leftOverGas, &topLevelCallGasUsed, cfg.EVMConfig.RestoreState, err, cfg.EVMConfig.Tracer)
 	} else if errors.Is(err, vm.ErrRuntimeOutOfGas) {
-		protocol.HandleRuntimeFailure(vmenv, vm.CALL, sender.Address(), address, input, gas, &leftOverGas, cfg.Value, err)
+		protocol.HandleRuntimeFailure(vmenv, vm.CALL, cfg.Origin, address, input, gas, &leftOverGas, cfg.Value, err)
 	}
 
 	if cfg.EVMConfig.Tracer.HasTxEndHook() {
@@ -294,4 +255,12 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	}
 
 	return ret, leftOverGas, err
+}
+
+// ownState gives a run without a caller state a versioned state over an empty base, and remembers it as the
+// runtime's own. The caller keeps the states it was returned.
+func ownState(cfg *Config) {
+	cfg.State = state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	cfg.State.SetNoConflictDetection()
+	cfg.ownState = cfg.State
 }

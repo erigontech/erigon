@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"testing"
 	"time"
@@ -28,14 +29,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 func TestPeerRequestUsesCallerContext(t *testing.T) {
-	requestCancelled := make(chan struct{})
+	requestStarted, requestCancelled := make(chan struct{}), make(chan struct{})
 	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
 		handler: http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+			close(requestStarted)
 			<-request.Context().Done()
 			close(requestCancelled)
 		}),
@@ -47,6 +50,7 @@ func TestPeerRequestUsesCallerContext(t *testing.T) {
 		done <- err
 	}()
 
+	receivePeerRequestTestValue(t, requestStarted)
 	cancel()
 	require.ErrorIs(t, receivePeerRequestTestValue(t, done), context.Canceled)
 	receivePeerRequestTestValue(t, requestCancelled)
@@ -109,5 +113,107 @@ func receivePeerRequestTestValue[T any](t *testing.T, values <-chan T) T {
 		t.Fatal("timed out waiting for peer request")
 		var zero T
 		return zero
+	}
+}
+
+// Requests to one peer share MAX_CONCURRENT_REQUESTS open streams per request type, across protocol versions and alternatives lists.
+func TestPeerRequestLimitsConcurrentStreamsPerPeerAndRequestType(t *testing.T) {
+	release := make(chan struct{})
+	reached := make(chan string, 8)
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		handler: http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+			reached <- request.Header.Get("REQRESP-PEER-ID") + " " + request.Header.Get("REQRESP-TOPIC")
+			<-release
+		}),
+	}}
+	request := func(pid, topic string) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := server.requestPeer(t.Context(), peer.ID(pid), &sentinelproto.RequestData{Topic: topic, Data: []byte("request")})
+			done <- err
+		}()
+		return done
+	}
+
+	blocksByRange := communication.BeaconBlocksByRangeProtocolV2 + "," + communication.BeaconBlocksByRangeProtocolV1
+	first, second := request("a", blocksByRange), request("a", blocksByRange)
+	receivePeerRequestTestValue(t, reached)
+	receivePeerRequestTestValue(t, reached)
+
+	require.ErrorIs(t, receivePeerRequestTestValue(t, request("a", communication.BeaconBlocksByRangeProtocolV2)), ErrPeerBusy)
+	otherPeer := request("b", communication.BeaconBlocksByRangeProtocolV1)
+	otherRequestType := request("a", communication.DataColumnSidecarsByRootProtocolV1)
+	receivePeerRequestTestValue(t, reached)
+	receivePeerRequestTestValue(t, reached)
+
+	close(release)
+	for _, done := range []<-chan error{first, second, otherPeer, otherRequestType} {
+		require.NotErrorIs(t, receivePeerRequestTestValue(t, done), ErrPeerBusy)
+	}
+	require.NotErrorIs(t, receivePeerRequestTestValue(t, request("a", communication.BeaconBlocksByRangeProtocolV2)), ErrPeerBusy, "finished streams free their slots")
+}
+
+func TestSmallRequestDoesNotWaitBehindBulkRequests(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	reached := make(chan struct{}, 4)
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		handler: http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			reached <- struct{}{}
+			<-release
+		}),
+	}}
+	bulk := func(pid string) {
+		go func() {
+			_, _ = server.requestPeer(t.Context(), peer.ID(pid), &sentinelproto.RequestData{Topic: communication.BeaconBlocksByRangeProtocolV2, Data: []byte{1}, MaxResponseBytes: math.MaxUint64})
+		}()
+	}
+	bulk("a")
+	bulk("b")
+	receivePeerRequestTestValue(t, reached)
+	receivePeerRequestTestValue(t, reached)
+	bulk("c")
+	time.Sleep(100 * time.Millisecond) // the third bulk request is now queued
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	go func() {
+		_, _ = server.requestPeer(ctx, peer.ID("d"), &sentinelproto.RequestData{Topic: communication.MetadataProtocolV2, Data: []byte{1}})
+	}()
+	receivePeerRequestTestValue(t, reached)
+}
+
+// Responses are buffered whole, so max-size requests in flight share one byte budget: a third must wait, without a stream.
+func TestPeerRequestsShareAResponseBudget(t *testing.T) {
+	release := make(chan struct{})
+	reached := make(chan struct{}, 4)
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		handler: http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			reached <- struct{}{}
+			<-release
+		}),
+	}}
+	blocksByRange := " " + communication.BeaconBlocksByRangeProtocolV2 + " , " + communication.BeaconBlocksByRangeProtocolV1 // the handler trims each alternative
+	request := func(pid string) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := server.requestPeer(t.Context(), peer.ID(pid), &sentinelproto.RequestData{Topic: blocksByRange, Data: []byte("request"), MaxResponseBytes: math.MaxUint64})
+			done <- err
+		}()
+		return done
+	}
+
+	first, second, third := request("a"), request("a"), request("a")
+	receivePeerRequestTestValue(t, reached)
+	receivePeerRequestTestValue(t, reached)
+	select {
+	case <-reached:
+		t.Fatal("a third max-size request ran while two held the budget")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	receivePeerRequestTestValue(t, reached)
+	for _, done := range []<-chan error{first, second, third} {
+		require.NotErrorIs(t, receivePeerRequestTestValue(t, done), ErrPeerBusy, "a request waiting for budget holds no stream")
 	}
 }

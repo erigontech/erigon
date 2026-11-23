@@ -17,7 +17,6 @@
 package handler
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -54,7 +53,7 @@ func TestBuilderWinningResponseFailsWhenRouteCapacityIsFull(t *testing.T) {
 
 	require.Error(t, err)
 	var endpointErr *beaconhttp.EndpointError
-	require.True(t, errors.As(err, &endpointErr))
+	require.ErrorAs(t, err, &endpointErr)
 	require.Equal(t, http.StatusServiceUnavailable, endpointErr.Code)
 	require.Empty(t, recorder.Header().Get("Eth-Builder-Url"))
 }
@@ -331,4 +330,18 @@ func TestBuilderRouteStoreEqualExpiryUsesKeyTieBreak(t *testing.T) {
 			require.True(t, higherExists)
 		})
 	}
+}
+
+func (s *builderRouteStore) Claim(root common.Hash, url string) (uint64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	s.pruneExpired(now)
+	route, ok := s.routes[builderRouteKey{root: root, url: url}]
+	if !ok || !route.trusted || route.state != builderRouteIdle {
+		return 0, false
+	}
+	route.claimID = s.newClaimID()
+	route.state = builderRouteInFlight
+	return route.claimID, true
 }

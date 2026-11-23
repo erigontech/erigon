@@ -22,24 +22,15 @@ package trie
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
-)
-
-var (
-	// EmptyRoot is the known root hash of an empty trie.
-	// DESCRIBED: docs/programmers_guide/guide.md#root
-	EmptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
-
-	// emptyState is the known hash of an empty state trie entry.
-	emptyState = crypto.Keccak256Hash(nil)
 )
 
 // Trie is a Merkle Patricia Trie.
@@ -54,22 +45,16 @@ type Trie struct {
 	valueNodesRLPEncoded bool
 
 	newHasherFunc func() *hasher
-	strictHash    bool // if true, the trie will panic on a hash access
 }
 
 // New creates a trie with an existing root node from db.
-//
-// If root is the zero hash or the sha3 hash of an empty string, the
-// trie is initially empty and does not require a database. Otherwise,
-// New will panic if db is nil and returns a MissingNodeError if root does
-// not exist in the database. Accessing the trie loads nodes from db on demand.
 // Deprecated
 // use package turbo/trie
 func New(root common.Hash) *Trie {
 	trie := &Trie{
 		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
 	}
-	if (root != common.Hash{}) && root != EmptyRoot {
+	if (root != common.Hash{}) && root != empty.RootHash {
 		trie.RootNode = &HashNode{hash: root[:]}
 	}
 	return trie
@@ -99,14 +84,10 @@ func NewTestRLPTrie(root common.Hash) *Trie {
 		valueNodesRLPEncoded: true,
 		newHasherFunc:        func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ true) },
 	}
-	if (root != common.Hash{}) && root != EmptyRoot {
+	if (root != common.Hash{}) && root != empty.RootHash {
 		trie.RootNode = &HashNode{hash: root[:]}
 	}
 	return trie
-}
-
-func (t *Trie) SetStrictHash(strict bool) {
-	t.strictHash = strict
 }
 
 // Get returns the value for key stored in the trie.
@@ -117,15 +98,6 @@ func (t *Trie) Get(key []byte) (value []byte, gotValue bool) {
 
 	hex := nibbles.KeybytesToHex(key)
 	return t.get(t.RootNode, hex, 0)
-}
-
-func (t *Trie) FindPath(key []byte) (value []byte, parents [][]byte, gotValue bool) {
-	if t.RootNode == nil {
-		return nil, nil, true
-	}
-
-	hex := nibbles.KeybytesToHex(key)
-	return t.getPath(t.RootNode, nil, hex, 0)
 }
 
 func (t *Trie) GetAccount(key []byte) (value *accounts.Account, gotValue bool) {
@@ -267,46 +239,6 @@ func (t *Trie) get(origNode Node, key []byte, pos int) (value []byte, gotValue b
 	}
 }
 
-func (t *Trie) getPath(origNode Node, parents [][]byte, key []byte, pos int) ([]byte, [][]byte, bool) {
-	switch n := origNode.(type) {
-	case nil:
-		return nil, parents, true
-	case ValueNode:
-		return n, parents, true
-	case *AccountNode:
-		return t.getPath(n.Storage, append(parents, n.reference()), key, pos)
-	case *ShortNode:
-		matchlen := nibbles.CommonPrefixLen(key[pos:], n.Key)
-		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
-			return t.getPath(n.Val, append(parents, n.reference()), key, pos+matchlen)
-		} else {
-			return nil, parents, true
-		}
-
-	case *DuoNode:
-		i1, i2 := n.childrenIdx()
-		switch key[pos] {
-		case i1:
-			return t.getPath(n.child1, append(parents, n.reference()), key, pos+1)
-		case i2:
-			return t.getPath(n.child2, append(parents, n.reference()), key, pos+1)
-		default:
-			return nil, parents, true
-		}
-	case *FullNode:
-		child := n.Children[key[pos]]
-		if child == nil {
-			return nil, parents, true
-		}
-		return t.getPath(child, append(parents, n.reference()), key, pos+1)
-	case *HashNode:
-		return n.hash, parents, false
-
-	default:
-		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))
-	}
-}
-
 // Update associates key with value in the trie. Subsequent calls to
 // Get will return value. If value has length zero, any existing value
 // is deleted from the trie and calls to Get will return nil.
@@ -339,7 +271,7 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	hex := nibbles.KeybytesToHex(key)
 
 	var newnode *AccountNode
-	if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
+	if value.Root == empty.RootHash || value.Root == (common.Hash{}) {
 		newnode = &AccountNode{*value, nil, true, nil, codeSizeUncached}
 	} else {
 		newnode = &AccountNode{*value, &HashNode{hash: value.Root[:]}, true, nil, codeSizeUncached}
@@ -376,191 +308,6 @@ func (t *Trie) UpdateAccountCode(key []byte, code CodeNode) error {
 	// t.insert will call the observer methods itself
 	_, t.RootNode = t.insert(t.RootNode, hex, accNode)
 	return nil
-}
-
-// UpdateAccountCodeSize attaches the code size to the account
-func (t *Trie) UpdateAccountCodeSize(key []byte, codeSize int) error {
-	if t.RootNode == nil {
-		return nil
-	}
-
-	hex := nibbles.KeybytesToHex(key)
-
-	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
-	if accNode == nil || !gotValue {
-		return fmt.Errorf("account not found with key: %x", key)
-	}
-
-	accNode.CodeSize = codeSize
-
-	// t.insert will call the observer methods itself
-	_, t.RootNode = t.insert(t.RootNode, hex, accNode)
-	return nil
-}
-
-// LoadRequestForCode Code expresses the need to fetch code from the DB (by its hash) and attach
-// to a specific account leaf in the trie.
-type LoadRequestForCode struct {
-	t        *Trie
-	addrHash common.Hash // contract address hash
-	codeHash accounts.CodeHash
-	bytecode bool // include the bytecode too
-}
-
-func (lrc *LoadRequestForCode) String() string {
-	return fmt.Sprintf("rr_code{addrHash:%x,codeHash:%x,bytecode:%v}", lrc.addrHash, lrc.codeHash, lrc.bytecode)
-}
-
-func (t *Trie) NewLoadRequestForCode(addrHash common.Hash, codeHash accounts.CodeHash, bytecode bool) *LoadRequestForCode {
-	return &LoadRequestForCode{t, addrHash, codeHash, bytecode}
-}
-
-func (t *Trie) NeedLoadCode(addrHash common.Hash, codeHash accounts.CodeHash, bytecode bool) (bool, *LoadRequestForCode) {
-	if codeHash.IsEmpty() {
-		return false, nil
-	}
-
-	var ok bool
-	if bytecode {
-		_, ok = t.GetAccountCode(addrHash[:])
-	} else {
-		_, ok = t.GetAccountCodeSize(addrHash[:])
-	}
-	if !ok {
-		return true, t.NewLoadRequestForCode(addrHash, codeHash, bytecode)
-	}
-
-	return false, nil
-}
-
-// FindSubTriesToLoad walks over the trie and creates the list of DB prefixes and
-// corresponding list of valid bits in the prefix (for the cases when prefix contains an
-// odd number of nibbles) that would allow loading the missing information from the database
-// It also create list of `hooks`, the paths in the trie (in nibbles) where the loaded
-// sub-tries need to be inserted.
-func (t *Trie) FindSubTriesToLoad(rl RetainDecider) (prefixes [][]byte, fixedbits []int, hooks [][]byte) {
-	return findSubTriesToLoad(t.RootNode, nil, nil, rl, nil, 0, nil, nil, nil)
-}
-
-var (
-	bytes8  [8]byte
-	bytes16 [16]byte
-)
-
-func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecider, dbPrefix []byte, bits int, prefixes [][]byte, fixedbits []int, hooks [][]byte) (newPrefixes [][]byte, newFixedBits []int, newHooks [][]byte) {
-	switch n := nd.(type) {
-	case *ShortNode:
-		nKey := n.Key
-		if nKey[len(nKey)-1] == 16 {
-			nKey = nKey[:len(nKey)-1]
-		}
-		nibblePath = append(nibblePath, nKey...)
-		hook = append(hook, nKey...)
-		if !rl.Retain(nibblePath) {
-			return prefixes, fixedbits, hooks
-		}
-		for _, b := range nKey {
-			if bits%8 == 0 {
-				dbPrefix = append(dbPrefix, b<<4)
-			} else {
-				dbPrefix[len(dbPrefix)-1] &= 0xf0
-				dbPrefix[len(dbPrefix)-1] |= b & 0xf
-			}
-			bits += 4
-		}
-		return findSubTriesToLoad(n.Val, nibblePath, hook, rl, dbPrefix, bits, prefixes, fixedbits, hooks)
-	case *DuoNode:
-		i1, i2 := n.childrenIdx()
-		newPrefixes = prefixes
-		newFixedBits = fixedbits
-		newHooks = hooks
-		newNibblePath := append([]byte(nil), nibblePath...)
-		newNibblePath = append(newNibblePath, i1)
-		newHook := append([]byte(nil), hook...)
-		newHook = append(newHook, i1)
-		if rl.Retain(newNibblePath) {
-			var newDbPrefix []byte
-			if bits%8 == 0 {
-				newDbPrefix = append([]byte(nil), dbPrefix...)
-				newDbPrefix = append(newDbPrefix, i1<<4)
-			} else {
-				newDbPrefix = dbPrefix
-				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
-				newDbPrefix[len(newDbPrefix)-1] |= i1 & 0xf
-			}
-			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child1, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
-		}
-		newNibblePath = append([]byte(nil), nibblePath...)
-		newNibblePath = append(newNibblePath, i2)
-		newHook = append([]byte(nil), hook...)
-		newHook = append(newHook, i2)
-		if rl.Retain(newNibblePath) {
-			var newDbPrefix []byte
-			if bits%8 == 0 {
-				newDbPrefix = append([]byte(nil), dbPrefix...)
-				newDbPrefix = append(newDbPrefix, i2<<4)
-			} else {
-				newDbPrefix = dbPrefix
-				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
-				newDbPrefix[len(newDbPrefix)-1] |= i2 & 0xf
-			}
-			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child2, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
-		}
-		return newPrefixes, newFixedBits, newHooks
-	case *FullNode:
-		newPrefixes = prefixes
-		newFixedBits = fixedbits
-		newHooks = hooks
-		for i, child := range n.Children {
-			if child != nil {
-				newNibblePath := append([]byte(nil), nibblePath...)
-				newNibblePath = append(newNibblePath, byte(i))
-				newHook := append([]byte(nil), hook...)
-				newHook = append(newHook, byte(i))
-				if rl.Retain(newNibblePath) {
-					var newDbPrefix []byte
-					if bits%8 == 0 {
-						newDbPrefix = append([]byte(nil), dbPrefix...)
-						newDbPrefix = append(newDbPrefix, byte(i)<<4)
-					} else {
-						newDbPrefix = dbPrefix
-						newDbPrefix[len(newDbPrefix)-1] &= 0xf0
-						newDbPrefix[len(newDbPrefix)-1] |= byte(i) & 0xf
-					}
-					newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(child, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
-				}
-			}
-		}
-		return newPrefixes, newFixedBits, newHooks
-	case *AccountNode:
-		if n.Storage == nil {
-			return prefixes, fixedbits, hooks
-		}
-		binary.BigEndian.PutUint64(bytes8[:], n.Incarnation)
-		dbPrefix = append(dbPrefix, bytes8[:]...)
-		// Add decompressed incarnation to the nibblePath
-		for i, b := range bytes8[:] {
-			bytes16[i*2] = b / 16
-			bytes16[i*2+1] = b % 16
-		}
-		nibblePath = append(nibblePath, bytes16[:]...)
-		newPrefixes = prefixes
-		newFixedBits = fixedbits
-		newHooks = hooks
-		if rl.Retain(nibblePath) {
-			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.Storage, nibblePath, hook, rl, dbPrefix, bits+64, prefixes, fixedbits, hooks)
-		}
-		return newPrefixes, newFixedBits, newHooks
-	case *HashNode:
-		newPrefixes = prefixes
-		newPrefixes = append(newPrefixes, bytes.Clone(dbPrefix))
-		newFixedBits = fixedbits
-		newFixedBits = append(newFixedBits, bits)
-		newHooks = hooks
-		newHooks = append(newHooks, bytes.Clone(hook))
-		return newPrefixes, newFixedBits, newHooks
-	}
-	return prefixes, fixedbits, hooks
 }
 
 // can pass incarnation=0 if start from root, method internally will
@@ -724,156 +471,6 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 	}
 }
 
-// non-recursive version of get and returns: node and parent node
-func (t *Trie) getNode(hex []byte, doTouch bool) (Node, Node, bool, uint64) {
-	nd := t.RootNode
-	var parent Node
-	pos := 0
-	var account bool
-	var incarnation uint64
-	for pos < len(hex) || account {
-		switch n := nd.(type) {
-		case nil:
-			return nil, nil, false, incarnation
-		case *ShortNode:
-			matchlen := nibbles.CommonPrefixLen(hex[pos:], n.Key)
-			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
-				parent = n
-				nd = n.Val
-				pos += matchlen
-				if _, ok := nd.(*AccountNode); ok {
-					account = true
-				}
-			} else {
-				return nil, nil, false, incarnation
-			}
-		case *DuoNode:
-			i1, i2 := n.childrenIdx()
-			switch hex[pos] {
-			case i1:
-				parent = n
-				nd = n.child1
-				pos++
-			case i2:
-				parent = n
-				nd = n.child2
-				pos++
-			default:
-				return nil, nil, false, incarnation
-			}
-		case *FullNode:
-			child := n.Children[hex[pos]]
-			if child == nil {
-				return nil, nil, false, incarnation
-			}
-			parent = n
-			nd = child
-			pos++
-		case *AccountNode:
-			parent = n
-			nd = n.Storage
-			incarnation = n.Incarnation
-			account = false
-		case ValueNode:
-			return nd, parent, true, incarnation
-		case HashNode:
-			return nd, parent, true, incarnation
-		default:
-			panic(fmt.Sprintf("Unknown node: %T", n))
-		}
-	}
-	return nd, parent, true, incarnation
-}
-
-func (t *Trie) HookSubTries(subTries SubTries, hooks [][]byte) error {
-	for i, hookNibbles := range hooks {
-		root := subTries.roots[i]
-		hash := subTries.Hashes[i]
-		if root == nil {
-			return fmt.Errorf("root==nil for hook %x", hookNibbles)
-		}
-		if err := t.hook(hookNibbles, root, hash[:]); err != nil {
-			return fmt.Errorf("hook %x: %w", hookNibbles, err)
-		}
-	}
-	return nil
-}
-
-func (t *Trie) hook(hex []byte, n Node, hash []byte) error {
-	nd, parent, ok, incarnation := t.getNode(hex, true)
-	if !ok {
-		return nil
-	}
-	if _, ok := nd.(ValueNode); ok {
-		return nil
-	}
-	if hn, ok := nd.(HashNode); ok {
-		if !bytes.Equal(hn.hash, hash) {
-			return fmt.Errorf("wrong hash when hooking, expected %s, sub-tree hash %x", hn, hash)
-		}
-	} else if nd != nil {
-		return fmt.Errorf("expected hash node at %x, got %T", hex, nd)
-	}
-
-	t.touchAll(n, hex, false, incarnation)
-	switch p := parent.(type) {
-	case nil:
-		t.RootNode = n
-	case *ShortNode:
-		p.Val = n
-	case *DuoNode:
-		i1, i2 := p.childrenIdx()
-		switch hex[len(hex)-1] {
-		case i1:
-			p.child1 = n
-		case i2:
-			p.child2 = n
-		}
-	case *FullNode:
-		idx := hex[len(hex)-1]
-		p.Children[idx] = n
-	case *AccountNode:
-		p.Storage = n
-	}
-	return nil
-}
-
-func (t *Trie) touchAll(n Node, hex []byte, del bool, incarnation uint64) {
-	switch n := n.(type) {
-	case *ShortNode:
-		if _, ok := n.Val.(ValueNode); !ok {
-			// Don't need to compute prefix for a leaf
-			h := n.Key
-			// Remove terminator
-			if h[len(h)-1] == 16 {
-				h = h[:len(h)-1]
-			}
-			hexVal := concat(hex, h...)
-			t.touchAll(n.Val, hexVal, del, incarnation)
-		}
-	case *DuoNode:
-		i1, i2 := n.childrenIdx()
-		hex1 := make([]byte, len(hex)+1)
-		copy(hex1, hex)
-		hex1[len(hex)] = i1
-		hex2 := make([]byte, len(hex)+1)
-		copy(hex2, hex)
-		hex2[len(hex)] = i2
-		t.touchAll(n.child1, hex1, del, incarnation)
-		t.touchAll(n.child2, hex2, del, incarnation)
-	case *FullNode:
-		for i, child := range n.Children {
-			if child != nil {
-				t.touchAll(child, concat(hex, byte(i)), del, incarnation)
-			}
-		}
-	case *AccountNode:
-		if n.Storage != nil {
-			t.touchAll(n.Storage, hex, del, n.Incarnation)
-		}
-	}
-}
-
 // Delete removes any existing value for key from the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Delete(key []byte) {
@@ -902,16 +499,13 @@ func (t *Trie) convertToShortNode(child Node, pos uint) Node {
 }
 
 func (t *Trie) delete(origNode Node, key []byte, preserveAccountNode bool) (updated bool, newNode Node) {
-	return t.deleteRecursive(origNode, key, 0, preserveAccountNode, 0)
+	return t.deleteRecursive(origNode, key, 0, preserveAccountNode)
 }
 
-// delete returns the new root of the trie with key deleted.
-// It reduces the trie to minimal form by simplifying
-// nodes on the way up after deleting recursively.
-//
-// can pass incarnation=0 if start from root, method internally will
-// put incarnation from accountNode when pass it by traverse
-func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserveAccountNode bool, incarnation uint64) (updated bool, newNode Node) {
+// deleteRecursive removes the key or subtree and simplifies nodes on the way back
+// up. If preserveAccountNode is set, it clears a matching account's storage and
+// cached code but keeps the account node.
+func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserveAccountNode bool) (updated bool, newNode Node) {
 	var nn Node
 	switch n := origNode.(type) {
 	case *ShortNode:
@@ -925,18 +519,9 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 
 			if removeNodeEntirely {
 				updated = true
-				touchKey := key[:keyStart+matchlen]
-				if touchKey[len(touchKey)-1] == 16 {
-					touchKey = touchKey[:len(touchKey)-1]
-				}
-				t.touchAll(n.Val, touchKey, true, incarnation)
 				newNode = nil
 			} else {
-				// The key is longer than n.Key. Remove the remaining suffix
-				// from the subtrie. Child can never be nil here since the
-				// subtrie must contain at least two other values with keys
-				// longer than n.Key.
-				updated, nn = t.deleteRecursive(n.Val, key, keyStart+matchlen, preserveAccountNode, incarnation)
+				updated, nn = t.deleteRecursive(n.Val, key, keyStart+matchlen, preserveAccountNode)
 				if !updated {
 					newNode = n
 				} else {
@@ -969,7 +554,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 		i1, i2 := n.childrenIdx()
 		switch key[keyStart] {
 		case i1:
-			updated, nn = t.deleteRecursive(n.child1, key, keyStart+1, preserveAccountNode, incarnation)
+			updated, nn = t.deleteRecursive(n.child1, key, keyStart+1, preserveAccountNode)
 			if !updated {
 				newNode = n
 			} else {
@@ -982,7 +567,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 				}
 			}
 		case i2:
-			updated, nn = t.deleteRecursive(n.child2, key, keyStart+1, preserveAccountNode, incarnation)
+			updated, nn = t.deleteRecursive(n.child2, key, keyStart+1, preserveAccountNode)
 			if !updated {
 				newNode = n
 			} else {
@@ -1002,20 +587,13 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 
 	case *FullNode:
 		child := n.Children[key[keyStart]]
-		updated, nn = t.deleteRecursive(child, key, keyStart+1, preserveAccountNode, incarnation)
+		updated, nn = t.deleteRecursive(child, key, keyStart+1, preserveAccountNode)
 		if !updated {
 			newNode = n
 		} else {
 			n.Children[key[keyStart]] = nn
-			// Check how many non-nil entries are left after deleting and
-			// reduce the full node to a short node if only one entry is
-			// left. Since n must've contained at least two children
-			// before deletion (otherwise it would not be a full node) n
-			// can never be reduced to nil.
-			//
-			// When the loop is done, pos contains the index of the single
-			// value that is left in n or -2 if n contains at least two
-			// values.
+			// Collapse branches with one or two remaining children into a ShortNode
+			// or DuoNode. A FullNode cannot become empty after deleting one child.
 			var pos1, pos2 int
 			count := 0
 			for i, cld := range n.Children {
@@ -1065,25 +643,17 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 	case *AccountNode:
 		if keyStart >= len(key) || key[keyStart] == 16 {
 			// Key terminates here
-			h := key[:keyStart]
-			if h[len(h)-1] == 16 {
-				h = h[:len(h)-1]
-			}
-			if n.Storage != nil {
-				// Mark all the storage nodes as deleted
-				t.touchAll(n.Storage, h, true, n.Incarnation)
-			}
 			if preserveAccountNode {
 				n.Storage = nil
 				n.Code = nil
-				n.Root = EmptyRoot
+				n.Root = empty.RootHash
 				n.RootCorrect = true
 				return true, n
 			}
 
 			return true, nil
 		}
-		updated, nn = t.deleteRecursive(n.Storage, key, keyStart, preserveAccountNode, n.Incarnation)
+		updated, nn = t.deleteRecursive(n.Storage, key, keyStart, preserveAccountNode)
 		if updated {
 			n.Storage = nn
 			n.RootCorrect = false
@@ -1101,9 +671,8 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 	}
 }
 
-// DeleteSubtree removes any existing value for key from the trie.
-// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
-// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
+// DeleteSubtree removes the subtree at keyPrefix. When keyPrefix identifies an
+// account, it keeps the account node but clears its storage and cached code.
 func (t *Trie) DeleteSubtree(keyPrefix []byte) {
 	hexPrefix := nibbles.KeybytesToHex(keyPrefix)
 
@@ -1130,7 +699,7 @@ func (t *Trie) Root() []byte {
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Hash() common.Hash {
 	if t == nil || t.RootNode == nil {
-		return EmptyRoot
+		return empty.RootHash
 	}
 
 	h := t.getHasher()
@@ -1165,7 +734,7 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash, error) {
 		return true, accNode.Root, nil
 	}
 	if accNode.Storage == nil {
-		accNode.Root = EmptyRoot
+		accNode.Root = empty.RootHash
 		accNode.RootCorrect = true
 	} else {
 		h := t.getHasher()
@@ -1175,107 +744,6 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash, error) {
 		}
 	}
 	return true, accNode.Root, nil
-}
-
-func (t *Trie) EvictNode(hex []byte) {
-	isCode := IsPointingToCode(hex)
-	if isCode {
-		hex = AddrHashFromCodeKey(hex)
-	}
-
-	nd, parent, ok, incarnation := t.getNode(hex, false)
-	if !ok {
-		return
-	}
-	if accNode, ok := parent.(*AccountNode); isCode && ok {
-		// add special treatment to code nodes
-		accNode.Code = nil
-		return
-	}
-
-	switch nd.(type) {
-	case ValueNode, *HashNode:
-		return
-	default:
-		// can work with other nodes type
-	}
-
-	var hn common.Hash
-	if nd == nil {
-		fmt.Printf("nd == nil, hex %x, parent node: %T\n", hex, parent)
-		return
-	}
-	copy(hn[:], nd.reference())
-	hnode := &HashNode{hash: hn[:]}
-
-	t.notifyUnloadRecursive(hex, incarnation, nd)
-
-	switch p := parent.(type) {
-	case nil:
-		t.RootNode = hnode
-	case *ShortNode:
-		p.Val = hnode
-	case *DuoNode:
-		i1, i2 := p.childrenIdx()
-		switch hex[len(hex)-1] {
-		case i1:
-			p.child1 = hnode
-		case i2:
-			p.child2 = hnode
-		}
-	case *FullNode:
-		idx := hex[len(hex)-1]
-		p.Children[idx] = hnode
-	case *AccountNode:
-		p.Storage = hnode
-	}
-}
-
-func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd Node) {
-	switch n := nd.(type) {
-	case *ShortNode:
-		hex = append(hex, n.Key...)
-		if hex[len(hex)-1] == 16 {
-			hex = hex[:len(hex)-1]
-		}
-		t.notifyUnloadRecursive(hex, incarnation, n.Val)
-	case *AccountNode:
-		if n.Storage == nil {
-			return
-		}
-		if _, ok := n.Storage.(*HashNode); ok {
-			return
-		}
-		t.notifyUnloadRecursive(hex, n.Incarnation, n.Storage)
-	case *FullNode:
-		for i := range n.Children {
-			if n.Children[i] == nil {
-				continue
-			}
-			if _, ok := n.Children[i].(*HashNode); ok {
-				continue
-			}
-			t.notifyUnloadRecursive(append(hex, uint8(i)), incarnation, n.Children[i])
-		}
-	case *DuoNode:
-		i1, i2 := n.childrenIdx()
-		if n.child1 != nil {
-			t.notifyUnloadRecursive(append(hex, i1), incarnation, n.child1)
-		}
-		if n.child2 != nil {
-			t.notifyUnloadRecursive(append(hex, i2), incarnation, n.child2)
-		}
-	default:
-		// nothing to do
-	}
-}
-
-func (t *Trie) TrieSize() int {
-	return calcSubtreeSize(t.RootNode)
-}
-
-func (t *Trie) NumberOfAccounts() int {
-	return calcSubtreeNodes(t.RootNode)
 }
 
 // RLPEncode traverses the trie from root to leaves and collects
@@ -1544,7 +1012,7 @@ func decodeAccountNode(val ValueNode, nodeMap map[common.Hash]Node) (*AccountNod
 	}
 
 	// If account has non-empty storage root, try to find it in nodeMap
-	if acc.Root != EmptyRoot && acc.Root != (common.Hash{}) {
+	if acc.Root != empty.RootHash && acc.Root != (common.Hash{}) {
 		if storageNode, ok := nodeMap[acc.Root]; ok {
 			an.Storage = storageNode
 		} else {

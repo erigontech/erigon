@@ -19,19 +19,33 @@ package stagedsync
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/execfinality"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -102,7 +116,7 @@ func seedPreverified(t *testing.T, chainName string, extraLines ...string) uint6
 	t.Helper()
 	empty, _ := snapcfg.KnownCfg(chainName)
 	require.Zero(t, empty.ExpectBlocks, "test chain must have no preverified set of its own")
-	t.Cleanup(func() { snapcfg.SetToml(chainName, []byte{}, false) })
+	t.Cleanup(func() { require.NoError(t, snapcfg.SetToml(chainName, []byte{}, false)) })
 
 	toml := `"v1-000000-000500-headers.seg" = "aa"
 "v1-000000-000500-bodies.seg" = "bb"
@@ -110,7 +124,7 @@ func seedPreverified(t *testing.T, chainName string, extraLines ...string) uint6
 	for _, line := range extraLines {
 		toml += line + "\n"
 	}
-	snapcfg.SetToml(chainName, []byte(toml), false)
+	require.NoError(t, snapcfg.SetToml(chainName, []byte(toml), false))
 
 	cfg, known := snapcfg.KnownCfg(chainName)
 	require.True(t, known)
@@ -481,4 +495,62 @@ func TestSnapshotDownloadProgressReporterNoopWithoutKnownTarget(t *testing.T) {
 	require.Zero(t, h.downloader.resetCount())
 	h.requireNoEvent(t)
 	require.Zero(t, h.currentBlock(t))
+}
+
+func TestSnapshotAdvanceInvalidatesStateChanges(t *testing.T) {
+	for _, target := range []uint64{0, 1, 2} {
+		t.Run(fmt.Sprint(target), func(t *testing.T) {
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			notifier := shards.NewNotifications(nil)
+			cfg := SnapshotsCfg{notifier: notifier}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 1))
+				require.NoError(t, cfg.advanceExecutionToSnapshot(tx, target))
+				progress, err := stages.GetStageProgress(tx, stages.Execution)
+				require.NoError(t, err)
+				require.Equal(t, max(uint64(1), target), progress)
+				return nil
+			}))
+			batch := notifier.Accumulator.Batch(&types.Header{})
+			require.Equal(t, target > 1, batch.StateChangesIncomplete)
+		})
+	}
+}
+
+// The accessor must be rebuilt before the stage saves snapshot hashes and notifies RPC.
+func TestDownloadAndIndexSnapshotsRebuildsMissedAccessorBeforeSavingHashes(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	stateDB := temporaltest.NewTestDB(t, dirs)
+	tx, sd := temporaltest.NewTestTxSD(t, stateDB)
+	addr := common.Address{1}
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&accounts.Account{Nonce: 1}), config3.DefaultStepSize, nil))
+	require.NoError(t, sd.Flush(t.Context(), tx))
+	require.NoError(t, tx.Commit())
+	require.NoError(t, stateDB.(*temporal.DB).BuildFiles(2*config3.DefaultStepSize, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
+	stateDB.Close()
+	accessors, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.0-1.bt"))
+	require.NoError(t, err)
+	require.Len(t, accessors, 1)
+	require.NoError(t, dir.RemoveFile(accessors[0]))
+
+	db := temporaltest.NewTestDB(t, dirs)
+	notADir := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(notADir, nil, 0o600))
+	unsavableDirs := dirs
+	unsavableDirs.Snap = filepath.Join(notADir, "snapshots")
+	cfg := SnapshotsCfg{
+		db:          db,
+		chainConfig: &chain.Config{ChainName: networkname.Test},
+		dirs:        unsavableDirs,
+		blockReader: freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles()),
+		notifier:    shards.NewNotifications(nil),
+	}
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	s := &StageState{CurrentSyncCycle: CurrentSyncCycleInfo{IsFirstCycle: true}}
+	err = DownloadAndIndexSnapshotsIfNeed(s, t.Context(), rwTx, cfg, log.New())
+	require.ErrorContains(t, err, "saving snapshot hashes")
+	require.FileExists(t, accessors[0])
 }

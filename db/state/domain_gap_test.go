@@ -18,16 +18,49 @@ package state
 
 import (
 	"math"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
+
+func TestCheckFilesDBGapChecksHistory(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	for _, path := range []string{
+		"history/v1.0-accounts.2-3.v",
+		"idx/v1.0-accounts.2-3.ef",
+		"accessor/v2.0-accounts.2-3.vi",
+		"history/v1.0-accounts.1-2.v",
+		"idx/v1.0-accounts.1-2.ef",
+		"accessor/v2.0-accounts.1-2.vi",
+	} {
+		t.Run(path, func(t *testing.T) {
+			db, agg := testDbAndAggregatorv3(t, 10)
+			ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+			generateStateFiles(t, agg.Dirs(), ranges)
+			generateCommitmentFile(t, agg.Dirs(), ranges)
+			require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().Snap, filepath.FromSlash(path))))
+			require.NoError(t, agg.OpenFolder(db))
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			require.NoError(t, SavePruneValProgress(tx, agg.d[kv.AccountsDomain].History.ValuesTable, &prune.Stat{TxTo: 30}))
+			at := agg.BeginFilesRo()
+			defer at.Close()
+			err = at.CheckFilesDBGap(tx)
+			require.ErrorContains(t, err, "history accounts")
+			require.ErrorContains(t, err, "snapshots index", "a lost accessor is rebuilt, not a reason to reset the datadir")
+		})
+	}
+}
 
 // TestDomain_RmStateLatestHole reproduces the silent files<->DB gap that
 // `snapshots rm-state --latest` opens when run without `stage_exec --reset`:
@@ -52,7 +85,7 @@ func TestDomain_RmStateLatestHole(t *testing.T) {
 	v1, v2 := []byte("v1-old"), []byte("v2-latest")
 
 	drt := d.beginForTests()
-	w := drt.NewWriter()
+	w := drt.NewWriter(db)
 	require.NoError(t, w.PutWithPrev(k, v1, 1, nil))        // step 0
 	require.NoError(t, w.PutWithPrev(k, v2, aggStep+1, v1)) // step 1 (the true latest)
 	require.NoError(t, w.Flush(ctx, tx))
@@ -112,7 +145,7 @@ func TestInvertedIndex_RmStateLatestHole(t *testing.T) {
 	defer tx.Rollback()
 
 	ic := ii.beginForTests()
-	w := ic.NewWriter()
+	w := ic.NewWriter(db)
 	require.NoError(t, w.Add([]byte("k"), 1))         // step 0
 	require.NoError(t, w.Add([]byte("k"), aggStep+1)) // step 1
 	require.NoError(t, w.Flush(ctx, tx))

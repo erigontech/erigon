@@ -51,6 +51,7 @@ type IntraBlockState interface {
 	GetCodeHash(accounts.Address) (accounts.CodeHash, error)
 	GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error)
 	Exist(accounts.Address) (bool, error)
+	HasSelfdestructed(accounts.Address) (bool, error)
 	GetRefund() uint64
 }
 
@@ -256,6 +257,10 @@ func (h *Hooks) EmitEnter(depth int, typ byte, from accounts.Address, to account
 	} else if h.OnEnter != nil {
 		h.OnEnter(depth, typ, from, to, precompile, input, gas.Execution, value, code)
 	}
+}
+
+func (h *Hooks) HasExitHook() bool {
+	return h != nil && (h.OnExitV2 != nil || h.OnExit != nil)
 }
 
 func (h *Hooks) EmitExit(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {

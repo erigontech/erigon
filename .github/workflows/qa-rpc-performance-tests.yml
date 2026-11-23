@@ -11,15 +11,6 @@ on:
         type: boolean
         required: false
         default: false
-      exec_mode:
-        description: 'Erigon execution mode ("default" leaves ERIGON_EXEC3_PARALLEL unset)'
-        type: choice
-        required: false
-        default: default
-        options:
-          - default
-          - serial
-          - parallel
   schedule:
     - cron: '0 3 * * *'  # Run daily at 03:00 UTC
 
@@ -57,19 +48,12 @@ jobs:
           # Unique namespace for this workflow execution
           RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
-          # Decide whether to run geth:
-          # - schedule: only on Sunday (UTC)
-          # - workflow_dispatch: controlled by input
+          # Geth runs on every schedule, never on push; workflow_dispatch controls it via input
           RUN_GETH="false"
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            DOW="$(date -u +%w)"
-            if [ "$DOW" = "0" ]; then  # Sunday, (0..6 = Sun..Sat)
-              RUN_GETH="true"
-            fi
+            RUN_GETH="true"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "$INPUT_RUN_GETH" = "true" ]; then
-              RUN_GETH="true"
-            fi
+            RUN_GETH="${INPUT_RUN_GETH:-false}"
           fi
           
           # Variables
@@ -128,6 +112,9 @@ jobs:
           echo "ERIGON_REFERENCE_DIR=${ERIGON_REFERENCE_DIR}" >> $GITHUB_ENV
           echo "ERIGON_REFERENCE_DATA_DIR=${ERIGON_REFERENCE_DIR}/datadir" >> $GITHUB_ENV
 
+      - name: Clean workspace
+        run: find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
       - name: Checkout Erigon repository
         if: matrix.client == 'erigon'
         uses: actions/checkout@v7
@@ -136,13 +123,22 @@ jobs:
           fetch-depth: "0"
           filter: blob:none
 
+      - name: Checkout the rpc-tests version file
+        if: matrix.client != 'erigon' && needs.setup.outputs.run_geth == 'true'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts/rpc_version.env
+          sparse-checkout-cone-mode: false
+
       - name: Checkout RPC Tests Repository
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         env:
           RUNNER_WS: ${{ runner.workspace }}
         run: |
+          source .github/workflows/scripts/rpc_version.env
           rm -rf "$RUNNER_WS/rpc-tests"
-          git -c advice.detachedHead=false clone --depth 1 --branch v2.4.0 https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
+          git -c advice.detachedHead=false clone --depth 1 --branch "$RPC_VERSION" https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
           cd "$RUNNER_WS/rpc-tests"
           make rpc_perf
 
@@ -216,23 +212,8 @@ jobs:
         id: rpcdaemon_running_step
         if: matrix.client == 'erigon'
         working-directory: ${{ github.workspace }}/build/bin
-        env:
-          EXEC_MODE: ${{ github.event.inputs.exec_mode }}
         run: |
           echo "Starting RpcDaemon..."
-
-          # Only set ERIGON_EXEC3_PARALLEL on an explicit choice; otherwise ensure it's
-          # unset so erigon uses its built-in default (and doesn't inherit runner env).
-          if [ "$EXEC_MODE" = "parallel" ]; then
-            export ERIGON_EXEC3_PARALLEL=true
-            echo "Set ERIGON_EXEC3_PARALLEL=true (parallel mode)"
-          elif [ "$EXEC_MODE" = "serial" ]; then
-            export ERIGON_EXEC3_PARALLEL=false
-            echo "Set ERIGON_EXEC3_PARALLEL=false (serial mode)"
-          else
-            unset ERIGON_EXEC3_PARALLEL
-            echo "Leaving ERIGON_EXEC3_PARALLEL unset (default behavior)"
-          fi
 
           ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net > erigon.log 2>&1 &
 
@@ -282,7 +263,7 @@ jobs:
           if [ "$CLIENT" == "erigon" ]; then
             commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
           else
-            commit=$(git -C $GETH_INSTALL_DIR rev-parse --short HEAD)
+            commit=$(git -c safe.directory="$GETH_INSTALL_DIR" -C "$GETH_INSTALL_DIR" rev-parse --short HEAD || echo no-version)
           fi
           
           # Prepare historical test results directory
@@ -310,6 +291,12 @@ jobs:
             cd $workspace/rpc-tests/perf
             rm -rf ./reports/$network
 
+            # Erigon is served by a standalone rpcdaemon; other clients run under their own process name
+            process_name_flag=()
+            if [ "$client" == "erigon" ]; then
+              process_name_flag=(--process-name rpcdaemon)
+            fi
+
             # Move to home dir of rpc-tests
             cd ..
             ./build/bin/rpc_perf --blockchain "$network" \
@@ -321,7 +308,7 @@ jobs:
                                       --test-report \
                                       --json-report $result_dir/$result_file \
                                       --testing-client $client \
-                                      --process-name rpcdaemon
+                                      "${process_name_flag[@]}"
           
             # Capture test runner script exit status
             perf_exit_status=$?
@@ -382,7 +369,7 @@ jobs:
               --repo $client \
               --branch $branch_name \
               --commit $commit_hash \
-              --test_name rpc-performance-test-$client${{ (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'parallel' && '-parallel') || (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'serial' && '-serial') || '' }}-$method \
+              --test_name rpc-performance-test-$client-$method \
               --chain $CHAIN \
               --runner "$RUNNER_NAME" \
               --db_version $db_version \
@@ -445,7 +432,7 @@ jobs:
         if: always() && matrix.client == 'erigon' && steps.rpcdaemon_running_step.outputs.rpc_daemon_started == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: rpcdaemon-logs${{ (github.event.inputs.exec_mode == 'parallel' && '-parallel') || (github.event.inputs.exec_mode == 'serial' && '-serial') || '' }}
+          name: rpcdaemon-logs
           path: ${{ github.workspace }}/build/bin/erigon.log
 
       - name: Restore Erigon Chaindata Directory
@@ -483,7 +470,7 @@ jobs:
         if: (matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true') && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}${{ (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'parallel' && '-parallel') || (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'serial' && '-serial') || '' }}
+          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}
           path: ${{ env.past_test_dir }}
 
       - name: Action to check failure condition

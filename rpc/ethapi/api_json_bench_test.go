@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"os"
+	"regexp"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -130,5 +132,49 @@ func BenchmarkRPCBlockMarshalFastJSONTo(b *testing.B) {
 				}
 			})
 		}
+	}
+}
+
+func BenchmarkCallArgsUnmarshal77KB(b *testing.B) {
+	raw := []byte(fmt.Sprintf(`{"from":"0x0000000000000000000000000000000000000001","to":"0x0000000000000000000000000000000000000002","gas":"0x1c9c380","data":"0x%x"}`, make([]byte, 77*1024)))
+	b.Run("fastjson", func(b *testing.B) {
+		b.SetBytes(int64(len(raw)))
+		for b.Loop() {
+			var a CallArgs
+			if err := a.UnmarshalJSON(raw); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("encoding-json", func(b *testing.B) {
+		b.SetBytes(int64(len(raw)))
+		for b.Loop() {
+			var a CallArgs
+			if err := a.unmarshalStd(raw); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkCallArgsUnmarshalAccessList(b *testing.B) {
+	raw, err := os.ReadFile("testdata/eth_call_access_list.json")
+	if err != nil {
+		b.Fatal(err)
+	}
+	bigData := regexp.MustCompile(`"data":"0x[0-9a-f]*"`).ReplaceAll(raw, fmt.Appendf(nil, `"data":"0x%x"`, make([]byte, 178*1024)))
+	for _, bc := range []struct {
+		name string
+		raw  []byte
+	}{{"mainnet", raw}, {"data178KB", bigData}} {
+		b.Run(bc.name, func(b *testing.B) {
+			b.SetBytes(int64(len(bc.raw)))
+			for b.Loop() {
+				var a CallArgs
+				if err := a.UnmarshalJSON(bc.raw); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }

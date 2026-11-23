@@ -264,6 +264,13 @@ func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	if s.unwindPoint == nil {
 		return nil
 	}
+	// The request is consumed even on failure: the caller's tx is rolled back,
+	// and a reused Sync must not replay this unwind or resume at the failed stage.
+	defer func() {
+		s.unwindPoint = nil
+		s.unwindReason = UnwindReason{}
+		s.currentStage = 0
+	}()
 	for j := 0; j < len(s.unwindOrder); j++ {
 		if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 			continue
@@ -273,11 +280,6 @@ func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 		}
 	}
 	s.prevUnwindPoint = s.unwindPoint
-	s.unwindPoint = nil
-	s.unwindReason = UnwindReason{}
-	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -371,8 +373,8 @@ func (e *ErrLoopExhausted) Is(err error) bool {
 	return errors.As(err, &errExhausted)
 }
 
-// IsOnlyLoopExhausted reports whether err is non-nil and every branch in its
-// unwrap tree ends in ErrLoopExhausted.
+// IsOnlyLoopExhausted reports whether err is non-nil and every branch of its
+// unwrap tree reaches a loop-exhausted boundary (no other error mixed in).
 func IsOnlyLoopExhausted(err error) bool {
 	return commonerrors.IsOnly(err, &ErrLoopExhausted{})
 }
@@ -457,6 +459,7 @@ func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, 
 
 // RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
 func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, finalityCtx kv.FinalityContext, timeout time.Duration) error {
+	defer func() { s.currentStage = 0 }()
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
@@ -466,10 +469,6 @@ func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, fina
 			return err
 		}
 	}
-	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return err
-	}
-	s.currentStage = 0
 	return nil
 }
 
@@ -515,6 +514,9 @@ func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.Tempo
 	}
 
 	if err = stage.Forward(badBlockUnwind, stageState, s, doms, rwTx, s.logger); err != nil {
+		// Only a purely-exhausted loop saves progress and continues. errors.AsType
+		// would also match errors.Join(exhausted, waitErr) and silently drop the
+		// real error, so use IsOnlyLoopExhausted (every branch must be exhausted).
 		if IsOnlyLoopExhausted(err) {
 			s.logger.Debug(fmt.Sprintf("[%s] loop exhausted", s.LogPrefix()), "msg", err.Error())
 			s.logRunStageDone(stageState, start)

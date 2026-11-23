@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -57,7 +56,7 @@ import (
 func TestEmptyBlock(t *testing.T) {
 	require := require.New(t)
 	genesis := chainspec.GnosisGenesisBlock()
-	genesisBlock, ibs, err := genesiswrite.GenesisToBlock(genesis, datadir.New(t.TempDir()), log.Root())
+	genesisBlock, ibs, err := genesiswrite.GenesisToBlock(genesis)
 	require.NoError(err)
 	defer ibs.Close()
 
@@ -72,8 +71,8 @@ func TestEmptyBlock(t *testing.T) {
 	time := uint64(1539016985)
 	header := builder.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
 	header.UncleHash = empty.UncleHash
-	header.TxHash = trie.EmptyRoot
-	header.ReceiptHash = trie.EmptyRoot
+	header.TxHash = empty.RootHash
+	header.ReceiptHash = empty.RootHash
 	header.Coinbase = common.HexToAddress("0xcace5b3c29211740e595850e80478416ee77ca21")
 	header.Difficulty = engine.CalcDifficulty(
 		nil, time,
@@ -157,14 +156,13 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	db := temporaltest.NewTestDB(t, dirs)
 	tx, domains := temporaltest.NewTestTxSD(t, db)
 
-	// Replay genesis block the same way exec3 does (see txtask.go):
-	// GenesisToBlock populates an IntraBlockState with the alloc,
-	// then MakeWriteSet writes it into the real shared domains.
-	genesisBlock, genesisIbs, err := genesiswrite.GenesisToBlock(genesis, dirs, logger)
+	// Apply genesis the way exec3 does: the write set of the genesis IBS goes into the shared domains.
+	genesisBlock, genesisIbs, err := genesiswrite.GenesisToBlock(genesis)
 	require.NoError(err)
 	defer genesisIbs.Close()
-	domainWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
-	err = genesisIbs.MakeWriteSet(&chain.Rules{}, domainWriter)
+	genesisWrites, err := genesisIbs.FinalizedWrites(&chain.Rules{})
+	require.NoError(err)
+	err = state.ApplyWrites(genesisWrites, domains, tx, 0, 1, false)
 	require.NoError(err)
 
 	// Write block headers so ChainReader can look up the genesis header.
@@ -194,6 +192,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	writer := state.NewVersionedWriteCollector(rs)
 	ibs := state.New(reader)
+	ibs.SetVersionMap(nil)
 	defer ibs.Close()
 	err = protocol.InitializeBlockExecution(engine, chainRdr, header, config, ibs, writer, logger, nil)
 	require.NoError(err)

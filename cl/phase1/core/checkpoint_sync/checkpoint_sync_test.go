@@ -2,7 +2,6 @@ package checkpoint_sync
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -146,7 +145,7 @@ func TestRemoteCheckpointSyncTimeout(t *testing.T) {
 	syncer := &RemoteCheckpointSync{&clparams.MainnetBeaconConfig, chainspec.MainnetChainID, 50 * time.Millisecond}
 	currentState, err := syncer.GetLatestBeaconState(ctx)
 	require.Nil(t, currentState)
-	require.True(t, errors.Is(err, context.DeadlineExceeded))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
 func TestRemoteCheckpointSyncCancel(t *testing.T) {

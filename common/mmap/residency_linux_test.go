@@ -19,9 +19,11 @@
 package mmap
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -65,4 +67,51 @@ func TestResidencyProbe(t *testing.T) {
 	res, err = Resident(m)
 	require.NoError(t, err)
 	require.True(t, res, "all pages should be resident after touching them")
+}
+
+func TestReadPagesStartsNoBatchOnceTheContextIsDone(t *testing.T) {
+	prev := BatchPrefetch
+	BatchPrefetch = true
+	defer func() { BatchPrefetch = prev }()
+	p := filepath.Join(t.TempDir(), "f")
+	require.NoError(t, os.WriteFile(p, make([]byte, 2*os.Getpagesize()), 0o600))
+	f, err := os.Open(p)
+	require.NoError(t, err)
+	defer f.Close()
+	m, err := OpenRo(f, 2*os.Getpagesize())
+	require.NoError(t, err)
+	defer func() { require.NoError(t, m.Unmap()) }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, ReadPages(ctx, []uintptr{uintptr(unsafe.Pointer(&m[0]))}), context.Canceled)
+}
+
+func TestMappingOfFindsTheMappingThatHoldsThePage(t *testing.T) {
+	defer func(prev bool) { BatchPrefetch = prev }(BatchPrefetch)
+	BatchPrefetch = true
+	f, err := os.CreateTemp(t.TempDir(), "f")
+	require.NoError(t, err)
+	defer f.Close()
+	bufs := [][]byte{make([]byte, 3*osPageSize), make([]byte, osPageSize), make([]byte, 2*osPageSize)}
+	for _, b := range []int{2, 0, 1} {
+		registerMapping(bufs[b], f)
+	}
+	defer func() {
+		for _, b := range bufs {
+			unregisterMapping(b)
+		}
+	}()
+	for _, b := range bufs {
+		start := uintptr(unsafe.Pointer(&b[0]))
+		for _, p := range []uintptr{start, start + uintptr(len(b)) - 1} {
+			m, ok := mappingOf(p)
+			require.True(t, ok)
+			require.Equal(t, start, m.start)
+			require.Equal(t, int(f.Fd()), m.fd)
+		}
+	}
+	unregisterMapping(bufs[1])
+	_, ok := mappingOf(uintptr(unsafe.Pointer(&bufs[1][0])))
+	require.False(t, ok, "an unregistered mapping is not found")
 }

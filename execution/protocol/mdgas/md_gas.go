@@ -153,10 +153,10 @@ func (t MdGasType) String() string {
 // EIP-8037: when tx.gas > TX_MAX_GAS_LIMIT, excess gas beyond the execution budget
 // becomes the state gas reservoir, which state-creation opcodes (SSTORE, CREATE,
 // code deposit) draw from before spilling to execution gas.
-// Pre-Amsterdam: all gas is execution gas (state reservoir is 0).
+// Pre-Amsterdam, or with skipSplit (read-only RPC calls), all gas is execution gas (state reservoir is 0).
 // See process_transaction in EIP-8037.
-func SplitTxnGasLimit(txnGasLimit, intrinsicGas uint64, rules *chain.Rules) MdGas {
-	if rules.IsAmsterdam {
+func SplitTxnGasLimit(txnGasLimit, intrinsicGas uint64, rules *chain.Rules, skipSplit bool) MdGas {
+	if rules.IsAmsterdam && !skipSplit {
 		// evm_gas = tx.gas - intrinsic_gas
 		// execution_gas_budget = TX_MAX_GAS_LIMIT - intrinsic_gas
 		// gas_left = min(execution_gas_budget, evm_gas)
