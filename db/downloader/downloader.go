@@ -37,7 +37,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/klauspost/compress/gzip"
+	"github.com/klauspost/compress/gzhttp"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/errgroup"
@@ -1815,23 +1815,14 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 	}
 }
 
-func torrentClientStatusHandler(writeStatus func(io.Writer)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func torrentClientStatusHandler(writeStatus func(io.Writer)) http.Handler {
+	return gzhttp.GzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// WriteStatus holds the client read lock. Collect the text before compressing or sending it.
 		var status bytes.Buffer
 		writeStatus(&status)
-
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Add("Vary", "Accept-Encoding")
-		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			w.Header().Set("Content-Encoding", "gzip")
-			gz := gzip.NewWriter(w)
-			_, _ = status.WriteTo(gz)
-			_ = gz.Close()
-			return
-		}
 		_, _ = status.WriteTo(w)
-	}
+	}))
 }
 
 func (d *Downloader) spawn(f func()) bool {
