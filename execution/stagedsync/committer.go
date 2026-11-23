@@ -664,7 +664,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		pb.mode = calcModeIncremental
 		return
 	}
-	if err := vm.SeedEmptyRemovals(eip161Enabled, isAura, base, balAddrs); err != nil {
+	if err := vm.SeedEmptyRemovals(eip161Enabled, isAura, base); err != nil {
 		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	}

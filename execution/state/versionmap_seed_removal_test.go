@@ -56,7 +56,7 @@ func TestSeedEmptyRemovals(t *testing.T) {
 	reader.accounts[survives] = &survivesBase
 
 	vm := NewVersionMap(bal)
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader, InternBALAddresses(vm.bal)))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 
 	// GetAccount reads the seeded removal deterministically — no SetRules.
 	_, ok, _ := vm.View(1, reader).GetAccount(emptied)
@@ -83,7 +83,7 @@ func TestSeedEmptyRemovalsSkipsBaseReadForProvenNonEmpty(t *testing.T) {
 
 	vm := NewVersionMap(bal)
 	vm.SeedAddresses(InternBALAddresses(vm.bal))
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader, InternBALAddresses(vm.bal)))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 	require.Zero(t, reader.reads)
 }
 
@@ -101,7 +101,7 @@ func TestSeedEmptyRemovalsReadsBaseWhenLastChangeClears(t *testing.T) {
 	reader := &countingAccountReader{}
 
 	vm := NewVersionMap(bal)
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader, InternBALAddresses(vm.bal)))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 	require.Equal(t, 3, reader.reads)
 	for _, a := range []accounts.Address{drained, renonced, uncoded} {
 		_, ok, _ := vm.View(2, reader).GetAccount(a)
@@ -338,7 +338,7 @@ func TestSeedEmptyRemovals_BaseReadErrorFails(t *testing.T) {
 	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
 	vm := NewVersionMap(bal)
 	boom := errors.New("boom")
-	require.ErrorIs(t, vm.SeedEmptyRemovals(true, false, &failingBaseReader{err: boom}, InternBALAddresses(vm.bal)), boom)
+	require.ErrorIs(t, vm.SeedEmptyRemovals(true, false, &failingBaseReader{err: boom}), boom)
 }
 
 // TestSeedEmptyRemovals_DrainThenRefund pins the removal at an interior index: an
@@ -371,7 +371,7 @@ func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 	}
 
 	vm := NewVersionMap(bal)
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader, InternBALAddresses(vm.bal)))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 
 	_, ok, _ := vm.View(1, reader).GetAccount(refunded)
 	require.False(t, ok, "drained to empty at index 1: absent before the re-fund")
@@ -438,7 +438,7 @@ func TestSeededRemovalAtMarkerIndexStaysAbsent(t *testing.T) {
 	bal := types.BlockAccessList{{Address: x.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
 	vm := NewVersionMap(bal)
 	vm.SeedAddresses(InternBALAddresses(vm.bal))
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader, InternBALAddresses(vm.bal)))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 
 	lc, _, _, _ := vm.AccountLifecycleAt(x, 1)
 	require.Equal(t, LifecycleAbsent, lc)
@@ -465,7 +465,7 @@ func seededRemovalOfPrefundedAccount(t *testing.T) (accounts.Address, *accountSt
 		CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: []byte{0x00}}},
 	}})
 	vm.SeedAddresses(InternBALAddresses(vm.bal))
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader, InternBALAddresses(vm.bal)))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 	return x, reader, vm
 }
 
@@ -647,7 +647,7 @@ func TestPresentAccountReadFromTheMarkerNeedsASealedRevival(t *testing.T) {
 		BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}},
 	}})
 	vm.SeedAddresses(InternBALAddresses(vm.bal))
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader, InternBALAddresses(vm.bal)))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 	for _, path := range []AccountPath{SelfDestructPath, BalancePath} {
 		vm.Delete(x, path, accounts.NilKey, 0, false)
 	}
@@ -748,7 +748,7 @@ func TestRepeatedDestructObservedBeforeItsInFlightFlushKeepsTheAccountAbsent(t *
 	}}
 	vm := NewVersionMap(bal)
 	vm.SeedAddresses(InternBALAddresses(vm.bal))
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader, InternBALAddresses(vm.bal)))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 	funded := accounts.NewAccount()
 	funded.Balance = *uint256.NewInt(1)
 	vm.WriteAddress(x, Version{TxIndex: 1}, &funded, true)
@@ -809,7 +809,7 @@ func TestDropWritePutsBackADerivedRemoval(t *testing.T) {
 		x := accounts.InternAddress(common.HexToAddress("0xc3"))
 		vm := NewVersionMap(types.BlockAccessList{{Address: x.Value(), CodeChanges: []*types.CodeChange{{Index: 1, Bytecode: []byte{0x60}}, {Index: 2}}}})
 		vm.SeedAddresses(InternBALAddresses(vm.bal))
-		require.NoError(t, vm.SeedEmptyRemovals(true, false, &countingAccountReader{}, InternBALAddresses(vm.bal)))
+		require.NoError(t, vm.SeedEmptyRemovals(true, false, &countingAccountReader{}))
 		return x, vm
 	}
 	// Seeding derives a removal at tx 0, then a zero balance of a revival at tx 1 and a removal at tx 1,
@@ -825,7 +825,7 @@ func TestDropWritePutsBackADerivedRemoval(t *testing.T) {
 			CodeChanges:    []*types.CodeChange{{Index: 2}},
 		}})
 		vm.SeedAddresses(InternBALAddresses(vm.bal))
-		require.NoError(t, vm.SeedEmptyRemovals(true, false, reader, InternBALAddresses(vm.bal)))
+		require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 		return x, vm
 	}
 	for _, tc := range []struct {
@@ -864,7 +864,7 @@ func TestDropWritePutsBackTheStatusOfASeededBalance(t *testing.T) {
 	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &baseAcc}}
 	vm := NewVersionMap(types.BlockAccessList{{Address: x.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}})
 	vm.SeedAddresses(InternBALAddresses(vm.bal))
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader, InternBALAddresses(vm.bal)))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 	run := &WriteSet{}
 	run.SetEmptyRemoval(x, Version{TxIndex: 0, Incarnation: 1})
 	vm.FlushVersionedWrites(run, false)
@@ -905,7 +905,7 @@ func TestDropWritePutsBackTheListedBalanceNextToADerivedRemoval(t *testing.T) {
 				{Address: y.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(7)}}},
 			})
 			vm.SeedAddresses(InternBALAddresses(vm.bal))
-			require.NoError(t, vm.SeedEmptyRemovals(true, false, reader, InternBALAddresses(vm.bal)))
+			require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 			run := &WriteSet{}
 			run.SetBalance(tc.addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: tc.addr, Path: BalancePath, Version: Version{TxIndex: tc.txIdx, Incarnation: 1}}, Val: *uint256.NewInt(11)})
 			vm.FlushVersionedWrites(run, false)
@@ -929,7 +929,7 @@ func TestExistenceReadIsStaleOnceADropPutsTheRemovalBack(t *testing.T) {
 	base := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &acc}}
 	vm := NewVersionMap(types.BlockAccessList{{Address: x.Value(), BalanceChanges: []*types.BalanceChange{{Index: 4, Value: uint256.Int{}}}}})
 	vm.SeedAddresses(InternBALAddresses(vm.bal))
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, base, InternBALAddresses(vm.bal)))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, base))
 	rerun := func(prev, cur *WriteSet, v Version) {
 		for h := range prev.AllHeaders() {
 			if !cur.Has(h) {
@@ -1003,7 +1003,7 @@ func TestABalanceReadAtTheSeededDestructsVersionIsStaleOnceTheBalanceMoves(t *te
 	base := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &acc}}
 	vm := NewVersionMap(types.BlockAccessList{{Address: x.Value(), BalanceChanges: []*types.BalanceChange{{Index: 4, Value: uint256.Int{}}}}})
 	vm.SeedAddresses(InternBALAddresses(vm.bal))
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, base, InternBALAddresses(vm.bal)))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, base))
 	readBalance := func(want uint64) ReadSet {
 		ibs := NewWithVersionMap(base, vm)
 		defer ibs.Close()

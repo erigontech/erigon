@@ -313,7 +313,7 @@ func (vm *VersionMap) HasAmbiguousBaseAccount(eip161Enabled, isAura bool, base S
 	return false, nil
 }
 
-func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader, addrs []accounts.Address) error {
+func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {
 	var stamps []*WriteSet
 	var candidates []uint32
 	for i := range vm.bal {
@@ -323,11 +323,11 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 		if maxIdx == 0 {
 			continue // only reads, no field change — not a removal candidate
 		}
-		addr := addrs[i]
-		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
+		if len(ac.BalanceChanges) == 0 && len(ac.NonceChanges) == 0 && len(ac.CodeChanges) == 0 {
 			continue
 		}
-		if len(ac.BalanceChanges) == 0 && len(ac.NonceChanges) == 0 && len(ac.CodeChanges) == 0 {
+		addr := accounts.InternAddress(ac.Address)
+		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
 			continue
 		}
 		candidates = candidates[:0]

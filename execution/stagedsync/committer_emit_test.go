@@ -198,7 +198,7 @@ func TestEmitTouched_SeededRemovalThenRevivalResetsStorage(t *testing.T) {
 	bal := types.BlockAccessList{{Address: av, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}, {Index: 2, Value: *uint256.NewInt(5)}}}}
 	vm := state.NewVersionMap(bal)
 	vm.SeedAddresses(state.InternBALAddresses(bal))
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, base, state.InternBALAddresses(bal)))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, base))
 
 	refund := newWS().bal(addr, state.Version{TxIndex: 1}, *uint256.NewInt(5)).build()
 	got := emitTouchedUpdates(t, vm, 3, base, state.NewVersionMapWriteView(refund, vm, 1))[string(av[:])]
