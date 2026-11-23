@@ -625,13 +625,11 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		return fmt.Errorf("failed to post forkchoice operations: %w", err)
 	}
 
-	if logger.Enabled(ctx, log.LvlDebug) {
-		alloc, sys := dbg.MemUsage()
-		logger.Debug("Imported chain segment",
-			"hash", headRoot, "slot", headSlot,
-			"alloc", common.ByteCount(alloc),
-			"sys", common.ByteCount(sys))
-	}
+	alloc, sys := dbg.MemUsage()
+	logger.Debug("Imported chain segment",
+		"hash", headRoot, "slot", headSlot,
+		"alloc", common.ByteCount(alloc),
+		"sys", common.ByteCount(sys))
 
 	notifyErr := waitNotified()
 	if err := tx.Commit(); err != nil {
