@@ -49,6 +49,15 @@ func (s *blockingOnBlockStore) OnBlock(ctx context.Context, block *cltypes.Signe
 	return s.onBlockErrorStore.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability)
 }
 
+type skippingOnBlockStore struct {
+	*onBlockErrorStore
+}
+
+func (s *skippingOnBlockStore) OnBlock(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+	s.calls.Add(1)
+	return nil
+}
+
 func newAcceptFixture(t *testing.T) (*blockService, *cltypes.SignedBeaconBlock, *blockingOnBlockStore, common.Hash) {
 	t.Helper()
 	service, block, processing, _ := newFuluColumnGossipFixture(t)
@@ -197,4 +206,21 @@ func TestProcessMessageRecoversFromPanicInBackgroundImport(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return !service.forkchoiceStore.PayloadImportInProgress(block.Block.Slot)
 	}, acceptTestTimeout, time.Millisecond)
+}
+
+func TestProcessMessageCountsImportSkippedByForkChoice(t *testing.T) {
+	service, block, store, root := newAcceptFixture(t)
+	skipping := &skippingOnBlockStore{onBlockErrorStore: store.onBlockErrorStore}
+	service.forkchoiceStore = skipping
+	skipped := gossipBlockImportAfterAcceptCounter.WithLabelValues("skipped")
+	imported := gossipBlockImportAfterAcceptCounter.WithLabelValues("imported")
+	beforeSkipped, beforeImported := skipped.GetValue(), imported.GetValue()
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
+
+	waitForGossipImports(t, service)
+	require.Equal(t, int32(1), skipping.calls.Load())
+	require.Equal(t, beforeSkipped+1, skipped.GetValue())
+	require.Equal(t, beforeImported, imported.GetValue())
+	require.False(t, blockPersisted(t, service, root))
 }

@@ -376,6 +376,7 @@ type gossipImportResult string
 
 const (
 	gossipImportImported gossipImportResult = "imported"
+	gossipImportSkipped  gossipImportResult = "skipped"
 	gossipImportWaiting  gossipImportResult = "waiting"
 	gossipImportRetry    gossipImportResult = "retry"
 	gossipImportInvalid  gossipImportResult = "invalid"
@@ -450,6 +451,9 @@ func (b *blockService) importGossipBlock(ctx context.Context, msg *cltypes.Signe
 			return gossipImportInvalid, err
 		}
 		return gossipImportFailed, fmt.Errorf("%w: %w", ErrIgnore, err)
+	}
+	if !accepted {
+		return gossipImportSkipped, nil
 	}
 	return gossipImportImported, nil
 }
