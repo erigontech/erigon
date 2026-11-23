@@ -23,13 +23,6 @@ import (
 	"github.com/erigontech/erigon/diagnostics/mem"
 )
 
-var gcDueMetrics = [...]string{
-	"/gc/cycles/total:gc-cycles",
-	"/gc/heap/live:bytes",
-	"/gc/heap/goal:bytes",
-	"/memory/classes/heap/objects:bytes",
-}
-
 func (e *ExecModule) startIdleAfterCommit() {
 	if !e.idleAfterCommitBusy.CompareAndSwap(false, true) {
 		return
@@ -42,9 +35,11 @@ func (e *ExecModule) startIdleAfterCommit() {
 }
 
 func (e *ExecModule) gcIfDue() {
-	s := make([]metrics.Sample, len(gcDueMetrics))
-	for i, name := range gcDueMetrics {
-		s[i].Name = name
+	s := []metrics.Sample{
+		{Name: "/gc/cycles/total:gc-cycles"},
+		{Name: "/gc/heap/live:bytes"},
+		{Name: "/gc/heap/goal:bytes"},
+		{Name: "/memory/classes/heap/objects:bytes"},
 	}
 	metrics.Read(s)
 	cycles, live, goal, heap := s[0].Value.Uint64(), s[1].Value.Uint64(), s[2].Value.Uint64(), s[3].Value.Uint64()
