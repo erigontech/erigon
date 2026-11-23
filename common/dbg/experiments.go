@@ -45,7 +45,6 @@ var (
 	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	heapProfileThresholdPercent = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
 	heapProfileFrequency        = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
-	noMemstat                   = EnvBool("NO_MEMSTAT", false)
 
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
@@ -185,29 +184,12 @@ func init() {
 // MemUsage returns MemStats.Alloc and MemStats.Sys without the stop-the-world
 // of runtime.ReadMemStats, so it is cheap enough for per-block logs.
 func MemUsage() (alloc, sys uint64) {
-	if noMemstat {
-		return 0, 0
-	}
 	s := []metrics.Sample{
 		{Name: "/memory/classes/heap/objects:bytes"},
 		{Name: "/memory/classes/total:bytes"},
 	}
 	metrics.Read(s)
 	return s[0].Value.Uint64(), s[1].Value.Uint64()
-}
-
-// AllocationTotals returns the equivalents of MemStats.Mallocs and MemStats.TotalAlloc.
-func AllocationTotals() (objects, bytes uint64) {
-	if noMemstat {
-		return 0, 0
-	}
-	s := []metrics.Sample{
-		{Name: "/gc/heap/allocs:objects"},
-		{Name: "/gc/heap/tiny/allocs:objects"},
-		{Name: "/gc/heap/allocs:bytes"},
-	}
-	metrics.Read(s)
-	return s[0].Value.Uint64() + s[1].Value.Uint64(), s[2].Value.Uint64()
 }
 
 func DiscardCommitment() bool       { return discardCommitment }
@@ -293,17 +275,10 @@ func LogHashMismatchReason() bool {
 }
 
 type saveHeapOptions struct {
-	memStats *runtime.MemStats
-	logger   *log.Logger
+	logger *log.Logger
 }
 
 type SaveHeapOption func(options *saveHeapOptions)
-
-func SaveHeapWithMemStats(memStats *runtime.MemStats) SaveHeapOption {
-	return func(options *saveHeapOptions) {
-		options.memStats = memStats
-	}
-}
 
 func SaveHeapWithLogger(logger *log.Logger) SaveHeapOption {
 	return func(options *saveHeapOptions) {
@@ -323,12 +298,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 
 	logger := common.Deref(options.logger)
 
-	var alloc, sys uint64
-	if options.memStats != nil {
-		alloc, sys = options.memStats.Alloc, options.memStats.Sys
-	} else {
-		alloc, sys = MemUsage()
-	}
+	alloc, sys := MemUsage()
 
 	totalMemory := estimate.TotalMemory()
 	threshold := (totalMemory / 100) * heapProfileThresholdPercent

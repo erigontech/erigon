@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	goruntime "runtime"
 	"runtime/pprof"
 	"testing"
 	"time"
@@ -37,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -130,13 +130,15 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 		stats.BytesAllocated = result.AllocedBytesPerOp()
 		stats.GasUsed = gasUsed
 	} else {
-		objectsBefore, bytesBefore := dbg.AllocationTotals()
+		// runtime/metrics does not flush the per-P allocation caches, so it undercounts short runs.
+		var memStatsBefore, memStatsAfter goruntime.MemStats
+		goruntime.ReadMemStats(&memStatsBefore) //nolint:forbidigo
 		startTime := time.Now()
 		output, stats.GasUsed, err = execFunc()
 		stats.Time = time.Since(startTime)
-		objectsAfter, bytesAfter := dbg.AllocationTotals()
-		stats.Allocs = int64(objectsAfter - objectsBefore)
-		stats.BytesAllocated = int64(bytesAfter - bytesBefore)
+		goruntime.ReadMemStats(&memStatsAfter) //nolint:forbidigo
+		stats.Allocs = int64(memStatsAfter.Mallocs - memStatsBefore.Mallocs)
+		stats.BytesAllocated = int64(memStatsAfter.TotalAlloc - memStatsBefore.TotalAlloc)
 	}
 
 	return output, stats, err

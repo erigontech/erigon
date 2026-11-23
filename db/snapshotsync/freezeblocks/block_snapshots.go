@@ -857,10 +857,7 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, 
 		case <-ctx.Done():
 			return false, ctx.Err()
 		case <-logEvery.C:
-			var alloc, sys uint64
-			if lvl >= log.LvlInfo {
-				alloc, sys = dbg.MemUsage()
-			}
+			alloc, sys := dbg.MemUsage()
 			logger.Log(
 				lvl, "[snapshots] Dumping headers", "blockNum", blockNum,
 				"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys),
@@ -940,10 +937,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 		case <-ctx.Done():
 			return false, ctx.Err()
 		case <-logEvery.C:
-			var alloc, sys uint64
-			if lvl >= log.LvlInfo {
-				alloc, sys = dbg.MemUsage()
-			}
+			alloc, sys := dbg.MemUsage()
 			logger.Log(
 				lvl, "[snapshots] Wrote into file", "blockNum", blockNum,
 				"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys),
