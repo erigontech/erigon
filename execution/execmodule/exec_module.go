@@ -706,7 +706,12 @@ func (e *ExecModule) awaitPreExecSeal(ctx context.Context, hash common.Hash, num
 	for {
 		e.flash.mu.Lock()
 		changed := e.flash.changedLocked()
-		building := e.flash.num == number && (!e.flash.valid || e.flash.built.Parent == parent)
+		buildingOn := e.flash.parent
+		if e.flash.valid {
+			buildingOn = e.flash.built.Parent
+		}
+		building := (e.flash.num == number && buildingOn == parent) ||
+			e.flash.rebuilding == rebuildOf{number: number, parent: parent}
 		e.flash.mu.Unlock()
 		e.pendingBlockMu.Lock()
 		sealed := e.sealedByHash[hash]
@@ -1043,7 +1048,11 @@ func (e *ExecModule) GetPreExecutedBody(ctx context.Context) (*types.RawBody, co
 	if body == nil {
 		return nil, common.Hash{}, 0, fmt.Errorf("GetPreExecutedBody: body %x not found", oldHash)
 	}
-	return body.RawBody(), oldHash, number, nil
+	txs, err := types.MarshalTransactionsBinary(body.Transactions)
+	if err != nil {
+		return nil, common.Hash{}, 0, fmt.Errorf("GetPreExecutedBody: encode body: %w", err)
+	}
+	return &types.RawBody{Transactions: txs, Uncles: body.Uncles, Withdrawals: body.Withdrawals}, oldHash, number, nil
 }
 
 // filterCandidatesByNonce keeps only the candidate txs applicable at the given state reader: it DROPS

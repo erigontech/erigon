@@ -145,6 +145,8 @@ type flashBodyState struct {
 	hash        common.Hash      // the current in-progress header hash
 	root        common.Hash      // last pre-exec computed state root (per-round; seal recomputes the final)
 	receipts    int              // receipts accumulated across rounds (== body txs)
+	parent      common.Hash
+	rebuilding  rebuildOf
 	changed     chan struct{}
 }
 
@@ -235,6 +237,7 @@ func (f *flashBodyState) resetLocked(num uint64) {
 	f.hash = common.Hash{}
 	f.root = common.Hash{}
 	f.receipts = 0
+	f.parent = common.Hash{}
 	f.signalLocked()
 }
 
@@ -323,6 +326,7 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 	e.flash.mu.Lock()
 	if e.flash.num != inputs.Number {
 		e.flash.resetLocked(inputs.Number)
+		e.flash.parent = inputs.Parent
 	}
 	// ⚠ A ROUND MUST NOT SILENTLY RE-STAMP THE ATTRIBUTES. Every successful round writes e.flash.built =
 	// inputs at the end of this function. If the proposer attributes moved on since the block opened, that
@@ -542,6 +546,7 @@ func (e *ExecModule) rebuildBodyNoncesLocked() {
 func (e *ExecModule) reopenFlashblockLocked(ctx context.Context, inputs FlashblockInputs, body [][]byte) (*types.RawBody, common.Hash, ValidationResult, error) {
 	e.flash.mu.Lock()
 	e.flash.resetLocked(inputs.Number)
+	e.flash.parent = inputs.Parent
 	signer := types.LatestSignerForChainID(e.config.ChainID)
 	for _, rlp := range body {
 		tx, derr := types.DecodeTransaction(rlp)
@@ -1037,7 +1042,21 @@ func (e *ExecModule) RebuildFlashblock(ctx context.Context, inputs FlashblockInp
 	defer e.semaphore.Release(1)
 	e.roundMu.Lock()
 	defer e.roundMu.Unlock()
+	e.flash.mu.Lock()
+	e.flash.rebuilding = rebuildOf{number: inputs.Number, parent: inputs.Parent}
+	e.flash.mu.Unlock()
+	defer func() {
+		e.flash.mu.Lock()
+		e.flash.rebuilding = rebuildOf{}
+		e.flash.signalLocked()
+		e.flash.mu.Unlock()
+	}()
 	e.abandonExtendingForkLocked()
 	_, _, vr, err := e.accumulateFlashblockLocked(ctx, inputs, body, len(body) > 0)
 	return vr, err
+}
+
+type rebuildOf struct {
+	number uint64
+	parent common.Hash
 }
