@@ -513,8 +513,8 @@ func (s *simulator) sanitizeCall(
 		if args.GasPrice == nil && args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil {
 			args.GasPrice = new(hexutil.U256)
 		}
-	} else {
-		// A base fee is provided, requiring 1559-type execution
+	} else if args.GasPrice == nil {
+		// A call with gasPrice stays legacy; zero dynamic fees would conflict with it.
 		if args.MaxFeePerGas == nil {
 			args.MaxFeePerGas = new(hexutil.U256)
 		}
