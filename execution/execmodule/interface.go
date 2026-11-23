@@ -196,6 +196,8 @@ type ExecutionModule interface {
 	// stream against its own SD, maintains the (filtered) block body, builds+inserts it, and pre-executes.
 	// Returns the current filtered body and its hash. See execmodule.PreExecuteFlashblock.
 	PreExecuteFlashblock(ctx context.Context, inputs FlashblockInputs, newTxRLPs [][]byte) (*types.RawBody, common.Hash, ValidationResult, error)
+	// RebuildFlashblock re-executes the in-progress block from body alone, for a build that ran past the block's end.
+	RebuildFlashblock(ctx context.Context, inputs FlashblockInputs, body [][]byte) (ValidationResult, error)
 
 	// GetPreExecutedBody returns the node's locally pre-executed in-progress flashblock body
 	// (accumulated from the DAG across PreExecute rounds) plus the deferred in-progress hash and

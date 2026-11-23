@@ -1011,3 +1011,16 @@ func orderBySenderNonce(cands []txCandidate) []txCandidate {
 	})
 	return out
 }
+
+// RebuildFlashblock re-executes the in-progress block from body alone, discarding everything else it executed.
+func (e *ExecModule) RebuildFlashblock(ctx context.Context, inputs FlashblockInputs, body [][]byte) (ValidationResult, error) {
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return ValidationResult{}, err
+	}
+	defer e.semaphore.Release(1)
+	e.roundMu.Lock()
+	defer e.roundMu.Unlock()
+	e.abandonExtendingForkLocked()
+	_, _, vr, err := e.accumulateFlashblockLocked(ctx, inputs, body, len(body) > 0)
+	return vr, err
+}
