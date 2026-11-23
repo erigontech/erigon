@@ -185,6 +185,8 @@ type testPoster struct {
 	sent   []post.Target
 	sends  int
 	err    error
+	// pooled has the postings sent through the mempool.
+	pooled bool
 }
 
 func (p *testPoster) Sign(_ context.Context, input []byte, gas uint64) (types.Transaction, error) {
@@ -207,7 +209,7 @@ func (p *testPoster) Send(_ context.Context, txs []types.Transaction, target pos
 	if p.err != nil {
 		return post.Sent{}, p.err
 	}
-	return post.Sent{Block: max(target.Block, 99), Time: target.Time}, nil
+	return post.Sent{Block: max(target.Block, 99), Time: target.Time, Pooled: p.pooled}, nil
 }
 
 func (p *testPoster) fail(err error) {
@@ -246,6 +248,7 @@ type quiet struct{}
 
 func (quiet) Head(context.Context) (*l1.Header, error)                  { return &l1.Header{Number: 1}, nil }
 func (quiet) Receipt(context.Context, common.Hash) (*l1.Receipt, error) { return nil, nil }
+func (quiet) HasTransaction(context.Context, common.Hash) (bool, error) { return false, nil }
 
 type harness struct {
 	chain  *testChain
@@ -495,6 +498,8 @@ type settling struct {
 
 func (s settling) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1}, nil }
 
+func (settling) HasTransaction(context.Context, common.Hash) (bool, error) { return true, nil }
+
 func (s settling) Receipt(context.Context, common.Hash) (*l1.Receipt, error) {
 	return receipt(1, batchPosted(s.t, eezL1), performed(s.t, eezL1, 1, s.terminal)), nil
 }
@@ -509,6 +514,47 @@ func TestComposerObserves(t *testing.T) {
 		e := h.c.ledger.entries[8]
 		return e != nil && e.resolution == Settled
 	}, 5*time.Second, time.Millisecond)
+}
+
+// pooling is an L1 past every target whose node holds the postings sent to
+// its pool until it loses them.
+type pooling struct {
+	has   atomic.Bool
+	asked atomic.Int64
+}
+
+func (*pooling) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1000}, nil }
+
+func (p *pooling) Receipt(context.Context, common.Hash) (*l1.Receipt, error) {
+	p.asked.Add(1)
+	return nil, nil
+}
+
+func (p *pooling) HasTransaction(context.Context, common.Hash) (bool, error) {
+	return p.has.Load(), nil
+}
+
+// TestComposerWaitsOnAPooledPosting: a posting sent through the mempool
+// holds the gate past its target while the node has it, and fails once the
+// node lost it.
+func TestComposerWaitsOnAPooledPosting(t *testing.T) {
+	node := &pooling{}
+	node.has.Store(true)
+	h := newHarness(t, newTestChain(t, 12), 12, node)
+	h.poster.pooled = true
+	h.slot(t, 8, 50, sequencer.ModeSteady)
+	require.Len(t, h.targets(t), 1)
+	require.Eventually(t, func() bool { return node.asked.Load() > 20 }, 5*time.Second, time.Millisecond)
+	r, ok := h.resolution(8)
+	require.True(t, ok)
+	require.Equal(t, Pending, r)
+	h.slot(t, 12, 52, sequencer.ModeSteady)
+	require.Len(t, h.targets(t), 1, "the pooled posting holds the gate past its target")
+	node.has.Store(false)
+	require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Failed }, 5*time.Second, time.Millisecond)
+	h.slot(t, 12, 52, sequencer.ModeSteady)
+	require.Len(t, h.targets(t), 2)
+	h.requireWindow(t, 1, 1, 12, post.Target{Block: 52, Time: h.chain.header(12).Time})
 }
 
 // TestComposerFallsBackFromAFreshCursor: the chunk replacing a failed anchor
@@ -550,6 +596,10 @@ type landing struct {
 }
 
 func (l *landing) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1}, nil }
+
+func (l *landing) HasTransaction(context.Context, common.Hash) (bool, error) {
+	return !l.gone.Load(), nil
+}
 
 func (l *landing) Receipt(context.Context, common.Hash) (*l1.Receipt, error) {
 	l.asked.Add(1)

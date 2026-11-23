@@ -238,6 +238,16 @@ func (r *RPC) SendRawTransaction(ctx context.Context, raw []byte) error {
 	return nil
 }
 
+// HasTransaction reports whether the node has the transaction with hash,
+// pooled or in a block.
+func (r *RPC) HasTransaction(ctx context.Context, hash common.Hash) (bool, error) {
+	var raw json.RawMessage
+	if err := r.client.CallContext(ctx, &raw, "eth_getTransactionByHash", hash); err != nil {
+		return false, mapError(err, fmt.Sprintf("transaction %x", hash))
+	}
+	return !isNull(raw), nil
+}
+
 // Receipt is what the poster reads of a transaction's receipt.
 type Receipt struct {
 	// Status is 1 for a transaction that succeeded.

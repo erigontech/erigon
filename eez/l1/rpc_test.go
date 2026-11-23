@@ -284,6 +284,17 @@ func (p *posting) GetTransactionReceipt(_ context.Context, hash common.Hash) (ma
 	}, nil
 }
 
+// GetTransactionByHash knows transaction 4 in a block and 9 in the pool.
+func (p *posting) GetTransactionByHash(_ context.Context, hash common.Hash) (map[string]any, error) {
+	switch hash {
+	case common.Hash{4}:
+		return map[string]any{"hash": hash, "blockHash": common.Hash{6}, "blockNumber": "0x11", "transactionIndex": "0x2"}, nil
+	case common.Hash{9}:
+		return map[string]any{"hash": hash, "blockHash": nil, "blockNumber": nil, "transactionIndex": nil}, nil
+	}
+	return nil, nil
+}
+
 func (p *posting) SendRawTransaction(_ context.Context, raw hexutil.Bytes) (common.Hash, error) {
 	if len(raw) == 0 {
 		return common.Hash{}, errors.New("nonce too low")
@@ -319,6 +330,11 @@ func TestRPCPosting(t *testing.T) {
 	receipt, err = r.Receipt(ctx, common.Hash{8})
 	require.NoError(t, err)
 	require.Nil(t, receipt)
+	for hash, want := range map[common.Hash]bool{{4}: true, {9}: true, {8}: false} {
+		has, err := r.HasTransaction(ctx, hash)
+		require.NoError(t, err)
+		require.Equal(t, want, has, "transaction %x", hash)
+	}
 
 	p.baseFee = nil
 	fee, err = r.BaseFee(ctx)

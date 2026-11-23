@@ -151,6 +151,9 @@ type Sent struct {
 	// Time is the timestamp the bundle is pinned to, zero when it is not; a
 	// bundle sent through the mempool is not.
 	Time uint64
+	// Pooled reports a bundle sent through the mempool, which may land after
+	// Block.
+	Pooled bool
 }
 
 // Send hands txs, the poster's call first, to the builder for target. A
@@ -191,7 +194,7 @@ func (p *Poster) Send(ctx context.Context, txs []types.Transaction, target Targe
 				"index", i, "hash", txs[i].Hash(), "err", err)
 		}
 	}
-	return Sent{Block: block}, nil
+	return Sent{Block: block, Pooled: true}, nil
 }
 
 // bundle sends raw to the builder for block, pinned to timestamp time unless

@@ -221,7 +221,7 @@ func TestSend(t *testing.T) {
 		},
 		{
 			name: "mempool", txs: 2, target: Target{Block: 100, Time: 1234}, answer: unsupported,
-			params: `{"txs":["%s","%s"],"blockNumber":"0x64","minTimestamp":1234,"maxTimestamp":1234}`, sent: Sent{Block: 100}, mempool: 2, tries: 2,
+			params: `{"txs":["%s","%s"],"blockNumber":"0x64","minTimestamp":1234,"maxTimestamp":1234}`, sent: Sent{Block: 100, Pooled: true}, mempool: 2, tries: 2,
 		},
 		{
 			name: "mempool refuses the call", txs: 2, target: Target{Block: 100}, answer: unsupported, refuse: map[int]bool{0: true},
@@ -229,7 +229,7 @@ func TestSend(t *testing.T) {
 		},
 		{
 			name: "mempool refuses a later one", txs: 2, target: Target{Block: 100}, answer: unsupported, refuse: map[int]bool{1: true},
-			params: `{"txs":["%s","%s"],"blockNumber":"0x64"}`, sent: Sent{Block: 100}, mempool: 1, tries: 2,
+			params: `{"txs":["%s","%s"],"blockNumber":"0x64"}`, sent: Sent{Block: 100, Pooled: true}, mempool: 1, tries: 2,
 		},
 		{name: "nothing to send", target: Target{Block: 100}, answer: accepted, err: "no transactions"},
 	} {

@@ -311,7 +311,7 @@ func (c *Composer) post(ctx context.Context, cursor uint64, terminal *types.Head
 		}
 		c.logger.Info("[eez] batch posted", "event", "eez.composer.batch.posted", "from", cursor+1, "to", to, "post", hash,
 			"l1Block", sent.Block, "pinned", sent.Time != 0)
-		verdict, err := c.observer.Watch(c.ctx, hash, batch, terminal.Hash(), sent.Block)
+		verdict, err := c.observer.Watch(c.ctx, hash, batch, terminal.Hash(), sent)
 		if err != nil {
 			return
 		}

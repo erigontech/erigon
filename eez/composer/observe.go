@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/l1"
+	"github.com/erigontech/erigon/eez/l1/post"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -31,6 +32,9 @@ import (
 type Receipts interface {
 	Head(ctx context.Context) (*l1.Header, error)
 	Receipt(ctx context.Context, hash common.Hash) (*l1.Receipt, error)
+	// HasTransaction reports whether the node has the transaction, pooled
+	// or in a block.
+	HasTransaction(ctx context.Context, hash common.Hash) (bool, error)
 }
 
 // slowVerdict is how long a posting waits for its verdict before a warning.
@@ -47,22 +51,23 @@ type Observer struct {
 	Logger log.Logger
 }
 
-// Watch returns the verdict on post, the posting of batch for L1 block
-// target, whose terminal block is terminal: Settled when its receipt shows
-// the rollup reaching terminal, SettledPartial when it shows the rollup
-// moved elsewhere, Failed when it shows neither or L1 passed target without
-// it. Failed reads give no verdict; Watch ends with ctx.
-func (o *Observer) Watch(ctx context.Context, post common.Hash, batch *protocol.ProofSystemBatch, terminal common.Hash, target uint64) (Resolution, error) {
+// Watch returns the verdict on hash, the posting of batch sent as sent,
+// whose terminal block is terminal: Settled when its receipt shows the
+// rollup reaching terminal, SettledPartial when it shows the rollup moved
+// elsewhere, Failed when it shows neither or the posting can no longer land.
+// Failed reads give no verdict; Watch ends with ctx.
+func (o *Observer) Watch(ctx context.Context, hash common.Hash, batch *protocol.ProofSystemBatch, terminal common.Hash, sent post.Sent) (Resolution, error) {
 	slow := time.Now().Add(slowVerdict)
 	tick := time.NewTicker(o.Every)
 	defer tick.Stop()
+	known := false
 	for {
-		if r, err := o.Node.Receipt(ctx, post); err == nil && r != nil {
+		if r, err := o.Node.Receipt(ctx, hash); err == nil && r != nil {
 			return o.judge(r, batch, terminal), nil
 		} else if err == nil {
-			// The receipt may land between the read and a head past target.
-			if head, err := o.Node.Head(ctx); err == nil && head.Number > target {
-				if r, err := o.Node.Receipt(ctx, post); err == nil {
+			// The receipt may land between the read and the check.
+			if gone, err := o.gone(ctx, hash, sent, &known); err == nil && gone {
+				if r, err := o.Node.Receipt(ctx, hash); err == nil {
 					if r != nil {
 						return o.judge(r, batch, terminal), nil
 					}
@@ -71,7 +76,8 @@ func (o *Observer) Watch(ctx context.Context, post common.Hash, batch *protocol.
 			}
 		}
 		if !slow.IsZero() && time.Now().After(slow) {
-			o.Logger.Warn("[eez] posting has no verdict yet", "event", "eez.composer.observe.slow", "post", post, "target", target)
+			o.Logger.Warn("[eez] posting has no verdict yet", "event", "eez.composer.observe.slow", "post", hash,
+				"target", sent.Block, "pooled", sent.Pooled)
 			slow = time.Time{}
 		}
 		select {
@@ -80,6 +86,31 @@ func (o *Observer) Watch(ctx context.Context, post common.Hash, batch *protocol.
 		case <-tick.C:
 		}
 	}
+}
+
+// gone reports whether hash, a posting without a receipt, can no longer
+// land. A bundle cannot once L1 passed its block. A pooled posting may land
+// later: it cannot once the node, which had it, no longer has it, and the
+// next posting takes its nonce. known records that the node had it; a node
+// that never showed it is taken as a bundle.
+func (o *Observer) gone(ctx context.Context, hash common.Hash, sent post.Sent, known *bool) (bool, error) {
+	if sent.Pooled {
+		has, err := o.Node.HasTransaction(ctx, hash)
+		switch {
+		case err != nil:
+			return false, err
+		case has:
+			*known = true
+			return false, nil
+		case *known:
+			return true, nil
+		}
+	}
+	head, err := o.Node.Head(ctx)
+	if err != nil {
+		return false, err
+	}
+	return head.Number > sent.Block, nil
 }
 
 // judge is the verdict on r, the receipt of the posting of batch.

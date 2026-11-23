@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/l1"
+	"github.com/erigontech/erigon/eez/l1/post"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -105,6 +106,17 @@ type chain struct {
 	failed error
 	reads  int
 	script func(c *chain, read int)
+	// has reports the posting known to the node; lookups counts the reads.
+	has          bool
+	lookupFailed error
+	lookups      int
+}
+
+func (c *chain) HasTransaction(context.Context, common.Hash) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lookups++
+	return c.has, c.lookupFailed
 }
 
 func (c *chain) Head(context.Context) (*l1.Header, error) {
@@ -131,66 +143,104 @@ func TestWatch(t *testing.T) {
 	settles := receipt(1, batchPosted(t, eezL1), performed(t, eezL1, 1, terminal))
 	down := errors.New("node down")
 	for _, c := range []struct {
-		name   string
-		head   uint64
-		script func(c *chain, read int)
-		want   Resolution
+		name        string
+		head        uint64
+		pooled, has bool
+		script      func(c *chain, read int)
+		want        Resolution
 	}{
-		{"settles once its receipt appears", 100, func(c *chain, read int) {
+		{name: "settles once its receipt appears", head: 100, script: func(c *chain, read int) {
 			if read == 3 {
 				c.got = settles
 			}
-		}, Settled},
-		{"dropped once L1 passes the target", 100, func(c *chain, read int) {
+		}, want: Settled},
+		{name: "dropped once L1 passes the target", head: 100, script: func(c *chain, read int) {
 			if read == 3 {
 				c.head = 102
 			}
-		}, Failed},
-		{"the target block itself is no verdict", 100, func(c *chain, read int) {
+		}, want: Failed},
+		{name: "the target block itself is no verdict", head: 100, script: func(c *chain, read int) {
 			switch read {
 			case 2:
 				c.head = 101
 			case 5:
 				c.got = settles
 			}
-		}, Settled},
-		{"a receipt behind the head", 102, func(c *chain, read int) {
+		}, want: Settled},
+		{name: "a receipt behind the head", head: 102, script: func(c *chain, read int) {
 			if read == 2 {
 				c.got = settles
 			}
-		}, Settled},
-		{"a failed recheck is no verdict", 102, func(c *chain, read int) {
+		}, want: Settled},
+		{name: "a failed recheck is no verdict", head: 102, script: func(c *chain, read int) {
 			switch read {
 			case 2:
 				c.failed = down
 			case 3:
 				c.failed, c.got = nil, settles
 			}
-		}, Settled},
-		{"failed reads are no verdict", 100, func(c *chain, read int) {
+		}, want: Settled},
+		{name: "failed reads are no verdict", head: 100, script: func(c *chain, read int) {
 			switch read {
 			case 1:
 				c.failed, c.head = down, 102
 			case 4:
 				c.failed, c.got = nil, settles
 			}
-		}, Settled},
+		}, want: Settled},
+		{name: "a pooled posting the node has outlives its target", head: 100, pooled: true, has: true, script: func(c *chain, read int) {
+			switch read {
+			case 2:
+				c.head = 105
+			case 6:
+				c.got = settles
+			}
+		}, want: Settled},
+		{name: "a pooled posting the node lost", head: 100, pooled: true, has: true, script: func(c *chain, read int) {
+			if read == 3 {
+				c.has = false
+			}
+		}, want: Failed},
+		{name: "a lost pooled posting's late receipt", head: 100, pooled: true, has: true, script: func(c *chain, read int) {
+			switch read {
+			case 3:
+				c.has = false
+			case 4:
+				c.got = settles
+			}
+		}, want: Settled},
+		{name: "a failed lookup is no verdict", head: 100, pooled: true, has: true, script: func(c *chain, read int) {
+			switch read {
+			case 2:
+				c.lookupFailed, c.has, c.head = down, false, 105
+			case 5:
+				c.lookupFailed, c.got = nil, settles
+			}
+		}, want: Settled},
+		{name: "a pooled posting the node never showed falls back on its target", head: 100, pooled: true, script: func(c *chain, read int) {
+			if read == 3 {
+				c.head = 102
+			}
+		}, want: Failed},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			node := &chain{head: c.head, script: c.script}
+			node := &chain{head: c.head, script: c.script, has: c.has}
 			o := &Observer{Node: node, RollupID: 1, EEZ: eezL1, Every: time.Millisecond, Logger: log.New()}
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
-			got, err := o.Watch(ctx, common.Hash{1}, b, terminal, 101)
+			got, err := o.Watch(ctx, common.Hash{1}, b, terminal, post.Sent{Block: 101, Pooled: c.pooled})
 			require.NoError(t, err)
 			require.Equal(t, c.want, got)
+			if !c.pooled {
+				require.Zero(t, node.lookups, "a bundle is not looked up")
+			}
 		})
 	}
 	t.Run("ends with its context", func(t *testing.T) {
 		o := &Observer{Node: &chain{head: 100}, RollupID: 1, EEZ: eezL1, Every: time.Millisecond, Logger: log.New()}
 		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 		defer cancel()
-		got, err := o.Watch(ctx, common.Hash{1}, b, terminal, 101)
+		got, err := o.Watch(ctx, common.Hash{1}, b, terminal, post.Sent{Block: 101})
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.Equal(t, Pending, got)
 	})
