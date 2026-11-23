@@ -884,11 +884,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 		var oldSideBlocks sideBlocksState
 		sideBlocksSwapped := false
-		swapSideBlocks := func() {
+		swapSideBlocks := func(publish func()) {
 			if sideBlocksSwapped {
 				return
 			}
-			oldSideBlocks = e.swapSideBlocksForForkChoice(side, retained)
+			oldSideBlocks = e.swapSideBlocksForForkChoice(side, retained, publish)
 			sideBlocksSwapped = true
 		}
 		restoreSideBlocks := func() {
@@ -924,7 +924,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				}
 			}()
 		}
-		swapSideBlocks()
+		swapSideBlocks(nil)
 
 		// Flush + commit: pass the outer roTx so it gets released between
 		// Flush and Commit, so the commit sees openTxs=1 in MDBX.
@@ -1008,7 +1008,7 @@ func (e *ExecModule) logTimings(msg string, timings []any) {
 // Dispatch must finish before the execution semaphore is released so the next
 // FCU cannot overtake these notifications. The result reports whether
 // publication happened, including when the later notification dispatch fails.
-func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *execctx.SharedDomains, finishProgressBefore uint64, prevUnwindPoint *uint64, onPublished func()) (bool, error) {
+func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *execctx.SharedDomains, finishProgressBefore uint64, prevUnwindPoint *uint64, switchSources func(publish func())) (bool, error) {
 	dispatcher := e.pipelineExecutor.Dispatcher()
 	if dispatcher == nil || e.accum == nil {
 		e.logger.Debug("[dispatchNotifications] skipped: dispatcher or accum nil", "dispatcherNil", dispatcher == nil, "accumNil", e.accum == nil)
@@ -1031,9 +1031,11 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *e
 	// the BlockListener (overlay-aware shutter) sees the overlay as active
 	// before any StateChangeBatch arrives, so it can buffer events properly.
 	e.logger.Debug("[dispatchNotifications] publishing SD")
-	dispatcher.PublishOverlay(sd)
-	if onPublished != nil {
-		onPublished()
+	publish := func() { dispatcher.PublishOverlay(sd) }
+	if switchSources != nil {
+		switchSources(publish)
+	} else {
+		publish()
 	}
 	// Overlay publication is drop-tolerant; the observer supplies the blocking
 	// boundary required by deterministic integration tests.

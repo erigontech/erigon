@@ -112,9 +112,12 @@ type sideBlocksState struct {
 	context  *execctx.SharedDomains
 }
 
-func (e *ExecModule) swapSideBlocksForForkChoice(side map[common.Hash]pendingBlock, retained *membatchwithdb.MemoryMutation) sideBlocksState {
+func (e *ExecModule) swapSideBlocksForForkChoice(side map[common.Hash]pendingBlock, retained *membatchwithdb.MemoryMutation, publish func()) sideBlocksState {
 	e.lock.Lock()
 	defer e.lock.Unlock()
+	if publish != nil {
+		publish()
+	}
 	old := sideBlocksState{
 		pending:  e.pendingBlocks,
 		retained: e.retainedBlocks,

@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -108,43 +110,43 @@ func TestForkChoiceCommitFailureKeepsRetainedSideBlock(t *testing.T) {
 	requireCanonicalWithTransactions(t, m, side)
 }
 
-func TestForkChoiceGettersSeePublishedHead(t *testing.T) {
-	var m *execmoduletester.ExecModuleTester
-	var key *ecdsa.PrivateKey
-	var child *types.Block
-	var armed atomic.Bool
-	type observation struct {
-		header       *types.Header
-		headerErr    error
-		canonical    bool
-		canonicalErr error
+func TestForkChoiceGettersSwitchWithPublication(t *testing.T) {
+	for _, parallel := range []bool{false, true} {
+		t.Run(fmt.Sprintf("parallel flushing %t", parallel), func(t *testing.T) {
+			m, key, _ := newMetricsTester(t, execmoduletester.WithParallelStateFlushing(parallel))
+			m.ExecModule.SetPublishedSD(m.Notifications.Events.LatestSD)
+			chain, err := m.GenerateChain(16, sendTo(t, m, key, common.Address{0x0c}, 1))
+			require.NoError(t, err)
+			for _, block := range chain.Blocks {
+				insertAndValidateBlocks(t, m, block)
+				_, seq := m.Notifications.Events.OverlaySnapshot()
+				var readers errgroup.Group
+				for range 4 {
+					readers.Go(func() error {
+						for t.Context().Err() == nil {
+							if _, now := m.Notifications.Events.OverlaySnapshot(); now != seq {
+								break
+							}
+						}
+						header, err := m.ExecModule.CurrentHeader(t.Context())
+						if err != nil {
+							return err
+						}
+						canonical, err := m.ExecModule.IsCanonicalHash(t.Context(), block.Hash())
+						if err != nil {
+							return err
+						}
+						if header.Hash() != block.Hash() || !canonical {
+							return fmt.Errorf("published block %d, getters read head %d, canonical %t", block.NumberU64(), header.Number.Uint64(), canonical)
+						}
+						return nil
+					})
+				}
+				updateForkChoiceTo(t, m, block)
+				require.NoError(t, readers.Wait())
+			}
+		})
 	}
-	observed := make(chan observation, 1)
-	m, key, _ = newMetricsTester(t, execmoduletester.WithStateTransitionObserver(func(ctx context.Context, point execmodule.StateTransitionPoint) {
-		if point != execmodule.StateTransitionOverlayPublished || !armed.CompareAndSwap(true, false) {
-			return
-		}
-		header, headerErr := m.ExecModule.CurrentHeader(ctx)
-		canonical, canonicalErr := m.ExecModule.IsCanonicalHash(ctx, child.Hash())
-		observed <- observation{header: header, headerErr: headerErr, canonical: canonical, canonicalErr: canonicalErr}
-	}))
-	m.ExecModule.SetPublishedSD(m.Notifications.Events.LatestSD)
-	chain, err := m.GenerateChain(2, sendTo(t, m, key, common.Address{0x0c}, 1))
-	require.NoError(t, err)
-	base, child := chain.Blocks[0], chain.Blocks[1]
-	insertAndValidateBlocks(t, m, base)
-	updateForkChoiceTo(t, m, base)
-	insertAndValidateBlocks(t, m, child)
-	armed.Store(true)
-
-	result, err := m.UpdateForkChoice(t.Context(), child.Header())
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
-	resultObservation := <-observed
-	require.NoError(t, resultObservation.headerErr)
-	require.Equal(t, child.Hash(), resultObservation.header.Hash())
-	require.NoError(t, resultObservation.canonicalErr)
-	require.True(t, resultObservation.canonical)
 }
 
 func TestValidateChildOfRetainedSideBlock(t *testing.T) {
