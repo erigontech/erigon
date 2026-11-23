@@ -145,7 +145,8 @@ func (p *Poster) Sign(ctx context.Context, input []byte, gas uint64) (types.Tran
 
 // Target is the L1 block a bundle is for.
 type Target struct {
-	// Block is the L1 block; zero aims two blocks above the L1 head.
+	// Block is the L1 block; zero, or without Time a block L1 has built,
+	// aims two blocks above the L1 head.
 	Block uint64
 	// Time, when set, admits the bundle only in a block with that timestamp.
 	Time uint64
@@ -179,12 +180,16 @@ func (p *Poster) Send(ctx context.Context, txs []types.Transaction, target Targe
 		return Sent{}, err
 	}
 	block := target.Block
-	if block == 0 {
+	// A target set before a catch-up and its proof may name a block L1 has
+	// built since; only a timestamp pin keeps it.
+	if block == 0 || target.Time == 0 {
 		head, err := p.node.Head(ctx)
 		if err != nil {
 			return Sent{}, err
 		}
-		block = head.Number + nextBlockSlack
+		if block <= head.Number {
+			block = head.Number + nextBlockSlack
+		}
 	}
 	err = p.bundle(ctx, raw, block, target.Time)
 	switch {

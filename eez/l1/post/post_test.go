@@ -264,6 +264,18 @@ func TestSend(t *testing.T) {
 			name: "the mempool takes nothing over its limit", txs: 1, input: 128 * 1024, target: Target{Block: 100}, answer: unsupported,
 			params: `{"txs":["%s"],"blockNumber":"0x64"}`, err: "eth_sendBundle",
 		},
+		{
+			name: "a block L1 has passed", txs: 1, target: Target{Block: 90}, answer: accepted,
+			params: `{"txs":["%s"],"blockNumber":"0x64"}`, sent: Sent{Block: 100},
+		},
+		{
+			name: "the block L1 builds next", txs: 1, target: Target{Block: 99}, answer: accepted,
+			params: `{"txs":["%s"],"blockNumber":"0x63"}`, sent: Sent{Block: 99},
+		},
+		{
+			name: "a passed block pinned to its time", txs: 1, target: Target{Block: 90, Time: 1234}, answer: accepted,
+			params: `{"txs":["%s"],"blockNumber":"0x5a","minTimestamp":1234,"maxTimestamp":1234}`, sent: Sent{Block: 90, Time: 1234},
+		},
 		{name: "nothing to send", target: Target{Block: 100}, answer: accepted, err: "no transactions"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
