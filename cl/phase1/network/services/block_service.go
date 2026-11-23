@@ -823,6 +823,8 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 		}
 	}
 	finalizedCheckpoint := b.forkchoiceStore.FinalizedCheckpoint()
+	var executionEnabled bool
+	var expectedTimestamp uint64
 
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
@@ -844,11 +846,13 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 			return ErrInvalidSignature
 		}
 		if blockVersion >= clparams.BellatrixVersion && blockVersion < clparams.GloasVersion {
-			// [REJECT] block.body.execution_payload.timestamp == compute_timestamp_at_slot(state, block.slot), if execution is enabled for the block.
-			payload := msg.Block.Body.ExecutionPayload
-			if payload != nil && (state.IsMergeTransitionComplete(headState) || payload.BlockHash != (common.Hash{})) &&
-				payload.Time != state.ComputeTimestampAtSlot(headState, msg.Block.Slot) {
-				return fmt.Errorf("invalid execution payload timestamp %d for slot %d", payload.Time, msg.Block.Slot)
+			if payload := msg.Block.Body.ExecutionPayload; payload != nil {
+				enabled, err := b.isExecutionEnabled(headState, payload)
+				if err != nil {
+					return err
+				}
+				executionEnabled = enabled
+				expectedTimestamp = state.ComputeTimestampAtSlot(headState, msg.Block.Slot)
 			}
 		}
 		return nil
@@ -856,9 +860,15 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 		return err
 	}
 
-	// [IGNORE] The block's parent passes all validation, including the execution node verification of its payload, when that is complete.
-	if blockVersion < clparams.GloasVersion && b.isParentExecutionInvalid(msg.Block.ParentRoot) {
-		return fmt.Errorf("%w: parent %v is invalid", ErrIgnore, msg.Block.ParentRoot)
+	preGloas := blockVersion < clparams.GloasVersion
+	// [REJECT] The block's parent failed validation and its payload was not processed; [IGNORE] if the payload was processed (VALID or INVALIDATED).
+	if preGloas && b.forkchoiceStore.IsBlockInvalid(msg.Block.ParentRoot) {
+		if _, stored := b.forkchoiceStore.GetHeader(msg.Block.ParentRoot); !stored {
+			if b.isPayloadProcessed(msg.Block.ParentRoot) {
+				return fmt.Errorf("%w: parent %v failed validation", ErrIgnore, msg.Block.ParentRoot)
+			}
+			return fmt.Errorf("parent %v failed validation and its payload was not processed", msg.Block.ParentRoot)
+		}
 	}
 
 	// Only signature-verified blocks may reach the retry checks below.
@@ -869,6 +879,19 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 			schedule()
 		}
 		return fmt.Errorf("%w: parent header not found: %v", ErrIgnore, msg.Block.ParentRoot)
+	}
+	parentPayloadInvalidated := preGloas && b.isParentPayloadInvalidated(msg.Block.ParentRoot, parentHeader, finalizedCheckpoint.Epoch)
+	// [IGNORE] [Fulu] The block's parent payload is not INVALIDATED, checked before the timestamp.
+	if parentPayloadInvalidated && blockVersion >= clparams.FuluVersion {
+		return fmt.Errorf("%w: parent %v payload is invalidated", ErrIgnore, msg.Block.ParentRoot)
+	}
+	// [REJECT] block.body.execution_payload.timestamp == compute_timestamp_at_slot(state, block.slot), if execution is enabled for the block.
+	if executionEnabled && msg.Block.Body.ExecutionPayload.Time != expectedTimestamp {
+		return fmt.Errorf("invalid execution payload timestamp %d for slot %d", msg.Block.Body.ExecutionPayload.Time, msg.Block.Slot)
+	}
+	// [IGNORE] [Bellatrix..Electra] The block's parent passes all validation, including the execution node verification of its payload, when that is complete.
+	if parentPayloadInvalidated {
+		return fmt.Errorf("%w: parent %v payload is invalidated", ErrIgnore, msg.Block.ParentRoot)
 	}
 	if parentHeader.Slot >= msg.Block.Slot {
 		return ErrBlockYoungerThanParent
@@ -963,12 +986,49 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 	return nil
 }
 
-func (b *blockService) isParentExecutionInvalid(parentRoot common.Hash) bool {
-	if b.forkchoiceStore.IsBlockInvalid(parentRoot) {
-		return true
+func (b *blockService) isPayloadProcessed(blockRoot common.Hash) bool {
+	status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatus(b.forkchoiceStore.GetEth1Hash(blockRoot))
+	return seen && (status == execution_client.PayloadStatusValidated || status == execution_client.PayloadStatusInvalidated)
+}
+
+// isParentPayloadInvalidated also reports a payload that is invalid only because an ancestor's payload is.
+func (b *blockService) isParentPayloadInvalidated(root common.Hash, header *cltypes.BeaconBlockHeader, finalizedEpoch uint64) bool {
+	finalizedStartSlot, ok := safeMultiplyUint64(finalizedEpoch, b.beaconCfg.SlotsPerEpoch)
+	if !ok {
+		return false
 	}
-	status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(parentRoot)
-	return seen && status == execution_client.PayloadStatusInvalidated
+	for {
+		if b.forkchoiceStore.IsBlockInvalid(root) {
+			return true
+		}
+		status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(root)
+		if seen && status == execution_client.PayloadStatusInvalidated {
+			return true
+		}
+		if seen && status == execution_client.PayloadStatusValidated || header.Slot <= finalizedStartSlot {
+			return false
+		}
+		root = header.ParentRoot
+		if header, ok = b.forkchoiceStore.GetHeader(root); !ok {
+			return false
+		}
+	}
+}
+
+// isExecutionEnabled is is_execution_enabled: the merge is complete, or the payload is not the default one.
+func (b *blockService) isExecutionEnabled(headState *state.CachingBeaconState, payload *cltypes.Eth1Block) (bool, error) {
+	if state.IsMergeTransitionComplete(headState) {
+		return true, nil
+	}
+	payloadRoot, err := payload.HashSSZ()
+	if err != nil {
+		return false, err
+	}
+	defaultRoot, err := cltypes.NewEth1Block(payload.Version(), b.beaconCfg).HashSSZ()
+	if err != nil {
+		return false, err
+	}
+	return payloadRoot != defaultRoot, nil
 }
 
 func (b *blockService) blockValidationContext(ctx context.Context, parentRoot common.Hash, slot uint64) (*blockValidationContext, error) {

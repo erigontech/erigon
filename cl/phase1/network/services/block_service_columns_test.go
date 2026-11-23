@@ -165,13 +165,22 @@ func newFuluColumnGossipFixture(t *testing.T) (*blockService, *cltypes.SignedBea
 // newFuluColumnGossipFixtureWithPayloadTimeOffset shifts the payload timestamp by that many seconds before the block is signed.
 func newFuluColumnGossipFixtureWithPayloadTimeOffset(t *testing.T, offset uint64) (*blockService, *cltypes.SignedBeaconBlock, *onBlockErrorStore, *das_mock.MockPeerDas) {
 	t.Helper()
-	parentState, cfg := newUpgradedValidationState(t, clparams.FuluVersion, func(cfg *clparams.BeaconChainConfig, _ uint64) {
+	return newColumnGossipFixture(t, clparams.FuluVersion, offset)
+}
+
+// newColumnGossipFixture supports Electra and Fulu.
+func newColumnGossipFixture(t *testing.T, version clparams.StateVersion, offset uint64) (*blockService, *cltypes.SignedBeaconBlock, *onBlockErrorStore, *das_mock.MockPeerDas) {
+	t.Helper()
+	parentState, cfg := newUpgradedValidationState(t, version, func(cfg *clparams.BeaconChainConfig, _ uint64) {
 		cfg.AltairForkEpoch = 0
 		cfg.BellatrixForkEpoch = 0
 		cfg.CapellaForkEpoch = 0
 		cfg.DenebForkEpoch = 0
 		cfg.ElectraForkEpoch = 0
-		cfg.FuluForkEpoch = 0
+		cfg.FuluForkEpoch = cfg.FarFutureEpoch
+		if version >= clparams.FuluVersion {
+			cfg.FuluForkEpoch = 0
+		}
 		cfg.GloasForkEpoch = cfg.FarFutureEpoch
 	})
 	parentSlot := parentState.Slot()
@@ -190,11 +199,11 @@ func newFuluColumnGossipFixtureWithPayloadTimeOffset(t *testing.T, offset uint64
 	validator.SetPublicKey(publicKey)
 	parentState.SetValidatorAtIndex(int(proposerIndex), validator)
 
-	parent := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
+	parent := cltypes.NewSignedBeaconBlock(cfg, version)
 	parent.Block.Slot = parentSlot
 	parentRoot, err := parent.Block.HashSSZ()
 	require.NoError(t, err)
-	block := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
+	block := cltypes.NewSignedBeaconBlock(cfg, version)
 	block.Block.Slot = childSlot
 	block.Block.ProposerIndex = proposerIndex
 	block.Block.ParentRoot = parentRoot
