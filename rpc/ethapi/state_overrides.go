@@ -169,7 +169,7 @@ func (so *StateOverrides) overridePrecompiles(precompiles vm.PrecompiledContract
 			precompiles[precompileMoveTo] = p
 			dirtyAddresses[precompileMoveTo] = struct{}{}
 		}
-		if isPrecompile {
+		if isPrecompile && (account.MovePrecompileTo != nil || account.Code != nil) {
 			delete(precompiles, addr)
 		}
 	}
