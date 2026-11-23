@@ -470,11 +470,11 @@ func TestRecordBALRevivalsSkipsUnrelatedChanges(t *testing.T) {
 	for i := range changes {
 		changes[i] = countedBALChange{index: uint32(2 * i), reads: &reads}
 	}
-	candidates := []balRemovalCandidate{{index: 7, next: 8}, {index: 127, next: 130}}
+	candidates := []balRemovalCandidate{{index: 7, nextWriteIndex: 8}, {index: 127, nextWriteIndex: 130}}
 	recordBALRevivals(candidates, changes)
-	require.False(t, candidates[0].seedBalance)
-	require.True(t, candidates[1].seedBalance)
-	require.Equal(t, uint32(128), candidates[1].next)
+	require.False(t, candidates[0].seedZeroBalance)
+	require.True(t, candidates[1].seedZeroBalance)
+	require.Equal(t, uint32(128), candidates[1].nextWriteIndex)
 	require.Less(t, reads, len(changes), "sparse candidates should skip unrelated field writes")
 }
 

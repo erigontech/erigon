@@ -351,7 +351,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 			}
 			candidate := balRemovalCandidate{index: c.Index}
 			if j+1 < len(ac.BalanceChanges) {
-				candidate.next = ac.BalanceChanges[j+1].Index
+				candidate.nextWriteIndex = ac.BalanceChanges[j+1].Index
 			}
 			candidates = append(candidates, candidate)
 		}
@@ -393,9 +393,9 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 				}
 				revivalsIndexed = true
 			}
-			if candidate.seedBalance {
+			if candidate.seedZeroBalance {
 				live := &WriteSet{}
-				live.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: int(candidate.next) - 1}}})
+				live.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: int(candidate.nextWriteIndex) - 1}}})
 				stamps = append(stamps, live)
 			}
 		}
@@ -474,8 +474,9 @@ func balLastChangeIndex[T interface{ GetIndex() uint32 }](changes []T) uint32 {
 }
 
 type balRemovalCandidate struct {
-	index, next uint32
-	seedBalance bool
+	index           uint32
+	nextWriteIndex  uint32
+	seedZeroBalance bool
 }
 
 // recordBALRevivals checks the sorted writes to nonce, code or one storage slot.
@@ -487,7 +488,7 @@ func recordBALRevivals[T interface{ GetIndex() uint32 }](candidates []balRemoval
 		changes = changes[1:]
 		// Each candidate here is a zero-balance write. Earlier searches end by
 		// the last candidate's index, so its next known write bounds this scan.
-		if limit := candidates[len(candidates)-1].next; limit != 0 && idx >= limit {
+		if limit := candidates[len(candidates)-1].nextWriteIndex; limit != 0 && idx >= limit {
 			return
 		}
 		after := candidates[0].index
@@ -496,12 +497,12 @@ func recordBALRevivals[T interface{ GetIndex() uint32 }](candidates []balRemoval
 			changes = changes[first:]
 			continue
 		}
-		end := sort.Search(len(candidates), func(i int) bool { return candidates[i].index >= idx })
-		candidate := &candidates[end-1]
-		if candidate.next == 0 || idx < candidate.next {
-			candidate.next = idx
-			candidate.seedBalance = true
+		nBeforeWrite := sort.Search(len(candidates), func(i int) bool { return candidates[i].index >= idx })
+		candidate := &candidates[nBeforeWrite-1]
+		if candidate.nextWriteIndex == 0 || idx < candidate.nextWriteIndex {
+			candidate.nextWriteIndex = idx
+			candidate.seedZeroBalance = true
 		}
-		candidates = candidates[end:]
+		candidates = candidates[nBeforeWrite:]
 	}
 }
