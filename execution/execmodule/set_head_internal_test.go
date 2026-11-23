@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -42,7 +44,7 @@ import (
 
 type commitErrorDB struct {
 	kv.TemporalRwDB
-	err error
+	failCommit func() error
 }
 
 func (db commitErrorDB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
@@ -50,15 +52,15 @@ func (db commitErrorDB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, e
 	if err != nil {
 		return nil, err
 	}
-	return commitErrorTx{tx, db.err}, nil
+	return commitErrorTx{tx, db.failCommit}, nil
 }
 
 type commitErrorTx struct {
 	kv.TemporalRwTx
-	err error
+	failCommit func() error
 }
 
-func (tx commitErrorTx) Commit() error { return tx.err }
+func (tx commitErrorTx) Commit() error { return tx.failCommit() }
 
 type setHeadBlockReader struct{ dbservices.FullBlockReader }
 
@@ -95,7 +97,18 @@ func TestSetHeadFailedCommitPreservesPendingNotifications(t *testing.T) {
 	}}, []stages.SyncStage{stages.Headers}, nil, logger, stages.ModeApplyingBlocks)
 	commitErr := errors.New("commit failed")
 	module := &ExecModule{
-		db:               commitErrorDB{db, commitErr},
+		db: commitErrorDB{db, func() error {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+				defer cancel()
+				resume, err := db.PauseStateFileBuilds(ctx)
+				if err == nil {
+					resume()
+				}
+				require.ErrorIs(t, err, context.DeadlineExceeded, "SetHead must still hold the pause at commit")
+			})
+			return commitErr
+		}},
 		blockReader:      setHeadBlockReader{},
 		semaphore:        semaphore.NewWeighted(1),
 		pipelineExecutor: &PipelineExecutor{sync: sync},

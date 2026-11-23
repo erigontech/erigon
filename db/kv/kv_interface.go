@@ -761,6 +761,7 @@ type TemporalRwDB interface {
 	BeginTemporalRwNosync(ctx context.Context) (TemporalRwTx, error)
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
 	OpenStateSnapshots(ctx context.Context) error
+	PauseStateFileBuilds(ctx context.Context) (resume func(), err error)
 	BuildFiles2(ctx context.Context, fromStep, toStep Step, finalityCtx FinalityContext, doMerge bool) error
 	BuildFilesInBackground(finalityCtx FinalityContext) chan struct{}
 	BuildMissedAccessors(ctx context.Context, workers int, opts ...BuildAccessorsOption) error

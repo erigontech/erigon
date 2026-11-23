@@ -1468,6 +1468,10 @@ func (td temporaldb) MaxPrunableStepsBacklog() uint64 {
 	return 0
 }
 
+func (td temporaldb) PauseStateFileBuilds(context.Context) (func(), error) {
+	return func() {}, nil
+}
+
 func (td temporaldb) BuildFiles2(context.Context, kv.Step, kv.Step, kv.FinalityContext, bool) error {
 	return errors.New("memory temporal db does not support state file maintenance")
 }

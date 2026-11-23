@@ -102,10 +102,12 @@ type Aggregator struct {
 	buildsMissedAccessorsAfterOpen bool
 	workers                        workersCfg
 
-	// To keep DB small - need move data to small files ASAP.
-	// It means goroutine which creating small files - can't be locked by merge or indexing.
-	buildingFiles atomic.Bool
-	mergingFiles  atomic.Bool
+	// A step holds the gate from its finality check through publication. A job
+	// queued for the shared snapshot worker can still be canceled by a rewind.
+	fileBuildGate   fileBuildGate
+	cancelFileBuild context.CancelCauseFunc // guarded by fileBuildGate
+	buildingFiles   atomic.Bool
+	mergingFiles    atomic.Bool
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -148,6 +150,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*
 	a := &Aggregator{
 		ctx:                ctx,
 		ctxCancel:          ctxCancel,
+		fileBuildGate:      semaphore.NewWeighted(1),
 		observerCtx:        observerCtx,
 		observerCancel:     observerCancel,
 		onFilesChange:      func(frozenFileNames []string) {},
@@ -1052,6 +1055,14 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 var errStepNotReady = errors.New("step not ready")
 
 func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}) error {
+	if !a.fileBuildGate.TryAcquire(1) {
+		return errStepNotReady
+	}
+	defer a.fileBuildGate.Release(1)
+	if err := context.Cause(ctx); err != nil {
+		return err
+	}
+
 	// Pin worker counts while collation and building read compressor settings.
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
@@ -1202,6 +1213,52 @@ func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context, db kv.RoDB, maxR
 	return reorgSafeBlock, reorgSafeStep, ok
 }
 
+type fileBuildGate interface {
+	Acquire(context.Context, int64) error
+	TryAcquire(int64) bool
+	Release(int64)
+}
+
+// PauseStateFileBuilds lets the current step finish and cancels queued steps.
+// Their finality was captured before the rewind. Builds can resume with fresh
+// finality after the caller commits and releases the pause.
+func (a *Aggregator) PauseStateFileBuilds(ctx context.Context) (func(), error) {
+	if err := a.fileBuildGate.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	if a.cancelFileBuild != nil {
+		a.cancelFileBuild(errStepNotReady)
+		a.cancelFileBuild = nil
+	}
+	return func() { a.fileBuildGate.Release(1) }, nil
+}
+
+func (a *Aggregator) startFileBuild(ctx context.Context, build func(context.Context)) bool {
+	if !a.buildingFiles.CompareAndSwap(false, true) {
+		a.logger.Debug("[snapshots] skipping file build: already building")
+		return false
+	}
+	if !a.fileBuildGate.TryAcquire(1) {
+		a.buildingFiles.Store(false)
+		a.logger.Debug("[snapshots] skipping file build: paused")
+		return false
+	}
+	// Register the job before it can queue for a worker or start its first step.
+	ctx, cancel := context.WithCancelCause(ctx)
+	a.cancelFileBuild = cancel
+	a.fileBuildGate.Release(1)
+	started := a.background.TryGo(func() {
+		defer a.buildingFiles.Store(false)
+		defer cancel(nil)
+		build(ctx)
+	})
+	if !started {
+		cancel(nil)
+		a.buildingFiles.Store(false)
+	}
+	return started
+}
+
 func (a *Aggregator) BuildFiles(db kv.TemporalRoDB, toTxNum uint64, finalityCtx kv.FinalityContext) error {
 	finished, _ := a.buildFilesInBackground(db, toTxNum, true, finalityCtx)
 	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
@@ -1232,16 +1289,12 @@ Loop:
 
 // [from, to)
 func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
-	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
-		return nil
-	}
-	started := a.background.TryGo(func() {
-		defer a.buildingFiles.Store(false)
+	a.startFileBuild(ctx, func(buildCtx context.Context) {
 		if toStep > fromStep {
 			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
 		}
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(ctx, db, step, finalityCtx, nil); err != nil {
+			if err := a.buildFiles(buildCtx, db, step, finalityCtx, nil); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
@@ -1262,9 +1315,6 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 			})
 		}
 	})
-	if !started {
-		a.buildingFiles.Store(false)
-	}
 	return nil
 }
 
@@ -2317,20 +2367,11 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		return fin, false
 	}
 
-	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
-		a.logger.Debug("[snapshots] buildFiles: already building")
-		close(fin)
-		return fin, false
-	}
-
-	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
-
-	started := a.background.TryGo(func() {
-		defer a.buildingFiles.Store(false)
-
+	started := a.startFileBuild(a.ctx, func(buildCtx context.Context) {
+		step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 		if a.snapshotBuildSema != nil {
 			// we are inside own goroutine - it's fine to block here
-			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil { // TODO: not sure if this ctx is correct
+			if err := a.snapshotBuildSema.Acquire(buildCtx, 1); err != nil {
 				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
 					a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				}
@@ -2364,7 +2405,7 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 				}
 			}()
 			select {
-			case <-a.ctx.Done():
+			case <-buildCtx.Done():
 				close(fin)
 				return
 			case <-timer.C:
@@ -2422,7 +2463,7 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(a.ctx, db, step, finalityCtx, fin); err != nil {
+			if err := a.buildFiles(buildCtx, db, step, finalityCtx, fin); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
@@ -2454,7 +2495,6 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		}
 	})
 	if !started {
-		a.buildingFiles.Store(false)
 		close(fin)
 	}
 	return fin, started
