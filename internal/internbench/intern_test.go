@@ -116,7 +116,8 @@ var valueSink atomic.Uint64
 func interners() []interner {
 	wt := &weakTable{m: xsync.NewMap[common.Hash, weak.Pointer[common.Hash]]()}
 	sm := xsync.NewMap[common.Hash, *common.Hash]()
-	st := newShardedTable()
+	st, sb := newShardedTable(), newShardedTable()
+	var blockOps atomic.Uint64
 	return []interner{
 		{name: "unique.Make", make: func(k common.Hash) unsafe.Pointer { h := unique.Make(k); return *(*unsafe.Pointer)(unsafe.Pointer(&h)) }},
 		{name: "main InternKey (1M front table + unique)", make: func(k common.Hash) unsafe.Pointer {
@@ -138,6 +139,26 @@ func interners() []interner {
 					st.s[i].mu.Lock()
 					clear(st.s[i].m)
 					st.s[i].mu.Unlock()
+				}
+			},
+		},
+		{
+			// a per-block table: dropped every 1M interns, so its max is not table growth
+			name: "64-shard strong, dropped every 1M ops", make: func(k common.Hash) unsafe.Pointer {
+				if blockOps.Add(1)%(1<<20) == 0 {
+					for i := range sb.s {
+						sb.s[i].mu.Lock()
+						sb.s[i].m = map[common.Hash]*common.Hash{}
+						sb.s[i].mu.Unlock()
+					}
+				}
+				return unsafe.Pointer(sb.intern(k))
+			},
+			reset: func() {
+				for i := range sb.s {
+					sb.s[i].mu.Lock()
+					sb.s[i].m = map[common.Hash]*common.Hash{}
+					sb.s[i].mu.Unlock()
 				}
 			},
 		},
@@ -284,7 +305,7 @@ func TestGCMarkVsLiveHandles(t *testing.T) {
 	fmt.Printf("arm | live handles | runtime.GC ms (median of 5) | STW pause µs\n")
 	for _, L := range []int{1_000_000, 10_000_000} {
 		for _, it := range interners() {
-			if it.name == "main InternKey (1M front table + unique)" {
+			if it.name == "main InternKey (1M front table + unique)" || it.name == "64-shard strong, dropped every 1M ops" {
 				continue
 			}
 			var keep []unsafe.Pointer
