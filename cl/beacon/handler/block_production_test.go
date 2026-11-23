@@ -3313,6 +3313,75 @@ func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
 	require.ErrorContains(t, err, "unsupported content type")
 }
 
+func TestPublishBlockContentType(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	for _, route := range []struct {
+		name    string
+		version clparams.StateVersion
+		v2      bool
+	}{
+		{"v1/fulu", clparams.FuluVersion, false},
+		{"v2/fulu", clparams.FuluVersion, true},
+		{"v2/gloas", clparams.GloasVersion, true},
+	} {
+		var block interface{ EncodeSSZ([]byte) ([]byte, error) }
+		if route.version >= clparams.GloasVersion {
+			block = cltypes.NewSignedBeaconBlock(&cfg, route.version)
+		} else {
+			block = cltypes.NewDenebSignedBeaconBlock(&cfg, route.version)
+		}
+		jsonBody, err := json.Marshal(block)
+		require.NoError(t, err)
+		sszBody, err := block.EncodeSSZ(nil)
+		require.NoError(t, err)
+		for _, tc := range []struct {
+			contentType string
+			body        []byte
+			wantCode    int
+		}{
+			{"application/json", jsonBody, 0},
+			{"application/json; charset=utf-8", jsonBody, 0},
+			{"", jsonBody, 0},
+			{"application/octet-stream", sszBody, 0},
+			{"Application/Octet-Stream; foo=bar", sszBody, 0},
+			{"text/plain", jsonBody, http.StatusUnsupportedMediaType},
+			{"application/octet-stream; bad", sszBody, http.StatusUnsupportedMediaType},
+		} {
+			name := tc.contentType
+			if name == "" {
+				name = "no content type"
+			}
+			t.Run(route.name+"/"+name, func(t *testing.T) {
+				blockService := network_services_mock.NewMockBlockService(gomock.NewController(t))
+				decoded := errors.New("decoded block reached gossip validation")
+				if tc.wantCode == 0 {
+					blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(decoded)
+				}
+				h := &ApiHandler{beaconChainCfg: &cfg, blockService: blockService}
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(tc.body))
+				if tc.contentType != "" {
+					req.Header.Set("Content-Type", tc.contentType)
+				}
+				req.Header.Set("Eth-Consensus-Version", route.version.String())
+
+				publish := h.PostEthV1BeaconBlocks
+				if route.v2 {
+					publish = h.PostEthV2BeaconBlocks
+				}
+				_, err := publish(httptest.NewRecorder(), req)
+				if tc.wantCode == 0 {
+					require.ErrorIs(t, err, decoded)
+					return
+				}
+				var endpointErr *beaconhttp.EndpointError
+				require.ErrorAs(t, err, &endpointErr)
+				require.Equal(t, tc.wantCode, endpointErr.Code)
+				require.ErrorContains(t, err, "unsupported content type")
+			})
+		}
+	}
+}
+
 func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	builderClient := builder_mock.NewMockBuilderClient(ctrl)
