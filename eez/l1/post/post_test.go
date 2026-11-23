@@ -51,14 +51,20 @@ type node struct {
 	// refuse fails the sends with these indexes with a refusal, down
 	// without an answer.
 	refuse, down map[int]bool
-	// hangHead, hangNonce and hangSend have those calls wait for their
-	// context.
-	hangHead, hangNonce, hangSend bool
-	sends                         int
-	sent                          [][]byte
+	// hangChainID, hangHead, hangNonce and hangSend have those calls wait
+	// for their context.
+	hangChainID, hangHead, hangNonce, hangSend bool
+	sends                                      int
+	sent                                       [][]byte
 }
 
-func (n *node) ChainID(context.Context) (uint64, error) { return 3151908, nil }
+func (n *node) ChainID(ctx context.Context) (uint64, error) {
+	if n.hangChainID {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
+	return 3151908, nil
+}
 
 func (n *node) Head(ctx context.Context) (*l1.Header, error) {
 	if n.hangHead {
@@ -385,6 +391,28 @@ func TestPosterOutlivesAHungNode(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNewOutlivesAHungNode: an L1 node that never answers its chain id fails
+// New within the poster's bound, rather than holding the node's start.
+func TestNewOutlivesAHungNode(t *testing.T) {
+	defer func(d time.Duration) { nodeTimeout = d }(nodeTimeout)
+	nodeTimeout = 50 * time.Millisecond
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	done := make(chan error, 1)
+	go func() {
+		_, err := New(t.Context(), key, eez, 10*gwei, "http://127.0.0.1:1", &node{hangChainID: true}, log.New())
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(5 * time.Second):
+		t.Fatal("New waits on the L1 node")
+	}
+	p := poster(t, &node{}, "http://127.0.0.1:1")
+	require.Equal(t, uint64(3151908), p.ChainID())
 }
 
 func TestSendAfterAMovedHead(t *testing.T) {

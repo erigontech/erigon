@@ -329,14 +329,12 @@ func newComposer(ctx context.Context, chainConfig *chain.Config, cfg *eez.Sequen
 			node.Close()
 		}
 	}()
-	if id, err := node.ChainID(ctx); err != nil {
-		return nil, nil, err
-	} else if id != l2.L1ChainID {
-		return nil, nil, fmt.Errorf("%w: --%s is chain %d, not the L1 %d", eez.ErrConfig, eez.L1RPCFlag.Name, id, l2.L1ChainID)
-	}
 	poster, err := post.New(ctx, c.PosterKey, l2.Registry, c.PriorityFee, c.Builder, node, logger)
 	if err != nil {
 		return nil, nil, err
+	}
+	if id := poster.ChainID(); id != l2.L1ChainID {
+		return nil, nil, fmt.Errorf("%w: --%s is chain %d, not the L1 %d", eez.ErrConfig, eez.L1RPCFlag.Name, id, l2.L1ChainID)
 	}
 	// The ECDSA proof system registers its attester's address as its key.
 	prover, err := prove.Dial(c.Prover, c.Attester, common.BytesToHash(c.Attester[:]))

@@ -47,12 +47,14 @@ const (
 	// methodNotFound is the JSON-RPC error of a node without the method.
 	methodNotFound = -32601
 	sendTimeout    = 30 * time.Second
-	nodeTimeout    = 5 * time.Second
 	maxAnswer      = 1 << 20
 	// maxPooled is the largest transaction other than a blob one that an L1
 	// pool admits, 128 KiB.
 	maxPooled = 128 * 1024
 )
+
+// nodeTimeout is the default bound of a poster's calls to the L1 node.
+var nodeTimeout = 5 * time.Second
 
 var errNoBundles = errors.New("builder has no eth_sendBundle")
 
@@ -91,7 +93,9 @@ type Poster struct {
 // New returns a poster of key's calls to the contract at to, tipping
 // priority, whose bundles go to the eth_sendBundle endpoint builder.
 func New(ctx context.Context, key *ecdsa.PrivateKey, to common.Address, priority uint64, builder string, node L1, logger log.Logger) (*Poster, error) {
-	id, err := node.ChainID(ctx)
+	cctx, cancel := context.WithTimeout(ctx, nodeTimeout)
+	id, err := node.ChainID(cctx)
+	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("L1 chain id: %w", err)
 	}
@@ -113,6 +117,9 @@ func New(ctx context.Context, key *ecdsa.PrivateKey, to common.Address, priority
 
 // From returns the poster's address.
 func (p *Poster) From() common.Address { return p.from }
+
+// ChainID returns the id of the L1 chain the poster signs for.
+func (p *Poster) ChainID() uint64 { return p.chainID.Uint64() }
 
 // Sign returns the poster's EIP-1559 call with input and gas limit gas, at
 // its pending nonce, capping the fee at twice the latest base fee plus the
