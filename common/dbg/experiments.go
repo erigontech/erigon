@@ -182,22 +182,32 @@ func init() {
 	}
 }
 
-func ReadMemStats(m *runtime.MemStats) {
-	if noMemstat {
-		return
-	}
-	runtime.ReadMemStats(m) //nolint:forbidigo // Full statistics for existing diagnostics.
-}
-
 // MemUsage returns MemStats.Alloc and MemStats.Sys without the stop-the-world
 // of runtime.ReadMemStats, so it is cheap enough for per-block logs.
 func MemUsage() (alloc, sys uint64) {
+	if noMemstat {
+		return 0, 0
+	}
 	s := []metrics.Sample{
 		{Name: "/memory/classes/heap/objects:bytes"},
 		{Name: "/memory/classes/total:bytes"},
 	}
 	metrics.Read(s)
 	return s[0].Value.Uint64(), s[1].Value.Uint64()
+}
+
+// AllocationTotals returns the equivalents of MemStats.Mallocs and MemStats.TotalAlloc.
+func AllocationTotals() (objects, bytes uint64) {
+	if noMemstat {
+		return 0, 0
+	}
+	s := []metrics.Sample{
+		{Name: "/gc/heap/allocs:objects"},
+		{Name: "/gc/heap/tiny/allocs:objects"},
+		{Name: "/gc/heap/allocs:bytes"},
+	}
+	metrics.Read(s)
+	return s[0].Value.Uint64() + s[1].Value.Uint64(), s[2].Value.Uint64()
 }
 
 func DiscardCommitment() bool       { return discardCommitment }
@@ -313,23 +323,23 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 
 	logger := common.Deref(options.logger)
 
-	var memStats runtime.MemStats
+	var alloc, sys uint64
 	if options.memStats != nil {
-		memStats = *options.memStats
+		alloc, sys = options.memStats.Alloc, options.memStats.Sys
 	} else {
-		ReadMemStats(&memStats)
+		alloc, sys = MemUsage()
 	}
 
 	totalMemory := estimate.TotalMemory()
 	threshold := (totalMemory / 100) * heapProfileThresholdPercent
-	aboveThreshold := memStats.Alloc >= threshold
+	aboveThreshold := alloc >= threshold
 	if logger != nil {
 		logger.Info(
 			"[Experiment] heap check",
 			"threshold", common.ByteCount(threshold),
-			"alloc", common.ByteCount(memStats.Alloc),
+			"alloc", common.ByteCount(alloc),
 			"aboveThreshold", aboveThreshold,
-			"sys", common.ByteCount(memStats.Sys),
+			"sys", common.ByteCount(sys),
 			"total", common.ByteCount(totalMemory),
 		)
 	}
@@ -346,7 +356,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	}
 
 	if logger != nil {
-		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath, "alloc", common.ByteCount(memStats.Alloc))
+		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath, "alloc", common.ByteCount(alloc))
 	}
 
 	// Write heap profile to buffer first

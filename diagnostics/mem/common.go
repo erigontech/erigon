@@ -19,7 +19,6 @@ package mem
 import (
 	"context"
 	"reflect"
-	"runtime"
 	"sync"
 	"time"
 
@@ -92,14 +91,13 @@ func LogMemStats(ctx context.Context, logger log.Logger) {
 			updateProcessMemGauges()
 			v, fresh := RefreshVirtualMemStats(VirtualMemStatsAge + 5*time.Minute)
 
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
+			alloc, sys := dbg.MemUsage()
 
 			var l []any
 			if fresh {
 				l = v.Fields()
 			}
-			l = append(l, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			l = append(l, "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 			logger.Info("[mem] memory stats", l...)
 		}

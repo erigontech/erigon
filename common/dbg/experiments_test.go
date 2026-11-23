@@ -80,3 +80,20 @@ func TestMemUsageMatchesMemStats(t *testing.T) {
 	require.GreaterOrEqual(t, sys, before.Sys)
 	require.LessOrEqual(t, sys, after.Sys)
 }
+
+func TestAllocationTotalsMatchMemStats(t *testing.T) {
+	tiny := make([]*byte, 128)
+	for i := range tiny {
+		tiny[i] = new(byte)
+	}
+	t.Cleanup(func() { runtime.KeepAlive(tiny) })
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	objects, bytes := AllocationTotals()
+	runtime.ReadMemStats(&after)
+	require.GreaterOrEqual(t, objects, before.Mallocs)
+	require.LessOrEqual(t, objects, after.Mallocs)
+	require.GreaterOrEqual(t, bytes, before.TotalAlloc)
+	require.LessOrEqual(t, bytes, after.TotalAlloc)
+}
