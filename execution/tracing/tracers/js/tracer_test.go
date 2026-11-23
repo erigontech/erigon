@@ -151,7 +151,11 @@ func TestTracer(t *testing.T) {
 		}, {
 			code: "{step: function() { var f = function() { f() }; f() }, fault: function() {}, result: function() {}}",
 			want: "",
-			fail: "tracer exceeded the maximum call stack size of 2048    in server-side tracer function 'step'",
+			fail: "tracer exceeded the maximum call stack size of 4096    in server-side tracer function 'step'",
+		}, {
+			code: "{step: function() {}, fault: function() {}, result: function() { var o = {get a() { return o.a }}; return o }}",
+			want: "",
+			fail: "tracer exceeded the maximum call stack size of 4096    in server-side tracer function 'result'",
 		}, { // tests ctx.coinbase
 			code: "{lengths: [], step: function(log) { }, fault: function() {}, result: function(ctx) { var coinbase = ctx.coinbase; return toAddress(coinbase); }}",
 			want: `{"0":0,"1":0,"2":0,"3":0,"4":0,"5":0,"6":0,"7":0,"8":0,"9":0,"10":0,"11":0,"12":0,"13":0,"14":0,"15":0,"16":0,"17":0,"18":0,"19":0}`,
@@ -520,11 +524,15 @@ func TestTracerInterfaceErrors(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// A tracer walking the call tree recurses once per call frame, and EVM calls nest up to 1024 deep.
+// A tracer walking the call tree recurses once per call frame, and EVM calls nest up to 1024 deep
+// when the 63/64 gas rule does not apply. Recursion through a native callback, as in
+// callTracerLegacy's finalize, uses two frames per level.
 func TestTracerRecursionAsDeepAsCallFrames(t *testing.T) {
 	code := `{result: function() {}, fault: function() {}, setup: function() {
 		var walk = function(depth) { return depth == 0 ? 0 : 1 + walk(depth - 1) };
 		walk(1025);
+		var finalize = function(depth) { return depth == 0 ? [] : [depth - 1].map(finalize, this) };
+		finalize(1025);
 	}}`
 	_, err := newJsTracer(code, new(tracers.Context), nil)
 	require.NoError(t, err)

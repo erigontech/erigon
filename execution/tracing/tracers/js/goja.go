@@ -59,10 +59,12 @@ func init() {
 // hex strings into big ints.
 var bigIntProgram = goja.MustCompile("bigInt", bigIntegerJS, false)
 
-// maxCallStackSize leaves room for a tracer that recurses once per EVM call frame (up to 1024),
-// and stops runaway recursion before it exhausts memory or the Go stack. Recursion through JS
-// getters costs quadratic time in goja, so a much larger limit makes such a tracer run for seconds.
-const maxCallStackSize = 2048
+// maxCallStackSize leaves room for a tracer that walks the call tree through a native callback
+// such as Array.map, which uses two frames per EVM call frame (up to 1024 when the 63/64 gas rule
+// does not apply), and stops runaway recursion before it exhausts memory or the Go stack.
+// Recursion through JS getters costs more than quadratic time in goja, so a much larger limit makes
+// such a tracer run for seconds.
+const maxCallStackSize = 4096
 
 var errStackOverflow = fmt.Errorf("tracer exceeded the maximum call stack size of %d", maxCallStackSize)
 
@@ -149,15 +151,9 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (tracer
 	}
 	vm := goja.New()
 	vm.SetMaxCallStackSize(maxCallStackSize)
-	// A timeout or a stack overflow inside a JS getter reaches Go as a panic from Object.Get.
 	defer func() {
 		if r := recover(); r != nil {
-			switch r.(type) {
-			case *goja.InterruptedError, *goja.StackOverflowError:
-				tracer, err = nil, r.(error)
-			default:
-				panic(r)
-			}
+			tracer, err = nil, uncatchableError(r)
 		}
 		err = describeStackOverflow(err)
 	}()
@@ -452,11 +448,20 @@ func (t *jsTracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		return nil, wrapError("result", err)
 	}
-	encoded, err := json.Marshal(res)
+	encoded, err := marshalResult(res)
 	if err != nil {
 		return nil, err
 	}
 	return json.RawMessage(encoded), t.err
+}
+
+func marshalResult(res goja.Value) (encoded []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			encoded, err = nil, wrapError("result", uncatchableError(r))
+		}
+	}()
+	return json.Marshal(res)
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
@@ -473,6 +478,17 @@ func (t *jsTracer) onError(context string, err error) {
 
 func wrapError(context string, err error) error {
 	return fmt.Errorf("%w    in server-side tracer function '%v'", describeStackOverflow(err), context)
+}
+
+// uncatchableError returns the goja error that vm.Try does not catch and that reaches Go as a panic,
+// for instance from Object.Get or Object.MarshalJSON. It re-panics on any other value.
+func uncatchableError(r any) error {
+	switch err := r.(type) {
+	case *goja.InterruptedError, *goja.StackOverflowError:
+		return err.(error)
+	default:
+		panic(r)
+	}
 }
 
 // describeStackOverflow replaces goja's StackOverflowError, whose message is "<nil>".
