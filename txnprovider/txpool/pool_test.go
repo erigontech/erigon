@@ -192,9 +192,9 @@ func TestUnwindRestoresTransactionsAboveAccountLimit(t *testing.T) {
 	}
 
 	var first, rest TxnSlots
-	first.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	first.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], false)
 	for nonce := uint64(1); nonce <= pool.cfg.AccountSlots+1; nonce++ {
-		rest.Append(newTestSenderTxnSlot(sender, nonce), sender[:], false)
+		rest.Append(newTestSenderTxnSlot(t, sender, nonce), sender[:], false)
 	}
 	require.NoError(t, pool.OnNewBlock(ctx, block(1, 1, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, first))
 	require.NoError(t, pool.OnNewBlock(ctx, block(2, pool.cfg.AccountSlots+2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, rest))
@@ -212,7 +212,7 @@ func TestUnwindRestoresTransactionsAboveAccountLimit(t *testing.T) {
 
 func TestReadPooledTransactionAcrossFlush(t *testing.T) {
 	ctx, pool, db, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	slot := encodeRemoteTxn(t, newTestSenderTxnSlot(sender, 0))
+	slot := newTestSenderTxnSlot(t, sender, 0)
 	want := slot.Rlp
 	var slots TxnSlots
 	slots.Append(slot, sender[:], true)
@@ -3697,13 +3697,11 @@ func TestOnNewBlockKeepsUnwoundLocalTxnLocal(t *testing.T) {
 	}
 }
 
-func newTestSenderTxnSlot(sender common.Address, nonce uint64) *TxnSlot {
-	s := newTestTxnSlot(nonce, 0, 1, 2, 100_000)
-	s.IDHash[0] = byte(nonce + 1)
-	s.Rlp = []byte{byte(nonce + 1)}
-	s.Size = uint32(len(s.Rlp))
-	s.Txn.SetSender(accounts.InternAddress(sender))
-	return s
+func newTestSenderTxnSlot(t *testing.T, sender common.Address, nonce uint64) *TxnSlot {
+	t.Helper()
+	slot := newTestTxnSlot(nonce, 0, 1, 2, 100_000)
+	slot.Txn.SetSender(accounts.InternAddress(sender))
+	return encodeRemoteTxn(t, slot)
 }
 
 func providedNonces(t *testing.T, ctx context.Context, pool *TxPool) []uint64 {
@@ -3742,18 +3740,18 @@ func TestProvideTxnsKeepsSenderNonceOrderAfterUnwind(t *testing.T) {
 	}
 
 	var local TxnSlots
-	local.Append(newTestSenderTxnSlot(sender, 0), sender[:], true)
-	local.Append(newTestSenderTxnSlot(sender, 1), sender[:], true)
+	local.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], true)
+	local.Append(newTestSenderTxnSlot(t, sender, 1), sender[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, local)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
 
 	var mined TxnSlots
-	mined.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	mined.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], false)
 	require.NoError(t, pool.OnNewBlock(ctx, block(1, 1, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, mined))
 
 	var unwound TxnSlots
-	unwound.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	unwound.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], false)
 	require.NoError(t, pool.OnNewBlock(ctx, block(0, 0, remoteproto.Direction_UNWIND), unwound, TxnSlots{}, TxnSlots{}))
 	pending, _, _ := pool.CountContent()
 	require.Equal(t, 2, pending)
@@ -3768,12 +3766,12 @@ func TestProvideTxnsKeepsSenderNonceOrderForRemoteThenLocal(t *testing.T) {
 	pool.started.Store(true)
 
 	var remote TxnSlots
-	remote.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	remote.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], false)
 	pool.AddRemoteTxns(ctx, remote, nil, nil)
 	require.NoError(t, pool.processRemoteTxns(ctx))
 
 	var local TxnSlots
-	local.Append(newTestSenderTxnSlot(sender, 1), sender[:], true)
+	local.Append(newTestSenderTxnSlot(t, sender, 1), sender[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, local)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)

@@ -89,7 +89,7 @@ func TestSelectFlushedTransactionsWithoutDatabaseReader(t *testing.T) {
 	var slots TxnSlots
 	var wantRlp [][]byte
 	for nonce := range uint64(2) {
-		slot := encodeRemoteTxn(t, newTestSenderTxnSlot(sender, nonce))
+		slot := newTestSenderTxnSlot(t, sender, nonce)
 		slots.Append(slot, sender[:], true)
 		wantRlp = append(wantRlp, slot.Rlp)
 	}
@@ -212,7 +212,7 @@ func TestProvideTxnsRechecksParentAfterUnwind(t *testing.T) {
 		}
 		require.NoError(t, update(1, remoteproto.Direction_FORWARD))
 		var slots TxnSlots
-		slots.Append(newTestSenderTxnSlot(sender, 0), sender[:], true)
+		slots.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], true)
 		_, err := pool.AddLocalTxns(ctx, slots)
 		require.NoError(t, err)
 

@@ -489,7 +489,7 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 
 func TestGrpcServerPendingAndAllOwnFlushedTransactionBytes(t *testing.T) {
 	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts3.EmptyCodeHash)
-	slot := encodeRemoteTxn(t, newTestSenderTxnSlot(sender, 0))
+	slot := newTestSenderTxnSlot(t, sender, 0)
 	want := slot.Rlp
 	var slots TxnSlots
 	slots.Append(slot, sender[:], true)

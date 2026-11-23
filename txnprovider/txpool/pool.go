@@ -961,44 +961,40 @@ func (p *TxPool) waitForBlock(ctx context.Context, n int, onTopOf uint64, stop <
 	})
 }
 
-var errParentBlockRewound = errors.New("txpool head rewound below the requested parent")
-
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	parentBlockWaitStop <-chan struct{},
 	availableGas mdgas.FullMdGas,
 	yielded mapset.Set[[32]byte], availableRlpSpace int,
 ) (bool, int, error) {
-	for p.waitForBlock(ctx, n, onTopOf, parentBlockWaitStop) {
-		onTime, count, err := p.selectBest(ctx, n, txns, onTopOf, availableGas, yielded, availableRlpSpace)
-		if !errors.Is(err, errParentBlockRewound) {
-			return onTime, count, err
+	for {
+		if !p.waitForBlock(ctx, n, onTopOf, parentBlockWaitStop) {
+			p.logger.Debug("[txpool] Parent block wait stopped", "expecting", onTopOf, "lastSeen", p.lastSeenBlock.Load())
+			return false, 0, ctx.Err()
 		}
+		if err := ctx.Err(); err != nil {
+			return false, 0, err
+		}
+		// Select from memory. A database snapshot opened before the pool lock can miss a flush,
+		// and waiting for a reader slot while holding the lock can deadlock with a reader.
+		p.lock.Lock()
+		if p.lastSeenBlock.Load() >= onTopOf {
+			break
+		}
+		// An unwind after the parent wait must send the caller back to the wait
+		// before any transactions are marked as yielded.
+		p.lock.Unlock()
 	}
-	p.logger.Debug("[txpool] Parent block wait stopped", "expecting", onTopOf, "lastSeen", p.lastSeenBlock.Load())
-	return false, 0, ctx.Err()
-}
-
-func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
-	availableGas mdgas.FullMdGas, yielded mapset.Set[[32]byte], availableRlpSpace int,
-) (bool, int, error) {
-	if err := ctx.Err(); err != nil {
-		return false, 0, err
-	}
-	// Select from memory. A database snapshot opened before the pool lock can miss a flush,
-	// and waiting for a reader slot while holding the lock can deadlock with a reader.
-	p.lock.Lock()
 	defer p.lock.Unlock()
-
-	// An unwind after the parent wait must send the caller back to the wait
-	// before any transactions are marked as yielded.
-	if p.lastSeenBlock.Load() < onTopOf {
-		return false, 0, errParentBlockRewound
-	}
 	if p.stateViewStale {
 		return false, 0, nil
 	}
+	return true, p.selectBestLocked(n, txns, onTopOf, availableGas, yielded, availableRlpSpace), nil
+}
 
+func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
+	availableGas mdgas.FullMdGas, yielded mapset.Set[[32]byte], availableRlpSpace int,
+) int {
 	best := p.pending.best
 
 	isEIP3860 := p.isShanghai()
@@ -1011,10 +1007,6 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 	pendingBaseFee, pendingBlobFee := p.pendingBaseFee.Load(), p.pendingBlobFee.Load()
 	count := 0
 	i := 0
-
-	defer func() {
-		p.logger.Debug("[txpool] Processing best request", "last", onTopOf, "txRequested", n, "txAvailable", len(best.ms), "txProcessed", i, "txReturned", count)
-	}()
 
 	for ; count < n && i < len(best.ms); i++ {
 		// if we wouldn't have enough gas for a standard transaction then quit out early
@@ -1137,7 +1129,8 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 		p.pending.EnforceBestInvariants() // Remove swaps the last txn into the removed one's place
 	}
 
-	return true, count, nil
+	p.logger.Debug("[txpool] Processing best request", "last", onTopOf, "txRequested", n, "txAvailable", len(best.ms), "txProcessed", i, "txReturned", count)
+	return count
 }
 
 func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
