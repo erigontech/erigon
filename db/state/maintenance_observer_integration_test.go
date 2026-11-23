@@ -59,26 +59,6 @@ func TestMaintenanceObserverFilePublication(t *testing.T) {
 	require.Equal(t, want, points)
 }
 
-func TestPauseStateFileBuilds(t *testing.T) {
-	const stepSize = uint64(10)
-	db, agg := testDbAndAggregatorv3(t, stepSize)
-	writeStepsKeys(t, db, agg, mkAddrs(0x10, 2), 0, 3)
-
-	func() {
-		resume, err := db.PauseStateFileBuilds(t.Context())
-		require.NoError(t, err)
-		defer resume()
-
-		require.NoError(t, db.BuildFiles2(t.Context(), 0, 1, unboundedFinalityCtx, false))
-		<-db.BuildFilesInBackground(unboundedFinalityCtx)
-		agg.WaitForFiles()
-		require.Zero(t, agg.EndTxNumMinimax(), "neither build may publish during a rewind")
-	}()
-
-	<-db.BuildFilesInBackground(unboundedFinalityCtx)
-	require.Positive(t, agg.EndTxNumMinimax(), "eligible steps must build after the pause")
-}
-
 func TestMaintenanceObserverBuildCompletion(t *testing.T) {
 	const stepSize = uint64(10)
 	db, agg := testDbAndAggregatorv3(t, stepSize)

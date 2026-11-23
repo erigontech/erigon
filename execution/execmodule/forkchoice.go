@@ -222,22 +222,14 @@ func forkChoiceHashesMatch(tx kv.Getter, blockHash, safeHash, finalizedHash comm
 		(finalizedHash == (common.Hash{}) || rawdb.ReadForkchoiceFinalized(tx) == finalizedHash)
 }
 
-// forkchoiceFinality returns the stored finalized height and whether this request
-// can lower it. An unset marker gives height zero. A stored hash with no known height gives nil.
-func (e *ExecModule) forkchoiceFinality(ctx context.Context, tx kv.Getter, headNum uint64, finalizedHash common.Hash) (*uint64, bool, error) {
-	storedHash := rawdb.ReadForkchoiceFinalized(tx)
-	if storedHash == (common.Hash{}) {
-		return new(uint64), false, nil
+// currentFinalisedBlockNum returns zero when finality is unset,
+// or nil when the stored finalized hash has no known block number.
+func (e *ExecModule) currentFinalisedBlockNum(ctx context.Context, tx kv.Getter) (*uint64, error) {
+	finalisedHash := rawdb.ReadForkchoiceFinalized(tx)
+	if finalisedHash == (common.Hash{}) {
+		return new(uint64), nil
 	}
-	stored, err := e.blockReader.HeaderNumber(ctx, tx, storedHash)
-	if err != nil || stored == nil {
-		return stored, false, err
-	}
-	if finalizedHash == (common.Hash{}) || finalizedHash == storedHash || (headNum > 0 && headNum < *stored) {
-		return stored, false, nil
-	}
-	proposed, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
-	return stored, proposed != nil && *proposed < *stored, err
+	return e.blockReader.HeaderNumber(ctx, tx, finalisedHash)
 }
 
 // shortCircuitForkchoice may close the overlay and roTx; the caller must return afterward.
@@ -467,7 +459,7 @@ func (e *ExecModule) unwindIfNeeded(
 	return nil, unwindPoint, nil
 }
 
-func (e *ExecModule) updateForkChoice(ctx context.Context, blockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
+func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
 	shouldReleaseSema := true
 	defer func() {
 		if shouldReleaseSema {
@@ -521,40 +513,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, blockHash, safeHash, 
 
 	// InsertBlocks may have staged block data, but it does not change
 	// canonical hashes, forkchoice markers, or stage progress.
-	hasOverlay := e.currentContext != nil && e.currentContext.BlockOverlay() != nil
-	var headerTx kv.Tx = roTx
-	if hasOverlay {
-		overlay := e.currentContext.BlockOverlay()
-		overlay.UpdateTxn(roTx)
-		headerTx = overlay
-	}
-	fcuHeader, err := e.blockReader.HeaderByHash(ctx, headerTx, blockHash)
-	if err != nil {
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-	}
-	if fcuHeader == nil {
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash), false)
-	}
-	finalisedBlockNum, lowersFinality, err := e.forkchoiceFinality(ctx, headerTx, fcuHeader.Number.Uint64(), finalizedHash)
-	if err != nil {
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-	}
-	if lowersFinality {
-		// An active build can still publish state up to the old checkpoint.
-		// Finish it before pinning the unwind boundary and keep builds paused until the lower marker commits.
-		roTx.Rollback()
-		resumeFileBuilds, err := e.db.PauseStateFileBuilds(ctx)
-		if err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("pause state file builds: %w", err), false)
-		}
-		defer resumeFileBuilds()
-		roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic // the outer defer closes the current roTx
-		if err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-		if hasOverlay {
-			e.currentContext.BlockOverlay().UpdateTxn(roTx)
-		}
+	var hasOverlay bool
+	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
+		hasOverlay = true
 	}
 
 	// Create SharedDomains on the raw RO tx. Domain state (accounts,
@@ -608,9 +569,21 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, blockHash, safeHash, 
 	// If InsertBlocks wrote block data, flush it into the block overlay
 	// so the pipeline can see it. The InsertBlocks overlay retains its data.
 	if hasOverlay {
+		e.currentContext.BlockOverlay().UpdateTxn(roTx)
 		if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("updateForkChoice: flush block overlay: %w", err), false)
 		}
+	}
+
+	blockHash := originalBlockHash
+
+	// Step one, find reconnection point, and mark all of those headers as canonical.
+	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, originalBlockHash)
+	if err != nil {
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+	}
+	if fcuHeader == nil {
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash), false)
 	}
 
 	e.hook.LastNewBlockSeen(fcuHeader.Number.Uint64()) // used by eth_syncing
@@ -645,6 +618,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, blockHash, safeHash, 
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
+	finalisedBlockNum, err := e.currentFinalisedBlockNum(ctx, tx)
+	if err != nil {
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+	}
 	if finalisedBlockNum == nil {
 		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 			LatestValidHash: common.Hash{},

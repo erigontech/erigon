@@ -28,7 +28,6 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/background"
@@ -590,35 +589,6 @@ func putHistoryKey(t *testing.T, db kv.RwDB, table string, txNum uint64, k []byt
 		binary.BigEndian.PutUint64(key[:], txNum)
 		return tx.Put(table, key[:], k)
 	}))
-}
-
-type observedFileBuildGate struct {
-	fileBuildGate
-	release func(int64)
-}
-
-func (g observedFileBuildGate) Release(n int64) {
-	g.release(n)
-}
-
-func TestWaitForFilesAllowsConsecutiveBuilds(t *testing.T) {
-	const stepSize = uint64(10)
-	db, agg := testDbAndAggregatorv3(t, stepSize)
-	tryOverlappingBuild := sync.OnceFunc(func() {
-		assert.False(t, agg.startFileBuild(func() {}), "a new build must not take ownership while the previous worker is finishing")
-	})
-	gate := agg.fileBuildGate
-	agg.fileBuildGate = observedFileBuildGate{gate, func(n int64) {
-		assert.True(t, agg.HasBackgroundFilesBuild2(), "the build must stay active until it releases the gate")
-		gate.Release(n)
-		tryOverlappingBuild()
-	}}
-
-	for step := range kv.Step(2) {
-		require.NoError(t, agg.BuildFiles2(t.Context(), asTemporalRoDB(db), step, step+1, unboundedFinalityCtx, false))
-		agg.WaitForFiles()
-		require.Equal(t, uint64(step+1)*stepSize, agg.EndTxNumMinimax(), "each requested range must be published")
-	}
 }
 
 func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
