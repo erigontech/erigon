@@ -78,7 +78,7 @@ func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 			AccessListLen:      uint64(len(msg.AccessList())),
 			StorageKeysLen:     uint64(msg.AccessList().StorageKeys()),
 			IsContractCreation: tx.IsContractDeploy(),
-			IsSelfTransfer:     !msg.To().IsNil() && msg.To() == sender,
+			IsSelfTransfer:     !msg.IsCreate() && msg.To() == sender,
 			HasValue:           !msg.Value().IsZero(),
 			IsEIP2:             rules.IsHomestead,
 			IsEIP2028:          rules.IsIstanbul,

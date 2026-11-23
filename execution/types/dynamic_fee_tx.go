@@ -277,9 +277,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 // AsMessage returns the transaction as a core.Message.
 func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	var to accounts.Address
-	if tx.To == nil {
-		to = accounts.NilAddress
-	} else {
+	if tx.To != nil {
 		to = accounts.InternAddress(*tx.To)
 	}
 	msg := Message{
@@ -289,6 +287,7 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules
 		tipCap:           tx.TipCap,
 		feeCap:           tx.FeeCap,
 		to:               to,
+		create:           tx.To == nil,
 		amount:           tx.Value,
 		data:             tx.Data,
 		accessList:       tx.AccessList,

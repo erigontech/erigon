@@ -170,7 +170,7 @@ func TestPrepareRecordsSystemCoinbaseInBlockAccessList(t *testing.T) {
 	ibs := New(nil)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 0)
-	ibs.Prepare(&chain.Rules{IsShanghai: true}, accounts.ZeroAddress, params.SystemAddress, accounts.NilAddress, nil, nil)
+	ibs.Prepare(&chain.Rules{IsShanghai: true}, accounts.ZeroAddress, params.SystemAddress, nil, nil, nil)
 
 	io := NewVersionedIO(1)
 	io.RecordReads(Version{TxIndex: 0}, ibs.VersionedReads())

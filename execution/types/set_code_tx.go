@@ -159,9 +159,7 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 
 func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	var to accounts.Address
-	if tx.To == nil {
-		to = accounts.NilAddress
-	} else {
+	if tx.To != nil {
 		to = accounts.InternAddress(*tx.To)
 	}
 	msg := Message{
@@ -171,6 +169,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *c
 		tipCap:           tx.TipCap,
 		feeCap:           tx.FeeCap,
 		to:               to,
+		create:           tx.To == nil,
 		amount:           tx.Value,
 		data:             tx.Data,
 		accessList:       tx.AccessList,

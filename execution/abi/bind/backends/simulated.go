@@ -907,6 +907,7 @@ func (m callMsg) To() accounts.Address {
 	}
 	return accounts.InternAddress(*m.CallMsg.To)
 }
+func (m callMsg) IsCreate() bool                        { return m.CallMsg.To == nil }
 func (m callMsg) GasPrice() *uint256.Int                { return m.CallMsg.GasPrice }
 func (m callMsg) FeeCap() *uint256.Int                  { return m.CallMsg.FeeCap }
 func (m callMsg) TipCap() *uint256.Int                  { return m.CallMsg.TipCap }

@@ -220,12 +220,6 @@ type IntraBlockState struct {
 	revisions revisions
 
 	lastCode accounts.Code // last code stored by SetCode
-	// Intern tables survive Reset and the pool on purpose: an idle pooled state keeps ~51 KB of
-	// tables and their unique handles alive, which is the reuse the next call pays for.
-	internCache *storageKeyCache
-	addrCache   *addressCache
-	internOps   uint32
-	addrOps     uint32
 }
 
 type sdProbeEntry struct {
@@ -3225,10 +3219,11 @@ func (ibs *IntraBlockState) clearJournalAndRefund() {
 //
 // Cancun fork:
 // - Reset transient storage (EIP-1153)
-func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase accounts.Address, dst accounts.Address,
+// A nil dst is a contract creation.
+func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase accounts.Address, dst *accounts.Address,
 	precompiles []accounts.Address, list types.AccessList,
 ) {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(sender.Handle()) || dst != nil && dbg.TraceAccount(dst.Handle())) {
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v\n", ibs.blockNum, ibs.txIndex, ibs.version, sender, coinbase, dst, precompiles, list, rules)
 	}
 	ibs.txOutputFree = true
@@ -3238,8 +3233,8 @@ func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 		al := &ibs.accessList
 
 		al.AddAddress(sender)
-		if !dst.IsNil() {
-			al.AddAddress(dst)
+		if dst != nil {
+			al.AddAddress(*dst)
 			// If it's a create-tx, the destination will be added inside evm.create
 		}
 		for _, addr := range precompiles {
@@ -3627,7 +3622,7 @@ func traceWrite[T any](ibs *IntraBlockState, vw *VersionedWrite[T]) {
 		return
 	}
 	hdr := vw.WriteHeader
-	if !(ibs.trace || (dbg.TraceAccount(hdr.Address.Handle()) && (hdr.Key == accounts.NilKey || traceKey(hdr.Key)))) {
+	if !(ibs.trace || (dbg.TraceAccount(hdr.Address.Handle()) && (hdr.Path != StoragePath || traceKey(hdr.Key)))) {
 		return
 	}
 	fmt.Printf("%d (%d.%d) WRT %x %s: %v (%d.%d)\n", ibs.blockNum, ibs.txIndex, ibs.version,

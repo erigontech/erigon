@@ -179,7 +179,7 @@ func TestTraceTxCompletionV2(t *testing.T) {
 			require.NoError(t, ibs.SetCode(recipient, []byte{
 				byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP),
 			}, tracing.CodeChangeUnspecified))
-			msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(0), gasLimit,
+			msg := types.NewMessage(sender, &recipient, 0, uint256.NewInt(0), gasLimit,
 				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), nil, nil, false, false, true, false, nil)
 			blockCtx := evmtypes.BlockContext{CanTransfer: protocol.CanTransfer, Transfer: misc.Transfer, GasLimit: 1_000_000}
 			txnGasUsage, err := TraceTx(t.Context(), nil, nil, msg, blockCtx, protocol.NewEVMTxContext(msg),
@@ -346,7 +346,7 @@ func BenchmarkTraceTxAccountReads(b *testing.B) {
 			code = append(code, byte(vm.STOP))
 			ibs := state.NewPooled(state.NewNoopReader())
 			defer state.ReleasePooled(ibs)
-			msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(0), 10_000_000,
+			msg := types.NewMessage(sender, &recipient, 0, uint256.NewInt(0), 10_000_000,
 				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), nil, nil, false, false, true, false, nil)
 			txn := types.NewTransaction(0, recipient.Value(), uint256.NewInt(0), 10_000_000, uint256.NewInt(0), nil)
 			blockCtx := evmtypes.BlockContext{CanTransfer: protocol.CanTransfer, Transfer: misc.Transfer, GasLimit: 30_000_000}

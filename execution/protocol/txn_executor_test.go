@@ -60,7 +60,7 @@ func newTestEVM(ibs *state.IntraBlockState, cfg *chain.Config, blockGasLimit uin
 // newSimpleTransferMsg creates a zero-value transfer message with the given gas limit.
 func newSimpleTransferMsg(from, to accounts.Address, gas uint64, checkGas bool) *types.Message {
 	return types.NewMessage(
-		from, to, 0, uint256.NewInt(0), gas,
+		from, &to, 0, uint256.NewInt(0), gas,
 		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 		nil, nil,
 		false, // checkNonce
@@ -241,7 +241,7 @@ func TestIntrinsicGasReject_NoStateMutation(t *testing.T) {
 	evm := newTestEVM(ibs, cfg, blockGasLimit)
 	gasPrice := uint256.NewInt(1_000_000_000)
 	msg := types.NewMessage(
-		sender, recipient, 0, uint256.NewInt(0), gasLimit,
+		sender, &recipient, 0, uint256.NewInt(0), gasLimit,
 		gasPrice, gasPrice, gasPrice,
 		make([]byte, 100), nil,
 		false, // checkNonce
@@ -283,7 +283,7 @@ func TestPreCheck_InsufficientFundsBeforeIntrinsicGas(t *testing.T) {
 	evm := newTestEVM(ibs, cfg, blockGasLimit)
 	gasPrice := uint256.NewInt(20)
 	msg := types.NewMessage(
-		sender, accounts.NilAddress, 0, uint256.NewInt(366), 21000,
+		sender, nil, 0, uint256.NewInt(366), 21000,
 		gasPrice, gasPrice, gasPrice,
 		nil, nil,
 		false, // checkNonce
@@ -323,7 +323,7 @@ func TestEIP8037_GasPoolTracksExecutionAndStateIndependently(t *testing.T) {
 	// state >> execution). Initcode = STOP (0x00): creates account, deploys no code.
 	evm1 := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
 	msg1 := types.NewMessage(
-		sender, accounts.NilAddress, 0, uint256.NewInt(0), 300_000,
+		sender, nil, 0, uint256.NewInt(0), 300_000,
 		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 		[]byte{0x00}, nil,
 		false, // checkNonce
@@ -510,7 +510,7 @@ func TestEIP2780TopLevelCallTraceStartsBeforeStateChanges(t *testing.T) {
 			})
 			value := uint256.NewInt(tc.value)
 			msg := types.NewMessage(
-				sender, recipient, 0, value, blockGasLimit,
+				sender, &recipient, 0, value, blockGasLimit,
 				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 				nil, nil, false, false, true, false, nil,
 			)
@@ -567,7 +567,7 @@ func TestEIP2780DelegationTargetAccessUsesWarmCost(t *testing.T) {
 	require.NoError(t, ibs.SetCode(recipient, types.AddressToDelegation(delegatedTo), tracing.CodeChangeUnspecified))
 	evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
 	msg := types.NewMessage(
-		sender, recipient, 0, uint256.NewInt(0), 100_000,
+		sender, &recipient, 0, uint256.NewInt(0), 100_000,
 		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 		nil, accessList, false, false, true, false, nil,
 	)
@@ -644,7 +644,7 @@ func TestEIP2780RecipientRuntimeOutOfGasPrecedesTransfer(t *testing.T) {
 	})
 	evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
 	msg := types.NewMessage(
-		sender, recipient, 0, value, gasLimit,
+		sender, &recipient, 0, value, gasLimit,
 		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 		nil, nil, false, false, true, false, nil,
 	)
@@ -676,7 +676,7 @@ func TestEIP2780CalldataFloorBindsBlockExecutionGas(t *testing.T) {
 	ibs := state.New(state.NewNoopReader())
 	evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
 	msg := types.NewMessage(
-		sender, recipient, 0, uint256.NewInt(0), 100_000,
+		sender, &recipient, 0, uint256.NewInt(0), 100_000,
 		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 		data, nil, false, false, true, false, nil,
 	)
@@ -720,7 +720,7 @@ func TestGasRefundWithCalldataFloor(t *testing.T) {
 			var changes []gasChange
 			evm := gasTracingEVM(ibs, chain.AllProtocolChanges, &changes)
 			msg := types.NewMessage(
-				sender, recipient, 0, uint256.NewInt(0), test.gasLimit,
+				sender, &recipient, 0, uint256.NewInt(0), test.gasLimit,
 				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 				make([]byte, test.dataLen), nil, false, false, true, false, nil,
 			)
@@ -805,7 +805,7 @@ func TestEIP8037IntrinsicGasCapWithoutCheckGas(t *testing.T) {
 				ibs := state.New(state.NewNoopReader())
 				defer ibs.Close()
 				require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(gasLimit), tracing.BalanceChangeUnspecified))
-				msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(0), gasLimit,
+				msg := types.NewMessage(sender, &recipient, 0, uint256.NewInt(0), gasLimit,
 					uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(1), test.data,
 					test.accessList, false, false, false, false, nil)
 				msg.SetSkipExecutionGasCap(skipExecutionGasCap)
@@ -849,7 +849,7 @@ func TestEIP8037SkipExecutionGasCap(t *testing.T) {
 		require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(gasLimit), tracing.BalanceChangeUnspecified))
 		require.NoError(t, ibs.SetCode(gasLeft, common.FromHex("0x5a6301312d0081106011575f5260205ff35b5f5ffd"), tracing.CodeChangeUnspecified))
 		require.NoError(t, ibs.SetCode(sstore, common.FromHex("0x600160015500"), tracing.CodeChangeUnspecified))
-		msg := types.NewMessage(sender, to, 0, uint256.NewInt(0), gasLimit,
+		msg := types.NewMessage(sender, &to, 0, uint256.NewInt(0), gasLimit,
 			uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(1), nil, nil, false, false, false, false, nil)
 		msg.SetSkipExecutionGasCap(skip)
 		return NewTxnExecutor(newTestEVM(ibs, chain.AllProtocolChanges, gasLimit), msg, gp).Execute(true, false)
@@ -925,7 +925,7 @@ func TestGasChangeTxReturn(t *testing.T) {
 						record(mdgas.MdGas{Execution: old}, mdgas.MdGas{Execution: new}, reason)
 					}
 				}
-				msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(0), test.gasLimit,
+				msg := types.NewMessage(sender, &recipient, 0, uint256.NewInt(0), test.gasLimit,
 					uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(1), nil, nil, false, false, true, false, nil)
 				executor := NewTxnExecutor(evm, msg, NewGasPool(initialBalance, 0))
 				result, err := executor.Execute(true, false)
@@ -1056,7 +1056,7 @@ func TestEIP2780ContractCreationRuntimeOutOfGasKeepsSenderNonce(t *testing.T) {
 	ibs := state.New(state.NewNoopReader())
 	evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
 	msg := types.NewMessage(
-		sender, accounts.NilAddress, 0, uint256.NewInt(0), gasLimit,
+		sender, nil, 0, uint256.NewInt(0), gasLimit,
 		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 		[]byte{0x00}, nil, false, false, true, false, nil,
 	)
@@ -1094,7 +1094,7 @@ func TestEIP2780ContractCreationNonceReadErrorIsExecutionFailure(t *testing.T) {
 	evm := newTestEVM(statedb, chain.AllProtocolChanges, blockGasLimit)
 	msg := types.NewMessage(
 		sender,
-		accounts.NilAddress,
+		nil,
 		0,
 		uint256.NewInt(0),
 		gasLimit,
@@ -1163,7 +1163,7 @@ func TestEIP2780ContractCreationFrameStartsAfterRuntimeCharge(t *testing.T) {
 	)
 	msg := types.NewMessage(
 		sender,
-		accounts.NilAddress,
+		nil,
 		0,
 		uint256.NewInt(0),
 		gasLimit,
@@ -1197,7 +1197,7 @@ func TestContractCreationDoesNotWarmZeroAddressDelegationTarget(t *testing.T) {
 
 	evm := newTestEVM(ibs, chain.TestChainOsakaConfig, blockGasLimit)
 	msg := types.NewMessage(
-		sender, accounts.NilAddress, 0, uint256.NewInt(0), 100_000,
+		sender, nil, 0, uint256.NewInt(0), 100_000,
 		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 		[]byte{byte(vm.STOP)}, nil, false, false, true, false, nil,
 	)
@@ -1243,7 +1243,7 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 		// feeCap=1, baseFee=100 -> would fail ErrFeeCapTooLow
 		// gas=blockGasLimit+1 -> must fail ErrGasLimitReached first
 		msg := types.NewMessage(
-			sender, recipient, 0, uint256.NewInt(0), blockGasLimit+1,
+			sender, &recipient, 0, uint256.NewInt(0), blockGasLimit+1,
 			uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(1),
 			nil, nil,
 			false, false, true, false, nil,
@@ -1313,7 +1313,7 @@ func TestBlobGasPreservedOnReject(t *testing.T) {
 
 	newBlobMsg := func(gas uint64) *types.Message {
 		m := types.NewMessage(
-			sender, recipient, 0, uint256.NewInt(0), gas,
+			sender, &recipient, 0, uint256.NewInt(0), gas,
 			uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 			nil, nil,
 			false, false, true, false,
@@ -1372,7 +1372,7 @@ func TestPreCheck_NilMaxFeePerBlobGas(t *testing.T) {
 	defer ibs.Close()
 	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{})
 	msg := types.NewMessage(
-		sender, recipient, 0, uint256.NewInt(0), 100_000,
+		sender, &recipient, 0, uint256.NewInt(0), 100_000,
 		uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(1),
 		nil, nil,
 		false, false, true, false, nil,
@@ -1402,7 +1402,7 @@ func TestType4Prereq_NoStateMutationOnReject(t *testing.T) {
 	evm := newTestEVM(ibs, cfg, 30_000_000)
 	gasPrice := uint256.NewInt(1_000_000_000)
 	msg := types.NewMessage(
-		sender, recipient, 0, uint256.NewInt(0), 1_000,
+		sender, &recipient, 0, uint256.NewInt(0), 1_000,
 		gasPrice, gasPrice, gasPrice,
 		nil, nil,
 		false, false, true, false, nil,
@@ -1442,7 +1442,7 @@ func TestMaxInitCodeSizeReject_NoStateMutation(t *testing.T) {
 	// One byte over the EIP-3860 limit, with ample gas to clear intrinsic gas.
 	initcode := make([]byte, params.MaxInitCodeSize+1)
 	msg := types.NewMessage(
-		sender, accounts.NilAddress, 0, uint256.NewInt(0), 1_000_000,
+		sender, nil, 0, uint256.NewInt(0), 1_000_000,
 		gasPrice, gasPrice, gasPrice,
 		initcode, nil,
 		false, false, true, false, nil,
@@ -1513,7 +1513,7 @@ func TestPreCheckNonceMismatchError(t *testing.T) {
 
 		evm := newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000)
 		msg := types.NewMessage(
-			sender, recipient, msgNonce, uint256.NewInt(0), 100_000,
+			sender, &recipient, msgNonce, uint256.NewInt(0), 100_000,
 			uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 			nil, nil,
 			true,  // checkNonce
@@ -1575,7 +1575,7 @@ func TestPreCheckAccessListRequiresBerlin(t *testing.T) {
 
 	newMsg := func(al types.AccessList) *types.Message {
 		return types.NewMessage(
-			sender, recipient, 0, uint256.NewInt(0), 100_000,
+			sender, &recipient, 0, uint256.NewInt(0), 100_000,
 			uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 			nil, al,
 			false, false, false, false, nil,
@@ -1624,7 +1624,7 @@ func TestPreCheckDynamicFeeArgsRequireLondon(t *testing.T) {
 		defer ibs.Close()
 		require.NoError(t, ibs.AddBalance(sender, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified))
 		msg := types.NewMessage(
-			sender, recipient, 0, uint256.NewInt(0), 100_000,
+			sender, &recipient, 0, uint256.NewInt(0), 100_000,
 			uint256.NewInt(gasPrice), uint256.NewInt(feeCap), uint256.NewInt(tipCap),
 			nil, nil,
 			false, false, false, false, nil,
@@ -1671,7 +1671,7 @@ func TestPreCheckBlobPrerequisites(t *testing.T) {
 	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
 	validHash := common.Hash{kzg.BlobCommitmentVersionKZG}
 
-	newMsg := func(to accounts.Address, hashes []common.Hash) *types.Message {
+	newMsg := func(to *accounts.Address, hashes []common.Hash) *types.Message {
 		msg := types.NewMessage(
 			sender, to, 0, uint256.NewInt(0), 100_000,
 			uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
@@ -1683,31 +1683,31 @@ func TestPreCheckBlobPrerequisites(t *testing.T) {
 	}
 
 	t.Run("blob hashes pre-Cancun are rejected", func(t *testing.T) {
-		err := runPreCheckMsg(t, chain.TestChainBerlinConfig, newMsg(recipient, []common.Hash{validHash}), params.GasPerBlob)
+		err := runPreCheckMsg(t, chain.TestChainBerlinConfig, newMsg(&recipient, []common.Hash{validHash}), params.GasPerBlob)
 		require.ErrorIs(t, err, types.ErrBlobTxnPreCancun)
 	})
 
 	t.Run("blob contract creation is rejected", func(t *testing.T) {
-		err := runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(accounts.NilAddress, []common.Hash{validHash}), params.GasPerBlob)
+		err := runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(nil, []common.Hash{validHash}), params.GasPerBlob)
 		require.ErrorIs(t, err, types.ErrNilToFieldTx)
 	})
 
 	t.Run("empty but present blob hash list is rejected", func(t *testing.T) {
-		err := runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(recipient, []common.Hash{}), 0)
+		err := runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(&recipient, []common.Hash{}), 0)
 		require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
 	})
 
 	t.Run("wrong versioned hash version byte is rejected", func(t *testing.T) {
-		err := runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(recipient, []common.Hash{{0x02}}), params.GasPerBlob)
+		err := runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(&recipient, []common.Hash{{0x02}}), params.GasPerBlob)
 		require.ErrorIs(t, err, types.ErrBlobTxnInvalidVersionedHash)
 	})
 
 	t.Run("absent blob hashes are accepted", func(t *testing.T) {
-		require.NoError(t, runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(recipient, nil), 0))
+		require.NoError(t, runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(&recipient, nil), 0))
 	})
 
 	t.Run("well formed blob hashes are accepted", func(t *testing.T) {
-		require.NoError(t, runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(recipient, []common.Hash{validHash}), params.GasPerBlob))
+		require.NoError(t, runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(&recipient, []common.Hash{validHash}), params.GasPerBlob))
 	})
 }
 
@@ -1808,7 +1808,7 @@ func TestRecipientCreditedAtValidationReportsCallToTracer(t *testing.T) {
 	}
 	evm := vm.NewEVM(evmtypes.BlockContext{CanTransfer: CanTransfer, Transfer: misc.Transfer, GasLimit: blockGasLimit},
 		evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true, Tracer: hooks})
-	msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(5), blockGasLimit,
+	msg := types.NewMessage(sender, &recipient, 0, uint256.NewInt(5), blockGasLimit,
 		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), nil, nil, false, false, true, false, nil)
 
 	result, err := ApplyMessageChargeSenderAtValidation(evm, msg, NewGasPool(blockGasLimit, 0), nil)
@@ -1866,7 +1866,7 @@ func TestPrecompileCallRunsOutOfGas(t *testing.T) {
 	ecrecover := accounts.InternAddress(common.BytesToAddress([]byte{1}))
 	plain := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
 	call := func(to accounts.Address, gas uint64) Message {
-		return types.NewMessage(sender, to, 0, uint256.NewInt(1), gas, uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+		return types.NewMessage(sender, &to, 0, uint256.NewInt(1), gas, uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 			nil, nil, false, false, true, false, nil)
 	}
 	require.True(t, PrecompileCallRunsOutOfGas(call(ecrecover, params.TxGas), rules))
@@ -1877,7 +1877,7 @@ func TestPrecompileCallRunsOutOfGas(t *testing.T) {
 	sha256 := accounts.InternAddress(common.BytesToAddress([]byte{2}))
 	words := make([]byte, 64)
 	hash := func(gas uint64) Message {
-		return types.NewMessage(sender, sha256, 0, uint256.NewInt(1), gas, uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+		return types.NewMessage(sender, &sha256, 0, uint256.NewInt(1), gas, uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 			words, nil, false, false, true, false, nil)
 	}
 	// From Prague the calldata floor leaves execution more gas than this precompile price, so the boundary needs earlier rules.

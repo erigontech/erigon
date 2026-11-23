@@ -89,7 +89,7 @@ func TestGasChangeV2RuntimeCharges(t *testing.T) {
 	require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 	var changes []gasChange
 	evm := gasTracingEVM(ibs, eip2780TestConfig(t), &changes)
-	msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(1), 500_000,
+	msg := types.NewMessage(sender, &recipient, 0, uint256.NewInt(1), 500_000,
 		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), nil, nil, false, false, true, false, nil)
 	msg.SetAuthorizations([]types.Authorization{auth})
 	result, err := NewTxnExecutor(evm, msg, NewGasPool(30_000_000, 0)).Execute(true, false)
@@ -111,7 +111,7 @@ func TestGasChangeV2TopLevelRefund(t *testing.T) {
 	defer ibs.Close()
 	var changes []gasChange
 	evm := gasTracingEVM(ibs, chain.AllProtocolChanges, &changes)
-	msg := types.NewMessage(accounts.ZeroAddress, accounts.NilAddress, 0, uint256.NewInt(0), 500_000,
+	msg := types.NewMessage(accounts.ZeroAddress, nil, 0, uint256.NewInt(0), 500_000,
 		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.REVERT)}, nil, false, false, true, false, nil)
 	result, err := NewTxnExecutor(evm, msg, NewGasPool(30_000_000, 0)).Execute(true, false)
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestGasChangeV2RuntimeRollback(t *testing.T) {
 	require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 	var changes []gasChange
 	evm := gasTracingEVM(ibs, eip2780TestConfig(t), &changes)
-	msg := types.NewMessage(sender, accounts.InternAddress(common.HexToAddress("0x2000")), 0, uint256.NewInt(1), 100_000,
+	msg := types.NewMessage(sender, new(accounts.InternAddress(common.HexToAddress("0x2000"))), 0, uint256.NewInt(1), 100_000,
 		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), nil, nil, false, false, true, false, nil)
 	msg.SetAuthorizations([]types.Authorization{auth})
 	executor := NewTxnExecutor(evm, msg, NewGasPool(30_000_000, 0))

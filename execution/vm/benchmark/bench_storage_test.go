@@ -237,19 +237,8 @@ func BenchmarkStorageDiversity(b *testing.B) {
 }
 
 // BenchmarkAddressDiversity measures repeated BALANCE over n distinct warm
-// accounts, the way an airdrop or batch contract walks a holder list. The sweep
-// assumes IntraBlockState interns addresses through a 256-entry direct-mapped table and
-// covers the miss side the call benchmarks never reach — they touch a handful of
-// addresses and hit every time.
-//
-// The addresses are keccak output, so they land in buckets at random rather than
-// one per bucket: 16 of them get 16 buckets and always hit, 256 cover 163 of the
-// 256 and miss 64% of the time, 1024 miss 98%. The sweep is therefore one hitting
-// tier and two thrashing ones, not a fits/fills/overflows progression.
+// accounts, the way an airdrop or batch contract walks a holder list.
 func BenchmarkAddressDiversity(b *testing.B) {
-	require.Equal(b, 256, state.AddressCacheSize,
-		"the tiers below are one hitting and two thrashing only against this bucket count")
-
 	for _, n := range []int{16, 256, 1024} {
 		p, lbl := program.New().Jumpdest()
 		addrs := make([]common.Address, n)

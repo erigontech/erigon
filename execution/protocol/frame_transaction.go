@@ -103,7 +103,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	if err != nil {
 		return nil, err
 	}
-	st.state.Prepare(rules, sender, st.evm.Context.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
+	st.state.Prepare(rules, sender, st.evm.Context.Coinbase, nil, vm.ActivePrecompiles(rules), nil)
 	if st.evm.Config().NoBAL {
 		st.state.StopAccessRecording()
 	}

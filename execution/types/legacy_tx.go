@@ -311,9 +311,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 // AsMessage returns the transaction as a core.Message.
 func (tx *LegacyTx) AsMessage(s Signer, _ *uint256.Int, _ *chain.Rules) (*Message, error) {
 	var to accounts.Address
-	if tx.To == nil {
-		to = accounts.NilAddress
-	} else {
+	if tx.To != nil {
 		to = accounts.InternAddress(*tx.To)
 	}
 	msg := Message{
@@ -323,6 +321,7 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *uint256.Int, _ *chain.Rules) (*Messag
 		tipCap:           tx.GasPrice,
 		feeCap:           tx.GasPrice,
 		to:               to,
+		create:           tx.To == nil,
 		amount:           tx.Value,
 		data:             tx.Data,
 		accessList:       nil,

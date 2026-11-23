@@ -91,7 +91,7 @@ func TestTransactionFeeDistribution(t *testing.T) {
 					if !test.berlin {
 						blobs = []common.Hash{{1}}
 					}
-					msg := types.NewMessage(sender, target, 0, new(uint256.Int), 100_000,
+					msg := types.NewMessage(sender, &target, 0, new(uint256.Int), 100_000,
 						uint256.NewInt(test.gasPrice), uint256.NewInt(test.feeCap), uint256.NewInt(tipCap),
 						nil, nil, true, true, true, test.free, uint256.NewInt(13))
 					msg.SetBlobVersionedHashes(blobs)

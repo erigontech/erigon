@@ -124,7 +124,7 @@ func Execute(code, input []byte, cfg *Config) ([]byte, *state.IntraBlockState, e
 		sender  = cfg.Origin
 		rules   = vmenv.ChainRules()
 	)
-	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
+	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil)
 	if err := cfg.State.CreateAccount(address, true); err != nil {
 		return nil, nil, err
 	}
@@ -165,7 +165,7 @@ func Create(input []byte, cfg *Config) ([]byte, common.Address, mdgas.MdGas, err
 		rules  = vmenv.ChainRules()
 		gas    = mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false)
 	)
-	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
+	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, nil, vm.ActivePrecompiles(rules), nil)
 	if !rules.IsAmsterdam {
 		code, address, leftOverGas, _, err := vmenv.Create(
 			sender,
@@ -219,7 +219,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
-	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil)
 	// Without EIP-161 an empty account survives in the post-state, and a
 	// zero-value transfer does not create the sender, so the origin has to
 	// exist for the dump and for CALL gas to match.

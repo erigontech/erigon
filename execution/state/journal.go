@@ -91,11 +91,11 @@ type journalExtra struct {
 // reverted scalar (nonce/refund/log index/incarnation), flags the booleans,
 // extra only what the infrequent kinds need.
 type journalEntry struct {
-	account accounts.Address
 	key     accounts.StorageKey
 	extra   *journalExtra
 	value   uint256.Int
 	aux     uint64
+	account accounts.Address // last, so kind and flags share its tail padding
 	kind    entryKind
 	flags   uint8
 }

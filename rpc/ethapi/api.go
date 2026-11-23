@@ -356,9 +356,9 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 		nonce = args.Nonce.Uint64()
 	}
 
-	to := accounts.NilAddress
+	var to *accounts.Address
 	if args.To != nil {
-		to = accounts.InternAddress(*args.To)
+		to = new(accounts.InternAddress(*args.To))
 	}
 
 	msg := types.NewMessage(addr, to, nonce, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)

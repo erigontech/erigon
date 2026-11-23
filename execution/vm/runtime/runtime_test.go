@@ -249,10 +249,10 @@ func TestCreatedCodeOutlivesNextTransaction(t *testing.T) {
 	initCode := append(append([]byte{byte(vm.PUSH32)}, code...),
 		byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN))
 
-	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil)
 	_, _, _, err := vmenv.Call(cfg.Origin, address, nil, gas, uint256.Int{}, false)
 	require.NoError(t, err)
-	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, nil, vm.ActivePrecompiles(rules), nil)
 	_, created, _, _, err := vmenv.Create(cfg.Origin, initCode, gas, uint256.Int{}, nil, false)
 	require.NoError(t, err)
 	_, _, err = Call(address, bytes.Repeat([]byte{2}, 32), cfg)
@@ -1034,7 +1034,7 @@ func runZeroValueSystemCall(t *testing.T, aura bool) (*state.IntraBlockState, ty
 	vmenv := NewEnv(cfg)
 	rules := vmenv.ChainRules()
 	require.Equal(t, aura, rules.IsAura)
-	statedb.Prepare(rules, systemAddr, cfg.Coinbase, target, vm.ActivePrecompiles(rules), nil)
+	statedb.Prepare(rules, systemAddr, cfg.Coinbase, &target, vm.ActivePrecompiles(rules), nil)
 
 	ret, _, _, err := vmenv.Call(
 		systemAddr,

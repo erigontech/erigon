@@ -415,6 +415,7 @@ type TransactionsGroupedBySender []Transactions
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
 	to               accounts.Address
+	create           bool
 	from             accounts.Address
 	nonce            uint64
 	amount           uint256.Int
@@ -438,13 +439,14 @@ type Message struct {
 	skipExecutionGasCap bool
 }
 
-func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
+// NewMessage builds a message; a nil to makes it a contract creation.
+func NewMessage(from accounts.Address, to *accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
 	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
 	checkTransaction bool, checkGas bool, isFree bool, maxFeePerBlobGas *uint256.Int,
 ) *Message {
 	m := Message{
 		from:             from,
-		to:               to,
+		create:           to == nil,
 		nonce:            nonce,
 		amount:           *amount,
 		gasLimit:         gasLimit,
@@ -454,6 +456,9 @@ func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount
 		checkTransaction: checkTransaction,
 		checkGas:         checkGas,
 		isFree:           isFree,
+	}
+	if to != nil {
+		m.to = *to
 	}
 	if gasPrice != nil {
 		m.gasPrice.Set(gasPrice)
@@ -472,6 +477,7 @@ func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount
 
 func (m *Message) From() accounts.Address          { return m.from }
 func (m *Message) To() accounts.Address            { return m.to }
+func (m *Message) IsCreate() bool                  { return m.create }
 func (m *Message) GasPrice() *uint256.Int          { return &m.gasPrice }
 func (m *Message) FeeCap() *uint256.Int            { return &m.feeCap }
 func (m *Message) TipCap() *uint256.Int            { return &m.tipCap }

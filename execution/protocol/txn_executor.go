@@ -110,6 +110,7 @@ type TxnExecutor struct {
 type Message interface {
 	From() accounts.Address
 	To() accounts.Address
+	IsCreate() bool
 
 	GasPrice() *uint256.Int
 	FeeCap() *uint256.Int
@@ -194,7 +195,7 @@ func ApplyMessageChargeSenderAtValidation(evm *vm.EVM, msg Message, gp *GasPool,
 
 // to returns the recipient of the message.
 func (st *TxnExecutor) to() accounts.Address {
-	if st.msg == nil || st.msg.To().IsNil() /* contract creation */ {
+	if st.msg == nil || st.msg.IsCreate() {
 		return accounts.ZeroAddress
 	}
 	return st.msg.To()
@@ -317,7 +318,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsic mdgas.IntrinsicGasCal
 		return upfrontTxnFees{}, types.ErrDynamicFeePreLondon
 	}
 	if st.msg.BlobHashes() != nil {
-		if err := types.ValidateBlobPrerequisites(st.msg.BlobHashes(), st.msg.To().IsNil(), rules.IsCancun); err != nil {
+		if err := types.ValidateBlobPrerequisites(st.msg.BlobHashes(), st.msg.IsCreate(), rules.IsCancun); err != nil {
 			return upfrontTxnFees{}, err
 		}
 	}
@@ -349,7 +350,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsic mdgas.IntrinsicGasCal
 	// order, report SetCode prerequisite errors before checking the sender's
 	// funds or whether the gas limit covers the intrinsic cost.
 	if auths := st.msg.Authorizations(); auths != nil {
-		if err := types.ValidateSetCodePrerequisites(auths, st.msg.To().IsNil(), rules.IsPrague); err != nil {
+		if err := types.ValidateSetCodePrerequisites(auths, st.msg.IsCreate(), rules.IsPrague); err != nil {
 			return upfrontTxnFees{}, err
 		}
 	}
@@ -405,7 +406,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsic mdgas.IntrinsicGasCal
 		return upfrontTxnFees{}, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, gas, intrinsic.RequiredGas())
 	}
 
-	if st.msg.To().IsNil() {
+	if st.msg.IsCreate() {
 		vmConfig := st.evm.Config()
 		if err := vm.CheckMaxInitCodeSize(uint64(len(st.data)), vmConfig.HasEip3860(rules), rules.IsAmsterdam); err != nil {
 			return upfrontTxnFees{}, err
@@ -445,7 +446,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	coinbase := st.evm.Context.Coinbase
 	msg := st.msg
 	sender := msg.From()
-	contractCreation := msg.To().IsNil()
+	contractCreation := msg.IsCreate()
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 	auths := msg.Authorizations()
 
@@ -506,7 +507,11 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		createAddress   accounts.Address
 		createNonce     uint64
 	)
-	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
+	var dst *accounts.Address
+	if !contractCreation {
+		dst = new(msg.To())
+	}
+	st.state.Prepare(rules, msg.From(), coinbase, dst, vm.ActivePrecompiles(rules), accessTuples)
 	if st.evm.Config().NoBAL {
 		st.state.StopAccessRecording()
 	}
@@ -879,7 +884,7 @@ func (st *TxnExecutor) refundGas(gasLeft mdgas.MdGas) error {
 }
 
 func intrinsicGas(msg Message, rules *chain.Rules, isEIP3860 bool) (mdgas.IntrinsicGasCalcResult, bool) {
-	contractCreation := msg.To().IsNil()
+	contractCreation := msg.IsCreate()
 	accessList := msg.AccessList()
 	return mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 		Data:               msg.Data(),

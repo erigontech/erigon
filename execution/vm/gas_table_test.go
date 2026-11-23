@@ -290,7 +290,7 @@ func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
 			}
 			vmenv := vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chain.AllProtocolChanges, vm.Config{})
 			rules := vmenv.ChainRules()
-			statedb.Prepare(rules, accounts.ZeroAddress, accounts.ZeroAddress, contract, vm.ActivePrecompiles(rules), nil)
+			statedb.Prepare(rules, accounts.ZeroAddress, accounts.ZeroAddress, &contract, vm.ActivePrecompiles(rules), nil)
 			if tt.warm {
 				statedb.AddSlotToAccessList(contract, slot)
 			}

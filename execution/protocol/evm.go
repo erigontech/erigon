@@ -41,9 +41,10 @@ import (
 func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (common.Hash, error),
 	engine rules.EngineReader, author accounts.Address, config *chain.Config,
 ) evmtypes.BlockContext {
-	// If we don't have an explicit author (i.e. not mining), extract from the header
+	// If we don't have an explicit author (i.e. not mining), extract from the header.
+	// With no engine, a zero author is an explicit zero coinbase.
 	var beneficiary accounts.Address
-	if author.IsNil() {
+	if author.IsNil() && engine != nil {
 		beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
 	} else {
 		beneficiary = author

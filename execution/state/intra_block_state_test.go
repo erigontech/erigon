@@ -482,7 +482,7 @@ func TestTransientStorageRevertAcrossClear(t *testing.T) {
 			addr := accounts.Address{}
 			const slots = 2 * transientScanLimit
 			for frame := range 3 {
-				state.Prepare(&chain.Rules{}, addr, addr, addr, nil, nil)
+				state.Prepare(&chain.Rules{}, addr, addr, &addr, nil, nil)
 				for i := range slots - frame {
 					key := TransientKey(*uint256.NewInt(uint64(frame*slots + i)))
 					state.SetTransientState(addr, &key, uint256.NewInt(1))
@@ -490,7 +490,7 @@ func TestTransientStorageRevertAcrossClear(t *testing.T) {
 				}
 			}
 			if clearLast {
-				state.Prepare(&chain.Rules{}, addr, addr, addr, nil, nil)
+				state.Prepare(&chain.Rules{}, addr, addr, &addr, nil, nil)
 			}
 			state.RevertToSnapshot(snapshot, nil)
 			for i := range 3 * slots {

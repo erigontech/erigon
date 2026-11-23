@@ -1334,17 +1334,6 @@ func TestContextAddressWordsReusedFrame(t *testing.T) {
 	}
 }
 
-// A context idle in the pool must not pin interned keys: a handle keeps its canonical
-// map entry alive.
-func TestPutReleasesFrameSlotKeys(t *testing.T) {
-	var evm EVM
-	ctx := evm.getCallContext(Contract{}, nil, mdgas.MdGas{})
-	ctx.slots.key[0] = accounts.InternKey(common.Hash{1})
-	ctx.slots.key[1] = accounts.InternKey(common.Hash{2})
-	evm.putCallContext(ctx)
-	require.Equal(t, [2]accounts.StorageKey{}, ctx.slots.key)
-}
-
 // A failed header read is the node's failure, not the transaction's. BLOCKHASH records it as a
 // state read error, so the executor does not judge the block by the call it aborted.
 func TestBlockhashRecordsAHeaderReadError(t *testing.T) {

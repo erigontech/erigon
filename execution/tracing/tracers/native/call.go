@@ -192,14 +192,9 @@ func (t *callTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to ac
 		return
 	}
 
-	var toValue *common.Address
-	if !to.IsNil() {
-		v := to.Value()
-		toValue = &v
-	}
 	call := callFrame{
 		From:     from.Value(),
-		To:       toValue,
+		To:       new(to.Value()),
 		Input:    bytes.Clone(input),
 		Gas:      hexutil.Uint64(gas.Execution),
 		StateGas: hexutil.Uint64(gas.State),

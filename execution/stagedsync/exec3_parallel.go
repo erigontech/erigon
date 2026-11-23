@@ -1891,7 +1891,7 @@ type execResult struct {
 // tx of result is validated: the coinbase, or the burnt-fee recipient.
 func (be *blockExecutor) isFeeRecipient(result *execResult) func(accounts.Address) bool {
 	burnt := result.ExecutionResult.BurntContractAddress
-	return func(addr accounts.Address) bool { return addr == be.coinbase || addr == burnt }
+	return func(addr accounts.Address) bool { return addr == be.coinbase || !burnt.IsNil() && addr == burnt }
 }
 
 func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint32, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
@@ -1923,12 +1923,17 @@ func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint3
 	if txIndex < 0 || task.IsBlockEnd() {
 		// System TXs use full IBS reconstruction (no worker path, so no fee split).
 		// Strip coinbase/burnt since they may carry stale writes.
+		burnt := result.ExecutionResult.BurntContractAddress
 		txOut, _, _, _ := result.TxOut.StripBalanceWrite(result.Coinbase, result.TxIn)
 		result.TxOut = txOut
-		txOut, _, _, _ = result.TxOut.StripBalanceWrite(result.ExecutionResult.BurntContractAddress, result.TxIn)
-		result.TxOut = txOut
+		if !burnt.IsNil() {
+			txOut, _, _, _ = result.TxOut.StripBalanceWrite(burnt, result.TxIn)
+			result.TxOut = txOut
+		}
 		result.TxIn.Delete(result.Coinbase)
-		result.TxIn.Delete(result.ExecutionResult.BurntContractAddress)
+		if !burnt.IsNil() {
+			result.TxIn.Delete(burnt)
+		}
 		return result.finalizeSystemTx(task, txTask, vm, stateReader)
 	}
 
@@ -2412,7 +2417,7 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 		Val:         u256.Sub(acc.Balance, charge),
 	})
 	nonceReason := tracing.NonceChangeEoACall
-	if msg.To().IsNil() {
+	if msg.IsCreate() {
 		nonceReason = tracing.NonceChangeContractCreator
 	}
 	ws.SetNonce(sender, &state.VersionedWrite[uint64]{
@@ -2420,7 +2425,7 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 		Val:         acc.Nonce + 1,
 	})
 	// A run that skipped the transfer frame left the recipient credit to validation.
-	if to := msg.To(); !to.IsNil() && to != sender && result.ExecutionResult.Err == nil && !msg.Value().IsZero() {
+	if to := msg.To(); !msg.IsCreate() && to != sender && result.ExecutionResult.Err == nil && !msg.Value().IsZero() {
 		if _, credited := result.TxOut.GetBalance(to); !credited {
 			recipient, err := reader.ReadAccountData(to)
 			if err != nil {

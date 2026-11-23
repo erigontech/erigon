@@ -93,7 +93,7 @@ type CallContext struct {
 	// opcode dispatch in the interpreter loop; cachedKeyGen/cachedAddrGen hold
 	// the generation at which the entry was populated. An entry is valid only
 	// when its gen equals cacheGen, giving the gas phase and execute phase of
-	// the same opcode a shared interned value without a second unique.Make call.
+	// the same opcode a shared value.
 	// Placed before Stack so these fields stay in L1D rather than being pushed
 	// out by Stack.data (32 KB).
 	cacheGen      uint64
@@ -248,17 +248,12 @@ func (evm *EVM) putCallContext(ctx *CallContext) {
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
 	ctx.create = createGasPreparation{}
-	ctx.slots.ok = [2]bool{}                 // the next frame may have another storage address
-	ctx.slots.key = [2]accounts.StorageKey{} // like cachedKey below: release the canonMap pins
+	ctx.slots.ok = [2]bool{} // the next frame may have another storage address
 	ctx.slots.memoGen = ^uint64(0)
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
 	ctx.cachedKeyGen = ^uint64(0)
 	ctx.cachedAddrGen = ^uint64(0)
-	// Zero the handles to release their canonMap pins while the context is
-	// idle in the pool; unique.Handle values keep interned entries alive.
-	ctx.cachedKey = accounts.NilKey
-	ctx.cachedAddr = accounts.NilAddress
 	ctx.input = nil
 	ctx.Contract = Contract{}
 	if evm.depth > 1 && evm.spareFrame == nil {

@@ -558,13 +558,13 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	}
 
 	// Parse recipient if present.
-	var to accounts.Address
+	var to *accounts.Address
 	if tx.To != "" {
 		var txto common.Address
 		if err := txto.UnmarshalText([]byte(tx.To)); err != nil {
 			return nil, fmt.Errorf("invalid to address: %w", err)
 		}
-		to = accounts.InternAddress(txto)
+		to = new(accounts.InternAddress(txto))
 	}
 
 	// Get values specific to this post state.

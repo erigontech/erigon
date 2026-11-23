@@ -255,7 +255,7 @@ func SysCallContractWithEVM(evm *vm.EVM, contract accounts.Address, data []byte,
 func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	msg := types.NewMessage(
 		params.SystemAddress,
-		contract,
+		&contract,
 		0, &u256.Num0,
 		SysCallGasLimit,
 		&u256.Num0,
@@ -301,7 +301,7 @@ func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainC
 func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header) (result []byte, err error) {
 	msg := types.NewMessage(
 		contract,
-		accounts.NilAddress, // to
+		nil, // to
 		0, &u256.Num0,
 		SysCallGasLimit,
 		&u256.Num0,

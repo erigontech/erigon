@@ -421,7 +421,7 @@ func TestCodeResolve(t *testing.T) {
 
 	defer state1.Close()
 	state1.SetVersionMap(&VersionMap{})
-	state1.Prepare(&chain.Rules{}, accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, nil, nil)
+	state1.Prepare(&chain.Rules{}, accounts.ZeroAddress, accounts.ZeroAddress, new(accounts.ZeroAddress), nil, nil)
 
 	_, ok, err := state1.GetDelegatedDesignation(stateobjaddr0)
 	require.NoError(t, err)

@@ -17,49 +17,24 @@
 package accounts
 
 import (
-	"encoding/binary"
 	"fmt"
-	"sync/atomic"
 	"unique"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 )
 
-type Address unique.Handle[common.Address]
+// Address and StorageKey are plain values: the nil and the zero value are the same, so code that
+// must tell "unset" from 0x0 carries its own flag.
+type Address common.Address
 
 var (
-	ZeroAddress = InternAddress(common.Address{})
+	ZeroAddress = Address{}
 	NilAddress  = Address{}
 )
 
-// unique drops a value at the first GC after its last handle dies, so values the next request reads again are
-// allocated and registered again, and unique.Make parks its caller while a GC cycle finishes marking. These
-// direct-mapped tables keep the latest values alive and answer hits without unique.Make; a miss overwrites the slot.
-const (
-	addressTableSize = 256 * 1024
-	keyTableSize     = 1024 * 1024
-)
-
-var (
-	addressTable [addressTableSize]atomic.Value // Address
-	keyTable     [keyTableSize]atomic.Value     // StorageKey
-	_            = [1]struct{}{}[addressTableSize&(addressTableSize-1)]
-	_            = [1]struct{}{}[keyTableSize&(keyTableSize-1)]
-)
-
-func addressSlot(a common.Address) *atomic.Value {
-	return &addressTable[binary.BigEndian.Uint32(a[16:])&(addressTableSize-1)]
-}
-
 func InternAddress(a common.Address) Address {
-	slot := addressSlot(a)
-	if h, ok := slot.Load().(Address); ok && h.Value() == a {
-		return h
-	}
-	h := Address(unique.Make(a))
-	slot.Store(h)
-	return h
+	return Address(a)
 }
 
 func (a Address) IsNil() bool {
@@ -67,99 +42,53 @@ func (a Address) IsNil() bool {
 }
 
 func (a Address) IsZero() bool {
-	return a == NilAddress || a == ZeroAddress
+	return a == ZeroAddress
 }
 
 func (a Address) Value() common.Address {
-	if a == NilAddress {
-		return common.Address{}
-	}
-	return unique.Handle[common.Address](a).Value()
+	return common.Address(a)
 }
 
-func (a Address) Handle() unique.Handle[common.Address] {
-	return unique.Handle[common.Address](a)
+func (a Address) Handle() common.Address {
+	return common.Address(a)
 }
 
 func (a Address) String() string {
-	if a == NilAddress {
-		return "<nil>"
-	}
 	return a.Value().String()
 }
 
 func (a Address) Format(s fmt.State, c rune) {
-	if a == NilAddress {
-		_, _ = s.Write([]byte("<nil>"))
-		return
-	}
 	a.Value().Format(s, c)
 }
 
 // MarshalText returns the hex representation of a.
 func (a Address) MarshalText() ([]byte, error) {
-	if a.IsNil() {
-		return nil, nil
-	}
 	return a.Value().MarshalText()
 }
 
 // UnmarshalText parses a hash in hex syntax.
 func (a *Address) UnmarshalText(input []byte) error {
-	var value common.Address
-	if err := value.UnmarshalText(input); err != nil {
-		return err
-	}
-	*a = InternAddress(value)
-	return nil
+	return (*common.Address)(a).UnmarshalText(input)
 }
 
 // UnmarshalJSON parses a hash in hex syntax.
 func (a *Address) UnmarshalJSON(input []byte) error {
-	var value common.Address
-	if err := value.UnmarshalJSON(input); err != nil {
-		return err
-	}
-	*a = InternAddress(value)
-	return nil
+	return (*common.Address)(a).UnmarshalJSON(input)
 }
 
 func (a Address) Cmp(o Address) int {
-	switch {
-	case a == NilAddress:
-		switch {
-		case o == NilAddress:
-			return 0
-		default:
-			return -1
-		}
-	case o == NilAddress:
-		return +1
-	}
-
 	return a.Value().Cmp(o.Value())
 }
 
-type StorageKey unique.Handle[common.Hash]
+type StorageKey common.Hash
 
 var (
-	ZeroKey = InternKey(common.Hash{})
+	ZeroKey = StorageKey{}
 	NilKey  = StorageKey{}
 )
 
-// keySlot mixes both ends of the key: keccak-derived slots differ everywhere, small scalar slots only at the end.
-func keySlot(k common.Hash) *atomic.Value {
-	return &keyTable[(binary.BigEndian.Uint32(k[:4])^binary.BigEndian.Uint32(k[28:]))&(keyTableSize-1)]
-}
-
 func InternKey(k common.Hash) StorageKey {
-	slot := keySlot(k)
-	if h, ok := slot.Load().(StorageKey); ok && h.Value() == k {
-		return h
-	}
-	h := StorageKey(unique.Make(k))
-	slot.Store(h)
-	return h
+	return StorageKey(k)
 }
 
 func (k StorageKey) IsNil() bool {
@@ -167,40 +96,18 @@ func (k StorageKey) IsNil() bool {
 }
 
 func (k StorageKey) Value() common.Hash {
-	if k == NilKey {
-		return common.Hash{}
-	}
-	return unique.Handle[common.Hash](k).Value()
+	return common.Hash(k)
 }
 
 func (k StorageKey) String() string {
-	if k == NilKey {
-		return "<nil>"
-	}
 	return k.Value().String()
 }
 
 func (k StorageKey) Format(s fmt.State, c rune) {
-	if k == NilKey {
-		_, _ = s.Write([]byte("<nil>"))
-		return
-	}
 	k.Value().Format(s, c)
 }
 
 func (k StorageKey) Cmp(o StorageKey) int {
-	switch {
-	case k == NilKey:
-		switch {
-		case o == NilKey:
-			return 0
-		default:
-			return -1
-		}
-	case o == NilKey:
-		return +1
-	}
-
 	return k.Value().Cmp(o.Value())
 }
 

@@ -2487,7 +2487,7 @@ func (ws *WriteSet) HasNewWrite(cmpSet *WriteSet) bool {
 // true only when a stale read and write yielded a non-zero delta.
 func (ws *WriteSet) StripBalanceWrite(addr accounts.Address, readSet ReadSet) (stripped *WriteSet, delta uint256.Int, increase bool, found bool) {
 	stripped = ws
-	if ws == nil || addr.IsNil() {
+	if ws == nil {
 		return
 	}
 	bw, hasWrite := ws.balance[addr]
@@ -2707,15 +2707,12 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 	ac := b.ac
 	// EIP-7928 requires every accessed address to appear in the BAL, so each per-path read map must register its address.
 	for addr, tr := range rs.balance {
-		if addr.IsNil() || tr.internal {
+		if tr.internal {
 			continue
 		}
 		ensureAccountState(ac, addr).updateReadBalance(tr.Val)
 	}
 	for addr, inner := range rs.storage {
-		if addr.IsNil() {
-			continue
-		}
 		for key, tr := range inner {
 			if tr.internal {
 				continue
@@ -2724,7 +2721,7 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		}
 	}
 	for addr, tr := range rs.address {
-		if addr.IsNil() || tr.internal {
+		if tr.internal {
 			continue
 		}
 		// Skip validation-only reads for non-existent accounts.
@@ -2737,37 +2734,37 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		ensureAccountState(ac, addr)
 	}
 	for addr, tr := range rs.nonce {
-		if addr.IsNil() || tr.internal {
+		if tr.internal {
 			continue
 		}
 		ensureAccountState(ac, addr)
 	}
 	for addr, tr := range rs.incarnation {
-		if addr.IsNil() || tr.internal {
+		if tr.internal {
 			continue
 		}
 		ensureAccountState(ac, addr)
 	}
 	for addr, tr := range rs.selfDestruct {
-		if addr.IsNil() || tr.internal {
+		if tr.internal {
 			continue
 		}
 		ensureAccountState(ac, addr)
 	}
 	for addr, tr := range rs.createContract {
-		if addr.IsNil() || tr.internal {
+		if tr.internal {
 			continue
 		}
 		ensureAccountState(ac, addr)
 	}
 	for addr, tr := range rs.code {
-		if addr.IsNil() || tr.internal {
+		if tr.internal {
 			continue
 		}
 		ensureAccountState(ac, addr)
 	}
 	for addr, tr := range rs.codeHash {
-		if addr.IsNil() || tr.internal {
+		if tr.internal {
 			continue
 		}
 		account := ensureAccountState(ac, addr)
@@ -2779,7 +2776,7 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		}
 	}
 	for addr, tr := range rs.codeSize {
-		if addr.IsNil() || tr.internal {
+		if tr.internal {
 			continue
 		}
 		ensureAccountState(ac, addr)
@@ -2789,27 +2786,18 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		// Self-destruct is applied before the balance writes so the EIP-7928
 		// burn (zeroing a non-zero balance written by the destroying tx) fires.
 		for addr, w := range writes.SelfDestructs() {
-			if addr.IsNil() || !w.Val {
+			if !w.Val {
 				continue
 			}
 			ensureAccountState(ac, addr)
 		}
 		for addr, w := range writes.Balances() {
-			if addr.IsNil() {
-				continue
-			}
 			ensureAccountState(ac, addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
 		}
 		for addr, w := range writes.Nonces() {
-			if addr.IsNil() {
-				continue
-			}
 			ensureAccountState(ac, addr).applyWriteNonce(w.Val, w.Version.blockAccessIndex())
 		}
 		for addr, w := range writes.Codes() {
-			if addr.IsNil() {
-				continue
-			}
 			account := ensureAccountState(ac, addr)
 			// An account absent or destroyed at the tx start had no code before the block: an account
 			// that had code before the block is never removed within it (EIP-161, EIP-6780).
@@ -2819,9 +2807,6 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 			account.applyWriteCode(w.Val, w.Version.blockAccessIndex())
 		}
 		for addr, byKey := range writes.Storages() {
-			if addr.IsNil() {
-				continue
-			}
 			account := ensureAccountState(ac, addr)
 			for key, w := range byKey {
 				account.applyWriteStorage(key, w.Val, w.Version.blockAccessIndex())
@@ -2835,9 +2820,6 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		registerAddrs(ac, writes.codeHash)
 		registerAddrs(ac, writes.codeSize)
 		for addr, w := range writes.createContract {
-			if addr.IsNil() {
-				continue
-			}
 			account := ensureAccountState(ac, addr)
 			// A contract created this block has empty pre-block code; applyToCode
 			// uses this to drop a net-zero empty code change.
@@ -2848,9 +2830,6 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 	}
 
 	for addr := range rs.access {
-		if addr.IsNil() {
-			continue
-		}
 		ensureAccountState(ac, addr)
 	}
 }
@@ -3086,9 +3065,7 @@ func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
 
 func registerAddrs[V any](ac map[accounts.Address]*accountState, writes map[accounts.Address]V) {
 	for addr := range writes {
-		if !addr.IsNil() {
-			ensureAccountState(ac, addr)
-		}
+		ensureAccountState(ac, addr)
 	}
 }
 

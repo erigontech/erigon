@@ -405,9 +405,7 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 // AsMessage returns the transaction as a core.Message.
 func (tx *AccessListTx) AsMessage(s Signer, _ *uint256.Int, rules *chain.Rules) (*Message, error) {
 	var txTo accounts.Address
-	if tx.To == nil {
-		txTo = accounts.NilAddress
-	} else {
+	if tx.To != nil {
 		txTo = accounts.InternAddress(*tx.To)
 	}
 
@@ -418,6 +416,7 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *uint256.Int, rules *chain.Rules) 
 		tipCap:           tx.GasPrice,
 		feeCap:           tx.GasPrice,
 		to:               txTo,
+		create:           tx.To == nil,
 		amount:           tx.Value,
 		data:             tx.Data,
 		accessList:       tx.AccessList,

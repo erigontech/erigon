@@ -266,7 +266,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	defer caller.Close()
 
 	msg := caller.Message()
-	plainTransfer := len(msg.Data()) == 0 && !msg.To().IsNil() && len(msg.Authorizations()) == 0
+	plainTransfer := len(msg.Data()) == 0 && !msg.IsCreate() && len(msg.Authorizations()) == 0
 
 	var initialState *state.IntraBlockState
 	if feeCap.Sign() != 0 || plainTransfer {
@@ -975,7 +975,7 @@ func excludeAuthorities(msg *types.Message, chainRules *chain.Rules, excl map[co
 // ToMessage leaves CheckGas false, so these calls skip the EIP-7825 cap on
 // declared gas. Execution checks Amsterdam's cap on intrinsic gas separately.
 func checkIntrinsicGas(msg *types.Message, chainRules *chain.Rules) error {
-	contractCreation := msg.To().IsNil()
+	contractCreation := msg.IsCreate()
 	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 		Data:               msg.Data(),
 		AuthorizationsLen:  uint64(len(msg.Authorizations())),

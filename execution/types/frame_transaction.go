@@ -573,6 +573,7 @@ func (tx *FrameTransaction) AsMessage(_ Signer, baseFee *uint256.Int, rules *cha
 		blobHashes: tx.BlobVersionedHashes,
 		checkNonce: true, checkTransaction: true, checkGas: true,
 		frameTransaction: tx,
+		create:           true, // no top-level recipient
 	}
 	if baseFee != nil {
 		tip := CalcEffectiveGasTip(baseFee, msg.TipCap, msg.FeeCap)
