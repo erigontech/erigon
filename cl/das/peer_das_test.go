@@ -2424,6 +2424,13 @@ func (r *recoveryRun) requireBlobsRecovered(t *testing.T) {
 	requireBlobSidecarsStored(t, r.d.blobStorage, recoveryTestSlot, r.root, r.blobs)
 }
 
+func (r *recoveryRun) requireNoBlobSidecars(t *testing.T) {
+	t.Helper()
+	_, found, err := r.d.blobStorage.ReadBlobSidecars(t.Context(), recoveryTestSlot, r.root)
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
 func requireBlobSidecarsStored(t *testing.T, storage blob_storage.BlobStorage, slot uint64, root common.Hash, want []*cltypes.BlobSidecar) {
 	t.Helper()
 	stored, found, err := storage.ReadBlobSidecars(t.Context(), slot, root)
@@ -3051,7 +3058,7 @@ func (s *corruptedColumnReadStorage) ReadColumnSidecarByColumnIndex(ctx context.
 }
 
 // A corrupted stored cell makes every reconstructed column fail its KZG proofs, so the worker neither stores nor
-// publishes any of them.
+// publishes any of them, and it builds no blob sidecars from the matrix.
 func TestBlobRecoveryDropsReconstructedColumnsWithInvalidKZGProofs(t *testing.T) {
 	r := startRecoveryWithPublisher(t, recoveryOptions{
 		caplinConfig: &clparams.CaplinConfig{},
@@ -3067,45 +3074,90 @@ func TestBlobRecoveryDropsReconstructedColumnsWithInvalidKZGProofs(t *testing.T)
 	saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
 	require.NoError(t, err)
 	require.ElementsMatch(t, slices.Collect(maps.Keys(r.stored)), saved)
+	r.requireNoBlobSidecars(t)
 }
 
-// One reconstructed column with a bad cell fails the batch check, and the worker still stores and publishes the others.
-// The test seeds the cached reconstruction, since a bad input cell spreads to every reconstructed column.
+// cacheMatrixWithInvalidColumn caches a reconstructed matrix whose first row has a bad cell in an unstored column, and
+// returns that column. A bad input cell would spread to every reconstructed column, so the test seeds the matrix.
+func (r *recoveryRun) cacheMatrixWithInvalidColumn(t *testing.T) uint64 {
+	t.Helper()
+	existing := slices.Sorted(maps.Keys(r.stored))
+	var entries []cltypes.MatrixEntry
+	var anyColumn *cltypes.DataColumnSidecar
+	for _, index := range existing {
+		column, err := r.d.columnStorage.ReadColumnSidecarByColumnIndex(t.Context(), recoveryTestSlot, r.root, int64(index))
+		require.NoError(t, err)
+		anyColumn = cmp.Or(anyColumn, column)
+		for row := range column.Column.Len() {
+			entries = append(entries, cltypes.MatrixEntry{Cell: *column.Column.Get(row), KzgProof: *column.KzgProofs.Get(row), RowIndex: uint64(row), ColumnIndex: index})
+		}
+	}
+	matrix, err := peerdasutils.RecoverMatrix(entries, uint64(len(r.blobs)))
+	require.NoError(t, err)
+	bad := r.unstoredColumns()[0].Index
+	matrix[0][bad].Cell[31] ^= 1
+	result := newBlobRecoveryResult(existing, false, nil, nil, anyColumn, matrix, uint64(len(r.blobs)), 0)
+	require.True(t, r.d.cacheBlobRecoveryResult(r.root, result))
+	return bad
+}
+
+// One reconstructed column with a bad cell fails the batch check. The worker still stores and publishes the other
+// columns, but builds no blob sidecars from the bad matrix and drops its cached result.
 func TestBlobRecoveryStoresTheOtherColumnsWhenOneReconstructedColumnIsInvalid(t *testing.T) {
 	var bad uint64
 	r := startRecoveryWithPublisher(t, recoveryOptions{
 		caplinConfig: &clparams.CaplinConfig{},
 		supernode:    true,
-		instrument: func(r *recoveryRun) {
-			existing := slices.Sorted(maps.Keys(r.stored))
-			var entries []cltypes.MatrixEntry
-			var anyColumn *cltypes.DataColumnSidecar
-			for _, index := range existing {
-				column, err := r.d.columnStorage.ReadColumnSidecarByColumnIndex(t.Context(), recoveryTestSlot, r.root, int64(index))
-				require.NoError(t, err)
-				anyColumn = cmp.Or(anyColumn, column)
-				for row := range column.Column.Len() {
-					entries = append(entries, cltypes.MatrixEntry{Cell: *column.Column.Get(row), KzgProof: *column.KzgProofs.Get(row), RowIndex: uint64(row), ColumnIndex: index})
-				}
-			}
-			matrix, err := peerdasutils.RecoverMatrix(entries, uint64(len(r.blobs)))
-			require.NoError(t, err)
-			bad = r.unstoredColumns()[0].Index
-			matrix[0][bad].Cell[31] ^= 1
-			result := newBlobRecoveryResult(existing, false, nil, nil, anyColumn, matrix, uint64(len(r.blobs)), 0)
-			require.True(t, r.d.cacheBlobRecoveryResult(r.root, result))
-		},
+		instrument:   func(r *recoveryRun) { bad = r.cacheMatrixWithInvalidColumn(t) },
 	})
 
 	call := receiveRecoveredColumnsPublish(t, r.published)
 	requireBlobRecoveryReleased(t, r.d, r.root)
 
-	r.requireBlobsRecovered(t)
+	r.requireNoBlobSidecars(t)
+	require.Nil(t, r.d.blobRecoveryResult(r.root))
 	want := slices.DeleteFunc(publishedColumnIndices(r.unstoredColumns()), func(index uint64) bool { return index == bad })
 	require.ElementsMatch(t, want, publishedColumnIndices(call.sidecars))
 	saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
 	require.NoError(t, err)
 	require.ElementsMatch(t, slices.Concat(slices.Collect(maps.Keys(r.stored)), want), saved)
+}
+
+type onColumnBatchWriteStorage struct {
+	blob_storage.DataColumnStorage
+	onWrite func()
+}
+
+func (s *onColumnBatchWriteStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	s.onWrite()
+	return s.DataColumnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars)
+}
+
+// A recovery that a newer request overtakes is retried. The retry must not reuse the cached matrix whose reconstructed
+// column failed verification.
+func TestBlobRecoveryDropsTheCachedMatrixWhenARetryFollowsAnInvalidReconstructedColumn(t *testing.T) {
+	r := startRecoveryWithPublisher(t, recoveryOptions{
+		caplinConfig: &clparams.CaplinConfig{},
+		supernode:    true,
+		unscheduled:  true,
+		instrument: func(r *recoveryRun) {
+			r.cacheMatrixWithInvalidColumn(t)
+			r.d.columnStorage = &onColumnBatchWriteStorage{DataColumnStorage: r.d.columnStorage, onWrite: func() {
+				if err := r.d.enqueueBlobRecovery(recoverBlobsRequest{slot: recoveryTestSlot, blockRoot: r.root, metadata: r.metadata}); err != nil {
+					t.Error(err)
+				}
+			}}
+		},
+	})
+	require.NoError(t, r.d.enqueueBlobRecovery(recoverBlobsRequest{slot: recoveryTestSlot, blockRoot: r.root}))
+
+	require.Eventually(t, func() bool {
+		r.d.recoveryRetryMutex.Lock()
+		defer r.d.recoveryRetryMutex.Unlock()
+		return r.d.recoveryRetries[r.root] != nil
+	}, 30*time.Second, time.Millisecond, "the overtaken recovery was not retried")
+
+	require.Nil(t, r.d.blobRecoveryResult(r.root))
 }
 
 // A failed read of the stored columns after the matrix recovery leaves the worker with the columns it read before.

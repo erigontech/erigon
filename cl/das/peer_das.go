@@ -1098,8 +1098,9 @@ func (d *peerdas) enqueueBlobRecovery(request recoverBlobsRequest) error {
 }
 
 // storeRecoveredColumns reports whether the custody columns were known and every reconstructed custody column was
-// written. A repeated call rebuilds only the columns still missing from storage.
-func (d *peerdas) storeRecoveredColumns(ctx context.Context, slot uint64, blockRoot common.Hash, result *blobRecoveryResult) (timeAddColumns time.Duration, completed bool) {
+// written, and how many reconstructed columns failed verification. A column that failed is neither stored nor
+// published. A repeated call rebuilds only the columns still missing from storage.
+func (d *peerdas) storeRecoveredColumns(ctx context.Context, slot uint64, blockRoot common.Hash, result *blobRecoveryResult) (timeAddColumns time.Duration, completed bool, invalidColumns int) {
 	isGloas := result.isGloas
 	anyColumnSidecar := result.anyColumnSidecar
 	// Columns stored while the matrix was recovered need no rebuild.
@@ -1108,7 +1109,7 @@ func (d *peerdas) storeRecoveredColumns(ctx context.Context, slot uint64, blockR
 	custodyColumns, err := d.state.GetMyCustodyColumns()
 	if err != nil {
 		log.Warn("[blobsRecover] failed to get my custody columns", "err", err, "slot", slot, "blockRoot", blockRoot)
-		return 0, false
+		return 0, false, 0
 	}
 	// Reconstructed columns are published on the subnets this node subscribes to, and stored if in custody. Recovery
 	// runs only on an archive node or a supernode, and a supernode has every column in custody.
@@ -1144,15 +1145,18 @@ func (d *peerdas) storeRecoveredColumns(ctx context.Context, slot uint64, blockR
 		if isGloas {
 			if !VerifyDataColumnSidecarWithCommitments(sidecar, result.kzgCommitmentsFromBlock) {
 				log.Warn("[blobsRecover] failed to verify column sidecar (GLOAS)", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+				invalidColumns++
 				continue
 			}
 		} else {
 			if !VerifyDataColumnSidecar(sidecar) {
 				log.Warn("[blobsRecover] failed to verify column sidecar", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+				invalidColumns++
 				continue
 			}
 			if !VerifyDataColumnSidecarInclusionProof(sidecar) {
 				log.Warn("[blobsRecover] failed to verify column sidecar inclusion proof", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+				invalidColumns++
 				continue
 			}
 		}
@@ -1163,6 +1167,7 @@ func (d *peerdas) storeRecoveredColumns(ctx context.Context, slot uint64, blockR
 		kzgCommitments = anyColumnSidecar.KzgCommitments
 	}
 	rebuilt, invalid := splitByKZGProofs(rebuilt, kzgCommitments)
+	invalidColumns += len(invalid)
 	for _, sidecar := range invalid {
 		log.Warn("[blobsRecover] failed to verify column sidecar kzg proofs", "slot", slot, "blockRoot", blockRoot, "column", sidecar.Index)
 	}
@@ -1181,7 +1186,7 @@ func (d *peerdas) storeRecoveredColumns(ctx context.Context, slot uint64, blockR
 	if d.publishColumns != nil && len(toPublish) > 0 {
 		d.publishInBackground(ctx, toPublish)
 	}
-	return time.Since(beginAddColumns), err == nil
+	return time.Since(beginAddColumns), err == nil, invalidColumns
 }
 
 // withStoredColumns returns known together with the columns stored for the block now, or known if the read fails. The
@@ -1432,7 +1437,12 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		}
 		var timeAddColumns time.Duration
 		if !result.columnsStored {
-			timeAddColumns, result.columnsStored = d.storeRecoveredColumns(ctx, slot, blockRoot, result)
+			var invalidColumns int
+			timeAddColumns, result.columnsStored, invalidColumns = d.storeRecoveredColumns(ctx, slot, blockRoot, result)
+			if invalidColumns > 0 {
+				d.removeBlobRecoveryResult(blockRoot)
+				return
+			}
 		}
 		if result.blobSidecars == nil && !d.buildBlobSidecars(slot, blockRoot, result) {
 			return

@@ -101,7 +101,7 @@ func VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumnSidecar) bool {
 		return false
 	}
 
-	return verifyKZGProofsInternal(sidecar, sidecar.KzgCommitments)
+	return verifyKZGProofsBatch([]*cltypes.DataColumnSidecar{sidecar}, sidecar.KzgCommitments)
 }
 
 // VerifyDataColumnSidecarKZGProofsWithCommitments verifies if the KZG proofs in the sidecar are correct.
@@ -111,11 +111,6 @@ func VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar *cltypes.DataColumn
 	if kzgCommitments == nil || kzgCommitments.Len() == 0 {
 		return false
 	}
-	return verifyKZGProofsInternal(sidecar, kzgCommitments)
-}
-
-// verifyKZGProofsInternal is the internal implementation for KZG proof verification.
-func verifyKZGProofsInternal(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
 	return verifyKZGProofsBatch([]*cltypes.DataColumnSidecar{sidecar}, kzgCommitments)
 }
 
