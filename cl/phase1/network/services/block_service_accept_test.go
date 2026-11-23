@@ -58,6 +58,18 @@ func (s *skippingOnBlockStore) OnBlock(context.Context, *cltypes.SignedBeaconBlo
 	return nil
 }
 
+type ctxBoundOnBlockStore struct {
+	*onBlockErrorStore
+	hadDeadline chan bool
+}
+
+func (s *ctxBoundOnBlockStore) OnBlock(ctx context.Context, _ *cltypes.SignedBeaconBlock, _, _, _ bool) error {
+	_, ok := ctx.Deadline()
+	s.hadDeadline <- ok
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 func newAcceptFixture(t *testing.T) (*blockService, *cltypes.SignedBeaconBlock, *blockingOnBlockStore, common.Hash) {
 	t.Helper()
 	service, block, processing, _ := newFuluColumnGossipFixture(t)
@@ -223,4 +235,21 @@ func TestProcessMessageCountsImportSkippedByForkChoice(t *testing.T) {
 	require.Equal(t, beforeSkipped+1, skipped.GetValue())
 	require.Equal(t, beforeImported, imported.GetValue())
 	require.False(t, blockPersisted(t, service, root))
+}
+
+func TestProcessMessageBoundsBackgroundImportAndSchedulesRetry(t *testing.T) {
+	service, block, store, root := newAcceptFixture(t)
+	service.gossipImportTimeout = 50 * time.Millisecond
+	bound := &ctxBoundOnBlockStore{onBlockErrorStore: store.onBlockErrorStore, hadDeadline: make(chan bool, 1)}
+	service.forkchoiceStore = bound
+	retries := gossipBlockImportAfterAcceptCounter.WithLabelValues("retry")
+	beforeRetries := retries.GetValue()
+
+	require.NoError(t, processMessageWithin(t, t.Context(), service, block))
+
+	waitForGossipImports(t, service)
+	require.True(t, <-bound.hadDeadline, "each import attempt must run under a deadline")
+	_, queued := service.blocksScheduledForLaterExecution.Load([32]byte(root))
+	require.True(t, queued, "a timed-out import must be scheduled for retry")
+	require.Equal(t, beforeRetries+1, retries.GetValue())
 }

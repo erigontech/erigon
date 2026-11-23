@@ -235,6 +235,7 @@ type blockService struct {
 	startELColumnsImport func(context.Context, *cltypes.SignedBeaconBlock)
 	startGossipImport    func(func())
 	importSlots          chan struct{}
+	gossipImportTimeout  time.Duration
 	syncedData           *synced_data.SyncedDataManager
 	ethClock             eth_clock.EthereumClock
 	beaconCfg            *clparams.BeaconChainConfig
@@ -308,21 +309,22 @@ func newBlockService(
 		panic(err)
 	}
 	b := &blockService{
-		ctx:              context.Background(),
-		forkchoiceStore:  forkchoiceStore,
-		syncedData:       syncedData,
-		ethClock:         ethClock,
-		beaconCfg:        beaconCfg,
-		seenBlocksCache:  seenBlocksCache,
-		reservations:     make(map[proposerIndexAndSlot]*blockReservation),
-		validationCache:  validationCache,
-		validationCalls:  make(map[blockValidationContextKey]*blockValidationContextCall),
-		validationSlots:  make(chan struct{}, maxConcurrentBlockValidationContexts),
-		importSlots:      make(chan struct{}, maxConcurrentGossipBlockImports),
-		elImportsStarted: elImportsStarted,
-		elBlobRetryRoots: elBlobRetryRoots,
-		emitter:          emitter,
-		db:               db,
+		ctx:                 context.Background(),
+		forkchoiceStore:     forkchoiceStore,
+		syncedData:          syncedData,
+		ethClock:            ethClock,
+		beaconCfg:           beaconCfg,
+		seenBlocksCache:     seenBlocksCache,
+		reservations:        make(map[proposerIndexAndSlot]*blockReservation),
+		validationCache:     validationCache,
+		validationCalls:     make(map[blockValidationContextKey]*blockValidationContextCall),
+		validationSlots:     make(chan struct{}, maxConcurrentBlockValidationContexts),
+		importSlots:         make(chan struct{}, maxConcurrentGossipBlockImports),
+		gossipImportTimeout: executionPayloadImportTimeout,
+		elImportsStarted:    elImportsStarted,
+		elBlobRetryRoots:    elBlobRetryRoots,
+		emitter:             emitter,
+		db:                  db,
 
 		publishedBlockScheduled: make(chan common.Hash, publishedBlockWakeBuffer),
 	}
@@ -408,7 +410,9 @@ func (b *blockService) runAcceptedImport(msg *cltypes.SignedBeaconBlock, finishP
 			log.Error("Panic while importing an accepted gossip block", "slot", msg.Block.Slot, "proposer", msg.Block.ProposerIndex, "panic", r, "stack", string(debug.Stack()))
 		}
 	}()
-	result, err := b.importGossipBlock(b.ctx, msg)
+	ctx, cancel := context.WithTimeout(b.ctx, b.gossipImportTimeout)
+	defer cancel()
+	result, err := b.importGossipBlock(ctx, msg)
 	gossipBlockImportAfterAcceptCounter.WithLabelValues(string(result)).Inc()
 	switch {
 	case result == gossipImportInvalid:
