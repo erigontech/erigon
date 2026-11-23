@@ -966,12 +966,36 @@ func TestSetHeadWaitsForStateFilePublication(t *testing.T) {
 		cancel()
 		require.ErrorIs(t, <-result, context.Canceled, "SetHead must wait while the snapshot is being built")
 	})
+
+	// A short read-ahead wait leaves only the rest of the budget for publication.
+	// A longer one must time out while read-ahead is still held.
+	for _, readAheadDelay := range []time.Duration{2 * time.Second, 10 * time.Second} {
+		synctest.Test(t, func(t *testing.T) {
+			callerCtx, cancel := context.WithTimeout(t.Context(), time.Minute)
+			defer cancel()
+			resume, err := m.ReadAheader.SuspendWarmup(callerCtx)
+			require.NoError(t, err)
+			defer resume()
+			timer := time.AfterFunc(readAheadDelay, resume)
+			defer timer.Stop()
+
+			start := time.Now()
+			err = m.ExecModule.SetHead(callerCtx, lastFileBlock-1)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.Equal(t, 5*time.Second, time.Since(start), "read-ahead held for %s", readAheadDelay)
+		})
+	}
+	head, finalized := chainPack.TopBlock.Hash(), chainPack.Blocks[lastFileBlock-1].Hash()
+	assertPersistedForkchoice(t, m.DB, head, finalized, finalized)
+	fcuCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	fcu, err := m.ExecModule.UpdateForkChoice(fcuCtx, head, finalized, finalized)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status, "execution must be available while publication is still held")
+
 	publish()
 	require.ErrorContains(t, m.ExecModule.SetHead(ctx, lastFileBlock-1), fmt.Sprintf("minimum unwindable block is %d", lastFileBlock))
-	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
-		require.Equal(t, chainPack.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
-		return nil
-	}))
+	assertPersistedForkchoice(t, m.DB, head, finalized, finalized)
 	require.NoError(t, m.ExecModule.SetHead(ctx, lastFileBlock))
 }
 
