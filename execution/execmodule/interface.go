@@ -273,10 +273,8 @@ type ExecutionModule interface {
 	// flash.mu-guarded state), so they are not real exec operations — they are concrete-only test/inspection
 	// methods on *ExecModule. Tests reach them by asserting the concrete type; production code never needs them.
 
-	// NOTE: discarding a stale in-progress flashblock (the former AbandonExtendingFork) is exec-INTERNAL now —
-	// its only triggers, the SealBlock reconcile and the AssembleBlock boundary re-anchor, run under the exec
-	// semaphore and call abandonExtendingForkLocked directly. There is no public wrapper (it would be a
-	// semaphore-free mutation on this interface — the anti-pattern this refactor removed).
+	// AbandonFlashblock drops the in-progress block under the exec semaphore.
+	AbandonFlashblock(ctx context.Context) error
 
 	// --- Header / body queries --------------------------------------------
 

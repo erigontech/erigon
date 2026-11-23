@@ -109,3 +109,43 @@ func TestANewPayloadWaitsThroughARebuildOfTheBlockItCheckpoints(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, r.ValidationStatus, r.ValidationError)
 	require.Equal(t, proposed1.Root(), r.ComputedRoot)
 }
+
+// A node that gives up building the block a newPayload is waiting on abandons it, and the newPayload then
+// executes the agreed block itself.
+func TestANewPayloadExecutesTheBlockOnceItsPreExecIsAbandoned(t *testing.T) {
+	replica := newRoundHarness(t)
+	proposer := newRoundHarnessWithKeys(t, replica.keys)
+	head, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
+	require.NoError(t, err)
+
+	first := [][][]byte{{replica.signed(0, 0, nil, 200_000, counterInit)}, {replica.signed(1, 0, nil, 200_000, counterInit)}}
+	paramsP, inP := proposer.attrs(head)
+	proposed1 := proposer.sealRounds(paramsP, inP, first)
+
+	_, in := replica.attrs(head)
+	_, _, vr, err := replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in, first[0])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
+	status, err := insertBlocks(replica.ctx, replica.m.ExecModule, []*types.Block{proposed1})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+
+	answered := make(chan execmodule.ValidationResult, 1)
+	go func() {
+		r, verr := replica.m.ExecModule.ValidateChain(replica.ctx, proposed1)
+		require.NoError(t, verr)
+		answered <- r
+	}()
+	select {
+	case r := <-answered:
+		t.Fatalf("newPayload answered (%s) while the block was still being pre-executed", r.ValidationStatus)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	require.NoError(t, replica.m.ExecModule.AbandonFlashblock(replica.ctx))
+	r := <-answered
+	require.Equal(t, execmodule.ExecutionStatusSuccess, r.ValidationStatus, r.ValidationError)
+	ur, err := forkChoiceTo(replica.ctx, replica.m.ExecModule, proposed1.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status, ur.ValidationError)
+}

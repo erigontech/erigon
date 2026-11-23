@@ -1056,6 +1056,18 @@ func (e *ExecModule) RebuildFlashblock(ctx context.Context, inputs FlashblockInp
 	return vr, err
 }
 
+// AbandonFlashblock drops the in-progress block, so a newPayload waiting on its height executes the agreed block.
+func (e *ExecModule) AbandonFlashblock(ctx context.Context) error {
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer e.semaphore.Release(1)
+	e.roundMu.Lock()
+	defer e.roundMu.Unlock()
+	e.abandonExtendingForkLocked()
+	return nil
+}
+
 type rebuildOf struct {
 	number uint64
 	parent common.Hash
