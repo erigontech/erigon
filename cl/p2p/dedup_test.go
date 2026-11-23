@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"io"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -446,8 +447,9 @@ func TestDedupExcusesAStreamCutByTheRemoteClosingADuplicate(t *testing.T) {
 				require.NoError(t, err)
 				excused := make(chan bool, 1)
 				go func() {
-					_, err := s.Read(make([]byte, 1))
-					excused <- err != nil && a.deduper.ConsumeDuplicateLoss(b.ID())
+					// The remote's protocol negotiation can write to the stream before the close.
+					_, _ = io.Copy(io.Discard, s)
+					excused <- a.deduper.ConsumeDuplicateLoss(b.ID())
 				}()
 				require.NoError(t, dupB.Close())
 				require.True(t, <-excused)
