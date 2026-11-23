@@ -70,13 +70,22 @@ type Deposit struct {
 }
 
 func (d *Deposit) UnmarshalJSON(buf []byte) error {
-	d.Proof = solid.NewHashVector(33)
-	d.Data = new(DepositData)
-
-	return json.Unmarshal(buf, &struct {
+	tmp := struct {
 		Proof solid.HashVectorSSZ `json:"proof"`
 		Data  *DepositData        `json:"data"`
-	}{d.Proof, d.Data})
+	}{
+		Proof: solid.NewHashVector(DepositProofLength),
+		Data:  new(DepositData),
+	}
+	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	if tmp.Proof == nil || tmp.Data == nil {
+		return errors.New("deposit proof or data is null")
+	}
+	d.Proof = tmp.Proof
+	d.Data = tmp.Data
+	return nil
 }
 
 func (d *Deposit) EncodeSSZ(dst []byte) ([]byte, error) {
