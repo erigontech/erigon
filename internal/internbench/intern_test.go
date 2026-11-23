@@ -187,7 +187,8 @@ func (h *hist) merge(o *hist) {
 
 func (h *hist) quantile(q float64) time.Duration {
 	target, acc := uint64(float64(h.n)*q), uint64(0)
-	for i, c := range h.b {
+	for i := range h.b {
+		c := h.b[i]
 		if acc += c; acc > target {
 			e, sub := i/8, uint64(i%8)
 			if e <= 3 {
