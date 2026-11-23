@@ -18,6 +18,8 @@ package network
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,11 +56,13 @@ func TestStartExportsBackfillStateBeforeTheFirstPass(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	b := &BlobHistoryDownloader{ctx: ctx, archiveBlobs: true, logger: log.New()}
+	started := time.Now()
 
 	b.Start()
 
 	require.Eventually(t, func() bool { return !b.running.Load() }, time.Second, time.Millisecond)
 	require.Zero(t, blobBackfillCompleteGauge().GetValueUint64())
+	require.WithinDuration(t, started.Add(blobBackfillWarningInterval), b.nextBackfillWarning, time.Second)
 }
 
 func TestStartWithoutBlobBackfillLeavesTheGaugeAlone(t *testing.T) {
@@ -121,6 +125,26 @@ func TestWarnBackfillIncompleteNamesFrontiersAndUnresolvedSlots(t *testing.T) {
 	}, handler.records[0].Ctx)
 }
 
+func TestWarnBackfillIncompleteOncePerInterval(t *testing.T) {
+	b, handler := newBackfillWarningDownloader()
+
+	warned := time.Now()
+	b.warnBackfillIncomplete()
+	b.warnBackfillIncomplete()
+
+	require.Len(t, handler.records, 1)
+	require.WithinDuration(t, warned.Add(blobBackfillWarningInterval), b.nextBackfillWarning, time.Second)
+}
+
+func TestWarnBackfillIncompleteSilentOnceCompleted(t *testing.T) {
+	b, handler := newBackfillWarningDownloader()
+	b.backfillCompleted.Store(true)
+
+	b.warnBackfillIncomplete()
+
+	require.Empty(t, handler.records)
+}
+
 // A pass that is still running has no unresolved slots yet; the frontiers alone describe it.
 func TestWarnBackfillIncompleteWithoutUnresolvedSlots(t *testing.T) {
 	b, handler := newBackfillWarningDownloader()
@@ -132,4 +156,31 @@ func TestWarnBackfillIncompleteWithoutUnresolvedSlots(t *testing.T) {
 		"currentSlot", uint64(15_300_001), "highestBackfilled", uint64(15_300_000),
 		"frozenBlobsTo", uint64(14_880_000), "frozenBlocksTo", uint64(15_220_000),
 	}, handler.records[0].Ctx)
+}
+
+func TestDownloadOnceWarnsWhileThePassRuns(t *testing.T) {
+	reader := &boundaryBlockReader{}
+	downloader := newBoundaryDownloader(t, blocksBatchSize, 0, 0, reader)
+	handler := &backfillLogHandler{}
+	downloader.logger.SetHandler(handler)
+	downloader.nextBackfillWarning = time.Now().Add(blobBackfillWarningInterval)
+
+	hasWarning := func() bool {
+		return slices.ContainsFunc(handler.records, func(r *log.Record) bool {
+			return r.Lvl == log.LvlWarn && strings.Contains(r.Msg, "Blob backfilling is not finished")
+		})
+	}
+	var warnedBySecondBatch bool
+	reader.onRead = func(slot uint64) {
+		switch slot {
+		case blocksBatchSize:
+			require.False(t, hasWarning(), "the first batch started before the warning deadline")
+			downloader.nextBackfillWarning = time.Time{}
+		case 0:
+			warnedBySecondBatch = hasWarning()
+		}
+	}
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.True(t, warnedBySecondBatch, "the warning was due when the second batch started")
 }
