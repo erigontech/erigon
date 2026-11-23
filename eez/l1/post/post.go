@@ -55,6 +55,10 @@ const (
 
 var errNoBundles = errors.New("builder has no eth_sendBundle")
 
+// ErrUnsure reports a send that failed without an answer refusing it: the
+// posting may have reached L1 all the same.
+var ErrUnsure = errors.New("posting may have reached L1")
+
 // L1 is the L1 node a poster reads from and sends to.
 type L1 interface {
 	ChainID(ctx context.Context) (uint64, error)
@@ -154,8 +158,9 @@ type Sent struct {
 	// Time is the timestamp the bundle is pinned to, zero when it is not; a
 	// bundle sent through the mempool is not.
 	Time uint64
-	// Pooled reports a bundle sent through the mempool, which may land after
-	// Block.
+	// Pooled reports a bundle that may be in the L1 node's pool and land
+	// after Block: one sent through the mempool, or one whose send failed
+	// without an answer.
 	Pooled bool
 }
 
@@ -163,7 +168,8 @@ type Sent struct {
 // builder without eth_sendBundle has them sent in order to the L1 node's pool
 // instead, which keeps neither their order nor the target and suits only a
 // development L1: the call refused there, or over the size a pool admits,
-// fails Send, a later transaction is left out.
+// fails Send, a later transaction is left out. A send failing without an
+// answer refusing it fails with ErrUnsure, the returned Sent describing it.
 func (p *Poster) Send(ctx context.Context, txs []types.Transaction, target Target) (Sent, error) {
 	if len(txs) == 0 {
 		return Sent{}, errors.New("bundle of no transactions")
@@ -184,6 +190,8 @@ func (p *Poster) Send(ctx context.Context, txs []types.Transaction, target Targe
 	switch {
 	case err == nil:
 		return Sent{Block: block, Time: target.Time}, nil
+	case errors.Is(err, ErrUnsure):
+		return Sent{Block: block, Pooled: true}, err
 	case !errors.Is(err, errNoBundles):
 		return Sent{}, err
 	}
@@ -195,12 +203,16 @@ func (p *Poster) Send(ctx context.Context, txs []types.Transaction, target Targe
 	p.logger.Warn("[eez] builder has no eth_sendBundle, sending through the mempool", "event", "eez.poster.mempool",
 		"block", block, "txs", len(raw))
 	for i, tx := range raw {
-		if err := p.node.SendRawTransaction(ctx, tx); err != nil {
-			if i == 0 {
-				return Sent{}, fmt.Errorf("mempool refused the posting: %w", err)
-			}
+		err := p.node.SendRawTransaction(ctx, tx)
+		switch {
+		case err == nil:
+		case i > 0:
 			p.logger.Warn("[eez] mempool refused a bundled transaction", "event", "eez.poster.mempool.refused",
 				"index", i, "hash", txs[i].Hash(), "err", err)
+		case errors.Is(err, l1.ErrRefused):
+			return Sent{}, fmt.Errorf("mempool refused the posting: %w", err)
+		default:
+			return Sent{Block: block, Pooled: true}, fmt.Errorf("%w: mempool: %w", ErrUnsure, err)
 		}
 	}
 	return Sent{Block: block, Pooled: true}, nil
@@ -228,10 +240,14 @@ func (p *Poster) bundle(ctx context.Context, raw [][]byte, block, time uint64) e
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("eth_sendBundle: %w", l1.RedactTransport(err))
+		return fmt.Errorf("%w: eth_sendBundle: %w", ErrUnsure, l1.RedactTransport(err))
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
+	switch {
+	case resp.StatusCode/100 == 5:
+		// A gateway may have passed the bundle on.
+		return fmt.Errorf("%w: eth_sendBundle: HTTP %s", ErrUnsure, resp.Status)
+	case resp.StatusCode/100 != 2:
 		return fmt.Errorf("eth_sendBundle: HTTP %s", resp.Status)
 	}
 	var answer struct {
@@ -241,7 +257,7 @@ func (p *Poster) bundle(ctx context.Context, raw [][]byte, block, time uint64) e
 		} `json:"error"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAnswer)).Decode(&answer); err != nil {
-		return fmt.Errorf("eth_sendBundle answer: %w", err)
+		return fmt.Errorf("%w: eth_sendBundle answer: %w", ErrUnsure, err)
 	}
 	switch {
 	case answer.Error == nil:

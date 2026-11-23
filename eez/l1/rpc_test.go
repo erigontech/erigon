@@ -185,6 +185,7 @@ func TestRPCTransportError(t *testing.T) {
 	r, err := l1.DialRPC(t.Context(), "http://"+addr, log.New())
 	require.NoError(t, err)
 	defer r.Close()
+	require.NotErrorIs(t, r.SendRawTransaction(t.Context(), []byte{0x02}), l1.ErrRefused, "no answer refuses it")
 	_, err = r.ChainID(t.Context())
 	// The system error's text and errno are the platform's.
 	require.True(t, strings.HasPrefix(err.Error(), "eth_chainId: dial tcp "+addr+": "), err.Error())
@@ -308,8 +309,13 @@ func (p *posting) GetTransactionByHash(_ context.Context, hash common.Hash) (map
 }
 
 func (p *posting) SendRawTransaction(_ context.Context, raw hexutil.Bytes) (common.Hash, error) {
-	if len(raw) == 0 {
+	switch {
+	case len(raw) == 0:
 		return common.Hash{}, errors.New("nonce too low")
+	case raw[0] == 0x01:
+		return common.Hash{}, errors.New("already known")
+	case raw[0] == 0x03:
+		return common.Hash{}, errors.New("existing txn with same hash")
 	}
 	p.sent = append(p.sent, raw)
 	return common.Hash{3}, nil
@@ -332,6 +338,9 @@ func TestRPCPosting(t *testing.T) {
 	require.Equal(t, []hexutil.Bytes{{0x02, 0xc0}}, p.sent)
 	err = r.SendRawTransaction(ctx, nil)
 	require.ErrorContains(t, err, "nonce too low")
+	require.ErrorIs(t, err, l1.ErrRefused, "the node answered")
+	require.NoError(t, r.SendRawTransaction(ctx, []byte{0x01}), "the pool holds it")
+	require.NoError(t, r.SendRawTransaction(ctx, []byte{0x03}), "the pool holds it")
 
 	receipt, err := r.Receipt(ctx, common.Hash{4})
 	require.NoError(t, err)

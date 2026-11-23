@@ -346,13 +346,20 @@ func (c *Composer) postBlocks(ctx context.Context, cursor uint64, blocks []*type
 	// A builder that hangs holds the bundle's verdict, not the chain.
 	c.wg.Go(func() {
 		sent, err := c.poster.Send(c.ctx, []types.Transaction{tx}, target)
-		if err != nil {
+		switch {
+		case errors.Is(err, post.ErrUnsure):
+			// Failing it would have the next posting take the following nonce
+			// from the same cursor while this one may still land.
+			c.logger.Warn("[eez] batch may have been sent, watching it", "event", "eez.composer.batch.unsure", "to", to, "post", hash,
+				"l1Block", sent.Block, "err", err)
+		case err != nil:
 			c.ledger.MarkFailed(to, hash, true)
 			c.logger.Warn("[eez] batch not sent", "event", "eez.composer.batch.unsent", "to", to, "post", hash, "err", err)
 			return
+		default:
+			c.logger.Info("[eez] batch posted", "event", "eez.composer.batch.posted", "from", cursor+1, "to", to, "post", hash,
+				"l1Block", sent.Block, "pinned", sent.Time != 0)
 		}
-		c.logger.Info("[eez] batch posted", "event", "eez.composer.batch.posted", "from", cursor+1, "to", to, "post", hash,
-			"l1Block", sent.Block, "pinned", sent.Time != 0)
 		c.observe(to, hash, batch, terminal, sent)
 	})
 	return nil

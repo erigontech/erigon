@@ -229,13 +229,28 @@ func (r *RPC) Balance(ctx context.Context, addr common.Address) (*uint256.Int, e
 	return balance, nil
 }
 
-// SendRawTransaction hands raw, a signed transaction, to the node's pool.
+// SendRawTransaction hands raw, a signed transaction, to the node's pool. A
+// pool already holding it is no error; an answer refusing it fails with
+// ErrRefused, which a request without an answer does not.
 func (r *RPC) SendRawTransaction(ctx context.Context, raw []byte) error {
 	var hash common.Hash
-	if err := r.client.CallContext(ctx, &hash, "eth_sendRawTransaction", hexutil.Bytes(raw)); err != nil {
+	err := r.client.CallContext(ctx, &hash, "eth_sendRawTransaction", hexutil.Bytes(raw))
+	if err == nil {
+		return nil
+	}
+	if _, answered := errors.AsType[rpc.Error](err); !answered {
 		return mapError(err, "send transaction")
 	}
-	return nil
+	if held(err) {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", ErrRefused, mapError(err, "send transaction"))
+}
+
+// held reports a pool's answer that it already holds the transaction.
+func held(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "already known") || strings.Contains(msg, "alreadyknown") || strings.Contains(msg, "same hash")
 }
 
 // HasTransaction reports whether the node has the transaction with hash,

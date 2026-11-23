@@ -22,6 +22,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -209,6 +210,9 @@ func (p *testPoster) Send(_ context.Context, txs []types.Transaction, target pos
 	defer p.mu.Unlock()
 	p.sends++
 	p.sent = append(p.sent, target)
+	if errors.Is(p.err, post.ErrUnsure) {
+		return post.Sent{Block: max(target.Block, 99), Pooled: true}, p.err
+	}
 	if p.err != nil {
 		return post.Sent{}, p.err
 	}
@@ -620,6 +624,28 @@ func TestComposerChunkReadsOnce(t *testing.T) {
 	require.Equal(t, [2]uint64{1, 4}, [2]uint64{h.prover.proven[0].from, h.prover.proven[0].to})
 	// The anchor's blocks, the chunk's below it, the cursor and the window's.
 	require.LessOrEqual(t, chain.reads.Load(), int64(sync+(sync-4)+1+4))
+}
+
+// TestComposerWatchesAnUnsureSend: a posting whose send failed without an
+// answer may have reached L1: it holds the gate while the node has it, and
+// fails once the node has lost it.
+func TestComposerWatchesAnUnsureSend(t *testing.T) {
+	node := &pooling{}
+	node.has.Store(true)
+	h := newHarness(t, newTestChain(t, 12), 12, node)
+	h.poster.fail(fmt.Errorf("%w: connection reset", post.ErrUnsure))
+	h.slot(t, 8, 50, sequencer.ModeSteady)
+	require.Eventually(t, func() bool { return node.asked.Load() > 20 }, 5*time.Second, time.Millisecond)
+	r, ok := h.resolution(8)
+	require.True(t, ok)
+	require.Equal(t, Pending, r)
+	h.poster.fail(nil)
+	h.slot(t, 12, 52, sequencer.ModeSteady)
+	require.Len(t, h.targets(t), 1, "the unsure posting holds the gate")
+	node.has.Store(false)
+	require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Failed }, 5*time.Second, time.Millisecond)
+	h.slot(t, 12, 52, sequencer.ModeSteady)
+	require.Len(t, h.targets(t), 2)
 }
 
 // TestComposerFallsBackFromAFreshCursor: the chunk replacing a failed anchor

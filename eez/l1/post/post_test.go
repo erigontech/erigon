@@ -47,10 +47,11 @@ type node struct {
 	baseFee *uint256.Int
 	balance *uint256.Int
 	failed  error
-	// refuse fails the sends with these indexes.
-	refuse map[int]bool
-	sends  int
-	sent   [][]byte
+	// refuse fails the sends with these indexes with a refusal, down
+	// without an answer.
+	refuse, down map[int]bool
+	sends        int
+	sent         [][]byte
 }
 
 func (n *node) ChainID(context.Context) (uint64, error) { return 3151908, nil }
@@ -76,7 +77,10 @@ func (n *node) SendRawTransaction(_ context.Context, raw []byte) error {
 	i := n.sends
 	n.sends++
 	if n.refuse[i] {
-		return fmt.Errorf("transaction %d refused", i)
+		return fmt.Errorf("%w: transaction %d refused", l1.ErrRefused, i)
+	}
+	if n.down[i] {
+		return fmt.Errorf("transaction %d: connection reset", i)
 	}
 	n.sent = append(n.sent, raw)
 	return nil
@@ -191,7 +195,10 @@ func TestSend(t *testing.T) {
 		status  int
 		answer  string
 		refuse  map[int]bool
+		down    map[int]bool
+		dead    bool   // the builder does not listen
 		params  string // the bundle's request params; empty when none is sent
+		unsure  bool   // the error leaves the posting possibly sent
 		sent    Sent
 		mempool int // transactions the mempool took
 		tries   int // transactions sent to the mempool
@@ -219,7 +226,19 @@ func TestSend(t *testing.T) {
 		},
 		{
 			name: "builder failure", txs: 1, target: Target{Block: 100}, status: http.StatusBadGateway,
-			params: `{"txs":["%s"],"blockNumber":"0x64"}`, err: "502",
+			params: `{"txs":["%s"],"blockNumber":"0x64"}`, err: "502", unsure: true, sent: Sent{Block: 100, Pooled: true},
+		},
+		{
+			name: "builder refuses the request", txs: 1, target: Target{Block: 100}, status: http.StatusBadRequest,
+			params: `{"txs":["%s"],"blockNumber":"0x64"}`, err: "400",
+		},
+		{
+			name: "unreadable answer", txs: 1, target: Target{Block: 100}, answer: `{"jsonrpc":`,
+			params: `{"txs":["%s"],"blockNumber":"0x64"}`, err: "answer", unsure: true, sent: Sent{Block: 100, Pooled: true},
+		},
+		{
+			name: "builder unreachable", txs: 1, target: Target{Block: 100}, dead: true,
+			err: "eth_sendBundle", unsure: true, sent: Sent{Block: 100, Pooled: true},
 		},
 		{
 			name: "mempool", txs: 2, target: Target{Block: 100, Time: 1234}, answer: unsupported,
@@ -228,6 +247,10 @@ func TestSend(t *testing.T) {
 		{
 			name: "mempool refuses the call", txs: 2, target: Target{Block: 100}, answer: unsupported, refuse: map[int]bool{0: true},
 			params: `{"txs":["%s","%s"],"blockNumber":"0x64"}`, tries: 1, err: "transaction 0 refused",
+		},
+		{
+			name: "mempool unreachable", txs: 2, target: Target{Block: 100}, answer: unsupported, down: map[int]bool{0: true},
+			params: `{"txs":["%s","%s"],"blockNumber":"0x64"}`, tries: 1, err: "connection reset", unsure: true, sent: Sent{Block: 100, Pooled: true},
 		},
 		{
 			name: "mempool refuses a later one", txs: 2, target: Target{Block: 100}, answer: unsupported, refuse: map[int]bool{1: true},
@@ -245,8 +268,12 @@ func TestSend(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			b := &builder{status: c.status, answer: c.answer}
-			n := &node{head: 98, baseFee: uint256.NewInt(gwei), balance: uint256.NewInt(1 << 62), refuse: c.refuse}
-			p := poster(t, n, serve(t, b))
+			n := &node{head: 98, baseFee: uint256.NewInt(gwei), balance: uint256.NewInt(1 << 62), refuse: c.refuse, down: c.down}
+			url := serve(t, b)
+			if c.dead {
+				url = "http://127.0.0.1:1"
+			}
+			p := poster(t, n, url)
 			var txs []types.Transaction
 			var raw []any
 			for i := range c.txs {
@@ -269,6 +296,10 @@ func TestSend(t *testing.T) {
 			}
 			if c.err != "" {
 				require.ErrorContains(t, err, c.err)
+				require.Equal(t, c.unsure, errors.Is(err, ErrUnsure), "unsure")
+				if c.unsure {
+					require.Equal(t, c.sent, sent)
+				}
 			} else {
 				require.NoError(t, err)
 				require.Equal(t, c.sent, sent)
