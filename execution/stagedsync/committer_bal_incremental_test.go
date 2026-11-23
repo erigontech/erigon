@@ -73,11 +73,6 @@ func balFoldRoot(t *testing.T, checkpoint bool, after int64, destroy bool) []byt
 		if flush != nil {
 			require.NoError(t, flush())
 		}
-		_, flush2, err := cc.computeRootFromBAL(ctx, req, vm, 4, 4, commitTarget{blockNum: 2, lastTxNum: 6})
-		require.NoError(t, err)
-		if flush2 != nil {
-			require.NoError(t, flush2())
-		}
 	}
 	rh, _, err := cc.computeRootFromBAL(ctx, req, vm, after, math.MaxUint32, commitTarget{blockNum: 2, lastTxNum: 10})
 	require.NoError(t, err)

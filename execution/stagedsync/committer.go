@@ -788,8 +788,9 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 	return after, nil
 }
 
-// computeRootFromBAL folds the BAL block's touched keys (up to maxTxIndex) straight
-// from its BAL-seeded version map via emitTouched, into a fresh updates buffer, and
+// computeRootFromBAL folds the BAL block's keys whose latest change at or before maxTxIndex is
+// after afterTxIndex (all of them when afterTxIndex < 0) straight from its BAL-seeded version
+// map via emitTouched, into a fresh updates buffer, and
 // computes the root at t. Shared by the block-end compute-ahead and the mid-block step
 // checkpoints so the two can't drift. The BAL supplies the touched-key set; every value
 // (and the seeded EIP-161 removal) is read from the version map view.
@@ -805,7 +806,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 		cc.balUpdates.Reset()
 	}
 	balUpdates := cc.balUpdates
-	// A block's later folds keep the touched set and storage wipes of its earlier ones, as the per-tx mid-block path does.
+	// Every fold starts with an empty touched set; a block's later folds keep only the storage wipes (wipedAt) of its earlier ones, as the per-tx mid-block path does.
 	if afterTxIndex < 0 {
 		cc.clearTouched()
 	} else {
