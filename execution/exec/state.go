@@ -381,7 +381,7 @@ func (rw *WorkerContext) newRunState(txTask Task) *state.IntraBlockState {
 	if rw.prevBlockReg != nil {
 		reader = state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg)
 	}
-	return state.AcquireExec(reader, txTask.BlockState())
+	return state.AcquireExec(reader, txTask.BlockState(), txTask.Version().BlockNum, txTask.Version().TxIndex)
 }
 
 func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {

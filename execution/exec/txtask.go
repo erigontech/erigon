@@ -433,11 +433,9 @@ func (t *TxTask) IsHistoric() bool {
 // taskVersion overrides this with the block's shared store.
 func (t *TxTask) BlockState() *state.BlockState { return nil }
 
-// Reset configures evm/ibs for this task. The per-run state is acquired clean, so it is
-// not reset here; it only receives this task's context and EVM block/tx setup.
+// Reset configures evm/ibs for this task. The per-run state is acquired already bound to
+// this task's (blockNum, txIndex) context, so Reset only does the EVM block/tx setup.
 func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
-	ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
-
 	if t.TxIndex != -1 && !t.IsBlockEnd() {
 		var vmCfg vm.Config
 		if callTracer != nil {

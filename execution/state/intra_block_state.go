@@ -390,11 +390,12 @@ func ReleasePooled(ibs *IntraBlockState) {
 	ibs.Close()
 }
 
-// AcquireExec returns a pooled state for one transaction's execution on the parallel
-// path (conflict detection on, unlike NewPooled), bound to the block's shared store bs
-// (a private empty store when bs is nil). Release it with ReleaseExec once the result's
-// reads/writes are extracted.
-func AcquireExec(stateReader StateReader, bs *BlockState) *IntraBlockState {
+// AcquireExec returns a pooled state constructed for one transaction's execution on the
+// parallel path (conflict detection on, unlike NewPooled), bound to the block's shared
+// store bs (a private empty store when bs is nil) and to the transaction's (blockNum,
+// txIndex) context. Release it with ReleaseExec once the result's reads/writes are
+// extracted.
+func AcquireExec(stateReader StateReader, bs *BlockState, blockNum uint64, txIndex int) *IntraBlockState {
 	if bs == nil {
 		bs = NewBlockState(nil)
 	}
@@ -404,8 +405,8 @@ func AcquireExec(stateReader StateReader, bs *BlockState) *IntraBlockState {
 	} else {
 		ibs.stateReader = stateReader
 		ibs.codeAccess, _ = stateReader.(codeAccessTracker)
-		ibs.SetTxContext(0, 0)
 	}
+	ibs.SetTxContext(blockNum, txIndex)
 	ibs.blockState = bs
 	return ibs
 }
