@@ -26,7 +26,7 @@ func (x *RPCTransaction) MarshalFastJSONTo(s *jsonstream.Stream) error {
 
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
 func (x *RPCTransaction) writeJSONFields(s *jsonstream.Stream) error {
-	if len(x.NonceKeys) > 0 {
+	if x.NonceKeys != nil {
 		s.Field("nonceKeys")
 		if err := x.NonceKeys.MarshalFastJSONTo(s); err != nil {
 			return err
@@ -64,12 +64,17 @@ func (x *RPCTransaction) writeJSONFields(s *jsonstream.Stream) error {
 	}
 	ethjson.Data(s, "from", x.From[:])
 	ethjson.Quantity(s, "gas", x.Gas)
-	ethjson.Quantity256(s, "gasPrice", (*uint256.Int)(&x.GasPrice))
+	if x.GasPrice != nil {
+		ethjson.Quantity256(s, "gasPrice", (*uint256.Int)(x.GasPrice))
+	}
 	if x.MaxPriorityFeePerGas != nil {
 		ethjson.Quantity256(s, "maxPriorityFeePerGas", (*uint256.Int)(x.MaxPriorityFeePerGas))
 	}
 	if x.MaxFeePerGas != nil {
 		ethjson.Quantity256(s, "maxFeePerGas", (*uint256.Int)(x.MaxFeePerGas))
+	}
+	if x.MaxFee != nil {
+		ethjson.Quantity256(s, "maxFee", (*uint256.Int)(x.MaxFee))
 	}
 	ethjson.Data(s, "hash", x.Hash[:])
 	ethjson.Data(s, "input", x.Input[:])

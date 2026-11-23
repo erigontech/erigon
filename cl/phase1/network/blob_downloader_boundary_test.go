@@ -22,6 +22,7 @@ import (
 	"slices"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -370,24 +371,26 @@ func TestBlobHistoryDownloaderRetryRechecksPeersBeforeDenebRequest(t *testing.T)
 }
 
 func TestBlobHistoryDownloaderRechecksPeersBeforeFuluRecovery(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
-	peerDas := mock_services.NewMockPeerDas(ctrl)
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
-	block.Block.Slot = 20
-	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
-	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
-	downloader := newBoundaryDownloader(t, block.GetSlot(), 0, block.GetSlot(), &boundaryBlockReader{block: block})
-	peers := &boundarySequencePeerCounter{counts: []uint64{1, 1, 0}}
-	downloader.rpc = peers
-	downloader.blobStorage = blobStorage
-	downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
-	downloader.columnBackfillTimeout = time.Second
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+		blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+		peerDas := mock_services.NewMockPeerDas(ctrl)
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+		block.Block.Slot = 20
+		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+		downloader := newBoundaryDownloader(t, block.GetSlot(), 0, block.GetSlot(), &boundaryBlockReader{block: block})
+		peers := &boundarySequencePeerCounter{counts: []uint64{1, 1, 0}}
+		downloader.rpc = peers
+		downloader.blobStorage = blobStorage
+		downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
+		downloader.columnBackfillTimeout = time.Second
 
-	require.NoError(t, downloader.downloadOnce(false))
-	require.GreaterOrEqual(t, peers.calls, 3)
-	require.Equal(t, []blobRetryRange{{start: block.GetSlot(), end: block.GetSlot(), cursor: block.GetSlot()}}, downloader.retryRanges)
+		require.NoError(t, downloader.downloadOnce(false))
+		require.GreaterOrEqual(t, peers.calls, 3)
+		require.Equal(t, []blobRetryRange{{start: block.GetSlot(), end: block.GetSlot(), cursor: block.GetSlot()}}, downloader.retryRanges)
+	})
 }
 
 func TestBlobHistoryDownloaderLocalOnlyPassChecksPeersOnce(t *testing.T) {
