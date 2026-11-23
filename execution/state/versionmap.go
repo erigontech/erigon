@@ -1731,14 +1731,15 @@ type cellMarks struct {
 	locked map[accounts.Address]struct{}
 	// A lock-free mark on a stamped map runs inside one mutBegin of the write set's tx, which
 	// ends with a stamp only if a marked entry has lifecycle cells.
-	stamping, lifecycle bool
+	stampTx   int
+	lifecycle bool
 }
 
 func (vm *VersionMap) markWrites(writes *WriteSet, flag statusFlag, isFeeRecipient func(accounts.Address) bool) {
 	if writes == nil {
 		return
 	}
-	m := cellMarks{vm: vm, flag: flag, fee: isFeeRecipient}
+	m := cellMarks{vm: vm, flag: flag, fee: isFeeRecipient, stampTx: UnknownDep}
 	for addr, vw := range writes.address {
 		markCell(&m, addr, vw)
 	}
@@ -1779,11 +1780,11 @@ func (vm *VersionMap) markWrites(writes *WriteSet, flag statusFlag, isFeeRecipie
 	for addr := range m.locked {
 		vm.markAccountLocked(addr, writes, flag)
 	}
-	if m.stamping {
+	if m.stampTx != UnknownDep {
 		if m.lifecycle {
-			vm.mutEnd(writes.txIndex())
+			vm.mutEnd(m.stampTx)
 		} else {
-			vm.mutAbort(writes.txIndex())
+			vm.mutAbort(m.stampTx)
 		}
 	}
 }
@@ -1797,9 +1798,9 @@ func markCell[T any](m *cellMarks, addr accounts.Address, vw *VersionedWrite[T])
 		m.lock(addr)
 		return
 	}
-	if m.vm.stamps != nil && !m.stamping {
+	if m.vm.stamps != nil && m.stampTx == UnknownDep {
 		m.vm.mutBegin(vw.Version.TxIndex)
-		m.stamping = true
+		m.stampTx = vw.Version.TxIndex
 	}
 	want := vw.Version.Incarnation
 	if m.flag == FlagDone {
