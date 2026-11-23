@@ -77,3 +77,77 @@ func TestBeaconBodyJSONKeepsValidAttesterSlashingForkLimits(t *testing.T) {
 		})
 	}
 }
+
+func TestIndexedAttestationJSONRejectsNullData(t *testing.T) {
+	signature := `"signature":"0x` + strings.Repeat("0", 192) + `"`
+	for _, tc := range []struct {
+		name  string
+		input string
+	}{
+		{name: "null", input: `{"attesting_indices":["1"],"data":null,` + signature + `}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			att := NewIndexedAttestation(clparams.FuluVersion)
+
+			require.ErrorContains(t, json.Unmarshal([]byte(tc.input), att), "data")
+		})
+	}
+}
+
+func TestProposerSlashingJSONRejectsIncompleteHeaders(t *testing.T) {
+	zeroRoot := `"0x` + strings.Repeat("0", 64) + `"`
+	signature := `"signature":"0x` + strings.Repeat("0", 192) + `"`
+	header := `{"message":{"slot":"1","proposer_index":"0","parent_root":` + zeroRoot +
+		`,"state_root":` + zeroRoot + `,"body_root":` + zeroRoot + `},` + signature + `}`
+	for _, tc := range []struct {
+		name  string
+		input string
+	}{
+		{name: "missing signed_header_1", input: `{"signed_header_2":` + header + `}`},
+		{name: "missing signed_header_2", input: `{"signed_header_1":` + header + `}`},
+		{name: "null signed_header_1", input: `{"signed_header_1":null,"signed_header_2":` + header + `}`},
+		{name: "null signed_header_2", input: `{"signed_header_1":` + header + `,"signed_header_2":null}`},
+		{name: "missing message", input: `{"signed_header_1":{` + signature + `},"signed_header_2":` + header + `}`},
+		{name: "null message", input: `{"signed_header_1":` + header + `,"signed_header_2":{"message":null,` + signature + `}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var slashing ProposerSlashing
+
+			require.Error(t, json.Unmarshal([]byte(tc.input), &slashing))
+		})
+	}
+}
+
+func TestBeaconBodyJSONRejectsOversizedAttesterSlashings(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxValidatorsPerCommittee = 2
+	cfg.MaxCommitteesPerSlot = 2
+	for _, tc := range []struct {
+		version clparams.StateVersion
+		count   int
+	}{
+		{version: clparams.DenebVersion, count: attestingIndicesLimit + 1},
+		{version: clparams.ElectraVersion, count: 5},
+		{version: clparams.FuluVersion, count: 5},
+	} {
+		for _, field := range []string{"attestation_1", "attestation_2"} {
+			t.Run(tc.version.String()+"/"+field, func(t *testing.T) {
+				block := NewSignedBeaconBlock(&cfg, tc.version)
+				slashing := NewAttesterSlashing(tc.version)
+				att := slashing.Attestation_1
+				if field == "attestation_2" {
+					att = slashing.Attestation_2
+				}
+				for i := range tc.count {
+					att.AttestingIndices.Append(uint64(i))
+				}
+				block.Block.Body.AttesterSlashings.Append(slashing)
+				data, err := json.Marshal(block)
+				require.NoError(t, err)
+
+				decoded := NewSignedBeaconBlock(&cfg, tc.version)
+				require.ErrorContains(t, json.Unmarshal(data, decoded), "attesting indices exceed limit")
+			})
+		}
+	}
+}

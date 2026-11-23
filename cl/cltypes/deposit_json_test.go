@@ -38,3 +38,22 @@ func TestDepositUnmarshalJSONRejectsOversizedProof(t *testing.T) {
 	var deposit cltypes.Deposit
 	require.Error(t, json.Unmarshal(encoded, &deposit))
 }
+
+func TestDepositUnmarshalJSONRejectsNullFields(t *testing.T) {
+	for _, input := range []string{
+		`{"proof":null,"data":{}}`,
+		`{"proof":[],"data":null}`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			var deposit cltypes.Deposit
+			require.ErrorContains(t, json.Unmarshal([]byte(input), &deposit), "null")
+		})
+	}
+}
+
+func TestDepositUnmarshalJSONAcceptsOmittedFields(t *testing.T) {
+	var deposit cltypes.Deposit
+	require.NoError(t, json.Unmarshal([]byte(`{}`), &deposit))
+	require.NotNil(t, deposit.Proof)
+	require.NotNil(t, deposit.Data)
+}
