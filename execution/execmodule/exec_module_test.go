@@ -886,14 +886,18 @@ func TestUpdateForkChoiceBelowSnapshotState(t *testing.T) {
 
 func TestSetHeadWaitsForStateFilePublication(t *testing.T) {
 	const stepSize = 16
-	m, chainPack := newExecutedTransferChain(t, execmoduletester.WithStepSize(stepSize), execmoduletester.WithAlwaysGenerateChangesets(true))
+	ctx := t.Context()
+	m, chainPack := newExecutedTransferChain(t,
+		execmoduletester.WithStepSize(stepSize),
+		execmoduletester.WithMaxReorgDepth(96),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+	)
 	m.ExecModule.Drain()
 	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	agg.WaitForFiles()
 	var lastFileBlock uint64
-	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
-		require.Zero(t, tx.Debug().TxNumsInFiles(kv.AccountsDomain))
-		block, found, err := m.BlockReader.TxnumReader().FindBlockNum(t.Context(), tx, stepSize-1)
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		block, found, err := m.BlockReader.TxnumReader().FindBlockNum(ctx, tx, stepSize-1)
 		require.NoError(t, err)
 		require.True(t, found)
 		require.Positive(t, block)
@@ -914,13 +918,30 @@ func TestSetHeadWaitsForStateFilePublication(t *testing.T) {
 	})
 	defer agg.SetMaintenanceObserver(nil)
 	defer allowPublication()
-	finality := execfinality.NewContext(chainPack.TopBlock.NumberU64(), lastFileBlock, 0, false, m.BlockReader.TxnumReader())
-	finished := m.DB.BuildFilesInBackground(finality)
+
+	// Finalize the block containing the step's last transaction so the step can be built.
+	// Pruning keeps that block's changeset, so the old snapshot view still allows a rewind to its parent.
+	finalizedHash := chainPack.Blocks[lastFileBlock-1].Hash()
+	fcu, err := m.UpdateForkChoice(ctx, chainPack.TopBlock.Header(),
+		execmoduletester.WithSafeHash(finalizedHash),
+		execmoduletester.WithFinalisedHash(finalizedHash),
+	)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	finished, err := m.ExecModule.Prune(ctx)
+	require.NoError(t, err)
 	select {
 	case <-built:
 	case <-finished:
 		t.Fatal("the build finished without producing the first snapshot step")
 	}
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		require.Zero(t, tx.FreezeInfo().ValueFilesEndTxNum())
+		oldestChangeset, err := changeset.ReadLowestUnwindableBlock(tx)
+		require.NoError(t, err)
+		require.Equal(t, lastFileBlock, oldestChangeset, "the finalized block must have the oldest remaining changeset")
+		return nil
+	}))
 
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
@@ -936,12 +957,12 @@ func TestSetHeadWaitsForStateFilePublication(t *testing.T) {
 	})
 	allowPublication()
 	<-finished
-	require.ErrorContains(t, m.ExecModule.SetHead(t.Context(), lastFileBlock-1), fmt.Sprintf("minimum unwindable block is %d", lastFileBlock))
-	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+	require.ErrorContains(t, m.ExecModule.SetHead(ctx, lastFileBlock-1), fmt.Sprintf("minimum unwindable block is %d", lastFileBlock))
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
 		require.Equal(t, chainPack.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 		return nil
 	}))
-	require.NoError(t, m.ExecModule.SetHead(t.Context(), lastFileBlock))
+	require.NoError(t, m.ExecModule.SetHead(ctx, lastFileBlock))
 }
 
 func truncateTxNumsBelowCommitment(t *testing.T, m *execmoduletester.ExecModuleTester, invalidExecutionProgress, keepChangesets bool) uint64 {
