@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1537,4 +1538,21 @@ func TestClearTableUnknownNameKeepsGC(t *testing.T) {
 	gcAfter, err := tx.(*mdbx.MdbxTx).BucketStat("gc")
 	require.NoError(t, err)
 	require.Equal(t, gcBefore.Entries, gcAfter.Entries)
+}
+
+func TestSpaceDirtyWriteTxMatchesReaderScan(t *testing.T) {
+	db := BaseCaseDB(t)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for i := range 1000 {
+		require.NoError(t, tx.Put("Table", fmt.Appendf(nil, "key%04d", i), fmt.Appendf(nil, "value%04d", i)))
+	}
+
+	dirty, _, err := tx.(*mdbx.MdbxTx).SpaceDirty()
+	require.NoError(t, err)
+	scanned, err := mdbx.ScannedSpaceDirty(tx.(*mdbx.MdbxTx))
+	require.NoError(t, err)
+	require.Positive(t, dirty)
+	require.Equal(t, scanned, dirty)
 }

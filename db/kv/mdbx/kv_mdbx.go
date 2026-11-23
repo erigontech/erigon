@@ -1530,7 +1530,7 @@ func (tx *MdbxTx) Rollback() {
 }
 
 func (tx *MdbxTx) SpaceDirty() (uint64, uint64, error) {
-	txInfo, err := tx.tx.Info(true)
+	txInfo, err := tx.tx.Info(tx.readOnly)
 	if err != nil {
 		return 0, 0, err
 	}
