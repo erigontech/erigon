@@ -23,11 +23,10 @@ import (
 )
 
 type depsTest struct {
-	t         *testing.T
-	pe        *parallelExecutor
-	be        *blockExecutor
-	deliverTx func(tx, inc int, reads state.ReadSet)
-	// accountReads counts the accounts the scheduler read from the DB.
+	t            *testing.T
+	pe           *parallelExecutor
+	be           *blockExecutor
+	deliverTx    func(tx, inc int, reads state.ReadSet)
 	accountReads map[common.Address]int
 }
 
@@ -245,8 +244,6 @@ func TestChargedValueTransferDoesNotWaitForRecipient(t *testing.T) {
 	}
 }
 
-// Whether a transfer credits its recipient at validation only decides whether it waits for the
-// recipient's previous tx, so the recipient is read only when a lower tx touched it.
 func TestChargedValueTransferReadsRecipientOnlyAfterALowerTxTouchedIt(t *testing.T) {
 	a := accounts.InternAddress(common.HexToAddress("0xa0"))
 	b := accounts.InternAddress(common.HexToAddress("0xb1"))
