@@ -813,6 +813,10 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]any, er
 
 	results := make([]map[string]any, 0, len(blocks))
 	for _, block := range blocks {
+		response, err := api.marshalBlock(ctx, tx, block, true, false)
+		if err != nil {
+			return nil, err
+		}
 		var blockRlp string
 		if rlpBytes, err := rlp.EncodeToBytes(block); err != nil {
 			blockRlp = err.Error() // hack
@@ -822,7 +826,7 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]any, er
 
 		results = append(results, map[string]any{
 			"hash":  block.Hash(),
-			"block": ethapi.RPCMarshalBlock(block, true, true),
+			"block": response,
 			"rlp":   blockRlp,
 		})
 	}
@@ -872,7 +876,7 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 // MemStats returns detailed runtime memory statistics.
 func (api *DebugAPIImpl) MemStats() *runtime.MemStats {
 	s := new(runtime.MemStats)
-	runtime.ReadMemStats(s)
+	runtime.ReadMemStats(s) //nolint:forbidigo // The debug RPC returns the full runtime snapshot.
 	return s
 }
 

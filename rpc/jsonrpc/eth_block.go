@@ -246,12 +246,38 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if b == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
-	response := ethapi.RPCMarshalBlock(b, true, fullTx)
+	response, err := api.marshalBlock(ctx, tx, b, fullTx, number != rpc.PendingBlockNumber)
+	if err != nil {
+		return nil, err
+	}
 	if number == rpc.PendingBlockNumber {
 		response.MarkPending()
 	}
 
 	return response, nil
+}
+
+func (api *BaseAPI) marshalBlock(ctx context.Context, tx kv.TemporalTx, block *types.Block, fullTx, useReceipts bool) (*ethapi.RPCBlock, error) {
+	if fullTx {
+		for i, txn := range block.Transactions() {
+			if txn.Type() != types.FrameTxType {
+				continue
+			}
+			blobFee, err := api.frameBlobBaseFee(ctx, tx, block.HeaderNoCopy(), block.Transactions()[i:]...)
+			if err != nil {
+				return nil, err
+			}
+			var receipts types.Receipts
+			if useReceipts {
+				receipts, err = api.canonicalReceiptsGasUsed(ctx, tx, block)
+				if err != nil {
+					return nil, err
+				}
+			}
+			return ethapi.RPCMarshalBlockWithFramePrices(block, true, true, blobFee, receipts), nil
+		}
+	}
+	return ethapi.RPCMarshalBlock(block, true, fullTx), nil
 }
 
 // GetHeaderByNumber implements eth_getHeaderByNumber. Returns a block's header given a block
@@ -336,7 +362,10 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 	number := block.NumberU64()
 
-	response := ethapi.RPCMarshalBlock(block, true, fullTx)
+	response, err := api.marshalBlock(ctx, tx, block, fullTx, true)
+	if err != nil {
+		return nil, err
+	}
 	if int64(number) == rpc.PendingBlockNumber.Int64() {
 		response.MarkPending()
 	}

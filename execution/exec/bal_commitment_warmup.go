@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	commitmentv3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -409,6 +410,39 @@ func prefetchBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList
 func prefetchBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte) {
 	started := time.Now()
 	logBatchPrefetch(ctx, "trie", len(keys), started, prefetchCommitment(ctx, db, keys))
+}
+
+// prefetchBALCommitmentV3 reads into the page cache, in io_uring batches, the flat levels of the BAL's v3 trie paths, so
+// the committer's per-key branch prefetch finds them resident.
+func prefetchBALCommitmentV3(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) {
+	started := time.Now()
+	var keys [][]byte
+	var err error
+	txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) {
+		p, ok := ttx.AggTx().(latestPrefetcher)
+		if !ok {
+			return
+		}
+		sampled := sampleEvenly(hashedKeys, residencySampleKeys)
+		cold, sampleErr := sampleCold(ctx, p, kv.CommitmentDomain, v3TrieKeys(sampled))
+		logSampleFailure(kv.CommitmentDomain, sampleErr)
+		if sampleErr != nil || !cold || len(sampled) == len(hashedKeys) {
+			return
+		}
+		keys = v3TrieKeys(hashedKeys)
+		err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, keys)
+	})
+	logBatchPrefetch(ctx, "trie", len(keys), started, cmp.Or(txErr, err))
+}
+
+// v3TrieKeys returns the distinct v3 node keys of the flat levels of the paths of hashedKeys.
+func v3TrieKeys(hashedKeys [][]byte) [][]byte {
+	var keys [][]byte
+	for _, hk := range hashedKeys {
+		keys = commitmentv3.PathNodeKeys(keys, hk, prefetchFlatDepth)
+	}
+	slices.SortFunc(keys, bytes.Compare)
+	return slices.CompactFunc(keys, bytes.Equal)
 }
 
 func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte) error {
