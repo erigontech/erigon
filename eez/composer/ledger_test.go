@@ -42,6 +42,25 @@ func blocking(t *testing.T, l *Ledger[int], cursor uint64) uint64 {
 }
 
 func TestLedger(t *testing.T) {
+	t.Run("a settlement whose posting left L1 is pending again", func(t *testing.T) {
+		l := NewLedger[int]()
+		begin(l, 10, 0xa)
+		require.False(t, l.Repend(10, posting(0xa)), "pending")
+		l.MarkSettled(10, posting(0xa))
+		require.False(t, l.Repend(10, posting(0xb)), "another posting")
+		require.True(t, l.Repend(10, posting(0xa)))
+		require.Equal(t, uint64(10), blocking(t, l, 5))
+		require.Empty(t, l.SettledAbove(5))
+		// Confirmed, then rolled out by an L1 reorg.
+		l.MarkSettled(10, posting(0xa))
+		l.ResolveBelowCursor(10)
+		require.Len(t, l.RolledOut(5), 1)
+		require.True(t, l.Repend(10, posting(0xa)))
+		require.Empty(t, l.RolledOut(5))
+		require.Equal(t, uint64(10), blocking(t, l, 5))
+		l.MarkFailed(10, posting(0xa), false)
+		require.False(t, l.Repend(10, posting(0xa)), "failed")
+	})
 	t.Run("finality hands out only landed postings as landed", func(t *testing.T) {
 		landed := func(f func(l *Ledger[int])) bool {
 			l := NewLedger[int]()

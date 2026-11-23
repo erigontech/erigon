@@ -479,6 +479,9 @@ func TestComposerRecovers(t *testing.T) {
 		h.cursor.Store(8)
 		h.c.RecoverFailed(t.Context())
 		h.cursor.Store(4)
+		h.c.RecoverFailed(t.Context())
+		// Off L1 and out of the node's pool, its posting fails.
+		require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Failed }, 5*time.Second, time.Millisecond)
 		h.slot(t, 12, 52, sequencer.ModeSteady)
 		require.Len(t, h.targets(t), 2)
 		h.requireWindow(t, 1, 5, 12, post.Target{Block: 52, Time: h.chain.header(12).Time})
@@ -623,12 +626,14 @@ func TestComposerChunkWithinTheGasLimit(t *testing.T) {
 	require.Equal(t, post.Target{Block: 50}, h.targets(t)[0])
 }
 
-// landing is an L1 on which postings settle at terminal until it drops them
-// or, reorged, includes them again as again has them.
+// landing is an L1 on which postings settle at terminal until it drops them,
+// back to its pool when pooled, or, reorged, includes them again as again
+// has them.
 type landing struct {
 	t        *testing.T
 	terminal atomic.Pointer[common.Hash]
 	gone     atomic.Bool
+	pooled   atomic.Bool
 	again    atomic.Pointer[func() *l1.Receipt]
 	asked    atomic.Int64
 }
@@ -636,7 +641,7 @@ type landing struct {
 func (l *landing) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1}, nil }
 
 func (l *landing) HasTransaction(context.Context, common.Hash) (bool, error) {
-	return !l.gone.Load(), nil
+	return !l.gone.Load() || l.pooled.Load(), nil
 }
 
 func (l *landing) Receipt(context.Context, common.Hash) (*l1.Receipt, error) {
@@ -680,13 +685,45 @@ func TestComposerSettlementLeftL1(t *testing.T) {
 			h.slot(t, 12, 52, sequencer.ModeSteady)
 			require.Len(t, h.targets(t), 1, "the settlement holds the gate while on L1")
 			leave(node)
-			h.c.RecoverFailed(t.Context())
-			_, ok := h.resolution(8)
-			require.False(t, ok, "dropped")
+			require.Eventually(t, func() bool {
+				h.c.RecoverFailed(t.Context())
+				_, ok := h.resolution(8)
+				return !ok
+			}, 5*time.Second, time.Millisecond, "dropped")
 			h.c.ComposeSyncSlot(t.Context(), h.chain.header(11), h.chain.header(12).Time, 52, sequencer.ModeSteady)
 			h.c.SyncCommitted(t.Context(), h.chain.header(12))
 			require.Len(t, h.targets(t), 2)
 			h.requireWindow(t, 1, 1, 12, post.Target{Block: 52, Time: h.chain.header(12).Time})
+		})
+	}
+}
+
+// TestComposerSettlementBackInThePool: a settlement whose posting an L1 reorg
+// returned to the node's pool holds the gate, its nonce taken, until it
+// lands again.
+func TestComposerSettlementBackInThePool(t *testing.T) {
+	for name, seen := range map[string]bool{"before derivation saw it": false, "after derivation saw it": true} {
+		t.Run(name, func(t *testing.T) {
+			chain := newTestChain(t, 12)
+			node := newLanding(t, chain.blocks[8].Hash())
+			h := newHarness(t, chain, 12, node)
+			h.slot(t, 8, 50, sequencer.ModeSteady)
+			require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Settled }, 5*time.Second, time.Millisecond)
+			if seen {
+				h.cursor.Store(8)
+				h.c.RecoverFailed(t.Context())
+				h.cursor.Store(4)
+			}
+			node.pooled.Store(true)
+			node.gone.Store(true)
+			h.c.RecoverFailed(t.Context())
+			r, ok := h.resolution(8)
+			require.True(t, ok)
+			require.Equal(t, Pending, r)
+			h.slot(t, 12, 52, sequencer.ModeSteady)
+			require.Len(t, h.targets(t), 1, "the posting back in the pool holds the gate")
+			node.gone.Store(false)
+			require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Settled }, 5*time.Second, time.Millisecond)
 		})
 	}
 }

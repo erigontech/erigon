@@ -313,21 +313,27 @@ func (c *Composer) post(ctx context.Context, cursor uint64, terminal *types.Head
 		}
 		c.logger.Info("[eez] batch posted", "event", "eez.composer.batch.posted", "from", cursor+1, "to", to, "post", hash,
 			"l1Block", sent.Block, "pinned", sent.Time != 0)
-		verdict, err := c.observer.Watch(c.ctx, hash, batch, terminal.Hash(), sent)
-		if err != nil {
-			return
-		}
-		switch verdict {
-		case Settled:
-			c.ledger.MarkSettled(to, hash)
-		case SettledPartial:
-			c.ledger.MarkSettledPartial(to, hash)
-		default:
-			c.ledger.MarkFailed(to, hash, false)
-		}
-		c.logger.Info("[eez] batch verdict", "event", "eez.composer.batch.verdict", "to", to, "post", hash, "verdict", verdict)
+		c.observe(to, hash, batch, terminal, sent)
 	})
 	return nil
+}
+
+// observe records the verdict on hash, the posting of batch, sent as sent,
+// whose terminal block is terminal.
+func (c *Composer) observe(to uint64, hash common.Hash, batch *protocol.ProofSystemBatch, terminal *types.Header, sent post.Sent) {
+	verdict, err := c.observer.Watch(c.ctx, hash, batch, terminal.Hash(), sent)
+	if err != nil {
+		return
+	}
+	switch verdict {
+	case Settled:
+		c.ledger.MarkSettled(to, hash)
+	case SettledPartial:
+		c.ledger.MarkSettledPartial(to, hash)
+	default:
+		c.ledger.MarkFailed(to, hash, false)
+	}
+	c.logger.Info("[eez] batch verdict", "event", "eez.composer.batch.verdict", "to", to, "post", hash, "verdict", verdict)
 }
 
 // block returns block n, failing when it is not canonical: the follower may
@@ -397,25 +403,29 @@ func (c *Composer) RecoverFailed(ctx context.Context) {
 	}
 }
 
-// settle applies derivation's cursor to the ledger and returns it: an L1
-// reorg that moved it back rolls out the settlements above it. A
-// settlement derivation has yet to see fails once L1 no longer settles it,
-// its posting dropped or included again without the settlement, whatever
-// the cursor did meanwhile.
+// settle applies derivation's cursor to the ledger and returns it. A
+// settlement whose posting left L1, rolled out by an L1 reorg that moved the
+// cursor back or dropped before derivation saw it, is watched again: back
+// in the node's pool, the posting may land again on the nonce the next
+// posting would take. One derivation has yet to see fails once L1 includes
+// its posting again without the settlement.
 func (c *Composer) settle(ctx context.Context) uint64 {
 	cursor := c.cursor()
 	if cursor < c.last {
-		c.ledger.TakeRolledOut(cursor)
+		for _, p := range c.ledger.RolledOut(cursor) {
+			c.rewatch(p)
+		}
 	}
 	c.last = cursor
 	for _, p := range c.ledger.SettledAbove(cursor) {
 		r, err := c.observer.Node.Receipt(ctx, p.Post)
-		if err != nil || (r != nil && c.observer.judge(r, p.Batch, p.Terminal.Hash()) != Failed) {
-			continue
-		}
-		if c.ledger.Unsettle(p.Height, p.Post) {
-			c.logger.Warn("[eez] L1 no longer settles a settled batch", "event", "eez.composer.batch.rolled_out", "to", p.Height, "post", p.Post,
-				"onL1", r != nil)
+		switch {
+		case err != nil:
+		case r == nil:
+			c.rewatch(p)
+		case c.observer.judge(r, p.Batch, p.Terminal.Hash()) == Failed && c.ledger.Unsettle(p.Height, p.Post):
+			c.logger.Warn("[eez] settled batch's posting is on L1 again without the settlement", "event", "eez.composer.batch.unsettled",
+				"to", p.Height, "post", p.Post)
 		}
 	}
 	c.ledger.ResolveBelowCursor(cursor)
@@ -428,6 +438,16 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 		c.ledger.ClaimPartial(p.Height, p.Post, nil)
 	}
 	return cursor
+}
+
+// rewatch has p, a settlement whose posting left L1, pending again under a
+// new watch, as a posting the node may hold in its pool.
+func (c *Composer) rewatch(p Posted[types.Transaction]) {
+	if !c.ledger.Repend(p.Height, p.Post) {
+		return
+	}
+	c.logger.Warn("[eez] settled batch's posting left L1, watching it again", "event", "eez.composer.batch.rolled_out", "to", p.Height, "post", p.Post)
+	c.wg.Go(func() { c.observe(p.Height, p.Post, p.Batch, p.Terminal, post.Sent{Pooled: true}) })
 }
 
 // audit checks that the posting of a finalized settlement is on L1: one

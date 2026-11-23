@@ -253,6 +253,32 @@ func (l *Ledger[T]) Unsettle(height uint64, post common.Hash) bool {
 	return false
 }
 
+// Repend turns post's Settled or SettledPartial batch back to Pending: L1
+// dropped the block that settled it, and the posting may land again.
+func (l *Ledger[T]) Repend(height uint64, post common.Hash) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if e := l.find(height, post); e != nil && (e.resolution == Settled || e.resolution == SettledPartial) {
+		e.resolution, e.confirmed, e.Landed = Pending, false, false
+		return true
+	}
+	return false
+}
+
+// RolledOut returns the Settled and SettledPartial batches above cursor,
+// which an L1 reorg moved back.
+func (l *Ledger[T]) RolledOut(cursor uint64) []Posted[T] {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []Posted[T]
+	for _, h := range l.heights(cursor+1, ^uint64(0)) {
+		if e := l.entries[h]; e.resolution == Settled || e.resolution == SettledPartial {
+			out = append(out, e.Posted)
+		}
+	}
+	return out
+}
+
 // ReinsertFailed puts back a Failed batch whose recovery failed.
 func (l *Ledger[T]) ReinsertFailed(p Posted[T]) {
 	l.mu.Lock()
