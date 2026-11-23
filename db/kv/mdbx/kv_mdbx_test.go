@@ -1538,3 +1538,27 @@ func TestClearTableUnknownNameKeepsGC(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, gcBefore.Entries, gcAfter.Entries)
 }
+
+func TestCommitCollectsMetricsOnlyForWrites(t *testing.T) {
+	db := mdbx.New(dbcfg.TemporaryDB, log.New()).InMem(t.TempDir()).WithMetrics().MustOpen()
+	t.Cleanup(db.Close)
+	label := string(dbcfg.TemporaryDB)
+	size := kv.MDBXGauges.DbSize.WithLabelValues(label)
+	limit := kv.MDBXGauges.TxLimit.WithLabelValues(label)
+	size.SetUint64(0)
+	limit.SetUint64(0)
+
+	ro, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer ro.Rollback()
+	require.NoError(t, ro.(*mdbx.MdbxTx).Commit())
+	require.Zero(t, size.GetValueUint64())
+	require.Zero(t, limit.GetValueUint64())
+
+	rw, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rw.Rollback()
+	require.NoError(t, rw.Commit())
+	require.Positive(t, size.GetValueUint64())
+	require.Positive(t, limit.GetValueUint64())
+}
