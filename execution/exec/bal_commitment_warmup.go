@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -39,31 +40,50 @@ import (
 )
 
 func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
-	keyCount := 0
+	const addrNibbles, storageNibbles = 2 * length.Hash, 4 * length.Hash
+	keyCount, nibbleCount := 0, 0
 	for i := range bal {
 		account := &bal[i]
-		if len(account.BalanceChanges)+len(account.NonceChanges)+len(account.CodeChanges) > 0 {
+		if accountChanged(account) {
 			keyCount++
+			nibbleCount += addrNibbles
 		}
 		keyCount += len(account.StorageChanges)
+		nibbleCount += len(account.StorageChanges) * storageNibbles
 	}
 	keys := make([][]byte, 0, keyCount)
+	buf := make([]byte, nibbleCount)
+	var addrKey [addrNibbles]byte
 	for i := range bal {
 		account := &bal[i]
-		address := account.Address
-		if len(account.BalanceChanges)+len(account.NonceChanges)+len(account.CodeChanges) > 0 {
-			keys = append(keys, commitment.KeyToHexNibbleHash(address[:]))
+		changed := accountChanged(account)
+		if !changed && len(account.StorageChanges) == 0 {
+			continue
+		}
+		addrHash := crypto.Keccak256Hash(account.Address[:])
+		nibbles.Expand(addrHash[:], addrKey[:])
+		if changed {
+			key := buf[:addrNibbles:addrNibbles]
+			buf = buf[addrNibbles:]
+			copy(key, addrKey[:])
+			keys = append(keys, key)
 		}
 		for _, storage := range account.StorageChanges {
+			key := buf[:storageNibbles:storageNibbles]
+			buf = buf[storageNibbles:]
+			copy(key, addrKey[:])
 			slot := storage.Slot.Value()
-			plainKey := make([]byte, len(address)+len(slot))
-			copy(plainKey, address[:])
-			copy(plainKey[len(address):], slot[:])
-			keys = append(keys, commitment.KeyToHexNibbleHash(plainKey))
+			slotHash := crypto.Keccak256Hash(slot[:])
+			nibbles.Expand(slotHash[:], key[addrNibbles:])
+			keys = append(keys, key)
 		}
 	}
 	slices.SortFunc(keys, bytes.Compare)
 	return keys
+}
+
+func accountChanged(account *types.AccountChanges) bool {
+	return len(account.BalanceChanges)+len(account.NonceChanges)+len(account.CodeChanges) > 0
 }
 
 type balCommitmentContext struct {
