@@ -170,10 +170,10 @@ func PeekTransactionType(serialized []byte) (byte, error) {
 	return serialized[dataPos], nil
 }
 
-// ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxnSlot.
-// It also performs syntactic validation of the transactions.
-// wrappedWithBlobs means that for blob (type 3) transactions the full version with blobs/commitments/proofs is expected
-// (see https://eips.ethereum.org/EIPS/eip-4844#networking).
+// ParseTransaction reads a transaction from payload at pos, validates its encoding, and fills slot.
+// When wrappedWithBlobs is set, type-3 transactions and frame transactions with blobs must
+// include their sidecar (blobs, commitments, and proofs).
+// See https://eips.ethereum.org/EIPS/eip-4844#networking for the type-3 network format.
 func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnSlot, sender []byte, hasEnvelope, wrappedWithBlobs bool, validateHash func([]byte) error) (p int, err error) {
 	if len(payload) == 0 {
 		return 0, fmt.Errorf("%w: empty rlp", ErrParseTxn)
@@ -443,8 +443,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 	}
 
-	// Step 6: Keep the full network encoding for gossip and cache its size,
-	// including any blob sidecar. Rlp may be cleared after flushing to the database.
+	// Step 6: Keep the encoded transaction for gossip and its size for selection after a flush.
 	slot.Rlp = txBytes
 	slot.Size = uint32(len(txBytes))
 
@@ -484,14 +483,17 @@ type PoolBlobBundle struct {
 // TxnSlot holds an unwrapped transaction and its pool metadata.
 // Txn must be non-nil except in the B-tree search sentinel (SenderID and Nonce)
 // and deletion records for rows rejected on reload (IDHash and SenderID).
+//
+// A flush moves ordinary transaction encodings to the database for lookup by hash
+// and keeps blob wrappers in memory for gossip and reorgs.
 type TxnSlot struct {
 	Txn      types.Transaction // Sidecars for type-3 and frame transactions are stored in BlobBundles
-	Rlp      []byte            // Full network encoding. A flush moves ordinary encodings to the database for lookup by hash and keeps blob wrappers in memory.
+	Rlp      []byte            // Encoded transaction. Pooled transactions with blobs include the sidecar. Block notifications carry only the body.
 	SenderID uint64            // SenderID - require external mapping to it's address
 	Nonce    uint64            // Nonce of the transaction (kept as field for btree search sentinel)
 	IDHash   [32]byte          // Transaction hash for the purposes of using it as a transaction Id
 	Traced   bool              // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
-	Size     uint32            // Full network encoding size, including any sidecar. Stays valid after Rlp is cleared.
+	Size     uint32            // Byte length of the original Rlp, including any sidecar it carried. Stays valid after Rlp is cleared.
 
 	BlobBundles []PoolBlobBundle // Parsed blob bytes reference the input RLP
 
