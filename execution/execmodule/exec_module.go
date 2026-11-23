@@ -670,9 +670,7 @@ func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, reva
 		}
 		return ValidationResult{}, err
 	}
-	// Do not defer doms.Close(): on the success path ownership transfers to
-	// forkValidator.sharedDom inside ValidatePayload and later phases close it,
-	// so we Close explicitly only on the early-return error paths below.
+	// ValidatePayload takes ownership of doms; close it on earlier errors.
 	if err := doms.InitBlockOverlay(roTx); err != nil {
 		doms.Close()
 		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
