@@ -91,10 +91,12 @@ const (
 	blobRecoveryValidationRetryInterval = 500 * time.Millisecond
 	maxBlobRecoveryResultBytes          = 16 << 20
 
-	// A recovery scheduled by a stored column starts once no column of the block has been stored for the quiet period,
-	// so gossip can deliver the remaining columns first. A deadline caps the wait when columns keep trickling in: a
-	// quarter of the slot before Gloas. From Gloas the columns come with the envelope, which may arrive as late as the
-	// payload deadline, so the cap is the payload deadline plus the custody grace.
+	// A recovery scheduled by a stored column starts once the quiet period has passed since the first call that found
+	// the block over half, so gossip can deliver the remaining columns first; later columns do not extend the wait. A
+	// block that can hold for the by-root sync (see blobRecoveryHold) restarts the wait with each column instead, so
+	// gossip that keeps delivering completes the matrix before the hold starts. A deadline caps the wait: a quarter of
+	// the slot before Gloas. From Gloas the columns come with the envelope, which may arrive as late as the payload
+	// deadline, so the cap is the payload deadline plus the custody grace.
 	blobRecoveryQuietPeriod         = 150 * time.Millisecond
 	blobRecoveryDeadlineSlotDivisor = 4
 
@@ -599,8 +601,12 @@ type recoverBlobsRequest struct {
 	slot      uint64
 	blockRoot common.Hash
 	metadata  *blobRecoveryMetadata
-	// lastColumn is when a column of the block was last stored; zero starts the recovery without waiting.
-	lastColumn time.Time
+	// waitFrom is when the quiet period starts: the first call that found the block over half, or the latest call that
+	// found the root holdable. Zero starts the recovery at once.
+	waitFrom time.Time
+	// holdable marks a request for a root that can hold for the by-root sync; it replaces an earlier owned request
+	// without metadata, which restarts the wait.
+	holdable bool
 }
 
 type delayedRecoverBlobsRequest struct {
@@ -900,7 +906,7 @@ func (d *peerdas) delayBlobRecovery(request recoverBlobsRequest) bool {
 	return true
 }
 
-// parkBlobRecovery releases the claim until the root's newest request has been quiet, and reports whether it parked.
+// parkBlobRecovery releases the claim until the owned request's quiet period has passed, and reports whether it parked.
 func (d *peerdas) parkBlobRecovery(blockRoot common.Hash, deadline time.Time) bool {
 	return d.parkBlobRecoveryUntil(blockRoot, deadline, time.Time{})
 }
@@ -1078,7 +1084,7 @@ func (d *peerdas) enqueueBlobRecovery(request recoverBlobsRequest) error {
 		if owned.metadata == nil && request.metadata != nil {
 			d.recoveryRequests[request.blockRoot] = request
 			d.recoveryGenerations[request.blockRoot]++
-		} else if exists && owned.metadata == nil && request.lastColumn.After(owned.lastColumn) {
+		} else if exists && owned.metadata == nil && request.holdable && request.waitFrom.After(owned.waitFrom) {
 			d.recoveryRequests[request.blockRoot] = request
 		}
 		d.recoveringMutex.Unlock()
@@ -1442,7 +1448,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 
 		var retryScheduled bool
 		switch {
-		case !toRecover.lastColumn.IsZero() &&
+		case !toRecover.waitFrom.IsZero() &&
 			d.parkBlobRecovery(toRecover.blockRoot, d.blobRecoveryDeadlineAt(toRecover.slot)):
 			retryScheduled = true
 		case toRecover.metadata != nil:
@@ -1472,10 +1478,10 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 }
 
 func blobRecoveryNotBefore(request recoverBlobsRequest, deadline time.Time) time.Time {
-	if request.lastColumn.IsZero() {
+	if request.waitFrom.IsZero() {
 		return time.Time{}
 	}
-	notBefore := request.lastColumn.Add(blobRecoveryQuietPeriod)
+	notBefore := request.waitFrom.Add(blobRecoveryQuietPeriod)
 	if deadline.Before(notBefore) {
 		return deadline
 	}
@@ -1486,7 +1492,7 @@ func blobRecoveryNotBefore(request recoverBlobsRequest, deadline time.Time) time
 // columns of a block with many blobs, so the by-root column sync can fetch them before FK20 runs. It reports whether it
 // parked. The queue and recovery locks are taken one after the other, never nested.
 func (d *peerdas) holdBlobRecovery(request recoverBlobsRequest, storedColumns int) bool {
-	if request.lastColumn.IsZero() || storedColumns >= int(d.beaconConfig.NumberOfColumns) || d.IsArchivedMode() {
+	if request.waitFrom.IsZero() || storedColumns >= int(d.beaconConfig.NumberOfColumns) || d.IsArchivedMode() {
 		return false
 	}
 	now := time.Now()
@@ -1535,7 +1541,8 @@ func (d *peerdas) tryScheduleRecover(slot uint64, blockRoot common.Hash, metadat
 		metadata:  metadata,
 	}
 	if metadata == nil {
-		request.lastColumn = time.Now()
+		request.waitFrom = time.Now()
+		request.holdable = !d.IsArchivedMode() && d.blocksToCheckSync.holdable(blockRoot)
 	}
 	return d.enqueueBlobRecovery(request)
 }
@@ -2300,22 +2307,36 @@ func (q *deferredColumnSyncs) retryLater(root common.Hash, now time.Time, slot t
 	}
 }
 
-// prioritiseFirstAttempt reports whether a recovery missing columns of root should hold for the by-root sync, which it
+// holdable reports whether a recovery missing columns of the entry's block should hold for the by-root sync, which it
 // should once per queued root, for a first attempt that has not failed and a block with many blobs. A root queued by
-// the custody backfill never holds, since its columns are not published. A first attempt that has not started moves to
-// now and wakes the worker.
+// the custody backfill never holds, since its columns are not published.
+func (e *deferredColumnSync) holdable() (hold bool, blobs int) {
+	if e == nil || e.prioritised || e.storageRetry || e.attempts > 0 {
+		return false, 0
+	}
+	if _, backfilled := e.block.(*backfillColumnBlock); backfilled {
+		return false, 0
+	}
+	blobs = e.block.GetBlobKzgCommitments().Len()
+	return blobs >= blobRecoveryHoldMinBlobs, blobs
+}
+
+// holdable reports whether prioritiseFirstAttempt would hold a recovery of root, without changing the queue.
+func (q *deferredColumnSyncs) holdable(root common.Hash) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	hold, _ := q.entries[root].holdable()
+	return hold
+}
+
+// prioritiseFirstAttempt reports whether a recovery missing columns of root should hold for the by-root sync, which it
+// does once per queued root, when the root is holdable. A first attempt that has not started moves to now and wakes the
+// worker.
 func (q *deferredColumnSyncs) prioritiseFirstAttempt(root common.Hash, now time.Time) (hold, moved bool, blobs int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	e := q.entries[root]
-	if e == nil || e.prioritised || e.storageRetry || e.attempts > 0 {
-		return false, false, 0
-	}
-	if _, backfilled := e.block.(*backfillColumnBlock); backfilled {
-		return false, false, 0
-	}
-	blobs = e.block.GetBlobKzgCommitments().Len()
-	if blobs < blobRecoveryHoldMinBlobs {
+	if hold, blobs = e.holdable(); !hold {
 		return false, false, blobs
 	}
 	e.prioritised = true
