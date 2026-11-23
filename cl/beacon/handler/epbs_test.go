@@ -311,6 +311,7 @@ type ptcForkEpochDutiesFixture struct {
 	syncedData       *synced_data.SyncedDataManager
 	forkEpoch        uint64
 	headRoot         common.Hash
+	lastPreForkRoot  common.Hash
 	predictedPtc     []uint64
 	advancedPtc      []uint64
 	wantDuties       map[[2]uint64]struct{}
@@ -318,6 +319,12 @@ type ptcForkEpochDutiesFixture struct {
 }
 
 func newPtcForkEpochDutiesFixture(t *testing.T, clockEpoch uint64) ptcForkEpochDutiesFixture {
+	t.Helper()
+	return newPtcForkEpochDutiesFixtureAt(t, clockEpoch, 1)
+}
+
+// newPtcForkEpochDutiesFixtureAt puts the head headDistance slots before the Gloas fork.
+func newPtcForkEpochDutiesFixtureAt(t *testing.T, clockEpoch, headDistance uint64) ptcForkEpochDutiesFixture {
 	t.Helper()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
@@ -337,8 +344,11 @@ func newPtcForkEpochDutiesFixture(t *testing.T, clockEpoch uint64) ptcForkEpochD
 	require.Equal(t, clparams.FuluVersion, headState.Version())
 
 	forkEpoch := cfg.GloasForkEpoch
-	headSlot := forkEpoch*cfg.SlotsPerEpoch - 1
+	headSlot := forkEpoch*cfg.SlotsPerEpoch - headDistance
 	require.NoError(t, transition.DefaultMachine.ProcessSlots(headState, headSlot))
+	// The attester rule would read the block root at this slot.
+	attesterRootSlot := forkEpoch*cfg.SlotsPerEpoch - cfg.SlotsPerEpoch - 1
+	require.NoError(t, headState.SetBlockRootAt(int(attesterRootSlot), common.Hash{0x81}))
 
 	predictedPtc, err := headState.ComputePTC(forkEpoch * cfg.SlotsPerEpoch)
 	require.NoError(t, err)
@@ -363,6 +373,8 @@ func newPtcForkEpochDutiesFixture(t *testing.T, clockEpoch uint64) ptcForkEpochD
 	require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, forkEpoch*cfg.SlotsPerEpoch))
 	require.Equal(t, clparams.GloasVersion, advancedState.Version())
 	advancedPtc, err := advancedState.GetPTC(forkEpoch * cfg.SlotsPerEpoch)
+	require.NoError(t, err)
+	lastPreForkRoot, err := advancedState.GetBlockRootAtSlot(forkEpoch*cfg.SlotsPerEpoch - 1)
 	require.NoError(t, err)
 
 	wantDuties := make(map[[2]uint64]struct{})
@@ -392,6 +404,7 @@ func newPtcForkEpochDutiesFixture(t *testing.T, clockEpoch uint64) ptcForkEpochD
 		syncedData:       syncedData,
 		forkEpoch:        forkEpoch,
 		headRoot:         headRoot,
+		lastPreForkRoot:  lastPreForkRoot,
 		predictedPtc:     predictedPtc,
 		advancedPtc:      advancedPtc,
 		wantDuties:       wantDuties,
@@ -420,13 +433,27 @@ func TestPostPtcDutiesForkEpochUsesAdvancedFuluState(t *testing.T) {
 		Data          []ptcDutyResponse `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	// The head is the last block before the fork, so it is the dependent root of the fork epoch.
 	require.Equal(t, fixture.headRoot, response.DependentRoot)
 	gotDuties := make(map[[2]uint64]struct{}, len(response.Data))
 	for _, duty := range response.Data {
 		gotDuties[[2]uint64{duty.ValidatorIndex, duty.Slot}] = struct{}{}
 	}
 	require.Equal(t, fixture.wantDuties, gotDuties)
+}
+
+func TestPostPtcDutiesForkEpochDependsOnEmptyLastPreForkSlot(t *testing.T) {
+	// The last Fulu slot is empty, so the dependent root is the block root that the state holds for it.
+	fixture := newPtcForkEpochDutiesFixtureAt(t, 2, 2)
+	require.NotEqual(t, common.Hash{0x81}, fixture.lastPreForkRoot)
+
+	recorder := fixture.post(t)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response struct {
+		DependentRoot common.Hash `json:"dependent_root"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, fixture.lastPreForkRoot, response.DependentRoot)
 }
 
 func TestPostPtcDutiesForkEpochUnavailableBeforeClockReachesFork(t *testing.T) {
