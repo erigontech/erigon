@@ -483,3 +483,7 @@ func TestForkSchemaMatchesSlotFarFutureGloas(t *testing.T) {
 	require.False(t, cfg.ForkSchemaMatchesSlot(fuluSlot, GloasVersion))
 	require.False(t, cfg.ForkSchemaMatchesSlot(math.MaxUint64/cfg.SlotsPerEpoch, GloasVersion))
 }
+
+func TestChiadoUsesTheGnosisPartialWithdrawalsSweep(t *testing.T) {
+	require.EqualValues(t, 6, chiadoConfig().MaxPendingPartialsPerWithdrawalsSweep)
+}
