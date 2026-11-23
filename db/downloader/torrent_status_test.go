@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -22,14 +22,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestTorrentClientStatusHandler(t *testing.T) {
-	const status = "Torrent client status\n"
-	for _, encoding := range []string{"identity", "gzip"} {
+	status := strings.Repeat("Torrent client status\n", 100)
+	for _, encoding := range []string{"identity", "gzip;q=0", "gzip"} {
 		t.Run(encoding, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			handler := torrentClientStatusHandler(func(w io.Writer) {
@@ -43,7 +44,7 @@ func TestTorrentClientStatusHandler(t *testing.T) {
 			handler.ServeHTTP(recorder, req)
 
 			require.Equal(t, http.StatusOK, recorder.Code)
-			if encoding == "identity" {
+			if encoding != "gzip" {
 				require.Empty(t, recorder.Header().Get("Content-Encoding"))
 				require.Equal(t, status, recorder.Body.String())
 				return
