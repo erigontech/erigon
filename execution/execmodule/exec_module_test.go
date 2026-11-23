@@ -884,7 +884,8 @@ func TestUpdateForkChoiceBelowSnapshotState(t *testing.T) {
 	}
 }
 
-func TestSetHeadWaitsForStateFilePublication(t *testing.T) {
+func holdStateFilePublication(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, uint64, func()) {
+	t.Helper()
 	const stepSize = 16
 	ctx := t.Context()
 	m, chainPack := newExecutedTransferChain(t,
@@ -906,7 +907,10 @@ func TestSetHeadWaitsForStateFilePublication(t *testing.T) {
 	}))
 
 	built, publish := make(chan struct{}), make(chan struct{})
-	allowPublication := sync.OnceFunc(func() { close(publish) })
+	allowPublication := sync.OnceFunc(func() {
+		agg.SetMaintenanceObserver(nil)
+		close(publish)
+	})
 	agg.SetMaintenanceObserver(func(ctx context.Context, event dbstate.MaintenanceEvent) {
 		if event.Point == dbstate.MaintenanceFilesBuilt {
 			close(built)
@@ -916,8 +920,7 @@ func TestSetHeadWaitsForStateFilePublication(t *testing.T) {
 			}
 		}
 	})
-	defer agg.SetMaintenanceObserver(nil)
-	defer allowPublication()
+	t.Cleanup(allowPublication)
 
 	// Finalize the block containing the step's last transaction so the step can be built.
 	// Pruning keeps that block's changeset, so the old snapshot view still allows a rewind to its parent.
@@ -942,7 +945,15 @@ func TestSetHeadWaitsForStateFilePublication(t *testing.T) {
 		require.Equal(t, lastFileBlock, oldestChangeset, "the finalized block must have the oldest remaining changeset")
 		return nil
 	}))
+	return m, chainPack, lastFileBlock, func() {
+		allowPublication()
+		<-finished
+	}
+}
 
+func TestSetHeadWaitsForStateFilePublication(t *testing.T) {
+	m, chainPack, lastFileBlock, publish := holdStateFilePublication(t)
+	ctx := t.Context()
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
@@ -955,14 +966,77 @@ func TestSetHeadWaitsForStateFilePublication(t *testing.T) {
 		cancel()
 		require.ErrorIs(t, <-result, context.Canceled, "SetHead must wait while the snapshot is being built")
 	})
-	allowPublication()
-	<-finished
+	publish()
 	require.ErrorContains(t, m.ExecModule.SetHead(ctx, lastFileBlock-1), fmt.Sprintf("minimum unwindable block is %d", lastFileBlock))
 	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
 		require.Equal(t, chainPack.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 		return nil
 	}))
 	require.NoError(t, m.ExecModule.SetHead(ctx, lastFileBlock))
+}
+
+func TestForkchoiceLoweringFinalityWaitsForStateFilePublication(t *testing.T) {
+	for _, name := range []string{"same_head", "advance_head", "rewind_at_boundary"} {
+		t.Run(name, func(t *testing.T) {
+			m, chain, lastFileBlock, publish := holdStateFilePublication(t)
+			ctx := t.Context()
+			finalized := chain.Blocks[lastFileBlock-1]
+			parentHash := finalized.ParentHash()
+			extension, err := m.GenerateChainFrom(chain.TopBlock, 2, nil)
+			require.NoError(t, err)
+			status, err := m.InsertBlocks(ctx, extension.Blocks)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			currentHead := extension.Blocks[0].Hash()
+			currentFinalized := finalized.Hash()
+			head := currentHead
+			switch name {
+			case "advance_head":
+				currentFinalized = chain.Blocks[lastFileBlock].Hash()
+				head = extension.TopBlock.Hash()
+			case "rewind_at_boundary":
+				// Forkchoice first unwinds to this older head's parent.
+				head = finalized.Hash()
+			}
+			// An extension can keep or advance finality during the build.
+			advanceCtx, cancelAdvance := context.WithTimeout(ctx, time.Minute)
+			defer cancelAdvance()
+			result, err := m.ExecModule.UpdateForkChoice(advanceCtx, currentHead, currentFinalized, currentFinalized)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+			m.ExecModule.Drain()
+
+			// The caller can time out while the execution module finishes the update.
+			requestCtx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			result, err = m.ExecModule.UpdateForkChoice(requestCtx, head, parentHash, parentHash)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusBusy, result.Status, "lowering finality must wait for publication")
+			require.True(t, result.UpdateInProgress)
+			assertPersistedForkchoice(t, m.DB, currentHead, currentFinalized, currentFinalized)
+			publish()
+			m.ExecModule.Drain()
+			if name == "rewind_at_boundary" {
+				assertPersistedForkchoice(t, m.DB, currentHead, finalized.Hash(), finalized.Hash())
+				result = updateForkChoice(t, m, head, parentHash, parentHash)
+				require.Equal(t, execmodule.ExecutionStatusReorgTooDeep, result.Status)
+				return
+			}
+			assertPersistedForkchoice(t, m.DB, head, parentHash, parentHash)
+
+			// The parent is now finalized, but its child is already in an immutable file.
+			header := finalized.Header()
+			header.Extra = []byte("sibling")
+			sibling := finalized.WithSeal(header)
+			status, err = m.InsertBlocks(ctx, []*types.Block{sibling})
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			result = updateForkChoice(t, m, sibling.Hash(), parentHash, parentHash)
+			require.Equal(t, execmodule.ExecutionStatusReorgTooDeep, result.Status)
+			assertPersistedForkchoice(t, m.DB, head, parentHash, parentHash)
+			require.Equal(t, finalized.Hash(), canonicalHashAt(t, m, lastFileBlock))
+		})
+	}
 }
 
 func truncateTxNumsBelowCommitment(t *testing.T, m *execmoduletester.ExecModuleTester, invalidExecutionProgress, keepChangesets bool) uint64 {
