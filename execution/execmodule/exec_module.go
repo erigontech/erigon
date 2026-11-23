@@ -253,8 +253,10 @@ type ExecModule struct {
 	// round takes ONLY this, so there is no cycle to deadlock on.
 	// assembleMu is ASSEMBLY's own domain: one block assembled at a time. Assembly builds a NEW block and
 	// rewrites no state, so it must not queue behind validation — see AssembleBlock.
-	assembleMu    sync.Mutex
-	roundMu       sync.Mutex
+	assembleMu sync.Mutex
+	roundMu    sync.Mutex
+	// genReadMu serialises the short reads that rebind a sealed generation's overlay to their own transaction.
+	genReadMu     sync.Mutex
 	forkValidator *ForkValidator
 	// preExec is the PRODUCER's pre-executed block chain — separate from the fork validator's candidate
 	// slot, which is validation space (see preexec_frontier.go).
@@ -302,8 +304,9 @@ type ExecModule struct {
 	// state/txNum, so it computes a different root or fails (nonce-too-low / can't-find-header) and falsely
 	// marks our own valid block INVALID. Accept-by-hash keeps the architecture's single-execution property.
 	// Guarded by pendingBlockMu. Pruned as blocks canonicalize (updateForkChoice).
-	sealedByHash map[common.Hash]*types.Header
-	postExecuted map[uint64]*types.Header
+	sealedByHash   map[common.Hash]*types.Header
+	postExecuted   map[uint64]*types.Header
+	acceptedSealed map[common.Hash]uint64
 
 	// flash is the exec-owned in-progress flashblock body (see flashBodyState / PreExecuteFlashblock): the
 	// execution half maintains the filtered block body here so the driver only streams unfiltered txs.
@@ -732,19 +735,36 @@ func (e *ExecModule) postExecutedOn(number uint64, parent common.Hash) *types.He
 // executing it; busy reports that the module could not be acquired before ctx ended.
 func (e *ExecModule) acceptSealed(ctx context.Context, sealed *types.Header) (busy bool, err error) {
 	hash, number := sealed.Hash(), sealed.Number.Uint64()
+	e.pendingBlockMu.Lock()
+	_, done := e.acceptedSealed[hash]
+	e.pendingBlockMu.Unlock()
+	if done {
+		return false, nil
+	}
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		return true, nil
 	}
 	e.semTake("acceptSealed")
-	e.roundMu.Lock()
+	e.genReadMu.Lock()
 	stageErr := e.stageSealedForCanonicalLocked(ctx, hash, number)
-	e.roundMu.Unlock()
+	e.genReadMu.Unlock()
 	e.semDrop()
 	e.semaphore.Release(1)
 	if stageErr != nil {
 		return false, stageErr
 	}
 	adopted := e.forkValidator.AdoptPreExecuted(hash, number)
+	e.pendingBlockMu.Lock()
+	if e.acceptedSealed == nil {
+		e.acceptedSealed = make(map[common.Hash]uint64)
+	}
+	e.acceptedSealed[hash] = number
+	for h, n := range e.acceptedSealed {
+		if n+postExecutedKept < number {
+			delete(e.acceptedSealed, h)
+		}
+	}
+	e.pendingBlockMu.Unlock()
 	e.logger.Debug("[execmodule] ValidateChain: accepting locally-sealed block (no re-exec)",
 		"number", number, "hash", hash, "root", sealed.Root, "adopted", adopted)
 	return false, nil

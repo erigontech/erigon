@@ -375,7 +375,10 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 		// one off stale genesis. Self-contained in this block's mem → survives UpdateTxn, needs no live parent.
 		if frontierParent != nil {
 			if pov := frontierParent.BlockOverlay(); pov != nil {
-				if err = copyFrontierChainTables(pov, doms.BlockOverlay(), roTx); err != nil {
+				e.genReadMu.Lock()
+				err = copyFrontierChainTables(pov, doms.BlockOverlay(), roTx)
+				e.genReadMu.Unlock()
+				if err != nil {
 					doms.Close()
 					return ValidationResult{}, fmt.Errorf("copy frontier chain tables: %w", err)
 				}

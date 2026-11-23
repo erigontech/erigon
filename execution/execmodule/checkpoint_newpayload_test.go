@@ -1,6 +1,7 @@
 package execmodule_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -323,4 +324,46 @@ func TestAbandonWithNothingInProgressKeepsTheSealedBlock(t *testing.T) {
 	_, _, vr, err := h.m.ExecModule.PreExecuteFlashblock(h.ctx, in2, [][]byte{h.signed(1, 0, nil, 100_000, emitsALog)})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
+}
+
+// A fork choice that skips a block this node sealed and accepted, straight to the next one it sealed and accepted,
+// makes both canonical.
+func TestAForkChoicePastAnAcceptedSealedBlockCanonicalisesBoth(t *testing.T) {
+	h := newRoundHarness(t)
+	parent, err := h.m.ExecModule.CurrentHeader(h.ctx)
+	require.NoError(t, err)
+	var chain []*types.Block
+	for n := uint64(0); n < 2; n++ {
+		params, in := h.attrs(parent)
+		b := h.sealRounds(params, in, [][][]byte{{h.signed(0, n, nil, 100_000, emitsALog)}})
+		status, ierr := insertBlocks(h.ctx, h.m.ExecModule, []*types.Block{b})
+		require.NoError(t, ierr)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+		chain, parent = append(chain, b), b.Header()
+	}
+	ur, err := forkChoiceTo(h.ctx, h.m.ExecModule, chain[1].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status, ur.ValidationError)
+	require.NoError(t, insertValidateAndUfc1By1(h.ctx, h.m.ExecModule, nil))
+	tip, err := h.m.ExecModule.CurrentHeader(h.ctx)
+	require.NoError(t, err)
+	require.Equal(t, chain[1].Hash(), tip.Hash())
+}
+
+// Accepting a sealed block does not queue behind a pre-exec round: newPayload and the fork choice answer within the
+// consensus layer's deadline while the next block's round runs.
+func TestAcceptingASealedBlockDoesNotWaitForARound(t *testing.T) {
+	h := newRoundHarness(t)
+	head, err := h.m.ExecModule.CurrentHeader(h.ctx)
+	require.NoError(t, err)
+	params, in := h.attrs(head)
+	b := h.sealRounds(params, in, [][][]byte{{h.signed(0, 0, nil, 100_000, emitsALog)}})
+
+	release := h.m.ExecModule.HoldRoundLockForTest()
+	defer release()
+	ctx, cancel := context.WithTimeout(h.ctx, time.Second)
+	defer cancel()
+	r, err := h.m.ExecModule.ValidateChain(ctx, b)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, r.ValidationStatus, "newPayload answered while a round runs")
 }

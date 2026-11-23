@@ -113,8 +113,14 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 }
 
 func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error) {
-	if head, err := e.GetHeader(ctx, &headHash, nil); err == nil && head != nil {
+	head, herr := e.GetHeader(ctx, &headHash, nil)
+	if herr != nil || head == nil {
+		e.logger.Debug("[execmodule] fork choice checkpoint: head not readable", "head", headHash, "err", herr)
+	}
+	if herr == nil && head != nil {
 		sealed, werr := e.awaitPreExecSeal(ctx, headHash, head.Number.Uint64(), head.ParentHash)
+		e.logger.Debug("[execmodule] fork choice checkpoint", "number", head.Number.Uint64(), "head", headHash,
+			"sealed", sealed != nil, "err", werr)
 		if werr != nil {
 			return ForkChoiceResult{Status: ExecutionStatusBusy}, nil
 		}

@@ -70,3 +70,9 @@ func (e *ExecModule) ModuleContextTxnSequenceForTest(ctx context.Context) (commi
 	}
 	return committed, moduleContext, true, nil
 }
+
+// HoldRoundLockForTest holds the round lock, as a long pre-exec round does, until the returned func is called.
+func (e *ExecModule) HoldRoundLockForTest() func() {
+	e.roundMu.Lock()
+	return e.roundMu.Unlock
+}
