@@ -230,6 +230,35 @@ func TestPostPtcDutiesDependentRootAtEpochOne(t *testing.T) {
 	require.Equal(t, headEvent.Data.NextEpochDependentRoot, postPtcDutiesDependentRoot(t, handler, 2))
 }
 
+func TestPostPtcDutiesDependentRootAtGloasForkEpochOne(t *testing.T) {
+	// A Gloas head inside the fork epoch serves the fork epoch from the head state.
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 1
+
+	slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
+	headSlot := slotsPerEpoch + 1
+	headState := newPtcDutiesHeadState(t, handler.beaconChainCfg, headSlot)
+	genesisRoot := common.Hash{0x61}
+	lastPreForkRoot := common.Hash{0x62}
+	require.NoError(t, headState.SetBlockRootAt(0, genesisRoot))
+	require.NoError(t, headState.SetBlockRootAt(int(slotsPerEpoch-1), lastPreForkRoot))
+
+	headRoot := common.Hash{0x63}
+	publishPtcDutiesHead(t, syncedData, headState, headRoot)
+	headEvent, err := beaconevents.BuildHeadV2Data(
+		handler.beaconChainCfg,
+		headState,
+		headSlot,
+		headRoot,
+		common.Hash{0x64},
+		"full",
+		false,
+	)
+	require.NoError(t, err)
+	require.Equal(t, lastPreForkRoot, headEvent.Data.NextEpochDependentRoot)
+	require.Equal(t, headEvent.Data.NextEpochDependentRoot, postPtcDutiesDependentRoot(t, handler, 1))
+}
+
 func TestPostPtcDutiesDependentRootMatchesHeadV2(t *testing.T) {
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -445,15 +474,7 @@ func TestPostPtcDutiesForkEpochDependsOnEmptyLastPreForkSlot(t *testing.T) {
 	// The last Fulu slot is empty, so the dependent root is the block root that the state holds for it.
 	fixture := newPtcForkEpochDutiesFixtureAt(t, 2, 2)
 	require.NotEqual(t, common.Hash{0x81}, fixture.lastPreForkRoot)
-
-	recorder := fixture.post(t)
-
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	var response struct {
-		DependentRoot common.Hash `json:"dependent_root"`
-	}
-	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	require.Equal(t, fixture.lastPreForkRoot, response.DependentRoot)
+	require.Equal(t, fixture.lastPreForkRoot, postPtcDutiesDependentRoot(t, fixture.handler, fixture.forkEpoch))
 }
 
 func TestPostPtcDutiesForkEpochUnavailableBeforeClockReachesFork(t *testing.T) {
