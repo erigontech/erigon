@@ -514,23 +514,23 @@ func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
 		}
 		return nil, nil
 	}
-	l1 := cmd.String(L1RPCFlag.Name)
-	if l1 == "" {
+	node := cmd.String(L1RPCFlag.Name)
+	if node == "" {
 		return nil, fmt.Errorf("%w: --%s posts through the L1 node of --%s", ErrConfig, ComposerFlag.Name, L1RPCFlag.Name)
 	}
 	c := &ComposerConfig{
-		L1:          l1,
+		L1:          node,
 		Prover:      cmd.String(AttestersFlag.Name),
 		Builder:     cmd.String(L1BuilderFlag.Name),
 		PriorityFee: cmd.Uint64(L1PriorityFeeFlag.Name),
 		MaxBlocks:   cmd.Uint64(BatchMaxBlocksFlag.Name),
 	}
 	if c.Builder == "" {
-		c.Builder = l1
+		c.Builder = node
 	}
 	// eth_sendBundle goes over HTTP.
 	if u, err := url.Parse(c.Builder); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return nil, fmt.Errorf("%w: --%s %q is not an http(s) URL; set it beside a websocket --%s", ErrConfig, L1BuilderFlag.Name, c.Builder, L1RPCFlag.Name)
+		return nil, fmt.Errorf("%w: --%s %q is not an http(s) URL; set it beside a websocket --%s", ErrConfig, L1BuilderFlag.Name, l1.RedactURL(c.Builder), L1RPCFlag.Name)
 	}
 	for _, f := range []*cli.StringFlag{&PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag} {
 		if !cmd.IsSet(f.Name) {

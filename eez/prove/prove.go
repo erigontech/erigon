@@ -116,20 +116,21 @@ func Dial(rawURL string, attester common.Address, vkey common.Hash) (*Client, er
 		// backoff's 100 ms.
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: grpcbackoff.Config{BaseDelay: 100 * time.Millisecond, Multiplier: 1.6, Jitter: 0.2, MaxDelay: time.Second}, MinConnectTimeout: exchange}))
 	if err != nil {
-		return nil, fmt.Errorf("prover url %q: %w", rawURL, err)
+		return nil, fmt.Errorf("prover %s: %w", target, err)
 	}
 	return &Client{conn: conn, prover: provepb.NewProverClient(conn), attester: attester, vkey: vkey}, nil
 }
 
 // Target returns the host:port of a prover's URL, http://host:port or
-// https://host:port, and whether it takes TLS.
+// https://host:port, and whether it takes TLS. Its errors print the URL's
+// scheme and host only: user info, path and query may carry an API key.
 func Target(rawURL string) (string, bool, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return "", false, fmt.Errorf("prover url: %w", err)
+		return "", false, errors.New("prover url is not a URL")
 	}
 	if _, port, err := net.SplitHostPort(u.Host); err != nil || port == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
-		return "", false, fmt.Errorf("prover url %q: want scheme://host:port", rawURL)
+		return "", false, fmt.Errorf("prover url %s://%s: want scheme://host:port alone", u.Scheme, u.Host)
 	}
 	switch u.Scheme {
 	case "http":
@@ -137,7 +138,7 @@ func Target(rawURL string) (string, bool, error) {
 	case "https":
 		return u.Host, true, nil
 	}
-	return "", false, fmt.Errorf("prover url %q: want http or https", rawURL)
+	return "", false, fmt.Errorf("prover url %s://%s: want http or https", u.Scheme, u.Host)
 }
 
 // Close releases the connection.

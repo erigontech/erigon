@@ -358,6 +358,20 @@ func (e *urlError) Error() string { return e.text }
 
 func (e *urlError) Unwrap() error { return e.err }
 
+// RedactURL returns raw's scheme and host, the scheme alone without a host,
+// or "endpoint": its user info, path and query may carry the endpoint's API
+// key.
+func RedactURL(raw string) string {
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil:
+		return "endpoint"
+	case u.Host == "":
+		return u.Scheme + ":"
+	}
+	return u.Scheme + "://" + u.Host
+}
+
 // RedactTransport returns err printed without what a failed request's error
 // text carries of its endpoint beyond scheme and host, and without a failed
 // connection's local address; err stays reachable through Unwrap.
@@ -368,10 +382,7 @@ func RedactTransport(err error) error {
 		return &transportError{op: short, err: err}
 	}
 	if ue, ok := errors.AsType[*url.Error](err); ok {
-		host := "endpoint"
-		if u, perr := url.Parse(ue.URL); perr == nil && u.Host != "" {
-			host = u.Scheme + "://" + u.Host
-		}
+		host := RedactURL(ue.URL)
 		// url.Error prints its URL quoted.
 		text := strings.ReplaceAll(err.Error(), strconv.Quote(ue.URL), host)
 		return &urlError{text: strings.ReplaceAll(text, ue.URL, host), err: err}

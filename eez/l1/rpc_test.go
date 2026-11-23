@@ -197,6 +197,18 @@ func TestRPCTransportError(t *testing.T) {
 // TestRPCURLError checks that a failure with no connection error, as an
 // untrusted certificate, prints the endpoint without its path and query,
 // where providers put API keys, and keeps the cause.
+// TestRedactURL: an endpoint prints its scheme and host only.
+func TestRedactURL(t *testing.T) {
+	for raw, want := range map[string]string{
+		"wss://user:secret@l1.example/v3/KEY?key=KEY": "wss://l1.example",
+		"https://l1.example:8545":                     "https://l1.example:8545",
+		"builder:8545":                                "builder:",
+		"http://user:secret@[l1/KEY":                  "endpoint",
+	} {
+		require.Equal(t, want, l1.RedactURL(raw), raw)
+	}
+}
+
 func TestRPCURLError(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	defer srv.Close()

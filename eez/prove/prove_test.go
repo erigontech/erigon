@@ -784,6 +784,13 @@ func TestDial(t *testing.T) {
 		_, err := Dial(url, common.Address{}, common.Hash{})
 		require.Error(t, err, url)
 	}
+	// User info, path and query may carry an API key.
+	for _, url := range []string{"http://user:secret@prover.example/KEY", "ftp://user:secret@prover.example:1", "http://prover.example:1/KEY?k=KEY", "http://user:secret@[prover/KEY"} {
+		_, err := Dial(url, common.Address{}, common.Hash{})
+		require.Error(t, err, url)
+		require.NotContains(t, err.Error(), "secret", url)
+		require.NotContains(t, err.Error(), "KEY", url)
+	}
 }
 
 // TestProveAfterAnOutage: a prover back from an outage takes the next

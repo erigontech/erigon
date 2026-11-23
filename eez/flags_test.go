@@ -570,4 +570,18 @@ func TestComposerFlags(t *testing.T) {
 		require.ErrorIs(t, err, ErrConfig, name)
 		require.ErrorContains(t, err, c.want, name)
 	}
+
+	// An endpoint's user info, path and query may carry an API key: errors
+	// name its scheme and host only.
+	for name, args := range map[string][]string{
+		"websocket L1 alone": append([]string{"--eez.enabled", "--eez.l1.rpc=wss://user:secret@l1.example/v3/KEY"}, without("--eez.enabled", "--eez.l1.rpc")...),
+		"bad builder":        append(slices.Clone(composer), "--eez.l1.builder=ftp://user:secret@builder.example/KEY?key=KEY"),
+		"bad prover":         append(without("--eez.attesters"), "--eez.attesters=ftp://user:secret@prover.example:1/KEY"),
+		"unparsable prover":  append(without("--eez.attesters"), "--eez.attesters=http://user:secret@[prover/KEY"),
+	} {
+		_, err := parse(t, args...)
+		require.ErrorIs(t, err, ErrConfig, name)
+		require.NotContains(t, err.Error(), "secret", name)
+		require.NotContains(t, err.Error(), "KEY", name)
+	}
 }
