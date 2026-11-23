@@ -126,7 +126,7 @@ func (b *BeaconRpcP2P) decodeBlocks(ctx context.Context, responses []responseDat
 		}
 		responsePacket[i] = responseChunk
 	}
-
+	b.rewardPeer(ctx, pid, len(responsePacket))
 	return responsePacket, nil
 }
 
@@ -145,7 +145,7 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 		}
 		responsePacket[i] = responseChunk
 	}
-
+	b.rewardPeer(ctx, pid, len(responsePacket))
 	return responsePacket, pid, nil
 }
 
@@ -213,7 +213,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 		}
 		ColumnSidecars[i] = columnSidecar
 	}
-
+	b.rewardPeer(ctx, pid, len(ColumnSidecars))
 	return ColumnSidecars, pid, filteredReq, nil
 }
 
@@ -237,7 +237,7 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 
 	responseLimit := min(count, maxRequestPayloads)
 	responsePacket, pid, responseErr := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), responseLimit), responseLimit)
-	envelopes, err := b.decodeExecutionPayloadEnvelopes("by range", responsePacket, responseErr)
+	envelopes, err := b.decodeExecutionPayloadEnvelopes(ctx, "by range", pid, responsePacket, responseErr)
 	return envelopes, pid, err
 }
 
@@ -261,11 +261,11 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Contex
 	}
 
 	responsePacket, pid, responseErr := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRootProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), uint64(len(roots))), uint64(len(roots)))
-	envelopes, err := b.decodeExecutionPayloadEnvelopes("by root", responsePacket, responseErr)
+	envelopes, err := b.decodeExecutionPayloadEnvelopes(ctx, "by root", pid, responsePacket, responseErr)
 	return envelopes, pid, err
 }
 
-func (b *BeaconRpcP2P) decodeExecutionPayloadEnvelopes(requestKind string, responsePacket []responseData, responseErr error) ([]*cltypes.SignedExecutionPayloadEnvelope, error) {
+func (b *BeaconRpcP2P) decodeExecutionPayloadEnvelopes(ctx context.Context, requestKind, pid string, responsePacket []responseData, responseErr error) ([]*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if responseErr != nil && len(responsePacket) == 0 {
 		return nil, responseErr
 	}
@@ -286,6 +286,7 @@ func (b *BeaconRpcP2P) decodeExecutionPayloadEnvelopes(requestKind string, respo
 		}
 		envelopes = append(envelopes, envelope)
 	}
+	b.rewardPeer(ctx, pid, len(envelopes))
 	return envelopes, responseErr
 }
 
@@ -411,6 +412,17 @@ func (b *BeaconRpcP2P) banPeer(ctx context.Context, pid string) {
 func (b *BeaconRpcP2P) banExcessChunks(ctx context.Context, pid string, err error) {
 	if errors.Is(err, errTooManyChunks) {
 		b.BanPeerForInvalidData(ctx, pid)
+	}
+}
+
+// rewardPeer reports that pid answered a data request with items that decoded. A peer that stays
+// useless is evicted, and only the decoder can tell valid data from junk.
+func (b *BeaconRpcP2P) rewardPeer(ctx context.Context, pid string, items int) {
+	if items == 0 {
+		return
+	}
+	if _, err := b.sentinel.RewardPeer(ctx, &sentinelproto.Peer{Pid: pid}); err != nil {
+		log.Debug("failed to reward peer", "pid", pid, "err", err)
 	}
 }
 

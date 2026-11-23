@@ -20,7 +20,7 @@ type P2PManager interface {
 	SetENRAttSubnets(subnets []uint64)
 	UpdateENRSyncNets(subnetIndex int, on bool)
 	// MarkPeerUseful records that pid just gave us something: a first copy of a valid gossip message
-	// or a non-empty answer to a data request.
+	// or a decoded answer to a data request.
 	MarkPeerUseful(pid peer.ID)
 	// PeerLastUseful returns when pid was last useful, counting its connection time as useful.
 	PeerLastUseful(pid peer.ID) (time.Time, bool)

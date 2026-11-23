@@ -187,3 +187,7 @@ func TestForwardInvalidEnvelopeUsesAvailableFallback(t *testing.T) {
 		})
 	}
 }
+
+func (*invalidEnvelopeSentinel) RewardPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}

@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
@@ -119,36 +120,31 @@ func (p peerRequestBackendStub) Config() *sentinel.SentinelConfig {
 }
 func (p peerRequestBackendStub) ReqRespHandler() http.Handler { return p.handler }
 
-// Only an answer to a data request counts as useful: status, ping and metadata are heartbeats that
-// an idle peer answers too.
-func TestPeerAnsweringADataRequestIsUseful(t *testing.T) {
-	answer := func(code, body string) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("REQRESP-RESPONSE-CODE", code)
-			_, _ = w.Write([]byte(body))
-		})
-	}
-	for _, tc := range []struct {
-		topic, code, body string
-		useful            bool
-	}{
-		{communication.BeaconBlocksByRangeProtocolV2, "0", "answer", true},
-		{communication.DataColumnSidecarsByRootProtocolV1, "0", "answer", true},
-		{communication.BeaconBlocksByRangeProtocolV2, "0", "", false},
-		{communication.StatusProtocolV2, "0", "answer", false},
-		{communication.MetadataProtocolV3, "0", "answer", false},
-		{communication.BeaconBlocksByRangeProtocolV2, "2", "answer", false},
-	} {
-		var useful []peer.ID
-		server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{handler: answer(tc.code, tc.body), useful: &useful}}
-		_, _ = server.requestPeer(t.Context(), peer.ID("peer"), &sentinelproto.RequestData{Topic: tc.topic, Data: []byte("request")})
-		name := tc.topic + " code " + tc.code + " body " + tc.body
-		if tc.useful {
-			require.Equal(t, []peer.ID{"peer"}, useful, name)
-		} else {
-			require.Empty(t, useful, name)
-		}
-	}
+// The server cannot tell valid data from junk, so it credits nothing itself; the caller reports a
+// decoded data answer through RewardPeer.
+func TestRewardPeerMarksThePeerUseful(t *testing.T) {
+	var useful []peer.ID
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("REQRESP-RESPONSE-CODE", "0")
+			_, _ = w.Write([]byte("answer"))
+		}),
+		useful: &useful,
+	}}
+	_, err := server.requestPeer(t.Context(), peer.ID("peer"), &sentinelproto.RequestData{Topic: communication.BeaconBlocksByRangeProtocolV2, Data: []byte("request")})
+	require.NoError(t, err)
+	require.Empty(t, useful, "a raw answer is not credited")
+
+	key, _, err := crypto.GenerateEd25519Key(nil)
+	require.NoError(t, err)
+	pid, err := peer.IDFromPrivateKey(key)
+	require.NoError(t, err)
+	_, err = server.RewardPeer(t.Context(), &sentinelproto.Peer{Pid: pid.String()})
+	require.NoError(t, err)
+	require.Equal(t, []peer.ID{pid}, useful)
+
+	_, err = server.RewardPeer(t.Context(), &sentinelproto.Peer{Pid: "not a peer id"})
+	require.Error(t, err)
 }
 
 // A request cut by a duplicate connection closing is not the peer's fault, and dropping the peer

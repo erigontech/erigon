@@ -175,10 +175,14 @@ func (s *SentinelServer) BanPeerForInvalidData(_ context.Context, p *sentinelpro
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
-// isDataRequest reports whether a request type fetches chain data. Status, ping, metadata and goodbye
-// are heartbeats that an idle peer answers too.
-func isDataRequest(requestType string) bool {
-	return strings.HasSuffix(requestType, "_by_range") || strings.HasSuffix(requestType, "_by_root")
+// RewardPeer records that the peer answered one of our data requests with data that decoded.
+func (s *SentinelServer) RewardPeer(_ context.Context, p *sentinelproto.Peer) (*sentinelproto.EmptyMessage, error) {
+	var pid peer.ID
+	if err := pid.UnmarshalText([]byte(p.GetPid())); err != nil {
+		return nil, err
+	}
+	s.peerRequestBackend.MarkPeerUseful(pid)
+	return &sentinelproto.EmptyMessage{}, nil
 }
 
 // dropOnFailure reports whether a request that failed with err drops pid: only at the peer limit,
@@ -298,9 +302,6 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 			s.dropFailedPeer(pid, err)
 		}
 		return nil, err
-	}
-	if isDataRequest(requestType) && len(data) > 0 {
-		s.peerRequestBackend.MarkPeerUseful(pid)
 	}
 	ans := &sentinelproto.ResponseData{
 		Data:  data,

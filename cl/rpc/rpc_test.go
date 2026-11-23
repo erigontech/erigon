@@ -37,6 +37,7 @@ type blockResponseSentinel struct {
 	askedPeers       []string
 	topics           []string
 	calls            int
+	rewardedPeers    []string
 }
 
 type contextRecordingSentinel struct {
@@ -54,6 +55,12 @@ type emptyColumnResponseSentinel struct {
 	askedPeers       []string
 	bannedPeer       string
 	softBannedPeer   string
+	rewardedPeers    []string
+}
+
+func (s *emptyColumnResponseSentinel) RewardPeer(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	s.rewardedPeers = append(s.rewardedPeers, peer.Pid)
+	return &sentinelproto.EmptyMessage{}, nil
 }
 
 func (s *emptyColumnResponseSentinel) BanPeer(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
@@ -342,6 +349,7 @@ func TestColumnSidecarsRequestAcceptsExactGloasForkDigest(t *testing.T) {
 	require.Equal(t, sidecar.Slot, sidecars[0].Slot)
 	require.Empty(t, sentinel.bannedPeer)
 	require.Empty(t, sentinel.softBannedPeer)
+	require.Equal(t, []string{"gloas-peer"}, sentinel.rewardedPeers)
 }
 
 func TestColumnSidecarsRequestRejectsUnknownForkDigest(t *testing.T) {
@@ -470,6 +478,11 @@ func (s *blockResponseSentinel) SendPeerRequest(_ context.Context, req *sentinel
 
 func (s *blockResponseSentinel) BanPeer(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	s.softBannedPeer = peer.Pid
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func (s *blockResponseSentinel) RewardPeer(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	s.rewardedPeers = append(s.rewardedPeers, peer.Pid)
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
@@ -1193,4 +1206,46 @@ func TestMaxRequestPayloadsFitsABufferedResponse(t *testing.T) {
 	require.EqualValues(t, httpreqresp.MaxResponseChunks, r.MaxRequestPayloads())
 	r = &BeaconRpcP2P{beaconConfig: &clparams.BeaconChainConfig{MaxRequestPayloads: 8}}
 	require.EqualValues(t, 8, r.MaxRequestPayloads())
+}
+
+// A peer is rewarded for a data answer only once the answer decodes to at least one item: raw bytes
+// can be junk.
+func TestDecodedDataAnswerRewardsThePeer(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	fuluDigest, err := clock.ComputeForkDigest(cfg.FuluForkEpoch)
+	require.NoError(t, err)
+	slot := (cfg.FuluForkEpoch + 1) * cfg.SlotsPerEpoch
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Slot = slot
+	var valid bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&valid, block, fuluDigest[:]...))
+
+	for _, tc := range []struct {
+		name     string
+		response []byte
+		rewarded []string
+	}{
+		{"decoded block", valid.Bytes(), []string{"peer"}},
+		{"truncated fork digest", []byte{0x00, 0x01}, nil},
+		{"empty answer", nil, nil},
+	} {
+		sentinel := &blockResponseSentinel{response: tc.response}
+		client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
+		_, _ = client.SendBeaconBlocksByRangeReqToPeer(t.Context(), "peer", slot, 1)
+		require.Equal(t, tc.rewarded, sentinel.rewardedPeers, tc.name)
+	}
+
+	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	var envelopeResponse bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&envelopeResponse, envelope, gloasDigest[:]...))
+	sentinel := &blockResponseSentinel{response: envelopeResponse.Bytes()}
+	client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
+	envelopes, pid, err := client.SendExecutionPayloadEnvelopesByRootReq(t.Context(), [][32]byte{{1}})
+	require.NoError(t, err)
+	require.Len(t, envelopes, 1)
+	require.Equal(t, []string{pid}, sentinel.rewardedPeers)
 }

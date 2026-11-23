@@ -2450,3 +2450,15 @@ func TestRetainBlocksBeforeMissingGloasEnvelopeKeepsCompletePrefix(t *testing.T)
 
 	require.Equal(t, blocks[:1], retained)
 }
+
+func (*rotatingProbeSentinel) RewardPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func (*switchableProbeSentinel) RewardPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func (*emptyThenBlockSentinel) RewardPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}

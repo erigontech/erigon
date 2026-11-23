@@ -341,7 +341,7 @@ func subnetsOfConnectedPeers(subnetToPeers *[attestationSubnetCount][]peer.ID, c
 	return coverage, peerToSubnets
 }
 
-// MarkPeerUseful records that pid gave a non-empty answer to one of our data requests.
+// MarkPeerUseful records that pid answered one of our data requests with data that decoded.
 func (s *Sentinel) MarkPeerUseful(pid peer.ID) {
 	s.p2p.MarkPeerUseful(pid)
 }
