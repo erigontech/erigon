@@ -17,8 +17,13 @@
 package testutil
 
 import (
+	"bytes"
 	"encoding/json"
+	"math/big"
 	"testing"
+
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/types"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -43,5 +48,21 @@ func TestTransactionTestGasLimitPriceOverflow(t *testing.T) {
 	var test TransactionTest
 	require.NoError(t, json.Unmarshal([]byte(fixture), &test))
 
+	require.NoError(t, test.Run(uint256.NewInt(1)))
+}
+
+func TestFrameTransactionFixtureGas(t *testing.T) {
+	tx := &types.FrameTransaction{NonceKeys: nil, ChainID: *uint256.NewInt(1), Frames: []types.Frame{{}}}
+	var data bytes.Buffer
+	require.NoError(t, tx.MarshalBinary(&data))
+	test := TransactionTest{RLP: data.Bytes(), Forks: ttForks{"Bogota": {Sender: tx.SenderAddress, Hash: tx.Hash(), IntrinsicGas: (*math.HexOrDecimal256)(big.NewInt(12_507))}}}
+	require.NoError(t, test.Run(uint256.NewInt(1)))
+}
+
+func TestFrameTransactionFixtureSingleUseNonce(t *testing.T) {
+	tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{1}}, Nonce: ^uint64(0), ChainID: *uint256.NewInt(1), Frames: []types.Frame{{}}}
+	var data bytes.Buffer
+	require.NoError(t, tx.MarshalBinary(&data))
+	test := TransactionTest{RLP: data.Bytes(), Forks: ttForks{"Bogota": {Sender: tx.SenderAddress, Hash: tx.Hash(), IntrinsicGas: (*math.HexOrDecimal256)(big.NewInt(24_607))}}}
 	require.NoError(t, test.Run(uint256.NewInt(1)))
 }

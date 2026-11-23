@@ -97,3 +97,21 @@ func TestDoubleBuildAcceptsDenseSequence(t *testing.T) {
 		}
 	}
 }
+
+func TestGet3ProbeMatchesGet3(t *testing.T) {
+	const n = 1000
+	cumKeys, position := make([]uint64, n+1), make([]uint64, n+1)
+	for i := range n {
+		cumKeys[i+1] = cumKeys[i] + uint64(i%7) + 1
+		position[i+1] = position[i] + uint64(i%11)*13 + 1
+	}
+	var ef DoubleEliasFano
+	ef.Build(cumKeys, position)
+	for b := range uint64(n) {
+		a, c, p := ef.Get3(b)
+		pa, pc, pp := ef.Get3Probe(b, nil)
+		if a != pa || c != pc || p != pp {
+			t.Fatalf("Get3Probe(%d) = (%d, %d, %d), Get3 = (%d, %d, %d)", b, pa, pc, pp, a, c, p)
+		}
+	}
+}

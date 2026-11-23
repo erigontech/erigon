@@ -85,7 +85,7 @@ type cborStaticValidator struct {
 }
 
 // Serialize encodes the StaticValidator data into CBOR format and writes it to the given writer.
-func (s *StaticValidator) WriteTo(w io.Writer) error {
+func (s *StaticValidator) Serialize(w io.Writer) error {
 	return cbor.Marshal(w, cborStaticValidator{
 		PublicKeys:            s.publicKeys,
 		WithdrawalCredentials: s.withdrawalCredentials,
@@ -98,7 +98,7 @@ func (s *StaticValidator) WriteTo(w io.Writer) error {
 }
 
 // Deserialize decodes CBOR data from the given reader and updates the StaticValidator fields.
-func (s *StaticValidator) ReadFrom(r io.Reader) error {
+func (s *StaticValidator) Deserialize(r io.Reader) error {
 	tmp := &cborStaticValidator{}
 	if err := cbor.Unmarshal(&tmp, r); err != nil {
 		return err
@@ -379,12 +379,6 @@ func (s *StaticValidatorTable) AddWithdrawableEpoch(validatorIndex, slot uint64,
 	return nil
 }
 
-func (s *StaticValidatorTable) GetInPlace(validatorIndex uint64, slot uint64, v solid.Validator) {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	s.validatorTable[validatorIndex].ToValidator(v, slot)
-}
-
 func (s *StaticValidatorTable) ForEach(fn func(validatorIndex uint64, validator *StaticValidator) bool) {
 	s.sync.RLock()
 	defer s.sync.RUnlock()
@@ -393,48 +387,6 @@ func (s *StaticValidatorTable) ForEach(fn func(validatorIndex uint64, validator 
 			break
 		}
 	}
-}
-
-func (s *StaticValidatorTable) WithdrawalCredentials(validatorIndex uint64, slot uint64) common.Hash {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	return s.validatorTable[validatorIndex].WithdrawalCredentials(slot)
-}
-
-func (s *StaticValidatorTable) Slashed(validatorIndex uint64, slot uint64) bool {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	return s.validatorTable[validatorIndex].Slashed(slot)
-}
-
-func (s *StaticValidatorTable) ActivationEligibilityEpoch(validatorIndex uint64, slot uint64) uint64 {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	return s.validatorTable[validatorIndex].ActivationEligibilityEpoch(slot)
-}
-
-func (s *StaticValidatorTable) ActivationEpoch(validatorIndex uint64, slot uint64) uint64 {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	return s.validatorTable[validatorIndex].ActivationEpoch(slot)
-}
-
-func (s *StaticValidatorTable) ExitEpoch(validatorIndex uint64, slot uint64) uint64 {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	return s.validatorTable[validatorIndex].ExitEpoch(slot)
-}
-
-func (s *StaticValidatorTable) WithdrawableEpoch(validatorIndex uint64, slot uint64) uint64 {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	return s.validatorTable[validatorIndex].WithdrawableEpoch(slot)
-}
-
-func (s *StaticValidatorTable) GetStaticValidator(validatorIndex uint64) *StaticValidator {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
-	return s.validatorTable[validatorIndex]
 }
 
 // This is for versioning

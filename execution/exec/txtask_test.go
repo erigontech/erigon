@@ -18,6 +18,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -282,6 +283,125 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 				require.NoError(t, result.Err)
 			}
 			require.Len(t, result.Logs, tc.wantLogs)
+		})
+	}
+}
+
+// A value call is charged at validation like a zero-value call: its run does not debit
+// the sender.
+func TestChargesSenderAtValidationIncludesValueCall(t *testing.T) {
+	sender := accounts.InternAddress(common.HexToAddress("0xaa"))
+	to := common.HexToAddress("0xbb")
+	task := func(value uint64) *TxTask {
+		txn := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, Value: *uint256.NewInt(value), GasLimit: 21000}, GasPrice: *uint256.NewInt(1)}
+		txn.SetSender(sender)
+		return &TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{txn}}
+	}
+	require.True(t, task(0).ChargesSenderAtValidation(0))
+	require.True(t, task(1).ChargesSenderAtValidation(0))
+}
+
+// A signature the workers cannot recover makes the block invalid, not the node failed.
+func TestTxSenderInvalidSignatureInvalidatesBlock(t *testing.T) {
+	to := common.HexToAddress("0xbb")
+	txn := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, GasLimit: 21000, V: *uint256.NewInt(27)}, GasPrice: *uint256.NewInt(1)}
+	task := &TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{txn}}
+	_, err := task.TxSender()
+	require.ErrorIs(t, err, rules.ErrInvalidBlock)
+}
+
+// A bad signature must win over the tx's own validity checks, as it did when senders were recovered before execution.
+func TestTxMessageReportsBadSignatureFirst(t *testing.T) {
+	to := common.HexToAddress("0xbb")
+	txn := &types.SetCodeTransaction{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &to, GasLimit: 21000, V: *uint256.NewInt(1)}, ChainID: *uint256.NewInt(1)}}
+	task := &TxTask{Header: &types.Header{BaseFee: uint256.NewInt(1)}, Config: chain.AllProtocolChanges, Txs: types.Transactions{txn}}
+	_, err := task.TxMessage()
+	require.ErrorIs(t, err, rules.ErrInvalidBlock)
+}
+
+// A creation takes its address from the tx nonce, which validation checks against the
+// sender's nonce, so a creation can run before its predecessor.
+func TestChargesSenderAtValidationIncludesCreation(t *testing.T) {
+	sender := accounts.InternAddress(common.HexToAddress("0xaa"))
+	task := func(value uint64) *TxTask {
+		txn := &types.LegacyTx{CommonTx: types.CommonTx{Value: *uint256.NewInt(value), GasLimit: 100000}, GasPrice: *uint256.NewInt(1)}
+		txn.SetSender(sender)
+		return &TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{txn}}
+	}
+	require.True(t, task(0).ChargesSenderAtValidation(0))
+	require.True(t, task(1).ChargesSenderAtValidation(0))
+}
+
+type failingAccountWriter struct {
+	*state.NoopWriter
+	err error
+}
+
+func (w failingAccountWriter) UpdateAccountData(accounts.Address, *accounts.Account, *accounts.Account) error {
+	return w.err
+}
+
+// A failed write says nothing about the block, so it must stop the stage rather than crash the node or condemn the block.
+func TestExecuteReportsFailedWriteSetAsOperational(t *testing.T) {
+	want := errors.New("disk error")
+	ibs := state.New(state.NewNoopReader())
+	ibs.SetVersionMap(nil)
+	defer ibs.Close()
+	require.NoError(t, ibs.AddBalance(accounts.InternAddress(common.HexToAddress("0xaa")), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+
+	task := &TxTask{TxNum: 1, TxIndex: 0, Header: &types.Header{}, Config: chain.TestChainBerlinConfig}
+	result := task.Execute(nil, nil, nil, ibs, failingAccountWriter{state.NewNoopWriter(), want}, chain.TestChainBerlinConfig, nil, datadir.Dirs{}, true)
+
+	require.ErrorIs(t, result.Err, want)
+	require.True(t, result.Operational)
+}
+
+func TestCreateReceiptBlobGasUsed(t *testing.T) {
+	t.Parallel()
+
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	to := crypto.PubkeyToAddress(key.PublicKey)
+	config := chain.TestChainOsakaConfig
+	signer := types.MakeSigner(config, 1, 0)
+	newDynamic := func() types.DynamicFeeTransaction {
+		return types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{To: &to, GasLimit: 21_000},
+			ChainID:  *config.ChainID,
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(1),
+		}
+	}
+	newBlob := func(hashes ...common.Hash) types.Transaction {
+		return &types.BlobTx{DynamicFeeTransaction: newDynamic(), MaxFeePerBlobGas: *uint256.NewInt(1), BlobVersionedHashes: hashes}
+	}
+	dynamic := newDynamic()
+
+	tests := []struct {
+		name string
+		tx   types.Transaction
+	}{
+		{"blob-2", newBlob(common.Hash{1, 1}, common.Hash{1, 2})},
+		{"blob-1", newBlob(common.Hash{1, 1})},
+		{"dynamic-fee", &dynamic},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			signedTx, err := types.SignTx(tc.tx, *signer, key)
+			require.NoError(t, err)
+			result := &TxResult{
+				Task: &TxTask{
+					Header: &types.Header{Number: *uint256.NewInt(1)},
+					Txs:    types.Transactions{signedTx},
+					Config: config,
+				},
+			}
+			receipt, err := result.CreateReceipt(0, 21_000, 0)
+			require.NoError(t, err)
+			require.Equal(t, signedTx.GetBlobGas(), receipt.BlobGasUsed)
+			if signedTx.Type() == types.BlobTxType {
+				require.NotZero(t, receipt.BlobGasUsed)
+			}
 		})
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -22,7 +23,7 @@ func TestGasSStoreDoesNotRefill(t *testing.T) {
 	require.NoError(t, ibs.SetState(accounts.ZeroAddress, accounts.ZeroKey, *uint256.NewInt(1)))
 	ibs.AddSlotToAccessList(accounts.ZeroAddress, accounts.ZeroKey)
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 200_000})
+	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 200_000})
 	defer evm.putCallContext(scope)
 	scope.cacheGen++
 	require.True(t, scope.useMdGas(params.StateGasPerStorageSet, mdgas.StateGas, nil, tracing.GasChangeIgnored))
@@ -52,7 +53,7 @@ func TestGasCallDoesNotCharge(t *testing.T) {
 			defer ibs.Close()
 			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 			initial := mdgas.MdGas{Execution: 500_000, State: params.StateGasNewAccount / 2}
-			scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, initial)
+			scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, initial)
 			defer evm.putCallContext(scope)
 			scope.cacheGen++
 			for range 4 {
@@ -79,4 +80,24 @@ func TestGasCallDoesNotCharge(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFrameCallDoesNotSpillStateGas(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	tx := &types.FrameTransaction{NonceKeys: nil, Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 500_000, State: params.StateGasNewAccount - 1}}}}
+	evm.FrameContext = ibs.NewFrameContext(tx, uint256.Int{})
+	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, tx.Frames[0].Limits)
+	defer evm.putCallContext(scope)
+	scope.cacheGen++
+	for range 4 {
+		scope.Stack.push(uint256.Int{})
+	}
+	scope.Stack.push(*uint256.NewInt(1))
+	scope.Stack.push(*uint256.NewInt(0x1000))
+	scope.Stack.push(*uint256.NewInt(500_000))
+	_, err := evm.jt[CALL].dynamicGas(evm, scope, tx.Frames[0].Limits, 0)
+	require.ErrorIs(t, err, ErrOutOfGas)
+	require.Zero(t, evm.FrameContext.Receipts[0].GasUsed.State)
 }

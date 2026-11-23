@@ -47,9 +47,9 @@ func TestGloasProposalPublishesBlockThenSignedEnvelope(t *testing.T) {
 	genesisRoot := common.Hash{3}
 	var submitted []string
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /eth/v3/validator/blocks/1", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /eth/v4/validator/blocks/1", func(w http.ResponseWriter, r *http.Request) {
 		assert.NotEmpty(t, r.URL.Query().Get("randao_reveal"))
-		assert.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": block, "execution_payload_envelope": envelope}))
+		assert.NoError(t, json.NewEncoder(w).Encode(blockContentsResponse(block, envelope)))
 	})
 	mux.HandleFunc("POST /eth/v2/beacon/blocks", func(w http.ResponseWriter, r *http.Request) {
 		decoded := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
@@ -99,15 +99,17 @@ func TestGloasProposalRetriesSameEnvelopeWithoutRepublishingBlock(t *testing.T) 
 	envelopeBodies := make(chan []byte, 2)
 	firstEnvelopeStarted := make(chan struct{})
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /eth/v3/validator/blocks/1", func(w http.ResponseWriter, _ *http.Request) {
-		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": block, "execution_payload_envelope": envelope}))
+	mux.HandleFunc("POST /eth/v4/validator/blocks/1", func(w http.ResponseWriter, _ *http.Request) {
+		assert.NoError(t, json.NewEncoder(w).Encode(blockContentsResponse(block, envelope)))
 	})
 	mux.HandleFunc("POST /eth/v2/beacon/blocks", func(http.ResponseWriter, *http.Request) {
 		blockPosts.Add(1)
 	})
 	mux.HandleFunc("POST /eth/v1/beacon/execution_payload_envelopes", func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
+		if !assert.NoError(t, err) {
+			return
+		}
 		// Count before queueing: the test waits on the bodies, so a post the
 		// counter has not recorded yet would read as one post short.
 		first := envelopePosts.Add(1) == 1
@@ -152,8 +154,8 @@ func TestGloasProposalStopsEnvelopeRetryWithService(t *testing.T) {
 	var envelopePosts atomic.Int32
 	firstEnvelopeDone := make(chan struct{})
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /eth/v3/validator/blocks/1", func(w http.ResponseWriter, _ *http.Request) {
-		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": block, "execution_payload_envelope": envelope}))
+	mux.HandleFunc("POST /eth/v4/validator/blocks/1", func(w http.ResponseWriter, _ *http.Request) {
+		assert.NoError(t, json.NewEncoder(w).Encode(blockContentsResponse(block, envelope)))
 	})
 	mux.HandleFunc("POST /eth/v2/beacon/blocks", func(http.ResponseWriter, *http.Request) {})
 	mux.HandleFunc("POST /eth/v1/beacon/execution_payload_envelopes", func(w http.ResponseWriter, _ *http.Request) {
@@ -182,15 +184,18 @@ func TestGloasProposalStopsEnvelopeRetryWithService(t *testing.T) {
 }
 
 func TestGloasProposalRejectsInvalidEnvelopeBeforePublishing(t *testing.T) {
-	for _, name := range []string{"missing", "null", "payload", "requests", "block root", "parent root", "builder", "payload hash", "block body", "block slot", "payload slot", "requests root", "bid", "bid message", "external builder envelope", "nil withdrawal", "nil deposit request", "nil withdrawal request", "nil consolidation request", "nil builder deposit request", "nil builder exit request", "nil transaction", "nested BAL"} {
+	for _, name := range []string{"missing", "bare self-build block", "null", "payload", "requests", "block root", "parent root", "builder", "payload hash", "block body", "block slot", "payload slot", "requests root", "bid", "bid message", "external builder envelope", "nil withdrawal", "nil deposit request", "nil withdrawal request", "nil consolidation request", "nil builder deposit request", "nil builder exit request", "nil transaction", "nested BAL"} {
 		t.Run(name, func(t *testing.T) {
 			cfg, key, block, envelope := proposalFixture(t, clparams.GloasVersion)
-			response := map[string]any{"data": block, "execution_payload_envelope": envelope}
+			response := blockContentsResponse(block, envelope)
+			contents := response["data"].(map[string]any)
 			switch name {
 			case "missing":
-				delete(response, "execution_payload_envelope")
+				delete(contents, "execution_payload_envelope")
+			case "bare self-build block":
+				response["data"] = block
 			case "null":
-				response["execution_payload_envelope"] = nil
+				contents["execution_payload_envelope"] = nil
 			case "payload":
 				envelope.Payload = nil
 			case "requests":
@@ -219,7 +224,7 @@ func TestGloasProposalRejectsInvalidEnvelopeBeforePublishing(t *testing.T) {
 				} else {
 					payload["block_access_list"] = []any{nil}
 				}
-				response["execution_payload_envelope"] = malformed
+				contents["execution_payload_envelope"] = malformed
 			case "block root":
 				envelope.BeaconBlockRoot[0] ^= 1
 			case "parent root":
@@ -246,10 +251,10 @@ func TestGloasProposalRejectsInvalidEnvelopeBeforePublishing(t *testing.T) {
 			case "external builder envelope":
 				block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = 1
 			}
-			gets, posts := 0, 0
+			templateRequests, posts := 0, 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodGet {
-					gets++
+				if r.Method == http.MethodPost && r.URL.Path == "/eth/v4/validator/blocks/1" {
+					templateRequests++
 					assert.NoError(t, json.NewEncoder(w).Encode(response))
 				} else {
 					posts++
@@ -260,7 +265,7 @@ func TestGloasProposalRejectsInvalidEnvelopeBeforePublishing(t *testing.T) {
 			var err error
 			require.NotPanics(t, func() { err = service.proposeBlock(context.Background(), 1, key) })
 			require.Error(t, err)
-			require.Equal(t, 1, gets)
+			require.Equal(t, 1, templateRequests)
 			require.Zero(t, posts, "invalid self-build template must not be published")
 		})
 	}
@@ -275,20 +280,22 @@ func TestProposalSubmissionPreservesForkAndErrorBoundaries(t *testing.T) {
 			}
 			cfg, key, block, envelope := proposalFixture(t, version)
 			response := map[string]any{"data": block}
+			templatePath, templateMethod := "/eth/v4/validator/blocks/1", http.MethodPost
 			switch {
 			case version == clparams.FuluVersion:
+				templatePath, templateMethod = "/eth/v3/validator/blocks/1", http.MethodGet
 				response["data"] = &cltypes.DenebBeaconBlock{Block: block, KZGProofs: solid.NewStaticListSSZ[*cltypes.KZGProof](0, cltypes.BYTES_KZG_PROOF), Blobs: solid.NewStaticListSSZ[*cltypes.Blob](0, int(cltypes.BYTES_PER_BLOB))}
 			case name == "external builder":
 				block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = 1
 			default:
-				response["execution_payload_envelope"] = envelope
+				response = blockContentsResponse(block, envelope)
 			}
 			var requests []string
 			envelopePosts := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
-				case "/eth/v3/validator/blocks/1":
-					assert.Equal(t, http.MethodGet, r.Method)
+				case templatePath:
+					assert.Equal(t, templateMethod, r.Method)
 					requests = append(requests, "template")
 					assert.NoError(t, json.NewEncoder(w).Encode(response))
 				case "/eth/v2/beacon/blocks":
@@ -365,4 +372,65 @@ func proposalFixture(t *testing.T, version clparams.StateVersion) (*clparams.Bea
 	envelope.Payload.BlockHash = bid.BlockHash
 	envelope.Payload.SlotNumber = block.Slot
 	return &cfg, keys[0], block, envelope
+}
+
+func blockContentsResponse(block *cltypes.BeaconBlock, envelope *cltypes.ExecutionPayloadEnvelope) map[string]any {
+	return map[string]any{"data": map[string]any{"block": block, "execution_payload_envelope": envelope}}
+}
+
+func TestGloasProposalRequestsV4TemplateWithBuilderConfig(t *testing.T) {
+	cfg, key, block, envelope := proposalFixture(t, clparams.GloasVersion)
+	var template *http.Request
+	var templateBody []byte
+	mux := http.NewServeMux()
+	mux.HandleFunc("/eth/v4/validator/blocks/1", func(w http.ResponseWriter, r *http.Request) {
+		template = r.Clone(context.Background())
+		var err error
+		templateBody, err = io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		assert.NoError(t, json.NewEncoder(w).Encode(blockContentsResponse(block, envelope)))
+	})
+	mux.HandleFunc("POST /eth/v2/beacon/blocks", func(http.ResponseWriter, *http.Request) {})
+	mux.HandleFunc("POST /eth/v1/beacon/execution_payload_envelopes", func(http.ResponseWriter, *http.Request) {})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	service := &Service{client: NewBeaconClient(server.URL), cfg: cfg, genesisValidatorsRoot: common.Hash{3}, logger: log.New()}
+
+	require.NoError(t, service.proposeBlock(context.Background(), 1, key))
+
+	require.NotNil(t, template)
+	require.Equal(t, http.MethodPost, template.Method)
+	require.NotEmpty(t, template.URL.Query().Get("randao_reveal"))
+	require.Equal(t, "true", template.URL.Query().Get("include_payload"))
+	require.Equal(t, "application/json", template.Header.Get("Content-Type"))
+	require.Equal(t, "application/json", template.Header.Get("Accept"))
+	require.Equal(t, "gloas", template.Header.Get("Eth-Consensus-Version"))
+	require.JSONEq(t, `{"min_bid":"0","builder_boost_factor":"100","builders":[]}`, string(templateBody))
+}
+
+func TestGloasProposalRetriesV4TemplateWithFullBody(t *testing.T) {
+	cfg, key, block, envelope := proposalFixture(t, clparams.GloasVersion)
+	var bodies []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /eth/v4/validator/blocks/1", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		bodies = append(bodies, string(body))
+		if len(bodies) == 1 {
+			http.Error(w, "busy", http.StatusServiceUnavailable)
+			return
+		}
+		assert.NoError(t, json.NewEncoder(w).Encode(blockContentsResponse(block, envelope)))
+	})
+	mux.HandleFunc("POST /eth/v2/beacon/blocks", func(http.ResponseWriter, *http.Request) {})
+	mux.HandleFunc("POST /eth/v1/beacon/execution_payload_envelopes", func(http.ResponseWriter, *http.Request) {})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	service := &Service{client: NewBeaconClient(server.URL), cfg: cfg, genesisValidatorsRoot: common.Hash{3}, logger: log.New()}
+
+	require.NoError(t, service.proposeBlock(context.Background(), 1, key))
+	require.Len(t, bodies, 2)
+	for _, body := range bodies {
+		require.JSONEq(t, `{"min_bid":"0","builder_boost_factor":"100","builders":[]}`, body)
+	}
 }

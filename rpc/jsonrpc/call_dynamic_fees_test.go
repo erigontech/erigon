@@ -90,8 +90,7 @@ func TestCallDynamicFeesBeforeLondon(t *testing.T) {
 			return result, err
 		}
 		with := func(fees map[string]any) map[string]any {
-			// A nonce spares eth_createAccessList a txpool lookup.
-			call := map[string]any{"from": bankAddr, "gas": "0x493e0", "nonce": "0x0", "data": gasPriceCode}
+			call := map[string]any{"from": bankAddr, "gas": "0x493e0", "data": gasPriceCode}
 			maps.Copy(call, fees)
 			return call
 		}

@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -102,7 +103,7 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 				_ = cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 			}
 			logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-			db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, chain, logger)
+			db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, logger)
 			if err != nil {
 				return fmt.Errorf("opening DB: %w", err)
 			}
@@ -129,7 +130,7 @@ var (
 	cmdStageHeaders     = makeStageCmd("stage_headers", stageHeaders, true, false, false)
 	cmdStageBodies      = makeStageCmd("stage_bodies", stageBodies, true, false, false)
 	cmdStageSenders     = makeStageCmd("stage_senders", stageSenders, true, false, false)
-	cmdStageExec        = makeStageCmd("stage_exec", stageExec, true, true, false)
+	cmdStageExec        = resetWithoutChaindata(makeStageCmd("stage_exec", stageExec, true, true, false))
 	cmdStageExecReplay  = makeStageCmd("stage_exec_replay", stageExecReplay, true, true, false)
 	cmdCaptureBlock     = makeStageCmd("capture_block", captureBlock, false, true, false)
 	cmdStageCustomTrace = makeStageCmd("stage_custom_trace", stageCustomTrace, true, true, false)
@@ -158,7 +159,7 @@ var cmdPrintTableSizes = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -277,6 +278,9 @@ var cmdRunMigrations = &cobra.Command{
 func runMigrationsForDB(label kv.Label, path string, logger log.Logger) error {
 	logger.Info("Opening DB", "label", label, "path", path)
 	cfg := dbCfg(label, path).RemoveFlags(mdbx.Accede).Exclusive(true)
+	if err := checkExistingDB(cfg); err != nil {
+		return err
+	}
 	db, err := openRawDB(cfg, true, logger)
 	if err != nil {
 		return err
@@ -608,7 +612,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		}
 
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber, true, false)
-		if err := stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
+		if err := stagedsync.UnwindSendersStage(u, tx, cfg); err != nil {
 			return err
 		}
 	default:
@@ -691,6 +695,36 @@ func resolveExecTarget(block, limit, execProgress, sendersProgress uint64) (targ
 	return target, !(target > 0 && target <= execProgress)
 }
 
+// resetWithoutChaindata lets `stage_exec --reset` run on a datadir without a DB in its
+// own chaindata: there is no execution state to reset, so it only clears the
+// pending-reset marker that a commitment convert left. An integration tool never
+// creates a DB, and the node starts a new one.
+func resetWithoutChaindata(cmd *cobra.Command) *cobra.Command {
+	runE := cmd.RunE
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if reset && isDefaultChaindata(chaindata, datadirCli) {
+			exists, err := dir.FileExist(filepath.Join(chaindata, "mdbx.dat"))
+			if err != nil {
+				return err
+			}
+			if !exists {
+				logger := debug.SetupCobra(cmd, "integration")
+				logger.Info("[stage_exec] no chaindata: nothing to reset")
+				return dbstate.CompleteExecReset(datadir.Open(datadirCli), logger)
+			}
+		}
+		return runE(cmd, args)
+	}
+	return cmd
+}
+
+func resetExec(ctx context.Context, db kv.TemporalRwDB, dirs datadir.Dirs, logger log.Logger) error {
+	if err := rawdbreset.ResetExec(ctx, db); err != nil {
+		return err
+	}
+	return dbstate.CompleteExecReset(dirs, logger)
+}
+
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	defer startExecProfiling(dirs, logger)()
@@ -700,10 +734,10 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	defer engine.Close()
 	must(sync.SetCurrentStage(stages.Execution))
 	if reset {
-		if err := rawdbreset.ResetExec(ctx, db); err != nil {
-			return err
-		}
-		return nil
+		return resetExec(ctx, db, dirs, logger)
+	}
+	if err := checkCommitmentTrieMatchesFiles(); err != nil {
+		return err
 	}
 
 	if txtrace {
@@ -737,6 +771,9 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		dirs, br, genesis, syncCfg, false /*experimentalBAL*/, exec.NewBlockReadAheader())
 
 	if unwind > 0 {
+		if unwind > s.BlockNumber {
+			return errors.New("cannot unwind past 0")
+		}
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 			minUnwindableBlockNum, _, err := rawtemporaldb.CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
 			if err != nil {
@@ -1165,6 +1202,12 @@ func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.Tempo
 		return nil, err
 	}
 	dirs := datadir.New(datadirCli)
+	if err := dbstate.MatchCommitmentSchemaToFiles(dirs); err != nil {
+		return nil, err
+	}
+	if err := dbstate.CheckSnapshotFileVersions(dirs); err != nil {
+		return nil, err
+	}
 	chainConfig := fromdb.ChainConfig(db)
 	snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
 	_allSnapshotsSingleton = blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, logger)
@@ -1173,12 +1216,32 @@ func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.Tempo
 		return nil, err
 	}
 	aggOpts := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings)
-	if reset {
+	if reset || skipFilesDBGapCheck {
 		aggOpts = aggOpts.SkipFilesDBGapCheck()
 	}
 	agg := aggOpts.MustOpen(ctx)
 	agg.SetProduceMod(snapCfg.ProduceE3)
 	return temporal.New(db, agg, _allSnapshotsSingleton)
+}
+
+func checkCommitmentTrieMatchesFiles() error {
+	if err := dbstate.CheckExecResetDone(datadir.New(datadirCli)); err != nil {
+		return err
+	}
+	cfg := statecfg.Schema.CommitmentDomain
+	if cfg.CommitmentV3Records != statecfg.ExperimentalCommitmentV3 {
+		if statecfg.ExperimentalCommitmentV3 {
+			return errors.New("commitment domain files are legacy and ERIGON_COMMITMENT_V3=true; run `integration commitment convert --v3` first")
+		}
+		return errors.New("commitment domain files are v3 and ERIGON_COMMITMENT_V3 is off; set ERIGON_COMMITMENT_V3=true")
+	}
+	if (cfg.Hist.FileVersion.DataV.Current.Major >= 3) != cfg.CommitmentV3Records {
+		if cfg.CommitmentV3Records {
+			return errors.New("commitment domain files are v3 and history files are legacy; roll the conversion back with `integration commitment convert --restore`")
+		}
+		return errors.New("commitment history files are v3 and domain files are legacy; finish the conversion with `integration commitment convert --v3 --no-history` or roll it back with `integration commitment convert --restore`")
+	}
+	return nil
 }
 
 func allSnapshots(ctx context.Context, db kv.TemporalRwDB, logger log.Logger) (*blocksnapshots.RoSnapshots, *freezeblocks.CaplinSnapshots, error) {
@@ -1298,14 +1361,13 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 		cfg.Builder = *builderConfig
 	}
 	cfg.Dirs = dirs
-	dbReadConcurrency := runtime.GOMAXPROCS(-1) * 16
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-	blockReader, blockWriter, allSn, _, err := eth.SetUpBlockReader(ctx, db, dirs, &cfg, chainConfig, dbReadConcurrency, logger, blockSnapBuildSema)
+	blockReader, blockWriter, allSn, _, err := eth.SetUpBlockReader(ctx, db, dirs, &cfg, chainConfig, logger, blockSnapBuildSema)
 	if err != nil {
 		panic(err)
 	}
 	cfg.Snapshot = allSn.Cfg()
-	engine := initRulesEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
+	engine := initRulesEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, logger)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
@@ -1353,7 +1415,7 @@ func stage(st *stagedsync.Sync, tx kv.Tx, stage stages.SyncStage) *stagedsync.St
 	return res
 }
 
-func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader dbservices.FullBlockReader, logger log.Logger) rules.Engine {
+func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, logger log.Logger) rules.Engine {
 	config := ethconfig.Defaults
 	var rulesConfig any
 	switch {
@@ -1363,7 +1425,7 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 		rulesConfig = &config.Ethash
 	}
 	return rulesconfig.CreateRulesEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, rulesConfig,
-		false /* noVerify */, blockReader, db.ReadOnly(), logger)
+		false /* noVerify */, db.ReadOnly(), logger)
 }
 
 func readGenesis(chain string) *types.Genesis {

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -34,9 +35,50 @@ import (
 
 const DelegateDesignationCodeSize = 23
 
+var (
+	ErrSetCodePrePrague           = errors.New("SetCode transaction not allowed before Prague fork")
+	ErrSetCodeContractCreation    = errors.New("contract creation not allowed with type4 txs")
+	ErrSetCodeEmptyAuthorizations = errors.New("SetCode transaction must have at least one authorization")
+)
+
+// ValidateSetCodePrerequisites checks that SetCode is active and the transaction
+// has a recipient and at least one authorization. Callers must first identify
+// the transaction as SetCode because a nil authorization list counts as empty.
+func ValidateSetCodePrerequisites(auths []Authorization, contractCreation, isPrague bool) error {
+	if !isPrague {
+		return ErrSetCodePrePrague
+	}
+	if contractCreation {
+		return ErrSetCodeContractCreation
+	}
+	if len(auths) == 0 {
+		return ErrSetCodeEmptyAuthorizations
+	}
+	return nil
+}
+
 type SetCodeTransaction struct {
 	DynamicFeeTransaction
 	Authorizations []Authorization
+	// authorities is set by the block pre-pass when it starts a list, so the executor waits for it rather than
+	// recovering the same list again; it is read and written atomically.
+	authorities atomic.Pointer[RecoveredAuthorities]
+}
+
+// RecoveredAuthorities is RecoverSigners of a tx's authorization list; Signers and Errs are set once done is closed.
+type RecoveredAuthorities struct {
+	done    chan struct{}
+	Signers []common.Address
+	Errs    []error
+}
+
+// WarmAuthorities recovers the authorization list on several goroutines for the tx's Message.
+func (tx *SetCodeTransaction) WarmAuthorities(chainID *uint256.Int) {
+	r := &RecoveredAuthorities{done: make(chan struct{})}
+	if tx.authorities.Load() == nil && tx.authorities.CompareAndSwap(nil, r) {
+		r.Signers, r.Errs = RecoverSigners(tx.Authorizations, chainID)
+		close(r.done)
+	}
 }
 
 func (tx *SetCodeTransaction) Unwrap() Transaction {
@@ -151,6 +193,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *c
 		return nil, errors.New("SetCodeTransaction without authorizations is invalid")
 	}
 	msg.authorizations = tx.Authorizations
+	msg.authorities = &tx.authorities
 
 	var err error
 	if msg.from, err = tx.Sender(s); err != nil {

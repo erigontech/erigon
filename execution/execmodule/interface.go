@@ -19,11 +19,14 @@ package execmodule
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -69,11 +72,17 @@ type ValidationResult struct {
 	ValidationError  string
 }
 
+// BlockStateView reads a block: blockTx holds the block and its executed state, parentState the latest state of its parent.
+type BlockStateView func(blockTx kv.TemporalTx, parentState kv.TemporalGetter) error
+
 // ForkChoiceResult is the native return type for UpdateForkChoice.
 type ForkChoiceResult struct {
 	Status          ExecutionStatus
 	LatestValidHash common.Hash
 	ValidationError string
+	MissingHash     common.Hash
+	// UpdateInProgress distinguishes admitted asynchronous work from a Busy rejection.
+	UpdateInProgress bool
 }
 
 // ForkChoiceState is the native return type for GetForkChoice.
@@ -130,18 +139,28 @@ type ExecutionModule interface {
 	// rejection (e.g. ExecutionStatusTooFarAway).
 	InsertBlocks(ctx context.Context, blocks []*types.Block) (ExecutionStatus, error)
 
+	AddSendersRecovery(blockHash common.Hash, recovery *exec.SendersRecovery)
+
 	// --- Chain validation -------------------------------------------------
 
-	// ValidateChain validates the chain ending at the block identified by
-	// blockHash and blockNumber.
-	ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error)
+	// ValidateChain validates the chain ending at block.
+	ValidateChain(ctx context.Context, block *types.Block) (ValidationResult, error)
+
+	// ValidateChainAndView is ValidateChain that, for a VALID block, also returns a view that calls fn with the
+	// block's state. The view holds no module lock and must be called once; the caller may first release its own
+	// locks. A nil view means fn already ran, for a tip on a side fork whose state the module drops once released,
+	// or that there is no state: a committed block whose changesets are pruned. It reads a committed block without
+	// the module, waits up to wait for a busy module, and executes again a block whose state is no longer held.
+	ValidateChainAndView(ctx context.Context, block *types.Block, wait time.Duration, fn BlockStateView) (ValidationResult, func() error, error)
 
 	// --- Fork choice ------------------------------------------------------
 
 	// UpdateForkChoice updates the canonical head, safe, and finalized block
 	// hashes.  The caller may set a deadline on ctx to bound how long to wait
-	// synchronously: a DeadlineExceeded returns ForkChoiceResult{Status:Busy}
-	// so the caller can poll with GetForkChoice.
+	// synchronously: an admitted update that exceeds the deadline returns Busy
+	// with UpdateInProgress set so the caller can poll with GetForkChoice.
+	// TooFarAway reports state ahead of the blocks; the canonical chain up to
+	// headHash is already committed when it is returned.
 	UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error)
 
 	// GetForkChoice returns the current fork choice state (head, safe,
@@ -152,6 +171,8 @@ type ExecutionModule interface {
 
 	// AssembleBlock initiates building a block. Busy reports that the execution module is occupied;
 	// otherwise PayloadID identifies the new build.
+	// Unfinished explicit-list builds (RequireAllTransactions) are discarded when ctx ends.
+	// Ordinary payload builds remain available for later retrieval after the requesting call ends.
 	AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error)
 
 	// GetAssembledBlock stops and waits for payloadID's builder. Busy reports that the execution
@@ -168,6 +189,11 @@ type ExecutionModule interface {
 	// implementation resolve the missing value from the database.
 	// Returns nil (no error) when the block is not found.
 	GetHeader(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error)
+
+	// GetHeadersByRange returns canonical headers from one read view,
+	// truncated at the latest known block. Unavailable headers within
+	// the range are returned as nil entries.
+	GetHeadersByRange(ctx context.Context, start, count uint64) ([]*types.Header, error)
 
 	// GetBody returns the raw body for the block identified by blockHash
 	// and/or blockNumber.  Pass nil for an unknown argument.
@@ -197,8 +223,12 @@ type ExecutionModule interface {
 	// --- Hash / number queries --------------------------------------------
 
 	// IsCanonicalHash reports whether blockHash belongs to the canonical
-	// chain.
+	// chain and Execution progress has reached its height.
 	IsCanonicalHash(ctx context.Context, blockHash common.Hash) (bool, error)
+
+	// IsValidated reports whether a payload with blockHash already passed
+	// validation.
+	IsValidated(blockHash common.Hash) bool
 
 	// GetHeaderHashNumber returns the block number for blockHash, or nil
 	// when the hash is unknown.

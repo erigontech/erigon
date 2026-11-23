@@ -21,12 +21,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/common/math"
 )
 
 // ByteListSSZ is a variable-length SSZ byte list (ByteList[N]) with a
@@ -34,7 +33,8 @@ import (
 // 32 bytes max), this type supports arbitrary limits such as
 // MAX_BYTES_PER_TRANSACTION (2^30).
 type ByteListSSZ struct {
-	data []byte
+	data            []byte
+	progressiveRoot *atomic.Pointer[[32]byte] // Replaced on mutation; see TransactionsSSZ.progressiveRoot.
 	// limit is the maximum number of bytes allowed (the N in ByteList[N]).
 	limit uint64
 }
@@ -42,8 +42,9 @@ type ByteListSSZ struct {
 // NewByteListSSZ creates a new empty ByteListSSZ with the given maximum length.
 func NewByteListSSZ(limit uint64) *ByteListSSZ {
 	return &ByteListSSZ{
-		data:  nil,
-		limit: limit,
+		data:            nil,
+		progressiveRoot: new(atomic.Pointer[[32]byte]),
+		limit:           limit,
 	}
 }
 
@@ -55,6 +56,7 @@ func (b *ByteListSSZ) UnmarshalJSON(buf []byte) error {
 	if uint64(len(h)) > b.limit {
 		return fmt.Errorf("ByteListSSZ: JSON data length %d exceeds limit %d", len(h), b.limit)
 	}
+	b.progressiveRoot = new(atomic.Pointer[[32]byte])
 	b.data = []byte(h)
 	return nil
 }
@@ -91,6 +93,7 @@ func (b *ByteListSSZ) DecodeSSZ(buf []byte, _ int) error {
 	if uint64(len(buf)) > b.limit {
 		return fmt.Errorf("ByteListSSZ: SSZ data length %d exceeds limit %d", len(buf), b.limit)
 	}
+	b.progressiveRoot = new(atomic.Pointer[[32]byte])
 	b.data = bytes.Clone(buf)
 	return nil
 }
@@ -103,22 +106,15 @@ func (b *ByteListSSZ) HashSSZ() ([32]byte, error) {
 	// Number of 32-byte chunks needed to hold limit bytes.
 	chunkLimit := (b.limit + 31) / 32
 
-	// Pack the data into 32-byte chunks and merkleize with the chunk limit.
-	leafCount := math.NextPowerOfTwo(uint64((len(b.data) + 31) / length.Hash))
-	if leafCount == 0 {
-		leafCount = 1
-	}
-	leaves := make([]byte, leafCount*uint64(length.Hash))
-	copy(leaves, b.data)
-
-	if err := merkle_tree.MerkleRootFromFlatLeavesWithLimit(leaves, leaves, chunkLimit); err != nil {
+	var root [32]byte
+	if err := merkle_tree.MerkleRootFromFlatLeavesWithLimit(b.data, root[:], chunkLimit); err != nil {
 		return [32]byte{}, err
 	}
 
 	// mix_in_length: hash(root || length)
 	var result [32]byte
 	mixIn := make([]byte, 64)
-	copy(mixIn[:32], leaves[:length.Hash])
+	copy(mixIn[:32], root[:])
 	binary.LittleEndian.PutUint64(mixIn[32:], uint64(len(b.data)))
 	if err := merkle_tree.HashByteSlice(result[:], mixIn); err != nil {
 		return [32]byte{}, err
@@ -127,7 +123,20 @@ func (b *ByteListSSZ) HashSSZ() ([32]byte, error) {
 }
 
 func (b *ByteListSSZ) HashSSZProgressive() ([32]byte, error) {
-	return merkle_tree.ProgressiveBasicListRoot(b.data, uint64(len(b.data)))
+	rootCache := b.progressiveRoot
+	if rootCache != nil {
+		if root := rootCache.Load(); root != nil {
+			return *root, nil
+		}
+	}
+	root, err := merkle_tree.ProgressiveBasicListRoot(b.data, uint64(len(b.data)))
+	if err != nil {
+		return [32]byte{}, err
+	}
+	if rootCache != nil {
+		rootCache.CompareAndSwap(nil, &root)
+	}
+	return root, nil
 }
 
 // Bytes returns a copy of the underlying data.
@@ -141,6 +150,7 @@ func (b *ByteListSSZ) SetBytes(buf []byte) error {
 	if uint64(len(buf)) > b.limit {
 		return fmt.Errorf("ByteListSSZ: data length %d exceeds limit %d", len(buf), b.limit)
 	}
+	b.progressiveRoot = new(atomic.Pointer[[32]byte])
 	b.data = bytes.Clone(buf)
 	return nil
 }

@@ -8,17 +8,24 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// newTestGenerator builds a minimal Generator with only the two receipt caches
-// populated. The other fields (blockReader, engine, …) are left nil because
-// TryGetCachedReceipt never touches them.
+// newTestGenerator serves receipt lookups from the caches and database history.
+// Tests that replay blocks need the block reader and engine from NewGenerator.
 func newTestGenerator(t *testing.T) *Generator {
 	t.Helper()
 	rsc, err := lru.New[common.Hash, types.Receipts](256)
 	require.NoError(t, err)
-	return &Generator{receiptCache: newReceiptCache(datasize.MB), receiptsCache: rsc}
+	fc, err := lru.New[uint64, common.Hash](256)
+	require.NoError(t, err)
+	return &Generator{
+		receiptCache:    newReceiptCache(datasize.MB),
+		receiptsCache:   rsc,
+		frozenCanonical: fc,
+		txNumReader:     rawdbv3.TxNums,
+	}
 }
 
 func TestTryGetCachedReceipt(t *testing.T) {

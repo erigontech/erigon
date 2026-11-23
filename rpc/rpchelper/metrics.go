@@ -31,6 +31,7 @@ var (
 	createdSubscriptionsCounter      = metrics.GetOrCreateCounterVec("subscriptions_created_total", []string{filterLabelName, protocolLabelName}, "Total number of subscriptions created")
 	unsubscribedSubscriptionsCounter = metrics.GetOrCreateCounterVec("subscriptions_unsubscribed_total", []string{filterLabelName, protocolLabelName}, "Total number of subscriptions removed by client unsubscribe or timeout eviction")
 	reapedSubscriptionsCounter       = metrics.GetOrCreateCounterVec("subscriptions_reaped_total", []string{filterLabelName}, "Total number of idle subscriptions evicted by timeout")
+	subscriptionsBudgetUsedGauge     = metrics.GetOrCreateGauge("subscriptions_budget_used")
 
 	activeSubscriptionsLogsAllAddressesGauge = metrics.GetOrCreateGauge("subscriptions_logs_all_addresses")
 	activeSubscriptionsLogsAllTopicsGauge    = metrics.GetOrCreateGauge("subscriptions_logs_all_topics")

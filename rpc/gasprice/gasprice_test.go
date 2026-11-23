@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
@@ -112,6 +113,70 @@ func TestSuggestPrice(t *testing.T) {
 	if got.CmpUint64(expect) != 0 {
 		t.Fatalf("Gas price mismatch, want %d, got %d", expect, got)
 	}
+}
+
+func TestSuggestTipCapFrameFeeBudget(t *testing.T) {
+	const baseFee, blobBaseFee = 10, 2
+	// One update fraction of excess blob gas sets the blob base fee to 2 wei.
+	excessBlobGas := chain.AllProtocolChanges.GetBlobGasPriceUpdateFraction(0)
+	transfer := types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 21_000, uint256.NewInt(baseFee), nil)
+	for _, tc := range []struct {
+		name          string
+		blobs         []common.Hash
+		unusedGas     uint64
+		tipAtGasLimit uint64
+		wantTip       uint64
+	}{
+		{name: "unused gas funds the tip", unusedGas: 30_000, wantTip: 3},
+		{name: "blob fees reduce the tip", blobs: []common.Hash{{1}}, tipAtGasLimit: 2, wantTip: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frame := &types.FrameTransaction{
+				SenderAddress: common.Address{1},
+				Frames: []types.Frame{{
+					Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 50_000},
+				}},
+				Fees:                types.FrameFees{TipCap: *uint256.NewInt(3)},
+				BlobVersionedHashes: tc.blobs,
+			}
+			gasLimit := frame.GetGasLimit()
+			frame.Fees.MaxFee.SetUint64((baseFee+tc.tipAtGasLimit)*gasLimit + blobBaseFee*frame.GetBlobGas())
+			gasUsed := gasLimit - tc.unusedGas
+			header := &types.Header{
+				Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: transfer.GetGasLimit() + gasUsed,
+				BaseFee: uint256.NewInt(baseFee), ExcessBlobGas: &excessBlobGas,
+			}
+			block := types.NewBlockFromStorage(common.Hash{1}, header, types.Transactions{transfer, frame}, nil, nil, nil)
+			backend := &feeChain{
+				blocks:   []*types.Block{nil, block},
+				receipts: map[uint64]types.Receipts{1: {nil, {GasUsed: gasUsed}}},
+			}
+			oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 1}, jsonrpc.NewGasPriceCache(), nil, log.New())
+			tip, err := oracle.SuggestTipCap(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, uint256.NewInt(tc.wantTip), tip)
+		})
+	}
+}
+
+func TestOracleWithPrunedFrameReceipt(t *testing.T) {
+	transfer := types.NewTransaction(0, common.Address{}, nil, 21_000, uint256.NewInt(17), nil)
+	frame := &types.FrameTransaction{SenderAddress: common.Address{1}}
+	header := &types.Header{Number: *uint256.NewInt(1), Coinbase: common.Address{2}, BaseFee: uint256.NewInt(10), GasLimit: 30_000_000}
+	block := types.NewBlockFromStorage(header.Hash(), header, types.Transactions{transfer, frame}, nil, nil, nil)
+	backend := &feeChain{blocks: []*types.Block{nil, block}, receipts: map[uint64]types.Receipts{1: {{GasUsed: 21_000}, nil}}}
+	config := gaspricecfg.Config{Blocks: 1, MaxHeaderHistory: 1, MaxBlockHistory: 1}
+	oracle := gasprice.NewOracle(backend, config, jsonrpc.NewGasPriceCache(), nil, log.New())
+	t.Run("suggestion uses the ordinary transaction", func(t *testing.T) {
+		tip, err := oracle.SuggestTipCap(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(7), tip)
+	})
+	t.Run("weighted rewards stop at the missing receipt", func(t *testing.T) {
+		_, rewards, _, _, _, _, err := oracle.FeeHistory(t.Context(), 1, 1, []float64{50})
+		require.NoError(t, err)
+		require.Empty(t, rewards)
+	})
 }
 
 const (
@@ -234,6 +299,7 @@ type mockOracleBackend struct {
 	frozen         uint64
 	canonicalErr   error
 	prepareForkErr error
+	rewardsErr     error
 	headerCalls    atomic.Int32
 	forkCalls      atomic.Int32
 	pending        *types.Block
@@ -268,6 +334,10 @@ func (m *mockOracleBackend) HeaderByNumber(_ context.Context, number rpc.BlockNu
 	return header, nil
 }
 
+func (m *mockOracleBackend) LatestHead(context.Context) (uint64, common.Hash, error) {
+	return m.head.Number.Uint64(), m.head.Hash(), nil
+}
+
 func (m *mockOracleBackend) BlockByNumber(ctx context.Context, _ rpc.BlockNumber) (*types.Block, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -283,8 +353,8 @@ func (m *mockOracleBackend) GetLatestBlockNumber() (uint64, error) {
 	return m.head.Number.Uint64(), nil
 }
 
-func (m *mockOracleBackend) GetReceiptsGasUsed(_ context.Context, _ *types.Block) (types.Receipts, error) {
-	return nil, nil
+func (m *mockOracleBackend) GetReceiptsGasUsed(context.Context, *types.Block) (types.Receipts, error) {
+	return types.Receipts{}, nil
 }
 
 func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
@@ -292,7 +362,7 @@ func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Recei
 }
 
 func (m *mockOracleBackend) CheckBlockRewardsAvailable(_ context.Context, _ uint64) error {
-	return nil
+	return m.rewardsErr
 }
 
 func (m *mockOracleBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]common.Hash, error) {
@@ -339,6 +409,17 @@ func (m *mockOracleBackend) BlockByHashNumber(ctx context.Context, hash common.H
 func (m *mockOracleBackend) Fork(_ context.Context) (gasprice.OracleBackend, func(), error) {
 	m.forkCalls.Add(1)
 	return nil, nil, nil // sequential mode
+}
+
+func TestFeeHistoryPropagatesRewardAvailabilityError(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	wantErr := errors.New("history lookup failed")
+	backend := &mockOracleBackend{head: head, rewardsErr: wantErr}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, _, _, _, _, err := oracle.FeeHistory(t.Context(), 1, rpc.LatestBlockNumber, []float64{50})
+	require.ErrorIs(t, err, wantErr)
 }
 
 // TestFeeHistory_CanonicalHashErrorDegradesToUncached pins that a transient
@@ -642,6 +723,25 @@ func TestSuggestTipCap_EmptyBlocksFallbackMatchesGeth(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, uint64(common.GWei/1000), got.Uint64(),
 		"empty-block fallback must be GWei/1000 to match Geth's default start price")
+}
+
+// TestSuggestTipCap_CachedHeadReadsNoHeader pins that a request served from the
+// tip cache identifies the head without reading its header.
+func TestSuggestTipCap_CachedHeadReadsNoHeader(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+
+	backend := &mockOracleBackend{head: head}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), nil, log.New())
+
+	cold, err := oracle.SuggestTipCap(context.Background())
+	require.NoError(t, err)
+	backend.headerCalls.Store(0)
+
+	cached, err := oracle.SuggestTipCap(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, cold, cached)
+	require.Zero(t, backend.headerCalls.Load(), "a cached request must not read the head header")
 }
 
 // TestSuggestTipCap_ContextCancelled verifies that a cancelled caller context is

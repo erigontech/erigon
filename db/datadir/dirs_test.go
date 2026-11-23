@@ -252,3 +252,22 @@ func Test_RenameOldVersions_TorrentOnlyResetsDownloader(t *testing.T) {
 		mustDirExist(t, d.Downloader)
 	})
 }
+
+func Test_RenameOldVersions_DropsTheTorrentOfTheNameItRenamesOnto(t *testing.T) {
+	for _, withTwin := range []bool{true, false} {
+		d := New(t.TempDir())
+		legacy := filepath.Join(d.SnapDomain, "v1-accounts.0-1.kv")
+		renamed := filepath.Join(d.SnapDomain, "v1.0-accounts.0-1.kv")
+		touch(t, legacy)
+		if withTwin {
+			touch(t, renamed)
+		}
+		touch(t, renamed+".torrent")
+
+		require.NoError(t, d.RenameOldVersions(false))
+
+		mustNotExist(t, legacy)
+		mustExist(t, renamed)
+		mustNotExist(t, renamed+".torrent")
+	}
+}

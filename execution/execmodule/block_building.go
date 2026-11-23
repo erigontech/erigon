@@ -27,7 +27,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -186,18 +188,16 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	// A stopped builder is still worth reusing: it holds the payload it was stopped for, which is
 	// exactly what a repeated request is asking for. Only one that cannot produce - failed, or
 	// discarded with its work still winding down - has to be passed over.
-	if previousID, ok := e.buildersByTimestamp[params.Timestamp]; ok {
-		if previous := e.builders[previousID]; previous != nil && previous.builder != nil &&
+	for previousID, previous := range e.builders {
+		if previous != nil && previous.params != nil && previous.params.Timestamp == params.Timestamp && previous.builder != nil &&
 			!previous.builder.Failed() && !previous.builder.Discarded() {
 			if sameBuildRequest(previous.params, params) {
+				e.buildersByTimestamp[params.Timestamp] = previousID
 				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
 				return AssembleBlockResult{PayloadID: previousID}, nil
 			}
 		}
 	}
-	// A superseded builder keeps running to its own deadline. The timestamp index moves to the new
-	// one, so nothing reaches it by dedup, while an id already handed out goes on answering with a
-	// payload that is still growing.
 	e.evictOldBuilders()
 
 	e.nextPayloadId++
@@ -205,10 +205,20 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	ownedParams.PayloadId = e.nextPayloadId
 
 	secondsPerSlot := e.config.SecondsPerSlot()
+	maxBuildTime := buildDuration(params.Timestamp, time.Now(), secondsPerSlot)
+	// Explicit lists use the request budget, independent of the payload timestamp.
+	if ownedParams.RequireAllTransactions {
+		if deadline, ok := ctx.Deadline(); ok {
+			maxBuildTime = time.Until(deadline)
+		}
+	}
 	e.builders[e.nextPayloadId] = &builderEntry{
 		builder: builder.NewBlockBuilder(e.backgroundCtx, e.builderFunc, ownedParams,
-			buildDuration(params.Timestamp, time.Now(), secondsPerSlot), stopGraceDuration(secondsPerSlot)),
+			maxBuildTime, stopGraceDuration(secondsPerSlot)),
 		params: ownedParams,
+	}
+	if ownedParams.RequireAllTransactions {
+		context.AfterFunc(ctx, e.builders[e.nextPayloadId].builder.Discard)
 	}
 	e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
@@ -217,19 +227,16 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 }
 
 // blockValue computes the expected value received by the fee recipient in wei.
-func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int {
-	blockValue := uint256.NewInt(0)
-	txs := br.Block.Transactions()
-	var gas, txValue uint256.Int
-	for i := range txs {
-		gas.SetUint64(br.Receipts[i].GasUsed)
-
-		effectiveTip := txs[i].GetEffectiveGasTip(baseFee)
-
-		txValue.Mul(&gas, &effectiveTip)
-		blockValue.Add(blockValue, &txValue)
+func blockValue(br *types.BlockWithReceipts, baseFee, blobBaseFee *uint256.Int) (*uint256.Int, error) {
+	value := new(uint256.Int)
+	for i, txn := range br.Block.Transactions() {
+		tip, err := ethutils.GasTipPaid(txn, br.Receipts[i].GasUsed, baseFee, blobBaseFee)
+		if err != nil {
+			return nil, err
+		}
+		value.Add(value, &tip)
 	}
-	return blockValue
+	return value, nil
 }
 
 func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error) {
@@ -268,8 +275,17 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 	}
 
 	header := blockWithReceipts.Block.Header()
-	baseFee := header.BaseFee
-	value := blockValue(blockWithReceipts, baseFee)
+	var blobBaseFee uint256.Int
+	if header.ExcessBlobGas != nil {
+		blobBaseFee, err = misc.GetBlobGasPrice(e.config, *header.ExcessBlobGas, header.Time)
+		if err != nil {
+			return AssembledBlockResult{}, err
+		}
+	}
+	value, err := blockValue(blockWithReceipts, header.BaseFee, &blobBaseFee)
+	if err != nil {
+		return AssembledBlockResult{}, err
+	}
 
 	return AssembledBlockResult{
 		Block:      blockWithReceipts,

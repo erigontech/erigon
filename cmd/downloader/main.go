@@ -272,7 +272,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
 	webseedsList := common.CliString2Array(cobraFlagValues.webseeds)
-	if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
+	if known, ok := snapcfg.Webseeds(ctx, chain); ok {
 		webseedsList = append(webseedsList, known...)
 	}
 	if seedbox {
@@ -360,13 +360,13 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 
 	d.InitBackgroundLogger()
 	if seedbox {
-		var downloadItems []*downloaderproto.DownloadItem
 		snapCfg := snapcfg.KnownCfgOrDevnet(chain)
-		for _, it := range snapCfg.Preverified.Items {
-			downloadItems = append(downloadItems, &downloaderproto.DownloadItem{
+		downloadItems := make([]*downloaderproto.DownloadItem, len(snapCfg.Preverified.Items))
+		for i, it := range snapCfg.Preverified.Items {
+			downloadItems[i] = &downloaderproto.DownloadItem{
 				Path:        it.Name,
 				TorrentHash: downloadergrpc.String2Proto(it.Hash),
-			})
+			}
 		}
 		if _, err := bittorrentServer.Download(ctx, &downloaderproto.DownloadRequest{Items: downloadItems}); err != nil {
 			return err
@@ -413,8 +413,8 @@ var manifestCmd = &cobra.Command{
 	Use:     "manifest",
 	Example: "go run ./cmd/downloader manifest --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := debug.SetupCobra(cmd, "downloader")
-		if err := manifest(cmd.Context(), logger); err != nil {
+		debug.SetupCobra(cmd, "downloader")
+		if err := manifest(); err != nil {
 			log.Error(err.Error())
 		}
 		return nil
@@ -536,7 +536,7 @@ var torrentMagnet = &cobra.Command{
 func manifestVerify(ctx context.Context, logger log.Logger) error {
 	webseedsList := common.CliString2Array(cobraFlagValues.webseeds)
 	if len(webseedsList) == 0 { // fallback to default if exact list not passed
-		if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
+		if known, ok := snapcfg.Webseeds(ctx, chain); ok {
 			for _, s := range known {
 				// TODO: enable validation of this buckets also. skipping to make CI useful.
 				if strings.Contains(s, "erigon2-v2") {
@@ -588,7 +588,7 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 	return wseed.VerifyManifestedBuckets(ctx, verifyFailfast)
 }
 
-func manifest(ctx context.Context, logger log.Logger) error {
+func manifest() error {
 	dirs := datadir.New(cobraFlagValues.datadir)
 
 	files, err := downloader.SeedableFiles(dirs, chain, true)

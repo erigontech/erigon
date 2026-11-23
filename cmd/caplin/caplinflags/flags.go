@@ -40,10 +40,13 @@ var CliFlags = []cli.Flag{
 	&utils.DataDirFlag,
 	&utils.BeaconApiAllowCredentialsFlag,
 	&utils.BeaconApiPreserveGraffitiFlag,
+	&utils.CaplinPayloadPreparationDisableFlag,
 	&utils.BeaconApiAllowMethodsFlag,
 	&utils.BeaconApiAllowOriginsFlag,
 	&utils.CaplinCheckpointSyncUrlFlag,
 	&utils.CaplinMaxPeerCount,
+	&utils.CaplinIPBlockLimitsDisableFlag,
+	&utils.CaplinIPBlockLimitsTrustedCIDRsFlag,
 	&utils.CaplinSubscribeAllTopicsFlag,
 }
 

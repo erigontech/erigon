@@ -91,11 +91,6 @@ func (api *TxPoolAPIImpl) poolContent(ctx context.Context) (pending, queued map[
 		if err != nil {
 			return nil, nil, fmt.Errorf("decoding transaction from: %x: %w", reply.Txs[i].RlpTx, err)
 		}
-		// Blob transactions (type 3) are excluded from txpool_content and txpool_inspect, matching Geth and Nethermind behaviour.
-		// Geth's BlobPool.Content() returns empty maps; Nethermind queries only the standard pool.
-		if txn.Type() == types.BlobTxType {
-			continue
-		}
 		addr := gointerfaces.ConvertH160toAddress(reply.Txs[i].Sender)
 		switch reply.Txs[i].TxnType {
 		// Base fee sub-pool transactions are nonce-ready and otherwise valid, waiting only for the
@@ -129,11 +124,6 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) 
 		}
 		sender := gointerfaces.ConvertH160toAddress(reply.Txs[i].Sender)
 		if sender != addr {
-			continue
-		}
-		// Blob transactions (type 3) are excluded from txpool_content, matching Geth and Nethermind behaviour.
-		// Geth's BlobPool.Content() returns empty maps; Nethermind queries only the standard pool.
-		if txn.Type() == types.BlobTxType {
 			continue
 		}
 
@@ -191,8 +181,13 @@ func inspectTxs(txs []types.Transaction) map[string]string {
 	return dump
 }
 
-// inspectTx uses the fee cap as the gas price, as Geth's Transaction.GasPrice does for EIP-1559 transactions.
 func inspectTx(txn types.Transaction) string {
+	if frame, ok := txn.Unwrap().(*types.FrameTransaction); ok {
+		// Each frame has its own target. Treating the nil top-level recipient
+		// as contract creation would mislabel the transaction.
+		return fmt.Sprintf("frame transaction: max fee %s wei", frame.Fees.MaxFee.Dec())
+	}
+	// For EIP-1559 transactions, Geth's Transaction.GasPrice reports the per-gas fee cap.
 	if to := txn.GetTo(); to != nil {
 		return fmt.Sprintf("%s: %s wei + %d gas × %s wei", to.Hex(), txn.GetValue().Dec(), txn.GetGasLimit(), txn.GetFeeCap().Dec())
 	}

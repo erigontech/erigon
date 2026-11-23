@@ -167,6 +167,11 @@ func (c *feeChain) HeaderByNumber(_ context.Context, number rpc.BlockNumber) (*t
 	return nil, nil
 }
 
+func (c *feeChain) LatestHead(context.Context) (uint64, common.Hash, error) {
+	head := c.blocks[len(c.blocks)-1]
+	return head.NumberU64(), head.Hash(), nil
+}
+
 func (c *feeChain) BlockByNumber(_ context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	c.fetches.Add(1)
 	return c.block(uint64(number)), nil
@@ -243,6 +248,7 @@ func TestFeeHistoryValues(t *testing.T) {
 			},
 			receipts: map[uint64]types.Receipts{
 				1: {{GasUsed: 63_000}, {GasUsed: 21_000}, {GasUsed: 42_000}},
+				2: {},
 				3: {{GasUsed: 30_000_000}},
 			},
 		}

@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
@@ -39,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
@@ -76,6 +78,54 @@ func TestGetDutiesProposerHistoricalEpochIgnoresHeadEffectiveBalance(t *testing.
 
 	after := getProposerDutiesForEpoch(t, handler, epoch)
 	require.Equal(t, before, after)
+}
+
+func TestGetDutiesProposerMissingRandaoMixReturns500(t *testing.T) {
+	db, _, _, _, post, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	epoch := uint64(2)
+	fcu.FinalizedSlotVal = (epoch+1)*handler.beaconChainCfg.SlotsPerEpoch - 1
+	handler.beaconChainCfg.MinSeedLookahead = handler.beaconChainCfg.EpochsPerHistoricalVector - 1
+	key := base_encoding.Encode64ToBytes4(epoch * handler.beaconChainCfg.SlotsPerEpoch)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		root, err := post.GetBlockRootAtSlot(epoch*handler.beaconChainCfg.SlotsPerEpoch - 1)
+		if err != nil {
+			return err
+		}
+		if err := beacon_indicies.MarkRootCanonical(tx, epoch*handler.beaconChainCfg.SlotsPerEpoch-1, root); err != nil {
+			return err
+		}
+		return tx.Delete(kv.IntraRandaoMixes, key)
+	}))
+	recorder := httptest.NewRecorder()
+	path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(epoch, 10)
+	handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "randao mix")
+}
+
+func TestGetAttesterDutiesMissingRandaoMixReturns500(t *testing.T) {
+	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	epoch := uint64(1)
+	handler.beaconChainCfg.MinSeedLookahead = handler.beaconChainCfg.EpochsPerHistoricalVector - 1
+	epochSlot := epoch * handler.beaconChainCfg.SlotsPerEpoch
+	lowestAvailableSlot := epochSlot + 1
+	fcu.LowestAvailableSlotVal = &lowestAvailableSlot
+	key := base_encoding.Encode64ToBytes4(epochSlot)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		root, err := blocks[0].Block.HashSSZ()
+		if err != nil {
+			return err
+		}
+		if err := beacon_indicies.MarkRootCanonical(tx, 0, root); err != nil {
+			return err
+		}
+		return tx.Delete(kv.IntraRandaoMixes, key)
+	}))
+	path := "/eth/v1/validator/duties/attester/1"
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, strings.NewReader(`["0"]`))
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
 }
 
 func TestGetHistoricalProposerDependentRootEpochZeroReturnsGenesisRoot(t *testing.T) {
@@ -307,19 +357,16 @@ func TestGetDutiesProposerFutureEpochTooFarReturnsBadRequest(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
-func TestGetDependentRootReturnsNotFoundWhenRootUnavailable(t *testing.T) {
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+// Processing the empty slots after the head would carry the head root into their block roots.
+func TestGetDependentRootUsesHeadRootForSlotsAfterHead(t *testing.T) {
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
-	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
-	require.NoError(t, err)
-	fcu.HeadVal = headRoot
-	fcu.HeadSlotVal = postState.Slot()
-
-	epoch := postState.Slot()/handler.beaconChainCfg.SlotsPerEpoch + maxEpochsLookaheadForDuties*3
-	root, err := handler.getDependentRoot(epoch, false)
-	require.Error(t, err)
-	require.Equal(t, common.Hash{}, root)
-	require.Contains(t, err.Error(), "dependent root not found")
+	headEpoch := syncedData.HeadSlot() / handler.beaconChainCfg.SlotsPerEpoch
+	for _, attester := range []bool{false, true} {
+		root, err := handler.getDependentRoot(headEpoch+2, attester)
+		require.NoError(t, err)
+		require.Equal(t, syncedData.HeadRoot(), root)
+	}
 }
 
 type proposerDutiesResponse struct {

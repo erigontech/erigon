@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	commitmentv3 "github.com/erigontech/erigon/execution/commitment/v3"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -34,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -78,10 +81,7 @@ type RecordingState struct {
 	// for debugging: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
 
-	// The system address is touched as msg.sender on every block's system calls;
-	// that alone is not a witness access. A real opcode access during a user tx
-	// (seen via the per-tx access set) sets this so it is kept (EIP-7928).
-	systemAddrTouchedInTx bool
+	systemAddrAccessed bool
 }
 
 // NewRecordingState creates a new RecordingState wrapping the given inner reader.
@@ -106,9 +106,7 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 	}
 }
 
-// MarkSystemAddrTouchedInTx records that a user transaction accessed the system
-// address via an opcode, so it is kept in the witness even without a state change.
-func (s *RecordingState) MarkSystemAddrTouchedInTx() { s.systemAddrTouchedInTx = true }
+func (s *RecordingState) MarkSystemAddrAccessed() { s.systemAddrAccessed = true }
 
 func (s *RecordingState) SetAccountsToTrace(addrs []common.Address) {
 	if len(addrs) == 0 {
@@ -161,6 +159,15 @@ func (s *RecordingState) ReadAccountData(address accounts.Address) (*accounts.Ac
 		}
 	}
 	return acc, err
+}
+
+func (s *RecordingState) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return s.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (s *RecordingState) HasAccount(address common.Address) (bool, error) {
+	acc, err := s.ReadAccountByPlainAddr(address)
+	return acc != nil, err
 }
 
 func (s *RecordingState) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
@@ -243,12 +250,7 @@ func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, erro
 		return nil, err
 	}
 	if len(code) > 0 {
-		s.AccessedCode[addr] = code
-		if _, already := s.PreStateCode[addr]; !already {
-			if _, created := s.createdCodeHashes[s.codeHash(code)]; !created {
-				s.PreStateCode[addr] = code
-			}
-		}
+		s.OnCodeAccess(address, code)
 	} else {
 		s.emptyCodeAccessed = true
 	}
@@ -332,6 +334,18 @@ func (s *RecordingState) codeHash(code []byte) common.Hash {
 	h := crypto.Keccak256Hash(code)
 	s.codeHashes[string(code)] = h
 	return h
+}
+
+func (s *RecordingState) OnCodeChange(codeHash accounts.CodeHash) func() {
+	if codeHash == accounts.EmptyCodeHash {
+		return nil
+	}
+	hash := codeHash.Value()
+	if _, exists := s.createdCodeHashes[hash]; exists {
+		return nil
+	}
+	s.createdCodeHashes[hash] = struct{}{}
+	return func() { delete(s.createdCodeHashes, hash) }
 }
 
 func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
@@ -470,11 +484,17 @@ func (s *RecordingState) GetModifiedKeys() ([]common.Address, map[common.Address
 	return addresses, storageKeys
 }
 
-// OnCodeAccess tracks code that bypasses ReadAccountCode via stateObject cache hits.
 func (s *RecordingState) OnCodeAccess(address accounts.Address, code []byte) {
 	if len(code) > 0 {
-		s.AccessedCode[address.Value()] = code
-		//s.HashedCodes[crypto.Keccak256Hash(code)] = code
+		addr := address.Value()
+		s.AccessedCode[addr] = code
+		if _, already := s.PreStateCode[addr]; !already {
+			_, modified := s.codeOverlay[addr]
+			_, created := s.createdCodeHashes[s.codeHash(code)]
+			if !modified && !created {
+				s.PreStateCode[addr] = code
+			}
+		}
 	}
 }
 
@@ -608,11 +628,15 @@ func (api *BaseAPI) buildAccessedState(
 	engine rules.EngineReader,
 	firstTxNumInBlock uint64,
 	mode witnessMode,
+	parent commitmentdb.ParentState,
 ) (accessed *accessedState, accessedBlockHashes []uint64, err error) {
 	blockNum := block.NumberU64()
 
 	// Create a state reader at the parent block state using the exact txnum
 	var stateReader state.StateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
+	if parent != nil {
+		stateReader = &parentStateReader{StateReader: stateReader, parent: parent}
+	}
 
 	// Create a combined recording state (reader + writer with in-memory overlay)
 	recordingState := NewRecordingState(stateReader)
@@ -622,8 +646,9 @@ func (api *BaseAPI) buildAccessedState(
 	})
 
 	// Create the in-block state with the recording state as reader
-	ibs := state.New(recordingState)
+	ibs := state.NewVersionedBlock(recordingState)
 	defer ibs.Close()
+	ibs.SetTxContext(blockNum, -1)
 
 	// Get header for block context
 	header := block.HeaderNoCopy()
@@ -652,12 +677,15 @@ func (api *BaseAPI) buildAccessedState(
 	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize block: %w", err)
 	}
-	if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
+	if err = ethapi.FinalizeCallTxTo(ibs, blockRules, recordingState); err != nil {
 		return nil, nil, fmt.Errorf("failed to finalize engine.Initialize tx: %w", err)
 	}
 
 	// Execute all transactions in the block
 	for txIndex, txn := range block.Transactions() {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)
@@ -673,13 +701,13 @@ func (api *BaseAPI) buildAccessedState(
 		// A user tx that accesses the system address via an opcode keeps it in the
 		// witness; the per-tx access set captures this even on state-cache hits.
 		if ibs.AccessedAddr(params.SystemAddress) {
-			recordingState.MarkSystemAddrTouchedInTx()
+			recordingState.MarkSystemAddrAccessed()
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
 		}
 
-		if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
+		if err = ethapi.FinalizeCallTxTo(ibs, blockRules, recordingState); err != nil {
 			return nil, nil, fmt.Errorf("failed to finalize tx %d: %w", txIndex, err)
 		}
 	}
@@ -687,6 +715,7 @@ func (api *BaseAPI) buildAccessedState(
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
 	}
+	ibs.SetTxContext(blockNum, len(block.Transactions()))
 
 	// Collect logs accumulated during transaction execution into a synthetic receipt
 	// so that Finalize can parse EIP-6110 deposit requests from them.
@@ -698,12 +727,75 @@ func (api *BaseAPI) buildAccessedState(
 	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), receipts, block.Withdrawals(), chainReader, syscall, false /* skipReceiptsEval */, log.Root()); err != nil {
 		return nil, nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
+	for _, withdrawal := range block.Withdrawals() {
+		if withdrawal.Address == params.SystemAddress.Value() {
+			recordingState.MarkSystemAddrAccessed()
+		}
+	}
 
-	if err = ibs.CommitBlock(blockRules, recordingState); err != nil {
+	if err = ethapi.FinalizeCallTxTo(ibs, blockRules, recordingState); err != nil {
 		return nil, nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
 	return collectAccessedState(recordingState, mode), accessedBlockHashes, nil
+}
+
+type parentStateReader struct {
+	state.StateReader
+	parent commitmentdb.ParentState
+}
+
+func (r *parentStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	acc, ok := r.parent.GetCommittedAccount(address)
+	if !ok {
+		witnessCacheParentStateMissCounter.Inc()
+		return r.StateReader.ReadAccountData(address)
+	}
+	witnessCacheParentStateHitCounter.Inc()
+	var got *accounts.Account
+	if acc != nil {
+		c := *acc
+		got = &c
+	}
+	if dbg.AssertEnabled {
+		want, err := r.StateReader.ReadAccountData(address)
+		if err != nil {
+			return nil, err
+		}
+		if (want == nil) != (got == nil) || want != nil && *want != *got {
+			return nil, fmt.Errorf("parent state account %x: %+v, history %+v", address, got, want)
+		}
+	}
+	return got, nil
+}
+
+func (r *parentStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(address)
+}
+
+func (r *parentStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	val, ok := r.parent.GetCommittedStorage(address, key)
+	if !ok {
+		witnessCacheParentStateMissCounter.Inc()
+		return r.StateReader.ReadAccountStorage(address, key)
+	}
+	witnessCacheParentStateHitCounter.Inc()
+	var v uint256.Int
+	v.SetBytes(val)
+	if dbg.AssertEnabled {
+		want, wantOK, err := r.StateReader.ReadAccountStorage(address, key)
+		if err != nil {
+			return v, false, err
+		}
+		if !wantOK {
+			want.Clear()
+		}
+		if want != v {
+			err = fmt.Errorf("parent state slot %x %x: %x, history %x", address, key, &v, &want)
+			return v, false, err
+		}
+	}
+	return v, len(val) > 0, nil
 }
 
 // ExecutionWitness implements debug_executionWitness.
@@ -838,7 +930,95 @@ var (
 // witness build. Direct tx.GetLatest reads keep it independent of the build's
 // in-memory commitment fold.
 type headCaptureSource struct {
-	pinnedParentTx kv.TemporalTx
+	pinnedParentTx kv.TemporalGetter
+	warmTxs        []kv.TemporalTx
+	records        *commitmentdb.ParentRecords
+	warm           *sync.Map
+}
+
+type warmRecord struct {
+	data []byte
+	step kv.Step
+}
+
+func (hc *headCaptureSource) recordReader() *commitmentdb.ParentRecords {
+	if hc.warm == nil {
+		return hc.records
+	}
+	r := &commitmentdb.ParentRecords{}
+	if hc.records != nil {
+		*r = *hc.records
+	}
+	parent := r.Get
+	r.Get = func(key []byte) ([]byte, kv.Step, bool) {
+		if parent != nil {
+			if v, step, ok := parent(key); ok {
+				return v, step, true
+			}
+		}
+		if v, ok := hc.warm.Load(string(key)); ok {
+			rec := v.(warmRecord)
+			return rec.data, rec.step, true
+		}
+		return nil, 0, false
+	}
+	return r
+}
+
+func (hc *headCaptureSource) warmPaths(accessed *accessedState) {
+	type path struct{ account, slot []byte }
+	var paths []path
+	for addr := range accessed.Addresses {
+		paths = append(paths, path{account: crypto.Keccak256(addr[:])})
+	}
+	for addr := range accessed.CodeAddrs {
+		paths = append(paths, path{account: crypto.Keccak256(addr[:])})
+	}
+	for addr, slots := range accessed.Storage {
+		account := crypto.Keccak256(addr[:])
+		paths = append(paths, path{account: account})
+		for slot := range slots {
+			paths = append(paths, path{account: account, slot: crypto.Keccak256(slot[:])})
+		}
+	}
+	txs := make([]kv.TemporalGetter, 0, 1+len(hc.warmTxs))
+	txs = append(txs, hc.pinnedParentTx)
+	for _, tx := range hc.warmTxs {
+		txs = append(txs, tx)
+	}
+	hc.warm = &sync.Map{}
+	get := hc.recordReader().Get
+	var wg sync.WaitGroup
+	var crash sync.Once
+	var crashed any
+	for w, tx := range txs {
+		wg.Go(func() {
+			defer func() {
+				if r := recover(); r != nil {
+					crash.Do(func() { crashed = fmt.Sprintf("%v\n%s", r, dbg.Stack()) })
+				}
+			}()
+			read := func(key []byte) []byte {
+				if v, _, ok := get(key); ok {
+					return v
+				}
+				v, step, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
+				if err != nil {
+					return nil
+				}
+				hc.warm.Store(string(key), warmRecord{data: bytes.Clone(v), step: step})
+				witnessCacheWarmRecordsCounter.Inc()
+				return v
+			}
+			for i := w; i < len(paths); i += len(txs) {
+				commitmentv3.PrefetchPath(read, paths[i].account, paths[i].slot)
+			}
+		})
+	}
+	wg.Wait()
+	if crashed != nil {
+		panic(crashed)
+	}
 }
 
 // collapseReaderFor selects the collapse-detection state reader: plain state at block
@@ -846,7 +1026,7 @@ type headCaptureSource struct {
 // parent-block history txNum (durable).
 func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock, endTxNum uint64) commitmentdb.StateReader {
 	if hc != nil {
-		return commitmentdb.NewHeadCaptureStateReader(hc.pinnedParentTx, tx, endTxNum)
+		return commitmentdb.NewHeadCaptureStateReader(hc.pinnedParentTx, tx, endTxNum).WithParentRecords(hc.recordReader())
 	}
 	return commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
 }
@@ -857,7 +1037,7 @@ func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBloc
 // WithHistory()==true so the read-only witness-capture fold does not write branches.
 func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock uint64) commitmentdb.StateReader {
 	if hc != nil {
-		return commitmentdb.NewHeadCaptureTrieStateReader(hc.pinnedParentTx, tx, firstTxNumInBlock)
+		return commitmentdb.NewHeadCaptureTrieStateReader(hc.pinnedParentTx, tx, firstTxNumInBlock).WithParentRecords(hc.recordReader())
 	}
 	return commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
 }
@@ -868,9 +1048,19 @@ func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock ui
 // state is read from committedTx's history exactly as the durable path does; only the
 // commitment source changes. Direct tx.GetLatest reads keep the pinned commitment
 // state independent of the build's in-memory commitment fold.
-func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx, pinnedParentTx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
-	hc := &headCaptureSource{pinnedParentTx: pinnedParentTx}
+func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx kv.TemporalTx, pin *rollingPin, records *commitmentdb.ParentRecords, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
+	hc := &headCaptureSource{pinnedParentTx: pin.tx, warmTxs: pin.warm, records: records}
 	return api.buildWitnessResult(ctx, committedTx, hc, info, mode)
+}
+
+// ValidatedBlockWitness builds the canonical-mode witness of blockHash from blockTx, a view
+// that holds the block and its executed state, reading the parent commitment from parentState.
+func (api *DebugAPIImpl) ValidatedBlockWitness(ctx context.Context, blockTx kv.TemporalTx, parentState kv.TemporalGetter, blockHash common.Hash) (*ExecutionWitnessResult, error) {
+	info, err := api.resolveWitnessBlock(ctx, blockTx, rpc.BlockNumberOrHashWithHash(blockHash, false))
+	if err != nil {
+		return nil, err
+	}
+	return api.buildWitnessResult(ctx, blockTx, &headCaptureSource{pinnedParentTx: parentState}, info, witnessModeCanonical)
 }
 
 // buildWitnessResult runs the witness-building pipeline for an already-resolved block
@@ -894,7 +1084,11 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	engine := api.engine()
 
-	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, mode)
+	var parent commitmentdb.ParentState
+	if hc != nil && hc.records != nil {
+		parent = hc.records.State
+	}
+	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, mode, parent)
 	if err != nil {
 		return nil, err
 	}
@@ -910,11 +1104,15 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Use the proof infrastructure from the commitment context.
 	// Witness generation requires the sequential HexPatriciaHashed (Witness()
 	// type-asserts it); the parallel trie cannot serve it.
-	domains, err := newSnapshotCommitmentDomains(ctx, tx, log.New())
-	if err != nil {
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
+	if domains != nil {
+		defer domains.Close()
+	}
+	// A side-fork view has TxNums only up to its tip, below the committed commitment. Head-capture seeks the
+	// commitment on the pinned parent instead.
+	if err != nil && (hc == nil || !errors.Is(err, commitmentdb.ErrBehindCommitment)) {
 		return nil, err
 	}
-	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 
 	// Get the expected parent state root for verification
@@ -934,7 +1132,10 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Head-capture reads parent commitment from the pinned snapshot, not commitment
 	// history, so the history-availability check only applies to the durable path.
 	if hc == nil {
-		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		commitmentStartingTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if err != nil {
+			return nil, err
+		}
 		if firstTxNumInBlock < commitmentStartingTxNum {
 			return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 		}
@@ -942,6 +1143,9 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	if accessed.isEmpty() { // nothing touched, return empty witness
 		return result, nil
+	}
+	if hc != nil && len(hc.warmTxs) != 0 {
+		hc.warmPaths(accessed)
 	}
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, hc, domains, sdCtx,
@@ -1019,33 +1223,31 @@ func (a *accessedState) isEmpty() bool {
 // touchNonZeroKeys touches only keys whose value is non-zero in at least one of pre/post state,
 // skipping zero→zero no-ops that would corrupt the HPH trie's internal maps.
 func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommitmentContext, post, pre commitmentdb.StateReader, stepSize uint64) {
-	for addr := range a.Addresses {
-		plainKey := addr[:]
-		postEnc, _, _ := post.Read(kv.AccountsDomain, plainKey, stepSize)
+	touch := func(d kv.Domain, plainKey []byte) {
+		postEnc, _, _ := post.Read(d, plainKey, stepSize)
 		if len(postEnc) == 0 {
-			preEnc, _, _ := pre.Read(kv.AccountsDomain, plainKey, stepSize)
-			if len(preEnc) == 0 {
-				continue
+			if preEnc, _, _ := pre.Read(d, plainKey, stepSize); len(preEnc) == 0 {
+				return
 			}
 		}
-		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), nil)
+		sdCtx.TouchKey(d, string(plainKey), postEnc)
+	}
+	for addr := range a.Addresses {
+		touch(kv.AccountsDomain, addr[:])
 	}
 	for addr := range a.CodeAddrs {
-		sdCtx.TouchKey(kv.CodeDomain, string(addr[:]), nil)
+		if sdCtx.AcceptsFeed() {
+			touch(kv.AccountsDomain, addr[:])
+		} else {
+			sdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), nil)
+		}
 	}
 	for addr, keys := range a.Storage {
 		for key := range keys {
 			plainKey := make([]byte, 0, len(addr)+len(key))
 			plainKey = append(plainKey, addr[:]...)
 			plainKey = append(plainKey, key[:]...)
-			postEnc, _, _ := post.Read(kv.StorageDomain, plainKey, stepSize)
-			if len(postEnc) == 0 {
-				preEnc, _, _ := pre.Read(kv.StorageDomain, plainKey, stepSize)
-				if len(preEnc) == 0 {
-					continue
-				}
-			}
-			sdCtx.TouchKey(kv.StorageDomain, string(plainKey), nil)
+			touch(kv.StorageDomain, plainKey)
 		}
 	}
 }
@@ -1133,7 +1335,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 			postExists = preExists
 		}
 		existenceChanged := preExists != postExists
-		if !reallyChanged && !hasStorage && !existenceChanged && !rs.systemAddrTouchedInTx {
+		if !reallyChanged && !hasStorage && !existenceChanged && !rs.systemAddrAccessed {
 			delete(out.Addresses, sysAddr)
 		}
 	}
@@ -1272,21 +1474,30 @@ func detectCollapseSiblings(
 		branchPrefix []byte
 	}
 	var candidates []collapseCandidate
-	sdCtx.SetCollapseTracer(func(hashedKeyPath, branchPrefix []byte) {
+	trace := func(hashedKeyPath, branchPrefix []byte) {
 		candidates = append(candidates, collapseCandidate{
 			siblingPath:  bytes.Clone(hashedKeyPath),
 			branchPrefix: bytes.Clone(branchPrefix),
 		})
-	})
-	defer sdCtx.SetCollapseTracer(nil)
-
-	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
-	if err != nil {
-		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %w", err)
 	}
+	traced := false
+	var root []byte
+	if mode == witnessModeLegacy && hc != nil && hc.records != nil {
+		if traced, root, err = sdCtx.TraceCollapses(ctx, tx, blockNum, firstTxNumInBlock, trace); err != nil {
+			return nil, fmt.Errorf("[debug_executionWitness] collapse detection via TraceCollapses failed: %w", err)
+		}
+	}
+	if !traced {
+		sdCtx.SetCollapseTracer(trace)
+		defer sdCtx.SetCollapseTracer(nil)
 
-	if common.Hash(computedRootHash) != expectedBlockRoot {
-		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
+		root, err = sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
+		if err != nil {
+			return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %w", err)
+		}
+	}
+	if !bytes.Equal(root, expectedBlockRoot[:]) {
+		return nil, fmt.Errorf("[debug_executionWitness] commitment root mismatch (traced=%t): got %x, want %x", traced, root, expectedBlockRoot)
 	}
 
 	// The canonical witness (insert-before-delete order) does not touch the sibling of
@@ -1326,8 +1537,6 @@ func buildWitnessTrie(
 	accessed *accessedState,
 	produceExclusionProofs bool,
 ) (encodedNodes []hexutil.Bytes, err error) {
-	encodedNodes = []hexutil.Bytes{}
-
 	sdCtx.SetStateReader(trieReaderFor(hc, tx, firstTxNumInBlock))
 	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
@@ -1352,8 +1561,9 @@ func buildWitnessTrie(
 		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
 	}
 
-	for _, node := range witnessNodes {
-		encodedNodes = append(encodedNodes, node)
+	encodedNodes = make([]hexutil.Bytes, len(witnessNodes))
+	for i, node := range witnessNodes {
+		encodedNodes[i] = node
 	}
 	return encodedNodes, nil
 }
@@ -1375,7 +1585,10 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return nil, err
 	}
-	if err := api.checkBlockHistoryAvailable(ctx, tx, blockNum); err != nil {
+	if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
+		return nil, err
+	}
+	if err := api.checkPruneHistory(ctx, tx, blockNum); err != nil {
 		return nil, err
 	}
 
@@ -1647,6 +1860,15 @@ func (s *witnessStateless) TracePrefix() string {
 
 func (s *witnessStateless) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return s.ReadAccountData(address)
+}
+
+func (s *witnessStateless) HasAccount(address common.Address) (bool, error) {
+	acc, err := s.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
+func (s *witnessStateless) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return s.ReadAccountData(accounts.InternAddress(address))
 }
 
 func (s *witnessStateless) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
@@ -2046,10 +2268,11 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	})
 
 	// Create the in-block state with the witness stateless as reader
-	ibs := state.New(stateless)
+	ibs := state.NewVersionedBlock(stateless)
 	defer ibs.Close()
 	header := block.HeaderNoCopy()
 	blockNum := block.NumberU64()
+	ibs.SetTxContext(blockNum, -1)
 
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary
 	// This ensures gas fees go to the correct address based on the block header
@@ -2065,7 +2288,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	if err = engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("verification: failed to initialize block: %w", err)
 	}
-	if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
+	if err = ethapi.FinalizeCallTxTo(ibs, blockRules, stateless); err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("verification: failed to finalize engine.Initialize tx: %w", err)
 	}
 
@@ -2089,7 +2312,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		}
 
 		// Finalize tx - state changes go to the witness stateless
-		if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
+		if err = ethapi.FinalizeCallTxTo(ibs, blockRules, stateless); err != nil {
 			return common.Hash{}, stateless, fmt.Errorf("[statelessExec] failed to finalize tx %d: %w", txIndex, err)
 		}
 	}
@@ -2097,6 +2320,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
 	}
+	ibs.SetTxContext(blockNum, len(block.Transactions()))
 	// Collect logs accumulated during transaction execution into a synthetic receipt
 	// so that Finalize can parse EIP-6110 deposit requests from them.
 	allLogs := ibs.Logs()
@@ -2110,9 +2334,9 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
 
-	err = ibs.CommitBlock(blockRules, stateless)
+	err = ethapi.FinalizeCallTxTo(ibs, blockRules, stateless)
 	if err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
+		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] FinalizeCallTxTo failed: %w", err)
 	}
 
 	// Finalize and compute the resulting state root

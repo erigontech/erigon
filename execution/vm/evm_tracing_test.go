@@ -155,7 +155,7 @@ func TestOpcodeV2StateGas(t *testing.T) {
 		steps = append(steps, step{pc: pc, op: OpCode(op), gas: gas, cost: cost})
 	}}
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
-	contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 	contract.Code = []byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(SSTORE), byte(STOP)}
 	initial := mdgas.MdGas{Execution: 200_000, State: params.StateGasPerStorageSet}
 	_, remaining, _, err := evm.Run(contract, initial, nil, false)
@@ -180,7 +180,7 @@ func TestOpcodeV2StateRefill(t *testing.T) {
 			}
 		}}
 		evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
-		contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+		contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 		contract.Code = []byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(SSTORE), byte(PUSH1), 0, byte(PUSH1), 0, byte(SSTORE)}
 		initial := mdgas.MdGas{Execution: 200_000, State: reservoir}
 		_, remaining, used, err := evm.Run(contract, initial, nil, false)
@@ -240,7 +240,7 @@ func TestOpcodeV2ChargeFailure(t *testing.T) {
 				},
 			}
 			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
-			contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 			contract.Code = tc.code
 			_, _, _, err := evm.Run(contract, tc.initial, nil, false)
 			require.ErrorIs(t, err, ErrOutOfGas)
@@ -272,7 +272,7 @@ func TestFaultV2(t *testing.T) {
 		},
 	}
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
-	contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 	contract.Code = []byte{byte(PUSH1), 0xff, byte(JUMP)}
 	_, _, _, err := evm.Run(contract, mdgas.MdGas{Execution: 100, State: 50}, nil, false)
 	require.ErrorIs(t, err, ErrInvalidJump)
@@ -287,7 +287,7 @@ func TestGasChangeV2FailedOpcodeCharge(t *testing.T) {
 		changes = append(changes, gasChange{old: old, new: new, reason: reason})
 	}}
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
-	contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 	contract.Code = []byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(MSTORE)}
 	_, remaining, _, err := evm.Run(contract, mdgas.MdGas{Execution: 11}, nil, false)
 	require.ErrorIs(t, err, ErrOutOfGas)
@@ -306,7 +306,7 @@ func TestGasChangeV2StateCharge(t *testing.T) {
 		changes = append(changes, gasChange{old: old, new: new, reason: reason})
 	}}
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
-	contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 	contract.Code = []byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(SSTORE), byte(STOP)}
 	initial := mdgas.MdGas{Execution: 200_000, State: params.StateGasPerStorageSet}
 	_, remaining, used, err := evm.Run(contract, initial, nil, false)
@@ -387,7 +387,7 @@ func TestGasChangeV2OpcodeReportsCurrentBalance(t *testing.T) {
 		},
 	}
 	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
-	contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 	contract.Code = []byte{byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH2), 0x10, 1, byte(GAS), byte(DELEGATECALL)}
 	_, _, _, err := evm.Run(contract, mdgas.MdGas{Execution: 200_000, State: 50_000}, nil, false)
 	require.NoError(t, err)
@@ -462,18 +462,27 @@ func TestGasChangeV2Precompile(t *testing.T) {
 }
 
 func TestGasChangeV2CodeDeposit(t *testing.T) {
-	ibs := state.New(state.NewNoopReader())
-	defer ibs.Close()
-	recorder := &gasTraceRecorder{t: t}
-	evm := NewEVM(evmtypes.BlockContext{Transfer: misc.Transfer, CanTransfer: func(_ evmtypes.IntraBlockState, _ accounts.Address, value uint256.Int) (bool, error) {
-		return value.IsZero(), nil
-	}}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: recorder.hooks()})
-	_, _, _, _, err := evm.Create(accounts.ZeroAddress, []byte{byte(PUSH1), 1, byte(PUSH0), byte(RETURN)},
-		mdgas.MdGas{Execution: 200_000, State: 50_000}, uint256.Int{}, nil, false)
-	require.NoError(t, err)
-	require.True(t, slices.ContainsFunc(recorder.changes, func(change gasChange) bool {
-		return change.reason == tracing.GasChangeCallCodeStorage && change.old.State == change.new.State+params.CostPerStateByte
-	}))
+	for _, frame := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary", true: "frame"}[frame], func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			recorder := &gasTraceRecorder{t: t}
+			evm := NewEVM(evmtypes.BlockContext{Transfer: misc.Transfer, CanTransfer: func(_ evmtypes.IntraBlockState, _ accounts.Address, value uint256.Int) (bool, error) {
+				return value.IsZero(), nil
+			}}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: recorder.hooks()})
+			initial := mdgas.MdGas{Execution: 200_000, State: 50_000}
+			if frame {
+				tx := &types.FrameTransaction{NonceKeys: nil, Frames: []types.Frame{{Limits: initial}}}
+				evm.FrameContext = ibs.NewFrameContext(tx, uint256.Int{})
+			}
+			_, _, _, _, err := evm.Create(accounts.ZeroAddress, []byte{byte(PUSH1), 1, byte(PUSH0), byte(RETURN)},
+				initial, uint256.Int{}, nil, false)
+			require.NoError(t, err)
+			require.True(t, slices.ContainsFunc(recorder.changes, func(change gasChange) bool {
+				return change.reason == tracing.GasChangeCallCodeStorage && change.old.State == change.new.State+params.CostPerStateByte
+			}))
+		})
+	}
 }
 
 func TestGasChangeV2FailedCodeDeposit(t *testing.T) {

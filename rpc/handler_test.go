@@ -20,12 +20,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -228,7 +230,7 @@ func TestRunMethodStreamableEnvelope(t *testing.T) {
 }
 
 // runMethod answers inside the stream, so the error it reports is the only signal left for the
-// failure metric and the "[rpc] served" warning.
+// failure metric and the "[rpc] served" log.
 func TestRunMethodReportsAnsweredError(t *testing.T) {
 	msg := jsonrpcMessage{Version: vsn, ID: []byte("1"), Method: "test_test"}
 	for name, cb := range map[string]*callback{
@@ -255,4 +257,18 @@ func TestRunMethodReportsAnsweredError(t *testing.T) {
 			require.Contains(t, buf.String(), `"error":`)
 		})
 	}
+}
+
+// Internal and uncoded errors stay visible at default log levels; an error the handler coded as an answer, such as a
+// revert, does not.
+func TestServedLogLevel(t *testing.T) {
+	internal := &CustomError{Code: ErrCodeInternalError, Message: "encode"}
+	require.Equal(t, log.LvlWarn, servedLvl(internal))
+	require.Equal(t, log.LvlWarn, servedLvl(fmt.Errorf("stream: %w", internal)))
+	require.Equal(t, log.LvlWarn, servedLvl(&jsonError{Code: ErrCodeInternalError}))
+	require.Equal(t, log.LvlTrace, servedLvl(&jsonError{Code: 3, Message: "execution reverted", Data: "0x"}))
+	require.Equal(t, log.LvlTrace, servedLvl(&InvalidParamsError{Message: "bad block number"}))
+	require.Equal(t, log.LvlWarn, servedLvl(errors.New("begin tx: mdbx: MDBX_PANIC")))
+	require.Equal(t, log.LvlWarn, servedLvl(&jsonError{Code: ErrCodeDefault, Message: "begin tx: mdbx: MDBX_PANIC"}))
+	require.Equal(t, log.LvlWarn, servedLvl(&jsonError{Code: ErrCodeServerOverloaded}))
 }

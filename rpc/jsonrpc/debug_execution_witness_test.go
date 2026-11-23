@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -27,7 +28,9 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -36,21 +39,34 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 // fakeStateReader is a minimal state.StateReader backed by an in-memory account
 // map, used to exercise RecordingState predicates without a database.
 type fakeStateReader struct {
 	accounts map[common.Address]*accounts.Account
+	codes    map[common.Address][]byte
 }
 
 func (r *fakeStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	return r.accounts[address.Value()], nil
+}
+
+func (r *fakeStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *fakeStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
 }
 
 func (r *fakeStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
@@ -61,9 +77,13 @@ func (r *fakeStateReader) ReadAccountStorage(address accounts.Address, key accou
 	return uint256.Int{}, false, nil
 }
 
-func (r *fakeStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) { return nil, nil }
+func (r *fakeStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	return r.codes[address.Value()], nil
+}
 
-func (r *fakeStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) { return 0, nil }
+func (r *fakeStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	return len(r.codes[address.Value()]), nil
+}
 
 func (r *fakeStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
 	return 0, nil
@@ -220,6 +240,49 @@ func TestCollectAccessedState_Legacy7702Designator(t *testing.T) {
 	}
 	if !sawDesignator {
 		t.Fatal("legacy witness codes missing the EIP-7702 designator (present only in PreStateCode)")
+	}
+}
+
+func TestRecordingStateCodeReadAfterRevertedWrite(t *testing.T) {
+	for _, operation := range []string{"code", "size", "delegation"} {
+		t.Run(operation, func(t *testing.T) {
+			writer := accounts.InternAddress(common.HexToAddress("0x11"))
+			reader := accounts.InternAddress(common.HexToAddress("0x22"))
+			code := []byte{0x60, 0x01, 0x00}
+			codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+			inner := &fakeStateReader{
+				accounts: map[common.Address]*accounts.Account{
+					writer.Value(): {Nonce: 1, Root: empty.RootHash, CodeHash: accounts.EmptyCodeHash},
+					reader.Value(): {Nonce: 1, Root: empty.RootHash, CodeHash: codeHash},
+				},
+				codes: map[common.Address][]byte{reader.Value(): code},
+			}
+			recorded := NewRecordingState(inner)
+			ibs := state.New(recorded)
+			defer ibs.Close()
+			transactions.VersionedBlockState(ibs)
+			ibs.SetTxContext(1, 0)
+			read := func() error {
+				switch operation {
+				case "size":
+					_, err := ibs.GetCodeSize(reader)
+					return err
+				case "delegation":
+					_, _, err := ibs.GetDelegatedDesignation(reader)
+					return err
+				default:
+					_, err := ibs.GetCode(reader)
+					return err
+				}
+			}
+			snapshot := ibs.PushSnapshot()
+			require.NoError(t, ibs.SetCode(writer, code, tracing.CodeChangeContractCreation))
+			require.NoError(t, read())
+			require.Empty(t, collectAccessedState(recorded, witnessModeCanonical).SortedCodes)
+			ibs.RevertToSnapshot(snapshot, nil)
+			require.NoError(t, read())
+			require.Equal(t, []hexutil.Bytes{code}, collectAccessedState(recorded, witnessModeCanonical).SortedCodes)
+		})
 	}
 }
 
@@ -453,74 +516,58 @@ func TestWitnessReaderComposition(t *testing.T) {
 // TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent drives the head-capture build
 // with a tip-pinned tx used as the parent of an older block, so the pinned commitment
 // plane does not match parent(B). The build must fail a validation gate and return no
-// result — a wrong witness is never produced.
+// result — a wrong witness is never produced. On a cache-only head-capture node nothing
+// is cached and the block serves out-of-window: a miss never falls through to a history
+// recompute.
 func TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent(t *testing.T) {
-	previousSchema := statecfg.Schema
-	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	for _, tc := range []struct {
+		name      string
+		cacheOnly bool
+	}{
+		{"nil cache", false},
+		{"cache only", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previousSchema := statecfg.Schema
+			statecfg.EnableHistoricalCommitment()
+			t.Cleanup(func() { statecfg.Schema = previousSchema })
 
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	ctx := context.Background()
+			m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+			ctx := context.Background()
 
-	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
-	}))
+			require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+				return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+			}))
 
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+			api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+			if tc.cacheOnly {
+				api.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+			}
 
-	tx, err := api.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+			tx, err := api.db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
 
-	// Block 3 is a non-empty old block; a tx pinned at the committed tip carries the
-	// wrong parent commitment for it.
-	const blockNum = uint64(3)
-	bn := rpc.BlockNumber(blockNum)
-	info, err := api.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
-	require.NoError(t, err)
+			// Block 3 is a non-empty old block; a tx pinned at the committed tip carries the
+			// wrong parent commitment for it.
+			const blockNum = uint64(3)
+			bn := rpc.BlockNumber(blockNum)
+			info, err := api.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+			require.NoError(t, err)
 
-	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, info, witnessModeLegacy)
-	require.Error(t, err, "a mispinned parent must fail a validation gate")
-	require.Nil(t, result, "no witness is produced on gate failure")
-}
+			result, err := api.buildWitnessResultHeadCapture(ctx, tx, &rollingPin{tx: tx}, nil, info, witnessModeLegacy)
+			require.Error(t, err, "a mispinned parent must fail a validation gate")
+			require.Nil(t, result, "no witness is produced on gate failure")
+			if !tc.cacheOnly {
+				return
+			}
+			require.Equal(t, 0, api.witnessCache.Len(), "a gate failure caches nothing")
 
-// TestHeadCaptureFailClosedYieldsOutOfWindow is the end-to-end fail-closed guard: a stale
-// parent view (the committed tip pinned as the parent of an older block) fails a witness
-// validation gate, so the build returns an error and no result. On a cache-only head-capture
-// node nothing is cached and the block serves out-of-window — a wrong witness is never
-// produced and a miss never falls through to a history recompute.
-func TestHeadCaptureFailClosedYieldsOutOfWindow(t *testing.T) {
-	previousSchema := statecfg.Schema
-	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
-
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	ctx := context.Background()
-	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
-	}))
-
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
-	api.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
-
-	tx, err := api.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	const blockNum = uint64(3)
-	bn := rpc.BlockNumber(blockNum)
-	info, err := api.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
-	require.NoError(t, err)
-
-	// The tip-pinned tx carries block 13's commitment, not parent(3): a validation gate fails.
-	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, info, witnessModeLegacy)
-	require.Error(t, err, "a stale parent view must fail a validation gate")
-	require.Nil(t, result, "no wrong witness is produced on gate failure")
-	require.Equal(t, 0, api.witnessCache.Len(), "a gate failure caches nothing")
-
-	served, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
-	require.ErrorIs(t, err, errWitnessOutOfWindow, "cache-only never recomputes a failed block from history")
-	require.Nil(t, served)
+			served, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+			require.ErrorIs(t, err, errWitnessOutOfWindow, "cache-only never recomputes a failed block from history")
+			require.Nil(t, served)
+		})
+	}
 }
 
 // TestExecutionWitnessCacheOnlyServe pins the Task 7 cache-only serve contract for a
@@ -816,4 +863,187 @@ func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
 	dbg.AssertEnabled = true
 	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
 		"under the gate the stateless replay rejects a wrong witness")
+}
+
+type fixedParentState struct {
+	acc  map[accounts.Address]*accounts.Account
+	slot map[accounts.StorageKey][]byte
+}
+
+func (p fixedParentState) GetCommittedAccount(addr accounts.Address) (*accounts.Account, bool) {
+	a, ok := p.acc[addr]
+	return a, ok
+}
+
+func (p fixedParentState) GetCommittedStorage(_ accounts.Address, key accounts.StorageKey) ([]byte, bool) {
+	v, ok := p.slot[key]
+	return v, ok
+}
+
+type fixedHistory struct {
+	state.StateReader
+	acc  map[accounts.Address]*accounts.Account
+	slot map[accounts.StorageKey]uint256.Int
+}
+
+func (h fixedHistory) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	return h.acc[addr], nil
+}
+
+func (h fixedHistory) ReadAccountStorage(_ accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	v, ok := h.slot[key]
+	return v, ok, nil
+}
+
+func TestParentStateReaderServesTheValidationsParentState(t *testing.T) {
+	previous := dbg.AssertEnabled
+	t.Cleanup(func() { dbg.AssertEnabled = previous })
+	cached, absent, unseen := accounts.InternAddress(common.Address{1}), accounts.InternAddress(common.Address{2}), accounts.InternAddress(common.Address{3})
+	full, empty, other := accounts.InternKey(common.Hash{1}), accounts.InternKey(common.Hash{2}), accounts.InternKey(common.Hash{3})
+	history := fixedHistory{
+		acc:  map[accounts.Address]*accounts.Account{cached: {Nonce: 7}, unseen: {Nonce: 9}},
+		slot: map[accounts.StorageKey]uint256.Int{full: *uint256.NewInt(5), other: *uint256.NewInt(6)},
+	}
+	parent := fixedParentState{
+		acc:  map[accounts.Address]*accounts.Account{cached: {Nonce: 7}, absent: nil},
+		slot: map[accounts.StorageKey][]byte{full: {5}, empty: nil},
+	}
+	for _, asserts := range []bool{false, true} {
+		dbg.AssertEnabled = asserts
+		r := &parentStateReader{StateReader: history, parent: parent}
+		acc, err := r.ReadAccountData(cached)
+		require.NoError(t, err)
+		require.Equal(t, uint64(7), acc.Nonce)
+		acc.Nonce = 8
+		require.Equal(t, uint64(7), parent.acc[cached].Nonce, "callers get a copy")
+		acc, err = r.ReadAccountData(absent)
+		require.NoError(t, err)
+		require.Nil(t, acc)
+		acc, err = r.ReadAccountData(unseen)
+		require.NoError(t, err)
+		require.Equal(t, uint64(9), acc.Nonce, "a key the validation never read comes from history")
+		v, ok, err := r.ReadAccountStorage(cached, full)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, uint64(5), v.Uint64())
+		v, ok, err = r.ReadAccountStorage(cached, empty)
+		require.NoError(t, err)
+		require.False(t, ok)
+		require.True(t, v.IsZero())
+		v, _, err = r.ReadAccountStorage(cached, other)
+		require.NoError(t, err)
+		require.Equal(t, uint64(6), v.Uint64())
+	}
+
+	dbg.AssertEnabled = true
+	wrong := fixedParentState{acc: map[accounts.Address]*accounts.Account{cached: {Nonce: 1}}, slot: map[accounts.StorageKey][]byte{full: {4}}}
+	r := &parentStateReader{StateReader: history, parent: wrong}
+	_, err := r.ReadAccountData(cached)
+	require.Error(t, err, "asserts reject a cached account that differs from history")
+	_, _, err = r.ReadAccountStorage(cached, full)
+	require.Error(t, err, "asserts reject a cached slot that differs from history")
+}
+
+func TestBuildAccessedStateStopsOnCancelledContext(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	tx, err := api.db.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	bn := rpc.BlockNumber(3)
+	info, err := api.resolveWitnessBlock(m.Ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err)
+	require.NotEmpty(t, info.Block.Transactions())
+	chainConfig, err := api.chainConfig(m.Ctx, tx)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(m.Ctx)
+	cancel()
+	_, _, err = api.buildAccessedState(ctx, tx, info.Block, chainConfig, api.engine(), info.FirstTxNumInBlock, witnessModeLegacy, nil)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+type chainWitnesses struct {
+	Legacy     [][]byte
+	Canonical  [][]byte
+	GetWitness []hexutil.Bytes
+}
+
+func collectChainWitnesses(t *testing.T, commitmentV3 bool) chainWitnesses {
+	previousAssert := dbg.AssertEnabled
+	t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
+	dbg.AssertEnabled = true
+	t.Cleanup(statecfg.SetCommitmentV3(commitmentV3))
+	statecfg.EnableHistoricalCommitment()
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	var latest uint64
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		latest, err = stages.GetStageProgress(tx, stages.Execution)
+		return err
+	}))
+	require.Positive(t, latest)
+
+	debugAPI := newDebugApiForTest(m)
+	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	var out chainWitnesses
+	for n := uint64(1); n <= latest; n++ {
+		bn := rpc.BlockNumber(n)
+		at := rpc.BlockNumberOrHash{BlockNumber: &bn}
+		for _, mode := range []string{"legacy", "canonical"} {
+			result, err := debugAPI.ExecutionWitness(ctx, at, &mode)
+			require.NoError(t, err, "block %d mode %s", n, mode)
+			encoded, err := json.Marshal(result)
+			require.NoError(t, err)
+			if mode == "legacy" {
+				out.Legacy = append(out.Legacy, encoded)
+			} else {
+				out.Canonical = append(out.Canonical, encoded)
+			}
+		}
+		witness, err := ethAPI.GetWitness(ctx, at)
+		require.NoError(t, err, "block %d eth_getWitness", n)
+		out.GetWitness = append(out.GetWitness, witness)
+	}
+	return out
+}
+
+func TestWitnessesMatchHPHUnderCommitmentV3(t *testing.T) {
+	var hph, v3 chainWitnesses
+	require.True(t, t.Run("hph", func(t *testing.T) { hph = collectChainWitnesses(t, false) }))
+	require.True(t, t.Run("v3", func(t *testing.T) { v3 = collectChainWitnesses(t, true) }))
+	require.NotEmpty(t, hph.Legacy)
+	for n := range hph.Legacy {
+		require.Equal(t, string(hph.Legacy[n]), string(v3.Legacy[n]), "debug_executionWitness legacy, block %d", n+1)
+		require.Equal(t, string(hph.Canonical[n]), string(v3.Canonical[n]), "debug_executionWitness canonical, block %d", n+1)
+		require.Equal(t, hph.GetWitness[n], v3.GetWitness[n], "eth_getWitness, block %d", n+1)
+	}
+}
+
+func TestHeadCaptureRejectsWrongTracedRoot(t *testing.T) {
+	m, testChain := newV3HistoryTestExecModule(t)
+	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
+	pin, err := openRollingPin(t.Context(), m.DB)
+	require.NoError(t, err)
+	t.Cleanup(pin.close)
+	require.NoError(t, m.InsertChain(testChain.Slice(1, 2)))
+	committed, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer committed.Rollback()
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	bn := rpc.BlockNumber(2)
+	info, err := api.resolveWitnessBlock(t.Context(), committed, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err)
+	header := info.Block.Header()
+	header.Root = common.Hash{0xde, 0xad}
+	info.Block = info.Block.WithSeal(header)
+	result, err := api.buildWitnessResultHeadCapture(t.Context(), committed, pin, &commitmentdb.ParentRecords{}, info, witnessModeLegacy)
+	require.ErrorContains(t, err, "commitment root mismatch (traced=true)")
+	require.Nil(t, result)
 }

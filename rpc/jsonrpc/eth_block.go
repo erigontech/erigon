@@ -92,7 +92,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	if err != nil {
 		return nil, err
 	}
-	if err := api.BaseAPI.checkPruneHistory(ctx, tx, stateBlockNumber); err != nil {
+	if err := api.BaseAPI.checkPruneStateAfterSystemTx(ctx, tx, stateBlockNumber); err != nil {
 		return nil, err
 	}
 	var stateReader state.StateReader
@@ -108,7 +108,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 	}
-	ibs := state.New(stateReader)
+	ibs := state.NewVersionedCall(stateReader)
 	defer ibs.Close()
 
 	parent, err := api.headerByHashAndNumber(ctx, tx, hash, stateBlockNumber)
@@ -152,7 +152,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	if timeoutMilliSecondsPtr != nil {
 		timeoutMilliSeconds = *timeoutMilliSecondsPtr
 	}
-	timeout := time.Millisecond * time.Duration(timeoutMilliSeconds)
+	timeout := capEVMTimeout(api.evmCallTimeout, timeoutMilliSeconds)
 
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, timeout)
 	defer cleanup()
@@ -166,7 +166,8 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	defer crypto.ReturnToPool(bundleHash)
 
 	results := make([]map[string]any, 0, len(txs))
-	for _, txn := range txs {
+	for i, txn := range txs {
+		ibs.SetTxContext(blockCtx.BlockNumber, i)
 		msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
 			return nil, err
@@ -184,7 +185,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
-		if err := ibs.FinalizeTx(rules, state.NewNoopWriter()); err != nil {
+		if err := ethapi.FinalizeCallTx(ibs, rules); err != nil {
 			return nil, err
 		}
 
@@ -245,12 +246,38 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if b == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
-	response := ethapi.RPCMarshalBlock(b, true, fullTx)
+	response, err := api.marshalBlock(ctx, tx, b, fullTx, number != rpc.PendingBlockNumber)
+	if err != nil {
+		return nil, err
+	}
 	if number == rpc.PendingBlockNumber {
 		response.MarkPending()
 	}
 
 	return response, nil
+}
+
+func (api *BaseAPI) marshalBlock(ctx context.Context, tx kv.TemporalTx, block *types.Block, fullTx, useReceipts bool) (*ethapi.RPCBlock, error) {
+	if fullTx {
+		for i, txn := range block.Transactions() {
+			if txn.Type() != types.FrameTxType {
+				continue
+			}
+			blobFee, err := api.frameBlobBaseFee(ctx, tx, block.HeaderNoCopy(), block.Transactions()[i:]...)
+			if err != nil {
+				return nil, err
+			}
+			var receipts types.Receipts
+			if useReceipts {
+				receipts, err = api.canonicalReceiptsGasUsed(ctx, tx, block)
+				if err != nil {
+					return nil, err
+				}
+			}
+			return ethapi.RPCMarshalBlockWithFramePrices(block, true, true, blobFee, receipts), nil
+		}
+	}
+	return ethapi.RPCMarshalBlock(block, true, fullTx), nil
 }
 
 // GetHeaderByNumber implements eth_getHeaderByNumber. Returns a block's header given a block
@@ -335,7 +362,10 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 	number := block.NumberU64()
 
-	response := ethapi.RPCMarshalBlock(block, true, fullTx)
+	response, err := api.marshalBlock(ctx, tx, block, fullTx, true)
+	if err != nil {
+		return nil, err
+	}
 	if int64(number) == rpc.PendingBlockNumber.Int64() {
 		response.MarkPending()
 	}
@@ -404,7 +434,7 @@ func (api *BaseAPI) blockAccessListBytes(ctx context.Context, tx kv.TemporalTx, 
 		return nil, err
 	}
 	if len(data) == 0 {
-		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum)
+		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum, nil)
 		if errors.Is(err, state.ErrPruned) {
 			return nil, blockAccessListPrunedHistoryError()
 		}

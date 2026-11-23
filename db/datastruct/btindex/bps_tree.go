@@ -136,7 +136,7 @@ func (b *BpsTree) compareKey(g *seg.Reader, key []byte, di uint64) int {
 	if di >= b.offt.Count() {
 		panic(fmt.Errorf("compareKey: di=%d >= count=%d, file: %s", di, b.offt.Count(), g.FileName()))
 	}
-	g.Reset(b.offt.Get(di))
+	g.Reset(b.offt.GetProbe(di, g.Probe()))
 	return g.MatchCmp(key)
 }
 
@@ -548,14 +548,14 @@ func (b *BpsTree) seekExact(g *seg.Reader, key []byte) (ok bool, offset uint64, 
 	var m uint64
 	l, r, m, found := b.interpNarrow(g, key, klo, khi, l, r)
 	if found {
-		return true, b.offt.Get(m), nil
+		return true, b.offt.GetProbe(m, g.Probe()), nil
 	}
 	for l < r {
 		m = (l + r) >> 1
 		if r-l <= DefaultBtreeStartSkip {
 			m = l
 			if offset == 0 {
-				offset = b.offt.Get(m)
+				offset = b.offt.GetProbe(m, g.Probe())
 				g.Reset(offset)
 			}
 			if cmp = g.MatchCmp(key); cmp < 0 {
@@ -567,7 +567,7 @@ func (b *BpsTree) seekExact(g *seg.Reader, key []byte) (ok bool, offset uint64, 
 				l++
 				continue
 			}
-			return true, b.offt.Get(m), nil
+			return true, b.offt.GetProbe(m, g.Probe()), nil
 		}
 
 		cmp = b.compareKey(g, key, m)
@@ -576,7 +576,7 @@ func (b *BpsTree) seekExact(g *seg.Reader, key []byte) (ok bool, offset uint64, 
 			if !g.HasNext() {
 				return false, 0, fmt.Errorf("pair %d/%d key not found in %s", m, b.offt.Count(), g.FileName())
 			}
-			return true, b.offt.Get(m), nil
+			return true, b.offt.GetProbe(m, g.Probe()), nil
 		case cmp < 0:
 			r = m
 		default:
@@ -597,7 +597,7 @@ func (b *BpsTree) seekExact(g *seg.Reader, key []byte) (ok bool, offset uint64, 
 	if !g.HasNext() {
 		return false, 0, fmt.Errorf("pair %d/%d key not found in %s", l, b.offt.Count(), g.FileName())
 	}
-	return true, b.offt.Get(l), nil
+	return true, b.offt.GetProbe(l, g.Probe()), nil
 }
 
 // Interpolation search narrows the window with position estimates from the
@@ -611,7 +611,7 @@ func (b *BpsTree) interpNarrow(g *seg.Reader, key, klo, khi []byte, l, r uint64)
 	km := kmArr[:0]
 	for probes := uint64(0); l < r && r-l > DefaultBtreeStartSkip && probes < BtInterpBudget; probes++ {
 		m := interpMid(key, klo, khi, l, r)
-		g.Reset(b.offt.Get(m))
+		g.Reset(b.offt.GetProbe(m, g.Probe()))
 		km, _ = g.Next(km[:0])
 		switch cmp := bytes.Compare(key, km); {
 		case cmp == 0:

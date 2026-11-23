@@ -159,7 +159,7 @@ func TestProgressiveListSSZDecodeEnforcesLimit(t *testing.T) {
 			require.NoError(t, err)
 			err = tc.list.DecodeSSZ(encoded, 0)
 			require.Error(t, err)
-			assert.True(t, errors.Is(err, ssz.ErrTooBigList), "expected ErrTooBigList, got %v", err)
+			assert.ErrorIs(t, err, ssz.ErrTooBigList, "expected ErrTooBigList, got %v", err)
 		})
 	}
 }

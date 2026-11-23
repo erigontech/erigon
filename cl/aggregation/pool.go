@@ -18,6 +18,7 @@ package aggregation
 
 import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -25,6 +26,21 @@ import (
 type AggregationPool interface {
 	// AddAttestation adds a single attestation to the pool.
 	AddAttestation(att *solid.Attestation) error
+	// AddVerifiedAttestation is AddAttestation for a vote whose signature the caller has already verified and
+	// decompressed. From Electra on the pool adds sig to the committee aggregate without decompressing it again;
+	// before Electra, or with a nil sig, it uses att's compressed signature.
+	AddVerifiedAttestation(att *solid.Attestation, sig *bls.Signature) error
 	GetAggregatationByRoot(root common.Hash) *solid.Attestation
-	GetAggregatationByRootAndCommittee(root common.Hash, committeeIndex uint64) *solid.Attestation
+	// GetAggregatationByRootAndCommittee returns the committee's aggregate of the data, also when the
+	// pool keeps it aside because the committee is full.
+	GetAggregatationByRootAndCommittee(root common.Hash, slot, committeeIndex uint64) *solid.Attestation
+	// Aggregates returns the current per-committee aggregates (Electra and later). The pool replaces
+	// an aggregate instead of changing it, so callers may keep them but must not modify them.
+	Aggregates() []*solid.Attestation
+	// PinAttestationData marks attestation data the node serves its validators. Once it is stored,
+	// gossip votes for other data cannot displace it.
+	PinAttestationData(data *solid.AttestationData) error
+	// AddAggregatorDuty marks a committee with a local aggregator, whose attestation data may come from
+	// another beacon node. Votes for data the committee does not store are then kept for every voter.
+	AddAggregatorDuty(slot, committeeIndex uint64)
 }

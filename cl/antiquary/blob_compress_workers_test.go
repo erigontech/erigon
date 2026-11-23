@@ -38,7 +38,7 @@ func TestIsBlobBacklog(t *testing.T) {
 		want bool
 	}{
 		{"one chunk, the steady tip case", limit, false},
-		{"one slot short of two chunks, so only one is compressed", 2*limit - 1, false},
+		{"one slot short of two chunks", 2*limit - 1, false},
 		{"exactly two chunks", 2 * limit, true},
 		{"the 72-chunk backlog measured on sepolia", 72 * limit, true},
 	} {
@@ -89,7 +89,7 @@ func TestBlobCompressWorkersHoldsTheLimiterWhileCatchingUp(t *testing.T) {
 }
 
 // Retiring slowly beats not retiring: an unavailable limiter drops the dump to one worker rather
-// than skipping it, because the blob gate stays shut until the whole range lands.
+// than skipping it.
 func TestBlobCompressWorkersFallsBackWhenTheLimiterIsTaken(t *testing.T) {
 	sema := semaphore.NewWeighted(caplinSnapshotBuildSemaWeight)
 	require.True(t, sema.TryAcquire(caplinSnapshotBuildSemaWeight))

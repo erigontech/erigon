@@ -20,14 +20,18 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 )
+
+var ErrAttesterSlashingEmptyIntersection = errors.New("attester slashing has an empty attesting indices intersection")
 
 func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error {
 	if attesterSlashing == nil ||
@@ -37,6 +41,9 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		attesterSlashing.Attestation_2.AttestingIndices == nil {
 		return errors.New("invalid attester slashing")
 	}
+	if _, err := attesterSlashingIntersection(attesterSlashing); err != nil {
+		return err
+	}
 	if f.operationsPool.AttesterSlashingsPool.Has(pool.ComputeKeyForAttesterSlashing(attesterSlashing)) {
 		return ErrIgnore
 	}
@@ -45,9 +52,9 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	defer f.mu.Unlock()
 
 	if f.syncedDataManager.Syncing() {
-		s, err := f.forkGraph.GetState(f.justifiedCheckpoint.Load().(solid.Checkpoint).Root, false)
+		s, err := f.getStateLocked(f.justifiedCheckpoint.Load().(solid.Checkpoint).Root)
 		if err != nil {
-			return err
+			log.Debug("[OnAttesterSlashing] failed to load the justified state", "err", err)
 		}
 		return f.onProcessAttesterSlashing(attesterSlashing, s, test)
 	}
@@ -58,18 +65,13 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 }
 
 func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, s *state.CachingBeaconState, test bool) error {
-	if s == nil {
-		return errors.New("no state accessible")
-	}
-
 	// Check if this attestation is even slashable.
 	attestation1 := attesterSlashing.Attestation_1
 	attestation2 := attesterSlashing.Attestation_2
-	if attestation1.AttestingIndices.Length() > attestation1.AttestingIndices.Cap() ||
-		attestation2.AttestingIndices.Length() > attestation2.AttestingIndices.Cap() {
-		return errors.New("attesting indices exceed limit")
+	intersection, err := attesterSlashingIntersection(attesterSlashing)
+	if err != nil {
+		return err
 	}
-	intersection := intersectAttestingIndices(attestation1.AttestingIndices, attestation2.AttestingIndices)
 	if f.allAttesterSlashingIndicesSeen(intersection) {
 		return ErrIgnore
 	}
@@ -78,6 +80,13 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	}
 	if !cltypes.IsSlashableAttestationData(attestation1.Data, attestation2.Data) {
 		return errors.New("attestation data is not slashable")
+	}
+	if s == nil {
+		if !solid.IsUint64SortedSet(attestation1.AttestingIndices) ||
+			!solid.IsUint64SortedSet(attestation2.AttestingIndices) {
+			return errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
+		}
+		return fmt.Errorf("%w: no state accessible", synced_data.ErrNotSynced)
 	}
 	attestation1PublicKeys, err := getIndexedAttestationPublicKeys(s, attestation1)
 	if err != nil {
@@ -144,6 +153,18 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	f.operationsPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
 	f.queueEmit(func() { f.emitters.Operation().SendAttesterSlashing(attesterSlashing) })
 	return nil
+}
+
+func attesterSlashingIntersection(attesterSlashing *cltypes.AttesterSlashing) ([]uint64, error) {
+	indices1, indices2 := attesterSlashing.Attestation_1.AttestingIndices, attesterSlashing.Attestation_2.AttestingIndices
+	if indices1.Length() > indices1.Cap() || indices2.Length() > indices2.Cap() {
+		return nil, errors.New("attesting indices exceed limit")
+	}
+	intersection := intersectAttestingIndices(indices1, indices2)
+	if len(intersection) == 0 {
+		return nil, ErrAttesterSlashingEmptyIntersection
+	}
+	return intersection, nil
 }
 
 func intersectAttestingIndices(left, right solid.IterableSSZ[uint64]) []uint64 {

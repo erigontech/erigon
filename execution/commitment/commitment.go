@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/bits"
 	"reflect"
 	"slices"
@@ -87,7 +88,6 @@ type Trie interface {
 	RootHash() (hash []byte, err error)
 
 	SetTraceWriter(io.Writer)
-	EnableCsvMetrics(filePathPrefix string)
 
 	Variant() TrieVariant
 
@@ -100,6 +100,11 @@ type Trie interface {
 	Release()
 }
 
+type TrieStateCodec interface {
+	EncodeState(blockNum, txNum uint64) ([]byte, error)
+	RestoreState(value []byte) (blockNum, txNum uint64, err error)
+}
+
 type CommitProgress struct {
 	KeyIndex    uint64
 	UpdateCount uint64
@@ -110,6 +115,9 @@ type PatriciaContext interface {
 	Branch(prefix []byte) ([]byte, kv.Step, error)
 	// Implementations must copy prefix and data rather than retain them: callers may pass
 	// pooled buffers that are recycled for a later, unrelated update.
+	// A nil prevData asks the writer to read the previous value.
+	// A non-nil empty slice means the branch was absent from the trie,
+	// even if an unreachable record remains in storage.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	Account(plainKey []byte) (*Update, error)
 	Storage(plainKey []byte) (*Update, error)
@@ -120,10 +128,57 @@ type TrieVariant string
 const (
 	VariantHexPatriciaTrie     TrieVariant = "hex-patricia-hashed"
 	VariantParallelHexPatricia TrieVariant = "hex-parallel-patricia-hashed"
+	VariantCommitmentV3        TrieVariant = "commitment-v3"
+	CommitmentV3StateMarker    byte        = 0x04
 )
+
+var (
+	KeyCommitmentState   = []byte("state")
+	KeyCommitmentV3State = []byte{0x42}
+	CommitmentStateKeys  = [][]byte{KeyCommitmentV3State, KeyCommitmentState}
+)
+
+const CommitmentV3StateSize = 1 + 8 + 8 + 32
+
+var (
+	ErrCommitmentV3StateMarker = errors.New("commitment v3: invalid state variant marker")
+	ErrCommitmentV3StateSize   = errors.New("commitment v3: invalid state size")
+)
+
+func EncodeCommitmentV3State(root []byte, blockNum, txNum uint64) ([]byte, error) {
+	if len(root) != length.Hash {
+		return nil, ErrCommitmentV3StateSize
+	}
+	dst := make([]byte, 1, CommitmentV3StateSize)
+	dst[0] = CommitmentV3StateMarker
+	dst = binary.BigEndian.AppendUint64(dst, txNum)
+	dst = binary.BigEndian.AppendUint64(dst, blockNum)
+	return append(dst, root...), nil
+}
+
+func DecodeCommitmentV3State(value []byte) (blockNum, txNum uint64, root []byte, err error) {
+	if len(value) != CommitmentV3StateSize {
+		return 0, 0, nil, ErrCommitmentV3StateSize
+	}
+	if value[0] != CommitmentV3StateMarker {
+		return 0, 0, nil, ErrCommitmentV3StateMarker
+	}
+	return binary.BigEndian.Uint64(value[9:17]), binary.BigEndian.Uint64(value[1:9]), bytes.Clone(value[17:]), nil
+}
+
+func IsCommitmentStateKey(key []byte) bool {
+	return slices.ContainsFunc(CommitmentStateKeys, func(k []byte) bool { return bytes.Equal(key, k) })
+}
+
+var NewCommitmentV3Trie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
 
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
+	case VariantCommitmentV3:
+		if NewCommitmentV3Trie == nil {
+			panic("commitment v3 selected without importing execution/commitment/v3")
+		}
+		return NewCommitmentV3Trie(tmpdir, cfg)
 	case VariantParallelHexPatricia:
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
@@ -207,6 +262,9 @@ type DeferredBranchUpdate struct {
 	// Backing store for a merged encoded value. encoded either aliases raw or points
 	// here, so it is never itself reused — this is the buffer that survives pooling.
 	encodedBuf []byte
+	// rawWrite writes raw as-is without merging it against prev, for a tombstone whose
+	// prev is carried only for the domain diff (see CollectTombstone).
+	rawWrite bool
 }
 
 var deferredUpdatePool = &sync.Pool{
@@ -222,13 +280,14 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	upd.raw = reuseBytes(upd.raw, raw)
 	upd.prev = reuseBytes(upd.prev, prev)
 	upd.encoded = nil
+	upd.rawWrite = false
 
 	return upd
 }
 
 // reuseBytes copies src into dst's backing array, matching bytes.Clone's nil handling:
 // a nil src yields nil, so pool history cannot change the result's nil-ness. Callers
-// distinguish a nil prev ("look it up") from an empty one ("known absent").
+// distinguish a nil prev ("look it up") from an empty one ("absent from the trie").
 func reuseBytes(dst, src []byte) []byte {
 	if src == nil {
 		return nil
@@ -258,19 +317,48 @@ func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	}
 }
 
+type BranchDelta struct {
+	Key  []byte
+	Data []byte
+	Prev []byte
+}
+
+type FeedSlot struct {
+	Hash  [32]byte
+	Value []byte
+}
+
+type FeedAccount struct {
+	Hash   [32]byte
+	Update *Update
+	Slots  []FeedSlot
+}
+
+type Feed struct {
+	Accounts []FeedAccount
+	Keys     int
+}
+
+type LeafRefs struct {
+	Mask uint16
+	Refs [][32]byte
+}
+
 type PendingCommitmentUpdate struct {
 	BlockNum uint64
 	// BlockHash disambiguates changeset lookups sharing a block number.
 	BlockHash common.Hash
 	TxNum     uint64
 	Deferred  []*DeferredBranchUpdate
+	Deltas    [][]BranchDelta
 	// Metrics is the producing trie's, carried so the later apply still reaches
-	// that trie's log and CSV counters. The Prometheus counters do not depend on
-	// it — publishBranchWrites bills those where the write lands.
+	// that trie's log counters. The Prometheus counters do not depend on it —
+	// publishBranchWrites bills those where the write lands.
 	Metrics *Metrics
 }
 
 func (p *PendingCommitmentUpdate) Clear() {
+	p.Deltas = nil
 	for _, upd := range p.Deferred {
 		putDeferredUpdate(upd)
 	}
@@ -317,6 +405,10 @@ func (be *BranchEncoder) ClearDeferred() {
 }
 
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
+	if upd.rawWrite {
+		upd.encoded = upd.raw
+		return nil
+	}
 	if len(upd.prev) > 0 {
 		if bytes.Equal(upd.prev, upd.raw) {
 			upd.encoded = nil
@@ -351,7 +443,7 @@ var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512
 // were written. Writes are published to the branch-write counters as they land,
 // not against a round: the caller-owned path applies from SharedDomains after the
 // producing round has already closed, so there is no round left to bill. m, when
-// non-nil, additionally carries them into that trie's log and CSV counters.
+// non-nil, additionally carries them into that trie's log counters.
 //
 // putBranch must copy prefix and data rather than retain them: they are pooled and
 // reused for a later, unrelated update. prevData is cloned per update and carries
@@ -376,20 +468,20 @@ func ApplyDeferredBranchUpdates(
 		var written, bytesOut int
 		for _, upd := range deferred {
 			if err := mergeDeferredUpdate(upd, merger); err != nil {
-				publishBranchWrites(written, bytesOut, m)
+				PublishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			if upd.encoded == nil {
 				continue
 			}
 			if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
-				publishBranchWrites(written, bytesOut, m)
+				PublishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			written++
 			bytesOut += len(upd.encoded)
 		}
-		publishBranchWrites(written, bytesOut, m)
+		PublishBranchWrites(written, bytesOut, m)
 		return written, nil
 	}
 
@@ -427,13 +519,13 @@ func ApplyDeferredBranchUpdates(
 			continue
 		}
 		if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
-			publishBranchWrites(written, bytesOut, m)
+			PublishBranchWrites(written, bytesOut, m)
 			return written, err
 		}
 		written++
 		bytesOut += len(upd.encoded)
 	}
-	publishBranchWrites(written, bytesOut, m)
+	PublishBranchWrites(written, bytesOut, m)
 	return written, nil
 }
 
@@ -441,8 +533,8 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
-// prev is the record stored at prefix, empty when the branch is new. The caller
-// supplies it because the trie already read it while unfolding the row.
+// prev is the branch read during unfold, empty when the branch is new.
+// A nil prev is passed to PutBranch as a non-nil empty slice to avoid a storage read.
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -476,11 +568,11 @@ func (be *BranchEncoder) CollectUpdate(
 	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	publishBranchWrites(1, len(updateCopy), be.metrics)
+	PublishBranchWrites(1, len(updateCopy), be.metrics)
 	return nil
 }
 
-// prev is the record stored at prefix, empty when the branch is new; see CollectUpdate.
+// See CollectUpdate for the meaning of prev.
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -507,6 +599,33 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		return err
 	}
 	be.deferred = append(be.deferred, getDeferredUpdate(prefix, raw, prev))
+	return nil
+}
+
+// CollectTombstone writes an empty-branch tombstone at prefix (touchMap present,
+// afterMap zero, no cells) without merging it against prev. The tombstone carries
+// no cells, and a real stored branch can be shorter than its bitmap implies (state
+// hashes, extensions, inlined leaves), so Merge would overrun it. prev is still
+// forwarded to PutBranch so the domain diff records the real previous branch and an
+// unwind across the destruct restores it rather than an empty tombstone.
+func (be *BranchEncoder) CollectTombstone(ctx PatriciaContext, prefix []byte, touchMap uint16, prev []byte) error {
+	if be.deferUpdates {
+		if err := be.CollectDeferredUpdate(ctx, prefix, 0, touchMap, 0, nil, prev); err != nil {
+			return err
+		}
+		be.deferred[len(be.deferred)-1].rawWrite = true
+		return nil
+	}
+	raw, err := be.EncodeBranch(0, touchMap, 0, nil)
+	if err != nil {
+		return err
+	}
+	prefixCopy := bytes.Clone(prefix)
+	updateCopy := bytes.Clone(raw)
+	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
+		return err
+	}
+	PublishBranchWrites(1, len(updateCopy), be.metrics)
 	return nil
 }
 
@@ -1110,6 +1229,8 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 func ParseTrieVariant(s string) TrieVariant {
 	var trieVariant TrieVariant
 	switch s {
+	case "v3":
+		trieVariant = VariantCommitmentV3
 	case "parallel":
 		trieVariant = VariantParallelHexPatricia
 	case "hex":
@@ -1271,6 +1392,7 @@ const (
 	ModeDirect   Mode = 1
 	ModeUpdate   Mode = 2
 	ModeParallel Mode = 3
+	ModeCollect  Mode = 4
 )
 
 func (m Mode) String() string {
@@ -1283,6 +1405,8 @@ func (m Mode) String() string {
 		return "update"
 	case ModeParallel:
 		return "parallel"
+	case ModeCollect:
+		return "collect"
 	default:
 		return "unknown"
 	}
@@ -1302,13 +1426,15 @@ type Updates struct {
 	directBytes    int
 	directMemLimit int
 
+	hashedTouches [][]byte
+
 	batchSlab []KeyUpdate
 
 	arenas   [arenaRingSize][]byte
 	curArena int
 	gen      uint64
 
-	addrCache      addrHashCache
+	addrCache      AddrHashCache
 	addrCacheReuse bool
 }
 
@@ -1337,10 +1463,6 @@ func (t *Updates) arenaEnsureCap(c int) {
 	}
 }
 
-func (t *Updates) IsConcurrentCommitment() bool {
-	return t.mode == ModeParallel
-}
-
 type keyHasher func(key []byte) []byte
 
 func hasherReusesAddrPrefix(h keyHasher) bool {
@@ -1349,7 +1471,7 @@ func hasherReusesAddrPrefix(h keyHasher) bool {
 
 func (t *Updates) hashKey(key []byte) []byte {
 	if t.addrCacheReuse {
-		return keyToHexNibbleHashCached(key, &t.addrCache)
+		return KeyToHexNibbleHashCached(key, &t.addrCache)
 	}
 	return t.hasher(key)
 }
@@ -1375,6 +1497,8 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	case ModeParallel:
 		t.keys = make(map[string]struct{})
 		t.parallel = newParallelUpdate()
+	case ModeCollect:
+		t.treeIdx = make(map[string]*KeyUpdate)
 	}
 	return t
 }
@@ -1407,7 +1531,7 @@ func (t *Updates) initCollector() {
 		t.etl.Close()
 		t.etl = nil
 	}
-	t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
+	t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("component", "update-tree")).LogLvl(log.LvlDebug)
 	t.etl.SortAndFlushInBackground(true)
 }
 
@@ -1465,6 +1589,8 @@ func (t *Updates) Size() (updates uint64) {
 		return uint64(len(t.keys))
 	case ModeUpdate:
 		return uint64(t.tree.Len())
+	case ModeCollect:
+		return uint64(len(t.treeIdx))
 	default:
 		return 0
 	}
@@ -1498,12 +1624,32 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		hashedKey := t.hashKey(keyBytes)
 		ik := t.parallel.internKey(keyBytes)
 		t.keys[key] = struct{}{}
-		t.parallel.Insert(hashedKey, ik, nil)
+		t.parallel.Collect(hashedKey, ik, nil)
+	case ModeCollect:
+		existing, ok := t.treeIdx[key]
+		if !ok {
+			existing = &KeyUpdate{plainKey: key, update: new(Update)}
+			t.treeIdx[key] = existing
+		}
+		fn(existing, val)
 	default:
 	}
 }
 
+func (t *Updates) HashKey(key []byte) []byte { return t.hashKey(key) }
+
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
+	t.TouchPlainKeyDirectHashed(key, nil, update)
+}
+
+func (t *Updates) hashedOr(key string, hashed []byte) []byte {
+	if hashed != nil {
+		return hashed
+	}
+	return t.hashKey(common.ToBytesZeroCopy(key))
+}
+
+func (t *Updates) TouchPlainKeyDirectHashed(key string, hashed []byte, update *Update) {
 	if dbg.TraceTouchKey {
 		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%s nonce=%d codeHash=%x\n",
 			key, update.Flags, update.Balance.String(), update.Nonce, update.CodeHash)
@@ -1511,33 +1657,11 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	switch t.mode {
 	case ModeUpdate:
 		if existing, ok := t.treeIdx[key]; ok {
-			if update.Flags&DeleteUpdate != 0 {
-				existing.update.Flags = DeleteUpdate
-				existing.update.CodeHash = empty.CodeHash
-			} else {
-				existing.update.Flags &^= DeleteUpdate
-				if update.Flags&BalanceUpdate != 0 {
-					existing.update.Balance.Set(&update.Balance)
-					existing.update.Flags |= BalanceUpdate
-				}
-				if update.Flags&NonceUpdate != 0 {
-					existing.update.Nonce = update.Nonce
-					existing.update.Flags |= NonceUpdate
-				}
-				if update.Flags&CodeUpdate != 0 {
-					existing.update.CodeHash = update.CodeHash
-					existing.update.Flags |= CodeUpdate
-				}
-				if update.Flags&StorageUpdate != 0 {
-					existing.update.Storage = update.Storage
-					existing.update.StorageLen = update.StorageLen
-					existing.update.Flags |= StorageUpdate
-				}
-			}
+			mergeUpdateInto(existing.update, update)
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
-				hashedKey: t.hashKey(common.ToBytesZeroCopy(key)),
+				hashedKey: t.hashedOr(key, hashed),
 				update:    new(Update),
 			}
 			*pivot.update = *update
@@ -1546,12 +1670,12 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
-			t.collectDirect(t.hashKey(common.ToBytesZeroCopy(key)), key)
+			t.collectDirect(t.hashedOr(key, hashed), key)
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
 		keyBytes := common.ToBytesZeroCopy(key)
-		hashedKey := t.hashKey(keyBytes)
+		hashedKey := t.hashedOr(key, hashed)
 		u := new(Update)
 		*u = *update
 		ik := keyBytes
@@ -1559,9 +1683,74 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			ik = t.parallel.internKey(keyBytes)
 			t.keys[key] = struct{}{}
 		}
-		t.parallel.Insert(hashedKey, ik, u)
+		t.parallel.Collect(hashedKey, ik, u)
+	case ModeCollect:
+		if existing, ok := t.treeIdx[key]; ok {
+			mergeUpdateInto(existing.update, update)
+			return
+		}
+		u := *update
+		t.treeIdx[key] = &KeyUpdate{plainKey: key, update: &u}
 	default:
 	}
+}
+
+func mergeUpdateInto(existing, update *Update) {
+	if update.DeleteStorageSubtree {
+		existing.DeleteStorageSubtree = true
+	}
+	if update.Flags&DeleteUpdate != 0 {
+		existing.Flags = DeleteUpdate
+		existing.CodeHash = empty.CodeHash
+		return
+	}
+	existing.Flags &^= DeleteUpdate
+	if update.Flags&BalanceUpdate != 0 {
+		existing.Balance.Set(&update.Balance)
+		existing.Flags |= BalanceUpdate
+	}
+	if update.Flags&NonceUpdate != 0 {
+		existing.Nonce = update.Nonce
+		existing.Flags |= NonceUpdate
+	}
+	if update.Flags&CodeUpdate != 0 {
+		existing.CodeHash = update.CodeHash
+		existing.Flags |= CodeUpdate
+	}
+	if update.Flags&StorageUpdate != 0 {
+		existing.Storage = update.Storage
+		existing.StorageLen = update.StorageLen
+		existing.Flags |= StorageUpdate
+	}
+}
+
+func (t *Updates) Drain(fn func(plainKey string, update *Update) error) error {
+	t.hashedTouches = t.hashedTouches[:0]
+	for key, item := range t.treeIdx {
+		if err := fn(key, item.update); err != nil {
+			return err
+		}
+	}
+	clear(t.treeIdx)
+	return nil
+}
+
+func (t *Updates) Untouch(plainKey string) bool {
+	if t.mode != ModeCollect {
+		return false
+	}
+	_, ok := t.treeIdx[plainKey]
+	delete(t.treeIdx, plainKey)
+	return ok
+}
+
+func (t *Updates) UntouchAll() []string {
+	if t.mode != ModeCollect {
+		return nil
+	}
+	keys := slices.Collect(maps.Keys(t.treeIdx))
+	clear(t.treeIdx)
+	return keys
 }
 
 func (t *Updates) TouchHashedKey(hashedKey []byte) {
@@ -1581,14 +1770,28 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		}
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			t.parallel.Insert(hashedKey, nil, nil)
+			t.parallel.Collect(common.ToBytesZeroCopy(dedupKey), nil, nil)
 			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeUpdate:
 		pivot := &KeyUpdate{hashedKey: bytes.Clone(hashedKey), update: new(Update)}
 		t.tree.ReplaceOrInsert(pivot)
+	case ModeCollect:
+		if len(hashedKey) != 0 {
+			t.hashedTouches = append(t.hashedTouches, bytes.Clone(hashedKey))
+		}
 	default:
 	}
+}
+
+func (t *Updates) CollectedHashedKeys() [][]byte {
+	keys := make([][]byte, 0, len(t.treeIdx)+len(t.hashedTouches))
+	for key := range t.treeIdx {
+		keys = append(keys, bytes.Clone(t.hashKey([]byte(key))))
+	}
+	keys = append(keys, t.hashedTouches...)
+	slices.SortFunc(keys, bytes.Compare)
+	return slices.CompactFunc(keys, bytes.Equal)
 }
 
 func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
@@ -1629,14 +1832,16 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 }
 
 func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
-	c.update.Flags |= CodeUpdate
 	if len(code) == 0 {
-		if c.update.Flags == 0 {
+		if t.mode == ModeCollect && c.update.Flags == 0 {
 			c.update.Flags = DeleteUpdate
+		} else {
+			c.update.Flags |= CodeUpdate
 		}
 		c.update.CodeHash = empty.CodeHash
 		return
 	}
+	c.update.Flags |= CodeUpdate
 	c.update.CodeHash = crypto.Keccak256Hash(code)
 }
 
@@ -1862,6 +2067,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		}
 		t.tree.Clear(true)
 
+	case ModeCollect:
+		return errors.New("commitment: ModeCollect has no HashSort; use Drain")
+
 	default:
 		return nil
 	}
@@ -1905,6 +2113,9 @@ func (t *Updates) Reset() {
 		if t.parallel != nil {
 			t.parallel.Reset()
 		}
+	case ModeCollect:
+		clear(t.treeIdx)
+		t.hashedTouches = t.hashedTouches[:0]
 	default:
 	}
 	t.batchSlab = t.batchSlab[:0]
@@ -1969,6 +2180,13 @@ type Update struct {
 	Flags      UpdateFlags
 	Balance    uint256.Int
 	Nonce      uint64
+
+	// DeleteStorageSubtree is a transient (never-serialized) signal that this
+	// account was self-destructed or created as a contract in the block: its whole
+	// storage subtree must be pruned before this account's update is applied, so the
+	// account rebuilds from empty storage. Set by the commitment calculator; consumed
+	// by the trie during Process. Not a Flags bit because Flags is serialized and merged.
+	DeleteStorageSubtree bool
 }
 
 func (u *Update) Reset() {
@@ -1977,6 +2195,7 @@ func (u *Update) Reset() {
 	u.Nonce = 0
 	u.StorageLen = 0
 	u.CodeHash = empty.CodeHash
+	u.DeleteStorageSubtree = false
 }
 
 func (u *Update) Copy() *Update {
@@ -1984,17 +2203,21 @@ func (u *Update) Copy() *Update {
 		return nil
 	}
 	c := &Update{
-		CodeHash:   u.CodeHash,
-		Storage:    u.Storage,
-		StorageLen: u.StorageLen,
-		Flags:      u.Flags,
-		Nonce:      u.Nonce,
+		CodeHash:             u.CodeHash,
+		Storage:              u.Storage,
+		StorageLen:           u.StorageLen,
+		Flags:                u.Flags,
+		Nonce:                u.Nonce,
+		DeleteStorageSubtree: u.DeleteStorageSubtree,
 	}
 	c.Balance.Set(&u.Balance)
 	return c
 }
 
 func (u *Update) Merge(b *Update) {
+	if b.DeleteStorageSubtree {
+		u.DeleteStorageSubtree = true
+	}
 	if b.Flags == DeleteUpdate {
 		u.Flags = DeleteUpdate
 		return

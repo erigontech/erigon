@@ -32,9 +32,8 @@ func TestOldIncarnationStorageMaskedAfterRecreate(t *testing.T) {
 		ibs := NewWithVersionMap(reader, vm)
 		ibs.SetTxContext(100, txIdx)
 		ibs.SetVersion(0)
-		ibs.SetNoMaterialize(true)
 		f(ibs)
-		vm.FlushVersionedWrites(ibs.FinalizedWrites(&chain.Rules{}), true)
+		vm.FlushVersionedWrites(finalizedWrites(t, ibs, &chain.Rules{}), true)
 	}
 
 	runTx(0, func(ibs *IntraBlockState) {
@@ -52,7 +51,6 @@ func TestOldIncarnationStorageMaskedAfterRecreate(t *testing.T) {
 	ibs3 := NewWithVersionMap(reader, vm)
 	ibs3.SetTxContext(100, 3)
 	ibs3.SetVersion(0)
-	ibs3.SetNoMaterialize(true)
 	v, err := ibs3.GetState(addr, key)
 	require.NoError(t, err)
 	require.True(t, v.IsZero(), "recreated contract's unwritten slot must read 0, got %s", v.String())
@@ -64,9 +62,8 @@ func runRevivalTx(t *testing.T, vm *VersionMap, txIdx int, f func(ibs *IntraBloc
 	t.Helper()
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
 	ibs.SetTxContext(100, txIdx)
-	ibs.SetNoMaterialize(true)
 	f(ibs)
-	writes := ibs.FinalizedWrites(&chain.Rules{})
+	writes := finalizedWrites(t, ibs, &chain.Rules{})
 	vm.FlushVersionedWrites(writes, true)
 	return writes
 }
@@ -91,13 +88,11 @@ func TestCreditRevivalCommitsIncarnationZero(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
 	vm := NewVersionMap(nil)
 	runRevivalTx(t, vm, 0, createAndDestroy(t, addr))
-	writes := runRevivalTx(t, vm, 1, credit(t, addr))
+	runRevivalTx(t, vm, 1, credit(t, addr))
 
-	normalized, err := writes.Normalize(vm, 1, 0, &emptyReader{}, nil, true, false, false)
-	require.NoError(t, err)
-	inc, ok := normalized.GetIncarnation(addr)
-	require.True(t, ok)
-	require.Zero(t, inc.Val)
+	acc := NewVersionedAccountView(addr, 2, vm, &emptyReader{}).Account()
+	require.NotNil(t, acc)
+	require.Zero(t, acc.Incarnation)
 }
 
 // tx0 creates and self-destructs the address; tx1 credits it, which revives it

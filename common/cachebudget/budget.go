@@ -81,6 +81,20 @@ func (b *Budget) Take(n int64) {
 	}
 }
 
+// ReserveUpTo reserves at most n bytes, as many as are free, and returns how many it took.
+func (b *Budget) ReserveUpTo(n int64) int64 {
+	for {
+		used := b.used.Load()
+		take := min(n, b.limit-used)
+		if take <= 0 {
+			return 0
+		}
+		if b.used.CompareAndSwap(used, used+take) {
+			return take
+		}
+	}
+}
+
 // Release returns n bytes to the envelope.
 func (b *Budget) Release(n int64) {
 	if n > 0 {

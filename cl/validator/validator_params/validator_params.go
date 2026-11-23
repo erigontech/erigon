@@ -24,8 +24,9 @@ import (
 )
 
 type ValidatorParams struct {
-	feeRecipients sync.Map
-	generation    atomic.Uint64
+	feeRecipients      sync.Map
+	attachedValidators sync.Map
+	generation         atomic.Uint64
 }
 
 func NewValidatorParams() *ValidatorParams {
@@ -38,6 +39,11 @@ func (vp *ValidatorParams) SetFeeRecipient(validatorIndex uint64, feeRecipient c
 	if previous, loaded := vp.feeRecipients.Swap(validatorIndex, feeRecipient); !loaded || previous.(common.Address) != feeRecipient {
 		vp.generation.Add(1)
 	}
+	vp.AddAttachedValidator(validatorIndex)
+}
+
+func (vp *ValidatorParams) AddAttachedValidator(validatorIndex uint64) {
+	vp.attachedValidators.Store(validatorIndex, struct{}{})
 }
 
 // Generation changes whenever a registration is added or its fee recipient changes, and is zero
@@ -55,9 +61,14 @@ func (vp *ValidatorParams) GetFeeRecipient(validatorIndex uint64) (common.Addres
 	return val.(common.Address), true
 }
 
+func (vp *ValidatorParams) HasAttachedValidator(validatorIndex uint64) bool {
+	_, ok := vp.attachedValidators.Load(validatorIndex)
+	return ok
+}
+
 func (vp *ValidatorParams) GetValidators() []uint64 {
 	validators := []uint64{}
-	vp.feeRecipients.Range(func(key, value any) bool {
+	vp.attachedValidators.Range(func(key, value any) bool {
 		validators = append(validators, key.(uint64))
 		return true
 	})

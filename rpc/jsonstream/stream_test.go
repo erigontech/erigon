@@ -1352,3 +1352,63 @@ func TestRewindField(t *testing.T) {
 		})
 	}
 }
+
+// WriteHexBytes serves arrays that can be large (proof nodes, txpool slots): it must hand its
+// bytes to the writer as it goes, like a value write does, or the whole array sits in memory
+// before the first byte leaves.
+func TestWriteHexBytesStreamsAtTheThreshold(t *testing.T) {
+	const n = 100_000
+	bytesOf := make([][]byte, n)
+	for i := range n {
+		bytesOf[i] = []byte{byte(i), byte(i >> 8), 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24}
+	}
+	var want bytes.Buffer
+	ref := New(&want)
+	ref.WriteArrayStart()
+	for i := range n {
+		ref.WriteHex(bytesOf[i])
+	}
+	ref.WriteArrayEnd()
+	require.NoError(t, ref.Flush())
+
+	var got bytes.Buffer
+	out := &countingWriter{w: &got}
+	s := New(out)
+	WriteHexBytes(s, bytesOf)
+	require.NoError(t, s.Flush())
+	require.Less(t, out.largest, 2*FlushThreshold, "the array reached the writer in one piece; its bytes sat in memory in full")
+	require.Equal(t, want.String(), got.String())
+}
+
+// countingWriter records the largest single Write: a bounded stream never hands over more
+// than a threshold's worth at once.
+type countingWriter struct {
+	w       io.Writer
+	largest int
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	c.largest = max(c.largest, len(p))
+	return c.w.Write(p)
+}
+
+type hexList [][]byte
+
+func (l hexList) MarshalFastJSONTo(s *Stream) error { WriteHexBytes(s, l); return nil }
+
+// MarshalTo is Marshal with a destination: same bytes, but a large value streams to the
+// writer instead of being held and copied.
+func TestMarshalToStreamsWhatMarshalBuffers(t *testing.T) {
+	l := make(hexList, 100_000)
+	for i := range l {
+		l[i] = []byte{byte(i), byte(i >> 8), 0xff}
+	}
+	want, err := Marshal(l)
+	require.NoError(t, err)
+
+	var got bytes.Buffer
+	out := &countingWriter{w: &got}
+	require.NoError(t, MarshalTo(out, l))
+	require.Equal(t, string(want), got.String())
+	require.Less(t, out.largest, 2*FlushThreshold)
+}

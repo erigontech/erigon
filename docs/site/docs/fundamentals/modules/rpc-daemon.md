@@ -48,7 +48,7 @@ Usage:
 
 Flags:
       --datadir string                              path to Erigon working directory
-      --db.read.concurrency int                     Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers when --experimental.parallel-commitment is on, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead
+      --db.read.concurrency int                     Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead
       --graphql                                     enables graphql endpoint (disabled by default)
       --grpc                                        Enable GRPC server
       --grpc.addr string                            GRPC server listening interface (default "localhost")
@@ -58,6 +58,7 @@ Flags:
       --http.addr string                            HTTP server listening interface (default "localhost")
       --http.api strings                            API's offered over the RPC interface: eth,erigon,web3,net,debug,trace,txpool,db. Supported methods: https://github.com/erigontech/erigon/tree/main/cmd/rpcdaemon (default [eth,erigon])
       --http.compression                            Disable http compression (default true)
+      --http.compression.loopback                   Also compress HTTP-RPC responses to loopback clients (default false)
       --http.corsdomain strings                     Comma separated list of domains from which to accept cross origin requests (browser enforced)
       --http.dbg.single                             Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed
       --http.enabled                                enable http server (default true)
@@ -106,8 +107,11 @@ Flags:
       --rpc.subscription.filters.maxaddresses int   Maximum number of addresses accepted per log subscription.
       --rpc.subscription.filters.maxheaders int     Maximum number of block headers to store per subscription.
       --rpc.subscription.filters.maxlogs int        Maximum number of logs to store per subscription.
+      --rpc.subscription.filters.maxsubscriptions int   Maximum number of live filters and subscriptions across all clients. Set to 0 to disable the limit. (default 10000)
       --rpc.subscription.filters.maxtopics int      Maximum number of topic alternatives accepted across all positions per log subscription.
       --rpc.subscription.filters.maxtxs int         Maximum number of transactions to store per subscription.
+      --rpc.subscription.filters.timeout duration   Timeout before idle filters are evicted. Defaults to 5m; set to 0 to disable eviction. (default 5m0s)
+      --rpc.subscription.limit int                  Maximum number of concurrent subscriptions per connection (WebSocket, IPC). 0 = unlimited (default 1024)
       --rpc.txfeecap float                          Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap) (default 1)
       --socket.enabled                              Enable IPC server
       --socket.url string                           IPC server listening url. prefix supported are tcp, unix (default "unix:///var/run/erigon.sock")
@@ -117,7 +121,6 @@ Flags:
       --tls.key string                              key file for client side TLS handshake for GRPC
       --trace string                                Write execution trace to the given file
       --trace.compat                                Bug for bug compatibility with OE for trace_ routines
-      --trace.maxtraces uint                        Sets a limit on traces that can be returned in trace_filter (default 200)
       --txpool.api.addr string                      txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)
       --verbosity string                            Set the log level for console logs (default "info")
       --ws                                          Enable Websockets - Same port as HTTP[S]

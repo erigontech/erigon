@@ -21,12 +21,13 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -53,8 +54,10 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 	mustReadBlock := true
 	reachedPageSize := false
 	hasMore := false
+	var blobFee *uint256.Int
+
 	for txNumsIter.HasNext() {
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
+		txNum, blockNum, txIndex, isFinalTxn, _, blockNumChanged, err := txNumsIter.Next()
 		if err != nil {
 			return nil, nil, false, err
 		}
@@ -66,6 +69,13 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			hasMore = true
 			break
 		}
+		if blockNumChanged {
+			// Require full replay history even when only a system entry survives.
+			// Trace indices can have a different physical start from state history.
+			if err := api.checkPruneTransactionHistory(ctx, tx, blockNum); err != nil {
+				return nil, nil, false, err
+			}
+		}
 
 		// Avoid reading the same block multiple times; multiple matches in the same block
 		// may be common.
@@ -74,12 +84,12 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 		// it is necessary to track dirty/lazy-must-read block headers
 		// because we skip system txs like rewards (which are not "real" txs
 		// for this rpc purposes)
-		if isFinalTxn {
+		if isFinalTxn || txIndex < 0 {
 			continue
 		}
 
 		if mustReadBlock {
-			if err := api.checkBlockHistoryAvailable(ctx, tx, blockNum); err != nil {
+			if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
 				return nil, nil, false, err
 			}
 			block, err = api.blockByNumberWithSenders(ctx, tx, blockNum)
@@ -89,9 +99,12 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			if block == nil {
 				return nil, nil, false, fmt.Errorf("block not found: %d", blockNum)
 			}
+			blobFee, err = api.frameBlobBaseFee(ctx, tx, block.HeaderNoCopy(), block.Transactions()...)
+			if err != nil {
+				return nil, nil, false, err
+			}
 			mustReadBlock = false
 		}
-
 		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, nil, false, err
@@ -100,16 +113,15 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			log.Warn("[rpc] txn not found", "blockNum", blockNum, "txIndex", txIndex)
 			continue
 		}
-		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), block.Time(), blockNum, uint64(txIndex), block.BaseFee())
-		txs = append(txs, rpcTx)
-
 		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block.HeaderNoCopy(), txn, txIndex, txNum, nil)
 		if err != nil {
 			return nil, nil, false, err
 		}
+		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), block.Time(), blockNum, uint64(txIndex), block.BaseFee(), blobFee, receipt.GasUsed)
+		txs = append(txs, rpcTx)
 
 		receipts = append(receipts, ReceiptWithTimestamp{
-			RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), true, false),
+			RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), true),
 			Timestamp:  block.Time(),
 		})
 
@@ -122,18 +134,23 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 	return txs, receipts, hasMore, nil
 }
 
+// addrTracesQuery selects the txs where addr is a trace sender or receiver, starting at fromTxNum in the asc order.
+func addrTracesQuery(addr common.Address, fromTxNum int, asc order.By) kv.IndexQuery {
+	return kv.IndexQuery{
+		Clauses: [][]kv.IndexKey{{{Idx: kv.TracesFromIdx, Key: addr[:]}, {Idx: kv.TracesToIdx, Key: addr[:]}}},
+		FromTs:  fromTxNum,
+		ToTs:    -1,
+		Asc:     asc,
+	}
+}
+
 func createBackwardTxNumIter(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error) {
 	// unbounded limit on purpose, since there could be e.g. block rewards system txs, we limit
 	// results later
-	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Desc, kv.Unlim)
+	txNums, err := tx.IndexJoin(addrTracesQuery(addr, fromTxNum, order.Desc))
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Desc, kv.Unlim)
-	if err != nil {
-		return nil, err
-	}
-	txNums := stream.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
 	return rawdbv3.TxNums2BlockNums(ctx, tx, txNumsReader, txNums, order.Desc), nil
 }
 
@@ -168,15 +185,10 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 func createForwardTxNumIter(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error) {
 	// unbounded limit on purpose, since there could be e.g. block rewards system txs, we limit
 	// results later
-	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Asc, kv.Unlim)
+	txNums, err := tx.IndexJoin(addrTracesQuery(addr, fromTxNum, order.Asc))
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Asc, kv.Unlim)
-	if err != nil {
-		return nil, err
-	}
-	txNums := stream.Union[uint64](itFrom, itTo, order.Asc, kv.Unlim)
 	return rawdbv3.TxNums2BlockNums(ctx, tx, txNumsReader, txNums, order.Asc), nil
 }
 

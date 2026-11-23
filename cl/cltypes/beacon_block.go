@@ -17,9 +17,11 @@
 package cltypes
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -269,6 +271,12 @@ type BeaconBody struct {
 	// The version of the beacon chain
 	Version   clparams.StateVersion       `json:"-"`
 	beaconCfg *clparams.BeaconChainConfig `json:"-"`
+	rootCache *atomic.Pointer[beaconBodyRootCacheEntry]
+}
+
+type beaconBodyRootCacheEntry struct {
+	encoding []byte
+	root     [32]byte
 }
 
 func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *BeaconBody {
@@ -276,6 +284,7 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 
 	body := &BeaconBody{
 		beaconCfg:         beaconCfg,
+		rootCache:         new(atomic.Pointer[beaconBodyRootCacheEntry]),
 		Eth1Data:          &Eth1Data{},
 		ProposerSlashings: solid.NewStaticListSSZ[*ProposerSlashing](limits.proposerSlashings, 416),
 		AttesterSlashings: solid.NewDynamicListSSZ[*AttesterSlashing](limits.attesterSlashings),
@@ -399,11 +408,7 @@ func (b *BeaconBody) ensureNilFields() {
 		b.Eth1Data = &Eth1Data{}
 	}
 	if b.SyncAggregate == nil {
-		bitsSize := defaultSyncCommitteeBitsSize
-		if b.beaconCfg != nil {
-			bitsSize = int(b.beaconCfg.SyncCommitteeSize) / 8
-		}
-		b.SyncAggregate = NewSyncAggregateWithSize(bitsSize)
+		b.SyncAggregate = newSyncAggregateForConfig(b.beaconCfg)
 	}
 	if b.ProposerSlashings == nil {
 		if b.Version >= clparams.GloasVersion {
@@ -556,15 +561,15 @@ func (b *BeaconBody) decodeSSZ(buf []byte, version int, strict bool) error {
 	}
 	var err error
 	if strict {
-		err = ssz2.UnmarshalSSZStrict(buf, version, b.getSchema(false)...)
+		err = ssz2.UnmarshalSSZStrict(buf, version, slashingDecodeSchema(b.getSchema(false), b.beaconCfg)...)
 	} else {
-		err = ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
+		err = ssz2.UnmarshalSSZ(buf, version, slashingDecodeSchema(b.getSchema(false), b.beaconCfg)...)
 	}
 	if err != nil {
 		return err
 	}
 
-	// Post-decode fixup: propagate preset-aware limits to decoded attestations and slashings.
+	// Post-decode fixup: propagate preset-aware limits to decoded attestations.
 	// DecodeDynamicList calls DecodeSSZ on each element with hardcoded mainnet limits.
 	// We must override those limits for minimal preset compatibility.
 	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
@@ -573,10 +578,6 @@ func (b *BeaconBody) decodeSSZ(buf []byte, version int, strict bool) error {
 		}); err != nil {
 			return err
 		}
-		b.AttesterSlashings.Range(func(_ int, as *AttesterSlashing, _ int) bool {
-			as.SetVersionWithConfig(b.Version, b.beaconCfg)
-			return true
-		})
 	}
 	return nil
 }
@@ -614,7 +615,28 @@ func (b *BeaconBody) Blinded() (*BlindedBeaconBody, error) {
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	b.ensureNilFields()
 	if b.Version >= clparams.GloasVersion {
-		return b.hashSSZGloas()
+		if b.rootCache == nil {
+			return b.hashSSZGloas()
+		}
+		entry := b.rootCache.Load()
+		var encodingCapacity int
+		if entry == nil {
+			encodingCapacity = b.EncodingSizeSSZ()
+		} else {
+			encodingCapacity = len(entry.encoding)
+		}
+		encoding, err := b.EncodeSSZ(make([]byte, 0, encodingCapacity))
+		if err != nil {
+			return b.hashSSZGloas()
+		}
+		if entry != nil && bytes.Equal(entry.encoding, encoding) {
+			return entry.root, nil
+		}
+		root, err := b.hashSSZGloas()
+		if err == nil {
+			b.rootCache.Store(&beaconBodyRootCacheEntry{encoding: bytes.Clone(encoding), root: root})
+		}
+		return root, err
 	}
 	return merkle_tree.HashTreeRoot(b.getSchema(false)...)
 }
@@ -764,6 +786,23 @@ func (b *BeaconBody) KzgCommitmentsInclusionProof() ([][32]byte, error) {
 	return merkle_tree.MerkleProof(4, 11, b.getSchema(false)...)
 }
 
+type requiredBodyField struct {
+	name   string
+	isNull bool
+}
+
+// rejectNullBodyFields expects decoding targets to preallocate every required
+// field, so a nil field after decoding means an explicit JSON null, while an
+// omitted key keeps its preallocated value.
+func rejectNullBodyFields(body string, fields ...requiredBodyField) error {
+	for _, field := range fields {
+		if field.isNull {
+			return fmt.Errorf("%s contains null %s", body, field.name)
+		}
+	}
+	return nil
+}
+
 func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	limits := beaconBodyLimitsForConfig(b.beaconCfg, b.Version)
 	ptcSize := clparams.MaxPtcSize
@@ -789,6 +828,10 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 		SignedExecutionPayloadBid *SignedExecutionPayloadBid          `json:"signed_execution_payload_bid,omitempty"`
 		PayloadAttestations       *solid.ListSSZ[*PayloadAttestation] `json:"payload_attestations,omitempty"`
 		ParentExecutionRequests   *ExecutionRequests                  `json:"parent_execution_requests,omitempty"`
+	}
+	tmp.Eth1Data = &Eth1Data{}
+	if b.Version >= clparams.AltairVersion {
+		tmp.SyncAggregate = newSyncAggregateForConfig(b.beaconCfg)
 	}
 	tmp.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](limits.proposerSlashings, 416)
 	tmp.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](limits.attesterSlashings)
@@ -820,6 +863,21 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	}
 
 	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	if err := rejectNullBodyFields("beacon body",
+		requiredBodyField{"eth1 data", tmp.Eth1Data == nil},
+		requiredBodyField{"proposer slashings", tmp.ProposerSlashings == nil},
+		requiredBodyField{"attester slashings", tmp.AttesterSlashings == nil},
+		requiredBodyField{"attestations", tmp.Attestations == nil},
+		requiredBodyField{"deposits", tmp.Deposits == nil},
+		requiredBodyField{"voluntary exits", tmp.VoluntaryExits == nil},
+		requiredBodyField{"sync aggregate", b.Version >= clparams.AltairVersion && tmp.SyncAggregate == nil},
+		requiredBodyField{"execution payload", b.Version >= clparams.BellatrixVersion && b.Version < clparams.GloasVersion && tmp.ExecutionPayload == nil},
+		requiredBodyField{"bls to execution changes", b.Version >= clparams.CapellaVersion && tmp.ExecutionChanges == nil},
+		requiredBodyField{"blob kzg commitments", b.Version >= clparams.DenebVersion && b.Version < clparams.GloasVersion && tmp.BlobKzgCommitments == nil},
+		requiredBodyField{"execution requests", b.Version >= clparams.ElectraVersion && b.Version < clparams.GloasVersion && tmp.ExecutionRequests == nil},
+	); err != nil {
 		return err
 	}
 	if b.Version >= clparams.GloasVersion {
