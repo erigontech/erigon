@@ -21,6 +21,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -53,7 +54,7 @@ func dbWithState(t *testing.T, buildFiles bool) (kv.TemporalRwDB, datadir.Dirs, 
 	const stepSize, txs, filed = 16, 64, 48
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
-	agg, _ := fillAccountState(t, db, txs)
+	agg, _ := fillAccountState(t, db, txs, 5)
 	ctx := t.Context()
 	if buildFiles {
 		require.NoError(t, agg.BuildFiles(db, filed, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
@@ -75,22 +76,30 @@ func dbWithState(t *testing.T, buildFiles bool) (kv.TemporalRwDB, datadir.Dirs, 
 	return db, dirs, countTail
 }
 
-func fillAccountState(t *testing.T, db kv.TemporalRwDB, txs uint64) (*state.Aggregator, []common.Hash) {
+func fillAccountState(t *testing.T, db kv.TemporalRwDB, txs, addrs uint64, skipCommitment ...uint64) (*state.Aggregator, []common.Hash) {
 	t.Helper()
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	tx, domains := temporaltest.NewTestTxSD(t, db)
 	roots := make([]common.Hash, txs)
 	for txNum := range txs {
-		addr := make([]byte, 20)
-		binary.BigEndian.PutUint64(addr[12:], txNum%5+1)
-		acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
-		prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, addr)
-		require.NoError(t, err)
-		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, prev))
-		root, err := domains.ComputeCommitment(t.Context(), tx, true, txNum, txNum, "", nil)
-		require.NoError(t, err)
-		roots[txNum] = common.Hash(root)
+		writes := uint64(1)
+		if txNum == 0 {
+			writes = 2
+		}
+		for i := range writes {
+			addr := make([]byte, 20)
+			binary.BigEndian.PutUint64(addr[12:], (txNum+i)%addrs+1)
+			acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
+			prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, addr)
+			require.NoError(t, err)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, prev))
+		}
+		if !slices.Contains(skipCommitment, txNum) {
+			root, err := domains.ComputeCommitment(t.Context(), tx, true, txNum, txNum, "", nil)
+			require.NoError(t, err)
+			roots[txNum] = common.Hash(root)
+		}
 		require.NoError(t, rawdbv3.TxNums.Append(tx, txNum, txNum))
 	}
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, txs-1))
@@ -103,12 +112,7 @@ func fillAccountState(t *testing.T, db kv.TemporalRwDB, txs uint64) (*state.Aggr
 func requireExecutionReset(t *testing.T, db kv.TemporalRwDB, countTail func() uint64) {
 	t.Helper()
 	require.Zero(t, countTail(), "the files-only rewrite covers only the files, so the DB tail past them must be gone")
-	roTx, err := db.BeginRo(t.Context())
-	require.NoError(t, err)
-	defer roTx.Rollback()
-	progress, err := stages.GetStageProgress(roTx, stages.Execution)
-	require.NoError(t, err)
-	require.Zero(t, progress)
+	require.Zero(t, executionProgressOf(t, db))
 }
 
 // useTestBlockReader keeps blocksIO off allSnapshots, which needs a DB with a genesis.
@@ -145,11 +149,22 @@ func TestCommitmentRebuildRefusesUnretiredSteps(t *testing.T) {
 	require.Equal(t, tail, countTail())
 }
 
-func TestCommitmentConvertV3DropsTheDBTail(t *testing.T) {
+func TestCommitmentConvertV3KeepsTheDBTail(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, _, countTail := dbWithState(t, true)
-	require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
-	requireExecutionReset(t, db, countTail)
+	tail, progress := countTail(), executionProgressOf(t, db)
+	require.NoError(t, commitmentConvert(db.(state.HasAgg).Agg().(*state.Aggregator), t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
+	require.Equal(t, tail, countTail())
+	require.Equal(t, progress, executionProgressOf(t, db))
+}
+
+func executionProgressOf(t *testing.T, db kv.TemporalRwDB) (progress uint64) {
+	t.Helper()
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) (err error) {
+		progress, err = executionProgress(tx)
+		return err
+	}))
+	return progress
 }
 
 func TestCommitmentConvertV3RefusedKeepsTheDBTail(t *testing.T) {
@@ -158,14 +173,14 @@ func TestCommitmentConvertV3RefusedKeepsTheDBTail(t *testing.T) {
 	backup := filepath.Join(dirs.Snap, "backup", "domains")
 	require.NoError(t, os.MkdirAll(backup, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(backup, "stale"), []byte{1}, 0o644))
-	require.Error(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
+	require.Error(t, commitmentConvert(db.(state.HasAgg).Agg().(*state.Aggregator), t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
 	require.Equal(t, before, countTail())
 }
 
 func TestCommitmentConvertV3WithoutFilesKeepsTheDBTail(t *testing.T) {
 	db, _, countTail := dbWithState(t, false)
 	before := countTail()
-	require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
+	require.NoError(t, commitmentConvert(db.(state.HasAgg).Agg().(*state.Aggregator), t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
 	require.Equal(t, before, countTail())
 }
 
@@ -192,7 +207,7 @@ func TestCommitmentRebuildWithoutHistoryAfterPrunedHistoryRefusal(t *testing.T) 
 	statecfg.EnableHistoricalCommitment()
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
-	agg, roots := fillAccountState(t, db, 56)
+	agg, roots := fillAccountState(t, db, 56, 5)
 	require.NoError(t, agg.BuildFiles(db, 56, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
 	agg.CloseFilesNoReopen()
 	for _, d := range []string{dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
@@ -206,7 +221,7 @@ func TestCommitmentRebuildWithoutHistoryAfterPrunedHistoryRefusal(t *testing.T) 
 	}
 	require.NoError(t, agg.ReloadFiles())
 
-	err := commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true})
+	err := commitmentConvert(db.(state.HasAgg).Agg().(*state.Aggregator), t.Context(), log.New(), state.ConvertOpts{TargetV3: true})
 	require.ErrorContains(t, err, "then run `integration commitment rebuild --yes --no-history` with ERIGON_COMMITMENT_V3=true")
 
 	agg.CloseFilesNoReopen()

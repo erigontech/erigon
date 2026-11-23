@@ -514,7 +514,11 @@ func (api *GraphQLAPIImpl) MaxPriorityFeePerGas(ctx context.Context) (string, er
 }
 
 func (api *GraphQLAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
-	return api.eth.GetLogs(ctx, crit)
+	res, err := api.eth.GetLogs(ctx, crit)
+	if err != nil {
+		return nil, err
+	}
+	return res.Logs, nil
 }
 
 func (api *GraphQLAPIImpl) GetPendingTransactions(ctx context.Context) ([]types.Transaction, error) {
