@@ -144,6 +144,7 @@ func init() {
 	commitmentCmd.AddCommand(cmdCommitmentConvert)
 
 	flags.DirVar(cmdCommitmentVerify.Flags(), &datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
+	must(cmdCommitmentVerify.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmdCommitmentVerify.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmdCommitmentVerify.Flags().UintSliceVar(&verifyAsOf, "asof", nil, "also fold the records as of these txNums")
 	commitmentCmd.AddCommand(cmdCommitmentVerify)
@@ -294,10 +295,7 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 	if salt, err := dbstate.GetStateIndicesSalt(dirs, false, logger); err != nil {
 		return err
 	} else if salt == nil {
-		return dbstate.ErrCannotStartWithoutSaltFiles
-	}
-	if err := dbstate.MatchCommitmentSchemaToFiles(dirs); err != nil {
-		return err
+		return fmt.Errorf("verify needs %s", filepath.Join(dirs.Snap, "salt-state.txt"))
 	}
 	hasHistory, err := dbstate.HasCommitmentHistoryFiles(dirs)
 	if err != nil {
@@ -657,6 +655,9 @@ func commitmentConvert(agg *dbstate.Aggregator, ctx context.Context, logger log.
 }
 
 func openStateFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*dbstate.Aggregator, error) {
+	if err := dbstate.MatchCommitmentSchemaToFiles(dirs); err != nil {
+		return nil, err
+	}
 	if err := dbstate.CheckSnapshotFileVersions(dirs); err != nil {
 		return nil, err
 	}
@@ -681,9 +682,6 @@ func openStateFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (
 func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
 	dirs := datadir.Open(datadirCli)
 	if err := CheckSaltFilesExist(dirs); err != nil {
-		return err
-	}
-	if err := dbstate.MatchCommitmentSchemaToFiles(dirs); err != nil {
 		return err
 	}
 	if opts.TargetV3 && !opts.NoHistory {

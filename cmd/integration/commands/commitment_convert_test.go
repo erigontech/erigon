@@ -142,6 +142,20 @@ func TestCommitmentVerifyRunsWithoutChaindata(t *testing.T) {
 	require.NoDirExists(t, dirs.Chaindata)
 }
 
+func TestCommitmentVerifyNeedsStateSalt(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	previousDatadir, previousVerifyAsOf := datadirCli, verifyAsOf
+	t.Cleanup(func() { datadirCli, verifyAsOf = previousDatadir, previousVerifyAsOf })
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	require.NoError(t, dir.RemoveFile(filepath.Join(dirs.Snap, "salt-state.txt")))
+
+	datadirCli, verifyAsOf = dirs.DataDir, nil
+	err := commitmentVerify(t.Context(), log.New())
+	require.ErrorContains(t, err, "salt-state.txt")
+	require.NotContains(t, err.Error(), "salt-blocks.txt")
+}
+
 func TestCommitmentVerifyChecksSnapshotFileVersions(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(true))
 	previousDatadir, previousVerifyAsOf := datadirCli, verifyAsOf
