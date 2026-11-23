@@ -47,6 +47,7 @@ const (
 	// methodNotFound is the JSON-RPC error of a node without the method.
 	methodNotFound = -32601
 	sendTimeout    = 30 * time.Second
+	nodeTimeout    = 5 * time.Second
 	maxAnswer      = 1 << 20
 	// maxPooled is the largest transaction other than a blob one that an L1
 	// pool admits, 128 KiB.
@@ -80,7 +81,11 @@ type Poster struct {
 	node     L1
 	builder  string
 	client   *http.Client
-	logger   log.Logger
+	// nodeTimeout bounds the poster's calls to the L1 node, whose websocket
+	// transport has no timeout of its own: Sign's reads together, Send's
+	// calls each.
+	nodeTimeout time.Duration
+	logger      log.Logger
 }
 
 // New returns a poster of key's calls to the contract at to, tipping
@@ -91,13 +96,14 @@ func New(ctx context.Context, key *ecdsa.PrivateKey, to common.Address, priority
 		return nil, fmt.Errorf("L1 chain id: %w", err)
 	}
 	p := &Poster{
-		key:     key,
-		from:    crypto.PubkeyToAddress(key.PublicKey),
-		to:      to,
-		node:    node,
-		builder: builder,
-		client:  &http.Client{Timeout: sendTimeout},
-		logger:  logger,
+		key:         key,
+		from:        crypto.PubkeyToAddress(key.PublicKey),
+		to:          to,
+		node:        node,
+		builder:     builder,
+		client:      &http.Client{Timeout: sendTimeout},
+		nodeTimeout: nodeTimeout,
+		logger:      logger,
 	}
 	p.chainID.SetUint64(id)
 	p.priority.SetUint64(priority)
@@ -112,6 +118,8 @@ func (p *Poster) From() common.Address { return p.from }
 // its pending nonce, capping the fee at twice the latest base fee plus the
 // tip.
 func (p *Poster) Sign(ctx context.Context, input []byte, gas uint64) (types.Transaction, error) {
+	ctx, cancel := context.WithTimeout(ctx, p.nodeTimeout)
+	defer cancel()
 	nonce, err := p.node.PendingNonce(ctx, p.from)
 	if err != nil {
 		return nil, err
@@ -183,7 +191,9 @@ func (p *Poster) Send(ctx context.Context, txs []types.Transaction, target Targe
 	// A target set before a catch-up and its proof may name a block L1 has
 	// built since; only a timestamp pin keeps it.
 	if block == 0 || target.Time == 0 {
-		head, err := p.node.Head(ctx)
+		hctx, cancel := context.WithTimeout(ctx, p.nodeTimeout)
+		head, err := p.node.Head(hctx)
+		cancel()
 		if err != nil {
 			return Sent{}, err
 		}
@@ -208,7 +218,9 @@ func (p *Poster) Send(ctx context.Context, txs []types.Transaction, target Targe
 	p.logger.Warn("[eez] builder has no eth_sendBundle, sending through the mempool", "event", "eez.poster.mempool",
 		"block", block, "txs", len(raw))
 	for i, tx := range raw {
-		err := p.node.SendRawTransaction(ctx, tx)
+		sctx, cancel := context.WithTimeout(ctx, p.nodeTimeout)
+		err := p.node.SendRawTransaction(sctx, tx)
+		cancel()
 		switch {
 		case err == nil:
 		case i > 0:

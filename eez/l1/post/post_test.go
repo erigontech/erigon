@@ -27,6 +27,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -50,17 +51,28 @@ type node struct {
 	// refuse fails the sends with these indexes with a refusal, down
 	// without an answer.
 	refuse, down map[int]bool
-	sends        int
-	sent         [][]byte
+	// hangHead, hangNonce and hangSend have those calls wait for their
+	// context.
+	hangHead, hangNonce, hangSend bool
+	sends                         int
+	sent                          [][]byte
 }
 
 func (n *node) ChainID(context.Context) (uint64, error) { return 3151908, nil }
 
-func (n *node) Head(context.Context) (*l1.Header, error) {
+func (n *node) Head(ctx context.Context) (*l1.Header, error) {
+	if n.hangHead {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return &l1.Header{Number: n.head}, n.failed
 }
 
-func (n *node) PendingNonce(context.Context, common.Address) (uint64, error) {
+func (n *node) PendingNonce(ctx context.Context, _ common.Address) (uint64, error) {
+	if n.hangNonce {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
 	return n.nonce, n.failed
 }
 
@@ -73,9 +85,13 @@ func (n *node) Balance(context.Context, common.Address) (*uint256.Int, error) {
 	return n.balance, nil
 }
 
-func (n *node) SendRawTransaction(_ context.Context, raw []byte) error {
+func (n *node) SendRawTransaction(ctx context.Context, raw []byte) error {
 	i := n.sends
 	n.sends++
+	if n.hangSend {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	if n.refuse[i] {
 		return fmt.Errorf("%w: transaction %d refused", l1.ErrRefused, i)
 	}
@@ -320,6 +336,52 @@ func TestSend(t *testing.T) {
 			require.Len(t, n.sent, c.mempool)
 			for i, s := range n.sent {
 				require.Equal(t, raw[i], hexutil.Encode(s))
+			}
+		})
+	}
+}
+
+// TestPosterOutlivesAHungNode: the poster's calls to an L1 node that stops
+// answering end within its bound. Signing fails, as does a head read before
+// anything is sent; a submission may have reached the pool.
+func TestPosterOutlivesAHungNode(t *testing.T) {
+	const unsupported = `{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"the method eth_sendBundle does not exist"}}`
+	for name, c := range map[string]struct {
+		hangNonce, hangHead, hangSend bool
+		target                        Target
+		unsure                        bool
+	}{
+		"nonce read": {hangNonce: true},
+		"head read":  {hangHead: true},
+		"submission": {hangSend: true, target: Target{Block: 100, Time: 1234}, unsure: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			n := &node{head: 98, baseFee: uint256.NewInt(gwei), balance: uint256.NewInt(1 << 62)}
+			p := poster(t, n, serve(t, &builder{answer: unsupported}))
+			p.nodeTimeout = 50 * time.Millisecond
+			var tx types.Transaction
+			if !c.hangNonce {
+				var err error
+				tx, err = p.Sign(t.Context(), []byte{1}, 100_000)
+				require.NoError(t, err)
+			}
+			n.hangNonce, n.hangHead, n.hangSend = c.hangNonce, c.hangHead, c.hangSend
+			done := make(chan error, 1)
+			go func() {
+				if c.hangNonce {
+					_, err := p.Sign(t.Context(), []byte{1}, 100_000)
+					done <- err
+					return
+				}
+				_, err := p.Send(t.Context(), []types.Transaction{tx}, c.target)
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				require.Error(t, err)
+				require.Equal(t, c.unsure, errors.Is(err, ErrUnsure), "unsure")
+			case <-time.After(5 * time.Second):
+				t.Fatal("the poster waits on the L1 node")
 			}
 		})
 	}
