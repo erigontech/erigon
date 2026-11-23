@@ -104,7 +104,7 @@ type Aggregator struct {
 
 	// Builds run independently of merges so new steps can be pruned promptly.
 	// A rewind also holds the gate, so waiters track actual builds separately.
-	fileBuildGate *semaphore.Weighted
+	fileBuildGate fileBuildGate
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
 
@@ -1204,6 +1204,12 @@ func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context, db kv.RoDB, maxR
 	return reorgSafeBlock, reorgSafeStep, ok
 }
 
+type fileBuildGate interface {
+	Acquire(context.Context, int64) error
+	TryAcquire(int64) bool
+	Release(int64)
+}
+
 // PauseStateFileBuilds waits for any active build to finish and prevents new
 // state-file builds until the caller invokes the returned function.
 func (a *Aggregator) PauseStateFileBuilds(ctx context.Context) (func(), error) {
@@ -1214,19 +1220,27 @@ func (a *Aggregator) PauseStateFileBuilds(ctx context.Context) (func(), error) {
 }
 
 func (a *Aggregator) startFileBuild(build func()) bool {
-	if !a.fileBuildGate.TryAcquire(1) {
-		a.logger.Debug("[snapshots] skipping file build: already building or paused")
+	if !a.buildingFiles.CompareAndSwap(false, true) {
+		a.logger.Debug("[snapshots] skipping file build: already building")
 		return false
+	}
+	if !a.fileBuildGate.TryAcquire(1) {
+		a.buildingFiles.Store(false)
+		a.logger.Debug("[snapshots] skipping file build: paused")
+		return false
+	}
+	finish := func() {
+		// WaitForFiles callers can request the next range as soon as they see the build finish.
+		a.fileBuildGate.Release(1)
+		a.buildingFiles.Store(false)
 	}
 	if !a.background.TryAdd() {
-		a.fileBuildGate.Release(1)
+		finish()
 		return false
 	}
-	a.buildingFiles.Store(true)
 	go func() {
 		defer a.background.Done()
-		defer a.fileBuildGate.Release(1)
-		defer a.buildingFiles.Store(false)
+		defer finish()
 		build()
 	}()
 	return true
