@@ -180,7 +180,7 @@ func TestProcessMessageImportSurvivesCancelingTheGossipContext(t *testing.T) {
 	}
 	require.Eventually(t, func() bool { return blockPersisted(t, service, root) }, acceptTestTimeout, time.Millisecond)
 	waitForGossipImports(t, service)
-	_, queued := service.blocksScheduledForLaterExecution.Load(root)
+	_, queued := service.blocksScheduledForLaterExecution.Load([32]byte(root))
 	require.False(t, queued)
 }
 
