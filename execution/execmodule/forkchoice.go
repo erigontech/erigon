@@ -935,7 +935,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 		persist := time.Since(persistStart)
 		e.observeStateTransition(ctx, StateTransitionCommitComplete)
-		e.startIdleAfterCommit()
 
 		// Prune: background by default (fcuBackgroundPrune=true). RunPrune
 		// shares the pipeline Sync with the next FCU's RunLoop, so the
@@ -954,6 +953,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			commitTimings = append(commitTimings, pruneTimings...)
 		}
+		e.startIdleAfterCommit()
 
 		e.logTimings("Timings: Forkchoice", commitTimings)
 		e.emitBlockMetrics(blockHash, e.forkValidator.GetTimings(blockHash), persist, headNum, finishProgressBefore, mergeExtendingFork)

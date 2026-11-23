@@ -24,7 +24,7 @@ import (
 )
 
 var gcDueMetrics = [...]string{
-	"/gc/heap/allocs:bytes",
+	"/gc/cycles/total:gc-cycles",
 	"/gc/heap/live:bytes",
 	"/gc/heap/goal:bytes",
 	"/memory/classes/heap/objects:bytes",
@@ -47,17 +47,18 @@ func (e *ExecModule) gcIfDue() {
 		s[i].Name = name
 	}
 	metrics.Read(s)
-	allocs, live, goal, heap := s[0].Value.Uint64(), s[1].Value.Uint64(), s[2].Value.Uint64(), s[3].Value.Uint64()
-	sinceLastCommit := allocs - e.allocsAtLastCommit
-	e.allocsAtLastCommit = allocs
-	if gcDue(heap, live, goal, sinceLastCommit) {
+	cycles, live, goal, heap := s[0].Value.Uint64(), s[1].Value.Uint64(), s[2].Value.Uint64(), s[3].Value.Uint64()
+	ranSinceLastCommit := cycles != e.gcCyclesAtLastCommit
+	e.gcCyclesAtLastCommit = cycles
+	if gcDue(heap, live, goal, ranSinceLastCommit) {
 		runtime.GC()
 	}
 }
 
-func gcDue(heap, live, goal, sinceLastCommit uint64) bool {
-	if goal <= live {
-		return true
+func gcDue(heap, live, goal uint64, ranSinceLastCommit bool) bool {
+	if ranSinceLastCommit || goal <= live {
+		return false
 	}
-	return heap+2*sinceLastCommit >= live+(goal-live)/64*45
+	runway := goal - live
+	return heap >= live+runway/2 && heap < live+runway/64*45
 }

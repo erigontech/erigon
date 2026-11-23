@@ -22,14 +22,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGCDueBeforeTheEarliestPacerTrigger(t *testing.T) {
+func TestGCDueBetweenHalfRunwayAndTheEarliestPacerTrigger(t *testing.T) {
 	const gib = uint64(1) << 30
 	live, goal := 10*gib, 20*gib
+	half := live + (goal-live)/2
 	earliestTrigger := live + (goal-live)/64*45
 
-	require.False(t, gcDue(live, live, goal, gib), "fresh heap, two slots of allocation stay far below the trigger")
-	require.False(t, gcDue(earliestTrigger-2*gib-1, live, goal, gib), "one byte short of the trigger after two slots")
-	require.True(t, gcDue(earliestTrigger-2*gib, live, goal, gib), "two slots of allocation reach the trigger")
-	require.True(t, gcDue(earliestTrigger, live, goal, 0), "already at the trigger")
-	require.True(t, gcDue(live, live, live, 0), "goal not above the live heap")
+	require.False(t, gcDue(half-1, live, goal, false), "less than half the runway used")
+	require.True(t, gcDue(half, live, goal, false), "half the runway used")
+	require.True(t, gcDue(earliestTrigger-1, live, goal, false), "just below the earliest pacer trigger")
+	require.False(t, gcDue(earliestTrigger, live, goal, false), "a natural cycle may already run, and runtime.GC would add a second one")
+	require.False(t, gcDue(half, live, goal, true), "a cycle finished since the last commit")
+	require.False(t, gcDue(goal, live, live, false), "goal not above live: the runtime already collects without a break")
 }
