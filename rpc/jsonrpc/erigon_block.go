@@ -184,15 +184,10 @@ func (api *ErigonImpl) buildBlockResponse(ctx context.Context, db kv.TemporalTx,
 		return nil, nil
 	}
 
-	blobFee, err := api.blobBaseFee(ctx, db, header)
+	response, err := api.marshalBlock(ctx, db, block, fullTx, true)
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := api.frameReceiptsGasUsed(ctx, db, block, fullTx)
-	if err != nil {
-		return nil, err
-	}
-	response := ethapi.RPCMarshalBlock(block, true, fullTx, blobFee, receipts)
 	if rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
 		response.MarkPending()
 	}

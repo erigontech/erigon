@@ -148,7 +148,7 @@ func (evm *EVM) consumeFrameNonce() error {
 		return ErrOutOfGas
 	}
 	sequence := *uint256.NewInt(tx.Nonce)
-	if tx.Nonce != math.MaxUint64 {
+	if !tx.UsesSingleUseNonce() {
 		sequence.AddUint64(&sequence, 1)
 	}
 	for _, slot := range slots[:len(tx.NonceKeys)] {

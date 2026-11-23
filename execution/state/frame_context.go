@@ -85,7 +85,7 @@ func (ibs *IntraBlockState) ResetFrameTransientStorage() {
 	if len(ibs.transientStorage) == 0 {
 		return
 	}
-	ibs.journal.entries = append(ibs.journal.entries, journalEntry{kind: kindFrameTransient, extra: &journalExtra{prevTransient: ibs.transientStorage}})
+	ibs.journal.push(journalEntry{kind: kindFrameTransient, extra: &journalExtra{prevTransient: ibs.transientStorage}})
 	ibs.transientStorage = newTransientStorage()
 }
 
@@ -98,7 +98,7 @@ func (ctx *FrameContext) ChargeStateGas(amount uint64) bool {
 		return false
 	}
 	used := &ctx.Receipts[ctx.Index].GasUsed.State
-	ctx.journal.entries = append(ctx.journal.entries, journalEntry{kind: kindFrameStateGas, flags: uint8(ctx.Index), aux: *used, extra: &ctx.undo})
+	ctx.journal.push(journalEntry{kind: kindFrameStateGas, flags: uint8(ctx.Index), aux: *used, extra: &ctx.undo})
 	*used += amount
 	return true
 }
@@ -108,7 +108,7 @@ func (ctx *FrameContext) SetApproval(senderApproved bool, payer accounts.Address
 	if ctx.SenderApproved {
 		flags = 1
 	}
-	ctx.journal.entries = append(ctx.journal.entries, journalEntry{kind: kindFrameApproval, account: ctx.Payer, flags: flags, extra: &ctx.undo})
+	ctx.journal.push(journalEntry{kind: kindFrameApproval, account: ctx.Payer, flags: flags, extra: &ctx.undo})
 	ctx.SenderApproved, ctx.Payer = senderApproved, payer
 }
 
@@ -118,7 +118,7 @@ func (ctx *FrameContext) RecordStorageCharge(address accounts.Address, key accou
 
 func (ctx *FrameContext) setStorageOwner(address accounts.Address, key accounts.StorageKey, owner uint8) {
 	slot := frameStorageSlot{address, key}
-	ctx.journal.entries = append(ctx.journal.entries, journalEntry{kind: kindFrameStorageOwner, account: address, key: key, flags: ctx.storageOwners[slot], extra: &ctx.undo})
+	ctx.journal.push(journalEntry{kind: kindFrameStorageOwner, account: address, key: key, flags: ctx.storageOwners[slot], extra: &ctx.undo})
 	if owner == 0 {
 		delete(ctx.storageOwners, slot)
 	} else {
@@ -144,6 +144,6 @@ func (ctx *FrameContext) refillStateGas(index int, amount uint64) {
 	if *used < amount {
 		panic("frame state gas refill exceeds charge")
 	}
-	ctx.journal.entries = append(ctx.journal.entries, journalEntry{kind: kindFrameStateGas, flags: uint8(index), aux: *used, extra: &ctx.undo})
+	ctx.journal.push(journalEntry{kind: kindFrameStateGas, flags: uint8(index), aux: *used, extra: &ctx.undo})
 	*used -= amount
 }

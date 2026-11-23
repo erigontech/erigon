@@ -537,6 +537,16 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				return
 			}
 		}
+		if path == StoragePath {
+			if storageClearedByCreate(r.life, true, hdr.Version.TxIndex) {
+				readClearedByCreate(s, hdr, r)
+				return
+			}
+			// A value below this tx is older than a creation in it.
+			if created, ok := s.versionedWriteCreateContract(addr); ok && created {
+				r.mapStorageVal = uint256.Int{}
+			}
+		}
 		r.outcome = outcomeMapDone
 		r.hdr = hdr
 		r.recordVR = true
@@ -638,7 +648,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 
 		// A slot with no cell after an in-block destruct reads post-wipe zero; anchor it as
 		// a MapRead at the wipe version {destroyedAt, wipeInc} so it validates by version
-		// against liveStorage. Mirrors the stale-Done-cell storage branch above.
+		// against liveStorageValue. Mirrors the stale-Done-cell storage branch above.
 		if path == StoragePath && r.life.state != LifecycleLive {
 			if !commited {
 				recordWipedSelfDestruct(s, addr, r.life)
@@ -647,6 +657,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			r.outcome = outcomeReturnZero
 			r.source = MapRead
 			r.version = r.life.canonicalVer
+			return
+		}
+		if path == StoragePath && storageClearedByCreate(r.life, false, UnknownDep) {
+			readClearedByCreate(s, hdr, r)
 			return
 		}
 
@@ -1260,8 +1274,25 @@ func recordWipedSelfDestruct(s *IntraBlockState, addr accounts.Address, life lif
 	})
 }
 
+// readClearedByCreate reads as zero a slot that a contract creation below the read replaced,
+// anchored on the creation, as liveStorageValue validates it. While the creation is in flight, the
+// read depends on it.
+func readClearedByCreate(s *IntraBlockState, hdr ReadHeader, r *readPathResult) {
+	if r.life.createInc < 0 {
+		s.dep = max(s.dep, r.life.createdAt)
+	}
+	hdr.Source = MapRead
+	hdr.Version = Version{TxIndex: r.life.createdAt, Incarnation: r.life.createInc}
+	r.mapStorageVal = uint256.Int{}
+	r.outcome = outcomeMapDone
+	r.hdr = hdr
+	r.recordVR = true
+	r.source = MapRead
+	r.version = hdr.Version
+}
+
 // recordWipedStorageRead records a zero slot read at the destruct that wiped it,
-// as liveStorage resolves it, so a later store above the destruct invalidates it.
+// as liveStorageValue resolves it, so a later store above the destruct invalidates it.
 func recordWipedStorageRead(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, life lifecycleVerdict) {
 	s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: life.destroyedAt, Incarnation: life.wipeInc}},

@@ -183,10 +183,10 @@ func setupPayloadAttestationService(t *testing.T, ctrl *gomock.Controller) (*pay
 func TestPayloadAttestationServiceSelectsSignatureVerifierByIngress(t *testing.T) {
 	saveSignatureGlobals(t)
 	var batchCalls atomic.Int32
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		batchCalls.Add(1)
 		return true, nil
-	}
+	})
 
 	setup := func(t *testing.T) (*payloadAttestationService, *signatureVerifierPayloadAttestationForkchoice, *cltypes.PayloadAttestationMessage, common.Hash) {
 		ctrl := gomock.NewController(t)
@@ -320,7 +320,7 @@ func TestPayloadAttestationServiceBatchSignatureOutcomes(t *testing.T) {
 	t.Run("raw fallback error enables immediate verification", func(t *testing.T) {
 		saveSignatureGlobals(t)
 		rawErr := errors.New("malformed signature")
-		blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return false, rawErr }
+		blsVerifyMultipleSignatures = withoutDecompressed(func(_, _, _ [][]byte) (bool, error) { return false, rawErr })
 		service, msg, _, forkchoiceStore := setup(t, validSignature, true)
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()

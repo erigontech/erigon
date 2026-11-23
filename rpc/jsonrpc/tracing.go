@@ -140,7 +140,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			}
 		}
 	}
-	transactions.VersionedCallState(ibs)
+	ibs.SetNoConflictDetection()
 	api.shareCodeByHash(ibs)
 
 	var precompiles vm.PrecompiledContracts
@@ -288,7 +288,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return err
 	}
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
+	ibs.SetNoConflictDetection()
 	api.shareCodeByHash(ibs)
 
 	// The state is built from history at txnIndex, so the earlier transactions of
@@ -414,9 +414,8 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 		return err
 	}
 	header := prepared.header
-	ibs := state.New(prepared.reader)
+	ibs := state.NewVersionedCall(prepared.reader)
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
 
 	baseFee := overrideBaseFee(config, header.BaseFee)
 
@@ -500,9 +499,8 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 	header := prepared.header
-	ibs := state.New(prepared.reader)
+	ibs := state.NewVersionedCall(prepared.reader)
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
 
 	getHash := transactions.MakeBlockHashProvider(ctx, tx, canonicalViewReader{api._blockReader}, overrideBlockHash)
 

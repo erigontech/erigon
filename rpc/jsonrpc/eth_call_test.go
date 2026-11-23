@@ -1762,7 +1762,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 
 	latestBlock, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
-	response := ethapi.RPCMarshalBlock(latestBlock, true, false, nil, nil)
+	response := ethapi.RPCMarshalBlock(latestBlock, true, false)
 	if rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
 		response.MarkPending()
 	}
@@ -1785,7 +1785,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	oldestBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 0)
 	require.NoError(t, err)
 
-	response := ethapi.RPCMarshalBlock(oldestBlock, true, false, nil, nil)
+	response := ethapi.RPCMarshalBlock(oldestBlock, true, false)
 	if rpc.BlockNumber(oldestBlock.NumberU64()) == rpc.PendingBlockNumber {
 		response.MarkPending()
 	}
@@ -1808,7 +1808,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	latestBlock, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
 
-	response := ethapi.RPCMarshalBlock(latestBlock, true, false, nil, nil)
+	response := ethapi.RPCMarshalBlock(latestBlock, true, false)
 	if rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
 		response.MarkPending()
 	}
@@ -1837,7 +1837,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	middleBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, middleNumber)
 	require.NoError(t, err)
 
-	response := ethapi.RPCMarshalBlock(middleBlock, true, false, nil, nil)
+	response := ethapi.RPCMarshalBlock(middleBlock, true, false)
 	if rpc.BlockNumber(middleBlock.NumberU64()) == rpc.PendingBlockNumber {
 		response.MarkPending()
 	}
@@ -1860,7 +1860,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	pickedBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, highestBlockNumber.Uint64()/3)
 	require.NoError(t, err)
 	require.NotNil(t, pickedBlock)
-	response := ethapi.RPCMarshalBlock(pickedBlock, true, false, nil, nil)
+	response := ethapi.RPCMarshalBlock(pickedBlock, true, false)
 	if rpc.BlockNumber(pickedBlock.NumberU64()) == rpc.PendingBlockNumber {
 		response.MarkPending()
 	}

@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"go.uber.org/goleak"
@@ -60,46 +61,43 @@ func TestExample(t *testing.T) {
 func TestMaxWorkers(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	wp := New(0)
-	wp.Stop()
-	if wp.maxWorkers != 1 {
-		t.Fatal("should have created one worker")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		wp := New(0)
+		wp.Stop()
+		if wp.maxWorkers != 1 {
+			t.Fatal("should have created one worker")
+		}
 
-	wp = New(maxWorkers)
-	defer wp.Stop()
+		wp = New(maxWorkers)
+		defer wp.Stop()
 
-	if wp.Size() != maxWorkers {
-		t.Fatal("wrong size returned")
-	}
+		if wp.Size() != maxWorkers {
+			t.Fatal("wrong size returned")
+		}
 
-	started := make(chan struct{}, maxWorkers)
-	release := make(chan struct{})
+		started := make(chan struct{}, maxWorkers)
+		release := make(chan struct{})
+		defer close(release)
 
-	// Start workers, and have them all wait on a channel before completing.
-	for range maxWorkers {
-		wp.Submit(func() {
-			started <- struct{}{}
-			<-release
-		})
-	}
+		// Start workers, and have them all wait on a channel before completing.
+		for range maxWorkers {
+			wp.Submit(func() {
+				started <- struct{}{}
+				<-release
+			})
+		}
 
-	// Wait for all queued tasks to be dispatched to workers.
-	if wp.waitingQueue.Len() != wp.WaitingQueueSize() {
-		t.Fatal("Working Queue size returned should not be 0")
-	}
-	timeout := time.After(5 * time.Second)
-	for startCount := 0; startCount < maxWorkers; {
-		select {
-		case <-started:
-			startCount++
-		case <-timeout:
+		// Wait for all queued tasks to be dispatched to workers.
+		if wp.waitingQueue.Len() != wp.WaitingQueueSize() {
+			t.Fatal("Working Queue size returned should not be 0")
+		}
+		synctest.Wait()
+		if len(started) != maxWorkers {
 			t.Fatal("timed out waiting for workers to start")
 		}
-	}
 
-	// Release workers.
-	close(release)
+		// Release workers.
+	})
 }
 
 func TestReuseWorkers(t *testing.T) {
@@ -126,41 +124,40 @@ func TestReuseWorkers(t *testing.T) {
 }
 
 func TestWorkerTimeout(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	synctest.Test(t, func(t *testing.T) {
+		wp := New(maxWorkers)
+		defer wp.Stop()
 
-	wp := New(maxWorkers)
-	defer wp.Stop()
+		// Start workers, and have them all wait on ctx before completing.
+		ctx, cancel := context.WithCancel(t.Context())
+		wp.Pause(ctx)
 
-	// Start workers, and have them all wait on ctx before completing.
-	ctx, cancel := context.WithCancel(t.Context())
-	wp.Pause(ctx)
+		if anyReady(wp) {
+			t.Fatal("number of ready workers should be zero")
+		}
 
-	if anyReady(wp) {
-		t.Fatal("number of ready workers should be zero")
-	}
+		if wp.killIdleWorker() {
+			t.Fatal("should have been no idle workers to kill")
+		}
 
-	if wp.killIdleWorker() {
-		t.Fatal("should have been no idle workers to kill")
-	}
+		// Release workers.
+		cancel()
 
-	// Release workers.
-	cancel()
+		if countReady(wp) != maxWorkers {
+			t.Fatal("Expected", maxWorkers, "ready workers")
+		}
 
-	if countReady(wp) != maxWorkers {
-		t.Fatal("Expected", maxWorkers, "ready workers")
-	}
+		// Advances the fake clock past two idle timers; the kills complete before Sleep returns.
+		time.Sleep(idleTimeout*2 + idleTimeout/2)
+		if countReady(wp) != maxWorkers-1 {
+			t.Fatal("First worker did not timeout")
+		}
 
-	// Check that a worker timed out.
-	time.Sleep(idleTimeout*2 + idleTimeout/2)
-	if countReady(wp) != maxWorkers-1 {
-		t.Fatal("First worker did not timeout")
-	}
-
-	// Check that another worker timed out.
-	time.Sleep(idleTimeout)
-	if countReady(wp) != maxWorkers-2 {
-		t.Fatal("Second worker did not timeout")
-	}
+		time.Sleep(idleTimeout)
+		if countReady(wp) != maxWorkers-2 {
+			t.Fatal("Second worker did not timeout")
+		}
+	})
 }
 
 func TestStop(t *testing.T) {

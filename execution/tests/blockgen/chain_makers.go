@@ -459,12 +459,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader) (*types.Block, types.Receipts, error) {
 		txNumIncrement()
-
-		versionMap := state.NewVersionMap(nil)
-		// SetVersionMap forces noMaterialize: the stateObject cache would let a
-		// reused IBS serve stale account state across txs (e.g. a revived account's
-		// code hash), producing a header the executor's cache-free run disagrees with.
-		ibs.SetVersionMap(versionMap)
+		versionMap := ibs.VersionMap()
 
 		b := &BlockGen{
 			i:           i,
@@ -593,7 +588,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 
 	for i := range n {
 		chainreader.current = parent
-		ibs := state.New(stateReader)
+		// Versioned without the stateObject cache, which would let a reused state serve stale account
+		// state across txs and give a header the executor's cache-free run disagrees with.
+		ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)
 		}

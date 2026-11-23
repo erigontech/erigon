@@ -37,7 +37,7 @@ jobs:
               shard: paris+shanghai
               fixtures-tarball: eest_stable
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 4 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
+              max-failures: 0
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -45,7 +45,7 @@ jobs:
               shard: cancun
               fixtures-tarball: eest_stable
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 2 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
+              max-failures: 0
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -53,7 +53,7 @@ jobs:
               shard: prague
               fixtures-tarball: eest_stable
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 2 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
+              max-failures: 0
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -61,7 +61,7 @@ jobs:
               shard: osaka
               fixtures-tarball: eest_stable
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 2 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
+              max-failures: 0
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -79,7 +79,7 @@ jobs:
               fixtures-tarball: eest_stable
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 2 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
+              max-failures: 0
               commitment_mode: parallel
             - sim: consume-rlp
               sim-limit: ".*(eip2930_access_list|eip4844_blobs).*"
@@ -123,16 +123,16 @@ jobs:
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
-              sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_(Amsterdam|BPO2ToAmsterdam)"
+              sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_(Amsterdam(-|BPO|ToBPO)|BPO2ToAmsterdam)"
               shard: glamsterdam-devnet-prague+
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 6 # Bogota transitions need EIPs 4758, 8151, 8298: https://github.com/erigontech/erigon/issues/25241
+              max-failures: 0
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
-              sim-limit: ".*tests/(?!(amsterdam|prague|osaka|bogota)/).*fork_(Amsterdam|BPO2ToAmsterdam)"
+              sim-limit: ".*tests/(?!(amsterdam|prague|osaka|bogota)/).*fork_(Amsterdam(-|BPO|ToBPO)|BPO2ToAmsterdam)"
               shard: glamsterdam-devnet-pre-prague
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
@@ -141,18 +141,16 @@ jobs:
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
-              sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_Bogota"
+              sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_(Bogota|AmsterdamToBogota)"
               shard: bogota-devnet-prague+
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              # Hive's rejection-reason checks add one EIP-8151 and two EIP-8298
-              # failures to the 861 failures reported by the native EngineX runner.
-              max-failures: 864 # Missing devnet-2 EIPs: 4758, 8151, 8298: https://github.com/erigontech/erigon/issues/25241
+              max-failures: 870 # 864 Bogota cases + 6 transition cases need missing EIPs: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
-              sim-limit: ".*tests/(?!(amsterdam|prague|osaka|bogota)/).*fork_Bogota"
+              sim-limit: ".*tests/(?!(amsterdam|prague|osaka|bogota)/).*fork_(Bogota|AmsterdamToBogota)"
               shard: bogota-devnet-pre-prague
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
@@ -326,8 +324,8 @@ jobs:
             # Keep fixtures compressed in the image to avoid a large Docker layer.
             # Hive extracts only this simulator's tests when the container starts.
             sim_dir='hive/simulators/ethereum/eels/${{ matrix.sim }}'
-            # Ignore the consumer's uv requirement only while upgrading Hive's older uv.
-            sed 's/^RUN uv sync$/RUN uv --no-config pip install --system uv==0.13.4 \&\& uv sync/' \
+            # The image's uv rejects the consumer's required-version before it can upgrade itself.
+            sed 's/^RUN uv sync$/RUN python -m pip install --no-cache-dir uv==0.13.4 \&\& uv sync/' \
               "$sim_dir/Dockerfile.git" > "$sim_dir/Dockerfile.erigon"
             bash erigon-full/tools/test-fixtures.sh --download-only \
               erigon-full/test-fixtures.json "$sim_dir" '${{ matrix.fixtures-tarball }}'
@@ -346,7 +344,10 @@ jobs:
             # image-build/registry/clone failure); a completed run is judged on its first result.
             local attempt=1 max_attempts=3
             while true; do
-              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=${{ matrix.runner == 'ubuntu-latest' && 4 || 12 }} --client erigon --docker.nocache=true --sim.limit.exact=false "${eels_args[@]}" ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
+              # -docker.buildoutput keeps docker build logs in the job log but stops relaying
+              # erigon container logs there (the workspace-logs artifact keeps them), which
+              # otherwise streams hundreds of MB per run on high-test-count shards.
+              ./hive -docker.buildoutput -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=${{ matrix.runner == 'ubuntu-latest' && 4 || 12 }} --client erigon --docker.nocache=true --sim.limit.exact=false "${eels_args[@]}" ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
               status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
               suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
               if [ -z "$suites" ]; then

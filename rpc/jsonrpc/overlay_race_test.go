@@ -187,6 +187,7 @@ func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarn
 			cumGas += params.TxGas
 			require.NoError(t, rawtemporaldb.AppendReceiptMetadata(putDel, 0, cumGas, 0, minTxNum+1+uint64(i)))
 		}
+		require.NoError(t, stages.SaveStageProgress(overlay, stages.Execution, overlayNumber))
 	}
 
 	return &overlayAheadHarness{t: t, base: base, m: m, overlayHeader: overlayHeader, overlayBody: overlayBody, events: events, doms: doms}
@@ -1152,7 +1153,7 @@ func TestGetLogsBlockHashUsesCommittedView(t *testing.T) {
 	api := newEthApiForTest(base, m.DB, nil, nil)
 	hash := overlayHeader.Hash()
 
-	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &hash})
+	logs, err := logsOf(api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &hash}))
 	require.EqualError(t, err, fmt.Sprintf("block not found: %x", hash))
 	require.Nil(t, logs)
 }
@@ -1416,7 +1417,7 @@ func TestGetLogsBlockHashRequiresBody(t *testing.T) {
 	m, aheadHash := newHeaderAheadTester(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
-	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &aheadHash})
+	logs, err := logsOf(api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &aheadHash}))
 	require.EqualError(t, err, fmt.Sprintf("block not found: %x", aheadHash))
 	require.Nil(t, logs)
 }

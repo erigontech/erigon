@@ -26,7 +26,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -97,9 +96,10 @@ type Aggregator struct {
 	visibilityLoweringForbidden atomic.Bool
 	snapshotBuildSema           *semaphore.Weighted
 
-	branchCacheDisabled bool
-	skipFilesDBGapCheck bool
-	workers             workersCfg
+	branchCacheDisabled            bool
+	skipFilesDBGapCheck            bool
+	buildsMissedAccessorsAfterOpen bool
+	workers                        workersCfg
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -124,6 +124,7 @@ type Aggregator struct {
 	maintenanceObserver atomic.Pointer[MaintenanceObserver]
 	observerCtx         context.Context
 	observerCancel      context.CancelFunc
+	closed              atomic.Bool
 
 	// next fields are set only if agg.doTraceCtx is true. can enable by env: TRACE_AGG=true
 	leakDetector *dbg.LeakDetector
@@ -474,7 +475,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 	a.checker.AddDependency(FromDomain(dependency), &DependentInfo{
 		entity:      FromDomain(dependent),
 		filesGetter: func() *DirtyFiles { return dd.dirtyFiles },
-		accessors:   dd.Accessors,
+		accessors:   &dd.Accessors,
 	})
 	a.d[dependency].SetChecker(a.checker)
 }
@@ -498,7 +499,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 		filesGetter: func() *DirtyFiles {
 			return h.dirtyFiles
 		},
-		accessors: h.Accessors,
+		accessors: &h.Accessors,
 	})
 	h.InvertedIndex.SetChecker(a.checker)
 }
@@ -597,6 +598,9 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 	}(); err != nil {
 		return err
 	}
+	if a.buildsMissedAccessorsAfterOpen && a.hasAccessorsToBuild() {
+		return nil
+	}
 	return a.checkFilesDBGap(db)
 }
 
@@ -619,6 +623,14 @@ func (a *Aggregator) checkFilesDBGap(db kv.RoDB) error {
 		}
 		return nil
 	})
+}
+
+func (a *Aggregator) hasAccessorsToBuild() bool {
+	dirty := a.DebugBeginDirtyFilesRo()
+	defer dirty.Close()
+	missed := dirty.FilesWithMissedAccessors()
+	dirty.dropCovered(missed) // startup builds with kv.SkipCoveredAccessors
+	return !missed.IsEmpty()
 }
 
 func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
@@ -721,16 +733,22 @@ func (a *Aggregator) WaitForFiles() {
 	}
 }
 
-func (a *Aggregator) Close() {
+// StopMaintenance refuses new background work and waits for the running work,
+// which may still use the database. Files stay open for live readers.
+func (a *Aggregator) StopMaintenance() {
 	a.observerCancel()
 	a.dirtyFilesLock.Lock()
 	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
 	a.dirtyFilesLock.Unlock()
-	// Every caller must wait for maintenance before it can safely close the database.
 	// Keep the aggregator context alive until that work finishes.
-	firstClose := a.background.BeginClose()
+	a.background.BeginClose()
 	a.background.Wait()
-	if !firstClose {
+}
+
+// Close unmaps the files: every reader must be gone, so close the database first.
+func (a *Aggregator) Close() {
+	a.StopMaintenance()
+	if !a.closed.CompareAndSwap(false, true) {
 		return
 	}
 	a.ctxCancel()
@@ -983,9 +1001,8 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, db kv.RoDB, worke
 			case <-ctx.Done():
 				return
 			case <-logEvery.C:
-				var m runtime.MemStats
-				dbg.ReadMemStats(&m)
-				a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				alloc, sys := dbg.MemUsage()
+				a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 			}
 		}
 	}()
@@ -1007,6 +1024,9 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, db kv.RoDB, worke
 
 	if err := a.OpenFolder(db); err != nil {
 		return err
+	}
+	if a.hasAccessorsToBuild() { // an accessor that could not be built
+		return a.checkFilesDBGap(db)
 	}
 	return nil
 }
@@ -1824,6 +1844,14 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return ceiling
 }
 
+// AssertFilesGap reports a gap in the files on disk: the visible files of this tx stop before the files end.
+func (at *AggregatorRoTx) AssertFilesGap() error {
+	if v := at.visible; v.visibleEnd < v.filesEnd {
+		return fmt.Errorf("a gap in files: visible files end at txNum %d, files reach %d", v.visibleEnd, v.filesEnd)
+	}
+	return nil
+}
+
 // aggregatorVisible immutable visible-for-application files (no gaps, no overlaps, indexed)
 // See also
 //
@@ -1838,6 +1866,8 @@ type aggregatorVisible struct {
 	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
+	visibleEnd   uint64                          // every list is cut here; below filesEnd means a gap
+	filesEnd     uint64                          // dirtyFilesEndTxNumMinimax when this generation was built
 
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
@@ -1851,21 +1881,67 @@ type aggregatorVisible struct {
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
-	toTxNum := a.dirtyFilesEndTxNumMinimax()
-	next := &aggregatorVisible{}
-	for id, d := range a.d {
-		if d == nil {
-			continue
+	// buildVisible builds every list up to toTxNum and returns the lowest end among the lists that have files.
+	buildVisible := func(toTxNum uint64) (next *aggregatorVisible, lowestEnd uint64) {
+		next, lowestEnd = &aggregatorVisible{}, toTxNum
+		lower := func(dirty *DirtyFiles, visible visibleFiles) {
+			if dirty.Len() > 0 {
+				lowestEnd = min(lowestEnd, contiguousEnd(visible))
+			}
 		}
-		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
+		// values files are never retired, so a values list must start at its first file on disk
+		lowerToFirstFile := func(dirty *DirtyFiles, visible visibleFiles) {
+			firstStart := uint64(math.MaxUint64)
+			dirty.Scan(func(f *FilesItem) bool {
+				if !f.canDelete.Load() {
+					firstStart = min(firstStart, f.startTxNum)
+				}
+				return true
+			})
+			if len(visible) > 0 && visible[0].startTxNum > firstStart {
+				lowestEnd = min(lowestEnd, firstStart)
+			}
+		}
+		for id, d := range a.d {
+			if d == nil {
+				continue
+			}
+			next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
+			if !d.Enabled || a.unalignedDomain[id] {
+				continue
+			}
+			lower(d.dirtyFiles, next.d[id].files)
+			lowerToFirstFile(d.dirtyFiles, next.d[id].files)
+			if !d.HistCfg.SnapshotsDisabled && !d.HistCfg.HistoryDisabled {
+				lower(d.History.dirtyFiles, next.dh[id])
+				lower(d.InvertedIndex.dirtyFiles, next.dhii[id].files)
+			}
+		}
+		for id, ii := range a.standaloneIIs() {
+			if ii == nil {
+				continue
+			}
+			next.iis[id] = ii.calcVisibleFiles(toTxNum)
+			if ii.Enabled && !a.unalignedIdx[id] {
+				lower(ii.dirtyFiles, next.iis[id].files)
+			}
+		}
+		return next, lowestEnd
 	}
-	for id, ii := range a.standaloneIIs() {
-		if ii == nil {
-			continue
-		}
-		next.iis[id] = ii.calcVisibleFiles(toTxNum)
+
+	dirtyEnd := a.dirtyFilesEndTxNumMinimax()
+	toTxNum := dirtyEnd
+	next, end := buildVisible(toTxNum)
+	// A list that stops early stops every list there; cutting there can drop a merged file that crosses it, so repeat.
+	for end < toTxNum {
+		toTxNum = end
+		next, end = buildVisible(toTxNum)
+	}
+	if toTxNum < dirtyEnd {
+		a.logger.Warn("[agg] a gap in files: every list stops at the first one that stops", "visibleEnd", toTxNum, "filesEnd", dirtyEnd)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
+	next.visibleEnd, next.filesEnd = toTxNum, dirtyEnd
 
 	if a.visibilityLoweringForbidden.Load() {
 		prev := a.visible.Load()
@@ -2485,6 +2561,24 @@ type AggregatorRoTx struct {
 
 // Generation identifies the immutable file view pinned by this transaction.
 func (at *AggregatorRoTx) Generation() uint64 { return at.visible.generation }
+
+// AssertRetired reports a full step of state in the DB that the files on disk do
+// not cover yet, as `erigon seg retire` would build. The files on disk count, not
+// the visible ones: accounts are not visible without their commitment files.
+func (at *AggregatorRoTx) AssertRetired(tx kv.Tx) error {
+	a := at.a
+	a.dirtyFilesLock.Lock()
+	filesEnd := kv.Step(a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax() / a.StepSize())
+	a.dirtyFilesLock.Unlock()
+	var inDB kv.Step
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		inDB = max(inDB, a.d[d].maxStepInDB(tx))
+	}
+	if inDB > filesEnd {
+		return fmt.Errorf("the DB holds steps %d-%d that are not in files: run `erigon seg retire` first (it builds a step only after the step's last block is final)", filesEnd, inDB)
+	}
+	return nil
+}
 
 // CheckFilesDBGap detects a gap between the snapshot files and the DB. It can arise from
 // snapshot/DB management operations — e.g. `seg rm-state --latest` and then starting

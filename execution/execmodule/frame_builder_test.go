@@ -81,7 +81,6 @@ func TestBuildFrameNonceAfterCreate(t *testing.T) {
 			approval := types.Frame{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Data: []byte{1}, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}}
 			first := &types.FrameTransaction{
 				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{*uint256.NewInt(tc.key)}, SenderAddress: sender,
-				Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 				Frames: []types.Frame{
 					{Mode: types.FrameDefault, Target: &creator, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
 					approval,
@@ -90,7 +89,7 @@ func TestBuildFrameNonceAfterCreate(t *testing.T) {
 			if tc.key == 0 {
 				first.NonceKeys = nil
 			}
-			first.Fees.MaxFee.Mul(&first.Fees.MaxFee, uint256.NewInt(first.GetGasLimit()))
+			first.Fees.MaxFee.SetUint64(first.GetGasLimit())
 			// CREATE advances the creator's nonce; legacy payment approval advances
 			// it once more when the creator is also the transaction sender.
 			secondNonce := uint64(1)
@@ -99,9 +98,9 @@ func TestBuildFrameNonceAfterCreate(t *testing.T) {
 			}
 			second := &types.FrameTransaction{
 				ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: creator, Nonce: secondNonce,
-				Fees: types.FrameFees{MaxFee: uint256.Int{1}}, Frames: []types.Frame{approval},
+				Frames: []types.Frame{approval},
 			}
-			second.Fees.MaxFee.Mul(&second.Fees.MaxFee, uint256.NewInt(second.GetGasLimit()))
+			second.Fees.MaxFee.SetUint64(second.GetGasLimit())
 			_, err = m.GenerateChainFrom(parent, 1, func(_ int, b *blockgen.BlockGen) {
 				b.AddTx(first)
 				b.AddTx(second)

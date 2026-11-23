@@ -153,6 +153,9 @@ func (ctx *TxnParseContext) decodeTxn(txBytes []byte) (types.Transaction, error)
 	if s.Remaining() != 0 {
 		return nil, fmt.Errorf("trailing bytes after transaction")
 	}
+	if blob, ok := txn.(*types.BlobTx); ok && len(blob.BlobVersionedHashes) == 0 {
+		return nil, types.ErrBlobTxnEmptyBlobs
+	}
 	return txn, nil
 }
 

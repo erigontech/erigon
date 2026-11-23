@@ -506,7 +506,7 @@ func TestValidateRead_StoragePath_RemovalUnderBALSubsumed(t *testing.T) {
 
 	// The validator stands on the wipe anchor (tx3), not the origin — so the cold origin
 	// read version-mismatches and is rejected, even with HasBAL set.
-	live := liveStorage(vm, addr, key, 5)
+	_, live, _, _ := liveStorageValue(vm, addr, key, 5)
 	require.Equal(t, 3, live.Version().TxIndex, "the live anchor is the wipe (tx3), not the origin")
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, checkVersionEqual, false, ""),
 		"a cold origin read under a later destruct invalidates by version even under BAL")
@@ -2596,7 +2596,7 @@ func TestValidateReadSet_BaseReadOfQuietAccountSkipsValidation(t *testing.T) {
 		{"self-destruct", SelfDestructPath, true, base, VersionInvalid, false},
 		{"address write", AddressPath, &accounts.Account{Incarnation: 1}, base, VersionValid, false},
 		{"incarnation write", IncarnationPath, uint64(1), base, VersionInvalid, false},
-		{"create contract", CreateContractPath, true, base, VersionValid, false},
+		{"create contract", CreateContractPath, true, base, VersionInvalid, false},
 		{"read of a removed write", 0, nil, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, VersionInvalid, false},
 		{"read of an aborted write", StoragePath, *uint256.NewInt(8), ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, VersionInvalid, false},
 	} {
@@ -2742,17 +2742,58 @@ func TestWritesAlreadySeededRefusesACellTheNetZeroResetMadeDone(t *testing.T) {
 	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 3, 42, ValueChanged)))
 }
 
-// A run that dropped the slot deleted the seed; the cell a later run re-creates is not the seed,
-// even once the net-zero reset makes it Done.
-func TestWritesAlreadySeededRefusesARecreatedCell(t *testing.T) {
+// A run overwrote the seed and a re-run dropped the write: the access list's value is back, but a
+// reader may hold the overwritten value.
+func TestWritesAlreadySeededRefusesASeedADroppedWritePutBack(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
 	slot := accounts.InternKey(common.Hash{0x04})
 	vm := NewVersionMap(seededSlotBAL(addr, slot))
-	vm.Delete(addr, StoragePath, slot, 1, false)
-	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 2, 42, ValueChanged), false)
-	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 3, 5, ValueUnchanged), false)
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 1, 9, ValueChanged), false)
+	vm.DropWrite(addr, StoragePath, slot, Version{TxIndex: 1, Incarnation: 2})
+	require.Equal(t, *uint256.NewInt(42), requireDoneCell(t, vm.load(addr).Storage[slot], 1, 2).Value)
 
-	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 4, 42, ValueChanged)))
+	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 3, 42, ValueChanged)))
+}
+
+// The same for a balance, also where the run wrote the seeded value with another status.
+func TestWritesAlreadySeededRefusesABalanceADroppedWritePutBack(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	balance := func(inc Incarnation, val uint64, status valueStatus) *WriteSet {
+		ws := &WriteSet{}
+		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1, Incarnation: inc}, valStatus: status}, Val: *uint256.NewInt(val)})
+		return ws
+	}
+	for _, tc := range []struct {
+		name   string
+		val    uint64
+		status valueStatus
+	}{
+		{"other value", 9, ValueChanged},
+		{"equal value with another status", 42, ValueCreated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(42)}}}})
+			vm.FlushVersionedWrites(balance(1, tc.val, tc.status), false)
+			vm.DropWrite(addr, BalancePath, accounts.NilKey, Version{TxIndex: 1, Incarnation: 2})
+			require.Equal(t, *uint256.NewInt(42), requireDoneCell(t, vm.load(addr).Balance, 1, 2).Value)
+
+			require.False(t, vm.WritesAlreadySeeded(addr, balance(3, 42, ValueChanged)))
+		})
+	}
+}
+
+// A run wrote a slot's seeded value with another status, which keeps the cell Done. Only a balance's
+// status has readers, so the drop keeps the seed's version and its readers stay valid.
+func TestDropWriteKeepsTheVersionOfASlotARunWroteEqually(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	slot := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(seededSlotBAL(addr, slot))
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 1, 42, ValueCreated), false)
+
+	vm.DropWrite(addr, StoragePath, slot, Version{TxIndex: 1, Incarnation: 2})
+	requireDoneCell(t, vm.load(addr).Storage[slot], 1, 0)
 }
 
 func TestWritesAlreadySeededKeepsTheSeedThroughValidation(t *testing.T) {

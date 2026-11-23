@@ -37,6 +37,8 @@ import (
 	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 func framePriceTestChain(t *testing.T) (*execmoduletester.ExecModuleTester, *types.Block, types.Receipts) {
@@ -88,7 +90,7 @@ func TestFrameTransactionRPCSettledGasPrice(t *testing.T) {
 		require.Equal(t, want, (*uint256.Int)(receipt.EffectiveGasPrice))
 		require.NotNil(t, got)
 		require.Equal(t, txn.Hash(), got.Hash)
-		require.Equal(t, want, (*uint256.Int)(&got.GasPrice))
+		require.Equal(t, want, (*uint256.Int)(got.GasPrice))
 	}
 	for name, lookup := range map[string]func(int) (*ethapi.RPCTransaction, error){
 		"transaction hash": func(i int) (*ethapi.RPCTransaction, error) {
@@ -155,19 +157,21 @@ func TestFrameTransactionRPCNonCanonicalGasPrice(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	for _, txn := range got.Transactions.([]*ethapi.RPCTransaction) {
-		require.Equal(t, block.BaseFee(), (*uint256.Int)(&txn.GasPrice), "an unexecuted fork must not use canonical receipts")
+		require.Equal(t, block.BaseFee(), (*uint256.Int)(txn.GasPrice), "an unexecuted fork must not use canonical receipts")
 	}
 }
 
 func TestFrameTransactionRPCUnexecutedGasPrice(t *testing.T) {
 	m, block, _ := framePriceTestChain(t)
 	header := block.Header()
+	header.ParentHash = block.Hash()
 	header.Number.AddUint64(&header.Number, 1)
 	block = types.NewBlockFromStorage(header.Hash(), header, block.Transactions(), nil, nil, nil)
 	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
 		if err := rawdb.WriteHeader(tx, header); err != nil {
 			return err
 		}
+		rawdb.WriteForkchoiceHead(tx, block.Hash())
 		return rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64())
 	}))
 	base := newBaseApiForTest(m)
@@ -178,7 +182,7 @@ func TestFrameTransactionRPCUnexecutedGasPrice(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, got)
 		for _, txn := range got.Transactions.([]*ethapi.RPCTransaction) {
-			require.Equal(t, block.BaseFee(), (*uint256.Int)(&txn.GasPrice), "a canonical header does not imply execution has finished")
+			require.Equal(t, block.BaseFee(), (*uint256.Int)(txn.GasPrice), "a canonical header does not imply execution has finished")
 		}
 	})
 	t.Run("transaction", func(t *testing.T) {
@@ -186,7 +190,94 @@ func TestFrameTransactionRPCUnexecutedGasPrice(t *testing.T) {
 			got, err := api.GetTransactionByBlockHashAndIndex(m.Ctx, block.Hash(), hexutil.Uint64(i))
 			require.NoError(t, err)
 			require.NotNil(t, got)
-			require.Equal(t, block.BaseFee(), (*uint256.Int)(&got.GasPrice))
+			require.Equal(t, block.BaseFee(), (*uint256.Int)(got.GasPrice))
 		}
+	})
+	t.Run("fee history", func(t *testing.T) {
+		headers, err := api.FeeHistory(m.Ctx, 2, rpc.LatestBlockNumber, nil)
+		require.NoError(t, err)
+		require.Len(t, headers.GasUsedRatio, 2)
+
+		withRewards, err := api.FeeHistory(m.Ctx, 2, rpc.LatestBlockNumber, []float64{50})
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), withRewards.OldestBlock.ToInt().Uint64())
+		require.Len(t, withRewards.Reward, 1, "only the executed parent has receipts")
+	})
+}
+
+func TestFrameTransactionRPCPrunedGasPrice(t *testing.T) {
+	m, block, _ := framePriceTestChain(t)
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		if err := tx.ClearTable(kv.TblReceiptHistoryVals); err != nil {
+			return err
+		}
+		return tx.ClearTable(kv.TblRCacheHistoryVals)
+	}))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	got, err := api.GetBlockByHash(m.Ctx, rpc.BlockNumberOrHashWithHash(block.Hash(), true), true)
+	require.NoError(t, err)
+	for i, txn := range got.Transactions.([]*ethapi.RPCTransaction) {
+		require.Equal(t, block.BaseFee(), (*uint256.Int)(txn.GasPrice))
+		single, err := api.GetTransactionByHash(m.Ctx, block.Transactions()[i].Hash())
+		require.NoError(t, err)
+		require.Equal(t, txn.GasPrice, single.GasPrice)
+	}
+}
+
+func TestBlockRPCFrameBlobFee(t *testing.T) {
+	m, block, _ := framePriceTestChain(t)
+	base := newBaseApiForTest(m)
+	eth := newEthApiForTest(base, m.DB, nil, nil)
+	debug := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+	header := block.Header()
+	header.ExcessBlobGas = common.NewUint64(1 << 62)
+	original := block.Transactions()[0].(*types.FrameTransaction)
+	frame := &types.FrameTransaction{
+		ChainID: original.ChainID, SenderAddress: original.SenderAddress, Frames: original.Frames, Fees: original.Fees,
+		BlobVersionedHashes: []common.Hash{{1}},
+	}
+	t.Run("pending frame with sidecar", func(t *testing.T) {
+		tx, err := m.DB.BeginTemporalRo(m.Ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		fee, err := base.frameBlobBaseFee(m.Ctx, tx, block.HeaderNoCopy(), &types.FrameTxWrapper{FrameTransaction: frame})
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(1), fee)
+	})
+	hash := header.Hash()
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		if err := rawdb.WriteHeader(tx, header); err != nil {
+			return err
+		}
+		return rawdb.WriteBody(tx, hash, header.Number.Uint64(), &types.Body{Transactions: types.Transactions{frame}})
+	}))
+	ref := rpc.BlockNumberOrHashWithHash(hash, false)
+	t.Run("hashes", func(t *testing.T) {
+		got, err := eth.GetBlockByHash(m.Ctx, ref, false)
+		require.NoError(t, err)
+		require.Equal(t, []common.Hash{frame.Hash()}, got.Transactions)
+	})
+	t.Run("full transactions", func(t *testing.T) {
+		got, err := eth.GetBlockByHash(m.Ctx, ref, true)
+		require.NoError(t, err)
+		txn := got.Transactions.([]*ethapi.RPCTransaction)[0]
+		require.Equal(t, frame.Hash(), txn.Hash)
+		data, err := jsonstream.Marshal(txn)
+		require.NoError(t, err)
+		require.NotContains(t, string(data), `"gasPrice"`)
+	})
+	t.Run("bad blocks", func(t *testing.T) {
+		require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+			if err := rawdb.WriteCanonicalHash(tx, hash, header.Number.Uint64()); err != nil {
+				return err
+			}
+			return rawdb.TruncateCanonicalHash(tx, header.Number.Uint64(), true)
+		}))
+		require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error { return rawdb.ResetBadBlockCache(tx, 100) }))
+		got, err := debug.GetBadBlocks(m.Ctx)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, hash, got[0]["hash"])
+		require.NotEmpty(t, got[0]["rlp"])
 	})
 }

@@ -57,7 +57,7 @@ func TestJumpDestAnalysis(t *testing.T) {
 
 func TestValidJumpdest(t *testing.T) {
 	t.Parallel()
-	contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 	contract.Code = []byte{byte(PUSH1), byte(JUMPDEST), byte(JUMPDEST), byte(ADD)}
 	for dest, want := range []bool{false, false, true, false, false} {
 		if got := contract.validJumpdest(uint256.NewInt(uint64(dest))); got != want {

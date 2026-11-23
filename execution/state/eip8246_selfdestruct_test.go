@@ -268,6 +268,7 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		t.Parallel()
 		reader := newAccountStateReader()
 		ibs := New(reader)
+		ibs.SetVersionMap(nil)
 		defer ibs.Close()
 		ibs.SetTxContext(1, 0)
 		require.NoError(t, ibs.CreateAccount(addr, true))
@@ -440,7 +441,88 @@ func TestEIP8246_CreateDestructWipesTheStorageOfAnExistingAccount(t *testing.T) 
 	var acc accounts.Account
 	require.NoError(t, accounts.DeserialiseV3(&acc, enc))
 	require.Equal(t, uint64(5), acc.Balance.Uint64())
+	require.Zero(t, acc.Nonce)
+	require.Zero(t, acc.Incarnation)
+	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash)
 	v, _, err := domains.GetLatest(kv.StorageDomain, tx, storageKey)
 	require.NoError(t, err)
 	require.Empty(t, v)
+}
+
+// Under EIP-8246 a contract that a tx creates over an existing account and destroys keeps the balance.
+// The tx publishes it as a creation that leaves the balance: the creation replaces the old storage,
+// so no destruct reaches a later tx, and the access list is the same. An account that ends empty is
+// still removed.
+func TestEIP8246_CreateDestructOverAnExistingAccountPublishesACreation(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	slot, old := accounts.InternKey(common.Hash{0x01}), accounts.InternKey(common.Hash{0x02})
+	rules := &chain.Rules{IsSpuriousDragon: true, IsCancun: true, IsAmsterdam: true}
+	for _, tc := range []struct {
+		name     string
+		balance  uint64
+		destruct bool
+	}{
+		{"balance kept", 10, false},
+		{"empty at the end", 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			pre := accounts.NewAccount()
+			pre.Balance = *uint256.NewInt(tc.balance)
+			pre.Incarnation = FirstContractIncarnation
+			reader := &storageReader{addr: addr, account: &pre, storage: map[accounts.StorageKey]uint256.Int{old: *uint256.NewInt(0x42)}}
+			vm := NewVersionMap(nil)
+			ibs := NewWithVersionMap(reader, vm)
+			defer ibs.Close()
+			ibs.SetTxContext(1, 2)
+			require.NoError(t, ibs.CreateAccount(addr, true))
+			require.NoError(t, ibs.SetNonce(addr, 1, tracing.NonceChangeUnspecified))
+			require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetState(addr, slot, *uint256.NewInt(7)))
+			destroyed, err := ibs.Selfdestruct(addr, true)
+			require.NoError(t, err)
+			require.True(t, destroyed)
+			ws, err := ibs.FinalizedWrites(rules)
+			require.NoError(t, err)
+
+			sd, ok := ws.GetSelfDestruct(addr)
+			require.Equal(t, tc.destruct, ok && sd.Val)
+			io := NewVersionedIO(4)
+			ibs.MergeTxIOInto(io, ws)
+			found := false
+			for _, ac := range io.AsBlockAccessList() {
+				if ac.Address == addr.Value() {
+					found = true
+					require.Equal(t, []common.Hash{slot.Value()}, ac.StorageReads, "the dead slot stays in the access list as a read")
+					require.Empty(t, ac.StorageChanges)
+					require.Empty(t, ac.NonceChanges)
+					require.Empty(t, ac.CodeChanges)
+				}
+			}
+			require.True(t, found)
+			if tc.destruct {
+				return
+			}
+			cc, ok := ws.GetCreateContract(addr)
+			require.True(t, ok && cc.Val, "the creation replaces the old storage")
+			dead, ok := ws.GetStorage(addr, slot)
+			require.True(t, ok && dead.Val.IsZero(), "the dead slot's zero write stays for readers of the state changes")
+
+			vm.FlushVersionedWrites(ws, true)
+			later := NewWithVersionMap(reader, vm)
+			defer later.Close()
+			later.SetTxContext(1, 3)
+			exists, err := later.Exist(addr)
+			require.NoError(t, err)
+			require.True(t, exists)
+			balance, err := later.GetBalance(addr)
+			require.NoError(t, err)
+			require.Equal(t, *uint256.NewInt(tc.balance), balance)
+			value, err := later.GetState(addr, old)
+			require.NoError(t, err)
+			require.True(t, value.IsZero())
+			require.Equal(t, VersionValid, validateReads(vm, later, 3))
+		})
+	}
 }

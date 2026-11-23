@@ -378,8 +378,6 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `false`
 * `--http.dbg.single`: Accepts the `dbg: true` HTTP header on an RPC request and logs how that request was executed. Intended for debugging a single call, not for continuous use.
   * Default: `false`
-* `--trace.maxtraces value`: Caps the number of traces `trace_filter` may return.
-  * Default: `200`
 * `--trace.compat`: Reproduces OpenEthereum's quirks in the `trace_` namespace, for consumers that depend on them.
   * Default: `false`
 * `--ots.search.max.pagesize value`: Caps the page size accepted by the Otterscan (`ots_`) search methods.
@@ -593,6 +591,9 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `false`
 * `--caplin.blobs-immediate-backfill`: Tells Caplin to immediately backfill blobs.
   * Default: `false`
+* `--caplin.blobs-backfill-endpoint value`: Beacon API endpoint that the blob backfill asks for a block's blobs before peers. Repeat it for fallback endpoints. The blobs are verified against the block before they are stored. Without `--caplin.blobs-archive` the backfill covers only the blob retention window (4096 epochs, about 18 days on mainnet); with it, older slots need an archive-capable endpoint.
+* `--caplin.blobs-backfill-endpoint-workers value`: Number of KZG proofs the blob backfill computes at a time, one CPU each, for blobs from `--caplin.blobs-backfill-endpoint` whose proof the endpoint left out; up to twice as many blocks are fetched at a time, and verifying them, about 2% of the proof cost, is not limited. Set it to the number of CPUs the node can spare: fewer on a validator node, more on a dedicated archive node. The node logs the setting and the CPU core count once at startup.
+  * Default: `0` — a quarter of the CPUs the process may use (`GOMAXPROCS`, which follows a container's CPU limit), at least 1
 * `--caplin.blobs-no-pruning`: Disables blob pruning.
   * Default: `false`
 * `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for data availability (DA) oracle or rollup nodes that need longer column history.
@@ -750,7 +751,6 @@ The four below are parsed as base-10 integers. **An unparseable value panics at 
 
 **Memory Management:**
 
-* `NO_MEMSTAT` - Disables memory statistics collection
 * `SAVE_HEAP_PROFILE` - Enables automatic heap profiling
 * `HEAP_PROFILE_THRESHOLD` - Memory usage percentage threshold for heap profiling (default: 35%)
 

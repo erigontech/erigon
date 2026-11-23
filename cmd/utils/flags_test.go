@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 )
 
@@ -476,6 +477,30 @@ func TestCommitmentPlainValuesFromCtx(t *testing.T) {
 	gotFalse := parse("--commitment.plainValues=false")
 	require.NotNil(t, gotFalse)
 	require.False(t, *gotFalse)
+}
+
+func TestSetEthConfigWiresCommitmentV3Flag(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	prefetch, mmapPrefetch, asyncIO, asyncIOMultiPage := dbg.BALBatchPrefetch, mmap.BatchPrefetch, dbg.FilesBlockingAsyncIO, dbg.FilesBlockingAsyncIOMultiPage
+	t.Cleanup(func() {
+		dbg.BALBatchPrefetch, mmap.BatchPrefetch, dbg.FilesBlockingAsyncIO, dbg.FilesBlockingAsyncIOMultiPage = prefetch, mmapPrefetch, asyncIO, asyncIOMultiPage
+	})
+	commitmentV3Flag := ExperimentalCommitmentV3Flag
+	downloaderAddrFlag := DownloaderAddrFlag
+	chainFlag := ChainFlag
+	var cfg ethconfig.Config
+	nodeConfig := nodecfg.Config{}
+	app := &cli.Command{
+		Flags: []cli.Flag{&commitmentV3Flag, &downloaderAddrFlag, &chainFlag},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			SetEthConfig(ctx, cmd, &nodeConfig, &cfg, log.Root())
+			return nil
+		},
+	}
+
+	require.NoError(t, app.Run(context.Background(), []string{"test", "--experimental.commitment-v3", "--downloader.api.addr=localhost:9090"}))
+	require.True(t, statecfg.ExperimentalCommitmentV3, "SetEthConfig must enable commitment v3")
+	require.True(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records, "SetEthConfig must enable v3 commitment records")
 }
 
 func TestSetCommitmentV3Flag(t *testing.T) {

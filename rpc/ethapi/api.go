@@ -710,8 +710,16 @@ var (
 
 // RPCMarshalBlock converts the given block to the RPC output. When inclTx is true the
 // result carries the block's transactions, as full objects if fullTx is also true and
-// as hashes otherwise. Optional receipts supply gas used for settled frame prices.
-func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool, blobBaseFee *uint256.Int, receipts types.Receipts) *RPCBlock {
+// as hashes otherwise.
+func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
+	return RPCMarshalBlockWithFramePrices(block, inclTx, fullTx, nil, nil)
+}
+
+// RPCMarshalBlockWithFramePrices uses the blob base fee and receipt gas usage to
+// price frame transactions. When supplied, receipts match the length and order of
+// the block's transactions. A frame without a receipt uses the pre-execution
+// estimate when the required fees are available.
+func RPCMarshalBlockWithFramePrices(block *types.Block, inclTx, fullTx bool, blobBaseFee *uint256.Int, receipts types.Receipts) *RPCBlock {
 	// A concrete slice type, not []any: boxing each element would heap-allocate
 	// every hash and send the encoder down its reflection path per transaction.
 	transactions := noTxHashes
@@ -727,7 +735,7 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool, blobBaseFee *
 			for i, txn := range txs {
 				indexes[i] = hexutil.Uint64(i)
 				var gasUsed uint64
-				if receipts != nil {
+				if receipts != nil && receipts[i] != nil {
 					gasUsed = receipts[i].GasUsed
 				}
 				full[i] = newRPCTransaction(txn, baseFee, blobBaseFee, gasUsed)
@@ -848,7 +856,7 @@ type RPCTransaction struct {
 	BlockTimestamp       *hexutil.Uint64         `json:"blockTimestamp" ethjson:"quantity"`
 	From                 common.Address          `json:"from" ethjson:"data"`
 	Gas                  hexutil.Uint64          `json:"gas" ethjson:"quantity"`
-	GasPrice             hexutil.U256            `json:"gasPrice" ethjson:"quantity"`
+	GasPrice             *hexutil.U256           `json:"gasPrice,omitempty" ethjson:"quantity"`
 	MaxPriorityFeePerGas *hexutil.U256           `json:"maxPriorityFeePerGas,omitempty" ethjson:"quantity"`
 	MaxFeePerGas         *hexutil.U256           `json:"maxFeePerGas,omitempty" ethjson:"quantity"`
 	MaxFee               *hexutil.U256           `json:"maxFee,omitempty" ethjson:"quantity"`
@@ -868,6 +876,9 @@ type RPCTransaction struct {
 	YParity              *hexutil.U256           `json:"yParity,omitempty" ethjson:"quantity"`
 	R                    *hexutil.U256           `json:"r" ethjson:"quantity"`
 	S                    *hexutil.U256           `json:"s" ethjson:"quantity"`
+
+	// Keep calculated prices inline to avoid an extra allocation per transaction in a full block.
+	computedGasPrice hexutil.U256
 }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
@@ -895,18 +906,19 @@ func newRPCTransaction(txn types.Transaction, baseFee, blobBaseFee *uint256.Int,
 		Value: (*hexutil.U256)(txn.GetValue()),
 	}
 	txn = txn.Unwrap()
+	txType := txn.Type()
 
 	v, r, s := txn.RawSignatureValues()
 	// For LegacyTx, v=r=s=0 means an unsigned system/protocol transaction (e.g. EIP-4788);
 	// match geth which returns null for these. For typed transactions (EIP-1559, EIP-2930…),
 	// v=0 is valid yParity=0 and must serialise as "0x0" — do not suppress it.
-	if txn.Type() != types.LegacyTxType || !v.IsZero() || !r.IsZero() || !s.IsZero() {
+	if txType != types.LegacyTxType || !v.IsZero() || !r.IsZero() || !s.IsZero() {
 		result.V = (*hexutil.U256)(v)
 		result.R = (*hexutil.U256)(r)
 		result.S = (*hexutil.U256)(s)
 	}
 
-	if txn.Type() == types.LegacyTxType {
+	if txType == types.LegacyTxType {
 		if !v.IsZero() { // skip chain id derivation in case of call simulation (where v,r,s are zero)
 			var err error
 			chainId, err = types.DeriveChainId(v)
@@ -917,7 +929,7 @@ func newRPCTransaction(txn types.Transaction, baseFee, blobBaseFee *uint256.Int,
 				result.ChainID = (*hexutil.U256)(chainId)
 			}
 		}
-		result.GasPrice = hexutil.U256(*txn.GetTipCap())
+		result.GasPrice = (*hexutil.U256)(txn.GetTipCap())
 	} else {
 		chainId = txn.GetChainID()
 		result.ChainID = (*hexutil.U256)(chainId)
@@ -927,15 +939,17 @@ func newRPCTransaction(txn types.Transaction, baseFee, blobBaseFee *uint256.Int,
 			result.Accesses = types.AccessList{}
 		}
 
-		if txn.Type() == types.AccessListTxType {
-			result.GasPrice = hexutil.U256(*txn.GetTipCap())
+		if txType == types.AccessListTxType {
+			result.GasPrice = (*hexutil.U256)(txn.GetTipCap())
 		} else {
-			result.GasPrice = computeGasPrice(txn, baseFee, blobBaseFee, gasUsed)
+			result.setGasPrice(txn, baseFee, blobBaseFee, gasUsed)
 			result.MaxPriorityFeePerGas = (*hexutil.U256)(txn.GetTipCap())
-			result.MaxFeePerGas = (*hexutil.U256)(txn.GetFeeCap())
+			if txType != types.FrameTxType {
+				result.MaxFeePerGas = (*hexutil.U256)(txn.GetFeeCap())
+			}
 		}
 
-		switch txn.Type() {
+		switch txType {
 		case types.BlobTxType:
 			blobTx := txn.(*types.BlobTx)
 			result.MaxFeePerBlobGas = (*hexutil.U256)(&blobTx.MaxFeePerBlobGas)
@@ -951,7 +965,6 @@ func newRPCTransaction(txn types.Transaction, baseFee, blobBaseFee *uint256.Int,
 				signatures = types.FrameSignatures{}
 			}
 			result.Signatures = &signatures
-			result.MaxFeePerGas = nil
 			result.MaxFee = (*hexutil.U256)(&frame.Fees.MaxFee)
 			result.BlobVersionedHashes = frame.BlobVersionedHashes
 			result.Accesses, result.YParity, result.V, result.R, result.S = nil, nil, nil, nil, nil
@@ -985,25 +998,37 @@ func newRPCTransaction(txn types.Transaction, baseFee, blobBaseFee *uint256.Int,
 	return result
 }
 
-// Frame settlement can pay more per gas than GASPRICE reports. A nonzero gasUsed
-// selects the settled price; without an execution result, only an estimate is known.
-func computeGasPrice(txn types.Transaction, baseFee, blobBaseFee *uint256.Int, gasUsed uint64) hexutil.U256 {
-	if baseFee != nil {
-		if frame, ok := txn.(*types.FrameTransaction); ok {
-			if gasUsed != 0 {
-				return hexutil.U256(*ethutils.ReceiptGasPrice(frame, gasUsed, baseFee, blobBaseFee))
-			}
-			if blobBaseFee == nil {
-				blobBaseFee = new(uint256.Int)
-			}
-			budget, err := frame.Fees.Budget(frame.GetGasLimit(), frame.GetBlobGas(), baseFee, blobBaseFee)
-			if err != nil {
-				log.Warn("cannot derive frame gas price", "txHash", frame.Hash(), "err", err)
-			}
-			return hexutil.U256(budget.GasPrice)
-		}
-		// price = min(tip + baseFee, gasFeeCap)
-		return hexutil.U256(u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap()))
+// In a block with a base fee, a frame's settled price can exceed its GASPRICE
+// estimate. Use receipt gas usage when available. Leave the price unset if the
+// budget cannot cover base fees or a blob-carrying frame's blob base fee is unknown.
+func (r *RPCTransaction) setGasPrice(txn types.Transaction, baseFee, blobBaseFee *uint256.Int, gasUsed uint64) {
+	if baseFee == nil {
+		r.GasPrice = (*hexutil.U256)(txn.GetFeeCap())
+		return
 	}
-	return hexutil.U256(*txn.GetFeeCap())
+	if frame, ok := txn.(*types.FrameTransaction); ok {
+		r.GasPrice = nil
+		if blobBaseFee == nil {
+			if frame.GetBlobGas() != 0 {
+				return
+			}
+			blobBaseFee = new(uint256.Int)
+		}
+		if gasUsed != 0 {
+			tip, err := ethutils.ReceiptGasTip(frame, gasUsed, baseFee, blobBaseFee)
+			if err != nil {
+				return
+			}
+			r.computedGasPrice = hexutil.U256(u256.Add(*baseFee, tip))
+		} else {
+			budget, err := frame.Fees.Budget(uint64(r.Gas), frame.GetBlobGas(), baseFee, blobBaseFee)
+			if err != nil {
+				return
+			}
+			r.computedGasPrice = hexutil.U256(budget.GasPrice)
+		}
+	} else {
+		r.computedGasPrice = hexutil.U256(u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap()))
+	}
+	r.GasPrice = &r.computedGasPrice
 }

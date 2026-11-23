@@ -57,8 +57,9 @@ type NonceChange struct {
 	Before, After uint64
 }
 
-// TransactionTrace builds the view once for the read-only ASSERT suffix. A failed
-// assertion ends the suffix, so the cache is never reused after body rollback.
+// TransactionTrace builds the view once for the read-only ASSERT suffix. It borrows
+// the transaction's logs. A failed assertion ends the suffix, so the cache is never
+// reused after body rollback.
 // It relies on EIP-8253 preventing creation over non-empty storage, so the first
 // journaled slot value is its transaction prestate: https://eips.ethereum.org/EIPS/eip-8253
 func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTrace, error) {
@@ -152,7 +153,7 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 	})
 	slices.SortFunc(trace.Codes, func(a, b CodeChange) int { return a.Address.Cmp(b.Address) })
 	slices.SortFunc(trace.Nonces, func(a, b NonceChange) int { return a.Address.Cmp(b.Address) })
-	trace.Events = ibs.LogsSince(ctx.logStart)
+	trace.Events = ibs.logs.entries[ctx.logStart:]
 	ctx.trace = trace
 	return trace, nil
 }

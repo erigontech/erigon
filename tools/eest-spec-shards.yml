@@ -259,13 +259,13 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: true
-  expected-tests: 26687
+  expected-tests: 26853
 - shard: zkevm-witness-v3
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: false
   commitment-v3: true
-  expected-tests: 26687
+  expected-tests: 26853
 - shard: blocktests-stable-race-pre-cancun-parallel
   workers: 12
   max-allowed-failures: 0
@@ -293,11 +293,16 @@
   run: 'fork_(Amsterdam|BPO2ToAmsterdam)'
 - shard: blocktests-devnet-race-amsterdam-parallel
   workers: 12
+  max-allowed-failures: 0
+  commitment-parallel: true
+  run: 'fork_Amsterdam(-|BPO|ToBPO)'
+- shard: blocktests-devnet-race-amsterdam-to-bogota-parallel
+  workers: 12
   max-allowed-failures: 6 # Bogota transitions need EIPs 4758, 8151, 8298: https://github.com/erigontech/erigon/issues/25241
   commitment-parallel: true
-  run: 'fork_Amsterdam'
+  run: 'fork_AmsterdamToBogota'
 - shard: zkevm-witness-race
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: true
-  expected-tests: 26687
+  expected-tests: 26853

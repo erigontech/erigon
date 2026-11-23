@@ -1135,6 +1135,16 @@ func requireSameObservableState(t *testing.T, want, got *IntraBlockState, addrs 
 	}
 }
 
+func TestNewAndResetBuildAVersionedState(t *testing.T) {
+	ibs := New(NewNoopReader())
+	defer ibs.Close()
+	require.True(t, ibs.IsVersioned())
+	before := ibs.VersionMap()
+	ibs.Reset()
+	require.True(t, ibs.IsVersioned())
+	require.NotSame(t, before, ibs.VersionMap(), "Reset drops the previous tx's writes with its map")
+}
+
 func TestApplyVersionedWrites(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -1144,8 +1154,11 @@ func TestApplyVersionedWrites(t *testing.T) {
 	defer s.Close()
 
 	sClean := New(reader)
+
+	sClean.SetVersionMap(nil)
 	defer sClean.Close()
 	sSingleProcess := New(reader)
+	sSingleProcess.SetVersionMap(nil)
 	defer sSingleProcess.Close()
 
 	states := []*IntraBlockState{s}
@@ -1258,6 +1271,8 @@ func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
 	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 
 	deploy := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+
+	deploy.SetVersionMap(nil)
 	defer deploy.Close()
 	require.NoError(t, deploy.CreateAccount(addr, true))
 	require.NoError(t, deploy.SetNonce(addr, 1, tracing.NonceChangeUnspecified))
@@ -1269,6 +1284,8 @@ func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
 	require.Equal(t, code, got)
 
 	clear := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+
+	clear.SetVersionMap(nil)
 	defer clear.Close()
 	require.NoError(t, clear.SetCode(addr, []byte{}, tracing.CodeChangeUnspecified))
 	require.NoError(t, clear.MakeWriteSet(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 1)))
@@ -1317,6 +1334,7 @@ func TestPropagatesBalanceIncGetStateObjectError(t *testing.T) {
 			wantErr := errors.New("read failed")
 			reader := &erroringReader{NoopReader: NewNoopReader(), errAddr: ripemd, err: wantErr}
 			sdb := New(reader)
+			sdb.SetVersionMap(nil)
 			defer sdb.Close()
 
 			require.NoError(t, sdb.AddBalance(ripemd, uint256.Int{}, tracing.BalanceChangeUnspecified))
@@ -1754,6 +1772,8 @@ func TestWriteFlushedToMatchesFinalizeTx(t *testing.T) {
 	}
 
 	materialized := New(reader)
+	materialized.SetVersionMap(nil)
+
 	defer materialized.Close()
 	materialized.SetTxContext(1, 0)
 	run(materialized)
@@ -1797,6 +1817,8 @@ func TestWriteFlushedToMatchesFinalizeTxAcrossTxs(t *testing.T) {
 	}
 
 	materialized := New(reader)
+	materialized.SetVersionMap(nil)
+
 	defer materialized.Close()
 	materialized.SetTxContext(1, 0)
 	tx0(materialized)
@@ -1850,6 +1872,8 @@ func TestWriteFlushedToMatchesFinalizeTxPreservedBalance(t *testing.T) {
 	}
 
 	materialized := New(reader)
+	materialized.SetVersionMap(nil)
+
 	defer materialized.Close()
 	materialized.SetTxContext(1, 0)
 	run(materialized)
@@ -1902,6 +1926,8 @@ func TestWriteFlushedToMatchesFinalizeTxIncarnationDecrease(t *testing.T) {
 	}
 
 	materialized := New(reader)
+	materialized.SetVersionMap(nil)
+
 	defer materialized.Close()
 	materialized.SetTxContext(1, 0)
 	run(materialized)

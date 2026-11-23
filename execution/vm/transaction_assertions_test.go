@@ -32,10 +32,13 @@ import (
 )
 
 func TestTxTraceNonceChanges(t *testing.T) {
-	ibs := state.New(state.NewNoopReader())
-	t.Cleanup(ibs.Close)
 	address := accounts.InternAddress(common.Address{19: 1})
-	require.NoError(t, ibs.SetNonce(address, 7, tracing.NonceChangeUnspecified))
+	versions := state.NewVersionMap(nil)
+	versions.WriteNonce(address, state.Version{TxIndex: 0}, 7, true)
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), versions)
+	t.Cleanup(ibs.Close)
+	ibs.SetTxContext(1, 1)
+
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 	evm.FrameContext = ibs.NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{{Mode: types.FrameAssert}}}, uint256.Int{})
 	require.NoError(t, ibs.SetNonce(address, 8, tracing.NonceChangeUnspecified))

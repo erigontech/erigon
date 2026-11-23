@@ -968,13 +968,12 @@ func excludeAuthorities(msg *types.Message, chainRules *chain.Rules, excl map[co
 	return nil
 }
 
-// checkIntrinsicGas rejects a message whose gas cannot cover the intrinsic cost of
-// its authorizations. It leaves out the access list, which the tracer strips of
-// excluded addresses before the executor prices it, so the figure stays at or below
-// what the executor charges and a call it would run is never refused here.
+// checkIntrinsicGas checks a lower bound on intrinsic gas before authority
+// recovery. It includes calldata and every authorization. The tracer filters
+// the access list before execution prices it, so this check leaves it out.
 //
-// The EIP-7825 cap the executor applies beside this comparison is gated on CheckGas,
-// which ToMessage leaves false, so enforcing it here would reject calls too.
+// ToMessage leaves CheckGas false, so these calls skip the EIP-7825 cap on
+// declared gas. Execution checks Amsterdam's cap on intrinsic gas separately.
 func checkIntrinsicGas(msg *types.Message, chainRules *chain.Rules) error {
 	contractCreation := msg.To().IsNil()
 	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
@@ -994,8 +993,8 @@ func checkIntrinsicGas(msg *types.Message, chainRules *chain.Rules) error {
 	if overflow {
 		return protocol.ErrGasUintOverflow
 	}
-	if required := max(intrinsic.ExecutionGas, intrinsic.FloorGasCost); msg.Gas() < required {
-		return fmt.Errorf("%w: have %d, want %d", protocol.ErrIntrinsicGas, msg.Gas(), required)
+	if intrinsic.ExceedsGasLimit(msg.Gas()) {
+		return fmt.Errorf("%w: have %d, want %d", protocol.ErrIntrinsicGas, msg.Gas(), intrinsic.RequiredGas())
 	}
 	return nil
 }

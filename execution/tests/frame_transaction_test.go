@@ -73,9 +73,9 @@ func TestFrameTransactionInsertChain(t *testing.T) {
 						NonceKeys: nil,
 						ChainID:   *cfg.ChainID, SenderAddress: sender, Nonce: nonce,
 						Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}, {Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 200_000, State: genesis.GasLimit - params.StateGasPerStorageSet}}},
-						Fees:   types.FrameFees{MaxFee: *uint256.NewInt(10_000_000_000), TipCap: *uint256.NewInt(1_000_000_000)},
+						Fees:   types.FrameFees{TipCap: *uint256.NewInt(common.GWei)},
 					}
-					tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+					tx.Fees.MaxFee.SetUint64(10 * common.GWei * tx.GetGasLimit())
 					b.AddTx(tx)
 				}
 			})
@@ -129,14 +129,14 @@ func TestFrameValidationUsesPublishedHead(t *testing.T) {
 			case <-ctx.Done():
 			}
 		}))
-	frame := func(sender common.Address, key, nonce, fee uint64) *types.FrameTransaction {
+	frame := func(sender common.Address, key, nonce, feePerGas uint64) *types.FrameTransaction {
 		tx := &types.FrameTransaction{
 			NonceKeys: []uint256.Int{*uint256.NewInt(key)},
 			ChainID:   *cfg.ChainID, SenderAddress: sender, Nonce: nonce,
 			Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}}},
-			Fees:   types.FrameFees{MaxFee: *uint256.NewInt(fee), TipCap: *uint256.NewInt(fee)},
+			Fees:   types.FrameFees{TipCap: *uint256.NewInt(feePerGas)},
 		}
-		tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+		tx.Fees.MaxFee.Mul(uint256.NewInt(tx.GetGasLimit()), uint256.NewInt(feePerGas))
 		return tx
 	}
 	expiring := frame(sender, 2, 0, 10_000_000_000)
@@ -252,9 +252,8 @@ func TestFrameValidationCreationNonces(t *testing.T) {
 					{Mode: types.FrameDefault, Target: &factory, Limits: mdgas.MdGas{Execution: 80_000, State: 400_000}},
 					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 				},
-				Fees: types.FrameFees{MaxFee: *uint256.NewInt(10_000_000_000)},
 			}
-			frame.Fees.MaxFee.Mul(&frame.Fees.MaxFee, uint256.NewInt(frame.GetGasLimit()))
+			frame.Fees.MaxFee.SetUint64(10 * common.GWei * frame.GetGasLimit())
 			var encoded bytes.Buffer
 			require.NoError(t, frame.MarshalBinary(&encoded))
 			server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
@@ -267,8 +266,8 @@ func TestFrameValidationCreationNonces(t *testing.T) {
 }
 
 func TestFrameValidationPendingFees(t *testing.T) {
-	for _, fee := range []uint64{90, 10} {
-		t.Run(fmt.Sprint(fee), func(t *testing.T) {
+	for _, feePerGas := range []uint64{90, 10} {
+		t.Run(fmt.Sprint(feePerGas), func(t *testing.T) {
 			cfg := chain.TestChainOsakaConfig.Copy()
 			cfg.AmsterdamTime, cfg.BogotaTime = common.NewUint64(0), common.NewUint64(0)
 			sender := common.HexToAddress("0x1000")
@@ -279,9 +278,8 @@ func TestFrameValidationPendingFees(t *testing.T) {
 			frame := &types.FrameTransaction{
 				NonceKeys: nil, ChainID: *cfg.ChainID, SenderAddress: sender,
 				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
-				Fees:   types.FrameFees{MaxFee: *uint256.NewInt(fee)},
 			}
-			frame.Fees.MaxFee.Mul(&frame.Fees.MaxFee, uint256.NewInt(frame.GetGasLimit()))
+			frame.Fees.MaxFee.SetUint64(feePerGas * frame.GetGasLimit())
 			var encoded bytes.Buffer
 			require.NoError(t, frame.MarshalBinary(&encoded))
 			server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
@@ -304,9 +302,8 @@ func TestFrameValidationAtBogotaActivation(t *testing.T) {
 	frame := &types.FrameTransaction{
 		NonceKeys: nil, ChainID: *cfg.ChainID, SenderAddress: sender,
 		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
-		Fees:   types.FrameFees{MaxFee: *uint256.NewInt(10_000_000_000)},
 	}
-	frame.Fees.MaxFee.Mul(&frame.Fees.MaxFee, uint256.NewInt(frame.GetGasLimit()))
+	frame.Fees.MaxFee.SetUint64(10 * common.GWei * frame.GetGasLimit())
 	var encoded bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&encoded))
 	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
@@ -326,9 +323,8 @@ func TestFrameValidationExpectedHead(t *testing.T) {
 	frame := &types.FrameTransaction{
 		NonceKeys: nil, ChainID: *cfg.ChainID, SenderAddress: sender,
 		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
-		Fees:   types.FrameFees{MaxFee: *uint256.NewInt(10_000_000_000)},
 	}
-	frame.Fees.MaxFee.Mul(&frame.Fees.MaxFee, uint256.NewInt(frame.GetGasLimit()))
+	frame.Fees.MaxFee.SetUint64(10 * common.GWei * frame.GetGasLimit())
 	var encoded bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&encoded))
 	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
@@ -370,9 +366,8 @@ func TestFrameValidationRejectsBlockhash(t *testing.T) {
 	frame := &types.FrameTransaction{
 		NonceKeys: nil, ChainID: *cfg.ChainID, SenderAddress: sender,
 		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
-		Fees:   types.FrameFees{MaxFee: *uint256.NewInt(10_000_000_000)},
 	}
-	frame.Fees.MaxFee.Mul(&frame.Fees.MaxFee, uint256.NewInt(frame.GetGasLimit()))
+	frame.Fees.MaxFee.SetUint64(10 * common.GWei * frame.GetGasLimit())
 	var encoded bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&encoded))
 	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
@@ -393,10 +388,9 @@ func TestFrameValidationPendingBlobFee(t *testing.T) {
 	frame := &types.FrameTransaction{
 		NonceKeys: nil, ChainID: *cfg.ChainID, SenderAddress: sender,
 		Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
-		Fees:                types.FrameFees{MaxFee: *uint256.NewInt(100)},
 		BlobVersionedHashes: []common.Hash{{1}},
 	}
-	frame.Fees.MaxFee.Mul(&frame.Fees.MaxFee, uint256.NewInt(frame.GetGasLimit()))
+	frame.Fees.MaxFee.SetUint64(100 * frame.GetGasLimit())
 	var encoded bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&encoded))
 	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)

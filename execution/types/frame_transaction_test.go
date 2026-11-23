@@ -419,7 +419,7 @@ func TestFrameTransactionAsMessage(t *testing.T) {
 		NonceKeys: nil,
 		ChainID:   *uint256.NewInt(1), SenderAddress: common.HexToAddress("0x1234"),
 		Frames: []Frame{{Mode: FrameVerify, Flags: FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}}},
-		Fees:   FrameFees{TipCap: *uint256.NewInt(2), MaxFee: *uint256.NewInt(20)},
+		Fees:   FrameFees{TipCap: *uint256.NewInt(2)},
 	}
 	tx.Fees.MaxFee.SetUint64(tx.GetGasLimit() * 20)
 	rules := &chain.Rules{IsBogota: true, ChainID: uint256.NewInt(1)}
@@ -697,7 +697,17 @@ func TestFrameTransactionJSONRequiresNonceKeys(t *testing.T) {
 	require.NoError(t, err)
 	var fields map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(encoded, &fields))
+	require.JSONEq(t, "[]", string(fields["nonceKeys"]))
+	var decoded FrameTransaction
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	require.True(t, decoded.UsesLegacyNonce())
+
 	delete(fields, "nonceKeys")
+	encoded, err = json.Marshal(fields)
+	require.NoError(t, err)
+	require.ErrorContains(t, json.Unmarshal(encoded, new(FrameTransaction)), "missing required frame transaction field")
+
+	fields["nonceKeys"] = json.RawMessage("null")
 	encoded, err = json.Marshal(fields)
 	require.NoError(t, err)
 	require.ErrorContains(t, json.Unmarshal(encoded, new(FrameTransaction)), "missing required frame transaction field")

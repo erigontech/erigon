@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
-	"github.com/erigontech/erigon/execution/vm/testutil"
 )
 
 func TestAssertFailureWithoutPaymentApproval(t *testing.T) {
@@ -120,8 +119,7 @@ func TestAssertBalanceTrace(t *testing.T) {
 	target := common.HexToAddress("0x2000")
 	assertion := common.HexToAddress("0x3000")
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
-	code := program.New().Push0().Push0().Op(vm.TXTRACE)
-	testutil.AssertStackWord(code, 2)
+	code := program.New().Push0().Push0().Op(vm.TXTRACE).AssertEq(2)
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), code.Bytes(), tracing.CodeChangeUnspecified))
 	tx.Frames = []types.Frame{
 		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
@@ -256,8 +254,7 @@ func TestTxTraceOmitsRestoredBalance(t *testing.T) {
 	require.NoError(t, ibs.SetBalance(accounts.InternAddress(sink), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 	// The relay forwards the value it receives, so its own balance ends unchanged.
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(relay), program.New().Call(uint256.NewInt(0), sink, 5, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
-	code := program.New().Push0().Push0().Op(vm.TXTRACE)
-	testutil.AssertStackWord(code, 2) // payer and sink
+	code := program.New().Push0().Push0().Op(vm.TXTRACE).AssertEq(2) // payer and sink
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), code.Op(vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
 	tx.Frames = []types.Frame{
 		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},

@@ -59,6 +59,7 @@ func frameTraceTestEnv(t *testing.T) (*vm.EVM, *types.FrameTransaction) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
 	ibs := state.New(state.NewNoopReader())
+	ibs.SetVersionMap(nil)
 	t.Cleanup(ibs.Close)
 	ibs.SetTxContext(1, 0)
 	sender, target := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
@@ -109,13 +110,12 @@ func TestFrameTraceBlockAfterTracerError(t *testing.T) {
 			data := common.BigToHash(new(big.Int).SetUint64(value))
 			tx := &types.FrameTransaction{
 				ChainID: *cfg.ChainID, NonceKeys: nil, Nonce: uint64(nonce), SenderAddress: sender,
-				Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 				Frames: []types.Frame{
 					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 					{Mode: types.FrameSender, Target: &target, Data: data[:], Limits: mdgas.MdGas{Execution: 100_000, State: params.StateGasPerStorageSet}},
 				},
 			}
-			tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+			tx.Fees.MaxFee.SetUint64(tx.GetGasLimit())
 			b.AddTx(tx)
 		}
 	})
@@ -501,13 +501,12 @@ func newFrameTraceChain(t *testing.T) (*execmoduletester.ExecModuleTester, *type
 	}))
 	frameTx := &types.FrameTransaction{
 		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
-		Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 10_000}},
 		},
 	}
-	frameTx.Fees.MaxFee.Mul(&frameTx.Fees.MaxFee, uint256.NewInt(frameTx.GetGasLimit()))
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 	return m, frameTx
 }
 
