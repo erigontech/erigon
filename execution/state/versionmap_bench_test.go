@@ -15,6 +15,29 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+func BenchmarkSeedEmptyRemovals(b *testing.B) {
+	for _, n := range []int{32, 256, 1024} {
+		b.Run(fmt.Sprintf("changes=%d", n), func(b *testing.B) {
+			bal := types.BlockAccessList{{
+				Address:      common.Address{19: 1},
+				NonceChanges: []*types.NonceChange{{Index: uint32(n + 1), Value: 1}},
+			}}
+			for i := range n {
+				bal[0].BalanceChanges = append(bal[0].BalanceChanges, &types.BalanceChange{
+					Index: uint32(i + 1), Value: *uint256.NewInt(uint64((i + 1) % 2)),
+				})
+			}
+			base := &countingAccountReader{}
+			for b.Loop() {
+				b.StopTimer()
+				vm := NewVersionMap(bal)
+				b.StartTimer()
+				require.NoError(b, vm.SeedEmptyRemovals(true, false, base))
+			}
+		})
+	}
+}
+
 func BenchmarkWriteTimeSameLocationDifferentTxIdx(b *testing.B) {
 	mvh2 := NewVersionMap(nil)
 	ap2 := getAddress(2)

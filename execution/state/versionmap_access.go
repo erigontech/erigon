@@ -337,6 +337,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 			}
 		}
 		candidates = append(candidates, maxIdx)
+		var revivals map[uint32]uint32
 		for _, idx := range candidates {
 			if b, ok := versionedUpdateBalance(vm, addr, int(idx)); ok && !b.IsZero() {
 				continue
@@ -362,8 +363,10 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 			if idx == maxIdx {
 				continue
 			}
-			next := balNextChangeIndex(ac, idx)
-			if !slices.ContainsFunc(ac.BalanceChanges, func(c *types.BalanceChange) bool { return c.Index == next }) {
+			if revivals == nil {
+				revivals = balRevivalIndexes(ac)
+			}
+			if next := revivals[idx]; next != 0 {
 				live := &WriteSet{}
 				live.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: int(next) - 1}}})
 				stamps = append(stamps, live)
@@ -397,7 +400,12 @@ type derivedRemovalKey struct {
 // the committed base for a base-present account's untouched fields.
 func (vm *VersionMap) SeedAddresses() {
 	for i := range vm.bal {
-		minIdx := balNextChangeIndex(&vm.bal[i], 0)
+		var minIdx uint32
+		balChangeIndexes(&vm.bal[i], func(idx uint32) {
+			if idx > 0 && (minIdx == 0 || idx < minIdx) {
+				minIdx = idx
+			}
+		})
 		if minIdx == 0 {
 			continue
 		}
@@ -413,6 +421,10 @@ func balChangeIndexes(ac *types.AccountChanges, fn func(uint32)) {
 	for _, c := range ac.BalanceChanges {
 		fn(c.Index)
 	}
+	balNonBalanceChangeIndexes(ac, fn)
+}
+
+func balNonBalanceChangeIndexes(ac *types.AccountChanges, fn func(uint32)) {
 	for _, c := range ac.NonceChanges {
 		fn(c.Index)
 	}
@@ -426,12 +438,21 @@ func balChangeIndexes(ac *types.AccountChanges, fn func(uint32)) {
 	}
 }
 
-func balNextChangeIndex(ac *types.AccountChanges, after uint32) uint32 {
-	var m uint32
-	balChangeIndexes(ac, func(idx uint32) {
-		if idx > after && (m == 0 || idx < m) {
-			m = idx
+// A removed account needs a zero balance at its first later change if that change
+// has no balance of its own. Group those changes by the preceding balance write.
+func balRevivalIndexes(ac *types.AccountChanges) map[uint32]uint32 {
+	revivals := make(map[uint32]uint32)
+	balNonBalanceChangeIndexes(ac, func(idx uint32) {
+		i, hasBalance := slices.BinarySearchFunc(ac.BalanceChanges, idx, func(c *types.BalanceChange, idx uint32) int {
+			return cmp.Compare(c.Index, idx)
+		})
+		if i == 0 || hasBalance {
+			return
+		}
+		prev := ac.BalanceChanges[i-1]
+		if next := revivals[prev.Index]; prev.Value.IsZero() && (next == 0 || idx < next) {
+			revivals[prev.Index] = idx
 		}
 	})
-	return m
+	return revivals
 }
