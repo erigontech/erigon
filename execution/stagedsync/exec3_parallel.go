@@ -2993,8 +2993,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		// Done cell a reader already consumed, and a later write to a sealed cell trips
 		// assertUnsealed. System/init and block-end txs are seal-exempt (final already).
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() {
-			be.blockState.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
-			be.blockState.SealUpTo(txVersion.TxIndex)
+			be.blockState.Seal(txVersion.TxIndex, be.blockIO.WriteSet(txVersion.TxIndex))
 		}
 
 		if r, ferr := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, stateReader); ferr != nil || r != nil {
@@ -3165,13 +3164,7 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 }
 
 func (be *blockExecutor) validateNow(txIdx int) bool {
-	return be.blockState.ValidateVersion(txIdx, be.blockIO,
-		func(rv, wv state.Version) state.VersionValidity {
-			if rv != wv {
-				return state.VersionInvalid
-			}
-			return state.VersionValid
-		}, false, "") == state.VersionValid
+	return be.blockState.Validate(txIdx, be.blockIO)
 }
 
 // runDepOrderValidation is the dependency-ordered validation pass. It finalizes the

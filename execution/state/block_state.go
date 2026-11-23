@@ -33,3 +33,25 @@ type BlockState struct {
 func NewBlockState(changes types.BlockAccessList) *BlockState {
 	return &BlockState{VersionMap: NewVersionMap(changes)}
 }
+
+// Validate reports whether the transaction at txIdx is still valid against the current
+// store: every value it read matches the version that now holds that cell. It is a pure
+// predicate — it stamps nothing — so a caller may use it both to gate a mark and to
+// re-check an already-committed tx without side effects.
+func (bs *BlockState) Validate(txIdx int, io *VersionedIO) bool {
+	return bs.ValidateVersion(txIdx, io,
+		func(rv, wv Version) VersionValidity {
+			if rv != wv {
+				return VersionInvalid
+			}
+			return VersionValid
+		}, false, "") == VersionValid
+}
+
+// Seal promotes the transaction's writes to Done and advances the seal frontier to
+// txIdx in one in-order step. The caller guarantees txIdx is a regular (non
+// system/block-end) transaction at the seal frontier.
+func (bs *BlockState) Seal(txIdx int, writes *WriteSet) {
+	bs.MarkWritesComplete(writes)
+	bs.SealUpTo(txIdx)
+}
