@@ -253,6 +253,7 @@ func New(stateReader StateReader) *IntraBlockState {
 	}
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
+	ibs.SetVersionMap(NewVersionMap(nil))
 	return ibs
 }
 
@@ -364,12 +365,7 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.sdProbeEpoch++
 	ibs.accessList.Reset()
 	clear(ibs.transientStorage)
-	ibs.versionMap = nil
-	// noMaterialize is meaningful only alongside a versionMap; clear it with the
-	// map so a reused IBS can't run unversioned with the stateObject cache still
-	// suppressed (which would silently drop writes). The versioned worker re-sets
-	// both right after Reset; the block assembler never calls Reset mid-block.
-	ibs.noMaterialize = false
+	ibs.SetVersionMap(NewVersionMap(nil))
 	ibs.noConflictDetection = false
 	ibs.codeByHash = nil
 	clear(ibs.committedBase)
@@ -813,7 +809,7 @@ func (ibs *IntraBlockState) GetNonce(addr accounts.Address) (uint64, error) {
 		return 0, nil
 	}
 
-	nonce, _, _, err := readNonce(ibs, addr)
+	nonce, _, _, err := readNonce(ibs, addr, false)
 
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) GetNonce %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, nonce)
@@ -1010,15 +1006,17 @@ func (ibs *IntraBlockState) GetCommittedCodeHash(addr accounts.Address) (account
 	return hash, nil
 }
 
-// ResolveCode returns the code a call to addr executes, following an EIP-7702 delegation. The
-// code hash comes from the same read as the code.
-func (ibs *IntraBlockState) ResolveCode(addr accounts.Address) (accounts.Code, error) {
+// ResolveCode returns the code a call to addr executes. With followDelegation set, it follows an
+// EIP-7702 delegation; otherwise a delegation designator is ordinary code. The code hash comes
+// from the same read as the code.
+func (ibs *IntraBlockState) ResolveCode(addr accounts.Address, followDelegation bool) (accounts.Code, error) {
 	// committed=false so the tx's own writes (e.g. EIP-7702 authorization) are
 	// visible rather than stale delegation code from the version map.
 	code, err := ibs.getCode(addr)
-	// eip-7702
-	if delegation, ok := types.ParseDelegation(code.Bytes); ok {
-		return ibs.getCode(delegation)
+	if followDelegation {
+		if delegation, ok := types.ParseDelegation(code.Bytes); ok {
+			return ibs.getCode(delegation)
+		}
 	}
 	if err != nil {
 		return accounts.Code{}, err
@@ -1342,7 +1340,7 @@ func (ibs *IntraBlockState) eip8246PreservedAccount(addr accounts.Address) (*acc
 	if err != nil {
 		return nil, err
 	}
-	nonce, _, _, err := readNonce(ibs, addr)
+	nonce, _, _, err := readNonce(ibs, addr, false)
 	if err != nil {
 		return nil, err
 	}
@@ -2870,6 +2868,17 @@ func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
+// BurnSelfDestructs makes every self-destruct of this state delete its account, also one
+// that ran with balance-preserving (EIP-8246) rules. For genesis only, which finalizes
+// without EIP-8246: a block keeps the balance that EIP-8246 preserves.
+func (ibs *IntraBlockState) BurnSelfDestructs() {
+	for addr, sd := range ibs.versionedWrites.SelfDestructs() {
+		if b, ok := ibs.versionedWrites.GetBalance(addr); sd.Val && ok && !b.Deletes() {
+			ibs.recordWriteBalanceDeleted(addr)
+		}
+	}
+}
+
 // FinalizedWrites applies EIP-6780 normalization and EIP-161 filtering, then
 // returns a detached committable snapshot. The EIP-161 filtering reads pre-tx state,
 // so it returns the IBS state read error, which ResetVersionedIO would clear.
@@ -3283,13 +3292,6 @@ func (ibs *IntraBlockState) AddSlotToAccessList(addr accounts.Address, slot acco
 		ibs.journal.accessListAddSlotChange(addr, slot)
 	}
 	return addrMod, slotMod
-}
-
-// AddSlotOnlyToAccessList preserves account coldness for EIP-7906 storage lookups.
-func (ibs *IntraBlockState) AddSlotOnlyToAccessList(addr accounts.Address, slot accounts.StorageKey) {
-	if ibs.accessList.AddSlotOnly(addr, slot) {
-		ibs.journal.accessListAddSlotOnlyChange(addr, slot)
-	}
 }
 
 // AddressInAccessList returns true if the given address is in the access list.

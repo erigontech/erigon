@@ -515,7 +515,7 @@ func (tx *TxnSlot) GetValue() *uint256.Int  { return tx.Txn.GetValue() }
 
 func (tx *TxnSlot) GetBlobFeeCap() *uint256.Int {
 	if frame, ok := tx.Txn.(*types.FrameTransaction); ok {
-		return &frame.Fees.BlobFeeCap
+		return new(uint256.Int).Div(&frame.Fees.MaxFee, uint256.NewInt(frame.GetBlobGas()))
 	}
 	if bt, ok := tx.Txn.(*types.BlobTx); ok {
 		return &bt.MaxFeePerBlobGas

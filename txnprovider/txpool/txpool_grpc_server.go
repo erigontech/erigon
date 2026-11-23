@@ -282,7 +282,7 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportR
 		txpoolcfg.IntrinsicGas, txpoolcfg.GasLimitTooHigh, txpoolcfg.NonceTooDistant,
 		txpoolcfg.RLPTooLong, txpoolcfg.InvalidCreateTxn, txpoolcfg.NoBlobs, txpoolcfg.TooManyBlobs,
 		txpoolcfg.TypeNotActivated, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail, txpoolcfg.BlobNonceGap,
-		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations, txpoolcfg.InvalidAuthorizationNonce,
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.BlobReplacementTypeMismatch, txpoolcfg.NoAuthorizations, txpoolcfg.InvalidAuthorizationNonce,
 		txpoolcfg.TipAboveFeeCap, txpoolcfg.DelegatedNonceGap, txpoolcfg.DelegatedTxnLimit, txpoolcfg.InvalidFrame:
 		// INVALID includes rejections under current fork rules or pool policy;
 		// it does not imply that the transaction can never be accepted.

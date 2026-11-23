@@ -98,10 +98,13 @@ func TestTransactionFeeDistribution(t *testing.T) {
 					if kind == "frame" {
 						require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
 						tx := &types.FrameTransaction{
-							ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender.Value(),
+							ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender.Value(),
 							Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
-							Fees:                types.FrameFees{FeeCap: uint256.Int{test.feeCap}, TipCap: uint256.Int{tipCap}, BlobFeeCap: uint256.Int{13}},
+							Fees:                types.FrameFees{TipCap: uint256.Int{test.wantTip}},
 							BlobVersionedHashes: blobs,
+						}
+						if !test.free {
+							tx.Fees.MaxFee.SetUint64(tx.GetGasLimit()*(2+test.wantTip) + 7*tx.GetBlobGas())
 						}
 						var err error
 						msg, err = tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
@@ -111,6 +114,12 @@ func TestTransactionFeeDistribution(t *testing.T) {
 					executor := NewTxnExecutor(evm, msg, NewGasPool(blockGas, params.GasPerBlob))
 					executor.noFeeBurnAndTip = deferred
 					result, err := executor.Execute(true, false)
+					if kind == "frame" && test.aura {
+						require.ErrorIs(t, err, types.ErrTxTypeNotSupported)
+						_, err = ValidateFrameTransaction(evm, msg.FrameTransaction())
+						require.ErrorIs(t, err, types.ErrTxTypeNotSupported)
+						return
+					}
 					require.NoError(t, err)
 					require.NoError(t, result.Err)
 					wantTip := result.ReceiptGasUsed * test.wantTip

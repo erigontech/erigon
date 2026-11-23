@@ -35,7 +35,7 @@ var (
 	DumpCommitmentStepForTest    = dumpCommitmentStep
 )
 
-func RebuildCommitmentShardKeysForTest(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte)) (uint64, error) {
+func RebuildCommitmentShardKeysForTest(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (ok bool, k, v []byte)) (uint64, error) {
 	rebuilt, err := rebuildCommitmentShard(ctx, sd, tx, next, &rebuiltCommitment{StepTo: 1})
 	if err != nil {
 		return 0, err
@@ -57,6 +57,12 @@ func SetConvertPhase5HookForTest(fn func() error) {
 func SetCommitmentV3BatchBytesForTest(n int) int {
 	old := commitmentV3BatchBytes
 	commitmentV3BatchBytes = n
+	return old
+}
+
+func SetCommitmentV3BatchForTest(n int) int {
+	old := commitmentV3Batch
+	commitmentV3Batch = n
 	return old
 }
 

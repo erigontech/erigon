@@ -21,16 +21,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-)
-
-const (
-	accountNonceChanged = 1 << iota
-	accountBalanceChanged
-	accountStorageChanged
-	accountCodeChanged
 )
 
 type BalanceChange struct {
@@ -38,21 +30,15 @@ type BalanceChange struct {
 	Before, After uint256.Int
 }
 
-// TransactionTrace exposes net changes from transaction prestate to POST_TX,
+// TransactionTrace exposes net changes from transaction prestate to ASSERT,
 // including payment escrow and nonce consumption, before final fee settlement.
 // State tables are sorted by address (then key for storage); events keep emission order.
 type TransactionTrace struct {
-	Balances              []BalanceChange
-	Slots                 []StorageChange
-	Deployed              []ContractDeployment
-	Events                []*types.Log
-	AccountFlags          map[accounts.Address]uint64
-	SlotIndicesByAddress  map[accounts.Address][]int
-	EventIndicesByAddress map[accounts.Address][]int
-	EventIndicesByTopic   map[common.Hash][]int
-	balanceBefore         map[accounts.Address]uint256.Int
-	storageBefore         map[frameStorageSlot]uint256.Int
-	codeBefore            map[accounts.Address]accounts.CodeHash
+	Balances []BalanceChange
+	Slots    []StorageChange
+	Codes    []CodeChange
+	Nonces   []NonceChange
+	Events   []*types.Log
 }
 
 type StorageChange struct {
@@ -61,161 +47,113 @@ type StorageChange struct {
 	Before, After uint256.Int
 }
 
-type ContractDeployment struct {
-	Address  accounts.Address
-	CodeHash accounts.CodeHash
+type CodeChange struct {
+	Address       accounts.Address
+	Before, After accounts.CodeHash
 }
 
-// TransactionTrace builds the view once for the read-only POST_TX suffix. A failed
-// assertion ends the suffix, so the cache is never reused after body rollback.
+type NonceChange struct {
+	Address       accounts.Address
+	Before, After uint64
+}
+
+// TransactionTrace builds the view once for the read-only ASSERT suffix. It borrows
+// the transaction's logs. A failed assertion ends the suffix, so the cache is never
+// reused after body rollback.
 // It relies on EIP-8253 preventing creation over non-empty storage, so the first
 // journaled slot value is its transaction prestate: https://eips.ethereum.org/EIPS/eip-8253
 func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTrace, error) {
 	if ctx.trace != nil {
 		return ctx.trace, nil
 	}
-	trace := &TransactionTrace{
-		AccountFlags:          make(map[accounts.Address]uint64),
-		SlotIndicesByAddress:  make(map[accounts.Address][]int),
-		EventIndicesByAddress: make(map[accounts.Address][]int),
-		EventIndicesByTopic:   make(map[common.Hash][]int),
-		balanceBefore:         make(map[accounts.Address]uint256.Int),
-		storageBefore:         make(map[frameStorageSlot]uint256.Int),
-		codeBefore:            make(map[accounts.Address]accounts.CodeHash),
-	}
-	nonceBefore := make(map[accounts.Address]uint64)
+	trace := &TransactionTrace{}
+	balances := make(map[accounts.Address]uint256.Int)
+	nonces := make(map[accounts.Address]uint64)
+	slots := make(map[frameStorageSlot]uint256.Int)
+	codes := make(map[accounts.Address]accounts.CodeHash)
 	for _, entry := range ibs.journal.entries[ctx.journalStart:] {
 		switch entry.kind {
 		case kindBalance, kindSelfdestruct:
-			if _, ok := trace.balanceBefore[entry.account]; !ok {
-				trace.balanceBefore[entry.account] = entry.value
+			if _, ok := balances[entry.account]; !ok {
+				balances[entry.account] = entry.value
 			}
 		case kindNonce:
-			if _, ok := nonceBefore[entry.account]; !ok {
-				nonceBefore[entry.account] = entry.aux
+			if _, ok := nonces[entry.account]; !ok {
+				nonces[entry.account] = entry.aux
 			}
 		case kindStorage, kindFakeStorage:
 			slot := frameStorageSlot{entry.account, entry.key}
-			if _, ok := trace.storageBefore[slot]; !ok {
-				trace.storageBefore[slot] = entry.value
+			if _, ok := slots[slot]; !ok {
+				slots[slot] = entry.value
 			}
 		case kindCode:
-			if _, ok := trace.codeBefore[entry.account]; !ok {
+			if _, ok := codes[entry.account]; !ok {
 				hash := accounts.EmptyCodeHash
 				if entry.extra != nil && !entry.extra.prevhash.IsEmpty() {
 					hash = entry.extra.prevhash
 				}
-				trace.codeBefore[entry.account] = hash
+				codes[entry.account] = hash
 			}
 		}
 	}
-	for address, before := range trace.balanceBefore {
+	for address, before := range balances {
 		after, err := ibs.GetBalance(address)
 		if err != nil {
 			return nil, err
 		}
 		if before != after {
 			trace.Balances = append(trace.Balances, BalanceChange{address, before, after})
-			trace.AccountFlags[address] |= accountBalanceChanged
 		}
 	}
-	for address, before := range nonceBefore {
+	for address, before := range nonces {
+		// Parallel nonce writes can journal an older base-account value. Resolve
+		// the transaction prestate through the versioned reader and retain its dependency.
+		if ibs.versionMap != nil {
+			var err error
+			before, _, _, err = readNonce(ibs, address, true)
+			if err != nil {
+				return nil, err
+			}
+		}
 		after, err := ibs.GetNonce(address)
 		if err != nil {
 			return nil, err
 		}
 		if before != after {
-			trace.AccountFlags[address] |= accountNonceChanged
+			trace.Nonces = append(trace.Nonces, NonceChange{address, before, after})
 		}
 	}
-	for slot, before := range trace.storageBefore {
+	for slot, before := range slots {
 		after, err := ibs.GetState(slot.address, slot.key)
 		if err != nil {
 			return nil, err
 		}
 		if before != after {
 			trace.Slots = append(trace.Slots, StorageChange{slot.address, slot.key, before, after})
-			trace.AccountFlags[slot.address] |= accountStorageChanged
 		}
 	}
-	for address, before := range trace.codeBefore {
-		after, err := trace.CodeHash(ibs, address, false)
+	for address, before := range codes {
+		after, err := ibs.GetCodeHash(address)
 		if err != nil {
 			return nil, err
 		}
-		if before == after {
-			continue
+		if after.IsEmpty() {
+			after = accounts.EmptyCodeHash
 		}
-		trace.AccountFlags[address] |= accountCodeChanged
-		if !before.IsEmpty() || after.IsEmpty() {
-			continue
-		}
-		_, delegation, err := ibs.GetDelegatedDesignation(address)
-		if err != nil {
-			return nil, err
-		}
-		if !delegation {
-			trace.Deployed = append(trace.Deployed, ContractDeployment{address, after})
+		if before != after {
+			trace.Codes = append(trace.Codes, CodeChange{address, before, after})
 		}
 	}
-	slices.SortFunc(trace.Balances, func(a, b BalanceChange) int {
-		return a.Address.Cmp(b.Address)
-	})
+	slices.SortFunc(trace.Balances, func(a, b BalanceChange) int { return a.Address.Cmp(b.Address) })
 	slices.SortFunc(trace.Slots, func(a, b StorageChange) int {
 		if order := a.Address.Cmp(b.Address); order != 0 {
 			return order
 		}
 		return a.Key.Cmp(b.Key)
 	})
-	slices.SortFunc(trace.Deployed, func(a, b ContractDeployment) int {
-		return a.Address.Cmp(b.Address)
-	})
-	for i, slot := range trace.Slots {
-		trace.SlotIndicesByAddress[slot.Address] = append(trace.SlotIndicesByAddress[slot.Address], i)
-	}
-	trace.Events = ibs.LogsSince(ctx.logStart)
-	for i, event := range trace.Events {
-		address := accounts.InternAddress(event.Address)
-		trace.EventIndicesByAddress[address] = append(trace.EventIndicesByAddress[address], i)
-		// Topic views exclude topic 0 and list each event once per matching topic.
-		for j := 1; j < len(event.Topics); j++ {
-			topic := event.Topics[j]
-			if !slices.Contains(event.Topics[1:j], topic) {
-				trace.EventIndicesByTopic[topic] = append(trace.EventIndicesByTopic[topic], i)
-			}
-		}
-	}
+	slices.SortFunc(trace.Codes, func(a, b CodeChange) int { return a.Address.Cmp(b.Address) })
+	slices.SortFunc(trace.Nonces, func(a, b NonceChange) int { return a.Address.Cmp(b.Address) })
+	trace.Events = ibs.logs.entries[ctx.logStart:]
 	ctx.trace = trace
 	return trace, nil
-}
-
-func (trace *TransactionTrace) Balance(ibs *IntraBlockState, address accounts.Address, before bool) (uint256.Int, error) {
-	if value, ok := trace.balanceBefore[address]; before && ok {
-		return value, nil
-	}
-	return ibs.GetBalance(address)
-}
-
-func (trace *TransactionTrace) Storage(ibs *IntraBlockState, address accounts.Address, key accounts.StorageKey, before bool) (uint256.Int, error) {
-	// Read even when the before-value is in the diff: TXDIFF records a
-	// storage access in the BAL, unlike TXTRACE's enumeration.
-	value, err := ibs.GetState(address, key)
-	if err != nil || !before {
-		return value, err
-	}
-	if original, ok := trace.storageBefore[frameStorageSlot{address, key}]; ok {
-		return original, nil
-	}
-	return value, nil
-}
-
-func (trace *TransactionTrace) CodeHash(ibs *IntraBlockState, address accounts.Address, before bool) (accounts.CodeHash, error) {
-	if hash, ok := trace.codeBefore[address]; before && ok {
-		return hash, nil
-	}
-	hash, err := ibs.GetCodeHash(address)
-	if hash.IsEmpty() {
-		hash = accounts.EmptyCodeHash
-	}
-	return hash, err
 }
