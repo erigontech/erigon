@@ -17,8 +17,6 @@
 package peerdasutils
 
 import (
-	"encoding/json"
-	"errors"
 	"math/rand/v2"
 	"path/filepath"
 	"slices"
@@ -99,8 +97,8 @@ func TestRecoverCellsAndKZGProofsMatchesGoEthKZG(t *testing.T) {
 	}
 }
 
-// The embedded setup is a second copy of the one go-eth-kzg embeds: the commitment checks the Lagrange points, the
-// recovered proofs check the monomial points and the batch verification checks the G2 points.
+// c-kzg reads the shared setup like go-eth-kzg: its commitment matches (all Lagrange points) and it accepts go-eth-kzg's
+// cell proofs (the first 64 monomial G1 points and the G2 point [τ^64]).
 func TestCkzgDefaultSettingsMatchGoEthKZG(t *testing.T) {
 	require.NoError(t, ckzgReady())
 	blob, cells, proofs := randomBlobCells(t, rand.New(rand.NewPCG(5, 6)))
@@ -128,8 +126,7 @@ func TestCkzgDefaultSettingsMatchGoEthKZG(t *testing.T) {
 
 func TestCkzgSettingsLoadFromParsedSetup(t *testing.T) {
 	require.NoError(t, ckzgReady())
-	setup := new(goethkzg.JSONTrustedSetup)
-	require.NoError(t, json.Unmarshal(defaultTrustedSetup, setup))
+	setup := kzg.TrustedSetup()
 	indices, givenCells := randomCells(t, rand.New(rand.NewPCG(7, 8)), 64)
 	wantCells, wantProofs, err := recoverWithGoEthKZG(indices, givenCells)
 	require.NoError(t, err)
@@ -137,7 +134,7 @@ func TestCkzgSettingsLoadFromParsedSetup(t *testing.T) {
 	restored := false
 	t.Cleanup(func() {
 		if !restored {
-			require.NoError(t, loadCkzgSettings(nil))
+			require.NoError(t, loadCkzgSettings(kzg.TrustedSetup()))
 		}
 	})
 
@@ -181,19 +178,21 @@ func TestRecoverCellsAndKZGProofsFallsBackToGoEthKZGWhenSettingsFailToLoad(t *te
 	indices, givenCells := randomCells(t, rand.New(rand.NewPCG(9, 10)), 64)
 	wantCells, wantProofs, err := recoverWithGoEthKZG(indices, givenCells)
 	require.NoError(t, err)
+	extraG2Point := *kzg.TrustedSetup()
+	extraG2Point.SetupG2 = append(slices.Clone(extraG2Point.SetupG2), extraG2Point.SetupG2[0])
+	ckzg.FreeTrustedSetup()
 	ckzgOnce = sync.Once{}
-	ckzgOnce.Do(func() {})
-	ckzgErr = errors.New("settings failed to load")
+	ckzgErr = nil
 	t.Cleanup(func() {
 		ckzgOnce = sync.Once{}
-		ckzgOnce.Do(func() {})
 		ckzgErr = nil
+		require.NoError(t, ckzgReady())
 	})
 
-	gotCells, gotProofs, err := RecoverCellsAndKZGProofs(indices, givenCells)
+	require.Error(t, loadCkzgOnce(&extraG2Point))
 
+	gotCells, gotProofs, err := RecoverCellsAndKZGProofs(indices, givenCells)
 	require.NoError(t, err)
-	require.Error(t, ckzgErr)
 	require.True(t, slices.Equal(wantCells, gotCells), "recovered cells differ from go-eth-kzg")
 	require.True(t, slices.Equal(wantProofs, gotProofs), "recovered proofs differ from go-eth-kzg")
 	_, _, err = RecoverCellsAndKZGProofs(slices.Concat(indices[1:2], indices[:1], indices[2:]), givenCells)

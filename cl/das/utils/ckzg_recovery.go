@@ -17,9 +17,7 @@
 package peerdasutils
 
 import (
-	_ "embed"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -36,11 +34,6 @@ import (
 // (143 ms at 0) for about 96 MiB of tables outside the Go heap.
 const ckzgPrecompute = 8
 
-// defaultTrustedSetup is the mainnet setup that go-eth-kzg embeds, which it does not export.
-//
-//go:embed trusted_setup.json
-var defaultTrustedSetup []byte
-
 var (
 	ckzgOnce sync.Once
 	ckzgErr  error
@@ -49,8 +42,12 @@ var (
 // ckzgReady loads the c-kzg settings on the first call and reports whether they can be used.
 // The loaded settings are read-only, so concurrent recoveries may share them.
 func ckzgReady() error {
+	return loadCkzgOnce(kzg.TrustedSetup())
+}
+
+func loadCkzgOnce(setup *goethkzg.JSONTrustedSetup) error {
 	ckzgOnce.Do(func() {
-		if ckzgErr = loadCkzgSettings(kzg.TrustedSetup()); ckzgErr != nil {
+		if ckzgErr = loadCkzgSettings(setup); ckzgErr != nil {
 			log.Error("[peerdas] failed to load the c-kzg settings, recovering cells with go-eth-kzg", "err", ckzgErr)
 		}
 	})
@@ -62,14 +59,8 @@ func WarmUpRecovery() {
 	go func() { _ = ckzgReady() }()
 }
 
-// loadCkzgSettings loads the parsed trusted setup, or the default mainnet setup if it is nil.
+// loadCkzgSettings loads the parsed trusted setup into c-kzg.
 func loadCkzgSettings(setup *goethkzg.JSONTrustedSetup) error {
-	if setup == nil {
-		setup = new(goethkzg.JSONTrustedSetup)
-		if err := json.Unmarshal(defaultTrustedSetup, setup); err != nil {
-			return err
-		}
-	}
 	g1Monomial, err := decodeHexPoints(setup.SetupG1Monomial[:])
 	if err != nil {
 		return err

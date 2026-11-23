@@ -220,7 +220,7 @@ func (d *peerdas) Start(ctx context.Context) {
 				d.state.SetCustodyRaiseSlot(raiseSlot)
 			}
 		}
-		if d.IsArchivedMode() || d.state.IsSupernode() {
+		if d.blobRecoveryEnabled() {
 			peerdasutils.WarmUpRecovery()
 		}
 		d.resubscribeGossip()
@@ -438,6 +438,11 @@ func (d *peerdas) IsColumnOverHalf(slot uint64, blockRoot common.Hash) bool {
 
 func (d *peerdas) IsArchivedMode() bool {
 	return d.caplinConfig.ArchiveBlobs || d.caplinConfig.ImmediateBlobsBackfilling
+}
+
+// blobRecoveryEnabled reports whether this node recovers blobs from columns, which needs Fulu on the chain.
+func (d *peerdas) blobRecoveryEnabled() bool {
+	return d.beaconConfig.FuluForkEpoch != math.MaxUint64 && (d.IsArchivedMode() || d.state.IsSupernode())
 }
 
 func (d *peerdas) IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, error) {
@@ -1522,7 +1527,7 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 }
 
 func (d *peerdas) tryScheduleRecover(slot uint64, blockRoot common.Hash, metadata *blobRecoveryMetadata) error {
-	if !d.IsArchivedMode() && !d.StateReader().IsSupernode() {
+	if !d.blobRecoveryEnabled() {
 		return nil
 	}
 

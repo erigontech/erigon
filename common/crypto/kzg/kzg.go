@@ -18,6 +18,7 @@ package kzg
 
 import (
 	"crypto/sha256"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +38,11 @@ const (
 )
 
 type VersionedHash [32]byte
+
+// mainnetTrustedSetup is the mainnet setup, identical to the one go-eth-kzg embeds but does not export.
+//
+//go:embed trusted_setup.json
+var mainnetTrustedSetup []byte
 
 var (
 	errInvalidInputLength = errors.New("invalid input length")
@@ -60,7 +66,7 @@ func SetTrustedSetupFilePath(path string) {
 	trustedSetupFile = path
 }
 
-// TrustedSetup returns the setup that the go-eth-kzg context was built from, or nil for its embedded mainnet setup.
+// TrustedSetup returns the setup that the go-eth-kzg context was built from.
 func TrustedSetup() *goethkzg.JSONTrustedSetup {
 	InitKZGCtx()
 	return trustedSetup
@@ -69,29 +75,22 @@ func TrustedSetup() *goethkzg.JSONTrustedSetup {
 // InitKZGCtx initializes the global context object returned via CryptoCtx
 func InitKZGCtx() {
 	initCryptoCtx.Do(func() {
+		var err error
+		setupJSON := mainnetTrustedSetup
 		if trustedSetupFile != "" {
-			file, err := os.ReadFile(trustedSetupFile)
-			if err != nil {
+			if setupJSON, err = os.ReadFile(trustedSetupFile); err != nil {
 				panic(fmt.Sprintf("could not read file, err: %v", err))
 			}
+		}
 
-			trustedSetup = new(goethkzg.JSONTrustedSetup)
-			if err = json.Unmarshal(file, trustedSetup); err != nil {
-				panic(fmt.Sprintf("could not unmarshal, err: %v", err))
-			}
+		trustedSetup = new(goethkzg.JSONTrustedSetup)
+		if err = json.Unmarshal(setupJSON, trustedSetup); err != nil {
+			panic(fmt.Sprintf("could not unmarshal, err: %v", err))
+		}
 
-			gokzgCtx, err = goethkzg.NewContext4096(trustedSetup)
-			if err != nil {
-				panic(fmt.Sprintf("could not create KZG context, err: %v", err))
-			}
-		} else {
-			var err error
-			// Initialize context to match the configurations that the
-			// specs are using.
-			gokzgCtx, err = goethkzg.NewContext4096Secure()
-			if err != nil {
-				panic(fmt.Sprintf("could not create context, err : %v", err))
-			}
+		gokzgCtx, err = goethkzg.NewContext4096(trustedSetup)
+		if err != nil {
+			panic(fmt.Sprintf("could not create KZG context, err: %v", err))
 		}
 	})
 }
