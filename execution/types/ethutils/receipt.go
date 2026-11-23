@@ -310,11 +310,7 @@ func GasFeePaid(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uin
 		fee, _, err := settledFrameGasFees(frame, gasUsed, baseFee, blobBaseFee)
 		return fee, err
 	}
-	price := *txn.GetTipCap()
-	if baseFee != nil {
-		tip := txn.GetEffectiveGasTip(baseFee)
-		price.Add(baseFee, &tip)
-	}
+	price := nonFrameGasPrice(txn, baseFee)
 	return *price.Mul(&price, uint256.NewInt(gasUsed)), nil
 }
 
@@ -370,13 +366,17 @@ func ReceiptGasTip(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *
 	return u256.Min(perGas, frame.Fees.TipCap), nil
 }
 
+func nonFrameGasPrice(txn types.Transaction, baseFee *uint256.Int) uint256.Int {
+	if baseFee == nil {
+		return *txn.GetTipCap()
+	}
+	return u256.Add(*baseFee, txn.GetEffectiveGasTip(baseFee))
+}
+
 func ReceiptGasPrice(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) *uint256.Int {
 	if txn.Type() != types.FrameTxType {
-		if baseFee == nil {
-			return new(uint256.Int).Set(txn.GetTipCap())
-		}
-		tip := txn.GetEffectiveGasTip(baseFee)
-		return new(uint256.Int).Add(baseFee, &tip)
+		price := nonFrameGasPrice(txn, baseFee)
+		return &price
 	}
 	tip, err := ReceiptGasTip(txn, gasUsed, baseFee, blobBaseFee)
 	if err != nil {
