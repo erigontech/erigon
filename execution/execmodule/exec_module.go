@@ -671,7 +671,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 		//
 		// It is also where the block's data crosses over. The seal keeps the sealed block in pre-exec space; the fork
 		// choice looks its header up in the module context, so it is staged there now — here, and nowhere earlier.
-		if !e.semaphore.TryAcquire(1) {
+		if err := e.semaphore.Acquire(ctx, 1); err != nil {
 			return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil
 		}
 		e.semTake("ValidateChain:stageSealed")
@@ -706,7 +706,7 @@ func (e *ExecModule) awaitPreExecSeal(ctx context.Context, hash common.Hash, num
 	for {
 		e.flash.mu.Lock()
 		changed := e.flash.changedLocked()
-		building := e.flash.num == number && e.flash.valid && e.flash.built.Parent == parent
+		building := e.flash.num == number && (!e.flash.valid || e.flash.built.Parent == parent)
 		e.flash.mu.Unlock()
 		e.pendingBlockMu.Lock()
 		sealed := e.sealedByHash[hash]
