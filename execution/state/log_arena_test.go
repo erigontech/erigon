@@ -88,16 +88,19 @@ func TestAllocLogClearsReusedEntry(t *testing.T) {
 func TestAllocLogKeepsEarlierTxsAcrossGrowth(t *testing.T) {
 	t.Parallel()
 
-	ibs := New(nil)
+	var rs ReceiptState
 	for txIndex := range 64 {
-		ibs.SetTxContext(1, txIndex)
-		ibs.AddLog(&types.Log{Address: common.BytesToAddress([]byte{byte(txIndex)})})
+		rs.CommitLogs(types.Logs{{
+			Address: common.BytesToAddress([]byte{byte(txIndex)}),
+			TxIndex: hexutil.Uint(txIndex),
+		}})
 	}
-	logs := ibs.Logs()
+	logs := rs.Logs()
 	require.Len(t, logs, 64)
 	for txIndex := range 64 {
 		require.Equal(t, common.BytesToAddress([]byte{byte(txIndex)}), logs[txIndex].Address, "tx %d", txIndex)
 		require.Equal(t, hexutil.Uint(txIndex), logs[txIndex].TxIndex)
+		require.Equal(t, hexutil.Uint(txIndex), logs[txIndex].Index, "block-wide index tracks the aggregate")
 	}
 }
 
@@ -479,34 +482,32 @@ func TestLogTakesNoJournalEntry(t *testing.T) {
 }
 
 // TestLogIndexIsBlockWide pins that AddLog stamps a block-wide log index:
-// receipts.DeriveFields derives FirstLogIndexWithinBlock from Logs[0].Index, so
-// the counter must run across transactions, roll back with a reverted log, and
-// restart at zero on Reset.
+// The block-wide log index runs across transactions: ReceiptState.CommitLogs numbers
+// each transaction's logs from the running block count (receipts.DeriveFields later
+// derives FirstLogIndexWithinBlock from Logs[0].Index), and Reset restarts at zero.
 func TestLogIndexIsBlockWide(t *testing.T) {
 	t.Parallel()
 
-	ibs := New(NewNoopReader())
-	ibs.SetTxContext(1, 0)
-	ibs.AddLog(&types.Log{Address: common.Address{0x01}})
-	ibs.AddLog(&types.Log{Address: common.Address{0x02}})
+	var rs ReceiptState
+	require.Equal(t, uint32(0), rs.CommitLogs(types.Logs{
+		{Address: common.Address{0x01}, TxIndex: 0},
+		{Address: common.Address{0x02}, TxIndex: 0},
+	}), "the first transaction's logs start at zero")
+	require.Equal(t, uint32(2), rs.CommitLogs(types.Logs{
+		{Address: common.Address{0x04}, TxIndex: 1},
+	}), "the next transaction continues the block count")
 
-	ibs.SetTxContext(1, 1)
-	snap := ibs.PushSnapshot()
-	ibs.AddLog(&types.Log{Address: common.Address{0x03}})
-	ibs.RevertToSnapshot(snap, nil)
-	ibs.AddLog(&types.Log{Address: common.Address{0x04}})
-
-	block := ibs.Logs()
+	block := rs.Logs()
 	require.Len(t, block, 3)
 	require.Equal(t, hexutil.Uint(0), block[0].Index)
 	require.Equal(t, hexutil.Uint(1), block[1].Index)
-	require.Equal(t, hexutil.Uint(2), block[2].Index, "index continues across txs and reuses a reverted slot")
-	require.Len(t, ibs.GetRawLogs(1), 1, "the transaction in context has one")
+	require.Equal(t, hexutil.Uint(2), block[2].Index, "the index continues across transactions")
+	require.Equal(t, common.Address{0x04}, block[2].Address)
+	require.Equal(t, uint32(3), rs.LogIndex())
 
-	ibs.Reset()
-	ibs.SetTxContext(2, 0)
-	ibs.AddLog(&types.Log{Address: common.Address{0x05}})
-	require.Equal(t, hexutil.Uint(0), ibs.GetRawLogs(0)[0].Index, "next block restarts at zero")
+	rs.Reset()
+	require.Equal(t, uint32(0), rs.LogIndex(), "a new block restarts at zero")
+	require.Empty(t, rs.Logs())
 }
 
 // Reading a transaction the run has moved past would answer empty, which a

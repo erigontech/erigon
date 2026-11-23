@@ -544,11 +544,13 @@ func (ibs *IntraBlockState) LogsSince(first int) types.Logs {
 	return logs.Copy()
 }
 
-func (ibs *IntraBlockState) Logs() types.Logs { return ibs.LogsSince(0) }
+// Logs returns the block's aggregated logs — the per-transaction logs folded into the
+// block aggregate in commit order.
+func (ibs *IntraBlockState) Logs() types.Logs { return ibs.blockState.receipts.Logs() }
 
-// LogsRlpHash is rlpHash of Logs, without building the flattened slice.
+// LogsRlpHash is rlpHash of the block's aggregated Logs, without building the flattened slice.
 func (ibs *IntraBlockState) LogsRlpHash() common.Hash {
-	return types.RlpHashLogs(ibs.logs.entries)
+	return ibs.blockState.receipts.LogsRlpHash()
 }
 
 // AddRefund adds gas to the refund counter
@@ -2326,12 +2328,13 @@ func (ibs *IntraBlockState) SetTxContext(bn uint64, ti int) {
 // transactions it skipped left behind. Called mid-block it renumbers everything
 // after it, so it belongs before the first log of the first transaction.
 func (ibs *IntraBlockState) ResumeLogIndexAt(idx uint32) {
-	ibs.logs.indexInBlock = uint(idx)
+	ibs.blockState.receipts.ResumeLogIndexAt(idx)
 }
 
-// ResetLogs empties the block's logs and takes the numbering back to zero,
-// keeping the state changes Reset would drop.
+// ResetLogs empties the block's aggregated logs and the per-tx logs and takes the
+// numbering back to zero, keeping the state changes Reset would drop.
 func (ibs *IntraBlockState) ResetLogs() {
+	ibs.blockState.receipts.Reset()
 	ibs.logs.reset()
 }
 
@@ -2339,7 +2342,16 @@ func (ibs *IntraBlockState) ResetLogs() {
 // journal and refund so a later transaction cannot revert this one's changes.
 // The writes stay in the tx write-set; the caller takes them with FinalizedWrites.
 func (ibs *IntraBlockState) EndTransaction() {
+	ibs.blockState.receipts.CommitLogs(ibs.logs.entries)
+	ibs.logs.reset()
 	ibs.clearJournalAndRefund()
+}
+
+// StampReceipt numbers a per-transaction receipt's logs with their block-wide indices
+// and records its FirstLogIndexWithinBlock, from the block's log count so far. Call
+// after building the receipt and before EndTransaction folds the transaction's logs.
+func (ibs *IntraBlockState) StampReceipt(receipt *types.Receipt) {
+	ibs.blockState.receipts.StampReceipt(receipt)
 }
 
 func (ibs *IntraBlockState) clearJournalAndRefund() {

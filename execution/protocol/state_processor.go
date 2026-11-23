@@ -179,6 +179,9 @@ func MakeReceipt(
 	}
 	// Set the receipt logs and create a bloom for filtering
 	receipt.SetLogs(ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNumber.Uint64(), blockHash))
+	// Number the logs with their block-wide indices; EndTransaction then folds them into
+	// the block aggregate, advancing the count this stamp reads.
+	ibs.StampReceipt(receipt)
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	receipt.BlockNumber = blockNumber
 	receipt.TransactionIndex = uint(ibs.TxnIndex())

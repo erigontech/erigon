@@ -80,6 +80,16 @@ func (r *ReceiptState) CommitLogs(txLogs types.Logs) uint32 {
 // transaction's first log will take.
 func (r *ReceiptState) LogIndex() uint32 { return uint32(r.logs.indexInBlock) }
 
+// StampReceipt gives a per-transaction receipt its place in the block: it numbers the
+// receipt's logs from the block-wide index reached so far and records that as the
+// receipt's FirstLogIndexWithinBlock. Call before the transaction's logs are folded in
+// (via CommitLogs), so the index is the count of logs earlier transactions committed.
+func (r *ReceiptState) StampReceipt(receipt *types.Receipt) {
+	first := r.LogIndex()
+	types.Logs(receipt.Logs).Reindex(first)
+	receipt.FirstLogIndexWithinBlock = first
+}
+
 // Logs returns the block's aggregated logs in order. The entries are owned by the
 // aggregate; a caller that holds them past the next reset must copy.
 func (r *ReceiptState) Logs() types.Logs { return r.logs.entries }
