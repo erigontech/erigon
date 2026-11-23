@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
@@ -284,11 +286,16 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 		}
 		return err
 	}
-	applied, done := make(chan struct{}, 1), make(chan struct{})
-	defer close(done)
-	requestor.Store(func(req *remoteproto.LogsFilterRequest) error {
-		return sendFilterUpdate(ctx, subscription.Send, req, applied, done)
-	})
+	acks := newFilterAcks()
+	defer close(acks.done)
+	if back.serverAcksFilters(ctx) {
+		requestor.Store(func(req *remoteproto.LogsFilterRequest) error {
+			req.Ack = true
+			return sendFilterUpdate(ctx, acks, subscription.Send, req)
+		})
+	} else {
+		requestor.Store(subscription.Send)
+	}
 	for {
 		logs, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
@@ -299,7 +306,7 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 			return err
 		}
 		if logs.FilterApplied {
-			applied <- struct{}{}
+			acks.ack()
 			continue
 		}
 		onNewLogs(logs)
@@ -315,12 +322,17 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 		}
 		return err
 	}
-	applied, done := make(chan struct{}, 1), make(chan struct{})
-	defer close(done)
+	acks := newFilterAcks()
+	defer close(acks.done)
 	if onReady != nil {
-		onReady(func(req *remoteproto.ReceiptsFilterRequest) error {
-			return sendFilterUpdate(ctx, subscription.Send, req, applied, done)
-		})
+		if back.serverAcksFilters(ctx) {
+			onReady(func(req *remoteproto.ReceiptsFilterRequest) error {
+				req.Ack = true
+				return sendFilterUpdate(ctx, acks, subscription.Send, req)
+			})
+		} else {
+			onReady(subscription.Send)
+		}
 	}
 	for {
 		receipts, err := subscription.Recv()
@@ -332,7 +344,7 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 			return err
 		}
 		if receipts.FilterApplied {
-			applied <- struct{}{}
+			acks.ack()
 			continue
 		}
 		onNewReceipts(receipts)
@@ -340,21 +352,67 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 	return nil
 }
 
+// serverAcksFilters reports whether the server behind the stream just opened acks filter
+// requests (EthBackendAPIVersion 5.1+). The startup version check does not cover a stream
+// that reconnects to a restarted erigon of another version.
+func (back *RemoteBackend) serverAcksFilters(ctx context.Context) bool {
+	v, err := back.remoteEthBackend.Version(ctx, &emptypb.Empty{})
+	if err != nil {
+		back.log.Warn("rpcdaemon: filter updates will not wait for the server", "err", err)
+		return false
+	}
+	return v.Major > 5 || v.Major == 5 && v.Minor >= 1
+}
+
+// filterAckTimeout bounds how long a filter update waits for the server's ack.
+const filterAckTimeout = 5 * time.Second
+
+// filterAcks matches the filter updates sent on one stream to the server's acks, which
+// arrive in request order. Counting keeps an update that stopped waiting from being
+// satisfied by a later ack of its own, and a later update from being satisfied by it.
+type filterAcks struct {
+	mu     sync.Mutex
+	sent   uint64
+	acked  atomic.Uint64
+	notify chan struct{}
+	done   chan struct{} // closed when the stream ends
+}
+
+func newFilterAcks() *filterAcks {
+	return &filterAcks{notify: make(chan struct{}, 1), done: make(chan struct{})}
+}
+
+func (a *filterAcks) ack() {
+	a.acked.Add(1)
+	select {
+	case a.notify <- struct{}{}:
+	default:
+	}
+}
+
 // sendFilterUpdate returns once the server has applied req, so events published after it
-// are filtered by req. The server acks requests in order and callers send one request
-// at a time per stream, so the next ack belongs to req.
-func sendFilterUpdate[R any](ctx context.Context, send func(R) error, req R, applied, done <-chan struct{}) error {
+// are filtered by req.
+func sendFilterUpdate[R any](ctx context.Context, a *filterAcks, send func(R) error, req R) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if err := send(req); err != nil {
 		return err
 	}
-	select {
-	case <-applied:
-		return nil
-	case <-done:
-		return errors.New("filter subscription closed before the update was applied")
-	case <-ctx.Done():
-		return ctx.Err()
+	a.sent++
+	timer := time.NewTimer(filterAckTimeout)
+	defer timer.Stop()
+	for a.acked.Load() < a.sent {
+		select {
+		case <-a.notify:
+		case <-a.done:
+			return errors.New("filter subscription closed before the update was applied")
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return fmt.Errorf("server did not apply the filter update within %s", filterAckTimeout)
+		}
 	}
+	return nil
 }
 
 func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {

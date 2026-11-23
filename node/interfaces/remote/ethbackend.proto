@@ -173,6 +173,7 @@ message LogsFilterRequest {
   repeated types.H160 addresses = 2;
   bool all_topics = 3;
   repeated types.H256 topics = 4;
+  bool ack = 5; // ask the server to reply filter_applied once it applied this request
 }
 
 message SubscribeLogsReply {
@@ -192,6 +193,7 @@ message SubscribeLogsReply {
 message ReceiptsFilterRequest {
   bool all_transactions = 1;
   repeated types.H256 transaction_hashes = 2;
+  bool ack = 3; // ask the server to reply filter_applied once it applied this request
 }
 
 message SubscribeReceiptsReply {

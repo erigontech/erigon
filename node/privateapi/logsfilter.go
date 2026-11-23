@@ -93,8 +93,8 @@ func (a *LogsFilterAggregator) removeLogsFilterLocked(filterId uint64, filter *L
 	a.checkEmpty()
 }
 
-// updateLogsFilter applies filterReq and acks it on the stream, under logsFilterLock
-// like every log, so the stream has one sender at a time.
+// updateLogsFilter applies filterReq and, if it asks, acks it on the stream. The ack is
+// sent under logsFilterLock like every log, so the stream has one sender at a time.
 func (a *LogsFilterAggregator) updateLogsFilter(filterId uint64, filterReq *remoteproto.LogsFilterRequest) error {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
@@ -123,6 +123,9 @@ func (a *LogsFilterAggregator) updateLogsFilter(filterId uint64, filterReq *remo
 	}
 	a.addLogsFilters(filter)
 	a.checkEmpty()
+	if !filterReq.GetAck() {
+		return nil
+	}
 	return filter.sender.Send(&remoteproto.SubscribeLogsReply{FilterApplied: true})
 }
 

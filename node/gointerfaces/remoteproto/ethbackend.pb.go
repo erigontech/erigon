@@ -981,6 +981,7 @@ type LogsFilterRequest struct {
 	Addresses     []*typesproto.H160     `protobuf:"bytes,2,rep,name=addresses,proto3" json:"addresses,omitempty"`
 	AllTopics     bool                   `protobuf:"varint,3,opt,name=all_topics,json=allTopics,proto3" json:"all_topics,omitempty"`
 	Topics        []*typesproto.H256     `protobuf:"bytes,4,rep,name=topics,proto3" json:"topics,omitempty"`
+	Ack           bool                   `protobuf:"varint,5,opt,name=ack,proto3" json:"ack,omitempty"` // ask the server to reply filter_applied once it applied this request
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1041,6 +1042,13 @@ func (x *LogsFilterRequest) GetTopics() []*typesproto.H256 {
 		return x.Topics
 	}
 	return nil
+}
+
+func (x *LogsFilterRequest) GetAck() bool {
+	if x != nil {
+		return x.Ack
+	}
+	return false
 }
 
 type SubscribeLogsReply struct {
@@ -1171,6 +1179,7 @@ type ReceiptsFilterRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	AllTransactions   bool                   `protobuf:"varint,1,opt,name=all_transactions,json=allTransactions,proto3" json:"all_transactions,omitempty"`
 	TransactionHashes []*typesproto.H256     `protobuf:"bytes,2,rep,name=transaction_hashes,json=transactionHashes,proto3" json:"transaction_hashes,omitempty"`
+	Ack               bool                   `protobuf:"varint,3,opt,name=ack,proto3" json:"ack,omitempty"` // ask the server to reply filter_applied once it applied this request
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -1217,6 +1226,13 @@ func (x *ReceiptsFilterRequest) GetTransactionHashes() []*typesproto.H256 {
 		return x.TransactionHashes
 	}
 	return nil
+}
+
+func (x *ReceiptsFilterRequest) GetAck() bool {
+	if x != nil {
+		return x.Ack
+	}
+	return false
 }
 
 type SubscribeReceiptsReply struct {
@@ -2809,13 +2825,14 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\x04type\x18\x01 \x01(\x0e2\r.remote.EventR\x04type\"G\n" +
 	"\x0eSubscribeReply\x12!\n" +
 	"\x04type\x18\x01 \x01(\x0e2\r.remote.EventR\x04type\x12\x12\n" +
-	"\x04data\x18\x02 \x01(\fR\x04data\"\xa7\x01\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\"\xb9\x01\n" +
 	"\x11LogsFilterRequest\x12#\n" +
 	"\rall_addresses\x18\x01 \x01(\bR\fallAddresses\x12)\n" +
 	"\taddresses\x18\x02 \x03(\v2\v.types.H160R\taddresses\x12\x1d\n" +
 	"\n" +
 	"all_topics\x18\x03 \x01(\bR\tallTopics\x12#\n" +
-	"\x06topics\x18\x04 \x03(\v2\v.types.H256R\x06topics\"\xaf\x03\n" +
+	"\x06topics\x18\x04 \x03(\v2\v.types.H256R\x06topics\x12\x10\n" +
+	"\x03ack\x18\x05 \x01(\bR\x03ack\"\xaf\x03\n" +
 	"\x12SubscribeLogsReply\x12%\n" +
 	"\aaddress\x18\x01 \x01(\v2\v.types.H160R\aaddress\x12*\n" +
 	"\n" +
@@ -2829,10 +2846,11 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\aremoved\x18\t \x01(\bR\aremoved\x12'\n" +
 	"\x0fblock_timestamp\x18\n" +
 	" \x01(\x04R\x0eblockTimestamp\x12%\n" +
-	"\x0efilter_applied\x18\v \x01(\bR\rfilterApplied\"~\n" +
+	"\x0efilter_applied\x18\v \x01(\bR\rfilterApplied\"\x90\x01\n" +
 	"\x15ReceiptsFilterRequest\x12)\n" +
 	"\x10all_transactions\x18\x01 \x01(\bR\x0fallTransactions\x12:\n" +
-	"\x12transaction_hashes\x18\x02 \x03(\v2\v.types.H256R\x11transactionHashes\"\xcf\a\n" +
+	"\x12transaction_hashes\x18\x02 \x03(\v2\v.types.H256R\x11transactionHashes\x12\x10\n" +
+	"\x03ack\x18\x03 \x01(\bR\x03ack\"\xcf\a\n" +
 	"\x16SubscribeReceiptsReply\x12*\n" +
 	"\n" +
 	"block_hash\x18\x01 \x01(\v2\v.types.H256R\tblockHash\x12!\n" +

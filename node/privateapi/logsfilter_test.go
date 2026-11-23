@@ -150,8 +150,10 @@ func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 		Addresses:    nil,
 		AllTopics:    false,
 		Topics:       nil,
+		Ack:          true,
 	}
 	srv.received <- req1
+	srv.received <- &remoteproto.LogsFilterRequest{}
 
 	go func() {
 		err := agg.subscribeLogs(srv)
@@ -161,7 +163,7 @@ func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 	}()
 
 	<-srv.receiveCompleted
-	require.Equal(t, 1, srv.acks, "each filter request is acked once applied")
+	require.Equal(t, 1, srv.acks, "only a request that asks for an ack is acked")
 
 	// now see if a log would be sent or not
 	lg := createLog()

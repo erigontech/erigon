@@ -128,8 +128,8 @@ func (api *APIImpl) waitForReceipt(ctx context.Context, hash common.Hash, timeou
 		return nil, err
 	}
 
-	// The filter update reaches the server asynchronously and without an ack, so a receipt produced before it
-	// lands is never delivered on the channel. Look the receipt up periodically to cover that window.
+	// A receipt produced before the subscription is applied, or while the receipts stream reconnects, is never
+	// delivered on the channel. Look the receipt up periodically to cover that window.
 	poll := time.NewTicker(receiptPollInterval)
 	defer poll.Stop()
 	for {

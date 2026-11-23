@@ -100,8 +100,8 @@ func (a *ReceiptsFilterAggregator) removeReceiptsFilterLocked(filterId uint64) {
 	a.checkEmpty()
 }
 
-// updateReceiptsFilter applies filterReq and acks it on the stream, under
-// receiptsFilterLock like every receipt, so the stream has one sender at a time.
+// updateReceiptsFilter applies filterReq and, if it asks, acks it on the stream. The ack
+// is sent under receiptsFilterLock like every receipt, so the stream has one sender at a time.
 func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filterId uint64, filterReq *remoteproto.ReceiptsFilterRequest) error {
 	a.receiptsFilterLock.Lock()
 	defer a.receiptsFilterLock.Unlock()
@@ -130,6 +130,9 @@ func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filterId uint64, filterR
 
 	a.addReceiptsFilters(filter)
 	a.checkEmpty()
+	if !filterReq.GetAck() {
+		return nil
+	}
 	return filter.sender.Send(&remoteproto.SubscribeReceiptsReply{FilterApplied: true})
 }
 
