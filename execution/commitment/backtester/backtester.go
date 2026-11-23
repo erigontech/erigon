@@ -22,6 +22,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"runtime"
 	"runtime/pprof"
 	"strings"
 	"time"
@@ -255,7 +256,7 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	}
 	bt.logger.Info("computed commitment", "block", block, "in", time.Since(commitmentStart))
 	pprof.StopCPUProfile()
-	err = stopFgprof()
+	err = stopFgprofProfile(stopFgprof)
 	if err != nil {
 		return fmt.Errorf("failed to stop fgprof: %w", err)
 	}
@@ -336,4 +337,18 @@ func (ri runId) String() string {
 
 func deriveBlockOutputDir(runOutputDir string, block uint64) string {
 	return path.Join(runOutputDir, fmt.Sprintf("block_%d", block))
+}
+
+// stopFgprofProfile works around fgprof v0.9.5, whose stop divides by zero when no sample was taken
+// (a fold shorter than one sampling tick); such a block keeps an empty fgprof file.
+func stopFgprofProfile(stop func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := r.(runtime.Error); !ok || !strings.Contains(e.Error(), "divide by zero") {
+				panic(r)
+			}
+			err = nil
+		}
+	}()
+	return stop()
 }
