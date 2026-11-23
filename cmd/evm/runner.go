@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	goruntime "runtime"
 	"runtime/pprof"
 	"testing"
 	"time"
@@ -131,14 +130,13 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 		stats.BytesAllocated = result.AllocedBytesPerOp()
 		stats.GasUsed = gasUsed
 	} else {
-		var memStatsBefore, memStatsAfter goruntime.MemStats
-		dbg.ReadMemStats(&memStatsBefore)
+		objectsBefore, bytesBefore := dbg.AllocationTotals()
 		startTime := time.Now()
 		output, stats.GasUsed, err = execFunc()
 		stats.Time = time.Since(startTime)
-		dbg.ReadMemStats(&memStatsAfter)
-		stats.Allocs = int64(memStatsAfter.Mallocs - memStatsBefore.Mallocs)
-		stats.BytesAllocated = int64(memStatsAfter.TotalAlloc - memStatsBefore.TotalAlloc)
+		objectsAfter, bytesAfter := dbg.AllocationTotals()
+		stats.Allocs = int64(objectsAfter - objectsBefore)
+		stats.BytesAllocated = int64(bytesAfter - bytesBefore)
 	}
 
 	return output, stats, err

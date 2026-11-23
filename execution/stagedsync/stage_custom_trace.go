@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime"
 	"strings"
 	"time"
 
@@ -208,10 +207,9 @@ Loop:
 		case <-cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).WaitForBuildAndMerge(context.Background()):
 			break Loop // Here we don't quit due to ctx because it's not safe for files.
 		case <-logEvery.C:
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
+			alloc, sys := dbg.MemUsage()
 			// TODO: log progress and list of domains/files
-			logger.Info("[snapshots] Building files", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			logger.Info("[snapshots] Building files", "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 		}
 	}
 
@@ -343,7 +341,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 	fromTxNum, _ := txNumsReader.Min(ctx, tx, fromBlock)
 	prevTxNumLog := fromTxNum
 
-	var m runtime.MemStats
 	if err := exec.CustomTraceMapReduce(ctx, fromBlock, toBlock, exec.TraceConsumerFunc(
 		func(blockResult *exec.BlockResult, result *exec.TxResult, tx kv.TemporalTx) error {
 			if result.Err != nil {
@@ -426,9 +423,9 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 			select {
 			case <-logEvery.C:
 				if prevTxNumLog > 0 {
-					dbg.ReadMemStats(&m)
+					alloc, sys := dbg.MemUsage()
 					txsPerSec := (txTask.TxNum - prevTxNumLog) / uint64(logPeriod.Seconds())
-					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", common.PrettyExact(txTask.BlockNumber()), "tx/s", common.PrettyCounter(txsPerSec), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", common.PrettyExact(txTask.BlockNumber()), "tx/s", common.PrettyCounter(txsPerSec), "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 				}
 				prevTxNumLog = txTask.TxNum
 			default:
