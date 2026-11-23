@@ -42,7 +42,7 @@ func TestDepositUnmarshalJSONRejectsOversizedProof(t *testing.T) {
 func TestDepositUnmarshalJSONRejectsNullFields(t *testing.T) {
 	for _, input := range []string{
 		`{"proof":null,"data":{}}`,
-		`{"proof":[],"data":null}`,
+		`{"data":null}`,
 	} {
 		t.Run(input, func(t *testing.T) {
 			var deposit cltypes.Deposit

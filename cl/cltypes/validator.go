@@ -17,7 +17,6 @@
 package cltypes
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 
@@ -70,34 +69,22 @@ type Deposit struct {
 	Data  *DepositData        `json:"data"`
 }
 
-func isNullJSON(raw json.RawMessage) bool {
-	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
-}
-
 func (d *Deposit) UnmarshalJSON(buf []byte) error {
-	var tmp struct {
-		Proof json.RawMessage `json:"proof"`
-		Data  json.RawMessage `json:"data"`
+	tmp := struct {
+		Proof solid.HashVectorSSZ `json:"proof"`
+		Data  *DepositData        `json:"data"`
+	}{
+		Proof: solid.NewHashVector(DepositProofLength),
+		Data:  new(DepositData),
 	}
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
-	if isNullJSON(tmp.Proof) || isNullJSON(tmp.Data) {
+	if tmp.Proof == nil || tmp.Data == nil {
 		return errors.New("deposit proof or data is null")
 	}
-
-	d.Proof = solid.NewHashVector(33)
-	d.Data = new(DepositData)
-	if len(tmp.Proof) > 0 {
-		if err := json.Unmarshal(tmp.Proof, d.Proof); err != nil {
-			return err
-		}
-	}
-	if len(tmp.Data) > 0 {
-		if err := json.Unmarshal(tmp.Data, d.Data); err != nil {
-			return err
-		}
-	}
+	d.Proof = tmp.Proof
+	d.Data = tmp.Data
 	return nil
 }
 

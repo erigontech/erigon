@@ -92,10 +92,11 @@ func (i *IndexedAttestation) Static() bool {
 
 func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 	var tmp struct {
-		AttestingIndices json.RawMessage `json:"attesting_indices"`
-		Data             json.RawMessage `json:"data"`
-		Signature        common.Bytes96  `json:"signature"`
+		AttestingIndices json.RawMessage        `json:"attesting_indices"`
+		Data             *solid.AttestationData `json:"data"`
+		Signature        common.Bytes96         `json:"signature"`
 	}
+	tmp.Data = &solid.AttestationData{}
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
@@ -108,17 +109,11 @@ func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 	if err != nil {
 		return err
 	}
-	data := &solid.AttestationData{}
-	if len(tmp.Data) > 0 {
-		if isNullJSON(tmp.Data) {
-			return errors.New("indexed attestation data is null")
-		}
-		if err := json.Unmarshal(tmp.Data, data); err != nil {
-			return err
-		}
+	if tmp.Data == nil {
+		return errors.New("indexed attestation data is null")
 	}
 	i.AttestingIndices = solid.NewRawUint64List(limit, indices)
-	i.Data = data
+	i.Data = tmp.Data
 	i.Signature = tmp.Signature
 	return nil
 }

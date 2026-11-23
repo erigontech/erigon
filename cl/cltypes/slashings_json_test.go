@@ -79,19 +79,9 @@ func TestBeaconBodyJSONKeepsValidAttesterSlashingForkLimits(t *testing.T) {
 }
 
 func TestIndexedAttestationJSONRejectsNullData(t *testing.T) {
-	signature := `"signature":"0x` + strings.Repeat("0", 192) + `"`
-	for _, tc := range []struct {
-		name  string
-		input string
-	}{
-		{name: "null", input: `{"attesting_indices":["1"],"data":null,` + signature + `}`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			att := NewIndexedAttestation(clparams.FuluVersion)
+	att := NewIndexedAttestation(clparams.FuluVersion)
 
-			require.ErrorContains(t, json.Unmarshal([]byte(tc.input), att), "data")
-		})
-	}
+	require.ErrorContains(t, json.Unmarshal([]byte(`{"data":null}`), att), "indexed attestation data is null")
 }
 
 func TestProposerSlashingJSONRejectsIncompleteHeaders(t *testing.T) {
