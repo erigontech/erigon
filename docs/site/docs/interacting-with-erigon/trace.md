@@ -163,7 +163,7 @@ A failure inside the EVM, such as a revert or an out-of-gas halt, is reported in
 | --- | --- |
 | `-32602` | Invalid parameters: a malformed value, a missing required parameter or too many parameters; an unknown trace type; the `pending` block tag; `data` and `input` both set and different; a `chainId` that does not match the chain; `maxPriorityFeePerGas` above `maxFeePerGas`; an integer element in a `trace_get` path; a malformed raw transaction; the `trace_filter` errors listed under [trace\_filter](#trace_filter). |
 | `-32001` | The selected block is unknown: a block number above the head, a hash the node does not know, or a `safe` or `finalized` tag that cannot be resolved. Also a known hash that is not canonical, in `trace_replayBlockTransactions` and with `requireCanonical: true` in `trace_call` and `trace_callMany`. |
-| `4444` | History outside the retention window, with the message `old data not available due to pruning: … available from block N`. Also, in `trace_call` and `trace_callMany`, a known hash that is not canonical, without `requireCanonical`: the node keeps state only for canonical blocks. |
+| `4444` | History outside the retention window, with the message `Pruned history unavailable: old data not available due to pruning: … available from block N`. Also, in `trace_call` and `trace_callMany`, a known hash that is not canonical, without `requireCanonical`: the node keeps state only for canonical blocks. |
 | `-38012` | `trace_call`, `trace_callMany`: the fee cap or gas price is below the block base fee. |
 | `-38013` | `trace_call`, `trace_callMany`: the gas limit is below the intrinsic gas. |
 | `-38014` | `trace_call`, `trace_callMany`: the sender cannot pay for the gas and the value. |
