@@ -149,3 +149,31 @@ func TestANewPayloadExecutesTheBlockOnceItsPreExecIsAbandoned(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status, ur.ValidationError)
 }
+
+// A block newPayload executed because nothing was pre-executing it is post-executed: a pre-exec round for that height
+// on the same parent is refused, so the block is never executed both ways.
+func TestAPreExecRoundIsRefusedForABlockNewPayloadAlreadyExecuted(t *testing.T) {
+	replica := newRoundHarness(t)
+	proposer := newRoundHarnessWithKeys(t, replica.keys)
+	head, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
+	require.NoError(t, err)
+
+	first := [][][]byte{{replica.signed(0, 0, nil, 200_000, counterInit)}}
+	paramsP, inP := proposer.attrs(head)
+	proposed1 := proposer.sealRounds(paramsP, inP, first)
+
+	status, err := insertBlocks(replica.ctx, replica.m.ExecModule, []*types.Block{proposed1})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	vr, err := validateChain(replica.ctx, replica.m.ExecModule, proposed1)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
+
+	_, in := replica.attrs(head)
+	_, _, _, err = replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in, first[0])
+	require.ErrorIs(t, err, execmodule.ErrPostExecuted)
+
+	ur, err := forkChoiceTo(replica.ctx, replica.m.ExecModule, proposed1.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status, ur.ValidationError)
+}

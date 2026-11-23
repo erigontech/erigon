@@ -63,6 +63,9 @@ import (
 
 var ErrMissingChainSegment = errors.New("missing chain segment")
 
+// ErrPostExecuted refuses a pre-exec round for a block newPayload has already executed.
+var ErrPostExecuted = errors.New("block already executed by newPayload")
+
 func makeErrMissingChainSegment(blockHash common.Hash) error {
 	return errors.Join(ErrMissingChainSegment, errors.New("block hash: "+blockHash.String()))
 }
@@ -300,6 +303,7 @@ type ExecModule struct {
 	// marks our own valid block INVALID. Accept-by-hash keeps the architecture's single-execution property.
 	// Guarded by pendingBlockMu. Pruned as blocks canonicalize (updateForkChoice).
 	sealedByHash map[common.Hash]*types.Header
+	postExecuted map[uint64]*types.Header
 
 	// flash is the exec-owned in-progress flashblock body (see flashBodyState / PreExecuteFlashblock): the
 	// execution half maintains the filtered block body here so the driver only streams unfiltered txs.
@@ -697,7 +701,37 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 	defer e.semaphore.Release(1)
 	e.semTake("ValidateChain")
 	defer e.semDrop()
-	return e.validateChain(ctx, block, false)
+	res, err := e.validateChain(ctx, block, false)
+	if err == nil && res.ValidationStatus == ExecutionStatusSuccess {
+		e.recordPostExecuted(block.Header())
+	}
+	return res, err
+}
+
+func (e *ExecModule) recordPostExecuted(h *types.Header) {
+	e.pendingBlockMu.Lock()
+	defer e.pendingBlockMu.Unlock()
+	if e.postExecuted == nil {
+		e.postExecuted = make(map[uint64]*types.Header)
+	}
+	e.postExecuted[h.Number.Uint64()] = h
+	for n := range e.postExecuted {
+		if n+postExecutedKept < h.Number.Uint64() {
+			delete(e.postExecuted, n)
+		}
+	}
+}
+
+const postExecutedKept = 64
+
+// postExecutedOn returns the block newPayload executed at number on parent, if any.
+func (e *ExecModule) postExecutedOn(number uint64, parent common.Hash) *types.Header {
+	e.pendingBlockMu.Lock()
+	defer e.pendingBlockMu.Unlock()
+	if h := e.postExecuted[number]; h != nil && h.ParentHash == parent {
+		return h
+	}
+	return nil
 }
 
 // awaitPreExecSeal returns this node's sealed block for hash, first waiting out a pre-exec still building that height:

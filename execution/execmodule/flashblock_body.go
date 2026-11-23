@@ -302,6 +302,9 @@ func (e *ExecModule) preExecuteFlashblockLocked(ctx context.Context, inputs Flas
 // supplied transactions were ALREADY accepted into this block and are being replayed under corrected
 // attributes, so they are restored verbatim instead of being re-filtered.
 func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs FlashblockInputs, newTxRLPs [][]byte, restore bool) (*types.RawBody, common.Hash, ValidationResult, error) {
+	if h := e.postExecutedOn(inputs.Number, inputs.Parent); h != nil {
+		return nil, common.Hash{}, ValidationResult{}, fmt.Errorf("%w: block %d %x", ErrPostExecuted, inputs.Number, h.Hash())
+	}
 	if restore {
 		return e.reopenFlashblockLocked(ctx, inputs, newTxRLPs)
 	}
