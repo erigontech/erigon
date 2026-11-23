@@ -28,14 +28,17 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -105,6 +108,12 @@ type announceInfo struct {
 	size     uint32
 }
 
+type txnChange struct {
+	txn       *TxnSlot
+	sender    [20]byte
+	direction remoteproto.Direction
+}
+
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction
 // messages. It tries to "prime" the sentry with StatusData message containing given
 // genesis hash and list of forks, but with zero max block and total difficulty
@@ -114,6 +123,7 @@ type Fetch struct {
 	pool                     Pool            // Transaction pool implementation
 	db                       kv.RwDB
 	stateChangesClient       StateChangesClient
+	pendingTxnChanges        []txnChange     // Owned by ConnectCore; retained across subscriptions until applied
 	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
 	connectWg                sync.WaitGroup  // tracks goroutines spawned by ConnectCore/ConnectSentries
 	stateChangesParseCtx     *TxnParseContext
@@ -781,7 +791,9 @@ func (f *Fetch) ConnectSentries() {
 }
 
 func (f *Fetch) ConnectCore() {
+	f.pool.MarkStateStale()
 	f.connectWg.Go(func() {
+		retryLogs := rate.NewLimiter(rate.Every(time.Minute), 1)
 		for {
 			select {
 			case <-f.ctx.Done():
@@ -789,15 +801,15 @@ func (f *Fetch) ConnectCore() {
 			default:
 			}
 			if err := f.handleStateChanges(f.ctx, f.stateChangesClient); err != nil {
-				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-					select {
-					case <-f.ctx.Done():
-						return
-					case <-time.After(3 * time.Second):
-					}
+				if errors.Is(err, errRefreshStateSnapshot) {
 					continue
 				}
-				f.logger.Warn("[txpool.handleStateChanges]", "err", err)
+				if !grpcutil.IsEndOfStream(err) && (!grpcutil.IsRetryLater(err) || retryLogs.Allow()) {
+					f.logger.Warn("[txpool.handleStateChanges]", "err", err)
+				}
+			}
+			if common.Sleep(f.ctx, 3*time.Second) != nil {
+				return
 			}
 		}
 	})
@@ -971,6 +983,11 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 				seenNewBlocks = newBlocks
 			}
 			if _, seen := seenLRU.Get(req.Data); seen {
+				// A repeated blob broadcast from another peer is still a protocol violation.
+				if req.Id == sentryproto.MessageId_TRANSACTIONS_66 && hasBlobTxn(req.Data) {
+					f.logger.Debug("[txpool] penalizing peer for broadcast blob tx", "peer", req.PeerId)
+					f.penalizePeer(streamCtx, sentryClient, req.PeerId)
+				}
 				if f.wg != nil {
 					f.wg.Done()
 				}
@@ -1119,6 +1136,11 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		txns := TxnSlots{}
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66:
+			if hasBlobTxn(req.Data) {
+				f.logger.Debug("[txpool] penalizing peer for broadcast blob tx", "peer", req.PeerId)
+				f.penalizePeer(ctx, sentryClient, req.PeerId)
+				return nil
+			}
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 				if _, err := ParseTransactions(req.Data, 0, parseContext, &txns, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
@@ -1169,9 +1191,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		}
 		// Post-parse peer-behaviour checks. checkPooledTxnAnnouncement only
 		// applies to the POOLED_TRANSACTIONS_66 (pull) path since TRANSACTIONS_66
-		// has no prior announcement to compare against; checkBlobSidecar applies
-		// to both because a peer can ship a blob-tx wrapper with mismatched
-		// commitments via either message and must be kicked either way.
+		// has no prior announcement to compare against.
 		for i := range txns.Txns {
 			if req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
 				if err := f.checkPooledTxnAnnouncement(req.PeerId, txns.Txns[i]); err != nil {
@@ -1195,6 +1215,72 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 	}
 
 	return nil
+}
+
+// frameTxnBodyFields is the number of fields in a bare frame transaction body:
+// chain id, nonce keys, nonce, sender, frames, signatures, fees and blob
+// versioned hashes.
+const frameTxnBodyFields = 8
+
+// hasBlobTxn reports whether a Transactions payload contains a blob transaction
+// or a frame transaction that carries blobs, wrapped or bare. Malformed payloads, and payloads
+// over maxTransactionsPerPacket, report false and are left to the regular parser.
+func hasBlobTxn(payload []byte) bool {
+	pos, _, err := rlp.ParseList(payload, 0)
+	if err != nil {
+		return false
+	}
+	for count := 0; pos < len(payload); count++ {
+		if count == maxTransactionsPerPacket {
+			return false
+		}
+		dataPos, dataLen, isList, err := rlp.Prefix(payload, pos)
+		if err != nil {
+			return false
+		}
+		if !isList && dataPos > pos && dataLen > 0 && isBlobEnvelope(payload[dataPos:dataPos+dataLen]) {
+			return true
+		}
+		pos = dataPos + dataLen
+	}
+	return false
+}
+
+// isBlobEnvelope reports whether a typed transaction envelope carries blobs:
+// any type-3 transaction, or a frame transaction that is either wrapped (its
+// first list element is the inner body, as in ParseTransaction's frame wrapper
+// check) or bare with a nonempty BlobVersionedHashes, its last body field.
+func isBlobEnvelope(txBytes []byte) bool {
+	switch txBytes[0] {
+	case BlobTxnType:
+		return true
+	case FrameTxnType:
+		bodyPos, bodyLen, err := rlp.ParseList(txBytes, 1)
+		if err != nil || bodyLen == 0 {
+			return false
+		}
+		if txBytes[bodyPos] >= 0xc0 {
+			return true
+		}
+		var lastLen int
+		var lastIsList bool
+		fields := 0
+		for pos, end := bodyPos, bodyPos+bodyLen; pos < end; fields++ {
+			// A bare frame body has exactly frameTxnBodyFields fields; leave
+			// anything longer to the regular parser.
+			if fields == frameTxnBodyFields {
+				return false
+			}
+			dataPos, dataLen, isList, err := rlp.Prefix(txBytes, pos)
+			if err != nil {
+				return false
+			}
+			lastLen, lastIsList = dataLen, isList
+			pos = dataPos + dataLen
+		}
+		return lastIsList && lastLen > 0
+	}
+	return false
 }
 
 func (f *Fetch) receivePeerLoop(sentryClient sentryproto.SentryClient) {
@@ -1312,22 +1398,46 @@ func (f *Fetch) dropAlternate(peer fetchPeer) {
 	}
 }
 
+var errRefreshStateSnapshot = errors.New("refresh state snapshot")
+
 func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClient) error {
+	// Any return ends this subscription, including a clean stream end. Keep the pool
+	// stale until a new subscription restores a usable state view.
+	defer f.pool.MarkStateStale()
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stream, err := client.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: true, WithTransactions: true}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}
-	for req, err := stream.Recv(); ; req, err = stream.Recv() {
+	var refreshTimer *time.Timer
+	for {
+		batch, err := stream.Recv()
+		if refreshTimer != nil {
+			if !refreshTimer.Stop() {
+				// The callback may still cancel the stream after Recv returns.
+				// Keep transaction and activation observations, but recover state through a fresh subscription.
+				if batch != nil {
+					f.collectStateChangeTxns(batch)
+					f.pool.RetainBogotaActivation(batch)
+				}
+				return errRefreshStateSnapshot
+			}
+			refreshTimer = nil
+		}
 		if err != nil {
 			return err
 		}
-		if req == nil {
+		if batch == nil {
 			return nil
 		}
-		if err := f.handleStateChangesRequest(ctx, req); err != nil {
-			f.logger.Warn("[fetch] onNewBlock", "err", err)
+		if err := f.handleStateChangesRequest(ctx, batch); err != nil {
+			if !errors.Is(err, errStateViewSuperseded) {
+				return err
+			}
+			// A newer commit may have no notification. Drain queued batches, but
+			// reconnect for a fresh snapshot if the stream stays idle.
+			refreshTimer = time.AfterFunc(time.Second, cancel)
 		}
 
 		if f.wg != nil { // to help tests
@@ -1337,52 +1447,86 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 }
 
 func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.StateChangeBatch) error {
-	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
+	f.collectStateChangeTxns(req)
+	for {
+		applyErr := f.applyStateChanges(ctx, req)
+		if applyErr == nil {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if errors.Is(applyErr, errStateViewSuperseded) {
+			return applyErr
+		}
+		if !errors.Is(applyErr, context.Canceled) {
+			f.logger.Warn("[fetch] onNewBlock", "err", applyErr)
+		}
+		// Retry the failed batch: recovery must not depend on another block arriving.
+		if err := common.Sleep(ctx, time.Second); err != nil {
+			return err
+		}
+	}
+}
+
+func (f *Fetch) collectStateChangeTxns(req *remoteproto.StateChangeBatch) {
+	changes := f.pendingTxnChanges
+	// A transaction can be mined and unwound within one batch. Pool membership
+	// follows its last direction, while state deltas must retain their full order.
+	lastChange := make(map[[32]byte]int, len(changes))
+	for i, change := range changes {
+		lastChange[change.txn.IDHash] = i
+	}
 	for _, change := range req.ChangeBatch {
-		if change.Direction == remoteproto.Direction_FORWARD {
-			for i := range change.Txs {
-				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
-					utx := &TxnSlot{}
-					sender := make([]byte, 20)
-					_, err := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
-					if err != nil {
-						return err
-					}
-					minedTxns.Append(utx, sender, false)
-					return nil
-				}); err != nil && !errors.Is(err, context.Canceled) {
-					txnType, _ := PeekTransactionType(change.Txs[i])
+		if change.Direction != remoteproto.Direction_FORWARD && change.Direction != remoteproto.Direction_UNWIND {
+			continue
+		}
+		for i, rlp := range change.Txs {
+			parsed := txnChange{txn: &TxnSlot{}, direction: change.Direction}
+			if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
+				_, err := parseContext.ParseTransaction(rlp, 0, parsed.txn, parsed.sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
+				return err
+			}); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					txnType, _ := PeekTransactionType(rlp)
 					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
-					continue // 1 txn handling error must not stop batch processing
 				}
+				continue // 1 txn handling error must not stop batch processing
 			}
-		} else if change.Direction == remoteproto.Direction_UNWIND {
-			for i := range change.Txs {
-				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
-					utx := &TxnSlot{}
-					sender := make([]byte, 20)
-					_, err := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
-					if err != nil {
-						return err
-					}
-					if utx.Txn.GetBlobGas() != 0 {
-						unwindBlobTxns.Append(utx, sender, false)
-					} else {
-						unwindTxns.Append(utx, sender, false)
-					}
-					return nil
-				}); err != nil && !errors.Is(err, context.Canceled) {
-					txnType, _ := PeekTransactionType(change.Txs[i])
-					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
-					continue // 1 txn handling error must not stop batch processing
-				}
-			}
+			lastChange[parsed.txn.IDHash] = len(changes)
+			changes = append(changes, parsed)
 		}
 	}
 
-	if err := f.pool.OnNewBlock(ctx, req, unwindTxns, unwindBlobTxns, minedTxns); err != nil && !errors.Is(err, context.Canceled) {
+	pending := changes[:0]
+	for i, change := range changes {
+		if lastChange[change.txn.IDHash] == i {
+			pending = append(pending, change)
+		}
+	}
+	clear(changes[len(pending):])
+	f.pendingTxnChanges = pending
+}
+
+func (f *Fetch) applyStateChanges(ctx context.Context, req *remoteproto.StateChangeBatch) error {
+	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
+	for _, change := range f.pendingTxnChanges {
+		// The pool mutates slot metadata, so each attempt needs its own copy.
+		txn := *change.txn
+		switch {
+		case change.direction == remoteproto.Direction_FORWARD:
+			minedTxns.Append(&txn, change.sender[:], false)
+		case change.txn.Txn.GetBlobGas() != 0:
+			unwindBlobTxns.Append(&txn, change.sender[:], false)
+		default:
+			unwindTxns.Append(&txn, change.sender[:], false)
+		}
+	}
+
+	if err := f.pool.OnNewBlock(ctx, req, unwindTxns, unwindBlobTxns, minedTxns); err != nil {
 		return err
 	}
+	f.pendingTxnChanges = nil
 	f.newBlocks.Add(1)
 	return nil
 }

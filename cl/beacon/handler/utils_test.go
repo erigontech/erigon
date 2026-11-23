@@ -81,6 +81,10 @@ var handlerChainFixtures [clparams.ElectraVersion + 1]struct {
 	err    error
 }
 
+func testNetworkConfig() *clparams.NetworkConfig {
+	return &clparams.NetworkConfig{GossipMaxSize: clparams.NetworkConfigs[chainspec.MainnetChainID].GossipMaxSize}
+}
+
 func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger, useRealSyncDataMgr bool) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData synced_data.SyncedData, fcu *mock_services2.ForkChoiceStorageMock, vp *validator_params.ValidatorParams) {
 	ctrl := gomock.NewController(t)
 	bcfg := clparams.MainnetBeaconConfig
@@ -254,7 +258,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	vp = validator_params.NewValidatorParams()
 	h = NewApiHandler(
 		logger,
-		&clparams.NetworkConfig{},
+		testNetworkConfig(),
 		ethClock,
 		&bcfg,
 		db,
@@ -293,6 +297,6 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		nil,
 		nil,
 	) // TODO: add tests
-	h.Init()
+	h.o.Do(h.init)
 	return
 }

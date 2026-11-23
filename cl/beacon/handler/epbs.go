@@ -1035,6 +1035,17 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
+	if err := signedEnvelope.ValidateForPersistence(a.beaconChainCfg); err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	gossipMaxSize := gossip.MaxUncompressedSize(gossip.TopicNameExecutionPayload, a.beaconChainCfg, a.netConfig)
+	if size := uint64(signedEnvelope.EncodingSizeSSZ()); size > gossipMaxSize {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf(
+			"execution payload envelope encoding size %d exceeds gossip max %d", size, gossipMaxSize,
+		)).WriteTo(w)
+		return
+	}
 	receivedAt := time.Now()
 	if !blobDataIncluded && contents == nil {
 		contents, err = a.pendingLocalExecutionPayloadEnvelopeContents(signedEnvelope)
@@ -1151,6 +1162,9 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
+	}
+	if contents == nil {
+		a.emitters.NotifyEnvelopeArrived(signedEnvelope.Message.BeaconBlockRoot)
 	}
 	if validation == BlockPublishingValidationConsensusAndEquivocation {
 		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
@@ -1630,10 +1644,8 @@ func (a *ApiHandler) publishAndStoreExecutionPayloadEnvelopeColumns(storeCtx, pu
 	if len(columns) != 0 && a.columnStorage == nil {
 		return errors.Join(publishErr, fmt.Errorf("%w: data column storage unavailable", errExecutionPayloadEnvelopeIntegration))
 	}
-	for _, column := range columns {
-		if err := a.columnStorage.WriteColumnSidecars(storeCtx, work.blockRoot, int64(column.Index), column); err != nil {
-			return errors.Join(publishErr, fmt.Errorf("%w: %w", errExecutionPayloadEnvelopeIntegration, err))
-		}
+	if err := a.writeColumnSidecarsBatched(storeCtx, work.slot, work.blockRoot, columns); err != nil {
+		return errors.Join(publishErr, fmt.Errorf("%w: %w", errExecutionPayloadEnvelopeIntegration, err))
 	}
 	for _, bundle := range work.bundles {
 		a.blobBundles.Add(bundle.Commitment, bundle)

@@ -2054,11 +2054,10 @@ func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int) err
 	return nil
 }
 
-// previousBranch returns the record stored at the folding row's prefix, which the
-// update is merged onto. It falls back to a read only for a row this trie never
-// unfolded itself — a mounted row 0, seeded from the base.
 func (hph *HexPatriciaHashed) previousBranch(row int, updateKey []byte) ([]byte, error) {
 	if !hph.branchBefore[row] {
+		// A new branch has no merge base, even if storage still contains a
+		// branch whose deletion is pending among the deferred writes.
 		return nil, nil
 	}
 	if len(hph.rowBranch[row]) > 0 {
@@ -2452,6 +2451,14 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
+func (hph *HexPatriciaHashed) RootExtension() (ext, hash []byte) {
+	r := &hph.root
+	if r.accountAddrLen != 0 || r.storageAddrLen != 0 || r.extLen == 0 || r.hashLen != length.Hash {
+		return nil, nil
+	}
+	return bytes.Clone(r.extension[:r.extLen]), bytes.Clone(r.hash[:r.hashLen])
+}
+
 // unfoldKeyPath drives hph.unfold in a loop until the trie is unfolded
 // far enough that the cell at hashedKey can be updated — i.e. until
 // needUnfolding returns 0. This is the per-key traversal primitive
@@ -2727,7 +2734,6 @@ func (hph *HexPatriciaHashed) witnessNodeSet(ctx context.Context, updates *Updat
 
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error) {
 	var (
-		m  runtime.MemStats
 		ki uint64
 
 		updatesCount = updates.Size()
@@ -2745,7 +2751,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	hph.metrics.Reset()
 	hph.metrics.AddRoundKeys(updatesCount)
 	roundStart := time.Now()
-	defer func() { observeRound(hph.metrics, roundStart) }()
+	defer func() { ObserveRound(hph.metrics, roundStart) }()
 
 	defer func() { logEvery.Stop() }()
 
@@ -2767,11 +2773,11 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 					Metrics:     hph.metrics.AsValues(),
 				})
 			} else {
-				dbg.ReadMemStats(&m)
+				alloc, sys := dbg.MemUsage()
 				keysPerSec := uint64(float64(ki) / time.Since(start).Seconds())
 				log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
 					append(append([]any{"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)), "keys/s", common.PrettyCounter(keysPerSec)},
-						hph.metrics.logMetrics()...), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))...)
+						hph.metrics.logMetrics()...), "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))...)
 			}
 		default:
 		}

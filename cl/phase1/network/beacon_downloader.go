@@ -168,6 +168,7 @@ var (
 	forwardBeaconProbeTimeout    = 21 * time.Second
 	forwardBeaconFallbackDelay   = 5 * time.Second
 	forwardBeaconResponsePoll    = 10 * time.Millisecond
+	beaconAPIClient              = &http.Client{Timeout: 10 * time.Second}
 )
 
 const maxConcurrentForwardBeaconRequests = 2
@@ -1028,7 +1029,7 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 	}
 
 	results := make([]slotResult, count)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := beaconAPIClient
 	sem := make(chan struct{}, 8) // limit concurrent requests
 	var wg sync.WaitGroup
 	requestCtx, cancel := context.WithCancel(ctx)
@@ -1202,7 +1203,7 @@ func fetchEnvelopesFromBeaconAPI(
 	}
 
 	results := make([]envResult, len(toFetch))
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := beaconAPIClient
 	sem := make(chan struct{}, 8)
 	var wg sync.WaitGroup
 

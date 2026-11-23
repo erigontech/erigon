@@ -58,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	mock_services "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -1700,11 +1701,11 @@ func testPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T, 
 
 	var columnsWritten atomic.Int32
 	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
-	columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), common.Hash(blockRoot), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error {
-			columnsWritten.Add(1)
+	columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), common.Hash(blockRoot), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+			columnsWritten.Add(int32(len(sidecars)))
 			return nil
-		}).Times(int(handler.beaconChainCfg.NumberOfColumns))
+		})
 	handler.columnStorage = columnStorage
 	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
 		if columnsWritten.Load() != int32(handler.beaconChainCfg.NumberOfColumns) {
@@ -4631,6 +4632,118 @@ func TestPostExecutionPayloadEnvelopeRejectsTooManyWithdrawalsBeforeAdmission(t 
 			require.Contains(t, recorder.Body.String(), "invalid execution payload withdrawals")
 			require.False(t, fcu.ValidateExecutionPayloadEnvelopeForGossipCalled)
 		})
+	}
+}
+
+func TestPostExecutionPayloadEnvelopeRejectsOversizedEncodingBeforeAdmission(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	envelope := validTestSignedExecutionPayloadEnvelope(&cfg)
+	jsonBody, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	depositCount := int(clparams.MaxChunkSize) / solid.SizeDepositRequest
+	deposits := envelope.Message.ExecutionRequests.Deposits
+	for range depositCount {
+		deposits.Append(&solid.DepositRequest{})
+	}
+	require.NoError(t, envelope.ValidateForConfig(&cfg))
+	sszBody, err := ssz2.MarshalSSZ(nil, envelope.Message, envelope.Signature[:])
+	require.NoError(t, err)
+	require.Greater(t, uint64(len(sszBody)), clparams.MaxChunkSize)
+
+	// Fully marshalled, the JSON exceeds the request body cap, so the zero deposits are written as {}.
+	emptyDeposits := []byte(`"deposits":[]`)
+	require.Equal(t, 1, bytes.Count(jsonBody, emptyDeposits))
+	compactDeposits := `"deposits":[` + strings.Repeat("{},", depositCount-1) + `{}]`
+	jsonBody = bytes.Replace(jsonBody, emptyDeposits, []byte(compactDeposits), 1)
+
+	for _, tc := range []struct {
+		contentType string
+		body        []byte
+	}{
+		{"application/json", jsonBody},
+		{"application/octet-stream", sszBody},
+	} {
+		for _, canonical := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/canonical=%t", tc.contentType, canonical), func(t *testing.T) {
+				_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				fcu.ClaimExecutionPayloadEnvelopeForGossipFunc = func(context.Context, common.Hash, uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+					t.Fatal("oversized envelope reached gossip admission")
+					return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, nil
+				}
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(tc.body))
+				request.Header.Set("Content-Type", tc.contentType)
+				request.Header.Set("Eth-Blob-Data-Included", "false")
+				request.Header.Set("Eth-Consensus-Version", "gloas")
+				recorder := httptest.NewRecorder()
+				handler.postEthV1BeaconExecutionPayloadEnvelope(recorder, request, canonical)
+
+				require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+				require.Contains(t, recorder.Body.String(), "execution payload envelope encoding size")
+				require.False(t, fcu.ValidateExecutionPayloadEnvelopeForGossipCalled)
+			})
+		}
+	}
+}
+
+func TestPostExecutionPayloadEnvelopeBoundsEncodingByGossipLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	envelope := validTestSignedExecutionPayloadEnvelope(&cfg)
+	jsonBody, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	sszBody, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	size := uint64(len(sszBody))
+	require.LessOrEqual(t, size, clparams.MaxChunkSize)
+
+	contents := cltypes.NewSignedExecutionPayloadEnvelopeContents(&cfg, 0)
+	contents.SignedExecutionPayloadEnvelope = envelope
+	contentsJSONBody, err := json.Marshal(contents)
+	require.NoError(t, err)
+	contentsSSZBody, err := contents.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		contentType      string
+		body             []byte
+		blobDataIncluded string
+		canonical        bool
+	}{
+		{"application/json", jsonBody, "false", true},
+		{"application/json", jsonBody, "false", false},
+		{"application/octet-stream", sszBody, "false", true},
+		{"application/octet-stream", sszBody, "false", false},
+		{"application/json", contentsJSONBody, "true", true},
+		{"application/octet-stream", contentsSSZBody, "true", true},
+	} {
+		for _, gossipMaxSize := range []uint64{size - 1, size} {
+			name := fmt.Sprintf("%s/blobDataIncluded=%s/canonical=%t/gossipMaxSize=%d", tc.contentType, tc.blobDataIncluded, tc.canonical, gossipMaxSize)
+			t.Run(name, func(t *testing.T) {
+				_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				handler.netConfig = &clparams.NetworkConfig{GossipMaxSize: gossipMaxSize}
+				require.Equal(t, gossipMaxSize, gossip.MaxUncompressedSize(gossip.TopicNameExecutionPayload, handler.beaconChainCfg, handler.netConfig))
+				var claims atomic.Int32
+				fcu.ClaimExecutionPayloadEnvelopeForGossipFunc = func(context.Context, common.Hash, uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+					claims.Add(1)
+					return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, errors.New("admission reached")
+				}
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(tc.body))
+				request.Header.Set("Content-Type", tc.contentType)
+				request.Header.Set("Eth-Blob-Data-Included", tc.blobDataIncluded)
+				request.Header.Set("Eth-Consensus-Version", "gloas")
+				recorder := httptest.NewRecorder()
+				handler.postEthV1BeaconExecutionPayloadEnvelope(recorder, request, tc.canonical)
+
+				if gossipMaxSize < size {
+					require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+					require.Contains(t, recorder.Body.String(), "exceeds gossip max")
+					require.Zero(t, claims.Load())
+				} else {
+					require.NotContains(t, recorder.Body.String(), "exceeds gossip max")
+					require.Equal(t, int32(1), claims.Load())
+				}
+				require.False(t, fcu.ValidateExecutionPayloadEnvelopeForGossipCalled)
+			})
+		}
 	}
 }
 

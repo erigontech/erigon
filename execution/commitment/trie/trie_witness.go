@@ -1,21 +1,11 @@
 package trie
 
-import "errors"
-
 func (t *Trie) ExtractWitness(trace bool, rl RetainDecider) (*Witness, error) {
 	var rd RetainDecider
 	if rl != nil {
 		rd = rl
 	}
 	return extractWitnessFromRootNode(t.RootNode, trace, rd)
-}
-
-func (t *Trie) ExtractWitnessForPrefix(prefix []byte, trace bool, rl RetainDecider) (*Witness, error) {
-	foundNode, _, found, _ := t.getNode(prefix)
-	if !found {
-		return nil, errors.New("no data found for given prefix")
-	}
-	return extractWitnessFromRootNode(foundNode, trace, rl)
 }
 
 // extractWitnessFromRootNode extracts witness for subtrie starting from the specified root

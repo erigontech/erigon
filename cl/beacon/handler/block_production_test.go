@@ -434,18 +434,155 @@ func TestStoreDataColumnSidecars(t *testing.T) {
 	root := common.Hash{1}
 	column := &cltypes.DataColumnSidecar{Index: 7}
 
-	storage.EXPECT().WriteColumnSidecars(gomock.Any(), root, int64(7), column).Return(nil)
-	require.NoError(t, handler.storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{column}))
+	storage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), root, []*cltypes.DataColumnSidecar{column}).Return(nil)
+	require.NoError(t, handler.storeDataColumnSidecars(context.Background(), 1, root, []*cltypes.DataColumnSidecar{column}))
 }
 
 func TestStoreDataColumnSidecarsRejectsInvalidInput(t *testing.T) {
 	root := common.Hash{1}
-	require.NoError(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), root, nil))
-	require.Error(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{{}}))
-	require.Error(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{nil}))
+	require.NoError(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), 1, root, nil))
+	require.NoError(t, (&ApiHandler{}).writeColumnSidecarsBatched(context.Background(), 1, root, nil))
+	require.Error(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), 1, root, []*cltypes.DataColumnSidecar{{}}))
+	require.Error(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), 1, root, []*cltypes.DataColumnSidecar{nil}))
 	require.Error(t, (&ApiHandler{columnStorage: blob_storage_mock.NewMockDataColumnStorage(gomock.NewController(t))}).storeDataColumnSidecars(
-		context.Background(), root, []*cltypes.DataColumnSidecar{{Index: math.MaxUint64}},
+		context.Background(), 1, root, []*cltypes.DataColumnSidecar{{Index: math.MaxUint64}},
 	))
+}
+
+func TestStoreDataColumnSidecarsWritesNothingWhenALaterSidecarIsInvalid(t *testing.T) {
+	root := common.Hash{1}
+	valid := &cltypes.DataColumnSidecar{Index: 7}
+	for name, invalid := range map[string]*cltypes.DataColumnSidecar{
+		"nil":                  nil,
+		"index above MaxInt64": {Index: math.MaxInt64 + 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			noWritesExpected := blob_storage_mock.NewMockDataColumnStorage(gomock.NewController(t))
+			handler := &ApiHandler{columnStorage: noWritesExpected}
+
+			err := handler.storeDataColumnSidecars(t.Context(), 1, root, []*cltypes.DataColumnSidecar{valid, invalid})
+
+			require.Error(t, err)
+		})
+	}
+}
+
+var errInjectedColumnFsFailure = errors.New("injected column filesystem failure")
+
+// faultyColumnFs fails the failRenameAt-th Rename once, and every Create of a path ending in
+// one of failCreateSuffixes.
+type faultyColumnFs struct {
+	afero.Fs
+	renames            atomic.Int32
+	createFailures     atomic.Int32
+	failRenameAt       int32
+	failCreateSuffixes []string
+}
+
+func (f *faultyColumnFs) Rename(oldname, newname string) error {
+	if f.renames.Add(1) == f.failRenameAt {
+		return errInjectedColumnFsFailure
+	}
+	return f.Fs.Rename(oldname, newname)
+}
+
+func (f *faultyColumnFs) Create(name string) (afero.File, error) {
+	if slices.ContainsFunc(f.failCreateSuffixes, func(suffix string) bool { return strings.HasSuffix(name, suffix) }) {
+		return nil, fmt.Errorf("%w: create failure %d", errInjectedColumnFsFailure, f.createFailures.Add(1))
+	}
+	return f.Fs.Create(name)
+}
+
+type realColumnStoreFixture struct {
+	handler *ApiHandler
+	events  chan *beaconevents.EventStream
+	warns   func() string
+}
+
+func newRealColumnStoreFixture(t *testing.T, fs afero.Fs) *realColumnStoreFixture {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	emitters := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, cfg.NumberOfColumns)
+	subscription := emitters.Operation().Subscribe(events)
+	t.Cleanup(subscription.Unsubscribe)
+
+	return &realColumnStoreFixture{
+		handler: &ApiHandler{columnStorage: blob_storage.NewDataColumnStore(fs, &cfg, emitters)},
+		events:  events,
+		warns:   captureProductionLogs(t),
+	}
+}
+
+func (f *realColumnStoreFixture) eventIndices() []uint64 {
+	var indices []uint64
+	for len(f.events) > 0 {
+		event := <-f.events
+		if event.Event == beaconevents.OpDataColumnSidecar {
+			indices = append(indices, event.Data.(*beaconevents.DataColumnSidecarData).Index)
+		}
+	}
+	return indices
+}
+
+func (f *realColumnStoreFixture) savedColumns(t *testing.T, slot uint64, root common.Hash) []uint64 {
+	t.Helper()
+	saved, err := f.handler.columnStorage.GetSavedColumnIndex(t.Context(), slot, root)
+	require.NoError(t, err)
+	slices.Sort(saved)
+	return saved
+}
+
+func testColumnSidecars(slot uint64, count uint64) []*cltypes.DataColumnSidecar {
+	sidecars := make([]*cltypes.DataColumnSidecar, count)
+	for i := range sidecars {
+		sidecars[i] = cltypes.NewDataColumnSidecar()
+		sidecars[i].Index = uint64(i)
+		sidecars[i].SignedBlockHeader = &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: slot}}
+	}
+	return sidecars
+}
+
+func TestStoreDataColumnSidecarsKeepsEveryColumnWhenTheBatchRenameFailsOnce(t *testing.T) {
+	const slot, columns = 1000, 8
+	root := common.Hash{1}
+	f := newRealColumnStoreFixture(t, &faultyColumnFs{Fs: afero.NewMemMapFs(), failRenameAt: 1})
+
+	require.NoError(t, f.handler.storeDataColumnSidecars(t.Context(), slot, root, testColumnSidecars(slot, columns)))
+
+	all := []uint64{0, 1, 2, 3, 4, 5, 6, 7}
+	require.Equal(t, all, f.savedColumns(t, slot, root))
+	for _, index := range all {
+		_, err := f.handler.columnStorage.ReadColumnSidecarByColumnIndex(t.Context(), slot, root, int64(index))
+		require.NoError(t, err, "column %d", index)
+	}
+	indices := f.eventIndices()
+	slices.Sort(indices)
+	require.Equal(t, all, indices, "one data_column_sidecar event per column")
+	warns := f.warns()
+	require.NotContains(t, warns, "\n", "exactly one warning")
+	require.Contains(t, warns, "batched data column write failed")
+	require.Contains(t, warns, "slot=1000")
+	require.Contains(t, warns, "columnCount=8")
+}
+
+func TestStoreDataColumnSidecarsReturnsTheWriteErrorAfterTheStoredPrefix(t *testing.T) {
+	const slot, columns, failingColumn = 1000, 8, 5
+	root := common.Hash{1}
+	f := newRealColumnStoreFixture(t, &faultyColumnFs{Fs: afero.NewMemMapFs(), failCreateSuffixes: []string{".pack.tmp", fmt.Sprintf("_%d.tmp", failingColumn)}})
+
+	err := f.handler.storeDataColumnSidecars(t.Context(), slot, root, testColumnSidecars(slot, columns))
+
+	require.ErrorIs(t, err, errInjectedColumnFsFailure)
+	require.ErrorContains(t, err, "create failure 1", "the batch error")
+	require.ErrorContains(t, err, "create failure 2", "the single write error")
+	require.ErrorContains(t, err, "after a failed batch write")
+	stored := []uint64{0, 1, 2, 3, 4}
+	require.Equal(t, stored, f.savedColumns(t, slot, root))
+	indices := f.eventIndices()
+	slices.Sort(indices)
+	require.Equal(t, stored, indices)
+	require.Empty(t, f.warns(), "the failing write is logged by the block service, not here")
 }
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
@@ -2671,13 +2808,24 @@ type publishedColumnsFixture struct {
 
 type hookedColumnStorage struct {
 	blob_storage.DataColumnStorage
-	hook func(write func() error) error
+	hook         func(write func() error) error
+	singleWrites atomic.Int32
+}
+
+func (s *hookedColumnStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	return s.hooked(func() error {
+		return s.DataColumnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars)
+	})
 }
 
 func (s *hookedColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
-	write := func() error {
+	s.singleWrites.Add(1)
+	return s.hooked(func() error {
 		return s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
-	}
+	})
+}
+
+func (s *hookedColumnStorage) hooked(write func() error) error {
 	if s.hook == nil {
 		return write()
 	}
@@ -2849,6 +2997,7 @@ func TestBroadcastBlockStoresAllColumnsInArchiveMode(t *testing.T) {
 			require.NoError(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip))
 
 			require.Len(t, f.storedColumns(t), int(f.handler.beaconChainCfg.NumberOfColumns))
+			require.Zero(t, f.columns.singleWrites.Load(), "the columns must be stored in one batch")
 		})
 	}
 }
@@ -2919,10 +3068,9 @@ func TestBroadcastGloasBlockGossipsColumnsWhileColumnWriteBlocks(t *testing.T) {
 	blocked, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	f.columns.hook = func(write func() error) error {
-		err := write()
 		once.Do(func() { close(blocked) })
 		<-release
-		return err
+		return write()
 	}
 	done := make(chan error, 1)
 	go func() { done <- f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip) }()
@@ -2931,7 +3079,7 @@ func TestBroadcastGloasBlockGossipsColumnsWhileColumnWriteBlocks(t *testing.T) {
 		require.NoError(t, <-done)
 	}()
 
-	requireClosed(t, blocked, "no column was written")
+	requireClosed(t, blocked, "the column write did not start")
 	blockedAt := time.Now()
 	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
 	require.Less(t, time.Since(blockedAt), publishedBlockStoreWaitBeforeColumns/2, "column gossip must not wait for the column writes")
@@ -3078,6 +3226,7 @@ func TestBroadcastBlockExactReplayCompletesMissingDataSidecars(t *testing.T) {
 				handler.blobStoage = blobStorage
 			} else {
 				columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
+				columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage unavailable")).AnyTimes()
 				columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage unavailable")).AnyTimes()
 				handler.columnStorage = columnStorage
 			}
@@ -3164,6 +3313,75 @@ func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
 	require.ErrorContains(t, err, "unsupported content type")
 }
 
+func TestPublishBlockContentType(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	for _, route := range []struct {
+		name    string
+		version clparams.StateVersion
+		v2      bool
+	}{
+		{"v1/fulu", clparams.FuluVersion, false},
+		{"v2/fulu", clparams.FuluVersion, true},
+		{"v2/gloas", clparams.GloasVersion, true},
+	} {
+		var block interface{ EncodeSSZ([]byte) ([]byte, error) }
+		if route.version >= clparams.GloasVersion {
+			block = cltypes.NewSignedBeaconBlock(&cfg, route.version)
+		} else {
+			block = cltypes.NewDenebSignedBeaconBlock(&cfg, route.version)
+		}
+		jsonBody, err := json.Marshal(block)
+		require.NoError(t, err)
+		sszBody, err := block.EncodeSSZ(nil)
+		require.NoError(t, err)
+		for _, tc := range []struct {
+			contentType string
+			body        []byte
+			wantCode    int
+		}{
+			{"application/json", jsonBody, 0},
+			{"application/json; charset=utf-8", jsonBody, 0},
+			{"", jsonBody, 0},
+			{"application/octet-stream", sszBody, 0},
+			{"Application/Octet-Stream; foo=bar", sszBody, 0},
+			{"text/plain", jsonBody, http.StatusUnsupportedMediaType},
+			{"application/octet-stream; bad", sszBody, http.StatusUnsupportedMediaType},
+		} {
+			name := tc.contentType
+			if name == "" {
+				name = "no content type"
+			}
+			t.Run(route.name+"/"+name, func(t *testing.T) {
+				blockService := network_services_mock.NewMockBlockService(gomock.NewController(t))
+				decoded := errors.New("decoded block reached gossip validation")
+				if tc.wantCode == 0 {
+					blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(decoded)
+				}
+				h := &ApiHandler{beaconChainCfg: &cfg, blockService: blockService}
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(tc.body))
+				if tc.contentType != "" {
+					req.Header.Set("Content-Type", tc.contentType)
+				}
+				req.Header.Set("Eth-Consensus-Version", route.version.String())
+
+				publish := h.PostEthV1BeaconBlocks
+				if route.v2 {
+					publish = h.PostEthV2BeaconBlocks
+				}
+				_, err := publish(httptest.NewRecorder(), req)
+				if tc.wantCode == 0 {
+					require.ErrorIs(t, err, decoded)
+					return
+				}
+				var endpointErr *beaconhttp.EndpointError
+				require.ErrorAs(t, err, &endpointErr)
+				require.Equal(t, tc.wantCode, endpointErr.Code)
+				require.ErrorContains(t, err, "unsupported content type")
+			})
+		}
+	}
+}
+
 func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	builderClient := builder_mock.NewMockBuilderClient(ctrl)
@@ -3244,14 +3462,14 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 				require.NoError(t, err)
 				return encoded
 			},
-			wantErr: "missing execution payload header",
+			wantErr: "blinded beacon body contains null execution payload header",
 		},
 		{
 			name: "omitted execution payload header",
 			mutate: func(block *cltypes.SignedBlindedBeaconBlock) {
 				block.Block.Body.ExecutionPayload = nil
 			},
-			wantErr: "missing execution payload header",
+			wantErr: "blinded beacon body contains null execution payload header",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3274,8 +3492,38 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 
 			_, err = h.publishBlindedBlocks(req, 2)
 			require.ErrorContains(t, err, tc.wantErr)
+			var endpointErr *beaconhttp.EndpointError
+			require.ErrorAs(t, err, &endpointErr)
+			require.Equal(t, http.StatusBadRequest, endpointErr.Code)
 		})
 	}
+}
+
+func TestPublishBlindedBlocksRejectsNullAttestations(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	h := &ApiHandler{
+		beaconChainCfg: &clparams.MainnetBeaconConfig,
+		builderClient:  builderClient,
+	}
+	block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	var request map[string]any
+	require.NoError(t, json.Unmarshal(body, &request))
+	request["message"].(map[string]any)["body"].(map[string]any)["attestations"] = nil
+	body, err = json.Marshal(request)
+	require.NoError(t, err)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+
+	require.NotPanics(t, func() {
+		_, err = h.publishBlindedBlocks(req, 2)
+	})
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusBadRequest, endpointErr.Code)
 }
 
 func TestValidateBuilderPayload(t *testing.T) {
@@ -4359,8 +4607,10 @@ func TestProcessProducedBlockSelectsExternalBidWithoutLegacyBuilderBoost(t *test
 	require.Equal(t, fixture.externalBid.Message.BlockHash, selectedState.GetLatestExecutionPayloadBid().BlockHash)
 }
 
-func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
-	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
+// newGloasProductionHandler returns a handler that produces a block on the fixture's head: the
+// execution engine builds `builds` payloads worth localValueWei each.
+func newGloasProductionHandler(t *testing.T, fixture *gloasBidSelectionFixture, builds int, localValueWei *big.Int) (*ApiHandler, *forkchoice_mock.ForkChoiceStorageMock) {
+	t.Helper()
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg = fixture.block.Cfg
 	startBuilderHandoffWindow(handler, fixture.block.Slot)
@@ -4400,7 +4650,7 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 	syncPool := sync_pool_mock.NewMockSyncContributionPool(gomock.NewController(t))
 	syncPool.EXPECT().GetSyncAggregate(gomock.Any(), gomock.Any()).
 		Return(cltypes.NewSyncAggregateWithSize(int(handler.beaconChainCfg.SyncCommitteeSize/8)), nil).
-		Times(2)
+		Times(builds)
 	handler.syncMessagePool = syncPool
 
 	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
@@ -4417,23 +4667,22 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), clparams.GloasVersion).
 		Return([]byte{1}, nil).
-		Times(2)
+		Times(builds)
 	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
-		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil).
-		Times(2)
+		Return(payload, &engine_types.BlobsBundle{}, nil, localValueWei, nil).
+		Times(builds)
 	handler.engine = engine
 	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
+	return handler, forkchoiceStore
+}
+
+func TestPostEthV4ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
+	handler, _ := newGloasProductionHandler(t, &fixture, 2, big.NewInt(1))
 
 	produce := func() *cltypes.BeaconBlock {
-		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
-			"/eth/v3/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true&graffiti=0x01",
-			fixture.block.Slot,
-			(common.Bytes96{}).String(),
-		), http.NoBody)
-		routeContext := chi.NewRouteContext()
-		routeContext.URLParams.Add("slot", fmt.Sprint(fixture.block.Slot))
-		request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
-		response, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), request)
+		request := postV4BlockRequest(t.Context(), fixture.block.Slot, false, "&graffiti=0x01", v4RequestBody(0, 100))
+		response, err := handler.PostEthV4ValidatorBlock(httptest.NewRecorder(), request)
 		require.NoError(t, err)
 		producedBlock, ok := response.Data.(*cltypes.BeaconBlock)
 		require.True(t, ok)
@@ -4460,7 +4709,7 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 	require.True(t, found)
 }
 
-// produceAcrossAHeadChange runs GetEthV3ValidatorBlock while the head changes during the wait for
+// produceAcrossAHeadChange runs PostEthV4ValidatorBlock while the head changes during the wait for
 // the parked envelope of the old head. The new head's state is published only if publish is set,
 // and the request is cancelled while production waits for that state if cancel is set.
 func produceAcrossAHeadChange(t *testing.T, publish, cancel bool) (*beaconhttp.BeaconResponse, error, common.Hash) {
@@ -4563,15 +4812,8 @@ func produceAcrossAHeadChange(t *testing.T, publish, cancel bool) (*beaconhttp.B
 	handler.engine = engine
 	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
 
-	request := httptest.NewRequestWithContext(requestCtx, http.MethodGet, fmt.Sprintf(
-		"/eth/v3/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true",
-		fixture.block.Slot,
-		(common.Bytes96{}).String(),
-	), http.NoBody)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("slot", fmt.Sprint(fixture.block.Slot))
-	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
-	response, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), request)
+	request := postV4BlockRequest(requestCtx, fixture.block.Slot, false, "", v4RequestBody(0, 100))
+	response, err := handler.PostEthV4ValidatorBlock(httptest.NewRecorder(), request)
 	require.True(t, headChanged.Load(), "production waited for the parked envelope")
 	if publish {
 		require.NoError(t, <-published)
@@ -6067,26 +6309,28 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 	}
 
 	t.Run("falls back after cap and memoizes wait", func(t *testing.T) {
-		handler, fcu, slot, produceCalls := setup(t)
-		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
-			return forkchoice.ForkChoiceNode{}, false
-		}
+		synctest.Test(t, func(t *testing.T) {
+			handler, fcu, slot, produceCalls := setup(t)
+			fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+				return forkchoice.ForkChoiceNode{}, false
+			}
 
-		start := time.Now()
-		status, data := requestAttestationData(t, handler, t.Context(), slot)
-		elapsed := time.Since(start)
-		require.Equal(t, http.StatusOK, status)
-		require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
-		require.GreaterOrEqual(t, elapsed, waitCap)
-		require.Less(t, elapsed, 2*waitCap+25*time.Millisecond)
-		require.Equal(t, 1, *produceCalls)
+			start := time.Now()
+			status, data := requestAttestationData(t, handler, t.Context(), slot)
+			elapsed := time.Since(start)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
+			require.GreaterOrEqual(t, elapsed, waitCap)
+			require.Less(t, elapsed, 2*waitCap+25*time.Millisecond)
+			require.Equal(t, 1, *produceCalls)
 
-		start = time.Now()
-		status, data = requestAttestationData(t, handler, t.Context(), slot)
-		require.Equal(t, http.StatusOK, status)
-		require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
-		require.Less(t, time.Since(start), waitCap)
-		require.Equal(t, 2, *produceCalls)
+			start = time.Now()
+			status, data = requestAttestationData(t, handler, t.Context(), slot)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
+			require.Less(t, time.Since(start), waitCap)
+			require.Equal(t, 2, *produceCalls)
+		})
 	})
 
 	t.Run("cached fallback does not read state", func(t *testing.T) {
@@ -6114,38 +6358,42 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 	})
 
 	t.Run("uses fork choice when lock becomes free", func(t *testing.T) {
-		handler, fcu, slot, produceCalls := setup(t)
-		handler.attestationDataImportWait = defaultAttestationDataImportWait
-		var attempts atomic.Int64
-		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
-			return forkchoice.ForkChoiceNode{Root: forkChoiceRoot}, attempts.Add(1) >= 4
-		}
-		fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
-			return solid.AttestationData{Slot: slot, BeaconBlockRoot: headRoot}, true
-		}
+		synctest.Test(t, func(t *testing.T) {
+			handler, fcu, slot, produceCalls := setup(t)
+			handler.attestationDataImportWait = defaultAttestationDataImportWait
+			var attempts atomic.Int64
+			fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+				return forkchoice.ForkChoiceNode{Root: forkChoiceRoot}, attempts.Add(1) >= 4
+			}
+			fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+				return solid.AttestationData{Slot: slot, BeaconBlockRoot: headRoot}, true
+			}
 
-		start := time.Now()
-		status, data := requestAttestationData(t, handler, t.Context(), slot)
-		elapsed := time.Since(start)
-		require.Equal(t, http.StatusOK, status)
-		require.Equal(t, forkChoiceRoot, data.BeaconBlockRoot)
-		require.GreaterOrEqual(t, elapsed, 2*attestationDataImportPollInterval)
-		require.Less(t, elapsed, defaultAttestationDataImportWait/2)
-		require.Zero(t, *produceCalls)
+			start := time.Now()
+			status, data := requestAttestationData(t, handler, t.Context(), slot)
+			elapsed := time.Since(start)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, forkChoiceRoot, data.BeaconBlockRoot)
+			require.GreaterOrEqual(t, elapsed, 2*attestationDataImportPollInterval)
+			require.Less(t, elapsed, defaultAttestationDataImportWait/2)
+			require.Zero(t, *produceCalls)
+		})
 	})
 
 	t.Run("request cancellation stops the wait", func(t *testing.T) {
-		handler, fcu, slot, _ := setup(t)
-		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
-			return forkchoice.ForkChoiceNode{}, false
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		time.AfterFunc(15*time.Millisecond, cancel)
+		synctest.Test(t, func(t *testing.T) {
+			handler, fcu, slot, _ := setup(t)
+			fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+				return forkchoice.ForkChoiceNode{}, false
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			time.AfterFunc(15*time.Millisecond, cancel)
 
-		start := time.Now()
-		status, _ := requestAttestationData(t, handler, ctx, slot)
-		require.Equal(t, http.StatusInternalServerError, status)
-		require.Less(t, time.Since(start), waitCap)
+			start := time.Now()
+			status, _ := requestAttestationData(t, handler, ctx, slot)
+			require.Equal(t, http.StatusInternalServerError, status)
+			require.Less(t, time.Since(start), waitCap)
+		})
 	})
 }
 
@@ -6852,7 +7100,8 @@ func TestGetEthV1ValidatorAttestationDataPinsOnlyFromElectra(t *testing.T) {
 func TestGetEthV3ValidatorBlockRejectsFarFutureSlot(t *testing.T) {
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
-	handler := &ApiHandler{ethClock: clock}
+	cfg := clparams.MainnetBeaconConfig
+	handler := &ApiHandler{ethClock: clock, beaconChainCfg: &cfg}
 
 	slot := fmt.Sprint(uint64(math.MaxUint64))
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
@@ -6874,4 +7123,8 @@ func TestCheckBlockProductionSlot(t *testing.T) {
 	require.NoError(t, checkBlockProductionSlot(current+1, current), "a validator may ask for the next slot")
 	require.Error(t, checkBlockProductionSlot(current+2, current))
 	require.Error(t, checkBlockProductionSlot(math.MaxUint64, current))
+}
+
+func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock, validation BlockPublishingValidation) error {
+	return a.broadcastBlockWithIntegrationWait(ctx, blk, validation, true)
 }

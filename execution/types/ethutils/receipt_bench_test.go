@@ -54,7 +54,7 @@ func BenchmarkMarshalReceipt(b *testing.B) {
 		}
 		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 
-		rpcReceipts := RPCReceipts{MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, true, true)}
+		rpcReceipts := RPCReceipts{MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, true)}
 
 		// The served path: the pooled stream a reply writes into, through the hand-written
 		// encoder. The reflect arm is what it replaces.
@@ -85,7 +85,7 @@ func BenchmarkMarshalReceipt(b *testing.B) {
 		b.Run(fmt.Sprintf("logs=%d/build", logCount), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				if MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, true, true) == nil {
+				if MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, true) == nil {
 					b.Fatal("nil")
 				}
 			}

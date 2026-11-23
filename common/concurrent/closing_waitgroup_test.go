@@ -19,7 +19,7 @@ package concurrent
 import (
 	"sync/atomic"
 	"testing"
-	"time"
+	"testing/synctest"
 )
 
 func TestClosingWaitGroup_BeginCloseIdempotent(t *testing.T) {
@@ -65,42 +65,45 @@ func TestClosingWaitGroup_TryGo(t *testing.T) {
 // Wait must not return until every registered goroutine has called Done — this
 // is the join guarantee Close relies on before tearing down shared resources.
 func TestClosingWaitGroup_WaitJoinsInFlight(t *testing.T) {
-	var g ClosingWaitGroup
-	if !g.TryAdd() {
-		t.Fatal("TryAdd should succeed")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		var g ClosingWaitGroup
+		if !g.TryAdd() {
+			t.Fatal("TryAdd should succeed")
+		}
 
-	release := make(chan struct{})
-	var doneRan atomic.Bool
-	go func() {
-		<-release
-		doneRan.Store(true)
-		g.Done()
-	}()
+		release := make(chan struct{})
+		var doneRan atomic.Bool
+		go func() {
+			<-release
+			doneRan.Store(true)
+			g.Done()
+		}()
 
-	g.BeginClose()
+		g.BeginClose()
 
-	waited := make(chan struct{})
-	go func() {
-		g.Wait()
-		close(waited)
-	}()
+		waited := make(chan struct{})
+		go func() {
+			g.Wait()
+			close(waited)
+		}()
 
-	// The goroutine is in-flight (Done not yet called), so Wait must still block.
-	select {
-	case <-waited:
-		t.Fatal("Wait returned before the in-flight goroutine called Done")
-	case <-time.After(20 * time.Millisecond):
-	}
+		// The goroutine is in-flight (Done not yet called), so Wait must still block.
+		synctest.Wait()
+		select {
+		case <-waited:
+			t.Fatal("Wait returned before the in-flight goroutine called Done")
+		default:
+		}
 
-	close(release)
-
-	select {
-	case <-waited:
-	case <-time.After(time.Second):
-		t.Fatal("Wait did not return after Done")
-	}
-	if !doneRan.Load() {
-		t.Fatal("Wait returned before the in-flight goroutine finished")
-	}
+		close(release)
+		synctest.Wait()
+		select {
+		case <-waited:
+		default:
+			t.Fatal("Wait did not return after Done")
+		}
+		if !doneRan.Load() {
+			t.Fatal("Wait returned before the in-flight goroutine finished")
+		}
+	})
 }

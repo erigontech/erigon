@@ -17,9 +17,15 @@
 package state
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // A background build and merge can overlap; editing must stay disabled until
@@ -102,4 +108,107 @@ func TestWorkersCfgKeepsOnlyTheNewestRequest(t *testing.T) {
 	w.lockEditing()
 	w.unlockEditing()
 	require.Equal(t, 6, w.getCollateAndBuild())
+}
+
+func TestCheckSnapshotsCompatibilityV3RecordsRejectsLegacyCommitment(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+
+	require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "convert the datadir with `integration commitment convert --v3`, or roll back an interrupted conversion with `integration commitment convert --restore`; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if the history of accounts, storage, code or commitment was pruned")
+}
+
+func TestCheckSnapshotsCompatibilityV3RecordsIgnoresConvertBackups(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+
+	dirs := datadir.New(t.TempDir())
+	backup := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backup, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(backup, "v2.0-commitment.0-1.kv"), nil, 0o644))
+
+	require.NoError(t, CheckSnapshotsCompatibility(dirs))
+}
+
+func TestCheckMixedCommitmentFilesRejectsMixedMajors(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		legacy string
+		v3     string
+		advice string
+	}{
+		{name: "domain data", legacy: "v2.0-commitment.0-1.kv", v3: "v3.0-commitment.1-2.kv", advice: "`integration commitment convert --restore`"},
+		{name: "history data", legacy: "v2.0-commitment.0-1.v", v3: "v3.0-commitment.1-2.v", advice: "`integration commitment convert --restore`"},
+		{name: "legacy domain, v3 history", legacy: "v2.0-commitment.0-1.kv", v3: "v3.0-commitment.1-2.v", advice: "finish the conversion with `integration commitment convert --v3 --no-history`"},
+		{name: "v3 domain, legacy history", legacy: "v2.0-commitment.0-1.v", v3: "v3.0-commitment.1-2.kv", advice: "`integration commitment convert --restore`"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			legacyDir, v3Dir := dirs.SnapDomain, dirs.SnapDomain
+			if filepath.Ext(test.legacy) == ".v" {
+				legacyDir = dirs.SnapHistory
+			}
+			if filepath.Ext(test.v3) == ".v" {
+				v3Dir = dirs.SnapHistory
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(legacyDir, test.legacy), nil, 0o644))
+			require.NoError(t, os.WriteFile(filepath.Join(v3Dir, test.v3), nil, 0o644))
+			require.ErrorContains(t, CheckMixedCommitmentFiles(dirs), "mixed major versions")
+			err := CheckSnapshotsCompatibility(dirs)
+			require.ErrorContains(t, err, test.advice)
+			require.ErrorContains(t, err, "or run `erigon seg reset` and restart erigon")
+			require.NotContains(t, err.Error(), "`integration commitment convert --v3`")
+		})
+	}
+}
+
+func TestCheckSnapshotsCompatibilityV3RecordsRequiresFlag(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+
+	require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "run erigon with --experimental.commitment-v3 (other tools: ERIGON_COMMITMENT_V3=true), or roll back an interrupted conversion with `integration commitment convert --restore`")
+}
+
+func TestOpenRefusesMixedCommitmentVersions(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.1-2.kv"), nil, 0o644))
+
+	agg, err := NewTest(dirs).SanityOldNaming().Open(t.Context())
+	if err == nil {
+		agg.Close()
+	}
+	require.ErrorContains(t, err, "mixed major versions")
+}
+
+func TestOpenRefusesPendingExecReset(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, markExecResetPending(dirs))
+
+	agg, err := NewTest(dirs).SanityOldNaming().Open(t.Context())
+	if err == nil {
+		agg.Close()
+	}
+	require.ErrorContains(t, err, "stage_exec --reset")
+
+	require.NoError(t, CompleteExecReset(dirs, log.New()))
+	agg, err = NewTest(dirs).SanityOldNaming().Open(t.Context())
+	require.NoError(t, err)
+	agg.Close()
+	require.NoDirExists(t, filepath.Join(dirs.Snap, "backup"))
+}
+
+func TestCheckExecResetDoneRecognizesLegacyMarker(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	backupRoot := filepath.Join(dirs.Snap, "backup")
+	require.NoError(t, os.MkdirAll(backupRoot, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(backupRoot, ".restore_v3_reset_pending"), nil, 0o644))
+
+	require.ErrorContains(t, CheckExecResetDone(dirs), "stage_exec --reset")
+	require.NoError(t, CompleteExecReset(dirs, log.New()))
+	require.NoError(t, CheckExecResetDone(dirs))
+	require.NoDirExists(t, backupRoot)
 }

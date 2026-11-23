@@ -21,6 +21,7 @@ import (
 	"context"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -35,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
-	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/privateapi"
@@ -72,21 +72,29 @@ func TestFramePoolConsumedNonceReply(t *testing.T) {
 		{name: "keyed", key: uint256.Int{1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, logger := t.Context(), log.New()
+			ctx, cancel := context.WithCancel(t.Context())
+			logger := log.New()
 			backend := &countingFrameValidationServer{ETHBACKENDServer: privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications, m.BlockReader, logger, nil, cfg)}
 			poolDB := mdbxtest.NewTestPoolDB(t)
+			stateChanges := direct.NewStateDiffClientDirect(m.Notifications.StateChangesConsumer.(remoteproto.KVServer))
 			pool, err := txpool.New(ctx, make(chan txpool.Announcements, 1), poolDB, m.DB, txpoolcfg.DefaultConfig,
-				kvcache.NewLatestBatchCache(), cfg, nil, nil, func() {}, nil, direct.NewEthBackendClientDirect(backend), logger, txpool.WithFeeCalculator(nil))
+				kvcache.NewLatestBatchCache(), cfg, nil, stateChanges, func() {}, nil, direct.NewEthBackendClientDirect(backend), logger)
 			require.NoError(t, err)
-			require.NoError(t, pool.OnNewBlock(ctx, &remoteproto.StateChangeBatch{
-				BlockGasLimit: genesis.GasLimit,
-				ChangeBatch:   []*remoteproto.StateChange{{BlockHash: gointerfaces.ConvertHashToH256(m.Genesis.Hash())}},
-			}, txpool.TxnSlots{}, txpool.TxnSlots{}, txpool.TxnSlots{}))
+			runDone := make(chan error, 1)
+			go func() { runDone <- pool.Run(ctx) }()
+			t.Cleanup(func() {
+				cancel()
+				require.ErrorIs(t, <-runDone, context.Canceled)
+			})
+			require.Eventually(t, pool.Started, 5*time.Second, time.Millisecond)
 			frame := &types.FrameTransaction{
 				NonceKeys: []uint256.Int{tc.key}, ChainID: *cfg.ChainID, SenderAddress: sender,
 				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
-				Fees:   types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
 			}
+			if tc.key.IsZero() {
+				frame.NonceKeys = nil
+			}
+			frame.Fees.MaxFee.SetUint64(10 * common.GWei * frame.GetGasLimit())
 			var encoded bytes.Buffer
 			require.NoError(t, frame.MarshalBinary(&encoded))
 			server := txpool.NewGrpcServer(ctx, pool, poolDB, nil, *cfg.ChainID, logger)

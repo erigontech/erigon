@@ -45,22 +45,24 @@
 #                                              export EVM_BIN to the race-built
 #                                              binary; otherwise -race
 #                                              detection doesn't fire.
-#   blocktests-devnet-race-amsterdam-parallel
-#                                              race-detector variants filtered
-#                                              to the Amsterdam fork only.
+#   blocktests-devnet-race-{amsterdam,amsterdam-to-bogota}-parallel
+#                                              Amsterdam and its transition to Bogota.
 #   zkevm-witness                              zkevm execution-witness conformance
 #                                              (eest_zkevm corpus) via the zkevmtest
 #                                              runner; compares debug_executionWitness
 #                                              (canonical) per block.
 #   zkevm-witness-race                         race-detector variant of the above over
 #                                              the whole corpus (run via evm.race).
-#   Every shard runs with parallel commitment; the manifest pins it through
-#   commitment-parallel. Execution is parallel in every shard.
+#   zkevm-witness-v3                           zkevm-witness on serial commitment v3.
+#   Every other shard runs with parallel commitment; the manifest pins the mode
+#   through commitment-parallel and commitment-v3. Execution is parallel in
+#   every shard.
 #
 # Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
-# is decided here (not by the binary, which always exits 0): the shard fails
-# if no tests ran (unexpected — fixture path bug) or if observed failures
-# exceed EEST_SPEC_MAX_FAILURES.
+# is decided here from the JSON (exit 1 only means a test failed): the shard
+# fails if evm exits 2 (some input could not run), if no tests ran
+# (unexpected — fixture path bug) or if observed failures exceed
+# EEST_SPEC_MAX_FAILURES.
 #
 # Env overrides:
 #   EEST_SPEC_MAX_FAILURES   - failure budget; CI sets via matrix include:
@@ -116,17 +118,19 @@ shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '
 	.[] | select(.shard == $s)
 	| if (."commitment-parallel" | type) != "boolean"
 		then error("shard \($s) must define boolean commitment-parallel")
-		else "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel")\t\(."no-ramdisk" // false)\t\(."expected-tests" // 0)\t\(."evm-timeout-minutes" // 0)\t\(.run // "")"
+		else "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel")\t\(."commitment-v3" // false)\t\(."no-ramdisk" // false)\t\(."expected-tests" // 0)\t\(."evm-timeout-minutes" // 0)\t\(.run // "")"
 	end')
 if [[ -z "$shard_row" ]]; then
 	echo "shard $shard not found in $manifest" >&2
 	exit 2
 fi
-IFS=$'\t' read -r default_workers default_max commitment_parallel shard_no_ramdisk expected_tests evm_timeout_minutes run_regex <<<"$shard_row"
+IFS=$'\t' read -r default_workers default_max commitment_parallel commitment_v3 shard_no_ramdisk expected_tests evm_timeout_minutes run_regex <<<"$shard_row"
 # Always set ERIGON_COMMITMENT_PARALLEL explicitly (true or false) so the shard's
 # commitment mode is pinned to the manifest, independent of whatever
 # statecfg.ExperimentalParallelCommitment defaults to at runtime.
 export ERIGON_COMMITMENT_PARALLEL="$commitment_parallel"
+unset COMMITMENT_V3
+export ERIGON_COMMITMENT_V3="$commitment_v3"
 
 # Strip "-parallel" / "-sequential" suffix for case-arm routing — both variants
 # share the same fixture path / regex as the parent shard; only the
@@ -239,8 +243,8 @@ cleanup() {
 trap cleanup EXIT
 
 # Linux: do NOT auto-create a ramdisk. tools/create-ramdisk uses sudo mount
-# and never unmounts; CI gets the env var pre-set via the setup-erigon
-# action's ramdisk: true input. Local Linux users can opt in by exporting
+# and never unmounts; CI gets the env var pre-set by the test-eest-spec
+# workflow. Local Linux users can opt in by exporting
 # ERIGON_EXECUTION_TESTS_TMPDIR or TMPDIR=/dev/shm.
 # Shards with no-ramdisk: true in the manifest skip the Darwin auto-ramdisk too:
 # their datadirs are few and long-lived, so tmpfs buys nothing — and the 150m
@@ -262,19 +266,15 @@ fi
 
 # Don't fail on most non-zero exits — the runners report all results via JSON
 # regardless, and we want to inspect the JSON to drive the pass/fail decision
-# (crashes surface as missing/truncated JSON below). The one exception is exit
-# code 66: the Go race runtime's "data race detected" signal, emitted even when
-# the run completes and the JSON parses clean, so it must be checked explicitly.
-# The grep filter strips any init-time log lines (e.g. dbg.envLookup's
-# "[WARN] [env]" message when ERIGON_COMMITMENT_PARALLEL is set fires before cmd/evm
-# sets the log handler, and the default log handler writes to stdout) so jq
-# sees only JSON.
+# (crashes surface as missing/truncated JSON below). The exceptions are exit
+# code 66, the Go race runtime's "data race detected" signal, emitted even when
+# the run completes and the JSON parses clean, and exit code 2, which drops the
+# tests of any input evm could not run.
 for path in "${paths[@]}"; do
 	echo "running: $evm_bin $cmd ${extra[*]:-} --workers $workers --jsonout $path"
 	raw_file=$(mktemp)
 	raw_files+=("$raw_file")
-	part_file=$(mktemp)
-	part_files+=("$part_file")
+	part_files+=("$raw_file")
 	rc=0
 	if (( evm_timeout_minutes > 0 )); then
 		# A hung run would otherwise sit silent until the job timeout and leave no trace.
@@ -300,7 +300,11 @@ for path in "${paths[@]}"; do
 		echo "ERROR: data race detected (race runtime exit code 66); see WARNING: DATA RACE in the log above" >&2
 		exit 1
 	fi
-	grep -v '^\[[A-Z][A-Z]*\]' "$raw_file" > "$part_file"
+	# Exit 2 means some input could not run, so its tests are missing from the JSON.
+	if (( rc == 2 )); then
+		echo "ERROR: evm could not run all of $path (exit code 2); see the log above" >&2
+		exit 1
+	fi
 done
 jq -s 'add' "${part_files[@]}" > "$result_file"
 

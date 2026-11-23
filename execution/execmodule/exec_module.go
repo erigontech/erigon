@@ -17,6 +17,7 @@
 package execmodule
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -50,7 +51,6 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -60,8 +60,6 @@ import (
 )
 
 var ErrMissingChainSegment = errors.New("missing chain segment")
-
-var inMemHistoryReads = dbg.EnvBool("ERIGON_IN_MEM_HISTORY", true)
 
 func makeErrMissingChainSegment(blockHash common.Hash) error {
 	return errors.Join(ErrMissingChainSegment, errors.New("block hash: "+blockHash.String()))
@@ -487,20 +485,10 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 		return nil
 	}
 
-	if err := e.hook.BeforeRun(tx, true); err != nil {
-		return err
-	}
-
 	if err := ensureReadAheadSuspended(); err != nil {
 		return fmt.Errorf("suspend read-ahead: %w", err)
 	}
-	if err := e.pipelineExecutor.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
-		return err
-	}
-	if err := e.pipelineExecutor.RunUnwind(sd, tx); err != nil {
-		return err
-	}
-	return nil
+	return e.pipelineExecutor.UnwindForValidation(sd, tx, unwindPoint)
 }
 
 const nextForkBanner = `
@@ -527,38 +515,45 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 	return e.validateChain(ctx, block, false)
 }
 
-func (e *ExecModule) ValidateChainAndView(ctx context.Context, block *types.Block, wait time.Duration, fn BlockStateView) (ValidationResult, error) {
+func (e *ExecModule) ValidateChainAndView(ctx context.Context, block *types.Block, wait time.Duration, fn BlockStateView) (ValidationResult, func() error, error) {
 	blockHash := block.Hash()
 	valid := ValidationResult{ValidationStatus: ExecutionStatusSuccess, LatestValidHash: blockHash}
-	if committed, err := e.viewCommittedBlock(ctx, blockHash, fn); err != nil || committed {
-		return valid, err
+	if committed, view, err := e.viewCommittedBlock(ctx, blockHash, block.NumberU64(), fn); err != nil || committed {
+		return valid, view, err
 	}
 	acquireCtx, cancel := context.WithTimeout(ctx, wait)
 	err := e.semaphore.Acquire(acquireCtx, 1)
 	cancel()
 	if err != nil {
 		// A forkchoice update is answered before its commit, which can land while the module stays busy.
-		if committed, err := e.viewCommittedBlock(ctx, blockHash, fn); err != nil || committed {
-			return valid, err
+		if committed, view, err := e.viewCommittedBlock(ctx, blockHash, block.NumberU64(), fn); err != nil || committed {
+			return valid, view, err
 		}
 		e.logger.Trace("ethereumExecutionModule.ValidateChainAndView: ExecutionStatus_Busy")
-		return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil
+		return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil, nil
 	}
 	defer e.semaphore.Release(1)
-	if held, err := e.viewRetainedTip(ctx, blockHash, fn); err != nil || held {
-		return valid, err
+	if held, view, err := e.viewRetainedTip(ctx, blockHash, fn); err != nil || held {
+		return valid, view, err
 	}
-	if committed, err := e.viewCommittedBlock(ctx, blockHash, fn); err != nil || committed {
-		return valid, err
+	if committed, view, err := e.viewCommittedBlock(ctx, blockHash, block.NumberU64(), fn); err != nil || committed {
+		return valid, view, err
 	}
 	start := time.Now()
 	result, err := e.validateChain(ctx, block, true)
 	validateChainDuration.ObserveDuration(start)
 	if err != nil || result.ValidationStatus != ExecutionStatusSuccess {
-		return result, err
+		return result, nil, err
 	}
-	_, err = e.viewRetainedTip(ctx, blockHash, fn)
-	return result, err
+	_, view, err := e.viewRetainedTip(ctx, blockHash, fn)
+	return result, view, err
+}
+
+// closeWithoutView closes a resource that no returned view owns.
+func closeWithoutView(view *func() error, close func()) {
+	if *view == nil {
+		close()
+	}
 }
 
 // validateChain with revalidate executes again a non-canonical block that passed validation before, so the fork
@@ -673,7 +668,6 @@ func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, reva
 	// Do not defer doms.Close(): on the success path ownership transfers to
 	// forkValidator.sharedDom inside ValidatePayload and later phases close it,
 	// so we Close explicitly only on the early-return error paths below.
-	doms.SetInMemHistoryReads(inMemHistoryReads)
 	if err := doms.InitBlockOverlay(roTx); err != nil {
 		doms.Close()
 		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
@@ -776,43 +770,43 @@ func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, reva
 	return result, nil
 }
 
-// viewRetainedTip calls fn when blockHash is the tip of the fork the fork validator retains, and must run under the
+// viewRetainedTip views blockHash when it is the tip of the fork the fork validator retains, and must run under the
 // module semaphore. A tip on any other parent than the committed head gets its parent state by unwinding, in memory,
 // the tip's changeset from the fork's state.
-func (e *ExecModule) viewRetainedTip(ctx context.Context, blockHash common.Hash, fn BlockStateView) (bool, error) {
+func (e *ExecModule) viewRetainedTip(ctx context.Context, blockHash common.Hash, fn BlockStateView) (held bool, view func() error, err error) {
 	head, number, sd := e.forkValidator.ExtendingFork()
 	if sd == nil || head != blockHash {
-		return false, nil
+		return false, nil, nil
 	}
 	tx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
-	defer tx.Rollback()
+	defer closeWithoutView(&view, tx.Rollback)
 	blockTx := sd.BlockOverlayTemporalTx(tx)
 	if blockTx == nil {
-		return false, nil
+		return false, nil, nil
 	}
 	header, err := e.blockReader.Header(ctx, blockTx, blockHash, number)
 	if err != nil || header == nil {
-		return false, err
+		return false, nil, err
 	}
 	executedTo, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if number == executedTo+1 {
 		committedParent, err := rawdb.ReadCanonicalHash(tx, executedTo)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		if committedParent == header.ParentHash {
-			return true, fn(blockTx, tx)
+			return e.viewTipOverCommittedHead(ctx, tx, sd, blockTx, blockHash, number, fn)
 		}
 	}
 	tip := sd.GetChangesetByHash(number, blockHash)
 	if tip == nil {
-		return false, nil
+		return false, nil, nil
 	}
 	var diffs [kv.DomainLen][]kv.DomainEntryDiff
 	for d := range tip.Diffs {
@@ -820,50 +814,121 @@ func (e *ExecModule) viewRetainedTip(ctx context.Context, blockHash common.Hash,
 	}
 	tipFrom, err := e.blockReader.TxnumReader().Min(ctx, blockTx, number)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	parentSD, err := execctx.NewSharedDomains(ctx, tx, e.logger, execctx.WithoutSharedBranchCache(), execctx.WithLocalCacheUnwind())
 	if parentSD != nil {
 		defer parentSD.Close()
 	}
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
+	// The parent state reads the fork validator's state, which the module drops once it is released.
 	parentSD.SetParent(sd)
 	parentSD.Unwind(tipFrom, &diffs)
-	return true, fn(blockTx, parentSD.AsSnapshotGetter(tx))
+	return true, nil, fn(blockTx, parentSD.AsSnapshotGetter(tx))
 }
 
-// viewCommittedBlock reports whether blockHash is committed. It calls fn only when the changesets of the blocks from
+// viewTipOverCommittedHead views a tip whose parent is the committed head. The view copies the block overlay and the
+// values the block writes, so it reads none of the fork validator's state and runs after the module is released. A
+// returned view owns tx.
+func (e *ExecModule) viewTipOverCommittedHead(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, blockTx kv.TemporalTx, blockHash common.Hash, number uint64, fn BlockStateView) (bool, func() error, error) {
+	changes := sd.GetChangesetByHash(number, blockHash)
+	if changes == nil {
+		return true, nil, fn(blockTx, tx)
+	}
+	lastTxNum, err := e.blockReader.TxnumReader().Max(ctx, blockTx, number)
+	if err != nil {
+		return false, nil, err
+	}
+	written, err := newBlockEndState(sd, changes, lastTxNum+1)
+	if err != nil {
+		return false, nil, err
+	}
+	overlay, err := membatchwithdb.NewMemoryBatch(tx)
+	if err != nil {
+		return false, nil, err
+	}
+	if err := sd.BlockOverlay().Flush(ctx, overlay); err != nil {
+		overlay.Close()
+		return false, nil, err
+	}
+	overlay.DomainReader = written
+	return true, func() error {
+		defer tx.Rollback()
+		defer overlay.Close()
+		return fn(overlay.NewTemporalReadView(tx), tx)
+	}, nil
+}
+
+// blockEndState holds the values a block leaves in the keys it writes. A read before the block end falls through to
+// the database, which holds the parent state.
+type blockEndState struct {
+	end    uint64
+	values [kv.DomainLen]map[string][]byte
+}
+
+func newBlockEndState(sd *execctx.SharedDomains, changes *changeset.StateChangeSet, end uint64) (*blockEndState, error) {
+	s := &blockEndState{end: end}
+	for d := range changes.Diffs {
+		diffs := changes.Diffs[d].GetDiffSet()
+		s.values[d] = make(map[string][]byte, len(diffs))
+		for _, diff := range diffs {
+			k := diff.Key[:len(diff.Key)-8]
+			v, ok, err := sd.GetAsOf(kv.Domain(d), []byte(k), end)
+			if errors.Is(err, kv.ErrInMemHistoryDisabled) {
+				v, _, ok = sd.GetLatestFromMemory(kv.Domain(d), []byte(k))
+			} else if err != nil {
+				return nil, err
+			}
+			if ok {
+				s.values[d][k] = bytes.Clone(v)
+			}
+		}
+	}
+	return s, nil
+}
+
+func (s *blockEndState) GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+	if ts < s.end {
+		return nil, false, nil
+	}
+	v, ok := s.values[name][string(k)]
+	return v, ok, nil
+}
+
+func (s *blockEndState) HistorySeek(kv.Domain, []byte, uint64) ([]byte, bool, error) {
+	return nil, false, nil
+}
+
+// viewCommittedBlock reports whether blockHash is committed. It returns a view only when the changesets of the blocks from
 // blockHash to the committed head are still kept for reorgs, and reads the parent state by unwinding them in memory.
 // It reads one database snapshot, so it needs no module semaphore.
-func (e *ExecModule) viewCommittedBlock(ctx context.Context, blockHash common.Hash, fn BlockStateView) (bool, error) {
+func (e *ExecModule) viewCommittedBlock(ctx context.Context, blockHash common.Hash, number uint64, fn BlockStateView) (committed bool, view func() error, err error) {
 	tx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
-	defer tx.Rollback()
+	defer closeWithoutView(&view, tx.Rollback)
 	executedTo, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
-	number := rawdb.ReadHeaderNumber(tx, blockHash)
-	if number == nil || *number == 0 || *number > executedTo {
-		return false, nil
+	if number == 0 || number > executedTo {
+		return false, nil, nil
 	}
-	canonical, err := rawdb.ReadCanonicalHash(tx, *number)
-	if err != nil || canonical != blockHash {
-		return false, err
+	if canonical, err := e.blockReader.IsCanonical(ctx, tx, blockHash, number); err != nil || !canonical {
+		return false, nil, err
 	}
 	var unwind *[kv.DomainLen][]kv.DomainEntryDiff
-	for n := executedTo; n >= *number; n-- {
+	for n := executedTo; n >= number; n-- {
 		hash, err := rawdb.ReadCanonicalHash(tx, n)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		diffs, ok, err := changeset.ReadDiffSet(tx, n, hash)
 		if err != nil || !ok {
-			return true, err
+			return true, nil, err
 		}
 		if unwind == nil {
 			unwind = &diffs
@@ -873,19 +938,23 @@ func (e *ExecModule) viewCommittedBlock(ctx context.Context, blockHash common.Ha
 			unwind[d] = changeset.MergeDiffSets(unwind[d], diffs[d])
 		}
 	}
-	unwindFrom, err := e.blockReader.TxnumReader().Min(ctx, tx, *number)
+	unwindFrom, err := e.blockReader.TxnumReader().Min(ctx, tx, number)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	sd, err := execctx.NewSharedDomains(ctx, tx, e.logger, execctx.WithoutSharedBranchCache(), execctx.WithLocalCacheUnwind())
 	if sd != nil {
-		defer sd.Close()
+		defer closeWithoutView(&view, sd.Close)
 	}
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	sd.Unwind(unwindFrom, unwind)
-	return true, fn(tx, sd.AsSnapshotGetter(tx))
+	return true, func() error {
+		defer tx.Rollback()
+		defer sd.Close()
+		return fn(tx, sd.AsSnapshotGetter(tx))
+	}, nil
 }
 
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {
@@ -914,7 +983,9 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 			return nil
 		}
 
-		rawdb.DeleteHeader(tx, currentHash, currentNumber)
+		if err := rawdb.DeleteBadBlock(tx, currentHash, currentNumber); err != nil {
+			return err
+		}
 		currentHash = currentHeader.ParentHash
 		currentNumber--
 	}

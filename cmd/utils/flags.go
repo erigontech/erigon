@@ -25,6 +25,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -462,7 +463,7 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers when --experimental.parallel-commitment is on, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead",
+		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead",
 		Value: httpcfg.DefaultDBReadConcurrency(),
 	}
 	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
@@ -536,12 +537,6 @@ var (
 	TxpoolApiAddrFlag = cli.StringFlag{
 		Name:  "txpool.api.addr",
 		Usage: "TxPool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)",
-	}
-
-	TraceMaxtracesFlag = cli.UintFlag{
-		Name:  "trace.maxtraces",
-		Usage: "Sets a limit on traces that can be returned in trace_filter",
-		Value: 200,
 	}
 
 	TLSFlag = cli.BoolFlag{
@@ -1106,6 +1101,15 @@ var (
 		Usage: "sets whether caplin should immediately backfill blobs (4096 epochs)",
 		Value: false,
 	}
+	CaplinBlobsBackfillEndpointFlag = cli.StringSliceFlag{
+		Name:  "caplin.blobs-backfill-endpoint",
+		Usage: "beacon API endpoint that the blob backfill asks for a block's blobs before peers; repeat for fallback endpoints. Blobs are verified against the block before they are stored. Without --caplin.blobs-archive only the blob retention window is backfilled",
+	}
+	CaplinBlobsBackfillEndpointWorkersFlag = cli.IntFlag{
+		Name:  "caplin.blobs-backfill-endpoint-workers",
+		Usage: "number of KZG proofs the blob backfill computes at a time, one CPU each, for blobs from --caplin.blobs-backfill-endpoint whose proof the endpoint left out (up to twice as many blocks are fetched at a time; verifying them costs about 2% of computing proofs and is not limited). 0 picks a quarter of the CPUs the process may use (GOMAXPROCS, which follows a container's CPU limit), at least 1; set it to the CPUs the node can spare (lower keeps a validator node responsive, a dedicated archive node can use more)",
+		Value: 0,
+	}
 	CaplinDisableBlobPruningFlag = cli.BoolFlag{
 		Name:  "caplin.blobs-no-pruning",
 		Usage: "disable blob pruning in caplin",
@@ -1180,9 +1184,15 @@ var (
 		Usage: "Use to override the default p2p listen port (defaults to 23102)",
 	}
 	ExperimentalParallelCommitmentFlag = cli.BoolFlag{
-		Name:  "experimental.parallel-commitment",
-		Usage: "Compute commitment on the parallel trie (ParallelPatriciaHashed). Pass =false for the sequential trie.",
-		Value: statecfg.DefaultParallelCommitment,
+		Name:   "experimental.parallel-commitment",
+		Usage:  "(DEPRECATED: No longer has any effect) Commitment always runs on the parallel trie.",
+		Value:  true,
+		Hidden: true,
+	}
+	ExperimentalCommitmentV3Flag = cli.BoolFlag{
+		Name:  "experimental.commitment-v3",
+		Usage: "Compute commitment on the v3 trie.",
+		Value: statecfg.DefaultCommitmentV3,
 	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
@@ -1915,6 +1925,14 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	}
 
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
+	for i, endpoint := range ctx.StringSlice(CaplinBlobsBackfillEndpointFlag.Name) {
+		if u, err := url.Parse(endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+			// The value is not echoed: it can carry an API key.
+			Fatalf("Option %s: value %d is not an http or https URL", CaplinBlobsBackfillEndpointFlag.Name, i+1)
+		}
+		cfg.CaplinConfig.BlobsBackfillEndpoints = append(cfg.CaplinConfig.BlobsBackfillEndpoints, endpoint)
+	}
+	cfg.CaplinConfig.BlobsBackfillEndpointWorkers = ctx.Int(CaplinBlobsBackfillEndpointWorkersFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	if cfg.CaplinConfig.SnapshotGenerationEnabled && cfg.CaplinConfig.BlobsArchiveFromSlot > 0 {
 		Fatalf("Option %s cannot be combined with %s: blob snapshots are built contiguously from Deneb", CaplinArchiveBlobsFromSlotFlag.Name, CaplinEnableSnapshotGeneration.Name)
@@ -1974,9 +1992,24 @@ func CheckExclusive(ctx *cli.Command, args ...any) {
 	}
 }
 
-func setParallelCommitment(ctx *cli.Command) {
+func warnParallelCommitmentDeprecated(ctx *cli.Command, logger log.Logger) {
 	if ctx.IsSet(ExperimentalParallelCommitmentFlag.Name) {
-		statecfg.ExperimentalParallelCommitment = ctx.Bool(ExperimentalParallelCommitmentFlag.Name)
+		logger.Warn("[DEPRECATED] --experimental.parallel-commitment has no effect; commitment always runs on the parallel trie")
+	}
+	for _, name := range []string{"COMMITMENT_PARALLEL", dbg.ErigonEnvPrefix + "COMMITMENT_PARALLEL"} {
+		if _, ok := os.LookupEnv(name); ok {
+			logger.Warn("[DEPRECATED] " + name + " has no effect; commitment always runs on the parallel trie")
+		}
+	}
+}
+
+func setCommitmentV3(ctx *cli.Command) {
+	if ctx.IsSet(ExperimentalCommitmentV3Flag.Name) {
+		if ctx.Bool(ExperimentalCommitmentV3Flag.Name) {
+			statecfg.SetCommitmentV3(true)
+		} else if statecfg.ExperimentalCommitmentV3 {
+			Fatalf("--%s=false conflicts with ERIGON_COMMITMENT_V3=true", ExperimentalCommitmentV3Flag.Name)
+		}
 	}
 }
 
@@ -2080,7 +2113,8 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
-	setParallelCommitment(ctx)
+	warnParallelCommitmentDeprecated(ctx, logger)
+	setCommitmentV3(ctx)
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
@@ -2121,10 +2155,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
 		warmupWorkers := dbg.BALCommitmentWarmupReaders()
 		blockReadAheadWorkers := dbg.ReadAheadWorkerReaders()
-		parallelCommitmentReaders := 0
-		if statecfg.ExperimentalParallelCommitment {
-			parallelCommitmentReaders = commitment.ParallelCommitmentReadTxs()
-		}
+		parallelCommitmentReaders := commitment.ParallelCommitmentReadTxs()
 		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers); int64(c) < limit {
 			logger.Warn("db.read.concurrency below the exec read-tx floor; raising to avoid a parallel-exec deadlock",
 				"configured", c, "using", limit, "execWorkers", cfg.ExecWorkerCount,
@@ -2219,7 +2250,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 			// Unfortunately we don't take webseed URL here in the native format.
 			webseedsList = common.CliString2Array(ctx.String(WebSeedsFlag.Name))
 		} else {
-			if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
+			if known, ok := snapcfg.Webseeds(nodeCtx, chain); ok {
 				webseedsList = append(webseedsList, known...)
 			}
 		}
@@ -2340,7 +2371,7 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 	genesisTime := uint64(time.Now().Unix())
 	// Compute the EL genesis block hash so the beacon state's Eth1Data
 	// matches the actual chain genesis.
-	elGenesisBlock, ibs, err := genesiswrite.GenesisToBlock(cfg.Genesis, cfg.Dirs, logger)
+	elGenesisBlock, ibs, err := genesiswrite.GenesisToBlock(cfg.Genesis)
 	if err != nil {
 		Fatalf("Failed to compute dev EL genesis hash: %v", err)
 	}

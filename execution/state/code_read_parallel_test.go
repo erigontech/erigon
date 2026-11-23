@@ -299,11 +299,23 @@ func TestCodeSegment_RecordsTheSameHeaderWithoutBytes(t *testing.T) {
 	require.Equal(t, wantRead.Val.Hash, haveRead.Val.Hash)
 }
 
+// A repeated segment read of one address reads the whole code once and copies the rest from it.
+func TestCodeSegment_RepeatedReadDecodesOnce(t *testing.T) {
+	ibs, reader, addr, code := newSegmentRead(t, NewVersionMap(nil))
+	for range 4 {
+		got, err := segmentOf(ibs, addr, len(code))
+		require.NoError(t, err)
+		require.Equal(t, code, got)
+	}
+	require.Equal(t, 1, reader.segmentReads)
+	require.Equal(t, 1, reader.fullReads)
+}
+
 func TestCodeSegment_LaterReadSeesFullCode(t *testing.T) {
 	for name, read := range map[string]func(*IntraBlockState, accounts.Address) ([]byte, error){
 		"GetCode": (*IntraBlockState).GetCode,
 		"ResolveCode": func(ibs *IntraBlockState, addr accounts.Address) ([]byte, error) {
-			code, err := ibs.ResolveCode(addr)
+			code, err := ibs.ResolveCode(addr, true)
 			return code.Bytes, err
 		},
 		"ReadCodeSegmentTo": func(ibs *IntraBlockState, addr accounts.Address) ([]byte, error) {
@@ -377,21 +389,6 @@ func TestCodeSegment_UncommittedCodeStaysOnTheNormalPath(t *testing.T) {
 		require.Equal(t, own, got)
 		require.Zero(t, reader.segmentReads)
 	})
-}
-
-// A repeated segment read copies again, from the worker's last decode, instead of reading the full code.
-func TestCodeSegment_RepeatedReadCopiesAgain(t *testing.T) {
-	ibs, reader, addr, code := newSegmentRead(t, NewVersionMap(nil))
-	for range 3 {
-		got, err := segmentOf(ibs, addr, len(code))
-		require.NoError(t, err)
-		require.Equal(t, code, got)
-	}
-	require.Zero(t, reader.fullReads, "a repeated segment read must not read the full code")
-	require.Equal(t, 3, reader.segmentReads)
-	read, ok := ibs.versionedReads.GetCode(addr)
-	require.True(t, ok)
-	require.True(t, codeBytesDropped(read.Val), "the read stays recorded without bytes")
 }
 
 func TestCodeSegment_CopiesFromTheOffsetAndZeroPads(t *testing.T) {

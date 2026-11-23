@@ -537,6 +537,16 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				return
 			}
 		}
+		if path == StoragePath {
+			if storageClearedByCreate(r.life, true, hdr.Version.TxIndex) {
+				readClearedByCreate(s, hdr, r)
+				return
+			}
+			// A value below this tx is older than a creation in it.
+			if created, ok := s.versionedWriteCreateContract(addr); ok && created {
+				r.mapStorageVal = uint256.Int{}
+			}
+		}
 		r.outcome = outcomeMapDone
 		r.hdr = hdr
 		r.recordVR = true
@@ -638,7 +648,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 
 		// A slot with no cell after an in-block destruct reads post-wipe zero; anchor it as
 		// a MapRead at the wipe version {destroyedAt, wipeInc} so it validates by version
-		// against liveStorage. Mirrors the stale-Done-cell storage branch above.
+		// against liveStorageValue. Mirrors the stale-Done-cell storage branch above.
 		if path == StoragePath && r.life.state != LifecycleLive {
 			if !commited {
 				recordWipedSelfDestruct(s, addr, r.life)
@@ -647,6 +657,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			r.outcome = outcomeReturnZero
 			r.source = MapRead
 			r.version = r.life.canonicalVer
+			return
+		}
+		if path == StoragePath && storageClearedByCreate(r.life, false, UnknownDep) {
+			readClearedByCreate(s, hdr, r)
 			return
 		}
 
@@ -1094,14 +1108,14 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 }
 
 // readNonce returns the nonce using the version-aware read pipeline.
-func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
+func readNonce(s *IntraBlockState, addr accounts.Address, committed bool) (uint64, ReadSource, Version, error) {
+	if committed || s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetNonce(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, NoncePath, accounts.NilKey, false, false, &r)
+	versionedReadCore(s, addr, NoncePath, accounts.NilKey, committed, false, &r)
 	if r.err != nil {
 		s.RecordStateReadError(r.err)
 		return 0, r.source, r.version, r.err
@@ -1132,6 +1146,9 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 	case outcomeLegacyStorage:
 		if r.so == nil || r.so.deleted {
 			return 0, StorageRead, UnknownVersion, nil
+		}
+		if committed {
+			return r.so.original.Nonce, StorageRead, UnknownVersion, nil
 		}
 		return r.so.Nonce(), StorageRead, UnknownVersion, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
@@ -1257,8 +1274,25 @@ func recordWipedSelfDestruct(s *IntraBlockState, addr accounts.Address, life lif
 	})
 }
 
+// readClearedByCreate reads as zero a slot that a contract creation below the read replaced,
+// anchored on the creation, as liveStorageValue validates it. While the creation is in flight, the
+// read depends on it.
+func readClearedByCreate(s *IntraBlockState, hdr ReadHeader, r *readPathResult) {
+	if r.life.createInc < 0 {
+		s.dep = max(s.dep, r.life.createdAt)
+	}
+	hdr.Source = MapRead
+	hdr.Version = Version{TxIndex: r.life.createdAt, Incarnation: r.life.createInc}
+	r.mapStorageVal = uint256.Int{}
+	r.outcome = outcomeMapDone
+	r.hdr = hdr
+	r.recordVR = true
+	r.source = MapRead
+	r.version = hdr.Version
+}
+
 // recordWipedStorageRead records a zero slot read at the destruct that wiped it,
-// as liveStorage resolves it, so a later store above the destruct invalidates it.
+// as liveStorageValue resolves it, so a later store above the destruct invalidates it.
 func recordWipedStorageRead(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, life lifecycleVerdict) {
 	s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: life.destroyedAt, Incarnation: life.wipeInc}},
@@ -1290,18 +1324,12 @@ type codeSegment struct {
 	copied bool // the read copied the segment into dst and returned the code without bytes
 }
 
-// readCodeSegment is readCode; with seg, a read that reaches the state reader copies the segment
-// into seg.dst and records the read without the code bytes. That includes a state-cache hit and a
-// read-set hit whose bytes were dropped.
+// readCodeSegment is readCode; with seg, a first read that reaches the state reader copies the segment
+// into seg.dst and records the read without the code bytes. A repeated read of the same address reads
+// the whole code once and keeps it in the record, so later copies do not decode it again.
 func readCodeSegment(s *IntraBlockState, addr accounts.Address, seg *codeSegment) (accounts.Code, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
-			if seg != nil && codeBytesDropped(tr.Val) {
-				if _, copied, err := s.readOriginCodeSegmentTo(addr, seg.from, seg.dst); err != nil || copied {
-					seg.copied = copied
-					return tr.Val, tr.Source, tr.Version, err
-				}
-			}
 			code, err := s.recordedCode(addr, tr)
 			return code, tr.Source, tr.Version, err
 		}

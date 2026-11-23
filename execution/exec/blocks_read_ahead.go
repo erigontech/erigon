@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -488,6 +489,20 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 	}
 }
 
+var hexWarmupsOffLog sync.Once
+
+// balHexTrieWarmups reports whether the BAL trie warmup and the commitment branch batch prefetch run for variant:
+// both read hex-patricia branch keys, so commitment v3 runs neither.
+func balHexTrieWarmups(variant commitment.TrieVariant) bool {
+	if variant != commitment.VariantCommitmentV3 {
+		return true
+	}
+	hexWarmupsOffLog.Do(func() {
+		log.Info("[warmBAL] commitment v3: the BAL trie warmup and the commitment branch batch prefetch read hex-patricia keys, both off")
+	})
+	return false
+}
+
 func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, txns types.Transactions, codeMode balCodeWarmupMode, workers int) error {
 	var txCodeDestinations map[accounts.Address]struct{}
 	if codeMode == balCodeWarmupTxnDestinations {
@@ -501,15 +516,20 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		return balCommitmentWarmupKeys(bal)
 	})
 	var group errgroup.Group
-	if dbg.TrieBALWarmupers > 0 {
+	hexWarmups := balHexTrieWarmups(execctx.PickTrieVariant())
+	if dbg.TrieBALWarmupers > 0 && hexWarmups {
 		group.Go(func() error {
 			return warmBALCommitment(ctx, db, trieKeys(), dbg.TrieBALWarmupers)
 		})
 	}
 	var cold coldState
 	if mmap.NewProbe() != nil {
+		prefetchTrie := prefetchBALCommitment
+		if !hexWarmups {
+			prefetchTrie = prefetchBALCommitmentV3
+		}
 		group.Go(func() error {
-			prefetchBALCommitment(ctx, db, trieKeys())
+			prefetchTrie(ctx, db, trieKeys())
 			return nil
 		})
 		cold = stateKeysCold(ctx, db, bal)

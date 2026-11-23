@@ -24,7 +24,9 @@ import (
 
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
@@ -215,8 +217,14 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		}
 	}
 
+	if len(slots.Txns) == 0 {
+		return reply, nil
+	}
 	discardReasons, err := s.txPool.AddLocalTxns(ctx, slots)
 	if err != nil {
+		if errors.Is(err, errPoolNotReady) {
+			return nil, status.Error(codes.Unavailable, err.Error())
+		}
 		return nil, err
 	}
 
@@ -274,7 +282,7 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportR
 		txpoolcfg.IntrinsicGas, txpoolcfg.GasLimitTooHigh, txpoolcfg.NonceTooDistant,
 		txpoolcfg.RLPTooLong, txpoolcfg.InvalidCreateTxn, txpoolcfg.NoBlobs, txpoolcfg.TooManyBlobs,
 		txpoolcfg.TypeNotActivated, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail, txpoolcfg.BlobNonceGap,
-		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations, txpoolcfg.InvalidAuthorizationNonce,
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.BlobReplacementTypeMismatch, txpoolcfg.NoAuthorizations, txpoolcfg.InvalidAuthorizationNonce,
 		txpoolcfg.TipAboveFeeCap, txpoolcfg.DelegatedNonceGap, txpoolcfg.DelegatedTxnLimit, txpoolcfg.InvalidFrame:
 		// INVALID includes rejections under current fork rules or pool policy;
 		// it does not imply that the transaction can never be accepted.

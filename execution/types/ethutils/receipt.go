@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -60,14 +61,14 @@ type RPCReceipt struct {
 	BlobGasUsed  *hexutil.Uint64 `json:"blobGasUsed,omitempty" ethjson:"quantity"`
 }
 
-// logsWithTimestamp returns the receipt's logs, and its frame receipts that share them, as the RPC
-// renders them: each log carrying timestamp, or none when timestamp is nil. Logs already in that
-// state are returned as they are; otherwise all are copied, so the cached receipt is never changed.
-func logsWithTimestamp(receipt *types.Receipt, timestamp *hexutil.Uint64) (types.Logs, []types.FrameReceipt) {
+// logsWithTimestamp returns the receipt's logs, and its frame receipts that share them, each log
+// carrying timestamp. Logs already stamped with it are returned as they are; otherwise all are
+// copied, so the cached receipt is never changed.
+func logsWithTimestamp(receipt *types.Receipt, timestamp hexutil.Uint64) (types.Logs, []types.FrameReceipt) {
 	if receipt.Logs == nil {
 		return types.Logs{}, receipt.FrameReceipts
 	}
-	if !slices.ContainsFunc(receipt.Logs, func(l *types.Log) bool { return !sameTimestamp(l.BlockTimestamp, timestamp) }) {
+	if !slices.ContainsFunc(receipt.Logs, func(l *types.Log) bool { return l.BlockTimestamp == nil || *l.BlockTimestamp != timestamp }) {
 		return receipt.Logs, receipt.FrameReceipts
 	}
 	copies := make([]struct {
@@ -77,11 +78,8 @@ func logsWithTimestamp(receipt *types.Receipt, timestamp *hexutil.Uint64) (types
 	logs := make(types.Logs, len(receipt.Logs))
 	for i, log := range receipt.Logs {
 		copies[i].log = *log
-		copies[i].log.BlockTimestamp = nil
-		if timestamp != nil {
-			copies[i].timestamp = *timestamp
-			copies[i].log.BlockTimestamp = &copies[i].timestamp
-		}
+		copies[i].timestamp = timestamp
+		copies[i].log.BlockTimestamp = &copies[i].timestamp
 		logs[i] = &copies[i].log
 	}
 	frames := receipt.FrameReceipts
@@ -93,24 +91,14 @@ func logsWithTimestamp(receipt *types.Receipt, timestamp *hexutil.Uint64) (types
 	return logs, frames
 }
 
-func sameTimestamp(a, b *hexutil.Uint64) bool {
-	return a == nil && b == nil || a != nil && b != nil && *a == *b
-}
-
 func MarshalReceipt(
 	receipt *types.Receipt,
 	txn types.Transaction,
 	chainConfig *chain.Config,
 	header *types.Header,
 	signed bool,
-	withBlockTimestamp bool,
 ) *RPCReceipt {
-	var timestamp *hexutil.Uint64
-	if withBlockTimestamp {
-		at := hexutil.Uint64(header.Time)
-		timestamp = &at
-	}
-	logs, frames := logsWithTimestamp(receipt, timestamp)
+	logs, frames := logsWithTimestamp(receipt, hexutil.Uint64(header.Time))
 	result := marshalReceipt(receipt, txn, chainConfig, header, signed, frames)
 	result.Logs, result.LogsBloom = logs, receipt.LogsBloom()
 	return result
@@ -120,7 +108,7 @@ func MarshalReceipt(
 func MarshalReceiptWithoutLogs(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header) *RPCReceipt {
 	frames := receipt.FrameReceipts
 	if len(frames) > 0 {
-		_, frames = logsWithTimestamp(receipt, nil)
+		_, frames = logsWithTimestamp(receipt, hexutil.Uint64(header.Time))
 	}
 	return marshalReceipt(receipt, txn, chainConfig, header, true, frames)
 }
@@ -159,16 +147,6 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		CumulativeGasUsed: hexutil.Uint64(receipt.CumulativeGasUsed),
 	}
 
-	if !chainConfig.IsLondon(header.Number.Uint64()) {
-		result.EffectiveGasPrice = (*hexutil.U256)(new(uint256.Int).Set(txn.GetTipCap()))
-	} else {
-		baseFee := header.BaseFee
-		effectiveTip := txn.GetEffectiveGasTip(baseFee)
-		var gasPrice uint256.Int
-		gasPrice.Add(baseFee, &effectiveTip)
-		result.EffectiveGasPrice = (*hexutil.U256)(&gasPrice)
-	}
-
 	// Assign status if postState is empty.
 	if len(receipt.PostState) == 0 {
 		status := hexutil.Uint64(receipt.Status)
@@ -198,6 +176,17 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 			result.BlobGasUsed = &blobGasUsed
 		}
 	}
+
+	baseFee := header.BaseFee
+	if !chainConfig.IsLondon(header.Number.Uint64()) {
+		baseFee = nil
+	}
+	blobFee := new(uint256.Int)
+	if result.BlobGasPrice != nil {
+		blobFee.Set((*uint256.Int)(result.BlobGasPrice))
+	}
+	price := ReceiptGasPrice(txn, receipt.GasUsed, baseFee, blobFee)
+	result.EffectiveGasPrice = (*hexutil.U256)(price)
 
 	return result
 }
@@ -303,7 +292,7 @@ func LogReceipts(level log.Lvl, msg string, receipts types.Receipts, txns types.
 	marshalled := make([]*RPCReceipt, 0, len(receipts))
 	for i, receipt := range receipts {
 		txn := txns[i]
-		marshalled = append(marshalled, MarshalReceipt(receipt, txn, cc, header, true, false))
+		marshalled = append(marshalled, MarshalReceipt(receipt, txn, cc, header, true))
 	}
 
 	result, err := json.Marshal(marshalled)
@@ -312,4 +301,92 @@ func LogReceipts(level log.Lvl, msg string, receipts types.Receipts, txns types.
 		return
 	}
 	logger.Log(level, msg, "block", header.Number.Uint64(), "receipts", string(result))
+}
+
+// GasFeePaid returns the total non-blob gas fee in wei, including the proposer tip.
+// For frames, the EVM's GASPRICE uses the declared gas limit. Settlement uses
+// actual gas usage to determine how much of the budget is left for the tip.
+func GasFeePaid(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) (uint256.Int, error) {
+	if frame, ok := txn.Unwrap().(*types.FrameTransaction); ok {
+		fee, _, err := settledFrameGasFees(frame, gasUsed, baseFee, blobBaseFee)
+		return fee, err
+	}
+	return u256.Mul(u256.U64(gasUsed), nonFrameGasPrice(txn, baseFee)), nil
+}
+
+// GasTipPaid is the proposer payment after settlement, excluding all base fees.
+func GasTipPaid(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) (uint256.Int, error) {
+	if frame, ok := txn.Unwrap().(*types.FrameTransaction); ok {
+		_, tip, err := settledFrameGasFees(frame, gasUsed, baseFee, blobBaseFee)
+		return tip, err
+	}
+	return u256.Mul(u256.U64(gasUsed), txn.GetEffectiveGasTip(baseFee)), nil
+}
+
+func settledFrameGasFees(frame *types.FrameTransaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) (fee, tip uint256.Int, err error) {
+	if baseFee == nil {
+		baseFee = new(uint256.Int)
+	}
+	if blobBaseFee == nil {
+		blobBaseFee = new(uint256.Int)
+	}
+	budget, err := frame.Fees.Budget(frame.GetGasLimit(), frame.GetBlobGas(), baseFee, blobBaseFee)
+	if err != nil {
+		return fee, tip, err
+	}
+	fee, tip = budget.Settle(gasUsed, baseFee, &frame.Fees.TipCap)
+	return fee, tip, nil
+}
+
+// ReceiptGasTip returns the settled proposer tip in wei per gas, rounded down.
+func ReceiptGasTip(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) (uint256.Int, error) {
+	frame, ok := txn.Unwrap().(*types.FrameTransaction)
+	if !ok {
+		return txn.GetEffectiveGasTip(baseFee), nil
+	}
+	if baseFee == nil {
+		baseFee = new(uint256.Int)
+	}
+	if blobBaseFee == nil {
+		blobBaseFee = new(uint256.Int)
+	}
+	_, blobCost, err := frame.Fees.RequiredCost(frame.GetGasLimit(), frame.GetBlobGas(), baseFee, blobBaseFee)
+	if err != nil || gasUsed == 0 {
+		return uint256.Int{}, err
+	}
+	// When MaxFee exceeds the amount collected at approval, that amount already
+	// covers the full tip cap at the gas limit and at any lower gas usage.
+	var perGas uint256.Int
+	perGas.Sub(&frame.Fees.MaxFee, &blobCost)
+	perGas.Div(&perGas, uint256.NewInt(gasUsed))
+	if _, underflow := perGas.SubOverflow(&perGas, baseFee); underflow {
+		return uint256.Int{}, types.ErrFrameFeeBudget
+	}
+	return u256.Min(perGas, frame.Fees.TipCap), nil
+}
+
+func nonFrameGasPrice(txn types.Transaction, baseFee *uint256.Int) uint256.Int {
+	if baseFee == nil {
+		return *txn.GetTipCap()
+	}
+	return u256.Add(*baseFee, txn.GetEffectiveGasTip(baseFee))
+}
+
+// ReceiptGasPrice returns the effective price in wei per gas. For frames, this
+// rate is rounded down, so multiplying it by gas used can understate the exact
+// total returned by [GasFeePaid].
+func ReceiptGasPrice(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) *uint256.Int {
+	if txn.Type() != types.FrameTxType {
+		price := nonFrameGasPrice(txn, baseFee)
+		return &price
+	}
+	tip, err := ReceiptGasTip(txn, gasUsed, baseFee, blobBaseFee)
+	if err != nil {
+		log.Warn("cannot derive receipt gas price", "txHash", txn.Hash(), "err", err)
+		return new(uint256.Int)
+	}
+	if baseFee != nil && gasUsed != 0 {
+		tip.Add(&tip, baseFee)
+	}
+	return &tip
 }
