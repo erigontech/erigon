@@ -92,16 +92,18 @@ func TestBlockServiceGossipParentThatFailedValidation(t *testing.T) {
 
 func ptr[T any](v T) *T { return &v }
 
-func TestBlockServiceGossipWrongTimestampWithInvalidatedParentPayload(t *testing.T) {
+func TestBlockServiceGossipInvalidatedParentPayload(t *testing.T) {
 	for name, tc := range map[string]struct {
 		version    clparams.StateVersion
+		offset     uint64
 		wantIgnore bool
 	}{
-		"fulu ignores":    {version: clparams.FuluVersion, wantIgnore: true},
-		"electra rejects": {version: clparams.ElectraVersion},
+		"fulu ignores":                           {version: clparams.FuluVersion, offset: 1, wantIgnore: true},
+		"electra rejects":                        {version: clparams.ElectraVersion, offset: 1},
+		"electra ignores with correct timestamp": {version: clparams.ElectraVersion, wantIgnore: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			service, block, processing, _ := newColumnGossipFixture(t, tc.version, 1)
+			service, block, processing, _ := newColumnGossipFixture(t, tc.version, tc.offset)
 			forkChoiceMock(processing).PayloadStatusByRootMap[block.Block.ParentRoot] = execution_client.PayloadStatusInvalidated
 
 			err := service.ProcessMessage(t.Context(), nil, block)
