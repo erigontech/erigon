@@ -1020,11 +1020,13 @@ func (d *Downloader) backgroundLogging(ctx context.Context) {
 			return
 		}
 		allActiveSnapshots := d.allActiveSnapshots()
-		stats = d.newStats(stats, allActiveSnapshots)
-		// Flexibility to add seeding and warn on unexpected behaviour in torrent client here. We
-		// should probably change the status message if downloading but nobody is actively waiting
-		// on sync. We can also report seeding if we see upload activity and everything is synced.
-		d.logStatsInner(log.LvlDebug, stats, "Idle", nil, false)
+		if d.logger.Enabled(ctx, log.LvlDebug) {
+			stats = d.newStats(stats, allActiveSnapshots)
+			// Flexibility to add seeding and warn on unexpected behaviour in torrent client here. We
+			// should probably change the status message if downloading but nobody is actively waiting
+			// on sync. We can also report seeding if we see upload activity and everything is synced.
+			d.logStatsInner(log.LvlDebug, stats, "Idle", nil, false)
+		}
 		// There are missing torrent infos but nobody is waiting on a download request to complete.
 		// Let me (anacrolix) know why this should happen.
 		d.logNoMetadata(log.LvlError, allActiveSnapshots)
