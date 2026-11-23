@@ -1781,15 +1781,14 @@ func (d *Downloader) logStatsInner(
 		)
 	}
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
+	alloc, sys := dbg.MemUsage()
 
 	addCtx(
 		"peers", stats.PeersUnique,
 		"conns", stats.ConnectionsTotal,
 		"upload", fmt.Sprintf("%s/s", common.ByteCount(stats.UploadRate)),
-		"alloc", common.ByteCount(m.Alloc),
-		"sys", common.ByteCount(m.Sys),
+		"alloc", common.ByteCount(alloc),
+		"sys", common.ByteCount(sys),
 	)
 
 	d.log(level, msg, logCtx...)
