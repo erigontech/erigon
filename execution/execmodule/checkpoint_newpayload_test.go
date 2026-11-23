@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -176,4 +177,111 @@ func TestAPreExecRoundIsRefusedForABlockNewPayloadAlreadyExecuted(t *testing.T) 
 	ur, err := forkChoiceTo(replica.ctx, replica.m.ExecModule, proposed1.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status, ur.ValidationError)
+}
+
+// Blocks the consensus layer inserts before this node seals its own copy of each: after the fork choice the chain
+// reads every one of them back, bodies included, and keeps going.
+func TestBlocksInsertedBeforeTheirLocalSealStayReadableThroughTheForkChoice(t *testing.T) {
+	replica := newRoundHarness(t)
+	proposer := newRoundHarnessWithKeys(t, replica.keys)
+	parent, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
+	require.NoError(t, err)
+
+	for n := uint64(0); n < 3; n++ {
+		round := [][]byte{replica.signed(0, n, nil, 200_000, counterInit), replica.signed(1, n, nil, 200_000, counterInit)}
+		paramsP, inP := proposer.attrs(parent)
+		proposed := proposer.sealRounds(paramsP, inP, [][][]byte{round})
+		ur, ferr := forkChoiceTo(proposer.ctx, proposer.m.ExecModule, proposed.Header())
+		require.NoError(t, ferr)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status, ur.ValidationError)
+
+		params, in := replica.attrs(parent)
+		_, _, vr, rerr := replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in, round)
+		require.NoError(t, rerr)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
+		status, ierr := insertBlocks(replica.ctx, replica.m.ExecModule, []*types.Block{proposed})
+		require.NoError(t, ierr)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+		vr, rerr = replica.m.ExecModule.RebuildFlashblock(replica.ctx, in, round)
+		require.NoError(t, rerr)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
+		br, serr := replica.m.ExecModule.SealBlock(replica.ctx, params, false)
+		require.NoError(t, serr)
+		require.Equal(t, proposed.Hash(), br.Block.Hash())
+		r, verr := validateChain(replica.ctx, replica.m.ExecModule, proposed)
+		require.NoError(t, verr)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, r.ValidationStatus, r.ValidationError)
+		ur, ferr = forkChoiceTo(replica.ctx, replica.m.ExecModule, proposed.Header())
+		require.NoError(t, ferr)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status, "block %d: %s", n+1, ur.ValidationError)
+		parent = proposed.Header()
+	}
+	tip, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
+	require.NoError(t, err)
+	require.Equal(t, parent.Hash(), tip.Hash())
+}
+
+// A fork choice to a block this node is still pre-executing, on top of one it sealed but has not made canonical, is a
+// checkpoint like newPayload: it lands once the block seals, and the chain reaches it with every block in between.
+func TestAForkChoiceToABlockStillBeingPreExecutedLandsOnceItSeals(t *testing.T) {
+	replica := newRoundHarness(t)
+	proposer := newRoundHarnessWithKeys(t, replica.keys)
+	parent, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
+	require.NoError(t, err)
+
+	var proposed []*types.Block
+	var rounds [][][]byte
+	for n := uint64(0); n < 2; n++ {
+		round := [][]byte{replica.signed(0, n, nil, 200_000, counterInit), replica.signed(1, n, nil, 200_000, counterInit)}
+		paramsP, inP := proposer.attrs(parent)
+		b := proposer.sealRounds(paramsP, inP, [][][]byte{round})
+		ur, ferr := forkChoiceTo(proposer.ctx, proposer.m.ExecModule, b.Header())
+		require.NoError(t, ferr)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status, ur.ValidationError)
+		proposed, rounds, parent = append(proposed, b), append(rounds, round), b.Header()
+	}
+
+	head, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
+	require.NoError(t, err)
+	params1, in1 := replica.attrs(head)
+	_, _, vr, err := replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in1, rounds[0])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
+	br, err := replica.m.ExecModule.SealBlock(replica.ctx, params1, false)
+	require.NoError(t, err)
+	require.Equal(t, proposed[0].Hash(), br.Block.Hash())
+	status, err := insertBlocks(replica.ctx, replica.m.ExecModule, proposed)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	r, err := validateChain(replica.ctx, replica.m.ExecModule, proposed[0])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, r.ValidationStatus, r.ValidationError)
+
+	params2, in2 := replica.attrs(proposed[0].Header())
+	_, _, vr, err = replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in2, rounds[1])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
+
+	landed := make(chan execmodule.ForkChoiceResult, 1)
+	landedErr := make(chan error, 1)
+	go func() {
+		ur, ferr := replica.m.ExecModule.UpdateForkChoice(replica.ctx, proposed[1].Hash(), common.Hash{}, common.Hash{})
+		landedErr <- ferr
+		landed <- ur
+	}()
+	time.Sleep(200 * time.Millisecond)
+	br, err = replica.m.ExecModule.SealBlock(replica.ctx, params2, false)
+	require.NoError(t, err)
+	require.Equal(t, proposed[1].Hash(), br.Block.Hash())
+
+	require.NoError(t, <-landedErr, "the fork choice to the block being pre-executed")
+	ur := <-landed
+	require.NotEqual(t, execmodule.ExecutionStatusBadBlock, ur.Status, ur.ValidationError)
+	ur, err = forkChoiceTo(replica.ctx, replica.m.ExecModule, proposed[1].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status, ur.ValidationError)
+	tip, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
+	require.NoError(t, err)
+	require.Equal(t, proposed[1].Hash(), tip.Hash())
+	require.NoError(t, insertValidateAndUfc1By1(replica.ctx, replica.m.ExecModule, nil))
 }

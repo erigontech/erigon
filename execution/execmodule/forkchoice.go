@@ -113,6 +113,19 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 }
 
 func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error) {
+	if head, err := e.GetHeader(ctx, &headHash, nil); err == nil && head != nil {
+		sealed, werr := e.awaitPreExecSeal(ctx, headHash, head.Number.Uint64(), head.ParentHash)
+		if werr != nil {
+			return ForkChoiceResult{Status: ExecutionStatusBusy}, nil
+		}
+		if sealed != nil {
+			if busy, aerr := e.acceptSealed(ctx, sealed); busy {
+				return ForkChoiceResult{Status: ExecutionStatusBusy}, nil
+			} else if aerr != nil {
+				return ForkChoiceResult{}, fmt.Errorf("updateForkChoice: %w", aerr)
+			}
+		}
+	}
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
 		return ForkChoiceResult{Status: ExecutionStatusBusy}, nil

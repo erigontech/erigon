@@ -675,19 +675,13 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 		//
 		// It is also where the block's data crosses over. The seal keeps the sealed block in pre-exec space; the fork
 		// choice looks its header up in the module context, so it is staged there now — here, and nowhere earlier.
-		if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		busy, err := e.acceptSealed(ctx, sealed)
+		if busy {
 			return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil
 		}
-		e.semTake("ValidateChain:stageSealed")
-		stageErr := e.stageSealedForCanonicalLocked(ctx, blockHash, blockNumber)
-		e.semDrop()
-		e.semaphore.Release(1)
-		if stageErr != nil {
-			return ValidationResult{}, fmt.Errorf("ValidateChain: %w", stageErr)
+		if err != nil {
+			return ValidationResult{}, fmt.Errorf("ValidateChain: %w", err)
 		}
-		adopted := e.forkValidator.AdoptPreExecuted(blockHash, blockNumber)
-		e.logger.Debug("[execmodule] ValidateChain: accepting locally-sealed block (no re-exec)",
-			"number", blockNumber, "hash", blockHash, "root", sealed.Root, "adopted", adopted)
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusSuccess,
 			LatestValidHash:  blockHash,
@@ -734,9 +728,32 @@ func (e *ExecModule) postExecutedOn(number uint64, parent common.Hash) *types.He
 	return nil
 }
 
+// acceptSealed hands a block this node sealed over to the canonical path, so a fork choice adopts it rather than
+// executing it; busy reports that the module could not be acquired before ctx ended.
+func (e *ExecModule) acceptSealed(ctx context.Context, sealed *types.Header) (busy bool, err error) {
+	hash, number := sealed.Hash(), sealed.Number.Uint64()
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return true, nil
+	}
+	e.semTake("acceptSealed")
+	stageErr := e.stageSealedForCanonicalLocked(ctx, hash, number)
+	e.semDrop()
+	e.semaphore.Release(1)
+	if stageErr != nil {
+		return false, stageErr
+	}
+	adopted := e.forkValidator.AdoptPreExecuted(hash, number)
+	e.logger.Debug("[execmodule] ValidateChain: accepting locally-sealed block (no re-exec)",
+		"number", number, "hash", hash, "root", sealed.Root, "adopted", adopted)
+	return false, nil
+}
+
 // awaitPreExecSeal returns this node's sealed block for hash, first waiting out a pre-exec still building that height:
 // the payload's hash only exists once the local seal at that height has run.
 func (e *ExecModule) awaitPreExecSeal(ctx context.Context, hash common.Hash, number uint64, parent common.Hash) (*types.Header, error) {
+	if number == 0 {
+		return nil, nil
+	}
 	for {
 		e.flash.mu.Lock()
 		changed := e.flash.changedLocked()
