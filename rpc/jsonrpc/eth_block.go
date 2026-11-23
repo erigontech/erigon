@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -259,26 +258,26 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 }
 
 func (api *BaseAPI) marshalBlock(ctx context.Context, tx kv.TemporalTx, block *types.Block, fullTx, useReceipts bool) (*ethapi.RPCBlock, error) {
-	if !fullTx {
-		return ethapi.RPCMarshalBlock(block, true, false), nil
-	}
-	txns := block.Transactions()
-	firstFrame := slices.IndexFunc(txns, func(txn types.Transaction) bool { return txn.Type() == types.FrameTxType })
-	if firstFrame < 0 {
-		return ethapi.RPCMarshalBlock(block, true, true), nil
-	}
-	blobFee, err := api.frameBlobBaseFee(ctx, tx, block.HeaderNoCopy(), txns[firstFrame:]...)
-	if err != nil {
-		return nil, err
-	}
-	var receipts types.Receipts
-	if useReceipts {
-		receipts, err = api.canonicalReceiptsGasUsed(ctx, tx, block)
-		if err != nil {
-			return nil, err
+	if fullTx {
+		for i, txn := range block.Transactions() {
+			if txn.Type() != types.FrameTxType {
+				continue
+			}
+			blobFee, err := api.frameBlobBaseFee(ctx, tx, block.HeaderNoCopy(), block.Transactions()[i:]...)
+			if err != nil {
+				return nil, err
+			}
+			var receipts types.Receipts
+			if useReceipts {
+				receipts, err = api.canonicalReceiptsGasUsed(ctx, tx, block)
+				if err != nil {
+					return nil, err
+				}
+			}
+			return ethapi.RPCMarshalBlockWithFramePrices(block, true, true, blobFee, receipts), nil
 		}
 	}
-	return ethapi.RPCMarshalBlockWithFramePrices(block, true, true, blobFee, receipts), nil
+	return ethapi.RPCMarshalBlock(block, true, fullTx), nil
 }
 
 // GetHeaderByNumber implements eth_getHeaderByNumber. Returns a block's header given a block
