@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -208,6 +209,9 @@ func (c *CacheView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error
 
 type ExecModule struct {
 	backgroundCtx context.Context
+
+	idleAfterCommitBusy atomic.Bool
+	allocsAtLastCommit  uint64
 	// Snapshots + MDBX
 	blockReader dbservices.FullBlockReader
 
