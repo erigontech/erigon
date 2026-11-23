@@ -16,7 +16,10 @@
 
 package state
 
-import "github.com/erigontech/erigon/execution/types"
+import (
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
+)
 
 // BlockState is the block-level shared store that a block's transactions read and
 // write through. It is thread-safe, holds no reader, and is created once per block by
@@ -24,8 +27,14 @@ import "github.com/erigontech/erigon/execution/types"
 // and the staged writes of lower transactions through this store. It is backed by the
 // version map; the embedded field is the store's internals, used where the raw map
 // still crosses a helper boundary.
+//
+// It also carries the block-wide log aggregate: a transaction emits its own logs into
+// its per-transaction state, which the single-threaded finalize path folds into the
+// aggregate here in commit order (the parallel executor aggregates through receipts and
+// does not touch this, so the aggregate is only ever written on one goroutine).
 type BlockState struct {
 	*VersionMap
+	logs logArena
 }
 
 // NewBlockState creates the per-block shared store, pre-populated from the block access
@@ -55,3 +64,32 @@ func (bs *BlockState) Seal(txIdx int, writes *WriteSet) {
 	bs.MarkWritesComplete(writes)
 	bs.SealUpTo(txIdx)
 }
+
+// AppendTxLogs folds a transaction's own logs into the block aggregate, assigning each
+// its block-wide index in the order transactions commit. txLogs are owned by the
+// transaction's per-tx arena, so the aggregate copies them and the caller may then
+// reset that arena for the next transaction. Call only on the single-threaded finalize
+// path (see the type doc): the aggregate is not safe for concurrent writers.
+func (bs *BlockState) AppendTxLogs(txLogs types.Logs) {
+	for _, src := range txLogs {
+		dst := bs.logs.alloc(src.Address, int(src.TxIndex), len(src.Topics), len(src.Data))
+		copy(dst.Topics, src.Topics)
+		copy(dst.Data, src.Data)
+		dst.Removed = src.Removed
+		dst.TxHash, dst.BlockHash, dst.BlockNumber = src.TxHash, src.BlockHash, src.BlockNumber
+	}
+}
+
+// BlockLogs returns the block's aggregated logs in order. The entries are owned by the
+// aggregate; a caller that holds them past the next reset must copy.
+func (bs *BlockState) BlockLogs() types.Logs { return bs.logs.entries }
+
+// BlockLogsRlpHash is the RLP hash of the block's aggregated logs.
+func (bs *BlockState) BlockLogsRlpHash() common.Hash { return types.RlpHashLogs(bs.logs.entries) }
+
+// ResetBlockLogs empties the aggregate and takes the numbering back to zero.
+func (bs *BlockState) ResetBlockLogs() { bs.logs.reset() }
+
+// ResumeBlockLogIndexAt continues the aggregate's block-wide numbering at idx, for a
+// caller that starts mid-block and hands in the count the skipped transactions left.
+func (bs *BlockState) ResumeBlockLogIndexAt(idx uint32) { bs.logs.indexInBlock = uint(idx) }
