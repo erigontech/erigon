@@ -718,6 +718,54 @@ func TestComposerOutlivesAHungL1(t *testing.T) {
 	})
 }
 
+// rolling is an L1 node whose head and pool the test moves; no posting has
+// a receipt.
+type rolling struct {
+	head  atomic.Uint64
+	has   atomic.Bool
+	asked atomic.Int64
+}
+
+func (r *rolling) Head(context.Context) (*l1.Header, error) {
+	return &l1.Header{Number: r.head.Load()}, nil
+}
+
+func (r *rolling) Receipt(context.Context, common.Hash) (*l1.Receipt, error) {
+	r.asked.Add(1)
+	return nil, nil
+}
+
+func (r *rolling) HasTransaction(context.Context, common.Hash) (bool, error) {
+	return r.has.Load(), nil
+}
+
+// TestComposerIgnoresAStaleWatch: a bundle's first watch, still running
+// when an L1 reorg rolls its settlement out and the posting is watched again
+// from the pool, does not fail it once L1 passes the bundle's block.
+func TestComposerIgnoresAStaleWatch(t *testing.T) {
+	node := &rolling{}
+	node.head.Store(1)
+	h := newHarness(t, newTestChain(t, 12), 12, node)
+	ctx := t.Context()
+	h.slot(t, 8, 50, sequencer.ModeSteady)
+	h.targets(t)
+	h.cursor.Store(8)
+	h.c.RecoverFailed(ctx)
+	r, _ := h.resolution(8)
+	require.Equal(t, Settled, r, "derivation confirmed it")
+	node.has.Store(true)
+	h.cursor.Store(4)
+	h.c.RecoverFailed(ctx)
+	node.head.Store(1000)
+	asked := node.asked.Load()
+	require.Eventually(t, func() bool { return node.asked.Load() > asked+40 }, 5*time.Second, time.Millisecond)
+	r, ok := h.resolution(8)
+	require.True(t, ok)
+	require.Equal(t, Pending, r, "the posting back in the pool may land")
+	h.slot(t, 12, 52, sequencer.ModeSteady)
+	require.Len(t, h.targets(t), 1, "the gate holds")
+}
+
 // TestComposerFallsBackFromAFreshCursor: the chunk replacing a failed anchor
 // starts where derivation is when it is posted.
 func TestComposerFallsBackFromAFreshCursor(t *testing.T) {

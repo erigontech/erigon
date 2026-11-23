@@ -79,6 +79,9 @@ type entry[T any] struct {
 	// confirmed reports that derivation passed the height; it releases Txs
 	// once, whichever verdict came first.
 	confirmed bool
+	// watch counts the watches of the posting Repend began: only the latest
+	// one's verdict holds.
+	watch uint64
 }
 
 // Ledger tracks the posted batches of a rollup from their sending to L1
@@ -158,7 +161,7 @@ func (l *Ledger[T]) MarkSettled(height uint64, post common.Hash) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if e := l.find(height, post); e != nil {
-		e.resolution, e.Landed = Settled, true
+		e.mark(Settled, false)
 	}
 }
 
@@ -167,10 +170,7 @@ func (l *Ledger[T]) MarkSettledPartial(height uint64, post common.Hash) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if e := l.find(height, post); e != nil {
-		e.Landed = true
-		if e.resolution == Pending {
-			e.resolution = SettledPartial
-		}
+		e.mark(SettledPartial, false)
 	}
 }
 
@@ -179,8 +179,34 @@ func (l *Ledger[T]) MarkSettledPartial(height uint64, post common.Hash) {
 func (l *Ledger[T]) MarkFailed(height uint64, post common.Hash, slotSkipped bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if e := l.find(height, post); e != nil && e.resolution == Pending {
-		e.resolution, e.SlotSkipped = Failed, slotSkipped
+	if e := l.find(height, post); e != nil {
+		e.mark(Failed, slotSkipped)
+	}
+}
+
+// Report records r, the verdict on post's batch of its watch watch, as the
+// Mark methods do; a watch older than the latest Repend began is stale.
+func (l *Ledger[T]) Report(height uint64, post common.Hash, watch uint64, r Resolution, slotSkipped bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if e := l.find(height, post); e != nil && e.watch == watch {
+		e.mark(r, slotSkipped)
+	}
+}
+
+func (e *entry[T]) mark(r Resolution, slotSkipped bool) {
+	switch r {
+	case Settled:
+		e.resolution, e.Landed = Settled, true
+	case SettledPartial:
+		e.Landed = true
+		if e.resolution == Pending {
+			e.resolution = SettledPartial
+		}
+	case Failed:
+		if e.resolution == Pending {
+			e.resolution, e.SlotSkipped = Failed, slotSkipped
+		}
 	}
 }
 
@@ -253,16 +279,18 @@ func (l *Ledger[T]) Unsettle(height uint64, post common.Hash) bool {
 	return false
 }
 
-// Repend turns post's Settled or SettledPartial batch back to Pending: L1
-// dropped the block that settled it, and the posting may land again.
-func (l *Ledger[T]) Repend(height uint64, post common.Hash) bool {
+// Repend turns post's Settled or SettledPartial batch back to Pending and
+// returns its new watch: L1 dropped the block that settled it, and the
+// posting may land again.
+func (l *Ledger[T]) Repend(height uint64, post common.Hash) (uint64, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if e := l.find(height, post); e != nil && (e.resolution == Settled || e.resolution == SettledPartial) {
 		e.resolution, e.confirmed, e.Landed = Pending, false, false
-		return true
+		e.watch++
+		return e.watch, true
 	}
-	return false
+	return 0, false
 }
 
 // RolledOut returns the Settled and SettledPartial batches above cursor,

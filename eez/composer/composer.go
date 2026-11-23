@@ -365,33 +365,26 @@ func (c *Composer) postBlocks(ctx context.Context, cursor uint64, blocks []*type
 			c.logger.Warn("[eez] batch may have been sent, watching it", "event", "eez.composer.batch.unsure", "to", to, "post", hash,
 				"l1Block", sent.Block, "err", err)
 		case err != nil:
-			c.ledger.MarkFailed(to, hash, true)
+			c.ledger.Report(to, hash, 0, Failed, true)
 			c.logger.Warn("[eez] batch not sent", "event", "eez.composer.batch.unsent", "to", to, "post", hash, "err", err)
 			return
 		default:
 			c.logger.Info("[eez] batch posted", "event", "eez.composer.batch.posted", "from", cursor+1, "to", to, "post", hash,
 				"l1Block", sent.Block, "pinned", sent.Time != 0)
 		}
-		c.observe(to, hash, batch, terminal, sent)
+		c.observe(to, hash, 0, batch, terminal, sent)
 	})
 	return nil
 }
 
-// observe records the verdict on hash, the posting of batch, sent as sent,
-// whose terminal block is terminal.
-func (c *Composer) observe(to uint64, hash common.Hash, batch *protocol.ProofSystemBatch, terminal *types.Header, sent post.Sent) {
+// observe records the verdict of watch, a watch of hash, the posting of
+// batch, sent as sent, whose terminal block is terminal.
+func (c *Composer) observe(to uint64, hash common.Hash, watch uint64, batch *protocol.ProofSystemBatch, terminal *types.Header, sent post.Sent) {
 	verdict, err := c.observer.Watch(c.ctx, hash, batch, terminal.Hash(), sent)
 	if err != nil {
 		return
 	}
-	switch verdict {
-	case Settled:
-		c.ledger.MarkSettled(to, hash)
-	case SettledPartial:
-		c.ledger.MarkSettledPartial(to, hash)
-	default:
-		c.ledger.MarkFailed(to, hash, false)
-	}
+	c.ledger.Report(to, hash, watch, verdict, false)
 	c.logger.Info("[eez] batch verdict", "event", "eez.composer.batch.verdict", "to", to, "post", hash, "verdict", verdict)
 }
 
@@ -504,11 +497,12 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 // rewatch has p, a settlement whose posting left L1, pending again under a
 // new watch, as a posting the node may hold in its pool.
 func (c *Composer) rewatch(p Posted[types.Transaction]) {
-	if !c.ledger.Repend(p.Height, p.Post) {
+	watch, ok := c.ledger.Repend(p.Height, p.Post)
+	if !ok {
 		return
 	}
 	c.logger.Warn("[eez] settled batch's posting left L1, watching it again", "event", "eez.composer.batch.rolled_out", "to", p.Height, "post", p.Post)
-	c.wg.Go(func() { c.observe(p.Height, p.Post, p.Batch, p.Terminal, post.Sent{Pooled: true}) })
+	c.wg.Go(func() { c.observe(p.Height, p.Post, watch, p.Batch, p.Terminal, post.Sent{Pooled: true}) })
 }
 
 // audit checks that the posting of a finalized settlement is on L1: one
