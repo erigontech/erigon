@@ -135,6 +135,15 @@ func TestOverCapResponseIsNotExcusedByADuplicateLoss(t *testing.T) {
 	require.True(t, lost.Load(), "the loss stays for a failure it can excuse")
 }
 
+// A well-formed error response arrived complete, so a cut stream did not cause it.
+func TestPeerErrorResponseIsNotExcusedByADuplicateLoss(t *testing.T) {
+	lost := &atomic.Bool{}
+	lost.Store(true)
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{active: 1, lostDuplicate: lost}}
+	require.True(t, server.dropOnFailure(peer.ID("peer"), &PeerResponseError{Code: httpreqresp.ResponseCodeServerError}))
+	require.True(t, lost.Load(), "the loss stays for a failure it can excuse")
+}
+
 // The duplicate can close while the request runs, so the drop decision is taken when the request
 // fails. The server has no sentinel, so a drop would panic.
 func TestRequestCutByADuplicateCloseKeepsThePeer(t *testing.T) {

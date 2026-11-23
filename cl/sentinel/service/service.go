@@ -183,7 +183,10 @@ func (s *SentinelServer) dropOnFailure(pid peer.ID, err error) bool {
 	if activePeers < int(s.peerRequestBackend.Config().MaxPeerCount) {
 		return false
 	}
-	return errors.Is(err, httpreqresp.ErrResponseTooLarge) || !s.peerRequestBackend.ConsumeDuplicateLoss(pid)
+	// A cut stream cannot produce an over-cap body or a complete error response.
+	var peerErr *PeerResponseError
+	return errors.Is(err, httpreqresp.ErrResponseTooLarge) || errors.As(err, &peerErr) ||
+		!s.peerRequestBackend.ConsumeDuplicateLoss(pid)
 }
 
 func (s *SentinelServer) dropFailedPeer(pid peer.ID, err error) {
@@ -270,13 +273,14 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 			s.dropFailedPeer(pid, err)
 			return nil, err
 		}
-		if responseCode != httpreqresp.ResponseCodeResourceUnavailable {
-			s.dropFailedPeer(pid, nil)
-		}
-		return nil, &PeerResponseError{
+		peerErr := &PeerResponseError{
 			Code:    responseCode,
 			Message: errorMessage,
 		}
+		if responseCode != httpreqresp.ResponseCodeResourceUnavailable {
+			s.dropFailedPeer(pid, peerErr)
+		}
+		return nil, peerErr
 	}
 
 	// read the body from the response
