@@ -3462,14 +3462,14 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 				require.NoError(t, err)
 				return encoded
 			},
-			wantErr: "missing execution payload header",
+			wantErr: "blinded beacon body contains null execution payload header",
 		},
 		{
 			name: "omitted execution payload header",
 			mutate: func(block *cltypes.SignedBlindedBeaconBlock) {
 				block.Block.Body.ExecutionPayload = nil
 			},
-			wantErr: "missing execution payload header",
+			wantErr: "blinded beacon body contains null execution payload header",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3492,6 +3492,9 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 
 			_, err = h.publishBlindedBlocks(req, 2)
 			require.ErrorContains(t, err, tc.wantErr)
+			var endpointErr *beaconhttp.EndpointError
+			require.ErrorAs(t, err, &endpointErr)
+			require.Equal(t, http.StatusBadRequest, endpointErr.Code)
 		})
 	}
 }
