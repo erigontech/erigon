@@ -116,13 +116,13 @@ The only way to override the default is per block, through the Beacon API: a val
 
 ### 3.4. Block Production Response Time
 
-A block production request (`GET /eth/v3/validator/blocks/{slot}` before the Gloas fork, `POST /eth/v4/validator/blocks/{slot}` from Gloas on) returns only after Caplin has collected the execution payload. Caplin gives the execution layer time to build the payload and collects it before the attestation deadline. The last quarter of the time up to the deadline stays free for block processing, signing and gossip. With 12-second slots, times counted from the start of the slot:
+A block production request (`GET /eth/v3/validator/blocks/{slot}` before the Gloas fork, `POST /eth/v4/validator/blocks/{slot}` from Gloas on) returns only after Caplin has collected the execution payload. Caplin gives the execution layer time to build the payload and stops polling for it before the attestation deadline, aiming to keep the last quarter of the time up to the deadline for block processing, signing and gossip. With 12-second slots, the polling targets are, counted from the start of the slot:
 
 | Payload | Before Gloas (attestation deadline at 4 s) | Gloas (attestation deadline at 3 s) |
 | --- | --- | --- |
-| Prepared ahead of the slot ([3.1](#31-payload-preparation-ahead-of-the-proposer-slot)) | first poll at 0.9 s at the earliest, collected by 3 s | first poll at 0.65 s at the earliest, collected by 2.25 s |
-| Not prepared | collected at about 3 s | collected at about 1 s |
+| Prepared ahead of the slot ([3.1](#31-payload-preparation-ahead-of-the-proposer-slot)) | first poll at 0.9 s at the earliest, polling stops at 3 s | first poll at 0.65 s at the earliest, polling stops at 2.25 s |
+| Not prepared | polled at about 3 s | polled at about 1 s |
 
-A prepared payload is usually ready at the first poll, so the response comes soon after it. A production that starts late still gets at least 500 ms of build time, but is never collected later than the prepared limit. A request that arrives after its collection time is polled once, right away. The deadlines are shares of the slot (one third before Gloas, one quarter from Gloas), so on networks with shorter slots, such as Gnosis Chain and Chiado, all these times are shorter.
+A prepared payload is usually ready at the first poll, so the response comes soon after it. A production that starts late gets up to 500 ms of build time, but polling still stops at the prepared limit, so a very late start gets less. A request that arrives after polling has stopped is polled once, right away. These are targets, not hard limits: polling does not interrupt a call already sent to the execution layer, so a slow execution layer can delay the response past them. The deadlines are shares of the slot (one third before Gloas, one quarter from Gloas), so on networks with shorter slots, such as Gnosis Chain and Chiado, all these times are shorter.
 
-Set the validator client's block production timeout above these times. A client that gives up earlier cancels the request and misses the proposal. Each production logs `BlockProduction: ForkChoiceUpdate&GetPayload took` with the time spent on the payload, and `BlockProduction: Block produced` when the block is ready.
+Set the validator client's block production timeout well above these times, with headroom for a slow execution layer. A client that gives up earlier cancels the request and misses the proposal. Each production logs `BlockProduction: ForkChoiceUpdate&GetPayload took` with the time spent on the payload, and `BlockProduction: Block produced` when the block is ready.
