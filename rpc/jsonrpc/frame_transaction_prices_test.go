@@ -30,15 +30,18 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func framePriceTestChain(t *testing.T) (*execmoduletester.ExecModuleTester, *types.Block, types.Receipts) {
@@ -142,6 +145,26 @@ func TestFrameTransactionRPCSettledGasPrice(t *testing.T) {
 	}
 }
 
+func TestPendingBlockUsesEstimatedFrameGasPrice(t *testing.T) {
+	m, block, _ := framePriceTestChain(t)
+	// The pending-block cache can still hold a payload after it becomes canonical.
+	filters := rpchelper.New(m.Ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	encoded, err := rlp.EncodeToBytes(block)
+	require.NoError(t, err)
+	filters.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: encoded})
+	require.NotNil(t, filters.LastPendingBlock())
+
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(filters, m.StateCache, m), m.DB, nil, nil)
+	got, err := api.GetBlockByNumber(m.Ctx, rpc.PendingBlockNumber, true)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	txns := got.Transactions.([]*ethapi.RPCTransaction)
+	require.Len(t, txns, len(block.Transactions()))
+	for _, txn := range txns {
+		require.Equal(t, block.BaseFee(), (*uint256.Int)(txn.GasPrice))
+	}
+}
+
 func TestFrameTransactionRPCNonCanonicalGasPrice(t *testing.T) {
 	m, block, _ := framePriceTestChain(t)
 	header := block.Header()
@@ -229,13 +252,32 @@ func TestBlockRPCFrameBlobFee(t *testing.T) {
 	base := newBaseApiForTest(m)
 	eth := newEthApiForTest(base, m.DB, nil, nil)
 	debug := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
-	header := block.Header()
-	header.ExcessBlobGas = common.NewUint64(1 << 62)
 	original := block.Transactions()[0].(*types.FrameTransaction)
 	frame := &types.FrameTransaction{
 		ChainID: original.ChainID, SenderAddress: original.SenderAddress, Frames: original.Frames, Fees: original.Fees,
 		BlobVersionedHashes: []common.Hash{{1}},
 	}
+	// At one wei per blob gas the budget covers both base fees exactly.
+	frame.Fees.MaxFee.AddUint64(&frame.Fees.MaxFee, frame.GetBlobGas())
+	writeBlock := func(t *testing.T, excessBlobGas uint64) common.Hash {
+		t.Helper()
+		header := block.Header()
+		header.ExcessBlobGas = &excessBlobGas
+		header.BlobGasUsed = common.NewUint64(frame.GetBlobGas())
+		side := types.NewBlock(header, types.Transactions{frame}, nil, nil, block.Withdrawals(), nil)
+		require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error { return rawdb.WriteBlock(tx, side) }))
+		return side.Hash()
+	}
+	t.Run("full block with priced blob frame", func(t *testing.T) {
+		hash := writeBlock(t, 0)
+		got, err := eth.GetBlockByHash(m.Ctx, rpc.BlockNumberOrHashWithHash(hash, false), true)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		txns := got.Transactions.([]*ethapi.RPCTransaction)
+		require.Len(t, txns, 1)
+		require.Equal(t, frame.Hash(), txns[0].Hash)
+		require.Equal(t, block.BaseFee(), (*uint256.Int)(txns[0].GasPrice))
+	})
 	t.Run("pending frame with sidecar", func(t *testing.T) {
 		tx, err := m.DB.BeginTemporalRo(m.Ctx)
 		require.NoError(t, err)
@@ -244,13 +286,7 @@ func TestBlockRPCFrameBlobFee(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uint256.NewInt(1), fee)
 	})
-	hash := header.Hash()
-	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
-		if err := rawdb.WriteHeader(tx, header); err != nil {
-			return err
-		}
-		return rawdb.WriteBody(tx, hash, header.Number.Uint64(), &types.Body{Transactions: types.Transactions{frame}})
-	}))
+	hash := writeBlock(t, 1<<62)
 	ref := rpc.BlockNumberOrHashWithHash(hash, false)
 	t.Run("hashes", func(t *testing.T) {
 		got, err := eth.GetBlockByHash(m.Ctx, ref, false)
@@ -268,10 +304,10 @@ func TestBlockRPCFrameBlobFee(t *testing.T) {
 	})
 	t.Run("bad blocks", func(t *testing.T) {
 		require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
-			if err := rawdb.WriteCanonicalHash(tx, hash, header.Number.Uint64()); err != nil {
+			if err := rawdb.WriteCanonicalHash(tx, hash, block.NumberU64()); err != nil {
 				return err
 			}
-			return rawdb.TruncateCanonicalHash(tx, header.Number.Uint64(), true)
+			return rawdb.TruncateCanonicalHash(tx, block.NumberU64(), true)
 		}))
 		require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error { return rawdb.ResetBadBlockCache(tx, 100) }))
 		got, err := debug.GetBadBlocks(m.Ctx)

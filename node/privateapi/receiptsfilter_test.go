@@ -438,7 +438,9 @@ func TestReceiptsFilter_SendsSettledBlobFrameGasPrice(t *testing.T) {
 	const gasUsed = 21_000
 	rn := createReceiptNotification(txHash1)
 	rn.Receipt.Type = types.FrameTxType
+	rn.Receipt.TransactionIndex = 1
 	rn.Receipt.GasUsed = gasUsed
+	rn.Receipt.CumulativeGasUsed = 2 * gasUsed
 	rn.Header = &types.Header{BaseFee: uint256.NewInt(1), ExcessBlobGas: common.NewUint64(0)}
 	rn.Tx = &types.FrameTransaction{
 		Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 30_000}}},
