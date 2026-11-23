@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -61,6 +62,9 @@ type Posted[T any] struct {
 	Post common.Hash
 	// Terminal is the header of the batch's terminal block.
 	Terminal *types.Header
+	// Batch is the posted batch without its DA and proofs, which judging its
+	// receipts does not read.
+	Batch *protocol.ProofSystemBatch
 	// Txs are the held transactions the batch carries.
 	Txs []T
 	// SlotSkipped reports a failure not owed to Txs.

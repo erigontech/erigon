@@ -329,6 +329,10 @@ func TestComposerPostsAnAnchor(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, uint64(8), at)
 	require.Equal(t, h.poster.txs[0].Hash(), h.c.ledger.entries[8].Post)
+	kept := h.c.ledger.entries[8].Batch
+	require.Equal(t, h.prover.proven[0].batch.Entries, kept.Entries)
+	require.Nil(t, kept.CallData, "the ledger keeps no DA")
+	require.Nil(t, kept.Proofs)
 
 	// One batch in flight: derivation must pass it first.
 	h.slot(t, 12, 52, sequencer.ModeSteady)
@@ -587,11 +591,13 @@ func TestComposerChunkWithinTheGasLimit(t *testing.T) {
 	require.Equal(t, post.Target{Block: 50}, h.targets(t)[0])
 }
 
-// landing is an L1 on which postings settle at terminal until it drops them.
+// landing is an L1 on which postings settle at terminal until it drops them
+// or, reorged, includes them again as again has them.
 type landing struct {
 	t        *testing.T
 	terminal atomic.Pointer[common.Hash]
 	gone     atomic.Bool
+	again    atomic.Pointer[func() *l1.Receipt]
 	asked    atomic.Int64
 }
 
@@ -606,6 +612,9 @@ func (l *landing) Receipt(context.Context, common.Hash) (*l1.Receipt, error) {
 	if l.gone.Load() {
 		return nil, nil
 	}
+	if again := l.again.Load(); again != nil {
+		return (*again)(), nil
+	}
 	return receipt(1, batchPosted(l.t, eezL1), performed(l.t, eezL1, 1, *l.terminal.Load())), nil
 }
 
@@ -615,25 +624,39 @@ func newLanding(t *testing.T, terminal common.Hash) *landing {
 	return l
 }
 
-// TestComposerSettlementLeftL1: a settlement whose posting L1 dropped before
-// derivation saw it fails, and the next slot posts again, though the cursor
-// never moved.
+// TestComposerSettlementLeftL1: a settlement whose posting an L1 reorg
+// dropped, or included again without settling, before derivation saw it
+// fails, and the next slot posts again, though the cursor never moved.
 func TestComposerSettlementLeftL1(t *testing.T) {
-	chain := newTestChain(t, 12)
-	node := newLanding(t, chain.blocks[8].Hash())
-	h := newHarness(t, chain, 12, node)
-	h.slot(t, 8, 50, sequencer.ModeSteady)
-	require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Settled }, 5*time.Second, time.Millisecond)
-	h.slot(t, 12, 52, sequencer.ModeSteady)
-	require.Len(t, h.targets(t), 1, "the settlement holds the gate while on L1")
-	node.gone.Store(true)
-	h.c.RecoverFailed(t.Context())
-	_, ok := h.resolution(8)
-	require.False(t, ok, "dropped")
-	h.c.ComposeSyncSlot(t.Context(), h.chain.header(11), h.chain.header(12).Time, 52, sequencer.ModeSteady)
-	h.c.SyncCommitted(t.Context(), h.chain.header(12))
-	require.Len(t, h.targets(t), 2)
-	h.requireWindow(t, 1, 1, 12, post.Target{Block: 52, Time: h.chain.header(12).Time})
+	for name, leave := range map[string]func(l *landing){
+		"dropped": func(l *landing) { l.gone.Store(true) },
+		"reverted": func(l *landing) {
+			again := func() *l1.Receipt { return receipt(0) }
+			l.again.Store(&again)
+		},
+		"posted without settling": func(l *landing) {
+			again := func() *l1.Receipt { return receipt(1, batchPosted(t, eezL1)) }
+			l.again.Store(&again)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			chain := newTestChain(t, 12)
+			node := newLanding(t, chain.blocks[8].Hash())
+			h := newHarness(t, chain, 12, node)
+			h.slot(t, 8, 50, sequencer.ModeSteady)
+			require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Settled }, 5*time.Second, time.Millisecond)
+			h.slot(t, 12, 52, sequencer.ModeSteady)
+			require.Len(t, h.targets(t), 1, "the settlement holds the gate while on L1")
+			leave(node)
+			h.c.RecoverFailed(t.Context())
+			_, ok := h.resolution(8)
+			require.False(t, ok, "dropped")
+			h.c.ComposeSyncSlot(t.Context(), h.chain.header(11), h.chain.header(12).Time, 52, sequencer.ModeSteady)
+			h.c.SyncCommitted(t.Context(), h.chain.header(12))
+			require.Len(t, h.targets(t), 2)
+			h.requireWindow(t, 1, 1, 12, post.Target{Block: 52, Time: h.chain.header(12).Time})
+		})
+	}
 }
 
 // TestComposerDisposesOfPartialSettlements: derivation passing a partial

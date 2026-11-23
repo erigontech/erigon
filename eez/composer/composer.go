@@ -300,7 +300,9 @@ func (c *Composer) post(ctx context.Context, cursor uint64, terminal *types.Head
 		return err
 	}
 	hash := tx.Hash()
-	c.ledger.Begin(Posted[types.Transaction]{Height: to, Post: hash, Terminal: terminal})
+	judged := *batch
+	judged.CallData, judged.Proofs = nil, nil
+	c.ledger.Begin(Posted[types.Transaction]{Height: to, Post: hash, Terminal: terminal, Batch: &judged})
 	// A builder that hangs holds the bundle's verdict, not the chain.
 	c.wg.Go(func() {
 		sent, err := c.poster.Send(c.ctx, []types.Transaction{tx}, target)
@@ -393,8 +395,9 @@ func (c *Composer) RecoverFailed(ctx context.Context) {
 
 // settle applies derivation's cursor to the ledger and returns it: an L1
 // reorg that moved it back rolls out the settlements above it. A
-// settlement derivation has yet to see fails once its posting leaves L1,
-// whatever the cursor did meanwhile.
+// settlement derivation has yet to see fails once L1 no longer settles it,
+// its posting dropped or included again without the settlement, whatever
+// the cursor did meanwhile.
 func (c *Composer) settle(ctx context.Context) uint64 {
 	cursor := c.cursor()
 	if cursor < c.last {
@@ -402,8 +405,13 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 	}
 	c.last = cursor
 	for _, p := range c.ledger.SettledAbove(cursor) {
-		if r, err := c.observer.Node.Receipt(ctx, p.Post); err == nil && r == nil && c.ledger.Unsettle(p.Height, p.Post) {
-			c.logger.Warn("[eez] settled batch's posting left L1", "event", "eez.composer.batch.rolled_out", "to", p.Height, "post", p.Post)
+		r, err := c.observer.Node.Receipt(ctx, p.Post)
+		if err != nil || (r != nil && c.observer.judge(r, p.Batch, p.Terminal.Hash()) != Failed) {
+			continue
+		}
+		if c.ledger.Unsettle(p.Height, p.Post) {
+			c.logger.Warn("[eez] L1 no longer settles a settled batch", "event", "eez.composer.batch.rolled_out", "to", p.Height, "post", p.Post,
+				"onL1", r != nil)
 		}
 	}
 	c.ledger.ResolveBelowCursor(cursor)
