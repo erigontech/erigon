@@ -40,11 +40,11 @@ import (
 
 type (
 	filesAheadTx   struct{ kv.TemporalTx }
-	filesAheadView struct{ kv.TemporalDebugTx }
+	filesAheadView struct{ kv.FreezeInfo }
 )
 
-func (tx filesAheadTx) Debug() kv.TemporalDebugTx        { return filesAheadView{tx.TemporalTx.Debug()} }
-func (filesAheadView) TxNumsInFiles(...kv.Domain) uint64 { return 100 }
+func (tx filesAheadTx) FreezeInfo() kv.FreezeInfo { return filesAheadView{tx.TemporalTx.FreezeInfo()} }
+func (filesAheadView) ValueFilesEndTxNum() uint64 { return 100 }
 
 func TestUnwindToReportsUnknownSnapshotBoundary(t *testing.T) {
 	_, tx := temporaltest.NewTestTx(t)

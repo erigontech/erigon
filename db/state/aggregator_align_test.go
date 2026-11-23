@@ -136,6 +136,55 @@ func TestVisibleFilesAligned_LaggingStandaloneIdxClampsEveryone(t *testing.T) {
 	requireVisibleEnd(t, agg, alignStepSize)
 }
 
+func TestValueFilesEndIncludesEveryDomain(t *testing.T) {
+	for domain := range kv.DomainLen {
+		t.Run(domain.String(), func(t *testing.T) {
+			db, agg := testDbAndAggregatorv3(t, alignStepSize)
+			agg.EnableDomain(domain)
+			path := filepath.Join(agg.Dirs().SnapDomain, fmt.Sprintf("v1.0-%s.0-1.kv", domain))
+			populateFiles(t, agg.Dirs(), []string{path})
+			require.NoError(t, agg.OpenFolder(db))
+			files := agg.BeginFilesRo()
+			defer files.Close()
+			require.Zero(t, files.TxNumsInFiles(domain), "missing accessors keep the file hidden")
+			require.EqualValues(t, alignStepSize, files.ValueFilesEndTxNum())
+		})
+	}
+}
+
+func TestValueFilesEndIncludesStepsWithMissingHistory(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+	dirs := agg.Dirs()
+	generateStateFiles(t, dirs, []testFileRange{{0, 1}})
+	generateCommitmentFile(t, dirs, []testFileRange{{0, 1}})
+	generateStandaloneIIFile(t, kv.LogAddrIdx, dirs, []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder(db))
+	first := agg.BeginFilesRo()
+	defer first.Close()
+	require.EqualValues(t, alignStepSize, first.ValueFilesEndTxNum(), "an index alone cannot raise the value-file end")
+
+	// A domain closes a value file whose history is missing, but keeps it on disk.
+	generateAccountsFile(t, dirs, []testFileRange{{1, 2}})
+	history := filepath.Join(dirs.SnapHistory, "v1.0-accounts.1-2.v")
+	savedHistory := filepath.Join(t.TempDir(), filepath.Base(history))
+	require.NoError(t, os.Rename(history, savedHistory))
+	require.NoError(t, agg.OpenFolder(db))
+	hidden := agg.BeginFilesRo()
+	defer hidden.Close()
+	require.EqualValues(t, alignStepSize, hidden.TxNumsInFiles(kv.AccountsDomain))
+	require.EqualValues(t, 2*alignStepSize, hidden.ValueFilesEndTxNum())
+	require.EqualValues(t, alignStepSize, first.ValueFilesEndTxNum(), "a pinned generation keeps its own end")
+
+	require.NoError(t, dir.RemoveFile(filepath.Join(dirs.SnapDomain, "v1.0-accounts.1-2.kv")))
+	require.NoError(t, os.Rename(savedHistory, history))
+	require.NoError(t, agg.OpenFolder(db))
+	reopened := agg.BeginFilesRo()
+	defer reopened.Close()
+	require.EqualValues(t, alignStepSize, reopened.ValueFilesEndTxNum(), "history may outlive its value file")
+	require.EqualValues(t, 2*alignStepSize, hidden.ValueFilesEndTxNum())
+}
+
 // no files at all = nothing to be misaligned with, so the domains stay visible
 func TestVisibleFilesAligned_EntityWithoutFilesDoesNotClamp(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))

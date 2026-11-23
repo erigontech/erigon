@@ -696,6 +696,10 @@ type WithFreezeInfo interface {
 type FreezeInfo interface {
 	AllFiles() VisibleFiles
 	Files(domainName Domain) VisibleFiles
+
+	// ValueFilesEndTxNum returns the greatest exclusive end of any domain value
+	// file in this generation, including files hidden by missing history or indexes.
+	ValueFilesEndTxNum() uint64
 }
 
 type TemporalRwTx interface {

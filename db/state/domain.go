@@ -90,6 +90,9 @@ type Domain struct {
 	// domainVisible snapshot and published atomically via Aggregator.visible.
 	// BeginFilesRo opens readers against that snapshot in zero-copy way.
 	dirtyFiles *DirtyFiles
+	// A value file stays on disk when its mappings are closed, for example
+	// while its history is missing. Only a directory scan can lower this end.
+	valueFilesEnd uint64
 
 	checker *DependencyIntegrityChecker
 
@@ -486,6 +489,7 @@ func (d *Domain) openList(ctx context.Context, scanResult ScanDirsResult) (retir
 	if err := d.openDirtyFiles(ctx, scanResult.domainFiles); err != nil {
 		return retired, fmt.Errorf("Domain(%s).openList: %w", d.FilenameBase, err)
 	}
+	d.valueFilesEnd = d.dirtyFiles.EndTxNumMax()
 	d.protectFromHistoryFilesAheadOfDomainFiles()
 	return retired, nil
 }
@@ -1543,6 +1547,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	fi.bindex = sf.valuesBt
 	fi.existence = sf.existenceFilter
 	d.dirtyFiles.Set(fi)
+	d.valueFilesEnd = max(d.valueFilesEnd, txNumTo)
 }
 
 // unwind restores the state before txNumUnwindTo using the supplied diffs

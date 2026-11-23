@@ -31,13 +31,10 @@ func CanUnwindToBlockNum(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader) (u
 		// Undoing the block with the oldest changeset restores its parent's state.
 		earliestTarget = oldestChangesetBlock - 1
 	}
-	var filesEnd uint64
-	for domain := range kv.DomainLen {
-		filesEnd = max(filesEnd, tx.Debug().TxNumsInFiles(domain))
-	}
+	filesEnd := kv.UnderlyingTx(tx).FreezeInfo().ValueFilesEndTxNum()
 	if filesEnd > 0 {
-		// Files cover [0, filesEnd). Keep the block containing their last tx,
-		// even when changesets for older blocks are still retained.
+		// The end is exclusive. Keep the block containing the last transaction
+		// covered by a value file, even when older changesets remain.
 		lastFileBlock, ok, err := txNumsReader.FindBlockNum(context.Background(), tx, filesEnd-1)
 		if err != nil {
 			return 0, err
