@@ -148,7 +148,7 @@ func (n *node) ensureSlot(nib int) *childSlot {
 	index := n.slotIndex(nib)
 	if n.slotMask&bit == 0 {
 		if n.slots == nil {
-			n.slots = make([]childSlot, 0, slotsInitialCap)
+			n.slots = make([]childSlot, 0, max(slotsInitialCap, bits.OnesCount16(n.childMask|bit)+1))
 		}
 		n.slots = slices.Insert(n.slots, index, childSlot{})
 		n.slotMask |= bit

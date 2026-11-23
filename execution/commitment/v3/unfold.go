@@ -62,7 +62,7 @@ func unfold(ctx brancher, path []byte, plane byte, addrHash []byte) (*node, erro
 		n.refs = leafRefsOf(ctx, key, data)
 		return n, nil
 	}
-	n.slots = make([]childSlot, 0, bits.OnesCount16(l.child))
+	n.slots = make([]childSlot, 0, bits.OnesCount16(l.child)+1)
 	for m := l.child; m != 0; m &= m - 1 {
 		nib := bits.TrailingZeros16(m)
 		bit := uint16(1) << nib
