@@ -429,8 +429,9 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 }
 
 // A payload with more transactions than its gas limit allows is INVALID. When its parent is
-// validated, the parent is the latest valid ancestor and latestValidHash must name it; when the
-// parent is not validated, latestValidHash stays null.
+// validated and the payload is well formed, the parent is the latest valid ancestor and
+// latestValidHash must name it. When the parent is not validated, a transaction is zero-length or
+// malformed, or the block hash is wrong, latestValidHash stays null.
 func TestNewPayloadGasLimitRejectionReportsValidatedParent(t *testing.T) {
 	t.Parallel()
 
@@ -439,9 +440,15 @@ func TestNewPayloadGasLimitRejectionReportsValidatedParent(t *testing.T) {
 	for _, test := range []struct {
 		name            string
 		parentValidated bool
+		rawTxn          hexutil.Bytes // replaces the payload's transaction, keeping the block hash right
+		wrongBlockHash  bool
+		wantParent      bool
 	}{
-		{name: "validated parent", parentValidated: true},
+		{name: "validated parent", parentValidated: true, wantParent: true},
 		{name: "parent not validated", parentValidated: false},
+		{name: "zero-length transaction", parentValidated: true, rawTxn: hexutil.Bytes{}},
+		{name: "malformed transaction", parentValidated: true, rawTxn: hexutil.Bytes{0xc0}},
+		{name: "wrong block hash", parentValidated: true, wrongBlockHash: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -460,6 +467,14 @@ func TestNewPayloadGasLimitRejectionReportsValidatedParent(t *testing.T) {
 			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
 			payload, err := engine_types.ExecutionPayloadFromBlock(block)
 			require.NoError(t, err)
+			if test.rawTxn != nil {
+				payload.Transactions = []hexutil.Bytes{test.rawTxn}
+				header.TxHash = types.DeriveSha(types.BinaryTransactions([][]byte{test.rawTxn}))
+				payload.BlockHash = types.RlpHash(header) // Hash() would return the hash cached above
+			}
+			if test.wrongBlockHash {
+				payload.BlockHash = common.Hash{0x2}
+			}
 
 			stub := &stubExecutionModule{
 				isValidatedFunc: func(hash common.Hash) bool { return test.parentValidated && hash == parentHash },
@@ -472,7 +487,7 @@ func TestNewPayloadGasLimitRejectionReportsValidatedParent(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, engine_types.InvalidStatus, status.Status)
 			require.ErrorContains(t, status.ValidationError.Error(), "gas limit reached")
-			if test.parentValidated {
+			if test.wantParent {
 				require.NotNil(t, status.LatestValidHash)
 				require.Equal(t, parentHash, *status.LatestValidHash)
 			} else {
