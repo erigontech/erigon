@@ -508,7 +508,7 @@ func (s *blockResponseSentinel) BanPeerForInvalidData(_ context.Context, peer *s
 
 func excessChunksClient(t *testing.T) (*BeaconRpcP2P, *blockResponseSentinel) {
 	t.Helper()
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
@@ -548,7 +548,7 @@ func TestExecutionPayloadEnvelopesByRootRejectsOverLimit(t *testing.T) {
 }
 
 func TestExecutionPayloadEnvelopesByRangeAllowsSpanAboveResponseLimit(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.MaxRequestPayloads = 1
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
@@ -577,7 +577,7 @@ func TestExecutionPayloadEnvelopesByRangeAllowsSpanAboveResponseLimit(t *testing
 }
 
 func TestExecutionPayloadEnvelopesByRangeCapsResponseBelowSlotSpan(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.MaxRequestPayloads = 1
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
@@ -666,7 +666,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectPreGloasResponseVersion(t *testin
 }
 
 func TestExecutionPayloadEnvelopeRequestsRejectConfiguredRequestLimit(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.MaxBuilderDepositRequestsPerPayload = 1
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
@@ -696,7 +696,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectConfiguredRequestLimit(t *testing
 }
 
 func TestExecutionPayloadEnvelopeRequestsRejectOversizedDecompressedChunk(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
@@ -728,7 +728,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectOversizedDecompressedChunk(t *tes
 }
 
 func TestParseResponseDataRejectsOversizedCompressedChunk(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
@@ -785,7 +785,7 @@ func TestParseResponseDataRejectsOversizedCompressedChunk(t *testing.T) {
 }
 
 func TestParseResponseDataAcceptsMaxPayloadSize(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
@@ -809,7 +809,7 @@ func TestParseResponseDataAcceptsMaxPayloadSize(t *testing.T) {
 }
 
 func TestExecutionPayloadEnvelopeRequestsRejectExcessResponseChunks(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
@@ -843,7 +843,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectExcessResponseChunks(t *testing.T
 }
 
 func TestExecutionPayloadEnvelopeRequestsRejectResponseForEmptyRequest(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
@@ -905,7 +905,7 @@ func TestSendExecutionPayloadEnvelopesByRootReqReturnsValidatedPrefixOnFramingEr
 }
 
 func TestExecutionPayloadEnvelopeRequestsPreservePrefixOnPeerError(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
@@ -948,7 +948,7 @@ func testExecutionPayloadEnvelopeRequestReturnsValidatedPrefixOnFramingError(
 	request func(*BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error),
 ) {
 	t.Helper()
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
@@ -989,7 +989,7 @@ func testExecutionPayloadEnvelopeRequestReturnsValidatedPrefixOnError(
 	request func(*BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error),
 ) {
 	t.Helper()
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.MaxBuilderDepositRequestsPerPayload = 1
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
@@ -1049,7 +1049,7 @@ func TestMaxRequestPayloadsFallback(t *testing.T) {
 }
 
 func TestSendBeaconBlocksByRangeReqRejectsForkSchemaSlotMismatch(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 
@@ -1106,7 +1106,7 @@ func TestSendBeaconBlocksByRangeReqRejectsDanglingResponseCodeWithoutPartialResu
 }
 
 func TestSendBeaconBlocksByRangeReqToPeerUsesThatPeer(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	fuluDigest, err := clock.ComputeForkDigest(cfg.FuluForkEpoch)
@@ -1227,7 +1227,7 @@ func TestMaxRequestPayloadsFitsABufferedResponse(t *testing.T) {
 // A peer is rewarded for a data answer only once the answer decodes to at least one item: raw bytes
 // can be junk.
 func TestDecodedDataAnswerRewardsThePeer(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
+	cfg := mainnetConfigGloasBeforeHeze()
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	fuluDigest, err := clock.ComputeForkDigest(cfg.FuluForkEpoch)
@@ -1285,4 +1285,12 @@ func TestDecodedDataAnswerRewardsThePeer(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, envelopes, 1)
 	require.Equal(t, []string{pid}, sentinel.rewardedPeers)
+}
+
+// mainnetConfigGloasBeforeHeze keeps Gloas in the far future but one epoch before Heze,
+// so ComputeForkDigest(GloasForkEpoch) returns the Gloas digest.
+func mainnetConfigGloasBeforeHeze() clparams.BeaconChainConfig {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = cfg.FarFutureEpoch - 1
+	return cfg
 }

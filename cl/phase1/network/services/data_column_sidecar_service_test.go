@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -97,6 +98,7 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 		ElectraForkEpoch:        0,
 		FuluForkEpoch:           0,
 		GloasForkEpoch:          100000,
+		HezeForkEpoch:           math.MaxUint64,
 		MaxBlobsPerBlockElectra: 9,
 		SecondsPerSlot:          12,
 	}

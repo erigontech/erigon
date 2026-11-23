@@ -633,7 +633,7 @@ func ParseExecutionPayloadEnvelopeVersion(header string) (clparams.StateVersion,
 
 // ValidateExecutionPayloadEnvelopeVersion rejects fork schemas unsupported by this build.
 func ValidateExecutionPayloadEnvelopeVersion(version clparams.StateVersion) error {
-	if version != clparams.GloasVersion {
+	if version < clparams.GloasVersion || version > clparams.HezeVersion {
 		return fmt.Errorf("unsupported execution payload envelope consensus version %d", version)
 	}
 	return nil

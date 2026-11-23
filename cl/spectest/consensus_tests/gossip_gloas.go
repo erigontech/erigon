@@ -136,6 +136,9 @@ func gloasGossipHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
 	// configured fork epoch.
 	gossipCfg := *cfg
 	cfg.GloasForkEpoch = 0
+	if c.Version() >= clparams.HezeVersion {
+		cfg.HezeForkEpoch = 0
+	}
 	for i := range meta.Blocks {
 		block := cltypes.NewSignedBeaconBlock(cfg, c.Version())
 		if err := spectest.ReadSsz(root, c.Version(), meta.Blocks[i].Block+".ssz_snappy", block); err != nil {

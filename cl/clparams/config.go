@@ -940,20 +940,21 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 
 // ForkSchemaMatchesSlot reports whether an object decoded with decodedVersion is
 // consistent with the fork implied by slot. A peer picks the response fork digest,
-// so the two are independent inputs; Gloas changed which fields BeaconBody and
-// DataColumnSidecar carry, so a disagreement reaches a field left unset.
+// so the two are independent inputs; Gloas and Heze changed which fields BeaconBody
+// and DataColumnSidecar carry, so a disagreement reaches a field left unset.
 func (b *BeaconChainConfig) ForkSchemaMatchesSlot(slot uint64, decodedVersion StateVersion) bool {
 	return bodySchema(b.GetCurrentStateVersion(slot/b.SlotsPerEpoch)) == bodySchema(decodedVersion)
 }
 
-func bodySchema(v StateVersion) int {
+// bodySchema returns the first fork of the body layout that v uses.
+func bodySchema(v StateVersion) StateVersion {
 	switch {
 	case v >= HezeVersion:
-		return 2
+		return HezeVersion
 	case v >= GloasVersion:
-		return 1
+		return GloasVersion
 	default:
-		return 0
+		return Phase0Version
 	}
 }
 

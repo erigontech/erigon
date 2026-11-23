@@ -79,6 +79,9 @@ func ReadBeaconState(root fs.FS, version clparams.StateVersion, name string) (*s
 	if version >= clparams.GloasVersion {
 		config.GloasForkEpoch = 0
 	}
+	if version >= clparams.HezeVersion {
+		config.HezeForkEpoch = 0
+	}
 	if configBytes, err := fs.ReadFile(root, "config.yaml"); err == nil {
 		if err := yaml.Unmarshal(configBytes, &config); err != nil {
 			return nil, fmt.Errorf("couldn't parse config: %w", err)

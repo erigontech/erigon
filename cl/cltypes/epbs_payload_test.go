@@ -44,6 +44,7 @@ func TestParseExecutionPayloadEnvelopeVersion(t *testing.T) {
 
 func TestValidateExecutionPayloadEnvelopeVersion(t *testing.T) {
 	require.NoError(t, ValidateExecutionPayloadEnvelopeVersion(clparams.GloasVersion))
+	require.NoError(t, ValidateExecutionPayloadEnvelopeVersion(clparams.HezeVersion))
 	require.Error(t, ValidateExecutionPayloadEnvelopeVersion(clparams.FuluVersion))
 	require.Error(t, ValidateExecutionPayloadEnvelopeVersion(clparams.StateVersion(255)))
 }
