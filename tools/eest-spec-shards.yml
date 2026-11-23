@@ -13,6 +13,7 @@
 # Per-entry keys:
 #   shard                 (required) — shard name; see run-eest-spec-test.sh
 #                                      for the routing case statement.
+#   local-only            (optional) — keep the Make target available outside the CI matrix.
 #   workers               (required) — parallel worker count.
 #   max-allowed-failures  (required) — failure budget; bump only with a comment
 #                                      explaining why and a tracking issue.
@@ -34,10 +35,7 @@
 #                                      leaves its goroutine dump in the log, and the
 #                                      shard fails. Set it well above a healthy run:
 #                                      quiet stretches of over 10 min are normal.
-#   run                   (optional) — blocktest --run fork regex for race shards.
-#                                      Read by run-eest-spec-test.sh (to filter the
-#                                      run) and tools/check-eest-shard-coverage.sh
-#                                      (to verify the shards partition every fork).
+#   run                   (optional) — fixture name regex passed to evm --run.
 
 - shard: statetests-stable-parallel
   workers: 12
@@ -302,7 +300,20 @@
   commitment-parallel: true
   run: 'fork_AmsterdamToBogota'
 - shard: zkevm-witness-race
+  local-only: true
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: true
   expected-tests: 26853
+- shard: zkevm-witness-race-a-h
+  workers: 8
+  max-allowed-failures: 0
+  commitment-parallel: true
+  run: '^[^/]+/[a-h]'
+  expected-tests: 14189
+- shard: zkevm-witness-race-rest
+  workers: 8
+  max-allowed-failures: 0
+  commitment-parallel: true
+  run: '^[^/]+/[^a-h]'
+  expected-tests: 12664

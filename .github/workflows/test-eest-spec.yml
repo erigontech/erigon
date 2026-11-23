@@ -35,7 +35,9 @@ jobs:
           persist-credentials: false
       - id: load
         run: |
-          matrix=$(yq -o=json '.' tools/eest-spec-shards.yml | jq -c '[.[] | select(env.SKIP_DEVNET_SHARDS != "true" or (.shard | contains("-devnet") | not))]')
+          matrix=$(yq -o=json '.' tools/eest-spec-shards.yml | jq -c '[.[]
+            | select(."local-only" != true)
+            | select(env.SKIP_DEVNET_SHARDS != "true" or (.shard | contains("-devnet") | not))]')
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   # Build evm and evm.race once per run and ship them as an artifact, so the

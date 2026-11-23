@@ -12,15 +12,16 @@
 # blockchain_test_engine_x. A gap silently never runs a fork; an overlap runs
 # it twice.
 #
-# The devnet check is skipped (not failed) when the devnet corpus isn't staged,
-# so a stable-only local run still works; `make check-eest-shards` stages both.
+# A local run can check only the staged indices. `make check-eest-shards`
+# stages the stable, devnet and witness indices.
 #
-# Usage: tools/check-eest-shard-coverage.sh [STABLE_INDEX_JSON [DEVNET_INDEX_JSON]]
+# Usage: tools/check-eest-shard-coverage.sh [STABLE_INDEX_JSON [DEVNET_INDEX_JSON [ZKEVM_INDEX_JSON]]]
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")/.." && pwd)
 stable_index="${1:-$here/test-fixtures-cache/eest_stable/fixtures/.meta/index.json}"
 devnet_index="${2:-$here/test-fixtures-cache/eest_devnet/fixtures/.meta/index.json}"
+witness_index="${3:-$here/test-fixtures-cache/eest_zkevm/fixtures/.meta/index.json}"
 shards="$here/tools/eest-spec-shards.yml"
 hive="$here/.github/workflows/test-hive-eest.yml"
 
@@ -104,7 +105,16 @@ check_transaction_race_shards || rc=1
 echo
 fork_rows "$stable_index" blockchain_test | check_partition "spec race shards (blocktest --run)" blockchain_test "$(race_regexes)" || rc=1
 echo
-echo
+if [[ -f "$witness_index" || $# -ge 3 ]]; then
+	witness_regexes=$(yq -o=json '.' "$shards" | jq -r '.[] |
+		select(."local-only" != true and (.shard | startswith("zkevm-witness-race"))) |
+		"\(.shard)=\(.run // ".*")"')
+	# zkevmtest matches --run against the relative fixture path followed by the case ID.
+	jq -r '.test_cases[] | select(.format=="blockchain_test") |
+		[.fork, 1, ((.json_path | ltrimstr("blockchain_tests/")) + "/" + .id)] | @tsv' "$witness_index" \
+		| check_partition "zkEVM witness race shards (zkevmtest --run)" blockchain_test "$witness_regexes" || rc=1
+	echo
+fi
 test_rows "$stable_index" blockchain_test_engine_x | check_partition "hive stable consume-enginex (sim-limit)" blockchain_test_engine_x "$(hive_consume_enginex_regexes eest_stable)" || rc=1
 echo
 if [[ -f "$devnet_index" ]]; then
@@ -117,6 +127,6 @@ fi
 if (( rc == 0 )); then
 	echo "EEST shard coverage OK."
 else
-	echo "EEST shard coverage FAILED: fix the transaction race-shard names or race run regexes in tools/eest-spec-shards.yml, or the Hive matrix in .github/workflows/test-hive-eest.yml." >&2
+	echo "EEST shard coverage FAILED: check tools/eest-spec-shards.yml and the Hive matrix in .github/workflows/test-hive-eest.yml." >&2
 fi
 exit $rc
