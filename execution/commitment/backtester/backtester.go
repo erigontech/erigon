@@ -18,7 +18,6 @@ package backtester
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -107,9 +106,6 @@ func (bt Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) 
 }
 
 func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64, toBlock uint64) error {
-	if statecfg.Schema.CommitmentDomain.CommitmentV3Records {
-		return errors.New("not supported on commitment v3")
-	}
 	start := time.Now()
 	bt.logger.Info("starting commitment backtest", "fromBlock", fromBlock, "toBlock", toBlock)
 	if fromBlock > toBlock || fromBlock == 0 {
@@ -180,6 +176,9 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	if bt.paraTrie {
 		cfg.Variant = commitment.VariantParallelHexPatricia
 	}
+	if statecfg.Schema.CommitmentDomain.CommitmentV3Records {
+		cfg.Variant = commitment.VariantCommitmentV3
+	}
 	cfg.EnableTrieWarmup = bt.trieWarmup
 	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger, execctx.WithTrieConfig(cfg))
 	if err != nil {
@@ -215,7 +214,9 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 		domainIdx := idx[d]
 		offsets := domainIdx.Offsets(block)
 		for _, off := range offsets {
-			sd.GetCommitmentCtx().TouchKey(d, domainIdx.Key(off), nil)
+			if err := sd.GetCommitmentCtx().TouchKeyFromState(tx, []byte(domainIdx.Key(off))); err != nil {
+				return err
+			}
 		}
 		bt.logger.Info("replayed changes", "domain", d, "changes", len(offsets))
 	}

@@ -12,6 +12,7 @@ The commitment backtester aims to provide ways to:
 
 To use the commitment backtester we have to sync an Erigon node for any chain with commitment history enabled.
 Once that node has synced it can be stopped and can be used for running backtests.
+On a datadir with commitment v3 records, run the backtester with `ERIGON_COMMITMENT_V3=true`.
 
 There are two main ways a backtest can be started:
 
