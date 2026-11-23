@@ -1065,7 +1065,7 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 			continue
 		}
 		if wireSize > int64(availableRlpSpace) {
-			p.logger.Debug("[txpool] transaction exceeds remaining RLP space", "size", wireSize, "available", availableRlpSpace)
+			p.logger.Debug("[txpool] skipping txn bigger than available rlp space", "size", wireSize, "available", availableRlpSpace)
 			continue
 		}
 

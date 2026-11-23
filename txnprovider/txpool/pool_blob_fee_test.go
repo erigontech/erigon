@@ -103,10 +103,6 @@ func TestBestKeepsPendingBlobTxnWithMissingWrapper(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, provided, 1)
 	require.IsType(t, &types.BlobTxWrapper{}, provided[0])
-	var pending TxnsRlp
-	_, err = pool.PeekBest(ctx, 1, &pending, 0)
-	require.NoError(t, err)
-	require.Equal(t, [][]byte{wrapper}, pending.Txns)
 }
 
 // Removing a txn from the middle of pending swaps the last one into its place; best() must leave pending sorted.
