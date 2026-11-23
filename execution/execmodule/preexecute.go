@@ -396,9 +396,15 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 	// transaction, and they are the block's own, carried along the staged parent. Nothing about the
 	// budget lives on the SharedDomains, which spans a whole batch of blocks on the canonical path.
 	spent := uint64(0)
+	var base execctx.ReceiptBase
 	for _, r := range blockReceiptsSoFar(doms, stagingBase) {
 		spent += r.GasUsed
+		base.BlobGasUsed += r.BlobGasUsed
+		base.NextLogIndex += uint32(len(r.Logs))
 	}
+	base.CumulativeGasUsed = spent
+	doms.SetPreExecReceiptBase(base)
+	defer doms.ClearPreExecReceiptBase()
 	remaining := header.GasLimit - min(spent, header.GasLimit)
 	var gasFullSeen atomic.Bool
 	ctx = exec.WithBlockGas(ctx, exec.BlockGas{

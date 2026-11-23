@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"maps"
 	"math"
 	"os"
@@ -3051,6 +3052,10 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 			}
 			cumulativeGasUsed = prevRes.Receipt.CumulativeGasUsed
 			firstLogIndex = prevRes.Receipt.FirstLogIndexWithinBlock + uint32(len(prevRes.Receipt.Logs))
+		} else if base, ok := pe.preExecReceiptBase(); ok {
+			cumulativeGasUsed = base.CumulativeGasUsed
+			firstLogIndex = base.NextLogIndex
+			be.blobGasUsed = base.BlobGasUsed
 		} else {
 			cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(applyTx, txVersion.TxNum)
 			if err != nil {
@@ -3983,4 +3988,13 @@ func isCancellation(err error) bool {
 // isInProgressHeader reports a flashblock header still being assembled: its receipt root is all-zero, which no real header carries.
 func isInProgressHeader(h *types.Header) bool {
 	return h != nil && h.ReceiptHash == (common.Hash{})
+}
+
+// preExecReceiptBase is where a pre-exec round that resumes mid-block continues its receipts from: the receipt
+// cache does not hold the earlier rounds' transactions as of this round's start.
+func (pe *parallelExecutor) preExecReceiptBase() (execctx.ReceiptBase, bool) {
+	if !pe.isForkValidation || pe.doms == nil {
+		return execctx.ReceiptBase{}, false
+	}
+	return pe.doms.PreExecReceiptBase()
 }

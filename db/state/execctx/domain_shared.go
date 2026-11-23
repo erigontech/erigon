@@ -251,6 +251,8 @@ type SharedDomains struct {
 	// validation never commits). SeekCommitment (the commitment start model) is left untouched.
 	preExecStart    uint64
 	preExecStartSet bool
+	receiptBase     ReceiptBase
+	receiptBaseSet  bool
 	// flashblockReceipts accumulates, in body order, the per-round receipts of the in-progress
 	// flashblock block. The SD is the natural home: it is fresh per block (auto-reset) and carried
 	// forward across rounds, exactly matching the accumulation lifecycle — so the seal derives
@@ -1230,6 +1232,27 @@ func (sd *SharedDomains) SetPreExecStart(txNum uint64) {
 
 // ClearPreExecStart reverts SeekStart to the commitment start model.
 func (sd *SharedDomains) ClearPreExecStart() { sd.preExecStartSet = false }
+
+// ReceiptBase is what a block's transactions before a resume point used: the receipts of the transactions that
+// follow continue from it.
+type ReceiptBase struct {
+	CumulativeGasUsed uint64
+	BlobGasUsed       uint64
+	NextLogIndex      uint32
+}
+
+// SetPreExecReceiptBase gives a round that resumes mid-block the receipt offsets of the block so far.
+func (sd *SharedDomains) SetPreExecReceiptBase(b ReceiptBase) {
+	sd.receiptBase = b
+	sd.receiptBaseSet = true
+}
+
+func (sd *SharedDomains) ClearPreExecReceiptBase() { sd.receiptBaseSet = false }
+
+// PreExecReceiptBase returns the receipt offsets a resumed round continues from, if set.
+func (sd *SharedDomains) PreExecReceiptBase() (ReceiptBase, bool) {
+	return sd.receiptBase, sd.receiptBaseSet
+}
 
 // AppendFlashblockReceipts appends a flashblock round's new-tx receipts to this SD's accumulated
 // full-body receipt list (in body order). Called by the executor per round on the fork-validation

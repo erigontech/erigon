@@ -36,3 +36,30 @@ func TestABlockWithLogsSealsTheReceiptRootAFullExecutionComputes(t *testing.T) {
 	require.NoError(t, insertValidateAndUfc1By1(h.ctx, h.independentNode().ExecModule, []*types.Block{b}),
 		"an independent node executing the block accepts its receipt root")
 }
+
+// Log indexes number every log in the block in body order, across the rounds the block was built in.
+func TestLogIndexesRunAcrossTheRoundsOfABlock(t *testing.T) {
+	h := newRoundHarness(t)
+	head, err := h.m.ExecModule.CurrentHeader(h.ctx)
+	require.NoError(t, err)
+	params, in := h.attrs(head)
+
+	rounds := [][][]byte{
+		{h.signed(0, 0, nil, 100_000, emitsALog)},
+		{h.signed(1, 0, nil, 100_000, emitsALog)},
+		{h.signed(0, 1, nil, 100_000, emitsALog)},
+	}
+	for i, r := range rounds {
+		_, _, vr, rerr := h.m.ExecModule.PreExecuteFlashblock(h.ctx, in, r)
+		require.NoError(t, rerr, "round %d", i+1)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "round %d: %s", i+1, vr.ValidationError)
+	}
+	br, err := h.m.ExecModule.SealBlock(h.ctx, params, false)
+	require.NoError(t, err)
+	require.Len(t, br.Receipts, 3)
+	for i, r := range br.Receipts {
+		require.Len(t, r.Logs, 1)
+		require.Equal(t, uint32(i), r.FirstLogIndexWithinBlock, "receipt %d's first log index", i)
+		require.EqualValues(t, i, r.Logs[0].Index, "receipt %d's log index", i)
+	}
+}
