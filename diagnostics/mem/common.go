@@ -18,7 +18,6 @@ package mem
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"runtime"
 	"sync"
@@ -30,8 +29,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 )
-
-var ErrorUnsupportedPlatform = errors.New("unsupported platform")
 
 const VirtualMemStatsAge = 30 * time.Minute
 
