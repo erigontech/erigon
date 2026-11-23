@@ -22,53 +22,14 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"maps"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
-
-	"github.com/c2h5oh/datasize"
-
-	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/erigontech/erigon/common"
 )
-
-// NewGatedRoDB wraps an RoDB so every View() call acquires gate.RLock() for
-// the duration of the tx. Purpose: serialize background read txs (e.g.
-// snapshot retirement reading chaindata) against a writer that briefly holds
-// gate.Lock() during commit. Without the gate, a concurrent reader pins the
-// MDBX freelist and prevents page reclamation at commit time.
-//
-// BeginRo is passed through ungated — gating open-ended Tx lifetimes has
-// ambiguous scope. Callers that need gating must use the View closure idiom.
-func NewGatedRoDB(inner RoDB, gate *sync.RWMutex) RoDB {
-	if gate == nil {
-		return inner
-	}
-	return &gatedRoDB{inner: inner, gate: gate}
-}
-
-type gatedRoDB struct {
-	inner RoDB
-	gate  *sync.RWMutex
-}
-
-func (g *gatedRoDB) Close()                                  { g.inner.Close() }
-func (g *gatedRoDB) BeginRo(ctx context.Context) (Tx, error) { return g.inner.BeginRo(ctx) }
-func (g *gatedRoDB) ReadOnly() bool                          { return g.inner.ReadOnly() }
-func (g *gatedRoDB) AllTables() TableCfg                     { return g.inner.AllTables() }
-func (g *gatedRoDB) PageSize() datasize.ByteSize             { return g.inner.PageSize() }
-func (g *gatedRoDB) CHandle() unsafe.Pointer                 { return g.inner.CHandle() }
-func (g *gatedRoDB) Path() string                            { return g.inner.Path() }
-func (g *gatedRoDB) View(ctx context.Context, f func(tx Tx) error) error {
-	g.gate.RLock()
-	defer g.gate.RUnlock()
-	return g.inner.View(ctx, f)
-}
 
 // Adapts an RoDB to the RwDB interface (invoking write operations results in error)
 type RwWrapper struct {
@@ -260,8 +221,8 @@ func LastKey(tx Tx, table string) ([]byte, error) {
 func NextSubtree(in []byte) ([]byte, bool) {
 	r := make([]byte, len(in))
 	copy(r, in)
-	for i := len(r) - 1; i >= 0; i-- {
-		if r[i] != 255 {
+	for i, v := range slices.Backward(r) {
+		if v != 255 {
 			r[i]++
 			return r, true
 		}
@@ -271,22 +232,11 @@ func NextSubtree(in []byte) ([]byte, bool) {
 	return nil, false
 }
 
-func IncrementKey(tx RwTx, table string, k []byte) error {
-	v, err := tx.GetOne(table, k)
-	if err != nil {
-		return err
-	}
-	var version uint64
-	if len(v) == 8 {
-		version = binary.BigEndian.Uint64(v)
-	}
-	version++
-	return tx.Put(table, k, hexutil.EncodeTs(version))
-}
-
 type DomainEntryDiff struct {
-	Key   string
-	Value []byte // nil means "delete only" (prev value was at a different step), non-nil means "restore this value"
+	Key string
+	// Previous value to restore; a non-nil empty slice means absent.
+	// A nil value is a legacy delete-only entry.
+	Value []byte
 }
 
 // DomainDiff represents a domain of state changes.
@@ -298,10 +248,6 @@ type DomainDiff struct {
 	currentStepBuf, keyBuf []byte
 }
 
-func (d *DomainDiff) Copy() *DomainDiff {
-	return &DomainDiff{prevValues: maps.Clone(d.prevValues)}
-}
-
 func (d *DomainDiff) Len() int {
 	if d == nil {
 		return 0
@@ -309,10 +255,8 @@ func (d *DomainDiff) Len() int {
 	return len(d.prevValues)
 }
 
-// RecordDelta records a state change.
-// prevValue is the previous value at the key. If prevStep != step, the previous value lives
-// at a different step position in the DB and doesn't need restoring on unwind (just delete current).
-// We encode this as nil in prevValues. If prevStep == step, we store the actual prevValue.
+// DomainUpdate keeps the first previous value recorded for each (key, step)
+// pair within this diff.
 func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte) {
 	if d.prevValues == nil {
 		d.prevValues = make(map[string][]byte, 16)
@@ -349,4 +293,12 @@ func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
 		return cmp.Compare(a.Key, b.Key)
 	})
 	return d.prevValsSlice
+}
+
+// RollbackUnless rolls tx back unless *ok is true. Defer it right after opening
+// a tx that is returned to the caller, so an early return or panic cannot leak it.
+func RollbackUnless(ok *bool, tx Tx) {
+	if !*ok {
+		tx.Rollback()
+	}
 }

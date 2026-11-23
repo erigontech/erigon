@@ -18,8 +18,8 @@ package cltypes
 
 import (
 	"encoding/json"
+	"errors"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -69,6 +69,9 @@ func (b *BlobSidecar) UnmarshalJSON(buf []byte) error {
 	tmp.CommitmentInclusionProof = solid.NewHashVector(CommitmentBranchSize)
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
+	}
+	if tmp.Blob == nil {
+		return errors.New("blob sidecar has a null blob")
 	}
 	b.Index = tmp.Index
 	b.Blob = *tmp.Blob
@@ -141,7 +144,7 @@ func (b *BlobIdentifier) getSchema() []any {
 	}
 }
 
-func VerifyCommitmentInclusionProof(commitment common.Bytes48, commitmentInclusionProof solid.HashVectorSSZ, commitmentIndex uint64, version clparams.StateVersion, bodyRoot [32]byte) bool {
+func VerifyCommitmentInclusionProof(commitment common.Bytes48, commitmentInclusionProof solid.HashVectorSSZ, commitmentIndex uint64, bodyRoot [32]byte) bool {
 	// Initialize the merkle tree leaf
 	value, err := merkle_tree.HashTreeRoot(commitment[:])
 	if err != nil {

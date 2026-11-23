@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -129,6 +130,7 @@ func TestConvertCommitmentFile_AlreadyTarget(t *testing.T) {
 //   - every non-state key in the output decodes canonically via DecodeKeyV2
 //   - the key count is preserved
 func TestConvertCommitmentFile_V1ToV2_KeysOnly(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -202,6 +204,7 @@ func TestConvertCommitmentFile_V1ToV2_KeysOnly(t *testing.T) {
 // short (sub-10-byte) plain-key references — the squeeze marker the read-side
 // detector keys off of.
 func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -262,6 +265,7 @@ func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
 // in tmpDir2, and compare tmpDir2/<file>.kv bytes against a snapshot taken
 // before the first conversion.
 func TestConvertCommitmentFile_RoundTrip_V1V2(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -353,6 +357,7 @@ func snapshotCommitmentFiles(t *testing.T, snapDir string) map[string][]byte {
 //     the commitment root computed against the reloaded files matches the
 //     root the original files produced.
 func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -415,7 +420,7 @@ func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
 	// Phase 4 invariant: rebuild dir is gone.
 	rebuildDir := filepath.Join(agg.Dirs().Snap, "rebuild", "domain")
 	_, statErr := os.Stat(rebuildDir)
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"rebuild dir must be removed; got err=%v", statErr)
 
 	// Phase 4 invariant: snapshots/domain/ has a fresh .kv + .kvi for each
@@ -437,6 +442,45 @@ func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
 	rootAfter := computeCommitmentRoot(t, db)
 	require.Equal(t, rootBefore, rootAfter,
 		"commitment root must be unchanged across squeeze conversion")
+}
+
+func TestConvertCommitmentFiles_RejectsUnindexedLegacyFileBeforeBackup(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
+	rogue := filepath.Join(agg.Dirs().SnapDomain, "v2.0-commitment.999-1000.kv")
+	require.NoError(t, os.WriteFile(rogue, nil, 0o644))
+
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(rwTx.Rollback)
+	at := state.AggTx(rwTx)
+	err = state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{TargetV3: true}, log.New())
+	rwTx.Rollback()
+	require.ErrorContains(t, err, "v2.0-commitment.999-1000.kv")
+	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "backup"))
+}
+
+func TestConvertCommitmentFiles_V3MarksExecResetPending(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(rwTx.Rollback)
+	require.NoError(t, state.CheckExecResetDone(agg.Dirs()))
+	state.SetConvertPhase5HookForTest(func() error {
+		require.ErrorContains(t, state.CheckExecResetDone(agg.Dirs()), "stage_exec --reset")
+		return errors.New("injected phase5 failure")
+	})
+	t.Cleanup(func() { state.SetConvertPhase5HookForTest(nil) })
+	err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(rwTx), state.ConvertOpts{TargetV3: true}, log.New())
+	rwTx.Rollback()
+	require.ErrorContains(t, err, "injected phase5 failure")
+	require.ErrorContains(t, state.CheckExecResetDone(agg.Dirs()), "stage_exec --reset")
 }
 
 // anyFileHasSqueezedField returns true if any non-state branch value in any of
@@ -510,6 +554,7 @@ func swapVersionExt(kviPath string) string {
 // pre-conversion snapshot. The composed round-trip also implicitly exercises
 // both axes in both directions.
 func TestConvertCommitmentFiles_RoundTripComposed(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -574,6 +619,7 @@ func runOrchestrator(t *testing.T, db kv.TemporalRwDB, opts state.ConvertOpts) {
 // every file is already in the requested state, the orchestrator emits no
 // backup, no rebuild dir, and modifies nothing on disk.
 func TestConvertCommitmentFiles_AllAlreadyTarget(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -600,9 +646,9 @@ func TestConvertCommitmentFiles_AllAlreadyTarget(t *testing.T) {
 	backupDir := filepath.Join(agg.Dirs().Snap, "backup", "domains")
 	rebuildDir := filepath.Join(agg.Dirs().Snap, "rebuild", "domain")
 	_, err := os.Stat(backupDir)
-	require.Truef(t, errors.Is(err, os.ErrNotExist), "backup dir must not exist (err=%v)", err)
+	require.ErrorIsf(t, err, os.ErrNotExist, "backup dir must not exist (err=%v)", err)
 	_, err = os.Stat(rebuildDir)
-	require.Truef(t, errors.Is(err, os.ErrNotExist), "rebuild dir must not exist (err=%v)", err)
+	require.ErrorIsf(t, err, os.ErrNotExist, "rebuild dir must not exist (err=%v)", err)
 }
 
 // TestConvertCommitmentFiles_EmptyDatadir covers the no-files-at-all path:
@@ -626,9 +672,9 @@ func TestConvertCommitmentFiles_EmptyDatadir(t *testing.T) {
 
 	// Nothing was created.
 	_, err = os.Stat(filepath.Join(agg.Dirs().Snap, "backup"))
-	require.Truef(t, errors.Is(err, os.ErrNotExist), "backup must not exist (err=%v)", err)
+	require.ErrorIsf(t, err, os.ErrNotExist, "backup must not exist (err=%v)", err)
 	_, err = os.Stat(filepath.Join(agg.Dirs().Snap, "rebuild"))
-	require.Truef(t, errors.Is(err, os.ErrNotExist), "rebuild must not exist (err=%v)", err)
+	require.ErrorIsf(t, err, os.ErrNotExist, "rebuild must not exist (err=%v)", err)
 }
 
 // TestConvertCommitmentFiles_BackupExists covers the pre-flight refusal path:
@@ -636,6 +682,7 @@ func TestConvertCommitmentFiles_EmptyDatadir(t *testing.T) {
 // the user hasn't acknowledged), the orchestrator must refuse to start so it
 // can't silently overwrite a recovery point.
 func TestConvertCommitmentFiles_BackupExists(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -663,6 +710,7 @@ func TestConvertCommitmentFiles_BackupExists(t *testing.T) {
 // if a prior crashed run left junk under snapshots/rebuild/domain/, the
 // orchestrator wipes it on pre-flight and proceeds normally.
 func TestConvertCommitmentFiles_LeftoverRebuild(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -679,7 +727,7 @@ func TestConvertCommitmentFiles_LeftoverRebuild(t *testing.T) {
 
 	// Junk gone; conversion completed.
 	_, err := os.Stat(junk)
-	require.Truef(t, errors.Is(err, os.ErrNotExist),
+	require.ErrorIsf(t, err, os.ErrNotExist,
 		"stale rebuild file must be wiped (err=%v)", err)
 	backupDir := filepath.Join(agg.Dirs().Snap, "backup", "domains")
 	_, err = os.Stat(backupDir)
@@ -717,6 +765,7 @@ func listVisibleCommitmentKVs(t *testing.T, db kv.TemporalRwDB) []kv.VisibleFile
 // than by counting log lines (which is fragile across line-number /
 // timestamp changes — see the plan's "Decision now" note in Task 5).
 func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -811,7 +860,7 @@ func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
 		require.Truef(t, bytes.Equal(want, got), "snapDomain file %s mutated during Phase 1 cancel", name)
 	}
 	_, statErr := os.Stat(backupDir)
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"backup dir must not exist after Phase 1 cancel (Phase 3 did not run): %v", statErr)
 
 	// Second run: Continue=true, fresh ctx, hook installed only to count calls
@@ -838,7 +887,7 @@ func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
 
 	// Phase 4 invariant: rebuildDir is gone.
 	_, statErr = os.Stat(rebuildDir)
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"rebuildDir must be removed after successful resume: %v", statErr)
 
 	// Phase 3 invariant: every original is backed up.
@@ -905,7 +954,8 @@ func TestRestoreCommitmentFiles_HappyPath(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"), []byte("CONV_KV"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"), []byte("CONV_BT"), 0o644))
 
-	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New()))
+	restoreErr := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	require.NoError(t, restoreErr)
 
 	restoredKV := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"))
 	restoredBT := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"))
@@ -913,10 +963,10 @@ func TestRestoreCommitmentFiles_HappyPath(t *testing.T) {
 	require.Equal(t, origBT, restoredBT, "bt must hold original backup bytes")
 
 	_, statErr := os.Stat(backupDir)
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"backup dir must be removed after restore (err=%v)", statErr)
 	_, statErr = os.Stat(filepath.Join(dirs.Snap, "backup"))
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"empty backup parent must be removed (err=%v)", statErr)
 }
 
@@ -964,14 +1014,15 @@ func TestRestoreCommitmentFiles_OrphanSweep(t *testing.T) {
 	require.NoError(t, os.WriteFile(convKVPath, []byte("CONV_KV"), 0o644))
 	require.NoError(t, os.WriteFile(convKVEIPath, []byte("CONV_KVEI"), 0o644))
 
-	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New()))
+	restoreErr := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	require.NoError(t, restoreErr)
 
 	// Sweep removed both cross-version artifacts.
 	_, statErr := os.Stat(convKVPath)
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"v2.1 .kv orphan must be swept (err=%v)", statErr)
 	_, statErr = os.Stat(convKVEIPath)
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"v2.1 .kvei orphan must be swept (err=%v)", statErr)
 
 	// Originals restored with backup content.
@@ -979,6 +1030,25 @@ func TestRestoreCommitmentFiles_OrphanSweep(t *testing.T) {
 	restoredBT := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"))
 	require.Equal(t, origKV, restoredKV)
 	require.Equal(t, origBT, restoredBT)
+}
+
+func TestRestoreCommitmentFiles_RejectsV3FileOutsideManifest(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	_, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backupDir, 0o755))
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.kv"), []byte("ORIG"), 0o644))
+	orphan := filepath.Join(dirs.SnapDomain, "v3.0-commitment.16-32.kv")
+	require.NoError(t, os.WriteFile(orphan, []byte("ORPHAN"), 0o644))
+
+	err := state.RestoreCommitmentFiles(t.Context(), dirs, log.New())
+	require.ErrorContains(t, err, "v3.0-commitment.16-32.kv")
+	require.FileExists(t, orphan)
+	require.FileExists(t, filepath.Join(backupDir, "v2.0-commitment.0-32.kv"))
 }
 
 // TestRestoreCommitmentFiles_RerunnableAfterPartialFailure simulates a restore
@@ -1010,6 +1080,7 @@ func TestRestoreCommitmentFiles_RerunnableAfterPartialFailure(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"), origBT, 0o644))
 
 	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New()))
+	require.NoError(t, state.CheckExecResetDone(dirs))
 
 	// All three originals present with the expected content — the manifest-aware
 	// sweep must not have deleted the .kv/.bt files already in place.
@@ -1019,7 +1090,7 @@ func TestRestoreCommitmentFiles_RerunnableAfterPartialFailure(t *testing.T) {
 
 	// Backup tree gone after successful completion.
 	_, statErr := os.Stat(backupDir)
-	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+	require.ErrorIsf(t, statErr, os.ErrNotExist,
 		"backup dir must be removed after successful retry (err=%v)", statErr)
 }
 
@@ -1111,7 +1182,8 @@ func TestRestoreCommitmentFiles_AtomicManifestIgnoresStaleTmp(t *testing.T) {
 	// Stale tmp from a crashed manifest write — must be ignored, not parsed.
 	require.NoError(t, os.WriteFile(filepath.Join(backupDir, ".restore_manifest.tmp"), []byte("garbage"), 0o644))
 
-	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New()))
+	restoreErr := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	require.NoError(t, restoreErr)
 
 	restoredKV := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"))
 	require.Equal(t, origKV, restoredKV)

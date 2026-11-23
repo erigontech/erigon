@@ -28,9 +28,11 @@ import (
 	"hash"
 	"os"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 	xsha3 "golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
@@ -302,7 +304,7 @@ func TestLoadECDSA(t *testing.T) {
 			t.Fatal(err)
 		}
 		filename := f.Name()
-		if _, err := f.WriteString(test.input); err != nil {
+		if _, err = f.WriteString(test.input); err != nil {
 			f.Close()
 			t.Fatal(err)
 		}
@@ -415,3 +417,43 @@ var (
 	sinkHash  common.Hash
 	sinkBytes []byte
 )
+
+func TestKeccak256HashMatchesReference(t *testing.T) {
+	ref := func(in []byte) (h common.Hash) {
+		d := xsha3.NewLegacyKeccak256()
+		d.Write(in)
+		d.Sum(h[:0])
+		return h
+	}
+	for n := 0; n <= 100; n++ {
+		in := bytes.Repeat([]byte{byte(n)}, n)
+		for range 2 { // the second call is served from the cache when 0 < n <= keccakCacheMaxInput
+			if got, want := Keccak256Hash(in), ref(in); got != want {
+				t.Fatalf("len %d: got %x, want %x", n, got, want)
+			}
+		}
+	}
+	var wg sync.WaitGroup
+	for g := range 8 {
+		wg.Go(func() {
+			for i := range 20000 {
+				in := []byte{byte(i), byte(i >> 8), byte(g % 2)}
+				if Keccak256Hash(in) != ref(in) {
+					t.Errorf("mismatch for %x", in)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+}
+
+func TestPrefaultKeepsBucketsInUse(t *testing.T) {
+	buckets := new([1 << 17]keccakBucket)
+	buckets[0].seq.Store(5)
+	buckets[0].tag.Store(7)
+	prefault(buckets)
+	require.Equal(t, uint64(5), buckets[0].seq.Load())
+	require.Equal(t, uint64(7), buckets[0].tag.Load())
+	require.Zero(t, buckets[len(buckets)-1].seq.Load())
+}

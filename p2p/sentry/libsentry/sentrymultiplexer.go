@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"slices"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -113,11 +114,10 @@ func fanOutSuccess[R interface{ GetSuccess() bool }](ctx context.Context, client
 func streamFanIn[T protoreflect.ProtoMessage, S interface{ Recv() (T, error) }](ctx context.Context, clients []*client, open func(context.Context, *client) (S, error)) *SentryStreamC[T] {
 	g, gctx := errgroup.WithContext(ctx)
 
-	ch := make(chan StreamReply[T], MessagesQueueSize)
-	streamServer := &SentryStreamS[T]{Ch: ch, Ctx: ctx}
+	streamServer, streamClient := NewSentryStream[T](ctx)
 
 	go func() {
-		defer close(ch)
+		defer streamServer.Close()
 
 		for _, client := range clients {
 			g.Go(func() error {
@@ -145,7 +145,9 @@ func streamFanIn[T protoreflect.ProtoMessage, S interface{ Recv() (T, error) }](
 						return fmt.Errorf("recv: %w", err)
 					}
 
-					_ = streamServer.Send(message)
+					if err := streamServer.Send(message); err != nil {
+						return err
+					}
 				}
 			})
 		}
@@ -153,7 +155,7 @@ func streamFanIn[T protoreflect.ProtoMessage, S interface{ Recv() (T, error) }](
 		_ = g.Wait()
 	}()
 
-	return &SentryStreamC[T]{Ch: ch, Ctx: ctx}
+	return streamClient
 }
 
 func (m *sentryMultiplexer) SetStatus(ctx context.Context, in *sentryproto.StatusData, opts ...grpc.CallOption) (*sentryproto.SetStatusReply, error) {
@@ -487,13 +489,17 @@ func (m *sentryMultiplexer) peersByClient(ctx context.Context, minProtocol sentr
 }
 
 func (m *sentryMultiplexer) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.PeersReply, error) {
-	var allPeers []*typesproto.PeerInfo
-
 	allReplies, err := m.peersByClient(ctx, noProtocol, opts...)
 	if err != nil {
 		return nil, err
 	}
 
+	var total int
+	for _, sentPeers := range allReplies {
+		total += len(sentPeers.GetPeers())
+	}
+
+	allPeers := slices.Grow([]*typesproto.PeerInfo(nil), total)
 	for _, sentPeers := range allReplies {
 		allPeers = append(allPeers, sentPeers.GetPeers()...)
 	}

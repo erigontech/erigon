@@ -63,15 +63,16 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 		return err
 	}
 	rcfg := beacon_router_configuration.RouterConfiguration{
-		Protocol:         cfg.BeaconProtocol,
-		Address:          cfg.BeaconAddr,
-		ReadTimeTimeout:  cfg.BeaconApiReadTimeout,
-		WriteTimeout:     cfg.BeaconApiWriteTimeout,
-		IdleTimeout:      cfg.BeaconApiWriteTimeout,
-		AllowedOrigins:   cfg.AllowedOrigins,
-		AllowedMethods:   cfg.AllowedMethods,
-		AllowCredentials: cfg.AllowCredentials,
-		PreserveGraffiti: cfg.PreserveGraffiti,
+		Protocol:                  cfg.BeaconProtocol,
+		Address:                   cfg.BeaconAddr,
+		ReadTimeTimeout:           cfg.BeaconApiReadTimeout,
+		WriteTimeout:              cfg.BeaconApiWriteTimeout,
+		IdleTimeout:               cfg.BeaconApiWriteTimeout,
+		AllowedOrigins:            cfg.AllowedOrigins,
+		AllowedMethods:            cfg.AllowedMethods,
+		AllowCredentials:          cfg.AllowCredentials,
+		PreserveGraffiti:          cfg.PreserveGraffiti,
+		DisablePayloadPreparation: cfg.DisablePayloadPreparation,
 	}
 	if err := rcfg.UnwrapEndpointsList(cfg.AllowedEndpoints); err != nil {
 		return err
@@ -108,23 +109,33 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 
-	return caplin1.RunCaplinService(ctx, executionEngine, clparams.CaplinConfig{
+	config := newCaplinConfig(cliCtx, cfg)
+	config.BeaconAPIRouter = rcfg
+	config.NetworkId = networkId
+	return caplin1.RunCaplinService(ctx, executionEngine, config, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema)
+}
+
+func newCaplinConfig(cliCtx *cli.Command, cfg *caplincli.CaplinCliCfg) clparams.CaplinConfig {
+	return clparams.CaplinConfig{
+		SentinelAddr:              cliCtx.String(sentinelflags.SentinelServerAddr.Name),
+		SentinelPort:              uint64(cliCtx.Int(sentinelflags.SentinelServerPort.Name)),
 		CaplinDiscoveryAddr:       cfg.Addr,
 		CaplinDiscoveryPort:       uint64(cfg.Port),
 		CaplinDiscoveryTCPPort:    uint64(cfg.ServerTcpPort),
 		CaplinDiscoveryQUICPort:   uint64(cfg.ServerQUICPort),
-		BeaconAPIRouter:           rcfg,
-		NetworkId:                 networkId,
+		CaplinDisableQUIC:         cfg.ServerQUICDisable,
 		LocalDiscovery:            cfg.LocalDiscovery,
 		MevRelayUrl:               cfg.MevRelayUrl,
 		AllowPrivateBuilderURLs:   cfg.AllowPrivateBuilderURLs,
 		CustomConfigPath:          cfg.CustomConfig,
 		CustomGenesisStatePath:    cfg.CustomGenesisState,
 		MaxPeerCount:              cfg.MaxPeerCount,
+		DisableIPBlockLimits:      cfg.DisableIPBlockLimits,
+		TrustedCIDRs:              cfg.TrustedCIDRs,
 		SubscribeAllTopics:        cfg.SubscribeAllTopics,
 		MaxInboundTrafficPerPeer:  datasize.MB,
 		MaxOutboundTrafficPerPeer: datasize.MB,
 		BootstrapNodes:            cfg.Bootnodes,
 		StaticPeers:               cfg.StaticPeers,
-	}, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema)
+	}
 }

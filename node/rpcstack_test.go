@@ -32,6 +32,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 	"net"
 	"net/http"
@@ -209,7 +210,7 @@ func startHTTPServer(t *testing.T, allowList rpc.AllowList, cors, vhosts []strin
 
 	srv := newTestRPCServer(t)
 	srv.SetAllowList(allowList)
-	ts := httptest.NewServer(NewHTTPHandlerStack(srv, cors, vhosts, false, 1000, true))
+	ts := httptest.NewServer(NewHTTPHandlerStack(srv, cors, vhosts, false, false, 1000, true))
 	t.Cleanup(ts.Close)
 	return ts.URL
 }
@@ -306,7 +307,7 @@ func rpcRequest(t *testing.T, url string, extraHeaders ...string) *http.Response
 func TestGzipBatchKeepsBody(t *testing.T) {
 	srv := rpc.NewServer(50, false /* traceRequests */, false /* debugSingleRequest */, false /* disableStreaming */, testlog.Logger(t, log.LvlError), 0)
 	t.Cleanup(srv.Stop)
-	ts := httptest.NewServer(NewHTTPHandlerStack(srv, nil, nil, true, 1000, true))
+	ts := httptest.NewServer(NewHTTPHandlerStack(srv, nil, nil, true, true, 1000, true))
 	t.Cleanup(ts.Close)
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL, strings.NewReader(`[{"jsonrpc":"2.0","id":1,"method":"rpc_modules"}]`))
@@ -324,7 +325,7 @@ func TestGzipBatchKeepsBody(t *testing.T) {
 // reach it only by prior knowledge and Nethermind refuses it too.
 func TestHTTP2CleartextNotServed(t *testing.T) {
 	srv := newTestRPCServer(t)
-	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
+	handler := NewHTTPHandlerStack(srv, nil, nil, false, false, 1000, true)
 	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = httpSrv.Shutdown(context.Background()) })
@@ -349,7 +350,7 @@ func TestHTTP2CleartextNotServed(t *testing.T) {
 // is answered on HTTP/1.1 instead of being switched, so it keeps working.
 func TestHTTP1UpgradeToH2CIsIgnored(t *testing.T) {
 	srv := newTestRPCServer(t)
-	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
+	handler := NewHTTPHandlerStack(srv, nil, nil, false, false, 1000, true)
 	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = httpSrv.Shutdown(context.Background()) })
@@ -377,7 +378,7 @@ func TestHTTP1UpgradeToH2CIsIgnored(t *testing.T) {
 func TestHTTPSEndpoint(t *testing.T) {
 	certFile, keyFile, roots := newSelfSignedCert(t)
 	srv := newTestRPCServer(t)
-	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
+	handler := NewHTTPHandlerStack(srv, nil, nil, false, false, 1000, true)
 	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{
 		Timeouts: rpccfg.DefaultHTTPTimeouts,
 		HTTPS:    true,
@@ -600,4 +601,53 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return limiter.(*wsConnectionLimiter).count.Load() == 0
 	}, 2*time.Second, time.Millisecond)
+}
+
+func TestCorsHandlerRefusesCrossSiteGet(t *testing.T) {
+	calls := 0
+	srv := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++ })
+
+	get := func(h http.Handler, header http.Header) int {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost:8545/?method=debug_setHead&params=[1]", nil)
+		maps.Copy(req.Header, header)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	refused := []http.Header{
+		{"Sec-Fetch-Site": {"cross-site"}},
+		{"Sec-Fetch-Site": {"same-site"}},
+		{"Origin": {"https://evil.example"}},
+	}
+	allowedOrigin := http.Header{"Sec-Fetch-Site": {"cross-site"}, "Origin": {"https://dapp.example"}}
+	passed := []http.Header{
+		{},
+		{"Sec-Fetch-Site": {"none"}},
+		{"Sec-Fetch-Site": {"same-origin"}, "Origin": {"http://localhost:8545"}},
+	}
+
+	// No CORS list: every cross-site GET is refused.
+	h := newCorsHandler(srv, nil)
+	for _, header := range append(refused, allowedOrigin) {
+		require.Equal(t, http.StatusForbidden, get(h, header), "%v", header)
+	}
+	require.Zero(t, calls)
+	for _, header := range passed {
+		require.Equal(t, http.StatusOK, get(h, header), "%v", header)
+	}
+	require.Equal(t, len(passed), calls)
+
+	// CORS list: an allowed origin reaches the handler, every other origin is still refused.
+	for _, list := range [][]string{{"https://dapp.example"}, {"*"}} {
+		calls = 0
+		h = newCorsHandler(srv, list)
+		require.Equal(t, http.StatusOK, get(h, allowedOrigin), "%v", list)
+		require.Equal(t, 1, calls)
+		for _, header := range []http.Header{{"Sec-Fetch-Site": {"cross-site"}}, {"Sec-Fetch-Site": {"same-site"}}} {
+			require.Equal(t, http.StatusForbidden, get(h, header), "%v %v", list, header)
+		}
+	}
+	h = newCorsHandler(srv, []string{"https://dapp.example"})
+	require.Equal(t, http.StatusForbidden, get(h, http.Header{"Sec-Fetch-Site": {"cross-site"}, "Origin": {"https://evil.example"}}))
 }

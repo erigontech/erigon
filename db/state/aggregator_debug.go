@@ -295,10 +295,6 @@ func (m MissedFilesMap) IsEmpty() bool {
 	return true
 }
 
-func (m MissedFilesMap) Get(accessor statecfg.Accessors) []*FilesItem {
-	return m[accessor]
-}
-
 func (m *MissedAccessorAggFiles) IsEmpty() bool {
 	if m == nil {
 		return true

@@ -78,6 +78,7 @@ type Config struct {
 	PragueTime    *uint64 `json:"pragueTime,omitempty"`
 	OsakaTime     *uint64 `json:"osakaTime,omitempty"`
 	AmsterdamTime *uint64 `json:"amsterdamTime,omitempty"`
+	BogotaTime    *uint64 `json:"bogotaTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice *uint64                       `json:"minBlobGasPrice,omitempty"`
@@ -130,9 +131,6 @@ type Config struct {
 	// their parent fork is active. Used for devnets where the reference
 	// client doesn't yet implement certain EIPs (e.g. [7708, 7778, 7928]).
 	DisabledEIPs []int `json:"disabledEIPs,omitempty"`
-
-	// Account Abstraction
-	AllowAA bool
 }
 
 // IsEIPEnabled reports whether the given EIP is active at the given block time:
@@ -402,6 +400,11 @@ func (c *Config) IsAmsterdam(time uint64) bool {
 	return isForked(c.AmsterdamTime, time)
 }
 
+// IsBogota returns whether time is either equal to the Bogota fork time or greater.
+func (c *Config) IsBogota(time uint64) bool {
+	return isForked(c.BogotaTime, time)
+}
+
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
 func (c *Config) IsPrague(time uint64) bool {
 	return isForked(c.PragueTime, time)
@@ -613,29 +616,30 @@ func (c *Config) forkBlockNumbers() []forkBlockNumber {
 }
 
 type forkTimestamp struct {
-	name       string // the config field, as it is spelled in JSON
-	what       string // how the fork is named in a compatibility error
-	timestamp  *uint64
-	outOfOrder bool // exempt from the ordering check
+	name        string // the config field, as it is spelled in JSON
+	what        string // how the fork is named in a compatibility error
+	timestamp   *uint64
+	predecessor string // name of an earlier entry; empty for the first timestamp fork
 }
 
-// forkTimestamps is the one inventory of time-based forks. CheckConfigForkOrder reads it
-// as a monotonic sequence, so an entry belongs in its chronological slot rather than at
-// the end, and anything whose slot is not settled is marked outOfOrder -- a wrong guess
-// there refuses a valid schedule at startup, which is worse than a missed inversion.
+// forkTimestamps is the shared inventory for fork ordering and compatibility checks.
+// Predecessors must appear earlier in the list so validation can resolve them in one pass.
+// BPO forks can fall before or after Amsterdam, and Balancer runs before Osaka on Gnosis;
+// explicit predecessors let each branch keep its own order.
 func (c *Config) forkTimestamps() []forkTimestamp {
 	return []forkTimestamp{
 		{name: "shanghaiTime", what: "Shanghai fork timestamp", timestamp: c.ShanghaiTime},
-		{name: "cancunTime", what: "Cancun fork timestamp", timestamp: c.CancunTime},
-		{name: "pragueTime", what: "Prague fork timestamp", timestamp: c.PragueTime},
-		{name: "osakaTime", what: "Osaka fork timestamp", timestamp: c.OsakaTime},
-		{name: "bpo1Time", what: "BPO1 fork timestamp", timestamp: c.Bpo1Time},
-		{name: "bpo2Time", what: "BPO2 fork timestamp", timestamp: c.Bpo2Time},
-		{name: "bpo3Time", what: "BPO3 fork timestamp", timestamp: c.Bpo3Time},
-		{name: "bpo4Time", what: "BPO4 fork timestamp", timestamp: c.Bpo4Time},
-		{name: "bpo5Time", what: "BPO5 fork timestamp", timestamp: c.Bpo5Time},
-		{name: "amsterdamTime", what: "Amsterdam fork timestamp", timestamp: c.AmsterdamTime, outOfOrder: true},
-		{name: "balancerTime", what: "Balancer fork timestamp", timestamp: c.BalancerTime, outOfOrder: true},
+		{name: "cancunTime", what: "Cancun fork timestamp", timestamp: c.CancunTime, predecessor: "shanghaiTime"},
+		{name: "pragueTime", what: "Prague fork timestamp", timestamp: c.PragueTime, predecessor: "cancunTime"},
+		{name: "osakaTime", what: "Osaka fork timestamp", timestamp: c.OsakaTime, predecessor: "pragueTime"},
+		{name: "bpo1Time", what: "BPO1 fork timestamp", timestamp: c.Bpo1Time, predecessor: "osakaTime"},
+		{name: "bpo2Time", what: "BPO2 fork timestamp", timestamp: c.Bpo2Time, predecessor: "bpo1Time"},
+		{name: "bpo3Time", what: "BPO3 fork timestamp", timestamp: c.Bpo3Time, predecessor: "bpo2Time"},
+		{name: "bpo4Time", what: "BPO4 fork timestamp", timestamp: c.Bpo4Time, predecessor: "bpo3Time"},
+		{name: "bpo5Time", what: "BPO5 fork timestamp", timestamp: c.Bpo5Time, predecessor: "bpo4Time"},
+		{name: "amsterdamTime", what: "Amsterdam fork timestamp", timestamp: c.AmsterdamTime, predecessor: "osakaTime"},
+		{name: "bogotaTime", what: "Bogota fork timestamp", timestamp: c.BogotaTime, predecessor: "amsterdamTime"},
+		{name: "balancerTime", what: "Balancer fork timestamp", timestamp: c.BalancerTime, predecessor: "pragueTime"},
 	}
 }
 
@@ -652,7 +656,9 @@ func (c *Config) SameTimestampForks(newcfg *Config) bool {
 	return true
 }
 
-// CheckConfigForkOrder checks that we don't "skip" any forks
+// CheckConfigForkOrder rejects missing predecessors and reversed activation schedules.
+// Future forks may remain unscheduled, but an enabled fork requires its mandatory
+// predecessors to be enabled no later. Equal activation points are allowed.
 func (c *Config) CheckConfigForkOrder() error {
 	if c != nil && c.ChainID != nil && c.ChainID.Uint64() == 77 {
 		return nil
@@ -679,21 +685,28 @@ func (c *Config) CheckConfigForkOrder() error {
 			lastFork = fork
 		}
 	}
+	// At the switch from block heights to timestamps, only the predecessor's presence
+	// can be checked: its activation value cannot be compared across the two units.
+	if lastFork.blockNumber == nil && c.ShanghaiTime != nil {
+		return fmt.Errorf("unsupported fork ordering: %v not enabled, but shanghaiTime enabled at %v",
+			lastFork.name, *c.ShanghaiTime)
+	}
 
-	// Time-based forks are all optional -- every one is still ahead of some supported
-	// chain -- so only their ordering relative to each other is checked. Amsterdam is
-	// exempt because no shipped spec schedules it yet and BPO3-5 may well follow it;
-	// Balancer because Gnosis schedules it below its own osakaTime.
-	var lastTime forkTimestamp
+	timestamps := make(map[string]*uint64)
 	for _, fork := range c.forkTimestamps() {
-		if fork.timestamp == nil || fork.outOfOrder {
+		timestamps[fork.name] = fork.timestamp
+		if fork.timestamp == nil || fork.predecessor == "" {
 			continue
 		}
-		if lastTime.timestamp != nil && *lastTime.timestamp > *fork.timestamp {
-			return fmt.Errorf("unsupported fork ordering: %v enabled at %v, but %v enabled at %v",
-				lastTime.name, *lastTime.timestamp, fork.name, *fork.timestamp)
+		previous := timestamps[fork.predecessor]
+		if previous == nil {
+			return fmt.Errorf("unsupported fork ordering: %v not enabled, but %v enabled at %v",
+				fork.predecessor, fork.name, *fork.timestamp)
 		}
-		lastTime = fork
+		if *previous > *fork.timestamp {
+			return fmt.Errorf("unsupported fork ordering: %v enabled at %v, but %v enabled at %v",
+				fork.predecessor, *previous, fork.name, *fork.timestamp)
+		}
 	}
 	return nil
 }
@@ -923,7 +936,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun                                          bool
-	IsPrague, IsOsaka, IsAmsterdam                    bool
+	IsPrague, IsOsaka, IsAmsterdam, IsBogota          bool
 	DisabledEIPs                                      []int
 	IsAura                                            bool
 
@@ -974,4 +987,11 @@ func isForked(s *uint64, head uint64) bool {
 
 func (c *Config) IsPreMerge(blockNumber uint64) bool {
 	return c.MergeHeight != nil && blockNumber < *c.MergeHeight
+}
+
+func (c *Config) IsPostMerge(number, time uint64) bool {
+	return (c.TerminalTotalDifficulty != nil && c.TerminalTotalDifficulty.IsZero()) ||
+		(c.MergeHeight != nil && number >= *c.MergeHeight) ||
+		(c.MergeNetsplitBlock != nil && number >= *c.MergeNetsplitBlock) ||
+		c.IsShanghai(time)
 }

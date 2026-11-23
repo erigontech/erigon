@@ -6,6 +6,8 @@ And create in tmpDir `results_*.csv` and `vegeta_*.txt` files.
 Command takes long time. Kill it when `vegeta_erigon_debug_storageRangeAt.txt` is few MB. 
 
 File `vegeta_erigon_*.txt` will produce load to `erigon` node, `vegeta_geth_*.txt` to `geth`.
+The `bench*` commands that write these files (e.g. `benchEthCall`; `bench1` writes none) also write `<method>.jsonl`:
+the same requests, one JSON-RPC request per line, with no URL, header or base64.
 Change host/port in `--gethUrl`, `--erigonUrl` variable. 
 
 By default `go run ./cmd/rpctest/main.go bench1` calling only Erigon node 
@@ -22,6 +24,15 @@ go get -u github.com/tsenart/vegeta
 tmpDir = "/var/folders/x_/1mnbt25s3291zr5_fxhjfnq9n86kng/T/"
 cat $(tmpDir)/erigon_stress_test/vegeta_geth_debug_storageRangeAt.csv | vegeta attack -rate=600 -format=json -duration=20s -timeout=300s | vegeta plot > plot.html
 open plot.html
+```
+
+### Run rpc_perf
+`rpc_perf` from [rpc-tests](https://github.com/erigontech/rpc-tests) replays the `.jsonl` files directly, from
+[erigontech/rpc-tests#633](https://github.com/erigontech/rpc-tests/pull/633) on; older builds replay only Vegeta
+targets, so use the `vegeta_*.txt` files with them. For the `eth_call.jsonl` written by `benchEthCall`:
+```
+tmpDir=/tmp  # the tmp dir printed by the command
+./build/bin/rpc_perf -p "$tmpDir/erigon_stress_test/eth_call.jsonl" -d localhost:8545 -t 600:20
 ```
 
 ### Mac environment changes

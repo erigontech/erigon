@@ -28,9 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
-	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 // ExecutionPayload represents an execution payload (aka block)
@@ -97,25 +94,32 @@ func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
 		Blobs:       make([]hexutil.Bytes, 0),
 	}
 	for i, txn := range txs {
-		if txn.Type() != types.BlobTxType {
+		if txn.Type() != types.BlobTxType && txn.GetBlobGas() == 0 {
 			continue
 		}
-		blobTx, ok := txn.(*types.BlobTxWrapper)
-		if !ok {
-			return nil, fmt.Errorf("expected BlobTxWrapper for tx %d, got %T", i, txn)
+		var blobs types.Blobs
+		var commitments types.BlobKzgs
+		var proofs types.KZGProofs
+		switch tx := txn.(type) {
+		case *types.BlobTxWrapper:
+			blobs, commitments, proofs = tx.Blobs, tx.Commitments, tx.Proofs
+		case *types.FrameTxWrapper:
+			blobs, commitments, proofs = tx.Blobs, tx.Commitments, tx.Proofs
+		default:
+			return nil, fmt.Errorf("missing blob sidecar for tx %d (%T)", i, txn)
 		}
-		for _, c := range blobTx.Commitments {
+		for _, c := range commitments {
 			cp := make([]byte, len(c))
 			copy(cp, c[:])
 			bundle.Commitments = append(bundle.Commitments, cp)
 		}
-		for _, p := range blobTx.Proofs {
+		for _, p := range proofs {
 			pp := make([]byte, len(p))
 			copy(pp, p[:])
 			bundle.Proofs = append(bundle.Proofs, pp)
 		}
 		//nolint:gocritic // rangeValCopy: iterating over 128KB blob byte array directly
-		for _, b := range blobTx.Blobs {
+		for _, b := range blobs {
 			bp := make([]byte, len(b))
 			copy(bp, b[:])
 			bundle.Blobs = append(bundle.Blobs, bp)
@@ -145,15 +149,19 @@ type BlobCellsAndProofsV1 struct {
 	Proofs    []*hexutil.Bytes `json:"proofs"`
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type ExecutionPayloadBody
+
 type ExecutionPayloadBody struct {
-	Transactions []hexutil.Bytes     `json:"transactions"`
-	Withdrawals  []*types.Withdrawal `json:"withdrawals"`
+	Transactions []hexutil.Bytes   `json:"transactions" ethjson:"datalist"`
+	Withdrawals  types.Withdrawals `json:"withdrawals" ethjson:"objects"`
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type ExecutionPayloadBodyV2
+
 type ExecutionPayloadBodyV2 struct {
-	Transactions    []hexutil.Bytes     `json:"transactions"`
-	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
-	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
+	Transactions    []hexutil.Bytes   `json:"transactions" ethjson:"datalist"`
+	Withdrawals     types.Withdrawals `json:"withdrawals" ethjson:"objects"`
+	BlockAccessList *hexutil.Bytes    `json:"blockAccessList" ethjson:"data"`
 }
 
 type PayloadStatus struct {
@@ -243,156 +251,16 @@ func (e *StringifiedError) Error() error {
 	return e.err
 }
 
-func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *ExecutionPayload {
-	header := payload.Header
-	body := payload.Body
-
-	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(header.LogsBloom)
-	baseFee := gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas)
-
-	// Convert slice of hexutil.Bytes to a slice of slice of bytes
-	transactions := make([]hexutil.Bytes, len(body.Transactions))
-	for i, transaction := range body.Transactions {
-		transactions[i] = transaction
-	}
-
-	res := &ExecutionPayload{
-		ParentHash:    gointerfaces.ConvertH256ToHash(header.ParentHash),
-		FeeRecipient:  gointerfaces.ConvertH160toAddress(header.Coinbase),
-		StateRoot:     gointerfaces.ConvertH256ToHash(header.StateRoot),
-		ReceiptsRoot:  gointerfaces.ConvertH256ToHash(header.ReceiptRoot),
-		LogsBloom:     bloom[:],
-		PrevRandao:    gointerfaces.ConvertH256ToHash(header.PrevRandao),
-		BlockNumber:   hexutil.Uint64(header.BlockNumber),
-		GasLimit:      hexutil.Uint64(header.GasLimit),
-		GasUsed:       hexutil.Uint64(header.GasUsed),
-		Timestamp:     hexutil.Uint64(header.Timestamp),
-		ExtraData:     header.ExtraData,
-		BaseFeePerGas: (*hexutil.U256)(baseFee),
-		BlockHash:     gointerfaces.ConvertH256ToHash(header.BlockHash),
-		Transactions:  transactions,
-	}
-	if header.WithdrawalHash != nil {
-		res.Withdrawals = ConvertWithdrawalsFromRpc(body.Withdrawals)
-	}
-	if header.BlobGasUsed != nil {
-		blobGasUsed := *header.BlobGasUsed
-		res.BlobGasUsed = (*hexutil.Uint64)(&blobGasUsed)
-		excessBlobGas := *header.ExcessBlobGas
-		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
-	}
-	if header.SlotNumber != nil {
-		slotNumber := *header.SlotNumber
-		res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
-	}
-	return res
-}
-
-func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPayload {
-	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
-	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas)
-
-	// Convert slice of hexutil.Bytes to a slice of slice of bytes
-	transactions := make([]hexutil.Bytes, len(payload.Transactions))
-	for i, transaction := range payload.Transactions {
-		transactions[i] = transaction
-	}
-
-	res := &ExecutionPayload{
-		ParentHash:    gointerfaces.ConvertH256ToHash(payload.ParentHash),
-		FeeRecipient:  gointerfaces.ConvertH160toAddress(payload.Coinbase),
-		StateRoot:     gointerfaces.ConvertH256ToHash(payload.StateRoot),
-		ReceiptsRoot:  gointerfaces.ConvertH256ToHash(payload.ReceiptRoot),
-		LogsBloom:     bloom[:],
-		PrevRandao:    gointerfaces.ConvertH256ToHash(payload.PrevRandao),
-		BlockNumber:   hexutil.Uint64(payload.BlockNumber),
-		GasLimit:      hexutil.Uint64(payload.GasLimit),
-		GasUsed:       hexutil.Uint64(payload.GasUsed),
-		Timestamp:     hexutil.Uint64(payload.Timestamp),
-		ExtraData:     payload.ExtraData,
-		BaseFeePerGas: (*hexutil.U256)(baseFee),
-		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
-		Transactions:  transactions,
-	}
-	if payload.Version >= 2 {
-		res.Withdrawals = ConvertWithdrawalsFromRpc(payload.Withdrawals)
-	}
-	if payload.Version >= 3 {
-		blobGasUsed := *payload.BlobGasUsed
-		res.BlobGasUsed = (*hexutil.Uint64)(&blobGasUsed)
-		excessBlobGas := *payload.ExcessBlobGas
-		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
-	}
-	if payload.Version >= 4 {
-		if payload.SlotNumber != nil {
-			slotNumber := *payload.SlotNumber
-			res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
-		}
-		bal := types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList)
-		if bal == nil {
-			bal = hexutil.Bytes{}
-		}
-		res.BlockAccessList = &bal
-	}
-	return res
-}
-
-func ConvertBlobsFromRpc(bundle *typesproto.BlobsBundle) *BlobsBundle {
-	if bundle == nil {
-		return nil
-	}
-	res := &BlobsBundle{
-		Commitments: make([]hexutil.Bytes, len(bundle.Commitments)),
-		Proofs:      make([]hexutil.Bytes, len(bundle.Proofs)),
-		Blobs:       make([]hexutil.Bytes, len(bundle.Blobs)),
-	}
-	for i, commitment := range bundle.Commitments {
-		res.Commitments[i] = hexutil.Bytes(commitment)
-	}
-	for i, proof := range bundle.Proofs {
-		res.Proofs[i] = hexutil.Bytes(proof)
-	}
-	for i, blob := range bundle.Blobs {
-		res.Blobs[i] = hexutil.Bytes(blob)
-	}
-	return res
-}
-
-func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*typesproto.Withdrawal {
-	if in == nil {
-		return nil
-	}
-	out := make([]*typesproto.Withdrawal, 0, len(in))
-	for _, w := range in {
-		out = append(out, &typesproto.Withdrawal{
-			Index:          uint64(w.Index),
-			ValidatorIndex: uint64(w.Validator),
-			Address:        gointerfaces.ConvertAddressToH160(w.Address),
-			Amount:         uint64(w.Amount),
-		})
-	}
-	return out
-}
-
-func ConvertWithdrawalsFromRpc(in []*typesproto.Withdrawal) []*types.Withdrawal {
-	if in == nil {
-		return nil
-	}
-	out := make([]*types.Withdrawal, 0, len(in))
-	for _, w := range in {
-		out = append(out, &types.Withdrawal{
-			Index:     hexutil.Uint64(w.Index),
-			Validator: hexutil.Uint64(w.ValidatorIndex),
-			Address:   gointerfaces.ConvertH160toAddress(w.Address),
-			Amount:    hexutil.Uint64(w.Amount),
-		})
-	}
-	return out
-}
-
 func ConvertPayloadId(payloadId uint64) *hexutil.Bytes {
 	encodedPayloadId := make([]byte, 8)
 	binary.BigEndian.PutUint64(encodedPayloadId, payloadId)
 	ret := hexutil.Bytes(encodedPayloadId)
 	return &ret
+}
+
+func DecodePayloadID(payloadID []byte) (uint64, error) {
+	if len(payloadID) != 8 {
+		return 0, errors.New("invalid payload id: expected 8 bytes")
+	}
+	return binary.BigEndian.Uint64(payloadID), nil
 }

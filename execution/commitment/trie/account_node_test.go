@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -35,7 +36,7 @@ func TestGetAccount(t *testing.T) {
 		Nonce:       1,
 		Incarnation: 1,
 		Balance:     u256.U64(100),
-		Root:        EmptyRoot,
+		Root:        empty.RootHash,
 	}
 	acc2 := &accounts.Account{
 		Nonce:       2,

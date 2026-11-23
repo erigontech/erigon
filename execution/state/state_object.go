@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -83,7 +82,6 @@ type stateObject struct {
 	db       *IntraBlockState
 
 	// Write caches.
-	// trie Trie // storage trie, which becomes non-nil on first access
 	code accounts.Code // contract bytecode, hash + canonical bytes
 
 	originStorage Storage // Storage cache of original entries to dedup rewrites
@@ -97,11 +95,12 @@ type stateObject struct {
 	// Cache flags.
 	// When an object is marked selfdestructed it will be delete from the trie
 	// during the "update" phase of the state transition.
-	dirtyCode       bool // true if the code was updated
-	selfdestructed  bool
-	deleted         bool // true if account was deleted during the lifetime of this object
-	newlyCreated    bool // true if this object was created in the current transaction
-	createdContract bool // true if this object represents a newly created contract
+	dirtyCode         bool // true if the code was updated
+	selfdestructed    bool
+	deleted           bool // true if account was deleted during the lifetime of this object
+	newlyCreated      bool // true if this object was created in the current transaction
+	createdContract   bool // true if this object represents a newly created contract
+	destructedCreated bool // createdContract was set when the account self-destructed, so its old slots still read zero
 
 	// Set by stateObjectArena.alloc; keeps release from pooling a slot the arena owns.
 	arena bool
@@ -140,6 +139,7 @@ func (so *stateObject) reset() {
 	so.deleted = false
 	so.newlyCreated = false
 	so.createdContract = false
+	so.destructedCreated = false
 }
 
 // release resets the object and pools it, unless the arena owns the slot.
@@ -197,7 +197,7 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 			return value, nil
 		}
 	}
-	if so.createdContract {
+	if so.createdContract || so.destructedCreated {
 		if dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle())) {
 			fmt.Printf("%d (%d.%d) GetCommittedState SKIP (createdContract) %x key=%x\n",
 				so.db.blockNum, so.db.txIndex, so.db.version, so.address, key)
@@ -218,7 +218,7 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 	}
 	so.db.storageReadCount++
 	so.db.stateReader.SetTrace(false, "")
-	so.db.recordStateReadError(err)
+	so.db.RecordStateReadError(err)
 
 	if err != nil {
 		return uint256.Int{}, err
@@ -311,10 +311,20 @@ func (so *stateObject) setState(key accounts.StorageKey, value uint256.Int) {
 func (so *stateObject) updateStorage(stateWriter StateWriter, useBlockOrigin bool) error {
 	// When using full state override, only the fake storage matters (see also SetStorage)
 	if so.fakeStorage != nil {
-		// First, delete the account to wipe out the original storage
-		err := stateWriter.DeleteAccount(so.address, &so.original)
+		// DeleteAccount also deletes the code, so read it first and write it back after.
+		code, err := so.CodeTyped()
 		if err != nil {
 			return err
+		}
+		// First, delete the account to wipe out the original storage
+		err = stateWriter.DeleteAccount(so.address, &so.original)
+		if err != nil {
+			return err
+		}
+		if len(code.Bytes) > 0 {
+			if err := stateWriter.UpdateAccountCode(so.address, so.data.Incarnation, code.Hash, code.Bytes); err != nil {
+				return err
+			}
 		}
 		// Then, we need to apply the fake storage changes to compute the state root correctly
 		err = so.applyStorageChanges(stateWriter, so.fakeStorage, useBlockOrigin)
@@ -371,7 +381,7 @@ func (so *stateObject) printTrie() {
 }
 
 func (so *stateObject) SetBalance(amount uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) {
-	so.db.journal.balanceChange(so.address, so.data.Balance, wasCommited)
+	so.db.journal.balanceChange(so.address, so.data.Balance, wasCommited, so.db.versionedWrites.balanceDeleted(so.address))
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
 		so.db.tracingHooks.OnBalanceChange(so.address, so.data.Balance, amount, reason)
 	}
@@ -381,9 +391,6 @@ func (so *stateObject) SetBalance(amount uint256.Int, wasCommited bool, reason t
 func (so *stateObject) setBalance(amount uint256.Int) {
 	so.data.Balance = amount
 }
-
-// Return the gas back to the origin. Used by the Virtual machine or Closures
-func (so *stateObject) ReturnGas(gas *big.Int) {}
 
 func (so *stateObject) setIncarnation(incarnation uint64) {
 	so.data.SetIncarnation(incarnation)
@@ -422,8 +429,16 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 	// entries from prior TXs (e.g. EIP-7702 SetCode). The versionMap has the
 	// synthetic code but the domain/stateReader does not.
 	if so.db.versionMap != nil {
-		if c, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok && rr.Status() == MVReadResultDone {
+		if c, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok {
+			if !rr.resolved() {
+				// An in-flight cell: storage holds the pre-block code, so wait through the versioned
+				// path. Its result is this read's view, not the object's state, so it is not cached.
+				c, _, _, err := readCode(so.db, so.address)
+				return c, err
+			}
 			so.code = c
+			so.data.CodeHash = c.Hash
+			so.original.CodeHash = c.Hash
 			return c, nil
 		}
 	}
@@ -440,14 +455,13 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 		so.db.codeReadCount++
 	}
 	so.db.stateReader.SetTrace(false, "")
-	so.db.recordStateReadError(err)
+	so.db.RecordStateReadError(err)
 
 	if err != nil {
 		return accounts.Code{}, fmt.Errorf("can't read code for %x: %w", so.Address(), err)
 	}
 	// Trust the committed (CodeHash, bytes) pair rather than re-hashing on every
-	// load; the only case they disagree is codeHash-without-code state (empty
-	// bytes, non-empty hash), reported honestly as empty so SetCode's compare
+	// load; a codeHash-without-code state reports as empty so SetCode's compare
 	// still heals it.
 	var c accounts.Code
 	if len(code) == 0 {
@@ -465,18 +479,13 @@ func (so *stateObject) SetCode(code accounts.Code, wasCommited bool, reason trac
 		return false, err
 	}
 
-	// bytes.Equal confirm guards the codeHash-without-code case: a matching hash
-	// against empty prev bytes must still heal the CodeDomain, not skip.
+	// bytes.Equal guards the codeHash-without-code case: a matching hash against
+	// empty prev bytes must still heal the CodeDomain, not skip.
 	if prev.Hash == code.Hash && bytes.Equal(prev.Bytes, code.Bytes) {
 		return false, nil
 	}
 
-	so.db.journal.codeChange(so.address, prev.Bytes, so.data.CodeHash, wasCommited)
-	if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChangeV2 != nil {
-		so.db.tracingHooks.OnCodeChangeV2(so.address, so.data.CodeHash, prev.Bytes, code.Hash, code.Bytes, reason)
-	} else if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChange != nil {
-		so.db.tracingHooks.OnCodeChange(so.address, so.data.CodeHash, prev.Bytes, code.Hash, code.Bytes)
-	}
+	so.db.journalCodeChange(so.address, so.data.CodeHash, prev.Bytes, code, wasCommited, reason)
 	so.setCode(code)
 	return true, nil
 }
@@ -511,11 +520,4 @@ func (so *stateObject) Nonce() uint64 {
 
 func (so *stateObject) IsDirty() bool {
 	return so.dirtyCode || len(so.dirtyStorage) > 0 || so.data != so.original
-}
-
-// Never called, but must be present to allow stateObject to be used
-// as a vm.Account interface that also satisfies the vm.ContractRef
-// interface. Interfaces are awesome.
-func (so *stateObject) Value() *big.Int {
-	panic("Value on stateObject should never be called")
 }

@@ -30,7 +30,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 var keytestID = HexID("51232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439")
@@ -506,4 +509,107 @@ func TestDBExpireV5(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.expireNodes()
+}
+
+// This test checks that the pong time of a node whose first stored item is its
+// pong is not attributed to the node stored before it.
+func TestDBExpirationNextNodePong(t *testing.T) {
+	db, err := OpenDB("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now()
+	stale := SignNull(new(enr.Record), ID{1})
+	fresh := SignNull(new(enr.Record), ID{2})
+	staleIP := netip.AddrFrom4([4]byte{127, 0, 0, 1})
+	freshIP := netip.AddrFrom4([4]byte{127, 0, 0, 2})
+
+	if err := db.UpdateNode(stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateLastPongReceived(stale.ID(), staleIP, now.Add(-dbNodeExpiration-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateLastPongReceived(fresh.ID(), freshIP, now); err != nil {
+		t.Fatal(err)
+	}
+
+	db.expireNodes()
+
+	if db.Node(stale.ID()) != nil {
+		t.Error("stale node should be removed")
+	}
+	if pong := db.LastPongReceived(fresh.ID(), freshIP); !pong.Equal(now.Truncate(time.Second)) {
+		t.Errorf("fresh pong time should be kept, got %v", pong)
+	}
+}
+
+// An unbonded node only ever has a ping row, so without a pong it must still expire.
+func TestDBExpiresNodeWithOnlyAPingRow(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	ip := netip.AddrFrom4([4]byte{127, 0, 0, 1})
+	now := time.Now()
+	stale, fresh := ID{1}, ID{2}
+	require.NoError(t, db.UpdateLastPingReceived(stale, ip, now.Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(fresh, ip, now))
+
+	db.expireNodes()
+
+	require.Zero(t, db.LastPingReceived(stale, ip).Unix(), "the stale ping row is deleted")
+	require.Equal(t, now.Unix(), db.LastPingReceived(fresh, ip).Unix())
+}
+
+func TestDBExpiredPongDecidesOverFreshPing(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	id := ID{1}
+	ponged, pinged := netip.AddrFrom4([4]byte{127, 0, 0, 1}), netip.AddrFrom4([4]byte{127, 0, 0, 2})
+	require.NoError(t, db.UpdateLastPongReceived(id, ponged, time.Now().Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(id, pinged, time.Now()))
+
+	db.expireNodes()
+
+	require.Zero(t, db.LastPongReceived(id, ponged).Unix())
+	require.Zero(t, db.LastPingReceived(id, pinged).Unix(), "a pong row decides the expiry, not a newer ping")
+}
+
+func TestDBExpiresStalePingRowOfALiveNode(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	id, oldIP, newIP := ID{1}, netip.AddrFrom4([4]byte{127, 0, 0, 1}), netip.AddrFrom4([4]byte{127, 0, 0, 2})
+	now := time.Now()
+	require.NoError(t, db.UpdateLastPingReceived(id, oldIP, now.Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(id, newIP, now))
+
+	db.expireNodes()
+
+	require.Zero(t, db.LastPingReceived(id, oldIP).Unix(), "a source IP that stopped pinging must not stay")
+	require.Equal(t, now.Unix(), db.LastPingReceived(id, newIP).Unix())
+}
+
+func TestDBExpiresNodeRecordByItsPing(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	seeds := makeDBExpirationNodes()
+	stale, fresh := seeds[0].node, seeds[1].node
+	require.NoError(t, db.UpdateNode(stale))
+	require.NoError(t, db.UpdateNode(fresh))
+	require.NoError(t, db.UpdateLastPingReceived(stale.ID(), stale.IPAddr(), time.Now().Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(fresh.ID(), fresh.IPAddr(), time.Now()))
+
+	db.expireNodes()
+
+	require.Nil(t, db.Node(stale.ID()), "a node whose only proof is a stale ping must be deleted")
+	require.NotNil(t, db.Node(fresh.ID()))
 }

@@ -19,6 +19,7 @@ package state_test
 import (
 	"bytes"
 	"math"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -28,8 +29,63 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
+
+func TestCommitmentReadableAfterFailedMergeRetry(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		t.Run(domain.String(), func(t *testing.T) {
+			const stepSize = uint64(10)
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
+			writeStepsKeys(t, db, agg, mkAddrs(0x10, 16), 0, 3)
+			require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 2, unboundedFinalityCtx, false))
+			agg.WaitForFiles()
+
+			badTmpDir := filepath.Join(t.TempDir(), "not-a-directory")
+			require.NoError(t, os.WriteFile(badTmpDir, nil, 0o600))
+			done, err := agg.MergeWithTempDirForTest(t.Context(), 2*stepSize, kv.ReceiptDomain, badTmpDir)
+			require.True(t, done)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "receipt")
+
+			commitmentPath := filepath.Join(agg.Dirs().SnapDomain, "v2.1-commitment.0-2.kv")
+			prefixes := referencedBranchPrefixes(t, commitmentPath)
+			require.NotEmpty(t, prefixes)
+			want := make([][]byte, len(prefixes))
+			ac := agg.BeginFilesRo()
+			defer ac.Close()
+			for i, prefix := range prefixes {
+				v, found, _, _, readErr := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, prefix, math.MaxUint64)
+				require.NoError(t, readErr)
+				require.True(t, found)
+				want[i] = bytes.Clone(v)
+			}
+			ac.Close()
+
+			done, err = agg.MergeWithTempDirForTest(t.Context(), 2*stepSize, domain, badTmpDir)
+			require.True(t, done)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), domain.String())
+			require.FileExists(t, commitmentPath)
+
+			db, agg = reopenAggregator(t, db, agg, stepSize)
+			require.NoError(t, agg.OpenFolder(db))
+			ac = agg.BeginFilesRo()
+			defer ac.Close()
+			for i, prefix := range prefixes {
+				v, found, from, to, readErr := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, prefix, math.MaxUint64)
+				require.NoError(t, readErr)
+				require.True(t, found)
+				require.Zero(t, from)
+				require.Equal(t, 2*stepSize, to)
+				require.Equal(t, want[i], v)
+			}
+		})
+	}
+}
 
 // TestCommitmentMergeFlagOffExpandsReferencedInputs exercises the corruption vector: v2.1 referenced
 // commitment files merged with the write flag off. The transformer must expand the referenced inputs
@@ -37,7 +93,7 @@ import (
 // with a disjoint nibble prefix, so its referenced branches survive as merge winners and reach the
 // flag-off merge.
 func TestCommitmentMergeFlagOffExpandsReferencedInputs(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(10)
 	setA := mkAddrs(0x10, 12)
 	setB := mkAddrs(0xf0, 12)
@@ -78,6 +134,7 @@ func TestCommitmentMergeFlagOffExpandsReferencedInputs(t *testing.T) {
 // the write flag off (rebuild loop, writing plain v2.2) then on (squeeze, re-referencing). The squeezed
 // files must be stamped v2.1 so they read back correctly after a disk reload.
 func TestCommitmentRebuildSqueezeReadableAfterReload(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(10)
 	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: stepSize, disableCommitmentBranchTransform: false})
 	dirs := agg.Dirs()
@@ -104,6 +161,7 @@ func TestCommitmentRebuildSqueezeReadableAfterReload(t *testing.T) {
 // its write version in memory (matching the on-disk name) without waiting for a folder reopen. A zero
 // in-memory version makes the merge-scheduling predicates treat a plain v2.2 file as referenced.
 func TestMergedCommitmentFileVersionStampedInMemory(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(10)
 	keys := mkAddrs(0x20, 16)
 
@@ -135,6 +193,7 @@ func TestMergedCommitmentFileVersionStampedInMemory(t *testing.T) {
 // v2.2-plain commitment files and pins the branch's central safety claim: reads are driven by each
 // file's own version, not the live write flag.
 func TestMixedVersionDatadirReadsVersionDriven(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(10)
 	const frozenSteps = uint64(4) // freeze below the referencing threshold so v2.1 and v2.2 files coexist
 	db, agg, dirs, _, _ := buildMixedRegimeDatadir(t, stepSize, frozenSteps)

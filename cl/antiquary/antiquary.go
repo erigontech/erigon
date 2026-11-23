@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 const (
@@ -54,6 +55,7 @@ var (
 	mxAntiquaryPruneBatchSeconds = metrics.GetOrCreateSummary(`caplin_antiquary_batch_seconds{phase="prune"}`)
 	mxAntiquaryIndexBatchSlots   = metrics.GetOrCreateGauge(`caplin_antiquary_batch_items{phase="index"}`)
 	mxAntiquaryPruneBatchBlocks  = metrics.GetOrCreateGauge(`caplin_antiquary_batch_items{phase="prune"}`)
+	mxBlobRetirementGapSlot      = metrics.GetOrCreateGauge(`caplin_antiquary_blob_retirement_gap_slot`) // gap slot the last completeness check found; 0 once a check passes
 	mxAntiquaryPrunedBlocks      = metrics.GetOrCreateCounter("caplin_antiquary_pruned_blocks_total")
 )
 
@@ -64,6 +66,8 @@ type Antiquary struct {
 	dirs                           datadir.Dirs
 	downloader                     dbservices.DownloaderClient
 	logger                         log.Logger
+	lastBlobGapLog                 time.Time
+	blobCheckedTo                  uint64 // every blob below it, from the next blob segment's start, was stored at the last scan
 	sn                             *freezeblocks.CaplinSnapshots
 	stateSn                        *snapshotsync.CaplinStateSnapshots
 	snReader                       freezeblocks.BeaconSnapshotReader
@@ -78,8 +82,9 @@ type Antiquary struct {
 	genesisState    *state.CachingBeaconState
 	syncedData      synced_data.SyncedData
 	// set to nil
-	currentState *state.CachingBeaconState
-	balances32   []byte
+	currentState        *state.CachingBeaconState
+	balances32          []byte
+	stateScannedThrough uint64
 	// maxSlotsPerCommit bounds how many slots the antiquary accumulates into one
 	// mdbx transaction. A very large commit overflows libmdbx's gc_fill_returned
 	// while serializing the transaction's retired-page list; bounding it avoids that.
@@ -163,6 +168,7 @@ func (s *Antiquary) Loop() error {
 	if err := s.sn.OpenFolder(); err != nil {
 		return err
 	}
+	s.removeBlockOverlaps()
 	if s.stateSn != nil {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
@@ -212,6 +218,10 @@ func (s *Antiquary) retirementLoop() error {
 		run:     s.antiquate,
 		onError: func(err error) { log.Warn("[Antiquary] Failed to antiquate", "err", err) },
 	}
+	merges := &retirementStep{
+		run:     s.mergeBlocks,
+		onError: func(err error) { log.Warn("[Antiquary] Failed to merge beacon blocks", "err", err) },
+	}
 	blobs := &retirementStep{
 		run:     s.antiquateBlobs,
 		onError: func(err error) { log.Error("[Antiquary] Failed to antiquate blobs", "err", err) },
@@ -222,23 +232,24 @@ func (s *Antiquary) retirementLoop() error {
 	for {
 		select {
 		case <-retirementTicker.C:
-			s.retirementTick(blocks, blobs)
+			s.retirementTick(blocks, merges, blobs)
 		case <-s.ctx.Done():
 			return nil
 		}
 	}
 }
 
-func (s *Antiquary) retirementTick(blocks, blobs *retirementStep) {
+func (s *Antiquary) retirementTick(blocks, merges, blobs *retirementStep) {
 	if !s.backfilled.Load() {
 		return
 	}
 	blocks.attempt(s.shuttingDown)
+	merges.attempt(s.shuttingDown)
 
 	if s.cfg.DenebForkEpoch == math.MaxUint64 {
 		return
 	}
-	if !s.blobBackfilled.Load() {
+	if !s.blobs && !s.blobBackfilled.Load() { // a node without a blob archive has pruned the blobs
 		return
 	}
 	blobs.attempt(s.shuttingDown)
@@ -299,7 +310,7 @@ func indexBeaconSnapshots(ctx context.Context, db kv.RwDB, from, to, batchSize u
 		batchTo := nextBatchEnd(batchFrom, to, batchSize)
 		start := time.Now()
 		err := db.Update(ctx, func(tx kv.RwTx) error {
-			if err := indexBeaconSnapshotBatch(ctx, tx, batchFrom, batchTo, readHeader, onProgress); err != nil {
+			if err := indexBeaconSnapshotBatch(tx, batchFrom, batchTo, readHeader, onProgress); err != nil {
 				return err
 			}
 			if err := beacon_indicies.WriteLastBeaconSnapshot(tx, batchTo); err != nil {
@@ -324,7 +335,7 @@ func nextBatchEnd(from, to, batchSize uint64) uint64 {
 	return batchTo
 }
 
-func indexBeaconSnapshotBatch(ctx context.Context, tx kv.RwTx, from, to uint64, readHeader readBeaconSnapshotHeaderFunc, onProgress func(slot uint64)) error {
+func indexBeaconSnapshotBatch(tx kv.RwTx, from, to uint64, readHeader readBeaconSnapshotHeaderFunc, onProgress func(slot uint64)) error {
 	for slot := from; slot < to; slot++ {
 		header, elBlockNumber, elBlockHash, err := readHeader(slot, tx)
 		if err != nil {
@@ -337,7 +348,7 @@ func indexBeaconSnapshotBatch(ctx context.Context, tx kv.RwTx, from, to uint64, 
 		if err != nil {
 			return err
 		}
-		if err := beacon_indicies.MarkRootCanonical(ctx, tx, header.Header.Slot, blockRoot); err != nil {
+		if err := beacon_indicies.MarkRootCanonical(tx, header.Header.Slot, blockRoot); err != nil {
 			return err
 		}
 		if err := beacon_indicies.WriteHeaderSlot(tx, blockRoot, header.Header.Slot); err != nil {
@@ -346,7 +357,7 @@ func indexBeaconSnapshotBatch(ctx context.Context, tx kv.RwTx, from, to uint64, 
 		if err := beacon_indicies.WriteStateRoot(tx, blockRoot, header.Header.Root); err != nil {
 			return err
 		}
-		if err := beacon_indicies.WriteParentBlockRoot(ctx, tx, blockRoot, header.Header.ParentRoot); err != nil {
+		if err := beacon_indicies.WriteParentBlockRoot(tx, blockRoot, header.Header.ParentRoot); err != nil {
 			return err
 		}
 		if err := beacon_indicies.WriteExecutionBlockNumber(tx, blockRoot, elBlockNumber); err != nil {
@@ -372,7 +383,7 @@ func pruneBeaconBlocksAndWriteProgress(ctx context.Context, db kv.RwDB, pruneTo,
 		start := time.Now()
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			if pruneTo != 0 {
-				deleted, more, err := beacon_indicies.PruneBlocksLimit(ctx, tx, pruneTo, int(batchLimit))
+				deleted, more, err := beacon_indicies.PruneBlocksLimit(tx, pruneTo, int(batchLimit))
 				if err != nil {
 					return err
 				}
@@ -427,6 +438,13 @@ func (s *Antiquary) antiquate() error {
 	from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	s.sn.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(sn *snapshotsync.DirtySegment) bool {
+		if segFrom, _ := sn.GetRange(); segFrom >= from && sn.IsIndexed() {
+			to = min(to, segFrom)
+			return false
+		}
+		return true
+	})
 
 	if from >= to || to-from < snaptype.CaplinMergeLimit {
 		return nil
@@ -451,6 +469,7 @@ func (s *Antiquary) antiquate() error {
 	if err := s.sn.OpenFolder(); err != nil {
 		return err
 	}
+	s.removeBlockOverlaps()
 
 	paths := s.sn.SegFileNames(from, to)
 	if s.downloader != nil {
@@ -463,6 +482,38 @@ func (s *Antiquary) antiquate() error {
 	return nil
 }
 
+func (s *Antiquary) mergeBlocks() error {
+	if !s.snapgen {
+		return nil
+	}
+	merger := snapshotsync.NewMerger(s.dirs.Tmp, 1, log.LvlDebug, nil, &chain.Config{}, s.logger)
+	ranges := merger.FindMergeRanges(s.sn.Ranges(false), snaptype.CaplinEnums.BeaconBlocks)
+	if len(ranges) == 0 {
+		return nil
+	}
+	var onMerge func([]string) error
+	var onDelete func(context.Context, []string) error
+	if s.downloader != nil {
+		onMerge = func(l []string) error { return s.downloader.Seed(s.ctx, l) }
+		onDelete = s.downloader.Delete
+	}
+	if err := merger.Merge(s.ctx, &s.sn.BaseRoSnapshots, []snaptype.Type{snaptype.BeaconBlocks}, ranges[:1], s.sn.Dir(), true, onMerge, onDelete); err != nil {
+		return err
+	}
+	s.removeBlockOverlaps()
+	return nil
+}
+
+func (s *Antiquary) removeBlockOverlaps() {
+	var onDelete func(l []string) error
+	if s.downloader != nil {
+		onDelete = func(l []string) error { return s.downloader.Delete(s.ctx, l) }
+	}
+	if err := s.sn.RemoveOverlaps(onDelete); err != nil {
+		s.logger.Warn("[Antiquary] Failed to remove block overlaps", "err", err)
+	}
+}
+
 func (s *Antiquary) NotifyBackfilled() {
 	// we set up the range for [lowestRawSlot, finalized]
 	s.backfilled.Store(true) // this is the lowest slot not in snapshots
@@ -470,6 +521,20 @@ func (s *Antiquary) NotifyBackfilled() {
 
 func (s *Antiquary) NotifyBlobBackfilled(completed bool) {
 	s.blobBackfilled.Store(completed)
+}
+
+// RetireBlobSnapshotsBelow drops blob snapshot segments that hold nothing at or above floor
+// and stops seeding them.
+func (s *Antiquary) RetireBlobSnapshotsBelow(floor uint64) error {
+	if s == nil || s.sn == nil {
+		return nil
+	}
+	var onDelete func([]string) error
+	if s.downloader != nil {
+		onDelete = func(paths []string) error { return s.downloader.Delete(s.ctx, paths) }
+	}
+	_, err := s.sn.RetireBlobsBelow(floor, onDelete)
+	return err
 }
 
 const caplinSnapshotBuildSemaWeight int64 = 1
@@ -480,8 +545,8 @@ const caplinSnapshotBuildSemaWeight int64 = 1
 // One worker keeps steady-state retirement from competing with execution. Catching up may use the
 // full estimate, but only while holding the limiter that admits one kind of snapshot build at a
 // time, since EL retirement sizes its own workers from the same estimate of the host. A limiter it
-// cannot take drops the dump to one worker rather than skipping it: the blob gate stays shut until
-// the whole range lands, so retiring slowly beats not retiring.
+// cannot take drops the dump to one worker rather than skipping it, since retiring slowly beats not
+// retiring.
 func (s *Antiquary) blobCompressWorkers(from, to uint64) (int, func()) {
 	noop := func() {}
 	if !isBlobBacklog(from, to) {
@@ -500,11 +565,73 @@ func (s *Antiquary) blobCompressWorkers(from, to uint64) (int, func()) {
 
 // isBlobBacklog reports whether the pending range is a catch-up rather than the single chunk
 // retired at the tip, which is what decides how many workers the compression may use.
-//
-// The span is the one DumpBlobsSidecar counts chunks with: it breaks once `toSlot-i` drops below a
-// merge limit, so two chunks are compressed exactly when the span reaches two of them.
 func isBlobBacklog(from, to uint64) bool {
 	return to >= from && to-from >= 2*snaptype.CaplinMergeLimit
+}
+
+type blobRetirementSnapshots interface {
+	FrozenBlobs() uint64
+	VisibleSegmentsMaxTo(snaptype.Enum) uint64
+}
+
+// nextBlobSegment returns the dump bounds of the next blob segment to retire and the end of
+// the whole pending backlog, which decides the compression parallelism. Retiring one segment
+// per attempt publishes each segment as soon as it is written, instead of after the backlog.
+func nextBlobSegment(sn blobRetirementSnapshots, cfg *clparams.BeaconChainConfig) (from, to, backlogTo uint64, ok bool) {
+	// Both frontiers are exclusive segment ends: BlocksAvailable is the last frozen slot and
+	// would hold every blob segment back by one block segment.
+	frozenBlobs, frozenBlocks := sn.FrozenBlobs(), sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum())
+	minimumBlobsProgress := ((cfg.DenebForkEpoch * cfg.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	from = max(frozenBlobs, minimumBlobsProgress)
+	if frozenBlocks < from+snaptype.CaplinMergeLimit {
+		return 0, 0, 0, false
+	}
+	return from, from + snaptype.CaplinMergeLimit, frozenBlocks, true
+}
+
+const blobRetirementGapLogInterval = 10 * time.Minute
+
+// blobSegmentComplete reports whether [from, to) can retire. An unfillable gap keeps backfill incomplete, but the
+// segments below it are still complete.
+func (s *Antiquary) blobSegmentComplete(tx kv.Tx, from, to uint64, blobCount freezeblocks.BlobCountBySlotFn) (bool, error) {
+	start := max(from, s.blobCheckedTo)
+	for slot := start; slot < to; slot++ {
+		want, skipped, err := blobCount(tx, slot)
+		if err != nil {
+			return false, err
+		}
+		if skipped {
+			continue
+		}
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+		if err != nil {
+			return false, err
+		}
+		stored, err := blob_storage.BlobsStored(s.ctx, s.blobStorage, slot, blockRoot, int(want))
+		if err != nil {
+			return false, err
+		}
+		if !stored {
+			s.blobCheckedTo = slot
+			s.reportBlobRetirementGap(from, slot, time.Now())
+			return false, nil
+		}
+	}
+	if start > from {
+		s.blobCheckedTo = from
+		return s.blobSegmentComplete(tx, from, to, blobCount)
+	}
+	mxBlobRetirementGapSlot.SetUint64(0)
+	return true, nil
+}
+
+func (s *Antiquary) reportBlobRetirementGap(from, gap uint64, now time.Time) {
+	mxBlobRetirementGapSlot.SetUint64(gap)
+	if now.Sub(s.lastBlobGapLog) < blobRetirementGapLogInterval {
+		return
+	}
+	s.lastBlobGapLog = now
+	s.logger.Info("[Antiquary] Blob retirement waits for a missing blob slot", "segmentFrom", from, "gapSlot", gap)
 }
 
 func (s *Antiquary) antiquateBlobs() error {
@@ -523,42 +650,24 @@ func (s *Antiquary) antiquateBlobs() error {
 	}
 	defer roTx.Rollback()
 	// perform blob antiquation if it is time to.
-	currentBlobsProgress := s.sn.FrozenBlobs()
-	// We should NEVER get ahead of the block snapshots.
-	if currentBlobsProgress >= s.sn.BlocksAvailable() {
+	currentBlobsProgress, to, backlogTo, ok := nextBlobSegment(s.sn, s.cfg)
+	if !ok {
 		return nil
 	}
-	minimunBlobsProgress := ((s.cfg.DenebForkEpoch * s.cfg.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-	currentBlobsProgress = max(currentBlobsProgress, minimunBlobsProgress)
-	// read the finalized head
-	to := s.sn.BlocksAvailable()
-	if to <= currentBlobsProgress || to-currentBlobsProgress < snaptype.CaplinMergeLimit {
-		return nil
+	blobCount := freezeblocks.BlobCountFromBlocks(s.ctx, s.sn, s.snReader)
+	complete, err := s.blobSegmentComplete(roTx, currentBlobsProgress, to, blobCount)
+	if err != nil || !complete {
+		return err
 	}
 	roTx.Rollback()
-	s.logger.Info("[Antiquary] Antiquating blobs", "from", currentBlobsProgress, "to", to)
-	blobCountFn := func(slot uint64) (uint64, error) {
-		block, err := s.snReader.ReadBeaconBlockBodyBySlot(s.ctx, nil, slot)
-		if err != nil {
-			return 0, err
-		}
-		if block == nil {
-			return 0, nil
-		}
-		commitments := block.Block.Body.GetBlobKzgCommitments()
-		if commitments == nil {
-			return 0, nil
-		}
-		return uint64(commitments.Len()), nil
-	}
-
+	s.logger.Info("[Antiquary] Antiquating blobs", "from", currentBlobsProgress, "to", to, "backlogTo", backlogTo)
 	// now, we need to retire the blobs
 	// The build slot is held for the compression only: opening the folder, seeding and pruning
 	// below draw nothing from the build budget, and EL retirement blocks on the same slot.
 	if err := func() error {
-		compressWorkers, releaseBuildSlot := s.blobCompressWorkers(currentBlobsProgress, to)
+		compressWorkers, releaseBuildSlot := s.blobCompressWorkers(currentBlobsProgress, backlogTo)
 		defer releaseBuildSlot()
-		return freezeblocks.DumpBlobsSidecar(s.ctx, s.blobStorage, s.mainDB, currentBlobsProgress, to, s.sn.Salt, s.dirs, compressWorkers, blobCountFn, log.LvlDebug, s.logger)
+		return freezeblocks.DumpBlobsSidecar(s.ctx, s.blobStorage, s.mainDB, currentBlobsProgress, to, s.sn.Salt, s.dirs, compressWorkers, blobCount, log.LvlDebug, s.logger)
 	}(); err != nil {
 		return err
 	}
@@ -567,6 +676,7 @@ func (s *Antiquary) antiquateBlobs() error {
 	if err := s.sn.OpenFolder(); err != nil {
 		return err
 	}
+	s.removeBlockOverlaps()
 
 	paths := s.sn.SegFileNames(currentBlobsProgress, to)
 	if s.downloader != nil {

@@ -18,6 +18,10 @@ inputs:
     description: "Extra segment appended to build cache key (e.g. matrix.test-group)"
     required: false
     default: ''
+  go-cache:
+    description: "Set to 'false' to skip the Go build and module caches, for jobs that do not save them"
+    required: false
+    default: 'true'
   cache-namespace:
     description: >
       Workflow segment of the Go cache keys. Defaults to the top-level workflow
@@ -152,6 +156,7 @@ runs:
         #   cl/transition/**/test_data/** - consensus transition test data
         #   cl/utils/eth2shuffle/spec/** - shuffle spec CSV (read at runtime)
         #   execution/state/genesiswrite/*.json - genesis JSON (read at runtime)
+        #   execution/vm/vmgen/*.go - generator sources TestRunIsGenerated reads
         #   Extensions: .json .js .txt .ssz .ssz_snappy .yaml .csv
         time git restore-mtime --no-directories -- \
           '**/testdata/**' \
@@ -159,7 +164,8 @@ runs:
           'cl/spectest/**/data_*/**' \
           'cl/transition/**/test_data/**' \
           'cl/utils/eth2shuffle/spec/**' \
-          'execution/state/genesiswrite/*.json'
+          'execution/state/genesiswrite/*.json' \
+          'execution/vm/vmgen/*.go'
 
         # Normalize directory mtimes to a fixed epoch.
         find . -type d -not -path '*/.git/*' -print0 | TZ=UTC xargs -0 touch -t 200902132331.30
@@ -284,12 +290,14 @@ runs:
     # never splits by matrix entry — sibling jobs share one entry per run and
     # the cleanup-erigon probe dedups the save.
     - id: restore-mod-cache
+      if: ${{ inputs.go-cache != 'false' }}
       uses: ./.github/actions/restore-mod-cache
       with:
         modcache-path: ${{ steps.go-env.outputs.modcache }}
         workflow-id: ${{ steps.go-env.outputs.workflow }}
 
     - name: Export modcache key
+      if: ${{ inputs.go-cache != 'false' }}
       shell: bash
       run: echo "ERIGON_CI_MODCACHE_KEY=${{ steps.restore-mod-cache.outputs.primary-key }}" >> "$GITHUB_ENV"
 
@@ -313,6 +321,7 @@ runs:
         done
 
     - id: restore-build-cache
+      if: ${{ inputs.go-cache != 'false' }}
       uses: ./.github/actions/restore-build-cache
       with:
         gocache-path: ${{ steps.go-env.outputs.build }}
@@ -321,6 +330,7 @@ runs:
         matrix-key: ${{ inputs.build-cache-extra-key }}
 
     - name: Export build cache key
+      if: ${{ inputs.go-cache != 'false' }}
       shell: bash
       run: echo "ERIGON_CI_GOCACHE_KEY=${{ steps.restore-build-cache.outputs.primary-key }}" >> "$GITHUB_ENV"
 

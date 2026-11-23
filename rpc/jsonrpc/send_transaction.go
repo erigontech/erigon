@@ -10,11 +10,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
@@ -38,16 +40,15 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
 
-	// this has been moved to prior to adding of transactions to capture the
-	// pre-state of the db - which is used for logging in the messages below
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	defer tx.Rollback()
-
-	cc, err := api.chainConfig(ctx, tx)
+	// Admission opens its own state view; release this database reader before calling it.
+	cc, err := func() (*chain.Config, error) {
+		tx, err := api.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		return api.chainConfig(ctx, tx)
+	}()
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -89,18 +90,23 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 // SendRawTransactionSync implements eth_sendRawTransactionSync (https://eips.ethereum.org/EIPS/eip-7966).
 // Creates a new message call or contract creation for a previously signed transaction waiting for the transaction to be processed and the receipt to be available.
 func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeoutMs *uint64) (*ethutils.RPCReceipt, error) {
-	// If timeout is not specified or zero, we use the default, otherwise we use the passed one capped by max.
-	timeout := api.RpcTxSyncDefaultTimeout
-	if timeoutMs != nil && *timeoutMs > 0 {
-		reqTimeout := time.Duration(*timeoutMs) * time.Millisecond
-		timeout = min(reqTimeout, api.RpcTxSyncMaxTimeout)
-	}
 	hash, err := api.SendRawTransaction(ctx, encodedTx)
 	if err != nil {
 		return nil, err
 	}
 
-	return api.waitForReceipt(ctx, hash, timeout)
+	return api.waitForReceipt(ctx, hash, api.txSyncTimeout(timeoutMs))
+}
+
+// txSyncTimeout returns the requested timeout capped by the maximum, or the default when none is requested.
+func (api *APIImpl) txSyncTimeout(timeoutMs *uint64) time.Duration {
+	if timeoutMs == nil || *timeoutMs == 0 {
+		return api.RpcTxSyncDefaultTimeout
+	}
+	if *timeoutMs > uint64(api.RpcTxSyncMaxTimeout.Milliseconds()) { // in ms: a huge request overflows a Duration
+		return api.RpcTxSyncMaxTimeout
+	}
+	return time.Duration(*timeoutMs) * time.Millisecond
 }
 
 const receiptPollInterval = time.Second
@@ -114,10 +120,14 @@ func (api *APIImpl) waitForReceipt(ctx context.Context, hash common.Hash, timeou
 		TransactionHashes: []common.Hash{hash},
 	}
 	receiptsCh, id, err := api.filters.SubscribeReceipts(128, criteria)
-	if err != nil {
+	switch {
+	case err == nil:
+		defer api.filters.UnsubscribeReceipts(id)
+	case errors.Is(err, rpchelper.ErrTooManySubscriptions):
+		// The poll below carries the wait on its own; the nil channel never fires.
+	default:
 		return nil, err
 	}
-	defer api.filters.UnsubscribeReceipts(id)
 
 	// The filter update reaches the server asynchronously and without an ack, so a receipt produced before it
 	// lands is never delivered on the channel. Look the receipt up periodically to cover that window.

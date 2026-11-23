@@ -17,12 +17,16 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/stretchr/testify/require"
 )
 
@@ -391,36 +395,36 @@ func setupWorkingStateMockDatadir(t *testing.T) datadir.Dirs {
 	// snapshots/accessor/
 	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.0-128.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.0-128.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.0-128.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.0-128.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-accounts.0-128.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-accounts.0-128.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.128-192.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.128-192.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.128-192.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.128-192.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-accounts.128-192.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-accounts.128-192.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.192-200.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.192-200.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.192-200.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.192-200.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-accounts.192-200.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-accounts.192-200.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.200-202.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.200-202.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.200-202.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-accounts.200-202.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-accounts.200-202.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-accounts.200-202.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-code.0-128.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-code.0-128.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-code.0-128.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-code.0-128.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-code.0-128.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-code.0-128.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-code.128-192.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-code.128-192.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-code.128-192.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-code.128-192.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-code.128-192.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-code.128-192.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-code.192-200.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-code.192-200.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-code.192-200.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-code.192-200.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-code.192-200.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-code.192-200.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-code.200-202.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-code.200-202.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-code.200-202.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-code.200-202.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-code.200-202.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-code.200-202.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-logaddrs.0-128.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-logaddrs.0-128.efi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-logaddrs.128-192.efi")
@@ -439,36 +443,36 @@ func setupWorkingStateMockDatadir(t *testing.T) datadir.Dirs {
 	createMockFile(t, dirs.SnapAccessors, "v1.1-logtopics.200-202.efi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.0-128.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.0-128.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.0-128.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.0-128.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-receipt.0-128.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-receipt.0-128.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.128-192.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.128-192.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.128-192.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.128-192.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-receipt.128-192.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-receipt.128-192.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.192-200.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.192-200.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.192-200.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.192-200.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-receipt.192-200.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-receipt.192-200.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.200-202.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.200-202.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.200-202.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-receipt.200-202.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-receipt.200-202.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-receipt.200-202.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.0-128.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.0-128.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.0-128.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.0-128.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-storage.0-128.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-storage.0-128.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.128-192.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.128-192.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.128-192.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.128-192.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-storage.128-192.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-storage.128-192.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.192-200.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.192-200.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.192-200.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.192-200.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-storage.192-200.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-storage.192-200.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.200-202.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.200-202.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.200-202.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-storage.200-202.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-storage.200-202.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-storage.200-202.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-tracesfrom.0-128.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-tracesfrom.0-128.efi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-tracesfrom.128-192.efi")
@@ -495,14 +499,14 @@ func removeMockFile(t *testing.T, dir string, name string) {
 }
 
 func Test_CheckStateSnapshotFiles_SuccessCase(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	err := checkStateSnapshotFiles(dirs, false, false)
 	require.NoError(t, err)
 }
 
 func Test_CheckStateSnapshotFiles_WithPersistReceiptCache(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	// Add rcache domain files (.kv + .kvi for each range)
 	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.0-128.kv")
@@ -533,20 +537,20 @@ func Test_CheckStateSnapshotFiles_WithPersistReceiptCache(t *testing.T) {
 	// Add rcache accessor files (.efi + .vi)
 	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.0-128.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.0-128.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.0-128.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.0-128.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-rcache.0-128.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-rcache.0-128.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.128-192.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.128-192.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.128-192.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.128-192.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-rcache.128-192.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-rcache.128-192.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.192-200.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.192-200.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.192-200.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.192-200.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-rcache.192-200.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-rcache.192-200.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.200-202.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.200-202.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.200-202.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.200-202.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-rcache.200-202.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-rcache.200-202.vi.torrent")
 	// Add rcache history files (.v)
 	createMockFile(t, dirs.SnapHistory, "v1.1-rcache.0-128.v")
 	createMockFile(t, dirs.SnapHistory, "v1.1-rcache.0-128.v.torrent")
@@ -561,7 +565,7 @@ func Test_CheckStateSnapshotFiles_WithPersistReceiptCache(t *testing.T) {
 }
 
 func Test_CheckStateSnapshotFiles_WithCommitmentHistory(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	// Add commitment idx files (.ef)
 	createMockFile(t, dirs.SnapIdx, "v2.0-commitment.0-128.ef")
@@ -575,20 +579,20 @@ func Test_CheckStateSnapshotFiles_WithCommitmentHistory(t *testing.T) {
 	// Add commitment accessor files (.efi + .vi)
 	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.0-128.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.0-128.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.0-128.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.0-128.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-commitment.0-128.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-commitment.0-128.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.128-192.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.128-192.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.128-192.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.128-192.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-commitment.128-192.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-commitment.128-192.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.192-200.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.192-200.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.192-200.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.192-200.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-commitment.192-200.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-commitment.192-200.vi.torrent")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.200-202.efi")
 	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.200-202.efi.torrent")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.200-202.vi")
-	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.200-202.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-commitment.200-202.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.0-commitment.200-202.vi.torrent")
 	// Add commitment history files (.v)
 	createMockFile(t, dirs.SnapHistory, "v1.1-commitment.0-128.v")
 	createMockFile(t, dirs.SnapHistory, "v1.1-commitment.0-128.v.torrent")
@@ -699,7 +703,7 @@ func Test_CheckStateSnapshotFiles_MissingDomainKVI(t *testing.T) {
 
 // If a non-account domain file extends beyond the account range, the maxStep check detects the mismatch.
 func Test_CheckStateSnapshotFiles_DomainMaxStepMismatch(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapDomain, "v1.1-storage.202-210.kv")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -710,7 +714,7 @@ func Test_CheckStateSnapshotFiles_DomainMaxStepMismatch(t *testing.T) {
 
 // A file in the idx directory that doesn't match the snapshot naming convention should be rejected.
 func Test_CheckStateSnapshotFiles_IdxUnparseableFile(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapIdx, "garbage.txt")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -719,7 +723,7 @@ func Test_CheckStateSnapshotFiles_IdxUnparseableFile(t *testing.T) {
 
 // When all account .ef files are missing, the check should report that no inverted index files were found.
 func Test_CheckStateSnapshotFiles_IdxNoAccountEF(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.0-128.ef")
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.128-192.ef")
@@ -731,7 +735,7 @@ func Test_CheckStateSnapshotFiles_IdxNoAccountEF(t *testing.T) {
 
 // If the first account .ef range doesn't start at step 0, a gap-at-start error is expected.
 func Test_CheckStateSnapshotFiles_IdxGapAtStart(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.0-128.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -740,7 +744,7 @@ func Test_CheckStateSnapshotFiles_IdxGapAtStart(t *testing.T) {
 
 // Two account .ef files sharing the same From value should be flagged as a possible overlap.
 func Test_CheckStateSnapshotFiles_IdxOverlapSameFrom(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapIdx, "v2.0-accounts.0-64.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -749,7 +753,7 @@ func Test_CheckStateSnapshotFiles_IdxOverlapSameFrom(t *testing.T) {
 
 // An account .ef file whose range overlaps with an existing range should be detected.
 func Test_CheckStateSnapshotFiles_IdxOverlap(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapIdx, "v2.0-accounts.64-200.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -758,7 +762,7 @@ func Test_CheckStateSnapshotFiles_IdxOverlap(t *testing.T) {
 
 // Removing a middle account .ef file creates a gap between consecutive ranges.
 func Test_CheckStateSnapshotFiles_IdxGap(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.128-192.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -787,7 +791,7 @@ func Test_CheckStateSnapshotFiles_MissingAccessorEFI(t *testing.T) {
 func Test_CheckStateSnapshotFiles_MissingAccessorVI(t *testing.T) {
 	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
-	removeMockFile(t, dirs.SnapAccessors, "v1.1-accounts.128-192.vi")
+	removeMockFile(t, dirs.SnapAccessors, "v2.0-accounts.128-192.vi")
 	err := checkStateSnapshotFiles(dirs, false, false)
 	require.ErrorIs(t, err, ErrSnapMissingFile)
 }
@@ -803,7 +807,7 @@ func Test_CheckStateSnapshotFiles_MissingHistoryV(t *testing.T) {
 
 // If the account idx range is shorter than the domain maxStep, the cross-directory maxStep check fails.
 func Test_CheckStateSnapshotFiles_IdxDomainMaxStepMismatch(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.200-202.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -847,7 +851,7 @@ func Test_CheckStateSnapshotFiles_DuplicateVersionsIdxEF(t *testing.T) {
 func Test_CheckStateSnapshotFiles_DuplicateVersionsAccessorVI(t *testing.T) {
 	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
-	createMockFile(t, dirs.SnapAccessors, "v1.2-code.0-128.vi")
+	createMockFile(t, dirs.SnapAccessors, "v2.1-code.0-128.vi")
 	err := checkStateSnapshotFiles(dirs, false, false)
 	require.ErrorIs(t, err, ErrSnapDuplicateVersions)
 }
@@ -870,7 +874,7 @@ func Test_CheckStateSnapshotFiles_DuplicateVersionsTorrent(t *testing.T) {
 
 // A .tmp leftover isn't a published file, so it must not trip the duplicate check.
 func Test_CheckStateSnapshotFiles_TmpFileIsNotDuplicate(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapDomain, "v1.2-storage.0-128.kv.tmp")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -878,7 +882,7 @@ func Test_CheckStateSnapshotFiles_TmpFileIsNotDuplicate(t *testing.T) {
 }
 
 func Test_CheckStateSnapshotFiles_NonSnapshotVersionedFileIsNotDuplicate(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapDomain, "v1.0-storage.0-128.log")
 	createMockFile(t, dirs.SnapDomain, "v1.1-storage.0-128.log")
@@ -916,4 +920,64 @@ func Test_CheckIfBlockSnapshotsPublishable_IgnoresStateSubdirs(t *testing.T) {
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapDomain, "v1.2-storage.0-128.kv")
 	require.NoError(t, checkIfBlockSnapshotsPublishable(dirs.Snap))
+}
+
+func Test_CheckIfBlockSnapshotsPublishable_LastRangeCompanions(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		remove    string
+		add       string
+		wantError string
+	}{
+		{name: "missing bodies seg", remove: "v1.1-000520-000521-bodies.seg", wantError: "missing file"},
+		{name: "missing headers idx", remove: "v2.0-000520-000521-headers.idx", wantError: "index file"},
+		{name: "missing transactions idx", remove: "v2.0-000520-000521-transactions.idx", wantError: "index file"},
+		{name: "missing transactions-to-block idx", remove: "v2.0-000520-000521-transactions-to-block.idx", wantError: "index file"},
+		{name: "unsupported bodies seg", remove: "v1.1-000520-000521-bodies.seg", add: "v0.1-000520-000521-bodies.seg", wantError: "expected version"},
+		{name: "unsupported headers seg", remove: "v1.1-000520-000521-headers.seg", add: "v0.1-000520-000521-headers.seg", wantError: "expected version"},
+		{name: "unsupported headers idx", remove: "v2.0-000520-000521-headers.idx", add: "v0.1-000520-000521-headers.idx", wantError: "less than supported"},
+		{name: "unsupported transactions-to-block idx", remove: "v2.0-000520-000521-transactions-to-block.idx", add: "v0.1-000520-000521-transactions-to-block.idx", wantError: "less than supported"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dirs := setupWorkingStateMockDatadir(t)
+			removeMockFile(t, dirs.Snap, tt.remove)
+			if tt.add != "" {
+				createMockFile(t, dirs.Snap, tt.add)
+			}
+			require.ErrorContains(t, checkIfBlockSnapshotsPublishable(dirs.Snap), tt.wantError)
+		})
+	}
+}
+
+func Test_CheckIfBlockSnapshotsPublishable_LegacyIdxVersion(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"headers.idx", "transactions.idx", "transactions-to-block.idx"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dirs := setupWorkingStateMockDatadir(t)
+			removeMockFile(t, dirs.Snap, "v2.0-000520-000521-"+name)
+			createMockFile(t, dirs.Snap, "v2-000520-000521-"+name)
+			require.NoError(t, checkIfBlockSnapshotsPublishable(dirs.Snap))
+		})
+	}
+}
+
+func Test_DoPublishable_StopsOnExpiredContext(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 0)
+	defer cancel()
+	dirs := datadir.New(t.TempDir())
+	require.ErrorIs(t, doPublishable(ctx, dirs, mdbxtest.NewTestDB(t, dbcfg.ChainDB)), context.DeadlineExceeded)
+}
+
+func TestDoPublishableRejectsMixedCommitmentVersions(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapDomain, "v2.0-commitment.0-128.kv")
+	createMockFile(t, dirs.SnapDomain, "v3.0-commitment.128-192.kv")
+
+	err := doPublishable(t.Context(), dirs, mdbxtest.NewTestDB(t, dbcfg.ChainDB))
+	require.ErrorContains(t, err, "mixed major versions")
 }

@@ -91,3 +91,68 @@ func TestEth1BlockTransactionLimitsChangeAtGloas(t *testing.T) {
 		})
 	}
 }
+
+func withdrawalsOverPreGloasLimit(cfg *clparams.BeaconChainConfig) []*Withdrawal {
+	withdrawals := make([]*Withdrawal, cfg.MaxWithdrawalsPerPayload+1)
+	for i := range withdrawals {
+		withdrawals[i] = &Withdrawal{Index: uint64(i), Validator: uint64(i), Amount: 1}
+	}
+	return withdrawals
+}
+
+func TestEth1BlockWithdrawalLimitsChangeAtGloas(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	withdrawals := withdrawalsOverPreGloasLimit(&cfg)
+	count := len(withdrawals)
+	for _, test := range []struct {
+		version   clparams.StateVersion
+		wantError bool
+	}{
+		{version: clparams.FuluVersion, wantError: true},
+		{version: clparams.GloasVersion},
+	} {
+		t.Run(test.version.String(), func(t *testing.T) {
+			block := NewEth1Block(test.version, &cfg)
+			block.Extra = solid.NewExtraData()
+			block.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+			block.Withdrawals = solid.NewStaticListSSZFromList(withdrawals, count, 44)
+			encoded, err := block.EncodeSSZ(nil)
+			require.NoError(t, err)
+
+			decoded := NewEth1Block(test.version, &cfg)
+			err = decoded.DecodeSSZ(encoded, int(test.version))
+			if test.wantError {
+				require.ErrorContains(t, err, "list too big")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, count, decoded.Withdrawals.Len())
+
+			reencoded, err := decoded.EncodeSSZ(nil)
+			require.NoError(t, err)
+			require.Equal(t, encoded, reencoded)
+
+			want, err := block.HashSSZ()
+			require.NoError(t, err)
+			got, err := decoded.HashSSZ()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
+}
+
+func TestEth1BlockJSONAcceptsGloasWithdrawalsOverPreGloasLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	withdrawals := withdrawalsOverPreGloasLimit(&cfg)
+	count := len(withdrawals)
+	block := NewEth1Block(clparams.GloasVersion, &cfg)
+	block.Extra = solid.NewExtraData()
+	block.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	block.Withdrawals = solid.NewStaticListSSZFromList(withdrawals, count, 44)
+	encoded, err := block.MarshalJSON()
+	require.NoError(t, err)
+
+	decoded := NewEth1Block(clparams.GloasVersion, &cfg)
+	require.NoError(t, decoded.UnmarshalJSON(encoded))
+	require.Equal(t, count, decoded.Withdrawals.Len())
+}

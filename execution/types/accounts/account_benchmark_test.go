@@ -450,3 +450,20 @@ func BenchmarkIsEmptyRoot(b *testing.B) {
 
 	fmt.Fprint(io.Discard, isEmpty)
 }
+
+func BenchmarkAccountCopy(b *testing.B) {
+	a := Account{Nonce: 1, Balance: *uint256.NewInt(2), Root: empty.RootHash, CodeHash: EmptyCodeHash, Incarnation: 5, PrevIncarnation: 6}
+	var c Account
+	for b.Loop() {
+		c.Copy(&a)
+	}
+}
+
+var accountSink *Account
+
+func BenchmarkAccountSelfCopy(b *testing.B) {
+	a := Account{Nonce: 1, Balance: *uint256.NewInt(2), Root: empty.RootHash, CodeHash: EmptyCodeHash, Incarnation: 5, PrevIncarnation: 6}
+	for b.Loop() {
+		accountSink = a.SelfCopy()
+	}
+}

@@ -92,7 +92,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	if err != nil {
 		return nil, err
 	}
-	if err := api.BaseAPI.checkPruneHistory(ctx, tx, stateBlockNumber); err != nil {
+	if err := api.BaseAPI.checkPruneStateAfterSystemTx(ctx, tx, stateBlockNumber); err != nil {
 		return nil, err
 	}
 	var stateReader state.StateReader
@@ -108,7 +108,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 	}
-	ibs := state.New(stateReader)
+	ibs := state.NewVersionedCall(stateReader)
 	defer ibs.Close()
 
 	parent, err := api.headerByHashAndNumber(ctx, tx, hash, stateBlockNumber)
@@ -152,7 +152,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	if timeoutMilliSecondsPtr != nil {
 		timeoutMilliSeconds = *timeoutMilliSecondsPtr
 	}
-	timeout := time.Millisecond * time.Duration(timeoutMilliSeconds)
+	timeout := capEVMTimeout(api.evmCallTimeout, timeoutMilliSeconds)
 
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, timeout)
 	defer cleanup()
@@ -166,7 +166,8 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	defer crypto.ReturnToPool(bundleHash)
 
 	results := make([]map[string]any, 0, len(txs))
-	for _, txn := range txs {
+	for i, txn := range txs {
+		ibs.SetTxContext(blockCtx.BlockNumber, i)
 		msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
 			return nil, err
@@ -184,7 +185,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
-		if err := ibs.FinalizeTx(rules, state.NewNoopWriter()); err != nil {
+		if err := ethapi.FinalizeCallTx(ibs, rules); err != nil {
 			return nil, err
 		}
 
@@ -404,7 +405,7 @@ func (api *BaseAPI) blockAccessListBytes(ctx context.Context, tx kv.TemporalTx, 
 		return nil, err
 	}
 	if len(data) == 0 {
-		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum)
+		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum, nil)
 		if errors.Is(err, state.ErrPruned) {
 			return nil, blockAccessListPrunedHistoryError()
 		}
@@ -448,11 +449,6 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
 	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return nil, err
@@ -488,11 +484,6 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		// (Compatibility) Every other node just return `null` for when the block does not exist.
 		log.Debug("eth_getBlockTransactionCountByHash GetBlockNumber failed", "err", err)
 		return nil, nil
-	}
-
-	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
 	}
 
 	body, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)

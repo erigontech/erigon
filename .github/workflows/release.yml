@@ -8,7 +8,7 @@ env:
   TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
   TEST_TOTAL_TIME_SECONDS: 432000   # 5 days
   TEST_CHAIN: "mainnet"
-  BUILDER_IMAGE: "golang:1.27-bookworm"
+  BUILDER_IMAGE: "golang:1.27-trixie"
   TARGET_BASE_IMAGE: "debian:12-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
@@ -246,6 +246,25 @@ jobs:
             --push \
             .
 
+      - name: Check that the binaries need at most the glibc, libstdc++ and libgcc_s of RHEL 9
+        run: |
+          # RHEL 9 ships glibc 2.34, and libstdc++ 6.0.29 and libgcc_s of GCC 11. The trixie builder ships
+          # newer ones, so without this check a call that binds to a newer symbol version would raise the
+          # minimum unnoticed.
+          docker run --rm -v "${GITHUB_WORKSPACE}/docker-build-output:/out:ro" "${BUILDER_IMAGE}" bash -c '
+            fail=0
+            for f in /out/*/usr/local/bin/*; do
+              versions=$(readelf -V "$f") || { echo "readelf failed on $f"; fail=1; continue; }
+              for max in GLIBC_2.34 GLIBCXX_3.4.29 CXXABI_1.3.13 GCC_7.0.0; do
+                need=$(printf "%s\n" "$versions" | grep -o "${max%%_*}_[0-9.]*" | sort -uV | tail -1)
+                if [ -n "$need" ] && [ "$(printf "%s\n" "$max" "$need" | sort -V | tail -1)" != "$max" ]; then
+                  echo "$f needs $need, newer than $max"
+                  fail=1
+                fi
+              done
+            done
+            exit $fail'
+
       - name: Create archives and checksums
         env:
           RELEASE_VERSION: ${{ inputs.release_version }}
@@ -409,6 +428,14 @@ jobs:
         with:
           name: torrent-client-status-${{ matrix.artifact }}
           path: torrent-client-status.txt
+
+      - name: Upload goroutine stacks
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: goroutine-stacks-${{ matrix.artifact }}
+          path: ${{ github.workspace }}/erigon-qa/test_system/goroutine-stacks.txt
+          if-no-files-found: ignore
 
       - name: Cleanup working directory
         run: rm -drfv *
@@ -613,7 +640,7 @@ jobs:
     - name: Generate GitHub App token for release publishing
       id: generate_token
       if: ${{ inputs.perform_release }}
-      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  ## v3.2.0
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  ## v3.3.0
       with:
         client-id: ${{ vars.RELEASE_BOT_APP_ID }}
         private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
@@ -774,7 +801,7 @@ jobs:
     steps:
       - name: Generate GitHub App token for git operations
         id: generate_token_rollback
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  ## v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  ## v3.3.0
         with:
           client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}

@@ -21,9 +21,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
-	"github.com/erigontech/erigon/common/length"
 )
 
 var (
@@ -63,10 +61,6 @@ func decodeObjectStrict(obj Unmarshaler, buf []byte, version int) error {
 	return obj.DecodeSSZ(buf, version)
 }
 
-func MarshalUint64SSZ(buf []byte, x uint64) {
-	binary.LittleEndian.PutUint64(buf, x)
-}
-
 func Uint64SSZ(x uint64) []byte {
 	b := make([]byte, 8)
 	binary.LittleEndian.PutUint64(b, x)
@@ -100,17 +94,20 @@ func UnmarshalUint64SSZ(x []byte) uint64 {
 }
 
 func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int) ([]T, error) {
-	return decodeDynamicList[T](bytes, start, end, _max, version, false)
+	return DecodeDynamicListWithDecoder[T](bytes, start, end, _max, version, false, nil)
 }
 
 // DecodeDynamicListStrict rejects non-canonical offset tables and propagates
 // strict decoding to elements that support it. Elements without
 // DecodeSSZStrict are decoded with DecodeSSZ.
 func DecodeDynamicListStrict[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int) ([]T, error) {
-	return decodeDynamicList[T](bytes, start, end, _max, version, true)
+	return DecodeDynamicListWithDecoder[T](bytes, start, end, _max, version, true, nil)
 }
 
-func decodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int, strict bool) ([]T, error) {
+// DecodeDynamicListWithDecoder uses decode for each freshly cloned element, while
+// retaining the ordinary or strict list offset and length checks. A nil callback
+// uses the element's ordinary or strict decoder.
+func DecodeDynamicListWithDecoder[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int, strict bool, decode func(T, []byte, int) error) ([]T, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -152,9 +149,12 @@ func decodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint
 		}
 		objs[i] = objs[i].Clone().(T)
 		var err error
-		if strict {
+		switch {
+		case decode != nil:
+			err = decode(objs[i], buf[currentOffset:endOffset], version)
+		case strict:
 			err = decodeObjectStrict(objs[i], buf[currentOffset:endOffset], version)
-		} else {
+		default:
 			err = objs[i].DecodeSSZ(buf[currentOffset:endOffset], version)
 		}
 		if err != nil {
@@ -202,46 +202,6 @@ func decodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 		if err != nil {
 			return nil, err
 		}
-	}
-	return objs, nil
-}
-
-func DecodeHashList(bytes []byte, start, end, _max uint32) ([]common.Hash, error) {
-	if start > end || len(bytes) < int(end) {
-		return nil, ErrBadOffset
-	}
-	buf := bytes[start:end]
-	elementsNum := uint32(len(buf)) / length.Hash
-	// Check for errors
-	if uint32(len(buf))%length.Hash != 0 {
-		return nil, ErrBufferNotRounded
-	}
-	if elementsNum > _max {
-		return nil, errors.Join(ErrTooBigList, fmt.Errorf("DecodeHashList: expected %d elements, got %d", _max, elementsNum))
-	}
-	objs := make([]common.Hash, elementsNum)
-	for i := range objs {
-		copy(objs[i][:], buf[i*length.Hash:])
-	}
-	return objs, nil
-}
-
-func DecodeNumbersList(bytes []byte, start, end uint32, _max uint64) ([]uint64, error) {
-	if start > end || len(bytes) < int(end) {
-		return nil, ErrBadOffset
-	}
-	buf := bytes[start:end]
-	elementsNum := uint64(len(buf)) / length.BlockNum
-	// Check for errors
-	if uint64(len(buf))%length.BlockNum != 0 {
-		return nil, ErrBufferNotRounded
-	}
-	if elementsNum > _max {
-		return nil, errors.Join(ErrTooBigList, fmt.Errorf("DecodeNumbersList: expected %d elements, got %d", _max, elementsNum))
-	}
-	objs := make([]uint64, elementsNum)
-	for i := range objs {
-		objs[i] = UnmarshalUint64SSZ(buf[i*length.BlockNum:])
 	}
 	return objs, nil
 }

@@ -19,11 +19,15 @@ package cache
 import (
 	"encoding/binary"
 	"math/rand"
+	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+
+	"github.com/erigontech/erigon/common/cachebudget"
 )
 
 // Steady-state throughput with many more goroutines than cores. Accesses are a
@@ -49,7 +53,7 @@ func BenchmarkGenericCacheParallelMixed(b *testing.B) {
 		}
 	}
 
-	c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, avgStoragePayloadBytes,
+	c := NewGenericCache[[]byte](128*datasize.MB,
 		func(v []byte) int { return len(v) }, ModeEvictLRU)
 	defer c.Close()
 	val := make([]byte, 32)
@@ -91,7 +95,7 @@ func BenchmarkGenericCacheFill(b *testing.B) {
 	const keys = 1 << 20
 	val := make([]byte, 32)
 	for b.Loop() {
-		c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, avgStoragePayloadBytes, func(v []byte) int { return len(v) }, ModeEvictLRU)
+		c := NewGenericCache[[]byte](128*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
 		k := make([]byte, 8)
 		for i := range uint64(keys) {
 			binary.BigEndian.PutUint64(k, i*0x9E3779B97F4A7C15)
@@ -101,15 +105,52 @@ func BenchmarkGenericCacheFill(b *testing.B) {
 	}
 }
 
-// The longest a single put is held up while filling a cache from cold: on main
-// that is a whole-cache migration behind every put stripe, here it is one
-// shard's migration behind that shard's mutex.
+// Read-ahead workers filling distinct cold accounts into one cache at once. The
+// cache already holds 2M entries, so the timed fill grows no table.
+func BenchmarkGenericCacheParallelFill(b *testing.B) {
+	const ballast, keys = 2 * 1024 * 1024, 1024 * 1024
+	prev := cachebudget.Global
+	b.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(1 << 40)
+	val := make([]byte, 40)
+	for b.Loop() {
+		b.StopTimer()
+		c := NewGenericCache[[]byte](1*datasize.GB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+		k := make([]byte, 20)
+		for i := range uint64(ballast) {
+			binary.BigEndian.PutUint64(k, i*0x9E3779B97F4A7C15)
+			c.PutIfAbsent(k, val, 1)
+		}
+		if c.Len() != ballast {
+			b.Fatalf("prefill holds %d entries, want %d", c.Len(), ballast)
+		}
+		var next atomic.Uint64
+		next.Store(ballast)
+		var wg sync.WaitGroup
+		b.StartTimer()
+		for range runtime.GOMAXPROCS(0) {
+			wg.Go(func() {
+				k := make([]byte, 20)
+				for i := next.Add(1); i <= ballast+keys; i = next.Add(1) {
+					binary.BigEndian.PutUint64(k, i*0x9E3779B97F4A7C15)
+					c.PutIfAbsent(k, val, 1)
+				}
+			})
+		}
+		wg.Wait()
+		b.StopTimer()
+		c.Close()
+		b.StartTimer()
+	}
+}
+
+// The longest a single put is held up while filling a cache from cold.
 func BenchmarkGenericCacheWorstPut(b *testing.B) {
 	const keys = 1 << 20
 	val := make([]byte, 32)
 	var worst time.Duration
 	for b.Loop() {
-		c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, avgStoragePayloadBytes, func(v []byte) int { return len(v) }, ModeEvictLRU)
+		c := NewGenericCache[[]byte](128*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
 		k := make([]byte, 8)
 		for i := range uint64(keys) {
 			binary.BigEndian.PutUint64(k, i*0x9E3779B97F4A7C15)

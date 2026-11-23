@@ -18,6 +18,8 @@ package cache
 
 import (
 	"runtime"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"weak"
@@ -37,6 +39,7 @@ func TestNewByteLRUOutsideBudget(t *testing.T) {
 	for i := range uint64(64) {
 		b.Add(i, make([]byte, 512))
 	}
+	b.c.CleanUp()
 	require.Equal(t, used, cachebudget.Global.Used())
 	require.LessOrEqual(t, b.Len(), 8)
 	b.Close()
@@ -51,6 +54,17 @@ func TestNewByteLRUDroppedIsCollectable(t *testing.T) {
 	}()
 	runtime.GC()
 	require.Nil(t, dropped.Value(), "an unbudgeted cache dropped without Close must be collected")
+}
+
+func TestBudgetedByteLRUClosedIsCollectable(t *testing.T) {
+	dropped := func() weak.Pointer[otter.Cache[uint64, []byte]] {
+		b := newByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+		b.Add(1, make([]byte, 64))
+		b.Close()
+		return weak.Make(b.c)
+	}()
+	runtime.GC()
+	require.Nil(t, dropped.Value(), "a budgeted cache dropped after Close must be collected")
 }
 
 func TestHashByteLRUMissesForeignHash(t *testing.T) {
@@ -73,4 +87,334 @@ func TestHashByteLRUWeighsAnEntryOnce(t *testing.T) {
 	_, ok := l.Get(common.Hash{1})
 	require.True(t, ok)
 	require.Equal(t, int32(1), calls.Load())
+}
+
+// otter drops a replacement node written before the first write drains.
+func TestByteLRUConcurrentSameKeyStaysBounded(t *testing.T) {
+	b := NewByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) })
+	value := make([]byte, 64*1024)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Go(func() {
+			for key := range uint64(2000) {
+				b.Add(key, value)
+			}
+		})
+	}
+	wg.Wait()
+	b.c.CleanUp()
+	require.LessOrEqual(t, b.Len(), 16, "a 1MB cache of 64KB entries holds 16")
+}
+
+func TestByteLRUAddReplacesLiveKey(t *testing.T) {
+	b := NewByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) })
+	require.True(t, b.Add(1, []byte("first")))
+	require.True(t, b.Add(1, []byte("second")))
+	v, ok := b.Get(1)
+	require.True(t, ok)
+	require.Equal(t, []byte("second"), v)
+}
+
+func TestByteLRUBudgetedAddReplacesLiveKey(t *testing.T) {
+	var evicted [][]byte
+	b := newByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) },
+		func(_ uint64, v []byte) { evicted = append(evicted, v) })
+	defer b.Close()
+
+	require.True(t, b.Add(1, []byte("first")))
+	require.True(t, b.Add(1, []byte("second")))
+	b.c.CleanUp()
+
+	v, ok := b.Get(1)
+	require.True(t, ok)
+	require.Equal(t, []byte("second"), v)
+	// The displaced value is refunded through onEvict, which also sees it.
+	require.Equal(t, [][]byte{[]byte("first")}, evicted)
+	require.Equal(t, int64(len("second")), b.resident.Load())
+	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
+}
+
+// A budgeted layer refunds through onEvict, so its charge must match what otter holds.
+func TestByteLRUBudgetedConcurrentSameKeyAccounting(t *testing.T) {
+	b := newByteLRU(8*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+	value := make([]byte, 64*1024)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Go(func() {
+			for key := range uint64(2000) {
+				b.Add(key, value)
+			}
+		})
+	}
+	wg.Wait()
+	b.c.CleanUp()
+	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
+	require.LessOrEqual(t, b.resident.Load(), b.limit.Load())
+}
+
+// Concurrent writers to one key must not reserve chunks for a predecessor they
+// both observed: the envelope is shared, and a stray reservation only comes
+// back on Purge or Close.
+func TestByteLRUConcurrentSameKeyDoesNotOverReserve(t *testing.T) {
+	val := make([]byte, 700*1024)
+	b := newByteLRU(64*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+
+	require.True(t, b.Add(1, val))
+	limAfterInsert := b.limit.Load()
+
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Go(func() {
+			for range 64 {
+				b.Add(1, val)
+			}
+		})
+	}
+	wg.Wait()
+	b.c.CleanUp()
+
+	require.Equal(t, limAfterInsert, b.limit.Load(), "same-size replacements must not grow the limit")
+	require.Equal(t, int64(len(val)), b.resident.Load())
+	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
+}
+
+// A growing working set must still raise the limit.
+func TestByteLRUGrowsOnPositiveNetChange(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(1 << 40)
+
+	val := make([]byte, 256*1024)
+	b := newByteLRU(64*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+
+	start := b.limit.Load()
+	for key := range uint64(64) {
+		require.True(t, b.Add(key, val))
+	}
+	b.c.CleanUp()
+
+	require.Greater(t, b.limit.Load(), start, "distinct keys past the floor must grow the limit")
+	require.LessOrEqual(t, b.resident.Load(), b.limit.Load())
+}
+
+// A newcomer W-TinyLFU refuses, or evicts straight away, must not leave its
+// weight charged: otter reports the insert as done, so the charge is only
+// returned by the deletion handler (CauseOverflow, not CauseReplacement).
+func TestByteLRURejectedNewcomerIsRefunded(t *testing.T) {
+	// A budget far smaller than the working set, so admission has to refuse.
+	val := make([]byte, 64*1024)
+	b := newByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+
+	for key := range uint64(512) {
+		require.True(t, b.Add(key, val), "Add reports the value was offered")
+	}
+	b.c.CleanUp()
+
+	// The charge tracks what otter actually holds, however many were refused.
+	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
+	require.LessOrEqual(t, b.resident.Load(), b.limit.Load())
+	require.Positive(t, b.Len())
+}
+
+// An unbudgeted layer holds maxBytes from the start and never grows. It must still
+// stay inside the byte bound under eviction pressure and serve correct values.
+func TestByteLRUUnbudgetedStaysBoundedAndCorrect(t *testing.T) {
+	const maxBytes = datasize.ByteSize(1 << 20)
+	val := func(i uint64) []byte { return append(make([]byte, 64*1024-1), byte(i)) }
+	b := NewByteLRU(maxBytes, func(_ uint64, v []byte) int64 { return int64(len(v)) })
+
+	for key := range uint64(256) {
+		require.True(t, b.Add(key, val(key)))
+	}
+	b.c.CleanUp()
+
+	require.LessOrEqual(t, int64(b.c.WeightedSize()), int64(maxBytes))
+	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
+	require.Positive(t, b.Len())
+	// Whatever survived answers with its own value.
+	for key := range uint64(256) {
+		if v, ok := b.Get(key); ok {
+			require.Equal(t, val(key), v, "key %d served the wrong value", key)
+		}
+	}
+	// The limit never moves: there is nothing to grow into.
+	require.Equal(t, int64(maxBytes), b.limit.Load())
+}
+
+// One write larger than a chunk must still be covered by the reservation.
+func TestByteLRUGrowCoversLargeWrite(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(1 << 40)
+
+	b := newByteLRU(64*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+
+	require.True(t, b.Add(1, make([]byte, 40*datasize.MB)))
+	b.c.CleanUp()
+	require.LessOrEqual(t, b.resident.Load(), b.limit.Load())
+}
+
+// A write that lands between Purge's invalidation and its reservation reset is
+// charged against the old limit; Purge must reserve for it again, or the entry
+// stays resident while other caches spend the released budget.
+func TestByteLRUPurgeRacingAddKeepsResidencyReserved(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(1 << 40)
+
+	val := make([]byte, 8*datasize.MB)
+	b := newByteLRU(64*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+	for round := range 2000 {
+		b.Add(1, val)
+		var wg sync.WaitGroup
+		wg.Go(b.Purge)
+		wg.Go(func() { b.Add(2, val) })
+		wg.Wait()
+		b.c.CleanUp()
+		require.LessOrEqual(t, b.resident.Load(), b.limit.Load(), "round %d: resident bytes outgrew the reservation", round)
+	}
+}
+
+// A refused envelope pins the cache at its limit; Purge reopens it to maxBytes.
+func TestByteLRURefusedEnvelopePinsLimitUntilPurge(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(byteLRUFloorBytes) // room for the floor only
+
+	val := make([]byte, 64*1024)
+	b := newByteLRU(256*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+	for key := range uint64(64) { // 4 MB: past the floor, so growth asks the envelope
+		b.Add(key, val)
+	}
+	b.c.CleanUp()
+	require.Equal(t, byteLRUFloorBytes, b.limit.Load())
+	require.Equal(t, byteLRUFloorBytes, b.ceiling.Load(), "a refused chunk must pin the ceiling")
+	require.LessOrEqual(t, b.resident.Load(), byteLRUFloorBytes)
+
+	cachebudget.Global = cachebudget.New(1 << 40)
+	b.Purge()
+	require.Equal(t, b.maxBytes, b.ceiling.Load())
+	for key := range uint64(64) {
+		b.Add(key, val)
+	}
+	b.c.CleanUp()
+	require.Greater(t, b.resident.Load(), byteLRUFloorBytes, "Purge must lift otter's maximum back to maxBytes")
+}
+
+// A full cache returns its grown reservation on Clear and everything on Close.
+func TestGenericCacheBudgetBackToBaselineAfterClearAndClose(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(1 << 40)
+	base := cachebudget.Global.Used()
+
+	val := make([]byte, 64*1024)
+	c := NewGenericCache[[]byte](128*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	k := make([]byte, 8)
+	for i := range uint64(1024) { // 64 MB
+		k[0], k[1] = byte(i), byte(i>>8)
+		c.Put(k, val, 1)
+	}
+	c.data.c.CleanUp()
+	require.Greater(t, cachebudget.Global.Used(), base+byteLRUFloorBytes)
+
+	c.Clear()
+	require.Equal(t, base+byteLRUFloorBytes, cachebudget.Global.Used())
+	c.Close()
+	require.Equal(t, base, cachebudget.Global.Used())
+}
+
+// Close racing writers leaves no reservation behind.
+func TestByteLRUCloseRacingWritersReturnsBudget(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(1 << 40)
+	base := cachebudget.Global.Used()
+
+	val := make([]byte, 64*1024)
+	b := newByteLRU(256*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	var wg sync.WaitGroup
+	for w := range uint64(4) {
+		wg.Go(func() {
+			for key := range uint64(1024) {
+				b.Add(w<<32|key, val)
+			}
+		})
+	}
+	b.Close()
+	wg.Wait()
+	b.c.CleanUp()
+	require.Equal(t, base, cachebudget.Global.Used())
+}
+
+// After the envelope refuses growth, a NoOp cache must drop a new key instead of letting otter evict others.
+func TestGenericCacheNoOpDropsNewKeyAfterRefusedEnvelope(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(byteLRUFloorBytes) // room for the floor only
+
+	val := make([]byte, 64*1024)
+	c := NewGenericCache[[]byte](256*datasize.MB, func(v []byte) int { return len(v) }, ModeNoOp)
+	defer c.Close()
+	k := make([]byte, 8)
+	for i := range uint64(64) { // 4 MB: past the floor, so growth asks the envelope
+		k[0] = byte(i)
+		c.Put(k, val, 1)
+	}
+	c.data.c.CleanUp()
+	require.Equal(t, byteLRUFloorBytes, c.data.ceiling.Load(), "the refused chunk must pin the ceiling")
+	var resident [][]byte
+	for i := range uint64(64) {
+		k[0] = byte(i)
+		if _, ok := c.Get(k); ok {
+			resident = append(resident, slices.Clone(k))
+		}
+	}
+	require.NotEmpty(t, resident)
+
+	dropped := c.dropped.Load()
+	k[0] = 200
+	c.Put(k, val, 1)
+	c.data.c.CleanUp()
+	require.Equal(t, dropped+1, c.dropped.Load(), "NoOp must drop the write, not hand it to otter")
+	_, ok := c.Get(k)
+	require.False(t, ok, "a new key must be dropped at the pinned bound")
+	for _, key := range resident {
+		_, ok := c.Get(key)
+		require.True(t, ok, "a new key must not evict a resident one")
+	}
+}
+
+// A cache kept after Close holds nothing a later write adds.
+func TestByteLRUWriteAfterCloseIsNotResident(t *testing.T) {
+	b := newByteLRU(8*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	b.Close()
+	b.Add(1, make([]byte, 1024))
+	b.c.CleanUp()
+	require.Zero(t, b.Len())
+	require.Zero(t, b.SizeBytes())
+}
+
+// When less than a full chunk is free, growth takes what is left instead of pinning at the floor.
+func TestByteLRUGrowsIntoAPartialChunk(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(byteLRUFloorBytes + 8*int64(datasize.MB))
+
+	val := make([]byte, 64*1024)
+	b := newByteLRU(256*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+	for key := range uint64(64) { // 4 MB: past the floor, less than the free 8 MB
+		b.Add(key, val)
+	}
+	b.c.CleanUp()
+	require.Equal(t, byteLRUFloorBytes+8*int64(datasize.MB), b.limit.Load(), "growth must take the partial chunk left in the envelope")
+	require.Equal(t, 64, b.Len())
 }

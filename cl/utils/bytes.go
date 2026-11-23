@@ -19,6 +19,7 @@ package utils
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 	"math/bits"
 	"unsafe"
 
@@ -55,29 +56,33 @@ func Bytes4ToUint32(bytes4 [4]byte) uint32 {
 	return binary.BigEndian.Uint32(bytes4[:])
 }
 
-func BytesToBytes4(b []byte) (ret [4]byte) {
-	copy(ret[:], b)
-	return
-}
-
 func Uint64ToLE(i uint64) []byte {
 	buf := make([]byte, 8)
 	binary.LittleEndian.PutUint64(buf, i)
 	return buf
 }
 
+var errSnappyDecodedTooLarge = errors.New("snappy: decoded length is too large")
+
 func DecompressSnappy(data []byte, lengthCheck bool) ([]byte, error) {
-	// Decode the snappy
+	limit := uint64(math.MaxInt)
+	if lengthCheck {
+		limit = uint64(maxDecodeLenAllowed)
+	}
+	return DecompressSnappyWithLimit(data, limit)
+}
+
+// DecompressSnappyWithLimit rejects a payload whose declared decoded length exceeds
+// maxDecodedLen before allocating anything for it.
+func DecompressSnappyWithLimit(data []byte, maxDecodedLen uint64) ([]byte, error) {
 	lenDecoded, err := snappy.DecodedLen(data)
 	if err != nil {
 		return nil, err
 	}
-	if lengthCheck && lenDecoded > int(maxDecodeLenAllowed) {
-		return nil, errors.New("snappy: decoded length is too large")
+	if uint64(lenDecoded) > maxDecodedLen {
+		return nil, errSnappyDecodedTooLarge
 	}
-	decodedData := make([]byte, lenDecoded)
-
-	return snappy.Decode(decodedData, data)
+	return snappy.Decode(make([]byte, lenDecoded), data)
 }
 
 func CompressSnappy(data []byte) []byte {
@@ -198,12 +203,6 @@ func BitsOnCount(b []byte) int {
 		count += bits.OnesCount8(v)
 	}
 	return count
-}
-
-func MergeBitlists(a, b []byte) {
-	for i := range b {
-		a[i] |= b[i]
-	}
 }
 
 func ExtractSlotFromSerializedBeaconState(beaconState []byte) (uint64, error) {

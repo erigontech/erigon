@@ -28,23 +28,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// AccountRef is a reference to an account address.
-//
-// Account references are used during EVM initialisation and
-// it's primary use is to fetch addresses. Removing this object
-// proves difficult because of the cached jump destinations which
-// are fetched from the parent contract (i.e. the caller).
-type AccountRef accounts.Address
-
-// Address casts AccountRef to a Address
-func (ar AccountRef) Address() accounts.Address { return accounts.Address(ar) }
-
-// Contract represents an ethereum contract in the state database. It contains
-// the contract code, calling arguments. Contract implements ContractRef
+// Contract holds the code and account context for a single EVM execution.
 type Contract struct {
-	// caller is the result of the caller which initialised this
-	// contract. However when the "call method" is delegated this value
-	// needs to be initialised to that of the caller's caller.
 	caller   accounts.Address
 	addr     accounts.Address
 	analysis bitvec // Locally cached result of JUMPDEST analysis
@@ -54,49 +39,50 @@ type Contract struct {
 
 	value uint256.Int
 
-	// selfBalance memoizes SELFBALANCE for the lifetime of this frame.
-	// Invalidated after opcodes that return control to this frame and may have
-	// changed the account's balance via a nested execution (CALL, CALLCODE,
-	// DELEGATECALL, CREATE, CREATE2). STATICCALL is exempt (whole subtree is
-	// read-only). SELFDESTRUCT is exempt because the frame halts.
+	// selfBalance memoizes SELFBALANCE until nested execution may change the
+	// account's balance. STATICCALL is exempt only outside frame transactions,
+	// where it cannot approve payment. SELFDESTRUCT halts the call.
 	selfBalance       uint256.Int
 	selfBalanceCached bool
 }
 
 // around 64MB cache in the worst case.
-var jumpDestCache = cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) }, cache.ModeEvictLRU)
+var jumpDestCache = newJumpDestCache()
 
-// NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
+func newJumpDestCache() *cache.GenericCache[bitvec] {
+	return cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) * 8 }, cache.ModeEvictLRU)
+}
+
+// NewContract returns a contract execution context with no code set.
+func NewContract(caller accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
 	return &Contract{
-		caller: callerAddress,
+		caller: caller,
 		addr:   addr,
 		value:  value,
 	}
 }
 
-// First result tells us if the destination is valid
-// Second result tells us if the code bitmap was used
-func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
+func (c *Contract) validJumpdest(dest *uint256.Int) bool {
 	udest, overflow := dest.Uint64WithOverflow()
 	// PC cannot go beyond len(code) and certainly can't be bigger than 64bits.
 	// Don't bother checking for JUMPDEST in that case.
 	if overflow || udest >= uint64(len(c.Code)) {
-		return false, false
+		return false
 	}
-	// Only JUMPDESTs allowed for destinations
-	if OpCode(c.Code[udest]) != JUMPDEST {
-		return false, false
+	if c.analysis == nil {
+		c.analysis = c.jumpdestAnalysis()
 	}
-	return c.isCode(udest), true
+	return c.analysis.isJumpdest(udest)
 }
 
-// isCode returns true if the provided PC location is an actual opcode, as
-// opposed to a data-segment following a PUSHN operation.
-func (c *Contract) isCode(udest uint64) bool {
-	if c.analysis != nil {
-		return c.analysis.codeSegment(udest)
-	}
+// analysedJumpdest is validJumpdest without the lazy analysis, small enough to
+// inline. It reports false while the analysis is missing.
+func (c *Contract) analysedJumpdest(dest *uint256.Int) bool {
+	return c.analysis != nil && dest.IsUint64() && dest.Uint64() < uint64(len(c.Code)) && c.analysis.isJumpdest(dest.Uint64())
+}
+
+// jumpdestAnalysis returns the cached JUMPDEST analysis of the code or computes it.
+func (c *Contract) jumpdestAnalysis() bitvec {
 	var codeHash common.Hash
 	isCodeHashZero := c.CodeHash.IsZero()
 	if !isCodeHashZero {
@@ -105,19 +91,18 @@ func (c *Contract) isCode(udest uint64) bool {
 
 	if !isCodeHashZero {
 		if analysis, ok := jumpDestCache.Get(codeHash[:]); ok {
-			c.analysis = analysis
-			return c.analysis.codeSegment(udest)
+			return analysis
 		}
 	}
 
-	c.analysis = codeBitmap(c.Code)
+	analysis := codeBitmap(c.Code)
 
 	if !isCodeHashZero {
 		// content-addressed by codeHash and never unwound, so txNum is irrelevant
-		jumpDestCache.Put(codeHash[:], c.analysis, 0)
+		jumpDestCache.Put(codeHash[:], analysis, 0)
 	}
 
-	return c.analysis.codeSegment(udest)
+	return analysis
 }
 
 // GetOp returns the n'th element in the contract's byte array
@@ -129,20 +114,18 @@ func (c *Contract) GetOp(n uint64) OpCode {
 	return STOP
 }
 
-// Caller returns the caller of the contract.
-//
-// Caller will recursively set to the caller's caller when
-// the contract is a delegate call, including that of caller's caller.
+// Caller returns the address exposed by the CALLER opcode. DELEGATECALL preserves
+// the parent call's caller, including across nested delegate calls.
 func (c *Contract) Caller() accounts.Address {
 	return c.caller
 }
 
-// Address returns the contracts address
+// Address returns the account address used for this execution's storage and balance.
 func (c *Contract) Address() accounts.Address {
 	return c.addr
 }
 
-// Value returns the contract's value (sent to it from it's caller)
+// Value returns the value exposed by the CALLVALUE opcode.
 func (c *Contract) Value() uint256.Int {
 	return c.value
 }

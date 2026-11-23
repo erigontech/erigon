@@ -13,7 +13,6 @@ type TrieConfig struct {
 	DeferBranchUpdates     bool
 	LeaveDeferredForCaller bool
 	EnableTrieWarmup       bool
-	CsvMetricsFilePrefix   string // empty falls back to the env var
 
 	MemoizationOff bool
 	// 0 = use dbg.TipTrieWarmupers (env TIP_TRIE_WARMUPERS)

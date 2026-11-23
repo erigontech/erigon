@@ -25,10 +25,13 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -66,7 +69,8 @@ func TestSendRawTransaction(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
 	require.NoError(err)
-	txsCh, id := ff.SubscribePendingTxs(1, "")
+	txsCh, id, err := ff.SubscribePendingTxs(1, "")
+	require.NoError(err)
 	defer ff.UnsubscribePendingTxs(id)
 	txHash, err := api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
@@ -91,6 +95,60 @@ func TestSendRawTransaction(t *testing.T) {
 	// require.Equal(eth.ToProto[m.MultiClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
 }
 
+type submissionReadDB struct {
+	kv.TemporalRoDB
+	readers int
+}
+
+func (db *submissionReadDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic // The returned transaction belongs to the caller.
+	if err != nil {
+		return nil, err
+	}
+	db.readers++
+	return &submissionReadTx{TemporalTx: tx, HasBlockFilesRoTx: tx.(freezeblocks.HasBlockFilesRoTx), db: db}, nil
+}
+
+type submissionReadTx struct {
+	kv.TemporalTx
+	freezeblocks.HasBlockFilesRoTx
+	db *submissionReadDB
+}
+
+func (tx *submissionReadTx) Rollback() {
+	tx.db.readers--
+	tx.TemporalTx.Rollback()
+}
+
+type submissionPoolClient struct {
+	txpoolproto.TxpoolClient
+	onAdd func()
+}
+
+func (c submissionPoolClient) Add(context.Context, *txpoolproto.AddRequest, ...grpc.CallOption) (*txpoolproto.AddReply, error) {
+	c.onAdd()
+	return &txpoolproto.AddReply{Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}}, nil
+}
+
+func TestSendRawTransactionReleasesReadBeforeAdmission(t *testing.T) {
+	m := execmoduletester.New(t)
+	db := &submissionReadDB{TemporalRoDB: m.DB}
+	called := false
+	client := submissionPoolClient{onAdd: func() {
+		called = true
+		require.Zero(t, db.readers, "pool recovery must be able to acquire a database reader during admission")
+	}}
+	api := newEthApiForTest(newBaseApiForTest(m), db, client, nil)
+	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(10*common.GWei), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	require.NoError(t, err)
+	var encoded bytes.Buffer
+	require.NoError(t, txn.MarshalBinary(&encoded))
+	_, err = api.SendRawTransaction(t.Context(), encoded.Bytes())
+	require.NoError(t, err)
+	require.True(t, called)
+	require.Zero(t, db.readers, "each database reader must be released exactly once")
+}
+
 func TestSendRawTransactionUnprotected(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithTxPool())
 	require := require.New(t)
@@ -109,7 +167,8 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
 	require.NoError(err)
-	txsCh, id := ff.SubscribePendingTxs(1, "")
+	txsCh, id, err := ff.SubscribePendingTxs(1, "")
+	require.NoError(err)
 	defer ff.UnsubscribePendingTxs(id)
 	txHash, err := api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
@@ -327,4 +386,58 @@ func TestWaitForReceiptOfExhaustedTimeout(t *testing.T) {
 	_, err := api.waitForReceipt(t.Context(), common.Hash{1}, time.Nanosecond)
 	var timeoutErr *rpc.TxSyncTimeoutError
 	require.ErrorAs(err, &timeoutErr)
+}
+
+// Pins that a full subscription budget degrades the wait to polling instead of failing a transaction the
+// pool has already accepted.
+func TestWaitForReceiptWithoutSubscriptionBudget(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	require := require.New(t)
+
+	var txnHash common.Hash
+	chain, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(
+			types.NewTransaction(0, m.Address, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(err)
+		b.AddTx(txn)
+		txnHash = txn.Hash()
+	})
+	require.NoError(err)
+
+	config := rpchelper.FiltersConfig{RpcSubscriptionFiltersMaxSubscriptions: 1}
+	ff := rpchelper.New(ctx, config, nil, nil, nil, func() {}, m.Log, nil)
+	_, _, err = ff.SubscribeNewHeads(8, rpchelper.ProtocolWS) // takes the only slot
+	require.NoError(err)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, m.StateCache, m), m.DB, nil, nil)
+
+	type result struct {
+		receipt *ethutils.RPCReceipt
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		receipt, err := api.waitForReceipt(ctx, txnHash, 5*time.Second)
+		done <- result{receipt, err}
+	}()
+
+	time.Sleep(200 * time.Millisecond) // let the initial lookup miss
+	require.NoError(m.InsertChain(chain))
+
+	res := <-done
+	require.NoError(res.err)
+	require.NotNil(res.receipt)
+	require.Equal(txnHash, res.receipt.TransactionHash)
+}
+
+func TestTxSyncTimeout(t *testing.T) {
+	t.Parallel()
+	api := &APIImpl{RpcTxSyncDefaultTimeout: 20 * time.Second, RpcTxSyncMaxTimeout: time.Minute}
+
+	require.Equal(t, 20*time.Second, api.txSyncTimeout(nil))
+	require.Equal(t, 20*time.Second, api.txSyncTimeout(common.NewUint64(0)))
+	require.Equal(t, 5*time.Second, api.txSyncTimeout(common.NewUint64(5000)))
+	require.Equal(t, time.Minute, api.txSyncTimeout(common.NewUint64(60_001)))
+	require.Equal(t, time.Minute, api.txSyncTimeout(common.NewUint64(10_000_000_000_000)), "overflows a Duration")
 }

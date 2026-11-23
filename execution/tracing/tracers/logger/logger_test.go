@@ -39,23 +39,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-type dummyContractRef struct {
-	calledForEach bool
-}
-
-func (dummyContractRef) ReturnGas(*big.Int)          {}
-func (dummyContractRef) Address() common.Address     { return accounts.ZeroAddress.Value() }
-func (dummyContractRef) Value() *big.Int             { return new(big.Int) }
-func (dummyContractRef) SetCode(common.Hash, []byte) {}
-func (d *dummyContractRef) ForEachStorage(callback func(key, value common.Hash) bool) {
-	d.calledForEach = true
-}
-func (d *dummyContractRef) SubBalance(amount *big.Int) {}
-func (d *dummyContractRef) AddBalance(amount *big.Int) {}
-func (d *dummyContractRef) SetBalance(*big.Int)        {}
-func (d *dummyContractRef) SetNonce(uint64)            {}
-func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
-
 func TestStoreCapture(t *testing.T) {
 	//c := vm.NewJumpDestCache(128)
 	ibs := state.New(state.NewNoopReader())
@@ -65,7 +48,7 @@ func TestStoreCapture(t *testing.T) {
 	var (
 		logger   = NewStructLogger(nil)
 		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{Tracer: logger.Hooks()})
-		contract = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+		contract = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
 	var index common.Hash
@@ -99,6 +82,33 @@ func TestStoreCapture(t *testing.T) {
 	require.EqualValues(t, -int64(params.StateGasPerStorageSet), logs[6]["stateGasCost"])
 }
 
+func TestStructLoggerHaltedStorageStepIsNotRecorded(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+
+	var (
+		logger   = NewStructLogger(nil)
+		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{Tracer: logger.Hooks()})
+		contract = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	)
+	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
+	logger.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
+
+	_, _, _, err := evm.Run(contract, mdgas.MdGas{Execution: 200_000}, nil, true)
+	require.ErrorIs(t, err, vm.ErrWriteProtection)
+	_, _, _, err = evm.Run(contract, mdgas.MdGas{Execution: 6 + params.SstoreSentryGasEIP2200}, nil, false)
+	require.ErrorIs(t, err, vm.ErrOutOfGas)
+
+	logs := logger.StructLogs()
+	require.Len(t, logs, 6)
+	for _, i := range []int{2, 5} {
+		require.Equal(t, vm.SSTORE, logs[i].Op)
+		require.Error(t, logs[i].Err)
+		require.Empty(t, logs[i].Storage)
+	}
+	require.Empty(t, logger.storage[contract.Address()])
+}
+
 func TestStructLoggerTxEndError(t *testing.T) {
 	logger := NewStructLogger(nil)
 	logger.Hooks().EmitTxEnd(nil, mdgas.TxnGasUsage{}, vm.ErrInsufficientBalance)
@@ -128,25 +138,6 @@ func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
 	buf.Reset()
 	logger.OnExitV2(0, nil, mdgas.MdGasUsage{Execution: 10}, nil, false)
 	require.JSONEq(t, `{"output":"","gasUsed":"0xa","stateGasUsed":0}`, buf.String())
-}
-
-func TestMarkdownLoggerStateGas(t *testing.T) {
-	var output bytes.Buffer
-	logger := NewMarkdownLogger(nil, &output)
-	logger.OnTxStart(&tracing.VMContext{Rules: &chain.Rules{IsAmsterdam: true}, IntraBlockState: &mockIBS{}}, nil, accounts.ZeroAddress)
-	logger.Hooks().EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, nil,
-		mdgas.MdGas{Execution: 100, State: 200}, uint256.Int{}, nil)
-	logger.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100, State: 200},
-		mdgas.MdGasCost{Execution: 10, State: 30}, &mockOpContext{}, nil, 0, nil)
-	require.NotContains(t, output.String(), "reservoir")
-	require.Contains(t, output.String(), "| Cost | State cost |   Stack   |")
-	require.Contains(t, output.String(), "|   10 |  30 |        [] |")
-	logger.Hooks().EmitExit(0, nil, mdgas.MdGasUsage{Execution: 50, State: -30, StateSpill: 10}, nil, false)
-	require.Contains(t, output.String(), "Consumed state gas: `-30`\n")
-	require.NotContains(t, output.String(), "spill")
-	output.Reset()
-	logger.Hooks().EmitExit(0, nil, mdgas.MdGasUsage{Execution: 50}, nil, false)
-	require.Contains(t, output.String(), "Consumed state gas: `0`\n")
 }
 
 //func TestStoreCapture(t *testing.T) {

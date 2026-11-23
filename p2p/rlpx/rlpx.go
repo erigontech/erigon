@@ -157,6 +157,10 @@ func (c *Conn) Read() (code uint64, data []byte, wireSize int, err error) {
 		if actualSize > maxUint24 {
 			return code, nil, 0, errPlainMessageTooLarge
 		}
+		// A 3-byte copy tag emits at most 64 bytes, so a valid block can't decode to more.
+		if actualSize > len(data)*64/3 {
+			return code, nil, 0, snappy.ErrCorrupt
+		}
 		c.snappyReadBuffer = slices.Grow(c.snappyReadBuffer[:0], actualSize)[:actualSize]
 		data, err = snappy.Decode(c.snappyReadBuffer, data)
 	}
@@ -187,17 +191,14 @@ func (h *sessionState) readFrame(conn io.Reader) ([]byte, error) {
 		rsize += 16 - padding
 	}
 
-	// Read the frame content.
-	frame, err := h.rbuf.read(conn, int(rsize))
+	// Read the frame content and MAC together so frame uses the current buffer.
+	frame, err := h.rbuf.read(conn, int(rsize)+16)
 	if err != nil {
 		return nil, err
 	}
+	frame, frameMAC := frame[:rsize], frame[rsize:]
 
 	// Validate frame MAC.
-	frameMAC, err := h.rbuf.read(conn, 16)
-	if err != nil {
-		return nil, err
-	}
 	wantFrameMAC := h.ingressMAC.computeFrame(frame)
 	if !hmac.Equal(wantFrameMAC, frameMAC) {
 		return nil, errors.New("bad frame MAC")
@@ -360,6 +361,8 @@ const (
 	shaLen = 32                     // hash length (for nonce etc)
 
 	eciesOverhead = 65 /* pubkey */ + 16 /* IV */ + 32 /* MAC */
+
+	maxHandshakeMsgSize = 2048
 )
 
 var (
@@ -370,6 +373,8 @@ var (
 	// errPlainMessageTooLarge is returned if a decompressed message length exceeds
 	// the allowed 24 bits (i.e. length >= 16MB).
 	errPlainMessageTooLarge = errors.New("message length >= 16MB")
+
+	errHandshakeMsgTooLarge = errors.New("handshake message too large")
 )
 
 // Secrets represents the connection secrets which are negotiated during the handshake.
@@ -609,6 +614,9 @@ func (h *handshakeState) readMsg(msg any, prv *ecdsa.PrivateKey, r io.Reader) ([
 		return nil, err
 	}
 	size := binary.BigEndian.Uint16(prefix)
+	if size > maxHandshakeMsgSize {
+		return nil, errHandshakeMsgTooLarge
+	}
 
 	// Read the handshake packet.
 	packet, err := h.rbuf.read(r, int(size))

@@ -34,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -69,7 +70,7 @@ func withCodeHash(codeHash common.Hash) func(*accounts.Account) {
 func TestEmptyTrie(t *testing.T) {
 	var trie Trie
 	res := trie.Hash()
-	exp := EmptyRoot
+	exp := empty.RootHash
 	if res != exp {
 		t.Errorf("expected %x got %x", exp, res)
 	}
@@ -289,7 +290,7 @@ func randomAccountWithCode(random *rand.Rand, codeValue []byte) accounts.Account
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
 	acc.Balance.SetFromBig(new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil)))
-	acc.Root = EmptyRoot
+	acc.Root = empty.RootHash
 	if codeValue == nil {
 		acc.CodeHash = accounts.EmptyCodeHash
 	} else {
@@ -628,7 +629,7 @@ func TestWitnessPruneOmitsInlinedNodes(t *testing.T) {
 	contract := &accounts.Account{
 		Nonce:    7,
 		Balance:  *uint256.NewInt(5),
-		Root:     EmptyRoot,
+		Root:     empty.RootHash,
 		CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x00})),
 	}
 	stateTrie.UpdateAccount(crypto.Keccak256(contractAddr[:]), contract)
@@ -711,4 +712,30 @@ func TestWitnessPruneKeepsSmallRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, fromNodes, 1)
 	require.Equal(t, rootRLP, []byte(fromNodes[0]))
+}
+
+func TestWitnessPruneStopsAtExtensionPrefix(t *testing.T) {
+	branch := &FullNode{}
+	account := &accounts.Account{Nonce: 1, Root: empty.RootHash, CodeHash: accounts.EmptyCodeHash}
+	leafKey := append(bytes.Repeat([]byte{1}, 60), 16)
+	branch.Children[0] = &ShortNode{Key: leafKey, Val: &AccountNode{Account: *account, RootCorrect: true}}
+	branch.Children[1] = &ShortNode{Key: leafKey, Val: &AccountNode{Account: *account, RootCorrect: true}}
+	tr := New(common.Hash{})
+	tr.RootNode = &ShortNode{Key: []byte{1, 2, 3}, Val: branch}
+	nodes, err := tr.RLPEncode()
+	require.NoError(t, err)
+	byHash := make(map[string][]byte)
+	for _, node := range nodes {
+		hash := crypto.Keccak256Hash(node)
+		byHash[string(hash[:])] = node
+	}
+	root := crypto.Keccak256Hash(nodes[0])
+	for _, key := range [][]byte{{1, 2, 3}, {1, 2}, {}, {1, 9}} {
+		canonical, err := WitnessNodesForKeysByHash(byHash, root[:], [][]byte{key}, false)
+		require.NoError(t, err)
+		require.Len(t, canonical, 1)
+		legacy, err := WitnessNodesForKeysByHash(byHash, root[:], [][]byte{key}, true)
+		require.NoError(t, err)
+		require.Len(t, legacy, 2)
+	}
 }

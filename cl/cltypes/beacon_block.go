@@ -17,9 +17,11 @@
 package cltypes
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -269,6 +271,12 @@ type BeaconBody struct {
 	// The version of the beacon chain
 	Version   clparams.StateVersion       `json:"-"`
 	beaconCfg *clparams.BeaconChainConfig `json:"-"`
+	rootCache *atomic.Pointer[beaconBodyRootCacheEntry]
+}
+
+type beaconBodyRootCacheEntry struct {
+	encoding []byte
+	root     [32]byte
 }
 
 func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *BeaconBody {
@@ -276,6 +284,7 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 
 	body := &BeaconBody{
 		beaconCfg:         beaconCfg,
+		rootCache:         new(atomic.Pointer[beaconBodyRootCacheEntry]),
 		Eth1Data:          &Eth1Data{},
 		ProposerSlashings: solid.NewStaticListSSZ[*ProposerSlashing](limits.proposerSlashings, 416),
 		AttesterSlashings: solid.NewDynamicListSSZ[*AttesterSlashing](limits.attesterSlashings),
@@ -556,15 +565,15 @@ func (b *BeaconBody) decodeSSZ(buf []byte, version int, strict bool) error {
 	}
 	var err error
 	if strict {
-		err = ssz2.UnmarshalSSZStrict(buf, version, b.getSchema(false)...)
+		err = ssz2.UnmarshalSSZStrict(buf, version, slashingDecodeSchema(b.getSchema(false), b.beaconCfg)...)
 	} else {
-		err = ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
+		err = ssz2.UnmarshalSSZ(buf, version, slashingDecodeSchema(b.getSchema(false), b.beaconCfg)...)
 	}
 	if err != nil {
 		return err
 	}
 
-	// Post-decode fixup: propagate preset-aware limits to decoded attestations and slashings.
+	// Post-decode fixup: propagate preset-aware limits to decoded attestations.
 	// DecodeDynamicList calls DecodeSSZ on each element with hardcoded mainnet limits.
 	// We must override those limits for minimal preset compatibility.
 	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
@@ -573,10 +582,6 @@ func (b *BeaconBody) decodeSSZ(buf []byte, version int, strict bool) error {
 		}); err != nil {
 			return err
 		}
-		b.AttesterSlashings.Range(func(_ int, as *AttesterSlashing, _ int) bool {
-			as.SetVersionWithConfig(b.Version, b.beaconCfg)
-			return true
-		})
 	}
 	return nil
 }
@@ -614,7 +619,28 @@ func (b *BeaconBody) Blinded() (*BlindedBeaconBody, error) {
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	b.ensureNilFields()
 	if b.Version >= clparams.GloasVersion {
-		return b.hashSSZGloas()
+		if b.rootCache == nil {
+			return b.hashSSZGloas()
+		}
+		entry := b.rootCache.Load()
+		var encodingCapacity int
+		if entry == nil {
+			encodingCapacity = b.EncodingSizeSSZ()
+		} else {
+			encodingCapacity = len(entry.encoding)
+		}
+		encoding, err := b.EncodeSSZ(make([]byte, 0, encodingCapacity))
+		if err != nil {
+			return b.hashSSZGloas()
+		}
+		if entry != nil && bytes.Equal(entry.encoding, encoding) {
+			return entry.root, nil
+		}
+		root, err := b.hashSSZGloas()
+		if err == nil {
+			b.rootCache.Store(&beaconBodyRootCacheEntry{encoding: bytes.Clone(encoding), root: root})
+		}
+		return root, err
 	}
 	return merkle_tree.HashTreeRoot(b.getSchema(false)...)
 }
@@ -852,12 +878,18 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 			return errors.New("gloas beacon body contains null parent execution requests")
 		}
 	}
+	if tmp.AttesterSlashings == nil {
+		return errors.New("beacon body contains null attester slashings")
+	}
 	tmp.AttesterSlashings.Range(func(_ int, value *AttesterSlashing, _ int) bool {
 		// Set version with config for preset-aware limits
 		value.SetVersionWithConfig(b.Version, b.beaconCfg)
 		return true
 	})
 	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
+		if tmp.Attestations == nil {
+			return errors.New("beacon body contains null attestations")
+		}
 		if err := solid.RangeErr(tmp.Attestations, func(_ int, att *solid.Attestation, _ int) error {
 			return att.ValidateForConfig(b.beaconCfg, b.Version)
 		}); err != nil {

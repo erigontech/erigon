@@ -111,7 +111,11 @@ func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 
 	path := ctx.Args().First()
 	if len(path) != 0 {
-		collected := filter.filterFiles(collectFiles(path))
+		files, err := collectFiles(path)
+		if err != nil {
+			return err
+		}
+		collected := filter.filterFiles(files)
 		results, err := runStateTestsParallel(ctx, cfg, traceOut, collected, workers, filter)
 		if err != nil {
 			return err
@@ -311,7 +315,7 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, traceOut *traceSink, env *sta
 				}
 				defer sd.Close()
 
-				statedb, root, err := test.Run(nil, sd, tx, st, cfg)
+				statedb, root, err := test.Run(sd, tx, st, cfg)
 				if err != nil {
 					result.Pass, result.Error = false, err.Error()
 				}
@@ -327,7 +331,7 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, traceOut *traceSink, env *sta
 				if bench {
 					// Reuse the subtest's tx+sd: a second concurrent rwtx on the same env would deadlock.
 					_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
-						_, _, gasUsed, _ := test.RunNoVerify(nil, sd, tx, st, cfg)
+						_, _, gasUsed, _ := test.RunNoVerify(sd, tx, st, cfg)
 						return nil, gasUsed, nil
 					})
 					result.Stats = &stats

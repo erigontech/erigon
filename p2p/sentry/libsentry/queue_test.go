@@ -22,46 +22,38 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/p2p/sentry/libsentry"
+	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
-func TestEvictOldestIfHalfFull_NoopBelowThreshold(t *testing.T) {
-	ch := make(chan int, 1024)
-	for i := range 512 {
-		ch <- i
+func TestSentryQueue_NoEvictionBelowThreshold(t *testing.T) {
+	s, c := newTestSentryStream(t)
+	for range 512 {
+		require.NoError(t, s.Send(&sentryproto.InboundMessage{}))
 	}
-	libsentry.EvictOldestIfHalfFull(ch)
-	assert.Equal(t, 512, len(ch), "at exactly half capacity eviction must not run")
+	s.Close()
+	assert.Len(t, drainMessages(t, c), 512)
 }
 
-func TestEvictOldestIfHalfFull_DropsQuarterFromOldest(t *testing.T) {
-	ch := make(chan int, 1024)
+func TestSentryQueue_DropsQuarterFromOldest(t *testing.T) {
+	s, c := newTestSentryStream(t)
+	dropped := metrics.GetOrCreateCounter(`p2p_sentry_queue_dropped_messages_total{limit="count"}`)
+	before := dropped.GetValueUint64()
 	for i := range 600 {
-		ch <- i
+		require.NoError(t, s.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId(i)}))
 	}
-	libsentry.EvictOldestIfHalfFull(ch)
-	// cap/4 = 256 drained; 600 - 256 = 344 remain.
-	assert.Equal(t, 344, len(ch))
-	// Drop is from the front of the FIFO, so the oldest (0..255) are gone and
-	// the freshest (599) is still queued.
-	first := <-ch
-	assert.Equal(t, 256, first)
-	var last int
-	for len(ch) > 0 {
-		last = <-ch
-	}
-	assert.Equal(t, 599, last)
+	s.Close()
+	messages := drainMessages(t, c)
+	// One batch evicts 1024/4 = 256 oldest messages; 600 - 256 = 344 remain.
+	require.Len(t, messages, 344)
+	assert.Equal(t, sentryproto.MessageId(256), messages[0].Id)
+	assert.Equal(t, sentryproto.MessageId(599), messages[len(messages)-1].Id)
+	require.Equal(t, before+256, dropped.GetValueUint64(), "only evicted messages count as dropped")
 }
 
-func TestEvictOldestIfHalfFull_DrainStopsWhenEmpty(t *testing.T) {
-	// Small cap to make eviction target larger than buffer contents.
-	ch := make(chan int, 4)
-	ch <- 0
-	ch <- 1
-	ch <- 2
-	// len=3, cap=4, cap/2=2, len>cap/2 → eviction runs; cap/4=1 drain target.
-	libsentry.EvictOldestIfHalfFull(ch)
-	require.Equal(t, 2, len(ch))
-	assert.Equal(t, 1, <-ch)
-	assert.Equal(t, 2, <-ch)
+func TestSentryQueue_EmptyClose(t *testing.T) {
+	s, c := newTestSentryStream(t)
+	s.Close()
+	s.Close()
+	require.Empty(t, drainMessages(t, c))
 }

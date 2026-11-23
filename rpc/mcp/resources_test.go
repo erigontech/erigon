@@ -89,6 +89,18 @@ func TestResourceNetworkStatusWhenSynced(t *testing.T) {
 	require.Equal(t, false, status["syncing"])
 }
 
+func TestResourceNetworkStatusDoesNotClaimSyncedOnRPCFailure(t *testing.T) {
+	e := NewErigonMCPServer(&scriptedCaller{responses: map[string]json.RawMessage{
+		"erigon_nodeInfo": json.RawMessage(`null`),
+		"eth_blockNumber": json.RawMessage(`"0x10"`),
+		// An absent eth_syncing response makes scriptedCaller return an RPC error.
+	}}, "", false)
+
+	contents, err := e.handleResourceNetworkStatus(context.Background(), readResourceRequest("erigon://network/status"))
+	require.ErrorContains(t, err, "eth_syncing")
+	require.Empty(t, contents)
+}
+
 func TestResourceAddressSummaryExtractsAddress(t *testing.T) {
 	addr := "0x00000000000000000000000000000000deadbeef"
 	caller := &scriptedCaller{responses: map[string]json.RawMessage{
