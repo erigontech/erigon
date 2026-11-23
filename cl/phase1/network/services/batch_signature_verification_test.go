@@ -229,10 +229,11 @@ func TestBatchSignatureVerifierSharesFallbackConcurrencyBudget(t *testing.T) {
 	})
 }
 
+const nonSubgroupSignatureHex = "85aa7e829cefd96a733fd7ed9cb646a95ebdafebe514ce732fe79ba85b52b396589bd2d567630fc39fd90ec5e6c134e412ec50905c7a53491aece65571eec1dea528e1e0091049cce4c4720f656a55428bdf665caf30662ec15e87269afe0061"
+
 func TestVerifyPayloadAttestationBatchMatchesSinglePath(t *testing.T) {
 	saveSignatureGlobals(t)
 	const count = batchSignatureVerificationThreshold
-	const nonSubgroupSignatureHex = "85aa7e829cefd96a733fd7ed9cb646a95ebdafebe514ce732fe79ba85b52b396589bd2d567630fc39fd90ec5e6c134e412ec50905c7a53491aece65571eec1dea528e1e0091049cce4c4720f656a55428bdf665caf30662ec15e87269afe0061"
 	nonSubgroupSignature, err := hex.DecodeString(nonSubgroupSignatureHex)
 	require.NoError(t, err)
 	nonSubgroupPoint := new(blst.P2Affine).Uncompress(nonSubgroupSignature)

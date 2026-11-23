@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"encoding/hex"
 	"runtime"
 	"slices"
 	"strings"
@@ -32,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
@@ -334,6 +336,29 @@ func TestSyncCommitteesGossipRejectsInvalidSignatureBeforeAccepting(t *testing.T
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 
 	require.ErrorIs(t, s.ProcessMessage(t.Context(), new(uint64), msg), ErrInvalidBlsSignature)
+}
+
+// The pool does not group-check signatures, so a signature outside G2 must be rejected before it reaches the pool.
+func TestSyncCommitteesRejectsSignatureOutsideG2BeforeThePool(t *testing.T) {
+	signature, err := hex.DecodeString(nonSubgroupSignatureHex)
+	require.NoError(t, err)
+	for name, immediate := range map[string]bool{"immediate": true, "batched": false} {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			ethClock := eth_clock.NewMockEthereumClock(ctrl)
+			ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+			pool := sync_contribution_pool.NewSyncContributionPool(&clparams.MainnetBeaconConfig)
+			s, synced := newSyncCommitteesServiceWithPool(t, ethClock, pool)
+			state, msg := getObjectsForSyncCommitteesServiceTest()
+			require.NoError(t, synced.OnHeadState(state))
+			msg.ImmediateVerification = immediate
+			msg.SyncCommitteeMessage.Signature = common.Bytes96(signature)
+
+			require.ErrorIs(t, s.ProcessMessage(t.Context(), new(uint64), msg), ErrInvalidBlsSignature)
+			contribution := pool.GetSyncContribution(msg.SyncCommitteeMessage.Slot, 0, msg.SyncCommitteeMessage.BeaconBlockRoot)
+			require.Zero(t, utils.BitsOnCount(contribution.AggregationBits))
+		})
+	}
 }
 
 // Waiting for the signature verdict holds no service or head-state lock, so a head-state publication is not blocked.

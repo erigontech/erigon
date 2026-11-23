@@ -23,6 +23,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/p2p/enode"
 )
@@ -62,4 +65,32 @@ func TestComputeSubscribedSubnets(t *testing.T) {
 			require.Equal(t, tt.wantRotation, SubscribedSubnetsRotationEpoch(tt.nodeID, tt.epoch))
 		})
 	}
+}
+
+func TestComputeSubnetsForSyncCommittee(t *testing.T) {
+	s := state.New(&clparams.MainnetBeaconConfig)
+	for i := range 3 {
+		v := solid.NewValidator()
+		v.SetPublicKey(common.Bytes48{byte(i + 1)})
+		s.AppendValidator(v)
+	}
+	committee := s.CurrentSyncCommittee().Copy()
+	keys := committee.GetCommittee()
+	subnetSize := clparams.MainnetBeaconConfig.SyncCommitteeSize / clparams.MainnetBeaconConfig.SyncCommitteeSubnetCount
+	keys[0], keys[1], keys[subnetSize+2] = common.Bytes48{1}, common.Bytes48{1}, common.Bytes48{1}
+	keys[len(keys)-1] = common.Bytes48{2}
+	committee.SetCommittee(keys)
+	require.NoError(t, s.SetCurrentSyncCommittee(committee))
+
+	got, err := ComputeSubnetsForSyncCommittee(s, 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{0, 1}, got)
+	got, err = ComputeSubnetsForSyncCommittee(s, 0, 1)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{3}, got)
+	got, err = ComputeSubnetsForSyncCommittee(s, 0, 2)
+	require.NoError(t, err)
+	require.Empty(t, got)
+	_, err = ComputeSubnetsForSyncCommittee(s, 0, 3)
+	require.Error(t, err)
 }

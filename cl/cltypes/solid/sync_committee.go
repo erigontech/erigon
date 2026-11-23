@@ -92,6 +92,16 @@ func (s *SyncCommittee) GetCommittee() []common.Bytes48 {
 	return committee
 }
 
+// PublicKeyAt returns the committee public key at position i without copying the committee.
+// Like indexing GetCommittee(), it panics if i is out of range.
+func (s *SyncCommittee) PublicKeyAt(i int) common.Bytes48 {
+	s.ensureData()
+	if i < 0 || i >= s.CommitteeSize() {
+		panic("solid: sync committee index out of range")
+	}
+	return common.Bytes48(s.data[i*48:])
+}
+
 func (s *SyncCommittee) AggregatePublicKey() (out common.Bytes48) {
 	s.ensureData()
 	copy(out[:], s.data[len(s.data)-48:])
