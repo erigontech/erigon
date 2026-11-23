@@ -186,7 +186,7 @@ func ReadMemStats(m *runtime.MemStats) {
 	if noMemstat {
 		return
 	}
-	runtime.ReadMemStats(m)
+	runtime.ReadMemStats(m) //nolint:forbidigo // Full statistics for existing diagnostics.
 }
 
 // MemUsage returns MemStats.Alloc and MemStats.Sys without the stop-the-world
