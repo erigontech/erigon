@@ -1036,8 +1036,12 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 		}
 
 		wireSize := int64(mt.TxnSlot.Size)
-		if wireSize == 0 || wireSize > int64(availableRlpSpace) {
-			p.logger.Debug("[txpool] skipping txn with unknown or oversized RLP", "size", wireSize, "available", availableRlpSpace)
+		if wireSize == 0 {
+			p.logger.Error("[txpool] pending transaction has no encoded size", "hash", common.Hash(mt.TxnSlot.IDHash))
+			continue
+		}
+		if wireSize > int64(availableRlpSpace) {
+			p.logger.Debug("[txpool] transaction exceeds remaining RLP space", "size", wireSize, "available", availableRlpSpace)
 			continue
 		}
 
@@ -2265,6 +2269,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 	}
 
 	if mt.TxnSlot.Size == 0 {
+		// Direct callers can supply wire bytes without a cached size. Keep their length across a flush.
 		mt.TxnSlot.Size = uint32(len(mt.TxnSlot.Rlp))
 	}
 	hashStr := string(mt.TxnSlot.IDHash[:])

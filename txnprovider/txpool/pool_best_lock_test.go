@@ -56,6 +56,16 @@ func TestBestReleasesTheLockWhenTheCallerGivesUpWaitingForABlock(t *testing.T) {
 	p.lock.Unlock()
 }
 
+func TestProvideTxnsHonorsCancellationAtCurrentHead(t *testing.T) {
+	ctx, pool, _, _ := newTestPool(t)
+	ctx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	txns, err := pool.ProvideTxns(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Empty(t, txns)
+}
+
 type provideTxnsResult struct {
 	txns []types.Transaction
 	err  error

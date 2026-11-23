@@ -886,6 +886,19 @@ func TestProvideTxnsContinuesAfterGasRejection(t *testing.T) {
 	require.Equal(t, []types.Transaction{first.Txn}, txns)
 }
 
+func TestProvideTxnsReportsMissingWireSize(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000)
+	slot := pool.pending.best.ms[0].TxnSlot
+	slot.Rlp, slot.Size = nil, 0
+	var logs bytes.Buffer
+	pool.logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StreamHandler(&logs, log.LogfmtFormat())))
+
+	txns, err := pool.ProvideTxns(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, txns, "a transaction with unknown size cannot be charged to the byte budget")
+	require.Contains(t, logs.String(), common.Hash(slot.IDHash).Hex())
+}
+
 func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -3641,6 +3654,7 @@ func newTestSenderTxnSlot(sender common.Address, nonce uint64) *TxnSlot {
 	s := newTestTxnSlot(nonce, 0, 1, 2, 100_000)
 	s.IDHash[0] = byte(nonce + 1)
 	s.Rlp = []byte{byte(nonce + 1)}
+	s.Size = uint32(len(s.Rlp))
 	s.Txn.SetSender(accounts.InternAddress(sender))
 	return s
 }

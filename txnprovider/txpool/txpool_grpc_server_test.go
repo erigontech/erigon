@@ -33,6 +33,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -484,6 +485,37 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGrpcServerPendingOwnsFlushedTransactionBytes(t *testing.T) {
+	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts3.EmptyCodeHash)
+	slot := encodeRemoteTxn(t, newTestSenderTxnSlot(sender, 0))
+	want := slot.Rlp
+	var slots TxnSlots
+	slots.Append(slot, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	_, err = pool.flushNoFsync(ctx)
+	require.NoError(t, err)
+	require.Nil(t, slot.Rlp)
+
+	// Keep the database row valid while checking that the reply has independent storage.
+	tx, err := poolDB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	row, err := tx.GetOne(kv.PoolTransaction, slot.IDHash[:])
+	require.NoError(t, err)
+	require.Len(t, row, len(sender)+len(want))
+	storedRlp := row[len(sender):]
+
+	server := NewGrpcServer(ctx, pool, poolDB, nil, pool.chainID, pool.logger)
+	reply, err := server.Pending(ctx, &emptypb.Empty{})
+	require.NoError(t, err)
+	require.Len(t, reply.Txs, 1)
+	got := reply.Txs[0].RlpTx
+	require.Equal(t, want, got)
+	require.NotSame(t, &storedRlp[0], &got[0], "a Pending reply can outlive the database reader")
 }
 
 func TestGrpcServerParkedFrame(t *testing.T) {
