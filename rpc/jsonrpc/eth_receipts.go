@@ -254,7 +254,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			return nil, errBlockRangeIntoFuture
 		}
 		if begin > end {
-			return preconfirmedLogs(preconfirmed, crit)
+			return preconfirmedLogs(preconfirmed, crit, begin)
 		}
 	}
 
@@ -298,21 +298,34 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	if err != nil || preconfirmed == nil {
 		return logs, err
 	}
-	preLogs, err := preconfirmedLogs(preconfirmed, crit)
+	preLogs, err := preconfirmedLogs(preconfirmed, crit, begin)
 	if err != nil {
 		return nil, err
 	}
 	return append(logs, preLogs...), nil
 }
 
-// preconfirmedLogs returns the matching logs of the pre-executed block, in body order, stamped with that block's own number and hash.
-func preconfirmedLogs(pre *rpchelper.Preconfirmed, crit filters.FilterCriteria) (types.Logs, error) {
+// preconfirmedLogs returns the matching logs of the sealed pre-exec blocks from `begin` and of the block being built, in
+// block and body order, each stamped with its own block's number and hash.
+func preconfirmedLogs(pre *rpchelper.Preconfirmed, crit filters.FilterCriteria, begin uint64) (types.Logs, error) {
 	out := types.Logs{}
-	txs, receipts, ok := pre.Body()
-	if !ok {
+	activeSealed := false
+	for _, b := range pre.Sealed {
+		activeSealed = activeSealed || b.Number == pre.Number
+		if b.Number >= begin {
+			out = append(out, blockLogs(b.Number, b.Hash, b.Txs, b.Receipts, crit)...)
+		}
+	}
+	if activeSealed {
 		return out, nil
 	}
+	if txs, receipts, ok := pre.Body(); ok {
+		out = append(out, blockLogs(pre.Number, pre.Hash, txs, receipts, crit)...)
+	}
+	return out, nil
+}
 
+func blockLogs(number uint64, hash common.Hash, txs types.Transactions, receipts types.Receipts, crit filters.FilterCriteria) types.Logs {
 	all := make(types.Logs, 0, len(receipts))
 	for _, r := range receipts {
 		if r == nil {
@@ -321,17 +334,18 @@ func preconfirmedLogs(pre *rpchelper.Preconfirmed, crit filters.FilterCriteria) 
 		all = append(all, r.Logs...)
 	}
 
+	var out types.Logs
 	for _, lg := range all.Filter(crit.Addresses, crit.Topics, 0) {
 		l := *lg
 		if l.TxHash == (common.Hash{}) && int(l.TxIndex) < len(txs) {
 			l.TxHash = txs[l.TxIndex].Hash()
 		}
-		l.BlockNumber = hexutil.Uint64(pre.Number)
-		l.BlockHash = pre.Hash
+		l.BlockNumber = hexutil.Uint64(number)
+		l.BlockHash = hash
 		l.Removed = false
 		out = append(out, &l)
 	}
-	return out, nil
+	return out
 }
 
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {

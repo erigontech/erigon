@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 // preExecFrontier owns the PRODUCER's pre-executed block chain — the blocks the DAG-L2 producer has
@@ -73,6 +74,8 @@ type preExecGen struct {
 	// sealed hash. ONLY a sealed generation may cross into validation space: an in-progress one has no
 	// output side yet, so promoting it would canonicalise a block whose state root was never computed.
 	sealed bool
+	// txs is the sealed body, which the pending view serves with the generation's receipts.
+	txs [][]byte
 	// notifications are the state changes accumulated while executing this block. The FCU publishes them
 	// when the block canonicalises, so they belong to the generation rather than to the validator — pre-exec
 	// never writes validation state, and a promoted generation must still be able to announce itself.
@@ -411,7 +414,7 @@ func (f *preExecFrontier) Depth() int {
 // head/blockHash mismatch) and canonical[number] (which copyFrontierChainTables propagates FORWARD into
 // every successor's overlay, so a later read resolves a header-less canonical hash and rebuilds a
 // SharedDomains). Rewrite both to the sealed hash here.
-func (f *preExecFrontier) SealActive(oldHash, newHash common.Hash, number uint64) error {
+func (f *preExecFrontier) SealActive(oldHash, newHash common.Hash, number uint64, txs [][]byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	n := len(f.gens)
@@ -424,6 +427,7 @@ func (f *preExecFrontier) SealActive(oldHash, newHash common.Hash, number uint64
 	}
 	g.headHash = newHash
 	g.sealed = true
+	g.txs = txs
 	if g.sd == nil {
 		return nil
 	}
@@ -473,4 +477,32 @@ func (f *preExecFrontier) CheckUpdate(blockNumber uint64, txs []types.Transactio
 		}
 	}
 	return FlashblockUpdate{IsUpdate: true, PrefixLen: len(f.txHashes), SD: active.sd}
+}
+
+// SealedAbove returns the sealed generations above `above`, oldest first, with their bodies and receipts.
+func (f *preExecFrontier) SealedAbove(above uint64) []rpchelper.PreconfirmedBlock {
+	type sealedGen struct {
+		number   uint64
+		hash     common.Hash
+		raw      [][]byte
+		receipts types.Receipts
+	}
+	f.mu.Lock()
+	var gens []sealedGen
+	for _, g := range f.gens {
+		if g.sealed && g.number > above && g.sd != nil {
+			gens = append(gens, sealedGen{g.number, g.headHash, g.txs, append(types.Receipts(nil), g.sd.FlashblockReceipts()...)})
+		}
+	}
+	f.mu.Unlock()
+
+	out := make([]rpchelper.PreconfirmedBlock, 0, len(gens))
+	for _, g := range gens {
+		txs, err := types.DecodeTransactions(g.raw)
+		if err != nil || len(g.receipts) != len(txs) {
+			continue
+		}
+		out = append(out, rpchelper.PreconfirmedBlock{Number: g.number, Hash: g.hash, Txs: txs, Receipts: g.receipts})
+	}
+	return out
 }

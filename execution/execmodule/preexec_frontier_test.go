@@ -101,7 +101,7 @@ func TestPreExecFrontier_LiveAndGen(t *testing.T) {
 	assert.True(t, f.Owns(sd))
 	assert.False(t, f.Owns(&execctx.SharedDomains{}))
 
-	require.NoError(t, f.SealActive(common.Hash{5}, common.Hash{55}, 5))
+	require.NoError(t, f.SealActive(common.Hash{5}, common.Hash{55}, 5, nil))
 	gotSD, _ := f.Gen(common.Hash{55}, 5)
 	assert.Same(t, sd, gotSD)
 }
@@ -117,7 +117,7 @@ func TestPreExecFrontier_GenRefusesUnsealed(t *testing.T) {
 	assert.Nil(t, sd, "an in-progress generation is not promotable")
 	assert.True(t, f.Live(common.Hash{5}, 5), "but it is still a live ancestor for its successor")
 
-	require.NoError(t, f.SealActive(common.Hash{5}, common.Hash{5}, 5))
+	require.NoError(t, f.SealActive(common.Hash{5}, common.Hash{5}, 5, nil))
 	sd, _ = f.Gen(common.Hash{5}, 5)
 	assert.NotNil(t, sd, "once sealed it is promotable")
 }
@@ -159,4 +159,33 @@ func TestPreExecFrontier_NotifyCommittedIsMonotonic(t *testing.T) {
 	f.NotifyCommitted(7)
 	f.NotifyCommitted(3)
 	assert.Equal(t, uint64(7), f.CommittedHeight(), "committed height never goes backwards")
+}
+
+// Every sealed generation above the executed head is a block this node has executed that the chain does not yet
+// hold, so the pending view must be able to read each one's body and receipts.
+func TestPreExecFrontier_SealedAboveServesEverySealedBlockAboveTheHead(t *testing.T) {
+	f := newPreExecFrontier()
+	for n := uint64(3); n <= 5; n++ {
+		sd := openGen(f, n, common.Hash{byte(n)})
+		sd.AppendFlashblockReceipts(types.Receipts{{Logs: []*types.Log{{Topics: []common.Hash{{byte(n)}}}}}})
+		require.NoError(t, f.SealActive(common.Hash{byte(n)}, common.Hash{byte(n), 0xee}, n, rawTxs(t, makeTx(n))))
+	}
+	openGen(f, 6, common.Hash{6})
+
+	blocks := f.SealedAbove(3)
+	require.Len(t, blocks, 2)
+	for i, n := range []uint64{4, 5} {
+		assert.Equal(t, n, blocks[i].Number)
+		assert.Equal(t, common.Hash{byte(n), 0xee}, blocks[i].Hash)
+		require.Len(t, blocks[i].Txs, 1)
+		assert.Equal(t, makeTx(n).Hash(), blocks[i].Txs[0].Hash())
+		require.Len(t, blocks[i].Receipts, 1)
+		assert.Equal(t, common.Hash{byte(n)}, blocks[i].Receipts[0].Logs[0].Topics[0])
+	}
+}
+
+func rawTxs(t *testing.T, txs ...types.Transaction) [][]byte {
+	raw, err := types.MarshalTransactionsBinary(txs)
+	require.NoError(t, err)
+	return raw
 }

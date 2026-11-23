@@ -1189,7 +1189,7 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 			return fmt.Errorf("IngestSealedFlashblock: delete deferred TD: %w", err)
 		}
 	}
-	if err := e.preExec.SealActive(oldHash, newHash, number); err != nil {
+	if err := e.preExec.SealActive(oldHash, newHash, number, body.Transactions); err != nil {
 		return fmt.Errorf("IngestSealedFlashblock: seal in place: %w", err)
 	}
 	// The block is now fully sealed (its block-end has run), so record the sealed hash as validated: a

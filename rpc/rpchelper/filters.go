@@ -123,8 +123,9 @@ type Filters struct {
 	// than a published pointer on purpose: the frontier's generations are retired continuously, so a
 	// stored *SharedDomains goes stale (and then invalid) between publish and read. The lease is taken
 	// at the moment of the query and held only for its duration.
-	preconfirmed     atomic.Pointer[PreconfirmedProvider]
-	preconfirmedBody atomic.Pointer[PreconfirmedBodyProvider]
+	preconfirmed       atomic.Pointer[PreconfirmedProvider]
+	preconfirmedBody   atomic.Pointer[PreconfirmedBodyProvider]
+	preconfirmedSealed atomic.Pointer[PreconfirmedSealedProvider]
 
 	config FiltersConfig
 }
@@ -1211,15 +1212,27 @@ type PreconfirmedProvider func() (sd *execctx.SharedDomains, hash common.Hash, n
 // generation. Separate from the state lease because a caller answering eth_call has no use for it.
 type PreconfirmedBodyProvider func(sd *execctx.SharedDomains, number uint64) (types.Transactions, types.Receipts, bool)
 
+// PreconfirmedBlock is a block this node has sealed from pre-exec that the chain has not yet made canonical.
+type PreconfirmedBlock struct {
+	Number   uint64
+	Hash     common.Hash
+	Txs      types.Transactions
+	Receipts types.Receipts
+}
+
+// PreconfirmedSealedProvider returns the sealed pre-exec blocks above a block number, oldest first.
+type PreconfirmedSealedProvider func(above uint64) []PreconfirmedBlock
+
 // SetPreconfirmedProvider wires the source of pre-confirmed state — the execution module's pre-exec
 // frontier. Absent a provider (a remote rpcdaemon, or a chain with no run-ahead producer) the `pending`
 // tag keeps its previous meaning.
-func (ff *Filters) SetPreconfirmedProvider(p PreconfirmedProvider, body PreconfirmedBodyProvider) {
+func (ff *Filters) SetPreconfirmedProvider(p PreconfirmedProvider, body PreconfirmedBodyProvider, sealed PreconfirmedSealedProvider) {
 	if ff == nil {
 		return
 	}
 	ff.preconfirmed.Store(&p)
 	ff.preconfirmedBody.Store(&body)
+	ff.preconfirmedSealed.Store(&sealed)
 }
 
 // preconfirmedBodyOf returns the leased generation's transactions and receipts, or ok=false.
@@ -1362,4 +1375,16 @@ func (ff *Filters) decrementMetrics(ft FilterType, protocol SubProtocol) {
 	}
 	activeSubscriptionsGauge.WithLabelValues(string(ft), string(protocol)).Dec()
 	unsubscribedSubscriptionsCounter.WithLabelValues(string(ft), string(protocol)).Inc()
+}
+
+// preconfirmedSealedAbove returns the sealed pre-exec blocks above `above`, oldest first.
+func (ff *Filters) preconfirmedSealedAbove(above uint64) []PreconfirmedBlock {
+	if ff == nil {
+		return nil
+	}
+	p := ff.preconfirmedSealed.Load()
+	if p == nil || *p == nil {
+		return nil
+	}
+	return (*p)(above)
 }

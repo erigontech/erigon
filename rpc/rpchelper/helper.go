@@ -190,7 +190,8 @@ func PreconfirmedView(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.B
 	if !ok {
 		return nil, false
 	}
-	if executed, err := GetLatestExecutedBlockNumber(tx); err != nil || number <= executed {
+	executed, err := GetLatestExecutedBlockNumber(tx)
+	if err != nil || number <= executed {
 		release()
 		return nil, false
 	}
@@ -200,6 +201,7 @@ func PreconfirmedView(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.B
 		Tx:     tx,
 		Reader: NewLatestStateReader(sd.AsGetter(tx)),
 		Number: number,
+		Sealed: filters.preconfirmedSealedAbove(executed),
 		Hash:   hash,
 		sd:     sd,
 		ff:     filters,
@@ -220,6 +222,8 @@ type Preconfirmed struct {
 	Reader state.StateReader
 	Number uint64
 	Hash   common.Hash
+	// Sealed are the blocks sealed from pre-exec between the executed head and this one, oldest first.
+	Sealed []PreconfirmedBlock
 
 	sd *execctx.SharedDomains
 	ff *Filters

@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 // BlockAssembler is the DAG-driven L2 block-production hook. On such an L2, AssembleBlock defers to
@@ -804,6 +805,14 @@ func (e *ExecModule) PinPreconfirmed() (*execctx.SharedDomains, common.Hash, uin
 		return nil, common.Hash{}, 0, nil, false
 	}
 	return e.preExec.PinActive()
+}
+
+// PreconfirmedSealed returns the blocks this node has sealed from pre-exec above `above` that are not yet canonical.
+func (e *ExecModule) PreconfirmedSealed(above uint64) []rpchelper.PreconfirmedBlock {
+	if e == nil || e.preExec == nil {
+		return nil
+	}
+	return e.preExec.SealedAbove(above)
 }
 
 // PreconfirmedBody returns the in-progress block's transactions and the receipts they produced, in body

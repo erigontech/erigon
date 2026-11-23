@@ -59,10 +59,66 @@ func TestPendingLogsDoNotRepeatTheHeadWhenThePreExecutedBlockIsAtIt(t *testing.T
 		},
 		func(*execctx.SharedDomains, uint64) (types.Transactions, types.Receipts, bool) {
 			return head.Transactions(), receipts, true
-		})
+		},
+		nil)
 	api := newEthApiForTest(NewBaseApi(ff, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, nil, nil)
 
 	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(int64(rpc.PendingBlockNumber))})
 	require.NoError(t, err)
 	require.Len(t, logs, missingHeaderChainLen*missingHeaderLogsPerBlock)
+}
+
+// A block this node has sealed but the chain has not yet made canonical lies between the executed head and the block
+// being built, so `pending` serves it from pre-exec alongside the block being built.
+func TestPendingLogsServeTheSealedBlocksBetweenTheHeadAndTheBlockBeingBuilt(t *testing.T) {
+	t.Parallel()
+
+	m := setupLogsChain(t)
+	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sd, err := execctx.NewSharedDomains(m.Ctx, roTx, m.Log)
+	require.NoError(t, err)
+	defer sd.Close()
+	head, err := m.BlockReader.BlockByNumber(m.Ctx, roTx, missingHeaderChainLen)
+	require.NoError(t, err)
+	receiptsWithTopic := func(topic byte) types.Receipts {
+		var receipts types.Receipts
+		for i := range head.Transactions() {
+			receipts = append(receipts, &types.Receipt{Status: types.ReceiptStatusSuccessful, Logs: []*types.Log{{TxIndex: hexutil.Uint(i), Topics: []common.Hash{{topic}}}}})
+		}
+		return receipts
+	}
+	sealed := uint64(missingHeaderChainLen + 1)
+	building := sealed + 1
+
+	ff := rpchelper.New(m.Ctx, rpchelper.FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
+	ff.SetPreconfirmedProvider(
+		func() (*execctx.SharedDomains, common.Hash, uint64, func(), bool) {
+			return sd, common.Hash{0xbb}, building, func() {}, true
+		},
+		func(*execctx.SharedDomains, uint64) (types.Transactions, types.Receipts, bool) {
+			return head.Transactions(), receiptsWithTopic(0x22), true
+		},
+		func(above uint64) []rpchelper.PreconfirmedBlock {
+			if above >= sealed {
+				return nil
+			}
+			return []rpchelper.PreconfirmedBlock{{Number: sealed, Hash: common.Hash{0xaa}, Txs: head.Transactions(), Receipts: receiptsWithTopic(0x11)}}
+		})
+	api := newEthApiForTest(NewBaseApi(ff, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, nil, nil)
+
+	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(int64(rpc.PendingBlockNumber))})
+	require.NoError(t, err)
+	canonical := missingHeaderChainLen * missingHeaderLogsPerBlock
+	require.Len(t, logs, canonical+2*len(head.Transactions()))
+	for i, l := range logs[canonical:] {
+		want, wantHash, wantTopic := sealed, common.Hash{0xaa}, common.Hash{0x11}
+		if i >= len(head.Transactions()) {
+			want, wantHash, wantTopic = building, common.Hash{0xbb}, common.Hash{0x22}
+		}
+		require.Equal(t, want, uint64(l.BlockNumber))
+		require.Equal(t, wantHash, l.BlockHash)
+		require.Equal(t, wantTopic, l.Topics[0])
+	}
 }
