@@ -22,6 +22,7 @@ import (
 	"runtime"
 	"sync/atomic"
 	"unique"
+	"unsafe"
 	"weak"
 
 	"github.com/puzpuzpuz/xsync/v4"
@@ -61,10 +62,46 @@ func InternAddress(a common.Address) Address {
 	if h, ok := slot.Load().(Address); ok && h.Value() == a {
 		return h
 	}
-	h := Address(unique.Make(a))
+	h := internAddrCanon(a)
 	slot.Store(h)
 	return h
 }
+
+var addrCanon = xsync.NewMap[common.Address, weak.Pointer[common.Address]]()
+
+// internAddrCanon is internKeyCanon for addresses. The handle is built from the table's own pointer, so Handle() keeps working.
+func internAddrCanon(a common.Address) Address {
+	if wp, ok := addrCanon.Load(a); ok {
+		if p := wp.Value(); p != nil {
+			return addressOf(p)
+		}
+	}
+	p := new(a)
+	wp := weak.Make(p)
+	var live *common.Address
+	addrCanon.Compute(a, func(old weak.Pointer[common.Address], loaded bool) (weak.Pointer[common.Address], xsync.ComputeOp) {
+		if loaded {
+			if live = old.Value(); live != nil {
+				return old, xsync.CancelOp
+			}
+		}
+		return wp, xsync.UpdateOp
+	})
+	if live != nil {
+		return addressOf(live)
+	}
+	runtime.AddCleanup(p, func(a common.Address) {
+		addrCanon.Compute(a, func(old weak.Pointer[common.Address], loaded bool) (weak.Pointer[common.Address], xsync.ComputeOp) {
+			if loaded && old == wp {
+				return old, xsync.DeleteOp
+			}
+			return old, xsync.CancelOp
+		})
+	}, a)
+	return addressOf(p)
+}
+
+func addressOf(p *common.Address) Address { return *(*Address)(unsafe.Pointer(&p)) }
 
 func (a Address) IsNil() bool {
 	return a == NilAddress
