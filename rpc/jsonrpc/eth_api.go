@@ -31,6 +31,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
@@ -84,7 +85,7 @@ type EthAPI interface {
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (*ethutils.RPCReceipt, error)
-	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) (LogsResult, error)
 	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) (ethutils.RPCReceipts, error)
 
 	// Block access list related (see ./eth_block_access_list.go)
@@ -1317,6 +1318,8 @@ type APIImpl struct {
 	RpcTxSyncMaxTimeout         time.Duration
 	logger                      log.Logger
 	gasOracleLogger             log.Logger
+	headLogs                    atomic.Pointer[headBlockLogs]
+	headLogsFill                singleflight.Group
 }
 
 // NewEthAPI returns APIImpl instance
@@ -1349,7 +1352,7 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
 func newRPCPendingTransaction(txn types.Transaction) *ethapi.RPCTransaction {
-	return ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, 0, nil)
+	return ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, 0, nil, nil, 0)
 }
 
 // newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.

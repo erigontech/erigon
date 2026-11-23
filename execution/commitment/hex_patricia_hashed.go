@@ -2734,7 +2734,6 @@ func (hph *HexPatriciaHashed) witnessNodeSet(ctx context.Context, updates *Updat
 
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error) {
 	var (
-		m  runtime.MemStats
 		ki uint64
 
 		updatesCount = updates.Size()
@@ -2774,11 +2773,11 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 					Metrics:     hph.metrics.AsValues(),
 				})
 			} else {
-				dbg.ReadMemStats(&m)
+				alloc, sys := dbg.MemUsage()
 				keysPerSec := uint64(float64(ki) / time.Since(start).Seconds())
 				log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
 					append(append([]any{"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)), "keys/s", common.PrettyCounter(keysPerSec)},
-						hph.metrics.logMetrics()...), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))...)
+						hph.metrics.logMetrics()...), "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))...)
 			}
 		default:
 		}

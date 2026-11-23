@@ -158,9 +158,11 @@ func ObserveBatchVerificationThroughput(d time.Duration, totalSigs int) {
 
 // ObserveGossipTopicSeen increments the gossip topic seen metric
 func ObserveGossipTopicSeen(topic string, l int) {
-	metricI, _ := gossipMetricsMap.LoadOrStore(topic, metrics.GetOrCreateCounter(gossipTopicsMetricCounterPrefix+"_"+topic))
-	metric := metricI.(metrics.Counter)
-	metric.Add(float64(l))
+	metricI, ok := gossipMetricsMap.Load(topic)
+	if !ok {
+		metricI, _ = gossipMetricsMap.LoadOrStore(topic, metrics.GetOrCreateCounter(gossipTopicsMetricCounterPrefix+"_"+topic))
+	}
+	metricI.(metrics.Counter).Add(float64(l))
 }
 
 func ObserveAggregateQuality(participationCount int, totalCount int) {

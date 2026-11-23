@@ -18,6 +18,7 @@ package cltypes
 
 import (
 	"encoding/json"
+	"errors"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -129,6 +130,19 @@ func (*VoluntaryExit) EncodingSizeSSZ() int {
 type SignedVoluntaryExit struct {
 	VoluntaryExit *VoluntaryExit `json:"message"`
 	Signature     common.Bytes96 `json:"signature"`
+}
+
+func (e *SignedVoluntaryExit) UnmarshalJSON(buf []byte) error {
+	type signedVoluntaryExitJSON SignedVoluntaryExit
+	var decoded signedVoluntaryExitJSON
+	if err := json.Unmarshal(buf, &decoded); err != nil {
+		return err
+	}
+	if decoded.VoluntaryExit == nil {
+		return errors.New("signed voluntary exit is missing message")
+	}
+	*e = SignedVoluntaryExit(decoded)
+	return nil
 }
 
 func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) ([]byte, error) {

@@ -220,7 +220,7 @@ func TestSearchTransactionsBefore(t *testing.T) {
 func TestSearchTransactionsLogsHaveBlockTimestamp(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
-	logs, err := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(10), ToBlock: big.NewInt(10)})
+	logs, err := logsOf(newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(10), ToBlock: big.NewInt(10)}))
 	require.NoError(t, err)
 	require.NotEmpty(t, logs)
 	addr := logs[0].Address

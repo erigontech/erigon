@@ -31,7 +31,7 @@ func BenchmarkFrameTransactionEncodingSize(b *testing.B) {
 	for _, size := range []int{0, 128 << 10} {
 		b.Run(fmt.Sprint(size), func(b *testing.B) {
 			tx := FrameTransaction{
-				NonceKeys:  []uint256.Int{{}},
+				NonceKeys:  nil,
 				Frames:     []Frame{{Data: make([]byte, size)}},
 				Signatures: []FrameSignature{{Scheme: FrameSignatureP256, Signature: make([]byte, 128)}},
 			}
@@ -48,7 +48,7 @@ func BenchmarkFrameTransactionGasLimits(b *testing.B) {
 		name string
 		keys []uint256.Int
 	}{
-		{"legacy", []uint256.Int{{}}},
+		{"legacy", nil},
 		{"keyed", []uint256.Int{{1}, {256}}},
 		{"16 keys", frameNonceKeysAtBit(FrameMaxNonceKeys, 255)},
 	} {
@@ -97,7 +97,7 @@ func BenchmarkFrameTransactionValidate(b *testing.B) {
 func BenchmarkFrameTransactionValidateArbitrary(b *testing.B) {
 	for _, mixed := range []bool{false, true} {
 		b.Run(fmt.Sprintf("mixed=%t", mixed), func(b *testing.B) {
-			tx := &FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []Frame{{}}}
+			tx := &FrameTransaction{NonceKeys: nil, Frames: []Frame{{}}}
 			if mixed {
 				tx, _ = signedFrameTransaction(b, FrameSignatureSecp256k1, nil)
 				hash := tx.SigningHash(nil)
