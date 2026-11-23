@@ -19,8 +19,11 @@ package accounts
 import (
 	"encoding/binary"
 	"fmt"
+	"os"
+	"sync"
 	"sync/atomic"
 	"unique"
+	"unsafe"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -48,6 +51,42 @@ var (
 	_            = [1]struct{}{}[keyTableSize&(keyTableSize-1)]
 )
 
+// INTERN_STRONG=true (probe): canonical values come from never-freed strong maps, so interning has no weak handle,
+// no cleanup and no weak-to-strong wait. Handles stay pointer-equal because every handle of a value comes from one map.
+var internStrong = os.Getenv("INTERN_STRONG") == "true"
+
+type strongShard[T comparable] struct {
+	mu sync.Mutex
+	m  map[T]*T
+	_  [40]byte
+}
+
+type strongTable[T comparable] [64]strongShard[T]
+
+var (
+	addrStrong strongTable[common.Address]
+	keyStrong  strongTable[common.Hash]
+)
+
+func makeHandle[T common.Address | common.Hash](t *strongTable[T], v T) unique.Handle[T] {
+	if !internStrong {
+		return unique.Make(v)
+	}
+	s := &t[v[len(v)-1]&63]
+	s.mu.Lock()
+	p, ok := s.m[v]
+	if !ok {
+		if s.m == nil {
+			s.m = make(map[T]*T)
+		}
+		p = new(T)
+		*p = v
+		s.m[v] = p
+	}
+	s.mu.Unlock()
+	return *(*unique.Handle[T])(unsafe.Pointer(&p))
+}
+
 func addressSlot(a common.Address) *atomic.Value {
 	return &addressTable[binary.BigEndian.Uint32(a[16:])&(addressTableSize-1)]
 }
@@ -57,7 +96,7 @@ func InternAddress(a common.Address) Address {
 	if h, ok := slot.Load().(Address); ok && h.Value() == a {
 		return h
 	}
-	h := Address(unique.Make(a))
+	h := Address(makeHandle(&addrStrong, a))
 	slot.Store(h)
 	return h
 }
@@ -157,7 +196,7 @@ func InternKey(k common.Hash) StorageKey {
 	if h, ok := slot.Load().(StorageKey); ok && h.Value() == k {
 		return h
 	}
-	h := StorageKey(unique.Make(k))
+	h := StorageKey(makeHandle(&keyStrong, k))
 	slot.Store(h)
 	return h
 }
