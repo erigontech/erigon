@@ -475,6 +475,15 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 	e.auditSealedBody(ctx, number, body.Transactions)
 
 	block := types.NewBlockForAsembling(sealed, body.Transactions, nil, receipts, params.Withdrawals, nil)
+	if got := block.Header(); got.Hash() != sealed.Hash() {
+		e.logger.Warn("[execmodule] sealed block differs from the header it is recorded under", "number", number,
+			"recorded", sealed.Hash(), "returned", got.Hash(),
+			"txHashOK", got.TxHash == sealed.TxHash, "receiptHashOK", got.ReceiptHash == sealed.ReceiptHash,
+			"bloomOK", got.Bloom == sealed.Bloom, "uncleOK", got.UncleHash == sealed.UncleHash,
+			"withdrawalsOK", (got.WithdrawalsHash == nil) == (sealed.WithdrawalsHash == nil) &&
+				(got.WithdrawalsHash == nil || *got.WithdrawalsHash == *sealed.WithdrawalsHash),
+			"receipts", len(receipts), "closeReceipts", res.FlashblockReceiptCount, "txs", len(body.Transactions))
+	}
 
 	// newPayload ingest: re-key the extending fork to the sealed header so a subsequent FCU canonicalises it.
 	if err := e.ingestSealedFlashblockLocked(ctx, sealed); err != nil {
