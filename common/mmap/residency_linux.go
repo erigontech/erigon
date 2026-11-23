@@ -48,3 +48,15 @@ func Resident(m []byte) (bool, error) {
 	}
 	return true, nil
 }
+
+func LockOnFault(m []byte) error {
+	if len(m) == 0 {
+		return nil
+	}
+	if _, _, errno := unix.Syscall(unix.SYS_MLOCK2, uintptr(unsafe.Pointer(&m[0])), uintptr(len(m)), unix.MLOCK_ONFAULT); errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+func Unlock(m []byte) error { return unix.Munlock(m) }

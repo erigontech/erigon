@@ -76,7 +76,8 @@ type Aggregator struct {
 	// an existing datadir, the existing domain files containing more steps will be unaffected.
 	erigondbDomainStepsInFrozenFile uint64
 
-	dirtyFilesLock sync.Mutex
+	dirtyFilesLock   sync.Mutex
+	lockedCommitment map[*FilesItem]struct{}
 	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
 	// flag: ReloadErigonDBSettings writes it while background merges read it.
 	commitmentRefsMu sync.RWMutex
@@ -1880,6 +1881,44 @@ type aggregatorVisible struct {
 // helpers, then publishes the completed snapshot with a.visible.Store(next).
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
+func (a *Aggregator) lockHotCommitmentFiles(v *aggregatorVisible) {
+	dv := v.d[kv.CommitmentDomain]
+	if dv == nil {
+		return
+	}
+	files := dv.files
+	hot := map[*FilesItem]struct{}{}
+	for _, f := range files[max(0, len(files)-3):max(0, len(files)-1)] {
+		hot[f.src] = struct{}{}
+	}
+	visible := map[*FilesItem]struct{}{}
+	for _, f := range files {
+		visible[f.src] = struct{}{}
+	}
+	for item := range a.lockedCommitment {
+		if _, ok := hot[item]; ok {
+			continue
+		}
+		if _, ok := visible[item]; ok {
+			_ = item.decompressor.Unlock()
+		}
+		delete(a.lockedCommitment, item)
+	}
+	for item := range hot {
+		if _, ok := a.lockedCommitment[item]; ok {
+			continue
+		}
+		if err := item.decompressor.LockOnFault(); err != nil {
+			a.logger.Warn("[agg] lock commitment file", "file", item.decompressor.FileName(), "err", err)
+			continue
+		}
+		if a.lockedCommitment == nil {
+			a.lockedCommitment = map[*FilesItem]struct{}{}
+		}
+		a.lockedCommitment[item] = struct{}{}
+	}
+}
+
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	// buildVisible builds every list up to toTxNum and returns the lowest end among the lists that have files.
 	buildVisible := func(toTxNum uint64) (next *aggregatorVisible, lowestEnd uint64) {
@@ -1967,6 +2006,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 
 	old := a.visible.Load()
 	next.generation = old.generation + 1
+	a.lockHotCommitmentFiles(next)
 	old.retired = retired
 	old.next = next
 	a.visible.Store(next)

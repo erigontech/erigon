@@ -674,6 +674,20 @@ func (d *Decompressor) DisableReadAhead() {
 	_ = mmap.MadviseRandom(d._mmapHandle)
 }
 
+func (d *Decompressor) LockOnFault() error {
+	if d == nil || d._mmapHandle == nil {
+		return nil
+	}
+	return mmap.LockOnFault(d._mmapHandle)
+}
+
+func (d *Decompressor) Unlock() error {
+	if d == nil || d._mmapHandle == nil {
+		return nil
+	}
+	return mmap.Unlock(d._mmapHandle)
+}
+
 func (d *Decompressor) MadvSequential() *Decompressor {
 	if d == nil || d._mmapHandle == nil {
 		return d

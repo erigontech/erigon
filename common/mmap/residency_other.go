@@ -21,3 +21,7 @@ package mmap
 // Resident is a no-op on platforms without mincore: it reports pages as
 // resident so callers skip the residency gate and fall back to plain mmap.
 func Resident(m []byte) (bool, error) { return true, nil }
+
+func LockOnFault(m []byte) error { return nil }
+
+func Unlock(m []byte) error { return nil }

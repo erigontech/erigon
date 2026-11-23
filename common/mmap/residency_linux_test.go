@@ -22,6 +22,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -114,4 +116,36 @@ func TestMappingOfFindsTheMappingThatHoldsThePage(t *testing.T) {
 	unregisterMapping(bufs[1])
 	_, ok := mappingOf(uintptr(unsafe.Pointer(&bufs[1][0])))
 	require.False(t, ok, "an unregistered mapping is not found")
+}
+
+func vmLockedKB(t *testing.T) int {
+	t.Helper()
+	b, err := os.ReadFile("/proc/self/status")
+	require.NoError(t, err)
+	for _, l := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(l, "VmLck:"); ok {
+			kb, err := strconv.Atoi(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(v), "kB")))
+			require.NoError(t, err)
+			return kb
+		}
+	}
+	t.Fatal("no VmLck in /proc/self/status")
+	return 0
+}
+
+func TestLockOnFaultLocksTheMappingUntilUnlock(t *testing.T) {
+	const size = 1 << 20
+	f, err := os.Create(filepath.Join(t.TempDir(), "lock"))
+	require.NoError(t, err)
+	defer f.Close()
+	require.NoError(t, f.Truncate(size))
+	m, err := unix.Mmap(int(f.Fd()), 0, size, unix.PROT_READ, unix.MAP_SHARED)
+	require.NoError(t, err)
+	defer unix.Munmap(m)
+
+	before := vmLockedKB(t)
+	require.NoError(t, LockOnFault(m))
+	require.Equal(t, before+size/1024, vmLockedKB(t))
+	require.NoError(t, Unlock(m))
+	require.Equal(t, before, vmLockedKB(t))
 }
