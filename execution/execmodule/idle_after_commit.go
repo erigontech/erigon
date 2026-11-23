@@ -23,14 +23,19 @@ import (
 	"github.com/erigontech/erigon/diagnostics/mem"
 )
 
+const (
+	minTriggerRatioNum = 45
+	triggerRatioDen    = 64
+)
+
 func (e *ExecModule) startIdleAfterCommit() {
 	if !e.idleAfterCommitBusy.CompareAndSwap(false, true) {
 		return
 	}
 	go func() {
 		defer e.idleAfterCommitBusy.Store(false)
-		mem.RefreshVirtualMemStats(mem.VirtualMemStatsAge)
 		e.gcIfDue()
+		mem.RefreshVirtualMemStats(mem.VirtualMemStatsAge)
 	}()
 }
 
@@ -55,5 +60,5 @@ func gcDue(heap, live, goal uint64, ranSinceLastCommit bool) bool {
 		return false
 	}
 	runway := goal - live
-	return heap >= live+runway/2 && heap < live+runway/64*45
+	return heap >= live+runway/2 && heap < live+runway/triggerRatioDen*minTriggerRatioNum
 }
