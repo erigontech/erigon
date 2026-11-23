@@ -3,9 +3,10 @@
 # Single source of truth for:
 #   - .github/workflows/test-eest-spec.yml (load-matrix step → matrix.include)
 #   - tools/run-eest-spec-test.sh         (runtime workers / failure budget lookup)
+#   - tools/check-eest-shard-coverage.sh  (CI shard coverage)
 #   - Makefile                            (EEST_SPEC_SHARDS / EEST_SPEC_RACE_SHARDS)
 #
-# All three readers convert YAML→JSON via `yq -o=json` and then query with `jq`,
+# All readers convert YAML→JSON via `yq -o=json` and then query with `jq`,
 # so existing jq expressions are unchanged. mikefarah/yq is pre-installed on
 # GitHub-hosted ubuntu-* runners; locally install via `brew install yq` (macOS)
 # or `snap install yq` (Linux).
@@ -13,7 +14,8 @@
 # Per-entry keys:
 #   shard                 (required) — shard name; see run-eest-spec-test.sh
 #                                      for the routing case statement.
-#   local-only            (optional) — keep the Make target available outside the CI matrix.
+#   local-only            (optional) — true omits the shard from the CI matrix.
+#                                      Its Make target still runs it.
 #   workers               (required) — parallel worker count.
 #   max-allowed-failures  (required) — failure budget; bump only with a comment
 #                                      explaining why and a tracking issue.
@@ -35,7 +37,8 @@
 #                                      leaves its goroutine dump in the log, and the
 #                                      shard fails. Set it well above a healthy run:
 #                                      quiet stretches of over 10 min are normal.
-#   run                   (optional) — fixture name regex passed to evm --run.
+#   run                   (optional) — evm --run regex. blocktest matches the case ID.
+#                                      zkevmtest matches <path under blockchain_tests>/<case ID>.
 
 - shard: statetests-stable-parallel
   workers: 12
@@ -257,13 +260,13 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: true
-  expected-tests: 26853
+  expected-tests: &zkevm-witness-total 26853
 - shard: zkevm-witness-v3
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: false
   commitment-v3: true
-  expected-tests: 26853
+  expected-tests: *zkevm-witness-total
 - shard: blocktests-stable-race-pre-cancun-parallel
   workers: 12
   max-allowed-failures: 0
@@ -304,7 +307,7 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: true
-  expected-tests: 26853
+  expected-tests: *zkevm-witness-total
 - shard: zkevm-witness-race-a-h
   workers: 8
   max-allowed-failures: 0
