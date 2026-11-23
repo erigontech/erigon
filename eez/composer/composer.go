@@ -231,38 +231,78 @@ func (c *Composer) chunk(ctx context.Context, cursor, sync uint64, target post.T
 	if err != nil {
 		return err
 	}
-	down := make([]*types.Header, 0, boundary-cursor)
-	for n := boundary; n > cursor; n-- {
-		h, err := c.header(ctx, n)
+	blocks, err := c.blocks(ctx, cursor, boundary)
+	if err != nil {
+		return err
+	}
+	down := make([]*types.Header, len(blocks))
+	for i, b := range blocks {
+		down[len(blocks)-1-i] = b.Header()
+	}
+	ends := EmptyBoundaries(down, c.cfg.K)
+	// A chunk's gas grows with its terminal: the highest within the limit is
+	// found without pricing every one above it.
+	lo, hi := 0, len(ends)
+	for lo < hi {
+		m := (lo + hi) / 2
+		fits, err := c.fits(blocks[:ends[m]-cursor])
 		if err != nil {
 			return err
 		}
-		down = append(down, h)
-	}
-	for _, b := range EmptyBoundaries(down, c.cfg.K) {
-		err := c.post(ctx, cursor, down[boundary-b], target, time.Now().Add(c.cfg.Proof), 0)
-		if !errors.Is(err, errOverBudget) {
-			return err
+		if fits {
+			hi = m
+		} else {
+			lo = m + 1
 		}
 	}
-	return fmt.Errorf("no empty grid block above cursor %d within the gas limit", cursor)
+	if lo == len(ends) {
+		return fmt.Errorf("no empty grid block above cursor %d within the gas limit", cursor)
+	}
+	return c.postBlocks(ctx, cursor, blocks[:ends[lo]-cursor], target, time.Now().Add(c.cfg.Proof), 0)
+}
+
+// fits reports whether the anchor-only batch of blocks posts within the gas
+// limit.
+func (c *Composer) fits(blocks []*types.Block) (bool, error) {
+	batch, err := c.cfg.Batcher.AnchorBatch(blocks[0].ParentHash(), blocks)
+	if err != nil {
+		return false, err
+	}
+	gas, err := PostBatchGas(batch)
+	return gas <= c.cfg.MaxGas, err
+}
+
+// blocks returns the blocks cursor+1..to.
+func (c *Composer) blocks(ctx context.Context, cursor, to uint64) ([]*types.Block, error) {
+	blocks := make([]*types.Block, 0, to-cursor)
+	for n := cursor + 1; n <= to; n++ {
+		b, err := c.block(ctx, n)
+		if err != nil {
+			return nil, err
+		}
+		blocks = append(blocks, b)
+	}
+	return blocks, nil
 }
 
 // post proves, signs and sends the anchor-only batch of cursor+1..terminal,
 // proving with start and per as ProveBy takes them, and watches it.
 func (c *Composer) post(ctx context.Context, cursor uint64, terminal *types.Header, target post.Target, start time.Time, per time.Duration) error {
-	to := terminal.Number.Uint64()
-	blocks := make([]*types.Block, 0, to-cursor)
-	for n := cursor + 1; n <= to; n++ {
-		b, err := c.block(ctx, n)
-		if err != nil {
-			return err
-		}
-		blocks = append(blocks, b)
+	blocks, err := c.blocks(ctx, cursor, terminal.Number.Uint64())
+	if err != nil {
+		return err
 	}
 	if last := blocks[len(blocks)-1].Hash(); last != terminal.Hash() {
-		return fmt.Errorf("block %d is %x, not the terminal %x", to, last, terminal.Hash())
+		return fmt.Errorf("block %d is %x, not the terminal %x", terminal.Number.Uint64(), last, terminal.Hash())
 	}
+	return c.postBlocks(ctx, cursor, blocks, target, start, per)
+}
+
+// postBlocks proves, signs and sends the anchor-only batch of blocks, the
+// chain from the cursor's child, and watches it.
+func (c *Composer) postBlocks(ctx context.Context, cursor uint64, blocks []*types.Block, target post.Target, start time.Time, per time.Duration) error {
+	terminal := blocks[len(blocks)-1].Header()
+	to := terminal.Number.Uint64()
 	// The window's blocks are canonical, so the first one's parent is the cursor.
 	batch, err := c.cfg.Batcher.AnchorBatch(blocks[0].ParentHash(), blocks)
 	if err != nil {

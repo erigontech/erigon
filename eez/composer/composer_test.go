@@ -77,6 +77,8 @@ var testSigner = types.LatestSignerForChainID(uint256.NewInt(6290))
 type testChain struct {
 	blocks []*types.Block
 	head   uint64
+	// reads counts the blocks and headers read.
+	reads atomic.Int64
 }
 
 func newTestChain(t *testing.T, n uint64, full ...uint64) *testChain {
@@ -105,6 +107,7 @@ func newTestChain(t *testing.T, n uint64, full ...uint64) *testChain {
 }
 
 func (c *testChain) BlockByNumber(_ context.Context, n uint64) (*types.Block, error) {
+	c.reads.Add(1)
 	if n > c.head {
 		return nil, nil
 	}
@@ -594,6 +597,29 @@ func TestComposerAuditsLandedSettlements(t *testing.T) {
 		require.False(t, ok, "finalized")
 		require.Equal(t, asked, node.asked.Load(), "not audited")
 	})
+}
+
+// TestComposerChunkReadsOnce: falling back from a backlog to its smallest
+// chunk reads the backlog's blocks once, not once per larger candidate.
+func TestComposerChunkReadsOnce(t *testing.T) {
+	const sync = 48
+	var full []uint64
+	for n := uint64(1); n < sync; n++ {
+		if n%4 != 0 {
+			full = append(full, n)
+		}
+	}
+	chain := newTestChain(t, sync, full...)
+	h := newHarness(t, chain, sync, nil)
+	small, err := h.c.cfg.Batcher.AnchorBatch(chain.blocks[0].Hash(), chain.blocks[1:5])
+	require.NoError(t, err)
+	h.c.cfg.MaxGas, err = PostBatchGas(small)
+	require.NoError(t, err)
+	h.slot(t, sync, 50, sequencer.ModeSteady)
+	require.Len(t, h.targets(t), 1)
+	require.Equal(t, [2]uint64{1, 4}, [2]uint64{h.prover.proven[0].from, h.prover.proven[0].to})
+	// The anchor's blocks, the chunk's below it, the cursor and the window's.
+	require.LessOrEqual(t, chain.reads.Load(), int64(sync+(sync-4)+1+4))
 }
 
 // TestComposerFallsBackFromAFreshCursor: the chunk replacing a failed anchor
