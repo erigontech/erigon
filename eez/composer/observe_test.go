@@ -21,6 +21,7 @@ import (
 	"errors"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -136,6 +137,40 @@ func (c *chain) Receipt(context.Context, common.Hash) (*l1.Receipt, error) {
 		return nil, c.failed
 	}
 	return c.got, nil
+}
+
+// stalling is an L1 node that answers its first receipt read never, the
+// others with settles.
+type stalling struct {
+	reads   atomic.Int32
+	settles *l1.Receipt
+}
+
+func (*stalling) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 100}, nil }
+
+func (s *stalling) Receipt(ctx context.Context, _ common.Hash) (*l1.Receipt, error) {
+	if s.reads.Add(1) == 1 {
+		<-ctx.Done()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.settles, nil
+}
+
+func (*stalling) HasTransaction(context.Context, common.Hash) (bool, error) { return false, nil }
+
+// TestWatchOutlivesAHungRead: a read the node never answers ends within
+// Read, and the next poll gets the verdict.
+func TestWatchOutlivesAHungRead(t *testing.T) {
+	b, terminal := anchorBatch(t)
+	node := &stalling{settles: receipt(1, batchPosted(t, eezL1), performed(t, eezL1, 1, terminal))}
+	o := &Observer{Node: node, RollupID: 1, EEZ: eezL1, Every: time.Millisecond, Read: 50 * time.Millisecond, Logger: log.New()}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	got, err := o.Watch(ctx, common.Hash{1}, b, terminal, post.Sent{Block: 101})
+	require.NoError(t, err)
+	require.Equal(t, Settled, got)
 }
 
 func TestWatch(t *testing.T) {

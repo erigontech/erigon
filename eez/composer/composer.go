@@ -514,7 +514,9 @@ func (c *Composer) rewatch(p Posted[types.Transaction]) {
 // audit checks that the posting of a finalized settlement is on L1: one
 // missing means a reorg the follower did not see.
 func (c *Composer) audit(p Posted[types.Transaction]) {
-	r, err := c.observer.Node.Receipt(c.ctx, p.Post)
+	ctx, cancel := context.WithTimeout(c.ctx, c.cfg.L1Read)
+	defer cancel()
+	r, err := c.observer.Node.Receipt(ctx, p.Post)
 	switch {
 	case err != nil:
 		c.logger.Error("[eez] finality audit failed", "event", "eez.composer.finality_audit.check_failed", "to", p.Height, "post", p.Post, "err", err)

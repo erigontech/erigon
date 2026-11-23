@@ -17,6 +17,7 @@
 package composer
 
 import (
+	"cmp"
 	"context"
 	"time"
 
@@ -47,7 +48,10 @@ type Observer struct {
 	// EEZ is the L1 contract the batches are posted to.
 	EEZ common.Address
 	// Every is the polling interval.
-	Every  time.Duration
+	Every time.Duration
+	// Read bounds a poll's reads, so that a node that stops answering does
+	// not hold the watch; zero is DefaultL1Read.
+	Read   time.Duration
 	Logger log.Logger
 }
 
@@ -62,18 +66,8 @@ func (o *Observer) Watch(ctx context.Context, hash common.Hash, batch *protocol.
 	defer tick.Stop()
 	known := false
 	for {
-		if r, err := o.Node.Receipt(ctx, hash); err == nil && r != nil {
-			return o.judge(r, batch, terminal), nil
-		} else if err == nil {
-			// The receipt may land between the read and the check.
-			if gone, err := o.gone(ctx, hash, sent, &known); err == nil && gone {
-				if r, err := o.Node.Receipt(ctx, hash); err == nil {
-					if r != nil {
-						return o.judge(r, batch, terminal), nil
-					}
-					return Failed, nil
-				}
-			}
+		if verdict, ok := o.poll(ctx, hash, batch, terminal, sent, &known); ok {
+			return verdict, nil
 		}
 		if !slow.IsZero() && time.Now().After(slow) {
 			o.Logger.Warn("[eez] posting has no verdict yet", "event", "eez.composer.observe.slow", "post", hash,
@@ -86,6 +80,31 @@ func (o *Observer) Watch(ctx context.Context, hash common.Hash, batch *protocol.
 		case <-tick.C:
 		}
 	}
+}
+
+// poll reads once what became of hash, within Read: a node that stops
+// answering must not hold the watch, and with it every later posting.
+func (o *Observer) poll(ctx context.Context, hash common.Hash, batch *protocol.ProofSystemBatch, terminal common.Hash, sent post.Sent, known *bool) (Resolution, bool) {
+	ctx, cancel := context.WithTimeout(ctx, cmp.Or(o.Read, DefaultL1Read))
+	defer cancel()
+	r, err := o.Node.Receipt(ctx, hash)
+	switch {
+	case err != nil:
+		return Pending, false
+	case r != nil:
+		return o.judge(r, batch, terminal), true
+	}
+	if gone, err := o.gone(ctx, hash, sent, known); err != nil || !gone {
+		return Pending, false
+	}
+	// The receipt may land between the read and the check.
+	if r, err = o.Node.Receipt(ctx, hash); err != nil {
+		return Pending, false
+	}
+	if r != nil {
+		return o.judge(r, batch, terminal), true
+	}
+	return Failed, true
 }
 
 // gone reports whether hash, a posting without a receipt, can no longer
