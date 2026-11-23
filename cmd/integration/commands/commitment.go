@@ -368,6 +368,9 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		return err
 	}
 	defer rwTx.Rollback()
+	if err := dbstate.AggTx(rwTx).AssertRetired(rwTx); err != nil {
+		return err
+	}
 
 	if !clearCommitment {
 		domainProgress := rwTx.Debug().DomainProgress(kv.CommitmentDomain)

@@ -2564,6 +2564,24 @@ type AggregatorRoTx struct {
 // Generation identifies the immutable file view pinned by this transaction.
 func (at *AggregatorRoTx) Generation() uint64 { return at.visible.generation }
 
+// AssertRetired reports a full step of state in the DB that the files on disk do
+// not cover yet, as `erigon seg retire` would build. The files on disk count, not
+// the visible ones: accounts are not visible without their commitment files.
+func (at *AggregatorRoTx) AssertRetired(tx kv.Tx) error {
+	a := at.a
+	a.dirtyFilesLock.Lock()
+	filesEnd := kv.Step(a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax() / a.StepSize())
+	a.dirtyFilesLock.Unlock()
+	var inDB kv.Step
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		inDB = max(inDB, a.d[d].maxStepInDB(tx))
+	}
+	if inDB > filesEnd {
+		return fmt.Errorf("the DB holds steps %d-%d that are not in files: run `erigon seg retire` first (it builds a step only after the step's last block is final)", filesEnd, inDB)
+	}
+	return nil
+}
+
 // CheckFilesDBGap detects a gap between the snapshot files and the DB. It can arise from
 // snapshot/DB management operations — e.g. `seg rm-state --latest` and then starting
 // erigon without `integration stage_exec --reset`. Meant to run once at startup.
