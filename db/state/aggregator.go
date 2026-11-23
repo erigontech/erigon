@@ -26,7 +26,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -1002,9 +1001,8 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, db kv.RoDB, worke
 			case <-ctx.Done():
 				return
 			case <-logEvery.C:
-				var m runtime.MemStats
-				dbg.ReadMemStats(&m)
-				a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				alloc, sys := dbg.MemUsage()
+				a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 			}
 		}
 	}()
