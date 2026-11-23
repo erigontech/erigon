@@ -24,12 +24,15 @@ import (
 )
 
 func TestRefreshVirtualMemStatsReadsAtMostOncePerMaxAge(t *testing.T) {
-	RefreshVirtualMemStats(0)
+	_, readErr := ReadVirtualMemStats()
+	_, fresh := RefreshVirtualMemStats(0)
 	first := vmStatsRead
 	require.False(t, first.IsZero())
+	require.Equal(t, readErr == nil, fresh, "fresh only after a successful read")
 
-	RefreshVirtualMemStats(time.Hour)
+	_, fresh = RefreshVirtualMemStats(time.Hour)
 	require.Equal(t, first, vmStatsRead, "a read younger than maxAge, failed or not, is not repeated")
+	require.False(t, fresh, "a cached value is not fresh")
 
 	time.Sleep(time.Millisecond)
 	RefreshVirtualMemStats(0)
