@@ -17,6 +17,7 @@
 package post
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -185,6 +186,7 @@ func TestSend(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		txs     int
+		input   int // the posting's input size, else one byte
 		target  Target
 		status  int
 		answer  string
@@ -231,6 +233,14 @@ func TestSend(t *testing.T) {
 			name: "mempool refuses a later one", txs: 2, target: Target{Block: 100}, answer: unsupported, refuse: map[int]bool{1: true},
 			params: `{"txs":["%s","%s"],"blockNumber":"0x64"}`, sent: Sent{Block: 100, Pooled: true}, mempool: 1, tries: 2,
 		},
+		{
+			name: "a bundle over the pool's limit", txs: 1, input: 128 * 1024, target: Target{Block: 100}, answer: accepted,
+			params: `{"txs":["%s"],"blockNumber":"0x64"}`, sent: Sent{Block: 100},
+		},
+		{
+			name: "the mempool takes nothing over its limit", txs: 1, input: 128 * 1024, target: Target{Block: 100}, answer: unsupported,
+			params: `{"txs":["%s"],"blockNumber":"0x64"}`, err: "eth_sendBundle",
+		},
 		{name: "nothing to send", target: Target{Block: 100}, answer: accepted, err: "no transactions"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -240,7 +250,11 @@ func TestSend(t *testing.T) {
 			var txs []types.Transaction
 			var raw []any
 			for i := range c.txs {
-				tx, err := p.Sign(t.Context(), []byte{byte(i)}, 100_000)
+				input := []byte{byte(i)}
+				if i == 0 && c.input > 0 {
+					input = bytes.Repeat([]byte{0xff}, c.input)
+				}
+				tx, err := p.Sign(t.Context(), input, 100_000)
 				require.NoError(t, err)
 				enc, err := types.MarshalTransactionsBinary(types.Transactions{tx})
 				require.NoError(t, err)

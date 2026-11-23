@@ -48,6 +48,9 @@ const (
 	methodNotFound = -32601
 	sendTimeout    = 30 * time.Second
 	maxAnswer      = 1 << 20
+	// maxPooled is the largest transaction other than a blob one that an L1
+	// pool admits, 128 KiB.
+	maxPooled = 128 * 1024
 )
 
 var errNoBundles = errors.New("builder has no eth_sendBundle")
@@ -158,8 +161,9 @@ type Sent struct {
 
 // Send hands txs, the poster's call first, to the builder for target. A
 // builder without eth_sendBundle has them sent in order to the L1 node's pool
-// instead, which keeps neither their order nor the target: the call refused
-// there fails Send, a later transaction is left out.
+// instead, which keeps neither their order nor the target and suits only a
+// development L1: the call refused there, or over the size a pool admits,
+// fails Send, a later transaction is left out.
 func (p *Poster) Send(ctx context.Context, txs []types.Transaction, target Target) (Sent, error) {
 	if len(txs) == 0 {
 		return Sent{}, errors.New("bundle of no transactions")
@@ -182,6 +186,11 @@ func (p *Poster) Send(ctx context.Context, txs []types.Transaction, target Targe
 		return Sent{Block: block, Time: target.Time}, nil
 	case !errors.Is(err, errNoBundles):
 		return Sent{}, err
+	}
+	if size := len(raw[0]); size > maxPooled {
+		p.logger.Error("[eez] posting over the size an L1 pool admits; settling it needs a builder with eth_sendBundle", "event", "eez.poster.mempool.oversized",
+			"size", size, "limit", maxPooled)
+		return Sent{}, fmt.Errorf("posting of %d bytes over the %d an L1 pool admits: settling it needs a builder with eth_sendBundle", size, maxPooled)
 	}
 	p.logger.Warn("[eez] builder has no eth_sendBundle, sending through the mempool", "event", "eez.poster.mempool",
 		"block", block, "txs", len(raw))
