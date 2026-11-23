@@ -46,11 +46,11 @@ var engineXTestCommand = cli.Command{
 	Name:      "enginextest",
 	Usage:     "Executes engine-x test fixtures using the existing EngineXTestRunner",
 	ArgsUsage: "<path>",
-	Description: "Tests with the same fork and pre-alloc hash share a short-lived Erigon\n" +
-		"node whose datadir lives under $TMPDIR (default /tmp). On a journaled filesystem like ext4 the\n" +
-		"per-tester create/unlink work serialises through the journal and\n" +
-		"dominates wall time. Pointing $TMPDIR at a RAM-backed filesystem cuts\n" +
-		"wall time by ~2× on Linux. Easiest cross-platform setup:\n" +
+	Description: "Tests share a short-lived Erigon node when the fork, pre-alloc hash, and\n" +
+		"EIP-8253 account list match. Its datadir lives under $TMPDIR (default /tmp).\n" +
+		"On a journaled filesystem like ext4, the per-tester create/unlink work\n" +
+		"serialises through the journal and dominates wall time. Pointing $TMPDIR\n" +
+		"at a RAM-backed filesystem cuts wall time by ~2× on Linux. Easiest cross-platform setup:\n" +
 		"\n" +
 		"    RAMDISK=$(./tools/create-ramdisk)\n" +
 		"    TMPDIR=$RAMDISK evm enginextest ...\n" +
