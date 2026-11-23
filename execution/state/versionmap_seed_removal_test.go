@@ -341,11 +341,8 @@ func TestSeedEmptyRemovals_BaseReadErrorFails(t *testing.T) {
 	require.ErrorIs(t, vm.SeedEmptyRemovals(true, false, &failingBaseReader{err: boom}), boom)
 }
 
-// TestSeedEmptyRemovals_DrainThenRefund pins the removal at an interior index: an
-// account drained to empty reads absent to a step checkpoint at index 1, then is
-// present at block end once funded again at index 2, or once re-created at index 2
-// with no balance change (CREATE2 onto a drained address, as createObject does for a
-// worker).
+// A drained account reads as absent until a refund or re-creation makes it
+// visible again. Only the refund supplies an explicit balance.
 func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 	t.Parallel()
 

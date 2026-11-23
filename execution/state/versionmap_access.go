@@ -314,6 +314,8 @@ func (vm *VersionMap) HasAmbiguousBaseAccount(eip161Enabled, isAura bool, base S
 	return false, nil
 }
 
+// SeedEmptyRemovals checks for EIP-161 removal at zero-balance writes and at
+// the account's final change, which can be to any field.
 func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {
 	var stamps []*WriteSet
 	var candidates []balRemovalCandidate
@@ -333,7 +335,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 			}
 		}
 		if maxIdx == 0 {
-			continue // only reads, no field change — not a removal candidate
+			continue // The account is read-only or all its writes are at block start.
 		}
 		addr := accounts.InternAddress(ac.Address)
 		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
@@ -476,12 +478,15 @@ type balRemovalCandidate struct {
 	seedBalance bool
 }
 
-// The next explicit balance write ends a candidate's search. Since every removal is
-// a balance write, the last candidate's next known write bounds the whole list.
+// recordBALRevivals checks the sorted writes to nonce, code or one storage slot.
+// A removed account needs a zero balance at the first later write unless the BAL
+// supplies an explicit balance at that same index.
 func recordBALRevivals[T interface{ GetIndex() uint32 }](candidates []balRemovalCandidate, changes []T) {
 	for len(candidates) > 0 && len(changes) > 0 {
 		idx := changes[0].GetIndex()
 		changes = changes[1:]
+		// Each candidate here is a zero-balance write. Earlier searches end by
+		// the last candidate's index, so its next known write bounds this scan.
 		if limit := candidates[len(candidates)-1].next; limit != 0 && idx >= limit {
 			return
 		}
