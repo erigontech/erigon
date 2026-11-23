@@ -56,11 +56,13 @@ func TestStartExportsBackfillStateBeforeTheFirstPass(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	b := &BlobHistoryDownloader{ctx: ctx, archiveBlobs: true, logger: log.New()}
+	started := time.Now()
 
 	b.Start()
 
 	require.Eventually(t, func() bool { return !b.running.Load() }, time.Second, time.Millisecond)
 	require.Zero(t, blobBackfillCompleteGauge().GetValueUint64())
+	require.WithinDuration(t, started.Add(blobBackfillWarningInterval), b.nextBackfillWarning, time.Second)
 }
 
 func TestStartWithoutBlobBackfillLeavesTheGaugeAlone(t *testing.T) {
@@ -121,6 +123,26 @@ func TestWarnBackfillIncompleteNamesFrontiersAndUnresolvedSlots(t *testing.T) {
 		"frozenBlobsTo", uint64(14_880_000), "frozenBlocksTo", uint64(15_220_000),
 		"unresolvedSlots", uint64(3), "lowestUnresolved", uint64(14_910_740), "highestUnresolved", uint64(14_911_999),
 	}, handler.records[0].Ctx)
+}
+
+func TestWarnBackfillIncompleteOncePerInterval(t *testing.T) {
+	b, handler := newBackfillWarningDownloader()
+
+	warned := time.Now()
+	b.warnBackfillIncomplete()
+	b.warnBackfillIncomplete()
+
+	require.Len(t, handler.records, 1)
+	require.WithinDuration(t, warned.Add(blobBackfillWarningInterval), b.nextBackfillWarning, time.Second)
+}
+
+func TestWarnBackfillIncompleteSilentOnceCompleted(t *testing.T) {
+	b, handler := newBackfillWarningDownloader()
+	b.backfillCompleted.Store(true)
+
+	b.warnBackfillIncomplete()
+
+	require.Empty(t, handler.records)
 }
 
 // A pass that is still running has no unresolved slots yet; the frontiers alone describe it.
