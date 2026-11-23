@@ -113,6 +113,58 @@ func TestPruneGateBoundary(t *testing.T) {
 	}
 }
 
+// TestStateReadsAtLatestExecutedIgnoreForkchoiceFloor pins that the latest executed
+// state stays readable when execution lags the forkchoice head by more than the
+// history distance: the prune floor follows the head, but this state comes from the
+// current domains. Older blocks below that floor are still rejected.
+func TestStateReadsAtLatestExecutedIgnoreForkchoiceFloor(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance},
+	})
+	ctx := t.Context()
+	executed := rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
+	wantBalance, err := apis.eth.GetBalance(ctx, testAddr, &executed)
+	require.NoError(t, err)
+
+	forkchoiceHead := chainInfo.head + uint64(pruneGatingDistance) + 1
+	headHash := common.Hash{0xfc}
+	require.NoError(t, apis.rwDB.Update(ctx, func(tx kv.RwTx) error {
+		rawdb.WriteForkchoiceHead(tx, headHash)
+		return rawdb.WriteHeaderNumber(tx, headHash, forkchoiceHead)
+	}))
+	require.Greater(t, pruneGatingDistance.PruneTo(forkchoiceHead), chainInfo.head, "the executed block must fall below the forkchoice prune floor")
+
+	for name, selector := range map[string]rpc.BlockNumberOrHash{
+		"latest_executed": executed,
+		"executed_number": rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.head)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			balance, err := apis.eth.GetBalance(ctx, testAddr, &selector)
+			require.NoError(t, err)
+			require.Equal(t, *wantBalance, *balance)
+
+			nonce, err := apis.eth.GetTransactionCount(ctx, testAddr, &selector)
+			require.NoError(t, err)
+			require.Equal(t, hexutil.Uint64(pruneGatingChainLen-1), *nonce)
+
+			values, err := apis.eth.GetStorageValues(ctx, map[common.Address][]common.Hash{testAddr: {{}}}, &selector)
+			require.NoError(t, err)
+			require.Equal(t, []hexutil.Bytes{make([]byte, 32)}, values[testAddr])
+		})
+	}
+
+	t.Run("pruned_block", func(t *testing.T) {
+		old := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num))
+		_, err := apis.eth.GetBalance(ctx, testAddr, &old)
+		require.ErrorIs(t, err, state.ErrPruned)
+
+		_, err = apis.eth.GetStorageValues(ctx, map[common.Address][]common.Hash{testAddr: {{}}}, &old)
+		require.ErrorIs(t, err, state.ErrPruned)
+	})
+}
+
 // TestCallBundleGatesTxBlockAndStateBlockSeparately pins the two blocks eth_callBundle
 // reads apart: the bundle's transactions come from the bodies of the blocks that hold
 // them, the state they run against comes from the block the caller names. A retention
