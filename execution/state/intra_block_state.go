@@ -2497,9 +2497,7 @@ func (ibs *IntraBlockState) createAccountVersioned(addr accounts.Address, contra
 	if prevSelfdestructed {
 		prevInc = prevIncarnation
 	}
-	if hadPrevious && prevInc < prevPrevIncarnation {
-		prevInc = prevPrevIncarnation
-	}
+	prevInc = max(prevInc, prevPrevIncarnation)
 	// Capture each path's own (source, version) for the synthetic reads stamped
 	// below; inheriting the account-record version would trip the validator on
 	// the recursive AddressPath check.
