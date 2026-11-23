@@ -946,8 +946,10 @@ func TestDropWriteAtARevivalKeepsTheRevivedAccount(t *testing.T) {
 			for h := range run.AllHeaders() {
 				vm.DropWrite(h.Address, h.Path, h.Key, Version{TxIndex: 1, Incarnation: 2})
 			}
-			_, ok := vm.load(x).Balance.Get(1)
-			require.False(t, ok)
+			_, res, ok := vm.ReadBalance(x, 2)
+			require.True(t, ok)
+			require.Equal(t, 0, res.DepIdx())
+			require.Equal(t, ValueDeleted, res.ValStatus())
 			require.Equal(t, VersionInvalid, validateReads(vm, seeded, 2))
 			require.Equal(t, VersionInvalid, validateReads(vm, stale, 2))
 			rerun, got := readInTx2(2)
