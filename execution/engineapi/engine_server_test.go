@@ -431,7 +431,8 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 // A payload with more transactions than its gas limit allows is INVALID. When its parent is
 // validated and the payload is well formed, the parent is the latest valid ancestor and
 // latestValidHash must name it. When the parent is not validated, a transaction is zero-length or
-// malformed, or the block hash is wrong, latestValidHash stays null.
+// malformed, the block hash is wrong, the blob hashes do not match or the block access list is
+// malformed, latestValidHash stays null.
 func TestNewPayloadGasLimitRejectionReportsValidatedParent(t *testing.T) {
 	t.Parallel()
 
@@ -442,6 +443,10 @@ func TestNewPayloadGasLimitRejectionReportsValidatedParent(t *testing.T) {
 		parentValidated bool
 		rawTxn          hexutil.Bytes // replaces the payload's transaction, keeping the block hash right
 		wrongBlockHash  bool
+		prague          bool
+		blobHashes      []common.Hash // passed to engine_newPayloadV4
+		amsterdam       bool
+		bal             hexutil.Bytes // the block access list of engine_newPayloadV5
 		wantParent      bool
 	}{
 		{name: "validated parent", parentValidated: true, wantParent: true},
@@ -449,11 +454,21 @@ func TestNewPayloadGasLimitRejectionReportsValidatedParent(t *testing.T) {
 		{name: "zero-length transaction", parentValidated: true, rawTxn: hexutil.Bytes{}},
 		{name: "malformed transaction", parentValidated: true, rawTxn: hexutil.Bytes{0xc0}},
 		{name: "wrong block hash", parentValidated: true, wrongBlockHash: true},
+		{name: "validated parent on Prague", parentValidated: true, prague: true, blobHashes: []common.Hash{}, wantParent: true},
+		{name: "wrong blob hashes on Prague", parentValidated: true, prague: true, blobHashes: []common.Hash{{0x01}}},
+		{name: "validated parent on Amsterdam", parentValidated: true, amsterdam: true, bal: hexutil.Bytes{0xc0}, wantParent: true},
+		{name: "malformed block access list on Amsterdam", parentValidated: true, amsterdam: true, bal: hexutil.Bytes{0xc1, 0x80}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
 			cfg := preCancunChainConfig()
+			switch {
+			case test.prague:
+				cfg = preOsakaChainConfig()
+			case test.amsterdam:
+				cfg = allForksChainConfig()
+			}
 			to := common.Address{0x1}
 			txs := types.Transactions{&types.LegacyTx{CommonTx: types.CommonTx{To: &to, GasLimit: 21_000}}}
 			header := makeParentHeader(1001)
@@ -464,6 +479,17 @@ func TestNewPayloadGasLimitRejectionReportsValidatedParent(t *testing.T) {
 			withdrawals := types.Withdrawals{}
 			withdrawalsHash := types.DeriveSha(withdrawals)
 			header.WithdrawalsHash = &withdrawalsHash
+			if test.prague || test.amsterdam {
+				header.BlobGasUsed = new(uint64)
+				header.ExcessBlobGas = new(uint64)
+				header.ParentBeaconBlockRoot = &common.Hash{}
+				header.RequestsHash = (types.FlatRequests{}).Hash()
+			}
+			if test.amsterdam {
+				balHash := crypto.Keccak256Hash(test.bal) // the hash of an empty or malformed list
+				header.BlockAccessListHash = &balHash
+				header.SlotNumber = new(uint64)
+			}
 			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
 			payload, err := engine_types.ExecutionPayloadFromBlock(block)
 			require.NoError(t, err)
@@ -483,7 +509,16 @@ func TestNewPayloadGasLimitRejectionReportsValidatedParent(t *testing.T) {
 			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
 			srv.test = true
 
-			status, err := srv.NewPayloadV2(t.Context(), payload)
+			var status *engine_types.PayloadStatus
+			switch {
+			case test.prague:
+				status, err = srv.NewPayloadV4(t.Context(), payload, test.blobHashes, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+			case test.amsterdam:
+				payload.BlockAccessList = &test.bal
+				status, err = srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+			default:
+				status, err = srv.NewPayloadV2(t.Context(), payload)
+			}
 			require.NoError(t, err)
 			require.Equal(t, engine_types.InvalidStatus, status.Status)
 			require.ErrorContains(t, status.ValidationError.Error(), "gas limit reached")
