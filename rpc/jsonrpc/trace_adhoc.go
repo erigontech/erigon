@@ -1979,7 +1979,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	num := rpc.LatestBlockNumber
 	blockNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &num}
 
-	blockNumber, hash, latest, err := rpchelper.ResolveExecutedBlock(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, dbtx, api._blockReader)
+	blockNumber, hash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, dbtx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
