@@ -386,6 +386,17 @@ func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
 	rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, reg))
 }
 
+type regionHitsResetter interface{ ResetRegionHits() }
+
+func (rw *WorkerContext) resetRegionHits() {
+	if rw.chainTx == nil {
+		return
+	}
+	if r, ok := rw.chainTx.AggTx().(regionHitsResetter); ok {
+		r.ResetRegionHits()
+	}
+}
+
 func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 	if txTask.IsHistoric() && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
@@ -415,6 +426,7 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 	}
 
 	rw.resetTxNum(txTask.Version().TxNum)
+	rw.resetRegionHits()
 
 	if err := txTask.Reset(rw.evm, rw.ibs, callTracer); err != nil {
 		return &TxResult{

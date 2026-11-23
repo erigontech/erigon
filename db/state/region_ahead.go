@@ -37,6 +37,14 @@ type regionKey struct {
 	file int
 }
 
+func (at *AggregatorRoTx) ResetRegionHits() {
+	at.d[kv.StorageDomain].resetRegionHits()
+}
+
+func (dt *DomainRoTx) resetRegionHits() {
+	clear(dt.regionHits)
+}
+
 func (dt *DomainRoTx) regionAhead(i int, k []byte) {
 	if len(k) <= length.Addr || dt.probe != nil {
 		return

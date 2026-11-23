@@ -147,3 +147,19 @@ func TestRegionWordsSplitTheFileByContract(t *testing.T) {
 		require.False(t, ok)
 	}
 }
+
+func TestRegionAheadCountsHitsPerTx(t *testing.T) {
+	dt := storageDomainTxWithContracts(t, 1, 200)
+	advised := recordRegionAdvise(t)
+	hit := func(n int) {
+		for range n {
+			dt.regionAhead(0, regionSlotKey(1, 0))
+		}
+	}
+	hit(regionAheadHits - 1)
+	dt.resetRegionHits()
+	hit(1)
+	require.Empty(t, *advised, "hits before the reset must not count")
+	hit(regionAheadHits - 1)
+	require.Equal(t, [][2]uint64{contractRegion(t, dt, 1)}, *advised)
+}

@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -223,4 +224,33 @@ func TestWorkerGetHashFailsOnAMissingHeader(t *testing.T) {
 	_, err := w.evm.Context.GetHash(5)
 	require.ErrorContains(t, err, "not found")
 	require.Equal(t, 1, reader.calls)
+}
+
+var _ regionHitsResetter = (*dbstate.AggregatorRoTx)(nil)
+
+type regionHitsRecorder struct{ resets int }
+
+func (r *regionHitsRecorder) ResetRegionHits() { r.resets++ }
+
+type aggTxOnly struct {
+	kv.TemporalTx
+	agg any
+}
+
+func (tx aggTxOnly) AggTx() any { return tx.agg }
+
+func TestWorkerResetsRegionHitsPerTask(t *testing.T) {
+	w := NewWorkerContext(t.Context(), false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
+	defer w.Close()
+	w.SetReader(state.NewNoopReader())
+	rec := &regionHitsRecorder{}
+	w.chainTx = aggTxOnly{agg: rec}
+	for n := range uint64(3) {
+		result := w.RunTxTask(&workerTestTask{
+			TxTask:  TxTask{TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(n + 1)}},
+			execute: func(*vm.EVM) *TxResult { return &TxResult{} },
+		})
+		require.NoError(t, result.Err)
+	}
+	require.Equal(t, 3, rec.resets)
 }
