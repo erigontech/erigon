@@ -141,7 +141,7 @@ func TestValueFilesEndIncludesEveryDomain(t *testing.T) {
 		t.Run(domain.String(), func(t *testing.T) {
 			db, agg := testDbAndAggregatorv3(t, alignStepSize)
 			agg.EnableDomain(domain)
-			path := filepath.Join(agg.Dirs().SnapDomain, fmt.Sprintf("v1.0-%s.0-1.kv", domain))
+			path := agg.d[domain].kvNewFilePath(0, 1)
 			populateFiles(t, agg.Dirs(), []string{path})
 			require.NoError(t, agg.OpenFolder(db))
 			files := agg.BeginFilesRo()
