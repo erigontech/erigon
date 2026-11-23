@@ -65,9 +65,18 @@ func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
 	return m, nil
 }
 
+func updateProcessMemGauges() {
+	proc := process.Process{Pid: int32(os.Getpid())}
+	// statm provides approximate RSS without a page table walk.
+	info, err := proc.MemoryInfo()
+	if err != nil {
+		return
+	}
+	memRssGauge.SetUint64(info.RSS)
+	memSizeGauge.SetUint64(info.VMS)
+}
+
 func UpdatePrometheusVirtualMemStats(p process.MemoryMapsStat) {
-	memRssGauge.SetUint64(p.Rss)
-	memSizeGauge.SetUint64(p.Size)
 	memPssGauge.SetUint64(p.Pss)
 	memSharedCleanGauge.SetUint64(p.SharedClean)
 	memSharedDirtyGauge.SetUint64(p.SharedDirty)

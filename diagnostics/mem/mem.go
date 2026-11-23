@@ -29,3 +29,5 @@ func ReadVirtualMemStats() (process.MemoryMapsStat, error) { //nolint
 }
 
 func UpdatePrometheusVirtualMemStats(p process.MemoryMapsStat) {}
+
+func updateProcessMemGauges() {}

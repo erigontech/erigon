@@ -65,7 +65,7 @@ func (m VirtualMemStat) Fields() []any {
 	var s []any
 	for i := 0; i < typ.NumField(); i++ {
 		t := typ.Field(i).Name
-		if t == "Path" { // always empty for aggregated smap statistics
+		if t == "Path" || t == "Size" { // smaps_rollup omits per-mapping fields
 			continue
 		}
 
@@ -89,6 +89,7 @@ func LogMemStats(ctx context.Context, logger log.Logger) {
 		case <-ctx.Done():
 			return
 		case <-logEvery.C:
+			updateProcessMemGauges()
 			v, fresh := RefreshVirtualMemStats(VirtualMemStatsAge + 5*time.Minute)
 
 			var m runtime.MemStats
