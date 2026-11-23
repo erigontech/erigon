@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -52,6 +53,86 @@ func (m *busyUntilModule) Ready(context.Context) (bool, error) {
 	return time.Now().After(m.readyAt), nil
 }
 
+func TestForkchoiceUpdatedSwitchBackDuringCommit(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		headerA := makeParentHeader(1000)
+		headerB := types.CopyHeader(headerA)
+		headerB.Extra = []byte{1}
+		headA, headB := headerA.Hash(), headerB.Hash()
+		headers := map[common.Hash]*types.Header{headA: headerA, headB: headerB}
+		headNumber := headerA.Number.Uint64()
+
+		var mu sync.Mutex
+		committedHead := headA
+		commitPending := false
+		var updates []common.Hash
+		module := &stubExecutionModule{
+			getHeaderFunc: func(_ context.Context, hash *common.Hash, _ *uint64) (*types.Header, error) {
+				return headers[*hash], nil
+			},
+			headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+				return &headNumber, nil
+			},
+			getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				return execmodule.ForkChoiceState{HeadHash: committedHead}, nil
+			},
+			readyFunc: func(context.Context) (bool, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				return !commitPending, nil
+			},
+			updateForkChoiceFunc: func(_ context.Context, head, _, _ common.Hash) (execmodule.ForkChoiceResult, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				if commitPending {
+					return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}, nil
+				}
+				updates = append(updates, head)
+				if head == headB {
+					commitPending = true
+				} else {
+					committedHead = head
+				}
+				return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: head}, nil
+			},
+		}
+
+		cfg := preCancunChainConfig()
+		ctx := t.Context()
+		downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), module, nil, nil, cfg, ethconfig.Sync{}, nil)
+		srv := NewEngineServer(log.New(), cfg, module, downloader, false, false, false, true, nil, nil, 0, 0)
+
+		resp, err := srv.ForkchoiceUpdatedV2(ctx, &engine_types.ForkChoiceState{HeadHash: headB}, nil)
+		require.NoError(t, err)
+		require.Equal(t, engine_types.ValidStatus, resp.PayloadStatus.Status)
+		require.Equal(t, headA, committedHead)
+		require.True(t, commitPending)
+
+		switchBackDone := make(chan struct{})
+		go func() {
+			defer close(switchBackDone)
+			resp, err = srv.ForkchoiceUpdatedV2(ctx, &engine_types.ForkChoiceState{HeadHash: headA}, nil)
+		}()
+		synctest.Wait()
+
+		mu.Lock()
+		committedHead = headB
+		commitPending = false
+		mu.Unlock()
+		<-switchBackDone
+
+		require.NoError(t, err)
+		require.Equal(t, engine_types.ValidStatus, resp.PayloadStatus.Status)
+		require.Equal(t, &headA, resp.PayloadStatus.LatestValidHash)
+		require.Equal(t, headA, committedHead, "the latest accepted forkchoice must become canonical")
+		require.Equal(t, []common.Hash{headB, headA}, updates)
+	})
+}
+
 // TestForkchoiceUpdatedWithAttributesWaitsOutPostForkchoiceWork proves a forkchoiceUpdated
 // carrying payload attributes for an already-known head does not come back SYNCING without a
 // payload id just because the execution module is briefly busy with the previous head's
@@ -69,11 +150,6 @@ func TestForkchoiceUpdatedWithAttributesWaitsOutPostForkchoiceWork(t *testing.T)
 		headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
 			return &headNumber, nil
 		},
-		// The module's recorded fork choice is still the previous head, so this request does not
-		// take the repeated-forkchoice shortcut.
-		getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
-			return execmodule.ForkChoiceState{HeadHash: common.Hash{0x99}}, nil
-		},
 		updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
 			return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: headHash}, nil
 		},
@@ -82,7 +158,7 @@ func TestForkchoiceUpdatedWithAttributesWaitsOutPostForkchoiceWork(t *testing.T)
 			return execmodule.AssembleBlockResult{PayloadID: 7}, nil
 		},
 	}
-	// Longer than the readiness check's current half-second budget, far shorter than a slot.
+	// Exceeds the readiness budget without payload attributes, but fits the budget with them.
 	module := &busyUntilModule{stubExecutionModule: stub, busyFor: 600 * time.Millisecond}
 
 	cfg := preCancunChainConfig()
@@ -116,9 +192,6 @@ func TestForkchoiceUpdatedWithoutAttributesStillAnswersSyncingQuickly(t *testing
 		getHeaderFunc: getHeaderReturning(headHash, header),
 		headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
 			return &headNumber, nil
-		},
-		getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
-			return execmodule.ForkChoiceState{HeadHash: common.Hash{0x99}}, nil
 		},
 	}
 	module := &busyUntilModule{stubExecutionModule: stub, busyFor: 5 * time.Second}
@@ -209,23 +282,22 @@ func TestReadinessWaitIsBoundedWhenReadyBlocks(t *testing.T) {
 		headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
 			return &headNumber, nil
 		},
-		getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
-			return execmodule.ForkChoiceState{HeadHash: common.Hash{0x99}}, nil
-		},
 	}
 	module := &snapshotsNotReadyModule{stubExecutionModule: stub}
 
 	cfg := preCancunChainConfig()
-	ctx := context.Background()
-	downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), module, nil, nil, cfg, ethconfig.Sync{}, nil)
-	srv := NewEngineServer(log.New(), cfg, module, downloader, false, false, true, true, nil, nil, 0, 0)
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), module, nil, nil, cfg, ethconfig.Sync{}, nil)
+		srv := NewEngineServer(log.New(), cfg, module, downloader, false, false, true, true, nil, nil, 0, 0)
 
-	start := time.Now()
-	status, err := srv.getQuickPayloadStatusIfPossible(ctx, headHash, 0, common.Hash{}, &engine_types.ForkChoiceState{HeadHash: headHash}, false, 200*time.Millisecond)
-	require.NoError(t, err)
-	require.NotNil(t, status)
-	require.Equal(t, engine_types.SyncingStatus, status.Status)
-	require.Less(t, time.Since(start), 500*time.Millisecond, "a blocking Ready must not stretch the wait past its budget")
+		start := time.Now()
+		status, err := srv.getQuickPayloadStatusIfPossible(ctx, headHash, 0, common.Hash{}, nil, false, 200*time.Millisecond)
+		require.NoError(t, err)
+		require.NotNil(t, status)
+		require.Equal(t, engine_types.SyncingStatus, status.Status)
+		require.Less(t, time.Since(start), 500*time.Millisecond, "a blocking Ready must not stretch the wait past its budget")
+	})
 }
 
 // TestWaitForResponseDoesNotCallBackAfterDeadline proves no callback starts once the budget is
@@ -233,19 +305,21 @@ func TestReadinessWaitIsBoundedWhenReadyBlocks(t *testing.T) {
 func TestWaitForResponseDoesNotCallBackAfterDeadline(t *testing.T) {
 	t.Parallel()
 
-	calls := 0
-	start := time.Now()
-	busy, err := waitForResponse(context.Background(), 5*time.Millisecond, func() (bool, error) {
-		calls++
-		if calls > 1 {
-			time.Sleep(time.Second)
-		}
-		return true, nil
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		start := time.Now()
+		busy, err := waitForResponse(context.Background(), 5*time.Millisecond, func() (bool, error) {
+			calls++
+			if calls > 1 {
+				time.Sleep(time.Second)
+			}
+			return true, nil
+		})
+		require.NoError(t, err)
+		require.True(t, busy)
+		require.Equal(t, 1, calls, "a callback must not start after the deadline")
+		require.Less(t, time.Since(start), 100*time.Millisecond)
 	})
-	require.NoError(t, err)
-	require.True(t, busy)
-	require.Equal(t, 1, calls, "a callback must not start after the deadline")
-	require.Less(t, time.Since(start), 100*time.Millisecond)
 }
 
 // TestWaitForResponseDoesNotCallBackAfterCancellation proves no callback starts once the context

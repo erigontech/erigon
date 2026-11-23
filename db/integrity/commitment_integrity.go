@@ -74,6 +74,9 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.
 		}
 	}
 	logger.Info("[integrity] CommitmentRoot files discovered", "total", len(allFiles), "kvFiles", len(files), "onlyCheckLastFile", onlyCheckLastFile, "onlyRecomputeLastFile", onlyRecomputeLastFile)
+	if err := aggTx.AssertFilesGap(); err != nil {
+		return fmt.Errorf("%w: CommitmentRoot: %w", ErrIntegrity, err)
+	}
 	if len(files) == 0 {
 		logger.Warn("[integrity] CommitmentRoot: no commitment .kv files found, nothing to check")
 		return nil
@@ -147,7 +150,7 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 	startTxNum := f.StartRootNum()
 	endTxNum := f.EndRootNum()
 	maxTxNum := endTxNum - 1
-	v, ok, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, maxTxNum)
+	stateKey, v, ok, start, end, err := latestCommitmentStateFromFiles(tx, maxTxNum)
 	if err != nil {
 		return info, err
 	}
@@ -160,7 +163,7 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 	if end != endTxNum {
 		return info, fmt.Errorf("%w: commitment root not found with same endTxNum: %d != %d", ErrIntegrity, end, endTxNum)
 	}
-	rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
+	rootHashBytes, blockNum, txNum, err := extractCommitmentStateRoot(stateKey, v)
 	if err != nil {
 		return info, fmt.Errorf("%w: commitment root could not be extracted: %w", ErrIntegrity, err)
 	}
@@ -208,6 +211,24 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 		return info, fmt.Errorf("%w: commitment root does not match header root for block %d: %s != %s", ErrIntegrity, blockNum, h.Root, rootHash)
 	}
 	return info, nil
+}
+
+func latestCommitmentStateFromFiles(tx kv.TemporalTx, maxTxNum uint64) (stateKey, value []byte, found bool, startTxNum, endTxNum uint64, err error) {
+	for _, key := range commitment.CommitmentStateKeys {
+		value, found, startTxNum, endTxNum, err = tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, key, maxTxNum)
+		if err != nil || found {
+			return key, value, found, startTxNum, endTxNum, err
+		}
+	}
+	return nil, nil, false, 0, 0, nil
+}
+
+func extractCommitmentStateRoot(stateKey, value []byte) ([]byte, uint64, uint64, error) {
+	if bytes.Equal(stateKey, commitment.KeyCommitmentV3State) {
+		blockNum, txNum, root, err := commitment.DecodeCommitmentV3State(value)
+		return root, blockNum, txNum, err
+	}
+	return commitment.HexTrieExtractStateRoot(value)
 }
 
 func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
@@ -277,6 +298,9 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 }
 
 func CheckCommitmentKvi(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, cache *IntegrityCache, failFast bool, logger log.Logger) error {
+	if err := skipCommitmentV3Records("CommitmentKvi"); err != nil {
+		return err
+	}
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -286,6 +310,9 @@ func CheckCommitmentKvi(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, 
 }
 
 func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *IntegrityCache, failFast bool, logger log.Logger) error {
+	if err := skipCommitmentV3Records("CommitmentKvDeref"); err != nil {
+		return err
+	}
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -827,6 +854,9 @@ func deriveDecompForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 }
 
 func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br dbservices.FullBlockReader, failFast bool, logger log.Logger) error {
+	if err := skipCommitmentV3Records("CommitmentHistVal"); err != nil {
+		return err
+	}
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -1248,6 +1278,9 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 }
 
 func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fromStep uint64, logger log.Logger) error {
+	if err := skipCommitmentV3Records("StateVerify"); err != nil {
+		return err
+	}
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -2369,7 +2402,9 @@ func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domai
 			if visitor != nil {
 				visitor([]byte(k))
 			}
-			sd.GetCommitmentCtx().TouchKey(d, k, nil)
+			if err := sd.GetCommitmentCtx().TouchKeyFromState(tx, []byte(k)); err != nil {
+				return 0, err
+			}
 		}
 		return uint64(len(offsets)), nil
 	}
@@ -2379,6 +2414,8 @@ func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domai
 	}
 	defer it.Close()
 	var touches uint64
+	var prev []byte
+	v3 := sd.GetCommitmentCtx().Trie().Variant() == commitment.VariantCommitmentV3
 	for it.HasNext() {
 		k, _, err := it.Next()
 		if err != nil {
@@ -2387,8 +2424,24 @@ func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domai
 		if visitor != nil {
 			visitor(k)
 		}
-		sd.GetCommitmentCtx().TouchKey(d, string(k), nil)
+		if v3 {
+			if bytes.Equal(k, prev) {
+				touches++
+				continue
+			}
+			prev = append(prev[:0], k...)
+		}
+		if err := sd.GetCommitmentCtx().TouchKeyFromState(tx, k); err != nil {
+			return 0, err
+		}
 		touches++
 	}
 	return touches, nil
+}
+
+func skipCommitmentV3Records(check string) error {
+	if !statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).CommitmentV3Records {
+		return nil
+	}
+	return fmt.Errorf("%w: %s checks legacy commitment files, not v3 records", ErrSkipped, check)
 }

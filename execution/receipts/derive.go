@@ -21,6 +21,7 @@ package receipts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
@@ -127,10 +128,7 @@ func DeriveForRange(
 // A non-nil stateWriter also receives the tx's writes.
 func EndTx(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
 	if !ibs.IsVersioned() {
-		if stateWriter == nil {
-			return nil
-		}
-		return ibs.CommitBlock(rules, stateWriter)
+		return errors.New("receipt state has no version map")
 	}
 	writes, err := ibs.FinalizedWrites(rules)
 	defer writes.ReleaseMaps() // the flush copies values into version-map cells

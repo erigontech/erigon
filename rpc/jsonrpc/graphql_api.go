@@ -69,7 +69,7 @@ func (r GraphQLReceipt) MarshalFastJSONTo(s *jsonstream.Stream) error {
 
 func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header) *GraphQLReceipt {
 	transaction := &GraphQLReceipt{
-		RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true, false),
+		RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true),
 		Nonce:      txn.GetNonce(),
 		Value:      txn.GetValue(),
 		Data:       txn.GetData(),
@@ -82,14 +82,14 @@ func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfi
 	// Exclusion, as in ethapi.NewRPCTransaction: a type registered outside this
 	// package is fee-capped too.
 	if txType := txn.Type(); txType != types.LegacyTxType && txType != types.AccessListTxType {
-		transaction.MaxFeePerGas = txn.GetFeeCap()
 		transaction.MaxPriorityFeePerGas = txn.GetTipCap()
+		if txType != types.FrameTxType {
+			transaction.MaxFeePerGas = txn.GetFeeCap()
+		}
 	}
 	txn = txn.Unwrap()
 	if blobTx, ok := txn.(*types.BlobTx); ok {
 		transaction.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
-	} else if frame, ok := txn.(*types.FrameTransaction); ok {
-		transaction.MaxFeePerBlobGas = (*hexutil.U256)(&frame.Fees.BlobFeeCap)
 	}
 	return transaction
 }
@@ -514,7 +514,11 @@ func (api *GraphQLAPIImpl) MaxPriorityFeePerGas(ctx context.Context) (string, er
 }
 
 func (api *GraphQLAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
-	return api.eth.GetLogs(ctx, crit)
+	res, err := api.eth.GetLogs(ctx, crit)
+	if err != nil {
+		return nil, err
+	}
+	return res.Logs, nil
 }
 
 func (api *GraphQLAPIImpl) GetPendingTransactions(ctx context.Context) ([]types.Transaction, error) {

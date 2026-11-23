@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -136,7 +137,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	filterWriter := state.NewWriter(filterSd.AsPutDel(filterMb), nil, txNum)
 	filterReader := state.NewReaderV3(filterSd.AsStateGetter(filterMb, execctxapi.StateGetterOptions{}))
 
-	ibs := state.New(stateReader)
+	ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
 	defer ibs.Close()
 	ibs.SetTxContext(current.Header.Number.Uint64(), -1)
 
@@ -148,8 +149,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		ExperimentalBAL:        execCfg.IsExperimentalBAL(),
 		RequireAllTransactions: cfg.requireAllTransactions,
 	}, current)
-
-	ibs.SetVersionMap(state.NewVersionMap(nil))
 
 	execCfg = execCfg.WithAuthor(accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase))
 
@@ -169,9 +168,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	yielded := mapset.NewSet[[32]byte]()
 	nonceTooHigh := map[accounts.Address][]nonceTooHighTxn{}
 	readNonce := func(sender accounts.Address) (uint64, error) {
-		if !ibs.IsVersioned() {
-			return ibs.GetNonce(sender)
-		}
 		// Filtering must observe executed writes without adding reads to the BAL.
 		view := state.NewVersionedAccountView(sender, len(ba.Txns), ibs.VersionMap(), stateReader)
 		nonce := view.GetNonce()
@@ -246,25 +242,19 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	blockHeight := block.NumberU64()
 
-	// FinalizeBlockExecution skipped the so.data CommitBlock of the versioned state; commit the accumulated per-phase write-sets to the
-	// domains via ApplyWrites instead — the same domain apply the parallel
-	// executor and block generation use (rw_v3 handles the self-destruct delete,
-	// EIP-161 removal and storage-subtree cascade). Each recorded phase
-	// (init/txs/finalize) is applied in order.
-	blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
-	blockRules := blockCtx.Rules(cfg.chainConfig)
+	// The versioned state holds the block's writes as per-phase write-sets (init/txs/finalize). Apply them to the
+	// domains in order with ApplyWrites, as the parallel executor and block generation do (rw_v3 handles the
+	// self-destruct delete, EIP-161 removal and storage-subtree cascade).
 	for _, ws := range ba.WriteSets() {
 		if ws == nil || ws.IsEmpty() {
 			continue
 		}
-		if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, nil, blockRules, false); err != nil {
+		if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, false); err != nil {
 			return fmt.Errorf("apply versioned block writes: %w", err)
 		}
 	}
 
-	// Compute state root directly from the domain writes accumulated during
-	// block assembly. All state changes flow through CommitBlock in
-	// AssembleBlock — no re-execution needed.
+	// The domains now hold every write of the block, so the state root needs no re-execution.
 	rh, err := sd.ComputeCommitment(ctx, tx, false, blockHeight, txNum, logPrefix, nil)
 	if err != nil {
 		return fmt.Errorf("compute commitment failed: %w", err)
@@ -507,13 +497,23 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 
 		if config.IsLondon(blockNumber) {
 			baseFee256 := header.BaseFee
-			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
-			if !transaction.GetFeeCap().IsZero() || !transaction.GetTipCap().IsZero() {
-				if err := protocol.CheckEip1559TxGasFeeCap(senderAddress, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */); err != nil {
-					transactions = transactions[1:]
-					feeTooLowCnt++
-					continue
+			var feeErr error
+			if isFrame {
+				var blobBaseFee uint256.Int
+				if header.ExcessBlobGas != nil && frame.GetBlobGas() != 0 {
+					blobBaseFee, err = misc.GetBlobGasPrice(config, *header.ExcessBlobGas, header.Time)
+					if err != nil {
+						return nil, nil, err
+					}
 				}
+				_, _, feeErr = frame.Fees.RequiredCost(frame.GetGasLimit(), frame.GetBlobGas(), baseFee256, &blobBaseFee)
+			} else if !transaction.GetFeeCap().IsZero() || !transaction.GetTipCap().IsZero() {
+				feeErr = protocol.CheckEip1559TxGasFeeCap(senderAddress, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */)
+			}
+			if feeErr != nil {
+				transactions = transactions[1:]
+				feeTooLowCnt++
+				continue
 			}
 		}
 		if isFrame {

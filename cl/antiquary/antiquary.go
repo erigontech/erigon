@@ -67,7 +67,7 @@ type Antiquary struct {
 	downloader                     dbservices.DownloaderClient
 	logger                         log.Logger
 	lastBlobGapLog                 time.Time
-	blobCheckedTo                  uint64 // every blob below it, from the next blob segment's start, is stored
+	blobCheckedTo                  uint64 // every blob below it, from the next blob segment's start, was stored at the last scan
 	sn                             *freezeblocks.CaplinSnapshots
 	stateSn                        *snapshotsync.CaplinStateSnapshots
 	snReader                       freezeblocks.BeaconSnapshotReader
@@ -82,8 +82,9 @@ type Antiquary struct {
 	genesisState    *state.CachingBeaconState
 	syncedData      synced_data.SyncedData
 	// set to nil
-	currentState *state.CachingBeaconState
-	balances32   []byte
+	currentState        *state.CachingBeaconState
+	balances32          []byte
+	stateScannedThrough uint64
 	// maxSlotsPerCommit bounds how many slots the antiquary accumulates into one
 	// mdbx transaction. A very large commit overflows libmdbx's gc_fill_returned
 	// while serializing the transaction's retired-page list; bounding it avoids that.
@@ -593,29 +594,32 @@ const blobRetirementGapLogInterval = 10 * time.Minute
 // blobSegmentComplete reports whether [from, to) can retire. An unfillable gap keeps backfill incomplete, but the
 // segments below it are still complete.
 func (s *Antiquary) blobSegmentComplete(tx kv.Tx, from, to uint64, blobCount freezeblocks.BlobCountBySlotFn) (bool, error) {
-	if !s.blobBackfilled.Load() {
-		for slot := max(from, s.blobCheckedTo); slot < to; slot++ {
-			want, skipped, err := blobCount(tx, slot)
-			if err != nil {
-				return false, err
-			}
-			if skipped {
-				continue
-			}
-			blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
-			if err != nil {
-				return false, err
-			}
-			stored, err := blob_storage.BlobsStored(s.ctx, s.blobStorage, slot, blockRoot, int(want))
-			if err != nil {
-				return false, err
-			}
-			if !stored {
-				s.blobCheckedTo = slot
-				s.reportBlobRetirementGap(from, slot, time.Now())
-				return false, nil
-			}
+	start := max(from, s.blobCheckedTo)
+	for slot := start; slot < to; slot++ {
+		want, skipped, err := blobCount(tx, slot)
+		if err != nil {
+			return false, err
 		}
+		if skipped {
+			continue
+		}
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+		if err != nil {
+			return false, err
+		}
+		stored, err := blob_storage.BlobsStored(s.ctx, s.blobStorage, slot, blockRoot, int(want))
+		if err != nil {
+			return false, err
+		}
+		if !stored {
+			s.blobCheckedTo = slot
+			s.reportBlobRetirementGap(from, slot, time.Now())
+			return false, nil
+		}
+	}
+	if start > from {
+		s.blobCheckedTo = from
+		return s.blobSegmentComplete(tx, from, to, blobCount)
 	}
 	mxBlobRetirementGapSlot.SetUint64(0)
 	return true, nil

@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	chainpkg "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -178,6 +177,7 @@ func seedTestAccounts(t *testing.T) kv.TemporalTx {
 	dustAddr := accounts.InternAddress(common.HexToAddress("0x03"))
 
 	st := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	st.SetVersionMap(nil)
 	defer st.Close()
 
 	_, err = st.GetOrNewStateObject(eoaAddr)
@@ -225,6 +225,7 @@ func seedManyAccounts(t testing.TB, n int) kv.TemporalTx {
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 1))
 
 	st := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	st.SetVersionMap(nil)
 	defer st.Close()
 
 	for i := range n {
@@ -627,10 +628,8 @@ func TestResolveExecTarget_ChainTipLoopReachesTarget(t *testing.T) {
 	require.Equal(t, []uint64{101}, executed, "--limit=1 must execute exactly the next block")
 }
 
-// TestExecCommandsExposeParallelCommitment pins the flag on every integration
-// command that computes commitment. Without it the flag is unknown on stage_exec,
-// so integration is stuck on whatever COMMITMENT_PARALLEL selected and
-// cannot switch tries.
+// TestExecCommandsExposeParallelCommitment pins the deprecated flag on every
+// integration command that computes commitment, so old scripts still parse.
 func TestExecCommandsExposeParallelCommitment(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -643,26 +642,7 @@ func TestExecCommandsExposeParallelCommitment(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NotNil(t, tc.cmd.Flags().Lookup(utils.ExperimentalParallelCommitmentFlag.Name),
-				"command cannot select the commitment trie")
+				"command rejects the deprecated flag")
 		})
-	}
-}
-
-func TestWithExperimentalCommitmentResolution(t *testing.T) {
-	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
-
-	resolve := func(seed bool, args ...string) bool {
-		statecfg.ExperimentalParallelCommitment = seed
-		cmd := &cobra.Command{Use: "probe"}
-		withExperimentalCommitment(cmd)
-		require.NoError(t, cmd.Flags().Parse(args))
-		return statecfg.ExperimentalParallelCommitment
-	}
-
-	for _, seed := range []bool{true, false} {
-		require.Equal(t, seed, resolve(seed),
-			"integration overrode COMMITMENT_PARALLEL with the flag default")
-		require.True(t, resolve(seed, "--"+utils.ExperimentalParallelCommitmentFlag.Name+"=true"))
-		require.False(t, resolve(seed, "--"+utils.ExperimentalParallelCommitmentFlag.Name+"=false"))
 	}
 }

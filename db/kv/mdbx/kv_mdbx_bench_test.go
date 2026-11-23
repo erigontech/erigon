@@ -198,6 +198,30 @@ func BenchmarkDB_ResetSequence(b *testing.B) {
 	}
 }
 
+// BenchmarkDB_ReadSequenceNewTx reads a sequence once per read-only tx, as every RPC state read does
+// with the state version.
+func BenchmarkDB_ReadSequenceNewTx(b *testing.B) {
+	db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	ctx := b.Context()
+	require.NoError(b, db.Update(ctx, func(tx kv.RwTx) error {
+		_, err := tx.IncrementSequence(table, 7)
+		return err
+	}))
+
+	b.ReportAllocs()
+	for b.Loop() {
+		tx, err := db.BeginRo(ctx) //nolint:gocritic
+		if err != nil {
+			b.Fatal(err)
+		}
+		if _, err := tx.ReadSequence(table); err != nil {
+			b.Fatal(err)
+		}
+		tx.Rollback()
+	}
+}
+
 func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
 	b.Helper()
 	path := b.TempDir()

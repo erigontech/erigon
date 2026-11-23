@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -157,9 +158,7 @@ type ExecModuleTester struct {
 
 func (emt *ExecModuleTester) Close() {
 	emt.Cancel()
-	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
-		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
-	}
+	err := emt.bgComponentsEg.Wait()
 	if emt.blockRetire != nil {
 		emt.blockRetire.Close()
 	}
@@ -177,6 +176,9 @@ func (emt *ExecModuleTester) Close() {
 	}
 	if emt.tb == nil && emt.Dirs.DataDir != "" {
 		_ = dir.RemoveAll(emt.Dirs.DataDir)
+	}
+	if err != nil && emt.tb != nil {
+		require.NoError(emt.tb, commonerrors.NilIfCanceled(err))
 	}
 }
 
@@ -321,15 +323,6 @@ func WithExperimentalBAL() Option {
 	}
 }
 
-// WithoutExperimentalBAL disables experimental BAL (and the parallel executor
-// it forces) for tests that exercise patterns the parallel executor doesn't
-// yet handle correctly (e.g. intra-block SELFDESTRUCT + CREATE2 reincarnation).
-func WithoutExperimentalBAL() Option {
-	return func(opts *options) {
-		opts.experimentalBAL = false
-	}
-}
-
 func WithGenesisSpec(gspec *types.Genesis) Option {
 	return func(opts *options) {
 		opts.genesis = gspec
@@ -446,7 +439,14 @@ func WithStateTransitionObserver(observer execmodule.StateTransitionObserver) Op
 	}
 }
 
+func WithExecutionPathReporter(report func(ethconfig.BlockExecutionPath)) Option {
+	return func(opts *options) {
+		opts.executionPathReporter = report
+	}
+}
+
 type options struct {
+	executionPathReporter    func(ethconfig.BlockExecutionPath)
 	stepSize                 *uint64
 	rwDBWrapper              func(kv.RwDB) kv.RwDB
 	e2RetireStep             *uint64
@@ -589,6 +589,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	if opt.execWorkerCount > 0 {
 		cfg.Sync.ExecWorkerCount = opt.execWorkerCount
 	}
+	cfg.Sync.ExecutionPathReporter = opt.executionPathReporter
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
@@ -700,6 +701,12 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	require.NoError(tb, err)
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
 
+	notificationReceipts := execmodule.NewReceiptsLoader(mock.ChainConfig, mock.BlockReader, receipts.NewGenerator(mock.Dirs, mock.BlockReader, mock.Engine, nil, time.Minute))
+	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.BlockReader, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, notificationReceipts, logger)
+	erigonGrpcServer.SetStateChangesSnapshot(func(ctx context.Context) (*remoteproto.StateChangeBatch, error) {
+		return dispatcher.StateChangesSnapshot(ctx, db)
+	})
+
 	if !cfg.TxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServer)
@@ -715,7 +722,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			nil,
 			// txpool.WithP2PFetcherWg(&mock.ReceiveWg), // this seems unecessary now status changes are async
 			txpool.WithP2PSenderWg(nil),
-			txpool.WithFeeCalculator(nil),
 			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.Logger) (kv.RwDB, error) {
 				dbOpts := mdbx.New(dbcfg.TxPoolDB, logger)
 				if tb == nil {
@@ -856,8 +862,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
 		validationNotifications, mock.BlockReader, blockWriter, logger, readAheader)
-	notificationReceipts := execmodule.NewReceiptsLoader(mock.ChainConfig, mock.BlockReader, receipts.NewGenerator(mock.Dirs, mock.BlockReader, mock.Engine, nil, time.Minute))
-	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, notificationReceipts, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
 
 	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil, mock.BlockReader)
@@ -884,7 +888,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		logger,
 		engine,
 		cfg.Sync,
-		cfg.ExperimentalBAL,
 		cfg.FcuBackgroundPrune,
 		false, /* onlySnapDownloadOnStart */
 		readAheader,
@@ -927,8 +930,26 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	if err = mock.InsertChain(c); err != nil {
 		tb.Fatal(err)
 	}
+	if withTxPool {
+		mock.waitForTxPoolStartup(5 * time.Second)
+	}
 
 	return mock
+}
+
+func (emt *ExecModuleTester) waitForTxPoolStartup(timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(emt.Ctx, timeout)
+	defer cancel()
+	for !emt.TxPool.Started() {
+		if err := common.Sleep(ctx, time.Millisecond); err != nil {
+			err = fmt.Errorf("transaction pool did not finish startup: %w", err)
+			if emt.tb == nil {
+				emt.Close()
+				panic(err)
+			}
+			emt.tb.Fatal(err)
+		}
+	}
 }
 
 func mockDownloader(ctrl *gomock.Controller, snapRoot string) dbservices.DownloaderClient {
@@ -1194,6 +1215,9 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 			}
 		}
 	}
+
+	// Notification delivery can precede FCU cleanup of shared execution state.
+	emt.ExecModule.Drain()
 
 	roTx, err := emt.DB.BeginRo(emt.Ctx)
 	if err != nil {

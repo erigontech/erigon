@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -126,8 +127,9 @@ type parallelExecutor struct {
 	// changeset; blocks below it run without one.
 	changesetWindowStart uint64
 	// currentChangeSet is the block's changeset while it is being built: the exec
-	// loop creates it and saves it by hash, then the apply fold and the committer
-	// bind it transiently by hash under changesetMu. Deliberately NOT installed as a
+	// loop creates it and saves it by hash, then the apply fold binds it transiently
+	// by hash under changesetMu and the committer's flush writes into its commitment
+	// diff directly. Deliberately NOT installed as a
 	// persistent live accumulator — the apply loop is the sole sd.mem writer, so a
 	// global install would only race the fold's own transient bind.
 	currentChangeSet *changeset.StateChangeSet
@@ -274,7 +276,7 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
 	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
 	defer restoreCS()
-	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
+	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes); err != nil {
 		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
 	if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
@@ -927,12 +929,11 @@ func (pe *parallelExecutor) LogCommitments(committedTransactions uint64, stepsIn
 	}
 }
 
-// triggerBatchCommitment sends a commitComputeRequest so the calculator computes
-// the batch commitment before the exec loop exits and closes channels. Delivery is
-// unconditional: honouring ctx.Done would drop the batch-end commitment when the
-// buffer is momentarily full, leaving commitment behind sd.mem. The calculator
-// keeps draining until its channel closes, so blocking is safe.
-func (pe *parallelExecutor) triggerBatchCommitment(ctx context.Context) {
+// triggerBatchCommitment queues the final commitment request before the exec loop
+// closes the result channels. The send must not be cancelled: dropping the request
+// could leave commitment out of sync with sd.mem. The calculator drains its input
+// channel before exiting, so the send can safely wait for buffer space.
+func (pe *parallelExecutor) triggerBatchCommitment() {
 	if pe.consumers == nil {
 		return
 	}
@@ -1047,7 +1048,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		var blockResult *blockResult
 		select {
 		case exec := <-pendingCh:
-			if err := pe.processRequest(ctx, exec, applyTx); err != nil {
+			if err := pe.processRequest(exec, applyTx); err != nil {
 				return err
 			}
 			continue
@@ -1077,7 +1078,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							pe.Lock()
 							delete(pe.blockExecutors, br.BlockNum)
 							pe.Unlock()
-							if err := pe.scheduleNextPending(ctx); err != nil {
+							if err := pe.scheduleNextPending(); err != nil {
 								return err
 							}
 						}
@@ -1196,13 +1197,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					// The calculator drains commitResults on its own uncancelled ctx;
 					// trigger the batch commitment, then deferred closeApplyChannels
 					// closes commitResults → applyResults.
-					pe.triggerBatchCommitment(ctx)
+					pe.triggerBatchCommitment()
 					return nil
 				}
 				if startCatchup {
 					sizeCutPending = true
 				}
-				if err := pe.scheduleNextPending(ctx); err != nil {
+				if err := pe.scheduleNextPending(); err != nil {
 					return err
 				}
 			}
@@ -1219,7 +1220,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// the exec loop (single-writer); lazily installed on first apply otherwise.
 				pe.ensureChangesetAccumulator(blockExecutor.blockNum, blockExecutor.blockHash)
 				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
-				if err := pe.startBlock(ctx, blockExecutor); err != nil {
+				if err := pe.startBlock(blockExecutor); err != nil {
 					return err
 				}
 			}
@@ -1246,7 +1247,7 @@ func (pe *parallelExecutor) refreshApplyTx(ctx context.Context, applyTx kv.Tempo
 	return applyTx, nil
 }
 
-func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest, applyTx kv.TemporalTx) (err error) {
+func (pe *parallelExecutor) processRequest(execRequest *execRequest, applyTx kv.TemporalTx) (err error) {
 	prevAccountTx := map[common.Address]int{}
 	var blockStart state.StateReader
 	var scheduleable *blockExecutor
@@ -1364,13 +1365,13 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	if scheduleable != nil {
-		return pe.startBlock(ctx, scheduleable)
+		return pe.startBlock(scheduleable)
 	}
 
 	return nil
 }
 
-func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) error {
+func (pe *parallelExecutor) startBlock(be *blockExecutor) error {
 	if be.execStarted.IsZero() && be.versionMap.HasBAL {
 		var reader state.StateReader = state.NewReaderV3(pe.domainsRead().AsGetter(pe.applyTx))
 		if first := be.tasks[0]; first.IsHistoric() {
@@ -1384,8 +1385,15 @@ func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) e
 			return fmt.Errorf("seed EIP-161 removals of block %d: %w", be.blockNum, err)
 		}
 	}
+	if be.execStarted.IsZero() {
+		if pe.workerCount <= 1 {
+			pe.reportExecutionPath(be.blockNum, be.blockHash, "sequential", "disabled", be.versionMap.HasBAL)
+		} else {
+			pe.reportExecutionPath(be.blockNum, be.blockHash, "parallel", "", be.versionMap.HasBAL)
+		}
+	}
 	be.execStarted = time.Now()
-	be.scheduleExecution(ctx, pe)
+	be.scheduleExecution(pe)
 	return nil
 }
 
@@ -1555,7 +1563,7 @@ func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
 // by processRequest while the slot was busy gets scheduled — processRequest itself
 // only schedules when the map was empty at insert time, so without this a block
 // enqueued mid-flight would orphan in the map and never be validated.
-func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) error {
+func (pe *parallelExecutor) scheduleNextPending() error {
 	pe.Lock()
 	if len(pe.blockExecutors) == 0 {
 		pe.Unlock()
@@ -1575,7 +1583,7 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) error {
 		// Already running (or scheduled).
 		return nil
 	}
-	return pe.startBlock(ctx, next)
+	return pe.startBlock(next)
 }
 
 // processSingleResult routes one worker result to its block executor's
@@ -1698,6 +1706,7 @@ type blockResult struct {
 	Exhausted        *ErrLoopExhausted
 	Header           *types.Header      // for accumulator.StartChange in apply loop
 	Txs              types.Transactions // for accumulator.StartChange in apply loop
+	parentState      commitmentdb.ParentState
 	BAL              *types.BlockAccessListSidecar
 
 	// Exec window for newPayload wall attribution; the calculator pairs these with
@@ -1738,23 +1747,28 @@ type txResult struct {
 // A read that observes an in-flight estimate aborts the run (result.Dep); the task
 // is re-queued once the commit frontier reaches its predecessor.
 
-// selfLoopFlush publishes tv's writes to the versionMap, plus deletion of any key
-// the previous incarnation wrote that this one dropped.
+// selfLoopFlush publishes the writes of the run at version to the versionMap, after dropping the
+// writes of the previous run that this run no longer makes.
 func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxResult, prevWrites *state.WriteSet) {
 	if prevWrites != nil {
-		for h := range prevWrites.AllHeaders() {
-			if !result.TxOut.Has(h) {
-				// checkExists=false: the previous incarnation's write-set may hold a
-				// net-zero storage write that was never materialized in the versionMap
-				// (net-zero writes are skipped at flush), so deleting it must be a no-op,
-				// not a "path must already exist" panic.
-				be.versionMap.Delete(h.Address, h.Path, h.Key, version.TxIndex, false)
-			}
-		}
+		be.dropUnwritten(version, prevWrites, result.TxOut)
 	}
 	// Flush as ESTIMATE (complete=false) so a downstream read observes the in-flight
 	// dependency and pauses until this tx commits.
 	be.versionMap.FlushVersionedWrites(result.TxOut, false)
+}
+
+// dropUnwritten drops the writes that an earlier run made and the run at version does not (see
+// VersionMap.DropWrite), and reports whether there were any. A net-zero storage write was never
+// materialized, so dropping it is a no-op.
+func (be *blockExecutor) dropUnwritten(version state.Version, prev, cur *state.WriteSet) (dropped bool) {
+	for h := range prev.AllHeaders() {
+		if !cur.Has(h) {
+			be.versionMap.DropWrite(h.Address, h.Path, h.Key, version)
+			dropped = true
+		}
+	}
+	return dropped
 }
 
 // taskIndexOf maps a versionMap block-TxIndex into this block's dense task-list
@@ -1938,11 +1952,10 @@ func (result *execResult) finalizeSystemTx(
 	// writes). result.TxIn may be stale if the system TX ran speculatively before the
 	// regular TXs completed, returning pre-block values instead of the post-block
 	// state syscalls (withdrawal/consolidation) need.
-	ibs := state.New(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader))
+	ibs := state.NewWithVersionMap(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader), vm)
 	defer ibs.Close()
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
-	ibs.SetVersionMap(vm)
 	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
 		return nil, state.ReadSet{}, nil, err
 	}
@@ -2732,7 +2745,9 @@ func pathBit(p state.AccountPath) uint16 { return 1 << p }
 func cmpReaderTx(r addrReader, tx int) int { return cmp.Compare(r.tx, tx) }
 
 // dispatchWindow bounds how far past the commit frontier a block dispatches tasks.
-const dispatchWindow = 32
+func dispatchWindow(workers int) int {
+	return min(128, max(32, 8*workers))
+}
 
 // readersAbove returns the readers in the ascending list l that are > tx.
 func readersAbove(l []addrReader, tx int) []addrReader {
@@ -3081,8 +3096,8 @@ func (be *blockExecutor) frontier() int {
 // dispatchLimit is the last task that dispatch may enqueue now. It is at most window tasks past
 // the commit frontier, so results arrive close to block order and the per-result reader scans
 // stay short.
-func (be *blockExecutor) dispatchLimit() int {
-	return min(len(be.tasks)-1, be.frontier()+dispatchWindow)
+func (be *blockExecutor) dispatchLimit(workers int) int {
+	return min(len(be.tasks)-1, be.frontier()+dispatchWindow(workers))
 }
 
 // requeueAt registers pt to be re-queued when the frontier reaches target. Returns
@@ -3318,13 +3333,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 		hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
 
-		// Remove entries the previous incarnation wrote but this one dropped. Like
-		// selfLoopFlush, tolerate a net-zero BAL write that was never materialized.
-		for h := range prevWrites.AllHeaders() {
-			if !res.TxOut.Has(h) {
-				hasWriteChange = true
-				be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, false)
-			}
+		if be.dropUnwritten(txVersion, prevWrites, res.TxOut) {
+			hasWriteChange = true
 		}
 
 		be.blockIO.RecordWrites(txVersion, res.TxOut)
@@ -3364,7 +3374,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
-	be.scheduleExecution(ctx, pe)
+	be.scheduleExecution(pe)
 
 	if be.publishTasks.minPending() != -1 {
 		toPublish := make(sort.IntSlice, 0, 2)
@@ -3532,10 +3542,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 			pe.RUnlock()
 
-			ibs := state.New(reader)
+			ibs := state.NewWithVersionMap(reader, be.versionMap)
 			defer ibs.Close()
 			ibs.SetVersion(finalVersion.Incarnation)
-			ibs.SetVersionMap(be.versionMap)
 			ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
 			ibs.StartAccessRecording()
 
@@ -3643,6 +3652,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			execStartedAt:    be.execStarted,
 			execEndedAt:      time.Now(),
 		}
+		if !isPartial && len(be.tasks) > 0 && commitmentdb.ParentReadsWanted() && !slices.ContainsFunc(be.tasks, func(t *execTask) bool { return t.Task.IsHistoric() }) {
+			be.result.parentState = parentStateFromReads(be.blockIO)
+		}
 		return be.result, nil
 	}
 
@@ -3650,7 +3662,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	return nil, nil
 }
 
-func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {
+func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 	if be.poolTasks == nil && len(be.tasks) > 0 {
 		be.poolTasks = make([]*poolTask, len(be.tasks))
 		be.pool = pe.pool
@@ -3663,21 +3675,19 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 
 	maxValidated := be.validateTasks.maxComplete()
 
-	// dispatch drains pending, enqueuing each tx. Budget bounds enqueues, which each
-	// occupy an input-channel slot. Txs that can't go now are left in pending.
+	// Queue tasks within the dispatch window; later tasks stay pending until the
+	// committed frontier advances.
 	dispatch := func() (dispatched int) {
 		if be.execTasks.minPending() < 0 {
 			return 0
 		}
 		budget := len(be.tasks)
-		lastTx := be.dispatchLimit()
+		lastTx := be.dispatchLimit(pe.workerCount)
 		for {
 			nextTx := be.execTasks.minPending()
 			if nextTx < 0 || nextTx > lastTx {
 				break
 			}
-			// A tx needs a free input-channel slot. If none, leave it in pending
-			// (peek, don't take): re-inserting the lowest index would be O(pending) churn.
 			if budget <= 0 {
 				break
 			}
@@ -3694,8 +3704,8 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 				execCpuNanos: &be.execCpuNanos,
 			}
 
-			// The worker owns its own re-execution loop, so the scheduler dispatches
-			// each task exactly once; re-execution is signalled in place via slReexec.
+			// Re-execution reuses the existing pool task, so the scheduler must not
+			// create another task for the same transaction.
 			if be.selfLoopDispatched[nextTx] {
 				be.cntExec++
 				dispatched++

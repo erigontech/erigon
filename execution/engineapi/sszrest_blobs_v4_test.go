@@ -115,7 +115,7 @@ func TestSSZRESTBlobsV4Availability(t *testing.T) {
 func TestSSZRESTBlobsV4DecodeRejectsTooManyHashes(t *testing.T) {
 	body := blobsV4RequestBytes(make([]common.Hash, 129), make([]byte, 16))
 	_, _, err := decodeBlobsV4Request(body)
-	require.ErrorContains(t, err, "too many blob hashes: 129")
+	require.ErrorContains(t, err, "hash list length exceeds limit: 129 > 128")
 }
 
 func TestSSZRESTBlobsV4MalformedRequest(t *testing.T) {

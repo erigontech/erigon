@@ -17,16 +17,12 @@
 package executiontests
 
 import (
-	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -48,25 +44,19 @@ func TestSoleAccountRootAfterDeleteCollapse(t *testing.T) {
 	final, _, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: gspec.Config, Alloc: types.GenesisAlloc{
 		survivor: {Balance: big.NewInt(1)},
 		newcomer: {Balance: big.NewInt(1e9)},
-	}}, datadir.New(t.TempDir()), log.New())
+	}})
 	require.NoError(t, err)
 
-	for _, parallel := range []bool{false, true} {
-		t.Run(fmt.Sprintf("parallelCommitment=%v", parallel), func(t *testing.T) {
-			prev := statecfg.ExperimentalParallelCommitment
-			t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = prev })
-			statecfg.ExperimentalParallelCommitment = parallel
-
-			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-			cp, err := m.GenerateChain(2, func(i int, bg *blockgen.BlockGen) {
-				if i == 0 {
-					bg.AddWithdrawal(&types.Withdrawal{Index: 0, Address: deleted})
-				} else {
-					bg.AddWithdrawal(&types.Withdrawal{Index: 1, Address: newcomer, Amount: 1})
-				}
-			})
-			require.NoError(t, err)
-			require.Equal(t, final.Root(), cp.Blocks[1].Root())
+	t.Run("parallelCommitment", func(t *testing.T) {
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+		cp, err := m.GenerateChain(2, func(i int, bg *blockgen.BlockGen) {
+			if i == 0 {
+				bg.AddWithdrawal(&types.Withdrawal{Index: 0, Address: deleted})
+			} else {
+				bg.AddWithdrawal(&types.Withdrawal{Index: 1, Address: newcomer, Amount: 1})
+			}
 		})
-	}
+		require.NoError(t, err)
+		require.Equal(t, final.Root(), cp.Blocks[1].Root())
+	})
 }

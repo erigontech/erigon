@@ -81,7 +81,10 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 
 	if targetBlock == currentHead {
-		return nil // already at the target
+		if !clearFinalityAbove(tx, targetBlock) {
+			return nil
+		}
+		return tx.Commit()
 	}
 
 	// Check if we can unwind that far back
@@ -117,14 +120,23 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	sd.SetStateCache(e.stateCache)
 	e.forkValidator.ClearWithUnwind()
 
+	// Pending notifications must follow the unwind's database commit outcome.
+	var restoreStateChanges func()
+	if e.accum != nil {
+		restoreStateChanges = e.accum.Accumulator.Checkpoint()
+	}
+	defer func() {
+		if restoreStateChanges != nil {
+			restoreStateChanges()
+		}
+	}()
+
 	// Set the unwind point and run the unwind
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {
 		return fmt.Errorf("failed to set unwind point: %w", err)
 	}
 
-	if err := e.hook.BeforeRun(tx, true); err != nil {
-		return fmt.Errorf("hook BeforeRun failed: %w", err)
-	}
+	e.hook.NotifySyncState(tx)
 
 	if err := e.pipelineExecutor.RunUnwind(sd, tx); err != nil {
 		return fmt.Errorf("failed to run unwind: %w", err)
@@ -146,6 +158,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("failed to write head header hash: %w", err)
 	}
 	rawdb.WriteForkchoiceHead(tx, targetHash)
+	clearFinalityAbove(tx, targetBlock)
 
 	// Update stage progress for headers and bodies
 	if err := stages.SaveStageProgress(tx, stages.Headers, targetBlock); err != nil {
@@ -163,10 +176,25 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	if err := sd.Commit(ctx, tx); err != nil {
 		return fmt.Errorf("failed to commit shared domains: %w", err)
 	}
+	restoreStateChanges = nil
 	if e.accum != nil && e.accum.RecentReceipts != nil {
 		e.accum.RecentReceipts.Clear()
 	}
 
 	e.logger.Info("SetHead: successfully rewound chain", "targetBlock", targetBlock, "previousHead", currentHead)
 	return nil
+}
+
+// clearFinalityAbove clears the safe and finalized markers above head and reports whether it changed one.
+func clearFinalityAbove(tx kv.RwTx, head uint64) bool {
+	changed := false
+	if safeNum := rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceSafe(tx)); safeNum != nil && *safeNum > head {
+		rawdb.WriteForkchoiceSafe(tx, common.Hash{})
+		changed = true
+	}
+	if rawdb.ReadForkchoiceFinalizedNum(tx) > head {
+		rawdb.WriteForkchoiceFinalized(tx, common.Hash{})
+		changed = true
+	}
+	return changed
 }

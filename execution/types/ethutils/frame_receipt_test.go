@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -29,9 +30,9 @@ import (
 
 func TestFrameRPCReceipt(t *testing.T) {
 	payer := common.Address{1}
-	tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, SenderAddress: payer, Frames: []types.Frame{{}}}
+	tx := &types.FrameTransaction{NonceKeys: nil, SenderAddress: payer, Frames: []types.Frame{{}}}
 	receipt := &types.Receipt{Type: types.FrameTxType, Payer: &payer, BlockNumber: uint256.NewInt(1), FrameReceipts: []types.FrameReceipt{{Status: 1, Logs: types.Logs{}}}}
-	result := MarshalReceipt(receipt, tx, chain.AllProtocolChanges, &types.Header{Number: *uint256.NewInt(1), BaseFee: uint256.NewInt(0)}, true, false)
+	result := MarshalReceipt(receipt, tx, chain.AllProtocolChanges, &types.Header{Number: *uint256.NewInt(1), BaseFee: uint256.NewInt(0)}, true)
 	data, err := json.Marshal(result)
 	require.NoError(t, err)
 	var fields map[string]json.RawMessage
@@ -51,17 +52,15 @@ func TestFrameRPCReceiptLogTimestamps(t *testing.T) {
 	require.NoError(t, err)
 	txn := &types.FrameTransaction{}
 	for _, tc := range []struct {
-		name  string
-		stamp bool
-		time  uint64
+		name string
+		time uint64
 	}{
-		{"stamped", true, 42},
-		{"unstamped", false, 42},
-		{"zero timestamp", true, 0},
+		{"stamped", 42},
+		{"zero timestamp", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			header := &types.Header{Number: *uint256.NewInt(1), Time: tc.time, BaseFee: uint256.NewInt(0)}
-			result := MarshalReceipt(receipt, txn, chain.AllProtocolChanges, header, false, tc.stamp)
+			result := MarshalReceipt(receipt, txn, chain.AllProtocolChanges, header, false)
 			data, err := json.Marshal(result)
 			require.NoError(t, err)
 			var decoded struct {
@@ -75,11 +74,7 @@ func TestFrameRPCReceiptLogTimestamps(t *testing.T) {
 				require.Len(t, frame.Logs, len(receipt.FrameReceipts[i].Logs))
 				for _, log := range frame.Logs {
 					require.Equal(t, decoded.Logs[offset], log)
-					if tc.stamp {
-						require.Equal(t, stampedAt(tc.time), log.BlockTimestamp)
-					} else {
-						require.Nil(t, log.BlockTimestamp)
-					}
+					require.Equal(t, stampedAt(tc.time), log.BlockTimestamp)
 					offset++
 				}
 			}
@@ -93,18 +88,16 @@ func TestFrameRPCReceiptLogTimestamps(t *testing.T) {
 }
 
 // Receipts in the RPC cache carry logs already stamped with the block time: they are rendered as
-// they are when the timestamp is wanted, and without it otherwise.
+// they are, and copied only when the header has another time.
 func TestMarshalReceiptWithStampedLogs(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name     string
-		stamp    bool
 		time     uint64
 		wantSame bool
 	}{
-		{"stamped with the block time", true, 42, true},
-		{"unstamped", false, 42, false},
-		{"stamped with another time", true, 43, false},
+		{"stamped with the block time", 42, true},
+		{"stamped with another time", 43, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logs := types.Logs{{Index: 1, Topics: []common.Hash{}}, {Index: 2, Topics: []common.Hash{}}, {Index: 3, Topics: []common.Hash{}}}
@@ -114,14 +107,10 @@ func TestMarshalReceiptWithStampedLogs(t *testing.T) {
 				FrameReceipts: []types.FrameReceipt{{Status: 1, Logs: logs[:2:2]}, {Status: 1, Logs: logs[2:]}},
 			}
 			header := &types.Header{Number: *uint256.NewInt(1), Time: tc.time, BaseFee: uint256.NewInt(0)}
-			result := MarshalReceipt(receipt, &types.FrameTransaction{}, chain.AllProtocolChanges, header, false, tc.stamp)
+			result := MarshalReceipt(receipt, &types.FrameTransaction{}, chain.AllProtocolChanges, header, false)
 			require.Len(t, result.Logs, len(logs))
 			for i, l := range result.Logs {
-				if tc.stamp {
-					require.Equal(t, stampedAt(tc.time), l.BlockTimestamp)
-				} else {
-					require.Nil(t, l.BlockTimestamp)
-				}
+				require.Equal(t, stampedAt(tc.time), l.BlockTimestamp)
 				require.Equal(t, tc.wantSame, l == logs[i])
 				require.Equal(t, stampedAt(42), logs[i].BlockTimestamp, "the cached log keeps its timestamp")
 			}
@@ -152,7 +141,7 @@ func TestMarshalReceiptWithoutLogs(t *testing.T) {
 			}
 			header := &types.Header{Number: *uint256.NewInt(1), Time: 42, BaseFee: uint256.NewInt(0)}
 
-			want := MarshalReceipt(receipt, tc.txn, chain.AllProtocolChanges, header, true, false)
+			want := MarshalReceipt(receipt, tc.txn, chain.AllProtocolChanges, header, true)
 			want.Logs, want.LogsBloom = nil, nil
 			got := MarshalReceiptWithoutLogs(receipt, tc.txn, chain.AllProtocolChanges, header)
 			require.Equal(t, want, got)
@@ -161,4 +150,61 @@ func TestMarshalReceiptWithoutLogs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFrameReceiptEffectiveGasPrice(t *testing.T) {
+	for _, blobs := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unused gas backs tip", true: "blob fee uses budget"}[blobs], func(t *testing.T) {
+			tx := &types.FrameTransaction{Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 100_000}}}, Fees: types.FrameFees{TipCap: uint256.Int{2}}}
+			header := &types.Header{Number: *uint256.NewInt(1), BaseFee: uint256.NewInt(10)}
+			used, want := uint64(25_000), uint64(12)
+			if blobs {
+				tx.BlobVersionedHashes = []common.Hash{{1}}
+				header.ExcessBlobGas = common.NewUint64(0)
+				used = tx.GetGasLimit()
+				want = 10
+			}
+			tx.Fees.MaxFee.SetUint64(tx.GetGasLimit()*10 + tx.GetBlobGas())
+			receipt := &types.Receipt{Type: types.FrameTxType, BlockNumber: uint256.NewInt(1), GasUsed: used}
+			got := MarshalReceipt(receipt, tx, chain.AllProtocolChanges, header, false)
+			require.Equal(t, want, (*uint256.Int)(got.EffectiveGasPrice).Uint64())
+		})
+	}
+}
+
+func TestFrameReceiptGasTip(t *testing.T) {
+	frame := &types.FrameTransaction{
+		Frames:              []types.Frame{{Limits: mdgas.MdGas{Execution: 50_000}}},
+		Fees:                types.FrameFees{TipCap: uint256.Int{3}},
+		BlobVersionedHashes: []common.Hash{{1}},
+	}
+	baseFee, blobBaseFee := uint256.NewInt(10), uint256.NewInt(2)
+	gasLimit := frame.GetGasLimit()
+	required := gasLimit*baseFee.Uint64() + frame.GetBlobGas()*blobBaseFee.Uint64()
+	t.Run("round down only the rate", func(t *testing.T) {
+		totalTip := 2*gasLimit + 1
+		frame.Fees.MaxFee.SetUint64(required + totalTip)
+		tip, err := ReceiptGasTip(frame, gasLimit, baseFee, blobBaseFee)
+		require.NoError(t, err)
+		require.Equal(t, uint256.Int{2}, tip)
+		require.Equal(t, uint256.NewInt(12), ReceiptGasPrice(frame, gasLimit, baseFee, blobBaseFee))
+		paid, err := GasTipPaid(frame, gasLimit, baseFee, blobBaseFee)
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(totalTip), &paid)
+		fee, err := GasFeePaid(frame, gasLimit, baseFee, blobBaseFee)
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(gasLimit*baseFee.Uint64()+totalTip), &fee)
+	})
+	t.Run("zero gas used", func(t *testing.T) {
+		frame.Fees.MaxFee.SetUint64(required)
+		tip, err := ReceiptGasTip(frame, 0, baseFee, blobBaseFee)
+		require.NoError(t, err)
+		require.Equal(t, uint256.Int{}, tip)
+		require.Equal(t, new(uint256.Int), ReceiptGasPrice(frame, 0, baseFee, blobBaseFee))
+	})
+	t.Run("budget must cover the declared gas limit", func(t *testing.T) {
+		frame.Fees.MaxFee.SetUint64(required - 1)
+		_, err := ReceiptGasTip(frame, gasLimit/2, baseFee, blobBaseFee)
+		require.ErrorIs(t, err, types.ErrFrameFeeBudget)
+	})
 }

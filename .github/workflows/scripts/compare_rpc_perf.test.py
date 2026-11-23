@@ -40,11 +40,14 @@ def rep(p50_ms, p95_ms, max_ms, success=1.0, rpc_success=1.0, p90_ms=None):
     }, "rpcSuccessRatio": rpc_success}
 
 
-def write_result(root, client, label, results):
+def write_result(root, client, label, results, pattern=None):
     path = os.path.join(root, "mainnet", f"{client}-{label}-result.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    configuration = {"testingDaemon": client}
+    if pattern:
+        configuration["pattern"] = pattern
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump({"configuration": {"testingDaemon": client}, "results": results}, fh)
+        json.dump({"configuration": configuration, "results": results}, fh)
 
 
 def run_main(argv):
@@ -147,7 +150,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("overview header has the clients in fixed order",
           any(line.split() == ["Test", "QPS", "erigon", "geth", "reth"] for line in md.splitlines()), md)
     header = next(line for line in md.splitlines() if line.split()[:2] == ["Test", "QPS"])
-    rows = [line.rsplit(" ", 1)[0] for line in md.splitlines() if line[-1:] in ("🟢", "🟡", "🔴", "⚪")]
+    rows = [line.rsplit(" ", 1)[0] for line in md.splitlines() if line[-1:] in ("🟢", "🟡", "🔴")]
     check("overview columns are ASCII and aligned, the status closes each row",
           len(rows) == 6 and all(r.isascii() and len(r) == len(header) for r in rows), md)
     row = overview_row(md, "eth_call", "1")
@@ -163,8 +166,9 @@ with tempfile.TemporaryDirectory() as tmp:
     row = overview_row(md, "eth_call", "5")
     check("erigon below 100% HTTP is red", row == ["eth_call", "5", "err", "-", "1.00*", "🔴"], row)
     row = overview_row(md, "mixed", "1")
-    check("no erigon result, no status", row == ["mixed", "1", "-", "-", "1.00*", "⚪"], row)
-    check("legend explains the white status", "⚪ no Erigon result" in md, md)
+    check("no erigon result where another client has one is red", row == ["mixed", "1", "-", "-", "1.00*", "🔴"], row)
+    check("legend says a missing Erigon result is red", "🔴 >= 1.3x, errors or no Erigon result" in md, md)
+    check("legend has no white status", "⚪" not in md, md)
 
 with tempfile.TemporaryDirectory() as tmp:
     write_result(tmp, "erigon", "mixed", [
@@ -222,6 +226,116 @@ with tempfile.TemporaryDirectory() as tmp:
     check("erigon tied with another client is green", row[-1:] == ["🟢"], row)
     check("legend explains double green", "🟢🟢 fastest by >= 1.3x" in text, text)
 
+# --- dead: a level that rpc_perf recorded with an error -------------------------
+
+DEAD = "server died during test"
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "reth", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 2, 3)]},
+        {"qps": "5", "testRepetitions": [], "error": DEAD},
+    ])
+    write_result(tmp, "geth", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 2, 3)]},
+        {"qps": "5", "testRepetitions": [rep(1, 2, 3)], "error": DEAD},
+    ])
+    res = mod.load_results(tmp)
+    check("a level with an error and no repetition is dead", res["trace_block_struct_log"]["reth"]["5"] == {"failed": "dead", "error": DEAD}, res)
+    check("a level with an error after some repetitions is dead", res["trace_block_struct_log"]["geth"]["5"] == {"failed": "dead", "error": DEAD}, res)
+    md = mod.render(res)
+    check("the detail table shows the error of a dead level", f"| 5 | reth | dead: {DEAD} |" in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 2.0, 3)]},
+        {"qps": "5", "testRepetitions": [rep(1, 2.0, 3)]},
+    ])
+    write_result(tmp, "reth", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "5", "testRepetitions": [], "error": DEAD},
+    ])
+    write_result(tmp, "erigon", "mixed", [{"qps": "1", "testRepetitions": [], "error": DEAD}])
+    write_result(tmp, "geth", "mixed", [{"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]}])
+    md = mod.render_overview(mod.load_results(tmp), "p95")
+    row = overview_row(md, "trace_block_struct_log", "5")
+    check("a dead client is dead in the overview and erigon is the fastest",
+          row == ["trace_block_struct_log", "5", "2.00*", "-", "dead", "🟢"], row)
+    row = overview_row(md, "mixed", "1")
+    check("a dead erigon is red", row == ["mixed", "1", "dead", "1.00*", "-", "🔴"], row)
+    check("legend explains dead", "dead the client died" in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "reth", "mixed", [
+        {"qps": "1", "testRepetitions": [rep(1, 2, 3)]},
+        {"qps": "2", "testRepetitions": [], "error": DEAD},
+    ])
+    code, out = run_main(["--results-dir", tmp])
+    check("main with a dead level exits 0", code in (0, None), code)
+    check("main with a dead level prints all the overviews",
+          all(f"status on {p}" in out for p in ("p50", "p90", "p95", "max")), out)
+
+# --- excluded: a client left out at a barrier, so its later patterns did not run ---
+
+
+def write_excluded(root, client, label):
+    path = os.path.join(root, f"{client}-{label}-result.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"configuration": {"testingDaemon": client}, "excluded": True, "results": []}, fh)
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_call_gen", [
+        {"qps": "100", "testRepetitions": [rep(1, 2.0, 3)]},
+        {"qps": "1000", "testRepetitions": [rep(1, 2.0, 3)]},
+    ])
+    write_result(tmp, "reth", "eth_call_gen", [
+        {"qps": "100", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "1000", "testRepetitions": [rep(1, 1.0, 3)]},
+    ])
+    write_excluded(tmp, "geth", "eth_call_gen")
+    write_excluded(tmp, "erigon", "mixed")
+    write_result(tmp, "reth", "mixed", [{"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]}])
+    res = mod.load_results(tmp)
+    check("an excluded client has every qps step of the pattern, excluded",
+          res["eth_call_gen"]["geth"] == {"100": {"failed": "excluded"}, "1000": {"failed": "excluded"}}, res)
+    md = mod.render_overview(res, "p95")
+    row = overview_row(md, "eth_call_gen", "1000")
+    check("an excluded client is excluded in the overview",
+          row == ["eth_call_gen", "1000", "2.00", "excluded", "1.00*", "🔴"], row)
+    row = overview_row(md, "mixed", "1")
+    check("an excluded erigon is red", row == ["mixed", "1", "excluded", "-", "1.00*", "🔴"], row)
+    check("legend explains excluded", "excluded left out at a barrier" in md, md)
+    md = mod.render(res)
+    check("the detail table shows an excluded client", "| 100 | geth | excluded | | | | |" in md, md)
+    code, out = run_main(["--results-dir", tmp])
+    check("main with an excluded client prints all the overviews",
+          code in (0, None) and all(f"status on {p}" in out for p in ("p50", "p90", "p95", "max")), out)
+
+# --- lost: a client of the run whose job uploaded no report -------------------
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "reth", "mixed", [
+        {"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "2", "testRepetitions": [rep(1, 1.0, 3)]},
+    ])
+    write_excluded(tmp, "geth", "mixed")
+    res = mod.load_results(tmp)
+    check("add_lost returns the clients with no report", mod.add_lost(res, ["erigon", "geth", "reth"]) == ["erigon"], res)
+    check("a client with no report is lost on every qps step",
+          res["mixed"]["erigon"] == {"1": {"failed": "lost"}, "2": {"failed": "lost"}}, res)
+    check("a client with an excluded report is not lost", res["mixed"]["geth"]["1"] == {"failed": "excluded"}, res)
+    md = mod.render_overview(res, "p50")
+    row = overview_row(md, "mixed", "1")
+    check("a lost erigon is lost and red in the overview", row == ["mixed", "1", "lost", "excluded", "1.00*", "🔴"], row)
+    check("legend explains lost", "lost no results from the client's job" in md, md)
+    md = mod.render(res)
+    check("the detail table shows a lost client", "| 1 | erigon | lost | | | | |" in md, md)
+    code, out = run_main(["--results-dir", tmp, "--clients", "erigon,geth,reth"])
+    check("main warns about a lost client", "⚠️ erigon: no results" in out, out)
+    check("main does not warn about a client with a report", "⚠️ geth" not in out and "⚠️ reth" not in out, out)
+    code, out = run_main(["--results-dir", tmp])
+    check("main without --clients has no lost client", "⚠️" not in out and "| erigon |" not in out, out)
+
 # --- main ---------------------------------------------------------------------
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -246,6 +360,239 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run_main(["--results-dir", tmp])
     check("main without results exits 0", code in (0, None), code)
     check("main without results says so", "No results" in out, out)
+
+# --- apis: the rows by method (mixed with --verbose) or by subscription measure ---
+
+
+def api(p50_ms, p95_ms, max_ms, requests, errors=0, p90_ms=None):
+    latencies = {"50th": int(p50_ms * 1e6), "95th": int(p95_ms * 1e6), "max": int(max_ms * 1e6)}
+    if p90_ms is not None:
+        latencies["90th"] = int(p90_ms * 1e6)
+    return {"requests": requests, "errors": errors, "empty": 0, "latencies": latencies}
+
+
+def rep_apis(apis):
+    r = rep(1, 2, 3)
+    r["apis"] = apis
+    return r
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "mixed", [{"qps": "100", "testRepetitions": [
+        rep_apis({"eth_call": api(1, 10, 50, 100, 1), "eth_getLogs": api(4, 40, 400, 10)}),
+        rep_apis({"eth_call": api(3, 30, 90, 100, 2)}),
+        rep_apis({"eth_call": api(2, 20, 70, 100)}),
+    ]}])
+    res = mod.load_results(tmp)
+    apis = res["mixed"]["erigon"]["100"]["apis"]
+    check("api p50 and p95 are the median over repetitions",
+          apis["eth_call"]["p50"] == 2.0 and apis["eth_call"]["p95"] == 20.0, apis)
+    check("api max is the max over repetitions", apis["eth_call"]["max"] == 90.0, apis)
+    check("api requests and errors are summed over repetitions",
+          apis["eth_call"]["requests"] == 300 and apis["eth_call"]["errors"] == 3, apis)
+    check("an api of some repetitions only is over those", apis["eth_getLogs"]["requests"] == 10, apis)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_call", [{"qps": "1", "testRepetitions": [rep(1, 2, 3)]}])
+    res = mod.load_results(tmp)
+    check("a step without apis has no apis", "apis" not in res["eth_call"]["erigon"]["1"], res)
+    md = mod.render(res)
+    check("the detail without apis has no api table", "| API |" not in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe", [{"qps": "10", "testRepetitions": [
+        rep_apis({"newHeads latency": api(1, 2, 3, 30), "logs vs newHeads": api(4, 5, 6, 90, 1)})]}])
+    write_result(tmp, "geth", "eth_subscribe", [{"qps": "10", "testRepetitions": [
+        rep_apis({"newHeads latency": api(7, 8, 9, 30)})]}])
+    md = mod.render(mod.load_results(tmp))
+    check("the api table has a row per api and client",
+          "| 10 | logs vs newHeads | erigon | 4.00 | 5.00 | 6.00 | 90 | 1 |" in md
+          and "| 10 | newHeads latency | erigon | 1.00 | 2.00 | 3.00 | 30 | 0 |" in md
+          and "| 10 | newHeads latency | geth | 7.00 | 8.00 | 9.00 | 30 | 0 |" in md, md)
+    check("the api rows are by api, then by client",
+          md.find("logs vs newHeads | erigon") < md.find("newHeads latency | erigon")
+          < md.find("newHeads latency | geth"), md)
+    check("the api table follows the step table in the same details",
+          md.find("| QPS | Client |") < md.find("| QPS | API | Client |") < md.find("</details>"), md)
+
+# --- eth_subscribe: the fan-out rows get an overview row of their own ------------
+
+
+def fanout_row(text, name, qps):
+    """The cells of the overview row of a fan-out measure, whose name holds spaces."""
+    line = next((line for line in text.splitlines() if line.startswith(name + " ")), "")
+    cells = line[len(name):].split()
+    return cells if cells[:1] == [qps] else []
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "newHeads fan-out": api(11, 39, 66, 1000, p90_ms=30),
+        "newHeads fan-out wallet": api(11, 39, 66, 900, p90_ms=30),
+        "newHeads latency wallet": api(1600, 3300, 3500, 900, p90_ms=3200),
+        "transactionReceipts fan-out indexer": api(5, 17, 26, 10, p90_ms=12)})]}])
+    write_result(tmp, "geth", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "newHeads fan-out": api(5, 20, 85, 1000, p90_ms=15),
+        "newHeads fan-out wallet": api(5, 20, 85, 900, p90_ms=15),
+        "newHeads latency wallet": api(1700, 3400, 3700, 900, p90_ms=3300),
+        "transactionReceipts fan-out indexer": api(4.5, 16, 43, 10, 1, p90_ms=11)})]}])
+    write_result(tmp, "reth", "eth_subscribe_classes", [
+        {"qps": "500", "testRepetitions": [], "error": "dial: bad handshake\ndial: bad handshake"}])
+    res = mod.load_results(tmp)
+    md = mod.render_overview(mod.overview_results(res), "p50")
+    row = fanout_row(md, "eth_subscribe_classes newHeads fan-out wallet", "500")
+    check("a fan-out measure has its own overview row with the erigon status",
+          row == ["500", "11.00", "5.00*", "dead", "🔴"], md)
+    row = fanout_row(md, "eth_subscribe_classes transactionReceipts fan-out indexer", "500")
+    check("errors in a fan-out measure make the client err", row == ["500", "5.00*", "err", "dead", "🟢"], md)
+    check("a measure with copies per class has no overview row of its own",
+          "eth_subscribe_classes newHeads fan-out 500" not in " ".join(md.split()), md)
+    check("the latency copies per class have no overview row", "newHeads latency" not in md, md)
+    md90 = mod.render_overview(mod.overview_results(res), "p90")
+    check("the p90 overview has the fan-out rows",
+          fanout_row(md90, "eth_subscribe_classes newHeads fan-out wallet", "500")[:3] == ["500", "30.00", "15.00*"], md90)
+    details = mod.render(res)
+    check("the fan-out measures have no details section of their own", details.count("<details>") == 1, details)
+    check("a dead client shows only the first line of its error",
+          "| 500 | reth | dead: dial: bad handshake | | | | |" in details, details)
+
+# --- eth_subscribe: newHeads latency gets one overview row, for all the classes ---
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "newHeads latency": api(2087, 3384, 3500, 1000, p90_ms=3300),
+        "newHeads latency wallet": api(2087, 3384, 3500, 900, p90_ms=3300),
+        "logs latency dapp": api(3086, 3485, 3500, 60, p90_ms=3400)})]}])
+    write_result(tmp, "geth", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "newHeads latency": api(1971, 3295, 3450, 1000, p90_ms=3200),
+        "newHeads latency wallet": api(1971, 3295, 3450, 900, p90_ms=3200),
+        "logs latency dapp": api(2982, 3432, 3450, 60, p90_ms=3400)})]}])
+    md = mod.render_overview(mod.overview_results(mod.load_results(tmp)), "p50")
+    check("newHeads latency has one overview row",
+          fanout_row(md, "eth_subscribe_classes newHeads latency", "500") == ["500", "2087.00", "1971.00*", "🟡"], md)
+    check("the newHeads latency copies per class have no overview row", "newHeads latency wallet" not in md, md)
+    check("the logs and receipts latency measures have no overview row", "logs latency" not in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    for client, p50 in (("erigon", 2087), ("geth", 1971)):
+        write_result(tmp, client, "eth_subscribe_newHeads", [{"qps": "500", "testRepetitions": [rep_apis({
+            "newHeads latency": api(p50, 3384, 3500, 1000)})]}])
+    md = mod.render_overview(mod.overview_results(mod.load_results(tmp)), "p50")
+    check("a test with only newHeads measures has no newHeads latency row, it repeats the row of the test",
+          "newHeads latency" not in md, md)
+
+# --- eth_subscribe: the vs first newHeads rows get an overview row, the vs newHeads rows do not ---
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "logs vs newHeads dapp": api(2.4, 12, 20, 60, p90_ms=8),
+        "logs vs first newHeads": api(3, 12, 20, 100, p90_ms=8),
+        "logs vs first newHeads dapp": api(3, 12, 20, 60, p90_ms=8),
+        "transactionReceipts vs first newHeads indexer": api(20, 40, 60, 10, p90_ms=30)})]}])
+    write_result(tmp, "geth", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "logs vs newHeads dapp": api(0.2, 13, 20, 60, p90_ms=9),
+        "logs vs first newHeads": api(3.3, 13, 20, 100, p90_ms=9),
+        "logs vs first newHeads dapp": api(3.3, 13, 20, 60, p90_ms=9),
+        "transactionReceipts vs first newHeads indexer": api(25, 45, 70, 10, p90_ms=35)})]}])
+    md = mod.render_overview(mod.overview_results(mod.load_results(tmp)), "p50")
+    check("a vs first newHeads measure has its own overview row",
+          fanout_row(md, "eth_subscribe_classes logs vs first newHeads dapp", "500") == ["500", "3.00*", "3.30", "🟢"], md)
+    check("the vs first newHeads rows of every class are in the overview",
+          fanout_row(md, "eth_subscribe_classes transactionReceipts vs first newHeads indexer", "500")
+          == ["500", "20.00*", "25.00", "🟢"], md)
+    check("a vs first newHeads measure with copies per class has no overview row of its own",
+          "eth_subscribe_classes logs vs first newHeads 500" not in " ".join(md.split()), md)
+    check("the vs newHeads measures are not in the overview", "logs vs newHeads" not in md, md)
+
+# --- eth_subscribe client classes: legend and the three measures per class -------
+
+CLASSES = {"description": "eth_subscribe by client class: wallet share 90: 1 newHeads; dapp share 9, pick 1: "
+                          "1 newHeads, 50 logs filter=address; indexer share 1: 1 newHeads, 1 logs filter=all, "
+                          "1 transactionReceipts; logs filters from the 3000 most recent blocks",
+           "clients": [{"name": "wallet", "share": 90}, {"name": "dapp", "share": 9, "pick": 1},
+                       {"name": "indexer", "share": 1}]}
+
+# --- eth_subscribe: a client that sends one notification per receipt is marked with ( )! and not compared ---
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "newHeads fan-out indexer": api(1, 2, 3, 10),
+        "transactionReceipts fan-out indexer": api(0.63, 2, 3, 10)})]}])
+    write_result(tmp, "nethermind", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "newHeads fan-out indexer": api(0.3, 2, 3, 10),
+        "transactionReceipts fan-out indexer": api(0.62, 2, 3, 10),
+        "transactionReceipts per receipt indexer": api(5, 9, 12, 10)})]}])
+    md = mod.render_overview(mod.overview_results(mod.load_results(tmp)), "p50")
+    check("the receipts rows show in ( )! the client that sends one notification per receipt, out of the status",
+          fanout_row(md, "eth_subscribe_classes transactionReceipts fan-out indexer", "500")
+          == ["500", "0.63*", "(0.62)!", "🟢"], md)
+    check("the rows of the other types have no !",
+          fanout_row(md, "eth_subscribe_classes newHeads fan-out indexer", "500") == ["500", "1.00", "0.30*", "🔴"], md)
+    check("the overview legend explains the ( )!",
+          "( )! not compared: the client sends the receipts of a block one notification each" in md, md)
+    md = mod.render_classes(mod.load_results(tmp), {"eth_subscribe_classes": CLASSES})
+    check("the class table shows the receipts measures of that client in ( )!, out of the fastest",
+          "| indexer | transactionReceipts fan-out | 0.63* / 2.00 | (0.62)! / (2.00) |" in md
+          and "| indexer | newHeads fan-out | 1.00 / 2.00 | 0.30* / 2.00 |" in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "transactionReceipts fan-out indexer": api(0.63, 2, 3, 10),
+        "transactionReceipts vs first newHeads indexer": api(4, 8, 9, 10)})]}])
+    write_result(tmp, "nethermind", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "transactionReceipts fan-out indexer": api(0.62, 2, 3, 10),
+        "transactionReceipts per receipt indexer": api(5, 9, 12, 10)})]}])
+    md = mod.render_classes(mod.load_results(tmp), {"eth_subscribe_classes": CLASSES})
+    check("a client that sends one notification per receipt and lacks a receipts measure shows -",
+          "| indexer | transactionReceipts vs first newHeads | 4.00* / 8.00 | - |" in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "logs latency dapp": api(3086, 3485, 3500, 60)})]}])
+    write_result(tmp, "geth", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "logs latency dapp": api(0, 0, 0, 60, 60)})]}])
+    md = mod.render_classes(mod.load_results(tmp), {"eth_subscribe_classes": CLASSES})
+    check("a client with more errors than the best one shows err and is not the fastest",
+          "| dapp | logs latency | 3086.00* / 3485.00 | err |" in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "transactionReceipts fan-out indexer": api(0.63, 2, 3, 10)})]}])
+    md = mod.render_overview(mod.overview_results(mod.load_results(tmp)), "p50")
+    check("without a client that sends one notification per receipt the legend has no ( )!", "( )!" not in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    for client, f in (("erigon", 1), ("geth", 2)):
+        write_result(tmp, client, "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+            "newHeads latency wallet": api(1900 * f, 3300, 3500, 900),
+            "newHeads fan-out wallet": api(3 * f, 16, 20, 900),
+            "newHeads fan-out": api(3 * f, 16, 20, 990),
+            "logs vs newHeads dapp": api(0.4 * f, 12, 20, 60),
+            "logs vs first newHeads dapp": api(3 * f, 12, 20, 60)})]}], CLASSES)
+    write_result(tmp, "erigon", "eth_call", [{"qps": "1", "testRepetitions": [rep(1, 2, 3)]}])
+    patterns = mod.load_patterns(tmp)
+    check("the pattern of a test with client classes is loaded", list(patterns) == ["eth_subscribe_classes"], patterns)
+    md = mod.render_classes(mod.load_results(tmp), patterns)
+    check("the legend gives the share of each class and the pattern description as rpc_perf writes it",
+          "Client classes, share of the connections: wallet 90%, dapp 9%, indexer 1%." in md
+          and "Pattern: " + CLASSES["description"] in md, md)
+    check("each table says how many connections it has", "\n500 connections\n" in md, md)
+    check("the legend explains the four measures",
+          "**latency**" in md and "**fan-out**" in md and "**vs first newHeads**" in md and "**vs newHeads**" in md, md)
+    check("the table has the measures of each class, p50 / p95 per client, the fastest p50 marked",
+          "| wallet | newHeads latency | 1900.00* / 3300.00 | 3800.00 / 3300.00 |" in md
+          and "| wallet | newHeads fan-out | 3.00* / 16.00 | 6.00 / 16.00 |" in md
+          and "| dapp | logs vs newHeads | 0.40* / 12.00 | 0.80 / 12.00 |" in md
+          and "| dapp | logs vs first newHeads | 3.00* / 12.00 | 6.00 / 12.00 |" in md, md)
+    check("the classes follow the order of the pattern", md.find("| wallet |") < md.find("| dapp |"), md)
+    check("in a class the measures are by type, newHeads first, then latency, fan-out, vs first newHeads, vs newHeads",
+          md.find("| wallet | newHeads latency") < md.find("| wallet | newHeads fan-out")
+          and md.find("| dapp | logs vs first newHeads") < md.find("| dapp | logs vs newHeads"), md)
+    rows = [line.split("|")[1].strip() for line in md.splitlines() if line.startswith("| ") and "Class" not in line]
+    check("every row of the class table is of one class", set(rows) == {"wallet", "dapp"}, rows)
+    code, out = run_main(["--results-dir", tmp])
+    check("main prints the class section after the overviews and before the details",
+          out.find("p50 latency") < out.find("client classes") < out.find("<details>"), out)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

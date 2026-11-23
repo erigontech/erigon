@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -42,7 +43,9 @@ import (
 	clgossip "github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	mock_services2 "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/phase1/network/gossip"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
@@ -53,6 +56,187 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
+
+type attesterSlashingStore struct {
+	forkchoice.ForkChoiceStorage
+	onAttesterSlashing func(*cltypes.AttesterSlashing, bool) error
+}
+
+func (s *attesterSlashingStore) OnAttesterSlashing(slashing *cltypes.AttesterSlashing, test bool) error {
+	return s.onAttesterSlashing(slashing, test)
+}
+
+func TestPoolAttesterSlashingPublication(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		err          error
+		status       int
+		publishCalls int
+		pooled       bool
+		tampered     bool
+	}{
+		{name: "validated", status: http.StatusOK, publishCalls: 1},
+		{name: "ignored", err: forkchoice.ErrIgnore, status: http.StatusOK},
+		{name: "wrapped ignore", err: fmt.Errorf("already seen: %w", forkchoice.ErrIgnore), status: http.StatusOK},
+		{name: "invalid", err: errors.New("invalid attester slashing"), status: http.StatusBadRequest},
+		{name: "pooled ignore", err: forkchoice.ErrIgnore, status: http.StatusOK, publishCalls: 1, pooled: true},
+		{name: "pooled wrapped ignore", err: fmt.Errorf("already seen: %w", forkchoice.ErrIgnore), status: http.StatusOK, publishCalls: 1, pooled: true},
+		{name: "tampered pooled request", err: forkchoice.ErrIgnore, status: http.StatusOK, publishCalls: 1, pooled: true, tampered: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			clock.EXPECT().GetCurrentEpoch().Return(uint64(0)).Times(1)
+			slashing := cltypes.NewAttesterSlashing(clparams.Phase0Version)
+			opPool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
+			if tc.pooled {
+				opPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(slashing), slashing)
+			}
+			encoded, err := slashing.EncodeSSZ(nil)
+			require.NoError(t, err)
+			if tc.tampered {
+				slashing = cltypes.NewAttesterSlashing(clparams.Phase0Version)
+				slashing.Attestation_1.Data.Slot = 123
+				tamperedSSZ, err := slashing.EncodeSSZ(nil)
+				require.NoError(t, err)
+				require.NotEqual(t, encoded, tamperedSSZ)
+			}
+			body, err := json.Marshal(slashing)
+			require.NoError(t, err)
+			publisher := gossip_mock.NewMockGossip(ctrl)
+			publisher.EXPECT().Publish(gomock.Any(), clgossip.TopicNameAttesterSlashing, encoded).Return(nil).Times(tc.publishCalls)
+			calls := 0
+			store := &attesterSlashingStore{onAttesterSlashing: func(req *cltypes.AttesterSlashing, test bool) error {
+				calls++
+				require.Equal(t, slashing, req)
+				require.False(t, test)
+				return tc.err
+			}}
+			handler := &ApiHandler{
+				logger:          log.Root(),
+				beaconChainCfg:  &clparams.MainnetBeaconConfig,
+				ethClock:        clock,
+				forkchoiceStore: store,
+				operationsPool:  opPool,
+				sentinel:        &nonNilSentinelClient{},
+				gossipManager:   publisher,
+			}
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/attester_slashings", bytes.NewReader(body))
+			handler.PostEthV1BeaconPoolAttesterSlashings(recorder, request)
+			require.Equal(t, tc.status, recorder.Code)
+			require.Equal(t, 1, calls)
+		})
+	}
+}
+
+func TestPoolAttesterSlashingRetriesFailedPublication(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentEpoch().Return(uint64(0)).Times(2)
+	opPool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
+	slashing := cltypes.NewAttesterSlashing(clparams.Phase0Version)
+	body, err := json.Marshal(slashing)
+	require.NoError(t, err)
+	encoded, err := slashing.EncodeSSZ(nil)
+	require.NoError(t, err)
+	calls := 0
+	store := &attesterSlashingStore{onAttesterSlashing: func(req *cltypes.AttesterSlashing, test bool) error {
+		calls++
+		require.False(t, test)
+		key := pool.ComputeKeyForAttesterSlashing(req)
+		if opPool.AttesterSlashingsPool.Has(key) {
+			return forkchoice.ErrIgnore
+		}
+		opPool.AttesterSlashingsPool.Insert(key, req)
+		return nil
+	}}
+	publisher := gossip_mock.NewMockGossip(ctrl)
+	gomock.InOrder(
+		publisher.EXPECT().Publish(gomock.Any(), clgossip.TopicNameAttesterSlashing, encoded).Return(errors.New("topic not found")),
+		publisher.EXPECT().Publish(gomock.Any(), clgossip.TopicNameAttesterSlashing, encoded).Return(nil),
+	)
+	handler := &ApiHandler{
+		logger:          log.Root(),
+		beaconChainCfg:  &clparams.MainnetBeaconConfig,
+		ethClock:        clock,
+		forkchoiceStore: store,
+		operationsPool:  opPool,
+		sentinel:        &nonNilSentinelClient{},
+		gossipManager:   publisher,
+	}
+	for range 2 {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/attester_slashings", bytes.NewReader(body))
+		handler.PostEthV1BeaconPoolAttesterSlashings(recorder, request)
+		require.Equal(t, http.StatusOK, recorder.Code)
+	}
+	require.Equal(t, 2, calls)
+}
+
+func TestPoolAttesterSlashingRejectsDisjointIndices(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.ElectraVersion} {
+		for _, route := range []string{"v1", "v2"} {
+			for _, pooled := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/pooled=%t", version, route, pooled), func(t *testing.T) {
+					ctrl := gomock.NewController(t)
+					cfg := clparams.MainnetBeaconConfig
+					epoch := uint64(0)
+					if version == clparams.ElectraVersion {
+						epoch = cfg.ElectraForkEpoch
+					}
+					clock := eth_clock.NewMockEthereumClock(ctrl)
+					if route == "v1" {
+						clock.EXPECT().GetCurrentEpoch().Return(epoch)
+					}
+					anchor := state.New(&cfg)
+					anchor.SetVersion(version)
+					synced := synced_data.NewSyncedDataManager(&cfg, true)
+					opPool := pool.NewOperationsPool(&cfg)
+					store, err := forkchoice.NewForkChoiceStore(clock, anchor, nil, opPool, nil, nil, synced, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(), nil, false, nil)
+					require.NoError(t, err)
+					anchorRoot, err := anchor.BlockRoot()
+					require.NoError(t, err)
+					require.NoError(t, synced.OnHeadStateWithBlockRoot(anchor, anchorRoot))
+					publisher := gossip_mock.NewMockGossip(ctrl)
+					publisher.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+					handler := &ApiHandler{
+						logger:          log.Root(),
+						beaconChainCfg:  &cfg,
+						ethClock:        clock,
+						forkchoiceStore: store,
+						operationsPool:  opPool,
+						sentinel:        &nonNilSentinelClient{},
+						gossipManager:   publisher,
+						routerCfg:       &beacon_router_configuration.RouterConfiguration{Beacon: true},
+					}
+					handler.init()
+					slashing := cltypes.NewAttesterSlashing(version)
+					slashing.Attestation_1.AttestingIndices.Append(1)
+					slashing.Attestation_2.AttestingIndices.Append(2)
+					slashing.Attestation_1.Data.BeaconBlockRoot = common.Hash{1}
+					slashing.Attestation_2.Data.BeaconBlockRoot = common.Hash{2}
+					if pooled {
+						// The pool key covers only the signatures, which this slashing shares.
+						opPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(slashing), cltypes.NewAttesterSlashing(version))
+					}
+					poolSize := len(opPool.AttesterSlashingsPool.Raw())
+					body, err := json.Marshal(slashing)
+					require.NoError(t, err)
+					request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/"+route+"/beacon/pool/attester_slashings", bytes.NewReader(body))
+					if route == "v2" {
+						request.Header.Set("Eth-Consensus-Version", version.String())
+					}
+					recorder := httptest.NewRecorder()
+					handler.mux.ServeHTTP(recorder, request)
+					require.Equal(t, http.StatusBadRequest, recorder.Code)
+					require.Contains(t, recorder.Body.String(), "attester slashing has an empty attesting indices intersection")
+					require.Len(t, opPool.AttesterSlashingsPool.Raw(), poolSize)
+				})
+			}
+		}
+	}
+}
 
 func TestPoolAttesterSlashings(t *testing.T) {
 	attesterSlashing := cltypes.NewAttesterSlashing(clparams.DenebVersion)
@@ -101,6 +285,175 @@ func TestPoolAttesterSlashings(t *testing.T) {
 
 	require.Len(t, out.Data, 1)
 	require.Equal(t, attesterSlashing, out.Data[0])
+}
+
+func TestPostPoolAttesterSlashingBodyLimit(t *testing.T) {
+	const bodyLimit = attesterSlashingJSONOverhead + attesterSlashingJSONBytesPerIndexPair
+	for _, tc := range []struct {
+		name   string
+		size   int
+		status int
+	}{
+		{name: "at limit", size: bodyLimit, status: http.StatusOK},
+		{name: "over limit", size: bodyLimit + 1, status: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.MaxValidatorsPerCommittee = 1
+			handler, store := newAttesterSlashingTestHandler(t, &cfg, 0)
+
+			slashing := cltypes.NewAttesterSlashing(clparams.Phase0Version)
+			slashing.Attestation_1.AttestingIndices.Append(1)
+			slashing.Attestation_2.AttestingIndices.Append(1)
+			body, err := json.Marshal(slashing)
+			require.NoError(t, err)
+			body = append(body, bytes.Repeat([]byte(" "), tc.size-len(body))...)
+
+			resp := httptest.NewRecorder()
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/attester_slashings", bytes.NewReader(body))
+			handler.PostEthV1BeaconPoolAttesterSlashings(resp, req)
+			require.Equal(t, tc.status, resp.Code, resp.Body.String())
+			if tc.status == http.StatusOK {
+				require.Equal(t, 1, store.Pool.AttesterSlashingsPool.Len())
+			} else {
+				require.Zero(t, store.Pool.AttesterSlashingsPool.Len())
+			}
+		})
+	}
+}
+
+func TestPostPoolAttesterSlashingFullLists(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	for _, tc := range []struct {
+		name  string
+		epoch uint64
+	}{
+		{name: "pre-Electra", epoch: 0},
+		{name: "Electra", epoch: cfg.ElectraForkEpoch},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			version := cfg.GetCurrentStateVersion(tc.epoch)
+			limit := int(state.MaxIndexedAttestationIndices(&cfg, version))
+			handler, store := newAttesterSlashingTestHandler(t, &cfg, tc.epoch)
+
+			slashing := cltypes.NewAttesterSlashing(version)
+			for i := range limit {
+				// 20-digit values, the widest decimal uint64 strings.
+				slashing.Attestation_1.AttestingIndices.Append(math.MaxUint64 - uint64(i))
+				slashing.Attestation_2.AttestingIndices.Append(math.MaxUint64 - uint64(i))
+			}
+			body, err := json.Marshal(slashing)
+			require.NoError(t, err)
+			require.Less(t, len(body), attesterSlashingJSONOverhead+limit*attesterSlashingJSONBytesPerIndexPair)
+
+			resp := httptest.NewRecorder()
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/attester_slashings", bytes.NewReader(body))
+			handler.PostEthV1BeaconPoolAttesterSlashings(resp, req)
+			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+			stored := store.Pool.AttesterSlashingsPool.Raw()
+			require.Len(t, stored, 1)
+			require.Equal(t, limit, stored[0].Attestation_1.AttestingIndices.Length())
+			require.Equal(t, limit, stored[0].Attestation_2.AttestingIndices.Length())
+		})
+	}
+}
+
+func TestPostPoolAttesterSlashingIndexLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxValidatorsPerCommittee = 1
+	cfg.MaxCommitteesPerSlot = 2
+	for _, tc := range []struct {
+		name           string
+		epoch          uint64
+		limit          int
+		count          int
+		first          bool
+		duplicateField string
+		status         int
+	}{
+		{name: "pre-Electra at limit", epoch: 0, limit: 1, count: 1, status: http.StatusOK},
+		{name: "pre-Electra over limit", epoch: 0, limit: 1, count: 2, status: http.StatusBadRequest},
+		{name: "Electra at limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 2, status: http.StatusOK},
+		{name: "Electra over limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 3, status: http.StatusBadRequest},
+		{name: "Electra first attestation over limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 3, first: true, status: http.StatusBadRequest},
+		{name: "Electra repeated first attestation at limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 2, first: true, duplicateField: "attestation_1", status: http.StatusOK},
+		{name: "Electra repeated second attestation at limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 2, duplicateField: "attestation_2", status: http.StatusOK},
+		{name: "Electra repeated first attestation over limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 3, first: true, duplicateField: "attestation_1", status: http.StatusBadRequest},
+		{name: "Electra repeated second attestation over limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 3, duplicateField: "attestation_2", status: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, store := newAttesterSlashingTestHandler(t, &cfg, tc.epoch)
+			slashing := cltypes.NewAttesterSlashing(cfg.GetCurrentStateVersion(tc.epoch))
+			slashing.Attestation_1.AttestingIndices.Append(1)
+			for i := range tc.count {
+				slashing.Attestation_2.AttestingIndices.Append(uint64(i + 1))
+			}
+			if tc.first {
+				slashing.Attestation_1, slashing.Attestation_2 = slashing.Attestation_2, slashing.Attestation_1
+			}
+			body, err := json.Marshal(slashing)
+			require.NoError(t, err)
+			if tc.duplicateField != "" {
+				body = fmt.Appendf(nil, `{"%s":null,%s`, tc.duplicateField, body[1:])
+			}
+
+			resp := httptest.NewRecorder()
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/attester_slashings", bytes.NewReader(body))
+			handler.PostEthV1BeaconPoolAttesterSlashings(resp, req)
+			require.Equal(t, tc.status, resp.Code, resp.Body.String())
+			if tc.status == http.StatusOK {
+				stored := store.Pool.AttesterSlashingsPool.Raw()
+				require.Len(t, stored, 1)
+				require.Equal(t, tc.limit, stored[0].Attestation_1.AttestingIndices.Cap())
+				require.Equal(t, tc.limit, stored[0].Attestation_2.AttestingIndices.Cap())
+			} else {
+				require.Contains(t, resp.Body.String(), "attesting indices exceed limit")
+				if tc.first {
+					require.Contains(t, resp.Body.String(), "attestation_1:")
+				} else {
+					require.Contains(t, resp.Body.String(), "attestation_2:")
+				}
+				require.Zero(t, store.Pool.AttesterSlashingsPool.Len())
+			}
+		})
+	}
+}
+
+func TestPostPoolAttesterSlashingRequiresBothAttestations(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	attestation := cltypes.NewIndexedAttestation(clparams.Phase0Version)
+	attestation.AttestingIndices.Append(1)
+
+	for _, tc := range []struct {
+		name string
+		body map[string]*cltypes.IndexedAttestation
+	}{
+		{name: "missing first", body: map[string]*cltypes.IndexedAttestation{"attestation_2": attestation}},
+		{name: "missing second", body: map[string]*cltypes.IndexedAttestation{"attestation_1": attestation}},
+		{name: "null first", body: map[string]*cltypes.IndexedAttestation{"attestation_1": nil, "attestation_2": attestation}},
+		{name: "null second", body: map[string]*cltypes.IndexedAttestation{"attestation_1": attestation, "attestation_2": nil}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, store := newAttesterSlashingTestHandler(t, &cfg, 0)
+			body, err := json.Marshal(tc.body)
+			require.NoError(t, err)
+
+			resp := httptest.NewRecorder()
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/attester_slashings", bytes.NewReader(body))
+			handler.PostEthV1BeaconPoolAttesterSlashings(resp, req)
+			require.Equal(t, http.StatusBadRequest, resp.Code, resp.Body.String())
+			require.Zero(t, store.Pool.AttesterSlashingsPool.Len())
+		})
+	}
+}
+
+func newAttesterSlashingTestHandler(t *testing.T, cfg *clparams.BeaconChainConfig, epoch uint64) (*ApiHandler, *mock_services2.ForkChoiceStorageMock) {
+	t.Helper()
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentEpoch().Return(epoch)
+	store := mock_services2.NewForkChoiceStorageMock(t)
+	store.Pool = pool.NewOperationsPool(cfg)
+	return &ApiHandler{beaconChainCfg: cfg, ethClock: clock, forkchoiceStore: store}, store
 }
 
 func TestPoolProposerSlashings(t *testing.T) {

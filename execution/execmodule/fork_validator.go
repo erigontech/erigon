@@ -189,7 +189,8 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	timings, _ := fv.timingsCache.Get(hash)
 	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
 	fv.timingsCache.Add(hash, timings)
-	candidate.notifications.CopyAndReset(target)
+	candidate.notifications.Accumulator.AppendAndReset(target.Accumulator)
+	candidate.notifications.RecentReceipts.MoveEntriesTo(target.RecentReceipts)
 	fv.candidates.Remove(hash)
 	return nil
 }
@@ -203,8 +204,9 @@ type HasDiff interface {
 // payload when required chain data is unavailable. Before a fork unwind it
 // invokes ensureReadAheadSuspended, which must idempotently acquire a
 // caller-owned suspension lasting until validation stops reading staged state;
-// an acquisition error aborts validation before the unwind.
-func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.Body, ensureReadAheadSuspended func() error, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+// an acquisition error aborts validation before the unwind. With revalidate, a
+// payload that passed validation before is executed again, so sd holds its state.
+func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.Body, revalidate bool, ensureReadAheadSuspended func() error, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	retained := false
@@ -221,7 +223,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	number := header.Number.Uint64()
 
 	// If the block is stored within the side fork it means it was already validated.
-	if fv.isKnownOrRetained(hash) {
+	if !revalidate && fv.isKnownOrRetained(hash) {
 		status = engine_types.ValidStatus
 		latestValidHash = hash
 		return
@@ -304,13 +306,13 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		}
 	}
 	notifications := fv.executor.ValidationNotifications()
-	notifications.Accumulator.Reset(0)
+	notifications.Accumulator.Reset()
 	notifications.RecentReceipts.Clear()
 	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(sd, tx, header, body, unwindPoint, headersChain, bodiesChain)
 	if status == engine_types.ValidStatus && criticalError == nil && validationError == nil {
 		owned := NewAccumulation()
-		notifications.Accumulator.CopyAndReset(owned.Accumulator)
-		notifications.RecentReceipts.CopyAndReset(owned.RecentReceipts)
+		notifications.Accumulator.AppendAndReset(owned.Accumulator)
+		notifications.RecentReceipts.MoveEntriesTo(owned.RecentReceipts)
 		for _, ancestor := range headersChain {
 			fv.candidates.Remove(ancestor.Hash())
 		}

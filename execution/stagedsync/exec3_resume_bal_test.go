@@ -49,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execfinality"
-	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -129,7 +128,7 @@ func newResumeBALFixture(t *testing.T) *resumeBALFixture {
 	} {
 		alloc[contract.Value()] = types.GenesisAccount{Balance: new(big.Int), Nonce: 1, Code: []byte{byte(vm.STOP)}}
 	}
-	genesis, genesisState, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}, datadir.New(t.TempDir()), log.New())
+	genesis, genesisState, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc})
 	require.NoError(t, err)
 	genesisState.Close()
 
@@ -329,13 +328,11 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 	assembled, err := ba.AssembleBlock(ibs, tx, logger)
 	require.NoError(t, err)
 
-	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), fx.engine, accounts.NilAddress, fx.config)
-	blockRules := blockContext.Rules(fx.config)
 	for _, ws := range ba.WriteSets() {
 		if ws == nil || ws.IsEmpty() {
 			continue
 		}
-		require.NoError(t, state.ApplyWrites(ws, domains, tx, 1, txNum, nil, blockRules, false))
+		require.NoError(t, state.ApplyWrites(ws, domains, tx, 1, txNum, false))
 	}
 	root, err := domains.ComputeCommitment(ctx, tx, false, 1, txNum, "resume-bal", nil)
 	require.NoError(t, err)

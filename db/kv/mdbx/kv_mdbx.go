@@ -1372,7 +1372,11 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 }
 
 func (tx *MdbxTx) ClearTable(bucket string) error {
-	dbi := tx.db.buckets[bucket].DBI
+	cfg, ok := tx.db.buckets[bucket]
+	if !ok {
+		return fmt.Errorf("table %s not found", bucket)
+	}
+	dbi := cfg.DBI
 	if dbi == NonExistingDBI {
 		return nil
 	}
@@ -1647,11 +1651,7 @@ func (tx *MdbxTx) ResetSequence(bucket string, newValue uint64) error {
 }
 
 func (tx *MdbxTx) ReadSequence(bucket string) (uint64, error) {
-	c, err := tx.statelessCursor(kv.Sequence)
-	if err != nil {
-		return 0, err
-	}
-	_, v, err := c.SeekExact([]byte(bucket))
+	v, err := tx.GetOne(kv.Sequence, []byte(bucket))
 	if err != nil {
 		return 0, err
 	}
@@ -2401,7 +2401,7 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 	// to find LAST dup with given prefix (descending):
 	nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
 	if !ok {
-		_, firstV, err = s.c.PrevDup()
+		firstV, err = s.c.LastDup()
 		if err != nil {
 			return err
 		}

@@ -25,10 +25,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2"
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -1013,7 +1013,7 @@ func TestRetryDataAvailablePendingExecutionPayloadEnvelopesAppliesZeroBlobEnvelo
 	require.NoError(t, err)
 	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
 	require.NoError(t, err)
-	retryAt, err := lru.New[common.Hash, time.Time](queueCacheSize)
+	retryAt, err := lru.New[common.Hash, *pendingEnvelopeRetryBooking](queueCacheSize)
 	require.NoError(t, err)
 	dataGraph := dataAvailabilityForkGraph{state: blockState, block: block}
 	f := newPayloadVoteTestStore(t, blockRoot, false, false)
@@ -1047,7 +1047,7 @@ func newColumnWaitingEnvelopeStore(t *testing.T, newGraph func(dataAvailabilityF
 	require.NoError(t, err)
 	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
 	require.NoError(t, err)
-	retryAt, err := lru.New[common.Hash, time.Time](queueCacheSize)
+	retryAt, err := lru.New[common.Hash, *pendingEnvelopeRetryBooking](queueCacheSize)
 	require.NoError(t, err)
 	f = newPayloadVoteTestStore(t, blockRoot, false, false)
 	f.beaconCfg = cfg
@@ -1056,6 +1056,7 @@ func newColumnWaitingEnvelopeStore(t *testing.T, newGraph func(dataAvailabilityF
 	f.pendingEnvelopes = pending
 	f.pendingLocalSelfBuildEnvelopes = local
 	f.dataAvailableEnvelopeRetryAt = retryAt
+	f.emitters = beaconevents.NewEventEmitter()
 	available, probes = new(bool), new(int)
 	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
 	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, blockRoot).DoAndReturn(func(uint64, common.Hash) (bool, error) {
@@ -1067,6 +1068,22 @@ func newColumnWaitingEnvelopeStore(t *testing.T, newGraph func(dataAvailabilityF
 	require.ErrorIs(t, f.OnExecutionPayload(t.Context(), envelope, true, true), ErrEIP7594ColumnDataNotAvailable)
 	require.True(t, pending.Contains(blockRoot))
 	return f, block, available, probes
+}
+
+func TestOnExecutionPayloadWakesRetryWhenParkingForColumns(t *testing.T) {
+	f, block, _, _ := newColumnWaitingEnvelopeStore(t, func(g dataAvailabilityForkGraph) fork_graph.ForkGraph {
+		return &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: g}
+	})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	wake := f.PendingEnvelopeRetryWake()
+
+	require.Len(t, wake, 1, "parking for missing columns wakes the retry")
+	<-wake
+
+	f.RetryPendingExecutionPayloadEnvelopes(t.Context(), 1)
+	require.True(t, f.pendingEnvelopes.Contains(blockRoot), "columns are still missing")
+	require.Empty(t, wake, "a retry does not wake itself")
 }
 
 func TestRetryDataAvailablePendingExecutionPayloadEnvelopesAppliesOnceColumnsArrive(t *testing.T) {
@@ -1089,6 +1106,41 @@ func TestRetryDataAvailablePendingExecutionPayloadEnvelopesAppliesOnceColumnsArr
 	f.RetryDataAvailablePendingExecutionPayloadEnvelopes(t.Context(), block.Block.Slot)
 	require.False(t, f.pendingEnvelopes.Contains(blockRoot))
 	require.True(t, graph.HasEnvelope(blockRoot))
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesOnColumnsStoredIgnoresProbeBooking(t *testing.T) {
+	graph := &persistedEnvelopeForkGraph{}
+	f, block, available, _ := newColumnWaitingEnvelopeStore(t, func(g dataAvailabilityForkGraph) fork_graph.ForkGraph {
+		graph.dataAvailabilityForkGraph = g
+		return graph
+	})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	f.RetryDataAvailablePendingExecutionPayloadEnvelopes(t.Context(), block.Block.Slot) // books a probe
+
+	*available = true
+	f.RetryPendingExecutionPayloadEnvelopesOnColumnsStored(t.Context(), block.Block.Slot+1)
+	require.True(t, f.pendingEnvelopes.Contains(blockRoot), "blocks before minSlot are left to the poll")
+
+	f.RetryPendingExecutionPayloadEnvelopesOnColumnsStored(t.Context(), block.Block.Slot)
+	require.False(t, f.pendingEnvelopes.Contains(blockRoot))
+	require.True(t, graph.HasEnvelope(blockRoot))
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesOnColumnsStoredHonoursAttemptBooking(t *testing.T) {
+	f, block, available, probes := newColumnWaitingEnvelopeStore(t, func(g dataAvailabilityForkGraph) fork_graph.ForkGraph {
+		return &failingEnvelopeDumpForkGraph{persistedEnvelopeForkGraph{dataAvailabilityForkGraph: g}}
+	})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	*available = true
+	f.RetryDataAvailablePendingExecutionPayloadEnvelopes(t.Context(), block.Block.Slot)
+	require.True(t, f.pendingEnvelopes.Contains(blockRoot), "a storage failure keeps the envelope queued")
+	attemptProbes := *probes
+
+	f.RetryPendingExecutionPayloadEnvelopesOnColumnsStored(t.Context(), block.Block.Slot)
+	require.True(t, f.pendingEnvelopes.Contains(blockRoot))
+	require.Equal(t, attemptProbes, *probes, "a column wake must not probe or repeat a failed attempt")
 }
 
 func TestRetryDataAvailablePendingExecutionPayloadEnvelopesPacesMissingDataProbes(t *testing.T) {
@@ -3555,59 +3607,63 @@ func TestValidatePayloadWithELReleasesForkChoiceMuDuringNewPayload(t *testing.T)
 }
 
 func TestOnExecutionPayloadMergesStrongerConcurrentValidationResult(t *testing.T) {
-	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-	blockRoot := envelope.Message.BeaconBlockRoot
-	ctrl := gomock.NewController(t)
-	engine := execution_client.NewMockExecutionEngine(ctrl)
-	firstStarted := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	secondStarted := make(chan struct{})
-	releaseSecond := make(chan struct{})
-	var calls atomic.Int32
-	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(2).
-		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
-			if calls.Add(1) == 1 {
-				close(firstStarted)
-				<-releaseFirst
-				return execution_client.PayloadStatusNone, nil
-			}
-			close(secondStarted)
-			<-releaseSecond
-			return execution_client.PayloadStatusValidated, nil
-		})
-	graph := &concurrentPayloadValidationForkGraph{
-		dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
-		bothRead:                  make(chan struct{}),
-	}
-	f := newPayloadVoteTestStore(t, blockRoot, false, false)
-	f.beaconCfg = cfg
-	f.engine = engine
-	f.forkGraph = graph
-	f.executionPayloadGasLimit, _ = lru.New[common.Hash, uint64](16)
-	firstDone := make(chan error, 1)
-	secondDone := make(chan error, 1)
+	synctest.Test(t, func(t *testing.T) {
+		cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+		blockRoot := envelope.Message.BeaconBlockRoot
+		ctrl := gomock.NewController(t)
+		engine := execution_client.NewMockExecutionEngine(ctrl)
+		firstStarted := make(chan struct{})
+		releaseFirst := make(chan struct{})
+		secondStarted := make(chan struct{})
+		releaseSecond := make(chan struct{})
+		var calls atomic.Int32
+		engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(2).
+			DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+				if calls.Add(1) == 1 {
+					close(firstStarted)
+					<-releaseFirst
+					return execution_client.PayloadStatusNone, nil
+				}
+				close(secondStarted)
+				<-releaseSecond
+				return execution_client.PayloadStatusValidated, nil
+			})
+		graph := &concurrentPayloadValidationForkGraph{
+			dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+			bothRead:                  make(chan struct{}),
+		}
+		f := newPayloadVoteTestStore(t, blockRoot, false, false)
+		f.beaconCfg = cfg
+		f.engine = engine
+		f.forkGraph = graph
+		f.executionPayloadGasLimit, _ = lru.New[common.Hash, uint64](16)
+		firstDone := make(chan error, 1)
+		secondDone := make(chan error, 1)
 
-	go func() { firstDone <- f.OnExecutionPayload(t.Context(), envelope, false, true) }()
-	<-firstStarted
-	go func() { secondDone <- f.OnExecutionPayload(t.Context(), envelope, false, true) }()
-	<-graph.bothRead
-	require.Eventually(t, func() bool {
+		go func() { firstDone <- f.OnExecutionPayload(t.Context(), envelope, false, true) }()
+		<-firstStarted
+		go func() { secondDone <- f.OnExecutionPayload(t.Context(), envelope, false, true) }()
+		<-graph.bothRead
+		// The second call must wait for admission before the fork-choice lock is taken here: earlier it can still need
+		// the lock back, and would block on it while this goroutine waits for it to start validating.
+		synctest.Wait()
 		f.envelopeAppliesMu.Lock()
-		defer f.envelopeAppliesMu.Unlock()
-		return f.envelopeApplies[blockRoot] == 2
-	}, lockScopeTimeout, time.Millisecond)
-	f.mu.Lock()
-	close(releaseFirst)
-	<-secondStarted
-	f.mu.Unlock()
-	require.NoError(t, <-firstDone)
-	close(releaseSecond)
-	require.ErrorIs(t, <-secondDone, ErrIgnore)
+		applies := f.envelopeApplies[blockRoot]
+		f.envelopeAppliesMu.Unlock()
+		require.Equal(t, 2, applies)
+		f.mu.Lock()
+		close(releaseFirst)
+		<-secondStarted
+		f.mu.Unlock()
+		require.NoError(t, <-firstDone)
+		close(releaseSecond)
+		require.ErrorIs(t, <-secondDone, ErrIgnore)
 
-	status, ok := f.GetRecentExecutionPayloadStatusByRoot(blockRoot)
-	require.True(t, ok)
-	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusValidated), status)
-	require.True(t, f.IsPayloadVerified(blockRoot))
+		status, ok := f.GetRecentExecutionPayloadStatusByRoot(blockRoot)
+		require.True(t, ok)
+		require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusValidated), status)
+		require.True(t, f.IsPayloadVerified(blockRoot))
+	})
 }
 
 func TestRefreshEnvelopeBlockDoesNotReplayState(t *testing.T) {
@@ -4238,7 +4294,7 @@ func TestValidatePayloadBlobHashes(t *testing.T) {
 		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &common.Address{1}}},
 		BlobVersionedHashes:   hashes[:2],
 	}
-	frame := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []types.Frame{{}}, BlobVersionedHashes: hashes[2:]}
+	frame := &types.FrameTransaction{NonceKeys: nil, Frames: []types.Frame{{}}, BlobVersionedHashes: hashes[2:]}
 	raw, err := types.MarshalTransactionsBinary(types.Transactions{
 		&types.LegacyTx{}, &types.AccessListTx{}, &types.DynamicFeeTransaction{},
 		&types.SetCodeTransaction{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &common.Address{1}}}},
@@ -5918,4 +5974,67 @@ func TestValidateExecutionPayloadEnvelopeForGossipRejectsInvalidBlock(t *testing
 
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+func TestHeadV2PayloadArrivalDoesNotDuplicateStageEvent(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	root := envelope.Message.BeaconBlockRoot
+	f := newPayloadVoteTestStore(t, root, true, false)
+	f.beaconCfg = cfg
+	f.forkGraph = &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}, hasEnvelope: true}
+	f.emitters = beaconevents.NewEventEmitter()
+	f.headHash, f.headSlot, f.headPayloadStatus = root, block.Block.Slot, cltypes.PayloadStatusEmpty
+	events := make(chan *beaconevents.EventStream, 8)
+	sub := f.emitters.State().SubscribeHeadV2(events)
+	defer sub.Unsubscribe()
+	emitStage := func(status string) {
+		t.Helper()
+		v2, err := beaconevents.BuildHeadV2Data(cfg, blockState, block.Block.Slot, root, block.Block.StateRoot, status, f.IsRootOptimistic(root))
+		require.NoError(t, err)
+		require.True(t, f.emitters.EmitHeadEventsIfCurrent(&beaconevents.HeadData{Slot: block.Block.Slot, Block: root}, v2, func() bool {
+			head, slot, err := f.GetHeadNode()
+			return err == nil && head.Root == root && slot == block.Block.Slot && beaconevents.PayloadStatusName(head.PayloadStatus) == status
+		}))
+	}
+	emitStage("empty")
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+	f.emitExecutionPayloadIntegrationEvents(root, envelope)
+	emitStage("full")
+	var statuses []string
+	for len(events) > 0 {
+		statuses = append(statuses, (<-events).Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+	}
+	require.Equal(t, []string{"empty", "full"}, statuses, "payload integration followed by the forkchoice stage must emit full once")
+}
+
+func TestHeadV2ReorgBackAfterPayloadArrival(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	root := envelope.Message.BeaconBlockRoot
+	oldRoot := common.Hash{0xab}
+	f := newPayloadVoteTestStore(t, root, true, false)
+	f.beaconCfg = cfg
+	f.forkGraph = &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}, hasEnvelope: true}
+	f.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 8)
+	sub := f.emitters.State().SubscribeHeadV2(events)
+	defer sub.Unsubscribe()
+	emitOldHead := func() {
+		t.Helper()
+		f.headHash, f.headSlot, f.headPayloadStatus = oldRoot, block.Block.Slot, cltypes.PayloadStatusFull
+		v2, err := beaconevents.BuildHeadV2Data(cfg, blockState, block.Block.Slot, oldRoot, block.Block.StateRoot, "full", f.IsRootOptimistic(oldRoot))
+		require.NoError(t, err)
+		require.True(t, f.emitters.EmitHeadEventsIfCurrent(&beaconevents.HeadData{Slot: block.Block.Slot, Block: oldRoot}, v2, func() bool {
+			head, _, err := f.GetHeadNode()
+			return err == nil && head.Root == oldRoot
+		}))
+	}
+	emitOldHead()
+	f.headHash, f.headSlot, f.headPayloadStatus = root, block.Block.Slot, cltypes.PayloadStatusFull
+	f.emitExecutionPayloadIntegrationEvents(root, envelope)
+	emitOldHead()
+	var roots []common.Hash
+	for len(events) > 0 {
+		roots = append(roots, (<-events).Data.(*beaconevents.HeadV2Data).Data.Block)
+	}
+	require.Equal(t, []common.Hash{oldRoot, root, oldRoot}, roots, "head_v2 must announce a return to the old head after payload integration announced another head")
 }

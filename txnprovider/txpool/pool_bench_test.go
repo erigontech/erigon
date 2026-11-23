@@ -18,8 +18,8 @@ package txpool
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
-	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -42,7 +42,6 @@ func BenchmarkCountContent(b *testing.B) {
 	for _, frames := range []int{0, 100, 10_000} {
 		b.Run(fmt.Sprintf("frames=%d", frames), func(b *testing.B) {
 			pool := &TxPool{
-				lock:    new(sync.Mutex),
 				pending: NewPendingSubPool(PendingSubPool, frames),
 				baseFee: NewSubPool(BaseFeeSubPool, frames),
 				queued:  NewSubPool(QueuedSubPool, frames),
@@ -65,6 +64,34 @@ func BenchmarkCountContent(b *testing.B) {
 	}
 }
 
+func BenchmarkRejectRemoteTxns(b *testing.B) {
+	for _, reason := range []string{"duplicate", "byte budget"} {
+		b.Run(reason, func(b *testing.B) {
+			pool := &TxPool{
+				unprocessedRemoteTxns:   &TxnSlots{},
+				unprocessedRemoteByHash: make(map[string]*TxnSlot),
+			}
+			var packet TxnSlots
+			sender := common.Address{1}
+			for i := range 256 {
+				txn := newTestTxnSlot(uint64(i), 0, 1, 2, 21_000)
+				txn.Rlp, txn.Size = make([]byte, 512), 512
+				binary.BigEndian.PutUint64(txn.IDHash[24:], uint64(i))
+				packet.Append(txn, sender[:], false)
+			}
+			pool.AddRemoteTxns(b.Context(), packet, nil, nil)
+			if reason == "byte budget" {
+				pool.unprocessedRemoteBytes = remoteTxnQueueByteLimit - 1
+				clear(pool.unprocessedRemoteByHash)
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				pool.AddRemoteTxns(b.Context(), packet, nil, nil)
+			}
+		})
+	}
+}
+
 func BenchmarkProcessRemoteTxns(b *testing.B) {
 	require := require.New(b)
 	ch := make(chan Announcements, 100)
@@ -74,7 +101,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	b.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New())
 	require.NoError(err)
 	require.NotNil(pool)
 

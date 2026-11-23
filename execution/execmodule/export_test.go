@@ -16,9 +16,20 @@
 
 package execmodule
 
-import "github.com/erigontech/erigon/common"
+import (
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/rawdb"
+)
 
 func (e *ExecModule) IsRetainedSideBlock(hash common.Hash) bool {
 	_, ok := e.pendingBlocks[hash]
 	return ok
+}
+
+func (e *ExecModule) DeleteRetainedHeader(hash common.Hash, number uint64) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	if e.retainedBlocks != nil {
+		rawdb.DeleteHeader(e.retainedBlocks, hash, number)
+	}
 }

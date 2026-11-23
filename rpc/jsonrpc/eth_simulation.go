@@ -513,8 +513,8 @@ func (s *simulator) sanitizeCall(
 		if args.GasPrice == nil && args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil {
 			args.GasPrice = new(hexutil.U256)
 		}
-	} else {
-		// A base fee is provided, requiring 1559-type execution
+	} else if args.GasPrice == nil {
+		// A call with gasPrice stays legacy; zero dynamic fees would conflict with it.
 		if args.MaxFeePerGas == nil {
 			args.MaxFeePerGas = new(hexutil.U256)
 		}
@@ -685,8 +685,7 @@ func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateR
 			}
 		}
 	}
-	overrides := state.New(base)
-	transactions.VersionedBlockState(overrides)
+	overrides := state.NewVersionedBlock(base)
 	if err := stateOverrides.OverrideTo(overrides, precompiles, rules, stateWriter); err != nil {
 		overrides.Close()
 		return nil, err
@@ -820,9 +819,8 @@ func (s *simulator) simulateBlock(
 		defer overrideReader.Close()
 		stateReader = overrideReader
 	}
-	intraBlockState := state.New(stateReader)
+	intraBlockState := state.NewVersionedBlock(stateReader)
 	defer intraBlockState.Close()
-	intraBlockState.SetVersionMap(state.NewVersionMap(nil))
 	intraBlockState.SetTxContext(blockNumber, -1)
 
 	var balIO *state.VersionedIO
@@ -1555,14 +1553,18 @@ func (s *simulator) computeCommitmentFromStateHistory(
 		for address, locations := range touched {
 			addrValue := address.Value()
 			addressKey := addrValue[:]
-			tsd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(addressKey), nil)
+			if err := tsd.GetCommitmentCtx().TouchKeyFromState(ttx, addressKey); err != nil {
+				return nil, err
+			}
 			s.logger.Debug("Touch key", "domain", kv.AccountsDomain, "key", address.Value().Hex()[2:])
 			for _, loc := range locations {
 				locValue := loc.Value()
 				locationKey := locValue[:]
 				copy(storageFullKey[:length.Addr], addressKey)
 				copy(storageFullKey[length.Addr:], locationKey)
-				tsd.GetCommitmentCtx().TouchKey(kv.StorageDomain, string(storageFullKey), nil)
+				if err := tsd.GetCommitmentCtx().TouchKeyFromState(ttx, storageFullKey); err != nil {
+					return nil, err
+				}
 				s.logger.Debug("Touch key", "domain", kv.StorageDomain, "key", address.Value().Hex()[2:]+loc.Value().Hex()[2:])
 			}
 		}

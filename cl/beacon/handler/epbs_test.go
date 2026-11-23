@@ -58,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	mock_services "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -1650,10 +1651,6 @@ func TestPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T) 
 
 func testPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T, canonical bool) {
 	ctrl := gomock.NewController(t)
-	if clparams.GetBeaconConfig() == nil {
-		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg)
-	}
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	currentSlot := handler.ethClock.GetCurrentSlot()
 	clock := eth_clock.NewMockEthereumClock(ctrl)
@@ -1704,11 +1701,11 @@ func testPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T, 
 
 	var columnsWritten atomic.Int32
 	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
-	columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), common.Hash(blockRoot), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error {
-			columnsWritten.Add(1)
+	columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), common.Hash(blockRoot), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+			columnsWritten.Add(int32(len(sidecars)))
 			return nil
-		}).Times(int(handler.beaconChainCfg.NumberOfColumns))
+		})
 	handler.columnStorage = columnStorage
 	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
 		if columnsWritten.Load() != int32(handler.beaconChainCfg.NumberOfColumns) {
@@ -2268,6 +2265,46 @@ func TestEmitFullHeadV2KeepsPayloadStatusWithHeadSnapshot(t *testing.T) {
 			require.Equal(t, "full", event.Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
 		})
 	}
+}
+
+func TestEmitFullHeadV2SharesHeadCacheWithStage(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	root := common.Hash{2}
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	headState := state.New(handler.beaconChainCfg)
+	headState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, headState.SetSlot(1))
+	require.NoError(t, headState.SetBlockRootAt(0, common.Hash{1}))
+	fcu.HeadVal, fcu.HeadSlotVal = root, 1
+	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+	fcu.StateAtBlockRootVal[root] = headState
+	handler.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 4)
+	subscription := handler.emitters.State().SubscribeHeadV2(events)
+	defer subscription.Unsubscribe()
+
+	stageEvent, err := beaconevents.BuildHeadV2Data(handler.beaconChainCfg, headState, 1, root, block.Block.StateRoot, "empty", false)
+	require.NoError(t, err)
+	require.True(t, handler.emitters.EmitHeadEventsIfCurrent(&beaconevents.HeadData{Slot: 1, Block: root}, stageEvent, func() bool {
+		head, slot, err := fcu.GetHeadNode()
+		return err == nil && head.Root == root && slot == 1 && beaconevents.PayloadStatusName(head.PayloadStatus) == "empty"
+	}))
+	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+
+	handler.emitFullHeadV2(block, root)
+	fullStageEvent, err := beaconevents.BuildHeadV2Data(handler.beaconChainCfg, headState, 1, root, block.Block.StateRoot, "full", false)
+	require.NoError(t, err)
+	require.True(t, handler.emitters.EmitHeadEventsIfCurrent(&beaconevents.HeadData{Slot: 1, Block: root}, fullStageEvent, func() bool {
+		head, slot, err := fcu.GetHeadNode()
+		return err == nil && head.Root == root && slot == 1 && beaconevents.PayloadStatusName(head.PayloadStatus) == "full"
+	}))
+
+	var statuses []string
+	for len(events) > 0 {
+		statuses = append(statuses, (<-events).Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+	}
+	require.Equal(t, []string{"empty", "full"}, statuses, "handler and stage must share the head_v2 root and payload-status cache")
 }
 
 func TestEmitFullHeadV2DoesNotCopyState(t *testing.T) {
@@ -4532,10 +4569,6 @@ func TestGetExecutionPayloadEnvelopeBySlotBeyondUint32IsNotFound(t *testing.T) {
 }
 
 func TestPostExecutionPayloadEnvelopesAcceptsBloblessStatelessContents(t *testing.T) {
-	if clparams.GetBeaconConfig() == nil {
-		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg)
-	}
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	root := common.Hash{3}
 	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 12, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
@@ -4599,6 +4632,56 @@ func TestPostExecutionPayloadEnvelopeRejectsTooManyWithdrawalsBeforeAdmission(t 
 			require.Contains(t, recorder.Body.String(), "invalid execution payload withdrawals")
 			require.False(t, fcu.ValidateExecutionPayloadEnvelopeForGossipCalled)
 		})
+	}
+}
+
+func TestPostExecutionPayloadEnvelopeRejectsOversizedEncodingBeforeAdmission(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	envelope := validTestSignedExecutionPayloadEnvelope(&cfg)
+	jsonBody, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	depositCount := int(clparams.MaxChunkSize) / solid.SizeDepositRequest
+	deposits := envelope.Message.ExecutionRequests.Deposits
+	for range depositCount {
+		deposits.Append(&solid.DepositRequest{})
+	}
+	require.NoError(t, envelope.ValidateForConfig(&cfg))
+	sszBody, err := ssz2.MarshalSSZ(nil, envelope.Message, envelope.Signature[:])
+	require.NoError(t, err)
+	require.Greater(t, uint64(len(sszBody)), clparams.MaxChunkSize)
+
+	// Fully marshalled, the JSON exceeds the request body cap, so the zero deposits are written as {}.
+	emptyDeposits := []byte(`"deposits":[]`)
+	require.Equal(t, 1, bytes.Count(jsonBody, emptyDeposits))
+	compactDeposits := `"deposits":[` + strings.Repeat("{},", depositCount-1) + `{}]`
+	jsonBody = bytes.Replace(jsonBody, emptyDeposits, []byte(compactDeposits), 1)
+
+	for _, tc := range []struct {
+		contentType string
+		body        []byte
+	}{
+		{"application/json", jsonBody},
+		{"application/octet-stream", sszBody},
+	} {
+		for _, canonical := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/canonical=%t", tc.contentType, canonical), func(t *testing.T) {
+				_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				fcu.ClaimExecutionPayloadEnvelopeForGossipFunc = func(context.Context, common.Hash, uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+					t.Fatal("oversized envelope reached gossip admission")
+					return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, nil
+				}
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(tc.body))
+				request.Header.Set("Content-Type", tc.contentType)
+				request.Header.Set("Eth-Blob-Data-Included", "false")
+				request.Header.Set("Eth-Consensus-Version", "gloas")
+				recorder := httptest.NewRecorder()
+				handler.postEthV1BeaconExecutionPayloadEnvelope(recorder, request, canonical)
+
+				require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+				require.Contains(t, recorder.Body.String(), "execution payload envelope encoding size")
+				require.False(t, fcu.ValidateExecutionPayloadEnvelopeForGossipCalled)
+			})
+		}
 	}
 }
 
