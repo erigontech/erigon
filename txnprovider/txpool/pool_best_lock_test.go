@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -188,6 +187,16 @@ func TestPeekBestWakesAtRequestedBlock(t *testing.T) {
 	})
 }
 
+type pauseOnErrContext struct {
+	context.Context
+	resume <-chan struct{}
+}
+
+func (c pauseOnErrContext) Err() error {
+	<-c.resume
+	return c.Context.Err()
+}
+
 func TestProvideTxnsRechecksParentAfterUnwind(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		_, pool, _, _ := newTestPool(t)
@@ -207,15 +216,17 @@ func TestProvideTxnsRechecksParentAfterUnwind(t *testing.T) {
 		_, err := pool.AddLocalTxns(ctx, slots)
 		require.NoError(t, err)
 
-		// Unwind between the parent wait and selection. The check under the pool lock
-		// must send the caller back to the wait before yielding any transactions.
-		require.True(t, pool.waitForBlock(ctx, 1, 1, nil))
-		require.NoError(t, update(0, remoteproto.Direction_UNWIND))
-		_, _, err = pool.selectBest(ctx, 1, &TxnsRlp{}, 1, mdgas.FullMdGas{}, nil, 0)
-		require.ErrorIs(t, err, errParentBlockRewound)
+		// Selection checks ctx.Err after seeing the parent and before taking the pool lock.
+		// Pause both builders there so the unwind makes them wait again before yielding any transactions.
+		resume := make(chan struct{})
+		selectionCtx := pauseOnErrContext{Context: ctx, resume: resume}
 		stop := make(chan struct{})
-		stopped := provideTxnsAsync(ctx, pool, txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockWaitStop(stop))
-		waiting := provideTxnsAsync(ctx, pool, txnprovider.WithParentBlockNum(1))
+		stopped := provideTxnsAsync(selectionCtx, pool, txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockWaitStop(stop))
+		waiting := provideTxnsAsync(selectionCtx, pool, txnprovider.WithParentBlockNum(1))
+		synctest.Wait()
+		err = update(0, remoteproto.Direction_UNWIND)
+		close(resume)
+		require.NoError(t, err)
 		synctest.Wait()
 		close(stop)
 		got := <-stopped
