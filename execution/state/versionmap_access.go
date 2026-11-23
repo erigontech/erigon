@@ -443,14 +443,17 @@ func balNonBalanceChangeIndexes(ac *types.AccountChanges, fn func(uint32)) {
 func balRevivalIndexes(ac *types.AccountChanges) map[uint32]uint32 {
 	revivals := make(map[uint32]uint32)
 	balNonBalanceChangeIndexes(ac, func(idx uint32) {
-		i, hasBalance := slices.BinarySearchFunc(ac.BalanceChanges, idx, func(c *types.BalanceChange, idx uint32) int {
-			return cmp.Compare(c.Index, idx)
+		i, hasBalance := slices.BinarySearchFunc(ac.BalanceChanges, idx, func(c *types.BalanceChange, target uint32) int {
+			return cmp.Compare(c.Index, target)
 		})
 		if i == 0 || hasBalance {
 			return
 		}
 		prev := ac.BalanceChanges[i-1]
-		if next := revivals[prev.Index]; prev.Value.IsZero() && (next == 0 || idx < next) {
+		if !prev.Value.IsZero() {
+			return
+		}
+		if next := revivals[prev.Index]; next == 0 || idx < next {
 			revivals[prev.Index] = idx
 		}
 	})

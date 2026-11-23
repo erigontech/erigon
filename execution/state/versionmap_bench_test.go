@@ -16,16 +16,29 @@ import (
 )
 
 func BenchmarkSeedEmptyRemovals(b *testing.B) {
-	for _, n := range []int{32, 256, 1024} {
-		b.Run(fmt.Sprintf("changes=%d", n), func(b *testing.B) {
+	for _, tc := range []struct{ balances, storage int }{
+		{32, 0},
+		{256, 0},
+		{1024, 0},
+		{2, 256},
+		{256, 256},
+	} {
+		b.Run(fmt.Sprintf("balances=%d/storage=%d", tc.balances, tc.storage), func(b *testing.B) {
 			bal := types.BlockAccessList{{
 				Address:      common.Address{19: 1},
-				NonceChanges: []*types.NonceChange{{Index: uint32(n + 1), Value: 1}},
+				NonceChanges: []*types.NonceChange{{Index: uint32(2*max(tc.balances, tc.storage) + 1), Value: 1}},
 			}}
-			for i := range n {
+			for i := range tc.balances {
 				bal[0].BalanceChanges = append(bal[0].BalanceChanges, &types.BalanceChange{
-					Index: uint32(i + 1), Value: *uint256.NewInt(uint64((i + 1) % 2)),
+					Index: uint32(2*i + 1), Value: *uint256.NewInt(uint64((i + 1) % 2)),
 				})
+			}
+			if tc.storage > 0 {
+				changes := make([]*types.StorageChange, tc.storage)
+				for i := range changes {
+					changes[i] = &types.StorageChange{Index: uint32(2*i + 2), Value: *uint256.NewInt(uint64(i + 1))}
+				}
+				bal[0].StorageChanges = []types.SlotChanges{{Slot: accounts.InternKey(common.Hash{31: 1}), Changes: changes}}
 			}
 			base := &countingAccountReader{}
 			for b.Loop() {
