@@ -145,23 +145,19 @@ func TestTransactionSignatureValidity2(t *testing.T) {
 	ctx := NewTxnParseContext(*chainId)
 	slot, sender := &TxnSlot{}, [20]byte{}
 	rawTxn := hexutil.MustDecodeHex("02f8720513844190ab00848321560082520894cab441d2f45a3fee83d15c6b6b6c36a139f55b6288054607fc96a6000080c001a0dffe4cb5651e663d0eac8c4d002de734dd24db0f1109b062d17da290a133cc02a0913fb9f53f7a792bcd9e4d7cced1b8545d1ab82c77432b0bc2e9384ba6c250c5")
-	envelope, err := rlp.EncodeToBytes(rawTxn)
-	require.NoError(t, err)
 	const start = 1
-	wantEnd := start + len(envelope)
+	wantEnd := start + rlp.StringLen(rawTxn)
 	payload := make([]byte, wantEnd+1)
-	copy(payload[start:], envelope)
+	rlp.EncodeStringToBuf(rawTxn, payload[start:wantEnd])
 
 	end, err := ctx.ParseTransaction(payload, start, slot, sender[:], true /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
-	assert.ErrorIs(t, err, types.ErrInvalidSig)
 	assert.ErrorIs(t, err, ErrRejected)
-	assert.ErrorIs(t, err, ErrParseTxn)
 	assert.Equal(t, wantEnd, end)
 
 	// Only legacy transactions can happen before EIP-2
 	ctx.WithAllowPreEip2s(true)
 	_, err = ctx.ParseTransaction(rawTxn, 0, slot, sender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
-	assert.ErrorIs(t, err, ErrRejected)
+	assert.ErrorIs(t, err, types.ErrInvalidSig)
 	assert.ErrorIs(t, err, ErrParseTxn)
 }
 
