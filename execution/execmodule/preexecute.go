@@ -346,7 +346,7 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 		// lagging DB (the predecessor has opened but not canonicalised). With no live ancestor — the first block
 		// after a restart — the parent is canonical, and its state is read from the DB beneath the SD: never from
 		// the module context, which is the canonical flow's.
-		frontierParent := e.preExec.ParentFor(blockNumber)
+		frontierParent := e.preExec.ParentFor(blockNumber, header.ParentHash)
 		parent := frontierParent
 		frontierExtension = frontierParent != nil
 

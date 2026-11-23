@@ -79,15 +79,22 @@ func TestPreExecFrontier_ParentForPicksImmediatePredecessor(t *testing.T) {
 	openGen(f, 4, common.Hash{4})
 	sd5 := openGen(f, 5, common.Hash{5})
 
-	assert.Same(t, sd5, f.ParentFor(6), "block 6 chains onto block 5")
-	assert.Nil(t, f.ParentFor(4), "no live ancestor below block 4")
+	assert.Same(t, sd5, f.ParentFor(6, common.Hash{5}), "block 6 chains onto block 5")
+	assert.Nil(t, f.ParentFor(4, common.Hash{3}), "no live ancestor below block 4")
+}
+
+func TestPreExecFrontier_ParentForRefusesAnotherForkAtTheParentHeight(t *testing.T) {
+	f := newPreExecFrontier()
+	openGen(f, 5, common.Hash{5})
+
+	assert.Nil(t, f.ParentFor(6, common.Hash{0xaa}), "a block on another block 5 does not chain onto this node's own 5")
 }
 
 func TestPreExecFrontier_ParentForFallsBackBelow(t *testing.T) {
 	f := newPreExecFrontier()
 	sd4 := openGen(f, 4, common.Hash{4})
 
-	assert.Same(t, sd4, f.ParentFor(9), "with no immediate predecessor, the newest generation below is the parent")
+	assert.Same(t, sd4, f.ParentFor(9, common.Hash{8}), "with no immediate predecessor, the newest generation below is the parent")
 }
 
 // The validation side asks these two questions, and only these two.

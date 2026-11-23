@@ -219,7 +219,7 @@ func (f *preExecFrontier) Active() (common.Hash, uint64, *execctx.SharedDomains)
 // predecessor matters — chaining to a grandparent copies a txNum index missing the parent's entry, so
 // AppendCanonicalTxNums for the new block fails with an append gap and the block cannot open.
 // Returns nil when there is no live ancestor (the caller falls back to the canonical context).
-func (f *preExecFrontier) ParentFor(number uint64) *execctx.SharedDomains {
+func (f *preExecFrontier) ParentFor(number uint64, parent common.Hash) *execctx.SharedDomains {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var best *preExecGen
@@ -228,6 +228,9 @@ func (f *preExecFrontier) ParentFor(number uint64) *execctx.SharedDomains {
 			continue
 		}
 		if number > 0 && g.number == number-1 {
+			if g.headHash != parent {
+				return nil
+			}
 			return g.sd
 		}
 		if best == nil || g.number > best.number {
