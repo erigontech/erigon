@@ -19,7 +19,6 @@ package execmodule
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -51,18 +50,27 @@ func getLatestBlockNumber(tx kv.Tx) (uint64, error) {
 // SetHead rewinds the local chain to the specified block number by unwinding
 // all staged sync stages. This is the core implementation used by debug_setHead.
 func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
-	acquireCtx, acquireCancel := context.WithTimeout(ctx, 5*time.Second)
+	// Acquiring the module and pausing maintenance share one deadline. The unwind itself can take longer.
+	acquireCtx, acquireCancel := context.WithTimeout(ctx, rewindAdmissionTimeout)
 	defer acquireCancel()
 	if err := e.semaphore.Acquire(acquireCtx, 1); err != nil {
 		return fmt.Errorf("execution module is busy: %w", err)
 	}
 	defer e.semaphore.Release(1)
 
-	resumeReadAhead, err := e.suspendReadAhead(ctx)
+	resumeReadAhead, err := e.suspendReadAhead(acquireCtx)
 	if err != nil {
 		return fmt.Errorf("suspend read-ahead: %w", err)
 	}
 	defer resumeReadAhead()
+
+	// The transaction pins its snapshot files when it opens. Wait for builds
+	// first and keep them paused through commit so they cannot publish unwound state.
+	resumeFileBuilds, err := e.db.PauseStateFileBuilds(acquireCtx)
+	if err != nil {
+		return fmt.Errorf("pause state file builds: %w", err)
+	}
+	defer resumeFileBuilds()
 
 	tx, err := e.db.BeginTemporalRw(ctx)
 	if err != nil {

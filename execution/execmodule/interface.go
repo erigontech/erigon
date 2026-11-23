@@ -156,9 +156,9 @@ type ExecutionModule interface {
 	// --- Fork choice ------------------------------------------------------
 
 	// UpdateForkChoice updates the canonical head, safe, and finalized block
-	// hashes.  The caller may set a deadline on ctx to bound how long to wait
-	// synchronously: an admitted update that exceeds the deadline returns Busy
-	// with UpdateInProgress set so the caller can poll with GetForkChoice.
+	// hashes. Busy before admission means the caller should retry. An admitted
+	// update that outlives the caller's deadline returns Busy with UpdateInProgress
+	// set so the caller can poll with GetForkChoice.
 	// TooFarAway reports state ahead of the blocks; the canonical chain up to
 	// headHash is already committed when it is returned.
 	UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error)

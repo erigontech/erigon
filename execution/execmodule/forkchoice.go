@@ -24,6 +24,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -48,6 +49,14 @@ type forkchoiceOutcome struct {
 	result ForkChoiceResult
 	err    error
 }
+
+const (
+	forkchoicePending uint32 = iota
+	forkchoiceAdmitted
+	forkchoiceAbandoned
+)
+
+const rewindAdmissionTimeout = 5 * time.Second
 
 func sendForkchoiceResultWithoutWaiting(ch chan forkchoiceOutcome, result ForkChoiceResult, alreadySent bool) {
 	if alreadySent {
@@ -173,17 +182,15 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 		return ForkChoiceResult{Status: ExecutionStatusBusy}, nil
 	}
 	outcomeCh := make(chan forkchoiceOutcome, 1)
+	var admission atomic.Uint32
+	admissionCtx, stopAdmission := context.WithCancel(e.backgroundCtx)
+	defer stopAdmission()
 
-	// Spawn the actual forkchoice work using the module's background context so
-	// it is not cancelled when the caller's context times out. We return as soon
-	// as the result lands on outcomeCh — for a merge-extending fork at tip the
-	// result is sent before flush/commit, so the consensus client is not blocked
-	// on the EL commit. The semaphore is released — by the forkchoice goroutine, or
-	// by the background prune goroutine it hands off to — only after the FCU
-	// cleanup has run, so any follow-up op (AssembleBlock, next FCU) that acquires
-	// the semaphore observes fully-settled state.
+	// An admitted update runs on the module context and can outlive the caller.
+	// At tip the result can arrive before commit. Execution keeps the semaphore
+	// through cleanup and prune so the next operation sees settled state.
 	go func() {
-		if err := e.updateForkChoice(e.backgroundCtx, headHash, safeHash, finalizedHash, outcomeCh); err != nil {
+		if err := e.updateForkChoice(admissionCtx, &admission, headHash, safeHash, finalizedHash, outcomeCh); err != nil {
 			e.logger.Debug("updateforkchoice failed", "err", err)
 		}
 	}()
@@ -192,9 +199,11 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 	case outcome := <-outcomeCh:
 		return outcome.result, outcome.err
 	case <-ctx.Done():
+		// If the caller reaches its deadline during admission, it can retry.
+		// Once the worker owns the update, it finishes on the module context.
+		admission.CompareAndSwap(forkchoicePending, forkchoiceAbandoned)
 		if ctx.Err() == context.DeadlineExceeded {
-			e.logger.Debug("treating forkChoiceUpdated as asynchronous as it is taking too long")
-			return ForkChoiceResult{Status: ExecutionStatusBusy, UpdateInProgress: true}, nil
+			return ForkChoiceResult{Status: ExecutionStatusBusy, UpdateInProgress: admission.Load() == forkchoiceAdmitted}, nil
 		}
 		e.logger.Debug("forkChoiceUpdate cancelled")
 		return ForkChoiceResult{}, ctx.Err()
@@ -222,14 +231,22 @@ func forkChoiceHashesMatch(tx kv.Getter, blockHash, safeHash, finalizedHash comm
 		(finalizedHash == (common.Hash{}) || rawdb.ReadForkchoiceFinalized(tx) == finalizedHash)
 }
 
-// currentFinalisedBlockNum returns zero when finality is unset,
-// or nil when the stored finalized hash has no known block number.
-func (e *ExecModule) currentFinalisedBlockNum(ctx context.Context, tx kv.Getter) (*uint64, error) {
-	finalisedHash := rawdb.ReadForkchoiceFinalized(tx)
-	if finalisedHash == (common.Hash{}) {
-		return new(uint64), nil
+// forkchoiceFinality returns the stored finalized height and whether this request
+// can lower it. An unset marker gives height zero. A stored hash with no known height gives nil.
+func (e *ExecModule) forkchoiceFinality(ctx context.Context, tx kv.Getter, headNum uint64, finalizedHash common.Hash) (*uint64, bool, error) {
+	storedHash := rawdb.ReadForkchoiceFinalized(tx)
+	if storedHash == (common.Hash{}) {
+		return new(uint64), false, nil
 	}
-	return e.blockReader.HeaderNumber(ctx, tx, finalisedHash)
+	stored, err := e.blockReader.HeaderNumber(ctx, tx, storedHash)
+	if err != nil || stored == nil {
+		return stored, false, err
+	}
+	if finalizedHash == (common.Hash{}) || finalizedHash == storedHash || (headNum > 0 && headNum < *stored) {
+		return stored, false, nil
+	}
+	proposed, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
+	return stored, proposed != nil && *proposed < *stored, err
 }
 
 // shortCircuitForkchoice may close the overlay and roTx; the caller must return afterward.
@@ -459,7 +476,8 @@ func (e *ExecModule) unwindIfNeeded(
 	return nil, unwindPoint, nil
 }
 
-func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
+func (e *ExecModule) updateForkChoice(admissionCtx context.Context, admission *atomic.Uint32, blockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
+	ctx := e.backgroundCtx
 	shouldReleaseSema := true
 	defer func() {
 		if shouldReleaseSema {
@@ -475,10 +493,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			restoreStateChanges = e.accum.Accumulator.Checkpoint()
 		}
 	}
-	checkpointStateChanges()
 	// The next semaphore acquirer must observe settled state, so the bg-prune
 	// path runs this eagerly before handing the semaphore to its goroutine.
 	cleanupBeforeSemaRelease := sync.OnceFunc(func() {
+		if admission.Load() != forkchoiceAdmitted {
+			return
+		}
 		if restoreStateChanges != nil {
 			restoreStateChanges()
 		}
@@ -489,7 +509,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	})
 	defer cleanupBeforeSemaRelease()
 
-	resumeReadAhead, err := e.suspendReadAhead(ctx)
+	resumeReadAhead, err := e.suspendReadAhead(admissionCtx)
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("suspend read-ahead: %w", err), false)
 	}
@@ -513,10 +533,50 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 	// InsertBlocks may have staged block data, but it does not change
 	// canonical hashes, forkchoice markers, or stage progress.
-	var hasOverlay bool
-	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-		hasOverlay = true
+	hasOverlay := e.currentContext != nil && e.currentContext.BlockOverlay() != nil
+	var headerTx kv.Tx = roTx
+	if hasOverlay {
+		headerTx = e.currentContext.BlockOverlay().NewReadView(roTx)
 	}
+	fcuHeader, err := e.blockReader.HeaderByHash(ctx, headerTx, blockHash)
+	if err != nil {
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+	}
+	if fcuHeader == nil {
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash), false)
+	}
+	finalisedBlockNum, lowersFinality, err := e.forkchoiceFinality(ctx, headerTx, fcuHeader.Number.Uint64(), finalizedHash)
+	if err != nil {
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+	}
+	var resumeFileBuilds func()
+	if lowersFinality {
+		// An active build can still publish state up to the old checkpoint.
+		// Finish it before pinning the unwind boundary and keep builds paused until the lower marker commits.
+		roTx.Rollback()
+		roTx = nil
+		waitCtx, cancelWait := context.WithTimeout(admissionCtx, rewindAdmissionTimeout)
+		resume, err := e.db.PauseStateFileBuilds(waitCtx)
+		cancelWait()
+		if errors.Is(err, context.DeadlineExceeded) {
+			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{Status: ExecutionStatusBusy}, false)
+			return nil
+		}
+		if err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("pause state file builds: %w", err), false)
+		}
+		resumeFileBuilds = sync.OnceFunc(resume)
+		defer resumeFileBuilds()
+		roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic // the outer defer closes the current roTx
+		if err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
+	}
+	if !admission.CompareAndSwap(forkchoicePending, forkchoiceAdmitted) {
+		return nil
+	}
+
+	checkpointStateChanges()
 
 	// Create SharedDomains on the raw RO tx. Domain state (accounts,
 	// storage, code, commitment) is read from the committed DB state.
@@ -575,17 +635,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 	}
 
-	blockHash := originalBlockHash
-
-	// Step one, find reconnection point, and mark all of those headers as canonical.
-	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, originalBlockHash)
-	if err != nil {
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-	}
-	if fcuHeader == nil {
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash), false)
-	}
-
 	e.hook.LastNewBlockSeen(fcuHeader.Number.Uint64()) // used by eth_syncing
 	e.hook.NotifySyncState(tx)
 
@@ -618,10 +667,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
-	finalisedBlockNum, err := e.currentFinalisedBlockNum(ctx, tx)
-	if err != nil {
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-	}
 	if finalisedBlockNum == nil {
 		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 			LatestValidHash: common.Hash{},
@@ -933,6 +978,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		commitTimings, err := e.runForkchoiceFlushCommit(currentContext, roTx)
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		}
+		if resumeFileBuilds != nil {
+			// The prune that follows can now schedule steps under committed finality.
+			resumeFileBuilds()
 		}
 		checkpointStateChanges()
 		restoreRecentReceipts = nil

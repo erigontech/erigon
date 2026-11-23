@@ -791,6 +791,10 @@ func (db *DB) BuildFiles(toTxNum uint64, finalityCtx kv.FinalityContext) error {
 	return db.stateFiles.BuildFiles(db, toTxNum, finalityCtx)
 }
 
+func (db *DB) PauseStateFileBuilds(ctx context.Context) (func(), error) {
+	return db.stateFiles.PauseStateFileBuilds(ctx)
+}
+
 func (db *DB) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
 	return db.stateFiles.BuildFiles2(ctx, db, fromStep, toStep, finalityCtx, doMerge)
 }
