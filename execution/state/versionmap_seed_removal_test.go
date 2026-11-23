@@ -449,6 +449,31 @@ func TestSeedEmptyRemovalsRevivalIndexes(t *testing.T) {
 	require.True(t, revival.Value.IsZero())
 }
 
+type countedBALChange struct {
+	index uint32
+	reads *int
+}
+
+func (c countedBALChange) GetIndex() uint32 {
+	(*c.reads)++
+	return c.index
+}
+
+func TestRecordBALRevivalsSkipsUnrelatedChanges(t *testing.T) {
+	t.Parallel()
+	var reads int
+	changes := make([]countedBALChange, 256)
+	for i := range changes {
+		changes[i] = countedBALChange{index: uint32(2 * i), reads: &reads}
+	}
+	candidates := []balRemovalCandidate{{index: 7, next: 8}, {index: 127, next: 130}}
+	recordBALRevivals(candidates, changes)
+	require.False(t, candidates[0].seedBalance)
+	require.True(t, candidates[1].seedBalance)
+	require.Equal(t, uint32(128), candidates[1].next)
+	require.Less(t, reads, len(changes), "sparse candidates should skip unrelated field writes")
+}
+
 func TestHasAmbiguousBaseAccount(t *testing.T) {
 	t.Parallel()
 	addr := func(s string) accounts.Address { return accounts.InternAddress(common.HexToAddress(s)) }

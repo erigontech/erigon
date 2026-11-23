@@ -19,6 +19,7 @@ package state
 import (
 	"cmp"
 	"slices"
+	"sort"
 
 	"github.com/holiman/uint256"
 
@@ -315,11 +316,22 @@ func (vm *VersionMap) HasAmbiguousBaseAccount(eip161Enabled, isAura bool, base S
 
 func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {
 	var stamps []*WriteSet
-	var candidates []uint32
+	var candidates []balRemovalCandidate
 	for i := range vm.bal {
 		ac := &vm.bal[i]
-		var maxIdx uint32
-		balChangeIndexes(ac, func(idx uint32) { maxIdx = max(maxIdx, idx) })
+		maxIdx := max(balLastChangeIndex(ac.NonceChanges), balLastChangeIndex(ac.CodeChanges))
+		for _, slot := range ac.StorageChanges {
+			if changes := slot.Changes; len(changes) > 0 {
+				maxIdx = max(maxIdx, changes[len(changes)-1].Index)
+			}
+		}
+		var zeroBalances int
+		for _, c := range ac.BalanceChanges {
+			maxIdx = max(maxIdx, c.Index)
+			if c.Value.IsZero() {
+				zeroBalances++
+			}
+		}
 		if maxIdx == 0 {
 			continue // only reads, no field change — not a removal candidate
 		}
@@ -330,16 +342,22 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 		if len(ac.BalanceChanges) == 0 && len(ac.NonceChanges) == 0 && len(ac.CodeChanges) == 0 {
 			continue
 		}
-		candidates = candidates[:0]
-		for _, c := range ac.BalanceChanges {
-			if c.Value.IsZero() && c.Index != maxIdx {
-				candidates = append(candidates, c.Index)
+		candidates = slices.Grow(candidates[:0], zeroBalances+1)
+		for j, c := range ac.BalanceChanges {
+			if !c.Value.IsZero() || c.Index == maxIdx {
+				continue
 			}
+			candidate := balRemovalCandidate{index: c.Index}
+			if j+1 < len(ac.BalanceChanges) {
+				candidate.next = ac.BalanceChanges[j+1].Index
+			}
+			candidates = append(candidates, candidate)
 		}
-		singleNonFinalCandidate := len(candidates) == 1
-		candidates = append(candidates, maxIdx)
-		var revivals map[uint32]uint32
-		for _, idx := range candidates {
+		candidates = append(candidates, balRemovalCandidate{index: maxIdx})
+		var revivalsIndexed bool
+		for j := range candidates {
+			candidate := &candidates[j]
+			idx := candidate.index
 			if b, ok := versionedUpdateBalance(vm, addr, int(idx)); ok && !b.IsZero() {
 				continue
 			}
@@ -364,21 +382,18 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 			if idx == maxIdx {
 				continue
 			}
-			var next uint32
-			if singleNonFinalCandidate {
-				next = balNextChangeIndex(ac, idx)
-				if _, hasBalance := balChangeAt(ac.BalanceChanges, (*types.BalanceChange).GetIndex, int(next)-1); hasBalance {
-					continue
+			if !revivalsIndexed {
+				remaining := candidates[j : len(candidates)-1]
+				recordBALRevivals(remaining, ac.NonceChanges)
+				recordBALRevivals(remaining, ac.CodeChanges)
+				for _, slot := range ac.StorageChanges {
+					recordBALRevivals(remaining, slot.Changes)
 				}
-			} else {
-				if revivals == nil {
-					revivals = balRevivalIndexes(ac)
-				}
-				next = revivals[idx]
+				revivalsIndexed = true
 			}
-			if next != 0 {
+			if candidate.seedBalance {
 				live := &WriteSet{}
-				live.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: int(next) - 1}}})
+				live.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: int(candidate.next) - 1}}})
 				stamps = append(stamps, live)
 			}
 		}
@@ -426,10 +441,6 @@ func balChangeIndexes(ac *types.AccountChanges, fn func(uint32)) {
 	for _, c := range ac.BalanceChanges {
 		fn(c.Index)
 	}
-	balNonBalanceChangeIndexes(ac, fn)
-}
-
-func balNonBalanceChangeIndexes(ac *types.AccountChanges, fn func(uint32)) {
 	for _, c := range ac.NonceChanges {
 		fn(c.Index)
 	}
@@ -453,24 +464,39 @@ func balNextChangeIndex(ac *types.AccountChanges, after uint32) uint32 {
 	return next
 }
 
-// A removed account needs a zero balance at its first later change if that change
-// has no balance of its own. Group those changes by the preceding balance write.
-func balRevivalIndexes(ac *types.AccountChanges) map[uint32]uint32 {
-	revivals := make(map[uint32]uint32)
-	balNonBalanceChangeIndexes(ac, func(idx uint32) {
-		i, hasBalance := slices.BinarySearchFunc(ac.BalanceChanges, idx, func(c *types.BalanceChange, target uint32) int {
-			return cmp.Compare(c.Index, target)
-		})
-		if i == 0 || hasBalance {
+func balLastChangeIndex[T interface{ GetIndex() uint32 }](changes []T) uint32 {
+	if len(changes) == 0 {
+		return 0
+	}
+	return changes[len(changes)-1].GetIndex()
+}
+
+type balRemovalCandidate struct {
+	index, next uint32
+	seedBalance bool
+}
+
+// The next explicit balance write ends a candidate's search. Since every removal is
+// a balance write, the last candidate's next known write bounds the whole list.
+func recordBALRevivals[T interface{ GetIndex() uint32 }](candidates []balRemovalCandidate, changes []T) {
+	for len(candidates) > 0 && len(changes) > 0 {
+		idx := changes[0].GetIndex()
+		changes = changes[1:]
+		if limit := candidates[len(candidates)-1].next; limit != 0 && idx >= limit {
 			return
 		}
-		prev := ac.BalanceChanges[i-1]
-		if !prev.Value.IsZero() {
-			return
+		after := candidates[0].index
+		if idx <= after {
+			first := sort.Search(len(changes), func(i int) bool { return changes[i].GetIndex() > after })
+			changes = changes[first:]
+			continue
 		}
-		if next := revivals[prev.Index]; next == 0 || idx < next {
-			revivals[prev.Index] = idx
+		end := sort.Search(len(candidates), func(i int) bool { return candidates[i].index >= idx })
+		candidate := &candidates[end-1]
+		if candidate.next == 0 || idx < candidate.next {
+			candidate.next = idx
+			candidate.seedBalance = true
 		}
-	})
-	return revivals
+		candidates = candidates[end:]
+	}
 }

@@ -16,15 +16,20 @@ import (
 )
 
 func BenchmarkSeedEmptyRemovals(b *testing.B) {
-	for _, tc := range []struct{ balances, storage, balanceStep, zeroEvery int }{
+	for _, tc := range []struct{ balances, storage, slots, balanceStep, zeroEvery int }{
 		{balances: 32, balanceStep: 2, zeroEvery: 2},
 		{balances: 256, balanceStep: 2, zeroEvery: 2},
 		{balances: 1024, balanceStep: 2, zeroEvery: 2},
-		{balances: 2, storage: 256, balanceStep: 2, zeroEvery: 2},
-		{balances: 256, storage: 256, balanceStep: 2, zeroEvery: 2},
-		{balances: 768, storage: 3200, balanceStep: 1, zeroEvery: 385},
+		{balances: 2, storage: 256, slots: 1, balanceStep: 2, zeroEvery: 2},
+		{balances: 256, storage: 256, slots: 1, balanceStep: 2, zeroEvery: 2},
+		{balances: 768, storage: 3200, slots: 1, balanceStep: 1, zeroEvery: 385},
+		{balances: 768, storage: 3200, slots: 1, balanceStep: 1, zeroEvery: 257},
+		{balances: 768, storage: 3200, slots: 1, balanceStep: 1, zeroEvery: 170},
+		{balances: 256, storage: 1024, slots: 1024, balanceStep: 4, zeroEvery: 256},
+		{balances: 256, storage: 1024, slots: 1024, balanceStep: 4, zeroEvery: 128},
 	} {
-		b.Run(fmt.Sprintf("balances=%d/storage=%d", tc.balances, tc.storage), func(b *testing.B) {
+		removals := tc.balances / tc.zeroEvery
+		b.Run(fmt.Sprintf("balances=%d/storage=%d/removals=%d/slots=%d", tc.balances, tc.storage, removals, tc.slots), func(b *testing.B) {
 			bal := types.BlockAccessList{{
 				Address:      common.Address{19: 1},
 				NonceChanges: []*types.NonceChange{{Index: uint32(2*max(tc.balances, tc.storage) + 1), Value: 1}},
@@ -34,13 +39,15 @@ func BenchmarkSeedEmptyRemovals(b *testing.B) {
 					Index: uint32(tc.balanceStep*i + 1), Value: *uint256.NewInt(uint64((i + 1) % tc.zeroEvery)),
 				})
 			}
-			if tc.storage > 0 {
-				changes := make([]*types.StorageChange, tc.storage)
-				for i := range changes {
-					changes[i] = &types.StorageChange{Index: uint32(2*i + 2), Value: *uint256.NewInt(uint64(i + 1))}
+			for slot := range tc.slots {
+				changes := make([]*types.StorageChange, 0, tc.storage/tc.slots)
+				for i := slot; i < tc.storage; i += tc.slots {
+					changes = append(changes, &types.StorageChange{Index: uint32(2*i + 2), Value: *uint256.NewInt(uint64(i + 1))})
 				}
-				bal[0].StorageChanges = []types.SlotChanges{{Slot: accounts.InternKey(common.Hash{31: 1}), Changes: changes}}
+				key := accounts.InternKey(common.BigToHash(big.NewInt(int64(slot + 1))))
+				bal[0].StorageChanges = append(bal[0].StorageChanges, types.SlotChanges{Slot: key, Changes: changes})
 			}
+			require.NoError(b, bal.Validate())
 			base := &countingAccountReader{}
 			var vm *VersionMap
 			for b.Loop() {
@@ -49,7 +56,7 @@ func BenchmarkSeedEmptyRemovals(b *testing.B) {
 				b.StartTimer()
 				require.NoError(b, vm.SeedEmptyRemovals(true, false, base))
 			}
-			require.Len(b, vm.derivedRemovals, tc.balances/tc.zeroEvery)
+			require.Len(b, vm.derivedRemovals, removals)
 		})
 	}
 }
