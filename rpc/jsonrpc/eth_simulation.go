@@ -860,8 +860,8 @@ func (s *simulator) simulateBlock(
 		return protocol.SysCallContract(contract, data, s.chainConfig, ibs, header, engine, constCall, vmConfig)
 	}
 	chainReader := &simulatedChainReader{
-		Reader:  consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger),
-		headers: ancestors,
+		Reader: consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger),
+		parent: parent,
 	}
 	err = engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
 	if err != nil {
@@ -1188,14 +1188,12 @@ func (s *simulator) simulateCall(
 
 type simulatedChainReader struct {
 	*consensuschain.Reader
-	headers []*types.Header
+	parent *types.Header
 }
 
 func (s *simulatedChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	for _, header := range s.headers {
-		if header.Number.Uint64() == number && header.Hash() == hash {
-			return header
-		}
+	if s.parent.Number.Uint64() == number && s.parent.Hash() == hash {
+		return s.parent
 	}
 	return s.Reader.GetHeader(hash, number)
 }

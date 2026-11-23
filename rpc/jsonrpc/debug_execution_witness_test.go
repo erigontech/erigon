@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -896,7 +895,6 @@ func TestExecBlockStatelesslyEIP8253RejectsInvalidParent(t *testing.T) {
 			header := block.Header()
 			switch name {
 			case "missing":
-				witness.Headers = nil
 				witness.headerByNumber = nil
 			case "wrong hash":
 				header.ParentHash[0] ^= 1
@@ -949,9 +947,6 @@ func eip8253ReplayWitness(t *testing.T, parentTime, beforeNonce, afterNonce uint
 	}
 
 	parent := &types.Header{Number: *uint256.NewInt(1), Time: parentTime, Root: prestate.Hash()}
-	encodedParent, err := rlp.EncodeToBytes(parent)
-	require.NoError(t, err)
-	witness.Headers = []hexutil.Bytes{encodedParent}
 	witness.headerByNumber = map[uint64]*types.Header{1: parent}
 
 	account.Nonce = afterNonce

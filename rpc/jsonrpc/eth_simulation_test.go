@@ -1103,8 +1103,8 @@ func TestSimulatedChainReaderHeaderLookup(t *testing.T) {
 	simulated := types.CopyHeader(stored)
 	simulated.Time = 20
 	reader := &simulatedChainReader{
-		Reader:  consensuschain.NewReader(chain.AllProtocolChanges, tx, nil, log.New()),
-		headers: []*types.Header{simulated},
+		Reader: consensuschain.NewReader(chain.AllProtocolChanges, tx, nil, log.New()),
+		parent: simulated,
 	}
 	for _, tc := range []struct {
 		name   string
