@@ -746,7 +746,7 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 				vm.EXTCODESIZE, vm.SLT, vm.OR, vm.NUMBER, vm.SLOTNUM, vm.PC, vm.TIMESTAMP, vm.BALANCE, vm.SELFBALANCE, vm.MULMOD, vm.ADDMOD, vm.BASEFEE,
 				vm.BLOBHASH, vm.BLOBBASEFEE, vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE, vm.MOD, vm.SIGNEXTEND, vm.GASLIMIT, vm.DIFFICULTY,
 				vm.SGT, vm.GASPRICE, vm.MSIZE, vm.EXTCODEHASH, vm.SMOD, vm.CHAINID, vm.COINBASE, vm.TLOAD, vm.DUPN,
-				vm.TXPARAM, vm.FRAMEPARAM, vm.SIGPARAM, vm.FRAMEDATALOAD, vm.TXTRACE, vm.TXDIFF:
+				vm.TXPARAM, vm.FRAMEPARAM, vm.SIGPARAM, vm.FRAMEDATALOAD, vm.TXTRACE:
 				showStack = 1
 			}
 			for i := showStack - 1; i >= 0; i-- {

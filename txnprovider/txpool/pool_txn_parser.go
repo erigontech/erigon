@@ -153,6 +153,9 @@ func (ctx *TxnParseContext) decodeTxn(txBytes []byte) (types.Transaction, error)
 	if s.Remaining() != 0 {
 		return nil, fmt.Errorf("trailing bytes after transaction")
 	}
+	if blob, ok := txn.(*types.BlobTx); ok && len(blob.BlobVersionedHashes) == 0 {
+		return nil, types.ErrBlobTxnEmptyBlobs
+	}
 	return txn, nil
 }
 
@@ -515,7 +518,7 @@ func (tx *TxnSlot) GetValue() *uint256.Int  { return tx.Txn.GetValue() }
 
 func (tx *TxnSlot) GetBlobFeeCap() *uint256.Int {
 	if frame, ok := tx.Txn.(*types.FrameTransaction); ok {
-		return &frame.Fees.BlobFeeCap
+		return new(uint256.Int).Div(&frame.Fees.MaxFee, uint256.NewInt(frame.GetBlobGas()))
 	}
 	if bt, ok := tx.Txn.(*types.BlobTx); ok {
 		return &bt.MaxFeePerBlobGas

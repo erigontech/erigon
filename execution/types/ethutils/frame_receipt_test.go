@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -29,7 +30,7 @@ import (
 
 func TestFrameRPCReceipt(t *testing.T) {
 	payer := common.Address{1}
-	tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, SenderAddress: payer, Frames: []types.Frame{{}}}
+	tx := &types.FrameTransaction{NonceKeys: nil, SenderAddress: payer, Frames: []types.Frame{{}}}
 	receipt := &types.Receipt{Type: types.FrameTxType, Payer: &payer, BlockNumber: uint256.NewInt(1), FrameReceipts: []types.FrameReceipt{{Status: 1, Logs: types.Logs{}}}}
 	result := MarshalReceipt(receipt, tx, chain.AllProtocolChanges, &types.Header{Number: *uint256.NewInt(1), BaseFee: uint256.NewInt(0)}, true)
 	data, err := json.Marshal(result)
@@ -149,4 +150,61 @@ func TestMarshalReceiptWithoutLogs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFrameReceiptEffectiveGasPrice(t *testing.T) {
+	for _, blobs := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unused gas backs tip", true: "blob fee uses budget"}[blobs], func(t *testing.T) {
+			tx := &types.FrameTransaction{Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 100_000}}}, Fees: types.FrameFees{TipCap: uint256.Int{2}}}
+			header := &types.Header{Number: *uint256.NewInt(1), BaseFee: uint256.NewInt(10)}
+			used, want := uint64(25_000), uint64(12)
+			if blobs {
+				tx.BlobVersionedHashes = []common.Hash{{1}}
+				header.ExcessBlobGas = common.NewUint64(0)
+				used = tx.GetGasLimit()
+				want = 10
+			}
+			tx.Fees.MaxFee.SetUint64(tx.GetGasLimit()*10 + tx.GetBlobGas())
+			receipt := &types.Receipt{Type: types.FrameTxType, BlockNumber: uint256.NewInt(1), GasUsed: used}
+			got := MarshalReceipt(receipt, tx, chain.AllProtocolChanges, header, false)
+			require.Equal(t, want, (*uint256.Int)(got.EffectiveGasPrice).Uint64())
+		})
+	}
+}
+
+func TestFrameReceiptGasTip(t *testing.T) {
+	frame := &types.FrameTransaction{
+		Frames:              []types.Frame{{Limits: mdgas.MdGas{Execution: 50_000}}},
+		Fees:                types.FrameFees{TipCap: uint256.Int{3}},
+		BlobVersionedHashes: []common.Hash{{1}},
+	}
+	baseFee, blobBaseFee := uint256.NewInt(10), uint256.NewInt(2)
+	gasLimit := frame.GetGasLimit()
+	required := gasLimit*baseFee.Uint64() + frame.GetBlobGas()*blobBaseFee.Uint64()
+	t.Run("round down only the rate", func(t *testing.T) {
+		totalTip := 2*gasLimit + 1
+		frame.Fees.MaxFee.SetUint64(required + totalTip)
+		tip, err := ReceiptGasTip(frame, gasLimit, baseFee, blobBaseFee)
+		require.NoError(t, err)
+		require.Equal(t, uint256.Int{2}, tip)
+		require.Equal(t, uint256.NewInt(12), ReceiptGasPrice(frame, gasLimit, baseFee, blobBaseFee))
+		paid, err := GasTipPaid(frame, gasLimit, baseFee, blobBaseFee)
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(totalTip), &paid)
+		fee, err := GasFeePaid(frame, gasLimit, baseFee, blobBaseFee)
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(gasLimit*baseFee.Uint64()+totalTip), &fee)
+	})
+	t.Run("zero gas used", func(t *testing.T) {
+		frame.Fees.MaxFee.SetUint64(required)
+		tip, err := ReceiptGasTip(frame, 0, baseFee, blobBaseFee)
+		require.NoError(t, err)
+		require.Equal(t, uint256.Int{}, tip)
+		require.Equal(t, new(uint256.Int), ReceiptGasPrice(frame, 0, baseFee, blobBaseFee))
+	})
+	t.Run("budget must cover the declared gas limit", func(t *testing.T) {
+		frame.Fees.MaxFee.SetUint64(required - 1)
+		_, err := ReceiptGasTip(frame, gasLimit/2, baseFee, blobBaseFee)
+		require.ErrorIs(t, err, types.ErrFrameFeeBudget)
+	})
 }

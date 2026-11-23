@@ -187,6 +187,7 @@ func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarn
 			cumGas += params.TxGas
 			require.NoError(t, rawtemporaldb.AppendReceiptMetadata(putDel, 0, cumGas, 0, minTxNum+1+uint64(i)))
 		}
+		require.NoError(t, stages.SaveStageProgress(overlay, stages.Execution, overlayNumber))
 	}
 
 	return &overlayAheadHarness{t: t, base: base, m: m, overlayHeader: overlayHeader, overlayBody: overlayBody, events: events, doms: doms}

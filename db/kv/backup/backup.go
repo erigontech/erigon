@@ -22,7 +22,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"time"
 
@@ -345,12 +344,11 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 			case <-ctx.Done():
 				return 0, ctx.Err()
 			case <-logEvery.C:
-				var m runtime.MemStats
-				dbg.ReadMemStats(&m)
+				alloc, sys := dbg.MemUsage()
 				logger.Info("Progress", "table", table, "progress",
 					fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(total)),
 					"size", common.ByteCount(size), "keys/s", uint64(float64(i)/time.Since(t).Seconds()),
-					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+					"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 			default:
 			}
 		}

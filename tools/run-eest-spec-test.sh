@@ -45,9 +45,8 @@
 #                                              export EVM_BIN to the race-built
 #                                              binary; otherwise -race
 #                                              detection doesn't fire.
-#   blocktests-devnet-race-amsterdam-parallel
-#                                              race-detector variants filtered
-#                                              to the Amsterdam fork only.
+#   blocktests-devnet-race-{amsterdam,amsterdam-to-bogota}-parallel
+#                                              Amsterdam and its transition to Bogota.
 #   zkevm-witness                              zkevm execution-witness conformance
 #                                              (eest_zkevm corpus) via the zkevmtest
 #                                              runner; compares debug_executionWitness

@@ -44,7 +44,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/app"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -142,8 +144,9 @@ func init() {
 	withConvertFlags(cmdCommitmentConvert)
 	commitmentCmd.AddCommand(cmdCommitmentConvert)
 
-	withChain(cmdCommitmentVerify)
-	withDataDir(cmdCommitmentVerify)
+	flags.DirVar(cmdCommitmentVerify.Flags(), &datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
+	must(cmdCommitmentVerify.MarkFlagDirname(utils.DataDirFlag.Name))
+	must(cmdCommitmentVerify.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmdCommitmentVerify.Flags().UintSliceVar(&verifyAsOf, "asof", nil, "also fold the records as of these txNums")
 	commitmentCmd.AddCommand(cmdCommitmentVerify)
 
@@ -289,12 +292,24 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 	if !statecfg.ExperimentalCommitmentV3 {
 		return errors.New("verify reads v3 commitment records; run with ERIGON_COMMITMENT_V3=true")
 	}
-	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, logger)
+	dirs := datadir.Open(datadirCli)
+	if salt, err := dbstate.GetStateIndicesSalt(dirs, false, logger); err != nil {
+		return err
+	} else if salt == nil {
+		return fmt.Errorf("verify needs %s", filepath.Join(dirs.Snap, "salt-state.txt"))
+	}
+	hasHistory, err := dbstate.HasCommitmentHistoryFiles(dirs)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	if hasHistory {
+		statecfg.EnableHistoricalCommitment()
+	}
+	agg, err := openStateFiles(ctx, dirs, logger)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
 	agg.DisableAllDependencies()
 	points := []uint64{math.MaxUint64}
 	for _, txNum := range verifyAsOf {
@@ -368,6 +383,9 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		return err
 	}
 	defer rwTx.Rollback()
+	if err := dbstate.AggTx(rwTx).AssertRetired(rwTx); err != nil {
+		return err
+	}
 
 	if !clearCommitment {
 		domainProgress := rwTx.Debug().DomainProgress(kv.CommitmentDomain)
@@ -658,12 +676,34 @@ func commitmentConvert(agg *dbstate.Aggregator, ctx context.Context, logger log.
 	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
 }
 
+func openStateFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*dbstate.Aggregator, error) {
+	if err := dbstate.MatchCommitmentSchemaToFiles(dirs); err != nil {
+		return nil, err
+	}
+	if err := dbstate.CheckSnapshotFileVersions(dirs); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dirs.Tmp, dir.DirPerm); err != nil { // sorts and folds spill there
+		return nil, err
+	}
+	settings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return nil, err
+	}
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := agg.OpenFolder(nil); err != nil {
+		agg.Close()
+		return nil, err
+	}
+	return agg, nil
+}
+
 func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
 	dirs := datadir.Open(datadirCli)
 	if err := CheckSaltFilesExist(dirs); err != nil {
-		return err
-	}
-	if err := dbstate.MatchCommitmentSchemaToFiles(dirs); err != nil {
 		return err
 	}
 	if opts.TargetV3 && !opts.NoHistory {
@@ -675,21 +715,11 @@ func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, o
 			statecfg.EnableHistoricalCommitment()
 		}
 	}
-	settings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dirs.Tmp, dir.DirPerm); err != nil { // the converter's sorts spill there
-		return err
-	}
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).Open(ctx)
+	agg, err := openStateFiles(ctx, dirs, logger)
 	if err != nil {
 		return err
 	}
 	defer agg.Close()
-	if err := agg.OpenFolder(nil); err != nil {
-		return err
-	}
 	if opts.TargetV3 && !opts.NoDomain {
 		blockSnaps := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, logger)
 		defer blockSnaps.Close()
