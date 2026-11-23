@@ -165,7 +165,7 @@ type Config struct {
 	// failed from being produced again. It bounds no depth through a stall.
 	MaxDepth uint64
 	// DABudget bounds the DA bytes of each block's transactions; zero is
-	// DABudget(K).
+	// DABudget(K, MaxBatchGas).
 	DABudget int
 	// Witnesses, when set, captures each produced block's witness.
 	Witnesses Witnesses
@@ -224,7 +224,7 @@ func New(cc *chain.Config, cfg Config, committer Committer, pool txnprovider.Txn
 		return nil, fmt.Errorf("%w: L2 block time %s, the chain's is %s", ErrTiming, cfg.Timing.L2, want)
 	}
 	if cfg.DABudget == 0 {
-		cfg.DABudget = DABudget(cfg.Timing.K())
+		cfg.DABudget = DABudget(cfg.Timing.K(), MaxBatchGas)
 	}
 	beneficiary := cfg.FeeRecipient
 	if beneficiary == (common.Address{}) && cc.FeeCollector != nil {

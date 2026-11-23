@@ -36,9 +36,9 @@ import (
 )
 
 const (
-	// maxBatchGas is the EIP-7825 cap on a transaction's gas, which bounds
+	// MaxBatchGas is the EIP-7825 cap on a transaction's gas, which bounds
 	// the posting of a batch.
-	maxBatchGas = 16_777_216
+	MaxBatchGas = 16_777_216
 	// batchReserve is the gas a batch spends besides its blocks' transactions:
 	// the transaction itself, its entries, proofs and encoding.
 	batchReserve = 1_000_000
@@ -48,15 +48,17 @@ const (
 )
 
 // DABudget is the bytes one block's transactions may add to a span, so that
-// a slot of k blocks always settles in one batch.
-func DABudget(k uint64) int {
-	return int((maxBatchGas - batchReserve) / floorGasPerByte / k)
+// a slot of k blocks always settles in one batch of at most gas.
+func DABudget(k, gas uint64) int {
+	if gas <= batchReserve {
+		return 0
+	}
+	return int((gas - batchReserve) / floorGasPerByte / k)
 }
 
-// MaxTxnSize is the largest transaction encoding a block of a slot of k
-// blocks can carry.
-func MaxTxnSize(k uint64) uint64 {
-	budget := DABudget(k)
+// MaxTxnSize is the largest transaction encoding a block of DA budget budget
+// can carry.
+func MaxTxnSize(budget int) uint64 {
 	size := budget
 	for size+uvarintLen(uint64(size)) > budget {
 		size--

@@ -34,8 +34,10 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/eez"
+	"github.com/erigontech/erigon/eez/composer"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/networks"
+	"github.com/erigontech/erigon/eez/sequencer"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
@@ -261,4 +263,13 @@ func TestStopHooksRegisterTogether(t *testing.T) {
 		require.NoError(t, h.Stop())
 	}
 	require.Equal(t, []int{1, 2}, stopped)
+}
+
+// TestDABudgetFollowsTheComposer: a composer's gas limit bounds the
+// sequencer's blocks, so that a slot settles in one posting.
+func TestDABudgetFollowsTheComposer(t *testing.T) {
+	require.Equal(t, sequencer.DABudget(6, sequencer.MaxBatchGas), daBudget(&eez.SequencerConfig{}, 6))
+	cfg := &eez.SequencerConfig{Composer: &eez.ComposerConfig{MaxGas: composer.MinPostBatchGas}}
+	require.Equal(t, sequencer.DABudget(6, composer.MinPostBatchGas), daBudget(cfg, 6))
+	require.Less(t, daBudget(cfg, 6), daBudget(&eez.SequencerConfig{}, 6))
 }

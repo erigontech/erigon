@@ -276,13 +276,14 @@ func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.Exe
 	}
 	chainConfig := backend.ChainConfig()
 	timing := sequencerTiming(chainConfig.L2.(*config.L2Config), cfg)
-	s, err := sequencer.New(chainConfig, sequencer.Config{Timing: timing, FeeRecipient: cfg.FeeRecipient, MaxDepth: cfg.MaxDepth, Witnesses: witnesses, Announcements: announcements, Composer: composer}, f, pool, logger)
+	budget := daBudget(cfg, timing.K())
+	s, err := sequencer.New(chainConfig, sequencer.Config{Timing: timing, FeeRecipient: cfg.FeeRecipient, MaxDepth: cfg.MaxDepth, DABudget: budget, Witnesses: witnesses, Announcements: announcements, Composer: composer}, f, pool, logger)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", eez.ErrConfig, err)
 	}
 	// The node has yet to start the pool, so the limit applies to the
 	// transactions it reloads too.
-	pool.SetMaxTxnSize(sequencer.MaxTxnSize(timing.K()))
+	pool.SetMaxTxnSize(sequencer.MaxTxnSize(budget))
 	genesis, err := chain.HeaderByNumber(ctx, 0)
 	if err != nil {
 		return nil, err
@@ -292,6 +293,16 @@ func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.Exe
 		go stop.Close()
 	}
 	return sequencer.NewService(s, sequencer.NewSchedule(timing, genesis.Time), halt, logger), nil
+}
+
+// daBudget is the DA budget of a block of a slot of k blocks: a slot must
+// settle in one posting within the composer's gas limit.
+func daBudget(cfg *eez.SequencerConfig, k uint64) int {
+	gas := uint64(sequencer.MaxBatchGas)
+	if cfg.Composer != nil {
+		gas = cfg.Composer.MaxGas
+	}
+	return sequencer.DABudget(k, gas)
 }
 
 func sequencerTiming(l2 *config.L2Config, cfg *eez.SequencerConfig) sequencer.Timing {

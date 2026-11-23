@@ -1020,7 +1020,7 @@ func TestFullCatchupSettlesPerSlot(t *testing.T) {
 	require.Equal(t, uint64(sync), h.head(t).Number.Uint64())
 
 	k := devnet().K()
-	budget := sequencer.DABudget(k)
+	budget := sequencer.DABudget(k, sequencer.MaxBatchGas)
 	txDA := spanSize(pool.txs[0])
 	for n := uint64(1); n <= sync; n++ {
 		size := sized(t, h.block(t, n).Transactions()...)
@@ -1234,7 +1234,7 @@ var otherKey, _ = crypto.HexToECDSA("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbe
 // produced.
 func TestBlockBudgetIgnoresTheFollowersOfAnOversizedTransaction(t *testing.T) {
 	h := newHarness(t)
-	budget := sequencer.DABudget(devnet().K())
+	budget := sequencer.DABudget(devnet().K(), sequencer.MaxBatchGas)
 	txs := []types.Transaction{signedTransfer(t, derivertest.UserKey, 0, budget)}
 	left := budget
 	for n := uint64(1); n <= 14; n++ {

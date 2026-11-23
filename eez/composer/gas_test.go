@@ -18,9 +18,18 @@ package composer
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"encoding/binary"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/eez/sequencer"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // TestFloorGas: the EIP-7623 floor, 21,000 plus 10 per token, a zero byte
@@ -79,4 +88,66 @@ func TestPostBatchGas(t *testing.T) {
 	require.GreaterOrEqual(t, len(proofPlaceholder), 65)
 	require.GreaterOrEqual(t, calldataGas(proofPlaceholder), calldataGas(bytes.Repeat([]byte{0x11}, 65)))
 	require.GreaterOrEqual(t, FloorGas(proofPlaceholder), FloorGas(bytes.Repeat([]byte{0x11}, 65)))
+}
+
+// TestSyncIntervalWithinCeiling: a Sync interval whose blocks the sequencer
+// filled to its DA budget for a ceiling posts within that ceiling, so a
+// backlog always has a chunk to post.
+func TestSyncIntervalWithinCeiling(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	b := &Batcher{RollupID: 1, ProofSystem: common.Address{0xab}, Signer: testSigner}
+	for _, k := range []uint64{2, 6, sequencer.MaxCatchup} {
+		for _, ceiling := range []uint64{MinPostBatchGas, 4_000_000, MaxPostBatchGas} {
+			blocks := fullInterval(t, key, k, sequencer.DABudget(k, ceiling))
+			batch, err := b.AnchorBatch(blocks[0].ParentHash(), blocks)
+			require.NoError(t, err)
+			gas, err := PostBatchGas(batch)
+			require.NoError(t, err)
+			require.LessOrEqual(t, gas, ceiling, "K %d, ceiling %d", k, ceiling)
+		}
+	}
+}
+
+// fullInterval returns the k blocks of a Sync interval: k-1 each carrying a
+// transaction of non-zero data that fills budget, then the empty Sync block.
+func fullInterval(t *testing.T, key *ecdsa.PrivateKey, k uint64, budget int) []*types.Block {
+	t.Helper()
+	daSize := func(tx types.Transaction) int {
+		var buf bytes.Buffer
+		require.NoError(t, tx.MarshalBinary(&buf))
+		return buf.Len() + len(binary.AppendUvarint(nil, uint64(buf.Len())))
+	}
+	sign := func(nonce uint64, size int) types.Transaction {
+		to := common.Address{1}
+		tx, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 30_000_000, To: &to, Data: bytes.Repeat([]byte{0xff}, max(size, 0))},
+			ChainID:  *testSigner.ChainID(),
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(1),
+		}, *testSigner, key)
+		require.NoError(t, err)
+		return tx
+	}
+	parent := common.Hash{0xc0}
+	blocks := make([]*types.Block, 0, k)
+	for i := range k {
+		h := &types.Header{Number: *uint256.NewInt(100 + i), ParentHash: parent, Coinbase: common.Address{0xfe}, Extra: []byte{}, TxHash: empty.RootHash}
+		var txs []types.Transaction
+		if i < k-1 {
+			size := budget
+			tx := sign(i, size)
+			for daSize(tx) > budget && size > 0 {
+				size -= daSize(tx) - budget
+				tx = sign(i, size)
+			}
+			if daSize(tx) <= budget {
+				txs = []types.Transaction{tx}
+			}
+		}
+		block := types.NewBlock(h, txs, nil, nil, nil, nil)
+		blocks = append(blocks, block)
+		parent = block.Hash()
+	}
+	return blocks
 }

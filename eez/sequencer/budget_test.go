@@ -132,7 +132,7 @@ func delegate(t *testing.T, nonce, authNonce uint64) types.Transaction {
 // nonce past the user's pending transaction, which fills what is left.
 func TestBlockBudgetLeavesOutWhatTheBuilderDrops(t *testing.T) {
 	h := newHarness(t)
-	budget := sequencer.DABudget(devnet().K())
+	budget := sequencer.DABudget(devnet().K(), sequencer.MaxBatchGas)
 	auth := delegate(t, 0, 0)
 	transfer := signedTransfer(t, otherKey, 1, 0)
 	data := budget - spanSize(auth) - 400
@@ -150,7 +150,7 @@ func TestBlockBudgetLeavesOutWhatTheBuilderDrops(t *testing.T) {
 // none of the block's budget.
 func TestBlockBudgetLeavesOutWhatThePoolSkips(t *testing.T) {
 	h := newHarness(t)
-	budget := sequencer.DABudget(devnet().K())
+	budget := sequencer.DABudget(devnet().K(), sequencer.MaxBatchGas)
 	var waiting []types.Transaction
 	left := budget
 	for n := uint64(1); left > 5_000; n++ {
