@@ -321,6 +321,11 @@ func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCoun
 	return coverage, subnetToPeers
 }
 
+// ConsumeDuplicateLoss is p2p.P2PManager.ConsumeDuplicateLoss for a peer that is still connected.
+func (s *Sentinel) ConsumeDuplicateLoss(pid peer.ID) bool {
+	return s.p2p.Host().Network().Connectedness(pid) == network.Connected && s.p2p.ConsumeDuplicateLoss(pid)
+}
+
 func (s *Sentinel) closePeer(pid peer.ID) {
 	if err := s.p2p.Host().Network().ClosePeer(pid); err != nil {
 		log.Trace("[Sentinel] failed to close peer", "peer", pid, "err", err)
@@ -633,6 +638,9 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Directi
 	}
 
 	valid, err := validate()
+	if !valid && s.ConsumeDuplicateLoss(peerId) {
+		valid, err = validate()
+	}
 	if !valid && err != nil {
 		failureCount, becameUndialable := s.peers.RecordHandshakeFailure(peerId)
 		s.logger.Debug("[Sentinel] Handshake failed", "peer", peerId, "count", failureCount, "err", err)
@@ -648,7 +656,7 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Directi
 	}
 
 	if !valid {
-		// Handshake succeeded but fork digest mismatched — peer is on a different fork.
+		// The peer's status did not decode or is for another fork.
 		// Must disconnect to avoid receiving incompatible blocks.
 		log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
 		s.p2p.Host().Peerstore().RemovePeer(peerId)
