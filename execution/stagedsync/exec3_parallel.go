@@ -1923,16 +1923,12 @@ func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint3
 	if txIndex < 0 || task.IsBlockEnd() {
 		// System TXs use full IBS reconstruction (no worker path, so no fee split).
 		// Strip coinbase/burnt since they may carry stale writes.
-		burnt := result.ExecutionResult.BurntContractAddress
-		txOut, _, _, _ := result.TxOut.StripBalanceWrite(result.Coinbase, result.TxIn)
-		result.TxOut = txOut
-		if !burnt.IsNil() {
-			txOut, _, _, _ = result.TxOut.StripBalanceWrite(burnt, result.TxIn)
-			result.TxOut = txOut
-		}
-		result.TxIn.Delete(result.Coinbase)
-		if !burnt.IsNil() {
-			result.TxIn.Delete(burnt)
+		// System tasks leave Coinbase and the burnt address unset, and a zero address is not stripped.
+		for _, addr := range []accounts.Address{result.Coinbase, result.ExecutionResult.BurntContractAddress} {
+			if !addr.IsNil() {
+				result.TxOut, _, _, _ = result.TxOut.StripBalanceWrite(addr, result.TxIn)
+				result.TxIn.Delete(addr)
+			}
 		}
 		return result.finalizeSystemTx(task, txTask, vm, stateReader)
 	}
