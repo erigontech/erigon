@@ -123,20 +123,24 @@ func interners() []interner {
 			h := accounts.InternKey(k)
 			return *(*unsafe.Pointer)(unsafe.Pointer(&h))
 		}},
-		{name: "#26404 xsync+weak", make: func(k common.Hash) unsafe.Pointer { return unsafe.Pointer(wt.intern(k)) },
-			reset: func() { wt.m.Clear() }},
+		{
+			name: "#26404 xsync+weak", make: func(k common.Hash) unsafe.Pointer { return unsafe.Pointer(wt.intern(k)) },
+			reset: func() { wt.m.Clear() },
+		},
 		{name: "xsync strong", make: func(k common.Hash) unsafe.Pointer {
 			p, _ := sm.LoadOrCompute(k, func() (*common.Hash, bool) { p := new(common.Hash); *p = k; return p, false })
 			return unsafe.Pointer(p)
 		}, reset: func() { sm.Clear() }},
-		{name: "64-shard map+mutex", make: func(k common.Hash) unsafe.Pointer { return unsafe.Pointer(st.intern(k)) },
+		{
+			name: "64-shard map+mutex", make: func(k common.Hash) unsafe.Pointer { return unsafe.Pointer(st.intern(k)) },
 			reset: func() {
 				for i := range st.s {
 					st.s[i].mu.Lock()
 					clear(st.s[i].m)
 					st.s[i].mu.Unlock()
 				}
-			}},
+			},
+		},
 		{name: "no interning ([32]byte)", make: func(k common.Hash) unsafe.Pointer {
 			valueSink.Add(uint64(k[0]))
 			return nil
