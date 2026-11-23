@@ -147,11 +147,7 @@ func (r *TxResult) CreateNextReceipt(prev *types.Receipt) (*types.Receipt, error
 }
 
 func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLogIndex uint32) (*types.Receipt, error) {
-	logIndex := firstLogIndex
-	for i := range r.Logs {
-		r.Logs[i].Index = hexutil.Uint(logIndex)
-		logIndex++
-	}
+	types.Logs(r.Logs).Reindex(firstLogIndex)
 
 	blockNum := r.Version().BlockNum
 	receipt := &types.Receipt{

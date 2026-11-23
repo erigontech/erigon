@@ -123,6 +123,17 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 
 type Logs []*Log
 
+// Reindex assigns each log its block-wide index, numbering consecutively from first.
+// The per-transaction builders leave logs with transaction-local indices; the block
+// commit renumbers them once their place in the block is known.
+func (logs Logs) Reindex(first uint32) {
+	idx := first
+	for _, l := range logs {
+		l.Index = hexutil.Uint(idx)
+		idx++
+	}
+}
+
 // Copy deep-copies the logs into freshly allocated shared backing arrays.
 // Nil entries stay nil.
 func (logs Logs) Copy() Logs {
