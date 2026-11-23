@@ -21,6 +21,7 @@ import (
 	"errors"
 	"reflect"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/process"
@@ -31,6 +32,27 @@ import (
 )
 
 var ErrorUnsupportedPlatform = errors.New("unsupported platform")
+
+const VirtualMemStatsAge = 30 * time.Minute
+
+var (
+	vmStatsMu   sync.Mutex
+	vmStats     process.MemoryMapsStat
+	vmStatsRead time.Time
+)
+
+func RefreshVirtualMemStats(maxAge time.Duration) VirtualMemStat {
+	vmStatsMu.Lock()
+	defer vmStatsMu.Unlock()
+	if time.Since(vmStatsRead) >= maxAge {
+		if vm, err := ReadVirtualMemStats(); err == nil {
+			vmStats = vm
+			UpdatePrometheusVirtualMemStats(vm)
+		}
+		vmStatsRead = time.Now()
+	}
+	return VirtualMemStat{vmStats}
+}
 
 type VirtualMemStat struct {
 	process.MemoryMapsStat
@@ -68,24 +90,15 @@ func LogMemStats(ctx context.Context, logger log.Logger) {
 		case <-ctx.Done():
 			return
 		case <-logEvery.C:
-			vm, err := ReadVirtualMemStats()
-			if err != nil {
-				// suppress error if platform is unsupported, we just print out heap stats
-				if errors.Is(err, ErrorUnsupportedPlatform) {
-					logger.Warn("[mem] error reading virtual memory stats", "err", err)
-					continue
-				}
-			}
+			v := RefreshVirtualMemStats(VirtualMemStatsAge + 5*time.Minute)
 
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
 
-			v := VirtualMemStat{vm}
 			l := v.Fields()
 			l = append(l, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 			logger.Info("[mem] memory stats", l...)
-			UpdatePrometheusVirtualMemStats(vm)
 		}
 	}
 }
