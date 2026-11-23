@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -32,13 +33,16 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/eez/composer"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/l1"
+	"github.com/erigontech/erigon/eez/l1/post"
 	"github.com/erigontech/erigon/eez/l1/recording"
 	"github.com/erigontech/erigon/eez/protocol/da"
+	"github.com/erigontech/erigon/eez/prove"
 	"github.com/erigontech/erigon/eez/sequencer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
@@ -995,23 +999,7 @@ func TestFullCatchupSettlesPerSlot(t *testing.T) {
 	)
 	h := newHarness(t)
 	cc := derivertest.Config()
-	signer := types.LatestSignerForChainID(cc.ChainID)
-	to := common.HexToAddress("0xb0b")
-	data := bytes.Repeat([]byte{0xff}, 1_000)
-	pool := &full{chain: h.chain}
-	for nonce := range uint64(2_000) {
-		tx, err := types.SignTx(&types.DynamicFeeTransaction{
-			CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 70_000, To: &to, Data: data},
-			ChainID:  *cc.ChainID,
-			TipCap:   *uint256.NewInt(1),
-			FeeCap:   *uint256.NewInt(10 * common.GWei),
-		}, *signer, derivertest.UserKey)
-		require.NoError(t, err)
-		sender, err := signer.Sender(tx)
-		require.NoError(t, err)
-		tx.SetSender(sender)
-		pool.txs = append(pool.txs, tx)
-	}
+	pool := newFull(t, h)
 	s, err := sequencer.New(cc, sequencer.Config{Timing: devnet()}, h.follower, pool, log.New())
 	require.NoError(t, err)
 
@@ -1060,6 +1048,128 @@ func TestFullCatchupSettlesPerSlot(t *testing.T) {
 			require.Greater(t, floorGas(end-k, end), uint64(maxPostingGas-batchReserve), "blocks %d..%d", end-k, end)
 		}
 	}
+}
+
+// TestFullCatchupKeepsTheGridEmpty: with a composer, the catch-up blocks on
+// the grid stay empty on a pool that never runs dry, so that a range over
+// one posting settles in chunks ending there; the others fill their budget.
+func TestFullCatchupKeepsTheGridEmpty(t *testing.T) {
+	h := newHarness(t)
+	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet(), Composer: &slotComposer{empty: true}}, h.follower, newFull(t, h), log.New())
+	require.NoError(t, err)
+	const sync = 24
+	require.NoError(t, s.Handle(t.Context(), sequencer.SyncSlot{Height: sync, Time: h.genesis.Time + 2*sync, L1Head: 4}))
+	require.Equal(t, uint64(sync), h.head(t).Number.Uint64())
+	k := devnet().K()
+	for n := uint64(1); n <= sync; n++ {
+		if txs := h.block(t, n).Transactions(); n%k == 0 {
+			require.Empty(t, txs, "grid block %d", n)
+		} else {
+			require.NotEmpty(t, txs, "block %d", n)
+		}
+	}
+}
+
+// TestLiveTickKeepsTheGridEmpty: with a composer, a Live tick after a Sync
+// block skipped off the grid leaves the grid height empty on a full pool.
+func TestLiveTickKeepsTheGridEmpty(t *testing.T) {
+	h := newHarness(t)
+	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet(), Composer: &slotComposer{empty: true}}, h.follower, newFull(t, h), log.New())
+	require.NoError(t, err)
+	ctx := t.Context()
+	g := h.genesis.Time
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 12, Time: g + 24, L1Head: 2}))
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 18, Time: g + 37, L1Head: 3}))
+	require.Equal(t, 1, s.Status().OffGridSkips)
+	require.Equal(t, uint64(17), h.head(t).Number.Uint64())
+	require.NotEmpty(t, h.block(t, 17).Transactions())
+	require.NoError(t, s.Handle(ctx, sequencer.LiveTick{SyncHeight: 24}))
+	require.Equal(t, uint64(18), h.head(t).Number.Uint64())
+	require.Empty(t, h.block(t, 18).Transactions(), "grid block 18")
+	require.NoError(t, s.Handle(ctx, sequencer.LiveTick{SyncHeight: 24}))
+	require.NotEmpty(t, h.block(t, 19).Transactions())
+}
+
+// chunkProver attests any window, recording its bounds.
+type chunkProver struct{ windows [][2]uint64 }
+
+func (p *chunkProver) ProveBy(_ context.Context, w *prove.Window, _ time.Time, _ time.Duration) ([]byte, error) {
+	p.windows = append(p.windows, [2]uint64{w.From, w.To})
+	return bytes.Repeat([]byte{0x11}, 65), nil
+}
+
+// chunkPoster signs postings and sends them nowhere.
+type chunkPoster struct{ key *ecdsa.PrivateKey }
+
+func (p *chunkPoster) Sign(_ context.Context, input []byte, gas uint64) (types.Transaction, error) {
+	to := common.Address{0xee}
+	return types.SignTx(&types.DynamicFeeTransaction{CommonTx: types.CommonTx{GasLimit: gas, To: &to, Data: input}, ChainID: *uint256.NewInt(1)},
+		*types.LatestSignerForChainID(uint256.NewInt(1)), p.key)
+}
+
+func (*chunkPoster) Send(context.Context, []types.Transaction, post.Target) (post.Sent, error) {
+	return post.Sent{Block: 1}, nil
+}
+
+// idleL1 is an L1 on which no posting lands.
+type idleL1 struct{}
+
+func (idleL1) Head(context.Context) (*l1.Header, error)                  { return &l1.Header{}, nil }
+func (idleL1) Receipt(context.Context, common.Hash) (*l1.Receipt, error) { return nil, nil }
+func (idleL1) HasTransaction(context.Context, common.Hash) (bool, error) { return false, nil }
+
+type noWitnesses struct{}
+
+func (noWitnesses) Get(context.Context, uint64, common.Hash) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+// TestFullCatchupSettlesInChunks: the composer settles a catch-up of full
+// blocks over one posting's gas in a chunk ending at an empty grid block.
+func TestFullCatchupSettlesInChunks(t *testing.T) {
+	h := newHarness(t)
+	cc := derivertest.Config()
+	k := devnet().K()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	prover := &chunkProver{}
+	c := composer.New(composer.Config{
+		Batcher: &composer.Batcher{RollupID: cc.L2.(*config.L2Config).RollupID, ProofSystem: common.Address{0xab}, Signer: types.LatestSignerForChainID(cc.ChainID)},
+		K:       k, MaxBlocks: composer.GridCap(300, k), MaxGas: composer.MaxPostBatchGas, Proof: time.Second,
+	}, h.chain, noWitnesses{}, prover, &chunkPoster{key: key},
+		&composer.Observer{Node: idleL1{}, Every: time.Millisecond, Logger: log.New()},
+		func() uint64 { return 0 }, func() uint64 { return 0 }, h.follower.HeadTo, log.New())
+	t.Cleanup(c.Close)
+	s, err := sequencer.New(cc, sequencer.Config{Timing: devnet(), Composer: c}, h.follower, newFull(t, h), log.New())
+	require.NoError(t, err)
+	const sync = 24
+	require.NoError(t, s.Handle(t.Context(), sequencer.SyncSlot{Height: sync, Time: h.genesis.Time + 2*sync, L1Head: 4}))
+	require.Equal(t, uint64(sync), h.head(t).Number.Uint64())
+	require.Equal(t, [][2]uint64{{1, k}}, prover.windows, "the one chunk within the gas limit")
+}
+
+// newFull returns a pool of h's chain that never runs dry.
+func newFull(t *testing.T, h *harness) *full {
+	t.Helper()
+	cc := derivertest.Config()
+	signer := types.LatestSignerForChainID(cc.ChainID)
+	to := common.HexToAddress("0xb0b")
+	data := bytes.Repeat([]byte{0xff}, 1_000)
+	pool := &full{chain: h.chain}
+	for nonce := range uint64(2_000) {
+		tx, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 70_000, To: &to, Data: data},
+			ChainID:  *cc.ChainID,
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(10 * common.GWei),
+		}, *signer, derivertest.UserKey)
+		require.NoError(t, err)
+		sender, err := signer.Sender(tx)
+		require.NoError(t, err)
+		tx.SetSender(sender)
+		pool.txs = append(pool.txs, tx)
+	}
+	return pool
 }
 
 // oneEach is a pool yielding one transaction per block, the sender's next.

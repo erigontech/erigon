@@ -296,7 +296,7 @@ func (s *Sequencer) liveTick(ctx context.Context, tick LiveTick) error {
 	if liveEnd := tick.SyncHeight - min(tick.SyncHeight, future+1); head.Number.Uint64() >= liveEnd || s.paused(head) {
 		return nil
 	}
-	_, err = s.produce(ctx, Live, head)
+	_, err = s.fill(ctx, Live, head, tick.SyncHeight)
 	return err
 }
 
@@ -317,7 +317,7 @@ func (s *Sequencer) syncSlot(ctx context.Context, slot SyncSlot) error {
 	case Catchup:
 		// Each block commits on the one before it, so the Sync block keeps its
 		// height; a head moved by derivation fails the next with ErrStaleParent.
-		if head, err = s.produceN(ctx, Live, head, c.Live, false); err != nil {
+		if head, err = s.catchup(ctx, head, c.Live); err != nil {
 			return err
 		}
 		return s.syncBlock(ctx, head, head.Time+s.l2.BlockInterval, slot.L1Head+1, ModeCatchup)
@@ -452,6 +452,29 @@ func (s *Sequencer) syncBlock(ctx context.Context, parent *types.Header, ts, tar
 		c.SyncCommitted(ctx, sync)
 	}
 	return nil
+}
+
+// catchup produces the n Live blocks of a Catchup on head.
+func (s *Sequencer) catchup(ctx context.Context, head *types.Header, n uint64) (*types.Header, error) {
+	sync := head.Number.Uint64() + n + 1
+	for range n {
+		var err error
+		if head, err = s.fill(ctx, Live, head, sync); err != nil {
+			return nil, err
+		}
+	}
+	return head, nil
+}
+
+// fill produces the block of kind on parent below the Sync block at sync.
+// With a composer, a block on its grid is empty, as a Sync block is: a range
+// over one posting's limits settles in chunks, each ending at an empty grid
+// block.
+func (s *Sequencer) fill(ctx context.Context, kind Kind, parent *types.Header, sync uint64) (*types.Header, error) {
+	if s.cfg.Composer != nil && (sync-parent.Number.Uint64()-1)%s.cfg.Timing.K() == 0 {
+		return s.build(ctx, kind, parent, noTxns{})
+	}
+	return s.produce(ctx, kind, parent)
 }
 
 // produceN produces n blocks of kind on head and returns the new head; nil
