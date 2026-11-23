@@ -468,7 +468,7 @@ func generateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if config.IsShanghai(timestamp) {
 			b.withdrawals = []*types.Withdrawal{}
 		}
-		b.header = makeHeader(chainreader, parent, b.engine, timestamp)
+		b.header = makeHeader(chainreader, parent.HeaderNoCopy(), b.engine, timestamp)
 		// blockIO carries the per-phase write-sets: it feeds both the Amsterdam
 		// BAL and the versioned write-set commit.
 		b.blockIO = &state.VersionedIO{}
@@ -605,23 +605,23 @@ func generateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: parent}, nil
 }
 
-func makeHeader(chain rules.ChainReader, parent *types.Block, engine rules.Engine, timestamp uint64) *types.Header {
-	header := builder.MakeEmptyHeader(parent.Header(), chain.Config(), timestamp, nil)
+func makeHeader(chain rules.ChainReader, parent *types.Header, engine rules.Engine, timestamp uint64) *types.Header {
+	header := builder.MakeEmptyHeader(parent, chain.Config(), timestamp, nil)
 	if chain.Config().IsAmsterdam(timestamp) {
 		// Real slot numbers come from the consensus layer. Synthetic chains use
 		// the block number as a deterministic stand-in.
 		slotNumber := header.Number.Uint64()
 		header.SlotNumber = &slotNumber
 	}
-	header.Coinbase = parent.Coinbase()
+	header.Coinbase = parent.Coinbase
 	header.Difficulty = engine.CalcDifficulty(
 		chain, timestamp,
-		parent.Time(),
-		parent.Difficulty(),
-		parent.NumberU64(),
-		parent.Hash(),
-		parent.UncleHash(),
-		parent.Header().AuRaStep,
+		parent.Time,
+		parent.Difficulty,
+		parent.Number.Uint64(),
+		header.ParentHash,
+		parent.UncleHash,
+		parent.AuRaStep,
 	)
 
 	return header

@@ -59,6 +59,22 @@ var blobSchedule = map[string]*params.BlobConfig{
 // Forks table defines supported forks and their chain config.
 var Forks = map[string]*chain.Config{}
 
+// FixtureConfig holds the fork parameters supplied by a test fixture.
+type FixtureConfig struct {
+	ZeroNonceStorageAccounts []common.Address `json:"zeroNonceStorageAccounts"`
+}
+
+// ChainConfig applies the fixture's parameters to a copy of the shared fork config.
+func (f FixtureConfig) ChainConfig(fork string) (*chain.Config, error) {
+	base, ok := Forks[fork]
+	if !ok {
+		return nil, UnsupportedForkError{Name: fork}
+	}
+	config := base.Copy()
+	config.ZeroNonceStorageAccounts = f.ZeroNonceStorageAccounts
+	return config, nil
+}
+
 func init() {
 	c := &chain.Config{ChainID: uint256.NewInt(1)}
 	Forks["Frontier"] = c
