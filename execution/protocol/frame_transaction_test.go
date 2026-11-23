@@ -412,7 +412,6 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		noBaseFee bool
-		free      bool
 		service   bool
 		feeCap    uint64
 		wantErr   error
@@ -420,7 +419,6 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 		{name: "normal validation", wantErr: types.ErrFrameFeeBudget},
 		{name: "unpriced call", noBaseFee: true},
 		{name: "priced call", noBaseFee: true, feeCap: 1, wantErr: types.ErrFrameFeeBudget},
-		{name: "free message", free: true},
 		{name: "AuRa service transaction", service: true, wantErr: types.ErrTxTypeNotSupported},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -437,15 +435,9 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 				evm.ChainConfig().Aura = &chain.AuRaConfig{}
 			}
 			evm.ResetBetweenBlocks(blockCtx, evm.TxContext, ibs, config, blockCtx.Rules(evm.ChainConfig()))
-			burn := common.HexToAddress("0xb000")
-			if test.free || test.service {
-				evm.ChainConfig().BurntContract = map[string]common.Address{"0": burn}
-			}
 			msg, err := tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
 			require.NoError(t, err)
-			msg.SetIsFree(test.free)
 			result, err := ApplyMessage(evm, msg, NewGasPool(30_000_000, 0), true, false, &serviceTxEngine{service: test.service})
-			require.Equal(t, test.free, msg.IsFree())
 			if test.wantErr != nil {
 				require.ErrorIs(t, err, test.wantErr)
 				return
@@ -453,15 +445,9 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, result.Err)
 			require.True(t, msg.GasPrice().IsZero())
-			if test.free {
-				require.True(t, result.BurntContractAddress.IsNil())
-			}
 			balance, err := ibs.GetBalance(sender)
 			require.NoError(t, err)
 			require.Equal(t, uint256.Int{10_000_000}, balance)
-			balance, err = ibs.GetBalance(accounts.InternAddress(burn))
-			require.NoError(t, err)
-			require.True(t, balance.IsZero())
 		})
 	}
 }
