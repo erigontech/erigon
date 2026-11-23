@@ -190,7 +190,7 @@ func copyWrites(ws *state.WriteSet) *state.WriteSet {
 	for addr, inner := range ws.Storages() {
 		for key, w := range inner {
 			cp := *w
-			out.SetStorage(addr, key, &cp)
+			out.SetStorage(addr, *key, &cp)
 		}
 	}
 	return out

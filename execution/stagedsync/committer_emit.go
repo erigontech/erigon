@@ -82,7 +82,8 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, bas
 			m = map[accounts.StorageKey][]byte{}
 			cc.touchedStorage[a] = m
 		}
-		for k := range slots {
+		for _, w := range slots {
+			k := w.Key
 			if _, seen := m[k]; seen {
 				continue
 			}

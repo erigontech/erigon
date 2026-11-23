@@ -20,10 +20,10 @@ type WriteSetView interface {
 	Codes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.Code]]
 	SelfDestructs() iter.Seq2[accounts.Address, *VersionedWrite[bool]]
 	CreateContracts() iter.Seq2[accounts.Address, *VersionedWrite[bool]]
-	Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]]
+	Storages() iter.Seq2[accounts.Address, StorageSlots]
 	// StorageChanges is Storages without the writes that leave the stored value
 	// as it was. Only the domain and commitment paths may use it.
-	StorageChanges() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]]
+	StorageChanges() iter.Seq2[accounts.Address, StorageSlots]
 	// AccountChanges yields each address whose account leaf this write set changes.
 	AccountChanges() iter.Seq[accounts.Address]
 	IsEmpty() bool

@@ -1420,6 +1420,21 @@ func TestWriteSet_AllHeaders_RoundTrip(t *testing.T) {
 // an accumulator via mergeTx matches repeated Merge channel by channel (reads,
 // writes, accesses) and as a whole BAL — including the begin-system tx at index
 // -1 and two txs touching the same index.
+// keyedReads splits rs into its storage reads keyed by slot and the rest, so
+// sets built over different slot tables compare equal.
+func keyedReads(rs ReadSet) (ReadSet, map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]) {
+	slots := make(map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int], len(rs.storage))
+	for a, inner := range rs.storage {
+		m := make(map[accounts.StorageKey]VersionedRead[uint256.Int], len(inner))
+		for id, tr := range inner {
+			m[*id] = tr
+		}
+		slots[a] = m
+	}
+	rs.storage, rs.slots = nil, nil
+	return rs, slots
+}
+
 func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
 	t.Parallel()
 
@@ -1490,7 +1505,10 @@ func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
 	// that overwrote instead of merged a slot passes the hash check but fails here.
 	// Access marks travel on the read-set now, so the ReadSet compare covers them.
 	for i := -1; i < merged.Len()-1; i++ {
-		require.Equal(t, merged.ReadSet(i), fused.ReadSet(i), "reads differ at tx %d", i)
+		mergedReads, mergedSlots := keyedReads(merged.ReadSet(i))
+		fusedReads, fusedSlots := keyedReads(fused.ReadSet(i))
+		require.Equal(t, mergedReads, fusedReads, "reads differ at tx %d", i)
+		require.Equal(t, mergedSlots, fusedSlots, "storage reads differ at tx %d", i)
 		require.Equal(t, merged.ReadSetIncarnation(i), fused.ReadSetIncarnation(i), "incarnation differs at tx %d", i)
 		require.Equal(t, merged.WriteSet(i), fused.WriteSet(i), "writes differ at tx %d", i)
 	}
@@ -1975,7 +1993,8 @@ func TestArenaDeleteKeepsItsCellOutOfThePool(t *testing.T) {
 	arena.SetStorage(addr, key, arena.newVWStorage())
 
 	delCell(&arena, arena.nonce, addr, func(*VersionedWrite[uint64]) { t.Fatal("a deleted arena cell reached the shared pool") })
-	delCell(&arena, arena.storage[addr], key, func(*VersionedWrite[uint256.Int]) { t.Fatal("a deleted arena cell reached the shared pool") })
+	id, _ := arena.slots.find(key)
+	delCell(&arena, arena.storage[addr], id, func(*VersionedWrite[uint256.Int]) { t.Fatal("a deleted arena cell reached the shared pool") })
 	require.Empty(t, arena.nonce)
 	require.Empty(t, arena.storage[addr])
 }

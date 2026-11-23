@@ -120,7 +120,8 @@ type ReadSet struct {
 	code           map[accounts.Address]VersionedRead[accounts.Code]
 	codeHash       map[accounts.Address]VersionedRead[accounts.CodeHash]
 	codeSize       map[accounts.Address]VersionedRead[int]
-	storage        map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
+	storage        map[accounts.Address]map[slotID]VersionedRead[uint256.Int]
+	slots          *slotTable
 	// slotMapPeak is the most slots each kept storage map has held: a cleared
 	// map keeps the buckets it grew.
 	slotMapPeak map[accounts.Address]int
@@ -179,6 +180,9 @@ func (s *ReadSet) clearForReuse() {
 		// Nil, not cleared: a cleared map keeps the buckets those addresses grew.
 		s.storage, s.slotMapPeak = nil, nil
 	}
+	if s.storage == nil {
+		s.slots = nil
+	}
 	s.access = nil
 }
 
@@ -230,15 +234,46 @@ func (s *ReadSet) SetCodeSize(addr accounts.Address, tr VersionedRead[int]) {
 }
 
 func (s *ReadSet) SetStorage(addr accounts.Address, key accounts.StorageKey, tr VersionedRead[uint256.Int]) {
+	s.setStorageID(addr, s.slotTable(nil).intern(key), tr)
+}
+
+func (s *ReadSet) setStorageID(addr accounts.Address, id slotID, tr VersionedRead[uint256.Int]) {
 	if s.storage == nil {
-		s.storage = make(map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int])
+		s.storage = make(map[accounts.Address]map[slotID]VersionedRead[uint256.Int])
 	}
 	inner := s.storage[addr]
 	if inner == nil {
-		inner = make(map[accounts.StorageKey]VersionedRead[uint256.Int])
+		inner = make(map[slotID]VersionedRead[uint256.Int])
 		s.storage[addr] = inner
 	}
-	inner[key] = tr
+	inner[id] = tr
+}
+
+// slotTable returns the table s takes ids from; a set with no storage reads
+// switches to src when src is a block table.
+func (s *ReadSet) slotTable(src *slotTable) *slotTable {
+	s.slots = joinSlots(s.slots, len(s.storage) == 0, src)
+	return s.slots
+}
+
+// useSlots takes t as the slot table of a set with no storage reads.
+func (s *ReadSet) useSlots(t *slotTable) {
+	if len(s.storage) == 0 {
+		s.slots = t
+	}
+}
+
+func (s *ReadSet) storageRead(addr accounts.Address, key accounts.StorageKey) (VersionedRead[uint256.Int], bool) {
+	inner := s.storage[addr]
+	if inner == nil {
+		return VersionedRead[uint256.Int]{}, false
+	}
+	id, ok := s.slots.find(key)
+	if !ok {
+		return VersionedRead[uint256.Int]{}, false
+	}
+	tr, ok := inner[id]
+	return tr, ok
 }
 
 func (s *ReadSet) GetAddress(addr accounts.Address) (VersionedRead[AccountView], bool) {
@@ -287,12 +322,7 @@ func (s *ReadSet) GetCodeSize(addr accounts.Address) (VersionedRead[int], bool) 
 }
 
 func (s *ReadSet) GetStorage(addr accounts.Address, key accounts.StorageKey) (VersionedRead[uint256.Int], bool) {
-	inner := s.storage[addr]
-	if inner == nil {
-		return VersionedRead[uint256.Int]{}, false
-	}
-	tr, ok := inner[key]
-	return tr, ok
+	return s.storageRead(addr, key)
 }
 
 // getHeader probes the read set for path and returns the type-agnostic
@@ -329,11 +359,7 @@ func (s *ReadSet) getHeader(addr accounts.Address, path AccountPath, key account
 		tr, ok := s.codeSize[addr]
 		return tr.ReadHeader, ok
 	case StoragePath:
-		inner := s.storage[addr]
-		if inner == nil {
-			return ReadHeader{}, false
-		}
-		tr, ok := inner[key]
+		tr, ok := s.storageRead(addr, key)
 		return tr.ReadHeader, ok
 	}
 	return ReadHeader{}, false
@@ -430,9 +456,9 @@ func (s *ReadSet) ScanAddr(addr accounts.Address, fn func(path AccountPath, key 
 		scanAddrPath(s.codeHash, addr, CodeHashPath, fn) +
 		scanAddrPath(s.codeSize, addr, CodeSizePath, fn)
 	if inner, ok := s.storage[addr]; ok {
-		for k, tr := range inner {
-			fn(StoragePath, k, &tr.ReadHeader)
-			inner[k] = tr
+		for id, tr := range inner {
+			fn(StoragePath, *id, &tr.ReadHeader)
+			inner[id] = tr
 			n++
 		}
 	}
@@ -528,8 +554,9 @@ func (s *ReadSet) mergeFrom(src ReadSet) {
 		readSetPut(&s.codeSize, a, tr)
 	}
 	for a, inner := range src.storage {
-		for k, tr := range inner {
-			s.SetStorage(a, k, tr)
+		slots := s.slotTable(src.slots)
+		for id, tr := range inner {
+			s.setStorageID(a, slots.adopt(src.slots, id), tr)
 		}
 	}
 	if len(src.access) > 0 {
@@ -585,8 +612,8 @@ func (s ReadSet) TraceReads(prefix string) {
 		fmt.Println(prefix, "RD", traceReadStr(addr, CodeSizePath, accounts.NilKey, tr.ReadHeader, valueString(CodeSizePath, tr.Val)))
 	}
 	for addr, inner := range s.storage {
-		for key, tr := range inner {
-			fmt.Println(prefix, "RD", traceReadStr(addr, StoragePath, key, tr.ReadHeader, valueString(StoragePath, tr.Val)))
+		for id, tr := range inner {
+			fmt.Println(prefix, "RD", traceReadStr(addr, StoragePath, *id, tr.ReadHeader, valueString(StoragePath, tr.Val)))
 		}
 	}
 }
@@ -685,8 +712,8 @@ func (s ReadSet) RangeFullHeaders(yield func(accounts.Address, AccountPath, acco
 		}
 	}
 	for a, inner := range s.storage {
-		for k, tr := range inner {
-			if !yield(a, StoragePath, k, tr.ReadHeader) {
+		for id, tr := range inner {
+			if !yield(a, StoragePath, *id, tr.ReadHeader) {
 				return
 			}
 		}
@@ -1009,10 +1036,15 @@ type WriteSet struct {
 	code           map[accounts.Address]*VersionedWrite[accounts.Code]
 	codeHash       map[accounts.Address]*VersionedWrite[accounts.CodeHash]
 	codeSize       map[accounts.Address]*VersionedWrite[int]
-	storage        map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int]
+	storage        map[accounts.Address]StorageSlots
+	slots          *slotTable
 
 	cells *vwArenas // nil until UseArena
 }
+
+// StorageSlots holds one address's storage writes keyed by slot id; a write's
+// Key is its slot.
+type StorageSlots = map[slotID]*VersionedWrite[uint256.Int]
 
 type vwArenas struct {
 	address        vwArena[*accounts.Account]
@@ -1103,18 +1135,18 @@ var (
 	wsMapPoolCodeHash       = newVWMapPool[accounts.CodeHash]()
 	wsMapPoolCodeSize       = newVWMapPool[int]()
 	wsMapPoolStorageInner   = sync.Pool{New: func() any {
-		return make(map[accounts.StorageKey]*VersionedWrite[uint256.Int])
+		return make(StorageSlots)
 	}}
 	wsMapPoolStorageOuter = sync.Pool{New: func() any {
-		return make(map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int])
+		return make(map[accounts.Address]StorageSlots)
 	}}
 )
 
-func wsGetStorageInner() map[accounts.StorageKey]*VersionedWrite[uint256.Int] {
-	return wsMapPoolStorageInner.Get().(map[accounts.StorageKey]*VersionedWrite[uint256.Int])
+func wsGetStorageInner() StorageSlots {
+	return wsMapPoolStorageInner.Get().(StorageSlots)
 }
 
-func wsPutStorageInner(m map[accounts.StorageKey]*VersionedWrite[uint256.Int]) {
+func wsPutStorageInner(m StorageSlots) {
 	if m == nil {
 		return
 	}
@@ -1122,11 +1154,11 @@ func wsPutStorageInner(m map[accounts.StorageKey]*VersionedWrite[uint256.Int]) {
 	wsMapPoolStorageInner.Put(m)
 }
 
-func wsGetStorageOuter() map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int] {
-	return wsMapPoolStorageOuter.Get().(map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int])
+func wsGetStorageOuter() map[accounts.Address]StorageSlots {
+	return wsMapPoolStorageOuter.Get().(map[accounts.Address]StorageSlots)
 }
 
-func wsPutStorageOuter(m map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int]) {
+func wsPutStorageOuter(m map[accounts.Address]StorageSlots) {
 	if m == nil {
 		return
 	}
@@ -1181,6 +1213,51 @@ func (ws *WriteSet) SetCodeSize(addr accounts.Address, vw *VersionedWrite[int]) 
 }
 
 func (ws *WriteSet) SetStorage(addr accounts.Address, key accounts.StorageKey, vw *VersionedWrite[uint256.Int]) {
+	ws.setStorageID(addr, ws.slotTable(nil).intern(key), vw)
+}
+
+// slotTable returns the table ws takes ids from; a set with no storage writes
+// switches to src when src is a block table.
+func (ws *WriteSet) slotTable(src *slotTable) *slotTable {
+	ws.slots = joinSlots(ws.slots, len(ws.storage) == 0, src)
+	return ws.slots
+}
+
+// copyStorageFrom sets ws's write at addr for each of src's slots, cloned when clone is set.
+func (ws *WriteSet) copyStorageFrom(src *WriteSet, addr accounts.Address, inner StorageSlots, keep func(WriteHeader) bool, clone bool) {
+	slots := ws.slotTable(src.slots)
+	for id, vw := range inner {
+		if keep != nil && !keep(vw.WriteHeader) {
+			continue
+		}
+		if clone {
+			vw = cloneVW(vw)
+		}
+		ws.setStorageID(addr, slots.adopt(src.slots, id), vw)
+	}
+}
+
+// useSlots takes t as the slot table of a set with no storage writes.
+func (ws *WriteSet) useSlots(t *slotTable) {
+	if len(ws.storage) == 0 {
+		ws.slots = t
+	}
+}
+
+func (ws *WriteSet) storageWrite(addr accounts.Address, key accounts.StorageKey) (*VersionedWrite[uint256.Int], bool) {
+	inner := ws.storage[addr]
+	if inner == nil {
+		return nil, false
+	}
+	id, ok := ws.slots.find(key)
+	if !ok {
+		return nil, false
+	}
+	vw, ok := inner[id]
+	return vw, ok
+}
+
+func (ws *WriteSet) setStorageID(addr accounts.Address, id slotID, vw *VersionedWrite[uint256.Int]) {
 	if ws.storage == nil {
 		ws.storage = wsGetStorageOuter()
 	}
@@ -1189,7 +1266,7 @@ func (ws *WriteSet) SetStorage(addr accounts.Address, key accounts.StorageKey, v
 		inner = wsGetStorageInner()
 		ws.storage[addr] = inner
 	}
-	inner[key] = vw
+	inner[id] = vw
 }
 
 func (ws *WriteSet) IsEmpty() bool {
@@ -1260,11 +1337,7 @@ func (ws *WriteSet) Filter(keep func(WriteHeader) bool) *WriteSet {
 		}
 	}
 	for a, inner := range ws.storage {
-		for k, vw := range inner {
-			if keep(vw.WriteHeader) {
-				out.SetStorage(a, k, vw)
-			}
-		}
+		out.copyStorageFrom(ws, a, inner, keep, false)
 	}
 	return out
 }
@@ -1324,9 +1397,7 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 			out.SetIncarnation(addr, cloneVW(vw))
 		}
 		if inner, ok := ws.storage[addr]; ok {
-			for k, vw := range inner {
-				out.SetStorage(addr, k, cloneVW(vw))
-			}
+			out.copyStorageFrom(ws, addr, inner, nil, true)
 		}
 		// CreateContract survives self-destruct: fee finalization and the BAL need
 		// the creation marker. ApplyVersionedWrites skips applying it under
@@ -1565,12 +1636,7 @@ func (ws *WriteSet) GetStorage(addr accounts.Address, key accounts.StorageKey) (
 	if ws == nil {
 		return nil, false
 	}
-	inner := ws.storage[addr]
-	if inner == nil {
-		return nil, false
-	}
-	vw, ok := inner[key]
-	return vw, ok
+	return ws.storageWrite(addr, key)
 }
 
 // forEachAddr calls f for every address with at least one entry, allocating
@@ -1705,15 +1771,15 @@ func (ws *WriteSet) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[acc
 
 // StorageChanges has nothing to filter: a plain WriteSet carries no version map
 // to compare a write against, so its writes are already the changed ones.
-func (ws *WriteSet) StorageChanges() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
+func (ws *WriteSet) StorageChanges() iter.Seq2[accounts.Address, StorageSlots] {
 	return ws.Storages()
 }
 
 func (ws *WriteSet) AccountChanges() iter.Seq[accounts.Address] { return accountChangeAddrs(ws) }
 
-func (ws *WriteSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
+func (ws *WriteSet) Storages() iter.Seq2[accounts.Address, StorageSlots] {
 	if ws == nil {
-		return maps.All(map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int](nil))
+		return maps.All(map[accounts.Address]StorageSlots(nil))
 	}
 	return maps.All(ws.storage)
 }
@@ -1887,7 +1953,11 @@ func (ws *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 	if inner == nil {
 		return
 	}
-	delCell(ws, inner, key, releaseVWStorage)
+	id, ok := ws.slots.find(key)
+	if !ok {
+		return
+	}
+	delCell(ws, inner, id, releaseVWStorage)
 	if len(inner) == 0 {
 		delete(ws.storage, addr)
 	}
@@ -1911,14 +1981,12 @@ func (ws *WriteSet) balanceDeleted(addr accounts.Address) bool {
 }
 
 func (ws *WriteSet) updateStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
-	if inner := ws.storage[addr]; inner != nil {
-		if vw, ok := inner[key]; ok {
-			vw.Val = val
-			// A journal revert restores an earlier value; re-stamp against the
-			// captured origin so valStatus tracks the restored value, not the
-			// reverted write it replaced.
-			vw.valStatus = storageValueStatus(vw.orig, val)
-		}
+	if vw, ok := ws.storageWrite(addr, key); ok {
+		vw.Val = val
+		// A journal revert restores an earlier value; re-stamp against the
+		// captured origin so valStatus tracks the restored value, not the
+		// reverted write it replaced.
+		vw.valStatus = storageValueStatus(vw.orig, val)
 	}
 }
 
@@ -2327,9 +2395,9 @@ func (ws *WriteSet) TouchUpdates(updates *commitment.Updates) {
 	}
 	for addr, inner := range ws.storage {
 		addrVal := addr.Value()
-		for key, w := range inner {
+		for _, w := range inner {
 			vBytes := w.Val.Bytes()
-			keyVal := key.Value()
+			keyVal := w.Key.Value()
 			composite := make([]byte, 20+32)
 			copy(composite, addrVal[:])
 			copy(composite[20:], keyVal[:])
@@ -2398,10 +2466,8 @@ func (ws *WriteSet) hasHeader(h WriteHeader) bool {
 		_, ok := ws.codeSize[h.Address]
 		return ok
 	case StoragePath:
-		if inner, ok := ws.storage[h.Address]; ok {
-			_, ok := inner[h.Key]
-			return ok
-		}
+		_, ok := ws.storageWrite(h.Address, h.Key)
+		return ok
 	}
 	return false
 }
@@ -2442,9 +2508,7 @@ func (ws *WriteSet) MergeFrom(src *WriteSet) {
 		ws.SetCodeSize(a, cloneVW(vw))
 	}
 	for a, inner := range src.storage {
-		for key, vw := range inner {
-			ws.SetStorage(a, key, cloneVW(vw))
-		}
+		ws.copyStorageFrom(src, a, inner, nil, true)
 	}
 }
 
@@ -2713,11 +2777,11 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		ensureAccountState(ac, addr).updateReadBalance(tr.Val)
 	}
 	for addr, inner := range rs.storage {
-		for key, tr := range inner {
+		for id, tr := range inner {
 			if tr.internal {
 				continue
 			}
-			ensureAccountState(ac, addr).updateReadStorage(key, tr.Val)
+			ensureAccountState(ac, addr).updateReadStorage(*id, tr.Val)
 		}
 	}
 	for addr, tr := range rs.address {
@@ -2809,7 +2873,7 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		for addr, byKey := range writes.Storages() {
 			account := ensureAccountState(ac, addr)
 			for key, w := range byKey {
-				account.applyWriteStorage(key, w.Val, w.Version.blockAccessIndex())
+				account.applyWriteStorage(*key, w.Val, w.Version.blockAccessIndex())
 			}
 		}
 		// EIP-7928 requires every touched address to appear; these paths carry
@@ -3300,7 +3364,7 @@ func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {
 		return false
 	}
 	for addr, writes := range txFrom.storage {
-		if anyCommonKey(writes, txTo.storage[addr]) {
+		if anyCommonSlot(txFrom.slots, writes, txTo.slots, txTo.storage[addr]) {
 			return true
 		}
 	}
@@ -3317,7 +3381,7 @@ func (s ReadSet) DependsOnAt(ws *WriteSet, addr accounts.Address) bool {
 	if ws == nil {
 		return false
 	}
-	if anyCommonKey(ws.storage[addr], s.storage[addr]) {
+	if anyCommonSlot(ws.slots, ws.storage[addr], s.slots, s.storage[addr]) {
 		return true
 	}
 	for _, p := range [...]AccountPath{AddressPath, SelfDestructPath, BalancePath, NoncePath, IncarnationPath, CodePath, CodeHashPath, CodeSizePath, CreateContractPath} {
@@ -3329,14 +3393,16 @@ func (s ReadSet) DependsOnAt(ws *WriteSet, addr accounts.Address) bool {
 	return false
 }
 
-// anyCommonKey probes the smaller map's keys in the larger one.
-func anyCommonKey[K comparable, A, B any](a map[K]A, b map[K]B) bool {
+// anyCommonSlot probes the smaller map's keys in the larger one.
+func anyCommonSlot[A, B any](ta *slotTable, a map[slotID]A, tb *slotTable, b map[slotID]B) bool {
 	if len(a) > len(b) {
-		return anyCommonKey(b, a)
+		return anyCommonSlot(tb, b, ta, a)
 	}
-	for k := range a {
-		if _, ok := b[k]; ok {
-			return true
+	for id := range a {
+		if id, ok := tb.findFrom(ta, id); ok {
+			if _, ok := b[id]; ok {
+				return true
+			}
 		}
 	}
 	return false

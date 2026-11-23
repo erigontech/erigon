@@ -80,7 +80,7 @@ func EmitTouchedAsOf(ws WriteSetView, view *VersionMapView, updates *commitment.
 		for key := range slots {
 			slot := key.Value()
 			copy(composite[length.Addr:], slot[:])
-			u := view.StorageUpdate(addr, key)
+			u := view.StorageUpdate(addr, *key)
 			updates.TouchPlainKeyDirect(string(composite), &u)
 		}
 	}

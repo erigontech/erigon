@@ -2694,6 +2694,7 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
 	versionMap := state.NewVersionMap(accessList)
+	versionMap.ShareSlotIDs()
 	versionMap.SeedAddresses()
 	be := &blockExecutor{
 		blockNum:            blockNum,

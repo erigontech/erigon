@@ -281,6 +281,8 @@ type VersionMap struct {
 	// at version originIndex; a hot account read by many workers no longer serializes on e.mu.
 	originAccounts atomic.Pointer[xsync.Map[accounts.Address, *accounts.Account]] // nil ptr = committed-absent
 	originStorage  atomic.Pointer[xsync.Map[originStorageKey, uint256.Int]]
+	// slots is the block's slot table, shared by the sets of its txs; nil until ShareSlotIDs.
+	slots *slotTable
 
 	// sealed/sealedArmed enforce that a finalized tx's cells are immutable: no write/delete at TxIndex <= sealed. SealUpTo is single-writer; assertUnsealed is many-reader.
 	sealed      atomic.Int64
@@ -436,6 +438,29 @@ func (vm *VersionMap) assertUnsealed(txIdx int, addr accounts.Address, path Acco
 		panic(fmt.Sprintf("versionMap: write to sealed cell tx=%d sealedUpTo=%d addr=%x path=%s key=%x",
 			txIdx, vm.sealed.Load(), addr.Value(), path, key.Value()))
 	}
+}
+
+// ShareSlotIDs gives the map a slot table that the sets of its txs share, with
+// the access list's slots interned up front. Call it before any tx runs.
+func (vm *VersionMap) ShareSlotIDs() {
+	n := 0
+	for i := range vm.bal {
+		n += len(vm.bal[i].StorageChanges) + len(vm.bal[i].StorageReads)
+	}
+	t := newSharedSlotTable(n)
+	keys := make([]accounts.StorageKey, 0, n)
+	for i := range vm.bal {
+		for _, sc := range vm.bal[i].StorageChanges {
+			keys = append(keys, sc.Slot)
+		}
+		for _, k := range vm.bal[i].StorageReads {
+			keys = append(keys, accounts.StorageKey(k))
+		}
+	}
+	for i := range keys {
+		t.shared.LoadOrStore(keys[i], &keys[i])
+	}
+	vm.slots = t
 }
 
 func NewVersionMap(changes types.BlockAccessList) *VersionMap {
@@ -1535,7 +1560,8 @@ func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag
 		return false
 	}
 	if inner, ok := writes.storage[addr]; ok {
-		for key, vw := range inner {
+		for id, vw := range inner {
+			key := *id
 			var cells *btree.Map[int, *WriteCell[uint256.Int]]
 			if e.Storage != nil {
 				cells = e.Storage[key]
@@ -1645,7 +1671,8 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			if e.Storage == nil {
 				e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
 			}
-			for key, vw := range inner {
+			for id, vw := range inner {
+				key := *id
 				// On a BAL block a net-zero write is omitted from the BAL and folded away by
 				// StorageChanges, so it is never materialized here (nor sealed below). The slot
 				// must read as the access list seeds it, so a cell an earlier run of the tx left
@@ -1837,7 +1864,8 @@ func (vm *VersionMap) markAccountLocked(addr accounts.Address, writes *WriteSet,
 		markLocked(e.CreateContract, addr, CreateContractPath, accounts.NilKey, vw, flag)
 	}
 	if inner, ok := writes.storage[addr]; ok {
-		for key, vw := range inner {
+		for id, vw := range inner {
+			key := *id
 			if vm.HasBAL && vw.valStatus == ValueUnchanged {
 				continue
 			}
@@ -2463,7 +2491,8 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	}
 	for a, inner := range rs.storage {
 		quiet := vm.hasNoCells(a, StoragePath)
-		for k, tr := range inner {
+		for id, tr := range inner {
+			k := *id
 			if quiet && tr.Version.TxIndex == originIndex {
 				continue
 			}

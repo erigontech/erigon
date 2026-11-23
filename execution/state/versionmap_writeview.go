@@ -136,12 +136,12 @@ func (v *versionMapWriteView) Count() int {
 	return v.keys.Count()
 }
 
-func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
-	return func(yield func(accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]) bool) {
+func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, StorageSlots] {
+	return func(yield func(accounts.Address, StorageSlots) bool) {
 		// The map and the writes it points at are scratch, reused for every address:
 		// a consumer must read what it needs inside the loop body and retain neither.
 		// Allocating per address made this the hot path of storage-heavy blocks.
-		out := map[accounts.StorageKey]*VersionedWrite[uint256.Int]{}
+		out := StorageSlots{}
 		var scratch []VersionedWrite[uint256.Int]
 		for addr, inner := range v.keys.Storages() {
 			clear(out)
@@ -151,7 +151,7 @@ func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[account
 			scratch = scratch[:len(inner)]
 			i := 0
 			for key, kw := range inner {
-				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: kw.Val}
+				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: *key}, Val: kw.Val}
 				out[key] = &scratch[i]
 				i++
 			}
@@ -168,9 +168,9 @@ func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[account
 // tx's own (lifecycle-aware) prior read, so there is no baseline to re-derive here
 // and a destruct needs no special case. Only the domain and commitment paths may
 // use it — the access list and notification accumulator must see every write.
-func (v *versionMapWriteView) StorageChanges() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
-	return func(yield func(accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]) bool) {
-		out := map[accounts.StorageKey]*VersionedWrite[uint256.Int]{}
+func (v *versionMapWriteView) StorageChanges() iter.Seq2[accounts.Address, StorageSlots] {
+	return func(yield func(accounts.Address, StorageSlots) bool) {
+		out := StorageSlots{}
 		var scratch []VersionedWrite[uint256.Int]
 		for addr, inner := range v.keys.Storages() {
 			clear(out)
@@ -187,7 +187,7 @@ func (v *versionMapWriteView) StorageChanges() iter.Seq2[accounts.Address, map[a
 				if kw.valStatus == ValueUnchanged {
 					continue
 				}
-				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: kw.Val}
+				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: *key}, Val: kw.Val}
 				if !createdEarlier {
 					scratch[i].valStatus, scratch[i].orig = kw.valStatus, kw.orig
 				}

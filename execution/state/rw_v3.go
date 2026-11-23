@@ -139,7 +139,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		for a, byKey := range writes.StorageChanges() {
 			d := ensure(a)
 			for k, vw := range byKey {
-				d.storage = append(d.storage, foldedSlot{storageItem{k, vw.Val}, prevFromRecord(vw)})
+				d.storage = append(d.storage, foldedSlot{storageItem{*k, vw.Val}, prevFromRecord(vw)})
 			}
 		}
 

@@ -76,8 +76,10 @@ func viewStorageVal(v state.WriteSetView, addr accounts.Address, key accounts.St
 		if a != addr {
 			continue
 		}
-		if w, ok := inner[key]; ok {
-			return w.Val, true
+		for _, w := range inner {
+			if w.Key == key {
+				return w.Val, true
+			}
 		}
 	}
 	return uint256.Int{}, false

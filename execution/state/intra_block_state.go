@@ -314,6 +314,19 @@ func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 	}
 	ibs.versionMap = versionMap
 	ibs.noMaterialize = noMaterialize
+	ibs.bindSlots()
+}
+
+// bindSlots points the empty sets at the version map's slot table, so their ids
+// match the block's.
+func (ibs *IntraBlockState) bindSlots() {
+	var t *slotTable
+	if ibs.versionMap != nil {
+		t = ibs.versionMap.slots
+	}
+	ibs.versionedReads.useSlots(t)
+	ibs.versionedWrites.useSlots(t)
+	ibs.versionedOrigins.useSlots(t)
 }
 
 // StateReader returns the committed-base reader. The parallel executor uses it to
@@ -372,6 +385,7 @@ func (ibs *IntraBlockState) Reset() {
 	// boundary call, so recycle can take every VW back.
 	ibs.versionedWrites.recycle()
 	ibs.versionedOrigins.ReleaseAndReset()
+	ibs.bindSlots()
 	ibs.recordAccess = false
 	ibs.accountReadDuration = 0
 	ibs.accountReadCount = 0
@@ -3137,7 +3151,7 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 			}
 		}
 		for key, vw := range writes.storage[addr] {
-			if err := stateWriter.WriteAccountStorage(addr, account.Incarnation, key, vw.orig, vw.Val); err != nil {
+			if err := stateWriter.WriteAccountStorage(addr, account.Incarnation, *key, vw.orig, vw.Val); err != nil {
 				return err
 			}
 		}
@@ -3826,11 +3840,13 @@ func (ibs *IntraBlockState) ResetVersionedIO() {
 	ibs.dep = UnknownDep
 	ibs.recordAccess = false
 	ibs.stateReadErr = nil
+	ibs.bindSlots()
 }
 
 // ResetVersionedReads clears tracked versioned reads without affecting writes.
 func (ibs *IntraBlockState) ResetVersionedReads() {
 	ibs.versionedReads = ReadSet{}
+	ibs.bindSlots()
 }
 
 // VersionedWrites returns a frozen typed snapshot of this tx's recorded writes.
@@ -3869,7 +3885,7 @@ func (ibs *IntraBlockState) PublishOrigins() {
 	}
 	for addr, inner := range ws.storage {
 		for key, vw := range inner {
-			ibs.versionMap.StoreOriginStorage(addr, key, vw.Val)
+			ibs.versionMap.StoreOriginStorage(addr, *key, vw.Val)
 		}
 	}
 	ws.ReleaseAndReset()

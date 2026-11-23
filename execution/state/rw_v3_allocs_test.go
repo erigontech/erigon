@@ -289,11 +289,11 @@ func TestWriteSetApplyKeyDoesNotScalePerSlot(t *testing.T) {
 
 	applyAllocs := func(slots int) float64 {
 		writes := &WriteSet{
-			storage: map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int]{addr: {}},
+			storage: map[accounts.Address]StorageSlots{addr: {}},
 		}
 		for i := range slots {
 			key := accounts.InternKey(common.BigToHash(big.NewInt(int64(i + 1))))
-			writes.storage[addr][key] = &VersionedWrite[uint256.Int]{
+			writes.storage[addr][&key] = &VersionedWrite[uint256.Int]{
 				WriteHeader: WriteHeader{Address: addr, Key: key, Path: StoragePath},
 				Val:         *uint256.NewInt(uint64(i + 1)),
 			}

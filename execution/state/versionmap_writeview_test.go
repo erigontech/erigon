@@ -143,7 +143,7 @@ func TestVersionMapWriteView_StorageChanges(t *testing.T) {
 	all := map[accounts.StorageKey]bool{}
 	for _, inner := range view.Storages() {
 		for k := range inner {
-			all[k] = true
+			all[*k] = true
 		}
 	}
 	require.True(t, all[unchanged] && all[changed], "Storages must still yield every write")
@@ -151,7 +151,7 @@ func TestVersionMapWriteView_StorageChanges(t *testing.T) {
 	got := map[accounts.StorageKey]uint256.Int{}
 	for _, inner := range view.StorageChanges() {
 		for k, vw := range inner {
-			got[k] = vw.Val
+			got[*k] = vw.Val
 		}
 	}
 	require.Equal(t, map[accounts.StorageKey]uint256.Int{changed: val200}, got,
@@ -165,7 +165,7 @@ func TestVersionMapWriteView_StorageChanges(t *testing.T) {
 	revived := map[accounts.StorageKey]uint256.Int{}
 	for _, inner := range NewVersionMapWriteView(revivedKeys, vm, myTx).StorageChanges() {
 		for k, vw := range inner {
-			revived[k] = vw.Val
+			revived[*k] = vw.Val
 		}
 	}
 	require.Equal(t, val100, revived[unchanged],

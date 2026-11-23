@@ -199,9 +199,12 @@ func slotRead(t *testing.T, reader StateReader, vm *VersionMap, x accounts.Addre
 	ibs.SetTxContext(1, txIdx)
 	_, err := ibs.GetState(x, k)
 	require.NoError(t, err)
-	read, ok := ibs.VersionedReads().storage[x][k]
+	reads := ibs.VersionedReads()
+	read, ok := reads.GetStorage(x, k)
 	require.True(t, ok)
-	return ReadSet{storage: map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]{x: {k: read}}}
+	var rs ReadSet
+	rs.SetStorage(x, k, read)
+	return rs
 }
 
 // A reverted SELFDESTRUCT leaves the contract created in this tx, so a slot from the
