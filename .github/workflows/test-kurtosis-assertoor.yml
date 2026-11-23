@@ -62,14 +62,14 @@ permissions:
   contents: read
 
 jobs:
-  # Suites share the image built for this commit. Later merge groups can
-  # restore the build cache written by the base branch's warmer.
   build-erigon-image:
     name: build-erigon-image
     if: ${{ !inputs.cl-images-only && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
+      # Exporting on a PR or merge-group ref delays the suites and only helps runs
+      # on that ref. The base-branch warmer exports layers that other runs can reuse.
       CACHE_TO: ${{ inputs.cache-warming-only && 'type=gha,mode=max,scope=kurtosis-erigon-build' || '' }}
     steps:
       - name: Fast checkout git repository
