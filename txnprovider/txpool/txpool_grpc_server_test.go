@@ -142,7 +142,7 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	chainID := *uint256.NewInt(1)
 
 	mockPool := &addMockTxPool{
-		knownByCall: []bool{true, false}, // first tx treated as already-known, second goes to AddLocalTxns
+		knownByCall: []bool{true, false, true}, // the second hash becomes known after its admission decision
 		addReasons:  []txpoolcfg.DiscardReason{txpoolcfg.TipAboveFeeCap},
 	}
 
@@ -329,13 +329,17 @@ type concurrentAddTxPool struct {
 	*TxPool
 	admissions atomic.Int32
 	bothParsed chan struct{}
+	reasons    [2][]txpoolcfg.DiscardReason
 }
 
 func (p *concurrentAddTxPool) AddLocalTxns(ctx context.Context, txns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
-	if p.admissions.Add(1) == 2 {
+	call := p.admissions.Add(1)
+	if call == 2 {
 		close(p.bothParsed)
 	}
-	return p.TxPool.AddLocalTxns(ctx, txns)
+	reasons, err := p.TxPool.AddLocalTxns(ctx, txns)
+	p.reasons[call-1] = reasons
+	return reasons, err
 }
 
 func TestGrpcServerAddFrameFailureAfterConcurrentAdmission(t *testing.T) {
@@ -397,6 +401,9 @@ func TestGrpcServerAddFrameFailureAfterConcurrentAdmission(t *testing.T) {
 			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, accepted.reply.Imported)
 			require.NoError(t, err)
 			require.Equal(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(frame.IDHash[:]))
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, wrapped.reasons[1])
+			require.False(t, pool.frameRejections.Contains(string(frame.IDHash[:])))
+			require.False(t, pool.discardReasonsLRU.Contains(string(frame.IDHash[:])))
 			require.Equal(t, &txpoolproto.AddReply{
 				Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS},
 				Errors:   []string{txpoolcfg.AlreadyKnown.String()},

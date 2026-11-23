@@ -1820,7 +1820,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			view, err := cache.View(ctx, tx)
 			asrt.NoError(err)
 			pool.blockGasLimit.Store(30_000_000)
-			reason, err := pool.validateTx(txn, false, view)
+			reason, err := pool.validateOrdinaryTxn(txn, false, view, false)
 			asrt.NoError(err)
 
 			if reason != test.expected {
@@ -1960,7 +1960,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	view, err := cache.View(ctx, tx)
 	require.NoError(t, err)
 
-	result, err := pool.validateTx(txn, false /* isLocal */, view)
+	result, err := pool.validateOrdinaryTxn(txn, false, view, false)
 	require.NoError(t, err)
 	assert.Equal(t, txpoolcfg.Success, result)
 }
@@ -1996,7 +1996,7 @@ func TestValidateTxReturnsSenderInfoError(t *testing.T) {
 	view, err := cache.View(ctx, tx)
 	require.NoError(t, err)
 
-	reason, err := pool.validateTx(txn, true, view)
+	reason, err := pool.validateOrdinaryTxn(txn, true, view, false)
 	require.Error(t, err)
 	require.Equal(t, txpoolcfg.ErrGetSenderInfo, reason)
 	require.ErrorContains(t, err, "validateTx: sender info")
@@ -3460,6 +3460,23 @@ func TestFromDBBlobsOutliveReadTx(t *testing.T) {
 	require.Equal(want, bundles[0].Blob, "blob loaded from the pool DB must not change after its read tx ends")
 }
 
+func TestAddLocalTxnsKeepsEachReplacementOutcome(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.discardReasonsLRU.Resize(1)
+	var txns TxnSlots
+	for i, fee := range []uint64{2, 4, 8} {
+		txn := newTestTxnSlot(0, 0, fee, fee, 100_000)
+		txn.IDHash[0] = byte(i + 1)
+		txns.Append(txn, sender[:], true)
+	}
+
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{
+		txpoolcfg.ReplacedByHigherTip, txpoolcfg.ReplacedByHigherTip, txpoolcfg.Success,
+	}, reasons)
+}
+
 func TestAddLocalTxnsClearsPreviousDiscardReason(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	txn := newTestTxnSlot(0, 0, 1, 2, 100_000)
@@ -3826,6 +3843,11 @@ func nonceRetrySender(t testing.TB, pool *TxPool, nonce uint64) {
 	require.NoError(t, pool.OnNewBlock(t.Context(), change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 }
 
+func prepareTxnReasons(ctx context.Context, pool *TxPool, txns TxnSlots, sources []remoteSource) ([]txpoolcfg.DiscardReason, error) {
+	batch, err := pool.prepareTxns(ctx, txns, sources)
+	return batch.reasons(), err
+}
+
 func TestBlobNonceRetryPrecheck(t *testing.T) {
 	for _, fork := range []string{"Cancun", "Osaka"} {
 		t.Run(fork, func(t *testing.T) {
@@ -3838,7 +3860,7 @@ func TestBlobNonceRetryPrecheck(t *testing.T) {
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 			for nonce := uint64(1); nonce <= 3; nonce++ {
 				nonceRetrySender(t, pool, nonce)
-				reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
+				reasons, err = prepareTxnReasons(t.Context(), pool, txns, nil)
 				require.NoError(t, err)
 				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 			}
@@ -3876,7 +3898,7 @@ func TestBlobNonceRetryEligibilityChanges(t *testing.T) {
 				txns = prefix
 			case "reorg":
 				nonceRetrySender(t, pool, 66)
-				reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
+				reasons, err = prepareTxnReasons(t.Context(), pool, txns, nil)
 				require.NoError(t, err)
 				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
 				nonceRetrySender(t, pool, 65)
@@ -3887,7 +3909,7 @@ func TestBlobNonceRetryEligibilityChanges(t *testing.T) {
 			case "gap boundary":
 				nonceRetrySender(t, pool, 1)
 			}
-			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
+			reasons, err = prepareTxnReasons(t.Context(), pool, txns, nil)
 			require.NoError(t, err)
 			for _, reason := range reasons {
 				require.Equal(t, txpoolcfg.NotSet, reason)
@@ -3932,7 +3954,7 @@ func TestBlobNonceRetryFrameBypass(t *testing.T) {
 			} else {
 				txns.Append(frame, sender[:], true)
 			}
-			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
+			reasons, err = prepareTxnReasons(t.Context(), pool, txns, nil)
 			require.NoError(t, err)
 			require.Equal(t, txpoolcfg.NotSet, reasons[0])
 		})
@@ -3948,11 +3970,11 @@ func TestBlobNonceRetryStillChecksHonestSidecar(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 	slot.BlobBundles[0].Blob[31] ^= 1
-	reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
+	reasons, err = prepareTxnReasons(t.Context(), pool, txns, nil)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 	nonceRetrySender(t, pool, 1000)
-	reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
+	reasons, err = prepareTxnReasons(t.Context(), pool, txns, nil)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
 	slot.BlobBundles[0].Blob[31] ^= 1
@@ -3979,7 +4001,7 @@ func TestBlobNonceRetryNonceBounds(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 			nonceRetrySender(t, pool, tc.nonce)
-			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
+			reasons, err = prepareTxnReasons(t.Context(), pool, txns, nil)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{tc.want}, reasons)
 		})

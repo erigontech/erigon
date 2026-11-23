@@ -20,6 +20,8 @@ import (
 	"math"
 
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // blobFeeCap returns min(capSoFar, the txn's blob fee cap), or capSoFar for a txn without blobs.
@@ -58,6 +60,7 @@ type metaTxn struct {
 	currentSubPool            SubPoolType
 	announced                 bool // has entered pending once; a later return is not announced
 	keyedNonce                bool
+	discardReason             txpoolcfg.DiscardReason
 	minedBlockNum             uint64
 }
 

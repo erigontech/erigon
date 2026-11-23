@@ -207,7 +207,7 @@ func BenchmarkNonceRetryPrepare(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				_, _, err := pool.prepareTxns(b.Context(), txns, nil)
+				_, err := pool.prepareTxns(b.Context(), txns, nil)
 				if err != nil {
 					b.Fatal(err)
 				}

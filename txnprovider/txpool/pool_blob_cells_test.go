@@ -206,10 +206,10 @@ func TestAmsterdamValidationDoesNotAttachCells(t *testing.T) {
 	pool.lock.Lock()
 	defer pool.lock.Unlock()
 	require.NoError(t, pool.senders.registerNewSenders(&txns, pool.logger))
-	_, goodTxns, _, err := pool.validateTxns(&txns, cacheView, nil, nil, false)
-	require.NoError(t, err)
-	require.Len(t, goodTxns.Txns, 1)
-	for i, bundle := range goodTxns.Txns[0].BlobBundles {
+	batch := newAdmissionBatch(txns, nil)
+	require.NoError(t, pool.validateTxns(batch, cacheView, make(blobCells)))
+	require.Equal(t, txpoolcfg.NotSet, batch.txns[0].reason)
+	for i, bundle := range batch.txns[0].txn.BlobBundles {
 		require.Nil(t, bundle.Cells, "validation attached cells for blob %d", i)
 	}
 }

@@ -249,7 +249,7 @@ func TestFramePoolPrecheckPanicReleasesLock(t *testing.T) {
 	txns.Append(framePoolSlot(t, sender, 1, 2), sender[:], false)
 	// Force a panic during the locked policy checks.
 	pool.frameRejections = nil
-	require.Panics(t, func() { pool.prepareFrames(ctx, txns) })
+	require.Panics(t, func() { pool.prepareFrames(ctx, newAdmissionBatch(txns, nil)) })
 	unlocked := pool.lock.TryLock()
 	if unlocked {
 		pool.lock.Unlock()
@@ -925,6 +925,31 @@ func TestFramePoolRejectionCacheWithinBatch(t *testing.T) {
 	require.Len(t, backend.calls, 1, "duplicates prepared before simulation must share the rejection")
 }
 
+func TestFramePoolDuplicateCannotInvalidateParkedFrame(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	mt := pool.byHash[string(frame.IDHash[:])]
+	pool.lock.Lock()
+	pool.parkFrameLocked(mt, "test revalidation")
+	pool.lock.Unlock()
+	backend.valid = false
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, reasons)
+
+	backend.valid = true
+	require.NoError(t, pool.revalidateFrames(ctx, []*metaTxn{mt}, pool.stateGeneration, pool.stateBlockHash))
+	require.Same(t, mt, pool.byHash[string(frame.IDHash[:])])
+	require.Equal(t, PendingSubPool, mt.currentSubPool)
+}
+
 func TestFramePoolSenderPolicyRejectionCache(t *testing.T) {
 	for _, nonce := range []uint64{0, 1} {
 		t.Run(fmt.Sprintf("sequence %d", nonce), func(t *testing.T) {
@@ -1280,6 +1305,56 @@ func TestFramePoolValidationBatchDeadline(t *testing.T) {
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
 	require.Len(t, backend.deadlines, 2)
 	require.Equal(t, backend.deadlines[0], backend.deadlines[1], "one slow batch must not get a new timeout for every frame")
+}
+
+func TestFramePoolBatchKeepsFirstValidationForRepeatedSlot(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	secondPayer := common.Address{2}
+	backend.onValidate = func() {
+		if len(backend.calls) == 1 {
+			backend.payer = secondPayer
+		}
+	}
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.DuplicateHash}, reasons)
+	require.Equal(t, sender, frame.frameValidation.Payer)
+	require.Contains(t, pool.frameReservations, sender)
+	require.NotContains(t, pool.frameReservations, secondPayer)
+}
+
+func TestFramePoolUnavailableWithConsumedAccountNonce(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	pool.ethBackend.(*frameValidationBackend).err = status.Error(codes.Unavailable, "backend unavailable")
+	frame := framePoolSlot(t, sender, 1, 2)
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
+}
+
+func TestFramePoolRechecksSetCodePrecheckAfterStateChange(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.onValidate = func() {
+		backend.onValidate = nil
+		require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{2}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	}
+	other := common.Address{2}
+	var txns TxnSlots
+	txns.Append(newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000), sender[:], true)
+	txns.Append(framePoolSlot(t, other, 1, 2, uint256.Int{1}), other[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
 }
 
 func TestFramePoolStaleBatchPreservesPrecheckRejection(t *testing.T) {

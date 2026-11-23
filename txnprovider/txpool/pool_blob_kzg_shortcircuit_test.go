@@ -112,9 +112,9 @@ func TestPrepareTxnsBlobKZGShortCircuit(t *testing.T) {
 		slots.Append(&s0, a0[:], false)
 		slots.Append(&s1, a1[:], false)
 
-		reasons, _, err := pool.prepareTxns(ctx, slots, []remoteSource{peer, peer})
+		reasons, err := prepareTxnReasons(ctx, pool, slots, []remoteSource{peer, peer})
 		require.NoError(t, err)
-		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NotSet}, reasons,
+		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}, reasons,
 			"txn[1] should not have been verified")
 	})
 
@@ -126,9 +126,9 @@ func TestPrepareTxnsBlobKZGShortCircuit(t *testing.T) {
 		slots.Append(&s0, a0[:], false)
 		slots.Append(&s1, a1[:], false)
 
-		reasons, _, err := pool.prepareTxns(ctx, slots, nil)
+		reasons, err := prepareTxnReasons(ctx, pool, slots, nil)
 		require.NoError(t, err)
-		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NotSet}, reasons,
+		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}, reasons,
 			"txn[1] should not have been verified")
 	})
 
@@ -140,7 +140,7 @@ func TestPrepareTxnsBlobKZGShortCircuit(t *testing.T) {
 		slots.Append(&s0, a0[:], true)
 		slots.Append(&s1, a1[:], true)
 
-		reasons, _, err := pool.prepareTxns(ctx, slots, nil)
+		reasons, err := prepareTxnReasons(ctx, pool, slots, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.UnmatchedBlobTxExt}, reasons)
 	})
@@ -288,7 +288,7 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	reasons, err = pool.processRemoteBatch(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{
-		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.Success, txpoolcfg.NotReplaced,
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure, txpoolcfg.NotReplaced,
 	}, reasons)
 }
 
@@ -342,10 +342,9 @@ func TestBlobKZGVerifiedOutsidePoolLock(t *testing.T) {
 		pool.lock.Lock()
 		defer pool.lock.Unlock()
 		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
-		reasons, goodTxns, _, err := pool.validateTxns(&slots, cacheView, nil, nil, false)
-		require.NoError(t, err)
-		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NotSet}, reasons)
-		assert.Len(t, goodTxns.Txns, 1)
+		batch := newAdmissionBatch(slots, nil)
+		require.NoError(t, pool.validateTxns(batch, cacheView, nil))
+		assert.Equal(t, txpoolcfg.NotSet, batch.txns[0].reason)
 	})
 
 	t.Run("bad proof is still rejected", func(t *testing.T) {
