@@ -1805,34 +1805,32 @@ func calculateTime(amountLeft, rate uint64) string {
 // Expose torrent client status to HTTP on the public/default serve mux used by GOPPROF=http, and
 // the provided "debug" mux if non-nil. Only do this if you have a single instance of a Downloader.
 func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// WriteStatus holds the client lock until it finishes. For large torrent counts, the output
-		// can be very large (90 MB).
-		var buf bytes.Buffer
-		gzW := gzip.NewWriter(&buf)
-		d.torrentClient.WriteStatus(gzW)
-		gzW.Close()
-		h := r.Header.Get("Accept-Encoding")
-		d.log(log.LvlDebug, "compressed torrent client status", "size", buf.Len(), "Accept-Encoding", h)
-		if strings.Contains(h, "gzip") {
-			w.Header().Set("Content-Encoding", "gzip")
-			_, _ = w.Write(buf.Bytes())
-		} else {
-			gzR, err := gzip.NewReader(&buf)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			_, _ = io.Copy(w, gzR)
-			gzR.Close()
-		}
-	})
+	h := torrentClientStatusHandler(d.torrentClient.WriteStatus)
 
 	// This is for gopprof.
 	defaultMux := http.DefaultServeMux
 	defaultMux.Handle(TorrentClientStatusPath, h)
 	if debugMux != nil && debugMux != defaultMux {
 		debugMux.Handle(TorrentClientStatusPath, h)
+	}
+}
+
+func torrentClientStatusHandler(writeStatus func(io.Writer)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// WriteStatus holds the client read lock. Collect the text before compressing or sending it.
+		var status bytes.Buffer
+		writeStatus(&status)
+
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Add("Vary", "Accept-Encoding")
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			gz := gzip.NewWriter(w)
+			_, _ = status.WriteTo(gz)
+			_ = gz.Close()
+			return
+		}
+		_, _ = status.WriteTo(w)
 	}
 }
 
