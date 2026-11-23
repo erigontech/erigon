@@ -82,14 +82,14 @@ func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfi
 	// Exclusion, as in ethapi.NewRPCTransaction: a type registered outside this
 	// package is fee-capped too.
 	if txType := txn.Type(); txType != types.LegacyTxType && txType != types.AccessListTxType {
-		transaction.MaxFeePerGas = txn.GetFeeCap()
 		transaction.MaxPriorityFeePerGas = txn.GetTipCap()
+		if txType != types.FrameTxType {
+			transaction.MaxFeePerGas = txn.GetFeeCap()
+		}
 	}
 	txn = txn.Unwrap()
 	if blobTx, ok := txn.(*types.BlobTx); ok {
 		transaction.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
-	} else if frame, ok := txn.(*types.FrameTransaction); ok {
-		transaction.MaxFeePerBlobGas = (*hexutil.U256)(&frame.Fees.BlobFeeCap)
 	}
 	return transaction
 }

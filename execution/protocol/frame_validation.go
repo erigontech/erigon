@@ -36,8 +36,10 @@ import (
 )
 
 // FrameValidation describes a successful pool simulation at one state snapshot.
-// It supplies payer reservations and dependencies for invalidating that result;
-// it does not guarantee that the transaction's execution frames will succeed.
+// Its dependencies tell the pool when to revalidate. The execution frames can still fail.
+//
+// MaxCost is the amount debited from the payer at payment approval using the
+// simulated fees. The pool reserves the full signed MaxFee, which can be higher.
 type FrameValidation struct {
 	Payer          common.Address
 	MaxCost        uint256.Int

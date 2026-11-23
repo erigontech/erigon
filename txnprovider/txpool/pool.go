@@ -612,6 +612,10 @@ func (p *TxPool) nonceConsumed(txn *TxnSlot, view kvcache.CacheView) (bool, erro
 		return nonce > txn.Nonce, err
 	}
 	frame := txn.Txn.(*types.FrameTransaction)
+	maxUnconsumedSequence := frame.Nonce
+	if frame.UsesSingleUseNonce() {
+		maxUnconsumedSequence = 0
+	}
 	var storageKey [length.Addr + length.Hash]byte
 	copy(storageKey[:length.Addr], types.FrameNonceManager[:])
 	for _, key := range frame.NonceKeys {
@@ -623,7 +627,7 @@ func (p *TxPool) nonceConsumed(txn *TxnSlot, view kvcache.CacheView) (bool, erro
 		}
 		var sequence uint256.Int
 		sequence.SetBytes(value)
-		if sequence.GtUint64(txn.Nonce) {
+		if sequence.GtUint64(maxUnconsumedSequence) {
 			return true, nil
 		}
 	}
@@ -1010,17 +1014,6 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 		if yielded != nil && yielded.Contains(mt.TxnSlot.IDHash) {
 			continue
 		}
-		// Pending is ordered without the blob fee, so promotion only demotes a blob txn the blob fee has risen
-		// past once it is the worst one.
-		if !coversPendingFees(mt, pendingBaseFee, pendingBlobFee) {
-			toDemote = append(toDemote, mt)
-			continue
-		}
-
-		if mt.TxnSlot.TxType() != FrameTxnType && mt.TxnSlot.GetGas() > p.blockGasLimit.Load() {
-			// Skip transactions with very large gas limit
-			continue
-		}
 		var limits mdgas.MdGas
 		var intrinsicGasResult mdgas.IntrinsicGasCalcResult
 		var err error
@@ -1031,6 +1024,15 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 			limits, err = protocol.TransactionGasLimits(mt.TxnSlot.Txn, isAmsterdam)
 		}
 		if err != nil {
+			continue
+		}
+		// A pending blob transaction can become underpriced before it reaches the
+		// bottom of the pool, where promotion would normally demote it.
+		if !coversPendingFees(mt, limits.Total(), pendingBaseFee, pendingBlobFee) {
+			toDemote = append(toDemote, mt)
+			continue
+		}
+		if !isFrame && mt.TxnSlot.GetGas() > p.blockGasLimit.Load() {
 			continue
 		}
 		executionGas, stateGas := limits.Execution, limits.State
@@ -2263,7 +2265,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 
 	hashStr := string(mt.TxnSlot.IDHash[:])
 	p.byHash[hashStr] = mt
-	p.reserveFrame(mt.TxnSlot.frameValidation)
+	p.reserveFrame(mt.TxnSlot)
 	p.discardReasonsLRU.Remove(hashStr)
 	p.frameRejections.Remove(hashStr)
 
@@ -2299,7 +2301,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 // dropping transaction from all sub-structures and from db
 // Important: don't call it while iterating by all
 func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
-	p.releaseFrame(mt.TxnSlot.frameValidation)
+	p.releaseFrame(mt.TxnSlot)
 	if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok && frame.UsesLegacyNonce() {
 		p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
 	}
@@ -2613,12 +2615,18 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 	return nil
 }
 
-func (p *TxPool) updateGasLimitMarker(mt *metaTxn, blockGasLimit uint64) {
+// updateGasLimitMarker also returns the total for frame pricing. Invalid limits
+// saturate as in FrameTransaction.GetGasLimit.
+func (p *TxPool) updateGasLimitMarker(mt *metaTxn, blockGasLimit uint64) uint64 {
 	limits, err := protocol.TransactionGasLimits(mt.TxnSlot.Txn, p.isAmsterdam())
 	mt.subPool &^= NotTooMuchGas
-	if err == nil && limits.Execution <= blockGasLimit && limits.State <= blockGasLimit {
+	if err != nil {
+		return math.MaxUint64
+	}
+	if limits.Execution <= blockGasLimit && limits.State <= blockGasLimit {
 		mt.subPool |= NotTooMuchGas
 	}
+	return limits.Total()
 }
 
 func (p *TxPool) refreshSender(cacheView kvcache.CacheView, senderID uint64) error {
@@ -2692,8 +2700,15 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			senderTxnKept = true
 		}
 
+		gasLimit := p.updateGasLimitMarker(mt, blockGasLimit)
+		var feeCap *uint256.Int
+		if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok {
+			feeCap = frame.Fees.ExecutionFeeCap(gasLimit, frame.GetBlobGas(), uint256.NewInt(p.pendingBlobFee.Load()))
+		} else {
+			feeCap = mt.TxnSlot.GetFeeCap()
+		}
 		if mt.keyedNonce {
-			mt.minFeeCap = *mt.TxnSlot.GetFeeCap()
+			mt.minFeeCap = *feeCap
 			mt.minBlobFeeCap = blobFeeCap(mt.TxnSlot, math.MaxUint64)
 			mt.minTip = math.MaxUint64
 			if mt.TxnSlot.GetTipCap().IsUint64() {
@@ -2701,13 +2716,12 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			}
 			mt.nonceDistance, mt.cumulativeBalanceDistance = 0, 0
 			mt.subPool |= NoNonceGaps | EnoughBalance
-			p.updateGasLimitMarker(mt, blockGasLimit)
 			p.updateInSubPool(mt)
 			return true
 		}
 
-		if minFeeCap.Gt(mt.TxnSlot.GetFeeCap()) {
-			*minFeeCap = *mt.TxnSlot.GetFeeCap()
+		if minFeeCap.Gt(feeCap) {
+			*minFeeCap = *feeCap
 		}
 		mt.minFeeCap = *minFeeCap
 		minBlobFeeCap = blobFeeCap(mt.TxnSlot, minBlobFeeCap)
@@ -2750,8 +2764,6 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 				mt.cumulativeBalanceDistance = cumulativeRequiredBalance.Uint64() - senderBalance.Uint64()
 			}
 		}
-
-		p.updateGasLimitMarker(mt, blockGasLimit)
 
 		if mt.TxnSlot.Traced {
 			p.logger.Info("TX TRACING: onSenderStateChange loop iteration update", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "senderId", mt.TxnSlot.SenderID, "nonce", mt.TxnSlot.Nonce, "subPool", mt.currentSubPool)
@@ -2807,14 +2819,22 @@ func (p *TxPool) promote(cacheView kvcache.CacheView, pendingBaseFee uint64, pen
 // coversPendingFees reports whether a txn, and every txn before it in its sender's nonce chain, pays the pending
 // block's base fee and blob fee. The txn's own blob fee cap is checked too, as the chain minimum is only set once
 // onSenderStateChange has seen the txn.
-func coversPendingFees(mt *metaTxn, pendingBaseFee, pendingBlobFee uint64) bool {
+func coversPendingFees(mt *metaTxn, frameGasLimit, pendingBaseFee, pendingBlobFee uint64) bool {
+	if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok {
+		if _, _, err := frame.Fees.RequiredCost(frameGasLimit, frame.GetBlobGas(), uint256.NewInt(pendingBaseFee), uint256.NewInt(pendingBlobFee)); err != nil {
+			return false
+		}
+	}
 	return mt.minFeeCap.CmpUint64(pendingBaseFee) >= 0 && mt.minBlobFeeCap >= pendingBlobFee &&
 		(!mt.TxnSlot.HasBlobs() || mt.TxnSlot.GetBlobFeeCap().CmpUint64(pendingBlobFee) >= 0)
 }
 
 func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements) {
+	coversFees := func(mt *metaTxn) bool {
+		return coversPendingFees(mt, mt.TxnSlot.GetGas(), pendingBaseFee, pendingBlobFee)
+	}
 	// Demote worst transactions that do not qualify for pending sub pool anymore, to other sub pools, or discard
-	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || !coversPendingFees(worst, pendingBaseFee, pendingBlobFee)); worst = p.pending.Worst() {
+	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || !coversFees(worst)); worst = p.pending.Worst() {
 		tx := p.pending.PopWorst()
 		if worst.subPool >= BaseFeePoolBits {
 			p.baseFee.Add(tx, "demote-pending", p.logger)
@@ -2829,7 +2849,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 	var blobFeeBlocked []*metaTxn
 	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && best.minFeeCap.CmpUint64(pendingBaseFee) >= 0; best = p.baseFee.Best() {
 		tx := p.baseFee.PopBest()
-		if !coversPendingFees(tx, pendingBaseFee, pendingBlobFee) {
+		if !coversFees(tx) {
 			blobFeeBlocked = append(blobFeeBlocked, tx)
 			continue
 		}
@@ -2849,7 +2869,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 	// Promote best transactions from the queued pool to either pending or base fee pool, while they qualify
 	for best := p.queued.Best(); p.queued.Len() > 0 && best.subPool >= BaseFeePoolBits; best = p.queued.Best() {
 		tx := p.queued.PopBest()
-		if coversPendingFees(best, pendingBaseFee, pendingBlobFee) {
+		if coversFees(best) {
 			announceFirstPending(announcements, tx)
 			p.pending.Add(tx, p.logger)
 		} else {
@@ -3299,7 +3319,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		return err
 	}
 	for it.HasNext() {
-		_, v, err := it.Next()
+		key, v, err := it.Next()
 		if err != nil {
 			return err
 		}
@@ -3309,8 +3329,10 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		// TODO(eip-4844) ensure wrappedWithBlobs when transactions are saved to the DB
 		_, err = parseCtx.ParseTransaction(txnRlp, 0, txn, nil, false /* hasEnvelope */, true /*wrappedWithBlobs*/, nil)
 		if err != nil {
-			err = fmt.Errorf("err: %w, rlp: %x", err, txnRlp)
-			p.logger.Warn("[txpool] fromDB: parseTransaction", "err", err)
+			var hash [32]byte
+			copy(hash[:], key)
+			p.deletedTxns = append(p.deletedTxns, newMetaTxn(&TxnSlot{IDHash: hash}, false, 0))
+			p.logger.Warn("[txpool] discarding undecodable stored transaction", "hash", fmt.Sprintf("%x", key), "err", err)
 			continue
 		}
 		if !txn.HasBlobs() {
