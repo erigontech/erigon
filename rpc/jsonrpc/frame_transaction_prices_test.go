@@ -171,15 +171,15 @@ func TestFrameTransactionRPCNonCanonicalGasPrice(t *testing.T) {
 	header.Coinbase = common.Address{42}
 	side := types.NewBlockFromStorage(header.Hash(), header, block.Transactions(), nil, nil, nil)
 	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteHeader(tx, header)
+		return rawdb.WriteBlock(tx, side)
 	}))
-	base := newBaseApiForTest(m)
-	base.blocksLRU.Add(side.Hash(), side)
-	api := newEthApiForTest(base, m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	got, err := api.GetBlockByHash(m.Ctx, rpc.BlockNumberOrHashWithHash(side.Hash(), false), true)
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	for _, txn := range got.Transactions.([]*ethapi.RPCTransaction) {
+	txns := got.Transactions.([]*ethapi.RPCTransaction)
+	require.Len(t, txns, len(side.Transactions()))
+	for _, txn := range txns {
 		require.Equal(t, block.BaseFee(), (*uint256.Int)(txn.GasPrice), "an unexecuted fork must not use canonical receipts")
 	}
 }
@@ -191,20 +191,20 @@ func TestFrameTransactionRPCUnexecutedGasPrice(t *testing.T) {
 	header.Number.AddUint64(&header.Number, 1)
 	block = types.NewBlockFromStorage(header.Hash(), header, block.Transactions(), nil, nil, nil)
 	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
-		if err := rawdb.WriteHeader(tx, header); err != nil {
+		if err := rawdb.WriteBlock(tx, block); err != nil {
 			return err
 		}
 		rawdb.WriteForkchoiceHead(tx, block.Hash())
 		return rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64())
 	}))
-	base := newBaseApiForTest(m)
-	base.blocksLRU.Add(block.Hash(), block)
-	api := newEthApiForTest(base, m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	t.Run("block", func(t *testing.T) {
 		got, err := api.GetBlockByHash(m.Ctx, rpc.BlockNumberOrHashWithHash(block.Hash(), true), true)
 		require.NoError(t, err)
 		require.NotNil(t, got)
-		for _, txn := range got.Transactions.([]*ethapi.RPCTransaction) {
+		txns := got.Transactions.([]*ethapi.RPCTransaction)
+		require.Len(t, txns, len(block.Transactions()))
+		for _, txn := range txns {
 			require.Equal(t, block.BaseFee(), (*uint256.Int)(txn.GasPrice), "a canonical header does not imply execution has finished")
 		}
 	})

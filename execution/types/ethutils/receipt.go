@@ -310,8 +310,7 @@ func GasFeePaid(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uin
 		fee, _, err := settledFrameGasFees(frame, gasUsed, baseFee, blobBaseFee)
 		return fee, err
 	}
-	price := nonFrameGasPrice(txn, baseFee)
-	return *price.Mul(&price, uint256.NewInt(gasUsed)), nil
+	return u256.Mul(u256.U64(gasUsed), nonFrameGasPrice(txn, baseFee)), nil
 }
 
 // GasTipPaid is the proposer payment after settlement, excluding all base fees.
@@ -320,8 +319,7 @@ func GasTipPaid(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uin
 		_, tip, err := settledFrameGasFees(frame, gasUsed, baseFee, blobBaseFee)
 		return tip, err
 	}
-	tip := txn.GetEffectiveGasTip(baseFee)
-	return *tip.Mul(&tip, uint256.NewInt(gasUsed)), nil
+	return u256.Mul(u256.U64(gasUsed), txn.GetEffectiveGasTip(baseFee)), nil
 }
 
 func settledFrameGasFees(frame *types.FrameTransaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) (fee, tip uint256.Int, err error) {
