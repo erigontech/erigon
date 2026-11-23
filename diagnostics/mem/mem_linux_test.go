@@ -17,37 +17,19 @@
 package mem
 
 import (
-	"os"
-	"path/filepath"
-	"strconv"
 	"testing"
 
-	"github.com/shirou/gopsutil/v4/process"
 	"github.com/stretchr/testify/require"
 )
 
 func TestProcessMemGauges(t *testing.T) {
-	procDir := t.TempDir()
-	t.Setenv("HOST_PROC", procDir)
-	pidDir := filepath.Join(procDir, strconv.Itoa(os.Getpid()))
-	require.NoError(t, os.Mkdir(pidDir, 0o700))
-	statm := filepath.Join(pidDir, "statm")
-	require.NoError(t, os.WriteFile(statm, []byte("42 7 0 0 0 0 0\n"), 0o600))
+	updateGaugesFromProcStatus("Name:\terigon\nVmRSS:\t28 kB\nVmSize:\t168 kB\nVmSwap:\t8 kB\n")
+	require.Equal(t, uint64(28*1024), memRssGauge.GetValueUint64())
+	require.Equal(t, uint64(168*1024), memSizeGauge.GetValueUint64())
+	require.Equal(t, uint64(8*1024), memSwapGauge.GetValueUint64())
 
-	pageSize := uint64(os.Getpagesize())
-	updateProcessMemGauges()
-	require.Equal(t, 7*pageSize, memRssGauge.GetValueUint64())
-	require.Equal(t, 42*pageSize, memSizeGauge.GetValueUint64())
-
-	UpdatePrometheusVirtualMemStats(process.MemoryMapsStat{Rss: 8 * pageSize, Pss: 5 * pageSize})
-	require.Equal(t, 5*pageSize, memPssGauge.GetValueUint64())
-	require.Equal(t, 7*pageSize, memRssGauge.GetValueUint64())
-	require.Equal(t, 42*pageSize, memSizeGauge.GetValueUint64())
-}
-
-func TestVirtualMemStatFieldsOmitSize(t *testing.T) {
-	stats := VirtualMemStat{process.MemoryMapsStat{Rss: 4096}}
-	fields := stats.Fields()
-	require.NotContains(t, fields, "Size")
-	require.Contains(t, fields, "Rss")
+	updateGaugesFromProcStatus("VmRSS:\t32 kB\nVmSwap:\t0 kB\n")
+	require.Equal(t, uint64(32*1024), memRssGauge.GetValueUint64())
+	require.Equal(t, uint64(168*1024), memSizeGauge.GetValueUint64())
+	require.Zero(t, memSwapGauge.GetValueUint64())
 }

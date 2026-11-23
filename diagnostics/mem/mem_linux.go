@@ -20,69 +20,44 @@ package mem
 
 import (
 	"os"
-	"reflect"
-
-	"github.com/shirou/gopsutil/v4/process"
+	"strconv"
+	"strings"
 
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var (
-	memRssGauge          = metrics.NewGauge(`mem_rss`)
-	memSizeGauge         = metrics.NewGauge(`mem_size`)
-	memPssGauge          = metrics.NewGauge(`mem_pss`)
-	memSharedCleanGauge  = metrics.NewGauge(`mem_shared{type="clean"}`)
-	memSharedDirtyGauge  = metrics.NewGauge(`mem_shared{type="dirty"}`)
-	memPrivateCleanGauge = metrics.NewGauge(`mem_private{type="clean"}`)
-	memPrivateDirtyGauge = metrics.NewGauge(`mem_private{type="dirty"}`)
-	memReferencedGauge   = metrics.NewGauge(`mem_referenced`)
-	memAnonymousGauge    = metrics.NewGauge(`mem_anonymous`)
-	memSwapGauge         = metrics.NewGauge(`mem_swap`)
+	memRssGauge  = metrics.NewGauge("mem_rss")
+	memSizeGauge = metrics.NewGauge("mem_size")
+	memSwapGauge = metrics.NewGauge("mem_swap")
 )
 
-func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
-	pid := os.Getpid()
-	proc, err := process.NewProcess(int32(pid))
-	if err != nil {
-		return process.MemoryMapsStat{}, err
+func updateProcessMemGauges() {
+	status, err := os.ReadFile("/proc/self/status")
+	if err == nil {
+		updateGaugesFromProcStatus(string(status))
 	}
+}
 
-	memoryMaps, err := proc.MemoryMaps(true)
-	if err != nil {
-		return process.MemoryMapsStat{}, err
+func updateGaugesFromProcStatus(status string) {
+	gauges := map[string]metrics.Gauge{
+		"VmRSS":  memRssGauge,
+		"VmSize": memSizeGauge,
+		"VmSwap": memSwapGauge,
 	}
-
-	m := (*memoryMaps)[0]
-
-	// convert from kilobytes to bytes
-	val := reflect.ValueOf(&m).Elem()
-	for _, field := range val.Fields() {
-		if field.Kind() == reflect.Uint64 {
-			field.SetUint(field.Interface().(uint64) * 1024)
+	for line := range strings.SplitSeq(status, "\n") {
+		name, value, _ := strings.Cut(line, ":")
+		gauge := gauges[name]
+		if gauge == nil {
+			continue
+		}
+		fields := strings.Fields(value)
+		if len(fields) != 2 || fields[1] != "kB" {
+			continue
+		}
+		kib, err := strconv.ParseUint(fields[0], 10, 54)
+		if err == nil {
+			gauge.SetUint64(kib * 1024)
 		}
 	}
-
-	return m, nil
-}
-
-func updateProcessMemGauges() {
-	proc := process.Process{Pid: int32(os.Getpid())}
-	// statm provides approximate RSS without a page table walk.
-	info, err := proc.MemoryInfo()
-	if err != nil {
-		return
-	}
-	memRssGauge.SetUint64(info.RSS)
-	memSizeGauge.SetUint64(info.VMS)
-}
-
-func UpdatePrometheusVirtualMemStats(p process.MemoryMapsStat) {
-	memPssGauge.SetUint64(p.Pss)
-	memSharedCleanGauge.SetUint64(p.SharedClean)
-	memSharedDirtyGauge.SetUint64(p.SharedDirty)
-	memPrivateCleanGauge.SetUint64(p.PrivateClean)
-	memPrivateDirtyGauge.SetUint64(p.PrivateDirty)
-	memReferencedGauge.SetUint64(p.Referenced)
-	memAnonymousGauge.SetUint64(p.Anonymous)
-	memSwapGauge.SetUint64(p.Swap)
 }

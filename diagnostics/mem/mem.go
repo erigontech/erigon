@@ -18,16 +18,4 @@
 
 package mem
 
-import (
-	"errors"
-
-	"github.com/shirou/gopsutil/v4/process"
-)
-
-func ReadVirtualMemStats() (process.MemoryMapsStat, error) { //nolint
-	return process.MemoryMapsStat{}, errors.New("unsupported platform")
-}
-
-func UpdatePrometheusVirtualMemStats(p process.MemoryMapsStat) {}
-
 func updateProcessMemGauges() {}
