@@ -835,8 +835,8 @@ func (p *TxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok && reason == txpoolcfg.InvalidAuthorizationNonce {
 		return reason
 	}
-	// Sender-policy rejections still need admission's current account-nonce check.
-	if rejection, ok := p.frameRejections.Get(hashS); ok && rejection.blocker == (common.Hash{}) && rejection.applies(p, p.stateGeneration) {
+	// Sender-policy rejections still need admission's current nonce and membership checks.
+	if rejection, ok := p.frameRejections.Get(hashS); ok && rejection.appliesToHead(p.stateGeneration) {
 		return rejection.reason
 	}
 	return txpoolcfg.NotSet
@@ -2085,6 +2085,9 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 			continue
 		}
 		if a.reason != txpoolcfg.NotSet {
+			if txn.TxType() == FrameTxnType {
+				a.reason = p.finalizeFrameRejection(txn, a.reason)
+			}
 			continue
 		}
 		if dbg.AssertEnabled && txn.SenderID == 0 {

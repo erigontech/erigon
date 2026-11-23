@@ -63,8 +63,8 @@ func (r frameRejection) applies(p *TxPool, generation uint64) bool {
 	return r.generation == generation
 }
 
-func (r frameRejection) validationResult() frameValidationResult {
-	return frameValidationResult{reason: r.reason, senderConflict: r.blocker != (common.Hash{})}
+func (r frameRejection) appliesToHead(generation uint64) bool {
+	return r.blocker == (common.Hash{}) && r.generation == generation
 }
 
 // RejectFramePrefix caches a prefix policy rejection for gossip deduplication.
@@ -76,10 +76,10 @@ func (p *TxPool) RejectFramePrefix(hash common.Hash) {
 }
 
 type frameValidationResult struct {
-	validation     *protocol.FrameValidation
-	reason         txpoolcfg.DiscardReason
-	headChanged    bool
-	senderConflict bool
+	validation  *protocol.FrameValidation
+	blocker     *metaTxn // the pooled entry that prevented simulation
+	reason      txpoolcfg.DiscardReason
+	headChanged bool
 }
 
 // frameRevalidationBatch ties parked entries to the pool's state view while
@@ -211,29 +211,67 @@ func (p *TxPool) prepareFrames(ctx context.Context, txns []txnAdmission) uint64 
 func (p *TxPool) precheckFrames(txns []txnAdmission) (uint64, common.Hash) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	firstRemoval := p.possibleFrameRemovals(txns)
 	for i := range txns {
 		a := &txns[i]
 		if a.txn.TxType() != FrameTxnType {
 			continue
 		}
-		if rejection, ok := p.frameRejections.Get(string(a.txn.IDHash[:])); ok && rejection.applies(p, p.stateGeneration) {
-			a.frame = rejection.validationResult()
-			continue
-		}
 		senderID, _ := p.senders.getID(a.sender)
-		a.frame = p.precheckFrame(a.txn, a.local, senderID)
+		pooled := p.all.senderIDFrameTxn[senderID]
+		if first, ok := firstRemoval[pooled]; ok && first < i {
+			// The blocker may be gone at insertion. Simulate against the head now
+			// so the batch can still be installed under one lock.
+			pooled = nil
+		}
+		a.frame = p.precheckFrame(a.txn, a.local, pooled)
 	}
 	return p.stateGeneration, p.stateBlockHash
 }
 
-// precheckFrame requires the pool lock.
-func (p *TxPool) precheckFrame(txn *TxnSlot, isLocal bool, senderID uint64) frameValidationResult {
-	result := frameValidationResult{reason: p.validateFrame(txn, isLocal)}
-	if result.reason == txpoolcfg.Success && senderID != 0 {
-		result.reason = p.checkFrameSender(txn, senderID)
-		result.senderConflict = result.reason != txpoolcfg.Success
+// possibleFrameRemovals records the first ordinary input that could replace each
+// pooled frame at its account nonce. A sender penalty can remove a remote frame
+// before insertion starts, so its index is -1. The caller holds the pool lock.
+func (p *TxPool) possibleFrameRemovals(txns []txnAdmission) map[*metaTxn]int {
+	if len(txns) < 2 || len(p.all.senderIDFrameTxn) == 0 {
+		return nil
 	}
-	return result
+	firstRemoval := make(map[*metaTxn]int)
+	for i := range txns {
+		a := &txns[i]
+		if a.txn.TxType() == FrameTxnType {
+			continue
+		}
+		senderID, _ := p.senders.getID(a.sender)
+		blocker := p.all.senderIDFrameTxn[senderID]
+		if blocker == nil {
+			continue
+		}
+		if !a.local && blocker.subPool&IsLocal == 0 {
+			firstRemoval[blocker] = -1
+		} else if !blocker.keyedNonce && blocker.TxnSlot.Nonce == a.txn.Nonce {
+			if _, ok := firstRemoval[blocker]; !ok {
+				firstRemoval[blocker] = i
+			}
+		}
+	}
+	return firstRemoval
+}
+
+// precheckFrame requires the pool lock.
+func (p *TxPool) precheckFrame(txn *TxnSlot, isLocal bool, pooled *metaTxn) frameValidationResult {
+	if rejection, ok := p.frameRejections.Get(string(txn.IDHash[:])); ok {
+		if rejection.appliesToHead(p.stateGeneration) {
+			return frameValidationResult{reason: rejection.reason}
+		}
+		if pooled != nil && rejection.blocker == pooled.TxnSlot.IDHash {
+			return frameValidationResult{reason: rejection.reason, blocker: pooled}
+		}
+	}
+	if reason := p.validateFrame(txn, isLocal); reason != txpoolcfg.Success {
+		return frameValidationResult{reason: reason}
+	}
+	return p.checkFrameSender(txn, pooled)
 }
 
 // Head publication can precede pool updates. Waiting on the generation also
@@ -246,10 +284,10 @@ func (p *TxPool) waitForStateChange(ctx context.Context, generation uint64) bool
 	})
 }
 
-// applyFrameValidation requires the pool lock. Stale batches and cleared sender
-// conflicts are retried while time remains. After the deadline, current prechecks
-// preserve specific rejections; frames needing simulation receive a retryable rejection.
-// Simulation results for the current state generation remain usable after the deadline.
+// applyFrameValidation checks simulation results against the locked state view.
+// While time remains, retry if the head or a blocker changed. After the deadline,
+// keep results for the current head and check unsimulated frames for consumed
+// nonces. The insertion loop resolves conflicts against current pool membership.
 func (p *TxPool) applyFrameValidation(ctx context.Context, txns []txnAdmission, generation uint64, stateCache kvcache.CacheView) error {
 	stale := generation != p.stateGeneration
 	if stale && ctx.Err() == nil {
@@ -263,18 +301,12 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns []txnAdmission, 
 		}
 		result := a.frame
 		if stale {
-			result = p.precheckFrame(txn, a.local, txn.SenderID)
+			result = frameValidationResult{reason: p.validateFrame(txn, a.local)}
 			if result.reason == txpoolcfg.Success {
 				result.reason = txpoolcfg.FrameValidationUnavailable
 			}
 		}
-		hash := string(txn.IDHash[:])
-		if p.byHash[hash] != nil && result.reason != txpoolcfg.Success {
-			// Pooled frames count as duplicates even while parked for revalidation.
-			a.reason = txpoolcfg.DuplicateHash
-			continue
-		}
-		if result.senderConflict || result.reason == txpoolcfg.FrameValidationUnavailable {
+		if result.blocker != nil || result.reason == txpoolcfg.FrameValidationUnavailable {
 			// State can establish that the nonce was consumed even when the frame could not be simulated.
 			consumed, err := p.nonceConsumed(txn, stateCache)
 			if err != nil {
@@ -282,29 +314,35 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns []txnAdmission, 
 			}
 			if consumed {
 				a.reason = txpoolcfg.NonceTooLow
-				p.frameRejections.Add(hash, frameRejection{generation: p.stateGeneration, reason: a.reason})
 				continue
 			}
-			// A sender conflict can appear or clear without a new state generation.
-			if reason := p.checkFrameSender(txn, txn.SenderID); reason != txpoolcfg.Success {
-				result.reason = reason
-			} else if result.senderConflict {
-				if ctx.Err() == nil {
-					return errFrameStateChanged
-				}
-				result.reason = txpoolcfg.FrameValidationUnavailable
+			if result.blocker != nil && ctx.Err() == nil && p.all.senderIDFrameTxn[txn.SenderID] != result.blocker {
+				return errFrameStateChanged
 			}
+			result.reason = txpoolcfg.FrameValidationUnavailable
 		}
 		if result.reason == txpoolcfg.Success {
 			a.reason = txpoolcfg.NotSet
 			continue
 		}
 		a.reason = result.reason
-		if result.reason == txpoolcfg.FrameValidationUnavailable {
-			p.discardReasonsLRU.Add(hash, result.reason)
-		}
 	}
 	return nil
+}
+
+// Earlier inputs may have added or replaced the sender's frame since simulation.
+// Resolve an unavailable result against the pool at this input's turn.
+func (p *TxPool) finalizeFrameRejection(txn *TxnSlot, reason txpoolcfg.DiscardReason) txpoolcfg.DiscardReason {
+	switch reason {
+	case txpoolcfg.NonceTooLow:
+		p.frameRejections.Add(string(txn.IDHash[:]), frameRejection{generation: p.stateGeneration, reason: reason})
+	case txpoolcfg.FrameValidationUnavailable:
+		if policy := p.checkFrameSender(txn, p.all.senderIDFrameTxn[txn.SenderID]); policy.reason != txpoolcfg.Success {
+			return policy.reason
+		}
+		p.discardReasonsLRU.Add(string(txn.IDHash[:]), reason)
+	}
+	return reason
 }
 
 func (p *TxPool) simulateFrameResult(ctx context.Context, txn *TxnSlot, generation uint64, stateBlockHash common.Hash) frameValidationResult {
@@ -333,8 +371,8 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 	if err := ctx.Err(); err != nil {
 		return frameValidationResult{}, err
 	}
-	// Another request may have cached a rejection while this one waited.
-	// Publish rejections before releasing the gate so its waiters can reuse them.
+	// A simulation waiting on the gate can reuse a rejection for this head.
+	// The admission loop resolves sender conflicts against the pool at insertion.
 	hash := string(txn.IDHash[:])
 	p.lock.Lock()
 	if p.stateViewStale {
@@ -342,10 +380,10 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 		return frameValidationResult{}, errFrameStateChanged
 	}
 	rejection, rejected := p.frameRejections.Get(hash)
-	rejected = rejected && rejection.applies(p, generation)
+	rejected = rejected && rejection.appliesToHead(generation)
 	p.lock.Unlock()
 	if rejected {
-		return rejection.validationResult(), nil
+		return frameValidationResult{reason: rejection.reason}, nil
 	}
 	var data bytes.Buffer
 	if err := txn.Txn.MarshalBinary(&data); err != nil {
@@ -407,26 +445,25 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 }
 
 // checkFrameSender requires the pool lock. A matching nonce and key set may replace the existing frame.
-func (p *TxPool) checkFrameSender(txn *TxnSlot, senderID uint64) txpoolcfg.DiscardReason {
-	pooled := p.all.senderIDFrameTxn[senderID]
+func (p *TxPool) checkFrameSender(txn *TxnSlot, pooled *metaTxn) frameValidationResult {
 	if pooled == nil {
-		return txpoolcfg.Success
+		return frameValidationResult{reason: txpoolcfg.Success}
 	}
 	pooledFrame := pooled.TxnSlot.Txn.(*types.FrameTransaction)
 	candidateFrame := txn.Txn.(*types.FrameTransaction)
 	if pooled.TxnSlot.Nonce != txn.Nonce || !slices.Equal(pooledFrame.NonceKeys, candidateFrame.NonceKeys) {
 		p.frameRejections.Add(string(txn.IDHash[:]), frameRejection{blocker: pooled.TxnSlot.IDHash, reason: txpoolcfg.InvalidFrame})
-		return txpoolcfg.InvalidFrame
+		return frameValidationResult{reason: txpoolcfg.InvalidFrame, blocker: pooled}
 	}
-	return txpoolcfg.Success
+	return frameValidationResult{reason: txpoolcfg.Success}
 }
 
 // checkFrameAdmission checks sender exclusivity and any payer reservation under
 // the pool lock. Restored frames remain parked without a validation result.
 func (p *TxPool) checkFrameAdmission(txn *TxnSlot, found *metaTxn) txpoolcfg.DiscardReason {
 	// Simulation releases the pool lock, so sender conflicts must be checked again.
-	if reason := p.checkFrameSender(txn, txn.SenderID); reason != txpoolcfg.Success {
-		return reason
+	if policy := p.checkFrameSender(txn, p.all.senderIDFrameTxn[txn.SenderID]); policy.reason != txpoolcfg.Success {
+		return policy.reason
 	}
 	v := txn.frameValidation
 	if v == nil {
@@ -782,7 +819,7 @@ func (p *TxPool) revalidateFrames(ctx context.Context, parked []*metaTxn, genera
 				p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
 			}
 		} else {
-			if validation == nil && !result.senderConflict {
+			if validation == nil {
 				p.frameRejections.Add(string(mt.TxnSlot.IDHash[:]), frameRejection{generation: generation, reason: result.reason})
 			}
 			p.discardLocked(mt, txpoolcfg.FrameStateChanged)

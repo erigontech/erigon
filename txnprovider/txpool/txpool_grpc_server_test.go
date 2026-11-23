@@ -429,6 +429,66 @@ func TestGrpcServerAddFrameFailureAfterConcurrentAdmission(t *testing.T) {
 	}
 }
 
+func TestGrpcServerAddFrameConflictCreatedInBatch(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.onValidate = func() {
+		if len(backend.calls) == 1 {
+			backend.err = status.Error(codes.Unavailable, "backend unavailable")
+		}
+	}
+	first := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	second := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
+	server := NewGrpcServer(ctx, pool, pool.poolDB, nil, *first.Txn.GetChainID(), pool.logger)
+	reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{first.Rlp, second.Rlp}})
+	require.NoError(t, err)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS, txpoolproto.ImportResult_INVALID}, reply.Imported)
+	require.Equal(t, txpoolcfg.InvalidFrame.String(), reply.Errors[1])
+	rejection, ok := pool.frameRejections.Peek(string(second.IDHash[:]))
+	require.True(t, ok)
+	require.Equal(t, common.Hash(first.IDHash), rejection.blocker)
+}
+
+func TestGrpcServerAddFrameConflictAroundReplacement(t *testing.T) {
+	replacement := TxnParseMainnetTests[1]
+	sender := common.HexToAddress(replacement.SenderStr)
+	for _, tc := range []struct {
+		name            string
+		originalFee     uint64
+		wantReplacement txpoolproto.ImportResult
+		wantFrame       txpoolproto.ImportResult
+	}{
+		{"accepted", 1, txpoolproto.ImportResult_SUCCESS, txpoolproto.ImportResult_SUCCESS},
+		{"underpriced", common.GWei, txpoolproto.ImportResult_FEE_TOO_LOW, txpoolproto.ImportResult_INVALID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _ := keyedFramePoolEnv(t)
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.payer, backend.balance = sender, common.Ether
+			original := framePoolSlot(t, sender, tc.originalFee, tc.originalFee)
+			keyed := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			server := NewGrpcServer(ctx, pool, pool.poolDB, nil, *original.Txn.GetChainID(), pool.logger)
+			reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{original.Rlp}})
+			require.NoError(t, err)
+			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported)
+
+			// The first attempt caches the conflict. Only an accepted replacement clears it for the second attempt.
+			reply, err = server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{keyed.Rlp, hexutil.MustDecodeHex(replacement.PayloadStr), keyed.Rlp}})
+			require.NoError(t, err)
+			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID, tc.wantReplacement, tc.wantFrame}, reply.Imported)
+			if tc.wantFrame == txpoolproto.ImportResult_SUCCESS {
+				require.NotContains(t, pool.byHash, string(original.IDHash[:]))
+				require.Contains(t, pool.byHash, string(keyed.IDHash[:]))
+				require.Equal(t, []common.Hash{original.IDHash, keyed.IDHash}, backend.calls)
+			} else {
+				require.Contains(t, pool.byHash, string(original.IDHash[:]))
+				require.NotContains(t, pool.byHash, string(keyed.IDHash[:]))
+			}
+		})
+	}
+}
+
 func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 	for _, persisted := range []bool{false, true} {
 		name := "memory only"
