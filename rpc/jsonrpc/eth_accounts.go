@@ -49,6 +49,28 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 	ok := false
 	defer kv.RollbackUnless(&ok, tx)
 
+	if number, isNumber := blockNrOrHash.Number(); isNumber && number == rpc.LatestBlockNumber {
+		head, err := api.latestHeadAt(ctx, tx)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !head.canonical {
+			return nil, nil, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
+		}
+		if head.number > head.executed {
+			return nil, nil, &rpchelper.BlockNotExecutedError{Block: head.number, LastExecuted: head.executed}
+		}
+		if err := api.BaseAPI.checkPruneState(ctx, tx, head.number); err != nil {
+			return nil, nil, err
+		}
+		reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, head.number, head.number == head.executed, -1, api.stateCache, api._txNumReader)
+		if err != nil {
+			return nil, nil, err
+		}
+		ok = true
+		return tx, reader, nil
+	}
+
 	blockNumber, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, nil, err

@@ -161,6 +161,7 @@ type BaseAPI struct {
 	_chainConfig              atomic.Pointer[chain.Config]
 	_genesis                  atomic.Pointer[types.Block]
 	_pruneMode                atomic.Pointer[prune.Mode]
+	_latestHead               atomic.Pointer[latestHead]
 	_commitmentHistoryEnabled atomic.Pointer[bool]
 	// _preMergeData is kept for a TTL rather than settled once: it reads live snapshot
 	// availability, which widens as segments arrive.
