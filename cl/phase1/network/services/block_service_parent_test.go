@@ -40,13 +40,13 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
-func fuluStore(processing *onBlockErrorStore) *mock_services.ForkChoiceStorageMock {
+func forkChoiceMock(processing *onBlockErrorStore) *mock_services.ForkChoiceStorageMock {
 	return processing.ForkChoiceStorage.(*mock_services.ForkChoiceStorageMock)
 }
 
 func TestBlockServiceGossipIgnoresChildOfInvalidatedGrandparentPayload(t *testing.T) {
 	service, block, processing, _ := newFuluColumnGossipFixture(t)
-	store := fuluStore(processing)
+	store := forkChoiceMock(processing)
 	parentRoot := block.Block.ParentRoot
 	grandparentRoot := common.Hash{0x61}
 	parentHeader := store.Headers[parentRoot]
@@ -71,7 +71,7 @@ func TestBlockServiceGossipParentThatFailedValidation(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			service, block, processing, _ := newFuluColumnGossipFixture(t)
-			store := fuluStore(processing)
+			store := forkChoiceMock(processing)
 			parentRoot := block.Block.ParentRoot
 			delete(store.Headers, parentRoot)
 			store.InvalidBlocks = map[common.Hash]struct{}{parentRoot: {}}
@@ -102,7 +102,7 @@ func TestBlockServiceGossipWrongTimestampWithInvalidatedParentPayload(t *testing
 	} {
 		t.Run(name, func(t *testing.T) {
 			service, block, processing, _ := newColumnGossipFixture(t, tc.version, 1)
-			fuluStore(processing).PayloadStatusByRootMap[block.Block.ParentRoot] = execution_client.PayloadStatusInvalidated
+			forkChoiceMock(processing).PayloadStatusByRootMap[block.Block.ParentRoot] = execution_client.PayloadStatusInvalidated
 
 			err := service.ProcessMessage(t.Context(), nil, block)
 			require.Error(t, err)
@@ -111,6 +111,16 @@ func TestBlockServiceGossipWrongTimestampWithInvalidatedParentPayload(t *testing
 			require.Zero(t, scheduledBlockCount(t, service))
 		})
 	}
+}
+
+func TestBlockServiceGossipWrongTimestampWithUnknownParentIsRetried(t *testing.T) {
+	service, block, processing, _ := newColumnGossipFixture(t, clparams.FuluVersion, 1)
+	delete(forkChoiceMock(processing).Headers, block.Block.ParentRoot)
+
+	err := service.ProcessMessage(t.Context(), nil, block)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Zero(t, processing.calls.Load())
+	require.Equal(t, 1, scheduledBlockCount(t, service))
 }
 
 func newPreMergeBellatrixGossipFixture(t *testing.T, mutate func(*cltypes.SignedBeaconBlock)) (*blockService, *cltypes.SignedBeaconBlock) {

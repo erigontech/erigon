@@ -1005,7 +1005,7 @@ func (b *blockService) isParentPayloadInvalidated(root common.Hash, header *clty
 		if seen && status == execution_client.PayloadStatusInvalidated {
 			return true
 		}
-		if seen && status == execution_client.PayloadStatusValidated || header.Slot <= finalizedStartSlot {
+		if (seen && status == execution_client.PayloadStatusValidated) || header.Slot <= finalizedStartSlot {
 			return false
 		}
 		root = header.ParentRoot
