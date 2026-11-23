@@ -1039,6 +1039,7 @@ func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, reva
 		for i, r := range receipts {
 			cum += r.GasUsed
 			r.CumulativeGasUsed = cum
+			r.Bloom = types.CreateBloom(types.Receipts{r})
 			// What this transaction ASKED for against what it SPENT. Both halves are already in hand here and
 			// nowhere else — body.Transactions is decoded and the receipts are in the same order — so the table
 			// costs one map lookup per transaction and no decoding.

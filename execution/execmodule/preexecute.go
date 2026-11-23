@@ -206,6 +206,7 @@ func (e *ExecModule) closePreExecutedLocked(ctx context.Context, blockHash commo
 	for _, r := range fbReceipts {
 		cum += r.GasUsed
 		r.CumulativeGasUsed = cum
+		r.Bloom = types.CreateBloom(types.Receipts{r})
 	}
 	result.FlashblockReceiptCount = len(fbReceipts)
 	result.GasUsed = cum
