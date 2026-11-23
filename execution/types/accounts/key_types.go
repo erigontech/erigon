@@ -19,13 +19,9 @@ package accounts
 import (
 	"encoding/binary"
 	"fmt"
-	"runtime"
 	"sync/atomic"
 	"unique"
 	"unsafe"
-	"weak"
-
-	"github.com/puzpuzpuz/xsync/v4"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -67,39 +63,9 @@ func InternAddress(a common.Address) Address {
 	return h
 }
 
-var addrCanon = xsync.NewMap[common.Address, weak.Pointer[common.Address]]()
+var addrCanon = newCanonTable[common.Address](1 << 18)
 
-// internAddrCanon is internKeyCanon for addresses. The handle is built from the table's own pointer, so Handle() keeps working.
-func internAddrCanon(a common.Address) Address {
-	if wp, ok := addrCanon.Load(a); ok {
-		if p := wp.Value(); p != nil {
-			return addressOf(p)
-		}
-	}
-	p := new(a)
-	wp := weak.Make(p)
-	var live *common.Address
-	addrCanon.Compute(a, func(old weak.Pointer[common.Address], loaded bool) (weak.Pointer[common.Address], xsync.ComputeOp) {
-		if loaded {
-			if live = old.Value(); live != nil {
-				return old, xsync.CancelOp
-			}
-		}
-		return wp, xsync.UpdateOp
-	})
-	if live != nil {
-		return addressOf(live)
-	}
-	runtime.AddCleanup(p, func(a common.Address) {
-		addrCanon.Compute(a, func(old weak.Pointer[common.Address], loaded bool) (weak.Pointer[common.Address], xsync.ComputeOp) {
-			if loaded && old == wp {
-				return old, xsync.DeleteOp
-			}
-			return old, xsync.CancelOp
-		})
-	}, a)
-	return addressOf(p)
-}
+func internAddrCanon(a common.Address) Address { return addressOf(addrCanon.intern(a)) }
 
 func addressOf(p *common.Address) Address { return *(*Address)(unsafe.Pointer(&p)) }
 
@@ -193,9 +159,7 @@ func keySlot(k common.Hash) *atomic.Value {
 	return &keyTable[(binary.BigEndian.Uint32(k[:4])^binary.BigEndian.Uint32(k[28:]))&(keyTableSize-1)]
 }
 
-// keyCanon replaces unique.Make for storage keys: unique.Make runs weak.Make and runtime.AddCleanup under its map
-// lock, so workers that read the same fresh slots at once queue on it. Here both run outside the map lock.
-var keyCanon = xsync.NewMap[common.Hash, weak.Pointer[common.Hash]]()
+var keyCanon = newCanonTable[common.Hash](1 << 20)
 
 func InternKey(k common.Hash) StorageKey {
 	slot := keySlot(k)
@@ -207,40 +171,7 @@ func InternKey(k common.Hash) StorageKey {
 	return h
 }
 
-func internKeyCanon(k common.Hash) StorageKey {
-	if wp, ok := keyCanon.Load(k); ok {
-		if p := wp.Value(); p != nil {
-			return StorageKey{p}
-		}
-	}
-	p := new(k)
-	wp := weak.Make(p)
-	var live *common.Hash
-	keyCanon.Compute(k, func(old weak.Pointer[common.Hash], loaded bool) (weak.Pointer[common.Hash], xsync.ComputeOp) {
-		if loaded {
-			// A nil Value means no handle of old is reachable, so replacing it keeps handles unique.
-			if live = old.Value(); live != nil {
-				return old, xsync.CancelOp
-			}
-		}
-		return wp, xsync.UpdateOp
-	})
-	if live != nil {
-		return StorageKey{live}
-	}
-	runtime.AddCleanup(p, func(k common.Hash) { releaseKey(k, wp) }, k)
-	return StorageKey{p}
-}
-
-// releaseKey deletes k only while it still maps to wp: a concurrent intern may have replaced the dead entry.
-func releaseKey(k common.Hash, wp weak.Pointer[common.Hash]) {
-	keyCanon.Compute(k, func(old weak.Pointer[common.Hash], loaded bool) (weak.Pointer[common.Hash], xsync.ComputeOp) {
-		if loaded && old == wp {
-			return old, xsync.DeleteOp
-		}
-		return old, xsync.CancelOp
-	})
-}
+func internKeyCanon(k common.Hash) StorageKey { return StorageKey{keyCanon.intern(k)} }
 
 func (k StorageKey) IsNil() bool {
 	return k == NilKey
