@@ -988,6 +988,7 @@ func TestApplyTransactionTxEndV2(t *testing.T) {
 			sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
 			recipient := common.HexToAddress("0x2222222222222222222222222222222222222222")
 			ibs := state.New(state.NewNoopReader())
+			ibs.SetVersionMap(nil)
 			defer ibs.Close()
 			require.NoError(t, ibs.SetCode(accounts.InternAddress(recipient), []byte{
 				byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP),
@@ -1833,8 +1834,8 @@ func TestApplyTransactionTxEndSeesTxWrites(t *testing.T) {
 	for _, versioned := range []bool{false, true} {
 		t.Run(fmt.Sprintf("versioned=%v", versioned), func(t *testing.T) {
 			ibs := state.New(state.NewNoopReader())
-			if versioned {
-				ibs = state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+			if !versioned {
+				ibs.SetVersionMap(nil)
 			}
 			defer ibs.Close()
 			ibs.SetTxContext(1, 0)

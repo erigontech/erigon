@@ -338,5 +338,7 @@ func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
 }
 
 func TestFinalizeCallTxRejectsAStateWithoutAVersionMap(t *testing.T) {
-	require.ErrorContains(t, FinalizeCallTx(state.New(state.NewNoopReader()), &chain.Rules{}), "no version map")
+	ibs := state.New(state.NewNoopReader())
+	ibs.SetVersionMap(nil)
+	require.ErrorContains(t, FinalizeCallTx(ibs, &chain.Rules{}), "no version map")
 }
