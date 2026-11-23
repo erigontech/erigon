@@ -17,8 +17,9 @@
 package peerdasutils
 
 import (
+	"encoding/json"
+	"errors"
 	"math/rand/v2"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -125,13 +126,10 @@ func TestCkzgDefaultSettingsMatchGoEthKZG(t *testing.T) {
 	require.True(t, ok)
 }
 
-func TestCkzgSettingsLoadFromTrustedSetupFile(t *testing.T) {
+func TestCkzgSettingsLoadFromParsedSetup(t *testing.T) {
 	require.NoError(t, ckzgReady())
-	dir := t.TempDir()
-	valid := filepath.Join(dir, "trusted_setup.json")
-	require.NoError(t, os.WriteFile(valid, defaultTrustedSetup, 0o600))
-	empty := filepath.Join(dir, "empty.json")
-	require.NoError(t, os.WriteFile(empty, []byte("{}"), 0o600))
+	setup := new(goethkzg.JSONTrustedSetup)
+	require.NoError(t, json.Unmarshal(defaultTrustedSetup, setup))
 	indices, givenCells := randomCells(t, rand.New(rand.NewPCG(7, 8)), 64)
 	wantCells, wantProofs, err := recoverWithGoEthKZG(indices, givenCells)
 	require.NoError(t, err)
@@ -139,13 +137,12 @@ func TestCkzgSettingsLoadFromTrustedSetupFile(t *testing.T) {
 	restored := false
 	t.Cleanup(func() {
 		if !restored {
-			require.NoError(t, loadCkzgSettings(""))
+			require.NoError(t, loadCkzgSettings(nil))
 		}
 	})
 
-	require.Error(t, loadCkzgSettings(empty))
-	require.Error(t, loadCkzgSettings(filepath.Join(dir, "missing.json")))
-	require.NoError(t, loadCkzgSettings(valid))
+	require.Error(t, loadCkzgSettings(&goethkzg.JSONTrustedSetup{}))
+	require.NoError(t, loadCkzgSettings(setup))
 	restored = true
 
 	gotCells, gotProofs, err := recoverWithCkzg(indices, givenCells)
@@ -154,16 +151,40 @@ func TestCkzgSettingsLoadFromTrustedSetupFile(t *testing.T) {
 	require.True(t, slices.Equal(wantProofs, gotProofs), "recovered proofs differ from go-eth-kzg")
 }
 
+func TestCkzgSettingsComeFromTheSetupGoEthKZGRead(t *testing.T) {
+	require.NoError(t, ckzgReady())
+	kzg.InitKZGCtx() // go-eth-kzg reads the setup path once, before the path changes
+	indices, givenCells := randomCells(t, rand.New(rand.NewPCG(11, 12)), 64)
+	wantCells, wantProofs, err := recoverWithGoEthKZG(indices, givenCells)
+	require.NoError(t, err)
+	kzg.SetTrustedSetupFilePath(filepath.Join(t.TempDir(), "missing.json"))
+	ckzg.FreeTrustedSetup() // the binding holds one global setup, which is loaded again below
+	ckzgOnce = sync.Once{}
+	t.Cleanup(func() {
+		kzg.SetTrustedSetupFilePath("")
+		if ckzgErr != nil { // the failed load left c-kzg without settings
+			ckzgOnce = sync.Once{}
+			require.NoError(t, ckzgReady())
+		}
+	})
+
+	require.NoError(t, ckzgReady())
+
+	gotCells, gotProofs, err := recoverWithCkzg(indices, givenCells)
+	require.NoError(t, err)
+	require.True(t, slices.Equal(wantCells, gotCells), "recovered cells differ from go-eth-kzg")
+	require.True(t, slices.Equal(wantProofs, gotProofs), "recovered proofs differ from go-eth-kzg")
+}
+
 func TestRecoverCellsAndKZGProofsFallsBackToGoEthKZGWhenSettingsFailToLoad(t *testing.T) {
-	kzg.InitKZGCtx() // go-eth-kzg reads the setup path once, before the broken one is set
 	require.NoError(t, ckzgReady())
 	indices, givenCells := randomCells(t, rand.New(rand.NewPCG(9, 10)), 64)
 	wantCells, wantProofs, err := recoverWithGoEthKZG(indices, givenCells)
 	require.NoError(t, err)
-	kzg.SetTrustedSetupFilePath(filepath.Join(t.TempDir(), "missing.json"))
 	ckzgOnce = sync.Once{}
+	ckzgOnce.Do(func() {})
+	ckzgErr = errors.New("settings failed to load")
 	t.Cleanup(func() {
-		kzg.SetTrustedSetupFilePath("")
 		ckzgOnce = sync.Once{}
 		ckzgOnce.Do(func() {})
 		ckzgErr = nil

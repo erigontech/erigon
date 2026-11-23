@@ -21,7 +21,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 
@@ -51,7 +50,7 @@ var (
 // The loaded settings are read-only, so concurrent recoveries may share them.
 func ckzgReady() error {
 	ckzgOnce.Do(func() {
-		if ckzgErr = loadCkzgSettings(kzg.TrustedSetupFilePath()); ckzgErr != nil {
+		if ckzgErr = loadCkzgSettings(kzg.TrustedSetup()); ckzgErr != nil {
 			log.Error("[peerdas] failed to load the c-kzg settings, recovering cells with go-eth-kzg", "err", ckzgErr)
 		}
 	})
@@ -63,18 +62,13 @@ func WarmUpRecovery() {
 	go func() { _ = ckzgReady() }()
 }
 
-// loadCkzgSettings loads the trusted setup file at the path, or the default mainnet setup if the path is empty.
-func loadCkzgSettings(trustedSetupPath string) error {
-	data := defaultTrustedSetup
-	if trustedSetupPath != "" {
-		var err error
-		if data, err = os.ReadFile(trustedSetupPath); err != nil {
+// loadCkzgSettings loads the parsed trusted setup, or the default mainnet setup if it is nil.
+func loadCkzgSettings(setup *goethkzg.JSONTrustedSetup) error {
+	if setup == nil {
+		setup = new(goethkzg.JSONTrustedSetup)
+		if err := json.Unmarshal(defaultTrustedSetup, setup); err != nil {
 			return err
 		}
-	}
-	setup := new(goethkzg.JSONTrustedSetup)
-	if err := json.Unmarshal(data, setup); err != nil {
-		return err
 	}
 	g1Monomial, err := decodeHexPoints(setup.SetupG1Monomial[:])
 	if err != nil {

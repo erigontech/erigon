@@ -45,6 +45,7 @@ var (
 	precompileReturnValue [64]byte
 
 	trustedSetupFile string
+	trustedSetup     *goethkzg.JSONTrustedSetup
 
 	gokzgCtx      *goethkzg.Context
 	initCryptoCtx sync.Once
@@ -59,9 +60,10 @@ func SetTrustedSetupFilePath(path string) {
 	trustedSetupFile = path
 }
 
-// TrustedSetupFilePath returns the path set by SetTrustedSetupFilePath, or "" for the default mainnet setup.
-func TrustedSetupFilePath() string {
-	return trustedSetupFile
+// TrustedSetup returns the setup that the go-eth-kzg context was built from, or nil for its embedded mainnet setup.
+func TrustedSetup() *goethkzg.JSONTrustedSetup {
+	InitKZGCtx()
+	return trustedSetup
 }
 
 // InitKZGCtx initializes the global context object returned via CryptoCtx
@@ -73,12 +75,12 @@ func InitKZGCtx() {
 				panic(fmt.Sprintf("could not read file, err: %v", err))
 			}
 
-			setup := new(goethkzg.JSONTrustedSetup)
-			if err = json.Unmarshal(file, setup); err != nil {
+			trustedSetup = new(goethkzg.JSONTrustedSetup)
+			if err = json.Unmarshal(file, trustedSetup); err != nil {
 				panic(fmt.Sprintf("could not unmarshal, err: %v", err))
 			}
 
-			gokzgCtx, err = goethkzg.NewContext4096(setup)
+			gokzgCtx, err = goethkzg.NewContext4096(trustedSetup)
 			if err != nil {
 				panic(fmt.Sprintf("could not create KZG context, err: %v", err))
 			}
