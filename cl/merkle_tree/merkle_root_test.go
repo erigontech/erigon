@@ -96,3 +96,21 @@ func TestBitlistRootWithLimitNoSentinel(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, empty, wellFormed)
 }
+
+func TestProgressiveContainerProofInactiveField(t *testing.T) {
+	first := common.Hash{1}
+	third := common.Hash{2}
+	zero := common.Hash{}
+	activeFields := []bool{true, false, true}
+
+	proof, err := merkle_tree.ProgressiveContainerProof(activeFields, 2, first[:], third[:])
+	require.NoError(t, err)
+
+	dense, err := merkle_tree.ProgressiveContainerProofAll(2, first[:], zero[:], third[:])
+	require.NoError(t, err)
+	require.Equal(t, dense[:len(dense)-1], proof[:len(proof)-1])
+	require.Equal(t, common.Hash{0b101}, common.Hash(proof[len(proof)-1]))
+
+	_, err = merkle_tree.ProgressiveContainerProof(activeFields, 1, first[:], third[:])
+	require.Error(t, err)
+}

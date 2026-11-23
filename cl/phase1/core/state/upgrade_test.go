@@ -112,6 +112,75 @@ func TestUpgradeToGloasStateRootMatchesDecodedState(t *testing.T) {
 	require.Equal(t, expected, actual)
 }
 
+func gloasStateForHezeUpgrade(t *testing.T) *CachingBeaconState {
+	t.Helper()
+	return gloasStateForHezeUpgradeWithConfig(t, &clparams.MainnetBeaconConfig)
+}
+
+func gloasStateForHezeUpgradeWithConfig(t *testing.T, cfg *clparams.BeaconChainConfig) *CachingBeaconState {
+	t.Helper()
+	s := New(cfg)
+	require.NoError(t, utils.DecodeSSZSnappy(s, stateEncoded, int(clparams.Phase0Version)))
+	require.NoError(t, s.UpgradeToAltair())
+	require.NoError(t, s.UpgradeToBellatrix())
+	require.NoError(t, s.UpgradeToCapella())
+	require.NoError(t, s.UpgradeToDeneb())
+	require.NoError(t, s.UpgradeToElectra())
+	require.NoError(t, s.UpgradeToFulu())
+	s.SetDepositRequestsStartIndex(s.Eth1DepositIndex())
+	require.NoError(t, s.UpgradeToGloas())
+	return s
+}
+
+func TestUpgradeToHezeStateRootMatchesDecodedState(t *testing.T) {
+	s := gloasStateForHezeUpgrade(t)
+	preBid := s.GetLatestExecutionPayloadBid().Copy()
+	preVersion := s.Fork().CurrentVersion
+	_, err := s.HashSSZ()
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpgradeToHeze())
+	require.Equal(t, clparams.HezeVersion, s.Version())
+	require.Equal(t, common.Bytes4(utils.Uint32ToBytes4(uint32(s.BeaconConfig().HezeForkVersion))), s.Fork().CurrentVersion)
+	require.Equal(t, preVersion, s.Fork().PreviousVersion)
+	require.Equal(t, Epoch(s.BeaconState), s.Fork().Epoch)
+
+	bid := s.GetLatestExecutionPayloadBid()
+	require.NotNil(t, bid.InclusionListBits)
+	require.Empty(t, bid.InclusionListBits.GetOnIndices())
+	require.Equal(t, preBid.BlockHash, bid.BlockHash)
+	require.Equal(t, preBid.ExecutionRequestsRoot, bid.ExecutionRequestsRoot)
+
+	actual, err := s.HashSSZ()
+	require.NoError(t, err)
+	encoded, err := s.EncodeSSZ(nil)
+	require.NoError(t, err)
+	fresh := New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, fresh.DecodeSSZ(encoded, int(clparams.HezeVersion)))
+	expected, err := fresh.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, expected, actual)
+}
+
+func TestUpgradeToHezeIgnoresConfiguredInclusionListCommitteeSize(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InclusionListCommitteeSize = 8
+	s := gloasStateForHezeUpgradeWithConfig(t, &cfg)
+
+	require.NoError(t, s.UpgradeToHeze())
+	encoded, err := s.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.NoError(t, New(&cfg).DecodeSSZ(encoded, int(clparams.HezeVersion)))
+}
+
+func TestUpgradeToHezeRequiresDisabledDepositMechanism(t *testing.T) {
+	s := gloasStateForHezeUpgrade(t)
+	s.SetDepositRequestsStartIndex(s.Eth1DepositIndex() + 1)
+
+	require.Error(t, s.UpgradeToHeze())
+	require.Equal(t, clparams.GloasVersion, s.Version())
+}
+
 // TestUpgradeToElectraPropagatesQueueExcessActiveBalanceError pins that a
 // failure while queuing a compounding-credential validator's excess active
 // balance aborts the Electra upgrade instead of being silently dropped,

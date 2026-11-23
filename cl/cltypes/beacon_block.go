@@ -306,11 +306,7 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 	} else {
 		body.resetGloasProgressiveLists()
 		// GLOAS: SignedExecutionPayloadBid and PayloadAttestations replace above
-		body.SignedExecutionPayloadBid = &SignedExecutionPayloadBid{
-			Message: &ExecutionPayloadBid{
-				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(beaconCfg), 48),
-			},
-		}
+		body.SignedExecutionPayloadBid = newSignedExecutionPayloadBid(beaconCfg, version)
 		body.ParentExecutionRequests = NewExecutionRequestsWithVersion(beaconCfg, version)
 	}
 
@@ -469,11 +465,7 @@ func (b *BeaconBody) ensureNilFields() {
 	// [New in Gloas:EIP7732] Initialize GLOAS fields if nil
 	if b.Version >= clparams.GloasVersion {
 		if b.SignedExecutionPayloadBid == nil {
-			b.SignedExecutionPayloadBid = &SignedExecutionPayloadBid{
-				Message: &ExecutionPayloadBid{
-					BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48),
-				},
-			}
+			b.SignedExecutionPayloadBid = newSignedExecutionPayloadBid(b.beaconCfg, b.Version)
 		}
 		if b.PayloadAttestations == nil {
 			ptcSize := clparams.MaxPtcSize
@@ -499,7 +491,9 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 	size += b.ProposerSlashings.EncodingSizeSSZ()
 	size += b.AttesterSlashings.EncodingSizeSSZ()
 	size += b.Attestations.EncodingSizeSSZ()
-	size += b.Deposits.EncodingSizeSSZ()
+	if b.Version < clparams.HezeVersion {
+		size += b.Deposits.EncodingSizeSSZ()
+	}
 	size += b.VoluntaryExits.EncodingSizeSSZ()
 	// [Modified in Gloas:EIP7732] ExecutionPayload removed in GLOAS
 	if b.Version >= clparams.BellatrixVersion && b.Version < clparams.GloasVersion {
@@ -552,11 +546,7 @@ func (b *BeaconBody) decodeSSZ(buf []byte, version int, strict bool) error {
 	}
 	// [New in Gloas:EIP7732] Initialize GLOAS fields for decoding
 	if b.Version >= clparams.GloasVersion {
-		b.SignedExecutionPayloadBid = &SignedExecutionPayloadBid{
-			Message: &ExecutionPayloadBid{
-				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48),
-			},
-		}
+		b.SignedExecutionPayloadBid = newSignedExecutionPayloadBid(b.beaconCfg, b.Version)
 		b.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
 	}
 	var err error
@@ -646,8 +636,20 @@ func (b *BeaconBody) hashSSZGloas() ([32]byte, error) {
 	if err != nil {
 		return [32]byte{}, err
 	}
-	return merkle_tree.ProgressiveContainerRootAll(schema...)
+	return merkle_tree.ProgressiveContainerRoot(b.activeFields(), schema...)
 }
+
+// hezeBodyActiveFields marks the eth1_data and deposits slots removed in Heze as gaps.
+var hezeBodyActiveFields = []bool{true, false, true, true, true, true, false, true, true, true, true, true, true}
+
+func (b *BeaconBody) activeFields() []bool {
+	if b.Version >= clparams.HezeVersion {
+		return hezeBodyActiveFields
+	}
+	return gloasBodyActiveFields
+}
+
+var gloasBodyActiveFields = []bool{true, true, true, true, true, true, true, true, true, true, true, true, true}
 
 func (b *BeaconBody) gloasHashSchema() ([]any, error) {
 	proposerSlashings, err := b.ProposerSlashings.HashSSZProgressive(nil)
@@ -682,6 +684,21 @@ func (b *BeaconBody) gloasHashSchema() ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if b.Version >= clparams.HezeVersion {
+		return []any{
+			b.RandaoReveal[:],
+			b.Graffiti[:],
+			proposerSlashings[:],
+			attesterSlashings[:],
+			attestations[:],
+			voluntaryExits[:],
+			b.SyncAggregate,
+			executionChanges[:],
+			b.SignedExecutionPayloadBid,
+			payloadAttestations[:],
+			b.ParentExecutionRequests,
+		}, nil
+	}
 	return []any{
 		b.RandaoReveal[:],
 		b.Eth1Data,
@@ -700,7 +717,12 @@ func (b *BeaconBody) gloasHashSchema() ([]any, error) {
 }
 
 func (b *BeaconBody) getSchema(storage bool) []any {
-	s := []any{b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings, b.Attestations, b.Deposits, b.VoluntaryExits}
+	var s []any
+	if b.Version >= clparams.HezeVersion {
+		s = []any{b.RandaoReveal[:], b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings, b.Attestations, b.VoluntaryExits}
+	} else {
+		s = []any{b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings, b.Attestations, b.Deposits, b.VoluntaryExits}
+	}
 	if b.Version >= clparams.AltairVersion {
 		s = append(s, b.SyncAggregate)
 	}
@@ -755,7 +777,7 @@ func (b *BeaconBody) ExecutionBlockHashMerkleProof() ([][32]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	bodyProof, err := merkle_tree.ProgressiveContainerProofAll(10, schema...)
+	bodyProof, err := merkle_tree.ProgressiveContainerProof(b.activeFields(), 10, schema...)
 	if err != nil {
 		return nil, err
 	}
@@ -801,6 +823,19 @@ func rejectNullBodyFields(body string, fields ...requiredBodyField) error {
 		}
 	}
 	return nil
+}
+
+// MarshalJSON omits the eth1_data and deposits fields removed in Heze.
+func (b *BeaconBody) MarshalJSON() ([]byte, error) {
+	type plain BeaconBody
+	if b.Version < clparams.HezeVersion {
+		return json.Marshal((*plain)(b))
+	}
+	return json.Marshal(struct {
+		*plain
+		Eth1Data *Eth1Data                `json:"eth1_data,omitempty"`
+		Deposits *solid.ListSSZ[*Deposit] `json:"deposits,omitempty"`
+	}{plain: (*plain)(b)})
 }
 
 func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
@@ -853,24 +888,33 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 		tmp.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](limits.deposits, 1240)
 		tmp.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](limits.voluntaryExits, 112)
 		tmp.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](limits.executionChanges, 172)
-		tmp.SignedExecutionPayloadBid = &SignedExecutionPayloadBid{
-			Message: &ExecutionPayloadBid{
-				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48),
-			},
-		}
+		tmp.SignedExecutionPayloadBid = newSignedExecutionPayloadBid(b.beaconCfg, clparams.GloasVersion)
 		tmp.PayloadAttestations = solid.NewStaticProgressiveListSSZ[*PayloadAttestation](maxPayloadAttestationsForConfig(b.beaconCfg), PayloadAttestationSSZSizeWithPtcSize(ptcSize))
 		tmp.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
+	}
+
+	isHeze := b.Version >= clparams.HezeVersion
+	if isHeze {
+		var keys map[string]json.RawMessage
+		if err := json.Unmarshal(buf, &keys); err != nil {
+			return err
+		}
+		for _, removed := range []string{"eth1_data", "deposits"} {
+			if _, ok := keys[removed]; ok {
+				return fmt.Errorf("heze beacon body contains removed field %s", removed)
+			}
+		}
 	}
 
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
 	if err := rejectNullBodyFields("beacon body",
-		requiredBodyField{"eth1 data", tmp.Eth1Data == nil},
+		requiredBodyField{"eth1 data", !isHeze && tmp.Eth1Data == nil},
 		requiredBodyField{"proposer slashings", tmp.ProposerSlashings == nil},
 		requiredBodyField{"attester slashings", tmp.AttesterSlashings == nil},
 		requiredBodyField{"attestations", tmp.Attestations == nil},
-		requiredBodyField{"deposits", tmp.Deposits == nil},
+		requiredBodyField{"deposits", !isHeze && tmp.Deposits == nil},
 		requiredBodyField{"voluntary exits", tmp.VoluntaryExits == nil},
 		requiredBodyField{"sync aggregate", b.Version >= clparams.AltairVersion && tmp.SyncAggregate == nil},
 		requiredBodyField{"execution payload", b.Version >= clparams.BellatrixVersion && b.Version < clparams.GloasVersion && tmp.ExecutionPayload == nil},
@@ -883,6 +927,9 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	if b.Version >= clparams.GloasVersion {
 		if tmp.SignedExecutionPayloadBid == nil || tmp.SignedExecutionPayloadBid.Message == nil {
 			return errors.New("gloas beacon body contains a null execution payload bid")
+		}
+		if err := tmp.SignedExecutionPayloadBid.Message.ValidateInclusionListBits(b.Version); err != nil {
+			return err
 		}
 		if err := solid.RangeErr(&tmp.SignedExecutionPayloadBid.Message.BlobKzgCommitments, func(i int, commitment *KZGCommitment, _ int) error {
 			if commitment == nil {
@@ -927,12 +974,14 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	}
 
 	b.RandaoReveal = tmp.RandaoReveal
-	b.Eth1Data = tmp.Eth1Data
 	b.Graffiti = tmp.Graffiti
 	b.ProposerSlashings = tmp.ProposerSlashings
 	b.AttesterSlashings = tmp.AttesterSlashings
 	b.Attestations = tmp.Attestations
-	b.Deposits = tmp.Deposits
+	if !isHeze {
+		b.Eth1Data = tmp.Eth1Data
+		b.Deposits = tmp.Deposits
+	}
 	b.VoluntaryExits = tmp.VoluntaryExits
 	b.SyncAggregate = tmp.SyncAggregate
 	b.ExecutionChanges = tmp.ExecutionChanges

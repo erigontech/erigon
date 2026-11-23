@@ -2940,6 +2940,27 @@ func TestPostExecutionPayloadBidsRejectsTrailingJSON(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "trailing data")
 }
 
+func TestPostExecutionPayloadBidRejectsInclusionListBitsBeforeHeze(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	body, err := json.Marshal(&cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(12, 3, 1000)})
+	require.NoError(t, err)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(body, &fields))
+	fields["message"].(map[string]any)["inclusion_list_bits"] = "0x0000"
+	body, err = json.Marshal(fields)
+	require.NoError(t, err)
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bids", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "inclusion_list_bits")
+}
+
 func TestPostExecutionPayloadBidRejectsIgnoredBid(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)

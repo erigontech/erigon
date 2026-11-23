@@ -144,6 +144,10 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 		size += uint32((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch) * uint32(cfg.PtcSize) * 8               // ptc_window (Vector[Vector[uint64, PTC_SIZE]])
 	}
 
+	if b.version >= clparams.HezeVersion {
+		size -= 72 + 4 + 8 + 8 // eth1_data, eth1_data_votes offset, eth1_deposit_index, deposit_requests_start_index
+	}
+
 	return size
 }
 
@@ -155,8 +159,11 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 func (b *BeaconState) getSchema() []any {
 	s := []any{
 		&b.genesisTime, b.genesisValidatorsRoot[:], &b.slot, b.fork, b.latestBlockHeader, b.blockRoots, b.stateRoots, b.historicalRoots,
-		b.eth1Data, b.eth1DataVotes, &b.eth1DepositIndex, b.validators, b.balances, b.randaoMixes, b.slashings,
 	}
+	if b.version < clparams.HezeVersion {
+		s = append(s, b.eth1Data, b.eth1DataVotes, &b.eth1DepositIndex)
+	}
+	s = append(s, b.validators, b.balances, b.randaoMixes, b.slashings)
 	if b.version == clparams.Phase0Version {
 		return append(s, b.previousEpochAttestations, b.currentEpochAttestations, &b.justificationBits, &b.previousJustifiedCheckpoint, &b.currentJustifiedCheckpoint,
 			&b.finalizedCheckpoint)
@@ -176,7 +183,10 @@ func (b *BeaconState) getSchema() []any {
 	}
 	if b.version >= clparams.ElectraVersion {
 		// Electra fields
-		s = append(s, &b.depositRequestsStartIndex, &b.depositBalanceToConsume, &b.exitBalanceToConsume, &b.earliestExitEpoch, &b.consolidationBalanceToConsume,
+		if b.version < clparams.HezeVersion {
+			s = append(s, &b.depositRequestsStartIndex)
+		}
+		s = append(s, &b.depositBalanceToConsume, &b.exitBalanceToConsume, &b.earliestExitEpoch, &b.consolidationBalanceToConsume,
 			&b.earliestConsolidationEpoch, b.pendingDeposits, b.pendingPartialWithdrawals, b.pendingConsolidations)
 	}
 	if b.version >= clparams.FuluVersion {
@@ -229,7 +239,9 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	size = int(b.baseOffsetSSZ())
 	// Add the variable-size field data (only fields where Static() == false).
 	size += b.historicalRoots.EncodingSizeSSZ()
-	size += b.eth1DataVotes.EncodingSizeSSZ()
+	if b.version < clparams.HezeVersion {
+		size += b.eth1DataVotes.EncodingSizeSSZ()
+	}
 	size += b.validators.EncodingSizeSSZ()
 	size += b.balances.Length() * 8
 	if b.version == clparams.Phase0Version {

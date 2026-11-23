@@ -18,6 +18,7 @@ package raw
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -63,14 +64,43 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 		endIndex = StateLeafSizeFulu * 32
 	}
 	if b.Version() >= clparams.GloasVersion {
-		schema := make([]any, StateLeafSizeGloas)
-		for i := range schema {
-			schema[i] = b.leaves[i*32 : (i+1)*32]
-		}
-		return merkle_tree.ProgressiveContainerRootAll(schema...)
+		activeFields, schema := b.progressiveSchema()
+		return merkle_tree.ProgressiveContainerRoot(activeFields, schema...)
 	}
 	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves[:endIndex], out[:])
 	return
+}
+
+var gloasStateActiveFields = func() []bool {
+	active := make([]bool, StateLeafSizeGloas)
+	for i := range active {
+		active[i] = true
+	}
+	return active
+}()
+
+// hezeStateActiveFields marks the leaves removed in Heze as gaps.
+var hezeStateActiveFields = func() []bool {
+	active := slices.Clone(gloasStateActiveFields)
+	for _, gap := range []StateLeafIndex{Eth1DataLeafIndex, Eth1DataVotesLeafIndex, Eth1DepositIndexLeafIndex, DepositRequestsStartIndexLeafIndex} {
+		active[gap] = false
+	}
+	return active
+}()
+
+// progressiveSchema returns the active-fields mask and the leaves of the active fields.
+func (b *BeaconState) progressiveSchema() ([]bool, []any) {
+	activeFields := gloasStateActiveFields
+	if b.version >= clparams.HezeVersion {
+		activeFields = hezeStateActiveFields
+	}
+	schema := make([]any, 0, len(activeFields))
+	for i, active := range activeFields {
+		if active {
+			schema = append(schema, b.leaves[i*32:(i+1)*32])
+		}
+	}
+	return activeFields, schema
 }
 
 func (b *BeaconState) PrintLeaves() {
@@ -97,11 +127,8 @@ func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeFulu
 	}
 	if b.Version() >= clparams.GloasVersion {
-		schema := make([]any, StateLeafSizeGloas)
-		for i := range schema {
-			schema[i] = b.leaves[i*32 : (i+1)*32]
-		}
-		return merkle_tree.ProgressiveContainerProofAll(22, schema...)
+		activeFields, schema := b.progressiveSchema()
+		return merkle_tree.ProgressiveContainerProof(activeFields, 22, schema...)
 	}
 
 	schema := make([]any, leafSize)
@@ -129,11 +156,8 @@ func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeFulu
 	}
 	if b.Version() >= clparams.GloasVersion {
-		schema := make([]any, StateLeafSizeGloas)
-		for i := range schema {
-			schema[i] = b.leaves[i*32 : (i+1)*32]
-		}
-		return merkle_tree.ProgressiveContainerProofAll(23, schema...)
+		activeFields, schema := b.progressiveSchema()
+		return merkle_tree.ProgressiveContainerProof(activeFields, 23, schema...)
 	}
 
 	schema := make([]any, leafSize)
@@ -160,11 +184,8 @@ func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeFulu
 	}
 	if b.Version() >= clparams.GloasVersion {
-		schema := make([]any, StateLeafSizeGloas)
-		for i := range schema {
-			schema[i] = b.leaves[i*32 : (i+1)*32]
-		}
-		proof, err := merkle_tree.ProgressiveContainerProofAll(20, schema...)
+		activeFields, schema := b.progressiveSchema()
+		proof, err := merkle_tree.ProgressiveContainerProof(activeFields, 20, schema...)
 		if err != nil {
 			return nil, err
 		}
