@@ -38,12 +38,13 @@ type DecodedInboundMessage[TPacket any] struct {
 	PeerId  *PeerId
 }
 
-// BlockBodiesEnvelope carries a request ID and the RLP payload of the body list.
+// BlockBodiesEnvelope holds the request ID and the concatenated RLP encodings of the bodies.
 type BlockBodiesEnvelope struct {
 	RequestId     uint64
 	EncodedBodies []byte
 }
 
+// BlockAccessListsEnvelope holds the request ID and the concatenated RLP encodings of the BAL entries.
 type BlockAccessListsEnvelope struct {
 	RequestId          uint64
 	EncodedAccessLists []byte
@@ -125,7 +126,7 @@ func (ml *MessageListener) Run(ctx context.Context) error {
 	// once context has been cancelled wait for the background loops to stop
 	ml.stopWg.Wait()
 
-	// unregister all observers
+	// Unregister the inbound message observers.
 	ml.newBlockObservers.Close()
 	ml.newBlockHashesObservers.Close()
 	ml.blockHeadersObservers.Close()
@@ -283,6 +284,9 @@ func (ml *MessageListener) notifyListResponse(ctx context.Context, message *sent
 	return nil
 }
 
+// decodeListResponseEnvelope reads [request ID, [entries...]]. Both lists must end
+// at the packet boundary. It returns a read-only view of the encoded entries so
+// the fetcher can match the peer and request ID before decoding them.
 func decodeListResponseEnvelope(data []byte) (uint64, []byte, error) {
 	stream := rlp.NewBytesStream(data)
 	defer rlp.PutStream(stream)
