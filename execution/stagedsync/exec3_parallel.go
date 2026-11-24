@@ -1318,19 +1318,25 @@ func (pe *parallelExecutor) processRequest(execRequest *execRequest, applyTx kv.
 				addresses = append(addresses, sender.Value())
 			}
 			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
-				if chargedAtValidation && blockStart == nil {
+				to := *tx.GetTo()
+				// Crediting only decides whether this tx waits for the recipient's previous tx, so a
+				// recipient that no lower tx touched is scheduled alike either way and is not read.
+				_, recipientTouched := prevAccountTx[to]
+				checkCredit := chargedAtValidation && recipientTouched
+				if checkCredit && blockStart == nil {
 					blockStart = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), execRequest.blockNum)
 				}
-				if to := *tx.GetTo(); chargedAtValidation && protocol.RecipientCreditedAtValidation(sender, accounts.InternAddress(to),
-					executor.coinbase, *tx.GetValue(), txTask.Hooks, txTask.Rules(), blockStart) {
+				switch {
+				case checkCredit && protocol.RecipientCreditedAtValidation(sender, accounts.InternAddress(to),
+					executor.coinbase, *tx.GetValue(), txTask.Hooks, txTask.Rules(), blockStart):
 					// Credited at validation: a later user of the recipient still waits for it.
 					prevAccountTx[to] = i
-				} else if ok && precompileCallRunsOutOfGas(txTask, accounts.InternAddress(to)) {
+				case ok && precompileCallRunsOutOfGas(txTask, accounts.InternAddress(to)):
 					// The failed frame still reads the recipient: wait for its last writer, without becoming one.
 					if prev, ok := prevAccountTx[to]; ok && executor.execTasks.addDependency(prev, i) {
 						executor.execTasks.clearPending(i)
 					}
-				} else {
+				default:
 					addresses = append(addresses, to)
 				}
 			}
