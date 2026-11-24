@@ -284,23 +284,27 @@ func (ml *MessageListener) notifyListResponse(ctx context.Context, message *sent
 }
 
 func decodeListResponseEnvelope(data []byte) (uint64, []byte, error) {
-	envelope, rest, err := rlp.SplitList(data)
+	stream := rlp.NewBytesStream(data)
+	defer rlp.PutStream(stream)
+
+	envelopeSize, err := stream.List()
 	if err != nil {
 		return 0, nil, err
 	}
-	if len(rest) != 0 {
+	if envelopeSize != uint64(len(stream.Peek())) {
 		return 0, nil, rlp.ErrMoreThanOneValue
 	}
 
-	requestId, payload, err := rlp.SplitUint64(envelope)
+	requestId, err := stream.Uint64()
 	if err != nil {
 		return 0, nil, err
 	}
-	payload, rest, err = rlp.SplitList(payload)
+	listSize, err := stream.List()
 	if err != nil {
 		return 0, nil, err
 	}
-	if len(rest) != 0 {
+	payload := stream.Peek()
+	if listSize != uint64(len(payload)) {
 		return 0, nil, rlp.ErrMoreThanOneValue
 	}
 
