@@ -202,3 +202,9 @@ func TestBeaconBodyEncodingSizeMatchesEncoding(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateInclusionListBitsDoesNotWriteTheBid(t *testing.T) {
+	bid := &ExecutionPayloadBid{InclusionListBits: solid.NewBitVector(clparams.InclusionListCommitteeSize)}
+	require.NoError(t, bid.ValidateInclusionListBits(clparams.HezeVersion))
+	require.Zero(t, bid.InclusionListBits.BitLen())
+}

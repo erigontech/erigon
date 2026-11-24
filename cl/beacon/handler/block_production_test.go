@@ -4654,6 +4654,7 @@ func TestProcessProducedBlockSelectsHezeExternalBidWithInclusionListBits(t *test
 
 	require.NoError(t, err)
 	require.Same(t, fixture.externalBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+	require.Zero(t, fixture.externalBid.Message.InclusionListBits.BitLen())
 }
 
 // newGloasProductionHandler returns a handler that produces a block on the fixture's head: the

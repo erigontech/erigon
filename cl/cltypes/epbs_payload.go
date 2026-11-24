@@ -503,7 +503,8 @@ func (e *ExecutionPayloadBid) ValidateInclusionListBits(version clparams.StateVe
 	if !hasBits {
 		return nil
 	}
-	return e.InclusionListBits.ValidateSize(clparams.InclusionListCommitteeSize)
+	// ValidateSize writes the vector, and callers pass bids that other goroutines read.
+	return e.InclusionListBits.Copy().ValidateSize(clparams.InclusionListCommitteeSize)
 }
 
 func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {
