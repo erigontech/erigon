@@ -418,7 +418,7 @@ func TestFramePrestateTracerRetainedBalance(t *testing.T) {
 	ibs := evm.IntraBlockState()
 	factory := common.HexToAddress("0x2000")
 	child := types.CreateAddress(factory, 0)
-	runtime := program.New().Push(1).Push0().Op(vm.SSTORE, vm.ADDRESS, vm.SENDALL).Bytes()
+	runtime := program.New().Sstore(0, 1).Op(vm.ADDRESS, vm.SENDALL).Bytes()
 	initCode := program.New().ReturnData(runtime).Bytes()
 	factoryCode := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(factory), factoryCode, tracing.CodeChangeUnspecified))
