@@ -21,13 +21,12 @@ import (
 	"fmt"
 	"sync/atomic"
 	"unique"
-	"unsafe"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 )
 
-type Address unique.Handle[common.Address]
+type Address struct{ p *common.Address }
 
 var (
 	ZeroAddress = InternAddress(common.Address{})
@@ -58,16 +57,12 @@ func InternAddress(a common.Address) Address {
 	if h, ok := slot.Load().(Address); ok && h.Value() == a {
 		return h
 	}
-	h := internAddrCanon(a)
+	h := Address{addrCanon.intern(a)}
 	slot.Store(h)
 	return h
 }
 
 var addrCanon = newCanonTable[common.Address](1 << 18)
-
-func internAddrCanon(a common.Address) Address { return addressOf(addrCanon.intern(a)) }
-
-func addressOf(p *common.Address) Address { return *(*Address)(unsafe.Pointer(&p)) }
 
 func (a Address) IsNil() bool {
 	return a == NilAddress
@@ -81,11 +76,7 @@ func (a Address) Value() common.Address {
 	if a == NilAddress {
 		return common.Address{}
 	}
-	return unique.Handle[common.Address](a).Value()
-}
-
-func (a Address) Handle() unique.Handle[common.Address] {
-	return unique.Handle[common.Address](a)
+	return *a.p
 }
 
 func (a Address) String() string {
@@ -166,12 +157,10 @@ func InternKey(k common.Hash) StorageKey {
 	if h, ok := slot.Load().(StorageKey); ok && h.Value() == k {
 		return h
 	}
-	h := internKeyCanon(k)
+	h := StorageKey{keyCanon.intern(k)}
 	slot.Store(h)
 	return h
 }
-
-func internKeyCanon(k common.Hash) StorageKey { return StorageKey{keyCanon.intern(k)} }
 
 func (k StorageKey) IsNil() bool {
 	return k == NilKey

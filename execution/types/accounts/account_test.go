@@ -23,7 +23,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-	"unique"
 	"weak"
 
 	"github.com/holiman/uint256"
@@ -419,13 +418,15 @@ func TestInternSlotCollision(t *testing.T) {
 	require.Same(t, addressSlot(a1), addressSlot(a2))
 	canon := map[common.Hash]StorageKey{k1: InternKey(k1), k2: InternKey(k2)}
 	require.NotEqual(t, canon[k1], canon[k2])
+	canonAddr := map[common.Address]Address{a1: InternAddress(a1), a2: InternAddress(a2)}
+	require.NotEqual(t, canonAddr[a1], canonAddr[a2])
 	for range 2 {
 		for _, k := range []common.Hash{k1, k2} {
 			require.True(t, canon[k] == InternKey(k))
 			require.Equal(t, k, InternKey(k).Value())
 		}
 		for _, a := range []common.Address{a1, a2} {
-			require.Equal(t, Address(unique.Make(a)), InternAddress(a))
+			require.True(t, canonAddr[a] == InternAddress(a))
 			require.Equal(t, a, InternAddress(a).Value())
 		}
 	}
