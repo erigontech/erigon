@@ -172,6 +172,13 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	}
 }
 
+func addRPCTransactions(t *testing.T, ctx context.Context, server *GrpcServer, rlpTxns ...[]byte) *txpoolproto.AddReply {
+	t.Helper()
+	reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: rlpTxns})
+	require.NoError(t, err)
+	return reply
+}
+
 type beforeAdmissionPool struct {
 	*TxPool
 	beforeAdd func()
@@ -189,20 +196,18 @@ func TestGrpcServerAddDuplicateDuringAdmission(t *testing.T) {
 	fixture := TxnParseMainnetTests[1]
 	sender := common.HexToAddress(fixture.SenderStr)
 	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
-	request := &txpoolproto.AddRequest{RlpTxs: [][]byte{hexutil.MustDecodeHex(fixture.PayloadStr)}}
+	txnRLP := hexutil.MustDecodeHex(fixture.PayloadStr)
 	server := NewGrpcServer(ctx, pool, poolDB, nil, uint256.Int{1}, pool.logger)
 	// Pool membership and the block gas limit can both change between the RPC lookup and admission.
 	delayed := &beforeAdmissionPool{TxPool: pool, beforeAdd: func() {
-		admitted, err := server.Add(ctx, request)
-		require.NoError(t, err)
+		admitted := addRPCTransactions(t, ctx, server, txnRLP)
 		require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, admitted.Imported)
 		change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
 		change.BlockGasLimit = 20_000
 		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	}}
 	delayedServer := NewGrpcServer(ctx, delayed, poolDB, nil, uint256.Int{1}, pool.logger)
-	reply, err := delayedServer.Add(ctx, request)
-	require.NoError(t, err)
+	reply := addRPCTransactions(t, ctx, delayedServer, txnRLP)
 	require.Equal(t, &txpoolproto.AddReply{
 		Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS},
 		Errors:   []string{"already known"},
@@ -251,12 +256,10 @@ func TestGrpcServerAddBatchReplacement(t *testing.T) {
 			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			server := NewGrpcServer(ctx, pool, poolDB, nil, pool.chainID, pool.logger)
 			if tc.pooled != nil {
-				reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{tc.pooled}})
-				require.NoError(t, err)
+				reply := addRPCTransactions(t, ctx, server, tc.pooled)
 				require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported)
 			}
-			reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: tc.batch})
-			require.NoError(t, err)
+			reply := addRPCTransactions(t, ctx, server, tc.batch...)
 			require.Equal(t, tc.want, reply)
 		})
 	}
@@ -399,10 +402,7 @@ func TestGrpcServerAddInvalidSelfAuthorizationNonce(t *testing.T) {
 			// The cached mismatch still applies after the account nonce advances.
 			change = newBlockChangeForAccounts(common.Hash{1}, 1, sender)
 			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
-			reply, addErr := server.Add(ctx, &txpoolproto.AddRequest{
-				RlpTxs: [][]byte{hexutil.MustDecodeHex(ordinary.PayloadStr), encoded.Bytes()},
-			})
-			require.NoError(t, addErr)
+			reply := addRPCTransactions(t, ctx, server, hexutil.MustDecodeHex(ordinary.PayloadStr), encoded.Bytes())
 			require.Equal(t, []string{txpoolcfg.Success.String(), txpoolcfg.InvalidAuthorizationNonce.String()}, reply.Errors)
 		})
 	}
@@ -506,8 +506,7 @@ func TestGrpcServerAddFrameConflictCreatedInBatch(t *testing.T) {
 	first := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
 	second := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
 	server := NewGrpcServer(ctx, pool, pool.poolDB, nil, *first.Txn.GetChainID(), pool.logger)
-	reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{first.Rlp, second.Rlp}})
-	require.NoError(t, err)
+	reply := addRPCTransactions(t, ctx, server, first.Rlp, second.Rlp)
 	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS, txpoolproto.ImportResult_INVALID}, reply.Imported)
 	require.Equal(t, txpoolcfg.InvalidFrame.String(), reply.Errors[1])
 	rejection, ok := pool.frameRejections.Peek(string(second.IDHash[:]))
@@ -535,13 +534,11 @@ func TestGrpcServerAddFrameConflictAroundReplacement(t *testing.T) {
 			original := framePoolSlot(t, sender, tc.originalFee, tc.originalFee)
 			keyed := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
 			server := NewGrpcServer(ctx, pool, pool.poolDB, nil, *original.Txn.GetChainID(), pool.logger)
-			reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{original.Rlp}})
-			require.NoError(t, err)
+			reply := addRPCTransactions(t, ctx, server, original.Rlp)
 			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported)
 
 			// The first attempt caches the conflict. Only an accepted replacement clears it for the second attempt.
-			reply, err = server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{keyed.Rlp, hexutil.MustDecodeHex(replacement.PayloadStr), keyed.Rlp}})
-			require.NoError(t, err)
+			reply = addRPCTransactions(t, ctx, server, keyed.Rlp, hexutil.MustDecodeHex(replacement.PayloadStr), keyed.Rlp)
 			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID, tc.wantReplacement, tc.wantFrame}, reply.Imported)
 			if tc.wantFrame == txpoolproto.ImportResult_SUCCESS {
 				require.NotContains(t, pool.byHash, string(original.IDHash[:]))
@@ -731,9 +728,7 @@ func TestGrpcServerAddRechecksCachedFrameRejectionAfterHeadChange(t *testing.T) 
 	server := NewGrpcServer(ctx, pool, pool.poolDB, nil, chainID, pool.logger)
 	backend := pool.ethBackend.(*frameValidationBackend)
 	backend.valid = false
-	frameRequest := &txpoolproto.AddRequest{RlpTxs: [][]byte{frame.Rlp}}
-	reply, err := server.Add(ctx, frameRequest)
-	require.NoError(t, err)
+	reply := addRPCTransactions(t, ctx, server, frame.Rlp)
 	require.Equal(t, []string{txpoolcfg.InvalidFrame.String()}, reply.Errors)
 	require.Equal(t, txpoolcfg.InvalidFrame, pool.KnownTxnReason(frame.IDHash[:]))
 
@@ -746,14 +741,10 @@ func TestGrpcServerAddRechecksCachedFrameRejectionAfterHeadChange(t *testing.T) 
 		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	}}
 	batchServer := NewGrpcServer(ctx, delayed, pool.poolDB, nil, chainID, pool.logger)
-	reply, err = batchServer.Add(ctx, &txpoolproto.AddRequest{
-		RlpTxs: [][]byte{hexutil.MustDecodeHex(ordinary.PayloadStr), frame.Rlp},
-	})
-	require.NoError(t, err)
+	reply = addRPCTransactions(t, ctx, batchServer, hexutil.MustDecodeHex(ordinary.PayloadStr), frame.Rlp)
 	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS, txpoolproto.ImportResult_SUCCESS}, reply.Imported)
 
-	reply, err = server.Add(ctx, frameRequest)
-	require.NoError(t, err)
+	reply = addRPCTransactions(t, ctx, server, frame.Rlp)
 	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS}, reply.Imported)
 }
 

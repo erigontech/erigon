@@ -271,7 +271,10 @@ func (p *TxPool) precheckFrame(txn *TxnSlot, isLocal bool, pooled *metaTxn) fram
 	if reason := p.validateFrame(txn, isLocal); reason != txpoolcfg.Success {
 		return frameValidationResult{reason: reason}
 	}
-	return p.checkFrameSender(txn, pooled)
+	if reason := p.checkFrameSender(txn, pooled); reason != txpoolcfg.Success {
+		return frameValidationResult{reason: reason, blocker: pooled}
+	}
+	return frameValidationResult{reason: txpoolcfg.Success}
 }
 
 // Head publication can precede pool updates. Waiting on the generation also
@@ -337,8 +340,8 @@ func (p *TxPool) finalizeFrameRejection(txn *TxnSlot, reason txpoolcfg.DiscardRe
 	case txpoolcfg.NonceTooLow:
 		p.frameRejections.Add(string(txn.IDHash[:]), frameRejection{generation: p.stateGeneration, reason: reason})
 	case txpoolcfg.FrameValidationUnavailable:
-		if policy := p.checkFrameSender(txn, p.all.senderIDFrameTxn[txn.SenderID]); policy.reason != txpoolcfg.Success {
-			return policy.reason
+		if senderReason := p.checkFrameSender(txn, p.all.senderIDFrameTxn[txn.SenderID]); senderReason != txpoolcfg.Success {
+			return senderReason
 		}
 		p.discardReasonsLRU.Add(string(txn.IDHash[:]), reason)
 	}
@@ -445,25 +448,25 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 }
 
 // checkFrameSender requires the pool lock. A matching nonce and key set may replace the existing frame.
-func (p *TxPool) checkFrameSender(txn *TxnSlot, pooled *metaTxn) frameValidationResult {
+func (p *TxPool) checkFrameSender(txn *TxnSlot, pooled *metaTxn) txpoolcfg.DiscardReason {
 	if pooled == nil {
-		return frameValidationResult{reason: txpoolcfg.Success}
+		return txpoolcfg.Success
 	}
 	pooledFrame := pooled.TxnSlot.Txn.(*types.FrameTransaction)
 	candidateFrame := txn.Txn.(*types.FrameTransaction)
 	if pooled.TxnSlot.Nonce != txn.Nonce || !slices.Equal(pooledFrame.NonceKeys, candidateFrame.NonceKeys) {
 		p.frameRejections.Add(string(txn.IDHash[:]), frameRejection{blocker: pooled.TxnSlot.IDHash, reason: txpoolcfg.InvalidFrame})
-		return frameValidationResult{reason: txpoolcfg.InvalidFrame, blocker: pooled}
+		return txpoolcfg.InvalidFrame
 	}
-	return frameValidationResult{reason: txpoolcfg.Success}
+	return txpoolcfg.Success
 }
 
 // checkFrameAdmission checks sender exclusivity and any payer reservation under
 // the pool lock. Restored frames remain parked without a validation result.
 func (p *TxPool) checkFrameAdmission(txn *TxnSlot, found *metaTxn) txpoolcfg.DiscardReason {
 	// Simulation releases the pool lock, so sender conflicts must be checked again.
-	if policy := p.checkFrameSender(txn, p.all.senderIDFrameTxn[txn.SenderID]); policy.reason != txpoolcfg.Success {
-		return policy.reason
+	if reason := p.checkFrameSender(txn, p.all.senderIDFrameTxn[txn.SenderID]); reason != txpoolcfg.Success {
+		return reason
 	}
 	v := txn.frameValidation
 	if v == nil {
