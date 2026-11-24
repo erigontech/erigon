@@ -22,7 +22,7 @@ func runSelfdestructGasFn(t *testing.T, gasFn gasFunc) *state.IntraBlockState {
 	self := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
 	beneficiary := accounts.InternAddress(common.HexToAddress("0x4444444444444444444444444444444444444444"))
 	ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
-	t.Cleanup(func() { ibs.Release(false) })
+	t.Cleanup(ibs.Close)
 	ibs.SetTxContext(1, 5)
 	ibs.SetVersion(0)
 	require.NoError(t, ibs.AddBalance(self, *uint256.NewInt(1000), 0))
@@ -65,7 +65,7 @@ func TestStatefulGasCallReadsEmptinessOnlyWithValue(t *testing.T) {
 	target := accounts.InternAddress(common.HexToAddress("0x5555555555555555555555555555555555555555"))
 	for _, transfersValue := range []bool{false, true} {
 		ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
-		t.Cleanup(func() { ibs.Release(false) })
+		t.Cleanup(ibs.Close)
 		ibs.SetTxContext(1, 5)
 		ibs.StartAccessRecording()
 		evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, Config{})

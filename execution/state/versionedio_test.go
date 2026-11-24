@@ -1992,7 +1992,7 @@ func TestCreateAccount_RecordsSelfDestructReadForOrdering(t *testing.T) {
 	reader := newAccountStateReader(addr)
 	vm := NewVersionMap(nil)
 	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader))
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(0, 5)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)

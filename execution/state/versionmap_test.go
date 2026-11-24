@@ -1484,7 +1484,7 @@ func TestAbsentConclusionThenCreatorFlushAborts(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xfc, 0x02})
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.txIndex = 9
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
@@ -1530,7 +1530,7 @@ func TestColdFieldReadAfterReconciledLoadValidates(t *testing.T) {
 	reader := &codeReader{addr: addr, account: &accounts.Account{Nonce: 1, Balance: *uint256.NewInt(5), CodeHash: code.Hash}, code: code.Bytes}
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(reader, vm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 60)
 	ibs.SetVersion(0)
 	exists, err := ibs.Exist(addr)
@@ -1558,7 +1558,7 @@ func TestAccountBase_ReconcilesDBLoadedRecordRead(t *testing.T) {
 	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(700), true)
 	dbAcc := &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash}
 	ibs := NewWithVersionMap(&fixedAccountReader{acc: dbAcc}, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.txIndex = 5
 	acc, _, _, err := ibs.accountBase(addr, true)
 	require.NoError(t, err)
@@ -1579,7 +1579,7 @@ func TestAccountBase_NoSynthesisForEmpty(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xba, 0x03})
 	mvhm.WriteBalance(addr, Version{TxIndex: 2}, uint256.Int{}, true)
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.txIndex = 5
 	acc, _, _, err := ibs.accountBase(addr, true)
 	require.NoError(t, err)
@@ -1592,7 +1592,7 @@ func TestAccountBase_NoSynthesisFromEstimate(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xba, 0x04})
 	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(500), false)
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.txIndex = 5
 	acc, _, _, err := ibs.accountBase(addr, true)
 	require.NoError(t, err)
@@ -1612,7 +1612,7 @@ func TestAccountBase_NoSynthesisAfterSelfDestruct(t *testing.T) {
 		require.NoError(t, err)
 	})
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.txIndex = 5
 	acc, _, _, err := ibs.accountBase(addr, true)
 	require.NoError(t, err)
@@ -1762,7 +1762,7 @@ func TestCommittedReadsBeforeDestructWithBalanceOnlyRevival(t *testing.T) {
 			reader := &codeReader{addr: addr, account: &accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash([32]byte{0xaa})}, code: []byte{0x60, 0x00}}
 			vm := NewVersionMap(nil)
 			ibs := NewWithVersionMap(reader, vm)
-			defer ibs.Release(false)
+			defer ibs.Close()
 			ibs.SetTxContext(1, 2)
 			ibs.SetVersion(0)
 			nonEmpty, err := tt.read(ibs, addr)
@@ -1945,7 +1945,7 @@ func TestGetStateObject_SelfDestructedButBALFunded_StaysAlive(t *testing.T) {
 	mvhm.WriteBalance(addr, Version{TxIndex: 3}, *uint256.NewInt(1000), true)
 	dbAcc := &accounts.Account{CodeHash: accounts.EmptyCodeHash}
 	ibs := NewWithVersionMap(&fixedAccountReader{acc: dbAcc}, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.txIndex = 5
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
@@ -1981,7 +1981,7 @@ func TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip(t *testing.T) {
 	}
 	newIBS := func(vm *VersionMap) *IntraBlockState {
 		ibs := NewWithVersionMap(&emptyReader{}, vm)
-		t.Cleanup(func() { ibs.Release(false) })
+		t.Cleanup(ibs.Close)
 		ibs.SetTxContext(0, 5)
 		ibs.SetVersion(0)
 		return ibs

@@ -424,9 +424,6 @@ func (ibs *IntraBlockState) SetNoConflictDetection() { ibs.noConflictDetection =
 
 func (ibs *IntraBlockState) SetCodeByHash(c CodeByHash) { ibs.codeByHash = c }
 
-// Release Deprecated use Close
-func (ibs *IntraBlockState) Release(bool) { ibs.Close() }
-
 // Close returns pooled resources (like journal, versioned writes)
 // back to their pools. Call this when the IntraBlockState is no longer needed.
 // Call Reset() to re-use IntraBlockState object
