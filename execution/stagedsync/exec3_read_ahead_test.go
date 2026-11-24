@@ -191,3 +191,22 @@ func TestWarmTxsHashesSkipsAuthListAboveGasLimit(t *testing.T) {
 	require.NotNil(t, setCode(1_000_000, 100).RecoveredAuthorities(), "a list the gas limit can pay for is warmed")
 	require.Nil(t, setCode(21_000, 1_000).RecoveredAuthorities(), "a list above the gas limit is left to the executor")
 }
+
+func TestWarmOfflineBALStartsTheBALWarmup(t *testing.T) {
+	oldReadAhead := dbg.ReadAhead
+	dbg.SetReadAhead(true)
+	t.Cleanup(func() { dbg.SetReadAhead(oldReadAhead) })
+	readAheader := exec.NewBlockReadAheader()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer readAheader.WaitForWarmup(context.Background())
+	defer cancel()
+	block := types.NewBlockFromStorage(common.Hash{1}, &types.Header{Number: *uint256.NewInt(1)}, nil, nil, nil,
+		types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.Address{1}}}))
+	warmupDB := &blockedWarmupDB{started: make(chan context.Context, 1)}
+	warmOfflineBAL(ctx, readAheader, warmupDB, &countingBlockAccessListGetter{}, block)
+	select {
+	case <-warmupDB.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("offline BAL warmup did not start")
+	}
+}

@@ -187,24 +187,21 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 	bra.cancelWarmup = cancel
 	bra.warmupMu.Unlock()
 	done := bra.markWarmupRunning()
-	var bal types.BlockAccessList
-	if header.HasNonEmptyBAL() {
-		balSidecar, ok := bra.bals.Get(blockHash)
-		if !ok {
-			data, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, header.Number.Uint64())
+	balSidecar, cached := bra.bals.Get(blockHash)
+	if !cached && header.HasNonEmptyBAL() {
+		data, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, header.Number.Uint64())
+		if err != nil {
+			log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", blockHash, "err", err)
+		} else if len(data) != 0 {
+			balSidecar, err = types.DecodeBlockAccessListSidecar(data)
 			if err != nil {
 				log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", blockHash, "err", err)
-			} else if len(data) != 0 {
-				balSidecar, err = types.DecodeBlockAccessListSidecar(data)
-				if err != nil {
-					log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", blockHash, "err", err)
-				} else {
-					bra.bals.Add(blockHash, balSidecar)
-				}
+			} else {
+				bra.bals.Add(blockHash, balSidecar)
 			}
 		}
-		bal = balSidecar.BlockAccessList()
 	}
+	bal := balSidecar.BlockAccessList()
 	go func() {
 		defer bra.warmupGate.Release(1)
 		defer close(done)
