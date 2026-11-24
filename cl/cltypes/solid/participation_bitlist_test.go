@@ -277,3 +277,28 @@ func TestParticipationBitListHashSSZSmallCapacity(t *testing.T) {
 		}
 	}
 }
+
+func TestParticipationBitListUnmarshalJSONRejectsOverLimit(t *testing.T) {
+	list := solid.NewParticipationBitList(1, 2)
+	list.Set(0, 7)
+	require.ErrorContains(t, json.Unmarshal([]byte(`["1","2","3"]`), list), "exceeds limit")
+	require.Equal(t, []byte{7}, list.Bytes())
+}
+
+func TestParticipationBitListUnmarshalJSONParseErrorKeepsList(t *testing.T) {
+	list := solid.NewParticipationBitList(2, 4)
+	list.Set(0, 7)
+	list.Set(1, 6)
+	require.Error(t, json.Unmarshal([]byte(`["1","bad","3"]`), list))
+	require.Equal(t, []byte{7, 6}, list.Bytes())
+}
+
+func TestParticipationBitListUnmarshalJSONAcceptsLimit(t *testing.T) {
+	for _, input := range []string{`["1","2"]`, `"0x0102"`} {
+		t.Run(input, func(t *testing.T) {
+			list := solid.NewParticipationBitList(0, 2)
+			require.NoError(t, json.Unmarshal([]byte(input), list))
+			require.Equal(t, []byte{1, 2}, list.Bytes())
+		})
+	}
+}

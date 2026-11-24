@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diskutils"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/nodecfg"
 )
 
@@ -438,6 +437,4 @@ func StartNode(stack *Node) {
 	if err := stack.Start(); err != nil {
 		utils.Fatalf("Error starting protocol stack: %v", err)
 	}
-
-	go debug.ListenSignals(func() { stack.Close() }, stack.logger)
 }

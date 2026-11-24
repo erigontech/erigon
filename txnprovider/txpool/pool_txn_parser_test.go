@@ -601,6 +601,35 @@ func TestParseTransactionRejectsBlobCommitmentCountMismatch(t *testing.T) {
 	require.ErrorContains(t, err, "fewer commitments than blobs")
 }
 
+func TestParseTransactionRejectsEmptyBlobHashes(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	wrapper := types.MakeWrappedBlobTxn(chainID)
+	wrapper.Tx.BlobVersionedHashes = nil
+
+	unwrapped := &bytes.Buffer{}
+	require.NoError(t, wrapper.Tx.MarshalBinary(unwrapped))
+	wrapped := &bytes.Buffer{}
+	require.NoError(t, wrapper.MarshalBinaryWrapped(wrapped))
+
+	for _, tc := range []struct {
+		name             string
+		payload          []byte
+		wrappedWithBlobs bool
+	}{
+		{"unwrapped", unwrapped.Bytes(), false},
+		{"wrapped", wrapped.Bytes(), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := NewTxnParseContext(*chainID)
+			ctx.WithSender(false)
+			var slot TxnSlot
+			_, err := ctx.ParseTransaction(tc.payload, 0, &slot, nil, false /* hasEnvelope */, tc.wrappedWithBlobs, nil)
+			require.ErrorIs(t, err, ErrParseTxn)
+			require.ErrorContains(t, err, types.ErrBlobTxnEmptyBlobs.Error())
+		})
+	}
+}
+
 func TestParseTransactionsRejectsTrailingBlobWrapperBytes(t *testing.T) {
 	chainID := uint256.NewInt(5)
 	wrapper := types.MakeV1WrappedBlobTxn(chainID)

@@ -22,12 +22,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -129,6 +131,49 @@ func TestIndexAggOptsOpenADatadirWithAGap(t *testing.T) {
 func TestSegLS_NoChaindata(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, lsDatadir(context.Background(), dirs, log.New()))
+}
+
+func TestDeleteStateSnapshotsPrompt(t *testing.T) {
+	if dataDir := os.Getenv("ERIGON_DELETE_PROMPT_TEST_DIR"); dataDir != "" {
+		if err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{
+			Dirs: datadir.New(dataDir), RemoveLatest: true, PromptUserBeforeDelete: true,
+		}); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	for _, input := range []string{"", "no\n", "1\n", "1\nno\n", "4\n", "1\n4\n"} {
+		t.Run(fmt.Sprintf("%q", input), func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			file := filepath.Join(dirs.SnapDomain, "v1.0-commitment.0-1.kv")
+			files := []string{file, file + ".torrent", filepath.Join(dirs.SnapDomain, "pending.tmp")}
+			for _, name := range files {
+				require.NoError(t, os.WriteFile(name, nil, 0o644))
+			}
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestDeleteStateSnapshotsPrompt$")
+			cmd.Env = append(os.Environ(), "ERIGON_DELETE_PROMPT_TEST_DIR="+dirs.DataDir)
+			cmd.Stdin = strings.NewReader(input)
+			out, err := cmd.CombinedOutput()
+			require.Contains(t, string(out), "Do that anyway?")
+			prompts := 1
+			if strings.HasPrefix(input, "1\n") {
+				prompts = 2
+			}
+			require.Equal(t, prompts, strings.Count(string(out), "(pick number):"), string(out))
+			if strings.HasSuffix(input, "4\n") {
+				require.NoError(t, err, string(out))
+			} else {
+				var exitErr *exec.ExitError
+				require.ErrorAs(t, err, &exitErr)
+				require.Equal(t, 1, exitErr.ExitCode())
+				require.Contains(t, string(out), "read snapshot deletion confirmation:")
+			}
+			for _, name := range files {
+				require.FileExists(t, name)
+			}
+		})
+	}
 }
 
 func Test_DeleteLatestStateSnaps(t *testing.T) {
@@ -1615,6 +1660,143 @@ func Test_DeleteBlockSnaps_NoBlockFilesSweepsTmp(t *testing.T) {
 	confirmDoesntExist(t, tmp)
 }
 
+func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
+	ctx := t.Context()
+	dirs := datadir.New(t.TempDir())
+	logger := log.New()
+
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE),
+		[]byte("step_size = 1000\nsteps_in_frozen_file = 64\n"), 0o644))
+	chainDB := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
+	writeChainMetadata(t, ctx, chainDB, networkname.Mainnet, 1)
+	chainDB.Close()
+
+	statePath := filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kv")
+	compressor, err := seg.NewCompressor(ctx, t.Name(), statePath, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	compressor.DisableFsync()
+	writer := seg.NewWriter(compressor, statecfg.Schema.AccountsDomain.Compression)
+	entries := []struct{ key, value []byte }{
+		{[]byte("account-key-01"), []byte("account-value-01")},
+		{[]byte("account-key-02"), []byte("account-value-02")},
+		{[]byte("account-key-03"), []byte("account-value-03")},
+	}
+	for _, entry := range entries {
+		_, err = writer.Write(entry.key)
+		require.NoError(t, err)
+		_, err = writer.Write(entry.value)
+		require.NoError(t, err)
+	}
+	require.NoError(t, compressor.Compress())
+	compressor.Close()
+
+	oldSalt := []byte{0x12, 0x34, 0x56, 0x78}
+	for _, name := range []string{"salt-blocks.txt", "salt-state.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), oldSalt, 0o644))
+	}
+
+	oldData, err := seg.NewDecompressor(statePath)
+	require.NoError(t, err)
+	oldBtree := filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.bt")
+	oldExistence := filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kvei")
+	require.NoError(t, btindex.BuildBtreeIndexWithDecompressor(
+		oldBtree, oldExistence,
+		seg.NewReader(oldData.MakeGetter(), statecfg.Schema.AccountsDomain.Compression),
+		background.NewProgressSet(), dirs.Tmp, 0x12345678, logger, true,
+		statecfg.Schema.AccountsDomain.Accessors,
+	))
+	oldData.Close()
+	require.FileExists(t, oldBtree)
+	require.FileExists(t, oldExistence)
+
+	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
+	args := []string{"erigon", "seg", "accessor", "--log.dir.disable", "--datadir", dirs.DataDir, "--rebuild", "--new-salt"}
+
+	err = app.Run(ctx, args)
+	require.ErrorContains(t, err, "requires a completed initial snapshot download")
+	for _, name := range []string{"salt-blocks.txt", "salt-state.txt"} {
+		salt, readErr := os.ReadFile(filepath.Join(dirs.Snap, name))
+		require.NoError(t, readErr)
+		require.Equal(t, oldSalt, salt, "rejected salt rotation must leave %s untouched", name)
+	}
+	require.FileExists(t, oldBtree)
+	require.FileExists(t, oldExistence)
+	require.NoFileExists(t, dirs.PreverifiedPath())
+
+	// Presence of preverified.toml marks the completed, pinned snapshot set.
+	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte("# initial snapshot download complete\n"), 0o444))
+	require.NoError(t, app.Run(ctx, args))
+
+	for _, name := range []string{"salt-blocks.txt", "salt-state.txt"} {
+		salt, err := os.ReadFile(filepath.Join(dirs.Snap, name))
+		require.NoError(t, err)
+		require.Len(t, salt, 4)
+		require.NotEqual(t, oldSalt, salt)
+	}
+
+	btrees, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.0-64.bt"))
+	require.NoError(t, err)
+	require.Len(t, btrees, 1, "the full command must recreate a state B-tree")
+	existenceFilters, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.0-64.kvei"))
+	require.NoError(t, err)
+	require.Len(t, existenceFilters, 1, "the full command must recreate the state existence filter")
+
+	chainDB = mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
+	require.NoError(t, err)
+	defer agg.Close()
+	// The fixture has only AccountsDomain, so other domains must not hide its file.
+	agg.DisableInterDomainDependencies()
+	require.NoError(t, chainDB.View(ctx, func(tx kv.Tx) error {
+		files := agg.BeginFilesRo()
+		defer files.Close()
+		for _, entry := range entries {
+			got, _, found, err := files.GetLatest(kv.AccountsDomain, entry.key, tx, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.True(t, found, "normal state reader must find %q through the rebuilt filter", entry.key)
+			require.Equal(t, entry.value, got)
+		}
+		got, _, found, err := files.GetLatest(kv.AccountsDomain, []byte("account-key-04"), tx, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.False(t, found, "normal state reader must reject a missing key")
+		require.Nil(t, got)
+		return nil
+	}))
+}
+
+func Test_renewSnapshotSaltFilesForRebuild(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		stateSalt string
+	}{
+		{name: "current", stateSalt: "salt-state.txt"},
+		{name: "legacy", stateSalt: "salt.txt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			oldSalt := []byte{0x12, 0x34, 0x56, 0x78}
+			for _, name := range []string{tc.stateSalt, "salt-blocks.txt"} {
+				path := filepath.Join(dirs.Snap, name)
+				require.NoError(t, os.WriteFile(path, oldSalt, 0o644))
+				require.NoError(t, os.WriteFile(path+".torrent", []byte("old torrent"), 0o644))
+			}
+			require.NoError(t, renewSnapshotSaltFilesForRebuild(dirs, log.New()))
+			for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
+				path := filepath.Join(dirs.Snap, name)
+				salt, err := os.ReadFile(path)
+				require.NoError(t, err, "salt must be generated before snapshot index rebuild")
+				require.Len(t, salt, 4)
+				require.NotEqual(t, oldSalt, salt, "the old salt must not be reused")
+				require.NoFileExists(t, path+".torrent")
+			}
+			for _, name := range []string{"salt.txt", "salt.txt.torrent"} {
+				require.NoFileExists(t, filepath.Join(dirs.Snap, name))
+			}
+		})
+	}
+}
+
 func Test_removeAccessorsForRebuild(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 
@@ -1639,6 +1821,8 @@ func Test_removeAccessorsForRebuild(t *testing.T) {
 		filepath.Join(dirs.SnapIdx, "v1.0-accounts.0-64.ef"),
 		filepath.Join(dirs.SnapHistory, "v1.0-accounts.0-64.v"),
 		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kv"),
+		filepath.Join(dirs.Snap, "salt-state.txt"),
+		filepath.Join(dirs.Snap, "salt-blocks.txt"),
 	}
 	for _, f := range accessors {
 		touch(f)

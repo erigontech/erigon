@@ -19,7 +19,6 @@ package protocol
 import (
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/holiman/uint256"
 
@@ -37,9 +36,10 @@ import (
 // boundaries and fee settlement; the EVM executes each individual frame.
 // A non-nil validation tracer limits execution to the pool's validation prefix
 // and causes all simulated changes to be reverted.
-func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refunds, gasBailout bool, validation *frameValidationTracer) (result *evmtypes.ExecutionResult, err error) {
+func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refunds bool, validation *frameValidationTracer) (result *evmtypes.ExecutionResult, err error) {
 	rules := st.evm.ChainRules()
-	if !rules.IsBogota {
+	// Frame fee accounting uses the block's execution base fee, which AuRa can waive for certified senders.
+	if !rules.IsBogota || rules.IsAura {
 		return nil, types.ErrTxTypeNotSupported
 	}
 	intrinsic, floor, limits, err := tx.GasLimits()
@@ -53,9 +53,6 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	nonce, err := st.state.GetNonce(sender)
 	if err != nil {
 		return nil, err
-	}
-	if tx.Nonce == math.MaxUint64 {
-		return nil, ErrNonceMax
 	}
 	if !tx.UsesLegacyNonce() {
 		// EIP-8250 requires the manager to be predeployed. Otherwise nonce writes
@@ -81,6 +78,12 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			if err != nil {
 				return nil, err
 			}
+			if tx.UsesSingleUseNonce() {
+				if !sequence.IsZero() {
+					return nil, fmt.Errorf("%w: single-use key %s is already used", ErrNonceTooLow, key.String())
+				}
+				continue
+			}
 			if sequence.LtUint64(tx.Nonce) {
 				return nil, fmt.Errorf("%w: key %s, tx: %d state: %s", ErrNonceTooHigh, key.String(), tx.Nonce, sequence.String())
 			}
@@ -89,30 +92,16 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			}
 		}
 	}
-	skipFeeCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
-	if !skipFeeCheck {
-		if err := CheckEip1559TxGasFeeCap(sender, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.isFree); err != nil {
-			return nil, err
+	baseFee, blobBaseFee := st.evm.Context.BaseFee, st.evm.Context.BlobBaseFee
+	if st.evm.Config().NoBaseFee && tx.Fees.MaxFee.IsZero() {
+		blobBaseFee.Clear()
+		if tx.Fees.TipCap.IsZero() {
+			baseFee.Clear()
 		}
 	}
-	skipBlobCheck := st.evm.Config().NoBaseFee && tx.Fees.BlobFeeCap.IsZero()
-	if tx.GetBlobGas() > 0 && !skipBlobCheck && tx.Fees.BlobFeeCap.Lt(&st.evm.Context.BlobBaseFee) {
-		return nil, ErrMaxFeePerBlobGas
-	}
-	// Execution and state gas are reserved at the fee cap; blob gas uses the
-	// current blob base fee. Approval debits this budget, and settlement returns
-	// unused gas and the difference from the effective execution gas price.
-	maxCost, overflow := u256.MulOverflow(u256.U64(limits.Total()), tx.Fees.FeeCap)
-	if overflow {
-		return nil, errors.New("frame transaction gas cost overflow")
-	}
-	blobCost, overflow := u256.MulOverflow(u256.U64(tx.GetBlobGas()), st.evm.Context.BlobBaseFee)
-	if overflow {
-		return nil, ErrInsufficientFunds
-	}
-	maxCost, overflow = u256.AddOverflow(maxCost, blobCost)
-	if overflow {
-		return nil, ErrInsufficientFunds
+	budget, err := tx.Fees.Budget(limits.Total(), tx.GetBlobGas(), &baseFee, &blobBaseFee)
+	if err != nil {
+		return nil, err
 	}
 	st.state.Prepare(rules, sender, st.evm.Context.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
 	if st.evm.Config().NoBAL {
@@ -120,21 +109,20 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	}
 	snapshot := st.state.PushSnapshot()
 	defer st.state.PopSnapshot(snapshot)
-	ctx := st.state.NewFrameContext(tx, maxCost)
+	ctx := st.state.NewFrameContext(tx, budget.MaxCost)
 	ctx.LegacyNonce = nonce
-	ctx.GasBailout = gasBailout
 	st.evm.FrameContext = ctx
 	defer func() {
 		st.evm.FrameContext = nil
 		// Transaction rejection and mempool simulation undo every frame's changes.
-		// Ordinary execution failures use the frame or batch snapshot instead,
-		// preserving approvals and nonce consumption from earlier successful frames.
+		// A failure within an accepted transaction uses a frame, atomic batch or
+		// ASSERT body snapshot, preserving changes before that boundary.
 		if err != nil || validation != nil {
 			st.state.RevertToSnapshot(snapshot, err)
 		}
 	}()
 	st.evm.BlobHashes = tx.BlobVersionedHashes
-	st.evm.GasPrice = *st.msg.GasPrice()
+	st.evm.GasPrice = budget.GasPrice
 	// Tracers need one transaction root with frames as ordered children. This
 	// synthetic call emits hooks only; it does not execute code or add EVM depth.
 	if tracer := st.evm.Config().Tracer; tracer.HasEnterHook() || tracer.HasExitHook() {
@@ -149,8 +137,15 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			tracer.EmitExit(0, nil, gasUsed, vm.VMErrorFromErr(traceErr), err != nil)
 		}()
 	}
+	hasAssertions := len(tx.Frames) > 0 && tx.Frames[len(tx.Frames)-1].Mode == types.FrameAssert
 	var lastErr error
 	batchStart, batchSnapshot := -1, -1
+	bodyStart, bodySnapshot := -1, -1
+	defer func() {
+		if bodySnapshot >= 0 {
+			st.state.PopSnapshot(bodySnapshot)
+		}
+	}()
 	for i := 0; i < len(tx.Frames); i++ {
 		frame := &tx.Frames[i]
 		ctx.Index = i
@@ -191,8 +186,8 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			ctx.Receipts[i].Logs = st.state.LogsSince(logStart)
 		} else {
 			lastErr = frameErr
-			// A failed VERIFY rejects the transaction. Other frame failures remain
-			// receipt outcomes and allow later frames to run, subject to atomic batches.
+			// A failed VERIFY rejects the transaction. Other failures affect the
+			// receipts and the rollback boundary without invalidating the transaction.
 			if frame.Mode == types.FrameVerify {
 				return nil, fmt.Errorf("verification frame %d failed: %w", i, frameErr)
 			}
@@ -208,6 +203,24 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 				return nil, nil
 			}
 		}
+		if frame.Mode == types.FrameAssert && frameErr != nil {
+			if bodySnapshot < 0 {
+				return nil, errors.New("frame transaction without payment approval")
+			}
+			// Assertions preserve the complete payment-approval frame, including
+			// its state changes after APPROVE returns from a nested call.
+			st.state.RevertToSnapshot(bodySnapshot, frameErr)
+			// Revert removes the snapshot. Clear its reusable ID so deferred
+			// cleanup cannot pop a later snapshot.
+			bodySnapshot = -1
+			for j := bodyStart; j <= i; j++ {
+				ctx.Receipts[j].Logs = nil
+			}
+			for j := i + 1; j < len(tx.Frames); j++ {
+				st.skipFrame(j)
+			}
+			break
+		}
 		if batchStart >= 0 {
 			if frameErr != nil {
 				// The journal restores state-gas charges, including refills to earlier
@@ -219,14 +232,16 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 				// The first frame without the flag is still part of this batch.
 				for tx.Frames[i].Flags&types.FrameAtomicBatch != 0 {
 					i++
-					ctx.Receipts[i].Status = types.ReceiptStatusSkipped
-					st.evm.TraceSkippedFrame(i)
+					st.skipFrame(i)
 				}
 			}
 			if frameErr != nil || frame.Flags&types.FrameAtomicBatch == 0 {
 				st.state.PopSnapshot(batchSnapshot)
 				batchStart, batchSnapshot = -1, -1
 			}
+		}
+		if hasAssertions && bodySnapshot < 0 && !ctx.Payer.IsNil() {
+			bodyStart, bodySnapshot = i+1, st.state.PushSnapshot()
 		}
 	}
 	if ctx.Payer.IsNil() {
@@ -239,7 +254,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		used.State += receipt.GasUsed.State
 	}
 	var refund uint64
-	if refunds && !gasBailout {
+	if refunds {
 		refund = min(st.state.GetRefund(), used.Total()/params.RefundQuotientEIP3529)
 	}
 	// Refunds reduce the payer's fee, but do not free block execution capacity.
@@ -250,18 +265,16 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		paidExecution = max(used.Execution-refund, floor)
 	}
 	paid := paidExecution + used.State
-	fee := u256.Mul(u256.U64(paid), *st.gasPrice)
-	change := u256.Sub(maxCost, u256.Add(fee, blobCost))
-	if !gasBailout {
-		if err := st.state.AddBalance(ctx.Payer, change, tracing.BalanceIncreaseGasReturn); err != nil {
-			return nil, err
-		}
+	gasFee, tipPaid := budget.Settle(paid, &baseFee, &tx.Fees.TipCap)
+	change := u256.Sub(budget.MaxCost, u256.Add(gasFee, budget.BlobCost))
+	if err := st.state.AddBalance(ctx.Payer, change, tracing.BalanceIncreaseGasReturn); err != nil {
+		return nil, err
 	}
-	tipped, err := st.payCoinbase(paid)
+	tipped, err := st.payCoinbaseAmount(tipPaid)
 	if err != nil {
 		return nil, err
 	}
-	burned, burnAddress, err := st.burnFees(paid, blobCost)
+	burned, burnAddress, err := st.burnFees(paid, budget.BlobCost)
 	if err != nil {
 		return nil, err
 	}
@@ -285,4 +298,9 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		st.evm.Context.PostApplyMessage(st.state, sender, st.evm.Context.Coinbase, result, rules)
 	}
 	return result, nil
+}
+
+func (st *TxnExecutor) skipFrame(index int) {
+	st.evm.FrameContext.Receipts[index].Status = types.ReceiptStatusSkipped
+	st.evm.TraceSkippedFrame(index)
 }

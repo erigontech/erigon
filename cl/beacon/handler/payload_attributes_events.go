@@ -114,7 +114,7 @@ func (a *ApiHandler) emitPayloadAttributes() error {
 	if stateVersion.Before(clparams.GloasVersion) || a.proposerLookupTooFarAhead(headSlot, proposalSlot) {
 		return nil
 	}
-	baseState, err := a.forkchoiceStore.GetOwnedStateAtBlockRoot(head.Root)
+	baseState, err := a.forkchoiceStore.GetOwnedStateAtBlockRoot(head.Root, nil)
 	if err != nil {
 		return fmt.Errorf("payload attributes event state: %w", err)
 	}

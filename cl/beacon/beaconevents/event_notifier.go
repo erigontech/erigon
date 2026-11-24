@@ -10,6 +10,9 @@ import (
 // Sized for every column of two blocks.
 const dataColumnStoredBufferSize = 256
 
+// A full buffer drops the notification, which only skips that block's retry.
+const envelopeArrivedBufferSize = 64
+
 type EventEmitter struct {
 	stateFeed                    *stateFeed     // block state feed
 	operationFeed                *operationFeed // block operation feed
@@ -23,6 +26,8 @@ type EventEmitter struct {
 	blockIndicesMu               sync.Mutex
 	blockIndicesChanged          chan struct{}
 	dataColumnStored             chan common.Hash
+	envelopeRetryWake            chan struct{}
+	envelopeArrived              chan common.Hash
 }
 
 // BlockIndicesChanged returns a channel that closes when an import commits block
@@ -104,9 +109,11 @@ func (e *EventEmitter) sendHeadV2IfChanged(headV2 *HeadV2Data) {
 
 func NewEventEmitter() *EventEmitter {
 	return &EventEmitter{
-		operationFeed:    newOpFeed(),
-		stateFeed:        newStateFeed(),
-		dataColumnStored: make(chan common.Hash, dataColumnStoredBufferSize),
+		operationFeed:     newOpFeed(),
+		stateFeed:         newStateFeed(),
+		dataColumnStored:  make(chan common.Hash, dataColumnStoredBufferSize),
+		envelopeRetryWake: make(chan struct{}, 1),
+		envelopeArrived:   make(chan common.Hash, envelopeArrivedBufferSize),
 	}
 }
 
@@ -123,6 +130,43 @@ func (e *EventEmitter) NotifyDataColumnStored(blockRoot common.Hash) {
 	}
 	select {
 	case e.dataColumnStored <- blockRoot:
+	default:
+	}
+	e.WakePendingEnvelopeRetry()
+}
+
+// WakePendingEnvelopeRetry signals the waiting retry loop that a parked envelope may be attemptable now. Signals
+// coalesce, so the loop checks every parked envelope on each signal.
+func (e *EventEmitter) WakePendingEnvelopeRetry() {
+	if e == nil {
+		return
+	}
+	select {
+	case e.envelopeRetryWake <- struct{}{}:
+	default:
+	}
+}
+
+func (e *EventEmitter) PendingEnvelopeRetryWake() <-chan struct{} {
+	if e == nil {
+		return nil
+	}
+	return e.envelopeRetryWake
+}
+
+func (e *EventEmitter) EnvelopeArrived() <-chan common.Hash {
+	if e == nil {
+		return nil
+	}
+	return e.envelopeArrived
+}
+
+func (e *EventEmitter) NotifyEnvelopeArrived(blockRoot common.Hash) {
+	if e == nil {
+		return
+	}
+	select {
+	case e.envelopeArrived <- blockRoot:
 	default:
 	}
 }

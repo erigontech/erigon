@@ -1910,6 +1910,51 @@ func TestParallelNextResultKeepsTheSeedOfADroppedWrite(t *testing.T) {
 	require.Equal(t, state.Version{TxIndex: 0, Incarnation: 1}, res.Version())
 }
 
+// A re-run that drops a write and makes no new one changes the tx's writes: nextResult passes the
+// earlier writes to the re-validation of committed dependents, so a validated reader of the
+// dropped key runs again. Without an access list, the drop removes the cell the reader read.
+func TestParallelNextResultRevalidatesTheReaderOfADroppedWrite(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	signedTx := signSelfSendTx(t, 0, 0, 1, 21000, config, 0)
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+	addr := accounts.InternAddress([20]byte{0xaa})
+
+	txs := []types.Transaction{signedTx, signedTx}
+	eTask := &execTask{Task: &exec.TxTask{Header: header, TxNum: 2, TxIndex: 0, Config: config, Txs: txs}}
+	readerTask := &execTask{Task: &exec.TxTask{Header: header, TxNum: 3, TxIndex: 1, Config: config, Txs: txs}, index: 1}
+	pe, roTx := newResumeTestExec(t, db, config)
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(10_000_000), nil, discardConsumers(1), false, nil)
+	be.tasks = []*execTask{eTask, readerTask}
+	be.results = []*execResult{nil, nil}
+	be.poolTasks = []*poolTask{{}, {}}
+	be.execFailed = make([]int, 2)
+	be.execTasks.setInProgress(0)
+
+	earlier := state.Version{BlockNum: 1, TxIndex: 0}
+	earlierWrites := newWS().bal(addr, earlier, *uint256.NewInt(8)).build()
+	be.versionMap.FlushVersionedWrites(earlierWrites, false)
+	be.blockIO.RecordWrites(earlier, earlierWrites)
+
+	reads := state.ReadSet{}
+	reads.SetHeader(addr, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.MapRead, Version: earlier})
+	be.blockIO.RecordReads(state.Version{BlockNum: 1, TxIndex: 1}, reads)
+	be.indexReads(1, reads)
+	be.finalizedResults[1] = &execResult{TxResult: &exec.TxResult{Task: readerTask.Task}}
+	markValidated(be, 1)
+
+	dropping := state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 2}
+	rerun := &exec.TxResult{
+		Task:     &taskVersion{execTask: eTask, version: dropping},
+		TxOut:    &state.WriteSet{},
+		Coinbase: accounts.ZeroAddress,
+	}
+	_, _ = be.nextResult(context.Background(), pe, rerun, roTx)
+
+	require.False(t, be.validateTasks.checkComplete(1), "tx 1 read the dropped write")
+	require.Equal(t, 1, be.execFailed[1])
+}
+
 // A newPayload block lives only in the block overlay until commit; the tracer
 // must still get its OnBlockStart.
 func TestOnBlockStartSeesOverlayBlock(t *testing.T) {
@@ -1950,7 +1995,7 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 		pe.blockExecMetrics = newBlockExecMetrics()
 		pe.workersCtx = t.Context()
 		header := &types.Header{Number: *uint256.NewInt(1)}
-		require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, nil))
+		require.NoError(t, pe.processRequest(&execRequest{blockNum: 1, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, nil))
 		be := pe.blockExecutors[1]
 		require.False(t, be.execStarted.IsZero())
 		pe.recordBlockExecMetrics(be)
@@ -1962,7 +2007,7 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 			txExecutor:     txExecutor{blockExecMetrics: newBlockExecMetrics()},
 			blockExecutors: map[uint64]*blockExecutor{1: be},
 		}
-		require.NoError(t, pe.scheduleNextPending(t.Context()))
+		require.NoError(t, pe.scheduleNextPending())
 		require.False(t, be.execStarted.IsZero())
 		pe.recordBlockExecMetrics(be)
 		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
@@ -1978,13 +2023,13 @@ func TestStartBlockSeedsRemovalsOnce(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xd7a3"))
 	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
 	header := &types.Header{Number: *uint256.NewInt(1)}
-	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, roTx))
+	require.NoError(t, pe.processRequest(&execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, roTx))
 	be := pe.blockExecutors[1]
 	lc, _, _, _ := be.versionMap.AccountLifecycleAt(addr, 1)
 	require.NotEqual(t, state.LifecycleLive, lc, "first start seeds the removal")
 
 	be.versionMap = state.NewVersionMap(bal)
-	require.NoError(t, pe.startBlock(t.Context(), be))
+	require.NoError(t, pe.startBlock(be))
 	lc, _, _, _ = be.versionMap.AccountLifecycleAt(addr, 1)
 	require.Equal(t, state.LifecycleLive, lc, "a restart must not seed again")
 }
@@ -2003,7 +2048,7 @@ func TestStartBlockFailsOnSeedBaseReadError(t *testing.T) {
 	pe.workersCtx = t.Context()
 	bal := types.BlockAccessList{{Address: av, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
 	header := &types.Header{Number: *uint256.NewInt(1)}
-	err := pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, roTx)
+	err := pe.processRequest(&execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, roTx)
 	require.ErrorContains(t, err, "seed EIP-161 removals of block 1")
 }
 
@@ -2029,7 +2074,7 @@ func TestStartBlockSeedsHistoricBlockAgainstHistory(t *testing.T) {
 	bal := types.BlockAccessList{{Address: av, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	task := &exec.TxTask{Header: header, Config: config, TxNum: 1, HistoryExecution: true}
-	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
+	require.NoError(t, pe.processRequest(&execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
 	lc, _, _, _ := pe.blockExecutors[1].versionMap.AccountLifecycleAt(addr, 1)
 	require.NotEqual(t, state.LifecycleLive, lc)
 }
@@ -2061,7 +2106,7 @@ func TestStartBlockSeedsAgainstUncommittedPrevBlock(t *testing.T) {
 	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
 	header := &types.Header{Number: *uint256.NewInt(2)}
 	task := &exec.TxTask{Header: header, Config: config, TxNum: 4}
-	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 2, accessList: bal, tasks: []exec.Task{task}}, roTx))
+	require.NoError(t, pe.processRequest(&execRequest{blockNum: 2, accessList: bal, tasks: []exec.Task{task}}, roTx))
 	lc, _, _, _ := pe.blockExecutors[2].versionMap.AccountLifecycleAt(addr, 1)
 	require.Equal(t, state.LifecycleLive, lc)
 }
@@ -2080,7 +2125,7 @@ func TestProcessRequestSetsVersionMapBase(t *testing.T) {
 	}}}
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	task := &exec.TxTask{Header: header, Config: config, TxNum: 11, TxIndex: 0}
-	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
+	require.NoError(t, pe.processRequest(&execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
 
 	const edgeTxNum = 15
 	view := pe.blockExecutors[1].versionMap.View(edgeTxNum, state.NewNoopReader())

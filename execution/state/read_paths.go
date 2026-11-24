@@ -114,9 +114,11 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 	return accounts.Code{Hash: codeHash, Bytes: code}, err
 }
 
-// codeSeed returns the code this tx currently sees at addr — its own Code write cell
-// if any, else the committed value — without recording an OCC read. Lets SetCode on the
-// rebuilt noMaterialize transient compare against current code, not the stale tx-start value.
+// codeSeed returns the code this tx sees at addr: its own Code write if any, else the
+// version-map value below txIndex, else the pre-block value. Its own write is returned
+// without recording a read; a value from a lower tx or the committed state is resolved
+// through the tracked code reader, so the comparison SetCode makes against it is covered
+// by an OCC read and resolves estimate cells like a normal read.
 func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts.CodeHash) (accounts.Code, error) {
 	if _, isDirty := ibs.journal.dirties[addr]; isDirty {
 		if vw, ok := ibs.versionedWrites.GetCode(addr); ok {
@@ -126,11 +128,15 @@ func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 	if currentHash == accounts.EmptyCodeHash {
 		return accounts.Code{Hash: accounts.EmptyCodeHash}, nil
 	}
-	code, err := ibs.originCodeDirect(addr)
+	// An earlier tx in this block may have installed the code; its bytes live in the
+	// version map, not the pre-block origin. Reading it untracked lets a withdrawal of
+	// that earlier write validate stale, and drops the bytes that distinguish an
+	// identical SetCode from a real change — so resolve through the tracked reader.
+	code, _, _, err := readCode(ibs, addr)
 	if err != nil {
 		return accounts.Code{}, err
 	}
-	return accounts.Code{Hash: currentHash, Bytes: code.Bytes}, nil
+	return code, nil
 }
 
 // originCodeHash returns the pre-block origin code hash from the state reader
@@ -537,6 +543,16 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				return
 			}
 		}
+		if path == StoragePath {
+			if storageClearedByCreate(r.life, true, hdr.Version.TxIndex) {
+				readClearedByCreate(s, hdr, r)
+				return
+			}
+			// A value below this tx is older than a creation in it.
+			if created, ok := s.versionedWriteCreateContract(addr); ok && created {
+				r.mapStorageVal = uint256.Int{}
+			}
+		}
 		r.outcome = outcomeMapDone
 		r.hdr = hdr
 		r.recordVR = true
@@ -638,7 +654,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 
 		// A slot with no cell after an in-block destruct reads post-wipe zero; anchor it as
 		// a MapRead at the wipe version {destroyedAt, wipeInc} so it validates by version
-		// against liveStorage. Mirrors the stale-Done-cell storage branch above.
+		// against liveStorageValue. Mirrors the stale-Done-cell storage branch above.
 		if path == StoragePath && r.life.state != LifecycleLive {
 			if !commited {
 				recordWipedSelfDestruct(s, addr, r.life)
@@ -647,6 +663,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			r.outcome = outcomeReturnZero
 			r.source = MapRead
 			r.version = r.life.canonicalVer
+			return
+		}
+		if path == StoragePath && storageClearedByCreate(r.life, false, UnknownDep) {
+			readClearedByCreate(s, hdr, r)
 			return
 		}
 
@@ -1094,14 +1114,14 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 }
 
 // readNonce returns the nonce using the version-aware read pipeline.
-func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
+func readNonce(s *IntraBlockState, addr accounts.Address, committed bool) (uint64, ReadSource, Version, error) {
+	if committed || s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetNonce(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, NoncePath, accounts.NilKey, false, false, &r)
+	versionedReadCore(s, addr, NoncePath, accounts.NilKey, committed, false, &r)
 	if r.err != nil {
 		s.RecordStateReadError(r.err)
 		return 0, r.source, r.version, r.err
@@ -1132,6 +1152,9 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 	case outcomeLegacyStorage:
 		if r.so == nil || r.so.deleted {
 			return 0, StorageRead, UnknownVersion, nil
+		}
+		if committed {
+			return r.so.original.Nonce, StorageRead, UnknownVersion, nil
 		}
 		return r.so.Nonce(), StorageRead, UnknownVersion, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
@@ -1257,8 +1280,25 @@ func recordWipedSelfDestruct(s *IntraBlockState, addr accounts.Address, life lif
 	})
 }
 
+// readClearedByCreate reads as zero a slot that a contract creation below the read replaced,
+// anchored on the creation, as liveStorageValue validates it. While the creation is in flight, the
+// read depends on it.
+func readClearedByCreate(s *IntraBlockState, hdr ReadHeader, r *readPathResult) {
+	if r.life.createInc < 0 {
+		s.dep = max(s.dep, r.life.createdAt)
+	}
+	hdr.Source = MapRead
+	hdr.Version = Version{TxIndex: r.life.createdAt, Incarnation: r.life.createInc}
+	r.mapStorageVal = uint256.Int{}
+	r.outcome = outcomeMapDone
+	r.hdr = hdr
+	r.recordVR = true
+	r.source = MapRead
+	r.version = hdr.Version
+}
+
 // recordWipedStorageRead records a zero slot read at the destruct that wiped it,
-// as liveStorage resolves it, so a later store above the destruct invalidates it.
+// as liveStorageValue resolves it, so a later store above the destruct invalidates it.
 func recordWipedStorageRead(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, life lifecycleVerdict) {
 	s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: life.destroyedAt, Incarnation: life.wipeInc}},

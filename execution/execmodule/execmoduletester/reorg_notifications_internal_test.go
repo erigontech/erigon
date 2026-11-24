@@ -19,7 +19,9 @@ package execmoduletester
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -350,12 +352,12 @@ func TestReorgCodeRollbackPreservesRecentRoots(t *testing.T) {
 	data := make([]byte, 72)
 	data[0], data[39], data[71] = 1, 1, 2
 	frame := &types.FrameTransaction{
-		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: frameSender,
+		NonceKeys: nil, ChainID: *cfg.ChainID, SenderAddress: frameSender,
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Target: &types.FrameRecentRootVerifier, Data: data, Limits: mdgas.MdGas{Execution: 20_000}},
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 		},
-		Fees: types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
+		Fees: types.FrameFees{MaxFee: *uint256.NewInt(10_000_000_000)},
 	}
 	refs := protocol.FrameTransactionRecentRoots(frame)
 	require.Len(t, refs, 1)
@@ -1039,5 +1041,140 @@ func TestRejectedCatchupForkchoiceKeepsCommittedNotifications(t *testing.T) {
 			require.Empty(t, m.Notifications.Accumulator.Changes())
 			require.Empty(t, collectReorgSubscriptions(headers, nil, nil).headers, "repeated forkchoice must not repeat delivered headers")
 		})
+	}
+}
+
+func newStoreTester(t *testing.T, config *chain.Config, stepSize uint64, slots byte) (m *ExecModuleTester, sstore func(nonce uint64, k, v byte) types.Transaction, transfer func(nonce uint64) types.Transaction) {
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	store := common.HexToAddress("0xaa")
+	slot := func(i byte) (h common.Hash) { h[31] = i; return h }
+	storage := map[common.Hash]common.Hash{}
+	for i := byte(1); i <= slots; i++ {
+		storage[slot(i)] = slot(1)
+	}
+	m = New(t, WithStepSize(stepSize), WithKey(key), WithGenesisSpec(&types.Genesis{
+		Config: config,
+		Alloc: types.GenesisAlloc{
+			crypto.PubkeyToAddress(key.PublicKey): {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+			store:                                 {Code: []byte{0x60, 0x20, 0x35, 0x60, 0x00, 0x35, 0x55, 0x00}, Storage: storage},
+		},
+	}))
+	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+	sign := func(txn types.Transaction) types.Transaction {
+		signed, err := types.SignTx(txn, signer, key)
+		require.NoError(t, err)
+		return signed
+	}
+	sstore = func(nonce uint64, k, v byte) types.Transaction {
+		ks, vs := slot(k), slot(v)
+		return sign(types.NewTransaction(nonce, store, uint256.NewInt(0), 2_000_000, gasPrice, append(ks[:], vs[:]...)))
+	}
+	transfer = func(nonce uint64) types.Transaction {
+		return sign(types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(1), 21_000, gasPrice, nil))
+	}
+	return m, sstore, transfer
+}
+
+func insertAndSwitchTo(t *testing.T, m *ExecModuleTester, blocks []*types.Block) {
+	ctx := t.Context()
+	for _, block := range blocks {
+		status, err := m.InsertBlocks(ctx, []*types.Block{block})
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+		fcu, err := m.UpdateForkChoice(ctx, block.Header())
+		require.NoError(t, err)
+		require.Equalf(t, execmodule.ExecutionStatusSuccess, fcu.Status, "block %d: %s", block.NumberU64(), fcu.ValidationError)
+		m.ExecModule.WaitIdle(ctx)
+	}
+}
+
+func TestReorgAfterStorageEmptiedAndRefilled(t *testing.T) {
+	const clearIdx = 24
+	m, sstore, transfer := newStoreTester(t, chain.AllProtocolChanges, 64, 2)
+	gen := func(side bool) func(int, *blockgen.BlockGen) {
+		return func(i int, b *blockgen.BlockGen) {
+			nonce := b.TxNonce(m.Address)
+			switch {
+			case i == clearIdx:
+				b.AddTx(sstore(nonce, 1, 0))
+				b.AddTx(sstore(nonce+1, 2, 0))
+			case i == clearIdx+1 && !side:
+				b.AddTx(sstore(nonce, 1, 7))
+			case i == clearIdx+2:
+				b.AddTx(sstore(nonce, 2, 9))
+			default:
+				b.AddTx(transfer(nonce))
+			}
+		}
+	}
+	canonical, err := m.GenerateChain(clearIdx+2, gen(false))
+	require.NoError(t, err)
+	side, err := m.GenerateChain(clearIdx+3, gen(true))
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+	m.ExecModule.WaitIdle(t.Context())
+	insertAndSwitchTo(t, m, side.Blocks[clearIdx+1:])
+}
+
+func TestRandomReorgs(t *testing.T) {
+	prague := *chain.AllProtocolChanges
+	prague.OsakaTime, prague.AmsterdamTime = nil, nil
+	for _, fork := range []struct {
+		name   string
+		config *chain.Config
+	}{{"prague", &prague}, {"amsterdam", chain.AllProtocolChanges}} {
+		for seed := range uint64(20) {
+			t.Run(fmt.Sprintf("%s/seed_%d", fork.name, seed), func(t *testing.T) {
+				testRandomReorgs(t, fork.config, seed)
+			})
+		}
+	}
+}
+
+func testRandomReorgs(t *testing.T, config *chain.Config, seed uint64) {
+	const slots, length, reorgs = 2, 20, 5
+	m, sstore, transfer := newStoreTester(t, config, 16, slots)
+	rng := rand.New(rand.NewPCG(seed, 0))
+	blockSeeds := make([]uint64, length, length+reorgs)
+	for i := range blockSeeds {
+		blockSeeds[i] = rng.Uint64()
+	}
+	gen := func(i int, b *blockgen.BlockGen) {
+		r := rand.New(rand.NewPCG(blockSeeds[i], 0))
+		nonce := b.TxNonce(m.Address)
+		for n := range uint64(r.IntN(3) + 1) {
+			switch r.IntN(3) {
+			case 0:
+				b.AddTx(transfer(nonce + n))
+			case 1:
+				b.AddTx(sstore(nonce+n, byte(r.IntN(slots)+1), 0))
+			default:
+				b.AddTx(sstore(nonce+n, byte(r.IntN(slots)+1), byte(r.IntN(255)+1)))
+			}
+		}
+	}
+	canonical, err := m.GenerateChain(length, gen)
+	require.NoError(t, err)
+	sides := make([][]*types.Block, reorgs)
+	head := length
+	for i := range sides {
+		depth := rng.IntN(4) + 1
+		forkAt := head - depth
+		head = forkAt + depth + 1
+		blockSeeds = blockSeeds[:forkAt]
+		for len(blockSeeds) < head {
+			blockSeeds = append(blockSeeds, rng.Uint64())
+		}
+		side, err := m.GenerateChain(head, gen)
+		require.NoError(t, err)
+		sides[i] = side.Blocks[forkAt:]
+	}
+
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+	m.ExecModule.WaitIdle(t.Context())
+	for _, blocks := range sides {
+		insertAndSwitchTo(t, m, blocks)
 	}
 }

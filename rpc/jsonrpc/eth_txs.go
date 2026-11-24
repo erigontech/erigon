@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -35,6 +36,41 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
+
+// frameBlobBaseFee is used to format transactions. A stored invalid header can
+// have an unrepresentable blob fee and must still be available for inspection.
+func (api *BaseAPI) frameBlobBaseFee(ctx context.Context, tx kv.Tx, header *types.Header, txns ...types.Transaction) (*uint256.Int, error) {
+	if header.ExcessBlobGas == nil {
+		return nil, nil
+	}
+	for _, txn := range txns {
+		if txn.Type() != types.FrameTxType || txn.GetBlobGas() == 0 {
+			continue
+		}
+		config, err := api.chainConfig(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		fee, err := misc.GetBlobGasPrice(config, *header.ExcessBlobGas, header.Time)
+		if err != nil {
+			return nil, nil
+		}
+		return &fee, nil
+	}
+	return nil, nil
+}
+
+func (api *BaseAPI) canonicalFrameGasPriceInputs(ctx context.Context, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int) (blobBaseFee *uint256.Int, gasUsed uint64, err error) {
+	if txn.Type() != types.FrameTxType {
+		return nil, 0, nil
+	}
+	blobBaseFee, err = api.frameBlobBaseFee(ctx, tx, header, txn)
+	if err != nil {
+		return nil, 0, err
+	}
+	gasUsed, err = api.receiptsGenerator.GetReceiptGasUsed(ctx, tx, header, txn, index)
+	return blobBaseFee, gasUsed, err
+}
 
 // GetTransactionByHash implements eth_getTransactionByHash. Returns information about a transaction given the transaction's hash.
 func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Hash) (*ethapi.RPCTransaction, error) {
@@ -89,7 +125,11 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, nil
 		}
 
-		return ethapi.NewRPCTransaction(txn, blockHash, blockTime, blockNum, uint64(txnIndex), baseFee), nil
+		blobFee, gasUsed, err := api.canonicalFrameGasPriceInputs(ctx, tx, header, txn, txnIndex)
+		if err != nil {
+			return nil, err
+		}
+		return ethapi.NewRPCTransaction(txn, blockHash, blockTime, blockNum, uint64(txnIndex), baseFee, blobFee, gasUsed), nil
 	}
 
 	// No finalized transaction, try to retrieve it from the pool
@@ -223,7 +263,11 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		if uint64(txIndex) >= uint64(len(txs)) {
 			return nil, nil
 		}
-		return ethapi.NewRPCTransaction(txs[txIndex], common.Hash{}, b.Time(), 0, uint64(txIndex), b.BaseFee()), nil
+		blobFee, err := api.frameBlobBaseFee(ctx, tx, b.HeaderNoCopy(), txs[txIndex])
+		if err != nil {
+			return nil, err
+		}
+		return ethapi.NewRPCTransaction(txs[txIndex], common.Hash{}, b.Time(), 0, uint64(txIndex), b.BaseFee(), blobFee, 0), nil
 	}
 
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockNumberAndIndex
@@ -305,12 +349,16 @@ func (api *APIImpl) txnByIdxInBlock(ctx context.Context, tx kv.Tx, blockHash com
 	return txn, header, true, nil
 }
 
-func (api *APIImpl) rpcTxnByIdxInBlock(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum, txIdxInBlock uint64) (*ethapi.RPCTransaction, error) {
+func (api *APIImpl) rpcTxnByIdxInBlock(ctx context.Context, tx kv.TemporalTx, blockHash common.Hash, blockNum, txIdxInBlock uint64) (*ethapi.RPCTransaction, error) {
 	txn, header, ok, err := api.txnByIdxInBlock(ctx, tx, blockHash, blockNum, txIdxInBlock)
 	if err != nil || !ok {
 		return nil, err
 	}
-	return ethapi.NewRPCTransaction(txn, blockHash, header.Time, blockNum, txIdxInBlock, header.BaseFee), nil
+	blobFee, gasUsed, err := api.canonicalFrameGasPriceInputs(ctx, tx, header, txn, int(txIdxInBlock))
+	if err != nil {
+		return nil, err
+	}
+	return ethapi.NewRPCTransaction(txn, blockHash, header.Time, blockNum, txIdxInBlock, header.BaseFee, blobFee, gasUsed), nil
 }
 
 // rawTxnByIdxInBlock returns the binary encoding of the i-th transaction of a canonical block.
