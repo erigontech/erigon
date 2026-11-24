@@ -332,13 +332,8 @@ func formatRate(ki uint64, elapsed time.Duration) string {
 
 // convertCommitmentFile produces a re-encoded copy of `file` in `dstDir`.
 //
-// It detects the source file's current state, builds the per-pair key and value
-// transformers for the target ConvertOpts, streams every (k, v) pair from the
-// source via the aggregator's compression-aware reader, applies keyXform per
-// pair (state keys pass through), and pushes (newKey, value) into a fresh
-// TemporalMemBatch's commitment-domain wal. The value-side transform is
-// supplied to dumpStepRangeToPath as `vt valueTransformer` so it runs during
-// collation alongside the ETL sort.
+// It applies the requested key and value conversions to each branch record
+// before writing it to the batch. Commitment state records are copied as stored.
 //
 // dstDir must exist; the resulting `.kv` plus per-domain index files (.bt /
 // .kvi / .kvei depending on the commitment-domain config) are written there.
@@ -454,9 +449,8 @@ func convertCommitmentFile(
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	// txNumForPut only affects the 8-byte step prefix on the wal entry; collateETL
-	// strips it before applying vt. endTxNum-1 guarantees the encoded step lands
-	// inside [stepFrom, stepTo).
+	// Use the file's last transaction number to put each batch entry in the final
+	// step of the range. Collation strips the step encoding from the output.
 	txNumForPut := endTxNum - 1
 	baseName := filepath.Base(file.Fullpath())
 	fileStart := time.Now()
