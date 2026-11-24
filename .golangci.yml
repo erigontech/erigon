@@ -14,6 +14,7 @@ linters:
     - bodyclose
     - durationcheck
     - fatcontext
+    - forbidigo
     - gochecksumtype
     - gocritic
     - gosmopolitan
@@ -52,6 +53,12 @@ linters:
     - spancheck # we don't use OpenTelemetry
     - unconvert # not enough profit from always enabling
   settings:
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: '^runtime\.ReadMemStats$'
+          pkg: '^runtime$'
+          msg: runtime.ReadMemStats stops the Go runtime. Use dbg.MemUsage or runtime/metrics.
     gomoddirectives:
       replace-allow-list:
         - github.com/holiman/bloomfilter/v2
@@ -204,6 +211,10 @@ linters:
       - common-false-positives
       - std-error-handling
     rules:
+      - linters:
+          - forbidigo
+        path: '_test\.go$'
+        text: 'runtime\.ReadMemStats'
       - linters:
           - modernize
         path: _grpc\.pb\.go
