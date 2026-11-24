@@ -41,6 +41,11 @@ type Receipts interface {
 // slowVerdict is how long a posting waits for its verdict before a warning.
 const slowVerdict = 30 * time.Second
 
+// pooledGrace is how many L1 blocks past its target a posting the node holds
+// in its pool may still land; past them the next posting replaces it at its
+// nonce.
+const pooledGrace = 3
+
 // Observer watches postings on L1 until their verdict.
 type Observer struct {
 	Node     Receipts
@@ -108,10 +113,12 @@ func (o *Observer) poll(ctx context.Context, hash common.Hash, batch *protocol.P
 }
 
 // gone reports whether hash, a posting without a receipt, can no longer
-// land. A bundle cannot once L1 passed its block. A pooled posting may land
-// later: it cannot once the node, which had it, no longer has it, and the
-// next posting takes its nonce. known records that the node had it; a node
-// that never showed it is taken as a bundle.
+// land, or no longer holds the next posting back. A bundle cannot land once
+// L1 passed its block. A pooled posting may land later: once the node, which
+// had it, lost it, the next posting takes its nonce; while the node has it,
+// L1 passing its block by pooledGrace has the next posting replace it at its
+// nonce. known records that the node had it; a node that never showed it is
+// taken as a bundle.
 func (o *Observer) gone(ctx context.Context, hash common.Hash, sent post.Sent, known *bool) (bool, error) {
 	if sent.Pooled {
 		has, err := o.Node.HasTransaction(ctx, hash)
@@ -120,7 +127,6 @@ func (o *Observer) gone(ctx context.Context, hash common.Hash, sent post.Sent, k
 			return false, err
 		case has:
 			*known = true
-			return false, nil
 		case *known:
 			return true, nil
 		}
@@ -129,7 +135,11 @@ func (o *Observer) gone(ctx context.Context, hash common.Hash, sent post.Sent, k
 	if err != nil {
 		return false, err
 	}
-	return head.Number > sent.Block, nil
+	end := sent.Block
+	if *known {
+		end += pooledGrace
+	}
+	return head.Number > end, nil
 }
 
 // judge is the verdict on r, the receipt of the posting of batch.

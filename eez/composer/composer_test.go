@@ -484,7 +484,8 @@ func TestComposerRecovers(t *testing.T) {
 		h.requireWindow(t, 1, 1, 12, post.Target{Block: 52, Time: h.chain.header(12).Time})
 	})
 	t.Run("an L1 reorg rolls a settlement out", func(t *testing.T) {
-		h := newHarness(t, newTestChain(t, 12), 12, nil)
+		node := &rolling{}
+		h := newHarness(t, newTestChain(t, 12), 12, node)
 		h.slot(t, 8, 50, sequencer.ModeSteady)
 		// Sends run off the slot: the first is sent before the second.
 		h.targets(t)
@@ -493,8 +494,10 @@ func TestComposerRecovers(t *testing.T) {
 		h.c.RecoverFailed(t.Context())
 		h.cursor.Store(4)
 		h.c.RecoverFailed(t.Context())
-		// Off L1 and out of the node's pool, its posting fails; the recovery
-		// that watches it again takes the verdict when it comes first.
+		node.head.Store(10)
+		// Off L1 and out of the node's pool, its posting fails once L1 moves
+		// on; the recovery that watches it again takes the verdict when it
+		// comes first.
 		require.Eventually(t, func() bool { r, ok := h.resolution(8); return !ok || r == Failed }, 5*time.Second, time.Millisecond)
 		h.slot(t, 12, 52, sequencer.ModeSteady)
 		require.Len(t, h.targets(t), 2)
@@ -537,41 +540,26 @@ func TestComposerObserves(t *testing.T) {
 	}, 5*time.Second, time.Millisecond)
 }
 
-// pooling is an L1 past every target whose node holds the postings sent to
-// its pool until it loses them.
-type pooling struct {
-	has   atomic.Bool
-	asked atomic.Int64
-}
-
-func (*pooling) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1000}, nil }
-
-func (p *pooling) Receipt(context.Context, common.Hash) (*l1.Receipt, error) {
-	p.asked.Add(1)
-	return nil, nil
-}
-
-func (p *pooling) HasTransaction(context.Context, common.Hash) (bool, error) {
-	return p.has.Load(), nil
-}
-
 // TestComposerWaitsOnAPooledPosting: a posting sent through the mempool
-// holds the gate past its target while the node has it, and fails once the
-// node lost it.
+// holds the gate while the node has it, up to pooledGrace L1 blocks past its
+// target; past them it fails, and the next posting replaces it at its nonce.
 func TestComposerWaitsOnAPooledPosting(t *testing.T) {
-	node := &pooling{}
+	node := &rolling{}
+	node.head.Store(99)
 	node.has.Store(true)
 	h := newHarness(t, newTestChain(t, 12), 12, node)
 	h.poster.pooled = true
 	h.slot(t, 8, 50, sequencer.ModeSteady)
 	require.Len(t, h.targets(t), 1)
-	require.Eventually(t, func() bool { return node.asked.Load() > 20 }, 5*time.Second, time.Millisecond)
+	node.head.Store(99 + pooledGrace)
+	asked := node.asked.Load()
+	require.Eventually(t, func() bool { return node.asked.Load() > asked+20 }, 5*time.Second, time.Millisecond)
 	r, ok := h.resolution(8)
 	require.True(t, ok)
 	require.Equal(t, Pending, r)
 	h.slot(t, 12, 52, sequencer.ModeSteady)
-	require.Len(t, h.targets(t), 1, "the pooled posting holds the gate past its target")
-	node.has.Store(false)
+	require.Len(t, h.targets(t), 1, "the pooled posting holds the gate within its grace")
+	node.head.Store(100 + pooledGrace)
 	require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Failed }, 5*time.Second, time.Millisecond)
 	h.slot(t, 12, 52, sequencer.ModeSteady)
 	require.Len(t, h.targets(t), 2)
@@ -595,7 +583,8 @@ func TestComposerAuditsLandedSettlements(t *testing.T) {
 		require.Equal(t, asked+1, node.asked.Load(), "audited")
 	})
 	t.Run("passed without landing", func(t *testing.T) {
-		node := &pooling{}
+		node := &rolling{}
+		node.head.Store(1000)
 		h := newHarness(t, newTestChain(t, 8), 8, node)
 		h.slot(t, 8, 50, sequencer.ModeSteady)
 		require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Failed }, 5*time.Second, time.Millisecond)
@@ -637,7 +626,8 @@ func TestComposerChunkReadsOnce(t *testing.T) {
 // answer may have reached L1: it holds the gate while the node has it, and
 // fails once the node has lost it.
 func TestComposerWatchesAnUnsureSend(t *testing.T) {
-	node := &pooling{}
+	node := &rolling{}
+	node.head.Store(99)
 	node.has.Store(true)
 	h := newHarness(t, newTestChain(t, 12), 12, node)
 	h.poster.fail(fmt.Errorf("%w: connection reset", post.ErrUnsure))
@@ -754,9 +744,10 @@ func TestComposerIgnoresAStaleWatch(t *testing.T) {
 	r, _ := h.resolution(8)
 	require.Equal(t, Settled, r, "derivation confirmed it")
 	node.has.Store(true)
+	node.head.Store(98)
 	h.cursor.Store(4)
 	h.c.RecoverFailed(ctx)
-	node.head.Store(1000)
+	node.head.Store(100)
 	asked := node.asked.Load()
 	require.Eventually(t, func() bool { return node.asked.Load() > asked+40 }, 5*time.Second, time.Millisecond)
 	r, ok := h.resolution(8)
@@ -804,11 +795,14 @@ type landing struct {
 	terminal atomic.Pointer[common.Hash]
 	gone     atomic.Bool
 	pooled   atomic.Bool
+	head     atomic.Uint64
 	again    atomic.Pointer[func() *l1.Receipt]
 	asked    atomic.Int64
 }
 
-func (l *landing) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1}, nil }
+func (l *landing) Head(context.Context) (*l1.Header, error) {
+	return &l1.Header{Number: l.head.Load()}, nil
+}
 
 func (l *landing) HasTransaction(context.Context, common.Hash) (bool, error) {
 	return !l.gone.Load() || l.pooled.Load(), nil
@@ -828,6 +822,7 @@ func (l *landing) Receipt(context.Context, common.Hash) (*l1.Receipt, error) {
 func newLanding(t *testing.T, terminal common.Hash) *landing {
 	l := &landing{t: t}
 	l.terminal.Store(&terminal)
+	l.head.Store(1)
 	return l
 }
 
@@ -857,6 +852,7 @@ func TestComposerSettlementLeftL1(t *testing.T) {
 			leave(node)
 			require.Eventually(t, func() bool {
 				h.c.RecoverFailed(t.Context())
+				node.head.Add(1)
 				_, ok := h.resolution(8)
 				return !ok
 			}, 5*time.Second, time.Millisecond, "dropped")

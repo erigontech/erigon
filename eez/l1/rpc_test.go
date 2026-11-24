@@ -260,8 +260,8 @@ type posting struct {
 var poster = common.HexToAddress("0x5")
 
 func (p *posting) GetTransactionCount(_ context.Context, addr common.Address, block string) (hexutil.Uint64, error) {
-	if addr != poster || block != "pending" {
-		return 0, errors.New("want the poster's pending nonce")
+	if addr != poster || block != "latest" {
+		return 0, errors.New("want the poster's confirmed nonce")
 	}
 	return 7, nil
 }
@@ -325,7 +325,7 @@ func TestRPCPosting(t *testing.T) {
 	p := &posting{baseFee: (*hexutil.Big)(big.NewInt(1_000_000_007))}
 	r := serveRPC(t, p)
 	ctx := t.Context()
-	nonce, err := r.PendingNonce(ctx, poster)
+	nonce, err := r.Nonce(ctx, poster)
 	require.NoError(t, err)
 	require.Equal(t, uint64(7), nonce)
 	fee, err := r.BaseFee(ctx)

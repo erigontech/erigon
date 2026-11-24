@@ -188,12 +188,12 @@ func (r *RPC) CallAt(ctx context.Context, call Call, blockHash common.Hash) ([]b
 	return out, nil
 }
 
-// PendingNonce returns the next nonce of addr, counting its transactions in
-// the node's pool.
-func (r *RPC) PendingNonce(ctx context.Context, addr common.Address) (uint64, error) {
+// Nonce returns the next nonce of addr at the latest block, which a
+// transaction still in a pool does not take.
+func (r *RPC) Nonce(ctx context.Context, addr common.Address) (uint64, error) {
 	var n hexutil.Uint64
-	if err := r.client.CallContext(ctx, &n, "eth_getTransactionCount", addr, "pending"); err != nil {
-		return 0, mapError(err, fmt.Sprintf("pending nonce of %x", addr))
+	if err := r.client.CallContext(ctx, &n, "eth_getTransactionCount", addr, "latest"); err != nil {
+		return 0, mapError(err, fmt.Sprintf("nonce of %x", addr))
 	}
 	return uint64(n), nil
 }

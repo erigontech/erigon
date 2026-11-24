@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -51,6 +52,12 @@ const (
 	// maxPooled is the largest transaction other than a blob one that an L1
 	// pool admits, 128 KiB.
 	maxPooled = 128 * 1024
+	// replaceBump is the percentage of a pooled posting's fees its
+	// replacement pays, over the 10% a pool requires of both tip and fee
+	// cap; maxBump caps the fees compounding bumps reach, as a multiple of
+	// fresh ones.
+	replaceBump = 115
+	maxBump     = 4
 )
 
 // nodeTimeout is the default bound of a poster's calls to the L1 node.
@@ -66,7 +73,7 @@ var ErrUnsure = errors.New("posting may have reached L1")
 type L1 interface {
 	ChainID(ctx context.Context) (uint64, error)
 	Head(ctx context.Context) (*l1.Header, error)
-	PendingNonce(ctx context.Context, addr common.Address) (uint64, error)
+	Nonce(ctx context.Context, addr common.Address) (uint64, error)
 	BaseFee(ctx context.Context) (*uint256.Int, error)
 	Balance(ctx context.Context, addr common.Address) (*uint256.Int, error)
 	SendRawTransaction(ctx context.Context, raw []byte) error
@@ -88,6 +95,19 @@ type Poster struct {
 	// calls each.
 	nodeTimeout time.Duration
 	logger      log.Logger
+
+	// mu guards last, which Send records off the goroutine that signs.
+	mu   sync.Mutex
+	last signed
+}
+
+// signed is the last posting a poster signed.
+type signed struct {
+	nonce       uint64
+	tip, feeCap uint256.Int
+	// held reports that a pool may hold a transaction at nonce: the posting
+	// went through one, or one refused it.
+	held bool
 }
 
 // New returns a poster of key's calls to the contract at to, tipping
@@ -122,12 +142,15 @@ func (p *Poster) From() common.Address { return p.from }
 func (p *Poster) ChainID() uint64 { return p.chainID.Uint64() }
 
 // Sign returns the poster's EIP-1559 call with input and gas limit gas, at
-// its pending nonce, capping the fee at twice the latest base fee plus the
-// tip.
+// its confirmed nonce, capping the fee at twice the latest base fee plus the
+// tip. A posting a pool may hold at that nonce, after a base fee rise above
+// its fee cap or from before a restart, is outbid by replaceBump percent,
+// compounding while pools refuse, up to maxBump times the fresh fees: at one
+// nonce, at most one posting lands.
 func (p *Poster) Sign(ctx context.Context, input []byte, gas uint64) (types.Transaction, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.nodeTimeout)
 	defer cancel()
-	nonce, err := p.node.PendingNonce(ctx, p.from)
+	nonce, err := p.node.Nonce(ctx, p.from)
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +165,15 @@ func (p *Poster) Sign(ctx context.Context, input []byte, gas uint64) (types.Tran
 	if overflow {
 		feeCap.SetAllOne()
 	}
+	tip := p.priority
+	p.mu.Lock()
+	if last := p.last; last.held && last.nonce == nonce {
+		tip, *feeCap = outbid(&p.priority, feeCap, &last.tip, &last.feeCap)
+		p.logger.Warn("[eez] posting replaces the one a pool may hold at its nonce", "event", "eez.poster.replacement",
+			"nonce", nonce, "tip", &tip, "feeCap", feeCap, "lastTip", &last.tip, "lastFeeCap", &last.feeCap)
+	}
+	p.last = signed{nonce: nonce, tip: tip, feeCap: *feeCap}
+	p.mu.Unlock()
 	// Only the gas used is charged; a balance short of the limit may still do.
 	need, overflow := new(uint256.Int).MulOverflow(feeCap, uint256.NewInt(gas))
 	if balance, err := p.node.Balance(ctx, p.from); err == nil && (overflow || balance.Lt(need)) {
@@ -152,10 +184,48 @@ func (p *Poster) Sign(ctx context.Context, input []byte, gas uint64) (types.Tran
 	tx := &types.DynamicFeeTransaction{
 		CommonTx: types.CommonTx{Nonce: nonce, GasLimit: gas, To: &to, Data: input},
 		ChainID:  p.chainID,
-		TipCap:   p.priority,
+		TipCap:   tip,
 		FeeCap:   *feeCap,
 	}
 	return types.SignTx(tx, *p.signer, p.key)
+}
+
+// outbid returns the fees of a posting replacing one with lastTip and
+// lastCap: replaceBump percent over them, no lower than the fresh tip and
+// feeCap, no higher than maxBump times them, the cap no lower than the tip.
+func outbid(tip, feeCap, lastTip, lastCap *uint256.Int) (uint256.Int, uint256.Int) {
+	bump := func(fresh, last *uint256.Int) uint256.Int {
+		var v uint256.Int
+		if _, overflow := v.MulOverflow(last, uint256.NewInt(replaceBump)); overflow {
+			v.SetAllOne()
+		} else {
+			v.Div(&v, uint256.NewInt(100))
+			v.AddUint64(&v, 1)
+		}
+		if v.Lt(fresh) {
+			v = *fresh
+		}
+		var ceiling uint256.Int
+		if _, overflow := ceiling.MulOverflow(fresh, uint256.NewInt(maxBump)); !overflow && v.Gt(&ceiling) {
+			v = ceiling
+		}
+		return v
+	}
+	t, c := bump(tip, lastTip), bump(feeCap, lastCap)
+	if c.Lt(&t) {
+		c = t
+	}
+	return t, c
+}
+
+// hold records that a pool may hold a transaction at the nonce of tx, the
+// last posting signed: the next one there outbids it.
+func (p *Poster) hold(tx types.Transaction) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.last.nonce == tx.GetNonce() {
+		p.last.held = true
+	}
 }
 
 // Target is the L1 block a bundle is for.
@@ -175,8 +245,8 @@ type Sent struct {
 	// bundle sent through the mempool is not.
 	Time uint64
 	// Pooled reports a bundle that may be in the L1 node's pool and land
-	// after Block: one sent through the mempool, or one whose send failed
-	// without an answer.
+	// after Block, until the next posting replaces it at its nonce: one sent
+	// through the mempool, or one whose send failed without an answer.
 	Pooled bool
 }
 
@@ -224,6 +294,9 @@ func (p *Poster) Send(ctx context.Context, txs []types.Transaction, target Targe
 	}
 	p.logger.Warn("[eez] builder has no eth_sendBundle, sending through the mempool", "event", "eez.poster.mempool",
 		"block", block, "txs", len(raw))
+	// Taken, refused or unanswered, the posting leaves its nonce to a pool's
+	// replacement rule.
+	p.hold(txs[0])
 	for i, tx := range raw {
 		sctx, cancel := context.WithTimeout(ctx, p.nodeTimeout)
 		err := p.node.SendRawTransaction(sctx, tx)

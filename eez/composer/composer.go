@@ -465,7 +465,7 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 	cursor := c.cursor()
 	if cursor < c.last {
 		for _, p := range c.ledger.RolledOut(cursor) {
-			c.rewatch(p)
+			c.rewatch(ctx, p)
 		}
 	}
 	c.last = cursor
@@ -476,7 +476,7 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 		switch {
 		case err != nil:
 		case r == nil:
-			c.rewatch(p)
+			c.rewatch(rctx, p)
 		case c.observer.judge(r, p.Batch, p.Terminal.Hash()) == Failed && c.ledger.Unsettle(p.Height, p.Post):
 			c.logger.Warn("[eez] settled batch's posting is on L1 again without the settlement", "event", "eez.composer.batch.unsettled",
 				"to", p.Height, "post", p.Post)
@@ -495,14 +495,20 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 }
 
 // rewatch has p, a settlement whose posting left L1, pending again under a
-// new watch, as a posting the node may hold in its pool.
-func (c *Composer) rewatch(p Posted[types.Transaction]) {
+// new watch, as a posting the node may hold in its pool from L1's head on.
+func (c *Composer) rewatch(ctx context.Context, p Posted[types.Transaction]) {
 	watch, ok := c.ledger.Repend(p.Height, p.Post)
 	if !ok {
 		return
 	}
+	var from uint64
+	rctx, cancel := context.WithTimeout(ctx, c.cfg.L1Read)
+	if head, err := c.observer.Node.Head(rctx); err == nil {
+		from = head.Number
+	}
+	cancel()
 	c.logger.Warn("[eez] settled batch's posting left L1, watching it again", "event", "eez.composer.batch.rolled_out", "to", p.Height, "post", p.Post)
-	c.wg.Go(func() { c.observe(p.Height, p.Post, watch, p.Batch, p.Terminal, post.Sent{Pooled: true}) })
+	c.wg.Go(func() { c.observe(p.Height, p.Post, watch, p.Batch, p.Terminal, post.Sent{Block: from, Pooled: true}) })
 }
 
 // audit checks that the posting of a finalized settlement is on L1: one

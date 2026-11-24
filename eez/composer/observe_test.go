@@ -223,14 +223,19 @@ func TestWatch(t *testing.T) {
 				c.failed, c.got = nil, settles
 			}
 		}, want: Settled},
-		{name: "a pooled posting the node has outlives its target", head: 100, pooled: true, has: true, script: func(c *chain, read int) {
+		{name: "a pooled posting the node has outlives its target by its grace", head: 100, pooled: true, has: true, script: func(c *chain, read int) {
 			switch read {
 			case 2:
-				c.head = 105
+				c.head = 101 + pooledGrace
 			case 6:
 				c.got = settles
 			}
 		}, want: Settled},
+		{name: "a pooled posting the node has, past its grace", head: 100, pooled: true, has: true, script: func(c *chain, read int) {
+			if read == 3 {
+				c.head = 102 + pooledGrace
+			}
+		}, want: Failed},
 		{name: "a pooled posting the node lost", head: 100, pooled: true, has: true, script: func(c *chain, read int) {
 			if read == 3 {
 				c.has = false

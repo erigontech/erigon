@@ -54,8 +54,11 @@ type node struct {
 	// hangChainID, hangHead, hangNonce and hangSend have those calls wait
 	// for their context.
 	hangChainID, hangHead, hangNonce, hangSend bool
-	sends                                      int
-	sent                                       [][]byte
+	// refuseTip refuses a transaction tipping less, as a pool holding its
+	// nonce does.
+	refuseTip uint64
+	sends     int
+	sent      [][]byte
 }
 
 func (n *node) ChainID(ctx context.Context) (uint64, error) {
@@ -74,7 +77,7 @@ func (n *node) Head(ctx context.Context) (*l1.Header, error) {
 	return &l1.Header{Number: n.head}, n.failed
 }
 
-func (n *node) PendingNonce(ctx context.Context, _ common.Address) (uint64, error) {
+func (n *node) Nonce(ctx context.Context, _ common.Address) (uint64, error) {
 	if n.hangNonce {
 		<-ctx.Done()
 		return 0, ctx.Err()
@@ -97,6 +100,15 @@ func (n *node) SendRawTransaction(ctx context.Context, raw []byte) error {
 	if n.hangSend {
 		<-ctx.Done()
 		return ctx.Err()
+	}
+	if n.refuseTip > 0 {
+		tx, err := types.DecodeWrappedTransaction(raw)
+		if err != nil {
+			return err
+		}
+		if tx.GetTipCap().Uint64() < n.refuseTip {
+			return fmt.Errorf("%w: replacement transaction underpriced", l1.ErrRefused)
+		}
 	}
 	if n.refuse[i] {
 		return fmt.Errorf("%w: transaction %d refused", l1.ErrRefused, i)
@@ -167,6 +179,91 @@ func TestSign(t *testing.T) {
 		n := &node{baseFee: uint256.NewInt(gwei), failed: failure}
 		_, err := poster(t, n, "").Sign(t.Context(), input, 1_000_000)
 		require.ErrorIs(t, err, failure)
+	})
+}
+
+// TestSignReplaces: a posting signed at the nonce of one a pool may hold bids
+// enough over it to replace it, compounding until a pool takes it, up to a
+// ceiling; a bundle that missed its block is not outbid, and a new nonce
+// starts afresh.
+func TestSignReplaces(t *testing.T) {
+	const (
+		accepted    = `{"jsonrpc":"2.0","id":1,"result":{"bundleHash":"0x01"}}`
+		unsupported = `{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"the method eth_sendBundle does not exist"}}`
+	)
+	fees := func(tx types.Transaction) [2]uint64 {
+		return [2]uint64{tx.GetTipCap().Uint64(), tx.GetFeeCap().Uint64()}
+	}
+	// 5 gwei of base fee: a tip of 10 gwei and a fee cap of 20.
+	fresh := [2]uint64{10 * gwei, 20 * gwei}
+	outbids := func(t *testing.T, last, next types.Transaction) {
+		t.Helper()
+		require.GreaterOrEqual(t, next.GetTipCap().Uint64()*100, last.GetTipCap().Uint64()*115)
+		require.GreaterOrEqual(t, next.GetFeeCap().Uint64()*100, last.GetFeeCap().Uint64()*115)
+		require.GreaterOrEqual(t, next.GetFeeCap().Uint64(), next.GetTipCap().Uint64())
+	}
+	setup := func(t *testing.T, answer string, refuseTip uint64) (*node, *Poster, func(types.Transaction) error) {
+		n := &node{nonce: 7, head: 98, baseFee: uint256.NewInt(5 * gwei), balance: uint256.NewInt(1 << 62), refuseTip: refuseTip}
+		p := poster(t, n, serve(t, &builder{answer: answer}))
+		send := func(tx types.Transaction) error {
+			_, err := p.Send(t.Context(), []types.Transaction{tx}, Target{Block: 100})
+			return err
+		}
+		return n, p, send
+	}
+	sign := func(t *testing.T, p *Poster) types.Transaction {
+		t.Helper()
+		tx, err := p.Sign(t.Context(), []byte{1}, 100_000)
+		require.NoError(t, err)
+		return tx
+	}
+
+	t.Run("a bundle that missed its block", func(t *testing.T) {
+		_, p, send := setup(t, accepted, 0)
+		require.NoError(t, send(sign(t, p)))
+		again := sign(t, p)
+		require.Equal(t, uint64(7), again.GetNonce())
+		require.Equal(t, fresh, fees(again))
+	})
+	t.Run("a posting through the mempool", func(t *testing.T) {
+		n, p, send := setup(t, unsupported, 0)
+		first := sign(t, p)
+		require.Equal(t, fresh, fees(first))
+		require.NoError(t, send(first))
+		again := sign(t, p)
+		require.Equal(t, uint64(7), again.GetNonce(), "the confirmed nonce")
+		outbids(t, first, again)
+		n.nonce = 8
+		require.Equal(t, fresh, fees(sign(t, p)), "a new nonce starts afresh")
+	})
+	t.Run("a pool holding the nonce", func(t *testing.T) {
+		n, p, send := setup(t, unsupported, 25*gwei)
+		last := sign(t, p)
+		for range 10 {
+			err := send(last)
+			if err == nil {
+				break
+			}
+			require.ErrorIs(t, err, l1.ErrRefused)
+			next := sign(t, p)
+			outbids(t, last, next)
+			last = next
+		}
+		require.GreaterOrEqual(t, last.GetTipCap().Uint64(), uint64(25*gwei))
+		require.Equal(t, n.sent[len(n.sent)-1], func() []byte {
+			raw, err := types.MarshalTransactionsBinary(types.Transactions{last})
+			require.NoError(t, err)
+			return raw[0]
+		}(), "the pool took the last")
+	})
+	t.Run("the ceiling", func(t *testing.T) {
+		_, p, send := setup(t, unsupported, 1<<62)
+		var last types.Transaction
+		for range 30 {
+			last = sign(t, p)
+			require.ErrorIs(t, send(last), l1.ErrRefused)
+		}
+		require.Equal(t, [2]uint64{4 * fresh[0], 4 * fresh[1]}, fees(last))
 	})
 }
 
