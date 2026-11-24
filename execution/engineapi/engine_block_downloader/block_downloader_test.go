@@ -19,6 +19,7 @@ package engine_block_downloader
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/p2p"
+	"github.com/erigontech/erigon/execution/p2p/p2pcfg"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -250,7 +252,7 @@ func newSizeCheckingDownloader(t *testing.T, config *chain.Config, blocks []*typ
 	exec := &sizeCheckingExecutionModule{config: config, genesis: genesis, insertErr: insertErr}
 	return NewEngineBlockDownloader(
 		t.Context(), logger, exec, downloadBlockReader{genesis: genesis}, mdbxtest.NewTestDB(t, dbcfg.ChainDB),
-		config, ethconfig.Sync{LoopBlockLimit: 500, MaxReorgDepth: 96}, bbd,
+		config, ethconfig.Sync{LoopBlockLimit: 500, MaxReorgDepth: 96, BlockDownload: p2pcfg.DefaultBlockDownload}, bbd,
 	)
 }
 
@@ -325,4 +327,46 @@ func TestDownloadInsertErrorDoesNotMarkChainBad(t *testing.T) {
 	})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Zero(t, e.badHeaders.Len())
+}
+
+type batchRecordingFetcher struct {
+	downloadChainFetcher
+	mu        sync.Mutex
+	maxBodies int
+}
+
+func (f *batchRecordingFetcher) FetchHeaders(_ context.Context, start, end uint64, _ *p2p.PeerId, _ ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error) {
+	headers := make([]*types.Header, 0, end-start)
+	for _, block := range f.blocks[start:min(end, uint64(len(f.blocks)))] {
+		headers = append(headers, block.HeaderNoCopy())
+	}
+	return p2p.FetcherResponse[[]*types.Header]{Data: headers}, nil
+}
+
+func (f *batchRecordingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Body], error) {
+	f.mu.Lock()
+	f.maxBodies = max(f.maxBodies, len(headers))
+	f.mu.Unlock()
+	return f.downloadChainFetcher.FetchBodies(ctx, headers, peerId, opts...)
+}
+
+func TestDownloadUsesConfiguredBlocksBatchSize(t *testing.T) {
+	config := &chain.Config{}
+	blocks := downloadTestChain(nil, nil, nil, nil, nil, nil)
+	logger := testlog.Logger(t, log.LvlCrit)
+	tracker := p2p.NewPeerTracker(logger, nil)
+	tracker.PeerConnected(p2p.PeerIdFromUint64(1))
+	fetcher := &batchRecordingFetcher{downloadChainFetcher: downloadChainFetcher{blocks: blocks}}
+	bbd := p2p.NewBackwardBlockDownloader(logger, fetcher, tracker, t.TempDir())
+	genesis := blocks[0].HeaderNoCopy()
+	syncCfg := ethconfig.Sync{LoopBlockLimit: 500, MaxReorgDepth: 96, BlockDownload: p2pcfg.DefaultBlockDownload}
+	syncCfg.BlockDownload.BlocksBatchSize = 2
+	e := NewEngineBlockDownloader(
+		t.Context(), logger, &sizeCheckingExecutionModule{config: config, genesis: genesis, insertErr: context.Canceled},
+		downloadBlockReader{genesis: genesis}, mdbxtest.NewTestDB(t, dbcfg.ChainDB), config, syncCfg, bbd,
+	)
+	err := e.processReq(t.Context(), BackwardDownloadRequest{MissingHash: blocks[len(blocks)-1].Hash(), Trigger: FcuTrigger})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Positive(t, fetcher.maxBodies)
+	require.LessOrEqual(t, fetcher.maxBodies, 2)
 }

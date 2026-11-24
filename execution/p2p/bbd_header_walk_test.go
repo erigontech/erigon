@@ -220,7 +220,7 @@ func TestBackwardBlockDownloader_HeaderWalkKeepsSeveralRequestsInFlight(t *testi
 	fetcher := &concurrencyHeaderFetcher{
 		chainServingBbdFetcher: chainServingBbdFetcher{headers: headers},
 		waitForOverlap: func(end uint64, inFlight int64) {
-			if end == 0 || end > uint64(len(headers))-3*defaultBbdRequestConfig.blocksBatchSize {
+			if end == 0 || end > uint64(len(headers))-3*defaultBbdRequestConfig.BlocksBatchSize {
 				return
 			}
 			if inFlight >= 4 {

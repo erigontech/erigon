@@ -19,6 +19,7 @@ package p2pcfg
 import "time"
 
 type BlockDownload struct {
+	BlocksBatchSize              uint64
 	MaxParallelBodyDownloads     int
 	MaxParallelHeaderDownloads   int
 	InitialHeaderFetchTimeout    time.Duration
@@ -32,6 +33,7 @@ type BlockDownload struct {
 }
 
 var DefaultBlockDownload = BlockDownload{
+	BlocksBatchSize:              500,
 	MaxParallelBodyDownloads:     10,
 	MaxParallelHeaderDownloads:   10,
 	InitialHeaderFetchTimeout:    time.Second, // note we want initial header fetch to be quick, so we terminate quickly

@@ -192,7 +192,7 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 }
 
 func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req BackwardDownloadRequest) error {
-	blocksBatchSize := min(500, uint64(e.syncCfg.LoopBlockLimit))
+	blocksBatchSize := min(e.syncCfg.BlockDownload.BlocksBatchSize, uint64(e.syncCfg.LoopBlockLimit))
 	opts := []p2p.BbdOption{p2p.WithBlocksBatchSize(blocksBatchSize)}
 	if req.Trigger == NewPayloadTrigger {
 		opts = append(opts, p2p.WithChainLengthLimit(e.syncCfg.MaxReorgDepth))

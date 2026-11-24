@@ -142,7 +142,7 @@ func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(
 	}
 
 	// 3. Download the header chain backwards in an etl collector until we connect it to a known local header.
-	//    Note we fetch headers in batches of min(config.blocksBatchSize,1024) from 1 peer and send every following
+	//    Note we fetch headers in batches of min(config.BlocksBatchSize,1024) from 1 peer and send every following
 	//    request to the next available peer (in rotating fashion) to distribute the requests across all peers.
 	bbd.logger.Info(
 		"[backward-block-downloader] downloading header chain backward from initial header",
@@ -157,7 +157,7 @@ func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(
 		return err
 	}
 
-	// 4. Start forward downloading the bodies in batches of config.blocksBatchSize from the next in-turn peer.
+	// 4. Start forward downloading the bodies in batches of config.BlocksBatchSize from the next in-turn peer.
 	//    Upon every complete batch we construct the blocks and feed them to the result feed.
 	bbd.logger.Info(
 		"[backward-block-downloader] starting forward downloading of blocks",
@@ -286,7 +286,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 		nextRangeTop = initialNum - 1
 	}
 	lastHeader := initialHeader
-	maxHeadersBatchLen := min(config.blocksBatchSize, eth.MaxHeadersServe)
+	maxHeadersBatchLen := min(config.BlocksBatchSize, eth.MaxHeadersServe)
 	var connectionPoint *types.Header
 	// the initial header may be the connection point
 	h, err := headerReader.HeaderByHash(ctx, initialHeader.Hash())
@@ -467,7 +467,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocks(
 ) error {
 	logProgressTicker := time.NewTicker(30 * time.Second)
 	defer logProgressTicker.Stop()
-	headers := make([]*types.Header, 0, config.blocksBatchSize)
+	headers := make([]*types.Header, 0, config.BlocksBatchSize)
 	headerCollectorLoadFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		var header types.Header
 		err := rlp.DecodeBytes(v, &header)
@@ -475,7 +475,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocks(
 			return err
 		}
 		headers = append(headers, &header)
-		if uint64(len(headers)) < config.blocksBatchSize {
+		if uint64(len(headers)) < config.BlocksBatchSize {
 			return nil // keep accumulating headers
 		}
 		// we've accumulated enough headers in the batch - time to fetch them from peers and send to the result feed

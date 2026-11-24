@@ -33,7 +33,7 @@ func WithPeerId(peerId *PeerId) BbdOption {
 
 func WithBlocksBatchSize(blocksBatchSize uint64) BbdOption {
 	return func(config bbdRequestConfig) bbdRequestConfig {
-		config.blocksBatchSize = blocksBatchSize
+		config.BlocksBatchSize = blocksBatchSize
 		return config
 	}
 }
@@ -64,7 +64,6 @@ func applyBbdOptions(blockDownload p2pcfg.BlockDownload, opts ...BbdOption) bbdR
 type bbdRequestConfig struct {
 	p2pcfg.BlockDownload
 	peerId                 *PeerId
-	blocksBatchSize        uint64
 	chainLengthLimit       uint64
 	chainLengthCurrentHead *uint64
 }
@@ -72,6 +71,5 @@ type bbdRequestConfig struct {
 var defaultBbdRequestConfig = bbdRequestConfig{
 	BlockDownload:    p2pcfg.DefaultBlockDownload,
 	peerId:           nil,
-	blocksBatchSize:  500,
 	chainLengthLimit: math.MaxUint64,
 }
