@@ -158,9 +158,24 @@ func (e *ExecModule) carryParentFromGeneration(tx kv.RwTx, gen *membatchwithdb.M
 	if err != nil {
 		return fmt.Errorf("read parent body record: %w", err)
 	}
-	if bfs != nil {
-		if err := rawdb.WriteBodyForStorage(tx, parentHash, parentNumber, bfs); err != nil {
-			return fmt.Errorf("carry parent body record: %w", err)
+	if bfs == nil {
+		return nil
+	}
+	if err := rawdb.WriteBodyForStorage(tx, parentHash, parentNumber, bfs); err != nil {
+		return fmt.Errorf("carry parent body record: %w", err)
+	}
+	// A body reader returns whatever rows follow the base, so a record carried without its rows reads another block's.
+	for i := 0; i < int(bfs.TxCount)-2; i++ {
+		id := binary.BigEndian.AppendUint64(nil, bfs.BaseTxnID.At(i))
+		v, err := gen.GetOne(kv.EthTx, id)
+		if err != nil {
+			return fmt.Errorf("read parent txn %d: %w", i, err)
+		}
+		if v == nil {
+			return fmt.Errorf("parent txn %d at id %d not in its generation", i, bfs.BaseTxnID.At(i))
+		}
+		if err := tx.Put(kv.EthTx, id, common.Copy(v)); err != nil {
+			return fmt.Errorf("carry parent txn %d: %w", i, err)
 		}
 	}
 	return nil
