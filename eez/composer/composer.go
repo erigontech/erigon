@@ -25,6 +25,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -546,18 +548,12 @@ const maxAttempts = 3
 // block is replaced by an empty one, the triggers that landed on L1 are let
 // go, the rest go back to the front of the pool.
 func (c *Composer) recoverHeld(ctx context.Context, p Posted[*Held]) {
-	landed := map[common.Hash]bool{}
-	rctx, cancel := context.WithTimeout(ctx, c.cfg.L1Read)
-	defer cancel()
-	for _, tx := range p.Txs {
-		r, err := c.observer.Node.Receipt(rctx, tx.Hash)
-		if err != nil {
-			c.ledger.ReinsertFailed(p)
-			return
-		}
-		landed[tx.Hash] = r != nil
+	landed, err := c.landed(ctx, p.Txs)
+	if err != nil {
+		c.ledger.ReinsertFailed(p)
+		return
 	}
-	_, err := c.substitute(ctx, p.Terminal)
+	_, err = c.substitute(ctx, p.Terminal)
 	switch {
 	case errors.Is(err, follower.ErrBelowSafe):
 		// L1 settled the height after all: once derivation passes it, the
@@ -723,6 +719,35 @@ func (c *Composer) audit(p Posted[*Held]) {
 	}
 }
 
+// receiptReads bounds the receipt reads a recovery runs at once.
+const receiptReads = 16
+
+// landed reports which of txs have an L1 receipt, read receiptReads at a
+// time, all within one L1Read: the sequencer waits on L1 for one L1Read at
+// most, and a node answering each read in time is not held to all of them.
+func (c *Composer) landed(ctx context.Context, txs []*Held) (map[common.Hash]bool, error) {
+	rctx, cancel := context.WithTimeout(ctx, c.cfg.L1Read)
+	defer cancel()
+	g, gctx := errgroup.WithContext(rctx)
+	g.SetLimit(receiptReads)
+	has := make([]bool, len(txs))
+	for i, tx := range txs {
+		g.Go(func() error {
+			r, err := c.observer.Node.Receipt(gctx, tx.Hash)
+			has[i] = r != nil
+			return err
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	out := make(map[common.Hash]bool, len(txs))
+	for i, tx := range txs {
+		out[tx.Hash] = has[i]
+	}
+	return out, nil
+}
+
 // partialCulprit returns the transaction where L1 stopped a partial batch of
 // txs, given those spent: its first one when unspent, as one behind a spent
 // trigger may only be stuck behind it. Nil names none.
@@ -738,15 +763,9 @@ func partialCulprit(txs []*Held, spent map[common.Hash]bool) *Held {
 // rest return to the pool, the one where L1 stopped charged. False leaves p
 // for the next call, a read having failed.
 func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
-	rctx, cancel := context.WithTimeout(ctx, c.cfg.L1Read)
-	defer cancel()
-	spent := map[common.Hash]bool{}
-	for _, tx := range p.Txs {
-		r, err := c.observer.Node.Receipt(rctx, tx.Hash)
-		if err != nil {
-			return false
-		}
-		spent[tx.Hash] = r != nil
+	spent, err := c.landed(ctx, p.Txs)
+	if err != nil {
+		return false
 	}
 	var ran, rest []*Held
 	for _, tx := range p.Txs {

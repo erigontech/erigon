@@ -1276,6 +1276,64 @@ func (l *triggers) HasTransaction(_ context.Context, h common.Hash) (bool, error
 	return l.landed[h], l.failed
 }
 
+// slowTriggers is triggers answering each receipt read after delay.
+type slowTriggers struct {
+	triggers
+	delay time.Duration
+}
+
+func (l *slowTriggers) Receipt(ctx context.Context, h common.Hash) (*l1.Receipt, error) {
+	select {
+	case <-time.After(l.delay):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return l.triggers.Receipt(ctx, h)
+}
+
+// TestComposerReadsReceiptsWithinL1Read: recovery reads its triggers'
+// receipts together within one L1Read, so a node answering each in time
+// neither holds a batch back nor holds the sequencer for one read after
+// another.
+func TestComposerReadsReceiptsWithinL1Read(t *testing.T) {
+	const n = 12
+	setup := func(t *testing.T) (*harness, *HeldPool) {
+		node := &slowTriggers{triggers: triggers{landed: map[common.Hash]bool{}}, delay: 50 * time.Millisecond}
+		h := newHarness(t, newTestChain(t, 8), 8, node)
+		h.c.cfg.L1Read = 100 * time.Millisecond
+		pool := NewHeldPool()
+		h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+		for i := byte(1); i <= n; i++ {
+			require.NoError(t, pool.Push(held(addr(i), 0, Inbound, i), 0))
+		}
+		h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: pool.PopN(n)})
+		return h, pool
+	}
+	recover := func(t *testing.T, h *harness) {
+		t.Helper()
+		start := time.Now()
+		h.c.RecoverFailed(t.Context())
+		require.Less(t, time.Since(start), 300*time.Millisecond, "not one read after another")
+	}
+	t.Run("a partial batch", func(t *testing.T) {
+		h, pool := setup(t)
+		h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
+		h.cursor.Store(8)
+		recover(t, h)
+		r, _ := h.resolution(8)
+		require.Equal(t, Settled, r)
+		require.Equal(t, n, pool.Len())
+	})
+	t.Run("a failed batch", func(t *testing.T) {
+		h, pool := setup(t)
+		h.c.ledger.MarkFailed(8, common.Hash{0xf}, true)
+		recover(t, h)
+		_, ok := h.resolution(8)
+		require.False(t, ok)
+		require.Equal(t, n, pool.Len())
+	})
+}
+
 // TestComposerChargeEvictsTheChain: a transaction out of attempts takes
 // the rest of its chain in the batch with it.
 func TestComposerChargeEvictsTheChain(t *testing.T) {
