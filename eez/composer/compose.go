@@ -121,8 +121,10 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 				if err != nil {
 					return err
 				}
-				// The posting carries the window's blocks before any effect.
-				gas, err := windowBudget(c.cfg.Batcher, c.cfg.MaxGas, append(window, types.NewBlockWithHeader(header, nil)))
+				// The posting carries the window's blocks before any effect; the
+				// bundle's block may have 1/1024 less gas than the anchor.
+				block := anchor.GasLimit - anchor.GasLimit/1024
+				gas, err := windowBudget(c.cfg.Batcher, c.cfg.MaxGas, block, append(window, types.NewBlockWithHeader(header, nil)))
 				if err != nil {
 					return err
 				}
@@ -189,10 +191,11 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 						if cost, err = inboundCost(ds.Delivered); err != nil {
 							return err
 						}
+						cost.trigger = tx.GetGasLimit()
 						switch {
 						case gas.fits(cost):
 							return nil
-						case !newBudget(c.cfg.MaxGas).fits(cost):
+						case !newBudget(c.cfg.MaxGas, block).fits(cost):
 							return Poison(fmt.Errorf("alone: %w", errOverBudget))
 						}
 						// A later window may leave it room.

@@ -97,17 +97,22 @@ func PostBatchGasCeiling(requested uint64) (uint64, bool) {
 
 // l1Cost is what a held transaction adds to its batch's posting: entries,
 // calldata at the standard rate and in EIP-7623 tokens, and the gas of the
-// L1 calls the posting makes for it.
-type l1Cost struct{ entries, calldata, tokens, target uint64 }
+// L1 calls the posting makes for it; and to its bundle, trigger, its gas
+// limit as a trigger.
+type l1Cost struct{ entries, calldata, tokens, target, trigger uint64 }
 
 // budget projects the gas of a batch's posting as held transactions join
 // it, from the anchor entry every batch leads with, at the standard rate
 // and on the EIP-7623 floor of the calldata it prices, against a cap
-// leaving the drain margin under the ceiling.
-type budget struct{ cap, projected, tokens uint64 }
+// leaving the drain margin under the ceiling. Its bundle takes the L1
+// block's gas, block, zero for any: the posting's, margin included, and
+// triggers, the gas limits of its triggers.
+type budget struct{ cap, projected, tokens, block, triggers uint64 }
 
-func newBudget(maxGas uint64) *budget {
-	b := &budget{projected: txGas + postBatchBaseGas + postBatchEntryGas}
+// newBudget returns the budget of a batch of the anchor entry alone, posted
+// in a bundle of an L1 block of blockGas.
+func newBudget(maxGas, blockGas uint64) *budget {
+	b := &budget{projected: txGas + postBatchBaseGas + postBatchEntryGas, block: blockGas}
 	if maxGas > drainMargin {
 		b.cap = maxGas - drainMargin
 	}
@@ -116,12 +121,12 @@ func newBudget(maxGas uint64) *budget {
 
 // windowBudget returns the budget of a batch settling blocks, the chain from
 // the cursor's child to an empty Sync block, from its anchor-only batch.
-func windowBudget(batcher *Batcher, maxGas uint64, blocks []*types.Block) (*budget, error) {
+func windowBudget(batcher *Batcher, maxGas, blockGas uint64, blocks []*types.Block) (*budget, error) {
 	batch, err := batcher.AnchorBatch(blocks[0].ParentHash(), blocks)
 	if err != nil {
 		return nil, err
 	}
-	b := newBudget(maxGas)
+	b := newBudget(maxGas, blockGas)
 	if b.projected, b.tokens, err = postBatchGas(batch); err != nil {
 		return nil, err
 	}
@@ -135,14 +140,16 @@ func (b *budget) after(c l1Cost) uint64 {
 // floor is the EIP-7623 floor of the calldata priced so far.
 func (b *budget) floor() uint64 { return txGas + 10*b.tokens }
 
-// fits reports whether c keeps the projection and the floor within the cap.
+// fits reports whether c keeps the projection and the floor within the cap,
+// and the bundle within the block.
 func (b *budget) fits(c l1Cost) bool {
-	return b.after(c) <= b.cap && txGas+10*(b.tokens+c.tokens) <= b.cap
+	posting := max(b.after(c), txGas+10*(b.tokens+c.tokens))
+	return posting <= b.cap && (b.block == 0 || posting+drainMargin+b.triggers+c.trigger <= b.block)
 }
 
 // take charges c.
 func (b *budget) take(c l1Cost) {
-	b.projected, b.tokens = b.after(c), b.tokens+c.tokens
+	b.projected, b.tokens, b.triggers = b.after(c), b.tokens+c.tokens, b.triggers+c.trigger
 }
 
 // inboundCost is what deliveries add: each a deferred entry in the batch

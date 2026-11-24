@@ -157,7 +157,7 @@ func fullInterval(t *testing.T, key *ecdsa.PrivateKey, k uint64, budget int) []*
 // 551,000, and takes a transaction while it stays within the ceiling less
 // the drain margin; the lowest ceiling holds one more entry of no calldata.
 func TestBudget(t *testing.T) {
-	b := newBudget(MinPostBatchGas)
+	b := newBudget(MinPostBatchGas, 0)
 	require.Equal(t, uint64(551_000), b.projected)
 	require.False(t, b.fits(l1Cost{entries: 1, calldata: 1}))
 	require.False(t, b.fits(l1Cost{entries: 1, target: 1}))
@@ -166,13 +166,27 @@ func TestBudget(t *testing.T) {
 	b.take(l1Cost{entries: 1})
 	require.Equal(t, uint64(921_000), b.projected)
 	require.False(t, b.fits(l1Cost{calldata: 1}))
-	require.False(t, newBudget(drainMargin).fits(l1Cost{}), "a ceiling within the margin takes nothing")
+	require.False(t, newBudget(drainMargin, 0).fits(l1Cost{}), "a ceiling within the margin takes nothing")
+}
+
+// TestBudgetBlock: the bundle fits the L1 block's gas: the posting's
+// projection with the drain margin and the gas limits of its triggers.
+func TestBudgetBlock(t *testing.T) {
+	const block = 551_000 + drainMargin + 3_000_000
+	b := newBudget(MaxPostBatchGas, block)
+	require.True(t, b.fits(l1Cost{trigger: 3_000_000}))
+	require.False(t, b.fits(l1Cost{trigger: 3_000_001}))
+	require.False(t, b.fits(l1Cost{entries: 1, trigger: 3_000_000}), "the posting grows with its entries")
+	b.take(l1Cost{trigger: 2_000_000})
+	require.True(t, b.fits(l1Cost{trigger: 1_000_000}))
+	require.False(t, b.fits(l1Cost{trigger: 1_000_001}))
+	require.True(t, newBudget(MaxPostBatchGas, 0).fits(l1Cost{trigger: 1 << 40}), "no block, no bound")
 }
 
 // TestBudgetFloor: calldata heavy enough for the EIP-7623 floor to exceed
 // the standard projection is held to the floor.
 func TestBudgetFloor(t *testing.T) {
-	b := newBudget(MaxPostBatchGas)
+	b := newBudget(MaxPostBatchGas, 0)
 	// 410,000 non-zero bytes: 6,560,000 at the standard rate, 16,421,000
 	// on the floor, over the cap of 16,177,216.
 	data := l1Cost{entries: 1, calldata: 16 * 410_000, tokens: 4 * 410_000}

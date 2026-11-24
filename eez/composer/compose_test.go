@@ -48,17 +48,23 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// memL1 is an L1 whose every block has state m.
+// memL1 is an L1 whose every block has state m, and gas limit gasLimit,
+// 30,000,000 when zero.
 type memL1 struct {
-	m      *memState
-	failed error
+	m        *memState
+	failed   error
+	gasLimit uint64
 }
 
 func (l *memL1) ViewState(_ context.Context, hash common.Hash, read func(*types.Header, state.StateReader) error) error {
 	if l.failed != nil {
 		return l.failed
 	}
-	h := &types.Header{Number: *uint256.NewInt(100), Time: 1_800_000_000, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Extra: []byte{}}
+	gas := l.gasLimit
+	if gas == 0 {
+		gas = 30_000_000
+	}
+	h := &types.Header{Number: *uint256.NewInt(100), Time: 1_800_000_000, GasLimit: gas, BaseFee: uint256.NewInt(1), Extra: []byte{}}
 	return read(h, l.m)
 }
 
@@ -119,7 +125,7 @@ func (f *crossFixture) compose(t *testing.T) *effects {
 // anchor-only batch over blocks, the cursor's child to an empty Sync block.
 func (f *crossFixture) windowGas(t *testing.T, blocks ...*types.Block) uint64 {
 	t.Helper()
-	b, err := windowBudget(f.c.cfg.Batcher, MaxPostBatchGas, append(blocks, types.NewBlockWithHeader(f.w.sync.Header(), nil)))
+	b, err := windowBudget(f.c.cfg.Batcher, MaxPostBatchGas, 0, append(blocks, types.NewBlockWithHeader(f.w.sync.Header(), nil)))
 	require.NoError(t, err)
 	return b.projected
 }
@@ -297,6 +303,32 @@ func TestComposeBoundsThePostingGas(t *testing.T) {
 		f.pool.mu.Lock()
 		defer f.pool.mu.Unlock()
 		require.Empty(t, f.pool.inFlight)
+	})
+}
+
+// TestComposeFitsTheL1Block: the bundle fits the L1 block it aims at, whose
+// gas may be the anchor's less 1/1024: the posting's projection with the
+// drain margin and its triggers' gas limits, 1,000,000 each. The rest waits,
+// and a trigger a bundle of its own cannot fit is evicted.
+func TestComposeFitsTheL1Block(t *testing.T) {
+	// limit has the bundle's block take about want, within 2.
+	limit := func(f *crossFixture, want uint64) { f.l1.gasLimit = want * 1024 / 1023 }
+	t.Run("the rest waits", func(t *testing.T) {
+		f := newCrossFixture(t)
+		first := f.hold(t, 0, f.call.Source, f.call.Data)
+		second := f.hold(t, 1, f.call.Source, f.call.Data)
+		limit(f, f.windowGas(t)+f.deliveryCost(t)+drainMargin+1_500_000)
+		fx := f.compose(t)
+		require.NotNil(t, fx)
+		require.Equal(t, []*Held{first}, fx.held)
+		require.Equal(t, []*Held{second}, f.pool.PopN(math.MaxInt))
+	})
+	t.Run("one a bundle of its own cannot fit", func(t *testing.T) {
+		f := newCrossFixture(t)
+		f.hold(t, 0, f.call.Source, f.call.Data)
+		limit(f, 551_000+f.deliveryCost(t)+drainMargin+1_000_000-3)
+		require.Nil(t, f.compose(t))
+		require.Zero(t, f.pool.Len())
 	})
 }
 
