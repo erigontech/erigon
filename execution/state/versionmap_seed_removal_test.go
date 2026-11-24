@@ -704,9 +704,10 @@ func createAndDestroyInTx0(t *testing.T, reader StateReader, vm *VersionMap, x a
 	}
 	_, err := ibs.Selfdestruct(x, true)
 	require.NoError(t, err)
-	require.NoError(t, ibs.MakeWriteSet(&chain.Rules{IsAmsterdam: true}, NewNoopWriter()))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), false)
-	vm.MarkWritesValidated(ibs.VersionedWrites(), nil)
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsAmsterdam: true})
+	require.NoError(t, err)
+	vm.FlushVersionedWrites(writes, false)
+	vm.MarkWritesValidated(writes, nil)
 }
 
 // As above, but tx 1 credits x in the window: the credit creates a fresh account instead of
@@ -895,8 +896,9 @@ func TestDropWriteAtARevivalKeepsTheRevivedAccount(t *testing.T) {
 		require.NoError(t, ibs.SetNonce(x, 1, tracing.NonceChangeUnspecified))
 		require.NoError(t, ibs.SetCode(x, []byte{0x00}, tracing.CodeChangeUnspecified))
 		require.NoError(t, ibs.AddBalance(x, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
-		require.NoError(t, ibs.MakeWriteSet(&chain.Rules{IsAmsterdam: true}, NewNoopWriter()))
-		return ibs.VersionedWrites()
+		writes, err := ibs.FinalizedWrites(&chain.Rules{IsAmsterdam: true})
+		require.NoError(t, err)
+		return writes
 	}
 	for _, tc := range []struct {
 		name string
@@ -1045,8 +1047,8 @@ func TestExistenceReadIsStaleOnceADropPutsTheRemovalBack(t *testing.T) {
 	require.NoError(t, creator.CreateAccount(x, true))
 	require.NoError(t, creator.SetNonce(x, 1, tracing.NonceChangeUnspecified))
 	require.NoError(t, creator.SetBalance(x, uint256.Int{}, tracing.BalanceChangeUnspecified))
-	require.NoError(t, creator.MakeWriteSet(&chain.Rules{IsAmsterdam: true}, NewNoopWriter()))
-	run1 := creator.VersionedWrites()
+	run1, err := creator.FinalizedWrites(&chain.Rules{IsAmsterdam: true})
+	require.NoError(t, err)
 	rerun(run0, run1, Version{TxIndex: 3, Incarnation: 1})
 	vm.MarkWritesValidated(run1, nil)
 	existed, reads := exists()

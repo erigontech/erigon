@@ -815,7 +815,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 	if _, err := protocol.ApplyTransaction(
 		b.m.ChainConfig, protocol.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
 		accounts.InternAddress(b.pendingHeader.Coinbase), b.gasPool,
-		b.pendingState, state.NewNoopWriter(),
+		b.pendingState,
 		b.pendingHeader, txn,
 		b.pendingGasUsed,
 		vm.Config{},
@@ -877,12 +877,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 		return errors.New("could not adjust time on non-empty block")
 	}
 
-	chain, err := b.m.GenerateChainFrom(b.prependBlock, 1, func(number int, block *blockgen.BlockGen) {
-		for _, txn := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
-		}
-		block.OffsetTime(int64(adjustment.Seconds()))
-	})
+	chain, err := b.m.GenerateChainWithTimeOffsets(b.prependBlock, []int64{int64(adjustment / time.Second)}, nil)
 	if err != nil {
 		return err
 	}
