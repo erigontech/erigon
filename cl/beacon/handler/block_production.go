@@ -890,16 +890,19 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			fmt.Errorf("invalid slot: %w", err),
 		)
 	}
+	if gloasOptions == nil && a.beaconChainCfg.GetCurrentStateVersion(targetSlot/a.beaconChainCfg.SlotsPerEpoch) >= clparams.GloasVersion {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("block production from Gloas requires POST /eth/v4/validator/blocks/{slot}"))
+	}
 	if err := checkBlockProductionSlot(targetSlot, a.ethClock.GetCurrentSlot()); err != nil {
 		return nil, err
 	}
 
 	builderBoostFactor := uint64(100)
-	if options := gloasBlockOptionsFromContext(ctx); options != nil {
-		builderBoostFactor = options.builderConfig.BuilderBoostFactor
+	if gloasOptions != nil {
+		builderBoostFactor = gloasOptions.builderConfig.BuilderBoostFactor
 	}
 	builderBoostFactorStr := r.URL.Query().Get("builder_boost_factor")
-	if builderBoostFactorStr != "" && gloasBlockOptionsFromContext(ctx) == nil {
+	if builderBoostFactorStr != "" && gloasOptions == nil {
 		builderBoostFactor, err = strconv.ParseUint(builderBoostFactorStr, 10, 64)
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(
@@ -1036,14 +1039,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			if err != nil {
 				log.Warn("Failed to compute beacon block root for self-build envelope", "err", err)
 			} else {
-				options := gloasBlockOptionsFromContext(ctx)
-				var cached *selfBuildPayload
-				if options != nil {
-					cached = options.selfBuildPayload
-				} else {
-					cached, _ = a.selfBuildPayloads.Get(bid.Message.BlockHash)
-				}
-				if cached != nil {
+				if cached := gloasOptions.selfBuildPayload; cached != nil {
 					cachedReqs := cached.ExecutionRequests
 					if cachedReqs == nil {
 						cachedReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
@@ -1056,10 +1052,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 						ParentBeaconBlockRoot: denebBlock.Block.ParentRoot,
 					}
 					a.selfBuildEnvelopes.Add(selfBuildEnvelopeKey{Slot: targetSlot, BeaconBlockRoot: beaconBlockRoot}, envelope)
-					// SSZ encoding only serializes Data, not Extra — only include
-					// the envelope in JSON responses to keep the header truthful.
-					switch {
-					case options != nil && options.includePayload:
+					if gloasOptions.includePayload {
 						contents := cltypes.NewGloasBlockContents(a.beaconChainCfg, targetSlot)
 						contents.Block = denebBlock.Block
 						contents.ExecutionPayloadEnvelope = envelope
@@ -1070,9 +1063,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 							With("execution_payload_blinded", block.IsBlinded()).
 							With("execution_payload_value", block.GetExecutionValue().String()).
 							With("consensus_block_value", consensusValue.String())
-						executionPayloadIncluded = true
-					case options == nil && !beaconhttp.WillEncodeSSZ(r.Header.Get("Accept")):
-						resp = resp.With("execution_payload_envelope", envelope)
 						executionPayloadIncluded = true
 					}
 					log.Info("BlockProduction: included unsigned execution payload envelope in response",
@@ -2252,8 +2242,18 @@ AttLoop:
 			}
 			rawIdxs = append(rawIdxs, currentValidatorIndex)
 		}
+		encoded, err := slashing.EncodeSSZ(nil)
+		if err != nil {
+			continue
+		}
+		normalized := new(cltypes.AttesterSlashing)
+		if err := normalized.DecodeSSZWithConfig(encoded, int(targetVersion), a.beaconChainCfg); err != nil {
+			continue
+		}
+		// Nested attestation decoders reset the limits to mainnet defaults.
+		normalized.SetVersionWithConfig(targetVersion, a.beaconChainCfg)
 		slashedIndicies = append(slashedIndicies, rawIdxs...)
-		attesterSlashings.Append(slashing)
+		attesterSlashings.Append(normalized)
 		if attesterSlashings.Len() >= int(maxAttesterSlashings) {
 			break
 		}
@@ -2659,12 +2659,9 @@ func (a *ApiHandler) publishBlindedBlocks(r *http.Request, apiVersion int) (*bea
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, cltypes.ErrGloasCannotBlind)
 	}
 	defer r.Body.Close()
-	contentType, err := requestContentType(r)
+	contentType, err := publishedBlockContentType(r)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err)
-	}
-	if contentType != "application/json" && contentType != "application/octet-stream" {
-		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, fmt.Errorf("unsupported content type: %s", contentType))
+		return nil, err
 	}
 	isJSON := contentType == "application/json"
 
@@ -2672,16 +2669,11 @@ func (a *ApiHandler) publishBlindedBlocks(r *http.Request, apiVersion int) (*bea
 
 	signedBlindedBlock := cltypes.NewSignedBlindedBeaconBlock(a.beaconChainCfg, version)
 	signedBlindedBlock.Block.SetVersion(version)
-	var b []byte
-	if isJSON {
-		limit, limitErr := a.publishedBlockJSONLimit(version, true)
-		if limitErr != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, limitErr)
-		}
-		b, err = readBoundedBody(r.Body, limit)
-	} else {
-		b, err = io.ReadAll(r.Body)
+	limit, err := a.publishedBlockBodyLimit(version, true)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
+	b, err := readBoundedBody(r, limit)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
@@ -2845,44 +2837,39 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 	if block == nil {
 		return nil, errors.New("failed to create block")
 	}
-	// check content type
-	switch r.Header.Get("Content-Type") {
-	case "application/json":
-		limit, err := a.publishedBlockJSONLimit(version, false)
-		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
-		}
-		body, err := readBoundedBody(r.Body, limit)
-		if err != nil {
-			return nil, err
-		}
-		if err := json.NewDecoder(bytes.NewReader(body)).Decode(block); err != nil {
-			return nil, err
-		}
-		return block, nil
-	case "application/octet-stream":
-		octect, err := io.ReadAll(r.Body)
-		if err != nil {
-			return nil, err
-		}
-		if err := block.DecodeSSZ(octect, int(version)); err != nil {
-			return nil, err
-		}
-		return block, nil
+	contentType, err := publishedBlockContentType(r)
+	if err != nil {
+		return nil, err
 	}
-	return nil, errors.New("invalid content type")
+	limit, err := a.publishedBlockBodyLimit(version, false)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+	}
+	body, err := readBoundedBody(r, limit)
+	if err != nil {
+		return nil, err
+	}
+	if contentType == "application/json" {
+		err = json.NewDecoder(bytes.NewReader(body)).Decode(block)
+	} else {
+		err = block.DecodeSSZ(body, int(version))
+	}
+	if err != nil {
+		return nil, err
+	}
+	return block, nil
 }
 
-// publishedBlockJSONLimit budgets four JSON bytes per SSZ byte of a gossip block.
+// publishedBlockBodyLimit uses the larger JSON budget for JSON and SSZ bodies.
 // Hex bytes need twice the space and quoted uint64s less than three times;
 // the rest covers keys and formatting. Blob contents have a separate budget.
-func (a *ApiHandler) publishedBlockJSONLimit(version clparams.StateVersion, blinded bool) (int64, error) {
+func (a *ApiHandler) publishedBlockBodyLimit(version clparams.StateVersion, blinded bool) (int64, error) {
 	blockSize := clparams.MaxChunkSize
 	if a.netConfig != nil {
 		blockSize = max(blockSize, a.netConfig.GossipMaxSize, a.netConfig.GossipMaxSizeBellatrix)
 	}
 	if blockSize > (math.MaxInt64-1)/4 {
-		return 0, errors.New("block JSON limit exceeds supported range")
+		return 0, errors.New("block body limit exceeds supported range")
 	}
 	limit := int64(blockSize * 4)
 	if blinded || version < clparams.DenebVersion {
@@ -2899,11 +2886,11 @@ func (a *ApiHandler) publishedBlockJSONLimit(version clparams.StateVersion, blin
 	const blobJSONSize = 2*cltypes.BYTES_PER_BLOB + 8
 	const proofJSONSize = 2*cltypes.BYTES_KZG_PROOF + 8
 	if proofsPerBlob > (math.MaxInt64-blobJSONSize)/proofJSONSize {
-		return 0, errors.New("blob proof JSON limit exceeds supported range")
+		return 0, errors.New("blob proof body limit exceeds supported range")
 	}
 	bytesPerBlob := int64(blobJSONSize + proofsPerBlob*proofJSONSize)
 	if blobs > uint64((math.MaxInt64-1-limit)/bytesPerBlob) {
-		return 0, errors.New("block contents JSON limit exceeds supported range")
+		return 0, errors.New("block contents body limit exceeds supported range")
 	}
 	return limit + int64(blobs)*bytesPerBlob, nil
 }
@@ -2914,11 +2901,15 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 	version clparams.StateVersion,
 	r *http.Request,
 ) (*cltypes.DenebSignedBeaconBlock, error) {
+	contentType, err := publishedBlockContentType(r)
+	if err != nil {
+		return nil, err
+	}
 	signedBlock := cltypes.NewSignedBeaconBlock(a.beaconChainCfg, version)
 
-	switch r.Header.Get("Content-Type") {
+	switch contentType {
 	case "application/json":
-		body, err := readBoundedBody(r.Body, maxGloasPublishedBlockSize)
+		body, err := readBoundedBody(r, maxGloasPublishedBlockSize)
 		if err != nil {
 			return nil, err
 		}
@@ -2934,8 +2925,8 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 			SignedBlock: signedBlock,
 		}, nil
 
-	case "application/octet-stream":
-		octect, err := readBoundedBody(r.Body, maxGloasPublishedBlockSize)
+	default:
+		octect, err := readBoundedBody(r, maxGloasPublishedBlockSize)
 		if err != nil {
 			return nil, err
 		}
@@ -2946,11 +2937,24 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 			SignedBlock: signedBlock,
 		}, nil
 	}
-	return nil, errors.New("invalid content type")
 }
 
-func readBoundedBody(body io.Reader, limit int64) ([]byte, error) {
-	b, err := io.ReadAll(io.LimitReader(body, limit+1))
+func publishedBlockContentType(r *http.Request) (string, error) {
+	contentType, err := requestContentType(r)
+	if err != nil {
+		return "", beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err)
+	}
+	if contentType != "application/json" && contentType != "application/octet-stream" {
+		return "", beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, fmt.Errorf("unsupported content type: %s", contentType))
+	}
+	return contentType, nil
+}
+
+func readBoundedBody(r *http.Request, limit int64) ([]byte, error) {
+	if r.ContentLength > limit {
+		return nil, fmt.Errorf("request body exceeds %d bytes", limit)
+	}
+	b, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
 		return nil, err
 	}

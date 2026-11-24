@@ -504,7 +504,7 @@ func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot 
 	if !headEventEmitted || !gloasHeadStatePublished(cfg, headSlot, headRoot) {
 		// Retrieve the head state.
 		var err error
-		if headState, err = cfg.forkChoice.GetOwnedStateAtBlockRoot(headRoot); err != nil {
+		if headState, err = cfg.forkChoice.GetOwnedStateAtBlockRoot(headRoot, cfg.syncedData.TakeSpareHeadState()); err != nil {
 			return fmt.Errorf("failed to get state at block root: %w", err)
 		}
 		// fail-safe check§
@@ -625,12 +625,11 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		return fmt.Errorf("failed to post forkchoice operations: %w", err)
 	}
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
+	alloc, sys := dbg.MemUsage()
 	logger.Debug("Imported chain segment",
 		"hash", headRoot, "slot", headSlot,
-		"alloc", common.ByteCount(m.Alloc),
-		"sys", common.ByteCount(m.Sys))
+		"alloc", common.ByteCount(alloc),
+		"sys", common.ByteCount(sys))
 
 	notifyErr := waitNotified()
 	if err := tx.Commit(); err != nil {

@@ -646,9 +646,8 @@ func (api *BaseAPI) buildAccessedState(
 	})
 
 	// Create the in-block state with the recording state as reader
-	ibs := state.New(recordingState)
+	ibs := state.NewVersionedBlock(recordingState)
 	defer ibs.Close()
-	transactions.VersionedBlockState(ibs)
 	ibs.SetTxContext(blockNum, -1)
 
 	// Get header for block context
@@ -1579,11 +1578,8 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	blockNrOrHash rpc.BlockNumberOrHash,
 ) (*witnessBlockInfo, error) {
 	// TxNums and commitment history must describe the same block view.
-	blockNum, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNum, hash, _, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
-		return nil, err
-	}
-	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return nil, err
 	}
 	if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
@@ -2269,11 +2265,10 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	})
 
 	// Create the in-block state with the witness stateless as reader
-	ibs := state.New(stateless)
+	ibs := state.NewVersionedBlock(stateless)
 	defer ibs.Close()
 	header := block.HeaderNoCopy()
 	blockNum := block.NumberU64()
-	transactions.VersionedBlockState(ibs)
 	ibs.SetTxContext(blockNum, -1)
 
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary

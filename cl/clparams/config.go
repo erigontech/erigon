@@ -1334,6 +1334,9 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	if beaconCfg.MaxCommitteesPerSlot > MaxSupportedCommitteesPerSlot {
 		return BeaconChainConfig{}, NetworkConfig{}, fmt.Errorf("MAX_COMMITTEES_PER_SLOT exceeds supported limit: %d > %d", beaconCfg.MaxCommitteesPerSlot, MaxSupportedCommitteesPerSlot)
 	}
+	if beaconCfg.MaxValidatorsPerCommittee > MaxSupportedValidatorsPerCommittee {
+		return BeaconChainConfig{}, NetworkConfig{}, fmt.Errorf("MAX_VALIDATORS_PER_COMMITTEE exceeds supported limit: %d > %d", beaconCfg.MaxValidatorsPerCommittee, uint64(MaxSupportedValidatorsPerCommittee))
+	}
 
 	// setup network config
 	if err := yaml.Unmarshal(b, &networkConfig); err != nil {

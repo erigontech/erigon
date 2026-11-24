@@ -140,7 +140,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	if b.gasUsed == nil {
 		b.gasUsed = new(protocol.GasUsed)
 	}
-	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, b.header, txn, b.gasUsed, vm.Config{})
 	protocol.SetGasUsed(b.header, b.gasUsed)
 	if err != nil {
 		panic(err)
@@ -179,7 +179,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 	if b.gasUsed == nil {
 		b.gasUsed = new(protocol.GasUsed)
 	}
-	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, b.header, txn, b.gasUsed, vm.Config{})
 	protocol.SetGasUsed(b.header, b.gasUsed)
 	// A reverted transaction (err==nil, status Failed) is still included: its nonce
 	// bump and gas payment survive the revert and must be flushed so a later tx of
@@ -459,12 +459,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader) (*types.Block, types.Receipts, error) {
 		txNumIncrement()
-
-		versionMap := state.NewVersionMap(nil)
-		// SetVersionMap forces noMaterialize: the stateObject cache would let a
-		// reused IBS serve stale account state across txs (e.g. a revived account's
-		// code hash), producing a header the executor's cache-free run disagrees with.
-		ibs.SetVersionMap(versionMap)
+		versionMap := ibs.VersionMap()
 
 		b := &BlockGen{
 			i:           i,
@@ -507,7 +502,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Set tx context for system init call (txIndex -1)
 			ibs.ResetVersionedIO()
 			ibs.SetTxContext(b.header.Number.Uint64(), -1)
-			err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, nil, logger, nil)
+			err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, logger, nil)
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
 			}
@@ -592,7 +587,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	}
 
 	for i := range n {
-		ibs := state.New(stateReader)
+		// Versioned without the stateObject cache, which would let a reused state serve stale account
+		// state across txs and give a header the executor's cache-free run disagrees with.
+		ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)
 		}

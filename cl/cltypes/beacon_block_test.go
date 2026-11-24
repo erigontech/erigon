@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -667,6 +669,88 @@ func TestBeaconBodyGloasJSONRejectsNullRequiredFields(t *testing.T) {
 			body := NewBeaconBody(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
 			require.Error(t, json.Unmarshal([]byte(input), body))
 		})
+	}
+}
+
+func TestBeaconBodyJSONRejectsNullRequiredFields(t *testing.T) {
+	phase0 := []string{"eth1_data", "proposer_slashings", "attester_slashings", "attestations", "deposits", "voluntary_exits"}
+	altair := slices.Concat(phase0, []string{"sync_aggregate"})
+	capella := slices.Concat(altair, []string{"bls_to_execution_changes"})
+	deneb := slices.Concat(capella, []string{"execution_payload", "blob_kzg_commitments"})
+	for version, fields := range map[clparams.StateVersion][]string{
+		clparams.Phase0Version:    phase0,
+		clparams.AltairVersion:    altair,
+		clparams.BellatrixVersion: slices.Concat(altair, []string{"execution_payload"}),
+		clparams.CapellaVersion:   slices.Concat(capella, []string{"execution_payload"}),
+		clparams.DenebVersion:     deneb,
+		clparams.ElectraVersion:   slices.Concat(deneb, []string{"execution_requests"}),
+		clparams.FuluVersion:      slices.Concat(deneb, []string{"execution_requests"}),
+		clparams.GloasVersion:     capella,
+	} {
+		for _, field := range fields {
+			t.Run(version.String()+"/"+field, func(t *testing.T) {
+				body := NewBeaconBody(&clparams.MainnetBeaconConfig, version)
+				err := json.Unmarshal([]byte(`{"`+field+`":null}`), body)
+				require.ErrorContains(t, err, "beacon body contains null")
+			})
+		}
+	}
+}
+
+func TestBeaconBodyJSONAcceptsOmittedFields(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.AltairVersion, clparams.BellatrixVersion, clparams.CapellaVersion, clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			body := NewBeaconBody(&clparams.MainnetBeaconConfig, version)
+			require.NoError(t, json.Unmarshal([]byte(`{}`), body))
+			_, err := body.HashSSZ()
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestBeaconBodyJSONRejectsIncompleteOperations(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.DenebVersion, clparams.FuluVersion} {
+		for _, tc := range incompleteOperationsJSON(version) {
+			t.Run(version.String()+"/"+tc.input, func(t *testing.T) {
+				body := NewBeaconBody(&clparams.MainnetBeaconConfig, version)
+				require.ErrorContains(t, json.Unmarshal([]byte(tc.input), body), tc.wantErr)
+			})
+		}
+	}
+}
+
+type incompleteOperationJSON struct {
+	input   string
+	wantErr string
+}
+
+// incompleteOperationsJSON returns body JSON whose operations omit or null a
+// field that SSZ encoding and hashing dereference.
+func incompleteOperationsJSON(version clparams.StateVersion) []incompleteOperationJSON {
+	signature := `"0x` + strings.Repeat("00", 96) + `"`
+	checkpoint := `{"epoch":"0","root":"0x` + strings.Repeat("00", 32) + `"}`
+	data := `{"slot":"1","index":"0","beacon_block_root":"0x` + strings.Repeat("00", 32) + `","source":` + checkpoint + `,"target":` + checkpoint + `}`
+	committeeBits := ""
+	if version >= clparams.ElectraVersion {
+		committeeBits = `,"committee_bits":"0x0100000000000000"`
+	}
+	const (
+		missingSyncCommitteeBits = "sync aggregate is missing sync committee bits"
+		missingExitMessage       = "signed voluntary exit is missing message"
+		missingChangeMessage     = "signed BLS to execution change is missing message"
+		incompleteAttestation    = "attestation is missing aggregation bits or data"
+	)
+	return []incompleteOperationJSON{
+		{`{"sync_aggregate":{"sync_committee_bits":null,"sync_committee_signature":` + signature + `}}`, missingSyncCommitteeBits},
+		{`{"sync_aggregate":{"sync_committee_signature":` + signature + `}}`, missingSyncCommitteeBits},
+		{`{"voluntary_exits":[{"message":null,"signature":` + signature + `}]}`, missingExitMessage},
+		{`{"voluntary_exits":[{"signature":` + signature + `}]}`, missingExitMessage},
+		{`{"bls_to_execution_changes":[{"message":null,"signature":` + signature + `}]}`, missingChangeMessage},
+		{`{"bls_to_execution_changes":[{"signature":` + signature + `}]}`, missingChangeMessage},
+		{`{"attestations":[{"aggregation_bits":null,"data":` + data + `,"signature":` + signature + committeeBits + `}]}`, incompleteAttestation},
+		{`{"attestations":[{"data":` + data + `,"signature":` + signature + committeeBits + `}]}`, incompleteAttestation},
+		{`{"attestations":[{"aggregation_bits":"0x01","data":null,"signature":` + signature + committeeBits + `}]}`, incompleteAttestation},
+		{`{"attestations":[{"aggregation_bits":"0x01","signature":` + signature + committeeBits + `}]}`, incompleteAttestation},
 	}
 }
 

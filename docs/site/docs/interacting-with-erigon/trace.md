@@ -76,12 +76,10 @@ Besides the parameters described for each method, Erigon accepts optional traili
 | `trace_call` | 4. trace settings |
 | `trace_callMany` | 3. trace settings |
 | `trace_rawTransaction` | none (a third parameter returns `-32602`) |
-| `trace_replayTransaction`, `trace_replayBlockTransactions` | 3. `gasBailOut`, 4. trace settings |
-| `trace_block`, `trace_transaction` | 2. `gasBailOut`, 3. trace settings |
-| `trace_get` | 3. `gasBailOut`, 4. trace settings |
-| `trace_filter` | 2. `gasBailOut`, 3. trace settings |
-
-`gasBailOut` is a boolean, `false` by default; see [The gasBailOut option](#the-gasbailout-option).
+| `trace_replayTransaction`, `trace_replayBlockTransactions` | 3. trace settings |
+| `trace_block`, `trace_transaction` | 2. trace settings |
+| `trace_get` | 3. trace settings |
+| `trace_filter` | 2. trace settings |
 
 The trace settings object accepts the following members. Member names are matched case-insensitively, and unknown members are ignored.
 
@@ -113,16 +111,14 @@ Omitted frames do not take a `traceAddress` index, which also determines the pat
 
 Beacon-chain withdrawals credit balances outside of any transaction, so by default no
 trace mentions them. `trace_block` and `trace_replayBlockTransactions` can be asked to
-include them by passing a trace-settings object as the last positional parameter. It is
-positional, so the parameters before it have to be supplied even when they are not
-otherwise needed:
+include them by passing a trace-settings object as the last positional parameter:
 
 ```js
-// trace_block(blockNumber, gasBailOut, traceSettings)
-["0x1194bf0", false, { "IncludeWithdrawals": true }]
+// trace_block(blockNumber, traceSettings)
+["0x1194bf0", { "IncludeWithdrawals": true }]
 
-// trace_replayBlockTransactions(blockNumber, traceTypes, gasBailOut, traceSettings)
-["0x1194bf0", ["stateDiff"], false, { "IncludeWithdrawals": true }]
+// trace_replayBlockTransactions(blockNumber, traceTypes, traceSettings)
+["0x1194bf0", ["stateDiff"], { "IncludeWithdrawals": true }]
 ```
 
 The default is off — omit the object, or leave the field out, and withdrawals are not
@@ -149,58 +145,15 @@ appear depends on the method:
 
 Withdrawal entries are an Erigon extension: other clients report one result per transaction and no withdrawal records.
 
-## The gasBailOut option
+## Fee accounting
 
-`gasBailOut` relaxes the balance rules during replay. It is exposed as a parameter by
-`trace_replayBlockTransactions`, `trace_replayTransaction`, `trace_block`,
-`trace_transaction`, `trace_get` and `trace_filter`, defaulting to `false` in each.
-`trace_call`, `trace_callMany` and `trace_rawTransaction` never enable it.
-`trace_call` and `trace_callMany` run each call object with the fees and block
-environment `eth_call` gives it: a call with a zero effective gas price runs free and sees `BASEFEE` 0,
-and a priced call is checked and pays for its gas. A signed transaction passed to
-`trace_rawTransaction` pays for its gas as it would in a block. The gas
-is bought before execution, so `BALANCE(ORIGIN)`, or `SELFBALANCE` in a delegated sender,
-reads the balance after that charge; this shows in `trace` and `vmTrace` as well as in
-`stateDiff`.
+Historical replays and `trace_rawTransaction` apply normal fee accounting, including
+upfront charges, refunds and block-producer payments. This also applies to frame
+transactions, so their assertions observe the same fee debits as block execution.
 
-:::warning
-`gasBailOut` is not only a bypass for senders who cannot afford the gas charge. It
-changes replayed state in ways that make the output unsuitable for reconstructing
-balances:
-
-* **Gas and blob fees are never deducted.** `TxnExecutor.buyGas` skips both `SubBalance`
-  calls whenever the flag is set, for *every* replayed transaction — funded senders
-  included, not only underfunded ones. The check that the sender can pay the upfront cost
-  is skipped as well.
-* **Refunds are skipped.** The gas-refund path is gated on `refunds && !gasBailout` — that
-  is the internal Go parameter, spelled with a lowercase `o`, not the JSON-RPC
-  `gasBailOut` this section documents. Before Amsterdam, the EIP-7623 calldata floor is
-  not applied either.
-* **The producer is paid on the gas used before refunds.** The block producer's tip is
-  `gasUsed * effectiveTip`, and with the flag set `gasUsed` does not subtract the refund,
-  so for a transaction with a refund the credit is larger than the canonical one.
-* **An unaffordable value transfer is credited anyway.** When the sender cannot cover a
-  non-zero `value`, the EVM-level bailout engages and `Transfer` skips the sender debit
-  while still crediting the recipient. Value appears from nowhere, so a trace can show
-  what looks like balance creation.
-* **Where the chain configures a burn contract, that contract is credited too.** A
-  **non-free** London transaction credits the configured `burntContract` with
-  `gasUsed * baseFee`, using the same unrefunded `gasUsed`; on Aura from Prague the blob
-  fee is added on top. Gnosis and Chiado are the chains that configure one. The sender
-  was never debited, so this is a second source of apparent balance creation in
-  `stateDiff`. Aura marks zero-fee certified service transactions as free and the credit
-  is guarded by `!msg.IsFree()`, so those are excluded. Chains with no configured
-  contract never receive this extra credit — every other effect above still applies to
-  them.
-:::
-
-Whether one transaction's altered state is visible to the next depends on the execution
-path. Replaying a block for traces alone, the latest block included, runs each
-transaction in parallel against its own canonical pre-state, so nothing propagates. The
-sequential path — taken when `stateDiff` or `vmTrace` is requested, and for
-single-transaction blocks — carries the altered state forward to every later transaction
-in the block. `trace_replayTransaction`, `trace_transaction` and `trace_get` replay only
-the selected transaction on its canonical pre-state, so nothing propagates there.
+`trace_call` and `trace_callMany` follow `eth_call`: a call with a zero effective gas
+price runs free and sees `BASEFEE` 0; a priced call must cover and pay for its gas.
+The gas is bought before execution, so balance reads observe the charge.
 
 ## Errors
 
@@ -210,13 +163,13 @@ A failure inside the EVM, such as a revert or an out-of-gas halt, is reported in
 | --- | --- |
 | `-32602` | Invalid parameters: a malformed value, a missing required parameter or too many parameters; an unknown trace type; the `pending` block tag; `data` and `input` both set and different; a `chainId` that does not match the chain; `maxPriorityFeePerGas` above `maxFeePerGas`; an integer element in a `trace_get` path; a malformed raw transaction; the `trace_filter` errors listed under [trace\_filter](#trace_filter). |
 | `-32001` | The selected block is unknown: a block number above the head, a hash the node does not know, or a `safe` or `finalized` tag that cannot be resolved. Also a known hash that is not canonical, in `trace_replayBlockTransactions` and with `requireCanonical: true` in `trace_call` and `trace_callMany`. |
-| `4444` | `trace_call`, `trace_callMany`: a known hash that is not canonical, without `requireCanonical`. The node keeps state only for canonical blocks. |
+| `4444` | History outside the retention window, with the message `Pruned history unavailable: old data not available due to pruning: … available from block N`. Also, in `trace_call` and `trace_callMany`, a known hash that is not canonical, without `requireCanonical`: the node keeps state only for canonical blocks. |
 | `-38012` | `trace_call`, `trace_callMany`: the fee cap or gas price is below the block base fee. |
 | `-38013` | `trace_call`, `trace_callMany`: the gas limit is below the intrinsic gas. |
 | `-38014` | `trace_call`, `trace_callMany`: the sender cannot pay for the gas and the value. |
 | `-38025` | `trace_call`, `trace_callMany`: the init code is larger than the limit. |
 | `-38026` | `trace_rawTransaction`: the gas limit, or the size of the authorization list, exceeds `--rpc.gascap`. |
-| `-32000` | Any other error, with a descriptive message. This includes: history outside the retention window (`old data not available due to pruning: … available from block N`); the validation errors of `trace_rawTransaction` (`nonce too low`, `nonce too high`, `insufficient funds …`, fee errors, a transaction signed for another chain); validation errors of a call object without a dedicated code (for example `gasPrice` together with `maxFeePerGas`, blob fields without blob hashes, an empty `authorizationList`, a feature not active at the selected block); a malformed `trace_callMany` item; an unsupported `blockOverrides` member; the `tracer` member; a timeout. |
+| `-32000` | Any other error, with a descriptive message. This includes: the validation errors of `trace_rawTransaction` (`nonce too low`, `nonce too high`, `insufficient funds …`, fee errors, a transaction signed for another chain); validation errors of a call object without a dedicated code (for example `gasPrice` together with `maxFeePerGas`, blob fields without blob hashes, an empty `authorizationList`, a feature not active at the selected block); a malformed `trace_callMany` item; an unsupported `blockOverrides` member; the `tracer` member; a timeout. |
 
 ## Configuration flags
 
@@ -596,7 +549,9 @@ Response
 
 Traces a call to `eth_sendRawTransaction` without making the call, returning the traces.
 
-The transaction runs on the latest state, with the block environment of the latest block. It is validated as it would be for inclusion in a block: the signature and chain ID, a nonce equal to the sender's nonce (too low and too high are both rejected), the balance for the value and the gas, the intrinsic gas, the fees, the sender-code rule of EIP-3607 (with the EIP-7702 delegation exception) and the gas limit cap of EIP-7825. A transaction that fails validation returns an error; a valid transaction that reverts or halts returns its trace. The sender pays for the gas, and `gasBailOut` is not available.
+The transaction runs on the latest state, with the block environment of the latest block. It is validated as it would be for inclusion in a block. For ordinary transactions this includes the signature and chain ID, a nonce equal to the sender's nonce (too low and too high are both rejected), the balance for the value and the gas, the intrinsic gas, the fees, the sender-code rule of EIP-3607 (with the EIP-7702 delegation exception) and the gas limit cap of EIP-7825. The sender pays for the gas.
+
+Frame transactions use their own approval, nonce and gas-budget rules. Gas is charged to the approved payer, which can differ from the sender. For either transaction type, a validation failure returns an error; a valid transaction that reverts or halts returns its trace.
 
 #### Parameters
 
@@ -660,8 +615,7 @@ Replays all transactions in a block returning the requested traces for each tran
 
 1. `Quantity`, `Tag` or `Hash` - Block number, one of the tags `"latest"`, `"earliest"`, `"safe"`, `"finalized"`, or the hash of a canonical block, as a string or as an EIP-1898 object. `"earliest"` is block 0, which is outside the retention window of a pruned node. `'pending'` is not supported and returns `-32602`: tracing replays committed state, so there is no pending block to replay.
 2. `Array` - Trace types: zero or more of `"vmTrace"`, `"trace"`, `"stateDiff"`.
-3. `Boolean` - (optional) `gasBailOut`, default `false`.
-4. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](#optional-parameters-and-trace-settings).
+3. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](#optional-parameters-and-trace-settings).
 
 ```js
 params: [
@@ -721,8 +675,7 @@ Replays a transaction, returning the traces.
 
 1. `Hash` - Transaction hash.
 2. `Array` - Trace types: zero or more of `"vmTrace"`, `"trace"`, `"stateDiff"`.
-3. `Boolean` - (optional) `gasBailOut`, default `false`.
-4. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](#optional-parameters-and-trace-settings).
+3. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](#optional-parameters-and-trace-settings).
 
 ```js
 params: [
@@ -780,8 +733,7 @@ Returns traces created at the given block.
 #### Parameters
 
 1. `Quantity` or `Tag` - Block number, or one of the tags `"latest"`, `"earliest"`, `"safe"`, `"finalized"`, `"latestExecuted"`. A block hash is not accepted. `'pending'` is not supported and returns `-32602`: tracing replays committed state, so there is no pending block to replay.
-2. `Boolean` - (optional) `gasBailOut`, default `false`.
-3. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](#optional-parameters-and-trace-settings).
+2. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](#optional-parameters-and-trace-settings).
 
 ```js
 params: [
@@ -858,8 +810,7 @@ Returns traces matching the given filter.
    A bound past the latest executed block returns `-32602`, as in `eth_getLogs`, rather than an empty or truncated result. As in `eth_getLogs`, a bound is a block number or tag: a block hash or an EIP-1898 object returns `-32602`; use `blockHash` to select a block by hash. An explicit `null` for `blockHash`, `fromBlock` or `toBlock` is the same as omitting it.
 
    A range wider than `--rpc.blockrange.limit` (1,000 blocks by default) returns `-32602`, as in `eth_getLogs`. An unknown member, for example a misspelled one, returns `-32602`; member names are matched case-insensitively.
-2. `Boolean` - (optional) `gasBailOut`, default `false`.
-3. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](#optional-parameters-and-trace-settings).
+2. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](#optional-parameters-and-trace-settings).
 
 Matching and order:
 
@@ -933,8 +884,7 @@ Returns the call frame at the given `traceAddress` path.
 
 1. `Hash` - Transaction hash.
 2. `Array` - `traceAddress` path of the call frame, as hex quantities: `[]` for the root call, `["0x1", "0x0"]` for the first child of the second child of the root. The `traceAddress` returned in traces uses JSON numbers, so convert each element to a hex string; an integer element returns `-32602`.
-3. `Boolean` - (optional) `gasBailOut`, default `false`.
-4. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](#optional-parameters-and-trace-settings).
+3. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](#optional-parameters-and-trace-settings).
 
 ```js
 params: [
@@ -997,8 +947,7 @@ Returns all traces of the given transaction.
 #### Parameters
 
 1. `Hash` - Transaction hash
-2. `Boolean` - (optional) `gasBailOut`, default `false`.
-3. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](#optional-parameters-and-trace-settings).
+2. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](#optional-parameters-and-trace-settings).
 
 ```js
 params: ["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3"]

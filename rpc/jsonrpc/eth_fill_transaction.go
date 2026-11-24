@@ -179,7 +179,7 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	}
 	return &ethapi.SignTransactionResult{
 		Raw:     buf.Bytes(),
-		Tx:      ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, 0, nil),
+		Tx:      ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, 0, nil, nil, 0),
 		Sidecar: sidecar,
 	}, nil
 }

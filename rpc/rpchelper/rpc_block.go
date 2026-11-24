@@ -36,12 +36,8 @@ func unknownBlockErr(requested string, latestBlock uint64) *rpc.CustomError {
 }
 
 func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
-	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
-	if forkchoiceHeadHash != (common.Hash{}) {
-		forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
-		if forkchoiceHeadNum != nil {
-			return *forkchoiceHeadNum, nil
-		}
+	if headNum, ok := forkchoiceHeadNumber(tx); ok {
+		return headNum, nil
 	}
 
 	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
@@ -50,6 +46,18 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 	}
 
 	return blockNum, nil
+}
+
+func forkchoiceHeadNumber(tx kv.Getter) (uint64, bool) {
+	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
+	if forkchoiceHeadHash == (common.Hash{}) {
+		return 0, false
+	}
+	forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
+	if forkchoiceHeadNum == nil {
+		return 0, false
+	}
+	return *forkchoiceHeadNum, true
 }
 
 func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {

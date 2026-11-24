@@ -195,7 +195,7 @@ func newEnvelopeContentsFixture(t *testing.T, slot uint64, blobCount int) *envel
 	fcu := mock_services2.NewForkChoiceStorageMock(t)
 	handler := NewApiHandler(
 		log.Root(),
-		nil,
+		testNetworkConfig(),
 		initialClock,
 		cfg,
 		db,

@@ -177,6 +177,7 @@ func seedTestAccounts(t *testing.T) kv.TemporalTx {
 	dustAddr := accounts.InternAddress(common.HexToAddress("0x03"))
 
 	st := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	st.SetVersionMap(nil)
 	defer st.Close()
 
 	_, err = st.GetOrNewStateObject(eoaAddr)
@@ -195,8 +196,9 @@ func seedTestAccounts(t *testing.T) kv.TemporalTx {
 
 	w := state.NewWriter(domains.AsPutDel(tx), nil, txNum)
 	require.NoError(t, st.FinalizeTx(&chainpkg.Rules{}, w))
-	blockWriter := state.NewWriter(domains.AsPutDel(tx), nil, txNum)
-	require.NoError(t, st.CommitBlock(&chainpkg.Rules{}, blockWriter))
+	writes, err := st.FinalizedWrites(&chainpkg.Rules{})
+	require.NoError(t, err)
+	require.NoError(t, state.ApplyWrites(writes, domains, tx, 1, txNum, false))
 	require.NoError(t, domains.Flush(context.Background(), tx))
 
 	return tx
@@ -224,6 +226,7 @@ func seedManyAccounts(t testing.TB, n int) kv.TemporalTx {
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 1))
 
 	st := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	st.SetVersionMap(nil)
 	defer st.Close()
 
 	for i := range n {
@@ -243,8 +246,9 @@ func seedManyAccounts(t testing.TB, n int) kv.TemporalTx {
 
 	w := state.NewWriter(domains.AsPutDel(tx), nil, txNum)
 	require.NoError(t, st.FinalizeTx(&chainpkg.Rules{}, w))
-	blockWriter := state.NewWriter(domains.AsPutDel(tx), nil, txNum)
-	require.NoError(t, st.CommitBlock(&chainpkg.Rules{}, blockWriter))
+	writes, err := st.FinalizedWrites(&chainpkg.Rules{})
+	require.NoError(t, err)
+	require.NoError(t, state.ApplyWrites(writes, domains, tx, 1, txNum, false))
 	require.NoError(t, domains.Flush(context.Background(), tx))
 
 	return tx

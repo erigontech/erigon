@@ -67,7 +67,7 @@ func TestTxBoundaryRewindsArenaWithoutReset(t *testing.T) {
 	first := ibs.allocStateObject()
 	require.True(t, first.arena)
 
-	ibs.SoftFinalise() // a transaction boundary, without Reset
+	ibs.EndTransaction() // a transaction boundary, without Reset
 
 	require.Same(t, first, ibs.allocStateObject(), "the transaction boundary must free the slot")
 }
@@ -104,12 +104,6 @@ func TestNoMaterializeReadReusesArena(t *testing.T) {
 // TestNoMaterializeAllocStateObjectUsesArena pins the routing: the parallel path
 // takes arena slots, the materializing path takes pooled objects.
 func TestNoMaterializeAllocStateObjectUsesArena(t *testing.T) {
-	materializing := New(&emptyReader{})
-	defer materializing.Close()
-	pooled := materializing.allocStateObject()
-	assert.False(t, pooled.arena, "materializing path must use the pool")
-	pooled.release()
-
 	versioned, _ := newNoMaterializeIBS(&emptyReader{})
 	defer versioned.Close()
 	assert.True(t, versioned.allocStateObject().arena, "parallel path must use the arena")

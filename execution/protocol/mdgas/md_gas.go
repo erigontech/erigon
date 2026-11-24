@@ -149,6 +149,15 @@ func (t MdGasType) String() string {
 	}
 }
 
+// ExceedsDeclaredGasCap checks the EIP-7825 cap on a transaction's declared gas
+// limit. Amsterdam raises the cap to allow for state gas.
+func ExceedsDeclaredGasCap(gasLimit uint64, isAmsterdam bool) bool {
+	if isAmsterdam {
+		return gasLimit > params.MaxTxnTotalGasLimit
+	}
+	return gasLimit > params.MaxTxnGasLimit
+}
+
 // SplitTxnGasLimit splits a transaction's gas limit into execution and state dimensions.
 // EIP-8037: when tx.gas > TX_MAX_GAS_LIMIT, excess gas beyond the execution budget
 // becomes the state gas reservoir, which state-creation opcodes (SSTORE, CREATE,
