@@ -33,8 +33,8 @@ func newFileCacheKey(k []byte, hi uint64) (key fileCacheKey, ok bool) {
 
 func fileCacheKeyHash(k fileCacheKey) uint32 { return uint32(k.hi) }
 
-func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
-	return &domainVisible{name: name, files: files}
+func newDomainVisible(name kv.Domain, files visibleFiles, enabled bool) *domainVisible {
+	return &domainVisible{name: name, files: files, enabled: enabled}
 }
 
 var (
@@ -91,14 +91,15 @@ func (c *IISeekInFilesCache) LogStats(fileBaseName string) {
 	log.Warn("[dbg] II_LRU", "a", fileBaseName, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)), "hit", c.hit, "collisions", m.Collisions, "evictions", m.Evictions, "inserts", m.Inserts, "removals", m.Removals, "limit", iiGetFromFileCacheLimit)
 }
 
-func newIIVisible(name string, files visibleFiles) *iiVisible {
+func newIIVisible(name string, files visibleFiles, enabled bool) *iiVisible {
 	if iiGetFromFileCacheLimit == 0 {
 		iiGetFromFileCacheEnabled = false
 	}
 	ii := &iiVisible{
-		name:   name,
-		files:  files,
-		caches: &sync.Pool{New: func() any { return NewIISeekInFilesCache() }},
+		name:    name,
+		files:   files,
+		caches:  &sync.Pool{New: func() any { return NewIISeekInFilesCache() }},
+		enabled: enabled,
 	}
 	return ii
 }

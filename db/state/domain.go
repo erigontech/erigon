@@ -109,8 +109,9 @@ type Domain struct {
 }
 
 type domainVisible struct {
-	files visibleFiles
-	name  kv.Domain
+	files   visibleFiles
+	name    kv.Domain
+	enabled bool
 }
 
 func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
@@ -469,7 +470,7 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 }
 
 func (dt *DomainRoTx) NewWriter(db kv.RoDB) *DomainBufferedWriter {
-	return dt.newWriter(db, dt.d.dirs.Tmp, !dt.d.Enabled)
+	return dt.newWriter(db, dt.d.dirs.Tmp, !dt.visible.enabled)
 }
 
 // openList - main method to open list of files.
@@ -550,7 +551,11 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
+	var files visibleFiles
+	if d.Enabled {
+		files = calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum)
+	}
+	dv := newDomainVisible(d.Name, files, d.Enabled)
 	hv, hiv := d.History.calcVisibleFiles(toTxNum)
 	return dv, hv, hiv
 }
@@ -895,10 +900,13 @@ func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.St
 //     directory). The in-memory static handles are closed in the !integrate case so they do
 //     not leak; the files themselves remain on disk in dstDir.
 func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.Step, batch *TemporalMemBatch, vt valueTransformer, dstDir string, integrate bool) error {
-	if !d.Enabled || stepFrom == stepTo {
+	if stepFrom == stepTo {
 		return nil
 	}
 	wal := batch.domainWriters[d.Name]
+	if wal == nil || wal.discard {
+		return nil
+	}
 
 	if stepFrom > stepTo {
 		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
@@ -930,9 +938,6 @@ func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.St
 // In contrast to collate function collateETL puts contents of wal into file.
 // dstDir overrides the output directory; empty means d.dirs.SnapDomain.
 func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *etl.Collector, vt valueTransformer, dstDir string) (coll Collation, err error) {
-	if !d.Enabled {
-		return Collation{}, err
-	}
 	started := time.Now()
 	closeCollation := true
 	defer func() {
@@ -1023,10 +1028,6 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
 func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64, roTx kv.Tx) (coll Collation, err error) {
-	if !d.Enabled {
-		return Collation{}, nil
-	}
-
 	{ // assert
 		if txFrom%d.stepSize != 0 {
 			panic(fmt.Errorf("assert: unexpected txFrom=%d", txFrom))
@@ -1140,9 +1141,6 @@ func (sf StaticFiles) CleanupOnError() {
 
 // skips history files; dstDir overrides where index files land (empty = d.dirs.SnapDomain).
 func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, collation Collation, ps *background.ProgressSet, dstDir string) (StaticFiles, error) {
-	if !d.Enabled {
-		return StaticFiles{}, nil
-	}
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
 	if traceFileLife != "" && d.FilenameBase == traceFileLife {
@@ -1240,10 +1238,6 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
-	if !d.Enabled {
-		return StaticFiles{}, nil
-	}
-
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
 	if traceFileLife != "" && d.FilenameBase == traceFileLife {
@@ -1770,7 +1764,7 @@ func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size
 }
 
 func (dt *DomainRoTx) GetLatestValSize(key []byte, roTx kv.Tx) (size int, found bool, err error) {
-	if !dt.d.Enabled {
+	if !dt.visible.enabled {
 		return 0, false, nil
 	}
 	v, _, found, err := dt.getLatestFromDb(key, roTx, kv.NoStepBound)
@@ -1807,7 +1801,7 @@ func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	if !dt.d.Enabled {
+	if !dt.visible.enabled {
 		return nil, false, nil
 	}
 
@@ -2040,7 +2034,7 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 }
 
 func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, opts kv.GetLatestOptions) ([]byte, kv.Step, bool, error) {
-	if !dt.d.Enabled {
+	if !dt.visible.enabled {
 		return nil, 0, false, nil
 	}
 	metrics, start := opts.Metrics()
