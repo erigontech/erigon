@@ -129,7 +129,7 @@ func BenchmarkGetHeadPreGloas(b *testing.B) {
 	f.checkpointStates.Store(justified, votes.cs)
 	runHeadBench(b, func(b *testing.B) {
 		f.headHash = common.Hash{}
-		if _, _, err := f.getHead(nil, false); err != nil {
+		if _, _, err := f.getHead(nil, false, rand.New(rand.NewSource(1))); err != nil {
 			b.Fatal(err)
 		}
 	}, func() {

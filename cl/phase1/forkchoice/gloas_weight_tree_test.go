@@ -678,7 +678,7 @@ func TestComputeVotesSkipsMessagesBeyondJustifiedRegistry(t *testing.T) {
 		balances:         []uint64{32_000_000_000},
 	}
 
-	votes := f.computeVotes(solid.Checkpoint{}, cs, nil)
+	votes := f.computeVotes(solid.Checkpoint{}, cs, nil, rand.New(rand.NewSource(1)))
 
 	require.Empty(t, votes)
 }
@@ -696,7 +696,7 @@ func TestComputeVotesAuxStateSkipsMessagesBeyondValidatorSet(t *testing.T) {
 
 	f.latestMessages.set(s.ValidatorLength(), LatestMessage{Root: common.HexToHash("0x01"), Slot: 5})
 
-	votes := f.computeVotes(justified, cs, s)
+	votes := f.computeVotes(justified, cs, s, rand.New(rand.NewSource(1)))
 
 	require.NotNil(t, votes)
 }
@@ -790,7 +790,7 @@ func TestComputeVotesAuxStateUsesCachedJustifiedBalanceForProposerBoost(t *testi
 	active.SetEffectiveBalance(32_000_000_000)
 	require.NoError(t, auxiliaryState.AddValidator(active, 32_000_000_000))
 
-	votes := f.computeVotes(checkpoint, nil, auxiliaryState)
+	votes := f.computeVotes(checkpoint, nil, auxiliaryState, rand.New(rand.NewSource(1)))
 
 	require.Equal(t, uint64(800_000_000), votes[root])
 }
@@ -816,7 +816,7 @@ func TestComputeVotesAuxStateExcludesSlashedBalanceFromProposerBoost(t *testing.
 	slashed.SetSlashed(true)
 	require.NoError(t, auxiliaryState.AddValidator(slashed, 64_000_000_000))
 
-	votes := f.computeVotes(solid.Checkpoint{}, checkpointState, auxiliaryState)
+	votes := f.computeVotes(solid.Checkpoint{}, checkpointState, auxiliaryState, rand.New(rand.NewSource(1)))
 
 	require.Equal(t, uint64(400_000_000), votes[root])
 }
@@ -857,7 +857,7 @@ func TestComputeVotesProbabilisticAuxStateUsesClampedCount(t *testing.T) {
 	v.SetEffectiveBalance(32_000_000_000)
 	require.NoError(t, s.AddValidator(v, 32_000_000_000))
 
-	votes := f.computeVotes(solid.Checkpoint{}, &checkpointState{}, s)
+	votes := f.computeVotes(solid.Checkpoint{}, &checkpointState{}, s, rand.New(rand.NewSource(1)))
 
 	require.Equal(t, uint64(32_000_000_000), votes[root])
 }

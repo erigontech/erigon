@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"runtime"
 	"slices"
 	"sync"
@@ -864,7 +865,7 @@ func TestGetHeadOnceReusesCachedHead(t *testing.T) {
 	store.headPayloadStatus = cltypes.PayloadStatusFull
 	store.weights = map[common.Hash]uint64{root: 17}
 
-	head, slot, ok, err := store.getHeadOnce(nil, store.JustifiedCheckpoint(), false)
+	head, slot, ok, err := store.getHeadOnce(nil, store.JustifiedCheckpoint(), false, rand.New(rand.NewSource(1)))
 
 	require.NoError(t, err)
 	require.True(t, ok)

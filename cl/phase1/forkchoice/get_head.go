@@ -76,10 +76,8 @@ const (
 	sampleBasis  = 80
 )
 
-func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, justificationState *checkpointState, auxilliaryState *state.CachingBeaconState) map[common.Hash]uint64 {
+func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, justificationState *checkpointState, auxilliaryState *state.CachingBeaconState, gen *rand.Rand) map[common.Hash]uint64 {
 	votes := make(map[common.Hash]uint64)
-	// make an rng generator
-	gen := rand.New(rand.NewSource(time.Now().UnixNano()))
 	if auxilliaryState != nil {
 		count := f.latestMessages.latestMessagesCount()
 		if validatorCount := auxilliaryState.ValidatorSet().Length(); validatorCount < count {
@@ -190,7 +188,7 @@ func (f *ForkChoiceStore) getHeadNode(viewAuxiliaryState auxiliaryStateView, try
 	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
 		return f.getHeadGloas(try)
 	}
-	return f.getHead(viewAuxiliaryState, try)
+	return f.getHead(viewAuxiliaryState, try, rand.New(rand.NewSource(time.Now().UnixNano())))
 }
 
 // GetHeadNode returns the root, payload status, and slot from one head snapshot.
@@ -426,10 +424,10 @@ func (f *ForkChoiceStore) getFilteredNodeTree(base common.Hash, justifiedCheckpo
 }
 
 // getHead returns the head using pre-GLOAS fork choice rules.
-func (f *ForkChoiceStore) getHead(viewAuxiliaryState auxiliaryStateView, try bool) (ForkChoiceNode, uint64, error) {
+func (f *ForkChoiceStore) getHead(viewAuxiliaryState auxiliaryStateView, try bool, gen *rand.Rand) (ForkChoiceNode, uint64, error) {
 	for {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-		head, headSlot, ok, err := f.getHeadOnce(viewAuxiliaryState, justifiedCheckpoint, try)
+		head, headSlot, ok, err := f.getHeadOnce(viewAuxiliaryState, justifiedCheckpoint, try, gen)
 		if err != nil {
 			return ForkChoiceNode{}, 0, err
 		}
@@ -446,7 +444,7 @@ func (f *ForkChoiceStore) getHead(viewAuxiliaryState auxiliaryStateView, try boo
 // ok=false when the checkpoint moved while it waited for f.mu, so the caller retries:
 // caching a head computed from a superseded checkpoint would leave it stale until the next
 // attestation, tick or block clears it.
-func (f *ForkChoiceStore) getHeadOnce(viewAuxiliaryState auxiliaryStateView, justifiedCheckpoint solid.Checkpoint, try bool) (ForkChoiceNode, uint64, bool, error) {
+func (f *ForkChoiceStore) getHeadOnce(viewAuxiliaryState auxiliaryStateView, justifiedCheckpoint solid.Checkpoint, try bool, gen *rand.Rand) (ForkChoiceNode, uint64, bool, error) {
 	var justificationState *checkpointState
 	var err error
 	if viewAuxiliaryState == nil {
@@ -488,9 +486,9 @@ func (f *ForkChoiceStore) getHeadOnce(viewAuxiliaryState auxiliaryStateView, jus
 
 	var votes map[common.Hash]uint64
 	if viewAuxiliaryState == nil {
-		votes = f.computeVotes(justifiedCheckpoint, justificationState, nil)
+		votes = f.computeVotes(justifiedCheckpoint, justificationState, nil, gen)
 	} else if err := viewAuxiliaryState(func(auxiliaryState *state.CachingBeaconState) error {
-		votes = f.computeVotes(justifiedCheckpoint, justificationState, auxiliaryState)
+		votes = f.computeVotes(justifiedCheckpoint, justificationState, auxiliaryState, gen)
 		return nil
 	}); err != nil {
 		return ForkChoiceNode{}, 0, false, err

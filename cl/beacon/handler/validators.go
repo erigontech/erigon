@@ -660,9 +660,7 @@ func copyValidatorEntries(s *state.CachingBeaconState, filterIndicies []uint64) 
 		return nil, err
 	}
 	validators := solid.NewValidatorSet(s.Validators().Cap())
-	if err := validators.DecodeSSZ(s.Validators().Bytes(), 0); err != nil {
-		return nil, err
-	}
+	s.Validators().CopyTo(validators)
 	return validatorEntries(nil, balances, validators), nil
 }
 

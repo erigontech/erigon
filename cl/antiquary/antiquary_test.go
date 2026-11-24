@@ -33,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
@@ -766,17 +767,16 @@ func TestBeaconStatesCollector_CollectEffectiveBalancesDump(t *testing.T) {
 	c := newBeaconStatesCollector(&clparams.MainnetBeaconConfig, t.TempDir(), log.New())
 	defer c.close()
 
-	// Build a fake validator set (each validator is 121 bytes, effective balance at offset 80:88)
-	validatorSetSize := 121
 	numValidators := 3
-	raw := make([]byte, validatorSetSize*numValidators)
-	// Set effective balances
+	validators := solid.NewValidatorSet(numValidators)
 	for i := range numValidators {
-		binary.LittleEndian.PutUint64(raw[i*validatorSetSize+80:], uint64((i+1)*32_000_000_000))
+		v := solid.NewValidator()
+		v.SetEffectiveBalance(uint64((i + 1) * 32_000_000_000))
+		validators.Append(v)
 	}
 
 	slot := uint64(clparams.SlotsPerDump * 4)
-	require.NoError(t, c.collectEffectiveBalancesDump(slot, raw))
+	require.NoError(t, c.collectEffectiveBalancesDump(slot, validators))
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())

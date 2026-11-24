@@ -434,7 +434,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				if err := stateAntiquaryCollector.collectBalancesDump(slot, s.currentState.RawBalances()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet()); err != nil {
+				if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.ValidatorSet()); err != nil {
 					return err
 				}
 				if s.currentState.Version() >= clparams.ElectraVersion {
@@ -471,7 +471,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			continue
 		}
 		// snapshot before TransitionState mutates the validator buffer in place
-		prevEffectiveBalances = base_encoding.AppendEffectiveBalances(prevEffectiveBalances[:0], s.currentState.RawValidatorSet())
+		prevEffectiveBalances = base_encoding.AppendEffectiveBalances(prevEffectiveBalances[:0], s.currentState.ValidatorSet())
 
 		fullValidation := slot%1000 == 0 || first
 		blockRewardsCollector := &eth2.BlockRewardsCollector{}
@@ -532,7 +532,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := stateAntiquaryCollector.collectBalancesDump(slot, s.currentState.RawBalances()); err != nil {
 				return err
 			}
-			if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet()); err != nil {
+			if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.ValidatorSet()); err != nil {
 				return err
 			}
 			if s.currentState.Version() >= clparams.ElectraVersion {
@@ -593,7 +593,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
 
 		if prevValidatorSetLength != s.currentState.ValidatorLength() || isEpochCrossed {
-			newEffectiveBalances = base_encoding.AppendEffectiveBalances(newEffectiveBalances[:0], s.currentState.RawValidatorSet())
+			newEffectiveBalances = base_encoding.AppendEffectiveBalances(newEffectiveBalances[:0], s.currentState.ValidatorSet())
 			if err := stateAntiquaryCollector.collectEffectiveBalancesDiffs(slot, prevEffectiveBalances, newEffectiveBalances); err != nil {
 				return err
 			}

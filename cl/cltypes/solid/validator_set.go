@@ -73,10 +73,6 @@ func NewValidatorSetWithLength(c int, l int) *ValidatorSet {
 	}
 }
 
-func (v *ValidatorSet) Bytes() []byte {
-	return v.buffer[:v.l*validatorSize]
-}
-
 func (v *ValidatorSet) expandBuffer(newValidatorSetLength int) {
 	size := newValidatorSetLength * validatorSize
 

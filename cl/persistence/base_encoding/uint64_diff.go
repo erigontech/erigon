@@ -25,6 +25,8 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
+
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 var zstdWriterPool = sync.Pool{
@@ -144,19 +146,13 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, oldVal, newVal []byt
 	return compressor.Close()
 }
 
-const (
-	validatorSSZSize       = 121
-	effectiveBalanceOffset = 80
-)
-
 // AppendEffectiveBalances appends each validator's 8-byte effective balance, tightly packed, to dst.
-func AppendEffectiveBalances(dst, validatorSetSSZ []byte) []byte {
-	validators := len(validatorSetSSZ) / validatorSSZSize
-	dst = slices.Grow(dst, validators*8)
-	for i := range validators {
-		off := i*validatorSSZSize + effectiveBalanceOffset
-		dst = append(dst, validatorSetSSZ[off:off+8]...)
-	}
+func AppendEffectiveBalances(dst []byte, validators *solid.ValidatorSet) []byte {
+	dst = slices.Grow(dst, validators.Length()*8)
+	validators.Range(func(_ int, v solid.Validator, _ int) bool {
+		dst = binary.LittleEndian.AppendUint64(dst, v.EffectiveBalance())
+		return true
+	})
 	return dst
 }
 
