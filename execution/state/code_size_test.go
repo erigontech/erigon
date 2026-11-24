@@ -59,8 +59,7 @@ func TestReproduceCrash(t *testing.T) {
 		writes, err := ibs.FinalizedWrites(rules)
 		require.NoError(t, err, msg)
 		require.NoError(t, state.ApplyWrites(writes, sd, tx, blockNum, txNum, false), msg)
-		ibs.EndTransaction()
-		ibs.ResetVersionedIO()
+		ibs.Reset()
 	}
 
 	intraBlockState := state.New(tsr)
@@ -80,6 +79,11 @@ func TestReproduceCrash(t *testing.T) {
 	require.NoError(t, intraBlockState.SetState(contract, storageKey1, *value0))
 	require.NoError(t, intraBlockState.SetState(contract, storageKey2, *value0))
 	finalize(4, intraBlockState, "finalising 4th tx")
+	for _, key := range []accounts.StorageKey{storageKey1, storageKey2} {
+		v, _, err := tsr.ReadAccountStorage(contract, key)
+		require.NoError(t, err)
+		require.True(t, v.IsZero(), "the 4th tx must clear the slot")
+	}
 }
 
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {

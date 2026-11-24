@@ -98,13 +98,17 @@ func TestEIP8246_FinalizeTx_PreservedBalanceCarriesToLaterTxCreate(t *testing.T)
 	reader.accounts[addr].CodeHash = realCodeHash
 	reader.accounts[addr].Balance = *uint256.NewInt(100)
 
-	ibs := New(reader)
+	rules := &chain.Rules{IsAmsterdam: true}
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(reader, vm)
 	defer ibs.Close()
 
 	ibs.SetTxContext(1, 0)
 	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
 	require.NoError(t, err)
 	ibs.EndTransaction()
+	vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
+	ibs.ResetVersionedIO()
 
 	ibs.SetTxContext(1, 1)
 	require.NoError(t, ibs.CreateAccount(addr, true))
