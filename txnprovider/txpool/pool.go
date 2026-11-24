@@ -2541,14 +2541,31 @@ func (p *TxPool) deleteMinedBlobTxn(hash string) {
 	delete(p.minedBlobTxnsByHash, hash)
 }
 
-func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) {
+// NonceFromAddress returns the last nonce before the first gap in the sender's
+// pooled account nonces, starting at the state nonce. If the state nonce itself
+// is missing, found is false. Queued transactions still occupy their nonces.
+func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, found bool) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	senderID, found := p.senders.getID(addr)
-	if !found {
+	return p.lastAccountNonceLocked(addr, nil)
+}
+
+func (p *TxPool) nonceAt(addr [20]byte, head common.Hash, stateNonce uint64) (uint64, bool, error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	if !p.Started() || p.stateViewStale || p.stateBlockHash != head {
+		return 0, false, errPoolNotReady
+	}
+	nonce, found := p.lastAccountNonceLocked(addr, &stateNonce)
+	return nonce, found, nil
+}
+
+func (p *TxPool) lastAccountNonceLocked(addr [20]byte, stateNonce *uint64) (uint64, bool) {
+	senderID, ok := p.senders.getID(addr)
+	if !ok {
 		return 0, false
 	}
-	return p.all.nonce(senderID)
+	return p.all.lastConsecutiveAccountNonce(senderID, stateNonce)
 }
 
 // removeMined - apply new highest block (or batch of blocks)

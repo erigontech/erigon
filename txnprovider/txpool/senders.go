@@ -31,35 +31,36 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-// BySenderAndNonce - designed to perform most expensive operation in TxPool:
-// "recalculate all ephemeral fields of all transactions" by algo
-//   - for all senders - iterate over transactions by nonce domain, then increasing nonce
-//
-// Performances decisions:
-//   - All senders stored inside 1 large BTree - because iterate over 1 BTree is faster than over map[senderId]BTree
-//   - sortByNonce used as non-pointer wrapper - because iterate over BTree of pointers is 2x slower
+// BySenderAndNonce keeps all pooled transactions in one tree ordered by sender,
+// nonce domain, and nonce. The pool can scan one sender or all senders in that order.
 type BySenderAndNonce struct {
 	tree              *btree.BTreeG[*metaTxn]
 	search            *metaTxn
-	senderIDTxnCount  map[uint64]int    // count of sender's txns in the pool - may differ from nonce
+	senderIDTxnCount  map[uint64]int    // includes transactions from both nonce domains
 	senderIDBlobCount map[uint64]uint64 // count of sender's total number of blobs in the pool
 	senderIDFrameTxn  map[uint64]*metaTxn
 }
 
-func (b *BySenderAndNonce) nonce(senderID uint64) (nonce uint64, ok bool) {
-	s := b.search
-	s.TxnSlot.SenderID = senderID
-	s.TxnSlot.Nonce = math.MaxUint64
-	s.keyedNonce = false
-
-	b.tree.DescendLessOrEqual(s, func(mt *metaTxn) bool {
-		if mt.TxnSlot.SenderID == senderID {
-			nonce = mt.TxnSlot.Nonce
-			ok = true
+func (b *BySenderAndNonce) lastConsecutiveAccountNonce(senderID uint64, stateNonce *uint64) (nonce uint64, found bool) {
+	var next uint64
+	if stateNonce != nil {
+		next = *stateNonce
+	}
+	b.ascendFrom(senderID, next, func(mt *metaTxn) bool {
+		if mt.keyedNonce {
+			return false
 		}
-		return false
+		if stateNonce == nil && !found {
+			next = mt.TxnSlot.Nonce - mt.nonceDistance
+		}
+		if mt.TxnSlot.Nonce != next {
+			return false
+		}
+		nonce, found = next, true
+		next++
+		return true
 	})
-	return nonce, ok
+	return nonce, found
 }
 
 func (b *BySenderAndNonce) ascendAll(f func(*metaTxn) bool) {
@@ -69,9 +70,13 @@ func (b *BySenderAndNonce) ascendAll(f func(*metaTxn) bool) {
 }
 
 func (b *BySenderAndNonce) ascend(senderID uint64, f func(*metaTxn) bool) {
+	b.ascendFrom(senderID, 0, f)
+}
+
+func (b *BySenderAndNonce) ascendFrom(senderID, nonce uint64, f func(*metaTxn) bool) {
 	s := b.search
 	s.TxnSlot.SenderID = senderID
-	s.TxnSlot.Nonce = 0
+	s.TxnSlot.Nonce = nonce
 	s.keyedNonce = false
 	b.tree.AscendGreaterOrEqual(s, func(mt *metaTxn) bool {
 		if mt.TxnSlot.SenderID != senderID {

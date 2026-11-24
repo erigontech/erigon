@@ -2319,6 +2319,9 @@ func TestFramePoolRevalidationQueuesNonceSuccessor(t *testing.T) {
 			change.ChangeBatch[0].BlockHeight = 1
 			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			checkParked()
+			nonce, ok := pool.NonceFromAddress(sender)
+			require.True(t, ok)
+			require.Equal(t, ordinary.Nonce, nonce, "the queued successor still occupies its account nonce")
 
 			backend.err = nil
 			change = newBlockChangeForAccounts(common.Hash{2}, 0)

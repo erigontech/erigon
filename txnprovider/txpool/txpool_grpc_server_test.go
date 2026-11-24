@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -86,9 +87,52 @@ func (m *addMockTxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
 	return txpoolcfg.NotSet
 }
 
-func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) { return 0, false }
+func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, found bool) { return 0, false }
+
+func (m *addMockTxPool) nonceAt([20]byte, common.Hash, uint64) (uint64, bool, error) {
+	return 0, false, nil
+}
 
 func (m *addMockTxPool) GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle) { return nil }
+
+func TestGrpcNonceAt(t *testing.T) {
+	ctx, pool, db, _ := newTestPool(t)
+	sender, blockHash := common.Address{1}, common.Hash{2}
+	const stateNonce = 3
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(blockHash, stateNonce, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	var slots TxnSlots
+	slots.Append(newTestSenderTxnSlot(sender, stateNonce), sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	server := NewGrpcServer(ctx, pool, db, nil, pool.chainID, pool.logger)
+	address := gointerfaces.ConvertAddressToH160(sender)
+	head := gointerfaces.ConvertHashToH256(blockHash)
+	reply, err := server.NonceAt(ctx, &txpoolproto.NonceAtRequest{Address: address, BlockHash: head, StateNonce: stateNonce})
+	require.NoError(t, err)
+	require.True(t, reply.Found)
+	require.EqualValues(t, stateNonce, reply.Nonce)
+
+	for _, tc := range []struct {
+		name    string
+		address *typesproto.H160
+		head    *typesproto.H256
+		code    codes.Code
+	}{
+		{"different head", address, gointerfaces.ConvertHashToH256(common.Hash{1}), codes.Aborted},
+		{"missing address", nil, head, codes.InvalidArgument},
+		{"incomplete address", &typesproto.H160{}, head, codes.InvalidArgument},
+		{"missing block hash", address, nil, codes.InvalidArgument},
+		{"missing high half of block hash", address, &typesproto.H256{Lo: head.Lo}, codes.InvalidArgument},
+		{"missing low half of block hash", address, &typesproto.H256{Hi: head.Hi}, codes.InvalidArgument},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := server.NonceAt(ctx, &txpoolproto.NonceAtRequest{Address: tc.address, BlockHash: tc.head, StateNonce: stateNonce})
+			require.Equal(t, tc.code, status.Code(err))
+		})
+	}
+}
 
 func TestMapDiscardReasonToProto(t *testing.T) {
 	t.Parallel()

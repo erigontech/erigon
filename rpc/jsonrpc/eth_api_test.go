@@ -30,11 +30,15 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -45,7 +49,10 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -508,6 +515,105 @@ func TestGetStorageValues_PrunedBlockReturnsError(t *testing.T) {
 // bnhPtr returns a pointer to a BlockNumberOrHash, for the state methods whose
 // block parameter is now optional (*rpc.BlockNumberOrHash).
 func bnhPtr(b rpc.BlockNumberOrHash) *rpc.BlockNumberOrHash { return &b }
+
+type nonceAtHeadClient struct {
+	txpoolproto.TxpoolClient
+	lookup func(*txpoolproto.NonceAtRequest) (*txpoolproto.NonceReply, error)
+}
+
+func (c nonceAtHeadClient) NonceAt(_ context.Context, req *txpoolproto.NonceAtRequest, _ ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
+	return c.lookup(req)
+}
+
+type legacyNoncePool struct {
+	txpoolproto.UnimplementedTxpoolServer
+}
+
+func (legacyNoncePool) Nonce(context.Context, *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
+	return &txpoolproto.NonceReply{Found: true, Nonce: 1}, nil
+}
+
+func TestPendingNonceRequiresNonceAt(t *testing.T) {
+	m := execmoduletester.New(t)
+	m.TxPoolGrpcServer = legacyNoncePool{}
+	_, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, txpoolproto.NewTxpoolClient(conn), nil)
+	block := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	nonce, err := api.GetTransactionCount(t.Context(), m.Address, &block)
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+	require.Nil(t, nonce)
+}
+
+func TestPendingNonceRetriesAtCurrentHead(t *testing.T) {
+	m := execmoduletester.New(t)
+	sender := m.Address
+	chain, err := m.GenerateChain(1, func(_ int, block *blockgen.BlockGen) {
+		tx := types.NewTransaction(0, common.Address{1}, nil, 21_000, uint256.NewInt(10_000_000_000), nil)
+		signed, err := types.SignTx(tx, *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, err)
+		block.AddTx(signed)
+	})
+	require.NoError(t, err)
+	calls := 0
+	pool := nonceAtHeadClient{lookup: func(req *txpoolproto.NonceAtRequest) (*txpoolproto.NonceReply, error) {
+		calls++
+		if calls == 1 {
+			require.Equal(t, gointerfaces.ConvertHashToH256(m.Genesis.Hash()), req.BlockHash)
+			require.Zero(t, req.StateNonce)
+			require.NoError(t, m.InsertChain(chain))
+			return nil, status.Error(codes.Aborted, "pool head changed")
+		}
+		require.Equal(t, gointerfaces.ConvertHashToH256(chain.TopBlock.Hash()), req.BlockHash)
+		require.EqualValues(t, 1, req.StateNonce)
+		return &txpoolproto.NonceReply{Found: true, Nonce: 2}, nil
+	}}
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, pool, nil)
+	block := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	nonce, err := api.GetTransactionCount(t.Context(), sender, &block)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, *nonce)
+	require.Equal(t, 2, calls)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	api.txPool = nonceAtHeadClient{lookup: func(*txpoolproto.NonceAtRequest) (*txpoolproto.NonceReply, error) {
+		cancel()
+		return nil, status.Error(codes.Aborted, "pool head changed")
+	}}
+	_, err = api.GetTransactionCount(ctx, sender, &block)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+type otherHeadReader struct{ dbservices.FullBlockReader }
+
+func (otherHeadReader) CanonicalHash(context.Context, kv.Getter, uint64) (common.Hash, bool, error) {
+	return common.Hash{1}, true, nil
+}
+
+func TestPendingNonceUsesAccountFromPinnedBlock(t *testing.T) {
+	m := execmoduletester.New(t)
+	base := newBaseApiForTest(m)
+	// A remote block reader and a streamed account cache can move past the open transaction.
+	base._blockReader = otherHeadReader{m.BlockReader}
+	base.stateCache = kvcache.NewLatestBatchCache()
+	account := accounts.Account{Nonce: 9, CodeHash: accounts.EmptyCodeHash}
+	base.stateCache.OnNewBlock(&remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{
+		Changes: []*remoteproto.AccountChange{{
+			Address: gointerfaces.ConvertAddressToH160(m.Address),
+			Action:  remoteproto.Action_UPSERT,
+			Data:    accounts.SerialiseV3(&account),
+		}},
+	}}})
+	pool := nonceAtHeadClient{lookup: func(req *txpoolproto.NonceAtRequest) (*txpoolproto.NonceReply, error) {
+		require.Equal(t, gointerfaces.ConvertHashToH256(m.Genesis.Hash()), req.BlockHash)
+		return &txpoolproto.NonceReply{}, nil
+	}}
+	api := newEthApiForTest(base, m.DB, pool, nil)
+	block := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	nonce, err := api.GetTransactionCount(t.Context(), m.Address, &block)
+	require.NoError(t, err)
+	require.Zero(t, *nonce)
+}
 
 // TestStateMethods_OmittedBlockDefaultsToLatest verifies that an omitted (nil)
 // block selector is treated identically to an explicit "latest" selector for each

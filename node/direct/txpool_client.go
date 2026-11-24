@@ -121,6 +121,10 @@ func (s *TxPoolClient) Nonce(ctx context.Context, in *txpoolproto.NonceRequest, 
 	return s.server.Nonce(ctx, in)
 }
 
+func (s *TxPoolClient) NonceAt(ctx context.Context, in *txpoolproto.NonceAtRequest, opts ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
+	return s.server.NonceAt(ctx, in)
+}
+
 func (s *TxPoolClient) GetBlobs(ctx context.Context, in *txpoolproto.GetBlobsRequest, opts ...grpc.CallOption) (*txpoolproto.GetBlobsReply, error) {
 	return s.server.GetBlobs(ctx, in)
 }
