@@ -225,9 +225,25 @@ func (g *GossipManager) SetLocalNodeID(nodeID enode.ID) {
 	g.subscribePersistentAttestationSubnets()
 }
 
-// Close gracefully shuts down the GossipManager and all its goroutines.
+// Close shuts down the GossipManager and releases every topic it registered, since the pubsub router outlives it.
 func (g *GossipManager) Close() error {
 	g.cancel()
+	var err error
+	for _, topic := range g.subscriptions.AllTopics() {
+		err = errors.Join(err, g.subscriptions.Remove(topic), g.unregisterTopicValidator(topic))
+	}
+	return err
+}
+
+func (g *GossipManager) unregisterTopicValidator(topic string) error {
+	err := g.p2p.Pubsub().UnregisterTopicValidator(topic)
+	// A router whose context has ended holds no validators to release.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("unregister validator for %s: %w", topic, err)
+	}
 	return nil
 }
 
@@ -381,17 +397,17 @@ func (g *GossipManager) registerGossipService(service serviceintf.Service[any], 
 		}
 		topicHandle, joinErr := g.p2p.Pubsub().Join(topic)
 		if joinErr != nil {
-			err = joinErr
+			err = errors.Join(joinErr, g.unregisterTopicValidator(topic))
 			return
 		}
 		if params := g.topicScoreParams(name); params != nil {
 			if err = topicHandle.SetScoreParams(params); err != nil {
-				topicHandle.Close()
+				err = errors.Join(err, topicHandle.Close(), g.unregisterTopicValidator(topic))
 				return
 			}
 		}
 		if err = g.subscriptions.Add(topic, topicHandle, validator); err != nil {
-			topicHandle.Close()
+			err = errors.Join(err, topicHandle.Close(), g.unregisterTopicValidator(topic))
 			return
 		}
 		err = g.subscriptions.SubscribeWithExpiry(topic, g.defaultExpiryForTopic(name))
