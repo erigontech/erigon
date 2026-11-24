@@ -2059,48 +2059,6 @@ func resetBalance(vm *VersionMap, cells *btree.Map[int, *WriteCell[uint256.Int]]
 	c.setState(inc, FlagDone)
 }
 
-func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
-	vm.assertUnsealed(txIdx, addr, AddressPath, accounts.NilKey)
-	e := vm.load(addr)
-	if e == nil {
-		return
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	var stamped bool
-	defer vm.endDeleteStamp(txIdx, &stamped)
-	if e.Address != nil {
-		deleteCell(vm, e.Address, txIdx, &stamped)
-	}
-	if e.SelfDestruct != nil {
-		deleteCell(vm, e.SelfDestruct, txIdx, &stamped)
-	}
-	if e.Balance != nil {
-		deleteCell(vm, e.Balance, txIdx, &stamped)
-	}
-	if e.Nonce != nil {
-		deleteCell(vm, e.Nonce, txIdx, &stamped)
-	}
-	if e.Incarnation != nil {
-		deleteCell(vm, e.Incarnation, txIdx, &stamped)
-	}
-	if e.Code != nil {
-		deleteCell(vm, e.Code, txIdx, &stamped)
-	}
-	if e.CodeHash != nil {
-		deleteCell(vm, e.CodeHash, txIdx, &stamped)
-	}
-	if e.CodeSize != nil {
-		deleteCell(vm, e.CodeSize, txIdx, &stamped)
-	}
-	if e.CreateContract != nil {
-		deleteCell(vm, e.CreateContract, txIdx, &stamped)
-	}
-	for _, cells := range e.Storage {
-		deleteCell(vm, cells, txIdx, &stamped)
-	}
-}
-
 type VersionValidity int
 
 func (v VersionValidity) String() string {

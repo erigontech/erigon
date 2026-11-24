@@ -331,11 +331,43 @@ func TestNoMaterialize_SetStorageRecordsCurrentIncarnation(t *testing.T) {
 
 	require.NoError(t, ibs.SetStorage(addr, Storage{accounts.InternKey([32]byte{0x01}): *uint256.NewInt(7)}))
 
-	inc, err := ibs.GetIncarnation(addr)
+	incBefore, err := ibs.GetIncarnation(addr)
 	require.NoError(t, err)
+	require.Equal(t, uint64(1), incBefore, "a freshly created contract has incarnation 1")
+
+	require.NoError(t, ibs.SetStorage(addr, Storage{accounts.InternKey([32]byte{0x02}): *uint256.NewInt(9)}))
+
 	wInc, ok := ibs.Writes().GetIncarnation(addr)
 	require.True(t, ok, "SetStorage records an incarnation write")
-	require.Equal(t, inc, wInc.Val, "SetStorage records the account's current incarnation")
+	require.Equal(t, incBefore, wInc.Val, "SetStorage records the current incarnation (1), not the materialized path's 0")
+}
+
+// SetCode's net-zero decision compares the new code against the previous code. When an
+// earlier tx in the block installed that code, the comparison must go through the
+// tracked versioned code reader so the decision is covered by an OCC read. Reading the
+// earlier tx's code cell untracked lets this tx skip its own SetCode against a
+// provisional value and, when that value is withdrawn, validate stale — leaving the old
+// code instead of the one it set.
+func TestNoMaterialize_SetCodeTracksEarlierTxCodeRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0xde})
+	codeB := []byte("earlier-tx-code-b")
+	vm := NewVersionMap(nil)
+
+	ibs0 := newNoMaterializeTx(vm, 0)
+	require.NoError(t, ibs0.CreateAccount(addr, true))
+	require.NoError(t, ibs0.SetCode(addr, codeB, tracing.CodeChangeContractCreation))
+	vm.FlushWrites(ibs0.Writes(), true)
+
+	// tx1 re-sets the identical code B (a no-op). Resolving the previous code through
+	// the versioned reader records the read so a later withdrawal of B invalidates tx1.
+	ibs1 := newNoMaterializeTx(vm, 1)
+	require.NoError(t, ibs1.SetCode(addr, codeB, tracing.CodeChangeUnspecified))
+
+	rs := ibs1.Reads()
+	tr, ok := rs.GetCode(addr)
+	require.True(t, ok, "SetCode against an earlier tx's code must record a versioned code read")
+	require.Equal(t, accounts.NewCode(codeB).Hash, tr.Val.Hash, "the recorded read must carry the earlier tx's code")
 }
 
 func newNoMaterializeTx(vm *VersionMap, txIndex int) *IntraBlockState {

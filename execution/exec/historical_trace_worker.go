@@ -396,7 +396,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
 					// End of block transaction in a block
 					reader := state.NewHistoryReaderV3(tx, outputTxNum)
-					ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+					ibs := state.New(reader)
 					defer ibs.Close()
 					ibs.SetNoConflictDetection()
 					ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)

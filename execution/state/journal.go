@@ -66,8 +66,6 @@ const (
 	flagSelfdestructHadIncarnation uint8 = 1 << 2 // kindSelfdestruct: a versioned incarnation write predated the destruct
 	flagSelfdestructHadBalance     uint8 = 1 << 3 // kindSelfdestruct: a versioned balance write predated the destruct
 	flagBalanceDeleted             uint8 = 1 << 4
-	flagSlotOnly                   uint8 = 1 << 5
-	flagSelfdestructPrevCreated    uint8 = 1 << 6 // kindSelfdestruct: createdContract was set
 )
 
 // journalExtra holds the fields needed only by the infrequent entry kinds,
@@ -159,9 +157,8 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 }
 
 // dirty explicitly sets an address to dirty, even if the change entries would
-// otherwise suggest it as clean. This method is an ugly hack to handle the RIPEMD
-// precompile consensus exception; CreateAccount also uses it to keep a
-// resurrected address dirty across an intra-tx revert.
+// otherwise suggest it as clean. CreateAccount uses it to keep a resurrected
+// address dirty across an intra-tx revert.
 func (j *journal) dirty(addr accounts.Address) {
 	j.dirties[addr]++
 }
@@ -262,10 +259,6 @@ func (j *journal) accessListAddAccountChange(address accounts.Address) {
 
 func (j *journal) accessListAddSlotChange(address accounts.Address, slot accounts.StorageKey) {
 	j.push(journalEntry{kind: kindAccessListAddSlot, account: address, key: slot})
-}
-
-func (j *journal) accessListAddSlotOnlyChange(address accounts.Address, slot accounts.StorageKey) {
-	j.entries = append(j.entries, journalEntry{kind: kindAccessListAddSlot, account: address, key: slot, flags: flagSlotOnly})
 }
 
 func (j *journal) transientStorageChange(account accounts.Address, slot int, prevalue uint256.Int) {
@@ -424,9 +417,8 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// Mirror kindBalance — drop the write if the touch created it, else restore
 		// the prior value.
 		//
-		// RIPEMD-160 is the exception: touchAccount bumps its dirty count so the
-		// touch outlives the revert and EIP-161 still sweeps it. Undoing the write
-		// here would drop that sweep and leave the account in the trie.
+		// RIPEMD-160 is the consensus exception: its touch outlives the revert, so
+		// the zero-balance write stays and EIP-161 still sweeps the account.
 		if je.account != ripemd {
 			if je.committed() {
 				s.writes.DelBalance(je.account)
@@ -450,11 +442,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindAccessListAddSlot:
-		if je.flags&flagSlotOnly != 0 {
-			delete(s.accessList.slotsOnly, frameStorageSlot{je.account, je.key})
-		} else {
-			s.accessList.DeleteSlot(je.account, je.key)
-		}
+		s.accessList.DeleteSlot(je.account, je.key)
 		return nil
 	}
 	panic(fmt.Sprintf("revert: unknown journal entry kind %d", je.kind))

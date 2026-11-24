@@ -194,7 +194,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	}
 	b.pendingReaderTx = tx
 	b.pendingReader = b.m.NewStateReader(b.pendingReaderTx)
-	b.pendingState = state.NewWithVersionMap(b.pendingReader, state.NewVersionMap(nil))
+	b.pendingState = state.New(b.pendingReader)
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
@@ -207,7 +207,7 @@ func (b *SimulatedBackend) stateByBlockNumber(db kv.TemporalTx, blockNumber *uin
 
 // newCallState puts a one-shot read or call on the versioned state, like the RPC call sites.
 func newCallState(r state.StateReader) *state.IntraBlockState {
-	s := state.NewWithVersionMap(r, state.NewVersionMap(nil))
+	s := state.New(r)
 	s.SetNoConflictDetection()
 	return s
 }
@@ -815,7 +815,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 	if _, err := protocol.ApplyTransaction(
 		b.m.ChainConfig, protocol.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
 		accounts.InternAddress(b.pendingHeader.Coinbase), b.gasPool,
-		b.pendingState, state.NewNoopWriter(),
+		b.pendingState,
 		b.pendingHeader, txn,
 		b.pendingGasUsed,
 		vm.Config{},

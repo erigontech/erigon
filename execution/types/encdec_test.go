@@ -289,10 +289,10 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		}
 	case FrameTxType:
 		return &FrameTransaction{
-			NonceKeys: []uint256.Int{{}},
+			NonceKeys: nil,
 			ChainID:   *uint256.NewInt(*tr.RandUint64()), Nonce: commonTx.Nonce, SenderAddress: tr.RandAddress(),
 			Frames:     []Frame{{Mode: FrameDefault, Limits: mdgas.MdGas{Execution: 100_000}, Data: tr.RandBytes(tr.RandIntInRange(0, 100))}},
-			Fees:       FrameFees{FeeCap: *uint256.NewInt(100), TipCap: *uint256.NewInt(1)},
+			Fees:       FrameFees{MaxFee: *uint256.NewInt(100), TipCap: *uint256.NewInt(1)},
 			Signatures: []FrameSignature{{Signature: tr.RandBytes(tr.RandIntInRange(0, 100))}},
 		}
 	default:

@@ -77,7 +77,7 @@ func newBenchEnv(t testing.TB, gasLimit uint64) *vm.EVM {
 	require.NoError(t, err)
 
 	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	statedb := state.New(reader)
 	statedb.SetNoConflictDetection()
 	return envFor(statedb, gasLimit)
 }
@@ -93,14 +93,14 @@ func newCommittedBenchEnv(t testing.TB, gasLimit uint64, seed func(*state.IntraB
 	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 1))
 	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
-	seeded := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	seeded := state.New(reader)
 	defer seeded.Close()
 	seed(seeded)
 	writes, err := seeded.FinalizedWrites(envFor(seeded, gasLimit).ChainRules())
 	require.NoError(t, err)
 	seeded.FlushWritesToVersionMap(writes)
 	require.NoError(t, seeded.WriteFlushedTo(writes, state.NewWriter(domains.AsPutDel(tx), nil, 1)))
-	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	statedb := state.New(reader)
 	statedb.SetNoConflictDetection()
 	return envFor(statedb, gasLimit)
 }

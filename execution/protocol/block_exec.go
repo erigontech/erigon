@@ -82,7 +82,7 @@ func ExecuteBlockEphemerally(
 	logger log.Logger,
 ) (res *EphemeralExecResult, executeBlockErr error) {
 	defer blockExecutionTimer.ObserveDuration(time.Now())
-	ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+	ibs := state.New(stateReader)
 	defer ibs.Close()
 	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
@@ -149,7 +149,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		receipt, err := ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, stateWriter, header, txn, gasUsed, *vmConfig)
+		receipt, err := ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, header, txn, gasUsed, *vmConfig)
 		if writeTrace && vmConfig.Tracer != nil && vmConfig.Tracer.Flush != nil {
 			vmConfig.Tracer.Flush(txn)
 			vmConfig.Tracer = nil

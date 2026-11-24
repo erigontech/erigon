@@ -385,13 +385,13 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 			var keyBytes common.Hash
 			binary.BigEndian.PutUint16(keyBytes[:], uint16(i))
 			key := accounts.InternKey(keyBytes)
-			sv, err := state.GetState(addr, key)
-			if err != nil {
-				return err
+			sv, serr := state.GetState(addr, key)
+			if serr != nil {
+				return serr
 			}
-			cv, err := checkstate.GetState(addr, key)
-			if err != nil {
-				return err
+			cv, cerr := checkstate.GetState(addr, key)
+			if cerr != nil {
+				return cerr
 			}
 			if !checkeq("GetState("+key.String()+")", sv, cv) {
 				return err
@@ -1078,13 +1078,23 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, b)
 }
 
-// TestMakeWriteSetClearsCodeDomainOnEmptyOverride pins that clearing an
+func TestNewAndResetBuildAVersionedState(t *testing.T) {
+	ibs := New(NewNoopReader())
+	defer ibs.Close()
+	require.NotNil(t, ibs.VersionMap())
+	before := ibs.VersionMap()
+	ibs.Reset()
+	require.NotNil(t, ibs.VersionMap())
+	require.NotSame(t, before, ibs.VersionMap(), "Reset drops the previous tx's writes with its map")
+}
+
+// TestFinalizedWritesClearsCodeDomainOnEmptyOverride pins that clearing an
 // account's code (e.g. an eth_simulateV1 stateOverride of "code":"0x") writes
 // through to the CodeDomain, keeping it consistent with the now-empty account
 // codeHash. Regression: gating the code write on a non-nil code slice skipped
 // the clear, leaving the CodeDomain holding stale code and tripping the
 // commitment codeHash-mismatch assert.
-func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
+func TestFinalizedWritesClearsCodeDomainOnEmptyOverride(t *testing.T) {
 	t.Parallel()
 
 	_, tx, domains := NewTestRwTx(t)
@@ -1119,25 +1129,6 @@ func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
 	require.Empty(t, got, "clearing code must clear the CodeDomain entry")
 }
 
-// erroringReader wraps NoopReader and fails ReadAccountData for one address,
-// simulating a DB read failure.
-type erroringReader struct {
-	*NoopReader
-	errAddr accounts.Address
-	err     error
-}
-
-func (r *erroringReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	if address == r.errAddr {
-		return nil, r.err
-	}
-	return r.NoopReader.ReadAccountData(address)
-}
-
-// TestPropagatesBalanceIncGetStateObjectError pins that a DB read failure while
-// materializing a pending ripemd touch aborts the call instead of being silently
-// dropped, which would skip the touch that state clearing and trie consistency
-// depend on.
 // TestRevertSetCodeOnCodelessAccount pins the revert of a code change whose
 // previous code was empty on an account that outlives the revert, e.g. an EOA.
 func TestRevertSetCodeOnCodelessAccount(t *testing.T) {
@@ -1543,4 +1534,161 @@ func (w *finalStateWriter) CreateContract(accounts.Address) error { return nil }
 func TestSetVersionMapRejectsNil(t *testing.T) {
 	ibs := New(NewNoopReader())
 	require.Panics(t, func() { ibs.SetVersionMap(nil) }, "a nil version map is an invariant violation")
+}
+
+// Close hands back everything a call collected, origin cells included, so the
+// next state takes them from the pools instead of the heap.
+func TestCloseReleasesOriginCells(t *testing.T) {
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	ibs.recordStorageOrigin(accounts.InternAddress([20]byte{0xc0, 0xde}), accounts.InternKey([32]byte{1}), uint256.Int{})
+	ibs.Close()
+	if !ibs.origins.IsEmpty() {
+		t.Fatal("Close kept the origin cells")
+	}
+}
+
+// A versioned state hands a finished tx to a StateWriter: the touched empty account is removed.
+func TestWriteFlushedToRemovesTouchedEmptyAccount(t *testing.T) {
+	t.Parallel()
+	a, b, c, d, empty := accounts.InternAddress(common.Address{1}), accounts.InternAddress(common.Address{2}),
+		accounts.InternAddress(common.Address{3}), accounts.InternAddress(common.Address{4}), accounts.InternAddress(common.Address{5})
+	slot1, slot2 := accounts.InternKey(common.Hash{1}), accounts.InternKey(common.Hash{2})
+	reader := &fakeBaseReader{
+		accts: map[accounts.Address]*accounts.Account{a: acctBal(100), b: acctBal(5), c: acctBal(1), empty: acctBal(0)},
+		storage: map[accounts.Address]map[accounts.StorageKey]uint256.Int{
+			c: {slot1: *uint256.NewInt(7)},
+		},
+	}
+	rules := &chain.Rules{IsSpuriousDragon: true, IsByzantium: true}
+
+	versioned := NewWithVersionMap(reader, NewVersionMap(nil))
+	defer versioned.Close()
+	versioned.SetTxContext(1, 0)
+	require.NoError(t, versioned.SubBalance(a, *uint256.NewInt(10), tracing.BalanceChangeTransfer))
+	require.NoError(t, versioned.AddBalance(b, *uint256.NewInt(10), tracing.BalanceChangeTransfer))
+	require.NoError(t, versioned.SetState(c, slot1, *uint256.NewInt(9)))
+	require.NoError(t, versioned.SetState(c, slot2, *uint256.NewInt(3)))
+	require.NoError(t, versioned.CreateAccount(d, true))
+	require.NoError(t, versioned.SetNonce(d, 1, tracing.NonceChangeContractCreator))
+	require.NoError(t, versioned.SetCode(d, []byte{0x60, 0x00}, tracing.CodeChangeContractCreation))
+	require.NoError(t, versioned.AddBalance(empty, uint256.Int{}, tracing.BalanceChangeTransfer))
+	writes, err := versioned.FinalizedWrites(rules)
+	require.NoError(t, err)
+	versioned.FlushWritesToVersionMap(writes)
+	got := newFinalStateWriter()
+	require.NoError(t, versioned.WriteFlushedTo(writes, got))
+
+	require.Equal(t, *uint256.NewInt(90), got.accounts[a].Balance)
+	require.Equal(t, *uint256.NewInt(15), got.accounts[b].Balance)
+	require.Equal(t, map[accounts.StorageKey]uint256.Int{slot1: *uint256.NewInt(9), slot2: *uint256.NewInt(3)}, got.storage[c])
+	require.Equal(t, uint64(1), got.accounts[d].Nonce)
+	require.Equal(t, string([]byte{0x60, 0x00}), got.code[d])
+	require.Contains(t, got.accounts, empty)
+	require.Nil(t, got.accounts[empty], "the touched empty account is removed")
+}
+
+// A later tx's writer sees each account as the earlier tx left it: the original of a
+// twice-debited account, and the delete of a destroyed account with storage.
+func TestWriteFlushedToAcrossTxs(t *testing.T) {
+	t.Parallel()
+	a, c := accounts.InternAddress(common.Address{1}), accounts.InternAddress(common.Address{3})
+	slot := accounts.InternKey(common.Hash{1})
+	reader := &fakeBaseReader{
+		accts:   map[accounts.Address]*accounts.Account{a: acctBal(100), c: acctBal(1)},
+		storage: map[accounts.Address]map[accounts.StorageKey]uint256.Int{c: {slot: *uint256.NewInt(7)}},
+	}
+	rules := &chain.Rules{IsSpuriousDragon: true, IsByzantium: true}
+
+	versioned := NewWithVersionMap(reader, NewVersionMap(nil))
+	defer versioned.Close()
+	finalize := func(w StateWriter) {
+		writes, err := versioned.FinalizedWrites(rules)
+		require.NoError(t, err)
+		versioned.FlushWritesToVersionMap(writes)
+		require.NoError(t, versioned.WriteFlushedTo(writes, w))
+		versioned.EndTransaction()
+		versioned.ResetIO()
+	}
+	versioned.SetTxContext(1, 0)
+	require.NoError(t, versioned.SubBalance(a, *uint256.NewInt(10), tracing.BalanceChangeTransfer))
+	require.NoError(t, versioned.SetState(c, slot, *uint256.NewInt(9)))
+	finalize(newFinalStateWriter())
+	versioned.SetTxContext(1, 1)
+	require.NoError(t, versioned.SubBalance(a, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+	_, err := versioned.Selfdestruct(c, false)
+	require.NoError(t, err)
+	got := newFinalStateWriter()
+	finalize(got)
+
+	require.Equal(t, *uint256.NewInt(90), got.originals[a].Balance, "the original carries tx 0's debit")
+	require.Nil(t, got.accounts[c], "the destroyed account is deleted")
+}
+
+// A balance-preserving SELFDESTRUCT (EIP-8246) leaves a balance-only account.
+func TestWriteFlushedToPreservedBalance(t *testing.T) {
+	t.Parallel()
+	c := accounts.InternAddress(common.Address{3})
+	slot := accounts.InternKey(common.Hash{1})
+	withCode := acctBal(50)
+	withCode.Nonce = 2
+	withCode.CodeHash = accounts.InternCodeHash(common.Hash{9})
+	reader := &fakeBaseReader{
+		accts:   map[accounts.Address]*accounts.Account{c: withCode},
+		storage: map[accounts.Address]map[accounts.StorageKey]uint256.Int{c: {slot: *uint256.NewInt(7)}},
+	}
+	rules := &chain.Rules{IsSpuriousDragon: true, IsByzantium: true, IsAmsterdam: true}
+
+	versioned := NewWithVersionMap(reader, NewVersionMap(nil))
+	defer versioned.Close()
+	versioned.SetTxContext(1, 0)
+	_, err := versioned.Selfdestruct(c, true)
+	require.NoError(t, err)
+	writes, err := versioned.FinalizedWrites(rules)
+	require.NoError(t, err)
+	versioned.FlushWritesToVersionMap(writes)
+	got := newFinalStateWriter()
+	require.NoError(t, versioned.WriteFlushedTo(writes, got))
+
+	require.NotNil(t, got.accounts[c], "the balance survives")
+	require.Equal(t, *uint256.NewInt(50), got.accounts[c].Balance)
+}
+
+// downRevClearingWriter clears an account's code and storage on an incarnation decrease, as Writer does.
+type downRevClearingWriter struct{ *finalStateWriter }
+
+func (w downRevClearingWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
+	if original.Incarnation > account.Incarnation {
+		delete(w.code, address)
+		delete(w.storage, address)
+	}
+	return w.finalStateWriter.UpdateAccountData(address, original, account)
+}
+
+// A recreate below the original incarnation keeps the new code: the account write that clears
+// the old code and storage must land first.
+func TestWriteFlushedToIncarnationDecrease(t *testing.T) {
+	t.Parallel()
+	c := accounts.InternAddress(common.Address{3})
+	slot := accounts.InternKey(common.Hash{1})
+	emptied := acctBal(0)
+	emptied.Incarnation = 2
+	reader := &fakeBaseReader{accts: map[accounts.Address]*accounts.Account{c: emptied}}
+	rules := &chain.Rules{IsSpuriousDragon: true, IsByzantium: true}
+
+	versioned := NewWithVersionMap(reader, NewVersionMap(nil))
+	defer versioned.Close()
+	versioned.SetTxContext(1, 0)
+	require.NoError(t, versioned.CreateAccount(c, true))
+	require.NoError(t, versioned.SetNonce(c, 1, tracing.NonceChangeContractCreator))
+	require.NoError(t, versioned.SetCode(c, []byte{0x60, 0x00}, tracing.CodeChangeContractCreation))
+	require.NoError(t, versioned.SetState(c, slot, *uint256.NewInt(5)))
+	writes, err := versioned.FinalizedWrites(rules)
+	require.NoError(t, err)
+	versioned.FlushWritesToVersionMap(writes)
+	got := downRevClearingWriter{newFinalStateWriter()}
+	require.NoError(t, versioned.WriteFlushedTo(writes, got))
+
+	require.Less(t, got.accounts[c].Incarnation, emptied.Incarnation, "the scenario lowers the incarnation")
+	require.Contains(t, got.code, c, "the new code survives the account write")
+	require.Equal(t, *uint256.NewInt(5), got.storage[c][slot], "the new storage survives the account write")
 }

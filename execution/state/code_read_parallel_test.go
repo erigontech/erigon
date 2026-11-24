@@ -164,28 +164,6 @@ func TestPriorTxCodeWriteHashSurvivesReadSetHit(t *testing.T) {
 	require.Equal(t, cellHash, code.Hash, "the cell's hash must win, not keccak(bytes)")
 }
 
-// refreshCode no longer derives a missing hash from the bytes, so a producer
-// storing code without its hash must trip the assertion instead of leaving a
-// nil code hash in the account record.
-func TestRefreshCodeAssertsHashPresent(t *testing.T) {
-	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
-	dbg.AssertEnabled = true
-
-	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
-	acc := accounts.NewAccount()
-	acc.Nonce = 1
-	acc.Incarnation = 1
-
-	vm := NewVersionMap(nil)
-	vm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.Code{Bytes: []byte{0x60, 0x00}}, true)
-
-	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: nil}, vm)
-	ibs.SetTxContext(100, 7)
-	ibs.SetVersion(0)
-
-	assert.Panics(t, func() { _, _ = refreshCode(ibs, addr) })
-}
-
 type segmentCodeReader struct {
 	codeReader
 	segmentReads, fullReads int
@@ -417,14 +395,6 @@ func TestCodeSegment_CopiesCodeAnEarlierTxWrote(t *testing.T) {
 			require.Zero(t, reader.segmentReads, "code from the version map must not be read from the committed state")
 		})
 	}
-}
-
-// A read without bytes stands for the code the transaction first read, not a later write of a lower transaction.
-func TestCodeSegment_RefreshKeepsTheFirstReadCode(t *testing.T) {
-	ibs, _, addr, code := segmentReadThenLowerCodeWrite(t)
-	got, err := refreshCode(ibs, addr)
-	require.NoError(t, err)
-	require.Equal(t, code, got.Bytes)
 }
 
 func TestCodeSegment_VersionedReaderKeepsTheFirstReadCode(t *testing.T) {

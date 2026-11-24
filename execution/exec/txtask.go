@@ -49,7 +49,6 @@ type Task interface {
 		engine rules.Engine,
 		genesis *types.Genesis,
 		ibs *state.IntraBlockState,
-		stateWriter state.StateWriter,
 		chainConfig *chain.Config,
 		chainReader rules.ChainReader,
 		dirs datadir.Dirs,
@@ -450,7 +449,6 @@ func (t *TxTask) Execute(evm *vm.EVM,
 	engine rules.Engine,
 	genesis *types.Genesis,
 	ibs *state.IntraBlockState,
-	stateWriter state.StateWriter,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
@@ -552,18 +550,18 @@ func (t *TxTask) Execute(evm *vm.EVM,
 	if result.Err != nil && errors.Is(result.Err, protocol.ErrExecPanic) && t.TxIndex >= 0 && !t.IsBlockEnd() {
 		result.Operational = true
 	}
-	if stateErr := ibs.StateReadError(); stateErr != nil && t.TxIndex >= 0 && !t.IsBlockEnd() {
+	if stateErr := ibs.StateReadError(); stateErr != nil && !t.IsBlockEnd() {
 		result.Operational = true
 		result.Err = stateErr
 	}
 	// Prepare the read and write sets.
 	if result.Err == nil {
-		result.TxOut, _ = ibs.FinalizedWrites(rules) // the read error is checked below
-
 		// FinalizedWrites composes pre-tx state to decide EIP-161 removals and can
 		// hit a read failure of its own; surface it operationally and drop the
 		// write-set built from it rather than committing a wrong deletion.
-		if stateErr := ibs.StateReadError(); stateErr != nil && t.TxIndex >= 0 && !t.IsBlockEnd() {
+		var stateErr error
+		result.TxOut, stateErr = ibs.FinalizedWrites(rules)
+		if stateErr != nil && !t.IsBlockEnd() {
 			result.Operational = true
 			result.Err = stateErr
 			result.TxOut = nil

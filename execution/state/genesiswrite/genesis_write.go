@@ -458,7 +458,7 @@ func genesisStateRoot(writes *state.WriteSet, vm *state.VersionMap) ([]byte, err
 // IntraBlockState, returning it with the finalized write set already published to the
 // state's version map.
 func GenesisState(g *types.Genesis, head *types.Header) (*state.IntraBlockState, *state.WriteSet, error) {
-	statedb := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	statedb := state.New(state.NewNoopReader())
 	statedb.SetTxContext(0, 0)
 	statedb.SetTrace(false)
 

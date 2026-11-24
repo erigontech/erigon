@@ -1179,7 +1179,6 @@ func TestVersionedWritePoolReuse_NoStaleFields(t *testing.T) {
 			Path:    NoncePath,
 			Key:     accounts.InternKey([32]byte{0xff}),
 			Version: Version{TxIndex: 999, Incarnation: 7},
-			Reason:  tracing.BalanceChangeReason(0xab),
 		},
 		Val: *uint256.NewInt(0xdead),
 	})
@@ -1193,7 +1192,6 @@ func TestVersionedWritePoolReuse_NoStaleFields(t *testing.T) {
 	require.Equal(t, addr, vw.Address, "Address must not retain the recycled value")
 	require.Equal(t, BalancePath, vw.Path, "Path must not retain the recycled value")
 	require.Equal(t, accounts.StorageKey{}, vw.Key, "Key must reset to zero (BalancePath has no key)")
-	require.Equal(t, tracing.BalanceChangeReason(0), vw.Reason, "Reason must reset to zero")
 	require.True(t, vw.Val.Eq(&want), "Val must not retain the recycled value")
 }
 
@@ -1568,27 +1566,6 @@ func TestGetVersionedAccount_ReconcilesDBLoadedRecordRead(t *testing.T) {
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.Equal(t, *uint256.NewInt(700), bal)
-	rd, ok := ibs.reads.GetAddress(addr)
-	require.True(t, ok)
-	require.NotNil(t, rd.Val)
-	require.NotNil(t, rd.Val.Account())
-}
-
-// A recordRead=false record read (delegation resolution, journal reverts)
-// still leaves refreshAccount's nil map-read marker in the read set; once the
-// DB resolves the account the marker must be reconciled all the same —
-// recordRead only means "don't add a read", not "leave a wrong one".
-func TestGetStateObject_NoRecordReadStillReconciles(t *testing.T) {
-	mvhm := NewVersionMap(nil)
-	addr := accounts.InternAddress([20]byte{0xdb, 0x02})
-	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(900), true)
-	dbAcc := &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash}
-	ibs := NewWithVersionMap(&fixedAccountReader{acc: dbAcc}, mvhm)
-	defer ibs.Release(false)
-	ibs.txIndex = 5
-	exists, err := ibs.Exist(addr)
-	require.NoError(t, err)
-	require.True(t, exists)
 	rd, ok := ibs.reads.GetAddress(addr)
 	require.True(t, ok)
 	require.NotNil(t, rd.Val)
@@ -2571,7 +2548,7 @@ func TestMarkWritesValidatedMarksACellRecreatedAtTheSameIncarnation(t *testing.T
 	addr := accounts.InternAddress(common.HexToAddress("0x16"))
 	first := balanceWrite(addr, Version{TxIndex: 3}, 1)
 	vm.FlushWrites(first, false)
-	vm.DeleteAll(addr, 3)
+	vm.Delete(addr, BalancePath, accounts.NilKey, 3, true)
 	vm.FlushWrites(balanceWrite(addr, Version{TxIndex: 3}, 1), false)
 	vm.MarkWritesValidated(first, nil)
 	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))

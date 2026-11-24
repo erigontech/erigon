@@ -84,9 +84,11 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 	return accounts.Code{Hash: codeHash, Bytes: code}, err
 }
 
-// codeSeed returns the code this tx currently sees at addr — its own Code write cell
-// if any, else the committed value — without recording an OCC read. Lets SetCode compare against
-// current code, not the stale tx-start value.
+// codeSeed returns the code this tx sees at addr: its own Code write if any, else the
+// version-map value below txIndex, else the pre-block value. Its own write is returned
+// without recording a read; a value from a lower tx or the committed state is resolved
+// through the tracked code reader, so the comparison SetCode makes against it is covered
+// by an OCC read and resolves estimate cells like a normal read.
 func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts.CodeHash) (accounts.Code, error) {
 	if _, isDirty := ibs.journal.dirties[addr]; isDirty {
 		if vw, ok := ibs.writes.GetCode(addr); ok {
@@ -96,18 +98,15 @@ func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 	if currentHash == accounts.EmptyCodeHash {
 		return accounts.Code{Hash: accounts.EmptyCodeHash}, nil
 	}
-	// An earlier tx in this block may have installed the code; its bytes live in
-	// the version map, not the pre-block origin. Resolve them there first so the
-	// seed carries the bytes matching currentHash rather than nil bytes from the
-	// origin reader (which would make an identical SetCode look like a change).
-	if code, _, ok := ibs.versionMap.ReadCode(addr, ibs.txIndex); ok {
-		return code, nil
-	}
-	code, err := ibs.originCodeDirect(addr)
+	// An earlier tx in this block may have installed the code; its bytes live in the
+	// version map, not the pre-block origin. Reading it untracked lets a withdrawal of
+	// that earlier write validate stale, and drops the bytes that distinguish an
+	// identical SetCode from a real change — so resolve through the tracked reader.
+	code, _, _, err := readCode(ibs, addr)
 	if err != nil {
 		return accounts.Code{}, err
 	}
-	return accounts.Code{Hash: currentHash, Bytes: code.Bytes}, nil
+	return code, nil
 }
 
 // originCodeHash returns the pre-block origin code hash from the state reader
@@ -658,61 +657,22 @@ func readCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key a
 				r.account = readAccount
 			}
 		}
-		// Cold origin storage read: resolve directly from the state reader without
-		// materializing a stateObject.
-		if path == StoragePath {
-			hdr.Source = StorageRead
-			// A cold slot depends only on its own StoragePath cell — recording an
-			// AddressPath dependency would be a false dep. The origin is resolved by
-			// ReadStorage's origin fallback; this cold path is the first reader (not yet
-			// published), which reads the origin base from the state reader.
-			val, err := s.originStorageDirect(addr, key)
-			if err != nil {
-				r.err = err
-				r.outcome = outcomeReturnDefault
-				r.source = StorageRead
-				r.version = UnknownVersion
-				return
-			}
-			r.mapStorageVal = val
-			r.outcome = outcomeStorageRead
-			r.hdr = hdr
-			r.recordVR = true
-			r.source = hdr.Source
-			r.version = hdr.Version
-			return
+		// Cold storage / code reads resolve straight from the state reader and record only
+		// their own path: an AddressPath dependency would be a false dep.
+		var err error
+		switch path {
+		case StoragePath:
+			r.mapStorageVal, err = s.originStorageDirect(addr, key)
+		case CodePath:
+			r.mapCodeVal, err = s.originCodeDirect(addr)
+		case CodeSizePath:
+			r.mapCodeSizeVal, err = s.originCodeSizeDirect(addr)
 		}
-		// Cold code / code-size read: resolve directly from the state reader without
-		// materializing a stateObject. Code paths record only their own dependency
-		// (no false AddressPath dep).
-		if path == CodePath || path == CodeSizePath {
-			hdr.Source = StorageRead
-			if path == CodePath {
-				code, err := s.originCodeDirect(addr)
-				if err != nil {
-					r.err = err
-					r.outcome = outcomeReturnDefault
-					r.source = StorageRead
-					r.version = UnknownVersion
-					return
-				}
-				r.mapCodeVal = code
-			} else {
-				size, err := s.originCodeSizeDirect(addr)
-				if err != nil {
-					r.err = err
-					r.outcome = outcomeReturnDefault
-					r.source = StorageRead
-					r.version = UnknownVersion
-					return
-				}
-				r.mapCodeSizeVal = size
-			}
-			r.outcome = outcomeStorageRead
-			r.hdr = hdr
-			r.recordVR = true
-			r.source = hdr.Source
-			r.version = hdr.Version
+		if err != nil {
+			r.err = err
+			r.outcome = outcomeReturnDefault
+			r.source = StorageRead
+			r.version = UnknownVersion
 			return
 		}
 		if r.account == nil {
@@ -998,14 +958,14 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 }
 
 // readNonce returns the nonce using the version-aware read pipeline.
-func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
+func readNonce(s *IntraBlockState, addr accounts.Address, committed bool) (uint64, ReadSource, Version, error) {
+	if committed || s.warmReadable(addr) {
 		if tr, ok := s.reads.GetNonce(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	readCore(s, addr, NoncePath, accounts.NilKey, false, false, &r)
+	readCore(s, addr, NoncePath, accounts.NilKey, committed, false, &r)
 	if r.err != nil {
 		s.RecordStateReadError(r.err)
 		return 0, r.source, r.version, r.err
@@ -1327,37 +1287,6 @@ func (ibs *IntraBlockState) readOriginCodeSegmentTo(addr accounts.Address, from 
 		return accounts.CodeHash{}, false, err
 	}
 	return codeHash, true, nil
-}
-
-// refreshCode re-reads CodePath from the versioned IO; a read-set hit recorded without bytes reads the committed code
-// again. CodePath is never recorded via the skipStorage branch (the `path != CodePath` guard), so the default case
-// records nothing.
-func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, error) {
-	var r readPathResult
-	readCore(s, addr, CodePath, accounts.NilKey, false, true, &r)
-	if r.err != nil {
-		return accounts.Code{}, r.err
-	}
-	var code accounts.Code
-	switch r.outcome {
-	case outcomeWriteSetHit:
-		code = r.vwCode.Val
-	case outcomeReadSetHit:
-		tr, _ := s.reads.GetCode(addr)
-		var err error
-		if code, err = s.recordedCode(addr, tr); err != nil {
-			return accounts.Code{}, err
-		}
-	case outcomeMapDone:
-		code = r.mapCodeVal
-	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
-	default:
-		panic(fmt.Sprintf("refreshCode: unexpected outcome %d for %x", r.outcome, addr))
-	}
-	if dbg.AssertEnabled && code.Bytes != nil && code.Hash == accounts.NilCodeHash {
-		panic(fmt.Sprintf("refreshCode: code without hash for %x", addr))
-	}
-	return code, nil
 }
 
 // readCodeSize returns the contract code size.
