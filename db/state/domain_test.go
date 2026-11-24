@@ -2959,7 +2959,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(t, err)
 		c.Close()
-		reclaimFiles(d.integrateDirtyFiles(sf, pruneFrom, pruneTo))
+		d.integrateDirtyFiles(sf, pruneFrom, pruneTo)
 		rotx.Rollback()
 
 		domainRoTx = d.beginForTests()
@@ -3530,7 +3530,7 @@ func TestDomain_IntegrateDirtyFilesNilGuard(t *testing.T) {
 	require.NotNil(t, sf.valuesDecomp, "buildFiles must produce a non-nil decompressor")
 
 	// -- integrate the good files --
-	reclaimFiles(d.integrateDirtyFiles(sf, 0, d.stepSize))
+	d.integrateDirtyFiles(sf, 0, d.stepSize)
 
 	// verify the dirty file has a non-nil decompressor
 	var foundGood *FilesItem
@@ -3548,7 +3548,7 @@ func TestDomain_IntegrateDirtyFilesNilGuard(t *testing.T) {
 
 	// -- simulate the second BuildFilesInBackground that skipped this domain --
 	// A zero-value StaticFiles (all nil) must NOT overwrite the good entry.
-	reclaimFiles(d.integrateDirtyFiles(StaticFiles{}, 0, d.stepSize))
+	d.integrateDirtyFiles(StaticFiles{}, 0, d.stepSize)
 
 	// regression check: dirty file must still have its non-nil decompressor
 	var foundAfter *FilesItem

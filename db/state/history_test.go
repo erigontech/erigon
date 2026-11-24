@@ -164,7 +164,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 					values[string(keyBuf)] = updates[vi:]
 					require.True(t, slices.IsSorted(seenKeys))
 				}
-				reclaimFiles(h.integrateDirtyFiles(sf, i, i+h.stepSize))
+				h.integrateDirtyFiles(sf, i, i+h.stepSize)
 				lastAggergatedTx = i + h.stepSize
 				return nil
 			}(); err != nil {

@@ -885,31 +885,20 @@ func (c Collation) Close() {
 // An empty dstDir uses the live snapshots directory. The caller must publish
 // the returned files through the aggregator or close their handles.
 func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.Step, batch *TemporalMemBatch, vt valueTransformer, dstDir string) (StaticFiles, error) {
-	if stepFrom == stepTo {
+	if !d.Enabled || stepFrom == stepTo {
 		return StaticFiles{}, nil
 	}
-	wal := batch.domainWriters[d.Name]
-	if wal == nil || wal.discard {
-		return StaticFiles{}, nil
-	}
-
 	if stepFrom > stepTo {
 		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
 	}
 
-	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.valsCollector(), vt, dstDir)
+	wal := batch.domainWriters[d.Name]
 	defer wal.Close()
+	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.valsCollector(), vt, dstDir)
 	if err != nil {
 		return StaticFiles{}, err
 	}
-
-	ps := background.NewProgressSet()
-	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, ps, dstDir)
-	wal.Close() // munmap ETL temp files after buildFileRange consumed the zero-copy data
-	if err != nil {
-		return StaticFiles{}, err
-	}
-	return static, nil
+	return d.buildFileRange(ctx, stepFrom, stepTo, coll, background.NewProgressSet(), dstDir)
 }
 
 // [stepFrom; stepTo)

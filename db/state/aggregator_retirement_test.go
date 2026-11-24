@@ -17,11 +17,11 @@
 package state
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -46,47 +46,33 @@ func TestAggregatorBuildRetiresReplacedFiles(t *testing.T) {
 		require.NoError(t, writer.Add([]byte{1}, 1))
 		return writer.Flush(ctx, tx)
 	}))
-	require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), 0, unboundedFinalityCtx, nil))
-	reader := agg.BeginFilesRo()
-	defer reader.Close()
+
 	domain := agg.d[kv.ReceiptDomain]
 	files := []*DirtyFiles{domain.dirtyFiles, domain.History.dirtyFiles, domain.InvertedIndex.dirtyFiles, agg.searchII(kv.LogAddrIdx).dirtyFiles}
+	var reader *AggregatorRoTx
 	var replaced []*FilesItem
-	for _, dirty := range files {
-		require.Equal(t, 1, dirty.Len())
-		old := dirty.Items()[0]
-		t.Cleanup(old.closeFiles)
-		require.NotNil(t, old.decompressor)
-		replaced = append(replaced, old)
-	}
-
-	// Build elsewhere so this checks publication without overwriting mapped files.
-	builder := NewTest(datadir.New(t.TempDir())).StepSize(stepSize).MustOpen(ctx)
-	defer builder.Close()
-	static := &AggV3StaticFiles{}
-	defer static.CleanupOnError()
-	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
-		domain := builder.d[kv.ReceiptDomain]
-		collation, err := domain.collate(ctx, 0, 0, stepSize, tx)
-		require.NoError(t, err)
-		defer collation.Close()
-		static.d[kv.ReceiptDomain], err = domain.buildFiles(ctx, 0, collation, builder.backgroundProgress)
-		require.NoError(t, err)
-		for id, ii := range builder.standaloneIIs() {
-			if ii.Name != kv.LogAddrIdx {
-				continue
-			}
-			indexCollation, err := ii.collate(ctx, 0, tx)
-			require.NoError(t, err)
-			static.ivfs[id], err = ii.buildFiles(ctx, 0, indexCollation, builder.backgroundProgress)
-			indexCollation.Close()
-			require.NoError(t, err)
+	agg.SetMaintenanceObserver(func(_ context.Context, event MaintenanceEvent) {
+		if event.Point != MaintenanceFilesBuilt {
+			return
 		}
-		return nil
-	}))
-	agg.IntegrateDirtyFiles(static, 0, stepSize)
+		// Pin the files from disk before the builder publishes its own mappings of the same paths.
+		require.NoError(t, agg.OpenFolder(db))
+		reader = agg.BeginFilesRo()
+		t.Cleanup(reader.Close)
+		for _, dirty := range files {
+			require.Equal(t, 1, dirty.Len())
+			old := dirty.Items()[0]
+			t.Cleanup(old.closeFiles)
+			require.NotNil(t, old.decompressor)
+			replaced = append(replaced, old)
+		}
+	})
+	require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), 0, unboundedFinalityCtx, nil))
+	require.NotNil(t, reader)
 	for i, old := range replaced {
-		require.NotSame(t, old, files[i].Items()[0])
+		replacement := files[i].Items()[0]
+		require.NotSame(t, old, replacement)
+		require.Equal(t, old.FilePaths(agg.dirs.Snap), replacement.FilePaths(agg.dirs.Snap))
 		require.NotNil(t, old.decompressor, "a pinned reader must keep its mappings")
 		require.True(t, old.decompressor.IsOpen())
 	}
