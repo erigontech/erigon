@@ -3754,10 +3754,26 @@ func TestRemoteAdmissionAboveAccountSlots(t *testing.T) {
 		return reasons
 	}
 
-	reasons := submit(newTestSenderTxnSlot(sender, 0), newTestSenderTxnSlot(sender, 1), newTestSenderTxnSlot(sender, 2))
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, 0)
+	require.NoError(t, err)
+	pooled := newTestSetCodeTxnSlot(2, 0, 1, 2, 100_000)
+	pooled.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
+	pooled.IDHash = pooled.Txn.Hash()
+	resubmitted := *pooled
+	reasons := submit(newTestSenderTxnSlot(sender, 0), newTestSenderTxnSlot(sender, 1), pooled)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, submit(newTestSenderTxnSlot(sender, 0)))
 	require.Len(t, pool.byHash, 3, "a duplicate must not trigger the sender penalty")
+
+	// The first input evicts the highest nonce. The copy now needs its own admission and authorization recovery.
+	reasons = submit(newTestSenderTxnSlot(sender, 3), &resubmitted)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, reasons)
+	installed := pool.byHash[string(resubmitted.IDHash[:])]
+	require.NotNil(t, installed)
+	require.Same(t, &resubmitted, installed.TxnSlot)
+	require.Same(t, installed, pool.auths[AuthAndNonce{crypto.PubkeyToAddress(key.PublicKey), 0}])
 
 	setCode := newTestSetCodeTxnSlot(3, 0, 1, 2, 100_000)
 	setCode.IDHash[0] = 4

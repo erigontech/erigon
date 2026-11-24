@@ -394,3 +394,28 @@ func TestBlobSlotsOverflowDoesNotPunishSender(t *testing.T) {
 		require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 	}
 }
+
+func TestRemoteBlobReadmissionAfterSenderPenalty(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, testforks.Forks["Cancun"])
+	pool.cfg.AccountSlots = 1
+	blob := makeBlobSlot(3, false)
+	blob.Nonce = 1
+	blobTx := blob.Txn.(*types.BlobTx)
+	blobTx.Nonce, blobTx.GasLimit = blob.Nonce, 100_000
+	pool.cfg.BlobSlots = uint64(len(blob.GetBlobHashes()))
+	pool.cfg.TotalBlobPoolLimit = pool.cfg.BlobSlots
+	resubmitted := blob
+	submit := func(ordinaryNonce uint64, candidate *TxnSlot) []txpoolcfg.DiscardReason {
+		t.Helper()
+		var batch TxnSlots
+		batch.Append(newTestSenderTxnSlot(sender, ordinaryNonce), sender[:], false)
+		batch.Append(candidate, sender[:], false)
+		pool.AddRemoteTxns(ctx, batch, nil, nil)
+		reasons, err := pool.processRemoteBatch(ctx)
+		require.NoError(t, err)
+		return reasons
+	}
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, submit(0, &blob))
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, submit(2, &resubmitted))
+	require.Contains(t, pool.byHash, string(blob.IDHash[:]))
+}
