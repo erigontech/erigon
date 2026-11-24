@@ -72,7 +72,6 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 		receipt *types.Receipt
 		result  *evmtypes.ExecutionResult
 		err     error
-		txEnded bool
 	)
 
 	rules := evm.ChainRules()
@@ -89,7 +88,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 		}
 		if cfg.Tracer.HasTxEndHook() {
 			defer func() {
-				if txEnded {
+				if err == nil {
 					return
 				}
 				var txnGasUsage mdgas.TxnGasUsage
@@ -122,11 +121,10 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	// so the tracer's tx-end hook fires first.
 	if cfg.Tracer.HasTxEndHook() {
 		cfg.Tracer.EmitTxEnd(receipt, result.TxnGasUsage, nil)
-		txEnded = true
 	}
 	ibs.EndTransaction()
 
-	return receipt, err
+	return receipt, nil
 }
 
 // ApplyTransaction attempts to apply a transaction to the given state database

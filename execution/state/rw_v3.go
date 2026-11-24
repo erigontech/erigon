@@ -690,8 +690,7 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 	}
 }
 
-func (w *Writer) SetTxNum(v uint64)              { w.txNum = v }
-func (w *Writer) SetPutDel(tx kv.TemporalPutDel) { w.tx = tx }
+func (w *Writer) SetTxNum(v uint64) { w.txNum = v }
 
 func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return nil, nil, nil, nil

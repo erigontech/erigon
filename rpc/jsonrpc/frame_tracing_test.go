@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -430,12 +431,7 @@ func TestFramePrestateTracerRetainedBalance(t *testing.T) {
 	destroyed, err := ibs.HasSelfdestructed(accounts.InternAddress(child))
 	require.NoError(t, err)
 	require.True(t, destroyed)
-	writes, err := ibs.FinalizedWrites(evm.ChainRules())
-	require.NoError(t, err)
-	ibs.FlushWritesToVersionMap(writes)
-	ibs.EndTransaction()
-	ibs.ResetVersionedIO()
-	ibs.SetTxContext(1, 1)
+	require.NoError(t, ethapi.EndCallTx(ibs, evm.ChainRules(), nil))
 	balance, err := ibs.GetBalance(accounts.InternAddress(child))
 	require.NoError(t, err)
 	require.Equal(t, uint256.Int{7}, balance)

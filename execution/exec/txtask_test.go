@@ -368,9 +368,8 @@ func TestExecuteReportsFailedWriteSetAsOperational(t *testing.T) {
 			armed := false
 			reader := failingAccountReader{state.NewNoopReader(), sender, slotOwner, &armed, want}
 			versionMap := state.NewVersionMap(nil)
-			ibs := state.New(state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, reader))
+			ibs := state.NewWithVersionMap(state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, reader), versionMap)
 			defer ibs.Close()
-			ibs.SetVersionMap(versionMap)
 			ibs.SetTxContext(1, txIndex)
 
 			// A storage-only write carries no balance, nonce or code hash, so only
