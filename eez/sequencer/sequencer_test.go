@@ -839,6 +839,21 @@ func TestComposerTxs(t *testing.T) {
 	require.Equal(t, h.block(t, 5).Hash(), w.pinned[sync.Hash()])
 }
 
+// TestComposerNoTxs: a composer's empty transaction list is an empty Sync
+// block, whatever the pool holds.
+func TestComposerNoTxs(t *testing.T) {
+	h := newHarness(t)
+	h.pool.hold(5)
+	h.pool.add(t, h.c.Transfer(common.HexToAddress("0xca1"), 3))
+	c := &slotComposer{txs: []types.Transaction{}}
+	s := h.sequencerOf(t, sequencer.Config{Composer: c})
+	g := h.genesis.Time
+	s.SetClock(func() time.Time { return onTime(g + 12) })
+	require.NoError(t, s.Handle(t.Context(), sequencer.SyncSlot{Height: 6, Time: g + 12, L1Head: 1}))
+	require.Empty(t, h.block(t, 6).Transactions())
+	require.Equal(t, []common.Hash{h.block(t, 6).Hash()}, c.committed)
+}
+
 func (h *harness) head(t *testing.T) *types.Header {
 	t.Helper()
 	head, err := h.follower.Head(t.Context())

@@ -92,7 +92,8 @@ func (m Mode) String() string {
 type Composed struct {
 	// Block, when set, is the Sync block.
 	Block *types.Block
-	// Txs, when set without Block, are the Sync block's transactions.
+	// Txs, when non-nil without Block, are the Sync block's transactions,
+	// none when empty.
 	Txs []types.Transaction
 	// Empty, without Block or Txs, has the sequencer build an empty Sync
 	// block; with none, it fills the block from the pool, empty in a late
@@ -448,7 +449,7 @@ func (s *Sequencer) syncBlock(ctx context.Context, parent *types.Header, ts, tar
 		sync, err = s.insert(ctx, Sync, answer.Block)
 	case len(answer.Txs) > 0:
 		sync, err = s.extend(ctx, Sync, parent, answer.Txs)
-	case answer.Empty || mode == ModeEmpty:
+	case answer.Txs != nil || answer.Empty || mode == ModeEmpty:
 		sync, err = s.build(ctx, Sync, parent, noTxns{})
 	default:
 		sync, err = s.produce(ctx, Sync, parent)
