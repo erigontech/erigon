@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -522,4 +523,10 @@ func TestCanonTableKeepsIdentityAcrossGenerations(t *testing.T) {
 	c.flush()
 	require.Same(t, held, c.intern(k))
 	runtime.KeepAlive(held)
+}
+
+func TestTraceAccountMatchesInternedAddress(t *testing.T) {
+	a := common.HexToAddress("0x5b38da6a701c568545dcfcb03fcb875f56beddc4")
+	dbg.TraceAccounts = []string{a.Hex()}
+	require.True(t, dbg.TraceAccount(InternAddress(a).Value()))
 }

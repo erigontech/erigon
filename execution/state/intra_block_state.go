@@ -535,7 +535,7 @@ func (ibs *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize in
 
 // NotifyLog runs the OnLog hook after a log's fields are populated.
 func (ibs *IntraBlockState) NotifyLog(lp *types.Log) {
-	if dbg.TraceLogs && (ibs.trace || dbg.TraceAccount(accounts.InternAddress(lp.Address).Handle())) {
+	if dbg.TraceLogs && (ibs.trace || dbg.TraceAccount(accounts.InternAddress(lp.Address).Value())) {
 		var topics string
 		for i := 0; i < len(lp.Topics); i++ {
 			topics += "[" + hex.EncodeToString(lp.Topics[i][:]) + "]"
@@ -619,7 +619,7 @@ func (ibs *IntraBlockState) SubRefund(gas uint64) error {
 // Exist reports whether the given account address exists in the state.
 // Notably this also returns true for self destructed accounts.
 func (ibs *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error) {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		defer func() {
 			fmt.Printf("%d (%d.%d) Exists %x: %v\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, exists)
 		}()
@@ -645,7 +645,7 @@ func (ibs *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error
 // Empty returns whether the state object is either non-existent
 // or empty according to the EIP161 specification (balance = nonce = code = 0)
 func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error) {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		defer func() {
 			fmt.Printf("%d (%d.%d) Empty %x: %v\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, empty)
 		}()
@@ -779,7 +779,7 @@ func (ibs *IntraBlockState) getBalance(addr accounts.Address) (uint256.Int, bool
 			return u256.Num0, false, err
 		}
 		if stateObject != nil && !stateObject.deleted {
-			if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+			if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 				balance := stateObject.Balance()
 				fmt.Printf("%d (%d.%d) GetBalance %x: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, balance.String())
 			}
@@ -790,7 +790,7 @@ func (ibs *IntraBlockState) getBalance(addr accounts.Address) (uint256.Int, bool
 
 	balance, source, _, err := readBalance(ibs, addr)
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) GetBalance %x: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, balance.String())
 	}
 	return balance, source == StorageRead || source == MapRead, err
@@ -811,7 +811,7 @@ func (ibs *IntraBlockState) GetNonce(addr accounts.Address) (uint64, error) {
 
 	nonce, _, _, err := readNonce(ibs, addr, false)
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) GetNonce %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, nonce)
 	}
 
@@ -844,7 +844,7 @@ func (ibs *IntraBlockState) ReadCodeSegmentTo(addr accounts.Address, from uint64
 	if !seg.copied {
 		common.CopySegment(dst, code.Bytes, from)
 	}
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) ReadCodeSegmentTo (%s) %x: from %d, %d bytes, err: %v\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, from, len(dst), err)
 	}
 	return err
@@ -858,7 +858,7 @@ func (ibs *IntraBlockState) getCode(addr accounts.Address) (accounts.Code, error
 		}
 		if stateObject != nil && !stateObject.deleted {
 			code, err := stateObject.CodeTyped()
-			if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+			if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 				if err != nil {
 					fmt.Printf("%d (%d.%d) GetCode (%s) %x: err: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, StorageRead, addr, err)
 				} else {
@@ -870,14 +870,14 @@ func (ibs *IntraBlockState) getCode(addr accounts.Address) (accounts.Code, error
 			}
 			return code, err
 		}
-		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, StorageRead, addr, 0)
 		}
 		return accounts.Code{}, nil
 	}
 	code, source, _, err := readCode(ibs, addr)
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		if err != nil {
 			fmt.Printf("%d (%d.%d) GetCode (%s) %x: err: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, err)
 		} else {
@@ -927,7 +927,7 @@ func (ibs *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 	}
 	size, source, _, err := readCodeSize(ibs, addr)
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) GetCodeSize (%s) %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, size)
 	}
 
@@ -1061,7 +1061,7 @@ func (ibs *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 func (ibs *IntraBlockState) GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
 	versionedValue, source, _, err := readState(ibs, addr, key)
 
-	if dbg.TraceTransactionIO && (ibs.trace || (dbg.TraceAccount(addr.Handle()) && traceKey(key))) {
+	if dbg.TraceTransactionIO && (ibs.trace || (dbg.TraceAccount(addr.Value()) && traceKey(key))) {
 		fmt.Printf("%d (%d.%d) GetState (%s) %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, key, versionedValue.Hex()[2:])
 	}
 
@@ -1073,7 +1073,7 @@ func (ibs *IntraBlockState) GetState(addr accounts.Address, key accounts.Storage
 func (ibs *IntraBlockState) GetCommittedState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
 	versionedValue, source, _, err := readCommittedState(ibs, addr, key)
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) GetCommittedState (%s) %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, key, versionedValue.Hex()[2:])
 	}
 
@@ -1141,7 +1141,7 @@ func (ibs *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 			if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
 				prev := new(uint256.Int)
 				amount := amount
-				if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+				if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value()))) {
 					ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 				}
 				var readStart time.Time
@@ -1180,7 +1180,7 @@ func (ibs *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 		return err
 	}
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		defer func() {
 			bal, _ := ibs.GetBalance(addr)
 			prev := prev     // avoid capture allocation unless we're tracing
@@ -1227,7 +1227,7 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 		}
 	}
 	markTouched := func() {
-		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 			fmt.Printf("%d (%d.%d) Touch %x\n", ibs.blockNum, ibs.txIndex, ibs.version, addr)
 		}
 		if ibs.versionMap != nil {
@@ -1495,7 +1495,7 @@ func (ibs *IntraBlockState) committedAccount(addr accounts.Address) (*accounts.A
 	if cached, ok := ibs.committedBase[addr]; ok {
 		return cached, nil
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
 	var readStart time.Time
@@ -1538,7 +1538,7 @@ func (ibs *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 		return err
 	}
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		defer func() {
 			bal, _ := ibs.GetBalance(addr)
 			prev := prev     // avoid capture allocation unless we're tracing
@@ -1563,7 +1563,7 @@ func (ibs *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		amount := amount
 		fmt.Printf("%d (%d.%d) SetBalance %x, %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, amount.String())
 	}
@@ -1581,7 +1581,7 @@ func (ibs *IntraBlockState) SetBalance(addr accounts.Address, amount uint256.Int
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64, reason tracing.NonceChangeReason) error {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) SetNonce %x, %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, nonce)
 	}
 
@@ -1658,7 +1658,7 @@ func printCode(c []byte) (int, string) {
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason tracing.CodeChangeReason) error {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		lenc, cs := printCode(code)
 		fmt.Printf("%d (%d.%d) SetCode %x, %d: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, lenc, cs)
 	}
@@ -1817,7 +1817,7 @@ func (ibs *IntraBlockState) writeCodeVersioned(addr accounts.Address, code accou
 	// value the tx reverts to.
 	matchesOriginal := !createdThisTx && code.Hash == origHash
 	unchanged := code.Hash == baseCodeHash || matchesOriginal
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		if unchanged {
 			fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x originalHash=%x codeLen=%d\n",
 				ibs.blockNum, ibs.txIndex, ibs.version, addr, code.Hash, baseCodeHash, origHash, len(code.Bytes))
@@ -1866,7 +1866,7 @@ func (ibs *IntraBlockState) SetState(addr accounts.Address, key accounts.Storage
 }
 
 func (ibs *IntraBlockState) setState(addr accounts.Address, key accounts.StorageKey, value uint256.Int, force bool) error {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) SetState %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, key, value.Hex())
 	}
 
@@ -1966,7 +1966,7 @@ func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) e
 
 // SetIncarnation sets incarnation for account if account exists
 func (ibs *IntraBlockState) SetIncarnation(addr accounts.Address, incarnation uint64) error {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) SetIncarnation %x, %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, incarnation)
 	}
 
@@ -2003,7 +2003,7 @@ func (ibs *IntraBlockState) GetIncarnation(addr accounts.Address) (uint64, error
 
 	incarnation, _, _, err := readIncarnation(ibs, addr)
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) GetIncarnation %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, incarnation)
 	}
 
@@ -2018,7 +2018,7 @@ func (ibs *IntraBlockState) GetIncarnation(addr accounts.Address) (uint64, error
 // The account's state object is still available until the state is committed,
 // getStateObject will return a non-nil account after Suicide.
 func (ibs *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance bool) (bool, error) {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) SelfDestruct %x\n", ibs.blockNum, ibs.txIndex, ibs.version, addr)
 	}
 	if ibs.versionMap != nil {
@@ -2212,7 +2212,7 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		return nil, nil
 	}
 
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
 	var readStart time.Time
@@ -2452,7 +2452,7 @@ func (ibs *IntraBlockState) createAccountVersioned(addr accounts.Address, contra
 	var prevIncarnation, prevPrevIncarnation uint64
 	var prevBalance uint256.Int
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		defer ibs.traceCreateAccount(addr, contractCreation, &err, func() string { return prevBalance.String() })()
 	}
 
@@ -2570,7 +2570,7 @@ func (ibs *IntraBlockState) createAccountVersioned(addr accounts.Address, contra
 		// deployed contract as empty.
 		ibs.recordWriteCreateContract(addr, true)
 		incarnation = prevInc + 1
-		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 			fmt.Printf("%d (%d.%d) New Incarnation %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, incarnation)
 		}
 	}
@@ -2614,7 +2614,7 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 
 	var previous *stateObject
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		defer ibs.traceCreateAccount(addr, contractCreation, &err, func() string {
 			var bal uint256.Int
 			if previous != nil {
@@ -2662,7 +2662,7 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	if contractCreation {
 		newObj.createdContract = true
 		newObj.data.Incarnation = prevInc + 1
-		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 			fmt.Printf("%d (%d.%d) New Incarnation %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, newObj.data.Incarnation)
 		}
 	} else {
@@ -2686,7 +2686,7 @@ func (ibs *IntraBlockState) RevertToSnapshot(revid int, err error) {
 	var traced bool
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TracingAccounts()) {
 		for addr := range ibs.journal.dirties {
-			if ibs.trace || dbg.TraceAccount(addr.Handle()) {
+			if ibs.trace || dbg.TraceAccount(addr.Value()) {
 				traced = true
 				if err == nil {
 					fmt.Printf("%d (%d.%d) Reverting %x, revid: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, revid)
@@ -2730,7 +2730,7 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
 			tracingHooks.OnBalanceChange(stateObject.address, balance, uint256.Int{}, tracing.BalanceDecreaseSelfdestructBurn)
 		}
-		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr.Handle()))) {
+		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr.Value()))) {
 			if _, ok := stateWriter.(*NoopWriter); !ok || dbg.TraceNoopIO {
 				fmt.Printf("%d (%d.%d) Delete Account: %x selfdestructed=%v stack=%s\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.selfdestructed, dbg.Stack())
 			}
@@ -2778,7 +2778,7 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 		if err := stateObject.updateStorage(stateWriter, useBlockOrigin); err != nil {
 			return err
 		}
-		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr.Handle()))) {
+		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr.Value()))) {
 			if _, ok := stateWriter.(*NoopWriter); !ok || dbg.TraceNoopIO {
 				fmt.Printf("%d (%d.%d) Update Account Data (%T): %x balance:%d,nonce:%d,codehash:%x\n",
 					stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, stateWriter, addr, &stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash)
@@ -2899,7 +2899,7 @@ func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	}
 	for addr, stateObject := range ibs.stateObjects {
 		_, isDirty := ibs.stateObjectsDirty[addr]
-		if dbg.TraceAccount(addr.Handle()) {
+		if dbg.TraceAccount(addr.Value()) {
 			var updated *uint256.Int
 			if w, ok := ibs.versionedWrites.GetBalance(addr); ok {
 				val := w.Val
@@ -2915,7 +2915,7 @@ func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 				fmt.Printf("%d (%d.%d) Updated Balance: %x%s: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, dirty, stateObject.data.Balance.String())
 			}
 		}
-		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 			fmt.Printf("%d (%d.%d) Update Account %x\n", ibs.blockNum, ibs.txIndex, ibs.version, addr)
 		}
 		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, stateObject, isDirty, ibs.trace, ibs.tracingHooks, true, chainRules.IsAmsterdam); err != nil {
@@ -3309,7 +3309,7 @@ func (ibs *IntraBlockState) clearJournalAndRefund() {
 func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase accounts.Address, dst accounts.Address,
 	precompiles []accounts.Address, list types.AccessList,
 ) {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(sender.Value()) || !dst.IsNil() && dbg.TraceAccount(dst.Value())) {
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v\n", ibs.blockNum, ibs.txIndex, ibs.version, sender, coinbase, dst, precompiles, list, rules)
 	}
 	ibs.txOutputFree = true
@@ -3708,7 +3708,7 @@ func traceWrite[T any](ibs *IntraBlockState, vw *VersionedWrite[T]) {
 		return
 	}
 	hdr := vw.WriteHeader
-	if !(ibs.trace || (dbg.TraceAccount(hdr.Address.Handle()) && (hdr.Key == accounts.NilKey || traceKey(hdr.Key)))) {
+	if !(ibs.trace || (dbg.TraceAccount(hdr.Address.Value()) && (hdr.Key == accounts.NilKey || traceKey(hdr.Key)))) {
 		return
 	}
 	fmt.Printf("%d (%d.%d) WRT %x %s: %v (%d.%d)\n", ibs.blockNum, ibs.txIndex, ibs.version,
