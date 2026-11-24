@@ -408,12 +408,6 @@ func (s *ValidatorSafeContract) epochSet(firstInEpoch bool, num uint64, setProof
 			panic(1)
 		}
 
-		//addresses, err := checkFirstValidatorSetProof(s.contractAddress, oldHeader, state_items)
-		//if err != nil {
-		//	panic(err)
-		//	return SimpleList{}, common.Hash{}, fmt.Errorf("insufitient proof: block=%d,%x: %w", oldHeader.Number.Uint64(), oldHeader.Hash(), err)
-		//}
-
 		//fmt.Printf("aaaa: %x,%x\n", common.HexToAddress("0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"), params.SokolGenesisHash)
 		//fmt.Printf("bbbbb: %x,%x\n", proof.ContractAddress, proof.Header.Hash())
 		return *l, proof.Header.ParentHash, nil
@@ -461,71 +455,6 @@ func (s *ValidatorSafeContract) epochSet(firstInEpoch bool, num uint64, setProof
 		}
 		_ = setProof
 	*/
-}
-
-// check a first proof: fetch the validator set at the given block.
-// nolint
-func checkFirstValidatorSetProof(contract_address common.Address, oldHeader *types.Header, dbItems [][]byte) ([]common.Address, error) {
-	/*
-		fn check_first_proof(
-		    machine: &EthereumMachine,
-		    contract_address: Address,
-		    old_header: Header,
-		    state_items: &[DBValue],
-		) -> Result<Vec<Address>, String> {
-		    use types::transaction::{Action, Transaction, TypedTransaction};
-
-		    // TODO: match client contract_call_tx more cleanly without duplication.
-		    const PROVIDED_GAS: u64 = 50_000_000;
-
-		    let env_info = ::vm::EnvInfo {
-		        number: old_header.number(),
-		        author: *old_header.author(),
-		        difficulty: *old_header.difficulty(),
-		        gas_limit: PROVIDED_GAS.into(),
-		        timestamp: old_header.timestamp(),
-		        last_hashes: {
-		            // this will break if we don't inclue all 256 last hashes.
-		            let mut last_hashes: Vec<_> = (0..256).map(|_| H256::default()).collect();
-		            last_hashes[255] = *old_header.parent_hash();
-		            Arc::new(last_hashes)
-		        },
-		        gas_used: 0.into(),
-		    };
-
-		    // check state proof using given machine.
-		    let number = old_header.number();
-		    let (data, decoder) = validator_set::functions::get_validators::call();
-
-		    let from = Address::default();
-		    let txn = TypedTransaction::Legacy(Transaction {
-		        nonce: machine.account_start_nonce(number),
-		        action: Action::Call(contract_address),
-		        gas: PROVIDED_GAS.into(),
-		        gas_price: U256::default(),
-		        value: U256::default(),
-		        data,
-		    })
-		    .fake_sign(from);
-
-		    let res = ::state::check_proof(
-		        state_items,
-		        *old_header.state_root(),
-		        &tx,
-		        machine,
-		        &env_info,
-		    );
-
-		    match res {
-		        ::state::ProvedExecution::BadProof => Err("Bad proof".into()),
-		        ::state::ProvedExecution::Failed(e) => Err(format!("Failed call: {}", e)),
-		        ::state::ProvedExecution::Complete(e) => {
-		            decoder.decode(&e.output).map_err(|e| e.to_string())
-		        }
-		    }
-		}
-	*/
-	return nil, nil
 }
 
 // inter-contract proofs are a header and receipts.
