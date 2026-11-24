@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"slices"
 	"sync"
 	"time"
 
@@ -37,10 +38,22 @@ func (u *peerUsefulness) lastUseful(pid peer.ID) (time.Time, bool) {
 	return t, ok
 }
 
-func (u *peerUsefulness) Connected(_ network.Network, c network.Conn) {
+// Connected starts a new window when the peer has no other open connection, even if the Disconnected
+// notification of its last connection has not run yet.
+func (u *peerUsefulness) Connected(n network.Network, c network.Conn) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	if !hasOtherOpenConn(n, c) {
+		u.last[c.RemotePeer()] = u.now()
+		return
+	}
 	u.addLocked(c.RemotePeer())
+}
+
+func hasOtherOpenConn(n network.Network, c network.Conn) bool {
+	return slices.ContainsFunc(n.ConnsToPeer(c.RemotePeer()), func(other network.Conn) bool {
+		return other != c && !other.IsClosed()
+	})
 }
 
 // addConnected adds the peers that connected before u was registered for notifications.

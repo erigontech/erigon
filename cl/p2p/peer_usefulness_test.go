@@ -14,13 +14,23 @@ const usefulPeer = peer.ID("useful-peer")
 type remoteConn struct {
 	network.Conn
 	remote peer.ID
+	id     string
+	closed bool
 }
 
 func (c remoteConn) RemotePeer() peer.ID { return c.remote }
+func (c remoteConn) IsClosed() bool      { return c.closed }
 
 type connectednessNetwork struct {
 	network.Network
 	connected bool
+	conns     []network.Conn
+}
+
+func (n connectednessNetwork) ConnsToPeer(peer.ID) []network.Conn { return n.conns }
+
+func connsTo(conns ...network.Conn) connectednessNetwork {
+	return connectednessNetwork{connected: true, conns: conns}
 }
 
 func (n connectednessNetwork) Connectedness(peer.ID) network.Connectedness {
@@ -34,17 +44,17 @@ func TestPeerUsefulnessStartsAtConnectionAndFollowsMarks(t *testing.T) {
 	u := newPeerUsefulness()
 	now := time.Unix(1000, 0)
 	u.now = func() time.Time { return now }
-	c := remoteConn{remote: usefulPeer}
+	c, second := remoteConn{remote: usefulPeer, id: "first"}, remoteConn{remote: usefulPeer, id: "second"}
 
 	_, ok := u.lastUseful(usefulPeer)
 	require.False(t, ok)
-	u.Connected(nil, c)
+	u.Connected(connsTo(c), c)
 	last, ok := u.lastUseful(usefulPeer)
 	require.True(t, ok)
 	require.Equal(t, now, last)
 
 	now = now.Add(time.Minute)
-	u.Connected(nil, c)
+	u.Connected(connsTo(c, second), second)
 	last, _ = u.lastUseful(usefulPeer)
 	require.Equal(t, time.Unix(1000, 0), last, "a second connection does not reset the window")
 
@@ -56,7 +66,7 @@ func TestPeerUsefulnessStartsAtConnectionAndFollowsMarks(t *testing.T) {
 func TestPeerUsefulnessForgetsAPeerOnlyWhenItsLastConnectionCloses(t *testing.T) {
 	u := newPeerUsefulness()
 	c := remoteConn{remote: usefulPeer}
-	u.Connected(nil, c)
+	u.Connected(connsTo(c), c)
 
 	u.Disconnected(connectednessNetwork{connected: true}, c)
 	_, ok := u.lastUseful(usefulPeer)
@@ -72,7 +82,7 @@ func TestPeerUsefulnessIgnoresAMarkForAPeerThatIsGone(t *testing.T) {
 	now := time.Unix(1000, 0)
 	u.now = func() time.Time { return now }
 	c := remoteConn{remote: usefulPeer}
-	u.Connected(nil, c)
+	u.Connected(connsTo(c), c)
 	u.Disconnected(connectednessNetwork{connected: false}, c)
 
 	u.mark(usefulPeer)
@@ -80,9 +90,27 @@ func TestPeerUsefulnessIgnoresAMarkForAPeerThatIsGone(t *testing.T) {
 	require.False(t, ok, "a late mark keeps no entry for a peer that is gone")
 
 	now = now.Add(2 * time.Hour)
-	u.Connected(nil, c)
+	u.Connected(connsTo(c), c)
 	last, _ := u.lastUseful(usefulPeer)
 	require.Equal(t, now, last, "a reconnected peer gets a full window")
+}
+
+func TestPeerUsefulnessGivesAFullWindowToAPeerThatReconnectsBeforeItsDisconnectIsHandled(t *testing.T) {
+	u := newPeerUsefulness()
+	now := time.Unix(1000, 0)
+	u.now = func() time.Time { return now }
+	old := remoteConn{remote: usefulPeer, id: "old"}
+	u.Connected(connsTo(old), old)
+
+	now = now.Add(2 * time.Hour)
+	reconnect := remoteConn{remote: usefulPeer, id: "reconnect"}
+	closedOld := old
+	closedOld.closed = true
+	u.Connected(connsTo(closedOld, reconnect), reconnect)
+	u.Disconnected(connsTo(reconnect), old)
+	last, ok := u.lastUseful(usefulPeer)
+	require.True(t, ok)
+	require.Equal(t, now, last, "a peer whose earlier connections are all closed gets a full window")
 }
 
 // reconnectingNetwork reports the peer as gone, then reconnects it before returning: a Connected
@@ -96,7 +124,7 @@ type reconnectingNetwork struct {
 func (n reconnectingNetwork) Connectedness(peer.ID) network.Connectedness {
 	done := make(chan struct{})
 	go func() {
-		n.u.Connected(nil, n.c)
+		n.u.Connected(connsTo(n.c), n.c)
 		close(done)
 	}()
 	select {
@@ -109,7 +137,7 @@ func (n reconnectingNetwork) Connectedness(peer.ID) network.Connectedness {
 func TestPeerUsefulnessKeepsAPeerThatReconnectsWhileItsDisconnectIsHandled(t *testing.T) {
 	u := newPeerUsefulness()
 	c := remoteConn{remote: usefulPeer}
-	u.Connected(nil, c)
+	u.Connected(connsTo(c), c)
 
 	u.Disconnected(reconnectingNetwork{u: u, c: c}, c)
 	require.Eventually(t, func() bool {

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -249,13 +250,22 @@ func peerIsInbound(conns []network.Conn) bool {
 	return len(conns) > 0 && conns[0].Stat().Direction != network.DirOutbound
 }
 
+// openConns leaves out connections that are closed but not yet removed from the network.
+func openConns(n network.Network, pid peer.ID) []network.Conn {
+	return slices.DeleteFunc(n.ConnsToPeer(pid), network.Conn.IsClosed)
+}
+
 func (s *Sentinel) peerCountsByDirection(exclude peer.ID) peerCounts {
 	var counts peerCounts
 	for _, pid := range s.p2p.Host().Network().Peers() {
 		if pid == exclude {
 			continue
 		}
-		if peerIsInbound(s.p2p.Host().Network().ConnsToPeer(pid)) {
+		conns := openConns(s.p2p.Host().Network(), pid)
+		if len(conns) == 0 {
+			continue
+		}
+		if peerIsInbound(conns) {
 			counts.inbound++
 		} else {
 			counts.outbound++

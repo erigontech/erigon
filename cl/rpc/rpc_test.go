@@ -6,7 +6,6 @@ import (
 	"errors"
 	"math"
 	"math/rand"
-	"slices"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -839,6 +838,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectExcessResponseChunks(t *testing.T
 		require.NotNil(t, envelopes[0].Message)
 		require.Equal(t, "malicious-peer", pid)
 		require.Equal(t, pid, sentinel.softBannedPeer)
+		require.Empty(t, sentinel.rewardedPeers, "a decoded prefix of an invalid answer earns no reward")
 	}
 }
 
@@ -1276,19 +1276,13 @@ func TestDecodedDataAnswerRewardsThePeer(t *testing.T) {
 	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
 	require.NoError(t, err)
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	envelope.Message.BeaconBlockRoot = common.Hash{1}
 	var envelopeResponse bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&envelopeResponse, envelope, gloasDigest[:]...))
 	sentinel := &blockResponseSentinel{response: envelopeResponse.Bytes()}
 	client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
-	envelopes, pid, err := client.SendExecutionPayloadEnvelopesByRootReq(t.Context(), [][32]byte{{1}})
+	envelopes, pid, err := client.SendExecutionPayloadEnvelopesByRootReq(t.Context(), [][32]byte{envelope.Message.BeaconBlockRoot})
 	require.NoError(t, err)
 	require.Len(t, envelopes, 1)
 	require.Equal(t, []string{pid}, sentinel.rewardedPeers)
-
-	tooManyChunks := &blockResponseSentinel{response: slices.Concat(envelopeResponse.Bytes(), []byte{0}, envelopeResponse.Bytes())}
-	client = &BeaconRpcP2P{ctx: t.Context(), sentinel: tooManyChunks, beaconConfig: &cfg, ethClock: clock}
-	envelopes, _, err = client.SendExecutionPayloadEnvelopesByRootReq(t.Context(), [][32]byte{{1}})
-	require.ErrorIs(t, err, ErrInvalidResponse)
-	require.Len(t, envelopes, 1)
-	require.Empty(t, tooManyChunks.rewardedPeers, "a decoded prefix of an invalid answer earns no reward")
 }

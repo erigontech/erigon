@@ -432,13 +432,15 @@ func selectPeersToPrune(candidates []pruneCandidate, coverage [attestationSubnet
 // pruneExcessPeers disconnects excess peers while ensuring no subnet becomes empty
 func (s *Sentinel) pruneExcessPeers() {
 	peers := s.p2p.Host().Network().Peers()
+	connected := make([]peer.ID, 0, len(peers))
 	candidates := make([]pruneCandidate, 0, len(peers))
 	var counts peerCounts
 	for _, pid := range peers {
-		conns := s.p2p.Host().Network().ConnsToPeer(pid)
+		conns := openConns(s.p2p.Host().Network(), pid)
 		if len(conns) == 0 {
 			continue
 		}
+		connected = append(connected, pid)
 		candidate := pruneCandidate{pid: pid, inbound: peerIsInbound(conns), opened: conns[0].Stat().Opened}
 		if candidate.inbound {
 			counts.inbound++
@@ -456,7 +458,7 @@ func (s *Sentinel) pruneExcessPeers() {
 	log.Debug("[Sentinel] Pruning excess peers", "current", counts.total(), "inbound", counts.inbound, "outbound", counts.outbound, "toRemove", toRemove)
 
 	_, subnetToPeers := s.getSubnetCoverageWithPeers()
-	coverage, peerToSubnets := subnetsOfConnectedPeers(&subnetToPeers, peers)
+	coverage, peerToSubnets := subnetsOfConnectedPeers(&subnetToPeers, connected)
 	for i := range candidates {
 		candidates[i].subnets = peerToSubnets[candidates[i].pid]
 	}

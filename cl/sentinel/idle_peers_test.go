@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -200,18 +199,26 @@ func TestEvictIdlePeersKeepsAPeerCreditedDuringThePass(t *testing.T) {
 	require.Equal(t, network.Connected, local.Network().Connectedness(remote.ID()))
 }
 
-// closingNetwork reports a peer as connected in Peers() but with no connections, as when the peer
-// disconnects during an eviction pass.
+type closedConn struct {
+	network.Conn
+}
+
+func (closedConn) IsClosed() bool { return true }
+
+// closingNetwork still lists the connections of a closing peer, as libp2p does until it removes them.
 type closingNetwork struct {
 	network.Network
 	closing peer.ID
 }
 
 func (n closingNetwork) ConnsToPeer(pid peer.ID) []network.Conn {
+	conns := n.Network.ConnsToPeer(pid)
 	if pid == n.closing {
-		return nil
+		for i := range conns {
+			conns[i] = closedConn{conns[i]}
+		}
 	}
-	return n.Network.ConnsToPeer(pid)
+	return conns
 }
 
 type closingHost struct {
@@ -221,35 +228,70 @@ type closingHost struct {
 
 func (h closingHost) Network() network.Network { return h.net }
 
-func TestEvictIdlePeersCountsOnlyConnectedPeersInSubnetCoverage(t *testing.T) {
-	local, err := libp2p.New(libp2p.NoListenAddrs)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = local.Close() })
-	now := time.Now()
-	topicName := fmt.Sprintf("/eth2/%x/%s/%s", common.Bytes4{1, 2, 3, 4}, gossip.TopicNameBeaconAttestation(0), gossip.SSZSnappyCodec)
-	lastUseful := map[peer.ID]time.Time{}
-	var remotes []peer.ID
-	for range minimumPeersPerSubnet + 1 {
-		remote, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = remote.Close() })
-		require.NoError(t, local.Connect(t.Context(), peer.AddrInfo{ID: remote.ID(), Addrs: remote.Addrs()}))
+func withClosingPeer(s *Sentinel, local host.Host, closing peer.ID, lastUseful map[peer.ID]time.Time) {
+	s.p2p = stubP2P{host: closingHost{Host: local, net: closingNetwork{Network: local.Network(), closing: closing}}, ps: s.p2p.Pubsub(), lastUseful: lastUseful}
+}
+
+var subnet0Topic = fmt.Sprintf("/eth2/%x/%s/%s", common.Bytes4{1, 2, 3, 4}, gossip.TopicNameBeaconAttestation(0), gossip.SSZSnappyCodec)
+
+func connectSubnet0Peers(t *testing.T, local host.Host, n int) []peer.ID {
+	t.Helper()
+	remotes := make([]peer.ID, 0, n)
+	for range n {
+		remote := connectOutbound(t, local)
 		remotePS, err := pubsub.NewGossipSub(t.Context(), remote)
 		require.NoError(t, err)
-		topic, err := remotePS.Join(topicName)
+		topic, err := remotePS.Join(subnet0Topic)
 		require.NoError(t, err)
 		_, err = topic.Subscribe()
 		require.NoError(t, err)
-		lastUseful[remote.ID()] = now
 		remotes = append(remotes, remote.ID())
+	}
+	return remotes
+}
+
+func subnet0Sentinel(t *testing.T, local host.Host, remotes []peer.ID, lastUseful map[peer.ID]time.Time) *Sentinel {
+	t.Helper()
+	s := idleTestSentinel(t, local, lastUseful)
+	require.Eventually(t, func() bool { return len(s.p2p.Pubsub().ListPeers(subnet0Topic)) == len(remotes) }, 5*time.Second, 10*time.Millisecond)
+	return s
+}
+
+func TestPeerCountsByDirectionSkipsAPeerWhoseConnectionsAreClosed(t *testing.T) {
+	local := newListeningHost(t)
+	open, closing := connectOutbound(t, local), connectOutbound(t, local)
+	s := testSentinel(t, local)
+	s.p2p = stubP2P{host: closingHost{Host: local, net: closingNetwork{Network: local.Network(), closing: closing.ID()}}}
+	require.Equal(t, peerCounts{outbound: 1}, s.peerCountsByDirection(""))
+	require.Equal(t, peerCounts{}, s.peerCountsByDirection(open.ID()))
+}
+
+func TestEvictIdlePeersCountsOnlyConnectedPeersInSubnetCoverage(t *testing.T) {
+	local := newListeningHost(t)
+	now := time.Now()
+	remotes := connectSubnet0Peers(t, local, minimumPeersPerSubnet+1)
+	lastUseful := map[peer.ID]time.Time{}
+	for _, pid := range remotes {
+		lastUseful[pid] = now
 	}
 	idle, closing := remotes[0], remotes[len(remotes)-1]
 	lastUseful[idle] = now.Add(-2 * peerIdleWindow)
-	s := idleTestSentinel(t, local, lastUseful)
-	require.Eventually(t, func() bool { return len(s.p2p.Pubsub().ListPeers(topicName)) == len(remotes) }, 5*time.Second, 10*time.Millisecond)
-	s.p2p = stubP2P{host: closingHost{Host: local, net: closingNetwork{Network: local.Network(), closing: closing}}, ps: s.p2p.Pubsub(), lastUseful: lastUseful}
+	s := subnet0Sentinel(t, local, remotes, lastUseful)
+	withClosingPeer(s, local, closing, lastUseful)
 
 	s.cfg.MaxPeerCount = 1
 	s.evictIdlePeers(now)
 	require.Equal(t, network.Connected, local.Network().Connectedness(idle), "a closing peer does not count toward subnet 0")
+}
+
+func TestPruneExcessPeersCountsOnlyConnectedPeersInSubnetCoverage(t *testing.T) {
+	local := newListeningHost(t)
+	remotes := connectSubnet0Peers(t, local, 2)
+	closing, last := remotes[0], remotes[1]
+	s := subnet0Sentinel(t, local, remotes, nil)
+	withClosingPeer(s, local, closing, nil)
+
+	s.cfg.MaxPeerCount = 0
+	s.pruneExcessPeers()
+	require.Equal(t, network.Connected, local.Network().Connectedness(last), "a closing peer does not count toward subnet 0")
 }

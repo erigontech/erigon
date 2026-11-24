@@ -84,7 +84,7 @@ func (s *Sentinel) evictIdlePeers(now time.Time) {
 	connected := make([]peer.ID, 0, len(peers))
 	candidates := make([]idleCandidate, 0, len(peers))
 	for _, pid := range peers {
-		conns := s.p2p.Host().Network().ConnsToPeer(pid)
+		conns := openConns(s.p2p.Host().Network(), pid)
 		if len(conns) == 0 {
 			continue
 		}
