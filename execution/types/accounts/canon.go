@@ -64,18 +64,9 @@ func (c *canonTable[T]) intern(v T) *T {
 		return p
 	}
 	c.mu.RLock()
-	// Re-check under the read lock: a rotation or a migration may have moved v since lookup.
-	if prev := c.prev.Load(); prev != nil {
-		if p, ok := prev.Load(v); ok {
-			c.mu.RUnlock()
-			return p
-		}
-	}
-	if wp, ok := c.weak.Load(v); ok {
-		if p := wp.Value(); p != nil {
-			c.mu.RUnlock()
-			return p
-		}
+	if p := c.lookup(v); p != nil {
+		c.mu.RUnlock()
+		return p
 	}
 	p, loaded := c.cur.Load().LoadOrCompute(v, func() (*T, bool) { p := new(T); *p = v; return p, false })
 	c.mu.RUnlock()
@@ -86,20 +77,37 @@ func (c *canonTable[T]) intern(v T) *T {
 }
 
 // rotate makes the current generation the previous one and migrates it to the weak table in the background.
+// While a migration runs, inserts block once cur reaches 2*limit, so at most two strong generations exist.
 func (c *canonTable[T]) rotate() {
 	if !c.migrate.TryLock() {
-		return
+		if c.cur.Load().Size() < int(2*c.limit) {
+			return
+		}
+		c.migrate.Lock()
 	}
+	old := c.swap()
+	go func() {
+		c.toWeak(old)
+		c.migrated()
+	}()
+}
+
+// migrated ends a migration and rotates again if cur filled up while it ran: no later insert may do it.
+func (c *canonTable[T]) migrated() {
+	c.migrate.Unlock()
+	if c.cur.Load().Size() >= int(c.limit) {
+		c.rotate()
+	}
+}
+
+func (c *canonTable[T]) swap() *xsync.Map[T, *T] {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	old := c.cur.Load()
 	c.cur.Store(xsync.NewMap[T, *T]())
 	c.prev.Store(old)
 	c.n.Store(0)
-	c.mu.Unlock()
-	go func() {
-		defer c.migrate.Unlock()
-		c.toWeak(old)
-	}()
+	return old
 }
 
 func (c *canonTable[T]) toWeak(old *xsync.Map[T, *T]) {
@@ -127,12 +135,6 @@ func (c *canonTable[T]) release(v T, wp weak.Pointer[T]) {
 // flush migrates every strong generation to the weak table and waits for it; tests use it.
 func (c *canonTable[T]) flush() {
 	c.migrate.Lock()
-	c.mu.Lock()
-	old := c.cur.Load()
-	c.cur.Store(xsync.NewMap[T, *T]())
-	c.prev.Store(old)
-	c.n.Store(0)
-	c.mu.Unlock()
-	c.toWeak(old)
+	c.toWeak(c.swap())
 	c.migrate.Unlock()
 }

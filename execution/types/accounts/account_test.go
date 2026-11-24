@@ -530,3 +530,45 @@ func TestTraceAccountMatchesInternedAddress(t *testing.T) {
 	dbg.TraceAccounts = []string{a.Hex()}
 	require.True(t, dbg.TraceAccount(InternAddress(a).Value()))
 }
+
+func TestCanonTableBoundsGenerationsWhileMigrating(t *testing.T) {
+	const limit = 8
+	c := newCanonTable[common.Hash](limit)
+	c.migrate.Lock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range 1000 {
+			c.intern(common.Hash{1, byte(i), byte(i >> 8)})
+		}
+	}()
+	maxSize := 0
+	for deadline := time.Now().Add(200 * time.Millisecond); time.Now().Before(deadline); {
+		maxSize = max(maxSize, c.cur.Load().Size())
+		runtime.Gosched()
+	}
+	maxSize = max(maxSize, c.cur.Load().Size())
+	c.migrate.Unlock()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("intern did not finish after migrate was released")
+	}
+	require.LessOrEqual(t, maxSize, 2*limit)
+	require.Eventually(t, func() bool {
+		return c.cur.Load().Size() < limit && c.prev.Load() == nil
+	}, 10*time.Second, time.Millisecond)
+}
+
+func TestCanonTableRotatesWhenMigrationEndsOverLimit(t *testing.T) {
+	const limit = 8
+	c := newCanonTable[common.Hash](limit)
+	c.migrate.Lock()
+	for i := range limit + 4 {
+		c.intern(common.Hash{2, byte(i)})
+	}
+	c.migrated()
+	require.Eventually(t, func() bool {
+		return c.cur.Load().Size() < limit && c.prev.Load() == nil
+	}, 10*time.Second, time.Millisecond)
+}
