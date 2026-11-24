@@ -1061,6 +1061,9 @@ func (e *ExecModule) RebuildFlashblock(ctx context.Context, inputs FlashblockInp
 
 // AbandonFlashblock drops the in-progress block, so a newPayload waiting on its height executes the agreed block.
 func (e *ExecModule) AbandonFlashblock(ctx context.Context) error {
+	// A seal executes into the in-progress generation without the semaphore, so it is excluded by its own lock.
+	e.assembleMu.Lock()
+	defer e.assembleMu.Unlock()
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		return err
 	}
