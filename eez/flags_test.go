@@ -554,24 +554,26 @@ func TestComposerFlags(t *testing.T) {
 		args []string
 		want string
 	}{
-		"no sequencer":           {without("--eez.sequencer", "--eez.proof.time"), "--eez.composer requires --eez.sequencer"},
-		"flag without composer":  {append(slices.Clone(sequencer), "--eez.batch.maxblocks=120"), "--eez.batch.maxblocks requires --eez.composer"},
-		"no poster key":          {without("--eez.poster.keyfile"), "--eez.poster.keyfile"},
-		"no prover":              {without("--eez.attesters"), "--eez.attesters"},
-		"no attester":            {without("--eez.attester.address"), "--eez.attester.address"},
-		"no proof system":        {without("--eez.proofsystem"), "--eez.proofsystem"},
-		"no L1 node":             {append([]string{"--eez.enabled", "--eez.l1.kv=127.0.0.1:9090"}, without("--eez.enabled", "--eez.l1.rpc")...), "--eez.l1.rpc"},
-		"bad attester":           {append(without("--eez.attester.address"), "--eez.attester.address=0x12"), "--eez.attester.address"},
-		"bad proof system":       {append(without("--eez.proofsystem"), "--eez.proofsystem=0x12"), "--eez.proofsystem"},
-		"bad prover":             {append(without("--eez.attesters"), "--eez.attesters=127.0.0.1:50061"), "--eez.attesters"},
-		"poster is attester":     {append(without("--eez.poster.keyfile"), "--eez.poster.keyfile="+attesterKey), "attester's key"},
-		"no blocks":              {append(slices.Clone(composer), "--eez.batch.maxblocks=0"), "--eez.batch.maxblocks"},
-		"gas below a batch":      {append(slices.Clone(composer), "--eez.batch.maxgas=1000000"), "--eez.batch.maxgas"},
-		"gas above EIP-7825":     {append(slices.Clone(composer), "--eez.batch.maxgas=16777217"), "--eez.batch.maxgas"},
-		"websocket L1 alone":     {append([]string{"--eez.enabled", "--eez.l1.rpc=ws://l1:8546"}, without("--eez.enabled", "--eez.l1.rpc")...), "--eez.l1.builder"},
-		"bad builder":            {append(slices.Clone(composer), "--eez.l1.builder=builder:8545"), "--eez.l1.builder"},
-		"bad L1 front":           {append(slices.Clone(composer), "--eez.composer.l1front=8547"), "--eez.composer.l1front"},
-		"front without composer": {append(slices.Clone(sequencer), "--eez.composer.l1front=127.0.0.1:8547"), "--eez.composer.l1front requires --eez.composer"},
+		"no sequencer":              {without("--eez.sequencer", "--eez.proof.time"), "--eez.composer requires --eez.sequencer"},
+		"flag without composer":     {append(slices.Clone(sequencer), "--eez.batch.maxblocks=120"), "--eez.batch.maxblocks requires --eez.composer"},
+		"no poster key":             {without("--eez.poster.keyfile"), "--eez.poster.keyfile"},
+		"no prover":                 {without("--eez.attesters"), "--eez.attesters"},
+		"no attester":               {without("--eez.attester.address"), "--eez.attester.address"},
+		"no proof system":           {without("--eez.proofsystem"), "--eez.proofsystem"},
+		"no L1 node":                {append([]string{"--eez.enabled", "--eez.l1.kv=127.0.0.1:9090"}, without("--eez.enabled", "--eez.l1.rpc")...), "--eez.l1.rpc"},
+		"bad attester":              {append(without("--eez.attester.address"), "--eez.attester.address=0x12"), "--eez.attester.address"},
+		"bad proof system":          {append(without("--eez.proofsystem"), "--eez.proofsystem=0x12"), "--eez.proofsystem"},
+		"bad prover":                {append(without("--eez.attesters"), "--eez.attesters=127.0.0.1:50061"), "--eez.attesters"},
+		"poster is attester":        {append(without("--eez.poster.keyfile"), "--eez.poster.keyfile="+attesterKey), "attester's key"},
+		"no blocks":                 {append(slices.Clone(composer), "--eez.batch.maxblocks=0"), "--eez.batch.maxblocks"},
+		"gas below a batch":         {append(slices.Clone(composer), "--eez.batch.maxgas=1000000"), "--eez.batch.maxgas"},
+		"gas above EIP-7825":        {append(slices.Clone(composer), "--eez.batch.maxgas=16777217"), "--eez.batch.maxgas"},
+		"websocket L1 alone":        {append([]string{"--eez.enabled", "--eez.l1.rpc=ws://l1:8546"}, without("--eez.enabled", "--eez.l1.rpc")...), "--eez.l1.builder"},
+		"bad builder":               {append(slices.Clone(composer), "--eez.l1.builder=builder:8545"), "--eez.l1.builder"},
+		"bad L1 front":              {append(slices.Clone(composer), "--eez.composer.l1front=8547"), "--eez.composer.l1front"},
+		"front without composer":    {append(slices.Clone(sequencer), "--eez.composer.l1front=127.0.0.1:8547"), "--eez.composer.l1front requires --eez.composer"},
+		"front over a websocket L1": {append([]string{"--eez.enabled", "--eez.l1.rpc=ws://l1:8546", "--eez.l1.builder=http://builder", "--eez.composer.l1front=127.0.0.1:8547"}, without("--eez.enabled", "--eez.l1.rpc")...), "--eez.composer.l1front forwards to --eez.l1.rpc over http(s)"},
+		"front over a hostless L1":  {append([]string{"--eez.enabled", "--eez.l1.rpc=http:l1", "--eez.l1.builder=http://builder", "--eez.composer.l1front=127.0.0.1:8547"}, without("--eez.enabled", "--eez.l1.rpc")...), "--eez.composer.l1front forwards to --eez.l1.rpc over http(s)"},
 	} {
 		_, err := parse(t, c.args...)
 		require.ErrorIs(t, err, ErrConfig, name)
@@ -582,9 +584,11 @@ func TestComposerFlags(t *testing.T) {
 	// name its scheme and host only.
 	for name, args := range map[string][]string{
 		"websocket L1 alone": append([]string{"--eez.enabled", "--eez.l1.rpc=wss://user:secret@l1.example/v3/KEY"}, without("--eez.enabled", "--eez.l1.rpc")...),
-		"bad builder":        append(slices.Clone(composer), "--eez.l1.builder=ftp://user:secret@builder.example/KEY?key=KEY"),
-		"bad prover":         append(without("--eez.attesters"), "--eez.attesters=ftp://user:secret@prover.example:1/KEY"),
-		"unparsable prover":  append(without("--eez.attesters"), "--eez.attesters=http://user:secret@[prover/KEY"),
+		"front over a websocket L1": append([]string{"--eez.enabled", "--eez.l1.rpc=wss://user:secret@l1.example/v3/KEY", "--eez.l1.builder=http://builder", "--eez.composer.l1front=127.0.0.1:8547"},
+			without("--eez.enabled", "--eez.l1.rpc")...),
+		"bad builder":       append(slices.Clone(composer), "--eez.l1.builder=ftp://user:secret@builder.example/KEY?key=KEY"),
+		"bad prover":        append(without("--eez.attesters"), "--eez.attesters=ftp://user:secret@prover.example:1/KEY"),
+		"unparsable prover": append(without("--eez.attesters"), "--eez.attesters=http://user:secret@[prover/KEY"),
 	} {
 		_, err := parse(t, args...)
 		require.ErrorIs(t, err, ErrConfig, name)

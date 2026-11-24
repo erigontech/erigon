@@ -194,7 +194,7 @@ var (
 	}
 	ComposerL1FrontFlag = cli.StringFlag{
 		Name:  "eez.composer.l1front",
-		Usage: "host:port of the L1 front, where wallets send the L1 transactions that call into the chain; set, steady Sync blocks carry their effects",
+		Usage: "host:port of the L1 front, where wallets send the L1 transactions that call into the chain; set, steady Sync blocks carry their effects. Forwards other requests to an http(s) --eez.l1.rpc",
 	}
 	BatchMaxGasFlag = cli.Uint64Flag{
 		Name:  "eez.batch.maxgas",
@@ -536,6 +536,10 @@ func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
 	if c.L1Front != "" {
 		if _, _, err := net.SplitHostPort(c.L1Front); err != nil {
 			return nil, fmt.Errorf("%w: --%s %q is not host:port", ErrConfig, ComposerL1FrontFlag.Name, c.L1Front)
+		}
+		// The front forwards over HTTP.
+		if u, err := url.Parse(node); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return nil, fmt.Errorf("%w: --%s forwards to --%s over http(s), not %s", ErrConfig, ComposerL1FrontFlag.Name, L1RPCFlag.Name, l1.RedactURL(node))
 		}
 	}
 	if c.Builder == "" {
