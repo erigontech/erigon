@@ -265,6 +265,17 @@ func TestStopHooksRegisterTogether(t *testing.T) {
 	require.Equal(t, []int{1, 2}, stopped)
 }
 
+// TestL1Source: the follower's L1 source prints an RPC endpoint by scheme and
+// host only, as its path or query may carry an API key.
+func TestL1Source(t *testing.T) {
+	for want, cfg := range map[string]*eez.Config{
+		"wss://l1.example": {L1RPC: "wss://l1.example/v3/KEY"},
+		"127.0.0.1:9090":   {L1KV: "127.0.0.1:9090"},
+	} {
+		require.Equal(t, want, l1Source(cfg))
+	}
+}
+
 // TestDABudgetFollowsTheComposer: a composer's gas limit bounds the
 // sequencer's blocks, so that a slot settles in one posting.
 func TestDABudgetFollowsTheComposer(t *testing.T) {

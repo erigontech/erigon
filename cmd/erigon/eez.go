@@ -595,13 +595,21 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		logger.Info("[eez] sequencer mode", "feeRecipient", cfg.Sequencer.FeeRecipient, "proofTime", cfg.Sequencer.ProofTime,
 			"submissionSlack", cfg.Sequencer.SubmissionSlack, "maxDepth", cfg.Sequencer.MaxDepth)
 	}
-	l1Source := cmp.Or(cfg.L1RPC, cfg.L1KV)
-	if cfg.AllInOne() {
-		l1Source = "in-process"
-	}
-	logger.Info("[eez] follower mode", "chaindata", dirs.Chaindata, "l1", l1Source, "l1Only", l1Only)
+	logger.Info("[eez] follower mode", "chaindata", dirs.Chaindata, "l1", l1Source(cfg), "l1Only", l1Only)
 	if seq != nil {
 		return firstHalt{svc, seq}, nil
 	}
 	return svc, nil
+}
+
+// l1Source names the L1 source of cfg in the log: an RPC endpoint by its
+// scheme and host, as its path or query may carry an API key.
+func l1Source(cfg *eez.Config) string {
+	switch {
+	case cfg.AllInOne():
+		return "in-process"
+	case cfg.L1RPC != "":
+		return l1.RedactURL(cfg.L1RPC)
+	}
+	return cfg.L1KV
 }
