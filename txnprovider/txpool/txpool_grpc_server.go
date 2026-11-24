@@ -187,19 +187,23 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 	reply := &txpoolproto.AddReply{Imported: make([]txpoolproto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 
 	for i := 0; i < len(in.RlpTxs); i++ {
-		j := len(slots.Txns) // some incoming txns may be rejected, so - need second index
-		slots.Resize(uint(j + 1))
-		slots.Txns[j] = &TxnSlot{}
-		slots.IsLocal[j] = true
+		slotIndex := len(slots.Txns) // Only inputs awaiting admission have slots.
+		slots.Resize(uint(slotIndex + 1))
+		slots.Txns[slotIndex] = &TxnSlot{}
+		slots.IsLocal[slotIndex] = true
 		var knownReason txpoolcfg.DiscardReason
-		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txns[j], slots.Senders.At(j), false /* hasEnvelope */, true /* wrappedWithBlobs */, func(hash []byte) error {
-			knownReason = s.txPool.KnownTxnReason(hash)
-			if knownReason != txpoolcfg.NotSet {
-				return ErrRejected
+		validateHash := func(hash []byte) error {
+			reason := s.txPool.KnownTxnReason(hash)
+			// An earlier input can replace a pooled transaction before its turn in the batch.
+			if reason == txpoolcfg.NotSet || (reason == txpoolcfg.AlreadyKnown && slotIndex > 0) {
+				return nil
 			}
-			return nil
-		}); err != nil {
-			slots.Resize(uint(j)) // remove erroneous transaction
+			knownReason = reason
+			return ErrRejected
+		}
+		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txns[slotIndex], slots.Senders.At(slotIndex),
+			false /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash); err != nil {
+			slots.Resize(uint(slotIndex)) // This input already has its result.
 			switch {
 			case knownReason != txpoolcfg.NotSet:
 				reply.Errors[i] = knownReason.String()
@@ -273,7 +277,7 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportR
 		return txpoolproto.ImportResult_ALREADY_EXISTS
 	case txpoolcfg.NonceTooLow:
 		return txpoolproto.ImportResult_STALE
-	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.NotReplaced, txpoolcfg.FeeTooLow:
+	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.NotReplaced, txpoolcfg.ReplacedByHigherTip, txpoolcfg.FeeTooLow:
 		return txpoolproto.ImportResult_FEE_TOO_LOW
 	case txpoolcfg.InvalidSender, txpoolcfg.InitCodeTooLarge,
 		txpoolcfg.IntrinsicGas, txpoolcfg.GasLimitTooHigh, txpoolcfg.NonceTooDistant,

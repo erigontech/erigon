@@ -114,6 +114,7 @@ func TestMapDiscardReasonToProto(t *testing.T) {
 }
 
 func TestGrpcServerAddDoesNotAdmitEmptySlots(t *testing.T) {
+	knownRLP := hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)
 	for _, tc := range []struct {
 		name  string
 		rlps  [][]byte
@@ -122,7 +123,8 @@ func TestGrpcServerAddDoesNotAdmitEmptySlots(t *testing.T) {
 	}{
 		{"empty", nil, false, []txpoolproto.ImportResult{}},
 		{"invalid", [][]byte{{0xff}}, false, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID}},
-		{"known", [][]byte{hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)}, true, []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS}},
+		{"known", [][]byte{knownRLP}, true, []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS}},
+		{"invalid then known", [][]byte{{0xff}, knownRLP}, true, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID, txpoolproto.ImportResult_ALREADY_EXISTS}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool := &addMockTxPool{knownByCall: []bool{tc.known}}
@@ -205,6 +207,59 @@ func TestGrpcServerAddDuplicateDuringAdmission(t *testing.T) {
 		Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS},
 		Errors:   []string{"already known"},
 	}, reply)
+}
+
+func TestGrpcServerAddBatchReplacement(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	chainID := chain.AllProtocolChanges.ChainID
+	signer := *types.LatestSignerForChainID(chainID)
+	encode := func(fee uint64) []byte {
+		t.Helper()
+		txn := newTestTxnSlot(0, 0, fee, fee, 100_000).Txn.(*types.DynamicFeeTransaction)
+		txn.ChainID = *chainID
+		signed, err := types.SignTx(txn, signer, key)
+		require.NoError(t, err)
+		var buf bytes.Buffer
+		require.NoError(t, signed.MarshalBinary(&buf))
+		return buf.Bytes()
+	}
+	original, replacement := encode(100), encode(200)
+
+	for _, tc := range []struct {
+		name   string
+		pooled []byte
+		batch  [][]byte
+		want   *txpoolproto.AddReply
+	}{
+		{"original replaced in batch", nil, [][]byte{original, replacement}, &txpoolproto.AddReply{
+			Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_FEE_TOO_LOW, txpoolproto.ImportResult_SUCCESS},
+			Errors:   []string{txpoolcfg.ReplacedByHigherTip.String(), txpoolcfg.Success.String()},
+		}},
+		{"pooled original resubmitted after replacement", original, [][]byte{replacement, original}, &txpoolproto.AddReply{
+			Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS, txpoolproto.ImportResult_FEE_TOO_LOW},
+			Errors:   []string{txpoolcfg.Success.String(), txpoolcfg.NotReplaced.String()},
+		}},
+		{"pooled transaction survives an underpriced replacement", replacement, [][]byte{original, replacement}, &txpoolproto.AddReply{
+			Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_FEE_TOO_LOW, txpoolproto.ImportResult_ALREADY_EXISTS},
+			Errors:   []string{txpoolcfg.NotReplaced.String(), txpoolcfg.AlreadyKnown.String()},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, poolDB, _ := newTestPool(t)
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			server := NewGrpcServer(ctx, pool, poolDB, nil, pool.chainID, pool.logger)
+			if tc.pooled != nil {
+				reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{tc.pooled}})
+				require.NoError(t, err)
+				require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported)
+			}
+			reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: tc.batch})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, reply)
+		})
+	}
 }
 
 func TestGrpcServerAddUnavailablePool(t *testing.T) {
