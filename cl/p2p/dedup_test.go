@@ -239,8 +239,6 @@ func trackedDeduper(after time.Duration) (*connDeduper, *fakeConn, *fakeConn) {
 	return d, preferred, other
 }
 
-// The excuse counts from when the pair registered: a stream on a duplicate the remote closes fails
-// before this side is notified.
 func TestDedupExcusesAClosedDuplicateUntilItExpires(t *testing.T) {
 	d, preferred, other := trackedDeduper(time.Second)
 	n := d.net.(*fakeNetwork)
@@ -273,12 +271,12 @@ func TestDedupExcusesTheFailuresOfOneClose(t *testing.T) {
 	d, _, _ := trackedDeduper(time.Second)
 	d.lossBurst = time.Hour
 	require.True(t, d.ConsumeDuplicateLoss(highID))
+	excused := d.conns[highID][1]
+	excused.excusedAt = excused.excusedAt.Add(-time.Minute)
+	first := excused.excusedAt
 	require.True(t, d.ConsumeDuplicateLoss(highID), "a second stream cut by the same close")
-	for _, c := range d.conns[highID] {
-		if !c.excusedAt.IsZero() {
-			c.excusedAt = c.excusedAt.Add(-2 * d.lossBurst)
-		}
-	}
+	require.Equal(t, first, excused.excusedAt, "the burst counts from the first excused failure")
+	excused.excusedAt = excused.excusedAt.Add(-2 * d.lossBurst)
 	require.False(t, d.ConsumeDuplicateLoss(highID), "a failure after the burst is the peer's")
 }
 
