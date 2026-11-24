@@ -555,21 +555,39 @@ func TestCanonTableBoundsGenerationsWhileMigrating(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("intern did not finish after migrate was released")
 	}
-	require.LessOrEqual(t, maxSize, 2*limit)
+	require.LessOrEqual(t, maxSize, limit)
 	require.Eventually(t, func() bool {
 		return c.cur.Load().Size() < limit && c.prev.Load() == nil
 	}, 10*time.Second, time.Millisecond)
 }
 
-func TestCanonTableRotatesWhenMigrationEndsOverLimit(t *testing.T) {
-	const limit = 8
+func TestStrongGenerationsStayWithinTwoLimits(t *testing.T) {
+	const limit, inserters, total = 1024, 8, 400_000
 	c := newCanonTable[common.Hash](limit)
-	c.migrate.Lock()
-	for i := range limit + 4 {
-		c.intern(common.Hash{2, byte(i)})
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	for g := range inserters {
+		wg.Go(func() {
+			for i := range total / inserters {
+				c.intern(common.Hash{3, byte(g), byte(i), byte(i >> 8), byte(i >> 16)})
+			}
+		})
 	}
-	c.migrated()
-	require.Eventually(t, func() bool {
-		return c.cur.Load().Size() < limit && c.prev.Load() == nil
-	}, 10*time.Second, time.Millisecond)
+	go func() { wg.Wait(); close(done) }()
+	peak := 0
+	for running := true; running; {
+		select {
+		case <-done:
+			running = false
+		default:
+		}
+		c.mu.RLock()
+		strong := c.cur.Load().Size()
+		if prev := c.prev.Load(); prev != nil {
+			strong += prev.Size()
+		}
+		c.mu.RUnlock()
+		peak = max(peak, strong)
+	}
+	require.LessOrEqual(t, peak, 2*limit+64)
 }

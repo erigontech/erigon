@@ -77,13 +77,12 @@ func (c *canonTable[T]) intern(v T) *T {
 }
 
 // rotate makes the current generation the previous one and migrates it to the weak table in the background.
-// While a migration runs, inserts block once cur reaches 2*limit, so at most two strong generations exist.
+// While a migration runs, an insert that fills cur waits for it, so each strong generation holds at most limit values.
 func (c *canonTable[T]) rotate() {
-	if !c.migrate.TryLock() {
-		if c.cur.Load().Size() < int(2*c.limit) {
-			return
-		}
-		c.migrate.Lock()
+	c.migrate.Lock()
+	if c.n.Load() < c.limit {
+		c.migrate.Unlock()
+		return
 	}
 	old := c.swap()
 	go func() {
@@ -95,7 +94,7 @@ func (c *canonTable[T]) rotate() {
 // migrated ends a migration and rotates again if cur filled up while it ran: no later insert may do it.
 func (c *canonTable[T]) migrated() {
 	c.migrate.Unlock()
-	if c.cur.Load().Size() >= int(c.limit) {
+	if c.n.Load() >= c.limit {
 		c.rotate()
 	}
 }
