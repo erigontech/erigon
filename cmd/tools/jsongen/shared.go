@@ -109,6 +109,9 @@ func checkSlice(scope *types.Scope, slice string, elem types.Type) error {
 	if obj == nil {
 		return fmt.Errorf("no %s in the package", slice)
 	}
+	if tn, ok := obj.(*types.TypeName); !ok || tn.IsAlias() {
+		return fmt.Errorf("%s is not a defined type", slice)
+	}
 	if s, ok := obj.Type().Underlying().(*types.Slice); ok {
 		if p, ok := s.Elem().(*types.Pointer); ok && types.Identical(p.Elem(), elem) {
 			return nil
@@ -129,11 +132,11 @@ func writeSliceMethod(w *bytes.Buffer, slice, elem string, fields []field) {
 			continue
 		}
 		if i > 0 && fields[i-1].shared != nil {
-			groups[len(groups)-1] = append(groups[len(groups)-1], f.shared)
 			continue
 		}
-		groups = append(groups, group{f.shared})
-		if !groupFrom(fields[i:]).mayBeEmpty() {
+		g := groupFrom(fields[i:])
+		groups = append(groups, g)
+		if !g.mayBeEmpty() {
 			fmt.Fprintf(&loop, "\ts.RawFields(shared.group%d(x))\n", len(groups)-1)
 		} else {
 			fmt.Fprintf(&loop, "\tif b := shared.group%d(x); len(b) > 0 {\n\t\ts.RawFields(b)\n\t}\n", len(groups)-1)

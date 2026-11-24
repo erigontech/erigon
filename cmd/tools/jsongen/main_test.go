@@ -82,6 +82,8 @@ func TestGenerateRejects(t *testing.T) {
 		"slice of values":       {"SliceOfValues", "SlicesOfValues"},
 		"slice of another type": {"SliceOfValues", "SharedStrings"},
 		"no such slice":         {"SliceOfValues", "Missing"},
+		"aliased slice":         {"SliceOfValues", "AliasedSlice"},
+		"slice variable":        {"SliceOfValues", "SliceVariable"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Chdir("testdata/bad")

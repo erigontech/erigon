@@ -82,3 +82,8 @@ type SliceOfValues struct {
 }
 
 type SlicesOfValues []SliceOfValues
+
+// A method needs a named type of its own as its receiver.
+type AliasedSlice = []*SliceOfValues
+
+var SliceVariable []*SliceOfValues
