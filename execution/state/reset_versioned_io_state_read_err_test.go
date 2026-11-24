@@ -27,7 +27,7 @@ import (
 // state-read error recorded for one tx must not stick to the next. A sticky
 // error would fail a later tx that read cleanly, and (with the EIP-161 removal
 // bail) would suppress a legitimate empty-account deletion.
-func TestResetVersionedIO_ClearsStateReadError(t *testing.T) {
+func TestResetIO_ClearsStateReadError(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(NewNoopReader())

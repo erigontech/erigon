@@ -78,7 +78,6 @@ type journalExtra struct {
 	prevWrites     *createWriteSnapshot // kindResetObject
 	prevhash       accounts.CodeHash    // kindCode
 	prevcode       []byte               // kindCode
-	prevBalance    uint256.Int          // kindSelfdestruct, when flagSelfdestructHadBalance is set
 	undoCodeChange func()
 }
 
@@ -200,7 +199,7 @@ func (j *journal) resetObjectChange(account accounts.Address, prevWrites *create
 
 // selfdestructChange records a self-destruct, capturing the balance/incarnation
 // writes it overwrites so a revert can restore them (see the kindSelfdestruct revert).
-func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevbalance uint256.Int, wasCommitted, hadIncarnation bool, prevIncarnation uint64, hadBalance bool, prevBalance uint256.Int, prevBalanceDeleted bool) {
+func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevBalance uint256.Int, wasCommitted, hadIncarnation bool, prevIncarnation uint64, hadBalance, prevBalanceDeleted bool) {
 	flags := commitFlag(wasCommitted)
 	if prev {
 		flags |= flagSelfdestructPrev
@@ -208,13 +207,12 @@ func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevba
 	if hadIncarnation {
 		flags |= flagSelfdestructHadIncarnation
 	}
-	e := journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, aux: prevIncarnation, flags: flags}
+	e := journalEntry{kind: kindSelfdestruct, account: account, value: prevBalance, aux: prevIncarnation, flags: flags}
 	if hadBalance {
 		e.flags |= flagSelfdestructHadBalance
 		if prevBalanceDeleted {
 			e.flags |= flagBalanceDeleted
 		}
-		e.extra = &journalExtra{prevBalance: prevBalance}
 	}
 	j.push(e)
 	j.dirties[account]++
@@ -341,7 +339,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// it. Gating this on committed (which describes SelfDestructPath, not
 		// BalancePath) deleted balance writes that predated the snapshot.
 		if je.flags&flagSelfdestructHadBalance != 0 {
-			s.writes.updateBalance(je.account, je.extra.prevBalance, je.flags&flagBalanceDeleted != 0)
+			s.writes.updateBalance(je.account, je.value, je.flags&flagBalanceDeleted != 0)
 		} else {
 			s.writes.DelBalance(je.account)
 		}
@@ -428,8 +426,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		//
 		// RIPEMD-160 is the exception: touchAccount bumps its dirty count so the
 		// touch outlives the revert and EIP-161 still sweeps it. Undoing the write
-		// here would drop that sweep on the versioned path only, leaving the
-		// account in the trie and diverging from serial's root.
+		// here would drop that sweep and leave the account in the trie.
 		if je.account != ripemd {
 			if je.committed() {
 				s.writes.DelBalance(je.account)

@@ -85,8 +85,8 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 }
 
 // codeSeed returns the code this tx currently sees at addr — its own Code write cell
-// if any, else the committed value — without recording an OCC read. Lets SetCode on the
-// rebuilt noMaterialize transient compare against current code, not the stale tx-start value.
+// if any, else the committed value — without recording an OCC read. Lets SetCode compare against
+// current code, not the stale tx-start value.
 func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts.CodeHash) (accounts.Code, error) {
 	if _, isDirty := ibs.journal.dirties[addr]; isDirty {
 		if vw, ok := ibs.writes.GetCode(addr); ok {
@@ -100,7 +100,7 @@ func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 	// the version map, not the pre-block origin. Resolve them there first so the
 	// seed carries the bytes matching currentHash rather than nil bytes from the
 	// origin reader (which would make an identical SetCode look like a change).
-	if code, _, ok := ibs.stateUpdates.ReadCode(addr, ibs.txIndex); ok {
+	if code, _, ok := ibs.versionMap.ReadCode(addr, ibs.txIndex); ok {
 		return code, nil
 	}
 	code, err := ibs.originCodeDirect(addr)
@@ -232,7 +232,7 @@ type readPathResult struct {
 // reads as its empty value — EmptyCodeHash for the code hash), else outcomeReturnZero
 // when the account is absent (reads as the zero value).
 func wipedFieldOutcome(s *IntraBlockState, addr accounts.Address) readPathOutcome {
-	state, destructDep := s.stateUpdates.AccountLifecycleWithDestructDep(addr, s.txIndex)
+	state, destructDep := s.versionMap.AccountLifecycleWithDestructDep(addr, s.txIndex)
 	// A destruct back in flight is not counted by the lifecycle, so the verdict may be stale.
 	if destructDep != UnknownDep {
 		s.dep = max(s.dep, destructDep)
@@ -295,7 +295,7 @@ func readCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key a
 		// Per-path revival: the field is revived only if a write to THIS path exists at a
 		// strictly higher TxIndex, so a field with no post-SD write reads as the fresh zero.
 		revived := false
-		pathRead := s.stateUpdates.ReadStatus(addr, path, key, s.txIndex)
+		pathRead := s.versionMap.ReadStatus(addr, path, key, s.txIndex)
 		if pathRead.DepIdx() > destructTxIndex &&
 			(pathRead.resolved() || pathRead.Status() == MVReadResultDependency) {
 			revived = true
@@ -362,27 +362,27 @@ func readCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key a
 	var res ReadResult
 	switch path {
 	case AddressPath:
-		r.mapAddressVal, res, _ = s.stateUpdates.ReadAddress(addr, s.txIndex)
+		r.mapAddressVal, res, _ = s.versionMap.ReadAddress(addr, s.txIndex)
 	case BalancePath:
-		r.mapBalanceVal, res, _ = s.stateUpdates.ReadBalance(addr, s.txIndex)
+		r.mapBalanceVal, res, _ = s.versionMap.ReadBalance(addr, s.txIndex)
 	case NoncePath:
-		r.mapNonceVal, res, _, r.life = s.stateUpdates.ReadNonceLife(addr, s.txIndex)
+		r.mapNonceVal, res, _, r.life = s.versionMap.ReadNonceLife(addr, s.txIndex)
 	case IncarnationPath:
-		r.mapIncarnationVal, res, _ = s.stateUpdates.ReadIncarnation(addr, s.txIndex)
+		r.mapIncarnationVal, res, _ = s.versionMap.ReadIncarnation(addr, s.txIndex)
 	case CodePath:
 		var mc accounts.Code
-		mc, res, _, r.life = s.stateUpdates.ReadCodeLife(addr, s.txIndex)
+		mc, res, _, r.life = s.versionMap.ReadCodeLife(addr, s.txIndex)
 		r.mapCodeVal = mc
 	case CodeHashPath:
-		r.mapCodeHashVal, res, _ = s.stateUpdates.ReadCodeHash(addr, s.txIndex)
+		r.mapCodeHashVal, res, _ = s.versionMap.ReadCodeHash(addr, s.txIndex)
 	case CodeSizePath:
-		r.mapCodeSizeVal, res, _, r.life = s.stateUpdates.ReadCodeSizeLife(addr, s.txIndex)
+		r.mapCodeSizeVal, res, _, r.life = s.versionMap.ReadCodeSizeLife(addr, s.txIndex)
 	case SelfDestructPath:
-		r.mapSelfDestructVal, res, _ = s.stateUpdates.ReadSelfDestruct(addr, s.txIndex)
+		r.mapSelfDestructVal, res, _ = s.versionMap.ReadSelfDestruct(addr, s.txIndex)
 	case CreateContractPath:
-		r.mapCreateContractVal, res, _ = s.stateUpdates.ReadCreateContract(addr, s.txIndex)
+		r.mapCreateContractVal, res, _ = s.versionMap.ReadCreateContract(addr, s.txIndex)
 	case StoragePath:
-		r.mapStorageVal, res, _, r.life = s.stateUpdates.ReadStorageLife(addr, key, s.txIndex)
+		r.mapStorageVal, res, _, r.life = s.versionMap.ReadStorageLife(addr, key, s.txIndex)
 	default:
 		panic(fmt.Errorf("readPaths: unknown path %v", path))
 	}
@@ -557,14 +557,14 @@ func readCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key a
 		// UnknownVersion would be rejected by the validator cross-check and loop.
 		if path == BalancePath || path == NoncePath || path == IncarnationPath ||
 			path == CodeHashPath || path == CodePath || path == CodeSizePath {
-			if s.stateUpdates.fieldMissHook != nil {
-				s.stateUpdates.fieldMissHook()
+			if s.versionMap.fieldMissHook != nil {
+				s.versionMap.fieldMissHook()
 			}
-			if destructed, sd, ok := s.stateUpdates.ReadSelfDestruct(addr, s.txIndex); ok && sd.resolved() && destructed {
+			if destructed, sd, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sd.resolved() && destructed {
 				sdVer := Version{TxIndex: sd.DepIdx(), Incarnation: sd.Incarnation()}
 				// The destruct may have been flushed after the field probe
 				// above, together with a field cell it keeps.
-				if s.stateUpdates.ReadStatus(addr, path, key, s.txIndex).Status() != MVReadResultNone {
+				if s.versionMap.ReadStatus(addr, path, key, s.txIndex).Status() != MVReadResultNone {
 					readCore(s, addr, path, key, commited, skipStorage, r)
 					return
 				}
@@ -604,7 +604,7 @@ func readCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key a
 		// code; read empty when no newer cell exists (a revival writes its own cell,
 		// returned by the version-map read above before reaching here).
 		if path == StoragePath || path == CodePath || path == CodeSizePath {
-			if inc, incRes, incOK := s.stateUpdates.ReadIncarnation(addr, s.txIndex); incOK && incRes.resolved() {
+			if inc, incRes, incOK := s.versionMap.ReadIncarnation(addr, s.txIndex); incOK && incRes.resolved() {
 				hdr.Source = StorageRead
 				s.reads.SetHeader(addr, path, key, hdr)
 				incVersion := Version{TxIndex: incRes.DepIdx(), Incarnation: incRes.Incarnation()}
@@ -646,7 +646,7 @@ func readCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key a
 			}
 			// The record may have been flushed after the field probe above,
 			// together with a field cell that supersedes the record's field.
-			if accSource == MapRead && s.stateUpdates.ReadStatus(addr, path, key, s.txIndex).Status() != MVReadResultNone {
+			if accSource == MapRead && s.versionMap.ReadStatus(addr, path, key, s.txIndex).Status() != MVReadResultNone {
 				readCore(s, addr, path, key, commited, skipStorage, r)
 				return
 			}
@@ -775,7 +775,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		// stays recorded at the marker's version, so it does not add a second AddressPath
 		// origin that would trip OCC against the marker cell.
 		if r.hdr.accSource == AccountFromBAL {
-			base, ok := s.stateUpdates.LoadOriginAccount(addr)
+			base, ok := s.versionMap.LoadOriginAccount(addr)
 			if !ok {
 				var err error
 				if base, err = s.committedAccount(addr); err != nil {
@@ -800,7 +800,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		// same-tx create+destruct cross-check (same hazard the outcomeMapDone gate above
 		// avoids). The absence is recorded at the destruct, so later loads in this tx
 		// keep it and a re-creation flushed since invalidates it.
-		if _, ok := s.reads.GetAddress(addr); !ok && s.stateUpdates.IsNetAbsent(addr, s.txIndex) {
+		if _, ok := s.reads.GetAddress(addr); !ok && s.versionMap.IsNetAbsent(addr, s.txIndex) {
 			s.reads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: r.version}})
 		}
 		return nil, r.source, r.version, nil
@@ -854,7 +854,7 @@ func gateOriginAccount(s *IntraBlockState, addr accounts.Address, acc *accounts.
 	if acc == nil {
 		return false
 	}
-	if s.stateUpdates.IsNetAbsent(addr, s.txIndex) {
+	if s.versionMap.IsNetAbsent(addr, s.txIndex) {
 		return false
 	}
 	return true

@@ -56,8 +56,6 @@ type Task interface {
 		calcFees bool) *TxResult
 
 	Version() state.Version
-	Reads(ibs *state.IntraBlockState) state.ReadSet
-	Writes(ibs *state.IntraBlockState) *state.WriteSet
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
 
 	Tx() types.Transaction
@@ -416,14 +414,6 @@ func (t *TxTask) Dependencies() []int {
 	return t.dependencies
 }
 
-func (t *TxTask) Reads(ibs *state.IntraBlockState) state.ReadSet {
-	return ibs.Reads()
-}
-
-func (t *TxTask) Writes(ibs *state.IntraBlockState) *state.WriteSet {
-	return ibs.Writes()
-}
-
 func (t *TxTask) IsBlockEnd() bool {
 	return t.TxIndex == len(t.Txs)
 }
@@ -578,7 +568,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			result.Err = stateErr
 			result.TxOut = nil
 		} else {
-			result.TxIn = t.Reads(ibs)
+			result.TxIn = ibs.Reads()
 		}
 	}
 

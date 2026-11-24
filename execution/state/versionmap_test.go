@@ -1562,7 +1562,7 @@ func TestGetVersionedAccount_ReconcilesDBLoadedRecordRead(t *testing.T) {
 	ibs := NewWithVersionMap(&fixedAccountReader{acc: dbAcc}, mvhm)
 	defer ibs.Release(false)
 	ibs.txIndex = 5
-	acc, _, _, err := ibs.getAccount(addr, true)
+	acc, _, _, err := ibs.accountBase(addr, true)
 	require.NoError(t, err)
 	require.NotNil(t, acc)
 	bal, err := ibs.GetBalance(addr)
@@ -1604,7 +1604,7 @@ func TestGetVersionedAccount_NoSynthesisForEmpty(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
 	defer ibs.Release(false)
 	ibs.txIndex = 5
-	acc, _, _, err := ibs.getAccount(addr, true)
+	acc, _, _, err := ibs.accountBase(addr, true)
 	require.NoError(t, err)
 	assert.Nil(t, acc)
 }
@@ -1617,7 +1617,7 @@ func TestGetVersionedAccount_NoSynthesisFromEstimate(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
 	defer ibs.Release(false)
 	ibs.txIndex = 5
-	acc, _, _, err := ibs.getAccount(addr, true)
+	acc, _, _, err := ibs.accountBase(addr, true)
 	require.NoError(t, err)
 	assert.Nil(t, acc)
 }
@@ -1637,7 +1637,7 @@ func TestGetVersionedAccount_NoSynthesisAfterSelfDestruct(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
 	defer ibs.Release(false)
 	ibs.txIndex = 5
-	acc, _, _, err := ibs.getAccount(addr, true)
+	acc, _, _, err := ibs.accountBase(addr, true)
 	require.NoError(t, err)
 	assert.Nil(t, acc)
 }
@@ -2748,9 +2748,9 @@ func TestWritesAlreadySeededRefusesASeedADroppedWritePutBack(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
 	slot := accounts.InternKey(common.Hash{0x04})
 	vm := NewVersionMap(seededSlotBAL(addr, slot))
-	vm.Delete(addr, StoragePath, slot, 1, false)
-	vm.FlushWrites(storageWriteSet(addr, slot, 2, 42, ValueChanged), false)
-	vm.FlushWrites(storageWriteSet(addr, slot, 3, 5, ValueUnchanged), false)
+	vm.FlushWrites(storageWriteSet(addr, slot, 1, 9, ValueChanged), false)
+	vm.DropWrite(addr, StoragePath, slot, Version{TxIndex: 1, Incarnation: 2})
+	require.Equal(t, *uint256.NewInt(42), requireDoneCell(t, vm.load(addr).Storage[slot], 1, 2).Value)
 
 	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 3, 42, ValueChanged)))
 }

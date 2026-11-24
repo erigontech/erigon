@@ -184,14 +184,6 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	return &exec.TxResult{}
 }
 
-func (t *testExecTask) Writes(_ *state.IntraBlockState) *state.WriteSet {
-	return t.writeMap
-}
-
-func (t *testExecTask) Reads(_ *state.IntraBlockState) state.ReadSet {
-	return t.readMap
-}
-
 func (t *testExecTask) Sender() accounts.Address {
 	return t.sender
 }

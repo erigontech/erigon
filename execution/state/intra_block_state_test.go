@@ -508,7 +508,7 @@ func TestCloseResetsRevisions(t *testing.T) {
 	require.Zero(t, state.revisions.nextId)
 }
 
-func TestCloseReleasesVersionedWrites(t *testing.T) {
+func TestCloseReleasesWrites(t *testing.T) {
 	t.Parallel()
 	state := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
 	t.Cleanup(state.Close)
@@ -662,7 +662,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	// Tx1 write
 	require.NoError(t, states[1].SetState(addr, key, val))
 	require.NoError(t, states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
-	states[1].stateUpdates.FlushWrites(states[1].Writes(), true)
+	states[1].versionMap.FlushWrites(states[1].Writes(), true)
 
 	// Tx1 read
 	v, err = states[1].GetState(addr, key)
@@ -694,7 +694,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 
 	// Publishing the finalized write-set to the versionMap carries the wipe, so
 	// later txs read the destroyed account as empty.
-	states[3].stateUpdates.FlushWrites(finalizedWrites(t, states[3], &chain.Rules{}), true)
+	states[3].versionMap.FlushWrites(finalizedWrites(t, states[3], &chain.Rules{}), true)
 
 	// Tx4 read
 	v, err = states[4].GetState(addr, key)
@@ -733,7 +733,7 @@ func TestVersionMapRevert(t *testing.T) {
 	// Tx0 write
 	require.NoError(t, states[0].SetState(addr, key, val))
 	require.NoError(t, states[0].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
-	states[0].stateUpdates.FlushWrites(states[0].Writes(), true)
+	states[0].versionMap.FlushWrites(states[0].Writes(), true)
 
 	// Tx1 perform some ops and then revert
 	snapshot := states[1].PushSnapshot()
@@ -759,7 +759,7 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
 	states[1].EndTransaction()
-	states[1].stateUpdates.FlushWrites(states[1].Writes(), true)
+	states[1].versionMap.FlushWrites(states[1].Writes(), true)
 
 	// Tx2 check the state and balance
 	v, err = states[2].GetState(addr, key)
@@ -803,13 +803,13 @@ func TestEstimateDependencyCaughtAtCommit(t *testing.T) {
 	v, err = states[0].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
-	states[0].stateUpdates.FlushWrites(states[0].Writes(), true)
+	states[0].versionMap.FlushWrites(states[0].Writes(), true)
 
 	// Tx1 speculative write: flushed incomplete, so its cells are born ESTIMATE
 	// (the branch never downgrades a completed Done cell back to Estimate).
 	require.NoError(t, states[1].SetState(addr, key, val))
 	require.NoError(t, states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
-	states[1].stateUpdates.FlushWrites(states[1].Writes(), false)
+	states[1].versionMap.FlushWrites(states[1].Writes(), false)
 
 	// Tx2 read: an estimate cell still carries its value, so the read returns it
 	// and records the dependency.
@@ -876,7 +876,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	// Tx0 write
 	require.NoError(t, states[0].SetState(addr, key, val1))
 	require.NoError(t, states[0].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified))
-	states[0].stateUpdates.FlushWrites(states[0].Writes(), true)
+	states[0].versionMap.FlushWrites(states[0].Writes(), true)
 
 	// Tx1 write
 	require.NoError(t, states[1].SetState(addr, key, val2))
@@ -885,7 +885,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.NoError(t, err)
 	b, err := states[1].GetBalance(addr)
 	assert.NoError(t, err)
-	states[1].stateUpdates.FlushWrites(states[1].Writes(), true)
+	states[1].versionMap.FlushWrites(states[1].Writes(), true)
 
 	assert.Equal(t, val2, v)
 	assert.Equal(t, balance2, b)
@@ -965,17 +965,17 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 	// Tx0 write
 	require.NoError(t, states[0].CreateAccount(addr, false))
-	states[0].stateUpdates.FlushWrites(states[0].Writes(), true)
+	states[0].versionMap.FlushWrites(states[0].Writes(), true)
 
 	// Tx2 write
 	require.NoError(t, states[2].SetState(addr, key2, val2))
-	states[2].stateUpdates.FlushWrites(states[2].Writes(), true)
+	states[2].versionMap.FlushWrites(states[2].Writes(), true)
 
 	// Tx1 write
 	tx1Snapshot := states[1].PushSnapshot()
 	require.NoError(t, states[1].SetState(addr, key1, val1))
 	require.NoError(t, states[1].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified))
-	states[1].stateUpdates.FlushWrites(states[1].Writes(), true)
+	states[1].versionMap.FlushWrites(states[1].Writes(), true)
 
 	// Tx1 read
 	v, err := states[1].GetState(addr, key1)
@@ -1039,11 +1039,11 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Tx1 revert
 	states[1].RevertToSnapshot(tx1Snapshot, nil)
 	states[1].PopSnapshot(tx1Snapshot)
-	states[1].stateUpdates.FlushWrites(states[1].Writes(), true)
+	states[1].versionMap.FlushWrites(states[1].Writes(), true)
 	// map deletes necessary here as they happen in scheduler not ibs
-	states[1].stateUpdates.Delete(addr, StoragePath, key1, 1, true)
-	states[1].stateUpdates.Delete(addr, StoragePath, key2, 1, true)
-	states[1].stateUpdates.Delete(addr, BalancePath, accounts.NilKey, 1, true)
+	states[1].versionMap.Delete(addr, StoragePath, key1, 1, true)
+	states[1].versionMap.Delete(addr, StoragePath, key2, 1, true)
+	states[1].versionMap.Delete(addr, BalancePath, accounts.NilKey, 1, true)
 
 	// Tx3 read
 	// we need to flush the cached reads as we're not
