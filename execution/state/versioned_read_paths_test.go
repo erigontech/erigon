@@ -171,18 +171,13 @@ func TestVersionedRead_B_WarmStorageReadReturnsReadSetTuple(t *testing.T) {
 	assert.True(t, clean, "a read-set hit is clean: this tx has no write of the slot, so a revert deletes the write")
 }
 
-func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, versioned bool) *IntraBlockState {
+func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account) *IntraBlockState {
 	_, tx, domains := NewTestRwTx(t)
 	addrValue := addr.Value()
 	domains.SetTxNum(10)
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
 	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-	var ibs *IntraBlockState
-	if versioned {
-		ibs = NewWithVersionMap(reader, NewVersionMap(nil))
-	} else {
-		ibs = New(reader)
-	}
+	ibs := New(reader)
 	t.Cleanup(ibs.Close)
 	ibs.SetTxContext(1, 5)
 	return ibs
@@ -190,36 +185,32 @@ func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, 
 
 func TestVersionedTouch_RepeatedTouchIsNoop(t *testing.T) {
 	t.Parallel()
-	for _, versioned := range []bool{false, true} {
-		addr := accounts.InternAddress([20]byte{0xb6})
-		acc := accounts.NewAccount()
-		acc.Incarnation = 1
-		ibs := newTouchTestIBS(t, addr, acc, versioned)
+	addr := accounts.InternAddress([20]byte{0xb6})
+	acc := accounts.NewAccount()
+	acc.Incarnation = 1
+	ibs := newTouchTestIBS(t, addr, acc)
 
-		require.NoError(t, ibs.TouchAccount(addr))
-		n := ibs.journal.length()
-		require.Positive(t, n)
-		require.NoError(t, ibs.TouchAccount(addr))
-		assert.Equal(t, n, ibs.journal.length(), "versioned=%v", versioned)
-	}
+	require.NoError(t, ibs.TouchAccount(addr))
+	n := ibs.journal.length()
+	require.Positive(t, n)
+	require.NoError(t, ibs.TouchAccount(addr))
+	assert.Equal(t, n, ibs.journal.length())
 }
 
 // The touch result does not depend on the other fields once the tx wrote the balance.
 func TestVersionedTouch_OwnBalanceWriteReadsNoFields(t *testing.T) {
 	t.Parallel()
-	for _, versioned := range []bool{false, true} {
-		addr := accounts.InternAddress([20]byte{0xb7})
-		acc := accounts.NewAccount()
-		acc.Incarnation = 1
-		acc.Nonce = 1
-		acc.Balance = *uint256.NewInt(5)
-		ibs := newTouchTestIBS(t, addr, acc, versioned)
+	addr := accounts.InternAddress([20]byte{0xb7})
+	acc := accounts.NewAccount()
+	acc.Incarnation = 1
+	acc.Nonce = 1
+	acc.Balance = *uint256.NewInt(5)
+	ibs := newTouchTestIBS(t, addr, acc)
 
-		require.NoError(t, ibs.SetBalance(addr, uint256.Int{}, 0))
-		require.NoError(t, ibs.TouchAccount(addr))
-		_, ok := ibs.versionedReads.GetNonce(addr)
-		assert.False(t, ok, "nonce read, versioned=%v", versioned)
-	}
+	require.NoError(t, ibs.SetBalance(addr, uint256.Int{}, 0))
+	require.NoError(t, ibs.TouchAccount(addr))
+	_, ok := ibs.versionedReads.GetNonce(addr)
+	assert.False(t, ok, "nonce read")
 }
 
 // ------------------------------------------------------------------

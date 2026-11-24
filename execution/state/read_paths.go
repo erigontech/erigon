@@ -657,61 +657,22 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				r.account = readAccount
 			}
 		}
-		// Cold origin storage read: resolve directly from the state reader without
-		// materializing a stateObject.
-		if path == StoragePath {
-			hdr.Source = StorageRead
-			// A cold slot depends only on its own StoragePath cell — recording an
-			// AddressPath dependency would be a false dep. The origin is resolved by
-			// ReadStorage's origin fallback; this cold path is the first reader (not yet
-			// published), which reads the origin base from the state reader.
-			val, err := s.originStorageDirect(addr, key)
-			if err != nil {
-				r.err = err
-				r.outcome = outcomeReturnDefault
-				r.source = StorageRead
-				r.version = UnknownVersion
-				return
-			}
-			r.mapStorageVal = val
-			r.outcome = outcomeStorageRead
-			r.hdr = hdr
-			r.recordVR = true
-			r.source = hdr.Source
-			r.version = hdr.Version
-			return
+		// Cold storage / code reads resolve straight from the state reader and record only
+		// their own path: an AddressPath dependency would be a false dep.
+		var err error
+		switch path {
+		case StoragePath:
+			r.mapStorageVal, err = s.originStorageDirect(addr, key)
+		case CodePath:
+			r.mapCodeVal, err = s.originCodeDirect(addr)
+		case CodeSizePath:
+			r.mapCodeSizeVal, err = s.originCodeSizeDirect(addr)
 		}
-		// Cold code / code-size read: resolve directly from the state reader without
-		// materializing a stateObject. Code paths record only their own dependency
-		// (no false AddressPath dep).
-		if path == CodePath || path == CodeSizePath {
-			hdr.Source = StorageRead
-			if path == CodePath {
-				code, err := s.originCodeDirect(addr)
-				if err != nil {
-					r.err = err
-					r.outcome = outcomeReturnDefault
-					r.source = StorageRead
-					r.version = UnknownVersion
-					return
-				}
-				r.mapCodeVal = code
-			} else {
-				size, err := s.originCodeSizeDirect(addr)
-				if err != nil {
-					r.err = err
-					r.outcome = outcomeReturnDefault
-					r.source = StorageRead
-					r.version = UnknownVersion
-					return
-				}
-				r.mapCodeSizeVal = size
-			}
-			r.outcome = outcomeStorageRead
-			r.hdr = hdr
-			r.recordVR = true
-			r.source = hdr.Source
-			r.version = hdr.Version
+		if err != nil {
+			r.err = err
+			r.outcome = outcomeReturnDefault
+			r.source = StorageRead
+			r.version = UnknownVersion
 			return
 		}
 		if r.account == nil {

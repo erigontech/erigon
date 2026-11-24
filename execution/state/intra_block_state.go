@@ -979,24 +979,8 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 			return nil
 		}
 	}
-	markTouched := func() {
-		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-			fmt.Printf("%d (%d.%d) Touch %x\n", ibs.blockNum, ibs.txIndex, ibs.version, addr)
-		}
-		// Versioned path: pair the BalancePath=0 write with a journal entry
-		// that reverts it, so the write-set stays in step through reverts
-		// without any dirties re-processing (deprecated on this path).
-		prevWrite, had := ibs.versionedWrites.GetBalance(addr)
-		var prev uint256.Int
-		if had {
-			prev = prevWrite.Val
-		}
-		ibs.recordWriteBalance(addr, uint256.Int{})
-		ibs.journal.touchAccount(addr, !had, prev)
-	}
-
 	// The touch only depends on emptiness. For an existing account compute it
-	// from field reads without reconstructing the stateObject.
+	// from field reads without reconstructing the account.
 	account, _, _, err := ibs.versionedAccountBase(addr, true)
 	if err != nil {
 		return err
@@ -1006,15 +990,26 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 		if err != nil {
 			return err
 		}
-		if empty {
-			markTouched()
+		if !empty {
+			return nil
 		}
-		return nil
+	} else {
+		// Absent or destroyed-no-revival: (re)create as empty and touch, recording
+		// the AddressPath write for OCC create detection. A fresh account is empty.
+		ibs.createVersioned(addr, false)
 	}
-	// Absent or destroyed-no-revival: (re)create as empty and touch, recording
-	// the AddressPath write for OCC create detection. A fresh account is empty.
-	ibs.createVersioned(addr, false)
-	markTouched()
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+		fmt.Printf("%d (%d.%d) Touch %x\n", ibs.blockNum, ibs.txIndex, ibs.version, addr)
+	}
+	// Pair the BalancePath=0 write with a journal entry that reverts it, so the
+	// write-set stays in step through reverts.
+	prevWrite, had := ibs.versionedWrites.GetBalance(addr)
+	var prev uint256.Int
+	if had {
+		prev = prevWrite.Val
+	}
+	ibs.recordWriteBalance(addr, uint256.Int{})
+	ibs.journal.touchAccount(addr, !had, prev)
 	return nil
 }
 
