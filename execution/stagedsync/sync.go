@@ -283,29 +283,6 @@ func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	return nil
 }
 
-// unwindAll runs every stage unwind for RunNoInterrupt. As in RunUnwind, a failed or panicking
-// unwind consumes the request: fork validation rolls the tx back, and the reused Sync must not
-// replay it. Run keeps the request instead, so the next Run resumes an interrupted unwind.
-func (s *Sync) unwindAll(initialCycle bool, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
-	done := false
-	defer func() {
-		if !done {
-			s.unwindPoint = nil
-			s.unwindReason = UnwindReason{}
-		}
-	}()
-	for j := 0; j < len(s.unwindOrder); j++ {
-		if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
-			continue
-		}
-		if err := s.unwindStage(initialCycle, s.unwindOrder[j], sd, tx); err != nil {
-			return err
-		}
-	}
-	done = true
-	return nil
-}
-
 func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (hasMore bool, err error) {
 	initialCycle, firstCycle := false, false
 	s.prevUnwindPoint = nil
@@ -324,16 +301,15 @@ func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (ha
 	for !s.IsDone() {
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {
-			if err := s.unwindAll(initialCycle, sd, tx); err != nil {
+			// RunUnwind consumes the request also on failure: fork validation rolls the tx back.
+			reason := s.unwindReason
+			if err := s.RunUnwind(sd, tx); err != nil {
 				return false, err
 			}
-			s.prevUnwindPoint = s.unwindPoint
-			s.unwindPoint = nil
-			if s.unwindReason.IsBadBlock() {
+			if reason.IsBadBlock() {
 				badBlockUnwind = true
-				errBadBlock = s.unwindReason.ErrBadBlock
+				errBadBlock = reason.ErrBadBlock
 			}
-			s.unwindReason = UnwindReason{}
 			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 				return false, err
 			}
