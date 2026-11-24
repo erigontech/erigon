@@ -27,6 +27,7 @@ import (
 	"github.com/cenkalti/backoff/v4"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -269,17 +270,7 @@ func (f *FetcherBase) fetchHeaders(
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	messages := make(chan *DecodedInboundMessage[*eth.BlockHeadersPacket66])
-	observer := func(message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) {
-		select {
-		case <-ctx.Done():
-			return
-		case messages <- message:
-			// no-op
-		}
-	}
-
-	unregister := f.messageListener.RegisterBlockHeadersObserver(observer)
+	messages, unregister := subscribeResponses(ctx, f.messageListener.RegisterBlockHeadersObserver)
 	defer unregister()
 
 	requestId := f.config.requestIdGenerator()
@@ -376,17 +367,7 @@ func (f *FetcherBase) fetchBodies(
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	messages := make(chan *DecodedInboundMessage[BlockBodiesEnvelope])
-	observer := func(message *DecodedInboundMessage[BlockBodiesEnvelope]) {
-		select {
-		case <-ctx.Done():
-			return
-		case messages <- message:
-			// no-op
-		}
-	}
-
-	unregister := f.messageListener.RegisterBlockBodiesObserver(observer)
+	messages, unregister := subscribeResponses(ctx, f.messageListener.RegisterBlockBodiesObserver)
 	defer unregister()
 
 	requestId := f.config.requestIdGenerator()
@@ -482,10 +463,21 @@ func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([
 	return bodies, nil
 }
 
+func subscribeResponses[T any](ctx context.Context, register func(event.Observer[T]) UnregisterFunc) (<-chan T, UnregisterFunc) {
+	messages := make(chan T)
+	unregister := register(func(message T) {
+		select {
+		case <-ctx.Done():
+		case messages <- message:
+		}
+	})
+	return messages, unregister
+}
+
 func awaitResponse[TPacket any](
 	ctx context.Context,
 	timeout time.Duration,
-	messages chan *DecodedInboundMessage[TPacket],
+	messages <-chan *DecodedInboundMessage[TPacket],
 	filter func(*DecodedInboundMessage[TPacket]) bool,
 ) (TPacket, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)

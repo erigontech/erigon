@@ -277,14 +277,7 @@ func decodeBlockAccessListsResponse(payload []byte, requested int) ([]rlp.RawVal
 func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) ([]byte, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	messages := make(chan *DecodedInboundMessage[BlockAccessListsEnvelope])
-	observer := func(message *DecodedInboundMessage[BlockAccessListsEnvelope]) {
-		select {
-		case <-ctx.Done():
-		case messages <- message:
-		}
-	}
-	unregister := f.messageListener.RegisterBlockAccessListsObserver(observer)
+	messages, unregister := subscribeResponses(ctx, f.messageListener.RegisterBlockAccessListsObserver)
 	defer unregister()
 	requestId := rand.Uint64() //nolint:gosec // request id does not need crypto-grade randomness
 	hashes := make([]common.Hash, len(reqs))
