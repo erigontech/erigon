@@ -1469,7 +1469,13 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 	candidateBlock.KzgProofs = nil
 	candidateBlock.ExecutionValue = selectedValueWei
 
-	candidateMachine, candidateErr := processBlock(candidateState, &candidateBlock)
+	var candidateMachine *eth2.Impl
+	candidateErr := externalBid.Message.ValidateInclusionListBits(block.Version())
+	if candidateErr != nil {
+		candidateErr = fmt.Errorf("%w: %w", machine.ErrInvalidExecutionPayloadBid, candidateErr)
+	} else {
+		candidateMachine, candidateErr = processBlock(candidateState, &candidateBlock)
+	}
 	if candidateErr == nil {
 		*block = candidateBlock
 		log.Info("GLOAS: selected external builder bid over self-build",

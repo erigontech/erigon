@@ -992,15 +992,23 @@ func (b *BeaconChainConfig) InitializeForkSchedule() {
 
 func configForkSchedule(b *BeaconChainConfig) map[common.Bytes4]VersionScheduleEntry {
 	fvs := map[common.Bytes4]VersionScheduleEntry{}
-	fvs[utils.Uint32ToBytes4(uint32(b.GenesisForkVersion))] = VersionScheduleEntry{b.GenesisSlot / b.SlotsPerEpoch, Phase0Version}
-	fvs[utils.Uint32ToBytes4(uint32(b.AltairForkVersion))] = VersionScheduleEntry{b.AltairForkEpoch, AltairVersion}
-	fvs[utils.Uint32ToBytes4(uint32(b.BellatrixForkVersion))] = VersionScheduleEntry{b.BellatrixForkEpoch, BellatrixVersion}
-	fvs[utils.Uint32ToBytes4(uint32(b.CapellaForkVersion))] = VersionScheduleEntry{b.CapellaForkEpoch, CapellaVersion}
-	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = VersionScheduleEntry{b.DenebForkEpoch, DenebVersion}
-	fvs[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = VersionScheduleEntry{b.ElectraForkEpoch, ElectraVersion}
-	fvs[utils.Uint32ToBytes4(uint32(b.FuluForkVersion))] = VersionScheduleEntry{b.FuluForkEpoch, FuluVersion}
-	fvs[utils.Uint32ToBytes4(uint32(b.GloasForkVersion))] = VersionScheduleEntry{b.GloasForkEpoch, GloasVersion}
-	fvs[utils.Uint32ToBytes4(uint32(b.HezeForkVersion))] = VersionScheduleEntry{b.HezeForkEpoch, HezeVersion}
+	add := func(version ConfigForkVersion, epoch uint64, stateVersion StateVersion) {
+		key := utils.Uint32ToBytes4(uint32(version))
+		// An unscheduled fork that reuses a fork version must not hide the fork that uses it.
+		if _, ok := fvs[key]; ok && epoch == b.FarFutureEpoch {
+			return
+		}
+		fvs[key] = VersionScheduleEntry{epoch, stateVersion}
+	}
+	add(b.GenesisForkVersion, b.GenesisSlot/b.SlotsPerEpoch, Phase0Version)
+	add(b.AltairForkVersion, b.AltairForkEpoch, AltairVersion)
+	add(b.BellatrixForkVersion, b.BellatrixForkEpoch, BellatrixVersion)
+	add(b.CapellaForkVersion, b.CapellaForkEpoch, CapellaVersion)
+	add(b.DenebForkVersion, b.DenebForkEpoch, DenebVersion)
+	add(b.ElectraForkVersion, b.ElectraForkEpoch, ElectraVersion)
+	add(b.FuluForkVersion, b.FuluForkEpoch, FuluVersion)
+	add(b.GloasForkVersion, b.GloasForkEpoch, GloasVersion)
+	add(b.HezeForkVersion, b.HezeForkEpoch, HezeVersion)
 	return fvs
 }
 
@@ -1358,6 +1366,9 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	}
 	if beaconCfg.MaxValidatorsPerCommittee > MaxSupportedValidatorsPerCommittee {
 		return BeaconChainConfig{}, NetworkConfig{}, fmt.Errorf("MAX_VALIDATORS_PER_COMMITTEE exceeds supported limit: %d > %d", beaconCfg.MaxValidatorsPerCommittee, uint64(MaxSupportedValidatorsPerCommittee))
+	}
+	if beaconCfg.InclusionListCommitteeSize != InclusionListCommitteeSize {
+		return BeaconChainConfig{}, NetworkConfig{}, fmt.Errorf("INCLUSION_LIST_COMMITTEE_SIZE is not supported: %d != %d", beaconCfg.InclusionListCommitteeSize, InclusionListCommitteeSize)
 	}
 
 	// setup network config

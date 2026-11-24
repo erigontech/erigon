@@ -44,3 +44,16 @@ func TestGetForkDigests(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, lastFork, nextDigest)
 }
+
+func TestForkDigestRoundTripWhenUnscheduledForkSharesGenesisVersion(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GenesisForkVersion = cfg.HezeForkVersion
+	cfg.InitializeForkSchedule()
+	clock := NewEthereumClock(0, common.Hash{0x01}, &cfg)
+
+	digest, err := clock.ComputeForkDigest(0)
+	require.NoError(t, err)
+	version, err := clock.StateVersionByForkDigest(digest)
+	require.NoError(t, err)
+	require.Equal(t, clparams.Phase0Version, version)
+}

@@ -191,3 +191,14 @@ func TestHezeBeaconBodyJSONRejectsRemovedFields(t *testing.T) {
 	}
 	require.NoError(t, unmarshalBody(t, clparams.HezeVersion, marshalBodyFields(t, clparams.HezeVersion)))
 }
+
+func TestBeaconBodyEncodingSizeMatchesEncoding(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.ElectraVersion, clparams.GloasVersion, clparams.HezeVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			body := NewBeaconBody(&clparams.MainnetBeaconConfig, version)
+			encoded, err := body.EncodeSSZ(nil)
+			require.NoError(t, err)
+			require.Equal(t, len(encoded), body.EncodingSizeSSZ())
+		})
+	}
+}

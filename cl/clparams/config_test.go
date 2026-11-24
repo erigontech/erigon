@@ -150,6 +150,23 @@ func TestCustomConfigBoundsMaxValidatorsPerCommittee(t *testing.T) {
 	}
 }
 
+func TestCustomConfigRejectsUnsupportedInclusionListCommitteeSize(t *testing.T) {
+	for _, size := range []uint64{8, InclusionListCommitteeSize, 32} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, os.WriteFile(configPath, fmt.Appendf(nil, "INCLUSION_LIST_COMMITTEE_SIZE: %d\n", size), 0o644))
+
+			beaconCfg, _, err := CustomConfig(configPath)
+			if size != InclusionListCommitteeSize {
+				require.EqualError(t, err, fmt.Sprintf("INCLUSION_LIST_COMMITTEE_SIZE is not supported: %d != %d", size, InclusionListCommitteeSize))
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, size, beaconCfg.InclusionListCommitteeSize)
+		})
+	}
+}
+
 func TestCustomConfigGasLimitSchedule(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(`GLOAS_FORK_EPOCH: 10

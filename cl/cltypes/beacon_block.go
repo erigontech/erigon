@@ -487,38 +487,17 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 
 func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 	b.ensureNilFields()
-
-	size += b.ProposerSlashings.EncodingSizeSSZ()
-	size += b.AttesterSlashings.EncodingSizeSSZ()
-	size += b.Attestations.EncodingSizeSSZ()
-	if b.Version < clparams.HezeVersion {
-		size += b.Deposits.EncodingSizeSSZ()
-	}
-	size += b.VoluntaryExits.EncodingSizeSSZ()
-	// [Modified in Gloas:EIP7732] ExecutionPayload removed in GLOAS
-	if b.Version >= clparams.BellatrixVersion && b.Version < clparams.GloasVersion {
-		size += b.ExecutionPayload.EncodingSizeSSZ()
-	}
-	if b.Version >= clparams.CapellaVersion {
-		size += b.ExecutionChanges.EncodingSizeSSZ()
-	}
-	// [Modified in Gloas:EIP7732] BlobKzgCommitments removed in GLOAS
-	if b.Version >= clparams.DenebVersion && b.Version < clparams.GloasVersion {
-		size += b.BlobKzgCommitments.EncodingSizeSSZ()
-	}
-	// [Modified in Gloas:EIP7732] ExecutionRequests removed in GLOAS
-	if b.Version >= clparams.ElectraVersion && b.Version < clparams.GloasVersion {
-		if b.ExecutionRequests != nil {
-			size += b.ExecutionRequests.EncodingSizeSSZ()
+	for _, field := range b.getSchema(false) {
+		switch f := field.(type) {
+		case []byte:
+			size += len(f)
+		case ssz2.SizedObjectSSZ:
+			if !f.Static() {
+				size += 4
+			}
+			size += f.EncodingSizeSSZ()
 		}
 	}
-	// [New in Gloas:EIP7732] SignedExecutionPayloadBid, PayloadAttestations, and ParentExecutionRequests
-	if b.Version >= clparams.GloasVersion {
-		size += b.SignedExecutionPayloadBid.EncodingSizeSSZ()
-		size += b.PayloadAttestations.EncodingSizeSSZ()
-		size += b.ParentExecutionRequests.EncodingSizeSSZ()
-	}
-
 	return
 }
 
