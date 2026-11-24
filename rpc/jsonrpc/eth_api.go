@@ -628,15 +628,6 @@ func (api *BaseAPI) checkPruneState(ctx context.Context, tx kv.Tx, block uint64)
 	return api.checkHistoryFloor(ctx, tx, block, func(f historyPruneFloors) uint64 { return f.postState })
 }
 
-// checkPruneStateUnlessLatest skips the gate for the latest executed block:
-// its state is read from the current domains, never from history.
-func (api *BaseAPI) checkPruneStateUnlessLatest(ctx context.Context, tx kv.Tx, block uint64, latest bool) error {
-	if latest {
-		return nil
-	}
-	return api.checkPruneState(ctx, tx, block)
-}
-
 // checkPruneStateAfterSystemTx matches state readers opened at Min(block+1)+1.
 func (api *BaseAPI) checkPruneStateAfterSystemTx(ctx context.Context, tx kv.Tx, block uint64) error {
 	return api.checkHistoryFloor(ctx, tx, block, func(f historyPruneFloors) uint64 { return f.stateAfterSystemTx })

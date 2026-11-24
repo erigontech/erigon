@@ -54,8 +54,11 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 		return nil, nil, err
 	}
 
-	if err := api.checkPruneStateUnlessLatest(ctx, tx, blockNumber, latest); err != nil {
-		return nil, nil, err
+	// The latest executed block is read from the current domains, never from history.
+	if !latest {
+		if err := api.checkPruneState(ctx, tx, blockNumber); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api.stateCache, api._txNumReader)
@@ -154,26 +157,11 @@ func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Ad
 		return nil, &rpc.InvalidParamsError{Message: "empty request"}
 	}
 
-	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	blockNumber, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
-	if err != nil {
-		return nil, err
-	}
-
-	err = api.checkPruneStateUnlessLatest(ctx, tx, blockNumber, latest)
-	if err != nil {
-		return nil, err
-	}
-
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api.stateCache, api._txNumReader)
-	if err != nil {
-		return nil, err
-	}
 
 	result := make(map[common.Address][]hexutil.Bytes, len(requests))
 	for addr, keys := range requests {
