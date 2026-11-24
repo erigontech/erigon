@@ -264,10 +264,12 @@ func TestFinalizeCallTxPublishesWritesToNextTx(t *testing.T) {
 	require.NoError(t, ethapi.FinalizeCallTx(ibs, &chain.Rules{}))
 
 	ibs.SetTxContext(0, 1)
+	ibs.ResetTxLogs()
 	got, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	require.Equal(t, *uint256.NewInt(7), got)
 	ibs.AddLog(&types.Log{Address: addr.Value()})
+	require.NoError(t, ethapi.FinalizeCallTx(ibs, &chain.Rules{}))
 	require.Equal(t, hexutil.Uint(1), ibs.Logs()[1].Index)
 }
 

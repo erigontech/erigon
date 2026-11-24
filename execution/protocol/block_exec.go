@@ -127,6 +127,7 @@ func ExecuteBlockEphemerally(
 	}
 
 	ibs.SetTxContext(blockNum, -1)
+	ibs.ResetTxLogs()
 	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger, vmConfig.Tracer); err != nil {
 		return nil, err
 	}
@@ -140,6 +141,7 @@ func ExecuteBlockEphemerally(
 
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(blockNum, i)
+		ibs.ResetTxLogs()
 		writeTrace := false
 		if vmConfig.Tracer == nil && getTracer != nil {
 			tracer, err := getTracer(i, txn.Hash())

@@ -50,7 +50,6 @@ type TraceWorker struct {
 	tx           kv.Getter
 	chainConfig  *chain.Config
 	tracer       GenericTracer
-	ibs          *state.IntraBlockState
 	evm          *vm.EVM
 
 	// calculated by .changeBlock()
@@ -75,16 +74,11 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine rules.EngineReade
 		tracer:       tracer,
 		evm:          vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, cc, vm.Config{}),
 		vmConfig:     &vm.Config{NoBaseFee: true},
-		ibs:          state.New(stateReader),
 	}
 	if tracer != nil {
 		ie.vmConfig.Tracer = tracer.TracingHooks()
 	}
 	return ie
-}
-
-func (e *TraceWorker) Close() {
-	e.ibs.Close()
 }
 
 func (e *TraceWorker) ChangeBlock(header *types.Header) {
@@ -97,16 +91,10 @@ func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.Time)
 }
 
-func (e *TraceWorker) GetRawLogs(txIdx int) types.Logs { return e.ibs.GetRawLogs(txIdx) }
-func (e *TraceWorker) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) []*types.Log {
-	return e.ibs.GetLogs(txIndex, txnHash, blockNumber, blockHash)
-}
-
 func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) error {
 	e.stateReader.SetTxNum(txNum)
-	e.ibs.Reset()
-	transactions.VersionedCallState(e.ibs)
-	e.ibs.SetTxContext(e.blockNum, txIndex)
+	ibs := state.NewPooled(e.stateReader).WithTxContext(e.blockNum, txIndex)
+	defer state.ReleasePooled(ibs)
 
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {
@@ -116,7 +104,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) 
 
 	txContext := protocol.NewEVMTxContext(msg)
 	blockCtx := vm.ZeroUnpricedBaseFee(*e.blockCtx, txContext, *e.vmConfig)
-	e.evm.ResetBetweenBlocks(blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
+	e.evm.ResetBetweenBlocks(blockCtx, txContext, ibs, *e.vmConfig, e.rules)
 
 	gp := new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas())
 
@@ -129,7 +117,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) 
 		return fmt.Errorf("%w: blockNum=%d, txNum=%d, %w", err, e.blockNum, txNum, result.Err)
 	}
 
-	e.ibs.EndTransaction()
+	ibs.EndTransaction()
 	if e.vmConfig.Tracer != nil {
 		if e.tracer.Found() {
 			e.tracer.SetTransaction(txn)

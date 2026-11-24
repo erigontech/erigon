@@ -520,14 +520,13 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 			return nil, err
 		}
-		ibs := state.NewVersionedCall(state.NewHistoryReaderV3(dbtx, txNum))
+		ibs := state.NewVersionedCall(state.NewHistoryReaderV3(dbtx, txNum)).WithTxContext(blockNum, txIndex)
 		defer ibs.Close()
 
 		evmTxCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-		ibs.SetTxContext(blockNum, txIndex)
 		ibs.SetHooks(ot.Tracer().Hooks)
 
 		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
@@ -923,7 +922,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 		return func(txIndex int) error {
 			msg := msgs[txIndex]
-			workerIbs := state.NewVersionedCall(state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(txIndex)))
+			workerIbs := state.NewVersionedCall(state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(txIndex))).WithTxContext(blockCtx.BlockNumber, txIndex)
 			defer workerIbs.Close()
 
 			traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: callParams[txIndex].txHash}
@@ -938,7 +937,6 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 			tracer := ot.Tracer()
 			vmConfig := vm.Config{Tracer: tracer.Hooks}
 
-			workerIbs.SetTxContext(blockCtx.BlockNumber, txIndex)
 			workerIbs.SetHooks(tracer.Hooks)
 
 			txCtx := protocol.NewEVMTxContext(msg)

@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 type HistoricalTraceWorker struct {
@@ -54,7 +53,6 @@ type HistoricalTraceWorker struct {
 	out      *ResultsQueue
 
 	stateReader *state.HistoryReaderV3
-	ibs         *state.IntraBlockState
 	evm         *vm.EVM
 
 	chainTx     kv.TemporalTx
@@ -107,7 +105,6 @@ func NewHistoricalTraceWorker(
 		vmCfg:       &vm.Config{},
 	}
 	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
-	ie.ibs = state.New(ie.stateReader)
 	return ie
 }
 
@@ -120,7 +117,6 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 		}
 	}()
 	defer rw.LogStats()
-	defer rw.ibs.Close()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		result := rw.RunTxTask(txTask.(*TxTask))
 		if err := rw.out.Add(rw.ctx, result); err != nil {
@@ -149,9 +145,9 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 	rw.stateWriter = state.NewNoopWriter()
 	rw.vmCfg.Tracer = nil
 
-	rw.ibs.Reset()
-	transactions.VersionedCallState(rw.ibs)
-	ibs, cc := rw.ibs, rw.execArgs.ChainConfig
+	runState := state.NewPooled(rw.stateReader).WithTxContext(txTask.BlockNumber(), txTask.TxIndex)
+	defer state.ReleasePooled(runState)
+	ibs, cc := runState, rw.execArgs.ChainConfig
 
 	ibs.SetTrace(txTask.Trace)
 	rw.stateReader.SetTrace(txTask.Trace, "")
@@ -176,8 +172,8 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 			if err != nil {
 				panic(fmt.Errorf("GenesisToBlock: %w", err))
 			}
-			// This state replaces rw.ibs for the genesis task only, so it needs its
-			// own close; rw.ibs stays owned by the worker.
+			// The genesis task runs on its own state, which owns its close; the
+			// per-run pooled state acquired above is released unused.
 			defer genesisIbs.Close()
 			ibs = genesisIbs
 			// For Genesis, rules should be empty, so that empty accounts can be included
@@ -209,7 +205,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 		result.Err = func() error {
 			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), txTask.Tx().GetBlobGas())
 			rw.vmCfg.Tracer = tracer.Tracer().Hooks
-			ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 			txn := txTask.Tx()
 
 			msg, err := txTask.TxMessage()

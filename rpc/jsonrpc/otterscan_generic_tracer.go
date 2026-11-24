@@ -41,7 +41,6 @@ func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context
 		return err
 	}
 	executor := exec.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, tracer)
-	defer executor.Close()
 
 	// if block number changed, calculate all related field
 	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)

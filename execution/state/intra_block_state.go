@@ -2353,12 +2353,20 @@ func (ibs *IntraBlockState) SetTxContext(bn uint64, ti int) {
 	ibs.sdProbeEpoch++
 }
 
+// WithTxContext binds a freshly constructed state to its transaction's (blockNum,
+// txIndex) context and returns it, so a per-tx state is created already positioned
+// rather than positioned afterward. Chain it onto a constructor at the call site.
+func (ibs *IntraBlockState) WithTxContext(blockNum uint64, txIndex int) *IntraBlockState {
+	ibs.SetTxContext(blockNum, txIndex)
+	return ibs
+}
+
 // ResumeLogIndexAt continues a block's log numbering at idx, for a caller that
 // starts execution in the middle of a block and has to hand in the count the
-// transactions it skipped left behind. Called mid-block it renumbers everything
-// after it, so it belongs before the first log of the first transaction.
+// transactions it skipped left behind. It seeds the per-transaction arena, where a
+// log's block-wide Index is stamped as it is emitted — which is what a tracer reads.
 func (ibs *IntraBlockState) ResumeLogIndexAt(idx uint32) {
-	ibs.blockState.receipts.ResumeLogIndexAt(idx)
+	ibs.logs.indexInBlock = uint(idx)
 }
 
 // ResetLogs empties the block's aggregated logs and the per-tx logs and takes the
@@ -2373,9 +2381,14 @@ func (ibs *IntraBlockState) ResetLogs() {
 // The writes stay in the tx write-set; the caller takes them with FinalizedWrites.
 func (ibs *IntraBlockState) EndTransaction() {
 	ibs.blockState.receipts.CommitLogs(ibs.logs.entries)
-	ibs.logs.reset()
 	ibs.clearJournalAndRefund()
 }
+
+// ResetTxLogs clears the per-transaction log arena. A caller that reuses one state
+// across a block's transactions calls it at each transaction's start, so the arena
+// holds only the current transaction's logs; EndTransaction folds them into the block
+// aggregate but no longer clears them, leaving them readable until the next transaction.
+func (ibs *IntraBlockState) ResetTxLogs() { ibs.logs.reset() }
 
 // StampReceipt numbers a per-transaction receipt's logs with their block-wide indices
 // and records its FirstLogIndexWithinBlock, from the block's log count so far. Call
