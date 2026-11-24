@@ -70,7 +70,8 @@ type withdrawalBalanceDiff struct {
 }
 
 // Transaction implements trace_transaction
-func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, traceConfig *config.TraceConfig) (ParityTraces, error) {
+func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, traceConfig *config.TraceConfig) (_ ParityTraces, err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -177,7 +178,8 @@ func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Addres
 }
 
 // Block implements trace_block
-func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, traceConfig *config.TraceConfig) (ParityTraces, error) {
+func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, traceConfig *config.TraceConfig) (_ ParityTraces, err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	if err := rejectPendingNumber(blockNr); err != nil {
 		return nil, err
 	}
@@ -296,7 +298,8 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // Filter implements trace_filter
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
-func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, traceConfig *config.TraceConfig, stream *jsonstream.Stream) error {
+func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, traceConfig *config.TraceConfig, stream *jsonstream.Stream) (err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	if req.BlockHash != nil && (req.FromBlock != nil || req.ToBlock != nil) {
 		return &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
 	}

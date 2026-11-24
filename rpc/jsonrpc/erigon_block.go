@@ -203,17 +203,12 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 
 	balancesMapping := make(map[common.Address]*hexutil.U256)
 
-	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNumber, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
