@@ -20,7 +20,6 @@
 package vm_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -33,12 +32,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -100,21 +93,6 @@ var eip2200Tests = []struct {
 	{1, math.MaxUint64, "0x600060005560016000556000600055", 10818, 19200, nil}, // 1 -> 0 -> 1 -> 0
 	{1, 2306, "0x6001600055", 2306, 0, vm.ErrOutOfGas},                         // 1 -> 1 (2300 sentry + 2xPUSH)
 	{1, 2307, "0x6001600055", 806, 0, nil},                                     // 1 -> 1 (2301 sentry + 2xPUSH)
-}
-
-func testTemporalTxSD(t testing.TB) (kv.TemporalRwTx, *execctx.SharedDomains) {
-	dirs := datadir.New(t.TempDir())
-
-	db := temporaltest.NewTestDB(t, dirs)
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-
-	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-	require.NoError(t, err)
-	t.Cleanup(sd.Close)
-
-	return tx, sd
 }
 
 // seedState stages the pre-state for a gas test directly in a shared version map:
@@ -503,20 +481,13 @@ func TestCreate2OntoStorageOnlyAccountChargesNewAccountAndClearsStorage(t *testi
 			}
 			// Persist the storage-only target as committed pre-state without EIP-161
 			// empty-removal pruning it, so the CREATE2 under Amsterdam wipes it.
-			versionMap := state.NewVersionMap(nil)
-			seed := state.NewWithVersionMap(state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader()), versionMap)
-			seed.SetTxContext(0, 0)
-			require.NoError(t, seed.CreateAccount(factory, true))
-			require.NoError(t, seed.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
-			require.NoError(t, seed.CreateAccount(target, true))
-			require.NoError(t, seed.SetState(target, accounts.ZeroKey, *uint256.NewInt(1)))
-			writes, err := seed.FinalizedWrites(&chain.Rules{})
-			require.NoError(t, err)
-			seed.FlushWritesToVersionMap(writes)
-			seed.Close()
-
-			check := state.NewWithVersionMap(state.NewVersionedStateReader(1, state.ReadSet{}, versionMap, state.NewNoopReader()), versionMap)
-			check.SetTxContext(0, 1)
+			check := seedState(t, &chain.Rules{}, func(seed *state.IntraBlockState) {
+				require.NoError(t, seed.CreateAccount(factory, true))
+				require.NoError(t, seed.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
+				require.NoError(t, seed.CreateAccount(target, true))
+				require.NoError(t, seed.SetState(target, accounts.ZeroKey, *uint256.NewInt(1)))
+			})
+			versionMap := check.VersionMap()
 			empty, err := check.Empty(target)
 			require.NoError(t, err)
 			require.True(t, empty)
@@ -790,12 +761,7 @@ func TestCreateInitCodeLimitAmsterdam(t *testing.T) {
 func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	t.Parallel()
 
-	tx, sd := testTemporalTxSD(t)
-	_, _, err := sd.SeekCommitment(t.Context(), tx)
-	require.NoError(t, err)
-
-	r := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-	s := state.New(r)
+	s := state.New(state.NewNoopReader())
 	defer s.Close()
 
 	address := accounts.InternAddress(common.BytesToAddress([]byte("callee")))
@@ -815,10 +781,8 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 			return transferErr
 		},
 	}
-	_, _ = s.FinalizedWrites(vmctx.Rules(chain.TestChainBerlinConfig))
-
 	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, vm.Config{})
-	_, _, _, err = vmenv.Call(params.SystemAddress, address, nil, mdgas.MdGas{Execution: math.MaxUint64}, uint256.Int{}, false /* bailout */)
+	_, _, _, err := vmenv.Call(params.SystemAddress, address, nil, mdgas.MdGas{Execution: math.MaxUint64}, uint256.Int{}, false /* bailout */)
 	require.NoError(t, err)
 	require.False(t, canTransferCalled, "CanTransfer should be skipped for zero-value system calls")
 	require.False(t, transferCalled, "Transfer should be skipped for zero-value system calls")

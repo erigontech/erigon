@@ -140,7 +140,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	if b.gasUsed == nil {
 		b.gasUsed = new(protocol.GasUsed)
 	}
-	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, b.header, txn, b.gasUsed, vm.Config{})
 	protocol.SetGasUsed(b.header, b.gasUsed)
 	if err != nil {
 		panic(err)
@@ -179,7 +179,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 	if b.gasUsed == nil {
 		b.gasUsed = new(protocol.GasUsed)
 	}
-	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, b.header, txn, b.gasUsed, vm.Config{})
 	protocol.SetGasUsed(b.header, b.gasUsed)
 	// A reverted transaction (err==nil, status Failed) is still included: its nonce
 	// bump and gas payment survive the revert and must be flushed so a later tx of

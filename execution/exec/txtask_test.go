@@ -333,20 +333,21 @@ func TestChargesSenderAtValidationIncludesCreation(t *testing.T) {
 	require.True(t, task(1).ChargesSenderAtValidation(0))
 }
 
-// failingAccountReader funds one address and fails the base read of another, standing
-// in for a transient domain read failure for a specific account.
+// failingAccountReader funds one address and, once armed, fails the base read of another,
+// standing in for a transient domain read failure for a specific account.
 type failingAccountReader struct {
 	state.StateReader
 	fundAddr accounts.Address
 	failAddr accounts.Address
+	armed    *bool
 	err      error
 }
 
 func (r failingAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
-	switch addr {
-	case r.failAddr:
+	switch {
+	case addr == r.failAddr && *r.armed:
 		return nil, r.err
-	case r.fundAddr:
+	case addr == r.fundAddr:
 		acc := accounts.NewAccount()
 		acc.Balance = *uint256.NewInt(1_000_000_000_000_000_000)
 		return &acc, nil
@@ -357,32 +358,42 @@ func (r failingAccountReader) ReadAccountData(addr accounts.Address) (*accounts.
 // A read failure while composing the write-set says nothing about the block, so it must
 // stop the stage operationally rather than crash the node or condemn the block.
 func TestExecuteReportsFailedWriteSetAsOperational(t *testing.T) {
-	want := errors.New("disk error")
-	config := chain.TestChainBerlinConfig
-	sender := accounts.InternAddress(common.HexToAddress("0xaa"))
-	to := common.HexToAddress("0xbb")
-	reader := failingAccountReader{state.NewNoopReader(), sender, accounts.InternAddress(to), want}
-	versionMap := state.NewVersionMap(nil)
-	ibs := state.New(state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, reader))
-	defer ibs.Close()
-	ibs.SetVersionMap(versionMap)
-	ibs.SetTxContext(1, 0)
+	for _, txIndex := range []int{0, -1} {
+		t.Run(fmt.Sprintf("txIndex=%d", txIndex), func(t *testing.T) {
+			want := errors.New("disk error")
+			config := chain.TestChainBerlinConfig
+			sender := accounts.InternAddress(common.HexToAddress("0xaa"))
+			to := common.HexToAddress("0xbb")
+			slotOwner := accounts.InternAddress(common.HexToAddress("0xdd"))
+			armed := false
+			reader := failingAccountReader{state.NewNoopReader(), sender, slotOwner, &armed, want}
+			versionMap := state.NewVersionMap(nil)
+			ibs := state.NewWithVersionMap(state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, reader), versionMap)
+			defer ibs.Close()
+			ibs.SetTxContext(1, txIndex)
 
-	engine := ethash.NewFaker()
-	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, Coinbase: common.HexToAddress("0xcc")}
-	getHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
-	blockContext := protocol.NewEVMBlockContext(header, getHash, engine, accounts.InternAddress(header.Coinbase), config)
-	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, vm.Config{})
+			// A storage-only write carries no balance, nonce or code hash, so only
+			// FinalizedWrites reads the account, to decide EIP-161 removal; that base read fails.
+			require.NoError(t, ibs.SetState(slotOwner, accounts.InternKey(common.HexToHash("0x07")), *uint256.NewInt(9)))
+			require.NoError(t, ibs.StateReadError())
+			armed = true
 
-	// A zero-value transfer touches the recipient, so FinalizedWrites composes its
-	// pre-tx state to decide EIP-161 removal; that base read fails.
-	txn := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, GasLimit: 21000}, GasPrice: *uint256.NewInt(1)}
-	txn.SetSender(sender)
-	task := &TxTask{TxNum: 1, TxIndex: 0, Header: header, Config: config, Txs: types.Transactions{txn}, EvmBlockContext: blockContext}
-	result := task.Execute(evm, engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+			engine := ethash.NewFaker()
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, Coinbase: common.HexToAddress("0xcc")}
+			getHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
+			blockContext := protocol.NewEVMBlockContext(header, getHash, engine, accounts.InternAddress(header.Coinbase), config)
+			evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, vm.Config{})
 
-	require.ErrorIs(t, result.Err, want)
-	require.True(t, result.Operational)
+			txn := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, GasLimit: 21000}, GasPrice: *uint256.NewInt(1)}
+			txn.SetSender(sender)
+			task := &TxTask{TxNum: 1, TxIndex: txIndex, Header: header, Config: config, Txs: types.Transactions{txn}, EvmBlockContext: blockContext}
+			result := task.Execute(evm, engine, nil, ibs, config, nil, datadir.Dirs{}, false)
+
+			require.ErrorIs(t, result.Err, want)
+			require.True(t, result.Operational)
+			require.Nil(t, result.TxOut)
+		})
+	}
 }
 
 func TestCreateReceiptBlobGasUsed(t *testing.T) {

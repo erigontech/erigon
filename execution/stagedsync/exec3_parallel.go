@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
-	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -55,7 +54,7 @@ Layers from top to bottom:
 - IntraBlockState - used to exec txs. It does store inside all updates of given txn.
 Can understand if txn failed or OutOfGas - then revert all changes.
 Each parallel-worker have own IntraBlockState.
-IntraBlockState does commit changes to lower-abstraction-level by method `ibs.MakeWriteSet()`
+IntraBlockState hands its changes to lower-abstraction-level by method `ibs.FinalizedWrites()`
 
 - versionedWriteCollector - txs which executed by parallel workers can conflict with each-other.
 This writer collects updates as a flat VersionedWrites slice and sends them to conflict-resolution.
@@ -956,7 +955,7 @@ func (pe *parallelExecutor) resetWorkers(rs *state.StateV3Buffered) {
 
 	for _, worker := range pe.execWorkers {
 		// parallel workers hold thier own tx don't pass in an externals tx
-		_ = worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil)
+		_ = worker.ResetState(rs, nil, nil)
 		worker.EnablePrevBlockReads(pe.prevBlocks)
 	}
 }
@@ -1644,7 +1643,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	}
 	var err error
 	pe.execWorkers, _, pe.stopWorkers, err = exec.NewWorkersPool(
-		workersCtx, nil, true, pe.cfg.db, nil, nil, nil,
+		workersCtx, true, pe.cfg.db, nil, nil,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
 		poolSize, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
 	)
@@ -2151,7 +2150,6 @@ func (result *execResult) calcFees(
 					Address: result.Coinbase,
 					Path:    state.BalancePath,
 					Version: taskVersion,
-					Reason:  tracing.BalanceIncreaseRewardTransactionFee,
 				},
 				Val: newCoinbaseBalance,
 			})
@@ -2235,7 +2233,6 @@ func (result *execResult) calcFees(
 				Address: burntAddr,
 				Path:    state.BalancePath,
 				Version: taskVersion,
-				Reason:  tracing.BalanceDecreaseGasBuy,
 			},
 			Val: newBurntBalance,
 		})
@@ -2378,15 +2375,11 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 	}
 	ws := &state.WriteSet{}
 	ws.SetBalance(sender, &state.VersionedWrite[uint256.Int]{
-		WriteHeader: state.WriteHeader{Address: sender, Path: state.BalancePath, Version: version, Reason: tracing.BalanceDecreaseGasBuy},
+		WriteHeader: state.WriteHeader{Address: sender, Path: state.BalancePath, Version: version},
 		Val:         u256.Sub(acc.Balance, charge),
 	})
-	nonceReason := tracing.NonceChangeEoACall
-	if msg.To().IsNil() {
-		nonceReason = tracing.NonceChangeContractCreator
-	}
 	ws.SetNonce(sender, &state.VersionedWrite[uint64]{
-		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version, NonceReason: nonceReason},
+		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version},
 		Val:         acc.Nonce + 1,
 	})
 	// A run that skipped the transfer frame left the recipient credit to validation.
@@ -2405,7 +2398,7 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 			}
 			state.SeedOrigin(vm, to, recipient)
 			ws.SetBalance(to, &state.VersionedWrite[uint256.Int]{
-				WriteHeader: state.WriteHeader{Address: to, Path: state.BalancePath, Version: version, Reason: tracing.BalanceChangeTransfer},
+				WriteHeader: state.WriteHeader{Address: to, Path: state.BalancePath, Version: version},
 				Val:         credit,
 			})
 		}
@@ -2431,7 +2424,6 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	engine rules.Engine,
 	genesis *types.Genesis,
 	ibs *state.IntraBlockState,
-	stateWriter state.StateWriter,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
@@ -2447,7 +2439,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	evm.Context.PostApplyMessage = nil
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
-	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
+	result = ev.execTask.Execute(evm, engine, genesis, ibs,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
 	// Occupancy accounting: sum every incarnation's exec CPU (including aborts) so

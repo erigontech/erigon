@@ -208,13 +208,10 @@ func TestPrestateTracerRetainedBalance(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		amsterdam bool
-		finalize  bool
 		prefund   uint64
 	}{
-		{name: "before finalization", amsterdam: true},
-		{name: "after finalization", amsterdam: true, finalize: true},
-		{name: "unchanged balance before finalization", amsterdam: true, prefund: 7},
-		{name: "unchanged balance after finalization", amsterdam: true, finalize: true, prefund: 7},
+		{name: "Amsterdam", amsterdam: true},
+		{name: "unchanged balance", amsterdam: true, prefund: 7},
 		{name: "before Amsterdam"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -241,13 +238,6 @@ func TestPrestateTracerRetainedBalance(t *testing.T) {
 			tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
 			// Settlement can credit an account after the root call has returned.
 			require.NoError(t, ibs.SetBalance(contract, uint256.Int{7}, tracing.BalanceChangeUnspecified))
-			if tc.finalize {
-				// The versioned finalize is FinalizedWrites: it applies the EIP-8246
-				// balance-preserve and EIP-161 removals into the version map, so the
-				// tracer reads the post-tx state back from the same IBS.
-				_, err = ibs.FinalizedWrites(&chain.Rules{IsAmsterdam: tc.amsterdam})
-				require.NoError(t, err)
-			}
 			tracer.EmitTxEnd(&types.Receipt{}, mdgas.TxnGasUsage{}, nil)
 			result, err := tracer.GetResult()
 			require.NoError(t, err)

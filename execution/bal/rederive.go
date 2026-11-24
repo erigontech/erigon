@@ -58,7 +58,6 @@ func RederiveBlockAccessList(
 ) (*state.VersionedIO, error) {
 	blockNum := header.Number.Uint64()
 	balIO := &state.VersionedIO{}
-	noopWriter := state.NewNoopWriter()
 	hashFn := protocol.GetHashFn(header, getHeader)
 	// phaseErr returns the error of the phase that just ran. The node's own
 	// failures come first: the EVM folds failed state reads and header lookups
@@ -111,7 +110,7 @@ func RederiveBlockAccessList(
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 		stopCancelWatch := context.AfterFunc(ctx, evm.Cancel)
-		receipt, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txn, gasUsed, vmCfg, evm)
+		receipt, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, header, txn, gasUsed, vmCfg, evm)
 		stopCancelWatch()
 		if err = phaseErr(err); err != nil {
 			return nil, fmt.Errorf("bal.RederiveBlockAccessList: replay tx %d of block %d: %w", i, blockNum, err)

@@ -285,6 +285,8 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		writes, err := ibs.FinalizedWrites(rules)
 		require.NoError(t, err)
 		ibs.FlushWritesToVersionMap(writes)
+		ibs.EndTransaction()
+		ibs.ResetVersionedIO()
 		ibs.SetTxContext(1, 1)
 		require.NoError(t, ibs.CreateAccount(addr, true))
 		inc, err := ibs.GetIncarnation(addr)
