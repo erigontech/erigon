@@ -17,7 +17,10 @@
 package state
 
 import (
+	"sync/atomic"
+
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 )
@@ -66,7 +69,11 @@ func (dt *DomainRoTx) regionAhead(i int, k []byte) {
 		return
 	}
 	regionAdvise(dt.files[i].src.decompressor, from, to)
+	n, b := regionAdvises.Add(1), regionAdvisedBytes.Add(to-from)
+	log.Info("[dbg] region ahead", "npAdvises", n, "npAdvisedMB", b>>20)
 }
+
+var regionAdvises, regionAdvisedBytes atomic.Uint64
 
 func (dt *DomainRoTx) regionWords(i int, prefix []byte) (from, to uint64, ok bool) {
 	bt := dt.statelessBtree(i)
