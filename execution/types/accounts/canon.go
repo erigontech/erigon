@@ -86,17 +86,9 @@ func (c *canonTable[T]) rotate() {
 	}
 	old := c.swap()
 	go func() {
+		defer c.migrate.Unlock()
 		c.toWeak(old)
-		c.migrated()
 	}()
-}
-
-// migrated ends a migration and rotates again if cur filled up while it ran: no later insert may do it.
-func (c *canonTable[T]) migrated() {
-	c.migrate.Unlock()
-	if c.n.Load() >= c.limit {
-		c.rotate()
-	}
 }
 
 func (c *canonTable[T]) swap() *xsync.Map[T, *T] {
