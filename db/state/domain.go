@@ -472,9 +472,9 @@ func (dt *DomainRoTx) NewWriter(db kv.RoDB) *DomainBufferedWriter {
 	return dt.newWriter(db, dt.d.dirs.Tmp, !dt.d.Enabled)
 }
 
-// openList - main method to open list of files.
-// It's ok if some files was open earlier.
-// An already-open file not in the provided list is retired (detached) and returned for deferred reclaim.
+// openList opens scanned files and detaches files missing from the scan.
+// Returned files must be reclaimed after existing readers finish, even when
+// opening fails.
 func (d *Domain) openList(ctx context.Context, scanResult ScanDirsResult) (retiredFiles, error) {
 	retired, err := d.History.openList(ctx, scanResult.iiFiles, scanResult.historyFiles, scanResult.accessorFiles)
 	if err != nil {
@@ -486,15 +486,7 @@ func (d *Domain) openList(ctx context.Context, scanResult ScanDirsResult) (retir
 	if err := d.openDirtyFiles(ctx, scanResult.domainFiles); err != nil {
 		return retired, fmt.Errorf("Domain(%s).openList: %w", d.FilenameBase, err)
 	}
-	d.protectFromHistoryFilesAheadOfDomainFiles()
 	return retired, nil
-}
-
-// protectFromHistoryFilesAheadOfDomainFiles - in some corner-cases app may see more .ef/.v files than .kv:
-//   - `kill -9` in the middle of `buildFiles()`, then `rm -f db` (restore from backup)
-//   - `kill -9` in the middle of `buildFiles()`, then `stage_exec --reset` (drop progress - as a hot-fix)
-func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
-	d.closeFilesAfterStep(kv.Step(d.dirtyFilesEndTxNumMinimax() / d.stepSize))
 }
 
 func (d *Domain) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFiles, error) {
@@ -502,21 +494,6 @@ func (d *Domain) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFile
 		return nil, nil
 	}
 	return d.openList(ctx, *r)
-}
-
-func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
-	pred := func(item *FilesItem) bool {
-		if item.StartStep(d.stepSize) < lowerBound {
-			return false
-		}
-		if item.decompressor != nil {
-			log.Debug("[snapshots] closing", "file", item.decompressor.FileName(), "reason", fmt.Sprintf("step %d not complete", lowerBound))
-		}
-		return true
-	}
-	d.dirtyFiles.CloseIf(pred)
-	d.History.dirtyFiles.CloseIf(pred)
-	d.History.InvertedIndex.dirtyFiles.CloseIf(pred)
 }
 
 func (d *Domain) scanDirtyFiles(fileNames []string) {
@@ -551,7 +528,8 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 		}
 	}
 	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
-	hv, hiv := d.History.calcVisibleFiles(toTxNum)
+	// Keep unpaired history in the inventory until the values become readable.
+	hv, hiv := d.History.calcVisibleFiles(dv.files.EndTxNum())
 	return dv, hv, hiv
 }
 
