@@ -68,7 +68,7 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 	}
 	trace := &TransactionTrace{}
 	balances := make(map[accounts.Address]uint256.Int)
-	nonces := make(map[accounts.Address]uint64)
+	nonces := make(map[accounts.Address]struct{})
 	slots := make(map[frameStorageSlot]uint256.Int)
 	codes := make(map[accounts.Address]accounts.CodeHash)
 	for _, entry := range ibs.journal.entries[ctx.journalStart:] {
@@ -78,9 +78,7 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 				balances[entry.account] = entry.value
 			}
 		case kindNonce:
-			if _, ok := nonces[entry.account]; !ok {
-				nonces[entry.account] = entry.aux
-			}
+			nonces[entry.account] = struct{}{}
 		case kindStorage:
 			slot := frameStorageSlot{entry.account, entry.key}
 			if _, ok := slots[slot]; !ok {
@@ -105,15 +103,12 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 			trace.Balances = append(trace.Balances, BalanceChange{address, before, after})
 		}
 	}
-	for address, before := range nonces {
+	for address := range nonces {
 		// Parallel nonce writes can journal an older base-account value. Resolve
 		// the transaction prestate through the versioned reader and retain its dependency.
-		if ibs.versionMap != nil {
-			var err error
-			before, _, _, err = readNonce(ibs, address, true)
-			if err != nil {
-				return nil, err
-			}
+		before, _, _, err := readNonce(ibs, address, true)
+		if err != nil {
+			return nil, err
 		}
 		after, err := ibs.GetNonce(address)
 		if err != nil {

@@ -220,10 +220,7 @@ func TestAssertStateReadErrorAbortsTransaction(t *testing.T) {
 						require.NoError(t, ibs.StateReadError())
 					},
 					OnExitV2: func(_ int, _ []byte, _ mdgas.MdGasUsage, err error, _ bool) {
-						if ibs.IsVersioned() {
-							frameErr = err
-						}
-						ibs.SetVersionMap(nil)
+						frameErr = err
 					},
 				}
 				evm.ResetBetweenBlocks(evm.Context, evm.TxContext, ibs, config, evm.ChainRules())

@@ -838,7 +838,7 @@ func SeedOrigin(vm *VersionMap, addr accounts.Address, acc *accounts.Account) {
 // StorageRead is version-only-validated). Only a genuine cold committed read seeds; a
 // versionMap or write-set hit is untouched. Mutates r so the seeded cell and read agree.
 func seedStorageOrigin(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, val uint256.Int, r *readPathResult) {
-	if s.versionMap == nil || r.source != StorageRead || r.version != UnknownVersion {
+	if r.source != StorageRead || r.version != UnknownVersion {
 		return
 	}
 	s.recordStorageOrigin(addr, key, val) // origin write-set, published at flush (not a mid-read versionMap write)
@@ -864,9 +864,6 @@ func gateOriginAccount(s *IntraBlockState, addr accounts.Address, acc *accounts.
 // base, and records the read at originIndex so the tx's own re-reads agree. seeded=false
 // means the account does not exist committed, so the caller falls back to the miss record.
 func seedOrigin(s *IntraBlockState, addr accounts.Address) (acc *accounts.Account, src ReadSource, ver Version, seeded bool, err error) {
-	if s.versionMap == nil {
-		return nil, UnknownSource, UnknownVersion, false, nil
-	}
 	// The origin is resolved by ReadAddress's origin fallback once published; this is the first
 	// reader (not yet published), which reads the committed base from the state reader and records
 	// it for publish to the origin map at flush.

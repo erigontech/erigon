@@ -346,9 +346,6 @@ func FinalizeBlockExecution(
 		return ret, err
 	}
 
-	if !ibs.IsVersioned() {
-		return nil, nil, errors.New("block state has no version map")
-	}
 	ibs.StartAccessRecording()
 
 	if isMining {

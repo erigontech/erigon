@@ -66,7 +66,6 @@ const (
 	flagSelfdestructHadIncarnation uint8 = 1 << 2 // kindSelfdestruct: a versioned incarnation write predated the destruct
 	flagSelfdestructHadBalance     uint8 = 1 << 3 // kindSelfdestruct: a versioned balance write predated the destruct
 	flagBalanceDeleted             uint8 = 1 << 4
-	flagSelfdestructPrevCreated    uint8 = 1 << 6 // kindSelfdestruct: createdContract was set
 )
 
 // journalExtra holds the fields needed only by the infrequent entry kinds,
@@ -196,21 +195,9 @@ func (j *journal) resetObjectChange(account accounts.Address, prevWrites *create
 	j.dirties[account]++
 }
 
-func (j *journal) selfdestructChange(account accounts.Address, prev, prevCreated bool, prevbalance uint256.Int, wasCommitted bool) {
-	flags := commitFlag(wasCommitted)
-	if prev {
-		flags |= flagSelfdestructPrev
-	}
-	if prevCreated {
-		flags |= flagSelfdestructPrevCreated
-	}
-	j.push(journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, flags: flags})
-	j.dirties[account]++
-}
-
 // selfdestructChangeVersioned records a self-destruct on the parallel path,
 // capturing the versioned balance/incarnation writes it overwrites so a revert
-// can restore them (see selfdestructChange.revert).
+// can restore them (see the kindSelfdestruct revert).
 func (j *journal) selfdestructChangeVersioned(account accounts.Address, prev bool, prevbalance uint256.Int, wasCommitted, hadIncarnation bool, prevIncarnation uint64, hadBalance bool, prevBalanceVersioned uint256.Int, prevBalanceDeleted bool) {
 	flags := commitFlag(wasCommitted)
 	if prev {
@@ -326,18 +313,14 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// (balance/nonce/…) prune themselves on revert; the account-record writes
 		// createObject emits (address/codeHash/…) have no field-level journal entry,
 		// so drop them here to keep versionedWrites in step with the journal.
-		if s.versionMap != nil {
-			s.versionedWrites.deleteAddr(je.account)
-		}
+		s.versionedWrites.deleteAddr(je.account)
 		return nil
 
 	case kindResetObject:
 		// Restore the account-record writes the recreation overwrote back to the
 		// snapshot taken before it ran, so versionedWrites reflects prev's state
 		// again (the field-level entries handle the fields creation doesn't write).
-		if s.versionMap != nil {
-			s.versionedWrites.restoreCreateFields(je.account, je.extra.prevWrites)
-		}
+		s.versionedWrites.restoreCreateFields(je.account, je.extra.prevWrites)
 		return nil
 
 	case kindSelfdestruct:
@@ -439,7 +422,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		//
 		// RIPEMD-160 is the consensus exception: its touch outlives the revert, so
 		// the zero-balance write stays and EIP-161 still sweeps the account.
-		if s.versionMap != nil && je.account != ripemd {
+		if je.account != ripemd {
 			if je.committed() {
 				s.versionedWrites.DelBalance(je.account)
 			} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {
