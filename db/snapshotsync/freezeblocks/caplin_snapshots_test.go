@@ -135,6 +135,45 @@ func TestDumpBeaconBlocksRangeBuildsSegAndIdx(t *testing.T) {
 	require.Equal(t, uint64(snaptype.CaplinMergeLimit), idx.KeyCount())
 }
 
+func TestDumpBeaconBlocksRangeFailsOnCanonicalRootWithoutBody(t *testing.T) {
+	for name, missingSlot := range map[string]uint64{"first": 0, "last": snaptype.CaplinMergeLimit - 500} {
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			dirs := datadir.New(t.TempDir())
+
+			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+				var prevRoot common.Hash
+				for slot := uint64(0); slot < snaptype.CaplinMergeLimit; slot += 500 {
+					var root common.Hash
+					binary.BigEndian.PutUint64(root[:], slot+1)
+					if err := beacon_indicies.MarkRootCanonical(tx, slot, root); err != nil {
+						return err
+					}
+					if err := beacon_indicies.WriteParentBlockRoot(tx, root, prevRoot); err != nil {
+						return err
+					}
+					prevRoot = root
+					if slot == missingSlot {
+						continue
+					}
+					if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, root), root[:]); err != nil {
+						return err
+					}
+				}
+				return nil
+			}))
+
+			err := dumpBeaconBlocksRange(ctx, db, 0, snaptype.CaplinMergeLimit, 1, dirs, 1, log.LvlDebug, log.New())
+			require.ErrorContains(t, err, "has no body", "slot %d", missingSlot)
+
+			segs, globErr := filepath.Glob(filepath.Join(dirs.Snap, "*-beaconblocks.seg"))
+			require.NoError(t, globErr)
+			require.Empty(t, segs, "slot %d", missingSlot)
+		})
+	}
+}
+
 // Pre-Deneb chains never freeze blobs, so the answer must be 0 regardless of visible segments.
 func TestFrozenBlobsZeroBeforeDeneb(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig

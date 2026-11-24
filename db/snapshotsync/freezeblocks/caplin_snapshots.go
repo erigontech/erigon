@@ -234,6 +234,9 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Dumping beacon blocks", "progress", i)
 		}
+		if dump == nil && blockRoot != (common.Hash{}) {
+			return fmt.Errorf("canonical block %x at slot %d has no body", blockRoot, i)
+		}
 		if dump == nil {
 			skippedInARow++
 		} else {
