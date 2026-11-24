@@ -663,6 +663,37 @@ func TestPoolProposerSlashings(t *testing.T) {
 	require.Equal(t, proposerSlashing, out.Data[0])
 }
 
+func TestPoolProposerSlashingRejectsNullHeaders(t *testing.T) {
+	signedHeader := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}}
+	nullMessage := &cltypes.SignedBeaconBlockHeader{}
+	handler := &ApiHandler{
+		proposerSlashingService: services.NewProposerSlashingService(pool.OperationsPool{}, nil, nil, nil, nil),
+	}
+
+	for _, tc := range []struct {
+		name    string
+		header1 *cltypes.SignedBeaconBlockHeader
+		header2 *cltypes.SignedBeaconBlockHeader
+		field   string
+	}{
+		{name: "null second header", header1: signedHeader, field: "signed_header_2"},
+		{name: "null second message", header1: signedHeader, header2: nullMessage, field: "signed_header_2"},
+		{name: "null first header", header2: signedHeader, field: "signed_header_1"},
+		{name: "null first message", header1: nullMessage, header2: signedHeader, field: "signed_header_1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(&cltypes.ProposerSlashing{Header1: tc.header1, Header2: tc.header2})
+			require.NoError(t, err)
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/proposer_slashings", bytes.NewReader(body))
+
+			require.NotPanics(t, func() { handler.PostEthV1BeaconPoolProposerSlashings(recorder, request) })
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.Contains(t, recorder.Body.String(), tc.field)
+		})
+	}
+}
+
 func TestPoolProposerSlashingDoesNotPublishIgnored(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	service := services_mock.NewMockProposerSlashingService(ctrl)

@@ -78,12 +78,18 @@ func (s *proposerSlashingService) DecodeGossipMessage(_ peer.ID, data []byte, ve
 func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.ProposerSlashing) error {
 	// https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#proposer_slashing
 
+	if msg == nil || msg.Header1 == nil || msg.Header1.Header == nil {
+		return errors.New("proposer slashing is missing signed_header_1 or its message")
+	}
 	h1 := msg.Header1.Header
 	pIndex := h1.ProposerIndex
 	if _, fromGossip := serviceinterface.GossipPeer(ctx); fromGossip {
 		if _, seen := s.seenProposers.Load(pIndex); seen {
 			return ErrIgnore
 		}
+	}
+	if msg.Header2 == nil || msg.Header2.Header == nil {
+		return errors.New("proposer slashing is missing signed_header_2 or its message")
 	}
 	h2 := msg.Header2.Header
 
