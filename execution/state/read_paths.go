@@ -1331,37 +1331,6 @@ func (ibs *IntraBlockState) readOriginCodeSegmentTo(addr accounts.Address, from 
 	return codeHash, true, nil
 }
 
-// refreshCode re-reads CodePath from the versioned IO; a read-set hit recorded without bytes reads the committed code
-// again. CodePath is never recorded via the skipStorage branch (the `path != CodePath` guard), so the default case
-// records nothing.
-func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, error) {
-	var r readPathResult
-	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, true, &r)
-	if r.err != nil {
-		return accounts.Code{}, r.err
-	}
-	var code accounts.Code
-	switch r.outcome {
-	case outcomeWriteSetHit:
-		code = r.vwCode.Val
-	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetCode(addr)
-		var err error
-		if code, err = s.recordedCode(addr, tr); err != nil {
-			return accounts.Code{}, err
-		}
-	case outcomeMapDone:
-		code = r.mapCodeVal
-	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
-	default:
-		panic(fmt.Sprintf("refreshCode: unexpected outcome %d for %x", r.outcome, addr))
-	}
-	if dbg.AssertEnabled && code.Bytes != nil && code.Hash == accounts.NilCodeHash {
-		panic(fmt.Sprintf("refreshCode: code without hash for %x", addr))
-	}
-	return code, nil
-}
-
 // readCodeSize returns the contract code size.
 func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, Version, error) {
 	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.codeSize, s.versionedReads.codeSize); ok {

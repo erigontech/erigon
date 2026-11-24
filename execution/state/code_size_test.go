@@ -59,6 +59,8 @@ func TestReproduceCrash(t *testing.T) {
 		writes, err := ibs.FinalizedWrites(rules)
 		require.NoError(t, err, msg)
 		require.NoError(t, state.ApplyWrites(writes, sd, tx, blockNum, txNum, false), msg)
+		ibs.EndTransaction()
+		ibs.ResetVersionedIO()
 	}
 
 	intraBlockState := state.New(tsr)

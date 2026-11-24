@@ -385,13 +385,13 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 			var keyBytes common.Hash
 			binary.BigEndian.PutUint16(keyBytes[:], uint16(i))
 			key := accounts.InternKey(keyBytes)
-			sv, err := state.GetState(addr, key)
-			if err != nil {
-				return err
+			sv, serr := state.GetState(addr, key)
+			if serr != nil {
+				return serr
 			}
-			cv, err := checkstate.GetState(addr, key)
-			if err != nil {
-				return err
+			cv, cerr := checkstate.GetState(addr, key)
+			if cerr != nil {
+				return cerr
 			}
 			if !checkeq("GetState("+key.String()+")", sv, cv) {
 				return err
@@ -1543,4 +1543,15 @@ func (w *finalStateWriter) CreateContract(accounts.Address) error { return nil }
 func TestSetVersionMapRejectsNil(t *testing.T) {
 	ibs := New(NewNoopReader())
 	require.Panics(t, func() { ibs.SetVersionMap(nil) }, "a nil version map is an invariant violation")
+}
+
+// Close hands back everything a call collected, origin cells included, so the
+// next state takes them from the pools instead of the heap.
+func TestCloseReleasesOriginCells(t *testing.T) {
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	ibs.recordStorageOrigin(accounts.InternAddress([20]byte{0xc0, 0xde}), accounts.InternKey([32]byte{1}), uint256.Int{})
+	ibs.Close()
+	if !ibs.versionedOrigins.IsEmpty() {
+		t.Fatal("Close kept the origin cells")
+	}
 }

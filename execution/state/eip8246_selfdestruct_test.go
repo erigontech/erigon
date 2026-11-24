@@ -294,9 +294,8 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 
 // Account-level reconstruction of a preserved account must agree with the
 // field-level reads: a later tx's Nonce/CodeHash map entries overlay the
-// reconstructed account exactly like a later balance write does, so a caller
-// materializing the account through getStateObject sees the same fields a
-// per-path read returns.
+// reconstructed account exactly like a later balance write does, so the
+// account record sees the same fields a per-path read returns.
 func TestEIP8246_PreservedAccount_OverlaysLaterFieldWrites(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x8246F"))
@@ -324,6 +323,11 @@ func TestEIP8246_PreservedAccount_OverlaysLaterFieldWrites(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(7), fieldNonce, "the later-tx nonce write must overlay")
 	require.Equal(t, laterCodeHash, fieldCodeHash, "the later-tx code hash write must overlay")
+	acc, _, _, err := ibs.getVersionedAccount(addr, false)
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	require.Equal(t, uint64(7), acc.Nonce, "the account record must carry the later-tx nonce")
+	require.Equal(t, laterCodeHash, acc.CodeHash, "the account record must carry the later-tx code hash")
 }
 
 // Under EIP-8246 a contract created at an absent address and destroyed in one tx leaves only its

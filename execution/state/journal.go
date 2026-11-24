@@ -159,9 +159,8 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 }
 
 // dirty explicitly sets an address to dirty, even if the change entries would
-// otherwise suggest it as clean. This method is an ugly hack to handle the RIPEMD
-// precompile consensus exception; CreateAccount also uses it to keep a
-// resurrected address dirty across an intra-tx revert.
+// otherwise suggest it as clean. CreateAccount uses it to keep a resurrected
+// address dirty across an intra-tx revert.
 func (j *journal) dirty(addr accounts.Address) {
 	j.dirties[addr]++
 }
@@ -438,10 +437,8 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// Mirror kindBalance — drop the write if the touch created it, else restore
 		// the prior value.
 		//
-		// RIPEMD-160 is the exception: touchAccount bumps its dirty count so the
-		// touch outlives the revert and EIP-161 still sweeps it. Undoing the write
-		// here would drop that sweep on the versioned path only, leaving the
-		// account in the trie and diverging from serial's root.
+		// RIPEMD-160 is the consensus exception: its touch outlives the revert, so
+		// the zero-balance write stays and EIP-161 still sweeps the account.
 		if s.versionMap != nil && je.account != ripemd {
 			if je.committed() {
 				s.versionedWrites.DelBalance(je.account)

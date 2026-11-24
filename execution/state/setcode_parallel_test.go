@@ -355,16 +355,9 @@ func TestResolveCodeTakesTheHashFromTheRead(t *testing.T) {
 	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 	hash := accounts.InternCodeHash([32]byte{0x12, 0x34})
 	r := &codeReader{addr: addr, account: &accounts.Account{CodeHash: hash, Incarnation: 1}, code: code}
-	for _, versioned := range []bool{false, true} {
-		var ibs *IntraBlockState
-		if versioned {
-			ibs = NewWithVersionMap(r, NewVersionMap(nil))
-		} else {
-			ibs = New(r)
-		}
-		got, err := ibs.ResolveCode(addr, true)
-		require.NoError(t, err)
-		require.Equal(t, code, got.Bytes, "versioned=%v", versioned)
-		require.Equal(t, hash, got.Hash, "versioned=%v", versioned)
-	}
+	ibs := NewWithVersionMap(r, NewVersionMap(nil))
+	got, err := ibs.ResolveCode(addr, true)
+	require.NoError(t, err)
+	require.Equal(t, code, got.Bytes)
+	require.Equal(t, hash, got.Hash)
 }
