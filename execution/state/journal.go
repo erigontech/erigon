@@ -69,7 +69,6 @@ const (
 	flagSelfdestructHadIncarnation uint8 = 1 << 2 // kindSelfdestruct: a versioned incarnation write predated the destruct
 	flagSelfdestructHadBalance     uint8 = 1 << 3 // kindSelfdestruct: a versioned balance write predated the destruct
 	flagBalanceDeleted             uint8 = 1 << 4
-	flagSelfdestructPrevCreated    uint8 = 1 << 6 // kindSelfdestruct: createdContract was set
 )
 
 // journalExtra holds the fields needed only by the infrequent entry kinds,
@@ -202,13 +201,10 @@ func (j *journal) resetObjectChange(account accounts.Address, prev *stateObject,
 	j.dirties[account]++
 }
 
-func (j *journal) selfdestructChange(account accounts.Address, prev, prevCreated bool, prevbalance uint256.Int, wasCommitted bool) {
+func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevbalance uint256.Int, wasCommitted bool) {
 	flags := commitFlag(wasCommitted)
 	if prev {
 		flags |= flagSelfdestructPrev
-	}
-	if prevCreated {
-		flags |= flagSelfdestructPrevCreated
 	}
 	j.push(journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, flags: flags})
 	j.dirties[account]++
@@ -376,50 +372,33 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 
 	case kindSelfdestruct:
 		prev := je.flags&flagSelfdestructPrev != 0
-		prevCreated := je.flags&flagSelfdestructPrevCreated != 0
 		if so, ok := s.stateObjects[je.account]; ok {
+			// A transiently-materialized object keeps the create flag in its CreateContract
+			// cell, so only the destruct flag and balance are restored here.
 			so.selfdestructed = prev
-			if s.versionMap == nil { // the versioned path keeps the flag in its CreateContract cell
-				so.createdContract = prevCreated
-				if prevCreated {
-					so.destructedCreated = false
-				}
-			}
 			so.setBalance(je.value)
-		} else if s.versionMap == nil {
-			obj, err := s.getStateObject(je.account, false)
-			if err != nil {
-				return err
-			}
-			if obj != nil {
-				obj.selfdestructed = prev
-				obj.createdContract = prevCreated
-				obj.setBalance(je.value)
-			}
 		}
-		if s.versionMap != nil {
-			if je.committed() {
-				s.versionedWrites.DelSelfDestruct(je.account)
-			} else if _, ok := s.versionedWrites.GetSelfDestruct(je.account); ok {
-				s.versionedWrites.updateSelfDestruct(je.account, prev)
-			}
-			// The self-destruct records BalancePath=0; restore the pre-destruct
-			// versioned balance write, or drop the cell if the self-destruct created
-			// it. Gating this on committed (which describes SelfDestructPath, not
-			// BalancePath) deleted balance writes that predated the snapshot.
-			if je.flags&flagSelfdestructHadBalance != 0 {
-				s.versionedWrites.updateBalance(je.account, je.extra.prevBalanceVersioned, je.flags&flagBalanceDeleted != 0)
-			} else {
-				s.versionedWrites.DelBalance(je.account)
-			}
-			// selfdestructVersioned resets the incarnation cell to 0 on both paths. Restore
-			// it to its pre-destruct versioned value, or drop the write if the
-			// self-destruct created it.
-			if je.flags&flagSelfdestructHadIncarnation != 0 {
-				s.versionedWrites.updateIncarnation(je.account, je.aux)
-			} else {
-				s.versionedWrites.DelIncarnation(je.account)
-			}
+		if je.committed() {
+			s.versionedWrites.DelSelfDestruct(je.account)
+		} else if _, ok := s.versionedWrites.GetSelfDestruct(je.account); ok {
+			s.versionedWrites.updateSelfDestruct(je.account, prev)
+		}
+		// The self-destruct records BalancePath=0; restore the pre-destruct
+		// versioned balance write, or drop the cell if the self-destruct created
+		// it. Gating this on committed (which describes SelfDestructPath, not
+		// BalancePath) deleted balance writes that predated the snapshot.
+		if je.flags&flagSelfdestructHadBalance != 0 {
+			s.versionedWrites.updateBalance(je.account, je.extra.prevBalanceVersioned, je.flags&flagBalanceDeleted != 0)
+		} else {
+			s.versionedWrites.DelBalance(je.account)
+		}
+		// selfdestructVersioned resets the incarnation cell to 0 on both paths. Restore
+		// it to its pre-destruct versioned value, or drop the write if the
+		// self-destruct created it.
+		if je.flags&flagSelfdestructHadIncarnation != 0 {
+			s.versionedWrites.updateIncarnation(je.account, je.aux)
+		} else {
+			s.versionedWrites.DelIncarnation(je.account)
 		}
 		return nil
 
@@ -430,21 +409,11 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// authoritative there.
 		if so, ok := s.stateObjects[je.account]; ok {
 			so.setBalance(je.value)
-		} else if s.versionMap == nil {
-			obj, err := s.getStateObject(je.account, false)
-			if err != nil {
-				return err
-			}
-			if obj != nil {
-				obj.setBalance(je.value)
-			}
 		}
-		if s.versionMap != nil {
-			if je.committed() {
-				s.versionedWrites.DelBalance(je.account)
-			} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {
-				s.versionedWrites.updateBalance(je.account, je.value, je.flags&flagBalanceDeleted != 0)
-			}
+		if je.committed() {
+			s.versionedWrites.DelBalance(je.account)
+		} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {
+			s.versionedWrites.updateBalance(je.account, je.value, je.flags&flagBalanceDeleted != 0)
 		}
 		return nil
 
@@ -465,21 +434,11 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 	case kindNonce:
 		if so, ok := s.stateObjects[je.account]; ok {
 			so.setNonce(je.aux)
-		} else if s.versionMap == nil {
-			obj, err := s.getStateObject(je.account, false)
-			if err != nil {
-				return err
-			}
-			if obj != nil {
-				obj.setNonce(je.aux)
-			}
 		}
-		if s.versionMap != nil {
-			if je.committed() {
-				s.versionedWrites.DelNonce(je.account)
-			} else if _, ok := s.versionedWrites.GetNonce(je.account); ok {
-				s.versionedWrites.updateNonce(je.account, je.aux)
-			}
+		if je.committed() {
+			s.versionedWrites.DelNonce(je.account)
+		} else if _, ok := s.versionedWrites.GetNonce(je.account); ok {
+			s.versionedWrites.updateNonce(je.account, je.aux)
 		}
 		return nil
 
@@ -490,30 +449,20 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		}
 		if so, ok := s.stateObjects[je.account]; ok {
 			so.setCode(accounts.Code{Hash: prevhash, Bytes: prevcode})
-		} else if s.versionMap == nil {
-			obj, err := s.getStateObject(je.account, false)
-			if err != nil {
-				return err
-			}
-			if obj != nil {
-				obj.setCode(accounts.Code{Hash: prevhash, Bytes: prevcode})
-			}
 		}
-		if s.versionMap != nil {
-			if je.committed() {
-				s.versionedWrites.DelCodeHash(je.account)
-				s.versionedWrites.DelCode(je.account)
-				s.versionedWrites.DelCodeSize(je.account)
-			} else {
-				if _, ok := s.versionedWrites.GetCode(je.account); ok {
-					s.versionedWrites.updateCode(je.account, accounts.Code{Hash: prevhash, Bytes: prevcode})
-				}
-				if _, ok := s.versionedWrites.GetCodeHash(je.account); ok {
-					s.versionedWrites.updateCodeHash(je.account, prevhash)
-				}
-				if _, ok := s.versionedWrites.GetCodeSize(je.account); ok {
-					s.versionedWrites.updateCodeSize(je.account, len(prevcode))
-				}
+		if je.committed() {
+			s.versionedWrites.DelCodeHash(je.account)
+			s.versionedWrites.DelCode(je.account)
+			s.versionedWrites.DelCodeSize(je.account)
+		} else {
+			if _, ok := s.versionedWrites.GetCode(je.account); ok {
+				s.versionedWrites.updateCode(je.account, accounts.Code{Hash: prevhash, Bytes: prevcode})
+			}
+			if _, ok := s.versionedWrites.GetCodeHash(je.account); ok {
+				s.versionedWrites.updateCodeHash(je.account, prevhash)
+			}
+			if _, ok := s.versionedWrites.GetCodeSize(je.account); ok {
+				s.versionedWrites.updateCodeSize(je.account, len(prevcode))
 			}
 		}
 		if je.extra != nil && je.extra.undoCodeChange != nil {
@@ -522,23 +471,13 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindStorage:
-		if s.versionMap != nil {
-			if je.committed() {
-				s.versionedWrites.DelStorage(je.account, je.key)
-			} else if _, ok := s.versionedWrites.GetStorage(je.account, je.key); ok {
-				s.versionedWrites.updateStorage(je.account, je.key, je.value)
-			}
+		if je.committed() {
+			s.versionedWrites.DelStorage(je.account, je.key)
+		} else if _, ok := s.versionedWrites.GetStorage(je.account, je.key); ok {
+			s.versionedWrites.updateStorage(je.account, je.key, je.value)
 		}
 		if so, ok := s.stateObjects[je.account]; ok {
 			so.setState(je.key, je.value)
-		} else if s.versionMap == nil {
-			obj, err := s.getStateObject(je.account, false)
-			if err != nil {
-				return err
-			}
-			if obj != nil {
-				obj.setState(je.key, je.value)
-			}
 		}
 		return nil
 

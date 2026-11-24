@@ -199,11 +199,8 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	blockNumber, blockHash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockParameter, tx, api._blockReader)
+	blockNumber, blockHash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockParameter, tx, api._blockReader)
 	if err != nil {
-		return nil, err
-	}
-	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return nil, err
 	}
 
@@ -864,10 +861,7 @@ func (s *simulator) simulateBlock(
 	if err != nil {
 		return nil, nil, err
 	}
-	err = intraBlockState.FinalizeTx(rules, state.NewNoopWriter())
-	if err != nil {
-		return nil, nil, err
-	}
+	intraBlockState.EndTransaction()
 	if err := recordPhase(); err != nil {
 		return nil, nil, err
 	}
@@ -883,10 +877,7 @@ func (s *simulator) simulateBlock(
 		txnList = append(txnList, txn)
 		receiptList = append(receiptList, receipt)
 		callResults = append(callResults, *callResult)
-		err = intraBlockState.FinalizeTx(rules, state.NewNoopWriter())
-		if err != nil {
-			return nil, nil, err
-		}
+		intraBlockState.EndTransaction()
 		if err := recordPhase(); err != nil {
 			return nil, nil, err
 		}

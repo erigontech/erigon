@@ -13,8 +13,7 @@ import (
 
 // A tx that CREATEs a contract (nonce=1 + code) and then reverts must leave no
 // versioned write behind — FinalizedWrites (the parallel write-set the commitment
-// consumes) must not emit a phantom account. Serial MakeWriteSet drops it via the
-// dirties reconciliation; the noMaterialize path relies on journal reverts.
+// consumes) must not emit a phantom account; the journal revert drops it.
 func finalizedWritesRules() *chain.Rules {
 	return &chain.Rules{ChainID: uint256.NewInt(1)}
 }

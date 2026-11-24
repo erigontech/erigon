@@ -248,6 +248,11 @@ func newBellatrixForkChoiceStore(t *testing.T, anchorState *state.CachingBeaconS
 
 func newUntickedBellatrixForkChoiceStore(t *testing.T, anchorState *state.CachingBeaconState, engine execution_client.ExecutionEngine) *forkchoice.ForkChoiceStore {
 	t.Helper()
+	return newUntickedForkChoiceStoreWithSyncedData(t, anchorState, engine, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true))
+}
+
+func newUntickedForkChoiceStoreWithSyncedData(t *testing.T, anchorState *state.CachingBeaconState, engine execution_client.ExecutionEngine, syncedData *synced_data.SyncedDataManager) *forkchoice.ForkChoiceStore {
+	t.Helper()
 	genesisState, err := initial_state.GetGenesisState(t.Context(), 1)
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
@@ -260,7 +265,7 @@ func newUntickedBellatrixForkChoiceStore(t *testing.T, anchorState *state.Cachin
 		pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
 		forkGraphDisk,
 		beaconevents.NewEventEmitter(),
-		synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true),
+		syncedData,
 		blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs()),
 		public_keys_registry.NewInMemoryPublicKeysRegistry(),
 		validator_params.NewValidatorParams(),
