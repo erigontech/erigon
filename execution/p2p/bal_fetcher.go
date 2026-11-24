@@ -290,7 +290,7 @@ func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *P
 	if err != nil {
 		return nil, err
 	}
-	message, _, err := awaitResponse(ctx, timeout, messages, filterBlockAccessLists(peerId, requestId))
+	message, _, err := awaitResponse(ctx, timeout, messages, matchBlockAccessLists(peerId, requestId))
 	if err != nil {
 		return nil, err
 	}
@@ -304,8 +304,8 @@ func (f *balFetcher) penalize(ctx context.Context, peerId *PeerId) {
 	}
 }
 
-func filterBlockAccessLists(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[BlockAccessListsEnvelope]) bool {
+func matchBlockAccessLists(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[BlockAccessListsEnvelope]) bool {
 	return func(message *DecodedInboundMessage[BlockAccessListsEnvelope]) bool {
-		return filter(peerId, message.PeerId, requestId, message.Decoded.RequestId)
+		return matchesRequest(peerId, message.PeerId, requestId, message.Decoded.RequestId)
 	}
 }

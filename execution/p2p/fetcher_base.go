@@ -282,7 +282,7 @@ func (f *FetcherBase) fetchHeaders(
 		return FetcherResponse[[]*types.Header]{}, err
 	}
 
-	message, messageSize, err := awaitResponse(ctx, responseTimeout, messages, filterBlockHeaders(peerId, requestId))
+	message, messageSize, err := awaitResponse(ctx, responseTimeout, messages, matchBlockHeaders(peerId, requestId))
 	if err != nil {
 		return FetcherResponse[[]*types.Header]{}, err
 	}
@@ -383,7 +383,7 @@ func (f *FetcherBase) fetchBodies(
 		return nil, err
 	}
 
-	message, messageSize, err := awaitResponse(ctx, responseTimeout, messages, filterBlockBodies(peerId, requestId))
+	message, messageSize, err := awaitResponse(ctx, responseTimeout, messages, matchBlockBodies(peerId, requestId))
 	if err != nil {
 		return nil, err
 	}
@@ -480,7 +480,7 @@ func awaitResponse[TPacket any](
 	ctx context.Context,
 	timeout time.Duration,
 	messages <-chan *DecodedInboundMessage[TPacket],
-	filter func(*DecodedInboundMessage[TPacket]) bool,
+	matches func(*DecodedInboundMessage[TPacket]) bool,
 ) (TPacket, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -491,27 +491,25 @@ func awaitResponse[TPacket any](
 			packet := generics.Zero[TPacket]()
 			return packet, 0, fmt.Errorf("await %v response interrupted: %w", reflect.TypeOf(packet), ctx.Err())
 		case message := <-messages:
-			if filter(message) {
-				continue
+			if matches(message) {
+				return message.Decoded, len(message.Data), nil
 			}
-
-			return message.Decoded, len(message.Data), nil
 		}
 	}
 }
 
-func filterBlockHeaders(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[*eth.BlockHeadersPacket66]) bool {
+func matchBlockHeaders(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[*eth.BlockHeadersPacket66]) bool {
 	return func(message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) bool {
-		return filter(peerId, message.PeerId, requestId, message.Decoded.RequestId)
+		return matchesRequest(peerId, message.PeerId, requestId, message.Decoded.RequestId)
 	}
 }
 
-func filterBlockBodies(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[BlockBodiesEnvelope]) bool {
+func matchBlockBodies(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[BlockBodiesEnvelope]) bool {
 	return func(message *DecodedInboundMessage[BlockBodiesEnvelope]) bool {
-		return filter(peerId, message.PeerId, requestId, message.Decoded.RequestId)
+		return matchesRequest(peerId, message.PeerId, requestId, message.Decoded.RequestId)
 	}
 }
 
-func filter(requestPeerId, responsePeerId *PeerId, requestId, responseId uint64) bool {
-	return !requestPeerId.Equal(responsePeerId) || requestId != responseId
+func matchesRequest(requestPeerId, responsePeerId *PeerId, requestId, responseId uint64) bool {
+	return requestPeerId.Equal(responsePeerId) && requestId == responseId
 }
