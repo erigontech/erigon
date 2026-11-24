@@ -338,3 +338,40 @@ func TestHeadRootServesAnImportedBlockBeforeItsIndicesAreWritten(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, "fork choice already holds the block")
 	require.Equal(t, importedRoot, root)
 }
+
+// importedOnHeaderLookup lets an optimistic import land between the handler's first fork choice reads and its
+// header lookup.
+type importedOnHeaderLookup struct {
+	*mock_services2.ForkChoiceStorageMock
+	root     common.Hash
+	header   *cltypes.BeaconBlockHeader
+	imported atomic.Bool
+}
+
+func (f *importedOnHeaderLookup) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	if root != f.root {
+		return f.ForkChoiceStorageMock.GetHeader(root)
+	}
+	f.imported.Store(true)
+	return f.header, true
+}
+
+func (f *importedOnHeaderLookup) IsRootOptimistic(root common.Hash) bool {
+	return root == f.root && f.imported.Load()
+}
+
+func TestBlockRootReportsTheOptimisticStatusOfABlockFoundByItsHeader(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	parent := blocks[len(blocks)-1].Block
+	root := common.Hash{0x0b}
+	handler.forkchoiceStore = &importedOnHeaderLookup{ForkChoiceStorageMock: fcu, root: root, header: &cltypes.BeaconBlockHeader{Slot: parent.Slot + 1}}
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/blocks/"+root.Hex()+"/root", http.NoBody))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response struct {
+		ExecutionOptimistic bool `json:"execution_optimistic"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.ExecutionOptimistic, "an optimistically imported block is not reported as validated")
+}
