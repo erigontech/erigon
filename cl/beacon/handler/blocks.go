@@ -243,8 +243,6 @@ func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		return nil, err
 	}
-	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
-
 	// check if the root exist
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {
@@ -258,6 +256,8 @@ func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Requ
 		}
 		slot = &header.Slot
 	}
+	// Read after the lookups, so the status belongs to the block found and not to a root fork choice did not know yet.
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
 	// Check if the block is canonical
 	var canonicalRoot common.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
