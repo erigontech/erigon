@@ -682,6 +682,30 @@ func TestComposeTakesAChainAdmittedAfterItsEviction(t *testing.T) {
 	})
 }
 
+// rewinding is a chain whose block at is then after its first read.
+type rewinding struct {
+	windowChain
+	at    uint64
+	then  *types.Block
+	reads int
+}
+
+func (c *rewinding) BlockByNumber(ctx context.Context, n uint64) (*types.Block, error) {
+	if n == c.at {
+		if c.reads++; c.reads > 1 {
+			return c.then, nil
+		}
+	}
+	return c.windowChain.BlockByNumber(ctx, n)
+}
+
+// emptyWitness is a witness store whose every witness is empty.
+type emptyWitness struct{}
+
+func (emptyWitness) Get(context.Context, uint64, common.Hash) (json.RawMessage, error) {
+	return json.RawMessage(`{"state":[],"codes":[],"keys":[],"headers":[]}`), nil
+}
+
 // missingAt is a witness store without the witness of block at.
 type missingAt struct {
 	syncWitness
@@ -717,10 +741,16 @@ func TestComposedSyncBlockWithoutAWitness(t *testing.T) {
 // fails charged; one it cannot reach fails uncharged.
 func TestComposedSyncBlockFailureCharges(t *testing.T) {
 	for _, c := range []struct {
-		name    string
-		err     error
-		maxGas  uint64 // of the posting, once composed
-		rollup  uint64 // of the batcher, once composed
+		name   string
+		err    error
+		maxGas uint64 // of the posting, once composed
+		rollup uint64 // of the batcher, once composed
+		// unread has the window's anchor header unreadable once composed.
+		unread bool
+		// witnesses, when set, is the witness store.
+		witnesses Witnesses
+		// rewound has the Sync block replaced after its first read.
+		rewound bool
 		skipped bool
 	}{
 		{name: "a refused proof", err: status.Error(codes.InvalidArgument, "window refused")},
@@ -729,10 +759,14 @@ func TestComposedSyncBlockFailureCharges(t *testing.T) {
 		{name: "an unreachable prover", err: status.Error(codes.Unavailable, "down"), skipped: true},
 		{name: "a cancelled proof", err: status.Error(codes.Canceled, "stopping"), skipped: true},
 		{name: "a malformed attestation", err: prove.ErrAttestation, skipped: true},
+		{name: "an anchor header unread", unread: true, skipped: true},
+		{name: "a witness that does not execute", witnesses: emptyWitness{}, skipped: true},
+		{name: "a Sync block rewound while posting", rewound: true, skipped: true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newCrossFixture(t)
 			f.hold(t, 0, f.call.Source, f.call.Data)
+			f.witnesses = c.witnesses
 			comp, prover, _, chain := f.poster(t, nil)
 			prover.err = c.err
 			composed := comp.ComposeSyncSlot(t.Context(), chain[467].Header(), f.w.sync.Time(), 101, sequencer.ModeSteady)
@@ -744,8 +778,16 @@ func TestComposedSyncBlockFailureCharges(t *testing.T) {
 				b.RollupID = c.rollup
 				comp.cfg.Batcher = &b
 			}
+			if c.unread {
+				delete(chain, 462)
+			}
 			sync := f.sealed(t, composed.Txs)
 			chain[sync.NumberU64()] = sync
+			if c.rewound {
+				h := sync.Header()
+				h.Extra = []byte{1}
+				comp.chain = &rewinding{windowChain: chain, at: sync.NumberU64(), then: types.NewBlockWithHeader(h, nil)}
+			}
 			comp.SyncCommitted(t.Context(), sync.Header())
 			p, ok := comp.ledger.TakeFailed(0)
 			require.True(t, ok)

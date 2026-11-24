@@ -370,12 +370,19 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 		return nodeFault(err)
 	}
 	candidates, err := Candidates(c.x.L2Config, c.x.Engine, block, &stateless.Witness{State: w.State, Codes: w.Codes, Headers: w.Headers}, PairEnds(block.Transactions()))
+	if errors.Is(err, stateless.ErrWitnessHeaders) || errors.Is(err, stateless.ErrIncompleteWitness) {
+		// The witness the node captured for the block falls short.
+		err = nodeFault(err)
+	}
 	if err != nil {
 		return err
 	}
 	blocks, err := c.blocks(ctx, e.cursor, e.sync)
 	if err != nil {
 		return nodeFault(err)
+	}
+	if last := blocks[len(blocks)-1]; last.Hash() != sync.Hash() {
+		return nodeFault(fmt.Errorf("block %d is %x, no longer the committed %x", e.sync, last.Hash(), sync.Hash()))
 	}
 	fx := Effects{}
 	for _, d := range e.fx.deliveries {
@@ -394,7 +401,7 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 	}
 	anchor, err := c.anchor(ctx, blocks[0])
 	if err != nil {
-		return err
+		return nodeFault(err)
 	}
 	start := time.Unix(int64(e.target.Time), 0).Add(-c.cfg.Slack - c.cfg.Proof)
 	w2 := &prove.Window{
