@@ -21,7 +21,9 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -571,6 +573,9 @@ func TestPruneModeEndpointGating(t *testing.T) {
 							require.Len(t, feeHistory.GasUsedRatio, blocks)
 						} else if pruned {
 							require.ErrorIs(t, err, state.ErrPruned)
+							if strings.HasPrefix(ep.name, "trace_") {
+								requirePrunedHistoryCode(t, err)
+							}
 						} else {
 							require.NoError(t, err)
 							require.NotNil(t, res)
@@ -580,6 +585,16 @@ func TestPruneModeEndpointGating(t *testing.T) {
 			}
 		})
 	}
+}
+
+// requirePrunedHistoryCode checks that a pruned-history rejection reaches the client
+// as 4444, with the "Pruned history unavailable" prefix before the original message.
+func requirePrunedHistoryCode(t *testing.T, err error) {
+	t.Helper()
+	coded, ok := errors.AsType[rpc.Error](err)
+	require.True(t, ok, "error carries no RPC code: %v", err)
+	require.Equal(t, 4444, coded.ErrorCode())
+	require.True(t, strings.HasPrefix(coded.Error(), "Pruned history unavailable: "+state.ErrPruned.Error()), coded.Error())
 }
 
 func pruneGateFires(boundary pruneGateBoundary, cfg pruneGatingConfig, blockNum, head uint64) bool {

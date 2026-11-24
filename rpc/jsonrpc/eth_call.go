@@ -136,11 +136,6 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
-	if err != nil {
-		return nil, err
-	}
-
 	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, header.Number.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
@@ -210,11 +205,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	blockNum := header.Number
 
 	err = api.BaseAPI.checkPruneStateAfterSystemTx(ctx, dbtx, blockNum.Uint64())
-	if err != nil {
-		return 0, err
-	}
-
-	err = rpchelper.CheckBlockExecuted(dbtx, header.Number.Uint64())
 	if err != nil {
 		return 0, err
 	}
@@ -492,21 +482,14 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	defer roTx.Rollback()
 
-	blockNumber, _, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader)
+	blockNumber, _, isLatest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, roTx, api._blockReader)
 	if err != nil {
-		return nil, err
-	}
-
-	// A canonical hash exists for blocks the header stage has downloaded but
-	// execution has not reached; the commitment history getProof needs is only
-	// written by execution.
-	if err := rpchelper.CheckBlockExecuted(roTx, blockNumber); err != nil {
 		return nil, err
 	}
 
 	err = api.BaseAPI.checkPruneState(ctx, roTx, blockNumber)
 	if err != nil {
-		return nil, wrapPrunedProof(err)
+		return nil, wrapPrunedHistory(err)
 	}
 
 	storageKeysConverted := make([]StorageKeysInfo, len(storageKeys))
@@ -516,22 +499,9 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	proof, err := api.getProof(ctx, roTx, address, storageKeysConverted, blockNumber, isLatest, api.logger)
 	if err != nil {
-		return nil, wrapPrunedProof(err)
+		return nil, wrapPrunedHistory(err)
 	}
 	return proof, nil
-}
-
-type proofPrunedError struct{ err error }
-
-func (e *proofPrunedError) Error() string  { return "Pruned history unavailable: " + e.err.Error() }
-func (e *proofPrunedError) ErrorCode() int { return 4444 }
-func (e *proofPrunedError) Unwrap() error  { return e.err }
-
-func wrapPrunedProof(err error) error {
-	if errors.Is(err, state.ErrPruned) {
-		return &proofPrunedError{err: err}
-	}
-	return err
 }
 
 func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNumber uint64, isLatest bool, logger log.Logger) (*accounts.AccProofResult, error) {
@@ -1047,11 +1017,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	} else {
 
 		err = api.BaseAPI.checkPruneTransactionHistory(ctx, tx, blockNumber+1)
-		if err != nil {
-			return nil, err
-		}
-
-		err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
 		}
