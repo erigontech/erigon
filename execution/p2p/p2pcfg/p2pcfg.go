@@ -35,7 +35,7 @@ var DefaultBlockDownload = BlockDownload{
 	MaxParallelBodyDownloads:     10,
 	MaxParallelHeaderDownloads:   10,
 	InitialHeaderFetchTimeout:    time.Second, // note we want initial header fetch to be quick, so we terminate quickly
-	InitialHeaderFetchRetries:    0,           // in case of chainLengthLimit+chainLengthCurrentHead early termination
+	InitialHeaderFetchRetries:    0,           // in case of p2p.WithChainLengthLimit+p2p.WithChainLengthCurrentHead early termination
 	HeaderChainBatchFetchTimeout: 10 * time.Second,
 	HeaderChainBatchFetchRetries: 1,
 	BodiesBatchFetchTimeout:      time.Minute,
