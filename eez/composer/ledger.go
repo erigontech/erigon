@@ -79,8 +79,8 @@ type entry[T any] struct {
 	// confirmed reports that derivation passed the height; it releases Txs
 	// once, whichever verdict came first.
 	confirmed bool
-	// watch counts the watches of the posting Repend began: only the latest
-	// one's verdict holds.
+	// watch is the latest watch of the posting, Begin's or Repend's: only
+	// its verdict holds.
 	watch uint64
 }
 
@@ -90,6 +90,9 @@ type entry[T any] struct {
 type Ledger[T any] struct {
 	mu      sync.Mutex
 	entries map[uint64]*entry[T]
+	// watches numbers the watches of all entries, so that one of a removed
+	// entry never matches its successor's.
+	watches uint64
 }
 
 // NewLedger returns an empty ledger.
@@ -107,12 +110,15 @@ func (l *Ledger[T]) heights(from, to uint64) []uint64 {
 	return hs
 }
 
-// Begin records batch p as sent, replacing an entry at its height.
-func (l *Ledger[T]) Begin(p Posted[T]) {
+// Begin records batch p as sent, replacing an entry at its height, and
+// returns its first watch.
+func (l *Ledger[T]) Begin(p Posted[T]) uint64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	p.SlotSkipped, p.Landed = false, false
-	l.entries[p.Height] = &entry[T]{Posted: p}
+	l.watches++
+	l.entries[p.Height] = &entry[T]{Posted: p, watch: l.watches}
+	return l.watches
 }
 
 // Blocking returns the lowest height above cursor, in any state: only
@@ -287,7 +293,8 @@ func (l *Ledger[T]) Repend(height uint64, post common.Hash) (uint64, bool) {
 	defer l.mu.Unlock()
 	if e := l.find(height, post); e != nil && (e.resolution == Settled || e.resolution == SettledPartial) {
 		e.resolution, e.confirmed, e.Landed = Pending, false, false
-		e.watch++
+		l.watches++
+		e.watch = l.watches
 		return e.watch, true
 	}
 	return 0, false

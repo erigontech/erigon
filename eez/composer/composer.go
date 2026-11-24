@@ -354,7 +354,7 @@ func (c *Composer) postBlocks(ctx context.Context, cursor uint64, blocks []*type
 	hash := tx.Hash()
 	judged := *batch
 	judged.CallData, judged.Proofs = nil, nil
-	c.ledger.Begin(Posted[types.Transaction]{Height: to, Post: hash, Terminal: terminal, Batch: &judged})
+	watch := c.ledger.Begin(Posted[types.Transaction]{Height: to, Post: hash, Terminal: terminal, Batch: &judged})
 	// A builder that hangs holds the bundle's verdict, not the chain.
 	c.wg.Go(func() {
 		sent, err := c.poster.Send(c.ctx, []types.Transaction{tx}, target)
@@ -365,14 +365,14 @@ func (c *Composer) postBlocks(ctx context.Context, cursor uint64, blocks []*type
 			c.logger.Warn("[eez] batch may have been sent, watching it", "event", "eez.composer.batch.unsure", "to", to, "post", hash,
 				"l1Block", sent.Block, "err", err)
 		case err != nil:
-			c.ledger.Report(to, hash, 0, Failed, true)
+			c.ledger.Report(to, hash, watch, Failed, true)
 			c.logger.Warn("[eez] batch not sent", "event", "eez.composer.batch.unsent", "to", to, "post", hash, "err", err)
 			return
 		default:
 			c.logger.Info("[eez] batch posted", "event", "eez.composer.batch.posted", "from", cursor+1, "to", to, "post", hash,
 				"l1Block", sent.Block, "pinned", sent.Time != 0)
 		}
-		c.observe(to, hash, 0, batch, terminal, sent)
+		c.observe(to, hash, watch, batch, terminal, sent)
 	})
 	return nil
 }
