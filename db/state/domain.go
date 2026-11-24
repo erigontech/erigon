@@ -1700,7 +1700,9 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 
 	// Walk newest→oldest; skip files starting strictly after maxTxNum so a key's
 	// last write in an older .kv is still found (walkback bounded by maxTxNum).
-	for i, f := range slices.Backward(dt.files) {
+	// Not slices.Backward: a range-over-func body this large is not inlined, and that call per file dominates an absent-key read.
+	for i := len(dt.files) - 1; i >= 0; i-- {
+		f := &dt.files[i]
 		if bounded && f.startTxNum > maxTxNum {
 			continue
 		}

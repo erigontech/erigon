@@ -264,6 +264,39 @@ func TestWriterShardedLarge(t *testing.T) {
 	}
 }
 
+func TestReaderShardedContainsHashMatchesBinaryFuse(t *testing.T) {
+	require := require.New(t)
+	w, err := NewWriterSharded(filepath.Join(t.TempDir(), "sharded_match"))
+	require.NoError(err)
+	defer w.Close()
+	rnd := rand.New(rand.NewPCG(5, 6))
+	keys := make([]uint64, 50_000)
+	for i := range keys {
+		keys[i] = rnd.Uint64()
+		require.NoError(w.AddHash(keys[i]))
+	}
+	var buf bytes.Buffer
+	_, err = w.BuildTo(&buf)
+	require.NoError(err)
+	r, _, err := NewReaderShardedOnBytes(buf.Bytes(), "test")
+	require.NoError(err)
+
+	falsePositives := 0
+	for i := range 1_000_000 {
+		v := rnd.Uint64()
+		if i < len(keys) {
+			v = keys[i]
+		}
+		inner := r.shards[v>>56].inner
+		want := inner != nil && inner.Contains(v)
+		require.Equal(want, r.ContainsHash(v), "key %x", v)
+		if want && i >= len(keys) {
+			falsePositives++
+		}
+	}
+	require.NotZero(falsePositives)
+}
+
 func TestWriterShardedForceInMem(t *testing.T) {
 	require := require.New(t)
 	dir := t.TempDir()

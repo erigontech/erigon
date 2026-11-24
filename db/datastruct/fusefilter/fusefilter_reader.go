@@ -196,7 +196,7 @@ func (r *Reader) MadvRandom() {
 	}
 }
 func (r *Reader) FileName() string           { return r.fileName }
-func (r *Reader) ContainsHash(v uint64) bool { return r.inner.Contains(v) }
+func (r *Reader) ContainsHash(v uint64) bool { return contains(r.inner, v) }
 
 // InMem reports whether the filter is a heap copy, so a lookup reads no file page.
 func (r *Reader) InMem() bool { return r.keepInMem }
@@ -206,28 +206,45 @@ func (r *Reader) ContainsHashProbe(v uint64, pr *mmap.Probe) bool {
 	if pr != nil && !r.keepInMem {
 		r.probe(v, pr)
 	}
-	return r.inner.Contains(v)
+	return contains(r.inner, v)
 }
 
 func (r *Reader) probe(v uint64, pr *mmap.Probe) {
-	f := r.inner
+	h0, h1, h2 := indexes(r.inner, mix(r.inner, v))
+	for _, i := range [3]uint32{h0, h1, h2} {
+		if int(i) < len(r.inner.Fingerprints) {
+			pr.Touch(unsafe.Pointer(&r.inner.Fingerprints[i]))
+		}
+	}
+}
+
+// contains is xorfilter's BinaryFuse8 Contains without generics: the generic method is not inlined, and the call
+// dominates a lookup in a cached filter.
+func contains(f *xorfilter.BinaryFuse[uint8], v uint64) bool {
+	if f == nil {
+		return false
+	}
+	h := mix(f, v)
+	h0, h1, h2 := indexes(f, h)
+	fp := uint8(h ^ h>>32)
+	return fp == f.Fingerprints[h0]^f.Fingerprints[h1]^f.Fingerprints[h2]
+}
+
+func mix(f *xorfilter.BinaryFuse[uint8], v uint64) uint64 {
 	h := v + f.Seed
 	h ^= h >> 33
 	h *= 0xff51afd7ed558ccd
 	h ^= h >> 33
 	h *= 0xc4ceb9fe1a85ec53
-	h ^= h >> 33
+	return h ^ h>>33
+}
+
+func indexes(f *xorfilter.BinaryFuse[uint8], h uint64) (h0, h1, h2 uint32) {
 	hi, _ := bits.Mul64(h, uint64(f.SegmentCountLength))
-	h0 := uint32(hi)
-	h1 := h0 + f.SegmentLength
-	h2 := h1 + f.SegmentLength
-	h1 ^= uint32(h>>18) & f.SegmentLengthMask
-	h2 ^= uint32(h) & f.SegmentLengthMask
-	for _, i := range [3]uint32{h0, h1, h2} {
-		if int(i) < len(f.Fingerprints) {
-			pr.Touch(unsafe.Pointer(&f.Fingerprints[i]))
-		}
-	}
+	h0 = uint32(hi)
+	h1 = h0 + f.SegmentLength
+	h2 = h1 + f.SegmentLength
+	return h0, h1 ^ uint32(h>>18)&f.SegmentLengthMask, h2 ^ uint32(h)&f.SegmentLengthMask
 }
 
 func (r *Reader) Close() {
@@ -366,11 +383,7 @@ func (r *ReaderSharded) ContainsHashProbe(v uint64, pr *mmap.Probe) bool {
 }
 
 func (r *ReaderSharded) ContainsHash(v uint64) bool {
-	s := &r.shards[v>>56]
-	if s.inner == nil {
-		return false
-	}
-	return s.inner.Contains(v)
+	return contains(r.shards[v>>56].inner, v)
 }
 
 // ForceInMem clones each shard's fingerprints into anonymous heap memory.
