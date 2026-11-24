@@ -70,7 +70,8 @@ func BenchmarkSendersStage(b *testing.B) {
 					return err
 				}
 				defer tx.Rollback()
-				return stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, uint64(shape.blocks), m.Ctx, log.New())
+				_, err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, uint64(shape.blocks), m.Ctx, log.New())
+				return err
 			}
 			for b.Loop() {
 				require.NoError(b, runStage())

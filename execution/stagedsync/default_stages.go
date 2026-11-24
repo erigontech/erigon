@@ -37,6 +37,7 @@ func DefaultStages(
 	txLookup TxLookupCfg,
 	finish FinishCfg,
 ) []*Stage {
+	var pendingSenders PendingSenders
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
@@ -97,7 +98,9 @@ func DefaultStages(
 			ID:          stages.Senders,
 			Description: "Recover senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, logger)
+				var err error
+				pendingSenders, err = SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, logger)
+				return err
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindSendersStage(u, tx, senders)
@@ -114,7 +117,9 @@ func DefaultStages(
 				if err := SpawnExecuteBlocksStage(s, u, sd, tx, 0, ctx, exec, logger); err != nil {
 					return err
 				}
-				return WritePendingSenders(ctx, senders, u, tx, logger)
+				pending := pendingSenders
+				pendingSenders = nil
+				return WritePendingSenders(ctx, senders, pending, u, tx, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)
@@ -171,6 +176,7 @@ func DefaultStages(
 }
 
 func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, senders SendersCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg) []*Stage {
+	var pendingSenders PendingSenders
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
@@ -205,7 +211,9 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, senders Senders
 			ID:          stages.Senders,
 			Description: "Recover senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, logger)
+				var err error
+				pendingSenders, err = SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, logger)
+				return err
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindSendersStage(u, tx, senders)
@@ -221,7 +229,9 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, senders Senders
 				if err := SpawnExecuteBlocksStage(s, u, sd, tx, 0, ctx, exec, logger); err != nil {
 					return err
 				}
-				return WritePendingSenders(ctx, senders, u, tx, logger)
+				pending := pendingSenders
+				pendingSenders = nil
+				return WritePendingSenders(ctx, senders, pending, u, tx, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)
@@ -261,6 +271,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, senders Senders
 
 // StateStages are all stages necessary for basic unwind and stage computation, it is primarily used to process side forks and memory execution.
 func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, senders SendersCfg, exec ExecuteBlockCfg) []*Stage {
+	var pendingSenders PendingSenders
 	return []*Stage{
 		{
 			ID:          stages.Headers,
@@ -296,7 +307,9 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, send
 			ID:          stages.Senders,
 			Description: "Recover senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, logger)
+				var err error
+				pendingSenders, err = SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, logger)
+				return err
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindSendersStage(u, tx, senders)
@@ -309,7 +322,9 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, send
 				if err := SpawnExecuteBlocksStage(s, u, sd, tx, 0, ctx, exec, logger); err != nil {
 					return err
 				}
-				return WritePendingSenders(ctx, senders, u, tx, logger)
+				pending := pendingSenders
+				pendingSenders = nil
+				return WritePendingSenders(ctx, senders, pending, u, tx, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)

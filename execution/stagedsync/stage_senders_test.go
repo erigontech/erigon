@@ -151,7 +151,7 @@ func TestSenders(t *testing.T) {
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
 	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, "", br, exec.NewBlockReadAheader())
-	err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 3, m.Ctx, log.New())
+	_, err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 3, m.Ctx, log.New())
 	require.NoError(err)
 
 	{
@@ -225,7 +225,8 @@ func TestSendersRegisteredRecovery(t *testing.T) {
 	readAheader.AddSendersRecovery(hash, exec.StartSendersRecovery(m.Ctx, signer, signed(recoveredKey)))
 
 	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, "", m.BlockReader, readAheader)
-	require.NoError(stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New()))
+	_, err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New())
+	require.NoError(err)
 
 	_, senders, err := m.BlockReader.BlockWithSenders(m.Ctx, tx, hash, 1)
 	require.NoError(err)
@@ -263,8 +264,9 @@ func TestSendersAttachesSendersToCachedBody(t *testing.T) {
 	readAheader.AddSendersRecovery(hash, exec.StartSendersRecovery(m.Ctx, types.MakeSigner(chain.TestChainBerlinConfig, 1, 0), body.Transactions))
 
 	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, readAheader)
-	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New()))
-	require.NoError(t, stagedsync.WritePendingSenders(m.Ctx, cfg, &recordingUnwinder{}, tx, log.New()))
+	pending, err := stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New())
+	require.NoError(t, err)
+	require.NoError(t, stagedsync.WritePendingSenders(m.Ctx, cfg, pending, &recordingUnwinder{}, tx, log.New()))
 
 	cached, ok := readAheader.ReadBodyWithTransactions(hash)
 	require.True(t, ok)
@@ -320,8 +322,11 @@ func TestSendersStageLetsExecStartBeforeTheRecoveryEnds(t *testing.T) {
 
 	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, readAheader)
 	done := make(chan error, 1)
+	var pending stagedsync.PendingSenders
 	go func() {
-		done <- stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New())
+		var err error
+		pending, err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New())
+		done <- err
 	}()
 	select {
 	case err := <-done:
@@ -344,7 +349,7 @@ func TestSendersStageLetsExecStartBeforeTheRecoveryEnds(t *testing.T) {
 		require.Equal(t, sender, got.Value())
 	}
 
-	require.NoError(t, stagedsync.WritePendingSenders(m.Ctx, cfg, &recordingUnwinder{}, tx, log.New()))
+	require.NoError(t, stagedsync.WritePendingSenders(m.Ctx, cfg, pending, &recordingUnwinder{}, tx, log.New()))
 	rows, err := rawdb.ReadSenders(tx, hash, 1)
 	require.NoError(t, err)
 	require.Equal(t, want, rows)
@@ -370,9 +375,10 @@ func TestPendingSendersUnwindBeforeABadSignature(t *testing.T) {
 	readAheader.AddSendersRecovery(hash, exec.StartSendersRecovery(m.Ctx, types.MakeSigner(chain.TestChainBerlinConfig, 1, 0), unsigned))
 
 	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, readAheader)
-	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New()))
+	pending, err := stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New())
+	require.NoError(t, err)
 	u := &recordingUnwinder{}
-	require.NoError(t, stagedsync.WritePendingSenders(m.Ctx, cfg, u, tx, log.New()))
+	require.NoError(t, stagedsync.WritePendingSenders(m.Ctx, cfg, pending, u, tx, log.New()))
 
 	require.Equal(t, 1, u.calls)
 	require.Zero(t, u.point)
@@ -412,8 +418,9 @@ func TestSendersWritesBALBlockSenders(t *testing.T) {
 	readAheader.AddSendersRecovery(hash, exec.StartSendersRecovery(m.Ctx, types.MakeSigner(chain.TestChainBerlinConfig, 1, 0), body.Transactions))
 
 	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, readAheader)
-	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New()))
-	require.NoError(t, stagedsync.WritePendingSenders(m.Ctx, cfg, &recordingUnwinder{}, tx, log.New()))
+	pending, err := stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New())
+	require.NoError(t, err)
+	require.NoError(t, stagedsync.WritePendingSenders(m.Ctx, cfg, pending, &recordingUnwinder{}, tx, log.New()))
 
 	_, senders, err := m.BlockReader.BlockWithSenders(m.Ctx, tx, hash, 1)
 	require.NoError(t, err)
@@ -434,7 +441,8 @@ func TestSendersRecoversWhenRegisteredRecoveryFails(t *testing.T) {
 	readAheader.AddSendersRecovery(hash, exec.StartSendersRecovery(m.Ctx, types.MakeSigner(chain.TestChainBerlinConfig, 1, 0), unsigned))
 
 	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, readAheader)
-	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New()))
+	_, err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New())
+	require.NoError(t, err)
 
 	_, senders, err := m.BlockReader.BlockWithSenders(m.Ctx, tx, hash, 1)
 	require.NoError(t, err)
@@ -487,7 +495,8 @@ func TestSendersUnwindsToTheBlockBeforeABadSignature(t *testing.T) {
 
 	u := &recordingUnwinder{}
 	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, exec.NewBlockReadAheader())
-	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, u, tx, 5, m.Ctx, log.New()))
+	_, err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, u, tx, 5, m.Ctx, log.New())
+	require.NoError(t, err)
 
 	require.Equal(t, 1, u.calls)
 	require.Equal(t, uint64(3), u.point)
@@ -528,7 +537,8 @@ func TestSendersBatchUsesEachBlocksSigner(t *testing.T) {
 
 	u := &recordingUnwinder{}
 	cfg := stagedsync.StageSendersCfg(config, false, t.TempDir(), m.BlockReader, exec.NewBlockReadAheader())
-	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, u, tx, 2, m.Ctx, log.New()))
+	_, err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, u, tx, 2, m.Ctx, log.New())
+	require.NoError(t, err)
 
 	require.Zero(t, u.calls, "a Frontier-only and a Spurious-Dragon-only signature are both valid in their own blocks")
 	for i, hash := range hashes {
@@ -579,7 +589,8 @@ func TestSendersMixesRegisteredAndRecoveredBlocks(t *testing.T) {
 	readAheader.AddSendersRecovery(hashes[1], exec.StartSendersRecovery(m.Ctx, signer, registered))
 
 	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, "", m.BlockReader, readAheader)
-	require.NoError(stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 2, m.Ctx, log.New()))
+	_, err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 2, m.Ctx, log.New())
+	require.NoError(err)
 
 	for i, want := range []int{len(recovered), len(registered)} {
 		_, senders, err := m.BlockReader.BlockWithSenders(m.Ctx, tx, hashes[i], uint64(i+1))
@@ -627,7 +638,8 @@ func recoverSendersOfBlock(t *testing.T, m *execmoduletester.ExecModuleTester, b
 	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, true, t.TempDir(), m.BlockReader, exec.NewBlockReadAheader())
 	done := make(chan error, 1)
 	go func() {
-		done <- stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New())
+		_, err := stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New())
+		done <- err
 	}()
 	select {
 	case err := <-done:
