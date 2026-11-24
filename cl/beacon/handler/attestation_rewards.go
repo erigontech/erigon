@@ -345,8 +345,8 @@ func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.Val
 			}
 		}
 	} else {
-		for index := uint64(0); index < uint64(validatorSet.Length()); index++ {
-			if err := fn(index, validatorSet.Get(int(index))); err != nil {
+		for index, v := range validatorSet.All(0, validatorSet.Length()) {
+			if err := fn(uint64(index), v); err != nil {
 				return nil, err
 			}
 		}
@@ -493,9 +493,8 @@ func (a *ApiHandler) computeAttestationsRewardsForPhase0(validatorSet *solid.Val
 			}
 		}
 	} else {
-		for index := uint64(0); index < uint64(validatorSet.Length()); index++ {
-			v := validatorSet.Get(int(index))
-			if err := fn(index, v); err != nil {
+		for index, v := range validatorSet.All(0, validatorSet.Length()) {
+			if err := fn(uint64(index), v); err != nil {
 				return nil, err
 			}
 		}

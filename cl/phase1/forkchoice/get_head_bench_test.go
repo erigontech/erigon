@@ -106,7 +106,9 @@ func newPreGloasHeadTestStore() (*ForkChoiceStore, *headSnapshotForkGraph, solid
 	return f, graph, justified
 }
 
-func BenchmarkGetHeadPreGloas(b *testing.B) {
+// newPreGloasHeadBenchStore returns a pre-Gloas store with a 96-block chain above the justified block and a
+// proposer boost on its tip. It returns the justified checkpoint and the last 32 block roots.
+func newPreGloasHeadBenchStore() (*ForkChoiceStore, solid.Checkpoint, []common.Hash) {
 	f, graph, justified := newPreGloasHeadTestStore()
 	cfg := *f.beaconCfg
 	parent := justified.Root
@@ -122,10 +124,14 @@ func BenchmarkGetHeadPreGloas(b *testing.B) {
 	f.headSet[parent] = struct{}{}
 	f.timeMs.Store((graph.headers[parent].Slot + 1) * cfg.SecondsPerSlot * 1000)
 	f.proposerBoostRoot.Store(parent)
+	return f, justified, roots[len(roots)-32:]
+}
 
+func BenchmarkGetHeadPreGloas(b *testing.B) {
+	f, justified, recent := newPreGloasHeadBenchStore()
 	epoch := uint64(11)
 	message := func(root common.Hash) LatestMessage { return LatestMessage{Epoch: epoch, Root: root} }
-	votes := newHeadBenchVotes(f, roots[len(roots)-32:], message)
+	votes := newHeadBenchVotes(f, recent, message)
 	f.checkpointStates.Store(justified, votes.cs)
 	runHeadBench(b, func(b *testing.B) {
 		f.headHash = common.Hash{}

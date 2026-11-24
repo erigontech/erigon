@@ -18,8 +18,9 @@ package solid
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"slices"
+	"iter"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
@@ -37,8 +38,6 @@ const (
 	IsPreviousMatchingHeadAttesterBit   = 0x5
 )
 
-const validatorSetCapacityMultiplier = 1.01 // allocate 20% to the validator set when re-allocation is needed.)
-
 // This is all stuff used by phase0 state transition. It makes many operations faster.
 type Phase0Data struct {
 	// MinInclusionDelay
@@ -47,75 +46,42 @@ type Phase0Data struct {
 }
 
 type ValidatorSet struct {
-	*merkle_tree.MerkleTree
-	progressiveTrees []*merkle_tree.MerkleTree
-	buffer           []byte
-
-	l, c int
+	list cowList
 
 	// We have phase0 data below
 	phase0Data   []Phase0Data
 	attesterBits []byte
 }
 
+var errValidatorLayout = errors.New("validator set hashed with the wrong layout")
+
 func NewValidatorSet(c int) *ValidatorSet {
-	return &ValidatorSet{
-		c: c,
-	}
+	v := &ValidatorSet{}
+	v.list.init(validatorSize, c, validatorLeaf)
+	return v
 }
 
 func NewValidatorSetWithLength(c int, l int) *ValidatorSet {
-	return &ValidatorSet{
-		c:            c,
-		l:            l,
-		buffer:       make([]byte, l*validatorSize),
-		attesterBits: make([]byte, l),
-	}
-}
-
-func (v *ValidatorSet) expandBuffer(newValidatorSetLength int) {
-	size := newValidatorSetLength * validatorSize
-
-	if size > cap(v.buffer) {
-		increasedValidatorsCapacity := int(uint64(float64(newValidatorSetLength)*validatorSetCapacityMultiplier)+1) * validatorSize
-		v.buffer = slices.Grow(v.buffer, increasedValidatorsCapacity-len(v.buffer))
-	}
-	v.buffer = v.buffer[:size]
+	v := NewValidatorSet(c)
+	v.list.reset(l, nil)
+	v.attesterBits = make([]byte, l)
+	return v
 }
 
 func (v *ValidatorSet) Append(val Validator) {
-	offset := v.EncodingSizeSSZ()
-	// we are overflowing the buffer? append.
-	// if offset+validatorSize >= len(v.buffer) {
-	v.expandBuffer(v.l + 1)
-	//}
-
-	copy(v.buffer[offset:], val)
-	if v.MerkleTree != nil {
-		v.MerkleTree.AppendLeaf()
-	}
-	v.appendProgressiveLeaf(v.l)
-	v.zeroTreeHash(v.l)
-
+	v.list.append(val)
 	if v.phase0Data != nil {
 		v.phase0Data = append(v.phase0Data, Phase0Data{})
 	}
-
-	if v.l >= len(v.attesterBits) {
-		for i := len(v.attesterBits); i < v.l+1; i++ {
-			v.attesterBits = append(v.attesterBits, 0)
-		}
-	}
-	v.attesterBits[v.l] = 0 // initialize to empty.
-	v.l++
+	v.attesterBits = append(v.attesterBits[:v.list.l-1], 0)
 }
 
 func (v *ValidatorSet) Cap() int {
-	return v.c
+	return v.list.c
 }
 
 func (v *ValidatorSet) Length() int {
-	return v.l
+	return v.list.l
 }
 
 func (v *ValidatorSet) Pop() Validator {
@@ -123,11 +89,9 @@ func (v *ValidatorSet) Pop() Validator {
 }
 
 func (v *ValidatorSet) Clear() {
-	v.l = 0
+	v.list.clear()
 	v.phase0Data = nil
 	v.attesterBits = v.attesterBits[:0]
-	v.MerkleTree = nil
-	v.progressiveTrees = nil
 }
 
 func (v *ValidatorSet) ClearPhase0Data() {
@@ -135,91 +99,43 @@ func (v *ValidatorSet) ClearPhase0Data() {
 }
 
 func (v *ValidatorSet) Clone() clonable.Clonable {
-	return NewValidatorSet(v.c)
+	clone := NewValidatorSet(v.list.c)
+	clone.list.layout = v.list.layout
+	return clone
 }
 
 func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
-	t.l = v.l
-	t.c = v.c
-	offset := v.EncodingSizeSSZ()
-	if offset > len(t.buffer) {
-		t.expandBuffer(v.l)
-		t.attesterBits = make([]byte, len(v.attesterBits))
-	}
-	if v.MerkleTree != nil {
-		if t.MerkleTree == nil {
-			t.MerkleTree = &merkle_tree.MerkleTree{}
-		}
-		v.MerkleTree.CopyInto(t.MerkleTree)
-		var hashBuffer [8 * 32]byte
-
-		t.MerkleTree.SetComputeLeafFn(func(idx int, out []byte) {
-			validator := t.at(idx)
-			if err := validator.CopyHashBufferTo(hashBuffer[:]); err != nil {
-				panic(err)
-			}
-			if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer[:], out); err != nil {
-				panic(err)
-			}
-		})
-	} else {
-		t.MerkleTree = nil
-	}
-	if v.progressiveTrees != nil {
-		t.progressiveTrees = slices.Grow(t.progressiveTrees[:0], len(v.progressiveTrees))[:len(v.progressiveTrees)]
-		start := 0
-		capacity := 1
-		for i, tree := range v.progressiveTrees {
-			segmentStart := start
-			start += capacity
-			capacity *= 4
-			if t.progressiveTrees[i] == nil {
-				t.progressiveTrees[i] = &merkle_tree.MerkleTree{}
-			}
-			tree.CopyInto(t.progressiveTrees[i])
-			t.progressiveTrees[i].SetComputeLeafFn(t.progressiveLeafFn(segmentStart))
-		}
-	} else {
-		t.progressiveTrees = nil
-	}
-
+	v.list.copyTo(&t.list)
 	if v.phase0Data == nil {
 		t.phase0Data = nil
 	} else {
 		t.phase0Data = append(t.phase0Data[:0], v.phase0Data...)
 	}
-	copy(t.buffer, v.buffer)
-	copy(t.attesterBits, v.attesterBits)
-	t.buffer = t.buffer[:v.l*validatorSize]
-	t.attesterBits = t.attesterBits[:v.l]
+	t.attesterBits = append(t.attesterBits[:0], v.attesterBits...)
 }
 
 func (v *ValidatorSet) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf)%validatorSize > 0 {
 		return ssz.ErrBufferNotRounded
 	}
-	if l := len(buf) / validatorSize; l > v.c {
-		return fmt.Errorf("validator set length exceeds limit: %d > %d", l, v.c)
+	if l := len(buf) / validatorSize; l > v.list.c {
+		return fmt.Errorf("validator set length exceeds limit: %d > %d", l, v.list.c)
 	}
-	v.expandBuffer(len(buf) / validatorSize)
-	copy(v.buffer, buf)
-	v.MerkleTree = nil
-	v.progressiveTrees = nil
-	v.l = len(buf) / validatorSize
+	v.list.decode(buf)
 	v.phase0Data = nil
-	v.attesterBits = make([]byte, v.l)
+	v.attesterBits = make([]byte, v.list.l)
 	return nil
 }
 
 func (v *ValidatorSet) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, v.buffer[:v.EncodingSizeSSZ()]...), nil
+	return v.list.encode(buf), nil
 }
 
 func (v *ValidatorSet) EncodingSizeSSZ() int {
 	if v == nil {
 		return 0
 	}
-	return v.l * validatorSize
+	return v.list.l * validatorSize
 }
 
 func (*ValidatorSet) Static() bool {
@@ -227,104 +143,61 @@ func (*ValidatorSet) Static() bool {
 }
 
 func (v *ValidatorSet) Get(idx int) ValidatorView {
-	return v.at(idx).View()
-}
-
-func (v *ValidatorSet) at(idx int) Validator {
-	if idx < 0 || idx >= v.l {
+	if uint(idx) >= uint(v.list.l) {
 		panic("ValidatorSet -- Get: out of bounds")
 	}
-
-	return Validator(v.buffer[idx*validatorSize : (idx*validatorSize)+validatorSize])
+	return ValidatorView{b: v.list.elem(idx)}
 }
 
 func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
-	if v.l > v.c {
-		return [32]byte{}, fmt.Errorf("validator set length exceeds limit: %d > %d", v.l, v.c)
+	if v.list.l > v.list.c {
+		return [32]byte{}, fmt.Errorf("validator set length exceeds limit: %d > %d", v.list.l, v.list.c)
 	}
-	// generate root list
-	if v.MerkleTree == nil {
-		tree := &merkle_tree.MerkleTree{}
-		cap := uint64(v.c)
-		hashBuffer := make([]byte, 8*32)
-		serialLeafFn := func(idx int, out []byte) {
-			validator := v.at(idx)
-			if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
-				panic(err)
-			}
-			hashBuffer = hashBuffer[:(8 * 32)]
-			if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, out); err != nil {
-				panic(err)
-			}
-		}
-		helperCount := validatorRootWorkers.acquireHelpers(v.l)
-		if helperCount == 0 {
-			tree.Initialize(v.l, merkle_tree.OptimalMaxTreeCacheDepth, serialLeafFn, &cap)
-			v.MerkleTree = tree
-		} else {
-			defer validatorRootWorkers.releaseHelpers(helperCount)
-			roots := validatorRootWorkers.computeRoots(v, helperCount+1)
-			tree, coreRoot := merkle_tree.BuildFromLeafRoots(
-				roots, v.l, merkle_tree.OptimalMaxTreeCacheDepth, &cap, helperCount+1, serialLeafFn,
-			)
-			v.MerkleTree = tree
-			lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
-			return crypto.Sha256(coreRoot[:], lengthRoot[:]), nil
-		}
+	if v.list.layout.progressive() {
+		return [32]byte{}, errValidatorLayout
 	}
-	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
-	coreRoot := v.MerkleTree.ComputeRoot()
-	return crypto.Sha256(coreRoot[:], lengthRoot[:]), nil
+	return v.hashWithLength()
 }
 
 func (v *ValidatorSet) HashSSZProgressive() ([32]byte, error) {
-	var roots []byte
-	var segmentRoots []common.Hash
-	workerCount := 1
-	if v.progressiveTrees == nil {
-		helperCount := validatorRootWorkers.acquireHelpers(v.l)
-		if helperCount > 0 {
-			defer validatorRootWorkers.releaseHelpers(helperCount)
-			workerCount = helperCount + 1
-			roots = validatorRootWorkers.computeRoots(v, workerCount)
-		}
-		segmentRoots = v.initializeProgressiveTrees(roots, workerCount)
+	if !v.list.layout.progressive() {
+		return [32]byte{}, errValidatorLayout
 	}
-	var root common.Hash
-	for i, tree := range slices.Backward(v.progressiveTrees) {
-		var left common.Hash
-		if segmentRoots != nil {
-			left = segmentRoots[i]
-		} else {
-			left = tree.ComputeRoot()
-		}
-		root = crypto.Sha256(left[:], root[:])
+	return v.hashWithLength()
+}
+
+func (v *ValidatorSet) hashWithLength() ([32]byte, error) {
+	core, err := v.list.coreRoot()
+	if err != nil {
+		return [32]byte{}, err
 	}
-	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
-	return crypto.Sha256(root[:], lengthRoot[:]), nil
+	lengthRoot := merkle_tree.Uint64Root(uint64(v.list.l))
+	return crypto.Sha256(core[:], lengthRoot[:]), nil
 }
 
 func (v *ValidatorSet) SetProgressiveHashing(enabled bool) {
 	if v == nil {
 		return
 	}
-	if enabled {
-		v.MerkleTree = nil
-		return
-	}
-	v.progressiveTrees = nil
+	v.list.setProgressive(enabled)
 }
 
 func (v *ValidatorSet) Set(idx int, val Validator) {
-	if idx < 0 || idx >= v.l {
+	if uint(idx) >= uint(v.list.l) {
 		panic("ValidatorSet -- Set: out of bounds")
 	}
-	copy(v.buffer[idx*validatorSize:(idx*validatorSize)+validatorSize], val)
-	v.zeroTreeHash(idx)
+	copy(v.list.write(idx), val)
+}
+
+func (v *ValidatorSet) write(idx int) Validator {
+	if uint(idx) >= uint(v.list.l) {
+		panic("ValidatorSet -- write: out of bounds")
+	}
+	return v.list.write(idx)
 }
 
 func (v *ValidatorSet) getPhase0(idx int) Phase0Data {
-	if idx < 0 || idx >= v.l {
+	if idx < 0 || idx >= v.list.l {
 		panic("ValidatorSet -- getPhase0: out of bounds")
 	}
 	if v.phase0Data == nil {
@@ -334,24 +207,24 @@ func (v *ValidatorSet) getPhase0(idx int) Phase0Data {
 }
 
 func (v *ValidatorSet) phase0ForWrite(idx int) *Phase0Data {
-	if idx < 0 || idx >= v.l {
+	if idx < 0 || idx >= v.list.l {
 		panic("ValidatorSet -- phase0ForWrite: out of bounds")
 	}
 	if v.phase0Data == nil {
-		v.phase0Data = make([]Phase0Data, v.l)
+		v.phase0Data = make([]Phase0Data, v.list.l)
 	}
 	return &v.phase0Data[idx]
 }
 
 func (v *ValidatorSet) getAttesterBit(idx int, bit int) bool {
-	if idx < 0 || idx >= v.l {
+	if idx < 0 || idx >= v.list.l {
 		panic("ValidatorSet -- getBit: out of bounds")
 	}
 	return (v.attesterBits[idx] & (1 << bit)) > 0
 }
 
 func (v *ValidatorSet) setAttesterBit(idx int, bit int, val bool) {
-	if idx < 0 || idx >= v.l {
+	if idx < 0 || idx >= v.list.l {
 		panic("ValidatorSet -- getBit: out of bounds")
 	}
 	if val {
@@ -361,92 +234,38 @@ func (v *ValidatorSet) setAttesterBit(idx int, bit int, val bool) {
 	v.attesterBits[idx] &= ^(1 << bit)
 }
 
+// All yields the validators in [from, to) in index order, as of the moment
+// iteration enters each chunk. The callback may write the current index; writes
+// to other indices may not be visible to later yields. Validators appended
+// during iteration are not visited.
+func (v *ValidatorSet) All(from, to int) iter.Seq2[int, ValidatorView] {
+	if from < 0 || from > to || to > v.list.l {
+		panic("ValidatorSet -- All: out of bounds")
+	}
+	return func(yield func(int, ValidatorView) bool) {
+		size := v.list.layout.elemSize
+		for i := from; i < to; {
+			ci, off := v.list.locate(i)
+			count := min(v.list.layout.chunkLeaves()-off, to-i)
+			data := v.list.chunks[ci].Load().data
+			for j := range count {
+				start := (off + j) * size
+				if !yield(i+j, ValidatorView{b: data[start : start+size : start+size]}) {
+					return
+				}
+			}
+			i += count
+		}
+	}
+}
+
 func (v *ValidatorSet) Range(fn func(int, ValidatorView, int) bool) {
-	for i := 0; i < v.l; i++ {
-		if !fn(i, v.Get(i), v.l) {
+	length := v.list.l
+	for i, val := range v.All(0, length) {
+		if !fn(i, val, length) {
 			return
 		}
 	}
-}
-
-func (v *ValidatorSet) zeroTreeHash(idx int) {
-	if v.MerkleTree != nil {
-		v.MerkleTree.MarkLeafAsDirty(idx)
-	}
-	if v.progressiveTrees != nil {
-		segment, localIndex, _ := progressiveSegmentForIndex(idx)
-		v.progressiveTrees[segment].MarkLeafAsDirty(localIndex)
-	}
-}
-
-func (v *ValidatorSet) initializeProgressiveTrees(roots []byte, workerCount int) []common.Hash {
-	trees := make([]*merkle_tree.MerkleTree, 0)
-	var segmentRoots []common.Hash
-	start := 0
-	capacity := 1
-	for start < v.l {
-		count := min(capacity, v.l-start)
-		limit := uint64(capacity)
-		computeLeaf := v.progressiveLeafFn(start)
-		var tree *merkle_tree.MerkleTree
-		if roots != nil {
-			var root common.Hash
-			tree, root = merkle_tree.BuildFromLeafRoots(
-				roots[start*32:(start+count)*32], count, merkle_tree.OptimalMaxTreeCacheDepth,
-				&limit, workerCount, computeLeaf,
-			)
-			segmentRoots = append(segmentRoots, root)
-		} else {
-			tree = &merkle_tree.MerkleTree{}
-			tree.Initialize(count, merkle_tree.OptimalMaxTreeCacheDepth, computeLeaf, &limit)
-		}
-		trees = append(trees, tree)
-		if validatorRootWorkers.progressiveTreeHook != nil {
-			validatorRootWorkers.progressiveTreeHook()
-		}
-		start += capacity
-		capacity *= 4
-	}
-	v.progressiveTrees = trees
-	return segmentRoots
-}
-
-func (v *ValidatorSet) appendProgressiveLeaf(index int) {
-	if v.progressiveTrees == nil {
-		return
-	}
-	segment, localIndex, capacity := progressiveSegmentForIndex(index)
-	if segment < len(v.progressiveTrees) {
-		v.progressiveTrees[segment].AppendLeaf()
-		return
-	}
-	tree := &merkle_tree.MerkleTree{}
-	limit := uint64(capacity)
-	tree.Initialize(1, merkle_tree.OptimalMaxTreeCacheDepth, v.progressiveLeafFn(index-localIndex), &limit)
-	v.progressiveTrees = append(v.progressiveTrees, tree)
-}
-
-func (v *ValidatorSet) progressiveLeafFn(start int) func(int, []byte) {
-	var hashBuffer [8 * 32]byte
-	return func(idx int, out []byte) {
-		if err := v.at(start + idx).CopyHashBufferTo(hashBuffer[:]); err != nil {
-			panic(err)
-		}
-		if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer[:], out); err != nil {
-			panic(err)
-		}
-	}
-}
-
-func progressiveSegmentForIndex(index int) (segment, localIndex, capacity int) {
-	localIndex = index
-	capacity = 1
-	for localIndex >= capacity {
-		localIndex -= capacity
-		capacity *= 4
-		segment++
-	}
-	return segment, localIndex, capacity
 }
 
 func (v *ValidatorSet) IsCurrentMatchingSourceAttester(idx int) bool {
@@ -514,44 +333,37 @@ func (v *ValidatorSet) SetMinPreviousInclusionDelayAttestation(idx int, val *Pen
 }
 
 func (v *ValidatorSet) SetWithdrawalCredentialForValidatorAtIndex(index int, creds common.Hash) {
-	v.zeroTreeHash(index)
-	v.at(index).SetWithdrawalCredentials(creds)
+	v.write(index).SetWithdrawalCredentials(creds)
 }
 
 func (v *ValidatorSet) SetExitEpochForValidatorAtIndex(index int, epoch uint64) {
-	v.zeroTreeHash(index)
-	v.at(index).SetExitEpoch(epoch)
+	v.write(index).SetExitEpoch(epoch)
 }
 
 func (v *ValidatorSet) SetWithdrawableEpochForValidatorAtIndex(index int, epoch uint64) {
-	v.zeroTreeHash(index)
-	v.at(index).SetWithdrawableEpoch(epoch)
+	v.write(index).SetWithdrawableEpoch(epoch)
 }
 
 func (v *ValidatorSet) SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64) {
-	v.zeroTreeHash(index)
-	v.at(index).SetEffectiveBalance(balance)
+	v.write(index).SetEffectiveBalance(balance)
 }
 
 func (v *ValidatorSet) SetActivationEpochForValidatorAtIndex(index int, epoch uint64) {
-	v.zeroTreeHash(index)
-	v.at(index).SetActivationEpoch(epoch)
+	v.write(index).SetActivationEpoch(epoch)
 }
 
 func (v *ValidatorSet) SetActivationEligibilityEpochForValidatorAtIndex(index int, epoch uint64) {
-	v.zeroTreeHash(index)
-	v.at(index).SetActivationEligibilityEpoch(epoch)
+	v.write(index).SetActivationEligibilityEpoch(epoch)
 }
 
 func (v *ValidatorSet) SetValidatorSlashed(index int, slashed bool) {
-	v.zeroTreeHash(index)
-	v.at(index).SetSlashed(slashed)
+	v.write(index).SetSlashed(slashed)
 }
 
 func (v *ValidatorSet) MarshalJSON() ([]byte, error) {
-	validators := make([]ValidatorView, v.l)
-	for i := 0; i < v.l; i++ {
-		validators[i] = v.Get(i)
+	validators := make([]ValidatorView, 0, v.list.l)
+	for _, val := range v.All(0, v.list.l) {
+		validators = append(validators, val)
 	}
 	return json.Marshal(validators)
 }

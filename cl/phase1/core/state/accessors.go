@@ -108,12 +108,6 @@ func InactivityLeaking(b abstract.BeaconState) bool {
 	return FinalityDelay(b) > b.BeaconConfig().MinEpochsToInactivityPenalty
 }
 
-// IsUnslashedParticipatingIndex
-func IsUnslashedParticipatingIndex(validatorSet *solid.ValidatorSet, previousEpochParticipation *solid.ParticipationBitList, epoch, index uint64, flagIdx int) bool {
-	validator := validatorSet.Get(int(index))
-	return validator.Active(epoch) && cltypes.ParticipationFlags(previousEpochParticipation.Get(int(index))).HasFlag(flagIdx) && !validator.Slashed()
-}
-
 // EligibleValidatorsIndicies Implementation of get_eligible_validator_indices as defined in the eth 2.0 specs.
 func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []uint64) {
 	/* This is a parallel implementation of get_eligible_validator_indices*/
@@ -136,11 +130,7 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 			if workerID == numThreads-1 {
 				to = b.ValidatorLength()
 			}
-			for j := from; j < to; j++ {
-				validator, err := b.ValidatorForValidatorIndex(j)
-				if err != nil {
-					panic(err)
-				}
+			for j, validator := range b.ValidatorSet().All(from, to) {
 				if validator.Active(previousEpoch) || (validator.Slashed() && previousEpoch+1 < validator.WithdrawableEpoch()) {
 					eligibleValidatorsShards[workerID] = append(eligibleValidatorsShards[workerID], uint64(j))
 				}
@@ -148,8 +138,6 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 			return nil
 		})
 	}
-	// Every job above returns nil unconditionally (the only fallible op inside
-	// panics instead), so Execute can never return a non-nil error here.
 	_ = wp.Execute()
 	// Merge the results from all threads.
 	total := 0
@@ -428,45 +416,48 @@ func GetValidatorsSweepWithdrawals(b abstract.BeaconState, withdrawalIndex uint6
 		return nil, withdrawalIndex, 0, fmt.Errorf("GetValidatorsSweepWithdrawals: next_withdrawal_validator_index %d out of range (validators length %d)", validatorIndex, maxValidators)
 	}
 
-	for range validatorsLimit {
-		if len(priorWithdrawals)+len(withdrawals) >= withdrawalsLimit {
-			break
-		}
+	end := int(validatorIndex + validatorsLimit)
+	ranges := [][2]int{{int(validatorIndex), min(end, int(maxValidators))}}
+	if end > int(maxValidators) {
+		ranges = append(ranges, [2]int{0, end - int(maxValidators)})
+	}
+	for _, r := range ranges {
+		for i, validator := range b.ValidatorSet().All(r[0], r[1]) {
+			if len(priorWithdrawals)+len(withdrawals) >= withdrawalsLimit {
+				return withdrawals, withdrawalIndex, processedCount, nil
+			}
 
-		validator, err := b.ValidatorForValidatorIndex(int(validatorIndex))
-		if err != nil {
-			return nil, withdrawalIndex, 0, fmt.Errorf("GetValidatorsSweepWithdrawals: %w", err)
-		}
-		var balance uint64
-		if b.Version() >= clparams.ElectraVersion {
-			balance = getBalanceAfterWithdrawals(b, validatorIndex, priorWithdrawals, withdrawals)
-		} else {
-			balance, _ = b.ValidatorBalance(int(validatorIndex))
-		}
-		wd := validator.WithdrawalCredentials()
+			validatorIndex := uint64(i)
+			var balance uint64
+			if b.Version() >= clparams.ElectraVersion {
+				balance = getBalanceAfterWithdrawals(b, validatorIndex, priorWithdrawals, withdrawals)
+			} else {
+				balance, _ = b.ValidatorBalance(int(validatorIndex))
+			}
+			wd := validator.WithdrawalCredentials()
 
-		if isFullyWithdrawableValidator(b, validator, balance, epoch) {
-			withdrawals = append(withdrawals, &cltypes.Withdrawal{
-				Index:     withdrawalIndex,
-				Validator: validatorIndex,
-				Address:   common.BytesToAddress(wd[12:]),
-				Amount:    balance,
-			})
-			withdrawalIndex++
-		} else if isPartiallyWithdrawableValidator(b, validator, balance) {
-			// [Modified in Electra:EIP7251]
-			maxEffectiveBalance := GetMaxEffectiveBalanceByVersion(validator, cfg, b.Version())
-			withdrawals = append(withdrawals, &cltypes.Withdrawal{
-				Index:     withdrawalIndex,
-				Validator: validatorIndex,
-				Address:   common.BytesToAddress(wd[12:]),
-				Amount:    balance - maxEffectiveBalance,
-			})
-			withdrawalIndex++
-		}
+			if isFullyWithdrawableValidator(b, validator, balance, epoch) {
+				withdrawals = append(withdrawals, &cltypes.Withdrawal{
+					Index:     withdrawalIndex,
+					Validator: validatorIndex,
+					Address:   common.BytesToAddress(wd[12:]),
+					Amount:    balance,
+				})
+				withdrawalIndex++
+			} else if isPartiallyWithdrawableValidator(b, validator, balance) {
+				// [Modified in Electra:EIP7251]
+				maxEffectiveBalance := GetMaxEffectiveBalanceByVersion(validator, cfg, b.Version())
+				withdrawals = append(withdrawals, &cltypes.Withdrawal{
+					Index:     withdrawalIndex,
+					Validator: validatorIndex,
+					Address:   common.BytesToAddress(wd[12:]),
+					Amount:    balance - maxEffectiveBalance,
+				})
+				withdrawalIndex++
+			}
 
-		validatorIndex = (validatorIndex + 1) % maxValidators
-		processedCount++
+			processedCount++
+		}
 	}
 
 	return withdrawals, withdrawalIndex, processedCount, nil

@@ -34,8 +34,8 @@ type pubkeyIndex struct {
 func newPubkeyIndex(validators *solid.ValidatorSet) pubkeyIndex {
 	length := validators.Length()
 	entries := make(map[[48]byte]uint64, length)
-	for index := range length {
-		entries[validators.Get(index).PublicKey()] = uint64(index)
+	for index, validator := range validators.All(0, length) {
+		entries[validator.PublicKey()] = uint64(index)
 	}
 	return pubkeyIndex{base: &pubkeyIndexBase{entries: entries, length: length}}
 }
@@ -44,14 +44,13 @@ func pubkeyIndexFromBase(base *pubkeyIndexBase, validators *solid.ValidatorSet) 
 	if base == nil {
 		return newPubkeyIndex(validators)
 	}
-	deltaLength := max(validators.Length()-base.length, 0)
+	from := min(base.length, validators.Length())
 	copied := pubkeyIndex{base: base}
-	if deltaLength > 0 {
+	if deltaLength := validators.Length() - from; deltaLength > 0 {
 		copied.delta = make(map[[48]byte]uint64, deltaLength)
 	}
-	for offset := range deltaLength {
-		index := base.length + offset
-		copied.delta[validators.Get(index).PublicKey()] = uint64(index)
+	for index, validator := range validators.All(from, validators.Length()) {
+		copied.delta[validator.PublicKey()] = uint64(index)
 	}
 	return copied
 }

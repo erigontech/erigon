@@ -151,9 +151,7 @@ func computePreviousAndCurrentTargetBalancePostAltair(s abstract.BeaconState, un
 			to = s.ValidatorSet().Length()
 		}
 		wp.AddWork(func() error {
-			for validatorIndex := from; validatorIndex < to; validatorIndex++ {
-
-				validator := s.ValidatorSet().Get(validatorIndex)
+			for validatorIndex, validator := range s.ValidatorSet().All(from, to) {
 				if validator.Slashed() {
 					continue
 				}

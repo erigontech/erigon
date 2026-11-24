@@ -84,16 +84,29 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, jus
 			count = validatorCount
 		}
 		startIdx, step := voteSampleBounds(count, f.probabilisticHeadGetter, gen)
-		for validatorIndex := startIdx; validatorIndex < count; validatorIndex += step {
-			message, _ := f.latestMessages.get(validatorIndex)
-			v := auxilliaryState.ValidatorSet().Get(validatorIndex)
-			if !v.Active(justifiedCheckpoint.Epoch) || v.Slashed() {
-				continue
+		if step == 1 {
+			for validatorIndex, v := range auxilliaryState.ValidatorSet().All(startIdx, count) {
+				message, _ := f.latestMessages.get(validatorIndex)
+				if !v.Active(justifiedCheckpoint.Epoch) || v.Slashed() {
+					continue
+				}
+				if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage || f.isUnequivocating(uint64(validatorIndex)) {
+					continue
+				}
+				votes[message.Root] += v.EffectiveBalance()
 			}
-			if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage || f.isUnequivocating(uint64(validatorIndex)) {
-				continue
+		} else {
+			for validatorIndex := startIdx; validatorIndex < count; validatorIndex += step {
+				message, _ := f.latestMessages.get(validatorIndex)
+				v := auxilliaryState.ValidatorSet().Get(validatorIndex)
+				if !v.Active(justifiedCheckpoint.Epoch) || v.Slashed() {
+					continue
+				}
+				if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage || f.isUnequivocating(uint64(validatorIndex)) {
+					continue
+				}
+				votes[message.Root] += v.EffectiveBalance()
 			}
-			votes[message.Root] += v.EffectiveBalance()
 		}
 		boostRoot := f.proposerBoostRoot.Load().(common.Hash)
 		if boostRoot != (common.Hash{}) {

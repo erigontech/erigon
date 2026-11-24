@@ -166,8 +166,8 @@ func (a *ApiHandler) GetLighthouseValidatorInclusionGlobal(w http.ResponseWriter
 
 func (a *ApiHandler) computeLighthouseValidatorInclusionGlobal(epoch, currentActiveGwei, previousActiveGwei uint64, validatorSet *solid.ValidatorSet, currentEpochParticipation, previousEpochParticipation *solid.ParticipationBitList) *LighthouseValidatorInclusionGlobal {
 	var currentEpochTargetAttestingGwei, previousEpochTargetAttestingGwei, previousEpochHeadAttestingGwei uint64
-	for i := 0; i < validatorSet.Length(); i++ {
-		validatorBalance := validatorSet.Get(i).EffectiveBalance()
+	for i, validator := range validatorSet.All(0, validatorSet.Length()) {
+		validatorBalance := validator.EffectiveBalance()
 		prevFlags := cltypes.ParticipationFlags(previousEpochParticipation.Get(i))
 		currFlags := cltypes.ParticipationFlags(currentEpochParticipation.Get(i))
 		if prevFlags.HasFlag(int(a.beaconChainCfg.TimelyHeadFlagIndex)) {

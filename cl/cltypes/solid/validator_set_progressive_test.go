@@ -14,6 +14,7 @@ func TestValidatorSetProgressiveRootMatchesReference(t *testing.T) {
 	for _, count := range []int{0, 1, 5, 21, 85, 341} {
 		t.Run(strconv.Itoa(count), func(t *testing.T) {
 			validators := NewValidatorSet(1_000_000)
+			validators.SetProgressiveHashing(true)
 			for i := range count {
 				validator := make(Validator, validatorSize)
 				validator[0] = byte(i + 1)
@@ -43,7 +44,7 @@ func TestValidatorSetProgressiveRootMatchesReference(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, want, got)
 
-			copied := NewValidatorSet(validators.c)
+			copied := NewValidatorSet(validators.Cap())
 			validators.CopyTo(copied)
 			got, err = copied.HashSSZProgressive()
 			require.NoError(t, err)
@@ -52,27 +53,26 @@ func TestValidatorSetProgressiveRootMatchesReference(t *testing.T) {
 	}
 }
 
-func TestValidatorSetSwitchesMerkleCacheMode(t *testing.T) {
+func TestValidatorSetSwitchesHashingLayout(t *testing.T) {
 	validators := NewValidatorSet(16)
 	validators.Append(make(Validator, validatorSize))
-	_, err := validators.HashSSZ()
+	want, err := validators.HashSSZ()
 	require.NoError(t, err)
-	require.NotNil(t, validators.MerkleTree)
 
 	validators.SetProgressiveHashing(true)
-	require.Nil(t, validators.MerkleTree)
-	_, err = validators.HashSSZProgressive()
-	require.NoError(t, err)
-	require.NotNil(t, validators.progressiveTrees)
+	_, err = validators.HashSSZ()
+	require.ErrorIs(t, err, errValidatorLayout)
+	require.Equal(t, validatorSetProgressiveRootReference(t, validators), mustProgressiveRoot(t, validators))
 
 	validators.SetProgressiveHashing(false)
-	require.Nil(t, validators.progressiveTrees)
-	_, err = validators.HashSSZ()
+	_, err = validators.HashSSZProgressive()
+	require.ErrorIs(t, err, errValidatorLayout)
+	got, err := validators.HashSSZ()
 	require.NoError(t, err)
-	require.NotNil(t, validators.MerkleTree)
+	require.Equal(t, want, got)
 }
 
-func TestValidatorSetCopyToReusesProgressiveTrees(t *testing.T) {
+func TestValidatorSetCopyToSharesChunksAndReusesSlots(t *testing.T) {
 	for _, testCase := range []struct {
 		sourceCount int
 		targetCount int
@@ -92,13 +92,17 @@ func TestValidatorSetCopyToReusesProgressiveTrees(t *testing.T) {
 			target := validatorSetWithCount(testCase.targetCount)
 			_, err = target.HashSSZProgressive()
 			require.NoError(t, err)
-			oldTrees := append([]*merkle_tree.MerkleTree(nil), target.progressiveTrees...)
+			oldSlots := &target.list.chunks[:1][0]
+			slotsFit := len(source.list.chunks) <= cap(target.list.chunks)
 
 			source.CopyTo(target)
 
-			require.Len(t, target.progressiveTrees, len(source.progressiveTrees))
-			for i := range min(len(oldTrees), len(target.progressiveTrees)) {
-				require.Same(t, oldTrees[i], target.progressiveTrees[i])
+			require.Len(t, target.list.chunks, len(source.list.chunks))
+			for i := range source.list.chunks {
+				require.Same(t, source.list.chunks[i].Load(), target.list.chunks[i].Load())
+			}
+			if slotsFit {
+				require.Same(t, oldSlots, &target.list.chunks[:1][0])
 			}
 			require.Equal(t, validatorSetProgressiveRootReference(t, source), mustProgressiveRoot(t, target))
 
@@ -120,7 +124,9 @@ func TestValidatorSetCopyToReusesProgressiveTrees(t *testing.T) {
 
 func TestValidatorSetCopyToSwitchesHashingModes(t *testing.T) {
 	fulu := validatorSetWithCount(5)
+	fulu.SetProgressiveHashing(false)
 	fuluReference := validatorSetWithCount(5)
+	fuluReference.SetProgressiveHashing(false)
 	wantFuluRoot, err := fuluReference.HashSSZ()
 	require.NoError(t, err)
 	_, err = fulu.HashSSZ()
@@ -130,8 +136,8 @@ func TestValidatorSetCopyToSwitchesHashingModes(t *testing.T) {
 	require.NoError(t, err)
 
 	fulu.CopyTo(gloas)
-	require.Nil(t, gloas.progressiveTrees)
-	require.NotNil(t, gloas.MerkleTree)
+	_, err = gloas.HashSSZProgressive()
+	require.ErrorIs(t, err, errValidatorLayout)
 	gotFuluRoot, err := gloas.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, wantFuluRoot, gotFuluRoot)
@@ -140,13 +146,14 @@ func TestValidatorSetCopyToSwitchesHashingModes(t *testing.T) {
 	_, err = gloas.HashSSZProgressive()
 	require.NoError(t, err)
 	gloas.CopyTo(fulu)
-	require.Nil(t, fulu.MerkleTree)
-	require.NotNil(t, fulu.progressiveTrees)
+	_, err = fulu.HashSSZ()
+	require.ErrorIs(t, err, errValidatorLayout)
 	require.Equal(t, validatorSetProgressiveRootReference(t, gloas), mustProgressiveRoot(t, fulu))
 }
 
 func validatorSetWithCount(count int) *ValidatorSet {
 	validators := NewValidatorSet(1_000_000)
+	validators.SetProgressiveHashing(true)
 	for i := range count {
 		validators.Append(validatorForProgressiveTest(byte(i + 1)))
 	}
@@ -167,13 +174,13 @@ func mustProgressiveRoot(t *testing.T, validators *ValidatorSet) [32]byte {
 }
 
 func validatorSetProgressiveRootReference(t *testing.T, validators *ValidatorSet) [32]byte {
-	roots := make([][32]byte, validators.l)
+	roots := make([][32]byte, validators.Length())
 	hashBuffer := make([]byte, 8*32)
 	for i := range roots {
 		require.NoError(t, validators.Get(i).Clone().CopyHashBufferTo(hashBuffer))
 		require.NoError(t, merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, roots[i][:]))
 	}
-	root, err := merkle_tree.ProgressiveListRoot(roots, uint64(validators.l))
+	root, err := merkle_tree.ProgressiveListRoot(roots, uint64(validators.Length()))
 	require.NoError(t, err)
 	return root
 }

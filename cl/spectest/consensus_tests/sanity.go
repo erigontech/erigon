@@ -36,6 +36,7 @@ var SanitySlots = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest
 
 	testState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PreSsz)
 	require.NoError(t, err)
+	freezeSibling(t, testState)
 
 	expectedState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
 	require.NoError(t, err)
@@ -80,6 +81,7 @@ var SanityBlocks = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectes
 
 	var block *cltypes.SignedBeaconBlock
 	for _, block = range blocks {
+		freezeSibling(t, testState)
 		err = transitionStateWithPrecomputedCheck(t, c.Machine, testState, block)
 		if err != nil {
 			break

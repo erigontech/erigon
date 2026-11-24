@@ -44,6 +44,17 @@ func TestNewStateSetValidatorsBuildsPubkeyIndex(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestPubkeyIndexFromBaseWithShorterRegistryHasNoDelta(t *testing.T) {
+	base := newPubkeyIndex(validatorSet(1, 2, 3)).base
+
+	copied := pubkeyIndexFromBase(base, validatorSet(1, 2))
+
+	require.Empty(t, copied.delta)
+	got, ok := copied.get(activeValidatorWithIndex(2).PublicKey())
+	require.True(t, ok)
+	require.Equal(t, uint64(1), got)
+}
+
 func TestPubkeyIndexSurvivesFuluToGloasUpgrade(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)

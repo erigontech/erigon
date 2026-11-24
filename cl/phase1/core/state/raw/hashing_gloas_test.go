@@ -28,7 +28,7 @@ func (l *trackingProgressiveUint64List) SetProgressiveHashing(enabled bool) {
 func TestGloasBeaconStateUsesProgressiveHashing(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	state := New(&cfg)
-	state.version = clparams.GloasVersion
+	state.SetVersion(clparams.GloasVersion)
 
 	require.NoError(t, state.computeDirtyLeaves())
 	emptyListRoot, err := merkle_tree.ProgressiveListRoot(nil, 0)

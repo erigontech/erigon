@@ -15,9 +15,6 @@ func ceil(num, divisor int) int {
 
 const OptimalMaxTreeCacheDepth = 12
 
-// Parallel hashing first outperforms serial hashing consistently at this layer width.
-const parallelLayerMinNodes = 4_096
-
 type MerkleTree struct {
 	computeLeaf func(idx int, out []byte)
 	layers      [][]byte // Flat hash-layers
@@ -134,27 +131,6 @@ func (m *MerkleTree) extendLayer(layerIdx int) {
 
 // ComputeRoot computes the root of the Merkle tree.
 func (m *MerkleTree) ComputeRoot() common.Hash {
-	return m.computeRoot(1)
-}
-
-func BuildFromLeafRoots(
-	leafRoots []byte,
-	leavesCount int,
-	maxTreeCacheDepth int,
-	limit *uint64,
-	workers int,
-	computeLeaf func(int, []byte),
-) (*MerkleTree, common.Hash) {
-	tree := &MerkleTree{}
-	tree.Initialize(leavesCount, maxTreeCacheDepth, func(idx int, out []byte) {
-		copy(out, leafRoots[idx*length.Hash:(idx+1)*length.Hash])
-	}, limit)
-	root := tree.computeRoot(max(1, workers))
-	tree.computeLeaf = computeLeaf
-	return tree, root
-}
-
-func (m *MerkleTree) computeRoot(workers int) common.Hash {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var root common.Hash
@@ -207,7 +183,7 @@ func (m *MerkleTree) computeRoot(workers int) common.Hash {
 
 	// Compute the root
 	for i := 0; i < len(m.layers); i++ {
-		m.computeLayer(i, workers)
+		m.computeLayer(i)
 	}
 	// Find last layer with more than 0 elements
 	for i := 0; i < len(m.layers); i++ {
@@ -282,7 +258,7 @@ func (m *MerkleTree) finishHashing(lastLayerIdx int, root []byte) {
 	}
 }
 
-func (m *MerkleTree) computeLayer(layerIdx, workers int) {
+func (m *MerkleTree) computeLayer(layerIdx int) {
 	currentDivisor := 1 << uint(layerIdx+1)
 	if m.layers[layerIdx] == nil {
 		// find previous layer nodes count and round  to the next power of 2
@@ -303,35 +279,7 @@ func (m *MerkleTree) computeLayer(layerIdx, workers int) {
 		return
 	}
 
-	iterations := ceil(m.leavesCount, currentDivisor)
-	if workers == 1 || iterations < parallelLayerMinNodes {
-		m.computeLayerRange(layerIdx, 0, iterations, &m.hashBuf)
-		return
-	}
-
-	workerCount := min(workers, iterations)
-	chunkSize := max(256, ceil(iterations, workerCount*4))
-	var next atomic.Int64
-	work := func(hashBuf *[64]byte) {
-		for {
-			start := int(next.Add(int64(chunkSize))) - chunkSize
-			if start >= iterations {
-				return
-			}
-			m.computeLayerRange(layerIdx, start, min(start+chunkSize, iterations), hashBuf)
-		}
-	}
-	var wg sync.WaitGroup
-	wg.Add(workerCount - 1)
-	for range workerCount - 1 {
-		go func() {
-			defer wg.Done()
-			var hashBuf [64]byte
-			work(&hashBuf)
-		}()
-	}
-	work(&m.hashBuf)
-	wg.Wait()
+	m.computeLayerRange(layerIdx, 0, ceil(m.leavesCount, currentDivisor), &m.hashBuf)
 }
 
 func (m *MerkleTree) computeLayerRange(layerIdx, start, end int, hashBuf *[64]byte) {

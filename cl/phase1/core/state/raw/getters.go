@@ -119,9 +119,12 @@ func (b *BeaconState) AppendValidator(in solid.Validator) {
 }
 
 func (b *BeaconState) ForEachValidator(fn func(v solid.ValidatorView, idx int, total int) bool) {
-	b.validators.Range(func(index int, value solid.ValidatorView, length int) bool {
-		return fn(value, index, length)
-	})
+	total := b.validators.Length()
+	for index, value := range b.validators.All(0, total) {
+		if !fn(value, index, total) {
+			return
+		}
+	}
 }
 
 func (b *BeaconState) ValidatorForValidatorIndex(index int) (solid.ValidatorView, error) {

@@ -201,6 +201,7 @@ func BuildGenesisState(
 
 	// Compute genesis validators root.
 	var validatorsRoot [32]byte
+	beaconState.Validators().SetProgressiveHashing(version >= clparams.GloasVersion)
 	if version >= clparams.GloasVersion {
 		validatorsRoot, err = beaconState.Validators().HashSSZProgressive()
 	} else {
@@ -209,7 +210,6 @@ func BuildGenesisState(
 	if err != nil {
 		return nil, nil, fmt.Errorf("hash validators: %w", err)
 	}
-	beaconState.Validators().SetProgressiveHashing(version >= clparams.GloasVersion)
 	beaconState.SetGenesisValidatorsRoot(common.Hash(validatorsRoot))
 
 	// Initialize RANDAO mixes with the genesis validators root.

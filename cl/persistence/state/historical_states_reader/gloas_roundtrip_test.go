@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/common"
@@ -900,4 +901,39 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 	require.Equal(t, int((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch), gotPtcWindow.Length())
 	require.Equal(t, uint64(42), gotPtcWindow.Get(2).Get(5), "PtcWindow[2][5] should be 42")
 	require.Equal(t, uint64(0), gotPtcWindow.Get(0).Get(0), "PtcWindow[0][0] should be zero")
+}
+
+func TestReadHistoricalState_GloasValidatorRootUsesProgressiveLayout(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	slot := cfg.SlotsPerEpoch
+	fixture := seedGloasHistoricalState(t, cfg, slot)
+	tx, err := fixture.db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	reconstructed, err := fixture.reader.ReadHistoricalState(context.Background(), tx, slot)
+	require.NoError(t, err)
+	require.NotNil(t, reconstructed)
+	require.Equal(t, clparams.GloasVersion, reconstructed.Version())
+
+	got, err := reconstructed.Validators().HashSSZProgressive()
+	require.NoError(t, err)
+	_, err = reconstructed.Validators().HashSSZ()
+	require.Error(t, err)
+	want, err := merkle_tree.ProgressiveListRoot(validatorLeafRoots(t, reconstructed.Validators()), uint64(reconstructed.ValidatorLength()))
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+	_, err = reconstructed.HashSSZ()
+	require.NoError(t, err)
+}
+
+func validatorLeafRoots(t *testing.T, validators *solid.ValidatorSet) [][32]byte {
+	t.Helper()
+	roots := make([][32]byte, validators.Length())
+	for i := range roots {
+		root, err := validators.Get(i).HashSSZ()
+		require.NoError(t, err)
+		roots[i] = root
+	}
+	return roots
 }

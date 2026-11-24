@@ -44,6 +44,7 @@ func NewEpochProcessing(fn func(s abstract.BeaconState) error) *EpochProcessing 
 func (b *EpochProcessing) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	testState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PreSsz)
 	require.NoError(t, err)
+	freezeSibling(t, testState)
 
 	var expectedError bool
 	expectedState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)

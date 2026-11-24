@@ -17,18 +17,39 @@
 package statechange
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/stretchr/testify/require"
 )
 
 func BenchmarkEpochProcessing(b *testing.B) {
-	base := newRewardsTestState(b, 200_000)
-	upgradeTo(b, base, clparams.FuluVersion)
+	for _, validators := range []int{200_000, 2_400_000} {
+		for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+			b.Run(fmt.Sprintf("%dk/%s", validators/1000, version), func(b *testing.B) {
+				benchmarkEpochProcessing(b, validators, version)
+			})
+		}
+	}
+}
+
+// Every effectiveBalanceWriteStride-th validator drops below the hysteresis band,
+// so each epoch boundary rewrites its effective balance across the whole registry.
+const effectiveBalanceWriteStride = 32
+
+func benchmarkEpochProcessing(b *testing.B, validators int, version clparams.StateVersion) {
+	base := newRewardsTestState(b, validators)
+	upgradeTo(b, base, version)
+	cfg := base.BeaconConfig()
+	for i := 0; i < validators; i += effectiveBalanceWriteStride {
+		require.NoError(b, base.SetValidatorBalance(i, cfg.MinActivationBalance-2*cfg.EffectiveBalanceIncrement))
+	}
 	_, err := base.HashSSZ()
 	require.NoError(b, err)
+	requireEffectiveBalanceWrites(b, base, validators)
 	eligible := state.EligibleValidatorsIndicies(base)
 	flags := GetUnslashedIndiciesSet(base.BeaconConfig(), state.PreviousEpoch(base), base.ValidatorSet(), base.PreviousEpochParticipation())
 
@@ -59,4 +80,41 @@ func BenchmarkEpochProcessing(b *testing.B) {
 			require.NoError(b, err)
 		}
 	})
+
+	b.Run("ProcessEpochAndHashSSZ", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			b.StopTimer()
+			working, err := base.Copy()
+			require.NoError(b, err)
+			cfg := working.BeaconConfig()
+			require.NoError(b, working.SetSlot(3*cfg.SlotsPerEpoch))
+			working.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: state.PreviousEpoch(working)})
+			require.NoError(b, working.InitBeaconState())
+			_, err = working.HashSSZ()
+			require.NoError(b, err)
+			b.StartTimer()
+			require.NoError(b, ProcessEpoch(working))
+			_, err = working.HashSSZ()
+			require.NoError(b, err)
+		}
+	})
+}
+
+func requireEffectiveBalanceWrites(b *testing.B, base *state.CachingBeaconState, validators int) {
+	b.Helper()
+	working, err := base.Copy()
+	require.NoError(b, err)
+	require.NoError(b, ProcessEffectiveBalanceUpdates(working))
+	written := 0
+	for i := range validators {
+		before, err := base.ValidatorEffectiveBalance(i)
+		require.NoError(b, err)
+		after, err := working.ValidatorEffectiveBalance(i)
+		require.NoError(b, err)
+		if before != after {
+			written++
+		}
+	}
+	require.Equal(b, (validators+effectiveBalanceWriteStride-1)/effectiveBalanceWriteStride, written)
 }

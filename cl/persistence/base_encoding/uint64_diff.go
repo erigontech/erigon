@@ -149,10 +149,9 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, oldVal, newVal []byt
 // AppendEffectiveBalances appends each validator's 8-byte effective balance, tightly packed, to dst.
 func AppendEffectiveBalances(dst []byte, validators *solid.ValidatorSet) []byte {
 	dst = slices.Grow(dst, validators.Length()*8)
-	validators.Range(func(_ int, v solid.ValidatorView, _ int) bool {
+	for _, v := range validators.All(0, validators.Length()) {
 		dst = binary.LittleEndian.AppendUint64(dst, v.EffectiveBalance())
-		return true
-	})
+	}
 	return dst
 }
 

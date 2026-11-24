@@ -15,7 +15,7 @@ import (
 func TestGloasSSZRoundTrip(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	s1 := New(&cfg)
-	s1.version = clparams.GloasVersion
+	s1.SetVersion(clparams.GloasVersion)
 
 	// Set some non-zero values to make the test meaningful
 	s1.genesisTime = 12345

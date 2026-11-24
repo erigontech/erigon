@@ -63,8 +63,8 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 
 	// Compute active validators
 	indicies := make([]uint64, 0, b.ValidatorLength())
-	for i := 0; i < b.ValidatorLength(); i++ {
-		if b.ValidatorSet().Get(i).Active(epoch) {
+	for i, validator := range b.ValidatorSet().All(0, b.ValidatorLength()) {
+		if validator.Active(epoch) {
 			indicies = append(indicies, uint64(i))
 		}
 	}

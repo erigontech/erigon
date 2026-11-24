@@ -240,8 +240,7 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 	}
 	epoch := Epoch(b)
 	var total uint64
-	for i := 0; i < b.ValidatorSet().Length(); i++ {
-		validator := b.ValidatorSet().Get(i)
+	for _, validator := range b.ValidatorSet().All(0, b.ValidatorSet().Length()) {
 		if validator.Active(epoch) {
 			total += validator.EffectiveBalance()
 		}
