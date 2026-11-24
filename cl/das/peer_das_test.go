@@ -1611,16 +1611,27 @@ func TestBlobsRecoverWorkersDoNotStarveHealthyRootBehindPersistentUnavailable(t 
 		encodedColumns[i] = encoded
 	}
 
+	headers := make(map[common.Hash]cltypes.BeaconBlockHeader, numOfBlobRecoveryWorkers+1)
+	rootWithProposer := func(proposerIndex uint64) common.Hash {
+		header := *block.SignedBeaconBlockHeader().Header
+		header.ProposerIndex = proposerIndex
+		root, err := header.HashSSZ()
+		require.NoError(t, err)
+		headers[root] = header
+		return root
+	}
+
 	ctrl := gomock.NewController(t)
 	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
 	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), block.Block.Slot, gomock.Any()).Return(existingColumns, nil).AnyTimes()
 	columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	columnStorage.EXPECT().ReadColumnSidecarByColumnIndex(gomock.Any(), block.Block.Slot, gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, _ uint64, _ common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
+		func(_ context.Context, _ uint64, root common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
 			column := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
 			if err := column.DecodeSSZ(encodedColumns[columnIndex], int(clparams.FuluVersion)); err != nil {
 				return nil, err
 			}
+			*column.SignedBlockHeader.Header = headers[root]
 			return column, nil
 		},
 	).AnyTimes()
@@ -1630,13 +1641,13 @@ func TestBlobsRecoverWorkersDoNotStarveHealthyRootBehindPersistentUnavailable(t 
 	baseMetadata, err := newBlobRecoveryMetadata(block, common.Hash{})
 	require.NoError(t, err)
 	for i := range numOfBlobRecoveryWorkers {
-		root := common.Hash{byte(i + 1)}
+		root := rootWithProposer(uint64(i + 1))
 		poisonedRoots[root] = true
 		metadata := *baseMetadata
 		metadata.blockRoot = root
 		requests = append(requests, recoverBlobsRequest{slot: block.Block.Slot, blockRoot: root, metadata: &metadata})
 	}
-	healthyRoot := common.Hash{0xff}
+	healthyRoot := rootWithProposer(uint64(numOfBlobRecoveryWorkers + 1))
 	healthyMetadata := *baseMetadata
 	healthyMetadata.blockRoot = healthyRoot
 	healthyRequest := recoverBlobsRequest{slot: block.Block.Slot, blockRoot: healthyRoot, metadata: &healthyMetadata}
@@ -3075,6 +3086,189 @@ func TestBlobRecoveryDropsReconstructedColumnsWithInvalidKZGProofs(t *testing.T)
 	require.NoError(t, err)
 	require.ElementsMatch(t, slices.Collect(maps.Keys(r.stored)), saved)
 	r.requireNoBlobSidecars(t)
+}
+
+type damagedColumnReadStorage struct {
+	blob_storage.DataColumnStorage
+	columns map[int64]bool
+	damage  func(*cltypes.DataColumnSidecar)
+	mu      sync.Mutex
+	removed []int64
+}
+
+func (s *damagedColumnReadStorage) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
+	sidecar, err := s.DataColumnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, columnIndex)
+	if err == nil && s.columns[columnIndex] {
+		s.damage(sidecar)
+	}
+	return sidecar, err
+}
+
+func (s *damagedColumnReadStorage) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error {
+	s.mu.Lock()
+	s.removed = append(s.removed, columnIndices...)
+	s.mu.Unlock()
+	return s.DataColumnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, columnIndices...)
+}
+
+func (s *damagedColumnReadStorage) removedColumns() []int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.removed)
+}
+
+func (r *recoveryRun) storeColumn(t *testing.T, index uint64) {
+	t.Helper()
+	require.NoError(t, r.d.columnStorage.WriteColumnSidecars(t.Context(), r.root, int64(index), r.columns[index]))
+	r.stored[index] = true
+}
+
+func (r *recoveryRun) requireStoredBlobs(t *testing.T) {
+	t.Helper()
+	stored, found, err := r.d.blobStorage.ReadBlobSidecars(t.Context(), recoveryTestSlot, r.root)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, stored, len(r.blobs))
+	for i := range stored {
+		require.Equal(t, r.blobs[i].KzgCommitment, stored[i].KzgCommitment)
+		require.True(t, r.blobs[i].Blob == stored[i].Blob, "blob %d", i)
+		require.Equal(t, r.blobs[i].SignedBlockHeader, stored[i].SignedBlockHeader, "header of blob %d", i)
+	}
+}
+
+// A stored column that decodes but has the wrong shape is removed and skipped. The other columns still recover the
+// blobs, and the removed column is rebuilt from the recovered matrix and stored again.
+func TestBlobRecoveryRemovesMalformedStoredColumnAndRecovers(t *testing.T) {
+	dropLastRow := func(s *cltypes.DataColumnSidecar) {
+		s.Column.Truncate(s.Column.Len() - 1)
+		s.KzgProofs.Truncate(s.KzgProofs.Len() - 1)
+	}
+	dropLastRowAndCommitment := func(s *cltypes.DataColumnSidecar) {
+		dropLastRow(s)
+		s.KzgCommitments.Truncate(s.KzgCommitments.Len() - 1)
+	}
+	gloasEpoch := recoveryTestSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
+	for _, gloas := range []bool{false, true} {
+		for _, tc := range []struct {
+			name      string
+			malformed int64
+			fuluOnly  bool
+			damage    func(*cltypes.DataColumnSidecar)
+		}{
+			{"fewer proofs than cells", 1, false, func(s *cltypes.DataColumnSidecar) { s.KzgProofs.Truncate(s.KzgProofs.Len() - 1) }},
+			{"fewer cells than proofs", 1, false, func(s *cltypes.DataColumnSidecar) { s.Column.Truncate(s.Column.Len() - 1) }},
+			{"one cell and proof fewer than commitments", 1, false, dropLastRow},
+			{"one cell and proof fewer than commitments in the first column", 0, false, dropLastRow},
+			{"one commitment, cell and proof fewer than the other columns", 1, true, dropLastRowAndCommitment},
+			{"one commitment, cell and proof fewer than the block in the first column", 0, true, dropLastRowAndCommitment},
+			{"signed header that is not the block's", 0, true, func(s *cltypes.DataColumnSidecar) { s.SignedBlockHeader.Header.ProposerIndex++ }},
+			{"no commitments, cells and proofs in the first column", 0, true, func(s *cltypes.DataColumnSidecar) {
+				s.Column.Clear()
+				s.KzgProofs.Clear()
+				s.KzgCommitments.Clear()
+			}},
+		} {
+			if gloas && tc.fuluOnly {
+				continue
+			}
+			t.Run(fmt.Sprintf("gloas=%t/%s", gloas, tc.name), func(t *testing.T) {
+				var storage *damagedColumnReadStorage
+				r := startRecoveryWithPublisher(t, recoveryOptions{
+					caplinConfig: &clparams.CaplinConfig{},
+					supernode:    true,
+					instrument: func(r *recoveryRun) {
+						r.storeColumn(t, r.d.beaconConfig.NumberOfColumns/2)
+						storage = &damagedColumnReadStorage{DataColumnStorage: r.d.columnStorage, columns: map[int64]bool{tc.malformed: true}, damage: tc.damage}
+						r.d.columnStorage = storage
+						if gloas {
+							forkToGloasAt(t, r, gloasEpoch)
+						}
+					},
+				})
+
+				requireBlobRecoveryReleased(t, r.d, r.root)
+				r.requireStoredBlobs(t)
+				call := receiveRecoveredColumnsPublish(t, r.published)
+				require.Equal(t, []int64{tc.malformed}, storage.removedColumns())
+				require.ElementsMatch(t, append(publishedColumnIndices(r.unstoredColumns()), uint64(tc.malformed)), publishedColumnIndices(call.sidecars))
+				saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
+				require.NoError(t, err)
+				require.ElementsMatch(t, publishedColumnIndices(r.columns), saved)
+			})
+		}
+	}
+}
+
+// A stored column that cannot be read is removed and skipped, and the other columns still recover the blobs.
+func TestBlobRecoveryRecoversBlobsWhenAStoredColumnIsMissing(t *testing.T) {
+	const missing = 1
+	var storage *transientColumnSidecarReadStorage
+	r := startRecoveryWithPublisher(t, recoveryOptions{
+		caplinConfig: &clparams.CaplinConfig{},
+		supernode:    true,
+		instrument: func(r *recoveryRun) {
+			r.storeColumn(t, r.d.beaconConfig.NumberOfColumns/2)
+			storage = &transientColumnSidecarReadStorage{DataColumnStorage: r.d.columnStorage, columnIndex: missing, readErr: os.ErrNotExist, failed: make(chan struct{})}
+			r.d.columnStorage = storage
+		},
+	})
+
+	requireBlobRecoveryReleased(t, r.d, r.root)
+	r.requireBlobsRecovered(t)
+	call := receiveRecoveredColumnsPublish(t, r.published)
+	require.Equal(t, int32(1), storage.targetRemoves.Load())
+	require.ElementsMatch(t, append(publishedColumnIndices(r.unstoredColumns()), missing), publishedColumnIndices(call.sidecars))
+	saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
+	require.NoError(t, err)
+	require.ElementsMatch(t, publishedColumnIndices(r.columns), saved)
+}
+
+// With fewer than half of the columns left after the malformed ones are rejected, the worker removes the malformed
+// columns and recovers nothing.
+func TestBlobRecoveryDoesNotRecoverWhenMalformedColumnsLeaveLessThanHalf(t *testing.T) {
+	gloasEpoch := recoveryTestSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
+	for _, gloas := range []bool{false, true} {
+		for _, everyStoredColumn := range []bool{false, true} {
+			t.Run(fmt.Sprintf("gloas=%t/everyStoredColumn=%t", gloas, everyStoredColumn), func(t *testing.T) {
+				var malformed []int64
+				var storage *damagedColumnReadStorage
+				r := startRecoveryWithPublisher(t, recoveryOptions{
+					caplinConfig: &clparams.CaplinConfig{},
+					supernode:    true,
+					instrument: func(r *recoveryRun) {
+						malformed = []int64{1, 2}
+						if everyStoredColumn {
+							malformed = nil
+							for index := range r.stored {
+								malformed = append(malformed, int64(index))
+							}
+						}
+						storage = &damagedColumnReadStorage{
+							DataColumnStorage: r.d.columnStorage,
+							columns:           make(map[int64]bool),
+							damage:            func(s *cltypes.DataColumnSidecar) { s.KzgProofs.Truncate(s.KzgProofs.Len() - 1) },
+						}
+						for _, index := range malformed {
+							storage.columns[index] = true
+						}
+						r.d.columnStorage = storage
+						if gloas {
+							forkToGloasAt(t, r, gloasEpoch)
+						}
+					},
+				})
+
+				requireBlobRecoveryReleased(t, r.d, r.root)
+				r.requireNoBlobSidecars(t)
+				require.ElementsMatch(t, malformed, storage.removedColumns())
+				require.Empty(t, r.published)
+				saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
+				require.NoError(t, err)
+				want := slices.DeleteFunc(slices.Sorted(maps.Keys(r.stored)), func(index uint64) bool { return slices.Contains(malformed, int64(index)) })
+				require.ElementsMatch(t, want, saved)
+			})
+		}
+	}
 }
 
 // cacheMatrixWithInvalidColumn caches a reconstructed matrix whose first row has a bad cell in an unstored column, and
