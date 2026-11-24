@@ -78,7 +78,7 @@ func BenchmarkSeedEmptyRemovalsWithNonzeroNonce(b *testing.B) {
 func benchmarkSeedEmptyRemovals(b *testing.B, bal types.BlockAccessList, wantRemovals int) {
 	b.Helper()
 	require.NoError(b, bal.Validate())
-	base := &countingAccountReader{}
+	base := &emptyReader{}
 	var vm *VersionMap
 	for b.Loop() {
 		b.StopTimer()

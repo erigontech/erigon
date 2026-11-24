@@ -313,8 +313,9 @@ func (vm *VersionMap) HasAmbiguousBaseAccount(eip161Enabled, isAura bool, base S
 	return false, nil
 }
 
-// SeedEmptyRemovals checks for EIP-161 removal at zero-balance writes and at
-// the account's final change, which can be to any field.
+// SeedEmptyRemovals considers only accounts with a balance, nonce, or code write
+// and at least one write after block start. It checks for EIP-161 removal at
+// zero-balance writes and at the account's final write, which may be to storage.
 func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {
 	var stamps []*WriteSet
 	var removals []balRemoval
