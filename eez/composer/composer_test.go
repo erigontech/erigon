@@ -897,6 +897,31 @@ func TestComposerChargesOnlyItsOwnFailures(t *testing.T) {
 	}
 }
 
+// TestComposerReservesRolledOutTransactions: a settlement derivation passed,
+// which an L1 reorg rolls out, takes its transactions' reservations back
+// while its posting is watched again: their nonces are not taken by others.
+func TestComposerReservesRolledOutTransactions(t *testing.T) {
+	node := &rolling{}
+	node.head.Store(1)
+	node.has.Store(true)
+	h := newHarness(t, newTestChain(t, 8), 8, node)
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	sender := addr(0xa)
+	tx := held(sender, 0, Inbound, 1)
+	require.NoError(t, pool.Push(tx, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: pool.PopN(1)})
+	h.c.ledger.MarkSettled(8, common.Hash{0xf})
+	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	h.cursor.Store(4)
+	h.c.RecoverFailed(t.Context())
+	r, ok := h.resolution(8)
+	require.True(t, ok)
+	require.Equal(t, Pending, r, "watched again")
+	require.Equal(t, &NonceError{Expected: 1, OnChain: 0}, pool.Push(held(sender, 0, Inbound, 9), 0))
+}
+
 // TestComposerReleasesSettledTransactions: once derivation passes a
 // settled batch, its held transactions are no longer reserved.
 func TestComposerReleasesSettledTransactions(t *testing.T) {

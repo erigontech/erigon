@@ -227,6 +227,49 @@ func TestHeldPoolRecovery(t *testing.T) {
 	})
 }
 
+// TestHeldPoolReserve: the transactions of a settlement an L1 reorg rolled
+// out take their reservations back, so their nonces stay theirs; a
+// replacement queued since they were released wins, as in recovery.
+func TestHeldPoolReserve(t *testing.T) {
+	t.Run("reserved again", func(t *testing.T) {
+		p := NewHeldPool()
+		sender := addr(0xa)
+		push(t, p, held(sender, 0, Inbound, 1), 0)
+		push(t, p, held(sender, 1, Inbound, 2), 0)
+		settled := p.PopN(2)
+		p.Release(settled)
+		p.Reserve(settled)
+		require.Equal(t, &NonceError{Expected: 2, OnChain: 0}, p.Push(held(sender, 0, Inbound, 9), 0))
+		push(t, p, held(sender, 2, Inbound, 3), 0)
+		p.Release(settled)
+		require.Empty(t, p.inFlight)
+	})
+	t.Run("a queued replacement wins", func(t *testing.T) {
+		p := NewHeldPool()
+		sender, other := addr(0xb), addr(0xc)
+		push(t, p, held(sender, 0, Inbound, 1), 0)
+		push(t, p, held(sender, 1, Inbound, 2), 0)
+		push(t, p, held(other, 0, Inbound, 3), 0)
+		settled := p.PopN(3)
+		p.Release(settled)
+		push(t, p, held(sender, 1, Inbound, 9), 1)
+		p.Reserve(settled)
+		require.Len(t, p.inFlight, 2)
+		require.Contains(t, p.inFlight, common.Hash{1})
+		require.Contains(t, p.inFlight, common.Hash{3})
+		require.Equal(t, []common.Hash{{9}}, hashes(p.PopN(math.MaxInt)))
+	})
+	t.Run("a queued one is not reserved", func(t *testing.T) {
+		p := NewHeldPool()
+		push(t, p, held(addr(0xd), 0, Inbound, 1), 0)
+		drained := p.PopN(1)
+		p.PushFront(drained)
+		p.Reserve(drained)
+		require.Empty(t, p.inFlight)
+		require.Equal(t, 1, p.Len())
+	})
+}
+
 func TestHeldPoolPopN(t *testing.T) {
 	p := NewHeldPool()
 	a, b := addr(0xa), addr(0xb)
@@ -245,10 +288,10 @@ func TestHeldPoolInvariants(t *testing.T) {
 		r := rand.New(rand.NewPCG(seed, 1))
 		p := NewHeldPool()
 		next := byte(1)
-		var drained []*Held
+		var drained, released []*Held
 		live := map[common.Hash]bool{}
 		for range 1 + r.IntN(159) {
-			switch r.IntN(4) {
+			switch r.IntN(5) {
 			case 0:
 				sender := addr(byte(1 + r.IntN(4)))
 				direction := Direction(r.IntN(2))
@@ -270,12 +313,23 @@ func TestHeldPoolInvariants(t *testing.T) {
 			case 2:
 				p.PushFront(drained)
 				drained = nil
-			default:
+			case 3:
 				p.Release(drained)
 				for _, tx := range drained {
 					delete(live, tx.Hash)
 				}
+				released = append(released, drained...)
 				drained = nil
+			default:
+				p.Reserve(released)
+				p.mu.Lock()
+				for _, tx := range released {
+					if _, ok := p.inFlight[tx.Hash]; ok {
+						live[tx.Hash] = true
+					}
+				}
+				p.mu.Unlock()
+				released = nil
 			}
 			p.mu.Lock()
 			seen := map[common.Hash]bool{}

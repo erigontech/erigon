@@ -166,18 +166,7 @@ func (tx *Held) chainKey() chainKey { return chainKey{tx.Sender, tx.Direction} }
 func (p *HeldPool) PushFront(recovered []*Held) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	// The lowest recovered nonce of each chain a queued replacement owns.
-	conflict := map[chainKey]uint64{}
-	for _, tx := range recovered {
-		k := chainKey{tx.Sender, tx.Direction}
-		for _, queued := range p.txs {
-			if queued.chainKey() == k && queued.Nonce == tx.Nonce && queued.Hash != tx.Hash {
-				if n, ok := conflict[k]; !ok || tx.Nonce < n {
-					conflict[k] = tx.Nonce
-				}
-			}
-		}
-	}
+	conflict := p.replaced(recovered)
 	front := make([]*Held, 0, len(recovered))
 	for _, tx := range recovered {
 		delete(p.inFlight, tx.Hash)
@@ -190,6 +179,39 @@ func (p *HeldPool) PushFront(recovered []*Held) {
 		}
 	}
 	p.txs = append(front, p.txs...)
+}
+
+// replaced returns, for each chain of txs a queued replacement owns part
+// of, the lowest nonce of txs it owns.
+func (p *HeldPool) replaced(txs []*Held) map[chainKey]uint64 {
+	conflict := map[chainKey]uint64{}
+	for _, tx := range txs {
+		k := tx.chainKey()
+		for _, queued := range p.txs {
+			if queued.chainKey() == k && queued.Nonce == tx.Nonce && queued.Hash != tx.Hash {
+				if n, ok := conflict[k]; !ok || tx.Nonce < n {
+					conflict[k] = tx.Nonce
+				}
+			}
+		}
+	}
+	return conflict
+}
+
+// Reserve takes back the reservations of txs, released when derivation
+// passed their settlement, which an L1 reorg rolled out: while its posting
+// may land again, their nonces stay theirs. A replacement queued since wins,
+// as in PushFront: that one of txs and the rest of its chain stay released.
+func (p *HeldPool) Reserve(txs []*Held) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	conflict := p.replaced(txs)
+	for _, tx := range txs {
+		if n, ok := conflict[tx.chainKey()]; (ok && tx.Nonce >= n) || p.byHash[tx.Hash] {
+			continue
+		}
+		p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce}
+	}
 }
 
 // Release ends the reservations of txs, whose batch settled.

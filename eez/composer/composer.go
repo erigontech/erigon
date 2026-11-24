@@ -665,12 +665,16 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 }
 
 // rewatch has p, a settlement whose posting left L1, pending again under a
-// new watch, as a posting the node may hold in its pool from L1's head on.
-// The watch waits for that head: its grace counts from it.
+// new watch, as a posting the node may hold in its pool from L1's head on,
+// its transactions reserved again. The watch waits for that head: its grace
+// counts from it.
 func (c *Composer) rewatch(p Posted[*Held]) {
 	watch, ok := c.ledger.Repend(p.Height, p.Post)
 	if !ok {
 		return
+	}
+	if c.pool != nil {
+		c.pool.Reserve(p.Txs)
 	}
 	c.logger.Warn("[eez] settled batch's posting left L1, watching it again", "event", "eez.composer.batch.rolled_out", "to", p.Height, "post", p.Post)
 	c.wg.Go(func() {
