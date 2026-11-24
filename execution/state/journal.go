@@ -69,7 +69,6 @@ const (
 	flagSelfdestructHadIncarnation uint8 = 1 << 2 // kindSelfdestruct: a versioned incarnation write predated the destruct
 	flagSelfdestructHadBalance     uint8 = 1 << 3 // kindSelfdestruct: a versioned balance write predated the destruct
 	flagBalanceDeleted             uint8 = 1 << 4
-	flagSelfdestructPrevCreated    uint8 = 1 << 6 // kindSelfdestruct: createdContract was set
 )
 
 // journalExtra holds the fields needed only by the infrequent entry kinds,
@@ -202,13 +201,10 @@ func (j *journal) resetObjectChange(account accounts.Address, prev *stateObject,
 	j.dirties[account]++
 }
 
-func (j *journal) selfdestructChange(account accounts.Address, prev, prevCreated bool, prevbalance uint256.Int, wasCommitted bool) {
+func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevbalance uint256.Int, wasCommitted bool) {
 	flags := commitFlag(wasCommitted)
 	if prev {
 		flags |= flagSelfdestructPrev
-	}
-	if prevCreated {
-		flags |= flagSelfdestructPrevCreated
 	}
 	j.push(journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, flags: flags})
 	j.dirties[account]++

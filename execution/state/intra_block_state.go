@@ -257,7 +257,6 @@ func New(stateReader StateReader) *IntraBlockState {
 	// materializes a stateObject. Callers that need a shared block-level map rebind
 	// it via SetVersionMap (NewWithVersionMap); the rest get a private empty map.
 	ibs.SetVersionMap(NewVersionMap(nil))
-	ibs.SetTxContext(0, 0)
 	return ibs
 }
 
@@ -271,9 +270,7 @@ func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockSta
 // re-executing a block's txs in order (a later tx may re-create an account an
 // earlier one destroyed, so conflict detection stays on).
 func NewVersionedBlock(stateReader StateReader) *IntraBlockState {
-	ibs := NewWithVersionMap(stateReader, NewVersionMap(nil))
-	ibs.SetTxContext(0, 0)
-	return ibs
+	return New(stateReader)
 }
 
 // NewVersionedCall is NewVersionedBlock for a single call, with cross-tx conflict
@@ -402,18 +399,15 @@ type statePool interface {
 
 var ibsPool statePool = &sync.Pool{}
 
-// NewPooled is NewVersionedCall over an IntraBlockState reused from an earlier
-// call, whose maps keep their capacity. Release it with ReleasePooled.
+// NewPooled is New over an IntraBlockState reused from an earlier call, whose
+// maps keep their capacity. Release it with ReleasePooled.
 func NewPooled(stateReader StateReader) *IntraBlockState {
 	ibs, ok := ibsPool.Get().(*IntraBlockState)
 	if !ok {
-		return NewVersionedCall(stateReader)
+		return New(stateReader)
 	}
 	ibs.stateReader = stateReader
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
-	ibs.SetVersionMap(NewVersionMap(nil))
-	ibs.SetTxContext(0, 0)
-	ibs.SetNoConflictDetection()
 	return ibs
 }
 
@@ -1603,7 +1597,7 @@ func (ibs *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64, reason
 	}
 
 	stateObject.SetNonce(nonce, wasCommited, reason)
-	ibs.recordWriteNonce(addr, stateObject.Nonce(), reason)
+	ibs.recordWriteNonce(addr, stateObject.Nonce())
 	return nil
 }
 
@@ -1642,7 +1636,7 @@ func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uin
 			ibs.tracingHooks.OnNonceChange(addr, prev, nonce)
 		}
 	}
-	ibs.recordWriteNonce(addr, nonce, reason)
+	ibs.recordWriteNonce(addr, nonce)
 	return nil
 }
 
@@ -2039,7 +2033,7 @@ func (ibs *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 		return false, nil
 	}
 	prevBalance := stateObject.Balance()
-	ibs.journal.selfdestructChange(addr, stateObject.selfdestructed, stateObject.createdContract, prevBalance, !ibs.hasWrite(addr, SelfDestructPath, accounts.NilKey))
+	ibs.journal.selfdestructChange(addr, stateObject.selfdestructed, prevBalance, !ibs.hasWrite(addr, SelfDestructPath, accounts.NilKey))
 
 	if !preserveBalance && ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
 		ibs.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
@@ -2394,7 +2388,7 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		ibs.recordWriteAddress(addr, &newobj.data)
 		ibs.recordWriteCodeHash(addr, newobj.data.CodeHash)
 		if previous != nil {
-			ibs.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
+			ibs.recordWriteNonce(addr, newobj.data.Nonce)
 		}
 	}
 	return newobj
@@ -2414,7 +2408,7 @@ func (ibs *IntraBlockState) createVersioned(addr accounts.Address, hadPrevious b
 	ibs.journal.resetObjectChange(addr, nil, prevWrites)
 	ibs.recordWriteAddress(addr, &account)
 	ibs.recordWriteCodeHash(addr, account.CodeHash)
-	ibs.recordWriteNonce(addr, account.Nonce, tracing.NonceChangeNewContract)
+	ibs.recordWriteNonce(addr, account.Nonce)
 }
 
 // recordVersionedCreateCells records the version-map cells a fresh account's creation
@@ -2429,7 +2423,7 @@ func (ibs *IntraBlockState) recordVersionedCreateCells(addr accounts.Address, ac
 	ibs.recordWriteAddress(addr, account)
 	ibs.recordWriteCodeHash(addr, account.CodeHash)
 	if _, res, ok := ibs.versionMap.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
-		ibs.recordWriteNonce(addr, account.Nonce, tracing.NonceChangeNewContract)
+		ibs.recordWriteNonce(addr, account.Nonce)
 	}
 	ibs.recordWriteBalance(addr, account.Balance)
 }
@@ -3177,8 +3171,7 @@ func (ibs *IntraBlockState) ResetLogs() {
 
 // EndTransaction is the versioned per-transaction boundary: it clears the
 // journal and refund so a later transaction cannot revert this one's changes.
-// Writes already live in the version map (taken via FinalizedWrites); no
-// StateWriter is involved.
+// The writes stay in the tx write-set; the caller takes them with FinalizedWrites.
 func (ibs *IntraBlockState) EndTransaction() {
 	ibs.clearJournalAndRefund()
 }
@@ -3419,7 +3412,7 @@ func (ibs *IntraBlockState) recordWriteBalanceDeleted(addr accounts.Address) {
 	traceWrite(ibs, vw)
 }
 
-func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64, reason tracing.NonceChangeReason) {
+func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64) {
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3427,12 +3420,11 @@ func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64, 
 	if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
-		vw.NonceReason = reason
 		traceWrite(ibs, vw)
 		return
 	}
 	vw := ibs.versionedWrites.newVWNonce()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: ibs.Version(), NonceReason: reason}
+	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetNonce(addr, vw)
 	traceWrite(ibs, vw)

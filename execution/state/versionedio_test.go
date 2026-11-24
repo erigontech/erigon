@@ -679,15 +679,6 @@ func TestStripBalanceWrite_NilAddress(t *testing.T) {
 	require.False(t, increase)
 }
 
-// These verify what reads the IBS produces when applying different write types.
-// The direct finalize path must produce equivalent reads for BAL correctness.
-//
-// Key insight: the per-field account refresh (the source of BalancePath reads) only
-// runs for accounts that ALREADY EXIST in the stateReader or version map.
-// For newly-created accounts, GetOrNewStateObject calls createObject which
-// skips the per-field account refresh. This is the normal case for accounts born
-// in the current block (e.g. contract CREATE).
-
 // accountStateReader returns pre-configured accounts for specific addresses.
 // Used to simulate accounts that exist in the DB before execution.
 type accountStateReader struct {
@@ -721,12 +712,6 @@ func recordTouch(io *VersionedIO, txIndex int, addr accounts.Address, revertable
 	}
 	rs.access[addr] = accessOptions{revertable: revertable}
 	io.RecordReads(Version{TxIndex: txIndex}, rs)
-}
-
-// hasRead reports whether the ReadSet has a read for the given address and path.
-func hasRead(reads ReadSet, addr accounts.Address, path AccountPath) bool {
-	_, ok := reads.getHeader(addr, path, accounts.NilKey)
-	return ok
 }
 
 // When a prior tx wrote a sub-field (e.g. BalancePath via AddBalance) without

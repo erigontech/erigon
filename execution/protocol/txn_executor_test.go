@@ -998,7 +998,7 @@ func TestApplyTransactionTxEndV2(t *testing.T) {
 			evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
 			var gasUsed GasUsed
 			receipt, err := applyTransaction(chain.AllProtocolChanges, nil, NewGasPool(blockGasLimit, 0), ibs,
-				state.NewNoopWriter(), &types.Header{GasLimit: blockGasLimit}, txn, &gasUsed, evm, cfg)
+				&types.Header{GasLimit: blockGasLimit}, txn, &gasUsed, evm, cfg)
 			require.NoError(t, err)
 			require.Equal(t, 1, calls)
 			require.NoError(t, completionErr)
@@ -1833,7 +1833,7 @@ func TestApplyTransactionTxEndSeesTxWrites(t *testing.T) {
 			}}
 			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, BaseFee: uint256.NewInt(0)}
 			_, err := ApplyTransaction(cfg, func(uint64) (common.Hash, error) { return common.Hash{}, nil }, nil, coinbase,
-				NewGasPool(header.GasLimit, 0), ibs, state.NewNoopWriter(), header, txn, &GasUsed{}, vm.Config{Tracer: hooks, NoBaseFee: true})
+				NewGasPool(header.GasLimit, 0), ibs, header, txn, &GasUsed{}, vm.Config{Tracer: hooks, NoBaseFee: true})
 			require.NoError(t, err)
 			require.Equal(t, uint64(7), balance.Uint64())
 			require.Equal(t, uint64(1), nonce)
