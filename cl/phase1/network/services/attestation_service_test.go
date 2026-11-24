@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"math"
 	"slices"
 	"sync"
 	"testing"
@@ -1675,5 +1676,58 @@ func TestAttestationHandsThePoolTheSignatureTheBatchVerifierDecompressed(t *test
 		require.True(t, bytes.Equal(decompressed.Bytes(), sig.Bytes()))
 	case <-time.After(5 * time.Second):
 		t.Fatal("attestation was not added to the pool")
+	}
+}
+
+func (t *attestationTestSuite) TestAttestationGossipSlotWindow() {
+	const propagationRange = 32
+	for _, tc := range []struct {
+		name        string
+		denebEpoch  uint64
+		slot        uint64
+		currentSlot uint64
+		inWindow    bool
+	}{
+		{name: "capella within range", denebEpoch: math.MaxUint64, slot: 288, currentSlot: 320, inWindow: true},
+		{name: "capella previous epoch beyond range", denebEpoch: math.MaxUint64, slot: 288, currentSlot: 351},
+		{name: "capella future slot", denebEpoch: math.MaxUint64, slot: 288, currentSlot: 287},
+		{name: "deneb previous epoch beyond range", denebEpoch: 0, slot: 288, currentSlot: 351, inWindow: true},
+		{name: "deneb current epoch", denebEpoch: 0, slot: 320, currentSlot: 351, inWindow: true},
+		{name: "deneb two epochs old", denebEpoch: 0, slot: 319, currentSlot: 352},
+		{name: "deneb future slot", denebEpoch: 0, slot: 288, currentSlot: 287},
+	} {
+		t.Run(tc.name, func() {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.AltairForkEpoch = 0
+			cfg.BellatrixForkEpoch = 0
+			cfg.CapellaForkEpoch = 0
+			cfg.DenebForkEpoch = tc.denebEpoch
+			cfg.ElectraForkEpoch = cfg.FarFutureEpoch
+			cfg.FuluForkEpoch = cfg.FarFutureEpoch
+			cfg.GloasForkEpoch = cfg.FarFutureEpoch
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			verifier := NewBatchSignatureVerifier(ctx, nil)
+			service := NewAttestationService(ctx, t.mockForkChoice, t.aggregationPool, t.ethClock, t.syncedData, &cfg, &clparams.NetworkConfig{AttestationPropagationSlotRange: propagationRange}, t.emitters, verifier)
+
+			epoch := tc.slot / cfg.SlotsPerEpoch
+			t.ethClock.EXPECT().GetEpochAtSlot(tc.slot).Return(epoch).Times(1)
+			t.ethClock.EXPECT().GetCurrentSlot().Return(tc.currentSlot).Times(1)
+			data := *attData
+			data.Slot = tc.slot
+			data.Target.Epoch = epoch
+			attestation := *att
+			attestation.Data = &data
+
+			err := service.ProcessMessage(ctx, common.NewUint64(1), &AttestationForGossip{Attestation: &attestation, ImmediateProcess: true})
+
+			t.Require().Error(err)
+			if tc.inWindow {
+				t.Require().NotContains(err.Error(), "not in propagation range")
+				return
+			}
+			t.Require().ErrorIs(err, ErrIgnore)
+			t.Require().ErrorContains(err, "not in propagation range")
+		})
 	}
 }
