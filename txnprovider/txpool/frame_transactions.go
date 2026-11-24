@@ -326,7 +326,8 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns []txnAdmission, 
 			}
 		}
 		if result.blocker != nil || result.reason == txpoolcfg.FrameValidationUnavailable {
-			if result.reason == txpoolcfg.DuplicateHash && p.all.senderIDFrameTxn[txn.SenderID] == result.blocker {
+			blockerChanged := result.blocker != nil && p.all.senderIDFrameTxn[txn.SenderID] != result.blocker
+			if result.reason == txpoolcfg.DuplicateHash && !blockerChanged {
 				a.reason = txpoolcfg.DuplicateHash
 				continue
 			}
@@ -340,7 +341,7 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns []txnAdmission, 
 				a.reason = txpoolcfg.NonceTooLow
 				continue
 			}
-			if result.blocker != nil && ctx.Err() == nil && p.all.senderIDFrameTxn[txn.SenderID] != result.blocker {
+			if blockerChanged && ctx.Err() == nil {
 				return errFrameStateChanged
 			}
 			result.reason = txpoolcfg.FrameValidationUnavailable

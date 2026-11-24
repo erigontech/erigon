@@ -2098,17 +2098,17 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			p.notifyPendingTxns(announcements)
 			return nil
 		})
-		if errors.Is(err, errPreparationRequired) {
+		switch {
+		case errors.Is(err, errPreparationRequired):
 			p.prepareCandidates(&batch)
-			continue
-		}
-		if !errors.Is(err, errFrameStateChanged) {
+		case errors.Is(err, errFrameStateChanged):
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			needFrameSimulation = true
+		default:
 			return reasons, err
 		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		needFrameSimulation = true
 	}
 }
 
