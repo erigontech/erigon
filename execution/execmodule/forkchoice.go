@@ -1292,9 +1292,10 @@ func (e *ExecModule) yieldBuildBelow(ctx context.Context, head *types.Header) er
 	return nil
 }
 
-// canonicaliseAcceptedBelow first makes canonical the highest block below head that this node sealed and accepted:
-// its transactions and state live only in its pre-exec generation, which the fork choice merges only when that block
-// is the head, so the blocks above it cannot be executed until it is. done reports a result to return as is.
+// canonicaliseAcceptedBelow first makes canonical the highest block below head that this node sealed, accepting it if
+// newPayload has not: its transactions and state live only in its pre-exec generation, which the fork choice merges
+// only when that block is the head, so the blocks above it cannot be executed until it is. done reports a result to
+// return as is.
 func (e *ExecModule) canonicaliseAcceptedBelow(ctx context.Context, head *types.Header, safeHash, finalizedHash common.Hash) (ForkChoiceResult, bool, error) {
 	current, err := e.CurrentHeader(ctx)
 	if err != nil || current == nil {
@@ -1310,8 +1311,9 @@ func (e *ExecModule) canonicaliseAcceptedBelow(ctx context.Context, head *types.
 		if next != nil && next.Number.Uint64() > current.Number.Uint64() {
 			e.pendingBlockMu.Lock()
 			_, ok := e.acceptedSealed[next.Hash()]
+			sealed := e.sealedByHash[next.Hash()]
 			e.pendingBlockMu.Unlock()
-			if ok {
+			if ok || sealed != nil {
 				accepted = next
 			}
 		}
@@ -1319,6 +1321,9 @@ func (e *ExecModule) canonicaliseAcceptedBelow(ctx context.Context, head *types.
 	}
 	if accepted == nil {
 		return ForkChoiceResult{}, false, nil
+	}
+	if busy, err := e.acceptSealed(ctx, accepted); busy || err != nil {
+		return ForkChoiceResult{Status: ExecutionStatusBusy}, true, err
 	}
 	res, err := e.UpdateForkChoice(ctx, accepted.Hash(), safeHash, finalizedHash)
 	if err != nil || res.Status != ExecutionStatusSuccess {
