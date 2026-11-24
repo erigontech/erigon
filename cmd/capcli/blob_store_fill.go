@@ -319,7 +319,7 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		if slot < b.windows[i].from.Load() {
 			continue
 		}
-		lastErr = blobfetch.FetchAndStore(ctx, store, endpoint, root, block, nil)
+		lastErr = blobfetch.FetchAndStore(ctx, store, endpoint, root, block, readBlinded(db, blocks, slot), nil)
 		if err := store.err(); err != nil {
 			return fmt.Errorf("blob store write failed, stopping: %w", err)
 		}
@@ -368,6 +368,16 @@ func readSlot(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapsho
 	return root, block, err
 }
 
+func readBlinded(db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, slot uint64) func(context.Context) (*cltypes.SignedBlindedBeaconBlock, error) {
+	return func(ctx context.Context) (blinded *cltypes.SignedBlindedBeaconBlock, err error) {
+		err = db.View(ctx, func(tx kv.Tx) (err error) {
+			blinded, err = blocks.ReadBlindedBlockBySlot(ctx, tx, slot)
+			return err
+		})
+		return blinded, err
+	}
+}
+
 func expectedBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, root common.Hash, block *cltypes.SignedBeaconBlock) (n int, unresolved bool, err error) {
 	err = db.View(ctx, func(tx kv.Tx) error {
 		n, unresolved, err = blobfetch.ExpectedBlobs(ctx, tx, blocks, root, block)
@@ -396,7 +406,7 @@ func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, block
 			if served, ok := answers[root]; ok {
 				return served
 			}
-			sidecars, err := blobfetch.Retrieve(ctx, b.Endpoints[i], root, block)
+			sidecars, err := blobfetch.Retrieve(ctx, b.Endpoints[i], root, block, readBlinded(db, blocks, block.Block.Slot))
 			if err == nil && len(sidecars) == 0 {
 				err = blobfetch.ErrNoSidecars
 			}

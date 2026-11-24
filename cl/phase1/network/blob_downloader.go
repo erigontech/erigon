@@ -402,7 +402,7 @@ func (b *BlobHistoryDownloader) fetchFromEndpoint(item incompleteBlock, record f
 		if !b.endpointUsable(i, slot) {
 			continue
 		}
-		err := blobfetch.FetchAndStore(b.ctx, b.blobStorage, endpoint, item.root, item.block, b.endpointCPU)
+		err := blobfetch.FetchAndStore(b.ctx, b.blobStorage, endpoint, item.root, item.block, b.readBlindedBlock(slot), b.endpointCPU)
 		b.recordEndpointHealth(i, err)
 		record(endpointResult{endpoint: i, item: item, err: err})
 		if err == nil {
@@ -411,6 +411,17 @@ func (b *BlobHistoryDownloader) fetchFromEndpoint(item incompleteBlock, record f
 		b.logger.Debug("[BlobHistoryDownloader] Endpoint did not fill block", "slot", slot, "endpoint", blobfetch.RedactEndpoint(endpoint), "err", err)
 	}
 	return false
+}
+
+func (b *BlobHistoryDownloader) readBlindedBlock(slot uint64) func(context.Context) (*cltypes.SignedBlindedBeaconBlock, error) {
+	return func(ctx context.Context) (*cltypes.SignedBlindedBeaconBlock, error) {
+		tx, err := b.indiciesDB.BeginRo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		return b.blockReader.ReadBlindedBlockBySlot(ctx, tx, slot)
+	}
 }
 
 // SetHeadSlot sets the head slot to download from (should be currentSlot + 1)

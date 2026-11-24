@@ -422,6 +422,87 @@ func TestBeaconSnapshotReaderPropagatesUnavailableExecutionBody(t *testing.T) {
 	}))
 }
 
+func blockWithPayload(t *testing.T, version clparams.StateVersion, slot uint64) *cltypes.SignedBeaconBlock {
+	t.Helper()
+	cfg := &clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(cfg, version)
+	block.Signature = common.Bytes96{1}
+	block.Block.Slot = slot
+	payload := block.Block.Body.ExecutionPayload
+	payload.BlockHash = common.Hash{2}
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1, 2, 3}, {4}})
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	payload.Withdrawals.Append(&cltypes.Withdrawal{Index: 7, Amount: 9})
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{2})
+	return block
+}
+
+func TestReadBlindedBlockBySlotKeepsTheBodyRootOfTheStoredBlock(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	const snapshotSlot, dbSlot = 10, limit + 10
+	versions := []clparams.StateVersion{clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion}
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	snapshotWords := map[uint64][]byte{}
+	for i, version := range versions {
+		snapshotWords[snapshotSlot+uint64(i)] = blockSnapshotWord(t, blockWithPayload(t, version, snapshotSlot+uint64(i)))
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			return beacon_indicies.WriteBeaconBlockAndIndicies(tx, blockWithPayload(t, version, dbSlot+uint64(i)), true)
+		}))
+	}
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true, func(slot uint64) []byte { return snapshotWords[slot] })
+	snapshots := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+	reader := NewBeaconSnapshotReader(snapshots, unavailableExecutionBlockReader{}, &clparams.MainnetBeaconConfig)
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		for i, version := range versions {
+			for name, slot := range map[string]uint64{"snapshot": snapshotSlot + uint64(i), "db": dbSlot + uint64(i)} {
+				want := blockWithPayload(t, version, slot).SignedBeaconBlockHeader()
+
+				blinded, err := reader.ReadBlindedBlockBySlot(t.Context(), tx, slot)
+				require.NoError(t, err, "%s %s", version, name)
+				require.NotNil(t, blinded, "%s %s", version, name)
+				require.Equal(t, want, blinded.SignedBeaconBlockHeader(), "%s %s", version, name)
+
+				promoted, err := reader.ReadBeaconBlockBodyBySlot(t.Context(), tx, slot)
+				require.NoError(t, err)
+				require.NotEqual(t, want.Header.BodyRoot, promoted.SignedBeaconBlockHeader().Header.BodyRoot,
+					"the promoted block must not hash to the stored body root, or this test proves nothing")
+			}
+		}
+		return nil
+	}))
+}
+
+func TestReadBlindedBlockBySlotWithoutABlindedForm(t *testing.T) {
+	const slot = snaptype.CaplinMergeLimit + 10
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	gloas := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	gloas.Block.Slot = slot
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, gloas, true)
+	}))
+	snapshots := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+	reader := NewBeaconSnapshotReader(snapshots, unavailableExecutionBlockReader{}, &clparams.MainnetBeaconConfig)
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		blinded, err := reader.ReadBlindedBlockBySlot(t.Context(), tx, slot)
+		require.ErrorIs(t, err, cltypes.ErrGloasCannotBlind)
+		require.Nil(t, blinded)
+
+		blinded, err = reader.ReadBlindedBlockBySlot(t.Context(), tx, slot+1)
+		require.NoError(t, err)
+		require.Nil(t, blinded, "a slot with no block")
+		return nil
+	}))
+}
+
 func blockSnapshotWord(t *testing.T, block *cltypes.SignedBeaconBlock) []byte {
 	t.Helper()
 	var b bytes.Buffer

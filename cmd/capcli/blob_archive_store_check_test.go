@@ -49,6 +49,13 @@ func (r *storeCheckReader) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.Tx,
 	return r.blocks[slot], nil
 }
 
+func (r *storeCheckReader) ReadBlindedBlockBySlot(_ context.Context, _ kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error) {
+	if r.blocks[slot] == nil {
+		return nil, nil
+	}
+	return r.blocks[slot].Blinded()
+}
+
 // storeCheckFixture builds a slot whose sidecars are stored under its canonical root, with the
 // indexed root deliberately different from the block's own hash — which is what a payload-stripped
 // read produces.

@@ -146,26 +146,56 @@ func RetrieveBlobSidecars(ctx context.Context, endpoint string, root common.Hash
 	return sidecars, nil
 }
 
-// Retrieve fetches the sidecars of the block at root: blob_sidecars before Gloas, and from Gloas on the blobs, built
-// into sidecars with an empty proof that Store recomputes.
-func Retrieve(ctx context.Context, endpoint string, root common.Hash, block *cltypes.SignedBeaconBlock) ([]*cltypes.BlobSidecar, error) {
-	if block.Version() < clparams.GloasVersion {
-		return RetrieveBlobSidecars(ctx, endpoint, root, BlobCount(block))
+// Retrieve fetches the sidecars of the block at root: blob_sidecars before Gloas, and the blobs from Gloas on, built
+// into sidecars with an empty proof that Store recomputes. Before Gloas an endpoint that does not serve blob_sidecars
+// is asked for the blobs instead, and blinded loads the block as stored, whose body root is the real one, to build the
+// header and inclusion proof of each sidecar. blinded is called only then.
+func Retrieve(ctx context.Context, endpoint string, root common.Hash, block *cltypes.SignedBeaconBlock, blinded func(context.Context) (*cltypes.SignedBlindedBeaconBlock, error)) ([]*cltypes.BlobSidecar, error) {
+	preGloas := block.Version() < clparams.GloasVersion
+	if preGloas {
+		sidecars, err := RetrieveBlobSidecars(ctx, endpoint, root, BlobCount(block))
+		// A client that removed the deprecated blob_sidecars API answers 410 Gone for every block.
+		removed := errors.Is(err, StatusError(http.StatusGone))
+		if len(sidecars) > 0 || err != nil && !NotServed(err) && !removed {
+			return sidecars, err
+		}
 	}
 	commitments := block.Block.Body.GetBlobKzgCommitments()
 	data, err := getBeaconData(ctx, endpoint, fmt.Sprintf("eth/v1/beacon/blobs/0x%x", root), BlobCount(block))
-	if err != nil {
+	if err != nil || len(data) == 0 {
 		return nil, err
 	}
-	header := block.SignedBeaconBlockHeader()
+	var header *cltypes.SignedBeaconBlockHeader
+	var blindedBody *cltypes.BlindedBeaconBody
+	if preGloas {
+		blindedBlock, err := blinded(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if blindedBlock == nil {
+			return nil, errors.New("the stored block is missing")
+		}
+		header, blindedBody = blindedBlock.SignedBeaconBlockHeader(), blindedBlock.Block.Body
+	} else {
+		header = block.SignedBeaconBlockHeader()
+	}
 	sidecars := make([]*cltypes.BlobSidecar, len(data))
 	for i, raw := range data {
 		var blob cltypes.Blob
 		if err := blob.UnmarshalJSON(raw); err != nil {
 			return nil, fmt.Errorf("blob retrieval decode failed %w", err)
 		}
-		sidecars[i] = cltypes.NewBlobSidecar(uint64(i), &blob, common.Bytes48(*commitments.Get(i)), common.Bytes48(goethkzg.PointAtInfinity), header,
-			solid.NewHashVector(cltypes.CommitmentBranchSize))
+		inclusionProof := solid.NewHashVector(cltypes.CommitmentBranchSize)
+		if blindedBody != nil {
+			branch, err := blindedBody.KzgCommitmentMerkleProof(i)
+			if err != nil {
+				return nil, err
+			}
+			for j, h := range branch {
+				inclusionProof.Set(j, h)
+			}
+		}
+		sidecars[i] = cltypes.NewBlobSidecar(uint64(i), &blob, common.Bytes48(*commitments.Get(i)), common.Bytes48(goethkzg.PointAtInfinity), header, inclusionProof)
 	}
 	return sidecars, nil
 }
@@ -241,9 +271,9 @@ func getBeaconData(ctx context.Context, endpoint, path string, maxEntries int) (
 // FetchAndStore fetches the sidecars of the block at the canonical root from endpoint, verifies them and stores them.
 // With a non-nil cpu, the missing proofs of the block are computed in parallel, one budget slot each; with nil they
 // are computed one after another on the caller's goroutine.
-func FetchAndStore(ctx context.Context, store blob_storage.BlobStorage, endpoint string, root common.Hash, block *cltypes.SignedBeaconBlock, cpu *semaphore.Weighted) error {
+func FetchAndStore(ctx context.Context, store blob_storage.BlobStorage, endpoint string, root common.Hash, block *cltypes.SignedBeaconBlock, blinded func(context.Context) (*cltypes.SignedBlindedBeaconBlock, error), cpu *semaphore.Weighted) error {
 	commitments := block.Block.Body.GetBlobKzgCommitments()
-	sidecars, err := Retrieve(ctx, endpoint, root, block)
+	sidecars, err := Retrieve(ctx, endpoint, root, block, blinded)
 	if err != nil {
 		return err
 	}

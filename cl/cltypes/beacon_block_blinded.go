@@ -526,6 +526,17 @@ func (b *BlindedBeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
 	return merkle_tree.MerkleProof(4, 9, b.getSchema(false)...)
 }
 
+func (b *BlindedBeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
+	if b.BlobKzgCommitments == nil || index >= b.BlobKzgCommitments.Len() {
+		return nil, errors.New("index out of range")
+	}
+	kzgCommitmentsProof, err := merkle_tree.MerkleProof(4, 11, b.getSchema(false)...)
+	if err != nil {
+		return nil, err
+	}
+	return append(b.BlobKzgCommitments.ElementProof(index), kzgCommitmentsProof...), nil
+}
+
 func (b *BlindedBeaconBody) GetPayloadHeader() (*Eth1Header, error) {
 	return b.ExecutionPayload, nil
 }

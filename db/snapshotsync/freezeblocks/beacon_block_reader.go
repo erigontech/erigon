@@ -74,6 +74,10 @@ type BeaconSnapshotReader interface {
 	// withdrawals). Works for both pre- and post-GLOAS blocks. Use ReadBlockBySlot when full EL
 	// data is needed.
 	ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error)
+	// ReadBlindedBlockBySlot reads the canonical block at slot as stored, before it is promoted with empty
+	// execution data, so hashing it yields the block's real roots. It returns nil if there is no block and an
+	// error for a Gloas block, which is stored full.
+	ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error)
 
 	FrozenSlots() uint64
 	// CacheBlockBody caches a recently produced block's execution body so it can
@@ -162,6 +166,18 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 }
 
 func (r *beaconSnapshotReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	return readStoredBlockBySlot(r, tx, slot, func(reader io.Reader) (*cltypes.SignedBeaconBlock, error) {
+		return snapshot_format.ReadBeaconBlockBodyFromSnapshot(reader, r.cfg)
+	})
+}
+
+func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error) {
+	return readStoredBlockBySlot(r, tx, slot, func(reader io.Reader) (*cltypes.SignedBlindedBeaconBlock, error) {
+		return snapshot_format.ReadBlindedBlockFromSnapshot(reader, r.cfg)
+	})
+}
+
+func readStoredBlockBySlot[T any](r *beaconSnapshotReader, tx kv.Tx, slot uint64, decode func(io.Reader) (*T, error)) (*T, error) {
 	view := r.sn.View()
 	defer view.Close()
 
@@ -217,7 +233,7 @@ func (r *beaconSnapshotReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx
 	defer putZstdReader(reader)
 
 	// Use pooled readers to avoid allocations.
-	return snapshot_format.ReadBeaconBlockBodyFromSnapshot(reader, r.cfg)
+	return decode(reader)
 }
 
 func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, root common.Hash) (*cltypes.SignedBeaconBlock, error) {

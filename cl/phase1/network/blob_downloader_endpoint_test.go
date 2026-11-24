@@ -53,12 +53,15 @@ func newEndpointBlock(t *testing.T, slot uint64) endpointBlock {
 	return endpointBlock{block: block, root: root, sidecars: sidecars}
 }
 
-// blobEndpoint serves the sidecars of served and answers 400, as a pruned beacon node does, for every other root.
+// blobEndpoint serves the sidecars of served and answers 400, as a pruned beacon node does, for every other root. Its
+// request count leaves out the blobs requests, which a fetch makes only after a blob_sidecars request was not served.
 func blobEndpoint(t *testing.T, served ...endpointBlock) (string, *atomic.Int32) {
 	t.Helper()
 	requests := &atomic.Int32{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
+		if !strings.Contains(r.URL.Path, "/eth/v1/beacon/blobs/") {
+			requests.Add(1)
+		}
 		id := common.HexToHash(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:])
 		for _, b := range served {
 			if b.root == id {
@@ -128,6 +131,31 @@ func TestBlobHistoryDownloaderFillsABlockFromTheEndpoint(t *testing.T) {
 	require.True(t, downloader.processBatch([]incompleteBlock{{block: b.block, root: b.root}}))
 	require.Equal(t, 1, storedSidecars(t, downloader, b))
 	require.Equal(t, int32(1), requests.Load())
+	require.Zero(t, peer.requests)
+}
+
+func TestBlobHistoryDownloaderFillsABlockFromTheBlobsOfTheEndpoint(t *testing.T) {
+	b := newEndpointBlock(t, 100)
+	blobs := make([]*cltypes.Blob, len(b.sidecars))
+	for i, sidecar := range b.sidecars {
+		blobs[i] = &sidecar.Blob
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/eth/v1/beacon/blobs/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if err := json.NewEncoder(w).Encode(map[string]any{"data": blobs}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	peer := &countingBlobPeerClient{}
+	downloader := newEndpointDownloader(t, []string{srv.URL}, 2, peer)
+	downloader.blockReader = &boundaryBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{100: b.block}}
+
+	require.True(t, downloader.processBatch([]incompleteBlock{{block: b.block, root: b.root}}))
+	require.Equal(t, 1, storedSidecars(t, downloader, b))
 	require.Zero(t, peer.requests)
 }
 
@@ -248,7 +276,10 @@ func TestBlobHistoryDownloaderCountsMissesInSlotOrder(t *testing.T) {
 	requests := &atomic.Int32{}
 	misses := make(chan struct{}, 4)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
+		fallback := strings.Contains(r.URL.Path, "/eth/v1/beacon/blobs/")
+		if !fallback {
+			requests.Add(1)
+		}
 		id := common.HexToHash(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:])
 		for _, b := range []endpointBlock{slow, older} {
 			if b.root == id {
@@ -268,6 +299,10 @@ func TestBlobHistoryDownloaderCountsMissesInSlotOrder(t *testing.T) {
 			}
 		}
 		w.WriteHeader(http.StatusBadRequest)
+		if !fallback {
+			return
+		}
+		// A miss is over once its blobs fallback is answered.
 		select {
 		case misses <- struct{}{}:
 		default:

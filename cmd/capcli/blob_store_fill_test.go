@@ -98,6 +98,9 @@ func (f *fillFixture) addBlockWithTransactions(slot uint64, blobs int, txs bool)
 		bid.ParentBlockHash, bid.BlockHash = f.payload, common.Hash{byte(slot >> 8), byte(slot)}
 		f.payload = bid.BlockHash
 	}
+	if f.version < clparams.GloasVersion {
+		block.Block.Body.ExecutionPayload.BlockHash = common.Hash{1}
+	}
 	if txs {
 		block.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x02, 0x01}})
 	}
@@ -154,13 +157,21 @@ func (f *fillFixture) storedValid(slot uint64, root common.Hash) bool {
 	return storedBlobsValid(f.t.Context(), f.store, slot, root, f.blocks.blocks[slot])
 }
 
+// isFallbackRequest reports a blobs request before Gloas, which a fetch makes only after its blob_sidecars request was
+// not served. Request counts leave it out: they count how often a block is asked of an endpoint.
+func (f *fillFixture) isFallbackRequest(r *http.Request) bool {
+	return f.version < clparams.GloasVersion && strings.Contains(r.URL.Path, "/eth/v1/beacon/blobs/")
+}
+
 // endpoint serves the fixture's sidecars, only their blobs for Gloas, or 404s when missing is set, and counts requests per root.
 func (f *fillFixture) endpoint(missing bool) (string, *sync.Map) {
 	requests := &sync.Map{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
-		counter, _ := requests.LoadOrStore(id, &atomic.Int32{})
-		counter.(*atomic.Int32).Add(1)
+		if !f.isFallbackRequest(r) {
+			counter, _ := requests.LoadOrStore(id, &atomic.Int32{})
+			counter.(*atomic.Int32).Add(1)
+		}
 		sidecars, ok := f.sidecars[common.HexToHash(id)]
 		var data any = sidecars
 		switch {
@@ -526,6 +537,39 @@ func TestBlobArchiveStoreFillFallsBackToTheNextEndpoint(t *testing.T) {
 	require.True(t, f.storedValid(fillTestSlot, root))
 }
 
+func (f *fillFixture) blobsOnlyEndpoint() string {
+	good, _ := f.endpoint(false)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/eth/v1/beacon/blob_sidecars/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		http.Redirect(w, r, good+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	f.t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func TestBlobArchiveStoreFillBuildsSidecarsFromBlobsBeforeGloas(t *testing.T) {
+	f := newFillFixture(t)
+	root := f.addBlock(fillTestSlot, 2)
+	url := f.blobsOnlyEndpoint()
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+
+	require.True(t, f.storedValid(fillTestSlot, root))
+}
+
+func TestBlobArchiveStoreFillDryRunProbeAcceptsAnEndpointThatServesOnlyBlobsBeforeGloas(t *testing.T) {
+	f := newFillFixture(t)
+	f.addBlock(fillTestSlot, 1)
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{f.blobsOnlyEndpoint()}, FromSlot: fillTestSlot, ToSlot: fillTestSlot, DryRun: true}
+
+	require.NoError(t, f.fill(cmd, nil))
+
+	require.EqualValues(t, fillTestSlot, cmd.windows[0].from.Load())
+}
+
 // A slot no endpoint can fill must not stop the others, and the run must not end as a success.
 func TestBlobArchiveStoreFillReportsSlotsNoEndpointHas(t *testing.T) {
 	f := newFillFixture(t)
@@ -740,8 +784,10 @@ func TestBlobArchiveStoreFillDoesNotRetryABadRequest(t *testing.T) {
 	root := f.addBlock(fillTestSlot, 1)
 	good, _ := f.endpoint(false)
 	var calls atomic.Int32
-	pruned := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
+	pruned := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !f.isFallbackRequest(r) {
+			calls.Add(1)
+		}
 		w.WriteHeader(http.StatusBadRequest)
 	}))
 	t.Cleanup(pruned.Close)
@@ -768,9 +814,14 @@ func (f *fillFixture) prunedChain(notServed http.HandlerFunc) (url string, roots
 	good, _ := f.endpoint(false)
 	prunedRequests, allRequests = &atomic.Int32{}, &atomic.Int32{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		allRequests.Add(1)
+		counted := !f.isFallbackRequest(r)
+		if counted {
+			allRequests.Add(1)
+		}
 		if pruned[common.HexToHash(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:])] {
-			prunedRequests.Add(1)
+			if counted {
+				prunedRequests.Add(1)
+			}
 			notServed(w, r)
 			return
 		}
