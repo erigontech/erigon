@@ -190,8 +190,13 @@ func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerI
 	if len(reqs) == 0 {
 		return nil, nil
 	}
-	response, err := f.fetchOnce(ctx, reqs, peerId, timeout)
+	payload, err := f.fetchOnce(ctx, reqs, peerId, timeout)
 	if err != nil {
+		return nil, err
+	}
+	response, err := decodeBlockAccessListsResponse(payload, len(reqs))
+	if err != nil {
+		f.penalize(ctx, peerId)
 		return nil, err
 	}
 	out, badPeer, err := validateBALResponse(reqs, response)
@@ -261,11 +266,29 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 	return out, badPeer, responseErr
 }
 
-func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) ([]rlp.RawValue, error) {
+func decodeBlockAccessListsResponse(payload []byte, requested int) ([]rlp.RawValue, error) {
+	stream := rlp.NewBytesStream(payload)
+	defer rlp.PutStream(stream)
+
+	var response []rlp.RawValue
+	for len(stream.Peek()) > 0 {
+		if len(response) == requested {
+			return nil, fmt.Errorf("%w: response exceeds requested count %d", ErrBadBALResponse, requested)
+		}
+		entry, err := stream.Raw()
+		if err != nil {
+			return nil, fmt.Errorf("decode block access list entry %d: %w", len(response), err)
+		}
+		response = append(response, entry)
+	}
+	return response, nil
+}
+
+func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) ([]byte, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	messages := make(chan *DecodedInboundMessage[*eth.BlockAccessListsPacket66])
-	observer := func(message *DecodedInboundMessage[*eth.BlockAccessListsPacket66]) {
+	messages := make(chan *DecodedInboundMessage[BlockAccessListsEnvelope])
+	observer := func(message *DecodedInboundMessage[BlockAccessListsEnvelope]) {
 		select {
 		case <-ctx.Done():
 		case messages <- message:
@@ -289,7 +312,7 @@ func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *P
 	if err != nil {
 		return nil, err
 	}
-	return message.BlockAccessListsPacket, nil
+	return message.EncodedAccessLists, nil
 }
 
 func (f *balFetcher) penalize(ctx context.Context, peerId *PeerId) {
@@ -299,8 +322,8 @@ func (f *balFetcher) penalize(ctx context.Context, peerId *PeerId) {
 	}
 }
 
-func filterBlockAccessLists(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[*eth.BlockAccessListsPacket66]) bool {
-	return func(message *DecodedInboundMessage[*eth.BlockAccessListsPacket66]) bool {
+func filterBlockAccessLists(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[BlockAccessListsEnvelope]) bool {
+	return func(message *DecodedInboundMessage[BlockAccessListsEnvelope]) bool {
 		return filter(peerId, message.PeerId, requestId, message.Decoded.RequestId)
 	}
 }

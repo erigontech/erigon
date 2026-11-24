@@ -40,7 +40,36 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
-func TestBALFetcherTracksAvailability(t *testing.T) {
+func TestMessageListenerIgnoresUnsolicitedBlockAccessLists(t *testing.T) {
+	test := newMessageListenerTest(t)
+	test.mockSentryStreams()
+	test.run(func(_ context.Context, t *testing.T) {
+		test.sendBlockAccessLists(t, PeerIdFromUint64(1), 1, []rlp.RawValue{{0xc1}})
+	})
+}
+
+func TestBALFetcherMatchesPeerAndRequest(t *testing.T) {
+	test := newMessageListenerTest(t)
+	test.inboundMessagesStream = make(chan *delayedMessage[*sentryproto.InboundMessage], 3)
+	peerId := PeerIdFromUint64(1)
+	want := types.BlockAccessList{{Address: common.Address{1}}}
+	raw, err := types.EncodeBlockAccessListBytes(want)
+	require.NoError(t, err)
+	req := BALRequest{Hash: common.Hash{1}, GasLimit: types.BalItemCost, ExpectedHash: crypto.Keccak256Hash(raw)}
+	fetcher := test.mockBALRequest(t, peerId, req.Hash, func(requestId uint64) {
+		malformed := []rlp.RawValue{{0xc1}}
+		test.sendBlockAccessLists(t, PeerIdFromUint64(2), requestId, malformed)
+		test.sendBlockAccessLists(t, peerId, requestId+1, malformed)
+		test.sendBlockAccessLists(t, peerId, requestId, []rlp.RawValue{raw})
+	})
+	test.run(func(ctx context.Context, t *testing.T) {
+		out, err := fetcher.fetchFromPeer(ctx, []BALRequest{req}, peerId, time.Second)
+		require.NoError(t, err)
+		require.Equal(t, want, out[req.Hash].BlockAccessList())
+	})
+}
+
+func TestBALFetcherResponse(t *testing.T) {
 	malformed := rlp.RawValue{0xc2, 0x01, 0x02}
 	invalid := encodeBALWithOverlappingStorageSlot(t)
 
@@ -49,51 +78,67 @@ func TestBALFetcherTracksAvailability(t *testing.T) {
 		response     []rlp.RawValue
 		expectedHash common.Hash
 		missing      bool
+		wantErr      error
 	}{
-		{"malformed committed BAL", []rlp.RawValue{malformed}, crypto.Keccak256Hash(malformed), false},
-		{"invalid committed BAL", []rlp.RawValue{invalid}, crypto.Keccak256Hash(invalid), false},
-		{"unavailable BAL", []rlp.RawValue{{0x80}}, empty.BlockAccessListHash, true},
-		{"empty entry", []rlp.RawValue{{}}, empty.BlockAccessListHash, true},
-		{"truncated response", nil, empty.BlockAccessListHash, false},
+		{"malformed committed BAL", []rlp.RawValue{malformed}, crypto.Keccak256Hash(malformed), false, nil},
+		{"invalid committed BAL", []rlp.RawValue{invalid}, crypto.Keccak256Hash(invalid), false, nil},
+		{"unavailable BAL", []rlp.RawValue{{0x80}}, empty.BlockAccessListHash, true, nil},
+		{"truncated response", nil, empty.BlockAccessListHash, false, nil},
+		{"malformed entry", []rlp.RawValue{{0xc1}}, empty.BlockAccessListHash, false, rlp.ErrValueTooLarge},
+		{"excess entry is never read", []rlp.RawValue{{0x80}, {0xc1}}, empty.BlockAccessListHash, false, ErrBadBALResponse},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			test := newMessageListenerTest(t)
-			t.Cleanup(test.ctxCancel)
 			peerId := PeerIdFromUint64(1)
-			tracker := NewPeerTracker(test.logger, test.messageListener)
-			tracker.PeerConnected(peerId)
-			fetcher := &balFetcher{
-				logger:          test.logger,
-				messageListener: test.messageListener,
-				messageSender:   NewMessageSender(test.sentryClient),
-				peerPenalizer:   NewPeerPenalizer(test.sentryClient),
-				peerTracker:     tracker,
+			if tc.wantErr != nil {
+				mockExpectPenalizePeer(t, test.sentryClient, peerId)
 			}
-			reqs := []BALRequest{{Hash: common.Hash{1}, Number: 100, GasLimit: 3 * types.BalItemCost, ExpectedHash: tc.expectedHash}}
-			test.sentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
-				DoAndReturn(func(_ context.Context, req *sentryproto.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
-					require.Equal(t, sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71, req.Data.Id)
-					require.Equal(t, peerId.H512(), req.PeerId)
-					var packet eth.GetBlockAccessListsPacket66
-					require.NoError(t, rlp.DecodeBytes(req.Data.Data, &packet))
-					require.Equal(t, eth.GetBlockAccessListsPacket{reqs[0].Hash}, packet.GetBlockAccessListsPacket)
-					test.messageListener.blockAccessListsObservers.Notify(&DecodedInboundMessage[*eth.BlockAccessListsPacket66]{
-						InboundMessage: &sentryproto.InboundMessage{},
-						PeerId:         peerId,
-						Decoded: &eth.BlockAccessListsPacket66{
-							RequestId:              packet.RequestId,
-							BlockAccessListsPacket: tc.response,
-						},
-					})
-					return &sentryproto.SentPeers{Peers: []*typesproto.H512{peerId.H512()}}, nil
-				})
-			out, err := fetcher.fetchFromPeer(t.Context(), reqs, peerId, time.Second)
-			require.NoError(t, err)
-			require.Empty(t, out)
-			require.Equal(t, !tc.missing, tracker.PeerMayHaveBALNum(peerId, 100))
-			require.Equal(t, !tc.missing, tracker.PeerMayHaveBALNum(peerId, 99))
-			require.True(t, tracker.PeerMayHaveBALNum(peerId, 101))
+			req := BALRequest{Hash: common.Hash{1}, Number: 100, GasLimit: 3 * types.BalItemCost, ExpectedHash: tc.expectedHash}
+			fetcher := test.mockBALRequest(t, peerId, req.Hash, func(requestId uint64) {
+				test.sendBlockAccessLists(t, peerId, requestId, tc.response)
+			})
+			test.run(func(ctx context.Context, t *testing.T) {
+				out, err := fetcher.fetchFromPeer(ctx, []BALRequest{req}, peerId, time.Second)
+				require.ErrorIs(t, err, tc.wantErr)
+				require.Empty(t, out)
+				require.Equal(t, !tc.missing, fetcher.peerTracker.PeerMayHaveBALNum(peerId, 100))
+				require.Equal(t, !tc.missing, fetcher.peerTracker.PeerMayHaveBALNum(peerId, 99))
+				require.True(t, fetcher.peerTracker.PeerMayHaveBALNum(peerId, 101))
+			})
 		})
+	}
+}
+
+func (mlt *messageListenerTest) mockBALRequest(t *testing.T, peerId *PeerId, hash common.Hash, reply func(uint64)) *balFetcher {
+	t.Helper()
+	mlt.mockSentryStreams()
+	mlt.sentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, req *sentryproto.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+			require.Equal(t, sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71, req.Data.Id)
+			require.Equal(t, peerId.H512(), req.PeerId)
+			var packet eth.GetBlockAccessListsPacket66
+			require.NoError(t, rlp.DecodeBytes(req.Data.Data, &packet))
+			require.Equal(t, eth.GetBlockAccessListsPacket{hash}, packet.GetBlockAccessListsPacket)
+			reply(packet.RequestId)
+			return &sentryproto.SentPeers{Peers: []*typesproto.H512{req.PeerId}}, nil
+		})
+	tracker := NewPeerTracker(mlt.logger, mlt.messageListener)
+	tracker.PeerConnected(peerId)
+	return &balFetcher{
+		logger:          mlt.logger,
+		messageListener: mlt.messageListener,
+		messageSender:   NewMessageSender(mlt.sentryClient),
+		peerPenalizer:   mlt.messageListener.peerPenalizer,
+		peerTracker:     tracker,
+	}
+}
+
+func (mlt *messageListenerTest) sendBlockAccessLists(t *testing.T, peerId *PeerId, requestId uint64, entries []rlp.RawValue) {
+	t.Helper()
+	data, err := rlp.EncodeToBytes(&eth.BlockAccessListsPacket66{RequestId: requestId, BlockAccessListsPacket: entries})
+	require.NoError(t, err)
+	mlt.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
+		message: &sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_ACCESS_LISTS_71, PeerId: peerId.H512(), Data: data},
 	}
 }
 
