@@ -159,6 +159,110 @@ func TestBuildMissedAccessorsKeepsAFileCoveredByHiddenFiles(t *testing.T) {
 	require.Len(t, built, 1)
 }
 
+// Every list kind with one file missing, on a datadir whose DB was pruned to the end of its files.
+// Values files are never retired, so any missing values file cuts every list and startup refuses.
+// History and index files are retired from the start, so a missing first (or first merged) file
+// reads as retired; a missing middle or last file is a hole that cuts every list.
+func TestVisibleFilesWithAMissingFile(t *testing.T) {
+	type kind struct {
+		name    string
+		dir     func(datadir.Dirs) string
+		pattern string // the file and its accessors in dir
+		retired bool   // removed from the start by Retire
+	}
+	var kinds []kind
+	for _, d := range []string{"accounts", "storage", "code", "commitment"} {
+		kinds = append(kinds, kind{d + ".kv", func(d datadir.Dirs) string { return d.SnapDomain }, d, false})
+	}
+	for _, d := range []string{"accounts", "storage", "code"} {
+		kinds = append(kinds,
+			kind{d + ".v", func(d datadir.Dirs) string { return d.SnapHistory }, d, true},
+			kind{d + ".ef", func(d datadir.Dirs) string { return d.SnapIdx }, d, true})
+	}
+	for _, ii := range []string{"logaddrs", "logtopics", "tracesfrom", "tracesto"} {
+		kinds = append(kinds, kind{ii + ".ef", func(d datadir.Dirs) string { return d.SnapIdx }, ii, true})
+	}
+	const filesEnd = 4 * alignStepSize
+	for _, k := range kinds {
+		for _, pos := range []struct {
+			name    string
+			ranges  []testFileRange
+			missing testFileRange
+		}{
+			{"first", []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}, testFileRange{0, 1}},
+			{"middle", []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}, testFileRange{2, 3}},
+			{"last", []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}, testFileRange{3, 4}},
+			{"merged", []testFileRange{{0, 2}, {2, 3}, {3, 4}}, testFileRange{0, 2}},
+		} {
+			t.Run(k.name+"/"+pos.name, func(t *testing.T) {
+				t.Cleanup(statecfg.SetCommitmentV3(false))
+				db, agg := testDbAndAggregatorv3(t, alignStepSize)
+				generateStateFiles(t, agg.Dirs(), pos.ranges)
+				generateStandaloneIIFiles(t, agg.Dirs(), pos.ranges)
+				generateCommitmentFile(t, agg.Dirs(), pos.ranges)
+				removeFiles(t, agg.Dirs(), k.dir(agg.Dirs()), k.pattern, pos.missing)
+				require.NoError(t, agg.OpenFolder(db))
+
+				wantEnd, wantRefuse := uint64(pos.missing.fromStep*alignStepSize), true
+				if k.retired && pos.missing.fromStep == 0 {
+					wantEnd, wantRefuse = filesEnd, false
+				}
+				requireVisibleEnd(t, agg, wantEnd)
+				err := pruneEverythingTo(t, db, agg, filesEnd)
+				if wantRefuse {
+					require.ErrorContains(t, err, "gap between snapshot files and DB")
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	}
+}
+
+// removeFiles removes the data file of base for r and every accessor of it.
+func removeFiles(t *testing.T, dirs datadir.Dirs, dataDir, base string, r testFileRange) {
+	t.Helper()
+	name := fmt.Sprintf("*-%s.%d-%d.*", base, r.fromStep, r.toStep)
+	data, err := filepath.Glob(filepath.Join(dataDir, name))
+	require.NoError(t, err)
+	require.NotEmpty(t, data)
+	var accessors []string
+	switch {
+	case dataDir == dirs.SnapHistory:
+		accessors, err = filepath.Glob(filepath.Join(dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.vi", base, r.fromStep, r.toStep)))
+	case dataDir == dirs.SnapIdx:
+		accessors, err = filepath.Glob(filepath.Join(dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.efi", base, r.fromStep, r.toStep)))
+	}
+	require.NoError(t, err)
+	for _, f := range append(data, accessors...) {
+		require.NoError(t, dir.RemoveFile(f))
+	}
+}
+
+// pruneEverythingTo marks every values, history and index table as pruned to txNum and runs the startup check.
+func pruneEverythingTo(t *testing.T, db kv.RwDB, agg *Aggregator, txNum uint64) error {
+	t.Helper()
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	stat := &prune.Stat{TxTo: txNum}
+	for _, id := range kv.StateDomains {
+		d := agg.d[id]
+		require.NoError(t, SavePruneValProgress(tx, d.ValuesTable, stat))
+		if id != kv.CommitmentDomain { // the fixture has no commitment history
+			require.NoError(t, SavePruneValProgress(tx, d.History.ValuesTable, stat))
+		}
+	}
+	for _, ii := range agg.standaloneIIs() {
+		if ii != nil {
+			require.NoError(t, SavePruneValProgress(tx, ii.ValuesTable, stat))
+		}
+	}
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	return at.CheckFilesDBGap(tx)
+}
+
 // domains visible past the log/trace indexes answer eth_getLogs from blocks no index saw
 func TestVisibleFilesAligned_LaggingStandaloneIdxClampsEveryone(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
