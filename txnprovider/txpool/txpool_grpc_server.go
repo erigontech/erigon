@@ -194,12 +194,13 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		var knownReason txpoolcfg.DiscardReason
 		validateHash := func(hash []byte) error {
 			reason := s.txPool.KnownTxnReason(hash)
-			// An earlier input can replace a pooled transaction before its turn in the batch.
-			if reason == txpoolcfg.NotSet || (reason == txpoolcfg.AlreadyKnown && slotIndex > 0) {
-				return nil
+			// An earlier input can replace a pooled transaction, and a new head can invalidate a
+			// cached frame rejection. Let admission resolve both in batch order.
+			if reason != txpoolcfg.NotSet && (slotIndex == 0 || cachedRejectionDependsOnlyOnTxn(reason)) {
+				knownReason = reason
+				return ErrRejected
 			}
-			knownReason = reason
-			return ErrRejected
+			return nil
 		}
 		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txns[slotIndex], slots.Senders.At(slotIndex),
 			false /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash); err != nil {

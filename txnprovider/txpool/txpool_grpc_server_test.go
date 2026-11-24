@@ -354,6 +354,7 @@ func TestGrpcServerAddBlobNonceGap(t *testing.T) {
 }
 
 func TestGrpcServerAddInvalidSelfAuthorizationNonce(t *testing.T) {
+	ordinary := TxnParseMainnetTests[0]
 	for _, tc := range []struct {
 		name  string
 		nonce uint64
@@ -366,7 +367,8 @@ func TestGrpcServerAddInvalidSelfAuthorizationNonce(t *testing.T) {
 			key, err := crypto.GenerateKey()
 			require.NoError(t, err)
 			sender := crypto.PubkeyToAddress(key.PublicKey)
-			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			change := newBlockChangeForAccounts(common.Hash{}, 0, sender, common.HexToAddress(ordinary.SenderStr))
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, tc.nonce)
 			require.NoError(t, err)
 			txn := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000).Txn.(*types.SetCodeTransaction)
@@ -393,6 +395,15 @@ func TestGrpcServerAddInvalidSelfAuthorizationNonce(t *testing.T) {
 				require.True(t, known, "this self-authorization nonce mismatch is independent of state")
 				return nil
 			}))
+
+			// The cached mismatch still applies after the account nonce advances.
+			change = newBlockChangeForAccounts(common.Hash{1}, 1, sender)
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			reply, addErr := server.Add(ctx, &txpoolproto.AddRequest{
+				RlpTxs: [][]byte{hexutil.MustDecodeHex(ordinary.PayloadStr), encoded.Bytes()},
+			})
+			require.NoError(t, addErr)
+			require.Equal(t, []string{txpoolcfg.Success.String(), txpoolcfg.InvalidAuthorizationNonce.String()}, reply.Errors)
 		})
 	}
 }
@@ -711,6 +722,39 @@ func TestGrpcServerCachedFrameRejectionBeforeSignatures(t *testing.T) {
 			require.NotEqual(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]))
 		})
 	}
+}
+
+func TestGrpcServerAddRechecksCachedFrameRejectionAfterHeadChange(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	chainID := *frame.Txn.GetChainID()
+	server := NewGrpcServer(ctx, pool, pool.poolDB, nil, chainID, pool.logger)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.valid = false
+	frameRequest := &txpoolproto.AddRequest{RlpTxs: [][]byte{frame.Rlp}}
+	reply, err := server.Add(ctx, frameRequest)
+	require.NoError(t, err)
+	require.Equal(t, []string{txpoolcfg.InvalidFrame.String()}, reply.Errors)
+	require.Equal(t, txpoolcfg.InvalidFrame, pool.KnownTxnReason(frame.IDHash[:]))
+
+	ordinary := TxnParseMainnetTests[1]
+	delayed := &beforeAdmissionPool{TxPool: pool, beforeAdd: func() {
+		// At the new head the ordinary sender has funds and the frame passes simulation.
+		backend.valid = true
+		change := newBlockChangeForAccounts(common.Hash{1}, 0, common.HexToAddress(ordinary.SenderStr))
+		change.ChangeBatch[0].BlockHeight = 1
+		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	}}
+	batchServer := NewGrpcServer(ctx, delayed, pool.poolDB, nil, chainID, pool.logger)
+	reply, err = batchServer.Add(ctx, &txpoolproto.AddRequest{
+		RlpTxs: [][]byte{hexutil.MustDecodeHex(ordinary.PayloadStr), frame.Rlp},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS, txpoolproto.ImportResult_SUCCESS}, reply.Imported)
+
+	reply, err = server.Add(ctx, frameRequest)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS}, reply.Imported)
 }
 
 func TestGrpcServerRejectedFrameResubmission(t *testing.T) {
