@@ -17,9 +17,12 @@
 package accounts
 
 import (
+	"cmp"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 	"weak"
 
 	"github.com/puzpuzpuz/xsync/v4"
@@ -102,12 +105,19 @@ func (c *canonTable[T]) swap() *xsync.Map[T, *T] {
 }
 
 func (c *canonTable[T]) toWeak(old *xsync.Map[T, *T]) {
-	old.Range(func(v T, p *T) bool {
+	// weak.Make and AddCleanup insert into a per-span list of specials; in address order each insert is near the last one.
+	ptrs := make([]*T, 0, old.Size())
+	old.Range(func(_ T, p *T) bool {
+		ptrs = append(ptrs, p)
+		return true
+	})
+	slices.SortFunc(ptrs, func(a, b *T) int { return cmp.Compare(uintptr(unsafe.Pointer(a)), uintptr(unsafe.Pointer(b))) })
+	for _, p := range ptrs {
+		v := *p
 		wp := weak.Make(p)
 		c.weak.Store(v, wp)
 		runtime.AddCleanup(p, func(v T) { c.release(v, wp) }, v)
-		return true
-	})
+	}
 	c.mu.Lock()
 	c.prev.Store(nil)
 	c.mu.Unlock()
