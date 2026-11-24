@@ -219,6 +219,83 @@ func TestVisibleFilesWithAMissingFile(t *testing.T) {
 	}
 }
 
+// Startup must accept the datadirs that normal operation and recovery leave behind.
+func TestVisibleFilesAfterRecoveryFlows(t *testing.T) {
+	all := []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}
+	const filesEnd = 4 * alignStepSize
+	stateFiles := func(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+		generateStateFiles(t, dirs, ranges)
+		generateStandaloneIIFiles(t, dirs, ranges)
+		generateCommitmentFile(t, dirs, ranges)
+	}
+	for _, tc := range []struct {
+		name      string
+		prepare   func(t *testing.T, dirs datadir.Dirs)
+		prunedTo  uint64 // 0: the DB is empty, as after removing chaindata
+		extra     []kv.Domain
+		wantEnd   uint64
+		rebuildTo uint64 // visible end after BuildMissedAccessors, 0: not checked
+	}{
+		{name: "chaindata removed", prepare: func(t *testing.T, dirs datadir.Dirs) { stateFiles(t, dirs, all) }, wantEnd: filesEnd},
+		{name: "killed mid-merge", prepare: func(t *testing.T, dirs datadir.Dirs) {
+			stateFiles(t, dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}, {2, 3}, {3, 4}})
+			for _, d := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx} {
+				require.NoError(t, os.WriteFile(filepath.Join(d, "v1.0-accounts.0-4.kv.tmp"), []byte("partial"), 0o644))
+			}
+		}, prunedTo: filesEnd, wantEnd: filesEnd},
+		{name: "killed mid-build", prepare: func(t *testing.T, dirs datadir.Dirs) {
+			stateFiles(t, dirs, all)
+			accessor, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.3-4.bt"))
+			require.NoError(t, err)
+			require.Len(t, accessor, 1)
+			require.NoError(t, dir.RemoveFile(accessor[0]))
+		}, prunedTo: 3 * alignStepSize, wantEnd: 3 * alignStepSize, rebuildTo: filesEnd},
+		{name: "optional domain enabled on a synced node", prepare: func(t *testing.T, dirs datadir.Dirs) {
+			stateFiles(t, dirs, all)
+			generateDomainFiles(t, "receipt", dirs, []testFileRange{{2, 3}, {3, 4}})
+		}, prunedTo: filesEnd, extra: []kv.Domain{kv.ReceiptDomain}, wantEnd: filesEnd},
+		{name: "custom trace reset", prepare: func(t *testing.T, dirs datadir.Dirs) { stateFiles(t, dirs, all) }, prunedTo: filesEnd, wantEnd: filesEnd},
+		{name: "rm-state of the first accounts step, then stage_exec --reset", prepare: func(t *testing.T, dirs datadir.Dirs) {
+			stateFiles(t, dirs, all)
+			removeFiles(t, dirs, dirs.SnapDomain, "accounts", testFileRange{0, 1})
+		}, wantEnd: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(false))
+			db, agg := testDbAndAggregatorv3(t, alignStepSize)
+			tc.prepare(t, agg.Dirs())
+			require.NoError(t, agg.OpenFolder(db))
+
+			requireVisibleEnd(t, agg, tc.wantEnd)
+			at := agg.BeginFilesRo()
+			for _, id := range tc.extra {
+				require.EqualValues(t, 2*alignStepSize, at.d[id].files.StartTxNum(), "domain %s", id)
+				require.EqualValues(t, filesEnd, at.d[id].files.EndTxNum(), "domain %s", id)
+			}
+			at.Close()
+			if tc.prunedTo > 0 {
+				require.NoError(t, pruneEverythingTo(t, db, agg, tc.prunedTo, tc.extra...))
+			} else {
+				require.NoError(t, checkFilesDBGapOf(t, db, agg))
+			}
+			if tc.rebuildTo > 0 {
+				require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
+				requireVisibleEnd(t, agg, tc.rebuildTo)
+			}
+		})
+	}
+}
+
+func checkFilesDBGapOf(t *testing.T, db kv.RoDB, agg *Aggregator) error {
+	t.Helper()
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	return at.CheckFilesDBGap(tx)
+}
+
 // removeFiles removes the data file of base for r and every accessor of it.
 func removeFiles(t *testing.T, dirs datadir.Dirs, dataDir, base string, r testFileRange) {
 	t.Helper()
@@ -240,7 +317,7 @@ func removeFiles(t *testing.T, dirs datadir.Dirs, dataDir, base string, r testFi
 }
 
 // pruneEverythingTo marks every values, history and index table as pruned to txNum and runs the startup check.
-func pruneEverythingTo(t *testing.T, db kv.RwDB, agg *Aggregator, txNum uint64) error {
+func pruneEverythingTo(t *testing.T, db kv.RwDB, agg *Aggregator, txNum uint64, extra ...kv.Domain) error {
 	t.Helper()
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
@@ -257,6 +334,9 @@ func pruneEverythingTo(t *testing.T, db kv.RwDB, agg *Aggregator, txNum uint64) 
 		if ii != nil {
 			require.NoError(t, SavePruneValProgress(tx, ii.ValuesTable, stat))
 		}
+	}
+	for _, id := range extra {
+		require.NoError(t, SavePruneValProgress(tx, agg.d[id].ValuesTable, stat))
 	}
 	at := agg.BeginFilesRo()
 	defer at.Close()
