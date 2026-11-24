@@ -21,6 +21,7 @@ package mmap
 import (
 	"context"
 	"os"
+	"time"
 	"unsafe"
 )
 
@@ -39,5 +40,7 @@ func NewProbe() *Probe { return nil }
 func (*Probe) Touch(unsafe.Pointer) {}
 
 func (*Probe) MarkResident([]uintptr) {}
+
+func (*Probe) Counters() (touches, mincores int, mincoreTime time.Duration) { return 0, 0, 0 }
 
 func ReadPages(context.Context, []uintptr) error { return nil }

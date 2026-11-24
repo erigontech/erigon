@@ -22,6 +22,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/tidwall/btree"
@@ -85,6 +86,14 @@ type ColdPage uintptr
 // probes nothing. A Probe belongs to one goroutine.
 type Probe struct {
 	resident map[uintptr]struct{}
+
+	touches, mincores int
+	mincoreTime       time.Duration
+}
+
+// Counters reports the page touches of the probe, the mincore calls they made and the time spent in them.
+func (pr *Probe) Counters() (touches, mincores int, mincoreTime time.Duration) {
+	return pr.touches, pr.mincores, pr.mincoreTime
 }
 
 // NewProbe returns nil when ReadPages cannot read pages, so callers fall back to ordinary reads.
@@ -114,11 +123,15 @@ func (pr *Probe) MarkResident(pages []uintptr) {
 
 func (pr *Probe) touch(p unsafe.Pointer) {
 	page := uintptr(p) &^ (osPageSize - 1)
+	pr.touches++
 	if _, ok := pr.resident[page]; ok {
 		return
 	}
 	var vec [1]byte
+	start := time.Now()
 	_, _, errno := unix.Syscall(unix.SYS_MINCORE, page, osPageSize, uintptr(unsafe.Pointer(&vec[0])))
+	pr.mincores++
+	pr.mincoreTime += time.Since(start)
 	if errno == 0 && vec[0]&1 == 0 {
 		panic(ColdPage(page))
 	}

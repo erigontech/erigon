@@ -187,29 +187,26 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 	bra.cancelWarmup = cancel
 	bra.warmupMu.Unlock()
 	done := bra.markWarmupRunning()
-	var bal types.BlockAccessList
-	if header.HasNonEmptyBAL() {
-		balSidecar, ok := bra.bals.Get(blockHash)
-		if !ok {
-			data, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, header.Number.Uint64())
+	balSidecar, cached := bra.bals.Get(blockHash)
+	if !cached && header.HasNonEmptyBAL() {
+		data, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, header.Number.Uint64())
+		if err != nil {
+			log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", blockHash, "err", err)
+		} else if len(data) != 0 {
+			balSidecar, err = types.DecodeBlockAccessListSidecar(data)
 			if err != nil {
 				log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", blockHash, "err", err)
-			} else if len(data) != 0 {
-				balSidecar, err = types.DecodeBlockAccessListSidecar(data)
-				if err != nil {
-					log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", blockHash, "err", err)
-				} else {
-					bra.bals.Add(blockHash, balSidecar)
-				}
+			} else {
+				bra.bals.Add(blockHash, balSidecar)
 			}
 		}
-		bal = balSidecar.BlockAccessList()
 	}
+	bal := balSidecar.BlockAccessList()
 	go func() {
 		defer bra.warmupGate.Release(1)
 		defer close(done)
 		defer cancel()
-		bra.warmBody(ctx, db, header, body, bal, dbg.ReadAheadWorkers)
+		bra.warmBody(context.WithValue(ctx, balBlockNumKey{}, header.Number.Uint64()), db, header, body, bal, dbg.ReadAheadWorkers)
 	}()
 }
 
@@ -489,6 +486,8 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 	}
 }
 
+type balBlockNumKey struct{}
+
 func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, txns types.Transactions, codeMode balCodeWarmupMode, workers int) error {
 	var txCodeDestinations map[accounts.Address]struct{}
 	if codeMode == balCodeWarmupTxnDestinations {
@@ -501,30 +500,53 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		}
 		return balCommitmentWarmupKeys(bal)
 	})
+	started := time.Now()
+	var trieStats, sampleStats, stateStats dbg.PrefetchStats
+	var trieTime, sampleTime, stateTime, perKeyTime atomic.Int64
+	var cold coldState
+	defer func() {
+		blockNum, _ := ctx.Value(balBlockNumKey{}).(uint64)
+		logFn := log.Debug
+		if dbg.WarmBALStatsInfo {
+			logFn = log.Info
+		}
+		logFn("[warmBAL] prefetch stats", "block", blockNum, "elapsed", time.Since(started), "cancelled", ctx.Err() != nil,
+			"accounts", len(bal), "cold", fmt.Sprintf("%+v", cold),
+			"trie", time.Duration(trieTime.Load()), "sample", time.Duration(sampleTime.Load()),
+			"state", time.Duration(stateTime.Load()), "perKey", time.Duration(perKeyTime.Load()),
+			"trieStats", trieStats.String(), "sampleStats", sampleStats.String(), "stateStats", stateStats.String())
+	}()
 	var group errgroup.Group
 	if dbg.TrieBALWarmupers > 0 && !statecfg.ExperimentalCommitmentV3 {
 		group.Go(func() error {
 			return warmBALCommitment(ctx, db, trieKeys(), dbg.TrieBALWarmupers)
 		})
 	}
-	var cold coldState
 	if mmap.NewProbe() != nil {
 		if !statecfg.ExperimentalCommitmentV3 {
 			group.Go(func() error {
-				prefetchBALCommitment(ctx, db, trieKeys())
+				start := time.Now()
+				prefetchBALCommitment(dbg.WithPrefetchStats(ctx, &trieStats), db, trieKeys())
+				trieTime.Store(int64(time.Since(start)))
 				return nil
 			})
 		}
-		cold = stateKeysCold(ctx, db, bal)
+		start := time.Now()
+		cold = stateKeysCold(dbg.WithPrefetchStats(ctx, &sampleStats), db, bal)
+		sampleTime.Store(int64(time.Since(start)))
 	}
 	group.Go(func() error {
 		warm, warmTasks, warmWorkers := bal, tasks, balWorkers
 		if cold.any() {
+			start := time.Now()
 			var stripped bool
-			if warm, stripped = perKeyWarmupBAL(bal, cold, prefetchBALState(ctx, db, bal, cold)); stripped {
+			if warm, stripped = perKeyWarmupBAL(bal, cold, prefetchBALState(dbg.WithPrefetchStats(ctx, &stateStats), db, bal, cold)); stripped {
 				warmTasks, warmWorkers = makeBALWarmupPlan(warm, workers)
 			}
+			stateTime.Store(int64(time.Since(start)))
 		}
+		start := time.Now()
+		defer func() { perKeyTime.Store(int64(time.Since(start))) }()
 		return bra.warmBALState(ctx, db, warm, warmTasks, codeMode, txCodeDestinations, warmWorkers)
 	})
 	return group.Wait()

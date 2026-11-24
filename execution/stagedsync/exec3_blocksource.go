@@ -77,6 +77,9 @@ func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*type
 	}
 	if b.BlockAccessList() == nil && blockBAL != nil {
 		b = b.WithBlockAccessListSidecar(types.NewBlockAccessListSidecar(blockBAL))
+		if !dbg.IgnoreBAL && !b.HeaderNoCopy().HasNonEmptyBAL() {
+			warmOfflineBAL(ctx, s.cfg.readAheader, s.cfg.db, s.blockTx, b)
+		}
 	}
 	if dbg.IgnoreBAL {
 		return b, nil, nil
@@ -86,4 +89,13 @@ func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*type
 
 func (s *dbBlockSource) header(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
 	return s.cfg.blockReader.Header(ctx, s.blockTx, hash, number)
+}
+
+// warmOfflineBAL starts the BAL warmup that the engine API path starts for blocks whose header carries a BAL.
+func warmOfflineBAL(ctx context.Context, bra *exec.BlockReadAheader, db kv.RoDB, tx kv.Getter, b *types.Block) {
+	if bra == nil {
+		return
+	}
+	bra.AddBlockAccessList(b.Hash(), b.BlockAccessListSidecar())
+	bra.AddHeaderAndBody(ctx, db, tx, b.HeaderNoCopy(), b.Body())
 }

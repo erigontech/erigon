@@ -2852,6 +2852,28 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 		dt.probe = nil
 		return 0, nil
 	}
+	var waves, probed int
+	var filterTime, probeTime, readTime time.Duration
+	if stats := dbg.PrefetchStatsFrom(ctx); stats != nil {
+		probe := dt.probe
+		defer func() {
+			touches, mincores, mincoreTime := probe.Counters()
+			stats.Calls.Add(1)
+			stats.KeysIn.Add(int64(len(keys)))
+			stats.KeysProbed.Add(int64(probed))
+			stats.ObserveWaves(waves)
+			stats.Pages.Add(int64(pages))
+			if errors.Is(err, kv.ErrPrefetchIncomplete) {
+				stats.Incomplete.Add(1)
+			}
+			stats.Touches.Add(int64(touches))
+			stats.Mincores.Add(int64(mincores))
+			stats.MincoreNs.Add(int64(mincoreTime))
+			stats.FilterNs.Add(int64(filterTime))
+			stats.ProbeNs.Add(int64(probeTime))
+			stats.ReadNs.Add(int64(readTime))
+		}()
+	}
 	defer func() {
 		dt.probe = nil
 		for _, r := range dt.dataReaders {
@@ -2861,6 +2883,7 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 		}
 	}()
 	// A key that no existence filter holds needs no page: drop it before the probed lookups, which touch every file.
+	filterStart := time.Now()
 	pending := make([][]byte, 0, len(keys))
 	for _, k := range keys {
 		if ctx.Err() != nil {
@@ -2870,8 +2893,11 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 			pending = append(pending, k)
 		}
 	}
+	filterTime = time.Since(filterStart)
+	probed = len(pending)
 	tried := map[uintptr]struct{}{}
-	for waves := 0; len(pending) > 0 && waves < prefetchMaxWaves && ctx.Err() == nil; waves++ {
+	for ; len(pending) > 0 && waves < prefetchMaxWaves && ctx.Err() == nil; waves++ {
+		probeStart := time.Now()
 		cold := make([]uintptr, 0, len(pending))
 		wave := make(map[uintptr]struct{}, len(pending)) // keys sharing a page count it once
 		next := pending[:0:0]
@@ -2892,8 +2918,12 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 			}
 			next = append(next, k)
 		}
+		probeTime += time.Since(probeStart)
+		readStart := time.Now()
 		// A failed page goes into tried below, so the next wave goes on with the other keys.
-		if rerr := mmap.ReadPages(ctx, cold); rerr != nil {
+		rerr := mmap.ReadPages(ctx, cold)
+		readTime += time.Since(readStart)
+		if rerr != nil {
 			err = cmp.Or(err, rerr)
 		} else {
 			dt.probe.MarkResident(cold)

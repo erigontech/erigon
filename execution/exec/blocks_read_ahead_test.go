@@ -495,6 +495,43 @@ func TestBlockReadAheaderWarmsOverlayBlockAccessList(t *testing.T) {
 	require.Equal(t, accountBytes, got)
 }
 
+func TestBlockReadAheaderWarmsCachedBlockAccessListWithoutHeaderHash(t *testing.T) {
+	oldReadAhead := dbg.ReadAhead
+	dbg.SetReadAhead(true)
+	t.Cleanup(func() { dbg.SetReadAhead(oldReadAhead) })
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	address := common.Address{19: 0x43}
+	account := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+	accountBytes := accounts.SerialiseV3(&account)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	domains.SetTxNum(1)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, address[:], accountBytes, 1, nil))
+	require.NoError(t, domains.Commit(ctx, rwTx))
+	domains.Close()
+	require.NoError(t, rwTx.Commit())
+	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		stateVersion, err := rawdb.GetStateVersion(tx)
+		stateCache.Applier().Initialize(stateVersion)
+		return err
+	}))
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	readAheader := NewBlockReadAheader()
+	readAheader.SetStateCache(stateCache)
+	readAheader.AddBlockAccessList(header.Hash(), types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: address}}))
+	readAheader.AddHeaderAndBody(ctx, db, new(countingGetter), header, new(types.Body))
+	readAheader.WaitForWarmup(ctx)
+	got, ok := stateCache.View(nil).Get(kv.AccountsDomain, address[:])
+	require.True(t, ok, "cached BAL of a block without a BAL hash was not warmed")
+	require.Equal(t, accountBytes, got)
+}
+
 func TestBlockReadAheaderCarriesBlockAccessListSidecar(t *testing.T) {
 	bra := NewBlockReadAheader()
 	header := &types.Header{Number: *uint256.NewInt(1)}
