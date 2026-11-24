@@ -232,22 +232,12 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		host = r.Host
 	}
 	host = strings.ToLower(host)
-	if ipAddr := net.ParseIP(host); ipAddr != nil {
-		// It's an IP address, we can serve that
-		h.next.ServeHTTP(w, r)
-		return
-
-	}
-	// Not an IP address, but a hostname. Need to validate
-	if _, exist := h.vhosts["*"]; exist {
-		h.next.ServeHTTP(w, r)
-		return
-	}
-	if _, exist := h.vhosts["any"]; exist {
-		h.next.ServeHTTP(w, r)
-		return
-	}
-	if _, exist := h.vhosts[host]; exist {
+	_, star := h.vhosts["*"]
+	_, anyHost := h.vhosts["any"]
+	_, listed := h.vhosts[host]
+	// An IP address is always served; it is parsed last because parsing a
+	// hostname allocates its error.
+	if star || anyHost || listed || net.ParseIP(host) != nil {
 		h.next.ServeHTTP(w, r)
 		return
 	}

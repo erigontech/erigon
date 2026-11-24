@@ -813,3 +813,24 @@ func TestHTTPUnsubscribeReportsUnknownSubscription(t *testing.T) {
 	require.NotNil(t, msg.Error)
 	require.Equal(t, ErrSubscriptionNotFound.Error(), msg.Error.Message)
 }
+
+func TestHTTPRequestValidationContentTypes(t *testing.T) {
+	for _, tc := range []struct {
+		contentType string
+		want        int
+	}{
+		{"application/json", 0},
+		{"application/json; charset=utf-8", 0},
+		{"Application/JSON", 0},
+		{"application/json-rpc", 0},
+		{"application/jsonrequest", 0},
+		{"application/json;", 0},
+		{"application/jsonx", http.StatusUnsupportedMediaType},
+		{"text/plain", http.StatusUnsupportedMediaType},
+		{"", http.StatusUnsupportedMediaType},
+	} {
+		t.Run(tc.contentType, func(t *testing.T) {
+			confirmRequestValidationCode(t, http.MethodPost, tc.contentType, "", tc.want)
+		})
+	}
+}

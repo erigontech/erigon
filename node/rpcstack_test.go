@@ -85,6 +85,17 @@ func TestVhosts(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, resp2.StatusCode)
 }
 
+// TestVhostsAcceptIPHosts makes sure a Host that is an IP address is served
+// whether or not it is listed in vhosts.
+func TestVhostsAcceptIPHosts(t *testing.T) {
+	url := startHTTPServer(t, nil, nil, []string{"test"})
+	for _, host := range []string{"127.0.0.1", "127.0.0.1:8545", "[::1]:8545", "192.0.2.1"} {
+		resp := rpcRequest(t, url, "host", host)
+		resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode, host)
+	}
+}
+
 // TestVhostsAny makes sure vhosts any is properly handled on the http server.
 func TestVhostsAny(t *testing.T) {
 	url := startHTTPServer(t, nil, nil, []string{"any"})
