@@ -1168,17 +1168,18 @@ func TestMergeFiles(t *testing.T) {
 
 func TestMergeReplacementClosesAfterReaders(t *testing.T) {
 	t.Parallel()
+	const domain = kv.CodeDomain
 	for _, tc := range []struct {
 		name  string
-		files func(*DomainRoTx) visibleFiles
+		files func(*AggregatorRoTx) visibleFiles
 	}{
-		{"values", func(d *DomainRoTx) visibleFiles { return d.files }},
-		{"history", func(d *DomainRoTx) visibleFiles { return d.ht.files }},
-		{"history_index", func(d *DomainRoTx) visibleFiles { return d.ht.iit.files }},
+		{"values", func(at *AggregatorRoTx) visibleFiles { return at.d[domain].files }},
+		{"history", func(at *AggregatorRoTx) visibleFiles { return at.d[domain].ht.files }},
+		{"history_index", func(at *AggregatorRoTx) visibleFiles { return at.d[domain].ht.iit.files }},
+		{"logaddrs", func(at *AggregatorRoTx) visibleFiles { return at.searchII(kv.LogAddrIdx).files }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const stepSize = uint64(10)
-			const domain = kv.CodeDomain
 			ctx := t.Context()
 			db, agg := testDbAndAggregatorv3(t, stepSize)
 			for step := range kv.Step(2) {
@@ -1194,6 +1195,14 @@ func TestMergeReplacementClosesAfterReaders(t *testing.T) {
 			merged, err := source.mergeFiles(ctx, inputs, ranges)
 			require.NoError(t, err)
 			t.Cleanup(merged.Close)
+			for id, index := range source.standaloneIIs() {
+				if index.name == kv.LogAddrIdx {
+					files := index.staticFilesInRange(r.from, r.to)
+					require.Len(t, files, 2)
+					merged.iis[id], err = index.mergeFiles(ctx, files, r.from, r.to, agg.backgroundProgress)
+					require.NoError(t, err)
+				}
+			}
 			source.Close()
 
 			// Open the merge output from disk before publishing it. The reader and
@@ -1201,7 +1210,7 @@ func TestMergeReplacementClosesAfterReaders(t *testing.T) {
 			require.NoError(t, agg.OpenFolder(db))
 			fileIn := func(view *AggregatorRoTx) *FilesItem {
 				t.Helper()
-				files := tc.files(view.d[domain])
+				files := tc.files(view)
 				require.Len(t, files, 1)
 				return files[0].src
 			}
