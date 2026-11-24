@@ -70,13 +70,15 @@ func IndexedPayloadAttestationSignatureSet(s abstract.BeaconState, attestation *
 		return nil, nil, nil, errors.New("indexedPayloadAttestationSignatureSet: attesting indices are empty or not sorted")
 	}
 
-	pks := make([][]byte, 0, indices.Length())
+	keys := make([][48]byte, indices.Length())
+	pks := make([][]byte, 0, len(keys))
 	for i := range indices.Length() {
 		val, err := s.ValidatorForValidatorIndex(int(indices.Get(i)))
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("indexedPayloadAttestationSignatureSet: failed to get validator public key: %w", err)
 		}
-		pks = append(pks, val.PublicKeyBytes())
+		keys[i] = val.PublicKey()
+		pks = append(pks, keys[i][:])
 	}
 
 	epoch := GetEpochAtSlot(s.BeaconConfig(), attestation.Data.Slot)

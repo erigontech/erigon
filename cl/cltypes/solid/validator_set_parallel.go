@@ -89,7 +89,7 @@ func (*validatorRootWorkerPool) computeRoots(validators *ValidatorSet, workerCou
 			}
 			end := min(start+chunkSize, validators.l)
 			for i := start; i < end; i++ {
-				validatorRoot(validators.Get(i), roots[i*32:(i+1)*32], &chunks)
+				validatorRoot(validators.at(i), roots[i*32:(i+1)*32], &chunks)
 			}
 		}
 	}

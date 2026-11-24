@@ -276,7 +276,7 @@ func TestValidatorSetParallelFanOutIsColdAndSizeBounded(t *testing.T) {
 	require.Positive(t, helpersStarted.Load())
 
 	helpersStarted.Store(0)
-	validator := append(Validator(nil), large.Get(0)...)
+	validator := large.Get(0).Clone()
 	validator[0]++
 	large.Set(0, validator)
 	_, err = large.HashSSZ()
@@ -284,7 +284,7 @@ func TestValidatorSetParallelFanOutIsColdAndSizeBounded(t *testing.T) {
 	require.Zero(t, helpersStarted.Load())
 
 	for i := range 100 {
-		validator = append(validator[:0], large.Get(i)...)
+		validator = large.Get(i).Clone()
 		validator[0]++
 		large.Set(i, validator)
 	}
@@ -312,7 +312,7 @@ func TestValidatorSetProgressiveParallelFanOutIsColdOnly(t *testing.T) {
 	require.Positive(t, helpersStarted.Load())
 
 	helpersStarted.Store(0)
-	validator := append(Validator(nil), validators.Get(0)...)
+	validator := validators.Get(0).Clone()
 	validator[0]++
 	validators.Set(0, validator)
 	_, err = validators.HashSSZProgressive()
@@ -320,7 +320,7 @@ func TestValidatorSetProgressiveParallelFanOutIsColdOnly(t *testing.T) {
 	require.Zero(t, helpersStarted.Load())
 
 	for i := range 100 {
-		validator = append(validator[:0], validators.Get(i)...)
+		validator = validators.Get(i).Clone()
 		validator[0]++
 		validators.Set(i, validator)
 	}
@@ -424,7 +424,7 @@ func TestValidatorSetProgressiveAppendAcrossSegmentBoundary(t *testing.T) {
 			validators := randomValidatorSet(count)
 			_, err := validators.HashSSZProgressive()
 			require.NoError(t, err)
-			validators.Append(randomValidatorSet(1).Get(0))
+			validators.Append(randomValidatorSet(1).Get(0).Clone())
 			assertValidatorSetRoot(t, validators, (*ValidatorSet).HashSSZProgressive, validatorSetProgressiveRootReference)
 		})
 	}
@@ -447,7 +447,7 @@ func TestValidatorSetParallelColdHashThenAppend(t *testing.T) {
 					helpersBefore := helpersStarted.Load()
 					assertValidatorSetRoot(t, validators, mode.hash, mode.reference)
 					require.Greater(t, helpersStarted.Load(), helpersBefore)
-					validators.Append(randomValidatorSet(1).Get(0))
+					validators.Append(randomValidatorSet(1).Get(0).Clone())
 					assertValidatorSetRoot(t, validators, mode.hash, mode.reference)
 				})
 			}
@@ -511,7 +511,7 @@ func randomValidatorSet(count int) *ValidatorSet {
 }
 
 func mutateValidator(validators *ValidatorSet, index int) {
-	validator := append(Validator(nil), validators.Get(index)...)
+	validator := validators.Get(index).Clone()
 	validator[index%validatorSize]++
 	validators.Set(index, validator)
 }
@@ -533,7 +533,7 @@ func validatorSetRootReference(t *testing.T, validators *ValidatorSet) [32]byte 
 	roots := make([][32]byte, validators.l)
 	var hashBuffer [8 * 32]byte
 	for i := range roots {
-		require.NoError(t, validators.Get(i).CopyHashBufferTo(hashBuffer[:]))
+		require.NoError(t, validators.Get(i).Clone().CopyHashBufferTo(hashBuffer[:]))
 		require.NoError(t, merkle_tree.MerkleRootFromFlatLeaves(hashBuffer[:], roots[i][:]))
 	}
 	root, err := merkle_tree.MerkleizeVector(roots, uint64(validators.c))

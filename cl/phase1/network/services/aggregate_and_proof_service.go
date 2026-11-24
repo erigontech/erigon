@@ -17,7 +17,6 @@
 package services
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -482,14 +481,15 @@ func AggregateMessageSignature(
 		return nil, nil, nil, errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 
-	pks := make([][]byte, 0, inds.Length())
-	if err := solid.RangeErr[uint64](inds, func(_ int, v uint64, _ int) error {
+	keys := make([][48]byte, inds.Length())
+	pks := make([][]byte, 0, len(keys))
+	if err := solid.RangeErr[uint64](inds, func(i int, v uint64, _ int) error {
 		val, err := s.ValidatorForValidatorIndex(int(v))
 		if err != nil {
 			return err
 		}
-		pk := val.PublicKeyBytes()
-		pks = append(pks, bytes.Clone(pk))
+		keys[i] = val.PublicKey()
+		pks = append(pks, keys[i][:])
 		return nil
 	}); err != nil {
 		return nil, nil, nil, err

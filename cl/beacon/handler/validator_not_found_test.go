@@ -98,7 +98,7 @@ func TestComputeLighthouseValidatorInclusionRejectsShortData(t *testing.T) {
 	validatorCount := postState.ValidatorLength()
 	earlierValidatorSet := solid.NewValidatorSet(validatorCount - 1)
 	for idx := 0; idx < validatorCount-1; idx++ {
-		earlierValidatorSet.Append(postState.Validators().Get(idx))
+		earlierValidatorSet.Append(postState.Validators().Get(idx).Clone())
 	}
 	shortParticipation := solid.NewParticipationBitList(validatorCount-1, validatorCount-1)
 	fullParticipation := solid.NewParticipationBitList(validatorCount, validatorCount)

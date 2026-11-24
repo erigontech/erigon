@@ -44,6 +44,70 @@ const validatorSize = 48 + 32 + 8 + 1 + 8 + 8 + 8 + 8
 // A flat buffer enables efficient read and write operations, as well as memory storage, without the need for serialization or deserialization.
 type Validator []byte
 
+// ValidatorView is a read-only window onto registry storage. It aliases the
+// registry, so it is not a stable snapshot; use Clone for an owned copy.
+type ValidatorView struct{ b []byte }
+
+func (v Validator) View() ValidatorView {
+	return ValidatorView{b: v}
+}
+
+func (v ValidatorView) Clone() Validator {
+	return append(Validator(nil), v.b...)
+}
+
+func (v ValidatorView) HashSSZ() ([32]byte, error) {
+	return Validator(v.b).HashSSZ()
+}
+
+func (v ValidatorView) EncodeSSZ(dst []byte) ([]byte, error) {
+	return append(dst, v.b...), nil
+}
+
+func (v ValidatorView) PublicKey() [48]byte {
+	return Validator(v.b).PublicKey()
+}
+
+func (v ValidatorView) WithdrawalCredentials() common.Hash {
+	return Validator(v.b).WithdrawalCredentials()
+}
+
+func (v ValidatorView) EffectiveBalance() uint64 {
+	return Validator(v.b).EffectiveBalance()
+}
+
+func (v ValidatorView) Slashed() bool {
+	return Validator(v.b).Slashed()
+}
+
+func (v ValidatorView) ActivationEligibilityEpoch() uint64 {
+	return Validator(v.b).ActivationEligibilityEpoch()
+}
+
+func (v ValidatorView) ActivationEpoch() uint64 {
+	return Validator(v.b).ActivationEpoch()
+}
+
+func (v ValidatorView) ExitEpoch() uint64 {
+	return Validator(v.b).ExitEpoch()
+}
+
+func (v ValidatorView) WithdrawableEpoch() uint64 {
+	return Validator(v.b).WithdrawableEpoch()
+}
+
+func (v ValidatorView) Active(epoch uint64) bool {
+	return Validator(v.b).Active(epoch)
+}
+
+func (v ValidatorView) IsSlashable(epoch uint64) bool {
+	return Validator(v.b).IsSlashable(epoch)
+}
+
+func (v ValidatorView) MarshalJSON() ([]byte, error) {
+	return Validator(v.b).MarshalJSON()
+}
+
 func NewValidator() Validator {
 	return make([]byte, validatorSize)
 }

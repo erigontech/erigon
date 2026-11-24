@@ -26,7 +26,7 @@ type Events struct {
 	OnNewBlockRoot                           func(index int, root common.Hash) error
 	OnNewStateRoot                           func(index int, root common.Hash) error
 	OnRandaoMixChange                        func(index int, mix [32]byte) error
-	OnNewValidator                           func(index int, v solid.Validator, balance uint64) error
+	OnNewValidator                           func(index int, v solid.ValidatorView, balance uint64) error
 	OnNewValidatorBalance                    func(index int, balance uint64) error
 	OnNewValidatorEffectiveBalance           func(index int, balance uint64) error
 	OnNewValidatorActivationEpoch            func(index int, epoch uint64) error

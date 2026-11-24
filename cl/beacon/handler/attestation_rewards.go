@@ -256,7 +256,7 @@ func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.Val
 	weights := a.beaconChainCfg.ParticipationWeights()
 	flagsTotalBalances := make([]uint64, len(weights))
 
-	validatorSet.Range(func(validatorIndex int, v solid.Validator, l int) bool {
+	validatorSet.Range(func(validatorIndex int, v solid.ValidatorView, l int) bool {
 		if v.Active(epoch) {
 			totalActiveBalance += v.EffectiveBalance()
 		}
@@ -291,7 +291,7 @@ func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.Val
 	// make a map with the filter indicies
 	totalActiveBalanceSqrt := utils.IntegerSquareRoot(totalActiveBalance)
 
-	fn := func(index uint64, v solid.Validator) error {
+	fn := func(index uint64, v solid.ValidatorView) error {
 		effectiveBalance := v.EffectiveBalance()
 		baseReward := a.baseReward(version, effectiveBalance, totalActiveBalanceSqrt)
 		// not eligible for rewards? then all empty
@@ -382,7 +382,7 @@ func (a *ApiHandler) computeAttestationsRewardsForPhase0(validatorSet *solid.Val
 	var unslashedMatchingSourceBalanceIncrements, unslashedMatchingTargetBalanceIncrements, unslashedMatchingHeadBalanceIncrements uint64
 	var err error
 
-	validatorSet.Range(func(i int, v solid.Validator, _ int) bool {
+	validatorSet.Range(func(i int, v solid.ValidatorView, _ int) bool {
 		if v.Slashed() {
 			return true
 		}
@@ -411,7 +411,7 @@ func (a *ApiHandler) computeAttestationsRewardsForPhase0(validatorSet *solid.Val
 	unslashedMatchingTargetBalanceIncrements /= beaconConfig.EffectiveBalanceIncrement
 	unslashedMatchingHeadBalanceIncrements /= beaconConfig.EffectiveBalanceIncrement
 	totalActiveBalanceSqrt := utils.IntegerSquareRoot(activeBalance)
-	fn := func(index uint64, currentValidator solid.Validator) error {
+	fn := func(index uint64, currentValidator solid.ValidatorView) error {
 		baseReward := a.baseReward(clparams.Phase0Version, currentValidator.EffectiveBalance(), totalActiveBalanceSqrt)
 
 		if err != nil {

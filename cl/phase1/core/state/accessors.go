@@ -173,14 +173,15 @@ func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.Indexed
 		return false, err
 	}
 
-	pks := make([][]byte, 0, inds.Length())
-	if err := solid.RangeErr[uint64](inds, func(_ int, v uint64, _ int) error {
+	keys := make([][48]byte, inds.Length())
+	pks := make([][]byte, 0, len(keys))
+	if err := solid.RangeErr[uint64](inds, func(i int, v uint64, _ int) error {
 		val, err := b.ValidatorForValidatorIndex(int(v))
 		if err != nil {
 			return err
 		}
-		pk := val.PublicKeyBytes()
-		pks = append(pks, pk)
+		keys[i] = val.PublicKey()
+		pks = append(pks, keys[i][:])
 		return nil
 	}); err != nil {
 		return false, err
@@ -238,7 +239,7 @@ func MaxIndexedAttestationIndices(cfg *clparams.BeaconChainConfig, version clpar
 // Implementation of is_eligible_for_activation_queue.
 // Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation_queue
 // updated for Electra: https://github.com/ethereum/consensus-specs/blob/dev/specs/electra/beacon-chain.md#modified-is_eligible_for_activation_queue
-func IsValidatorEligibleForActivationQueue(b abstract.BeaconState, validator solid.Validator) bool {
+func IsValidatorEligibleForActivationQueue(b abstract.BeaconState, validator solid.ValidatorView) bool {
 	if b.Version() <= clparams.DenebVersion {
 		return validator.ActivationEligibilityEpoch() == b.BeaconConfig().FarFutureEpoch &&
 			validator.EffectiveBalance() == b.BeaconConfig().MaxEffectiveBalance

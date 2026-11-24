@@ -319,7 +319,7 @@ func (b *BeaconState) SetValidatorBalance(index int, balance uint64) error {
 
 func (b *BeaconState) AddValidator(validator solid.Validator, balance uint64) error {
 	if b.events.OnNewValidator != nil {
-		if err := b.events.OnNewValidator(b.validators.Length(), validator, balance); err != nil {
+		if err := b.events.OnNewValidator(b.validators.Length(), validator.View(), balance); err != nil {
 			return err
 		}
 	}

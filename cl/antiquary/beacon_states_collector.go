@@ -163,7 +163,7 @@ func (i *beaconStatesCollector) addGenesisState(state *state.CachingBeaconState)
 
 	events := state_accessors.NewStateEvents()
 
-	state.ForEachValidator(func(v solid.Validator, index, total int) bool {
+	state.ForEachValidator(func(v solid.ValidatorView, index, total int) bool {
 		events.AddValidator(uint64(index), v)
 		return true
 	})

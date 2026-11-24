@@ -99,10 +99,10 @@ func newVerifyingPackingFixture(t *testing.T) *verifyingPackingFixture {
 		}
 		return indices, nil
 	}).AnyTimes()
-	f.state.EXPECT().ValidatorForValidatorIndex(gomock.Any()).DoAndReturn(func(index int) (solid.Validator, error) {
+	f.state.EXPECT().ValidatorForValidatorIndex(gomock.Any()).DoAndReturn(func(index int) (solid.ValidatorView, error) {
 		validator := solid.NewValidator()
 		validator.SetPublicKey([48]byte(bls.CompressPublicKey(f.keys[index/packingCommitteeSize][index%packingCommitteeSize].PublicKey())))
-		return validator, nil
+		return validator.View(), nil
 	}).AnyTimes()
 	f.state.EXPECT().GetDomain(f.cfg.DomainBeaconAttester, gomock.Any()).Return(f.domain, nil).AnyTimes()
 	f.state.EXPECT().BaseRewardPerIncrement().Return(uint64(1000)).AnyTimes()

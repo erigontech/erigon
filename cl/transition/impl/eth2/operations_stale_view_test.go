@@ -17,7 +17,6 @@
 package eth2
 
 import (
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,9 +30,9 @@ import (
 // detachedViews returns validator views that do not alias registry storage.
 type detachedViews struct{ *state.CachingBeaconState }
 
-func (d detachedViews) ValidatorForValidatorIndex(i int) (solid.Validator, error) {
+func (d detachedViews) ValidatorForValidatorIndex(i int) (solid.ValidatorView, error) {
 	v, err := d.CachingBeaconState.ValidatorForValidatorIndex(i)
-	return slices.Clone(v), err
+	return v.Clone().View(), err
 }
 
 func electraStateWith(t *testing.T, cfg *clparams.BeaconChainConfig, vals ...solid.Validator) *state.CachingBeaconState {

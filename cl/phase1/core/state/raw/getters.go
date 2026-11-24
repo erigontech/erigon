@@ -118,15 +118,15 @@ func (b *BeaconState) AppendValidator(in solid.Validator) {
 	b.validators.Append(in)
 }
 
-func (b *BeaconState) ForEachValidator(fn func(v solid.Validator, idx int, total int) bool) {
-	b.validators.Range(func(index int, value solid.Validator, length int) bool {
+func (b *BeaconState) ForEachValidator(fn func(v solid.ValidatorView, idx int, total int) bool) {
+	b.validators.Range(func(index int, value solid.ValidatorView, length int) bool {
 		return fn(value, index, length)
 	})
 }
 
-func (b *BeaconState) ValidatorForValidatorIndex(index int) (solid.Validator, error) {
+func (b *BeaconState) ValidatorForValidatorIndex(index int) (solid.ValidatorView, error) {
 	if index < 0 || index >= b.validators.Length() {
-		return nil, ErrInvalidValidatorIndex
+		return solid.ValidatorView{}, ErrInvalidValidatorIndex
 	}
 	return b.validators.Get(index), nil
 }

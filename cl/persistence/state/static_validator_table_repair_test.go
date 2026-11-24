@@ -42,14 +42,14 @@ func TestStaticValidatorTable_RefillsRestoredShortTable(t *testing.T) {
 
 	table := NewStaticValidatorTable()
 	for i := range persisted {
-		require.NoError(t, table.AddValidator(vals[i], uint64(i), 0))
+		require.NoError(t, table.AddValidator(vals[i].View(), uint64(i), 0))
 	}
 	// Simulate a restore where the processing slot advanced past genesis.
 	table.SetSlot(1000)
 	require.Equal(t, persisted, staticTableLen(table))
 
 	for i := range full {
-		require.NoError(t, table.AddValidator(vals[i], uint64(i), 0))
+		require.NoError(t, table.AddValidator(vals[i].View(), uint64(i), 0))
 	}
 	require.Equal(t, full, staticTableLen(table))
 }
@@ -57,6 +57,6 @@ func TestStaticValidatorTable_RefillsRestoredShortTable(t *testing.T) {
 // A genuine index gap must error, not silently corrupt the table.
 func TestStaticValidatorTable_AddValidatorRejectsGap(t *testing.T) {
 	table := NewStaticValidatorTable()
-	require.NoError(t, table.AddValidator(solid.NewValidator(), 0, 0))
-	require.Error(t, table.AddValidator(solid.NewValidator(), 5, 0))
+	require.NoError(t, table.AddValidator(solid.NewValidator().View(), 0, 0))
+	require.Error(t, table.AddValidator(solid.NewValidator().View(), 5, 0))
 }

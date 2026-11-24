@@ -170,7 +170,7 @@ func validatorSetProgressiveRootReference(t *testing.T, validators *ValidatorSet
 	roots := make([][32]byte, validators.l)
 	hashBuffer := make([]byte, 8*32)
 	for i := range roots {
-		require.NoError(t, validators.Get(i).CopyHashBufferTo(hashBuffer))
+		require.NoError(t, validators.Get(i).Clone().CopyHashBufferTo(hashBuffer))
 		require.NoError(t, merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, roots[i][:]))
 	}
 	root, err := merkle_tree.ProgressiveListRoot(roots, uint64(validators.l))

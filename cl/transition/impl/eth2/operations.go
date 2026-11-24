@@ -1957,7 +1957,7 @@ func switchToCompoundingValidator(s abstract.BeaconState, vindex uint64) error {
 	if err != nil {
 		return err
 	}
-	return state.QueueExcessActiveBalance(s, vindex, &validator)
+	return state.QueueExcessActiveBalance(s, vindex, validator)
 }
 
 // compute_consolidation_epoch_and_update_churn

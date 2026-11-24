@@ -718,8 +718,9 @@ func TestBlockServiceGossipUsesPostUpgradeExecutionHeadAtGloasBoundary(t *testin
 	require.Equal(t, common.Hash{}, parentState.GetLatestBlockHash())
 	privateKey, err := bls.GenerateKey()
 	require.NoError(t, err)
-	validator, err := parentState.ValidatorForValidatorIndex(int(expectedProposer))
+	validatorView, err := parentState.ValidatorForValidatorIndex(int(expectedProposer))
 	require.NoError(t, err)
+	validator := validatorView.Clone()
 	var pubkey [48]byte
 	copy(pubkey[:], bls.CompressPublicKey(privateKey.PublicKey()))
 	validator.SetPublicKey(pubkey)

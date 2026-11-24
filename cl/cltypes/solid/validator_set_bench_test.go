@@ -37,7 +37,7 @@ func BenchmarkValidatorSetWarmDirty(b *testing.B) {
 			for iteration := 0; iteration < b.N; iteration++ {
 				b.StopTimer()
 				for i := range dirty {
-					validator := append(Validator(nil), validators.Get(i)...)
+					validator := validators.Get(i).Clone()
 					validator[0] = byte(iteration + i)
 					validators.Set(i, validator)
 				}

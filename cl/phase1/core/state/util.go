@@ -50,28 +50,28 @@ func GetValidatorFromDeposit(s abstract.BeaconState, pubkey [48]byte, withdrawal
 	validator.SetWithdrawableEpoch(conf.FarFutureEpoch)
 
 	// maxEffectiveBalance differs based on the version
-	maxEffectiveBalance := GetMaxEffectiveBalanceByVersion(validator, conf, s.Version())
+	maxEffectiveBalance := GetMaxEffectiveBalanceByVersion(validator.View(), conf, s.Version())
 	effectiveBalance := min(amount-amount%conf.EffectiveBalanceIncrement, maxEffectiveBalance)
 	validator.SetEffectiveBalance(effectiveBalance)
 	return validator
 }
 
-func HasEth1WithdrawalCredential(validator solid.Validator, conf *clparams.BeaconChainConfig) bool {
+func HasEth1WithdrawalCredential(validator solid.ValidatorView, conf *clparams.BeaconChainConfig) bool {
 	withdrawalCredentials := validator.WithdrawalCredentials()
 	return withdrawalCredentials[0] == byte(conf.ETH1AddressWithdrawalPrefixByte)
 }
 
-func HasCompoundingWithdrawalCredential(validator solid.Validator, conf *clparams.BeaconChainConfig) bool {
+func HasCompoundingWithdrawalCredential(validator solid.ValidatorView, conf *clparams.BeaconChainConfig) bool {
 	withdrawalCredentials := validator.WithdrawalCredentials()
 	return withdrawalCredentials[0] == byte(conf.CompoundingWithdrawalPrefix)
 }
 
-func HasExecutionWithdrawalCredential(validator solid.Validator, conf *clparams.BeaconChainConfig) bool {
+func HasExecutionWithdrawalCredential(validator solid.ValidatorView, conf *clparams.BeaconChainConfig) bool {
 	return HasCompoundingWithdrawalCredential(validator, conf) || HasEth1WithdrawalCredential(validator, conf)
 }
 
 // Check whether a validator is fully withdrawable at the given epoch.
-func isFullyWithdrawableValidator(b abstract.BeaconState, validator solid.Validator, balance uint64, epoch uint64) bool {
+func isFullyWithdrawableValidator(b abstract.BeaconState, validator solid.ValidatorView, balance uint64, epoch uint64) bool {
 	conf := b.BeaconConfig()
 	if b.Version().BeforeOrEqual(clparams.DenebVersion) {
 		return HasEth1WithdrawalCredential(validator, conf) &&
@@ -85,7 +85,7 @@ func isFullyWithdrawableValidator(b abstract.BeaconState, validator solid.Valida
 }
 
 // getMaxEffectiveBalanceElectra is new in electra
-func getMaxEffectiveBalanceElectra(v solid.Validator, conf *clparams.BeaconChainConfig) uint64 {
+func getMaxEffectiveBalanceElectra(v solid.ValidatorView, conf *clparams.BeaconChainConfig) uint64 {
 	if HasCompoundingWithdrawalCredential(v, conf) {
 		return conf.MaxEffectiveBalanceElectra
 	}
@@ -94,7 +94,7 @@ func getMaxEffectiveBalanceElectra(v solid.Validator, conf *clparams.BeaconChain
 
 // GetMaxEffectiveBalanceByVersion is a helper function to get the max effective balance based on the state version.
 // In Electra, the max effective balance is different based on the withdrawal credential.
-func GetMaxEffectiveBalanceByVersion(v solid.Validator, conf *clparams.BeaconChainConfig, version clparams.StateVersion) uint64 {
+func GetMaxEffectiveBalanceByVersion(v solid.ValidatorView, conf *clparams.BeaconChainConfig, version clparams.StateVersion) uint64 {
 	if version.BeforeOrEqual(clparams.DenebVersion) {
 		return conf.MaxEffectiveBalance
 	}
@@ -102,7 +102,7 @@ func GetMaxEffectiveBalanceByVersion(v solid.Validator, conf *clparams.BeaconCha
 }
 
 // Check whether a validator is partially withdrawable.
-func isPartiallyWithdrawableValidator(b abstract.BeaconState, validator solid.Validator, balance uint64) bool {
+func isPartiallyWithdrawableValidator(b abstract.BeaconState, validator solid.ValidatorView, balance uint64) bool {
 	conf := b.BeaconConfig()
 	withdrawalCredentials := validator.WithdrawalCredentials()
 	if b.Version().BeforeOrEqual(clparams.DenebVersion) {
@@ -161,7 +161,7 @@ func GetConsolidationChurnLimit(s abstract.BeaconState) uint64 {
 	return GetBalanceChurnLimit(s) - GetActivationExitChurnLimit(s)
 }
 
-func QueueExcessActiveBalance(s abstract.BeaconState, vindex uint64, validator *solid.Validator) error {
+func QueueExcessActiveBalance(s abstract.BeaconState, vindex uint64, validator solid.ValidatorView) error {
 	balance, err := s.ValidatorBalance(int(vindex))
 	if err != nil {
 		return err

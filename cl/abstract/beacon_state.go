@@ -231,8 +231,8 @@ type BeaconStateMinimal interface {
 	ValidatorSet() *solid.ValidatorSet
 	PreviousEpochParticipation() *solid.ParticipationBitList
 
-	ForEachValidator(fn func(v solid.Validator, idx int, total int) bool)
-	ValidatorForValidatorIndex(index int) (solid.Validator, error)
+	ForEachValidator(fn func(v solid.ValidatorView, idx int, total int) bool)
+	ValidatorForValidatorIndex(index int) (solid.ValidatorView, error)
 
 	ForEachSlashingSegment(fn func(idx int, v uint64, total int) bool)
 	SlashingSegmentAt(pos int) uint64
@@ -264,7 +264,7 @@ type BeaconStateReader interface {
 	ValidatorPublicKey(index int) (common.Bytes48, error)
 	GetDomain(domainType [4]byte, epoch uint64) ([]byte, error)
 	CommitteeCount(epoch uint64) uint64
-	ValidatorForValidatorIndex(index int) (solid.Validator, error)
+	ValidatorForValidatorIndex(index int) (solid.ValidatorView, error)
 	Version() clparams.StateVersion
 	GenesisValidatorsRoot() common.Hash
 	GetBeaconProposerIndexForSlot(slot uint64) (uint64, error)

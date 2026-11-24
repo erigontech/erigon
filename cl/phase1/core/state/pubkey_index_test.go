@@ -256,7 +256,7 @@ func assertPubkeyIndexMatchesUniverse(t *testing.T, beaconState *CachingBeaconSt
 
 func pubkeyIndexFromValidators(beaconState *CachingBeaconState) map[[48]byte]uint64 {
 	want := make(map[[48]byte]uint64, beaconState.ValidatorLength())
-	beaconState.ForEachValidator(func(validator solid.Validator, index, _ int) bool {
+	beaconState.ForEachValidator(func(validator solid.ValidatorView, index, _ int) bool {
 		want[validator.PublicKey()] = uint64(index)
 		return true
 	})

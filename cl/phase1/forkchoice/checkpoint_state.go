@@ -75,7 +75,7 @@ func readFromBitset(bitset []byte, i int) bool {
 	return (bitset[sliceIndex] & (1 << uint(bitIndex))) > 0
 }
 
-func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegistry public_keys_registry.PublicKeyRegistry, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
+func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegistry public_keys_registry.PublicKeyRegistry, validatorSet []solid.ValidatorView, randaoMixes solid.HashVectorSSZ,
 	genesisValidatorsRoot common.Hash, fork *cltypes.Fork, unslashedActiveBalance, epoch uint64, checkpoint solid.Checkpoint,
 ) *checkpointState {
 	balances := make([]uint64, len(validatorSet))

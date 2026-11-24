@@ -40,7 +40,7 @@ func (r *InMemoryPublicKeysRegistry) ResetAnchor(s abstract.BeaconState) {
 	r.statesRegistry = make(map[solid.Checkpoint][]common.Bytes48)        // reset the registry
 	r.basePublicKeyRegistry = make([]common.Bytes48, s.ValidatorLength()) // reset the public keys registry
 	for i := 0; i < s.ValidatorLength(); i++ {
-		copy(r.basePublicKeyRegistry[i][:], s.ValidatorSet().Get(i).PublicKeyBytes())
+		r.basePublicKeyRegistry[i] = s.ValidatorSet().Get(i).PublicKey()
 	}
 }
 
@@ -78,7 +78,7 @@ func (r *InMemoryPublicKeysRegistry) AddState(checkpoint solid.Checkpoint, s abs
 	defer r.mu.Unlock()
 	statePublicKeys := make([]common.Bytes48, s.ValidatorLength()-len(r.basePublicKeyRegistry))
 	for i := len(r.basePublicKeyRegistry); i < s.ValidatorLength(); i++ {
-		copy(statePublicKeys[i-len(r.basePublicKeyRegistry)][:], s.ValidatorSet().Get(i).PublicKeyBytes())
+		statePublicKeys[i-len(r.basePublicKeyRegistry)] = s.ValidatorSet().Get(i).PublicKey()
 	}
 	r.statesRegistry[checkpoint] = statePublicKeys
 }

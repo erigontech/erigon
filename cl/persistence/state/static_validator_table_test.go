@@ -82,7 +82,7 @@ func TestStaticValidatorTable(t *testing.T) {
 
 	table := NewStaticValidatorTable()
 	for i := range vals {
-		require.NoError(t, table.AddValidator(vals[i], uint64(i), 0))
+		require.NoError(t, table.AddValidator(vals[i].View(), uint64(i), 0))
 	}
 	// Now let us play with this
 	require.NoError(t, table.AddExitEpoch(1, 32, 34))

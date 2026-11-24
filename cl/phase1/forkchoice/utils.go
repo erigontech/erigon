@@ -413,8 +413,8 @@ func (f *ForkChoiceStore) buildCheckpointState(checkpoint solid.Checkpoint, base
 	}
 	mixes := baseState.RandaoMixes()
 	// TODO: make this copy smarter when validators is a smarter struct
-	validators := make([]solid.Validator, baseState.ValidatorLength())
-	baseState.ForEachValidator(func(v solid.Validator, idx, total int) bool {
+	validators := make([]solid.ValidatorView, baseState.ValidatorLength())
+	baseState.ForEachValidator(func(v solid.ValidatorView, idx, total int) bool {
 		validators[idx] = v
 		return true
 	})
@@ -472,7 +472,7 @@ func (f *ForkChoiceStore) storeCheckpointState(checkpoint solid.Checkpoint, chec
 func getUnslashedActiveBalance(beaconState *state.CachingBeaconState) uint64 {
 	epoch := state.Epoch(beaconState)
 	var total uint64
-	beaconState.ForEachValidator(func(validator solid.Validator, _, _ int) bool {
+	beaconState.ForEachValidator(func(validator solid.ValidatorView, _, _ int) bool {
 		if validator.Active(epoch) && !validator.Slashed() {
 			total += validator.EffectiveBalance()
 		}

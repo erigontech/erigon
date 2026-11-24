@@ -26,7 +26,7 @@ import (
 
 func TestStateEvents(t *testing.T) {
 	events := NewStateEvents()
-	events.AddValidator(0, solid.NewValidator())
+	events.AddValidator(0, solid.NewValidator().View())
 	events.ChangeExitEpoch(1, 3)
 	events.ChangeWithdrawableEpoch(1, 4)
 	events.ChangeWithdrawalCredentials(1, [32]byte{2})
@@ -34,7 +34,7 @@ func TestStateEvents(t *testing.T) {
 	events.ChangeActivationEligibilityEpoch(1, 6)
 	events.ChangeSlashed(1, true)
 	// Make one for index 2
-	events.AddValidator(2, solid.NewValidator())
+	events.AddValidator(2, solid.NewValidator().View())
 	events.ChangeExitEpoch(2, 2)
 	events.ChangeWithdrawableEpoch(2, 3)
 	events.ChangeWithdrawalCredentials(2, [32]byte{1})
@@ -42,8 +42,8 @@ func TestStateEvents(t *testing.T) {
 	events.ChangeActivationEligibilityEpoch(2, 5)
 	events.ChangeSlashed(2, true)
 	// Ok now lets replay it.
-	require.NoError(t, ReplayEvents(func(validatorIndex uint64, validator solid.Validator) error {
-		require.Equal(t, validator, solid.NewValidator())
+	require.NoError(t, ReplayEvents(func(validatorIndex uint64, validator solid.ValidatorView) error {
+		require.Equal(t, validator, solid.NewValidator().View())
 		return nil
 	}, func(validatorIndex, exitEpoch uint64) error {
 		if validatorIndex == 1 {

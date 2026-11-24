@@ -54,7 +54,7 @@ func consolidationState(
 	s.EXPECT().BeaconConfig().Return(cfg).AnyTimes()
 	s.EXPECT().Slot().Return(uint64(0)).AnyTimes()
 	s.EXPECT().GetPendingConsolidations().Return(consolidations).AnyTimes()
-	s.EXPECT().ValidatorForValidatorIndex(consolidationSourceIndex).Return(source, nil).AnyTimes()
+	s.EXPECT().ValidatorForValidatorIndex(consolidationSourceIndex).Return(source.View(), nil).AnyTimes()
 	s.EXPECT().ValidatorBalance(gomock.Any()).DoAndReturn(func(index int) (uint64, error) {
 		balance, ok := balances[index]
 		if !ok {

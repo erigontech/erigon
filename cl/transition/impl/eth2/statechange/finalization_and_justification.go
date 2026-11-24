@@ -90,7 +90,7 @@ func ProcessJustificationBitsAndFinality(s abstract.BeaconState, unslashedPartic
 	var previousTargetBalance, currentTargetBalance uint64
 	if s.Version() == clparams.Phase0Version {
 		var err error
-		s.ForEachValidator(func(validator solid.Validator, idx, total int) bool {
+		s.ForEachValidator(func(validator solid.ValidatorView, idx, total int) bool {
 			if validator.Slashed() {
 				return true
 			}

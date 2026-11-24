@@ -163,7 +163,7 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 	b.SetVersion(clparams.ElectraVersion)
 
 	earliestExitEpoch := ComputeActivationExitEpoch(b.BeaconConfig(), epoch)
-	b.ValidatorSet().Range(func(i int, v solid.Validator, _ int) bool {
+	b.ValidatorSet().Range(func(i int, v solid.ValidatorView, _ int) bool {
 		if v.ExitEpoch() != b.BeaconConfig().FarFutureEpoch {
 			if v.ExitEpoch() > earliestExitEpoch {
 				earliestExitEpoch = v.ExitEpoch()
@@ -197,7 +197,7 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		index       uint64
 	}
 	validators := []tempValidator{}
-	b.ValidatorSet().Range(func(i int, v solid.Validator, _ int) bool {
+	b.ValidatorSet().Range(func(i int, v solid.ValidatorView, _ int) bool {
 		if v.ActivationEpoch() == b.BeaconConfig().FarFutureEpoch {
 			validators = append(validators, tempValidator{
 				pubkey:      v.PublicKey(),
@@ -243,9 +243,9 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 
 	// Ensure early adopters of compounding credentials go through the activation churn
 	var queueErr error
-	b.ValidatorSet().Range(func(vindex int, v solid.Validator, _ int) bool {
+	b.ValidatorSet().Range(func(vindex int, v solid.ValidatorView, _ int) bool {
 		if HasCompoundingWithdrawalCredential(v, b.BeaconConfig()) {
-			if queueErr = QueueExcessActiveBalance(b, uint64(vindex), &v); queueErr != nil {
+			if queueErr = QueueExcessActiveBalance(b, uint64(vindex), v); queueErr != nil {
 				return false
 			}
 		}

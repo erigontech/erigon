@@ -154,7 +154,7 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 		var hashBuffer [8 * 32]byte
 
 		t.MerkleTree.SetComputeLeafFn(func(idx int, out []byte) {
-			validator := t.Get(idx)
+			validator := t.at(idx)
 			if err := validator.CopyHashBufferTo(hashBuffer[:]); err != nil {
 				panic(err)
 			}
@@ -226,7 +226,11 @@ func (*ValidatorSet) Static() bool {
 	return false
 }
 
-func (v *ValidatorSet) Get(idx int) Validator {
+func (v *ValidatorSet) Get(idx int) ValidatorView {
+	return v.at(idx).View()
+}
+
+func (v *ValidatorSet) at(idx int) Validator {
 	if idx < 0 || idx >= v.l {
 		panic("ValidatorSet -- Get: out of bounds")
 	}
@@ -244,7 +248,7 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 		cap := uint64(v.c)
 		hashBuffer := make([]byte, 8*32)
 		serialLeafFn := func(idx int, out []byte) {
-			validator := v.Get(idx)
+			validator := v.at(idx)
 			if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
 				panic(err)
 			}
@@ -357,7 +361,7 @@ func (v *ValidatorSet) setAttesterBit(idx int, bit int, val bool) {
 	v.attesterBits[idx] &= ^(1 << bit)
 }
 
-func (v *ValidatorSet) Range(fn func(int, Validator, int) bool) {
+func (v *ValidatorSet) Range(fn func(int, ValidatorView, int) bool) {
 	for i := 0; i < v.l; i++ {
 		if !fn(i, v.Get(i), v.l) {
 			return
@@ -425,7 +429,7 @@ func (v *ValidatorSet) appendProgressiveLeaf(index int) {
 func (v *ValidatorSet) progressiveLeafFn(start int) func(int, []byte) {
 	var hashBuffer [8 * 32]byte
 	return func(idx int, out []byte) {
-		if err := v.Get(start + idx).CopyHashBufferTo(hashBuffer[:]); err != nil {
+		if err := v.at(start + idx).CopyHashBufferTo(hashBuffer[:]); err != nil {
 			panic(err)
 		}
 		if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer[:], out); err != nil {
@@ -511,41 +515,41 @@ func (v *ValidatorSet) SetMinPreviousInclusionDelayAttestation(idx int, val *Pen
 
 func (v *ValidatorSet) SetWithdrawalCredentialForValidatorAtIndex(index int, creds common.Hash) {
 	v.zeroTreeHash(index)
-	v.Get(index).SetWithdrawalCredentials(creds)
+	v.at(index).SetWithdrawalCredentials(creds)
 }
 
 func (v *ValidatorSet) SetExitEpochForValidatorAtIndex(index int, epoch uint64) {
 	v.zeroTreeHash(index)
-	v.Get(index).SetExitEpoch(epoch)
+	v.at(index).SetExitEpoch(epoch)
 }
 
 func (v *ValidatorSet) SetWithdrawableEpochForValidatorAtIndex(index int, epoch uint64) {
 	v.zeroTreeHash(index)
-	v.Get(index).SetWithdrawableEpoch(epoch)
+	v.at(index).SetWithdrawableEpoch(epoch)
 }
 
 func (v *ValidatorSet) SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64) {
 	v.zeroTreeHash(index)
-	v.Get(index).SetEffectiveBalance(balance)
+	v.at(index).SetEffectiveBalance(balance)
 }
 
 func (v *ValidatorSet) SetActivationEpochForValidatorAtIndex(index int, epoch uint64) {
 	v.zeroTreeHash(index)
-	v.Get(index).SetActivationEpoch(epoch)
+	v.at(index).SetActivationEpoch(epoch)
 }
 
 func (v *ValidatorSet) SetActivationEligibilityEpochForValidatorAtIndex(index int, epoch uint64) {
 	v.zeroTreeHash(index)
-	v.Get(index).SetActivationEligibilityEpoch(epoch)
+	v.at(index).SetActivationEligibilityEpoch(epoch)
 }
 
 func (v *ValidatorSet) SetValidatorSlashed(index int, slashed bool) {
 	v.zeroTreeHash(index)
-	v.Get(index).SetSlashed(slashed)
+	v.at(index).SetSlashed(slashed)
 }
 
 func (v *ValidatorSet) MarshalJSON() ([]byte, error) {
-	validators := make([]Validator, v.l)
+	validators := make([]ValidatorView, v.l)
 	for i := 0; i < v.l; i++ {
 		validators[i] = v.Get(i)
 	}

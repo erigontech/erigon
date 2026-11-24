@@ -283,8 +283,9 @@ func TestSyncCommitteesChecksTheCommitteeOfTheMessageSlot(t *testing.T) {
 			require.NoError(t, head.SetSlot(nextPeriod-tt.headBehind))
 
 			publicKey := common.Bytes48{0xaa}
-			validator, err := head.ValidatorForValidatorIndex(0)
+			validatorView, err := head.ValidatorForValidatorIndex(0)
 			require.NoError(t, err)
+			validator := validatorView.Clone()
 			validator.SetPublicKey(publicKey)
 			head.SetValidatorAtIndex(0, validator)
 			current, next := head.CurrentSyncCommittee().Copy(), head.NextSyncCommittee().Copy()

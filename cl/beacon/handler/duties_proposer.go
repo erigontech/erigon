@@ -321,7 +321,7 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validators not found for slot %d", expectedSlot))
 	}
 	activeIndices := make([]uint64, 0, validatorSet.Length())
-	validatorSet.Range(func(validatorIndex int, validator solid.Validator, _ int) bool {
+	validatorSet.Range(func(validatorIndex int, validator solid.ValidatorView, _ int) bool {
 		if validator.Active(epoch) {
 			activeIndices = append(activeIndices, uint64(validatorIndex))
 		}
