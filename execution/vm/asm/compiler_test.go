@@ -29,6 +29,10 @@ func TestCompiler(t *testing.T) {
 		input, output string
 	}{
 		{
+			input:  "SENDALL\nSELFDESTRUCT\n",
+			output: "ffff",
+		},
+		{
 			input: `
 	GAS
 	label:
