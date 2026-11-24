@@ -169,6 +169,21 @@ func TestBudget(t *testing.T) {
 	require.False(t, newBudget(drainMargin).fits(l1Cost{}), "a ceiling within the margin takes nothing")
 }
 
+// TestBudgetFloor: calldata heavy enough for the EIP-7623 floor to exceed
+// the standard projection is held to the floor.
+func TestBudgetFloor(t *testing.T) {
+	b := newBudget(MaxPostBatchGas)
+	// 410,000 non-zero bytes: 6,560,000 at the standard rate, 16,421,000
+	// on the floor, over the cap of 16,177,216.
+	data := l1Cost{entries: 1, calldata: 16 * 410_000, tokens: 4 * 410_000}
+	require.LessOrEqual(t, b.projected+postBatchEntryGas+data.calldata, b.cap, "the standard projection fits")
+	require.False(t, b.fits(data))
+	b.take(l1Cost{entries: 1, calldata: 16 * 300_000, tokens: 4 * 300_000})
+	require.Equal(t, uint64(txGas+10*4*300_000), b.floor())
+	require.False(t, b.fits(l1Cost{calldata: 16 * 120_000, tokens: 4 * 120_000}))
+	require.True(t, b.fits(l1Cost{calldata: 16 * 1_000, tokens: 4 * 1_000}))
+}
+
 // TestInboundCost: an inbound delivery adds its deferred entry to the batch
 // and its sidecar to the DA, and nothing on L1 the posting runs.
 func TestInboundCost(t *testing.T) {
@@ -189,11 +204,12 @@ func TestInboundCost(t *testing.T) {
 	require.NoError(t, err)
 	encDeferred, err := protocol.EncodeExecutionEntry(deferred)
 	require.NoError(t, err)
-	one := l1Cost{entries: 1, calldata: calldataGas(encSidecar) + calldataGas(encDeferred)}
+	one := l1Cost{entries: 1, calldata: calldataGas(encSidecar) + calldataGas(encDeferred), tokens: floorTokens(encSidecar) + floorTokens(encDeferred)}
+	require.Equal(t, FloorGas(append(encSidecar, encDeferred...)), txGas+10*one.tokens)
 	cost, err := inboundCost([]*Delivery{{Call: in, Sidecar: sidecar}})
 	require.NoError(t, err)
 	require.Equal(t, one, cost)
 	cost, err = inboundCost([]*Delivery{{Call: in, Sidecar: sidecar}, {Call: in, Sidecar: sidecar}})
 	require.NoError(t, err)
-	require.Equal(t, l1Cost{entries: 2, calldata: 2 * one.calldata}, cost)
+	require.Equal(t, l1Cost{entries: 2, calldata: 2 * one.calldata, tokens: 2 * one.tokens}, cost)
 }

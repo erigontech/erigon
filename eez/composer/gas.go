@@ -60,9 +60,12 @@ func PostBatchGas(b *protocol.ProofSystemBatch) (uint64, error) {
 }
 
 // FloorGas is the EIP-7623 floor of a transaction with input.
-func FloorGas(input []byte) uint64 {
+func FloorGas(input []byte) uint64 { return txGas + 10*floorTokens(input) }
+
+// floorTokens are the EIP-7623 tokens of input: 1 a zero byte, 4 any other.
+func floorTokens(input []byte) uint64 {
 	zero := uint64(bytes.Count(input, []byte{0}))
-	return txGas + 10*(zero+4*(uint64(len(input))-zero))
+	return zero + 4*(uint64(len(input))-zero)
 }
 
 // calldataGas is the standard price of input: 4 a zero byte, 16 any other.
@@ -82,14 +85,15 @@ func PostBatchGasCeiling(requested uint64) (uint64, bool) {
 }
 
 // l1Cost is what a held transaction adds to its batch's posting: entries,
-// calldata at the standard rate, and the gas of the L1 calls the posting
-// makes for it.
-type l1Cost struct{ entries, calldata, target uint64 }
+// calldata at the standard rate and in EIP-7623 tokens, and the gas of the
+// L1 calls the posting makes for it.
+type l1Cost struct{ entries, calldata, tokens, target uint64 }
 
 // budget projects the gas of a batch's posting as held transactions join
-// it, from the anchor entry every batch leads with, against a cap leaving
-// the drain margin under the ceiling.
-type budget struct{ cap, projected uint64 }
+// it, from the anchor entry every batch leads with, at the standard rate
+// and on the EIP-7623 floor of the calldata it prices, against a cap
+// leaving the drain margin under the ceiling.
+type budget struct{ cap, projected, tokens uint64 }
 
 func newBudget(maxGas uint64) *budget {
 	b := &budget{projected: txGas + postBatchBaseGas + postBatchEntryGas}
@@ -103,11 +107,18 @@ func (b *budget) after(c l1Cost) uint64 {
 	return b.projected + postBatchEntryGas*c.entries + c.calldata + c.target
 }
 
-// fits reports whether c keeps the projection within the cap.
-func (b *budget) fits(c l1Cost) bool { return b.after(c) <= b.cap }
+// floor is the EIP-7623 floor of the calldata priced so far.
+func (b *budget) floor() uint64 { return txGas + 10*b.tokens }
+
+// fits reports whether c keeps the projection and the floor within the cap.
+func (b *budget) fits(c l1Cost) bool {
+	return b.after(c) <= b.cap && txGas+10*(b.tokens+c.tokens) <= b.cap
+}
 
 // take charges c.
-func (b *budget) take(c l1Cost) { b.projected = b.after(c) }
+func (b *budget) take(c l1Cost) {
+	b.projected, b.tokens = b.after(c), b.tokens+c.tokens
+}
 
 // inboundCost is what deliveries add: each a deferred entry in the batch
 // and a sidecar in its DA.
@@ -121,6 +132,7 @@ func inboundCost(ds []*Delivery) (l1Cost, error) {
 				return l1Cost{}, err
 			}
 			c.calldata += calldataGas(enc)
+			c.tokens += floorTokens(enc)
 		}
 	}
 	return c, nil
