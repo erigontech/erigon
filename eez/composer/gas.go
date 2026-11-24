@@ -20,6 +20,7 @@ import (
 	"bytes"
 
 	"github.com/erigontech/erigon/eez/protocol"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 const (
@@ -49,14 +50,24 @@ var proofPlaceholder = bytes.Repeat([]byte{0xff}, 128)
 // proofPlaceholder: the larger of its execution and calldata at the standard
 // rate and its EIP-7623 floor.
 func PostBatchGas(b *protocol.ProofSystemBatch) (uint64, error) {
+	standard, tokens, err := postBatchGas(b)
+	if err != nil {
+		return 0, err
+	}
+	return max(standard, txGas+10*tokens), nil
+}
+
+// postBatchGas projects the gas of posting b with a proof of
+// proofPlaceholder at the standard rate, and returns its calldata's EIP-7623
+// tokens.
+func postBatchGas(b *protocol.ProofSystemBatch) (standard, tokens uint64, err error) {
 	sized := *b
 	sized.Proofs = [][]byte{proofPlaceholder}
 	input, err := protocol.EncodePostAndVerifyBatch(&sized)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	standard := txGas + postBatchBaseGas + postBatchEntryGas*uint64(len(b.Entries)) + calldataGas(input)
-	return max(standard, FloorGas(input)), nil
+	return txGas + postBatchBaseGas + postBatchEntryGas*uint64(len(b.Entries)) + calldataGas(input), floorTokens(input), nil
 }
 
 // FloorGas is the EIP-7623 floor of a transaction with input.
@@ -101,6 +112,20 @@ func newBudget(maxGas uint64) *budget {
 		b.cap = maxGas - drainMargin
 	}
 	return b
+}
+
+// windowBudget returns the budget of a batch settling blocks, the chain from
+// the cursor's child to an empty Sync block, from its anchor-only batch.
+func windowBudget(batcher *Batcher, maxGas uint64, blocks []*types.Block) (*budget, error) {
+	batch, err := batcher.AnchorBatch(blocks[0].ParentHash(), blocks)
+	if err != nil {
+		return nil, err
+	}
+	b := newBudget(maxGas)
+	if b.projected, b.tokens, err = postBatchGas(batch); err != nil {
+		return nil, err
+	}
+	return b, nil
 }
 
 func (b *budget) after(c l1Cost) uint64 {

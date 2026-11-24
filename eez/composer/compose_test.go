@@ -93,7 +93,7 @@ func newCrossFixture(t *testing.T) *crossFixture {
 	m.deploy(call.Source, forward(crossProxy, false))
 	m.deploy(unproxied, append(callTo(nobody), 0x00))
 	f := &crossFixture{w: w, call: call, output: output, l1: &memL1{m: m}, key: key, pool: NewHeldPool()}
-	f.c = New(Config{MaxGas: MaxPostBatchGas}, nil, nil, nil, nil, nil, nil, nil, nil, log.New())
+	f.c = New(Config{MaxGas: MaxPostBatchGas, Batcher: devnetBatcher(w.batch.ProofSystems[0])}, nil, nil, nil, nil, nil, nil, nil, nil, log.New())
 	t.Cleanup(f.c.Close)
 	f.c.CrossChain(&CrossChain{
 		Pool: f.pool, L1: f.l1, L1Config: chain.TestChainOsakaConfig, Manager: manager,
@@ -105,6 +105,39 @@ func newCrossFixture(t *testing.T) *crossFixture {
 		L2Config: w.config, Engine: w.engine, Sync: w.ctx(),
 	})
 	return f
+}
+
+// compose composes window 468's Sync block on a cursor at its parent: the
+// window holds the Sync block alone.
+func (f *crossFixture) compose(t *testing.T) *effects {
+	t.Helper()
+	sync := f.w.sync.Header()
+	return f.c.compose(t.Context(), sync.Number.Uint64(), sync, 101)
+}
+
+// windowGas is the posting's projection at the standard rate of window 468's
+// anchor-only batch over blocks, the cursor's child to an empty Sync block.
+func (f *crossFixture) windowGas(t *testing.T, blocks ...*types.Block) uint64 {
+	t.Helper()
+	b, err := windowBudget(f.c.cfg.Batcher, MaxPostBatchGas, append(blocks, types.NewBlockWithHeader(f.w.sync.Header(), nil)))
+	require.NoError(t, err)
+	return b.projected
+}
+
+// deliveryCost is what window 468's inbound delivery adds to a posting: an
+// entry, its deferred form and its sidecar.
+func (f *crossFixture) deliveryCost(t *testing.T) uint64 {
+	t.Helper()
+	sidecar, err := protocol.NewInboundSidecar(&protocol.IncomingCall{
+		SourceAddress: f.call.Source, SourceRollupID: f.call.SourceRollup, TargetAddress: f.call.Target, RollupID: f.call.RollupID,
+		Value: f.call.Value.ToBig(), Data: f.call.Data, ReturnData: f.output,
+	})
+	require.NoError(t, err)
+	encSidecar, err := protocol.EncodeExecutionEntry(sidecar)
+	require.NoError(t, err)
+	encDeferred, err := protocol.EncodeExecutionEntry(&protocol.ExecutionEntry{ProxyEntryHash: sidecar.ProxyEntryHash, ReturnData: f.output, Success: true})
+	require.NoError(t, err)
+	return postBatchEntryGas + calldataGas(encSidecar) + calldataGas(encDeferred)
 }
 
 // hold holds the L1 transaction of nonce calling to with data.
@@ -134,7 +167,7 @@ func (f *crossFixture) holdOn(t *testing.T, nonce, onChain uint64, to common.Add
 func TestComposeDeliversAHeldCall(t *testing.T) {
 	f := newCrossFixture(t)
 	trigger := f.hold(t, 0, f.call.Source, f.call.Data)
-	fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+	fx := f.compose(t)
 	require.NotNil(t, fx)
 	require.Equal(t, []*Held{trigger}, fx.held)
 	require.Equal(t, common.Hash{0x1, 100}, fx.anchor)
@@ -153,7 +186,7 @@ func TestComposeRefuses(t *testing.T) {
 		f := newCrossFixture(t)
 		f.hold(t, 0, unproxied, nil)
 		f.hold(t, 1, f.call.Source, f.call.Data)
-		require.Nil(t, f.c.compose(t.Context(), f.w.sync.Header(), 101))
+		require.Nil(t, f.compose(t))
 		require.Zero(t, f.pool.Len())
 		f.pool.mu.Lock()
 		defer f.pool.mu.Unlock()
@@ -164,7 +197,7 @@ func TestComposeRefuses(t *testing.T) {
 		f.hold(t, 0, f.call.Source, f.call.Data)
 		next := f.hold(t, 1, f.call.Source, f.call.Data)
 		f.l1.m.accounts[crypto.PubkeyToAddress(f.key.PublicKey)].Nonce = 1
-		fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+		fx := f.compose(t)
 		require.NotNil(t, fx)
 		require.Equal(t, []*Held{next}, fx.held)
 		require.Zero(t, f.pool.Len())
@@ -177,7 +210,7 @@ func TestComposeRefuses(t *testing.T) {
 		f := newCrossFixture(t)
 		trigger := f.hold(t, 0, f.call.Source, f.call.Data)
 		f.l1.failed = errors.New("L1 node down")
-		require.Nil(t, f.c.compose(t.Context(), f.w.sync.Header(), 101))
+		require.Nil(t, f.compose(t))
 		require.Equal(t, []*Held{trigger}, f.pool.PopN(math.MaxInt))
 	})
 }
@@ -192,11 +225,11 @@ func TestComposeWaitsOnANonceGap(t *testing.T) {
 		f := newCrossFixture(t)
 		first := f.holdOn(t, 1, 1, f.call.Source, f.call.Data)
 		second := f.hold(t, 2, f.call.Source, f.call.Data)
-		require.Nil(t, f.c.compose(t.Context(), f.w.sync.Header(), 101))
+		require.Nil(t, f.compose(t))
 		require.Equal(t, 2, f.pool.Len(), "not evicted")
 		require.Equal(t, uint32(1), first.Deferred)
 		f.l1.m.accounts[sender(f)].Nonce = 1
-		fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+		fx := f.compose(t)
 		require.NotNil(t, fx)
 		require.Equal(t, []*Held{first, second}, fx.held)
 	})
@@ -210,7 +243,7 @@ func TestComposeWaitsOnANonceGap(t *testing.T) {
 		other := *f
 		other.key = key
 		ready := other.hold(t, 0, f.call.Source, f.call.Data)
-		fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+		fx := f.compose(t)
 		require.NotNil(t, fx)
 		require.Equal(t, []*Held{ready}, fx.held)
 		require.Equal(t, gapped, f.pool.PopN(math.MaxInt), "waiting, in order")
@@ -220,7 +253,7 @@ func TestComposeWaitsOnANonceGap(t *testing.T) {
 		first := f.holdOn(t, 1, 1, f.call.Source, f.call.Data)
 		f.hold(t, 2, f.call.Source, f.call.Data)
 		first.Deferred = maxDeferrals - 1
-		require.Nil(t, f.c.compose(t.Context(), f.w.sync.Header(), 101))
+		require.Nil(t, f.compose(t))
 		require.Zero(t, f.pool.Len())
 		f.pool.mu.Lock()
 		defer f.pool.mu.Unlock()
@@ -229,39 +262,37 @@ func TestComposeWaitsOnANonceGap(t *testing.T) {
 }
 
 // TestComposeBoundsThePostingGas: held transactions compose while the
-// posting's projected gas stays within the ceiling less the drain margin;
-// the rest waits, and a transaction over it alone is evicted.
+// posting's projected gas, from the anchor-only batch of the window, stays
+// within the ceiling less the drain margin; the rest waits, a transaction
+// the window leaves no room for waits too, and one over it in a window of
+// the Sync block alone, from the anchor entry, is evicted.
 func TestComposeBoundsThePostingGas(t *testing.T) {
-	// One delivery adds an entry, its deferred form and its sidecar.
-	one := func(t *testing.T, f *crossFixture) uint64 {
-		sidecar, err := protocol.NewInboundSidecar(&protocol.IncomingCall{
-			SourceAddress: f.call.Source, SourceRollupID: f.call.SourceRollup, TargetAddress: f.call.Target, RollupID: f.call.RollupID,
-			Value: f.call.Value.ToBig(), Data: f.call.Data, ReturnData: f.output,
-		})
-		require.NoError(t, err)
-		encSidecar, err := protocol.EncodeExecutionEntry(sidecar)
-		require.NoError(t, err)
-		encDeferred, err := protocol.EncodeExecutionEntry(&protocol.ExecutionEntry{ProxyEntryHash: sidecar.ProxyEntryHash, ReturnData: f.output, Success: true})
-		require.NoError(t, err)
-		return postBatchEntryGas + calldataGas(encSidecar) + calldataGas(encDeferred)
-	}
 	t.Run("the rest waits", func(t *testing.T) {
 		f := newCrossFixture(t)
 		first := f.hold(t, 0, f.call.Source, f.call.Data)
 		second := f.hold(t, 1, f.call.Source, f.call.Data)
-		f.c.cfg.MaxGas = drainMargin + 551_000 + one(t, f)
-		fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+		f.c.cfg.MaxGas = drainMargin + f.windowGas(t) + f.deliveryCost(t)
+		fx := f.compose(t)
 		require.NotNil(t, fx)
 		require.Equal(t, []*Held{first}, fx.held)
 		require.Len(t, fx.txs, 1)
 		require.Equal(t, []*Held{second}, f.pool.PopN(math.MaxInt))
 	})
+	t.Run("one the window leaves no room for waits", func(t *testing.T) {
+		f := newCrossFixture(t)
+		first := f.hold(t, 0, f.call.Source, f.call.Data)
+		f.c.cfg.MaxGas = drainMargin + f.windowGas(t) + f.deliveryCost(t) - 1
+		require.Greater(t, f.c.cfg.MaxGas, uint64(drainMargin+551_000)+f.deliveryCost(t), "room in a batch of the anchor entry alone")
+		require.Nil(t, f.compose(t))
+		require.Equal(t, []*Held{first}, f.pool.PopN(math.MaxInt))
+		require.Zero(t, first.Attempts)
+	})
 	t.Run("one over alone is evicted with its chain", func(t *testing.T) {
 		f := newCrossFixture(t)
 		f.hold(t, 0, f.call.Source, f.call.Data)
 		f.hold(t, 1, f.call.Source, f.call.Data)
-		f.c.cfg.MaxGas = drainMargin + 551_000 + one(t, f) - 1
-		require.Nil(t, f.c.compose(t.Context(), f.w.sync.Header(), 101))
+		f.c.cfg.MaxGas = drainMargin + 551_000 + f.deliveryCost(t) - 1
+		require.Nil(t, f.compose(t))
 		require.Zero(t, f.pool.Len())
 		f.pool.mu.Lock()
 		defer f.pool.mu.Unlock()
@@ -284,7 +315,7 @@ func TestComposeFillsTheBlock(t *testing.T) {
 		f := newCrossFixture(t)
 		first := f.hold(t, 0, f.call.Source, f.call.Data)
 		second := f.hold(t, 1, f.call.Source, f.call.Data)
-		fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+		fx := f.compose(t)
 		require.NotNil(t, fx)
 		require.Equal(t, []*Held{first, second}, fx.held)
 		require.Len(t, fx.deliveries, 2)
@@ -297,7 +328,7 @@ func TestComposeFillsTheBlock(t *testing.T) {
 		second := f.hold(t, 1, f.call.Source, f.call.Data)
 		// Room for one delivery's declared gas, not two.
 		limit(f, protocol.SystemTxGasLimit)
-		fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+		fx := f.compose(t)
 		require.NotNil(t, fx)
 		require.Equal(t, []*Held{first}, fx.held)
 		require.Equal(t, []*Held{second}, f.pool.PopN(math.MaxInt))
@@ -306,7 +337,7 @@ func TestComposeFillsTheBlock(t *testing.T) {
 		f := newCrossFixture(t)
 		f.hold(t, 0, f.call.Source, f.call.Data)
 		limit(f, protocol.SystemTxGasLimit-1)
-		require.Nil(t, f.c.compose(t.Context(), f.w.sync.Header(), 101))
+		require.Nil(t, f.compose(t))
 		require.Zero(t, f.pool.Len())
 	})
 }
@@ -349,7 +380,7 @@ func TestComposeLeavesTheEvictedChains(t *testing.T) {
 	second := other.hold(t, 1, f.call.Source, f.call.Data)
 	f.hold(t, 1, f.call.Source, f.call.Data)
 	f.c.cfg.MaxGas = drainMargin + 551_000 + 2*postBatchEntryGas - 1
-	fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+	fx := f.compose(t)
 	require.NotNil(t, fx)
 	require.Equal(t, []*Held{first}, fx.held)
 	require.Equal(t, []*Held{second}, f.pool.PopN(math.MaxInt))
@@ -565,10 +596,42 @@ func TestComposedSyncBlockPosts(t *testing.T) {
 	require.Equal(t, []*Held{trigger}, e.Txs)
 }
 
+// TestComposedSyncBlockWithinTheGasLimit: across gas limits around a window
+// with one delivery, whatever the slot composes posts within the limit;
+// when the window leaves no room, the trigger waits uncharged.
+func TestComposedSyncBlockWithinTheGasLimit(t *testing.T) {
+	probe := newCrossFixture(t)
+	c, _, _, _ := probe.poster(t, nil)
+	window, err := c.blocks(t.Context(), 462, 467)
+	require.NoError(t, err)
+	seed, one := probe.windowGas(t, window...), probe.deliveryCost(t)
+	require.Greater(t, seed, uint64(551_000), "the window's own calldata")
+	composed := 0
+	for extra := one - (seed - 551_000); extra <= one+(seed-551_000); extra += (seed - 551_000) / 4 {
+		f := newCrossFixture(t)
+		trigger := f.hold(t, 0, f.call.Source, f.call.Data)
+		c, prover, _, chain := f.poster(t, nil)
+		c.cfg.MaxGas = drainMargin + seed + extra
+		got := c.ComposeSyncSlot(t.Context(), chain[467].Header(), f.w.sync.Time(), 101, sequencer.ModeSteady)
+		if got.Empty {
+			require.Less(t, extra, one, "max gas %d", c.cfg.MaxGas)
+			require.Equal(t, []*Held{trigger}, f.pool.PopN(math.MaxInt))
+			require.Zero(t, trigger.Attempts)
+			continue
+		}
+		composed++
+		sync := f.sealed(t, got.Txs)
+		chain[sync.NumberU64()] = sync
+		c.SyncCommitted(t.Context(), sync.Header())
+		require.Len(t, prover.proven, 1, "max gas %d: posted within it", c.cfg.MaxGas)
+	}
+	require.NotZero(t, composed)
+}
+
 func TestComposedSyncBlockMismatch(t *testing.T) {
 	f := newCrossFixture(t)
 	trigger := f.hold(t, 0, f.call.Source, f.call.Data)
-	fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+	fx := f.compose(t)
 	require.NotNil(t, fx)
 	c, prover, _, _ := f.poster(t, f.w.sync)
 	c.pending = emission{kind: emitEffects, cursor: 462, sync: 468, target: post.Target{Block: 101, Time: f.w.sync.Time()}, fx: fx}

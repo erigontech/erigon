@@ -86,12 +86,13 @@ type effects struct {
 
 // compose simulates held transactions on L1 at block target-1 and delivers
 // their calls on a draft of the Sync block on parent, while the block and
-// the posting's gas hold them. A poison transaction, or one neither holds
-// alone, is evicted with the rest of its nonce chain; a transient failure or
-// a full block or posting returns the rest to the pool. A transaction whose
-// nonce is ahead of its sender's on L1 waits, out of the drain's count, up
-// to maxDeferrals compositions. Nil when none composes.
-func (c *Composer) compose(ctx context.Context, parent *types.Header, target uint64) *effects {
+// the gas of the posting settling the window from cursor hold them. A poison
+// transaction, or one an empty block or a posting of the Sync block alone
+// cannot hold, is evicted with the rest of its nonce chain; a transient
+// failure or a full block or posting returns the rest to the pool. A
+// transaction whose nonce is ahead of its sender's on L1 waits, out of the
+// drain's count, up to maxDeferrals compositions. Nil when none composes.
+func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Header, target uint64) *effects {
 	rest := c.x.Pool.PopN(c.x.MaxTxs)
 	if len(rest) == 0 {
 		return nil
@@ -116,7 +117,15 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 				if err != nil {
 					return err
 				}
-				gas := newBudget(c.cfg.MaxGas)
+				window, err := c.blocks(ctx, cursor, parent.Number.Uint64())
+				if err != nil {
+					return err
+				}
+				// The posting carries the window's blocks before any effect.
+				gas, err := windowBudget(c.cfg.Batcher, c.cfg.MaxGas, append(window, types.NewBlockWithHeader(header, nil)))
+				if err != nil {
+					return err
+				}
 				evict := func(h *Held, err error) {
 					c.logger.Warn("[eez] held transaction evicted: it cannot compose", "event", "eez.composer.poison",
 						"hash", h.Hash, "sender", h.Sender, "nonce", h.Nonce, "err", err)
@@ -180,12 +189,16 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 						if cost, err = inboundCost(ds.Delivered); err != nil {
 							return err
 						}
-						if !gas.fits(cost) {
-							return errOverBudget
+						switch {
+						case gas.fits(cost):
+							return nil
+						case !newBudget(c.cfg.MaxGas).fits(cost):
+							return Poison(fmt.Errorf("alone: %w", errOverBudget))
 						}
-						return nil
+						// A later window may leave it room.
+						return errOverBudget
 					})
-					if full(err) && len(fx.held) == 0 {
+					if errors.Is(err, ErrFull) && len(fx.held) == 0 {
 						err = Poison(fmt.Errorf("alone: %w", err))
 					}
 					if err != nil {
