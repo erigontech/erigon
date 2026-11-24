@@ -648,7 +648,9 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 		if !ok {
 			break
 		}
-		// An anchor-only batch holds no transactions to dispose of.
+		// Until a partial batch's transactions are disposed of by what ran
+		// (C4.2), they are let go.
+		c.release(p.Txs)
 		c.ledger.ClaimPartial(p.Height, p.Post, nil)
 	}
 	return cursor

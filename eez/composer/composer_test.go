@@ -835,12 +835,18 @@ func TestComposerFallsBackFromAFreshCursor(t *testing.T) {
 }
 
 // slotted is an L1 on which no posting lands, its block of number n having
-// time times[n].
-type slotted struct{ times map[uint64]uint64 }
+// time times[n]; failed fails the header reads.
+type slotted struct {
+	times  map[uint64]uint64
+	failed error
+}
 
 func (slotted) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1 << 20}, nil }
 
 func (s slotted) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
+	if s.failed != nil {
+		return nil, s.failed
+	}
 	return &l1.Header{Number: n, Time: s.times[n]}, nil
 }
 
@@ -854,18 +860,20 @@ func TestComposerChargesOnlyItsOwnFailures(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		shift   uint64 // of the time of the target block from the pin
+		read    error
 		send    error
 		skipped bool
 	}{
 		{name: "a failure in its slot"},
 		{name: "a missed slot", shift: 12, skipped: true},
+		{name: "a slot that cannot be read", read: errors.New("node down"), skipped: true},
 		{name: "a refused bundle", send: fmt.Errorf("%w: simulation reverted (-32000)", post.ErrBundleRefused)},
 		{name: "a transport failure", send: errors.New("connection refused"), skipped: true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			chain := newTestChain(t, 8)
 			ts := chain.header(8).Time
-			h := newHarness(t, chain, 8, slotted{times: map[uint64]uint64{100: ts + c.shift}})
+			h := newHarness(t, chain, 8, slotted{times: map[uint64]uint64{100: ts + c.shift}, failed: c.read})
 			h.poster.err = c.send
 			h.slot(t, 8, 100, sequencer.ModeSteady)
 			require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Failed }, 5*time.Second, time.Millisecond)
@@ -886,6 +894,53 @@ func TestComposerReleasesSettledTransactions(t *testing.T) {
 	require.NoError(t, pool.Push(tx, 0))
 	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Txs: pool.PopN(1)})
 	h.c.ledger.MarkSettled(8, common.Hash{0xf})
+	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	require.Empty(t, pool.inFlight)
+}
+
+// TestComposerRequeuesRolledOutTransactions: a settled batch an L1 reorg
+// rolls out, which derivation never confirmed, is watched again with its
+// transactions reserved; once its posting has left L1 for good, recovery
+// requeues them.
+func TestComposerRequeuesRolledOutTransactions(t *testing.T) {
+	node := &rolling{}
+	node.head.Store(1)
+	h := newHarness(t, newTestChain(t, 8), 8, node)
+	pool := NewHeldPool()
+	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+	tx := held(addr(0xa), 0, Inbound, 1)
+	require.NoError(t, pool.Push(tx, 0))
+	h.cursor.Store(5)
+	h.c.RecoverFailed(t.Context())
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: pool.PopN(1)})
+	h.c.ledger.MarkSettled(8, common.Hash{0xf})
+	h.cursor.Store(4)
+	h.c.RecoverFailed(t.Context())
+	r, ok := h.resolution(8)
+	require.True(t, ok)
+	require.Equal(t, Pending, r, "watched again")
+	require.Eventually(t, func() bool {
+		node.head.Add(1)
+		h.c.RecoverFailed(t.Context())
+		_, ok := h.resolution(8)
+		return !ok
+	}, 5*time.Second, time.Millisecond)
+	require.Equal(t, []*Held{tx}, pool.PopN(math.MaxInt), "requeued")
+}
+
+// TestComposerReleasesPartialTransactions: a batch L1 kept part of lets its
+// transactions go once derivation passes it.
+func TestComposerReleasesPartialTransactions(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 8), 8, nil)
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	tx := held(addr(0xa), 0, Inbound, 1)
+	require.NoError(t, pool.Push(tx, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Txs: pool.PopN(1)})
+	h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
 	h.cursor.Store(8)
 	h.c.RecoverFailed(t.Context())
 	pool.mu.Lock()

@@ -219,13 +219,25 @@ func (c *Composer) postEffects(ctx context.Context, e emission, sync *types.Head
 	}
 }
 
+// nodeFailure is a failure to post a composition that lies with the node,
+// which the same composition may not meet again.
+type nodeFailure struct{ err error }
+
+func (e *nodeFailure) Error() string { return e.err.Error() }
+func (e *nodeFailure) Unwrap() error { return e.err }
+
+func nodeFault(err error) error { return &nodeFailure{err} }
+
 // owed reports a failure to post a composition that lies with what it
-// composed, which the same composition meets again: an effect that failed,
-// a posting over its gas, a proof the prover refused.
+// composed, any but the node's: the same composition meets it again.
 func owed(err error) bool {
-	if errors.Is(err, ErrFailedEffect) || errors.Is(err, errOverBudget) {
-		return true
-	}
+	_, ok := errors.AsType[*nodeFailure](err)
+	return !ok
+}
+
+// refused reports a prover's refusal of a window, which the same window
+// meets again.
+func refused(err error) bool {
 	switch status.Code(err) {
 	case codes.OK, codes.Unknown, codes.Canceled:
 		return false
@@ -236,14 +248,14 @@ func owed(err error) bool {
 func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.Header) error {
 	block, err := c.block(ctx, e.sync)
 	if err != nil {
-		return err
+		return nodeFault(err)
 	}
 	if block.Hash() != sync.Hash() || !sameTxs(block, e.fx.txs) {
-		return fmt.Errorf("committed block %d is not the composed one", e.sync)
+		return nodeFault(fmt.Errorf("committed block %d is not the composed one", e.sync))
 	}
 	_, w, err := c.windowBlock(ctx, e.sync)
 	if err != nil {
-		return err
+		return nodeFault(err)
 	}
 	candidates, err := Candidates(c.x.L2Config, c.x.Engine, block, &stateless.Witness{State: w.State, Codes: w.Codes, Headers: w.Headers}, PairEnds(block.Transactions()))
 	if err != nil {
@@ -251,7 +263,7 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 	}
 	blocks, err := c.blocks(ctx, e.cursor, e.sync)
 	if err != nil {
-		return err
+		return nodeFault(err)
 	}
 	fx := Effects{}
 	for _, d := range e.fx.deliveries {
@@ -279,6 +291,9 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 	}
 	sig, err := c.prover.ProveBy(ctx, w2, start, c.cfg.Proof)
 	if err != nil {
+		if !refused(err) {
+			err = nodeFault(err)
+		}
 		return fmt.Errorf("prove %d..%d: %w", e.cursor+1, e.sync, err)
 	}
 	batch.Proofs = [][]byte{sig}
@@ -290,7 +305,7 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 	tx, err := c.poster.Sign(sctx, input, c.cfg.MaxGas)
 	cancel()
 	if err != nil {
-		return err
+		return nodeFault(err)
 	}
 	bundle := []types.Transaction{tx}
 	for _, h := range e.fx.held {

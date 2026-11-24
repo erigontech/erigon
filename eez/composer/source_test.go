@@ -248,6 +248,8 @@ var (
 	unproxied  = common.HexToAddress("0xc000000000000000000000000000000000000006")
 	registrar  = common.HexToAddress("0xc000000000000000000000000000000000000007")
 	nobody     = common.HexToAddress("0xc000000000000000000000000000000000000008")
+	// invalider calls the proxy, then hits INVALID.
+	invalider = common.HexToAddress("0xc000000000000000000000000000000000000009")
 )
 
 type sourceFixture struct {
@@ -273,6 +275,7 @@ func newSourceFixture(t *testing.T) *sourceFixture {
 	m.deploy(twice, slices.Concat(callTo(proxy), callTo(proxy), []byte{0x00}))
 	m.deploy(static, slices.Concat([]byte{0x5f, 0x5f, 0x5f, 0x5f}, push20(proxy), []byte{0x5a, 0xfa, 0x50, 0x00}))
 	m.deploy(unproxied, append(callTo(nobody), 0x00))
+	m.deploy(invalider, append(callTo(proxy), 0xfe))
 	m.deploy(registrar, slices.Concat(callTo(manager), callTo(late), []byte{0x00}))
 	header := &types.Header{Number: *uint256.NewInt(100), Time: 1_800_000_000, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Extra: []byte{}}
 	f.src = NewSource(chain.TestChainOsakaConfig, header, m, func(uint64) (common.Hash, error) { return common.Hash{}, nil }, manager, 0)
@@ -334,6 +337,7 @@ func TestSourceCalls(t *testing.T) {
 		{"a proxy registered in the transaction", registrar, []common.Address{lateTarget}, nil},
 		{"a reverted caller", reverter, nil, ErrRevertedCall},
 		{"a caught revert", catcher, nil, ErrRevertedCall},
+		{"a caller failing without revert", invalider, nil, ErrRevertedCall},
 		{"a static call", static, nil, ErrNoCalls},
 		{"no proxy", unproxied, nil, ErrNoCalls},
 	} {

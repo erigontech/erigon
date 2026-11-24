@@ -340,9 +340,11 @@ func TestComposedSyncBlockFailureCharges(t *testing.T) {
 		name    string
 		err     error
 		maxGas  uint64 // of the posting, once composed
+		rollup  uint64 // of the batcher, once composed
 		skipped bool
 	}{
 		{name: "a refused proof", err: status.Error(codes.InvalidArgument, "window refused")},
+		{name: "a batch the batcher refuses", rollup: 2},
 		{name: "a posting over its gas", maxGas: 900_000},
 		{name: "an unreachable prover", err: status.Error(codes.Unavailable, "down"), skipped: true},
 		{name: "a cancelled proof", err: status.Error(codes.Canceled, "stopping"), skipped: true},
@@ -356,6 +358,11 @@ func TestComposedSyncBlockFailureCharges(t *testing.T) {
 			composed := comp.ComposeSyncSlot(t.Context(), chain[467].Header(), f.w.sync.Time(), 101, sequencer.ModeSteady)
 			if c.maxGas != 0 {
 				comp.cfg.MaxGas = c.maxGas
+			}
+			if c.rollup != 0 {
+				b := *comp.cfg.Batcher
+				b.RollupID = c.rollup
+				comp.cfg.Batcher = &b
 			}
 			sync := f.sealed(t, composed.Txs)
 			chain[sync.NumberU64()] = sync

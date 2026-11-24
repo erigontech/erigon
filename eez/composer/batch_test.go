@@ -262,6 +262,11 @@ func twoCalls(e protocol.ExecutionEntry) protocol.ExecutionEntry {
 	return e
 }
 
+func proxied(e protocol.ExecutionEntry) protocol.ExecutionEntry {
+	e.ProxyEntryHash = common.Hash{1}
+	return e
+}
+
 func noCall(e protocol.ExecutionEntry) protocol.ExecutionEntry {
 	e.L2ToL1Calls = nil
 	return e
@@ -283,6 +288,7 @@ func TestBatchRefuses(t *testing.T) {
 		{"another terminal", fx, append(slices.Clone(candidates[:3]), common.Hash{1}), "terminal"},
 		{"an outbound effect missing", Effects{Outbound: fx.Outbound[:1], Inbound: fx.Inbound}, append(slices.Clone(candidates[:2]), candidates[3]), "user transactions"},
 		{"no effects", Effects{}, candidates[3:], "user transactions"},
+		{"an outbound effect with a proxy entry", Effects{Outbound: []protocol.ExecutionEntry{proxied(fx.Outbound[0]), fx.Outbound[1]}, Inbound: fx.Inbound}, candidates, "outbound effect 0"},
 		{"an outbound effect of two calls", Effects{Outbound: []protocol.ExecutionEntry{twoCalls(fx.Outbound[0]), fx.Outbound[1]}, Inbound: fx.Inbound}, candidates, "outbound effect 0"},
 		{"an inbound effect of no call", Effects{Outbound: fx.Outbound, Inbound: []protocol.ExecutionEntry{noCall(fx.Inbound[0])}}, candidates, "inbound effect 0"},
 	} {
