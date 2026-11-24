@@ -20,6 +20,22 @@ func TestJournalEntrySize(t *testing.T) {
 	}
 }
 
+// TestJournalGrowsByDoubling pins the growth policy: a TSTORE loop journals one
+// entry per store, and growing by append's ~1.25x would copy the entries many times.
+func TestJournalGrowsByDoubling(t *testing.T) {
+	j := &journal{dirties: make(map[accounts.Address]int)}
+	grows, last := 0, cap(j.entries)
+	for i := range 1 << 17 {
+		j.transientStorageChange(accounts.NilAddress, i, uint256.Int{})
+		if c := cap(j.entries); c != last {
+			grows, last = grows+1, c
+		}
+	}
+	if grows > 20 {
+		t.Fatalf("journal grew %d times for %d entries, want <= 20", grows, 1<<17)
+	}
+}
+
 // TestJournalDirtySymmetry pins every constructor's dirties accounting against
 // dirtied(), which revert uses to undo it. A kind the two disagree about leaves
 // the dirties refcount unbalanced — under-dirtying drops a modified account and
@@ -35,19 +51,13 @@ func TestJournalDirtySymmetry(t *testing.T) {
 		call func(j *journal)
 	}{
 		{"createObjectChange", kindCreateObject, func(j *journal) { j.createObjectChange(addr) }},
-		{"resetObjectChange", kindResetObject, func(j *journal) { j.resetObjectChange(addr, nil, nil) }},
-		{"selfdestructChange", kindSelfdestruct, func(j *journal) { j.selfdestructChange(addr, false, val, false) }},
+		{"resetObjectChange", kindResetObject, func(j *journal) { j.resetObjectChange(addr, nil) }},
 		{"selfdestructChangeVersioned", kindSelfdestruct, func(j *journal) {
 			j.selfdestructChangeVersioned(addr, false, val, false, false, 0, false, val, false)
 		}},
 		{"balanceChange", kindBalance, func(j *journal) { j.balanceChange(addr, val, false, false) }},
-		{"balanceIncrease", kindBalanceIncrease, func(j *journal) { j.balanceIncrease(addr, val) }},
-		{"balanceIncreaseTransfer", kindBalanceIncreaseTransfer, func(j *journal) {
-			j.balanceIncreaseTransfer(&BalanceIncrease{})
-		}},
 		{"nonceChange", kindNonce, func(j *journal) { j.nonceChange(addr, 1, false) }},
 		{"storageChange", kindStorage, func(j *journal) { j.storageChange(addr, key, val, false) }},
-		{"fakeStorageChange", kindFakeStorage, func(j *journal) { j.fakeStorageChange(addr, key, val) }},
 		{"codeChange", kindCode, func(j *journal) { j.codeChange(addr, nil, accounts.CodeHash{}, false) }},
 		{"refundChange", kindRefund, func(j *journal) { j.refundChange(7) }},
 		{"touchAccount", kindTouch, func(j *journal) { j.touchAccount(addr, false, val) }},
@@ -165,7 +175,6 @@ func TestJournalResetDropsEntriesItReslicesPast(t *testing.T) {
 func TestJournalRevertDropsTheEntriesItTruncates(t *testing.T) {
 	ibs := New(NewVersionedStateReader(0, ReadSet{}, nil, nil))
 	addr := accounts.InternAddress(common.Address{1})
-	ibs.stateObjects[addr] = newObject(ibs, addr, &accounts.Account{}, &accounts.Account{})
 
 	j := ibs.journal
 	for range 4 {

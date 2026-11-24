@@ -81,10 +81,7 @@ type RecordingState struct {
 	// for debugging: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
 
-	// The system address is touched as msg.sender on every block's system calls;
-	// that alone is not a witness access. A real opcode access during a user tx
-	// (seen via the per-tx access set) sets this so it is kept (EIP-7928).
-	systemAddrTouchedInTx bool
+	systemAddrAccessed bool
 }
 
 // NewRecordingState creates a new RecordingState wrapping the given inner reader.
@@ -109,9 +106,7 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 	}
 }
 
-// MarkSystemAddrTouchedInTx records that a user transaction accessed the system
-// address via an opcode, so it is kept in the witness even without a state change.
-func (s *RecordingState) MarkSystemAddrTouchedInTx() { s.systemAddrTouchedInTx = true }
+func (s *RecordingState) MarkSystemAddrAccessed() { s.systemAddrAccessed = true }
 
 func (s *RecordingState) SetAccountsToTrace(addrs []common.Address) {
 	if len(addrs) == 0 {
@@ -255,12 +250,7 @@ func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, erro
 		return nil, err
 	}
 	if len(code) > 0 {
-		s.AccessedCode[addr] = code
-		if _, already := s.PreStateCode[addr]; !already {
-			if _, created := s.createdCodeHashes[s.codeHash(code)]; !created {
-				s.PreStateCode[addr] = code
-			}
-		}
+		s.OnCodeAccess(address, code)
 	} else {
 		s.emptyCodeAccessed = true
 	}
@@ -344,6 +334,18 @@ func (s *RecordingState) codeHash(code []byte) common.Hash {
 	h := crypto.Keccak256Hash(code)
 	s.codeHashes[string(code)] = h
 	return h
+}
+
+func (s *RecordingState) OnCodeChange(codeHash accounts.CodeHash) func() {
+	if codeHash == accounts.EmptyCodeHash {
+		return nil
+	}
+	hash := codeHash.Value()
+	if _, exists := s.createdCodeHashes[hash]; exists {
+		return nil
+	}
+	s.createdCodeHashes[hash] = struct{}{}
+	return func() { delete(s.createdCodeHashes, hash) }
 }
 
 func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
@@ -482,11 +484,17 @@ func (s *RecordingState) GetModifiedKeys() ([]common.Address, map[common.Address
 	return addresses, storageKeys
 }
 
-// OnCodeAccess tracks code that bypasses ReadAccountCode via stateObject cache hits.
 func (s *RecordingState) OnCodeAccess(address accounts.Address, code []byte) {
 	if len(code) > 0 {
-		s.AccessedCode[address.Value()] = code
-		//s.HashedCodes[crypto.Keccak256Hash(code)] = code
+		addr := address.Value()
+		s.AccessedCode[addr] = code
+		if _, already := s.PreStateCode[addr]; !already {
+			_, modified := s.codeOverlay[addr]
+			_, created := s.createdCodeHashes[s.codeHash(code)]
+			if !modified && !created {
+				s.PreStateCode[addr] = code
+			}
+		}
 	}
 }
 
@@ -543,8 +551,9 @@ type ExecutionWitnessResult struct {
 	// Keys holds the standalone preimages of every accessed account address (20B) and
 	// storage slot (32B), matching the reference legacy witness; populated in both modes.
 	Keys []hexutil.Bytes `json:"keys,omitempty"`
-	// Headers is the contiguous chain of RLP-encoded ancestor headers from the parent
-	// back to the oldest block reached via BLOCKHASH.
+	// Headers contains consecutive RLP-encoded headers from the oldest ancestor
+	// requested by BLOCKHASH through the parent, in ascending block order.
+	// With no such requests, it contains just the parent.
 	Headers []hexutil.Bytes `json:"headers,omitempty"`
 
 	// Header lookups for BLOCKHASH and stateless block initialization; not serialized.
@@ -638,9 +647,8 @@ func (api *BaseAPI) buildAccessedState(
 	})
 
 	// Create the in-block state with the recording state as reader
-	ibs := state.New(recordingState)
+	ibs := state.NewVersionedBlock(recordingState)
 	defer ibs.Close()
-	transactions.VersionedBlockState(ibs)
 	ibs.SetTxContext(blockNum, -1)
 
 	// Get header for block context
@@ -694,7 +702,7 @@ func (api *BaseAPI) buildAccessedState(
 		// A user tx that accesses the system address via an opcode keeps it in the
 		// witness; the per-tx access set captures this even on state-cache hits.
 		if ibs.AccessedAddr(params.SystemAddress) {
-			recordingState.MarkSystemAddrTouchedInTx()
+			recordingState.MarkSystemAddrAccessed()
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
@@ -719,6 +727,11 @@ func (api *BaseAPI) buildAccessedState(
 
 	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), receipts, block.Withdrawals(), chainReader, syscall, false /* skipReceiptsEval */, log.Root()); err != nil {
 		return nil, nil, fmt.Errorf("failed to finalize block: %w", err)
+	}
+	for _, withdrawal := range block.Withdrawals() {
+		if withdrawal.Address == params.SystemAddress.Value() {
+			recordingState.MarkSystemAddrAccessed()
+		}
 	}
 
 	if err = ethapi.FinalizeCallTxTo(ibs, blockRules, recordingState); err != nil {
@@ -1323,7 +1336,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 			postExists = preExists
 		}
 		existenceChanged := preExists != postExists
-		if !reallyChanged && !hasStorage && !existenceChanged && !rs.systemAddrTouchedInTx {
+		if !reallyChanged && !hasStorage && !existenceChanged && !rs.systemAddrAccessed {
 			delete(out.Addresses, sysAddr)
 		}
 	}
@@ -1566,11 +1579,8 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	blockNrOrHash rpc.BlockNumberOrHash,
 ) (*witnessBlockInfo, error) {
 	// TxNums and commitment history must describe the same block view.
-	blockNum, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNum, hash, _, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
-		return nil, err
-	}
-	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return nil, err
 	}
 	if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
@@ -1616,10 +1626,10 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	}, nil
 }
 
-// collectAccessedHeaders gathers the headers a stateless verifier needs to anchor
-// pre-state and resolve BLOCKHASH lookups. The headers form a contiguous chain
-// from the parent back to the oldest block reached via the BLOCKHASH opcode, so
-// each header can be validated against the next one's parentHash.
+// collectAccessedHeaders builds the witness header chain and indexes it by block
+// number. The parent anchors the pre-state and supplies the timestamp for hardfork
+// transitions. Intermediate headers let the verifier check older BLOCKHASH results
+// by following parent hashes.
 func (api *BaseAPI) collectAccessedHeaders(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -2294,11 +2304,10 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	})
 
 	// Create the in-block state with the witness stateless as reader
-	ibs := state.New(stateless)
+	ibs := state.NewVersionedBlock(stateless)
 	defer ibs.Close()
 	header := block.HeaderNoCopy()
 	blockNum := block.NumberU64()
-	transactions.VersionedBlockState(ibs)
 	ibs.SetTxContext(blockNum, -1)
 
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary

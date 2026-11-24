@@ -62,6 +62,12 @@ var computedAheadCount atomic.Int64
 // (stage/exec/commit/overlap/gap/residual) for perf attribution.
 var logNpPhases = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
 
+// commitmentIntraBlockTxs > 0 enables mid-block commitment checkpoints every N
+// txs for non-BAL blocks, overlapping the fold with execution (0 = off). It
+// reuses the step-edge mid-block checkpoint path: fold the touches accumulated
+// so far, leaving the block open so its block-end fold covers only the residual.
+var commitmentIntraBlockTxs = dbg.EnvInt("COMMITMENT_INTRABLOCK_TXS", 0)
+
 // ComputedAheadCountForTest reports the number of BAL compute-ahead computations
 // performed so far; ResetComputedAheadForTest zeroes it. Test-only observability.
 func ComputedAheadCountForTest() int64 { return computedAheadCount.Load() }
@@ -104,6 +110,10 @@ type commitmentCalculator struct {
 	prefetch   *commitment.Warmuper
 	balBlock   bool
 	hashAtFold bool
+
+	// txsSinceCheckpoint counts txResults folded since the last mid-block
+	// commitment checkpoint; drives commitmentIntraBlockTxs. Reset per block.
+	txsSinceCheckpoint int
 
 	// balUpdates is the per-block BAL fold buffer, Reset and reused across blocks
 	// to avoid reallocating a fresh prefix-trie arena each block.
@@ -308,7 +318,7 @@ func (cc *commitmentCalculator) Stop() {
 	cc.wg.Wait()
 	if p := cc.branchPrefetch; p != nil {
 		p.close()
-		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
+		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(), "dropped", p.dropped.Load())
 		if commitmentdb.ParentReadsWanted() {
 			if r := cc.parentRecords(); r != nil {
 				commitmentdb.PublishParentRecords(r)
@@ -431,6 +441,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			if !cc.computedAhead[r.blockNum] || dbg.BALShadowCompute {
 				cc.accumulateTouched(r.writes, base)
 			}
+			cc.txsSinceCheckpoint++
 		}
 
 		// A computed-ahead block already emitted its interior step checkpoints from
@@ -439,11 +450,23 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// commitment .kv inconsistent. If a late-consumed blockRequest leaves
 		// computedAhead[n] unset and both paths checkpoint the same edge, that is
 		// benign — both emit identical values at the same txNum.
-		if !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
-			// Checkpoint commitment at a mid-block step edge without advancing
+		stepEdge := cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum)
+		// Intra-block checkpoint: for a non-BAL per-block block, fold every
+		// commitmentIntraBlockTxs txs so the commitment hash overlaps execution
+		// rather than running wholly at block end. The block-end fold then covers
+		// only the residual, exactly as the step-edge checkpoint does.
+		intraBlock := commitmentIntraBlockTxs > 0 && perBlock && !cc.balBlock &&
+			cc.txsSinceCheckpoint >= commitmentIntraBlockTxs
+		if !cc.computedAhead[r.blockNum] && (stepEdge || intraBlock) {
+			// Checkpoint commitment at a mid-block edge without advancing
 			// lastComputedBlock or resetting block flags; the block-end fold then
 			// covers only the keys touched after the edge.
-			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: "step-boundary ", midBlock: true})
+			label := "step-boundary "
+			if intraBlock && !stepEdge {
+				label = "intra-block "
+			}
+			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: label, midBlock: true})
+			cc.txsSinceCheckpoint = 0
 		}
 
 	case *blockResult:
@@ -466,6 +489,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		cc.lastBlockResult = r
 		cc.lastBlockResultSeen = r.BlockNum
 		cc.hasSeenBlockResult = true
+		cc.txsSinceCheckpoint = 0
 
 		commitStart := time.Now()
 		switch {
@@ -646,11 +670,12 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	// A block straddling an unfrozen step edge must checkpoint at that edge, else
 	// the step's commitment .kv lags its account/storage .kv. The per-tx BAL lets
 	// compute-ahead do this mid-block.
-	if err := cc.checkpointStepsFromBAL(ctx, req, vm); err != nil {
+	after, err := cc.checkpointStepsFromBAL(ctx, req, vm)
+	if err != nil {
 		fail(err)
 		return
 	}
-	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, math.MaxUint32, targetOf(br))
+	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, after, math.MaxUint32, targetOf(br))
 	if err != nil {
 		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
@@ -684,27 +709,31 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 // BAL index is txNum-firstTxNum, so applying changes at index <= edge-firstTxNum
 // gives the state as of the edge. The returned root is discarded (no header to
 // verify mid-block). Runs before the block-end compute so that builds on it.
-func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap) error {
+// checkpointStepsFromBAL returns the tx index of its last checkpoint, -1 when it made none.
+func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap) (int64, error) {
+	after := int64(-1)
 	ss := cc.doms.StepSize()
 	if ss == 0 {
-		return nil
+		return after, nil
 	}
 	for edge := ((req.firstTxNum/ss)+1)*ss - 1; edge < req.lastTxNum; edge += ss {
 		if !cc.doms.IsUnfrozenStepEdge(cc.roTx, edge) {
 			continue
 		}
 		stepBr := &blockResult{BlockNum: req.blockNum, BlockHash: req.blockHash, lastTxNum: edge}
-		_, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, uint32(edge-req.firstTxNum), targetOf(stepBr))
+		idx := uint32(edge - req.firstTxNum)
+		_, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, after, idx, targetOf(stepBr))
 		if err != nil {
-			return fmt.Errorf("BAL-driven step-checkpoint at txNum %d: %w", edge, err)
+			return after, fmt.Errorf("BAL-driven step-checkpoint at txNum %d: %w", edge, err)
 		}
 		if flushOwn != nil {
 			if err := flushOwn(); err != nil {
-				return fmt.Errorf("BAL-driven step-checkpoint flush at txNum %d: %w", edge, err)
+				return after, fmt.Errorf("BAL-driven step-checkpoint flush at txNum %d: %w", edge, err)
 			}
 		}
+		after = int64(idx)
 	}
-	return nil
+	return after, nil
 }
 
 // computeRootFromBAL folds the BAL block's touched keys (up to maxTxIndex) straight
@@ -712,8 +741,8 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 // computes the root at t. Shared by the block-end compute-ahead and the mid-block step
 // checkpoints so the two can't drift. The BAL supplies the touched-key set; every value
 // (and the seeded EIP-161 removal) is read from the version map view.
-func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap, maxTxIndex uint32, t commitTarget) ([]byte, func() error, error) {
-	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1, dr: cc.asOfReader.dr, prefetched: cc.branchPrefetch}
+func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap, afterTxIndex int64, maxTxIndex uint32, t commitTarget) ([]byte, func() error, error) {
+	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1, dr: cc.asOfReader.dr, prefetched: cc.branchPrefetch, cur: vm, curTxNum: t.lastTxNum}
 	if cc.balUpdates == nil {
 		cc.balUpdates = cc.updates.NewEmpty()
 		// ModeDirect must upgrade to ModeUpdate to carry the BAL values.
@@ -724,11 +753,16 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 		cc.balUpdates.Reset()
 	}
 	balUpdates := cc.balUpdates
-	cc.clearTouched()
+	// A block's later folds keep the touched set and storage wipes of its earlier ones, as the per-tx mid-block path does.
+	if afterTxIndex < 0 {
+		cc.clearTouched()
+	} else {
+		cc.clearFoldedKeys()
+	}
 	cc.balBlock = true
-	cc.accumulateTouched(bal.ToWriteSet(req.bal, maxTxIndex), nil)
+	cc.accumulateTouched(bal.ToWriteSetAfter(req.bal, afterTxIndex, maxTxIndex), nil)
 	err := cc.emit(cc.foldView(vm, t.lastTxNum, reader.dr.StateReaderAt(reader.txNum)), balUpdates)
-	cc.clearTouched()
+	cc.clearFoldedKeys()
 	if err != nil {
 		return nil, nil, fmt.Errorf("base read: %w", err)
 	}
@@ -741,8 +775,6 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // buffer rather than compute()'s shared one.
 func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
 	cc.finishPrefetch()
-	cc.branchPrefetch.pause()
-	defer cc.branchPrefetch.resume()
 	sdCtx := cc.doms.GetCommitmentContext()
 	if cc.branchPrefetch != nil {
 		sdCtx.SetFeed(&cc.feed.Feed)
@@ -1048,13 +1080,8 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	}()
 
 	// Flush block N-1's own pending update (hash-routed to N-1's saved changeset,
-	// independent of N's diff below) — the one remaining changesetMu window, brief
-	// rather than spanning the fold that follows.
-	if err := func() error {
-		cc.doms.LockChangesetAccumulator()
-		defer cc.doms.UnlockChangesetAccumulator()
-		return cc.doms.FlushPendingUpdatesLocked(cc.roTx)
-	}(); err != nil {
+	// independent of N's diff below).
+	if err := cc.doms.FlushPendingUpdates(cc.roTx); err != nil {
 		return nil, err
 	}
 

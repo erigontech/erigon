@@ -2654,7 +2654,8 @@ func TestOeTracerMcopyMemory(t *testing.T) {
 			_, _, err := runtime.Execute(common.FromHex(tc.code), nil, &runtime.Config{
 				GasLimit:  1000000,
 				EVMConfig: vm.Config{Tracer: tracer.Tracer().Hooks},
-			}, t.TempDir())
+			})
+
 			require.NoError(t, err)
 			var found bool
 			for _, op := range result.VmTrace.Ops {
@@ -2794,7 +2795,7 @@ func TestOeTracerStateGasRemaining(t *testing.T) {
 			tracer := &OeTracer{r: result}
 			env := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges,
 				vm.Config{Tracer: tracer.Tracer().Hooks})
-			contract := *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			contract := *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 			contract.Code = []byte{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.SSTORE)}
 			if tc.refill {
 				contract.Code = append(contract.Code, byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.SSTORE))

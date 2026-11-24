@@ -197,7 +197,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 				filesGetter: func() *DirtyFiles {
 					return d.History.dirtyFiles
 				},
-				accessors: d.History.Accessors,
+				accessors: &d.History.Accessors,
 			})
 			d.History.InvertedIndex.SetChecker(checker)
 		}
@@ -1340,7 +1340,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			filesGetter: func() *DirtyFiles {
 				return commitment.dirtyFiles
 			},
-			accessors: commitment.Accessors,
+			accessors: &commitment.Accessors,
 		}
 		checker.AddDependency(FromDomain(account.Name), info)
 		checker.AddDependency(FromDomain(storage.Name), info)

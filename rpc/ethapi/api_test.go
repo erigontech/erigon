@@ -126,7 +126,7 @@ func TestRPCMarshalBlockAllocsPerTransaction(t *testing.T) {
 		}
 		block := types.NewBlock(&types.Header{Number: *uint256.NewInt(7), BaseFee: uint256.NewInt(7)}, txs, nil, nil, nil, nil)
 		block.Hash()
-		return testing.AllocsPerRun(100, func() { RPCMarshalBlock(block, true, true, nil, nil) })
+		return testing.AllocsPerRun(100, func() { RPCMarshalBlock(block, true, true) })
 	}
 	require.Equal(t, 1.0, blockAllocs(2)-blockAllocs(1))
 }
@@ -256,6 +256,16 @@ func TestToTransactionBlobWithoutMaxFeePerBlobGas(t *testing.T) {
 	require.True(t, blobTx.MaxFeePerBlobGas.IsZero())
 }
 
+// A call may name gasPrice or the dynamic fee fields, not both.
+func TestToMessageGasPriceWithDynamicFee(t *testing.T) {
+	gasPrice := hexutil.U256(*uint256.NewInt(2_000_000_000))
+	maxFee := hexutil.U256(*uint256.NewInt(3_000_000_000))
+	args := CallArgs{GasPrice: &gasPrice, MaxFeePerGas: &maxFee}
+
+	_, err := args.ToMessage(50_000_000, uint256.NewInt(1_000_000_000))
+	require.ErrorContains(t, err, "both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
+}
+
 // RPCMarshalHeader aliases the header it is given: the U256 quantities, the
 // extraData slice and the fields callers may null out all point straight at it.
 // RPCMarshalBlock must therefore hand it a copy — the result is mutable and
@@ -273,7 +283,7 @@ func TestRPCMarshalBlockDoesNotAliasBlockHeader(t *testing.T) {
 	wantHash := block.Hash()
 	wantMiner := block.Coinbase()
 
-	fields := RPCMarshalBlock(block, false, false, nil, nil)
+	fields := RPCMarshalBlock(block, false, false)
 
 	(*uint256.Int)(fields.Number).SetUint64(99)
 	(*uint256.Int)(fields.Difficulty).SetUint64(99)
@@ -311,7 +321,7 @@ func TestRPCMarshalBlockTransactionsJSON(t *testing.T) {
 	block := types.NewBlock(header, []types.Transaction{txn}, nil, nil, nil, nil)
 
 	field := func(inclTx, fullTx bool) string {
-		b, err := json.Marshal(RPCMarshalBlock(block, inclTx, fullTx, nil, nil))
+		b, err := json.Marshal(RPCMarshalBlock(block, inclTx, fullTx))
 		require.NoError(t, err)
 		var m map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(b, &m))
@@ -337,10 +347,10 @@ func TestRPCMarshalBlockEmptyKeepsElementType(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(7), Difficulty: *uint256.NewInt(11)}
 	block := types.NewBlock(header, nil, nil, nil, nil, nil)
 
-	_, ok := RPCMarshalBlock(block, true, true, nil, nil).Transactions.([]*RPCTransaction)
+	_, ok := RPCMarshalBlock(block, true, true).Transactions.([]*RPCTransaction)
 	require.True(t, ok, "inclTx+fullTx on an empty block must hold []*RPCTransaction")
 
-	_, ok = RPCMarshalBlock(block, true, false, nil, nil).Transactions.([]common.Hash)
+	_, ok = RPCMarshalBlock(block, true, false).Transactions.([]common.Hash)
 	require.True(t, ok, "inclTx without fullTx on an empty block must hold []common.Hash")
 }
 
@@ -443,48 +453,48 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 		name string
 		b    *RPCBlock
 	}{
-		{"hashes", RPCMarshalBlock(withTx, true, false, nil, nil)},
-		{"full transactions", RPCMarshalBlock(withTx, true, true, nil, nil)},
-		{"no transactions", RPCMarshalBlock(empty, true, false, nil, nil)},
-		{"uncle form", RPCMarshalBlock(empty, false, false, nil, nil)},
-		{"pending", func() *RPCBlock { b := RPCMarshalBlock(withTx, true, false, nil, nil); b.MarkPending(); return b }()},
+		{"hashes", RPCMarshalBlock(withTx, true, false)},
+		{"full transactions", RPCMarshalBlock(withTx, true, true)},
+		{"no transactions", RPCMarshalBlock(empty, true, false)},
+		{"uncle form", RPCMarshalBlock(empty, false, false)},
+		{"pending", func() *RPCBlock { b := RPCMarshalBlock(withTx, true, false); b.MarkPending(); return b }()},
 		{"with withdrawals", func() *RPCBlock {
 			wb := types.NewBlock(header, []types.Transaction{txn}, nil, nil, types.Withdrawals{
 				{Index: 1, Validator: 2, Address: to, Amount: 3},
 				{Index: 0, Validator: 0, Address: common.Address{}, Amount: 0},
 			}, nil)
-			return RPCMarshalBlock(wb, true, false, nil, nil)
+			return RPCMarshalBlock(wb, true, false)
 		}()},
 		{"withdrawals pointer to nil slice", func() *RPCBlock {
-			b := RPCMarshalBlock(withTx, true, false, nil, nil)
+			b := RPCMarshalBlock(withTx, true, false)
 			var none types.Withdrawals // non-nil pointer, nil slice: renders null, not []
 			b.Withdrawals = &none
 			return b
 		}()},
 		{"nil withdrawals", func() *RPCBlock {
-			b := RPCMarshalBlock(withTx, true, false, nil, nil)
+			b := RPCMarshalBlock(withTx, true, false)
 			b.Withdrawals = nil
 			return b
 		}()},
 		{"typed nil hash slice", func() *RPCBlock {
-			b := RPCMarshalBlock(withTx, true, false, nil, nil)
+			b := RPCMarshalBlock(withTx, true, false)
 			var none []common.Hash
 			b.Transactions = none // typed nil: a non-nil any that json renders as null
 			return b
 		}()},
 		{"nil uncles", func() *RPCBlock {
-			b := RPCMarshalBlock(withTx, true, false, nil, nil)
+			b := RPCMarshalBlock(withTx, true, false)
 			b.Uncles = nil
 			return b
 		}()},
 		{"otterscan shape", func() *RPCBlock {
-			b := RPCMarshalBlock(withTx, true, false, nil, nil)
+			b := RPCMarshalBlock(withTx, true, false)
 			b.TransactionCount = &count
 			b.LogsBloom = nil
 			return b
 		}()},
 		{"simulate shape", func() *RPCBlock {
-			b := RPCMarshalBlock(withTx, true, false, nil, nil)
+			b := RPCMarshalBlock(withTx, true, false)
 			b.Calls = []CallResult{
 				{ReturnData: "0x01", Logs: []*types.Log{{Topics: []common.Hash{{1}}, Data: []byte{2}}}, GasUsed: 0x5208, MaxUsedGas: 0x5300, Status: 1},
 				{ReturnData: "0x", Logs: []*types.Log{}, Error: map[string]any{"code": 3, "message": "execution reverted", "data": "0x<&>"}},
@@ -492,14 +502,14 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 			return b
 		}()},
 		{"simulate shape, no calls", func() *RPCBlock {
-			b := RPCMarshalBlock(empty, true, false, nil, nil)
+			b := RPCMarshalBlock(empty, true, false)
 			b.Calls = []CallResult{}
 			return b
 		}()},
-		{"no transactions, full shape", RPCMarshalBlock(empty, true, true, nil, nil)},
-		{"transactions excluded, full shape", RPCMarshalBlock(withTx, false, true, nil, nil)},
+		{"no transactions, full shape", RPCMarshalBlock(empty, true, true)},
+		{"transactions excluded, full shape", RPCMarshalBlock(withTx, false, true)},
 		{"typed nil full tx slice", func() *RPCBlock {
-			b := RPCMarshalBlock(withTx, true, true, nil, nil)
+			b := RPCMarshalBlock(withTx, true, true)
 			b.Transactions = []*RPCTransaction(nil)
 			return b
 		}()},
@@ -520,7 +530,7 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	base := func() *RPCTransaction {
 		return &RPCTransaction{
 			BlockHash: &hash, BlockNumber: u(0x1234), BlockTimestamp: q(0x64),
-			From: to, Gas: 0x5208, GasPrice: *u(0x9), Hash: hash,
+			From: to, Gas: 0x5208, GasPrice: u(0x9), Hash: hash,
 			Input: hexutil.Bytes{0xde, 0xad}, Nonce: 3, To: &to,
 			TransactionIndex: q(2), Value: u(0x100), Type: 0,
 			V: u(0x1b), R: u(0xaa), S: u(0xbb),

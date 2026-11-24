@@ -137,7 +137,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	filterWriter := state.NewWriter(filterSd.AsPutDel(filterMb), nil, txNum)
 	filterReader := state.NewReaderV3(filterSd.AsStateGetter(filterMb, execctxapi.StateGetterOptions{}))
 
-	ibs := state.New(stateReader)
+	ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
 	defer ibs.Close()
 	ibs.SetTxContext(current.Header.Number.Uint64(), -1)
 
@@ -149,8 +149,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		ExperimentalBAL:        execCfg.IsExperimentalBAL(),
 		RequireAllTransactions: cfg.requireAllTransactions,
 	}, current)
-
-	ibs.SetVersionMap(state.NewVersionMap(nil))
 
 	execCfg = execCfg.WithAuthor(accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase))
 
@@ -508,7 +506,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 						return nil, nil, err
 					}
 				}
-				_, feeErr = frame.Fees.Budget(frame.GetGasLimit(), frame.GetBlobGas(), baseFee256, &blobBaseFee)
+				_, _, feeErr = frame.Fees.RequiredCost(frame.GetGasLimit(), frame.GetBlobGas(), baseFee256, &blobBaseFee)
 			} else if !transaction.GetFeeCap().IsZero() || !transaction.GetTipCap().IsZero() {
 				feeErr = protocol.CheckEip1559TxGasFeeCap(senderAddress, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */)
 			}

@@ -20,9 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/OffchainLabs/go-bitfield"
@@ -140,7 +138,6 @@ func New(
 		Bootnodes:  enodes,
 	}
 
-	signal.Reset(syscall.SIGINT)
 	s.peers = peers.NewPool(s.p2p.Host())
 	s.p2p.SetDialPolicy(s.peers.Dialable)
 

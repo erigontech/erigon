@@ -1554,6 +1554,82 @@ func TestPostEnvelopeConsensusModeWithoutBlobDataReadsStoredColumns(t *testing.T
 	require.True(t, f.consensusCheckBlobData)
 }
 
+func TestPostEnvelopeWithoutBlobDataNotifiesArrival(t *testing.T) {
+	f := newEnvelopeContentsFixture(t, 0, 2)
+	f.handler.emitters = beaconevents.NewEventEmitter()
+	f.expirePendingLocal()
+	f.storeCustodyColumns()
+
+	recorder := f.postAllBlobs(true, "?broadcast_validation=consensus")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, []common.Hash{f.root}, drainEnvelopeArrivals(f.handler.emitters))
+}
+
+func TestPostEnvelopeLegacyRouteWithoutBlobDataNotifiesArrival(t *testing.T) {
+	f := newEnvelopeContentsFixture(t, 0, 2)
+	f.handler.emitters = beaconevents.NewEventEmitter()
+	f.expirePendingLocal()
+	f.storeCustodyColumns()
+
+	recorder := f.postLegacy(t.Context())
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, []common.Hash{f.root}, drainEnvelopeArrivals(f.handler.emitters))
+}
+
+func TestPostEnvelopeWithBlobDataDoesNotNotifyArrival(t *testing.T) {
+	f := newEnvelopeContentsFixture(t, 0, 2)
+	f.handler.emitters = beaconevents.NewEventEmitter()
+
+	recorder := f.postAllBlobs(false, "")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Empty(t, drainEnvelopeArrivals(f.handler.emitters))
+}
+
+func TestPostEnvelopeWithoutBlobDataNotifiesArrivalWhenColumnsAreMissing(t *testing.T) {
+	for _, mode := range []string{"gossip", "consensus", "consensus_and_equivocation"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			f.handler.emitters = beaconevents.NewEventEmitter()
+			f.expirePendingLocal()
+
+			recorder := f.postAllBlobs(true, "?broadcast_validation="+mode)
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Contains(t, recorder.Body.String(), forkchoice.ErrEIP7594ColumnDataNotAvailable.Error())
+			require.Equal(t, []common.Hash{f.root}, drainEnvelopeArrivals(f.handler.emitters))
+		})
+	}
+}
+
+func TestPostEnvelopeFailingGossipValidationDoesNotNotifyArrival(t *testing.T) {
+	f := newEnvelopeContentsFixture(t, 0, 2)
+	f.handler.emitters = beaconevents.NewEventEmitter()
+	f.expirePendingLocal()
+	f.forkchoice.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
+		return errors.New("invalid signature")
+	}
+
+	recorder := f.postAllBlobs(true, "")
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Empty(t, drainEnvelopeArrivals(f.handler.emitters))
+}
+
+func drainEnvelopeArrivals(emitter *beaconevents.EventEmitter) []common.Hash {
+	var roots []common.Hash
+	for {
+		select {
+		case root := <-emitter.EnvelopeArrived():
+			roots = append(roots, root)
+		default:
+			return roots
+		}
+	}
+}
+
 func TestPostEnvelopeContentsConsensusModesImportRejectionAfterColumnsKeepsBadRequest(t *testing.T) {
 	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
 		for _, tc := range []struct {

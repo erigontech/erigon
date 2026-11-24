@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -109,13 +110,12 @@ func TestFrameTraceBlockAfterTracerError(t *testing.T) {
 			data := common.BigToHash(new(big.Int).SetUint64(value))
 			tx := &types.FrameTransaction{
 				ChainID: *cfg.ChainID, NonceKeys: nil, Nonce: uint64(nonce), SenderAddress: sender,
-				Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 				Frames: []types.Frame{
 					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 					{Mode: types.FrameSender, Target: &target, Data: data[:], Limits: mdgas.MdGas{Execution: 100_000, State: params.StateGasPerStorageSet}},
 				},
 			}
-			tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+			tx.Fees.MaxFee.SetUint64(tx.GetGasLimit())
 			b.AddTx(tx)
 		}
 	})
@@ -433,7 +433,7 @@ func TestFramePrestateTracerRetainedBalance(t *testing.T) {
 	destroyed, err := ibs.HasSelfdestructed(accounts.InternAddress(child))
 	require.NoError(t, err)
 	require.False(t, destroyed)
-	require.NoError(t, ibs.FinalizeTx(evm.ChainRules(), state.NewNoopWriter()))
+	require.NoError(t, ethapi.EndCallTx(ibs, evm.ChainRules(), nil))
 	balance, err := ibs.GetBalance(accounts.InternAddress(child))
 	require.NoError(t, err)
 	require.Equal(t, uint256.Int{7}, balance)
@@ -513,13 +513,12 @@ func newFrameTraceChain(t *testing.T) (*execmoduletester.ExecModuleTester, *type
 	}))
 	frameTx := &types.FrameTransaction{
 		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
-		Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 10_000}},
 		},
 	}
-	frameTx.Fees.MaxFee.Mul(&frameTx.Fees.MaxFee, uint256.NewInt(frameTx.GetGasLimit()))
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 	return m, frameTx
 }
 

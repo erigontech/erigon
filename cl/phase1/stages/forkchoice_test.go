@@ -461,7 +461,7 @@ func TestHeadEventBeforeStateCopyMatchesCopiedStateEvent(t *testing.T) {
 
 			emitted := emitHeadEventBeforeStateCopy(&beaconCfg, store, earlyEmitter, headSlot, head.Root)
 			require.True(t, emitted)
-			copied, err := store.GetOwnedStateAtBlockRoot(head.Root)
+			copied, err := store.GetOwnedStateAtBlockRoot(head.Root, nil)
 			require.NoError(t, err)
 			require.NoError(t, emitHeadEvent(&beaconCfg, store, oldEmitter, headSlot, head.Root, copied))
 
@@ -724,18 +724,18 @@ func (m *busyOnceExecutionModule) UpdateForkChoice(context.Context, common.Hash,
 }
 
 func TestGloasForkChoiceRejectedAsBusyIsResent(t *testing.T) {
-	cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
-	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
-	module := &busyOnceExecutionModule{}
-	direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
-	require.NoError(t, err)
-	engine.forkChoiceFn = direct.ForkChoiceUpdate
-
 	synctest.Test(t, func(t *testing.T) {
+		cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+		bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+		module := &busyOnceExecutionModule{}
+		direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+		require.NoError(t, err)
+		engine.forkChoiceFn = direct.ForkChoiceUpdate
+
 		started := time.Now()
 		previousExecutionHead := cfg.executionHead
 		cfg.sleepForSlotLastWake = sleepForSlotWake{root: headRoot, executionHead: bid.ParentBlockHash, at: started}
-		_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+		_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
 		require.NoError(t, err)
 		require.Equal(t, 1, module.forkChoiceCalls)
 		require.Equal(t, previousExecutionHead, cfg.executionHead, "a busy execution module did not apply the head")
@@ -891,6 +891,40 @@ func TestPostForkchoiceOperationsPublishesOwnedHeadState(t *testing.T) {
 		require.Same(t, recorder.ownedState, head)
 		return nil
 	}))
+}
+
+type spareHeadStateData struct {
+	synced_data.SyncedData
+	spare *state.CachingBeaconState
+}
+
+func (s *spareHeadStateData) TakeSpareHeadState() *state.CachingBeaconState {
+	spare := s.spare
+	s.spare = nil
+	return spare
+}
+
+func TestPostForkchoiceOperationsCopiesTheHeadIntoTheSpareState(t *testing.T) {
+	fixture := newLockOrderFixture(t, 1)
+	fixture.cfg.blobDownloader = &network2.BlobHistoryDownloader{}
+	fixture.cfg.attestationDataProducer = noOpAttestationDataProducer{}
+	fixture.cfg.dirs = datadir.New(t.TempDir())
+	var spare *state.CachingBeaconState
+	require.NoError(t, fixture.cfg.forkChoice.ViewStateAtBlockRoot(fixture.headRoot, func(current *state.CachingBeaconState) error {
+		spare = state.New(current.BeaconConfig())
+		return nil
+	}))
+	recorder := &recordingHeadPublish{SyncedData: &spareHeadStateData{SyncedData: fixture.syncedData, spare: spare}}
+	fixture.cfg.syncedData = recorder
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	require.NoError(t, postForkchoiceOperations(tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot))
+
+	require.Same(t, spare, recorder.ownedState)
+	require.Equal(t, fixture.headState.Slot(), spare.Slot())
 }
 
 func newForkChoicePublicationFixture(t *testing.T) (*Cfg, *cltypes.SignedBeaconBlock, common.Hash) {
@@ -2012,7 +2046,7 @@ func TestHeadEventsDeduplicateAcrossStateCopy(t *testing.T) {
 	emitPass := func() {
 		t.Helper()
 		require.True(t, emitHeadEventBeforeStateCopy(f.cfg.beaconCfg, f.cfg.forkChoice, f.cfg.emitter, f.headSlot, f.headRoot))
-		copied, err := f.cfg.forkChoice.GetOwnedStateAtBlockRoot(f.headRoot)
+		copied, err := f.cfg.forkChoice.GetOwnedStateAtBlockRoot(f.headRoot, nil)
 		require.NoError(t, err)
 		require.NoError(t, emitHeadEvent(f.cfg.beaconCfg, f.cfg.forkChoice, f.cfg.emitter, f.headSlot, f.headRoot, copied))
 	}

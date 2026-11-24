@@ -103,29 +103,32 @@ func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remot
 			dependencies = append(dependencies, gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier))
 		}
 	}
-	cost := new(uint256.Int).Mul(uint256.NewInt(tx.GetGasLimit()), tx.GetTipCap())
 	return &remoteproto.FrameValidationReply{
-		Valid: b.valid, Payer: gointerfaces.ConvertAddressToH160(b.payer),
-		PayerBalance: gointerfaces.ConvertUint256IntToH256(uint256.NewInt(b.balance)), MaxCost: gointerfaces.ConvertUint256IntToH256(cost),
-		Paymaster: b.paymaster, Deadline: expiry, Dependencies: dependencies, CreationNonces: b.creationNonces,
+		Valid:          b.valid,
+		Payer:          gointerfaces.ConvertAddressToH160(b.payer),
+		PayerBalance:   gointerfaces.ConvertUint256IntToH256(uint256.NewInt(b.balance)),
+		Paymaster:      b.paymaster,
+		Deadline:       expiry,
+		Dependencies:   dependencies,
+		CreationNonces: b.creationNonces,
 	}, nil
 }
 
-func framePoolSlot(t *testing.T, sender common.Address, tip, fee uint64, keys ...uint256.Int) *TxnSlot {
+func framePoolSlot(t *testing.T, sender common.Address, tip, feePerGas uint64, keys ...uint256.Int) *TxnSlot {
 	t.Helper()
-	return framePoolSlotWithNonce(t, sender, 0, tip, fee, keys...)
+	return framePoolSlotWithNonce(t, sender, 0, tip, feePerGas, keys...)
 }
 
-func framePoolSlotWithNonce(t *testing.T, sender common.Address, nonce, tip, fee uint64, keys ...uint256.Int) *TxnSlot {
+func framePoolSlotWithNonce(t *testing.T, sender common.Address, nonce, tip, feePerGas uint64, keys ...uint256.Int) *TxnSlot {
 	t.Helper()
 	tx := &types.FrameTransaction{
 		NonceKeys: keys,
 		Nonce:     nonce,
 		ChainID:   *uint256.NewInt(1), SenderAddress: sender,
 		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}}},
-		Fees:   types.FrameFees{TipCap: *uint256.NewInt(tip), MaxFee: *uint256.NewInt(fee)},
+		Fees:   types.FrameFees{TipCap: *uint256.NewInt(tip)},
 	}
-	tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+	tx.Fees.MaxFee.Mul(uint256.NewInt(tx.GetGasLimit()), uint256.NewInt(feePerGas))
 	return framePoolSlotFromTransaction(t, tx)
 }
 
@@ -585,9 +588,9 @@ func TestFramePoolReservationReleasePromotesOrdinary(t *testing.T) {
 					{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: binary.BigEndian.AppendUint64(nil, deadline), Limits: mdgas.MdGas{Execution: 5_000}},
 					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
 				},
-				Fees: types.FrameFees{TipCap: *uint256.NewInt(1), MaxFee: *uint256.NewInt(2)},
+				Fees: types.FrameFees{TipCap: *uint256.NewInt(1)},
 			}
-			tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+			tx.Fees.MaxFee.SetUint64(2 * tx.GetGasLimit())
 			var encoded bytes.Buffer
 			require.NoError(t, tx.MarshalBinary(&encoded))
 			frame := &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
@@ -650,9 +653,9 @@ func TestFramePoolRevalidationRefreshesSenderNonceChain(t *testing.T) {
 					{Mode: types.FrameVerify, Flags: types.FrameApproveExecution, Limits: mdgas.MdGas{Execution: 100}},
 					{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &payer, Limits: mdgas.MdGas{Execution: 100}},
 				},
-				Fees: types.FrameFees{TipCap: *uint256.NewInt(1), MaxFee: *uint256.NewInt(2)},
+				Fees: types.FrameFees{TipCap: *uint256.NewInt(1)},
 			}
-			tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+			tx.Fees.MaxFee.SetUint64(2 * tx.GetGasLimit())
 			var encoded bytes.Buffer
 			require.NoError(t, tx.MarshalBinary(&encoded))
 			frame := &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
@@ -1200,8 +1203,8 @@ func TestFramePoolAdmissionWaitsForHeadNotification(t *testing.T) {
 			name = "local"
 		}
 		t.Run(name, func(t *testing.T) {
-			_, pool, sender := keyedFramePoolEnv(t)
 			synctest.Test(t, func(t *testing.T) {
+				_, pool, sender := keyedFramePoolEnv(t)
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				oldHead, newHead := common.Hash{1}, common.Hash{2}
@@ -1369,17 +1372,18 @@ func TestFramePoolStaleBatchPreservesSenderConflict(t *testing.T) {
 }
 
 func TestFramePoolHeadNotificationTimeout(t *testing.T) {
-	_, pool, sender := keyedFramePoolEnv(t)
-	backend := pool.ethBackend.(*frameValidationBackend)
-	backend.err = status.Error(codes.Aborted, "frame validation head changed")
-	var txns TxnSlots
-	for _, address := range []common.Address{sender, {2}} {
-		txns.Append(framePoolSlot(t, address, 1, 2, uint256.Int{1}), address[:], true)
-	}
-	ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
-	ordinary.IDHash[0] = 2
-	txns.Append(ordinary, sender[:], true)
 	synctest.Test(t, func(t *testing.T) {
+		_, pool, sender := keyedFramePoolEnv(t)
+		backend := pool.ethBackend.(*frameValidationBackend)
+		backend.err = status.Error(codes.Aborted, "frame validation head changed")
+		var txns TxnSlots
+		for _, address := range []common.Address{sender, {2}} {
+			txns.Append(framePoolSlot(t, address, 1, 2, uint256.Int{1}), address[:], true)
+		}
+		ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
+		ordinary.IDHash[0] = 2
+		txns.Append(ordinary, sender[:], true)
+
 		started := time.Now()
 		reasons, err := pool.AddLocalTxns(t.Context(), txns)
 		require.NoError(t, err)
@@ -1518,8 +1522,36 @@ func TestFramePoolBlobFeeFloor(t *testing.T) {
 	require.Empty(t, pool.frameReservations)
 }
 
+func TestFramePoolRemoteBlobPriceLimit(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.cfg.MinFeeCap = 20
+	change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	change.PendingBlockBaseFee, change.PendingBlobFeePerGas = 1, 2
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	// The budget covers the execution price limit exactly when blob gas costs 1 wei.
+	frame := framePoolSlot(t, sender, 1, pool.cfg.MinFeeCap, uint256.Int{1}).Txn.(*types.FrameTransaction)
+	frame.Fees.MaxFee.AddUint64(&frame.Fees.MaxFee, params.GasPerBlob)
+	slot := framePoolSlotWithBlob(t, frame)
+	var txns TxnSlots
+	txns.Append(slot, sender[:], false)
+	reasons, err := pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnderPriced}, reasons)
+	require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls)
+
+	change = newBlockChangeForAccounts(common.Hash{2}, 0)
+	change.PendingBlockBaseFee, change.PendingBlobFeePerGas = 1, 1
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	reasons, err = pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Equal(t, PendingSubPool, pool.byHash[string(slot.IDHash[:])].currentSubPool)
+}
+
 func TestFramePoolSponsoredBlobFeeFalls(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.cfg.MinFeeCap = 10
 	backend := pool.ethBackend.(*frameValidationBackend)
 	backend.payer, backend.balance = common.Address{9}, common.Ether
 	change := newBlockChangeForAccounts(common.Hash{1}, 0, sender, backend.payer)
@@ -1930,9 +1962,10 @@ func TestFramePoolReloadRestoresNonceChain(t *testing.T) {
 
 	restored, err := New(ctx, make(chan Announcements, 1), pool.poolDB, pool._chainDB,
 		pool.cfg, pool._stateCache, pool.chainConfig, nil, nil, func() {}, nil,
-		pool.ethBackend, log.New(), WithFeeCalculator(nil))
+		pool.ethBackend, log.New())
 	require.NoError(t, err)
 	restored.chainID.SetUint64(1)
+	require.NoError(t, restored.OnNewBlock(ctx, newBlockChangeForAccounts(pool.stateBlockHash, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.NoError(t, restored.start(ctx))
 	for _, txn := range txns.Txns {
 		mt := restored.byHash[string(txn.IDHash[:])]
@@ -1945,22 +1978,22 @@ func TestFramePoolReloadRestoresNonceChain(t *testing.T) {
 }
 
 func TestFramePoolReloadValidationBudgets(t *testing.T) {
-	ctx, pool, sender := keyedFramePoolEnv(t)
-	pool.chainID.SetUint64(1)
-	backend := pool.ethBackend.(*frameValidationBackend)
-	var frames []*TxnSlot
-	require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
-		for _, address := range []common.Address{sender, {2}} {
-			frame := framePoolSlot(t, address, 1, 2, uint256.Int{1})
-			frames = append(frames, frame)
-			if err := tx.Put(kv.PoolTransaction, frame.IDHash[:], append(address[:], frame.Rlp...)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}))
-
 	synctest.Test(t, func(t *testing.T) {
+		ctx, pool, sender := keyedFramePoolEnv(t)
+		pool.chainID.SetUint64(1)
+		backend := pool.ethBackend.(*frameValidationBackend)
+		var frames []*TxnSlot
+		require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
+			for _, address := range []common.Address{sender, {2}} {
+				frame := framePoolSlot(t, address, 1, 2, uint256.Int{1})
+				frames = append(frames, frame)
+				if err := tx.Put(kv.PoolTransaction, frame.IDHash[:], append(address[:], frame.Rlp...)); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+
 		pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
 			// Each validation fits its own budget, but together they exceed one budget.
 			select {
@@ -2250,14 +2283,14 @@ func TestFramePoolRevalidationQueuesNonceSuccessor(t *testing.T) {
 			frameTx := &types.FrameTransaction{
 				ChainID: *uint256.NewInt(1), NonceKeys: nil, SenderAddress: sender,
 				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}}},
-				Fees:   types.FrameFees{TipCap: *uint256.NewInt(1), MaxFee: *uint256.NewInt(2)},
+				Fees:   types.FrameFees{TipCap: *uint256.NewInt(1)},
 			}
 			if funding == "sponsor" {
 				backend.payer = common.Address{2}
 				frameTx.Frames[0].Flags = types.FrameApproveExecution
 				frameTx.Frames = append(frameTx.Frames, types.Frame{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &backend.payer, Limits: mdgas.MdGas{Execution: 100}})
 			}
-			frameTx.Fees.MaxFee.Mul(&frameTx.Fees.MaxFee, uint256.NewInt(frameTx.GetGasLimit()))
+			frameTx.Fees.MaxFee.SetUint64(2 * frameTx.GetGasLimit())
 			frame := &TxnSlot{Txn: frameTx}
 			ordinary := newTestTxnSlot(1, 0, 1, 2, 21_000)
 			var txns TxnSlots
@@ -2698,7 +2731,7 @@ func TestFramePoolExpiry(t *testing.T) {
 						{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: binary.BigEndian.AppendUint64(nil, deadline), Limits: mdgas.MdGas{Execution: 5_000}},
 						{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
 					},
-					Fees: types.FrameFees{TipCap: *uint256.NewInt(1), MaxFee: *uint256.NewInt(1)},
+					Fees: types.FrameFees{TipCap: *uint256.NewInt(1)},
 				}
 				tx.Fees.MaxFee.SetUint64(tx.GetGasLimit())
 				var encoded bytes.Buffer
@@ -2783,9 +2816,9 @@ func TestFramePoolCreationNonceChanges(t *testing.T) {
 					{Mode: types.FrameDefault, Target: &factory, Limits: mdgas.MdGas{Execution: 10_000, State: 400_000}},
 					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
 				},
-				Fees: types.FrameFees{TipCap: *uint256.NewInt(1), MaxFee: *uint256.NewInt(1)},
+				Fees: types.FrameFees{TipCap: *uint256.NewInt(1)},
 			}
-			tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+			tx.Fees.MaxFee.SetUint64(tx.GetGasLimit())
 			var encoded bytes.Buffer
 			require.NoError(t, tx.MarshalBinary(&encoded))
 			slot := &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
@@ -2867,14 +2900,54 @@ func TestFramePoolReplacementNeedsFeeIncrease(t *testing.T) {
 	reasons, err := pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, txpoolcfg.Success, reasons[0])
-	replacement := framePoolSlot(t, sender, 1, 2)
-	replacement.Txn.(*types.FrameTransaction).Frames[0].Data = []byte{1}
-	replacement.Txn.(*types.FrameTransaction).TransactionMisc = types.TransactionMisc{}
-	replacement.IDHash = replacement.Txn.Hash()
+	replacement := framePoolSlot(t, sender, 2, 2)
 	txns.Txns[0] = replacement
 	reasons, err = pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, txpoolcfg.NotReplaced, reasons[0])
+}
+
+func TestBlobFrameReplacementRequiresBlobPriceBump(t *testing.T) {
+	slot := func(tip, maxFee uint64) *TxnSlot {
+		return &TxnSlot{Txn: &types.FrameTransaction{
+			BlobVersionedHashes: []common.Hash{{1}},
+			Fees:                types.FrameFees{TipCap: *uint256.NewInt(tip), MaxFee: *uint256.NewInt(maxFee)},
+		}}
+	}
+	previous := slot(10, 100)
+	require.Equal(t, txpoolcfg.ReplaceUnderpriced, validateFrameReplacement(previous, slot(11, 199), 10, 100))
+	require.Equal(t, txpoolcfg.Success, validateFrameReplacement(previous, slot(11, 200), 10, 100))
+}
+
+func TestMixedBlobReplacement(t *testing.T) {
+	hashes := []common.Hash{{1}}
+	frame := &TxnSlot{Txn: &types.FrameTransaction{
+		Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 80_000}}},
+		BlobVersionedHashes: hashes,
+		Fees:                types.FrameFees{TipCap: uint256.Int{11}, MaxFee: uint256.Int{200 * params.GasPerBlob}},
+	}}
+	blob := func(tip, feeCap uint64) *TxnSlot {
+		slot := newTestBlobTxnSlot(0, 0, tip, feeCap, frame.GetGas())
+		tx := slot.Txn.(*types.BlobTx)
+		tx.BlobVersionedHashes = hashes
+		tx.MaxFeePerBlobGas.SetUint64(feeCap)
+		return slot
+	}
+	pool := &TxPool{cfg: txpoolcfg.DefaultConfig}
+	// Each candidate clears both fee bumps if the frame budget is counted twice.
+	for _, tc := range []struct {
+		name                  string
+		previous, replacement *TxnSlot
+	}{
+		{"blob to frame", blob(10, 100), frame},
+		{"frame to blob", frame, blob(22, 1_000)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := pool.checkReplacement(newMetaTxn(tc.replacement, true, 0), newMetaTxn(tc.previous, true, 0))
+			require.Equal(t, txpoolcfg.BlobReplacementTypeMismatch, decision.reason)
+			require.Equal(t, txpoolproto.ImportResult_INVALID, mapDiscardReasonToProto(decision.reason))
+		})
+	}
 }
 
 func TestFramePoolReplacementIncreasesGasBudget(t *testing.T) {

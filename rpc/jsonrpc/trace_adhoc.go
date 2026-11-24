@@ -1096,7 +1096,8 @@ func parseTraceTypes(traceTypes []string) (trace, stateDiff, vmTrace bool, err e
 	return trace, stateDiff, vmTrace, nil
 }
 
-func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string, traceConfig *config.TraceConfig) (*TraceCallResult, error) {
+func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string, traceConfig *config.TraceConfig) (_ *TraceCallResult, err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1142,7 +1143,8 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	return trace, nil
 }
 
-func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, traceTypes []string, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, traceTypes []string, traceConfig *config.TraceConfig) (_ []*TraceCallResult, err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	if err := rejectPending(blockNrOrHash); err != nil {
 		return nil, err
 	}
@@ -1257,7 +1259,8 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 }
 
 // Call implements trace_call.
-func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) (*TraceCallResult, error) {
+func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) (_ *TraceCallResult, err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1281,7 +1284,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader)
+	blockNumber, hash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, *blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, callBlockError(err, *blockNrOrHash)
 	}
@@ -1299,17 +1302,12 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-
 	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
 
-	ibs := state.New(stateReader)
+	ibs := state.NewVersionedCall(stateReader)
 	defer ibs.Close()
 
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, api.evmCallTimeout)
@@ -1320,7 +1318,6 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
-	transactions.VersionedCallState(ibs)
 	if traceTypeVmTrace {
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
@@ -1400,9 +1397,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 			return nil, err
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
-		initialIbs := state.New(stateReader)
+		initialIbs := state.NewVersionedCall(stateReader)
 		defer initialIbs.Close()
-		transactions.VersionedCallState(initialIbs)
 		if traceConfig != nil && traceConfig.StateOverrides != nil {
 			if _, err := applyStateOverrides(initialIbs, traceConfig.StateOverrides, blockCtx.Rules(chainConfig)); err != nil {
 				return nil, err
@@ -1465,7 +1461,8 @@ func (r *overriddenStorageReader) ReadAccountStorage(address accounts.Address, k
 }
 
 // CallMany implements trace_callMany.
-func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) (_ []*TraceCallResult, err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1529,7 +1526,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if err := rejectPending(*parentNrOrHash); err != nil {
 		return nil, err
 	}
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader)
+	blockNumber, hash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, *parentNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, callBlockError(err, *parentNrOrHash)
 	}
@@ -1566,11 +1563,6 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		}
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-
 	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api._txNumReader)
 	if err != nil {
 		return nil, err
@@ -1586,9 +1578,8 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
-	ibs := state.New(cachedReader)
+	ibs := state.NewVersionedBlock(cachedReader)
 	defer ibs.Close()
-	transactions.VersionedBlockState(ibs)
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
 		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* advanceTxNum */, true /* noBaseFee */, traceConfig, overrides)
@@ -1875,9 +1866,8 @@ func finalizeTraceTx(ibs *state.IntraBlockState, rules *chain.Rules, cloneReader
 	if sd == nil {
 		return ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter)
 	}
-	initialIbs := state.New(cloneReader)
+	initialIbs := state.NewVersionedCall(cloneReader)
 	defer initialIbs.Close()
-	transactions.VersionedCallState(initialIbs)
 	var changes bufferedWriter
 	if err := ethapi.EndCallTx(ibs, rules, &changes); err != nil {
 		return err
@@ -1993,7 +1983,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	num := rpc.LatestBlockNumber
 	blockNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &num}
 
-	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader)
+	blockNumber, hash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, dbtx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -2009,11 +1999,6 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
-	}
-
-	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
-	if err != nil {
-		return nil, err
 	}
 
 	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, blockNumber, latest, 0, api._txNumReader)
@@ -2033,9 +2018,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
 
-	ibs := state.New(stateReader)
+	ibs := state.NewVersionedCall(stateReader)
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
 
 	var ot OeTracer
 	ot.config, err = parseOeTracerConfig(nil)
@@ -2095,9 +2079,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		if err := ethapi.EndCallTx(ibs, evm.ChainRules(), sd); err != nil {
 			return nil, err
 		}
-		initialIbs := state.New(stateReader)
+		initialIbs := state.NewVersionedCall(stateReader)
 		defer initialIbs.Close()
-		transactions.VersionedCallState(initialIbs)
 		if err := sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}

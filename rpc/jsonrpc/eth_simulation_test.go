@@ -578,6 +578,26 @@ func TestSanitizeCallBaseFeeSet(t *testing.T) {
 	assert.Nil(t, args.GasPrice, "GasPrice should not be set when baseFee is provided")
 }
 
+// TestSanitizeCallBaseFeeSetGasPrice verifies that a call with gasPrice keeps the
+// dynamic fee fields unset after London, so it runs as a legacy call like in eth_call.
+func TestSanitizeCallBaseFeeSetGasPrice(t *testing.T) {
+	sim := newTestSimulator(uint256.NewInt(1))
+	args := callArgs()
+	gasPrice := hexutil.U256(*uint256.NewInt(2_000_000_000))
+	args.GasPrice = &gasPrice
+	bc := blockCtx(30_000_000)
+	baseFee := uint256.NewInt(1_000_000_000)
+
+	err := sim.sanitizeCall(&args, nil, &bc, baseFee, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
+	require.NoError(t, err)
+	assert.Nil(t, args.MaxFeePerGas)
+	assert.Nil(t, args.MaxPriorityFeePerGas)
+
+	msg, err := args.ToMessage(50_000_000, baseFee)
+	require.NoError(t, err)
+	assert.Equal(t, uint256.NewInt(2_000_000_000), msg.FeeCap())
+}
+
 // TestSanitizeCallBlobGas verifies that MaxFeePerBlobGas is set when BlobVersionedHashes is provided.
 func TestSanitizeCallBlobGas(t *testing.T) {
 	sim := newTestSimulator(uint256.NewInt(1))
@@ -1083,8 +1103,8 @@ func TestSimulatedChainReaderHeaderLookup(t *testing.T) {
 	simulated := types.CopyHeader(stored)
 	simulated.Time = 20
 	reader := &simulatedChainReader{
-		Reader:  consensuschain.NewReader(chain.AllProtocolChanges, tx, nil, log.New()),
-		headers: []*types.Header{simulated},
+		Reader: consensuschain.NewReader(chain.AllProtocolChanges, tx, nil, log.New()),
+		parent: simulated,
 	}
 	for _, tc := range []struct {
 		name   string

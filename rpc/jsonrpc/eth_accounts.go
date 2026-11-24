@@ -49,16 +49,12 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 	ok := false
 	defer kv.RollbackUnless(&ok, tx)
 
-	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNumber, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	if err := api.BaseAPI.checkPruneState(ctx, tx, blockNumber); err != nil {
-		return nil, nil, err
-	}
-
-	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return nil, nil, err
 	}
 
@@ -164,18 +160,12 @@ func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Ad
 	}
 	defer tx.Rollback()
 
-	blockNrOrHash.RequireCanonical = true
-	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNumber, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
 
 	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}

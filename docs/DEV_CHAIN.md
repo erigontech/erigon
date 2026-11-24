@@ -98,7 +98,8 @@ Using PoS dev mode  seed=devnet validators=64 signer=0x78eF752367584ee389aCB8824
 
 2. **Consensus**: Caplin runs the same fork choice and state transition as mainnet.
    The embedded validator checks proposer duties each slot and produces blocks via
-   the standard Beacon API (`/eth/v3/validator/blocks/{slot}`).
+   the standard Beacon API (`GET /eth/v3/validator/blocks/{slot}`, or
+   `POST /eth/v4/validator/blocks/{slot}` from the Gloas fork).
 
 3. **Execution**: Block payloads are assembled by the EL's `AssembleBlock`, including
    any pending transactions from the txpool. The CL signs and submits the block,

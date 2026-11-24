@@ -179,7 +179,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 		return nil, err
 	}
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
+	ibs.SetNoConflictDetection()
 	api.shareCodeByHash(ibs)
 
 	msg, txCtx, err := transactions.ComputeTxContext(ibs, rules, signer, block, int(txIndex))
@@ -298,7 +298,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 }
 
 func delegateGetBlockByNumber(b *types.Block, number rpc.BlockNumber, inclTx bool) (*ethapi.RPCBlock, error) {
-	response := ethapi.RPCMarshalBlock(b, inclTx, inclTx, nil, nil)
+	response := ethapi.RPCMarshalBlock(b, inclTx, inclTx)
 	if !inclTx {
 		response.Transactions = nil // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
@@ -439,7 +439,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, fmt.Errorf("receipts count mismatch: got %d, need %d", len(receipts), pageEnd)
 	}
 
-	blobFee, err := api.blobBaseFee(ctx, tx, b.HeaderNoCopy())
+	blobFee, err := api.frameBlobBaseFee(ctx, tx, b.HeaderNoCopy(), b.Transactions()[pageStart:pageEnd]...)
 	if err != nil {
 		return nil, err
 	}

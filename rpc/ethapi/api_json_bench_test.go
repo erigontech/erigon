@@ -83,7 +83,7 @@ func BenchmarkRPCMarshalBlock(b *testing.B) {
 			b.Run(fmt.Sprintf("txs=%d/fullTx=%t", txCount, fullTx), func(b *testing.B) {
 				b.ReportAllocs()
 				for b.Loop() {
-					out, err := json.Marshal(RPCMarshalBlock(block, true, fullTx, nil, nil))
+					out, err := json.Marshal(RPCMarshalBlock(block, true, fullTx))
 					if err != nil || len(out) == 0 {
 						b.Fatal(err)
 					}
@@ -107,7 +107,7 @@ func BenchmarkRPCBlockMarshalFastJSONTo(b *testing.B) {
 		block.Hash()
 
 		for _, fullTx := range []bool{true, false} {
-			rpcBlock := RPCMarshalBlock(block, true, fullTx, nil, nil)
+			rpcBlock := RPCMarshalBlock(block, true, fullTx)
 			b.Run(fmt.Sprintf("txs=%d/fullTx=%t", txCount, fullTx), func(b *testing.B) {
 				b.ReportAllocs()
 				rec := httptest.NewRecorder()

@@ -759,6 +759,38 @@ func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 	}
 }
 
+// DeleteBadBlock removes the header, total difficulty, hash-to-number entry, body, transactions,
+// senders and access list of a block that failed validation.
+func DeleteBadBlock(db kv.RwTx, hash common.Hash, number uint64) error {
+	key := dbutils.BlockBodyKey(number, hash)
+	b, ok, err := ReadBodyOnlyTxnByKey(db, key)
+	if err != nil {
+		return err
+	}
+	if ok {
+		if err := deleteTxs(db, b); err != nil {
+			return err
+		}
+	}
+	for _, table := range []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers, kv.HeaderTD} {
+		if err := db.Delete(table, key); err != nil {
+			return err
+		}
+	}
+	return db.Delete(kv.HeaderNumber, hash[:])
+}
+
+func deleteTxs(db kv.RwTx, b types.BodyOnlyTxn) error {
+	txIDBytes := make([]byte, 8)
+	for txID := b.BaseTxnID.U64(); txID <= b.BaseTxnID.LastSystemTx(b.TxCount); txID++ {
+		binary.BigEndian.PutUint64(txIDBytes, txID)
+		if err := db.Delete(kv.EthTx, txIDBytes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func AppendCanonicalTxNums(tx kv.RwTx, from uint64) error {
 	nextBaseTxNum := 0
 	if from > 0 {
@@ -935,14 +967,8 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 		}
 		if !ok {
 			log.Debug("PruneBlocks: block body not found", "height", n)
-		} else {
-			txIDBytes := make([]byte, 8)
-			for txID := b.BaseTxnID.U64(); txID <= b.BaseTxnID.LastSystemTx(b.TxCount); txID++ {
-				binary.BigEndian.PutUint64(txIDBytes, txID)
-				if err := tx.Delete(kv.EthTx, txIDBytes); err != nil {
-					return deleted, err
-				}
-			}
+		} else if err := deleteTxs(tx, b); err != nil {
+			return deleted, err
 		}
 		// Copying k because otherwise the same memory will be reused
 		// for the next key and Delete below will end up deleting 1 more record than required
@@ -987,12 +1013,8 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 			return err
 		}
 		if ok {
-			txIDBytes := make([]byte, 8)
-			for txID := b.BaseTxnID.U64(); txID <= b.BaseTxnID.LastSystemTx(b.TxCount); txID++ {
-				binary.BigEndian.PutUint64(txIDBytes, txID)
-				if err := tx.Delete(kv.EthTx, txIDBytes); err != nil {
-					return err
-				}
+			if err := deleteTxs(tx, b); err != nil {
+				return err
 			}
 		}
 		// Copying k because otherwise the same memory will be reused
@@ -1341,9 +1363,7 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, 
 	return res, true, nil
 }
 
-func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
-	blockHash := block.Hash()
-	blockNum := block.NumberU64()
+func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (types.Receipts, error) {
 	transactions := block.Transactions()
 	// Hashing the transactions overlaps with reading the receipts.
 	hashed := make(chan struct{})
@@ -1355,55 +1375,65 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	}()
 	defer func() { <-hashed }()
 
-	minTxNum, err := txNumReader.Min(context.Background(), tx, blockNum)
+	res, err := ReadBlockReceiptsCacheV2(context.Background(), tx, block.NumberU64(), txNumReader)
 	if err != nil {
-		return
-	}
-	maxTxNum, err := txNumReader.Max(context.Background(), tx, blockNum)
-	if err != nil {
-		return
-	}
-
-	receiptIdx := 0
-	for txNum := minTxNum; txNum < maxTxNum+1; txNum++ {
-		v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, txNum+1)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-		if len(v) == 0 {
-			continue
-		}
-
-		// Convert the receipts from their storage form to their internal representation
-		receipt := &types.ReceiptForStorage{}
-		if err := rlp.DecodeBytes(v, receipt); err != nil {
-			return nil, fmt.Errorf("ReadReceiptsCacheV2: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
-		}
-		x := (*types.Receipt)(receipt)
-		txnIdx := int(receipt.TransactionIndex)
-		if txnIdx < 0 || txnIdx != receiptIdx || txnIdx >= len(transactions) {
-			// RCacheV2 is read in txNum order. The stored transaction index must
-			// match the next receipt position, otherwise derive the block instead.
-			return nil, nil
-		}
-		res = append(res, x)
-		receiptIdx++
-	}
-	if receiptIdx != len(transactions) {
-		// Block receipt RPCs require the full ordered receipt set.
-		return nil, nil
+		return nil, err
 	}
 	<-hashed
-	for i, x := range res {
-		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, transactions[i].Hash(), true)
+	return DeriveCachedBlockReceipts(block, res), nil
+}
+
+// DeriveCachedBlockReceipts completes the RCacheV2 receipts of block with the block fields.
+// It returns nil when res does not hold one receipt per transaction: block receipt RPCs require the full set.
+func DeriveCachedBlockReceipts(block *types.Block, res types.Receipts) types.Receipts {
+	transactions := block.Transactions()
+	if len(res) != len(transactions) {
+		return nil
 	}
-	return res, nil
+	blockHash, blockNum := block.Hash(), block.NumberU64()
+	for i, x := range res {
+		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, transactions[i].Hash(), false)
+	}
+	return res
 }
 
 func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
 	var w rawtemporaldb.ReceiptWriter
 	return w.Append(tx, receipt, txNum)
+}
+
+// ReadBlockReceiptsCacheV2 reads and decodes the RCacheV2 receipts of blockNum, with their blooms,
+// without the block. A gap returns nil, and a missing tail returns a shorter list.
+func ReadBlockReceiptsCacheV2(ctx context.Context, tx kv.TemporalTx, blockNum uint64, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
+	minTxNum, err := txNumReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	maxTxNum, err := txNumReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	for txNum := minTxNum; txNum < maxTxNum+1; txNum++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, txNum+1)
+		if err != nil {
+			return nil, err
+		}
+		if !ok || len(v) == 0 {
+			continue
+		}
+		receipt := &types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(v, receipt); err != nil {
+			return nil, fmt.Errorf("ReadBlockReceiptsCacheV2: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
+		}
+		x := (*types.Receipt)(receipt)
+		if int(x.TransactionIndex) != len(res) {
+			return nil, nil
+		}
+		x.Bloom = types.CreateBloom(types.Receipts{x})
+		res = append(res, x)
+	}
+	return res, nil
 }

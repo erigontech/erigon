@@ -31,6 +31,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
@@ -84,7 +85,7 @@ type EthAPI interface {
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (*ethutils.RPCReceipt, error)
-	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) (LogsResult, error)
 	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) (ethutils.RPCReceipts, error)
 
 	// Block access list related (see ./eth_block_access_list.go)
@@ -174,7 +175,8 @@ type BaseAPI struct {
 
 	_blockReader dbservices.FullBlockReader
 	// remoteBlocks is set when block lookups go to the backend over gRPC (rpcdaemon without
-	// --datadir): each one opens a backend read tx.
+	// --datadir): each one opens a backend read tx, and the remote DB waits for a read slot even
+	// under kv.WithNonBlockingAcquire.
 	remoteBlocks bool
 	_txNumReader rawdbv3.TxNumsReader
 	_txnReader   dbservices.TxnReader
@@ -512,13 +514,14 @@ func (api *BaseAPI) canonicalHeaderByNumber(ctx context.Context, tx kv.Getter, n
 	return api.headerByHashAndNumber(ctx, tx, hash, number)
 }
 
-// canonicalHeaderByNumberOrHash resolves the selector and header through tx.
-// It never selects an overlay, so callers can keep dependent reads on one view.
+// canonicalHeaderByNumberOrHash resolves the selector and header through tx and
+// rejects a block that tx has not executed yet. It never selects an overlay, so
+// callers can keep dependent reads on one view.
 func (api *BaseAPI) canonicalHeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
 	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
 		return nil, false, nil
 	}
-	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNum, hash, isLatest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1316,6 +1319,8 @@ type APIImpl struct {
 	RpcTxSyncMaxTimeout         time.Duration
 	logger                      log.Logger
 	gasOracleLogger             log.Logger
+	headLogs                    atomic.Pointer[headBlockLogs]
+	headLogsFill                singleflight.Group
 }
 
 // NewEthAPI returns APIImpl instance

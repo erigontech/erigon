@@ -46,3 +46,27 @@ func TestFeeHistoryFrameFeeBudget(t *testing.T) {
 	require.NoError(t, bf.err)
 	require.Equal(t, []txGasAndReward{{gasUsed: header.GasUsed, reward: *uint256.NewInt(3)}}, bf.results.tips)
 }
+
+func TestFeeHistoryBlobFrameReward(t *testing.T) {
+	frame := &types.FrameTransaction{
+		Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
+		BlobVersionedHashes: []common.Hash{{1}},
+		Fees:                types.FrameFees{TipCap: *uint256.NewInt(10)},
+	}
+	gasUsed := frame.GetGasLimit()
+	// At zero excess blob gas one wei per blob gas is burned. The remaining
+	// budget pays the execution base fee of 10 and a tip of 2 per gas.
+	frame.Fees.MaxFee.SetUint64(12*gasUsed + frame.GetBlobGas())
+	header := &types.Header{
+		Number: *uint256.NewInt(1), BaseFee: uint256.NewInt(10), GasLimit: 30_000_000, GasUsed: gasUsed,
+		ExcessBlobGas: common.NewUint64(0), BlobGasUsed: common.NewUint64(frame.GetBlobGas()),
+	}
+	bf := &blockFees{
+		blockNumber: 1, header: header,
+		block:    types.NewBlockFromStorage(common.Hash{}, header, types.Transactions{frame}, nil, nil, nil),
+		receipts: types.Receipts{{GasUsed: gasUsed}},
+	}
+	(&Oracle{log: log.New()}).processBlock(bf, chain.AllProtocolChanges)
+	require.NoError(t, bf.err)
+	require.Equal(t, []txGasAndReward{{gasUsed: gasUsed, reward: *uint256.NewInt(2)}}, bf.results.tips)
+}

@@ -245,7 +245,7 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 // preCheck validates the transaction and computes the fees for buyGas without
 // mutating state or reserving block gas.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) (upfrontTxnFees, error) {
+func (st *TxnExecutor) preCheck(gasBailout bool, intrinsic mdgas.IntrinsicGasCalcResult) (upfrontTxnFees, error) {
 	rules := st.evm.ChainRules()
 	from := st.msg.From()
 
@@ -337,27 +337,21 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	// EIP-7825.
-	requiredIntrinsicGas := max(intrinsicGasResult.ExecutionGas, intrinsicGasResult.FloorGasCost)
-	if st.msg.CheckGas() && rules.IsOsaka {
-		if rules.IsAmsterdam {
-			if gas > params.MaxTxnTotalGasLimit {
-				return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
-			}
-		} else if gas > params.MaxTxnGasLimit {
-			return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
-		}
+	if st.msg.CheckGas() && rules.IsOsaka && mdgas.ExceedsDeclaredGasCap(gas, rules.IsAmsterdam) {
+		return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
 	}
-	// EIP-8037: TX_MAX_GAS_LIMIT applies to the execution gas dimension only.
-	if rules.IsAmsterdam && !st.msg.SkipExecutionGasCap() && requiredIntrinsicGas > params.MaxTxnGasLimit {
+	if intrinsic.ExceedsExecutionGasCap(rules.IsAmsterdam) && !st.msg.SkipExecutionGasCap() {
 		return upfrontTxnFees{}, fmt.Errorf("%w: execution gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
-			ErrIntrinsicGas, requiredIntrinsicGas, params.MaxTxnGasLimit)
+			ErrIntrinsicGas, intrinsic.RequiredGas(), params.MaxTxnGasLimit)
 	}
 
-	// Match geth's EIP-7702 prerequisite precedence: after fee caps, before
-	// affordability and intrinsic gas.
-	if err := validateSetCodePrerequisites(st.msg.Authorizations(), st.msg.To().IsNil(), rules.IsPrague); err != nil {
-		return upfrontTxnFees{}, err
+	// Fee and gas caps take precedence here. To match geth's EIP-7702 error
+	// order, report SetCode prerequisite errors before checking the sender's
+	// funds or whether the gas limit covers the intrinsic cost.
+	if auths := st.msg.Authorizations(); auths != nil {
+		if err := types.ValidateSetCodePrerequisites(auths, st.msg.To().IsNil(), rules.IsPrague); err != nil {
+			return upfrontTxnFees{}, err
+		}
 	}
 
 	var (
@@ -407,8 +401,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	if gas < requiredIntrinsicGas {
-		return upfrontTxnFees{}, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, gas, requiredIntrinsicGas)
+	if intrinsic.ExceedsGasLimit(gas) {
+		return upfrontTxnFees{}, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, gas, intrinsic.RequiredGas())
 	}
 
 	if st.msg.To().IsNil() {
@@ -435,15 +429,13 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.ExecutionResult, err error) {
-	if st.evm.IntraBlockState().IsVersioned() {
-		defer func() {
-			if r := recover(); r != nil {
-				// An in-flight dependency aborts via result.Dep, it does not panic,
-				// so any panic here is a genuine failure.
-				err = fmt.Errorf("%w: %v at: %s", ErrExecPanic, r, dbg.Stack())
-			}
-		}()
-	}
+	defer func() {
+		if r := recover(); r != nil {
+			// An in-flight dependency aborts via result.Dep, it does not panic,
+			// so any panic here is a genuine failure.
+			err = fmt.Errorf("%w: %v at: %s", ErrExecPanic, r, dbg.Stack())
+		}
+	}()
 
 	if msg, ok := st.msg.(*types.Message); ok && msg.FrameTransaction() != nil {
 		return st.executeFrameTransaction(msg.FrameTransaction(), refunds, nil)
@@ -680,22 +672,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	return result, nil
 }
 
-func validateSetCodePrerequisites(auths []types.Authorization, contractCreation, isPrague bool) error {
-	if auths == nil {
-		return nil
-	}
-	if !isPrague {
-		return errors.New("SetCode transaction not allowed before Prague fork")
-	}
-	if contractCreation {
-		return errors.New("contract creation not allowed with type4 txs")
-	}
-	if len(auths) == 0 {
-		return errors.New("SetCode transaction must have at least one authorization")
-	}
-	return nil
-}
-
 func (st *TxnExecutor) handleRuntimeFailure(typ vm.OpCode, destination accounts.Address, startGas mdgas.MdGas, err error) mdgas.MdGasUsage {
 	return HandleRuntimeFailure(st.evm, typ, st.msg.From(), destination, st.data, startGas, &st.gasRemaining, st.value, err)
 }
@@ -729,8 +705,9 @@ func RecipientCreditedAtValidation(from, to, coinbase accounts.Address, value ui
 	return err == nil && acc != nil && acc.CodeHash.IsEmpty()
 }
 
-// verifyAuthorities applies the EIP-7702 authorization list, mutating state;
-// callers must first validate the list with validateSetCodePrerequisites.
+// verifyAuthorities applies individual EIP-7702 authorizations after
+// types.ValidateSetCodePrerequisites checks the transaction. It skips invalid
+// tuples and updates the authority's code and nonce for each accepted tuple.
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *uint256.Int, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
 	var gasUsed mdgas.MdGasUsage
 	if auths == nil {

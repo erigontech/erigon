@@ -35,6 +35,28 @@ import (
 
 const DelegateDesignationCodeSize = 23
 
+var (
+	ErrSetCodePrePrague           = errors.New("SetCode transaction not allowed before Prague fork")
+	ErrSetCodeContractCreation    = errors.New("contract creation not allowed with type4 txs")
+	ErrSetCodeEmptyAuthorizations = errors.New("SetCode transaction must have at least one authorization")
+)
+
+// ValidateSetCodePrerequisites checks that SetCode is active and the transaction
+// has a recipient and at least one authorization. Callers must first identify
+// the transaction as SetCode because a nil authorization list counts as empty.
+func ValidateSetCodePrerequisites(auths []Authorization, contractCreation, isPrague bool) error {
+	if !isPrague {
+		return ErrSetCodePrePrague
+	}
+	if contractCreation {
+		return ErrSetCodeContractCreation
+	}
+	if len(auths) == 0 {
+		return ErrSetCodeEmptyAuthorizations
+	}
+	return nil
+}
+
 type SetCodeTransaction struct {
 	DynamicFeeTransaction
 	Authorizations []Authorization

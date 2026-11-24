@@ -66,43 +66,30 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *ty
 	if err != nil {
 		return nil, err
 	}
-
-	commitmentHistoryEnabled, err := api.commitmentHistoryEnabled(tx)
+	opts, err := api.receiptsOpts(tx)
 	if err != nil {
 		return nil, err
 	}
-	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled})
+	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, opts)
+}
+
+func (api *BaseAPI) receiptsOpts(tx kv.TemporalTx) (eth.ReceiptsOpts, error) {
+	commitmentHistoryEnabled, err := api.commitmentHistoryEnabled(tx)
+	return eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled}, err
 }
 
 func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *receipts.PostStateInfo) (*types.Receipt, error) {
 	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, header, txn, index, txNum, postState)
 }
 
-func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
-	return api.receiptsGenerator.GetReceiptsGasUsed(ctx, tx, block, api._txNumReader)
-}
-
-func (api *BaseAPI) frameReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, fullTx bool) (types.Receipts, error) {
-	if !fullTx {
-		return nil, nil
+func (api *BaseAPI) canonicalReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
+	// Receipt metadata is indexed by canonical transaction number, so it
+	// cannot supply gas used for another block at the same height.
+	hash, ok, err := (canonicalViewReader{api._blockReader}).CanonicalHash(ctx, tx, block.NumberU64())
+	if err != nil || !ok || hash != block.Hash() {
+		return nil, err
 	}
-	for _, txn := range block.Transactions() {
-		if txn.Type() != types.FrameTxType {
-			continue
-		}
-		executed, err := rpchelper.GetLatestExecutedBlockNumber(tx)
-		if err != nil || block.NumberU64() > executed {
-			return nil, err
-		}
-		// Receipt metadata is indexed by canonical transaction number, so it
-		// cannot supply gas used for another block at the same height.
-		hash, ok, err := (canonicalViewReader{api._blockReader}).CanonicalHash(ctx, tx, block.NumberU64())
-		if err != nil || !ok || hash != block.Hash() {
-			return nil, err
-		}
-		return api.getReceiptsGasUsed(ctx, tx, block)
-	}
-	return nil, nil
+	return api.receiptsGenerator.GetReceiptsGasUsed(ctx, tx, block)
 }
 
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
@@ -230,42 +217,42 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 }
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
-func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
+func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (LogsResult, error) {
 	if err := crit.ValidateTopicPositions(); err != nil {
-		return nil, err
+		return LogsResult{}, err
 	}
 
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
-		return nil, beginErr
+		return LogsResult{}, beginErr
 	}
 	defer tx.Rollback()
 	// Committed view only: GetReceipt must not wrap this tx in a newer overlay.
 	tx = rpchelper.PinToOverlay(tx, nil)
 
 	if exceedsLogQueryLimit(crit, api.logQueryLimit) {
-		return nil, &rpc.CustomError{Message: fmt.Sprintf(errExceedLogQueryLimit, api.logQueryLimit), Code: rpc.ErrCodeInvalidParams}
+		return LogsResult{}, &rpc.CustomError{Message: fmt.Sprintf(errExceedLogQueryLimit, api.logQueryLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
 	if crit.BlockHash != nil && (crit.FromBlock != nil || crit.ToBlock != nil) {
-		return nil, &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
+		return LogsResult{}, &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
 	}
 
 	begin, end, err := api.resolveLogsRange(ctx, tx, crit, true)
 	if err != nil {
-		return nil, err
+		return LogsResult{}, err
 	}
 
 	if end < begin {
-		return nil, &rpc.CustomError{Message: errInvalidBlockRange, Code: rpc.ErrCodeInvalidParams}
+		return LogsResult{}, &rpc.CustomError{Message: errInvalidBlockRange, Code: rpc.ErrCodeInvalidParams}
 	}
 	if end > roaring.MaxUint32 {
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
-			return nil, err
+			return LogsResult{}, err
 		}
 		if begin > latest {
-			return nil, fmt.Errorf("begin (%d) > latest (%d)", begin, latest)
+			return LogsResult{}, fmt.Errorf("begin (%d) > latest (%d)", begin, latest)
 		}
 		end = latest
 	}
@@ -274,20 +261,93 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	// This prevents returning empty results when blocks exist but haven't been executed yet.
 	latestExecuted, err := rpchelper.GetLatestExecutedBlockNumber(tx)
 	if err != nil {
-		return nil, err
+		return LogsResult{}, err
 	}
 	if begin > latestExecuted || end > latestExecuted {
-		return nil, fmt.Errorf("requested block range [%d, %d] is beyond latest executed block %d (node is still syncing)", begin, end, latestExecuted)
+		return LogsResult{}, fmt.Errorf("requested block range [%d, %d] is beyond latest executed block %d (node is still syncing)", begin, end, latestExecuted)
 	}
 	if begin == 0 && end == 0 && latestExecuted == 0 {
-		return nil, fmt.Errorf("node is still initializing")
+		return LogsResult{}, fmt.Errorf("node is still initializing")
 	}
 
 	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, end, crit); err != nil {
-		return nil, err
+		return LogsResult{}, err
 	}
 
-	return api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.blockRangeLimit, api.BaseAPI.getLogsMaxResults)
+	if begin == latestExecuted && end == latestExecuted {
+		return api.headLogsResult(ctx, tx, begin, crit)
+	}
+	logs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.blockRangeLimit, api.BaseAPI.getLogsMaxResults)
+	if err != nil {
+		return LogsResult{}, err
+	}
+	return LogsResult{Logs: logs}, nil
+}
+
+// headLogsResult answers a query on the latest executed block from the cached logs of that block,
+// keyed by its canonical hash: the logs of a block hash never change, and clients polling the head
+// repeat queries on it.
+func (api *APIImpl) headLogsResult(ctx context.Context, tx kv.TemporalTx, blockNum uint64, crit filters.FilterCriteria) (LogsResult, error) {
+	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, blockNum)
+	if err != nil {
+		return LogsResult{}, err
+	}
+	var head *headBlockLogs
+	if ok {
+		if head, err = api.loadHeadLogs(ctx, tx, blockNum, hash); err != nil {
+			return LogsResult{}, err
+		}
+	}
+	if head == nil || head.tooMany {
+		logs, err := api.getLogsV3(ctx, tx, blockNum, blockNum, crit, api.BaseAPI.blockRangeLimit, api.BaseAPI.getLogsMaxResults)
+		return LogsResult{Logs: logs}, err
+	}
+	// A cached block has at most rpc.logs.maxresults logs, so its matches are within the cap.
+	return head.filter(types.NewLogFilter(crit.Addresses, crit.Topics)), nil
+}
+
+// loadHeadLogs returns the cached logs of the head block, filling the cache once for all the
+// concurrent callers. A block with more logs than rpc.logs.maxresults is cached as a tooMany marker,
+// so the cap still bounds the work of a query and the block is read in full only once.
+func (api *APIImpl) loadHeadLogs(ctx context.Context, tx kv.TemporalTx, blockNum uint64, hash common.Hash) (*headBlockLogs, error) {
+	if head := api.headLogs.Load(); head != nil && head.hash == hash {
+		return head, nil
+	}
+	v, err, _ := api.headLogsFill.Do(hash.String(), func() (any, error) {
+		if prev := api.headLogs.Load(); prev != nil && prev.hash == hash {
+			return prev, nil
+		}
+		// Callers that share the fill must not fail because the first one was cancelled.
+		logs, err := api.getLogsV3(context.WithoutCancel(ctx), tx, blockNum, blockNum, filters.FilterCriteria{}, 0, api.BaseAPI.getLogsMaxResults)
+		var head *headBlockLogs
+		if _, tooMany := errors.AsType[*rpc.InvalidParamsError](err); tooMany {
+			head = &headBlockLogs{hash: hash, num: blockNum, tooMany: true}
+		} else if err != nil {
+			return nil, err
+		} else if head, err = newHeadBlockLogs(hash, blockNum, logs); err != nil {
+			return nil, err
+		}
+		api.publishHeadLogs(head)
+		return head, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*headBlockLogs), nil
+}
+
+// publishHeadLogs caches head unless a newer block is already cached: a query whose transaction
+// still sees an older head must not replace it.
+func (api *APIImpl) publishHeadLogs(head *headBlockLogs) {
+	for {
+		prev := api.headLogs.Load()
+		if prev != nil && prev.num > head.num {
+			return
+		}
+		if api.headLogs.CompareAndSwap(prev, head) {
+			return
+		}
+	}
 }
 
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {
@@ -564,6 +624,20 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	opts, err := api.receiptsOpts(tx)
+	if err != nil {
+		return nil, err
+	}
+	var prefetch *receipts.ReceiptsPrefetch
+	if !api.remoteBlocks {
+		prefetch = api.receiptsGenerator.PrefetchReceipts(ctx, chainConfig, api.db, blockNum, blockHash, opts)
+		defer prefetch.Close()
+	}
+
 	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
@@ -571,11 +645,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if block == nil {
 		return nil, nil
 	}
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	receipts, err := api.getReceipts(ctx, tx, block)
+	receipts, err := api.receiptsGenerator.GetReceiptsPrefetched(ctx, chainConfig, tx, block, opts, prefetch)
 	if err != nil {
 		return nil, err
 	}

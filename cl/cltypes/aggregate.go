@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -191,6 +193,13 @@ func NewSyncAggregateWithSize(bitsSize int) *SyncAggregate {
 	}
 }
 
+func newSyncAggregateForConfig(beaconCfg *clparams.BeaconChainConfig) *SyncAggregate {
+	if beaconCfg == nil {
+		return NewSyncAggregate()
+	}
+	return NewSyncAggregateWithSize(int(beaconCfg.SyncCommitteeSize) / 8)
+}
+
 // assertBitsInitialized panics if SyncCommiteeBits has not been initialized.
 // All SyncAggregate instances must be created via NewSyncAggregate() or
 // NewSyncAggregateWithSize(), never as bare &SyncAggregate{} literals.
@@ -277,6 +286,12 @@ func (agg *SyncAggregate) UnmarshalJSON(input []byte) error {
 	bits, err := hex.DecodeString(s)
 	if err != nil {
 		return err
+	}
+	if len(bits) == 0 {
+		return errors.New("sync aggregate is missing sync committee bits")
+	}
+	if want := len(agg.SyncCommiteeBits); want > 0 && len(bits) != want {
+		return fmt.Errorf("sync committee bits are %d bytes, expected %d", len(bits), want)
 	}
 	agg.SyncCommiteeBits = bits
 	agg.SyncCommiteeSignature = tmp.SyncCommiteeSignature

@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -42,20 +43,22 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 // fakeStateReader is a minimal state.StateReader backed by an in-memory account
 // map, used to exercise RecordingState predicates without a database.
 type fakeStateReader struct {
 	accounts map[common.Address]*accounts.Account
+	codes    map[common.Address][]byte
 }
 
 func (r *fakeStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
@@ -79,9 +82,13 @@ func (r *fakeStateReader) ReadAccountStorage(address accounts.Address, key accou
 	return uint256.Int{}, false, nil
 }
 
-func (r *fakeStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) { return nil, nil }
+func (r *fakeStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	return r.codes[address.Value()], nil
+}
 
-func (r *fakeStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) { return 0, nil }
+func (r *fakeStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	return len(r.codes[address.Value()]), nil
+}
 
 func (r *fakeStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
 	return 0, nil
@@ -238,6 +245,49 @@ func TestCollectAccessedState_Legacy7702Designator(t *testing.T) {
 	}
 	if !sawDesignator {
 		t.Fatal("legacy witness codes missing the EIP-7702 designator (present only in PreStateCode)")
+	}
+}
+
+func TestRecordingStateCodeReadAfterRevertedWrite(t *testing.T) {
+	for _, operation := range []string{"code", "size", "delegation"} {
+		t.Run(operation, func(t *testing.T) {
+			writer := accounts.InternAddress(common.HexToAddress("0x11"))
+			reader := accounts.InternAddress(common.HexToAddress("0x22"))
+			code := []byte{0x60, 0x01, 0x00}
+			codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+			inner := &fakeStateReader{
+				accounts: map[common.Address]*accounts.Account{
+					writer.Value(): {Nonce: 1, Root: empty.RootHash, CodeHash: accounts.EmptyCodeHash},
+					reader.Value(): {Nonce: 1, Root: empty.RootHash, CodeHash: codeHash},
+				},
+				codes: map[common.Address][]byte{reader.Value(): code},
+			}
+			recorded := NewRecordingState(inner)
+			ibs := state.New(recorded)
+			defer ibs.Close()
+			transactions.VersionedBlockState(ibs)
+			ibs.SetTxContext(1, 0)
+			read := func() error {
+				switch operation {
+				case "size":
+					_, err := ibs.GetCodeSize(reader)
+					return err
+				case "delegation":
+					_, _, err := ibs.GetDelegatedDesignation(reader)
+					return err
+				default:
+					_, err := ibs.GetCode(reader)
+					return err
+				}
+			}
+			snapshot := ibs.PushSnapshot()
+			require.NoError(t, ibs.SetCode(writer, code, tracing.CodeChangeContractCreation))
+			require.NoError(t, read())
+			require.Empty(t, collectAccessedState(recorded, witnessModeCanonical).SortedCodes)
+			ibs.RevertToSnapshot(snapshot, nil)
+			require.NoError(t, read())
+			require.Equal(t, []hexutil.Bytes{code}, collectAccessedState(recorded, witnessModeCanonical).SortedCodes)
+		})
 	}
 }
 
@@ -839,24 +889,31 @@ func TestExecBlockStatelesslyEIP8253(t *testing.T) {
 }
 
 func TestExecBlockStatelesslyEIP8253RejectsInvalidParent(t *testing.T) {
-	for _, name := range []string{"missing", "wrong hash", "wrong number"} {
-		t.Run(name, func(t *testing.T) {
-			witness, block, config := eip8253ReplayWitness(t, 99, 0, 1)
-			header := block.Header()
-			switch name {
-			case "missing":
-				witness.Headers = nil
-				witness.headerByNumber = nil
-			case "wrong hash":
-				header.ParentHash[0] ^= 1
-			case "wrong number":
-				parent := types.CopyHeader(witness.headerByNumber[1])
-				parent.Number.SetUint64(2)
-				witness.headerByNumber[1] = parent
-				header.ParentHash = parent.Hash()
+	witness, block, config := eip8253ReplayWitness(t, 99, 0, 1)
+	parentNumber := block.NumberU64() - 1
+	parent := witness.headerByNumber[parentNumber]
+	parentAtWrongHeight := types.CopyHeader(parent)
+	parentAtWrongHeight.Number.SetUint64(block.NumberU64())
+
+	for _, tc := range []struct {
+		name          string
+		parent        *types.Header
+		requestedHash common.Hash
+	}{
+		{name: "missing", requestedHash: parent.Hash()},
+		{name: "wrong hash", parent: parent, requestedHash: common.Hash{}},
+		{name: "wrong number", parent: parentAtWrongHeight, requestedHash: parentAtWrongHeight.Hash()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testWitness := *witness
+			testWitness.headerByNumber = make(map[uint64]*types.Header)
+			if tc.parent != nil {
+				testWitness.headerByNumber[parentNumber] = tc.parent
 			}
-			block = types.NewBlockWithHeader(header, nil)
-			_, _, err := execBlockStatelessly(witness, block, config, merge.New(ethash.NewFaker()))
+			header := block.Header()
+			header.ParentHash = tc.requestedHash
+			testBlock := types.NewBlockWithHeader(header, nil)
+			_, _, err := execBlockStatelessly(&testWitness, testBlock, config, merge.New(ethash.NewFaker()))
 			require.ErrorIs(t, err, rules.ErrUnknownAncestor)
 		})
 	}
@@ -898,9 +955,6 @@ func eip8253ReplayWitness(t *testing.T, parentTime, beforeNonce, afterNonce uint
 	}
 
 	parent := &types.Header{Number: *uint256.NewInt(1), Time: parentTime, Root: prestate.Hash()}
-	encodedParent, err := rlp.EncodeToBytes(parent)
-	require.NoError(t, err)
-	witness.Headers = []hexutil.Bytes{encodedParent}
 	witness.headerByNumber = map[uint64]*types.Header{1: parent}
 
 	account.Nonce = afterNonce

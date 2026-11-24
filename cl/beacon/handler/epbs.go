@@ -176,7 +176,8 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 			}
 		}
 
-		dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, true)
+		// The fork epoch's PTC is computed at the fork, so it depends on the last pre-fork block.
+		dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, epoch != a.beaconChainCfg.GloasForkEpoch)
 		if dependentRootSlot == headSlot {
 			dependentRoot = headRoot
 			return nil
@@ -1035,6 +1036,17 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
+	if err := signedEnvelope.ValidateForPersistence(a.beaconChainCfg); err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	gossipMaxSize := gossip.MaxUncompressedSize(gossip.TopicNameExecutionPayload, a.beaconChainCfg, a.netConfig)
+	if size := uint64(signedEnvelope.EncodingSizeSSZ()); size > gossipMaxSize {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf(
+			"execution payload envelope encoding size %d exceeds gossip max %d", size, gossipMaxSize,
+		)).WriteTo(w)
+		return
+	}
 	receivedAt := time.Now()
 	if !blobDataIncluded && contents == nil {
 		contents, err = a.pendingLocalExecutionPayloadEnvelopeContents(signedEnvelope)
@@ -1151,6 +1163,9 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
+	}
+	if contents == nil {
+		a.emitters.NotifyEnvelopeArrived(signedEnvelope.Message.BeaconBlockRoot)
 	}
 	if validation == BlockPublishingValidationConsensusAndEquivocation {
 		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
