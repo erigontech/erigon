@@ -1875,12 +1875,6 @@ type aggregatorVisible struct {
 	next    *aggregatorVisible // oldest→newest linked-list link (set under dirtyFilesLock)
 }
 
-// recalcVisibleFiles must be called with dirtyFilesLock held (writers are
-// serialized by it; readers take no lock and instead load a.visible). It builds
-// a fresh immutable aggregatorVisible bundle via the per-entity calcVisibleFiles
-// helpers, then publishes the completed snapshot with a.visible.Store(next).
-// Per-entity visibility is not mutated; readers atomically observe one
-// cross-entity-consistent generation.
 func (a *Aggregator) lockHotCommitmentFiles(v *aggregatorVisible) {
 	dv := v.d[kv.CommitmentDomain]
 	if dv == nil {
@@ -1919,6 +1913,12 @@ func (a *Aggregator) lockHotCommitmentFiles(v *aggregatorVisible) {
 	}
 }
 
+// recalcVisibleFiles must be called with dirtyFilesLock held (writers are
+// serialized by it; readers take no lock and instead load a.visible). It builds
+// a fresh immutable aggregatorVisible bundle via the per-entity calcVisibleFiles
+// helpers, then publishes the completed snapshot with a.visible.Store(next).
+// Per-entity visibility is not mutated; readers atomically observe one
+// cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	// buildVisible builds every list up to toTxNum and returns the lowest end among the lists that have files.
 	buildVisible := func(toTxNum uint64) (next *aggregatorVisible, lowestEnd uint64) {
