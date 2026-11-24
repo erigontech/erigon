@@ -124,56 +124,6 @@ func TestPrestateTracerOnOpcodeFaultedSkipsLookup(t *testing.T) {
 		"storage slot referenced by a faulted SLOAD must not be recorded in the prestate")
 }
 
-func TestPrestateTracerTxDiffForkRules(t *testing.T) {
-	addr := common.HexToAddress("0x20000")
-	target := accounts.InternAddress(addr)
-	slot := common.HexToHash("0x01")
-	for _, tc := range []struct {
-		name    string
-		bogota  bool
-		param   uint64
-		storage bool
-	}{
-		{name: "before Bogota storage before", param: 0},
-		{name: "before Bogota storage after", param: 1},
-		{name: "before Bogota account", param: 2},
-		{name: "Bogota storage before", bogota: true, param: 0, storage: true},
-		{name: "Bogota storage after", bogota: true, param: 1, storage: true},
-		{name: "Bogota account", bogota: true, param: 2},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			tr := newTestPrestateTracer(prestateTracerConfig{})
-			tr.env = &tracing.VMContext{
-				IntraBlockState: &postTxIBS{},
-				Rules:           &chain.Rules{IsBogota: tc.bogota},
-			}
-			tr.frameTx = &types.FrameTransaction{Frames: []types.Frame{{Mode: types.FramePostTx}}}
-			var operand uint256.Int
-			if tc.param <= 1 {
-				operand.SetBytes(slot[:])
-			}
-			scope := &fakeOpContext{stack: []uint256.Int{
-				operand,
-				*new(uint256.Int).SetBytes(addr[:]),
-				*uint256.NewInt(tc.param),
-			}}
-			tr.OnOpcodeV2(0, byte(vm.TXDIFF), mdgas.MdGas{}, mdgas.MdGasCost{}, scope, nil, 1, nil)
-			_, err := tr.GetResult()
-			require.NoError(t, err)
-			if !tc.bogota {
-				require.Empty(t, tr.pre)
-				return
-			}
-			require.Contains(t, tr.pre, target)
-			if tc.storage {
-				require.Contains(t, tr.pre[target].Storage, slot)
-			} else {
-				require.Empty(t, tr.pre[target].Storage)
-			}
-		})
-	}
-}
-
 // codeIBS serves one contract whose code hash is stored apart from its code, as the
 // state stores it.
 type codeIBS struct {
@@ -241,7 +191,7 @@ func TestPrestateTracerDiffModeAfterFinalization(t *testing.T) {
 	_, err = ibs.Selfdestruct(contract, false)
 	require.NoError(t, err)
 	tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
-	require.NoError(t, ibs.FinalizeTx(&chain.Rules{}, executionstate.NewNoopWriter()))
+	ibs.EndTransaction()
 	tracer.EmitTxEnd(&types.Receipt{}, mdgas.TxnGasUsage{}, nil)
 	result, err := tracer.GetResult()
 	require.NoError(t, err)
@@ -258,13 +208,10 @@ func TestPrestateTracerRetainedBalance(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		amsterdam bool
-		finalize  bool
 		prefund   uint64
 	}{
-		{name: "before finalization", amsterdam: true},
-		{name: "after finalization", amsterdam: true, finalize: true},
-		{name: "unchanged balance before finalization", amsterdam: true, prefund: 7},
-		{name: "unchanged balance after finalization", amsterdam: true, finalize: true, prefund: 7},
+		{name: "Amsterdam", amsterdam: true},
+		{name: "unchanged balance", amsterdam: true, prefund: 7},
 		{name: "before Amsterdam"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -291,9 +238,6 @@ func TestPrestateTracerRetainedBalance(t *testing.T) {
 			tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
 			// Settlement can credit an account after the root call has returned.
 			require.NoError(t, ibs.SetBalance(contract, uint256.Int{7}, tracing.BalanceChangeUnspecified))
-			if tc.finalize {
-				require.NoError(t, ibs.FinalizeTx(&chain.Rules{IsAmsterdam: tc.amsterdam}, executionstate.NewNoopWriter()))
-			}
 			tracer.EmitTxEnd(&types.Receipt{}, mdgas.TxnGasUsage{}, nil)
 			result, err := tracer.GetResult()
 			require.NoError(t, err)

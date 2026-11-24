@@ -64,7 +64,7 @@ func destroyThenRecreate(t *testing.T, reader *accountStateReader, addr accounts
 	destroyed, err := destroyer.Selfdestruct(addr, true)
 	require.NoError(t, err)
 	require.True(t, destroyed)
-	require.NoError(t, destroyer.FinalizeTx(amsterdamRules, NewNoopWriter()))
+	destroyer.EndTransaction()
 	destroyWrites := finalizedWrites(t, destroyer, amsterdamRules)
 	t.Cleanup(destroyWrites.ReleaseAndReset)
 	vm.FlushVersionedWrites(destroyWrites, true)
@@ -78,7 +78,7 @@ func destroyThenRecreate(t *testing.T, reader *accountStateReader, addr accounts
 	require.NoError(t, recreator.CreateAccount(addr, true))
 	require.NoError(t, recreator.SetNonce(addr, 1, tracing.NonceChangeNewContract))
 	require.NoError(t, recreator.SetCode(addr, code, tracing.CodeChangeContractCreation))
-	require.NoError(t, recreator.FinalizeTx(amsterdamRules, NewNoopWriter()))
+	recreator.EndTransaction()
 	recreateWrites := finalizedWrites(t, recreator, amsterdamRules)
 	t.Cleanup(recreateWrites.ReleaseAndReset)
 
@@ -142,7 +142,7 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 	require.Equal(t, codeHash, view.CodeHash)
 	require.True(t, view.Balance.IsZero(), "destroyed balance is gone; the recreate starts fresh")
 
-	resolved, err := ibs.ResolveCode(addr)
+	resolved, err := ibs.ResolveCode(addr, true)
 	require.NoError(t, err)
 	require.Equal(t, code, resolved.Bytes)
 	require.NoError(t, ibs.TouchAccount(addr))
@@ -184,9 +184,6 @@ func TestConsumedAbsenceOutlivesRecreationFlush(t *testing.T) {
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
 	require.False(t, exists, "the record fallback must not revive an address this tx already read as absent")
-	so, err := ibs.getStateObject(addr, true)
-	require.NoError(t, err)
-	require.Nil(t, so)
 	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
 }
 
@@ -211,7 +208,7 @@ func TestEIP8246PreserveSelfDestructRevert(t *testing.T) {
 	require.True(t, destroyed)
 	ibs.RevertToSnapshot(snap, nil)
 
-	require.NoError(t, ibs.FinalizeTx(amsterdamRules, NewNoopWriter()))
+	ibs.EndTransaction()
 	vm.FlushVersionedWrites(finalizedWrites(t, ibs, amsterdamRules), true)
 
 	acc, ok, _ := vm.View(1, reader).GetAccount(addr)

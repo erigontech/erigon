@@ -83,6 +83,7 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 	enabled := statecfg.ExperimentalCommitmentV3
 	t.Cleanup(func() {
 		convertSqueeze, convertNibblesV2, convertRestore, convertContinue, convertV3, statecfg.ExperimentalCommitmentV3 = false, false, false, false, false, enabled
+		convertNoDomain, convertNoHistory = false, false
 		cmdCommitmentConvert.Flags().Lookup("squeeze").Changed = false
 		cmdCommitmentConvert.Flags().Lookup("nibbles.v2").Changed = false
 	})
@@ -92,52 +93,75 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 
 	convertRestore, convertContinue = false, false
 	statecfg.ExperimentalCommitmentV3 = true
-	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--v3"})
-	require.ErrorContains(t, root.ExecuteContext(t.Context()), "without ERIGON_COMMITMENT_V3=true")
-
-	convertV3 = false
-	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--restore"})
-	require.ErrorContains(t, root.ExecuteContext(t.Context()), "without ERIGON_COMMITMENT_V3=true")
-
-	convertRestore = false
-	statecfg.ExperimentalCommitmentV3 = false
-	dirs := datadir.New(t.TempDir())
-	require.NoError(t, os.MkdirAll(filepath.Join(dirs.Snap, "backup"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "backup", ".restore_v3_reset_pending"), nil, 0o644))
-	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", dirs.DataDir, "--chain", "mainnet", "--v3"})
-	require.ErrorContains(t, root.ExecuteContext(t.Context()), "convert --restore")
-
-	convertV3 = false
-	statecfg.ExperimentalCommitmentV3 = true
 	for _, mode := range [][]string{nil, {"--squeeze=true"}, {"--nibbles.v2=true"}} {
 		root.SetArgs(append([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet"}, mode...))
 		require.ErrorContains(t, root.ExecuteContext(t.Context()), "without ERIGON_COMMITMENT_V3=true", mode)
 	}
+
+	statecfg.ExperimentalCommitmentV3, convertSqueeze, convertNibblesV2 = false, false, false
+	cmdCommitmentConvert.Flags().Lookup("squeeze").Changed = false
+	cmdCommitmentConvert.Flags().Lookup("nibbles.v2").Changed = false
+	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--v3", "--no-domain", "--no-history"})
+	require.ErrorContains(t, root.ExecuteContext(t.Context()), "leave nothing to convert")
 }
 
 func TestCommitmentVerifyRejectsAsOfWithoutHistory(t *testing.T) {
-	enabled := statecfg.ExperimentalCommitmentV3
-	previousDatadir, previousChaindata, previousVerifyAsOf := datadirCli, chaindata, verifyAsOf
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = enabled
-		datadirCli, chaindata, verifyAsOf = previousDatadir, previousChaindata, previousVerifyAsOf
-	})
-	statecfg.ExperimentalCommitmentV3 = true
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	previousDatadir, previousVerifyAsOf := datadirCli, verifyAsOf
+	t.Cleanup(func() { datadirCli, verifyAsOf = previousDatadir, previousVerifyAsOf })
 	db, dirs := dbWithV3State(t)
-	dbPath := db.Path()
 	db.Close()
-	datadirCli = dirs.DataDir
-	chaindata = dbPath
-	verifyAsOf = []uint{0}
-	openSnapshotOnce = sync.Once{}
+	datadirCli, verifyAsOf = dirs.DataDir, []uint{0}
 	require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), "history is disabled")
+}
+
+// verify reads the state files only: it runs without chaindata, and creates none.
+func TestCommitmentVerifyRunsWithoutChaindata(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	previousDatadir, previousVerifyAsOf := datadirCli, verifyAsOf
+	t.Cleanup(func() { datadirCli, verifyAsOf = previousDatadir, previousVerifyAsOf })
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
+	require.NoError(t, dir.RemoveAll(dirs.Tmp))
+	require.NoError(t, dir.RemoveFile(filepath.Join(dirs.Snap, "salt-blocks.txt")), "verify opens no block files")
+
+	datadirCli, verifyAsOf = dirs.DataDir, nil
+	require.NoError(t, commitmentVerify(t.Context(), log.New()))
+	require.NoDirExists(t, dirs.Chaindata)
+}
+
+func TestCommitmentVerifyNeedsStateSalt(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	previousDatadir, previousVerifyAsOf := datadirCli, verifyAsOf
+	t.Cleanup(func() { datadirCli, verifyAsOf = previousDatadir, previousVerifyAsOf })
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	require.NoError(t, dir.RemoveFile(filepath.Join(dirs.Snap, "salt-state.txt")))
+
+	datadirCli, verifyAsOf = dirs.DataDir, nil
+	err := commitmentVerify(t.Context(), log.New())
+	require.ErrorContains(t, err, "salt-state.txt")
+	require.NotContains(t, err.Error(), "salt-blocks.txt")
+}
+
+func TestCommitmentVerifyChecksSnapshotFileVersions(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	previousDatadir, previousVerifyAsOf := datadirCli, verifyAsOf
+	t.Cleanup(func() { datadirCli, verifyAsOf = previousDatadir, previousVerifyAsOf })
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1-accounts.0-1.kv"), nil, 0o600))
+
+	datadirCli, verifyAsOf = dirs.DataDir, nil
+	require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), "incompatible with the current erigon version")
 }
 
 func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(true))
 	statecfg.EnableHistoricalCommitment()
-	previousDatadir, previousChaindata, previousVerifyAsOf := datadirCli, chaindata, verifyAsOf
-	t.Cleanup(func() { datadirCli, chaindata, verifyAsOf = previousDatadir, previousChaindata, previousVerifyAsOf })
+	previousDatadir, previousVerifyAsOf := datadirCli, verifyAsOf
+	t.Cleanup(func() { datadirCli, verifyAsOf = previousDatadir, previousVerifyAsOf })
 
 	db, dirs := dbWithV3State(t)
 	latest, err := state.FoldCommitmentV3(t.Context(), db.(state.HasAgg).Agg().(*state.Aggregator), math.MaxUint64)
@@ -154,29 +178,136 @@ func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
 		require.NoError(t, dir.RemoveFile(f))
 	}
 
-	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
+	datadirCli = dirs.DataDir
 	for _, asOf := range []uint64{1, latest.TxNum} {
 		verifyAsOf = []uint{uint(asOf)}
-		openSnapshotOnce = sync.Once{}
 		require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), fmt.Sprintf("no commitment history covers txNum %d", asOf))
 	}
 }
 
-func TestNewTemporalDBRejectsV3FilesWhenV3IsDisabled(t *testing.T) {
-	previous := statecfg.ExperimentalCommitmentV3
-	statecfg.ExperimentalCommitmentV3 = false
-	t.Cleanup(func() { statecfg.ExperimentalCommitmentV3 = previous })
+func TestNewTemporalDBAllowsV3FilesWhenV3IsDisabled(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	db, dirs := dbWithV3State(t)
+	db.Close()
+	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment.*"))
+	require.NoError(t, err)
+	for _, f := range files {
+		require.NoError(t, dir.RemoveFile(f))
+	}
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
 	previousDatadir := datadirCli
 	datadirCli = dirs.DataDir
 	t.Cleanup(func() { datadirCli = previousDatadir })
 
-	require.ErrorContains(t, func() error {
-		_, err := newTemporalDB(t.Context(), db, log.New())
+	opened, err := newTemporalDB(t.Context(), mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen(), log.New())
+	require.NoError(t, err)
+	opened.Close()
+}
+
+func TestNewTemporalDBRejectsMixedCommitmentDomainFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+
+	requireNewTemporalDBError(t, dirs, "mixed major versions", statecfg.MixedCommitmentAdvice)
+}
+
+func TestNewTemporalDBRefusesOldSnapshotNames(t *testing.T) {
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1-accounts.0-1.kv"), nil, 0o644))
+
+	requireNewTemporalDBError(t, dirs, "incompatible with the current erigon version")
+}
+
+func requireNewTemporalDBError(t *testing.T, dirs datadir.Dirs, wantErrs ...string) {
+	t.Helper()
+	previousDatadir := datadirCli
+	datadirCli = dirs.DataDir
+	t.Cleanup(func() { datadirCli = previousDatadir })
+	db := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	defer db.Close()
+	_, err := newTemporalDB(t.Context(), db, log.New())
+	for _, want := range wantErrs {
+		require.ErrorContains(t, err, want)
+	}
+}
+
+func TestIntegrationOpensCommitmentFilesAtTheirVersions(t *testing.T) {
+	previousDatadir, previousChaindata := datadirCli, chaindata
+	t.Cleanup(func() {
+		datadirCli, chaindata = previousDatadir, previousChaindata
+		openSnapshotOnce = sync.Once{}
+	})
+	open := func(t *testing.T, dirs datadir.Dirs) error {
+		t.Helper()
+		datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
+		openSnapshotOnce = sync.Once{}
+		opened, err := openDB(t.Context(), dbCfg(dbcfg.ChainDB, dirs.Chaindata), false, log.New())
+		if err == nil {
+			opened.Close()
+		}
 		return err
-	}(), "requires commitment v3")
+	}
+
+	t.Run("v3 files, v3 off", func(t *testing.T) {
+		t.Cleanup(statecfg.SetCommitmentV3(false))
+		db, dirs := dbWithV3State(t)
+		require.NoError(t, commitmentConvert(db.(state.HasAgg).Agg().(*state.Aggregator), t.Context(), log.New(), state.ConvertOpts{TargetV3: true, NoHistory: true}))
+		db.Close()
+		v3Files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "v3.0-commitment.*.kv"))
+		require.NoError(t, err)
+		require.NotEmpty(t, v3Files)
+
+		require.NoError(t, open(t, dirs))
+		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "stage_exec --reset")
+		require.NoError(t, state.CompleteExecReset(dirs, log.New()))
+		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "files are v3 and ERIGON_COMMITMENT_V3 is off")
+	})
+
+	t.Run("legacy files, v3 on", func(t *testing.T) {
+		t.Cleanup(statecfg.SetCommitmentV3(false))
+		db, dirs := dbWithV3State(t)
+		db.Close()
+		statecfg.SetCommitmentV3(true)
+
+		require.NoError(t, open(t, dirs))
+		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "files are legacy and ERIGON_COMMITMENT_V3=true")
+	})
+
+	t.Run("v3 history, legacy domain, v3 off", func(t *testing.T) {
+		dirs := legacyDatadirWithCommitmentHistory(t)
+		require.NoError(t, runCommitmentConvert(t, dirs, "--v3", "--no-domain"))
+		requireCommitmentKVPrefix(t, dirs, "v2.")
+		statecfg.SetCommitmentV3(false)
+
+		require.NoError(t, open(t, dirs))
+		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "history files are v3 and domain files are legacy")
+	})
+}
+
+func TestCommitmentReadersRefuseV3FilesWhenV3IsDisabled(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	previousDatadir, previousChaindata := datadirCli, chaindata
+	t.Cleanup(func() {
+		datadirCli, chaindata = previousDatadir, previousChaindata
+		openSnapshotOnce = sync.Once{}
+	})
+	db, dirs := dbWithV3State(t)
+	require.NoError(t, commitmentConvert(db.(state.HasAgg).Agg().(*state.Aggregator), t.Context(), log.New(), state.ConvertOpts{TargetV3: true, NoHistory: true}))
+	db.Close()
+	require.NoError(t, state.CompleteExecReset(dirs, log.New()))
+	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
+	openSnapshotOnce = sync.Once{}
+	opened, err := openDB(t.Context(), dbCfg(dbcfg.ChainDB, dirs.Chaindata), false, log.New())
+	require.NoError(t, err)
+	t.Cleanup(opened.Close)
+
+	require.ErrorContains(t, printCommitment(opened, t.Context()), "files are v3 and ERIGON_COMMITMENT_V3 is off")
+	require.ErrorContains(t, requestDomains(opened, t.Context(), kv.AccountsDomain.String(), nil, log.New()), "files are v3 and ERIGON_COMMITMENT_V3 is off")
 }
 
 func TestCommitmentConvertLegacyRestoreKeepsExecution(t *testing.T) {
@@ -188,7 +319,7 @@ func TestCommitmentConvertLegacyRestoreKeepsExecution(t *testing.T) {
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		return stages.SaveStageProgress(tx, stages.Execution, 100)
 	}))
-	require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetSqueeze: true}))
+	require.NoError(t, commitmentConvert(db.(state.HasAgg).Agg().(*state.Aggregator), t.Context(), log.New(), state.ConvertOpts{TargetSqueeze: true}))
 	db.Close()
 
 	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
@@ -204,7 +335,7 @@ func TestCommitmentConvertLegacyRestoreKeepsExecution(t *testing.T) {
 	}))
 }
 
-func TestCommitmentConvertRestoreResetsExecution(t *testing.T) {
+func TestCommitmentConvertRestoreLeavesExecutionUnchanged(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousDatadir, previousChaindata := datadirCli, chaindata
 	t.Cleanup(func() { datadirCli, chaindata = previousDatadir, previousChaindata })
@@ -226,6 +357,7 @@ func TestCommitmentConvertRestoreResetsExecution(t *testing.T) {
 
 	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
 	require.NoError(t, commitmentRestore(t.Context(), log.New()))
+	require.NoDirExists(t, backupDir)
 
 	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
 	defer rawDB.Close()
@@ -234,10 +366,10 @@ func TestCommitmentConvertRestoreResetsExecution(t *testing.T) {
 		progress, err = stages.GetStageProgress(tx, stages.Execution)
 		return err
 	}))
-	require.Zero(t, progress)
+	require.Equal(t, uint64(100), progress)
 }
 
-func TestCommitmentConvertRestoreRetryResetsExecution(t *testing.T) {
+func TestCommitmentConvertRestoreRetryLeavesExecutionUnchanged(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousDatadir, previousChaindata := datadirCli, chaindata
 	t.Cleanup(func() { datadirCli, chaindata = previousDatadir, previousChaindata })
@@ -275,50 +407,12 @@ func TestCommitmentConvertRestoreRetryResetsExecution(t *testing.T) {
 	require.NoError(t, rawDB.View(t.Context(), func(tx kv.Tx) error {
 		progress, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
-		require.Zero(t, progress)
+		require.Equal(t, uint64(100), progress)
 		return nil
 	}))
 }
 
-func TestCommitmentConvertRestoreRetryAfterFilesResetsExecution(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
-	previousDatadir, previousChaindata := datadirCli, chaindata
-	t.Cleanup(func() { datadirCli, chaindata = previousDatadir, previousChaindata })
-
-	db, dirs := dbWithV3State(t)
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return stages.SaveStageProgress(tx, stages.Execution, 100)
-	}))
-	db.Close()
-	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
-	require.NoError(t, os.MkdirAll(backupDir, 0o755))
-	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment.*"))
-	require.NoError(t, err)
-	require.NotEmpty(t, files)
-	for _, f := range files {
-		require.NoError(t, os.Rename(f, filepath.Join(backupDir, filepath.Base(f))))
-	}
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-2.kv"), nil, 0o644))
-	restoredV3, err := state.RestoreCommitmentFiles(t.Context(), dirs, log.New())
-	require.NoError(t, err)
-	require.True(t, restoredV3)
-	require.NoDirExists(t, backupDir)
-
-	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
-	require.NoError(t, commitmentRestore(t.Context(), log.New()))
-
-	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
-	defer rawDB.Close()
-	require.NoError(t, rawDB.View(t.Context(), func(tx kv.Tx) error {
-		progress, err := stages.GetStageProgress(tx, stages.Execution)
-		require.NoError(t, err)
-		require.Zero(t, progress)
-		return nil
-	}))
-	require.NoFileExists(t, filepath.Join(dirs.Snap, "backup", ".restore_v3_reset_pending"))
-}
-
-func dbWithV3State(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) {
+func dbWithV3StateRoots(t *testing.T, addrs uint64, skipCommitment ...uint64) (kv.TemporalRwDB, datadir.Dirs, []common.Hash) {
 	t.Helper()
 	dirs := datadir.New(t.TempDir())
 	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
@@ -343,7 +437,51 @@ func dbWithV3State(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) {
 	require.NoError(t, err)
 	require.NoError(t, db.OpenStateSnapshots(t.Context()))
 	t.Cleanup(db.Close)
-	agg, _ := fillAccountState(t, db, 64)
+	agg, roots := fillAccountState(t, db, 64, addrs, skipCommitment...)
 	require.NoError(t, agg.BuildFiles(db, 48, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
+	return db, dirs, roots
+}
+
+func dbWithV3State(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) {
+	t.Helper()
+	db, dirs, _ := dbWithV3StateRoots(t, 5)
 	return db, dirs
+}
+
+func TestResetExecClearsPendingExecReset(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	previousDatadir, previousChaindata := datadirCli, chaindata
+	t.Cleanup(func() { datadirCli, chaindata = previousDatadir, previousChaindata })
+
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backupDir, 0o755))
+	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment.*"))
+	require.NoError(t, err)
+	for _, f := range files {
+		require.NoError(t, os.Rename(f, filepath.Join(backupDir, filepath.Base(f))))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-2.kv"), nil, 0o644))
+	require.NoError(t, commitmentRestore(t.Context(), log.New()))
+	require.ErrorContains(t, state.CheckExecResetDone(dirs), "stage_exec --reset")
+
+	openSnapshotOnce = sync.Once{}
+	opened, err := openDB(t.Context(), dbCfg(dbcfg.ChainDB, dirs.Chaindata), false, log.New())
+	require.NoError(t, err)
+	defer opened.Close()
+	require.NoError(t, resetExec(t.Context(), opened, dirs, log.New()))
+	require.NoError(t, state.CheckExecResetDone(dirs))
+}
+
+func TestCheckCommitmentTrieMatchesFilesRefusesPendingExecReset(t *testing.T) {
+	previousDatadir := datadirCli
+	t.Cleanup(func() { datadirCli = previousDatadir })
+	dirs := datadir.New(t.TempDir())
+	datadirCli = dirs.DataDir
+	require.NoError(t, os.MkdirAll(filepath.Join(dirs.Snap, "backup"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "backup", ".exec_reset_pending"), nil, 0o644))
+
+	require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "stage_exec --reset")
 }

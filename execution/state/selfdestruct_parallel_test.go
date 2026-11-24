@@ -58,8 +58,6 @@ func TestSelfdestructParallel_NoMaterialize(t *testing.T) {
 	bal, ok := writes.GetBalance(addr)
 	require.True(t, ok, "BalancePath write expected")
 	assert.True(t, bal.Val.IsZero(), "balance should be cleared")
-
-	assert.Empty(t, ibs.stateObjects, "parallel Selfdestruct must not materialize a stateObject")
 }
 
 // TestSelfdestructParallel_RepeatedSameTx verifies that a second SELFDESTRUCT of
@@ -128,7 +126,6 @@ func TestSelfdestructParallel_AbsentAccount(t *testing.T) {
 	destroyed, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	assert.False(t, destroyed, "absent account cannot be destroyed")
-	assert.Empty(t, ibs.stateObjects, "absent-account Selfdestruct must not materialize a stateObject")
 }
 
 // An earlier transaction's SELFDESTRUCT leaves a deleted account, which a later

@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
-	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -55,7 +54,7 @@ Layers from top to bottom:
 - IntraBlockState - used to exec txs. It does store inside all updates of given txn.
 Can understand if txn failed or OutOfGas - then revert all changes.
 Each parallel-worker have own IntraBlockState.
-IntraBlockState does commit changes to lower-abstraction-level by method `ibs.MakeWriteSet()`
+IntraBlockState hands its changes to lower-abstraction-level by method `ibs.FinalizedWrites()`
 
 - versionedWriteCollector - txs which executed by parallel workers can conflict with each-other.
 This writer collects updates as a flat VersionedWrites slice and sends them to conflict-resolution.
@@ -956,7 +955,7 @@ func (pe *parallelExecutor) resetWorkers(rs *state.StateV3Buffered) {
 
 	for _, worker := range pe.execWorkers {
 		// parallel workers hold thier own tx don't pass in an externals tx
-		_ = worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil)
+		_ = worker.ResetState(rs, nil, nil)
 		worker.EnablePrevBlockReads(pe.prevBlocks)
 	}
 }
@@ -1336,19 +1335,25 @@ func (pe *parallelExecutor) processRequest(execRequest *execRequest, applyTx kv.
 				addresses = append(addresses, sender.Value())
 			}
 			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
-				if chargedAtValidation && blockStart == nil {
+				to := *tx.GetTo()
+				// Crediting only decides whether this tx waits for the recipient's previous tx, so a
+				// recipient that no lower tx touched is scheduled alike either way and is not read.
+				_, recipientTouched := prevAccountTx[to]
+				checkCredit := chargedAtValidation && recipientTouched
+				if checkCredit && blockStart == nil {
 					blockStart = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), execRequest.blockNum)
 				}
-				if to := *tx.GetTo(); chargedAtValidation && protocol.RecipientCreditedAtValidation(sender, accounts.InternAddress(to),
-					executor.coinbase, *tx.GetValue(), txTask.Hooks, txTask.Rules(), blockStart) {
+				switch {
+				case checkCredit && protocol.RecipientCreditedAtValidation(sender, accounts.InternAddress(to),
+					executor.coinbase, *tx.GetValue(), txTask.Hooks, txTask.Rules(), blockStart):
 					// Credited at validation: a later user of the recipient still waits for it.
 					prevAccountTx[to] = i
-				} else if ok && precompileCallRunsOutOfGas(txTask, accounts.InternAddress(to)) {
+				case ok && precompileCallRunsOutOfGas(txTask, accounts.InternAddress(to)):
 					// The failed frame still reads the recipient: wait for its last writer, without becoming one.
 					if prev, ok := prevAccountTx[to]; ok && executor.execTasks.addDependency(prev, i) {
 						executor.execTasks.clearPending(i)
 					}
-				} else {
+				default:
 					addresses = append(addresses, to)
 				}
 			}
@@ -1656,7 +1661,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	}
 	var err error
 	pe.execWorkers, _, pe.stopWorkers, err = exec.NewWorkersPool(
-		workersCtx, nil, true, pe.cfg.db, nil, nil, nil,
+		workersCtx, true, pe.cfg.db, nil, nil,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
 		poolSize, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
 	)
@@ -1939,56 +1944,20 @@ func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint3
 	}
 
 	if txIndex < 0 || task.IsBlockEnd() {
-		// System TXs use full IBS reconstruction (no worker path, so no fee split).
-		// Strip coinbase/burnt since they may carry stale writes.
+		// System/block-end txs carry no fee split. Strip coinbase/burnt since the
+		// speculative run may have left stale balance writes, then hand the worker's
+		// finalized writes/reads straight through: the version map is the state, so
+		// no IBS rebuild or re-finalize is needed.
 		txOut, _, _, _ := result.TxOut.StripBalanceWrite(result.Coinbase, result.TxIn)
 		result.TxOut = txOut
 		txOut, _, _, _ = result.TxOut.StripBalanceWrite(result.ExecutionResult.BurntContractAddress, result.TxIn)
 		result.TxOut = txOut
 		result.TxIn.Delete(result.Coinbase)
 		result.TxIn.Delete(result.ExecutionResult.BurntContractAddress)
-		return result.finalizeSystemTx(task, txTask, vm, stateReader)
+		return nil, result.TxIn, result.TxOut, nil
 	}
 
 	return result.finalizeTx(task, txTask, cumulativeGasUsed, firstLogIndex, engine, vm, stateReader)
-}
-
-// finalizeSystemTx handles block-end and system TXs (txIndex < 0) via full
-// IBS reconstruction. These are infrequent (1 per block) so the overhead is
-// acceptable.
-func (result *execResult) finalizeSystemTx(
-	task *taskVersion,
-	txTask *exec.TxTask,
-	vm *state.VersionMap,
-	stateReader state.StateReader,
-) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
-	blockNum := task.Version().BlockNum
-	txIndex := task.Version().TxIndex
-	txIncarnation := task.Version().Incarnation
-
-	// Empty ReadSet so all reads go through the versionMap (which holds all prior TX
-	// writes). result.TxIn may be stale if the system TX ran speculatively before the
-	// regular TXs completed, returning pre-block values instead of the post-block
-	// state syscalls (withdrawal/consolidation) need.
-	ibs := state.NewWithVersionMap(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader), vm)
-	defer ibs.Close()
-	ibs.SetTxContext(blockNum, txIndex)
-	ibs.SetVersion(txIncarnation)
-	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
-		return nil, state.ReadSet{}, nil, err
-	}
-	ibs.SetTrace(txTask.Trace)
-
-	rules := txTask.Rules()
-	if blockNum == 0 {
-		// Genesis runs with empty rules, so its alloc keeps empty accounts (EIP-161 off).
-		rules = &chain.Rules{}
-	}
-	writes, stateErr := ibs.FinalizedWrites(rules)
-	if stateErr != nil {
-		return nil, state.ReadSet{}, nil, fmt.Errorf("finalize system tx block %d: state read: %w", blockNum, stateErr)
-	}
-	return nil, ibs.VersionedReads(), writes, nil
 }
 
 // finalizedBlockWrites is the block-end write-set. Deciding EIP-161 removals reads pre-block
@@ -2199,7 +2168,6 @@ func (result *execResult) calcFees(
 					Address: result.Coinbase,
 					Path:    state.BalancePath,
 					Version: taskVersion,
-					Reason:  tracing.BalanceIncreaseRewardTransactionFee,
 				},
 				Val: newCoinbaseBalance,
 			})
@@ -2283,7 +2251,6 @@ func (result *execResult) calcFees(
 				Address: burntAddr,
 				Path:    state.BalancePath,
 				Version: taskVersion,
-				Reason:  tracing.BalanceDecreaseGasBuy,
 			},
 			Val: newBurntBalance,
 		})
@@ -2367,7 +2334,7 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	if err != nil {
 		return err
 	}
-	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
+	ibs := state.NewVersionedCall(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
 	defer ibs.Close()
 	ibs.SetTxContext(blockNum, txIndex)
 	postApplyMessageFunc(ibs, message.From(), result.Coinbase, &execResult, chainRules)
@@ -2426,15 +2393,11 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 	}
 	ws := &state.WriteSet{}
 	ws.SetBalance(sender, &state.VersionedWrite[uint256.Int]{
-		WriteHeader: state.WriteHeader{Address: sender, Path: state.BalancePath, Version: version, Reason: tracing.BalanceDecreaseGasBuy},
+		WriteHeader: state.WriteHeader{Address: sender, Path: state.BalancePath, Version: version},
 		Val:         u256.Sub(acc.Balance, charge),
 	})
-	nonceReason := tracing.NonceChangeEoACall
-	if msg.To().IsNil() {
-		nonceReason = tracing.NonceChangeContractCreator
-	}
 	ws.SetNonce(sender, &state.VersionedWrite[uint64]{
-		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version, NonceReason: nonceReason},
+		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version},
 		Val:         acc.Nonce + 1,
 	})
 	// A run that skipped the transfer frame left the recipient credit to validation.
@@ -2453,7 +2416,7 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 			}
 			state.SeedOrigin(vm, to, recipient)
 			ws.SetBalance(to, &state.VersionedWrite[uint256.Int]{
-				WriteHeader: state.WriteHeader{Address: to, Path: state.BalancePath, Version: version, Reason: tracing.BalanceChangeTransfer},
+				WriteHeader: state.WriteHeader{Address: to, Path: state.BalancePath, Version: version},
 				Val:         credit,
 			})
 		}
@@ -2479,7 +2442,6 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	engine rules.Engine,
 	genesis *types.Genesis,
 	ibs *state.IntraBlockState,
-	stateWriter state.StateWriter,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
@@ -2495,7 +2457,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	evm.Context.PostApplyMessage = nil
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
-	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
+	result = ev.execTask.Execute(evm, engine, genesis, ibs,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
 	// Occupancy accounting: sum every incarnation's exec CPU (including aborts) so

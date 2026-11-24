@@ -153,7 +153,7 @@ func (ba *BlockAssembler) recordPhase(ibs *state.IntraBlockState, writes *state.
 
 func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) error {
 	if err := protocol.InitializeBlockExecution(ba.cfg.Engine,
-		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, state.NewNoopWriter(), logger, nil); err != nil {
+		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, logger, nil); err != nil {
 		return err
 	}
 	writes, err := ibs.FinalizedWrites(ba.blockRules)
@@ -209,7 +209,6 @@ func (ba *BlockAssembler) AddTransactions(
 	signer := types.MakeSigner(ba.cfg.ChainConfig, header.Number.Uint64(), header.Time)
 
 	var coalescedLogs types.Logs
-	writer := state.NewNoopWriter() // the builder applies the recorded write sets
 	recordTxIO := func() error {
 		writes, err := ibs.FinalizedWrites(ba.blockRules)
 		if err != nil {
@@ -245,7 +244,7 @@ func (ba *BlockAssembler) AddTransactions(
 		gasSnapshot := *gasUsed
 
 		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader),
-			ba.cfg.Engine, coinbase, gasPool, ibs, writer, header, txn, gasUsed, *vmConfig)
+			ba.cfg.Engine, coinbase, gasPool, ibs, header, txn, gasUsed, *vmConfig)
 		if err != nil {
 			// Restore cumulative gas to pre-tx values.
 			*gasUsed = gasSnapshot

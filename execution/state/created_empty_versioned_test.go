@@ -315,7 +315,7 @@ func TestFinalizedWritesAfterFinalizeTx(t *testing.T) {
 			rules := &chain.Rules{IsSpuriousDragon: true}
 
 			require.NoError(t, tc.apply(ibs, addr))
-			require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+			ibs.EndTransaction()
 
 			bal, ok := finalizedWrites(t, ibs, rules).GetBalance(addr)
 			require.Equal(t, tc.removed, ok && bal.Deletes())

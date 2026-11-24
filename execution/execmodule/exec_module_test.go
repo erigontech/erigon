@@ -2215,7 +2215,6 @@ func txPoolBehindParentFixture(t *testing.T) (
 	require.NoError(t, m.InsertChain(chainPack))
 
 	parent = chainPack.TopBlock
-	// A synctest bubble would fast-forward this wait past the txpool catching up in real time.
 	require.NoError(t, m.WaitForTxPool(t.Context(), parent.Hash()))
 	addTwoTxnsToPool(t.Context(), 0, t, m, m.TxPoolGrpcServer, parent.BaseFee().Uint64())
 	provider = &rewindingTxnProvider{
@@ -2300,8 +2299,8 @@ func TestGetAssembledBlockDoesNotWaitForTxPoolBehindParent(t *testing.T) {
 }
 
 func TestGetAssembledBlockIncludesTxnsOnceTxPoolCatchesUpSoonAfterStop(t *testing.T) {
-	m, parent, params, provider := txPoolBehindParentFixture(t)
 	synctest.Test(t, func(t *testing.T) {
+		m, parent, params, provider := txPoolBehindParentFixture(t)
 		payloadID, err := m.AssembleBlock(t.Context(), params)
 		require.NoError(t, err)
 		<-provider.ready

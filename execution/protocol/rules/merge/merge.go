@@ -442,6 +442,20 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 		return s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 	}
 
+	if len(config.ZeroNonceStorageAccounts) > 0 && config.IsBogota(header.Time) && header.Number.Sign() != 0 {
+		parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+		if parent == nil {
+			return rules.ErrUnknownAncestor
+		}
+		if !config.IsBogota(parent.Time) {
+			for _, address := range config.ZeroNonceStorageAccounts {
+				if err := state.SetNonce(accounts.InternAddress(address), 1, tracing.NonceChangeUnspecified); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
 	// See https://hackmd.io/@filoozom/rycoQITlWl
 	if config.BalancerTime != nil && header.Time >= *config.BalancerTime {
 		parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)

@@ -189,6 +189,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotRebuildFlag,
+				&SnapshotNewSaltFlag,
 			}),
 		},
 		{
@@ -584,14 +585,6 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:        "clearIndexing",
-			Action:      doClearIndexing,
-			Description: "Clear all indexing data",
-			Flags: joinFlags([]cli.Flag{
-				&utils.DataDirFlag,
-			}),
-		},
-		{
 			Name:        "compareIdx",
 			Action:      doCompareIdx,
 			Description: "compares to accessors (recsplit) files",
@@ -670,6 +663,11 @@ var (
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
 		Usage: "Force rebuild",
+	}
+	SnapshotNewSaltFlag = cli.BoolFlag{
+		Name: "new-salt",
+		Usage: "Regenerate block and state salts. Requires --rebuild and a completed initial snapshot download (preverified.toml). " +
+			"After seg reset --keep-local-snapshots, the next start restores the network salts.",
 	}
 	SnapshotFileFlag = cli.StringFlag{
 		Name:  "file",
@@ -1444,9 +1442,8 @@ func doBtSearch(ctx context.Context, cliCtx *cli.Command) error {
 	dataFilePath := strings.TrimRight(srcF, ".bt") + ".kv"
 
 	runtime.GC()
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	logger.Info("before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	alloc, sys := dbg.MemUsage()
+	logger.Info("before open", "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 	compress := seg.CompressKeys | seg.CompressVals
 	kv, idx, err := btindex.OpenBtreeIndexAndDataFile(srcF, dataFilePath, compress)
 	if err != nil {
@@ -1456,8 +1453,8 @@ func doBtSearch(ctx context.Context, cliCtx *cli.Command) error {
 	defer kv.Close()
 
 	runtime.GC()
-	dbg.ReadMemStats(&m)
-	logger.Info("after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	alloc, sys = dbg.MemUsage()
+	logger.Info("after open", "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 	seek := common.FromHex(cliCtx.String("key"))
 
@@ -2581,14 +2578,17 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 }
 
 func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := state.CheckMixedCommitmentFiles(dat); err != nil {
+		return err
+	}
 	if chainDB == nil {
 		chainDB = dbCfg(dbcfg.ChainDB, dat.Chaindata).MustOpen()
 		defer chainDB.Close()
 	}
 
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
 		return err
@@ -2661,64 +2661,25 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 	return nil
 }
 
-func doClearIndexing(ctx context.Context, cliCtx *cli.Command) error {
-	dat, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
-	if err != nil {
-		return err
-	}
-	defer unlockDatadir(log.Root(), l)
-	accessorsDir := dat.SnapAccessors
-	domainDir := dat.SnapDomain
-	snapDir := dat.Snap
-
-	// Delete accessorsDir
-	if err := dir2.RemoveAll(accessorsDir); err != nil {
-		return fmt.Errorf("failed to delete accessorsDir: %w", err)
-	}
-
-	// Delete all files in domainDir with extensions .bt and .bt.torrent
-	if err := deleteFilesWithExtensions(domainDir, []string{".bt", ".bt.torrent", ".kvei", ".kvei.torrent", ".kvi", ".kvi.torrent"}); err != nil {
-		return fmt.Errorf("failed to delete files in domainDir: %w", err)
-	}
-
-	// Delete all files in snapDir with extensions .idx and .idx.torrent
-	if err := deleteFilesWithExtensions(snapDir, []string{".idx", ".idx.torrent"}); err != nil {
-		return fmt.Errorf("failed to delete files in snapDir: %w", err)
-	}
-
-	// remove salt-state.txt and salt-blocks.txt
-	for _, name := range []string{"salt-state.txt", "salt-state.txt.torrent", "salt-blocks.txt", "salt-blocks.txt.torrent"} {
-		if err := dir2.RemoveFile(filepath.Join(snapDir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("failed to remove %s: %w", name, err)
+// renewSnapshotSaltFilesForRebuild must run after removeAccessorsForRebuild: an accessor built with the old salt must never be opened with the new one.
+func renewSnapshotSaltFilesForRebuild(dirs datadir.Dirs, logger log.Logger) error {
+	for _, name := range []string{
+		"salt-state.txt", "salt-state.txt.torrent",
+		"salt.txt", "salt.txt.torrent", // legacy state salt; must not be migrated and reused
+		"salt-blocks.txt", "salt-blocks.txt.torrent",
+	} {
+		path := filepath.Join(dirs.Snap, name)
+		if err := dir2.RemoveFile(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("rebuild: remove %s: %w", path, err)
 		}
 	}
-
+	if _, err := snaptype.LoadSalt(dirs.Snap, true, logger); err != nil {
+		return fmt.Errorf("rebuild: generate block salt: %w", err)
+	}
+	if _, err := state.GetStateIndicesSalt(dirs, true, logger); err != nil {
+		return fmt.Errorf("rebuild: generate state salt: %w", err)
+	}
 	return nil
-}
-
-func deleteFilesWithExtensions(dir string, extensions []string) error {
-	return filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) { // it's ok if some file get removed during walk
-				return nil
-			}
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-
-		// Check file extensions and delete matching files
-		for _, ext := range extensions {
-			if strings.HasSuffix(info.Name(), ext) {
-				if err := dir2.RemoveFile(path); err != nil {
-					return err
-				}
-			}
-		}
-
-		return nil
-	})
 }
 
 func doBlkTxNum(ctx context.Context, cliCtx *cli.Command) error {
@@ -2989,6 +2950,19 @@ func removeAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger) error {
 	return nil
 }
 
+// The downloader may replace salt-state.txt until preverified.toml exists, which would orphan accessors built with a new salt.
+func requirePinnedSnapshotSet(dirs datadir.Dirs) error {
+	preverifiedPath := dirs.PreverifiedPath()
+	exists, err := dir2.FileExist(preverifiedPath)
+	if err != nil {
+		return fmt.Errorf("check initial snapshot download completion: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("--new-salt requires a completed initial snapshot download: %s is missing", preverifiedPath)
+	}
+	return nil
+}
+
 // indexAggOpts skip the startup gap check: `snapshots index` rebuilds the accessors whose absence makes it refuse.
 var indexAggOpts = []func(state.AggOpts) state.AggOpts{state.AggOpts.SkipFilesDBGapCheck}
 
@@ -2997,12 +2971,26 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	defer logger.Info("Done")
 
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
+	newSalt := cliCtx.Bool(SnapshotNewSaltFlag.Name)
+	if newSalt {
+		if !rebuild {
+			return errors.New("--new-salt requires --rebuild")
+		}
+		if err := requirePinnedSnapshotSet(dirs); err != nil {
+			return err
+		}
+	}
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	if rebuild {
 		if err := removeAccessorsForRebuild(dirs, logger); err != nil {
 			return err
+		}
+		if newSalt {
+			if err := renewSnapshotSaltFilesForRebuild(dirs, logger); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -3222,9 +3210,8 @@ func doUncompress(ctx context.Context, cliCtx *cli.Command) error {
 
 func doCompress(ctx context.Context, cliCtx *cli.Command) error {
 	defer func() {
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		log.Info("done", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		alloc, sys := dbg.MemUsage()
+		log.Info("done", "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 	}()
 
 	dirs, lck, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
