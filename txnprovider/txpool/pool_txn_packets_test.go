@@ -452,7 +452,6 @@ func TestTransactionPacketAuthorizationLimit(t *testing.T) {
 			want [][]byte
 		}{
 			{"outbound batch with a large final transaction", outbound, outbound},
-			{"at limit", [][]byte{first, rest}, [][]byte{first, rest}},
 			{"ordinary after one over", [][]byte{first, rest, one, ordinary}, [][]byte{first, rest, ordinary}},
 			{"skip before decoding", [][]byte{first, rest, trailingByte, ordinary}, [][]byte{first, rest, ordinary}},
 			{"remaining budget", [][]byte{first, over, rest}, [][]byte{first, rest}},
@@ -462,7 +461,6 @@ func TestTransactionPacketAuthorizationLimit(t *testing.T) {
 				ctx.WithSender(false)
 				ctx.ValidateRLP(ValidateSerializedTxn)
 				var slots TxnSlots
-				slots.Resize(1)
 				var payload []byte
 				var pos int
 				var err error

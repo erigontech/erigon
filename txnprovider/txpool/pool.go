@@ -1594,10 +1594,7 @@ func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
 	return p.chainConfig.GetMaxBlobsPerBlock(uint64(now))
 }
 
-const (
-	txnSlotSize = 32 * 1024
-	txnMaxSize  = 4 * txnSlotSize // 128 KiB
-)
+const txnMaxSize = 128 * 1024
 
 // ValidateSerializedTxn checks that the serialized transaction does not exceed the size limit for its type.
 func ValidateSerializedTxn(serializedTxn []byte) error {
