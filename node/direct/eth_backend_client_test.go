@@ -78,6 +78,56 @@ func TestSubscribeReceiptsSendAfterServerExit(t *testing.T) {
 	})
 }
 
+func TestSubscribeStreamSendCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		replies := make(chan *subscribeReply, 1)
+		replies <- &subscribeReply{}
+		stream := &SubscribeStreamS{ctx: ctx, ch: replies}
+		done := make(chan error, 1)
+		go func() { done <- stream.Send(&remoteproto.SubscribeReply{}) }()
+		synctest.Wait()
+
+		cancel()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, context.Canceled)
+		default:
+			<-replies
+			<-done
+			t.Fatal("Send remained blocked after cancellation")
+		}
+	})
+}
+
+func TestSubscribeStreamErrCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		replies := make(chan *subscribeReply, 1)
+		replies <- &subscribeReply{}
+		stream := &SubscribeStreamS{ctx: ctx, ch: replies}
+		done := make(chan struct{})
+		go func() {
+			stream.Err(errors.New("server failed"))
+			close(done)
+		}()
+		synctest.Wait()
+
+		cancel()
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			<-replies
+			<-done
+			t.Fatal("Err remained blocked after cancellation")
+		}
+	})
+}
+
 func TestSubscribeLogsStreamSendCancellation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())

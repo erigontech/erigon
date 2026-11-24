@@ -86,15 +86,22 @@ type SubscribeStreamS struct {
 }
 
 func (s *SubscribeStreamS) Send(m *remoteproto.SubscribeReply) error {
-	s.ch <- &subscribeReply{r: m}
-	return nil
+	select {
+	case s.ch <- &subscribeReply{r: m}:
+		return nil
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
 }
 func (s *SubscribeStreamS) Context() context.Context { return s.ctx }
 func (s *SubscribeStreamS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- &subscribeReply{err: err}
+	select {
+	case s.ch <- &subscribeReply{err: err}:
+	case <-s.ctx.Done():
+	}
 }
 
 type SubscribeStreamC struct {
