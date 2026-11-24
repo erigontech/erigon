@@ -71,6 +71,9 @@ func (m *Merger) filesByRange(v *View, snapTypes []snaptype.Type, from, to uint6
 	toMerge := map[snaptype.Enum][]*DirtySegment{}
 	for _, t := range snapTypes {
 		toMerge[t.Enum()] = m.filesByRangeOfType(v, from, to, t)
+		if len(toMerge[t.Enum()]) == 0 {
+			return nil, fmt.Errorf("no %s segments to merge in range [%d, %d)", t.Name(), from, to)
+		}
 	}
 
 	return toMerge, nil
