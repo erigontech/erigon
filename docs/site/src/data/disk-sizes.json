@@ -29,8 +29,8 @@
         "source": "manual"
       },
       "full": {
-        "bytes": 244851294039,
-        "display": "244.85 GB",
+        "bytes": 245495033090,
+        "display": "245.50 GB",
         "measured_at": "2026-11-24",
         "source": "ci"
       },
@@ -69,8 +69,8 @@
         "source": "manual"
       },
       "full": {
-        "bytes": 654795826807,
-        "display": "654.80 GB",
+        "bytes": 655658065760,
+        "display": "655.66 GB",
         "measured_at": "2026-11-24",
         "source": "ci"
       },
