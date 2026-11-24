@@ -1552,7 +1552,7 @@ func TestColdFieldReadAfterReconciledLoadValidates(t *testing.T) {
 // the recorded nil map-read marker with the loaded record: leaving the nil in
 // place spuriously invalidates the reader once a later record cell (e.g. the
 // calcFees coinbase record) is flushed at validation time.
-func TestGetVersionedAccount_ReconcilesDBLoadedRecordRead(t *testing.T) {
+func TestAccountBase_ReconcilesDBLoadedRecordRead(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0xdb, 0x01})
 	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(700), true)
@@ -1574,7 +1574,7 @@ func TestGetVersionedAccount_ReconcilesDBLoadedRecordRead(t *testing.T) {
 
 // Cells proving only an EIP-161-empty state must not synthesize: an
 // existing-empty account is not gas-equivalent to a non-existent one.
-func TestGetVersionedAccount_NoSynthesisForEmpty(t *testing.T) {
+func TestAccountBase_NoSynthesisForEmpty(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0xba, 0x03})
 	mvhm.WriteBalance(addr, Version{TxIndex: 2}, uint256.Int{}, true)
@@ -1587,7 +1587,7 @@ func TestGetVersionedAccount_NoSynthesisForEmpty(t *testing.T) {
 }
 
 // An estimate (non-Done) cell is a racing speculative write — no synthesis.
-func TestGetVersionedAccount_NoSynthesisFromEstimate(t *testing.T) {
+func TestAccountBase_NoSynthesisFromEstimate(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0xba, 0x04})
 	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(500), false)
@@ -1602,7 +1602,7 @@ func TestGetVersionedAccount_NoSynthesisFromEstimate(t *testing.T) {
 // A burn (SELFDESTRUCT with preserveBalance=false) must not be synthesized: the
 // balance write is stamped ValueDeleted, so even a non-zero pre-destruct balance
 // reads as absent — the reader keys on the stamp, not the cell value.
-func TestGetVersionedAccount_NoSynthesisAfterSelfDestruct(t *testing.T) {
+func TestAccountBase_NoSynthesisAfterSelfDestruct(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0xba, 0x05})
 	runRevivalTx(t, mvhm, 2, func(ibs *IntraBlockState) {

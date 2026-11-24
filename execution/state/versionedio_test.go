@@ -547,11 +547,11 @@ func TestVersionedIO_RemovedDependencyFallsThroughToStorage(t *testing.T) {
 		"a MapRead whose version-map cell was removed must invalidate at commit")
 }
 
-// TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths verifies
+// TestIBSWrites_SelfdestructRetainsBalanceDropsOtherPaths verifies
 // that IntraBlockState.VersionedWrites retains SelfDestructPath, BalancePath
 // (including non-zero residual balances — EIP-7708 case 2), and IncarnationPath
 // after selfdestruct, and drops NoncePath/CodePath which selfdestruct resets.
-func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing.T) {
+func TestIBSWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
@@ -761,7 +761,7 @@ func TestCreateAccount_SyntheticIncarnationStamp_DoesNotInvalidate(t *testing.T)
 // when stateReader (which doesn't consult the versionMap) returns the pre-SD
 // record. Without this gate Empty() returns false and a CALL-with-value to
 // the SD'd address misses CallNewAccountGas.
-func TestGetVersionedAccount_PriorTxSelfDestruct_ReturnsNil(t *testing.T) {
+func TestAccountBase_PriorTxSelfDestruct_ReturnsNil(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0xF1F5555B"))
@@ -801,7 +801,7 @@ func TestGetVersionedAccount_PriorTxSelfDestruct_ReturnsNil(t *testing.T) {
 // AddressPath land at the SAME TxIdx. A strict hi > destructTxIndex
 // revival check would miss this; getAccount must recognise
 // AddressPath at TxIdx >= destructTxIndex as revival.
-func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing.T) {
+func TestAccountBase_SameTxMetamorphicRecreate_ReturnsAccount(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0x140DA4236"))

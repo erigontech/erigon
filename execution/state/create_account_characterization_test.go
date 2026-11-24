@@ -50,7 +50,7 @@ func requireAccount(t *testing.T, ibs *IntraBlockState, addr accounts.Address, b
 func TestCreateAccount_FreshEOA(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xca, 0x01})
-	ibs := versionedRevertIBS(&emptyReader{})
+	ibs := revertIBS(&emptyReader{})
 
 	snap := ibs.PushSnapshot()
 	require.NoError(t, ibs.CreateAccount(addr, false))
@@ -68,7 +68,7 @@ func TestCreateAccount_FreshEOA(t *testing.T) {
 func TestCreateAccount_FreshContractBumpsIncarnation(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xca, 0x02})
-	ibs := versionedRevertIBS(&emptyReader{})
+	ibs := revertIBS(&emptyReader{})
 
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	inc, err := ibs.GetIncarnation(addr)
@@ -82,7 +82,7 @@ func TestCreateAccount_FreshContractBumpsIncarnation(t *testing.T) {
 func TestCreateAccount_OverExistingEOACarriesBalance(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xca, 0x03})
-	ibs := versionedRevertIBS(committedAccountReader(addr, 7, 1000, nil))
+	ibs := revertIBS(committedAccountReader(addr, 7, 1000, nil))
 
 	snap := ibs.PushSnapshot()
 	require.NoError(t, ibs.CreateAccount(addr, true))
@@ -100,7 +100,7 @@ func TestCreateAccount_OverExistingContractResetsAndCarriesBalance(t *testing.T)
 	acc := accounts.NewAccount()
 	acc.Nonce, acc.Balance, acc.Incarnation = 3, *uint256.NewInt(500), 2
 	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
-	ibs := versionedRevertIBS(&fieldReader{addr: addr, account: &acc, code: code})
+	ibs := revertIBS(&fieldReader{addr: addr, account: &acc, code: code})
 
 	snap := ibs.PushSnapshot()
 	require.NoError(t, ibs.CreateAccount(addr, true))
@@ -123,7 +123,7 @@ func TestCreateAccount_OverExistingContractResetsAndCarriesBalance(t *testing.T)
 func TestCreateAccount_CarriesSameTxCreditToAbsentAddress(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xca, 0x05})
-	ibs := versionedRevertIBS(&emptyReader{})
+	ibs := revertIBS(&emptyReader{})
 
 	// The EVM credits funds to a not-yet-created address, then CREATE deploys there.
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(250), tracing.BalanceChangeUnspecified))

@@ -16,7 +16,7 @@ import (
 // the nonce/code-hash/balance cells, so emptyFromFields wrongly returns
 // empty=true -> a same-tx CALL to it charges params.StateGasNewAccount (183600),
 // over-charging gas (the eip8246/eip6780 post_send_opcode_CALL zkevm failures).
-func TestEIP6780_SelfdestructVersioned_NotEmptySameTx(t *testing.T) {
+func TestEIP6780_Selfdestruct_NotEmptySameTx(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x82472"))
 	vm := NewVersionMap(nil)

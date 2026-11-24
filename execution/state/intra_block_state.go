@@ -876,25 +876,25 @@ func (ibs *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
-	versionedValue, source, _, err := readState(ibs, addr, key)
+	value, source, _, err := readState(ibs, addr, key)
 
 	if dbg.TraceTransactionIO && (ibs.trace || (dbg.TraceAccount(addr.Handle()) && traceKey(key))) {
-		fmt.Printf("%d (%d.%d) GetState (%s) %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, key, versionedValue.Hex()[2:])
+		fmt.Printf("%d (%d.%d) GetState (%s) %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, key, value.Hex()[2:])
 	}
 
-	return versionedValue, err
+	return value, err
 }
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) GetCommittedState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
-	versionedValue, source, _, err := readCommittedState(ibs, addr, key)
+	value, source, _, err := readCommittedState(ibs, addr, key)
 
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-		fmt.Printf("%d (%d.%d) GetCommittedState (%s) %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, key, versionedValue.Hex()[2:])
+		fmt.Printf("%d (%d.%d) GetCommittedState (%s) %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, key, value.Hex()[2:])
 	}
 
-	return versionedValue, err
+	return value, err
 }
 
 func (ibs *IntraBlockState) HasSelfdestructed(addr accounts.Address) (bool, error) {

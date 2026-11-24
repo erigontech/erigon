@@ -16,7 +16,7 @@ import (
 // but the code is still present — GetCodeHash must recompute the real hash, else the
 // eip1052/eip6780 EXTCODEHASH-of-self-destructed-contract zkevm fixtures store the
 // empty hash and diverge (wrong BAL / state root).
-func TestEIP6780_SelfdestructVersioned_CodeHashSameTx(t *testing.T) {
+func TestEIP6780_Selfdestruct_CodeHashSameTx(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x82474"))
 	vm := NewVersionMap(nil)

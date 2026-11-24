@@ -63,7 +63,6 @@ type testExecTask struct {
 	*exec.TxTask
 	ctx          context.Context
 	ops          []Op
-	readMap      state.ReadSet
 	writeMap     *state.WriteSet
 	sender       accounts.Address
 	nonce        int
@@ -91,7 +90,6 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 		},
 		ctx:          context.Background(),
 		ops:          ops,
-		readMap:      state.ReadSet{},
 		writeMap:     &state.WriteSet{},
 		sender:       sender,
 		nonce:        nonce,
@@ -123,7 +121,6 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 	version := t.Version()
 
-	t.readMap = state.ReadSet{}
 	t.writeMap = &state.WriteSet{}
 
 	dep := -1
@@ -143,10 +140,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 			// op[0] is always a NoncePath read; peek the versionMap value (no
 			// extra recorded read) and abort on a nonce mismatch.
 			if i == 0 {
-				if vm := ibs.VersionMap(); vm != nil {
-					if nonce, _, ok := vm.ReadNonce(k.addr, version.TxIndex); ok && int(nonce) != t.nonce {
-						return &exec.TxResult{Err: fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce)}
-					}
+				if nonce, _, ok := ibs.VersionMap().ReadNonce(k.addr, version.TxIndex); ok && int(nonce) != t.nonce {
+					return &exec.TxResult{Err: fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce)}
 				}
 			}
 
@@ -156,17 +151,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 				}
 			}
 
-			var readKind state.ReadSource
-
-			if result.Status() == state.MVReadResultDone {
-				readKind = state.MapRead
-			} else if result.Status() == state.MVReadResultNone {
-				readKind = state.StorageRead
-			}
-
 			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
-
-			t.readMap.SetHeader(k.addr, k.path, k.key, state.ReadHeader{Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
 			testWriteSetInt(t.writeMap, k.addr, k.path, k.key, version, op.val)
 		case otherType:

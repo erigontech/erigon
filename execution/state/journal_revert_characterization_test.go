@@ -34,7 +34,7 @@ import (
 // kind on the versioned path. See TestJournalDirtySymmetry for the complementary
 // per-kind dirty accounting.
 
-func versionedRevertIBS(reader StateReader) *IntraBlockState {
+func revertIBS(reader StateReader) *IntraBlockState {
 	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
@@ -54,7 +54,7 @@ func committedAccountReader(addr accounts.Address, nonce uint64, balance uint64,
 func TestJournalRevert_Balance(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xba, 0x01})
-	ibs := versionedRevertIBS(committedAccountReader(addr, 1, 1000, nil))
+	ibs := revertIBS(committedAccountReader(addr, 1, 1000, nil))
 
 	snap := ibs.PushSnapshot()
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeUnspecified))
@@ -71,7 +71,7 @@ func TestJournalRevert_Balance(t *testing.T) {
 func TestJournalRevert_Nonce(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xba, 0x02})
-	ibs := versionedRevertIBS(committedAccountReader(addr, 5, 10, nil))
+	ibs := revertIBS(committedAccountReader(addr, 5, 10, nil))
 
 	snap := ibs.PushSnapshot()
 	require.NoError(t, ibs.SetNonce(addr, 9, tracing.NonceChangeUnspecified))
@@ -92,7 +92,7 @@ func TestJournalRevert_Storage(t *testing.T) {
 	acc := accounts.NewAccount()
 	acc.Nonce, acc.Incarnation = 1, 1
 	reader := &storageReader{addr: addr, account: &acc, storage: map[accounts.StorageKey]uint256.Int{key: *uint256.NewInt(7)}}
-	ibs := versionedRevertIBS(reader)
+	ibs := revertIBS(reader)
 
 	snap := ibs.PushSnapshot()
 	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(42)))
@@ -110,7 +110,7 @@ func TestJournalRevert_Code(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xba, 0x04})
 	oldCode := []byte{0x60, 0x01}
-	ibs := versionedRevertIBS(committedAccountReader(addr, 1, 1, oldCode))
+	ibs := revertIBS(committedAccountReader(addr, 1, 1, oldCode))
 	oldHash := accounts.InternCodeHash(crypto.Keccak256Hash(oldCode))
 
 	snap := ibs.PushSnapshot()
@@ -130,7 +130,7 @@ func TestJournalRevert_Code(t *testing.T) {
 
 func TestJournalRevert_Refund(t *testing.T) {
 	t.Parallel()
-	ibs := versionedRevertIBS(&emptyReader{})
+	ibs := revertIBS(&emptyReader{})
 
 	snap := ibs.PushSnapshot()
 	ibs.AddRefund(7)
@@ -143,7 +143,7 @@ func TestJournalRevert_Refund(t *testing.T) {
 func TestJournalRevert_AccessListAccount(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xba, 0x05})
-	ibs := versionedRevertIBS(&emptyReader{})
+	ibs := revertIBS(&emptyReader{})
 
 	snap := ibs.PushSnapshot()
 	ibs.AddAddressToAccessList(addr)
@@ -157,7 +157,7 @@ func TestJournalRevert_AccessListSlot(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xba, 0x06})
 	slot := accounts.InternKey([32]byte{0x02})
-	ibs := versionedRevertIBS(&emptyReader{})
+	ibs := revertIBS(&emptyReader{})
 	ibs.AddAddressToAccessList(addr)
 
 	snap := ibs.PushSnapshot()
@@ -174,7 +174,7 @@ func TestJournalRevert_TransientStorage(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xba, 0x07})
 	key := TransientKey(*uint256.NewInt(1))
-	ibs := versionedRevertIBS(&emptyReader{})
+	ibs := revertIBS(&emptyReader{})
 
 	snap := ibs.PushSnapshot()
 	ibs.SetTransientState(addr, &key, uint256.NewInt(99))
@@ -187,7 +187,7 @@ func TestJournalRevert_TransientStorage(t *testing.T) {
 func TestJournalRevert_Selfdestruct(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xba, 0x08})
-	ibs := versionedRevertIBS(committedAccountReader(addr, 1, 1000, []byte{0x60, 0x01}))
+	ibs := revertIBS(committedAccountReader(addr, 1, 1000, []byte{0x60, 0x01}))
 
 	snap := ibs.PushSnapshot()
 	_, err := ibs.Selfdestruct(addr, false)
@@ -207,7 +207,7 @@ func TestJournalRevert_Selfdestruct(t *testing.T) {
 
 func TestJournalRevert_FrameApproval(t *testing.T) {
 	t.Parallel()
-	ibs := versionedRevertIBS(&emptyReader{})
+	ibs := revertIBS(&emptyReader{})
 	payer := accounts.InternAddress([20]byte{0xfa, 0x01})
 	ctx := ibs.NewFrameContext(&types.FrameTransaction{}, uint256.Int{})
 	prevPayer, prevApproved := ctx.Payer, ctx.SenderApproved
@@ -224,7 +224,7 @@ func TestJournalRevert_FrameApproval(t *testing.T) {
 
 func TestJournalRevert_FrameStateGas(t *testing.T) {
 	t.Parallel()
-	ibs := versionedRevertIBS(&emptyReader{})
+	ibs := revertIBS(&emptyReader{})
 	ctx := ibs.NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{{Limits: mdgas.MdGas{State: 10}}}}, uint256.Int{})
 
 	snap := ibs.PushSnapshot()
@@ -239,7 +239,7 @@ func TestJournalRevert_FrameTransient(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xfa, 0x03})
 	key := TransientKey(*uint256.NewInt(1))
-	ibs := versionedRevertIBS(&emptyReader{})
+	ibs := revertIBS(&emptyReader{})
 	ibs.SetTransientState(addr, &key, uint256.NewInt(55))
 
 	snap := ibs.PushSnapshot()
@@ -261,7 +261,7 @@ func TestJournalRevert_FrameStorageOwner(t *testing.T) {
 
 	t.Run("install_then_revert_removes_owner", func(t *testing.T) {
 		t.Parallel()
-		ibs := versionedRevertIBS(&emptyReader{})
+		ibs := revertIBS(&emptyReader{})
 		ctx := ibs.NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{{Limits: mdgas.MdGas{State: 100}}}}, uint256.Int{})
 
 		snap := ibs.PushSnapshot()
@@ -275,7 +275,7 @@ func TestJournalRevert_FrameStorageOwner(t *testing.T) {
 
 	t.Run("overwrite_then_revert_refunds_outer_frame", func(t *testing.T) {
 		t.Parallel()
-		ibs := versionedRevertIBS(&emptyReader{})
+		ibs := revertIBS(&emptyReader{})
 		ctx := ibs.NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{
 			{Limits: mdgas.MdGas{State: 100}},
 			{Limits: mdgas.MdGas{State: 100}},
@@ -303,7 +303,7 @@ func TestJournalRevert_FrameStorageOwner(t *testing.T) {
 func TestJournalRevert_BalanceCreateOnAbsent(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xba, 0x09})
-	ibs := versionedRevertIBS(&emptyReader{})
+	ibs := revertIBS(&emptyReader{})
 
 	snap := ibs.PushSnapshot()
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeUnspecified))
@@ -327,7 +327,7 @@ func TestJournalRevert_BalanceCreateOnAbsent(t *testing.T) {
 func TestJournalRevert_NonceCreateOnAbsent(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xba, 0x0a})
-	ibs := versionedRevertIBS(&emptyReader{})
+	ibs := revertIBS(&emptyReader{})
 
 	snap := ibs.PushSnapshot()
 	require.NoError(t, ibs.SetNonce(addr, 3, tracing.NonceChangeUnspecified))
@@ -357,7 +357,7 @@ func TestSelfdestructThenBalanceKeepsRecord(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xba, 0x0b})
 	code := []byte{0x60, 0x01}
 	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
-	ibs := versionedRevertIBS(committedAccountReader(addr, 7, 1000, code))
+	ibs := revertIBS(committedAccountReader(addr, 7, 1000, code))
 
 	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
@@ -385,7 +385,7 @@ func TestSelfdestructThenNonceKeepsRecord(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xba, 0x0c})
 	code := []byte{0x60, 0x01}
 	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
-	ibs := versionedRevertIBS(committedAccountReader(addr, 7, 1000, code))
+	ibs := revertIBS(committedAccountReader(addr, 7, 1000, code))
 
 	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
