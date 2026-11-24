@@ -186,12 +186,12 @@ func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerI
 	if err != nil {
 		return nil, err
 	}
-	response, err := decodeBlockAccessListsResponse(payload, len(reqs))
+	entries, err := decodeBlockAccessListsResponse(payload, len(reqs))
 	if err != nil {
 		f.penalize(ctx, peerId)
 		return nil, err
 	}
-	out, err := validateBALResponse(reqs, response)
+	out, err := validateBALResponse(reqs, entries)
 	if errors.Is(err, ErrBadBALResponse) {
 		f.logger.Debug("[p2p.bal] penalizing peer for bad BAL response", "peerId", peerId, "err", err)
 		f.penalize(ctx, peerId)
@@ -199,7 +199,7 @@ func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerI
 	// Mark a BAL missing only when the peer explicitly reports it as unavailable.
 	// A short reply leaves later blocks unanswered, and a discarded entry may
 	// still match its header commitment.
-	for i, entry := range response {
+	for i, entry := range entries {
 		if isUnavailableBALEntry(entry) {
 			f.peerTracker.BALNumMissing(peerId, reqs[i].Number)
 		}
@@ -251,24 +251,26 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 }
 
 func decodeBlockAccessListsResponse(payload []byte, requested int) ([]rlp.RawValue, error) {
+	if len(payload) == 0 {
+		return nil, nil
+	}
+
 	stream := rlp.NewBytesStream(payload)
 	defer rlp.PutStream(stream)
 
-	var response []rlp.RawValue
-	// On empty input a pooled stream may retain its previous Remaining count.
-	// Peek reports the unread bytes from this payload.
-	for len(stream.Peek()) > 0 {
+	var entries []rlp.RawValue
+	for stream.Remaining() > 0 {
 		// Raw copies the whole entry, so check the request limit before reading it.
-		if len(response) == requested {
+		if len(entries) == requested {
 			return nil, fmt.Errorf("%w: response exceeds requested count %d", ErrBadBALResponse, requested)
 		}
 		entry, err := stream.Raw()
 		if err != nil {
-			return nil, fmt.Errorf("decode block access list entry %d: %w", len(response), err)
+			return nil, fmt.Errorf("decode block access list entry %d: %w", len(entries), err)
 		}
-		response = append(response, entry)
+		entries = append(entries, entry)
 	}
-	return response, nil
+	return entries, nil
 }
 
 func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) ([]byte, error) {
