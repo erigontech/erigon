@@ -14,17 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package testutil
+package monitor
 
-import (
-	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/program"
-)
+import "testing"
 
-// AssertStackWord consumes the top stack word and reverts unless it equals expected.
-func AssertStackWord(p *program.Program, expected uint64) *program.Program {
-	p.Push(expected).Op(vm.EQ)
-	destination := p.Size() + 7
-	return p.Op(vm.PUSH2).Append([]byte{byte(destination >> 8), byte(destination)}).Op(vm.JUMPI).
-		Push0().Push0().Op(vm.REVERT, vm.JUMPDEST)
+func BenchmarkObserveGossipTopicSeen(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			ObserveGossipTopicSeen("beacon_attestation_1", 256)
+		}
+	})
 }

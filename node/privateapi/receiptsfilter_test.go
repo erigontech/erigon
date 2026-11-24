@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/notifications"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
@@ -433,8 +434,29 @@ func TestReceiptsFilter_SendsEffectiveGasPrice(t *testing.T) {
 	}
 }
 
-// The blob fields are derived from the transaction, the chain config and the header, which the
-// RPC side does not have, and only a blob transaction reports them.
+func TestReceiptsFilter_SendsSettledBlobFrameGasPrice(t *testing.T) {
+	const gasUsed = 21_000
+	rn := createReceiptNotification(txHash1)
+	rn.Receipt.Type = types.FrameTxType
+	rn.Receipt.TransactionIndex = 1
+	rn.Receipt.GasUsed = gasUsed
+	rn.Receipt.CumulativeGasUsed = 2 * gasUsed
+	rn.Header = &types.Header{BaseFee: uint256.NewInt(1), ExcessBlobGas: common.NewUint64(0)}
+	rn.Tx = &types.FrameTransaction{
+		Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 30_000}}},
+		BlobVersionedHashes: []common.Hash{{1}},
+		// At one wei per blob gas, the remaining budget pays four wei per unit of gas used.
+		Fees: types.FrameFees{MaxFee: uint256.Int{params.GasPerBlob + 4*gasUsed}, TipCap: uint256.Int{10}},
+	}
+	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
+	reply := agg.receiptNotificationToProto(rn)
+	require.NotNil(t, reply.EffectiveGasPrice)
+	require.Equal(t, uint256.NewInt(4), gointerfaces.ConvertH256ToUint256Int(reply.EffectiveGasPrice))
+}
+
+// Any transaction carrying blobs, including a frame transaction, reports blob gas
+// used and, when available, the blob gas price. The backend derives these fields
+// from the transaction, header and chain config before sending the notification.
 func TestReceiptsFilter_SendsBlobFields(t *testing.T) {
 	chainConfig := chain.AllProtocolChanges
 	dynamicFee := func() types.DynamicFeeTransaction {

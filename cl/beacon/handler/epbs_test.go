@@ -230,6 +230,35 @@ func TestPostPtcDutiesDependentRootAtEpochOne(t *testing.T) {
 	require.Equal(t, headEvent.Data.NextEpochDependentRoot, postPtcDutiesDependentRoot(t, handler, 2))
 }
 
+func TestPostPtcDutiesDependentRootAtGloasForkEpochOne(t *testing.T) {
+	// A Gloas head inside the fork epoch serves the fork epoch from the head state.
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 1
+
+	slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
+	headSlot := slotsPerEpoch + 1
+	headState := newPtcDutiesHeadState(t, handler.beaconChainCfg, headSlot)
+	genesisRoot := common.Hash{0x61}
+	lastPreForkRoot := common.Hash{0x62}
+	require.NoError(t, headState.SetBlockRootAt(0, genesisRoot))
+	require.NoError(t, headState.SetBlockRootAt(int(slotsPerEpoch-1), lastPreForkRoot))
+
+	headRoot := common.Hash{0x63}
+	publishPtcDutiesHead(t, syncedData, headState, headRoot)
+	headEvent, err := beaconevents.BuildHeadV2Data(
+		handler.beaconChainCfg,
+		headState,
+		headSlot,
+		headRoot,
+		common.Hash{0x64},
+		"full",
+		false,
+	)
+	require.NoError(t, err)
+	require.Equal(t, lastPreForkRoot, headEvent.Data.NextEpochDependentRoot)
+	require.Equal(t, headEvent.Data.NextEpochDependentRoot, postPtcDutiesDependentRoot(t, handler, 1))
+}
+
 func TestPostPtcDutiesDependentRootMatchesHeadV2(t *testing.T) {
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -311,7 +340,7 @@ type ptcForkEpochDutiesFixture struct {
 	syncedData       *synced_data.SyncedDataManager
 	forkEpoch        uint64
 	headRoot         common.Hash
-	dependentRoot    common.Hash
+	lastPreForkRoot  common.Hash
 	predictedPtc     []uint64
 	advancedPtc      []uint64
 	wantDuties       map[[2]uint64]struct{}
@@ -319,6 +348,12 @@ type ptcForkEpochDutiesFixture struct {
 }
 
 func newPtcForkEpochDutiesFixture(t *testing.T, clockEpoch uint64) ptcForkEpochDutiesFixture {
+	t.Helper()
+	return newPtcForkEpochDutiesFixtureAt(t, clockEpoch, 1)
+}
+
+// newPtcForkEpochDutiesFixtureAt puts the head headDistance slots before the Gloas fork.
+func newPtcForkEpochDutiesFixtureAt(t *testing.T, clockEpoch, headDistance uint64) ptcForkEpochDutiesFixture {
 	t.Helper()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
@@ -338,11 +373,11 @@ func newPtcForkEpochDutiesFixture(t *testing.T, clockEpoch uint64) ptcForkEpochD
 	require.Equal(t, clparams.FuluVersion, headState.Version())
 
 	forkEpoch := cfg.GloasForkEpoch
-	headSlot := forkEpoch*cfg.SlotsPerEpoch - 1
+	headSlot := forkEpoch*cfg.SlotsPerEpoch - headDistance
 	require.NoError(t, transition.DefaultMachine.ProcessSlots(headState, headSlot))
-	dependentRoot := common.Hash{0x81}
-	dependentRootSlot := forkEpoch*cfg.SlotsPerEpoch - cfg.SlotsPerEpoch - 1
-	require.NoError(t, headState.SetBlockRootAt(int(dependentRootSlot), dependentRoot))
+	// The attester rule would read the block root at this slot.
+	attesterRootSlot := forkEpoch*cfg.SlotsPerEpoch - cfg.SlotsPerEpoch - 1
+	require.NoError(t, headState.SetBlockRootAt(int(attesterRootSlot), common.Hash{0x81}))
 
 	predictedPtc, err := headState.ComputePTC(forkEpoch * cfg.SlotsPerEpoch)
 	require.NoError(t, err)
@@ -367,6 +402,8 @@ func newPtcForkEpochDutiesFixture(t *testing.T, clockEpoch uint64) ptcForkEpochD
 	require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, forkEpoch*cfg.SlotsPerEpoch))
 	require.Equal(t, clparams.GloasVersion, advancedState.Version())
 	advancedPtc, err := advancedState.GetPTC(forkEpoch * cfg.SlotsPerEpoch)
+	require.NoError(t, err)
+	lastPreForkRoot, err := advancedState.GetBlockRootAtSlot(forkEpoch*cfg.SlotsPerEpoch - 1)
 	require.NoError(t, err)
 
 	wantDuties := make(map[[2]uint64]struct{})
@@ -396,7 +433,7 @@ func newPtcForkEpochDutiesFixture(t *testing.T, clockEpoch uint64) ptcForkEpochD
 		syncedData:       syncedData,
 		forkEpoch:        forkEpoch,
 		headRoot:         headRoot,
-		dependentRoot:    dependentRoot,
+		lastPreForkRoot:  lastPreForkRoot,
 		predictedPtc:     predictedPtc,
 		advancedPtc:      advancedPtc,
 		wantDuties:       wantDuties,
@@ -425,12 +462,19 @@ func TestPostPtcDutiesForkEpochUsesAdvancedFuluState(t *testing.T) {
 		Data          []ptcDutyResponse `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	require.Equal(t, fixture.dependentRoot, response.DependentRoot)
+	require.Equal(t, fixture.headRoot, response.DependentRoot)
 	gotDuties := make(map[[2]uint64]struct{}, len(response.Data))
 	for _, duty := range response.Data {
 		gotDuties[[2]uint64{duty.ValidatorIndex, duty.Slot}] = struct{}{}
 	}
 	require.Equal(t, fixture.wantDuties, gotDuties)
+}
+
+func TestPostPtcDutiesForkEpochDependsOnEmptyLastPreForkSlot(t *testing.T) {
+	// The last Fulu slot is empty, so the dependent root is the block root that the state holds for it.
+	fixture := newPtcForkEpochDutiesFixtureAt(t, 2, 2)
+	require.NotEqual(t, common.Hash{0x81}, fixture.lastPreForkRoot)
+	require.Equal(t, fixture.lastPreForkRoot, postPtcDutiesDependentRoot(t, fixture.handler, fixture.forkEpoch))
 }
 
 func TestPostPtcDutiesForkEpochUnavailableBeforeClockReachesFork(t *testing.T) {
@@ -4679,6 +4723,68 @@ func TestPostExecutionPayloadEnvelopeRejectsOversizedEncodingBeforeAdmission(t *
 
 				require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 				require.Contains(t, recorder.Body.String(), "execution payload envelope encoding size")
+				require.False(t, fcu.ValidateExecutionPayloadEnvelopeForGossipCalled)
+			})
+		}
+	}
+}
+
+func TestPostExecutionPayloadEnvelopeBoundsEncodingByGossipLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	envelope := validTestSignedExecutionPayloadEnvelope(&cfg)
+	jsonBody, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	sszBody, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	size := uint64(len(sszBody))
+	require.LessOrEqual(t, size, clparams.MaxChunkSize)
+
+	contents := cltypes.NewSignedExecutionPayloadEnvelopeContents(&cfg, 0)
+	contents.SignedExecutionPayloadEnvelope = envelope
+	contentsJSONBody, err := json.Marshal(contents)
+	require.NoError(t, err)
+	contentsSSZBody, err := contents.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		contentType      string
+		body             []byte
+		blobDataIncluded string
+		canonical        bool
+	}{
+		{"application/json", jsonBody, "false", true},
+		{"application/json", jsonBody, "false", false},
+		{"application/octet-stream", sszBody, "false", true},
+		{"application/octet-stream", sszBody, "false", false},
+		{"application/json", contentsJSONBody, "true", true},
+		{"application/octet-stream", contentsSSZBody, "true", true},
+	} {
+		for _, gossipMaxSize := range []uint64{size - 1, size} {
+			name := fmt.Sprintf("%s/blobDataIncluded=%s/canonical=%t/gossipMaxSize=%d", tc.contentType, tc.blobDataIncluded, tc.canonical, gossipMaxSize)
+			t.Run(name, func(t *testing.T) {
+				_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				handler.netConfig = &clparams.NetworkConfig{GossipMaxSize: gossipMaxSize}
+				require.Equal(t, gossipMaxSize, gossip.MaxUncompressedSize(gossip.TopicNameExecutionPayload, handler.beaconChainCfg, handler.netConfig))
+				var claims atomic.Int32
+				fcu.ClaimExecutionPayloadEnvelopeForGossipFunc = func(context.Context, common.Hash, uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+					claims.Add(1)
+					return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, errors.New("admission reached")
+				}
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(tc.body))
+				request.Header.Set("Content-Type", tc.contentType)
+				request.Header.Set("Eth-Blob-Data-Included", tc.blobDataIncluded)
+				request.Header.Set("Eth-Consensus-Version", "gloas")
+				recorder := httptest.NewRecorder()
+				handler.postEthV1BeaconExecutionPayloadEnvelope(recorder, request, tc.canonical)
+
+				if gossipMaxSize < size {
+					require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+					require.Contains(t, recorder.Body.String(), "exceeds gossip max")
+					require.Zero(t, claims.Load())
+				} else {
+					require.NotContains(t, recorder.Body.String(), "exceeds gossip max")
+					require.Equal(t, int32(1), claims.Load())
+				}
 				require.False(t, fcu.ValidateExecutionPayloadEnvelopeForGossipCalled)
 			})
 		}

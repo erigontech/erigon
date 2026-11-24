@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -516,75 +517,77 @@ func TestForwardRequestMoreStartsHTTPFallbackWhileProbesAreSlow(t *testing.T) {
 }
 
 func TestForwardRequestMoreDoesNotPreferHTTPWithoutProgress(t *testing.T) {
-	previousInterval := forwardBeaconRequestInterval
-	previousTimeout := forwardBeaconRequestTimeout
-	previousFallbackDelay := forwardBeaconFallbackDelay
-	previousResponsePoll := forwardBeaconResponsePoll
-	forwardBeaconRequestInterval = time.Millisecond
-	forwardBeaconRequestTimeout = 100 * time.Millisecond
-	forwardBeaconFallbackDelay = 5 * time.Millisecond
-	forwardBeaconResponsePoll = time.Millisecond
-	t.Cleanup(func() {
-		forwardBeaconRequestInterval = previousInterval
-		forwardBeaconRequestTimeout = previousTimeout
-		forwardBeaconFallbackDelay = previousFallbackDelay
-		forwardBeaconResponsePoll = previousResponsePoll
+	synctest.Test(t, func(t *testing.T) {
+		previousInterval := forwardBeaconRequestInterval
+		previousTimeout := forwardBeaconRequestTimeout
+		previousFallbackDelay := forwardBeaconFallbackDelay
+		previousResponsePoll := forwardBeaconResponsePoll
+		previousClient := beaconAPIClient
+		forwardBeaconRequestInterval = time.Millisecond
+		forwardBeaconRequestTimeout = 100 * time.Millisecond
+		forwardBeaconFallbackDelay = 5 * time.Millisecond
+		forwardBeaconResponsePoll = time.Millisecond
+		defer func() {
+			forwardBeaconRequestInterval = previousInterval
+			forwardBeaconRequestTimeout = previousTimeout
+			forwardBeaconFallbackDelay = previousFallbackDelay
+			forwardBeaconResponsePoll = previousResponsePoll
+			beaconAPIClient = previousClient
+		}()
+
+		cfg := clparams.MainnetBeaconConfig
+		cfg.InitializeForkSchedule()
+		clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, &cfg)
+		digest, err := clock.ComputeForkDigest(cfg.GenesisEpoch)
+		require.NoError(t, err)
+		block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
+		block.Block.Slot = 1
+		encodedBlock, err := block.EncodeSSZ(nil)
+		require.NoError(t, err)
+		var p2pResponse bytes.Buffer
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&p2pResponse, block, digest[:]...))
+
+		var httpCalls atomic.Int32
+		beaconAPIClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			httpCalls.Add(1)
+			if r.URL.Path != "/eth/v2/beacon/blocks/1" {
+				return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody, Request: r}, nil
+			}
+			header := http.Header{"Eth-Consensus-Version": []string{"phase0"}}
+			return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(bytes.NewReader(encodedBlock)), Request: r}, nil
+		})}
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		sentinel := &switchableProbeSentinel{response: p2pResponse.Bytes()}
+		rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock)
+		downloader := NewForwardBeaconDownloader(ctx, rpcClient, &cfg)
+		downloader.SetHTTPFallbackURL("http://beacon.invalid")
+		var firstProcessCalls atomic.Int32
+		downloader.SetProcessFunction(func(highest uint64, _ []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+			firstProcessCalls.Add(1)
+			return highest, nil
+		})
+
+		downloader.RequestMore(ctx)
+		require.Positive(t, httpCalls.Load())
+		require.Equal(t, int32(1), firstProcessCalls.Load(), "HTTP response did not reach processing")
+		require.False(t, sentinel.healthy.Load())
+		p2pCalls := sentinel.calls.Load()
+		firstHTTPCalls := httpCalls.Load()
+
+		sentinel.healthy.Store(true)
+		sentinel.delay = 20 * time.Millisecond
+		forwardBeaconFallbackDelay = time.Second
+		downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+			return blocks[len(blocks)-1].Block.Slot, nil
+		})
+		downloader.RequestMore(ctx)
+
+		require.Greater(t, sentinel.calls.Load(), p2pCalls, "second request did not return to P2P")
+		require.Equal(t, firstHTTPCalls, httpCalls.Load(), "second request incorrectly preferred HTTP")
+		require.Equal(t, uint64(1), downloader.GetHighestProcessedSlot())
 	})
-
-	cfg := clparams.MainnetBeaconConfig
-	cfg.InitializeForkSchedule()
-	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, &cfg)
-	digest, err := clock.ComputeForkDigest(cfg.GenesisEpoch)
-	require.NoError(t, err)
-	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
-	block.Block.Slot = 1
-	encodedBlock, err := block.EncodeSSZ(nil)
-	require.NoError(t, err)
-	var p2pResponse bytes.Buffer
-	require.NoError(t, ssz_snappy.EncodeAndWrite(&p2pResponse, block, digest[:]...))
-
-	var httpCalls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		httpCalls.Add(1)
-		if r.URL.Path != "/eth/v2/beacon/blocks/1" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Eth-Consensus-Version", "phase0")
-		_, _ = w.Write(encodedBlock)
-	}))
-	t.Cleanup(server.Close)
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	sentinel := &switchableProbeSentinel{response: p2pResponse.Bytes()}
-	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock)
-	downloader := NewForwardBeaconDownloader(ctx, rpcClient, &cfg)
-	downloader.SetHTTPFallbackURL(server.URL)
-	var firstProcessCalls atomic.Int32
-	downloader.SetProcessFunction(func(highest uint64, _ []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
-		firstProcessCalls.Add(1)
-		return highest, nil
-	})
-
-	downloader.RequestMore(ctx)
-	require.Positive(t, httpCalls.Load())
-	require.Equal(t, int32(1), firstProcessCalls.Load(), "HTTP response did not reach processing")
-	require.False(t, sentinel.healthy.Load())
-	p2pCalls := sentinel.calls.Load()
-	firstHTTPCalls := httpCalls.Load()
-
-	sentinel.healthy.Store(true)
-	sentinel.delay = 20 * time.Millisecond
-	forwardBeaconFallbackDelay = time.Second
-	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
-		return blocks[len(blocks)-1].Block.Slot, nil
-	})
-	downloader.RequestMore(ctx)
-
-	require.Greater(t, sentinel.calls.Load(), p2pCalls, "second request did not return to P2P")
-	require.Equal(t, firstHTTPCalls, httpCalls.Load(), "second request incorrectly preferred HTTP")
-	require.Equal(t, uint64(1), downloader.GetHighestProcessedSlot())
 }
 
 func TestForwardRequestMoreEmptyP2PDoesNotInvalidateHTTPFallback(t *testing.T) {

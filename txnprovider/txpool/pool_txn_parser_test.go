@@ -136,22 +136,30 @@ func TestTransactionSignatureValidity1(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = ctx.ParseTransaction(preEip2Txn, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrRejected)
 }
 
-// Problematic txn included in a bad block on Görli
 func TestTransactionSignatureValidity2(t *testing.T) {
 	chainId := new(uint256.Int).SetUint64(5)
 	ctx := NewTxnParseContext(*chainId)
 	slot, sender := &TxnSlot{}, [20]byte{}
-	rlp := hexutil.MustDecodeHex("02f8720513844190ab00848321560082520894cab441d2f45a3fee83d15c6b6b6c36a139f55b6288054607fc96a6000080c001a0dffe4cb5651e663d0eac8c4d002de734dd24db0f1109b062d17da290a133cc02a0913fb9f53f7a792bcd9e4d7cced1b8545d1ab82c77432b0bc2e9384ba6c250c5")
-	_, err := ctx.ParseTransaction(rlp, 0, slot, sender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
-	assert.Error(t, err)
+	rawTxn := hexutil.MustDecodeHex("02f8720513844190ab00848321560082520894cab441d2f45a3fee83d15c6b6b6c36a139f55b6288054607fc96a6000080c001a0dffe4cb5651e663d0eac8c4d002de734dd24db0f1109b062d17da290a133cc02a0913fb9f53f7a792bcd9e4d7cced1b8545d1ab82c77432b0bc2e9384ba6c250c5")
 
-	// Only legacy transactions can happen before EIP-2
+	// Padding on both sides makes the end offset differ from the encoded length and len(payload).
+	const start = 1
+	wantEnd := start + rlp.StringLen(rawTxn)
+	payload := make([]byte, wantEnd+1)
+	rlp.EncodeStringToBuf(rawTxn, payload[start:wantEnd])
+
+	end, err := ctx.ParseTransaction(payload, start, slot, sender[:], true /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
+	assert.ErrorIs(t, err, ErrRejected)
+	assert.Equal(t, wantEnd, end)
+
+	// Dynamic-fee transactions require low-s signatures even when high-s legacy signatures are allowed.
 	ctx.WithAllowPreEip2s(true)
-	_, err = ctx.ParseTransaction(rlp, 0, slot, sender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
-	assert.Error(t, err)
+	_, err = ctx.ParseTransaction(rawTxn, 0, slot, sender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
+	assert.ErrorIs(t, err, types.ErrInvalidSig)
+	assert.ErrorIs(t, err, ErrParseTxn)
 }
 
 func TestTxnSlotsGrowth(t *testing.T) {
@@ -599,6 +607,35 @@ func TestParseTransactionRejectsBlobCommitmentCountMismatch(t *testing.T) {
 	_, err = ctx.ParseTransaction(fewerBuf.Bytes(), 0, &fewerSlot, nil, false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "fewer commitments than blobs")
+}
+
+func TestParseTransactionRejectsEmptyBlobHashes(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	wrapper := types.MakeWrappedBlobTxn(chainID)
+	wrapper.Tx.BlobVersionedHashes = nil
+
+	unwrapped := &bytes.Buffer{}
+	require.NoError(t, wrapper.Tx.MarshalBinary(unwrapped))
+	wrapped := &bytes.Buffer{}
+	require.NoError(t, wrapper.MarshalBinaryWrapped(wrapped))
+
+	for _, tc := range []struct {
+		name             string
+		payload          []byte
+		wrappedWithBlobs bool
+	}{
+		{"unwrapped", unwrapped.Bytes(), false},
+		{"wrapped", wrapped.Bytes(), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := NewTxnParseContext(*chainID)
+			ctx.WithSender(false)
+			var slot TxnSlot
+			_, err := ctx.ParseTransaction(tc.payload, 0, &slot, nil, false /* hasEnvelope */, tc.wrappedWithBlobs, nil)
+			require.ErrorIs(t, err, ErrParseTxn)
+			require.ErrorContains(t, err, types.ErrBlobTxnEmptyBlobs.Error())
+		})
+	}
 }
 
 func TestParseTransactionsRejectsTrailingBlobWrapperBytes(t *testing.T) {
