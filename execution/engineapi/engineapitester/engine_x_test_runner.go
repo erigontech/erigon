@@ -384,8 +384,8 @@ func (extr *EngineXTestRunner) getOrCreateTester(test EngineXTestDefinition) (En
 	return entry.tester, nil
 }
 
-// createTester builds a fresh EngineApiTester for the test's configuration. The
-// caller is responsible for caching/publishing the result. No locks are taken.
+// createTester starts a tester in its own temporary directory. The caller
+// must either cache the returned entry or close it.
 func (extr *EngineXTestRunner) createTester(test EngineXTestDefinition) (*testerEntry, error) {
 	fork, preAllocHash := test.Fork, test.PreAllocHash
 	forkConfig, err := test.Config.ChainConfig(fork.String())

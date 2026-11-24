@@ -389,9 +389,8 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 	return domains.Commit(ctx, tx)
 }
 
-// GenerateChain creates a chain of n blocks. The first block's
-// parent will be the provided parent. db is used to store
-// intermediate states and should contain the parent's state trie.
+// GenerateChain builds n blocks on top of parent. It reads the parent's state
+// from db and carries changes between generated blocks in a temporary overlay.
 //
 // The generator function is called with a new block generator for
 // every block. Any transactions and uncles added to the generator
@@ -534,10 +533,8 @@ func GenerateChainWithTimeOffsets(config *chain.Config, parent *types.Block, eng
 			b.versionMap.FlushVersionedWrites(writes, true)
 			ibs.ResetVersionedIO()
 
-			// Write state changes to db
-			// Commit from the versionMap write-set via ApplyWrites, the same domain apply
-			// the executor uses, so generation matches import. Each recorded phase
-			// (init txIdx=-1, txs, finalize) is applied in order.
+			// Apply initialization, transaction, and finalization writes to the overlay
+			// in execution order so the state root matches the one computed at import.
 			blockNum := b.header.Number.Uint64()
 			for _, ws := range b.blockIO.Outputs() {
 				if ws == nil || ws.IsEmpty() {
