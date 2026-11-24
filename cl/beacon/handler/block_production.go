@@ -675,7 +675,7 @@ const (
 	attestationDataImportPollInterval = 5 * time.Millisecond
 )
 
-func (a *ApiHandler) waitForAttestationHead(ctx context.Context, slot uint64) (forkchoice.ForkChoiceNode, bool) {
+func (a *ApiHandler) waitForImportedHead(ctx context.Context, slot uint64) (forkchoice.ForkChoiceNode, bool) {
 	waitedSlot := slot + 1
 	deadline := time.Now().Add(a.attestationDataImportWait)
 	for {
@@ -727,7 +727,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if *slot > a.ethClock.GetCurrentSlot() {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is in the future"))
 	}
-	head, haveHead := a.waitForAttestationHead(r.Context(), *slot)
+	head, haveHead := a.waitForImportedHead(r.Context(), *slot)
 	if err := r.Context().Err(); err != nil {
 		return nil, err
 	}
