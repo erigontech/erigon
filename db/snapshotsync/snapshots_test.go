@@ -614,6 +614,46 @@ func TestIntegrateFrozenMergeKeepsSegmentsBelowItsRange(t *testing.T) {
 	require.True(t, ok, "segment below the frozen output must stay")
 }
 
+func TestMergeRejectsRangeWithCoveredBodies(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+	for from := uint64(0); from < 90_000; from += 10_000 {
+		createTestSegmentFile(t, from, from+10_000, snaptype2.Headers.Enum(), dir, version.V1_0, logger)
+	}
+	for from := uint64(90_000); from < 100_000; from += 1_000 {
+		for _, typ := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+1_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	filesBefore, err := filepath.Glob(filepath.Join(dir, "*"))
+	require.NoError(t, err)
+
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	ranges := merger.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
+	require.Equal(t, []Range{NewRange(90_000, 100_000)}, ranges)
+	err = merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, func([]string) error {
+		t.Error("a rejected merge must not seed files")
+		return nil
+	}, func(context.Context, []string) error {
+		t.Error("a rejected merge must not delete files")
+		return nil
+	})
+	require.ErrorContains(t, err, "no bodies segments to merge in range [90000, 100000)")
+
+	filesAfter, err := filepath.Glob(filepath.Join(dir, "*"))
+	require.NoError(t, err)
+	require.Equal(t, filesBefore, filesAfter)
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		require.True(t, s.TryAcquireRange(typ.Enum(), 90_000, 100_000))
+		s.ReleaseRange(typ.Enum(), 90_000, 100_000)
+	}
+}
+
 func TestMergeSkipsPreClaimedRange(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
