@@ -146,6 +146,9 @@ func TestLockOnFaultLocksTheMappingUntilUnlock(t *testing.T) {
 	before := vmLockedKB(t)
 	require.NoError(t, LockOnFault(m))
 	require.Equal(t, before+size/1024, vmLockedKB(t))
+	resident, err := Resident(m)
+	require.NoError(t, err)
+	require.False(t, resident, "the lock must not read the file in")
 	require.NoError(t, Unlock(m))
 	require.Equal(t, before, vmLockedKB(t))
 }

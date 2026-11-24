@@ -77,7 +77,8 @@ type Aggregator struct {
 	erigondbDomainStepsInFrozenFile uint64
 
 	dirtyFilesLock   sync.Mutex
-	lockedCommitment map[*FilesItem]struct{}
+	lockedCommitment map[*FilesItem]bool
+	lockWarned       bool
 	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
 	// flag: ReloadErigonDBSettings writes it while background merges read it.
 	commitmentRefsMu sync.RWMutex
@@ -1875,26 +1876,32 @@ type aggregatorVisible struct {
 	next    *aggregatorVisible // oldest→newest linked-list link (set under dirtyFilesLock)
 }
 
+const lockHotMaxSteps = 16
+
+var (
+	lockFile   = (*seg.Decompressor).LockOnFault
+	unlockFile = (*seg.Decompressor).Unlock
+)
+
 func (a *Aggregator) lockHotCommitmentFiles(v *aggregatorVisible) {
 	dv := v.d[kv.CommitmentDomain]
 	if dv == nil {
 		return
 	}
 	files := dv.files
+	maxTxs := lockHotMaxSteps * a.stepSize.Load()
 	hot := map[*FilesItem]struct{}{}
 	for _, f := range files[max(0, len(files)-3):max(0, len(files)-1)] {
-		hot[f.src] = struct{}{}
+		if f.endTxNum-f.startTxNum <= maxTxs {
+			hot[f.src] = struct{}{}
+		}
 	}
-	visible := map[*FilesItem]struct{}{}
-	for _, f := range files {
-		visible[f.src] = struct{}{}
-	}
-	for item := range a.lockedCommitment {
+	for item, locked := range a.lockedCommitment {
 		if _, ok := hot[item]; ok {
 			continue
 		}
-		if _, ok := visible[item]; ok {
-			_ = item.decompressor.Unlock()
+		if locked {
+			_ = unlockFile(item.decompressor)
 		}
 		delete(a.lockedCommitment, item)
 	}
@@ -1902,14 +1909,15 @@ func (a *Aggregator) lockHotCommitmentFiles(v *aggregatorVisible) {
 		if _, ok := a.lockedCommitment[item]; ok {
 			continue
 		}
-		if err := item.decompressor.LockOnFault(); err != nil {
-			a.logger.Warn("[agg] lock commitment file", "file", item.decompressor.FileName(), "err", err)
-			continue
+		err := lockFile(item.decompressor)
+		if err != nil && !a.lockWarned {
+			a.lockWarned = true
+			a.logger.Warn("[agg] commitment files stay unlocked", "file", item.decompressor.FileName(), "err", err)
 		}
 		if a.lockedCommitment == nil {
-			a.lockedCommitment = map[*FilesItem]struct{}{}
+			a.lockedCommitment = map[*FilesItem]bool{}
 		}
-		a.lockedCommitment[item] = struct{}{}
+		a.lockedCommitment[item] = err == nil
 	}
 }
 

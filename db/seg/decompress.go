@@ -675,14 +675,14 @@ func (d *Decompressor) DisableReadAhead() {
 }
 
 func (d *Decompressor) LockOnFault() error {
-	if d == nil || d._mmapHandle == nil {
+	if d == nil || d.f == nil || d._mmapHandle == nil {
 		return nil
 	}
 	return mmap.LockOnFault(d._mmapHandle)
 }
 
 func (d *Decompressor) Unlock() error {
-	if d == nil || d._mmapHandle == nil {
+	if d == nil || d.f == nil || d._mmapHandle == nil {
 		return nil
 	}
 	return mmap.Unlock(d._mmapHandle)

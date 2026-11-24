@@ -17,6 +17,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -53,22 +54,111 @@ func commitmentVisible(items ...*FilesItem) *aggregatorVisible {
 	return v
 }
 
-func TestAggregatorLocksTheTwoCommitmentFilesBeforeTheNewest(t *testing.T) {
-	items := make([]*FilesItem, 5)
-	for i := range items {
-		items[i] = &FilesItem{decompressor: testSegFile(t, fmt.Sprintf("c%d.kv", i)), startTxNum: uint64(i), endTxNum: uint64(i + 1)}
+type lockCalls struct {
+	locked, unlocked []*seg.Decompressor
+	fail             error
+}
+
+func recordLockCalls(t *testing.T) *lockCalls {
+	c := &lockCalls{}
+	origLock, origUnlock := lockFile, unlockFile
+	lockFile = func(d *seg.Decompressor) error {
+		c.locked = append(c.locked, d)
+		return c.fail
 	}
-	a := &Aggregator{}
+	unlockFile = func(d *seg.Decompressor) error {
+		c.unlocked = append(c.unlocked, d)
+		return nil
+	}
+	t.Cleanup(func() { lockFile, unlockFile = origLock, origUnlock })
+	return c
+}
+
+func (c *lockCalls) take() (locked, unlocked []*seg.Decompressor) {
+	locked, unlocked = c.locked, c.unlocked
+	c.locked, c.unlocked = nil, nil
+	return locked, unlocked
+}
+
+func lockTestItems(t *testing.T, steps ...uint64) []*FilesItem {
+	items := make([]*FilesItem, len(steps))
+	var from uint64
+	for i, n := range steps {
+		items[i] = &FilesItem{decompressor: testSegFile(t, fmt.Sprintf("c%d.kv", i)), startTxNum: from, endTxNum: from + n}
+		from += n
+	}
+	return items
+}
+
+func decompressors(items ...*FilesItem) []*seg.Decompressor {
+	ds := make([]*seg.Decompressor, len(items))
+	for i, it := range items {
+		ds[i] = it.decompressor
+	}
+	return ds
+}
+
+func lockTestAggregator() *Aggregator {
+	a := &Aggregator{logger: log.New()}
+	a.stepSize.Store(1)
+	return a
+}
+
+func TestAggregatorLocksTheTwoCommitmentFilesBeforeTheNewest(t *testing.T) {
+	calls := recordLockCalls(t)
+	items := lockTestItems(t, 1, 1, 1, 1, 1)
+	a := lockTestAggregator()
 
 	a.lockHotCommitmentFiles(commitmentVisible(items[:4]...))
-	require.Equal(t, map[*FilesItem]struct{}{items[1]: {}, items[2]: {}}, a.lockedCommitment)
+	locked, unlocked := calls.take()
+	require.ElementsMatch(t, decompressors(items[1], items[2]), locked)
+	require.Empty(t, unlocked)
 
 	a.lockHotCommitmentFiles(commitmentVisible(items...))
-	require.Equal(t, map[*FilesItem]struct{}{items[2]: {}, items[3]: {}}, a.lockedCommitment, "a new newest file shifts the pair")
+	locked, unlocked = calls.take()
+	require.Equal(t, decompressors(items[3]), locked, "a new newest file shifts the pair")
+	require.Equal(t, decompressors(items[1]), unlocked, "a visible file that left the pair is unlocked")
 
 	a.lockHotCommitmentFiles(commitmentVisible(items[0], items[4]))
-	require.Equal(t, map[*FilesItem]struct{}{items[0]: {}}, a.lockedCommitment, "files that left the visible set drop out")
+	locked, unlocked = calls.take()
+	require.Equal(t, decompressors(items[0]), locked)
+	require.ElementsMatch(t, decompressors(items[2], items[3]), unlocked, "files that left the visible set are unlocked")
 
 	a.lockHotCommitmentFiles(commitmentVisible(items[4]))
+	locked, unlocked = calls.take()
+	require.Empty(t, locked)
+	require.Equal(t, decompressors(items[0]), unlocked)
 	require.Empty(t, a.lockedCommitment)
+}
+
+func TestAggregatorDoesNotLockACommitmentFileOverTheStepBound(t *testing.T) {
+	calls := recordLockCalls(t)
+	items := lockTestItems(t, 256, lockHotMaxSteps+1, lockHotMaxSteps, 1)
+	a := lockTestAggregator()
+
+	a.lockHotCommitmentFiles(commitmentVisible(items...))
+	locked, unlocked := calls.take()
+	require.Equal(t, decompressors(items[2]), locked)
+	require.Empty(t, unlocked)
+}
+
+func TestAggregatorTriesAFailedCommitmentLockOnce(t *testing.T) {
+	calls := recordLockCalls(t)
+	calls.fail = errors.New("cannot allocate memory")
+	items := lockTestItems(t, 1, 1, 1, 1)
+	a := lockTestAggregator()
+
+	a.lockHotCommitmentFiles(commitmentVisible(items[:3]...))
+	locked, _ := calls.take()
+	require.ElementsMatch(t, decompressors(items[0], items[1]), locked)
+	require.True(t, a.lockWarned)
+
+	a.lockHotCommitmentFiles(commitmentVisible(items[:3]...))
+	locked, unlocked := calls.take()
+	require.Empty(t, locked, "a failed lock is not tried again for the same file")
+	require.Empty(t, unlocked)
+
+	a.lockHotCommitmentFiles(commitmentVisible(items...))
+	_, unlocked = calls.take()
+	require.Empty(t, unlocked, "a file that was never locked is not unlocked")
 }
