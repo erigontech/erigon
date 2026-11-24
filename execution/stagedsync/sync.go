@@ -310,9 +310,6 @@ func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (ha
 				badBlockUnwind = true
 				errBadBlock = reason.ErrBadBlock
 			}
-			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-				return false, err
-			}
 			// If there were unwinds at the start, a heavier but invalid chain may be present, so
 			// we relax the rules for Stage1
 			initialCycle = false
