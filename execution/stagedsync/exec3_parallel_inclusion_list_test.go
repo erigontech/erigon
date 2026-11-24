@@ -108,7 +108,7 @@ func TestParallelInclusionListCheckResolvesBlockHashWithoutProducerTx(t *testing
 	require.NoError(t, pe.doms.DomainPut(kv.CodeDomain, roTx, sender[:], code, 1, nil))
 
 	omitted := &types.FrameTransaction{
-		NonceKeys: []uint256.Int{{}}, ChainID: *config.ChainID, SenderAddress: sender,
+		ChainID: *config.ChainID, SenderAddress: sender,
 		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 50_000}}},
 	}
 

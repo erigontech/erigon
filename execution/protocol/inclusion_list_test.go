@@ -313,7 +313,7 @@ func ilFrameTxnSetup(code []byte, blobHashes []common.Hash) (*chain.Config, *ilS
 		reader.setCode(accounts.InternAddress(sender), code)
 	}
 	txn := &types.FrameTransaction{
-		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender,
+		ChainID: *cfg.ChainID, SenderAddress: sender,
 		Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 50_000}}},
 		BlobVersionedHashes: blobHashes,
 	}
