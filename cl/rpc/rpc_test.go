@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"math/rand"
+	"slices"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -101,6 +102,21 @@ func (s *contextRecordingSentinel) SendRequest(ctx context.Context, _ *sentinelp
 func (s *contextRecordingSentinel) SendPeerRequest(ctx context.Context, _ *sentinelproto.RequestDataWithPeer, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
 	s.deadline, s.hasDeadline = ctx.Deadline()
 	return nil, errors.New("request stopped")
+}
+
+func (s *contextRecordingSentinel) RewardPeer(ctx context.Context, _ *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	s.deadline, s.hasDeadline = ctx.Deadline()
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func TestRewardPeerBoundsAContextWithoutDeadline(t *testing.T) {
+	sentinel := &contextRecordingSentinel{}
+	client := &BeaconRpcP2P{sentinel: sentinel}
+	before := time.Now().Add(reqRespFallbackTimeout)
+	client.rewardPeer(t.Context(), "peer", 1)
+	require.True(t, sentinel.hasDeadline)
+	require.False(t, sentinel.deadline.Before(before))
+	require.False(t, sentinel.deadline.After(time.Now().Add(reqRespFallbackTimeout)))
 }
 
 func TestReqRespRequestsPreserveCallerDeadline(t *testing.T) {
@@ -1268,4 +1284,11 @@ func TestDecodedDataAnswerRewardsThePeer(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, envelopes, 1)
 	require.Equal(t, []string{pid}, sentinel.rewardedPeers)
+
+	tooManyChunks := &blockResponseSentinel{response: slices.Concat(envelopeResponse.Bytes(), []byte{0}, envelopeResponse.Bytes())}
+	client = &BeaconRpcP2P{ctx: t.Context(), sentinel: tooManyChunks, beaconConfig: &cfg, ethClock: clock}
+	envelopes, _, err = client.SendExecutionPayloadEnvelopesByRootReq(t.Context(), [][32]byte{{1}})
+	require.ErrorIs(t, err, ErrInvalidResponse)
+	require.Len(t, envelopes, 1)
+	require.Empty(t, tooManyChunks.rewardedPeers, "a decoded prefix of an invalid answer earns no reward")
 }

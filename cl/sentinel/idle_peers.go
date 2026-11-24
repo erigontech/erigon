@@ -76,34 +76,28 @@ func idleEvictionScope(c peerCounts, maxPeers int) (evict, inboundOnly bool) {
 // would be useful can connect. When only the inbound share is full, only inbound peers are evicted,
 // as only they free an inbound slot. Static peers are never evicted.
 func (s *Sentinel) evictIdlePeers(now time.Time) {
-	maxPeers := int(s.cfg.MaxPeerCount)
+	evict, inboundOnly := idleEvictionScope(s.peerCountsByDirection(""), int(s.cfg.MaxPeerCount))
+	if !evict {
+		return
+	}
 	peers := s.p2p.Host().Network().Peers()
+	connected := make([]peer.ID, 0, len(peers))
 	candidates := make([]idleCandidate, 0, len(peers))
-	var counts peerCounts
 	for _, pid := range peers {
 		conns := s.p2p.Host().Network().ConnsToPeer(pid)
 		if len(conns) == 0 {
 			continue
 		}
-		inbound := peerIsInbound(conns)
-		if inbound {
-			counts.inbound++
-		} else {
-			counts.outbound++
-		}
+		connected = append(connected, pid)
 		if _, static := s.staticPeers[pid]; static {
 			continue
 		}
 		if last, ok := s.p2p.PeerLastUseful(pid); ok {
-			candidates = append(candidates, idleCandidate{pid: pid, idleFor: now.Sub(last), inbound: inbound})
+			candidates = append(candidates, idleCandidate{pid: pid, idleFor: now.Sub(last), inbound: peerIsInbound(conns)})
 		}
 	}
-	evict, inboundOnly := idleEvictionScope(counts, maxPeers)
-	if !evict {
-		return
-	}
 	_, subnetToPeers := s.getSubnetCoverageWithPeers()
-	coverage, peerToSubnets := subnetsOfConnectedPeers(&subnetToPeers, peers)
+	coverage, peerToSubnets := subnetsOfConnectedPeers(&subnetToPeers, connected)
 	for i := range candidates {
 		candidates[i].subnets = peerToSubnets[candidates[i].pid]
 	}

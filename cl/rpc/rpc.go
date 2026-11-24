@@ -286,7 +286,9 @@ func (b *BeaconRpcP2P) decodeExecutionPayloadEnvelopes(ctx context.Context, requ
 		}
 		envelopes = append(envelopes, envelope)
 	}
-	b.rewardPeer(ctx, pid, len(envelopes))
+	if responseErr == nil {
+		b.rewardPeer(ctx, pid, len(envelopes))
+	}
 	return envelopes, responseErr
 }
 
@@ -421,6 +423,8 @@ func (b *BeaconRpcP2P) rewardPeer(ctx context.Context, pid string, items int) {
 	if items == 0 {
 		return
 	}
+	ctx, cancel := boundReqRespContext(ctx)
+	defer cancel()
 	if _, err := b.sentinel.RewardPeer(ctx, &sentinelproto.Peer{Pid: pid}); err != nil {
 		log.Debug("failed to reward peer", "pid", pid, "err", err)
 	}
