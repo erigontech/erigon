@@ -370,7 +370,7 @@ func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddres
 	if err := s.listener.LocalNode().Node().Load(syncNetEnr); err != nil {
 		s.logger.Debug("[IDENTITY] Could not load sync subnet", "err", err)
 	}
-	cgc := s.forkChoiceReader.GetPeerDas().StateReader().GetAdvertisedCgc()
+	cgc := s.advertisedCgc()
 	metadata = &cltypes.Metadata{
 		SeqNumber:         s.listener.LocalNode().Seq(),
 		Attnets:           [8]byte(subnetField),
@@ -407,4 +407,15 @@ func (s *Sentinel) PeersList() []peer.AddrInfo {
 		infos = append(infos, s.p2p.Host().Network().Peerstore().PeerInfo(pid))
 	}
 	return infos
+}
+
+// advertisedCgc reports the custody group count to put in our metadata. The
+// PeerDAS state is shared with the runtime that owns it, so read it directly
+// rather than through the fork choice, which is absent whenever no Caplin
+// runtime is attached.
+func (s *Sentinel) advertisedCgc() uint64 {
+	if s.peerDasStateReader == nil {
+		return s.cfg.BeaconConfig.CustodyRequirement
+	}
+	return s.peerDasStateReader.GetAdvertisedCgc()
 }
