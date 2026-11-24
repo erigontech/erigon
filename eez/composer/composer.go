@@ -437,7 +437,7 @@ func (c *Composer) send(cursor uint64, terminal *types.Header, batch *protocol.P
 			c.logger.Info("[eez] batch posted", "event", "eez.composer.batch.posted", "from", cursor+1, "to", to, "post", hash,
 				"l1Block", sent.Block, "pinned", sent.Time != 0, "triggers", len(held))
 		}
-		c.observe(to, hash, watch, batch, terminal, sent)
+		c.observe(to, hash, watch, batch, terminal, sent, false)
 	})
 }
 
@@ -456,13 +456,15 @@ func (c *Composer) anchor(ctx context.Context, first *types.Block) (*types.Heade
 }
 
 // observe records the verdict of watch, a watch of hash, the posting of
-// batch, sent as sent, whose terminal block is terminal.
-func (c *Composer) observe(to uint64, hash common.Hash, watch uint64, batch *protocol.ProofSystemBatch, terminal *types.Header, sent post.Sent) {
+// batch, sent as sent, whose terminal block is terminal. A failure is not
+// owed to the batch's transactions when free, or when the slot it was
+// pinned to went missed.
+func (c *Composer) observe(to uint64, hash common.Hash, watch uint64, batch *protocol.ProofSystemBatch, terminal *types.Header, sent post.Sent, free bool) {
 	verdict, err := c.observer.Watch(c.ctx, hash, batch, terminal.Hash(), sent)
 	if err != nil {
 		return
 	}
-	c.ledger.Report(to, hash, watch, verdict, verdict == Failed && c.missed(sent))
+	c.ledger.Report(to, hash, watch, verdict, verdict == Failed && (free || c.missed(sent)))
 	c.logger.Info("[eez] batch verdict", "event", "eez.composer.batch.verdict", "to", to, "post", hash, "verdict", verdict)
 }
 
@@ -624,10 +626,11 @@ func (c *Composer) charge(pool *HeldPool, txs []*Held, charged ...*Held) []*Held
 
 // settle applies derivation's cursor to the ledger and returns it. A
 // settlement whose posting left L1, rolled out by an L1 reorg that moved the
-// cursor back or dropped before derivation saw it, is watched again: back
-// in the node's pool, the posting may land again on the nonce the next
-// posting would take. One derivation has yet to see fails once L1 includes
-// its posting again without the settlement.
+// cursor back or dropped before derivation saw it, is watched again with
+// its transactions reserved: back in the node's pool, the posting may land
+// again on the nonce the next posting would take; if it does not, recovery
+// requeues them uncharged. One derivation has yet to see fails, uncharged,
+// once L1 includes its posting again without the settlement.
 func (c *Composer) settle(ctx context.Context) uint64 {
 	cursor := c.cursor()
 	if cursor < c.last {
@@ -683,7 +686,7 @@ func (c *Composer) rewatch(p Posted[*Held]) {
 	c.logger.Warn("[eez] settled batch's posting left L1, watching it again", "event", "eez.composer.batch.rolled_out", "to", p.Height, "post", p.Post)
 	c.wg.Go(func() {
 		if from, ok := c.head(); ok {
-			c.observe(p.Height, p.Post, watch, p.Batch, p.Terminal, post.Sent{Block: from, Pooled: true})
+			c.observe(p.Height, p.Post, watch, p.Batch, p.Terminal, post.Sent{Block: from, Pooled: true}, true)
 		}
 	})
 }

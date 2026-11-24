@@ -274,12 +274,13 @@ func (l *Ledger[T]) SettledAbove(cursor uint64) []Posted[T] {
 }
 
 // Unsettle turns post's Settled batch, unconfirmed by derivation, to
-// Failed: L1 dropped the block that settled it.
+// Failed, not owing to its transactions: L1 includes its posting again
+// without the settlement.
 func (l *Ledger[T]) Unsettle(height uint64, post common.Hash) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if e := l.find(height, post); e != nil && e.resolution == Settled && !e.confirmed {
-		e.resolution, e.Landed = Failed, false
+		e.resolution, e.Landed, e.SlotSkipped = Failed, false, true
 		return true
 	}
 	return false

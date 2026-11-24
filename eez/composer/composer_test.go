@@ -944,34 +944,45 @@ func TestComposerReleasesSettledTransactions(t *testing.T) {
 	require.Empty(t, pool.inFlight)
 }
 
-// TestComposerRequeuesRolledOutTransactions: a settled batch an L1 reorg
-// rolls out, which derivation never confirmed, is watched again with its
+// TestComposerRequeuesRolledOutTransactions: a settlement an L1 reorg rolls
+// out, whether derivation had confirmed it or not, is watched again with its
 // transactions reserved; once its posting has left L1 for good, recovery
-// requeues them.
+// requeues them uncharged for the next drain to revalidate.
 func TestComposerRequeuesRolledOutTransactions(t *testing.T) {
-	node := &rolling{}
-	node.head.Store(1)
-	h := newHarness(t, newTestChain(t, 8), 8, node)
-	pool := NewHeldPool()
-	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
-	tx := held(addr(0xa), 0, Inbound, 1)
-	require.NoError(t, pool.Push(tx, 0))
-	h.cursor.Store(5)
-	h.c.RecoverFailed(t.Context())
-	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: pool.PopN(1)})
-	h.c.ledger.MarkSettled(8, common.Hash{0xf})
-	h.cursor.Store(4)
-	h.c.RecoverFailed(t.Context())
-	r, ok := h.resolution(8)
-	require.True(t, ok)
-	require.Equal(t, Pending, r, "watched again")
-	require.Eventually(t, func() bool {
-		node.head.Add(1)
-		h.c.RecoverFailed(t.Context())
-		_, ok := h.resolution(8)
-		return !ok
-	}, 5*time.Second, time.Millisecond)
-	require.Equal(t, []*Held{tx}, pool.PopN(math.MaxInt), "requeued")
+	for _, confirmed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("confirmed=%v", confirmed), func(t *testing.T) {
+			node := &rolling{}
+			node.head.Store(1)
+			h := newHarness(t, newTestChain(t, 8), 8, node)
+			pool := NewHeldPool()
+			h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+			in, out := held(addr(0xa), 0, Inbound, 1), held(addr(0xb), 0, Outbound, 2)
+			require.NoError(t, pool.Push(in, 0))
+			require.NoError(t, pool.Push(out, 0))
+			h.cursor.Store(5)
+			h.c.RecoverFailed(t.Context())
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: pool.PopN(2)})
+			h.c.ledger.MarkSettled(8, common.Hash{0xf})
+			if confirmed {
+				h.cursor.Store(8)
+				h.c.RecoverFailed(t.Context())
+			}
+			h.cursor.Store(4)
+			h.c.RecoverFailed(t.Context())
+			r, ok := h.resolution(8)
+			require.True(t, ok)
+			require.Equal(t, Pending, r, "watched again")
+			require.Eventually(t, func() bool {
+				node.head.Add(1)
+				h.c.RecoverFailed(t.Context())
+				_, ok := h.resolution(8)
+				return !ok
+			}, 5*time.Second, time.Millisecond)
+			require.True(t, pool.Holds(out.Hash), "never a plain transaction once composed")
+			require.Equal(t, []*Held{in, out}, pool.PopN(math.MaxInt))
+			require.Zero(t, in.Attempts+out.Attempts)
+		})
+	}
 }
 
 // TestComposerDisposesOfPartialTransactions: once derivation passes a batch
@@ -1262,6 +1273,30 @@ func TestComposerSettlementBackInThePool(t *testing.T) {
 			require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Settled }, 5*time.Second, time.Millisecond)
 		})
 	}
+}
+
+// TestComposerSettlementLeftL1IsFree: the held transactions of a settlement
+// whose posting L1 dropped are watched again, and return to the pool
+// uncharged once it has left L1 for good.
+func TestComposerSettlementLeftL1IsFree(t *testing.T) {
+	chain := newTestChain(t, 8)
+	node := &rolling{}
+	node.head.Store(1)
+	h := newHarness(t, chain, 8, node)
+	pool := NewHeldPool()
+	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+	tx := held(addr(0xa), 0, Inbound, 1)
+	require.NoError(t, pool.Push(tx, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
+	h.c.ledger.MarkSettled(8, common.Hash{0xf})
+	require.Eventually(t, func() bool {
+		node.head.Add(1)
+		h.c.RecoverFailed(t.Context())
+		_, ok := h.resolution(8)
+		return !ok
+	}, 5*time.Second, time.Millisecond)
+	require.Equal(t, []*Held{tx}, pool.PopN(math.MaxInt))
+	require.Zero(t, tx.Attempts)
 }
 
 // TestComposerDisposesOfPartialSettlements: derivation passing a partial
