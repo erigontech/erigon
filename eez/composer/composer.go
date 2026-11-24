@@ -211,7 +211,7 @@ func (c *Composer) ComposeSyncSlot(ctx context.Context, parent *types.Header, ts
 	if e := &c.pending; c.x != nil && e.kind == emitAnchor && e.target.Time != 0 {
 		// Its L1 reads end when the slot's proof must start.
 		cctx, cancel := context.WithTimeout(ctx, time.Unix(int64(ts), 0).Add(-c.cfg.Slack-c.cfg.Proof).Sub(c.now()))
-		fx := c.compose(cctx, cursor, parent, target)
+		fx := c.compose(cctx, cursor, parent, target, ts)
 		cancel()
 		if fx != nil {
 			e.kind, e.fx = emitEffects, fx

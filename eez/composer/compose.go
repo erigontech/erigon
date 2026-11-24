@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/eez/prove"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -88,8 +89,9 @@ type effects struct {
 	anchor common.Hash
 }
 
-// compose simulates held transactions on L1 at block target-1 and delivers
-// their calls on a draft of the Sync block on parent, while the block and
+// compose simulates held transactions on L1 state at block target-1, in the
+// context of block target at ts, and delivers their calls on a draft of the
+// Sync block on parent, while the block and
 // the gas of the posting settling the window from cursor hold them. A poison
 // transaction, or one an empty block or a posting of the Sync block alone
 // cannot hold, is evicted with the rest of its nonce chain; a transient
@@ -98,7 +100,7 @@ type effects struct {
 // sender's on L1 waits with the rest of its chain, out of the drain's count,
 // and so does one only a lighter window has room for, in the count, while
 // others behind it compose. Nil when none composes.
-func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Header, target uint64) *effects {
+func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Header, target, ts uint64) *effects {
 	rest := c.x.Pool.PopN(c.x.MaxTxs)
 	if len(rest) == 0 {
 		return nil
@@ -120,7 +122,7 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 		}
 		return c.x.L1.ViewState(ctx, fx.anchor, func(anchor *types.Header, reader state.StateReader) error {
 			blockHash := func(n uint64) (common.Hash, error) { return c.x.L1Hash(ctx, n) }
-			src := NewSource(c.x.L1Config, anchor, reader, blockHash, c.x.Manager, protocol.MainnetRollupID)
+			src := NewSource(c.x.L1Config, child(c.x.L1Config, anchor, ts), reader, blockHash, c.x.Manager, protocol.MainnetRollupID)
 			return c.x.L2(ctx, parent, func(pre PreState) error {
 				header, err := c.x.Header(parent, pre.Headers)
 				if err != nil {
@@ -276,6 +278,24 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 		return nil
 	}
 	return fx
+}
+
+// child returns the context of the block on parent at time as far as it is
+// known before the block is built: its number, time, base fee and excess
+// blob gas; the rest is parent's.
+func child(config *chain.Config, parent *types.Header, time uint64) *types.Header {
+	h := types.CopyHeader(parent)
+	h.ParentHash = parent.Hash()
+	h.Number.AddUint64(&parent.Number, 1)
+	h.Time, h.GasUsed = time, 0
+	if config.IsLondon(h.Number.Uint64()) {
+		h.BaseFee = misc.CalcBaseFee(config, parent)
+	}
+	if config.IsCancun(time) {
+		excess := misc.CalcExcessBlobGas(config, parent, time)
+		h.ExcessBlobGas, h.BlobGasUsed = &excess, new(uint64)
+	}
+	return h
 }
 
 // full reports a Sync block or a posting without room for one more held

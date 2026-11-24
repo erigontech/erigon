@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"math"
@@ -47,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 // memL1 is an L1 whose every block has state m, and gas limit gasLimit,
@@ -55,6 +57,8 @@ type memL1 struct {
 	m        *memState
 	failed   error
 	gasLimit uint64
+	// gasUsed is every block's gas used.
+	gasUsed uint64
 }
 
 func (l *memL1) ViewState(_ context.Context, hash common.Hash, read func(*types.Header, state.StateReader) error) error {
@@ -65,11 +69,14 @@ func (l *memL1) ViewState(_ context.Context, hash common.Hash, read func(*types.
 	if gas == 0 {
 		gas = 30_000_000
 	}
-	h := &types.Header{Number: *uint256.NewInt(100), Time: 1_800_000_000, GasLimit: gas, BaseFee: uint256.NewInt(1), Extra: []byte{}}
+	h := &types.Header{Number: *uint256.NewInt(100), Time: 1_800_000_000, GasLimit: gas, GasUsed: l.gasUsed, BaseFee: uint256.NewInt(1), Extra: []byte{}}
 	return read(h, l.m)
 }
 
 var crossProxy = common.HexToAddress("0xaaaa0000000000000000000000000000000000ff")
+
+// targetTime is the time of block 101, the one after every memL1 block.
+const targetTime = 1_800_000_012
 
 // crossFixture composes on window 468's Sync block parent, with an L1 on
 // which the window's recorded inbound call is one held transaction away.
@@ -121,7 +128,7 @@ func newCrossFixture(t *testing.T) *crossFixture {
 func (f *crossFixture) compose(t *testing.T) *effects {
 	t.Helper()
 	sync := f.w.sync.Header()
-	return f.c.compose(t.Context(), sync.Number.Uint64(), sync, 101)
+	return f.c.compose(t.Context(), sync.Number.Uint64(), sync, 101, targetTime)
 }
 
 // windowGas is the posting's projection at the standard rate of window 468's
@@ -283,10 +290,32 @@ func TestComposeStopsAtItsDeadline(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	sync := f.w.sync.Header()
-	require.Nil(t, f.c.compose(ctx, sync.Number.Uint64(), sync, 101))
+	require.Nil(t, f.c.compose(ctx, sync.Number.Uint64(), sync, 101, targetTime))
 	require.Equal(t, []*Held{trigger}, f.pool.PopN(math.MaxInt))
 	require.Zero(t, trigger.Attempts)
 	require.Zero(t, trigger.Deferred)
+}
+
+// TestComposeRunsInTheTargetBlock: a held transaction runs on the anchor's
+// state in the context of the block its bundle aims at: that block's number,
+// time and base fee, not the anchor's.
+func TestComposeRunsInTheTargetBlock(t *testing.T) {
+	f := newCrossFixture(t)
+	// A full anchor at base fee 1 has its child at base fee 2.
+	f.l1.gasUsed = 30_000_000
+	// Calls the proxy only at block 101, time targetTime and base fee 2.
+	guard := []byte{
+		byte(vm.NUMBER), byte(vm.PUSH1), 101, byte(vm.EQ), byte(vm.PUSH1), 8, byte(vm.JUMPI), byte(vm.STOP),
+		byte(vm.JUMPDEST), byte(vm.TIMESTAMP), byte(vm.PUSH4), 0, 0, 0, 0, byte(vm.EQ), byte(vm.PUSH1), 20, byte(vm.JUMPI), byte(vm.STOP),
+		byte(vm.JUMPDEST), byte(vm.BASEFEE), byte(vm.PUSH1), 2, byte(vm.EQ), byte(vm.PUSH1), 29, byte(vm.JUMPI), byte(vm.STOP),
+		byte(vm.JUMPDEST),
+	}
+	binary.BigEndian.PutUint32(guard[11:15], targetTime)
+	f.l1.m.deploy(f.call.Source, append(guard, forward(crossProxy, false)...))
+	trigger := f.hold(t, 0, f.call.Source, f.call.Data)
+	fx := f.compose(t)
+	require.NotNil(t, fx)
+	require.Equal(t, []*Held{trigger}, fx.held)
 }
 
 // TestComposeBoundsThePostingGas: held transactions compose while the
@@ -352,7 +381,7 @@ func TestComposeWaitsForALighterWindow(t *testing.T) {
 	}
 	t.Run("waits", func(t *testing.T) {
 		f, chain, trigger := setup(t)
-		require.Nil(t, f.c.compose(t.Context(), 0, chain.header(8), 101))
+		require.Nil(t, f.c.compose(t.Context(), 0, chain.header(8), 101, targetTime))
 		require.Equal(t, []*Held{trigger}, f.pool.PopN(math.MaxInt))
 		require.Equal(t, uint32(1), trigger.Deferred)
 		require.Zero(t, trigger.Attempts)
@@ -374,7 +403,7 @@ func TestComposeWaitsForALighterWindow(t *testing.T) {
 		chain, window, alone := heavy(t, f)
 		block := alone + f.deliveryCost(t) + drainMargin + f.gas + (window-alone)/2
 		f.l1.gasLimit, f.c.cfg.MaxGas = block*1024/1023, block-3
-		fx := f.c.compose(t.Context(), 0, chain.header(8), 101)
+		fx := f.c.compose(t.Context(), 0, chain.header(8), 101, targetTime)
 		require.NotNil(t, fx)
 		require.Equal(t, []*Held{small}, fx.held)
 		require.Equal(t, []*Held{first, next}, f.pool.PopN(math.MaxInt))
@@ -399,14 +428,14 @@ func TestComposeWaitsForALighterWindow(t *testing.T) {
 		chain, window, alone := heavy(t, f)
 		block := alone + f.deliveryCost(t) + drainMargin + 10_000_000 + (window-alone)/2
 		f.l1.gasLimit, f.c.cfg.MaxGas = block*1024/1023, block-3
-		require.Nil(t, f.c.compose(t.Context(), 0, chain.header(8), 101), "two simulations, the drain's")
+		require.Nil(t, f.c.compose(t.Context(), 0, chain.header(8), 101, targetTime), "two simulations, the drain's")
 		require.Equal(t, append(big, small), f.pool.PopN(math.MaxInt))
 		require.Equal(t, []uint32{1, 1, 0}, []uint32{big[0].Deferred, big[1].Deferred, small.Deferred})
 	})
 	t.Run("composes behind a lighter window", func(t *testing.T) {
 		f, chain, trigger := setup(t)
-		require.Nil(t, f.c.compose(t.Context(), 0, chain.header(8), 101))
-		fx := f.c.compose(t.Context(), 8, chain.header(8), 101)
+		require.Nil(t, f.c.compose(t.Context(), 0, chain.header(8), 101, targetTime))
+		fx := f.c.compose(t.Context(), 8, chain.header(8), 101, targetTime)
 		require.NotNil(t, fx)
 		require.Equal(t, []*Held{trigger}, fx.held)
 		require.Zero(t, trigger.Deferred)
@@ -414,7 +443,7 @@ func TestComposeWaitsForALighterWindow(t *testing.T) {
 	t.Run("a window that stays too heavy evicts it", func(t *testing.T) {
 		f, chain, trigger := setup(t)
 		trigger.Deferred = maxDeferrals - 1
-		require.Nil(t, f.c.compose(t.Context(), 0, chain.header(8), 101))
+		require.Nil(t, f.c.compose(t.Context(), 0, chain.header(8), 101, targetTime))
 		require.Zero(t, f.pool.Len())
 		f.pool.mu.Lock()
 		defer f.pool.mu.Unlock()
