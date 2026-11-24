@@ -497,8 +497,9 @@ func recordBALRevivals[T interface{ GetIndex() uint32 }](removals []balRemoval, 
 	for len(removals) > 0 && len(changes) > 0 {
 		idx := changes[0].GetIndex()
 		changes = changes[1:]
-		// Each removal here has an explicit balance write. Earlier searches end by
-		// the last removal's index, so its next known write bounds this scan.
+		// Each removal here occurs at a balance write. An earlier removal's next
+		// balance write is at or before the following removal's index. Once this
+		// sorted list reaches the last removal's next known write, we can stop.
 		if limit := removals[len(removals)-1].nextWriteIndex; limit != 0 && idx >= limit {
 			return
 		}
