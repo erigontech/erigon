@@ -79,7 +79,6 @@ func (df *DirtyFiles) replace(item *FilesItem) retiredFiles {
 	if !replaced || previous == item {
 		return nil
 	}
-	previous.canDelete.Store(false)
 	return retiredFiles{previous}
 }
 

@@ -488,8 +488,12 @@ func generateStorageFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange
 
 func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
+	ver := version.V1_0_standart
 	stepSize := uint64(10)
-	schema := NewDomainSnapSchema(statecfg.Schema.CommitmentDomain, stepSize, dirs)
+	schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+		Data(dirs.SnapDomain, "commitment", DataExtensionKv, ver).
+		Accessor(dirs.SnapDomain, ver).
+		Build()
 	populateFiles2(t, dirs, schema, stepSize, ranges)
 }
 

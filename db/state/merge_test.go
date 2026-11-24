@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -1167,44 +1168,72 @@ func TestMergeFiles(t *testing.T) {
 
 func TestMergeReplacementClosesAfterReaders(t *testing.T) {
 	t.Parallel()
-	const stepSize = uint64(10)
-	db, agg := testDbAndAggregatorv3(t, stepSize)
-	ranges := []testFileRange{{0, 2}}
-	generateStateFiles(t, agg.Dirs(), ranges)
-	generateCommitmentFile(t, agg.Dirs(), ranges)
-	require.NoError(t, agg.OpenFolder(db))
+	for _, tc := range []struct {
+		name  string
+		files func(*DomainRoTx) visibleFiles
+	}{
+		{"values", func(d *DomainRoTx) visibleFiles { return d.files }},
+		{"history", func(d *DomainRoTx) visibleFiles { return d.ht.files }},
+		{"history_index", func(d *DomainRoTx) visibleFiles { return d.ht.iit.files }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const stepSize = uint64(10)
+			const domain = kv.CodeDomain
+			ctx := t.Context()
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			for step := range kv.Step(2) {
+				require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil))
+			}
+			source := agg.BeginFilesRo()
+			defer source.Close()
+			r := *NewMergeRange(domain.String(), true, 0, 2*stepSize)
+			ranges := &Ranges{}
+			ranges.domain[domain] = NewDomainRanges(domain, r, NewHistoryRanges(r, r), stepSize)
+			inputs, err := source.filesInRange(ranges)
+			require.NoError(t, err)
+			merged, err := source.mergeFiles(ctx, inputs, ranges)
+			require.NoError(t, err)
+			t.Cleanup(merged.Close)
+			source.Close()
 
-	reader := agg.BeginFilesRo()
-	defer reader.Close()
-	files := reader.d[kv.AccountsDomain].ht.iit.files
-	require.Len(t, files, 1)
-	original := files[0].src
-	defer original.closeFiles()
-	originalMapping := original.decompressor
-	dataPath, indexPath := originalMapping.FilePath(), original.index.FilePath()
+			// Open the merge output from disk before publishing it. The reader and
+			// the merge result now have independent mappings of the same paths.
+			require.NoError(t, agg.OpenFolder(db))
+			fileIn := func(view *AggregatorRoTx) *FilesItem {
+				t.Helper()
+				files := tc.files(view.d[domain])
+				require.Len(t, files, 1)
+				return files[0].src
+			}
+			reader := agg.BeginFilesRo()
+			defer reader.Close()
+			original := fileIn(reader)
+			t.Cleanup(original.closeFiles)
+			originalMapping := original.decompressor
+			paths := original.FilePaths(agg.dirs.Snap)
+			require.Greater(t, len(paths), 1, "expected a data file and its accessors")
 
-	replacement := newFilesItem(0, 2*stepSize)
-	defer replacement.closeFiles()
-	var err error
-	replacement.decompressor, err = seg.NewDecompressor(dataPath)
-	require.NoError(t, err)
-	replacement.index, err = recsplit.OpenIndex(indexPath)
-	require.NoError(t, err)
-	replacementMapping := replacement.decompressor
-	in := &MergeResult{}
-	in.dIdx[kv.AccountsDomain] = replacement
-	agg.integrateMergedDirtyFiles(in)
+			agg.integrateMergedDirtyFiles(merged)
+			current := agg.BeginFilesRo()
+			defer current.Close()
+			replacement := fileIn(current)
+			replacementMapping := replacement.decompressor
+			require.NotSame(t, originalMapping, replacementMapping)
+			require.Equal(t, paths, replacement.FilePaths(agg.dirs.Snap))
+			require.True(t, originalMapping.IsOpen(), "the old reader still holds this mapping")
 
-	require.True(t, originalMapping.IsOpen(), "existing readers must keep their mapping")
-	reader.Close()
-	require.False(t, originalMapping.IsOpen(), "the replaced mapping must close with its last reader")
-	require.Nil(t, original.index, "the replaced accessor must close too")
-	require.True(t, replacementMapping.IsOpen())
-	require.FileExists(t, dataPath, "retiring the old mapping must not delete the replacement")
-	require.FileExists(t, indexPath)
-
-	agg.Close()
-	require.False(t, replacementMapping.IsOpen())
+			reader.Close()
+			require.False(t, originalMapping.IsOpen(), "the last reader must release the old mapping")
+			require.Empty(t, original.FilePaths(agg.dirs.Snap), "the old accessor handles must close too")
+			require.True(t, replacementMapping.IsOpen())
+			for _, path := range paths {
+				require.FileExists(t, filepath.Join(agg.dirs.Snap, path))
+			}
+			current.Close()
+			agg.Close()
+			require.False(t, replacementMapping.IsOpen())
+		})
+	}
 }
 
 func TestDomainMergeCancellationClosesOutput(t *testing.T) {

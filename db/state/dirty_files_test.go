@@ -266,6 +266,17 @@ func writeTestKVFile(t *testing.T, path, tmp string, logger log.Logger) {
 	require.NoError(t, comp.Compress())
 }
 
+func TestDirtyFilesReplaceSameItem(t *testing.T) {
+	t.Parallel()
+	files := newDirtyFiles()
+	item := newFilesItem(0, 16)
+	require.Empty(t, files.replace(item))
+	require.Empty(t, files.replace(item), "the current item must not be retired")
+	current, ok := files.Get(item)
+	require.True(t, ok)
+	require.Same(t, item, current)
+}
+
 func TestRetireSkipsAlreadyDetachedItems(t *testing.T) {
 	t.Parallel()
 	dirty := newDirtyFiles()
