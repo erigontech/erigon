@@ -118,6 +118,12 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 		e.logger.Debug("[execmodule] fork choice checkpoint: head not readable", "head", headHash, "err", herr)
 	}
 	if herr == nil && head != nil {
+		if res, done, err := e.canonicaliseAcceptedBelow(ctx, head, safeHash, finalizedHash); err != nil || done {
+			return res, err
+		}
+		if err := e.yieldBuildBelow(ctx, head); err != nil {
+			return ForkChoiceResult{}, fmt.Errorf("updateForkChoice: %w", err)
+		}
 		sealed, werr := e.awaitPreExecSeal(ctx, headHash, head.Number.Uint64(), head.ParentHash)
 		e.logger.Debug("[execmodule] fork choice checkpoint", "number", head.Number.Uint64(), "head", headHash,
 			"sealed", sealed != nil, "err", werr)
@@ -1244,4 +1250,83 @@ func (e *ExecModule) emitBlockMetrics(blockHash common.Hash, blockTimings BlockT
 	}
 	rec.Commit = blockTimings[BlockTimingsFlushExtendingFork] + persist
 	blockmetrics.Emit(e.logger, common.Deref(e.syncCfg.SlowBlockThreshold), rec)
+}
+
+// yieldBuildBelow hands the fork choice the blocks from the height this node is still building up to head, when head
+// descends from the parent that build is on: the consensus layer is ahead, so those blocks are executed by the fork
+// choice and this node's build of the first of them is dropped.
+func (e *ExecModule) yieldBuildBelow(ctx context.Context, head *types.Header) error {
+	e.flash.mu.Lock()
+	building, on := e.flash.num, e.flash.parent
+	if e.flash.valid {
+		on = e.flash.built.Parent
+	}
+	e.flash.mu.Unlock()
+	if building == 0 || building >= head.Number.Uint64() {
+		return nil
+	}
+	var taken []*types.Header
+	for h := head; h != nil && h.Number.Uint64() >= building; {
+		taken = append(taken, h)
+		if h.Number.Uint64() == building {
+			break
+		}
+		parent := h.ParentHash
+		next, err := e.GetHeader(ctx, &parent, nil)
+		if err != nil {
+			return err
+		}
+		h = next
+	}
+	if len(taken) == 0 || taken[len(taken)-1].Number.Uint64() != building || taken[len(taken)-1].ParentHash != on {
+		return nil
+	}
+	if err := e.AbandonFlashblock(ctx); err != nil {
+		return err
+	}
+	for _, h := range taken {
+		e.recordPostExecuted(h)
+	}
+	e.logger.Debug("[execmodule] fork choice is ahead of the block being built — dropping the build", "building", building,
+		"head", head.Number.Uint64())
+	return nil
+}
+
+// canonicaliseAcceptedBelow first makes canonical the highest block below head that this node sealed and accepted:
+// its transactions and state live only in its pre-exec generation, which the fork choice merges only when that block
+// is the head, so the blocks above it cannot be executed until it is. done reports a result to return as is.
+func (e *ExecModule) canonicaliseAcceptedBelow(ctx context.Context, head *types.Header, safeHash, finalizedHash common.Hash) (ForkChoiceResult, bool, error) {
+	current, err := e.CurrentHeader(ctx)
+	if err != nil || current == nil {
+		return ForkChoiceResult{}, false, err
+	}
+	var accepted *types.Header
+	for h := head; h != nil && h.Number.Uint64() > current.Number.Uint64() && accepted == nil; {
+		parent := h.ParentHash
+		next, gerr := e.GetHeader(ctx, &parent, nil)
+		if gerr != nil {
+			return ForkChoiceResult{}, false, gerr
+		}
+		if next != nil && next.Number.Uint64() > current.Number.Uint64() {
+			e.pendingBlockMu.Lock()
+			_, ok := e.acceptedSealed[next.Hash()]
+			e.pendingBlockMu.Unlock()
+			if ok {
+				accepted = next
+			}
+		}
+		h = next
+	}
+	if accepted == nil {
+		return ForkChoiceResult{}, false, nil
+	}
+	res, err := e.UpdateForkChoice(ctx, accepted.Hash(), safeHash, finalizedHash)
+	if err != nil || res.Status != ExecutionStatusSuccess {
+		return res, true, err
+	}
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return ForkChoiceResult{Status: ExecutionStatusBusy}, true, nil
+	}
+	e.semaphore.Release(1)
+	return ForkChoiceResult{}, false, nil
 }

@@ -328,6 +328,9 @@ type Sync struct {
 
 	SlowBlockThreshold *time.Duration
 
+	// TxnIDsFollowParent derives each block's txn ids from its parent's, for chains whose order a consensus fixes before execution.
+	TxnIDsFollowParent bool
+
 	// ExecutionPathReporter, when set, is told how each executed block runs.
 	ExecutionPathReporter func(BlockExecutionPath) `toml:"-"`
 }

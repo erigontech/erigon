@@ -367,3 +367,56 @@ func TestAcceptingASealedBlockDoesNotWaitForARound(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, r.ValidationStatus, "newPayload answered while a round runs")
 }
+
+// A fork choice past the height this node is still building means the consensus layer is ahead: the fork choice
+// executes the blocks from that height up, this node drops its build of it, and a later round for it is refused.
+func TestAForkChoicePastTheHeightBeingBuiltTakesThoseBlocks(t *testing.T) {
+	replica := newRoundHarness(t)
+	proposer := newRoundHarnessWithKeys(t, replica.keys)
+	parent, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
+	require.NoError(t, err)
+
+	var proposed []*types.Block
+	var rounds [][][]byte
+	for n := uint64(0); n < 3; n++ {
+		round := [][]byte{replica.signed(0, n, nil, 100_000, emitsALog)}
+		paramsP, inP := proposer.attrs(parent)
+		b := proposer.sealRounds(paramsP, inP, [][][]byte{round})
+		ur, ferr := forkChoiceTo(proposer.ctx, proposer.m.ExecModule, b.Header())
+		require.NoError(t, ferr)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status, ur.ValidationError)
+		proposed, rounds, parent = append(proposed, b), append(rounds, round), b.Header()
+	}
+
+	genesis, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
+	require.NoError(t, err)
+	params1, in1 := replica.attrs(genesis)
+	_, _, vr, err := replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in1, rounds[0])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
+	br, err := replica.m.ExecModule.SealBlock(replica.ctx, params1, false)
+	require.NoError(t, err)
+	require.Equal(t, proposed[0].Hash(), br.Block.Hash())
+	status, err := insertBlocks(replica.ctx, replica.m.ExecModule, proposed)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	r, err := validateChain(replica.ctx, replica.m.ExecModule, proposed[0])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, r.ValidationStatus, r.ValidationError)
+
+	_, in2 := replica.attrs(proposed[0].Header())
+	_, _, vr, err = replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in2, nil)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
+
+	ur, err := forkChoiceTo(replica.ctx, replica.m.ExecModule, proposed[2].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status, ur.ValidationError)
+	require.NoError(t, insertValidateAndUfc1By1(replica.ctx, replica.m.ExecModule, nil))
+	tip, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
+	require.NoError(t, err)
+	require.Equal(t, proposed[2].Hash(), tip.Hash())
+
+	_, _, _, err = replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in2, rounds[1])
+	require.ErrorIs(t, err, execmodule.ErrPostExecuted)
+}

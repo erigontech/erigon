@@ -54,7 +54,8 @@ func newRoundHarnessWithKeys(t *testing.T, keys [2]*ecdsa.PrivateKey) *roundHarn
 			crypto.PubkeyToAddress(h.keys[1].PublicKey): {Balance: funds},
 		},
 	}
-	h.m = execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(h.keys[0]))
+	h.m = execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(h.keys[0]),
+		execmoduletester.WithTxnIDsFollowParent())
 	return h
 }
 

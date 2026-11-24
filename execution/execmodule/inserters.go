@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -98,24 +99,9 @@ func (e *ExecModule) writePreExecBlock(tx kv.RwTx, roTx kv.TemporalTx, block *ty
 	number := header.Number.Uint64()
 	if gen := e.generationOverlay(header.ParentHash, number-1); gen != nil && kv.RwTx(gen) != tx {
 		// The block's execution verifies it against its parent in its own overlay, and raw tables do not read through
-		// to the parent generation, so the parent's header and TD are carried in.
-		gen.UpdateTxn(roTx)
-		parent := rawdb.ReadHeader(gen, header.ParentHash, number-1)
-		if parent == nil {
-			return fmt.Errorf("parent header %d %x not in its generation", number-1, header.ParentHash)
-		}
-		genTd, err := rawdb.ReadTd(gen, header.ParentHash, number-1)
-		if err != nil {
-			return fmt.Errorf("read parent TD: %w", err)
-		}
-		if genTd == nil {
-			return fmt.Errorf("parent TD %d %x not in its generation", number-1, header.ParentHash)
-		}
-		if err := rawdb.WriteHeader(tx, parent); err != nil {
-			return fmt.Errorf("carry parent header: %w", err)
-		}
-		if err := rawdb.WriteTd(tx, header.ParentHash, number-1, *genTd); err != nil {
-			return fmt.Errorf("carry parent TD: %w", err)
+		// to the parent generation, so the parent's header, TD and body record are carried in.
+		if err := e.carryParentFromGeneration(tx, gen, roTx, header.ParentHash, number-1); err != nil {
+			return err
 		}
 	}
 	parentTd, err := rawdb.ReadTd(tx, header.ParentHash, number-1)
@@ -135,9 +121,8 @@ func (e *ExecModule) writePreExecBlock(tx kv.RwTx, roTx kv.TemporalTx, block *ty
 	if err := rawdb.WriteTd(tx, header.Hash(), number, td); err != nil {
 		return fmt.Errorf("write TD: %w", err)
 	}
-	// The block's ids start at the sequence as it stands when the block is open: nothing advances it until the
-	// seal, so every round writes the same range.
-	base, err := tx.ReadSequence(kv.EthTx)
+	// Every round writes the same range: nothing advances the sequence until the seal.
+	base, err := e.txnBaseFor(tx, header.ParentHash, number)
 	if err != nil {
 		return fmt.Errorf("read txn id sequence: %w", err)
 	}
@@ -145,6 +130,39 @@ func (e *ExecModule) writePreExecBlock(tx kv.RwTx, roTx kv.TemporalTx, block *ty
 		return fmt.Errorf("write body: %w", err)
 	}
 	traceBodyIds(e.logger, "preexec-round", tx, header.Hash(), number, base, false)
+	return nil
+}
+
+func (e *ExecModule) carryParentFromGeneration(tx kv.RwTx, gen *membatchwithdb.MemoryMutation, roTx kv.TemporalTx, parentHash common.Hash, parentNumber uint64) error {
+	e.genReadMu.Lock()
+	defer e.genReadMu.Unlock()
+	gen.UpdateTxn(roTx)
+	parent := rawdb.ReadHeader(gen, parentHash, parentNumber)
+	if parent == nil {
+		return fmt.Errorf("parent header %d %x not in its generation", parentNumber, parentHash)
+	}
+	genTd, err := rawdb.ReadTd(gen, parentHash, parentNumber)
+	if err != nil {
+		return fmt.Errorf("read parent TD: %w", err)
+	}
+	if genTd == nil {
+		return fmt.Errorf("parent TD %d %x not in its generation", parentNumber, parentHash)
+	}
+	if err := rawdb.WriteHeader(tx, parent); err != nil {
+		return fmt.Errorf("carry parent header: %w", err)
+	}
+	if err := rawdb.WriteTd(tx, parentHash, parentNumber, *genTd); err != nil {
+		return fmt.Errorf("carry parent TD: %w", err)
+	}
+	bfs, err := rawdb.ReadBodyForStorageByKey(gen, dbutils.BlockBodyKey(parentNumber, parentHash))
+	if err != nil {
+		return fmt.Errorf("read parent body record: %w", err)
+	}
+	if bfs != nil {
+		if err := rawdb.WriteBodyForStorage(tx, parentHash, parentNumber, bfs); err != nil {
+			return fmt.Errorf("carry parent body record: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -175,6 +193,42 @@ func writePreExecBody(tx kv.RwTx, hash common.Hash, number uint64, body *types.R
 		}
 	}
 	return nil
+}
+
+// txnBaseAfter is the first txn id of a block on parentHash when ids follow the agreed order; ok is false when the
+// parent's body record is not readable here, as for a frozen parent.
+func txnBaseAfter(tx kv.Getter, parentHash common.Hash, number uint64) (base uint64, ok bool, err error) {
+	if number == 0 {
+		return 0, false, nil
+	}
+	parent, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(number-1, parentHash))
+	if err != nil || parent == nil {
+		return 0, false, err
+	}
+	return parent.BaseTxnID.U64() + uint64(parent.TxCount), true, nil
+}
+
+// advanceTxnSequenceTo moves the kv.EthTx sequence forward to next, never back.
+func advanceTxnSequenceTo(tx kv.RwTx, next uint64) error {
+	seq, err := tx.ReadSequence(kv.EthTx)
+	if err != nil {
+		return err
+	}
+	if seq < next {
+		return tx.ResetSequence(kv.EthTx, next)
+	}
+	return nil
+}
+
+// txnBaseFor is where a block's ids start: derived from its parent when ids follow the agreed order, else the
+// sequence as it stands.
+func (e *ExecModule) txnBaseFor(tx kv.RwTx, parentHash common.Hash, number uint64) (uint64, error) {
+	if e.syncCfg.TxnIDsFollowParent {
+		if base, ok, err := txnBaseAfter(tx, parentHash, number); err != nil || ok {
+			return base, err
+		}
+	}
+	return tx.ReadSequence(kv.EthTx)
 }
 
 // traceBodyIds records the txn-id range a body owns, at a site that creates a block's DB representation,
@@ -218,27 +272,29 @@ func traceBodyIds(logger log.Logger, when string, tx kv.Getter, hash common.Hash
 // longer body and was then dropped: the block overlay is shared across rounds, so its rows persist although the
 // body was rolled back. Ids above the base are unallocated until this advance, so every such row is stale — and the
 // lowest of them is the end system slot, a nil entry that must hold nothing.
-func sealPreExecBodyIds(tx kv.RwTx, bfs *types.BodyForStorage) error {
+func sealPreExecBodyIds(tx *membatchwithdb.MemoryMutation, bfs *types.BodyForStorage, followParent bool) error {
 	endSlot := bfs.BaseTxnID.LastSystemTx(bfs.TxCount)
-	from := make([]byte, 8)
-	binary.BigEndian.PutUint64(from, endSlot)
-	c, err := tx.Cursor(kv.EthTx)
+	// Under agreed-order ids the rows above this block belong to its successor, so only rows this overlay wrote are stale.
+	var src kv.Tx = tx
+	if followParent {
+		memTx, err := tx.MemDB().BeginRo(context.Background())
+		if err != nil {
+			return err
+		}
+		defer memTx.Rollback()
+		src = memTx
+	}
+	stale, err := txnRowsFrom(src, endSlot)
 	if err != nil {
 		return err
 	}
-	var stale [][]byte
-	for k, _, cerr := c.Seek(from); k != nil; k, _, cerr = c.Next() {
-		if cerr != nil {
-			c.Close()
-			return cerr
-		}
-		stale = append(stale, common.Copy(k))
-	}
-	c.Close()
 	for _, k := range stale {
 		if err := tx.Delete(kv.EthTx, k); err != nil {
 			return fmt.Errorf("delete stale txn id %d: %w", binary.BigEndian.Uint64(k), err)
 		}
+	}
+	if followParent {
+		return advanceTxnSequenceTo(tx, endSlot+1)
 	}
 	base, err := tx.IncrementSequence(kv.EthTx, uint64(bfs.TxCount))
 	if err != nil {
@@ -249,6 +305,47 @@ func sealPreExecBodyIds(tx kv.RwTx, bfs *types.BodyForStorage) error {
 			base, bfs.BaseTxnID.U64())
 	}
 	return nil
+}
+
+func txnRowsFrom(tx kv.Tx, from uint64) ([][]byte, error) {
+	key := make([]byte, 8)
+	binary.BigEndian.PutUint64(key, from)
+	c, err := tx.Cursor(kv.EthTx)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	var rows [][]byte
+	for k, _, cerr := c.Seek(key); k != nil; k, _, cerr = c.Next() {
+		if cerr != nil {
+			return nil, cerr
+		}
+		rows = append(rows, common.Copy(k))
+	}
+	return rows, nil
+}
+
+// writeInsertedBody stores an inserted block's body unless one is already stored, at ids derived from its parent
+// when ids follow the agreed order.
+func (e *ExecModule) writeInsertedBody(tx kv.RwTx, header *types.Header, body *types.RawBody) (bool, error) {
+	number, hash := header.Number.Uint64(), header.Hash()
+	if !e.syncCfg.TxnIDsFollowParent {
+		return rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
+	}
+	if existing, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(number, hash)); err != nil || existing != nil {
+		return false, err
+	}
+	base, ok, err := txnBaseAfter(tx, header.ParentHash, number)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
+	}
+	if err := writePreExecBody(tx, hash, number, body, base); err != nil {
+		return false, err
+	}
+	return true, advanceTxnSequenceTo(tx, base+uint64(types.TxCountToTxAmount(len(body.Transactions))))
 }
 
 func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (ExecutionStatus, error) {
@@ -365,7 +462,7 @@ func (e *ExecModule) insertBlocksLocked(ctx context.Context, blocks []*types.Blo
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %w", err)
 			}
 			seqBefore, _ := blockOverlay.ReadSequence(kv.EthTx)
-			allocated, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, blockHash, height, body)
+			allocated, err := e.writeInsertedBody(blockOverlay, header, body)
 			if err != nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %w", err)
 			}

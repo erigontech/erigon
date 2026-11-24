@@ -408,6 +408,12 @@ func WithSlowBlockThreshold(d time.Duration) Option {
 	}
 }
 
+func WithTxnIDsFollowParent() Option {
+	return func(opts *options) {
+		opts.txnIDsFollowParent = true
+	}
+}
+
 func WithExecWorkerCount(n int) Option {
 	return func(opts *options) {
 		opts.execWorkerCount = n
@@ -459,6 +465,7 @@ type options struct {
 	batchSize                datasize.ByteSize
 	slowBlockThreshold       *time.Duration
 	execWorkerCount          int
+	txnIDsFollowParent       bool
 	sentryProtocol           uint
 	stateTransitionObserver  execmodule.StateTransitionObserver
 	skipSystemContracts      bool
@@ -583,6 +590,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		cfg.Sync.ExecWorkerCount = opt.execWorkerCount
 	}
 	cfg.Sync.ExecutionPathReporter = opt.executionPathReporter
+	cfg.Sync.TxnIDsFollowParent = opt.txnIDsFollowParent
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName

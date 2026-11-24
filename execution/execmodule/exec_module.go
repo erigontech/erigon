@@ -1232,7 +1232,7 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 		if rerr != nil || bfs == nil {
 			return fmt.Errorf("IngestSealedFlashblock: read in-place body: %v", rerr)
 		}
-		if err := sealPreExecBodyIds(ov, bfs); err != nil {
+		if err := sealPreExecBodyIds(ov, bfs, e.syncCfg.TxnIDsFollowParent); err != nil {
 			return fmt.Errorf("IngestSealedFlashblock: %w", err)
 		}
 		traceBodyIds(e.logger, "seal", ov, newHash, number, bfs.BaseTxnID.U64(), true)
@@ -1269,7 +1269,7 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 	if rerr != nil || bfs == nil || bfs.TxCount != types.TxCountToTxAmount(len(body.Transactions)) {
 		// No in-progress record to re-key (or it disagrees with the sealed body) — write one, at the same base the
 		// rounds use: the sequence has not been advanced yet, and is advanced once below.
-		base, err := ov.ReadSequence(kv.EthTx)
+		base, err := e.txnBaseFor(ov, sealed.ParentHash, number)
 		if err != nil {
 			return fmt.Errorf("IngestSealedFlashblock: read txn id sequence: %w", err)
 		}
@@ -1287,7 +1287,7 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 	}
 	// The body is final: advance the txn id sequence once, past its end system slot, and drop anything a dropped
 	// round left at or above that slot. Only the generation's overlay carries the sequence the successor seeds from.
-	if err := sealPreExecBodyIds(ov, bfs); err != nil {
+	if err := sealPreExecBodyIds(ov, bfs, e.syncCfg.TxnIDsFollowParent); err != nil {
 		return fmt.Errorf("IngestSealedFlashblock: %w", err)
 	}
 	traceBodyIds(e.logger, "seal", ov, newHash, number, bfs.BaseTxnID.U64(), true)
