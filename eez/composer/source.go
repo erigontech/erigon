@@ -18,6 +18,7 @@ package composer
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 
@@ -110,9 +111,10 @@ func (s *Source) Nonce(addr common.Address) (uint64, error) {
 // Run simulates tx, dispatching each proxy call it makes, and returns the
 // calls in order. It keeps tx's writes when accept, if set, takes the calls,
 // and returns accept's error otherwise. Errors from the dispatcher come back
-// as they are, and a failed state read as ErrStateRead; a transaction
-// without calls or with a failed frame around one is poison.
-func (s *Source) Run(tx types.Transaction, dispatch Dispatcher, accept func([]*Call) error) ([]*Call, error) {
+// as they are, a failed state read as ErrStateRead and an ended ctx as its
+// error; a transaction without calls or with a failed frame around one is
+// poison.
+func (s *Source) Run(ctx context.Context, tx types.Transaction, dispatch Dispatcher, accept func([]*Call) error) ([]*Call, error) {
 	var (
 		calls   []*Call
 		failure error
@@ -160,12 +162,21 @@ func (s *Source) Run(tx types.Transaction, dispatch Dispatcher, accept func([]*C
 	if err != nil {
 		return nil, Poison(err)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	snapshot := s.ibs.PushSnapshot()
 	s.ibs.SetTxContext(s.header.Number.Uint64(), s.index)
 	evm.Reset(core.NewEVMTxContext(msg), s.ibs)
+	// A cancelled EVM stops as if at a STOP: the context, not the result,
+	// tells a cut-short run.
+	stop := context.AfterFunc(ctx, evm.Cancel)
 	gp := new(core.GasPool).AddGas(s.header.GasLimit).AddBlobGas(s.config.GetMaxBlobGasPerBlock(s.header.Time))
 	_, err = core.ApplyMessage(evm, msg, gp, true, false, nil)
+	stop()
 	switch {
+	case ctx.Err() != nil:
+		err = ctx.Err()
 	case s.reads.failed() != nil:
 		err = s.reads.failed()
 	case failure != nil:

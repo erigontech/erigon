@@ -17,6 +17,7 @@
 package composer
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
 	"errors"
@@ -311,7 +312,7 @@ func (e *echo) dispatch(c *Call) ([]byte, error) {
 func TestSourceDispatchesProxyCalls(t *testing.T) {
 	f := newSourceFixture(t)
 	e := &echo{}
-	calls, err := f.src.Run(f.tx(t, 0, forwarder, 5, []byte{0x12, 0x34}), e.dispatch, nil)
+	calls, err := f.src.Run(t.Context(), f.tx(t, 0, forwarder, 5, []byte{0x12, 0x34}), e.dispatch, nil)
 	require.NoError(t, err)
 	want := &Call{Target: target, RollupID: 1, Source: forwarder, SourceRollup: 0, Data: []byte{0x12, 0x34}, Return: []byte{0xbe, 0xef}}
 	want.Value.SetUint64(5)
@@ -324,6 +325,34 @@ func TestSourceDispatchesProxyCalls(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint256.NewInt(5), &balance)
 	require.Equal(t, uint64(1), f.nonce(t), "kept")
+}
+
+// TestSourceStopsOnCancellation: a run whose context ends, before or while
+// it executes, fails with the context's error and keeps nothing: the
+// transaction may compose later.
+func TestSourceStopsOnCancellation(t *testing.T) {
+	t.Run("before", func(t *testing.T) {
+		f := newSourceFixture(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		_, err := f.src.Run(ctx, f.tx(t, 0, forwarder, 5, []byte{0x12, 0x34}), (&echo{}).dispatch, nil)
+		require.ErrorIs(t, err, context.Canceled)
+		require.False(t, IsPoison(err))
+		require.Zero(t, f.nonce(t))
+	})
+	t.Run("while it runs", func(t *testing.T) {
+		f := newSourceFixture(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		e := &echo{}
+		dispatch := func(c *Call) ([]byte, error) {
+			cancel()
+			return e.dispatch(c)
+		}
+		_, err := f.src.Run(ctx, f.tx(t, 0, forwarder, 5, []byte{0x12, 0x34}), dispatch, nil)
+		require.ErrorIs(t, err, context.Canceled)
+		require.False(t, IsPoison(err))
+		require.Zero(t, f.nonce(t))
+	})
 }
 
 func TestSourceCalls(t *testing.T) {
@@ -343,7 +372,7 @@ func TestSourceCalls(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newSourceFixture(t)
-			calls, err := f.src.Run(f.tx(t, 0, c.to, 0, nil), (&echo{}).dispatch, nil)
+			calls, err := f.src.Run(t.Context(), f.tx(t, 0, c.to, 0, nil), (&echo{}).dispatch, nil)
 			if c.err != nil {
 				require.ErrorIs(t, err, c.err)
 				require.True(t, IsPoison(err))
@@ -363,32 +392,32 @@ func TestSourceCalls(t *testing.T) {
 func TestSourceRefuses(t *testing.T) {
 	t.Run("an invalid transaction is poison", func(t *testing.T) {
 		f := newSourceFixture(t)
-		_, err := f.src.Run(f.tx(t, 5, forwarder, 0, nil), (&echo{}).dispatch, nil)
+		_, err := f.src.Run(t.Context(), f.tx(t, 5, forwarder, 0, nil), (&echo{}).dispatch, nil)
 		require.True(t, IsPoison(err), err)
 	})
 	t.Run("a failed dispatch ends the dispatching", func(t *testing.T) {
 		f := newSourceFixture(t)
 		down := errors.New("rollup unavailable")
 		dispatched := 0
-		_, err := f.src.Run(f.tx(t, 0, twice, 0, nil), func(*Call) ([]byte, error) { dispatched++; return nil, down }, nil)
+		_, err := f.src.Run(t.Context(), f.tx(t, 0, twice, 0, nil), func(*Call) ([]byte, error) { dispatched++; return nil, down }, nil)
 		require.ErrorIs(t, err, down)
 		require.Equal(t, 1, dispatched)
 	})
 	t.Run("a dispatch failure is the dispatcher's", func(t *testing.T) {
 		f := newSourceFixture(t)
 		down := errors.New("rollup unavailable")
-		_, err := f.src.Run(f.tx(t, 0, forwarder, 0, nil), func(*Call) ([]byte, error) { return nil, down }, nil)
+		_, err := f.src.Run(t.Context(), f.tx(t, 0, forwarder, 0, nil), func(*Call) ([]byte, error) { return nil, down }, nil)
 		require.ErrorIs(t, err, down)
 		require.False(t, IsPoison(err))
 		require.Zero(t, f.nonce(t), "discarded")
 	})
 	t.Run("a refused transaction leaves no trace", func(t *testing.T) {
 		f := newSourceFixture(t)
-		_, err := f.src.Run(f.tx(t, 0, forwarder, 0, nil), (&echo{}).dispatch, nil)
+		_, err := f.src.Run(t.Context(), f.tx(t, 0, forwarder, 0, nil), (&echo{}).dispatch, nil)
 		require.NoError(t, err)
-		_, err = f.src.Run(f.tx(t, 1, reverter, 0, nil), (&echo{}).dispatch, nil)
+		_, err = f.src.Run(t.Context(), f.tx(t, 1, reverter, 0, nil), (&echo{}).dispatch, nil)
 		require.Error(t, err)
-		_, err = f.src.Run(f.tx(t, 1, forwarder, 0, nil), (&echo{}).dispatch, nil)
+		_, err = f.src.Run(t.Context(), f.tx(t, 1, forwarder, 0, nil), (&echo{}).dispatch, nil)
 		require.NoError(t, err)
 		require.Equal(t, uint64(2), f.nonce(t))
 	})
@@ -413,7 +442,7 @@ func TestSourceRefuses(t *testing.T) {
 				addr = f.sender
 			}
 			src := NewSource(chain.TestChainOsakaConfig, f.src.header, &failing{StateReader: f.state, addr: addr, armed: true, only: c.only}, f.src.blockHash, manager, 0)
-			_, err := src.Run(f.tx(t, 0, c.to, 0, nil), (&echo{}).dispatch, nil)
+			_, err := src.Run(t.Context(), f.tx(t, 0, c.to, 0, nil), (&echo{}).dispatch, nil)
 			require.ErrorIs(t, err, ErrStateRead)
 			require.ErrorIs(t, err, errDown)
 			require.False(t, IsPoison(err), err)
@@ -426,7 +455,7 @@ func TestSourceRefuses(t *testing.T) {
 		hasher := common.HexToAddress("0xc0000000000000000000000000000000000000aa")
 		f.state.deploy(hasher, append(slices.Clone(lastHash), forward(proxy, false)...))
 		src := NewSource(chain.TestChainOsakaConfig, f.src.header, f.state, func(uint64) (common.Hash, error) { return common.Hash{}, errDown }, manager, 0)
-		_, err := src.Run(f.tx(t, 0, hasher, 0, nil), (&echo{}).dispatch, nil)
+		_, err := src.Run(t.Context(), f.tx(t, 0, hasher, 0, nil), (&echo{}).dispatch, nil)
 		require.ErrorIs(t, err, ErrStateRead)
 		require.ErrorIs(t, err, errDown)
 		require.False(t, IsPoison(err), err)
@@ -435,14 +464,14 @@ func TestSourceRefuses(t *testing.T) {
 		f := newSourceFixture(t)
 		full := errors.New("full")
 		var seen []*Call
-		_, err := f.src.Run(f.tx(t, 0, forwarder, 0, nil), (&echo{}).dispatch, func(calls []*Call) error {
+		_, err := f.src.Run(t.Context(), f.tx(t, 0, forwarder, 0, nil), (&echo{}).dispatch, func(calls []*Call) error {
 			seen = calls
 			return full
 		})
 		require.ErrorIs(t, err, full)
 		require.Len(t, seen, 1)
 		require.Zero(t, f.nonce(t))
-		_, err = f.src.Run(f.tx(t, 0, forwarder, 0, nil), (&echo{}).dispatch, func([]*Call) error { return nil })
+		_, err = f.src.Run(t.Context(), f.tx(t, 0, forwarder, 0, nil), (&echo{}).dispatch, func([]*Call) error { return nil })
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), f.nonce(t))
 	})

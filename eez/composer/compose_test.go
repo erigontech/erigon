@@ -275,6 +275,20 @@ func TestComposeWaitsOnANonceGap(t *testing.T) {
 	})
 }
 
+// TestComposeStopsAtItsDeadline: a composition whose context has ended
+// takes nothing and leaves the pool as it was.
+func TestComposeStopsAtItsDeadline(t *testing.T) {
+	f := newCrossFixture(t)
+	trigger := f.hold(t, 0, f.call.Source, f.call.Data)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	sync := f.w.sync.Header()
+	require.Nil(t, f.c.compose(ctx, sync.Number.Uint64(), sync, 101))
+	require.Equal(t, []*Held{trigger}, f.pool.PopN(math.MaxInt))
+	require.Zero(t, trigger.Attempts)
+	require.Zero(t, trigger.Deferred)
+}
+
 // TestComposeBoundsThePostingGas: held transactions compose while the
 // posting's projected gas, from the anchor-only batch of the window, stays
 // within the ceiling less the drain margin; the rest waits, and one over it
@@ -770,6 +784,8 @@ func (f *crossFixture) poster(t *testing.T, sync *types.Block) (*Composer, *test
 	}
 	c := New(cfg, chain, witnesses, prover, poster, obs, func() uint64 { return 462 }, func() uint64 { return 0 }, headTo, log.New())
 	t.Cleanup(c.Close)
+	// The window's slot is a minute away.
+	c.now = func() time.Time { return time.Unix(int64(f.w.sync.Time())-60, 0) }
 	c.CrossChain(f.c.x)
 	return c, prover, poster, chain
 }
@@ -900,6 +916,7 @@ func TestComposeOutlivesAHungL1(t *testing.T) {
 	f := newCrossFixture(t)
 	trigger := f.hold(t, 0, f.call.Source, f.call.Data)
 	c, _, _, chain := f.poster(t, nil)
+	c.now = time.Now
 	c.x.L1Hash = func(ctx context.Context, _ uint64) (common.Hash, error) {
 		<-ctx.Done()
 		return common.Hash{}, ctx.Err()

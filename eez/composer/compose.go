@@ -169,6 +169,9 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 						}
 						popped += len(rest)
 					}
+					if err := ctx.Err(); err != nil {
+						return err
+					}
 					h := rest[0]
 					if slices.ContainsFunc(deferred, func(d *Held) bool { return d.chainKey() == h.chainKey() && h.Nonce > d.Nonce }) {
 						// It waits on the one of its chain ahead.
@@ -211,7 +214,7 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 						return err
 					}
 					var cost l1Cost
-					_, err = src.Run(tx, ds.Dispatch, func([]*Call) error {
+					_, err = src.Run(ctx, tx, ds.Dispatch, func([]*Call) error {
 						var err error
 						if cost, err = inboundCost(ds.Delivered); err != nil {
 							return err

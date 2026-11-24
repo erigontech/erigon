@@ -106,6 +106,8 @@ type Composer struct {
 	// x, when set, composes cross-chain effects in steady slots.
 	x      *CrossChain
 	logger log.Logger
+	// now times a composition against its slot's proof start.
+	now func() time.Time
 
 	ledger *Ledger[*Held]
 	// pending is the posting ComposeSyncSlot decided for SyncCommitted.
@@ -131,7 +133,7 @@ func New(cfg Config, chain Chain, witnesses Witnesses, prover Prover, poster Pos
 	return &Composer{
 		cfg: cfg, chain: chain, witnesses: witnesses, prover: prover, poster: poster, observer: observer,
 		cursor: cursor, finalized: finalized, headTo: headTo, logger: logger,
-		ledger: NewLedger[*Held](), ctx: ctx, cancel: cancel,
+		ledger: NewLedger[*Held](), ctx: ctx, cancel: cancel, now: time.Now,
 	}
 }
 
@@ -208,7 +210,7 @@ func (c *Composer) ComposeSyncSlot(ctx context.Context, parent *types.Header, ts
 	c.pending = c.decide(cursor, sync, ts, target, mode, inFlight)
 	if e := &c.pending; c.x != nil && e.kind == emitAnchor && e.target.Time != 0 {
 		// Its L1 reads end when the slot's proof must start.
-		cctx, cancel := context.WithDeadline(ctx, time.Unix(int64(ts), 0).Add(-c.cfg.Slack-c.cfg.Proof))
+		cctx, cancel := context.WithTimeout(ctx, time.Unix(int64(ts), 0).Add(-c.cfg.Slack-c.cfg.Proof).Sub(c.now()))
 		fx := c.compose(cctx, cursor, parent, target)
 		cancel()
 		if fx != nil {
