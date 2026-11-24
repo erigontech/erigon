@@ -2581,3 +2581,88 @@ func TestHistoryIdxRange_DescDBBounds(t *testing.T) {
 		})
 	}
 }
+
+func TestHistoryFlushMatchesPlainPut(t *testing.T) {
+	t.Parallel()
+	type entry struct {
+		key   []byte
+		txNum uint64
+		prev  []byte
+	}
+	key := func(i int) []byte { return binary.BigEndian.AppendUint64(make([]byte, 12), uint64(i)) }
+	forward := func(fromTxNum uint64, n int) []entry {
+		var es []entry
+		for i := range n {
+			txNum := fromTxNum + uint64(i)
+			prev := binary.BigEndian.AppendUint64(nil, txNum)
+			es = append(es, entry{key(0), txNum, prev}, entry{key(i % 50), txNum, prev}, entry{key(1000 + i), txNum, nil})
+		}
+		return es
+	}
+	batches := [][]entry{
+		forward(1, 400),
+		forward(401, 400),
+		append(forward(100, 50), forward(801, 50)...),
+		append(append(forward(851, 20), forward(851, 20)...), entry{key(7), 860, []byte("other")}),
+		forward(871, 30),
+	}
+
+	ctx := t.Context()
+	logger := log.New()
+	db, h := testDbAndHistory(t, false, logger)
+	refDB, _ := testDbAndHistory(t, false, logger)
+	hc := h.beginForTests()
+	defer hc.Close()
+	for _, batch := range batches {
+		require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+			w := hc.NewWriter(db)
+			for _, e := range batch {
+				if err := w.AddPrevValue(e.key, e.txNum, e.prev); err != nil {
+					return err
+				}
+			}
+			return w.Flush(ctx, tx)
+		}))
+		require.NoError(t, refDB.Update(ctx, func(tx kv.RwTx) error {
+			for _, e := range batch {
+				txNum := binary.BigEndian.AppendUint64(nil, e.txNum)
+				if err := tx.Put(h.ValuesTable, e.key, append(txNum, e.prev...)); err != nil {
+					return err
+				}
+				if err := tx.Put(h.KeysTable, txNum, e.key); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+	}
+
+	dump := func(db kv.RoDB) map[string][][2][]byte {
+		tables := map[string][][2][]byte{}
+		require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+			for _, table := range kv.ChaindataTables {
+				if err := func() error {
+					c, err := tx.Cursor(table)
+					if err != nil {
+						return err
+					}
+					defer c.Close()
+					for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+						if err != nil {
+							return err
+						}
+						tables[table] = append(tables[table], [2][]byte{bytes.Clone(k), bytes.Clone(v)})
+					}
+					return nil
+				}(); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+		return tables
+	}
+	got := dump(db)
+	require.NotEmpty(t, got[h.ValuesTable])
+	require.Equal(t, dump(refDB), got)
+}

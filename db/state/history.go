@@ -476,12 +476,26 @@ func (w *historyBufferedWriter) flush(ctx context.Context, tx kv.RwTx, keep *kee
 	if w.discard {
 		return nil
 	}
+	if w.historyVals != nil && !w.largeValues {
+		lastTxNum, err := w.lastKeysTxNum(tx)
+		if err != nil {
+			return err
+		}
+		if err := w.ii.Flush(ctx, tx); err != nil {
+			return err
+		}
+		if err := w.loadDupVals(ctx, tx, lastTxNum); err != nil {
+			return err
+		}
+		w.close()
+		return nil
+	}
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
 	if w.historyVals != nil {
 		load := loadFunc
-		if w.largeValues && keep != nil {
+		if keep != nil {
 			load = keep.load
 		}
 		if err := w.historyVals.Load(tx, w.historyValsTable, load, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
@@ -490,6 +504,34 @@ func (w *historyBufferedWriter) flush(ctx context.Context, tx kv.RwTx, keep *kee
 	}
 	w.close()
 	return nil
+}
+
+// lastKeysTxNum returns the largest txNum in the keys table, or MaxUint64 when it is empty.
+func (w *historyBufferedWriter) lastKeysTxNum(tx kv.Tx) (uint64, error) {
+	k, err := kv.LastKey(tx, w.ii.indexKeysTable)
+	if err != nil || len(k) == 0 {
+		return math.MaxUint64, err
+	}
+	return binary.BigEndian.Uint64(k), nil
+}
+
+// loadDupVals appends a value after the last dup of its key when it is larger than every value of
+// that key: stored dups all have a keys-table entry, so their txNum is <= lastTxNum, and ETL yields
+// the batch values of a key contiguously but in insertion order.
+func (w *historyBufferedWriter) loadDupVals(ctx context.Context, tx kv.RwTx, lastTxNum uint64) error {
+	c, err := tx.RwCursorDupSort(w.historyValsTable)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	var lastK, lastV []byte
+	return w.historyVals.Load(tx, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		if binary.BigEndian.Uint64(v) <= lastTxNum || (bytes.Equal(k, lastK) && bytes.Compare(v, lastV) <= 0) {
+			return c.Put(k, v)
+		}
+		lastK, lastV = append(lastK[:0], k...), append(lastV[:0], v...)
+		return c.AppendDup(k, v)
+	}, etl.TransformArgs{Quit: ctx.Done()})
 }
 
 type keepRetainedHistory struct {

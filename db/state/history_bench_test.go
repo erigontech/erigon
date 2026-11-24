@@ -18,6 +18,8 @@ package state
 
 import (
 	"encoding/binary"
+	"fmt"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -251,4 +253,74 @@ func collateHistory(b *testing.B, db kv.RwDB, h *History, txs uint64) {
 		require.NoError(b, h.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 	}
 	require.NoError(b, tx.Commit())
+}
+
+// BenchmarkHistoryWriterFlush flushes per-block history batches into a table that already holds
+// many keys; the zipf key choice gives hot keys with nested dup trees.
+func BenchmarkHistoryWriterFlush(b *testing.B) {
+	for _, largeValues := range []bool{false, true} {
+		for _, zipf := range []bool{false, true} {
+			b.Run(fmt.Sprintf("large=%t/zipf=%t", largeValues, zipf), func(b *testing.B) {
+				benchHistoryWriterFlush(b, largeValues, zipf)
+			})
+		}
+	}
+}
+
+func benchHistoryWriterFlush(b *testing.B, largeValues, skewed bool) {
+	const (
+		poolKeys     = 200_000
+		batchEntries = 3_000
+		warmupBlocks = 200
+	)
+	ctx := b.Context()
+	db, h := testDbAndHistory(b, largeValues, log.New())
+	rnd := rand.New(rand.NewPCG(1, 2))
+	zipf := rand.NewZipf(rnd, 1.1, 1, poolKeys-1)
+	pick := func() int {
+		if skewed {
+			return int(zipf.Uint64())
+		}
+		return rnd.IntN(poolKeys)
+	}
+	keys := make([][]byte, poolKeys)
+	for i := range keys {
+		keys[i] = make([]byte, 20)
+		binary.BigEndian.PutUint64(keys[i], rnd.Uint64())
+		binary.BigEndian.PutUint64(keys[i][8:], rnd.Uint64())
+	}
+	val := make([]byte, 32)
+	hc := h.beginForTests()
+	defer hc.Close()
+
+	var txNum uint64
+	block := func(timed bool) {
+		tx, err := db.BeginRw(ctx)
+		require.NoError(b, err)
+		defer tx.Rollback()
+		w := hc.NewWriter(db)
+		for i := range batchEntries {
+			binary.BigEndian.PutUint64(val, txNum)
+			require.NoError(b, w.AddPrevValue(keys[pick()], txNum+uint64(i), val))
+		}
+		txNum += batchEntries
+		if timed {
+			b.StartTimer()
+		}
+		require.NoError(b, w.Flush(ctx, tx))
+		if timed {
+			b.StopTimer()
+		}
+		require.NoError(b, tx.Commit())
+	}
+	for range warmupBlocks {
+		block(false)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.StopTimer()
+	for range b.N {
+		block(true)
+	}
 }
