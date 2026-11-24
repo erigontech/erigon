@@ -73,6 +73,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			return nil, &nonceError{ErrNonceTooLow, sender, tx.Nonce, nonce}
 		}
 	} else if st.msg.CheckNonce() {
+		var nonceTooHigh error
 		for _, key := range tx.NonceKeys {
 			sequence, err := st.state.GetState(accounts.InternAddress(types.FrameNonceManager), accounts.InternKey(types.FrameNonceSlot(tx.SenderAddress, key)))
 			if err != nil {
@@ -84,12 +85,20 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 				}
 				continue
 			}
-			if sequence.LtUint64(tx.Nonce) {
-				return nil, fmt.Errorf("%w: key %s, tx: %d state: %s", ErrNonceTooHigh, key.String(), tx.Nonce, sequence.String())
-			}
 			if sequence.GtUint64(tx.Nonce) {
 				return nil, fmt.Errorf("%w: key %s, tx: %d state: %s", ErrNonceTooLow, key.String(), tx.Nonce, sequence.String())
 			}
+			if nonceTooHigh == nil && sequence.LtUint64(tx.Nonce) {
+				nonceTooHigh = fmt.Errorf("%w: key %s, tx: %d state: %s", ErrNonceTooHigh, key.String(), tx.Nonce, sequence.String())
+				// A lagging sequence can catch up. Pool validation checks the remaining
+				// keys for a consumed nonce before reporting this gap.
+				if validation == nil {
+					return nil, nonceTooHigh
+				}
+			}
+		}
+		if nonceTooHigh != nil {
+			return nil, nonceTooHigh
 		}
 	}
 	baseFee, blobBaseFee := st.evm.Context.BaseFee, st.evm.Context.BlobBaseFee

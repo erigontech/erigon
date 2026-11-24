@@ -72,6 +72,17 @@ func TestFrameValidationKeyedNonceDependency(t *testing.T) {
 	require.True(t, sequence.IsZero(), "validation must not consume the key")
 }
 
+func TestFrameValidationNonceAboveAllKeys(t *testing.T) {
+	evm, tx := frameTestEnv(t)
+	manager := accounts.InternAddress(types.FrameNonceManager)
+	require.NoError(t, evm.IntraBlockState().SetNonce(manager, 1, tracing.NonceChangeUnspecified))
+	tx.Nonce = 1
+	tx.NonceKeys = []uint256.Int{{1}, {2}}
+	tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}}
+	_, err := ValidateFrameTransaction(evm, tx)
+	require.ErrorIs(t, err, ErrNonceTooHigh)
+}
+
 func TestFrameValidationPolicy(t *testing.T) {
 	t.Parallel()
 	for name, code := range map[string][]byte{
