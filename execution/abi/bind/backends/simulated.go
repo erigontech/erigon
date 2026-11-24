@@ -815,7 +815,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 	if _, err := protocol.ApplyTransaction(
 		b.m.ChainConfig, protocol.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
 		accounts.InternAddress(b.pendingHeader.Coinbase), b.gasPool,
-		b.pendingState, state.NewNoopWriter(),
+		b.pendingState,
 		b.pendingHeader, txn,
 		b.pendingGasUsed,
 		vm.Config{},

@@ -52,7 +52,7 @@ func TestJournalDirtySymmetry(t *testing.T) {
 	}{
 		{"createObjectChange", kindCreateObject, func(j *journal) { j.createObjectChange(addr) }},
 		{"resetObjectChange", kindResetObject, func(j *journal) { j.resetObjectChange(addr, nil, nil) }},
-		{"selfdestructChange", kindSelfdestruct, func(j *journal) { j.selfdestructChange(addr, false, false, val, false) }},
+		{"selfdestructChange", kindSelfdestruct, func(j *journal) { j.selfdestructChange(addr, false, val, false) }},
 		{"selfdestructChangeVersioned", kindSelfdestruct, func(j *journal) {
 			j.selfdestructChangeVersioned(addr, false, val, false, false, 0, false, val, false)
 		}},

@@ -182,7 +182,6 @@ func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, 
 		ibs = NewWithVersionMap(reader, NewVersionMap(nil))
 	} else {
 		ibs = New(reader)
-		ibs.SetVersionMap(nil)
 	}
 	t.Cleanup(ibs.Close)
 	ibs.SetTxContext(1, 5)
@@ -1491,19 +1490,4 @@ func TestVersionedRead_CodeSizeServedBySharedStore(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(code), size)
 	require.Zero(t, reader.codeReads+reader.codeSizeReads)
-}
-
-// A versioned read that finds a stateObject materialized before the IBS was bound to a
-// version map fails the read instead of panicking.
-func TestVersionedRead_MaterializedObjectFailsTheRead(t *testing.T) {
-	t.Parallel()
-	ibs := New(NewNoopReader())
-	ibs.SetVersionMap(nil)
-	addr := accounts.InternAddress(common.HexToAddress("0xab"))
-	require.NoError(t, ibs.CreateAccount(addr, true))
-	ibs.SetVersionMap(NewVersionMap(nil))
-	require.NotPanics(t, func() {
-		_, err := ibs.GetState(addr, accounts.InternKey(common.Hash{31: 1}))
-		require.Error(t, err)
-	})
 }
