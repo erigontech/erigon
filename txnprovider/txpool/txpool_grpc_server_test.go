@@ -144,7 +144,7 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	chainID := *uint256.NewInt(1)
 
 	mockPool := &addMockTxPool{
-		knownByCall: []bool{true, false, true}, // the second hash becomes known after its admission decision
+		knownByCall: []bool{true, false, true}, // a third lookup would hide the second input's rejection
 		addReasons:  []txpoolcfg.DiscardReason{txpoolcfg.TipAboveFeeCap},
 	}
 

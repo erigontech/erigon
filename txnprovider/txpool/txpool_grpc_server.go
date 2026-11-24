@@ -193,8 +193,9 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		var knownReason txpoolcfg.DiscardReason
 		validateHash := func(hash []byte) error {
 			reason, pooledSender := s.txPool.knownTxn(hash)
-			// An earlier input can replace a pooled transaction, and a new head can invalidate a
-			// cached frame rejection. Let admission resolve both in batch order.
+			// If earlier inputs await admission, only a rejection independent of pool
+			// and chain state is final. Those inputs can replace a pooled transaction,
+			// and a new head can invalidate a cached frame rejection.
 			if reason != txpoolcfg.NotSet && (len(slots.Txns) == 0 || cachedRejectionDependsOnlyOnTxn(reason)) {
 				knownReason = reason
 				return ErrRejected

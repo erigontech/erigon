@@ -1092,8 +1092,8 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 		}
 
 		// The gas limits determine whether a transaction fits. Until it executes,
-		// estimate the execution gas left for later candidates by deducting its
-		// intrinsic cost.
+		// estimate the execution gas left for later candidates by deducting the
+		// intrinsic execution cost or the applicable gas floor, whichever is higher.
 		if !isFrame {
 			to := mt.TxnSlot.Txn.GetTo()
 			isSelfTransfer := to != nil && *to == sender
@@ -1425,8 +1425,8 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		return txpoolcfg.TooManyBlobs
 	}
 
-	// The pool already counts these blobs for both limits. The transaction hash
-	// excludes the sidecar, so admission must still check the incoming bytes.
+	// A pooled hash already counts toward both limits. Sidecar verification is
+	// separate because different sidecars can accompany the same transaction.
 	if p.byHash[string(txn.IDHash[:])] != nil {
 		return txpoolcfg.Success
 	}
@@ -1446,8 +1446,9 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	return txpoolcfg.Success
 }
 
-// validateBlobSidecar checks the blob sidecar against the txn and adds its cells to cellsByHash.
-// It reads no pool state, so it does not need p.lock.
+// validateBlobSidecar verifies the sidecar against the transaction using the active fork's
+// proof rules. Fork checks use atomic flags, so verification can run without the pool lock.
+// From Amsterdam onward, callers can collect the derived cells in cellsByHash.
 func (p *TxPool) validateBlobSidecar(txn *TxnSlot, cellsByHash blobCells) txpoolcfg.DiscardReason {
 	blobHashes := txn.GetBlobHashes()
 	blobCount := len(blobHashes)
@@ -1748,7 +1749,8 @@ func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.
 }
 
 // Each admission stays at its original input index through preparation, insertion
-// and promotion. The installed entry records any eviction before the batch returns.
+// and promotion. Keeping the installed entry ties an eviction to the input that
+// added it, even when another input has the same hash.
 type txnAdmission struct {
 	txn              *TxnSlot
 	sender           common.Address
@@ -1767,6 +1769,7 @@ type admissionBatch struct {
 	preparedCells blobCells
 }
 
+// Any supplied sources must follow input order so a bad sidecar is attributed to the correct peer.
 func newAdmissionBatch(txns TxnSlots, sources []remoteSource) admissionBatch {
 	batch := admissionBatch{txns: make([]txnAdmission, len(txns.Txns))}
 	for i, txn := range txns.Txns {
@@ -1824,8 +1827,9 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 	return batch, nil
 }
 
-// A precheck can skip expensive work based on the current nonce, balance or pool
-// limits. Recheck those candidates under the admission lock before returning a rejection.
+// Nonce, balance and pool limits can defer expensive preparation. Recheck deferred
+// inputs under the admission lock. Return true if any input is ready for signature
+// recovery or sidecar verification outside that lock.
 func (p *TxPool) precheckUnprepared(batch *admissionBatch, view kvcache.CacheView) (bool, error) {
 	var ready bool
 	for i := range batch.txns {
@@ -1898,10 +1902,10 @@ func (p *TxPool) prepareCandidates(batch *admissionBatch) {
 	}
 }
 
-// kzgOffenders tracks remote sources whose later transactions must be skipped.
+// After a remote proof failure, skip later inputs from the same peer that still need validation.
 type kzgOffenders struct {
 	peers     [][64]byte
-	allRemote bool // a failure without a peer ID skips every later remote txn
+	allRemote bool // a failure without a peer ID extends the rule to all remote sources
 }
 
 func (o *kzgOffenders) skip(source remoteSource) bool {
@@ -1936,7 +1940,7 @@ func (p *TxPool) validateTxns(txns []txnAdmission, stateCache kvcache.CacheView,
 	return nil
 }
 
-// A successful validation leaves the decision open for insertion.
+// A candidate that passes validation keeps NotSet until insertion decides its result.
 func (p *TxPool) validateCandidate(a *txnAdmission, view kvcache.CacheView, cells blobCells, unwinding bool) error {
 	if a.txn.TxType() == FrameTxnType {
 		if a.frame.validation == nil {
@@ -1991,6 +1995,9 @@ func (p *TxPool) punishSpammer(spammer uint64) {
 
 const localAdmissionTimeout = 30 * time.Second
 
+// AddLocalTxns returns one result per input in order when the error is nil.
+// Success means the entry added by that input was still pooled after promotion.
+// DuplicateHash means the hash was already pooled when admission reached that input.
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
 	ctx, cancel := context.WithTimeout(ctx, localAdmissionTimeout)
 	defer cancel()
@@ -2034,8 +2041,9 @@ func (p *TxPool) waitForCondition(ctx context.Context, stop <-chan struct{}, rea
 	}
 }
 
-// Head-change retries share one simulation deadline. Admission returns
-// errStateViewStale so recovery can wait outside that budget and restart admission.
+// Preparing a deferred input preserves earlier frame simulations. Admission rechecks
+// their generation before using them. Any new simulation shares the original deadline.
+// Returning errStateViewStale lets the caller wait for recovery outside that budget.
 func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource) ([]txpoolcfg.DiscardReason, error) {
 	batch, err := p.prepareTxns(ctx, newTxns, sources)
 	if err != nil {
@@ -2121,8 +2129,8 @@ func (p *TxPool) addTxns(cacheView kvcache.CacheView, txns []txnAdmission, cells
 		a := &txns[i]
 		txn := a.txn
 		if !a.local {
-			// A transaction hash does not identify its sidecar. Keep the result for
-			// the peer that supplied it, even if the transaction is already pooled.
+			// A pooled hash cannot establish that a peer's sidecar is valid. Preserve
+			// both sidecar rejections and skips caused by an earlier remote proof failure.
 			switch a.reason {
 			case txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail, txpoolcfg.SkippedAfterKZGFailure:
 				continue
@@ -2130,7 +2138,7 @@ func (p *TxPool) addTxns(cacheView kvcache.CacheView, txns []txnAdmission, cells
 		}
 		if found := p.byHash[string(txn.IDHash[:])]; found != nil {
 			a.reason = txpoolcfg.DuplicateHash
-			// Reannounce a stuck local transaction when it is resubmitted.
+			// A local resubmission can help the pooled transaction propagate again.
 			if a.local && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
 				announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.Size, found.TxnSlot.IDHash[:])
 			}
@@ -2146,7 +2154,8 @@ func (p *TxPool) addTxns(cacheView kvcache.CacheView, txns []txnAdmission, cells
 			panic("senderID can't be zero")
 		}
 		if a.frame.validation != nil {
-			// Only the input being inserted may change the payer reservation.
+			// Inputs can share a slot. Attach this result after the duplicate check so
+			// a pooled frame keeps the validation that matches its payer reservation.
 			txn.frameValidation = a.frame.validation
 		}
 		mt := newMetaTxn(txn, a.local, blockNum)
@@ -2403,8 +2412,8 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 	return txpoolcfg.NotSet
 }
 
-// dropping transaction from all sub-structures and from db
-// Important: don't call it while iterating by all
+// discardLocked removes the entry from the pool indexes and queues its database
+// row for deletion on flush. Finish iterating p.all before calling it.
 func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	mt.discardReason = reason
 	p.releaseFrame(mt.TxnSlot)

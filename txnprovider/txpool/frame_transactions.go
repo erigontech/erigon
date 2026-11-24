@@ -79,7 +79,7 @@ type frameValidationResult struct {
 	validation      *protocol.FrameValidation
 	blocker         *metaTxn // the pooled entry that prevented simulation
 	reason          txpoolcfg.DiscardReason
-	sidecarVerified bool
+	sidecarVerified bool // Set when the sidecar matches verified pool data. Frame simulation checks only the inner transaction.
 	headChanged     bool
 }
 
@@ -303,9 +303,10 @@ func (p *TxPool) waitForStateChange(ctx context.Context, generation uint64) bool
 }
 
 // applyFrameValidation checks simulation results against the locked state view.
-// While time remains, retry if the head or a blocker changed. After the deadline,
-// keep results for the current head and check unsimulated frames for consumed
-// nonces. The insertion loop resolves conflicts against current pool membership.
+// A stale generation or a removed blocker can require another simulation while
+// time remains. After the deadline, keep simulations from the current generation
+// and check stale frames for policy or nonce rejections. Insertion resolves
+// sender conflicts in batch order.
 func (p *TxPool) applyFrameValidation(ctx context.Context, txns []txnAdmission, generation uint64, stateCache kvcache.CacheView) error {
 	stale := generation != p.stateGeneration
 	if stale && ctx.Err() == nil {
@@ -329,7 +330,8 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns []txnAdmission, 
 				a.reason = txpoolcfg.DuplicateHash
 				continue
 			}
-			// State can establish that the nonce was consumed even when the frame could not be simulated.
+			// A consumed nonce takes precedence over a sender conflict or an unavailable
+			// simulation. Check it against the state view used for admission.
 			consumed, err := p.nonceConsumed(txn, stateCache)
 			if err != nil {
 				return err
@@ -425,7 +427,8 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 			reason = txpoolcfg.NonceTooLow
 		}
 		p.lock.Lock()
-		// Only revalidation can reject a pooled entry, including a parked one.
+		// Revalidation caches a backend rejection for a pooled frame only after
+		// confirming that the same entry is still parked at this generation.
 		if generation == p.stateGeneration && p.byHash[hash] == nil {
 			p.frameRejections.Add(hash, frameRejection{generation: generation, reason: reason})
 		}

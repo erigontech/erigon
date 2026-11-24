@@ -281,7 +281,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
 		}
 		slot.Txn = txn
-		// The hash covers only the inner tx, so a known txn is rejected before its blobs are copied.
+		// The hash covers only the inner transaction. The callback can reject a
+		// known hash here and avoid copying the sidecar.
 		slot.IDHash = crypto.Keccak256Hash(innerTxBytes)
 		if validateHash != nil {
 			err = validateHash(slot.IDHash[:])
@@ -492,7 +493,7 @@ type PoolBlobBundle struct {
 // and deletion records for rows rejected on reload (IDHash and SenderID).
 type TxnSlot struct {
 	Txn      types.Transaction // Sidecars for type-3 and frame transactions are stored in BlobBundles
-	Rlp      []byte            // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
+	Rlp      []byte            // Flush clears this field for transactions without blobs to save memory. Later reads can use the database.
 	SenderID uint64            // SenderID - require external mapping to it's address
 	Nonce    uint64            // Nonce of the transaction (kept as field for btree search sentinel)
 	IDHash   [32]byte          // Transaction hash for the purposes of using it as a transaction Id
@@ -502,7 +503,7 @@ type TxnSlot struct {
 	senderVerified bool
 	Size           uint32 // Cached size of the RLP payload (persists after Rlp is set to nil)
 
-	BlobBundles []PoolBlobBundle // Parsed blob bytes reference the input RLP
+	BlobBundles []PoolBlobBundle // Parsed blob bytes reference the slot's copy of the network wrapper in Rlp.
 
 	// AuthAndNonces caches recovered authority/nonce pairs; nil means not recovered.
 	// Invalid tuples and authorizations for other chains are omitted.
