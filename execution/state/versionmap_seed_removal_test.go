@@ -453,6 +453,69 @@ func TestSeedEmptyRemovalsRevivalIndexes(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(1), requireDoneCell(t, otherBalances, 8-1, 0).Value)
 }
 
+func seedRemovalsForFundedAccount(t *testing.T, changes types.AccountChanges) (*VersionMap, accounts.Address) {
+	t.Helper()
+	addr := accounts.InternAddress(common.HexToAddress("0xd7b1"))
+	changes.Address = addr.Value()
+	bal := types.BlockAccessList{changes}
+	require.NoError(t, bal.Validate())
+	vm := NewVersionMap(bal)
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, newAccountStateReader(addr)))
+	return vm, addr
+}
+
+func TestSeedEmptyRemovalsRevivalByOneField(t *testing.T) {
+	t.Parallel()
+	for name, changes := range map[string]types.AccountChanges{
+		"nonce": {NonceChanges: []*types.NonceChange{{Index: 2, Value: 1}}},
+		"code":  {CodeChanges: []*types.CodeChange{{Index: 2, Bytecode: []byte{0x00}}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			changes.BalanceChanges = []*types.BalanceChange{{Index: 1}}
+			vm, addr := seedRemovalsForFundedAccount(t, changes)
+			balances := vm.load(addr).Balance
+			require.Equal(t, ValueDeleted, requireDoneCell(t, balances, 0, 0).valStatus)
+			revival := requireDoneCell(t, balances, 1, 0)
+			require.Equal(t, ValueChanged, revival.valStatus)
+			require.True(t, revival.Value.IsZero())
+		})
+	}
+}
+
+func TestSeedEmptyRemovalsWriteAtRemovalIndex(t *testing.T) {
+	t.Parallel()
+	vm, addr := seedRemovalsForFundedAccount(t, types.AccountChanges{
+		BalanceChanges: []*types.BalanceChange{{Index: 1}, {Index: 3}, {Index: 5, Value: *uint256.NewInt(7)}},
+		StorageChanges: []types.SlotChanges{{
+			Slot: accounts.InternKey(common.Hash{31: 1}),
+			Changes: []*types.StorageChange{
+				{Index: 1, Value: *uint256.NewInt(1)}, {Index: 3}, {Index: 5, Value: *uint256.NewInt(2)},
+			},
+		}},
+	})
+	balances := vm.load(addr).Balance
+	require.Equal(t, 3, balances.Len())
+	require.Equal(t, ValueDeleted, requireDoneCell(t, balances, 0, 0).valStatus)
+	require.Equal(t, ValueDeleted, requireDoneCell(t, balances, 2, 0).valStatus)
+	require.Equal(t, *uint256.NewInt(7), requireDoneCell(t, balances, 4, 0).Value)
+}
+
+func TestSeedEmptyRemovalsFinalStorageWrite(t *testing.T) {
+	t.Parallel()
+	vm, addr := seedRemovalsForFundedAccount(t, types.AccountChanges{
+		BalanceChanges: []*types.BalanceChange{{Index: 1}},
+		StorageChanges: []types.SlotChanges{{
+			Slot:    accounts.InternKey(common.Hash{31: 1}),
+			Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(1)}},
+		}},
+	})
+	require.Equal(t, map[derivedRemovalKey]struct{}{{addr, 0}: {}, {addr, 1}: {}}, vm.derivedRemovals)
+	balances := vm.load(addr).Balance
+	require.Equal(t, ValueDeleted, requireDoneCell(t, balances, 0, 0).valStatus)
+	require.Equal(t, ValueDeleted, requireDoneCell(t, balances, 1, 0).valStatus)
+}
+
 type countedBALChange struct {
 	index uint32
 	reads *int
@@ -470,12 +533,12 @@ func TestRecordBALRevivalsSkipsUnrelatedChanges(t *testing.T) {
 	for i := range changes {
 		changes[i] = countedBALChange{index: uint32(2 * i), reads: &reads}
 	}
-	candidates := []balRemovalCandidate{{index: 7, nextWriteIndex: 8}, {index: 127, nextWriteIndex: 130}}
-	recordBALRevivals(candidates, changes)
-	require.False(t, candidates[0].seedZeroBalance)
-	require.True(t, candidates[1].seedZeroBalance)
-	require.Equal(t, uint32(128), candidates[1].nextWriteIndex)
-	require.Less(t, reads, len(changes), "sparse candidates should skip unrelated field writes")
+	removals := []balRemoval{{index: 7, nextWriteIndex: 8}, {index: 127, nextWriteIndex: 130}}
+	recordBALRevivals(removals, changes)
+	require.False(t, removals[0].seedZeroBalance)
+	require.True(t, removals[1].seedZeroBalance)
+	require.Equal(t, uint32(128), removals[1].nextWriteIndex)
+	require.Less(t, reads, 32, "a linear scan would read 65 changes to reach index 128")
 }
 
 func TestHasAmbiguousBaseAccount(t *testing.T) {

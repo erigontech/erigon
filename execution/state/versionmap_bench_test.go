@@ -47,18 +47,46 @@ func BenchmarkSeedEmptyRemovals(b *testing.B) {
 				key := accounts.InternKey(common.BigToHash(big.NewInt(int64(slot + 1))))
 				bal[0].StorageChanges = append(bal[0].StorageChanges, types.SlotChanges{Slot: key, Changes: changes})
 			}
-			require.NoError(b, bal.Validate())
-			base := &countingAccountReader{}
-			var vm *VersionMap
-			for b.Loop() {
-				b.StopTimer()
-				vm = NewVersionMap(bal)
-				b.StartTimer()
-				require.NoError(b, vm.SeedEmptyRemovals(true, false, base))
-			}
-			require.Len(b, vm.derivedRemovals, removals)
+			benchmarkSeedEmptyRemovals(b, bal, removals)
 		})
 	}
+}
+
+func BenchmarkSeedEmptyRemovalsWithNonzeroNonce(b *testing.B) {
+	const balances = 256
+	ac := types.AccountChanges{
+		Address:      common.Address{19: 1},
+		NonceChanges: []*types.NonceChange{{Index: 2, Value: 1}},
+	}
+	for i := range balances {
+		ac.BalanceChanges = append(ac.BalanceChanges, &types.BalanceChange{
+			Index: uint32(2*i + 1), Value: *uint256.NewInt(uint64(i % 2)),
+		})
+	}
+	for i := range 16 {
+		slot := types.SlotChanges{Slot: accounts.InternKey(common.Hash{31: byte(i + 1)})}
+		for j := range balances - 1 {
+			slot.Changes = append(slot.Changes, &types.StorageChange{
+				Index: uint32(2*j + 2), Value: *uint256.NewInt(uint64(j + 1)),
+			})
+		}
+		ac.StorageChanges = append(ac.StorageChanges, slot)
+	}
+	benchmarkSeedEmptyRemovals(b, types.BlockAccessList{ac}, 1)
+}
+
+func benchmarkSeedEmptyRemovals(b *testing.B, bal types.BlockAccessList, wantRemovals int) {
+	b.Helper()
+	require.NoError(b, bal.Validate())
+	base := &countingAccountReader{}
+	var vm *VersionMap
+	for b.Loop() {
+		b.StopTimer()
+		vm = NewVersionMap(bal)
+		b.StartTimer()
+		require.NoError(b, vm.SeedEmptyRemovals(true, false, base))
+	}
+	require.Len(b, vm.derivedRemovals, wantRemovals)
 }
 
 func BenchmarkWriteTimeSameLocationDifferentTxIdx(b *testing.B) {
