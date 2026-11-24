@@ -60,6 +60,8 @@ type Held struct {
 	Direction Direction
 	MaxFee    uint256.Int
 	Tip       uint256.Int
+	// Cost is its upfront cost: value plus gas limit times max fee.
+	Cost uint256.Int
 }
 
 // NonceError refuses a transaction whose nonce does not extend its sender's
@@ -68,6 +70,14 @@ type NonceError struct{ Expected, OnChain uint64 }
 
 func (e *NonceError) Error() string {
 	return fmt.Sprintf("nonce out of order: expected %d, %d on chain", e.Expected, e.OnChain)
+}
+
+// FundsError refuses a transaction whose sender's balance does not cover
+// the upfront cost of its held chain with it: Need.
+type FundsError struct{ Balance, Need uint256.Int }
+
+func (e *FundsError) Error() string {
+	return fmt.Sprintf("balance %s short of the %s its held transactions need", &e.Balance, &e.Need)
 }
 
 // UnderpricedError refuses a replacement that does not raise both fees by
@@ -89,6 +99,7 @@ type reservation struct {
 	chainKey
 	nonce uint64
 	slots int
+	cost  uint256.Int
 }
 
 const (
@@ -156,7 +167,16 @@ func NewHeldPool() *HeldPool {
 // nonce of its chain, or a replacement of a queued one raising both fees,
 // within the size, chain and pool limits. A transaction already held is
 // admitted again without effect.
-func (p *HeldPool) Push(tx *Held, onChain uint64) error {
+func (p *HeldPool) Push(tx *Held, onChain uint64) error { return p.push(tx, onChain, nil) }
+
+// PushFunded admits tx as Push does while balance, its sender's on its
+// network, covers the upfront cost of its chain from onChain with it: the
+// queued and in-flight transactions', a replaced one's aside.
+func (p *HeldPool) PushFunded(tx *Held, onChain uint64, balance *uint256.Int) error {
+	return p.push(tx, onChain, balance)
+}
+
+func (p *HeldPool) push(tx *Held, onChain uint64, balance *uint256.Int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if _, ok := p.inFlight[tx.Hash]; ok || p.byHash[tx.Hash] {
@@ -184,6 +204,9 @@ func (p *HeldPool) Push(tx *Held, onChain uint64) error {
 		if tx.MaxFee.Lt(&maxFee) || tx.Tip.Lt(&tip) {
 			return &UnderpricedError{MaxFee: tx.MaxFee, RequiredMaxFee: maxFee, Tip: tx.Tip, RequiredTip: tip}
 		}
+		if err := p.funds(k, onChain, queued.Hash, tx, balance); err != nil {
+			return err
+		}
 		if p.used()-slotsOf(queued.Raw)+slotsOf(tx.Raw) > p.slots {
 			return ErrHeldPoolFull
 		}
@@ -202,8 +225,42 @@ func (p *HeldPool) Push(tx *Held, onChain uint64) error {
 	case p.used()+slotsOf(tx.Raw) > p.slots:
 		return ErrHeldPoolFull
 	}
+	if err := p.funds(k, onChain, common.Hash{}, tx, balance); err != nil {
+		return err
+	}
 	p.byHash[tx.Hash] = true
 	p.txs = append(p.txs, tx)
+	return nil
+}
+
+// funds checks that balance, when set, covers the upfront cost of k's chain
+// from onChain with tx, the transaction of replaced aside.
+func (p *HeldPool) funds(k chainKey, onChain uint64, replaced common.Hash, tx *Held, balance *uint256.Int) error {
+	if balance == nil {
+		return nil
+	}
+	need, overflow := tx.Cost, false
+	add := func(c *uint256.Int) {
+		if !overflow {
+			_, overflow = need.AddOverflow(&need, c)
+		}
+	}
+	for _, q := range p.txs {
+		if q.chainKey() == k && q.Nonce >= onChain && q.Hash != replaced {
+			add(&q.Cost)
+		}
+	}
+	for _, r := range p.inFlight {
+		if r.chainKey == k && r.nonce >= onChain {
+			add(&r.cost)
+		}
+	}
+	if overflow || balance.Lt(&need) {
+		if overflow {
+			need.SetAllOne()
+		}
+		return &FundsError{Balance: *balance, Need: need}
+	}
 	return nil
 }
 
@@ -296,7 +353,7 @@ func (p *HeldPool) Reserve(txs []*Held) {
 		if n, ok := conflict[tx.chainKey()]; (ok && tx.Nonce >= n) || p.byHash[tx.Hash] {
 			continue
 		}
-		p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce, slotsOf(tx.Raw)}
+		p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce, slotsOf(tx.Raw), tx.Cost}
 	}
 }
 
@@ -345,7 +402,7 @@ func (p *HeldPool) PopN(n int) []*Held {
 	for _, tx := range drained {
 		delete(p.byHash, tx.Hash)
 		if _, ok := p.inFlight[tx.Hash]; !ok {
-			p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce, slotsOf(tx.Raw)}
+			p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce, slotsOf(tx.Raw), tx.Cost}
 		}
 	}
 	return drained

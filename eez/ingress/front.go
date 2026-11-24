@@ -276,7 +276,11 @@ func (f *Front) admit(ctx context.Context, raw []byte, tx types.Transaction) (co
 	h := &composer.Held{Raw: raw, Hash: crypto.Keccak256Hash(raw), Sender: sender, Nonce: tx.GetNonce(), Direction: f.Direction}
 	h.MaxFee.Set(tx.GetFeeCap())
 	h.Tip.Set(tx.GetTipCap())
-	if err := f.Pool.Push(h, onChain); err != nil {
+	h.Cost.Set(cost)
+	if err := f.Pool.PushFunded(h, onChain, balance); err != nil {
+		if funds, ok := errors.AsType[*composer.FundsError](err); ok {
+			return common.Hash{}, fmt.Errorf("insufficient balance for %s: have %s, need %s (value + gas limit × max fee of its held transactions)", sender, &funds.Balance, &funds.Need)
+		}
 		if nonce, ok := errors.AsType[*composer.NonceError](err); ok {
 			return common.Hash{}, fmt.Errorf("invalid nonce %d for %s: expected next unreserved nonce %d (source-chain nonce %d)", h.Nonce, sender, nonce.Expected, nonce.OnChain)
 		}

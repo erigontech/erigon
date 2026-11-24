@@ -341,6 +341,32 @@ func TestHeldPoolLimits(t *testing.T) {
 	})
 }
 
+// TestHeldPoolFunds: a sender's balance covers the upfront cost of its held
+// chain, queued and in flight, a replaced transaction's aside.
+func TestHeldPoolFunds(t *testing.T) {
+	costing := func(nonce uint64, h byte, cost uint64) *Held {
+		tx := held(addr(0xa), nonce, Inbound, h)
+		tx.Cost.SetUint64(cost)
+		return tx
+	}
+	balance := uint256.NewInt(10)
+	p := NewHeldPool()
+	require.NoError(t, p.PushFunded(costing(0, 1, 5), 0, balance))
+	require.NoError(t, p.PushFunded(costing(1, 2, 5), 0, balance))
+	var funds *FundsError
+	require.ErrorAs(t, p.PushFunded(costing(2, 3, 1), 0, balance), &funds)
+	require.Equal(t, uint64(11), funds.Need.Uint64())
+	drained := p.PopN(1)
+	require.ErrorAs(t, p.PushFunded(costing(2, 3, 1), 0, balance), &funds, "in flight counts")
+	require.ErrorAs(t, p.PushFunded(costing(1, 9, 6), 0, balance), &funds, "a replacement costing more")
+	require.NoError(t, p.PushFunded(costing(1, 9, 4), 0, balance), "a replacement costing less")
+	require.NoError(t, p.PushFunded(costing(2, 3, 1), 0, balance))
+	p.Release(drained)
+	// Spent on L1, the first no longer counts: 4 and 1 held of 5.
+	require.NoError(t, p.PushFunded(costing(3, 4, 0), 1, uint256.NewInt(5)))
+	require.ErrorAs(t, p.PushFunded(costing(4, 5, 1), 1, uint256.NewInt(5)), &funds)
+}
+
 func TestHeldPoolPopN(t *testing.T) {
 	p := NewHeldPool()
 	a, b := addr(0xa), addr(0xb)

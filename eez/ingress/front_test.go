@@ -339,6 +339,19 @@ func TestFrontBoundsASender(t *testing.T) {
 	require.Equal(t, 16, h.front.Pool.Len())
 }
 
+// TestFrontFundsTheChain: a sender's balance covers the upfront cost of all
+// its held transactions, not of each alone.
+func TestFrontFundsTheChain(t *testing.T) {
+	h := newFront(t, composer.Inbound)
+	h.src.balance = 2*100_000*100 - 1
+	require.Nil(t, h.send(t, h.sign(t, dynamic(0, 100_000, ptr(target)), chainID)).Error)
+	a := h.send(t, h.sign(t, dynamic(1, 100_000, ptr(target)), chainID))
+	require.NotNil(t, a.Error)
+	require.Contains(t, a.Error.Message, "insufficient balance")
+	require.Contains(t, a.Error.Message, "held transactions")
+	require.Equal(t, 1, h.front.Pool.Len())
+}
+
 // TestFrontReservations: a nonce drained for a batch is not taken again, and
 // the chain continues above it.
 func TestFrontReservations(t *testing.T) {
