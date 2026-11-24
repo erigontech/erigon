@@ -18,7 +18,6 @@ package state
 
 import (
 	"cmp"
-	"slices"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -321,17 +320,14 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 	var candidates []balRemovalCandidate
 	for i := range vm.bal {
 		ac := &vm.bal[i]
-		maxIdx := max(balLastChangeIndex(ac.NonceChanges), balLastChangeIndex(ac.CodeChanges))
+		maxIdx := max(
+			balLastChangeIndex(ac.BalanceChanges),
+			balLastChangeIndex(ac.NonceChanges),
+			balLastChangeIndex(ac.CodeChanges),
+		)
 		for _, slot := range ac.StorageChanges {
 			if changes := slot.Changes; len(changes) > 0 {
 				maxIdx = max(maxIdx, changes[len(changes)-1].Index)
-			}
-		}
-		var zeroBalances int
-		for _, c := range ac.BalanceChanges {
-			maxIdx = max(maxIdx, c.Index)
-			if c.Value.IsZero() {
-				zeroBalances++
 			}
 		}
 		if maxIdx == 0 {
@@ -344,7 +340,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 		if len(ac.BalanceChanges) == 0 && len(ac.NonceChanges) == 0 && len(ac.CodeChanges) == 0 {
 			continue
 		}
-		candidates = slices.Grow(candidates[:0], zeroBalances+1)
+		candidates = candidates[:0]
 		for j, c := range ac.BalanceChanges {
 			if !c.Value.IsZero() || c.Index == maxIdx {
 				continue
