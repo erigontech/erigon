@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -694,16 +693,14 @@ func (s ReadSet) RangeFullHeaders(yield func(accounts.Address, AccountPath, acco
 }
 
 // WriteHeader is the type-agnostic part of a versioned write: address,
-// path, optional storage key, tx-version and balance-change reason.
+// path, optional storage key and tx-version.
 // Shared across every per-path write via embedding in VersionedWrite[T].
 type WriteHeader struct {
-	Address     accounts.Address
-	Key         accounts.StorageKey
-	Version     Version
-	Path        AccountPath
-	Reason      tracing.BalanceChangeReason
-	NonceReason tracing.NonceChangeReason
-	valStatus   valueStatus
+	Address   accounts.Address
+	Key       accounts.StorageKey
+	Version   Version
+	Path      AccountPath
+	valStatus valueStatus
 }
 
 func (h WriteHeader) String() string {
@@ -1329,7 +1326,7 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 			}
 		}
 		// CreateContract survives self-destruct: fee finalization and the BAL need
-		// the creation marker. ApplyVersionedWrites skips applying it under
+		// the creation marker. ApplyWrites skips applying it under
 		// self-destruct, so keeping it here does not resurrect the account.
 		if vw, ok := ws.createContract[addr]; ok {
 			out.SetCreateContract(addr, cloneVW(vw))
@@ -2014,71 +2011,13 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		return &updated, nil
 	}
 
-	// Check version map for AddressPath — handles accounts created by
-	// prior transactions in the same block that aren't in the read set.
-	if vr.versionMap != nil {
-		// A prior tx may have self-destructed this account. Honor the destruct
-		// only if no subsequent write at a strictly higher TxIndex re-creates it,
-		// so a later tip to a pruned coinbase surfaces the re-created account.
-		if vr.versionMap.IsNetAbsent(address, vr.txIndex) {
-			// A self-destruct stamps its balance write ValueDeleted when it burns the
-			// account; a balance-preserving destruct (EIP-8246) leaves a non-deleting
-			// balance. Reconstruct the balance-only EOA only in the latter case — the
-			// delete/preserve decision rides the write, so no fork flag is needed. A
-			// net-absent account with a non-zero kept balance surfaces (an empty one is
-			// EIP-161-removed).
-			if _, res, ok := vr.versionMap.ReadBalance(address, vr.txIndex); ok && res.ValStatus() != ValueDeleted {
-				var synth accounts.Account
-				if updated := vr.applyVersionedUpdates(address, synth); !updated.Balance.IsZero() {
-					return &updated, nil
-				}
-			}
+	if vr.versionMap == nil {
+		if vr.stateReader == nil {
 			return nil, nil
 		}
-		if acc, ok := versionedUpdateAddress(vr.versionMap, address, vr.txIndex); ok && acc != nil {
-			updated := vr.applyVersionedUpdates(address, *acc)
-			return &updated, nil
-		}
+		return vr.stateReader.ReadAccountData(address)
 	}
-
-	// A BAL-marked AddressPath defers to the stored origin, so the fee calculation's per-tx reads
-	// stay in memory. An origin seeded at validation may hold in-block writes below its txIndex; it
-	// is seeded only after every lower tx is validated, so its readers read at or after that index.
-	if vr.versionMap != nil {
-		if base, ok := vr.versionMap.LoadOriginAccount(address); ok && base != nil {
-			updated := vr.applyVersionedUpdates(address, *base)
-			return &updated, nil
-		}
-	}
-
-	if vr.stateReader != nil {
-		account, err := vr.stateReader.ReadAccountData(address)
-		if err != nil {
-			return nil, err
-		}
-
-		if account != nil {
-			updated := vr.applyVersionedUpdates(address, *account)
-			return &updated, nil
-		}
-	}
-
-	// No stateReader account and no AddressPath entry. The BAL pre-population
-	// writes only field paths (not AddressPath), so an account created mid-block
-	// purely by tip credits has post-tx balances in the versionMap that
-	// ReadAccountData would otherwise miss. Synthesize an empty account and let
-	// applyVersionedUpdates apply the BAL-preloaded fields.
-	if vr.versionMap != nil {
-		var synth accounts.Account
-		updated := vr.applyVersionedUpdates(address, synth)
-		// Only return it if at least one field was applied; else this address has
-		// no versionMap entries and must stay absent.
-		if updated != synth {
-			return &updated, nil
-		}
-	}
-
-	return nil, nil
+	return vr.versionMap.ApplyView(vr.txIndex, vr.stateReader).ReadAccountData(address)
 }
 
 func (vr *versionedStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
@@ -2094,17 +2033,6 @@ func (vr *versionedStateReader) HasAccount(address common.Address) (bool, error)
 // (Estimate) write exists at txIndex — a Dependency cell holds the same latest
 // in-block write a Done cell does, and finalize reconstruction must consume it
 // rather than fall back to the pre-block DB value — else zero value and ok=false.
-
-func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) (*accounts.Account, bool) {
-	val, res, ok := vm.ReadAddress(addr, txIndex)
-	if ok && res.Status() != MVReadResultNone {
-		if res.accSource() == AccountFromBAL {
-			return nil, false
-		}
-		return val, true
-	}
-	return nil, false
-}
 
 func versionedUpdateBalance(vm *VersionMap, addr accounts.Address, txIndex int) (uint256.Int, bool) {
 	val, res, ok := vm.ReadBalance(addr, txIndex)
@@ -2413,24 +2341,6 @@ func (ws *WriteSet) TouchUpdates(updates *commitment.Updates) {
 			updates.TouchPlainKeyDirect(string(composite), &u)
 		}
 	}
-}
-
-// sortWriteHeaders sorts headers by (Address, Path, Key) for deterministic
-// processing order; WriteSet map iteration is non-deterministic in Go.
-// The sort relies on the AccountPath enum ordering defined in versionmap.go.
-func sortWriteHeaders(headers []WriteHeader) {
-	slices.SortFunc(headers, func(a, b WriteHeader) int {
-		if c := a.Address.Cmp(b.Address); c != 0 {
-			return c
-		}
-		if a.Path != b.Path {
-			if a.Path < b.Path {
-				return -1
-			}
-			return 1
-		}
-		return a.Key.Cmp(b.Key)
-	})
 }
 
 // hasHeader reports whether a write exists at h's (Address, Path, Key).

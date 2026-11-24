@@ -79,7 +79,7 @@ func Verify(
 			return
 		}
 		cfg, _ := snapcfg.KnownCfg(chain)
-		webseeds, _ := snapcfg.GetEmbeddedWebseeds(chain)
+		webseeds, _ := snapcfg.Webseeds(ctx, chain)
 		var baseUrl string
 		err := errors.New("no valid webseeds")
 		for _, webseed := range webseeds {

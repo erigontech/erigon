@@ -551,11 +551,12 @@ type ExecutionWitnessResult struct {
 	// Keys holds the standalone preimages of every accessed account address (20B) and
 	// storage slot (32B), matching the reference legacy witness; populated in both modes.
 	Keys []hexutil.Bytes `json:"keys,omitempty"`
-	// Headers is the contiguous chain of RLP-encoded ancestor headers from the parent
-	// back to the oldest block reached via BLOCKHASH.
+	// Headers contains consecutive RLP-encoded headers from the oldest ancestor
+	// requested by BLOCKHASH through the parent, in ascending block order.
+	// With no such requests, it contains just the parent.
 	Headers []hexutil.Bytes `json:"headers,omitempty"`
 
-	// lookup map for BLOCKHASH opcode, not serialized to JSON
+	// Header lookups for BLOCKHASH and stateless block initialization; not serialized.
 	headerByNumber map[uint64]*types.Header
 }
 
@@ -646,9 +647,8 @@ func (api *BaseAPI) buildAccessedState(
 	})
 
 	// Create the in-block state with the recording state as reader
-	ibs := state.New(recordingState)
+	ibs := state.NewVersionedBlock(recordingState)
 	defer ibs.Close()
-	transactions.VersionedBlockState(ibs)
 	ibs.SetTxContext(blockNum, -1)
 
 	// Get header for block context
@@ -1579,11 +1579,8 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	blockNrOrHash rpc.BlockNumberOrHash,
 ) (*witnessBlockInfo, error) {
 	// TxNums and commitment history must describe the same block view.
-	blockNum, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNum, hash, _, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
-		return nil, err
-	}
-	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return nil, err
 	}
 	if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
@@ -1629,10 +1626,10 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	}, nil
 }
 
-// collectAccessedHeaders gathers the headers a stateless verifier needs to anchor
-// pre-state and resolve BLOCKHASH lookups. The headers form a contiguous chain
-// from the parent back to the oldest block reached via the BLOCKHASH opcode, so
-// each header can be validated against the next one's parentHash.
+// collectAccessedHeaders builds the witness header chain and indexes it by block
+// number. The parent anchors the pre-state and supplies the timestamp for hardfork
+// transitions. Intermediate headers let the verifier check older BLOCKHASH results
+// by following parent hashes.
 func (api *BaseAPI) collectAccessedHeaders(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -2245,6 +2242,44 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 	return finalHash, nil
 }
 
+type witnessHeaderReader struct {
+	config  *chain.Config
+	parent  *types.Header
+	headers map[uint64]*types.Header
+}
+
+func (r witnessHeaderReader) Config() *chain.Config                  { return r.config }
+func (r witnessHeaderReader) CurrentHeader() *types.Header           { return r.parent }
+func (r witnessHeaderReader) CurrentFinalizedHeader() *types.Header  { return nil }
+func (r witnessHeaderReader) CurrentSafeHeader() *types.Header       { return nil }
+func (r witnessHeaderReader) GetTd(common.Hash, uint64) *uint256.Int { return nil }
+func (r witnessHeaderReader) FrozenBlocks() uint64                   { return 0 }
+
+func (r witnessHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	header := r.GetHeaderByNumber(number)
+	if header != nil && header.Hash() == hash {
+		return header
+	}
+	return nil
+}
+
+func (r witnessHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
+	header := r.headers[number]
+	if header != nil && header.Number.Uint64() == number {
+		return header
+	}
+	return nil
+}
+
+func (r witnessHeaderReader) GetHeaderByHash(hash common.Hash) *types.Header {
+	for _, header := range r.headers {
+		if header != nil && header.Hash() == hash {
+			return header
+		}
+	}
+	return nil
+}
+
 // execBlockStatelessly executes the block statelessly.
 // It decodes the witness trie, executes all transactions and returns the resulting state root
 func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine) (postStateRoot common.Hash, stateless *witnessStateless, err error) {
@@ -2269,11 +2304,10 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	})
 
 	// Create the in-block state with the witness stateless as reader
-	ibs := state.New(stateless)
+	ibs := state.NewVersionedBlock(stateless)
 	defer ibs.Close()
 	header := block.HeaderNoCopy()
 	blockNum := block.NumberU64()
-	transactions.VersionedBlockState(ibs)
 	ibs.SetTxContext(blockNum, -1)
 
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary
@@ -2284,10 +2318,12 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
 
 	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
+	chainReader := witnessHeaderReader{config: chainConfig, headers: result.headerByNumber}
+	chainReader.parent = chainReader.GetHeader(header.ParentHash, blockNum-1)
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
 	}
-	if err = engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
+	if err = engine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("verification: failed to initialize block: %w", err)
 	}
 	if err = ethapi.FinalizeCallTxTo(ibs, blockRules, stateless); err != nil {
@@ -2328,9 +2364,8 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	allLogs := ibs.Logs()
 	statelessReceipts := types.Receipts{&types.Receipt{Logs: allLogs}}
 
-	// only the AuRa engine uses ChainReader, and only to read headers, so its witness may need
-	// augmenting with headers accessed during engine.Finalize(). ChainReader = nil is sufficient
-	// for Ethereum.
+	// Only AuRa finalization reads ancestor headers, so its witness may need additional
+	// headers accessed during engine.Finalize(). Ethereum finalization needs no reader.
 	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), statelessReceipts, block.Withdrawals(), nil /* chainReader */, syscall, false /*skipReceiptsEval*/, log.Root())
 	if err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)

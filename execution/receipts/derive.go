@@ -21,7 +21,6 @@ package receipts
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
@@ -72,7 +71,6 @@ func DeriveForRange(
 
 	blockNum := header.Number.Uint64()
 	gasUsed := new(protocol.GasUsed)
-	noopWriter := state.NewNoopWriter()
 	hashFn := protocol.GetHashFn(header, getHeader)
 	vmCfg := vm.Config{}
 
@@ -86,7 +84,7 @@ func DeriveForRange(
 		}
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
-		_, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
+		_, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, header, txns[i], gasUsed, vmCfg, evm)
 		if err == nil {
 			err = EndTx(ibs, evm.ChainRules(), nil)
 		}
@@ -107,7 +105,7 @@ func DeriveForRange(
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 
 		receipt, err := applyCancellable(ctx, evm, func() (*types.Receipt, error) {
-			return protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
+			return protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, header, txns[i], gasUsed, vmCfg, evm)
 		})
 		if err != nil {
 			return nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d: %w", i, err)
@@ -127,9 +125,6 @@ func DeriveForRange(
 // EndTx publishes a versioned state's finished tx to its version map, where the next tx reads it.
 // A non-nil stateWriter also receives the tx's writes.
 func EndTx(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
-	if !ibs.IsVersioned() {
-		return errors.New("receipt state has no version map")
-	}
 	writes, err := ibs.FinalizedWrites(rules)
 	defer writes.ReleaseMaps() // the flush copies values into version-map cells
 	if err != nil {

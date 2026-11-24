@@ -179,24 +179,20 @@ func seedTestAccounts(t *testing.T) kv.TemporalTx {
 	st := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer st.Close()
 
-	_, err = st.GetOrNewStateObject(eoaAddr)
-	require.NoError(t, err)
+	require.NoError(t, st.CreateAccount(eoaAddr, false))
 	require.NoError(t, st.SetNonce(eoaAddr, 5, tracing.NonceChangeUnspecified))
 	require.NoError(t, st.AddBalance(eoaAddr, *uint256.NewInt(1000), tracing.BalanceChangeUnspecified))
 
-	_, err = st.GetOrNewStateObject(contractAddr)
-	require.NoError(t, err)
+	require.NoError(t, st.CreateAccount(contractAddr, false))
 	require.NoError(t, st.SetNonce(contractAddr, 1, tracing.NonceChangeUnspecified))
 	require.NoError(t, st.SetCode(contractAddr, []byte{0x01, 0x02, 0x03}, tracing.CodeChangeUnspecified))
 
-	_, err = st.GetOrNewStateObject(dustAddr)
-	require.NoError(t, err)
+	require.NoError(t, st.CreateAccount(dustAddr, false))
 	require.NoError(t, st.AddBalance(dustAddr, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 
-	w := state.NewWriter(domains.AsPutDel(tx), nil, txNum)
-	require.NoError(t, st.FinalizeTx(&chainpkg.Rules{}, w))
-	blockWriter := state.NewWriter(domains.AsPutDel(tx), nil, txNum)
-	require.NoError(t, st.CommitBlock(&chainpkg.Rules{}, blockWriter))
+	writes, err := st.FinalizedWrites(&chainpkg.Rules{})
+	require.NoError(t, err)
+	require.NoError(t, state.ApplyWrites(writes, domains, tx, 1, txNum, false))
 	require.NoError(t, domains.Flush(context.Background(), tx))
 
 	return tx
@@ -231,8 +227,7 @@ func seedManyAccounts(t testing.TB, n int) kv.TemporalTx {
 		binary.BigEndian.PutUint64(raw[12:], uint64(i+1))
 		addr := accounts.InternAddress(raw)
 
-		_, err = st.GetOrNewStateObject(addr)
-		require.NoError(t, err)
+		require.NoError(t, st.CreateAccount(addr, false))
 		require.NoError(t, st.SetNonce(addr, uint64(i), tracing.NonceChangeUnspecified))
 		require.NoError(t, st.AddBalance(addr, *uint256.NewInt(uint64(i) + 1), tracing.BalanceChangeUnspecified))
 		if i%6 == 0 {
@@ -241,10 +236,9 @@ func seedManyAccounts(t testing.TB, n int) kv.TemporalTx {
 		}
 	}
 
-	w := state.NewWriter(domains.AsPutDel(tx), nil, txNum)
-	require.NoError(t, st.FinalizeTx(&chainpkg.Rules{}, w))
-	blockWriter := state.NewWriter(domains.AsPutDel(tx), nil, txNum)
-	require.NoError(t, st.CommitBlock(&chainpkg.Rules{}, blockWriter))
+	writes, err := st.FinalizedWrites(&chainpkg.Rules{})
+	require.NoError(t, err)
+	require.NoError(t, state.ApplyWrites(writes, domains, tx, 1, txNum, false))
 	require.NoError(t, domains.Flush(context.Background(), tx))
 
 	return tx

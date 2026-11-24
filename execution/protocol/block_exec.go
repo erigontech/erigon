@@ -127,7 +127,7 @@ func ExecuteBlockEphemerally(
 	}
 
 	ibs.SetTxContext(blockNum, -1)
-	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, stateWriter, logger, vmConfig.Tracer); err != nil {
+	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger, vmConfig.Tracer); err != nil {
 		return nil, err
 	}
 	if err := endPhase(); err != nil {
@@ -149,7 +149,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		receipt, err := ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, stateWriter, header, txn, gasUsed, *vmConfig)
+		receipt, err := ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, header, txn, gasUsed, *vmConfig)
 		if writeTrace && vmConfig.Tracer != nil && vmConfig.Tracer.Flush != nil {
 			vmConfig.Tracer.Flush(txn)
 			vmConfig.Tracer = nil
@@ -346,9 +346,6 @@ func FinalizeBlockExecution(
 		return ret, err
 	}
 
-	if !ibs.IsVersioned() {
-		return nil, nil, errors.New("block state has no version map")
-	}
 	ibs.StartAccessRecording()
 
 	if isMining {
@@ -363,7 +360,7 @@ func FinalizeBlockExecution(
 }
 
 func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader, header *types.Header,
-	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
+	cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger, tracer *tracing.Hooks,
 ) error {
 	err := engine.Initialize(cc, chain, header, ibs, func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibState, header, engine, constCall, vm.Config{})
@@ -372,9 +369,6 @@ func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader
 	if err != nil {
 		return err
 	}
-	if stateWriter == nil {
-		stateWriter = state.NewNoopWriter()
-	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
-	return ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
+	ibs.EndTransaction()
+	return nil
 }

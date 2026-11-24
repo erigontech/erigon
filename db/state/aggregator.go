@@ -26,7 +26,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -1002,9 +1001,8 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, db kv.RoDB, worke
 			case <-ctx.Done():
 				return
 			case <-logEvery.C:
-				var m runtime.MemStats
-				dbg.ReadMemStats(&m)
-				a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				alloc, sys := dbg.MemUsage()
+				a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 			}
 		}
 	}()
@@ -1847,6 +1845,14 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return ceiling
 }
 
+// AssertFilesGap reports a gap in the files on disk: the visible files of this tx stop before the files end.
+func (at *AggregatorRoTx) AssertFilesGap() error {
+	if v := at.visible; v.visibleEnd < v.filesEnd {
+		return fmt.Errorf("a gap in files: visible files end at txNum %d, files reach %d", v.visibleEnd, v.filesEnd)
+	}
+	return nil
+}
+
 // aggregatorVisible holds the immutable lists of indexed snapshot files for one generation.
 // Readers pin the generation they open. Its retired files can be reclaimed once
 // this generation and all earlier generations have no readers.
@@ -1859,6 +1865,8 @@ type aggregatorVisible struct {
 	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
+	visibleEnd   uint64                          // every list is cut here; below filesEnd means a gap
+	filesEnd     uint64                          // dirtyFilesEndTxNumMinimax when this generation was built
 
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // mappings detached when the next generation was published
@@ -1932,6 +1940,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 		a.logger.Warn("[agg] a gap in files: every list stops at the first one that stops", "visibleEnd", toTxNum, "filesEnd", dirtyEnd)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
+	next.visibleEnd, next.filesEnd = toTxNum, dirtyEnd
 
 	if a.visibilityLoweringForbidden.Load() {
 		prev := a.visible.Load()
@@ -2550,6 +2559,24 @@ type AggregatorRoTx struct {
 
 // Generation identifies the immutable file view pinned by this transaction.
 func (at *AggregatorRoTx) Generation() uint64 { return at.visible.generation }
+
+// AssertRetired reports a full step of state in the DB that the files on disk do
+// not cover yet, as `erigon seg retire` would build. The files on disk count, not
+// the visible ones: accounts are not visible without their commitment files.
+func (at *AggregatorRoTx) AssertRetired(tx kv.Tx) error {
+	a := at.a
+	a.dirtyFilesLock.Lock()
+	filesEnd := kv.Step(a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax() / a.StepSize())
+	a.dirtyFilesLock.Unlock()
+	var inDB kv.Step
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		inDB = max(inDB, a.d[d].maxStepInDB(tx))
+	}
+	if inDB > filesEnd {
+		return fmt.Errorf("the DB holds steps %d-%d that are not in files: run `erigon seg retire` first (it builds a step only after the step's last block is final)", filesEnd, inDB)
+	}
+	return nil
+}
 
 // CheckFilesDBGap detects a gap between the snapshot files and the DB. It can arise from
 // snapshot/DB management operations — e.g. `seg rm-state --latest` and then starting

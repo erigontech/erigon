@@ -87,13 +87,14 @@ func (bt *BlockTest) UnmarshalJSON(in []byte) error {
 }
 
 type btJSON struct {
-	Blocks     []btBlock             `json:"blocks"`
-	Genesis    btHeader              `json:"genesisBlockHeader"`
-	Pre        types.GenesisAlloc    `json:"pre"`
-	Post       types.GenesisAlloc    `json:"postState"`
-	BestBlock  common.UnprefixedHash `json:"lastblockhash"`
-	Network    string                `json:"network"`
-	SealEngine string                `json:"sealEngine"`
+	Config     testforks.FixtureConfig `json:"config"`
+	Blocks     []btBlock               `json:"blocks"`
+	Genesis    btHeader                `json:"genesisBlockHeader"`
+	Pre        types.GenesisAlloc      `json:"pre"`
+	Post       types.GenesisAlloc      `json:"postState"`
+	BestBlock  common.UnprefixedHash   `json:"lastblockhash"`
+	Network    string                  `json:"network"`
+	SealEngine string                  `json:"sealEngine"`
 }
 
 type btBlock struct {
@@ -284,9 +285,9 @@ func (bt *BlockTest) Run(t *testing.T) error {
 // newTester builds the ExecModuleTester for this block test. tb may be nil for
 // CLI usage, in which case the caller owns the tester's lifecycle and MUST Close it.
 func (bt *BlockTest) newTester(tb testing.TB) (*execmoduletester.ExecModuleTester, error) {
-	config, ok := testforks.Forks[bt.json.Network]
-	if !ok {
-		return nil, testforks.UnsupportedForkError{Name: bt.json.Network}
+	config, err := bt.json.Config.ChainConfig(bt.json.Network)
+	if err != nil {
+		return nil, err
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
 	mOpts := []execmoduletester.Option{
@@ -359,7 +360,7 @@ func (bt *BlockTest) validateHeadAndPostState(m *execmoduletester.ExecModuleTest
 	if common.Hash(bt.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
 	}
-	newDB := state.New(m.NewStateReader(tx))
+	newDB := state.NewWithVersionMap(m.NewStateReader(tx), state.NewVersionMap(nil))
 	if err := bt.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %w", err)
 	}

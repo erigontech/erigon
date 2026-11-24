@@ -561,7 +561,7 @@ func TestConvertPhase3RestoreKeepsUnmovedDomainFile(t *testing.T) {
 	require.FileExists(t, filepath.Join(dirs.SnapDomain, rangeFiles[1]))
 	require.NoError(t, dir.RemoveFile(filepath.Join(backupDir, rangeFiles[1])))
 
-	_, err = RestoreCommitmentFiles(t.Context(), dirs, log.New())
+	err = RestoreCommitmentFiles(t.Context(), dirs, log.New())
 	require.NoError(t, err)
 	for _, name := range rangeFiles {
 		require.Equal(t, original[name], readFileBytesForTest(t, filepath.Join(dirs.SnapDomain, name)))
@@ -589,7 +589,7 @@ func TestConvertPhase3RestoreKeepsEveryRange(t *testing.T) {
 	require.Equal(t, 3, moved)
 	require.NoError(t, dir.RemoveFile(blocked))
 
-	_, err = RestoreCommitmentFiles(t.Context(), dirs, log.New())
+	err = RestoreCommitmentFiles(t.Context(), dirs, log.New())
 	require.NoError(t, err)
 	for _, name := range rangeFiles {
 		require.Equal(t, []byte("ORIG_"+name), readFileBytesForTest(t, filepath.Join(dirs.SnapDomain, name)))
@@ -622,7 +622,7 @@ func TestConvertPhase3RestoreKeepsUnmovedHistoryAccessor(t *testing.T) {
 	require.FileExists(t, filepath.Join(dirs.SnapAccessors, rangeFiles[1]))
 	require.NoError(t, dir.RemoveFile(filepath.Join(backupDir, rangeFiles[1])))
 
-	_, err = RestoreCommitmentFiles(t.Context(), dirs, log.New())
+	err = RestoreCommitmentFiles(t.Context(), dirs, log.New())
 	require.NoError(t, err)
 	for _, name := range rangeFiles {
 		require.Equal(t, original[name], readFileBytesForTest(t, filepath.Join(dirs.SnapAccessors, name)))

@@ -153,6 +153,9 @@ func (ctx *TxnParseContext) decodeTxn(txBytes []byte) (types.Transaction, error)
 	if s.Remaining() != 0 {
 		return nil, fmt.Errorf("trailing bytes after transaction")
 	}
+	if blob, ok := txn.(*types.BlobTx); ok && len(blob.BlobVersionedHashes) == 0 {
+		return nil, types.ErrBlobTxnEmptyBlobs
+	}
 	return txn, nil
 }
 
@@ -167,10 +170,13 @@ func PeekTransactionType(serialized []byte) (byte, error) {
 	return serialized[dataPos], nil
 }
 
-// ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxnSlot.
-// It also performs syntactic validation of the transactions.
-// wrappedWithBlobs means that for blob (type 3) transactions the full version with blobs/commitments/proofs is expected
-// (see https://eips.ethereum.org/EIPS/eip-4844#networking).
+// ParseTransaction decodes and validates the transaction at pos, fills slot, and optionally recovers its sender.
+// With wrappedWithBlobs set, transactions carrying blobs must include a network sidecar
+// containing the blobs, commitments, and proofs (see https://eips.ethereum.org/EIPS/eip-4844#networking).
+//
+// On success, p is the offset just past the transaction in payload. Packet parsing also needs
+// this offset on ErrRejected so it can continue with the next transaction.
+// The txpool RPC reports INVALID if the rejection also wraps ErrParseTxn.
 func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnSlot, sender []byte, hasEnvelope, wrappedWithBlobs bool, validateHash func([]byte) error) (p int, err error) {
 	if len(payload) == 0 {
 		return 0, fmt.Errorf("%w: empty rlp", ErrParseTxn)
@@ -428,7 +434,6 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 				if ctx.rejectPrefix != nil {
 					ctx.rejectPrefix(slot.IDHash)
 				}
-				// Gossip skips policy rejections; RPC still reports an invalid transaction.
 				return p, fmt.Errorf("%w: %w: %w", ErrRejected, ErrParseTxn, err)
 			}
 		}
@@ -456,7 +461,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 		addr, senderErr := txn.Sender(*signer)
 		if senderErr != nil {
-			return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, senderErr) //nolint
+			return p, fmt.Errorf("%w: %w: recovering sender from signature: %w", ErrRejected, ErrParseTxn, senderErr)
 		}
 		addrBytes := addr.Value()
 		copy(sender, addrBytes[:])
@@ -515,7 +520,7 @@ func (tx *TxnSlot) GetValue() *uint256.Int  { return tx.Txn.GetValue() }
 
 func (tx *TxnSlot) GetBlobFeeCap() *uint256.Int {
 	if frame, ok := tx.Txn.(*types.FrameTransaction); ok {
-		return &frame.Fees.BlobFeeCap
+		return new(uint256.Int).Div(&frame.Fees.MaxFee, uint256.NewInt(frame.GetBlobGas()))
 	}
 	if bt, ok := tx.Txn.(*types.BlobTx); ok {
 		return &bt.MaxFeePerBlobGas

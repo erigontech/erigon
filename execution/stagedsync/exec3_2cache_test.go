@@ -139,16 +139,16 @@ func TestCrossBlockTimingRace(t *testing.T) {
 		"plain domain reader must NOT see block N's balance yet (the timing hole)")
 
 	// Simulate ApplyStateWrites completing (domain apply catches up).
-	w := state.NewWriter(domains.AsPutDel(tx), nil, 5)
 	ibsApply := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
-	defer ibsApply.Close()
 	ibsApply.SetTxContext(1, 0)
 	err = ibsApply.SetBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
 	err = ibsApply.SetNonce(addr, 7, tracing.NonceChangeUnspecified)
 	require.NoError(t, err)
-	err = ibsApply.FinalizeTx(&chain.Rules{}, w)
+	writes, err := ibsApply.FinalizedWrites(&chain.Rules{})
 	require.NoError(t, err)
+	require.NoError(t, state.ApplyWrites(writes, domains, tx, 0, 1, false))
+	ibsApply.Close()
 
 	// After domain apply, plain reader must see the correct value.
 	ibsRawAfter := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
