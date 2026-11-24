@@ -76,10 +76,11 @@ func (p *TxPool) RejectFramePrefix(hash common.Hash) {
 }
 
 type frameValidationResult struct {
-	validation  *protocol.FrameValidation
-	blocker     *metaTxn // the pooled entry that prevented simulation
-	reason      txpoolcfg.DiscardReason
-	headChanged bool
+	validation      *protocol.FrameValidation
+	blocker         *metaTxn // the pooled entry that prevented simulation
+	reason          txpoolcfg.DiscardReason
+	sidecarVerified bool
+	headChanged     bool
 }
 
 // frameRevalidationBatch ties parked entries to the pool's state view while
@@ -194,12 +195,15 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReas
 // prepareFrames checks pool policy under the lock, then simulates against the
 // captured head without holding the lock. applyFrameValidation checks the state
 // generation under the lock before these results can be used for admission.
-func (p *TxPool) prepareFrames(ctx context.Context, txns []txnAdmission) uint64 {
+func (p *TxPool) prepareFrames(ctx context.Context, txns []txnAdmission, cells blobCells) uint64 {
 	generation, stateBlockHash := p.precheckFrames(txns)
 	for i := range txns {
 		a := &txns[i]
 		if a.txn.TxType() == FrameTxnType && a.frame.reason == txpoolcfg.Success {
 			a.frame = p.simulateFrameResult(ctx, a.txn, generation, stateBlockHash)
+			if a.frame.validation != nil && a.txn.HasBlobs() {
+				a.frame.sidecarVerified = p.reusePooledSidecar(a.txn, cells)
+			}
 			if a.frame.headChanged && p.waitForStateChange(ctx, generation) {
 				break
 			}
@@ -212,6 +216,7 @@ func (p *TxPool) precheckFrames(txns []txnAdmission) (uint64, common.Hash) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	firstRemoval := p.possibleFrameRemovals(txns)
+	mayBeReplaced := make(map[*metaTxn]bool)
 	for i := range txns {
 		a := &txns[i]
 		if a.txn.TxType() != FrameTxnType {
@@ -224,7 +229,17 @@ func (p *TxPool) precheckFrames(txns []txnAdmission) (uint64, common.Hash) {
 			// so the batch can still be installed under one lock.
 			pooled = nil
 		}
-		a.frame = p.precheckFrame(a.txn, a.local, pooled)
+		// A surviving pooled hash decides the local result. An earlier frame from
+		// this sender may replace it. Remote inputs still need their peer's sidecar checks.
+		sameHash := pooled != nil && pooled.TxnSlot.IDHash == a.txn.IDHash
+		if a.local && sameHash && !mayBeReplaced[pooled] {
+			a.frame = frameValidationResult{reason: txpoolcfg.DuplicateHash, blocker: pooled}
+		} else {
+			a.frame = p.precheckFrame(a.txn, a.local, pooled)
+			if a.frame.reason == txpoolcfg.Success && pooled != nil && !sameHash {
+				mayBeReplaced[pooled] = true
+			}
+		}
 	}
 	return p.stateGeneration, p.stateBlockHash
 }
@@ -310,6 +325,10 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns []txnAdmission, 
 			}
 		}
 		if result.blocker != nil || result.reason == txpoolcfg.FrameValidationUnavailable {
+			if result.reason == txpoolcfg.DuplicateHash && p.all.senderIDFrameTxn[txn.SenderID] == result.blocker {
+				a.reason = txpoolcfg.DuplicateHash
+				continue
+			}
 			// State can establish that the nonce was consumed even when the frame could not be simulated.
 			consumed, err := p.nonceConsumed(txn, stateCache)
 			if err != nil {

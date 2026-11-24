@@ -105,6 +105,54 @@ func TestValidationCachesNoCellsOnBlobHashMismatch(t *testing.T) {
 	require.Zero(t, pool.blobs.cells.Len(), "cells cached for a txn whose blob hash does not match its commitment")
 }
 
+func TestPooledBlobSidecarReuse(t *testing.T) {
+	ctx, pool, slot, txns := newPoolWithBlobTxn(t, "Amsterdam")
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	verified := pool.GetBlobs(slot.GetBlobHashes())
+	parser := NewTxnParseContext(pool.chainID)
+	parser.WithSender(false)
+	for _, tc := range []struct {
+		name   string
+		change func(*PoolBlobBundle)
+		want   txpoolcfg.DiscardReason
+	}{
+		{"identical", nil, txpoolcfg.NotSet},
+		{"blob", func(b *PoolBlobBundle) { b.Blob[31] ^= 1 }, txpoolcfg.UnmatchedBlobTxExt},
+		{"commitment", func(b *PoolBlobBundle) { b.Commitment[0] ^= 1 }, txpoolcfg.BlobHashCheckFail},
+		{"proof", func(b *PoolBlobBundle) { b.Proofs[0][0] ^= 1 }, txpoolcfg.UnmatchedBlobTxExt},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var replay TxnSlot
+			_, parseErr := parser.ParseTransaction(slot.Rlp, 0, &replay, nil, false, true, nil)
+			require.NoError(t, parseErr)
+			if tc.change != nil {
+				tc.change(&replay.BlobBundles[1])
+			}
+			var remote TxnSlots
+			remote.Append(&replay, txns.Senders.At(0), false)
+			batch, prepareErr := pool.prepareTxns(ctx, remote, nil)
+			require.NoError(t, prepareErr)
+			require.Equal(t, tc.want, batch.txns[0].reason)
+			if tc.change == nil {
+				for i, hash := range slot.GetBlobHashes() {
+					require.NotNil(t, verified[i].Cells)
+					require.True(t, verified[i].Cells == batch.preparedCells[hash], "cells for blob %d were recomputed", i)
+				}
+			} else {
+				require.Empty(t, batch.preparedCells)
+			}
+		})
+	}
+	// Cell eviction drops a derived value. The stored blob and its proofs are still verified.
+	pool.blobs.cells.Purge()
+	batch, err := pool.prepareTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, txpoolcfg.NotSet, batch.txns[0].reason)
+	require.Zero(t, len(batch.preparedCells), "replaying a verified sidecar recomputed evicted cells")
+}
+
 func TestValidationCachesNoCellsBeforeAmsterdam(t *testing.T) {
 	ctx, pool, _, txns := newPoolWithBlobTxn(t, "Osaka")
 	reasons, err := pool.AddLocalTxns(ctx, txns)

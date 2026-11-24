@@ -830,20 +830,29 @@ func cachedRejectionDependsOnlyOnTxn(reason txpoolcfg.DiscardReason) bool {
 // Otherwise it returns a cached rejection that still applies,
 // or NotSet if admission is needed.
 func (p *TxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
+	reason, _ := p.knownTxn(hash)
+	return reason
+}
+
+func (p *TxPool) knownTxn(hash []byte) (txpoolcfg.DiscardReason, common.Address) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	hashS := string(hash)
-	if _, ok := p.byHash[hashS]; ok {
-		return txpoolcfg.AlreadyKnown
+	if mt := p.byHash[hashS]; mt != nil {
+		var sender common.Address
+		if mt.TxnSlot.senderVerified {
+			sender = p.senders.senderID2Addr[mt.TxnSlot.SenderID]
+		}
+		return txpoolcfg.AlreadyKnown, sender
 	}
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok && cachedRejectionDependsOnlyOnTxn(reason) {
-		return reason
+		return reason, common.Address{}
 	}
 	// Sender-policy rejections still need admission's current nonce and membership checks.
 	if rejection, ok := p.frameRejections.Get(hashS); ok && rejection.appliesToHead(p.stateGeneration) {
-		return rejection.reason
+		return rejection.reason, common.Address{}
 	}
-	return txpoolcfg.NotSet
+	return txpoolcfg.NotSet, common.Address{}
 }
 
 func (p *TxPool) FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error) {
@@ -1416,8 +1425,8 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		return txpoolcfg.TooManyBlobs
 	}
 
-	// The pool already counts these blobs for both limits. The copy's sidecar
-	// still needs its own verification because it is not part of the transaction hash.
+	// The pool already counts these blobs for both limits. The transaction hash
+	// excludes the sidecar, so admission must still check the incoming bytes.
 	if p.byHash[string(txn.IDHash[:])] != nil {
 		return txpoolcfg.Success
 	}
@@ -1491,6 +1500,38 @@ func (p *TxPool) validateBlobSidecar(txn *TxnSlot, cellsByHash blobCells) txpool
 	}
 
 	return txpoolcfg.Success
+}
+
+// A pooled sidecar has already passed KZG. Reuse that result only when every
+// blob, commitment and proof matches, including the proof format for this fork.
+func (p *TxPool) reusePooledSidecar(txn *TxnSlot, cells blobCells) bool {
+	hashes := txn.GetBlobHashes()
+	if len(hashes) == 0 || len(hashes) != len(txn.BlobBundles) {
+		return false
+	}
+	proofsPerBlob := 1
+	if p.isOsaka() {
+		proofsPerBlob = int(params.CellsPerExtBlob)
+	}
+	pooled := p.blobs.get(hashes)
+	for i, incoming := range txn.BlobBundles {
+		known := &pooled[i]
+		if known.Blob == nil || len(incoming.Proofs) != proofsPerBlob {
+			return false
+		}
+		if incoming.Commitment != known.Commitment || !slices.Equal(incoming.Proofs, known.Proofs) || !bytes.Equal(incoming.Blob, known.Blob) {
+			return false
+		}
+	}
+	if cells != nil && p.isAmsterdam() {
+		// Cells are optional. GetBlobsV4 can derive them if the bounded cache evicted them.
+		for i, hash := range hashes {
+			if pooled[i].Cells != nil {
+				cells.add(hash, pooled[i].Cells)
+			}
+		}
+	}
+	return true
 }
 
 var maxUint256 = new(uint256.Int).SetAllOne()
@@ -1838,12 +1879,15 @@ func (p *TxPool) prepareCandidates(batch *admissionBatch) {
 		if a.needsPreparation && a.reason == txpoolcfg.NotSet {
 			a.needsPreparation = false
 			batch.unprepared--
-			if a.txn.TxType() == SetCodeTxnType {
+			switch {
+			case a.txn.TxType() == SetCodeTxnType:
 				p.recoverAuthorizations(a.txn)
-			} else if !a.local && offenders.skip(a.source) {
+			case !a.local && offenders.skip(a.source):
 				a.reason = txpoolcfg.SkippedAfterKZGFailure
-			} else if reason := p.validateBlobSidecar(a.txn, batch.preparedCells); reason != txpoolcfg.Success {
-				a.reason = reason
+			case !p.reusePooledSidecar(a.txn, batch.preparedCells):
+				if reason := p.validateBlobSidecar(a.txn, batch.preparedCells); reason != txpoolcfg.Success {
+					a.reason = reason
+				}
 			}
 		}
 		if a.reason == txpoolcfg.UnmatchedBlobTxExt && !a.local {
@@ -1896,7 +1940,11 @@ func (p *TxPool) validateCandidate(a *txnAdmission, view kvcache.CacheView, cell
 		if a.frame.validation == nil {
 			a.reason = txpoolcfg.InvalidFrame
 		} else if a.txn.HasBlobs() {
-			if reason := p.validateBlobTxnAndSidecar(a.txn, a.local, cells); reason != txpoolcfg.Success {
+			reason := p.validateBlobTxn(a.txn, a.local)
+			if reason == txpoolcfg.Success && !a.frame.sidecarVerified {
+				reason = p.validateBlobSidecar(a.txn, cells)
+			}
+			if reason != txpoolcfg.Success {
 				a.reason = reason
 			}
 		}
@@ -1996,6 +2044,9 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 		var cancel context.CancelFunc
 		simulationCtx, cancel = context.WithTimeout(ctx, frameValidationTimeout)
 		defer cancel()
+		if batch.preparedCells == nil {
+			batch.preparedCells = make(blobCells)
+		}
 	}
 	var frameGeneration uint64
 	needFrameSimulation := batch.hasFrames
@@ -2007,7 +2058,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			if stale {
 				return nil, errStateViewStale
 			}
-			frameGeneration = p.prepareFrames(simulationCtx, batch.txns)
+			frameGeneration = p.prepareFrames(simulationCtx, batch.txns, batch.preparedCells)
 			needFrameSimulation = false
 		}
 		var reasons []txpoolcfg.DiscardReason
@@ -2021,20 +2072,15 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 					return errPreparationRequired
 				}
 			}
-			cells := batch.preparedCells
 			if batch.hasFrames {
 				if err := p.applyFrameValidation(simulationCtx, batch.txns, frameGeneration, cacheView); err != nil {
 					return err
 				}
-				cells = make(blobCells)
 			}
-			if err := p.validateTxns(batch.txns, cacheView, cells); err != nil {
+			if err := p.validateTxns(batch.txns, cacheView, batch.preparedCells); err != nil {
 				return err
 			}
-			if batch.hasFrames {
-				maps.Copy(cells, batch.preparedCells)
-			}
-			announcements, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, batch.txns, cells,
+			announcements, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, batch.txns, batch.preparedCells,
 				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), true)
 			if len(sources) != 0 {
 				p.kickKZGOffenders(ctx, batch.txns)

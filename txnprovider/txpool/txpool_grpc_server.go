@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -48,7 +49,7 @@ type txPool interface {
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
-	KnownTxnReason(hash []byte) txpoolcfg.DiscardReason
+	knownTxn(hash []byte) (txpoolcfg.DiscardReason, common.Address)
 	RejectFramePrefix(hash common.Hash)
 	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
 	GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle)
@@ -193,12 +194,15 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		slots.IsLocal[slotIndex] = true
 		var knownReason txpoolcfg.DiscardReason
 		validateHash := func(hash []byte) error {
-			reason := s.txPool.KnownTxnReason(hash)
+			reason, sender := s.txPool.knownTxn(hash)
 			// An earlier input can replace a pooled transaction, and a new head can invalidate a
 			// cached frame rejection. Let admission resolve both in batch order.
 			if reason != txpoolcfg.NotSet && (slotIndex == 0 || cachedRejectionDependsOnlyOnTxn(reason)) {
 				knownReason = reason
 				return ErrRejected
+			}
+			if reason == txpoolcfg.AlreadyKnown && sender != (common.Address{}) {
+				slots.Txns[slotIndex].Txn.SetSender(accounts.InternAddress(sender))
 			}
 			return nil
 		}

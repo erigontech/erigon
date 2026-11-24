@@ -249,7 +249,7 @@ func TestFramePoolPrecheckPanicReleasesLock(t *testing.T) {
 	txns.Append(framePoolSlot(t, sender, 1, 2), sender[:], false)
 	// Force a panic during the locked policy checks.
 	pool.frameRejections = nil
-	require.Panics(t, func() { pool.prepareFrames(ctx, newAdmissionBatch(txns, nil).txns) })
+	require.Panics(t, func() { pool.prepareFrames(ctx, newAdmissionBatch(txns, nil).txns, nil) })
 	unlocked := pool.lock.TryLock()
 	if unlocked {
 		pool.lock.Unlock()
@@ -948,6 +948,32 @@ func TestFramePoolDuplicateCannotInvalidateParkedFrame(t *testing.T) {
 	require.NoError(t, pool.revalidateFrames(ctx, []*metaTxn{mt}, pool.stateGeneration, pool.stateBlockHash))
 	require.Same(t, mt, pool.byHash[string(frame.IDHash[:])])
 	require.Equal(t, PendingSubPool, mt.currentSubPool)
+}
+
+func TestFramePoolResimulatesRemovedDuplicate(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	other := common.Address{7}
+	txns.Append(framePoolSlot(t, other, 1, 2, uint256.Int{2}), other[:], true)
+	backend.onValidate = func() {
+		backend.onValidate = nil
+		pool.lock.Lock()
+		defer pool.lock.Unlock()
+		mt := pool.byHash[string(frame.IDHash[:])]
+		pool.removeFromSubPool(mt, "test removal")
+		pool.discardLocked(mt, txpoolcfg.Mined)
+	}
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	require.Contains(t, backend.calls[1:], common.Hash(frame.IDHash))
 }
 
 func TestFramePoolSenderPolicyRejectionCache(t *testing.T) {
@@ -1659,6 +1685,38 @@ func TestFramePoolBlobFeeFloor(t *testing.T) {
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.FeeTooLow}, reasons)
 	require.Zero(t, pool.totalBlobsInPool.Load())
 	require.Empty(t, pool.frameReservations)
+}
+
+func TestRemoteFrameChecksPooledSidecar(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1}).Txn.(*types.FrameTransaction)
+	frame.Fees.MaxFee.SetUint64(2*frame.GetGasLimit() + 2*params.GasPerBlob)
+	slot := framePoolSlotWithBlob(t, frame)
+	var txns TxnSlots
+	txns.Append(slot, sender[:], false)
+	reasons, err := pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	pool.cfg.TotalBlobPoolLimit = 1
+
+	var replay TxnSlot
+	parser := NewTxnParseContext(frame.ChainID)
+	parser.WithSender(false)
+	_, err = parser.ParseTransaction(slot.Rlp, 0, &replay, nil, false, true, nil)
+	require.NoError(t, err)
+	txns.Txns[0] = &replay
+	batch := newAdmissionBatch(txns, nil)
+	pool.prepareFrames(ctx, batch.txns, make(blobCells))
+	require.True(t, batch.txns[0].frame.sidecarVerified, "an exact copy must be checked before taking the admission lock")
+	reasons, err = pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, reasons)
+
+	replay.BlobBundles[0].Proofs[0][0] ^= 1
+	reasons, err = pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
 }
 
 func TestFramePoolRemoteBlobPriceLimit(t *testing.T) {

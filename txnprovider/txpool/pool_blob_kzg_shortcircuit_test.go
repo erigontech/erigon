@@ -326,6 +326,24 @@ func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
 	}
 }
 
+func TestPooledBlobProofFormatAfterOsaka(t *testing.T) {
+	ctx := t.Context()
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	blob := makeBlobSlot(0x51, false)
+	var txns TxnSlots
+	sender := common.Address{1}
+	txns.Append(&blob, sender[:], false)
+	reasons, err := pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	pool.osakaTime = common.NewUint64(0)
+	reasons, err = pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
+}
+
 func TestBlobKZGVerifiedOutsidePoolLock(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
