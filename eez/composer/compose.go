@@ -41,8 +41,12 @@ import (
 const defaultMaxTxs = 50
 
 // maxDeferrals is how many compositions a held transaction waits out for a
-// predecessor sent elsewhere to land on L1.
+// predecessor sent elsewhere to land on L1, or for a window that leaves it
+// room.
 const maxDeferrals = 32
+
+// errNoRoom defers a transaction only a lighter window leaves room for.
+var errNoRoom = errors.New("no room behind the window")
 
 // CrossChain is what a composer composes cross-chain effects with.
 type CrossChain struct {
@@ -89,16 +93,20 @@ type effects struct {
 // the gas of the posting settling the window from cursor hold them. A poison
 // transaction, or one an empty block or a posting of the Sync block alone
 // cannot hold, is evicted with the rest of its nonce chain; a transient
-// failure or a full block or posting returns the rest to the pool. A
-// transaction whose nonce is ahead of its sender's on L1 waits, out of the
-// drain's count, up to maxDeferrals compositions. Nil when none composes.
+// failure or a full block or posting returns the rest to the pool. Up to
+// maxDeferrals compositions, a transaction whose nonce is ahead of its
+// sender's on L1 waits with the rest of its chain, out of the drain's count,
+// and so does one only a lighter window has room for, in the count, while
+// others behind it compose. Nil when none composes.
 func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Header, target uint64) *effects {
 	rest := c.x.Pool.PopN(c.x.MaxTxs)
 	if len(rest) == 0 {
 		return nil
 	}
 	fx := &effects{}
-	popped := len(rest)
+	// unroomed counts those deferred after a simulation: they take from the
+	// drain as the others do.
+	popped, unroomed := len(rest), 0
 	var evicted, deferred []*Held
 	err := func() error {
 		// Read ahead of the state views, which hold the chain's read
@@ -125,7 +133,13 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 				// The posting carries the window's blocks before any effect; the
 				// bundle's block may have 1/1024 less gas than the anchor.
 				block := anchor.GasLimit - anchor.GasLimit/1024
-				gas, err := windowBudget(c.cfg.Batcher, c.cfg.MaxGas, block, append(window, types.NewBlockWithHeader(header, nil)))
+				sync := types.NewBlockWithHeader(header, nil)
+				gas, err := windowBudget(c.cfg.Batcher, c.cfg.MaxGas, block, append(window, sync))
+				if err != nil {
+					return err
+				}
+				// The lightest window a posting of effects settles.
+				alone, err := windowBudget(c.cfg.Batcher, c.cfg.MaxGas, block, []*types.Block{sync})
 				if err != nil {
 					return err
 				}
@@ -137,8 +151,9 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 				}
 				for {
 					if len(rest) == 0 {
-						// Those waiting on L1 leave the drain room for others.
-						want := c.x.MaxTxs - (popped - len(deferred))
+						// Those waiting on L1 or on the one ahead leave the drain room
+						// for others.
+						want := c.x.MaxTxs - (popped - len(deferred) + unroomed)
 						if want <= 0 {
 							break
 						}
@@ -149,6 +164,12 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 					}
 					h := rest[0]
 					if slices.ContainsFunc(evicted, func(e *Held) bool { return e.chainKey() == h.chainKey() && h.Nonce > e.Nonce }) {
+						rest = rest[1:]
+						continue
+					}
+					if slices.ContainsFunc(deferred, func(d *Held) bool { return d.chainKey() == h.chainKey() && h.Nonce > d.Nonce }) {
+						// It waits on the one of its chain ahead.
+						deferred = append(deferred, h)
 						rest = rest[1:]
 						continue
 					}
@@ -196,12 +217,22 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 						switch {
 						case gas.fits(cost):
 							return nil
-						case !newBudget(c.cfg.MaxGas, block).fits(cost):
+						case !alone.fits(cost):
 							return Poison(fmt.Errorf("alone: %w", errOverBudget))
+						case len(fx.held) > 0:
+							return errOverBudget
 						}
-						// A later window may leave it room.
-						return errOverBudget
+						if h.Deferred++; h.Deferred >= maxDeferrals {
+							return Poison(fmt.Errorf("no window left room in %d compositions: %w", maxDeferrals, errOverBudget))
+						}
+						return errNoRoom
 					})
+					if errors.Is(err, errNoRoom) {
+						deferred = append(deferred, h)
+						unroomed++
+						rest = rest[1:]
+						continue
+					}
 					if errors.Is(err, ErrFull) && len(fx.held) == 0 {
 						err = Poison(fmt.Errorf("alone: %w", err))
 					}
@@ -214,6 +245,7 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 						continue
 					}
 					gas.take(cost)
+					h.Deferred = 0
 					draft = ds.fork
 					fx.held = append(fx.held, h)
 					fx.deliveries = append(fx.deliveries, ds.Delivered...)
