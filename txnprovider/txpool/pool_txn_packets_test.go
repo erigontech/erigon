@@ -435,13 +435,13 @@ func TestTransactionPacketCountLimit(t *testing.T) {
 }
 
 func TestTransactionPacketAuthorizationLimit(t *testing.T) {
-	const half = maxRemoteAuthorizations / 2
-	txns := [][]byte{
-		remoteSetCodeTxn(t, 0, half).Rlp,
-		tpEncodeTests[1].txns[0],
-		remoteSetCodeTxn(t, 1, maxRemoteAuthorizations-half).Rlp,
-		remoteSetCodeTxn(t, 2, 1).Rlp,
-	}
+	const limit = 8_647
+	first := remoteSetCodeTxn(t, 0, limit/2).Rlp
+	rest := remoteSetCodeTxn(t, 1, limit-limit/2).Rlp
+	one := remoteSetCodeTxn(t, 2, 1).Rlp
+	over := remoteSetCodeTxn(t, 3, limit-limit/2+1).Rlp
+	trailingByte := append(bytes.Clone(one), 0)
+	ordinary := tpEncodeTests[1].txns[0]
 	outbound := [][]byte{remoteSetCodeTxn(t, 0, 3_700).Rlp, remoteSetCodeTxn(t, 1, 4_800).Rlp}
 	require.Less(t, len(outbound[0]), p2pTxPacketLimit)
 	require.NoError(t, ValidateSerializedTxn(outbound[1]))
@@ -449,20 +449,18 @@ func TestTransactionPacketAuthorizationLimit(t *testing.T) {
 		for _, tt := range []struct {
 			name string
 			txns [][]byte
-			want int
+			want [][]byte
 		}{
-			{"outbound batch with a large final transaction", outbound, 2},
-			{"at limit", txns[:3], 3},
-			{"one over", txns, 0},
+			{"outbound batch with a large final transaction", outbound, outbound},
+			{"at limit", [][]byte{first, rest}, [][]byte{first, rest}},
+			{"ordinary after one over", [][]byte{first, rest, one, ordinary}, [][]byte{first, rest, ordinary}},
+			{"skip before decoding", [][]byte{first, rest, trailingByte, ordinary}, [][]byte{first, rest, ordinary}},
+			{"remaining budget", [][]byte{first, over, rest}, [][]byte{first, rest}},
 		} {
 			t.Run(fmt.Sprintf("pooled=%t/%s", pooled, tt.name), func(t *testing.T) {
 				ctx := NewTxnParseContext(*uint256.NewInt(1))
 				ctx.WithSender(false)
-				decoded := 0
-				ctx.ValidateRLP(func(txn []byte) error {
-					decoded++
-					return ValidateSerializedTxn(txn)
-				})
+				ctx.ValidateRLP(ValidateSerializedTxn)
 				var slots TxnSlots
 				slots.Resize(1)
 				var payload []byte
@@ -477,10 +475,32 @@ func TestTransactionPacketAuthorizationLimit(t *testing.T) {
 				}
 				require.NoError(t, err)
 				require.Equal(t, len(payload), pos)
-				require.Equal(t, tt.want, decoded)
-				require.Len(t, slots.Txns, tt.want)
 				require.NoError(t, slots.Valid())
+				require.Len(t, slots.Txns, len(tt.want))
+				for i, want := range tt.want {
+					require.Equal(t, crypto.Keccak256Hash(want), common.Hash(slots.Txns[i].IDHash))
+				}
 			})
 		}
 	}
+}
+
+func TestTransactionPacketOversizedSetCode(t *testing.T) {
+	over := remoteSetCodeTxn(t, 0, maxRemoteAuthorizations+1).Rlp
+	ordinary := tpEncodeTests[1].txns[0]
+	payload := EncodeTransactions([][]byte{over, ordinary}, nil)
+	ctx := NewTxnParseContext(*uint256.NewInt(1))
+	ctx.WithSender(false)
+	var slots TxnSlots
+
+	ctx.ValidateRLP(ValidateSerializedTxn)
+	_, err := ParseTransactions(payload, 0, ctx, &slots, nil)
+	require.ErrorIs(t, err, ErrRlpTooBig)
+
+	ctx.ValidateRLP(nil)
+	pos, err := ParseTransactions(payload, 0, ctx, &slots, nil)
+	require.NoError(t, err)
+	require.Equal(t, len(payload), pos)
+	require.Len(t, slots.Txns, 1)
+	require.Equal(t, crypto.Keccak256Hash(ordinary), common.Hash(slots.Txns[0].IDHash))
 }
