@@ -1486,6 +1486,8 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 	}
 	rules := evm.ChainRules()
 	var clearContract bool
+	// Bogota's SENDALL preserves code, storage, and nonce even for a contract
+	// created in the current transaction.
 	if !rules.IsBogota {
 		clearContract, err = ibs.IsNewContract(self)
 		if err != nil {
@@ -1506,6 +1508,8 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		}
 	}
 	if clearContract {
+		// Amsterdam preserves any balance left in the account when the contract
+		// is cleared at transaction end.
 		if _, err := ibs.Selfdestruct(self, rules.IsAmsterdam); err != nil {
 			return pc, nil, err
 		}
