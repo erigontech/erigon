@@ -1343,6 +1343,56 @@ func TestProductionUsesLocalPayloadWhenBuilderWithdrawalsRootIsWrong(t *testing.
 	})
 }
 
+func TestProductionUsesLocalPayloadWhenBuilderBidSignatureIsInvalid(t *testing.T) {
+	requireProductionUsesLocalPayload(t, func(ctrl *gomock.Controller, handler *ApiHandler, postState *state.CachingBeaconState, targetSlot uint64, parentHash common.Hash) {
+		header := validBuilderHeaderForTest(t, postState, targetSlot, parentHash)
+		header.Data.Message.Value = "1000000"
+		signBuilderHeaderForTest(t, postState, header)
+		header.Data.Signature[0] ^= 0x01
+		builderClient := relayClient(ctrl)
+		builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
+		handler.builderClient = builderClient
+	})
+}
+
+func TestGetBuilderPayloadRejectsInvalidBidSignature(t *testing.T) {
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	parentHash := postState.LatestExecutionPayloadHeader().BlockHash
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*builder.ExecutionHeader)
+	}{
+		{name: "unsigned", mutate: func(*builder.ExecutionHeader) {}},
+		{name: "value changed after signing", mutate: func(header *builder.ExecutionHeader) {
+			signBuilderHeaderForTest(t, postState, header)
+			header.Data.Message.Value = "2"
+		}},
+		{name: "pubkey replaced after signing", mutate: func(header *builder.ExecutionHeader) {
+			signBuilderHeaderForTest(t, postState, header)
+			pubKey, err := postState.ValidatorPublicKey(0)
+			require.NoError(t, err)
+			header.Data.Message.PubKey = pubKey
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			header := validBuilderHeaderForTest(t, postState, targetSlot, parentHash)
+			tc.mutate(header)
+			builderClient := relayClient(ctrl)
+			builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
+			handler.builderClient = builderClient
+
+			got, value, err := handler.getBuilderPayload(t.Context(), postState, targetSlot)
+
+			require.ErrorIs(t, err, builder.ErrInvalidBidSignature)
+			require.Nil(t, got)
+			require.Nil(t, value)
+		})
+	}
+}
+
 func TestProcessBlockForProductionRejectsUnexpectedPayloadWithdrawal(t *testing.T) {
 	blocks, s, _ := tests.GetCapellaRandom()
 	block := blocks[0].Block
@@ -1370,6 +1420,7 @@ func TestProductionUsesValidBuilderPayloadAfterSlotAdvance(t *testing.T) {
 		require.NotEmpty(t, expected.Withdrawals)
 		header = validBuilderHeaderForTest(t, postState, targetSlot, parentHash)
 		header.Data.Message.Value = "1000000"
+		signBuilderHeaderForTest(t, postState, header)
 		builderClient := relayClient(ctrl)
 		builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
 		handler.builderClient = builderClient
@@ -1483,6 +1534,16 @@ func validBuilderHeaderForTest(
 	}
 }
 
+func signBuilderHeaderForTest(t *testing.T, baseState *state.CachingBeaconState, header *builder.ExecutionHeader) {
+	t.Helper()
+	key, err := bls.NewPrivateKeyFromIKM(bytes.Repeat([]byte{0x42}, 32))
+	require.NoError(t, err)
+	copy(header.Data.Message.PubKey[:], bls.CompressPublicKey(key.PublicKey()))
+	root, err := header.SigningRoot(baseState.BeaconConfig(), baseState.Version())
+	require.NoError(t, err)
+	copy(header.Data.Signature[:], key.Sign(root[:]).Bytes())
+}
+
 func TestGetBuilderPayloadValidatesWithdrawalsRoot(t *testing.T) {
 	for _, version := range []clparams.StateVersion{clparams.BellatrixVersion, clparams.CapellaVersion, clparams.ElectraVersion} {
 		t.Run(version.String(), func(t *testing.T) {
@@ -1526,6 +1587,7 @@ func TestGetBuilderPayloadValidatesWithdrawalsRoot(t *testing.T) {
 							case "zero":
 								header.Data.Message.Header.WithdrawalsRoot = common.Hash{}
 							}
+							signBuilderHeaderForTest(t, baseState, header)
 							builderClient := relayClient(ctrl)
 							builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
 							handler := &ApiHandler{
@@ -1727,6 +1789,7 @@ func TestGetBuilderPayloadUsesForkBlobLimit(t *testing.T) {
 						header.Data.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
 					}
 					header.Data.Message.Value = new(big.Int).Lsh(big.NewInt(1), 128).String()
+					signBuilderHeaderForTest(t, postState, header)
 					builderClient := relayClient(ctrl)
 					builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
 					handler.builderClient = builderClient
