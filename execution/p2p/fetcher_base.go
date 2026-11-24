@@ -363,7 +363,6 @@ func (f *FetcherBase) fetchBodies(
 	peerId *PeerId,
 	responseTimeout time.Duration,
 ) (*FetcherResponse[[]*types.Body], error) {
-	// cleanup for the chan message observer
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -463,6 +462,9 @@ func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([
 	return bodies, nil
 }
 
+// subscribeResponses registers a reply observer for one request. Unregistering
+// prevents future notifications from selecting it. The caller must also cancel
+// ctx when it stops reading so callbacks already waiting to send can return.
 func subscribeResponses[T any](ctx context.Context, register func(event.Observer[T]) UnregisterFunc) (<-chan T, UnregisterFunc) {
 	messages := make(chan T)
 	unregister := register(func(message T) {
