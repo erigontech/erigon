@@ -2413,17 +2413,14 @@ func (ibs *IntraBlockState) createVersioned(addr accounts.Address, hadPrevious b
 // recordVersionedCreateCells records the version-map cells a fresh account's creation
 // emits, without journaling — the caller records the journal entry. Address and code
 // hash are always written (the code-hash write invalidates any stale pre-create
-// GetCodeHash read); the nonce only when a prior incarnation's nonce still sits in the
-// version-map floor, which a commitment read would otherwise resurrect — a genuinely
-// fresh account has no floor, so a nonce=0 write there is a net-zero change the BAL
-// wrongly reports; the balance unconditionally, since a lower tx's removal of the
-// account can be flushed after this tx ran and its deleted balance would then decide it.
+// GetCodeHash read); the balance too, since a lower tx's removal of the account can be
+// flushed after this tx ran and its deleted balance would then decide it. The nonce is
+// not: readers skip a nonce cell at or below a destruct and the fresh address cell gives
+// nonce 0, so the write is not needed, and a write that depended on such a cell would
+// rest on a read the tx does not record.
 func (ibs *IntraBlockState) recordVersionedCreateCells(addr accounts.Address, account *accounts.Account) {
 	ibs.recordWriteAddress(addr, account)
 	ibs.recordWriteCodeHash(addr, account.CodeHash)
-	if _, res, ok := ibs.versionMap.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
-		ibs.recordWriteNonce(addr, account.Nonce, tracing.NonceChangeNewContract)
-	}
 	ibs.recordWriteBalance(addr, account.Balance)
 }
 
