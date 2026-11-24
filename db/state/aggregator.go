@@ -2661,6 +2661,9 @@ func reclaimFiles(files retiredFiles) {
 	}
 }
 
+// VisibleGeneration identifies the current visible-file generation.
+func (a *Aggregator) VisibleGeneration() any { return a.visible.Load() }
+
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return a.beginFilesRoOn(a.acquireVisibleFiles())
 }

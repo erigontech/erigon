@@ -1890,6 +1890,9 @@ type View struct {
 	*snapshotVisible
 }
 
+// VisibleGeneration identifies the current visible-file generation.
+func (s *BaseRoSnapshots) VisibleGeneration() any { return s.visible.Load() }
+
 func (s *BaseRoSnapshots) View() *View {
 	return &View{s: s, snapshotVisible: s.acquireVisible()}
 }

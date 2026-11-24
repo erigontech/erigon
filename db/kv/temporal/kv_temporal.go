@@ -105,6 +105,20 @@ func (db *DB) beginBlockFilesRo() *blocksnapshots.View {
 	return db.blockFiles.View()
 }
 
+// ViewGeneration identifies the committed database snapshot and the file
+// generations a new read transaction would see. ok is false when the database
+// cannot report commits made through it.
+func (db *DB) ViewGeneration() (commit uint64, stateFiles, blockFiles any, ok bool) {
+	g, ok := db.RwDB.(interface{ CommitGeneration() uint64 })
+	if !ok {
+		return 0, nil, nil, false
+	}
+	if db.blockFiles != nil {
+		blockFiles = db.blockFiles.VisibleGeneration()
+	}
+	return g.CommitGeneration(), db.stateFiles.VisibleGeneration(), blockFiles, true
+}
+
 func (db *DB) InternalDB() kv.RwDB {
 	return db.RwDB
 }

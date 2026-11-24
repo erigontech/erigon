@@ -569,10 +569,12 @@ type MdbxKV struct {
 	roTxsLimiter *semaphore.Weighted // does limit amount of concurrent Ro transactions - in most casess runtime.NumCPU() is good value for this channel capacity - this channel can be shared with other components (like Decompressor)
 	// roTxPool holds reset read txns: Renew reuses their bound reader slot, BeginTxn locks the reader table to bind one.
 	roTxPool chan *mdbx.Txn
-	opts     MdbxOpts
-	txSize   uint64
-	closed   atomic.Bool
-	path     string
+	// commitGen counts successful read-write commits made through this handle.
+	commitGen atomic.Uint64
+	opts      MdbxOpts
+	txSize    uint64
+	closed    atomic.Bool
+	path      string
 
 	syncerStop chan struct{}
 	syncerDone chan struct{} // nil when no background sync runs; closed when it has returned
@@ -974,6 +976,9 @@ type MdbxCursor struct {
 }
 
 func (db *MdbxKV) Env() *mdbx.Env { return db.env }
+
+// CommitGeneration changes after every successful read-write commit through this handle.
+func (db *MdbxKV) CommitGeneration() uint64 { return db.commitGen.Load() }
 func (db *MdbxKV) AllTables() kv.TableCfg {
 	return db.buckets
 }
@@ -1463,6 +1468,9 @@ func (tx *MdbxTx) Commit() error {
 	latency, err := tx.tx.Commit()
 	if err != nil {
 		return fmt.Errorf("label: %s, %w", tx.db.opts.label, err)
+	}
+	if !tx.readOnly {
+		tx.db.commitGen.Add(1)
 	}
 
 	if tx.db.opts.metrics {

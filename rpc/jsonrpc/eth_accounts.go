@@ -42,6 +42,13 @@ const maxGetStorageSlots = 1024
 // reads back cannot come from different overlay generations.
 // The caller must defer tx.Rollback() on the returned tx.
 func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (kv.TemporalTx, state.StateReader, error) {
+	if number, isNumber := blockNrOrHash.Number(); isNumber && number == rpc.LatestBlockNumber && latestViewPoolEnabled && api._latestViewPool != nil {
+		return api.leaseLatest(ctx, blockNrOrHash)
+	}
+	return api.openStateReaderAt(ctx, blockNrOrHash)
+}
+
+func (api *APIImpl) openStateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (kv.TemporalTx, state.StateReader, error) {
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, nil, err

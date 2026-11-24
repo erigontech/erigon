@@ -151,6 +151,8 @@ type EthAPI interface {
 }
 
 type BaseAPI struct {
+	_latestViewPool *latestViewPool
+
 	// all caches are thread-safe
 	stateCache kvcache.Cache
 	blocksLRU  *cache.HashByteLRU[*types.Block]
@@ -250,6 +252,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 	}
 
 	api := &BaseAPI{
+		_latestViewPool:   &latestViewPool{},
 		filters:           f,
 		stateCache:        stateCache,
 		blocksLRU:         blocksLRU,
