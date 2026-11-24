@@ -374,12 +374,6 @@ func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStora
 	return nil
 }
 
-func (so *stateObject) printTrie() {
-	for key, value := range so.dirtyStorage {
-		fmt.Printf("UpdateStorage: %x,%x,%s\n", so.address, key, value.Hex())
-	}
-}
-
 func (so *stateObject) SetBalance(amount uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) {
 	so.db.journal.balanceChange(so.address, so.data.Balance, wasCommited, so.db.versionedWrites.balanceDeleted(so.address))
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {

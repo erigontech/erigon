@@ -388,6 +388,10 @@ func TestFrameTransactionRPCNonceCheck(t *testing.T) {
 				if keyed {
 					tx.NonceKeys = []uint256.Int{{1}}
 					manager := accounts.InternAddress(types.FrameNonceManager)
+					// EIP-8250 requires the manager to be predeployed: on the versioned
+					// path a bare storage write does not make the account exist, so set
+					// its nonce to materialize the predeployed account record.
+					require.NoError(t, ibs.SetNonce(manager, 1, tracing.NonceChangeUnspecified))
 					slot := accounts.InternKey(types.FrameNonceSlot(tx.SenderAddress, tx.NonceKeys[0]))
 					require.NoError(t, ibs.SetState(manager, slot, uint256.Int{5}))
 				}
