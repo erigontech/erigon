@@ -107,7 +107,7 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 	// unroomed counts those deferred after a simulation: they take from the
 	// drain as the others do.
 	popped, unroomed := len(rest), 0
-	var evicted, deferred []*Held
+	var deferred []*Held
 	err := func() error {
 		// Read ahead of the state views, which hold the chain's read
 		// transactions.
@@ -147,7 +147,10 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 					c.logger.Warn("[eez] held transaction evicted: it cannot compose", "event", "eez.composer.poison",
 						"hash", h.Hash, "sender", h.Sender, "nonce", h.Nonce, "err", err)
 					c.x.Pool.Evict(h.Sender, h.Direction, h.Nonce)
-					evicted = append(evicted, h)
+					// Evict ended the reservations of the chain drained so far; one
+					// the front admits after it is a new chain.
+					behind := func(t *Held) bool { return t.chainKey() == h.chainKey() && t.Nonce > h.Nonce }
+					rest, deferred = slices.DeleteFunc(rest, behind), slices.DeleteFunc(deferred, behind)
 				}
 				for {
 					if len(rest) == 0 {
@@ -163,10 +166,6 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 						popped += len(rest)
 					}
 					h := rest[0]
-					if slices.ContainsFunc(evicted, func(e *Held) bool { return e.chainKey() == h.chainKey() && h.Nonce > e.Nonce }) {
-						rest = rest[1:]
-						continue
-					}
 					if slices.ContainsFunc(deferred, func(d *Held) bool { return d.chainKey() == h.chainKey() && h.Nonce > d.Nonce }) {
 						// It waits on the one of its chain ahead.
 						deferred = append(deferred, h)
@@ -265,11 +264,7 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 		c.logger.Warn("[eez] composition stopped, the rest waits for the next slot", "event", "eez.composer.compose.stopped",
 			"composed", len(fx.held), "waiting", len(rest), "err", err)
 	}
-	// Evict took the chains of the evicted out of the pool.
-	rest = slices.DeleteFunc(append(deferred, rest...), func(h *Held) bool {
-		return slices.ContainsFunc(evicted, func(e *Held) bool { return e.chainKey() == h.chainKey() && h.Nonce > e.Nonce })
-	})
-	c.x.Pool.PushFront(rest)
+	c.x.Pool.PushFront(append(deferred, rest...))
 	if len(fx.held) == 0 {
 		return nil
 	}

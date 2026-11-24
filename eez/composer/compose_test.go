@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -519,6 +520,69 @@ func TestComposeLeavesTheEvictedChains(t *testing.T) {
 	require.NotNil(t, fx)
 	require.Equal(t, []*Held{first}, fx.held)
 	require.Equal(t, []*Held{second}, f.pool.PopN(math.MaxInt))
+}
+
+// onLog is a log handler calling f on each record.
+type onLog func(r *log.Record)
+
+func (f onLog) Log(r *log.Record) error { f(r); return nil }
+
+func (onLog) Enabled(context.Context, log.Lvl) bool { return true }
+
+// TestComposeTakesAChainAdmittedAfterItsEviction: a chain the front admits
+// anew after an eviction, drained by the same composition, composes or
+// waits whole; no reservation of it is left without its transaction.
+func TestComposeTakesAChainAdmittedAfterItsEviction(t *testing.T) {
+	setup := func(t *testing.T) (*crossFixture, *[]*Held) {
+		f := newCrossFixture(t)
+		f.hold(t, 0, unproxied, nil)
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		stale := *f
+		stale.key = key
+		stale.hold(t, 0, f.call.Source, f.call.Data)
+		f.l1.m.fund(crypto.PubkeyToAddress(key.PublicKey), 1e18)
+		f.l1.m.accounts[crypto.PubkeyToAddress(key.PublicKey)].Nonce = 1
+		// Dropping the stale one comes after the eviction and before the
+		// drain takes more: the front admits a new chain of the evicted
+		// sender then.
+		fresh := new([]*Held)
+		l := log.New()
+		l.SetHandler(onLog(func(r *log.Record) {
+			if strings.Contains(r.Msg, "nonce is spent") && *fresh == nil {
+				*fresh = []*Held{f.hold(t, 0, f.call.Source, f.call.Data), f.hold(t, 1, f.call.Source, f.call.Data)}
+			}
+		}))
+		f.c.logger = l
+		return f, fresh
+	}
+	t.Run("composes", func(t *testing.T) {
+		f, fresh := setup(t)
+		fx := f.compose(t)
+		require.NotNil(t, fx)
+		require.Len(t, *fresh, 2)
+		require.Equal(t, *fresh, fx.held)
+		f.pool.mu.Lock()
+		defer f.pool.mu.Unlock()
+		require.Len(t, f.pool.inFlight, 2, "only the composed are reserved")
+	})
+	t.Run("waits when the composition stops", func(t *testing.T) {
+		f, fresh := setup(t)
+		// A Sync block with room for one delivery.
+		f.c.x.Header = func(*types.Header, rules.ChainHeaderReader) (*types.Header, error) {
+			h := types.CopyHeader(f.w.sync.Header())
+			h.GasLimit = protocol.SystemTxGasLimit
+			return h, nil
+		}
+		fx := f.compose(t)
+		require.NotNil(t, fx)
+		require.Len(t, *fresh, 2)
+		require.Equal(t, (*fresh)[:1], fx.held)
+		require.Equal(t, (*fresh)[1:], f.pool.PopN(math.MaxInt), "requeued, not dropped")
+		f.pool.mu.Lock()
+		defer f.pool.mu.Unlock()
+		require.Len(t, f.pool.inFlight, 2, "the composed one and the one drained here")
+	})
 }
 
 // missingAt is a witness store without the witness of block at.
