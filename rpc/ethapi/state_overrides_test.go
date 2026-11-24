@@ -13,7 +13,9 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -173,12 +175,16 @@ func TestStateOverridesOnTheVersionedPath(t *testing.T) {
 type storageReader struct {
 	*state.NoopReader
 	code    []byte
+	nonce   uint64
+	balance uint64
 	storage map[accounts.StorageKey]uint256.Int
 }
 
 func (r storageReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
 	account := accounts.NewAccount()
 	account.Incarnation = 1
+	account.Nonce = r.nonce
+	account.Balance.SetUint64(r.balance)
 	if len(r.code) > 0 {
 		account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(r.code))
 	}
@@ -341,4 +347,116 @@ func TestFinalizeCallTxRejectsAStateWithoutAVersionMap(t *testing.T) {
 	ibs := state.New(state.NewNoopReader())
 	ibs.SetVersionMap(nil)
 	require.ErrorContains(t, FinalizeCallTx(ibs, &chain.Rules{}), "no version map")
+}
+
+// Where EIP-161 is active, an account that the overrides write and leave empty does not
+// exist after them, with no storage, unless the override sets a non-zero slot.
+func TestStateOverrideRemovesEmptiedAccounts(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x1000000000000000000000000000000000000006"))
+	slot := common.HexToHash("0x01")
+	empty := hexutil.Bytes{}
+	zero := hexutil.U256{}
+	zeroPtr := &zero
+	one := hexutil.U256(*uint256.NewInt(1))
+	onePtr := &one
+	slots := func(value string) *map[common.Hash]common.Hash {
+		return &map[common.Hash]common.Hash{slot: common.HexToHash(value)}
+	}
+	stored := storageReader{balance: 5, storage: map[accounts.StorageKey]uint256.Int{accounts.InternKey(slot): *uint256.NewInt(9)}}
+	contract := storageReader{code: []byte{0x00}, nonce: 1, storage: map[accounts.StorageKey]uint256.Int{accounts.InternKey(slot): *uint256.NewInt(9)}}
+	nonce := hexutil.Uint64(0)
+	for _, tc := range []struct {
+		name      string
+		reader    state.StateReader
+		account   Account
+		preEIP161 bool
+		disabled  bool
+		exists    bool
+		value     uint64
+	}{
+		{name: "balance on a missing account", account: Account{Balance: &onePtr}, exists: true},
+		{name: "empty code on a missing account", account: Account{Code: &empty}},
+		{name: "empty state on a missing account", account: Account{State: &map[common.Hash]common.Hash{}}},
+		{name: "zero slot on a missing account", account: Account{StateDiff: slots("0x00")}},
+		{name: "non-zero slot on a missing account", account: Account{Code: &empty, StateDiff: slots("0x2a")}, exists: true, value: 0x2a},
+		{name: "zero balance on a funded account", reader: stored, account: Account{Balance: &zeroPtr}},
+		{name: "zero balance and a non-zero slot on a funded account", reader: stored, account: Account{Balance: &zeroPtr, State: slots("0x2a")}, exists: true, value: 0x2a},
+		{name: "zero balance and a zero slot on a funded account", reader: stored, account: Account{Balance: &zeroPtr, StateDiff: slots("0x00")}},
+		{name: "zero balance and a zero slot in state on a funded account", reader: stored, account: Account{Balance: &zeroPtr, State: slots("0x00")}},
+		{name: "zero nonce and empty code on a contract", reader: contract, account: Account{Nonce: &nonce, Code: &empty}},
+		{name: "empty code on a contract keeps its nonce", reader: contract, account: Account{Code: &empty}, exists: true, value: 9},
+		{name: "zero balance on an existing empty account", reader: storageReader{}, account: Account{Balance: &zeroPtr}},
+		{name: "empty code with EIP-161 disabled", account: Account{Code: &empty}, disabled: true, exists: true},
+		{name: "empty code before EIP-161", account: Account{Code: &empty}, preEIP161: true, exists: true},
+		{name: "empty state diff on an existing empty account", reader: storageReader{}, account: Account{StateDiff: &map[common.Hash]common.Hash{}}, exists: true},
+	} {
+		for _, amsterdam := range []bool{false, true} {
+			if amsterdam && tc.preEIP161 {
+				continue
+			}
+			t.Run(fmt.Sprintf("%s/amsterdam=%v", tc.name, amsterdam), func(t *testing.T) {
+				reader := tc.reader
+				if reader == nil {
+					reader = state.NewNoopReader()
+				}
+				ibs := newVersionedCallState(reader)
+				defer ibs.Close()
+				overrides := StateOverrides{addr: tc.account}
+				rules := &chain.Rules{IsSpuriousDragon: !tc.preEIP161, IsAmsterdam: amsterdam}
+				if tc.disabled {
+					rules.DisabledEIPs = []int{161}
+				}
+				require.NoError(t, overrides.Override(ibs, vm.PrecompiledContracts{}, rules))
+				exists, err := ibs.Exist(addr)
+				require.NoError(t, err)
+				require.Equal(t, tc.exists, exists)
+				value, err := ibs.GetState(addr, accounts.InternKey(slot))
+				require.NoError(t, err)
+				require.Equal(t, tc.value, value.Uint64())
+			})
+		}
+	}
+}
+
+// A later transaction that funds an account the overrides removed creates it again, without
+// the storage it had before.
+func TestStateOverrideRemovedAccountIsCreatedAgain(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x1000000000000000000000000000000000000007"))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	zero := hexutil.U256{}
+	zeroPtr := &zero
+	ibs := newVersionedCallState(storageReader{balance: 5, storage: map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(9)}})
+	defer ibs.Close()
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	overrides := StateOverrides{addr: Account{Balance: &zeroPtr}}
+	require.NoError(t, overrides.Override(ibs, vm.PrecompiledContracts{}, rules))
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(3), tracing.BalanceChangeUnspecified))
+	require.NoError(t, EndCallTx(ibs, rules, nil))
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), balance.Uint64())
+	value, err := ibs.GetState(addr, slot)
+	require.NoError(t, err)
+	require.True(t, value.IsZero())
+}
+
+// Aura keeps the empty system address, so an override that leaves it empty keeps it too.
+// Other accounts are removed as on any chain.
+func TestStateOverrideKeepsAuraSystemAddress(t *testing.T) {
+	t.Parallel()
+	other := accounts.InternAddress(common.HexToAddress("0x1000000000000000000000000000000000000008"))
+	zero := hexutil.U256{}
+	zeroPtr := &zero
+	ibs := newVersionedCallState(storageReader{balance: 5})
+	defer ibs.Close()
+	overrides := StateOverrides{params.SystemAddress: Account{Balance: &zeroPtr}, other: Account{Balance: &zeroPtr}}
+	require.NoError(t, overrides.Override(ibs, vm.PrecompiledContracts{}, &chain.Rules{IsSpuriousDragon: true, IsAura: true}))
+	exists, err := ibs.Exist(params.SystemAddress)
+	require.NoError(t, err)
+	require.True(t, exists)
+	exists, err = ibs.Exist(other)
+	require.NoError(t, err)
+	require.False(t, exists)
 }
