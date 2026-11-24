@@ -97,8 +97,10 @@ func (tx *SetCodeTransaction) GetAuthorizations() []Authorization {
 	return tx.Authorizations
 }
 
-// SetCodeAuthorizationCount counts authorization list entries in a raw or RLP-enveloped
-// SetCode transaction without decoding the tuples or validating the transaction.
+// SetCodeAuthorizationCount counts entries in a raw or RLP-wrapped SetCode
+// transaction's authorization list. It returns zero for other types or if it
+// cannot locate the list. It uses RLP item lengths and stops at the first
+// incomplete entry. Complete entries may still contain invalid fields.
 func SetCodeAuthorizationCount(encoded []byte) int {
 	if TypedTransactionMarshalledAsRlpString(encoded) {
 		var err error

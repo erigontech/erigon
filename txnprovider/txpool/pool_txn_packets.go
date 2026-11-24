@@ -27,8 +27,10 @@ import (
 
 const maxTransactionsPerPacket = 5000
 
-// Erigon can append one full-size transaction after approaching its outbound packet
-// target. Each EIP-7702 authorization takes at least 27 RLP bytes.
+// maxRemoteAuthorizations limits how many authorization tuples the txpool decodes per packet.
+// The pending remote queue uses the same limit across packets to bound signature
+// recovery. The limit allows for Erigon's send target plus one final full-size
+// SetCode transaction. Each EIP-7702 tuple takes at least 27 RLP bytes.
 const maxRemoteAuthorizations = (p2pTxPacketLimit + txnMaxSize) / 27
 
 // ParseHashesCount looks at the RLP length Prefix for list of 32-byte hashes
@@ -174,6 +176,11 @@ func EncodeTransactions(txnsRlp [][]byte, encodeBuf []byte) []byte {
 	return encodeBuf
 }
 
+// ParseTransactions reads the transaction list at pos in wire order. After any
+// configured RLP check, it skips a SetCode transaction that exceeds the packet's
+// remaining authorization budget and continues with the next transaction.
+// Once a transaction reaches the decoder, its authorizations count against the
+// budget even if the transaction is later rejected.
 func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *TxnSlots, validateHash func([]byte) error) (newPos int, err error) {
 	pos, _, err = rlp.ParseList(payload, pos)
 	if err != nil {

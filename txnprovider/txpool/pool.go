@@ -134,11 +134,9 @@ type TxPool struct {
 	lock                   sync.Mutex
 	recentlyConnectedPeers *recentlyConnectedPeers // all txns will be propagated to this peers eventually, and clear list
 	senders                *sendersBatch
-	// batch processing of remote transactions
-	// handling is fast enough without batching, but batching allows:
-	//   - fewer _chainDB transactions
-	//   - batch notifications about new txns (reduced P2P spam to other nodes about txns propagation)
-	//   - and as a result reducing lock contention
+	// Batching remote transactions reduces database transactions, peer notifications,
+	// and lock contention. A batch in progress still counts toward the queue limits
+	// until its transactions are removed.
 	unprocessedRemoteTxns   *TxnSlots
 	unprocessedRemotePeers  []remoteSource      // index-aligned with unprocessedRemoteTxns
 	unprocessedRemoteByHash map[string]*TxnSlot // to reject duplicates
@@ -1598,7 +1596,8 @@ const txnMaxSize = 128 * 1024
 
 // ValidateSerializedTxn checks that the serialized transaction does not exceed the size limit for its type.
 func ValidateSerializedTxn(serializedTxn []byte) error {
-	// Should be enough for a transaction with 6 blobs
+	// Blob transactions and wrapped frame transactions get extra room for sidecars.
+	// A wrapped frame's inner transaction must still fit within txnMaxSize.
 	const blobTxnMaxSize = 1024 * 1024
 	if len(serializedTxn) <= txnMaxSize {
 		return nil
