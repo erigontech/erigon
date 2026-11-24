@@ -140,22 +140,6 @@ type storedReceiptRLP struct {
 	GasUsed          uint64
 }
 
-// NewReceipt creates a barebone transaction receipt, copying the init fields.
-//
-// Deprecated: create receipts using a struct literal instead.
-func NewReceipt(failed bool, cumulativeGasUsed uint64) *Receipt {
-	r := &Receipt{
-		Type:              LegacyTxType,
-		CumulativeGasUsed: cumulativeGasUsed,
-	}
-	if failed {
-		r.Status = ReceiptStatusFailed
-	} else {
-		r.Status = ReceiptStatusSuccessful
-	}
-	return r
-}
-
 // SetLogs preserves frame boundaries and shares log objects between the combined
 // log list and frame receipts, so metadata updates apply to both.
 // The input must keep the existing per-frame log counts and order.
