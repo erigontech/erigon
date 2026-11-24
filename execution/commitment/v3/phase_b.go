@@ -24,13 +24,13 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-func accountUpdate(value []byte, found bool, update *commitment.Update) (*commitment.Update, []byte, error) {
-	result := &commitment.Update{CodeHash: empty.CodeHash}
+func accountUpdate(value []byte, found bool, update *commitment.Update) (commitment.Update, []byte, error) {
+	result := commitment.Update{CodeHash: empty.CodeHash}
 	var storageRoot []byte
 	if found {
 		nonce, balance, codeHash, root, err := decodeAccountLeaf(value)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: %w", errNodeRecord, err)
+			return commitment.Update{}, nil, fmt.Errorf("%w: %w", errNodeRecord, err)
 		}
 		storageRoot = root
 		result.Nonce = nonce
@@ -74,5 +74,6 @@ func accountLeafAt(n *node, path []byte) (value []byte, found, stored bool) {
 	if child := n.child(nib); child != nil {
 		return accountLeafAt(child, path)
 	}
-	return nil, false, n.hasChildHash(nib) && bytes.HasPrefix(path, n.childPath(nib, nil))
+	var pathScratch [64]byte
+	return nil, false, n.hasChildHash(nib) && bytes.HasPrefix(path, n.childPath(nib, pathScratch[:0]))
 }

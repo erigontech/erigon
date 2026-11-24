@@ -17,7 +17,6 @@
 package v3
 
 import (
-	"bytes"
 	"fmt"
 	"math/bits"
 	"slices"
@@ -158,7 +157,8 @@ func (n *node) ensureSlot(nib int) *childSlot {
 }
 
 func (n *node) setLeaf(nib int, suffix, value []byte) {
-	n.setLeafShared(nib, bytes.Clone(suffix), bytes.Clone(value))
+	owned := append(append(make([]byte, 0, len(suffix)+len(value)), suffix...), value...)
+	n.setLeafShared(nib, owned[:len(suffix)], owned[len(suffix):])
 }
 
 func (n *node) setLeafShared(nib int, suffix, value []byte) {

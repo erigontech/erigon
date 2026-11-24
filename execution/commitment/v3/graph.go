@@ -124,7 +124,8 @@ func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) 
 	if !n.hasChildHash(nib) {
 		return errNodeRecord
 	}
-	childPath := n.childPath(nib, nil)
+	var pathScratch [64]byte
+	childPath := n.childPath(nib, pathScratch[:0])
 	if !bytes.HasPrefix(path, childPath) {
 		return nil
 	}

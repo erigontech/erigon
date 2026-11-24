@@ -200,7 +200,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			copy(storageRoot[:], existingRoot)
 		}
 		at := i * accountLeafScratch
-		plans[i].value = encodeAccountLeaf(update, storageRoot[:], accountValues[at:at:at+accountLeafScratch])
+		plans[i].value = encodeAccountLeaf(&update, storageRoot[:], accountValues[at:at:at+accountLeafScratch])
 	}
 
 	var pipelined [16]bool

@@ -57,8 +57,10 @@ type accountEntry struct {
 }
 
 type partitioner struct {
-	storage  []storageTask
-	accounts []accountEntry
+	storage   []storageTask
+	accounts  []accountEntry
+	entries   []storageEntry
+	taskStart int
 }
 
 func (p *partitioner) add(hashedKey []byte, update *commitment.Update) error {
@@ -75,14 +77,15 @@ func (p *partitioner) add(hashedKey []byte, update *commitment.Update) error {
 
 	if !current.storageDirty {
 		p.storage = append(p.storage, storageTask{addrHash: hashAddressPath(current.hashedKey)})
+		p.taskStart = len(p.entries)
 		current.storageDirty = true
 	}
 	entry, err := storageEntryOf(hashedKey[64:128:128], update)
 	if err != nil {
 		return err
 	}
-	task := &p.storage[len(p.storage)-1]
-	task.entries = append(task.entries, entry)
+	p.entries = append(p.entries, entry)
+	p.storage[len(p.storage)-1].entries = p.entries[p.taskStart:len(p.entries):len(p.entries)]
 	return nil
 }
 
