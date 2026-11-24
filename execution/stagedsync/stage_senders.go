@@ -58,6 +58,10 @@ func StageSendersCfg(chainCfg *chain.Config, badBlockHalt bool, tmpdir string, b
 }
 
 func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, logger log.Logger) error {
+	// Recovery derives contexts, and one derived from the swappable round context panics when it swaps back first.
+	if round, ok := ctx.(interface{ Current() context.Context }); ok {
+		ctx = round.Current()
+	}
 	if s.BlockNumber < cfg.blockReader.FrozenBlocks() {
 		s.BlockNumber = cfg.blockReader.FrozenBlocks()
 	}

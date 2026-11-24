@@ -17,6 +17,7 @@
 package stagedsync_test
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"slices"
 	"testing"
@@ -521,4 +522,38 @@ func recoverSendersOfBlock(t *testing.T, m *execmoduletester.ExecModuleTester, b
 	case <-time.After(10 * time.Second):
 		t.Fatal("senders stage hung after a sender recovery error")
 	}
+}
+
+// swappedRoundContext is a pipeline context whose deadline is re-pointed between rounds: only its Current is safe to use.
+type swappedRoundContext struct {
+	context.Context
+	t       *testing.T
+	current context.Context
+}
+
+func (c swappedRoundContext) Current() context.Context { return c.current }
+func (c swappedRoundContext) Done() <-chan struct{} {
+	c.t.Error("senders stage read the swappable context's Done")
+	return c.current.Done()
+}
+func (c swappedRoundContext) Err() error {
+	c.t.Error("senders stage read the swappable context's Err")
+	return c.current.Err()
+}
+
+func TestSendersRunsUnderTheRoundsOwnContext(t *testing.T) {
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	hash, _ := writeSignedBlock(t, tx, &types.Header{Number: *common.Num1}, key)
+
+	ctx := swappedRoundContext{Context: m.Ctx, t: t, current: m.Ctx}
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, exec.NewBlockReadAheader())
+	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, ctx, log.New()))
+	senders, err := rawdb.ReadSenders(tx, hash, 1)
+	require.NoError(t, err)
+	require.Equal(t, []common.Address{crypto.PubkeyToAddress(key.PublicKey)}, senders)
 }
