@@ -152,3 +152,87 @@ func TestSimulateV1EmptyFullStateOverrideClearsStorage(t *testing.T) {
 		}
 	}
 }
+
+// Every way a simulation removes all of a contract's stored slots counts against one bound: an emptied contract
+// that a call touches (EIP-161), a contract created over it, and a "state" override.
+func TestSimulateV1BoundsTheStorageItRemoves(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	// The bank's first CREATE lands on the contract.
+	contract := types.CreateAddress(crypto.PubkeyToAddress(bankKey.PublicKey), 0)
+	zero := hexutil.Uint64(0)
+	empty := hexutil.Bytes{}
+	noBalance := hexutil.U256{}
+	noBalancePtr := &noBalance
+	// PUSH1 1 SLOAD PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
+	readSlot1 := hexutil.Bytes{byte(vm.PUSH1), 0x01, byte(vm.SLOAD), byte(vm.PUSH1), 0x00, byte(vm.MSTORE), byte(vm.PUSH1), 0x20, byte(vm.PUSH1), 0x00, byte(vm.RETURN)}
+	gas := hexutil.Uint64(100_000)
+	removals := []struct {
+		name  string
+		block func(bank common.Address) SimulatedBlock
+	}{
+		{"deleted", func(bank common.Address) SimulatedBlock {
+			return SimulatedBlock{
+				StateOverrides: &ethapi.StateOverrides{accounts.InternAddress(contract): {Nonce: &zero, Code: &empty, Balance: &noBalancePtr}},
+				Calls:          []ethapi.CallArgs{{From: &bank, To: &contract, Gas: &gas}},
+			}
+		}},
+		{"created over", func(bank common.Address) SimulatedBlock {
+			return SimulatedBlock{
+				StateOverrides: &ethapi.StateOverrides{accounts.InternAddress(contract): {Nonce: &zero, Code: &empty}, accounts.InternAddress(bank): {Nonce: &zero}},
+				Calls:          []ethapi.CallArgs{{From: &bank, Gas: &gas, Input: &empty}},
+			}
+		}},
+		{"state override", func(common.Address) SimulatedBlock {
+			return SimulatedBlock{StateOverrides: &ethapi.StateOverrides{accounts.InternAddress(contract): {State: &map[common.Hash]common.Hash{}}}}
+		}},
+	}
+	for _, size := range []struct {
+		name  string
+		slots int
+		fails bool
+	}{
+		{"at the bound", maxSimReplacedSlots, false},
+		{"above the bound", maxSimReplacedSlots + 1, true},
+	} {
+		storage := make(map[common.Hash]common.Hash, size.slots)
+		for i := range size.slots {
+			storage[common.BigToHash(big.NewInt(int64(i+1)))] = common.Hash{31: 1}
+		}
+		for _, removal := range removals {
+			for _, cfg := range simulateOverrideConfigs {
+				for _, base := range simulateBases {
+					t.Run(removal.name+"/"+size.name+"/"+cfg.name+"/"+base.name, func(t *testing.T) {
+						m, bankAddr := contractGenesis(t, cfg.cfg, contract, types.GenesisAccount{Nonce: 1, Balance: big.NewInt(1), Code: []byte{0x00}, Storage: storage})
+						api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+						result, err := api.SimulateV1(context.Background(), SimulationRequest{
+							BlockStateCalls: []SimulatedBlock{
+								removal.block(bankAddr),
+								{
+									StateOverrides: &ethapi.StateOverrides{accounts.InternAddress(contract): {Code: &readSlot1}},
+									Calls:          []ethapi.CallArgs{{From: &bankAddr, To: &contract, Gas: &gas}},
+								},
+							},
+						}, base.base)
+						if !size.fails {
+							require.NoError(t, err)
+							require.Len(t, result, 2)
+							for _, c := range result[0].Calls {
+								require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(c.Status), "%v", c.Error)
+							}
+							require.Equal(t, hexutil.Encode(make([]byte, 32)), result[1].Calls[0].ReturnData, "slot 1 after the removal")
+							return
+						}
+						require.ErrorContains(t, err, "the simulation removes more than 100000 storage slots")
+						var rpcErr rpc.Error
+						require.ErrorAs(t, err, &rpcErr)
+						require.Equal(t, rpc.ErrCodeClientLimitExceeded, rpcErr.ErrorCode())
+					})
+				}
+			}
+		}
+	}
+}

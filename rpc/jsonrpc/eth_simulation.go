@@ -616,36 +616,34 @@ type simOverrideReader struct {
 
 var _ state.StateReader = (*simOverrideReader)(nil)
 
-// maxSimReplacedSlots bounds the "state" overrides of one request: replacing an account's storage loads all its stored slots into memory.
+// maxSimReplacedSlots bounds the stored slots one request removes: removing all of an account's stored slots
+// loads them all into memory.
 const maxSimReplacedSlots = 100_000
 
-func (s *simulator) checkStorageReplacements(ctx context.Context, stateOverrides *ethapi.StateOverrides, sd *execctx.SharedDomains, tx kv.TemporalTx, latest bool, firstMinTxNum uint64, limit int) error {
-	for addr, account := range *stateOverrides {
-		if account.State == nil {
-			continue
-		}
-		addrValue := addr.Value()
-		budget := limit - s.replacedSlots
-		replaced := make(map[string]struct{})
-		add := func(key []byte) bool {
-			replaced[string(key)] = struct{}{}
-			return len(replaced) <= budget
-		}
-		if err := sd.IteratePrefix(kv.StorageDomain, addrValue[:], tx, func(k, _ []byte) (bool, error) {
-			return add(k), ctx.Err()
-		}); err != nil {
+// countStorageSlots adds the slots stored for addr, at the head and at the simulation base block, to the slots
+// the request removes, and fails once they exceed limit.
+func (s *simulator) countStorageSlots(ctx context.Context, addr accounts.Address, sd *execctx.SharedDomains, tx kv.TemporalTx, latest bool, firstMinTxNum uint64, limit int) error {
+	addrValue := addr.Value()
+	budget := limit - s.replacedSlots
+	replaced := make(map[string]struct{})
+	add := func(key []byte) bool {
+		replaced[string(key)] = struct{}{}
+		return len(replaced) <= budget
+	}
+	if err := sd.IteratePrefix(kv.StorageDomain, addrValue[:], tx, func(k, _ []byte) (bool, error) {
+		return add(k), ctx.Err()
+	}); err != nil {
+		return err
+	}
+	if _, swept := s.sweptStorage[addr]; !latest && !swept && len(replaced) <= budget {
+		if err := visitStorageSlotsAsOf(ctx, tx, addrValue[:], firstMinTxNum, add); err != nil {
 			return err
 		}
-		if _, swept := s.sweptStorage[addr]; !latest && !swept && len(replaced) <= budget {
-			if err := visitStorageSlotsAsOf(ctx, tx, addrValue[:], firstMinTxNum, add); err != nil {
-				return err
-			}
-		}
-		if len(replaced) > budget {
-			return clientLimitExceededError(fmt.Sprintf("state overrides replace more than %d storage slots", limit))
-		}
-		s.replacedSlots += len(replaced)
 	}
+	if len(replaced) > budget {
+		return clientLimitExceededError(fmt.Sprintf("the simulation removes more than %d storage slots", limit))
+	}
+	s.replacedSlots += len(replaced)
 	return nil
 }
 
@@ -801,14 +799,14 @@ func (s *simulator) simulateBlock(
 	if !latest {
 		putDel = &historicalPutDel{TemporalPutDel: putDel, view: newSimulationIntraBlockStateReader(tx, sharedDomains, firstMinTxNum), touched: s.touchedKeys, sweptStorage: s.sweptStorage}
 	}
+	putDel = &storageBoundPutDel{TemporalPutDel: putDel, count: func(addr accounts.Address) error {
+		return s.countStorageSlots(ctx, addr, sharedDomains, tx, latest, firstMinTxNum, maxSimReplacedSlots)
+	}}
 	stateWriter := newDiffTrackingWriter(putDel, minTxNum, s.touchedKeys)
 	balMode := s.chainConfig.IsEIPEnabled(7928, header.Time)
 
 	// Override the state before block execution.
 	if bsc.StateOverrides != nil {
-		if err := s.checkStorageReplacements(ctx, bsc.StateOverrides, sharedDomains, tx, latest, firstMinTxNum, maxSimReplacedSlots); err != nil {
-			return nil, nil, err
-		}
 		overrideReader, err := commitSimOverrides(bsc.StateOverrides, stateReader, activePrecompiles, rules, stateWriter)
 		if err != nil {
 			return nil, nil, err
@@ -1364,6 +1362,31 @@ func newSimulationIntraBlockStateReader(roTx kv.TemporalTx, sd *execctx.SharedDo
 		firstMinTxNum: firstMinTxNum,
 		composite:     make([]byte, 20+32),
 	}
+}
+
+// storageBoundPutDel counts an account's stored slots against the request's bound before every write that removes
+// them all.
+type storageBoundPutDel struct {
+	kv.TemporalPutDel
+	count func(accounts.Address) error
+}
+
+func (p *storageBoundPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
+	if domain == kv.AccountsDomain {
+		if err := p.count(accounts.InternAddress(common.BytesToAddress(k))); err != nil {
+			return err
+		}
+	}
+	return p.TemporalPutDel.DomainDel(domain, k, txNum, prevVal)
+}
+
+func (p *storageBoundPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
+	if domain == kv.StorageDomain {
+		if err := p.count(accounts.InternAddress(common.BytesToAddress(prefix))); err != nil {
+			return err
+		}
+	}
+	return p.TemporalPutDel.DomainDelPrefix(domain, prefix, txNum)
 }
 
 // historicalPutDel writes a simulation on a historical block. SharedDomains resolves the previous
