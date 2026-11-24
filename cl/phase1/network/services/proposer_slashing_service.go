@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	st "github.com/erigontech/erigon/cl/phase1/core/state"
+	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -77,8 +78,13 @@ func (s *proposerSlashingService) DecodeGossipMessage(_ peer.ID, data []byte, ve
 func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.ProposerSlashing) error {
 	// https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#proposer_slashing
 
-	pIndex := msg.Header1.Header.ProposerIndex
 	h1 := msg.Header1.Header
+	pIndex := h1.ProposerIndex
+	if _, fromGossip := serviceinterface.GossipPeer(ctx); fromGossip {
+		if _, seen := s.seenProposers.Load(pIndex); seen {
+			return ErrIgnore
+		}
+	}
 	h2 := msg.Header2.Header
 
 	// Verify header slots match

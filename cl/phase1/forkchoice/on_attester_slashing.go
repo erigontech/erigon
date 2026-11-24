@@ -136,25 +136,26 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 		}
 	}
 
-	if seen {
-		return ErrIgnore
-	}
-
-	var anySlashed bool
+	var anySlashable bool
 	for _, index := range intersection {
-		f.setUnequivocating(index)
-		if !anySlashed {
+		if !seen {
+			f.setUnequivocating(index)
+		}
+		if !anySlashable {
 			v, err := s.ValidatorForValidatorIndex(int(index))
 			if err != nil {
 				return fmt.Errorf("unable to retrieve state: %w", err)
 			}
 			if v.IsSlashable(state.Epoch(s)) {
-				anySlashed = true
+				anySlashable = true
 			}
 		}
 	}
-	if !anySlashed {
+	if !anySlashable {
 		return errors.New("no slashable validators in intersection")
+	}
+	if seen {
+		return ErrIgnore
 	}
 	f.operationsPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
 	f.queueEmit(func() { f.emitters.Operation().SendAttesterSlashing(attesterSlashing) })

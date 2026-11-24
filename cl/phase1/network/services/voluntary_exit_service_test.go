@@ -318,7 +318,9 @@ func (t *voluntaryExitTestSuite) TestSeenValidatorIsIgnoredAfterPoolPrune() {
 	st.ValidatorSet().Set(int(validatorIndex), validator)
 	t.Require().NoError(t.syncedData.OnHeadState(st))
 
-	t.Require().Error(t.voluntaryExitService.ProcessMessage(context.Background(), nil, msg))
+	err := t.voluntaryExitService.ProcessMessage(context.Background(), nil, msg)
+	t.Require().Error(err)
+	t.Require().NotErrorIs(err, ErrIgnore)
 
 	gossipMsg := *msg
 	gossipMsg.ImmediateVerification = false

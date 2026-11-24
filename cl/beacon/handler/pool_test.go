@@ -265,10 +265,11 @@ func TestPoolAttesterSlashingValidatesKnownSlashings(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name    string
-		request func(t *testing.T, s *state.CachingBeaconState, key *bls.PrivateKey, pooled *cltypes.AttesterSlashing) *cltypes.AttesterSlashing
-		status  int
-		publish bool
+		name           string
+		request        func(t *testing.T, s *state.CachingBeaconState, key *bls.PrivateKey, pooled *cltypes.AttesterSlashing) *cltypes.AttesterSlashing
+		status         int
+		publish        bool
+		slashValidator bool
 	}{
 		{
 			name: "pooled duplicate",
@@ -311,6 +312,14 @@ func TestPoolAttesterSlashingValidatesKnownSlashings(t *testing.T) {
 				return req
 			},
 			status: http.StatusBadRequest,
+		},
+		{
+			name: "seen indices with no slashable validator",
+			request: func(t *testing.T, s *state.CachingBeaconState, key *bls.PrivateKey, pooled *cltypes.AttesterSlashing) *cltypes.AttesterSlashing {
+				return newSlashing(t, s, key, common.Hash{3}, common.Hash{4})
+			},
+			status:         http.StatusBadRequest,
+			slashValidator: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -363,6 +372,10 @@ func TestPoolAttesterSlashingValidatesKnownSlashings(t *testing.T) {
 			require.Equal(t, [][]byte{pooledSSZ}, published)
 			published = nil
 
+			if tc.slashValidator {
+				require.NoError(t, anchor.SetValidatorSlashed(0, true))
+				require.NoError(t, synced.OnHeadState(anchor))
+			}
 			require.Equal(t, tc.status, submit(tc.request(t, anchor, key, pooled)))
 			require.Len(t, opPool.AttesterSlashingsPool.Raw(), 1)
 			if tc.publish {
