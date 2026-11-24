@@ -273,6 +273,13 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 		c.logger.Warn("[eez] composition stopped, the rest waits for the next slot", "event", "eez.composer.compose.stopped",
 			"composed", len(fx.held), "waiting", len(rest), "err", err)
 	}
+	if len(fx.held) > 0 && ctx.Err() != nil {
+		// Committed past its deadline, the Sync block could not be proven in
+		// time; each chain keeps its nonce order with the composed first.
+		c.logger.Warn("[eez] composition past its deadline dropped, its transactions wait", "event", "eez.composer.compose.late",
+			"composed", len(fx.held))
+		deferred, fx.held = append(fx.held, deferred...), nil
+	}
 	c.x.Pool.PushFront(append(deferred, rest...))
 	if len(fx.held) == 0 {
 		return nil

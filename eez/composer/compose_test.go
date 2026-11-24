@@ -296,6 +296,39 @@ func TestComposeStopsAtItsDeadline(t *testing.T) {
 	require.Zero(t, trigger.Deferred)
 }
 
+// TestComposeDropsALateComposition: a deadline that passes after a
+// transaction composed leaves nothing composed: a Sync block committed then
+// could not be proven in time. Every drained transaction returns to the pool.
+func TestComposeDropsALateComposition(t *testing.T) {
+	f := newCrossFixture(t)
+	first := f.hold(t, 0, f.call.Source, f.call.Data)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	stale := *f
+	stale.key = key
+	spent := stale.hold(t, 0, f.call.Source, f.call.Data)
+	f.l1.m.fund(crypto.PubkeyToAddress(key.PublicKey), 1e18)
+	f.l1.m.accounts[crypto.PubkeyToAddress(key.PublicKey)].Nonce = 1
+	next := f.hold(t, 1, f.call.Source, f.call.Data)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	// The deadline passes as the spent one is dropped, after the first composed.
+	l := log.New()
+	l.SetHandler(onLog(func(r *log.Record) {
+		if strings.Contains(r.Msg, "nonce is spent") {
+			cancel()
+		}
+	}))
+	f.c.logger = l
+	sync := f.w.sync.Header()
+	require.Nil(t, f.c.compose(ctx, sync.Number.Uint64(), sync, 101, targetTime))
+	require.Equal(t, []*Held{first, next}, f.pool.PopN(math.MaxInt))
+	f.pool.mu.Lock()
+	defer f.pool.mu.Unlock()
+	require.Len(t, f.pool.inFlight, 2, "the two just drained again")
+	require.NotContains(t, f.pool.inFlight, spent.Hash)
+}
+
 // TestComposeRunsInTheTargetBlock: a held transaction runs on the anchor's
 // state in the context of the block its bundle aims at: that block's number,
 // time and base fee, not the anchor's.
