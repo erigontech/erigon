@@ -19,8 +19,10 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -39,8 +41,42 @@ type caplinBlobSnapshotReader interface {
 	ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar, error)
 }
 
+func parseSelector[K comparable](r *http.Request, name string, parse func(string) (K, error)) (map[K]struct{}, error) {
+	values, err := beaconhttp.StringListFromQueryParams(r, name)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	if values == nil {
+		return nil, nil
+	}
+	selected := make(map[K]struct{})
+	for _, value := range values {
+		key, err := parse(value)
+		if err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid %s %q: %w", name, value, err))
+		}
+		if _, ok := selected[key]; ok {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("duplicate %s %q", name, value))
+		}
+		selected[key] = struct{}{}
+	}
+	return selected, nil
+}
+
+func parseVersionedHash(value string) (hash common.Hash, err error) {
+	if !strings.HasPrefix(value, "0x") {
+		return hash, errors.New("missing 0x prefix")
+	}
+	err = hash.UnmarshalText([]byte(value))
+	return hash, err
+}
+
 func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
+	selectedIndices, err := parseSelector(r, "indices", func(value string) (uint64, error) { return strconv.ParseUint(value, 10, 64) })
+	if err != nil {
+		return nil, err
+	}
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -72,10 +108,6 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 	if err != nil {
 		return nil, err
 	}
-	strIdxs, err := beaconhttp.StringListFromQueryParams(r, "indices")
-	if err != nil {
-		return nil, err
-	}
 
 	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
@@ -88,23 +120,9 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 			WithVersion(version).
 			WithOptimistic(isOptimistic), nil
 	}
-	if len(strIdxs) == 0 {
-		for _, v := range out {
+	for _, v := range out {
+		if _, ok := selectedIndices[v.Index]; ok || selectedIndices == nil {
 			resp.Append(v)
-		}
-	} else {
-		included := make(map[uint64]struct{})
-		for _, idx := range strIdxs {
-			i, err := strconv.ParseUint(idx, 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			included[i] = struct{}{}
-		}
-		for _, v := range out {
-			if _, ok := included[v.Index]; ok {
-				resp.Append(v)
-			}
 		}
 	}
 
@@ -200,6 +218,11 @@ func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter
 
 func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
+	// versioned_hashes: Array of versioned hashes for blobs to request for in the specified block. Returns all blobs in the block if not specified.
+	selectedHashes, err := parseSelector(r, "versioned_hashes", parseVersionedHash)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
@@ -235,12 +258,6 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// versioned_hashes: Array of versioned hashes for blobs to request for in the specified block. Returns all blobs in the block if not specified.
-	versionedHashes, err := beaconhttp.StringListFromQueryParams(r, "versioned_hashes")
-	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
-	}
-
 	// read the blobs
 	block, err := a.blockReader.ReadBlockByRoot(ctx, tx, blockRoot)
 	if err != nil {
@@ -255,7 +272,7 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 	if commitments == nil {
 		commitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48)
 	}
-	if versionedHashes == nil {
+	if selectedHashes == nil {
 		// take all blobs
 		indicies = make([]uint64, commitments.Len())
 		for i := range indicies {
@@ -263,22 +280,17 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 		}
 	} else {
 		// take the blobs by the versioned hashes
-		filtered := make([]uint64, 0, len(versionedHashes))
-		versionedHashesToIndex := make(map[common.Hash]uint64, commitments.Len())
+		filtered := make([]uint64, 0, len(selectedHashes))
 		commitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
 			hash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*value))
 			if err != nil {
 				return false
 			}
-			versionedHashesToIndex[hash] = uint64(index)
+			if _, ok := selectedHashes[hash]; ok {
+				filtered = append(filtered, uint64(index))
+			}
 			return true
 		})
-		for _, hash := range versionedHashes {
-			index, ok := versionedHashesToIndex[common.HexToHash(hash)]
-			if ok {
-				filtered = append(filtered, index)
-			}
-		}
 		indicies = filtered
 	}
 
