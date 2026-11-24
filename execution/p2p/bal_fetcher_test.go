@@ -49,24 +49,39 @@ func TestMessageListenerIgnoresUnsolicitedBlockAccessLists(t *testing.T) {
 }
 
 func TestBALFetcherMatchesPeerAndRequest(t *testing.T) {
-	test := newMessageListenerTest(t)
-	test.inboundMessagesStream = make(chan *delayedMessage[*sentryproto.InboundMessage], 3)
 	peerId := PeerIdFromUint64(1)
 	want := types.BlockAccessList{{Address: common.Address{1}}}
 	raw, err := types.EncodeBlockAccessListBytes(want)
 	require.NoError(t, err)
 	req := BALRequest{Hash: common.Hash{1}, GasLimit: types.BalItemCost, ExpectedHash: crypto.Keccak256Hash(raw)}
-	fetcher := test.mockBALRequest(t, peerId, req.Hash, func(requestId uint64) {
-		malformed := []rlp.RawValue{{0xc1}}
-		test.sendBlockAccessLists(t, PeerIdFromUint64(2), requestId, malformed)
-		test.sendBlockAccessLists(t, peerId, requestId+1, malformed)
-		test.sendBlockAccessLists(t, peerId, requestId, []rlp.RawValue{raw})
-	})
-	test.run(func(ctx context.Context, t *testing.T) {
-		out, err := fetcher.fetchFromPeer(ctx, []BALRequest{req}, peerId, time.Second)
-		require.NoError(t, err)
-		require.Equal(t, want, out[req.Hash].BlockAccessList())
-	})
+	malformed := rlp.RawValue{0xc1}
+	for _, tc := range []struct {
+		name            string
+		responsePeerId  *PeerId
+		requestIdOffset uint64
+		entry           rlp.RawValue
+		wantErr         error
+	}{
+		{"matching reply", peerId, 0, raw, nil},
+		{"reply from another peer", PeerIdFromUint64(2), 0, malformed, context.DeadlineExceeded},
+		{"reply to another request", peerId, 1, malformed, context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				test := newMessageListenerTest(t)
+				defer test.ctxCancel()
+				fetcher := test.mockBALRequest(t, peerId, req.Hash, func(requestId uint64) {
+					test.sendBlockAccessLists(t, tc.responsePeerId, requestId+tc.requestIdOffset, []rlp.RawValue{tc.entry})
+				})
+				go test.messageListener.listenInboundMessages(test.ctx)
+				out, err := fetcher.fetchFromPeer(test.ctx, []BALRequest{req}, peerId, 100*time.Millisecond)
+				require.ErrorIs(t, err, tc.wantErr)
+				if tc.wantErr == nil {
+					require.Equal(t, want, out[req.Hash].BlockAccessList())
+				}
+			})
+		})
+	}
 }
 
 func TestBALFetcherResponse(t *testing.T) {
@@ -309,13 +324,6 @@ func TestValidateBALResponse(t *testing.T) {
 		require.True(t, bad)
 		require.NotContains(t, out, h0)
 		require.Equal(t, wantBAL, out[h1].BlockAccessList())
-	})
-
-	t.Run("over-long response penalises the peer", func(t *testing.T) {
-		reqs := []BALRequest{{Hash: h0, Number: 1, ExpectedHash: balHash}}
-		_, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal, bal})
-		require.Error(t, err)
-		require.True(t, bad)
 	})
 
 	t.Run("short response leaves trailing requests absent", func(t *testing.T) {

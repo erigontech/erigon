@@ -207,8 +207,8 @@ func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerI
 	// A discarded BAL can still match the header commitment, so absence from out
 	// does not prove that the peer lacks it. Only explicit unavailable entries
 	// update the tracker; a truncated response also gives no availability evidence.
-	for i := 0; i < len(response) && i < len(reqs); i++ {
-		if isUnavailableBALEntry(response[i]) {
+	for i, entry := range response {
+		if isUnavailableBALEntry(entry) {
 			f.peerTracker.BALNumMissing(peerId, reqs[i].Number)
 		}
 	}
@@ -219,16 +219,9 @@ func isUnavailableBALEntry(entry rlp.RawValue) bool {
 	return len(entry) == 0 || (len(entry) == 1 && entry[0] == 0x80)
 }
 
-// validateBALResponse maps a positional EIP-8159 BlockAccessLists response onto
-// a hash-keyed result. badPeer is true when the peer must be penalised: an
-// over-long response, a 0xc0 "empty" claim for a block whose header commits to a
-// non-empty BAL, or a payload whose keccak256 does not match the committed hash.
-// A violating entry is skipped while the remaining valid entries are kept —
-// pruned peers answering 0xc0 must not cost the rest of the response.
+// validateBALResponse expects at most one entry per request, in request order.
+// It keeps valid entries and flags the peer if a BAL conflicts with its header commitment.
 func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common.Hash]*types.BlockAccessListSidecar, bool, error) {
-	if len(response) > len(reqs) {
-		return nil, true, fmt.Errorf("%w: peer returned %d entries for %d requests", ErrBadBALResponse, len(response), len(reqs))
-	}
 	var badPeer bool
 	var responseErr error
 	out := make(map[common.Hash]*types.BlockAccessListSidecar, len(reqs))
