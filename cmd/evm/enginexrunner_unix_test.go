@@ -19,6 +19,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -47,4 +48,20 @@ func TestLoadEngineXGroupsReadsAPipeOnce(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, common.HexToHash("0x0a"), *def.LastBlockHash)
 	}
+}
+
+// A piped input is a file, not a directory: collectFiles returns it as given. On Linux its
+// /proc/self/fd link points at "pipe:[N]", which filepath.EvalSymlinks can not resolve.
+func TestCollectFilesKeepsAPipe(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	defer r.Close()
+	defer w.Close()
+	path := fmt.Sprintf("/dev/fd/%d", r.Fd())
+	if _, err := os.Stat("/proc/self/fd"); err == nil {
+		path = fmt.Sprintf("/proc/self/fd/%d", r.Fd())
+	}
+	files, err := collectFiles(path)
+	require.NoError(t, err)
+	require.Equal(t, []string{path}, files)
 }
