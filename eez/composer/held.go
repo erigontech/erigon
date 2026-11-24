@@ -238,8 +238,8 @@ func (p *HeldPool) held(k chainKey) int {
 func (tx *Held) chainKey() chainKey { return chainKey{tx.Sender, tx.Direction} }
 
 // PushFront returns recovered, drained earlier, to the front in their order,
-// releasing their reservations. A queued replacement of one of them wins:
-// that one and the rest of its chain are dropped.
+// releasing their reservations. A replacement of one of them, queued or in
+// flight, wins: that one and the rest of its chain are dropped.
 func (p *HeldPool) PushFront(recovered []*Held) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -258,17 +258,25 @@ func (p *HeldPool) PushFront(recovered []*Held) {
 	p.txs = append(front, p.txs...)
 }
 
-// replaced returns, for each chain of txs a queued replacement owns part
-// of, the lowest nonce of txs it owns.
+// replaced returns, for each chain of txs a replacement queued or in flight
+// owns part of, the lowest nonce of txs it owns.
 func (p *HeldPool) replaced(txs []*Held) map[chainKey]uint64 {
 	conflict := map[chainKey]uint64{}
+	own := func(k chainKey, nonce uint64) {
+		if n, ok := conflict[k]; !ok || nonce < n {
+			conflict[k] = nonce
+		}
+	}
 	for _, tx := range txs {
 		k := tx.chainKey()
 		for _, queued := range p.txs {
 			if queued.chainKey() == k && queued.Nonce == tx.Nonce && queued.Hash != tx.Hash {
-				if n, ok := conflict[k]; !ok || tx.Nonce < n {
-					conflict[k] = tx.Nonce
-				}
+				own(k, tx.Nonce)
+			}
+		}
+		for h, r := range p.inFlight {
+			if r.chainKey == k && r.nonce == tx.Nonce && h != tx.Hash {
+				own(k, tx.Nonce)
 			}
 		}
 	}
@@ -277,8 +285,9 @@ func (p *HeldPool) replaced(txs []*Held) map[chainKey]uint64 {
 
 // Reserve takes back the reservations of txs, released when derivation
 // passed their settlement, which an L1 reorg rolled out: while its posting
-// may land again, their nonces stay theirs. A replacement queued since wins,
-// as in PushFront: that one of txs and the rest of its chain stay released.
+// may land again, their nonces stay theirs. A replacement queued or drained
+// since wins, as in PushFront: that one of txs and the rest of its chain
+// stay released.
 func (p *HeldPool) Reserve(txs []*Held) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
