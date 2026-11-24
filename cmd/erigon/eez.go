@@ -64,6 +64,7 @@ import (
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // exitDiverged is the exit status of a follower that halted because its
@@ -464,6 +465,16 @@ type frontServer struct {
 	logger log.Logger
 }
 
+// newFrontServer serves h on addr with the timeouts of the node's RPC
+// listener: a request's body read is bounded, not only its headers.
+func newFrontServer(addr string, h http.Handler, logger log.Logger) *frontServer {
+	t := rpccfg.DefaultHTTPTimeouts
+	return &frontServer{srv: &http.Server{
+		Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout: t.ReadTimeout, WriteTimeout: t.WriteTimeout, IdleTimeout: t.IdleTimeout,
+	}, logger: logger}
+}
+
 func (f *frontServer) Start() error {
 	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", f.srv.Addr)
 	if err != nil {
@@ -690,8 +701,7 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		n.RegisterLifecycle(&onStop{stopComposer})
 	}
 	if front != nil {
-		srv := &http.Server{Addr: cfg.Sequencer.Composer.L1Front, Handler: front, ReadHeaderTimeout: 10 * time.Second}
-		n.RegisterLifecycle(&frontServer{srv: srv, logger: logger})
+		n.RegisterLifecycle(newFrontServer(cfg.Sequencer.Composer.L1Front, front, logger))
 	}
 	if signer != nil {
 		// Stops after the follower, the writer of the heads it signs, and

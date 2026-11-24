@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -49,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/p2p/netutil"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // The L1's own peers, which the EEZ chain beside it must not take.
@@ -283,4 +285,14 @@ func TestDABudgetFollowsTheComposer(t *testing.T) {
 	cfg := &eez.SequencerConfig{Composer: &eez.ComposerConfig{MaxGas: composer.MinPostBatchGas}}
 	require.Equal(t, sequencer.DABudget(6, composer.MinPostBatchGas), daBudget(cfg, 6))
 	require.Less(t, daBudget(cfg, 6), daBudget(&eez.SequencerConfig{}, 6))
+}
+
+// TestFrontServerTimeouts: the front bounds a request's body read, not only
+// its headers, as the node's RPC listener does.
+func TestFrontServerTimeouts(t *testing.T) {
+	srv := newFrontServer("127.0.0.1:0", http.NotFoundHandler(), log.New())
+	require.Equal(t, rpccfg.DefaultHTTPTimeouts.ReadTimeout, srv.srv.ReadTimeout)
+	require.Equal(t, rpccfg.DefaultHTTPTimeouts.WriteTimeout, srv.srv.WriteTimeout)
+	require.Equal(t, rpccfg.DefaultHTTPTimeouts.IdleTimeout, srv.srv.IdleTimeout)
+	require.Positive(t, srv.srv.ReadHeaderTimeout)
 }
