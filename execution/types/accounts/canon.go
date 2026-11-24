@@ -155,11 +155,3 @@ func (c *canonTable[T]) release(v T, wp weak.Pointer[T]) {
 		return old, xsync.CancelOp
 	})
 }
-
-// flush migrates every strong generation to the weak table and waits for it; tests use it.
-func (c *canonTable[T]) flush() {
-	c.migrate.Lock()
-	c.toWeak(c.swap())
-	c.migrate.Unlock()
-	c.rotate()
-}
