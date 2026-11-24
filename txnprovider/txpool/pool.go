@@ -1775,6 +1775,9 @@ func newAdmissionBatch(txns TxnSlots, sources []remoteSource) admissionBatch {
 		if i < len(sources) {
 			a.source = sources[i]
 		}
+		if batch.preparedCells == nil && len(txn.BlobBundles) != 0 {
+			batch.preparedCells = make(blobCells)
+		}
 		switch txn.TxType() {
 		case SetCodeTxnType, BlobTxnType:
 			a.needsPreparation = true
@@ -1817,7 +1820,6 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 	if err != nil {
 		return admissionBatch{}, err
 	}
-	batch.preparedCells = make(blobCells)
 	p.prepareCandidates(&batch)
 	return batch, nil
 }
@@ -2044,9 +2046,6 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 		var cancel context.CancelFunc
 		simulationCtx, cancel = context.WithTimeout(ctx, frameValidationTimeout)
 		defer cancel()
-		if batch.preparedCells == nil {
-			batch.preparedCells = make(blobCells)
-		}
 	}
 	var frameGeneration uint64
 	needFrameSimulation := batch.hasFrames
@@ -2080,8 +2079,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			if err := p.validateTxns(batch.txns, cacheView, batch.preparedCells); err != nil {
 				return err
 			}
-			announcements, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, batch.txns, batch.preparedCells,
-				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), true)
+			announcements, err := p.addTxns(cacheView, batch.txns, batch.preparedCells)
 			if len(sources) != 0 {
 				p.kickKZGOffenders(ctx, batch.txns)
 			}
@@ -2112,9 +2110,9 @@ func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 	return p._chainDB, p._stateCache
 }
 
-func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
-	txns []txnAdmission, cells blobCells, pendingBaseFee, pendingBlobFee uint64, collect bool,
-) (Announcements, error) {
+// The caller holds the pool lock, so the block number and pending fees stay stable for the batch.
+func (p *TxPool) addTxns(cacheView kvcache.CacheView, txns []txnAdmission, cells blobCells) (Announcements, error) {
+	blockNum := p.lastSeenBlock.Load()
 	// Refresh senders after inserting the batch so their nonce-chain and balance
 	// checks account for all accepted transactions in the batch.
 	sendersWithChangedState := map[uint64]struct{}{}
@@ -2133,7 +2131,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		if found := p.byHash[string(txn.IDHash[:])]; found != nil {
 			a.reason = txpoolcfg.DuplicateHash
 			// Reannounce a stuck local transaction when it is resubmitted.
-			if collect && a.local && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
+			if a.local && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
 				announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.Size, found.TxnSlot.IDHash[:])
 			}
 			continue
@@ -2175,7 +2173,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		}
 	}
 
-	err := p.promote(cacheView, pendingBaseFee, pendingBlobFee, &announcements)
+	err := p.promote(cacheView, p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), &announcements)
 	return announcements, err
 }
 
@@ -3490,8 +3488,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		txns = append(txns, txnAdmission{txn: txn, local: isLocalTx})
 	}
 
-	if _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, txns, cells,
-		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), false); err != nil {
+	if _, err := p.addTxns(cacheView, txns, cells); err != nil {
 		return err
 	}
 

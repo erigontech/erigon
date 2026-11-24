@@ -187,42 +187,41 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 
 	reply := &txpoolproto.AddReply{Imported: make([]txpoolproto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 
-	for i := 0; i < len(in.RlpTxs); i++ {
-		slotIndex := len(slots.Txns) // Only inputs awaiting admission have slots.
-		slots.Resize(uint(slotIndex + 1))
-		slots.Txns[slotIndex] = &TxnSlot{}
-		slots.IsLocal[slotIndex] = true
+	for i, raw := range in.RlpTxs {
+		slot := new(TxnSlot)
+		var sender common.Address
 		var knownReason txpoolcfg.DiscardReason
 		validateHash := func(hash []byte) error {
-			reason, sender := s.txPool.knownTxn(hash)
+			reason, pooledSender := s.txPool.knownTxn(hash)
 			// An earlier input can replace a pooled transaction, and a new head can invalidate a
 			// cached frame rejection. Let admission resolve both in batch order.
-			if reason != txpoolcfg.NotSet && (slotIndex == 0 || cachedRejectionDependsOnlyOnTxn(reason)) {
+			if reason != txpoolcfg.NotSet && (len(slots.Txns) == 0 || cachedRejectionDependsOnlyOnTxn(reason)) {
 				knownReason = reason
 				return ErrRejected
 			}
-			if reason == txpoolcfg.AlreadyKnown && sender != (common.Address{}) {
-				slots.Txns[slotIndex].Txn.SetSender(accounts.InternAddress(sender))
+			if reason == txpoolcfg.AlreadyKnown && pooledSender != (common.Address{}) {
+				slot.Txn.SetSender(accounts.InternAddress(pooledSender))
 			}
 			return nil
 		}
-		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txns[slotIndex], slots.Senders.At(slotIndex),
-			false /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash); err != nil {
-			slots.Resize(uint(slotIndex)) // This input already has its result.
-			switch {
-			case knownReason != txpoolcfg.NotSet:
-				reply.Errors[i] = knownReason.String()
-				reply.Imported[i] = mapDiscardReasonToProto(knownReason)
-			case errors.Is(err, ErrRlpTooBig):
-				reply.Errors[i] = txpoolcfg.RLPTooLong.String()
-				reply.Imported[i] = txpoolproto.ImportResult_INVALID
-			case errors.Is(err, ErrParseTxn):
-				reply.Errors[i] = err.Error()
-				reply.Imported[i] = txpoolproto.ImportResult_INVALID
-			default:
-				reply.Errors[i] = err.Error()
-				reply.Imported[i] = txpoolproto.ImportResult_INTERNAL_ERROR
-			}
+		_, err := parseCtx.ParseTransaction(raw, 0, slot, sender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash)
+		if err == nil {
+			slots.Append(slot, sender[:], true)
+			continue
+		}
+		switch {
+		case knownReason != txpoolcfg.NotSet:
+			reply.Errors[i] = knownReason.String()
+			reply.Imported[i] = mapDiscardReasonToProto(knownReason)
+		case errors.Is(err, ErrRlpTooBig):
+			reply.Errors[i] = txpoolcfg.RLPTooLong.String()
+			reply.Imported[i] = txpoolproto.ImportResult_INVALID
+		case errors.Is(err, ErrParseTxn):
+			reply.Errors[i] = err.Error()
+			reply.Imported[i] = txpoolproto.ImportResult_INVALID
+		default:
+			reply.Errors[i] = err.Error()
+			reply.Imported[i] = txpoolproto.ImportResult_INTERNAL_ERROR
 		}
 	}
 
@@ -237,6 +236,8 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		return nil, err
 	}
 
+	// Inputs rejected during parsing already have replies. Entries still at the default
+	// SUCCESS value match the slots passed to admission, in input order.
 	j := 0
 	for i := range reply.Imported {
 		if reply.Imported[i] != txpoolproto.ImportResult_SUCCESS {
