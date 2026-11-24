@@ -494,11 +494,14 @@ func TestComposerRecovers(t *testing.T) {
 		h.c.RecoverFailed(t.Context())
 		h.cursor.Store(4)
 		h.c.RecoverFailed(t.Context())
-		node.head.Store(10)
 		// Off L1 and out of the node's pool, its posting fails once L1 moves
 		// on; the recovery that watches it again takes the verdict when it
 		// comes first.
-		require.Eventually(t, func() bool { r, ok := h.resolution(8); return !ok || r == Failed }, 5*time.Second, time.Millisecond)
+		require.Eventually(t, func() bool {
+			node.head.Add(1)
+			r, ok := h.resolution(8)
+			return !ok || r == Failed
+		}, 5*time.Second, time.Millisecond)
 		h.slot(t, 12, 52, sequencer.ModeSteady)
 		require.Len(t, h.targets(t), 2)
 		h.requireWindow(t, 1, 5, 12, post.Target{Block: 52, Time: h.chain.header(12).Time})
@@ -709,14 +712,18 @@ func TestComposerOutlivesAHungL1(t *testing.T) {
 }
 
 // rolling is an L1 node whose head and pool the test moves; no posting has
-// a receipt.
+// a receipt. While down, its head reads fail.
 type rolling struct {
 	head  atomic.Uint64
 	has   atomic.Bool
+	down  atomic.Bool
 	asked atomic.Int64
 }
 
 func (r *rolling) Head(context.Context) (*l1.Header, error) {
+	if r.down.Load() {
+		return nil, errors.New("node down")
+	}
 	return &l1.Header{Number: r.head.Load()}, nil
 }
 
@@ -727,6 +734,31 @@ func (r *rolling) Receipt(context.Context, common.Hash) (*l1.Receipt, error) {
 
 func (r *rolling) HasTransaction(context.Context, common.Hash) (bool, error) {
 	return r.has.Load(), nil
+}
+
+// TestComposerRewatchesFromAKnownHead: a settlement watched again while the
+// L1 head cannot be read waits for it, so the grace of a posting the node
+// holds counts from the head, not from block zero.
+func TestComposerRewatchesFromAKnownHead(t *testing.T) {
+	node := &rolling{}
+	node.head.Store(1)
+	h := newHarness(t, newTestChain(t, 12), 12, node)
+	ctx := t.Context()
+	h.slot(t, 8, 50, sequencer.ModeSteady)
+	h.targets(t)
+	h.cursor.Store(8)
+	h.c.RecoverFailed(ctx)
+	node.has.Store(true)
+	node.head.Store(100)
+	node.down.Store(true)
+	h.cursor.Store(4)
+	h.c.RecoverFailed(ctx)
+	time.Sleep(50 * time.Millisecond)
+	node.down.Store(false)
+	time.Sleep(200 * time.Millisecond)
+	r, ok := h.resolution(8)
+	require.True(t, ok)
+	require.Equal(t, Pending, r, "the node holds it within its grace from block 100")
 }
 
 // TestComposerIgnoresAStaleWatch: a bundle's first watch, still running
