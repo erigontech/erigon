@@ -68,18 +68,18 @@ func balFoldRoot(t *testing.T, checkpoint bool, after int64, destroy bool) []byt
 	vm.SetBaseTxNum(req.firstTxNum)
 	require.NoError(t, vm.SeedEmptyRemovals(true, false, cc.asOfReader.dr.StateReaderAt(req.firstTxNum)))
 	if checkpoint {
-		_, flush, err := cc.computeRootFromBAL(ctx, req, vm, -1, 4, commitTarget{blockNum: 2, lastTxNum: 6})
+		_, flush, err := cc.computeRootFromBAL(ctx, req, vm, cc.asOfReader.dr.StateReaderAt(req.firstTxNum), -1, 4, commitTarget{blockNum: 2, lastTxNum: 6})
 		require.NoError(t, err)
 		if flush != nil {
 			require.NoError(t, flush())
 		}
-		_, flush2, err := cc.computeRootFromBAL(ctx, req, vm, 4, 4, commitTarget{blockNum: 2, lastTxNum: 6})
+		_, flush2, err := cc.computeRootFromBAL(ctx, req, vm, cc.asOfReader.dr.StateReaderAt(req.firstTxNum), 4, 4, commitTarget{blockNum: 2, lastTxNum: 6})
 		require.NoError(t, err)
 		if flush2 != nil {
 			require.NoError(t, flush2())
 		}
 	}
-	rh, _, err := cc.computeRootFromBAL(ctx, req, vm, after, math.MaxUint32, commitTarget{blockNum: 2, lastTxNum: 10})
+	rh, _, err := cc.computeRootFromBAL(ctx, req, vm, cc.asOfReader.dr.StateReaderAt(req.firstTxNum), after, math.MaxUint32, commitTarget{blockNum: 2, lastTxNum: 10})
 	require.NoError(t, err)
 	return rh
 }
