@@ -17,7 +17,6 @@
 package engineapi
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -30,33 +29,9 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
-	"github.com/erigontech/erigon/execution/p2p"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 )
-
-// wireChainFetcher round-trips the bodies through RLP, as a body from a peer is decoded.
-type wireChainFetcher struct{ chainFetcher }
-
-func (f *wireChainFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Body], error) {
-	res, err := f.chainFetcher.FetchBodies(ctx, headers, peerId, opts...)
-	if err != nil {
-		return res, err
-	}
-	for i, body := range res.Data {
-		enc, err := rlp.EncodeToBytes(body)
-		if err != nil {
-			return p2p.FetcherResponse[[]*types.Body]{}, err
-		}
-		decoded := new(types.Body)
-		if err := rlp.DecodeBytes(enc, decoded); err != nil {
-			return p2p.FetcherResponse[[]*types.Body]{}, err
-		}
-		res.Data[i] = decoded
-	}
-	return res, nil
-}
 
 type emptyBlobHashesChain struct {
 	srv                      *EngineServer
@@ -87,16 +62,10 @@ func newEmptyBlobHashesChain(t *testing.T) emptyBlobHashesChain {
 	header2.ParentHash = invalid.Hash()
 	invalid2 := types.NewBlock(header2, nil, nil, nil, chainPack.Blocks[2].Withdrawals(), nil)
 
-	fetcher := &wireChainFetcher{chainFetcher{blocks: map[common.Hash]*types.Block{
+	fetcher := &chainFetcher{blocks: map[common.Hash]*types.Block{
 		valid.Hash(): valid, invalid.Hash(): invalid, invalid2.Hash(): invalid2,
-	}}}
-	peerTracker := p2p.NewPeerTracker(m.Log, nil)
-	peerTracker.PeerConnected(p2p.PeerIdFromUint64(1))
-	bbd := p2p.NewBackwardBlockDownloader(m.Log, fetcher, peerTracker, t.TempDir())
-	syncCfg := m.Cfg().Sync
-	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), m.Log, m.ExecModule, m.BlockReader, m.DB, m.ChainConfig, syncCfg, bbd)
-	srv := NewEngineServer(m.Log, m.ChainConfig, m.ExecModule, downloader, false, false, false, true, nil, nil, 0, syncCfg.MaxReorgDepth)
-	return emptyBlobHashesChain{srv: srv, valid: valid, invalid: invalid, invalid2: invalid2}
+	}}
+	return emptyBlobHashesChain{srv: newDownloadingEngineServer(t, m, fetcher), valid: valid, invalid: invalid, invalid2: invalid2}
 }
 
 func sendNewPayload(t *testing.T, srv *EngineServer, block *types.Block) *engine_types.PayloadStatus {
@@ -123,7 +92,9 @@ func TestNewPayloadMarksDownloadedEmptyBlobHashesChainInvalid(t *testing.T) {
 
 	status := sendNewPayload(t, c.srv, c.invalid2)
 	require.Contains(t, []engine_types.EngineStatus{engine_types.SyncingStatus, engine_types.InvalidStatus}, status.Status)
-	require.NotEqual(t, engine_block_downloader.Syncing, c.srv.blockDownloader.Status())
+	require.Eventually(t, func() bool {
+		return c.srv.blockDownloader.Status() != engine_block_downloader.Syncing
+	}, 30*time.Second, 10*time.Millisecond)
 
 	requireEmptyBlobHashesInvalid(t, sendNewPayload(t, c.srv, c.invalid2), c.valid.Hash())
 	requireEmptyBlobHashesInvalid(t, sendNewPayload(t, c.srv, c.invalid), c.valid.Hash())
