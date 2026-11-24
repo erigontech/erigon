@@ -17,7 +17,6 @@
 package ethapi
 
 import (
-	"errors"
 	"maps"
 
 	"github.com/holiman/uint256"
@@ -27,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // BlockHashOverrides maps block numbers to their hash overrides,
@@ -58,13 +58,13 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error 
 		return nil
 	}
 	if overrides.BeaconRoot != nil {
-		return errors.New(`block override "beaconRoot" is not supported for this RPC method`)
+		return &rpc.InvalidParamsError{Message: `block override "beaconRoot" is not supported for this RPC method`}
 	}
 	if overrides.Withdrawals != nil {
-		return errors.New(`block override "withdrawals" is not supported for this RPC method`)
+		return &rpc.InvalidParamsError{Message: `block override "withdrawals" is not supported for this RPC method`}
 	}
 	if overrides.BlockHash != nil {
-		return errors.New(`block override "blockHash" is not supported for this RPC method`)
+		return &rpc.InvalidParamsError{Message: `block override "blockHash" is not supported for this RPC method`}
 	}
 	if overrides.Number != nil {
 		context.BlockNumber = overrides.Number.Uint64()

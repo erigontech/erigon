@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // helpers
@@ -77,6 +78,8 @@ func TestOverride_RejectsBeaconRoot(t *testing.T) {
 	err := o.Override(&evmtypes.BlockContext{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "beaconRoot")
+	var rpcErr *rpc.InvalidParamsError
+	require.ErrorAs(t, err, &rpcErr)
 }
 
 func TestOverride_RejectsWithdrawals(t *testing.T) {
@@ -85,6 +88,18 @@ func TestOverride_RejectsWithdrawals(t *testing.T) {
 	err := o.Override(&evmtypes.BlockContext{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "withdrawals")
+	var rpcErr *rpc.InvalidParamsError
+	require.ErrorAs(t, err, &rpcErr)
+}
+
+func TestOverride_RejectsBlockHash(t *testing.T) {
+	hashes := map[uint64]common.Hash{1: {0x01}}
+	o := BlockOverrides{BlockHash: &hashes}
+	err := o.Override(&evmtypes.BlockContext{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "blockHash")
+	var rpcErr *rpc.InvalidParamsError
+	require.ErrorAs(t, err, &rpcErr)
 }
 
 func TestOverride_PartialOverrideDoesNotTouchOtherFields(t *testing.T) {
