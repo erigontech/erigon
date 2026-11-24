@@ -33,9 +33,7 @@ var (
 	NilAddress  = Address{}
 )
 
-// unique drops a value at the first GC after its last handle dies, so values the next request reads again are
-// allocated and registered again, and unique.Make parks its caller while a GC cycle finishes marking. These
-// direct-mapped tables keep the latest values alive and answer hits without unique.Make; a miss overwrites the slot.
+// Direct-mapped caches in front of the canon tables: a hit skips the canon lookup, a miss overwrites the slot.
 const (
 	addressTableSize = 256 * 1024
 	keyTableSize     = 1024 * 1024
