@@ -2711,26 +2711,26 @@ func newBlockAccessListBuilder(accountsHint int) *BlockAccessListBuilder {
 	}
 }
 
-// readsOf returns the reads of addr, or nil when addr has an accountState.
-func (b *BlockAccessListBuilder) readsOf(addr accounts.Address) *readOnlyAccount {
+// lookup returns the reads of addr, or its accountState when it has one; a new addr starts with reads only.
+func (b *BlockAccessListBuilder) lookup(addr accounts.Address) (*readOnlyAccount, *accountState) {
 	if i, ok := b.readOnly[addr]; ok {
-		return &b.readOnlyAccounts[i]
+		return &b.readOnlyAccounts[i], nil
 	}
-	if _, ok := b.ac[addr]; ok {
-		return nil
+	if account, ok := b.ac[addr]; ok {
+		return nil, account
 	}
 	b.readOnly[addr] = len(b.readOnlyAccounts)
 	b.readOnlyAccounts = append(b.readOnlyAccounts, readOnlyAccount{})
-	return &b.readOnlyAccounts[len(b.readOnlyAccounts)-1]
+	return &b.readOnlyAccounts[len(b.readOnlyAccounts)-1], nil
 }
 
 // touch registers addr, which must appear in the list.
-func (b *BlockAccessListBuilder) touch(addr accounts.Address) { b.readsOf(addr) }
+func (b *BlockAccessListBuilder) touch(addr accounts.Address) { b.lookup(addr) }
 
 func (b *BlockAccessListBuilder) readBalance(addr accounts.Address, val uint256.Int) {
-	r := b.readsOf(addr)
-	if r == nil {
-		b.ac[addr].updateReadBalance(val)
+	r, account := b.lookup(addr)
+	if account != nil {
+		account.updateReadBalance(val)
 		return
 	}
 	if !r.balanceRead {
@@ -2740,9 +2740,12 @@ func (b *BlockAccessListBuilder) readBalance(addr accounts.Address, val uint256.
 }
 
 func (b *BlockAccessListBuilder) readCodeHash(addr accounts.Address, empty bool) {
-	r := b.readsOf(addr)
-	if r == nil {
-		if account := b.ac[addr]; empty && len(account.code.changes.entries) == 0 {
+	r, account := b.lookup(addr)
+	if account != nil {
+		// A pre-block-empty code hash marks the baseline empty so applyToCode
+		// drops a net-zero same-tx set-then-clear. Only an empty read seen
+		// before any code change is the pre-block value.
+		if empty && len(account.code.changes.entries) == 0 {
 			account.initialCodeEmpty = true
 		}
 		return
@@ -2850,9 +2853,6 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		// A pre-block-empty code hash marks the baseline empty so applyToCode
-		// drops a net-zero same-tx set-then-clear. Only an empty read seen
-		// before any code change is the pre-block value.
 		b.readCodeHash(addr, tr.Val.IsEmpty())
 	}
 	for addr, tr := range rs.codeSize {

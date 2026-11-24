@@ -128,6 +128,26 @@ func TestBlockAccessListBuilderReplaysReadsOfReadOnlyAccount(t *testing.T) {
 	}
 }
 
+// TestBlockAccessListBuilderReplaysFirstAndLastBalanceInOrder pins that the first flat
+// balance read replays as the pre-block balance and the last one as the latest balance.
+func TestBlockAccessListBuilderReplaysFirstAndLastBalanceInOrder(t *testing.T) {
+	addr := accounts.InternAddress(common.Address{19: 0x46})
+	b := NewBlockAccessListBuilder()
+	for i, read := range []uint64{10, 20} {
+		var rs ReadSet
+		rs.SetBalance(addr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(read)})
+		b.Add(i-1, rs, nil)
+	}
+	for i, write := range []uint64{10, 20} {
+		ws := &WriteSet{}
+		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: i + 1}}, Val: *uint256.NewInt(write)})
+		b.Add(i+1, ReadSet{}, ws)
+	}
+	bal := b.Build()
+	require.Len(t, bal, 1)
+	require.Equal(t, []*types.BalanceChange{{Index: 3, Value: *uint256.NewInt(20)}}, bal[0].BalanceChanges)
+}
+
 // TestBlockAccessListBuilderSizedFromBALAddsReadOnlyAccountsWithoutAllocating pins that a
 // builder sized from the block's access list does not grow while it registers the accounts.
 func TestBlockAccessListBuilderSizedFromBALAddsReadOnlyAccountsWithoutAllocating(t *testing.T) {
@@ -173,7 +193,9 @@ func TestBlockAccessListBuilderBuildKeepsReadOnlyAccountsFlat(t *testing.T) {
 	require.Equal(t, written.Value(), bal[1].Address)
 	require.NotEmpty(t, bal[1].BalanceChanges)
 	require.NotContains(t, b.ac, read, "Build promoted a read-only account")
-	require.True(t, b.Matches(bal))
+	again := NewBlockAccessListBuilder()
+	again.Add(-1, rs, ws)
+	require.True(t, again.Matches(bal))
 }
 
 // TestBlockAccessListBuilderReplaysEmptyCodeHashReadOfReadOnlyAccount pins that an empty
@@ -210,12 +232,14 @@ func TestBlockAccessListBuilderReadOnlyPathMatchesFullState(t *testing.T) {
 	for seed := range int64(2000) {
 		rng := rand.New(rand.NewSource(seed))
 		txs := make([]tx, 1+rng.Intn(5))
+		var touched []accounts.Address
 		for i := range txs {
 			txs[i].ws = &WriteSet{}
 			version := Version{TxIndex: i - 1}
 			for range 1 + rng.Intn(6) {
 				addr, key := addrs[rng.Intn(len(addrs))], keys[rng.Intn(len(keys))]
 				val := *uint256.NewInt(uint64(rng.Intn(3)))
+				touched = append(touched, addr)
 				header := func(path AccountPath) WriteHeader {
 					return WriteHeader{Address: addr, Key: key, Version: version, Path: path}
 				}
@@ -240,7 +264,6 @@ func TestBlockAccessListBuilderReadOnlyPathMatchesFullState(t *testing.T) {
 				}
 			}
 		}
-		var touched []accounts.Address
 		build := func(fullState bool) *BlockAccessListBuilder {
 			b := NewBlockAccessListBuilder()
 			if fullState {
@@ -254,11 +277,9 @@ func TestBlockAccessListBuilderReadOnlyPathMatchesFullState(t *testing.T) {
 			return b
 		}
 		got := build(false).Build()
-		for _, a := range got {
-			touched = append(touched, accounts.InternAddress(a.Address))
-		}
 		want := build(true).Build()
 		require.Equal(t, want, got, "seed %d", seed)
+		require.True(t, build(false).Matches(want), "seed %d", seed)
 		perturbed := want.Copy()
 		if len(perturbed) > 0 {
 			perturbed[rng.Intn(len(perturbed))].BalanceChanges = []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(9)}}
