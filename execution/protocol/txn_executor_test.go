@@ -976,7 +976,6 @@ func TestApplyTransactionTxEndV2(t *testing.T) {
 			sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
 			recipient := common.HexToAddress("0x2222222222222222222222222222222222222222")
 			ibs := state.New(state.NewNoopReader())
-			ibs.SetVersionMap(nil)
 			defer ibs.Close()
 			require.NoError(t, ibs.SetCode(accounts.InternAddress(recipient), []byte{
 				byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP),
@@ -1814,31 +1813,24 @@ func TestApplyTransactionTxEndSeesTxWrites(t *testing.T) {
 	signer := types.MakeSigner(cfg, 1, 0)
 	txn, err := types.SignTx(types.NewTransaction(0, to, uint256.NewInt(7), 100_000, uint256.NewInt(0), nil), *signer, key)
 	require.NoError(t, err)
-	for _, versioned := range []bool{false, true} {
-		t.Run(fmt.Sprintf("versioned=%v", versioned), func(t *testing.T) {
-			ibs := state.New(state.NewNoopReader())
-			if !versioned {
-				ibs.SetVersionMap(nil)
-			}
-			defer ibs.Close()
-			ibs.SetTxContext(1, 0)
-			require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified))
-			var balance uint256.Int
-			var nonce uint64
-			hooks := &tracing.Hooks{OnTxEndV2: func(*types.Receipt, mdgas.TxnGasUsage, error) {
-				balance, err = ibs.GetBalance(accounts.InternAddress(to))
-				require.NoError(t, err)
-				nonce, err = ibs.GetNonce(sender)
-				require.NoError(t, err)
-			}}
-			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, BaseFee: uint256.NewInt(0)}
-			_, err := ApplyTransaction(cfg, func(uint64) (common.Hash, error) { return common.Hash{}, nil }, nil, coinbase,
-				NewGasPool(header.GasLimit, 0), ibs, header, txn, &GasUsed{}, vm.Config{Tracer: hooks, NoBaseFee: true})
-			require.NoError(t, err)
-			require.Equal(t, uint64(7), balance.Uint64())
-			require.Equal(t, uint64(1), nonce)
-		})
-	}
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified))
+	var balance uint256.Int
+	var nonce uint64
+	hooks := &tracing.Hooks{OnTxEndV2: func(*types.Receipt, mdgas.TxnGasUsage, error) {
+		balance, err = ibs.GetBalance(accounts.InternAddress(to))
+		require.NoError(t, err)
+		nonce, err = ibs.GetNonce(sender)
+		require.NoError(t, err)
+	}}
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, BaseFee: uint256.NewInt(0)}
+	_, err = ApplyTransaction(cfg, func(uint64) (common.Hash, error) { return common.Hash{}, nil }, nil, coinbase,
+		NewGasPool(header.GasLimit, 0), ibs, header, txn, &GasUsed{}, vm.Config{Tracer: hooks, NoBaseFee: true})
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), balance.Uint64())
+	require.Equal(t, uint64(1), nonce)
 }
 
 // A precompile frame that cannot pay the precompile gas fails and reverts the transfer, so the

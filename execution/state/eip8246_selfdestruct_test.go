@@ -99,13 +99,16 @@ func TestEIP8246_FinalizeTx_PreservedBalanceCarriesToLaterTxCreate(t *testing.T)
 	reader.accounts[addr].Balance = *uint256.NewInt(100)
 
 	rules := &chain.Rules{IsAmsterdam: true}
-	ibs := New(reader)
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(reader, vm)
 	defer ibs.Close()
 
 	ibs.SetTxContext(1, 0)
 	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
 	require.NoError(t, err)
-	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	ibs.EndTransaction()
+	vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
+	ibs.ResetVersionedIO()
 
 	ibs.SetTxContext(1, 1)
 	require.NoError(t, ibs.CreateAccount(addr, true))
@@ -129,7 +132,7 @@ func TestEIP8246_FinalizeTx_PreservesSameTxCredit(t *testing.T) {
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(7), tracing.BalanceChangeTransfer))
 	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
 	require.NoError(t, err)
-	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	ibs.EndTransaction()
 	vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
 	ibs.ResetVersionedIO()
 
@@ -271,7 +274,6 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		reader := newAccountStateReader()
 		vm := NewVersionMap(nil)
 		ibs := New(reader)
-		ibs.SetVersionMap(nil)
 		defer ibs.Close()
 		ibs.SetTxContext(1, 0)
 		ibs.SetVersion(0)
@@ -298,9 +300,8 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 
 // Account-level reconstruction of a preserved account must agree with the
 // field-level reads: a later tx's Nonce/CodeHash map entries overlay the
-// reconstructed account exactly like a later balance write does, so a caller
-// materializing the account through getStateObject sees the same fields a
-// per-path read returns.
+// reconstructed account exactly like a later balance write does, so the
+// account record sees the same fields a per-path read returns.
 func TestEIP8246_PreservedAccount_OverlaysLaterFieldWrites(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x8246F"))
@@ -319,17 +320,20 @@ func TestEIP8246_PreservedAccount_OverlaysLaterFieldWrites(t *testing.T) {
 	ibs.SetTxContext(0, 2)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists, "the preserved account must exist")
 	fieldNonce, err := ibs.GetNonce(addr)
 	require.NoError(t, err)
 	fieldCodeHash, err := ibs.GetCodeHash(addr)
 	require.NoError(t, err)
-	obj, err := ibs.getStateObject(addr, false)
+	require.Equal(t, uint64(7), fieldNonce, "the later-tx nonce write must overlay")
+	require.Equal(t, laterCodeHash, fieldCodeHash, "the later-tx code hash write must overlay")
+	acc, _, _, err := ibs.getVersionedAccount(addr, false)
 	require.NoError(t, err)
-	require.NotNil(t, obj, "the preserved account must materialize")
-	require.Equal(t, fieldNonce, obj.data.Nonce, "account-level nonce must agree with the field-level read")
-	require.Equal(t, fieldCodeHash, obj.data.CodeHash, "account-level code hash must agree with the field-level read")
-	require.Equal(t, uint64(7), obj.data.Nonce)
-	require.Equal(t, laterCodeHash, obj.data.CodeHash)
+	require.NotNil(t, acc)
+	require.Equal(t, uint64(7), acc.Nonce, "the account record must carry the later-tx nonce")
+	require.Equal(t, laterCodeHash, acc.CodeHash, "the account record must carry the later-tx code hash")
 }
 
 // Under EIP-8246 a contract created at an absent address and destroyed in one tx leaves only its

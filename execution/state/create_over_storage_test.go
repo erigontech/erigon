@@ -30,7 +30,7 @@ func createdOverStorage(t *testing.T) (accounts.Address, accounts.StorageKey, *s
 	require.NoError(t, ibs.CreateAccount(x, true))
 	require.NoError(t, ibs.SetNonce(x, 1, tracing.NonceChangeUnspecified))
 	require.NoError(t, ibs.SetState(x, k2, *uint256.NewInt(1)))
-	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	ibs.EndTransaction()
 	writes := finalizedWrites(t, ibs, rules)
 	vm.FlushVersionedWrites(writes, false)
 	return x, k5, reader, vm, writes
@@ -310,7 +310,7 @@ func TestRevertedSelfdestructUndoesWriteToZero(t *testing.T) {
 	current, err := ibs.GetState(x, k5)
 	require.NoError(t, err)
 	require.True(t, current.IsZero())
-	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	ibs.EndTransaction()
 	writes, err := ibs.FinalizedWrites(rules)
 	require.NoError(t, err)
 	_, ok := writes.GetStorage(x, k5)

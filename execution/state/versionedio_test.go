@@ -714,57 +714,6 @@ func recordTouch(io *VersionedIO, txIndex int, addr accounts.Address, revertable
 	io.RecordReads(Version{TxIndex: txIndex}, rs)
 }
 
-// When a prior tx wrote a sub-field (e.g. BalancePath via AddBalance) without
-// writing AddressPath, the per-field account refresh promotes the sub-field version
-// onto accountRead's AddressPath stamp. The validator's vm.Read(AddressPath)
-// must not invalidate that stamp — otherwise OCC re-execution races
-// identically until the retry budget exhausts.
-func TestAccountRead_BalancePathPromotion_DoesNotInvalidate(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress(common.HexToAddress("0xB19A240E"))
-	reader := newAccountStateReader(addr)
-	reader.accounts[addr].Balance = *uint256.NewInt(50_000_000_000_000_000)
-
-	postWithdrawalBalance := *uint256.NewInt(100_000_000_000_000_000)
-	vm := NewVersionMap(nil)
-	vm.WriteBalance(addr,
-		Version{TxIndex: 0, Incarnation: 0},
-		postWithdrawalBalance, true)
-
-	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader))
-	ibs.SetTxContext(0, 1)
-	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
-
-	// Simulate the per-field account refresh's promoted return value:
-	// BalancePath at (0,0) bumped (source, version) above the
-	// account-record's own.
-	acc := accounts.NewAccount()
-	acc.Balance = postWithdrawalBalance
-	acc.CodeHash = accounts.EmptyCodeHash
-	ibs.accountRead(addr, &acc, MapRead, Version{TxIndex: 0, Incarnation: 0})
-
-	// Same call the parallel-exec scheduler makes between worker
-	// completion and apply.
-	io := NewVersionedIO(1)
-	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
-
-	checkVersionEqual := func(rv, wv Version) VersionValidity {
-		if rv == wv {
-			return VersionValid
-		}
-		return VersionInvalid
-	}
-	valid := vm.ValidateVersion(1, io, checkVersionEqual, true, "TestAccountRead_BalancePathPromotion")
-
-	require.Equal(t, VersionValid, valid,
-		"tx 1's account read should validate against a versionMap with only "+
-			"a BalancePath write at TxIdx=0 — promoting the sub-field's "+
-			"version onto an AddressPath cell that does not exist is what "+
-			"makes validation fail and produces the cross-chain OCC livelock")
-}
-
 // When CreateAccount runs on an address whose only versionMap entry is a
 // sub-field (e.g. BalancePath from a prior credit), the synthetic
 // IncarnationPath read must default to (StorageRead, UnknownVersion), not
