@@ -108,6 +108,10 @@ func (s *Sentinel) evictIdlePeers(now time.Time) {
 		candidates[i].subnets = peerToSubnets[candidates[i].pid]
 	}
 	for _, c := range selectIdlePeers(candidates, coverage, peerIdleWindow, maxIdleEvictionsPerPass, inboundOnly) {
+		// A peer can be credited or reconnect while the subnet coverage is read.
+		if last, ok := s.p2p.PeerLastUseful(c.pid); !ok || now.Sub(last) < peerIdleWindow {
+			continue
+		}
 		log.Debug("[Sentinel] Evicting idle peer", "peer", c.pid, "idleFor", c.idleFor.Round(time.Second))
 		s.closePeer(c.pid)
 		s.p2p.Host().Peerstore().RemovePeer(c.pid)

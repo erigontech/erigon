@@ -1221,6 +1221,8 @@ func TestDecodedDataAnswerRewardsThePeer(t *testing.T) {
 	block.Block.Slot = slot
 	var valid bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&valid, block, fuluDigest[:]...))
+	var notABlock bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&notABlock, cltypes.NewEth1Data(), fuluDigest[:]...))
 
 	for _, tc := range []struct {
 		name     string
@@ -1229,6 +1231,7 @@ func TestDecodedDataAnswerRewardsThePeer(t *testing.T) {
 	}{
 		{"decoded block", valid.Bytes(), []string{"peer"}},
 		{"truncated fork digest", []byte{0x00, 0x01}, nil},
+		{"framed chunk that is not a block", notABlock.Bytes(), nil},
 		{"empty answer", nil, nil},
 	} {
 		sentinel := &blockResponseSentinel{response: tc.response}
@@ -1236,6 +1239,23 @@ func TestDecodedDataAnswerRewardsThePeer(t *testing.T) {
 		_, _ = client.SendBeaconBlocksByRangeReqToPeer(t.Context(), "peer", slot, 1)
 		require.Equal(t, tc.rewarded, sentinel.rewardedPeers, tc.name)
 	}
+
+	denebDigest, err := clock.ComputeForkDigest(cfg.DenebForkEpoch)
+	require.NoError(t, err)
+	sidecar := &cltypes.BlobSidecar{
+		SignedBlockHeader:        &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}},
+		CommitmentInclusionProof: solid.NewHashVector(cltypes.CommitmentBranchSize),
+	}
+	var blobResponse bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&blobResponse, sidecar, denebDigest[:]...))
+	blobSentinel := &blockResponseSentinel{response: blobResponse.Bytes()}
+	blobClient := &BeaconRpcP2P{ctx: t.Context(), sentinel: blobSentinel, beaconConfig: &cfg, ethClock: clock}
+	blobRequest := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](1, 40)
+	blobRequest.Append(&cltypes.BlobIdentifier{})
+	blobs, blobPid, err := blobClient.SendBlobsSidecarByIdentifierReq(t.Context(), blobRequest)
+	require.NoError(t, err)
+	require.Len(t, blobs, 1)
+	require.Equal(t, []string{blobPid}, blobSentinel.rewardedPeers)
 
 	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
 	require.NoError(t, err)

@@ -172,3 +172,29 @@ func TestStaticPeerIDsReadsMultiaddrPeers(t *testing.T) {
 	ids := staticPeerIDs([]string{addr, "not a peer"})
 	require.Equal(t, map[peer.ID]struct{}{remote.ID(): {}}, ids)
 }
+
+// creditedDuringPassP2P reports a peer as idle on the first lookup and as just credited on the later ones.
+type creditedDuringPassP2P struct {
+	stubP2P
+	lookups map[peer.ID]int
+	idle    time.Time
+	fresh   time.Time
+}
+
+func (s *creditedDuringPassP2P) PeerLastUseful(pid peer.ID) (time.Time, bool) {
+	s.lookups[pid]++
+	if s.lookups[pid] == 1 {
+		return s.idle, true
+	}
+	return s.fresh, true
+}
+
+func TestEvictIdlePeersKeepsAPeerCreditedDuringThePass(t *testing.T) {
+	local, remote := connectedPair(t)
+	now := time.Now()
+	s := idleTestSentinel(t, local, nil)
+	s.p2p = &creditedDuringPassP2P{stubP2P: s.p2p.(stubP2P), lookups: map[peer.ID]int{}, idle: now.Add(-2 * peerIdleWindow), fresh: now}
+	s.cfg.MaxPeerCount = 1
+	s.evictIdlePeers(now)
+	require.Equal(t, network.Connected, local.Network().Connectedness(remote.ID()))
+}
