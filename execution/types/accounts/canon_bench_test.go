@@ -60,6 +60,7 @@ func BenchmarkCanonMigrationOrder(b *testing.B) {
 				})
 				o.sort(ptrs)
 				c.addWeak(ptrs)
+				c.prev.Store(nil) // the cleanups capture c, so a set prev would keep this generation alive across iterations
 			}
 		})
 	}
