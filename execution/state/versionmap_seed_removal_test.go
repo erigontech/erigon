@@ -18,6 +18,7 @@ package state
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -1288,4 +1289,110 @@ func TestABalanceReadAtTheSeededDestructsVersionIsStaleOnceTheBalanceMoves(t *te
 	vm.MarkWritesValidated(final, nil)
 	require.Equal(t, VersionInvalid, vm.ValidateReadSet(4, reads, validateEqualVersion, false, ""))
 	require.Equal(t, VersionValid, vm.ValidateReadSet(4, readBalance(0), validateEqualVersion, false, ""))
+}
+
+// Seeding derives a removal of x at tx 1 from code changes: a deleted zero balance. A run of tx 1
+// that writes a live zero balance writes the value the cell holds with another status, so the
+// cell takes the run's flag and a reader of the balance waits for the run: a deleted balance
+// reads as a removed account.
+func TestEqualBalanceFlushThatRevivesARemovalIsAChange(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress(common.HexToAddress("0xc4"))
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
+	vm := NewVersionMap(types.BlockAccessList{{Address: x.Value(), CodeChanges: []*types.CodeChange{{Index: 1, Bytecode: []byte{0x60}}, {Index: 2}}}})
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+	require.Equal(t, ValueDeleted, requireDoneCell(t, vm.load(x).Balance, 1, 0).valStatus)
+
+	run := &WriteSet{}
+	run.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: Version{TxIndex: 1, Incarnation: 1}}})
+	vm.FlushWrites(run, false)
+	c, ok := vm.load(x).Balance.Get(1)
+	require.True(t, ok)
+	require.Equal(t, FlagEstimate, c.loadFlag())
+
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	_, err := ibs.GetBalance(x)
+	require.NoError(t, err)
+	require.True(t, ibs.HadInvalidRead(), "a reader of the balance waits for the run")
+}
+
+// Seeding derives a removal of x at tx 1. A run of tx 1 writes a zero balance, the next writes
+// nothing, and the third creates x, which puts a live zero balance over the removal that the drop
+// put back. Tx 2 reads the balance and the code hash of x, and the final run removes x, as the
+// access list says. While the third run is in flight tx 2 waits for it; once it is validated tx 2
+// reads it, and its reads are invalid after the removal.
+func TestBalanceReadOfACreateOverAPutBackRemoval(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress(common.HexToAddress("0xc3"))
+	code := []*types.CodeChange{{Index: 1, Bytecode: []byte{0x60}}, {Index: 2}}
+	for _, bal := range []struct {
+		name    string
+		changes types.AccountChanges
+	}{
+		{"the access list has no balance", types.AccountChanges{Address: x.Value(), CodeChanges: code}},
+		{"the access list has the zero balance", types.AccountChanges{
+			Address: x.Value(), CodeChanges: code,
+			BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(5)}, {Index: 2, Value: uint256.Int{}}},
+		}},
+	} {
+		for _, validated := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/validated=%v", bal.name, validated), func(t *testing.T) {
+				t.Parallel()
+				base := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
+				vm := NewVersionMap(types.BlockAccessList{bal.changes})
+				vm.SeedAddresses()
+				require.NoError(t, vm.SeedEmptyRemovals(true, false, base))
+				rerun := func(prev, cur *WriteSet, v Version) {
+					for h := range prev.AllHeaders() {
+						if !cur.Has(h) {
+							vm.DropWrite(h.Address, h.Path, h.Key, v)
+						}
+					}
+					vm.FlushWrites(cur, false)
+				}
+
+				run0 := &WriteSet{}
+				run0.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: Version{TxIndex: 1}}})
+				vm.FlushWrites(run0, false)
+				vm.MarkWritesValidated(run0, nil)
+				run1 := &WriteSet{}
+				rerun(run0, run1, Version{TxIndex: 1, Incarnation: 1})
+
+				creator := NewWithVersionMap(base, vm)
+				defer creator.Close()
+				creator.SetTxContext(1, 1)
+				creator.SetVersion(2)
+				require.NoError(t, creator.CreateAccount(x, true))
+				require.NoError(t, creator.SetNonce(x, 1, tracing.NonceChangeUnspecified))
+				require.NoError(t, creator.SetBalance(x, uint256.Int{}, tracing.BalanceChangeUnspecified))
+				run2, err := creator.FinalizedWrites(&chain.Rules{IsAmsterdam: true})
+				require.NoError(t, err)
+				rerun(run1, run2, Version{TxIndex: 1, Incarnation: 2})
+				if validated {
+					vm.MarkWritesValidated(run2, nil)
+				}
+
+				reader := NewWithVersionMap(base, vm)
+				defer reader.Close()
+				reader.SetTxContext(1, 2)
+				_, err = reader.GetBalance(x)
+				require.NoError(t, err)
+				_, err = reader.GetCodeHash(x)
+				require.NoError(t, err)
+				require.Equal(t, !validated, reader.HadInvalidRead(), "tx 2 waits for the run only while it is in flight")
+				reads := reader.Reads()
+
+				removal := &WriteSet{}
+				removal.SetEmptyRemoval(x, Version{TxIndex: 1, Incarnation: 3})
+				rerun(run2, removal, Version{TxIndex: 1, Incarnation: 3})
+				vm.MarkWritesValidated(removal, nil)
+				vm.MarkWritesComplete(removal)
+				vm.SealUpTo(1)
+				require.Equal(t, VersionInvalid, vm.ValidateReadSet(2, reads, validateEqualVersion, false, ""), "tx 2 read the created x")
+			})
+		}
+	}
 }

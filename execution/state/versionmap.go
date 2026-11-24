@@ -1451,10 +1451,12 @@ func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool
 
 // flushCell keeps the cell's incarnation when a re-execution flushes an equal value at
 // the same txIndex, so readers bound to it stay valid. A reincarnated account always
-// re-versions: across a removal an equal value does not mean an unchanged state.
+// re-versions: across a removal an equal value does not mean an unchanged state. A balance
+// with another status is written as a changed value too, as a deleted balance reads as a
+// removed account.
 func flushCell[T any](vm *VersionMap, e *AddressEntry, cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, vw *VersionedWrite[T], flag statusFlag, eq func(a, b T) bool, destructed bool) *btree.Map[int, *WriteCell[T]] {
 	if !destructed && cells != nil {
-		if ci, ok := cells.Get(vw.Version.TxIndex); ok && eq(ci.Value, vw.Val) {
+		if ci, ok := cells.Get(vw.Version.TxIndex); ok && eq(ci.Value, vw.Val) && (path != BalancePath || ci.valStatus == vw.valStatus) {
 			ci.setFlagUnlessDone(flag)
 			ci.valStatus = vw.valStatus
 			ci.accSource = AccountFromBase
@@ -2036,9 +2038,8 @@ func resetCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], v Ve
 	c.setState(inc, FlagDone)
 }
 
-// resetBalance is resetCell for a balance seeded with status. Readers take a deleted balance as a
-// removed account, so the status counts as a change too: a flush of an equal value keeps the cell
-// Done but rewrites its status.
+// resetBalance is resetCell for a balance seeded with status. As in flushCell, a changed status
+// counts as a change.
 func resetBalance(vm *VersionMap, cells *btree.Map[int, *WriteCell[uint256.Int]], v Version, seed uint256.Int, status valueStatus, stamped *bool) {
 	if cells == nil {
 		return
