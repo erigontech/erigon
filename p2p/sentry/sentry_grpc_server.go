@@ -532,24 +532,11 @@ func runPeer(
 				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
-		case eth.GetBlockAccessListsMsg:
-			// eth/71 (EIP-8159) — inbound BAL request. Mirrors GetBlockBodiesMsg:
-			// read-only request, no permit change, forward to subscribers.
+		case eth.GetBlockAccessListsMsg, eth.BlockAccessListsMsg:
+			// BAL requests use SendMessageById, which takes no request permit.
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
-			b := make([]byte, msg.Size)
-			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
-			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
-		case eth.BlockAccessListsMsg:
-			// eth/71 (EIP-8159) — inbound BAL response. Mirrors BlockBodiesMsg:
-			// completes an in-flight request so release a request permit.
-			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
-				continue
-			}
-			givePermit = true
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
