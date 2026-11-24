@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/p2p/p2pcfg"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
@@ -80,15 +81,15 @@ var LightClientGPO = gaspricecfg.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	Sync: Sync{
-		ExecWorkerCount:            dbg.Exec3Workers, // only half of CPU, other half will spend for snapshots build/merge/prune
-		BodyCacheLimit:             256 * 1024 * 1024,
-		BodyDownloadTimeoutSeconds: 2,
+		ExecWorkerCount: dbg.Exec3Workers, // only half of CPU, other half will spend for snapshots build/merge/prune
+		BodyCacheLimit:  256 * 1024 * 1024,
 		// LoopBlockLimit:             100_000,
 		ParallelStateFlushing:    true,
 		ChaosMonkey:              false,
 		AlwaysGenerateChangesets: !dbg.BatchCommitments,
 		MaxReorgDepth:            dbg.MaxReorgDepth,
 		PersistReceiptsCacheV2:   true,
+		BlockDownload:            p2pcfg.DefaultBlockDownload,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -299,15 +300,13 @@ func (c *Config) CommitmentRefsFirstStart() *bool {
 
 type Sync struct {
 	// LoopThrottle sets a minimum time between staged loop iterations
-	LoopThrottle     time.Duration
-	ExecWorkerCount  int
-	ReconWorkerCount int
+	LoopThrottle    time.Duration
+	ExecWorkerCount int
 
-	BodyCacheLimit             datasize.ByteSize
-	BodyDownloadTimeoutSeconds int // TODO: change to duration
-	BreakAfterStage            string
-	LoopBlockLimit             uint
-	ParallelStateFlushing      bool
+	BodyCacheLimit        datasize.ByteSize
+	BreakAfterStage       string
+	LoopBlockLimit        uint
+	ParallelStateFlushing bool
 
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool
@@ -317,6 +316,8 @@ type Sync struct {
 	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
 
 	SlowBlockThreshold *time.Duration
+
+	BlockDownload p2pcfg.BlockDownload
 
 	// ExecutionPathReporter, when set, is told how each executed block runs.
 	ExecutionPathReporter func(BlockExecutionPath) `toml:"-"`

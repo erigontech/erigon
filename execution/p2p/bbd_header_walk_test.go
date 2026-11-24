@@ -406,7 +406,7 @@ func TestBackwardBlockDownloader_HeaderWalkGivesUpOnStalledRanges(t *testing.T) 
 	collector := etl.NewCollector("test", t.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize), testlog.Logger(t, log.LvlCrit))
 	defer collector.Close()
 	config := defaultBbdRequestConfig
-	config.headerChainBatchFetchTimeout = 100 * time.Millisecond
+	config.HeaderChainBatchFetchTimeout = 100 * time.Millisecond
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 

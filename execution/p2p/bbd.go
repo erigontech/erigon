@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/execution/p2p/p2pcfg"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -42,11 +43,12 @@ type BbdHeaderReader interface {
 }
 
 type BackwardBlockDownloader struct {
-	logger      log.Logger
-	fetcher     Fetcher
-	balFetcher  BALFetcher
-	peerTracker *PeerTracker
-	tmpDir      string
+	logger        log.Logger
+	fetcher       Fetcher
+	balFetcher    BALFetcher
+	peerTracker   *PeerTracker
+	tmpDir        string
+	blockDownload p2pcfg.BlockDownload
 }
 
 type BackwardBlockDownloaderOption func(*BackwardBlockDownloader)
@@ -54,6 +56,12 @@ type BackwardBlockDownloaderOption func(*BackwardBlockDownloader)
 func WithBALFetcher(balFetcher BALFetcher) BackwardBlockDownloaderOption {
 	return func(bbd *BackwardBlockDownloader) {
 		bbd.balFetcher = balFetcher
+	}
+}
+
+func WithBlockDownloadConfig(blockDownload p2pcfg.BlockDownload) BackwardBlockDownloaderOption {
+	return func(bbd *BackwardBlockDownloader) {
+		bbd.blockDownload = blockDownload
 	}
 }
 
@@ -65,10 +73,11 @@ func NewBackwardBlockDownloader(
 	opts ...BackwardBlockDownloaderOption,
 ) *BackwardBlockDownloader {
 	bbd := &BackwardBlockDownloader{
-		logger:      logger,
-		fetcher:     fetcher,
-		peerTracker: peerTracker,
-		tmpDir:      tmpDir,
+		logger:        logger,
+		fetcher:       fetcher,
+		peerTracker:   peerTracker,
+		tmpDir:        tmpDir,
+		blockDownload: p2pcfg.DefaultBlockDownload,
 	}
 	for _, opt := range opts {
 		opt(bbd)
@@ -118,7 +127,7 @@ func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(
 ) error {
 	bbd.logger.Debug("[backward-block-downloader] fetching blocks backwards by hash", "hash", hash)
 	// 1. Get all peers
-	config := applyBbdOptions(opts...)
+	config := applyBbdOptions(bbd.blockDownload, opts...)
 	peers, err := bbd.loadPeers(config)
 	if err != nil {
 		return err
@@ -183,8 +192,8 @@ func (bbd *BackwardBlockDownloader) downloadInitialHeader(
 	peersHeadersResponses := make([][]*types.Header, len(peers.all))
 	eg := errgroup.Group{}
 	fetcherOpts := []FetcherOption{
-		WithResponseTimeout(config.initialHeaderFetchTimeout),
-		WithMaxRetries(config.initialHeaderFetchRetries),
+		WithResponseTimeout(config.InitialHeaderFetchTimeout),
+		WithMaxRetries(config.InitialHeaderFetchRetries),
 	}
 	for _, peer := range peers.all {
 		eg.Go(func() error {
@@ -254,15 +263,15 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 	}
 
 	fetcherOpts := []FetcherOption{
-		WithResponseTimeout(config.headerChainBatchFetchTimeout),
-		WithMaxRetries(config.headerChainBatchFetchRetries),
+		WithResponseTimeout(config.HeaderChainBatchFetchTimeout),
+		WithMaxRetries(config.HeaderChainBatchFetchRetries),
 	}
 	logProgressTicker := time.NewTicker(30 * time.Second)
 	defer logProgressTicker.Stop()
 	chainLen := uint64(1)
 	var peersRefreshedAt uint64
 	rangeOpts := []FetcherOption{
-		WithResponseTimeout(config.headerChainBatchFetchTimeout),
+		WithResponseTimeout(config.HeaderChainBatchFetchTimeout),
 		WithMaxRetries(0),
 		WithoutFailureTracking(),
 	}
@@ -349,7 +358,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			inFlight[top] = result
 			nextRangeTop -= n
 			go func() {
-				rangeCtx, cancel := context.WithTimeout(fetchCtx, config.headerChainBatchFetchTimeout)
+				rangeCtx, cancel := context.WithTimeout(fetchCtx, config.HeaderChainBatchFetchTimeout)
 				defer cancel()
 				resp, err := bbd.fetcher.FetchHeaders(rangeCtx, top-n+1, top+1, &rangePeer, rangeOpts...)
 				result <- headerBatchResult{headers: resp.Data, peerId: rangePeer, err: err, peersRefreshedAt: launchedAt}
@@ -415,7 +424,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			}
 			headers = resp.Data
 		}
-		window = min(max(2*window, 1), config.maxParallelHeaderDownloads)
+		window = min(max(2*window, 1), config.MaxParallelHeaderDownloads)
 
 		// collect the headers batch into the etl and check for a connecting point
 		for _, header := range slices.Backward(headers) {
@@ -515,7 +524,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 		peers = newPeersContext(current)
 	}
 	// split the headers into batches
-	neededPeers := min(len(headers), config.maxParallelBodyDownloads)
+	neededPeers := min(len(headers), config.MaxParallelBodyDownloads)
 	availablePeers, err := peers.nextAvailablePeers(neededPeers)
 	if err != nil {
 		return err
@@ -600,7 +609,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 				batchEg, batchCtx := errgroup.WithContext(ctx)
 				batchEg.Go(func() error {
 					var err error
-					bodiesResponse, err = bbd.fetcher.FetchBodies(batchCtx, headerBatch, &peerId, WithResponseTimeout(config.bodiesBatchFetchTimeout), WithMaxRetries(maxRetries))
+					bodiesResponse, err = bbd.fetcher.FetchBodies(batchCtx, headerBatch, &peerId, WithResponseTimeout(config.BodiesBatchFetchTimeout), WithMaxRetries(maxRetries))
 					return err
 				})
 				if bbd.balFetcher != nil {
@@ -615,7 +624,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 						balPeers = append(balPeers, peerId)
 					}
 					batchEg.Go(func() error {
-						balsResponse = bbd.balFetcher.Fetch(batchCtx, balReqs, &balPrimary, balPeers, config.balsBatchFetchTimeout, config.balsRequestTimeout)
+						balsResponse = bbd.balFetcher.Fetch(batchCtx, balReqs, &balPrimary, balPeers, config.BALsBatchFetchTimeout, config.BALsRequestTimeout)
 						return nil
 					})
 				}
@@ -689,7 +698,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 						peers = newPeersContext(connected)
 					}
 				}
-				maxRetries = config.bodiesBatchFetchRetries
+				maxRetries = config.BodiesBatchFetchRetries
 				availablePeers, err = peers.nextAvailablePeers(incompleteBatches)
 			}
 			if err != nil {

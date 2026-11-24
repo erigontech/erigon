@@ -556,7 +556,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	// One module per test, many at once: the production budget would let each
 	// claim the whole shared envelope.
 	cfg.StateCacheBudget = 1 * datasize.MB
-	cfg.Sync.BodyDownloadTimeoutSeconds = 10
 	cfg.Sync.ParallelStateFlushing = opt.parallelStateFlushing
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs

@@ -18,7 +18,8 @@ package p2p
 
 import (
 	"math"
-	"time"
+
+	"github.com/erigontech/erigon/execution/p2p/p2pcfg"
 )
 
 type BbdOption func(bbdRequestConfig) bbdRequestConfig
@@ -51,8 +52,9 @@ func WithChainLengthCurrentHead(head uint64) BbdOption {
 	}
 }
 
-func applyBbdOptions(opts ...BbdOption) bbdRequestConfig {
+func applyBbdOptions(blockDownload p2pcfg.BlockDownload, opts ...BbdOption) bbdRequestConfig {
 	config := defaultBbdRequestConfig
+	config.BlockDownload = blockDownload
 	for _, opt := range opts {
 		config = opt(config)
 	}
@@ -60,34 +62,16 @@ func applyBbdOptions(opts ...BbdOption) bbdRequestConfig {
 }
 
 type bbdRequestConfig struct {
-	peerId                       *PeerId
-	blocksBatchSize              uint64
-	chainLengthLimit             uint64
-	chainLengthCurrentHead       *uint64
-	maxParallelBodyDownloads     int
-	maxParallelHeaderDownloads   int
-	initialHeaderFetchTimeout    time.Duration
-	initialHeaderFetchRetries    uint64
-	headerChainBatchFetchTimeout time.Duration
-	headerChainBatchFetchRetries uint64
-	bodiesBatchFetchTimeout      time.Duration
-	bodiesBatchFetchRetries      uint64
-	balsBatchFetchTimeout        time.Duration
-	balsRequestTimeout           time.Duration
+	p2pcfg.BlockDownload
+	peerId                 *PeerId
+	blocksBatchSize        uint64
+	chainLengthLimit       uint64
+	chainLengthCurrentHead *uint64
 }
 
 var defaultBbdRequestConfig = bbdRequestConfig{
-	peerId:                       nil,
-	blocksBatchSize:              500,
-	chainLengthLimit:             math.MaxUint64,
-	maxParallelBodyDownloads:     10,
-	maxParallelHeaderDownloads:   10,
-	initialHeaderFetchTimeout:    time.Second, // note we want initial header fetch to be quick, so we terminate quickly
-	initialHeaderFetchRetries:    0,           // in case of chainLengthLimit+chainLengthCurrentHead early termination
-	headerChainBatchFetchTimeout: 10 * time.Second,
-	headerChainBatchFetchRetries: 1,
-	bodiesBatchFetchTimeout:      time.Minute,
-	bodiesBatchFetchRetries:      1,
-	balsBatchFetchTimeout:        time.Minute,
-	balsRequestTimeout:           10 * time.Second,
+	BlockDownload:    p2pcfg.DefaultBlockDownload,
+	peerId:           nil,
+	blocksBatchSize:  500,
+	chainLengthLimit: math.MaxUint64,
 }
