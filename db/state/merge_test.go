@@ -1170,13 +1170,14 @@ func TestMergeReplacementClosesAfterReaders(t *testing.T) {
 	t.Parallel()
 	const domain = kv.CodeDomain
 	for _, tc := range []struct {
-		name  string
-		files func(*AggregatorRoTx) visibleFiles
+		name            string
+		afterValueMerge bool
+		files           func(*AggregatorRoTx) visibleFiles
 	}{
-		{"values", func(at *AggregatorRoTx) visibleFiles { return at.d[domain].files }},
-		{"history", func(at *AggregatorRoTx) visibleFiles { return at.d[domain].ht.files }},
-		{"history_index", func(at *AggregatorRoTx) visibleFiles { return at.d[domain].ht.iit.files }},
-		{"logaddrs", func(at *AggregatorRoTx) visibleFiles { return at.searchII(kv.LogAddrIdx).files }},
+		{"values", false, func(at *AggregatorRoTx) visibleFiles { return at.d[domain].files }},
+		{"history", true, func(at *AggregatorRoTx) visibleFiles { return at.d[domain].ht.files }},
+		{"history_index", true, func(at *AggregatorRoTx) visibleFiles { return at.d[domain].ht.iit.files }},
+		{"logaddrs", true, func(at *AggregatorRoTx) visibleFiles { return at.searchII(kv.LogAddrIdx).files }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const stepSize = uint64(10)
@@ -1185,24 +1186,21 @@ func TestMergeReplacementClosesAfterReaders(t *testing.T) {
 			for step := range kv.Step(2) {
 				require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil))
 			}
+			// The planner merges domain values before histories and standalone indexes.
+			if tc.afterValueMerge {
+				progressed, err := agg.mergeLoopStep(ctx, 2*stepSize)
+				require.NoError(t, err)
+				require.True(t, progressed, "expected a merge of the value files")
+			}
 			source := agg.BeginFilesRo()
 			defer source.Close()
-			r := *NewMergeRange(domain.String(), true, 0, 2*stepSize)
-			ranges := &Ranges{}
-			ranges.domain[domain] = NewDomainRanges(domain, r, NewHistoryRanges(r, r), stepSize)
+			require.Len(t, tc.files(source), 2)
+			ranges := source.findMergeRange(2*stepSize, stepSize, agg.StepsInFrozenFile())
 			inputs, err := source.filesInRange(ranges)
 			require.NoError(t, err)
 			merged, err := source.mergeFiles(ctx, inputs, ranges)
 			require.NoError(t, err)
 			t.Cleanup(merged.Close)
-			for id, index := range source.standaloneIIs() {
-				if index.name == kv.LogAddrIdx {
-					files := index.staticFilesInRange(r.from, r.to)
-					require.Len(t, files, 2)
-					merged.iis[id], err = index.mergeFiles(ctx, files, r.from, r.to, agg.backgroundProgress)
-					require.NoError(t, err)
-				}
-			}
 			source.Close()
 
 			// Open the merge output from disk before publishing it. The reader and

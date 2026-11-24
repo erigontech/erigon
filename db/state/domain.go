@@ -881,10 +881,11 @@ func (c Collation) Close() {
 	c.HistoryCollation.Close()
 }
 
-// dumpStepRangeToPath writes the [stepFrom, stepTo) range of this domain to disk.
+// dumpStepRangeToPath builds the [stepFrom, stepTo) file from the domain writer.
+// Once the build starts, it closes the writer on return.
 // An empty dstDir uses the live snapshots directory. The caller must publish
 // the returned files through the aggregator or close their handles.
-func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.Step, batch *TemporalMemBatch, vt valueTransformer, dstDir string) (StaticFiles, error) {
+func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.Step, writer *DomainBufferedWriter, dstDir string) (StaticFiles, error) {
 	if !d.Enabled || stepFrom == stepTo {
 		return StaticFiles{}, nil
 	}
@@ -892,9 +893,8 @@ func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.St
 		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
 	}
 
-	wal := batch.domainWriters[d.Name]
-	defer wal.Close()
-	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.valsCollector(), vt, dstDir)
+	defer writer.Close()
+	coll, err := d.collateETL(ctx, stepFrom, stepTo, writer.valsCollector(), nil, dstDir)
 	if err != nil {
 		return StaticFiles{}, err
 	}

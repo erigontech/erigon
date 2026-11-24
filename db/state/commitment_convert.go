@@ -242,12 +242,11 @@ func keyXform(detectedV2, targetV2 bool) func([]byte) ([]byte, error) {
 	}
 }
 
-// buildValueTransformer returns the valueTransformer for the requested
-// (detected, target) squeeze-axis combination, or nil when both match
-// (pass-through; the dump path treats nil as a no-op).
+// buildValueTransformer returns a transformer for encoded branch values, or nil
+// when the source and target squeeze settings match.
 //
 //	unsqueezed → unsqueezed  nil
-//	unsqueezed → squeezed    commitment.commitmentValTransformDomain(rng, …)
+//	unsqueezed → squeezed    commitmentRo.commitmentValTransformDomain(rng, …)
 //	squeezed   → unsqueezed  closure around ExpandShortenedKeysInBranch
 //	squeezed   → squeezed    nil
 //
@@ -261,10 +260,6 @@ func keyXform(detectedV2, targetV2 bool) func([]byte) ([]byte, error) {
 // key-encoding conversions (squeeze axis unchanged) don't need account/storage
 // files at all — useful when the datadir was produced by a partial rebuild
 // where commitment ranges don't align with account/storage ranges.
-//
-// KeyCommitmentState rows have no embedded plain keys; both directions are
-// effectively pass-through on their value, so the caller does not need a
-// state-value carve-out.
 func buildValueTransformer(
 	detectedSqueezed, targetSqueezed bool,
 	commitmentRo *DomainRoTx,
@@ -332,8 +327,8 @@ func formatRate(ki uint64, elapsed time.Duration) string {
 
 // convertCommitmentFile produces a re-encoded copy of `file` in `dstDir`.
 //
-// It applies the requested key and value conversions to each branch record
-// before writing it to the batch. Commitment state records are copied as stored.
+// It applies the requested key and value conversions before buffering each
+// branch record. Commitment state records are copied as stored.
 //
 // dstDir must exist; the resulting `.kv` plus per-domain index files (.bt /
 // .kvi / .kvei depending on the commitment-domain config) are written there.
@@ -429,9 +424,7 @@ func convertCommitmentFile(
 	}
 	defer view.Close()
 
-	batch := &TemporalMemBatch{}
-	batch.domainWriters[kv.CommitmentDomain] = commitmentRo.NewWriter(nil)
-	wal := batch.domainWriters[kv.CommitmentDomain]
+	wal := commitmentRo.NewWriter(nil)
 	defer wal.Close()
 
 	// Sub-threshold (steps < DomainMinStepsToCompress) commitment files are
@@ -449,17 +442,12 @@ func convertCommitmentFile(
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	// Use the file's last transaction number to put each batch entry in the final
+	// Use the file's last transaction number to put each entry in the final
 	// step of the range. Collation strips the step encoding from the output.
 	txNumForPut := endTxNum - 1
 	baseName := filepath.Base(file.Fullpath())
 	fileStart := time.Now()
 
-	// Value transform is applied here (not in collateETL) so we can (a) carve out
-	// KeyCommitmentState — its value is opaque metadata, not BranchData — and (b)
-	// pass the actual source file range to vt, matching SqueezeCommitmentFiles.
-	// collateETL's per-pair fromTxNum/endTxNum are derived from stepFrom/stepTo
-	// with a (-1) offset that does not match the source file for stepFrom>0 files.
 	var k, v []byte
 	for reader.HasNext() {
 		k, _ = reader.Next(k[:0])
@@ -482,6 +470,10 @@ func convertCommitmentFile(
 			outKey = append([]byte(nil), tk...)
 		}
 
+		// Convert values here, where the key identifies opaque commitment state
+		// records to copy verbatim. Branch offsets refer to the account and storage
+		// files for the exact source range. For stepFrom > 0, collateETL would use
+		// the first transaction of the previous step as the transformer's lower bound.
 		var outVal []byte
 		if !isState && vt != nil {
 			tv, verr := vt(v, startTxNum, endTxNum)
@@ -514,8 +506,7 @@ func convertCommitmentFile(
 		}
 	}
 
-	// vt was applied per-pair above; pass nil so collateETL doesn't double-transform.
-	files, err := commitmentRo.d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, nil, dstDir)
+	files, err := commitmentRo.d.dumpStepRangeToPath(ctx, stepFrom, stepTo, wal, dstDir)
 	if err != nil {
 		return 0, 0, ki, fmt.Errorf("convertCommitmentFile %q: dumpStepRangeToPath: %w", file.Fullpath(), err)
 	}

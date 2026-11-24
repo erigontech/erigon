@@ -313,9 +313,7 @@ func TestDumpStepRangeToPathWithoutWrites(t *testing.T) {
 	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
-	batch := &TemporalMemBatch{}
-	batch.domainWriters[d.Name] = writer
-	files, err := d.dumpStepRangeToPath(t.Context(), 0, 1, batch, nil, t.TempDir())
+	files, err := d.dumpStepRangeToPath(t.Context(), 0, 1, writer, t.TempDir())
 	require.NoError(t, err)
 	files.CleanupOnError()
 }
@@ -363,10 +361,7 @@ func TestDumpStepRangeToPath(t *testing.T) {
 	beforeDirty := d.dirtyFiles.Len()
 
 	dstDir := t.TempDir()
-	batch := &TemporalMemBatch{}
-	batch.domainWriters[d.Name] = writer
-
-	files, err := d.dumpStepRangeToPath(ctx, 0, 1, batch, nil, dstDir)
+	files, err := d.dumpStepRangeToPath(ctx, 0, 1, writer, dstDir)
 	require.NoError(t, err)
 	files.CleanupOnError()
 

@@ -1213,13 +1213,14 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys))
 
 	sb := time.Now()
-	files, err := aggTx.d[kv.CommitmentDomain].d.dumpStepRangeToPath(ctx, cfg.StepFrom, cfg.StepTo, sd.GetMemBatch().(*TemporalMemBatch), nil, "")
+	writer := sd.GetMemBatch().(*TemporalMemBatch).domainWriters[kv.CommitmentDomain]
+	files, err := aggTx.d[kv.CommitmentDomain].d.dumpStepRangeToPath(ctx, cfg.StepFrom, cfg.StepTo, writer, "")
 	if err != nil {
 		return nil, err
 	}
 	static := &AggV3StaticFiles{}
 	static.d[kv.CommitmentDomain] = files
-	aggTx.a.IntegrateDirtyFiles(static, uint64(cfg.StepFrom)*aggTx.StepSize(), uint64(cfg.StepTo)*aggTx.StepSize())
+	aggTx.a.IntegrateDirtyFiles(static, aggTx.a.FirstTxNumOfStep(cfg.StepFrom), aggTx.a.FirstTxNumOfStep(cfg.StepTo))
 
 	logger.Info(cfg.LogPrefix+" finished", "block", cfg.BlockNumber, "txn", cfg.TxnNumber, "root", hex.EncodeToString(rh),
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys),
@@ -1266,7 +1267,7 @@ func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDo
 	}
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	retired := d.integrateDirtyFiles(sf, uint64(step)*a.StepSize(), uint64(step+1)*a.StepSize())
+	retired := d.integrateDirtyFiles(sf, a.FirstTxNumOfStep(step), a.FirstTxNumOfStep(step+1))
 	a.recalcVisibleFiles(retired)
 	return nil
 }
