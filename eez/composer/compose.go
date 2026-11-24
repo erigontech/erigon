@@ -133,6 +133,10 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 				// The posting carries the window's blocks before any effect; the
 				// bundle's block may have 1/1024 less gas than the anchor.
 				block := anchor.GasLimit - anchor.GasLimit/1024
+				// The posting is signed with the ceiling as its gas limit.
+				if c.cfg.MaxGas > block {
+					return fmt.Errorf("posting gas limit %d over the L1 block's %d", c.cfg.MaxGas, block)
+				}
 				sync := types.NewBlockWithHeader(header, nil)
 				gas, err := windowBudget(c.cfg.Batcher, c.cfg.MaxGas, block, append(window, sync))
 				if err != nil {

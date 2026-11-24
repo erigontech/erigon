@@ -359,7 +359,7 @@ func TestComposeWaitsForALighterWindow(t *testing.T) {
 		small := other.hold(t, 0, f.call.Source, f.call.Data)
 		chain, window, alone := heavy(t, f)
 		block := alone + f.deliveryCost(t) + drainMargin + f.gas + (window-alone)/2
-		f.l1.gasLimit = block * 1024 / 1023
+		f.l1.gasLimit, f.c.cfg.MaxGas = block*1024/1023, block-3
 		fx := f.c.compose(t.Context(), 0, chain.header(8), 101)
 		require.NotNil(t, fx)
 		require.Equal(t, []*Held{small}, fx.held)
@@ -383,7 +383,8 @@ func TestComposeWaitsForALighterWindow(t *testing.T) {
 		}
 		small := f.hold(t, 0, f.call.Source, f.call.Data)
 		chain, window, alone := heavy(t, f)
-		f.l1.gasLimit = (alone + f.deliveryCost(t) + drainMargin + 10_000_000 + (window-alone)/2) * 1024 / 1023
+		block := alone + f.deliveryCost(t) + drainMargin + 10_000_000 + (window-alone)/2
+		f.l1.gasLimit, f.c.cfg.MaxGas = block*1024/1023, block-3
 		require.Nil(t, f.c.compose(t.Context(), 0, chain.header(8), 101), "two simulations, the drain's")
 		require.Equal(t, append(big, small), f.pool.PopN(math.MaxInt))
 		require.Equal(t, []uint32{1, 1, 0}, []uint32{big[0].Deferred, big[1].Deferred, small.Deferred})
@@ -410,10 +411,14 @@ func TestComposeWaitsForALighterWindow(t *testing.T) {
 // TestComposeFitsTheL1Block: the bundle fits the L1 block it aims at, whose
 // gas may be the anchor's less 1/1024: the posting's projection with the
 // drain margin and its triggers' gas limits, 1,000,000 each. The rest waits,
-// and a trigger a bundle of its own cannot fit is evicted.
+// and a trigger a bundle of its own cannot fit is evicted. A block under the
+// posting's gas limit, the ceiling, takes no posting: nothing composes.
 func TestComposeFitsTheL1Block(t *testing.T) {
-	// limit has the bundle's block take about want, within 2.
-	limit := func(f *crossFixture, want uint64) { f.l1.gasLimit = want * 1024 / 1023 }
+	// limit has the bundle's block take about want, within 2, and the
+	// posting's gas limit fit it.
+	limit := func(f *crossFixture, want uint64) {
+		f.l1.gasLimit, f.c.cfg.MaxGas = want*1024/1023, want-3
+	}
 	t.Run("the rest waits", func(t *testing.T) {
 		f := newCrossFixture(t)
 		first := f.hold(t, 0, f.call.Source, f.call.Data)
@@ -423,6 +428,22 @@ func TestComposeFitsTheL1Block(t *testing.T) {
 		require.NotNil(t, fx)
 		require.Equal(t, []*Held{first}, fx.held)
 		require.Equal(t, []*Held{second}, f.pool.PopN(math.MaxInt))
+	})
+	t.Run("a block under the posting's gas limit composes nothing", func(t *testing.T) {
+		// The least anchor gas limit whose block takes MaxPostBatchGas.
+		least := uint64(MaxPostBatchGas)
+		for least-least/1024 < MaxPostBatchGas {
+			least++
+		}
+		f := newCrossFixture(t)
+		trigger := f.hold(t, 0, f.call.Source, f.call.Data)
+		f.l1.gasLimit = least - 1
+		require.Nil(t, f.compose(t))
+		require.Equal(t, []*Held{trigger}, f.pool.PopN(math.MaxInt), "left in the pool")
+		require.Zero(t, trigger.Deferred)
+		f.pool.PushFront([]*Held{trigger})
+		f.l1.gasLimit = least
+		require.NotNil(t, f.compose(t), "a block of the posting's gas limit")
 	})
 	t.Run("one a bundle of its own cannot fit", func(t *testing.T) {
 		f := newCrossFixture(t)
