@@ -164,6 +164,45 @@ func TestParallelInitializeRulesEngineErrorUsesVerdictPath(t *testing.T) {
 	require.NotErrorIs(t, result.Err, rules.ErrInvalidBlock)
 }
 
+// rulesEngineWithInitRead reads an account in Initialize and drops the error, as a block-init
+// system call whose failure is only logged does.
+type rulesEngineWithInitRead struct {
+	rules.Engine
+	address accounts.Address
+}
+
+func (e rulesEngineWithInitRead) Initialize(_ *chain.Config, _ rules.ChainHeaderReader, _ *types.Header,
+	ibs *state.IntraBlockState, _ rules.SysCallCustom, _ log.Logger, _ *tracing.Hooks,
+) error {
+	_, _ = ibs.GetBalance(e.address)
+	return nil
+}
+
+// A state-read failure during block init is an infrastructure failure, as it is for a tx.
+func TestParallelInitializeStateReadErrorIsOperational(t *testing.T) {
+	config := chain.TestChainBerlinConfig
+	cause := errors.New("beacon roots account read failed")
+	engine := rulesEngineWithInitRead{Engine: ethash.NewFaker(), address: accounts.InternAddress(common.Address{19: 0x42})}
+	txTask := &exec.TxTask{
+		Header:          &types.Header{Number: *uint256.NewInt(1)},
+		TxIndex:         -1,
+		Config:          config,
+		Logger:          log.New(),
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	task := &taskVersion{
+		execTask: &execTask{Task: txTask},
+		version:  state.Version{BlockNum: 1, TxIndex: -1},
+	}
+	ibs := state.New(failingAccountStateReader{NoopReader: state.NewNoopReader(), err: cause})
+	t.Cleanup(ibs.Close)
+
+	result := task.Execute(&vm.EVM{}, engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+
+	require.True(t, result.Operational)
+	require.ErrorIs(t, result.Err, cause)
+}
+
 // A rules-engine finalize error is a block-validity verdict: nextResult wraps it in
 // rules.ErrInvalidBlock while preserving the cause.
 func TestParallelFinalizeClassifiesRulesEngineError(t *testing.T) {
