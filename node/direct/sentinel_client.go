@@ -112,6 +112,16 @@ func (c *SentinelSubscribeGossipC) Recv() (*sentinelproto.GossipData, error) {
 }
 func (c *SentinelSubscribeGossipC) Context() context.Context { return c.ctx }
 
+// sendOrDone delivers v to a server stream's reply channel, or returns when the caller's context ends.
+func sendOrDone[T any](ctx context.Context, ch chan<- T, v T) error {
+	select {
+	case ch <- v:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 type SentinelSubscribeGossipS struct {
 	ch  chan *gossipReply
 	ctx context.Context
@@ -124,13 +134,12 @@ type gossipReply struct {
 }
 
 func (s *SentinelSubscribeGossipS) Send(m *sentinelproto.GossipData) error {
-	s.ch <- &gossipReply{r: m}
-	return nil
+	return sendOrDone(s.ctx, s.ch, &gossipReply{r: m})
 }
 func (s *SentinelSubscribeGossipS) Context() context.Context { return s.ctx }
 func (s *SentinelSubscribeGossipS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- &gossipReply{err: err}
+	_ = sendOrDone(s.ctx, s.ch, &gossipReply{err: err})
 }

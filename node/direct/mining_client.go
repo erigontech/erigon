@@ -65,15 +65,14 @@ type MiningOnPendingBlockS struct {
 }
 
 func (s *MiningOnPendingBlockS) Send(m *txpoolproto.OnPendingBlockReply) error {
-	s.ch <- &onPendigBlockReply{r: m}
-	return nil
+	return sendOrDone(s.ctx, s.ch, &onPendigBlockReply{r: m})
 }
 func (s *MiningOnPendingBlockS) Context() context.Context { return s.ctx }
 func (s *MiningOnPendingBlockS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- &onPendigBlockReply{err: err}
+	_ = sendOrDone(s.ctx, s.ch, &onPendigBlockReply{err: err})
 }
 
 type MiningOnPendingBlockC struct {
@@ -116,15 +115,14 @@ type MiningOnMinedBlockS struct {
 }
 
 func (s *MiningOnMinedBlockS) Send(m *txpoolproto.OnMinedBlockReply) error {
-	s.ch <- &onMinedBlockReply{r: m}
-	return nil
+	return sendOrDone(s.ctx, s.ch, &onMinedBlockReply{r: m})
 }
 func (s *MiningOnMinedBlockS) Context() context.Context { return s.ctx }
 func (s *MiningOnMinedBlockS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- &onMinedBlockReply{err: err}
+	_ = sendOrDone(s.ctx, s.ch, &onMinedBlockReply{err: err})
 }
 
 type MiningOnMinedBlockC struct {
@@ -166,15 +164,14 @@ type MiningOnPendingLogsS struct {
 }
 
 func (s *MiningOnPendingLogsS) Send(m *txpoolproto.OnPendingLogsReply) error {
-	s.ch <- &onPendingLogsReply{r: m}
-	return nil
+	return sendOrDone(s.ctx, s.ch, &onPendingLogsReply{r: m})
 }
 func (s *MiningOnPendingLogsS) Context() context.Context { return s.ctx }
 func (s *MiningOnPendingLogsS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- &onPendingLogsReply{err: err}
+	_ = sendOrDone(s.ctx, s.ch, &onPendingLogsReply{err: err})
 }
 
 type MiningOnPendingLogsC struct {
