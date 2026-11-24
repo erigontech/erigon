@@ -718,7 +718,7 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 
 	// Adjust DB query bounds to exclude the range already covered by files.
 	// Range semantics: asc=[from,to), desc=(to,from].
-	// Files cover [0, filesEndTxNum).
+	// Files cover up to filesEndTxNum; below the first file the files were retired, and the DB holds nothing there either.
 	// Asc:  DB should cover [filesEndTxNum, endTxNum) — adjust inclusive lower bound.
 	// Desc: DB should cover (filesEndTxNum-1, startTxNum] — adjust exclusive lower bound.
 	//       filesEndTxNum-1 because `to` is exclusive, so value > (filesEndTxNum-1) ≡ value >= filesEndTxNum.

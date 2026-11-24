@@ -1866,7 +1866,7 @@ type aggregatorVisible struct {
 	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
-	visibleEnd   uint64                          // every list is cut here; below filesEnd means a gap
+	visibleEnd   uint64                          // every enabled, aligned list is cut here; below filesEnd means a gap
 	filesEnd     uint64                          // dirtyFilesEndTxNumMinimax when this generation was built
 
 	refcnt  atomic.Int32       // live readers
@@ -1881,15 +1881,17 @@ type aggregatorVisible struct {
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
-	// buildVisible builds every list up to toTxNum and returns the lowest end among the lists that have files.
+	// buildVisible builds every list up to toTxNum and returns the lowest end among the enabled, aligned lists that have files.
 	buildVisible := func(toTxNum uint64) (next *aggregatorVisible, lowestEnd uint64) {
 		next, lowestEnd = &aggregatorVisible{}, toTxNum
+		// lower checks only where a list stops: history and index lists may start past 0, because Retire removes their oldest files.
 		lower := func(dirty *DirtyFiles, visible visibleFiles) {
 			if dirty.Len() > 0 {
 				lowestEnd = min(lowestEnd, contiguousEnd(visible))
 			}
 		}
-		// values files are never retired, so a values list must start at its first file on disk
+		// values files are never retired, so a values list must not start past its first file on disk;
+		// optional domains (receipt, rcache) can start past 0 when they are enabled on a synced node
 		lowerToFirstFile := func(dirty *DirtyFiles, visible visibleFiles) {
 			firstStart := uint64(math.MaxUint64)
 			dirty.Scan(func(f *FilesItem) bool {
