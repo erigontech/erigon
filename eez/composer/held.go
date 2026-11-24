@@ -17,6 +17,7 @@
 package composer
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -83,7 +84,36 @@ type chainKey struct {
 type reservation struct {
 	chainKey
 	nonce uint64
+	slots int
 }
+
+const (
+	// heldSlotSize is the size of a slot: a transaction takes one for each
+	// heldSlotSize bytes of its encoding, rounded up.
+	heldSlotSize = 32 << 10
+	// MaxHeldTxSize is the largest transaction encoding the pool holds, the
+	// largest L1 transaction pools take.
+	MaxHeldTxSize = 4 * heldSlotSize
+	// maxHeldSlots bounds the pool's queued and in-flight transactions:
+	// 4,096 of them at most, 128 MiB of encodings at most.
+	maxHeldSlots = 4096
+	// maxHeldPerChain is the most transactions a sender's chain holds, queued
+	// and in flight: the per-account slots of the transaction pool.
+	maxHeldPerChain = 16
+)
+
+var (
+	// ErrHeldTooLarge refuses a transaction over MaxHeldTxSize.
+	ErrHeldTooLarge = fmt.Errorf("transaction encoding over %d bytes", MaxHeldTxSize)
+	// ErrHeldChainFull refuses a transaction its sender's chain has no room
+	// for.
+	ErrHeldChainFull = fmt.Errorf("the sender holds %d transactions, the most a sender may: wait for some to settle", maxHeldPerChain)
+	// ErrHeldPoolFull refuses a transaction the pool has no room for.
+	ErrHeldPoolFull = errors.New("held pool full: resubmit later")
+)
+
+// slotsOf returns the slots of a transaction encoded as raw.
+func slotsOf(raw []byte) int { return max(1, (len(raw)+heldSlotSize-1)/heldSlotSize) }
 
 // HeldPool holds cross-chain transactions in arrival order, each sender's
 // nonces contiguous per direction. A drained transaction stays reserved,
@@ -93,6 +123,8 @@ type HeldPool struct {
 	txs      []*Held
 	byHash   map[common.Hash]bool
 	inFlight map[common.Hash]reservation
+	// slots bounds the slots of the queued and in-flight transactions.
+	slots int
 }
 
 // replaceBump is the percentage a replacement raises both fees by.
@@ -113,17 +145,21 @@ func minReplacement(fee *uint256.Int) uint256.Int {
 
 // NewHeldPool returns an empty pool.
 func NewHeldPool() *HeldPool {
-	return &HeldPool{byHash: map[common.Hash]bool{}, inFlight: map[common.Hash]reservation{}}
+	return &HeldPool{byHash: map[common.Hash]bool{}, inFlight: map[common.Hash]reservation{}, slots: maxHeldSlots}
 }
 
 // Push admits tx, whose sender has nonce onChain on its network: the next
-// nonce of its chain, or a replacement of a queued one raising both fees. A
-// transaction already held is admitted again without effect.
+// nonce of its chain, or a replacement of a queued one raising both fees,
+// within the size, chain and pool limits. A transaction already held is
+// admitted again without effect.
 func (p *HeldPool) Push(tx *Held, onChain uint64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if _, ok := p.inFlight[tx.Hash]; ok || p.byHash[tx.Hash] {
 		return nil
+	}
+	if len(tx.Raw) > MaxHeldTxSize {
+		return ErrHeldTooLarge
 	}
 	k := chainKey{tx.Sender, tx.Direction}
 	refuse := func() error {
@@ -144,6 +180,9 @@ func (p *HeldPool) Push(tx *Held, onChain uint64) error {
 		if tx.MaxFee.Lt(&maxFee) || tx.Tip.Lt(&tip) {
 			return &UnderpricedError{MaxFee: tx.MaxFee, RequiredMaxFee: maxFee, Tip: tx.Tip, RequiredTip: tip}
 		}
+		if p.used()-slotsOf(queued.Raw)+slotsOf(tx.Raw) > p.slots {
+			return ErrHeldPoolFull
+		}
 		delete(p.byHash, queued.Hash)
 		p.byHash[tx.Hash] = true
 		p.txs[i] = tx
@@ -153,9 +192,43 @@ func (p *HeldPool) Push(tx *Held, onChain uint64) error {
 	if next, ok := p.nextNonce(k, onChain); !ok || tx.Nonce != next {
 		return refuse()
 	}
+	switch {
+	case p.held(k) >= maxHeldPerChain:
+		return ErrHeldChainFull
+	case p.used()+slotsOf(tx.Raw) > p.slots:
+		return ErrHeldPoolFull
+	}
 	p.byHash[tx.Hash] = true
 	p.txs = append(p.txs, tx)
 	return nil
+}
+
+// used returns the slots of the queued and in-flight transactions.
+func (p *HeldPool) used() int {
+	n := 0
+	for _, tx := range p.txs {
+		n += slotsOf(tx.Raw)
+	}
+	for _, r := range p.inFlight {
+		n += r.slots
+	}
+	return n
+}
+
+// held returns how many transactions k's chain holds, queued and in flight.
+func (p *HeldPool) held(k chainKey) int {
+	n := 0
+	for _, tx := range p.txs {
+		if tx.chainKey() == k {
+			n++
+		}
+	}
+	for _, r := range p.inFlight {
+		if r.chainKey == k {
+			n++
+		}
+	}
+	return n
 }
 
 func (tx *Held) chainKey() chainKey { return chainKey{tx.Sender, tx.Direction} }
@@ -210,7 +283,7 @@ func (p *HeldPool) Reserve(txs []*Held) {
 		if n, ok := conflict[tx.chainKey()]; (ok && tx.Nonce >= n) || p.byHash[tx.Hash] {
 			continue
 		}
-		p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce}
+		p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce, slotsOf(tx.Raw)}
 	}
 }
 
@@ -259,7 +332,7 @@ func (p *HeldPool) PopN(n int) []*Held {
 	for _, tx := range drained {
 		delete(p.byHash, tx.Hash)
 		if _, ok := p.inFlight[tx.Hash]; !ok {
-			p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce}
+			p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce, slotsOf(tx.Raw)}
 		}
 	}
 	return drained

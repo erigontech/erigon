@@ -222,6 +222,9 @@ func (f *Front) admit(ctx context.Context, raw []byte, tx types.Transaction) (co
 	if err := tx.MarshalBinary(&canonical); err != nil || !bytes.Equal(canonical.Bytes(), raw) {
 		return common.Hash{}, errors.New("non-canonical transaction encoding: send the EIP-2718 envelope")
 	}
+	if len(raw) > composer.MaxHeldTxSize {
+		return common.Hash{}, fmt.Errorf("%w: %d bytes", composer.ErrHeldTooLarge, len(raw))
+	}
 	switch tx.Type() {
 	case types.LegacyTxType, types.AccessListTxType, types.DynamicFeeTxType:
 	default:

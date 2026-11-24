@@ -17,6 +17,7 @@
 package composer
 
 import (
+	"bytes"
 	"math"
 	"math/rand/v2"
 	"slices"
@@ -267,6 +268,50 @@ func TestHeldPoolReserve(t *testing.T) {
 		p.Reserve(drained)
 		require.Empty(t, p.inFlight)
 		require.Equal(t, 1, p.Len())
+	})
+}
+
+// TestHeldPoolLimits: a transaction over MaxHeldTxSize, one past the most
+// a sender's chain holds, queued and in flight, and one past the pool's
+// slots are refused; recovery returns what it drained whatever the room.
+func TestHeldPoolLimits(t *testing.T) {
+	sized := func(sender common.Address, nonce uint64, h byte, size int) *Held {
+		tx := held(sender, nonce, Inbound, h)
+		tx.Raw = bytes.Repeat([]byte{h}, size)
+		return tx
+	}
+	t.Run("a transaction too large", func(t *testing.T) {
+		p := NewHeldPool()
+		require.ErrorIs(t, p.Push(sized(addr(1), 0, 1, MaxHeldTxSize+1), 0), ErrHeldTooLarge)
+		push(t, p, sized(addr(1), 0, 2, MaxHeldTxSize), 0)
+	})
+	t.Run("a sender's chain", func(t *testing.T) {
+		p := NewHeldPool()
+		sender := addr(2)
+		for n := range uint64(maxHeldPerChain) {
+			push(t, p, held(sender, n, Inbound, byte(n+1)), 0)
+		}
+		drained := p.PopN(1)
+		require.ErrorIs(t, p.Push(held(sender, maxHeldPerChain, Inbound, 0xf0), 0), ErrHeldChainFull, "in flight counts")
+		push(t, p, held(sender, 1, Inbound, 0xf1), 0)
+		push(t, p, held(addr(3), 0, Inbound, 0xf2), 0)
+		push(t, p, held(sender, 0, Outbound, 0xf3), 0)
+		p.Release(drained)
+		push(t, p, held(sender, maxHeldPerChain, Inbound, 0xf4), 1)
+	})
+	t.Run("the pool's slots", func(t *testing.T) {
+		p := NewHeldPool()
+		p.slots = 3
+		push(t, p, sized(addr(4), 0, 1, heldSlotSize+1), 0)
+		push(t, p, sized(addr(5), 0, 2, heldSlotSize), 0)
+		require.ErrorIs(t, p.Push(sized(addr(6), 0, 3, 1), 0), ErrHeldPoolFull)
+		require.ErrorIs(t, p.Push(sized(addr(5), 0, 4, heldSlotSize+1), 0), ErrHeldPoolFull, "a replacement that grows")
+		drained := p.PopN(math.MaxInt)
+		require.ErrorIs(t, p.Push(sized(addr(6), 0, 3, 1), 0), ErrHeldPoolFull, "in flight counts")
+		p.Release(drained[:1])
+		push(t, p, sized(addr(6), 0, 3, heldSlotSize), 0)
+		p.PushFront(drained[:1])
+		require.Equal(t, 2, p.Len(), "recovery is never refused")
 	})
 }
 

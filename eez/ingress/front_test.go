@@ -280,6 +280,11 @@ func TestFrontRefuses(t *testing.T) {
 			require.NoError(t, err)
 			return wrapped
 		}, want: []string{"canonical"}},
+		{name: "an encoding over 128 KiB", tx: func(h *harness) []byte {
+			tx := dynamic(0, 16_000_000, ptr(target))
+			tx.Data = make([]byte, composer.MaxHeldTxSize)
+			return h.sign(t, tx, chainID)
+		}, want: []string{"over 131072 bytes"}},
 		{
 			name: "codeless target", tx: func(h *harness) []byte { return h.sign(t, dynamic(0, 100_000, ptr(codeless)), chainID) },
 			want: []string{"has no code", "createCrossChainProxy"}, reads: true,
@@ -319,6 +324,19 @@ func TestFrontRefuses(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestFrontBoundsASender: a sender's chain holds at most 16 transactions,
+// queued and in flight.
+func TestFrontBoundsASender(t *testing.T) {
+	h := newFront(t, composer.Inbound)
+	for n := range uint64(16) {
+		require.Nil(t, h.send(t, h.sign(t, dynamic(n, 100_000, ptr(target)), chainID)).Error)
+	}
+	a := h.send(t, h.sign(t, dynamic(16, 100_000, ptr(target)), chainID))
+	require.NotNil(t, a.Error)
+	require.Contains(t, a.Error.Message, "holds 16 transactions")
+	require.Equal(t, 16, h.front.Pool.Len())
 }
 
 // TestFrontReservations: a nonce drained for a batch is not taken again, and
