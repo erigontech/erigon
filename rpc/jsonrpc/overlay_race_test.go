@@ -1287,6 +1287,28 @@ func TestSimulateV1RejectsBlockAheadOfExecution(t *testing.T) {
 	require.ErrorContains(t, err, "not executed")
 }
 
+func TestCallMethodsRejectBlockAheadOfExecution(t *testing.T) {
+	m, aheadHash := newBlockAheadOfExecutionTester(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	args := ethapi.CallArgs{From: &m.Address, To: &m.Address}
+
+	for name, selector := range map[string]rpc.BlockNumberOrHash{
+		"hash":   rpc.BlockNumberOrHashWithHash(aheadHash, false),
+		"latest": rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := api.Call(m.Ctx, args, &selector, nil, nil)
+			require.ErrorContains(t, err, "not executed")
+
+			_, err = api.EstimateGas(m.Ctx, &args, &selector, nil, nil)
+			require.ErrorContains(t, err, "not executed")
+
+			_, err = api.CreateAccessList(m.Ctx, args, &selector, nil, nil)
+			require.ErrorContains(t, err, "not executed")
+		})
+	}
+}
+
 func TestEthWitnessMethodsRejectBlockAheadOfExecution(t *testing.T) {
 	m, aheadHash := newBlockAheadOfExecutionTester(t)
 	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {

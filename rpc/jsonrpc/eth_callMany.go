@@ -143,17 +143,12 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	defer func(start time.Time) { log.Trace("Executing EVM callMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader)
+	blockNum, hash, _, err := rpchelper.ResolveExecutedBlock(ctx, simulateContext.BlockNumber.RequireCanonical, simulateContext.BlockNumber, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
 
 	err = api.checkBlockHistoryAvailable(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
