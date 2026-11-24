@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
-	"github.com/erigontech/erigon/execution/vm/testutil"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -227,14 +226,14 @@ func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
 	frameTx := &types.FrameTransaction{
-		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
-		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &successfulTarget, Limits: mdgas.MdGas{Execution: 10_000, State: 5_000}},
 			{Mode: types.FrameSender, Target: &revertingTarget, Limits: mdgas.MdGas{Execution: 10_000}},
 		},
 	}
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddFailedTx(frameTx) })
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
@@ -694,7 +693,7 @@ func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 				create = program.New().Create2(initCode, 0)
 				contract = types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
 			}
-			factoryCode := testutil.AssertStackWord(create.Op(vm.ISZERO), 0)
+			factoryCode := create.Op(vm.ISZERO).AssertEq(0)
 			if tc.repeatCreate2 {
 				factoryCode.Create2(initCode, 0).Op(vm.POP)
 			}
@@ -714,14 +713,15 @@ func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 			}), execmoduletester.WithKey(key))
 			var txn types.Transaction
 			if tc.frameTx {
-				txn = &types.FrameTransaction{
-					ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
-					Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+				frameTx := &types.FrameTransaction{
+					ChainID: *cfg.ChainID, SenderAddress: sender,
 					Frames: []types.Frame{
 						{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 						{Mode: types.FrameSender, Target: &factory, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
 					},
 				}
+				frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
+				txn = frameTx
 			} else {
 				txn, err = types.SignTx(types.NewTransaction(0, factory, new(uint256.Int), 500_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(cfg), key)
 				require.NoError(t, err)
@@ -771,7 +771,7 @@ func TestCallConstructorRetryAfterRollback(t *testing.T) {
 		require.Equal(t, &CreationCode{Code: &runtime}, result)
 
 		// Only the first, rolled-back deployment receives an endowment.
-		replacement := testutil.AssertStackWord(program.New().Op(vm.CALLVALUE), 1).ReturnData(runtime)
+		replacement := program.New().Op(vm.CALLVALUE).AssertEq(1).ReturnData(runtime)
 		result, err = api.CallConstructor(m.Ctx, target, replacement.Bytes())
 		require.Nil(t, result)
 		require.ErrorIs(t, err, vm.ErrExecutionReverted)
@@ -794,8 +794,7 @@ func TestCallConstructorRetryAfterRollback(t *testing.T) {
 	t.Run("atomic batch revert", func(t *testing.T) {
 		limits := mdgas.MdGas{Execution: 200_000, State: 1_000_000}
 		txn := &types.FrameTransaction{
-			ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: testAddr,
-			Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+			ChainID: *cfg.ChainID, SenderAddress: testAddr,
 			Frames: []types.Frame{
 				{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 				{Mode: types.FrameSender, Flags: types.FrameAtomicBatch, Target: &factory, Value: uint256.Int{1}, Limits: limits},
@@ -803,6 +802,7 @@ func TestCallConstructorRetryAfterRollback(t *testing.T) {
 				{Mode: types.FrameSender, Target: &factory, Limits: limits},
 			},
 		}
+		txn.Fees.MaxFee.SetUint64(txn.GetGasLimit())
 		approval := program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE)
 		checkRetry(t, types.GenesisAlloc{
 			testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: approval.Bytes()},
@@ -821,7 +821,7 @@ func TestCallConstructorRetryInsufficientBalance(t *testing.T) {
 	// The factory reverts unless the deployed code is one byte long. It uses the
 	// calldata length as the endowment, so the retry needs one wei from the unfunded factory.
 	create := program.New().Mstore(initCode, 0).Push0().Push(len(initCode)).Push0().Op(vm.CALLDATASIZE, vm.CREATE2, vm.EXTCODESIZE)
-	factoryCode := testutil.AssertStackWord(create, 1)
+	factoryCode := create.AssertEq(1)
 	calls := program.New().Call(nil, factory, 0, 0, 0, 0, 0).Op(vm.POP)
 	calls.Call(nil, factory, 0, 0, 1, 0, 0).Op(vm.POP)
 
@@ -897,7 +897,7 @@ func TestCallConstructorRetryOutOfGas(t *testing.T) {
 				target = types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
 			}
 			create.Push(len(initCode)).Push0().Push0().Op(tc.op, vm.EXTCODESIZE)
-			factoryCode := testutil.AssertStackWord(create, 1).Bytes()
+			factoryCode := create.AssertEq(1).Bytes()
 			calls := program.New().Call(nil, factory, 0, 0, 0, 0, 0).Op(vm.POP)
 			calls.Call(uint256.NewInt(1_000), tc.secondCall, 0, 0, tc.inputSize, 0, 0).Op(vm.POP)
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
@@ -984,7 +984,7 @@ func TestCallConstructorNestedInitCodeErrors(t *testing.T) {
 			// The entry contract gives the factory enough gas for the original deployment.
 			// It discards the call result, so a factory failure can leave the transaction successful.
 			call := program.New().Call(uint256.NewInt(params.CreateGas+700), factory, 0, 0, 0, 0, 0).Op(vm.POP, vm.STOP)
-			factoryCode := testutil.AssertStackWord(create.Op(vm.ISZERO), 0).Op(vm.STOP)
+			factoryCode := create.Op(vm.ISZERO).AssertEq(0).Op(vm.STOP)
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 				Config: chain.TestChainOsakaConfig.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
 				Alloc: types.GenesisAlloc{
@@ -1072,13 +1072,13 @@ func TestFrameCallConstructor(t *testing.T) {
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
 	frameTx := &types.FrameTransaction{
-		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
-		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
 		Frames: []types.Frame{
 			{Mode: types.FrameDefault, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Data: []byte{1}, Limits: mdgas.MdGas{Execution: 1_000}},
 		},
 	}
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
@@ -1120,18 +1120,18 @@ func TestFrameCallConstructorPaymentApprovalError(t *testing.T) {
 	sender := common.HexToAddress("0x1000")
 	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
 	create := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.EXTCODESIZE)
-	approval := testutil.AssertStackWord(create, 1).Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE)
+	approval := create.AssertEq(1).Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
 		Alloc: types.GenesisAlloc{sender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: approval.Bytes()}},
 	}))
 	frameTx := &types.FrameTransaction{
-		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
-		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		ChainID: *cfg.ChainID, SenderAddress: sender,
 		Frames: []types.Frame{
 			{Mode: types.FrameDefault, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 500_000, State: 1_000_000}},
 		},
 	}
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 	insertConstructorTx(t, m, frameTx)
 	base := newBaseApiForTest(m)
 	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
@@ -1176,13 +1176,13 @@ func TestFrameCallConstructorFeeAccounting(t *testing.T) {
 		},
 	}))
 	frameTx := &types.FrameTransaction{
-		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
-		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &factory, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
 		},
 	}
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
@@ -1212,12 +1212,12 @@ func TestFrameCallConstructorAssertionRollback(t *testing.T) {
 			contract := types.CreateAddress(factory, 0)
 			initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
 			create := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP)
-			assertCode := testutil.AssertStackWord(program.New().Push(contract).Op(vm.EXTCODESIZE), 1).Op(vm.STOP)
+			assertCode := program.New().Push(contract).Op(vm.EXTCODESIZE).AssertEq(1).Op(vm.STOP)
 			approval := program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE)
 			frames := []types.Frame{
 				{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 				{Mode: types.FrameSender, Target: &factory, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
-				{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
+				{Mode: types.FrameAssert, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
 			}
 			if tc.createInApproval {
 				approval = program.New().Call(uint256.NewInt(200_000), factory, 0, 0, 0, 0, 0).Op(vm.POP).Append(approval.Bytes())
@@ -1234,16 +1234,16 @@ func TestFrameCallConstructorAssertionRollback(t *testing.T) {
 				},
 			}))
 			frameTx := &types.FrameTransaction{
-				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
-				Fees: types.FrameFees{FeeCap: uint256.Int{1}}, Frames: frames,
+				ChainID: *cfg.ChainID, SenderAddress: sender, Frames: frames,
 			}
+			frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 			pack := insertConstructorTx(t, m, frameTx)
 			require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].Status)
 			require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].FrameReceipts[len(frames)-1].Status)
 
 			base := newBaseApiForTest(m)
 			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
-			// The replacement changes the code size, so POST_TX rolls back the body.
+			// The replacement changes the code size, so the assertion fails and rolls back the body.
 			want := hexutil.Bytes{byte(vm.PUSH0), byte(vm.STOP)}
 			result, err := api.CallConstructor(m.Ctx, contract, program.New().ReturnData(want).Bytes())
 			require.NoError(t, err)

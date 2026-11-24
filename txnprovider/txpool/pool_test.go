@@ -326,18 +326,32 @@ func TestFlushSenderActivity(t *testing.T) {
 	}
 }
 
-func TestAddLocalTxnsRejectsTotalGasAboveCap(t *testing.T) {
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	pool.blockGasLimit.Store(2 * math.MaxUint32)
-	txn := newTestTxnSlot(0, 0, 1, 2, uint64(math.MaxUint32)+1)
-	txn.IDHash[0] = 1
-	var txns TxnSlots
-	txns.Append(txn, sender[:], true)
-	reasons, err := pool.AddLocalTxns(ctx, txns)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.GasLimitTooHigh}, reasons)
-	pending, baseFee, queued := pool.CountContent()
-	require.Zero(t, pending+baseFee+queued)
+func TestPoolDeclaredGasCap(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config *chain.Config
+		cap    uint64
+	}{
+		{"before Osaka", testforks.Forks["Prague"], params.MaxTxnGasLimit},
+		{"Amsterdam", chain.AllProtocolChanges, math.MaxUint32},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, tc.config)
+			pool.blockGasLimit.Store(2 * tc.cap)
+			var txns TxnSlots
+			for i, gas := range []uint64{tc.cap, tc.cap + 1} {
+				slot := newTestTxnSlot(uint64(i), 0, 1, 2, gas)
+				slot.IDHash[0] = byte(i + 1)
+				txns.Append(slot, sender[:], true)
+			}
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.GasLimitTooHigh}, reasons)
+			pending, baseFee, queued := pool.CountContent()
+			require.Equal(t, 1, pending+baseFee+queued)
+			require.NotContains(t, pool.byHash, string(txns.Txns[1].IDHash[:]))
+		})
+	}
 }
 
 func TestAddLocalTxnsRejectsTipAboveFeeCap(t *testing.T) {
@@ -841,7 +855,7 @@ func TestProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
 func TestProvideTxnsRejectsFrameAboveExecutionGasTarget(t *testing.T) {
 	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000)
 	frameTxn := &types.FrameTransaction{
-		NonceKeys:     []uint256.Int{{}},
+		NonceKeys:     nil,
 		SenderAddress: common.Address{1}, Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 87_525}}},
 	}
 	pool.pending.best.ms[0].TxnSlot.Txn = frameTxn
@@ -1037,6 +1051,34 @@ func TestNonceFromAddress(t *testing.T) {
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.NonceTooLow, reason, reason.String())
 		}
+	}
+}
+
+func TestSetCodePrerequisiteRejections(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		config   *chain.Config
+		creation bool
+		want     txpoolcfg.DiscardReason
+	}{
+		{"before Prague", chain.TestChainBerlinConfig, true, txpoolcfg.TypeNotActivated},
+		{"contract creation", chain.TestChainOsakaConfig, true, txpoolcfg.InvalidCreateTxn},
+		{"missing authorizations", chain.TestChainOsakaConfig, false, txpoolcfg.NoAuthorizations},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, tc.config)
+			slot := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
+			tx := slot.Txn.(*types.SetCodeTransaction)
+			tx.Authorizations = nil
+			if tc.creation {
+				tx.To = nil
+			}
+			var txns TxnSlots
+			txns.Append(slot, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.want}, reasons)
+		})
 	}
 }
 
@@ -1784,6 +1826,35 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			if reason != test.expected {
 				t.Errorf("expected %v, got %v", test.expected, reason)
 			}
+		})
+	}
+}
+
+func TestPoolIntrinsicGasAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name, fork      string
+		gasLimit        uint64
+		nonZeroBytes    int
+		accessListAddrs int
+		want            txpoolcfg.DiscardReason
+	}{
+		{name: "before calldata floor", fork: "Cancun", gasLimit: 50_000, nonZeroBytes: 1_000, want: txpoolcfg.Success},
+		{name: "below calldata floor", fork: "Prague", gasLimit: 50_000, nonZeroBytes: 1_000, want: txpoolcfg.IntrinsicGas},
+		{name: "below execution cap", fork: "Amsterdam", gasLimit: 30_000_000, accessListAddrs: 4_010, want: txpoolcfg.Success},
+		{name: "above execution cap", fork: "Amsterdam", gasLimit: 30_000_000, accessListAddrs: 4_011, want: txpoolcfg.GasLimitTooHigh},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, testforks.Forks[tc.fork])
+			pool.blockGasLimit.Store(tc.gasLimit + 1)
+			slot := newTestTxnSlot(0, 0, 1, 2, tc.gasLimit)
+			txn := slot.Txn.(*types.DynamicFeeTransaction)
+			txn.Data = bytes.Repeat([]byte{1}, tc.nonZeroBytes)
+			txn.AccessList = make(types.AccessList, tc.accessListAddrs)
+			var txns TxnSlots
+			txns.Append(slot, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.want}, reasons)
 		})
 	}
 }

@@ -18,6 +18,7 @@ package das
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -189,12 +190,12 @@ func TestBlobRecoveryHoldsOncePerQueuedRootAcrossRecoveries(t *testing.T) {
 func TestBlobRecoveryContinuesWhenTheHoldExpiredBeforeItParks(t *testing.T) {
 	g := startGossipRecoveryWithBlobs(t, false, holdBlobs)
 	const queueUpdateDelay = 400 * time.Millisecond
-	g.d.blocksToCheckSync.add(g.root, &slowCommitmentsBlock{ColumnSyncableSignedBlock: g.block, delay: queueUpdateDelay}, time.Now().Add(firstAttemptAhead))
 	fuluDeadline := time.Duration(clparams.MainnetBeaconConfig.SecondsPerSlot) * time.Second / 4
 	scheduled := time.Now()
 	g.slotStart.Store(scheduled.Add(450*time.Millisecond - fuluDeadline).UnixNano())
 
 	g.schedule(t)
+	g.d.blocksToCheckSync.add(g.root, &slowCommitmentsBlock{ColumnSyncableSignedBlock: g.block, delay: queueUpdateDelay}, time.Now().Add(firstAttemptAhead))
 	started := g.awaitFirstRead(t)
 
 	g.awaitHoldStart(t)
@@ -250,6 +251,62 @@ func TestBlobRecoveryDoesNotHoldWithoutTheConditions(t *testing.T) {
 
 			require.Less(t, started.Sub(call.end), wantQuietPeriod+startSlack, "the worker held")
 			g.requireColumnSyncUntouched(t, firstAttempt)
+		})
+	}
+}
+
+// Each column stored for a root that can hold restarts the quiet period. Gossip that keeps delivering completes the
+// matrix before the recovery reaches the hold, so neither the by-root sync nor FK20 runs.
+func TestBlobRecoveryWaitIsRestartedByStoredColumnsForARootThatCanHold(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g := startGossipRecoveryWithBlobs(t, false, holdBlobs)
+		firstAttempt := time.Now().Add(firstAttemptAhead)
+		g.queueForColumnSync(firstAttempt)
+
+		last := g.schedule(t)
+		g.storeColumnsUpTo(t, int(g.d.beaconConfig.NumberOfColumns), func() {
+			time.Sleep(wantQuietPeriod / 10)
+			last = g.schedule(t)
+		})
+		started := g.awaitFirstRead(t)
+
+		require.False(t, started.Before(last.begin.Add(wantQuietPeriod)), "the worker started before the quiet period of the last column passed")
+		require.Less(t, started.Sub(last.end), wantQuietPeriod+startSlack)
+		g.requireColumnSyncUntouched(t, firstAttempt)
+		requireBlobRecoveryReleased(t, g.d, g.root)
+		g.requireBlobsRecovered(t)
+		require.Zero(t, g.workerWrites.writes.Load(), "column writes by the worker")
+		require.Never(t, func() bool { return len(g.published) > 0 }, 100*time.Millisecond, 10*time.Millisecond, "published columns")
+	})
+}
+
+// A queued root that cannot hold keeps the quiet period of the first column: an archive node never holds, and neither
+// does a block with fewer than 9 blobs.
+func TestBlobRecoveryWaitIsNotRestartedByStoredColumnsOfAQueuedRootThatCannotHold(t *testing.T) {
+	archive := func(r *recoveryRun) { r.d.caplinConfig = &clparams.CaplinConfig{ArchiveBlobs: true} }
+	for _, tc := range []struct {
+		name      string
+		blobs     int
+		configure []func(*recoveryRun)
+	}{
+		{"archive node", holdBlobs, []func(*recoveryRun){archive}},
+		{"eight blobs", holdBlobs - 1, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				g := startGossipRecoveryWithBlobs(t, false, tc.blobs, tc.configure...)
+				g.queueForColumnSync(time.Now().Add(firstAttemptAhead))
+
+				first := g.schedule(t)
+				time.Sleep(wantQuietPeriod / 10)
+				second := g.schedule(t)
+				time.Sleep(wantQuietPeriod / 10)
+				g.schedule(t)
+				started := g.awaitFirstRead(t)
+
+				require.False(t, started.Before(first.begin.Add(wantQuietPeriod)), "the worker started before the quiet period of the first column passed")
+				require.True(t, started.Before(second.begin.Add(wantQuietPeriod)), "a later column extended the wait")
+			})
 		})
 	}
 }

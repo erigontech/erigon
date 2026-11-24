@@ -84,9 +84,11 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 	return accounts.Code{Hash: codeHash, Bytes: code}, err
 }
 
-// codeSeed returns the code this tx currently sees at addr — its own Code write cell
-// if any, else the committed value — without recording an OCC read. Lets SetCode on the
-// rebuilt noMaterialize transient compare against current code, not the stale tx-start value.
+// codeSeed returns the code this tx sees at addr: its own Code write if any, else the
+// version-map value below txIndex, else the pre-block value. Its own write is returned
+// without recording a read; a value from a lower tx or the committed state is resolved
+// through the tracked code reader, so the comparison SetCode makes against it is covered
+// by an OCC read and resolves estimate cells like a normal read.
 func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts.CodeHash) (accounts.Code, error) {
 	if _, isDirty := ibs.journal.dirties[addr]; isDirty {
 		if vw, ok := ibs.versionedWrites.GetCode(addr); ok {
@@ -96,18 +98,15 @@ func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 	if currentHash == accounts.EmptyCodeHash {
 		return accounts.Code{Hash: accounts.EmptyCodeHash}, nil
 	}
-	// An earlier tx in this block may have installed the code; its bytes live in
-	// the version map, not the pre-block origin. Resolve them there first so the
-	// seed carries the bytes matching currentHash rather than nil bytes from the
-	// origin reader (which would make an identical SetCode look like a change).
-	if code, _, ok := ibs.versionMap.ReadCode(addr, ibs.txIndex); ok {
-		return code, nil
-	}
-	code, err := ibs.originCodeDirect(addr)
+	// An earlier tx in this block may have installed the code; its bytes live in the
+	// version map, not the pre-block origin. Reading it untracked lets a withdrawal of
+	// that earlier write validate stale, and drops the bytes that distinguish an
+	// identical SetCode from a real change — so resolve through the tracked reader.
+	code, _, _, err := readCode(ibs, addr)
 	if err != nil {
 		return accounts.Code{}, err
 	}
-	return accounts.Code{Hash: currentHash, Bytes: code.Bytes}, nil
+	return code, nil
 }
 
 // originCodeHash returns the pre-block origin code hash from the state reader
@@ -1001,14 +1000,14 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 }
 
 // readNonce returns the nonce using the version-aware read pipeline.
-func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
+func readNonce(s *IntraBlockState, addr accounts.Address, committed bool) (uint64, ReadSource, Version, error) {
+	if committed || s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetNonce(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, NoncePath, accounts.NilKey, false, false, &r)
+	versionedReadCore(s, addr, NoncePath, accounts.NilKey, committed, false, &r)
 	if r.err != nil {
 		s.RecordStateReadError(r.err)
 		return 0, r.source, r.version, r.err

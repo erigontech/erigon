@@ -876,6 +876,92 @@ func TestDropWritePutsBackTheStatusOfASeededBalance(t *testing.T) {
 	require.Equal(t, ValueChanged, c.valStatus)
 }
 
+// Seeding derives a zero balance where a later tx revives a removed account without a balance change,
+// and a drop there deletes the cell. A later tx still sees the same revived account, in its reads and
+// in the account the interpreter composes, now from the deleted balance of the removal. The drop costs
+// at most a re-run: the reads of the zero and of the dropped balance are invalid.
+func TestDropWriteAtARevivalKeepsTheRevivedAccount(t *testing.T) {
+	t.Parallel()
+	balanceOnly := func(_ *testing.T, _ StateReader, _ *VersionMap, x accounts.Address, v Version) *WriteSet {
+		run := &WriteSet{}
+		run.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: v}, Val: *uint256.NewInt(5)})
+		return run
+	}
+	revivalWithValue := func(t *testing.T, reader StateReader, vm *VersionMap, x accounts.Address, v Version) *WriteSet {
+		ibs := NewWithVersionMap(reader, vm)
+		t.Cleanup(ibs.Close)
+		ibs.SetTxContext(1, v.TxIndex)
+		ibs.SetVersion(v.Incarnation)
+		require.NoError(t, ibs.CreateAccount(x, true))
+		require.NoError(t, ibs.SetNonce(x, 1, tracing.NonceChangeUnspecified))
+		require.NoError(t, ibs.SetCode(x, []byte{0x00}, tracing.CodeChangeUnspecified))
+		require.NoError(t, ibs.AddBalance(x, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+		writes, err := ibs.FinalizedWrites(&chain.Rules{IsAmsterdam: true})
+		require.NoError(t, err)
+		return writes
+	}
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T, StateReader, *VersionMap, accounts.Address, Version) *WriteSet
+	}{
+		{"a run writes only a balance", balanceOnly},
+		{"the re-run no longer revives the account", revivalWithValue},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			x, reader, vm := seededRemovalOfPrefundedAccount(t)
+			readInTx2 := func(inc Incarnation) (*IntraBlockState, accounts.Account) {
+				ibs := NewWithVersionMap(reader, vm)
+				t.Cleanup(ibs.Close)
+				ibs.SetTxContext(1, 2)
+				ibs.SetVersion(inc)
+				exists, err := ibs.Exist(x)
+				require.NoError(t, err)
+				require.True(t, exists)
+				acc := accounts.NewAccount()
+				acc.Balance, err = ibs.GetBalance(x)
+				require.NoError(t, err)
+				acc.Nonce, err = ibs.GetNonce(x)
+				require.NoError(t, err)
+				acc.CodeHash, err = ibs.GetCodeHash(x)
+				require.NoError(t, err)
+				require.False(t, ibs.HadInvalidRead())
+				return ibs, acc
+			}
+			composedInTx2 := func() accounts.Account {
+				acc, ok, _ := vm.ViewAtTxIndex(2, reader).GetAccount(x)
+				require.True(t, ok)
+				return acc
+			}
+			seeded, want := readInTx2(0)
+			require.True(t, want.Balance.IsZero())
+			require.Equal(t, uint64(1), want.Nonce)
+			require.Equal(t, want, composedInTx2())
+
+			run := tc.run(t, reader, vm, x, Version{TxIndex: 1, Incarnation: 1})
+			vm.FlushVersionedWrites(run, false)
+			vm.MarkWritesValidated(run, nil)
+			stale, acc := readInTx2(1)
+			require.Equal(t, *uint256.NewInt(5), acc.Balance)
+			require.Equal(t, VersionValid, validateReads(vm, stale, 2))
+
+			for h := range run.AllHeaders() {
+				vm.DropWrite(h.Address, h.Path, h.Key, Version{TxIndex: 1, Incarnation: 2})
+			}
+			_, res, ok := vm.ReadBalance(x, 2)
+			require.True(t, ok)
+			require.Equal(t, 0, res.DepIdx())
+			require.Equal(t, ValueDeleted, res.ValStatus())
+			require.Equal(t, VersionInvalid, validateReads(vm, seeded, 2))
+			require.Equal(t, VersionInvalid, validateReads(vm, stale, 2))
+			rerun, got := readInTx2(2)
+			require.Equal(t, want, got)
+			require.Equal(t, VersionValid, validateReads(vm, rerun, 2))
+			require.Equal(t, want, composedInTx2())
+		})
+	}
+}
+
 // The derived removals are per account and tx: a drop of a write of another account at the tx, or of
 // the account at another tx, puts back the value from the access list.
 func TestDropWritePutsBackTheListedBalanceNextToADerivedRemoval(t *testing.T) {

@@ -730,7 +730,7 @@ func (ibs *IntraBlockState) getBalance(addr accounts.Address) (uint256.Int, bool
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) GetNonce(addr accounts.Address) (uint64, error) {
-	nonce, _, _, err := readNonce(ibs, addr)
+	nonce, _, _, err := readNonce(ibs, addr, false)
 
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) GetNonce %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, nonce)
@@ -1081,7 +1081,7 @@ func (ibs *IntraBlockState) eip8246PreservedAccount(addr accounts.Address) (*acc
 	if err != nil {
 		return nil, err
 	}
-	nonce, _, _, err := readNonce(ibs, addr)
+	nonce, _, _, err := readNonce(ibs, addr, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1890,9 +1890,7 @@ func (ibs *IntraBlockState) createAccountVersioned(addr accounts.Address, contra
 	if prevSelfdestructed {
 		prevInc = prevIncarnation
 	}
-	if hadPrevious && prevInc < prevPrevIncarnation {
-		prevInc = prevPrevIncarnation
-	}
+	prevInc = max(prevInc, prevPrevIncarnation)
 	// Capture each path's own (source, version) for the synthetic reads stamped
 	// below; inheriting the account-record version would trip the validator on
 	// the recursive AddressPath check.
@@ -2457,13 +2455,6 @@ func (ibs *IntraBlockState) AddSlotToAccessList(addr accounts.Address, slot acco
 		ibs.journal.accessListAddSlotChange(addr, slot)
 	}
 	return addrMod, slotMod
-}
-
-// AddSlotOnlyToAccessList preserves account coldness for EIP-7906 storage lookups.
-func (ibs *IntraBlockState) AddSlotOnlyToAccessList(addr accounts.Address, slot accounts.StorageKey) {
-	if ibs.accessList.AddSlotOnly(addr, slot) {
-		ibs.journal.accessListAddSlotOnlyChange(addr, slot)
-	}
 }
 
 // AddressInAccessList returns true if the given address is in the access list.

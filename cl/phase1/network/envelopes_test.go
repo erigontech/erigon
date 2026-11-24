@@ -23,6 +23,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -106,37 +107,39 @@ func (s *slowEnvelopeSentinel) SendRequest(ctx context.Context, req *sentinelpro
 }
 
 func TestRequestEnvelopesFranticallyCancelsBlockedRequestWhenBatchExpires(t *testing.T) {
-	previousExpiration := requestEnvelopeBatchExpiration
-	requestEnvelopeBatchExpiration = 100 * time.Millisecond
-	t.Cleanup(func() { requestEnvelopeBatchExpiration = previousExpiration })
+	synctest.Test(t, func(t *testing.T) {
+		previousExpiration := requestEnvelopeBatchExpiration
+		requestEnvelopeBatchExpiration = 100 * time.Millisecond
+		t.Cleanup(func() { requestEnvelopeBatchExpiration = previousExpiration })
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	sentinel := newContextBlockingSentinel()
-	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		sentinel := newContextBlockingSentinel()
+		rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
 
-	done := make(chan error, 1)
-	go func() {
-		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{{1}}, NewEnvelopeBlockValidator(cfg, blockLookup(nil)), nil)
-		done <- err
-	}()
+		done := make(chan error, 1)
+		go func() {
+			_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{{1}}, NewEnvelopeBlockValidator(cfg, blockLookup(nil)), nil)
+			done <- err
+		}()
 
-	select {
-	case <-sentinel.started:
-	case <-time.After(time.Second):
-		t.Fatal("request did not reach the Sentinel boundary")
-	}
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(time.Second):
-		t.Fatal("batch expiration did not stop the blocked envelope request")
-	}
-	select {
-	case <-sentinel.canceled:
-	case <-time.After(time.Second):
-		t.Fatal("batch expiration returned without canceling the blocked envelope request")
-	}
+		select {
+		case <-sentinel.started:
+		case <-time.After(time.Second):
+			t.Fatal("request did not reach the Sentinel boundary")
+		}
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("batch expiration did not stop the blocked envelope request")
+		}
+		select {
+		case <-sentinel.canceled:
+		case <-time.After(time.Second):
+			t.Fatal("batch expiration returned without canceling the blocked envelope request")
+		}
+	})
 }
 
 func TestRequestEnvelopesFranticallyReturnsCallerCancellation(t *testing.T) {
@@ -182,101 +185,107 @@ func TestRequestEnvelopesFranticallyInterruptsRetryDelay(t *testing.T) {
 		{name: "empty_response", empty: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			rpcClient, cfg := newContextBlockingBeaconRPC(ctx, &immediateEnvelopeSentinel{empty: tc.empty})
-			var bans atomic.Int32
-			done := make(chan error, 1)
-			go func() {
-				_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{{1}}, NewEnvelopeBlockValidator(cfg, blockLookup(nil)), func(context.Context, string) { bans.Add(1) })
-				done <- err
-			}()
-			select {
-			case err := <-done:
-				require.NoError(t, err)
-			case <-time.After(200 * time.Millisecond):
-				t.Fatal("batch expiration did not interrupt the retry delay")
-			}
-			require.Zero(t, bans.Load())
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				rpcClient, cfg := newContextBlockingBeaconRPC(ctx, &immediateEnvelopeSentinel{empty: tc.empty})
+				var bans atomic.Int32
+				done := make(chan error, 1)
+				go func() {
+					_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{{1}}, NewEnvelopeBlockValidator(cfg, blockLookup(nil)), func(context.Context, string) { bans.Add(1) })
+					done <- err
+				}()
+				select {
+				case err := <-done:
+					require.NoError(t, err)
+				case <-time.After(200 * time.Millisecond):
+					t.Fatal("batch expiration did not interrupt the retry delay")
+				}
+				require.Zero(t, bans.Load())
+			})
 		})
 	}
 }
 
 func TestRequestEnvelopesFranticallyReservesTimeForRangeFallback(t *testing.T) {
-	previousExpiration := requestEnvelopeBatchExpiration
-	previousAttemptTimeout := requestEnvelopeAttemptTimeout
-	requestEnvelopeBatchExpiration = 200 * time.Millisecond
-	requestEnvelopeAttemptTimeout = 20 * time.Millisecond
-	t.Cleanup(func() {
-		requestEnvelopeBatchExpiration = previousExpiration
-		requestEnvelopeAttemptTimeout = previousAttemptTimeout
+	synctest.Test(t, func(t *testing.T) {
+		previousExpiration := requestEnvelopeBatchExpiration
+		previousAttemptTimeout := requestEnvelopeAttemptTimeout
+		requestEnvelopeBatchExpiration = 200 * time.Millisecond
+		requestEnvelopeAttemptTimeout = 20 * time.Millisecond
+		t.Cleanup(func() {
+			requestEnvelopeBatchExpiration = previousExpiration
+			requestEnvelopeAttemptTimeout = previousAttemptTimeout
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		sentinel := &slowEnvelopeSentinel{byRange: make(chan struct{})}
+		rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+		block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+		block.Block.Slot = 1
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+
+		done := make(chan error, 1)
+		go func() {
+			_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{root}, NewEnvelopeBlockValidator(cfg, blockLookup([]*cltypes.SignedBeaconBlock{block})), nil, block)
+			done <- err
+		}()
+
+		select {
+		case <-sentinel.byRange:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("slow by-root peer consumed the range fallback budget")
+		}
+		cancel()
+		require.ErrorIs(t, <-done, context.Canceled)
 	})
-
-	ctx, cancel := context.WithCancel(t.Context())
-	sentinel := &slowEnvelopeSentinel{byRange: make(chan struct{})}
-	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
-	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
-	block.Block.Slot = 1
-	root, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-
-	done := make(chan error, 1)
-	go func() {
-		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{root}, NewEnvelopeBlockValidator(cfg, blockLookup([]*cltypes.SignedBeaconBlock{block})), nil, block)
-		done <- err
-	}()
-
-	select {
-	case <-sentinel.byRange:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("slow by-root peer consumed the range fallback budget")
-	}
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 func TestRequestEnvelopesFranticallyBoundsRangeFallbackAttempt(t *testing.T) {
-	previousExpiration := requestEnvelopeBatchExpiration
-	previousAttemptTimeout := requestEnvelopeAttemptTimeout
-	previousRetryInterval := requestEnvelopeRetryInterval
-	requestEnvelopeBatchExpiration = 200 * time.Millisecond
-	requestEnvelopeAttemptTimeout = 20 * time.Millisecond
-	requestEnvelopeRetryInterval = time.Millisecond
-	t.Cleanup(func() {
-		requestEnvelopeBatchExpiration = previousExpiration
-		requestEnvelopeAttemptTimeout = previousAttemptTimeout
-		requestEnvelopeRetryInterval = previousRetryInterval
+	synctest.Test(t, func(t *testing.T) {
+		previousExpiration := requestEnvelopeBatchExpiration
+		previousAttemptTimeout := requestEnvelopeAttemptTimeout
+		previousRetryInterval := requestEnvelopeRetryInterval
+		requestEnvelopeBatchExpiration = 200 * time.Millisecond
+		requestEnvelopeAttemptTimeout = 20 * time.Millisecond
+		requestEnvelopeRetryInterval = time.Millisecond
+		t.Cleanup(func() {
+			requestEnvelopeBatchExpiration = previousExpiration
+			requestEnvelopeAttemptTimeout = previousAttemptTimeout
+			requestEnvelopeRetryInterval = previousRetryInterval
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		sentinel := &blockedRangeEnvelopeSentinel{
+			byRange:     make(chan struct{}),
+			laterByRoot: make(chan struct{}),
+		}
+		rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+		block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+		block.Block.Slot = 1
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+
+		done := make(chan error, 1)
+		go func() {
+			_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{root}, NewEnvelopeBlockValidator(cfg, blockLookup([]*cltypes.SignedBeaconBlock{block})), nil, block)
+			done <- err
+		}()
+
+		select {
+		case <-sentinel.byRange:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("range fallback did not start")
+		}
+		select {
+		case <-sentinel.laterByRoot:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("blocked range fallback consumed the remaining by-root budget")
+		}
+		cancel()
+		require.ErrorIs(t, <-done, context.Canceled)
 	})
-
-	ctx, cancel := context.WithCancel(t.Context())
-	sentinel := &blockedRangeEnvelopeSentinel{
-		byRange:     make(chan struct{}),
-		laterByRoot: make(chan struct{}),
-	}
-	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
-	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
-	block.Block.Slot = 1
-	root, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-
-	done := make(chan error, 1)
-	go func() {
-		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{root}, NewEnvelopeBlockValidator(cfg, blockLookup([]*cltypes.SignedBeaconBlock{block})), nil, block)
-		done <- err
-	}()
-
-	select {
-	case <-sentinel.byRange:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("range fallback did not start")
-	}
-	select {
-	case <-sentinel.laterByRoot:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("blocked range fallback consumed the remaining by-root budget")
-	}
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 type envelopeResponseSentinel struct {
@@ -362,27 +371,29 @@ func TestRequestEnvelopesFranticallyRetriesMalformedResponseWithoutBan(t *testin
 		{name: "by-range", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := gloasFromGenesisConfig()
-			cfg.InitializeForkSchedule()
-			_, block, envelope := backfilledGloasEnvelopeFixture(t, cfg, 10, clparams.BuilderIndexSelfBuild, 0, backfillProposerKey)
-			clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
-			digest, err := clock.ComputeForkDigest(0)
-			require.NoError(t, err)
-			var wire bytes.Buffer
-			require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, envelope, digest[:]...))
-			sentinel := &retryEnvelopeSentinel{
-				envelopeResponseSentinel: envelopeResponseSentinel{response: wire.Bytes()},
-				malformedProtocol:        tc.protocol,
-			}
-			client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
-			roots := [][32]byte{envelope.Message.BeaconBlockRoot}
-			received, err := RequestEnvelopesFrantically(t.Context(), client, roots, NewEnvelopeBlockValidator(cfg, blockLookup([]*cltypes.SignedBeaconBlock{block})), nil, block)
-			require.NoError(t, err)
-			require.True(t, sentinel.sentMalformed)
-			require.Equal(t, 1, sentinel.validRequests)
-			require.Empty(t, sentinel.banned)
-			require.Len(t, received, 1)
-			require.NoError(t, ValidateDownloadedGloasEnvelope(cfg, block, received[envelope.Message.BeaconBlockRoot]))
+			synctest.Test(t, func(t *testing.T) {
+				cfg := gloasFromGenesisConfig()
+				cfg.InitializeForkSchedule()
+				_, block, envelope := backfilledGloasEnvelopeFixture(t, cfg, 10, clparams.BuilderIndexSelfBuild, 0, backfillProposerKey)
+				clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
+				digest, err := clock.ComputeForkDigest(0)
+				require.NoError(t, err)
+				var wire bytes.Buffer
+				require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, envelope, digest[:]...))
+				sentinel := &retryEnvelopeSentinel{
+					envelopeResponseSentinel: envelopeResponseSentinel{response: wire.Bytes()},
+					malformedProtocol:        tc.protocol,
+				}
+				client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
+				roots := [][32]byte{envelope.Message.BeaconBlockRoot}
+				received, err := RequestEnvelopesFrantically(t.Context(), client, roots, NewEnvelopeBlockValidator(cfg, blockLookup([]*cltypes.SignedBeaconBlock{block})), nil, block)
+				require.NoError(t, err)
+				require.True(t, sentinel.sentMalformed)
+				require.Equal(t, 1, sentinel.validRequests)
+				require.Empty(t, sentinel.banned)
+				require.Len(t, received, 1)
+				require.NoError(t, ValidateDownloadedGloasEnvelope(cfg, block, received[envelope.Message.BeaconBlockRoot]))
+			})
 		})
 	}
 }
@@ -452,65 +463,67 @@ func TestBackwardBeaconDownloaderCancelsBlockedEnvelopeBan(t *testing.T) {
 		{name: "by-range excess chunks caller cancellation", protocol: communication.ExecutionPayloadEnvelopesByRangeProtocolV1, excessChunks: true, cancelCaller: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			requestEnvelopeBatchExpiration = 100 * time.Millisecond
-			if tc.cancelCaller {
-				requestEnvelopeBatchExpiration = time.Minute
-			}
-			cfg := gloasFromGenesisConfig()
-			cfg.InitializeForkSchedule()
-			_, block, envelope := backfilledGloasEnvelopeFixture(t, cfg, 10, clparams.BuilderIndexSelfBuild, 0, backfillProposerKey)
-			envelope.Message.BuilderIndex++
-			require.ErrorContains(t, ValidateDownloadedGloasEnvelope(cfg, block, envelope), "builder index mismatch")
-			clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
-			digest, err := clock.ComputeForkDigest(0)
-			require.NoError(t, err)
-			var wire bytes.Buffer
-			require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, envelope, digest[:]...))
-			if tc.excessChunks {
-				require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, envelope, append([]byte{0}, digest[:]...)...))
-			}
-			sentinel := &blockedEnvelopeBanSentinel{
-				backfillEnvelopeSentinel: backfillEnvelopeSentinel{
-					invalidResponse: wire.Bytes(),
-					invalidProtocol: tc.protocol,
-				},
-				banStarted: make(chan struct{}),
-			}
-			clientCtx, cancelClient := context.WithCancel(t.Context())
-			fetchCtx, cancelFetch := context.WithCancel(clientCtx)
-			client := rpc.NewBeaconRpcP2P(clientCtx, sentinel, cfg, clock)
-			downloader := NewBackwardBeaconDownloader(clientCtx, client, nil, nil, nil, cfg)
-			t.Cleanup(downloader.reqInterval.Stop)
-			done := make(chan struct{})
-			var fetchErr error
-			go func() {
-				_, fetchErr = downloader.requestEnvelopes(fetchCtx, [][32]byte{envelope.Message.BeaconBlockRoot}, block)
-				close(done)
-			}()
-			defer func() {
-				cancelFetch()
-				cancelClient()
-				<-done
-			}()
-			select {
-			case <-sentinel.banStarted:
-			case <-time.After(time.Second):
-				t.Fatal("envelope fetch did not reach the ban RPC")
-			}
-			if tc.cancelCaller {
-				cancelFetch()
-			}
-			select {
-			case <-done:
-			case <-time.After(time.Second):
-				t.Fatal("envelope fetch remained blocked in the ban RPC")
-			}
-			if tc.cancelCaller {
-				require.ErrorIs(t, fetchErr, context.Canceled)
-			} else {
-				require.NoError(t, fetchErr)
-			}
-			require.NoError(t, clientCtx.Err())
+			synctest.Test(t, func(t *testing.T) {
+				requestEnvelopeBatchExpiration = 100 * time.Millisecond
+				if tc.cancelCaller {
+					requestEnvelopeBatchExpiration = time.Minute
+				}
+				cfg := gloasFromGenesisConfig()
+				cfg.InitializeForkSchedule()
+				_, block, envelope := backfilledGloasEnvelopeFixture(t, cfg, 10, clparams.BuilderIndexSelfBuild, 0, backfillProposerKey)
+				envelope.Message.BuilderIndex++
+				require.ErrorContains(t, ValidateDownloadedGloasEnvelope(cfg, block, envelope), "builder index mismatch")
+				clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
+				digest, err := clock.ComputeForkDigest(0)
+				require.NoError(t, err)
+				var wire bytes.Buffer
+				require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, envelope, digest[:]...))
+				if tc.excessChunks {
+					require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, envelope, append([]byte{0}, digest[:]...)...))
+				}
+				sentinel := &blockedEnvelopeBanSentinel{
+					backfillEnvelopeSentinel: backfillEnvelopeSentinel{
+						invalidResponse: wire.Bytes(),
+						invalidProtocol: tc.protocol,
+					},
+					banStarted: make(chan struct{}),
+				}
+				clientCtx, cancelClient := context.WithCancel(t.Context())
+				fetchCtx, cancelFetch := context.WithCancel(clientCtx)
+				client := rpc.NewBeaconRpcP2P(clientCtx, sentinel, cfg, clock)
+				downloader := NewBackwardBeaconDownloader(clientCtx, client, nil, nil, nil, cfg)
+				t.Cleanup(downloader.reqInterval.Stop)
+				done := make(chan struct{})
+				var fetchErr error
+				go func() {
+					_, fetchErr = downloader.requestEnvelopes(fetchCtx, [][32]byte{envelope.Message.BeaconBlockRoot}, block)
+					close(done)
+				}()
+				defer func() {
+					cancelFetch()
+					cancelClient()
+					<-done
+				}()
+				select {
+				case <-sentinel.banStarted:
+				case <-time.After(time.Second):
+					t.Fatal("envelope fetch did not reach the ban RPC")
+				}
+				if tc.cancelCaller {
+					cancelFetch()
+				}
+				select {
+				case <-done:
+				case <-time.After(time.Second):
+					t.Fatal("envelope fetch remained blocked in the ban RPC")
+				}
+				if tc.cancelCaller {
+					require.ErrorIs(t, fetchErr, context.Canceled)
+				} else {
+					require.NoError(t, fetchErr)
+				}
+				require.NoError(t, clientCtx.Err())
+			})
 		})
 	}
 }
@@ -549,92 +562,94 @@ func TestBackwardBeaconDownloaderBansInvalidEnvelopePeerAndRecovers(t *testing.T
 		{name: "single signature", protocol: communication.ExecutionPayloadEnvelopesByRootProtocolV1, invalidKind: "signature", single: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := gloasFromGenesisConfig()
-			cfg.MaxBuilderDepositRequestsPerPayload = 1
-			cfg.InitializeForkSchedule()
-			clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
-			digest, err := clock.ComputeForkDigest(0)
-			require.NoError(t, err)
-			anchorState, block, valid := backfilledGloasEnvelopeFixture(t, cfg, 10, clparams.BuilderIndexSelfBuild, 0, backfillProposerKey)
-			validBytes, err := valid.EncodeSSZ(nil)
-			require.NoError(t, err)
-			invalid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
-			require.NoError(t, invalid.DecodeSSZ(validBytes, int(clparams.GloasVersion)))
-			switch tc.invalidKind {
-			case "signature":
-				signBackfilledGloasEnvelope(t, cfg, anchorState, invalid, backfillOtherKey)
-				require.NoError(t, ValidateDownloadedGloasEnvelope(cfg, block, invalid))
-				require.ErrorContains(t, validateBackfilledGloasEnvelopeSignature(anchorState, block, invalid), "invalid signature")
-			case "config":
-				invalid.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
-				invalid.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
-				require.ErrorContains(t, invalid.ValidateForConfig(cfg), "builder deposits")
-			case "":
-				invalid.Message.BuilderIndex++
-				require.ErrorContains(t, ValidateDownloadedGloasEnvelope(cfg, block, invalid), "builder index mismatch")
-			}
-			if tc.invalidKind != "config" {
-				require.NoError(t, invalid.ValidateForConfig(cfg))
-			}
-
-			var validWire, invalidWire bytes.Buffer
-			require.NoError(t, ssz_snappy.EncodeAndWrite(&validWire, valid, digest[:]...))
-			switch tc.invalidKind {
-			case "ssz":
-				require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, rawEnvelopeSSZ{0}, digest[:]...))
-			case "framing":
-				_, err = invalidWire.Write(digest[:1])
+			synctest.Test(t, func(t *testing.T) {
+				cfg := gloasFromGenesisConfig()
+				cfg.MaxBuilderDepositRequestsPerPayload = 1
+				cfg.InitializeForkSchedule()
+				clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
+				digest, err := clock.ComputeForkDigest(0)
 				require.NoError(t, err)
-			case "fork":
-				require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, invalid, 0, 0, 0, 0))
-			case "excess":
-				require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, valid, digest[:]...))
-				require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, valid, append([]byte{0}, digest[:]...)...))
-			default:
-				require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, invalid, digest[:]...))
-			}
-			sentinel := &backfillEnvelopeSentinel{
-				envelopeResponseSentinel: envelopeResponseSentinel{response: validWire.Bytes()},
-				invalidResponse:          invalidWire.Bytes(),
-				invalidProtocol:          tc.protocol,
-			}
-			client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
-			downloader := NewBackwardBeaconDownloader(t.Context(), client, nil, nil, nil, cfg)
-			t.Cleanup(downloader.reqInterval.Stop)
-			downloader.SetGloasEnvelopeSignatureValidator(anchorState)
-			validate := downloader.validateGloasEnvelope
-			validations := 0
-			downloader.validateGloasEnvelope = func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
-				err := validate(block, envelope)
-				if err == nil {
-					validations++
+				anchorState, block, valid := backfilledGloasEnvelopeFixture(t, cfg, 10, clparams.BuilderIndexSelfBuild, 0, backfillProposerKey)
+				validBytes, err := valid.EncodeSSZ(nil)
+				require.NoError(t, err)
+				invalid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+				require.NoError(t, invalid.DecodeSSZ(validBytes, int(clparams.GloasVersion)))
+				switch tc.invalidKind {
+				case "signature":
+					signBackfilledGloasEnvelope(t, cfg, anchorState, invalid, backfillOtherKey)
+					require.NoError(t, ValidateDownloadedGloasEnvelope(cfg, block, invalid))
+					require.ErrorContains(t, validateBackfilledGloasEnvelopeSignature(anchorState, block, invalid), "invalid signature")
+				case "config":
+					invalid.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+					invalid.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+					require.ErrorContains(t, invalid.ValidateForConfig(cfg), "builder deposits")
+				case "":
+					invalid.Message.BuilderIndex++
+					require.ErrorContains(t, ValidateDownloadedGloasEnvelope(cfg, block, invalid), "builder index mismatch")
 				}
-				return err
-			}
-			downloader.SetExpectedRoot(valid.Message.BeaconBlockRoot)
-			downloader.SetSlotToDownload(block.Block.Slot)
-			child := makeGloasBlock(11, hash(2), valid.Message.Payload.BlockHash)
-			linkBeaconBlocks(t, block, child)
-			downloader.prevBatchTopBlock = child
-			downloader.SetOnNewBlock(func(got *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
-				require.Same(t, block, got)
-				require.NoError(t, validate(got, envelope))
-				return true, nil
-			})
+				if tc.invalidKind != "config" {
+					require.NoError(t, invalid.ValidateForConfig(cfg))
+				}
 
-			if tc.single {
-				envelope, err := downloader.fetchSingleEnvelopeP2P(t.Context(), block)
-				require.NoError(t, err)
-				require.NoError(t, validate(block, envelope))
-			} else {
-				require.NoError(t, downloader.processResponses(t.Context(), []*cltypes.SignedBeaconBlock{block}))
-				require.True(t, downloader.Finished())
-				require.Equal(t, uint64(1), downloader.Processed())
-				require.Equal(t, block.Block.ParentRoot, downloader.expectedRoot)
-			}
-			require.Equal(t, []string{"invalid-envelope-peer"}, sentinel.banned)
-			require.Equal(t, 1, validations)
-			require.Zero(t, downloader.consecutiveEnvelopeFailures)
+				var validWire, invalidWire bytes.Buffer
+				require.NoError(t, ssz_snappy.EncodeAndWrite(&validWire, valid, digest[:]...))
+				switch tc.invalidKind {
+				case "ssz":
+					require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, rawEnvelopeSSZ{0}, digest[:]...))
+				case "framing":
+					_, err = invalidWire.Write(digest[:1])
+					require.NoError(t, err)
+				case "fork":
+					require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, invalid, 0, 0, 0, 0))
+				case "excess":
+					require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, valid, digest[:]...))
+					require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, valid, append([]byte{0}, digest[:]...)...))
+				default:
+					require.NoError(t, ssz_snappy.EncodeAndWrite(&invalidWire, invalid, digest[:]...))
+				}
+				sentinel := &backfillEnvelopeSentinel{
+					envelopeResponseSentinel: envelopeResponseSentinel{response: validWire.Bytes()},
+					invalidResponse:          invalidWire.Bytes(),
+					invalidProtocol:          tc.protocol,
+				}
+				client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
+				downloader := NewBackwardBeaconDownloader(t.Context(), client, nil, nil, nil, cfg)
+				t.Cleanup(downloader.reqInterval.Stop)
+				downloader.SetGloasEnvelopeSignatureValidator(anchorState)
+				validate := downloader.validateGloasEnvelope
+				validations := 0
+				downloader.validateGloasEnvelope = func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+					err := validate(block, envelope)
+					if err == nil {
+						validations++
+					}
+					return err
+				}
+				downloader.SetExpectedRoot(valid.Message.BeaconBlockRoot)
+				downloader.SetSlotToDownload(block.Block.Slot)
+				child := makeGloasBlock(11, hash(2), valid.Message.Payload.BlockHash)
+				linkBeaconBlocks(t, block, child)
+				downloader.prevBatchTopBlock = child
+				downloader.SetOnNewBlock(func(got *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+					require.Same(t, block, got)
+					require.NoError(t, validate(got, envelope))
+					return true, nil
+				})
+
+				if tc.single {
+					envelope, err := downloader.fetchSingleEnvelopeP2P(t.Context(), block)
+					require.NoError(t, err)
+					require.NoError(t, validate(block, envelope))
+				} else {
+					require.NoError(t, downloader.processResponses(t.Context(), []*cltypes.SignedBeaconBlock{block}))
+					require.True(t, downloader.Finished())
+					require.Equal(t, uint64(1), downloader.Processed())
+					require.Equal(t, block.Block.ParentRoot, downloader.expectedRoot)
+				}
+				require.Equal(t, []string{"invalid-envelope-peer"}, sentinel.banned)
+				require.Equal(t, 1, validations)
+				require.Zero(t, downloader.consecutiveEnvelopeFailures)
+			})
 		})
 	}
 }
