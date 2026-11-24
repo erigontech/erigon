@@ -200,17 +200,18 @@ func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *
 	}
 
 	remainingAuthorizations := maxRemoteAuthorizations
-	for i := 0; pos < len(payload); i++ {
-		txnSlots.Resize(uint(i + 1))
-		txnSlots.Txns[i] = &TxnSlot{}
-		pos, err = ctx.parseTransaction(payload, pos, txnSlots.Txns[i], txnSlots.Senders.At(i),
+	accepted := 0
+	for pos < len(payload) {
+		txnSlots.Resize(uint(accepted + 1))
+		txnSlots.Txns[accepted] = &TxnSlot{}
+		pos, err = ctx.parseTransaction(payload, pos, txnSlots.Txns[accepted], txnSlots.Senders.At(accepted),
 			true /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash, &remainingAuthorizations)
-		if err != nil {
-			if errors.Is(err, ErrRejected) {
-				txnSlots.Resize(uint(i))
-				i--
-				continue
-			}
+		switch {
+		case err == nil:
+			accepted++
+		case errors.Is(err, ErrRejected):
+			txnSlots.Resize(uint(accepted))
+		default:
 			return 0, err
 		}
 	}

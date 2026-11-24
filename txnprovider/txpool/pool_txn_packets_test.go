@@ -435,27 +435,45 @@ func TestTransactionPacketCountLimit(t *testing.T) {
 }
 
 func TestTransactionPacketAuthorizationLimit(t *testing.T) {
-	const limit = 8_647
-	first := remoteSetCodeTxn(t, 0, limit/2).Rlp
-	rest := remoteSetCodeTxn(t, 1, limit-limit/2).Rlp
-	one := remoteSetCodeTxn(t, 2, 1).Rlp
-	over := remoteSetCodeTxn(t, 3, limit-limit/2+1).Rlp
-	trailingByte := append(bytes.Clone(one), 0)
+	const (
+		limit     = 8_647
+		firstHalf = limit / 2
+		remaining = limit - firstHalf
+	)
+	first := remoteSetCodeTxn(t, 0, firstHalf).Rlp
+	fillsRemainder := remoteSetCodeTxn(t, 1, remaining).Rlp
+	oneAuth := remoteSetCodeTxn(t, 2, 1).Rlp
+	exceedsRemainder := remoteSetCodeTxn(t, 3, remaining+1).Rlp
+	malformed := append(bytes.Clone(oneAuth), 0)
 	ordinary := tpEncodeTests[1].txns[0]
 	outbound := [][]byte{remoteSetCodeTxn(t, 0, 3_700).Rlp, remoteSetCodeTxn(t, 1, 4_800).Rlp}
 	require.Less(t, len(outbound[0]), p2pTxPacketLimit)
 	require.NoError(t, ValidateSerializedTxn(outbound[1]))
+
+	tests := []struct {
+		name string
+		txns [][]byte
+		want [][]byte
+	}{
+		{name: "outbound batch with a large final transaction", txns: outbound, want: outbound},
+		{
+			name: "ordinary transaction after budget is spent",
+			txns: [][]byte{first, fillsRemainder, oneAuth, ordinary},
+			want: [][]byte{first, fillsRemainder, ordinary},
+		},
+		{
+			name: "over-budget transaction is skipped before decoding",
+			txns: [][]byte{first, fillsRemainder, malformed, ordinary},
+			want: [][]byte{first, fillsRemainder, ordinary},
+		},
+		{
+			name: "later transaction fits remaining budget",
+			txns: [][]byte{first, exceedsRemainder, fillsRemainder},
+			want: [][]byte{first, fillsRemainder},
+		},
+	}
 	for _, pooled := range []bool{false, true} {
-		for _, tt := range []struct {
-			name string
-			txns [][]byte
-			want [][]byte
-		}{
-			{"outbound batch with a large final transaction", outbound, outbound},
-			{"ordinary after one over", [][]byte{first, rest, one, ordinary}, [][]byte{first, rest, ordinary}},
-			{"skip before decoding", [][]byte{first, rest, trailingByte, ordinary}, [][]byte{first, rest, ordinary}},
-			{"remaining budget", [][]byte{first, over, rest}, [][]byte{first, rest}},
-		} {
+		for _, tt := range tests {
 			t.Run(fmt.Sprintf("pooled=%t/%s", pooled, tt.name), func(t *testing.T) {
 				ctx := NewTxnParseContext(*uint256.NewInt(1))
 				ctx.WithSender(false)
