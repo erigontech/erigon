@@ -509,7 +509,11 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	var cold coldState
 	defer func() {
 		blockNum, _ := ctx.Value(balBlockNumKey{}).(uint64)
-		log.Debug("[warmBAL] prefetch stats", "block", blockNum, "elapsed", time.Since(started), "cancelled", ctx.Err() != nil,
+		logFn := log.Debug
+		if dbg.WarmBALStatsInfo {
+			logFn = log.Info
+		}
+		logFn("[warmBAL] prefetch stats", "block", blockNum, "elapsed", time.Since(started), "cancelled", ctx.Err() != nil,
 			"accounts", len(bal), "cold", fmt.Sprintf("%+v", cold),
 			"trie", time.Duration(trieTime.Load()), "sample", time.Duration(sampleTime.Load()),
 			"state", time.Duration(stateTime.Load()), "perKey", time.Duration(perKeyTime.Load()),

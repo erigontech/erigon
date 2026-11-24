@@ -14,6 +14,8 @@ type PrefetchStats struct {
 	WaveHist                                                      [65]atomic.Int64 // calls by wave count
 }
 
+var WarmBALStatsInfo = EnvBool("WARMBAL_STATS", false)
+
 type prefetchStatsKey struct{}
 
 func WithPrefetchStats(ctx context.Context, s *PrefetchStats) context.Context {
