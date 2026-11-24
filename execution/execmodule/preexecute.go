@@ -20,13 +20,12 @@ import (
 // (kv.HeaderCanonical) and the txNum index (kv.MaxTxNum) — from a predecessor frontier block's overlay (src)
 // into a successor's overlay (dst), so the successor continues ONE chain from the last committed hash. These
 // entries live only in overlay mem for an uncommitted frontier block (never the committed DB), and raw
-// tables do not chain through SetParent, so they must be copied. src's own backing tx is per-round and
-// already rolled back, so give it a live one (roTx) for the read; only raw index/hash tables are touched
-// (no commitment domain), so this does not disturb src's commitment trie.
+// tables do not chain through SetParent, so they must be copied. src is read through a view on roTx: other
+// readers rebind src itself, and a rebind under this read would leave it on their transaction.
 func copyFrontierChainTables(src, dst *membatchwithdb.MemoryMutation, roTx kv.TemporalTx) error {
-	src.UpdateTxn(roTx)
+	view := src.NewReadView(roTx)
 	for _, table := range []string{kv.HeaderCanonical, kv.MaxTxNum} {
-		c, err := src.Cursor(table)
+		c, err := view.Cursor(table)
 		if err != nil {
 			return err
 		}
@@ -46,7 +45,7 @@ func copyFrontierChainTables(src, dst *membatchwithdb.MemoryMutation, roTx kv.Te
 	// allocated those in its own overlay and has not committed them: seeded from the DB alone, this overlay would hand
 	// the successor the parent's ids and its body would overwrite the parent's transactions. Only ever moved forward —
 	// a parent that has since committed leaves the DB's sequence ahead of it.
-	parentSeq, err := src.ReadSequence(kv.EthTx)
+	parentSeq, err := view.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err
 	}

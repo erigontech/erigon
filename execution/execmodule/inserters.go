@@ -133,10 +133,8 @@ func (e *ExecModule) writePreExecBlock(tx kv.RwTx, roTx kv.TemporalTx, block *ty
 	return nil
 }
 
-func (e *ExecModule) carryParentFromGeneration(tx kv.RwTx, gen *membatchwithdb.MemoryMutation, roTx kv.TemporalTx, parentHash common.Hash, parentNumber uint64) error {
-	e.genReadMu.Lock()
-	defer e.genReadMu.Unlock()
-	gen.UpdateTxn(roTx)
+func (e *ExecModule) carryParentFromGeneration(tx kv.RwTx, generation *membatchwithdb.MemoryMutation, roTx kv.TemporalTx, parentHash common.Hash, parentNumber uint64) error {
+	gen := generation.NewReadView(roTx)
 	parent := rawdb.ReadHeader(gen, parentHash, parentNumber)
 	if parent == nil {
 		return fmt.Errorf("parent header %d %x not in its generation", parentNumber, parentHash)
