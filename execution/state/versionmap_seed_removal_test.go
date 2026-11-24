@@ -1236,8 +1236,8 @@ func flushCreateInTx3(t *testing.T, base StateReader, vm *VersionMap, x accounts
 	require.NoError(t, creator.CreateAccount(x, true))
 	require.NoError(t, creator.SetNonce(x, 1, tracing.NonceChangeUnspecified))
 	require.NoError(t, creator.SetBalance(x, uint256.Int{}, tracing.BalanceChangeUnspecified))
-	require.NoError(t, creator.MakeWriteSet(&chain.Rules{IsAmsterdam: true}, NewNoopWriter()))
-	create := creator.VersionedWrites()
+	create, err := creator.FinalizedWrites(&chain.Rules{IsAmsterdam: true})
+	require.NoError(t, err)
 	vm.FlushVersionedWrites(create, false)
 	return create
 }
