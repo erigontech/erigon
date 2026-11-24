@@ -1912,7 +1912,7 @@ func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint3
 	txIncarnation := task.Version().Incarnation
 
 	txTrace := dbg.TraceTransactionIO &&
-		(dbg.TraceTx(blockNum, txIndex) || dbg.TraceAccount(result.Coinbase.Value()) || dbg.TraceAccount(result.ExecutionResult.BurntContractAddress.Value()))
+		(dbg.TraceTx(blockNum, txIndex) || traceAddr(result.Coinbase) || traceAddr(result.ExecutionResult.BurntContractAddress))
 
 	if txTrace {
 		tracePrefix := fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation)
@@ -3735,3 +3735,6 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 
 	dispatch()
 }
+
+// traceAddr keeps NilAddress (no burn contract) apart from the zero address, which TRACE_ACCOUNTS may name.
+func traceAddr(a accounts.Address) bool { return !a.IsNil() && dbg.TraceAccount(a.Value()) }

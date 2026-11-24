@@ -72,8 +72,9 @@ func (c *canonTable[T]) intern(v T) *T {
 		return p
 	}
 	p, loaded := c.cur.Load().LoadOrCompute(v, func() (*T, bool) { p := new(T); *p = v; return p, false })
+	full := !loaded && c.n.Add(1) >= c.limit // counted under the read lock, so swap cannot reset n between the insert and its count
 	c.mu.RUnlock()
-	if !loaded && c.n.Add(1) >= c.limit {
+	if full {
 		c.rotate()
 	}
 	return p
