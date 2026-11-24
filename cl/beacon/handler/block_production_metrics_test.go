@@ -24,7 +24,14 @@ func summaryCount(t *testing.T, s metrics.Summary) uint64 {
 	return m.GetSummary().GetSampleCount()
 }
 
-func produceCapellaBody(t *testing.T, prepared bool, getErr error) error {
+func summarySum(t *testing.T, s metrics.Summary) float64 {
+	t.Helper()
+	m := &dto.Metric{}
+	require.NoError(t, s.Write(m))
+	return m.GetSummary().GetSampleSum()
+}
+
+func produceCapellaBody(t *testing.T, prepared bool, getErr error) (sinceSlotBefore, sinceSlotAfter float64, err error) {
 	t.Helper()
 	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
 	payload := cltypes.NewEth1BlockFromExecutionHeader(postState.LatestExecutionPayloadHeader(), clparams.CapellaVersion, h.beaconChainCfg)
@@ -41,28 +48,38 @@ func produceCapellaBody(t *testing.T, prepared bool, getErr error) error {
 	if prepared {
 		h.preparedPayload.set(baseBlock.Slot+1, []byte{1}, baseBlockRoot, time.Now().Add(-time.Second))
 	}
+	slotStart := h.ethClock.GetSlotTime(baseBlock.Slot + 1)
+	sinceSlotBefore = time.Since(slotStart).Seconds()
 	_, _, err = h.produceBeaconBody(t.Context(), baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1, common.Bytes96{0xc0}, common.Hash{})
-	return err
+	return sinceSlotBefore, time.Since(slotStart).Seconds(), err
+}
+
+func requireCollectedOnce(t *testing.T, prepared bool) {
+	t.Helper()
+	collected, other := payloadCollectedSeconds[prepared], payloadCollectedSeconds[!prepared]
+	count, sum, otherCount := summaryCount(t, collected), summarySum(t, collected), summaryCount(t, other)
+	sinceSlotBefore, sinceSlotAfter, err := produceCapellaBody(t, prepared, nil)
+	require.NoError(t, err)
+	require.Equal(t, count+1, summaryCount(t, collected))
+	require.Equal(t, otherCount, summaryCount(t, other))
+	observed := summarySum(t, collected) - sum
+	require.GreaterOrEqual(t, observed, sinceSlotBefore, "the collection time is the seconds since the slot start")
+	require.LessOrEqual(t, observed, sinceSlotAfter, "the collection time is the seconds since the slot start")
 }
 
 func TestProduceBeaconBodyRecordsWhenTheUnpreparedPayloadWasCollected(t *testing.T) {
-	unprepared, prepared := summaryCount(t, payloadCollectedSeconds[false]), summaryCount(t, payloadCollectedSeconds[true])
-	require.NoError(t, produceCapellaBody(t, false, nil))
-	require.Equal(t, unprepared+1, summaryCount(t, payloadCollectedSeconds[false]))
-	require.Equal(t, prepared, summaryCount(t, payloadCollectedSeconds[true]))
+	requireCollectedOnce(t, false)
 }
 
 func TestProduceBeaconBodyRecordsWhenThePreparedPayloadWasCollected(t *testing.T) {
-	unprepared, prepared := summaryCount(t, payloadCollectedSeconds[false]), summaryCount(t, payloadCollectedSeconds[true])
-	require.NoError(t, produceCapellaBody(t, true, nil))
-	require.Equal(t, prepared+1, summaryCount(t, payloadCollectedSeconds[true]))
-	require.Equal(t, unprepared, summaryCount(t, payloadCollectedSeconds[false]))
+	requireCollectedOnce(t, true)
 }
 
 func TestProduceBeaconBodyCountsAFailedPayloadPollByReason(t *testing.T) {
 	busy := payloadPollFailures.WithLabelValues("busy")
 	before, collected := busy.GetValue(), summaryCount(t, payloadCollectedSeconds[false])
-	require.Error(t, produceCapellaBody(t, false, chainreader.ErrExecutionBusy))
+	_, _, err := produceCapellaBody(t, false, chainreader.ErrExecutionBusy)
+	require.Error(t, err)
 	require.Greater(t, busy.GetValue(), before)
 	require.Equal(t, collected, summaryCount(t, payloadCollectedSeconds[false]), "a failed production records no collection time")
 }
