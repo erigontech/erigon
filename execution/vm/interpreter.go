@@ -67,7 +67,8 @@ type Config struct {
 }
 
 // CallOverride replaces the outcome of a CALL outside a static context, at any
-// depth including the top frame. ok == false runs the call unchanged.
+// depth including the top frame, once the call passed its depth and balance
+// checks. ok == false runs the call unchanged.
 // An overridden call runs no code, moves no value and returns all of its gas;
 // err is nil or ErrExecutionReverted. Writes made through
 // evm.IntraBlockState() are not reverted by ErrExecutionReverted.

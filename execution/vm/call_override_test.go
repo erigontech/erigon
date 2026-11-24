@@ -208,6 +208,26 @@ func TestCallOverrideDepth(t *testing.T) {
 	require.Equal(t, ga, gb)
 }
 
+// TestCallOverrideAfterCallAdmission: a CALL the caller cannot fund fails as
+// it does without the override, which is not consulted.
+func TestCallOverrideAfterCallAdmission(t *testing.T) {
+	t.Parallel()
+	// CALL 0x2000 value 11 from a caller holding 10; slot0 = success.
+	ibs := ovState(t, append(callTarget(CALL, 0x2000, 11), byte(PUSH0), byte(SSTORE), byte(STOP)))
+	asked := 0
+	hook := func(_ *EVM, _ int, _, addr accounts.Address, _ []byte, _ uint256.Int) ([]byte, bool, error) {
+		if addr == ovTarget {
+			asked++
+			return []byte{1}, true, nil
+		}
+		return nil, false, nil
+	}
+	_, err := ovRun(t, ibs, Config{CallOverride: hook}, ovCaller)
+	require.NoError(t, err)
+	require.Zero(t, asked, "not consulted")
+	require.EqualValues(t, 0, ovGet(t, ibs, ovCaller, 0), "the CALL fails")
+}
+
 func TestCallOverrideStateVisibleToCaller(t *testing.T) {
 	t.Parallel()
 	var calls int

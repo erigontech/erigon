@@ -305,15 +305,6 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 	// BAL: record address access even if call fails due to gas/call depth/insufficient balance
 	evm.intraBlockState.MarkAddressAccess(addr, false)
 
-	if hook := evm.config.CallOverride; hook != nil && !evm.readOnly {
-		if out, ok, herr := hook(evm, depth, caller, addr, input, value); ok {
-			if herr != nil && herr != ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
-				out = nil
-			}
-			return out, gasRemaining, mdgas.MdGasUsage{}, herr
-		}
-	}
-
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, gasRemaining, mdgas.MdGasUsage{}, nil
 	}
@@ -332,6 +323,16 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 		}
 		if !canTransfer {
 			return nil, gasRemaining, mdgas.MdGasUsage{}, ErrInsufficientBalance
+		}
+	}
+
+	// The override replaces only a call that passed the checks above.
+	if hook := evm.config.CallOverride; hook != nil && !evm.readOnly {
+		if out, ok, herr := hook(evm, depth, caller, addr, input, value); ok {
+			if herr != nil && herr != ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
+				out = nil
+			}
+			return out, gasRemaining, mdgas.MdGasUsage{}, herr
 		}
 	}
 
