@@ -353,7 +353,7 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 }
 
 // serverAcksFilters reports whether the server behind the stream just opened acks filter
-// requests (EthBackendAPIVersion 5.1+). The startup version check does not cover a stream
+// requests (EthBackendAPIVersion 5.0.1+). The startup version check does not cover a stream
 // that reconnects to a restarted erigon of another version.
 func (back *RemoteBackend) serverAcksFilters(ctx context.Context) bool {
 	v, err := back.remoteEthBackend.Version(ctx, &emptypb.Empty{})
@@ -361,7 +361,7 @@ func (back *RemoteBackend) serverAcksFilters(ctx context.Context) bool {
 		back.log.Warn("rpcdaemon: filter updates will not wait for the server", "err", err)
 		return false
 	}
-	return v.Major > 5 || v.Major == 5 && v.Minor >= 1
+	return v.Major > 5 || v.Major == 5 && (v.Minor > 0 || v.Patch >= 1)
 }
 
 // filterAckTimeout bounds how long a filter update waits for the server's ack.

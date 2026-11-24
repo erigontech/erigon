@@ -28,6 +28,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/privateapi"
@@ -143,6 +144,14 @@ func TestFilterUpdateIgnoresLateAckOfTimedOutUpdate(t *testing.T) {
 		srv.release <- struct{}{} // the late ack of the timed-out update
 		requireSendWaitsForAck(t, srv, func() error { return send(&remoteproto.LogsFilterRequest{AllAddresses: true}) })
 	})
+}
+
+// Acks are opt-in on the wire, so an erigon and an rpcdaemon from either side of the change still connect.
+func TestFilterAckKeepsTheBackendVersionCompatible(t *testing.T) {
+	current := gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion)
+	before := &typesproto.VersionReply{Major: 5, Minor: 0, Patch: 0}
+	require.True(t, gointerfaces.EnsureVersion(current, before), "a new rpcdaemon must accept an erigon without acks")
+	require.True(t, gointerfaces.EnsureVersion(gointerfaces.VersionFromProto(before), privateapi.EthBackendAPIVersion), "an old rpcdaemon must accept a new erigon")
 }
 
 // A stream can reconnect to an erigon that predates acks; its updates must not wait.

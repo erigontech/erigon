@@ -65,8 +65,8 @@ import (
 // 4.1.0 - add FrozenBlocks function
 // 4.2.0 - add BlockBody function
 // 5.0.0 - replace AAValidation with FrameValidation
-// 5.1.0 - ack logs and receipts filter requests that set ack
-var EthBackendAPIVersion = &typesproto.VersionReply{Major: 5, Minor: 1, Patch: 0}
+// 5.0.1 - ack logs and receipts filter requests that set ack (opt-in, so a patch bump)
+var EthBackendAPIVersion = &typesproto.VersionReply{Major: 5, Minor: 0, Patch: 1}
 
 type EthBackendServer struct {
 	remoteproto.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
