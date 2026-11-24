@@ -379,22 +379,22 @@ func (extr *EngineXTestRunner) getOrCreateTester(test EngineXTestDefinition) (En
 		_ = entry.close()
 		return existing.tester, nil
 	}
-	group[listKey] = &entry
+	group[listKey] = entry
 	extr.mu.Unlock()
 	return entry.tester, nil
 }
 
 // createTester builds a fresh EngineApiTester for the test's configuration. The
 // caller is responsible for caching/publishing the result. No locks are taken.
-func (extr *EngineXTestRunner) createTester(test EngineXTestDefinition) (testerEntry, error) {
+func (extr *EngineXTestRunner) createTester(test EngineXTestDefinition) (*testerEntry, error) {
 	fork, preAllocHash := test.Fork, test.PreAllocHash
 	forkConfig, err := test.Config.ChainConfig(fork.String())
 	if err != nil {
-		return testerEntry{}, err
+		return nil, err
 	}
 	alloc, ok := extr.preAllocs[preAllocHash]
 	if !ok {
-		return testerEntry{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
+		return nil, fmt.Errorf("pre_alloc %s not found", preAllocHash)
 	}
 	var genesis types.Genesis
 	if alloc.Environment.GasLimit != 0 {
@@ -432,7 +432,7 @@ func (extr *EngineXTestRunner) createTester(test EngineXTestDefinition) (testerE
 	}
 	dataDir, err := os.MkdirTemp("", "enginex-tester-*")
 	if err != nil {
-		return testerEntry{}, fmt.Errorf("create temp data dir: %w", err)
+		return nil, fmt.Errorf("create temp data dir: %w", err)
 	}
 	engineApiClientTimeout := 10 * time.Minute
 	tester, err := InitialiseEngineApiTester(extr.ctx, EngineApiTesterInitArgs{
@@ -455,9 +455,9 @@ func (extr *EngineXTestRunner) createTester(test EngineXTestDefinition) (testerE
 		// returned, so its own cleanups have already run inside
 		// InitialiseEngineApiTester's rollback path.
 		_ = dir.RemoveAll(dataDir)
-		return testerEntry{}, fmt.Errorf("initialise tester for fork=%s preAlloc=%s: %w", fork, preAllocHash, err)
+		return nil, fmt.Errorf("initialise tester for fork=%s preAlloc=%s: %w", fork, preAllocHash, err)
 	}
-	return testerEntry{tester: tester, dataDir: dataDir}, nil
+	return &testerEntry{tester: tester, dataDir: dataDir}, nil
 }
 
 func processNewPayload(ctx context.Context, tester EngineApiTester, payload EngineXTestNewPayload, testName string, hook RequestProfileHook) error {

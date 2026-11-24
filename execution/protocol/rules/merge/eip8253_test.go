@@ -31,18 +31,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-type nonceBumpChainReader struct {
-	readerMock
-	parent *types.Header
-}
-
-func (r nonceBumpChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	if r.parent != nil && r.parent.Hash() == hash && r.parent.Number.Uint64() == number {
-		return r.parent
-	}
-	return nil
-}
-
 func TestEIP8253BeforeSystemCalls(t *testing.T) {
 	t.Run("genesis parent", func(t *testing.T) { testEIP8253BeforeSystemCalls(t, 0) })
 	t.Run("later parent", func(t *testing.T) { testEIP8253BeforeSystemCalls(t, 1) })
@@ -71,7 +59,7 @@ func testEIP8253BeforeSystemCalls(t *testing.T, parentNumber uint64) {
 		require.EqualValues(t, 1, nonce, "the nonce bump precedes system calls")
 		return nil, nil
 	}
-	reader := nonceBumpChainReader{readerMock{config: config}, parent}
+	reader := readerMock{config: config, parent: parent}
 	require.NoError(t, New(nil).Initialize(config, reader, header, ibs, syscall, log.New(), nil))
 	require.True(t, called)
 	balance, err := ibs.GetBalance(target)

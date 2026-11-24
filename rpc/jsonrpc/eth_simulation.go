@@ -1185,8 +1185,8 @@ type simulatedChainReader struct {
 }
 
 func (s *simulatedChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	if s.parent.Number.Uint64() == number && s.parent.Hash() == hash {
-		return s.parent
+	if parent := matchingParent(s.parent, hash, number); parent != nil {
+		return parent
 	}
 	return s.Reader.GetHeader(hash, number)
 }
