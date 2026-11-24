@@ -132,6 +132,7 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 				if err != nil {
 					return err
 				}
+				draft.ctx = ctx
 				// The posting carries the window's blocks before any effect; the
 				// bundle's block may have 1/1024 less gas than the anchor.
 				block := anchor.GasLimit - anchor.GasLimit/1024

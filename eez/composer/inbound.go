@@ -18,6 +18,7 @@ package composer
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 
@@ -78,9 +79,9 @@ func (in *Deliveries) Dispatch(c *Call) ([]byte, error) {
 	case c.Target == in.ctx.EEZL2:
 		return nil, Poison(errors.New("a call to EEZL2 is not deliverable"))
 	}
-	// refuse marks err final unless a state read failed.
+	// refuse marks err final unless a state read failed or the run was cut.
 	refuse := func(err error) error {
-		if errors.Is(err, ErrStateRead) {
+		if errors.Is(err, ErrStateRead) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
 		}
 		return Poison(err)

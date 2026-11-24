@@ -18,6 +18,7 @@ package composer
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"slices"
 	"testing"
@@ -334,4 +335,22 @@ func TestProbed(t *testing.T) {
 		_, err := probed(c)
 		require.Error(t, err, name)
 	}
+}
+
+// TestDeliveriesStopOnCancellation: a delivery whose draft's context has
+// ended fails with the context's error, never as poison.
+func TestDeliveriesStopOnCancellation(t *testing.T) {
+	w := loadSyncWindow(t)
+	_, call, _ := recordedDelivery(t, w)
+	d, err := NewDraft(w.config, w.engine, w.sync.Header(), w.pre)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	d.ctx = ctx
+	ds, err := NewDeliveries(w.ctx(), d)
+	require.NoError(t, err)
+	_, err = ds.Dispatch(call)
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, IsPoison(err))
+	require.Empty(t, ds.Delivered)
 }

@@ -17,6 +17,7 @@
 package composer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -61,6 +62,9 @@ type Draft struct {
 	gasUsed    core.GasUsed
 	txs        []types.Transaction
 	receipts   types.Receipts
+	// ctx, when set, ends the draft's runs: a run it ends fails with its
+	// error.
+	ctx context.Context
 }
 
 // NewDraft opens the block of header, running the engine's opening system
@@ -89,15 +93,26 @@ func (d *Draft) rules() *chain.Rules { return d.chainRules }
 
 // Apply executes tx at the end of the draft, observed by tracer when set.
 // A transaction the block cannot hold fails Apply and leaves the draft as
-// it was. A failed state read fails it with ErrStateRead, and leaves the
-// draft unusable.
+// it was. A failed state read fails it with ErrStateRead, and the end of
+// the draft's context with the context's error; either leaves the draft
+// unusable.
 func (d *Draft) Apply(tx types.Transaction, tracer *tracing.Hooks) (*types.Receipt, error) {
 	i := len(d.txs)
 	d.ibs.SetTxContext(d.header.Number.Uint64(), i)
 	evm := core.CreateEVM(d.config, d.blockHash, d.engine, accounts.InternAddress(d.header.Coinbase), d.ibs, d.header, vm.Config{Tracer: tracer})
+	if d.ctx != nil {
+		if err := d.ctx.Err(); err != nil {
+			return nil, err
+		}
+		defer context.AfterFunc(d.ctx, evm.Cancel)()
+	}
 	txs := append(slices.Clone(d.txs), tx)
 	receipt, err := core.ApplyTransactionWithEVMPostProcessed(d.config, d.engine, d.gp, d.ibs, state.NewNoopWriter(), d.header, tx, &d.gasUsed,
 		vm.Config{Tracer: tracer}, evm, core.TxPostProcess(d.engine, d.config, d.ibs, txs, i))
+	// A cancelled EVM stops as if at a STOP: the context tells a cut-short run.
+	if d.ctx != nil && d.ctx.Err() != nil {
+		return nil, d.ctx.Err()
+	}
 	if failed := d.reads.failed(); failed != nil {
 		return nil, failed
 	}
@@ -108,12 +123,14 @@ func (d *Draft) Apply(tx types.Transaction, tracer *tracing.Hooks) (*types.Recei
 	return receipt, nil
 }
 
-// Fork returns a draft with the same transactions, on a fresh state.
+// Fork returns a draft with the same transactions, on a fresh state, ended
+// by the same context.
 func (d *Draft) Fork() (*Draft, error) {
 	f, err := NewDraft(d.config, d.engine, d.header, d.pre)
 	if err != nil {
 		return nil, err
 	}
+	f.ctx = d.ctx
 	for i, tx := range d.txs {
 		if _, err := f.Apply(tx, nil); err != nil {
 			return nil, fmt.Errorf("replay transaction %d: %w", i, err)
