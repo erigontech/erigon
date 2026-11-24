@@ -100,11 +100,8 @@ func TestStepAlignedEndRefusesListStartingOffBoundary(t *testing.T) {
 	generateCommitmentFile(t, dirs, []testFileRange{{0, 20}})
 	generateCodeFile(t, dirs, []testFileRange{{4, 20}})
 	require.NoError(t, agg.OpenFolder(db))
-	at := agg.BeginFilesRo()
-	require.Equal(t, uint64(40), at.d[kv.CodeDomain].files.StartTxNum())
-	at.Close()
 	_, err := agg.StepAlignedEnd(100)
-	require.ErrorContains(t, err, "starts at txNum 40")
+	require.ErrorContains(t, err, "not readable past txNum 0")
 }
 
 func TestStepAlignedEndRefusesHiddenFiles(t *testing.T) {

@@ -122,22 +122,22 @@ func (ac *aggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorAggFi
 }
 
 func (ac *aggDirtyFilesRoTx) dropCovered(mf *MissedAccessorAggFiles) {
-	drop := func(missed MissedFilesMap, all []*FilesItem, l statecfg.Accessors) {
+	drop := func(missed MissedFilesMap, all []*FilesItem, l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool) {
 		for acc := range missed {
-			missed[acc] = dropCoveredAccessors(missed[acc], all, l)
+			missed[acc] = dropCoveredAccessors(missed[acc], all, l, checker)
 		}
 	}
 	for _, d := range ac.domain {
 		df := mf.domain[d.d.Name]
-		drop(df.files, d.files, d.d.Accessors)
-		drop(df.history.files, d.history.files, d.history.h.Accessors)
-		drop(df.history.ii.files, d.history.ii.files, d.history.ii.ii.Accessors)
+		drop(df.files, d.files, d.d.Accessors, d.d.dependentsPresent())
+		drop(df.history.files, d.history.files, d.history.h.Accessors, nil)
+		drop(df.history.ii.files, d.history.ii.files, d.history.ii.ii.Accessors, nil)
 	}
 	for _, ii := range ac.ii {
 		if ii == nil {
 			continue
 		}
-		drop(mf.ii[ii.ii.Name].files, ii.files, ii.ii.Accessors)
+		drop(mf.ii[ii.ii.Name].files, ii.files, ii.ii.Accessors, nil)
 	}
 }
 

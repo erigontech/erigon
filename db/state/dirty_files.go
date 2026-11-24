@@ -692,13 +692,13 @@ func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canB
 
 // coveredByVisibleFiles reports whether item's [startTxNum, endTxNum) range is fully
 // covered by other files that are themselves visible (i.e. have their accessors).
-func coveredByVisibleFiles(item *FilesItem, all []*FilesItem, l statecfg.Accessors) bool {
+func coveredByVisibleFiles(item *FilesItem, all []*FilesItem, l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool) bool {
 	subs := make([]*FilesItem, 0, len(all))
 	for _, f := range all {
 		if f == nil || f == item {
 			continue
 		}
-		if f.isProperSubsetOf(item) && checkForVisibility(f, l, false) {
+		if f.isProperSubsetOf(item) && checkForVisibility(f, l, false) && (checker == nil || checker(f.startTxNum, f.endTxNum)) {
 			subs = append(subs, f)
 		}
 	}
@@ -717,13 +717,13 @@ func coveredByVisibleFiles(item *FilesItem, all []*FilesItem, l statecfg.Accesso
 	return cur >= item.endTxNum
 }
 
-func dropCoveredAccessors(missed, all []*FilesItem, l statecfg.Accessors) []*FilesItem {
+func dropCoveredAccessors(missed, all []*FilesItem, l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool) []*FilesItem {
 	if len(missed) == 0 {
 		return missed
 	}
 	out := make([]*FilesItem, 0, len(missed))
 	for _, m := range missed {
-		if !coveredByVisibleFiles(m, all, l) {
+		if !coveredByVisibleFiles(m, all, l, checker) {
 			out = append(out, m)
 		}
 	}

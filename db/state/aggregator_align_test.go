@@ -120,6 +120,45 @@ func TestVisibleFilesAligned_LeadingGapInOneListLowersEveryList(t *testing.T) {
 	requireVisibleEnd(t, agg, 0)
 }
 
+// values files are never retired: a values list whose first file is missing from disk must not start past 0
+func TestVisibleFilesAligned_MissingFirstValuesFileLowersEveryList(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	files, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "*-accounts.0-1.*"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	for _, f := range files {
+		require.NoError(t, dir.RemoveFile(f))
+	}
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, 0)
+}
+
+// a file is covered only by smaller files that can become visible; without their commitment they can not
+func TestBuildMissedAccessorsKeepsAFileCoveredByHiddenFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 2}})
+	accessors, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "*-accounts.0-2.bt"))
+	require.NoError(t, err)
+	require.Len(t, accessors, 1)
+	require.NoError(t, dir.RemoveFile(accessors[0]))
+	require.NoError(t, agg.OpenFolder(db))
+
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1, kv.SkipCoveredAccessors))
+	built, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "*-accounts.0-2.bt"))
+	require.NoError(t, err)
+	require.Len(t, built, 1)
+}
+
 // domains visible past the log/trace indexes answer eth_getLogs from blocks no index saw
 func TestVisibleFilesAligned_LaggingStandaloneIdxClampsEveryone(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))

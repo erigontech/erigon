@@ -1912,6 +1912,10 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			}
 			lower(d.dirtyFiles, next.d[id].files)
 			lowerToFirstFile(d.dirtyFiles, next.d[id].files)
+			// state values always start at 0: a missing first file is not on disk for lowerToFirstFile to see
+			if files := next.d[id].files; len(files) > 0 && files[0].startTxNum > 0 && slices.Contains(kv.StateDomains, kv.Domain(id)) {
+				lowestEnd = 0
+			}
 			if !d.HistCfg.SnapshotsDisabled && !d.HistCfg.HistoryDisabled {
 				lower(d.History.dirtyFiles, next.dh[id])
 				lower(d.InvertedIndex.dirtyFiles, next.dhii[id].files)
