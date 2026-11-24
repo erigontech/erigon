@@ -213,13 +213,13 @@ func RecoverCellsAndKZGProofs(cellIndices []ColumnIndex, cells []cltypes.Cell) (
 }
 
 func recoverWithGoEthKZG(cellIndices []ColumnIndex, cells []cltypes.Cell) ([]cltypes.Cell, []cltypes.KZGProof, error) {
-	ckzgCells := make([]*goethkzg.Cell, len(cells))
+	goCells := make([]*goethkzg.Cell, len(cells))
 	for i := range cells {
-		ckzgCells[i] = (*goethkzg.Cell)(&cells[i])
+		goCells[i] = (*goethkzg.Cell)(&cells[i])
 	}
 
 	// recover cells and proofs
-	recoveredCells, recoveredProofs, err := kzg.Ctx().RecoverCellsAndComputeKZGProofs(cellIndices, ckzgCells, 0 /* numGoRoutines */)
+	recoveredCells, recoveredProofs, err := kzg.Ctx().RecoverCellsAndComputeKZGProofs(cellIndices, goCells, 0 /* numGoRoutines */)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to recover cells and proofs: %w", err)
 	}
@@ -238,12 +238,12 @@ func recoverWithGoEthKZG(cellIndices []ColumnIndex, cells []cltypes.Cell) ([]clt
 
 // ComputeCellsAndKZGProofs uses the go-eth-kzg library to compute the cells and proofs.
 func ComputeCellsAndKZGProofs(blob []byte) ([]cltypes.Cell, []cltypes.KZGProof, error) {
-	ckzgBlob := goethkzg.Blob{}
-	if len(blob) != len(ckzgBlob) {
-		return nil, nil, fmt.Errorf("blob length mismatch: %d != %d", len(blob), len(ckzgBlob))
+	goBlob := goethkzg.Blob{}
+	if len(blob) != len(goBlob) {
+		return nil, nil, fmt.Errorf("blob length mismatch: %d != %d", len(blob), len(goBlob))
 	}
-	copy(ckzgBlob[:], blob)
-	cells, proofs, err := kzg.Ctx().ComputeCellsAndKZGProofs(&ckzgBlob, 0 /* numGoRoutines */)
+	copy(goBlob[:], blob)
+	cells, proofs, err := kzg.Ctx().ComputeCellsAndKZGProofs(&goBlob, 0 /* numGoRoutines */)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to compute cells and proofs: %w", err)
 	}
