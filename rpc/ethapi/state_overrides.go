@@ -18,12 +18,17 @@ package ethapi
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -32,6 +37,69 @@ import (
 )
 
 type StateOverrides map[accounts.Address]Account
+
+// UnmarshalJSON rejects account override keys that are not defined.
+// encoding/json alone ignores unknown keys.
+func (so *StateOverrides) UnmarshalJSON(input []byte) error {
+	var raw map[common.Address]json.RawMessage
+	if err := json.Unmarshal(input, &raw); err != nil {
+		return err
+	}
+	if raw == nil {
+		*so = nil
+		return nil
+	}
+	overrides := make(StateOverrides, len(raw))
+	for _, addr := range slices.SortedFunc(maps.Keys(raw), common.Address.Cmp) {
+		if err := CheckOverrideKeys(raw[addr], reflect.TypeFor[Account](), "state override for "+addr.Hex()); err != nil {
+			return err
+		}
+		var account Account
+		if err := json.Unmarshal(raw[addr], &account); err != nil {
+			return err
+		}
+		overrides[accounts.InternAddress(addr)] = account
+	}
+	*so = overrides
+	return nil
+}
+
+// CheckOverrideKeys returns an error for a key of the JSON object that does not
+// name a field of t, or that names a field another key already names. Names
+// match case-insensitively, as in encoding/json. Repeated identical keys cannot
+// be seen here; encoding/json keeps the last one.
+func CheckOverrideKeys(input json.RawMessage, t reflect.Type, what string) error {
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(input, &keys); err != nil || keys == nil {
+		return nil
+	}
+	seen := make(map[int]string)
+	for _, key := range slices.Sorted(maps.Keys(keys)) {
+		field := -1
+		for i := range t.NumField() {
+			f := t.Field(i)
+			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			if !f.IsExported() || name == "-" {
+				continue
+			}
+			if name == "" {
+				name = f.Name
+			}
+			if strings.EqualFold(key, name) {
+				field = i
+				break
+			}
+		}
+		if field < 0 {
+			return fmt.Errorf("unknown field %q in %s", key, what)
+		}
+		if prev, ok := seen[field]; ok {
+			return fmt.Errorf("keys %q and %q in %s name the same field", prev, key, what)
+		}
+		seen[field] = key
+	}
+	return nil
+}
 
 func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.Address) error {
 	for _, addr := range addrs {
