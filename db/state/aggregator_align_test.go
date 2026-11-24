@@ -296,6 +296,27 @@ func checkFilesDBGapOf(t *testing.T, db kv.RoDB, agg *Aggregator) error {
 	return at.CheckFilesDBGap(tx)
 }
 
+// a history index file is covered only by smaller index files that can become visible; without their history files they can not
+func TestBuildMissedAccessorsKeepsAnIndexFileCoveredByHiddenFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	removeFiles(t, agg.Dirs(), agg.Dirs().SnapHistory, "accounts", testFileRange{0, 1})
+	removeFiles(t, agg.Dirs(), agg.Dirs().SnapHistory, "accounts", testFileRange{1, 2})
+	efi, err := filepath.Glob(filepath.Join(agg.Dirs().SnapAccessors, "*-accounts.0-2.efi"))
+	require.NoError(t, err)
+	require.Len(t, efi, 1)
+	require.NoError(t, dir.RemoveFile(efi[0]))
+	require.NoError(t, agg.OpenFolder(db))
+
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1, kv.SkipCoveredAccessors))
+	built, err := filepath.Glob(filepath.Join(agg.Dirs().SnapAccessors, "*-accounts.0-2.efi"))
+	require.NoError(t, err)
+	require.Len(t, built, 1)
+}
+
 // The coverage filter reads dependency state, which is guarded by dirtyFilesLock.
 func TestCoverageFilterRunsUnderTheDirtyFilesLock(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))

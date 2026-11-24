@@ -1866,7 +1866,7 @@ type aggregatorVisible struct {
 	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
-	visibleEnd   uint64                          // every enabled, aligned list is cut here; below filesEnd means a gap
+	visibleEnd   uint64                          // every list is cut here; below filesEnd means a gap
 	filesEnd     uint64                          // dirtyFilesEndTxNumMinimax when this generation was built
 
 	refcnt  atomic.Int32       // live readers

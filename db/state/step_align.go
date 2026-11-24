@@ -46,7 +46,7 @@ func (a *Aggregator) StepAlignedEnd(stepSize uint64) (uint64, error) {
 			if item.canDelete.Load() || checkForVisibility(item, accessors, false) {
 				continue
 			}
-			if !slices.ContainsFunc(srcs, item.isProperSubsetOf) && !coveredByVisibleFiles(item, srcs, accessors, nil) {
+			if !slices.ContainsFunc(srcs, item.isProperSubsetOf) && !coveredByVisibleFiles(item, srcs, accessors) {
 				return fmt.Errorf("%s snapshot [%d,%d) is not indexed; build or repair its accessors before rebasing", name, item.startTxNum, item.endTxNum)
 			}
 		}

@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/db/kv"
@@ -124,22 +125,26 @@ func (ac *aggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorAggFi
 func (ac *aggDirtyFilesRoTx) dropCovered(mf *MissedAccessorAggFiles) {
 	ac.agg.dirtyFilesLock.Lock() // the dependency checker reads live dirty files
 	defer ac.agg.dirtyFilesLock.Unlock()
-	drop := func(missed MissedFilesMap, all []*FilesItem, l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool) {
+	// a smaller file covers only if it can become visible: its dependents are present
+	drop := func(missed MissedFilesMap, all []*FilesItem, l statecfg.Accessors, dependentsPresent func(startTxNum, endTxNum uint64) bool) {
+		if dependentsPresent != nil {
+			all = slices.DeleteFunc(slices.Clone(all), func(f *FilesItem) bool { return !dependentsPresent(f.startTxNum, f.endTxNum) })
+		}
 		for acc := range missed {
-			missed[acc] = dropCoveredAccessors(missed[acc], all, l, checker)
+			missed[acc] = dropCoveredAccessors(missed[acc], all, l)
 		}
 	}
 	for _, d := range ac.domain {
 		df := mf.domain[d.d.Name]
 		drop(df.files, d.files, d.d.Accessors, d.d.dependentsPresent())
 		drop(df.history.files, d.history.files, d.history.h.Accessors, nil)
-		drop(df.history.ii.files, d.history.ii.files, d.history.ii.ii.Accessors, nil)
+		drop(df.history.ii.files, d.history.ii.files, d.history.ii.ii.Accessors, d.history.ii.ii.dependentsPresent())
 	}
 	for _, ii := range ac.ii {
 		if ii == nil {
 			continue
 		}
-		drop(mf.ii[ii.ii.Name].files, ii.files, ii.ii.Accessors, nil)
+		drop(mf.ii[ii.ii.Name].files, ii.files, ii.ii.Accessors, ii.ii.dependentsPresent())
 	}
 }
 

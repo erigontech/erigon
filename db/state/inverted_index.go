@@ -232,15 +232,19 @@ func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
 // calcVisibleFiles is pure — it does not mutate ii. Used by the Aggregator to
 // assemble a cross-entity snapshot published atomically as aggregatorVisible.
 func (ii *InvertedIndex) calcVisibleFiles(toTxNum uint64) *iiVisible {
-	var checker func(startTxNum, endTxNum uint64) bool
+	return newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, ii.dependentsPresent(), false, toTxNum))
+}
+
+// dependentsPresent is Domain.dependentsPresent for an index.
+func (ii *InvertedIndex) dependentsPresent() func(startTxNum, endTxNum uint64) bool {
 	c := ii.checker
-	if c != nil {
-		ue := FromII(ii.Name)
-		checker = func(startTxNum, endTxNum uint64) bool {
-			return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
-		}
+	if c == nil {
+		return nil
 	}
-	return newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
+	ue := FromII(ii.Name)
+	return func(startTxNum, endTxNum uint64) bool {
+		return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
+	}
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
