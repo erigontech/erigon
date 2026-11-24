@@ -232,9 +232,10 @@ var (
 // btInMemMaxShare caps the .bt files read into memory at this fraction of the total memory.
 const btInMemMaxShare = 10
 
-// btInMemDefaultDomains are the domains whose .bt files the node reads into memory by default:
-// the state that block execution reads at the chain tip.
-var btInMemDefaultDomains = []string{kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String()}
+// btInMemDefaultDomains are the domains whose .bt files the node reads into memory by default: the state that block
+// execution reads at the chain tip, and the commitment trie (a .bt only with commitment v3 records), whose fold reads
+// every branch on the touched paths.
+var btInMemDefaultDomains = []string{kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String()}
 
 // btInMemBudget counts the bytes of .bt files a node holds in memory, against a share of its memory.
 // One budget serves all domains of an aggregator, whose merges run together.

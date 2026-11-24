@@ -4168,6 +4168,33 @@ func TestDomain_BtIndexInMem(t *testing.T) {
 	checkHistory(t, db, d, txs)
 }
 
+func TestDomain_CommitmentV3BtIndexInMem(t *testing.T) {
+	t.Parallel()
+
+	cfg := statecfg.Schema.CommitmentDomain
+	statecfg.EnableCommitmentV3Records(&cfg)
+	db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+	d.btForceInMem, d.btForceMmap, d.btBudget = nil, nil, &btInMemBudget{limit: 1 << 40}
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	view := d.beginForTests()
+	writer := view.NewWriter(db)
+	const txs = 48
+	for txNum := range uint64(txs) {
+		require.NoError(t, writer.PutWithPrev([]byte{byte(txNum)}, []byte{byte(txNum), 1}, txNum, nil))
+	}
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	view.Close()
+	require.NoError(t, tx.Commit())
+
+	buildBtIndexSteps(t, db, d, txs)
+	inMem, total, _ := visibleBtIndexes(t, d)
+	require.Equal(t, total, inMem)
+}
+
 // buildBtIndexSteps builds and integrates the step files of d without merging them.
 func buildBtIndexSteps(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	t.Helper()
