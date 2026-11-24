@@ -19,6 +19,7 @@ package txpool
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -156,19 +157,15 @@ func TestRemoteTxnQueueAuthorizationLimit(t *testing.T) {
 
 	add(first)
 	add(first, second, extra, ordinary)
-	require.Len(t, pool.unprocessedRemoteTxns.Txns, 3)
-	require.Same(t, first, pool.unprocessedRemoteTxns.Txns[0])
-	require.Same(t, second, pool.unprocessedRemoteTxns.Txns[1])
-	require.Same(t, ordinary, pool.unprocessedRemoteTxns.Txns[2])
+	require.True(t, slices.Equal(pool.unprocessedRemoteTxns.Txns, []*TxnSlot{first, second, ordinary}), "initial queue")
 
 	pool.removeProcessedRemoteTxns(1)
 	add(first, extra)
-	require.Len(t, pool.unprocessedRemoteTxns.Txns, 3)
-	require.Same(t, first, pool.unprocessedRemoteTxns.Txns[2])
+	require.True(t, slices.Equal(pool.unprocessedRemoteTxns.Txns, []*TxnSlot{second, ordinary, first}), "queue after partial drain")
 
 	pool.removeProcessedRemoteTxns(3)
 	add(first, second)
-	require.Len(t, pool.unprocessedRemoteTxns.Txns, 2)
+	require.True(t, slices.Equal(pool.unprocessedRemoteTxns.Txns, []*TxnSlot{first, second}), "queue after full drain")
 }
 
 func TestRemoteTxnQueueOwnsPayload(t *testing.T) {

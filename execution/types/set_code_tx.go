@@ -100,12 +100,11 @@ func (tx *SetCodeTransaction) GetAuthorizations() []Authorization {
 // SetCodeAuthorizationCount counts authorization list entries in a raw or RLP-enveloped
 // SetCode transaction without decoding the tuples or validating the transaction.
 func SetCodeAuthorizationCount(encoded []byte) int {
-	if len(encoded) > 0 && encoded[0] >= rlp.EmptyStringCode {
-		dataPos, dataLen, isList, err := rlp.Prefix(encoded, 0)
-		if err != nil || isList {
+	if TypedTransactionMarshalledAsRlpString(encoded) {
+		var err error
+		if encoded, _, err = rlp.SplitString(encoded); err != nil {
 			return 0
 		}
-		encoded = encoded[dataPos : dataPos+dataLen]
 	}
 	if len(encoded) == 0 || encoded[0] != SetCodeTxType {
 		return 0
