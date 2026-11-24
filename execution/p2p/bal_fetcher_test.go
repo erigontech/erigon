@@ -98,6 +98,7 @@ func TestBALFetcherResponse(t *testing.T) {
 		{"malformed committed BAL", []rlp.RawValue{malformed}, crypto.Keccak256Hash(malformed), false, nil},
 		{"invalid committed BAL", []rlp.RawValue{invalid}, crypto.Keccak256Hash(invalid), false, nil},
 		{"unavailable BAL", []rlp.RawValue{{0x80}}, empty.BlockAccessListHash, true, nil},
+		{"commitment mismatch", []rlp.RawValue{{0xc0}}, common.Hash{1}, false, ErrBadBALResponse},
 		{"truncated response", nil, empty.BlockAccessListHash, false, nil},
 		{"malformed entry", []rlp.RawValue{{0xc1}}, empty.BlockAccessListHash, false, rlp.ErrValueTooLarge},
 		{"excess entry is never read", []rlp.RawValue{{0x80}, {0xc1}}, empty.BlockAccessListHash, false, ErrBadBALResponse},
@@ -170,10 +171,9 @@ func TestValidateBALResponseBoundsStorageReadAllocations(t *testing.T) {
 	reqs := []BALRequest{{Hash: common.Hash{1}, GasLimit: types.BalItemCost, ExpectedHash: hash}}
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	out, bad, err := validateBALResponse(reqs, []rlp.RawValue{raw})
+	out, err := validateBALResponse(reqs, []rlp.RawValue{raw})
 	runtime.ReadMemStats(&after)
 	require.NoError(t, err)
-	require.False(t, bad)
 	require.Empty(t, out)
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
@@ -191,10 +191,9 @@ func TestValidateBALResponseBoundsEmptySlotAllocations(t *testing.T) {
 	reqs := []BALRequest{{Hash: common.Hash{1}, GasLimit: 1_000_000_000, ExpectedHash: crypto.Keccak256Hash(raw)}}
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	out, bad, err := validateBALResponse(reqs, []rlp.RawValue{raw})
+	out, err := validateBALResponse(reqs, []rlp.RawValue{raw})
 	runtime.ReadMemStats(&after)
 	require.NoError(t, err)
-	require.False(t, bad)
 	require.Empty(t, out)
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
@@ -211,10 +210,10 @@ func TestValidateBALResponseChecksHashBeforeDecoding(t *testing.T) {
 	reqs := []BALRequest{{Hash: common.Hash{1}, GasLimit: 60_000_000, ExpectedHash: common.Hash{0xff}}}
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	out, bad, err := validateBALResponse(reqs, []rlp.RawValue{raw})
+	out, err := validateBALResponse(reqs, []rlp.RawValue{raw})
 	runtime.ReadMemStats(&after)
 	require.ErrorContains(t, err, "wanted")
-	require.True(t, bad)
+	require.ErrorIs(t, err, ErrBadBALResponse)
 	require.Empty(t, out)
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
@@ -233,9 +232,8 @@ func TestValidateBALResponse(t *testing.T) {
 
 	t.Run("valid populated BAL is returned", func(t *testing.T) {
 		reqs := []BALRequest{{Hash: h0, Number: 1, GasLimit: validGasLimit, ExpectedHash: balHash}}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal})
+		out, err := validateBALResponse(reqs, []rlp.RawValue{bal})
 		require.NoError(t, err)
-		require.False(t, bad)
 		require.Equal(t, wantBAL, out[h0].BlockAccessList())
 		gotRaw, err := out[h0].Bytes()
 		require.NoError(t, err)
@@ -244,26 +242,23 @@ func TestValidateBALResponse(t *testing.T) {
 
 	t.Run("hash-matching BAL exceeding the block gas bound is discarded without a penalty", func(t *testing.T) {
 		reqs := []BALRequest{{Hash: h0, Number: 1, GasLimit: types.BalItemCost - 1, ExpectedHash: balHash}}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal})
+		out, err := validateBALResponse(reqs, []rlp.RawValue{bal})
 		require.NoError(t, err)
-		require.False(t, bad)
 		require.NotContains(t, out, h0)
 	})
 
 	t.Run("hash-matching malformed BAL is discarded without a penalty", func(t *testing.T) {
 		malformed := []byte{0xc2, 0x01, 0x02}
 		reqs := []BALRequest{{Hash: h0, Number: 1, GasLimit: validGasLimit, ExpectedHash: crypto.Keccak256Hash(malformed)}}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{malformed})
+		out, err := validateBALResponse(reqs, []rlp.RawValue{malformed})
 		require.NoError(t, err)
-		require.False(t, bad)
 		require.NotContains(t, out, h0)
 	})
 
 	t.Run("0x80 sentinel is a miss not an error", func(t *testing.T) {
 		reqs := []BALRequest{{Hash: h0, Number: 1, ExpectedHash: balHash}}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{{0x80}})
+		out, err := validateBALResponse(reqs, []rlp.RawValue{{0x80}})
 		require.NoError(t, err)
-		require.False(t, bad)
 		require.NotContains(t, out, h0)
 	})
 
@@ -277,26 +272,23 @@ func TestValidateBALResponse(t *testing.T) {
 			{Hash: h0, Number: 1, GasLimit: gasLimit, ExpectedHash: crypto.Keccak256Hash(invalid)},
 			{Hash: h1, Number: 2, GasLimit: validGasLimit, ExpectedHash: balHash},
 		}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{invalid, bal})
+		out, err := validateBALResponse(reqs, []rlp.RawValue{invalid, bal})
 		require.NoError(t, err)
-		require.False(t, bad)
 		require.NotContains(t, out, h0)
 		require.Equal(t, wantBAL, out[h1].BlockAccessList())
 	})
 
 	t.Run("empty entry is a miss", func(t *testing.T) {
 		reqs := []BALRequest{{Hash: h0, Number: 1, ExpectedHash: balHash}}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{{}})
+		out, err := validateBALResponse(reqs, []rlp.RawValue{{}})
 		require.NoError(t, err)
-		require.False(t, bad)
 		require.NotContains(t, out, h0)
 	})
 
 	t.Run("0xc0 accepted only for the empty-BAL hash", func(t *testing.T) {
 		reqs := []BALRequest{{Hash: h0, Number: 1, ExpectedHash: empty.BlockAccessListHash}}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{{0xc0}})
+		out, err := validateBALResponse(reqs, []rlp.RawValue{{0xc0}})
 		require.NoError(t, err)
-		require.False(t, bad)
 		require.NotNil(t, out[h0])
 		require.Empty(t, out[h0].BlockAccessList())
 	})
@@ -307,9 +299,8 @@ func TestValidateBALResponse(t *testing.T) {
 			{Hash: h1, Number: 2, GasLimit: validGasLimit, ExpectedHash: balHash},
 		}
 		reqs[0].ExpectedHash = balHash
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{{0xc0}, bal})
-		require.Error(t, err)
-		require.True(t, bad)
+		out, err := validateBALResponse(reqs, []rlp.RawValue{{0xc0}, bal})
+		require.ErrorIs(t, err, ErrBadBALResponse)
 		require.NotContains(t, out, h0)
 		require.Equal(t, wantBAL, out[h1].BlockAccessList())
 	})
@@ -319,9 +310,8 @@ func TestValidateBALResponse(t *testing.T) {
 			{Hash: h0, Number: 1, ExpectedHash: common.BytesToHash([]byte{0xff})},
 			{Hash: h1, Number: 2, GasLimit: validGasLimit, ExpectedHash: balHash},
 		}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal, bal})
-		require.Error(t, err)
-		require.True(t, bad)
+		out, err := validateBALResponse(reqs, []rlp.RawValue{bal, bal})
+		require.ErrorIs(t, err, ErrBadBALResponse)
 		require.NotContains(t, out, h0)
 		require.Equal(t, wantBAL, out[h1].BlockAccessList())
 	})
@@ -331,9 +321,8 @@ func TestValidateBALResponse(t *testing.T) {
 			{Hash: h0, Number: 1, GasLimit: validGasLimit, ExpectedHash: balHash},
 			{Hash: h1, Number: 2, ExpectedHash: balHash},
 		}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal}) // only first answered
+		out, err := validateBALResponse(reqs, []rlp.RawValue{bal}) // only first answered
 		require.NoError(t, err)
-		require.False(t, bad)
 		require.Equal(t, wantBAL, out[h0].BlockAccessList())
 		require.NotContains(t, out, h1)
 	})

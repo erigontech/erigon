@@ -199,8 +199,8 @@ func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerI
 		f.penalize(ctx, peerId)
 		return nil, err
 	}
-	out, badPeer, err := validateBALResponse(reqs, response)
-	if badPeer {
+	out, err := validateBALResponse(reqs, response)
+	if errors.Is(err, ErrBadBALResponse) {
 		f.logger.Debug("[p2p.bal] penalizing peer for bad BAL response", "peerId", peerId, "err", err)
 		f.penalize(ctx, peerId)
 	}
@@ -220,9 +220,8 @@ func isUnavailableBALEntry(entry rlp.RawValue) bool {
 }
 
 // validateBALResponse expects at most one entry per request, in request order.
-// It keeps valid entries and flags the peer if a BAL conflicts with its header commitment.
-func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common.Hash]*types.BlockAccessListSidecar, bool, error) {
-	var badPeer bool
+// It keeps valid entries and returns ErrBadBALResponse for a header commitment mismatch.
+func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common.Hash]*types.BlockAccessListSidecar, error) {
 	var responseErr error
 	out := make(map[common.Hash]*types.BlockAccessListSidecar, len(reqs))
 	for i := range response {
@@ -235,14 +234,12 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 		}
 		if len(entry) == 1 && entry[0] == 0xc0 {
 			if expected != empty.BlockAccessListHash {
-				badPeer = true
 				responseErr = fmt.Errorf("%w: req %d wanted non-empty BAL %x, peer returned empty", ErrBadBALResponse, i, expected)
 				continue
 			}
 		}
 		hash := crypto.Keccak256Hash(entry)
 		if hash != expected {
-			badPeer = true
 			responseErr = fmt.Errorf("%w: req %d wanted %x got %x", ErrBadBALResponse, i, expected, hash)
 			continue
 		}
@@ -256,7 +253,7 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 		}
 		out[reqs[i].Hash] = bal
 	}
-	return out, badPeer, responseErr
+	return out, responseErr
 }
 
 func decodeBlockAccessListsResponse(payload []byte, requested int) ([]rlp.RawValue, error) {
