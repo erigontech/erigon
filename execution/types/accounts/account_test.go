@@ -432,9 +432,7 @@ func TestInternSlotCollision(t *testing.T) {
 
 func requireCanonKey(t *testing.T, k common.Hash, h StorageKey) {
 	t.Helper()
-	wp, ok := keyCanon.Load(k)
-	require.True(t, ok)
-	require.Same(t, wp.Value(), h.p)
+	require.Same(t, keyCanon.lookup(k), h.p)
 	require.Equal(t, k, h.Value())
 }
 
@@ -456,6 +454,7 @@ func TestInternKeyConcurrentFirstUse(t *testing.T) {
 func internAndEvict(t *testing.T, k common.Hash) {
 	t.Helper()
 	requireCanonKey(t, k, InternKey(k))
+	keyCanon.flush()
 	other := k
 	other[10]++
 	require.Same(t, keySlot(k), keySlot(other))
@@ -466,7 +465,7 @@ func requireKeyReleased(t *testing.T, k common.Hash) {
 	t.Helper()
 	require.Eventually(t, func() bool {
 		runtime.GC()
-		_, ok := keyCanon.Load(k)
+		_, ok := keyCanon.weak.Load(k)
 		return !ok
 	}, 10*time.Second, time.Millisecond)
 }
@@ -492,7 +491,8 @@ func TestInternKeyAfterRelease(t *testing.T) {
 func TestReleaseKeyKeepsReplacedEntry(t *testing.T) {
 	k := common.HexToHash("0x3e8b5d1f7a9c2e4b6d8f0a1c3e5b7d9f2a4c6e8b0d1f3a5c7e9b2d4f6a8c0e1b")
 	h := InternKey(k)
-	releaseKey(k, weak.Make(new(common.Hash)))
+	keyCanon.flush()
+	keyCanon.release(k, weak.Make(new(common.Hash)))
 	requireCanonKey(t, k, h)
 }
 
@@ -500,4 +500,26 @@ func TestReleaseKeyKeepsReplacedEntry(t *testing.T) {
 func TestInternSlotsSpreadLowValues(t *testing.T) {
 	require.NotSame(t, addressSlot(common.BytesToAddress([]byte{1})), addressSlot(common.BytesToAddress([]byte{2})))
 	require.NotSame(t, keySlot(common.BytesToHash([]byte{1})), keySlot(common.BytesToHash([]byte{2})))
+}
+
+func TestCanonTableKeepsIdentityAcrossGenerations(t *testing.T) {
+	c := newCanonTable[common.Hash](8)
+	k := common.HexToHash("0x01")
+	held := c.intern(k)
+	var wg sync.WaitGroup
+	for g := range 16 {
+		wg.Go(func() {
+			for i := range 1000 {
+				var v common.Hash
+				v[0], v[1], v[2] = byte(g+1), byte(i), byte(i>>8)
+				first := c.intern(v)
+				require.Same(t, first, c.intern(v))
+				require.Same(t, held, c.intern(k))
+			}
+		})
+	}
+	wg.Wait()
+	c.flush()
+	require.Same(t, held, c.intern(k))
+	runtime.KeepAlive(held)
 }
