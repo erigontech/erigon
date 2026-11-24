@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -124,11 +125,50 @@ func (so *StateOverrides) OverrideTo(ibs *state.IntraBlockState, precompiles vm.
 	if err := so.overridePrecompiles(precompiles, addrs); err != nil {
 		return err
 	}
+	// Where EIP-161 is active, an account the overrides write and leave empty does not exist
+	// after them (EIP-7523), unless the override sets a non-zero slot.
+	for _, addr := range addrs {
+		account := (*so)[addr]
+		if !state.EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) || !account.writesAccount() || account.hasStorage() {
+			continue
+		}
+		empty, err := ibs.Empty(addr)
+		if err != nil {
+			return err
+		}
+		if empty {
+			if _, err := ibs.Selfdestruct(addr, false); err != nil {
+				return err
+			}
+		}
+	}
 
-	// State overrides are synthetic pre-state and must not trigger EIP-161 account deletion.
+	// EIP-161 removal ignores storage, so it would also remove the empty accounts kept above.
 	overrideRules := *rules
 	overrideRules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
 	return EndCallTx(ibs, &overrideRules, stateWriter)
+}
+
+// writesAccount reports whether the override sets a field or a storage slot of the account.
+// An override that only moves a precompile leaves the account unchanged.
+func (account Account) writesAccount() bool {
+	return account.Nonce != nil || account.Code != nil || account.Balance != nil || account.State != nil ||
+		(account.StateDiff != nil && len(*account.StateDiff) > 0)
+}
+
+// hasStorage reports whether the override sets a non-zero storage slot.
+func (account Account) hasStorage() bool {
+	for _, slots := range []*map[common.Hash]common.Hash{account.State, account.StateDiff} {
+		if slots == nil {
+			continue
+		}
+		for _, value := range *slots {
+			if value != (common.Hash{}) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ActivePrecompiles returns the precompile set of rules with the code overrides and precompile
