@@ -40,6 +40,10 @@ import (
 // defaultMaxTxs bounds the held transactions one Sync block takes.
 const defaultMaxTxs = 50
 
+// maxDeferrals is how many compositions a held transaction waits out for a
+// predecessor sent elsewhere to land on L1.
+const maxDeferrals = 32
+
 // CrossChain is what a composer composes cross-chain effects with.
 type CrossChain struct {
 	Pool *HeldPool
@@ -84,16 +88,17 @@ type effects struct {
 // their calls on a draft of the Sync block on parent, while the block and
 // the posting's gas hold them. A poison transaction, or one neither holds
 // alone, is evicted with the rest of its nonce chain; a transient failure or
-// a full block or posting returns the rest to the pool. Nil when none
-// composes.
+// a full block or posting returns the rest to the pool. A transaction whose
+// nonce is ahead of its sender's on L1 waits, out of the drain's count, up
+// to maxDeferrals compositions. Nil when none composes.
 func (c *Composer) compose(ctx context.Context, parent *types.Header, target uint64) *effects {
-	held := c.x.Pool.PopN(c.x.MaxTxs)
-	if len(held) == 0 {
+	rest := c.x.Pool.PopN(c.x.MaxTxs)
+	if len(rest) == 0 {
 		return nil
 	}
 	fx := &effects{}
-	rest := held
-	var evicted []*Held
+	popped := len(rest)
+	var evicted, deferred []*Held
 	err := func() error {
 		var err error
 		if fx.anchor, err = c.x.L1Hash(ctx, target-1); err != nil {
@@ -112,7 +117,24 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 					return err
 				}
 				gas := newBudget(c.cfg.MaxGas)
-				for len(rest) > 0 {
+				evict := func(h *Held, err error) {
+					c.logger.Warn("[eez] held transaction evicted: it cannot compose", "event", "eez.composer.poison",
+						"hash", h.Hash, "sender", h.Sender, "nonce", h.Nonce, "err", err)
+					c.x.Pool.Evict(h.Sender, h.Direction, h.Nonce)
+					evicted = append(evicted, h)
+				}
+				for {
+					if len(rest) == 0 {
+						// Those waiting on L1 leave the drain room for others.
+						want := c.x.MaxTxs - (popped - len(deferred))
+						if want <= 0 {
+							break
+						}
+						if rest = c.x.Pool.PopN(want); len(rest) == 0 {
+							break
+						}
+						popped += len(rest)
+					}
 					h := rest[0]
 					if slices.ContainsFunc(evicted, func(e *Held) bool { return e.chainKey() == h.chainKey() && h.Nonce > e.Nonce }) {
 						rest = rest[1:]
@@ -122,10 +144,25 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 					if err != nil {
 						return err
 					}
-					if h.Nonce < onChain {
+					switch {
+					case h.Nonce < onChain:
 						c.logger.Info("[eez] held transaction dropped: its nonce is spent", "event", "eez.composer.stale",
 							"hash", h.Hash, "sender", h.Sender, "nonce", h.Nonce, "onChain", onChain)
 						c.x.Pool.Release([]*Held{h})
+						rest = rest[1:]
+						continue
+					case h.Nonce > onChain:
+						// Admitted on a pending nonce: a predecessor sent elsewhere
+						// has yet to land.
+						if h.Deferred++; h.Deferred >= maxDeferrals {
+							evict(h, Poison(fmt.Errorf("nonce %d still ahead of the sender's %d on L1", h.Nonce, onChain)))
+						} else {
+							if h.Deferred == 1 {
+								c.logger.Info("[eez] held transaction waits: its nonce is ahead of the sender's on L1", "event", "eez.composer.nonce_gap",
+									"hash", h.Hash, "sender", h.Sender, "nonce", h.Nonce, "onChain", onChain)
+							}
+							deferred = append(deferred, h)
+						}
 						rest = rest[1:]
 						continue
 					}
@@ -155,10 +192,7 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 						if !IsPoison(err) {
 							return err
 						}
-						c.logger.Warn("[eez] held transaction evicted: it cannot compose", "event", "eez.composer.poison",
-							"hash", h.Hash, "sender", h.Sender, "nonce", h.Nonce, "err", err)
-						c.x.Pool.Evict(h.Sender, h.Direction, h.Nonce)
-						evicted = append(evicted, h)
+						evict(h, err)
 						rest = rest[1:]
 						continue
 					}
@@ -183,7 +217,7 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 			"composed", len(fx.held), "waiting", len(rest), "err", err)
 	}
 	// Evict took the chains of the evicted out of the pool.
-	rest = slices.DeleteFunc(rest, func(h *Held) bool {
+	rest = slices.DeleteFunc(append(deferred, rest...), func(h *Held) bool {
 		return slices.ContainsFunc(evicted, func(e *Held) bool { return e.chainKey() == h.chainKey() && h.Nonce > e.Nonce })
 	})
 	c.x.Pool.PushFront(rest)

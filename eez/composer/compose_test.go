@@ -110,6 +110,13 @@ func newCrossFixture(t *testing.T) *crossFixture {
 // hold holds the L1 transaction of nonce calling to with data.
 func (f *crossFixture) hold(t *testing.T, nonce uint64, to common.Address, data []byte) *Held {
 	t.Helper()
+	return f.holdOn(t, nonce, 0, to, data)
+}
+
+// holdOn holds the L1 transaction of nonce calling to with data, admitted on
+// a pending L1 nonce onChain.
+func (f *crossFixture) holdOn(t *testing.T, nonce, onChain uint64, to common.Address, data []byte) *Held {
+	t.Helper()
 	tx := &types.DynamicFeeTransaction{CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 1_000_000, To: &to, Data: data}, ChainID: *uint256.MustFromBig(chain.TestChainOsakaConfig.ChainID.ToBig())}
 	tx.FeeCap.SetUint64(10)
 	tx.TipCap.SetUint64(1)
@@ -120,7 +127,7 @@ func (f *crossFixture) hold(t *testing.T, nonce uint64, to common.Address, data 
 	h := &Held{Raw: buf.Bytes(), Hash: signed.Hash(), Sender: crypto.PubkeyToAddress(f.key.PublicKey), Nonce: nonce, Direction: Inbound}
 	h.MaxFee.SetUint64(10)
 	h.Tip.SetUint64(1)
-	require.NoError(t, f.pool.Push(h, 0))
+	require.NoError(t, f.pool.Push(h, onChain))
 	return h
 }
 
@@ -172,6 +179,52 @@ func TestComposeRefuses(t *testing.T) {
 		f.l1.failed = errors.New("L1 node down")
 		require.Nil(t, f.c.compose(t.Context(), f.w.sync.Header(), 101))
 		require.Equal(t, []*Held{trigger}, f.pool.PopN(math.MaxInt))
+	})
+}
+
+// TestComposeWaitsOnANonceGap: a held transaction whose nonce is ahead of
+// its sender's on L1, admitted on a pending nonce, waits with the rest of
+// its chain for the predecessor sent elsewhere, without taking the slot's
+// drain from others; a gap that does not close evicts the chain.
+func TestComposeWaitsOnANonceGap(t *testing.T) {
+	sender := func(f *crossFixture) common.Address { return crypto.PubkeyToAddress(f.key.PublicKey) }
+	t.Run("waits, then composes", func(t *testing.T) {
+		f := newCrossFixture(t)
+		first := f.holdOn(t, 1, 1, f.call.Source, f.call.Data)
+		second := f.hold(t, 2, f.call.Source, f.call.Data)
+		require.Nil(t, f.c.compose(t.Context(), f.w.sync.Header(), 101))
+		require.Equal(t, 2, f.pool.Len(), "not evicted")
+		require.Equal(t, uint32(1), first.Deferred)
+		f.l1.m.accounts[sender(f)].Nonce = 1
+		fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+		require.NotNil(t, fx)
+		require.Equal(t, []*Held{first, second}, fx.held)
+	})
+	t.Run("others compose behind a full drain of it", func(t *testing.T) {
+		f := newCrossFixture(t)
+		f.c.x.MaxTxs = 2
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		f.l1.m.fund(crypto.PubkeyToAddress(key.PublicKey), 1e18)
+		gapped := []*Held{f.holdOn(t, 1, 1, f.call.Source, f.call.Data), f.hold(t, 2, f.call.Source, f.call.Data)}
+		other := *f
+		other.key = key
+		ready := other.hold(t, 0, f.call.Source, f.call.Data)
+		fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+		require.NotNil(t, fx)
+		require.Equal(t, []*Held{ready}, fx.held)
+		require.Equal(t, gapped, f.pool.PopN(math.MaxInt), "waiting, in order")
+	})
+	t.Run("a gap that does not close", func(t *testing.T) {
+		f := newCrossFixture(t)
+		first := f.holdOn(t, 1, 1, f.call.Source, f.call.Data)
+		f.hold(t, 2, f.call.Source, f.call.Data)
+		first.Deferred = maxDeferrals - 1
+		require.Nil(t, f.c.compose(t.Context(), f.w.sync.Header(), 101))
+		require.Zero(t, f.pool.Len())
+		f.pool.mu.Lock()
+		defer f.pool.mu.Unlock()
+		require.Empty(t, f.pool.inFlight)
 	})
 }
 

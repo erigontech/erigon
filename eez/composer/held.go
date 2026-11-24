@@ -50,7 +50,10 @@ type Held struct {
 	Raw  []byte
 	Hash common.Hash
 	// Attempts counts the bundles that carried it and failed for it.
-	Attempts  uint32
+	Attempts uint32
+	// Deferred counts the compositions it waited out, its nonce ahead of
+	// its sender's on its network.
+	Deferred  uint32
 	Sender    common.Address
 	Nonce     uint64
 	Direction Direction
