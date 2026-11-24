@@ -113,7 +113,6 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	engine rules.Engine,
 	genesis *types.Genesis,
 	ibs *state.IntraBlockState,
-	stateWriter state.StateWriter,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
@@ -182,10 +181,6 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	}
 
 	return &exec.TxResult{}
-}
-
-func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) *state.WriteSet {
-	return t.writeMap
 }
 
 func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) state.ReadSet {

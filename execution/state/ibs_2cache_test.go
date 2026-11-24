@@ -282,7 +282,6 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 	// — Block N: write state then commit to domains via Writer —
 	{
 		ibsN := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
-		ibsN.SetVersionMap(nil)
 		defer ibsN.Close()
 		ibsN.SetTxContext(1, 0)
 
@@ -293,14 +292,13 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 		err = ibsN.SetState(addr, key, wantStorage)
 		require.NoError(t, err)
 
-		w := NewWriter(domains.AsPutDel(tx), nil, 2)
-		err = ibsN.FinalizeTx(&chain.Rules{}, w)
+		writes, err := ibsN.FinalizedWrites(&chain.Rules{})
 		require.NoError(t, err)
+		require.NoError(t, ApplyWrites(writes, domains, tx, 1, 2, false))
 	}
 
 	// — Block N+1: fresh IBS reads state that block N wrote to domains —
 	ibsN1 := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
-	ibsN1.SetVersionMap(nil)
 	defer ibsN1.Close()
 
 	gotBal, err := ibsN1.GetBalance(addr)
@@ -314,67 +312,4 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 	gotStorage, err := ibsN1.GetState(addr, key)
 	require.NoError(t, err)
 	require.Equal(t, wantStorage, gotStorage, "block N+1 must read block N's committed storage")
-}
-
-// TestDomainApplyFromVersionedWrites verifies that applying VersionedWrites
-// through the existing round-trip path (ApplyVersionedWrites → IBS →
-// FinalizeTx → Writer) produces the correct domain state.
-//
-// This is the baseline that Phase 2's StateUpdatesFromVersionedWrites must
-// reproduce without the IBS round-trip.
-func TestDomainApplyFromVersionedWrites(t *testing.T) {
-	t.Parallel()
-
-	_, tx, domains := NewTestRwTx(t)
-	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-
-	addr := accounts.InternAddress(common.HexToAddress("0xEEEE"))
-	key := accounts.InternKey(common.HexToHash("0x0001"))
-	wantBalance := *uint256.NewInt(321)
-	wantNonce := uint64(9)
-	wantStorage := *uint256.NewInt(456)
-
-	// — Step 1: produce VersionedWrites via a tx —
-	ibsTx := NewWithVersionMap(reader, mvhm)
-	defer ibsTx.Close()
-	ibsTx.SetTxContext(1, 0)
-
-	err := ibsTx.SetBalance(addr, wantBalance, tracing.BalanceChangeUnspecified)
-	require.NoError(t, err)
-	err = ibsTx.SetNonce(addr, wantNonce, tracing.NonceChangeUnspecified)
-	require.NoError(t, err)
-	err = ibsTx.SetState(addr, key, wantStorage)
-	require.NoError(t, err)
-
-	writes := ibsTx.VersionedWrites()
-	require.NotEmpty(t, writes, "VersionedWrites must not be empty")
-
-	// — Step 2: apply VersionedWrites through existing round-trip path —
-	ibsApply := New(reader)
-	ibsApply.SetVersionMap(nil)
-	defer ibsApply.Close()
-	err = ibsApply.ApplyVersionedWrites(writes)
-	require.NoError(t, err)
-
-	w := NewWriter(domains.AsPutDel(tx), nil, 3)
-	err = ibsApply.FinalizeTx(&chain.Rules{}, w)
-	require.NoError(t, err)
-
-	// — Step 3: read back from domains, assert correct state —
-	ibsRead := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
-	ibsRead.SetVersionMap(nil)
-	defer ibsRead.Close()
-
-	gotBal, err := ibsRead.GetBalance(addr)
-	require.NoError(t, err)
-	require.Equal(t, wantBalance, gotBal, "domain must contain balance from VersionedWrites")
-
-	gotNonce, err := ibsRead.GetNonce(addr)
-	require.NoError(t, err)
-	require.Equal(t, wantNonce, gotNonce, "domain must contain nonce from VersionedWrites")
-
-	gotStorage, err := ibsRead.GetState(addr, key)
-	require.NoError(t, err)
-	require.Equal(t, wantStorage, gotStorage, "domain must contain storage from VersionedWrites")
 }
