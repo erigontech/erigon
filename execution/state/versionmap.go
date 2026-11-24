@@ -2345,19 +2345,16 @@ func (vm *VersionMap) validateBalanceAtDestruct(addr accounts.Address, tr Versio
 //     cell is valid only while the tx that wrote it has an account cell.
 func (vm *VersionMap) validateAccountAtSeed(addr accounts.Address, tr VersionedRead[AccountView], txIdx int) VersionValidity {
 	if tr.Val != nil && !tr.Val.IsNil() {
+		if e := vm.load(addr); e == nil || !e.destructed.Load() {
+			return VersionValid
+		}
 		if tr.accSource != AccountFromBAL {
 			if tr.Version.TxIndex < 0 {
-				return VersionValid
-			}
-			if e := vm.load(addr); e == nil || !e.destructed.Load() {
 				return VersionValid
 			}
 			if _, res, _ := vm.ReadAddress(addr, tr.Version.TxIndex+1); res.DepIdx() != tr.Version.TxIndex {
 				return VersionInvalid
 			}
-			return VersionValid
-		}
-		if e := vm.load(addr); e == nil || !e.destructed.Load() {
 			return VersionValid
 		}
 		if st, _, destroyedAt, _ := vm.ResolvedAccountLifecycleAt(addr, txIdx); st == LifecycleAbsent && !vm.destructKeptBalance(addr, destroyedAt) {
