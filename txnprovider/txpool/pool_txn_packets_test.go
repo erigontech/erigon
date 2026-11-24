@@ -433,3 +433,54 @@ func TestTransactionPacketCountLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestTransactionPacketAuthorizationLimit(t *testing.T) {
+	const half = maxRemoteAuthorizations / 2
+	txns := [][]byte{
+		remoteSetCodeTxn(t, 0, half).Rlp,
+		tpEncodeTests[1].txns[0],
+		remoteSetCodeTxn(t, 1, maxRemoteAuthorizations-half).Rlp,
+		remoteSetCodeTxn(t, 2, 1).Rlp,
+	}
+	outbound := [][]byte{remoteSetCodeTxn(t, 0, 3_700).Rlp, remoteSetCodeTxn(t, 1, 4_800).Rlp}
+	require.Less(t, len(outbound[0]), p2pTxPacketLimit)
+	require.NoError(t, ValidateSerializedTxn(outbound[1]))
+	for _, pooled := range []bool{false, true} {
+		for _, tt := range []struct {
+			name string
+			txns [][]byte
+			want int
+		}{
+			{"outbound batch with a large final transaction", outbound, 2},
+			{"at limit", txns[:3], 3},
+			{"one over", txns, 0},
+		} {
+			t.Run(fmt.Sprintf("pooled=%t/%s", pooled, tt.name), func(t *testing.T) {
+				ctx := NewTxnParseContext(*uint256.NewInt(1))
+				ctx.WithSender(false)
+				decoded := 0
+				ctx.ValidateRLP(func(txn []byte) error {
+					decoded++
+					return ValidateSerializedTxn(txn)
+				})
+				var slots TxnSlots
+				slots.Resize(1)
+				var payload []byte
+				var pos int
+				var err error
+				if pooled {
+					payload = EncodePooledTransactions66(tt.txns, 1, nil)
+					_, pos, err = ParsePooledTransactions66(payload, 0, ctx, &slots, nil)
+				} else {
+					payload = EncodeTransactions(tt.txns, nil)
+					pos, err = ParseTransactions(payload, 0, ctx, &slots, nil)
+				}
+				require.NoError(t, err)
+				require.Equal(t, len(payload), pos)
+				require.Equal(t, tt.want, decoded)
+				require.Len(t, slots.Txns, tt.want)
+				require.NoError(t, slots.Valid())
+			})
+		}
+	}
+}

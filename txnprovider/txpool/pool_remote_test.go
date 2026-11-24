@@ -38,6 +38,13 @@ func encodeRemoteTxn(t *testing.T, txn *TxnSlot) *TxnSlot {
 	return txn
 }
 
+func remoteSetCodeTxn(t *testing.T, nonce uint64, authorizationCount int) *TxnSlot {
+	t.Helper()
+	txn := newTestSetCodeTxnSlot(nonce, 0, 1, 2, 100_000)
+	txn.Txn.(*types.SetCodeTransaction).Authorizations = make([]types.Authorization, authorizationCount)
+	return encodeRemoteTxn(t, txn)
+}
+
 func TestRemoteTxnQueueLimit(t *testing.T) {
 	for _, recovering := range []bool{false, true} {
 		t.Run(fmt.Sprintf("recovering=%t", recovering), func(t *testing.T) {
@@ -129,6 +136,39 @@ func TestRemoteTxnQueueByteLimit(t *testing.T) {
 	require.Equal(t, expectedBytes+uint64(dropped.Size), pool.unprocessedRemoteBytes)
 	pool.removeProcessedRemoteTxns(len(pool.unprocessedRemoteTxns.Txns))
 	require.Zero(t, pool.unprocessedRemoteBytes)
+}
+
+func TestRemoteTxnQueueAuthorizationLimit(t *testing.T) {
+	ctx, pool, _, _ := newTestPool(t)
+	sender := common.Address{1}
+	add := func(txns ...*TxnSlot) {
+		var slots TxnSlots
+		for _, txn := range txns {
+			slots.Append(txn, sender[:], false)
+		}
+		pool.AddRemoteTxns(ctx, slots, nil, nil)
+	}
+	const half = maxRemoteAuthorizations / 2
+	first := remoteSetCodeTxn(t, 0, half)
+	second := remoteSetCodeTxn(t, 1, maxRemoteAuthorizations-half)
+	extra := remoteSetCodeTxn(t, 2, 1)
+	ordinary := encodeRemoteTxn(t, newTestTxnSlot(3, 0, 1, 2, 21_000))
+
+	add(first)
+	add(first, second, extra, ordinary)
+	require.Len(t, pool.unprocessedRemoteTxns.Txns, 3)
+	require.Same(t, first, pool.unprocessedRemoteTxns.Txns[0])
+	require.Same(t, second, pool.unprocessedRemoteTxns.Txns[1])
+	require.Same(t, ordinary, pool.unprocessedRemoteTxns.Txns[2])
+
+	pool.removeProcessedRemoteTxns(1)
+	add(first, extra)
+	require.Len(t, pool.unprocessedRemoteTxns.Txns, 3)
+	require.Same(t, first, pool.unprocessedRemoteTxns.Txns[2])
+
+	pool.removeProcessedRemoteTxns(3)
+	add(first, second)
+	require.Len(t, pool.unprocessedRemoteTxns.Txns, 2)
 }
 
 func TestRemoteTxnQueueOwnsPayload(t *testing.T) {

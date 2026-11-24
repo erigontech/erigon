@@ -97,6 +97,39 @@ func (tx *SetCodeTransaction) GetAuthorizations() []Authorization {
 	return tx.Authorizations
 }
 
+// SetCodeAuthorizationCount counts authorization list entries in a raw or RLP-enveloped
+// SetCode transaction without decoding the tuples or validating the transaction.
+func SetCodeAuthorizationCount(encoded []byte) int {
+	if len(encoded) > 0 && encoded[0] >= rlp.EmptyStringCode {
+		dataPos, dataLen, isList, err := rlp.Prefix(encoded, 0)
+		if err != nil || isList {
+			return 0
+		}
+		encoded = encoded[dataPos : dataPos+dataLen]
+	}
+	if len(encoded) == 0 || encoded[0] != SetCodeTxType {
+		return 0
+	}
+	payload := encoded[1:]
+	pos, _, err := rlp.ParseList(payload, 0)
+	if err != nil {
+		return 0
+	}
+	// chainID, nonce, tip, feeCap, gas, to, value, data and accessList precede the authorization list.
+	for range 9 {
+		dataPos, dataLen, _, err := rlp.Prefix(payload, pos)
+		if err != nil {
+			return 0
+		}
+		pos = dataPos + dataLen
+	}
+	dataPos, dataLen, err := rlp.ParseList(payload, pos)
+	if err != nil {
+		return 0
+	}
+	return rlp.CountItems(payload[dataPos : dataPos+dataLen])
+}
+
 func (tx *SetCodeTransaction) copy() *SetCodeTransaction {
 	cpy := &SetCodeTransaction{}
 	cpy.DynamicFeeTransaction = *tx.DynamicFeeTransaction.copy()

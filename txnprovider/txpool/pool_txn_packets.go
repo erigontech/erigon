@@ -23,9 +23,14 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 const maxTransactionsPerPacket = 5000
+
+// Outbound batches can append one full-size transaction after approaching the packet
+// target. Each EIP-7702 authorization takes at least 27 RLP bytes.
+const maxRemoteAuthorizations = (p2pTxPacketLimit + txnMaxSize) / 27
 
 // ParseHashesCount looks at the RLP length Prefix for list of 32-byte hashes
 // and returns number of hashes in the list to expect
@@ -176,16 +181,27 @@ func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *
 		return 0, err
 	}
 
+	authorizations := 0
 	for p, count := pos, 0; p < len(payload); count++ {
 		if count == maxTransactionsPerPacket {
 			return 0, fmt.Errorf("%w: too many transactions (limit %d)", ErrParseTxn, maxTransactionsPerPacket)
 		}
 		var dataPos, dataLen int
-		dataPos, dataLen, _, err = rlp.Prefix(payload, p)
+		var isList bool
+		dataPos, dataLen, isList, err = rlp.Prefix(payload, p)
 		if err != nil {
 			return 0, err
 		}
-		p = dataPos + dataLen
+		end := dataPos + dataLen
+		if !isList && authorizations <= maxRemoteAuthorizations {
+			authorizations += types.SetCodeAuthorizationCount(payload[p:end])
+		}
+		p = end
+	}
+	if authorizations > maxRemoteAuthorizations {
+		// This is a local work limit. An empty result drops the packet without penalizing the peer.
+		txnSlots.Resize(0)
+		return len(payload), nil
 	}
 
 	for i := 0; pos < len(payload); i++ {
