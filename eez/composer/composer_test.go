@@ -732,6 +732,19 @@ func TestComposerOutlivesAHungL1(t *testing.T) {
 		_, ok := h.c.ledger.Blocking(0)
 		require.False(t, ok, "nothing posted")
 	})
+	t.Run("a partial batch disposed of", func(t *testing.T) {
+		h := newHarness(t, newTestChain(t, 8), 8, hung{})
+		h.c.cfg.L1Read = 50 * time.Millisecond
+		pool := NewHeldPool()
+		h.c.Recover(pool, nil)
+		require.NoError(t, pool.Push(held(addr(0xa), 0, Inbound, 1), 0))
+		h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: pool.PopN(1)})
+		h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
+		h.cursor.Store(8)
+		within(t, func() { h.c.RecoverFailed(t.Context()) })
+		r, _ := h.resolution(8)
+		require.Equal(t, SettledPartial, r, "an unanswered read changes nothing")
+	})
 }
 
 // rolling is an L1 node whose head and pool the test moves; no posting has
@@ -931,21 +944,107 @@ func TestComposerRequeuesRolledOutTransactions(t *testing.T) {
 	require.Equal(t, []*Held{tx}, pool.PopN(math.MaxInt), "requeued")
 }
 
-// TestComposerReleasesPartialTransactions: a batch L1 kept part of lets its
-// transactions go once derivation passes it.
-func TestComposerReleasesPartialTransactions(t *testing.T) {
-	h := newHarness(t, newTestChain(t, 8), 8, nil)
-	pool := NewHeldPool()
-	h.c.Recover(pool, nil)
-	tx := held(addr(0xa), 0, Inbound, 1)
-	require.NoError(t, pool.Push(tx, 0))
-	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Txs: pool.PopN(1)})
-	h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
-	h.cursor.Store(8)
-	h.c.RecoverFailed(t.Context())
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-	require.Empty(t, pool.inFlight)
+// TestComposerDisposesOfPartialTransactions: once derivation passes a batch
+// L1 kept part of, the triggers L1 has are spent and let go; the rest return
+// to the pool, and only the one where L1 stopped is charged.
+func TestComposerDisposesOfPartialTransactions(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		attempts uint32 // of the first trigger
+		lookup   error
+		// spentFirst has the first trigger run on L1.
+		spentFirst bool
+		allSpent   bool
+		// queued are the transactions back in the pool, with their attempts.
+		queued map[common.Hash]uint32
+		kept   bool // the batch waits for the next call
+	}{
+		{name: "the rest requeued, the first unspent charged", queued: map[common.Hash]uint32{{2}: 1, {4}: 0, {5}: 0}},
+		{name: "the charge evicts the chain", attempts: 2, queued: map[common.Hash]uint32{{4}: 0}},
+		{name: "none charged behind a spent trigger", spentFirst: true, queued: map[common.Hash]uint32{{4}: 0, {5}: 0}},
+		{name: "a lookup failing", lookup: errors.New("node down"), queued: map[common.Hash]uint32{{5}: 0}, kept: true},
+		{name: "every trigger spent", allSpent: true, queued: map[common.Hash]uint32{{5}: 0}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			node := &triggers{landed: map[common.Hash]bool{}, failed: c.lookup}
+			h := newHarness(t, newTestChain(t, 8), 8, node)
+			pool := NewHeldPool()
+			h.c.Recover(pool, nil)
+			cut := held(addr(0xb), 0, Inbound, 2)
+			cut.Attempts = c.attempts
+			behind := held(addr(0xb), 1, Inbound, 5)
+			landed, dropped := held(addr(0xc), 0, Inbound, 3), held(addr(0xd), 0, Inbound, 4)
+			node.landed[landed.Hash] = true
+			if c.spentFirst {
+				node.landed[cut.Hash] = true
+			}
+			if c.allSpent {
+				node.landed[cut.Hash], node.landed[dropped.Hash] = true, true
+			}
+			for _, tx := range []*Held{cut, behind, landed, dropped} {
+				require.NoError(t, pool.Push(tx, 0))
+			}
+			txs := pool.PopN(math.MaxInt)
+			// b's second transaction missed the batch: it waits in the pool.
+			pool.PushFront([]*Held{behind})
+			txs = slices.DeleteFunc(txs, func(tx *Held) bool { return tx == behind })
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: txs})
+			h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
+			h.cursor.Store(8)
+
+			h.c.RecoverFailed(t.Context())
+			r, _ := h.resolution(8)
+			if c.kept {
+				require.Equal(t, SettledPartial, r)
+			} else {
+				require.Equal(t, Settled, r)
+				h.c.ledger.mu.Lock()
+				var spent []common.Hash
+				for _, tx := range h.c.ledger.entries[8].Txs {
+					spent = append(spent, tx.Hash)
+				}
+				h.c.ledger.mu.Unlock()
+				require.Contains(t, spent, landed.Hash, "kept for a reorg")
+				require.Equal(t, c.allSpent, slices.Contains(spent, dropped.Hash), "only what ran is kept")
+			}
+			got := map[common.Hash]uint32{}
+			for _, tx := range pool.PopN(math.MaxInt) {
+				got[tx.Hash] = tx.Attempts
+			}
+			require.Equal(t, c.queued, got)
+			if !c.kept {
+				pool.mu.Lock()
+				defer pool.mu.Unlock()
+				require.Len(t, pool.inFlight, len(got), "only the requeued, now drained, are reserved")
+			}
+		})
+	}
+}
+
+// TestPartialCulprit: L1 stopped a partial batch at its first trigger when
+// unspent; a later trigger may only be stuck behind one that ran and
+// reverted.
+func TestPartialCulprit(t *testing.T) {
+	spentOf := func(txs ...*Held) map[common.Hash]bool {
+		m := map[common.Hash]bool{}
+		for _, tx := range txs {
+			m[tx.Hash] = true
+		}
+		return m
+	}
+	b := addr(0xb)
+	t.Run("the first when unspent", func(t *testing.T) {
+		dropped, behind := held(b, 4, Inbound, 4), held(b, 5, Inbound, 5)
+		require.Equal(t, dropped, partialCulprit([]*Held{dropped, behind}, spentOf()))
+	})
+	t.Run("none behind a spent one", func(t *testing.T) {
+		reverted, stuck := held(b, 3, Inbound, 3), held(b, 4, Inbound, 4)
+		require.Nil(t, partialCulprit([]*Held{reverted, stuck}, spentOf(reverted)))
+	})
+	t.Run("none when all are spent", func(t *testing.T) {
+		x, y := held(b, 1, Inbound, 1), held(b, 2, Inbound, 2)
+		require.Nil(t, partialCulprit([]*Held{x, y}, spentOf(x, y)))
+	})
 }
 
 // TestComposerChunkWithinTheGasLimit: a candidate over the gas limit gives

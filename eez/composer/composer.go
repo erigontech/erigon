@@ -582,16 +582,20 @@ func (c *Composer) recoverHeld(ctx context.Context, p Posted[*Held]) {
 	c.pool.PushFront(keep)
 }
 
-// charge counts a failed bundle against each of txs and returns those left:
-// one at maxAttempts is evicted with the rest of its nonce chain.
-func (c *Composer) charge(txs []*Held) []*Held {
+// charge counts a failed bundle against each of charged, by default all of
+// txs, and returns those of txs left: one at maxAttempts is evicted with the
+// rest of its nonce chain.
+func (c *Composer) charge(txs []*Held, charged ...*Held) []*Held {
 	type root struct {
 		sender    common.Address
 		direction Direction
 		nonce     uint64
 	}
+	if len(charged) == 0 {
+		charged = txs
+	}
 	var roots []root
-	for _, tx := range txs {
+	for _, tx := range charged {
 		tx.Attempts++
 		if tx.Attempts >= maxAttempts {
 			roots = append(roots, root{tx.Sender, tx.Direction, tx.Nonce})
@@ -648,10 +652,13 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 		if !ok {
 			break
 		}
-		// Until a partial batch's transactions are disposed of by what ran
-		// (C4.2), they are let go.
-		c.release(p.Txs)
-		c.ledger.ClaimPartial(p.Height, p.Post, nil)
+		if len(p.Txs) == 0 {
+			c.ledger.ClaimPartial(p.Height, p.Post, nil)
+			continue
+		}
+		if !c.disposePartial(ctx, p) {
+			break
+		}
 	}
 	return cursor
 }
@@ -709,4 +716,57 @@ func (c *Composer) audit(p Posted[*Held]) {
 	case r == nil:
 		c.logger.Error("[eez] finalized settlement's posting is not on L1", "event", "eez.composer.finality_audit.rolled_out", "to", p.Height, "post", p.Post)
 	}
+}
+
+// partialCulprit returns the transaction where L1 stopped a partial batch of
+// txs, given those spent: its first one when unspent, as one behind a spent
+// trigger may only be stuck behind it. Nil names none.
+func partialCulprit(txs []*Held, spent map[common.Hash]bool) *Held {
+	if len(txs) == 0 || spent[txs[0].Hash] {
+		return nil
+	}
+	return txs[0]
+}
+
+// disposePartial disposes of p, a batch L1 kept part of, by what ran: the
+// triggers L1 has are spent and let go, kept with p for a later reorg; the
+// rest return to the pool, the one where L1 stopped charged. False leaves p
+// for the next call, a read having failed.
+func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
+	rctx, cancel := context.WithTimeout(ctx, c.cfg.L1Read)
+	defer cancel()
+	spent := map[common.Hash]bool{}
+	for _, tx := range p.Txs {
+		r, err := c.observer.Node.Receipt(rctx, tx.Hash)
+		if err != nil {
+			return false
+		}
+		spent[tx.Hash] = r != nil
+	}
+	var ran, rest []*Held
+	for _, tx := range p.Txs {
+		if spent[tx.Hash] {
+			ran = append(ran, tx)
+		} else {
+			rest = append(rest, tx)
+		}
+	}
+	// A reorg during the reads may have taken the batch and requeued it.
+	if !c.ledger.ClaimPartial(p.Height, p.Post, ran) {
+		return true
+	}
+	culprit, charged := partialCulprit(p.Txs, spent), common.Hash{}
+	if culprit != nil {
+		charged = culprit.Hash
+	}
+	c.logger.Info("[eez] partial settlement disposed of", "event", "eez.composer.recovery.settled_partial",
+		"to", p.Height, "post", p.Post, "txs", len(p.Txs), "spent", len(ran), "charged", charged)
+	c.release(ran)
+	if culprit != nil {
+		rest = c.charge(rest, culprit)
+	}
+	if len(rest) > 0 {
+		c.pool.PushFront(rest)
+	}
+	return true
 }
