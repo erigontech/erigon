@@ -139,7 +139,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, fmt.Errorf("no contract at %x", address)
 	}
 
-	blockNum, _, ok, err := api.txnLookup(ctx, tx, creationData.Tx)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, creationData.Tx)
 	if err != nil {
 		return nil, err
 	}
@@ -162,15 +162,11 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, fmt.Errorf("block not found: %d", blockNum)
 	}
 
-	transactionIndex := -1
-	for idx, transaction := range block.Transactions() {
-		if transaction.Hash() == creationData.Tx {
-			transactionIndex = idx
-			break
-		}
+	transactionIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum)
+	if err != nil {
+		return nil, err
 	}
-
-	if transactionIndex == -1 {
+	if transactionIndex >= block.Transactions().Len() || block.Transactions()[transactionIndex].Hash() != creationData.Tx {
 		return nil, fmt.Errorf("could not find txn hash")
 	}
 
@@ -187,7 +183,8 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateHistoryStateReader(ctx, tx, blockNum, 0, api._txNumReader)
+	// The history at the creation transaction already holds the effects of the earlier ones.
+	stateReader, err := rpchelper.CreateHistoryStateReaderAtTxNum(ctx, tx, blockNum, txNum, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -206,25 +203,6 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	rules := blockCtx.Rules(chainConfig)
 
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
-	// Replay the earlier transactions with their original messages to restore
-	// the state at the start of the deployment transaction.
-	for idx, txn := range block.Transactions()[:transactionIndex] {
-		statedb.SetTxContext(blockNum, idx)
-		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
-		if err != nil {
-			return nil, err
-		}
-		txCtx := protocol.NewEVMTxContext(msg)
-		evm := vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{})
-		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
-		if err != nil {
-			return nil, err
-		}
-		if err := ethapi.FinalizeCallTx(statedb, rules); err != nil {
-			return nil, err
-		}
-	}
-
 	statedb.SetTxContext(blockNum, transactionIndex)
 
 	msg, err := creationTx.AsMessage(*signer, block.BaseFee(), rules)

@@ -970,6 +970,137 @@ func TestCallConstructorPreservesSiblingCreate(t *testing.T) {
 	require.Equal(t, &CreationCode{Code: &want}, result)
 }
 
+// The replacement constructor runs on the state left by the earlier transactions of the block.
+func TestCallConstructorReadsStateOfEarlierTransactions(t *testing.T) {
+	recipient := common.HexToAddress("0x4000")
+	otherKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chain.TestChainOsakaConfig.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+			crypto.PubkeyToAddress(otherKey.PublicKey): {Balance: big.NewInt(1_000_000_000_000_000_000)},
+		},
+	}), execmoduletester.WithKey(testKey))
+	signer := types.LatestSigner(m.ChainConfig)
+	gasPrice := uint256.NewInt(2_000_000_000)
+	var txns []types.Transaction
+	for nonce := range uint64(3) {
+		txn, err := types.SignTx(types.NewTransaction(nonce, recipient, uint256.NewInt(1), 21_000, gasPrice, nil), *signer, otherKey)
+		require.NoError(t, err)
+		txns = append(txns, txn)
+	}
+	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+	creation, err := types.SignTx(types.NewContractCreation(0, new(uint256.Int), 100_000, gasPrice, initCode), *signer, testKey)
+	require.NoError(t, err)
+	txns = append(txns, creation)
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		for _, txn := range txns {
+			b.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+
+	replacement := program.New().Push(recipient).Op(vm.BALANCE).Push(0).Op(vm.MSTORE8).Return(0, 1)
+	result, err := api.CallConstructor(m.Ctx, types.CreateAddress(testAddr, 0), replacement.Bytes())
+	require.NoError(t, err)
+	want := hexutil.Bytes{3}
+	require.Equal(t, &CreationCode{Code: &want}, result)
+}
+
+// The coinbase balance seen by the replacement constructor includes the tips of the earlier
+// transactions, a reverted one included.
+func TestCallConstructorReadsCoinbaseTipsOfEarlierTransactions(t *testing.T) {
+	coinbase := common.HexToAddress("0xc0ffee")
+	reverter := common.HexToAddress("0x5000")
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chain.TestChainOsakaConfig.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+			reverter: {Code: program.New().Push(1).Push(0).Op(vm.SSTORE).Push(0).Push(0).Op(vm.REVERT).Bytes()},
+		},
+	}), execmoduletester.WithKey(testKey))
+	signer := types.LatestSigner(m.ChainConfig)
+	gasPrice := uint256.NewInt(2_000_000_000)
+	reverted, err := types.SignTx(types.NewTransaction(0, reverter, new(uint256.Int), 100_000, gasPrice, nil), *signer, testKey)
+	require.NoError(t, err)
+	transfer, err := types.SignTx(types.NewTransaction(1, common.HexToAddress("0x4000"), uint256.NewInt(1), 21_000, gasPrice, nil), *signer, testKey)
+	require.NoError(t, err)
+	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+	creation, err := types.SignTx(types.NewContractCreation(2, new(uint256.Int), 100_000, gasPrice, initCode), *signer, testKey)
+	require.NoError(t, err)
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		b.SetCoinbase(coinbase)
+		for _, txn := range []types.Transaction{reverted, transfer, creation} {
+			b.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	receipts := pack.Receipts[0]
+	require.Equal(t, types.ReceiptStatusFailed, receipts[0].Status)
+	tip := new(uint256.Int).Sub(gasPrice, pack.Headers[0].BaseFee)
+	tips := new(uint256.Int).Mul(tip, uint256.NewInt(receipts[0].GasUsed+receipts[1].GasUsed))
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+
+	replacement := program.New().Op(vm.COINBASE).Op(vm.BALANCE).Push(0).Op(vm.MSTORE).Return(0, 32)
+	result, err := api.CallConstructor(m.Ctx, types.CreateAddress(testAddr, 2), replacement.Bytes())
+	require.NoError(t, err)
+	word := tips.Bytes32()
+	want := hexutil.Bytes(word[:])
+	require.Equal(t, &CreationCode{Code: &want}, result)
+}
+
+// A delegation set by an earlier EIP-7702 transaction of the block is visible to the replacement constructor.
+func TestCallConstructorReadsDelegationOfEarlierTransaction(t *testing.T) {
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	authorityKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chain.TestChainOsakaConfig.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+			crypto.PubkeyToAddress(senderKey.PublicKey): {Balance: big.NewInt(1_000_000_000_000_000_000)},
+		},
+	}), execmoduletester.WithKey(testKey))
+	signer := types.LatestSigner(m.ChainConfig)
+	chainID := *uint256.MustFromBig(m.ChainConfig.ChainID.ToBig())
+	gasPrice := uint256.NewInt(2_000_000_000)
+	auth, err := types.SignAuthorization(authorityKey, chainID, common.HexToAddress("0x1234"), 0)
+	require.NoError(t, err)
+	delegation, err := types.SignTx(&types.SetCodeTransaction{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{GasLimit: 100_000, To: &authority},
+			ChainID:  chainID, TipCap: *gasPrice, FeeCap: *gasPrice,
+		},
+		Authorizations: []types.Authorization{auth},
+	}, *signer, senderKey)
+	require.NoError(t, err)
+	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+	creation, err := types.SignTx(types.NewContractCreation(0, new(uint256.Int), 100_000, gasPrice, initCode), *signer, testKey)
+	require.NoError(t, err)
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		b.AddTx(delegation)
+		b.AddTx(creation)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+
+	replacement := program.New().Push(authority).Op(vm.EXTCODESIZE).Push(0).Op(vm.MSTORE8).Return(0, 1)
+	result, err := api.CallConstructor(m.Ctx, types.CreateAddress(testAddr, 0), replacement.Bytes())
+	require.NoError(t, err)
+	want := hexutil.Bytes{23}
+	require.Equal(t, &CreationCode{Code: &want}, result)
+}
+
 func TestCallConstructorNestedInitCodeErrors(t *testing.T) {
 	entry, factory := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
 	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
