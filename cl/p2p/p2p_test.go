@@ -92,7 +92,7 @@ func TestNewP2PManagerLogsBoundAndAdvertisedQUIC(t *testing.T) {
 	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
 
 	ctx, cancel := context.WithCancel(t.Context())
-	manager, err := NewP2Pmanager(ctx, cfg, logger, clock)
+	manager, _, err := NewP2Pmanager(ctx, cfg, logger, clock)
 	require.NoError(t, err)
 	listener := manager.UDPv5Listener()
 	localNodeDB := listener.LocalNode().Database()
@@ -140,7 +140,7 @@ func TestNewP2PManagerRejectsSharedDiscoveryAndQUICPort(t *testing.T) {
 	}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
 
-	_, err = NewP2Pmanager(t.Context(), cfg, log.Root(), clock)
+	_, _, err = NewP2Pmanager(t.Context(), cfg, log.Root(), clock)
 	require.EqualError(t, err, "discovery and QUIC ports must differ: 9000")
 }
 
@@ -169,7 +169,7 @@ func TestNewP2PManagerAllowsSharedDiscoveryAndQUICPortWhenQUICDisabled(t *testin
 			TmpDir:        t.TempDir(),
 		}
 		ctx, cancel := context.WithCancel(t.Context())
-		manager, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
+		manager, _, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
 		if errors.Is(err, syscall.EADDRINUSE) {
 			cancel()
 			continue
@@ -250,7 +250,7 @@ func TestNewP2PManagerAllowsSharedDiscoveryAndTCPPort(t *testing.T) {
 			TmpDir:        t.TempDir(),
 		}
 		ctx, cancel := context.WithCancel(t.Context())
-		manager, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
+		manager, _, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
 		if errors.Is(err, syscall.EADDRINUSE) {
 			cancel()
 			continue
@@ -308,7 +308,7 @@ func TestNewP2PManagerClosesHostWhenDiscoveryStartupFails(t *testing.T) {
 	}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
 
-	_, err = NewP2Pmanager(context.Background(), cfg, log.Root(), clock)
+	_, _, err = NewP2Pmanager(context.Background(), cfg, log.Root(), clock)
 	require.Error(t, err)
 	require.NotZero(t, cfg.TCPPort)
 	require.NotZero(t, cfg.QUICPort)
@@ -350,7 +350,7 @@ func TestNewP2PManagerRejectsPartialStartupWhenTCPPortIsOccupied(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 
 	require.NoError(t, quicProbe.Close())
-	manager, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
+	manager, _, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
 	cancel()
 	if manager != nil {
 		listener := manager.UDPv5Listener()
@@ -395,7 +395,7 @@ func TestNewP2PManagerRejectsPartialStartupWhenQUICPortIsOccupied(t *testing.T) 
 	ctx, cancel := context.WithCancel(t.Context())
 
 	require.NoError(t, tcpProbe.Close())
-	manager, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
+	manager, _, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
 	cancel()
 	if manager != nil {
 		listener := manager.UDPv5Listener()

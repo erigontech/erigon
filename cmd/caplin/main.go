@@ -108,11 +108,15 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 	}
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
+	// The standalone binary never restarts the runtime, so its session opens
+	// the p2p stack once and closes it when the process ends.
+	network := caplin1.NewNetworkSession(ctx)
+	defer network.Stop()
 
 	config := newCaplinConfig(cliCtx, cfg)
 	config.BeaconAPIRouter = rcfg
 	config.NetworkId = networkId
-	return caplin1.RunCaplinService(ctx, executionEngine, config, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema)
+	return caplin1.RunCaplinService(ctx, executionEngine, config, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema, network)
 }
 
 func newCaplinConfig(cliCtx *cli.Command, cfg *caplincli.CaplinCliCfg) clparams.CaplinConfig {

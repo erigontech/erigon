@@ -162,6 +162,37 @@ func (c *ConsensusHandlers) Start() {
 	}
 }
 
+// selfAnswered names the protocols served from the sentinel's own state —
+// its config, its handshake status and the shared PeerDAS state — with no
+// read of a Caplin runtime's stores.
+var selfAnswered = map[protocol.ID]struct{}{
+	protocol.ID(communication.PingProtocolV1):     {},
+	protocol.ID(communication.GoodbyeProtocolV1):  {},
+	protocol.ID(communication.StatusProtocolV1):   {},
+	protocol.ID(communication.StatusProtocolV2):   {},
+	protocol.ID(communication.MetadataProtocolV1): {},
+	protocol.ID(communication.MetadataProtocolV2): {},
+	protocol.ID(communication.MetadataProtocolV3): {},
+}
+
+// Stop retires the handlers that read the runtime's stores, which a restart
+// closes under them. They are replaced rather than removed: the host keeps
+// its peers across a restart, and a peer that sees a protocol disappear
+// penalises the node for not supporting it.
+func (c *ConsensusHandlers) Stop() {
+	for id := range c.handlers {
+		if _, ok := selfAnswered[id]; ok {
+			continue
+		}
+		c.host.SetStreamHandler(id, resourceUnavailable)
+	}
+}
+
+func resourceUnavailable(s network.Stream) {
+	_ = ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
+	_ = s.Close()
+}
+
 func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Stream) error) func(s network.Stream) {
 	return func(s network.Stream) {
 		defer func() {

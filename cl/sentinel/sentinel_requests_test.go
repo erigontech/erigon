@@ -120,7 +120,7 @@ func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, p
 
 func newTestP2PManager(t *testing.T, ethClock eth_clock.EthereumClock) p2p.P2PManager {
 	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
-	pm, err := p2p.NewP2Pmanager(t.Context(), &p2p.P2PConfig{
+	pm, _, err := p2p.NewP2Pmanager(t.Context(), &p2p.P2PConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  beaconConfig,
 		IpAddr:        "127.0.0.1",

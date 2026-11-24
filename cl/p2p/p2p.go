@@ -84,9 +84,9 @@ func loadOrGenerateKey(dataDir string) (*ecdsa.PrivateKey, error) {
 	return cfg.LoadOrGenerateAndSave(filepath.Join(dataDir, "caplin-nodekey"))
 }
 
-func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethClock eth_clock.EthereumClock) (P2PManager, error) {
+func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethClock eth_clock.EthereumClock) (P2PManager, func(), error) {
 	if discoveryAndQUICPortConflict(cfg) {
-		return nil, fmt.Errorf("discovery and QUIC ports must differ: %d", cfg.Port)
+		return nil, nil, fmt.Errorf("discovery and QUIC ports must differ: %d", cfg.Port)
 	}
 
 	// Resolve external IP from NAT once so both discv5 ENR and libp2p multiaddrs use
@@ -105,34 +105,34 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	for i, bootnode := range cfg.NetworkConfig.BootNodes {
 		newNode, err := enode.Parse(enode.ValidSchemes, bootnode)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		enodes[i] = newNode
 	}
 
 	privateKey, err := loadOrGenerateKey(cfg.DataDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	gater, err := NewGater(cfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	opts, err := buildOptions(cfg, privateKey)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	bwc := metrics.NewBandwidthCounter()
 	opts = append(opts, libp2p.ConnectionGater(gater), libp2p.BandwidthReporter(bwc))
 	host, err := libp2p.New(opts...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tcpPort := hostTCPPort(host)
 	if tcpPort == 0 {
 		host.Close()
-		return nil, fmt.Errorf("failed to bind TCP listener on port %d", cfg.TCPPort)
+		return nil, nil, fmt.Errorf("failed to bind TCP listener on port %d", cfg.TCPPort)
 	}
 	cfg.TCPPort = tcpPort
 	if cfg.DisableQUIC {
@@ -141,7 +141,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		quicPort := hostQUICPort(host)
 		if quicPort == 0 {
 			host.Close()
-			return nil, fmt.Errorf("failed to bind QUIC listener on port %d", cfg.QUICPort)
+			return nil, nil, fmt.Errorf("failed to bind QUIC listener on port %d", cfg.QUICPort)
 		}
 		cfg.QUICPort = quicPort
 	}
@@ -172,11 +172,11 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	pubsub.TimeCacheDuration = gossipSubSeenTTL * gossipSubHeartbeatInterval
 	psOpts, err := p.pubsubOptions(cfg.BeaconConfig)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	p.pubsub, err = pubsub.NewGossipSub(p2pCtx, host, psOpts...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// udpv5
@@ -186,17 +186,17 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	}
 	p.udpv5, err = NewUDPv5Listener(p2pCtx, cfg, discCfg, logger)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// connect to bootnodes
 	if err := p.connectToBootnodes(p2pCtx, discCfg); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// setup ENR
 	if err := p.setupENR(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	enrQUIC := "unavailable"
 	if endpoint, ok := p.udpv5.LocalNode().Node().QUICEndpoint(); ok {
@@ -208,10 +208,20 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		"quic_port", cfg.QUICPort,
 		"enr_quic", enrQUIC,
 		"advertised_addrs", host.Addrs())
-	go p.updateENR()
+	go p.updateENR(p2pCtx)
 	go p.peerMonitor(p2pCtx)
 	initialized = true
-	return &p, nil
+	stop := func() {
+		cancel()
+		p.udpv5.Close()
+		if localNode := p.udpv5.LocalNode(); localNode != nil {
+			localNode.Database().Close()
+		}
+		if err := host.Close(); err != nil {
+			logger.Warn("[Caplin] closing libp2p host", "err", err)
+		}
+	}
+	return &p, stop, nil
 }
 
 func discoveryAndQUICPortConflict(cfg *P2PConfig) bool {
@@ -323,7 +333,7 @@ func (p *p2pManager) setupENR() error {
 	return nil
 }
 
-func (p *p2pManager) updateENR() {
+func (p *p2pManager) updateENR(ctx context.Context) {
 	node := p.udpv5.LocalNode()
 	if node == nil {
 		panic("local node is nil")
@@ -336,7 +346,11 @@ func (p *p2pManager) updateENR() {
 		// sleep until next fork epoch
 		wakeupTime := p.ethClock.GetSlotTime(nextForkEpoch * p.cfg.BeaconConfig.SlotsPerEpoch).Add(time.Second)
 		log.Info("[Sentinel] Sleeping until next fork epoch", "nextForkEpoch", nextForkEpoch, "wakeupTime", wakeupTime)
-		time.Sleep(time.Until(wakeupTime)) // add 1 second for safety
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Until(wakeupTime)):
+		}
 		nfd, err := p.ethClock.NextForkDigest()
 		if err != nil {
 			log.Warn("[Sentinel] Could not get next fork digest", "err", err)

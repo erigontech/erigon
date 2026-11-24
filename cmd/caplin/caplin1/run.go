@@ -221,6 +221,7 @@ func selectConsensusEngine(engineType string, logger log.Logger) consensus.Engin
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader dbservices.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted,
+	network *NetworkSession,
 ) error {
 	var networkConfig *clparams.NetworkConfig
 	var beaconConfig *clparams.BeaconChainConfig
@@ -440,7 +441,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 	}
 
-	p2p, err := clp2p.NewP2Pmanager(ctx, &clp2p.P2PConfig{
+	p2p, err := network.P2P(&clp2p.P2PConfig{
 		IpAddr:         config.CaplinDiscoveryAddr,
 		Port:           int(config.CaplinDiscoveryPort),
 		TCPPort:        uint(config.CaplinDiscoveryTCPPort),

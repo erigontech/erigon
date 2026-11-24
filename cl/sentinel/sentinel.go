@@ -70,6 +70,8 @@ type Sentinel struct {
 	indiciesDB kv.RoDB
 
 	discoverConfig     discover.Config
+	notifiee           *network.NotifyBundle
+	handlers           *handlers.ConsensusHandlers
 	metrics            bool
 	logger             log.Logger
 	forkChoiceReader   forkchoice.ForkChoiceStorageReader
@@ -165,7 +167,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 	}*/
 	s.listener = s.p2p.UDPv5Listener()
 
-	handlers.NewConsensusHandlers(
+	s.handlers = handlers.NewConsensusHandlers(
 		s.ctx,
 		s.blockReader,
 		s.indiciesDB,
@@ -173,19 +175,21 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		s.cfg.NetworkConfig,
 		s.p2p.UDPv5Listener().LocalNode(),
 		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks, s.cfg.EnvelopeRebuilder,
-	).Start()
+	)
+	s.handlers.Start()
 
 	/*if err := s.connectToBootnodes(); err != nil {
 		return nil, fmt.Errorf("failed to connect to bootnodes err=%w", err)
 	}*/
 	// Configuring handshake
-	s.p2p.Host().Network().Notify(&network.NotifyBundle{
+	s.notifiee = &network.NotifyBundle{
 		ConnectedF: s.onConnection,
 		DisconnectedF: func(n network.Network, c network.Conn) {
 			peerId := c.RemotePeer()
 			log.Trace("[Sentinel] Peer disconnected", "peer", peerId, "direction", c.Stat().Direction, "addr", c.RemoteMultiaddr())
 		},
-	})
+	}
+	s.p2p.Host().Network().Notify(s.notifiee)
 	go s.listenForPeers()
 	go s.proactiveSubnetPeerSearch() // Proactively search for peers when subnet coverage is low
 	_, connected, _ := s.GetPeersCount()
@@ -212,10 +216,20 @@ func (s *Sentinel) updatePeerMetrics() {
 	}
 }
 
+// Stop releases what this Sentinel owns. The libp2p host and the discv5
+// listener are not among them: they belong to the p2p manager, which
+// outlives any one Caplin runtime, and rebuilding their peer set costs far
+// more than the restart that releases this Sentinel.
 func (s *Sentinel) Stop() {
-	//s.listener.Close()
+	if s.handlers != nil {
+		s.handlers.Stop()
+		s.handlers = nil
+	}
+	if s.notifiee != nil {
+		s.p2p.Host().Network().StopNotify(s.notifiee)
+		s.notifiee = nil
+	}
 	s.cancel()
-	s.p2p.Host().Close()
 }
 
 func (s *Sentinel) String() string {

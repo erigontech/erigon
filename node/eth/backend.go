@@ -187,6 +187,8 @@ type Ethereum struct {
 	shutterPool               *shutter.Pool
 	blockBuilderNotifyNewTxns chan struct{}
 	components                *nodebuilder.Builder
+	// caplinNetwork holds the p2p stack Caplin runtimes share, so a restart keeps its peer set.
+	caplinNetwork *caplin1.NetworkSession
 
 	blockSnapshots *blocksnapshots.RoSnapshots
 	blockReader    dbservices.FullBlockReader
@@ -954,13 +956,15 @@ func New(
 				return nil, err
 			}
 		}
+		backend.caplinNetwork = caplin1.NewNetworkSession(ctx)
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter); err != nil {
+			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter, backend.caplinNetwork); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					logger.Error("could not start caplin", "err", err)
 				}
 			}
+			backend.caplinNetwork.Stop()
 			ctxCancel()
 		}()
 		// Start embedded dev validator if configured.
