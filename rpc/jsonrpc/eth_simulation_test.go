@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
@@ -1088,6 +1089,86 @@ func TestComputeSimulatedStateRootWithoutCommitmentHistory(t *testing.T) {
 
 			require.NoError(t, err)
 			require.Equal(t, common.Hash{}, block.Root())
+		})
+	}
+}
+
+func TestSimulatedChainReaderHeaderLookup(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	stored := &types.Header{Number: *uint256.NewInt(1), Time: 10}
+	require.NoError(t, rawdb.WriteHeader(tx, stored))
+	simulated := types.CopyHeader(stored)
+	simulated.Time = 20
+	reader := &simulatedChainReader{
+		Reader: consensuschain.NewReader(chain.AllProtocolChanges, tx, nil, log.New()),
+		parent: simulated,
+	}
+	for _, tc := range []struct {
+		name   string
+		hash   common.Hash
+		number uint64
+		want   *types.Header
+	}{
+		{name: "simulated", hash: simulated.Hash(), number: 1, want: simulated},
+		{name: "stored", hash: stored.Hash(), number: 1, want: stored},
+		{name: "wrong hash", hash: common.Hash{1}, number: 1},
+		{name: "wrong number", hash: simulated.Hash(), number: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := reader.GetHeader(tc.hash, tc.number)
+			if tc.want == nil {
+				require.Nil(t, got)
+			} else {
+				require.NotNil(t, got)
+				require.Equal(t, tc.want.Hash(), got.Hash())
+			}
+		})
+	}
+}
+
+func TestSimulateV1EIP8253AcrossBlocks(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		bogotaTime uint64
+	}{
+		{name: "already active", bogotaTime: 1},
+		{name: "activation in simulation", bogotaTime: 30},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target := common.HexToAddress("0x8253")
+			cfg := chain.AllProtocolChanges.Copy()
+			cfg.BogotaTime = &tc.bogotaTime
+			cfg.ZeroNonceStorageAccounts = []common.Address{target}
+			m, bank := contractGenesis(t, cfg, target, types.GenesisAccount{
+				Balance: big.NewInt(1_000_000_000_000_000_000),
+				Storage: map[common.Hash]common.Hash{{}: {31: 42}},
+			})
+			api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+			call := ethapi.CallArgs{From: &target, To: &bank, Gas: newUint64(30_000), MaxFeePerGas: newBig(1_000_000_000_000)}
+			result, err := api.SimulateV1(t.Context(), SimulationRequest{
+				Validation:             true,
+				ReturnFullTransactions: true,
+				BlockStateCalls: []SimulatedBlock{
+					{BlockOverrides: &ethapi.BlockOverrides{Time: newUint64(20)}},
+					{BlockOverrides: &ethapi.BlockOverrides{Time: newUint64(30)}, Calls: []ethapi.CallArgs{call}},
+					{BlockOverrides: &ethapi.BlockOverrides{Time: newUint64(40)}, Calls: []ethapi.CallArgs{call}},
+				},
+			}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+			require.NoError(t, err)
+			require.Len(t, result, 3)
+			for i, wantNonce := range []uint64{1, 2} {
+				block := result[i+1]
+				require.Equal(t, *result[i].Hash, block.ParentHash)
+				require.Len(t, block.Calls, 1)
+				require.EqualValues(t, types.ReceiptStatusSuccessful, block.Calls[0].Status)
+				txns, ok := block.Transactions.([]*ethapi.RPCTransaction)
+				require.True(t, ok)
+				require.Len(t, txns, 1)
+				require.EqualValues(t, wantNonce, txns[0].Nonce)
+			}
 		})
 	}
 }

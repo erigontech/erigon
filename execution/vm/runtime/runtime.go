@@ -224,7 +224,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	// zero-value transfer does not create the sender, so the origin has to
 	// exist for the dump and for CALL gas to match.
 	if !rules.IsEIP161Enabled() {
-		if _, err := statedb.GetOrNewStateObject(cfg.Origin); err != nil {
+		if err := statedb.TouchAccount(cfg.Origin); err != nil {
 			return nil, mdgas.MdGas{}, err
 		}
 	}

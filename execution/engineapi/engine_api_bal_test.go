@@ -733,10 +733,10 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 //     That removed the new contract's SSTORE-gas-calc read from the
 //     per-tx read set before it was merged into balIO.
 //
-//   - Parallel executor (validator): txtask.Execute calls SoftFinalise +
-//     MakeWriteSet, which never had the corresponding delete. The read
-//     survived into result.TxIn and ended up in blockIO as a
-//     storageReads=[0x01] entry on the ephemeral contract's address.
+//   - Parallel executor (validator): txtask.Execute's write-set production
+//     never had the corresponding delete. The read survived into result.TxIn
+//     and ended up in blockIO as a storageReads=[0x01] entry on the ephemeral
+//     contract's address.
 //
 // BuildCanonicalBlock ran the block through both paths (assembler-signed
 // header BAL hash, parallel-executor validator BAL hash). Divergence →
