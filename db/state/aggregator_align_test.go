@@ -296,6 +296,32 @@ func checkFilesDBGapOf(t *testing.T, db kv.RoDB, agg *Aggregator) error {
 	return at.CheckFilesDBGap(tx)
 }
 
+// The coverage filter reads dependency state, which is guarded by dirtyFilesLock.
+func TestCoverageFilterRunsUnderTheDirtyFilesLock(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 2}})
+	accessors, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "*-accounts.0-2.bt"))
+	require.NoError(t, err)
+	require.Len(t, accessors, 1)
+	require.NoError(t, dir.RemoveFile(accessors[0]))
+	require.NoError(t, agg.OpenFolder(db))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 100 {
+			agg.DisableAllDependencies()
+			agg.EnableAllDependencies()
+		}
+	}()
+	for range 100 {
+		agg.hasAccessorsToBuild()
+	}
+	<-done
+}
+
 // removeFiles removes the data file of base for r and every accessor of it.
 func removeFiles(t *testing.T, dirs datadir.Dirs, dataDir, base string, r testFileRange) {
 	t.Helper()
