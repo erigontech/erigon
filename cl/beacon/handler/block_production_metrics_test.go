@@ -63,8 +63,10 @@ func requireCollectedOnce(t *testing.T, prepared bool) {
 	require.Equal(t, count+1, summaryCount(t, collected))
 	require.Equal(t, otherCount, summaryCount(t, other))
 	observed := summarySum(t, collected) - sum
-	require.GreaterOrEqual(t, observed, sinceSlotBefore, "the collection time is the seconds since the slot start")
-	require.LessOrEqual(t, observed, sinceSlotAfter, "the collection time is the seconds since the slot start")
+	// The test slot started years ago, so the float64 sum keeps no sub-microsecond precision.
+	const tolerance = 1e-3
+	require.GreaterOrEqual(t, observed, sinceSlotBefore-tolerance, "the collection time is the seconds since the slot start")
+	require.LessOrEqual(t, observed, sinceSlotAfter+tolerance, "the collection time is the seconds since the slot start")
 }
 
 func TestProduceBeaconBodyRecordsWhenTheUnpreparedPayloadWasCollected(t *testing.T) {
