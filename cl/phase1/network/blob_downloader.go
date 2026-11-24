@@ -403,6 +403,10 @@ func (b *BlobHistoryDownloader) fetchFromEndpoint(item incompleteBlock, record f
 			continue
 		}
 		err := blobfetch.FetchAndStore(b.ctx, b.blobStorage, endpoint, item.root, item.block, b.readBlindedBlock(slot), b.endpointCPU)
+		if errors.Is(err, blobfetch.ErrStoredBlock) {
+			b.logger.Debug("[BlobHistoryDownloader] Could not read the stored block", "slot", slot, "endpoint", blobfetch.RedactEndpoint(endpoint), "err", err)
+			continue
+		}
 		b.recordEndpointHealth(i, err)
 		record(endpointResult{endpoint: i, item: item, err: err})
 		if err == nil {

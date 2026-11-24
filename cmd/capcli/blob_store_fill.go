@@ -333,6 +333,9 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		if ctx.Err() != nil {
 			return nil
 		}
+		if errors.Is(lastErr, blobfetch.ErrStoredBlock) {
+			return fmt.Errorf("slot %d: %w", slot, lastErr)
+		}
 		if !blobfetch.NotServed(lastErr) {
 			unserved = false
 		} else if !unresolved {
@@ -407,6 +410,10 @@ func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, block
 				return served
 			}
 			sidecars, err := blobfetch.Retrieve(ctx, b.Endpoints[i], root, block, readBlinded(db, blocks, block.Block.Slot))
+			if errors.Is(err, blobfetch.ErrStoredBlock) {
+				w.err = fmt.Errorf("slot %d: %w", block.Block.Slot, err)
+				return true
+			}
 			if err == nil && len(sidecars) == 0 {
 				err = blobfetch.ErrNoSidecars
 			}

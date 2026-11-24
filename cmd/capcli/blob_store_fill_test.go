@@ -570,6 +570,33 @@ func TestBlobArchiveStoreFillDryRunProbeAcceptsAnEndpointThatServesOnlyBlobsBefo
 	require.EqualValues(t, fillTestSlot, cmd.windows[0].from.Load())
 }
 
+func TestBlobArchiveStoreFillStopsAtAStoredBlockReadFailure(t *testing.T) {
+	f := newFillFixture(t)
+	root := f.addBlock(fillTestSlot, 1)
+	f.blocks.blindedErr = errors.New("block read failed")
+	first := f.blobsOnlyEndpoint()
+	second, secondRequests := f.endpoint(false)
+
+	err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{first, second}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil)
+
+	require.ErrorIs(t, err, blobfetch.ErrStoredBlock)
+	require.ErrorContains(t, err, fmt.Sprintf("slot %d", fillTestSlot))
+	require.Zero(t, requestsFor(secondRequests, root), "a local fault is not retried on the next endpoint")
+	require.False(t, f.storedValid(fillTestSlot, root))
+}
+
+func TestBlobArchiveStoreFillDryRunProbeReportsAStoredBlockReadFailure(t *testing.T) {
+	f := newFillFixture(t)
+	f.addBlock(fillTestSlot, 1)
+	f.blocks.blindedErr = errors.New("block read failed")
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{f.blobsOnlyEndpoint()}, FromSlot: fillTestSlot, ToSlot: fillTestSlot, DryRun: true}
+
+	err := f.fill(cmd, nil)
+
+	require.ErrorIs(t, err, blobfetch.ErrStoredBlock)
+	require.ErrorContains(t, err, fmt.Sprintf("slot %d", fillTestSlot))
+}
+
 // A slot no endpoint can fill must not stop the others, and the run must not end as a success.
 func TestBlobArchiveStoreFillReportsSlotsNoEndpointHas(t *testing.T) {
 	f := newFillFixture(t)

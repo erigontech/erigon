@@ -64,6 +64,9 @@ var (
 // ErrNoSidecars reports an endpoint that answers without the sidecars of a block that has blobs.
 var ErrNoSidecars = errors.New("the endpoint has no sidecars for the block")
 
+// ErrStoredBlock reports a failure to read the block as stored, which is a local fault, not an answer of the endpoint.
+var ErrStoredBlock = errors.New("read the stored block")
+
 type StatusError int
 
 func (e StatusError) Error() string {
@@ -170,10 +173,10 @@ func Retrieve(ctx context.Context, endpoint string, root common.Hash, block *clt
 	if preGloas {
 		blindedBlock, err := blinded(ctx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", ErrStoredBlock, err)
 		}
 		if blindedBlock == nil {
-			return nil, errors.New("the stored block is missing")
+			return nil, fmt.Errorf("%w: it is missing", ErrStoredBlock)
 		}
 		header, blindedBody = blindedBlock.SignedBeaconBlockHeader(), blindedBlock.Block.Body
 	} else {

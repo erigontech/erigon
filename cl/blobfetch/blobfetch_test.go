@@ -19,6 +19,7 @@ package blobfetch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httptrace"
@@ -385,6 +386,30 @@ func TestFetchAndStoreDoesNotFallBackOnAFailure(t *testing.T) {
 	require.ErrorIs(t, err, StatusError(http.StatusInternalServerError))
 	require.False(t, NotServed(err))
 	require.Zero(t, *loads)
+}
+
+func TestRetrieveReportsAStoredBlockReadFailure(t *testing.T) {
+	loadErr := errors.New("block read failed")
+	for name, tc := range map[string]struct {
+		load func(context.Context) (*cltypes.SignedBlindedBeaconBlock, error)
+		want error
+	}{
+		"loader fails":  {func(context.Context) (*cltypes.SignedBlindedBeaconBlock, error) { return nil, loadErr }, loadErr},
+		"block missing": {func(context.Context) (*cltypes.SignedBlindedBeaconBlock, error) { return nil, nil }, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fixture := newBlockFixture(t, clparams.ElectraVersion, 1)
+			endpoint := serveBeacon(t, respondStatus(http.StatusNotFound), respondData(fixture.blobs()))
+
+			_, err := Retrieve(t.Context(), endpoint, fixture.root, fixture.promoted, tc.load)
+
+			require.ErrorIs(t, err, ErrStoredBlock)
+			if tc.want != nil {
+				require.ErrorIs(t, err, tc.want)
+			}
+			require.False(t, NotServed(err))
+		})
+	}
 }
 
 func TestFetchAndStoreReportsNotServedWhenNeitherEndpointServes(t *testing.T) {
