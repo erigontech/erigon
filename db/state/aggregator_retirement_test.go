@@ -47,10 +47,18 @@ func TestAggregatorBuildRetiresReplacedFiles(t *testing.T) {
 		return writer.Flush(ctx, tx)
 	}))
 
-	domain := agg.d[kv.ReceiptDomain]
-	files := []*DirtyFiles{domain.dirtyFiles, domain.History.dirtyFiles, domain.InvertedIndex.dirtyFiles, agg.searchII(kv.LogAddrIdx).dirtyFiles}
+	receipts := agg.d[kv.ReceiptDomain]
+	files := []struct {
+		kind     string
+		dirty    *DirtyFiles
+		original *FilesItem
+	}{
+		{kind: "receipt values", dirty: receipts.dirtyFiles},
+		{kind: "receipt history", dirty: receipts.History.dirtyFiles},
+		{kind: "receipt history index", dirty: receipts.InvertedIndex.dirtyFiles},
+		{kind: "log address index", dirty: agg.searchII(kv.LogAddrIdx).dirtyFiles},
+	}
 	var reader *AggregatorRoTx
-	var replaced []*FilesItem
 	agg.SetMaintenanceObserver(func(_ context.Context, event MaintenanceEvent) {
 		if event.Point != MaintenanceFilesBuilt {
 			return
@@ -59,30 +67,35 @@ func TestAggregatorBuildRetiresReplacedFiles(t *testing.T) {
 		require.NoError(t, agg.OpenFolder(db))
 		reader = agg.BeginFilesRo()
 		t.Cleanup(reader.Close)
-		for _, dirty := range files {
-			require.Equal(t, 1, dirty.Len())
-			old := dirty.Items()[0]
-			t.Cleanup(old.closeFiles)
-			require.NotNil(t, old.decompressor)
-			replaced = append(replaced, old)
+		for i := range files {
+			file := &files[i]
+			items := file.dirty.Items()
+			require.Len(t, items, 1, file.kind)
+			file.original = items[0]
+			t.Cleanup(file.original.closeFiles)
+			require.NotNil(t, file.original.decompressor, file.kind)
 		}
 	})
 	require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), 0, unboundedFinalityCtx, nil))
 	require.NotNil(t, reader)
-	for i, old := range replaced {
-		replacement := files[i].Items()[0]
-		require.NotSame(t, old, replacement)
-		require.Equal(t, old.FilePaths(agg.dirs.Snap), replacement.FilePaths(agg.dirs.Snap))
-		require.NotNil(t, old.decompressor, "a pinned reader must keep its mappings")
-		require.True(t, old.decompressor.IsOpen())
+	for _, file := range files {
+		old := file.original
+		replacement, ok := file.dirty.Get(old)
+		require.True(t, ok, "missing %s replacement", file.kind)
+		require.NotSame(t, old, replacement, file.kind)
+		require.Equal(t, old.FilePaths(agg.dirs.Snap), replacement.FilePaths(agg.dirs.Snap), file.kind)
+		require.NotNil(t, old.decompressor, "a pinned reader must keep the %s mapping", file.kind)
+		require.True(t, old.decompressor.IsOpen(), file.kind)
 	}
 	reader.Close()
-	for i, old := range replaced {
-		require.Nil(t, old.decompressor, "replaced mappings must close with their last reader")
-		require.Nil(t, old.index)
-		require.Nil(t, old.vAccessor)
-		replacement := files[i].Items()[0]
-		require.True(t, replacement.decompressor.IsOpen())
-		require.FileExists(t, replacement.decompressor.FilePath())
+	for _, file := range files {
+		old := file.original
+		require.Nil(t, old.decompressor, "the last reader must release the old %s mapping", file.kind)
+		require.Nil(t, old.index, file.kind)
+		require.Nil(t, old.vAccessor, file.kind)
+		replacement, ok := file.dirty.Get(old)
+		require.True(t, ok, "missing %s replacement", file.kind)
+		require.True(t, replacement.decompressor.IsOpen(), file.kind)
+		require.FileExists(t, replacement.decompressor.FilePath(), file.kind)
 	}
 }

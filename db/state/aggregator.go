@@ -2229,7 +2229,7 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult, 
 		if in == nil {
 			names, r = d.cleanAfterMerge(nil, nil, nil)
 		} else {
-			names, r = d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
+			names, r = d.cleanAfterMerge(in.d[id], in.dIdx[id], in.dHist[id])
 		}
 		deleted = append(deleted, names...)
 		retired = append(retired, r...)

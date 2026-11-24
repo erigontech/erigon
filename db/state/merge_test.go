@@ -1204,40 +1204,40 @@ func TestMergeReplacementClosesAfterReaders(t *testing.T) {
 			t.Cleanup(merged.Close)
 			source.Close()
 
-			// Open the merge output from disk before publishing it. The reader and
-			// the merge result now have independent mappings of the same paths.
-			require.NoError(t, agg.OpenFolder(db))
 			fileIn := func(view *AggregatorRoTx) *FilesItem {
 				t.Helper()
 				files := tc.files(view)
 				require.Len(t, files, 1)
 				return files[0].src
 			}
-			reader := agg.BeginFilesRo()
-			defer reader.Close()
-			original := fileIn(reader)
+			// OpenFolder publishes the mappings it opens from disk. Pin that view
+			// before the merge publishes its own mappings of the same files.
+			require.NoError(t, agg.OpenFolder(db))
+			oldView := agg.BeginFilesRo()
+			defer oldView.Close()
+			original := fileIn(oldView)
 			t.Cleanup(original.closeFiles)
 			originalMapping := original.decompressor
 			paths := original.FilePaths(agg.dirs.Snap)
 			require.Greater(t, len(paths), 1, "expected a data file and its accessors")
 
 			agg.integrateMergedDirtyFiles(merged)
-			current := agg.BeginFilesRo()
-			defer current.Close()
-			replacement := fileIn(current)
+			newView := agg.BeginFilesRo()
+			defer newView.Close()
+			replacement := fileIn(newView)
 			replacementMapping := replacement.decompressor
 			require.NotSame(t, originalMapping, replacementMapping)
 			require.Equal(t, paths, replacement.FilePaths(agg.dirs.Snap))
 			require.True(t, originalMapping.IsOpen(), "the old reader still holds this mapping")
 
-			reader.Close()
+			oldView.Close()
 			require.False(t, originalMapping.IsOpen(), "the last reader must release the old mapping")
 			require.Empty(t, original.FilePaths(agg.dirs.Snap), "the old accessor handles must close too")
 			require.True(t, replacementMapping.IsOpen())
 			for _, path := range paths {
 				require.FileExists(t, filepath.Join(agg.dirs.Snap, path))
 			}
-			current.Close()
+			newView.Close()
 			agg.Close()
 			require.False(t, replacementMapping.IsOpen())
 		})
