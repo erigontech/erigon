@@ -43,6 +43,10 @@ func newRoundHarness(t *testing.T) *roundHarness {
 // newRoundHarnessWithKeys builds the harness on given sender keys. The trie's shape follows the senders'
 // addresses, so a defect that depends on it reproduces only for particular keys.
 func newRoundHarnessWithKeys(t *testing.T, keys [2]*ecdsa.PrivateKey) *roundHarness {
+	return newRoundHarnessWithOptions(t, keys)
+}
+
+func newRoundHarnessWithOptions(t *testing.T, keys [2]*ecdsa.PrivateKey, opts ...execmoduletester.Option) *roundHarness {
 	h := &roundHarness{t: t, ctx: t.Context(), keys: keys}
 	funds := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 	cfg := *chain.AllProtocolChanges //nolint:govet // the tester wants a value, and this copy is never shared
@@ -54,8 +58,8 @@ func newRoundHarnessWithKeys(t *testing.T, keys [2]*ecdsa.PrivateKey) *roundHarn
 			crypto.PubkeyToAddress(h.keys[1].PublicKey): {Balance: funds},
 		},
 	}
-	h.m = execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(h.keys[0]),
-		execmoduletester.WithTxnIDsFollowParent())
+	h.m = execmoduletester.New(t, append([]execmoduletester.Option{execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(h.keys[0]),
+		execmoduletester.WithTxnIDsFollowParent()}, opts...)...)
 	return h
 }
 

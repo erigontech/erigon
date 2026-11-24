@@ -1,13 +1,20 @@
 package execmodule_test
 
 import (
+	"context"
+	"crypto/ecdsa"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -103,4 +110,56 @@ func TestBlocksPreExecutedBeforeTheirPredecessorIsAcceptedStoreWholeSenders(t *t
 		}
 		return nil
 	}))
+}
+
+// missingHeaders records every header lookup that came back empty for a hash it watches.
+type missingHeaders struct {
+	dbservices.FullBlockReader
+	mu      sync.Mutex
+	watched map[common.Hash]bool
+	missed  []uint64
+}
+
+func (r *missingHeaders) Header(ctx context.Context, tx kv.Getter, hash common.Hash, number uint64) (*types.Header, error) {
+	h, err := r.FullBlockReader.Header(ctx, tx, hash, number)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if h == nil && err == nil && r.watched[hash] {
+		r.missed = append(r.missed, number)
+	}
+	return h, err
+}
+
+func TestARoundTwoGenerationsAboveTheDurableHeadReadsEveryCanonicalHeader(t *testing.T) {
+	reader := &missingHeaders{watched: map[common.Hash]bool{}}
+	var keys [2]*ecdsa.PrivateKey
+	for i := range keys {
+		k, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		keys[i] = k
+	}
+	replica := newRoundHarnessWithOptions(t, keys, execmoduletester.WithBlockReaderWrap(func(br dbservices.FullBlockReader) dbservices.FullBlockReader {
+		reader.FullBlockReader = br
+		return reader
+	}))
+	parent, err := replica.m.ExecModule.CurrentHeader(replica.ctx)
+	require.NoError(t, err)
+	for n := uint64(0); n < 3; n++ {
+		params, in := replica.attrs(parent)
+		_, _, vr, err := replica.m.ExecModule.PreExecuteFlashblock(replica.ctx, in, [][]byte{replica.signed(0, n, nil, 100_000, emitsALog)})
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, vr.ValidationError)
+		if n == 2 {
+			break
+		}
+		br, err := replica.m.ExecModule.SealBlock(replica.ctx, params, false)
+		require.NoError(t, err)
+		reader.mu.Lock()
+		reader.watched[br.Block.Hash()] = true
+		reader.mu.Unlock()
+		parent = br.Block.Header()
+	}
+	reader.mu.Lock()
+	defer reader.mu.Unlock()
+	require.Empty(t, reader.missed, "a round could not read the header of a canonical block below it")
 }

@@ -100,7 +100,7 @@ func (e *ExecModule) writePreExecBlock(tx kv.RwTx, roTx kv.TemporalTx, block *ty
 	if gen := e.generationOverlay(header.ParentHash, number-1); gen != nil && kv.RwTx(gen) != tx {
 		// The block's execution verifies it against its parent in its own overlay, and raw tables do not read through
 		// to the parent generation, so the parent's header, TD and body record are carried in.
-		if err := e.carryParentFromGeneration(tx, gen, roTx, header.ParentHash, number-1); err != nil {
+		if err := e.carryAncestorsFromGeneration(tx, gen, roTx, header.ParentHash, number-1); err != nil {
 			return err
 		}
 	}
@@ -133,50 +133,70 @@ func (e *ExecModule) writePreExecBlock(tx kv.RwTx, roTx kv.TemporalTx, block *ty
 	return nil
 }
 
-func (e *ExecModule) carryParentFromGeneration(tx kv.RwTx, generation *membatchwithdb.MemoryMutation, roTx kv.TemporalTx, parentHash common.Hash, parentNumber uint64) error {
+// carryAncestorsFromGeneration carries the parent, and every ancestor this transaction cannot yet read, from the
+// parent's generation: their canonical rows travel forward with the generations, so their blocks must too.
+func (e *ExecModule) carryAncestorsFromGeneration(tx kv.RwTx, generation *membatchwithdb.MemoryMutation, roTx kv.TemporalTx, parentHash common.Hash, parentNumber uint64) error {
 	gen := generation.NewReadView(roTx)
+	hash, number := parentHash, parentNumber
+	for {
+		parent, err := carryBlockFrom(tx, gen, hash, number)
+		if err != nil {
+			return err
+		}
+		if number == 0 {
+			return nil
+		}
+		hash, number = parent.ParentHash, number-1
+		if rawdb.ReadHeader(tx, hash, number) != nil {
+			return nil
+		}
+	}
+}
+
+// carryBlockFrom copies one block's header, TD, body record and transactions from a generation into tx.
+func carryBlockFrom(tx kv.RwTx, gen kv.Getter, parentHash common.Hash, parentNumber uint64) (*types.Header, error) {
 	parent := rawdb.ReadHeader(gen, parentHash, parentNumber)
 	if parent == nil {
-		return fmt.Errorf("parent header %d %x not in its generation", parentNumber, parentHash)
+		return nil, fmt.Errorf("parent header %d %x not in its generation", parentNumber, parentHash)
 	}
 	genTd, err := rawdb.ReadTd(gen, parentHash, parentNumber)
 	if err != nil {
-		return fmt.Errorf("read parent TD: %w", err)
+		return nil, fmt.Errorf("read parent TD: %w", err)
 	}
 	if genTd == nil {
-		return fmt.Errorf("parent TD %d %x not in its generation", parentNumber, parentHash)
+		return nil, fmt.Errorf("parent TD %d %x not in its generation", parentNumber, parentHash)
 	}
 	if err := rawdb.WriteHeader(tx, parent); err != nil {
-		return fmt.Errorf("carry parent header: %w", err)
+		return nil, fmt.Errorf("carry parent header: %w", err)
 	}
 	if err := rawdb.WriteTd(tx, parentHash, parentNumber, *genTd); err != nil {
-		return fmt.Errorf("carry parent TD: %w", err)
+		return nil, fmt.Errorf("carry parent TD: %w", err)
 	}
 	bfs, err := rawdb.ReadBodyForStorageByKey(gen, dbutils.BlockBodyKey(parentNumber, parentHash))
 	if err != nil {
-		return fmt.Errorf("read parent body record: %w", err)
+		return nil, fmt.Errorf("read parent body record: %w", err)
 	}
 	if bfs == nil {
-		return nil
+		return parent, nil
 	}
 	if err := rawdb.WriteBodyForStorage(tx, parentHash, parentNumber, bfs); err != nil {
-		return fmt.Errorf("carry parent body record: %w", err)
+		return nil, fmt.Errorf("carry parent body record: %w", err)
 	}
 	// A body reader returns whatever rows follow the base, so a record carried without its rows reads another block's.
 	for i := 0; i < int(bfs.TxCount)-2; i++ {
 		id := binary.BigEndian.AppendUint64(nil, bfs.BaseTxnID.At(i))
 		v, err := gen.GetOne(kv.EthTx, id)
 		if err != nil {
-			return fmt.Errorf("read parent txn %d: %w", i, err)
+			return nil, fmt.Errorf("read parent txn %d: %w", i, err)
 		}
 		if v == nil {
-			return fmt.Errorf("parent txn %d at id %d not in its generation", i, bfs.BaseTxnID.At(i))
+			return nil, fmt.Errorf("parent txn %d at id %d not in its generation", i, bfs.BaseTxnID.At(i))
 		}
 		if err := tx.Put(kv.EthTx, id, common.Copy(v)); err != nil {
-			return fmt.Errorf("carry parent txn %d: %w", i, err)
+			return nil, fmt.Errorf("carry parent txn %d: %w", i, err)
 		}
 	}
-	return nil
+	return parent, nil
 }
 
 // writePreExecBody stores an in-progress block's body at a FIXED base id without advancing the kv.EthTx sequence.
