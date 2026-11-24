@@ -349,9 +349,10 @@ func TestSyncCommitteesRejectsSignatureOutsideG2BeforeThePool(t *testing.T) {
 		f := newOutsideG2SyncCommitteeFixture(t)
 		f.forged.ImmediateVerification = true
 
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-		defer cancel()
-		require.ErrorIs(t, f.service.ProcessMessage(ctx, new(uint64), f.forged), ErrInvalidBlsSignature)
+		// A rejected message is not recorded, so each submission is verified again.
+		for range 200 {
+			require.ErrorIs(t, f.service.ProcessMessage(t.Context(), new(uint64), f.forged), ErrInvalidBlsSignature)
+		}
 		require.Zero(t, utils.BitsOnCount(f.contribution().AggregationBits))
 	})
 
@@ -372,7 +373,11 @@ func TestSyncCommitteesRejectsSignatureOutsideG2BeforeThePool(t *testing.T) {
 		go func() { forgedResult <- f.service.ProcessMessage(ctx, new(uint64), f.forged) }()
 		go func() { validResult <- f.service.ProcessMessage(ctx, new(uint64), f.valid) }()
 		waitForQueuedVerification(t, f.verifier.syncCommitteeMessage, 2)
-		f.verifier.Start()
+		batch := []*AggregateVerificationData{<-f.verifier.syncCommitteeMessage, <-f.verifier.syncCommitteeMessage}
+		callbacks, _ := f.verifier.processSignatureVerification(batch)
+		for _, callback := range callbacks {
+			callback()
+		}
 
 		require.ErrorIs(t, <-forgedResult, ErrInvalidBlsSignature)
 		require.NoError(t, <-validResult)
@@ -392,7 +397,7 @@ func TestSyncCommitteesRejectsSignatureOutsideG2BeforeThePool(t *testing.T) {
 }
 
 // outsideG2SyncCommitteeFixture has two members of subcommittee 0 whose keys the test knows. Both sign the same block
-// root; the signature of forged is its own valid signature plus a point outside G2.
+// root; the signature of forged is its own valid signature plus a point of order 13.
 type outsideG2SyncCommitteeFixture struct {
 	service        SyncCommitteeMessagesService
 	verifier       *BatchSignatureVerifier
@@ -445,7 +450,7 @@ func newOutsideG2SyncCommitteeFixture(t *testing.T) *outsideG2SyncCommitteeFixtu
 	committee.SetCommittee(committeeKeys)
 	require.NoError(t, head.SetCurrentSyncCommittee(committee))
 	forged := messages[0]
-	forged.SyncCommitteeMessage.Signature = common.Bytes96(addPointOutsideG2(t, forged.SyncCommitteeMessage.Signature[:]))
+	forged.SyncCommitteeMessage.Signature = common.Bytes96(addOrder13Point(t, forged.SyncCommitteeMessage.Signature[:]))
 
 	ctrl := gomock.NewController(t)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
@@ -464,24 +469,19 @@ func newOutsideG2SyncCommitteeFixture(t *testing.T) *outsideG2SyncCommitteeFixtu
 	}
 }
 
-// addPointOutsideG2 adds [r]R to a signature, where R is a point on the curve outside G2 and r is the order of G2.
-// Multiplying by r clears the G2 component of R and leaves a non-zero point outside G2, so the sum is not in G2.
-func addPointOutsideG2(t *testing.T, signature []byte) []byte {
-	t.Helper()
-	outside, err := hex.DecodeString(nonSubgroupSignatureHex)
-	require.NoError(t, err)
-	groupOrder, err := hex.DecodeString("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001")
-	require.NoError(t, err)
-	slices.Reverse(groupOrder) // blst takes a little-endian scalar; Scalar rejects r itself
-	var sum, tail blst.P2
-	sum.FromAffine(new(blst.P2Affine).Uncompress(signature))
-	tail.FromAffine(new(blst.P2Affine).Uncompress(outside))
-	forged := sum.AddAssign(tail.MultAssign(groupOrder)).ToAffine().Compress()
+// order13PointHex is a point of order 13 on the G2 curve; cl/utils/bls/bls_test.go explains why the tests use it.
+const order13PointHex = "816921c9b317c92cea639a5169a77dd05a86c582075c929f84d5a4364b10fa5e85d9c32cb918bb410a3f7b1779fe4d1b18cde05d1a0c83bf062e4c9b9c820bb89ee64874860ff8eedd7c1323ca86c1f449ba4845097301eaea81f0d992a06be6"
 
-	point := new(blst.P2Affine).Uncompress(forged)
-	require.NotNil(t, point, "the forged signature is not a point on the curve")
-	require.False(t, point.InG2())
-	return forged
+func addOrder13Point(t *testing.T, signature []byte) []byte {
+	t.Helper()
+	raw, err := hex.DecodeString(order13PointHex)
+	require.NoError(t, err)
+	var point, sum blst.P2
+	point.FromAffine(new(blst.P2Affine).Uncompress(raw))
+	require.NotEqual(t, bls.InfiniteSignature[:], point.Compress())
+	require.Equal(t, bls.InfiniteSignature[:], point.Mult([]byte{13}).Compress())
+	sum.FromAffine(new(blst.P2Affine).Uncompress(signature))
+	return sum.AddAssign(&point).Compress()
 }
 
 // Waiting for the signature verdict holds no service or head-state lock, so a head-state publication is not blocked.

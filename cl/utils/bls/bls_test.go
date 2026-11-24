@@ -366,20 +366,21 @@ func sharedMessageBatch(t *testing.T, n int, messages ...[]byte) (sigs, msgs, pk
 	return sigs, msgs, pks
 }
 
-// notInG2Signature returns a point on the G2 curve outside the prime-order subgroup: nearly every curve point is.
-func notInG2Signature(t *testing.T) []byte {
+// order13PointHex is a point of order 13 on the G2 curve, so it is not in G2. The random 64-bit weight of a batch
+// verification cancels it whenever 13 divides the weight, so without a group check a valid signature plus this point
+// is accepted about once in 13 verifications.
+const order13PointHex = "816921c9b317c92cea639a5169a77dd05a86c582075c929f84d5a4364b10fa5e85d9c32cb918bb410a3f7b1779fe4d1b18cde05d1a0c83bf062e4c9b9c820bb89ee64874860ff8eedd7c1323ca86c1f449ba4845097301eaea81f0d992a06be6"
+
+func addOrder13Point(t *testing.T, signature []byte) []byte {
 	t.Helper()
-	for x := range 256 {
-		compressed := make([]byte, 96)
-		compressed[0] = 0x80
-		compressed[95] = byte(x)
-		if point := new(blst.P2Affine).Uncompress(compressed); point != nil {
-			require.False(t, point.InG2())
-			return compressed
-		}
-	}
-	t.Fatal("no curve point found")
-	return nil
+	raw, err := hex.DecodeString(order13PointHex)
+	require.NoError(t, err)
+	var point, sum blst.P2
+	point.FromAffine(new(blst.P2Affine).Uncompress(raw))
+	require.NotEqual(t, bls.InfiniteSignature[:], point.Compress())
+	require.Equal(t, bls.InfiniteSignature[:], point.Mult([]byte{13}).Compress())
+	sum.FromAffine(new(blst.P2Affine).Uncompress(signature))
+	return sum.AddAssign(&point).Compress()
 }
 
 func TestVerifyMultipleSignaturesSharedMessages(t *testing.T) {
@@ -412,12 +413,17 @@ func TestVerifyMultipleSignaturesRejectsOneBadSignatureInAGroup(t *testing.T) {
 }
 
 func TestVerifyMultipleSignaturesRejectsSignatureOutsideG2(t *testing.T) {
-	sigs, msgs, pks := sharedMessageBatch(t, 4, []byte("shared message"))
-	sigs[2] = notInG2Signature(t)
-
-	valid, err := bls.VerifyMultipleSignatures(sigs, msgs, pks)
-	require.NoError(t, err)
-	require.False(t, valid)
+	sigs, msgs, pks := sharedMessageBatch(t, 2, []byte("shared message"))
+	sigs[0] = addOrder13Point(t, sigs[0])
+	for name, n := range map[string]int{"alone": 1, "with a valid signature of the same message": 2} {
+		t.Run(name, func(t *testing.T) {
+			for range 200 {
+				valid, err := bls.VerifyMultipleSignatures(sigs[:n], msgs[:n], pks[:n])
+				require.NoError(t, err)
+				require.False(t, valid)
+			}
+		})
+	}
 }
 
 func TestVerifyMultipleSignaturesRejectsInfiniteSignatureInAGroup(t *testing.T) {
