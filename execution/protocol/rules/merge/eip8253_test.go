@@ -49,7 +49,6 @@ func TestEIP8253BeforeSystemCalls(t *testing.T) {
 }
 
 func testEIP8253BeforeSystemCalls(t *testing.T, parentNumber uint64) {
-	t.Helper()
 	config := chain.AllProtocolChanges.Copy()
 	config.BogotaTime = common.NewUint64(100)
 	config.ZeroNonceStorageAccounts = []common.Address{common.HexToAddress("0x8253")}

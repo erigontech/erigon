@@ -894,6 +894,7 @@ func TestWitnessParentForAuRaGasLimit(t *testing.T) {
 	require.NoError(t, engine.Initialize(config, reader, header, nil, syscall, nil, nil))
 	require.NotNil(t, gasLimitHeader)
 	require.Equal(t, parent.Hash(), gasLimitHeader.Hash())
+	require.Nil(t, reader.GetHeaderByHash(header.Hash()))
 }
 
 func TestExecBlockStatelesslyEIP8253(t *testing.T) {
