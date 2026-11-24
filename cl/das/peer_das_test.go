@@ -3151,6 +3151,7 @@ func TestBlobRecoveryDropsTheCachedMatrixWhenARetryFollowsAnInvalidReconstructed
 	})
 	require.NoError(t, r.d.enqueueBlobRecovery(recoverBlobsRequest{slot: recoveryTestSlot, blockRoot: r.root}))
 
+	r.d.initBlobRecoveryRetries()
 	require.Eventually(t, func() bool {
 		r.d.recoveryRetryMutex.Lock()
 		defer r.d.recoveryRetryMutex.Unlock()
