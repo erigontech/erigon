@@ -1157,6 +1157,31 @@ func TestGenesisConstructorReadsButDropsAllocStorage(t *testing.T) {
 	}
 }
 
+// An alloc entry with a constructor deploys over a fresh account, also when an earlier
+// constructor created that address and wrote its storage.
+func TestGenesisAllocConstructorReplacesEarlierStorage(t *testing.T) {
+	t.Parallel()
+	child := types.CreateAddress(allocA, 1)
+	require.Positive(t, bytes.Compare(child[:], allocA[:]), "the child must come after its creator in the alloc")
+	// PUSH6 initcode PUSH1 0 MSTORE, then CREATE(value 0, offset 26, size 6)
+	createChild := func(initcode []byte) []byte {
+		return append(append([]byte{0x65}, initcode...), 0x60, 0x00, 0x52, 0x60, 0x06, 0x60, 0x1a, 0x60, 0x00, 0xf0, 0x50)
+	}
+	root := func(initcode []byte) common.Hash {
+		alloc := types.GenesisAlloc{
+			allocA: {Balance: big.NewInt(5), Constructor: createChild(initcode)},
+			child:  {Constructor: []byte{0x00}},
+		}
+		block, ibs, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: chain.AllProtocolChanges, Alloc: alloc})
+		require.NoError(t, err)
+		ibs.Close()
+		return block.Root()
+	}
+	storesSlot0 := []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x00}   // SSTORE(0, 1) STOP
+	storesNothing := []byte{0x60, 0x00, 0x60, 0x00, 0x55, 0x00} // SSTORE(0, 0) STOP
+	require.Equal(t, root(storesNothing), root(storesSlot0))
+}
+
 // Genesis finalizes without EIP-8246: every self-destruct deletes its account, after all
 // constructors ran, nested creations included. Accounts that did not self-destruct stay.
 func TestGenesisSelfDestructsFinalizeWithoutEIP8246(t *testing.T) {
