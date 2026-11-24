@@ -18,10 +18,13 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
@@ -31,9 +34,13 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	mock_services2 "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestGetSelectedHeadDoesNotTrailTheMemoizedHeadState(t *testing.T) {
@@ -244,4 +251,90 @@ func TestViewHeadStateWithIdentityReportsSyncing(t *testing.T) {
 	var endpointErr *beaconhttp.EndpointError
 	require.ErrorAs(t, err, &endpointErr)
 	require.Equal(t, http.StatusServiceUnavailable, endpointErr.Code)
+}
+
+func requestHeadRoot(t *testing.T, handler *ApiHandler) (int, common.Hash) {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/blocks/head/root", http.NoBody))
+	if recorder.Code != http.StatusOK {
+		t.Logf("head root response: %s", recorder.Body.String())
+		return recorder.Code, common.Hash{}
+	}
+	var response struct {
+		Data struct {
+			Root common.Hash `json:"root"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	return recorder.Code, response.Data.Root
+}
+
+// headImport makes the fork choice mock behave like the store: the head moves to the imported block once its
+// import ends, and every head computation publishes the selected head.
+type headImport struct {
+	imported             atomic.Bool
+	parent, importedRoot common.Hash
+	parentSlot, slot     uint64
+}
+
+func (h *headImport) attach(fcu *mock_services2.ForkChoiceStorageMock, syncedData *synced_data.SyncedDataManager) {
+	fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+		root, slot := h.parent, h.parentSlot
+		if h.imported.Load() {
+			root, slot = h.importedRoot, h.slot
+		}
+		syncedData.OnSelectedHead(root, slot)
+		return forkchoice.ForkChoiceNode{Root: root}, true
+	}
+}
+
+func TestHeadRootWaitsForTheImportOfTheCurrentSlotBlock(t *testing.T) {
+	_, blocks, _, _, _, handler, _, sd, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	syncedData := sd.(*synced_data.SyncedDataManager)
+	handler.enableMemoizedHeadState = true
+	parent, block := blocks[len(blocks)-2].Block, blocks[len(blocks)-1].Block
+	parentRoot, err := parent.HashSSZ()
+	require.NoError(t, err)
+	blockRoot, err := block.HashSSZ()
+	require.NoError(t, err)
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(block.Slot).AnyTimes()
+	handler.ethClock = clock
+	handler.attestationDataImportWait = time.Second
+	fcu.HighestSeenVal = parent.Slot
+	h := &headImport{parent: common.Hash(parentRoot), importedRoot: common.Hash(blockRoot), parentSlot: parent.Slot, slot: block.Slot}
+	h.attach(fcu, syncedData)
+	syncedData.OnSelectedHead(common.Hash(parentRoot), parent.Slot)
+
+	finishImport := fcu.BeginPayloadImport(block.Slot)
+	time.AfterFunc(50*time.Millisecond, func() {
+		h.imported.Store(true)
+		finishImport()
+	})
+
+	status, root := requestHeadRoot(t, handler)
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, common.Hash(blockRoot), root, "the head root waits for the block whose import is in progress")
+}
+
+func TestHeadRootServesAnImportedBlockBeforeItsIndicesAreWritten(t *testing.T) {
+	_, blocks, _, _, _, handler, _, sd, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	syncedData := sd.(*synced_data.SyncedDataManager)
+	handler.enableMemoizedHeadState = true
+	parent := blocks[len(blocks)-1].Block
+	parentRoot, err := parent.HashSSZ()
+	require.NoError(t, err)
+	importedRoot, importedSlot := common.Hash{0x1d}, parent.Slot+1
+	fcu.Headers[importedRoot] = &cltypes.BeaconBlockHeader{Slot: importedSlot, ParentRoot: parentRoot}
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(importedSlot).AnyTimes()
+	handler.ethClock = clock
+	h := &headImport{parent: common.Hash(parentRoot), importedRoot: importedRoot, parentSlot: parent.Slot, slot: importedSlot}
+	h.imported.Store(true)
+	h.attach(fcu, syncedData)
+
+	status, root := requestHeadRoot(t, handler)
+	require.Equal(t, http.StatusOK, status, "fork choice already holds the block")
+	require.Equal(t, importedRoot, root)
 }
