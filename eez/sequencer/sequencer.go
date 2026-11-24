@@ -88,12 +88,27 @@ func (m Mode) String() string {
 	return "steady"
 }
 
+// Composed is a composer's answer for a Sync slot.
+type Composed struct {
+	// Block, when set, is the Sync block.
+	Block *types.Block
+	// Empty, without Block, has the sequencer build an empty Sync block;
+	// with neither, it fills the block from the pool, empty in a late slot.
+	Empty bool
+}
+
 // SyncSlotComposer composes the Sync blocks of a sequencer's slots.
 type SyncSlotComposer interface {
-	// ComposeSyncSlot returns the Sync block on parent with timestamp ts, its
-	// batch aimed at L1 block target, zero for the next one available; nil
-	// has the sequencer fill the block from the pool.
-	ComposeSyncSlot(ctx context.Context, parent *types.Header, ts, target uint64, mode Mode) *types.Block
+	// ComposeSyncSlot answers for the Sync block on parent with timestamp
+	// ts, its batch aimed at L1 block target, zero for the next one
+	// available.
+	ComposeSyncSlot(ctx context.Context, parent *types.Header, ts, target uint64, mode Mode) Composed
+	// SyncCommitted takes the Sync block committed for the slot composed
+	// last, on the sequencer's goroutine before its next trigger and outside
+	// the follower's loop; the composer posts its batch here. The block's
+	// witness may be missing, its capture having failed. A block of
+	// Substitute is not handed back.
+	SyncCommitted(ctx context.Context, sync *types.Header)
 	// RecoverFailed handles the bundles that failed on L1, replacing each
 	// failed Sync block through Sequencer.Substitute. It runs before every
 	// trigger reads the head, which it may move.
@@ -150,7 +165,7 @@ type Config struct {
 	// failed from being produced again. It bounds no depth through a stall.
 	MaxDepth uint64
 	// DABudget bounds the DA bytes of each block's transactions; zero is
-	// DABudget(K).
+	// DABudget(K, MaxBatchGas).
 	DABudget int
 	// Witnesses, when set, captures each produced block's witness.
 	Witnesses Witnesses
@@ -209,7 +224,7 @@ func New(cc *chain.Config, cfg Config, committer Committer, pool txnprovider.Txn
 		return nil, fmt.Errorf("%w: L2 block time %s, the chain's is %s", ErrTiming, cfg.Timing.L2, want)
 	}
 	if cfg.DABudget == 0 {
-		cfg.DABudget = DABudget(cfg.Timing.K())
+		cfg.DABudget = DABudget(cfg.Timing.K(), MaxBatchGas)
 	}
 	beneficiary := cfg.FeeRecipient
 	if beneficiary == (common.Address{}) && cc.FeeCollector != nil {
@@ -281,7 +296,7 @@ func (s *Sequencer) liveTick(ctx context.Context, tick LiveTick) error {
 	if liveEnd := tick.SyncHeight - min(tick.SyncHeight, future+1); head.Number.Uint64() >= liveEnd || s.paused(head) {
 		return nil
 	}
-	_, err = s.produce(ctx, Live, head)
+	_, err = s.fill(ctx, Live, head, tick.SyncHeight)
 	return err
 }
 
@@ -302,7 +317,7 @@ func (s *Sequencer) syncSlot(ctx context.Context, slot SyncSlot) error {
 	case Catchup:
 		// Each block commits on the one before it, so the Sync block keeps its
 		// height; a head moved by derivation fails the next with ErrStaleParent.
-		if head, err = s.produceN(ctx, Live, head, c.Live, false); err != nil {
+		if head, err = s.catchup(ctx, head, c.Live); err != nil {
 			return err
 		}
 		return s.syncBlock(ctx, head, head.Time+s.l2.BlockInterval, slot.L1Head+1, ModeCatchup)
@@ -409,26 +424,57 @@ func (s *Sequencer) late(ts uint64) bool {
 }
 
 // syncBlock commits the Sync block on parent: the composer's, else one from
-// the pool, empty for a slot too late.
+// the pool, empty when the composer asks or for a slot too late, and hands it
+// to the composer.
 func (s *Sequencer) syncBlock(ctx context.Context, parent *types.Header, ts, target uint64, mode Mode) error {
-	var composed *types.Block
-	if c := s.cfg.Composer; c != nil {
-		composed = c.ComposeSyncSlot(ctx, parent, ts, target, mode)
+	var answer Composed
+	c := s.cfg.Composer
+	if c != nil {
+		answer = c.ComposeSyncSlot(ctx, parent, ts, target, mode)
 	}
-	var err error
+	var (
+		sync *types.Header
+		err  error
+	)
 	switch {
-	case composed != nil:
-		_, err = s.insert(ctx, Sync, composed)
-	case mode == ModeEmpty:
-		_, err = s.build(ctx, Sync, parent, noTxns{})
+	case answer.Block != nil:
+		sync, err = s.insert(ctx, Sync, answer.Block)
+	case answer.Empty || mode == ModeEmpty:
+		sync, err = s.build(ctx, Sync, parent, noTxns{})
 	default:
-		_, err = s.produce(ctx, Sync, parent)
+		sync, err = s.produce(ctx, Sync, parent)
 	}
 	if err != nil {
 		return err
 	}
 	s.setOffGrid(0)
+	if c != nil {
+		c.SyncCommitted(ctx, sync)
+	}
 	return nil
+}
+
+// catchup produces the n Live blocks of a Catchup on head.
+func (s *Sequencer) catchup(ctx context.Context, head *types.Header, n uint64) (*types.Header, error) {
+	sync := head.Number.Uint64() + n + 1
+	for range n {
+		var err error
+		if head, err = s.fill(ctx, Live, head, sync); err != nil {
+			return nil, err
+		}
+	}
+	return head, nil
+}
+
+// fill produces the block of kind on parent below the Sync block at sync.
+// With a composer, a block on its grid is empty, as a Sync block is: a range
+// over one posting's limits settles in chunks, each ending at an empty grid
+// block.
+func (s *Sequencer) fill(ctx context.Context, kind Kind, parent *types.Header, sync uint64) (*types.Header, error) {
+	if s.cfg.Composer != nil && (sync-parent.Number.Uint64()-1)%s.cfg.Timing.K() == 0 {
+		return s.build(ctx, kind, parent, noTxns{})
+	}
+	return s.produce(ctx, kind, parent)
 }
 
 // produceN produces n blocks of kind on head and returns the new head; nil

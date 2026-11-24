@@ -859,13 +859,14 @@ func TestSequencerBinary(t *testing.T) {
 		return encoded.Bytes()
 	}
 	// The pool refuses a transaction too large for any block's DA budget.
-	require.ErrorContains(t, call(t.Context(), s.url, "eth_sendRawTransaction", new(common.Hash), sign(1, seqpkg.MaxTxnSize(k))), "RLPTooLong")
+	require.ErrorContains(t, call(t.Context(), s.url, "eth_sendRawTransaction", new(common.Hash), sign(1, seqpkg.MaxTxnSize(seqpkg.DABudget(k, seqpkg.MaxBatchGas)))), "RLPTooLong")
 	// Block 1 takes the transfer and two of three transactions of 30 KB, as
 	// many as its DA budget carries; a later block takes the third.
 	spanSize := func(tx hexutil.Bytes) int { return len(tx) + len(binary.AppendUvarint(nil, uint64(len(tx)))) }
 	fill := []hexutil.Bytes{sign(1, 30_000), sign(2, 30_000), sign(3, 30_000)}
 	two := spanSize(tx) + spanSize(fill[0]) + spanSize(fill[1])
-	require.True(t, two <= seqpkg.DABudget(k) && two+spanSize(fill[2]) > seqpkg.DABudget(k), "two fill the budget")
+	budget := seqpkg.DABudget(k, seqpkg.MaxBatchGas)
+	require.True(t, two <= budget && two+spanSize(fill[2]) > budget, "two fill the budget")
 	for _, raw := range fill {
 		require.NoError(t, call(t.Context(), s.url, "eth_sendRawTransaction", new(common.Hash), raw))
 	}

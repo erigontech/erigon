@@ -26,6 +26,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -186,6 +188,112 @@ func (r *RPC) CallAt(ctx context.Context, call Call, blockHash common.Hash) ([]b
 	return out, nil
 }
 
+// Nonce returns the next nonce of addr at the latest block, which a
+// transaction still in a pool does not take.
+func (r *RPC) Nonce(ctx context.Context, addr common.Address) (uint64, error) {
+	var n hexutil.Uint64
+	if err := r.client.CallContext(ctx, &n, "eth_getTransactionCount", addr, "latest"); err != nil {
+		return 0, mapError(err, fmt.Sprintf("nonce of %x", addr))
+	}
+	return uint64(n), nil
+}
+
+// BaseFee returns the base fee of the latest block, zero before London.
+func (r *RPC) BaseFee(ctx context.Context) (*uint256.Int, error) {
+	var h *struct {
+		BaseFee *hexutil.Big `json:"baseFeePerGas"`
+	}
+	if err := r.client.CallContext(ctx, &h, "eth_getBlockByNumber", "latest", false); err != nil {
+		return nil, mapError(err, "latest block")
+	}
+	if h == nil {
+		return nil, fmt.Errorf("%w: latest block", ErrNotFound)
+	}
+	fee := new(uint256.Int)
+	if h.BaseFee != nil && fee.SetFromBig(h.BaseFee.ToInt()) {
+		return nil, fmt.Errorf("%w: base fee %s", ErrInconsistent, h.BaseFee)
+	}
+	return fee, nil
+}
+
+// Balance returns the balance of addr at the latest block.
+func (r *RPC) Balance(ctx context.Context, addr common.Address) (*uint256.Int, error) {
+	var b hexutil.Big
+	if err := r.client.CallContext(ctx, &b, "eth_getBalance", addr, "latest"); err != nil {
+		return nil, mapError(err, fmt.Sprintf("balance of %x", addr))
+	}
+	balance := new(uint256.Int)
+	if balance.SetFromBig(b.ToInt()) {
+		return nil, fmt.Errorf("%w: balance %s", ErrInconsistent, &b)
+	}
+	return balance, nil
+}
+
+// SendRawTransaction hands raw, a signed transaction, to the node's pool. A
+// pool already holding it is no error; an answer refusing it fails with
+// ErrRefused, which a request without an answer does not.
+func (r *RPC) SendRawTransaction(ctx context.Context, raw []byte) error {
+	var hash common.Hash
+	err := r.client.CallContext(ctx, &hash, "eth_sendRawTransaction", hexutil.Bytes(raw))
+	if err == nil {
+		return nil
+	}
+	if _, answered := errors.AsType[rpc.Error](err); !answered {
+		return mapError(err, "send transaction")
+	}
+	if held(err) {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", ErrRefused, mapError(err, "send transaction"))
+}
+
+// held reports a pool's answer that it already holds the transaction.
+func held(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "already known") || strings.Contains(msg, "alreadyknown") || strings.Contains(msg, "same hash")
+}
+
+// HasTransaction reports whether the node has the transaction with hash,
+// pooled or in a block.
+func (r *RPC) HasTransaction(ctx context.Context, hash common.Hash) (bool, error) {
+	var raw json.RawMessage
+	if err := r.client.CallContext(ctx, &raw, "eth_getTransactionByHash", hash); err != nil {
+		return false, mapError(err, fmt.Sprintf("transaction %x", hash))
+	}
+	return !isNull(raw), nil
+}
+
+// Receipt is what the poster reads of a transaction's receipt.
+type Receipt struct {
+	// Status is 1 for a transaction that succeeded.
+	Status      uint64
+	BlockNumber uint64
+	TxIndex     uint64
+	Logs        []*types.Log
+}
+
+// Receipt returns the receipt of the transaction with hash, nil when the
+// node has none.
+func (r *RPC) Receipt(ctx context.Context, hash common.Hash) (*Receipt, error) {
+	var raw *struct {
+		Status      *hexutil.Uint64 `json:"status"`
+		BlockNumber *hexutil.Uint64 `json:"blockNumber"`
+		TxIndex     *hexutil.Uint64 `json:"transactionIndex"`
+		Logs        []*types.Log    `json:"logs"`
+	}
+	what := fmt.Sprintf("receipt of %x", hash)
+	if err := r.client.CallContext(ctx, &raw, "eth_getTransactionReceipt", hash); err != nil {
+		return nil, mapError(err, what)
+	}
+	if raw == nil {
+		return nil, nil
+	}
+	if raw.Status == nil || raw.BlockNumber == nil || raw.TxIndex == nil {
+		return nil, fmt.Errorf("%w: %s lacks status, blockNumber or transactionIndex", ErrInconsistent, what)
+	}
+	return &Receipt{Status: uint64(*raw.Status), BlockNumber: uint64(*raw.BlockNumber), TxIndex: uint64(*raw.TxIndex), Logs: raw.Logs}, nil
+}
+
 // revertCode is the JSON-RPC error code of an execution revert (EIP-1474).
 const revertCode = 3
 
@@ -265,6 +373,20 @@ func (e *urlError) Error() string { return e.text }
 
 func (e *urlError) Unwrap() error { return e.err }
 
+// RedactURL returns raw's scheme and host, the scheme alone without a host,
+// or "endpoint": its user info, path and query may carry the endpoint's API
+// key.
+func RedactURL(raw string) string {
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil:
+		return "endpoint"
+	case u.Host == "":
+		return u.Scheme + ":"
+	}
+	return u.Scheme + "://" + u.Host
+}
+
 // RedactTransport returns err printed without what a failed request's error
 // text carries of its endpoint beyond scheme and host, and without a failed
 // connection's local address; err stays reachable through Unwrap.
@@ -275,10 +397,7 @@ func RedactTransport(err error) error {
 		return &transportError{op: short, err: err}
 	}
 	if ue, ok := errors.AsType[*url.Error](err); ok {
-		host := "endpoint"
-		if u, perr := url.Parse(ue.URL); perr == nil && u.Host != "" {
-			host = u.Scheme + "://" + u.Host
-		}
+		host := RedactURL(ue.URL)
 		// url.Error prints its URL quoted.
 		text := strings.ReplaceAll(err.Error(), strconv.Quote(ue.URL), host)
 		return &urlError{text: strings.ReplaceAll(text, ue.URL, host), err: err}

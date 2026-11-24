@@ -35,6 +35,9 @@ var (
 	ErrRangeTooWide = errors.New("log range too wide for the L1 source")
 	// ErrInconsistent reports a response that contradicts itself or an earlier one.
 	ErrInconsistent = errors.New("inconsistent L1 response")
+	// ErrRefused reports a request the L1 node answered with an error, as
+	// against one that got no answer.
+	ErrRefused = errors.New("refused by the L1 node")
 	// ErrNotCanonical reports a block off the source's canonical chain where
 	// a read requires a canonical one; errors carrying it also carry
 	// ErrNotFound.

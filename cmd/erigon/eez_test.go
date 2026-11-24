@@ -34,10 +34,13 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/eez"
+	"github.com/erigontech/erigon/eez/composer"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/networks"
+	"github.com/erigontech/erigon/eez/sequencer"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -244,4 +247,40 @@ func TestNewHeadSigner(t *testing.T) {
 	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), s.Address())
 	require.Zero(t, s.EpochMs(), "the epoch is taken once signing starts")
 	require.Equal(t, 1, strings.Count(logs.String(), "lvl=warn"), logs.String())
+}
+
+// TestStopHooksRegisterTogether: the node compares the lifecycles it
+// registers, each against the others, so two stop hooks must compare.
+func TestStopHooksRegisterTogether(t *testing.T) {
+	stack, err := node.New(t.Context(), &nodecfg.Config{}, log.New())
+	require.NoError(t, err)
+	var stopped []int
+	hooks := []node.Lifecycle{&onStop{func() { stopped = append(stopped, 1) }}, &onStop{func() { stopped = append(stopped, 2) }}}
+	for _, h := range hooks {
+		require.NotPanics(t, func() { stack.RegisterLifecycle(h) })
+	}
+	for _, h := range hooks {
+		require.NoError(t, h.Stop())
+	}
+	require.Equal(t, []int{1, 2}, stopped)
+}
+
+// TestL1Source: the follower's L1 source prints an RPC endpoint by scheme and
+// host only, as its path or query may carry an API key.
+func TestL1Source(t *testing.T) {
+	for want, cfg := range map[string]*eez.Config{
+		"wss://l1.example": {L1RPC: "wss://l1.example/v3/KEY"},
+		"127.0.0.1:9090":   {L1KV: "127.0.0.1:9090"},
+	} {
+		require.Equal(t, want, l1Source(cfg))
+	}
+}
+
+// TestDABudgetFollowsTheComposer: a composer's gas limit bounds the
+// sequencer's blocks, so that a slot settles in one posting.
+func TestDABudgetFollowsTheComposer(t *testing.T) {
+	require.Equal(t, sequencer.DABudget(6, sequencer.MaxBatchGas), daBudget(&eez.SequencerConfig{}, 6))
+	cfg := &eez.SequencerConfig{Composer: &eez.ComposerConfig{MaxGas: composer.MinPostBatchGas}}
+	require.Equal(t, sequencer.DABudget(6, composer.MinPostBatchGas), daBudget(cfg, 6))
+	require.Less(t, daBudget(cfg, 6), daBudget(&eez.SequencerConfig{}, 6))
 }

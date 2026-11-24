@@ -71,10 +71,18 @@ License: `LGPL-3.0-only` (nethermind).
 
 `chiado-699169/l1-23731489-23731968.json.gz` and `chiado-916969/l1-23731445-23731589.json.gz` are the L1 side of the first 31 settlements of 699169 and the first 12 of 916969, read on 2026-10-29: every header from the network's L1 reference to its last batch's block and the registry's logs from its first batch on, by `eth_getBlockByNumber` and `eth_getLogs` of an Erigon archive Chiado node; the batches' posting transactions by `eth_getTransactionByHash` of the same node; their blobs, trailing zeros trimmed, from `https://rpc-gbc.chiadochain.net`, each checked against its versioned hash; and the hashes of the L2 blocks up to the last batch's time, by `eth_getBlockByNumber` of the networks' L2 RPCs.
 
+## conformance/
+
+`rollup0-transcripts.json.gz` and `rollup0-limits-transcripts.json.gz` are `crates/eez-control-rpc/conformance/rollup0-transcripts.json` and `rollup0-limits-transcripts.json` of `eez-association/eez-rollup0` at `4e806552a2abe1f8eca50e3a0ce5a0c32ddda5af`, gzip-compressed with `gzip -9 -n`; decompressed, their SHA-256 are `f540b6ff4cc51881860ae44a6ff15b8dcfb7232adb83ce449c036d2e73cc90a3` and `9acf394f6e1eaa8976b759eb2dea9fc8e7b75a9d29db610a8a352b21a3188d5e`. Per that directory's `README.md` they are `prove.v1.Prover/ProveStream` requests and replies recorded from the reference stateless signer over window `captured-devnet-window-84`: 21 cases, 339 requests and 338 replies, as protobuf payloads without the gRPC length prefix. Their `Finalize` requests carry the mined `postAndVerifyBatch` calldata, proof included.
+
+License: `MIT` (eez-rollup0, workspace `Cargo.toml`).
+
 ## SHA-256
 
 | File | SHA-256 |
 |---|---|
+| `conformance/rollup0-limits-transcripts.json.gz` | `2a15b57577a23444d81dd0fd42bce75491a1d8a7e4572b60d3594ae2ff8f1e65` |
+| `conformance/rollup0-transcripts.json.gz` | `7fb98a799e2cfec5af9d6d6963b86acd604466d9ab610ff26054583709c0c8aa` |
 | `chiado/anchor-23507949.json` | `9253ff31da86cbb86177d4058583a72223a5a7da162f6bd2d6d0187cd73a939d` |
 | `chiado/blob-23507949-0.hex` | `384eaae16ad11854a0b1b83c2ff67542b7903b86ecd1ee189444699242b76f40` |
 | `chiado/header-23507949.rlp.hex` | `b6c2ffc4aea6c879093cd6bf111dddf24807997d1b1b6bda485953950b22d373` |

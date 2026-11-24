@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"math/big"
 	"net"
 	"net/http/httptest"
 	"net/url"
@@ -28,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -36,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/l1test"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
@@ -182,6 +185,7 @@ func TestRPCTransportError(t *testing.T) {
 	r, err := l1.DialRPC(t.Context(), "http://"+addr, log.New())
 	require.NoError(t, err)
 	defer r.Close()
+	require.NotErrorIs(t, r.SendRawTransaction(t.Context(), []byte{0x02}), l1.ErrRefused, "no answer refuses it")
 	_, err = r.ChainID(t.Context())
 	// The system error's text and errno are the platform's.
 	require.True(t, strings.HasPrefix(err.Error(), "eth_chainId: dial tcp "+addr+": "), err.Error())
@@ -194,6 +198,18 @@ func TestRPCTransportError(t *testing.T) {
 // TestRPCURLError checks that a failure with no connection error, as an
 // untrusted certificate, prints the endpoint without its path and query,
 // where providers put API keys, and keeps the cause.
+// TestRedactURL: an endpoint prints its scheme and host only.
+func TestRedactURL(t *testing.T) {
+	for raw, want := range map[string]string{
+		"wss://user:secret@l1.example/v3/KEY?key=KEY": "wss://l1.example",
+		"https://l1.example:8545":                     "https://l1.example:8545",
+		"builder:8545":                                "builder:",
+		"http://user:secret@[l1/KEY":                  "endpoint",
+	} {
+		require.Equal(t, want, l1.RedactURL(raw), raw)
+	}
+}
+
 func TestRPCURLError(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	defer srv.Close()
@@ -233,4 +249,116 @@ func TestRPCURLError(t *testing.T) {
 			}
 		})
 	}
+}
+
+// posting serves what a poster reads from and sends to L1.
+type posting struct {
+	baseFee *hexutil.Big
+	sent    []hexutil.Bytes
+}
+
+var poster = common.HexToAddress("0x5")
+
+func (p *posting) GetTransactionCount(_ context.Context, addr common.Address, block string) (hexutil.Uint64, error) {
+	if addr != poster || block != "latest" {
+		return 0, errors.New("want the poster's confirmed nonce")
+	}
+	return 7, nil
+}
+
+func (p *posting) GetBlockByNumber(_ context.Context, block string, full bool) (map[string]any, error) {
+	if block != "latest" || full {
+		return nil, errors.New("want the latest header")
+	}
+	h := map[string]any{"number": "0x10", "hash": common.Hash{1}, "parentHash": common.Hash{2}, "timestamp": "0x20"}
+	if p.baseFee != nil {
+		h["baseFeePerGas"] = p.baseFee
+	}
+	return h, nil
+}
+
+func (p *posting) GetBalance(_ context.Context, addr common.Address, block string) (*hexutil.Big, error) {
+	if addr != poster || block != "latest" {
+		return nil, errors.New("want the poster's latest balance")
+	}
+	return (*hexutil.Big)(new(big.Int).Lsh(big.NewInt(1), 70)), nil
+}
+
+func (p *posting) GetTransactionReceipt(_ context.Context, hash common.Hash) (map[string]any, error) {
+	if hash != (common.Hash{4}) {
+		return nil, nil
+	}
+	return map[string]any{
+		"status": "0x1", "blockNumber": "0x11", "transactionIndex": "0x2", "transactionHash": hash,
+		"logs": []map[string]any{{
+			"address": poster, "topics": []common.Hash{{5}}, "data": "0x0102", "blockNumber": "0x11",
+			"transactionHash": hash, "transactionIndex": "0x2", "blockHash": common.Hash{6}, "logIndex": "0x7", "removed": false,
+		}},
+	}, nil
+}
+
+// GetTransactionByHash knows transaction 4 in a block and 9 in the pool.
+func (p *posting) GetTransactionByHash(_ context.Context, hash common.Hash) (map[string]any, error) {
+	switch hash {
+	case common.Hash{4}:
+		return map[string]any{"hash": hash, "blockHash": common.Hash{6}, "blockNumber": "0x11", "transactionIndex": "0x2"}, nil
+	case common.Hash{9}:
+		return map[string]any{"hash": hash, "blockHash": nil, "blockNumber": nil, "transactionIndex": nil}, nil
+	}
+	return nil, nil
+}
+
+func (p *posting) SendRawTransaction(_ context.Context, raw hexutil.Bytes) (common.Hash, error) {
+	switch {
+	case len(raw) == 0:
+		return common.Hash{}, errors.New("nonce too low")
+	case raw[0] == 0x01:
+		return common.Hash{}, errors.New("already known")
+	case raw[0] == 0x03:
+		return common.Hash{}, errors.New("existing txn with same hash")
+	}
+	p.sent = append(p.sent, raw)
+	return common.Hash{3}, nil
+}
+
+func TestRPCPosting(t *testing.T) {
+	p := &posting{baseFee: (*hexutil.Big)(big.NewInt(1_000_000_007))}
+	r := serveRPC(t, p)
+	ctx := t.Context()
+	nonce, err := r.Nonce(ctx, poster)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), nonce)
+	fee, err := r.BaseFee(ctx)
+	require.NoError(t, err)
+	require.Equal(t, uint256.NewInt(1_000_000_007), fee)
+	balance, err := r.Balance(ctx, poster)
+	require.NoError(t, err)
+	require.Equal(t, new(uint256.Int).Lsh(uint256.NewInt(1), 70), balance)
+	require.NoError(t, r.SendRawTransaction(ctx, []byte{0x02, 0xc0}))
+	require.Equal(t, []hexutil.Bytes{{0x02, 0xc0}}, p.sent)
+	err = r.SendRawTransaction(ctx, nil)
+	require.ErrorContains(t, err, "nonce too low")
+	require.ErrorIs(t, err, l1.ErrRefused, "the node answered")
+	require.NoError(t, r.SendRawTransaction(ctx, []byte{0x01}), "the pool holds it")
+	require.NoError(t, r.SendRawTransaction(ctx, []byte{0x03}), "the pool holds it")
+
+	receipt, err := r.Receipt(ctx, common.Hash{4})
+	require.NoError(t, err)
+	require.Equal(t, &l1.Receipt{Status: 1, BlockNumber: 0x11, TxIndex: 2, Logs: []*types.Log{{
+		Address: poster, Topics: []common.Hash{{5}}, Data: []byte{1, 2}, BlockNumber: 0x11,
+		TxHash: common.Hash{4}, TxIndex: 2, BlockHash: common.Hash{6}, Index: 7,
+	}}}, receipt)
+	receipt, err = r.Receipt(ctx, common.Hash{8})
+	require.NoError(t, err)
+	require.Nil(t, receipt)
+	for hash, want := range map[common.Hash]bool{{4}: true, {9}: true, {8}: false} {
+		has, err := r.HasTransaction(ctx, hash)
+		require.NoError(t, err)
+		require.Equal(t, want, has, "transaction %x", hash)
+	}
+
+	p.baseFee = nil
+	fee, err = r.BaseFee(ctx)
+	require.NoError(t, err)
+	require.True(t, fee.IsZero())
 }

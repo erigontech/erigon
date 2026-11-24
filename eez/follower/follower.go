@@ -112,6 +112,10 @@ type Config struct {
 	PeerCount        func(ctx context.Context) (uint64, error)
 	PeerRefresh      time.Duration
 	OverlayPeerCount func() int
+	// DropUnsettledTail has Run move the head back to the safe block after
+	// boot, before OnHead hears of L1: a restarted composer has lost the
+	// batches it had in flight.
+	DropUnsettledTail bool
 	// OnHead, when set, receives from Run the L1 head boot caught up to, then
 	// every new one; it must not block.
 	OnHead func(l1.Header)
@@ -379,6 +383,42 @@ func (f *Follower) stepUnsafe(ctx context.Context) {
 // Deriver is the follower's deriver.
 func (f *Follower) Deriver() *deriver.Deriver { return f.deriver }
 
+// dropTail moves the head back to the safe block, logging the transactions
+// of the blocks it drops. It runs before Run's loop, which serves HeadTo.
+func (f *Follower) dropTail(ctx context.Context) error {
+	head, err := f.chain.Head(ctx)
+	if err != nil {
+		return err
+	}
+	safe, to := f.deriver.Safe(), head.Number.Uint64()
+	if to <= safe {
+		return nil
+	}
+	var txs []common.Hash
+	for n := safe + 1; n <= to; n++ {
+		b, err := f.chain.BlockByNumber(ctx, n)
+		if err != nil {
+			return fmt.Errorf("unsettled block %d: %w", n, err)
+		}
+		for _, tx := range b.Transactions() {
+			txs = append(txs, tx.Hash())
+		}
+	}
+	hash, ok, err := f.chain.CanonicalHash(ctx, safe)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("safe block %d is not canonical", safe)
+	}
+	if err := f.deriver.ForkChoiceTo(ctx, hash); err != nil {
+		return err
+	}
+	f.logger.Warn("[eez] unsettled tail dropped at restart", "event", "eez.follower.unsettled_tail.dropped",
+		"from", safe+1, "to", to, "txs", len(txs), "txHashes", txs)
+	return nil
+}
+
 // Run boots and follows L1 until ctx ends or the follower must halt: on a
 // divergence from canonical L1, an L1 reorg it cannot follow, or a boot
 // that exhausts BootAttempts. Once booted it also performs the commands of
@@ -396,6 +436,11 @@ func (f *Follower) Run(ctx context.Context) error {
 	}
 	if err := f.Boot(ctx); err != nil {
 		return err
+	}
+	if f.cfg.DropUnsettledTail {
+		if err := f.dropTail(ctx); err != nil {
+			return err
+		}
 	}
 	if f.funnel != nil {
 		f.funnel.start(ctx)

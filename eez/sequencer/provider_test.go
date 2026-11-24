@@ -79,8 +79,11 @@ func TestPoolTxns(t *testing.T) {
 
 func TestDABudget(t *testing.T) {
 	// A 6-block slot of full blocks fits one batch at the floor price.
-	require.Equal(t, 65_738, DABudget(6))
-	require.LessOrEqual(t, uint64(6*DABudget(6))*floorGasPerByte+batchReserve, uint64(maxBatchGas))
+	require.Equal(t, 65_738, DABudget(6, MaxBatchGas))
+	for _, gas := range []uint64{1_521_000, 4_000_000, MaxBatchGas} {
+		require.LessOrEqual(t, uint64(6*DABudget(6, gas))*floorGasPerByte+batchReserve, gas, "gas %d", gas)
+	}
+	require.Zero(t, DABudget(6, batchReserve))
 }
 
 // paged is a pool yielding pages of n transactions it has not yielded,
@@ -243,8 +246,9 @@ func TestProvideTxnsBoundsTheWait(t *testing.T) {
 func TestMaxTxnSize(t *testing.T) {
 	spanSize := func(n uint64) int { return int(n) + len(binary.AppendUvarint(nil, n)) }
 	for k := uint64(1); k <= MaxCatchup; k++ {
-		size := MaxTxnSize(k)
-		require.LessOrEqual(t, spanSize(size), DABudget(k), "K %d", k)
-		require.Greater(t, spanSize(size+1), DABudget(k), "K %d", k)
+		budget := DABudget(k, MaxBatchGas)
+		size := MaxTxnSize(budget)
+		require.LessOrEqual(t, spanSize(size), budget, "K %d", k)
+		require.Greater(t, spanSize(size+1), budget, "K %d", k)
 	}
 }
