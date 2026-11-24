@@ -48,6 +48,7 @@ func newEmptyBlobHashesChain(t *testing.T) emptyBlobHashesChain {
 	require.NoError(t, err)
 	valid := chainPack.Blocks[0]
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{valid}))
+	m.ExecModule.WaitIdle(t.Context())
 
 	txn, err := types.SignTx(&types.BlobTx{
 		DynamicFeeTransaction: *types.NewEIP1559Transaction(
@@ -85,13 +86,23 @@ func requireEmptyBlobHashesInvalid(t *testing.T, status *engine_types.PayloadSta
 	require.ErrorContains(t, status.ValidationError.Error(), types.ErrBlobTxnEmptyBlobs.Error())
 }
 
+func requireSyncingOrEmptyBlobHashesInvalid(t *testing.T, status *engine_types.PayloadStatus, latestValid common.Hash) {
+	t.Helper()
+	if status.Status == engine_types.InvalidStatus {
+		requireEmptyBlobHashesInvalid(t, status, latestValid)
+		return
+	}
+	require.Equal(t, engine_types.SyncingStatus, status.Status)
+	require.Nil(t, status.LatestValidHash)
+	require.Nil(t, status.ValidationError)
+}
+
 // The parent of the new payload is downloaded from a peer, and both blocks are then
 // invalid, with the last valid block as the latest valid hash.
 func TestNewPayloadMarksDownloadedEmptyBlobHashesChainInvalid(t *testing.T) {
 	c := newEmptyBlobHashesChain(t)
 
-	status := sendNewPayload(t, c.srv, c.invalid2)
-	require.Contains(t, []engine_types.EngineStatus{engine_types.SyncingStatus, engine_types.InvalidStatus}, status.Status)
+	requireSyncingOrEmptyBlobHashesInvalid(t, sendNewPayload(t, c.srv, c.invalid2), c.valid.Hash())
 	require.Eventually(t, func() bool {
 		return c.srv.blockDownloader.Status() != engine_block_downloader.Syncing
 	}, 30*time.Second, 10*time.Millisecond)
@@ -118,7 +129,7 @@ func TestForkchoiceMarksDownloadedEmptyBlobHashesChainInvalid(t *testing.T) {
 		return resp.PayloadStatus
 	}
 
-	require.Contains(t, []engine_types.EngineStatus{engine_types.SyncingStatus, engine_types.InvalidStatus}, fcu().Status)
+	requireSyncingOrEmptyBlobHashesInvalid(t, fcu(), c.valid.Hash())
 	require.Eventually(t, func() bool {
 		return c.srv.blockDownloader.Status() != engine_block_downloader.Syncing
 	}, 30*time.Second, 10*time.Millisecond)
