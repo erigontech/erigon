@@ -560,8 +560,9 @@ func (c *Composer) recoverHeld(ctx context.Context, p Posted[*Held]) {
 	_, err := c.substitute(ctx, p.Terminal)
 	switch {
 	case errors.Is(err, follower.ErrBelowSafe):
-		// L1 settled the height after all: the verdict was stale.
-		c.pool.Release(p.Txs)
+		// L1 settled the height after all: once derivation passes it, the
+		// batch is disposed of by what ran.
+		c.ledger.ReinsertFailed(p)
 		return
 	case err != nil && !errors.Is(err, follower.ErrNotCanonical) && !errors.Is(err, follower.ErrStaleParent):
 		c.ledger.ReinsertFailed(p)

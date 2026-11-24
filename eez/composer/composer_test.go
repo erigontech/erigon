@@ -1285,7 +1285,7 @@ func TestComposerRecoversHeldTransactions(t *testing.T) {
 		{name: "a skipped slot is free", skipped: true, queued: map[common.Hash]uint32{{1}: 0, {2}: 0, {3}: 0}, replaced: true},
 		{name: "a landed trigger is released", landed: true, queued: map[common.Hash]uint32{{2}: 0, {3}: 1}, replaced: true},
 		{name: "the third failure evicts the chain", attempts: 2, queued: map[common.Hash]uint32{{3}: 1}, replaced: true},
-		{name: "a height L1 settled", substitute: follower.ErrBelowSafe, queued: map[common.Hash]uint32{{2}: 0}},
+		{name: "a height L1 settled waits for derivation", substitute: follower.ErrBelowSafe, queued: map[common.Hash]uint32{{2}: 0}, kept: true},
 		{name: "a block no longer canonical", substitute: follower.ErrNotCanonical, queued: map[common.Hash]uint32{{1}: 1, {2}: 0, {3}: 1}, replaced: true},
 		{name: "a stale parent", substitute: follower.ErrStaleParent, queued: map[common.Hash]uint32{{1}: 1, {2}: 0, {3}: 1}, replaced: true},
 		{name: "a substitution failing", substitute: errors.New("chain busy"), queued: map[common.Hash]uint32{{2}: 0}, kept: true},
@@ -1333,4 +1333,34 @@ func TestComposerRecoversHeldTransactions(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestComposerDisposesOfAFailedBatchL1Settled: a failed batch whose height
+// L1 settled after all is disposed of by what ran once derivation passes it:
+// a trigger that landed is let go, one that did not returns to the pool.
+func TestComposerDisposesOfAFailedBatchL1Settled(t *testing.T) {
+	node := &triggers{landed: map[common.Hash]bool{}}
+	h := newHarness(t, newTestChain(t, 8), 8, node)
+	pool := NewHeldPool()
+	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, follower.ErrBelowSafe })
+	ran, cut := held(addr(0xa), 0, Inbound, 1), held(addr(0xb), 0, Inbound, 2)
+	node.landed[ran.Hash] = true
+	require.NoError(t, pool.Push(ran, 0))
+	require.NoError(t, pool.Push(cut, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: pool.PopN(2)})
+	h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
+	h.c.RecoverFailed(t.Context())
+	require.Zero(t, pool.Len(), "nothing requeued before derivation passes the height")
+	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	r, ok := h.resolution(8)
+	require.True(t, ok)
+	require.Equal(t, Settled, r)
+	h.c.ledger.mu.Lock()
+	require.Equal(t, []*Held{ran}, h.c.ledger.entries[8].Txs, "what ran is kept for a reorg")
+	h.c.ledger.mu.Unlock()
+	require.Equal(t, []*Held{cut}, pool.PopN(math.MaxInt))
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	require.NotContains(t, pool.inFlight, ran.Hash)
 }
