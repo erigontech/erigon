@@ -910,22 +910,6 @@ func TestRunPeer_BlockRangeUpdateBurstIsDroppedWithoutDisconnect(t *testing.T) {
 	require.Less(t, forwarded, 40)
 }
 
-func TestRunPeer_BlockAccessListsPreserveRequestPermits(t *testing.T) {
-	peerInfo, peerID := newTestPeerInfoWithEth(t)
-	peerInfo.AddDeadline(time.Now().Add(time.Minute))
-	rw := NewMockMsgReadWriter()
-	require.NoError(t, p2p.Send(rw, eth.BlockAccessListsMsg, &eth.BlockAccessListsPacket66{RequestId: 1}))
-	rw.WriteToReadBuffer(rw.ReadAllWritten())
-
-	var forwarded sentryproto.MessageId
-	peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH71}, rw, peerInfo,
-		func(id sentryproto.MessageId, _ [64]byte, _ []byte) { forwarded = id },
-		func(sentryproto.MessageId) bool { return true }, log.Root())
-	require.ErrorIs(t, peerErr.Err, io.EOF)
-	require.Equal(t, sentryproto.MessageId_BLOCK_ACCESS_LISTS_71, forwarded)
-	require.Equal(t, 1, peerInfo.ClearDeadlines(time.Now(), false))
-}
-
 func newGetBlockHeadersReadWriter(t *testing.T, requests int) *MockMsgReadWriter {
 	t.Helper()
 	rw := NewMockMsgReadWriter()

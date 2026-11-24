@@ -207,18 +207,15 @@ func TestMessageListenerPenalizesMalformedListEnvelope(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			test := newMessageListenerTest(t)
-			test.mockSentryStreams()
+			defer test.ctxCancel()
 			peerId := PeerIdFromUint64(1)
 			mockExpectPenalizePeer(t, test.sentryClient, peerId)
-			test.run(func(context.Context, *testing.T) {
-				test.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
-					message: &sentryproto.InboundMessage{
-						Id:     tc.id,
-						PeerId: peerId.H512(),
-						Data:   tc.data,
-					},
-				}
+			err := test.messageListener.notifyListResponse(t.Context(), &sentryproto.InboundMessage{
+				Id:     tc.id,
+				PeerId: peerId.H512(),
+				Data:   tc.data,
 			})
+			require.True(t, rlp.IsInvalidRLPError(err))
 		})
 	}
 }
