@@ -1854,6 +1854,7 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 	ctx := context.WithValue(r.Context(), gloasBlockProductionOptionsKey{}, &gloasBlockProductionOptions{
 		payloadFeeRecipient: &preferences.Message.FeeRecipient,
 		deferPayloadCache:   true,
+		bidRequest:          true,
 	})
 	options := gloasBlockOptionsFromContext(ctx)
 	beaconBody, executionValue, err := a.produceBeaconBody(

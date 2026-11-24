@@ -119,8 +119,6 @@ const gloasPayloadCollectionDivisor = 3
 const minimumPayloadBuildTime = 500 * time.Millisecond
 
 var (
-	// payloadCollectedSeconds is the time from the slot start until the payload was collected, by
-	// whether it was prepared ahead of the slot.
 	payloadCollectedSeconds = map[bool]metrics.Summary{
 		true:  metrics.GetOrCreateSummary(`caplin_block_production_payload_collected_seconds{window="prepared"}`),
 		false: metrics.GetOrCreateSummary(`caplin_block_production_payload_collected_seconds{window="unprepared"}`),
@@ -1942,17 +1940,19 @@ func (a *ApiHandler) produceBeaconBody(
 			)
 		}
 		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, warmup)
+		options := gloasBlockOptionsFromContext(ctx)
+		recordMetrics := options == nil || !options.bidRequest
 		payload, bundles, requestsBundle, blockValue, err := pollAssembledPayload(
 			ctx, buildWindow, retryTime,
 			func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 				p, b, rb, v, getErr := a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
-				if getErr != nil {
+				if getErr != nil && recordMetrics {
 					payloadPollFailures.WithLabelValues(payloadPollFailureReason(getErr)).Inc()
 				}
 				return p, b, rb, v, getErr
 			},
 		)
-		if err == nil && payload != nil {
+		if err == nil && payload != nil && recordMetrics {
 			payloadCollectedSeconds[warmup > 0].Observe(time.Since(slotStart).Seconds())
 		}
 		if err != nil {

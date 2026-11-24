@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -10,7 +11,9 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -31,35 +34,88 @@ func summarySum(t *testing.T, s metrics.Summary) float64 {
 	return m.GetSummary().GetSampleSum()
 }
 
-func produceCapellaBody(t *testing.T, prepared bool, getErr error) (sinceSlotBefore, sinceSlotAfter float64, err error) {
-	t.Helper()
-	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
-	payload := cltypes.NewEth1BlockFromExecutionHeader(postState.LatestExecutionPayloadHeader(), clparams.CapellaVersion, h.beaconChainCfg)
-	if getErr != nil {
-		payload = nil
-	}
-	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]byte{1}, nil)
-	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.CapellaVersion).Return(payload, nil, nil, nil, getErr).AnyTimes()
-	h.engine = engine
-	baseBlock := blocks[len(blocks)-1].Block
-	baseBlockRoot, err := baseBlock.HashSSZ()
-	require.NoError(t, err)
-	if prepared {
-		h.preparedPayload.set(baseBlock.Slot+1, []byte{1}, baseBlockRoot, time.Now().Add(-time.Second))
-	}
-	slotStart := h.ethClock.GetSlotTime(baseBlock.Slot + 1)
-	sinceSlotBefore = time.Since(slotStart).Seconds()
-	_, _, err = h.produceBeaconBody(t.Context(), baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1, common.Bytes96{0xc0}, common.Hash{})
-	return sinceSlotBefore, time.Since(slotStart).Seconds(), err
+func collectedSummary(window string) metrics.Summary {
+	return metrics.GetOrCreateSummary(`caplin_block_production_payload_collected_seconds{window="` + window + `"}`)
 }
 
-func requireCollectedOnce(t *testing.T, prepared bool) {
+type slotStartClock struct {
+	eth_clock.EthereumClock
+	slot  uint64
+	start time.Time
+}
+
+func (c slotStartClock) GetSlotTime(slot uint64) time.Time {
+	if slot == c.slot {
+		return c.start
+	}
+	return c.EthereumClock.GetSlotTime(slot)
+}
+
+type capellaProduction struct {
+	h         *ApiHandler
+	engine    *execution_client.MockExecutionEngine
+	baseBlock *cltypes.BeaconBlock
+	baseRoot  common.Hash
+	postState *state.CachingBeaconState
+	payload   *cltypes.Eth1Block
+}
+
+func newCapellaProduction(t *testing.T) *capellaProduction {
 	t.Helper()
-	collected, other := payloadCollectedSeconds[prepared], payloadCollectedSeconds[!prepared]
-	count, sum, otherCount := summaryCount(t, collected), summarySum(t, collected), summaryCount(t, other)
-	sinceSlotBefore, sinceSlotAfter, err := produceCapellaBody(t, prepared, nil)
+	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]byte{1}, nil)
+	h.engine = engine
+	baseBlock := blocks[len(blocks)-1].Block
+	baseRoot, err := baseBlock.HashSSZ()
 	require.NoError(t, err)
+	return &capellaProduction{
+		h:         h,
+		engine:    engine,
+		baseBlock: baseBlock,
+		baseRoot:  baseRoot,
+		postState: postState,
+		payload:   cltypes.NewEth1BlockFromExecutionHeader(postState.LatestExecutionPayloadHeader(), clparams.CapellaVersion, h.beaconChainCfg),
+	}
+}
+
+func (p *capellaProduction) targetSlot() uint64 {
+	return p.baseBlock.Slot + 1
+}
+
+func (p *capellaProduction) poll(payload *cltypes.Eth1Block, err error) *execution_client.MockExecutionEngineGetAssembledBlockCall {
+	return p.engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.CapellaVersion).Return(payload, nil, nil, nil, err)
+}
+
+func (p *capellaProduction) prepare() {
+	p.h.preparedPayload.set(p.targetSlot(), []byte{1}, p.baseRoot, time.Now().Add(-time.Second))
+}
+
+func (p *capellaProduction) prepareWithPollingOpenFor(left time.Duration) {
+	p.prepare()
+	due := attestationDue(p.h.beaconChainCfg, clparams.CapellaVersion)
+	start := time.Now().Add(-preparedGrabOffset(due)).Add(left)
+	p.h.ethClock = slotStartClock{EthereumClock: p.h.ethClock, slot: p.targetSlot(), start: start}
+}
+
+func (p *capellaProduction) produce(ctx context.Context) error {
+	_, _, err := p.h.produceBeaconBody(ctx, p.baseBlock.Slot, p.baseRoot, p.postState, p.targetSlot(), common.Bytes96{0xc0}, common.Hash{})
+	return err
+}
+
+func requireCollectedOnce(t *testing.T, prepared bool, window, otherWindow string) {
+	t.Helper()
+	collected, other := collectedSummary(window), collectedSummary(otherWindow)
+	count, sum, otherCount := summaryCount(t, collected), summarySum(t, collected), summaryCount(t, other)
+	p := newCapellaProduction(t)
+	p.poll(p.payload, nil)
+	if prepared {
+		p.prepare()
+	}
+	slotStart := p.h.ethClock.GetSlotTime(p.targetSlot())
+	sinceSlotBefore := time.Since(slotStart).Seconds()
+	require.NoError(t, p.produce(t.Context()))
+	sinceSlotAfter := time.Since(slotStart).Seconds()
 	require.Equal(t, count+1, summaryCount(t, collected))
 	require.Equal(t, otherCount, summaryCount(t, other))
 	observed := summarySum(t, collected) - sum
@@ -70,20 +126,42 @@ func requireCollectedOnce(t *testing.T, prepared bool) {
 }
 
 func TestProduceBeaconBodyRecordsWhenTheUnpreparedPayloadWasCollected(t *testing.T) {
-	requireCollectedOnce(t, false)
+	requireCollectedOnce(t, false, "unprepared", "prepared")
 }
 
 func TestProduceBeaconBodyRecordsWhenThePreparedPayloadWasCollected(t *testing.T) {
-	requireCollectedOnce(t, true)
+	requireCollectedOnce(t, true, "prepared", "unprepared")
 }
 
-func TestProduceBeaconBodyCountsAFailedPayloadPollByReason(t *testing.T) {
+func TestProduceBeaconBodyCountsABusyPollBeforeTheCollectedPayload(t *testing.T) {
 	busy := payloadPollFailures.WithLabelValues("busy")
-	before, collected := busy.GetValue(), summaryCount(t, payloadCollectedSeconds[false])
-	_, _, err := produceCapellaBody(t, false, chainreader.ErrExecutionBusy)
-	require.Error(t, err)
-	require.Greater(t, busy.GetValue(), before)
-	require.Equal(t, collected, summaryCount(t, payloadCollectedSeconds[false]), "a failed production records no collection time")
+	before, collected := busy.GetValue(), summaryCount(t, collectedSummary("prepared"))
+	p := newCapellaProduction(t)
+	p.prepareWithPollingOpenFor(time.Second)
+	gomock.InOrder(p.poll(nil, chainreader.ErrExecutionBusy), p.poll(p.payload, nil))
+	require.NoError(t, p.produce(t.Context()))
+	require.Equal(t, before+1, busy.GetValue())
+	require.Equal(t, collected+1, summaryCount(t, collectedSummary("prepared")))
+}
+
+func TestProduceBeaconBodyFailedProductionRecordsNoCollectionTime(t *testing.T) {
+	collected := summaryCount(t, collectedSummary("unprepared"))
+	p := newCapellaProduction(t)
+	p.poll(nil, chainreader.ErrExecutionBusy).AnyTimes()
+	require.Error(t, p.produce(t.Context()))
+	require.Equal(t, collected, summaryCount(t, collectedSummary("unprepared")))
+}
+
+func TestProduceBeaconBodyForABidRequestRecordsNoProductionMetrics(t *testing.T) {
+	busy := payloadPollFailures.WithLabelValues("busy")
+	before, collected := busy.GetValue(), summaryCount(t, collectedSummary("prepared"))
+	p := newCapellaProduction(t)
+	p.prepareWithPollingOpenFor(time.Second)
+	gomock.InOrder(p.poll(nil, chainreader.ErrExecutionBusy), p.poll(p.payload, nil))
+	ctx := context.WithValue(t.Context(), gloasBlockProductionOptionsKey{}, &gloasBlockProductionOptions{bidRequest: true})
+	require.NoError(t, p.produce(ctx))
+	require.Equal(t, before, busy.GetValue())
+	require.Equal(t, collected, summaryCount(t, collectedSummary("prepared")))
 }
 
 func TestPayloadPollFailureReason(t *testing.T) {
