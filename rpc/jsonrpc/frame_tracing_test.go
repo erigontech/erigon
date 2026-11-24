@@ -338,6 +338,16 @@ func TestFramePrestateTracerKeyedNonce(t *testing.T) {
 	require.Equal(t, common.HexToHash("0x1"), trace[types.FrameNonceManager].Storage[slot])
 }
 
+type framePrestateDiff struct {
+	Pre  map[common.Address]struct{} `json:"pre"`
+	Post map[common.Address]struct {
+		Balance hexutil.U256                `json:"balance"`
+		Code    hexutil.Bytes               `json:"code"`
+		Nonce   uint64                      `json:"nonce"`
+		Storage map[common.Hash]common.Hash `json:"storage"`
+	} `json:"post"`
+}
+
 func TestFramePrestateTracerRollback(t *testing.T) {
 	factory := common.HexToAddress("0x2000")
 	child := types.CreateAddress(factory, 0)
@@ -385,10 +395,7 @@ func TestFramePrestateTracerRollback(t *testing.T) {
 			require.NoError(t, ibs.SetCode(accounts.InternAddress(revertedTransfer), program.New().Call(uint256.NewInt(20_000), child, 0, 0, 0, 0, 0).Op(vm.POP).Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
 			tx.Frames[1].Limits = mdgas.MdGas{Execution: 100_000, State: 1_000_000}
 			tx.Frames = append(tx.Frames, tc.frames...)
-			var diff struct {
-				Pre  map[common.Address]json.RawMessage `json:"pre"`
-				Post map[common.Address]json.RawMessage `json:"post"`
-			}
+			var diff framePrestateDiff
 			require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "prestateTracer", json.RawMessage(`{"diffMode":true}`)), &diff))
 			destroyed, err := ibs.HasSelfdestructed(accounts.InternAddress(child))
 			require.NoError(t, err)
@@ -398,12 +405,7 @@ func TestFramePrestateTracerRollback(t *testing.T) {
 			require.Equal(t, uint256.Int{tc.wantBalance}, balance)
 			require.NotContains(t, diff.Pre, child)
 			require.Contains(t, diff.Post, child)
-			var account struct {
-				Balance hexutil.U256  `json:"balance"`
-				Code    hexutil.Bytes `json:"code"`
-				Nonce   uint64        `json:"nonce"`
-			}
-			require.NoError(t, json.Unmarshal(diff.Post[child], &account))
+			account := diff.Post[child]
 			require.Equal(t, uint256.Int{tc.wantBalance}, uint256.Int(account.Balance))
 			require.Equal(t, hexutil.Bytes(runtime), account.Code)
 			require.EqualValues(t, 1, account.Nonce)
@@ -425,10 +427,7 @@ func TestFramePrestateTracerRetainedBalance(t *testing.T) {
 		Mode: types.FrameSender, Target: &child, Value: uint256.Int{7},
 		Limits: mdgas.MdGas{Execution: 30_000, State: 100_000},
 	})
-	var diff struct {
-		Pre  map[common.Address]json.RawMessage `json:"pre"`
-		Post map[common.Address]json.RawMessage `json:"post"`
-	}
+	var diff framePrestateDiff
 	require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "prestateTracer", json.RawMessage(`{"diffMode":true}`)), &diff))
 	destroyed, err := ibs.HasSelfdestructed(accounts.InternAddress(child))
 	require.NoError(t, err)
@@ -439,13 +438,7 @@ func TestFramePrestateTracerRetainedBalance(t *testing.T) {
 	require.Equal(t, uint256.Int{7}, balance)
 	require.NotContains(t, diff.Pre, child)
 	require.Contains(t, diff.Post, child)
-	var account struct {
-		Balance hexutil.U256                `json:"balance"`
-		Code    hexutil.Bytes               `json:"code"`
-		Nonce   uint64                      `json:"nonce"`
-		Storage map[common.Hash]common.Hash `json:"storage"`
-	}
-	require.NoError(t, json.Unmarshal(diff.Post[child], &account))
+	account := diff.Post[child]
 	require.Equal(t, uint256.Int{7}, uint256.Int(account.Balance))
 	require.Equal(t, hexutil.Bytes(runtime), account.Code)
 	require.EqualValues(t, 1, account.Nonce)
