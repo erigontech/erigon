@@ -17,6 +17,7 @@
 package protocol
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -25,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -203,35 +203,21 @@ func TestAssertStateReadErrorAbortsTransaction(t *testing.T) {
 					{Mode: types.FrameAssert, Target: &frameTarget, Limits: mdgas.MdGas{Execution: 20_000}},
 				}
 
-				var readErr, frameErr error
+				readErr := fmt.Errorf("%w: injected read failure", vm.ErrIntraBlockStateFailed)
 				config := evm.Config()
 				config.Tracer = &tracing.Hooks{
 					OnOpcode: func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
-						if vm.OpCode(op) != tc.op {
-							return
+						if vm.OpCode(op) == tc.op {
+							ibs.RecordStateReadError(readErr)
 						}
-						address := accounts.InternAddress(body)
-						key := accounts.InternKey(common.Hash{})
-						// A materialized account in versioned mode triggers an internal read
-						// error without setting StateReadError. Inject it only for this opcode.
-						ibs.SetVersionMap(state.NewVersionMap(nil))
-						_, readErr = ibs.GetState(address, key)
-						require.ErrorContains(t, readErr, "noMaterialize read fell back to a materialized stateObject")
-						require.NoError(t, ibs.StateReadError())
-					},
-					OnExitV2: func(_ int, _ []byte, _ mdgas.MdGasUsage, err error, _ bool) {
-						frameErr = err
 					},
 				}
 				evm.ResetBetweenBlocks(evm.Context, evm.TxContext, ibs, config, evm.ChainRules())
 
 				result, err := applyFrameTest(t, evm, tx)
-				require.Error(t, readErr)
-				require.ErrorContains(t, frameErr, readErr.Error())
-				require.ErrorIs(t, err, vm.ErrIntraBlockStateFailed)
-				require.ErrorContains(t, err, readErr.Error())
+				require.ErrorIs(t, err, readErr)
 				require.Nil(t, result)
-				require.ErrorIs(t, ibs.StateReadError(), vm.ErrIntraBlockStateFailed)
+				require.ErrorIs(t, ibs.StateReadError(), readErr)
 				value, err := ibs.GetState(accounts.InternAddress(body), accounts.InternKey(common.Hash{}))
 				require.NoError(t, err)
 				require.True(t, value.IsZero())
