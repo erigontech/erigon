@@ -151,8 +151,7 @@ func newFilesItem(startTxNum, endTxNum uint64) *FilesItem {
 	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum}
 }
 
-// retiredFiles will close in near future (or deleted from disk). `retiredFiles` already was removed from `dirtyFiles` list.
-// See `mvcc.RetireReason`
+// retiredFiles holds mappings detached from dirtyFiles and awaiting reclamation.
 type retiredFiles []*FilesItem
 
 func (i *FilesItem) Segment() *seg.Decompressor { return i.decompressor }
@@ -382,8 +381,7 @@ func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext str
 }
 
 // retire detaches matching entries from dirtyFiles. The caller must attach the
-// returned files to the outgoing visible generation; reclaim waits until readers
-// of that generation and all earlier generations finish.
+// returned files to the outgoing visible generation.
 func retire(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) (detached []*FilesItem) {
 	// canDelete decides whether reclaim also deletes the file from disk, or only closes it.
 	var canDelete bool

@@ -1186,7 +1186,8 @@ func TestMergeReplacementClosesAfterReaders(t *testing.T) {
 			for step := range kv.Step(2) {
 				require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil))
 			}
-			// The planner merges domain values before histories and standalone indexes.
+			// Each domain merges its values before its own history and history index.
+			// Standalone indexes wait for a pass with no domain value merges.
 			if tc.afterValueMerge {
 				progressed, err := agg.mergeLoopStep(ctx, 2*stepSize)
 				require.NoError(t, err)

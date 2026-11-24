@@ -1847,13 +1847,11 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return ceiling
 }
 
-// aggregatorVisible immutable visible-for-application files (no gaps, no overlaps, indexed)
-// See also
+// aggregatorVisible holds the immutable lists of indexed snapshot files for one generation.
+// Readers pin the generation they open. Its retired files can be reclaimed once
+// this generation and all earlier generations have no readers.
 //
-// new reader: refcnt++
-// new end: refcnt++
-// FilesDelete flow: Merge/Prune can mark old files as "ready for delete". Then last reader traversing linked-list of aggregatorVisible objects and perform real FileDelete
-// See: docs/plans/20260525-lockfree-file-reclamation-spec.md
+// See docs/plans/20260525-lockfree-file-reclamation-spec.md for the reclamation design.
 type aggregatorVisible struct {
 	generation   uint64
 	d            [kv.DomainLen]*domainVisible
@@ -1863,7 +1861,7 @@ type aggregatorVisible struct {
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
 
 	refcnt  atomic.Int32       // live readers
-	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
+	retired retiredFiles       // mappings detached when the next generation was published
 	next    *aggregatorVisible // oldest→newest linked-list link (set under dirtyFilesLock)
 }
 
@@ -1963,8 +1961,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	old.next = next
 	a.visible.Store(next)
 
-	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
-	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
+	// Reclaim eligible files at publication so readers have less work when they close.
 	reclaimFiles(a.reclaimRetiredLocked())
 }
 
@@ -2595,15 +2592,15 @@ func (a *Aggregator) acquireVisibleFiles() (v *aggregatorVisible) {
 	return v
 }
 
-// releaseVisibleFiles drops a pin taken by acquireVisibleFiles. Last reader: delete files
+// releaseVisibleFiles drops a pin taken by acquireVisibleFiles.
 func (a *Aggregator) releaseVisibleFiles(v *aggregatorVisible) {
 	if v.refcnt.Add(-1) == 0 {
 		a.reclaimRetired()
 	}
 }
 
-// reclaimRetiredLocked oldest-first traverse linked-list of visibleFiles objects while `refcnt == 0`
-// collecting retired files for physical reclaim. Physical reclaim happens out of `dirtyFilesLock`
+// reclaimRetiredLocked collects files ready to reclaim, oldest generation first.
+// The caller holds dirtyFilesLock during collection and closes the returned files.
 func (a *Aggregator) reclaimRetiredLocked() (toReclaim retiredFiles) {
 	cur := a.visible.Load()
 	for h := a.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {

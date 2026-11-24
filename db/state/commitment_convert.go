@@ -250,11 +250,8 @@ func keyXform(detectedV2, targetV2 bool) func([]byte) ([]byte, error) {
 //	squeezed   → unsqueezed  closure around ExpandShortenedKeysInBranch
 //	squeezed   → squeezed    nil
 //
-// The unsqueezed→squeezed path delegates to the existing read-side machinery
-// in domain_committed.go so the converter writes the same on-disk format the
-// live system produces. The squeezed→unsqueezed direction calls
-// ExpandShortenedKeysInBranch — the same code path the live read side uses
-// to materialise plain keys.
+// Squeezing uses the merge writer's encoding for account and storage references.
+// Expansion uses the live reader's helper to recover the plain keys.
 //
 // Account+storage file lookup happens here (not at the call site) so pure
 // key-encoding conversions (squeeze axis unchanged) don't need account/storage

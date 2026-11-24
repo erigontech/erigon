@@ -1096,7 +1096,7 @@ type StaticFiles struct {
 	existenceFilter *existence.Filter
 }
 
-// CleanupOnError - call it on collation fail. It closing all files
+// CleanupOnError closes the data and index handles, leaving the files on disk.
 func (sf StaticFiles) CleanupOnError() {
 	if sf.valuesDecomp != nil {
 		sf.valuesDecomp.Close()
