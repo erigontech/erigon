@@ -73,8 +73,7 @@ type handler struct {
 	allowSubscribe bool
 	inlineCalls    bool // the caller waits for every answer, as a single HTTP request does
 
-	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
-	forbiddenList ForbiddenList
+	allowList AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
 
 	unsubscribeCb   *callback
 	unsubscribeOnce sync.Once
@@ -136,7 +135,6 @@ func newHandler(
 	rpcSlowLogThreshold time.Duration,
 ) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
-	forbiddenList := ForbiddenList{}
 
 	h := &handler{
 		reg:            reg,
@@ -147,7 +145,6 @@ func newHandler(
 		allowSubscribe: true,
 		baseLogger:     logger,
 		allowList:      allowList,
-		forbiddenList:  forbiddenList,
 
 		subscriptionLimit:   subscriptionLimit,
 		maxBatchConcurrency: maxBatchConcurrency,
@@ -669,9 +666,8 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 }
 
 func (h *handler) isMethodAllowedByGranularControl(method string) bool {
-	_, isForbidden := h.forbiddenList[method]
 	if len(h.allowList) == 0 {
-		return !isForbidden
+		return true
 	}
 
 	_, ok := h.allowList[method]
