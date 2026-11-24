@@ -99,7 +99,7 @@ func TestBALFetcherResponse(t *testing.T) {
 		{"invalid committed BAL", []rlp.RawValue{invalid}, crypto.Keccak256Hash(invalid), false, nil},
 		{"unavailable BAL", []rlp.RawValue{{0x80}}, empty.BlockAccessListHash, true, nil},
 		{"commitment mismatch", []rlp.RawValue{{0xc0}}, common.Hash{1}, false, ErrBadBALResponse},
-		{"truncated response", nil, empty.BlockAccessListHash, false, nil},
+		{"empty reply leaves availability unknown", nil, empty.BlockAccessListHash, false, nil},
 		{"malformed entry", []rlp.RawValue{{0xc1}}, empty.BlockAccessListHash, false, rlp.ErrValueTooLarge},
 		{"excess entry is never read", []rlp.RawValue{{0x80}, {0xc1}}, empty.BlockAccessListHash, false, ErrBadBALResponse},
 	} {
