@@ -33,22 +33,31 @@ import (
 // pointers, so identity holds and memory stays bounded.
 type canonTable[T comparable] struct {
 	mu      sync.RWMutex // read-held while inserting into cur; write-held to rotate
-	cur     atomic.Pointer[xsync.Map[T, *T]]
+	cur     atomic.Pointer[generation[T]]
 	prev    atomic.Pointer[xsync.Map[T, *T]]
 	n       atomic.Int64
 	limit   int64
 	weak    *xsync.Map[T, weak.Pointer[T]]
-	migrate sync.Mutex
+	migrate sync.Mutex // held while a generation migrates; whoever unlocks it calls rotate
+}
+
+type generation[T comparable] struct {
+	m       *xsync.Map[T, *T]
+	rotated chan struct{}
+}
+
+func newGeneration[T comparable]() *generation[T] {
+	return &generation[T]{m: xsync.NewMap[T, *T](), rotated: make(chan struct{})}
 }
 
 func newCanonTable[T comparable](limit int64) *canonTable[T] {
 	c := &canonTable[T]{limit: limit, weak: xsync.NewMap[T, weak.Pointer[T]]()}
-	c.cur.Store(xsync.NewMap[T, *T]())
+	c.cur.Store(newGeneration[T]())
 	return c
 }
 
 func (c *canonTable[T]) lookup(v T) *T {
-	if p, ok := c.cur.Load().Load(v); ok {
+	if p, ok := c.cur.Load().m.Load(v); ok {
 		return p
 	}
 	if prev := c.prev.Load(); prev != nil {
@@ -62,6 +71,8 @@ func (c *canonTable[T]) lookup(v T) *T {
 	return nil
 }
 
+// intern rotates when cur reaches limit values. limit is soft: while a migration runs cur keeps growing, and an
+// insert waits only when cur reaches 2×limit, so cur holds at most 2×limit values plus one per inserting goroutine.
 func (c *canonTable[T]) intern(v T) *T {
 	if p := c.lookup(v); p != nil {
 		return p
@@ -71,38 +82,49 @@ func (c *canonTable[T]) intern(v T) *T {
 		c.mu.RUnlock()
 		return p
 	}
-	p, loaded := c.cur.Load().LoadOrCompute(v, func() (*T, bool) { p := new(T); *p = v; return p, false })
-	full := !loaded && c.n.Add(1) >= c.limit // counted under the read lock, so swap cannot reset n between the insert and its count
+	gen := c.cur.Load()
+	p, loaded := gen.m.LoadOrCompute(v, func() (*T, bool) { p := new(T); *p = v; return p, false })
+	var n int64
+	if !loaded {
+		n = c.n.Add(1) // counted under the read lock, so swap cannot reset n between the insert and its count
+	}
 	c.mu.RUnlock()
-	if full {
+	switch {
+	case n == c.limit:
 		c.rotate()
+	case n >= 2*c.limit:
+		c.rotate()
+		<-gen.rotated
 	}
 	return p
 }
 
-// rotate makes the current generation the previous one and migrates it to the weak table in the background.
-// While a migration runs, an insert that fills cur waits for it, so each strong generation holds at most limit values.
+// rotate starts a background migration of cur unless one runs; the running one calls rotate again when it ends.
 func (c *canonTable[T]) rotate() {
-	c.migrate.Lock()
-	if c.n.Load() < c.limit {
-		c.migrate.Unlock()
+	for c.n.Load() >= c.limit && c.migrate.TryLock() {
+		if c.n.Load() < c.limit {
+			c.migrate.Unlock()
+			continue
+		}
+		old := c.swap()
+		go func() {
+			c.toWeak(old)
+			c.migrate.Unlock()
+			c.rotate()
+		}()
 		return
 	}
-	old := c.swap()
-	go func() {
-		defer c.migrate.Unlock()
-		c.toWeak(old)
-	}()
 }
 
 func (c *canonTable[T]) swap() *xsync.Map[T, *T] {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	old := c.cur.Load()
-	c.cur.Store(xsync.NewMap[T, *T]())
-	c.prev.Store(old)
+	c.cur.Store(newGeneration[T]())
+	c.prev.Store(old.m)
 	c.n.Store(0)
-	return old
+	close(old.rotated)
+	return old.m
 }
 
 func (c *canonTable[T]) toWeak(old *xsync.Map[T, *T]) {
@@ -139,4 +161,5 @@ func (c *canonTable[T]) flush() {
 	c.migrate.Lock()
 	c.toWeak(c.swap())
 	c.migrate.Unlock()
+	c.rotate()
 }

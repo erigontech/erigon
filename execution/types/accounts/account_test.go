@@ -532,6 +532,28 @@ func TestTraceAccountMatchesInternedAddress(t *testing.T) {
 	require.True(t, dbg.TraceAccount(InternAddress(a).Value()))
 }
 
+func TestCanonTableInsertDoesNotWaitBelowHardCap(t *testing.T) {
+	const limit, inserters = 64, 8
+	c := newCanonTable[common.Hash](limit)
+	c.migrate.Lock()
+	t.Cleanup(func() { c.migrate.Unlock(); c.rotate() })
+	var wg sync.WaitGroup
+	for g := range inserters {
+		wg.Go(func() {
+			for i := range (2*limit - 1) / inserters {
+				c.intern(common.Hash{4, byte(g), byte(i)})
+			}
+		})
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("inserters waited for the migration with cur at %d values, below the hard cap %d", c.cur.Load().m.Size(), 2*limit)
+	}
+}
+
 func TestCanonTableBoundsGenerationsWhileMigrating(t *testing.T) {
 	const limit = 8
 	c := newCanonTable[common.Hash](limit)
@@ -545,23 +567,24 @@ func TestCanonTableBoundsGenerationsWhileMigrating(t *testing.T) {
 	}()
 	maxSize := 0
 	for deadline := time.Now().Add(200 * time.Millisecond); time.Now().Before(deadline); {
-		maxSize = max(maxSize, c.cur.Load().Size())
+		maxSize = max(maxSize, c.cur.Load().m.Size())
 		runtime.Gosched()
 	}
-	maxSize = max(maxSize, c.cur.Load().Size())
+	maxSize = max(maxSize, c.cur.Load().m.Size())
 	c.migrate.Unlock()
+	c.rotate()
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("intern did not finish after migrate was released")
 	}
-	require.LessOrEqual(t, maxSize, limit)
+	require.Equal(t, 2*limit, maxSize)
 	require.Eventually(t, func() bool {
-		return c.cur.Load().Size() < limit && c.prev.Load() == nil
+		return c.cur.Load().m.Size() < limit && c.prev.Load() == nil
 	}, 10*time.Second, time.Millisecond)
 }
 
-func TestStrongGenerationsStayWithinTwoLimits(t *testing.T) {
+func TestStrongGenerationsStayWithinHardCaps(t *testing.T) {
 	const limit, inserters, total = 1024, 8, 400_000
 	c := newCanonTable[common.Hash](limit)
 	done := make(chan struct{})
@@ -582,12 +605,12 @@ func TestStrongGenerationsStayWithinTwoLimits(t *testing.T) {
 		default:
 		}
 		c.mu.RLock()
-		strong := c.cur.Load().Size()
+		strong := c.cur.Load().m.Size()
 		if prev := c.prev.Load(); prev != nil {
 			strong += prev.Size()
 		}
 		c.mu.RUnlock()
 		peak = max(peak, strong)
 	}
-	require.LessOrEqual(t, peak, 2*limit+64)
+	require.LessOrEqual(t, peak, 2*(2*limit+inserters))
 }
