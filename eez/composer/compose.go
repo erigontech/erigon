@@ -101,7 +101,12 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 	popped := len(rest)
 	var evicted, deferred []*Held
 	err := func() error {
-		var err error
+		// Read ahead of the state views, which hold the chain's read
+		// transactions.
+		window, err := c.blocks(ctx, cursor, parent.Number.Uint64())
+		if err != nil {
+			return err
+		}
 		if fx.anchor, err = c.x.L1Hash(ctx, target-1); err != nil {
 			return err
 		}
@@ -114,10 +119,6 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 					return err
 				}
 				draft, err := NewDraft(c.x.L2Config, c.x.Engine, header, pre)
-				if err != nil {
-					return err
-				}
-				window, err := c.blocks(ctx, cursor, parent.Number.Uint64())
 				if err != nil {
 					return err
 				}
