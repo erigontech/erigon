@@ -349,50 +349,57 @@ type framePrestateDiff struct {
 }
 
 func TestFramePrestateTracerRollback(t *testing.T) {
+	const childEndowment = 7
 	factory := common.HexToAddress("0x2000")
 	child := types.CreateAddress(factory, 0)
 	failure := common.HexToAddress("0x3000")
-	nestedFailure := common.HexToAddress("0x4000")
-	revertedTransfer := common.HexToAddress("0x5000")
+	revertCatcher := common.HexToAddress("0x4000")
+	revertingCaller := common.HexToAddress("0x5000")
 	sendAll := types.Frame{Mode: types.FrameSender, Target: &child, Limits: mdgas.MdGas{Execution: 20_000}}
 	fail := types.Frame{Mode: types.FrameSender, Target: &failure, Limits: mdgas.MdGas{Execution: 10_000}}
 	batchSendAll := sendAll
 	batchSendAll.Flags = types.FrameAtomicBatch
 	for _, tc := range []struct {
-		name        string
-		frames      []types.Frame
-		wantBalance uint64
+		name             string
+		frames           []types.Frame
+		wantChildBalance uint64
 	}{
 		{name: "no revert", frames: []types.Frame{sendAll}},
-		{name: "revert before transfer", frames: []types.Frame{fail, sendAll}},
-		{name: "revert after transfer", frames: []types.Frame{sendAll, fail}},
+		{name: "separate frame reverts before transfer", frames: []types.Frame{fail, sendAll}},
+		{name: "transfer survives a later frame revert", frames: []types.Frame{sendAll, fail}},
 		{
-			name: "nested revert",
+			name: "earlier frame catches an inner revert",
 			frames: []types.Frame{
-				{Mode: types.FrameSender, Target: &nestedFailure, Limits: mdgas.MdGas{Execution: 20_000}},
+				{Mode: types.FrameSender, Target: &revertCatcher, Limits: mdgas.MdGas{Execution: 20_000}},
 				sendAll,
 			},
 		},
 		{
-			name: "reverted transfer",
+			name: "enclosing call reverts the transfer",
 			frames: []types.Frame{
-				{Mode: types.FrameSender, Target: &revertedTransfer, Limits: mdgas.MdGas{Execution: 40_000}},
+				{Mode: types.FrameSender, Target: &revertingCaller, Limits: mdgas.MdGas{Execution: 40_000}},
 			},
-			wantBalance: 7,
+			wantChildBalance: childEndowment,
 		},
-		{name: "atomic batch rollback", frames: []types.Frame{batchSendAll, fail}, wantBalance: 7},
+		{name: "atomic batch rollback", frames: []types.Frame{batchSendAll, fail}, wantChildBalance: childEndowment},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			evm, tx := frameTraceTestEnv(t)
 			ibs := evm.IntraBlockState()
 			runtime := program.New().Push(tx.SenderAddress).Op(vm.SENDALL).Bytes()
 			initCode := program.New().ReturnData(runtime).Bytes()
-			factoryCode := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push(7).Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
-			require.NoError(t, ibs.SetBalance(accounts.InternAddress(factory), uint256.Int{7}, tracing.BalanceChangeUnspecified))
+			factoryCode := program.New().Mstore(initCode, 0).
+				Push(len(initCode)).Push0().Push(childEndowment).Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
+			catchInnerRevert := program.New().Call(uint256.NewInt(5_000), failure, 0, 0, 0, 0, 0).
+				Op(vm.POP, vm.STOP).Bytes()
+			callChildThenRevert := program.New().Call(uint256.NewInt(20_000), child, 0, 0, 0, 0, 0).
+				Op(vm.POP).Push0().Push0().Op(vm.REVERT).Bytes()
+
+			require.NoError(t, ibs.SetBalance(accounts.InternAddress(factory), uint256.Int{childEndowment}, tracing.BalanceChangeUnspecified))
 			require.NoError(t, ibs.SetCode(accounts.InternAddress(factory), factoryCode, tracing.CodeChangeUnspecified))
 			require.NoError(t, ibs.SetCode(accounts.InternAddress(failure), program.New().Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
-			require.NoError(t, ibs.SetCode(accounts.InternAddress(nestedFailure), program.New().Call(uint256.NewInt(5_000), failure, 0, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
-			require.NoError(t, ibs.SetCode(accounts.InternAddress(revertedTransfer), program.New().Call(uint256.NewInt(20_000), child, 0, 0, 0, 0, 0).Op(vm.POP).Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(revertCatcher), catchInnerRevert, tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(revertingCaller), callChildThenRevert, tracing.CodeChangeUnspecified))
 			tx.Frames[1].Limits = mdgas.MdGas{Execution: 100_000, State: 1_000_000}
 			tx.Frames = append(tx.Frames, tc.frames...)
 			var diff framePrestateDiff
@@ -402,18 +409,18 @@ func TestFramePrestateTracerRollback(t *testing.T) {
 			require.False(t, destroyed)
 			balance, err := ibs.GetBalance(accounts.InternAddress(child))
 			require.NoError(t, err)
-			require.Equal(t, uint256.Int{tc.wantBalance}, balance)
+			require.Equal(t, uint256.Int{tc.wantChildBalance}, balance)
 			require.NotContains(t, diff.Pre, child)
 			require.Contains(t, diff.Post, child)
 			account := diff.Post[child]
-			require.Equal(t, uint256.Int{tc.wantBalance}, uint256.Int(account.Balance))
+			require.Equal(t, uint256.Int{tc.wantChildBalance}, uint256.Int(account.Balance))
 			require.Equal(t, hexutil.Bytes(runtime), account.Code)
 			require.EqualValues(t, 1, account.Nonce)
 		})
 	}
 }
 
-func TestFramePrestateTracerRetainedBalance(t *testing.T) {
+func TestFramePrestateTracerSendAllToSelf(t *testing.T) {
 	evm, tx := frameTraceTestEnv(t)
 	ibs := evm.IntraBlockState()
 	factory := common.HexToAddress("0x2000")
