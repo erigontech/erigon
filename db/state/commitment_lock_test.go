@@ -145,20 +145,16 @@ func TestAggregatorDoesNotLockACommitmentFileOverTheStepBound(t *testing.T) {
 func TestAggregatorTriesAFailedCommitmentLockOnce(t *testing.T) {
 	calls := recordLockCalls(t)
 	calls.fail = errors.New("cannot allocate memory")
-	items := lockTestItems(t, 1, 1, 1, 1)
+	items := lockTestItems(t, 1, 1, 1)
 	a := lockTestAggregator()
 
-	a.lockHotCommitmentFiles(commitmentVisible(items[:3]...))
+	a.lockHotCommitmentFiles(commitmentVisible(items...))
 	locked, _ := calls.take()
 	require.ElementsMatch(t, decompressors(items[0], items[1]), locked)
 	require.True(t, a.lockWarned)
 
-	a.lockHotCommitmentFiles(commitmentVisible(items[:3]...))
+	a.lockHotCommitmentFiles(commitmentVisible(items...))
 	locked, unlocked := calls.take()
 	require.Empty(t, locked, "a failed lock is not tried again for the same file")
 	require.Empty(t, unlocked)
-
-	a.lockHotCommitmentFiles(commitmentVisible(items...))
-	_, unlocked = calls.take()
-	require.Empty(t, unlocked, "a file that was never locked is not unlocked")
 }

@@ -77,7 +77,7 @@ type Aggregator struct {
 	erigondbDomainStepsInFrozenFile uint64
 
 	dirtyFilesLock   sync.Mutex
-	lockedCommitment map[*FilesItem]bool
+	lockedCommitment map[*FilesItem]struct{}
 	lockWarned       bool
 	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
 	// flag: ReloadErigonDBSettings writes it while background merges read it.
@@ -1896,28 +1896,25 @@ func (a *Aggregator) lockHotCommitmentFiles(v *aggregatorVisible) {
 			hot[f.src] = struct{}{}
 		}
 	}
-	for item, locked := range a.lockedCommitment {
+	for item := range a.lockedCommitment {
 		if _, ok := hot[item]; ok {
 			continue
 		}
-		if locked {
-			_ = unlockFile(item.decompressor)
-		}
+		_ = unlockFile(item.decompressor)
 		delete(a.lockedCommitment, item)
 	}
 	for item := range hot {
 		if _, ok := a.lockedCommitment[item]; ok {
 			continue
 		}
-		err := lockFile(item.decompressor)
-		if err != nil && !a.lockWarned {
+		if err := lockFile(item.decompressor); err != nil && !a.lockWarned {
 			a.lockWarned = true
 			a.logger.Warn("[agg] commitment files stay unlocked", "file", item.decompressor.FileName(), "err", err)
 		}
 		if a.lockedCommitment == nil {
-			a.lockedCommitment = map[*FilesItem]bool{}
+			a.lockedCommitment = map[*FilesItem]struct{}{}
 		}
-		a.lockedCommitment[item] = err == nil
+		a.lockedCommitment[item] = struct{}{}
 	}
 }
 
