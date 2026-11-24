@@ -42,15 +42,16 @@ func (at *AggregatorRoTx) ResetRegionHits() {
 }
 
 func (dt *DomainRoTx) resetRegionHits() {
+	if dt.regionHits == nil {
+		dt.regionHits = make(map[regionKey]uint32)
+		return
+	}
 	clear(dt.regionHits)
 }
 
 func (dt *DomainRoTx) regionAhead(i int, k []byte) {
-	if len(k) <= length.Addr || dt.probe != nil {
+	if dt.regionHits == nil || len(k) <= length.Addr || dt.probe != nil {
 		return
-	}
-	if dt.regionHits == nil {
-		dt.regionHits = make(map[regionKey]uint32)
 	}
 	key := regionKey{addr: [length.Addr]byte(k[:length.Addr]), file: i}
 	hits, tracked := dt.regionHits[key]

@@ -74,6 +74,7 @@ func contractRegion(t *testing.T, dt *DomainRoTx, addr byte) [2]uint64 {
 
 func TestRegionAheadAdvisesAContractOnceAfterEnoughFileHits(t *testing.T) {
 	dt := storageDomainTxWithContracts(t, 3, 200)
+	dt.resetRegionHits()
 	advised := recordRegionAdvise(t)
 	read := func(addr byte, from, to int) {
 		for slot := from; slot < to; slot++ {
@@ -117,7 +118,8 @@ func TestRegionAheadSkipsARegionOverTheCap(t *testing.T) {
 		maxBytes uint64
 		want     int
 	}{{region[1] - region[0] - 1, 0}, {region[1] - region[0], 1}} {
-		dt.regionHits, *advised = nil, nil
+		dt.resetRegionHits()
+		*advised = nil
 		regionAheadMaxBytes = c.maxBytes
 		for range regionAheadHits {
 			dt.regionAhead(0, regionSlotKey(1, 0))
@@ -156,10 +158,29 @@ func TestRegionAheadCountsHitsPerTx(t *testing.T) {
 			dt.regionAhead(0, regionSlotKey(1, 0))
 		}
 	}
+	dt.resetRegionHits()
 	hit(regionAheadHits - 1)
 	dt.resetRegionHits()
 	hit(1)
 	require.Empty(t, *advised, "hits before the reset must not count")
 	hit(regionAheadHits - 1)
+	require.Equal(t, [][2]uint64{contractRegion(t, dt, 1)}, *advised)
+}
+
+func TestRegionAheadIsOffUntilTheReaderResetsHits(t *testing.T) {
+	dt := storageDomainTxWithContracts(t, 1, 200)
+	advised := recordRegionAdvise(t)
+	read := func() {
+		for slot := range regionAheadHits {
+			_, found, _, _, err := dt.getLatestFromFiles(regionSlotKey(1, slot), nil, kv.NoStepBound)
+			require.NoError(t, err)
+			require.True(t, found)
+		}
+	}
+	read()
+	require.Empty(t, *advised, "a reader that never reset its hits must not read ahead")
+	require.Nil(t, dt.regionHits)
+	dt.resetRegionHits()
+	read()
 	require.Equal(t, [][2]uint64{contractRegion(t, dt, 1)}, *advised)
 }
