@@ -33,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -41,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/aura"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -868,6 +871,29 @@ func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
 	dbg.AssertEnabled = true
 	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
 		"under the gate the stateless replay rejects a wrong witness")
+}
+
+func TestWitnessParentForAuRaGasLimit(t *testing.T) {
+	config := &chain.Config{Aura: &chain.AuRaConfig{
+		StepDuration:                     common.NewUint64(5),
+		Validators:                       &chain.ValidatorSetJson{List: []common.Address{{1}}},
+		BlockGasLimitContractTransitions: map[uint64]common.Address{0: {2}},
+	}}
+	engine, err := aura.NewAuRa(config.Aura, mdbxtest.NewTestDB(t, dbcfg.ChainDB))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, engine.Close()) })
+
+	parent := &types.Header{Number: *uint256.NewInt(1)}
+	header := &types.Header{Number: *uint256.NewInt(2), ParentHash: parent.Hash(), Difficulty: *uint256.NewInt(1)}
+	reader := witnessHeaderReader{config: config, parent: parent}
+	var gasLimitHeader *types.Header
+	syscall := func(_ accounts.Address, _ []byte, _ *state.IntraBlockState, h *types.Header, _ bool) ([]byte, error) {
+		gasLimitHeader = h
+		return nil, nil
+	}
+	require.NoError(t, engine.Initialize(config, reader, header, nil, syscall, nil, nil))
+	require.NotNil(t, gasLimitHeader)
+	require.Equal(t, parent.Hash(), gasLimitHeader.Hash())
 }
 
 func TestExecBlockStatelesslyEIP8253(t *testing.T) {

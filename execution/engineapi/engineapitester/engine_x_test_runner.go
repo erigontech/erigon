@@ -135,7 +135,7 @@ type testerEntry struct {
 	dataDir string
 }
 
-func (entry testerEntry) close() error {
+func (entry *testerEntry) close() error {
 	return errors.Join(entry.tester.Close(), dir.RemoveAll(entry.dataDir))
 }
 
@@ -145,14 +145,12 @@ type testerGroupKey struct {
 }
 
 // Each account list needs its own node within a fixture group.
-type testerGroup map[string]testerEntry
+type testerGroup map[string]*testerEntry
 
 func (group testerGroup) close() error {
-	var errs []error
-	for key := range group {
-		if err := group[key].close(); err != nil {
-			errs = append(errs, err)
-		}
+	errs := make([]error, 0, len(group))
+	for _, entry := range group {
+		errs = append(errs, entry.close())
 	}
 	return errors.Join(errs...)
 }
@@ -172,11 +170,9 @@ func (extr *EngineXTestRunner) Close() error {
 	extr.testers = nil
 	extr.mu.Unlock()
 
-	var errs []error
+	errs := make([]error, 0, len(groups))
 	for _, group := range groups {
-		if err := group.close(); err != nil {
-			errs = append(errs, err)
-		}
+		errs = append(errs, group.close())
 	}
 	return errors.Join(errs...)
 }
@@ -383,7 +379,7 @@ func (extr *EngineXTestRunner) getOrCreateTester(test EngineXTestDefinition) (En
 		_ = entry.close()
 		return existing.tester, nil
 	}
-	group[listKey] = entry
+	group[listKey] = &entry
 	extr.mu.Unlock()
 	return entry.tester, nil
 }

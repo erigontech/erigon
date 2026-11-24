@@ -2243,39 +2243,32 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 }
 
 type witnessHeaderReader struct {
-	config  *chain.Config
-	parent  *types.Header
-	headers map[uint64]*types.Header
+	config *chain.Config
+	parent *types.Header
 }
 
 func (r witnessHeaderReader) Config() *chain.Config                  { return r.config }
 func (r witnessHeaderReader) CurrentHeader() *types.Header           { return r.parent }
 func (r witnessHeaderReader) CurrentFinalizedHeader() *types.Header  { return nil }
 func (r witnessHeaderReader) CurrentSafeHeader() *types.Header       { return nil }
+func (r witnessHeaderReader) GetHeaderByNumber(uint64) *types.Header { return nil }
 func (r witnessHeaderReader) GetTd(common.Hash, uint64) *uint256.Int { return nil }
 func (r witnessHeaderReader) FrozenBlocks() uint64                   { return 0 }
 
-func (r witnessHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	header := r.GetHeaderByNumber(number)
-	if header != nil && header.Hash() == hash {
-		return header
+func matchingParent(parent *types.Header, hash common.Hash, number uint64) *types.Header {
+	if parent != nil && parent.Number.Uint64() == number && parent.Hash() == hash {
+		return parent
 	}
 	return nil
 }
 
-func (r witnessHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
-	header := r.headers[number]
-	if header != nil && header.Number.Uint64() == number {
-		return header
-	}
-	return nil
+func (r witnessHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	return matchingParent(r.parent, hash, number)
 }
 
 func (r witnessHeaderReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	for _, header := range r.headers {
-		if header != nil && header.Hash() == hash {
-			return header
-		}
+	if r.parent != nil && r.parent.Hash() == hash {
+		return r.parent
 	}
 	return nil
 }
@@ -2318,8 +2311,11 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
 
 	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
-	chainReader := witnessHeaderReader{config: chainConfig, headers: result.headerByNumber}
-	chainReader.parent = chainReader.GetHeader(header.ParentHash, blockNum-1)
+	parentNumber := blockNum - 1
+	chainReader := witnessHeaderReader{
+		config: chainConfig,
+		parent: matchingParent(result.headerByNumber[parentNumber], header.ParentHash, parentNumber),
+	}
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
 	}

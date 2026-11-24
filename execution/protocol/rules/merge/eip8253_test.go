@@ -44,12 +44,18 @@ func (r nonceBumpChainReader) GetHeader(hash common.Hash, number uint64) *types.
 }
 
 func TestEIP8253BeforeSystemCalls(t *testing.T) {
+	t.Run("genesis parent", func(t *testing.T) { testEIP8253BeforeSystemCalls(t, 0) })
+	t.Run("later parent", func(t *testing.T) { testEIP8253BeforeSystemCalls(t, 1) })
+}
+
+func testEIP8253BeforeSystemCalls(t *testing.T, parentNumber uint64) {
+	t.Helper()
 	config := chain.AllProtocolChanges.Copy()
 	config.BogotaTime = common.NewUint64(100)
 	config.ZeroNonceStorageAccounts = []common.Address{common.HexToAddress("0x8253")}
-	parent := &types.Header{Number: *uint256.NewInt(1), Time: 99}
+	parent := &types.Header{Number: *uint256.NewInt(parentNumber), Time: 99}
 	header := &types.Header{
-		Number: *uint256.NewInt(2), ParentHash: parent.Hash(), Time: 100,
+		Number: *uint256.NewInt(parentNumber + 1), ParentHash: parent.Hash(), Time: 100,
 		ParentBeaconBlockRoot: new(common.Hash),
 	}
 	ibs := state.New(state.NewNoopReader())
