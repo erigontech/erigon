@@ -677,33 +677,40 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	if blockPruneTo < math.MaxUint64 {
 		blockPruneTo++ // the prune is exclusive
 	}
-	// AlwaysGenerateChangesets keeps changesets for unwinds deeper than MaxReorgDepth (debug / integration
-	// tool / explicit --experimental.always-generate-changesets flag); collation deletes the ones it needs gone.
+	// Blocks in state files can not be unwound, so their changesets go in every mode, also those an older build
+	// left behind. AlwaysGenerateChangesets keeps changesets for unwinds deeper than MaxReorgDepth (debug /
+	// integration tool / explicit --experimental.always-generate-changesets flag); collation deletes the ones of
+	// the steps it collates.
+	changesetsPruneTo, err := blocksInFilesEnd(ctx, tx, cfg.blockReader)
+	if err != nil {
+		return err
+	}
 	if !cfg.syncCfg.AlwaysGenerateChangesets {
-		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
-		// Some chains produce blocks with 400 chunks of diff = 3mb
-		if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
-			pruneChangeSetsStartTime := time.Now()
-			if err := rawdb.PruneTable(
-				tx,
-				kv.ChangeSets3,
-				blockPruneTo,
-				ctx,
-				pruneDiffsLimit,
-				pruneChangeSetsTimeout,
-				logger,
-				s.LogPrefix(),
-			); err != nil {
-				return err
-			}
-			if duration := time.Since(pruneChangeSetsStartTime); duration > pruneChangeSetsTimeout {
-				logger.Debug(
-					fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
-					"duration", duration,
-					"timeout", pruneChangeSetsTimeout,
-					"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-				)
-			}
+		changesetsPruneTo = max(changesetsPruneTo, blockPruneTo)
+	}
+	// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
+	// Some chains produce blocks with 400 chunks of diff = 3mb
+	if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
+		pruneChangeSetsStartTime := time.Now()
+		if err := rawdb.PruneTable(
+			tx,
+			kv.ChangeSets3,
+			changesetsPruneTo,
+			ctx,
+			pruneDiffsLimit,
+			pruneChangeSetsTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
+			return err
+		}
+		if duration := time.Since(pruneChangeSetsStartTime); duration > pruneChangeSetsTimeout {
+			logger.Debug(
+				fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
+				"duration", duration,
+				"timeout", pruneChangeSetsTimeout,
+				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+			)
 		}
 	}
 
@@ -754,6 +761,19 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		return err
 	}
 	return nil
+}
+
+// blocksInFilesEnd is the block after the last block in the visible state files.
+func blocksInFilesEnd(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader) (uint64, error) {
+	filesEnd := tx.Debug().TxNumsInFiles(kv.StateDomains...)
+	if filesEnd == 0 {
+		return 0, nil
+	}
+	lastBlock, ok, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, filesEnd-1)
+	if err != nil || !ok {
+		return 0, err
+	}
+	return lastBlock + 1, nil
 }
 
 // historyRetireCutoffs maps the prune mode to per-domain retirement cutoffs, in
