@@ -65,17 +65,17 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 	if accumulator == nil {
 		return nil
 	}
-	chunks := make([]notifyChunk, max(1, min(runtime.GOMAXPROCS(0), len(blockWrites)/notifyWriteSetsPerWorker)))
-	step := (len(blockWrites) + len(chunks) - 1) / len(chunks)
-	if len(chunks) == 1 {
-		chunks[0].collect(rs.domains, blockWrites)
-	} else {
-		var wg sync.WaitGroup
-		for k := range chunks {
-			wg.Go(func() { chunks[k].collect(rs.domains, blockWrites[k*step:min((k+1)*step, len(blockWrites))]) })
-		}
-		wg.Wait()
+	workers := min(runtime.GOMAXPROCS(0), len(blockWrites)/notifyWriteSetsPerWorker)
+	if workers < 2 {
+		return rs.notifyAccumulatorSerial(accumulator, roTx, blockWrites)
 	}
+	chunks := make([]notifyChunk, workers)
+	step := (len(blockWrites) + len(chunks) - 1) / len(chunks)
+	var wg sync.WaitGroup
+	for k := range chunks {
+		wg.Go(func() { chunks[k].collect(rs.domains, blockWrites[k*step:min((k+1)*step, len(blockWrites))]) })
+	}
+	wg.Wait()
 	entries := 0
 	for k := range chunks {
 		if err := chunks[k].resolveFromTx(rs.domains, roTx); err != nil {
@@ -90,6 +90,78 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 	// repeat carries the same final state, so the entry stays as it was.
 	for k := range chunks {
 		chunks[k].replay(accumulator)
+	}
+	return nil
+}
+
+func (rs *StateV3) notifyAccumulatorSerial(accumulator *shards.Accumulator, roTx kv.TemporalTx, blockWrites []WriteSetView) error {
+	latest := make(map[accounts.Address]accounts.Account, len(blockWrites))
+	account := func(addr accounts.Address) (accounts.Account, error) {
+		if acc, ok := latest[addr]; ok {
+			return acc, nil
+		}
+		acc := accounts.NewAccount()
+		address := addr.Value()
+		v, _, err := rs.domains.GetLatest(kv.AccountsDomain, roTx, address[:])
+		if err != nil {
+			return accounts.Account{}, err
+		}
+		if len(v) > 0 {
+			if err := accounts.DeserialiseV3(&acc, v); err != nil {
+				return accounts.Account{}, err
+			}
+		}
+		latest[addr] = acc
+		return acc, nil
+	}
+
+	// Every call for an address carries its final state, so a repeat would change nothing.
+	changed := make(map[accounts.Address]struct{}, len(blockWrites))
+	changeAccount := func(addr accounts.Address) error {
+		if _, ok := changed[addr]; ok {
+			return nil
+		}
+		changed[addr] = struct{}{}
+		acc, err := account(addr)
+		if err != nil {
+			return err
+		}
+		accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
+		return nil
+	}
+
+	for _, writes := range blockWrites {
+		// Balance and nonce writes only name the account: range the keys, not the resolved values.
+		keys := writes
+		if v, ok := writes.(*versionMapWriteView); ok {
+			keys = v.keys
+		}
+		for addr, write := range writes.Codes() {
+			acc, err := account(addr)
+			if err != nil {
+				return err
+			}
+			accumulator.ChangeCode(addr.Value(), acc.Incarnation, write.Val.Bytes)
+		}
+		for addr, byKey := range writes.Storages() {
+			acc, err := account(addr)
+			if err != nil {
+				return err
+			}
+			for key, write := range byKey {
+				accumulator.ChangeStorage(addr.Value(), acc.Incarnation, key.Value(), write.Val.Bytes())
+			}
+		}
+		for addr := range keys.Balances() {
+			if err := changeAccount(addr); err != nil {
+				return err
+			}
+		}
+		for addr := range keys.Nonces() {
+			if err := changeAccount(addr); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
