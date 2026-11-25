@@ -440,11 +440,8 @@ func readCommitmentHistoryValues(t *testing.T, path string, cfg statecfg.HistCfg
 	d, err := seg.NewDecompressor(path)
 	require.NoError(t, err)
 	defer d.Close()
-	pageValues := d.CompressedPageValuesCount()
-	if d.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-		pageValues = cfg.HistoryValuesOnCompressedPage
-	}
-	r := seg.NewPagedReader(seg.NewReader(d.MakeGetter(), cfg.Compression), pageValues, true)
+	d.BackfillV0PageValuesCount(cfg.HistoryValuesOnCompressedPage)
+	r := seg.NewPagedReader(seg.NewReader(d.MakeGetter(), cfg.Compression), true)
 	var pairs []commitmentHistoryPair
 	for r.HasNext() {
 		key, value, _, _ := r.Next2(nil)

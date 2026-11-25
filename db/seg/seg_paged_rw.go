@@ -129,7 +129,7 @@ type pageResult struct {
 }
 
 type PagedReader struct {
-	file         *Reader
+	file         ReaderI
 	isCompressed bool
 	pageSize     int
 	page         *Page
@@ -137,12 +137,15 @@ type PagedReader struct {
 	currentPageOffset, nextPageOffset uint64
 }
 
-func NewPagedReader(r *Reader, pageSize int, snappy bool) *PagedReader {
+func NewPagedReader(r ReaderI, snappy bool) *PagedReader {
+	pageSize := r.CompressedPageValuesCount()
 	if pageSize == 0 {
 		pageSize = 1
 	}
 	return &PagedReader{file: r, pageSize: pageSize, isCompressed: snappy, page: &Page{}}
 }
+
+func (g *PagedReader) CompressedPageValuesCount() int { return g.pageSize }
 
 func (g *PagedReader) Reset(offset uint64) {
 	if g.pageSize <= 1 {

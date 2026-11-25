@@ -117,14 +117,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				require.NotNil(t, sf)
 				defer sf.CleanupOnError()
 
-				compressedPageValuesCount := sf.historyDecomp.CompressedPageValuesCount()
-
-				if sf.historyDecomp.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-					compressedPageValuesCount = h.HistoryValuesOnCompressedPage
-				}
-
 				efReader := h.InvertedIndex.dataReader(sf.efHistoryDecomp)
-				hReader := seg.NewPagedReader(h.dataReader(sf.historyDecomp), compressedPageValuesCount, true)
+				hReader := seg.NewPagedReader(h.dataReader(sf.historyDecomp), true)
 
 				// ef contains all sorted keys
 				// for each key it has a list of txNums
@@ -249,13 +243,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		defer sf.CleanupOnError()
 		var valWords []string
 
-		compressedPageValuesCount := sf.historyDecomp.CompressedPageValuesCount()
-
-		if sf.historyDecomp.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-			compressedPageValuesCount = h.HistoryValuesOnCompressedPage
-		}
-
-		gh := seg.NewPagedReader(h.dataReader(sf.historyDecomp), compressedPageValuesCount, true)
+		gh := seg.NewPagedReader(h.dataReader(sf.historyDecomp), true)
 		gh.Reset(0)
 		for gh.HasNext() {
 			w, _ := gh.Next(nil)
@@ -297,7 +285,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			w, _ := ge.Next(nil)
 			require.Equal(keyWords[i], string(w))
 		}
-		gh = seg.NewPagedReader(h.dataReader(sf.historyDecomp), compressedPageValuesCount, true)
+		gh = seg.NewPagedReader(h.dataReader(sf.historyDecomp), true)
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]

@@ -225,11 +225,7 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 
 // valuesPerPage is how many .v values share one offset; an unpaged .v gives each its own.
 func (h *History) valuesPerPage(hist *seg.Decompressor) uint64 {
-	n := hist.CompressedPageValuesCount()
-	if hist.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-		n = h.HistoryValuesOnCompressedPage
-	}
-	return uint64(max(n, 1))
+	return uint64(max(hist.CompressedPageValuesCount(), 1))
 }
 
 func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet) error {
@@ -926,6 +922,7 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("open %s v history decompressor: %w", h.FilenameBase, err)
 	}
+	historyDecomp.BackfillV0PageValuesCount(h.HistoryValuesOnCompressedPage)
 
 	historyIdxPath := h.vAccessorNewFilePath(step, step+1)
 	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
@@ -1058,12 +1055,12 @@ func (ht *HistoryRoTx) statelessGetter(i int) *seg.Reader {
 
 // pagedGetter reads one file through its own reader, so a seek keeps the page it decoded: the next seek into the
 // same page skips both the read and the decompression.
-func (ht *HistoryRoTx) pagedGetter(i, pageSize int) *seg.PagedReader {
+func (ht *HistoryRoTx) pagedGetter(i int) *seg.PagedReader {
 	if ht.pagedGetters == nil {
 		ht.pagedGetters = make([]*seg.PagedReader, len(ht.files))
 	}
 	if ht.pagedGetters[i] == nil {
-		ht.pagedGetters[i] = seg.NewPagedReader(ht.dataReader(ht.files[i].src.decompressor), pageSize, true)
+		ht.pagedGetters[i] = seg.NewPagedReader(ht.dataReader(ht.files[i].src.decompressor), true)
 	}
 	return ht.pagedGetters[i]
 }
@@ -1272,11 +1269,7 @@ func (ht *HistoryRoTx) historyValueAt(key []byte, seek iiSeekResult, txNum uint6
 		return nil, false, fmt.Errorf(".vi of %s holds no value for key %x at txNum %d, which %s indexes",
 			historyItem.src.decompressor.FileName(), key, histTxNum, ht.iit.files[seek.fileIdx].src.decompressor.FileName())
 	}
-	compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
-	if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-		compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
-	}
-	g := ht.pagedGetter(historyItem.i, compressedPageValuesCount)
+	g := ht.pagedGetter(historyItem.i)
 	g.Reset(offset)
 	v, err := g.GetFromPage(historyKey)
 	if err != nil {
@@ -1581,10 +1574,6 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 				}
 
 				compressedPageValuesCount := viFile.src.decompressor.CompressedPageValuesCount()
-
-				if viFile.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-					compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
-				}
 
 				vReader := ht.statelessGetter(viFile.i)
 				vReader.Reset(vOffset)

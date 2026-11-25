@@ -479,11 +479,6 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 	if keysErr != nil {
 		return r, keysErr
 	}
-	pageValues := vFile.src.decompressor.CompressedPageValuesCount()
-	if vFile.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-		pageValues = h.HistoryValuesOnCompressedPage
-	}
-
 	workers := max(1, runtime.GOMAXPROCS(0))
 	collectors, closeCollectors := newV3Collectors("commitment_convert_v3_history", at.Dirs().Tmp, workers, logger)
 	defer closeCollectors()
@@ -536,7 +531,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		}
 		defer efView.Close()
 		efReader := seg.NewReader(efView.MakeGetter(), ii.Compression)
-		vReader := seg.NewPagedReader(seg.NewReader(vView.MakeGetter(), h.Compression), pageValues, true)
+		vReader := seg.NewPagedReader(seg.NewReader(vView.MakeGetter(), h.Compression), true)
 		var seq multiencseq.SequenceReader
 		var it multiencseq.SequenceIterator
 		var keyBuf, efBuf, valBuf []byte
