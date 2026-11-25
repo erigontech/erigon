@@ -348,7 +348,7 @@ func rewriteDomainFile(ctx context.Context, dt *DomainRoTx, f visibleFile, patch
 	if compErr != nil {
 		return r, compErr
 	}
-	w := d.dataWriter(comp, false)
+	w := d.dataWriter(comp, r.to-r.from < DomainMinStepsToCompress)
 	reader := d.dataReader(f.src.decompressor)
 	reader.Reset(0)
 	var k, v []byte
