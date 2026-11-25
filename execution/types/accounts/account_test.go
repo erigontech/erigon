@@ -22,6 +22,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 	"weak"
 
@@ -613,4 +614,35 @@ func TestStrongGenerationsStayWithinHardCaps(t *testing.T) {
 		peak = max(peak, strong)
 	}
 	require.LessOrEqual(t, peak, 2*(2*limit+inserters))
+}
+
+// With limit 1 the first insert of v moves its generation to prev while the other goroutines wait for the read lock.
+func TestCanonTableConcurrentFirstUseAcrossRotation(t *testing.T) {
+	c := newCanonTable[common.Hash](1)
+	for round := range 2000 {
+		v := common.Hash{9, byte(round), byte(round >> 8)}
+		start := make(chan struct{})
+		got := make([]*common.Hash, 16)
+		var wg sync.WaitGroup
+		for i := range got {
+			wg.Go(func() { <-start; got[i] = c.intern(v) })
+		}
+		close(start)
+		wg.Wait()
+		for _, p := range got {
+			require.Same(t, got[0], p, "round %d", round)
+		}
+	}
+}
+
+func TestCanonTableRotationAcrossSynctestBubble(t *testing.T) {
+	c := newCanonTable[common.Hash](4)
+	synctest.Test(t, func(t *testing.T) {
+		for i := range 4 {
+			c.intern(common.Hash{byte(i), 1}) // the 4th insert rotates inside the bubble
+		}
+	})
+	for i := range 4 {
+		c.intern(common.Hash{byte(i), 2})
+	}
 }

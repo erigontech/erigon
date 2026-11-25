@@ -43,11 +43,13 @@ type canonTable[T comparable] struct {
 
 type generation[T comparable] struct {
 	m       *xsync.Map[T, *T]
-	rotated chan struct{}
+	rotated sync.Mutex // locked until swap replaces this generation; unlike a channel, a mutex is not bound to a synctest bubble
 }
 
 func newGeneration[T comparable]() *generation[T] {
-	return &generation[T]{m: xsync.NewMap[T, *T](), rotated: make(chan struct{})}
+	g := &generation[T]{m: xsync.NewMap[T, *T]()}
+	g.rotated.Lock()
+	return g
 }
 
 func newCanonTable[T comparable](limit int64) *canonTable[T] {
@@ -93,8 +95,8 @@ func (c *canonTable[T]) intern(v T) *T {
 	case n == c.limit:
 		c.rotate()
 	case n >= 2*c.limit:
-		c.rotate()
-		<-gen.rotated
+		gen.rotated.Lock()
+		gen.rotated.Unlock() //nolint:gocritic // the lock only waits for swap
 	}
 	return p
 }
@@ -106,9 +108,8 @@ func (c *canonTable[T]) rotate() {
 			c.migrate.Unlock()
 			continue
 		}
-		old := c.swap()
 		go func() {
-			c.toWeak(old)
+			c.toWeak(c.swap())
 			c.migrate.Unlock()
 			c.rotate()
 		}()
@@ -123,12 +124,12 @@ func (c *canonTable[T]) swap() *xsync.Map[T, *T] {
 	c.cur.Store(newGeneration[T]())
 	c.prev.Store(old.m)
 	c.n.Store(0)
-	close(old.rotated)
+	old.rotated.Unlock()
 	return old.m
 }
 
 func (c *canonTable[T]) toWeak(old *xsync.Map[T, *T]) {
-	// weak.Make and AddCleanup walk a per-span list of specials sorted by address; in descending order each insert is at its head.
+	// weak.Make and AddCleanup walk a per-span list of specials sorted by address; descending order keeps each walk at the front of the list.
 	ptrs := make([]*T, 0, old.Size())
 	old.Range(func(_ T, p *T) bool {
 		ptrs = append(ptrs, p)
