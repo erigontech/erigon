@@ -1995,6 +1995,12 @@ func verifyStagedCommitmentV3(ctx context.Context, at *AggregatorRoTx, rebuildDi
 	vd.DomainCfg = live.DomainCfg
 	vd.History.FileVersion.DataV = live.History.FileVersion.DataV
 	vd.History.HistoryDisabled = live.History.HistoryDisabled
+	for id, d := range view.d {
+		d.Enabled = kv.Domain(id) == kv.CommitmentDomain
+	}
+	for _, ii := range view.standaloneIIs() {
+		ii.Enabled = false
+	}
 	if err := view.OpenFolder(nil); err != nil {
 		return nil, err
 	}
