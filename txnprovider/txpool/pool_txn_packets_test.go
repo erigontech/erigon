@@ -455,32 +455,47 @@ func TestTransactionPacketAuthorizationLimit(t *testing.T) {
 	require.NoError(t, ValidateSerializedTxn(outbound[1]))
 
 	tests := []struct {
-		name string
-		txns [][]byte
-		want [][]byte
+		name        string
+		validateRLP func([]byte) error
+		txns        [][]byte
+		want        [][]byte
 	}{
-		{name: "outbound batch with a large final transaction", txns: outbound, want: outbound},
 		{
-			name: "ordinary transaction after budget is spent",
-			txns: [][]byte{first, fillsRemainder, oneAuth, ordinary},
-			want: [][]byte{first, fillsRemainder, ordinary},
+			name:        "outbound batch with a large final transaction",
+			validateRLP: ValidateSerializedTxn,
+			txns:        outbound,
+			want:        outbound,
 		},
 		{
-			name: "over-budget transaction is skipped before decoding",
-			txns: [][]byte{first, fillsRemainder, malformed, ordinary},
-			want: [][]byte{first, fillsRemainder, ordinary},
+			name:        "ordinary transaction after budget is spent",
+			validateRLP: ValidateSerializedTxn,
+			txns:        [][]byte{first, fillsRemainder, oneAuth, ordinary},
+			want:        [][]byte{first, fillsRemainder, ordinary},
 		},
 		{
-			name: "later transaction fits remaining budget",
-			txns: [][]byte{first, exceedsRemainder, fillsRemainder},
-			want: [][]byte{first, fillsRemainder},
+			name:        "budget applies without an RLP validator",
+			validateRLP: nil,
+			txns:        [][]byte{first, fillsRemainder, oneAuth, ordinary},
+			want:        [][]byte{first, fillsRemainder, ordinary},
+		},
+		{
+			name:        "over-budget transaction is skipped before decoding",
+			validateRLP: ValidateSerializedTxn,
+			txns:        [][]byte{first, fillsRemainder, malformed, ordinary},
+			want:        [][]byte{first, fillsRemainder, ordinary},
+		},
+		{
+			name:        "later transaction fits remaining budget",
+			validateRLP: ValidateSerializedTxn,
+			txns:        [][]byte{first, exceedsRemainder, fillsRemainder},
+			want:        [][]byte{first, fillsRemainder},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := NewTxnParseContext(*uint256.NewInt(1))
 			ctx.WithSender(false)
-			ctx.ValidateRLP(ValidateSerializedTxn)
+			ctx.ValidateRLP(tt.validateRLP)
 			payload := EncodeTransactions(tt.txns, nil)
 			var slots TxnSlots
 			pos, err := ParseTransactions(payload, 0, ctx, &slots, nil)
