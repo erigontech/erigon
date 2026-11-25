@@ -298,6 +298,7 @@ func (pe *parallelExecutor) exec(ctx context.Context,
 		outHeader, outTx, outErr = pe.execImpl(lctx, startBlockNum, offsetFromBlockBeginning,
 			maxBlockNum, blockLimit, initialTxNum, inputTxNum, initialCycle, rwTx, stepsInDb, accumulator, readAhead, logEvery)
 	})
+	NpEndMark("npExecImpl")
 	return outHeader, outTx, outErr
 }
 
@@ -571,11 +572,13 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// Exec loop closed the channel — batch complete. Drain calculator
 					// results, then exit. Skip the drain if rootResults already closed
 					// (ranging a nil channel hangs forever).
+					NpEndMark("npApplyClosed")
 					if !rootResultsClosed {
 						for cr := range rootResults {
 							processCommit(cr)
 						}
 					}
+					NpEndMark("npRootDrained")
 					if lastBlockResult.BlockNum > 0 {
 						pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
 						pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
@@ -665,7 +668,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// every cell a published tx wrote is in the versionMap, so later txs
 					// resolve it there and never read it from sd.mem.
 					if !finalized && foldErr == nil {
+						tf := time.Now()
 						foldErr = pe.foldTx(ctx, rwTx, applyResult)
+						NpEndAdd("npFoldSum", time.Since(tf))
 					}
 					if applyResult.txIO != nil {
 						if balBuilder == nil {
@@ -681,7 +686,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					}
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
+					NpEndMark("npApplyTx")
 				case *blockResult:
+					NpEndMark("npApplyBlkRecv")
 					built := balBuilder
 					balBuilder = nil
 					if finalized {
@@ -809,13 +816,16 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockUpdateCount = 0
 					blockApplyCount = 0
 
+					NpEndMark("npApplyAcc")
 					<-balDone
+					NpEndMark("npApplyBal")
 					// Join the per-block validator spawned above; its verdict wins over
 					// a bal.Process error.
 					if err := blockValidatorWaiter.Wait(); err != nil {
 						failInfra(fmt.Errorf("%w, block=%d, %w", rules.ErrInvalidBlock, applyResult.BlockNum, err))
 						continue
 					}
+					NpEndMark("npApplyVal")
 
 					if balErr != nil {
 						failInfra(balErr)
@@ -826,6 +836,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					}
 
 					appliedBlocks[applyResult.BlockNum] = struct{}{}
+					NpEndMark("npApplyBlkEnd")
 
 					// A commit wrong-root deferred for this (or an earlier) block: exec
 					// has now applied it cleanly, so the divergence is real. Finalize on
@@ -871,6 +882,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	}()
 
 	executorCancel(nil)
+	NpEndMark("npExecCancel")
 
 	if !hasLoggedExecution {
 		pe.LogExecution()
@@ -884,6 +896,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			execErr = errors.Join(execErr, waitErr)
 		}
 	}
+	NpEndMark("npExecWait")
 
 	// Commitment is computed per-block by the calculator. Stage progress
 	// is updated in handleCommitResult when results are consumed.
@@ -975,6 +988,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	// applyResults, draining the calculator and apply loop. It owns the workers'
 	// inner context too — whatever exit path it takes, the workers must not outlive it.
 	defer pe.cancelWorkers()
+	defer NpEndMark("npApplyChClosed")
 	defer pe.closeApplyChannels()
 	defer func() {
 		// Close the exec loop's own RO tx — prevents leak across batches.
@@ -1180,6 +1194,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				if err := blockExecutor.sendResult(ctx, blockResult, terminal); err != nil {
 					return err
 				}
+				NpEndMark("npBlockSent")
 				pe.clearChangesetAccumulator()
 
 				// Leave failure reporting and cancellation to the apply loop so it can
