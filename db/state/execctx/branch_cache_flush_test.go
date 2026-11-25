@@ -20,6 +20,8 @@ import (
 	"encoding/binary"
 	"testing"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/empty"
@@ -97,7 +99,7 @@ func mergedCommitmentFileFixture(t *testing.T, stepSize uint64) (kv.TemporalRwDB
 		commitmentState, err = commitment.EncodeCommitmentV3State(empty.RootHash[:], 0, 20)
 		require.NoError(t, err)
 	} else {
-		trieState, err := commitment.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig()).EncodeCurrentState(nil)
+		trieState, err := v2.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig()).EncodeCurrentState(nil)
 		require.NoError(t, err)
 		commitmentState, err = commitmentdb.NewCommitmentState(20, 0, trieState).Encode()
 		require.NoError(t, err)

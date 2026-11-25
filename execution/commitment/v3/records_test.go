@@ -28,6 +28,8 @@ import (
 	"strconv"
 	"testing"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 
@@ -451,14 +453,14 @@ func TestRecordGraph(t *testing.T) {
 
 type legacyWorld struct {
 	*runner.Memory
-	trie    *commitment.HexPatriciaHashed
+	trie    *v2.HexPatriciaHashed
 	written map[string][]byte
 	touched map[string]struct{}
 }
 
 func newLegacyWorld() *legacyWorld {
 	w := &legacyWorld{Memory: runner.NewMemory(runner.ContextSpec{}), touched: map[string]struct{}{}}
-	w.trie = commitment.NewHexPatriciaHashed(length.Addr, w, commitment.TrieConfig{})
+	w.trie = v2.NewHexPatriciaHashed(length.Addr, w, commitment.TrieConfig{})
 	return w
 }
 

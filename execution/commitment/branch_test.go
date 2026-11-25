@@ -26,53 +26,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-func TestDecodeBranchInto_RoundTrip(t *testing.T) {
-	t.Parallel()
-	row, bm, enc := encodeCellRow(t, 16)
-	require.NotEmpty(t, enc)
-
-	branchData := []byte(enc)[2:]
-
-	var cells [16]cell
-	maps, err := DecodeBranchInto(branchData, false /* not deleted */, &cells)
-	require.NoError(t, err)
-
-	require.Equal(t, bm, maps.Bitmap, "decoded bitmap mismatch")
-	require.Equal(t, uint16(0), maps.TouchMap, "expected empty touchMap when deleted=false")
-	require.Equal(t, bm, maps.AfterMap, "afterMap should equal bitmap when deleted=false")
-
-	for i, orig := range row {
-		requireDecodedCellEq(t, i, orig, &cells[i])
-	}
-}
-
-func TestDecodeBranchInto_DeletedFlag(t *testing.T) {
-	t.Parallel()
-	_, bm, enc := encodeCellRow(t, 16)
-	branchData := []byte(enc)[2:]
-
-	var cells [16]cell
-	maps, err := DecodeBranchInto(branchData, true, &cells)
-	require.NoError(t, err)
-	require.Equal(t, bm, maps.Bitmap)
-	require.Equal(t, bm, maps.TouchMap, "deleted=true → touchMap = bitmap")
-	require.Equal(t, uint16(0), maps.AfterMap, "deleted=true → afterMap = 0")
-}
-
-func TestDecodeBranchInto_TruncatedInput(t *testing.T) {
-	t.Parallel()
-	var cells [16]cell
-
-	_, err := DecodeBranchInto(nil, false, &cells)
-	require.Error(t, err)
-
-	_, err = DecodeBranchInto([]byte{0x00, 0x00}, false, &cells)
-	require.NoError(t, err, "bitmap=0 with no cell data should decode cleanly")
-
-	_, err = DecodeBranchInto([]byte{0x00, 0x01}, false, &cells)
-	require.Error(t, err, "bitmap with set bit but no cell data should error")
-}
-
 func TestForEachCellRejectsInvalidBranch(t *testing.T) {
 	for _, tc := range []struct {
 		name string

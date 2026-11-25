@@ -22,6 +22,8 @@ import (
 	"math/rand"
 	"testing"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -346,9 +348,9 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 		}
 
 		bd := commitment.BranchData(v)
-		t.Logf("Branch key=%x data=%s", k, commitment.BranchDataString(bd))
+		t.Logf("Branch key=%x data=%s", k, v2.BranchDataString(bd))
 
-		err = commitment.VerifyBranchHashes(k, bd, accountValues, storageValues)
+		err = v2.VerifyBranchHashes(k, bd, accountValues, storageValues)
 		checked++
 		if err != nil {
 			t.Errorf("VerifyBranchHashes FAILED for key=%x: %v", k, err)

@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"errors"
 	"math/bits"
 	"sync"
 	"testing"
@@ -633,4 +634,33 @@ func TestPrefixTrieResetClearsVisited(t *testing.T) {
 	for i, n := range tr.visited[:cap(tr.visited)] {
 		require.Nil(t, n, "Reset left a node pointer at visited[%d], pinning a dropped slab", i)
 	}
+}
+
+// hashedKey passed to fn is mutated in place and must not be retained.
+func dfsSubtree(node *PrefixNode, path []byte, fn func(hashedKey, plainKey []byte, update *Update) error) error {
+	if node == nil {
+		return nil
+	}
+	if node.PlainKey != nil {
+		if err := fn(path, node.PlainKey, node.Update); err != nil {
+			return err
+		}
+	} else if node.Bitmap == 0 {
+		return errors.New("ParallelPatriciaHashed: trie leaf without a plainKey")
+	}
+	childIdx := 0
+	for bm := node.Bitmap; bm != 0; {
+		nib := byte(bits.TrailingZeros16(bm))
+		child := node.Children[childIdx]
+		base := len(path)
+		path = append(path, nib)
+		path = append(path, child.Ext...)
+		if err := dfsSubtree(child, path, fn); err != nil {
+			return err
+		}
+		path = path[:base]
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+	return nil
 }

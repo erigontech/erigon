@@ -24,6 +24,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -142,7 +145,7 @@ func TestTrieAPI(t *testing.T) {
 	t.Run("E45/InitializeTrieAndUpdatesV3", func(t *testing.T) {
 		cfg := commitment.DefaultTrieConfig()
 		cfg.Variant = commitment.VariantCommitmentV3
-		trie, updates := commitment.InitializeTrieAndUpdates(commitment.ModeCollect, t.TempDir(), cfg)
+		trie, updates := commitmentdb.InitializeTrieAndUpdates(commitment.ModeCollect, t.TempDir(), cfg)
 		t.Cleanup(trie.Release)
 		t.Cleanup(updates.Close)
 
@@ -757,7 +760,7 @@ func foldPlaneRoot(t *testing.T, n *node) []byte {
 func hexPatriciaRoot(t *testing.T, plane byte, keys, paths [][]byte, updates []commitment.Update) []byte {
 	t.Helper()
 	ctx := runner.NewMemory(runner.ContextSpec{})
-	trie := commitment.NewHexPatriciaHashed(length.Addr, ctx, commitment.TrieConfig{DeferBranchUpdates: false})
+	trie := v2.NewHexPatriciaHashed(length.Addr, ctx, commitment.TrieConfig{DeferBranchUpdates: false})
 	defer trie.Release()
 	batch := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
 	for i := range paths {

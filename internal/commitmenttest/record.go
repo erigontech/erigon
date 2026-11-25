@@ -19,6 +19,8 @@ package commitmenttest
 import (
 	"bytes"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -94,6 +96,6 @@ func DecodeState(v []byte) (txNum, blockNum uint64, root []byte, err error) {
 		blockNum, txNum, root, err = commitment.DecodeCommitmentV3State(v)
 		return txNum, blockNum, root, err
 	}
-	root, blockNum, txNum, err = commitment.HexTrieExtractStateRoot(v)
+	root, blockNum, txNum, err = v2.HexTrieExtractStateRoot(v)
 	return txNum, blockNum, root, err
 }

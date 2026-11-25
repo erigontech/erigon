@@ -26,6 +26,8 @@ import (
 	"strings"
 	"testing"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
@@ -75,7 +77,7 @@ func newWitnessBed(t testing.TB, ops []commitmenttest.Op) *witnessBed {
 	}
 
 	reader, _ := b.hphMem.Open(ctx)
-	hph := commitment.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
+	hph := v2.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
 	hu := testUpdates(t, commitment.ModeUpdate, ops)
 	hphRoot, err := hph.Process(ctx, hu, "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
@@ -101,7 +103,7 @@ func (b *witnessBed) hphWitness(t testing.TB, keys witnessKeys, exclusion bool) 
 	t.Helper()
 	ctx := context.Background()
 	reader, _ := b.hphMem.Open(ctx)
-	hph := commitment.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
+	hph := v2.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
 	require.NoError(t, hph.SetState(b.hphState))
 	u := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
 	defer u.Close()
@@ -454,7 +456,7 @@ func (b *witnessBed) hphCollapses(t *testing.T, batch []commitmenttest.Op) ([]st
 	ctx := context.Background()
 	b.hphMem.Apply(batch)
 	reader, _ := b.hphMem.Open(ctx)
-	hph := commitment.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
+	hph := v2.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
 	require.NoError(t, hph.SetState(b.hphState))
 	var events []string
 	hph.SetCollapseTracer(func(sibling, prefix []byte) { events = append(events, fmt.Sprintf("%x/%x", sibling, prefix)) })

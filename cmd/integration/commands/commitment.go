@@ -36,6 +36,8 @@ import (
 	"sync"
 	"time"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/go-echarts/go-echarts/v2/charts"
 	"github.com/go-echarts/go-echarts/v2/components"
@@ -271,7 +273,7 @@ func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize ui
 
 	// Parse and display the branch data in human-readable format
 	branchData := commitment.BranchData(val)
-	fmt.Printf("\nParsed branch data:\n%s\n", commitment.BranchDataString(branchData))
+	fmt.Printf("\nParsed branch data:\n%s\n", v2.BranchDataString(branchData))
 
 	return nil
 }
@@ -536,7 +538,7 @@ func commitmentFileState(acRo *dbstate.AggregatorRoTx, maxTxNum uint64) (string,
 		return "no state record", nil
 	}
 	if !v3 {
-		return commitment.HexTrieStateToShortString(record)
+		return v2.HexTrieStateToShortString(record)
 	}
 	blockNum, txNum, root, err := commitment.DecodeCommitmentV3State(record)
 	return fmt.Sprintf("block: %d txn: %d rootHash: %x", blockNum, txNum, root), err
@@ -1586,7 +1588,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		val, afterValPos = getter.Next(val[:0])
 		cpair++
 		if bytes.Equal(key, []byte("state")) {
-			str, err := commitment.HexTrieStateToString(val)
+			str, err := v2.HexTrieStateToString(val)
 			if err != nil {
 				fmt.Printf("[ERR] failed to decode state: %v", err)
 			}
@@ -1602,7 +1604,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		if depth > len(key) {
 			continue
 		}
-		stat := commitment.DecodeBranchAndCollectStat(key, val, tv)
+		stat := v2.DecodeBranchAndCollectStat(key, val, tv)
 		if stat == nil {
 			return fmt.Errorf("failed to decode branch: %x %x", key, val)
 		}

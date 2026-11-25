@@ -33,6 +33,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
@@ -228,7 +230,7 @@ func extractCommitmentStateRoot(stateKey, value []byte) ([]byte, uint64, uint64,
 		blockNum, txNum, root, err := commitment.DecodeCommitmentV3State(value)
 		return root, blockNum, txNum, err
 	}
-	return commitment.HexTrieExtractStateRoot(value)
+	return v2.HexTrieExtractStateRoot(value)
 }
 
 func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
@@ -537,7 +539,7 @@ func checkDerefBranch(
 		}
 		return plainKey, nil
 	})
-	if err := commitment.ValidateBranchData(newBranchData, branchKey); err != nil {
+	if err := v2.ValidateBranchData(newBranchData, branchKey); err != nil {
 		err = fmt.Errorf("branch data validation failure for branch key %x in %s: %w", branchKey, fileName, err)
 		logger.Warn(err.Error())
 		integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
@@ -1001,7 +1003,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 			return 0, err
 		}
 		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
-			rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
+			rootHashBytes, blockNum, txNum, err := v2.HexTrieExtractStateRoot(v)
 			if err != nil {
 				return 0, fmt.Errorf("issue extracting state root value in %s for [%d,%d) tx nums: %w", fileName, bucketStart, bucketEnd, err)
 			}
@@ -1036,7 +1038,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 			}
 		} else {
 			branchData := commitment.BranchData(v)
-			err = commitment.ValidateBranchData(branchData, k)
+			err = v2.ValidateBranchData(branchData, k)
 			if err != nil {
 				err = fmt.Errorf("branch data validation failure for branch key %x in %s: %w", k, fileName, err)
 				if failFast {
@@ -2334,7 +2336,7 @@ func verifyHashItem(
 		return nil
 	}
 
-	err = commitment.VerifyBranchHashes(item.branchKey, resolvedBranchData, accountValues, storageValues)
+	err = v2.VerifyBranchHashes(item.branchKey, resolvedBranchData, accountValues, storageValues)
 	if err != nil {
 		hashMismatches.Add(1)
 		if failFast {

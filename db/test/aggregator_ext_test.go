@@ -28,6 +28,8 @@ import (
 	"testing"
 	"time"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -83,7 +85,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	rnd := newRnd(0)
 	keys := make([][]byte, txs)
 
-	hph := commitment.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig())
+	hph := v2.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig())
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)

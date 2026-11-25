@@ -27,6 +27,8 @@ import (
 	"slices"
 	"strings"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -454,7 +456,7 @@ func genesisStateRoot(writes *state.WriteSet, vm *state.VersionMap) ([]byte, err
 	if err := state.EmitTouchedAsOf(writes, view, updates); err != nil {
 		return nil, err
 	}
-	hph := commitment.NewHexPatriciaHashed(20, commitment.NewMemoryContext(), commitment.DefaultTrieConfig())
+	hph := v2.NewHexPatriciaHashed(20, commitment.NewMemoryContext(), commitment.DefaultTrieConfig())
 	defer hph.Release()
 	return hph.Process(context.Background(), updates, "genesis", nil, commitment.WarmupConfig{})
 }

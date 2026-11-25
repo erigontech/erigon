@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"math/bits"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common/empty"
@@ -406,7 +408,7 @@ func LegacyRootExtension(value []byte) (ext, hash []byte, err error) {
 	if err != nil || len(trieState) == 0 {
 		return nil, nil, err
 	}
-	hph := commitment.NewHexPatriciaHashed(length.Addr, leafRootContext{}, commitment.DefaultTrieConfig())
+	hph := v2.NewHexPatriciaHashed(length.Addr, leafRootContext{}, commitment.DefaultTrieConfig())
 	defer hph.Release()
 	if err := hph.SetState(trieState); err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", errLegacyState, err)
@@ -461,7 +463,7 @@ func ConvertLegacyState(value []byte) ([]byte, error) {
 	}
 	root := empty.RootHash[:]
 	if len(trieState) != 0 {
-		hph := commitment.NewHexPatriciaHashed(length.Addr, leafRootContext{}, commitment.DefaultTrieConfig())
+		hph := v2.NewHexPatriciaHashed(length.Addr, leafRootContext{}, commitment.DefaultTrieConfig())
 		defer hph.Release()
 		if err := hph.SetState(trieState); err != nil {
 			return nil, fmt.Errorf("%w: %w", errLegacyState, err)

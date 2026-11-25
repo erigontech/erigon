@@ -18,52 +18,10 @@ package commitment
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/bits"
 )
-
-type BranchMaps struct {
-	Bitmap   uint16
-	TouchMap uint16
-	AfterMap uint16
-}
-
-// branchData must have its leading 2-byte touch-map prefix already stripped by the caller.
-func DecodeBranchInto(
-	branchData []byte,
-	deleted bool,
-	cells *[16]cell,
-) (BranchMaps, error) {
-	if len(branchData) < 2 {
-		return BranchMaps{}, fmt.Errorf("branch data too short for bitmap: %d bytes", len(branchData))
-	}
-	bitmap := binary.BigEndian.Uint16(branchData[0:])
-	maps := BranchMaps{Bitmap: bitmap}
-	if deleted {
-		maps.TouchMap, maps.AfterMap = bitmap, 0
-	} else {
-		maps.TouchMap, maps.AfterMap = 0, bitmap
-	}
-
-	pos := 2
-	for bitset := bitmap; bitset != 0; {
-		bit := bitset & -bitset
-		nibble := bits.TrailingZeros16(bit)
-		c := &cells[nibble]
-		if pos >= len(branchData) {
-			return BranchMaps{}, fmt.Errorf("branch data truncated before cell at nibble %d", nibble)
-		}
-		fieldBits := branchData[pos]
-		pos++
-		newPos, err := c.fillFromFields(branchData, pos, CellFields(fieldBits))
-		if err != nil {
-			return BranchMaps{}, fmt.Errorf("fillFromFields nibble %d: %w", nibble, err)
-		}
-		pos = newPos
-		bitset ^= bit
-	}
-	return maps, nil
-}
 
 type BranchCell struct {
 	Extension   []byte
@@ -126,4 +84,39 @@ func (branchData BranchData) ForEachCell(fn func(nibble int, c BranchCell) error
 		return fmt.Errorf("branch data has %d trailing bytes", len(branchData)-pos)
 	}
 	return nil
+}
+
+// MaxCompactKeyLen bounds a compact-encoded (hex-prefix) key or branch prefix,
+// derived from the 128-nibble key path rather than from the shorter keys today's depth
+// arithmetic yields, so a caller slicing deeper cannot overflow the buffer.
+const MaxCompactKeyLen = 128/2 + 1
+
+func ReadUvarint(data []byte) (uint64, int, error) {
+	l, n := binary.Uvarint(data)
+	if n == 0 {
+		return 0, 0, errors.New("buffer too small for length")
+	} else if n < 0 {
+		return 0, 0, errors.New("value overflow for length")
+	}
+	return l, n, nil
+}
+
+// skipCellFields skips over the fields in branch data based on fieldBits.
+// Used during warmup traversal to find the right child's data.
+func skipCellFields(data []byte, pos int, fieldBits byte) int {
+	// Field flags: extension=1, accountAddr=2, storageAddr=4, hash=8, stateHash=16
+	for bit := byte(1); bit <= 16; bit <<= 1 {
+		if fieldBits&bit != 0 {
+			if pos >= len(data) {
+				return pos
+			}
+			// Read length varint
+			l, n := binary.Uvarint(data[pos:])
+			if n <= 0 {
+				return pos
+			}
+			pos += n + int(l) // Skip length + data
+		}
+	}
+	return pos
 }

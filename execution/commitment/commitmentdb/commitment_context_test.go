@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -57,8 +59,8 @@ func TestLegacyCommitmentStateDispatch(t *testing.T) {
 	t.Parallel()
 
 	variants := []commitment.Trie{
-		commitment.NewHexPatriciaHashed(length.Addr, nil, commitment.DefaultTrieConfig()),
-		commitment.NewParallelPatriciaHashed(nil, length.Addr, commitment.DefaultTrieConfig()),
+		v2.NewHexPatriciaHashed(length.Addr, nil, commitment.DefaultTrieConfig()),
+		v2.NewParallelPatriciaHashed(nil, length.Addr, commitment.DefaultTrieConfig()),
 	}
 	for _, trie := range variants {
 		sdc := &SharedDomainsCommitmentContext{patriciaTrie: trie}
@@ -379,4 +381,38 @@ func TestSyncStateReaderKeepsOwnedBranchIdentity(t *testing.T) {
 	got, _, err := tc.BranchOwned([]byte{0xaa})
 	require.NoError(t, err)
 	require.NotNil(t, tc.LeafRefs([]byte{0xaa}, got))
+}
+
+func TestInitializeTrieAndUpdates_Variants(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name         string
+		variant      commitment.TrieVariant
+		wantType     any
+		wantMode     commitment.Mode
+		wantParallel bool
+	}{
+		{"parallel", commitment.VariantParallelHexPatricia, (*v2.ParallelPatriciaHashed)(nil), commitment.ModeParallel, true},
+		{"hex unchanged", commitment.VariantHexPatriciaTrie, (*v2.HexPatriciaHashed)(nil), commitment.ModeDirect, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := commitment.DefaultTrieConfig()
+			cfg.Variant = tc.variant
+			trie, upd := InitializeTrieAndUpdates(commitment.ModeDirect, t.TempDir(), cfg)
+			defer upd.Close()
+			defer trie.Release()
+
+			require.IsType(t, tc.wantType, trie)
+			require.Equal(t, tc.variant, trie.Variant())
+			require.Equal(t, tc.wantMode, upd.Mode())
+			if tc.wantParallel {
+				require.NotNil(t, upd.Parallel)
+			} else {
+				require.Nil(t, upd.Parallel)
+			}
+		})
+	}
 }

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -327,7 +329,7 @@ func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
 			require.NotEmpty(t, v)
 
 			expanded := commitment.BranchData(v)
-			require.NoError(t, commitment.ValidateBranchData(expanded, k),
+			require.NoError(t, v2.ValidateBranchData(expanded, k),
 				"expanded BranchData failed Validate for key %x in %s", k, vf.Fullpath())
 
 			// Walk embedded plain-key fields and assert each is full-length.

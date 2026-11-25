@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
@@ -328,7 +330,7 @@ func TestConcurrentTrieContextLeavesHPHMainReaderUnchanged(t *testing.T) {
 	t.Parallel()
 	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
 	sdc, _ := newSnapshotSdc(t)
-	sdc.patriciaTrie = commitment.NewParallelPatriciaHashed(nil, length.Addr, commitment.DefaultTrieConfig())
+	sdc.patriciaTrie = v2.NewParallelPatriciaHashed(nil, length.Addr, commitment.DefaultTrieConfig())
 	mainReader := NewLatestStateReader(caller, sdc.sharedDomains, LatestStateReaderOptions{})
 	main := &TrieContext{stepSize: 1, stateReader: mainReader}
 
@@ -633,7 +635,7 @@ func TestConcurrentTrieContextFactoryReportsAFullReadTxLimitAsErrorContext(t *te
 	t.Parallel()
 	sdc := &SharedDomainsCommitmentContext{
 		sharedDomains: stubSharedDomains{},
-		patriciaTrie:  commitment.NewHexPatriciaHashed(length.Addr, nil, commitment.DefaultTrieConfig()),
+		patriciaTrie:  v2.NewHexPatriciaHashed(length.Addr, nil, commitment.DefaultTrieConfig()),
 	}
 	factory, _ := sdc.concurrentTrieContextFactory(t.Context(), &beginRoRecordingDB{}, nil, nil, 0, nil)
 	trieCtx, cleanup := factory(kv.WithNonBlockingAcquire(t.Context()))

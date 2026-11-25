@@ -21,6 +21,8 @@ import (
 	"math/rand"
 	"testing"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
@@ -68,7 +70,7 @@ func TestBranchChildCountUnderCommitmentV3(t *testing.T) {
 		return mem.Records()
 	}
 	hphRecords := process(func(pc commitment.PatriciaContext) commitment.Trie {
-		return commitment.NewHexPatriciaHashed(length.Addr, pc, commitment.DefaultTrieConfig())
+		return v2.NewHexPatriciaHashed(length.Addr, pc, commitment.DefaultTrieConfig())
 	}, commitment.ModeUpdate)
 	v3Trie, v3Updates := v3.NewTrie(t.TempDir(), commitment.DefaultTrieConfig())
 	v3Updates.Close()

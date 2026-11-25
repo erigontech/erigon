@@ -24,6 +24,8 @@ import (
 	"slices"
 	"testing"
 
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
@@ -47,10 +49,10 @@ func BenchmarkFoldV3VsHPH(b *testing.B) {
 			}{
 				{"v3", commitment.ModeCollect, func(c *shardedContext) commitment.Trie { return newFactoryTrie(0, c, c.factory) }},
 				{"hph", commitment.ModeUpdate, func(c *shardedContext) commitment.Trie {
-					return commitment.NewHexPatriciaHashed(length.Addr, c, commitment.DefaultTrieConfig())
+					return v2.NewHexPatriciaHashed(length.Addr, c, commitment.DefaultTrieConfig())
 				}},
 				{"parallel", commitment.ModeParallel, func(c *shardedContext) commitment.Trie {
-					return commitment.NewParallelPatriciaHashed(c.factory, length.Addr, commitment.DefaultTrieConfig())
+					return v2.NewParallelPatriciaHashed(c.factory, length.Addr, commitment.DefaultTrieConfig())
 				}},
 			} {
 				b.Run(fmt.Sprintf("%s/%d/%s", shape, n, arm.name), func(b *testing.B) {
@@ -180,7 +182,7 @@ func BenchmarkWitness(b *testing.B) {
 		b.Run("nodes/"+name+"/hph", func(b *testing.B) {
 			for b.Loop() {
 				reader, _ := bed.hphMem.Open(ctx)
-				hph := commitment.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
+				hph := v2.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
 				require.NoError(b, hph.SetState(bed.hphState))
 				u := commitment.NewUpdates(commitment.ModeUpdate, dir, commitment.KeyToHexNibbleHash)
 				keys.touch(u)
@@ -213,7 +215,7 @@ func BenchmarkWitness(b *testing.B) {
 		b.Run("collapse/hph/"+suffix, func(b *testing.B) {
 			for b.Loop() {
 				reader, _ := bed.hphMem.Open(ctx)
-				hph := commitment.NewHexPatriciaHashed(length.Addr, discardWrites{reader}, commitment.DefaultTrieConfig())
+				hph := v2.NewHexPatriciaHashed(length.Addr, discardWrites{reader}, commitment.DefaultTrieConfig())
 				require.NoError(b, hph.SetState(bed.hphState))
 				if trace {
 					hph.SetCollapseTracer(func([]byte, []byte) {})
