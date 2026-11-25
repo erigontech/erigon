@@ -500,7 +500,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	if db == nil {
 		db = remoteKv
 		if err := dbstate.ResolveCommitmentV3(ctx, datadir.Dirs{}, remoteKv, logger); err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, err
+			logger.Warn("[commitment] cannot read the commitment trie from the remote KV, keeping the configured one; set ERIGON_COMMITMENT_V3 to choose it", "err", err)
 		}
 	}
 

@@ -981,3 +981,12 @@ func TestDoPublishableRejectsMixedCommitmentVersions(t *testing.T) {
 	err := doPublishable(t.Context(), dirs, mdbxtest.NewTestDB(t, dbcfg.ChainDB))
 	require.ErrorContains(t, err, "mixed major versions")
 }
+
+func TestDoPublishableSelectsCommitmentTrieFromDatadir(t *testing.T) {
+	t.Cleanup(statecfg.ResetCommitmentV3ForTest())
+	dirs := datadir.New(t.TempDir())
+	createMockFile(t, dirs.SnapDomain, "v3.0-commitment.0-128.kv")
+
+	_ = doPublishable(t.Context(), dirs, mdbxtest.NewTestDB(t, dbcfg.ChainDB))
+	require.True(t, statecfg.ExperimentalCommitmentV3, "publishable must check the files against the datadir's commitment trie")
+}

@@ -2588,6 +2588,9 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 		chainDB = dbCfg(dbcfg.ChainDB, dat.Chaindata).MustOpen()
 		defer chainDB.Close()
 	}
+	if err := state.ResolveCommitmentV3(ctx, dat, chainDB, log.Root()); err != nil {
+		return err
+	}
 
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {

@@ -53,7 +53,9 @@ var rootCmd = &cobra.Command{
 		if datadirCli == "" {
 			return
 		}
-		if err := dbstate.ResolveCommitmentV3(context.Background(), datadir.Open(datadirCli), nil, log.Root()); err != nil {
+		dirs := datadir.Open(datadirCli)
+		dirs.Chaindata = chaindata
+		if err := dbstate.ResolveCommitmentV3(context.Background(), dirs, nil, log.Root()); err != nil {
 			utils.Fatalf("resolving the commitment trie of the datadir: %v", err)
 		}
 	},

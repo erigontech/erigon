@@ -560,7 +560,7 @@ var EmbeddedWebseeds = map[string][]string{
 	networkname.Bloatnet: {"v1:https://erigon36-v1-snapshots-bloatnet.erigon.network"},
 }
 
-// Webseeds returns the webseeds of the snapshot branch the manifest comes from (SNAPS_GIT_BRANCH).
+// Webseeds returns the webseeds of the snapshot branch the manifest comes from.
 func Webseeds(ctx context.Context, chain string) ([]string, bool) {
 	embedded, ok := EmbeddedWebseeds[chain]
 	branch := snapshotGitBranch()

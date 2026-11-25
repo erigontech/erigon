@@ -62,3 +62,19 @@ func TestSchemaEntityEnabled(t *testing.T) {
 		assert.Equal(t, tc.enabled, tc.cfg.Enabled, tc.name)
 	}
 }
+
+func TestSetCommitmentV3KeepsHistoricalCommitment(t *testing.T) {
+	t.Cleanup(SetCommitmentV3(true))
+	EnableHistoricalCommitment()
+
+	SetCommitmentV3(false)
+	assert.False(t, Schema.CommitmentDomain.Hist.HistoryDisabled, "switching to legacy must keep commitment history enabled")
+	assert.False(t, Schema.CommitmentDomain.Hist.SnapshotsDisabled)
+	assert.False(t, Schema.CommitmentDomain.CommitmentV3Records)
+	assert.Equal(t, legacyCommitmentDomain.FileVersion, Schema.CommitmentDomain.FileVersion)
+	assert.Equal(t, legacyCommitmentDomain.Accessors, Schema.CommitmentDomain.Accessors)
+
+	SetCommitmentV3(true)
+	assert.False(t, Schema.CommitmentDomain.Hist.HistoryDisabled, "switching to v3 must keep commitment history enabled")
+	assert.True(t, Schema.CommitmentDomain.CommitmentV3Records)
+}

@@ -96,7 +96,7 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 	statecfg.ExperimentalCommitmentV3 = true
 	for _, mode := range [][]string{nil, {"--squeeze=true"}, {"--nibbles.v2=true"}} {
 		root.SetArgs(append([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet"}, mode...))
-		require.ErrorContains(t, root.ExecuteContext(t.Context()), "the datadir holds no legacy commitment files", mode)
+		require.ErrorContains(t, root.ExecuteContext(t.Context()), "commitment v3 is active", mode)
 	}
 
 	statecfg.ExperimentalCommitmentV3, convertSqueeze, convertNibblesV2 = false, false, false

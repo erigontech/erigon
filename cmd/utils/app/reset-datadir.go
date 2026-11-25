@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/state"
 )
 
 var (
@@ -122,6 +123,9 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	}
 	defer unlock()
 
+	if err = state.ResolveCommitmentV3(ctx, dirs, nil, logger); err != nil {
+		return
+	}
 	err = snapcfg.LoadPreverified(ctx, cliCtx.String(PreverifiedFlag.Name), &dirs, chainName, "")
 	if err != nil {
 		return

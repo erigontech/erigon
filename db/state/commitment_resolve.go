@@ -69,6 +69,9 @@ func commitmentVariantOfFiles(d datadir.Dirs) (source string, v3 bool, err error
 
 func chaindataCommitmentVariant(ctx context.Context, d datadir.Dirs, chainDB kv.RoDB, logger log.Logger) (v3, found bool, err error) {
 	if chainDB == nil {
+		if d.Chaindata == "" {
+			return false, false, nil
+		}
 		exists, existErr := dir.FileExist(filepath.Join(d.Chaindata, "mdbx.dat"))
 		if existErr != nil || !exists {
 			return false, false, existErr
