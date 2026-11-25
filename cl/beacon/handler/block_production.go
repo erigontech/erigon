@@ -1284,7 +1284,7 @@ func (a *ApiHandler) produceBlock(
 					candidates = append(candidates, a.requestConfiguredBuilderBids(ctx, baseState, targetSlot, proposerPubkey, selfBid, options.builderConfig.Builders)...)
 				}
 			}
-			selected := selectGloasBid(localExecValue, candidates)
+			selected := selectGloasBid(stateVersion, localExecValue, candidates)
 			if selected != nil && selected.builderURL != "" {
 				if options == nil || a.builderRoutes == nil || !a.builderRoutes.Reserve() {
 					log.Warn("GLOAS: builder handoff capacity unavailable, using self-build", "slot", targetSlot)
@@ -1550,7 +1550,7 @@ type executionPayloadBidValidator interface {
 	ValidateBid(context.Context, *cltypes.SignedExecutionPayloadBid) error
 }
 
-func selectGloasBid(localExecutionValueWei *big.Int, candidates []gloasBidCandidate) *gloasBidCandidate {
+func selectGloasBid(version clparams.StateVersion, localExecutionValueWei *big.Int, candidates []gloasBidCandidate) *gloasBidCandidate {
 	var localWeighted *big.Int
 	if localExecutionValueWei != nil {
 		localWeighted = new(big.Int).Mul(new(big.Int).Set(localExecutionValueWei), big.NewInt(100))
@@ -1560,6 +1560,9 @@ func selectGloasBid(localExecutionValueWei *big.Int, candidates []gloasBidCandid
 	for i := range candidates {
 		candidate := &candidates[i]
 		if candidate.bid == nil || candidate.bid.Message == nil {
+			continue
+		}
+		if candidate.bid.Message.ValidateInclusionListBits(version) != nil {
 			continue
 		}
 		countedExecutionPayment := min(candidate.bid.Message.ExecutionPayment, candidate.maxExecutionPayment)

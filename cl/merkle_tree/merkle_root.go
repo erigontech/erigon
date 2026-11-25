@@ -102,35 +102,43 @@ func HashTreeRoot(schema ...any) ([32]byte, error) {
 }
 
 func ProgressiveContainerRoot(activeFields []bool, schema ...any) ([32]byte, error) {
-	if len(activeFields) == 0 || len(activeFields) > 256 || !activeFields[len(activeFields)-1] {
-		return [32]byte{}, errors.New("invalid progressive container active fields")
-	}
-	roots, err := progressiveSchemaRoots(schema)
+	chunks, activeRoot, err := progressiveContainerChunks(activeFields, schema)
 	if err != nil {
 		return [32]byte{}, err
-	}
-	chunks := make([][32]byte, len(activeFields))
-	rootIndex := 0
-	var activeRoot [32]byte
-	for i, active := range activeFields {
-		if !active {
-			continue
-		}
-		if rootIndex >= len(roots) {
-			return [32]byte{}, errors.New("progressive container has fewer fields than active bits")
-		}
-		chunks[i] = roots[rootIndex]
-		activeRoot[i/8] |= 1 << uint(i%8)
-		rootIndex++
-	}
-	if rootIndex != len(roots) {
-		return [32]byte{}, errors.New("progressive container has more fields than active bits")
 	}
 	root, err := MerkleizeProgressive(chunks)
 	if err != nil {
 		return [32]byte{}, err
 	}
 	return hashPair(root, activeRoot), nil
+}
+
+func progressiveContainerChunks(activeFields []bool, schema []any) ([][32]byte, [32]byte, error) {
+	if len(activeFields) == 0 || len(activeFields) > 256 || !activeFields[len(activeFields)-1] {
+		return nil, [32]byte{}, errors.New("invalid progressive container active fields")
+	}
+	roots, err := progressiveSchemaRoots(schema)
+	if err != nil {
+		return nil, [32]byte{}, err
+	}
+	chunks := make([][32]byte, len(activeFields))
+	var activeRoot [32]byte
+	rootIndex := 0
+	for i, active := range activeFields {
+		if !active {
+			continue
+		}
+		if rootIndex >= len(roots) {
+			return nil, [32]byte{}, errors.New("progressive container has fewer fields than active bits")
+		}
+		chunks[i] = roots[rootIndex]
+		activeRoot[i/8] |= 1 << uint(i%8)
+		rootIndex++
+	}
+	if rootIndex != len(roots) {
+		return nil, [32]byte{}, errors.New("progressive container has more fields than active bits")
+	}
+	return chunks, activeRoot, nil
 }
 
 func ProgressiveContainerRootAll(schema ...any) ([32]byte, error) {
@@ -152,32 +160,12 @@ func ProgressiveContainerProofAll(fieldIndex int, schema ...any) ([][32]byte, er
 // ProgressiveContainerProof proves the field at position fieldIndex of activeFields.
 // The schema holds the roots of the active fields only.
 func ProgressiveContainerProof(activeFields []bool, fieldIndex int, schema ...any) ([][32]byte, error) {
-	if len(activeFields) == 0 || len(activeFields) > 256 || !activeFields[len(activeFields)-1] {
-		return nil, errors.New("invalid progressive container active fields")
-	}
 	if fieldIndex < 0 || fieldIndex >= len(activeFields) || !activeFields[fieldIndex] {
 		return nil, errors.New("progressive container field index out of range")
 	}
-	roots, err := progressiveSchemaRoots(schema)
+	chunks, activeRoot, err := progressiveContainerChunks(activeFields, schema)
 	if err != nil {
 		return nil, err
-	}
-	chunks := make([][32]byte, len(activeFields))
-	var activeRoot [32]byte
-	rootIndex := 0
-	for i, active := range activeFields {
-		if !active {
-			continue
-		}
-		if rootIndex >= len(roots) {
-			return nil, errors.New("progressive container has fewer fields than active bits")
-		}
-		chunks[i] = roots[rootIndex]
-		activeRoot[i/8] |= 1 << uint(i%8)
-		rootIndex++
-	}
-	if rootIndex != len(roots) {
-		return nil, errors.New("progressive container has more fields than active bits")
 	}
 	proof, err := progressiveProof(chunks, fieldIndex, 1)
 	if err != nil {

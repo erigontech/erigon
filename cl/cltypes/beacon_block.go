@@ -485,17 +485,24 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, b.getSchema(false)...)
 }
 
-func (b *BeaconBody) EncodingSizeSSZ() (size int) {
+func (b *BeaconBody) EncodingSizeSSZ() int {
+	fixed, dynamic := b.sszSize()
+	return fixed + dynamic
+}
+
+func (b *BeaconBody) sszSize() (fixed, dynamic int) {
 	b.ensureNilFields()
 	for _, field := range b.getSchema(false) {
 		switch f := field.(type) {
 		case []byte:
-			size += len(f)
+			fixed += len(f)
 		case ssz2.SizedObjectSSZ:
-			if !f.Static() {
-				size += 4
+			if f.Static() {
+				fixed += f.EncodingSizeSSZ()
+			} else {
+				fixed += 4
+				dynamic += f.EncodingSizeSSZ()
 			}
-			size += f.EncodingSizeSSZ()
 		}
 	}
 	return
@@ -514,8 +521,7 @@ func (b *BeaconBody) decodeSSZ(buf []byte, version int, strict bool) error {
 	if b.Version >= clparams.GloasVersion {
 		b.resetGloasProgressiveLists()
 	}
-
-	if len(buf) < b.EncodingSizeSSZ() {
+	if fixed, _ := b.sszSize(); len(buf) < fixed {
 		return fmt.Errorf("[BeaconBody] err: %w", ssz.ErrLowBufferSize)
 	}
 

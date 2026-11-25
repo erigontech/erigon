@@ -203,8 +203,29 @@ func TestBeaconBodyEncodingSizeMatchesEncoding(t *testing.T) {
 	}
 }
 
-func TestValidateInclusionListBitsDoesNotWriteTheBid(t *testing.T) {
-	bid := &ExecutionPayloadBid{InclusionListBits: solid.NewBitVector(clparams.InclusionListCommitteeSize)}
-	require.NoError(t, bid.ValidateInclusionListBits(clparams.HezeVersion))
-	require.Zero(t, bid.InclusionListBits.BitLen())
+func TestBeaconBodyDecodeIgnoresThePreviousBodySize(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.FuluVersion, clparams.GloasVersion, clparams.HezeVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			small, err := NewBeaconBody(cfg, version).EncodeSSZ(nil)
+			require.NoError(t, err)
+			big := NewBeaconBody(cfg, version)
+			big.VoluntaryExits.Append(&SignedVoluntaryExit{VoluntaryExit: &VoluntaryExit{}})
+			if version >= clparams.GloasVersion {
+				big.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(&KZGCommitment{})
+			}
+			bigEncoded, err := big.EncodeSSZ(nil)
+			require.NoError(t, err)
+			require.Greater(t, len(bigEncoded), len(small))
+
+			for _, decode := range []func(*BeaconBody, []byte) error{
+				func(b *BeaconBody, buf []byte) error { return b.DecodeSSZ(buf, int(version)) },
+				func(b *BeaconBody, buf []byte) error { return b.DecodeSSZStrict(buf, int(version)) },
+			} {
+				receiver := NewBeaconBody(cfg, version)
+				require.NoError(t, decode(receiver, bigEncoded))
+				require.NoError(t, decode(receiver, small))
+			}
+		})
+	}
 }

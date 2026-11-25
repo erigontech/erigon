@@ -4826,3 +4826,55 @@ func validTestExecutionPayloadEnvelopeBody(t *testing.T, cfg *clparams.BeaconCha
 	require.NoError(t, err)
 	return body
 }
+
+func TestPostExecutionPayloadBidRejectsGloasLayoutForHezeSlot(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	cfg := *handler.beaconChainCfg
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch = 0, 0, 0, 0
+	cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch, cfg.HezeForkEpoch = 0, 0, 0, 0
+	handler.beaconChainCfg = &cfg
+	body, err := json.Marshal(&cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(12, 3, 1000)})
+	require.NoError(t, err)
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.postEthV1BeaconExecutionPayloadBidLegacy(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "inclusion_list_bits")
+}
+
+func TestPostExecutionPayloadBidPublishesOnTheBidSlotFork(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	cfg := *handler.beaconChainCfg
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch = 0, 0, 0, 0
+	cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch, cfg.HezeForkEpoch = 0, 0, 0, 1
+	handler.beaconChainCfg = &cfg
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, &cfg)
+	handler.ethClock = clock
+	currentDigest, err := clock.CurrentForkDigest()
+	require.NoError(t, err)
+	hezeDigest, err := clock.ComputeForkDigest(1)
+	require.NoError(t, err)
+	require.NotEqual(t, currentDigest, hezeDigest)
+
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().PublishToForkDigest(gomock.Any(), hezeDigest, gossip.TopicNameExecutionPayloadBid, gomock.Any()).Return(nil)
+	handler.gossipManager = gossipManager
+	handler.sentinel = &nonNilSentinelClient{}
+
+	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(cfg.SlotsPerEpoch, 3, 1000)}
+	bid.Message.InclusionListBits = solid.NewBitVector(clparams.InclusionListCommitteeSize)
+	body, err := json.Marshal(bid)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.postEthV1BeaconExecutionPayloadBidLegacy(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}

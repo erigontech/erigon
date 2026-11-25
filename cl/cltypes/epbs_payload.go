@@ -393,7 +393,7 @@ func (e *ExecutionPayloadBid) hashSchema() ([]any, error) {
 
 func (e *ExecutionPayloadBid) EncodingSizeSSZ() int {
 	// The fixed section contains five hashes, one address, five uint64 values,
-	// and the offset for BlobKzgCommitments.
+	// the BlobKzgCommitments offset and, from Heze, the inclusion_list_bits vector.
 	const dynamicOffsetSize = 4
 	size := length.Hash*5 +
 		length.Addr +
@@ -494,17 +494,14 @@ func (e *ExecutionPayloadBid) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ValidateInclusionListBits checks that inclusion_list_bits is present exactly from Heze on and has the preset size.
+// ValidateInclusionListBits checks that inclusion_list_bits is present exactly from Heze on.
+// Decoders already enforce the preset size.
 func (e *ExecutionPayloadBid) ValidateInclusionListBits(version clparams.StateVersion) error {
 	hasBits := e.InclusionListBits != nil
 	if wantBits := version >= clparams.HezeVersion; hasBits != wantBits {
 		return fmt.Errorf("execution payload bid inclusion_list_bits present=%v, want %v for %s", hasBits, wantBits, version)
 	}
-	if !hasBits {
-		return nil
-	}
-	// ValidateSize writes the vector, and callers pass bids that other goroutines read.
-	return e.InclusionListBits.Copy().ValidateSize(clparams.InclusionListCommitteeSize)
+	return nil
 }
 
 func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {

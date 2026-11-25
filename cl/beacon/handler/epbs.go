@@ -1736,7 +1736,8 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r
 		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("missing message in signed execution payload bid")).WriteTo(w)
 		return
 	}
-	if err := req.Message.ValidateInclusionListBits(clparams.GloasVersion); err != nil {
+	bidEpoch := req.Message.Slot / a.beaconChainCfg.SlotsPerEpoch
+	if err := req.Message.ValidateInclusionListBits(a.beaconChainCfg.GetCurrentStateVersion(bidEpoch)); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -1756,7 +1757,11 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameExecutionPayloadBid, encodedSSZ); err != nil {
+		forkDigest, err := a.ethClock.ComputeForkDigest(bidEpoch)
+		if err == nil {
+			err = a.gossipManager.PublishToForkDigest(r.Context(), forkDigest, gossip.TopicNameExecutionPayloadBid, encodedSSZ)
+		}
+		if err != nil {
 			a.logger.Debug("[Beacon REST] failed to publish execution payload bid to gossip", "err", err)
 		}
 	}
