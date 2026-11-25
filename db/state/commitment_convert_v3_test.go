@@ -923,16 +923,24 @@ func accountPairsByFirstNibble(t *testing.T) (pairs [][2][]byte, others [][]byte
 func TestConvertCommitmentFiles_V3RejectsCorruptLatestRecord(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
-	state.SetConvertPhase5HookForTest(func() error {
-		paths := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
-		latest := paths[len(paths)-1]
+	dirs := agg.Dirs()
+	stagedDir := filepath.Join(dirs.Snap, "rebuild", "domain")
+	liveFiles := len(commitmentFilesByEnd(t, dirs.SnapDomain))
+	corrupted := false
+	state.SetConvertPhase1AfterFileHookForTest(func(int) {
+		staged := commitmentFilesByEnd(t, stagedDir)
+		if corrupted || len(staged) != liveFiles {
+			return
+		}
+		corrupted = true
+		latest := staged[len(staged)-1]
 		keys, values := readKVFile(t, agg, latest)
 		i := slices.IndexFunc(keys, func(key []byte) bool { return bytes.Equal(key, []byte{0x40, 0}) })
 		require.NotEqual(t, -1, i)
 		require.NotEmpty(t, values[i])
 		values[i][len(values[i])-1] ^= 1
 		tmp := latest + ".tmp"
-		comp, err := seg.NewCompressor(t.Context(), "corrupt-latest-v3", tmp, agg.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, log.New())
+		comp, err := seg.NewCompressor(t.Context(), "corrupt-latest-v3", tmp, dirs.Tmp, seg.DefaultCfg, log.LvlTrace, log.New())
 		require.NoError(t, err)
 		defer comp.Close()
 		writer := seg.NewWriter(comp, agg.Cfg(kv.CommitmentDomain).Compression)
@@ -946,7 +954,7 @@ func TestConvertCommitmentFiles_V3RejectsCorruptLatestRecord(t *testing.T) {
 		comp.Close()
 		require.NoError(t, os.Rename(tmp, latest))
 		from, to := commitmentFileRange(t, latest)
-		siblings, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, fmt.Sprintf("*-commitment.%d-%d.*", from, to)))
+		siblings, err := filepath.Glob(filepath.Join(stagedDir, fmt.Sprintf("*-commitment.%d-%d.*", from, to)))
 		require.NoError(t, err)
 		for _, path := range siblings {
 			switch filepath.Ext(path) {
@@ -954,14 +962,32 @@ func TestConvertCommitmentFiles_V3RejectsCorruptLatestRecord(t *testing.T) {
 				require.NoError(t, dir.RemoveFile(path))
 			}
 		}
-		require.NoError(t, agg.ReloadFiles())
-		require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
-		agg.CloseFilesNoReopen()
-		return nil
+		require.NoError(t, state.BuildCommitmentAccessorsForTest(t.Context(), agg, latest, stagedDir, kv.Step(from), kv.Step(to)))
+	})
+	t.Cleanup(func() { state.SetConvertPhase1AfterFileHookForTest(nil) })
+
+	err := convertErr(t, db, state.ConvertOpts{TargetV3: true})
+	require.True(t, corrupted)
+	require.ErrorContains(t, err, "v3 verification")
+	requireDomainsNotSwapped(t, dirs)
+}
+
+func TestConvertCommitmentFiles_V3RejectsFilesMissingAfterReload(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
+	dirs := agg.Dirs()
+	removed := ""
+	state.SetConvertPhase5HookForTest(func() error {
+		bts, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment.*.bt"))
+		require.NoError(t, err)
+		require.NotEmpty(t, bts)
+		slices.Sort(bts)
+		removed = bts[len(bts)-1]
+		return dir.RemoveFile(removed)
 	})
 	t.Cleanup(func() { state.SetConvertPhase5HookForTest(nil) })
-	at := agg.BeginFilesRo()
-	defer at.Close()
-	err := state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{TargetV3: true}, log.New())
-	require.ErrorContains(t, err, "v3 verification")
+
+	err := convertErr(t, db, state.ConvertOpts{TargetV3: true})
+	require.NotEmpty(t, removed)
+	require.ErrorContains(t, err, "v3 file check")
 }

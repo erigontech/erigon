@@ -351,7 +351,17 @@ func TestCommitmentConvertV3NoHistoryVerifiesV3History(t *testing.T) {
 		require.NoError(t, os.Rename(f, filepath.Join(dirs.SnapHistory, "v3.0-"+suffix)))
 	}
 
-	require.ErrorContains(t, runCommitmentConvert(t, dirs, "--v3", "--no-history"), "has no state entries")
+	err = runCommitmentConvert(t, dirs, "--v3", "--no-history")
+	require.ErrorContains(t, err, "has no state entries")
+	require.ErrorContains(t, err, "integration commitment convert --restore")
+	requireCommitmentKVPrefix(t, dirs, "v2.")
+	entries, err := os.ReadDir(filepath.Join(dirs.Snap, "backup", "domains"))
+	if err != nil {
+		require.ErrorIs(t, err, os.ErrNotExist)
+	}
+	require.Empty(t, entries)
+	_, err = os.Stat(filepath.Join(dirs.Snap, "backup", ".exec_reset_pending"))
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestCommitmentConvertV3EmptySideErrors(t *testing.T) {

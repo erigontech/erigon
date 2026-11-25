@@ -758,7 +758,20 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		logger.Info("[commitment_convert] no files needed conversion; no backup or promote performed")
 		return nil
 	}
+	var verifiedFiles []string
 	if opts.TargetV3 && convertDomain {
+		verifyHistory := len(historyRanges) > 0 || (!convertHistory && !commitmentDomain.HistoryDisabled && commitmentDomain.History.FileVersion.DataV.Current.Major >= 3)
+		var err error
+		if verifiedFiles, err = verifyStagedCommitmentV3(ctx, at, rebuildDir, historyStage, len(historyRanges) > 0, verifyHistory, logger); err != nil {
+			advice := fmt.Sprintf("no commitment file was replaced; %s", rebuildV3Advice)
+			if len(historyRanges) == 0 && verifyHistory {
+				advice = "no domain file was replaced; the history was promoted by an earlier pass, restore it with `integration commitment convert --restore`"
+			}
+			if opts.Continue {
+				advice += "; the staged files are reused by --continue, so run without it to convert again"
+			}
+			return fmt.Errorf("[commitment_convert] v3 verification: %w; %s", err, advice)
+		}
 		if err := markExecResetPending(dirs); err != nil {
 			return err
 		}
@@ -802,9 +815,8 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		return commitmentRestoreError("phase 5 ReloadFiles", reloadErr)
 	}
 	if opts.TargetV3 && convertDomain {
-		verifyHistory := len(historyRanges) > 0 || (!convertHistory && !commitmentDomain.HistoryDisabled && commitmentDomain.History.FileVersion.DataV.Current.Major >= 3)
-		if err := VerifyCommitmentV3(ctx, at.a, nil, verifyHistory, logger); err != nil {
-			return commitmentRestoreError("v3 verification", err)
+		if liveFiles := commitmentVisibleFileNames(at.a); !slices.Equal(liveFiles, verifiedFiles) {
+			return commitmentRestoreError("v3 file check", fmt.Errorf("verified files %v differ from the reloaded files %v", verifiedFiles, liveFiles))
 		}
 	}
 
@@ -1957,4 +1969,50 @@ func sampleViaStride(reader *seg.Reader, fi *FilesItem, samples int) ([]sampledP
 		pairIdx++
 	}
 	return out, nil
+}
+
+func verifyStagedCommitmentV3(ctx context.Context, at *AggregatorRoTx, rebuildDir string, stage commitmentV3HistoryStage, stagedHistory, verifyHistory bool, logger log.Logger) ([]string, error) {
+	live := at.d[kv.CommitmentDomain].d
+	viewDirs := at.Dirs()
+	viewDirs.SnapDomain = rebuildDir
+	switch {
+	case stagedHistory:
+		viewDirs.SnapHistory, viewDirs.SnapIdx, viewDirs.SnapAccessors = stage.history, stage.idx, stage.accessor
+	case !verifyHistory:
+		empty, err := os.MkdirTemp(viewDirs.Tmp, "commitment-verify-*")
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = dir.RemoveAll(empty) }()
+		viewDirs.SnapHistory, viewDirs.SnapIdx, viewDirs.SnapAccessors = empty, empty, empty
+	}
+	view, err := New(viewDirs).StepSize(at.StepSize()).StepsInFrozenFile(at.a.StepsInFrozenFile()).DisableBranchCache().Logger(logger).Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer view.Close()
+	vd := view.d[kv.CommitmentDomain]
+	vd.DomainCfg = live.DomainCfg
+	vd.History.FileVersion.DataV = live.History.FileVersion.DataV
+	vd.History.HistoryDisabled = live.History.HistoryDisabled
+	if err := view.OpenFolder(nil); err != nil {
+		return nil, err
+	}
+	if err := VerifyCommitmentV3(ctx, view, nil, verifyHistory, logger); err != nil {
+		return nil, err
+	}
+	return commitmentVisibleFileNames(view), nil
+}
+
+func commitmentVisibleFileNames(a *Aggregator) []string {
+	at := a.BeginFilesRo()
+	defer at.Close()
+	dt := at.d[kv.CommitmentDomain]
+	var names []string
+	for _, files := range []visibleFiles{dt.files, dt.ht.files, dt.ht.iit.files} {
+		for _, f := range files {
+			names = append(names, filepath.Base(f.Fullpath()))
+		}
+	}
+	return names
 }
