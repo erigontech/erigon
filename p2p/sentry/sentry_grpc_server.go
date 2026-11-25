@@ -1001,7 +1001,7 @@ func (ss *GrpcServer) deletePeer(peerID [64]byte) {
 	delete(store.peers, peerID)
 }
 
-func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sentryproto.MessageId, msgcode uint64, data []byte, ttl time.Duration) {
+func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode uint64, data []byte, ttl time.Duration) {
 	peerInfo.Async(func() {
 		// Async enqueue can win the race against Remove closing pi.removed, so a
 		// queued task may be scheduled to run on a peer we have already asked
@@ -1159,7 +1159,7 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *sentryprot
 	if inreq.MaxPeers == 1 {
 		peerInfo, found := ss.findPeerByMinBlock(inreq.MinBlock)
 		if found {
-			ss.writePeer("[sentry] sendMessageByMinBlock", peerInfo, inreq.Data.Id, msgcode, inreq.Data.Data, 30*time.Second)
+			ss.writePeer("[sentry] sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
 			reply.Peers = []*typesproto.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
 			return reply, nil
 		}
@@ -1167,7 +1167,7 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *sentryprot
 	peerInfos := ss.findBestPeersWithPermit(int(inreq.MaxPeers))
 	reply.Peers = make([]*typesproto.H512, len(peerInfos))
 	for i, peerInfo := range peerInfos {
-		ss.writePeer("[sentry] sendMessageByMinBlock", peerInfo, inreq.Data.Id, msgcode, inreq.Data.Data, 15*time.Second)
+		ss.writePeer("[sentry] sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 15*time.Second)
 		reply.Peers[i] = gointerfaces.ConvertHashToH512(peerInfo.ID())
 	}
 	return reply, nil
@@ -1196,7 +1196,7 @@ func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *sentryproto.Send
 		return reply, nil
 	}
 
-	ss.writePeer("[sentry] sendMessageById", peerInfo, inreq.Data.Id, msgcode, inreq.Data.Data, 0)
+	ss.writePeer("[sentry] sendMessageById", peerInfo, msgcode, inreq.Data.Data, 0)
 	reply.Peers = []*typesproto.H512{inreq.PeerId}
 	return reply, nil
 }
@@ -1246,7 +1246,7 @@ func (ss *GrpcServer) SendMessageToRandomPeers(ctx context.Context, req *sentryp
 
 	// Send the block to a subset of our peers at random
 	for _, peerInfo := range peerInfos[:peersToSendCount] {
-		ss.writePeer("[sentry] sendMessageToRandomPeers", peerInfo, req.Data.Id, msgcode, req.Data.Data, 0)
+		ss.writePeer("[sentry] sendMessageToRandomPeers", peerInfo, msgcode, req.Data.Data, 0)
 		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
 	}
 	return reply, nil
@@ -1270,7 +1270,7 @@ func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *sentryproto.Out
 	var lastErr error
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		if protocolVersions.Contains(peerInfo.EthProtocol()) {
-			ss.writePeer("[sentry] SendMessageToAll", peerInfo, req.Id, msgcode, req.Data, 0)
+			ss.writePeer("[sentry] SendMessageToAll", peerInfo, msgcode, req.Data, 0)
 			reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
 		}
 		return true
