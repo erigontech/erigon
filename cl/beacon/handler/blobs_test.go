@@ -116,6 +116,25 @@ func TestGetBlobsReturnsCommitmentOrder(t *testing.T) {
 	require.True(t, strings.HasPrefix(out.Data[1], "0x03"))
 }
 
+func TestGetBlobsRepeatedCommitmentReturnsEveryMatchingBlob(t *testing.T) {
+	f := setupBlobsTestWithCommitments(t, []cltypes.KZGCommitment{{69}, {1}, {69}})
+	require.Equal(t, f.versionedHashes[0], f.versionedHashes[2])
+	f.handler.caplinSnapshots = frozenBlobSnapshotReader{
+		frozenBlobsExclusive: f.slot + 1,
+		sidecars: []*cltypes.BlobSidecar{
+			{Index: 0, Blob: cltypes.Blob{1}},
+			{Index: 1, Blob: cltypes.Blob{2}},
+			{Index: 2, Blob: cltypes.Blob{3}},
+		},
+	}
+
+	out := getBeaconBlobs(t, f, "versioned_hashes="+f.versionedHashes[0].Hex())
+
+	require.Len(t, out.Data, 2)
+	require.True(t, strings.HasPrefix(out.Data[0], "0x01"))
+	require.True(t, strings.HasPrefix(out.Data[1], "0x03"))
+}
+
 func TestGetBlobsIgnoresUnknownVersionedHash(t *testing.T) {
 	f := setupBlobsTest(t)
 	f.handler.caplinSnapshots = frozenBlobSnapshotReader{
@@ -126,6 +145,26 @@ func TestGetBlobsIgnoresUnknownVersionedHash(t *testing.T) {
 	out := getBeaconBlobs(t, f, "versioned_hashes="+common.Hash{0x42}.Hex())
 
 	require.Empty(t, out.Data)
+}
+
+func TestBlobSidecarsReturnOnlyRequestedIndices(t *testing.T) {
+	f := setupBlobsTest(t)
+	f.handler.caplinSnapshots = frozenBlobSnapshotReader{
+		frozenBlobsExclusive: f.slot + 1,
+		sidecars:             []*cltypes.BlobSidecar{{Index: 0}, {Index: 1}, {Index: 2}},
+	}
+
+	for name, tc := range map[string]struct {
+		query string
+		want  []uint64
+	}{
+		"subset":   {"indices=2,0", []uint64{0, 2}},
+		"no match": {"indices=7", []uint64{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, tc.want, getBlobSidecarIndices(t, f, tc.query))
+		})
+	}
 }
 
 func TestBlobEndpointsRejectInvalidSelector(t *testing.T) {
@@ -212,6 +251,26 @@ func getBeaconBlobs(t *testing.T, f blobsTestFixture, query string) beaconBlobsR
 	return out
 }
 
+func getBlobSidecarIndices(t *testing.T, f blobsTestFixture, query string) []uint64 {
+	t.Helper()
+
+	resp := requestBlobEndpoint(t, f, "blob_sidecars", query)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var out struct {
+		Data []struct {
+			Index uint64 `json:"index,string"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	indices := make([]uint64, 0, len(out.Data))
+	for _, sidecar := range out.Data {
+		indices = append(indices, sidecar.Index)
+	}
+	return indices
+}
+
 func setupBlobsTest(t *testing.T) blobsTestFixture {
 	t.Helper()
 	return setupBlobsTestWithCommitments(t, []cltypes.KZGCommitment{{69}, {1}, {2}})
@@ -276,13 +335,7 @@ func TestBlobSidecarsResponseEnvelope(t *testing.T) {
 		},
 	}
 
-	server := httptest.NewServer(f.handler.mux)
-	defer server.Close()
-
-	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/blob_sidecars/"+strconv.FormatUint(f.slot, 10), nil)
-	require.NoError(t, err)
-	resp, err := server.Client().Do(req)
-	require.NoError(t, err)
+	resp := requestBlobEndpoint(t, f, "blob_sidecars", "")
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -313,13 +366,7 @@ func TestBlobSidecarsEmptyResponseEnvelope(t *testing.T) {
 	// No snapshots, no blob storage data for this block → empty response.
 	f.handler.caplinSnapshots = frozenBlobSnapshotReader{frozenBlobsExclusive: f.slot + 1}
 
-	server := httptest.NewServer(f.handler.mux)
-	defer server.Close()
-
-	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/blob_sidecars/"+strconv.FormatUint(f.slot, 10), nil)
-	require.NoError(t, err)
-	resp, err := server.Client().Do(req)
-	require.NoError(t, err)
+	resp := requestBlobEndpoint(t, f, "blob_sidecars", "")
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 

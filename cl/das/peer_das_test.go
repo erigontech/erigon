@@ -3055,19 +3055,6 @@ func TestBlobRecoveryWritesAndPublishesMissingColumns(t *testing.T) {
 	require.Equal(t, int32(1), columns.batches.Load(), "column batch writes by the worker")
 }
 
-type corruptedColumnReadStorage struct {
-	blob_storage.DataColumnStorage
-	column int64
-}
-
-func (s *corruptedColumnReadStorage) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
-	sidecar, err := s.DataColumnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, columnIndex)
-	if err == nil && columnIndex == s.column {
-		sidecar.Column.Get(0)[cltypes.BytesPerCell-1] ^= 1
-	}
-	return sidecar, err
-}
-
 // A corrupted stored cell makes every reconstructed column fail its KZG proofs, so the worker neither stores nor
 // publishes any of them, and it builds no blob sidecars from the matrix.
 func TestBlobRecoveryDropsReconstructedColumnsWithInvalidKZGProofs(t *testing.T) {
@@ -3075,7 +3062,11 @@ func TestBlobRecoveryDropsReconstructedColumnsWithInvalidKZGProofs(t *testing.T)
 		caplinConfig: &clparams.CaplinConfig{},
 		supernode:    true,
 		instrument: func(r *recoveryRun) {
-			r.d.columnStorage = &corruptedColumnReadStorage{DataColumnStorage: r.d.columnStorage, column: 0}
+			r.d.columnStorage = &damagedColumnReadStorage{
+				DataColumnStorage: r.d.columnStorage,
+				columns:           map[int64]bool{0: true},
+				damage:            func(s *cltypes.DataColumnSidecar) { s.Column.Get(0)[cltypes.BytesPerCell-1] ^= 1 },
+			}
 		},
 	})
 
@@ -3092,8 +3083,6 @@ type damagedColumnReadStorage struct {
 	blob_storage.DataColumnStorage
 	columns map[int64]bool
 	damage  func(*cltypes.DataColumnSidecar)
-	mu      sync.Mutex
-	removed []int64
 }
 
 func (s *damagedColumnReadStorage) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
@@ -3102,19 +3091,6 @@ func (s *damagedColumnReadStorage) ReadColumnSidecarByColumnIndex(ctx context.Co
 		s.damage(sidecar)
 	}
 	return sidecar, err
-}
-
-func (s *damagedColumnReadStorage) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error {
-	s.mu.Lock()
-	s.removed = append(s.removed, columnIndices...)
-	s.mu.Unlock()
-	return s.DataColumnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, columnIndices...)
-}
-
-func (s *damagedColumnReadStorage) removedColumns() []int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return slices.Clone(s.removed)
 }
 
 func (r *recoveryRun) storeColumn(t *testing.T, index uint64) {
@@ -3172,14 +3148,15 @@ func TestBlobRecoveryRemovesMalformedStoredColumnAndRecovers(t *testing.T) {
 				continue
 			}
 			t.Run(fmt.Sprintf("gloas=%t/%s", gloas, tc.name), func(t *testing.T) {
-				var storage *damagedColumnReadStorage
+				var removals *removalRecordingColumnStorage
 				r := startRecoveryWithPublisher(t, recoveryOptions{
 					caplinConfig: &clparams.CaplinConfig{BlobPruningDisabled: true},
 					supernode:    true,
 					instrument: func(r *recoveryRun) {
 						r.storeColumn(t, r.d.beaconConfig.NumberOfColumns/2)
-						storage = &damagedColumnReadStorage{DataColumnStorage: r.d.columnStorage, columns: map[int64]bool{tc.malformed: true}, damage: tc.damage}
-						r.d.columnStorage = storage
+						damaged := &damagedColumnReadStorage{DataColumnStorage: r.d.columnStorage, columns: map[int64]bool{tc.malformed: true}, damage: tc.damage}
+						removals = &removalRecordingColumnStorage{DataColumnStorage: damaged}
+						r.d.columnStorage = removals
 						if gloas {
 							forkToGloasAt(t, r, gloasEpoch)
 						}
@@ -3189,7 +3166,7 @@ func TestBlobRecoveryRemovesMalformedStoredColumnAndRecovers(t *testing.T) {
 				requireBlobRecoveryReleased(t, r.d, r.root)
 				r.requireStoredBlobs(t)
 				call := receiveRecoveredColumnsPublish(t, r.published)
-				require.Equal(t, []int64{tc.malformed}, storage.removedColumns())
+				require.Equal(t, []int64{tc.malformed}, slices.Concat(removals.removed...))
 				require.ElementsMatch(t, append(publishedColumnIndices(r.unstoredColumns()), uint64(tc.malformed)), publishedColumnIndices(call.sidecars))
 				saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
 				require.NoError(t, err)
@@ -3231,7 +3208,7 @@ func TestBlobRecoveryDoesNotRecoverWhenMalformedColumnsLeaveLessThanHalf(t *test
 		for _, everyStoredColumn := range []bool{false, true} {
 			t.Run(fmt.Sprintf("gloas=%t/everyStoredColumn=%t", gloas, everyStoredColumn), func(t *testing.T) {
 				var malformed []int64
-				var storage *damagedColumnReadStorage
+				var removals *removalRecordingColumnStorage
 				r := startRecoveryWithPublisher(t, recoveryOptions{
 					caplinConfig: &clparams.CaplinConfig{},
 					supernode:    true,
@@ -3243,15 +3220,16 @@ func TestBlobRecoveryDoesNotRecoverWhenMalformedColumnsLeaveLessThanHalf(t *test
 								malformed = append(malformed, int64(index))
 							}
 						}
-						storage = &damagedColumnReadStorage{
+						damaged := &damagedColumnReadStorage{
 							DataColumnStorage: r.d.columnStorage,
 							columns:           make(map[int64]bool),
 							damage:            func(s *cltypes.DataColumnSidecar) { s.KzgProofs.Truncate(s.KzgProofs.Len() - 1) },
 						}
 						for _, index := range malformed {
-							storage.columns[index] = true
+							damaged.columns[index] = true
 						}
-						r.d.columnStorage = storage
+						removals = &removalRecordingColumnStorage{DataColumnStorage: damaged}
+						r.d.columnStorage = removals
 						if gloas {
 							forkToGloasAt(t, r, gloasEpoch)
 						}
@@ -3260,7 +3238,7 @@ func TestBlobRecoveryDoesNotRecoverWhenMalformedColumnsLeaveLessThanHalf(t *test
 
 				requireBlobRecoveryReleased(t, r.d, r.root)
 				r.requireNoBlobSidecars(t)
-				require.ElementsMatch(t, malformed, storage.removedColumns())
+				require.ElementsMatch(t, malformed, slices.Concat(removals.removed...))
 				require.Empty(t, r.published)
 				saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
 				require.NoError(t, err)
@@ -4031,18 +4009,19 @@ func TestLazyBlobRecoverySkipsABlockWithAllColumnsStored(t *testing.T) {
 // and rebuilt from the others, and that the lazy recovery still writes no blob sidecars.
 func TestLazyBlobRecoveryRepairsAMalformedGloasColumnWithoutBlobSidecars(t *testing.T) {
 	const malformed = 1
-	var storage *damagedColumnReadStorage
+	var removals *removalRecordingColumnStorage
 	r := startRecoveryWithPublisher(t, recoveryOptions{
 		caplinConfig: &clparams.CaplinConfig{},
 		supernode:    true,
 		instrument: func(r *recoveryRun) {
 			r.storeColumn(t, r.d.beaconConfig.NumberOfColumns/2)
-			storage = &damagedColumnReadStorage{
+			damaged := &damagedColumnReadStorage{
 				DataColumnStorage: r.d.columnStorage,
 				columns:           map[int64]bool{malformed: true},
 				damage:            func(s *cltypes.DataColumnSidecar) { s.KzgProofs.Truncate(s.KzgProofs.Len() - 1) },
 			}
-			r.d.columnStorage = storage
+			removals = &removalRecordingColumnStorage{DataColumnStorage: damaged}
+			r.d.columnStorage = removals
 			forkToGloasAt(t, r, recoveryTestSlot/clparams.MainnetBeaconConfig.SlotsPerEpoch)
 		},
 	})
@@ -4050,7 +4029,7 @@ func TestLazyBlobRecoveryRepairsAMalformedGloasColumnWithoutBlobSidecars(t *test
 
 	requireBlobRecoveryReleased(t, r.d, r.root)
 
-	require.Equal(t, []int64{malformed}, storage.removedColumns())
+	require.Equal(t, []int64{malformed}, slices.Concat(removals.removed...))
 	call := receiveRecoveredColumnsPublish(t, r.published)
 	require.ElementsMatch(t, append(publishedColumnIndices(r.unstoredColumns()), malformed), publishedColumnIndices(call.sidecars))
 	r.requireAllColumnsStored(t)
