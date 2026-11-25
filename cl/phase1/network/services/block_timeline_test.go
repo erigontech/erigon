@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -222,6 +224,7 @@ func TestGossipBlockThatWaitsForColumnsLogsItsTimeline(t *testing.T) {
 		synctest.Wait()
 
 		require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
+		synctest.Wait()
 		processing.err = nil
 		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
 		sidecar.SignedBlockHeader = block.SignedBeaconBlockHeader()
@@ -235,4 +238,70 @@ func TestGossipBlockThatWaitsForColumnsLogsItsTimeline(t *testing.T) {
 		require.Equal(t, true, fields["waitedForColumns"])
 		require.IsType(t, int64(0), fields["seenMs"], "a gossip block has an arrival time")
 	})
+}
+
+func TestBlockTimelineTakesTheLineFieldsFromTheImportedBlock(t *testing.T) {
+	logger, records := timelineLogger(log.LvlDebug)
+	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
+	go timelines.run(t.Context())
+	first, imported := timelineBlock(timelineSlot, 2), timelineBlock(timelineSlot, 5)
+	imported.Block.Body.ExecutionPayload.BlockNumber++
+
+	timelines.seen(first, at(time.Second))
+	timelines.importAttempt(imported, common.Hash{0x10}, at(2*time.Second), at(3*time.Second), nil)
+
+	fields := recordFields(t, <-records)
+	require.Equal(t, imported.Block.Body.ExecutionPayload.BlockNumber, fields["number"])
+	require.Equal(t, 5, fields["blobs"])
+	require.Equal(t, common.Hash{0x10}, fields["root"])
+}
+
+func TestBlockTimelineCountsTheBlobsOfAGloasBid(t *testing.T) {
+	logger, records := timelineLogger(log.LvlDebug)
+	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
+	go timelines.run(t.Context())
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	block.Block.Slot = timelineSlot
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	require.NotNil(t, bid)
+	for range 3 {
+		bid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	}
+
+	timelines.importAttempt(block, common.Hash{0x11}, at(time.Second), at(2*time.Second), nil)
+
+	require.Equal(t, 3, recordFields(t, <-records)["blobs"])
+}
+
+func TestBlockTimelineSkipsBlocksOfFutureSlots(t *testing.T) {
+	logger, _ := timelineLogger(log.LvlDebug)
+	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
+
+	timelines.seen(timelineBlock(timelineSlot+1, 0), at(time.Second))
+	timelines.seen(timelineBlockByProposer(timelineSlot+2, 1, 0), at(time.Second))
+	timelines.seen(timelineBlockByProposer(math.MaxUint64, 2, 0), at(time.Second))
+
+	require.Len(t, timelines.pending, 1, "only a block of the next slot can arrive early")
+}
+
+func TestGossipBlockWithAnInvalidSignatureLeavesNoTimeline(t *testing.T) {
+	service, block, _, _ := newFuluColumnGossipFixture(t)
+	logger, _ := timelineLogger(log.LvlDebug)
+	service.timelines = newBlockTimelines(timelineClock(t, block.Block.Slot), logger)
+	block.Signature[0] ^= 0xff
+
+	require.Error(t, service.ProcessMessage(t.Context(), nil, block))
+	require.Empty(t, service.timelines.pending)
+}
+
+func TestGossipBlockQueuedForItsParentKeepsItsArrival(t *testing.T) {
+	service, block, processing, _ := newFuluColumnGossipFixture(t)
+	logger, _ := timelineLogger(log.LvlDebug)
+	service.timelines = newBlockTimelines(timelineClock(t, block.Block.Slot), logger)
+	delete(processing.ForkChoiceStorage.(*mock_services.ForkChoiceStorageMock).Headers, block.Block.ParentRoot)
+
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, block), ErrIgnore)
+	line := service.timelines.pending[blockGossipKey(block)]
+	require.NotNil(t, line, "a block queued for its parent passed the signature check")
+	require.False(t, line.seen.IsZero())
 }

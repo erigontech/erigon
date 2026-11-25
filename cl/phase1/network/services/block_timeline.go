@@ -30,15 +30,17 @@ import (
 )
 
 const (
-	// blockTimelineSlots is how many slots behind the current one a block is still tracked.
+	// blockTimelineSlots is how many slots behind the current one a block is still tracked. A block of the next slot
+	// is tracked too, as gossip accepts it early within the clock disparity.
 	blockTimelineSlots       = 2
 	maxPendingBlockTimelines = 64
 	blockTimelineBuffer      = 64
 )
 
-// blockTimelines logs one debug line per imported block of a recent slot, with the time since the slot start at
-// which the block arrived on gossip and went through its import attempts. A separate goroutine writes the lines and
-// a full buffer drops them, so a slow log file never delays an import.
+// blockTimelines logs one debug line per block of a recent slot that the block service imports, with the time since
+// the slot start at which the block arrived on gossip and went through its import attempts. Locally published blocks
+// are imported by the beacon API and have no line. A separate goroutine writes the lines and a full buffer drops them,
+// so a slow log file never delays an import.
 type blockTimelines struct {
 	clock  eth_clock.EthereumClock
 	logger log.Logger
@@ -101,7 +103,8 @@ func msSince(slotStart, t time.Time) any {
 	return t.Sub(slotStart).Milliseconds()
 }
 
-// seen records when the block arrived on gossip.
+// seen records when the block arrived on gossip. Callers record it only after the block signature is verified, as
+// the entry is shared by the blocks of one proposer and slot.
 func (t *blockTimelines) seen(block *cltypes.SignedBeaconBlock, now time.Time) {
 	t.update(block, func(line *blockTimeline) {
 		if line.seen.IsZero() {
@@ -124,6 +127,14 @@ func (t *blockTimelines) importAttempt(block *cltypes.SignedBeaconBlock, root co
 			return
 		}
 		line.root, line.importStart, line.imported = root, start, end
+		if body := block.Block.Body; body != nil {
+			if body.ExecutionPayload != nil {
+				line.number = body.ExecutionPayload.BlockNumber
+			}
+			if commitments := body.GetBlobKzgCommitments(); commitments != nil {
+				line.blobs = commitments.Len()
+			}
+		}
 		delete(t.pending, blockGossipKey(block))
 		select {
 		case t.lines <- *line:
@@ -137,7 +148,7 @@ func (t *blockTimelines) update(block *cltypes.SignedBeaconBlock, apply func(*bl
 		return
 	}
 	currentSlot := t.clock.GetCurrentSlot()
-	if block.Block.Slot+blockTimelineSlots < currentSlot {
+	if !timelineSlotTracked(block.Block.Slot, currentSlot) {
 		return
 	}
 	t.mu.Lock()
@@ -146,7 +157,7 @@ func (t *blockTimelines) update(block *cltypes.SignedBeaconBlock, apply func(*bl
 	line, ok := t.pending[key]
 	if !ok {
 		for pendingKey, pending := range t.pending {
-			if pending.slot+blockTimelineSlots < currentSlot {
+			if !timelineSlotTracked(pending.slot, currentSlot) {
 				delete(t.pending, pendingKey)
 			}
 		}
@@ -154,15 +165,14 @@ func (t *blockTimelines) update(block *cltypes.SignedBeaconBlock, apply func(*bl
 			return
 		}
 		line = &blockTimeline{slot: block.Block.Slot}
-		if body := block.Block.Body; body != nil {
-			if body.ExecutionPayload != nil {
-				line.number = body.ExecutionPayload.BlockNumber
-			}
-			if body.BlobKzgCommitments != nil {
-				line.blobs = body.BlobKzgCommitments.Len()
-			}
-		}
 		t.pending[key] = line
 	}
 	apply(line)
+}
+
+func timelineSlotTracked(slot, currentSlot uint64) bool {
+	if slot > currentSlot {
+		return slot-currentSlot <= 1
+	}
+	return currentSlot-slot <= blockTimelineSlots
 }

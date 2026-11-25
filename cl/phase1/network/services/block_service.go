@@ -336,13 +336,17 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if msg == nil || msg.Block == nil || msg.Block.Body == nil {
 		return errors.New("missing beacon block")
 	}
-	b.timelines.seen(msg, time.Now())
+	arrived := time.Now()
 	log.Trace("Received block via gossip", "slot", msg.Block.Slot)
 
 	// [IGNORE] The block is the first block with valid signature received for the proposer for the slot, signed_beacon_block.message.slot.
-	if err := b.validateFirstGossip(ctx, msg, func() { b.scheduleBlockForLaterProcessing(msg, nil, false, false) }, true); err != nil {
+	if err := b.validateFirstGossip(ctx, msg, func() {
+		b.timelines.seen(msg, arrived)
+		b.scheduleBlockForLaterProcessing(msg, nil, false, false)
+	}, true); err != nil {
 		return err
 	}
+	b.timelines.seen(msg, arrived)
 	b.publishBlockGossipEvent(msg)
 	afterAdmission := startsELColumnsImportAfterAdmission(msg)
 	if !afterAdmission {
