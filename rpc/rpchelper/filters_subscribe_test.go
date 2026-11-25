@@ -515,3 +515,35 @@ func TestReceiptsStreamEndFlushesHalfBlock(t *testing.T) {
 	f.receiptsSubs.endStream()
 	require.Len(t, (<-ch).Value, 1)
 }
+
+type callerKey struct{}
+
+// Only a subscribe waits for the server to apply the filter, and it waits with the caller's context;
+// an unsubscribe only shrinks the filter, so it does not wait.
+func TestFilterUpdatesAskForAnAckOnlyOnSubscribe(t *testing.T) {
+	f := newTestFilters(t)
+	type update struct {
+		caller any
+		ack    bool
+	}
+	var logs, receipts []update
+	f.logsRequestor.Store(func(ctx context.Context, r *remoteproto.LogsFilterRequest) error {
+		logs = append(logs, update{ctx.Value(callerKey{}), r.Ack})
+		return nil
+	})
+	f.receiptsRequestor.Store(func(ctx context.Context, r *remoteproto.ReceiptsFilterRequest) error {
+		receipts = append(receipts, update{ctx.Value(callerKey{}), r.Ack})
+		return nil
+	})
+	ctx := context.WithValue(t.Context(), callerKey{}, "caller")
+
+	_, logsID, err := f.SubscribeLogs(ctx, 8, filters.FilterCriteria{}, ProtocolHTTP)
+	require.NoError(t, err)
+	require.True(t, f.UnsubscribeLogs(logsID))
+	require.Equal(t, []update{{"caller", true}, {nil, false}}, logs)
+
+	_, receiptsID, err := f.SubscribeReceipts(ctx, 8, filters.ReceiptsFilterCriteria{})
+	require.NoError(t, err)
+	require.True(t, f.UnsubscribeReceipts(receiptsID))
+	require.Equal(t, []update{{"caller", true}, {nil, false}}, receipts)
+}

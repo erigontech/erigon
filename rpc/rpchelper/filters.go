@@ -234,9 +234,9 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 				ff.receiptsRequestor.Store(send)
 				ff.mu.Unlock()
 				if ff.pendingReceiptsUpdate.CompareAndSwap(true, false) {
-					// The update waits for an ack that this stream reads only after onReady returns.
+					// The request lock can be held by an update that waits for an ack this stream reads only after onReady returns.
 					go func() {
-						if err := ff.sendReceiptsFilterUpdate(context.Background()); err != nil {
+						if err := ff.sendReceiptsFilterUpdate(context.Background(), false); err != nil {
 							logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
 						}
 					}()
@@ -765,7 +765,7 @@ func (ff *Filters) SubscribeReceipts(ctx context.Context, size int, criteria fil
 	}
 	sub := newChanSub[*Shared[[]*remoteproto.SubscribeReceiptsReply]](size, "")
 	id := ff.receiptsSubs.insertReceiptsFilter(sub, criteria.TransactionHashes, ff.config.RpcSubscriptionFiltersMaxLogs)
-	if err := ff.sendReceiptsFilterUpdate(ctx); err != nil {
+	if err := ff.sendReceiptsFilterUpdate(ctx, true); err != nil {
 		ff.receiptsSubs.removeReceiptsFilter(id)
 		ff.releaseSubscription()
 		return nil, "", fmt.Errorf("could not update remote receipts filter: %w", err)
@@ -781,7 +781,7 @@ func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
 		return false
 	}
 	ff.releaseSubscription()
-	if err := ff.sendReceiptsFilterUpdate(context.Background()); err != nil {
+	if err := ff.sendReceiptsFilterUpdate(context.Background(), false); err != nil {
 		ff.logger.Warn("Could not update remote receipts filter after unsubscribe", "err", err)
 	}
 	return true
@@ -791,11 +791,12 @@ func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
 // If the requestor is not yet available, it sets a flag so the onReady callback
 // will send the update once the receipts subscription goroutine connects.
 // The load-or-flag operation is atomic under ff.mu to prevent a race with onReady
-// storing the requestor concurrently.
-func (ff *Filters) sendReceiptsFilterUpdate(ctx context.Context) error {
+// storing the requestor concurrently. ack makes the update wait until the server applies it.
+func (ff *Filters) sendReceiptsFilterUpdate(ctx context.Context, ack bool) error {
 	ff.receiptsRequestMu.Lock()
 	defer ff.receiptsRequestMu.Unlock()
 	rfr := ff.receiptsSubs.createFilterRequest()
+	rfr.Ack = ack
 	ff.mu.Lock()
 	loaded := ff.receiptsRequestor.Load()
 	if loaded == nil {
@@ -835,7 +836,7 @@ func (ff *Filters) SubscribeLogs(ctx context.Context, size int, criteria filters
 	f := newLogsFilter(sub, criteria, pollingCriteria)
 	id := ff.logsSubs.insertLogsFilter(f)
 
-	if err := ff.pushRemoteLogsFilter(ctx); err != nil {
+	if err := ff.pushRemoteLogsFilter(ctx, true); err != nil {
 		ff.removeLogsSubscription(id, false)
 		return nil, "", fmt.Errorf("could not update remote logs filter: %w", err)
 	}
@@ -893,18 +894,19 @@ func (ff *Filters) removeLogsSubscription(id LogsSubID, pushRemote bool) bool {
 
 // updateRemoteLogsFilter pushes the aggregated filter state to the remote log source.
 func (ff *Filters) updateRemoteLogsFilter() {
-	if err := ff.pushRemoteLogsFilter(context.Background()); err != nil {
+	if err := ff.pushRemoteLogsFilter(context.Background(), false); err != nil {
 		ff.logger.Warn("Could not update remote logs filter", "err", err)
 	}
 }
 
 // pushRemoteLogsFilter sends the aggregated filter state to the remote log source.
 // If any filters in the aggregate need all addresses or all topics then the request
-// to the central log subscription needs to honour this.
-func (ff *Filters) pushRemoteLogsFilter(ctx context.Context) error {
+// to the central log subscription needs to honour this. ack makes the update wait until the server applies it.
+func (ff *Filters) pushRemoteLogsFilter(ctx context.Context, ack bool) error {
 	ff.logsRequestMu.Lock()
 	defer ff.logsRequestMu.Unlock()
 	lfr := ff.logsSubs.createFilterRequest()
+	lfr.Ack = ack
 	addresses, topics := ff.logsSubs.getAggMaps()
 	for addr := range addresses {
 		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))

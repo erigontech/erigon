@@ -294,11 +294,13 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 	defer close(acks.done)
 	if serverAcks {
 		requestor.Store(func(callCtx context.Context, req *remoteproto.LogsFilterRequest) error {
-			req.Ack = true
-			return sendFilterUpdate(callCtx, acks, subscription.Send, req)
+			return sendFilterUpdate(callCtx, acks, subscription.Send, req, req.Ack)
 		})
 	} else {
-		requestor.Store(func(_ context.Context, req *remoteproto.LogsFilterRequest) error { return subscription.Send(req) })
+		requestor.Store(func(_ context.Context, req *remoteproto.LogsFilterRequest) error {
+			req.Ack = false
+			return subscription.Send(req)
+		})
 	}
 	for {
 		logs, err := subscription.Recv()
@@ -335,11 +337,13 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 	if onReady != nil {
 		if serverAcks {
 			onReady(func(callCtx context.Context, req *remoteproto.ReceiptsFilterRequest) error {
-				req.Ack = true
-				return sendFilterUpdate(callCtx, acks, subscription.Send, req)
+				return sendFilterUpdate(callCtx, acks, subscription.Send, req, req.Ack)
 			})
 		} else {
-			onReady(func(_ context.Context, req *remoteproto.ReceiptsFilterRequest) error { return subscription.Send(req) })
+			onReady(func(_ context.Context, req *remoteproto.ReceiptsFilterRequest) error {
+				req.Ack = false
+				return subscription.Send(req)
+			})
 		}
 	}
 	for {
@@ -398,13 +402,17 @@ func (a *filterAcks) ack() {
 	}
 }
 
-// sendFilterUpdate returns once the server has applied req, so events published after it
-// are filtered by req. ctx is the caller's: its deadline ends the wait; the stream's end does too.
-func sendFilterUpdate[R any](ctx context.Context, a *filterAcks, send func(R) error, req R) error {
+// sendFilterUpdate sends req. If req asks for an ack, it returns once the server has applied req, so
+// events published after it are filtered by req. ctx is the caller's: its deadline ends the wait; the
+// stream's end does too.
+func sendFilterUpdate[R any](ctx context.Context, a *filterAcks, send func(R) error, req R, ack bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if err := send(req); err != nil {
 		return err
+	}
+	if !ack {
+		return nil
 	}
 	a.sent++
 	timer := time.NewTimer(filterAckTimeout)

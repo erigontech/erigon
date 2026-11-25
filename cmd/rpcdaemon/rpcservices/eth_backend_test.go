@@ -85,6 +85,30 @@ func (s gatedAckServer) SubscribeReceipts(st grpc.BidiStreamingServer[remoteprot
 	}
 }
 
+type (
+	logsSend     = func(context.Context, *remoteproto.LogsFilterRequest) error
+	receiptsSend = func(context.Context, *remoteproto.ReceiptsFilterRequest) error
+)
+
+// connectLogs opens a logs stream to srv until ctx ends and returns its filter requestor.
+func connectLogs(ctx context.Context, srv gatedAckServer, onNewLogs func(*remoteproto.SubscribeLogsReply)) logsSend {
+	back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
+	var requestor atomic.Value
+	go back.SubscribeLogs(ctx, onNewLogs, &requestor) //nolint:errcheck
+	synctest.Wait()
+	return requestor.Load().(logsSend)
+}
+
+// connectReceipts opens a receipts stream to srv until ctx ends and returns its filter requestor.
+func connectReceipts(ctx context.Context, srv gatedAckServer, onNewReceipts func(*remoteproto.SubscribeReceiptsReply)) receiptsSend {
+	back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
+	ready := make(chan receiptsSend, 1)
+	go back.SubscribeReceipts(ctx, onNewReceipts, func(send receiptsSend) { ready <- send }) //nolint:errcheck
+	return <-ready
+}
+
+func ignoreLogs(*remoteproto.SubscribeLogsReply) {}
+
 // requireSendWaitsForAck checks that send returns only after the server applied the request.
 func requireSendWaitsForAck(t *testing.T, srv gatedAckServer, send func() error) {
 	var sent atomic.Bool
@@ -101,51 +125,46 @@ func requireSendWaitsForAck(t *testing.T, srv gatedAckServer, send func() error)
 
 func TestSubscribeLogsUpdateWaitsForFilterApplied(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
 		srv := newGatedAckServer()
-		back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
-		var requestor atomic.Value
 		var delivered atomic.Int32
-		go back.SubscribeLogs(ctx, func(*remoteproto.SubscribeLogsReply) { delivered.Add(1) }, &requestor) //nolint:errcheck
-		synctest.Wait()
-		send := requestor.Load().(func(context.Context, *remoteproto.LogsFilterRequest) error)
-		requireSendWaitsForAck(t, srv, func() error { return send(t.Context(), &remoteproto.LogsFilterRequest{AllAddresses: true}) })
+		send := connectLogs(t.Context(), srv, func(*remoteproto.SubscribeLogsReply) { delivered.Add(1) })
+		requireSendWaitsForAck(t, srv, func() error {
+			return send(t.Context(), &remoteproto.LogsFilterRequest{AllAddresses: true, Ack: true})
+		})
 		require.Zero(t, delivered.Load(), "an ack is not a log")
 	})
 }
 
 func TestSubscribeReceiptsUpdateWaitsForFilterApplied(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
 		srv := newGatedAckServer()
-		back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
-		ready := make(chan func(context.Context, *remoteproto.ReceiptsFilterRequest) error, 1)
 		var delivered atomic.Int32
-		go back.SubscribeReceipts(ctx, func(*remoteproto.SubscribeReceiptsReply) { delivered.Add(1) }, func(send func(context.Context, *remoteproto.ReceiptsFilterRequest) error) { //nolint:errcheck
-			ready <- send
+		send := connectReceipts(t.Context(), srv, func(*remoteproto.SubscribeReceiptsReply) { delivered.Add(1) })
+		requireSendWaitsForAck(t, srv, func() error {
+			return send(t.Context(), &remoteproto.ReceiptsFilterRequest{AllTransactions: true, Ack: true})
 		})
-		send := <-ready
-		requireSendWaitsForAck(t, srv, func() error { return send(t.Context(), &remoteproto.ReceiptsFilterRequest{AllTransactions: true}) })
 		require.Zero(t, delivered.Load(), "an ack is not a receipt")
+	})
+}
+
+// An update that does not ask for an ack, such as an unsubscribe, returns once it is sent.
+func TestFilterUpdateWithoutAckDoesNotWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		send := connectLogs(t.Context(), newGatedAckServer(), ignoreLogs)
+		require.NoError(t, send(t.Context(), &remoteproto.LogsFilterRequest{AllAddresses: true}))
 	})
 }
 
 func TestFilterUpdateIgnoresLateAckOfTimedOutUpdate(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
 		srv := newGatedAckServer()
-		back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
-		var requestor atomic.Value
-		go back.SubscribeLogs(ctx, func(*remoteproto.SubscribeLogsReply) {}, &requestor) //nolint:errcheck
-		synctest.Wait()
-		send := requestor.Load().(func(context.Context, *remoteproto.LogsFilterRequest) error)
+		send := connectLogs(t.Context(), srv, ignoreLogs)
 
-		require.ErrorContains(t, send(t.Context(), &remoteproto.LogsFilterRequest{}), "no ack of the filter update")
+		require.ErrorContains(t, send(t.Context(), &remoteproto.LogsFilterRequest{Ack: true}), "no ack of the filter update")
 		srv.release <- struct{}{} // the late ack of the timed-out update
-		requireSendWaitsForAck(t, srv, func() error { return send(t.Context(), &remoteproto.LogsFilterRequest{AllAddresses: true}) })
+		requireSendWaitsForAck(t, srv, func() error {
+			return send(t.Context(), &remoteproto.LogsFilterRequest{AllAddresses: true, Ack: true})
+		})
 	})
 }
 
@@ -160,16 +179,10 @@ func TestFilterAckKeepsTheBackendVersionCompatible(t *testing.T) {
 // A stream can reconnect to an erigon that predates acks; its updates must not wait.
 func TestFilterUpdateDoesNotWaitOnServerWithoutAcks(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
 		srv := newGatedAckServer()
 		srv.version = &typesproto.VersionReply{Major: 5, Minor: 0}
-		back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
-		var requestor atomic.Value
-		go back.SubscribeLogs(ctx, func(*remoteproto.SubscribeLogsReply) {}, &requestor) //nolint:errcheck
-		synctest.Wait()
-		send := requestor.Load().(func(context.Context, *remoteproto.LogsFilterRequest) error)
-		req := &remoteproto.LogsFilterRequest{AllAddresses: true}
+		send := connectLogs(t.Context(), srv, ignoreLogs)
+		req := &remoteproto.LogsFilterRequest{AllAddresses: true, Ack: true}
 		require.NoError(t, send(t.Context(), req))
 		require.False(t, req.Ack, "a server without acks must not be asked for one")
 	})
@@ -184,7 +197,7 @@ func TestFilterStreamEndsWhenTheVersionCallFails(t *testing.T) {
 		back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
 		var requestor atomic.Value
 		done := make(chan error, 1)
-		go func() { done <- back.SubscribeLogs(t.Context(), func(*remoteproto.SubscribeLogsReply) {}, &requestor) }()
+		go func() { done <- back.SubscribeLogs(t.Context(), ignoreLogs, &requestor) }()
 		synctest.Wait()
 		select {
 		case err := <-done:
@@ -202,51 +215,49 @@ func TestFilterStreamReadsTheVersionOnEachConnect(t *testing.T) {
 		srv := newGatedAckServer()
 		version := &typesproto.VersionReply{Major: 5}
 		srv.version = version
-		back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
-		connect := func() (send func(context.Context, *remoteproto.LogsFilterRequest) error, end func()) {
-			ctx, cancel := context.WithCancel(t.Context())
-			var requestor atomic.Value
-			go back.SubscribeLogs(ctx, func(*remoteproto.SubscribeLogsReply) {}, &requestor) //nolint:errcheck
-			synctest.Wait()
-			return requestor.Load().(func(context.Context, *remoteproto.LogsFilterRequest) error), cancel
-		}
-		send, end := connect()
-		req := &remoteproto.LogsFilterRequest{AllAddresses: true}
+		ctx, end := context.WithCancel(t.Context())
+		send := connectLogs(ctx, srv, ignoreLogs)
+		req := &remoteproto.LogsFilterRequest{AllAddresses: true, Ack: true}
 		require.NoError(t, send(t.Context(), req))
 		require.False(t, req.Ack)
 		end()
 
 		*version = typesproto.VersionReply{Major: 5, Patch: 1}
-		send, end = connect()
-		defer end()
-		req = &remoteproto.LogsFilterRequest{AllAddresses: true}
-		done := make(chan error, 1)
-		go func() { done <- send(t.Context(), req) }()
-		synctest.Wait()
-		require.True(t, req.Ack, "a reconnect to an erigon that acks asks for one")
-		srv.release <- struct{}{}
-		require.NoError(t, <-done)
+		send = connectLogs(t.Context(), srv, ignoreLogs)
+		requireSendWaitsForAck(t, srv, func() error {
+			return send(t.Context(), &remoteproto.LogsFilterRequest{AllAddresses: true, Ack: true})
+		})
 	})
 }
 
 // A filter update waits for the server's ack at most until the caller's deadline.
 func TestFilterUpdateEndsAtTheCallersDeadline(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		srv := newGatedAckServer()
-		back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
-		var requestor atomic.Value
-		go back.SubscribeLogs(ctx, func(*remoteproto.SubscribeLogsReply) {}, &requestor) //nolint:errcheck
-		synctest.Wait()
-		send := requestor.Load().(func(context.Context, *remoteproto.LogsFilterRequest) error)
-
-		deadline := filterAckTimeout / 5
-		callCtx, cancelCall := context.WithTimeout(t.Context(), deadline)
-		defer cancelCall()
-		start := time.Now()
-		require.ErrorIs(t, send(callCtx, &remoteproto.LogsFilterRequest{AllAddresses: true}), context.DeadlineExceeded)
-		require.Equal(t, deadline, time.Since(start))
-		srv.release <- struct{}{} // the server applies the abandoned update
-	})
+	for name, connect := range map[string]func(context.Context, gatedAckServer) func(context.Context) error{
+		"logs": func(ctx context.Context, srv gatedAckServer) func(context.Context) error {
+			send := connectLogs(ctx, srv, ignoreLogs)
+			return func(callCtx context.Context) error {
+				return send(callCtx, &remoteproto.LogsFilterRequest{AllAddresses: true, Ack: true})
+			}
+		},
+		"receipts": func(ctx context.Context, srv gatedAckServer) func(context.Context) error {
+			send := connectReceipts(ctx, srv, func(*remoteproto.SubscribeReceiptsReply) {})
+			return func(callCtx context.Context) error {
+				return send(callCtx, &remoteproto.ReceiptsFilterRequest{AllTransactions: true, Ack: true})
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				srv := newGatedAckServer()
+				send := connect(t.Context(), srv)
+				deadline := filterAckTimeout / 5
+				callCtx, cancelCall := context.WithTimeout(t.Context(), deadline)
+				defer cancelCall()
+				start := time.Now()
+				require.ErrorIs(t, send(callCtx), context.DeadlineExceeded)
+				require.Equal(t, deadline, time.Since(start))
+				srv.release <- struct{}{} // the server applies the abandoned update
+			})
+		})
+	}
 }
