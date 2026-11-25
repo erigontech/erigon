@@ -224,6 +224,7 @@ type blockService struct {
 	blocksScheduledForLaterExecution sync.Map
 	blockJobsLifecycleMu             sync.RWMutex
 	blockJobsStopped                 bool
+	timelines                        *blockTimelines
 	// store the block in db
 	db kv.RwDB
 }
@@ -245,6 +246,7 @@ func NewBlockService(
 	b.dataColumns = dataColumns
 	go b.stopPublishedBlockJobsOnContext(ctx)
 	go b.loop(ctx)
+	go b.timelines.run(ctx)
 	return b
 }
 
@@ -281,6 +283,7 @@ func newBlockService(
 		elImportsStarted: elImportsStarted,
 		emitter:          emitter,
 		db:               db,
+		timelines:        newBlockTimelines(ethClock, log.Root()),
 	}
 	b.startELColumnsImport = func(ctx context.Context, block *cltypes.SignedBeaconBlock) {
 		go b.importColumnsFromELBlobs(context.WithoutCancel(ctx), block)
@@ -309,12 +312,17 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if msg == nil || msg.Block == nil || msg.Block.Body == nil {
 		return errors.New("missing beacon block")
 	}
+	arrived := time.Now()
 	log.Trace("Received block via gossip", "slot", msg.Block.Slot)
 
 	// [IGNORE] The block is the first block with valid signature received for the proposer for the slot, signed_beacon_block.message.slot.
-	if err := b.validateFirstGossip(ctx, msg, func() { b.scheduleBlockForLaterProcessing(msg, nil, false) }, true); err != nil {
+	if err := b.validateFirstGossip(ctx, msg, func() {
+		b.timelines.seen(msg, arrived)
+		b.scheduleBlockForLaterProcessing(msg, nil, false)
+	}, true); err != nil {
 		return err
 	}
+	b.timelines.seen(msg, arrived)
 	b.publishBlockGossipEvent(msg)
 	afterAdmission := startsELColumnsImportAfterAdmission(msg)
 	if !afterAdmission {
@@ -1148,7 +1156,10 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	}
 
 	if !headerExists {
-		if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
+		start := time.Now()
+		err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true)
+		b.timelines.importAttempt(block, common.Hash(blockRoot), start, time.Now(), err)
+		if err != nil {
 			return err
 		}
 		go b.importBlockOperations(block)
