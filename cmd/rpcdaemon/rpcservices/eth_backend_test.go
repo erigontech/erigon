@@ -18,6 +18,7 @@ package rpcservices
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -38,8 +39,9 @@ import (
 // request asks. One send on release releases one request.
 type gatedAckServer struct {
 	remoteproto.UnimplementedETHBACKENDServer
-	release chan struct{}
-	version *typesproto.VersionReply
+	release    chan struct{}
+	version    *typesproto.VersionReply
+	versionErr error
 }
 
 func newGatedAckServer() gatedAckServer {
@@ -47,7 +49,7 @@ func newGatedAckServer() gatedAckServer {
 }
 
 func (s gatedAckServer) Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error) {
-	return s.version, nil
+	return s.version, s.versionErr
 }
 
 func (s gatedAckServer) SubscribeLogs(st grpc.BidiStreamingServer[remoteproto.LogsFilterRequest, remoteproto.SubscribeLogsReply]) error {
@@ -140,7 +142,7 @@ func TestFilterUpdateIgnoresLateAckOfTimedOutUpdate(t *testing.T) {
 		synctest.Wait()
 		send := requestor.Load().(func(*remoteproto.LogsFilterRequest) error)
 
-		require.ErrorContains(t, send(&remoteproto.LogsFilterRequest{}), "did not apply")
+		require.ErrorContains(t, send(&remoteproto.LogsFilterRequest{}), "no ack of the filter update")
 		srv.release <- struct{}{} // the late ack of the timed-out update
 		requireSendWaitsForAck(t, srv, func() error { return send(&remoteproto.LogsFilterRequest{AllAddresses: true}) })
 	})
@@ -169,5 +171,59 @@ func TestFilterUpdateDoesNotWaitOnServerWithoutAcks(t *testing.T) {
 		req := &remoteproto.LogsFilterRequest{AllAddresses: true}
 		require.NoError(t, send(req))
 		require.False(t, req.Ack, "a server without acks must not be asked for one")
+	})
+}
+
+// A stream that can not learn the server's version ends, so the reconnect asks again, instead of
+// sending updates that never wait for the server.
+func TestFilterStreamEndsWhenTheVersionCallFails(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		srv := newGatedAckServer()
+		srv.versionErr = errors.New("version unavailable")
+		back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
+		var requestor atomic.Value
+		done := make(chan error, 1)
+		go func() { done <- back.SubscribeLogs(t.Context(), func(*remoteproto.SubscribeLogsReply) {}, &requestor) }()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			require.ErrorContains(t, err, "version unavailable")
+		default:
+			t.Fatal("the stream kept running without knowing whether the server acks")
+		}
+		require.Nil(t, requestor.Load())
+	})
+}
+
+// Each connect asks the server's version again: a reconnect to an erigon that acks waits for acks.
+func TestFilterStreamReadsTheVersionOnEachConnect(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		srv := newGatedAckServer()
+		version := &typesproto.VersionReply{Major: 5}
+		srv.version = version
+		back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
+		connect := func() (send func(*remoteproto.LogsFilterRequest) error, end func()) {
+			ctx, cancel := context.WithCancel(t.Context())
+			var requestor atomic.Value
+			go back.SubscribeLogs(ctx, func(*remoteproto.SubscribeLogsReply) {}, &requestor) //nolint:errcheck
+			synctest.Wait()
+			return requestor.Load().(func(*remoteproto.LogsFilterRequest) error), cancel
+		}
+		send, end := connect()
+		req := &remoteproto.LogsFilterRequest{AllAddresses: true}
+		require.NoError(t, send(req))
+		require.False(t, req.Ack)
+		end()
+
+		*version = typesproto.VersionReply{Major: 5, Patch: 1}
+		send, end = connect()
+		defer end()
+		req = &remoteproto.LogsFilterRequest{AllAddresses: true}
+		done := make(chan error, 1)
+		go func() { done <- send(req) }()
+		synctest.Wait()
+		require.True(t, req.Ack, "a reconnect to an erigon that acks asks for one")
+		srv.release <- struct{}{}
+		require.NoError(t, <-done)
 	})
 }

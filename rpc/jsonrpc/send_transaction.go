@@ -128,7 +128,7 @@ func (api *APIImpl) waitForReceipt(ctx context.Context, hash common.Hash, timeou
 		return nil, err
 	}
 
-	// A receipt produced before the subscription is applied, or while the receipts stream reconnects, is never
+	// A receipt produced before the subscription is applied, or while the receipts stream reconnects, may not be
 	// delivered on the channel. Look the receipt up periodically to cover that window.
 	poll := time.NewTicker(receiptPollInterval)
 	defer poll.Stop()

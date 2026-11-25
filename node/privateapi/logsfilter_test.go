@@ -55,7 +55,8 @@ type testServer struct {
 	sent             []*remoteproto.SubscribeLogsReply
 	sendErr          error
 	sendCalls        int
-	acks             int
+	recvs            int
+	ackedAfter       []int // the number of requests received when each ack was sent
 	ctx              context.Context
 	grpc.ServerStream
 }
@@ -85,7 +86,7 @@ func newFailingTestServer(ctx context.Context) *failingTestServer {
 
 func (ts *testServer) Send(m *remoteproto.SubscribeLogsReply) error {
 	if m.FilterApplied {
-		ts.acks++
+		ts.ackedAfter = append(ts.ackedAfter, ts.recvs)
 		return nil
 	}
 	ts.sendCalls++
@@ -113,6 +114,7 @@ func (ts *testServer) Recv() (*remoteproto.LogsFilterRequest, error) {
 	if !ok {
 		return nil, io.EOF
 	}
+	ts.recvs++
 	return request, nil
 }
 
@@ -163,7 +165,7 @@ func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 	}()
 
 	<-srv.receiveCompleted
-	require.Equal(t, 1, srv.acks, "only a request that asks for an ack is acked")
+	require.Equal(t, []int{1}, srv.ackedAfter, "only the first request asks for an ack")
 
 	// now see if a log would be sent or not
 	lg := createLog()

@@ -57,6 +57,8 @@ type testReceiptsServer struct {
 	received         chan *remoteproto.ReceiptsFilterRequest
 	receiveCompleted chan struct{}
 	sent             []*remoteproto.SubscribeReceiptsReply
+	recvs            int
+	ackedAfter       []int // the number of requests received when each ack was sent
 	ctx              context.Context
 	grpc.ServerStream
 }
@@ -78,6 +80,7 @@ func newTestReceiptsServer(ctx context.Context) *testReceiptsServer {
 
 func (ts *testReceiptsServer) Send(m *remoteproto.SubscribeReceiptsReply) error {
 	if m.FilterApplied {
+		ts.ackedAfter = append(ts.ackedAfter, ts.recvs)
 		return nil
 	}
 	ts.sent = append(ts.sent, m)
@@ -94,6 +97,7 @@ func (ts *testReceiptsServer) Recv() (*remoteproto.ReceiptsFilterRequest, error)
 	if !ok {
 		return nil, io.EOF
 	}
+	ts.recvs++
 	return request, nil
 }
 
@@ -142,6 +146,20 @@ func TestReceiptsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 	if len(srv.sent) != 0 {
 		t.Error("expected the sent slice to be empty for empty filter")
 	}
+}
+
+func TestReceiptsFilter_AcksOnlyARequestThatAsks(t *testing.T) {
+	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
+	srv := newTestReceiptsServer(t.Context())
+	srv.received <- &remoteproto.ReceiptsFilterRequest{AllTransactions: true, Ack: true}
+	srv.received <- &remoteproto.ReceiptsFilterRequest{}
+	go func() {
+		if err := agg.subscribeReceipts(srv); err != nil {
+			t.Error(err)
+		}
+	}()
+	<-srv.receiveCompleted
+	require.Equal(t, []int{1}, srv.ackedAfter, "only the first request asks for an ack")
 }
 
 func TestReceiptsFilter_AllTransactionsFilter_DistributesAllReceipts(t *testing.T) {

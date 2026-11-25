@@ -279,6 +279,10 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 }
 
 func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(reply *remoteproto.SubscribeLogsReply), requestor *atomic.Value) error {
+	serverAcks, err := back.serverAcksFilters(ctx)
+	if err != nil {
+		return err
+	}
 	subscription, err := back.remoteEthBackend.SubscribeLogs(ctx, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
@@ -288,7 +292,7 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 	}
 	acks := newFilterAcks()
 	defer close(acks.done)
-	if back.serverAcksFilters(ctx) {
+	if serverAcks {
 		requestor.Store(func(req *remoteproto.LogsFilterRequest) error {
 			req.Ack = true
 			return sendFilterUpdate(ctx, acks, subscription.Send, req)
@@ -315,6 +319,10 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 }
 
 func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), onReady func(func(*remoteproto.ReceiptsFilterRequest) error)) error {
+	serverAcks, err := back.serverAcksFilters(ctx)
+	if err != nil {
+		return err
+	}
 	subscription, err := back.remoteEthBackend.SubscribeReceipts(ctx, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
@@ -325,7 +333,7 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 	acks := newFilterAcks()
 	defer close(acks.done)
 	if onReady != nil {
-		if back.serverAcksFilters(ctx) {
+		if serverAcks {
 			onReady(func(req *remoteproto.ReceiptsFilterRequest) error {
 				req.Ack = true
 				return sendFilterUpdate(ctx, acks, subscription.Send, req)
@@ -352,16 +360,16 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 	return nil
 }
 
-// serverAcksFilters reports whether the server behind the stream just opened acks filter
+// serverAcksFilters reports whether the server a stream is about to open on acks filter
 // requests (EthBackendAPIVersion 5.0.1+). The startup version check does not cover a stream
-// that reconnects to a restarted erigon of another version.
-func (back *RemoteBackend) serverAcksFilters(ctx context.Context) bool {
+// that reconnects to a restarted erigon of another version. It runs before the stream opens,
+// so a rate limit on streams can not hold it behind that stream.
+func (back *RemoteBackend) serverAcksFilters(ctx context.Context) (bool, error) {
 	v, err := back.remoteEthBackend.Version(ctx, &emptypb.Empty{})
 	if err != nil {
-		back.log.Warn("rpcdaemon: filter updates will not wait for the server", "err", err)
-		return false
+		return false, fmt.Errorf("rpcdaemon: the filter stream needs the server version: %w", err)
 	}
-	return v.Major > 5 || v.Major == 5 && (v.Minor > 0 || v.Patch >= 1)
+	return v.Major > 5 || v.Major == 5 && (v.Minor > 0 || v.Patch >= 1), nil
 }
 
 // filterAckTimeout bounds how long a filter update waits for the server's ack.
@@ -409,7 +417,7 @@ func sendFilterUpdate[R any](ctx context.Context, a *filterAcks, send func(R) er
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
-			return fmt.Errorf("server did not apply the filter update within %s", filterAckTimeout)
+			return fmt.Errorf("no ack of the filter update within %s", filterAckTimeout)
 		}
 	}
 	return nil
