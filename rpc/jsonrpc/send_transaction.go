@@ -118,7 +118,7 @@ func (api *APIImpl) waitForReceipt(ctx context.Context, hash common.Hash, timeou
 	criteria := filters.ReceiptsFilterCriteria{
 		TransactionHashes: []common.Hash{hash},
 	}
-	receiptsCh, id, err := api.filters.SubscribeReceipts(128, criteria)
+	receiptsCh, id, err := api.filters.SubscribeReceipts(timeoutCtx, 128, criteria)
 	switch {
 	case err == nil:
 		defer api.filters.UnsubscribeReceipts(id)

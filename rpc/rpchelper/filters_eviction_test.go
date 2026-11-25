@@ -17,6 +17,7 @@
 package rpchelper
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -56,7 +57,7 @@ func TestEvictStaleSubscriptionsRemovesIdleFilters(t *testing.T) {
 	require.NoError(t, err)
 	txsCh, txsID, err := f.SubscribePendingTxs(8, ProtocolHTTP)
 	require.NoError(t, err)
-	logsCh, logsID, err := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
+	logsCh, logsID, err := f.SubscribeLogs(t.Context(), 8, filters.FilterCriteria{}, ProtocolHTTP)
 	require.NoError(t, err)
 
 	headsSub, ok := f.headsSubs.Get(headsID)
@@ -151,7 +152,7 @@ func TestAddAfterUnsubscribeDoesNotOrphanStore(t *testing.T) {
 		require.False(t, ok)
 	})
 	t.Run("logs", func(t *testing.T) {
-		_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
+		_, id, err := f.SubscribeLogs(t.Context(), 8, filters.FilterCriteria{}, ProtocolHTTP)
 		require.NoError(t, err)
 		require.True(t, f.UnsubscribeLogs(id))
 		require.False(t, f.hasTrackedSub(SubscriptionID(id)))
@@ -165,14 +166,14 @@ func TestLogsEvictionBatchesRemoteFilterUpdate(t *testing.T) {
 	f := newTestFilters(t)
 
 	var updates atomic.Int32
-	f.logsRequestor.Store(func(*remoteproto.LogsFilterRequest) error {
+	f.logsRequestor.Store(func(context.Context, *remoteproto.LogsFilterRequest) error {
 		updates.Add(1)
 		return nil
 	})
 
 	ids := make([]LogsSubID, 0, 3)
 	for range 3 {
-		_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
+		_, id, err := f.SubscribeLogs(t.Context(), 8, filters.FilterCriteria{}, ProtocolHTTP)
 		require.NoError(t, err)
 		lf, ok := f.logsSubs.logsFilters.Get(id)
 		require.True(t, ok)

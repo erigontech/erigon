@@ -17,6 +17,7 @@
 package rpchelper
 
 import (
+	"context"
 	"errors"
 	"math/big"
 	"sync"
@@ -42,11 +43,11 @@ import (
 // when the remote filter update fails, Subscribe* reports the error instead.
 func TestSubscribeLogsRemoteUpdateFailureReturnsError(t *testing.T) {
 	f := newTestFilters(t)
-	f.logsRequestor.Store(func(*remoteproto.LogsFilterRequest) error {
+	f.logsRequestor.Store(func(context.Context, *remoteproto.LogsFilterRequest) error {
 		return errors.New("remote logs source unavailable")
 	})
 
-	_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
+	_, id, err := f.SubscribeLogs(t.Context(), 8, filters.FilterCriteria{}, ProtocolHTTP)
 	require.Error(t, err)
 	_, ok := f.logsSubs.logsFilters.Get(id)
 	require.False(t, ok)
@@ -61,7 +62,7 @@ func TestSubscribeLogsRejectsTooManyAddresses(t *testing.T) {
 			}
 			f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 
-			_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{
+			_, id, err := f.SubscribeLogs(t.Context(), 8, filters.FilterCriteria{
 				Addresses: []common.Address{{1}, {2}},
 			}, protocol)
 			var invalidParams *rpc.InvalidParamsError
@@ -78,7 +79,7 @@ func TestSubscribeLogsRejectsTooManyTopics(t *testing.T) {
 	}
 	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 
-	_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{
+	_, id, err := f.SubscribeLogs(t.Context(), 8, filters.FilterCriteria{
 		Topics: [][]common.Hash{{{1}, {2}}, {{3}}},
 	}, ProtocolHTTP)
 	var invalidParams *rpc.InvalidParamsError
@@ -92,7 +93,7 @@ func TestSubscribeLogsRejectsTooManyTopicPositions(t *testing.T) {
 		t.Run(string(protocol), func(t *testing.T) {
 			f := newTestFilters(t)
 
-			_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{
+			_, id, err := f.SubscribeLogs(t.Context(), 8, filters.FilterCriteria{
 				Topics: make([][]common.Hash, filters.MaxTopicPositions+1),
 			}, protocol)
 			var invalidParams *rpc.InvalidParamsError
@@ -115,7 +116,7 @@ func TestSubscribeLogsAcceptsTopicAlternativesInFourPositions(t *testing.T) {
 	for _, protocol := range []SubProtocol{ProtocolHTTP, ProtocolWS} {
 		t.Run(string(protocol), func(t *testing.T) {
 			f := newTestFilters(t)
-			_, id, err := f.SubscribeLogs(8, criteria, protocol)
+			_, id, err := f.SubscribeLogs(t.Context(), 8, criteria, protocol)
 			require.NoError(t, err)
 			t.Cleanup(func() { f.UnsubscribeLogs(id) })
 		})
@@ -125,7 +126,7 @@ func TestSubscribeLogsAcceptsTopicAlternativesInFourPositions(t *testing.T) {
 func TestSubscribeLogsDoesNotStoreCriteriaForWebSocket(t *testing.T) {
 	f := newTestFilters(t)
 
-	_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{
+	_, id, err := f.SubscribeLogs(t.Context(), 8, filters.FilterCriteria{
 		Addresses: []common.Address{{1}},
 		Topics:    [][]common.Hash{{{1}}},
 	}, ProtocolWS)
@@ -145,7 +146,7 @@ func TestSubscribeLogsOwnsStoredCriteria(t *testing.T) {
 		Topics:    [][]common.Hash{{{2}}},
 	}
 
-	_, id, err := f.SubscribeLogs(8, criteria, ProtocolHTTP)
+	_, id, err := f.SubscribeLogs(t.Context(), 8, criteria, ProtocolHTTP)
 	require.NoError(t, err)
 	t.Cleanup(func() { f.UnsubscribeLogs(id) })
 
@@ -168,7 +169,7 @@ func TestSubscribeLogsOwnsWebSocketTopics(t *testing.T) {
 		Topics: [][]common.Hash{{{99, 99}}},
 	}
 
-	logs, id, err := f.SubscribeLogs(8, criteria, ProtocolWS)
+	logs, id, err := f.SubscribeLogs(t.Context(), 8, criteria, ProtocolWS)
 	require.NoError(t, err)
 	t.Cleanup(func() { f.UnsubscribeLogs(id) })
 
@@ -179,7 +180,7 @@ func TestSubscribeLogsOwnsWebSocketTopics(t *testing.T) {
 
 func TestSubscribeLogsIncludesBlockTimestamp(t *testing.T) {
 	f := newTestFilters(t)
-	logs, id, err := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolWS)
+	logs, id, err := f.SubscribeLogs(t.Context(), 8, filters.FilterCriteria{}, ProtocolWS)
 	require.NoError(t, err)
 	t.Cleanup(func() { f.UnsubscribeLogs(id) })
 	event := createLog()
@@ -213,7 +214,7 @@ func TestSubscribeLogsPublishesInitializedFilter(t *testing.T) {
 	<-started
 
 	for range 1000 {
-		_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolWS)
+		_, id, err := f.SubscribeLogs(t.Context(), 8, filters.FilterCriteria{}, ProtocolWS)
 		require.NoError(t, err)
 		require.True(t, f.UnsubscribeLogs(id))
 	}
@@ -221,11 +222,11 @@ func TestSubscribeLogsPublishesInitializedFilter(t *testing.T) {
 
 func TestSubscribeReceiptsRemoteUpdateFailureReturnsError(t *testing.T) {
 	f := newTestFilters(t)
-	f.receiptsRequestor.Store(func(*remoteproto.ReceiptsFilterRequest) error {
+	f.receiptsRequestor.Store(func(context.Context, *remoteproto.ReceiptsFilterRequest) error {
 		return errors.New("remote receipts source unavailable")
 	})
 
-	_, id, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+	_, id, err := f.SubscribeReceipts(t.Context(), 8, filters.ReceiptsFilterCriteria{})
 	require.Error(t, err)
 	require.False(t, f.receiptsSubs.removeReceiptsFilter(id))
 }
@@ -239,7 +240,7 @@ func TestDistributeLogsLeavesDeliveredLogsUntouched(t *testing.T) {
 	var wg sync.WaitGroup
 	ids := make([]LogsSubID, 0, 8)
 	for range 8 {
-		logs, id, err := f.SubscribeLogs(64, filters.FilterCriteria{}, ProtocolWS)
+		logs, id, err := f.SubscribeLogs(t.Context(), 64, filters.FilterCriteria{}, ProtocolWS)
 		require.NoError(t, err)
 		// Covers the FailNow path only, where wg.Wait() is never reached and the
 		// consumers would block on a channel nobody closes.
@@ -291,7 +292,7 @@ func TestSubscribeLogsConcurrentSubscribersDoNotSendStaleRequest(t *testing.T) {
 	releaseFirstSend := make(chan struct{})
 	secondRequestSeen := make(chan struct{})
 	var secondRequestSeenOnce sync.Once
-	f.logsRequestor.Store(func(r *remoteproto.LogsFilterRequest) error {
+	f.logsRequestor.Store(func(_ context.Context, r *remoteproto.LogsFilterRequest) error {
 		if firstSend.CompareAndSwap(true, false) {
 			close(firstSendEntered)
 			<-releaseFirstSend
@@ -307,7 +308,7 @@ func TestSubscribeLogsConcurrentSubscribersDoNotSendStaleRequest(t *testing.T) {
 
 	firstDone := make(chan error, 1)
 	go func() {
-		_, _, err := f.SubscribeLogs(8, filters.FilterCriteria{Addresses: []common.Address{addr1}}, ProtocolHTTP)
+		_, _, err := f.SubscribeLogs(t.Context(), 8, filters.FilterCriteria{Addresses: []common.Address{addr1}}, ProtocolHTTP)
 		firstDone <- err
 	}()
 	select {
@@ -318,7 +319,7 @@ func TestSubscribeLogsConcurrentSubscribersDoNotSendStaleRequest(t *testing.T) {
 
 	secondDone := make(chan error, 1)
 	go func() {
-		_, _, err := f.SubscribeLogs(8, filters.FilterCriteria{Addresses: []common.Address{addr2}}, ProtocolHTTP)
+		_, _, err := f.SubscribeLogs(t.Context(), 8, filters.FilterCriteria{Addresses: []common.Address{addr2}}, ProtocolHTTP)
 		secondDone <- err
 	}()
 
@@ -363,7 +364,7 @@ func TestSubscribeReceiptsConcurrentSubscribersDoNotSendStaleRequest(t *testing.
 	releaseFirstSend := make(chan struct{})
 	secondRequestSeen := make(chan struct{})
 	var secondRequestSeenOnce sync.Once
-	f.receiptsRequestor.Store(func(r *remoteproto.ReceiptsFilterRequest) error {
+	f.receiptsRequestor.Store(func(_ context.Context, r *remoteproto.ReceiptsFilterRequest) error {
 		if firstSend.CompareAndSwap(true, false) {
 			close(firstSendEntered)
 			<-releaseFirstSend
@@ -379,7 +380,7 @@ func TestSubscribeReceiptsConcurrentSubscribersDoNotSendStaleRequest(t *testing.
 
 	firstDone := make(chan error, 1)
 	go func() {
-		_, _, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{TransactionHashes: []common.Hash{hash1}})
+		_, _, err := f.SubscribeReceipts(t.Context(), 8, filters.ReceiptsFilterCriteria{TransactionHashes: []common.Hash{hash1}})
 		firstDone <- err
 	}()
 	select {
@@ -390,7 +391,7 @@ func TestSubscribeReceiptsConcurrentSubscribersDoNotSendStaleRequest(t *testing.
 
 	secondDone := make(chan error, 1)
 	go func() {
-		_, _, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{TransactionHashes: []common.Hash{hash2}})
+		_, _, err := f.SubscribeReceipts(t.Context(), 8, filters.ReceiptsFilterCriteria{TransactionHashes: []common.Hash{hash2}})
 		secondDone <- err
 	}()
 
@@ -430,9 +431,9 @@ func TestNewHeadsSubscribersShareOneEvent(t *testing.T) {
 
 func TestReceiptsSubscribersShareOneEvent(t *testing.T) {
 	f := newTestFilters(t)
-	a, idA, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+	a, idA, err := f.SubscribeReceipts(t.Context(), 8, filters.ReceiptsFilterCriteria{})
 	require.NoError(t, err)
-	b, idB, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+	b, idB, err := f.SubscribeReceipts(t.Context(), 8, filters.ReceiptsFilterCriteria{})
 	require.NoError(t, err)
 	defer f.UnsubscribeReceipts(idA)
 	defer f.UnsubscribeReceipts(idB)
@@ -453,7 +454,7 @@ func TestReceiptsSubscriptionBatchesPerBlock(t *testing.T) {
 		}
 	}
 	f := newTestFilters(t)
-	ch, id, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+	ch, id, err := f.SubscribeReceipts(t.Context(), 8, filters.ReceiptsFilterCriteria{})
 	require.NoError(t, err)
 	defer f.UnsubscribeReceipts(id)
 
@@ -479,7 +480,7 @@ func TestReceiptsSubscriptionSendsTheFirstBlockAsOneEvent(t *testing.T) {
 		}
 	}
 	f := newTestFilters(t)
-	ch, id, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+	ch, id, err := f.SubscribeReceipts(t.Context(), 8, filters.ReceiptsFilterCriteria{})
 	require.NoError(t, err)
 	defer f.UnsubscribeReceipts(id)
 
@@ -504,7 +505,7 @@ func TestReceiptsStreamEndFlushesHalfBlock(t *testing.T) {
 		}
 	}
 	f := newTestFilters(t)
-	ch, id, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+	ch, id, err := f.SubscribeReceipts(t.Context(), 8, filters.ReceiptsFilterCriteria{})
 	require.NoError(t, err)
 	defer f.UnsubscribeReceipts(id)
 

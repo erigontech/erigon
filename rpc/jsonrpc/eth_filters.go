@@ -66,11 +66,11 @@ func (api *APIImpl) NewBlockFilter(_ context.Context) (string, error) {
 }
 
 // NewFilter implements eth_newFilter. Creates an arbitrary filter object, based on filter options, to notify when the state changes (logs).
-func (api *APIImpl) NewFilter(_ context.Context, crit filters.FilterCriteria) (string, error) {
+func (api *APIImpl) NewFilter(ctx context.Context, crit filters.FilterCriteria) (string, error) {
 	if api.filters == nil {
 		return "", rpc.ErrNotificationsUnsupported
 	}
-	logs, id, err := api.filters.SubscribeLogs(256, crit, rpchelper.ProtocolHTTP)
+	logs, id, err := api.filters.SubscribeLogs(ctx, 256, crit, rpchelper.ProtocolHTTP)
 	if err != nil {
 		return "", err
 	}
@@ -311,7 +311,7 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 	}
 	return subscribeRPC(ctx,
 		func() (<-chan *types.Log, func(), error) {
-			logs, id, err := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit, rpchelper.ProtocolWS)
+			logs, id, err := api.filters.SubscribeLogs(ctx, api.SubscribeLogsChannelSize, crit, rpchelper.ProtocolWS)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -336,7 +336,7 @@ func (api *APIImpl) TransactionReceipts(ctx context.Context, crit *filters.Recei
 	}
 	return subscribeRPC(ctx,
 		func() (<-chan *rpchelper.Shared[[]*remoteproto.SubscribeReceiptsReply], func(), error) {
-			receipts, id, err := api.filters.SubscribeReceipts(api.SubscribeLogsChannelSize, criteria)
+			receipts, id, err := api.filters.SubscribeReceipts(ctx, api.SubscribeLogsChannelSize, criteria)
 			if err != nil {
 				return nil, nil, err
 			}

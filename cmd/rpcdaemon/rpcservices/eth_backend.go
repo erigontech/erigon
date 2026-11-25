@@ -293,12 +293,12 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 	acks := newFilterAcks()
 	defer close(acks.done)
 	if serverAcks {
-		requestor.Store(func(req *remoteproto.LogsFilterRequest) error {
+		requestor.Store(func(_ context.Context, req *remoteproto.LogsFilterRequest) error {
 			req.Ack = true
 			return sendFilterUpdate(ctx, acks, subscription.Send, req)
 		})
 	} else {
-		requestor.Store(subscription.Send)
+		requestor.Store(func(_ context.Context, req *remoteproto.LogsFilterRequest) error { return subscription.Send(req) })
 	}
 	for {
 		logs, err := subscription.Recv()
@@ -318,7 +318,7 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 	return nil
 }
 
-func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), onReady func(func(*remoteproto.ReceiptsFilterRequest) error)) error {
+func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), onReady func(func(context.Context, *remoteproto.ReceiptsFilterRequest) error)) error {
 	serverAcks, err := back.serverAcksFilters(ctx)
 	if err != nil {
 		return err
@@ -334,12 +334,12 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 	defer close(acks.done)
 	if onReady != nil {
 		if serverAcks {
-			onReady(func(req *remoteproto.ReceiptsFilterRequest) error {
+			onReady(func(_ context.Context, req *remoteproto.ReceiptsFilterRequest) error {
 				req.Ack = true
 				return sendFilterUpdate(ctx, acks, subscription.Send, req)
 			})
 		} else {
-			onReady(subscription.Send)
+			onReady(func(_ context.Context, req *remoteproto.ReceiptsFilterRequest) error { return subscription.Send(req) })
 		}
 	}
 	for {

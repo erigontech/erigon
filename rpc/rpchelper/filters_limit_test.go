@@ -17,6 +17,7 @@
 package rpchelper
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -52,11 +53,11 @@ var subscriptionKinds = []subscriptionKind{
 		return func() bool { return f.UnsubscribeSyncing(id) }, err
 	}},
 	{"logs", func(f *Filters) (func() bool, error) {
-		_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
+		_, id, err := f.SubscribeLogs(context.Background(), 8, filters.FilterCriteria{}, ProtocolHTTP)
 		return func() bool { return f.UnsubscribeLogs(id) }, err
 	}},
 	{"receipts", func(f *Filters) (func() bool, error) {
-		_, id, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+		_, id, err := f.SubscribeReceipts(context.Background(), 8, filters.ReceiptsFilterCriteria{})
 		return func() bool { return f.UnsubscribeReceipts(id) }, err
 	}},
 }
@@ -97,12 +98,12 @@ func TestSubscriptionLimitReleasedOnEviction(t *testing.T) {
 func TestSubscriptionLimitReleasedWhenRemoteUpdateFails(t *testing.T) {
 	f := newLimitedFilters(t, 1)
 	remoteDown := errors.New("remote down")
-	f.logsRequestor.Store(func(*remoteproto.LogsFilterRequest) error { return remoteDown })
-	f.receiptsRequestor.Store(func(*remoteproto.ReceiptsFilterRequest) error { return remoteDown })
+	f.logsRequestor.Store(func(context.Context, *remoteproto.LogsFilterRequest) error { return remoteDown })
+	f.receiptsRequestor.Store(func(context.Context, *remoteproto.ReceiptsFilterRequest) error { return remoteDown })
 
-	_, _, err := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
+	_, _, err := f.SubscribeLogs(context.Background(), 8, filters.FilterCriteria{}, ProtocolHTTP)
 	require.ErrorIs(t, err, remoteDown)
-	_, _, err = f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+	_, _, err = f.SubscribeReceipts(context.Background(), 8, filters.ReceiptsFilterCriteria{})
 	require.ErrorIs(t, err, remoteDown)
 
 	_, _, err = f.SubscribeNewHeads(8, ProtocolHTTP)
@@ -127,7 +128,7 @@ func TestSubscriptionLimitGaugeTracksBudgetUse(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, base+1, subscriptionsBudgetUsedGauge.GetValue())
 
-	_, _, err = f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+	_, _, err = f.SubscribeReceipts(context.Background(), 8, filters.ReceiptsFilterCriteria{})
 	require.ErrorIs(t, err, ErrTooManySubscriptions)
 	require.Equal(t, base+1, subscriptionsBudgetUsedGauge.GetValue())
 

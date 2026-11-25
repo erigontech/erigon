@@ -423,7 +423,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	for i := range ids {
 		idx := i
 		wg.Go(func() {
-			_, id, err := ff.SubscribeLogs(32, crit, rpchelper.ProtocolWS)
+			_, id, err := ff.SubscribeLogs(t.Context(), 32, crit, rpchelper.ProtocolWS)
 			ids[idx] = id
 			errs[idx] = err
 			if err != nil {

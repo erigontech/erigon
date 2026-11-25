@@ -44,7 +44,7 @@ func TestFiltersDeadlock(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	for range subCount {
 		n := &sub{}
-		n.ch, n.id, _ = f.SubscribeLogs(128, crit, "")
+		n.ch, n.id, _ = f.SubscribeLogs(t.Context(), 128, crit, "")
 		// start a loop similar to an rpcdaemon subscription, that calls unsubscribe on return
 		go func() {
 			defer f.UnsubscribeLogs(n.id)
