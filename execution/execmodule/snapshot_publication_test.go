@@ -187,7 +187,7 @@ func TestStateFileBuildDeletesTheChangesetsOfCollatedBlocks(t *testing.T) {
 			var opts []execmoduletester.Option
 			if mode == "no_prune" {
 				dbg.SetNoPrune(true)
-				defer dbg.SetNoPrune(false)
+				t.Cleanup(func() { dbg.SetNoPrune(false) }) // after the tester's cleanup: its goroutines read it
 			} else {
 				opts = append(opts, execmoduletester.WithAlwaysGenerateChangesets(true))
 			}
