@@ -128,8 +128,10 @@ func ProcessBlockWithSignatureValidation(impl BlockProcessor, s abstract.BeaconS
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
 	// 5. process_eth1_data
-	if err := impl.ProcessEth1Data(s, body.GetEth1Data()); err != nil {
-		return fmt.Errorf("processBlock: failed to process Eth1 data: %w", err)
+	if version < clparams.HezeVersion {
+		if err := impl.ProcessEth1Data(s, body.GetEth1Data()); err != nil {
+			return fmt.Errorf("processBlock: failed to process Eth1 data: %w", err)
+		}
 	}
 
 	// 6. process_operations
@@ -188,7 +190,7 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 				return nil, nil, nil, errors.New("no deposits allowed after deposit contract limit")
 			}
 		}
-	case blockBody.GetDeposits().Len() != 0:
+	case s.Version() < clparams.HezeVersion && blockBody.GetDeposits().Len() != 0:
 		return nil, nil, nil, errors.New("old-style deposits are not allowed after Fulu")
 	}
 	if s.Version() >= clparams.GloasVersion {

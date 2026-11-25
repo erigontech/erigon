@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/cl/abstract"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/stretchr/testify/require"
@@ -148,6 +149,29 @@ func TestEth1DataReset(t *testing.T) {
 		ProcessEth1DataReset(s)
 		return nil
 	})
+}
+
+func TestProcessEpochResetsEth1DataVotesOnlyBeforeHeze(t *testing.T) {
+	for _, test := range []struct {
+		version clparams.StateVersion
+		votes   int
+	}{
+		{clparams.GloasVersion, 0},
+		{clparams.HezeVersion, 1},
+	} {
+		t.Run(test.version.String(), func(t *testing.T) {
+			s := newRewardsTestState(t, 64)
+			upgradeTo(t, s, test.version)
+			cfg := s.BeaconConfig()
+			require.NoError(t, s.SetSlot((cfg.EpochsPerEth1VotingPeriod-1)*cfg.SlotsPerEpoch))
+			require.Zero(t, (state.Epoch(s)+1)%cfg.EpochsPerEth1VotingPeriod)
+			require.NoError(t, s.AddEth1DataVote(&cltypes.Eth1Data{DepositCount: 1}))
+			require.NoError(t, s.InitBeaconState())
+
+			require.NoError(t, ProcessEpoch(s))
+			require.Equal(t, test.votes, s.Eth1DataVotes().Len())
+		})
+	}
 }
 
 func TestRandaoMixesReset(t *testing.T) {

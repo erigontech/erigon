@@ -94,6 +94,10 @@ func upgradeTo(t testing.TB, s *state.CachingBeaconState, version clparams.State
 	if version >= clparams.GloasVersion {
 		require.NoError(t, s.UpgradeToGloas())
 	}
+	if version >= clparams.HezeVersion {
+		s.SetDepositRequestsStartIndex(s.Eth1DepositIndex())
+		require.NoError(t, s.UpgradeToHeze())
+	}
 }
 
 func requireWarmRootEqualsColdRoot(t testing.TB, s *state.CachingBeaconState) {

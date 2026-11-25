@@ -96,6 +96,9 @@ func ProcessPendingDeposits(s abstract.BeaconState) error {
 func applyPendingDeposit(s abstract.BeaconState, d *solid.PendingDeposit) error {
 	vindex, exist := s.ValidatorIndexByPubkey(d.PubKey)
 	if !exist {
+		if s.Version() >= clparams.HezeVersion && d.WithdrawalCredentials[0] == byte(s.BeaconConfig().BLSWithdrawalPrefixByte) {
+			return nil
+		}
 		if valid, _ := IsValidDepositSignature(&cltypes.DepositData{
 			PubKey:                d.PubKey,
 			WithdrawalCredentials: d.WithdrawalCredentials,
