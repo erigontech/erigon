@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -43,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -91,6 +93,66 @@ func TestGetLogsFromPersistedReceipts(t *testing.T) {
 		require.Equal(t, c.Blocks[0].Transactions()[i].Hash(), l.TxHash)
 		require.Equal(t, []common.Hash{topics[i]}, l.Topics)
 	}
+}
+
+// Old cache files hold receipts whose index is the txNum (#21658). eth_getTransactionReceipt and
+// eth_getLogs do not serve them, and return the position in the block as eth_getBlockReceipts does.
+func TestPersistedReceiptWithTxNumAsIndex(t *testing.T) {
+	enableHistoricalRCache(t)
+	m := newLatestLogsTestChain(t)
+	// Give transaction 1's stored receipt a txNum as its index, as #21658 wrote it.
+	entries := map[string][]byte{}
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		if err := tx.ForEach(kv.TblRCacheHistoryVals, nil, func(k, v []byte) error {
+			r := &types.ReceiptForStorage{}
+			if len(v) == 0 || rlp.DecodeBytes(v, r) != nil || r.TransactionIndex != 1 {
+				return nil
+			}
+			r.TransactionIndex = 3_246_875_000
+			var buf bytes.Buffer
+			if err := r.EncodeRLP(&buf); err != nil {
+				return err
+			}
+			entries[string(k)] = buf.Bytes()
+			return nil
+		}); err != nil {
+			return err
+		}
+		for k, v := range entries {
+			if err := tx.Put(kv.TblRCacheHistoryVals, []byte(k), v); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	require.Len(t, entries, 1)
+
+	// Only the corrupted receipt is refused; the others are still served from the persistent cache.
+	base := newBaseApiForTest(m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	header, err := base._blockReader.HeaderByNumber(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	minTxNum, err := base._txNumReader.Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	for i := range 3 {
+		_, ok, err := base.receiptsGenerator.PersistedReceipt(m.Ctx, tx, header, i, minTxNum+1+uint64(i))
+		require.NoError(t, err)
+		require.Equal(t, i != 1, ok, "transaction %d", i)
+	}
+
+	// Fresh APIs: a receipt in the in-memory caches would hide the persisted one.
+	logs, err := logsOf(newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}))
+	require.NoError(t, err)
+	require.Len(t, logs, 3)
+	for i, l := range logs {
+		require.Equal(t, hexutil.Uint(i), l.TxIndex)
+	}
+	receipt, err := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetTransactionReceipt(m.Ctx, logs[1].TxHash)
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Uint64(1), receipt.TransactionIndex)
+	require.Equal(t, hexutil.Uint(1), receipt.Logs[0].TxIndex)
 }
 
 // TestGetReceiptAssertsBeforeStamping re-executes a persisted receipt with logs under ERIGON_ASSERT,

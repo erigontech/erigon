@@ -49,7 +49,7 @@ func TestGasUsedBelowReceiptHistory(t *testing.T) {
 	block := types.NewBlockFromStorage(header.Hash(), header, types.Transactions{frame, frame, frame, frame}, nil, nil, nil)
 	g := newTestGenerator(t)
 
-	check := func(t *testing.T, wantFirst uint64) {
+	check := func(t *testing.T, wantFirst, wantSecond uint64) {
 		t.Helper()
 		first, err := g.GetReceiptGasUsed(t.Context(), tx, header, frame, 0)
 		require.NoError(t, err)
@@ -64,16 +64,22 @@ func TestGasUsedBelowReceiptHistory(t *testing.T) {
 		} else {
 			require.Equal(t, wantFirst, byIndex[0].GasUsed)
 		}
-		require.Nil(t, byIndex[1])
+		if wantSecond == 0 {
+			require.Nil(t, byIndex[1])
+		} else {
+			require.Equal(t, wantSecond, byIndex[1].GasUsed)
+		}
 		require.Equal(t, uint64(400), byIndex[3].GasUsed)
 	}
-	t.Run("metadata only", func(t *testing.T) { check(t, 0) })
+	t.Run("metadata only", func(t *testing.T) { check(t, 0, 0) })
 	t.Run("persisted receipt", func(t *testing.T) {
 		receipt := &types.Receipt{Type: types.FrameTxType, Payer: &common.Address{1}, GasUsed: 100, CumulativeGasUsed: 100}
+		second := &types.Receipt{Type: types.FrameTxType, Payer: &common.Address{1}, GasUsed: 200, CumulativeGasUsed: 300, TransactionIndex: 1}
 		require.NoError(t, rawdb.WriteReceiptCacheV2(put, receipt, 3))
-		require.NoError(t, rawdb.WriteReceiptCacheV2(put, nil, 4))
+		require.NoError(t, rawdb.WriteReceiptCacheV2(put, second, 4))
+		require.NoError(t, rawdb.WriteReceiptCacheV2(put, nil, 5))
 		require.NoError(t, doms.Flush(t.Context(), tx))
-		check(t, 100)
+		check(t, 100, 200)
 
 		// A later block also has a receipt at index zero. Its row cannot
 		// supply this block's receipt once the older values are pruned.
@@ -82,7 +88,7 @@ func TestGasUsedBelowReceiptHistory(t *testing.T) {
 		require.NoError(t, tx.ClearTable(kv.TblRCacheHistoryVals))
 		require.NoError(t, put.DomainPut(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, []byte{}, 10, encoded))
 		require.NoError(t, doms.Flush(t.Context(), tx))
-		check(t, 0)
+		check(t, 0, 0)
 	})
 }
 

@@ -219,6 +219,7 @@ func DerivePriorReceipts(
 			BlockHash:     blockHash,
 			TxnHash:       txns[i].Hash(),
 			TxNum:         txNum,
+			TxIndex:       i,
 			DontCalcBloom: true,
 		})
 		if err != nil || !ok {
