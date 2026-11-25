@@ -18,7 +18,10 @@ package execfinality
 
 import (
 	"context"
+	"math"
+	"time"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -30,7 +33,6 @@ type FinalityContext struct {
 	finalisedBlockNum uint64
 	maxReorgDepth     uint64
 	retentionBlockNum uint64
-	collateToBlockNum uint64
 	txNumsReader      rawdbv3.TxNumsReader
 }
 
@@ -54,14 +56,12 @@ func NewContext(headBlockNum, finalisedBlockNum, maxReorgDepth uint64, initialCy
 	}
 	if finalisedBlockNum > 0 && !initialCycle {
 		ctx.retentionBlockNum = finalisedBlockNum
-		ctx.collateToBlockNum = finalisedBlockNum
 		return ctx
 	}
 	if headBlockNum <= maxReorgDepth {
 		return ctx
 	}
 	ctx.retentionBlockNum = headBlockNum - maxReorgDepth
-	ctx.collateToBlockNum = ctx.retentionBlockNum - 1
 	return ctx
 }
 
@@ -89,33 +89,47 @@ func (c FinalityContext) RetireToBlockNum() uint64 {
 	return c.retentionBlockNum
 }
 
-func (c FinalityContext) CollateToBlockNum() uint64 {
-	return c.collateToBlockNum
-}
-
 func (c FinalityContext) MaxReorgDepth() uint64 {
 	return c.maxReorgDepth
 }
 
+// ReadyForCollation reports whether every block of the step is below the retention boundary, so no unwind may
+// reach it. On a writable db the same tx deletes the changesets of those blocks, so collation never waits for
+// the changeset prune and a block in files is never unwindable.
 func (c FinalityContext) ReadyForCollation(ctx context.Context, db kv.TemporalRoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	finalisedBlockNum = c.finalisedBlockNum
-	var lowestUnwindableBlock uint64
-	err = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		lastBlockInStep, ok, err = c.txNumsReader.FindBlockNum(ctx, tx, stepLastTxNum)
-		if err != nil {
+	decide := func(tx kv.TemporalTx) error {
+		var found bool
+		if lastBlockInStep, found, err = c.txNumsReader.FindBlockNum(ctx, tx, stepLastTxNum); err != nil {
 			return err
 		}
-		if !ok {
+		if !found {
 			lastBlockInStep = 0
 		}
-		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
-		if err != nil {
+		if lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx); err != nil {
 			return err
 		}
-		lowestUnwindableBlock, err = changeset.ReadLowestUnwindableBlock(tx)
-		return err
+		ok = lastBlockInStep < c.retentionBlockNum
+		return nil
+	}
+	rwDB, writable := db.(kv.TemporalRwDB)
+	if !writable {
+		err = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+			if err := decide(tx); err != nil || !ok {
+				return err
+			}
+			lowestUnwindableBlock, err := changeset.ReadLowestUnwindableBlock(tx)
+			ok = lastBlockInStep < lowestUnwindableBlock
+			return err
+		})
+		return
+	}
+	err = rwDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		if err := decide(tx); err != nil || !ok {
+			return err
+		}
+		return rawdb.PruneTable(tx, kv.ChangeSets3, lastBlockInStep+1, ctx, math.MaxInt, time.Duration(math.MaxInt64), log.Root(), "collate")
 	})
-	// A block that still has a changeset can be unwound, so it must stay out of the files.
-	ok = err == nil && c.retentionBlockNum > 0 && lastBlockInStep <= c.collateToBlockNum && lastBlockInStep < lowestUnwindableBlock
+	ok = ok && err == nil
 	return
 }

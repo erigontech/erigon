@@ -737,7 +737,6 @@ type TemporalPutDel interface {
 type FinalityContext interface {
 	PruneToBlockNum() uint64
 	RetireToBlockNum() uint64
-	CollateToBlockNum() uint64
 	MaxReorgDepth() uint64
 	ReadyForCollation(ctx context.Context, db TemporalRoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error)
 }
