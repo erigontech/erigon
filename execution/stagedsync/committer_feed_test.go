@@ -222,7 +222,7 @@ func computeAheadRoot(t *testing.T, wantFeed bool) []byte {
 	req := &blockRequest{blockNum: 2, firstTxNum: 2, lastTxNum: 3, bal: bal}
 	vm := state.NewVersionMap(req.bal)
 	vm.SetBaseTxNum(req.firstTxNum)
-	rh, _, err := cc.computeRootFromBAL(ctx, req, vm, math.MaxUint32, commitTarget{blockNum: req.blockNum, lastTxNum: req.lastTxNum})
+	rh, _, err := cc.computeRootFromBAL(ctx, req, vm, -1, math.MaxUint32, commitTarget{blockNum: req.blockNum, lastTxNum: req.lastTxNum})
 	require.NoError(t, err)
 	require.Equal(t, wantFeed, cc.feed.Keys > 0, "v3 compute-ahead folds through the feed")
 	if wantFeed {

@@ -117,7 +117,6 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		return nil, nil, err
 	}
 
-	var storedBlock *types.Block
 	if genesis != nil && genesis.Config == nil {
 		return chain.AllProtocolChanges, nil, types.ErrGenesisNoConfig
 	}
@@ -156,7 +155,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	}
 
 	if (storedHash == common.Hash{}) {
-		block, err1 := write(tx, genesis, dirs, logger)
+		block, err1 := write(tx, genesis)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -168,7 +167,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, ibs, err1 := GenesisToBlock(genesis, dirs, logger)
+		block, ibs, err1 := GenesisToBlock(genesis)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -178,10 +177,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			return genesis.Config, block, &GenesisMismatchError{Stored: storedHash, New: hash}
 		}
 	}
+	var storedGenesis *types.Block
 	number := rawdb.ReadHeaderNumber(tx, storedHash)
 	if number != nil {
 		var err error
-		storedBlock, _, err = rawdb.ReadBlockWithSenders(tx, storedHash, *number)
+		storedGenesis, _, err = rawdb.ReadBlockWithSenders(tx, storedHash, *number)
 		if err != nil {
 			return genesis.Config, nil, err
 		}
@@ -204,7 +204,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		if err1 != nil {
 			return newCfg, nil, err1
 		}
-		return newCfg, storedBlock, nil
+		return newCfg, storedGenesis, nil
 	}
 	// Special case: don't change the existing config of a private chain if no new
 	// config is supplied. This is useful, for example, to preserve DB config created by erigon init.
@@ -222,7 +222,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	}
 	if keepStoredChainConfig {
 		if genesis != nil && !sameUint256(newCfg.ChainID, storedCfg.ChainID) {
-			return newCfg, storedBlock, fmt.Errorf("genesis chain ID mismatch: database has %v, supplied genesis has %v", storedCfg.ChainID, newCfg.ChainID)
+			return newCfg, storedGenesis, fmt.Errorf("genesis chain ID mismatch: database has %v, supplied genesis has %v", storedCfg.ChainID, newCfg.ChainID)
 		}
 		// storedCfg is the receiver of CheckCompatible below, so overriding it in
 		// place would compare it against itself and find no conflict.
@@ -239,20 +239,25 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	// are returned to the caller unless we're already at block zero.
 	headHash := rawdb.ReadHeadHeaderHash(tx)
 	if height := rawdb.ReadHeaderNumber(tx, headHash); height != nil && *height != 0 {
-		// The head's time, not just its number: the post-merge forks are scheduled by
-		// timestamp and cannot be compared against a block number. Only a fork that moved
-		// can conflict on that axis, so an undatable head is fatal only to those -- a
-		// datadir whose head header is gone still starts on an unchanged schedule.
+		compatCfg := newCfg
+		if storedGenesis != nil && storedCfg.IsBogota(storedGenesis.Time()) && newCfg.IsBogota(storedGenesis.Time()) {
+			// No block applies the nonce migration when Bogota is active at genesis,
+			// so its account list cannot change historical state.
+			compatCfg = newCfg.Copy()
+			compatCfg.ZeroNonceStorageAccounts = storedCfg.ZeroNonceStorageAccounts
+		}
+		// Changes to timestamp-based rules require the head's time, not its number.
+		// An unreadable head header does not prevent startup when those rules are unchanged.
 		var headTime uint64
-		if !storedCfg.SameTimestampForks(newCfg) {
+		if !storedCfg.SameTimestampRules(compatCfg) {
 			var err error
 			if headTime, err = headTimestamp(tx, headHash, *height, chainName, dirs, logger); err != nil {
-				return newCfg, storedBlock, err
+				return newCfg, storedGenesis, err
 			}
 		}
-		toleratedForks, compatibilityErr := checkCompatibleTolerating(storedCfg, newCfg, *height, headTime)
+		toleratedForks, compatibilityErr := checkCompatibleTolerating(storedCfg, compatCfg, *height, headTime)
 		if compatibilityErr != nil {
-			return newCfg, storedBlock, compatibilityErr
+			return newCfg, storedGenesis, compatibilityErr
 		}
 		if len(toleratedForks) > 0 {
 			logger.Warn("Replacing the stored chain config, tolerating PoW-era fork differences that select nothing on this chain",
@@ -262,7 +267,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	if err := rawdb.WriteChainConfig(tx, storedHash, newCfg); err != nil {
 		return newCfg, nil, err
 	}
-	return newCfg, storedBlock, nil
+	return newCfg, storedGenesis, nil
 }
 
 func sameUint256(a, b *uint256.Int) bool {
@@ -338,33 +343,28 @@ func headTimestamp(tx kv.Tx, hash common.Hash, number uint64, chainName string, 
 	return head.Time, nil
 }
 
-func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, error) {
-	block, statedb, err := GenesisToBlock(g, dirs, logger)
+func WriteGenesisState(g *types.Genesis) (*types.Block, error) {
+	block, statedb, err := GenesisToBlock(g)
 	if err != nil {
 		return nil, err
 	}
 	defer statedb.Close()
 
-	stateWriter := state.NewNoopWriter()
-
 	blockNum := block.Number()
 	if !blockNum.IsZero() {
 		return nil, errors.New("can't commit genesis block with number > 0")
-	}
-	if err := statedb.CommitBlock(&chain.Rules{}, stateWriter); err != nil {
-		return nil, fmt.Errorf("cannot write state: %w", err)
 	}
 
 	return block, nil
 }
 
-func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger log.Logger) *types.Block {
+func MustCommitGenesis(g *types.Genesis, db kv.RwDB) *types.Block {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		panic(err)
 	}
 	defer tx.Rollback()
-	block, err := write(tx, g, dirs, logger)
+	block, err := write(tx, g)
 	if err != nil {
 		panic(err)
 	}
@@ -377,8 +377,8 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger l
 
 // Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, error) {
-	block, err := WriteGenesisState(g, dirs, logger)
+func write(tx kv.RwTx, g *types.Genesis) (*types.Block, error) {
+	block, err := WriteGenesisState(g)
 	if err != nil {
 		return block, err
 	}
@@ -425,10 +425,7 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 // GenesisToBlock creates the genesis block from a genesis specification, computing its
 // state root from the genesis allocation alone — block 0 has no prior state, so the
 // root follows from the version map with no database.
-func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
-	if dirs.SnapDomain == "" {
-		panic("empty `dirs` variable")
-	}
+func GenesisToBlock(g *types.Genesis) (*types.Block, *state.IntraBlockState, error) {
 	_ = g.Alloc //nil-check
 
 	head, withdrawals := GenesisWithoutStateToBlock(g)
@@ -522,6 +519,20 @@ func GenesisState(g *types.Genesis, head *types.Header) (*state.IntraBlockState,
 			if _, err := protocol.SysCreate(address, account.Constructor, g.Config, statedb, head); err != nil {
 				return nil, nil, err
 			}
+			// The constructor reads the alloc storage, but deploys over a fresh account:
+			// only the slots it changed stay.
+			for key, value := range account.Storage {
+				slotVal.SetBytes(value[:])
+				cur, err := statedb.GetState(address, accounts.InternKey(key))
+				if err != nil {
+					return nil, nil, err
+				}
+				if cur == slotVal {
+					if err := statedb.SetState(address, accounts.InternKey(key), uint256.Int{}); err != nil {
+						return nil, nil, err
+					}
+				}
+			}
 		}
 
 		if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
@@ -531,6 +542,7 @@ func GenesisState(g *types.Genesis, head *types.Header) (*state.IntraBlockState,
 			}
 		}
 	}
+	statedb.BurnSelfDestructs()
 	writes, err := statedb.FinalizedWrites(&chain.Rules{})
 	if err != nil {
 		return nil, nil, err

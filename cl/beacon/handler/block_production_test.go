@@ -1978,6 +1978,39 @@ func TestPostEthV2BeaconBlocksConsensusRejectsPreflightFailureBeforeGossip(t *te
 	require.Equal(t, http.StatusBadRequest, endpointErr.Code)
 }
 
+func TestPostEthV2BeaconBlocksRejectsIncompleteSlashings(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	block := cltypes.NewDenebSignedBeaconBlock(handler.beaconChainCfg, clparams.ElectraVersion)
+	block.SignedBlock.Block.Slot = 1
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	zeroRoot := `"0x` + strings.Repeat("0", 64) + `"`
+	signature := `"signature":"0x` + strings.Repeat("0", 192) + `"`
+	header := `{"message":{"slot":"1","proposer_index":"0","parent_root":` + zeroRoot +
+		`,"state_root":` + zeroRoot + `,"body_root":` + zeroRoot + `},` + signature + `}`
+	for _, tc := range []struct {
+		name, field, value string
+	}{
+		{name: "null attestation data", field: "attester_slashings", value: `[{"attestation_1":{"data":null},"attestation_2":{}}]`},
+		{name: "null signed header", field: "proposer_slashings", value: `[{"signed_header_1":null,"signed_header_2":` + header + `}]`},
+		{name: "null header message", field: "proposer_slashings", value: `[{"signed_header_1":{"message":null,` + signature + `},"signed_header_2":` + header + `}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			empty := `"` + tc.field + `":[]`
+			require.Contains(t, string(body), empty)
+			malformed := strings.Replace(string(body), empty, `"`+tc.field+`":`+tc.value, 1)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", strings.NewReader(malformed))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Eth-Consensus-Version", clparams.ElectraVersion.String())
+
+			_, err := handler.PostEthV2BeaconBlocks(httptest.NewRecorder(), req)
+			var endpointErr *beaconhttp.EndpointError
+			require.ErrorAs(t, err, &endpointErr)
+			require.Equal(t, http.StatusBadRequest, endpointErr.Code)
+		})
+	}
+}
+
 func TestPostEthV2BeaconBlocksConsensusBroadcastsBeforeExecutionInvalidation(t *testing.T) {
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	forkchoiceStore.OnTickFn = func(uint64) {}
@@ -3313,6 +3346,75 @@ func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
 	require.ErrorContains(t, err, "unsupported content type")
 }
 
+func TestPublishBlockContentType(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	for _, route := range []struct {
+		name    string
+		version clparams.StateVersion
+		v2      bool
+	}{
+		{"v1/fulu", clparams.FuluVersion, false},
+		{"v2/fulu", clparams.FuluVersion, true},
+		{"v2/gloas", clparams.GloasVersion, true},
+	} {
+		var block interface{ EncodeSSZ([]byte) ([]byte, error) }
+		if route.version >= clparams.GloasVersion {
+			block = cltypes.NewSignedBeaconBlock(&cfg, route.version)
+		} else {
+			block = cltypes.NewDenebSignedBeaconBlock(&cfg, route.version)
+		}
+		jsonBody, err := json.Marshal(block)
+		require.NoError(t, err)
+		sszBody, err := block.EncodeSSZ(nil)
+		require.NoError(t, err)
+		for _, tc := range []struct {
+			contentType string
+			body        []byte
+			wantCode    int
+		}{
+			{"application/json", jsonBody, 0},
+			{"application/json; charset=utf-8", jsonBody, 0},
+			{"", jsonBody, 0},
+			{"application/octet-stream", sszBody, 0},
+			{"Application/Octet-Stream; foo=bar", sszBody, 0},
+			{"text/plain", jsonBody, http.StatusUnsupportedMediaType},
+			{"application/octet-stream; bad", sszBody, http.StatusUnsupportedMediaType},
+		} {
+			name := tc.contentType
+			if name == "" {
+				name = "no content type"
+			}
+			t.Run(route.name+"/"+name, func(t *testing.T) {
+				blockService := network_services_mock.NewMockBlockService(gomock.NewController(t))
+				decoded := errors.New("decoded block reached gossip validation")
+				if tc.wantCode == 0 {
+					blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(decoded)
+				}
+				h := &ApiHandler{beaconChainCfg: &cfg, blockService: blockService}
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(tc.body))
+				if tc.contentType != "" {
+					req.Header.Set("Content-Type", tc.contentType)
+				}
+				req.Header.Set("Eth-Consensus-Version", route.version.String())
+
+				publish := h.PostEthV1BeaconBlocks
+				if route.v2 {
+					publish = h.PostEthV2BeaconBlocks
+				}
+				_, err := publish(httptest.NewRecorder(), req)
+				if tc.wantCode == 0 {
+					require.ErrorIs(t, err, decoded)
+					return
+				}
+				var endpointErr *beaconhttp.EndpointError
+				require.ErrorAs(t, err, &endpointErr)
+				require.Equal(t, tc.wantCode, endpointErr.Code)
+				require.ErrorContains(t, err, "unsupported content type")
+			})
+		}
+	}
+}
+
 func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	builderClient := builder_mock.NewMockBuilderClient(ctrl)
@@ -3393,14 +3495,14 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 				require.NoError(t, err)
 				return encoded
 			},
-			wantErr: "missing execution payload header",
+			wantErr: "blinded beacon body contains null execution payload header",
 		},
 		{
 			name: "omitted execution payload header",
 			mutate: func(block *cltypes.SignedBlindedBeaconBlock) {
 				block.Block.Body.ExecutionPayload = nil
 			},
-			wantErr: "missing execution payload header",
+			wantErr: "blinded beacon body contains null execution payload header",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3423,6 +3525,9 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 
 			_, err = h.publishBlindedBlocks(req, 2)
 			require.ErrorContains(t, err, tc.wantErr)
+			var endpointErr *beaconhttp.EndpointError
+			require.ErrorAs(t, err, &endpointErr)
+			require.Equal(t, http.StatusBadRequest, endpointErr.Code)
 		})
 	}
 }

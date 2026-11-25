@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -694,16 +693,14 @@ func (s ReadSet) RangeFullHeaders(yield func(accounts.Address, AccountPath, acco
 }
 
 // WriteHeader is the type-agnostic part of a versioned write: address,
-// path, optional storage key, tx-version and balance-change reason.
+// path, optional storage key and tx-version.
 // Shared across every per-path write via embedding in VersionedWrite[T].
 type WriteHeader struct {
-	Address     accounts.Address
-	Key         accounts.StorageKey
-	Version     Version
-	Path        AccountPath
-	Reason      tracing.BalanceChangeReason
-	NonceReason tracing.NonceChangeReason
-	valStatus   valueStatus
+	Address   accounts.Address
+	Key       accounts.StorageKey
+	Version   Version
+	Path      AccountPath
+	valStatus valueStatus
 }
 
 func (h WriteHeader) String() string {
@@ -1329,7 +1326,7 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 			}
 		}
 		// CreateContract survives self-destruct: fee finalization and the BAL need
-		// the creation marker. ApplyVersionedWrites skips applying it under
+		// the creation marker. ApplyWrites skips applying it under
 		// self-destruct, so keeping it here does not resurrect the account.
 		if vw, ok := ws.createContract[addr]; ok {
 			out.SetCreateContract(addr, cloneVW(vw))
@@ -2344,24 +2341,6 @@ func (ws *WriteSet) TouchUpdates(updates *commitment.Updates) {
 			updates.TouchPlainKeyDirect(string(composite), &u)
 		}
 	}
-}
-
-// sortWriteHeaders sorts headers by (Address, Path, Key) for deterministic
-// processing order; WriteSet map iteration is non-deterministic in Go.
-// The sort relies on the AccountPath enum ordering defined in versionmap.go.
-func sortWriteHeaders(headers []WriteHeader) {
-	slices.SortFunc(headers, func(a, b WriteHeader) int {
-		if c := a.Address.Cmp(b.Address); c != 0 {
-			return c
-		}
-		if a.Path != b.Path {
-			if a.Path < b.Path {
-				return -1
-			}
-			return 1
-		}
-		return a.Key.Cmp(b.Key)
-	})
 }
 
 // hasHeader reports whether a write exists at h's (Address, Path, Key).

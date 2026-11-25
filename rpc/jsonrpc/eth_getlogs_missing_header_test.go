@@ -140,7 +140,7 @@ func TestGetLogsFailsOnAMissingBody(t *testing.T) {
 	dropBodies(t, m.DB, missingHeaderBlock, missingHeaderBlock+1)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
-	logs, err := api.GetLogs(m.Ctx, fullRangeCriteria())
+	logs, err := logsOf(api.GetLogs(m.Ctx, fullRangeCriteria()))
 	require.ErrorContains(t, err, "transaction not found")
 	require.Nil(t, logs)
 }

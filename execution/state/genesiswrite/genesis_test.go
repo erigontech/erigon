@@ -88,7 +88,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	block, ibs, err := genesiswrite.GenesisToBlock(chainspec.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, ibs, err := genesiswrite.GenesisToBlock(chainspec.MainnetGenesisBlock())
 	require.NoError(err)
 	ibs.Close()
 
@@ -104,7 +104,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 		require.NoError(err)
 		require.False(spec.IsEmpty())
 
-		block, ibs, err = genesiswrite.GenesisToBlock(spec.Genesis, datadir.New(t.TempDir()), log.Root())
+		block, ibs, err = genesiswrite.GenesisToBlock(spec.Genesis)
 		require.NoError(err)
 		ibs.Close()
 
@@ -230,6 +230,99 @@ func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
 	}
 }
 
+func TestCommitGenesisBlockZeroNonceStorageAccountChange(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		bogotaTime   uint64
+		wantConflict bool
+	}{
+		{name: "before activation", bogotaTime: 2},
+		{name: "at activation", bogotaTime: 1, wantConflict: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stored := chain.AllProtocolChanges.Copy()
+			stored.BogotaTime = common.NewUint64(tc.bogotaTime)
+			stored.ZeroNonceStorageAccounts = []common.Address{{1}}
+			db := dbAtHeightOne(t, stored)
+			original := readStoredChainConfig(t, db)
+
+			next := stored.Copy()
+			next.ZeroNonceStorageAccounts = []common.Address{{2}}
+			_, err := commitConfig(t, db, next)
+			if tc.wantConflict {
+				var compatErr *chain.ConfigCompatError
+				require.ErrorAs(t, err, &compatErr)
+				require.Equal(t, "EIP-8253 account list", compatErr.WhatTime)
+				require.Zero(t, compatErr.RewindToTime)
+				require.Equal(t, original, readStoredChainConfig(t, db))
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, next.ZeroNonceStorageAccounts, readStoredChainConfig(t, db).ZeroNonceStorageAccounts)
+			}
+		})
+	}
+}
+
+func TestCommitGenesisBlockZeroNonceStorageAccountChangeAfterGenesisActivation(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		genesisTime, bogotaTime uint64
+	}{
+		{name: "zero timestamp"},
+		{name: "before genesis timestamp", genesisTime: 100, bogotaTime: 50},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stored := chain.AllProtocolChanges.Copy()
+			stored.BogotaTime = common.NewUint64(tc.bogotaTime)
+			stored.ZeroNonceStorageAccounts = []common.Address{{1}}
+			genesis := testGenesis(stored)
+			genesis.Timestamp = tc.genesisTime
+			db := dbWithGenesisAtHeightOne(t, genesis)
+
+			next := stored.Copy()
+			next.ZeroNonceStorageAccounts = []common.Address{{2}}
+			genesis.Config = next
+			_, err := commitGenesis(t, db, genesis, "")
+			require.NoError(t, err)
+			require.Equal(t, next.ZeroNonceStorageAccounts, readStoredChainConfig(t, db).ZeroNonceStorageAccounts)
+		})
+	}
+}
+
+func TestCommitGenesisBlockZeroNonceStorageAccountsWithoutHeadHeader(t *testing.T) {
+	a, b := common.Address{1}, common.Address{2}
+	for _, tc := range []struct {
+		name         string
+		bogotaTime   *uint64
+		stored, next []common.Address
+		wantError    bool
+	}{
+		{name: "changed", bogotaTime: common.NewUint64(1), stored: []common.Address{a}, next: []common.Address{b}, wantError: true},
+		{name: "reordered", bogotaTime: common.NewUint64(1), stored: []common.Address{a, b}, next: []common.Address{b, a}},
+		{name: "nil and empty", bogotaTime: common.NewUint64(1), next: []common.Address{}},
+		{name: "unscheduled", stored: []common.Address{a}, next: []common.Address{b}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stored := chain.AllProtocolChanges.Copy()
+			stored.BogotaTime = tc.bogotaTime
+			stored.ZeroNonceStorageAccounts = tc.stored
+			db := dbAtHeightOne(t, stored)
+			original := readStoredChainConfig(t, db)
+			dropHeadHeader(t, db)
+
+			next := stored.Copy()
+			next.ZeroNonceStorageAccounts = tc.next
+			_, err := commitConfig(t, db, next)
+			if tc.wantError {
+				require.ErrorContains(t, err, "head header")
+				require.Equal(t, original, readStoredChainConfig(t, db))
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestCommitGenesisBlockRejectsChainIDChange(t *testing.T) {
 	genesis := &types.Genesis{
 		Config: &chain.Config{
@@ -330,8 +423,7 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDB(t *testing.T) {
 	require.Equal(t, uint64(1), *storedCfg.OsakaTime, "the stored schedule must be left alone")
 }
 
-// An unreadable head header is only fatal to a fork that moved: with the timestamp
-// schedule unchanged the head's time cannot change the answer, so the node still starts.
+// Unchanged timestamp-based rules do not need a readable head header.
 func TestCommitGenesisBlockHeadHeaderOutsideTheDBUnchangedSchedule(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -825,7 +917,7 @@ func TestGenesisAllocWithoutBalanceUsesZero(t *testing.T) {
 		},
 	}
 
-	_, ibs, err := genesiswrite.GenesisToBlock(genSpec, datadir.New(t.TempDir()), log.Root())
+	_, ibs, err := genesiswrite.GenesisToBlock(genSpec)
 	require.NoError(t, err)
 	defer ibs.Close()
 
@@ -970,7 +1062,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "custom block in DB, genesis == nil",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
-				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
+				genesiswrite.MustCommitGenesis(&customg, db)
 				return genesiswrite.CommitGenesisBlock(db, nil, "", datadir.New(tmpdir), logger)
 			},
 			wantHash:   customghash,
@@ -983,7 +1075,7 @@ func TestSetupGenesis(t *testing.T) {
 			// The custom config must be preserved, not overwritten with mainnet's.
 			name: "custom block in DB, genesis == nil, chainName mainnet",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
-				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
+				genesiswrite.MustCommitGenesis(&customg, db)
 				return genesiswrite.CommitGenesisBlock(db, nil, networkname.Mainnet, datadir.New(tmpdir), logger)
 			},
 			wantHash:   customghash,
@@ -992,7 +1084,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "custom block in DB, genesis == sepolia",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
-				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
+				genesiswrite.MustCommitGenesis(&customg, db)
 				return genesiswrite.CommitGenesisBlock(db, chainspec.SepoliaGenesisBlock(), networkname.Sepolia, datadir.New(tmpdir), logger)
 			},
 			wantErr:    &genesiswrite.GenesisMismatchError{Stored: customghash, New: chainspec.Sepolia.GenesisHash},
@@ -1002,7 +1094,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "compatible config in DB",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
-				genesiswrite.MustCommitGenesis(&oldcustomg, db, datadir.New(tmpdir), logger)
+				genesiswrite.MustCommitGenesis(&oldcustomg, db)
 				return genesiswrite.CommitGenesisBlock(db, &customg, "", datadir.New(tmpdir), logger)
 			},
 			wantHash:   customghash,
@@ -1081,41 +1173,108 @@ func TestSetupGenesis(t *testing.T) {
 	}
 }
 
+var (
+	allocA       = common.HexToAddress("0x00000000000000000000000000000000c0ffee05")
+	allocB       = common.HexToAddress("0x00000000000000000000000000000000c0ffee06")
+	absent       = common.HexToAddress("0x00000000000000000000000000000000c0ffee07")
+	allocSlot1   = map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x0b")}
+	selfDestruct = []byte{0x30, 0xff} // ADDRESS SELFDESTRUCT
+	// MSTORE 0x30ff at word 0, then CREATE(value 1, offset 30, size 2): the child self-destructs.
+	createSelfDestructingChild = []byte{0x61, 0x30, 0xff, 0x60, 0x00, 0x52, 0x60, 0x02, 0x60, 0x1e, 0x60, 0x01, 0xf0, 0x50}
+)
+
 // The genesis root GenesisToBlock computes from the version map alone (an in-memory
 // trie) must equal the root of the same genesis write set applied to SharedDomains and
 // committed — the path rpchelper reconstructs block 0 through. A divergence would mean
 // the block header's root and a replay-based root disagree.
 func TestGenesisRootMatchesAppliedCommitment(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
-	logger := log.New()
-	addr := common.HexToAddress("0x00000000000000000000000000000000c0ffee02")
-	genSpec := &types.Genesis{
-		Config: chain.AllProtocolChanges,
-		Alloc: types.GenesisAlloc{addr: {
-			Balance: big.NewInt(5),
-			Code:    []byte{0x60, 0x02},
-			Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x0b")},
-		}},
+	for name, alloc := range map[string]types.GenesisAlloc{
+		"plain account":             {allocA: {Balance: big.NewInt(5), Code: []byte{0x60, 0x02}, Storage: allocSlot1}},
+		"constructor reads storage": {allocA: {Balance: big.NewInt(5), Storage: allocSlot1, Constructor: []byte{0x60, 0x01, 0x54, 0x60, 0x02, 0x55}}},
+		"self-destruct":             {allocA: {Balance: big.NewInt(5), Constructor: selfDestruct}},
+		"nested child":              {allocA: {Balance: big.NewInt(5), Constructor: createSelfDestructingChild}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			genSpec := &types.Genesis{Config: chain.AllProtocolChanges, Alloc: alloc}
+			want, ibs, err := genesiswrite.GenesisToBlock(genSpec)
+			require.NoError(t, err)
+			ibs.Close()
+
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			tx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+			sd, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithSequentialCommitment())
+			require.NoError(t, err)
+			defer sd.Close()
+
+			head, _ := genesiswrite.GenesisWithoutStateToBlock(genSpec)
+			ibs, writes, err := genesiswrite.GenesisState(genSpec, head)
+			require.NoError(t, err)
+			ibs.Close()
+			require.NoError(t, state.ApplyWrites(writes, sd, tx, 0, 1, false))
+			root, err := sd.ComputeCommitment(ctx, tx, true, 0, 1, "genesis", nil)
+			require.NoError(t, err)
+			require.Equal(t, want.Root(), common.BytesToHash(root))
+		})
 	}
-	want, ibs, err := genesiswrite.GenesisToBlock(genSpec, datadir.New(t.TempDir()), logger)
-	require.NoError(t, err)
-	ibs.Close()
+}
 
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	tx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
-	require.NoError(t, err)
-	defer sd.Close()
+// A constructor deploys over a fresh account: it reads the storage listed next to it in
+// the alloc, but only the slots it writes reach the genesis state.
+func TestGenesisConstructorReadsButDropsAllocStorage(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		constructor []byte
+		root        string
+	}{
+		"stops":           {[]byte{0x00}, "0x43f783974e88e53a1016e9c65f9fedc2527b47844515ec929f1696e2022dbbef"},
+		"reads the slot":  {[]byte{0x60, 0x01, 0x54, 0x60, 0x02, 0x55}, "0xa7f300432cdaedb0038a1a97e38826f4366c62e37970e6982098b4caeb6c118d"}, // SSTORE(2, SLOAD(1))
+		"copies the slot": {[]byte{0x60, 0x01, 0x54, 0x60, 0x01, 0x55}, "0x43f783974e88e53a1016e9c65f9fedc2527b47844515ec929f1696e2022dbbef"}, // SSTORE(1, SLOAD(1))
+		"overwrites it":   {[]byte{0x60, 0x0c, 0x60, 0x01, 0x55}, "0x017f452e572db8375dd45970a274889d4b8f3624e1ec0837fa1b58e239f50751"},       // SSTORE(1, 0x0c)
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			alloc := types.GenesisAlloc{common.HexToAddress("0x00000000000000000000000000000000c0ffee01"): {
+				Balance: big.NewInt(5), Storage: allocSlot1, Constructor: tc.constructor,
+			}}
+			block, ibs, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: chain.AllProtocolChanges, Alloc: alloc})
+			require.NoError(t, err)
+			ibs.Close()
+			require.Equal(t, common.HexToHash(tc.root), block.Root())
+		})
+	}
+}
 
-	head, _ := genesiswrite.GenesisWithoutStateToBlock(genSpec)
-	ibs, writes, err := genesiswrite.GenesisState(genSpec, head)
-	require.NoError(t, err)
-	ibs.Close()
-	require.NoError(t, state.ApplyWrites(writes, sd, tx, 0, 1, false))
-	root, err := sd.ComputeCommitment(ctx, tx, true, 0, 1, "genesis", nil)
-	require.NoError(t, err)
-	require.Equal(t, want.Root(), common.BytesToHash(root))
+// Genesis finalizes without EIP-8246: every self-destruct deletes its account, after all
+// constructors ran, nested creations included. Accounts that did not self-destruct stay.
+func TestGenesisSelfDestructsFinalizeWithoutEIP8246(t *testing.T) {
+	t.Parallel()
+	// PUSH20 a BALANCE PUSH1 0 SSTORE
+	storeBalanceOfA := append(append([]byte{0x73}, allocA[:]...), 0x31, 0x60, 0x00, 0x55)
+	// CALL(gas, absent, value 1, 0, 0, 0, 0)
+	sendToAbsent := append(append([]byte{0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x01, 0x73}, absent[:]...), 0x5a, 0xf1, 0x50)
+	createSurvivingChild := []byte{0x60, 0x00, 0x60, 0x00, 0x60, 0x01, 0xf0, 0x50} // CREATE(value 1, offset 0, size 0)
+	emptyRoot := "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
+	for name, tc := range map[string]struct {
+		alloc types.GenesisAlloc
+		root  string
+	}{
+		"zero balance":          {types.GenesisAlloc{allocA: {Constructor: selfDestruct}}, emptyRoot},
+		"with balance":          {types.GenesisAlloc{allocA: {Balance: big.NewInt(5), Constructor: selfDestruct}}, emptyRoot},
+		"later reads it":        {types.GenesisAlloc{allocA: {Balance: big.NewInt(5), Constructor: selfDestruct}, allocB: {Constructor: storeBalanceOfA}}, "0x3a347e8eca5fbf845400dc78507e7ff365b6f146a114b7f55388807435ddd681"},
+		"nested child":          {types.GenesisAlloc{allocA: {Balance: big.NewInt(5), Constructor: createSelfDestructingChild}}, "0xdf73771f177186430015650435d807056389fbc3525f2b0ddb6a9a0f4ed9f43e"},
+		"nested child survives": {types.GenesisAlloc{allocA: {Balance: big.NewInt(5), Constructor: createSurvivingChild}}, "0xb683392ccf587c3fc8f8e75a69a9262dfc3e391dd453073bfdc68f053ddfa2e9"},
+		"sends value to absent": {types.GenesisAlloc{allocA: {Balance: big.NewInt(5), Constructor: sendToAbsent}}, "0xf5c7f7c466479e7ec8f4dcb1d92b84670ae9ff5da75368f75a50afce06af718c"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			block, ibs, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: chain.AllProtocolChanges, Alloc: tc.alloc})
+			require.NoError(t, err)
+			ibs.Close()
+			require.Equal(t, common.HexToHash(tc.root), block.Root())
+		})
+	}
 }

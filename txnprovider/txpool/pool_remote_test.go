@@ -19,6 +19,7 @@ package txpool
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,6 +37,13 @@ func encodeRemoteTxn(t *testing.T, txn *TxnSlot) *TxnSlot {
 	txn.Rlp, txn.Size = encoded.Bytes(), uint32(encoded.Len())
 	txn.IDHash = txn.Txn.Hash()
 	return txn
+}
+
+func remoteSetCodeTxn(t *testing.T, nonce uint64, authorizationCount int) *TxnSlot {
+	t.Helper()
+	txn := newTestSetCodeTxnSlot(nonce, 0, 1, 2, 100_000)
+	txn.Txn.(*types.SetCodeTransaction).Authorizations = make([]types.Authorization, authorizationCount)
+	return encodeRemoteTxn(t, txn)
 }
 
 func TestRemoteTxnQueueLimit(t *testing.T) {
@@ -129,6 +137,35 @@ func TestRemoteTxnQueueByteLimit(t *testing.T) {
 	require.Equal(t, expectedBytes+uint64(dropped.Size), pool.unprocessedRemoteBytes)
 	pool.removeProcessedRemoteTxns(len(pool.unprocessedRemoteTxns.Txns))
 	require.Zero(t, pool.unprocessedRemoteBytes)
+}
+
+func TestRemoteTxnQueueAuthorizationLimit(t *testing.T) {
+	ctx, pool, _, _ := newTestPool(t)
+	sender := common.Address{1}
+	add := func(txns ...*TxnSlot) {
+		var slots TxnSlots
+		for _, txn := range txns {
+			slots.Append(txn, sender[:], false)
+		}
+		pool.AddRemoteTxns(ctx, slots, nil, nil)
+	}
+	const half = maxRemoteAuthorizations / 2
+	first := remoteSetCodeTxn(t, 0, half)
+	second := remoteSetCodeTxn(t, 1, maxRemoteAuthorizations-half)
+	extra := remoteSetCodeTxn(t, 2, 1)
+	ordinary := encodeRemoteTxn(t, newTestTxnSlot(3, 0, 1, 2, 21_000))
+
+	add(first)
+	add(first, second, extra, ordinary)
+	require.True(t, slices.Equal(pool.unprocessedRemoteTxns.Txns, []*TxnSlot{first, second, ordinary}), "initial queue")
+
+	pool.removeProcessedRemoteTxns(1)
+	add(first, extra)
+	require.True(t, slices.Equal(pool.unprocessedRemoteTxns.Txns, []*TxnSlot{second, ordinary, first}), "queue after partial drain")
+
+	pool.removeProcessedRemoteTxns(3)
+	add(first, second)
+	require.True(t, slices.Equal(pool.unprocessedRemoteTxns.Txns, []*TxnSlot{first, second}), "queue after full drain")
 }
 
 func TestRemoteTxnQueueOwnsPayload(t *testing.T) {

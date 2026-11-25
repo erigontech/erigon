@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -55,7 +56,7 @@ import (
 func TestEmptyBlock(t *testing.T) {
 	require := require.New(t)
 	genesis := chainspec.GnosisGenesisBlock()
-	genesisBlock, ibs, err := genesiswrite.GenesisToBlock(genesis, datadir.New(t.TempDir()), log.Root())
+	genesisBlock, ibs, err := genesiswrite.GenesisToBlock(genesis)
 	require.NoError(err)
 	defer ibs.Close()
 
@@ -155,16 +156,12 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	db := temporaltest.NewTestDB(t, dirs)
 	tx, domains := temporaltest.NewTestTxSD(t, db)
 
-	// Replay genesis block the same way exec3 does for a versioned IBS (see txtask.go):
-	// GenesisState builds the alloc into a versioned IntraBlockState, then ApplyWrites
-	// publishes its write set into the real shared domains.
-	genesisBlock, genesisIbs, err := genesiswrite.GenesisToBlock(genesis, dirs, logger)
+	// Apply genesis the way exec3 does: the write set of the genesis IBS goes into the shared domains.
+	genesisBlock, genesisIbs, err := genesiswrite.GenesisToBlock(genesis)
 	require.NoError(err)
-	genesisIbs.Close()
-	genesisHead, _ := genesiswrite.GenesisWithoutStateToBlock(genesis)
-	stateIbs, genesisWrites, err := genesiswrite.GenesisState(genesis, genesisHead)
+	defer genesisIbs.Close()
+	genesisWrites, err := genesisIbs.FinalizedWrites(&chain.Rules{})
 	require.NoError(err)
-	stateIbs.Close()
 	err = state.ApplyWrites(genesisWrites, domains, tx, 0, 1, false)
 	require.NoError(err)
 
@@ -190,15 +187,24 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	header.GasLimit = 12500000
 
 	// Set up block 1 state the same way exec3 does for TxIndex == -1:
-	// engine.Initialize + FinalizeTx via InitializeBlockExecution.
+	// engine.Initialize via InitializeBlockExecution.
 	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, logger))
 	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsStateGetter(tx, execctxapi.StateGetterOptions{})))
-	writer := state.NewVersionedWriteCollector(rs)
 	ibs := state.New(reader)
 	defer ibs.Close()
-	err = protocol.InitializeBlockExecution(engine, chainRdr, header, config, ibs, writer, logger, nil)
+	err = protocol.InitializeBlockExecution(engine, chainRdr, header, config, ibs, logger, nil)
 	require.NoError(err)
-	account, err := reader.ReadAccountData(params.SystemAddress)
+
+	// Finalize the init writes into the version map and publish them into the
+	// shared domains the way exec3 does for TxIndex == -1.
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), engine, accounts.NilAddress, config)
+	writes, err := ibs.FinalizedWrites(blockContext.Rules(config))
+	require.NoError(err)
+	err = state.ApplyWrites(writes, domains, tx, header.Number.Uint64(), 2, false)
+	require.NoError(err)
+
+	freshReader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	account, err := freshReader.ReadAccountData(params.SystemAddress)
 	require.NoError(err)
 	require.NotNil(account)
 	require.True(account.Empty())

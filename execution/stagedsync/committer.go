@@ -670,11 +670,12 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	// A block straddling an unfrozen step edge must checkpoint at that edge, else
 	// the step's commitment .kv lags its account/storage .kv. The per-tx BAL lets
 	// compute-ahead do this mid-block.
-	if err := cc.checkpointStepsFromBAL(ctx, req, vm); err != nil {
+	after, err := cc.checkpointStepsFromBAL(ctx, req, vm)
+	if err != nil {
 		fail(err)
 		return
 	}
-	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, math.MaxUint32, targetOf(br))
+	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, after, math.MaxUint32, targetOf(br))
 	if err != nil {
 		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
@@ -708,27 +709,31 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 // BAL index is txNum-firstTxNum, so applying changes at index <= edge-firstTxNum
 // gives the state as of the edge. The returned root is discarded (no header to
 // verify mid-block). Runs before the block-end compute so that builds on it.
-func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap) error {
+// checkpointStepsFromBAL returns the tx index of its last checkpoint, -1 when it made none.
+func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap) (int64, error) {
+	after := int64(-1)
 	ss := cc.doms.StepSize()
 	if ss == 0 {
-		return nil
+		return after, nil
 	}
 	for edge := ((req.firstTxNum/ss)+1)*ss - 1; edge < req.lastTxNum; edge += ss {
 		if !cc.doms.IsUnfrozenStepEdge(cc.roTx, edge) {
 			continue
 		}
 		stepBr := &blockResult{BlockNum: req.blockNum, BlockHash: req.blockHash, lastTxNum: edge}
-		_, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, uint32(edge-req.firstTxNum), targetOf(stepBr))
+		idx := uint32(edge - req.firstTxNum)
+		_, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, after, idx, targetOf(stepBr))
 		if err != nil {
-			return fmt.Errorf("BAL-driven step-checkpoint at txNum %d: %w", edge, err)
+			return after, fmt.Errorf("BAL-driven step-checkpoint at txNum %d: %w", edge, err)
 		}
 		if flushOwn != nil {
 			if err := flushOwn(); err != nil {
-				return fmt.Errorf("BAL-driven step-checkpoint flush at txNum %d: %w", edge, err)
+				return after, fmt.Errorf("BAL-driven step-checkpoint flush at txNum %d: %w", edge, err)
 			}
 		}
+		after = int64(idx)
 	}
-	return nil
+	return after, nil
 }
 
 // computeRootFromBAL folds the BAL block's touched keys (up to maxTxIndex) straight
@@ -736,8 +741,8 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 // computes the root at t. Shared by the block-end compute-ahead and the mid-block step
 // checkpoints so the two can't drift. The BAL supplies the touched-key set; every value
 // (and the seeded EIP-161 removal) is read from the version map view.
-func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap, maxTxIndex uint32, t commitTarget) ([]byte, func() error, error) {
-	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1, dr: cc.asOfReader.dr, prefetched: cc.branchPrefetch}
+func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap, afterTxIndex int64, maxTxIndex uint32, t commitTarget) ([]byte, func() error, error) {
+	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1, dr: cc.asOfReader.dr, prefetched: cc.branchPrefetch, cur: vm, curTxNum: t.lastTxNum}
 	if cc.balUpdates == nil {
 		cc.balUpdates = cc.updates.NewEmpty()
 		// ModeDirect must upgrade to ModeUpdate to carry the BAL values.
@@ -748,11 +753,16 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 		cc.balUpdates.Reset()
 	}
 	balUpdates := cc.balUpdates
-	cc.clearTouched()
+	// A block's later folds keep the touched set and storage wipes of its earlier ones, as the per-tx mid-block path does.
+	if afterTxIndex < 0 {
+		cc.clearTouched()
+	} else {
+		cc.clearFoldedKeys()
+	}
 	cc.balBlock = true
-	cc.accumulateTouched(bal.ToWriteSet(req.bal, maxTxIndex), nil)
+	cc.accumulateTouched(bal.ToWriteSetAfter(req.bal, afterTxIndex, maxTxIndex), nil)
 	err := cc.emit(cc.foldView(vm, t.lastTxNum, reader.dr.StateReaderAt(reader.txNum)), balUpdates)
-	cc.clearTouched()
+	cc.clearFoldedKeys()
 	if err != nil {
 		return nil, nil, fmt.Errorf("base read: %w", err)
 	}

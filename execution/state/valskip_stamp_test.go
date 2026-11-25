@@ -272,8 +272,7 @@ func TestQuietBelow_DeleteBumpsStamp(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x05"))
 	ops := map[string]func(vm *VersionMap, j int){
-		"Delete":    func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, true) },
-		"DeleteAll": func(vm *VersionMap, j int) { vm.DeleteAll(addr, j) },
+		"Delete": func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, true) },
 	}
 	for name, op := range ops {
 		for _, tc := range []struct {
@@ -293,8 +292,7 @@ func TestQuietBelow_NoOpDeleteDoesNotBump(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x06"))
 	ops := map[string]func(vm *VersionMap, j int){
-		"Delete":    func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, false) },
-		"DeleteAll": func(vm *VersionMap, j int) { vm.DeleteAll(addr, j) },
+		"Delete": func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, false) },
 	}
 	for name, op := range ops {
 		vm := newStampedMap(32)

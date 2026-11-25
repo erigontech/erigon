@@ -74,6 +74,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
@@ -116,6 +117,27 @@ const payloadPublicationDivisor = 4
 const gloasPayloadCollectionDivisor = 3
 
 const minimumPayloadBuildTime = 500 * time.Millisecond
+
+var (
+	payloadCollectedSeconds = map[bool]metrics.Summary{
+		true:  metrics.GetOrCreateSummary(`caplin_block_production_payload_collected_seconds{window="prepared"}`),
+		false: metrics.GetOrCreateSummary(`caplin_block_production_payload_collected_seconds{window="unprepared"}`),
+	}
+	payloadPollFailures = metrics.GetOrCreateCounterVec("caplin_block_production_payload_poll_failures_total", []string{"reason"})
+)
+
+func payloadPollFailureReason(err error) string {
+	switch classifyProductionError(err) {
+	case productionErrorBusy:
+		return "busy"
+	case productionErrorUnknownPayload:
+		return "unknown_payload"
+	case productionErrorCanceled, productionErrorUnexpectedCancellation:
+		return "canceled"
+	default:
+		return "other"
+	}
+}
 
 // identificationSegment builds the client-version graffiti standard's EL+CL code and commit
 // prefix segment, so client-diversity tooling can attribute proposed blocks. See
@@ -1918,12 +1940,21 @@ func (a *ApiHandler) produceBeaconBody(
 			)
 		}
 		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, warmup)
+		options := gloasBlockOptionsFromContext(ctx)
+		recordMetrics := options == nil || !options.bidRequest
 		payload, bundles, requestsBundle, blockValue, err := pollAssembledPayload(
 			ctx, buildWindow, retryTime,
 			func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-				return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
+				p, b, rb, v, getErr := a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
+				if getErr != nil && recordMetrics {
+					payloadPollFailures.WithLabelValues(payloadPollFailureReason(getErr)).Inc()
+				}
+				return p, b, rb, v, getErr
 			},
 		)
+		if err == nil && payload != nil && recordMetrics {
+			payloadCollectedSeconds[warmup > 0].Observe(time.Since(slotStart).Seconds())
+		}
 		if err != nil {
 			executionErr = fmt.Errorf("produceBeaconBody: %w", err)
 			return
@@ -2659,12 +2690,9 @@ func (a *ApiHandler) publishBlindedBlocks(r *http.Request, apiVersion int) (*bea
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, cltypes.ErrGloasCannotBlind)
 	}
 	defer r.Body.Close()
-	contentType, err := requestContentType(r)
+	contentType, err := publishedBlockContentType(r)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err)
-	}
-	if contentType != "application/json" && contentType != "application/octet-stream" {
-		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, fmt.Errorf("unsupported content type: %s", contentType))
+		return nil, err
 	}
 	isJSON := contentType == "application/json"
 
@@ -2840,9 +2868,9 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 	if block == nil {
 		return nil, errors.New("failed to create block")
 	}
-	contentType := r.Header.Get("Content-Type")
-	if contentType != "application/json" && contentType != "application/octet-stream" {
-		return nil, errors.New("invalid content type")
+	contentType, err := publishedBlockContentType(r)
+	if err != nil {
+		return nil, err
 	}
 	limit, err := a.publishedBlockBodyLimit(version, false)
 	if err != nil {
@@ -2904,9 +2932,13 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 	version clparams.StateVersion,
 	r *http.Request,
 ) (*cltypes.DenebSignedBeaconBlock, error) {
+	contentType, err := publishedBlockContentType(r)
+	if err != nil {
+		return nil, err
+	}
 	signedBlock := cltypes.NewSignedBeaconBlock(a.beaconChainCfg, version)
 
-	switch r.Header.Get("Content-Type") {
+	switch contentType {
 	case "application/json":
 		body, err := readBoundedBody(r, maxGloasPublishedBlockSize)
 		if err != nil {
@@ -2924,7 +2956,7 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 			SignedBlock: signedBlock,
 		}, nil
 
-	case "application/octet-stream":
+	default:
 		octect, err := readBoundedBody(r, maxGloasPublishedBlockSize)
 		if err != nil {
 			return nil, err
@@ -2936,7 +2968,17 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 			SignedBlock: signedBlock,
 		}, nil
 	}
-	return nil, errors.New("invalid content type")
+}
+
+func publishedBlockContentType(r *http.Request) (string, error) {
+	contentType, err := requestContentType(r)
+	if err != nil {
+		return "", beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err)
+	}
+	if contentType != "application/json" && contentType != "application/octet-stream" {
+		return "", beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, fmt.Errorf("unsupported content type: %s", contentType))
+	}
+	return contentType, nil
 }
 
 func readBoundedBody(r *http.Request, limit int64) ([]byte, error) {

@@ -109,6 +109,7 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 	type blobRange struct {
 		from, to uint64
 		fps      []fileFingerprint
+		src      *snapshotsync.DirtySegment
 	}
 	var ranges []blobRange
 	if err := db.View(ctx, func(tx kv.Tx) error {
@@ -125,7 +126,7 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 					continue
 				}
 			}
-			ranges = append(ranges, blobRange{from, to, fps})
+			ranges = append(ranges, blobRange{from, to, fps, segment.Src()})
 		}
 		return nil
 	}); err != nil {
@@ -139,6 +140,7 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 	g.SetLimit(estimate.AlmostAllCPUs())
 	for i, r := range ranges {
 		g.Go(func() error {
+			defer r.src.MadvSequential().DisableReadAhead()
 			return db.View(gctx, func(tx kv.Tx) error {
 				var dependsOnChild bool
 				for slot := r.from; slot < r.to; slot++ {
