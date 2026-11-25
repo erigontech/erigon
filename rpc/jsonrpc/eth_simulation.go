@@ -303,9 +303,9 @@ type simulator struct {
 	validation        bool
 	fullTransactions  bool
 	// Without commitment history, each block's root is replayed from the base block, so it needs the keys of all earlier simulated blocks.
-	touchedKeys   keysByAccount
-	sweptStorage  map[accounts.Address]struct{}
-	replacedSlots int
+	touchedKeys  keysByAccount
+	sweptStorage map[accounts.Address]struct{}
+	removedSlots int
 }
 
 func newSimulator(
@@ -616,34 +616,46 @@ type simOverrideReader struct {
 
 var _ state.StateReader = (*simOverrideReader)(nil)
 
-// maxSimReplacedSlots bounds the stored slots one request removes: removing all of an account's stored slots
+// maxSimRemovedSlots bounds the stored slots one request removes: removing all of an account's stored slots
 // loads them all into memory.
-const maxSimReplacedSlots = 100_000
+const maxSimRemovedSlots = 100_000
 
 // countStorageSlots adds the slots stored for addr, at the head and at the simulation base block, to the slots
 // the request removes, and fails once they exceed limit.
-func (s *simulator) countStorageSlots(ctx context.Context, addr accounts.Address, sd *execctx.SharedDomains, tx kv.TemporalTx, latest bool, firstMinTxNum uint64, limit int) error {
-	addrValue := addr.Value()
-	budget := limit - s.replacedSlots
-	replaced := make(map[string]struct{})
-	add := func(key []byte) bool {
-		replaced[string(key)] = struct{}{}
-		return len(replaced) <= budget
+func (s *simulator) countStorageSlots(ctx context.Context, addr []byte, sd *execctx.SharedDomains, tx kv.TemporalTx, latest bool, firstMinTxNum uint64, limit int) error {
+	budget := limit - s.removedSlots
+	removed := 0
+	// Only a historical base walks a second view, whose slots may repeat those at the head.
+	var seen map[string]struct{}
+	if !latest {
+		seen = make(map[string]struct{})
 	}
-	if err := sd.IteratePrefix(kv.StorageDomain, addrValue[:], tx, func(k, _ []byte) (bool, error) {
+	add := func(key []byte) bool {
+		if seen != nil {
+			if _, ok := seen[string(key)]; ok {
+				return true
+			}
+			seen[string(key)] = struct{}{}
+		}
+		removed++
+		return removed <= budget
+	}
+	if err := sd.IteratePrefix(kv.StorageDomain, addr, tx, func(k, _ []byte) (bool, error) {
 		return add(k), ctx.Err()
 	}); err != nil {
 		return err
 	}
-	if _, swept := s.sweptStorage[addr]; !latest && !swept && len(replaced) <= budget {
-		if err := visitStorageSlotsAsOf(ctx, tx, addrValue[:], firstMinTxNum, add); err != nil {
-			return err
+	if !latest && removed <= budget {
+		if _, swept := s.sweptStorage[accounts.InternAddress(common.BytesToAddress(addr))]; !swept {
+			if err := visitStorageSlotsAsOf(ctx, tx, addr, firstMinTxNum, add); err != nil {
+				return err
+			}
 		}
 	}
-	if len(replaced) > budget {
+	if removed > budget {
 		return clientLimitExceededError(fmt.Sprintf("the simulation removes more than %d storage slots", limit))
 	}
-	s.replacedSlots += len(replaced)
+	s.removedSlots += removed
 	return nil
 }
 
@@ -799,8 +811,8 @@ func (s *simulator) simulateBlock(
 	if !latest {
 		putDel = &historicalPutDel{TemporalPutDel: putDel, view: newSimulationIntraBlockStateReader(tx, sharedDomains, firstMinTxNum), touched: s.touchedKeys, sweptStorage: s.sweptStorage}
 	}
-	putDel = &storageBoundPutDel{TemporalPutDel: putDel, count: func(addr accounts.Address) error {
-		return s.countStorageSlots(ctx, addr, sharedDomains, tx, latest, firstMinTxNum, maxSimReplacedSlots)
+	putDel = &storageBoundPutDel{TemporalPutDel: putDel, count: func(addr []byte) error {
+		return s.countStorageSlots(ctx, addr, sharedDomains, tx, latest, firstMinTxNum, maxSimRemovedSlots)
 	}}
 	stateWriter := newDiffTrackingWriter(putDel, minTxNum, s.touchedKeys)
 	balMode := s.chainConfig.IsEIPEnabled(7928, header.Time)
@@ -1368,12 +1380,12 @@ func newSimulationIntraBlockStateReader(roTx kv.TemporalTx, sd *execctx.SharedDo
 // them all.
 type storageBoundPutDel struct {
 	kv.TemporalPutDel
-	count func(accounts.Address) error
+	count func(addr []byte) error
 }
 
 func (p *storageBoundPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
 	if domain == kv.AccountsDomain {
-		if err := p.count(accounts.InternAddress(common.BytesToAddress(k))); err != nil {
+		if err := p.count(k); err != nil {
 			return err
 		}
 	}
@@ -1382,7 +1394,7 @@ func (p *storageBoundPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64,
 
 func (p *storageBoundPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
 	if domain == kv.StorageDomain {
-		if err := p.count(accounts.InternAddress(common.BytesToAddress(prefix))); err != nil {
+		if err := p.count(prefix); err != nil {
 			return err
 		}
 	}

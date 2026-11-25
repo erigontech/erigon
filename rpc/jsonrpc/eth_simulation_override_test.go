@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -22,14 +21,12 @@ import (
 
 func contractGenesis(t *testing.T, cfg *chain.Config, contract common.Address, account types.GenesisAccount) (*execmoduletester.ExecModuleTester, common.Address) {
 	t.Helper()
-	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	require.NoError(t, err)
-	bankAddr := crypto.PubkeyToAddress(bankKey.PublicKey)
+	bankAddr := testAddr
 	alloc := types.GenesisAlloc{
 		bankAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
 		contract: account,
 	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: cfg, Alloc: alloc, GasLimit: 60_000_000}), execmoduletester.WithKey(bankKey))
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: cfg, Alloc: alloc, GasLimit: 60_000_000}), execmoduletester.WithKey(testKey))
 	chainPack, err := m.GenerateChain(1, func(int, *blockgen.BlockGen) {})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainPack))
@@ -159,10 +156,8 @@ func TestSimulateV1BoundsTheStorageItRemoves(t *testing.T) {
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
-	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	require.NoError(t, err)
 	// The bank's first CREATE lands on the contract.
-	contract := types.CreateAddress(crypto.PubkeyToAddress(bankKey.PublicKey), 0)
+	contract := types.CreateAddress(testAddr, 0)
 	zero := hexutil.Uint64(0)
 	empty := hexutil.Bytes{}
 	noBalance := hexutil.U256{}
@@ -195,19 +190,20 @@ func TestSimulateV1BoundsTheStorageItRemoves(t *testing.T) {
 		slots int
 		fails bool
 	}{
-		{"at the bound", maxSimReplacedSlots, false},
-		{"above the bound", maxSimReplacedSlots + 1, true},
+		{"at the bound", maxSimRemovedSlots, false},
+		{"above the bound", maxSimRemovedSlots + 1, true},
 	} {
 		storage := make(map[common.Hash]common.Hash, size.slots)
 		for i := range size.slots {
 			storage[common.BigToHash(big.NewInt(int64(i+1)))] = common.Hash{31: 1}
 		}
-		for _, removal := range removals {
-			for _, cfg := range simulateOverrideConfigs {
+		for _, cfg := range simulateOverrideConfigs {
+			// SimulateV1 does not write to the database, so the subtests share one chain.
+			m, bankAddr := contractGenesis(t, cfg.cfg, contract, types.GenesisAccount{Nonce: 1, Balance: big.NewInt(1), Code: []byte{0x00}, Storage: storage})
+			api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+			for _, removal := range removals {
 				for _, base := range simulateBases {
 					t.Run(removal.name+"/"+size.name+"/"+cfg.name+"/"+base.name, func(t *testing.T) {
-						m, bankAddr := contractGenesis(t, cfg.cfg, contract, types.GenesisAccount{Nonce: 1, Balance: big.NewInt(1), Code: []byte{0x00}, Storage: storage})
-						api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 						result, err := api.SimulateV1(context.Background(), SimulationRequest{
 							BlockStateCalls: []SimulatedBlock{
 								removal.block(bankAddr),

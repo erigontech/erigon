@@ -43,19 +43,25 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
+// putSlots stores slots 1 to n of addr, each holding its own number.
+func putSlots(t *testing.T, putDel kv.TemporalPutDel, addr common.Address, n byte) {
+	t.Helper()
+	for slot := byte(1); slot <= n; slot++ {
+		require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}), []byte{slot}, 1, nil))
+	}
+}
+
 func TestCountStorageSlotsBoundsTheRequest(t *testing.T) {
 	t.Parallel()
 	rwTx, sd := temporaltest.NewTestTxSD(t, temporaltest.NewTestDB(t, datadir.New(t.TempDir())))
 	addrA, addrB := common.HexToAddress("0xaa"), common.HexToAddress("0xbb")
 	putDel := sd.AsPutDel(rwTx)
-	for slot := byte(1); slot <= 2; slot++ {
-		require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addrA, common.Hash{31: slot}), []byte{slot}, 1, nil))
-		require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addrB, common.Hash{31: slot}), []byte{slot}, 1, nil))
-	}
+	putSlots(t, putDel, addrA, 2)
+	putSlots(t, putDel, addrB, 2)
 	check := func(limit int) error {
 		sim := &simulator{}
 		for _, addr := range []common.Address{addrA, addrB} {
-			if err := sim.countStorageSlots(t.Context(), accounts.InternAddress(addr), sd, rwTx, true, 0, limit); err != nil {
+			if err := sim.countStorageSlots(t.Context(), addr[:], sd, rwTx, true, 0, limit); err != nil {
 				return err
 			}
 		}
@@ -76,10 +82,9 @@ func TestCountStorageSlotsCountsSlotsAtTheBaseBlock(t *testing.T) {
 		require.NoError(t, putDel.DomainDel(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}), 2, []byte{slot}))
 	}
 	require.NoError(t, sd.Flush(t.Context(), rwTx))
-	interned := accounts.InternAddress(addr)
 
-	require.NoError(t, (&simulator{}).countStorageSlots(t.Context(), interned, sd, rwTx, true, 2, 2), "the head has no slots")
-	require.ErrorContains(t, (&simulator{}).countStorageSlots(t.Context(), interned, sd, rwTx, false, 2, 2), "more than 2 storage slots")
+	require.NoError(t, (&simulator{}).countStorageSlots(t.Context(), addr[:], sd, rwTx, true, 2, 2), "the head has no slots")
+	require.ErrorContains(t, (&simulator{}).countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 2), "more than 2 storage slots")
 }
 
 func TestCountStorageSlotsCountsHeadAndBaseSlotsOnce(t *testing.T) {
@@ -94,10 +99,9 @@ func TestCountStorageSlotsCountsHeadAndBaseSlotsOnce(t *testing.T) {
 	}
 	require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: 5}), []byte{5}, 1, nil))
 	require.NoError(t, sd.Flush(t.Context(), rwTx))
-	interned := accounts.InternAddress(addr)
 
-	require.NoError(t, (&simulator{}).countStorageSlots(t.Context(), interned, sd, rwTx, false, 2, 5))
-	err := (&simulator{}).countStorageSlots(t.Context(), interned, sd, rwTx, false, 2, 4)
+	require.NoError(t, (&simulator{}).countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 5))
+	err := (&simulator{}).countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 4)
 	require.ErrorContains(t, err, "more than 4 storage slots")
 	var rpcErr rpc.Error
 	require.ErrorAs(t, err, &rpcErr)
@@ -117,27 +121,23 @@ func TestCountStorageSlotsSkipsBaseSlotsAlreadySwept(t *testing.T) {
 	interned := accounts.InternAddress(addr)
 	sim := &simulator{sweptStorage: map[accounts.Address]struct{}{interned: {}}}
 
-	require.NoError(t, sim.countStorageSlots(t.Context(), interned, sd, rwTx, false, 2, 2))
-	require.Zero(t, sim.replacedSlots)
+	require.NoError(t, sim.countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 2))
+	require.Zero(t, sim.removedSlots)
 }
 
 // Slots that an earlier write already removed are not counted again.
 func TestCountStorageSlotsCountsRemovedSlotsOnce(t *testing.T) {
 	t.Parallel()
 	rwTx, sd := temporaltest.NewTestTxSD(t, temporaltest.NewTestDB(t, datadir.New(t.TempDir())))
-	addrA, addrB := common.HexToAddress("0xaa"), common.HexToAddress("0xbb")
+	addr := common.HexToAddress("0xaa")
 	putDel := sd.AsPutDel(rwTx)
-	for slot := byte(1); slot <= 2; slot++ {
-		require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addrA, common.Hash{31: slot}), []byte{slot}, 1, nil))
-		require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addrB, common.Hash{31: slot}), []byte{slot}, 1, nil))
-	}
+	putSlots(t, putDel, addr, 2)
 	sim := &simulator{}
-	require.NoError(t, sim.countStorageSlots(t.Context(), accounts.InternAddress(addrA), sd, rwTx, true, 0, 3))
-	require.NoError(t, putDel.DomainDelPrefix(kv.StorageDomain, addrA[:], 2))
+	require.NoError(t, sim.countStorageSlots(t.Context(), addr[:], sd, rwTx, true, 0, 3))
+	require.NoError(t, putDel.DomainDelPrefix(kv.StorageDomain, addr[:], 2))
 
-	require.NoError(t, sim.countStorageSlots(t.Context(), accounts.InternAddress(addrA), sd, rwTx, true, 0, 3))
-	require.Equal(t, 2, sim.replacedSlots)
-	require.ErrorContains(t, sim.countStorageSlots(t.Context(), accounts.InternAddress(addrB), sd, rwTx, true, 0, 3), "more than 3 storage slots")
+	require.NoError(t, sim.countStorageSlots(t.Context(), addr[:], sd, rwTx, true, 0, 3))
+	require.Equal(t, 2, sim.removedSlots)
 }
 
 // Every write that removes all of an account's slots is counted before it runs, and a refused one leaves them.
@@ -161,9 +161,7 @@ func TestStorageBoundPutDelCountsBeforeRemoving(t *testing.T) {
 			t.Parallel()
 			rwTx, sd := temporaltest.NewTestTxSD(t, temporaltest.NewTestDB(t, datadir.New(t.TempDir())))
 			putDel := sd.AsPutDel(rwTx)
-			for slot := byte(1); slot <= 2; slot++ {
-				require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}), []byte{slot}, 1, nil))
-			}
+			putSlots(t, putDel, addr, 2)
 			countSlots := func() int {
 				n := 0
 				require.NoError(t, sd.IteratePrefix(kv.StorageDomain, addr[:], rwTx, func([]byte, []byte) (bool, error) {
@@ -173,16 +171,16 @@ func TestStorageBoundPutDelCountsBeforeRemoving(t *testing.T) {
 				return n
 			}
 			refused := errors.New("refused")
-			var counted []accounts.Address
-			bound := &storageBoundPutDel{TemporalPutDel: putDel, count: func(a accounts.Address) error {
+			var counted [][]byte
+			bound := &storageBoundPutDel{TemporalPutDel: putDel, count: func(a []byte) error {
 				counted = append(counted, a)
 				return refused
 			}}
 			require.ErrorIs(t, tc.remove(state.NewWriter(bound, nil, 2)), refused)
-			require.Equal(t, []accounts.Address{interned}, counted)
+			require.Equal(t, [][]byte{addr[:]}, counted)
 			require.Equal(t, 2, countSlots())
 
-			bound.count = func(accounts.Address) error { return nil }
+			bound.count = func([]byte) error { return nil }
 			require.NoError(t, tc.remove(state.NewWriter(bound, nil, 2)))
 			require.Zero(t, countSlots())
 		})
