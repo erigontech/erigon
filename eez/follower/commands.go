@@ -93,6 +93,36 @@ func (f *Follower) Produce(ctx context.Context, in deriver.HeaderInputs, txs txn
 	return built, err
 }
 
+// Extend builds the block of inputs in on the head from exactly txs, in
+// order, and makes it the head, running hook when set. A transaction the
+// block cannot take fails it; a head other than in's parent fails it with
+// ErrStaleParent.
+func (f *Follower) Extend(ctx context.Context, in deriver.HeaderInputs, txs []types.Transaction, hook CommitHook) (*types.BlockWithReceipts, error) {
+	var built *types.BlockWithReceipts
+	err := f.do(ctx, func(ctx context.Context) error {
+		if err := f.requireHead(ctx, in.ParentHash); err != nil {
+			return err
+		}
+		parent, err := f.chain.Head(ctx)
+		if err != nil {
+			return err
+		}
+		safe, finalized, err := f.deriver.Anchors(ctx)
+		if err != nil {
+			return err
+		}
+		var committed func(*types.Header)
+		if hook != nil {
+			committed = hook()
+		}
+		if built, err = f.chain.Extend(ctx, parent, in, txs, safe, finalized); err == nil && committed != nil {
+			committed(built.Block.Header())
+		}
+		return err
+	})
+	return built, err
+}
+
 // Insert stores blocks, the first a child of the head, and makes the last
 // one the head, running hook when set: on the first one's parent and with
 // the last one's header. A head other than the first block's parent fails

@@ -99,34 +99,38 @@ func TestJudge(t *testing.T) {
 	}
 }
 
-// chain is an L1 whose state script changes on each receipt read.
-type chain struct {
+// scripted is an L1 whose state script changes on each receipt read.
+type scripted struct {
 	mu     sync.Mutex
 	head   uint64
 	got    *l1.Receipt
 	failed error
 	reads  int
-	script func(c *chain, read int)
+	script func(c *scripted, read int)
 	// has reports the posting known to the node; lookups counts the reads.
 	has          bool
 	lookupFailed error
 	lookups      int
 }
 
-func (c *chain) HasTransaction(context.Context, common.Hash) (bool, error) {
+func (c *scripted) HasTransaction(context.Context, common.Hash) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.lookups++
 	return c.has, c.lookupFailed
 }
 
-func (c *chain) Head(context.Context) (*l1.Header, error) {
+func (c *scripted) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
+	return &l1.Header{Number: n}, nil
+}
+
+func (c *scripted) Head(context.Context) (*l1.Header, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return &l1.Header{Number: c.head}, c.failed
 }
 
-func (c *chain) Receipt(context.Context, common.Hash) (*l1.Receipt, error) {
+func (c *scripted) Receipt(context.Context, common.Hash) (*l1.Receipt, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.reads++
@@ -147,6 +151,10 @@ type stalling struct {
 }
 
 func (*stalling) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 100}, nil }
+
+func (*stalling) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
+	return &l1.Header{Number: n}, nil
+}
 
 func (s *stalling) Receipt(ctx context.Context, _ common.Hash) (*l1.Receipt, error) {
 	if s.reads.Add(1) == 1 {
@@ -181,20 +189,20 @@ func TestWatch(t *testing.T) {
 		name        string
 		head        uint64
 		pooled, has bool
-		script      func(c *chain, read int)
+		script      func(c *scripted, read int)
 		want        Resolution
 	}{
-		{name: "settles once its receipt appears", head: 100, script: func(c *chain, read int) {
+		{name: "settles once its receipt appears", head: 100, script: func(c *scripted, read int) {
 			if read == 3 {
 				c.got = settles
 			}
 		}, want: Settled},
-		{name: "dropped once L1 passes the target", head: 100, script: func(c *chain, read int) {
+		{name: "dropped once L1 passes the target", head: 100, script: func(c *scripted, read int) {
 			if read == 3 {
 				c.head = 102
 			}
 		}, want: Failed},
-		{name: "the target block itself is no verdict", head: 100, script: func(c *chain, read int) {
+		{name: "the target block itself is no verdict", head: 100, script: func(c *scripted, read int) {
 			switch read {
 			case 2:
 				c.head = 101
@@ -202,12 +210,12 @@ func TestWatch(t *testing.T) {
 				c.got = settles
 			}
 		}, want: Settled},
-		{name: "a receipt behind the head", head: 102, script: func(c *chain, read int) {
+		{name: "a receipt behind the head", head: 102, script: func(c *scripted, read int) {
 			if read == 2 {
 				c.got = settles
 			}
 		}, want: Settled},
-		{name: "a failed recheck is no verdict", head: 102, script: func(c *chain, read int) {
+		{name: "a failed recheck is no verdict", head: 102, script: func(c *scripted, read int) {
 			switch read {
 			case 2:
 				c.failed = down
@@ -215,7 +223,7 @@ func TestWatch(t *testing.T) {
 				c.failed, c.got = nil, settles
 			}
 		}, want: Settled},
-		{name: "failed reads are no verdict", head: 100, script: func(c *chain, read int) {
+		{name: "failed reads are no verdict", head: 100, script: func(c *scripted, read int) {
 			switch read {
 			case 1:
 				c.failed, c.head = down, 102
@@ -223,7 +231,7 @@ func TestWatch(t *testing.T) {
 				c.failed, c.got = nil, settles
 			}
 		}, want: Settled},
-		{name: "a pooled posting the node has outlives its target by its grace", head: 100, pooled: true, has: true, script: func(c *chain, read int) {
+		{name: "a pooled posting the node has outlives its target by its grace", head: 100, pooled: true, has: true, script: func(c *scripted, read int) {
 			switch read {
 			case 2:
 				c.head = 101 + pooledGrace
@@ -231,17 +239,17 @@ func TestWatch(t *testing.T) {
 				c.got = settles
 			}
 		}, want: Settled},
-		{name: "a pooled posting the node has, past its grace", head: 100, pooled: true, has: true, script: func(c *chain, read int) {
+		{name: "a pooled posting the node has, past its grace", head: 100, pooled: true, has: true, script: func(c *scripted, read int) {
 			if read == 3 {
 				c.head = 102 + pooledGrace
 			}
 		}, want: Failed},
-		{name: "a pooled posting the node lost", head: 100, pooled: true, has: true, script: func(c *chain, read int) {
+		{name: "a pooled posting the node lost", head: 100, pooled: true, has: true, script: func(c *scripted, read int) {
 			if read == 3 {
 				c.has = false
 			}
 		}, want: Failed},
-		{name: "a lost pooled posting's late receipt", head: 100, pooled: true, has: true, script: func(c *chain, read int) {
+		{name: "a lost pooled posting's late receipt", head: 100, pooled: true, has: true, script: func(c *scripted, read int) {
 			switch read {
 			case 3:
 				c.has = false
@@ -249,7 +257,7 @@ func TestWatch(t *testing.T) {
 				c.got = settles
 			}
 		}, want: Settled},
-		{name: "a failed lookup is no verdict", head: 100, pooled: true, has: true, script: func(c *chain, read int) {
+		{name: "a failed lookup is no verdict", head: 100, pooled: true, has: true, script: func(c *scripted, read int) {
 			switch read {
 			case 2:
 				c.lookupFailed, c.has, c.head = down, false, 105
@@ -257,14 +265,14 @@ func TestWatch(t *testing.T) {
 				c.lookupFailed, c.got = nil, settles
 			}
 		}, want: Settled},
-		{name: "a pooled posting the node never showed falls back on its target", head: 100, pooled: true, script: func(c *chain, read int) {
+		{name: "a pooled posting the node never showed falls back on its target", head: 100, pooled: true, script: func(c *scripted, read int) {
 			if read == 3 {
 				c.head = 102
 			}
 		}, want: Failed},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			node := &chain{head: c.head, script: c.script, has: c.has}
+			node := &scripted{head: c.head, script: c.script, has: c.has}
 			o := &Observer{Node: node, RollupID: 1, EEZ: eezL1, Every: time.Millisecond, Logger: log.New()}
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
@@ -277,11 +285,61 @@ func TestWatch(t *testing.T) {
 		})
 	}
 	t.Run("ends with its context", func(t *testing.T) {
-		o := &Observer{Node: &chain{head: 100}, RollupID: 1, EEZ: eezL1, Every: time.Millisecond, Logger: log.New()}
+		o := &Observer{Node: &scripted{head: 100}, RollupID: 1, EEZ: eezL1, Every: time.Millisecond, Logger: log.New()}
 		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 		defer cancel()
 		got, err := o.Watch(ctx, common.Hash{1}, b, terminal, post.Sent{Block: 101})
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.Equal(t, Pending, got)
+	})
+}
+
+// TestWatchScansTheBlock: with a scanner, a posting's settlement is read
+// from its whole block, where the triggers that consume its entries log.
+func TestWatchScansTheBlock(t *testing.T) {
+	b, terminal := anchorBatch(t)
+	posting := common.Hash{1}
+	landed := receipt(1, batchPosted(t, eezL1))
+	for _, c := range []struct {
+		name    string
+		scanned []l1.ScannedBatch
+		failed  error
+		want    Resolution
+	}{
+		{"settled by its triggers", []l1.ScannedBatch{{TxHash: posting, Settlement: protocol.Settlement{Applied: []protocol.AppliedEntry{{}}, FinalState: terminal}}}, nil, Settled},
+		{"part of it", []l1.ScannedBatch{{TxHash: posting, Settlement: protocol.Settlement{Applied: []protocol.AppliedEntry{{}}, FinalState: common.Hash{7}}}}, nil, SettledPartial},
+		{"another posting's", []l1.ScannedBatch{{TxHash: common.Hash{2}, Settlement: protocol.Settlement{Applied: []protocol.AppliedEntry{{}}, FinalState: terminal}}}, nil, Failed},
+		{"nothing applied", nil, nil, Failed},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var asked []uint64
+			o := &Observer{
+				Node: &scripted{head: 100, got: landed}, RollupID: 1, EEZ: eezL1, Every: time.Millisecond, Logger: log.New(),
+				Scan: func(_ context.Context, block uint64) ([]l1.ScannedBatch, error) {
+					asked = append(asked, block)
+					return c.scanned, nil
+				},
+			}
+			got, err := o.Watch(t.Context(), posting, b, terminal, post.Sent{Block: 101})
+			require.NoError(t, err)
+			require.Equal(t, c.want, got)
+			require.Equal(t, []uint64{landed.BlockNumber}, asked)
+		})
+	}
+	t.Run("a failed scan is no verdict", func(t *testing.T) {
+		scans := 0
+		o := &Observer{
+			Node: &scripted{head: 100, got: landed}, RollupID: 1, EEZ: eezL1, Every: time.Millisecond, Logger: log.New(),
+			Scan: func(context.Context, uint64) ([]l1.ScannedBatch, error) {
+				if scans++; scans < 3 {
+					return nil, errors.New("node down")
+				}
+				return []l1.ScannedBatch{{TxHash: posting, Settlement: protocol.Settlement{Applied: []protocol.AppliedEntry{{}}, FinalState: terminal}}}, nil
+			},
+		}
+		got, err := o.Watch(t.Context(), posting, b, terminal, post.Sent{Block: 101})
+		require.NoError(t, err)
+		require.Equal(t, Settled, got)
+		require.Equal(t, 3, scans)
 	})
 }

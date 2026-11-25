@@ -260,10 +260,15 @@ type posting struct {
 var poster = common.HexToAddress("0x5")
 
 func (p *posting) GetTransactionCount(_ context.Context, addr common.Address, block string) (hexutil.Uint64, error) {
-	if addr != poster || block != "latest" {
-		return 0, errors.New("want the poster's confirmed nonce")
+	switch {
+	case addr != poster:
+		return 0, errors.New("want the poster's nonce")
+	case block == "latest":
+		return 7, nil
+	case block == "pending":
+		return 9, nil
 	}
-	return 7, nil
+	return 0, errors.New("want the latest or pending nonce")
 }
 
 func (p *posting) GetBlockByNumber(_ context.Context, block string, full bool) (map[string]any, error) {
@@ -275,6 +280,13 @@ func (p *posting) GetBlockByNumber(_ context.Context, block string, full bool) (
 		h["baseFeePerGas"] = p.baseFee
 	}
 	return h, nil
+}
+
+func (p *posting) GetCode(_ context.Context, addr common.Address, block string) (hexutil.Bytes, error) {
+	if addr != poster || block != "latest" {
+		return nil, errors.New("want the poster's latest code")
+	}
+	return hexutil.Bytes{0x60, 0x00}, nil
 }
 
 func (p *posting) GetBalance(_ context.Context, addr common.Address, block string) (*hexutil.Big, error) {
@@ -325,9 +337,15 @@ func TestRPCPosting(t *testing.T) {
 	p := &posting{baseFee: (*hexutil.Big)(big.NewInt(1_000_000_007))}
 	r := serveRPC(t, p)
 	ctx := t.Context()
+	code, err := r.Code(ctx, poster)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x60, 0x00}, code)
 	nonce, err := r.Nonce(ctx, poster)
 	require.NoError(t, err)
 	require.Equal(t, uint64(7), nonce)
+	pending, err := r.PendingNonce(ctx, poster)
+	require.NoError(t, err)
+	require.Equal(t, uint64(9), pending)
 	fee, err := r.BaseFee(ctx)
 	require.NoError(t, err)
 	require.Equal(t, uint256.NewInt(1_000_000_007), fee)

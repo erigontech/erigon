@@ -20,6 +20,7 @@ import (
 	"bytes"
 
 	"github.com/erigontech/erigon/eez/protocol"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 const (
@@ -49,20 +50,33 @@ var proofPlaceholder = bytes.Repeat([]byte{0xff}, 128)
 // proofPlaceholder: the larger of its execution and calldata at the standard
 // rate and its EIP-7623 floor.
 func PostBatchGas(b *protocol.ProofSystemBatch) (uint64, error) {
+	standard, tokens, err := postBatchGas(b)
+	if err != nil {
+		return 0, err
+	}
+	return max(standard, txGas+10*tokens), nil
+}
+
+// postBatchGas projects the gas of posting b with a proof of
+// proofPlaceholder at the standard rate, and returns its calldata's EIP-7623
+// tokens.
+func postBatchGas(b *protocol.ProofSystemBatch) (standard, tokens uint64, err error) {
 	sized := *b
 	sized.Proofs = [][]byte{proofPlaceholder}
 	input, err := protocol.EncodePostAndVerifyBatch(&sized)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	standard := txGas + postBatchBaseGas + postBatchEntryGas*uint64(len(b.Entries)) + calldataGas(input)
-	return max(standard, FloorGas(input)), nil
+	return txGas + postBatchBaseGas + postBatchEntryGas*uint64(len(b.Entries)) + calldataGas(input), floorTokens(input), nil
 }
 
 // FloorGas is the EIP-7623 floor of a transaction with input.
-func FloorGas(input []byte) uint64 {
+func FloorGas(input []byte) uint64 { return txGas + 10*floorTokens(input) }
+
+// floorTokens are the EIP-7623 tokens of input: 1 a zero byte, 4 any other.
+func floorTokens(input []byte) uint64 {
 	zero := uint64(bytes.Count(input, []byte{0}))
-	return txGas + 10*(zero+4*(uint64(len(input))-zero))
+	return zero + 4*(uint64(len(input))-zero)
 }
 
 // calldataGas is the standard price of input: 4 a zero byte, 16 any other.
@@ -79,4 +93,79 @@ func PostBatchGasCeiling(requested uint64) (uint64, bool) {
 		return MaxPostBatchGas, false
 	}
 	return requested, true
+}
+
+// l1Cost is what a held transaction adds to its batch's posting: entries,
+// calldata at the standard rate and in EIP-7623 tokens, and the gas of the
+// L1 calls the posting makes for it; and to its bundle, trigger, its gas
+// limit as a trigger.
+type l1Cost struct{ entries, calldata, tokens, target, trigger uint64 }
+
+// budget projects the gas of a batch's posting as held transactions join
+// it, from the anchor entry every batch leads with, at the standard rate
+// and on the EIP-7623 floor of the calldata it prices, against a cap
+// leaving the drain margin under the ceiling. Its bundle takes the L1
+// block's gas, block, zero for any: the posting's, margin included, and
+// triggers, the gas limits of its triggers.
+type budget struct{ cap, projected, tokens, block, triggers uint64 }
+
+// newBudget returns the budget of a batch of the anchor entry alone, posted
+// in a bundle of an L1 block of blockGas.
+func newBudget(maxGas, blockGas uint64) *budget {
+	b := &budget{projected: txGas + postBatchBaseGas + postBatchEntryGas, block: blockGas}
+	if maxGas > drainMargin {
+		b.cap = maxGas - drainMargin
+	}
+	return b
+}
+
+// windowBudget returns the budget of a batch settling blocks, the chain from
+// the cursor's child to an empty Sync block, from its anchor-only batch.
+func windowBudget(batcher *Batcher, maxGas, blockGas uint64, blocks []*types.Block) (*budget, error) {
+	batch, err := batcher.AnchorBatch(blocks[0].ParentHash(), blocks)
+	if err != nil {
+		return nil, err
+	}
+	b := newBudget(maxGas, blockGas)
+	if b.projected, b.tokens, err = postBatchGas(batch); err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+func (b *budget) after(c l1Cost) uint64 {
+	return b.projected + postBatchEntryGas*c.entries + c.calldata + c.target
+}
+
+// floor is the EIP-7623 floor of the calldata priced so far.
+func (b *budget) floor() uint64 { return txGas + 10*b.tokens }
+
+// fits reports whether c keeps the projection and the floor within the cap,
+// and the bundle within the block.
+func (b *budget) fits(c l1Cost) bool {
+	posting := max(b.after(c), txGas+10*(b.tokens+c.tokens))
+	return posting <= b.cap && (b.block == 0 || posting+drainMargin+b.triggers+c.trigger <= b.block)
+}
+
+// take charges c.
+func (b *budget) take(c l1Cost) {
+	b.projected, b.tokens, b.triggers = b.after(c), b.tokens+c.tokens, b.triggers+c.trigger
+}
+
+// inboundCost is what deliveries add: each a deferred entry in the batch
+// and a sidecar in its DA.
+func inboundCost(ds []*Delivery) (l1Cost, error) {
+	c := l1Cost{entries: uint64(len(ds))}
+	for _, d := range ds {
+		deferred := inboundEntry(d.Sidecar)
+		for _, e := range []*protocol.ExecutionEntry{d.Sidecar, &deferred} {
+			enc, err := protocol.EncodeExecutionEntry(e)
+			if err != nil {
+				return l1Cost{}, err
+			}
+			c.calldata += calldataGas(enc)
+			c.tokens += floorTokens(enc)
+		}
+	}
+	return c, nil
 }

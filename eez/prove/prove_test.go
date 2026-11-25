@@ -191,12 +191,12 @@ func TestAttestTheMinedProof(t *testing.T) {
 
 func TestPublicInputsHash(t *testing.T) {
 	f := anchor402(t)
-	got, err := publicInputsHash(f.batch, f.VKey)
+	got, err := publicInputsHash(f.batch, f.VKey, nil)
 	require.NoError(t, err)
 	require.Equal(t, f.Hash, got)
 	other := *f.batch
 	other.CallData = append(bytes.Clone(other.CallData), 0)
-	got, err = publicInputsHash(&other, f.VKey)
+	got, err = publicInputsHash(&other, f.VKey, nil)
 	require.NoError(t, err)
 	require.NotEqual(t, f.Hash, got)
 }
@@ -741,9 +741,14 @@ func TestProveRefusesAnUnprovableRequest(t *testing.T) {
 		{"window upside down", func(w *Window) { w.To = w.From - 1 }},
 		{"no anchor", func(w *Window) { w.Anchor = nil }},
 		{"anchor of another height", func(w *Window) { w.Anchor = f.blocks[f.From].Header() }},
-		{"live batch", func(w *Window) {
+		{"live batch without its L1 block", func(w *Window) {
 			b := *w.Batch
 			b.BlockNumber = protocol.LiveBlockNumber
+			w.Batch = &b
+		}},
+		{"batch of another blockNumber", func(w *Window) {
+			b := *w.Batch
+			b.BlockNumber = 7
 			w.Batch = &b
 		}},
 		{"bound sender", func(w *Window) {
@@ -848,4 +853,49 @@ func TestProveConnectsSlowly(t *testing.T) {
 	sig, err := dial(t, "http://"+lis.Addr().String(), f).Prove(t.Context(), f.window())
 	require.NoError(t, err)
 	require.Equal(t, f.proof, sig)
+}
+
+// TestProveLive: a live batch is proven with the L1 block it lands on, its
+// parent's hash and its timestamp, the terminal block's, sent as the
+// posting context and bound in the batch's custom data.
+func TestProveLive(t *testing.T) {
+	f := anchor402(t)
+	key, err := crypto.HexToECDSA(attesterKey)
+	require.NoError(t, err)
+	live := *f.batch
+	live.BlockNumber = protocol.LiveBlockNumber
+	parent, time := common.Hash{0x42}, f.blocks[f.To].Time()
+	custom, err := protocol.SettlementCustomData(protocol.LiveBlockNumber, time, parent)
+	require.NoError(t, err)
+	p, err := protocol.NewPublicInputs(&live, nil, [][]byte{custom}, [][]common.Hash{{f.VKey}}, common.Address{})
+	require.NoError(t, err)
+	hashes, err := p.ProofSystemHashes(1)
+	require.NoError(t, err)
+	timeless, err := publicInputsHash(f.batch, f.VKey, nil)
+	require.NoError(t, err)
+	require.NotEqual(t, timeless, hashes[0])
+
+	for name, signed := range map[string]common.Hash{"live": hashes[0], "timeless": timeless} {
+		t.Run(name, func(t *testing.T) {
+			pr := &prover{answer: func(int) (*provepb.Proof, *provepb.Rejected, error) {
+				return &provepb.Proof{PublicInputsHash: signed[:], Proof: sign(t, key, signed[:])}, nil, nil
+			}}
+			w := f.window()
+			w.Batch, w.L1Parent, w.Time = &live, parent, time
+			sig, err := dial(t, serve(t, pr), f).Prove(t.Context(), w)
+			if signed != hashes[0] {
+				require.ErrorIs(t, err, ErrAttestation)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, sign(t, key, signed[:]), sig)
+			_, frames := pr.last()
+			ctx := frames[len(frames)-1].GetFinalize().GetSettlement().GetPostingContext()
+			require.NotNil(t, ctx)
+			require.Equal(t, parent[:], ctx.ParentHash)
+			require.Equal(t, time, ctx.TargetTimestamp)
+			require.Zero(t, ctx.ChainId)
+			require.Zero(t, ctx.ParentNumber)
+		})
+	}
 }

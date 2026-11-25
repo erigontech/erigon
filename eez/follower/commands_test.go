@@ -271,3 +271,42 @@ func TestOnL2Head(t *testing.T) {
 	require.NoError(t, err)
 	requireHanded(b4.Block.Hash())
 }
+
+// TestExtend: Extend builds on the head a block of exactly the transactions
+// it is given, in order, or none.
+func TestExtend(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	n := newNode(t, c.L1)
+	n.run(t)
+	ctx := t.Context()
+	genesis, err := n.chain.Head(ctx)
+	require.NoError(t, err)
+	txs := provide(t, c.Transfer(bob, 1), c.Transfer(bob, 2)).txs
+	var hookHead, committed common.Hash
+	b1, err := n.follower.Extend(ctx, inputs(genesis), txs, func() func(*types.Header) {
+		h, err := n.chain.Head(ctx)
+		require.NoError(t, err)
+		hookHead = h.Hash()
+		return func(h *types.Header) { committed = h.Hash() }
+	})
+	require.NoError(t, err)
+	require.Equal(t, genesis.Hash(), hookHead)
+	require.Equal(t, b1.Block.Hash(), committed)
+	got := b1.Block.Transactions()
+	require.Len(t, got, 2)
+	require.Equal(t, txs[0].Hash(), got[0].Hash())
+	require.Equal(t, txs[1].Hash(), got[1].Hash())
+	head, err := n.chain.Head(ctx)
+	require.NoError(t, err)
+	require.Equal(t, b1.Block.Hash(), head.Hash())
+	require.Equal(t, follower.HeadSequencer, n.follower.Status().HeadSource)
+
+	_, err = n.follower.Extend(ctx, inputs(genesis), nil, nil)
+	require.ErrorIs(t, err, follower.ErrStaleParent)
+	// A transaction the block cannot take fails the block.
+	_, err = n.follower.Extend(ctx, inputs(b1.Block.Header()), txs[:1], nil)
+	require.Error(t, err)
+	head, err = n.chain.Head(ctx)
+	require.NoError(t, err)
+	require.Equal(t, b1.Block.Hash(), head.Hash())
+}

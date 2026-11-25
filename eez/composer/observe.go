@@ -32,6 +32,7 @@ import (
 // Receipts is the L1 an observer reads.
 type Receipts interface {
 	Head(ctx context.Context) (*l1.Header, error)
+	HeaderByNumber(ctx context.Context, number uint64) (*l1.Header, error)
 	Receipt(ctx context.Context, hash common.Hash) (*l1.Receipt, error)
 	// HasTransaction reports whether the node has the transaction, pooled
 	// or in a block.
@@ -56,7 +57,10 @@ type Observer struct {
 	Every time.Duration
 	// Read bounds a poll's reads, so that a node that stops answering does
 	// not hold the watch; zero is DefaultL1Read.
-	Read   time.Duration
+	Read time.Duration
+	// Scan, when set, returns the batches posted in an L1 block with what
+	// L1 applied of each.
+	Scan   func(ctx context.Context, block uint64) ([]l1.ScannedBatch, error)
 	Logger log.Logger
 }
 
@@ -97,7 +101,7 @@ func (o *Observer) poll(ctx context.Context, hash common.Hash, batch *protocol.P
 	case err != nil:
 		return Pending, false
 	case r != nil:
-		return o.judge(r, batch, terminal), true
+		return o.verdict(ctx, r, hash, batch, terminal)
 	}
 	if gone, err := o.gone(ctx, hash, sent, known); err != nil || !gone {
 		return Pending, false
@@ -107,7 +111,7 @@ func (o *Observer) poll(ctx context.Context, hash common.Hash, batch *protocol.P
 		return Pending, false
 	}
 	if r != nil {
-		return o.judge(r, batch, terminal), true
+		return o.verdict(ctx, r, hash, batch, terminal)
 	}
 	return Failed, true
 }
@@ -142,6 +146,35 @@ func (o *Observer) gone(ctx context.Context, hash common.Hash, sent post.Sent, k
 	return head.Number > end, nil
 }
 
+// verdict is the verdict on post, whose receipt is r: from its block's
+// scan when there is a scanner, else from r; false when the scan failed.
+func (o *Observer) verdict(ctx context.Context, r *l1.Receipt, post common.Hash, batch *protocol.ProofSystemBatch, terminal common.Hash) (Resolution, bool) {
+	if o.Scan == nil || r.Status != 1 {
+		return o.judge(r, batch, terminal), true
+	}
+	scanned, err := o.Scan(ctx, r.BlockNumber)
+	if err != nil {
+		return Pending, false
+	}
+	for i := range scanned {
+		if s := &scanned[i]; s.TxHash == post {
+			return settlement(&s.Settlement, terminal), true
+		}
+	}
+	return Failed, true
+}
+
+// settlement is the verdict on a batch L1 applied s of.
+func settlement(s *protocol.Settlement, terminal common.Hash) Resolution {
+	switch {
+	case len(s.Applied) == 0:
+		return Failed
+	case s.FinalState == terminal:
+		return Settled
+	}
+	return SettledPartial
+}
+
 // judge is the verdict on r, the receipt of the posting of batch.
 func (o *Observer) judge(r *l1.Receipt, batch *protocol.ProofSystemBatch, terminal common.Hash) Resolution {
 	if r.Status != 1 {
@@ -166,11 +199,5 @@ func (o *Observer) judge(r *l1.Receipt, batch *protocol.ProofSystemBatch, termin
 		o.Logger.Error("[eez] posting's logs do not attribute", "event", "eez.composer.observe.unattributed", "block", r.BlockNumber, "err", err)
 		return Failed
 	}
-	switch {
-	case len(s[0].Applied) == 0:
-		return Failed
-	case s[0].FinalState == terminal:
-		return Settled
-	}
-	return SettledPartial
+	return settlement(&s[0], terminal)
 }
