@@ -140,13 +140,13 @@ func (mlt *messageListenerTest) mockBALRequest(t *testing.T, peerId *PeerId, has
 		})
 	tracker := NewPeerTracker(mlt.logger, mlt.messageListener)
 	tracker.PeerConnected(peerId)
-	return &balFetcher{
-		logger:          mlt.logger,
-		messageListener: mlt.messageListener,
-		messageSender:   NewMessageSender(mlt.sentryClient),
-		peerPenalizer:   mlt.messageListener.peerPenalizer,
-		peerTracker:     tracker,
-	}
+	return NewBALFetcher(
+		mlt.logger,
+		mlt.messageListener,
+		NewMessageSender(mlt.sentryClient),
+		mlt.messageListener.peerPenalizer,
+		tracker,
+	).(*balFetcher)
 }
 
 func (mlt *messageListenerTest) sendBlockAccessLists(t *testing.T, peerId *PeerId, requestId uint64, entries []rlp.RawValue) {
