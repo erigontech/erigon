@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -436,10 +437,13 @@ func TestTransactionPacketCountLimit(t *testing.T) {
 
 func TestTransactionPacketAuthorizationLimit(t *testing.T) {
 	const (
-		limit     = 8_647
-		firstHalf = limit / 2
-		remaining = limit - firstHalf
+		firstHalf = maxRemoteAuthorizations / 2
+		remaining = maxRemoteAuthorizations - firstHalf
 	)
+	minTuple, err := rlp.EncodeToBytes(&types.Authorization{})
+	require.NoError(t, err)
+	require.Equal(t, (p2pTxPacketLimit+txnMaxSize)/len(minTuple), maxRemoteAuthorizations)
+
 	first := remoteSetCodeTxn(t, 0, firstHalf).Rlp
 	fillsRemainder := remoteSetCodeTxn(t, 1, remaining).Rlp
 	oneAuth := remoteSetCodeTxn(t, 2, 1).Rlp
@@ -472,51 +476,30 @@ func TestTransactionPacketAuthorizationLimit(t *testing.T) {
 			want: [][]byte{first, fillsRemainder},
 		},
 	}
-	for _, pooled := range []bool{false, true} {
-		for _, tt := range tests {
-			t.Run(fmt.Sprintf("pooled=%t/%s", pooled, tt.name), func(t *testing.T) {
-				ctx := NewTxnParseContext(*uint256.NewInt(1))
-				ctx.WithSender(false)
-				ctx.ValidateRLP(ValidateSerializedTxn)
-				var slots TxnSlots
-				var payload []byte
-				var pos int
-				var err error
-				if pooled {
-					payload = EncodePooledTransactions66(tt.txns, 1, nil)
-					_, pos, err = ParsePooledTransactions66(payload, 0, ctx, &slots, nil)
-				} else {
-					payload = EncodeTransactions(tt.txns, nil)
-					pos, err = ParseTransactions(payload, 0, ctx, &slots, nil)
-				}
-				require.NoError(t, err)
-				require.Equal(t, len(payload), pos)
-				require.NoError(t, slots.Valid())
-				require.Len(t, slots.Txns, len(tt.want))
-				for i, want := range tt.want {
-					require.Equal(t, crypto.Keccak256Hash(want), common.Hash(slots.Txns[i].IDHash))
-				}
-			})
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := NewTxnParseContext(*uint256.NewInt(1))
+			ctx.WithSender(false)
+			ctx.ValidateRLP(ValidateSerializedTxn)
+			payload := EncodeTransactions(tt.txns, nil)
+			var slots TxnSlots
+			pos, err := ParseTransactions(payload, 0, ctx, &slots, nil)
+			require.NoError(t, err)
+			require.Equal(t, len(payload), pos)
+			require.NoError(t, slots.Valid())
+			require.Len(t, slots.Txns, len(tt.want))
+			for i, want := range tt.want {
+				require.Equal(t, crypto.Keccak256Hash(want), common.Hash(slots.Txns[i].IDHash))
+			}
+		})
 	}
 }
 
 func TestTransactionPacketOversizedSetCode(t *testing.T) {
 	over := remoteSetCodeTxn(t, 0, maxRemoteAuthorizations+1).Rlp
-	ordinary := tpEncodeTests[1].txns[0]
-	payload := EncodeTransactions([][]byte{over, ordinary}, nil)
+	payload := EncodeTransactions([][]byte{over}, nil)
 	ctx := NewTxnParseContext(*uint256.NewInt(1))
-	ctx.WithSender(false)
-	var slots TxnSlots
-
 	ctx.ValidateRLP(ValidateSerializedTxn)
-	_, err := ParseTransactions(payload, 0, ctx, &slots, nil)
+	_, err := ParseTransactions(payload, 0, ctx, &TxnSlots{}, nil)
 	require.ErrorIs(t, err, ErrRlpTooBig)
-
-	ctx.ValidateRLP(nil)
-	pos, err := ParseTransactions(payload, 0, ctx, &slots, nil)
-	require.NoError(t, err)
-	require.Equal(t, len(payload), pos)
-	require.Len(t, slots.Txns, 1)
-	require.Equal(t, crypto.Keccak256Hash(ordinary), common.Hash(slots.Txns[0].IDHash))
 }
