@@ -55,25 +55,25 @@ type touchEntry struct {
 	update    *Update
 }
 
-type parallelUpdate struct {
-	trie *prefixTrie
+type ParallelUpdate struct {
+	Trie *prefixTrie
 
 	pending  []touchEntry
 	spare    []touchEntry
 	inflight sync.WaitGroup
 
-	deferredMu       sync.Mutex
-	deferredCombined []*DeferredBranchUpdate
+	DeferredMu       sync.Mutex
+	DeferredCombined []*DeferredBranchUpdate
 
 	keyArena plainKeyArena
 }
 
-func newParallelUpdate() *parallelUpdate {
-	return &parallelUpdate{trie: newPrefixTrie()}
+func NewParallelUpdate() *ParallelUpdate {
+	return &ParallelUpdate{Trie: newPrefixTrie()}
 }
 
 // Collect is not safe for concurrent calls; the caller must serialize them.
-func (pu *parallelUpdate) Collect(hashedKey, plainKey []byte, update *Update) {
+func (pu *ParallelUpdate) Collect(hashedKey, plainKey []byte, update *Update) {
 	pu.pending = append(pu.pending, touchEntry{hashedKey: hashedKey, plainKey: plainKey, update: update})
 	if len(pu.pending) >= touchChunkKeys {
 		pu.handOff()
@@ -85,7 +85,7 @@ func resetEntries(c []touchEntry) []touchEntry {
 	return c[:0]
 }
 
-func (pu *parallelUpdate) handOff() {
+func (pu *ParallelUpdate) handOff() {
 	pu.inflight.Wait()
 	c := pu.pending
 	pu.pending, pu.spare = slices.Grow(pu.spare[:0], touchChunkKeys), c
@@ -95,90 +95,90 @@ func (pu *parallelUpdate) handOff() {
 	})
 }
 
-func (pu *parallelUpdate) insertChunk(c []touchEntry) {
+func (pu *ParallelUpdate) insertChunk(c []touchEntry) {
 	for i := range c {
-		pu.trie.Insert(c[i].hashedKey, c[i].plainKey, c[i].update)
+		pu.Trie.Insert(c[i].hashedKey, c[i].plainKey, c[i].update)
 	}
 }
 
-func (pu *parallelUpdate) Build() {
+func (pu *ParallelUpdate) Build() {
 	pu.inflight.Wait()
 	pu.insertChunk(pu.pending)
 	pu.pending = resetEntries(pu.pending)
 }
 
-func (pu *parallelUpdate) internKey(plainKey []byte) []byte {
+func (pu *ParallelUpdate) internKey(plainKey []byte) []byte {
 	return pu.keyArena.intern(plainKey)
 }
 
-func (pu *parallelUpdate) drainDeferred() {
-	pu.deferredMu.Lock()
-	for _, upd := range pu.deferredCombined {
-		putDeferredUpdate(upd)
+func (pu *ParallelUpdate) DrainDeferred() {
+	pu.DeferredMu.Lock()
+	for _, upd := range pu.DeferredCombined {
+		PutDeferredUpdate(upd)
 	}
-	pu.deferredCombined = nil
-	pu.deferredMu.Unlock()
+	pu.DeferredCombined = nil
+	pu.DeferredMu.Unlock()
 }
 
-func (pu *parallelUpdate) Reset() {
+func (pu *ParallelUpdate) Reset() {
 	pu.inflight.Wait()
 	pu.pending = resetEntries(pu.pending)
-	if pu.trie != nil {
-		pu.trie.Reset()
+	if pu.Trie != nil {
+		pu.Trie.Reset()
 	}
-	pu.drainDeferred()
+	pu.DrainDeferred()
 	pu.keyArena.reset()
 }
 
-func (pu *parallelUpdate) Close() {
+func (pu *ParallelUpdate) Close() {
 	pu.inflight.Wait()
 	pu.pending, pu.spare = nil, nil
-	pu.trie = nil
-	pu.drainDeferred()
+	pu.Trie = nil
+	pu.DrainDeferred()
 	pu.keyArena.reset()
 }
 
-// foldTombstones keeps, for a prefix a self-destruct tombstoned and the same Process
+// FoldTombstones keeps, for a prefix a self-destruct tombstoned and the same Process
 // rebuilt, only the rebuilt branch: a forked child checks it in before the parent's
 // tombstone, and merged it onto the old stored branch. Written raw, it carries the
 // tombstone's prev, so the domain diff still restores the old branch on unwind.
-func (pu *parallelUpdate) foldTombstones() {
-	pu.deferredMu.Lock()
-	defer pu.deferredMu.Unlock()
+func (pu *ParallelUpdate) FoldTombstones() {
+	pu.DeferredMu.Lock()
+	defer pu.DeferredMu.Unlock()
 	var tombs map[string]*DeferredBranchUpdate
-	for _, u := range pu.deferredCombined {
-		if u.rawWrite {
+	for _, u := range pu.DeferredCombined {
+		if u.RawWrite {
 			if tombs == nil {
 				tombs = map[string]*DeferredBranchUpdate{}
 			}
-			tombs[string(u.prefix)] = u
+			tombs[string(u.Prefix)] = u
 		}
 	}
 	if tombs == nil {
 		return
 	}
 	folded := map[*DeferredBranchUpdate]bool{}
-	for _, u := range pu.deferredCombined {
-		if t, ok := tombs[string(u.prefix)]; ok && !u.rawWrite {
-			u.rawWrite = true
-			u.prev = reuseBytes(u.prev, t.prev)
+	for _, u := range pu.DeferredCombined {
+		if t, ok := tombs[string(u.Prefix)]; ok && !u.RawWrite {
+			u.RawWrite = true
+			u.Prev = reuseBytes(u.Prev, t.Prev)
 			folded[t] = true
 		}
 	}
-	pu.deferredCombined = slices.DeleteFunc(pu.deferredCombined, func(u *DeferredBranchUpdate) bool {
+	pu.DeferredCombined = slices.DeleteFunc(pu.DeferredCombined, func(u *DeferredBranchUpdate) bool {
 		if folded[u] {
-			putDeferredUpdate(u)
+			PutDeferredUpdate(u)
 			return true
 		}
 		return false
 	})
 }
 
-func (pu *parallelUpdate) appendDeferred(updates []*DeferredBranchUpdate) {
+func (pu *ParallelUpdate) AppendDeferred(updates []*DeferredBranchUpdate) {
 	if len(updates) == 0 {
 		return
 	}
-	pu.deferredMu.Lock()
-	pu.deferredCombined = append(pu.deferredCombined, updates...)
-	pu.deferredMu.Unlock()
+	pu.DeferredMu.Lock()
+	pu.DeferredCombined = append(pu.DeferredCombined, updates...)
+	pu.DeferredMu.Unlock()
 }

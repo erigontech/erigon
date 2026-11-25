@@ -405,7 +405,7 @@ func TestTrieTracePutBranchRecording(t *testing.T) {
 	require.NoError(t, err)
 	upds.Close()
 
-	require.NotEmpty(t, recorder.putBranches, "PutBranch calls should have been recorded")
+	require.NotEmpty(t, recorder.PutBranches, "PutBranch calls should have been recorded")
 
 	trace, err := BuildTrieTrace(recorder, nil, nil)
 	require.NoError(t, err)

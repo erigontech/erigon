@@ -102,9 +102,9 @@ func BuildTrieTrace(rc *RecordingContext, inputKeys map[string]struct{}, trieSta
 		return cmp.Compare(a.PlainKey, b.PlainKey)
 	})
 
-	if len(rc.putBranches) > 0 {
-		tt.PutBranches = make(map[string]TraceBranchWrite, len(rc.putBranches))
-		for k, bw := range rc.putBranches {
+	if len(rc.PutBranches) > 0 {
+		tt.PutBranches = make(map[string]TraceBranchWrite, len(rc.PutBranches))
+		for k, bw := range rc.PutBranches {
 			tt.PutBranches[hex.EncodeToString([]byte(k))] = TraceBranchWrite{
 				PrevData: hex.EncodeToString(bw.PrevData),
 				NewData:  hex.EncodeToString(bw.NewData),

@@ -80,7 +80,7 @@ func TestForEachCellRejectsInvalidBranch(t *testing.T) {
 		want string
 	}{
 		{"unknown_fields", branchOfCells(t, cellOf(0x20)), "unknown cell fields"},
-		{"field_length_overflow", branchOfCells(t, append(binary.AppendUvarint([]byte{byte(fieldStateHash)}, ^uint64(0)), 0), nil), "past the end"},
+		{"field_length_overflow", branchOfCells(t, append(binary.AppendUvarint([]byte{byte(FieldStateHash)}, ^uint64(0)), 0), nil), "past the end"},
 		{"trailing_bytes", append(branchOfCells(t), 0), "trailing bytes"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -445,15 +445,15 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	return
 }
 
-func WrapKeyUpdates(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, updates []Update) *Updates {
+func WrapKeyUpdates(tb testing.TB, mode Mode, hasher func(key []byte) []byte, keys [][]byte, updates []Update) *Updates {
 	tb.Helper()
 
 	upd := NewUpdates(mode, tb.TempDir(), hasher)
 	for i, key := range keys {
 		upd.TouchPlainKey(string(key), nil, func(c *KeyUpdate, _ []byte) {
-			c.plainKey = string(key)
-			c.hashedKey = hasher(key)
-			c.update = &updates[i]
+			c.PlainKey = string(key)
+			c.HashedKey = hasher(key)
+			c.Update = &updates[i]
 		})
 	}
 	return upd
@@ -463,7 +463,7 @@ func WrapKeyUpdatesInto(tb testing.TB, upd *Updates, keys [][]byte, updates []Up
 	tb.Helper()
 	for i, key := range keys {
 		upd.TouchPlainKey(string(key), nil, func(c *KeyUpdate, _ []byte) {
-			c.update = &updates[i]
+			c.Update = &updates[i]
 		})
 	}
 }

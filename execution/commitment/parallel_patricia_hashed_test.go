@@ -257,24 +257,24 @@ func TestParallelProcessSkeleton_RejectsNonParallelMode(t *testing.T) {
 }
 
 // hashedKey passed to fn is mutated in place and must not be retained.
-func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byte, update *Update) error) error {
+func dfsSubtree(node *PrefixNode, path []byte, fn func(hashedKey, plainKey []byte, update *Update) error) error {
 	if node == nil {
 		return nil
 	}
-	if node.plainKey != nil {
-		if err := fn(path, node.plainKey, node.update); err != nil {
+	if node.PlainKey != nil {
+		if err := fn(path, node.PlainKey, node.Update); err != nil {
 			return err
 		}
-	} else if node.bitmap == 0 {
+	} else if node.Bitmap == 0 {
 		return errors.New("ParallelPatriciaHashed: trie leaf without a plainKey")
 	}
 	childIdx := 0
-	for bm := node.bitmap; bm != 0; {
+	for bm := node.Bitmap; bm != 0; {
 		nib := byte(bits.TrailingZeros16(bm))
-		child := node.children[childIdx]
+		child := node.Children[childIdx]
 		base := len(path)
 		path = append(path, nib)
-		path = append(path, child.ext...)
+		path = append(path, child.Ext...)
 		if err := dfsSubtree(child, path, fn); err != nil {
 			return err
 		}
@@ -881,10 +881,10 @@ func reusedInstanceIncrementalRoot(t *testing.T, variant TrieVariant, workers in
 
 	cfg := DefaultTrieConfig()
 	cfg.Variant = variant
-	trie, ut := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	pt := NewParallelPatriciaHashed(nil, length.Addr, cfg)
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
 	defer ut.Close()
-	defer trie.Release()
-	pt := trie.(*ParallelPatriciaHashed)
+	defer pt.Release()
 	pt.SetNumWorkers(workers)
 	pt.SetTrieContextFactory(mockTrieCtxFactory(ms))
 	pt.ResetContext(ms)

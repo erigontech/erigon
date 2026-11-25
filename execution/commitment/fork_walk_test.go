@@ -58,7 +58,7 @@ func TestForkWalk_CancelledContextStopsBeforeNode(t *testing.T) {
 	defer w.Release()
 
 	fw := forkWalk{grain: ForkGrainNever}
-	node := &prefixNode{plainKey: make([]byte, length.Addr), update: &Update{Flags: BalanceUpdate}}
+	node := &PrefixNode{PlainKey: make([]byte, length.Addr), Update: &Update{Flags: BalanceUpdate}}
 	err := fw.walk(ctx, &walker{trie: w}, node, make([]byte, 64))
 
 	require.ErrorIs(t, err, context.Canceled)
@@ -72,7 +72,7 @@ func TestForkWalk_CancelledDuringNodeStopsBeforeChildren(t *testing.T) {
 	defer w.Release()
 
 	fw := forkWalk{grain: ForkGrainNever}
-	node := &prefixNode{plainKey: make([]byte, length.Addr)}
+	node := &PrefixNode{PlainKey: make([]byte, length.Addr)}
 	err := fw.walk(ctx, &walker{trie: w}, node, make([]byte, 64))
 
 	require.ErrorIs(t, err, context.Canceled)
@@ -303,8 +303,8 @@ func TestForkWalk_PanicInChildKeepsLeaseOnTheRunner(t *testing.T) {
 	base := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
 	defer base.Release()
 
-	child := &prefixNode{plainKey: make([]byte, length.Addr)}
-	node := &prefixNode{bitmap: 1, children: []*prefixNode{child}}
+	child := &PrefixNode{PlainKey: make([]byte, length.Addr)}
+	node := &PrefixNode{Bitmap: 1, Children: []*PrefixNode{child}}
 
 	l, err := pool.acquire(ctx)
 	require.NoError(t, err)
@@ -332,7 +332,7 @@ func TestForkWalk_CheckinKeepsTheDeferredSliceOnTheTrie(t *testing.T) {
 		return &noopPatriciaContext{}, nil
 	}, 1)
 	defer pool.close()
-	pu := &parallelUpdate{}
+	pu := &ParallelUpdate{}
 	fw := &forkWalk{
 		leases:        pool,
 		accountKeyLen: length.Addr,
@@ -348,13 +348,13 @@ func TestForkWalk_CheckinKeepsTheDeferredSliceOnTheTrie(t *testing.T) {
 
 	fw.checkout(wk, nil)
 	w := wk.trie
-	upd := &DeferredBranchUpdate{encoded: BranchData{1}}
+	upd := &DeferredBranchUpdate{Encoded: BranchData{1}}
 	w.branchEncoder.deferred = append(w.branchEncoder.deferred, upd)
 	collected := w.branchEncoder.deferred
 	fw.checkin(wk)
 
-	require.Equal(t, []*DeferredBranchUpdate{upd}, pu.deferredCombined, "checkin must hand the collected records to the round")
-	require.NotNil(t, upd.encoded, "checkin must not return a record the round owns to the update pool")
+	require.Equal(t, []*DeferredBranchUpdate{upd}, pu.DeferredCombined, "checkin must hand the collected records to the round")
+	require.NotNil(t, upd.Encoded, "checkin must not return a record the round owns to the update pool")
 	require.Empty(t, w.branchEncoder.deferred, "the released trie must hold none of the records the round now owns")
 	require.Same(t, &collected[:1][0], &w.branchEncoder.deferred[:1][0], "the released trie must keep the slice it collected into")
 }
@@ -394,15 +394,15 @@ func TestForkWalk_ForkStartsHelpersOnlyOnIdleLeases(t *testing.T) {
 			leases:        leases,
 			accountKeyLen: length.Addr,
 			cfg:           DefaultTrieConfig(),
-			pu:            ut.parallel,
+			pu:            ut.Parallel,
 			metrics:       &Metrics{},
 			grain:         1,
 		}
 		bw := &walker{trie: base}
 		require.NoError(t, fw.attach(ctx, bw))
-		ut.parallel.Build()
-		root := ut.parallel.trie.root
-		err := fw.walk(ctx, bw, root, append(make([]byte, 0, forkPathCap), root.ext...))
+		ut.Parallel.Build()
+		root := ut.Parallel.Trie.Root
+		err := fw.walk(ctx, bw, root, append(make([]byte, 0, forkPathCap), root.Ext...))
 		fw.detach(bw)
 		require.NoError(t, err)
 		require.Positive(t, fw.forks.Load(), "the corpus must fork at grain 1")
@@ -487,16 +487,16 @@ func TestForkWalk_HelperErrorIsNotMaskedByCancellation(t *testing.T) {
 		leases:        leases,
 		accountKeyLen: length.Addr,
 		cfg:           DefaultTrieConfig(),
-		pu:            ut.parallel,
+		pu:            ut.Parallel,
 		metrics:       &Metrics{},
 		grain:         1,
 	}
 	bw := &walker{trie: base}
 	require.NoError(t, fw.attach(ctx, bw))
 	require.Same(t, first, bw.lease, "the forking walker must hold the lease whose reads wait for the helper to fail")
-	ut.parallel.Build()
-	root := ut.parallel.trie.root
-	err = fw.walk(ctx, bw, root, append(make([]byte, 0, forkPathCap), root.ext...))
+	ut.Parallel.Build()
+	root := ut.Parallel.Trie.Root
+	err = fw.walk(ctx, bw, root, append(make([]byte, 0, forkPathCap), root.Ext...))
 	fw.detach(bw)
 
 	require.ErrorIs(t, err, errInjectedHelperRead, "a helper's read error must surface, not the cancellation it causes on the forking walker")
@@ -574,14 +574,14 @@ func absentDeleteCorpus(freshRegion bool) (k1 [][]byte, u1 []Update, k2 [][]byte
 }
 
 func TestForkWalk_SplitsExcludesTheNodesOwnKey(t *testing.T) {
-	pu := newParallelUpdate()
+	pu := NewParallelUpdate()
 	pu.Collect(nibs(0x01, 0x02), []byte("pk-D"), nil)
 	pu.Collect(nibs(0x01, 0x02, 0x03), []byte("pk-A"), nil)
 	pu.Collect(nibs(0x01, 0x02, 0x04), []byte("pk-B"), nil)
 	pu.Build()
-	node := pu.trie.root.children[0]
-	require.NotNil(t, node.plainKey)
-	require.Equal(t, uint32(3), node.subtreeCount)
+	node := pu.Trie.Root.Children[0]
+	require.NotNil(t, node.PlainKey)
+	require.Equal(t, uint32(3), node.SubtreeCount)
 	require.True(t, (&forkWalk{grain: 1}).splits(node))
 	require.False(t, (&forkWalk{grain: 2}).splits(node), "the non-largest child holds one key, below a grain of 2")
 }

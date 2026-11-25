@@ -53,7 +53,7 @@ type Warmuper struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	ctxFactory TrieContextFactory
-	maxDepth   int
+	MaxDepth   int
 	numWorkers int
 	logPrefix  string
 
@@ -83,7 +83,7 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 		ctx:        ctx,
 		cancel:     cancel,
 		ctxFactory: cfg.CtxFactory,
-		maxDepth:   cfg.MaxDepth,
+		MaxDepth:   cfg.MaxDepth,
 		numWorkers: cfg.NumWorkers,
 		logPrefix:  cfg.LogPrefix,
 	}
@@ -123,7 +123,7 @@ func (w *Warmuper) Start() {
 					if !ok {
 						return nil
 					}
-					w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
+					w.WarmupKey(trieCtx, item.hashedKey, item.startDepth)
 					w.keysProcessed.Add(1)
 					w.releaseGen(item.gen)
 				}
@@ -141,10 +141,10 @@ func (w *Warmuper) Start() {
 	})
 }
 
-func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
+func (w *Warmuper) WarmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
 	var compactBuf [MaxCompactKeyLen]byte
-	for depth <= len(hashedKey) && depth <= w.maxDepth {
+	for depth <= len(hashedKey) && depth <= w.MaxDepth {
 		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
 
 		branchData, _, err := trieCtx.Branch(prefix)
@@ -190,17 +190,17 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		fieldBits := branchData[pos]
 		pos++
 
-		fields := cellFields(fieldBits)
+		fields := CellFields(fieldBits)
 		extLen := 0
-		if fields&fieldExtension != 0 {
+		if fields&FieldExtension != 0 {
 			if l, n := binary.Uvarint(branchData[pos:]); n > 0 {
 				extLen = int(l)
 			}
 		}
 		switch {
-		case fields&(fieldAccountAddr|fieldStorageAddr|fieldHash) == fieldAccountAddr|fieldHash && depth < 64 && len(hashedKey) > 64:
+		case fields&(FieldAccountAddr|FieldStorageAddr|FieldHash) == FieldAccountAddr|FieldHash && depth < 64 && len(hashedKey) > 64:
 			depth = 64 + extLen
-		case fields&(fieldAccountAddr|fieldStorageAddr) != 0:
+		case fields&(FieldAccountAddr|FieldStorageAddr) != 0:
 			return
 		default:
 			depth += 1 + extLen

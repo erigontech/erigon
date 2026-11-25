@@ -37,38 +37,38 @@ type walkEntry struct {
 
 func collectWalk(t *prefixTrie) []walkEntry {
 	var out []walkEntry
-	var dfs func(n *prefixNode, accPrefix []byte)
-	dfs = func(n *prefixNode, accPrefix []byte) {
+	var dfs func(n *PrefixNode, accPrefix []byte)
+	dfs = func(n *PrefixNode, accPrefix []byte) {
 		if n == nil {
 			return
 		}
-		prefix := make([]byte, len(accPrefix)+len(n.ext))
+		prefix := make([]byte, len(accPrefix)+len(n.Ext))
 		copy(prefix, accPrefix)
-		copy(prefix[len(accPrefix):], n.ext)
-		out = append(out, walkEntry{prefix: prefix, subtreeCount: n.subtreeCount, bitmap: n.bitmap, plainKey: n.plainKey, update: n.update})
+		copy(prefix[len(accPrefix):], n.Ext)
+		out = append(out, walkEntry{prefix: prefix, subtreeCount: n.SubtreeCount, bitmap: n.Bitmap, plainKey: n.PlainKey, update: n.Update})
 		childIdx := 0
-		for bm := n.bitmap; bm != 0; {
+		for bm := n.Bitmap; bm != 0; {
 			nib := byte(bits.TrailingZeros16(bm))
 			childPrefix := make([]byte, len(prefix)+1)
 			copy(childPrefix, prefix)
 			childPrefix[len(prefix)] = nib
-			dfs(n.children[childIdx], childPrefix)
+			dfs(n.Children[childIdx], childPrefix)
 			childIdx++
 			bm &^= uint16(1) << nib
 		}
 	}
-	dfs(t.root, nil)
+	dfs(t.Root, nil)
 	return out
 }
 
 func TestPrefixTrieEmpty(t *testing.T) {
 	tr := newPrefixTrie()
-	require.NotNil(t, tr.root)
+	require.NotNil(t, tr.Root)
 	assert.Equal(t, 1, tr.arena.nodeCount())
-	assert.Equal(t, uint32(0), tr.root.subtreeCount)
-	assert.Equal(t, uint16(0), tr.root.bitmap)
-	assert.Empty(t, tr.root.children)
-	assert.Empty(t, tr.root.ext)
+	assert.Equal(t, uint32(0), tr.Root.SubtreeCount)
+	assert.Equal(t, uint16(0), tr.Root.Bitmap)
+	assert.Empty(t, tr.Root.Children)
+	assert.Empty(t, tr.Root.Ext)
 }
 
 func TestPrefixTrieSingleInsert(t *testing.T) {
@@ -77,14 +77,14 @@ func TestPrefixTrieSingleInsert(t *testing.T) {
 	tr.Insert(key, nil, nil)
 
 	assert.Equal(t, 2, tr.arena.nodeCount())
-	assert.Equal(t, uint32(1), tr.root.subtreeCount)
-	assert.Equal(t, uint16(1)<<0x01, tr.root.bitmap)
-	require.Len(t, tr.root.children, 1)
+	assert.Equal(t, uint32(1), tr.Root.SubtreeCount)
+	assert.Equal(t, uint16(1)<<0x01, tr.Root.Bitmap)
+	require.Len(t, tr.Root.Children, 1)
 
-	leaf := tr.root.children[0]
-	assert.Equal(t, uint32(1), leaf.subtreeCount)
-	assert.Equal(t, nibs(0x02, 0x03, 0x04), leaf.ext)
-	assert.Equal(t, uint16(0), leaf.bitmap)
+	leaf := tr.Root.Children[0]
+	assert.Equal(t, uint32(1), leaf.SubtreeCount)
+	assert.Equal(t, nibs(0x02, 0x03, 0x04), leaf.Ext)
+	assert.Equal(t, uint16(0), leaf.Bitmap)
 }
 
 func TestPrefixTrieTwoInsertsDivergeAtRoot(t *testing.T) {
@@ -94,14 +94,14 @@ func TestPrefixTrieTwoInsertsDivergeAtRoot(t *testing.T) {
 		tr.Insert(nibs(0x05, 0x06, 0x07), nil, nil)
 
 		assert.Equal(t, 3, tr.arena.nodeCount())
-		assert.Equal(t, uint32(2), tr.root.subtreeCount)
-		assert.Equal(t, uint16(1)<<0x01|uint16(1)<<0x05, tr.root.bitmap)
-		require.Len(t, tr.root.children, 2)
+		assert.Equal(t, uint32(2), tr.Root.SubtreeCount)
+		assert.Equal(t, uint16(1)<<0x01|uint16(1)<<0x05, tr.Root.Bitmap)
+		require.Len(t, tr.Root.Children, 2)
 
-		assert.Equal(t, nibs(0x02, 0x03), tr.root.children[0].ext)
-		assert.Equal(t, uint32(1), tr.root.children[0].subtreeCount)
-		assert.Equal(t, nibs(0x06, 0x07), tr.root.children[1].ext)
-		assert.Equal(t, uint32(1), tr.root.children[1].subtreeCount)
+		assert.Equal(t, nibs(0x02, 0x03), tr.Root.Children[0].Ext)
+		assert.Equal(t, uint32(1), tr.Root.Children[0].SubtreeCount)
+		assert.Equal(t, nibs(0x06, 0x07), tr.Root.Children[1].Ext)
+		assert.Equal(t, uint32(1), tr.Root.Children[1].SubtreeCount)
 	})
 
 	t.Run("asymmetricCounts", func(t *testing.T) {
@@ -117,10 +117,10 @@ func TestPrefixTrieTwoInsertsDivergeAtRoot(t *testing.T) {
 			tr.Insert(append([]byte{0x05}, suf...), nil, nil)
 		}
 
-		assert.Equal(t, uint32(7), tr.root.subtreeCount)
-		require.Len(t, tr.root.children, 2)
-		assert.Equal(t, uint32(4), tr.root.children[0].subtreeCount, "left subtree")
-		assert.Equal(t, uint32(3), tr.root.children[1].subtreeCount, "right subtree")
+		assert.Equal(t, uint32(7), tr.Root.SubtreeCount)
+		require.Len(t, tr.Root.Children, 2)
+		assert.Equal(t, uint32(4), tr.Root.Children[0].SubtreeCount, "left subtree")
+		assert.Equal(t, uint32(3), tr.Root.Children[1].SubtreeCount, "right subtree")
 	})
 }
 
@@ -132,17 +132,17 @@ func TestPrefixTrieDivergenceInsideExtension(t *testing.T) {
 
 		assert.Equal(t, 4, tr.arena.nodeCount())
 
-		require.Len(t, tr.root.children, 1)
-		mid := tr.root.children[0]
-		assert.Equal(t, nibs(0x02, 0x03), mid.ext)
-		assert.Equal(t, uint32(2), mid.subtreeCount)
-		assert.Equal(t, uint16(1)<<0x04|uint16(1)<<0x06, mid.bitmap)
-		require.Len(t, mid.children, 2)
+		require.Len(t, tr.Root.Children, 1)
+		mid := tr.Root.Children[0]
+		assert.Equal(t, nibs(0x02, 0x03), mid.Ext)
+		assert.Equal(t, uint32(2), mid.SubtreeCount)
+		assert.Equal(t, uint16(1)<<0x04|uint16(1)<<0x06, mid.Bitmap)
+		require.Len(t, mid.Children, 2)
 
-		assert.Equal(t, nibs(0x05), mid.children[0].ext)
-		assert.Equal(t, uint32(1), mid.children[0].subtreeCount)
-		assert.Equal(t, nibs(0x07), mid.children[1].ext)
-		assert.Equal(t, uint32(1), mid.children[1].subtreeCount)
+		assert.Equal(t, nibs(0x05), mid.Children[0].Ext)
+		assert.Equal(t, uint32(1), mid.Children[0].SubtreeCount)
+		assert.Equal(t, nibs(0x07), mid.Children[1].Ext)
+		assert.Equal(t, uint32(1), mid.Children[1].SubtreeCount)
 	})
 
 	t.Run("atEndOfExtension", func(t *testing.T) {
@@ -152,16 +152,16 @@ func TestPrefixTrieDivergenceInsideExtension(t *testing.T) {
 
 		assert.Equal(t, 3, tr.arena.nodeCount())
 
-		require.Len(t, tr.root.children, 1)
-		mid := tr.root.children[0]
-		assert.Equal(t, nibs(0x02, 0x03, 0x04, 0x05), mid.ext)
-		assert.Equal(t, uint32(2), mid.subtreeCount)
-		assert.Equal(t, uint16(1)<<0x06, mid.bitmap)
-		require.Len(t, mid.children, 1)
+		require.Len(t, tr.Root.Children, 1)
+		mid := tr.Root.Children[0]
+		assert.Equal(t, nibs(0x02, 0x03, 0x04, 0x05), mid.Ext)
+		assert.Equal(t, uint32(2), mid.SubtreeCount)
+		assert.Equal(t, uint16(1)<<0x06, mid.Bitmap)
+		require.Len(t, mid.Children, 1)
 
-		leaf := mid.children[0]
-		assert.Equal(t, nibs(0x07), leaf.ext)
-		assert.Equal(t, uint32(1), leaf.subtreeCount)
+		leaf := mid.Children[0]
+		assert.Equal(t, nibs(0x07), leaf.Ext)
+		assert.Equal(t, uint32(1), leaf.SubtreeCount)
 	})
 }
 
@@ -175,9 +175,9 @@ func TestPrefixTrieDuplicateInsert(t *testing.T) {
 	tr.Insert(key, nil, nil)
 
 	assert.Equal(t, nodesAfterFirst, tr.arena.nodeCount(), "duplicate inserts must not grow the trie")
-	assert.Equal(t, uint32(3), tr.root.subtreeCount, "subtreeCount must reflect path traversals")
-	require.Len(t, tr.root.children, 1)
-	assert.Equal(t, uint32(3), tr.root.children[0].subtreeCount)
+	assert.Equal(t, uint32(3), tr.Root.SubtreeCount, "subtreeCount must reflect path traversals")
+	require.Len(t, tr.Root.Children, 1)
+	assert.Equal(t, uint32(3), tr.Root.Children[0].SubtreeCount)
 }
 
 func TestPrefixTrieDeepInsert(t *testing.T) {
@@ -189,10 +189,10 @@ func TestPrefixTrieDeepInsert(t *testing.T) {
 	tr.Insert(deep, nil, nil)
 
 	assert.Equal(t, 2, tr.arena.nodeCount())
-	assert.Equal(t, uint32(1), tr.root.subtreeCount)
-	require.Len(t, tr.root.children, 1)
-	assert.Equal(t, 127, len(tr.root.children[0].ext), "leaf ext = remainder after consuming first nibble")
-	assert.True(t, bytes.Equal(tr.root.children[0].ext, deep[1:]))
+	assert.Equal(t, uint32(1), tr.Root.SubtreeCount)
+	require.Len(t, tr.Root.Children, 1)
+	assert.Equal(t, 127, len(tr.Root.Children[0].Ext), "leaf ext = remainder after consuming first nibble")
+	assert.True(t, bytes.Equal(tr.Root.Children[0].Ext, deep[1:]))
 }
 
 func TestPrefixTrieSubtreeCountAccumulation(t *testing.T) {
@@ -202,10 +202,10 @@ func TestPrefixTrieSubtreeCountAccumulation(t *testing.T) {
 		k := []byte{0x01, 0x02, 0x03, byte(i & 0x0F), byte((i >> 4) & 0x0F), byte(i & 0x0F)}
 		tr.Insert(k, nil, nil)
 	}
-	assert.Equal(t, uint32(N), tr.root.subtreeCount)
+	assert.Equal(t, uint32(N), tr.Root.SubtreeCount)
 
-	require.Len(t, tr.root.children, 1)
-	assert.Equal(t, uint32(N), tr.root.children[0].subtreeCount)
+	require.Len(t, tr.Root.Children, 1)
+	assert.Equal(t, uint32(N), tr.Root.Children[0].SubtreeCount)
 }
 
 func TestPrefixTrieArenaReuse(t *testing.T) {
@@ -217,9 +217,9 @@ func TestPrefixTrieArenaReuse(t *testing.T) {
 
 	tr.Reset()
 	assert.Equal(t, 1, tr.arena.nodeCount(), "Reset must leave only the fresh root")
-	assert.Equal(t, uint32(0), tr.root.subtreeCount)
-	assert.Equal(t, uint16(0), tr.root.bitmap)
-	assert.Empty(t, tr.root.children)
+	assert.Equal(t, uint32(0), tr.Root.SubtreeCount)
+	assert.Equal(t, uint16(0), tr.Root.Bitmap)
+	assert.Empty(t, tr.Root.Children)
 
 	tr.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
 	tr.Insert(nibs(0x01, 0x02, 0x04), nil, nil)
@@ -294,8 +294,8 @@ func TestPrefixTrieArenaReusesExtChunkBacking(t *testing.T) {
 	assert.Equal(t, cap(chunk), cap(tr.arena.extChunks[0]), "Reset must keep the chunk's capacity")
 
 	tr.Insert(nibs(0x05, 0x06, 0x07, 0x08), nil, nil)
-	require.Len(t, tr.root.children, 1)
-	newExt := tr.root.children[0].ext
+	require.Len(t, tr.Root.Children, 1)
+	newExt := tr.Root.Children[0].Ext
 	assert.Equal(t, nibs(0x06, 0x07, 0x08), newExt)
 	assert.Equal(t, newExt, full[:len(newExt)], "post-reset extension must land in the same backing array as before Reset")
 }
@@ -367,12 +367,12 @@ func TestPrefixTrieWalkDFSOrder(t *testing.T) {
 
 func TestPrefixTrieChildIndex(t *testing.T) {
 	t.Run("childIndex", func(t *testing.T) {
-		n := &prefixNode{bitmap: 0}
+		n := &PrefixNode{Bitmap: 0}
 		idx, ok := childIndex(n, 0x05)
 		assert.False(t, ok)
 		assert.Equal(t, 0, idx)
 
-		n.bitmap = uint16(1)<<0x01 | uint16(1)<<0x05 | uint16(1)<<0x0A
+		n.Bitmap = uint16(1)<<0x01 | uint16(1)<<0x05 | uint16(1)<<0x0A
 		idx, ok = childIndex(n, 0x01)
 		assert.True(t, ok)
 		assert.Equal(t, 0, idx)
@@ -393,27 +393,27 @@ func TestPrefixTrieChildIndex(t *testing.T) {
 
 func TestParallelUpdateLifecycle(t *testing.T) {
 	t.Run("construction", func(t *testing.T) {
-		pu := newParallelUpdate()
+		pu := NewParallelUpdate()
 		require.NotNil(t, pu)
-		require.NotNil(t, pu.trie, "trie must be allocated")
-		require.NotNil(t, pu.trie.root, "trie root must be allocated")
-		assert.Empty(t, pu.deferredCombined, "deferredCombined is empty on construction")
+		require.NotNil(t, pu.Trie, "trie must be allocated")
+		require.NotNil(t, pu.Trie.Root, "trie root must be allocated")
+		assert.Empty(t, pu.DeferredCombined, "deferredCombined is empty on construction")
 	})
 
 	t.Run("close", func(t *testing.T) {
-		pu := newParallelUpdate()
+		pu := NewParallelUpdate()
 		pu.Collect(nibs(0x01, 0x02), nil, nil)
-		pu.deferredCombined = append(pu.deferredCombined, &DeferredBranchUpdate{})
+		pu.DeferredCombined = append(pu.DeferredCombined, &DeferredBranchUpdate{})
 
 		pu.Close()
 
-		assert.Nil(t, pu.trie, "trie must be released")
-		assert.Nil(t, pu.deferredCombined, "deferredCombined must be released")
+		assert.Nil(t, pu.Trie, "trie must be released")
+		assert.Nil(t, pu.DeferredCombined, "deferredCombined must be released")
 	})
 }
 
 func TestParallelUpdateInsertDelegates(t *testing.T) {
-	pu := newParallelUpdate()
+	pu := NewParallelUpdate()
 
 	pu.Collect(nibs(0x01, 0x02, 0x03), nil, nil)
 	pu.Collect(nibs(0x01, 0x02, 0x04), nil, nil)
@@ -425,56 +425,56 @@ func TestParallelUpdateInsertDelegates(t *testing.T) {
 	expected.Insert(nibs(0x01, 0x02, 0x04), nil, nil)
 	expected.Insert(nibs(0x05, 0x06, 0x07), nil, nil)
 
-	assert.Equal(t, expected.arena.nodeCount(), pu.trie.arena.nodeCount(),
+	assert.Equal(t, expected.arena.nodeCount(), pu.Trie.arena.nodeCount(),
 		"parallelUpdate.Insert must produce same node count as direct trie.Insert")
-	assert.Equal(t, expected.root.subtreeCount, pu.trie.root.subtreeCount,
+	assert.Equal(t, expected.Root.SubtreeCount, pu.Trie.Root.SubtreeCount,
 		"subtreeCount must reflect all inserts delegated through parallelUpdate")
 }
 
 func TestParallelUpdateResetClearsAllState(t *testing.T) {
-	pu := newParallelUpdate()
+	pu := NewParallelUpdate()
 
 	pu.Collect(nibs(0x01, 0x02, 0x03), nil, nil)
 	pu.Collect(nibs(0x05, 0x06, 0x07), nil, nil)
-	pu.deferredCombined = append(pu.deferredCombined, &DeferredBranchUpdate{})
+	pu.DeferredCombined = append(pu.DeferredCombined, &DeferredBranchUpdate{})
 	pu.Build()
 
-	require.Equal(t, uint32(2), pu.trie.root.subtreeCount)
-	require.Len(t, pu.deferredCombined, 1)
+	require.Equal(t, uint32(2), pu.Trie.Root.SubtreeCount)
+	require.Len(t, pu.DeferredCombined, 1)
 
 	pu.Reset()
 
-	assert.Equal(t, uint32(0), pu.trie.root.subtreeCount, "trie must be reset")
-	assert.Equal(t, 1, pu.trie.arena.nodeCount(), "arena must be reset to a single root node")
-	assert.Empty(t, pu.deferredCombined, "deferredCombined must be cleared")
+	assert.Equal(t, uint32(0), pu.Trie.Root.SubtreeCount, "trie must be reset")
+	assert.Equal(t, 1, pu.Trie.arena.nodeCount(), "arena must be reset to a single root node")
+	assert.Empty(t, pu.DeferredCombined, "deferredCombined must be cleared")
 
 	pu.Collect(nibs(0x0A, 0x0B), nil, nil)
 	pu.Build()
-	assert.Equal(t, uint32(1), pu.trie.root.subtreeCount)
+	assert.Equal(t, uint32(1), pu.Trie.Root.SubtreeCount)
 }
 
 func TestParallelUpdateAppendDeferredSequential(t *testing.T) {
-	pu := newParallelUpdate()
+	pu := NewParallelUpdate()
 
-	pu.appendDeferred(nil)
-	pu.appendDeferred([]*DeferredBranchUpdate{})
-	assert.Empty(t, pu.deferredCombined, "empty inputs must not grow deferredCombined")
+	pu.AppendDeferred(nil)
+	pu.AppendDeferred([]*DeferredBranchUpdate{})
+	assert.Empty(t, pu.DeferredCombined, "empty inputs must not grow deferredCombined")
 
 	a := &DeferredBranchUpdate{}
 	b := &DeferredBranchUpdate{}
 	c := &DeferredBranchUpdate{}
 
-	pu.appendDeferred([]*DeferredBranchUpdate{a})
-	pu.appendDeferred([]*DeferredBranchUpdate{b, c})
+	pu.AppendDeferred([]*DeferredBranchUpdate{a})
+	pu.AppendDeferred([]*DeferredBranchUpdate{b, c})
 
-	require.Len(t, pu.deferredCombined, 3)
-	assert.Same(t, a, pu.deferredCombined[0])
-	assert.Same(t, b, pu.deferredCombined[1])
-	assert.Same(t, c, pu.deferredCombined[2])
+	require.Len(t, pu.DeferredCombined, 3)
+	assert.Same(t, a, pu.DeferredCombined[0])
+	assert.Same(t, b, pu.DeferredCombined[1])
+	assert.Same(t, c, pu.DeferredCombined[2])
 }
 
 func TestParallelUpdateAppendDeferredConcurrent(t *testing.T) {
-	pu := newParallelUpdate()
+	pu := NewParallelUpdate()
 
 	const (
 		workers      = 16
@@ -489,15 +489,15 @@ func TestParallelUpdateAppendDeferredConcurrent(t *testing.T) {
 			for i := range batch {
 				batch[i] = &DeferredBranchUpdate{}
 			}
-			pu.appendDeferred(batch)
+			pu.AppendDeferred(batch)
 		})
 	}
 	wg.Wait()
 
-	assert.Len(t, pu.deferredCombined, expectedSize,
+	assert.Len(t, pu.DeferredCombined, expectedSize,
 		"appendDeferred must atomically merge every worker's batch")
 
-	for i, upd := range pu.deferredCombined {
+	for i, upd := range pu.DeferredCombined {
 		assert.NotNil(t, upd, "deferredCombined[%d] must not be nil", i)
 	}
 }
@@ -509,15 +509,15 @@ func TestPrefixTrieInsertDuplicateMerges(t *testing.T) {
 	key := nibs(0x01, 0x02, 0x03)
 	first := &Update{Flags: BalanceUpdate, Balance: *uint256.NewInt(100)}
 	trie.Insert(key, []byte("pk"), first)
-	require.Equal(t, uint32(1), trie.root.subtreeCount)
+	require.Equal(t, uint32(1), trie.Root.SubtreeCount)
 
 	trie.Insert(key, []byte("pk"), &Update{Flags: NonceUpdate, Nonce: 5})
 
-	assert.Equal(t, uint32(1), trie.root.subtreeCount, "duplicate insert must not inflate subtreeCount")
+	assert.Equal(t, uint32(1), trie.Root.SubtreeCount, "duplicate insert must not inflate subtreeCount")
 
 	var got *Update
 	count := 0
-	require.NoError(t, dfsSubtree(trie.root, nil, func(_, _ []byte, upd *Update) error {
+	require.NoError(t, dfsSubtree(trie.Root, nil, func(_, _ []byte, upd *Update) error {
 		got = upd
 		count++
 		return nil
@@ -597,7 +597,7 @@ func TestPrefixArenaKeepsMaxSlabAcrossReset(t *testing.T) {
 	for range prefixSlabMax + 1 {
 		a.allocNode()
 	}
-	var maxSlab *prefixNode
+	var maxSlab *PrefixNode
 	for _, s := range a.slabs {
 		if len(s) == prefixSlabMax {
 			maxSlab = &s[0]

@@ -112,7 +112,7 @@ type forkWalk struct {
 	leases        *ctxLeasePool
 	accountKeyLen int16
 	cfg           TrieConfig
-	pu            *parallelUpdate
+	pu            *ParallelUpdate
 	metrics       *Metrics
 	traceW        io.Writer
 	grain         uint32
@@ -143,33 +143,33 @@ func (fw *forkWalk) detach(wk *walker) {
 	wk.lease = nil
 }
 
-func (fw *forkWalk) splits(node *prefixNode) bool {
-	if bits.OnesCount16(node.bitmap) < 2 {
+func (fw *forkWalk) splits(node *PrefixNode) bool {
+	if bits.OnesCount16(node.Bitmap) < 2 {
 		return false
 	}
 	var children, largest uint32
-	for _, c := range node.children {
-		children += c.subtreeCount
-		largest = max(largest, c.subtreeCount)
+	for _, c := range node.Children {
+		children += c.SubtreeCount
+		largest = max(largest, c.SubtreeCount)
 	}
 	return children-largest >= fw.grain
 }
 
-func (fw *forkWalk) walk(ctx context.Context, wk *walker, node *prefixNode, path []byte) error {
+func (fw *forkWalk) walk(ctx context.Context, wk *walker, node *PrefixNode, path []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if node == nil {
 		return nil
 	}
-	if node.plainKey != nil {
-		if err := wk.trie.followAndUpdate(path, node.plainKey, node.update); err != nil {
+	if node.PlainKey != nil {
+		if err := wk.trie.followAndUpdate(path, node.PlainKey, node.Update); err != nil {
 			return err
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-	} else if node.bitmap == 0 {
+	} else if node.Bitmap == 0 {
 		return errors.New("commitment: trie leaf without a plainKey")
 	}
 	if fw.splits(node) {
@@ -178,17 +178,17 @@ func (fw *forkWalk) walk(ctx context.Context, wk *walker, node *prefixNode, path
 	return fw.walkChildren(ctx, wk, node, path)
 }
 
-func (fw *forkWalk) walkChildren(ctx context.Context, wk *walker, node *prefixNode, path []byte) error {
+func (fw *forkWalk) walkChildren(ctx context.Context, wk *walker, node *PrefixNode, path []byte) error {
 	childIdx := 0
-	for bm := node.bitmap; bm != 0; {
+	for bm := node.Bitmap; bm != 0; {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		nib := byte(bits.TrailingZeros16(bm))
-		child := node.children[childIdx]
+		child := node.Children[childIdx]
 		base := len(path)
 		path = append(path, nib)
-		path = append(path, child.ext...)
+		path = append(path, child.Ext...)
 		if err := fw.walk(ctx, wk, child, path); err != nil {
 			return err
 		}
@@ -199,7 +199,7 @@ func (fw *forkWalk) walkChildren(ctx context.Context, wk *walker, node *prefixNo
 	return nil
 }
 
-func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path []byte) error {
+func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *PrefixNode, path []byte) error {
 	w := wk.trie
 	positioned, err := unfoldToRow(ctx, w, path)
 	if err != nil {
@@ -218,7 +218,7 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 	var touched, present atomic.Uint32
 	var nibs [16]byte
 	n := 0
-	for bm := node.bitmap; bm != 0; {
+	for bm := node.Bitmap; bm != 0; {
 		nib := bits.TrailingZeros16(bm)
 		nibs[n] = byte(nib)
 		n++
@@ -320,14 +320,14 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 	return nil
 }
 
-func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *walker, node *prefixNode,
+func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *walker, node *PrefixNode,
 	idx, nib int, path []byte, cells *[16]cell, touched, present *atomic.Uint32,
 ) error {
-	child := node.children[idx]
-	childPath := make([]byte, 0, max(len(path)+1+len(child.ext), forkPathCap))
+	child := node.Children[idx]
+	childPath := make([]byte, 0, max(len(path)+1+len(child.Ext), forkPathCap))
 	childPath = append(childPath, path...)
 	childPath = append(childPath, byte(nib))
-	childPath = append(childPath, child.ext...)
+	childPath = append(childPath, child.Ext...)
 
 	fw.checkout(cw, childPath)
 	defer fw.checkin(cw)
@@ -367,7 +367,7 @@ func (fw *forkWalk) checkin(wk *walker) {
 	w.ResetContext(nil)
 	fw.metrics.Merge(w.metrics)
 	recs := w.branchEncoder.deferred
-	fw.pu.appendDeferred(recs)
+	fw.pu.AppendDeferred(recs)
 	clear(recs)
 	w.branchEncoder.deferred = recs[:0]
 	w.Release()

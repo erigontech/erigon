@@ -1425,19 +1425,19 @@ func sortUpdatesByHashIncrease(t *testing.T, plainKeys [][]byte, updates []Updat
 
 	ku := make([]*KeyUpdate, len(plainKeys))
 	for i, pk := range plainKeys {
-		ku[i] = &KeyUpdate{plainKey: string(pk), hashedKey: KeyToHexNibbleHash(pk), update: &updates[i]}
+		ku[i] = &KeyUpdate{PlainKey: string(pk), HashedKey: KeyToHexNibbleHash(pk), Update: &updates[i]}
 	}
 
 	slices.SortFunc(ku, func(a, b *KeyUpdate) int {
-		return bytes.Compare(a.hashedKey, b.hashedKey)
+		return bytes.Compare(a.HashedKey, b.HashedKey)
 	})
 
 	pks := make([][]byte, len(ku))
 	upds := make([]Update, len(ku))
 	for i, u := range ku {
-		pks[i] = []byte(u.plainKey)
-		upds[i] = *u.update
-		fmt.Printf("%x -> %x\n", u.plainKey, u.hashedKey)
+		pks[i] = []byte(u.PlainKey)
+		upds[i] = *u.Update
+		fmt.Printf("%x -> %x\n", u.PlainKey, u.HashedKey)
 	}
 	return pks, upds
 }
@@ -1817,7 +1817,7 @@ func TestDeferredCallerOwned_MatchesEagerAcrossDeletions(t *testing.T) {
 		pending := trieCaller.TakeDeferredUpdates()
 		require.NotEmpty(t, pending, "round %d left nothing for the caller to apply", round)
 		for _, upd := range pending {
-			if len(upd.raw) == 4 && upd.raw[2] == 0 && upd.raw[3] == 0 {
+			if len(upd.Raw) == 4 && upd.Raw[2] == 0 && upd.Raw[3] == 0 {
 				deletions++
 			}
 		}
@@ -1826,7 +1826,7 @@ func TestDeferredCallerOwned_MatchesEagerAcrossDeletions(t *testing.T) {
 		require.NoError(t, err, "round %d apply", round)
 		require.NotZero(t, written, "round %d wrote nothing", round)
 		for _, upd := range pending {
-			putDeferredUpdate(upd)
+			PutDeferredUpdate(upd)
 		}
 
 		require.Equal(t, eagerState.cm, callerState.cm, "round %d stored branches", round)
@@ -1936,7 +1936,7 @@ func TestDeferredCollection_AddsNoBranchRead(t *testing.T) {
 	pending := trie.TakeDeferredUpdates()
 	defer func() {
 		for _, upd := range pending {
-			putDeferredUpdate(upd)
+			PutDeferredUpdate(upd)
 		}
 	}()
 
@@ -1948,7 +1948,7 @@ func TestDeferredCollection_AddsNoBranchRead(t *testing.T) {
 		}
 	}
 	for _, upd := range pending {
-		if len(upd.prev) > 0 {
+		if len(upd.Prev) > 0 {
 			withPrev++
 		}
 	}

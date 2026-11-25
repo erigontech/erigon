@@ -38,7 +38,7 @@ func (hph *HexPatriciaHashed) mountTo(base *HexPatriciaHashed, nibble int) {
 }
 
 func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Updates) ([]byte, error) {
-	pu := updates.parallel
+	pu := updates.Parallel
 	base := p.template
 	if base.ctx == nil && p.trieCtxFactory != nil {
 		bctx, cleanup := p.trieCtxFactory(ctx)
@@ -69,9 +69,9 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 	if err := fw.attach(ctx, bw); err != nil {
 		return nil, err
 	}
-	root := pu.trie.root
+	root := pu.Trie.Root
 	path := make([]byte, 0, forkPathCap)
-	path = append(path, root.ext...)
+	path = append(path, root.Ext...)
 	walkErr := fw.walk(ctx, bw, root, path)
 	fw.detach(bw)
 	p.forks.Store(fw.forks.Load())
@@ -83,6 +83,6 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		return nil, fmt.Errorf("processMounted: root fold: %w", err)
 	}
 	p.metrics.Merge(base.metrics)
-	pu.appendDeferred(base.TakeDeferredUpdates())
+	pu.AppendDeferred(base.TakeDeferredUpdates())
 	return base.RootHash()
 }

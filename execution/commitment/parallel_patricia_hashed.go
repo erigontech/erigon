@@ -226,7 +226,7 @@ func (p *ParallelPatriciaHashed) Process(
 	onProgress func(*CommitProgress),
 	warmup WarmupConfig,
 ) (rootHash []byte, err error) {
-	if updates == nil || updates.Mode() != ModeParallel || updates.parallel == nil {
+	if updates == nil || updates.Mode() != ModeParallel || updates.Parallel == nil {
 		return nil, errors.New("ParallelPatriciaHashed.Process requires Updates in ModeParallel")
 	}
 	if p.trieCtxFactory == nil {
@@ -247,9 +247,9 @@ func (p *ParallelPatriciaHashed) Process(
 	roundStart := time.Now()
 	defer func() { ObserveRound(p.metrics, roundStart) }()
 
-	pu := updates.parallel
+	pu := updates.Parallel
 	pu.Build()
-	if pu.trie == nil || pu.trie.root == nil || pu.trie.root.subtreeCount == 0 {
+	if pu.Trie == nil || pu.Trie.Root == nil || pu.Trie.Root.SubtreeCount == 0 {
 		// A consumed (or never-touched) collection must return the carried root; folding
 		// an empty base would publish the empty-trie root instead.
 		rh, rerr := p.template.RootHash()
@@ -270,22 +270,22 @@ func (p *ParallelPatriciaHashed) Process(
 	rh, mErr := p.processMounted(ctx, updates)
 	if mErr != nil {
 		restoreTemplate()
-		pu.drainDeferred()
+		pu.DrainDeferred()
 		return nil, mErr
 	}
 
-	pu.foldTombstones()
+	pu.FoldTombstones()
 	if p.cfg.LeaveDeferredForCaller {
-		pu.deferredMu.Lock()
-		p.deferredForCaller = pu.deferredCombined
-		pu.deferredCombined = nil
-		pu.deferredMu.Unlock()
+		pu.DeferredMu.Lock()
+		p.deferredForCaller = pu.DeferredCombined
+		pu.DeferredCombined = nil
+		pu.DeferredMu.Unlock()
 	} else if aErr := p.applyDeferredUpdates(ctx, pu); aErr != nil {
 		restoreTemplate()
 		return nil, aErr
 	}
 
-	updates.consumeParallel()
+	updates.ConsumeParallel()
 
 	out := make([]byte, len(rh))
 	copy(out, rh)
@@ -297,18 +297,18 @@ func (p *ParallelPatriciaHashed) Process(
 	return out, nil
 }
 
-func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *parallelUpdate) error {
-	pu.deferredMu.Lock()
-	deferred := pu.deferredCombined
-	pu.deferredCombined = nil
-	pu.deferredMu.Unlock()
+func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *ParallelUpdate) error {
+	pu.DeferredMu.Lock()
+	deferred := pu.DeferredCombined
+	pu.DeferredCombined = nil
+	pu.DeferredMu.Unlock()
 
 	if len(deferred) == 0 {
 		return nil
 	}
 	defer func() {
 		for _, upd := range deferred {
-			putDeferredUpdate(upd)
+			PutDeferredUpdate(upd)
 		}
 	}()
 
@@ -331,25 +331,25 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *p
 			if wctx == nil {
 				return errors.New("ParallelPatriciaHashed: trieCtxFactory returned nil context for deferred apply")
 			}
-			merger := workerMergerPool.Get().(*BranchMerger)
-			defer workerMergerPool.Put(merger)
+			merger := WorkerMergerPool.Get().(*BranchMerger)
+			defer WorkerMergerPool.Put(merger)
 			for {
 				i := int(claimed.Add(1)) - 1
 				if i >= len(deferred) {
 					return nil
 				}
 				upd := deferred[i]
-				if err := mergeDeferredUpdate(upd, merger); err != nil {
+				if err := MergeDeferredUpdate(upd, merger); err != nil {
 					return err
 				}
-				if upd.encoded == nil {
+				if upd.Encoded == nil {
 					continue
 				}
-				if err := wctx.PutBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+				if err := wctx.PutBranch(CapLen(upd.Prefix), CapLen(upd.Encoded), CapLen(upd.Prev)); err != nil {
 					return err
 				}
 				n++
-				size += int64(len(upd.encoded))
+				size += int64(len(upd.Encoded))
 			}
 		})
 	}

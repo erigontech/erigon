@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 // buildNibbleSpread returns a corpus whose accounts land under distinct root
@@ -81,16 +82,16 @@ func TestParallelPatriciaHashedReportsProgress(t *testing.T) {
 	defer sut.Close()
 	_, err = seq.Process(context.Background(), sut, "", nil, WarmupConfig{})
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, m.AddressKeys, seq.metrics.addressKeys.Load(),
+	assert.GreaterOrEqual(t, m.AddressKeys, seq.metrics.AsValues().AddressKeys,
 		"every worker's address keys are merged in")
-	assert.GreaterOrEqual(t, m.StorageKeys, seq.metrics.storageKeys.Load(),
+	assert.GreaterOrEqual(t, m.StorageKeys, seq.metrics.AsValues().StorageKeys,
 		"every worker's storage keys are merged in")
 }
 
 func TestMetricsResetClearsEveryCounter(t *testing.T) {
 	m := &Metrics{}
-	m.folds.Add(6)
-	m.unfolds.Add(7)
+	m.Folds.Add(6)
+	m.Unfolds.Add(7)
 
 	m.Reset()
 
@@ -179,8 +180,8 @@ func TestBranchWritesArePublishedOnce(t *testing.T) {
 		ut.TouchPlainKey(string(k), nil, nil)
 	}
 
-	beforePuts := mxBranchPuts.GetValueUint64()
-	beforeBytes := mxWriteBytes.GetValueUint64()
+	beforePuts := metrics.GetOrCreateCounter("commitment_branch_writes_total").GetValueUint64()
+	beforeBytes := metrics.GetOrCreateCounter("commitment_branch_write_bytes_total").GetValueUint64()
 
 	var got *CommitProgress
 	_, err := tr.Process(context.Background(), ut, "", func(p *CommitProgress) { got = p }, WarmupConfig{})
@@ -188,9 +189,9 @@ func TestBranchWritesArePublishedOnce(t *testing.T) {
 	require.NotNil(t, got)
 
 	require.Positive(t, got.Metrics.UpdateBranch, "the round wrote branches at all")
-	assert.EqualValues(t, got.Metrics.UpdateBranch, mxBranchPuts.GetValueUint64()-beforePuts,
+	assert.EqualValues(t, got.Metrics.UpdateBranch, metrics.GetOrCreateCounter("commitment_branch_writes_total").GetValueUint64()-beforePuts,
 		"commitment_branch_writes_total counts each write once")
-	assert.EqualValues(t, got.Metrics.BranchWriteBytes, mxWriteBytes.GetValueUint64()-beforeBytes,
+	assert.EqualValues(t, got.Metrics.BranchWriteBytes, metrics.GetOrCreateCounter("commitment_branch_write_bytes_total").GetValueUint64()-beforeBytes,
 		"commitment_branch_write_bytes_total counts each write once")
 }
 

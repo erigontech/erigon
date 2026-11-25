@@ -28,7 +28,7 @@ func unfoldToRow(ctx context.Context, base *HexPatriciaHashed, prefix []byte) (b
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
-		base.metrics.folds.Add(1)
+		base.metrics.Folds.Add(1)
 		if err := base.fold(); err != nil {
 			return false, err
 		}
@@ -41,7 +41,7 @@ func unfoldToRow(ctx context.Context, base *HexPatriciaHashed, prefix []byte) (b
 		if base.activeRows > 0 {
 			depth = base.depths[base.activeRows-1]
 		}
-		base.metrics.unfolds.Add(1)
+		base.metrics.Unfolds.Add(1)
 		if err := base.unfold(probe, min(u, int16(len(probe))-depth)); err != nil {
 			return false, err
 		}
@@ -58,7 +58,7 @@ type openedRow struct {
 }
 
 func openEmptyRow(base *HexPatriciaHashed, prefix []byte) openedRow {
-	base.metrics.unfolds.Add(1)
+	base.metrics.Unfolds.Add(1)
 	row := base.activeRows
 	out := openedRow{opened: true, row: row}
 	if row > 0 {
@@ -150,7 +150,7 @@ func foldSplitRow(ctx context.Context, base *HexPatriciaHashed) (cell, error) {
 		if err := ctx.Err(); err != nil {
 			return cell{}, err
 		}
-		base.metrics.folds.Add(1)
+		base.metrics.Folds.Add(1)
 		if err := base.fold(); err != nil {
 			return cell{}, err
 		}

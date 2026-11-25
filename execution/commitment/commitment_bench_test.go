@@ -277,8 +277,8 @@ func BenchmarkGetDeferredUpdate(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		upd := getDeferredUpdate(prefix, raw, prev)
-		putDeferredUpdate(upd)
+		upd := GetDeferredUpdate(prefix, raw, prev)
+		PutDeferredUpdate(upd)
 	}
 }
 
@@ -314,8 +314,8 @@ func BenchmarkGetDeferredUpdate_FewCells(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		upd := getDeferredUpdate(prefix, raw, prev)
-		putDeferredUpdate(upd)
+		upd := GetDeferredUpdate(prefix, raw, prev)
+		PutDeferredUpdate(upd)
 	}
 }
 

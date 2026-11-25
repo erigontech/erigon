@@ -55,7 +55,7 @@ func DecodeBranchInto(
 		}
 		fieldBits := branchData[pos]
 		pos++
-		newPos, err := c.fillFromFields(branchData, pos, cellFields(fieldBits))
+		newPos, err := c.fillFromFields(branchData, pos, CellFields(fieldBits))
 		if err != nil {
 			return BranchMaps{}, fmt.Errorf("fillFromFields nibble %d: %w", nibble, err)
 		}
@@ -86,21 +86,21 @@ func (branchData BranchData) ForEachCell(fn func(nibble int, c BranchCell) error
 		if pos >= len(branchData) {
 			return fmt.Errorf("branch data truncated before cell at nibble %d", nibble)
 		}
-		fields := cellFields(branchData[pos])
+		fields := CellFields(branchData[pos])
 		pos++
-		if fields&^(fieldExtension|fieldAccountAddr|fieldStorageAddr|fieldHash|fieldStateHash) != 0 {
+		if fields&^(FieldExtension|FieldAccountAddr|FieldStorageAddr|FieldHash|FieldStateHash) != 0 {
 			return fmt.Errorf("unknown cell fields %08b at nibble %d", fields, nibble)
 		}
 		var c BranchCell
 		for _, f := range [...]struct {
-			flag cellFields
+			flag CellFields
 			dst  *[]byte
 		}{
-			{fieldExtension, &c.Extension},
-			{fieldAccountAddr, &c.AccountAddr},
-			{fieldStorageAddr, &c.StorageAddr},
-			{fieldHash, &c.Hash},
-			{fieldStateHash, nil},
+			{FieldExtension, &c.Extension},
+			{FieldAccountAddr, &c.AccountAddr},
+			{FieldStorageAddr, &c.StorageAddr},
+			{FieldHash, &c.Hash},
+			{FieldStateHash, nil},
 		} {
 			if fields&f.flag == 0 {
 				continue

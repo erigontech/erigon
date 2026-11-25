@@ -92,8 +92,8 @@ func TestModeParallel_ProcessConsumesUpdates(t *testing.T) {
 		require.Equal(t, uint64(len(k1)), ut.Size())
 		processRoot(t, tr, ut)
 		require.Zero(t, ut.Size(), "Process left the touched-key collection unconsumed")
-		if root := ut.parallel.trie.root; root != nil {
-			require.Zero(t, root.subtreeCount, "Process left the prefix trie populated")
+		if root := ut.Parallel.Trie.Root; root != nil {
+			require.Zero(t, root.SubtreeCount, "Process left the prefix trie populated")
 		}
 
 		touchBatch(t, ms, ut, k2, u2)

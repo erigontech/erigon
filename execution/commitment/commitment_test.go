@@ -822,7 +822,7 @@ func TestCollectDeferredUpdate_CarriesSuppliedPrev(t *testing.T) {
 	require.NoError(t, be.CollectDeferredUpdate(ctx, prefix, bm, bm, bm, &cells, prev))
 
 	require.Len(t, be.deferred, 1)
-	require.Equal(t, prev, []byte(be.deferred[0].prev), "the record must carry the prev it was given")
+	require.Equal(t, prev, []byte(be.deferred[0].Prev), "the record must carry the prev it was given")
 	require.Empty(t, ctx.puts, "deferred collection writes nothing")
 }
 
@@ -835,9 +835,9 @@ func TestCollectDeferredUpdate_CarriesSuppliedPrev(t *testing.T) {
 // sync.Pool may hand back a fresh object and leave the recycle unexercised.
 func TestCollectDeferredUpdate_PoolRecycleDoesNotCorruptEarlierApply(t *testing.T) {
 	seed := &DeferredBranchUpdate{}
-	saved := deferredUpdatePool
-	deferredUpdatePool = &sync.Pool{New: func() any { return seed }}
-	t.Cleanup(func() { deferredUpdatePool = saved })
+	saved := DeferredUpdatePool
+	DeferredUpdatePool = &sync.Pool{New: func() any { return seed }}
+	t.Cleanup(func() { DeferredUpdatePool = saved })
 
 	rowA, bmA := generateCellRow(t, 8)
 	cellsA := generateCellEncodeDataRow(t, rowA, bmA)
@@ -889,7 +889,7 @@ func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
 	// so scanning it with only plainKey set as pivot returns nothing.
 	entry, ok := updates.treeIdx[key]
 	require.True(t, ok, "key should be present after TouchPlainKey rewrite")
-	got := entry.update
+	got := entry.Update
 
 	require.NotNil(t, got)
 	require.Equal(t, StorageUpdate, got.Flags)
@@ -915,8 +915,8 @@ func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
 	defer ut.Close()
 
 	require.Equal(t, ModeParallel, ut.mode)
-	require.NotNil(t, ut.parallel, "parallel field must be allocated")
-	require.NotNil(t, ut.parallel.trie, "parallel trie must be allocated")
+	require.NotNil(t, ut.Parallel, "parallel field must be allocated")
+	require.NotNil(t, ut.Parallel.Trie, "parallel trie must be allocated")
 	require.NotNil(t, ut.keys, "keys dedup map must be allocated")
 	require.Nil(t, ut.tree)
 	require.Nil(t, ut.treeIdx)
@@ -928,8 +928,8 @@ func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
 func requireParallelCount(t *testing.T, ut *Updates, n int, msg string) {
 	t.Helper()
 	require.Equal(t, uint64(n), ut.Size())
-	ut.parallel.Build()
-	require.EqualValues(t, n, ut.parallel.trie.root.subtreeCount, msg)
+	ut.Parallel.Build()
+	require.EqualValues(t, n, ut.Parallel.Trie.Root.SubtreeCount, msg)
 }
 
 func TestUpdatesModeParallel_TouchPlainKeyRoutes(t *testing.T) {
@@ -1010,11 +1010,11 @@ func TestUpdatesModeParallel_Reset(t *testing.T) {
 	ut.Reset()
 
 	require.Equal(t, uint64(0), ut.Size())
-	require.NotNil(t, ut.parallel, "Reset must not release parallel field")
-	require.NotNil(t, ut.parallel.trie)
-	require.NotNil(t, ut.parallel.trie.root, "trie root must be re-allocated after Reset")
-	require.EqualValues(t, 0, ut.parallel.trie.root.subtreeCount, "trie counts cleared after Reset")
-	require.EqualValues(t, 0, ut.parallel.trie.root.bitmap, "trie bitmap cleared after Reset")
+	require.NotNil(t, ut.Parallel, "Reset must not release parallel field")
+	require.NotNil(t, ut.Parallel.Trie)
+	require.NotNil(t, ut.Parallel.Trie.Root, "trie root must be re-allocated after Reset")
+	require.EqualValues(t, 0, ut.Parallel.Trie.Root.SubtreeCount, "trie counts cleared after Reset")
+	require.EqualValues(t, 0, ut.Parallel.Trie.Root.Bitmap, "trie bitmap cleared after Reset")
 
 	for _, k := range keys {
 		ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
@@ -1030,7 +1030,7 @@ func TestUpdatesModeParallel_Close(t *testing.T) {
 	ut.TouchPlainKey(string(common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f")), []byte("v"), ut.TouchStorage)
 
 	ut.Close()
-	require.Nil(t, ut.parallel, "Close must release parallel field")
+	require.Nil(t, ut.Parallel, "Close must release parallel field")
 }
 
 func TestUpdatesModeParallel_SetMode(t *testing.T) {
@@ -1038,16 +1038,16 @@ func TestUpdatesModeParallel_SetMode(t *testing.T) {
 
 	ut := NewUpdates(ModeDirect, t.TempDir(), KeyToHexNibbleHash)
 	defer ut.Close()
-	require.Nil(t, ut.parallel)
+	require.Nil(t, ut.Parallel)
 
 	ut.SetMode(ModeParallel)
 	require.Equal(t, ModeParallel, ut.mode)
-	require.NotNil(t, ut.parallel)
+	require.NotNil(t, ut.Parallel)
 	require.Equal(t, uint64(0), ut.Size())
 
-	prev := ut.parallel
+	prev := ut.Parallel
 	ut.SetMode(ModeParallel)
-	require.Same(t, prev, ut.parallel)
+	require.Same(t, prev, ut.Parallel)
 }
 
 func TestInitializeTrieAndUpdates_Variants(t *testing.T) {
@@ -1076,9 +1076,9 @@ func TestInitializeTrieAndUpdates_Variants(t *testing.T) {
 			require.Equal(t, tc.variant, trie.Variant())
 			require.Equal(t, tc.wantMode, upd.Mode())
 			if tc.wantParallel {
-				require.NotNil(t, upd.parallel)
+				require.NotNil(t, upd.Parallel)
 			} else {
-				require.Nil(t, upd.parallel)
+				require.Nil(t, upd.Parallel)
 			}
 		})
 	}
@@ -1108,43 +1108,43 @@ func TestReuseBytes(t *testing.T) {
 // fails if it is ever switched to a pooled buffer. putDeferredUpdate clears prev, so a
 // warm buffer has to be seeded through the pool rather than by a Put/Get round trip.
 func TestGetDeferredUpdate_WarmPoolPreservesNilPrev(t *testing.T) {
-	seed := &DeferredBranchUpdate{prev: make([]byte, 0, 32)}
-	saved := deferredUpdatePool
-	deferredUpdatePool = &sync.Pool{New: func() any { return seed }}
-	t.Cleanup(func() { deferredUpdatePool = saved })
+	seed := &DeferredBranchUpdate{Prev: make([]byte, 0, 32)}
+	saved := DeferredUpdatePool
+	DeferredUpdatePool = &sync.Pool{New: func() any { return seed }}
+	t.Cleanup(func() { DeferredUpdatePool = saved })
 
-	upd := getDeferredUpdate([]byte{1}, []byte{2, 3}, nil)
-	defer putDeferredUpdate(upd)
+	upd := GetDeferredUpdate([]byte{1}, []byte{2, 3}, nil)
+	defer PutDeferredUpdate(upd)
 	require.Same(t, seed, upd)
-	require.Nil(t, upd.prev)
+	require.Nil(t, upd.Prev)
 }
 
 // Pins the production path, not the helper: sync.Pool may hand back a fresh object, so the
 // pool is swapped for one that always yields a known object with known backing arrays.
 func TestGetDeferredUpdate_WritesIntoPooledBacking(t *testing.T) {
 	seed := &DeferredBranchUpdate{
-		prefix: make([]byte, 0, 32),
-		raw:    make([]byte, 0, 32),
-		prev:   make([]byte, 0, 32),
+		Prefix: make([]byte, 0, 32),
+		Raw:    make([]byte, 0, 32),
+		Prev:   make([]byte, 0, 32),
 	}
-	prefixArr, rawArr := &seed.prefix[:1][0], &seed.raw[:1][0]
+	prefixArr, rawArr := &seed.Prefix[:1][0], &seed.Raw[:1][0]
 
-	saved := deferredUpdatePool
-	deferredUpdatePool = &sync.Pool{New: func() any { return seed }}
-	t.Cleanup(func() { deferredUpdatePool = saved })
+	saved := DeferredUpdatePool
+	DeferredUpdatePool = &sync.Pool{New: func() any { return seed }}
+	t.Cleanup(func() { DeferredUpdatePool = saved })
 
-	upd := getDeferredUpdate([]byte{1, 2}, []byte{3, 4, 5}, []byte{6})
+	upd := GetDeferredUpdate([]byte{1, 2}, []byte{3, 4, 5}, []byte{6})
 	require.Same(t, seed, upd)
-	require.Same(t, prefixArr, &upd.prefix[0], "prefix must be written into the pooled array")
-	require.Same(t, rawArr, &upd.raw[0], "raw must be written into the pooled array")
+	require.Same(t, prefixArr, &upd.Prefix[0], "prefix must be written into the pooled array")
+	require.Same(t, rawArr, &upd.Raw[0], "raw must be written into the pooled array")
 }
 
 func TestCapLen(t *testing.T) {
 	t.Parallel()
-	require.Nil(t, capLen(nil))
+	require.Nil(t, CapLen(nil))
 	big := make([]byte, 3, 64)
-	require.Equal(t, 3, cap(capLen(big)))
-	require.Equal(t, 0, cap(capLen(big[:0])))
+	require.Equal(t, 3, cap(CapLen(big)))
+	require.Equal(t, 0, cap(CapLen(big[:0])))
 }
 
 // A callback must not see capacity left over from whichever update used the object before.
@@ -1155,9 +1155,9 @@ func TestApplyDeferred_CallbackSeesInputDerivedCapacity(t *testing.T) {
 
 	upd := func(prefix, raw byte) *DeferredBranchUpdate {
 		return &DeferredBranchUpdate{
-			prefix: append(make([]byte, 0, 64), prefix),
-			raw:    append(make(BranchData, 0, 64), raw),
-			prev:   make([]byte, 0, 64),
+			Prefix: append(make([]byte, 0, 64), prefix),
+			Raw:    append(make(BranchData, 0, 64), raw),
+			Prev:   make([]byte, 0, 64),
 		}
 	}
 	deferred := func(n int) []*DeferredBranchUpdate {
@@ -1230,9 +1230,9 @@ func TestHashSortLeavesNoBatchSlabEntriesBehind(t *testing.T) {
 
 	require.NotZero(t, cap(upd.batchSlab), "no batch ran, so the test proves nothing")
 	for i, ku := range upd.batchSlab[:cap(upd.batchSlab)] {
-		require.Nil(t, ku.update, "batchSlab[%d] still pins an Update after HashSort", i)
-		require.Nil(t, ku.hashedKey, "batchSlab[%d] still pins a hashed key after HashSort", i)
-		require.Empty(t, ku.plainKey, "batchSlab[%d] still pins a plain key after HashSort", i)
+		require.Nil(t, ku.Update, "batchSlab[%d] still pins an Update after HashSort", i)
+		require.Nil(t, ku.HashedKey, "batchSlab[%d] still pins a hashed key after HashSort", i)
+		require.Empty(t, ku.PlainKey, "batchSlab[%d] still pins a plain key after HashSort", i)
 	}
 }
 
@@ -1241,15 +1241,15 @@ func TestHashSortLeavesNoBatchSlabEntriesBehind(t *testing.T) {
 func TestParallelUpdateResetDetachesDeferred(t *testing.T) {
 	t.Parallel()
 
-	pu := newParallelUpdate()
-	pu.appendDeferred([]*DeferredBranchUpdate{
-		getDeferredUpdate([]byte{1}, make([]byte, 4096), nil),
-		getDeferredUpdate([]byte{2}, make([]byte, 4096), nil),
+	pu := NewParallelUpdate()
+	pu.AppendDeferred([]*DeferredBranchUpdate{
+		GetDeferredUpdate([]byte{1}, make([]byte, 4096), nil),
+		GetDeferredUpdate([]byte{2}, make([]byte, 4096), nil),
 	})
 
 	pu.Reset()
 
-	require.Nil(t, pu.deferredCombined, "Reset still pins the recycled updates")
+	require.Nil(t, pu.DeferredCombined, "Reset still pins the recycled updates")
 }
 
 func TestCollectDeferredUpdate_CallerOwnedIgnoresCapacityLimit(t *testing.T) {
@@ -1298,8 +1298,8 @@ func TestCollectDeferredUpdate_NewBranchCarriesEmptyPrev(t *testing.T) {
 	be.setDeferUpdates(true)
 	require.NoError(t, be.CollectDeferredUpdate(&recordingCtx{}, []byte{0x33, 0x44}, bm, bm, bm, &cells, nil))
 	require.Len(t, be.deferred, 1)
-	require.NotNil(t, be.deferred[0].prev, "a new branch must carry an empty prev, or the domain reads the previous value again on apply")
-	require.Empty(t, be.deferred[0].prev)
+	require.NotNil(t, be.deferred[0].Prev, "a new branch must carry an empty prev, or the domain reads the previous value again on apply")
+	require.Empty(t, be.deferred[0].Prev)
 	be.ClearDeferred()
 }
 
@@ -1352,16 +1352,16 @@ func TestApplyDeferredUpdates_ShardedFlushMergesAndWritesEachPrefixOnce(t *testi
 				return &countingFlushCtx{mu: &mu, written: written, prev: prevSeen, calls: &calls}, func() {}
 			}
 
-			pu := &parallelUpdate{}
-			pu.deferredCombined = append(pu.deferredCombined,
-				getDeferredUpdate([]byte{0x01}, raw, prev),
-				getDeferredUpdate([]byte{0x02}, raw, nil),
-				getDeferredUpdate([]byte{0x03}, same, same))
+			pu := &ParallelUpdate{}
+			pu.DeferredCombined = append(pu.DeferredCombined,
+				GetDeferredUpdate([]byte{0x01}, raw, prev),
+				GetDeferredUpdate([]byte{0x02}, raw, nil),
+				GetDeferredUpdate([]byte{0x03}, same, same))
 			for i := range (workers - 1) * deferredWritesPerWorker {
-				pu.deferredCombined = append(pu.deferredCombined,
-					getDeferredUpdate([]byte{0x10, byte(i >> 8), byte(i)}, raw, prev))
+				pu.DeferredCombined = append(pu.DeferredCombined,
+					GetDeferredUpdate([]byte{0x10, byte(i >> 8), byte(i)}, raw, prev))
 			}
-			wantWrites := int64(len(pu.deferredCombined) - 1)
+			wantWrites := int64(len(pu.DeferredCombined) - 1)
 
 			p := NewParallelPatriciaHashed(factory, length.Addr, DefaultTrieConfig())
 			p.SetNumWorkers(workers)
