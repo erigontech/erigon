@@ -536,7 +536,7 @@ func (ibs *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize in
 
 // NotifyLog runs the OnLog hook after a log's fields are populated.
 func (ibs *IntraBlockState) NotifyLog(lp *types.Log) {
-	if dbg.TraceLogs && (ibs.trace || dbg.TraceAccount(accounts.InternAddress(lp.Address).Value())) {
+	if dbg.TraceLogs && (ibs.trace || dbg.TraceAccount(lp.Address)) {
 		var topics string
 		for i := 0; i < len(lp.Topics); i++ {
 			topics += "[" + hex.EncodeToString(lp.Topics[i][:]) + "]"
