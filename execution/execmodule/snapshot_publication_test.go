@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func newSnapshotBoundaryChain(t *testing.T, opts ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, uint64) {
@@ -200,6 +202,45 @@ func TestStateFileBuildDeletesTheChangesetsOfCollatedBlocks(t *testing.T) {
 			requireFilesOnCanonicalChain(t, m, chainPack)
 		})
 	}
+}
+
+// With state-file production off no step enters the files, so the changesets kept for deep unwinds stay.
+func TestStateFileProductionOffKeepsTheChangesets(t *testing.T) {
+	for _, off := range []string{"no_background_maintenance", "snap_state_stop"} {
+		for _, mode := range []string{"always_generate_changesets", "no_prune"} {
+			t.Run(off+"/"+mode, func(t *testing.T) {
+				opts := []execmoduletester.Option{execmoduletester.WithAlwaysGenerateChangesets(mode == "always_generate_changesets")}
+				if mode == "no_prune" {
+					dbg.SetNoPrune(true)
+					t.Cleanup(func() { dbg.SetNoPrune(false) })
+				}
+				if off == "no_background_maintenance" {
+					dbg.SetNoBackgroundMaintenance(true)
+					t.Cleanup(func() { dbg.SetNoBackgroundMaintenance(false) })
+				} else {
+					opts = append(opts, execmoduletester.WithBlockReaderWrap(func(br dbservices.FullBlockReader) dbservices.FullBlockReader {
+						return stateFilesStopped{br}
+					}))
+				}
+				m, chainPack, lastFileBlock := newSnapshotBoundaryChain(t, opts...)
+				agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+				if off == "snap_state_stop" {
+					agg.SetProduceMod(false)
+				}
+				pruneWithFinalized(t, m, chainPack, lastFileBlock+1)
+				require.Zero(t, agg.EndTxNumMinimax())
+				require.NoError(t, m.ExecModule.SetHead(t.Context(), lastFileBlock-1))
+			})
+		}
+	}
+}
+
+type stateFilesStopped struct{ dbservices.FullBlockReader }
+
+func (r stateFilesStopped) FreezingCfg() ethconfig.BlocksFreezing {
+	cfg := r.FullBlockReader.FreezingCfg()
+	cfg.ProduceE3 = false
+	return cfg
 }
 
 func pruneWithFinalized(t *testing.T, m *execmoduletester.ExecModuleTester, chainPack *blockgen.ChainPack, finalized uint64) {
