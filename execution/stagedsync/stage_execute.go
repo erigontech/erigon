@@ -631,7 +631,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
 	if dbg.NoPrune() {
 		// The prune is off, but a step goes into files only after its blocks' changesets are gone.
-		if s.FinalityCtx != nil {
+		if s.FinalityCtx != nil && producesStateFiles(cfg.blockReader) {
 			end, err := collatableStepsEnd(ctx, tx, cfg.blockReader, s.FinalityCtx.CollateToBlockNum())
 			if err != nil {
 				return err
@@ -689,11 +689,14 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	// integration tool / explicit --experimental.always-generate-changesets flag): only the steps about to be
 	// collated lose theirs.
 	var changesetsPruneTo uint64
-	if cfg.syncCfg.AlwaysGenerateChangesets {
-		changesetsPruneTo, err = collatableStepsEnd(ctx, tx, cfg.blockReader, s.FinalityCtx.CollateToBlockNum())
-	} else {
+	switch {
+	case !cfg.syncCfg.AlwaysGenerateChangesets:
 		changesetsPruneTo, err = blocksInFilesEnd(ctx, tx, cfg.blockReader)
 		changesetsPruneTo = max(changesetsPruneTo, blockPruneTo)
+	case producesStateFiles(cfg.blockReader):
+		changesetsPruneTo, err = collatableStepsEnd(ctx, tx, cfg.blockReader, s.FinalityCtx.CollateToBlockNum())
+	default:
+		changesetsPruneTo, err = blocksInFilesEnd(ctx, tx, cfg.blockReader)
 	}
 	if err != nil {
 		return err
@@ -775,6 +778,10 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 
 // noPruneChangesetsTimeout bounds the changeset delete that collation still needs with the prune off.
 const noPruneChangesetsTimeout = 100 * time.Millisecond
+
+func producesStateFiles(blockReader dbservices.FullBlockReader) bool {
+	return blockReader.FreezingCfg().ProduceE3 && !dbg.NoBackgroundMaintenance()
+}
 
 // blocksInFilesEnd is the block after the last block in the visible state files.
 func blocksInFilesEnd(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader) (uint64, error) {
