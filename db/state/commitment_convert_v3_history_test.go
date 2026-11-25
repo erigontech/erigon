@@ -417,6 +417,16 @@ func TestVerifyCommitmentV3_RejectsOrphanInLastGroup(t *testing.T) {
 	require.ErrorContains(t, err, "orphan records")
 }
 
+func TestVerifyCommitmentV3_HistoryFlagFromAggregator(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 7, 2)
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+	previousSchema := statecfg.Schema
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	statecfg.Schema.CommitmentDomain.Hist.HistoryDisabled = true
+	require.NoError(t, state.VerifyCommitmentV3(t.Context(), agg, nil, true, log.New()))
+}
+
 func TestConvertCommitmentFiles_V3HistoryOversizedBatch(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, _, _ := testDbAggregatorWithCommitmentHistory(t, 7, 4)

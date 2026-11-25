@@ -775,7 +775,7 @@ const commitmentV3VerifyGroup = 4
 
 func VerifyCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, history bool, logger log.Logger) error {
 	started := time.Now()
-	if (history || len(asOf) > 0) && statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Hist.HistoryDisabled {
+	if (history || len(asOf) > 0) && a.d[kv.CommitmentDomain].HistoryDisabled {
 		return errors.New("commitment history is disabled")
 	}
 	points := append([]uint64{math.MaxUint64}, asOf...)
@@ -790,8 +790,9 @@ func VerifyCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, histo
 	defer a.MadvNormal().DisableReadAhead()
 	groups := (len(points) + commitmentV3VerifyGroup - 1) / commitmentV3VerifyGroup
 	logged := time.Now()
-	for gi := range groups {
-		group := points[gi*commitmentV3VerifyGroup : min((gi+1)*commitmentV3VerifyGroup, len(points))]
+	gi := -1
+	for group := range slices.Chunk(points, commitmentV3VerifyGroup) {
+		gi++
 		groupStarted := time.Now()
 		checks, err := FoldCommitmentV3(ctx, a, group, func(done, total int) {
 			if time.Since(logged) < 30*time.Second {
@@ -827,7 +828,7 @@ var (
 	commitmentV3FoldChunk         = 4096
 )
 
-const commitmentV3RangeChunks = 64
+const commitmentV3RangeChunks = 4
 
 var foldCommitmentV3RangeHook func(seq int)
 
@@ -851,7 +852,7 @@ func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, progres
 	in := make(chan task)
 	orders := make([]chan chan foldChunk, len(asOf))
 	for j := range orders {
-		orders[j] = make(chan chan foldChunk, workers*2)
+		orders[j] = make(chan chan foldChunk, workers)
 	}
 	states := make([][]byte, len(asOf))
 	folds := make([]CommitmentV3Check, len(asOf))
