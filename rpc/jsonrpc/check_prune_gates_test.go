@@ -300,7 +300,7 @@ func TestReplayGateMatchesReaderAtHistoryStart(t *testing.T) {
 
 			apis.trace.kv = historyFloorDB{TemporalRoDB: apis.trace.kv, startTxNum: startTxNum}
 			block := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(tc.firstBlock))
-			traces, err := apis.trace.ReplayBlockTransactions(ctx, block, []string{TraceTypeTrace}, nil, &tracersConfig.TraceConfig{})
+			traces, err := apis.trace.ReplayBlockTransactions(ctx, block, []string{TraceTypeTrace}, &tracersConfig.TraceConfig{})
 			require.NoError(t, err, "replay must accept the oldest block supported by its reader")
 			require.NotEmpty(t, traces)
 
@@ -820,24 +820,31 @@ func TestIndexedHistoryGateWithSnapshotMappings(t *testing.T) {
 	for _, number := range []uint64{historyBlock - 1, historyBlock} {
 		require.NoError(t, rwTx.Delete(kv.MaxTxNum, hexutil.EncodeTs(number)))
 	}
-	require.NoError(t, rwTx.Commit())
 	block := c.Blocks[historyBlock-1]
+	rawdb.DeleteHeader(rwTx, block.Hash(), historyBlock)
+	require.NoError(t, rwTx.Delete(kv.HeaderCanonical, hexutil.EncodeTs(historyBlock)))
+	require.NoError(t, rwTx.Commit())
 	_, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	remoteDB, _ := remoteHistoryDB(t, m.DB)
 	for _, reader := range []struct {
 		name string
 		read dbservices.FullBlockReader
+		db   kv.TemporalRoDB
 	}{
-		{"local", m.BlockReader},
-		{"remote", freezeblocks.NewRemoteBlockReader(remoteproto.NewETHBACKENDClient(conn))},
+		{"local", m.BlockReader, m.DB},
+		{"remote", freezeblocks.NewRemoteBlockReader(remoteproto.NewETHBACKENDClient(conn)), remoteDB},
 	} {
 		t.Run(reader.name, func(t *testing.T) {
 			api := newDebugApiForTest(m)
+			api._blockReader = reader.read
 			api._txNumReader = reader.read.TxnumReader()
-			api.db = historyFloorDB{TemporalRoDB: api.db, startTxNum: minTxNum + 2}
+			api.db = historyFloorDB{TemporalRoDB: reader.db, startTxNum: minTxNum + 2}
 			account, err := api.AccountAt(ctx, block.Hash(), 1, testAddr)
 			require.NoError(t, err, "snapshot mappings must admit a retained position without MDBX mappings")
 			require.NotNil(t, account)
 			require.EqualValues(t, 1, account.Nonce)
+			_, err = api.StorageRangeAt(ctx, block.Hash(), 1, testAddr, nil, 10)
+			require.NoError(t, err)
 			_, err = api.AccountAt(ctx, block.Hash(), 0, testAddr)
 			require.ErrorIs(t, err, state.ErrPruned)
 		})
@@ -936,6 +943,7 @@ func TestComputedReceiptsNeedCommitmentHistory(t *testing.T) {
 	}{
 		{"block_start", 8, 0, true, 8},
 		{"inside_block", 8, 1, true, 9},
+		{"inside_genesis", 0, 1, true, 0},
 		{"beyond_byzantium", pruneGatingByzantiumHeight + 1, 0, true, pruneGatingByzantiumHeight},
 		{"not_retired", 0, 0, true, 0},
 		{"disabled", 8, 1, false, 0},
@@ -997,6 +1005,46 @@ func TestComputedReceiptsNeedCommitmentHistory(t *testing.T) {
 			require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, view, pruneGatingByzantiumHeight))
 		})
 	}
+}
+
+// TestGenesisReceiptsWithCommitmentHistory pins the receipt endpoints at genesis when
+// commitment history starts at the genesis write, inside block 0.
+func TestGenesisReceiptsWithCommitmentHistory(t *testing.T) {
+	t.Parallel()
+
+	mode := prune.ArchiveMode
+	mode.CommitmentHistory = prune.Distance(5)
+	apis, _ := setupPruneGating(t, pruneGatingConfig{
+		mode:        mode,
+		chainConfig: byzantiumChainConfig(pruneGatingByzantiumHeight),
+	})
+	ctx := t.Context()
+	rwTx, err := apis.rwDB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(rwTx, true))
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	genesisStart, err := apis.eth._txNumReader.Min(ctx, tx, 0)
+	require.NoError(t, err)
+	starts := map[kv.Domain]uint64{kv.CommitmentDomain: genesisStart + 1}
+	apis.eth.db = historyFloorDB{TemporalRoDB: apis.eth.db, starts: starts}
+	apis.debug.db = historyFloorDB{TemporalRoDB: apis.debug.db, starts: starts}
+
+	genesis := rpc.BlockNumberOrHashWithNumber(rpc.EarliestBlockNumber)
+
+	receipts, err := apis.eth.GetBlockReceipts(ctx, genesis)
+	require.NoError(t, err)
+	require.NotNil(t, receipts)
+	require.Empty(t, receipts)
+
+	raw, err := apis.debug.GetRawReceipts(ctx, genesis)
+	require.NoError(t, err)
+	require.NotNil(t, raw)
+	require.Empty(t, raw)
 }
 
 func TestLogsGateSkipsInitialSystemHistory(t *testing.T) {
@@ -1238,7 +1286,7 @@ func TestGenesisRangesRequireContiguousBlocks(t *testing.T) {
 				ToBlock:   new(rpc.BlockNumber(to)),
 			}
 			return streamedResult(func(stream *jsonstream.Stream) error {
-				return apis.trace.Filter(ctx, req, new(bool), nil, stream)
+				return apis.trace.Filter(ctx, req, nil, stream)
 			})
 		}},
 	} {
@@ -2239,7 +2287,7 @@ func TestLogsByBlockHashNamesThePruneBoundary(t *testing.T) {
 			return apis.overlay.GetLogs(ctx, filters.FilterCriteria{BlockHash: &hash}, nil, nil)
 		}},
 		{"trace_filter", func() (any, error) {
-			return nil, apis.trace.Filter(ctx, TraceFilterRequest{BlockHash: &hash}, new(bool), nil, jsonstream.New(io.Discard))
+			return nil, apis.trace.Filter(ctx, TraceFilterRequest{BlockHash: &hash}, nil, jsonstream.New(io.Discard))
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2556,30 +2604,38 @@ func TestCapabilitiesRenderAWindowThatHasNotStarted(t *testing.T) {
 	require.Equal(t, uint64(pruneGatingReceiptsUnstarted), uint64(caps.Receipts.DeleteStrategy.RetentionBlocks))
 }
 
-// TestCheckTxFee pins the fee cap: the fee is gasPrice*gas in wei, compared
-// against a cap expressed in ether, and a zero cap disables the check.
+// TestCheckTxFee checks the maximum fee in wei against the RPC cap in ether.
+// Ordinary transactions use gas limit times fee cap per gas, and frame
+// transactions use their signed MaxFee. A zero cap disables the check.
 func TestCheckTxFee(t *testing.T) {
 	t.Parallel()
 
-	oneEtherGasPrice := new(big.Int).Div(big.NewInt(common.Ether), big.NewInt(21000))
+	// One ether in wei is divisible by 25,000, so the at-cap case tests exact equality.
+	gasPrice := uint256.NewInt(common.Ether / 25_000)
+	oneEther := types.NewTransaction(0, common.Address{}, nil, 25_000, gasPrice, nil)
+	twoEther := types.NewTransaction(0, common.Address{}, nil, 50_000, gasPrice, nil)
+	wrappedFrame := &types.FrameTxWrapper{FrameTransaction: &types.FrameTransaction{
+		Fees: types.FrameFees{MaxFee: *uint256.NewInt(common.Ether + 1)},
+	}}
 	for _, tc := range []struct {
 		name     string
-		gasPrice *big.Int
-		gas      uint64
-		gasCap   float64
-		wantErr  bool
+		txn      types.Transaction
+		capEther float64
+		wantErr  string
 	}{
-		{"no_cap", oneEtherGasPrice, 21000, 0, false},
-		{"under_cap", oneEtherGasPrice, 21000, 2, false},
-		{"at_cap", oneEtherGasPrice, 21000, 1, false},
-		{"over_cap", oneEtherGasPrice, 42000, 1, true},
-		{"zero_fee", big.NewInt(0), 21000, 1, false},
+		{"no_cap", oneEther, 0, ""},
+		{"under_cap", oneEther, 2, ""},
+		{"at_cap", oneEther, 1, ""},
+		{"over_cap", twoEther, 1, "tx fee (2.00 ether) exceeds the configured cap (1.00 ether)"},
+		{"zero_fee", &types.LegacyTx{}, 1, ""},
+		{"wrapped_frame_rounds_to_cap", wrappedFrame, 1, ""},
+		{"wrapped_frame_over_cap", wrappedFrame, 0.5, "tx fee (1.00 ether) exceeds the configured cap (0.50 ether)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := checkTxFee(tc.gasPrice, tc.gas, tc.gasCap)
-			if tc.wantErr {
-				require.ErrorContains(t, err, "exceeds the configured cap")
+			err := checkTxFee(tc.txn, tc.capEther)
+			if tc.wantErr != "" {
+				require.EqualError(t, err, tc.wantErr)
 			} else {
 				require.NoError(t, err)
 			}

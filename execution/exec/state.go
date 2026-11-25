@@ -41,10 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/node/shards"
 )
-
-var noop = state.NewNoopWriter()
 
 type WorkerMetrics struct {
 	Active              activeCount
@@ -110,7 +107,6 @@ type WorkerContext struct {
 	background  bool
 	blockReader dbservices.FullBlockReader
 	rs          *state.StateV3Buffered
-	stateWriter state.StateWriter
 	stateReader state.StateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	// prevBlockReg, when non-nil, keeps the IBS reading its committed base through a
@@ -150,11 +146,7 @@ func (rw *WorkerContext) installWorkerGetHash(txTask Task) {
 	br := rw.blockReader
 	ctx := rw.ctx
 	rw.evm.Context.GetHash = protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-		h, err := br.Header(ctx, rw.chainTx, hash, number)
-		if h == nil && err == nil {
-			h = &types.Header{}
-		}
-		return h, err
+		return br.Header(ctx, rw.chainTx, hash, number)
 	})
 }
 
@@ -185,7 +177,7 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 	return w
 }
 
-func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, stateReader state.StateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) error {
+func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, stateReader state.StateReader) error {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 
@@ -197,12 +189,6 @@ func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.Tempor
 		// bindTx points the reader's getter at chainTx (nil until a dispatch
 		// goroutine binds its roTx).
 		rw.SetReader(state.NewReaderV3(nil))
-	}
-
-	if stateWriter != nil {
-		rw.stateWriter = stateWriter
-	} else {
-		rw.stateWriter = state.NewWriter(nil, accumulator, 0)
 	}
 
 	return rw.bindTx(chainTx)
@@ -242,15 +228,11 @@ func (rw *WorkerContext) resetTxNum(txNum uint64) {
 	if resettable, ok := rw.stateReader.(resettable); ok {
 		resettable.SetTxNum(txNum)
 	}
-
-	if resettable, ok := rw.stateWriter.(resettable); ok {
-		resettable.SetTxNum(txNum)
-	}
 }
 
-// bindTx points this worker's reader, writer, and chain reader at chainTx,
+// bindTx points this worker's reader and chain reader at chainTx,
 // overlay-wrapped so block metadata staged in the SharedDomains BlockOverlay is
-// visible. A nil tx detaches (teardown); readers/writer keep their type and are
+// visible. A nil tx detaches (teardown); the reader keeps its type and is
 // re-pointed on the next bind.
 func (rw *WorkerContext) bindTx(chainTx kv.TemporalTx) error {
 	if chainTx == nil {
@@ -278,16 +260,6 @@ func (rw *WorkerContext) bindTx(chainTx kv.TemporalTx) error {
 		if rw.stateReader != nil {
 			return fmt.Errorf("can't set tx for reader: %T", rw.stateReader)
 		}
-	}
-
-	// Writers that implement neither (NoopWriter) need no tx — not an error.
-	type withPutter interface{ SetPutDel(kv.TemporalPutDel) }
-	type withTx interface{ SetTx(kv.TemporalTx) }
-	switch typedWriter := rw.stateWriter.(type) {
-	case withPutter:
-		typedWriter.SetPutDel(rw.rs.Domains().AsPutDel(chainTx))
-	case withTx:
-		typedWriter.SetTx(chainTx)
 	}
 
 	rw.chain = consensuschain.NewReader(rw.chainConfig, chainTx, rw.blockReader, rw.logger)
@@ -435,7 +407,7 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 		rw.installWorkerGetHash(txTask)
 	}
 
-	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
+	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, rw.chainConfig, rw.chain, rw.dirs, true)
 	// The EVM can return a nil error after cancellation; reject that result.
 	if err := rw.ctx.Err(); err != nil {
 		return &TxResult{Task: txTask, Err: err, Operational: true}
@@ -453,8 +425,8 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 	return result
 }
 
-func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
-	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
+func NewWorkersPool(ctx context.Context, background bool, chainDb kv.TemporalRoDB,
+	rs *state.StateV3Buffered, stateReader state.StateReader, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
 	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger,
 ) (reconWorkers []*WorkerContext, applyWorker *WorkerContext, clear func(), err error) {
 	reconWorkers = make([]*WorkerContext, workerCount)
@@ -488,7 +460,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 				reader = state.NewReaderV3(rs.Domains().AsGetterMetered(nil, reconWorkers[i].readMetrics))
 			}
 
-			if err = reconWorkers[i].ResetState(rs, nil, reader, stateWriter, accumulator); err != nil {
+			if err = reconWorkers[i].ResetState(rs, nil, reader); err != nil {
 				return
 			}
 		}

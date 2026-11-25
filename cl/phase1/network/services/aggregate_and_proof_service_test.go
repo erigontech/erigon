@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -121,7 +120,7 @@ func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced
 	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
 	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
-	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
+	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, p, true, batchSignatureVerifier)
 	return blockService, syncedDataManager, forkchoiceMock
 }
 
@@ -427,7 +426,7 @@ func prepareTargetShufflingAggregate(
 ) {
 	t.Helper()
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) { return true, nil }
+	blsVerifyMultipleSignatures = withoutDecompressed(func([][]byte, [][]byte, [][]byte) (bool, error) { return true, nil })
 	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
 	epoch := data.Slot / clparams.MainnetBeaconConfig.SlotsPerEpoch
 	expectedCommitteeIndex := data.CommitteeIndex
@@ -462,10 +461,10 @@ func TestAggregateAndProofUsesTargetShuffling(t *testing.T) {
 	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
 	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
 	var callOrder []string
-	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func([][]byte, [][]byte, [][]byte) (bool, error) {
 		callOrder = append(callOrder, "bls")
 		return true, nil
-	}
+	})
 	targetCommitteeFn := fc.TargetBeaconCommitteeFn
 	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error) {
 		require.Equal(t, []string{"bls"}, callOrder)
@@ -504,7 +503,7 @@ func TestAggregateAndProofRejectsInvalidSignatureBeforeTargetShuffling(t *testin
 		targetCalls++
 		return targetCommitteeFn(target, slot, committeeIndex, claimBuild)
 	}
-	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) { return false, nil }
+	blsVerifyMultipleSignatures = withoutDecompressed(func([][]byte, [][]byte, [][]byte) (bool, error) { return false, nil })
 	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
 	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
 
@@ -694,10 +693,10 @@ func TestAggregateAndProofIgnoresUnknownVotedBlockTargetAncestor(t *testing.T) {
 	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
 	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
 	blsCalls := 0
-	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func([][]byte, [][]byte, [][]byte) (bool, error) {
 		blsCalls++
 		return true, nil
-	}
+	})
 	targetCalls := 0
 	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
 		targetCalls++
@@ -725,10 +724,10 @@ func TestAggregateAndProofIgnoresUnavailableTargetCheckpointState(t *testing.T) 
 	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
 	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
 	blsCalls := 0
-	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func([][]byte, [][]byte, [][]byte) (bool, error) {
 		blsCalls++
 		return true, nil
-	}
+	})
 	targetCalls := 0
 	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
 		targetCalls++
@@ -747,9 +746,9 @@ func TestAggregateAndProofIgnoresUnavailableTargetCheckpointState(t *testing.T) 
 
 func TestAggregateAndProofGossipDoesNotAcceptBeforeBLSVerification(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return false, nil
-	}
+	})
 
 	agg, s := getAggregateAndProofAndState()
 	setValidAggregateSelectionProof(t, &clparams.MainnetBeaconConfig, agg, s)
@@ -767,9 +766,9 @@ func TestAggregateAndProofGossipDoesNotAcceptBeforeBLSVerification(t *testing.T)
 
 func TestAggregateAndProofImmediateRetryReturnsAlreadySeenOnlyForSameAggregate(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return true, nil
-	}
+	})
 
 	cfg := clparams.MainnetBeaconConfig
 	agg, s := getAggregateAndProofAndState()
@@ -872,7 +871,7 @@ func setupAggregateAndProofTestWithConfig(t *testing.T, cfg *clparams.BeaconChai
 	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
 	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
-	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
+	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, p, true, batchSignatureVerifier)
 	return blockService, syncedDataManager, forkchoiceMock
 }
 
@@ -880,7 +879,6 @@ func setupAggregateAndProofGossipTestWithConfig(t *testing.T, cfg *clparams.Beac
 	service, syncedDataManager, forkchoiceMock := setupAggregateAndProofTestWithConfig(t, cfg)
 	serviceImpl := service.(*aggregateAndProofServiceImpl)
 	serviceImpl.test = false
-	serviceImpl.validatorParams.SetFeeRecipient(0, common.Address{})
 	return service, syncedDataManager, forkchoiceMock
 }
 
@@ -908,9 +906,9 @@ func setupValidAggregateGossipMessage(
 
 func TestAggregateAndProofGossipNewForkAggregateOnOldForkTopicNotAccepted(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return true, nil
-	}
+	})
 
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
@@ -939,9 +937,9 @@ func TestAggregateAndProofGossipNewForkAggregateOnOldForkTopicNotAccepted(t *tes
 
 func TestAggregateAndProofGossipRejectsDifferentBPOForkDigest(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return true, nil
-	}
+	})
 
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
@@ -981,9 +979,9 @@ func TestAggregateAndProofGossipRejectsDifferentBPOForkDigest(t *testing.T) {
 
 func TestAggregateAndProofGossipPreForkAggregateOnPostForkTopicNotAccepted(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return true, nil
-	}
+	})
 
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
@@ -1565,7 +1563,7 @@ func TestAggregateAndProofRejectsAggregationBitsLengthMismatchBeforeElectra(t *t
 
 func TestAggregateAndProofForLateBlockIsProcessedOnceBlockArrives(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+	blsVerifyMultipleSignatures = withoutDecompressed(func(_, _, _ [][]byte) (bool, error) { return true, nil })
 
 	cfg := &clparams.MainnetBeaconConfig
 	agg, s := getAggregateAndProofAndState()
@@ -1586,10 +1584,8 @@ func TestAggregateAndProofForLateBlockIsProcessedOnceBlockArrives(t *testing.T) 
 	verifier := NewBatchSignatureVerifier(ctx, nil)
 	verifier.Start()
 	opPool := pool.OperationsPool{AttestationsPool: pool.NewOperationPool[common.Bytes96, *solid.Attestation](100, "test")}
-	validatorParams := validator_params.NewValidatorParams()
-	validatorParams.SetFeeRecipient(0, common.Address{})
 	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
-	service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, clock, cfg, opPool, false, verifier, validatorParams)
+	service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, clock, cfg, opPool, false, verifier)
 
 	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, agg), ErrIgnore)
 
@@ -1598,65 +1594,68 @@ func TestAggregateAndProofForLateBlockIsProcessedOnceBlockArrives(t *testing.T) 
 		"aggregate was not processed by fork choice after its block arrived")
 }
 
-func TestAggregateAndProofIsVerifiedWhenTheNodeHasValidators(t *testing.T) {
-	for _, validatorSource := range []string{"none", "fee recipient", "attached"} {
-		t.Run(validatorSource, func(t *testing.T) {
-			saveSignatureGlobals(t)
-			blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+type attestingIndicesRecorder struct {
+	*mock_services.ForkChoiceStorageMock
+	mu   sync.Mutex
+	seen [][]uint64
+}
 
-			cfg := &clparams.MainnetBeaconConfig
-			agg, s := getAggregateAndProofAndState()
-			setValidAggregateSelectionProof(t, cfg, agg, s)
-			data := agg.SignedAggregateAndProof.Message.Aggregate.Data
-			s.SetVersion(clparams.FuluVersion)
+func (f *attestingIndicesRecorder) ProcessAttestingIndicies(_ *solid.Attestation, indices []uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seen = append(f.seen, slices.Clone(indices))
+}
 
-			// The local validator proposes neither in this epoch nor in the next one.
-			proposers, err := s.GetBeaconProposerIndices(state.Epoch(s))
-			require.NoError(t, err)
-			lookahead := s.GetProposerLookahead()
-			for i := range lookahead.Length() {
-				proposers = append(proposers, lookahead.Get(i))
-			}
-			localValidator := uint64(0)
-			for slices.Contains(proposers, localValidator) {
-				localValidator++
-			}
+func (f *attestingIndicesRecorder) calls() [][]uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.seen)
+}
 
-			syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
-			require.NoError(t, syncedDataManager.OnHeadState(s))
-			forkChoiceMock := mock_services.NewForkChoiceStorageMock(t)
-			forkChoiceMock.FinalizedCheckpointVal = s.FinalizedCheckpoint()
-			forkChoiceMock.Ancestors[s.FinalizedCheckpoint().Epoch*cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
-			forkChoiceMock.Ancestors[data.Slot] = forkchoice.ForkChoiceNode{Root: data.Target.Root}
-			forkChoiceMock.Headers[data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+func TestAggregateAndProofIsVerifiedWithoutValidators(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = withoutDecompressed(func(_, _, _ [][]byte) (bool, error) { return true, nil })
 
-			ctx, cancel := context.WithCancel(context.Background())
-			t.Cleanup(cancel)
-			verifier := NewBatchSignatureVerifier(ctx, nil)
-			verifier.Start()
-			opPool := pool.OperationsPool{AttestationsPool: pool.NewOperationPool[common.Bytes96, *solid.Attestation](100, "test")}
-			validatorParams := validator_params.NewValidatorParams()
-			switch validatorSource {
-			case "fee recipient":
-				validatorParams.SetFeeRecipient(localValidator, common.Address{})
-			case "attached":
-				validatorParams.AddAttachedValidator(localValidator)
-			}
-			clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
-			service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoiceMock, clock, cfg, opPool, false, verifier, validatorParams)
+	cfg := &clparams.MainnetBeaconConfig
+	agg, s := getAggregateAndProofAndState()
+	setValidAggregateSelectionProof(t, cfg, agg, s)
+	aggregate := agg.SignedAggregateAndProof.Message.Aggregate
+	data := aggregate.Data
+	s.SetVersion(clparams.FuluVersion)
 
-			err = service.ProcessMessage(context.Background(), nil, agg)
-			stored := func() bool {
-				_, ok := opPool.AttestationsPool.Get(agg.SignedAggregateAndProof.Message.Aggregate.Signature)
-				return ok
-			}
-			if validatorSource == "none" {
-				require.ErrorIs(t, err, ErrIgnore)
-				require.False(t, stored())
-				return
-			}
-			require.NoError(t, err)
-			require.Eventually(t, stored, 5*time.Second, 10*time.Millisecond, "a verified aggregate must reach the block attestation pool")
-		})
+	committee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+	require.NoError(t, err)
+	var expectedIndices []uint64
+	for i, validatorIndex := range committee {
+		if aggregate.AggregationBits.GetBitAt(i) {
+			expectedIndices = append(expectedIndices, validatorIndex)
+		}
 	}
+	require.NotEmpty(t, expectedIndices)
+
+	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	forkChoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	forkChoiceMock.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	forkChoiceMock.Ancestors[s.FinalizedCheckpoint().Epoch*cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	forkChoiceMock.Ancestors[data.Slot] = forkchoice.ForkChoiceNode{Root: data.Target.Root}
+	forkChoiceMock.Headers[data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+	forkChoice := &attestingIndicesRecorder{ForkChoiceStorageMock: forkChoiceMock}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	verifier := NewBatchSignatureVerifier(ctx, nil)
+	verifier.Start()
+	opPool := pool.OperationsPool{AttestationsPool: pool.NewOperationPool[common.Bytes96, *solid.Attestation](100, "test")}
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
+	service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, clock, cfg, opPool, false, verifier)
+
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, agg))
+	require.Eventually(t, func() bool {
+		_, ok := opPool.AttestationsPool.Get(aggregate.Signature)
+		return ok
+	}, 5*time.Second, 10*time.Millisecond, "a verified aggregate must reach the block attestation pool")
+	require.Eventually(t, func() bool { return len(forkChoice.calls()) > 0 }, 5*time.Second, 10*time.Millisecond,
+		"a verified aggregate must reach fork choice")
+	require.Equal(t, [][]uint64{expectedIndices}, forkChoice.calls())
 }

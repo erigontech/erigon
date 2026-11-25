@@ -17,6 +17,7 @@
 package handlers
 
 import (
+	"errors"
 	"math"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -37,18 +38,18 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandlerDeneb(s network.Stream) e
 
 func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, version clparams.StateVersion) error {
 	req := &cltypes.BlobsByRangeRequest{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
+	if err := ssz_snappy.DecodeAndReadFixedSizeNoForkDigest(s, req, version); err != nil {
 		return err
 	}
+	if req.StartSlot+req.Count < req.StartSlot {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+	}
 
-	// Consume additional rate-limit tokens. Estimate blob count as slots × max blobs per block,
-	// capped at the per-request throughput limit (72). Use BlobSchedule-aware lookup so Deneb
-	// requests (max 6 blobs) are not overcharged at the Electra rate (max 9 blobs).
-	// Note: blob sidecars are deprecated at Fulu (replaced by data columns), so the effective
-	// max here is always ≤ Electra's MaxBlobsPerBlock.
+	// Estimate response work from the requested slots and the configured blob limit.
+	// Cap the charge at the response limit, since larger ranges cannot return more blobs.
 	startEpoch := req.StartSlot / c.beaconConfig.SlotsPerEpoch
-	maxBlobs := int(c.beaconConfig.GetBlobParameters(startEpoch).MaxBlobsPerBlock)
-	if cost := min(int(req.Count)*maxBlobs, maxBlobsThroughputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
+	maxBlobs := c.beaconConfig.GetBlobParameters(startEpoch).MaxBlobsPerBlock
+	if cost := requestCost(req.Count, maxBlobs, maxBlobsThroughputPerRequest); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -111,13 +112,20 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandlerDeneb(s network.Stream) err
 }
 
 func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version clparams.StateVersion) error {
-	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
+	// Blob requests retain their Deneb wire format when later forks change the size limit.
+	// Before Deneb activates, use its limit because this handler is already registered.
+	currentVersion := max(clparams.DenebVersion, c.beaconConfig.GetCurrentStateVersion(c.ethClock.GetCurrentEpoch()))
+	maxIDs := c.beaconConfig.MaxRequestBlobSidecarsByVersion(currentVersion)
+	identifierSize := new(cltypes.BlobIdentifier).EncodingSizeSSZ()
+	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](maxIDs, identifierSize)
+	if err := ssz_snappy.DecodeAndReadNoForkDigestMax(s, req, version, uint64(maxIDs)*uint64(identifierSize)); err != nil {
+		if errors.Is(err, ssz_snappy.ErrPayloadExceedsLimit) {
+			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+		}
 		return err
 	}
 
-	// Consume additional rate-limit tokens: one per blob identifier.
-	if cost := min(req.Len(), maxBlobsThroughputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := requestCost(uint64(req.Len()), 1, maxBlobsThroughputPerRequest); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -128,20 +136,26 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 	defer tx.Rollback()
 
 	written := 0
+	seen := make(map[cltypes.BlobIdentifier]struct{}, req.Len())
 	for i := 0; i < req.Len() && written < maxBlobsThroughputPerRequest; i++ {
 
 		id := req.Get(i)
+		if _, ok := seen[*id]; ok {
+			continue
+		}
+		seen[*id] = struct{}{}
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, id.BlockRoot)
 		if err != nil {
 			return err
 		}
 		if slot == nil {
-			break
+			continue
 		}
 		version := c.beaconConfig.GetCurrentStateVersion(*slot / c.beaconConfig.SlotsPerEpoch)
 		if version >= clparams.FuluVersion {
-			// deprecated after Fulu upgrade
-			break
+			// Only serve blob sidecars for blocks before Fulu. Roots can appear in any
+			// slot order, so later identifiers may still refer to blocks we can serve.
+			continue
 		}
 
 		// Read the fork digest

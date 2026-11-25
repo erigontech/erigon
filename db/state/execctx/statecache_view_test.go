@@ -21,9 +21,11 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
@@ -142,6 +144,16 @@ func TestAccountOnlyDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 	cached, ok := stateCache.View(nil).Get(kv.CodeDomain, contractAddr)
 	require.True(t, ok, "an account-only deletion must not block unrelated code fills")
 	require.Equal(t, code, cached)
+
+	counted := &countingLatestTx{TemporalTx: freshTx}
+	getter := execctx.NewCachedTemporalTxStateGetter(counted, stateCache)
+	for range 2 {
+		got, found, err := getter.GetCode(contractAddr, 21)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, code, got)
+	}
+	require.Zero(t, counted.reads, "code filled from this snapshot must be reusable by that snapshot")
 }
 
 func TestGetCodeSizeColdReadDoesNotCacheCode(t *testing.T) {
@@ -189,4 +201,25 @@ func TestGetCodeSizeColdReadDoesNotCacheCode(t *testing.T) {
 	cachedSize, found := stateCache.View(nil).GetCodeSizeByHash(codeHash[:])
 	require.True(t, found)
 	require.Equal(t, len(code), cachedSize)
+}
+
+func TestCommitmentReadCountsStateCacheMiss(t *testing.T) {
+	previous := dbg.KVReadLevelledMetrics
+	dbg.KVReadLevelledMetrics = true
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = previous })
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(domains.Close)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	require.False(t, stateCache.Caches(kv.CommitmentDomain))
+	domains.BindStateCache(stateCache)
+	m := kvmetrics.NewDomainMetrics()
+	_, _, err = domains.AsGetterMetered(tx, m).GetLatest(kv.CommitmentDomain, []byte("missing"), kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, m.StateCacheMissCount)
 }

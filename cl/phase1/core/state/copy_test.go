@@ -24,6 +24,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCopyIntoWithTotalActiveBalanceMatchesRescannedCopy(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	source := New(&cfg)
+	source.SetVersion(clparams.AltairVersion)
+
+	require.NoError(t, source.AddValidator(activeValidatorWithIndex(0), 32_000_000_000))
+	require.NoError(t, source.InitBeaconState())
+
+	rescanned, err := source.Copy()
+	require.NoError(t, err)
+	rescannedTotal := rescanned.GetTotalActiveBalance()
+	seeded := New(&cfg)
+	require.NoError(t, source.CopyIntoWithTotalActiveBalance(seeded, rescannedTotal))
+	require.Equal(t, rescannedTotal, seeded.GetTotalActiveBalance())
+	require.Equal(t, rescanned.BaseRewardPerIncrement(), seeded.BaseRewardPerIncrement())
+
+	clamped := New(&cfg)
+	require.NoError(t, source.CopyIntoWithTotalActiveBalance(clamped, cfg.EffectiveBalanceIncrement-1))
+	require.Equal(t, cfg.EffectiveBalanceIncrement, clamped.GetTotalActiveBalance())
+}
+
 func TestGloasCopyIntoReusedSpareMatchesFreshDecode(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)

@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -35,35 +36,55 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	commitmentv3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
-	keyCount := 0
+	const addrNibbles, storageNibbles = 2 * length.Hash, 4 * length.Hash
+	keyCount, nibbleCount := 0, 0
 	for i := range bal {
 		account := &bal[i]
-		if len(account.BalanceChanges)+len(account.NonceChanges)+len(account.CodeChanges) > 0 {
+		if accountChanged(account) {
 			keyCount++
+			nibbleCount += addrNibbles
 		}
 		keyCount += len(account.StorageChanges)
+		nibbleCount += len(account.StorageChanges) * storageNibbles
 	}
 	keys := make([][]byte, 0, keyCount)
+	buf := make([]byte, nibbleCount)
+	var addrKey [addrNibbles]byte
 	for i := range bal {
 		account := &bal[i]
-		address := account.Address
-		if len(account.BalanceChanges)+len(account.NonceChanges)+len(account.CodeChanges) > 0 {
-			keys = append(keys, commitment.KeyToHexNibbleHash(address[:]))
+		changed := accountChanged(account)
+		if !changed && len(account.StorageChanges) == 0 {
+			continue
+		}
+		addrHash := crypto.Keccak256Hash(account.Address[:])
+		nibbles.Expand(addrHash[:], addrKey[:])
+		if changed {
+			key := buf[:addrNibbles:addrNibbles]
+			buf = buf[addrNibbles:]
+			copy(key, addrKey[:])
+			keys = append(keys, key)
 		}
 		for _, storage := range account.StorageChanges {
+			key := buf[:storageNibbles:storageNibbles]
+			buf = buf[storageNibbles:]
+			copy(key, addrKey[:])
 			slot := storage.Slot.Value()
-			plainKey := make([]byte, len(address)+len(slot))
-			copy(plainKey, address[:])
-			copy(plainKey[len(address):], slot[:])
-			keys = append(keys, commitment.KeyToHexNibbleHash(plainKey))
+			slotHash := crypto.Keccak256Hash(slot[:])
+			nibbles.Expand(slotHash[:], key[addrNibbles:])
+			keys = append(keys, key)
 		}
 	}
 	slices.SortFunc(keys, bytes.Compare)
 	return keys
+}
+
+func accountChanged(account *types.AccountChanges) bool {
+	return len(account.BalanceChanges)+len(account.NonceChanges)+len(account.CodeChanges) > 0
 }
 
 type balCommitmentContext struct {
@@ -411,6 +432,39 @@ func prefetchBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte) {
 	logBatchPrefetch(ctx, "trie", len(keys), started, prefetchCommitment(ctx, db, keys))
 }
 
+// prefetchBALCommitmentV3 reads into the page cache, in io_uring batches, the flat levels of the BAL's v3 trie paths, so
+// the committer's per-key branch prefetch finds them resident.
+func prefetchBALCommitmentV3(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) {
+	started := time.Now()
+	var keys [][]byte
+	var err error
+	txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) {
+		p, ok := ttx.AggTx().(latestPrefetcher)
+		if !ok {
+			return
+		}
+		sampled := sampleEvenly(hashedKeys, residencySampleKeys)
+		cold, sampleErr := sampleCold(ctx, p, kv.CommitmentDomain, v3TrieKeys(sampled))
+		logSampleFailure(kv.CommitmentDomain, sampleErr)
+		if sampleErr != nil || !cold || len(sampled) == len(hashedKeys) {
+			return
+		}
+		keys = v3TrieKeys(hashedKeys)
+		err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, keys)
+	})
+	logBatchPrefetch(ctx, "trie", len(keys), started, cmp.Or(txErr, err))
+}
+
+// v3TrieKeys returns the distinct v3 node keys of the flat levels of the paths of hashedKeys.
+func v3TrieKeys(hashedKeys [][]byte) [][]byte {
+	var keys [][]byte
+	for _, hk := range hashedKeys {
+		keys = commitmentv3.PathNodeKeys(keys, hk, prefetchFlatDepth)
+	}
+	slices.SortFunc(keys, bytes.Compare)
+	return slices.CompactFunc(keys, bytes.Equal)
+}
+
 func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte) error {
 	var err error
 	if txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) { err = prefetchKeys(ctx, db, ttx, domain, keys) }); txErr != nil {
@@ -437,10 +491,10 @@ func compactPrefixes(keys [][]byte, depth int) [][]byte {
 	return prefixes
 }
 
-// flatPrefixes returns the distinct compact prefixes of keys at every depth up to prefetchFlatDepth.
-func flatPrefixes(keys [][]byte) [][]byte {
+// flatPrefixes returns the distinct compact prefixes of keys at each of the prefetchFlatDepth levels below start.
+func flatPrefixes(keys [][]byte, start int) [][]byte {
 	var prefixes [][]byte
-	for depth := 0; depth <= prefetchFlatDepth; depth++ {
+	for depth := start; depth <= start+prefetchFlatDepth; depth++ {
 		prefixes = append(prefixes, compactPrefixes(keys, depth)...)
 	}
 	return prefixes
@@ -453,24 +507,28 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) er
 		if !ok || trieMostlyResident(ctx, p, hashedKeys) {
 			return
 		}
-		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys)); err != nil {
+		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys, 0)); err != nil {
 			return
-		}
-		var storageKeys [][]byte
-		for _, k := range hashedKeys {
-			if len(k) > storageTrieDepth {
-				storageKeys = append(storageKeys, k)
-			}
 		}
 		// The account trie walk loses a storage key at the extension above its account, so storage tries start again at their root.
 		if err = walkTriePrefixes(ctx, db, ttx, hashedKeys, 0); err == nil {
-			err = walkTriePrefixes(ctx, db, ttx, storageKeys, storageTrieDepth)
+			err = walkTriePrefixes(ctx, db, ttx, storageKeysOf(hashedKeys), storageTrieDepth)
 		}
 	})
 	return cmp.Or(txErr, err)
 }
 
 const storageTrieDepth = 64
+
+func storageKeysOf(hashedKeys [][]byte) [][]byte {
+	var storageKeys [][]byte
+	for _, k := range hashedKeys {
+		if len(k) > storageTrieDepth {
+			storageKeys = append(storageKeys, k)
+		}
+	}
+	return storageKeys
+}
 
 // walkTriePrefixes prefetches the trie levels below the flat depth and stops at the first read error.
 func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, start int) error {
@@ -634,7 +692,10 @@ const (
 // trieMostlyResident probes the flat prefixes of evenly spaced keys and reports whether too few were cold to walk the
 // trie; a failed probe also skips the walk.
 func trieMostlyResident(ctx context.Context, p latestPrefetcher, hashedKeys [][]byte) bool {
-	isCold, err := sampleCold(ctx, p, kv.CommitmentDomain, flatPrefixes(sampleEvenly(hashedKeys, residencySampleKeys)))
+	keys := sampleEvenly(hashedKeys, residencySampleKeys)
+	// Slots of one account share every account-trie level, so only their storage trie can tell a cold trie.
+	sample := append(flatPrefixes(keys, 0), flatPrefixes(storageKeysOf(keys), storageTrieDepth)...)
+	isCold, err := sampleCold(ctx, p, kv.CommitmentDomain, sample)
 	logSampleFailure(kv.CommitmentDomain, err)
 	return err != nil || !isCold
 }

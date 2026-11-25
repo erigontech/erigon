@@ -117,11 +117,14 @@ type clientConn struct {
 func (c *Client) newClientConn(conn ServerCodec) *clientConn {
 	ctx := context.WithValue(context.Background(), clientContextKey{}, c)
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, conn.peerInfo())
-	handler := newHandler(ctx, conn, randomIDGenerator(), c.services, 0, 0, nil, 50, false /* traceRequests */, c.logger, 0)
+	handler := newHandler(ctx, conn, randomIDGenerator(), c.services, 0, nil, 50, false /* traceRequests */, c.logger, 0)
 	return &clientConn{conn, handler}
 }
 
 func (cc *clientConn) close(err error, inflightReq *requestOp) {
+	// The connection is gone, so there is no point in finishing calls that are
+	// still being served on it. Cancel them before waiting for them to return.
+	cc.handler.cancelRoot()
 	cc.handler.close(err, inflightReq)
 	cc.codec.Close()
 }
@@ -146,6 +149,7 @@ func (op *requestOp) wait(ctx context.Context, c *Client) ([]*jsonrpcMessage, er
 		if !c.isHTTP {
 			select {
 			case c.reqTimeout <- op:
+			case <-op.resp: // closed when the connection is torn down, which can wait for this call
 			case <-c.closing:
 			}
 		}
@@ -637,7 +641,7 @@ func (c *Client) dispatch(codec ServerCodec) {
 			}
 
 		case err := <-c.readErr:
-			conn.handler.logger.Trace("RPC connection read error", "err", err)
+			conn.handler.log().Trace("RPC connection read error", "err", err)
 			// A read error is fatal for the connection, and all pending requests must be cancelled,
 			// including any that might still be considered in-flight. Once the resp channel is closed
 			// here, a later reconnect must not re-register this op (sending on a closed channel would
@@ -706,7 +710,7 @@ func (c *Client) drainRead() {
 // read decodes RPC messages from a codec, feeding them into dispatch.
 func (c *Client) read(codec ServerCodec) {
 	for {
-		msgs, batch, err := readBatch(codec, c.logger)
+		msgs, batch, err := readBatch(codec, 0, c.logger)
 		if err != nil {
 			c.readErr <- err
 			return
@@ -716,8 +720,8 @@ func (c *Client) read(codec ServerCodec) {
 }
 
 // readBatch reads the next message or batch, answering a JSON syntax error before returning it.
-func readBatch(codec ServerCodec, logger log.Logger) ([]*jsonrpcMessage, bool, error) {
-	msgs, batch, err := codec.ReadBatch()
+func readBatch(codec ServerCodec, batchLimit int, logger log.Logger) ([]*jsonrpcMessage, bool, error) {
+	msgs, batch, err := codec.ReadBatch(batchLimit)
 	if _, ok := errors.AsType[*json.SyntaxError](err); ok {
 		if writeErr := codec.WriteJSON(context.Background(), errorMessage(&parseError{err.Error()})); writeErr != nil {
 			logger.Trace("RPC failed to write parse error response", "err", writeErr)

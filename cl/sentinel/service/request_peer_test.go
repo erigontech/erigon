@@ -19,8 +19,12 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,9 +38,10 @@ import (
 )
 
 func TestPeerRequestUsesCallerContext(t *testing.T) {
-	requestCancelled := make(chan struct{})
+	requestStarted, requestCancelled := make(chan struct{}), make(chan struct{})
 	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
 		handler: http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+			close(requestStarted)
 			<-request.Context().Done()
 			close(requestCancelled)
 		}),
@@ -48,6 +53,7 @@ func TestPeerRequestUsesCallerContext(t *testing.T) {
 		done <- err
 	}()
 
+	receivePeerRequestTestValue(t, requestStarted)
 	cancel()
 	require.ErrorIs(t, receivePeerRequestTestValue(t, done), context.Canceled)
 	receivePeerRequestTestValue(t, requestCancelled)
@@ -90,16 +96,83 @@ func (b *blockingResponseBody) Close() error {
 var _ io.ReadCloser = (*blockingResponseBody)(nil)
 
 type peerRequestBackendStub struct {
-	handler http.Handler
+	handler       http.Handler
+	active        int
+	lostDuplicate *atomic.Bool
 }
 
-func (p peerRequestBackendStub) GetPeersCount() (int, int, int) { return 0, 0, 0 }
+func (p peerRequestBackendStub) GetPeersCount() (int, int, int) { return p.active, 0, 0 }
+func (p peerRequestBackendStub) ConsumeDuplicateLoss(peer.ID) bool {
+	return p.lostDuplicate != nil && p.lostDuplicate.CompareAndSwap(true, false)
+}
+
 func (p peerRequestBackendStub) Config() *sentinel.SentinelConfig {
 	config := &sentinel.SentinelConfig{}
 	config.MaxPeerCount = 1
 	return config
 }
 func (p peerRequestBackendStub) ReqRespHandler() http.Handler { return p.handler }
+
+// A request cut by a duplicate connection closing is not the peer's fault, and dropping the peer
+// would close the connection it still has.
+func TestFailedRequestKeepsAPeerThatJustLostADuplicateConnection(t *testing.T) {
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{active: 1}}
+	require.True(t, server.dropOnFailure(peer.ID("peer"), nil))
+	lost := &atomic.Bool{}
+	lost.Store(true)
+	server.peerRequestBackend = peerRequestBackendStub{active: 0, lostDuplicate: lost}
+	require.False(t, server.dropOnFailure(peer.ID("peer"), nil), "below the peer limit failures never drop")
+	require.True(t, lost.Load(), "a failure that drops nothing leaves the loss for the next one")
+	server.peerRequestBackend = peerRequestBackendStub{active: 1, lostDuplicate: lost}
+	require.False(t, server.dropOnFailure(peer.ID("peer"), nil))
+	require.True(t, server.dropOnFailure(peer.ID("peer"), nil), "one loss excuses one failure")
+}
+
+func TestOverCapResponseIsNotExcusedByADuplicateLoss(t *testing.T) {
+	lost := &atomic.Bool{}
+	lost.Store(true)
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{active: 1, lostDuplicate: lost}}
+	require.True(t, server.dropOnFailure(peer.ID("peer"), fmt.Errorf("read body: %w", httpreqresp.ErrResponseTooLarge)))
+	require.True(t, lost.Load(), "the loss stays for a failure it can excuse")
+}
+
+// A cut stream cannot send an error code, so a peer-sent error code drops the peer at the limit
+// without using up a duplicate loss. The server has no sentinel, so the drop panics.
+func TestPeerErrorCodeIsNotExcusedByADuplicateLoss(t *testing.T) {
+	lost := &atomic.Bool{}
+	lost.Store(true)
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		active:        1,
+		lostDuplicate: lost,
+		handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("REQRESP-RESPONSE-CODE", strconv.Itoa(int(httpreqresp.ResponseCodeServerError)))
+			_, _ = w.Write([]byte{0})
+		}),
+	}}
+	require.Panics(t, func() {
+		_, _ = server.requestPeer(t.Context(), peer.ID("peer"), &sentinelproto.RequestData{Data: []byte("request")})
+	})
+	require.True(t, lost.Load(), "the loss stays for a failure it can excuse")
+}
+
+// The duplicate can close while the request runs, so the drop decision is taken when the request
+// fails. The server has no sentinel, so a drop would panic.
+func TestRequestCutByADuplicateCloseKeepsThePeer(t *testing.T) {
+	lost := &atomic.Bool{}
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		active:        1,
+		lostDuplicate: lost,
+		handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			lost.Store(true)
+			w.WriteHeader(http.StatusBadRequest)
+		}),
+	}}
+	require.NotPanics(t, func() {
+		_, err := server.requestPeer(t.Context(), peer.ID("peer"), &sentinelproto.RequestData{Data: []byte("request")})
+		var httpErr *HTTPError
+		require.ErrorAs(t, err, &httpErr)
+	})
+}
 
 func receivePeerRequestTestValue[T any](t *testing.T, values <-chan T) T {
 	t.Helper()
@@ -148,4 +221,69 @@ func TestPeerRequestLimitsConcurrentStreamsPerPeerAndRequestType(t *testing.T) {
 		require.NotErrorIs(t, receivePeerRequestTestValue(t, done), ErrPeerBusy)
 	}
 	require.NotErrorIs(t, receivePeerRequestTestValue(t, request("a", communication.BeaconBlocksByRangeProtocolV2)), ErrPeerBusy, "finished streams free their slots")
+}
+
+func TestSmallRequestDoesNotWaitBehindBulkRequests(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	reached := make(chan struct{}, 4)
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		handler: http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			reached <- struct{}{}
+			<-release
+		}),
+	}}
+	bulk := func(pid string) {
+		go func() {
+			_, _ = server.requestPeer(t.Context(), peer.ID(pid), &sentinelproto.RequestData{Topic: communication.BeaconBlocksByRangeProtocolV2, Data: []byte{1}, MaxResponseBytes: math.MaxUint64})
+		}()
+	}
+	bulk("a")
+	bulk("b")
+	receivePeerRequestTestValue(t, reached)
+	receivePeerRequestTestValue(t, reached)
+	bulk("c")
+	time.Sleep(100 * time.Millisecond) // the third bulk request is now queued
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	go func() {
+		_, _ = server.requestPeer(ctx, peer.ID("d"), &sentinelproto.RequestData{Topic: communication.MetadataProtocolV2, Data: []byte{1}})
+	}()
+	receivePeerRequestTestValue(t, reached)
+}
+
+// Responses are buffered whole, so max-size requests in flight share one byte budget: a third must wait, without a stream.
+func TestPeerRequestsShareAResponseBudget(t *testing.T) {
+	release := make(chan struct{})
+	reached := make(chan struct{}, 4)
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		handler: http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			reached <- struct{}{}
+			<-release
+		}),
+	}}
+	blocksByRange := " " + communication.BeaconBlocksByRangeProtocolV2 + " , " + communication.BeaconBlocksByRangeProtocolV1 // the handler trims each alternative
+	request := func(pid string) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := server.requestPeer(t.Context(), peer.ID(pid), &sentinelproto.RequestData{Topic: blocksByRange, Data: []byte("request"), MaxResponseBytes: math.MaxUint64})
+			done <- err
+		}()
+		return done
+	}
+
+	first, second, third := request("a"), request("a"), request("a")
+	receivePeerRequestTestValue(t, reached)
+	receivePeerRequestTestValue(t, reached)
+	select {
+	case <-reached:
+		t.Fatal("a third max-size request ran while two held the budget")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	receivePeerRequestTestValue(t, reached)
+	for _, done := range []<-chan error{first, second, third} {
+		require.NotErrorIs(t, receivePeerRequestTestValue(t, done), ErrPeerBusy, "a request waiting for budget holds no stream")
+	}
 }

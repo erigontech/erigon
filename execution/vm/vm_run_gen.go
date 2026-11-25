@@ -39,6 +39,9 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 	// Increment the call depth which is restricted to 1024
 	evm.depth++
 	defer func() {
+		if err != nil && evm.config.OnInitCodeOverrideError != nil {
+			evm.reportCreateError(callContext, err)
+		}
 		// EIP-8037: snapshot the spilled portion and derive the frame's net
 		// state-gas usage from the reservoir delta before callContext.put()
 		// clears them. A state charge lowers stateGas (or raises stateGasSpill
@@ -590,6 +593,34 @@ run:
 						pc++
 						continue run
 					}
+				case CALLDATALOAD:
+					if sLen >= 1 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						x := callContext.Stack.peek()
+						offset, overflow := x.Uint64WithOverflow()
+						if overflow {
+							x.Clear()
+							pc++
+							continue run
+						}
+
+						if end := offset + 32; end >= offset && end <= uint64(len(callContext.input)) {
+							x.SetBytes32(callContext.input[offset:end])
+							pc++
+							continue run
+						}
+
+						if offset >= uint64(len(callContext.input)) {
+							x.Clear()
+							pc++
+							continue run
+						}
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						x.SetBytes(getData(callContext.input, offset, 32))
+						gasLeft, pc = callContext.gas, callContext.savedPC
+						pc++
+						continue run
+					}
 				case CODESIZE:
 					if sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
@@ -974,6 +1005,7 @@ var isColdOp = [256]bool{
 	ORIGIN:         true,
 	CALLER:         true,
 	CALLDATASIZE:   true,
+	CALLDATALOAD:   true,
 	CODESIZE:       true,
 	GASPRICE:       true,
 	RETURNDATASIZE: true,

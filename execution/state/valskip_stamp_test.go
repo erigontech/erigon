@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -68,6 +69,20 @@ func TestValSkip_SelfDestructPromotionBumpsStamp(t *testing.T) {
 		"after the destruct is Validated, the read of the destroyed contract's slot is stale")
 	require.False(t, vm.QuietBelow(i, stamp),
 		"promoting a lifecycle cell must invalidate stamps taken before it")
+}
+
+func TestQuietBelow_SeedPutBackByADroppedWriteBlocks(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xaa"))
+	vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}}}})
+	vm.InitStamps(8)
+	earlier := &WriteSet{}
+	earlier.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}}, Val: *uint256.NewInt(8)})
+	vm.FlushVersionedWrites(earlier, false)
+	stamp := vm.WriteSeq()
+
+	vm.DropWrite(addr, BalancePath, accounts.NilKey, Version{TxIndex: 1, Incarnation: 1})
+	require.False(t, vm.QuietBelow(2, stamp), "putting the seed back changes the cell a reader of tx 1 saw")
 }
 
 func newStampedMap(n int) *VersionMap {
@@ -257,8 +272,7 @@ func TestQuietBelow_DeleteBumpsStamp(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x05"))
 	ops := map[string]func(vm *VersionMap, j int){
-		"Delete":    func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, true) },
-		"DeleteAll": func(vm *VersionMap, j int) { vm.DeleteAll(addr, j) },
+		"Delete": func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, true) },
 	}
 	for name, op := range ops {
 		for _, tc := range []struct {
@@ -278,8 +292,7 @@ func TestQuietBelow_NoOpDeleteDoesNotBump(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x06"))
 	ops := map[string]func(vm *VersionMap, j int){
-		"Delete":    func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, false) },
-		"DeleteAll": func(vm *VersionMap, j int) { vm.DeleteAll(addr, j) },
+		"Delete": func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, false) },
 	}
 	for name, op := range ops {
 		vm := newStampedMap(32)
@@ -313,6 +326,26 @@ func TestQuietBelow_NoOpBALFlushDoesNotBump(t *testing.T) {
 	stamp := vm.WriteSeq()
 	flushPath(vm, addr, 3, BalancePath)
 	require.True(t, vm.QuietBelow(5, stamp), "a flush that changes no cell must not stamp")
+}
+
+func TestQuietBelow_NoOpBALCodeFlushDoesNotBump(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x09"))
+	code := accounts.NewCode([]byte{0x60, 0x00})
+	version := Version{TxIndex: 3}
+	vm := NewVersionMap(nil)
+	vm.WriteCode(addr, version, code, true)
+	vm.WriteCodeHash(addr, version, code.Hash, true)
+	vm.WriteCodeSize(addr, version, code.Len(), true)
+	vm.HasBAL = true
+	vm.InitStamps(32)
+	stamp := vm.WriteSeq()
+	ws := &WriteSet{}
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: version}, Val: code})
+	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: version}, Val: code.Hash})
+	ws.SetCodeSize(addr, &VersionedWrite[int]{WriteHeader: WriteHeader{Address: addr, Path: CodeSizePath, Version: version}, Val: code.Len()})
+	vm.FlushVersionedWrites(ws, false)
+	require.True(t, vm.QuietBelow(5, stamp), "an equal code flush must not stamp")
 }
 
 func TestQuietBelow_WriterOutsideLayoutPanics(t *testing.T) {

@@ -4,28 +4,31 @@ go 1.26.8
 
 replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 
+replace github.com/libp2p/go-libp2p-pubsub => github.com/domiwei/go-libp2p-pubsub v0.0.0-20261119062000-9d96f54458a3
+
 require (
 	github.com/erigontech/evmone_precompiles v0.0.0-20261020072006-fc5972e25a08
 	github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268
-	github.com/erigontech/mdbx-go v0.43.0
+	github.com/erigontech/mdbx-go v0.43.1
 	github.com/erigontech/secp256k1 v1.4.1
 )
 
 require (
 	charm.land/bubbles/v2 v2.2.1
-	charm.land/bubbletea/v2 v2.1.0
+	charm.land/bubbletea/v2 v2.1.1
 	charm.land/lipgloss/v2 v2.0.5
 	github.com/99designs/gqlgen v0.17.98
 	github.com/FastFilter/xorfilter v0.5.1
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/OffchainLabs/go-bitfield v0.0.0-20261020212435-260d98aec40c
 	github.com/RoaringBitmap/roaring/v2 v2.30.0
+	github.com/anacrolix/chansync v0.8.0
 	github.com/anacrolix/envpprof v1.5.0
 	github.com/anacrolix/generics v0.2.0
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
-	github.com/anacrolix/missinggo/v2 v2.11.0
+	github.com/anacrolix/missinggo/v2 v2.12.0
 	github.com/anacrolix/sync v0.5.5-0.20251119100342-d78dd1f686f1
-	github.com/anacrolix/torrent v1.61.1-0.20261024051421-5f95cd33fd29
+	github.com/anacrolix/torrent v1.63.0
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.3.0
@@ -39,6 +42,7 @@ require (
 	github.com/dop251/goja v0.0.0-20230605162241-28ee0ee714f3
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/elastic/go-freelru v0.16.0
+	github.com/ethereum/c-kzg-4844/v2 v2.1.8
 	github.com/felixge/fgprof v0.9.5
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/go-chi/cors v1.2.2
@@ -53,15 +57,15 @@ require (
 	github.com/google/cel-go v0.31.0
 	github.com/google/gofuzz v1.2.0
 	github.com/google/uuid v1.6.0
-	github.com/grafana/pyroscope-go v1.4.3
+	github.com/grafana/pyroscope-go v1.5.0
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.4
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/heimdalr/dag v1.5.1
 	github.com/holiman/bloomfilter/v2 v2.0.3
-	github.com/holiman/uint256 v1.3.3-0.20261104134511-4019abcf0234
+	github.com/holiman/uint256 v1.3.3-0.20261109190209-808a9d02b85f
 	github.com/huandu/xstrings v1.6.3
-	github.com/huin/goupnp v1.3.0
+	github.com/huin/goupnp v1.3.1
 	github.com/jackpal/go-nat-pmp v1.1.0
 	github.com/jinzhu/copier v0.4.0
 	github.com/json-iterator/go v1.1.12
@@ -76,7 +80,6 @@ require (
 	github.com/maypok86/otter/v2 v2.4.0
 	github.com/miekg/dns v1.1.73
 	github.com/multiformats/go-multiaddr v0.16.1
-	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pion/stun/v3 v3.1.7
 	github.com/prometheus/client_golang v1.25.0
@@ -102,11 +105,11 @@ require (
 	go.uber.org/goleak v1.3.0
 	go.uber.org/mock v0.6.0
 	go.uber.org/zap v1.28.0
-	golang.org/x/crypto v0.58.0
+	golang.org/x/crypto v0.59.0
 	golang.org/x/net v0.62.0
-	golang.org/x/sync v0.24.0
-	golang.org/x/sys v0.49.0
-	golang.org/x/text v0.43.0
+	golang.org/x/sync v0.25.0
+	golang.org/x/sys v0.50.0
+	golang.org/x/text v0.44.0
 	golang.org/x/time v0.16.0
 	golang.org/x/tools v0.52.0
 	google.golang.org/grpc v1.85.0
@@ -128,7 +131,6 @@ require (
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/alecthomas/repr v0.5.2 // indirect
 	github.com/anacrolix/btree v0.1.1 // indirect
-	github.com/anacrolix/chansync v0.8.0 // indirect
 	github.com/anacrolix/dht/v2 v2.23.1-0.20260525063928-ec3a9bd99456 // indirect
 	github.com/anacrolix/go-libutp v1.5.2-0.20260908013213-836dd42cdde6 // indirect
 	github.com/anacrolix/go-utp v0.0.0-20260908033909-9f1664acf866 // indirect
@@ -146,7 +148,6 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.25.0 // indirect
 	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8 // indirect
-	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4 // indirect
@@ -273,17 +274,18 @@ require (
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.etcd.io/bbolt v1.4.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/otel v1.45.0 // indirect
-	go.opentelemetry.io/otel/metric v1.45.0 // indirect
-	go.opentelemetry.io/otel/trace v1.45.0 // indirect
+	go.opentelemetry.io/otel v1.47.0 // indirect
+	go.opentelemetry.io/otel/log v1.47.0 // indirect
+	go.opentelemetry.io/otel/metric v1.47.0 // indirect
+	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.uber.org/dig v1.19.0 // indirect
 	go.uber.org/fx v1.24.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20261009195045-ca0d7ba23607 // indirect
-	golang.org/x/mod v0.42.0 // indirect
-	golang.org/x/telemetry v0.0.0-20261009151841-97e8ea77aa2a // indirect
+	golang.org/x/mod v0.43.0 // indirect
+	golang.org/x/telemetry v0.0.0-20261111153349-cdaf7e97dd7b // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260817212433-ac3dfec99bb1 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260817212433-ac3dfec99bb1 // indirect
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.6.2 // indirect

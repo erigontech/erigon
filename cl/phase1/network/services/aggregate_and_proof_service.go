@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/cl/validator/validator_params"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -76,7 +75,6 @@ type aggregateAndProofServiceImpl struct {
 	batchSignatureVerifier *BatchSignatureVerifier
 	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, common.Hash]
 	targetStateBuildClaims *lru.Cache[targetStateBuildClaim, struct{}]
-	validatorParams        *validator_params.ValidatorParams
 
 	awaitingBlock *blockArrivalQueue
 }
@@ -90,7 +88,6 @@ func NewAggregateAndProofService(
 	opPool pool.OperationsPool,
 	test bool,
 	batchSignatureVerifier *BatchSignatureVerifier,
-	validatorParams *validator_params.ValidatorParams,
 ) AggregateAndProofService {
 	seenAggCache, err := lru.New[seenAggregateIndex, common.Hash]("seenAggregate", seenAggregateCacheSize)
 	if err != nil {
@@ -106,7 +103,6 @@ func NewAggregateAndProofService(
 		batchSignatureVerifier: batchSignatureVerifier,
 		seenAggreatorIndexes:   seenAggCache,
 		targetStateBuildClaims: newTargetStateBuildClaims(),
-		validatorParams:        validatorParams,
 		awaitingBlock: newBlockArrivalQueue(
 			forkchoiceStore,
 			int(beaconCfg.MaxCommitteesPerSlot*beaconCfg.TargetAggregatorsPerCommittee),
@@ -130,7 +126,7 @@ func (a *aggregateAndProofServiceImpl) DecodeGossipMessage(pid peer.ID, data []b
 		Receiver:                &sentinelproto.Peer{Pid: pid.String()},
 		SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
 	}
-	if err := obj.SignedAggregateAndProof.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj.SignedAggregateAndProof, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -177,7 +173,7 @@ func (a *aggregateAndProofServiceImpl) verifyAggregateBeforeBuild(aggregateAndPr
 	}); err != nil {
 		return err
 	}
-	valid, err := blsVerifyMultipleSignatures(
+	valid, _, err := blsVerifyMultipleSignatures(
 		[][]byte{signature1, signature2},
 		[][]byte{signingRoot1, signingRoot2},
 		[][]byte{pubKey1, pubKey2},
@@ -254,10 +250,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	}
 
 	var (
-		aggregateVerificationData *AggregateVerificationData
-		aggregateRoot             common.Hash
-		attestingIndices          []uint64
-		seenIndex                 seenAggregateIndex
+		aggregateRoot    common.Hash
+		attestingIndices []uint64
+		seenIndex        seenAggregateIndex
 	)
 	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// If our head state is too far from the aggregate's epoch, committee
@@ -369,22 +364,17 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
 	monitor.ObserveCommitteeSize(float64(len(committee)))
 
-	// A node with validators verifies every aggregate: it relays them and packs them into its own blocks.
-	if len(a.validatorParams.GetValidators()) > 0 || aggregateAndProof.ImmediateProcess {
-		// Set beacon config on the aggregate's attestation so HashSSZ uses the correct
-		// AggregationBits limit for the active preset (e.g. minimal: 8192, mainnet: 131072).
-		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.SetBeaconConfig(a.beaconCfg)
-		// aggregate signatures for later verification
-		if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-			var err error
-			aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
-			return err
-		}); err != nil {
-			return err
-		}
-	}
-	if aggregateVerificationData == nil {
-		return ErrIgnore
+	// Set beacon config on the aggregate's attestation so HashSSZ uses the correct
+	// AggregationBits limit for the active preset (e.g. minimal: 8192, mainnet: 131072).
+	aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.SetBeaconConfig(a.beaconCfg)
+	// aggregate signatures for later verification
+	var aggregateVerificationData *AggregateVerificationData
+	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		var err error
+		aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
+		return err
+	}); err != nil {
+		return err
 	}
 	aggregateVerificationData.F = func() {
 		a.opPool.AttestationsPool.Insert(

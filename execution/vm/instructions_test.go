@@ -457,17 +457,17 @@ func TestCreate2InitCodeAllocations(t *testing.T) {
 	defer ibs.Close()
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 	evm.depth = int(params.CallCreateDepth) + 1 // exclude child execution from the allocation count.
-	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 500_000})
+	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 500_000})
 	defer evm.putCallContext(scope)
 	scope.Memory.Resize(64)
 	clear(scope.Memory.Data())
-	allocations := func(memorySize int) float64 {
+	allocations := func(memorySize int, initCodeSize uint64) float64 {
 		return testing.AllocsPerRun(100, func() {
 			scope.Memory.store = scope.Memory.store[:memorySize]
 			scope.Memory.lastGasCost = 0
 			scope.Stack.Reset()
 			scope.Stack.push(uint256.Int{})
-			scope.Stack.push(*uint256.NewInt(64))
+			scope.Stack.push(*uint256.NewInt(initCodeSize))
 			scope.Stack.push(uint256.Int{})
 			scope.Stack.push(uint256.Int{})
 			if _, err := gasCreate2Eip3860(evm, scope, scope.Gas(), 64); err != nil {
@@ -479,10 +479,11 @@ func TestCreate2InitCodeAllocations(t *testing.T) {
 			}
 		})
 	}
-	withoutPadding := allocations(64)
-	withPadding := allocations(32)
-	if withPadding != withoutPadding {
-		t.Fatalf("zero-padding adds initcode allocations: without padding %g, with padding %g", withoutPadding, withPadding)
+	empty := allocations(64, 0)
+	withoutPadding := allocations(64, 64)
+	withPadding := allocations(32, 64)
+	if withoutPadding > empty || withPadding > empty+1 {
+		t.Fatalf("CREATE2 allocations: empty %g, in memory %g, zero-padded %g", empty, withoutPadding, withPadding)
 	}
 }
 
@@ -555,7 +556,7 @@ func TestOpTstore(t *testing.T) {
 		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, chain.AllProtocolChanges, Config{})
 		caller      = accounts.ZeroAddress
 		to          = accounts.InternAddress(common.Address{1})
-		callContext = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{})}
+		callContext = &CallContext{Contract: *NewContract(caller, to, uint256.Int{})}
 		value       = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
 	defer state.Close()
@@ -1206,7 +1207,7 @@ func TestLogDataSurvivesMemoryAndArenaReuse(t *testing.T) {
 	ibs := state.New(state.NewNoopReader())
 	defer ibs.Close()
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-	scope := &CallContext{Contract: *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
+	scope := &CallContext{Contract: *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
 	op := makeLog(3)
 	for i, size := range []int{1024 * 1024, 1024, 32, 0, 1024 * 1024} {
 		ibs.SetTxContext(1, 0)
@@ -1306,7 +1307,7 @@ func TestContextAddressWordsReusedFrame(t *testing.T) {
 		coinbase := addresses[(frame+3)%len(addresses)]
 		evm.TxContext = evmtypes.TxContext{Origin: origin}
 		evm.Context = evmtypes.BlockContext{Coinbase: coinbase}
-		scope := evm.getCallContext(*NewContract(caller, caller, address, uint256.Int{}), nil, mdgas.MdGas{})
+		scope := evm.getCallContext(*NewContract(caller, address, uint256.Int{}), nil, mdgas.MdGas{})
 		for _, tc := range []struct {
 			name    string
 			op      executionFunc
@@ -1342,4 +1343,122 @@ func TestPutReleasesFrameSlotKeys(t *testing.T) {
 	ctx.slots.key[1] = accounts.InternKey(common.Hash{2})
 	evm.putCallContext(ctx)
 	require.Equal(t, [2]accounts.StorageKey{}, ctx.slots.key)
+}
+
+// A failed header read is the node's failure, not the transaction's. BLOCKHASH records it as a
+// state read error, so the executor does not judge the block by the call it aborted.
+func TestBlockhashRecordsAHeaderReadError(t *testing.T) {
+	t.Parallel()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	readErr := errors.New("header read failed")
+	blockCtx := gasTraceBlockContext()
+	blockCtx.BlockNumber = 10
+	blockCtx.GetHash = func(uint64) (common.Hash, error) { return common.Hash{}, readErr }
+	evm := NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	c.Code = []byte{byte(PUSH1), 9, byte(BLOCKHASH)}
+
+	_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
+	require.ErrorIs(t, err, readErr)
+	require.ErrorIs(t, ibs.StateReadError(), readErr)
+}
+
+type segmentCodeReader struct {
+	state.NoopReader
+	addr         accounts.Address
+	code         []byte
+	segmentReads int
+	attempts     int
+	refuse       bool
+}
+
+func (r *segmentCodeReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if addr != r.addr {
+		return nil, nil
+	}
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(r.code))
+	return &acc, nil
+}
+
+func (r *segmentCodeReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+	if addr != r.addr {
+		return nil, nil
+	}
+	return r.code, nil
+}
+
+func (r *segmentCodeReader) ReadAccountCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (bool, error) {
+	r.attempts++
+	if r.refuse {
+		return false, nil
+	}
+	r.segmentReads++
+	if addr != r.addr {
+		return false, nil
+	}
+	common.CopySegment(dst, r.code, from)
+	return true, nil
+}
+
+func runExtCodeCopy(t *testing.T, segments bool, memOffset, codeOffset, length uint256.Int, memSize uint64) (mem []byte, attempts, segmentReads int) {
+	t.Helper()
+
+	addrBytes := common.Address{0xC0, 0xDE}
+	addr := accounts.InternAddress(addrBytes)
+	code := make([]byte, 64)
+	for i := range code {
+		code[i] = byte(i + 1)
+	}
+	reader := &segmentCodeReader{addr: addr, code: code, refuse: !segments}
+	ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	ibs.SetTxContext(100, 1)
+	ibs.SetVersion(0)
+
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{cacheGen: 1}
+	callContext.Memory.Resize(memSize)
+	callContext.Memory.Set(0, memSize, bytes.Repeat([]byte{0xff}, int(memSize)))
+	callContext.Stack.push(length)
+	callContext.Stack.push(codeOffset)
+	callContext.Stack.push(memOffset)
+	var addrWord uint256.Int
+	addrWord.SetBytes(addrBytes[:])
+	callContext.Stack.push(addrWord)
+
+	_, _, err := opExtCodeCopy(0, evm, callContext)
+	require.NoError(t, err)
+	return bytes.Clone(callContext.Memory.store), reader.attempts, reader.segmentReads
+}
+
+func TestOpExtCodeCopySegmentReadMatchesNormalPath(t *testing.T) {
+	for _, tc := range []struct {
+		name                          string
+		memOffset, codeOffset, length uint256.Int
+		memSize                       uint64
+	}{
+		{name: "range inside code", memOffset: *uint256.NewInt(8), codeOffset: *uint256.NewInt(4), length: *uint256.NewInt(16), memSize: 32},
+		{name: "range past code end", memOffset: *uint256.NewInt(0), codeOffset: *uint256.NewInt(60), length: *uint256.NewInt(16), memSize: 32},
+		{name: "offset overflow", memOffset: *uint256.NewInt(0), codeOffset: *new(uint256.Int).Lsh(uint256.NewInt(1), 70), length: *uint256.NewInt(16), memSize: 32},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want := bytes.Repeat([]byte{0xff}, int(tc.memSize))
+			for i := uint64(0); i < tc.length.Uint64(); i++ {
+				var b byte
+				if src, overflow := new(uint256.Int).AddOverflow(&tc.codeOffset, uint256.NewInt(i)); !overflow && src.IsUint64() && src.Uint64() < 64 {
+					b = byte(src.Uint64() + 1)
+				}
+				want[tc.memOffset.Uint64()+i] = b
+			}
+			off, offAttempts, _ := runExtCodeCopy(t, false, tc.memOffset, tc.codeOffset, tc.length, tc.memSize)
+			on, _, onSegmentReads := runExtCodeCopy(t, true, tc.memOffset, tc.codeOffset, tc.length, tc.memSize)
+			require.Equal(t, want, off, "a declined segment read must take the normal path")
+			require.Equal(t, want, on)
+			require.Equal(t, 1, offAttempts, "the refused run must try the segment read")
+			require.Equal(t, 1, onSegmentReads, "the miss must be read as a segment")
+		})
+	}
 }

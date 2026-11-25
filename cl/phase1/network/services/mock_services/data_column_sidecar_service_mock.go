@@ -43,6 +43,44 @@ func (m *MockDataColumnSidecarService) EXPECT() *MockDataColumnSidecarServiceMoc
 	return m.recorder
 }
 
+// ClaimColumns mocks base method.
+func (m *MockDataColumnSidecarService) ClaimColumns(sidecars []*cltypes.DataColumnSidecar) func(context.Context) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ClaimColumns", sidecars)
+	ret0, _ := ret[0].(func(context.Context))
+	return ret0
+}
+
+// ClaimColumns indicates an expected call of ClaimColumns.
+func (mr *MockDataColumnSidecarServiceMockRecorder) ClaimColumns(sidecars any) *MockDataColumnSidecarServiceClaimColumnsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClaimColumns", reflect.TypeOf((*MockDataColumnSidecarService)(nil).ClaimColumns), sidecars)
+	return &MockDataColumnSidecarServiceClaimColumnsCall{Call: call}
+}
+
+// MockDataColumnSidecarServiceClaimColumnsCall wrap *gomock.Call
+type MockDataColumnSidecarServiceClaimColumnsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockDataColumnSidecarServiceClaimColumnsCall) Return(publish func(context.Context)) *MockDataColumnSidecarServiceClaimColumnsCall {
+	c.Call = c.Call.Return(publish)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockDataColumnSidecarServiceClaimColumnsCall) Do(f func([]*cltypes.DataColumnSidecar) func(context.Context)) *MockDataColumnSidecarServiceClaimColumnsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockDataColumnSidecarServiceClaimColumnsCall) DoAndReturn(f func([]*cltypes.DataColumnSidecar) func(context.Context)) *MockDataColumnSidecarServiceClaimColumnsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // DecodeGossipMessage mocks base method.
 func (m *MockDataColumnSidecarService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*cltypes.DataColumnSidecar, error) {
 	m.ctrl.T.Helper()
@@ -158,38 +196,38 @@ func (c *MockDataColumnSidecarServiceProcessMessageCall) DoAndReturn(f func(cont
 	return c
 }
 
-// PublishColumnsFromEL mocks base method.
-func (m *MockDataColumnSidecarService) PublishColumnsFromEL(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
+// PublishColumns mocks base method.
+func (m *MockDataColumnSidecarService) PublishColumns(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "PublishColumnsFromEL", ctx, sidecars)
+	m.ctrl.Call(m, "PublishColumns", ctx, sidecars)
 }
 
-// PublishColumnsFromEL indicates an expected call of PublishColumnsFromEL.
-func (mr *MockDataColumnSidecarServiceMockRecorder) PublishColumnsFromEL(ctx, sidecars any) *MockDataColumnSidecarServicePublishColumnsFromELCall {
+// PublishColumns indicates an expected call of PublishColumns.
+func (mr *MockDataColumnSidecarServiceMockRecorder) PublishColumns(ctx, sidecars any) *MockDataColumnSidecarServicePublishColumnsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PublishColumnsFromEL", reflect.TypeOf((*MockDataColumnSidecarService)(nil).PublishColumnsFromEL), ctx, sidecars)
-	return &MockDataColumnSidecarServicePublishColumnsFromELCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PublishColumns", reflect.TypeOf((*MockDataColumnSidecarService)(nil).PublishColumns), ctx, sidecars)
+	return &MockDataColumnSidecarServicePublishColumnsCall{Call: call}
 }
 
-// MockDataColumnSidecarServicePublishColumnsFromELCall wrap *gomock.Call
-type MockDataColumnSidecarServicePublishColumnsFromELCall struct {
+// MockDataColumnSidecarServicePublishColumnsCall wrap *gomock.Call
+type MockDataColumnSidecarServicePublishColumnsCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockDataColumnSidecarServicePublishColumnsFromELCall) Return() *MockDataColumnSidecarServicePublishColumnsFromELCall {
+func (c *MockDataColumnSidecarServicePublishColumnsCall) Return() *MockDataColumnSidecarServicePublishColumnsCall {
 	c.Call = c.Call.Return()
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockDataColumnSidecarServicePublishColumnsFromELCall) Do(f func(context.Context, []*cltypes.DataColumnSidecar)) *MockDataColumnSidecarServicePublishColumnsFromELCall {
+func (c *MockDataColumnSidecarServicePublishColumnsCall) Do(f func(context.Context, []*cltypes.DataColumnSidecar)) *MockDataColumnSidecarServicePublishColumnsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockDataColumnSidecarServicePublishColumnsFromELCall) DoAndReturn(f func(context.Context, []*cltypes.DataColumnSidecar)) *MockDataColumnSidecarServicePublishColumnsFromELCall {
+func (c *MockDataColumnSidecarServicePublishColumnsCall) DoAndReturn(f func(context.Context, []*cltypes.DataColumnSidecar)) *MockDataColumnSidecarServicePublishColumnsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

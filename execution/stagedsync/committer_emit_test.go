@@ -50,8 +50,12 @@ func TestEmitTouched_ProducesExpectedUpdates(t *testing.T) {
 	del := commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash, DeleteStorageSubtree: true}
 	storDel := commitment.Update{Flags: commitment.DeleteUpdate}
 
-	wiped := full(3, 1, accounts.EmptyCodeHash)
+	// A self-destruct that preserves balance leaves a balance-only EOA: nonce and code
+	// are wiped even though this tx also wrote the nonce at the destruct version.
+	wiped := full(3, 0, accounts.EmptyCodeHash)
 	wiped.DeleteStorageSubtree = true
+	created := full(9, 1, codeHash)
+	created.DeleteStorageSubtree = true
 
 	scenarios := []struct {
 		name   string
@@ -85,9 +89,9 @@ func TestEmitTouched_ProducesExpectedUpdates(t *testing.T) {
 			map[string]commitment.Update{acctPlainKey(a(5)): wiped},
 		},
 		{
-			"created contract",
+			"created contract wipes subtree",
 			newWS().createContract(a(7), ver, true).bal(a(7), ver, *uint256.NewInt(9)).nonce(a(7), ver, 1).codeHash(a(7), ver, codeHash).build(),
-			map[string]commitment.Update{acctPlainKey(a(7)): full(9, 1, codeHash)},
+			map[string]commitment.Update{acctPlainKey(a(7)): created},
 		},
 		{
 			"zero-balance live touch (nonce keeps it alive)",

@@ -54,7 +54,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		destroyed, err := ibs.Selfdestruct(addr, false)
 		require.NoError(t, err)
 		require.True(t, destroyed)
-		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
+		ibs.EndTransaction()
 		writes := finalizedWrites(t, ibs, sd)
 		vm.FlushVersionedWrites(writes, true)
 
@@ -75,7 +75,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		destroyed, err := ibs.Selfdestruct(addr, false)
 		require.NoError(t, err)
 		require.True(t, destroyed)
-		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
+		ibs.EndTransaction()
 		writes := finalizedWrites(t, ibs, sd)
 		vm.FlushVersionedWrites(writes, true)
 
@@ -96,7 +96,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		destroyed, err := destroyer.Selfdestruct(addr, false)
 		require.NoError(t, err)
 		require.True(t, destroyed)
-		require.NoError(t, destroyer.FinalizeTx(sd, NewNoopWriter()))
+		destroyer.EndTransaction()
 		vm.FlushVersionedWrites(finalizedWrites(t, destroyer, sd), true)
 
 		recreator := newAmsterdamIBS(reader, vm, 1)
@@ -104,13 +104,38 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.NoError(t, recreator.CreateAccount(addr, true))
 		require.NoError(t, recreator.SetNonce(addr, 1, tracing.NonceChangeNewContract))
 		require.NoError(t, recreator.SetCode(addr, code, tracing.CodeChangeContractCreation))
-		require.NoError(t, recreator.FinalizeTx(sd, NewNoopWriter()))
+		recreator.EndTransaction()
 		vm.FlushVersionedWrites(finalizedWrites(t, recreator, sd), true)
 
 		acc, ok, _ := vm.View(2, reader).GetAccount(addr)
 		require.True(t, ok, "a recreated account must project as live after the recreate tx")
 		require.Equal(t, crypto.Keccak256Hash(code), acc.CodeHash.Value(),
 			"the recreated account carries the new code hash")
+	})
+
+	// The recreating tx runs before the lower tx's removal of the touched account is flushed,
+	// and creates the account from an absent base as an EIP-7702 authority.
+	t.Run("recreate run before a lower tx's EIP-161 removal projects live", func(t *testing.T) {
+		addr := accounts.InternAddress(common.HexToAddress("0x7004c4"))
+		reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
+
+		vm := NewVersionMap(nil)
+
+		recreator := newAmsterdamIBS(reader, vm, 1)
+		t.Cleanup(recreator.Close)
+		require.NoError(t, recreator.SetNonce(addr, 1, tracing.NonceChangeAuthorization))
+		recreator.EndTransaction()
+		vm.FlushVersionedWrites(finalizedWrites(t, recreator, sd), true)
+
+		toucher := newAmsterdamIBS(reader, vm, 0)
+		t.Cleanup(toucher.Close)
+		require.NoError(t, toucher.AddBalance(addr, uint256.Int{}, tracing.BalanceChangeUnspecified))
+		toucher.EndTransaction()
+		vm.FlushVersionedWrites(finalizedWrites(t, toucher, sd), true)
+
+		acc, ok, _ := vm.View(2, reader).GetAccount(addr)
+		require.True(t, ok, "the recreated account must project as live")
+		require.Equal(t, uint64(1), acc.Nonce)
 	})
 
 	t.Run("funded account survives as live", func(t *testing.T) {
@@ -122,7 +147,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		t.Cleanup(ibs.Close)
 
 		require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(50), tracing.BalanceChangeUnspecified))
-		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
+		ibs.EndTransaction()
 		writes := finalizedWrites(t, ibs, sd)
 		vm.FlushVersionedWrites(writes, true)
 
@@ -284,16 +309,18 @@ func TestVersionMapView_GetAccountTable(t *testing.T) {
 			vm.FlushVersionedWrites(ws, true)
 		}, base: &committed, acc: committed, ok: true, baseReads: 1},
 		{
+			// SELFDESTRUCT means deleted: a lone SD cell with no preserving balance cell
+			// is a full wipe, so the account is gone — not kept at its committed balance.
 			name: "self-destruct cell only", setup: func(vm *VersionMap) { vm.WriteSelfDestruct(addr, v(0), true, true) },
-			base: &committed, acc: committed, ok: true, wasDeleted: true, baseReads: 1,
+			base: &committed, wasDeleted: true, baseReads: 1,
 		},
-		{name: "EIP-8246 destruct keeps raw floors below it", setup: func(vm *VersionMap) {
+		{name: "self-destruct wipes nonce and code hash below it", setup: func(vm *VersionMap) {
 			vm.WriteNonce(addr, v(0), 9, true)
 			vm.WriteCodeHash(addr, v(0), cellCode, true)
 			vm.WriteSelfDestruct(addr, v(1), true, true)
 			vm.WriteBalance(addr, v(1), *uint256.NewInt(3), true)
 		}, base: &committed, acc: with(committed, func(a *accounts.Account) {
-			a.Balance, a.Nonce, a.CodeHash = *uint256.NewInt(3), 9, cellCode
+			a.Balance, a.Nonce, a.CodeHash = *uint256.NewInt(3), 0, accounts.EmptyCodeHash
 		}), ok: true, wasDeleted: true, baseReads: 1},
 		{name: "BAL marker over base", setup: func(vm *VersionMap) {
 			vm.WriteAddressExists(addr, v(0), &marker)

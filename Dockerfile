@@ -44,7 +44,8 @@ ARG TARGETARCH \
     TARGETVARIANT \
     TARGETPLATFORM \
     BUILD_DBTOOLS \
-    BINARIES
+    BINARIES \
+    GOPROXY="https://proxy.golang.org|https://goproxy.cn|direct"
 
 SHELL ["/bin/bash", "-c"]
 
@@ -102,8 +103,6 @@ LABEL \
     "org.opencontainers.image.documentation"="https://docs.erigon.tech/" \
     "org.opencontainers.image.source"="https://github.com/erigontech/erigon" \
     "org.opencontainers.image.url"="https://github.com/erigontech/erigon/blob/main/Dockerfile"
-
-STOPSIGNAL 2
 
 SHELL ["/bin/bash", "-c"]
 

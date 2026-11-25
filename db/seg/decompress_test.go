@@ -1398,3 +1398,71 @@ func TestGetterNextRejectsUnderflowedWordLen(t *testing.T) {
 	require.Nil(t, buf)
 	require.Zero(t, offset)
 }
+
+func TestDecompressorTruncatedDictVarint(t *testing.T) {
+	// A 0x80 byte starts a varint that never terminates; 0x01 is a complete one-byte varint.
+	patternDict := func(dict ...byte) []byte {
+		aux := make([]byte, 24+len(dict)+8)                       // trailing bytes hold the position dict size
+		binary.BigEndian.PutUint64(aux[16:24], uint64(len(dict))) // pattern dict size in bytes
+		copy(aux[24:], dict)
+		return aux
+	}
+	positionDict := func(dict ...byte) []byte {
+		aux := make([]byte, 24+8+len(dict))
+		binary.BigEndian.PutUint64(aux[24:32], uint64(len(dict))) // position dict size in bytes
+		copy(aux[32:], dict)
+		return aux
+	}
+
+	for name, tc := range map[string]struct {
+		file   []byte
+		reason string
+	}{
+		"patternDepth":  {patternDict(0x80), "invalid pattern depth varint"},
+		"patternLength": {patternDict(0x01, 0x80), "invalid pattern length varint"},
+		"positionDepth": {positionDict(0x80), "invalid position depth varint"},
+		"positionValue": {positionDict(0x01, 0x80), "invalid position varint"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fpath := filepath.Join(t.TempDir(), name)
+			require.NoError(t, os.WriteFile(fpath, tc.file, 0o644))
+
+			d, err := NewDecompressor(fpath)
+			require.ErrorIs(t, err, &ErrCompressedFileCorrupted{})
+			require.Nil(t, d)
+
+			var corrupted *ErrCompressedFileCorrupted
+			require.ErrorAs(t, err, &corrupted)
+			require.Contains(t, corrupted.Reason, tc.reason)
+		})
+	}
+}
+
+func TestDecompressorRejectsDepthsOutOfTreeOrder(t *testing.T) {
+	t.Run("patterns", func(t *testing.T) {
+		dict := []byte{50, 0, 1, 0}
+		aux := make([]byte, 24+len(dict)+8)
+		binary.BigEndian.PutUint64(aux[16:24], uint64(len(dict)))
+		copy(aux[24:], dict)
+
+		fpath := filepath.Join(t.TempDir(), "patternDepths")
+		require.NoError(t, os.WriteFile(fpath, aux, 0o644))
+
+		d, err := NewDecompressor(fpath)
+		require.ErrorIs(t, err, &ErrCompressedFileCorrupted{})
+		require.Nil(t, d)
+	})
+	t.Run("positions", func(t *testing.T) {
+		dict := []byte{50, 0, 1, 1}
+		aux := make([]byte, 24+8+len(dict))
+		binary.BigEndian.PutUint64(aux[24:32], uint64(len(dict)))
+		copy(aux[32:], dict)
+
+		fpath := filepath.Join(t.TempDir(), "positionDepths")
+		require.NoError(t, os.WriteFile(fpath, aux, 0o644))
+
+		d, err := NewDecompressor(fpath)
+		require.ErrorIs(t, err, &ErrCompressedFileCorrupted{})
+		require.Nil(t, d)
+	})
+}

@@ -199,11 +199,8 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	blockNumber, blockHash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockParameter, tx, api._blockReader)
+	blockNumber, blockHash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockParameter, tx, api._blockReader)
 	if err != nil {
-		return nil, err
-	}
-	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return nil, err
 	}
 
@@ -306,8 +303,9 @@ type simulator struct {
 	validation        bool
 	fullTransactions  bool
 	// Without commitment history, each block's root is replayed from the base block, so it needs the keys of all earlier simulated blocks.
-	touchedKeys  keysByAccount
-	sweptStorage map[accounts.Address]struct{}
+	touchedKeys   keysByAccount
+	sweptStorage  map[accounts.Address]struct{}
+	replacedSlots int
 }
 
 func newSimulator(
@@ -512,8 +510,8 @@ func (s *simulator) sanitizeCall(
 		if args.GasPrice == nil && args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil {
 			args.GasPrice = new(hexutil.U256)
 		}
-	} else {
-		// A base fee is provided, requiring 1559-type execution
+	} else if args.GasPrice == nil {
+		// A call with gasPrice stays legacy; zero dynamic fees would conflict with it.
 		if args.MaxFeePerGas == nil {
 			args.MaxFeePerGas = new(hexutil.U256)
 		}
@@ -618,26 +616,76 @@ type simOverrideReader struct {
 
 var _ state.StateReader = (*simOverrideReader)(nil)
 
-func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateReader, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) (*simOverrideReader, error) {
-	overrides := state.New(base)
-	if err := stateOverrides.Override(overrides, precompiles, rules); err != nil {
-		overrides.Close()
-		return nil, err
-	}
-	overridden := make(map[accounts.Address]struct{}, len(*stateOverrides))
-	for addr := range *stateOverrides {
-		overridden[addr] = struct{}{}
-	}
-	dirty := overrides.ExtractAndClearDirty()
+// maxSimReplacedSlots bounds the "state" overrides of one request: replacing an account's storage loads all its stored slots into memory.
+const maxSimReplacedSlots = 100_000
+
+func (s *simulator) checkStorageReplacements(ctx context.Context, stateOverrides *ethapi.StateOverrides, sd *execctx.SharedDomains, tx kv.TemporalTx, latest bool, firstMinTxNum uint64, limit int) error {
 	for addr, account := range *stateOverrides {
-		// An empty storage replacement journals nothing, but must still clear the stored slots.
-		if account.State != nil {
-			dirty[addr] = struct{}{}
+		if account.State == nil {
+			continue
+		}
+		addrValue := addr.Value()
+		budget := limit - s.replacedSlots
+		replaced := make(map[string]struct{})
+		add := func(key []byte) bool {
+			replaced[string(key)] = struct{}{}
+			return len(replaced) <= budget
+		}
+		if err := sd.IteratePrefix(kv.StorageDomain, addrValue[:], tx, func(k, _ []byte) (bool, error) {
+			return add(k), ctx.Err()
+		}); err != nil {
+			return err
+		}
+		if _, swept := s.sweptStorage[addr]; !latest && !swept && len(replaced) <= budget {
+			if err := visitStorageSlotsAsOf(ctx, tx, addrValue[:], firstMinTxNum, add); err != nil {
+				return err
+			}
+		}
+		if len(replaced) > budget {
+			return clientLimitExceededError(fmt.Sprintf("state overrides replace more than %d storage slots", limit))
+		}
+		s.replacedSlots += len(replaced)
+	}
+	return nil
+}
+
+func visitStorageSlotsAsOf(ctx context.Context, tx kv.TemporalTx, prefix []byte, txNum uint64, visit func(key []byte) bool) error {
+	to, _ := kv.NextSubtree(prefix)
+	it, err := tx.RangeAsOf(kv.StorageDomain, prefix, to, txNum, order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, enc, err := it.Next()
+		if err != nil {
+			return err
+		}
+		if len(enc) > 0 && !visit(k) {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 	}
-	if err := overrides.CommitOverrideDirtyAccounts(rules, stateWriter, dirty); err != nil {
+	return nil
+}
+
+func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateReader, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) (*simOverrideReader, error) {
+	overridden := make(map[accounts.Address]struct{}, len(*stateOverrides))
+	for addr, account := range *stateOverrides {
+		overridden[addr] = struct{}{}
+		// The version map hides the replaced storage from this block only; the writer must drop the stored slots.
+		if account.State != nil {
+			if err := stateWriter.CreateContract(addr); err != nil {
+				return nil, err
+			}
+		}
+	}
+	overrides := state.NewVersionedBlock(base)
+	if err := stateOverrides.OverrideTo(overrides, precompiles, rules, stateWriter); err != nil {
 		overrides.Close()
-		return nil, fmt.Errorf("committing override accounts: %w", err)
+		return nil, err
 	}
 	return &simOverrideReader{StateReader: base, overrides: overrides, overridden: overridden}, nil
 }
@@ -758,6 +806,9 @@ func (s *simulator) simulateBlock(
 
 	// Override the state before block execution.
 	if bsc.StateOverrides != nil {
+		if err := s.checkStorageReplacements(ctx, bsc.StateOverrides, sharedDomains, tx, latest, firstMinTxNum, maxSimReplacedSlots); err != nil {
+			return nil, nil, err
+		}
 		overrideReader, err := commitSimOverrides(bsc.StateOverrides, stateReader, activePrecompiles, rules, stateWriter)
 		if err != nil {
 			return nil, nil, err
@@ -765,9 +816,8 @@ func (s *simulator) simulateBlock(
 		defer overrideReader.Close()
 		stateReader = overrideReader
 	}
-	intraBlockState := state.New(stateReader)
+	intraBlockState := state.NewVersionedBlock(stateReader)
 	defer intraBlockState.Close()
-	intraBlockState.SetVersionMap(state.NewVersionMap(nil))
 	intraBlockState.SetTxContext(blockNumber, -1)
 
 	var balIO *state.VersionedIO
@@ -806,15 +856,15 @@ func (s *simulator) simulateBlock(
 	systemCallCustom := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, s.chainConfig, ibs, header, engine, constCall, vmConfig)
 	}
-	chainReader := consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger)
+	chainReader := &simulatedChainReader{
+		Reader: consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger),
+		parent: parent,
+	}
 	err = engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
 	if err != nil {
 		return nil, nil, err
 	}
-	err = intraBlockState.FinalizeTx(rules, state.NewNoopWriter())
-	if err != nil {
-		return nil, nil, err
-	}
+	intraBlockState.EndTransaction()
 	if err := recordPhase(); err != nil {
 		return nil, nil, err
 	}
@@ -830,10 +880,7 @@ func (s *simulator) simulateBlock(
 		txnList = append(txnList, txn)
 		receiptList = append(receiptList, receipt)
 		callResults = append(callResults, *callResult)
-		err = intraBlockState.FinalizeTx(rules, state.NewNoopWriter())
-		if err != nil {
-			return nil, nil, err
-		}
+		intraBlockState.EndTransaction()
 		if err := recordPhase(); err != nil {
 			return nil, nil, err
 		}
@@ -1128,6 +1175,20 @@ func (s *simulator) simulateCall(
 		txn.SetSender(accounts.InternAddress(*call.From))
 	}
 	return &callResult, txn, receipt, nil
+}
+
+// simulatedChainReader lets block initialization read the timestamp of a parent
+// built earlier in the same simulation, even when it exists only in memory.
+type simulatedChainReader struct {
+	*consensuschain.Reader
+	parent *types.Header
+}
+
+func (s *simulatedChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if s.parent.Number.Uint64() == number && s.parent.Hash() == hash {
+		return s.parent
+	}
+	return s.Reader.GetHeader(hash, number)
 }
 
 type simulatedCanonicalReader struct {
@@ -1500,14 +1561,18 @@ func (s *simulator) computeCommitmentFromStateHistory(
 		for address, locations := range touched {
 			addrValue := address.Value()
 			addressKey := addrValue[:]
-			tsd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(addressKey), nil)
+			if err := tsd.GetCommitmentCtx().TouchKeyFromState(ttx, addressKey); err != nil {
+				return nil, err
+			}
 			s.logger.Debug("Touch key", "domain", kv.AccountsDomain, "key", address.Value().Hex()[2:])
 			for _, loc := range locations {
 				locValue := loc.Value()
 				locationKey := locValue[:]
 				copy(storageFullKey[:length.Addr], addressKey)
 				copy(storageFullKey[length.Addr:], locationKey)
-				tsd.GetCommitmentCtx().TouchKey(kv.StorageDomain, string(storageFullKey), nil)
+				if err := tsd.GetCommitmentCtx().TouchKeyFromState(ttx, storageFullKey); err != nil {
+					return nil, err
+				}
 				s.logger.Debug("Touch key", "domain", kv.StorageDomain, "key", address.Value().Hex()[2:]+loc.Value().Hex()[2:])
 			}
 		}

@@ -1334,7 +1334,7 @@ func (b *BackwardBeaconDownloader) isGloasSlot(slot uint64) bool {
 // This is needed when the beacon API's HEAD chain diverges from the finalized chain;
 // slot-based queries return HEAD-chain blocks, but root-based queries work regardless.
 func fetchBlockFromBeaconAPIByRoot(ctx context.Context, baseURL string, root common.Hash, beaconCfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := beaconAPIClient
 	reqURL := fmt.Sprintf("%s/eth/v2/beacon/blocks/0x%x", baseURL, root)
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
@@ -1430,7 +1430,7 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelopeP2P(ctx context.Context, b
 
 func (b *BackwardBeaconDownloader) fetchSingleEnvelopeHTTP(ctx context.Context, block *cltypes.SignedBeaconBlock) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if b.httpFallbackURL == "" {
-		return nil, fmt.Errorf("no HTTP fallback URL configured")
+		return nil, errors.New("no HTTP fallback URL configured")
 	}
 	if block == nil || block.Block == nil {
 		return nil, errors.New("cannot fetch envelope for nil block")
@@ -1440,7 +1440,7 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelopeHTTP(ctx context.Context, 
 		return nil, fmt.Errorf("block root: %w", err)
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := beaconAPIClient
 	reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelopes/0x%x", b.httpFallbackURL, blockRoot)
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {

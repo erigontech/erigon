@@ -71,7 +71,7 @@ func setupBLSToExecutionChangeTest(t *testing.T) (*blsToExecutionChangeTestConte
 	prevComputeSigningRoot := computeSigningRoot
 	prevBlsVerifyMultipleSignatures := blsVerifyMultipleSignatures
 	computeSigningRoot = mockFuncs.ComputeSigningRoot
-	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+	blsVerifyMultipleSignatures = withoutDecompressed(mockFuncs.BlsVerifyMultipleSignatures)
 	t.Cleanup(func() {
 		computeSigningRoot = prevComputeSigningRoot
 		blsVerifyMultipleSignatures = prevBlsVerifyMultipleSignatures

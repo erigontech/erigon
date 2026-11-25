@@ -22,15 +22,156 @@ import (
 	"testing"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
+	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/common"
 )
+
+func stateWithStaleTotalActiveBalance(t *testing.T, cfg *clparams.BeaconChainConfig) (*state.CachingBeaconState, uint64) {
+	t.Helper()
+	beaconState := state.New(cfg)
+	validator := solid.NewValidator()
+	validator.SetEffectiveBalance(32_000_000_000)
+	validator.SetActivationEpoch(0)
+	validator.SetExitEpoch(cfg.FarFutureEpoch)
+	require.NoError(t, beaconState.AddValidator(validator, 32_000_000_000))
+	require.NoError(t, beaconState.InitBeaconState())
+	require.Equal(t, uint64(32_000_000_000), beaconState.GetTotalActiveBalance())
+	require.NoError(t, beaconState.SetEffectiveBalanceForValidatorAtIndex(0, 16_000_000_000))
+	rescanned, err := beaconState.Copy()
+	require.NoError(t, err)
+	expected := rescanned.GetTotalActiveBalance()
+	require.NotEqual(t, expected, beaconState.GetTotalActiveBalance())
+	return beaconState, expected
+}
+
+func TestGetStateAtBlockRootSeedsCurrentStateTotalActiveBalance(t *testing.T) {
+	root := common.Hash{0x01}
+	current := state.New(&clparams.MainnetBeaconConfig)
+	graph := &getFinalizedExecutionHashForkGraph{
+		states:           map[common.Hash]*state.CachingBeaconState{root: current},
+		currentStateRoot: root,
+	}
+	totals, err := lru.New[common.Hash, uint64](1)
+	require.NoError(t, err)
+	seededTotal := 2 * current.BeaconConfig().EffectiveBalanceIncrement
+	totals.Add(root, seededTotal)
+	store := &ForkChoiceStore{forkGraph: graph, totalActiveBalances: totals}
+
+	copied, err := store.GetStateAtBlockRoot(root)
+	require.NoError(t, err)
+	require.Equal(t, seededTotal, copied.GetTotalActiveBalance())
+}
+
+func TestGetOwnedStateAtBlockRootCopiesIntoTheGivenState(t *testing.T) {
+	root := common.Hash{0x01}
+	current, expected := stateWithStaleTotalActiveBalance(t, &clparams.MainnetBeaconConfig)
+	require.NoError(t, current.SetSlot(42))
+	graph := &getFinalizedExecutionHashForkGraph{
+		states:           map[common.Hash]*state.CachingBeaconState{root: current},
+		currentStateRoot: root,
+	}
+	totals, err := lru.New[common.Hash, uint64](1)
+	require.NoError(t, err)
+	store := &ForkChoiceStore{forkGraph: graph, totalActiveBalances: totals}
+
+	seededTotal := 2 * clparams.MainnetBeaconConfig.EffectiveBalanceIncrement
+	require.NotEqual(t, expected, seededTotal)
+	for _, seeded := range []bool{false, true} {
+		want := expected
+		if seeded {
+			totals.Add(root, seededTotal)
+			want = seededTotal
+		}
+		reuse := state.New(&clparams.MainnetBeaconConfig)
+		copied, err := store.GetOwnedStateAtBlockRoot(root, reuse)
+		require.NoError(t, err)
+		require.Same(t, reuse, copied)
+		require.Equal(t, uint64(42), copied.Slot())
+		require.Equal(t, want, copied.GetTotalActiveBalance())
+	}
+}
+
+func TestGetOwnedStateAtBlockRootDoesNotReuseAStateOfAnotherConfig(t *testing.T) {
+	root := common.Hash{0x01}
+	graph := &getFinalizedExecutionHashForkGraph{
+		states:           map[common.Hash]*state.CachingBeaconState{root: state.New(&clparams.MainnetBeaconConfig)},
+		currentStateRoot: root,
+	}
+	store := &ForkChoiceStore{forkGraph: graph}
+	cfg := clparams.MainnetBeaconConfig
+	reuse := state.New(&cfg)
+
+	copied, err := store.GetOwnedStateAtBlockRoot(root, reuse)
+	require.NoError(t, err)
+	require.NotSame(t, reuse, copied)
+	require.Same(t, &clparams.MainnetBeaconConfig, copied.BeaconConfig())
+}
+
+func TestGetStateAtBlockRootRescansWithoutCachedTotal(t *testing.T) {
+	root := common.Hash{0x01}
+	current, expected := stateWithStaleTotalActiveBalance(t, &clparams.MainnetBeaconConfig)
+	graph := &getFinalizedExecutionHashForkGraph{
+		states:           map[common.Hash]*state.CachingBeaconState{root: current},
+		currentStateRoot: root,
+	}
+	totals, err := lru.New[common.Hash, uint64](1)
+	require.NoError(t, err)
+	store := &ForkChoiceStore{forkGraph: graph, totalActiveBalances: totals}
+
+	copied, err := store.GetStateAtBlockRoot(root)
+	require.NoError(t, err)
+	require.Equal(t, expected, copied.GetTotalActiveBalance())
+}
+
+func TestNewForkChoiceStoreSeedsAnchorTotalFromForkGraphState(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	anchor, expected := stateWithStaleTotalActiveBalance(t, &cfg)
+
+	graph, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	anchorRoot := graph.AnchorRoot()
+	store, err := NewForkChoiceStore(
+		nil,
+		anchor,
+		nil,
+		pool.OperationsPool{},
+		graph,
+		nil,
+		nil,
+		nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		nil,
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+
+	total, ok := store.TotalActiveBalance(anchorRoot)
+	require.True(t, ok)
+	require.Equal(t, expected, total)
+}
+
+type ownedReplayStateForkGraph struct {
+	fork_graph.ForkGraph
+	replayed *state.CachingBeaconState
+}
+
+func (g ownedReplayStateForkGraph) ReplayStateWithOwnership(common.Hash) (*state.CachingBeaconState, bool, error) {
+	return g.replayed, true, nil
+}
 
 func TestGetStateAtBlockRootHoldsReadLockDuringCurrentStateCopy(t *testing.T) {
 	root := common.Hash{0x01}
@@ -300,7 +441,7 @@ func TestGetOwnedStateAtBlockRootCopiesReplayedState(t *testing.T) {
 	}
 	store := &ForkChoiceStore{forkGraph: graph}
 
-	owned, err := store.GetOwnedStateAtBlockRoot(root)
+	owned, err := store.GetOwnedStateAtBlockRoot(root, nil)
 	require.NoError(t, err)
 	require.NotSame(t, replayed, owned)
 
@@ -318,6 +459,20 @@ func TestGetOwnedStateAtBlockRootCopiesReplayedState(t *testing.T) {
 	require.Equal(t, common.Hash{0x44}, owned.GetLatestExecutionPayloadBid().BlockHash)
 }
 
+func TestGetOwnedStateAtBlockRootKeepsOwnedReplay(t *testing.T) {
+	root := common.Hash{0x01}
+	replayed := state.New(&clparams.MainnetBeaconConfig)
+	base := &getFinalizedExecutionHashForkGraph{
+		states:           map[common.Hash]*state.CachingBeaconState{root: replayed},
+		currentStateRoot: common.Hash{0xff},
+	}
+	store := &ForkChoiceStore{forkGraph: ownedReplayStateForkGraph{ForkGraph: base, replayed: replayed}}
+
+	owned, err := store.GetOwnedStateAtBlockRoot(root, nil)
+	require.NoError(t, err)
+	require.Same(t, replayed, owned)
+}
+
 func TestGetOwnedStateAtBlockRootCopiesCurrentState(t *testing.T) {
 	root := common.Hash{0x01}
 	current := state.New(&clparams.MainnetBeaconConfig)
@@ -330,7 +485,7 @@ func TestGetOwnedStateAtBlockRootCopiesCurrentState(t *testing.T) {
 	expectedRoot, err := current.HashSSZ()
 	require.NoError(t, err)
 
-	owned, err := store.GetOwnedStateAtBlockRoot(root)
+	owned, err := store.GetOwnedStateAtBlockRoot(root, nil)
 	require.NoError(t, err)
 	require.NotSame(t, current, owned)
 	actualRoot, err := owned.HashSSZ()

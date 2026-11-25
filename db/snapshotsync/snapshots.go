@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -620,11 +619,10 @@ func (s *BaseRoSnapshots) SetIndexBuilder(t snaptype.Type, indexBuilder snaptype
 }
 
 func (s *BaseRoSnapshots) LogStat(label string) {
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
+	alloc, sys := dbg.MemUsage()
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", label),
 		"blocks", common.PrettyExact(s.SegmentsMax()+1), "indices", common.PrettyExact(s.IndicesMax()+1),
-		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 }
 
 func (s *BaseRoSnapshots) Types() []snaptype.Type { return s.types }
@@ -1319,23 +1317,6 @@ func (s *BaseRoSnapshots) detachNotInList(protect []string) retiredSegments {
 	return detached
 }
 
-func closeAndDropNotProtected(tree *btree.BTreeG[*DirtySegment], protectFiles map[string]struct{}, nameOf func(*DirtySegment) string) {
-	var toClose []*DirtySegment
-	tree.Walk(func(segs []*DirtySegment) bool {
-		for _, seg := range segs {
-			if _, ok := protectFiles[nameOf(seg)]; ok {
-				continue
-			}
-			toClose = append(toClose, seg)
-		}
-		return true
-	})
-	for _, delSeg := range toClose {
-		delSeg.close()
-		tree.Delete(delSeg)
-	}
-}
-
 // FindOpenSegment returns tree's already-open segment named fName, if any.
 func FindOpenSegment(tree *btree.BTreeG[*DirtySegment], fName string) (*DirtySegment, bool) {
 	return findOpenSegment(tree, func(sn *DirtySegment) bool { return sn.FileName() == fName })
@@ -1749,7 +1730,7 @@ func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, on
 	return true, nil
 }
 
-// RetireFilesAbove retires VISIBLE segments whose range ends at or beyond blockNum — the extra
+// RetireFilesAbove retires VISIBLE segments whose range ends beyond blockNum — the extra
 // files downloaded past a SnapshotDownloadToBlock target — handing their files (.seg + indexes)
 // to onDelete for the seeder. Reads visible only; unlink is deferred to the reader watermark.
 func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []string) error) error {
@@ -1762,7 +1743,7 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 	var names, paths []string
 	for _, t := range s.types {
 		for _, sn := range v.Segments(t) {
-			if sn.To() < blockNum {
+			if BlockFileRetainedUnderCap(sn.To(), blockNum) {
 				continue
 			}
 			names = append(names, sn.src.FileName())
@@ -1834,10 +1815,9 @@ func (s *BaseRoSnapshots) IndexMissed(ctx context.Context, logPrefix, tmpDir str
 		for {
 			select {
 			case <-logEvery.C:
-				var m runtime.MemStats
-				dbg.ReadMemStats(&m)
-				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
-				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				alloc, sys := dbg.MemUsage()
+				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), alloc, sys)
+				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 			case <-finish:
 				return
 			case <-ctx.Done():

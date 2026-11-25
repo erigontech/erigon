@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -39,21 +38,16 @@ import (
 
 func TestEIP8246FundedThenSelfdestructedAccount(t *testing.T) {
 	for _, mode := range []struct {
-		name     string
-		parallel bool
-		workers  int
+		name    string
+		workers int
 	}{
-		{"serial", false, 1},
-		{"parallel/workers=1", true, 1},
-		{"parallel/workers=4", true, 4},
+		{"workers=1", 1},
+		{"workers=4", 4},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			previousWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
 			ethconfig.Defaults.Sync.ExecWorkerCount = mode.workers
 			t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = previousWorkers })
-			previousParallel := dbg.Exec3Parallel
-			dbg.Exec3Parallel = mode.parallel
-			t.Cleanup(func() { dbg.Exec3Parallel = previousParallel })
 
 			key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 			require.NoError(t, err)
@@ -81,6 +75,7 @@ func TestEIP8246FundedThenSelfdestructedAccount(t *testing.T) {
 				block.AddTx(sign(types.NewTransaction(block.TxNonce(sender), contract, uint256.NewInt(1), 300_000, gasPrice, nil)))
 			})
 			require.NoError(t, err)
+			requireGeneratedBlock(t, chainPack)
 			for _, receipt := range chainPack.Receipts[0] {
 				require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 			}
@@ -101,24 +96,19 @@ func TestEIP8246FundedThenSelfdestructedAccount(t *testing.T) {
 // balance away, so the account is empty at destruct time. Under EIP-8246 it must
 // still exist, so a later same-block credit lands on it: the created contract
 // ends with the post-destruct credit and the beneficiary keeps the swept
-// balance. Covers the zero-balance preserve path across serial and parallel exec.
+// balance. Covers the zero-balance preserve path.
 func TestEIP8246PreserveToNonSelfBeneficiaryThenCredited(t *testing.T) {
 	for _, mode := range []struct {
-		name     string
-		parallel bool
-		workers  int
+		name    string
+		workers int
 	}{
-		{"serial", false, 1},
-		{"parallel/workers=1", true, 1},
-		{"parallel/workers=4", true, 4},
+		{"workers=1", 1},
+		{"workers=4", 4},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			previousWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
 			ethconfig.Defaults.Sync.ExecWorkerCount = mode.workers
 			t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = previousWorkers })
-			previousParallel := dbg.Exec3Parallel
-			dbg.Exec3Parallel = mode.parallel
-			t.Cleanup(func() { dbg.Exec3Parallel = previousParallel })
 
 			key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 			require.NoError(t, err)
@@ -150,6 +140,7 @@ func TestEIP8246PreserveToNonSelfBeneficiaryThenCredited(t *testing.T) {
 				block.AddTx(sign(types.NewTransaction(block.TxNonce(sender), contract, uint256.NewInt(3), 300_000, gasPrice, nil)))
 			})
 			require.NoError(t, err)
+			requireGeneratedBlock(t, chainPack)
 			for _, receipt := range chainPack.Receipts[0] {
 				require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 			}

@@ -45,13 +45,8 @@ var (
 	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	heapProfileThresholdPercent = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
 	heapProfileFrequency        = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
-	noMemstat                   = EnvBool("NO_MEMSTAT", false)
 
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
-	// CallNoMaterialize runs eth_call on the versioned state path, where reads
-	// go straight to the state reader instead of a resident stateObject.
-	CallNoMaterialize = EnvBool("CALL_NO_MATERIALIZE", true)
-
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
 	MdbxNoSyncUnsafe = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
@@ -79,6 +74,8 @@ var (
 	// reader goroutine exists: flag parsing, or test setup before the first read.
 	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
 
+	KVFileReadSummaries = KVReadLevelledMetrics // only KV_READ_METRICS enables it; the slow-block flag sets KVReadLevelledMetrics later
+
 	// allow simultaneous build of multiple snapshot types.
 	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1) // allows 1 kind of snapshots to be built simultaneously
@@ -90,7 +87,6 @@ var (
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
-	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", true)
 	numWorkers           = runtime.NumCPU()
 	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
@@ -133,7 +129,7 @@ var (
 	// BAL_DRIVEN_COMMITMENT=false (or IGNORE_BAL=true) to fall back to the
 	// incremental path if it ever misbehaves.
 	BALDrivenCommitment = EnvBool("BAL_DRIVEN_COMMITMENT", true)
-	BALBatchPrefetch    = EnvBool("BAL_BATCH_PREFETCH", false)
+	BALBatchPrefetch    = EnvBool("BAL_BATCH_PREFETCH", true)
 	// BALShadowCompute (requires BALDrivenCommitment) also computes each
 	// BAL-driven block incrementally and asserts both roots match before
 	// publishing; without it the BAL-driven root is published directly.
@@ -183,13 +179,6 @@ func init() {
 		runtime.SetBlockProfileRate(1)
 		runtime.SetMutexProfileFraction(1)
 	}
-}
-
-func ReadMemStats(m *runtime.MemStats) {
-	if noMemstat {
-		return
-	}
-	runtime.ReadMemStats(m)
 }
 
 // MemUsage returns MemStats.Alloc and MemStats.Sys without the stop-the-world
@@ -286,17 +275,10 @@ func LogHashMismatchReason() bool {
 }
 
 type saveHeapOptions struct {
-	memStats *runtime.MemStats
-	logger   *log.Logger
+	logger *log.Logger
 }
 
 type SaveHeapOption func(options *saveHeapOptions)
-
-func SaveHeapWithMemStats(memStats *runtime.MemStats) SaveHeapOption {
-	return func(options *saveHeapOptions) {
-		options.memStats = memStats
-	}
-}
 
 func SaveHeapWithLogger(logger *log.Logger) SaveHeapOption {
 	return func(options *saveHeapOptions) {
@@ -316,23 +298,18 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 
 	logger := common.Deref(options.logger)
 
-	var memStats runtime.MemStats
-	if options.memStats != nil {
-		memStats = *options.memStats
-	} else {
-		ReadMemStats(&memStats)
-	}
+	alloc, sys := MemUsage()
 
 	totalMemory := estimate.TotalMemory()
 	threshold := (totalMemory / 100) * heapProfileThresholdPercent
-	aboveThreshold := memStats.Alloc >= threshold
+	aboveThreshold := alloc >= threshold
 	if logger != nil {
 		logger.Info(
 			"[Experiment] heap check",
 			"threshold", common.ByteCount(threshold),
-			"alloc", common.ByteCount(memStats.Alloc),
+			"alloc", common.ByteCount(alloc),
 			"aboveThreshold", aboveThreshold,
-			"sys", common.ByteCount(memStats.Sys),
+			"sys", common.ByteCount(sys),
 			"total", common.ByteCount(totalMemory),
 		)
 	}
@@ -349,7 +326,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	}
 
 	if logger != nil {
-		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath, "alloc", common.ByteCount(memStats.Alloc))
+		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath, "alloc", common.ByteCount(alloc))
 	}
 
 	// Write heap profile to buffer first

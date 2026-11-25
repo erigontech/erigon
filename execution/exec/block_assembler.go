@@ -24,10 +24,11 @@ import (
 )
 
 type AssemblerCfg struct {
-	ChainConfig     *chain.Config
-	Engine          rules.Engine
-	BlockReader     dbservices.FullBlockReader
-	ExperimentalBAL bool
+	ChainConfig            *chain.Config
+	Engine                 rules.Engine
+	BlockReader            dbservices.FullBlockReader
+	ExperimentalBAL        bool
+	RequireAllTransactions bool
 }
 
 type AssembledBlock struct {
@@ -152,7 +153,7 @@ func (ba *BlockAssembler) recordPhase(ibs *state.IntraBlockState, writes *state.
 
 func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) error {
 	if err := protocol.InitializeBlockExecution(ba.cfg.Engine,
-		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, state.NewNoopWriter(), logger, nil); err != nil {
+		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, logger, nil); err != nil {
 		return err
 	}
 	writes, err := ibs.FinalizedWrites(ba.blockRules)
@@ -187,6 +188,9 @@ func (ba *BlockAssembler) AddTransactions(
 	// matches the validator's parallel executor (which assigns txIndex
 	// based on position in the block's transaction list).
 	txnIdx := len(ba.Txns)
+	inclusionError := func(txn types.Transaction, err error) error {
+		return fmt.Errorf("transaction %d (%s): %w", txnIdx, txn.Hash(), err)
+	}
 	header := ba.AssembledBlock.Header
 	// EIP-8037: execution and state gas pools deplete independently. The
 	// builder calls AddTransactions repeatedly with batches from the txpool,
@@ -205,7 +209,6 @@ func (ba *BlockAssembler) AddTransactions(
 	signer := types.MakeSigner(ba.cfg.ChainConfig, header.Number.Uint64(), header.Time)
 
 	var coalescedLogs types.Logs
-	writer := state.NewNoopWriter() // the builder applies the recorded write sets
 	recordTxIO := func() error {
 		writes, err := ibs.FinalizedWrites(ba.blockRules)
 		if err != nil {
@@ -241,7 +244,7 @@ func (ba *BlockAssembler) AddTransactions(
 		gasSnapshot := *gasUsed
 
 		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader),
-			ba.cfg.Engine, coinbase, gasPool, ibs, writer, header, txn, gasUsed, *vmConfig)
+			ba.cfg.Engine, coinbase, gasPool, ibs, header, txn, gasUsed, *vmConfig)
 		if err != nil {
 			// Restore cumulative gas to pre-tx values.
 			*gasUsed = gasSnapshot
@@ -283,7 +286,9 @@ LOOP:
 			return nil, true, err
 		}
 
-		if interrupt != nil && interrupt.Load() && stopped == nil {
+		// Explicit lists must finish before a result can be returned. Their build
+		// context still handles cancellation and the build timeout.
+		if !ba.cfg.RequireAllTransactions && interrupt != nil && interrupt.Load() && stopped == nil {
 			logger.Debug("Transaction adding was requested to stop", "payload", ba.PayloadId)
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)
@@ -291,6 +296,9 @@ LOOP:
 		// Transactions can have a zero state gas limit, so only the execution
 		// pool bounds this early exit.
 		if gasPool.Gas() < minTxGas {
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, inclusionError(txn, protocol.ErrGasLimitReached)
+			}
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", minTxGas)
 			done = true
 			break
@@ -298,6 +306,9 @@ LOOP:
 
 		rlpSpacePostTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig, txn)
 		if rlpSpacePostTxn < 0 {
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, inclusionError(txn, errors.New("exceeds block RLP size limit"))
+			}
 			rlpSpacePreTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig)
 			logger.Debug(
 				fmt.Sprintf("[%s] Skipping transaction since it does not fit in available rlp space", logPrefix),
@@ -311,6 +322,9 @@ LOOP:
 		// We use the eip155 signer regardless of the env hf.
 		from, err := txn.Sender(*signer)
 		if err != nil {
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, inclusionError(txn, err)
+			}
 			logger.Warn(fmt.Sprintf("[%s] Could not recover transaction sender", logPrefix), "hash", txn.Hash(), "err", err)
 			continue
 		}
@@ -318,6 +332,9 @@ LOOP:
 		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
 		// phase, start ignoring the sender until we do.
 		if txn.Protected() && !ba.cfg.ChainConfig.IsSpuriousDragon(header.Number.Uint64()) {
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, inclusionError(txn, errors.New("replay protection is not active"))
+			}
 			logger.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", ba.cfg.ChainConfig.SpuriousDragonBlock)
 			continue
 		}
@@ -330,6 +347,9 @@ LOOP:
 			}
 		} else {
 			clearTxIO()
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, inclusionError(txn, err)
+			}
 		}
 		switch {
 		case errors.Is(err, protocol.ErrGasLimitReached):
@@ -353,7 +373,7 @@ LOOP:
 func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) (block *types.Block, err error) {
 	chainReader := NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger)
 
-	if err := ba.cfg.Engine.Prepare(chainReader, ba.Header, ibs); err != nil {
+	if err := ba.cfg.Engine.Prepare(chainReader, ba.Header); err != nil {
 		return nil, err
 	}
 
@@ -363,7 +383,7 @@ func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.Tempor
 	ibs.SetTxContext(ba.Header.Number.Uint64(), len(ba.Txns))
 	ibs.ResetVersionedIO()
 	block, ba.Requests, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, ba.Header, ba.Txns, ba.Uncles,
-		state.NewNoopWriter(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger)
+		ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger)
 	if err != nil {
 		return nil, fmt.Errorf("cannot finalize block execution: %w", err)
 	}
