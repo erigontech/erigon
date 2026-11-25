@@ -53,7 +53,7 @@ type Warmuper struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	ctxFactory TrieContextFactory
-	MaxDepth   int
+	maxDepth   int
 	numWorkers int
 	logPrefix  string
 
@@ -83,7 +83,7 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 		ctx:        ctx,
 		cancel:     cancel,
 		ctxFactory: cfg.CtxFactory,
-		MaxDepth:   cfg.MaxDepth,
+		maxDepth:   cfg.MaxDepth,
 		numWorkers: cfg.NumWorkers,
 		logPrefix:  cfg.LogPrefix,
 	}
@@ -144,7 +144,7 @@ func (w *Warmuper) Start() {
 func (w *Warmuper) WarmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
 	var compactBuf [MaxCompactKeyLen]byte
-	for depth <= len(hashedKey) && depth <= w.MaxDepth {
+	for depth <= len(hashedKey) && depth <= w.maxDepth {
 		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
 
 		branchData, _, err := trieCtx.Branch(prefix)

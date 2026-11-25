@@ -18,6 +18,7 @@ package v2
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"slices"
 	"testing"
@@ -58,7 +59,8 @@ func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
 	plainKeys, updates := ub.Build()
 	_, ms := sequentialRoot(t, plainKeys, updates)
 
-	w := &commitment.Warmuper{MaxDepth: commitment.WarmupMaxDepth}
+	w := commitment.NewWarmuper(context.Background(), commitment.WarmupConfig{MaxDepth: commitment.WarmupMaxDepth})
+	defer w.Close()
 	extensionHops, storageRootExtensions := 0, 0
 	for _, pk := range append(plainKeys, newSlots...) {
 		hk := commitment.KeyToHexNibbleHash(pk)

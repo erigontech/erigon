@@ -842,15 +842,10 @@ func reusedInstanceIncrementalRoot(t *testing.T, workers int, k1 [][]byte, u1 []
 	ms := NewMockState(t)
 	ms.SetConcurrentCommitment(true)
 
-	cfg := commitment.DefaultTrieConfig()
-	cfg.Variant = commitment.VariantParallelHexPatricia
-	pt := NewParallelPatriciaHashed(nil, length.Addr, cfg)
+	pt := newParTrie(t, ms, workers)
+	defer pt.Release()
 	ut := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), commitment.KeyToHexNibbleHash)
 	defer ut.Close()
-	defer pt.Release()
-	pt.SetNumWorkers(workers)
-	pt.SetTrieContextFactory(mockTrieCtxFactory(ms))
-	pt.ResetContext(ms)
 
 	process := func(keys [][]byte, upds []commitment.Update) ([]byte, []byte) {
 		require.NoError(t, ms.applyPlainUpdates(keys, upds))
