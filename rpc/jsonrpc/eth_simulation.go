@@ -835,7 +835,7 @@ func (s *simulator) simulateBlock(
 		if err := intraBlockState.WriteFlushedTo(writes, stateWriter); err != nil {
 			return fmt.Errorf("apply simulated writes: %w", err)
 		}
-		intraBlockState.ResetVersionedIO()
+		intraBlockState.ResetIO()
 		return nil
 	}
 
@@ -899,7 +899,7 @@ func (s *simulator) simulateBlock(
 		return systemCallCustom(contract, data, intraBlockState, header, false)
 	}
 	intraBlockState.SetTxContext(blockNumber, len(bsc.Calls))
-	intraBlockState.ResetVersionedIO()
+	intraBlockState.ResetIO()
 	if balMode {
 		// Withdrawal recipients left absent still belong in the BAL as accessed.
 		intraBlockState.StartAccessRecording()
@@ -1183,8 +1183,8 @@ type simulatedChainReader struct {
 }
 
 func (s *simulatedChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	if s.parent.Number.Uint64() == number && s.parent.Hash() == hash {
-		return s.parent
+	if parent := matchingParent(s.parent, hash, number); parent != nil {
+		return parent
 	}
 	return s.Reader.GetHeader(hash, number)
 }

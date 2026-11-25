@@ -1193,6 +1193,7 @@ func validDenebRecoverySidecars(t *testing.T, slot uint64, count int) (*cltypes.
 	require.NoError(t, err)
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	block.Block.Slot = slot
+	block.Block.Body.ExecutionPayload.BlockHash = common.Hash{1}
 	for range count {
 		block.GetBlobKzgCommitments().Append((*cltypes.KZGCommitment)(&commitment))
 	}
