@@ -123,7 +123,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 	logger := log.New("component", "trace_filtering_test")
 	consensusHeaderReader := consensuschain.NewReader(cfg, tx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader,
-		block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
+		block.HeaderNoCopy(), cfg, ibs, logger, nil)
 	require.NoError(t, err)
 	err = ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter)
 	require.NoError(t, err)

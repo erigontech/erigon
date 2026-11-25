@@ -7,7 +7,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -76,7 +75,7 @@ func TestCreditAfterADestructReadsAFreshNonce(t *testing.T) {
 			ownNonce, err := credit.GetNonce(x)
 			require.NoError(t, err)
 			require.Zero(t, ownNonce)
-			require.NoError(t, credit.MakeWriteSet(&chain.Rules{IsSpuriousDragon: true}, NewNoopWriter()))
+			credit.EndTransaction()
 			require.Equal(t, VersionValid, vm.ValidateReadSet(2, credit.VersionedReads(), validateEqualVersion, false, ""))
 			vm.FlushVersionedWrites(credit.VersionedWrites(), true)
 
@@ -137,7 +136,7 @@ func TestCreationWritesDoNotDependOnANonceCellBelow(t *testing.T) {
 				defer ibs.Close()
 				ibs.SetTxContext(1, 2)
 				require.NoError(t, tc.recreate(ibs, x))
-				require.NoError(t, ibs.MakeWriteSet(&chain.Rules{IsSpuriousDragon: true}, NewNoopWriter()))
+				ibs.EndTransaction()
 				var paths []AccountPath
 				for h := range ibs.VersionedWrites().AllHeaders() {
 					if h.Address == x {

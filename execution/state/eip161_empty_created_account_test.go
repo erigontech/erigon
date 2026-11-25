@@ -27,38 +27,17 @@ import (
 )
 
 // emptinessScenario drives an account through a lifecycle and reports the
-// EIP-161 verdict. Each scenario runs on both the versioned and the serial
-// path, which must agree.
+// EIP-161 verdict.
 type emptinessScenario struct {
 	name  string
 	steps func(t *testing.T, ibs *IntraBlockState, addr accounts.Address)
 	want  bool
 }
 
-// emptinessMode is one of the two state configurations that must agree: the
-// serial path, and the versioned (noMaterialize) path staged sync runs. A
-// versionMap forces noMaterialize, so there is no versioned+materialize config.
-type emptinessMode struct {
-	name      string
-	versioned bool
-}
-
-var emptinessModes = []emptinessMode{
-	{"serial", false},
-	{"versioned", true},
-}
-
-func runEmptiness(t *testing.T, mode emptinessMode, sc emptinessScenario, addr accounts.Address) bool {
+func runEmptiness(t *testing.T, sc emptinessScenario, addr accounts.Address) bool {
 	t.Helper()
 
-	reader := NewNoopReader()
-	var ibs *IntraBlockState
-	if mode.versioned {
-		ibs = NewWithVersionMap(reader, NewVersionMap(nil))
-	} else {
-		ibs = New(reader)
-		ibs.SetVersionMap(nil)
-	}
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
 	defer ibs.Close()
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
@@ -174,10 +153,7 @@ func TestEmptyAccountLifecycle(t *testing.T) {
 	for _, sc := range scenarios {
 		t.Run(sc.name, func(t *testing.T) {
 			t.Parallel()
-			for _, mode := range emptinessModes {
-				addr := toAddr([]byte(sc.name + mode.name))
-				require.Equal(t, sc.want, runEmptiness(t, mode, sc, addr), mode.name)
-			}
+			require.Equal(t, sc.want, runEmptiness(t, sc, toAddr([]byte(sc.name))))
 		})
 	}
 }

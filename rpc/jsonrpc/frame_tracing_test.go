@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -59,7 +60,6 @@ func frameTraceTestEnv(t *testing.T) (*vm.EVM, *types.FrameTransaction) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
 	ibs := state.New(state.NewNoopReader())
-	ibs.SetVersionMap(nil)
 	t.Cleanup(ibs.Close)
 	ibs.SetTxContext(1, 0)
 	sender, target := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
@@ -431,7 +431,7 @@ func TestFramePrestateTracerRetainedBalance(t *testing.T) {
 	destroyed, err := ibs.HasSelfdestructed(accounts.InternAddress(child))
 	require.NoError(t, err)
 	require.True(t, destroyed)
-	require.NoError(t, ibs.FinalizeTx(evm.ChainRules(), state.NewNoopWriter()))
+	require.NoError(t, ethapi.EndCallTx(ibs, evm.ChainRules(), nil))
 	balance, err := ibs.GetBalance(accounts.InternAddress(child))
 	require.NoError(t, err)
 	require.Equal(t, uint256.Int{7}, balance)

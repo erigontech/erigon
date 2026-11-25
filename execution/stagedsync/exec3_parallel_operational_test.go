@@ -157,7 +157,7 @@ func TestParallelInitializeRulesEngineErrorUsesVerdictPath(t *testing.T) {
 	ibs := state.New(state.NewNoopReader())
 	t.Cleanup(ibs.Close)
 
-	result := task.Execute(&vm.EVM{}, engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+	result := task.Execute(&vm.EVM{}, engine, nil, ibs, config, nil, datadir.Dirs{}, false)
 
 	require.False(t, result.Operational)
 	require.ErrorIs(t, result.Err, engineErr)
@@ -244,7 +244,7 @@ func TestParallelStateReadErrorUsesOperationalBlockResult(t *testing.T) {
 	t.Cleanup(ibs.Close)
 	evm := &vm.EVM{}
 	require.NoError(t, task.Reset(evm, ibs, nil))
-	result := task.Execute(evm, pe.cfg.engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+	result := task.Execute(evm, pe.cfg.engine, nil, ibs, config, nil, datadir.Dirs{}, false)
 	result.Task = task
 	require.Zero(t, result.TxIn.Len())
 	require.True(t, result.Operational)
@@ -283,7 +283,7 @@ func TestParallelBlockhashHeaderReadErrorUsesOperationalBlockResult(t *testing.T
 	t.Cleanup(ibs.Close)
 	evm := &vm.EVM{}
 	require.NoError(t, task.Reset(evm, ibs, nil))
-	result := task.Execute(evm, pe.cfg.engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+	result := task.Execute(evm, pe.cfg.engine, nil, ibs, config, nil, datadir.Dirs{}, false)
 	result.Task = task
 	require.True(t, result.Operational)
 	require.ErrorIs(t, result.Err, cause)
@@ -311,7 +311,7 @@ func TestParallelTransitionPanicUsesOperationalBlockResult(t *testing.T) {
 	t.Cleanup(ibs.Close)
 	evm := &vm.EVM{}
 	require.NoError(t, task.Reset(evm, ibs, nil))
-	result := task.Execute(evm, pe.cfg.engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+	result := task.Execute(evm, pe.cfg.engine, nil, ibs, config, nil, datadir.Dirs{}, false)
 	result.Task = task
 	require.True(t, result.Operational)
 

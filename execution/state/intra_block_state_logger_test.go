@@ -70,9 +70,8 @@ func TestStateLogger(t *testing.T) {
 					}
 				}
 
-				so, err := stateDB.GetOrNewStateObject(accounts.ZeroAddress)
+				balance, err := stateDB.GetBalance(accounts.ZeroAddress)
 				require.NoError(t, err)
-				balance := so.Balance()
 				if !reflect.DeepEqual(&balance, uint256.NewInt(3)) {
 					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", accounts.ZeroAddress, uint256.NewInt(3), &balance)
 				}
@@ -91,10 +90,9 @@ func TestStateLogger(t *testing.T) {
 				return state.SubBalance(accounts.ZeroAddress, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 			},
 			checker: func(t *testing.T, stateDB *IntraBlockState) {
-				so, err := stateDB.GetOrNewStateObject(accounts.ZeroAddress)
+				balance, err := stateDB.GetBalance(accounts.ZeroAddress)
 				require.NoError(t, err)
-				if !reflect.DeepEqual(so.Balance(), *uint256.NewInt(1)) {
-					balance := so.Balance()
+				if !reflect.DeepEqual(balance, *uint256.NewInt(1)) {
 					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", accounts.ZeroAddress, uint256.NewInt(1), &balance)
 				}
 			},
@@ -116,7 +114,6 @@ func TestStateLogger(t *testing.T) {
 			defer mockCtl.Finish()
 			mt := mockTracer{}
 			state := New(NewReaderV3(execctx.NewTemporalTxStateGetter(tx)))
-			state.SetVersionMap(nil)
 			defer state.Close()
 			state.SetHooks(mt.Hooks())
 
