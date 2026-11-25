@@ -769,6 +769,19 @@ func truncateAtGap(segments VisibleSegments) VisibleSegments {
 	return segments
 }
 
+func (s *BaseRoSnapshots) hasIndexedDirtyFile(t snaptype.Enum, path string) (found bool) {
+	name := filepath.Base(path)
+	s.dirtyLock.RLock()
+	defer s.dirtyLock.RUnlock()
+	s.dirty[t].Walk(func(segments []*DirtySegment) bool {
+		found = slices.ContainsFunc(segments, func(sn *DirtySegment) bool {
+			return sn.Decompressor != nil && sn.IsIndexed() && sn.FileName() == name
+		})
+		return !found
+	})
+	return found
+}
+
 // mergedFilesNotInEveryType returns the indexed segments that other types lack and whose own smaller segments
 // cover their whole range. Showing those smaller segments instead keeps one file layout for every type, so a
 // merge range never cuts through a visible file, and hides no block.

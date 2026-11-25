@@ -2169,14 +2169,19 @@ func TestVisibleBlockFilesKeepOneLayoutAfterAnInterruptedMerge(t *testing.T) {
 	require.NoError(t, s.OpenFolder())
 	requireOneVisibleLayout(t, s, small)
 
+	leftover := snaptype2.Headers.FileInfo(dir, 0, 100_000).Path
+	before, err := os.Stat(leftover)
+	require.NoError(t, err)
+
 	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 	merger.DisableFsync()
 	ranges := merger.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
 	require.Equal(t, []Range{NewRange(0, 100_000)}, ranges)
 	require.NoError(t, merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil))
-	for _, typ := range snaptype2.BlockSnapshotTypes {
-		createTestSegmentIndex(t, 0, 100_000, typ, dir, logger)
-	}
+	after, err := os.Stat(leftover)
+	require.NoError(t, err)
+	require.True(t, os.SameFile(before, after), "the merge reuses the stopped merge's output instead of writing over the open file")
+	createTestSegmentIndex(t, 0, 100_000, snaptype2.Transactions, dir, logger)
 	require.NoError(t, s.OpenFolder())
 	requireOneVisibleLayout(t, s, []Range{NewRange(0, 100_000)})
 }
