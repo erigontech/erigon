@@ -74,6 +74,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
@@ -116,6 +117,27 @@ const payloadPublicationDivisor = 4
 const gloasPayloadCollectionDivisor = 3
 
 const minimumPayloadBuildTime = 500 * time.Millisecond
+
+var (
+	payloadCollectedSeconds = map[bool]metrics.Summary{
+		true:  metrics.GetOrCreateSummary(`caplin_block_production_payload_collected_seconds{window="prepared"}`),
+		false: metrics.GetOrCreateSummary(`caplin_block_production_payload_collected_seconds{window="unprepared"}`),
+	}
+	payloadPollFailures = metrics.GetOrCreateCounterVec("caplin_block_production_payload_poll_failures_total", []string{"reason"})
+)
+
+func payloadPollFailureReason(err error) string {
+	switch classifyProductionError(err) {
+	case productionErrorBusy:
+		return "busy"
+	case productionErrorUnknownPayload:
+		return "unknown_payload"
+	case productionErrorCanceled, productionErrorUnexpectedCancellation:
+		return "canceled"
+	default:
+		return "other"
+	}
+}
 
 // identificationSegment builds the client-version graffiti standard's EL+CL code and commit
 // prefix segment, so client-diversity tooling can attribute proposed blocks. See
@@ -1918,12 +1940,21 @@ func (a *ApiHandler) produceBeaconBody(
 			)
 		}
 		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, warmup)
+		options := gloasBlockOptionsFromContext(ctx)
+		recordMetrics := options == nil || !options.bidRequest
 		payload, bundles, requestsBundle, blockValue, err := pollAssembledPayload(
 			ctx, buildWindow, retryTime,
 			func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-				return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
+				p, b, rb, v, getErr := a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
+				if getErr != nil && recordMetrics {
+					payloadPollFailures.WithLabelValues(payloadPollFailureReason(getErr)).Inc()
+				}
+				return p, b, rb, v, getErr
 			},
 		)
+		if err == nil && payload != nil && recordMetrics {
+			payloadCollectedSeconds[warmup > 0].Observe(time.Since(slotStart).Seconds())
+		}
 		if err != nil {
 			executionErr = fmt.Errorf("produceBeaconBody: %w", err)
 			return

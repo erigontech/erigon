@@ -93,9 +93,8 @@ func (b *BlockGen) SetNonce(nonce types.BlockNonce) {
 	b.header.Nonce = nonce
 }
 
-// SetDifficulty sets the difficulty field of the generated block. This method is
-// useful for tests where the difficulty does not depend on time. For the ethash
-// tests, please use OffsetTime, which implicitly recalculates the diff.
+// SetDifficulty sets the difficulty field of the generated block. For Ethash,
+// use GenerateChainWithTimeOffsets to calculate difficulty from the timestamp.
 func (b *BlockGen) SetDifficulty(diff uint64) {
 	b.header.Difficulty.SetUint64(diff)
 }
@@ -269,28 +268,6 @@ func (b *BlockGen) PrevBlock(index int) *types.Block {
 	return b.chain[index]
 }
 
-// OffsetTime modifies the time instance of a block, implicitly changing its
-// associated difficulty. It's useful to test scenarios where forking is not
-// tied to chain length directly.
-func (b *BlockGen) OffsetTime(seconds int64) {
-	b.header.Time += uint64(seconds)
-	parent := b.parent
-	if b.header.Time <= parent.Time() {
-		panic("block time out of range")
-	}
-	chainreader := &FakeChainReader{Cfg: b.config}
-	b.header.Difficulty = b.engine.CalcDifficulty(
-		chainreader,
-		b.header.Time,
-		parent.Time(),
-		parent.Difficulty(),
-		parent.NumberU64(),
-		parent.Hash(),
-		parent.UncleHash(),
-		parent.Header().AuRaStep,
-	)
-}
-
 func (b *BlockGen) GetHeader() *types.Header {
 	return b.header
 }
@@ -418,13 +395,24 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 //
 // The generator function is called with a new block generator for
 // every block. Any transactions and uncles added to the generator
-// become part of the block. If gen is nil, the blocks will be empty
-// and their coinbase will be the zero address.
+// become part of the block. If gen is nil, each block has no transactions
+// or uncles and inherits its parent's coinbase.
 //
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
 func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
+	return generateChain(config, parent, engine, db, n, nil, gen)
+}
+
+// GenerateChainWithTimeOffsets generates one block per offset. Each offset adds
+// signed seconds to the usual ten-second interval from that block's parent.
+// The header and fork transitions use the resulting timestamp before gen runs.
+func GenerateChainWithTimeOffsets(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, timeOffsets []int64, gen func(int, *BlockGen)) (*ChainPack, error) {
+	return generateChain(config, parent, engine, db, len(timeOffsets), timeOffsets, gen)
+}
+
+func generateChain(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, n int, timeOffsets []int64, gen func(int, *BlockGen)) (*ChainPack, error) {
 	if config == nil {
 		config = chain.AllProtocolChanges
 	}
@@ -457,7 +445,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	txNumIncrement := func() {
 		txNum++
 	}
-	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader) (*types.Block, types.Receipts, error) {
+	genblock := func(i int, parent *types.Block, timestamp uint64, ibs *state.IntraBlockState, stateReader state.StateReader) (*types.Block, types.Receipts, error) {
 		txNumIncrement()
 		versionMap := ibs.VersionMap()
 
@@ -477,10 +465,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				txNumIncrement()
 			},
 		}
-		if chainreader.Config().IsShanghai(parent.Time()) {
+		if config.IsShanghai(timestamp) {
 			b.withdrawals = []*types.Withdrawal{}
 		}
-		b.header = makeHeader(chainreader, parent, b.engine)
+		b.header = makeHeader(chainreader, parent.HeaderNoCopy(), b.engine, timestamp)
 		// blockIO carries the per-phase write-sets: it feeds both the Amsterdam
 		// BAL and the versioned write-set commit.
 		b.blockIO = &state.VersionedIO{}
@@ -586,14 +574,24 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		return nil, nil, errors.New("no engine to generate blocks")
 	}
 
+	const defaultBlockInterval = 10
 	for i := range n {
+		var offset int64
+		if timeOffsets != nil {
+			offset = timeOffsets[i]
+		}
+		timestamp := parent.Time() + defaultBlockInterval + uint64(offset)
+		if offset <= -defaultBlockInterval || timestamp <= parent.Time() {
+			return nil, fmt.Errorf("block %d time offset %d out of range for parent timestamp %d", parent.NumberU64()+1, offset, parent.Time())
+		}
+		chainreader.current = parent
 		// Versioned without the stateObject cache, which would let a reused state serve stale account
 		// state across txs and give a header the executor's cache-free run disagrees with.
 		ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)
 		}
-		block, receipt, err := genblock(i, parent, ibs, stateReader)
+		block, receipt, err := genblock(i, parent, timestamp, ibs, stateReader)
 		ibs.SetTrace(false)
 		if err != nil {
 			return nil, fmt.Errorf("generating block %d: %w", i, err)
@@ -604,33 +602,26 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		parent = block
 	}
 
-	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
+	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: parent}, nil
 }
 
-func makeHeader(chain rules.ChainReader, parent *types.Block, engine rules.Engine) *types.Header {
-	var time uint64
-	if parent.Time() == 0 {
-		time = 10
-	} else {
-		time = parent.Time() + 10 // block time is fixed at 10 seconds
-	}
-
-	header := builder.MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
-	if chain.Config().IsAmsterdam(time) {
+func makeHeader(chain rules.ChainReader, parent *types.Header, engine rules.Engine, timestamp uint64) *types.Header {
+	header := builder.MakeEmptyHeader(parent, chain.Config(), timestamp, nil)
+	if chain.Config().IsAmsterdam(timestamp) {
 		// Real slot numbers come from the consensus layer. Synthetic chains use
 		// the block number as a deterministic stand-in.
 		slotNumber := header.Number.Uint64()
 		header.SlotNumber = &slotNumber
 	}
-	header.Coinbase = parent.Coinbase()
+	header.Coinbase = parent.Coinbase
 	header.Difficulty = engine.CalcDifficulty(
-		chain, time,
-		time-10,
-		parent.Difficulty(),
-		parent.NumberU64(),
-		parent.Hash(),
-		parent.UncleHash(),
-		parent.Header().AuRaStep,
+		chain, timestamp,
+		parent.Time,
+		parent.Difficulty,
+		parent.Number.Uint64(),
+		header.ParentHash,
+		parent.UncleHash,
+		parent.AuRaStep,
 	)
 
 	return header
@@ -654,10 +645,15 @@ func (cr *FakeChainReader) CurrentFinalizedHeader() *types.Header {
 func (cr *FakeChainReader) CurrentSafeHeader() *types.Header {
 	return nil
 }
-func (cr *FakeChainReader) GetHeaderByNumber(number uint64) *types.Header           { return nil }
-func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header          { return nil }
-func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
-func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block   { return nil }
-func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }
-func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int      { return nil }
-func (cr *FakeChainReader) FrozenBlocks() uint64                                    { return 0 }
+func (cr *FakeChainReader) GetHeaderByNumber(number uint64) *types.Header  { return nil }
+func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header { return nil }
+func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if cr.current != nil && cr.current.NumberU64() == number && cr.current.Hash() == hash {
+		return cr.current.Header()
+	}
+	return nil
+}
+func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block { return nil }
+func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool         { return false }
+func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int    { return nil }
+func (cr *FakeChainReader) FrozenBlocks() uint64                                  { return 0 }

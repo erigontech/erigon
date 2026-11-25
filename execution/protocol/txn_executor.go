@@ -429,15 +429,13 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsic mdgas.IntrinsicGasCal
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.ExecutionResult, err error) {
-	if st.evm.IntraBlockState().IsVersioned() {
-		defer func() {
-			if r := recover(); r != nil {
-				// An in-flight dependency aborts via result.Dep, it does not panic,
-				// so any panic here is a genuine failure.
-				err = fmt.Errorf("%w: %v at: %s", ErrExecPanic, r, dbg.Stack())
-			}
-		}()
-	}
+	defer func() {
+		if r := recover(); r != nil {
+			// An in-flight dependency aborts via result.Dep, it does not panic,
+			// so any panic here is a genuine failure.
+			err = fmt.Errorf("%w: %v at: %s", ErrExecPanic, r, dbg.Stack())
+		}
+	}()
 
 	if msg, ok := st.msg.(*types.Message); ok && msg.FrameTransaction() != nil {
 		return st.executeFrameTransaction(msg.FrameTransaction(), refunds, nil)

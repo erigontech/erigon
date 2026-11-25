@@ -27,6 +27,7 @@ import (
 	"math"
 	"math/big"
 	"math/rand/v2"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -348,15 +349,11 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
 	// Insert one chain first, then the other
-	firstChain, err := m.GenerateChainFrom(m.Current(nil), len(first), func(i int, b *blockgen.BlockGen) {
-		b.OffsetTime(first[i])
-	})
+	firstChain, err := m.GenerateChainWithTimeOffsets(m.Current(nil), first, nil)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	secondChain, err := m.GenerateChainFrom(m.Current(nil), len(second), func(i int, b *blockgen.BlockGen) {
-		b.OffsetTime(second[i])
-	})
+	secondChain, err := m.GenerateChainWithTimeOffsets(m.Current(nil), second, nil)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
@@ -500,7 +497,8 @@ func TestChainTxReorgs(t *testing.T) {
 	//  - futureAdd: transaction added after the reorg has already finished
 	var pastAdd, freshAdd, futureAdd types.Transaction
 
-	chain, err := m.GenerateChain(3, func(i int, gen *blockgen.BlockGen) {
+	// Delay the third block to simulate a weaker chain.
+	chain, err := m.GenerateChainWithTimeOffsets(m.Genesis, []int64{0, 0, 9}, func(i int, gen *blockgen.BlockGen) {
 		switch i {
 		case 0:
 			pastDrop, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr2), addr2, uint256.NewInt(1000), params.TxGas, nil, nil), *signer, key2)
@@ -513,8 +511,6 @@ func TestChainTxReorgs(t *testing.T) {
 
 			gen.AddTx(freshDrop) // This transaction will be dropped in the fork from exactly at the split point
 			gen.AddTx(swapped)   // This transaction will be swapped out at the exact height
-
-			gen.OffsetTime(9) // Lower the block difficulty to simulate a weaker chain
 		}
 	})
 	if err != nil {
@@ -1178,10 +1174,11 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	// Generate a bunch of fork blocks, each side forking from the canonical chain
 	forks := make([]*blockgen.ChainPack, chain.Length())
 	for i := range forks {
-		fork, err := m.GenerateChain(i+1, func(j int, b *blockgen.BlockGen) {
+		offsets := make([]int64, i+1)
+		offsets[i] = -2 // Shorten the last interval so the fork has higher difficulty.
+		fork, err := m.GenerateChainWithTimeOffsets(m.Genesis, offsets, func(j int, b *blockgen.BlockGen) {
 			if j == i {
 				b.SetCoinbase(common.Address{2})
-				b.OffsetTime(-2) // By reducing time, we increase difficulty of the fork, so that it can overwrite the canonical chain
 			} else {
 				b.SetCoinbase(common.Address{1})
 			}
@@ -1259,12 +1256,12 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate original chain: %v", err)
 	}
-	competitor, err := m.GenerateChain(64+2*triesInMemory+1, func(i int, b *blockgen.BlockGen) {
+	offsets := slices.Concat(make([]int64, 64), slices.Repeat([]int64{-2}, 2*triesInMemory+1))
+	competitor, err := m.GenerateChainWithTimeOffsets(m.Genesis, offsets, func(i int, b *blockgen.BlockGen) {
 		if i < 64 {
 			b.SetCoinbase(common.Address{1})
 		} else {
 			b.SetCoinbase(common.Address{3})
-			b.OffsetTime(-2)
 		}
 	})
 	if err != nil {
@@ -1308,18 +1305,19 @@ func TestLowDiffLongChain(t *testing.T) {
 
 	// We must use a pretty long chain to ensure that the fork doesn't overtake us
 	// until after at least 128 blocks post tip
-	chain, err := m.GenerateChain(6*triesInMemory, func(i int, b *blockgen.BlockGen) {
+	offsets := slices.Repeat([]int64{-9}, 6*triesInMemory)
+	chain, err := m.GenerateChainWithTimeOffsets(m.Genesis, offsets, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-		b.OffsetTime(-9)
 	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Generate fork chain, starting from an early block
-	fork, err := m.GenerateChain(11+8*triesInMemory, func(i int, b *blockgen.BlockGen) {
-		if i < 11 {
+	const sharedBlocks = 11
+	forkOffsets := slices.Concat(offsets[:sharedBlocks], make([]int64, 8*triesInMemory))
+	fork, err := m.GenerateChainWithTimeOffsets(m.Genesis, forkOffsets, func(i int, b *blockgen.BlockGen) {
+		if i < sharedBlocks {
 			b.SetCoinbase(common.Address{1})
-			b.OffsetTime(-9)
 		} else {
 			b.SetCoinbase(common.Address{2})
 		}

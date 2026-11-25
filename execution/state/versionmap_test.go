@@ -1572,27 +1572,6 @@ func TestGetVersionedAccount_ReconcilesDBLoadedRecordRead(t *testing.T) {
 	require.NotNil(t, rd.Val.Account())
 }
 
-// A recordRead=false record read (delegation resolution, journal reverts)
-// still leaves refreshAccount's nil map-read marker in the read set; once the
-// DB resolves the account the marker must be reconciled all the same —
-// recordRead only means "don't add a read", not "leave a wrong one".
-func TestGetStateObject_NoRecordReadStillReconciles(t *testing.T) {
-	mvhm := NewVersionMap(nil)
-	addr := accounts.InternAddress([20]byte{0xdb, 0x02})
-	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(900), true)
-	dbAcc := &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash}
-	ibs := NewWithVersionMap(&fixedAccountReader{acc: dbAcc}, mvhm)
-	defer ibs.Release(false)
-	ibs.txIndex = 5
-	so, err := ibs.getStateObject(addr, false)
-	require.NoError(t, err)
-	require.NotNil(t, so)
-	rd, ok := ibs.versionedReads.GetAddress(addr)
-	require.True(t, ok)
-	require.NotNil(t, rd.Val)
-	require.NotNil(t, rd.Val.Account())
-}
-
 // Cells proving only an EIP-161-empty state must not synthesize: an
 // existing-empty account is not gas-equivalent to a non-existent one.
 func TestGetVersionedAccount_NoSynthesisForEmpty(t *testing.T) {
@@ -1968,9 +1947,9 @@ func TestGetStateObject_SelfDestructedButBALFunded_StaysAlive(t *testing.T) {
 	ibs := NewWithVersionMap(&fixedAccountReader{acc: dbAcc}, mvhm)
 	defer ibs.Release(false)
 	ibs.txIndex = 5
-	so, err := ibs.getStateObject(addr, true)
+	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
-	require.NotNil(t, so)
+	require.True(t, exists)
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.Equal(t, *uint256.NewInt(1000), bal)

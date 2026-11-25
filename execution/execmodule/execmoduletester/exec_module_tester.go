@@ -971,6 +971,10 @@ func (emt *ExecModuleTester) GenerateChainWithConfig(config *chain.Config, paren
 	return blockgen.GenerateChain(config, parent, emt.Engine, emt.DB, n, gen)
 }
 
+func (emt *ExecModuleTester) GenerateChainWithTimeOffsets(parent *types.Block, timeOffsets []int64, gen func(int, *blockgen.BlockGen)) (*blockgen.ChainPack, error) {
+	return blockgen.GenerateChainWithTimeOffsets(emt.ChainConfig, parent, emt.Engine, emt.DB, timeOffsets, gen)
+}
+
 func (emt *ExecModuleTester) InsertBlocks(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
 	return retryBusy(ctx, func() (execmodule.ExecutionStatus, bool, error) {
 		status, err := emt.ExecModule.InsertBlocks(ctx, blocks)

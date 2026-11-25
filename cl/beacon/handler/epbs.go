@@ -176,7 +176,8 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 			}
 		}
 
-		dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, true)
+		// The fork epoch's PTC is computed at the fork, so it depends on the last pre-fork block.
+		dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, epoch != a.beaconChainCfg.GloasForkEpoch)
 		if dependentRootSlot == headSlot {
 			dependentRoot = headRoot
 			return nil
@@ -1854,6 +1855,7 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 	ctx := context.WithValue(r.Context(), gloasBlockProductionOptionsKey{}, &gloasBlockProductionOptions{
 		payloadFeeRecipient: &preferences.Message.FeeRecipient,
 		deferPayloadCache:   true,
+		bidRequest:          true,
 	})
 	options := gloasBlockOptionsFromContext(ctx)
 	beaconBody, executionValue, err := a.produceBeaconBody(
