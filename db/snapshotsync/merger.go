@@ -90,6 +90,11 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 	return
 }
 
+// coversRange relies on visible segments being contiguous, so only the ends need checking.
+func coversRange(segs []*DirtySegment, from, to uint64) bool {
+	return len(segs) > 0 && segs[0].from == from && segs[len(segs)-1].to == to
+}
+
 // removeMergedFiles removes a merge output's files. A same-range input with an older segment version resolves to the
 // output's index names, so its index is kept unless the output's index was built: that replaced the file.
 func removeMergedFiles(sn snaptype.FileInfo, inputs []*DirtySegment, indexBuilt bool) {
@@ -229,6 +234,12 @@ func (m *Merger) Merge(
 		toMerge, err := m.filesByRange(v, snapTypes, r.From(), r.To())
 		if err != nil {
 			return err
+		}
+		if uncovered := slices.IndexFunc(snapTypes, func(t snaptype.Type) bool {
+			return !coversRange(toMerge[t.Enum()], r.From(), r.To())
+		}); uncovered >= 0 {
+			m.logger.Warn("[snapshots] skip merge: files of a type do not cover the range", "type", snapTypes[uncovered].Name(), "from", r.From(), "to", r.To())
+			continue
 		}
 		for snapType, t := range toMerge {
 			if out[snapType] == nil {

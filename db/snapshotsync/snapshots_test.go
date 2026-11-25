@@ -653,6 +653,32 @@ func TestMergeSkipsPreClaimedRange(t *testing.T) {
 	}
 }
 
+func TestMergeSkipsRangeNotCoveredByEveryType(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	for i := uint64(10); i < 20; i++ {
+		for _, snT := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, i*1_000, (i+1)*1_000, snT.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	// a larger bodies file hides the small bodies files, so no bodies file lies inside the merge range
+	createTestSegmentFile(t, 0, 20_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Headers, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	r := NewRange(10_000, 20_000)
+	require.NoError(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, []Range{r}, s.Dir(), false, nil, nil))
+
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		exists, err := dir2.FileExist(snT.FileInfo(dir, r.From(), r.To()).Path)
+		require.NoError(err)
+		require.False(exists, "%s must not be merged", snT.Name())
+	}
+}
+
 func TestDeleteSnapshots(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
