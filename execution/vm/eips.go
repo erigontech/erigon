@@ -297,8 +297,7 @@ func enable5656(jt *JumpTable) {
 	}
 }
 
-// enable6780 makes SELFDESTRUCT delete a contract only if the current transaction
-// created it. Older contracts can still use the opcode to transfer their balance.
+// enable6780 applies EIP-6780 (deactivate SELFDESTRUCT)
 func enable6780(jt *JumpTable) {
 	jt[SELFDESTRUCT].execute = opSelfdestruct6780
 }
