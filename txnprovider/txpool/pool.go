@@ -134,15 +134,14 @@ type TxPool struct {
 	lock                   sync.Mutex
 	recentlyConnectedPeers *recentlyConnectedPeers // all txns will be propagated to this peers eventually, and clear list
 	senders                *sendersBatch
-	// batch processing of remote transactions
-	// handling is fast enough without batching, but batching allows:
-	//   - fewer _chainDB transactions
-	//   - batch notifications about new txns (reduced P2P spam to other nodes about txns propagation)
-	//   - and as a result reducing lock contention
+	// Batching remote transactions reduces database transactions, peer notifications,
+	// and lock contention. A batch in progress still counts toward the queue limits
+	// until its transactions are removed.
 	unprocessedRemoteTxns   *TxnSlots
 	unprocessedRemotePeers  []remoteSource      // index-aligned with unprocessedRemoteTxns
 	unprocessedRemoteByHash map[string]*TxnSlot // to reject duplicates
 	unprocessedRemoteBytes  uint64
+	unprocessedRemoteAuths  int
 	byHash                  map[string]*metaTxn                             // All pooled transactions by hash, including parked frames
 	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // txn_hash => discard_reason : non-persisted
 	pending                 *PendingPool
@@ -705,10 +704,12 @@ func (p *TxPool) removeProcessedRemoteTxns(n int) {
 	if n == len(p.unprocessedRemoteTxns.Txns) {
 		p.unprocessedRemoteByHash = make(map[string]*TxnSlot)
 		p.unprocessedRemoteBytes = 0
+		p.unprocessedRemoteAuths = 0
 	} else {
 		for _, txn := range p.unprocessedRemoteTxns.Txns[:n] {
 			delete(p.unprocessedRemoteByHash, string(txn.IDHash[:]))
 			p.unprocessedRemoteBytes -= uint64(txn.Size)
+			p.unprocessedRemoteAuths -= len(txn.Txn.GetAuthorizations())
 		}
 	}
 	p.unprocessedRemoteTxns.Txns = slices.Delete(p.unprocessedRemoteTxns.Txns, 0, n)
@@ -1213,6 +1214,10 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		if uint64(txn.Size) > remoteTxnQueueByteLimit-p.unprocessedRemoteBytes {
 			continue
 		}
+		authorizations := len(txn.Txn.GetAuthorizations())
+		if authorizations > maxRemoteAuthorizations-p.unprocessedRemoteAuths {
+			continue
+		}
 		if txn.TxType() == FrameTxnType && !p.remoteFrames.reserve(txn, src, now) {
 			continue
 		}
@@ -1223,6 +1228,7 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		}
 		p.unprocessedRemoteByHash[hashS] = txn
 		p.unprocessedRemoteBytes += uint64(txn.Size)
+		p.unprocessedRemoteAuths += authorizations
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
 		p.unprocessedRemotePeers = append(p.unprocessedRemotePeers, src)
 	}
@@ -1586,24 +1592,13 @@ func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
 	return p.chainConfig.GetMaxBlobsPerBlock(uint64(now))
 }
 
+const txnMaxSize = 128 * 1024
+
 // ValidateSerializedTxn checks that the serialized transaction does not exceed the size limit for its type.
 func ValidateSerializedTxn(serializedTxn []byte) error {
-	const (
-		// txnSlotSize is used to calculate how many data slots a single transaction
-		// takes up based on its size. The slots are used as DoS protection, ensuring
-		// that validating a new transaction remains a constant operation (in reality
-		// O(maxslots), where max slots are 4 currently).
-		txnSlotSize = 32 * 1024
-
-		// txnMaxSize is the maximum size a single transaction can have. This field has
-		// non-trivial consequences: larger transactions are significantly harder and
-		// more expensive to propagate; larger transactions also take more resources
-		// to validate whether they fit into the pool or not.
-		txnMaxSize = 4 * txnSlotSize // 128KB
-
-		// Should be enough for a transaction with 6 blobs
-		blobTxnMaxSize = 1024 * 1024
-	)
+	// Blob transactions and wrapped frame transactions get extra room for sidecars.
+	// A wrapped frame's inner transaction must still fit within txnMaxSize.
+	const blobTxnMaxSize = 1024 * 1024
 	if len(serializedTxn) <= txnMaxSize {
 		return nil
 	}

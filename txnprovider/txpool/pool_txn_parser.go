@@ -178,6 +178,13 @@ func PeekTransactionType(serialized []byte) (byte, error) {
 // this offset on ErrRejected so it can continue with the next transaction.
 // The txpool RPC reports INVALID if the rejection also wraps ErrParseTxn.
 func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnSlot, sender []byte, hasEnvelope, wrappedWithBlobs bool, validateHash func([]byte) error) (p int, err error) {
+	return ctx.parseTransaction(payload, pos, slot, sender, hasEnvelope, wrappedWithBlobs, validateHash, nil)
+}
+
+func (ctx *TxnParseContext) parseTransaction(
+	payload []byte, pos int, slot *TxnSlot, sender []byte, hasEnvelope, wrappedWithBlobs bool,
+	validateHash func([]byte) error, remainingAuthorizations *int,
+) (p int, err error) {
 	if len(payload) == 0 {
 		return 0, fmt.Errorf("%w: empty rlp", ErrParseTxn)
 	}
@@ -230,6 +237,13 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if err != nil {
 			return 0, err
 		}
+	}
+	if remainingAuthorizations != nil && txBytes[0] == SetCodeTxnType {
+		count := types.SetCodeAuthorizationCount(txBytes)
+		if count > *remainingAuthorizations {
+			return p, ErrRejected
+		}
+		*remainingAuthorizations -= count
 	}
 
 	// Step 3: Decode the transaction using standard types.
