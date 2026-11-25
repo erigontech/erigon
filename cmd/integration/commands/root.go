@@ -53,12 +53,8 @@ var rootCmd = &cobra.Command{
 		if datadirCli == "" {
 			return
 		}
-		legacyFile, err := dbstate.ResolveCommitmentV3(datadir.Open(datadirCli))
-		if err != nil {
+		if _, err := dbstate.ResolveCommitmentV3(context.Background(), datadir.Open(datadirCli), nil, log.Root()); err != nil {
 			utils.Fatalf("resolving the commitment trie of the datadir: %v", err)
-		}
-		if legacyFile != "" {
-			log.Info("[commitment] the datadir holds legacy commitment files, using the legacy commitment trie", "file", legacyFile)
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

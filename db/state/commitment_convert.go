@@ -1039,28 +1039,6 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 	return nil
 }
 
-func ResolveCommitmentV3(d datadir.Dirs) (legacyFile string, err error) {
-	if statecfg.CommitmentV3Pinned() {
-		return "", nil
-	}
-	for _, dirPath := range []string{d.SnapDomain, d.SnapHistory} {
-		legacyName, v3Name, err := commitmentFileNames(dirPath)
-		if err != nil {
-			return "", err
-		}
-		if v3Name != "" {
-			return "", nil
-		}
-		if legacyFile == "" && legacyName != "" {
-			legacyFile = filepath.Join(dirPath, legacyName)
-		}
-	}
-	if legacyFile != "" {
-		statecfg.SetCommitmentV3(false)
-	}
-	return legacyFile, nil
-}
-
 func MatchCommitmentSchemaToFiles(d datadir.Dirs) error {
 	cfg := statecfg.Schema.CommitmentDomain
 	domainV3, err := commitmentFilesAreV3(d.SnapDomain, cfg.CommitmentV3Records)

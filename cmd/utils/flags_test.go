@@ -513,7 +513,7 @@ func TestSetCommitmentV3Flag(t *testing.T) {
 		app := &cli.Command{
 			Flags: []cli.Flag{&flag},
 			Action: func(_ context.Context, cmd *cli.Command) error {
-				setCommitmentV3(cmd, datadir.New(t.TempDir()), "mainnet", log.Root())
+				setCommitmentV3(context.Background(), cmd, datadir.New(t.TempDir()), "mainnet", log.Root())
 				return nil
 			},
 		}
@@ -527,26 +527,27 @@ func TestSetCommitmentV3Flag(t *testing.T) {
 	require.True(t, run("--"+ExperimentalCommitmentV3Flag.Name))
 	require.True(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records, "the flag must switch the commitment schema too")
 
-	statecfg.ResetCommitmentV3()
+	statecfg.ResetCommitmentV3ForTest()
 	require.True(t, run(), "a fresh datadir must default to commitment v3")
-	statecfg.ResetCommitmentV3()
+	statecfg.ResetCommitmentV3ForTest()
 	require.False(t, run("--"+ExperimentalCommitmentV3Flag.Name+"=false"), "the flag must turn the v3 default off")
 	require.False(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
 }
 
 func TestSetCommitmentV3KeepsLegacyDatadir(t *testing.T) {
-	t.Cleanup(statecfg.ResetCommitmentV3())
+	t.Cleanup(statecfg.ResetCommitmentV3ForTest())
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
 	var logs bytes.Buffer
 	logger := log.New()
 	logger.SetHandler(log.StreamHandler(&logs, log.TerminalFormatNoColor()))
+	chain := "sepolia"
 	run := func(args ...string) {
 		flag := ExperimentalCommitmentV3Flag
 		app := &cli.Command{
 			Flags: []cli.Flag{&flag},
 			Action: func(_ context.Context, cmd *cli.Command) error {
-				setCommitmentV3(cmd, dirs, "sepolia", logger)
+				setCommitmentV3(context.Background(), cmd, dirs, chain, logger)
 				return nil
 			},
 		}
@@ -558,13 +559,21 @@ func TestSetCommitmentV3KeepsLegacyDatadir(t *testing.T) {
 	require.False(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
 	require.Contains(t, logs.String(), "erigon seg reset --datadir="+dirs.DataDir+" --chain=sepolia")
 
-	statecfg.ResetCommitmentV3()
+	statecfg.ResetCommitmentV3ForTest()
+	logs.Reset()
+	chain = "dev"
+	run()
+	require.False(t, statecfg.ExperimentalCommitmentV3)
+	require.Contains(t, logs.String(), "--"+ExperimentalCommitmentV3Flag.Name+"=false")
+	require.NotContains(t, logs.String(), "seg reset", "a chain without published snapshots has no seg reset path")
+
+	statecfg.ResetCommitmentV3ForTest()
 	logs.Reset()
 	run("--" + ExperimentalCommitmentV3Flag.Name + "=false")
 	require.False(t, statecfg.ExperimentalCommitmentV3)
 	require.Empty(t, logs.String(), "an explicit legacy choice must not warn")
 
-	statecfg.ResetCommitmentV3()
+	statecfg.ResetCommitmentV3ForTest()
 	run("--" + ExperimentalCommitmentV3Flag.Name)
 	require.True(t, statecfg.ExperimentalCommitmentV3, "an explicit v3 choice must not be switched by the datadir")
 }

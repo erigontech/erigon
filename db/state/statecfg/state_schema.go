@@ -110,7 +110,7 @@ func SetCommitmentV3(on bool) (restore func()) {
 
 func CommitmentV3Pinned() bool { return commitmentV3Pinned }
 
-func ResetCommitmentV3() (restore func()) {
+func ResetCommitmentV3ForTest() (restore func()) {
 	restore = SetCommitmentV3(DefaultCommitmentV3)
 	commitmentV3Pinned = false
 	return restore

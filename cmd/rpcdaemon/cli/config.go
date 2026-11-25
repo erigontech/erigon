@@ -414,10 +414,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		blockReader = freezeblocks.NewBlockReader(allSnapshots)
 		txNumsReader := blockReader.TxnumReader()
 
-		if legacyFile, err := dbstate.ResolveCommitmentV3(cfg.Dirs); err != nil {
+		if _, err := dbstate.ResolveCommitmentV3(ctx, cfg.Dirs, rawDB, logger); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, err
-		} else if legacyFile != "" {
-			logger.Info("[commitment] the datadir holds legacy commitment files, reading the legacy commitment trie", "file", legacyFile)
 		}
 		if err := dbstate.CheckSnapshotsCompatibility(cfg.Dirs); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, err
@@ -501,6 +499,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	// If DB can't be configured - used PrivateApiAddr as remote DB
 	if db == nil {
 		db = remoteKv
+		if _, err := dbstate.ResolveCommitmentV3(ctx, datadir.Dirs{}, remoteKv, logger); err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, err
+		}
 	}
 
 	if !cfg.WithDatadir {
