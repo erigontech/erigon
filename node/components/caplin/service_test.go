@@ -42,6 +42,11 @@ import (
 type fakeLaunch struct {
 	starts   atomic.Int32
 	released chan struct{}
+
+	// exitDelay keeps the closure running this long after its ctx is
+	// cancelled, standing in for Caplin's stage loop finishing the
+	// stage it is already inside.
+	exitDelay time.Duration
 }
 
 func newFakeLaunch() *fakeLaunch {
@@ -56,6 +61,7 @@ func (f *fakeLaunch) fn() LaunchFn {
 		default:
 		}
 		<-ctx.Done()
+		time.Sleep(f.exitDelay)
 		return ctx.Err()
 	}
 }
@@ -182,4 +188,67 @@ func TestCaplinService_StopStartRoundTrip(t *testing.T) {
 	require.Equal(t, int32(1), fl.starts.Load(), "the original closure must NOT run again")
 
 	s.Close()
+}
+
+// Caplin's stage loop cannot be interrupted mid-stage: clstages evaluates
+// ActionFunc as a select send value, and the ArgsFunc that follows it takes no
+// cancellation path, so an exit well past the teardown bound is normal. The
+// service must still end with Caplin running.
+func TestCaplinService_SlowTeardownStillRelaunches(t *testing.T) {
+	unexpected := atomic.Int32{}
+	fl := newFakeLaunch()
+	fl.exitDelay = 300 * time.Millisecond
+	s := NewCaplinService(context.Background(), datadir.Dirs{}, fl.fn(), func() { unexpected.Add(1) }, log.New())
+	s.teardownTimeout = 50 * time.Millisecond
+	require.NoError(t, s.Start(context.Background()))
+	<-fl.released
+
+	err := s.Restart()
+	require.ErrorContains(t, err, "relaunch deferred",
+		"the overrun must be reported as a deferral, so the test covers that path and not the fast one")
+
+	select {
+	case <-fl.released:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Caplin was not relaunched after a teardown that overran the bound")
+	}
+	require.Equal(t, int32(2), fl.starts.Load())
+	require.Equal(t, int32(0), unexpected.Load(),
+		"a slow Restart teardown is not an unexpected exit")
+
+	s.Close()
+}
+
+// A goroutine that never exits must not be papered over with a second Caplin
+// running alongside it: the service escalates instead.
+func TestCaplinService_HungTeardownEscalatesAndDoesNotDoubleSpawn(t *testing.T) {
+	unexpected := make(chan struct{}, 1)
+	wedged := make(chan struct{})
+	starts := atomic.Int32{}
+	launch := func(ctx context.Context) error {
+		starts.Add(1)
+		<-wedged
+		return nil
+	}
+	s := NewCaplinService(context.Background(), datadir.Dirs{}, launch, func() {
+		select {
+		case unexpected <- struct{}{}:
+		default:
+		}
+	}, log.New())
+	s.teardownTimeout = 50 * time.Millisecond
+	require.NoError(t, s.Start(context.Background()))
+	require.Eventually(t, func() bool { return starts.Load() == 1 }, 2*time.Second, 10*time.Millisecond)
+
+	require.ErrorContains(t, s.Restart(), "relaunch deferred")
+
+	select {
+	case <-unexpected:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a hung Caplin goroutine did not escalate to onUnexpectedExit")
+	}
+	require.Equal(t, int32(1), starts.Load(),
+		"no second Caplin may run while the first is still inside its stage")
+
+	close(wedged)
 }

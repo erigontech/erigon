@@ -31,10 +31,14 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-// teardownTimeout bounds how long Stop/Restart wait for the Caplin
-// goroutine to exit. Above this we surface a loud error rather than
-// hang the caller indefinitely.
-const teardownTimeout = 60 * time.Second
+// defaultTeardownTimeout bounds how long Stop/Close wait for the Caplin
+// goroutine to exit, and how long Restart waits before handing the relaunch
+// to a background waiter rather than hanging its caller.
+const defaultTeardownTimeout = 60 * time.Second
+
+// hardTeardownMultiple scales teardownTimeout into the bound past which a
+// goroutine that has not exited is treated as hung rather than slow.
+const hardTeardownMultiple = 10
 
 // LaunchFn is the runtime closure that runs Caplin to completion. The
 // service supplies the context; the closure returns when ctx is
@@ -59,6 +63,9 @@ type CaplinService struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 	stopping atomic.Bool
+	closed   bool
+
+	teardownTimeout time.Duration
 }
 
 // NewCaplinService constructs the service. parentCtx is typically
@@ -75,6 +82,7 @@ func NewCaplinService(parentCtx context.Context, dirs datadir.Dirs, launch Launc
 		dirs:             dirs,
 		logger:           logger,
 		onUnexpectedExit: onUnexpectedExit,
+		teardownTimeout:  defaultTeardownTimeout,
 	}
 }
 
@@ -128,10 +136,51 @@ func (s *CaplinService) Restart() error {
 	s.cancel()
 	select {
 	case <-s.done:
-	case <-time.After(teardownTimeout):
-		return fmt.Errorf("CaplinService.Restart: prior goroutine did not exit within %s", teardownTimeout)
+	case <-time.After(s.teardownTimeout):
+		// Caplin's stage loop finishes the stage it is inside before it
+		// observes cancellation, so overrunning the bound is slowness, not
+		// death. Hand the relaunch to a waiter rather than abandon it: the
+		// caller only logs, and a service left stopped here is a node with
+		// no consensus layer and nothing to say so.
+		go s.relaunchWhenIdle(s.done)
+		return fmt.Errorf("CaplinService.Restart: prior goroutine still running after %s; relaunch deferred until it exits", s.teardownTimeout)
 	}
 
+	s.relaunchLocked()
+	return nil
+}
+
+// relaunchWhenIdle completes a restart whose teardown overran the bound. The
+// requirement it upholds is that exactly one Caplin goroutine runs, so it waits
+// for the old one instead of spawning alongside it. A goroutine that never
+// exits is escalated, never papered over.
+func (s *CaplinService) relaunchWhenIdle(done chan struct{}) {
+	select {
+	case <-done:
+	case <-s.parentCtx.Done():
+		return
+	case <-time.After(s.teardownTimeout * hardTeardownMultiple):
+		s.logger.Error("[caplin-service] prior Caplin goroutine never exited; cascading shutdown",
+			"waited", s.teardownTimeout*hardTeardownMultiple)
+		if s.onUnexpectedExit != nil {
+			s.onUnexpectedExit()
+		}
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.done != done {
+		return
+	}
+	s.logger.Warn("[caplin-service] prior goroutine exited late; completing deferred relaunch")
+	s.relaunchLocked()
+}
+
+// relaunchLocked resets the per-instance block-relay cache and spawns the next
+// Caplin goroutine. Caller must hold s.mu and must have observed the previous
+// goroutine exit.
+func (s *CaplinService) relaunchLocked() {
 	// Wipe the PersistentBlockCollector's MDBX env. The cache holds
 	// blocks whose parents lived in EL chaindata that the just-finished
 	// mode-B unwind has DELETED. Without the wipe, the new Caplin
@@ -156,7 +205,6 @@ func (s *CaplinService) Restart() error {
 	s.stopping.Store(false)
 	s.spawnLocked()
 	s.logger.Info("[caplin-service] new Caplin goroutine spawned")
-	return nil
 }
 
 // Close cancels the running goroutine and waits for it to exit. Called
@@ -166,6 +214,7 @@ func (s *CaplinService) Restart() error {
 func (s *CaplinService) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.closed = true
 	if s.done == nil {
 		return
 	}
@@ -173,9 +222,9 @@ func (s *CaplinService) Close() {
 	s.cancel()
 	select {
 	case <-s.done:
-	case <-time.After(teardownTimeout):
+	case <-time.After(s.teardownTimeout):
 		s.logger.Error("[caplin-service] Close: goroutine did not exit within timeout; leaking",
-			"timeout", teardownTimeout)
+			"timeout", s.teardownTimeout)
 	}
 }
 
@@ -195,8 +244,8 @@ func (s *CaplinService) Stop() error {
 	s.cancel()
 	select {
 	case <-s.done:
-	case <-time.After(teardownTimeout):
-		return fmt.Errorf("CaplinService.Stop: goroutine did not exit within %s", teardownTimeout)
+	case <-time.After(s.teardownTimeout):
+		return fmt.Errorf("CaplinService.Stop: goroutine did not exit within %s", s.teardownTimeout)
 	}
 	s.done = nil
 	s.cancel = nil
