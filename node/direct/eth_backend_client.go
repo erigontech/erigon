@@ -63,6 +63,27 @@ func (s *EthBackendClientDirect) ClientVersion(ctx context.Context, in *remotepr
 	return s.server.ClientVersion(ctx, in)
 }
 
+// sendOrDone delivers v to a server stream, or returns ctx.Err() once the caller's context ended.
+func sendOrDone[T any](ctx context.Context, ch chan<- T, v T) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case ch <- v:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// endOf is the error a client stream's Recv returns once the server closed the channel.
+func endOf(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return io.EOF
+}
+
 // -- start Subscribe
 
 func (s *EthBackendClientDirect) Subscribe(ctx context.Context, in *remoteproto.SubscribeRequest, opts ...grpc.CallOption) (remoteproto.ETHBACKEND_SubscribeClient, error) {
@@ -86,15 +107,14 @@ type SubscribeStreamS struct {
 }
 
 func (s *SubscribeStreamS) Send(m *remoteproto.SubscribeReply) error {
-	s.ch <- &subscribeReply{r: m}
-	return nil
+	return sendOrDone(s.ctx, s.ch, &subscribeReply{r: m})
 }
 func (s *SubscribeStreamS) Context() context.Context { return s.ctx }
 func (s *SubscribeStreamS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- &subscribeReply{err: err}
+	_ = sendOrDone(s.ctx, s.ch, &subscribeReply{err: err})
 }
 
 type SubscribeStreamC struct {
@@ -107,7 +127,7 @@ func (c *SubscribeStreamC) Recv() (*remoteproto.SubscribeReply, error) {
 	select {
 	case m, ok := <-c.ch:
 		if !ok || m == nil {
-			return nil, io.EOF
+			return nil, endOf(c.ctx)
 		}
 		return m.r, m.err
 	case <-c.ctx.Done():
@@ -219,7 +239,7 @@ func (c *SubscribeLogsStreamC) Recv() (*remoteproto.SubscribeLogsReply, error) {
 	select {
 	case m, ok := <-c.chRecv:
 		if !ok || m == nil {
-			return nil, io.EOF
+			return nil, endOf(c.ctx)
 		}
 		return m.r, m.err
 	case <-c.ctx.Done():
@@ -329,7 +349,7 @@ func (c *SubscribeReceiptsStreamC) Recv() (*remoteproto.SubscribeReceiptsReply, 
 	select {
 	case m, ok := <-c.chRecv:
 		if !ok || m == nil {
-			return nil, io.EOF
+			return nil, endOf(c.ctx)
 		}
 		return m.r, m.err
 	case <-c.ctx.Done():

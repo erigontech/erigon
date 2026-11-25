@@ -18,7 +18,6 @@ package direct
 
 import (
 	"context"
-	"io"
 
 	"google.golang.org/grpc"
 
@@ -106,7 +105,7 @@ type SentinelSubscribeGossipC struct {
 func (c *SentinelSubscribeGossipC) Recv() (*sentinelproto.GossipData, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
-		return nil, io.EOF
+		return nil, endOf(c.ctx)
 	}
 	return m.r, m.err
 }
@@ -124,13 +123,12 @@ type gossipReply struct {
 }
 
 func (s *SentinelSubscribeGossipS) Send(m *sentinelproto.GossipData) error {
-	s.ch <- &gossipReply{r: m}
-	return nil
+	return sendOrDone(s.ctx, s.ch, &gossipReply{r: m})
 }
 func (s *SentinelSubscribeGossipS) Context() context.Context { return s.ctx }
 func (s *SentinelSubscribeGossipS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- &gossipReply{err: err}
+	_ = sendOrDone(s.ctx, s.ch, &gossipReply{err: err})
 }

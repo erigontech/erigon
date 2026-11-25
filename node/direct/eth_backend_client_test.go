@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"testing/synctest"
 
@@ -27,6 +28,8 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 )
 
 // recvUntilErrServer mimics the private API filter aggregators: it reads filter requests until Recv fails.
@@ -74,6 +77,56 @@ func TestSubscribeReceiptsSendAfterServerExit(t *testing.T) {
 		<-client.done
 		for range cap(client.chSend) + 1 {
 			require.Error(t, stream.Send(&remoteproto.ReceiptsFilterRequest{}))
+		}
+	})
+}
+
+func TestSubscribeStreamSendCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		replies := make(chan *subscribeReply, 1)
+		replies <- &subscribeReply{}
+		stream := &SubscribeStreamS{ctx: ctx, ch: replies}
+		done := make(chan error, 1)
+		go func() { done <- stream.Send(&remoteproto.SubscribeReply{}) }()
+		synctest.Wait()
+
+		cancel()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, context.Canceled)
+		default:
+			<-replies
+			<-done
+			t.Fatal("Send remained blocked after cancellation")
+		}
+	})
+}
+
+func TestSubscribeStreamErrCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		replies := make(chan *subscribeReply, 1)
+		replies <- &subscribeReply{}
+		stream := &SubscribeStreamS{ctx: ctx, ch: replies}
+		done := make(chan struct{})
+		go func() {
+			stream.Err(errors.New("server failed"))
+			close(done)
+		}()
+		synctest.Wait()
+
+		cancel()
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			<-replies
+			<-done
+			t.Fatal("Err remained blocked after cancellation")
 		}
 	})
 }
@@ -214,4 +267,149 @@ func TestSubscribeSendAfterHandlerErrorFails(t *testing.T) {
 		require.Error(t, logs.Send(&remoteproto.LogsFilterRequest{}))
 		require.Error(t, receipts.Send(&remoteproto.ReceiptsFilterRequest{}))
 	})
+}
+
+// Every in-process server stream returns from Send and Err once the caller's context ends,
+// even when its reply buffer is full; Send then reports the cancel.
+func TestDirectServerStreamsReturnOnCancel(t *testing.T) {
+	failed := errors.New("server failed")
+	type stream func(ctx context.Context) (call func() error, drain func())
+	for name, open := range map[string]stream{
+		"sentinel gossip Send": func(ctx context.Context) (func() error, func()) {
+			ch := make(chan *gossipReply, 1)
+			ch <- &gossipReply{}
+			s := &SentinelSubscribeGossipS{ctx: ctx, ch: ch}
+			return func() error { return s.Send(&sentinelproto.GossipData{}) }, func() { <-ch }
+		},
+		"sentinel gossip Err": func(ctx context.Context) (func() error, func()) {
+			ch := make(chan *gossipReply, 1)
+			ch <- &gossipReply{}
+			s := &SentinelSubscribeGossipS{ctx: ctx, ch: ch}
+			return func() error { s.Err(failed); return nil }, func() { <-ch }
+		},
+		"mining pending block Send": func(ctx context.Context) (func() error, func()) {
+			ch := make(chan *onPendigBlockReply, 1)
+			ch <- &onPendigBlockReply{}
+			s := &MiningOnPendingBlockS{ctx: ctx, ch: ch}
+			return func() error { return s.Send(&txpoolproto.OnPendingBlockReply{}) }, func() { <-ch }
+		},
+		"mining pending block Err": func(ctx context.Context) (func() error, func()) {
+			ch := make(chan *onPendigBlockReply, 1)
+			ch <- &onPendigBlockReply{}
+			s := &MiningOnPendingBlockS{ctx: ctx, ch: ch}
+			return func() error { s.Err(failed); return nil }, func() { <-ch }
+		},
+		"mining mined block Send": func(ctx context.Context) (func() error, func()) {
+			ch := make(chan *onMinedBlockReply, 1)
+			ch <- &onMinedBlockReply{}
+			s := &MiningOnMinedBlockS{ctx: ctx, ch: ch}
+			return func() error { return s.Send(&txpoolproto.OnMinedBlockReply{}) }, func() { <-ch }
+		},
+		"mining mined block Err": func(ctx context.Context) (func() error, func()) {
+			ch := make(chan *onMinedBlockReply, 1)
+			ch <- &onMinedBlockReply{}
+			s := &MiningOnMinedBlockS{ctx: ctx, ch: ch}
+			return func() error { s.Err(failed); return nil }, func() { <-ch }
+		},
+		"mining pending logs Send": func(ctx context.Context) (func() error, func()) {
+			ch := make(chan *onPendingLogsReply, 1)
+			ch <- &onPendingLogsReply{}
+			s := &MiningOnPendingLogsS{ctx: ctx, ch: ch}
+			return func() error { return s.Send(&txpoolproto.OnPendingLogsReply{}) }, func() { <-ch }
+		},
+		"mining pending logs Err": func(ctx context.Context) (func() error, func()) {
+			ch := make(chan *onPendingLogsReply, 1)
+			ch <- &onPendingLogsReply{}
+			s := &MiningOnPendingLogsS{ctx: ctx, ch: ch}
+			return func() error { s.Err(failed); return nil }, func() { <-ch }
+		},
+		"txpool OnAdd Send": func(ctx context.Context) (func() error, func()) {
+			ch := make(chan *onAddReply, 1)
+			ch <- &onAddReply{}
+			s := &TxPoolOnAddS{ctx: ctx, ch: ch}
+			return func() error { return s.Send(&txpoolproto.OnAddReply{}) }, func() { <-ch }
+		},
+		"txpool OnAdd Err": func(ctx context.Context) (func() error, func()) {
+			ch := make(chan *onAddReply, 1)
+			ch <- &onAddReply{}
+			s := &TxPoolOnAddS{ctx: ctx, ch: ch}
+			return func() error { s.Err(failed); return nil }, func() { <-ch }
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				call, drain := open(ctx)
+				done := make(chan error, 1)
+				go func() { done <- call() }()
+				synctest.Wait()
+				select {
+				case <-done:
+					t.Fatal("returned before the cancel, with its buffer full")
+				default:
+				}
+
+				cancel()
+				synctest.Wait()
+				select {
+				case err := <-done:
+					if strings.HasSuffix(name, "Send") {
+						require.ErrorIs(t, err, context.Canceled)
+					}
+				default:
+					drain()
+					<-done
+					t.Fatal("remained blocked after cancellation")
+				}
+			})
+		})
+	}
+}
+
+// Once the caller's context ended, a client stream reports the cancel, not a clean end.
+func TestDirectClientStreamsReportTheCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	gossip := make(chan *gossipReply)
+	close(gossip)
+	_, err := (&SentinelSubscribeGossipC{ctx: ctx, ch: gossip}).Recv()
+	require.ErrorIs(t, err, context.Canceled)
+	pending := make(chan *onPendigBlockReply)
+	close(pending)
+	_, err = (&MiningOnPendingBlockC{ctx: ctx, ch: pending}).Recv()
+	require.ErrorIs(t, err, context.Canceled)
+	mined := make(chan *onMinedBlockReply)
+	close(mined)
+	_, err = (&MiningOnMinedBlockC{ctx: ctx, ch: mined}).Recv()
+	require.ErrorIs(t, err, context.Canceled)
+	logs := make(chan *onPendingLogsReply)
+	close(logs)
+	_, err = (&MiningOnPendingLogsC{ctx: ctx, ch: logs}).Recv()
+	require.ErrorIs(t, err, context.Canceled)
+	added := make(chan *onAddReply)
+	close(added)
+	_, err = (&TxPoolOnAddC{ctx: ctx, ch: added}).Recv()
+	require.ErrorIs(t, err, context.Canceled)
+	subscribed := make(chan *subscribeReply)
+	close(subscribed)
+	_, err = (&SubscribeStreamC{ctx: ctx, ch: subscribed}).Recv()
+	require.ErrorIs(t, err, context.Canceled)
+	logReplies := make(chan *subscribeLogsReply)
+	close(logReplies)
+	_, err = (&SubscribeLogsStreamC{ctx: ctx, chRecv: logReplies}).Recv()
+	require.ErrorIs(t, err, context.Canceled)
+	receiptReplies := make(chan *subscribeReceiptsReply)
+	close(receiptReplies)
+	_, err = (&SubscribeReceiptsStreamC{ctx: ctx, chRecv: receiptReplies}).Recv()
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+// A send after the cancel reports it and queues nothing, even with room in the buffer.
+func TestDirectServerStreamSendAfterCancelQueuesNothing(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	ch := make(chan *gossipReply, 1)
+	require.ErrorIs(t, (&SentinelSubscribeGossipS{ctx: ctx, ch: ch}).Send(&sentinelproto.GossipData{}), context.Canceled)
+	require.Empty(t, ch)
 }

@@ -18,7 +18,6 @@ package direct
 
 import (
 	"context"
-	"io"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -65,15 +64,14 @@ type MiningOnPendingBlockS struct {
 }
 
 func (s *MiningOnPendingBlockS) Send(m *txpoolproto.OnPendingBlockReply) error {
-	s.ch <- &onPendigBlockReply{r: m}
-	return nil
+	return sendOrDone(s.ctx, s.ch, &onPendigBlockReply{r: m})
 }
 func (s *MiningOnPendingBlockS) Context() context.Context { return s.ctx }
 func (s *MiningOnPendingBlockS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- &onPendigBlockReply{err: err}
+	_ = sendOrDone(s.ctx, s.ch, &onPendigBlockReply{err: err})
 }
 
 type MiningOnPendingBlockC struct {
@@ -85,7 +83,7 @@ type MiningOnPendingBlockC struct {
 func (c *MiningOnPendingBlockC) Recv() (*txpoolproto.OnPendingBlockReply, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
-		return nil, io.EOF
+		return nil, endOf(c.ctx)
 	}
 	return m.r, m.err
 }
@@ -116,15 +114,14 @@ type MiningOnMinedBlockS struct {
 }
 
 func (s *MiningOnMinedBlockS) Send(m *txpoolproto.OnMinedBlockReply) error {
-	s.ch <- &onMinedBlockReply{r: m}
-	return nil
+	return sendOrDone(s.ctx, s.ch, &onMinedBlockReply{r: m})
 }
 func (s *MiningOnMinedBlockS) Context() context.Context { return s.ctx }
 func (s *MiningOnMinedBlockS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- &onMinedBlockReply{err: err}
+	_ = sendOrDone(s.ctx, s.ch, &onMinedBlockReply{err: err})
 }
 
 type MiningOnMinedBlockC struct {
@@ -136,7 +133,7 @@ type MiningOnMinedBlockC struct {
 func (c *MiningOnMinedBlockC) Recv() (*txpoolproto.OnMinedBlockReply, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
-		return nil, io.EOF
+		return nil, endOf(c.ctx)
 	}
 	return m.r, m.err
 }
@@ -166,15 +163,14 @@ type MiningOnPendingLogsS struct {
 }
 
 func (s *MiningOnPendingLogsS) Send(m *txpoolproto.OnPendingLogsReply) error {
-	s.ch <- &onPendingLogsReply{r: m}
-	return nil
+	return sendOrDone(s.ctx, s.ch, &onPendingLogsReply{r: m})
 }
 func (s *MiningOnPendingLogsS) Context() context.Context { return s.ctx }
 func (s *MiningOnPendingLogsS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- &onPendingLogsReply{err: err}
+	_ = sendOrDone(s.ctx, s.ch, &onPendingLogsReply{err: err})
 }
 
 type MiningOnPendingLogsC struct {
@@ -186,7 +182,7 @@ type MiningOnPendingLogsC struct {
 func (c *MiningOnPendingLogsC) Recv() (*txpoolproto.OnPendingLogsReply, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
-		return nil, io.EOF
+		return nil, endOf(c.ctx)
 	}
 	return m.r, m.err
 }
