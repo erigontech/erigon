@@ -95,7 +95,8 @@ func TestSubnetsOfConnectedPeersIgnoresTopicPeersThatAreGone(t *testing.T) {
 	require.NotContains(t, peerToSubnets, peer.ID("gone"))
 }
 
-// The local router can track remote subnet subscriptions without subscribing to those subnets itself.
+// idleTestSentinel returns a Sentinel whose router tracks remote subscriptions
+// without joining the subnet topics itself.
 func idleTestSentinel(t *testing.T, local host.Host, lastUseful map[peer.ID]time.Time) *Sentinel {
 	t.Helper()
 	s := testSentinel(t, local)
@@ -238,7 +239,8 @@ func subnet0Sentinel(t *testing.T, local host.Host, peerCount int, lastUseful ma
 		require.NoError(t, err)
 		_, err = topic.Subscribe()
 		require.NoError(t, err)
-		// Dial after both routers are ready so the remote can announce its subscription on its first stream.
+		// Dial after both routers are ready. If a router receives its peer's protocol
+		// update before it processes its first stream error, it may never retry.
 		require.NoError(t, local.Connect(t.Context(), peer.AddrInfo{ID: remote.ID(), Addrs: remote.Addrs()}))
 		remotes = append(remotes, remote.ID())
 	}
