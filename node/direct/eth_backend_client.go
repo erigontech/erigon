@@ -127,7 +127,7 @@ func (c *SubscribeStreamC) Recv() (*remoteproto.SubscribeReply, error) {
 	select {
 	case m, ok := <-c.ch:
 		if !ok || m == nil {
-			return nil, io.EOF
+			return nil, endOf(c.ctx)
 		}
 		return m.r, m.err
 	case <-c.ctx.Done():
@@ -239,7 +239,7 @@ func (c *SubscribeLogsStreamC) Recv() (*remoteproto.SubscribeLogsReply, error) {
 	select {
 	case m, ok := <-c.chRecv:
 		if !ok || m == nil {
-			return nil, io.EOF
+			return nil, endOf(c.ctx)
 		}
 		return m.r, m.err
 	case <-c.ctx.Done():
@@ -349,7 +349,7 @@ func (c *SubscribeReceiptsStreamC) Recv() (*remoteproto.SubscribeReceiptsReply, 
 	select {
 	case m, ok := <-c.chRecv:
 		if !ok || m == nil {
-			return nil, io.EOF
+			return nil, endOf(c.ctx)
 		}
 		return m.r, m.err
 	case <-c.ctx.Done():

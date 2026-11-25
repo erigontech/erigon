@@ -391,6 +391,18 @@ func TestDirectClientStreamsReportTheCancel(t *testing.T) {
 	close(added)
 	_, err = (&TxPoolOnAddC{ctx: ctx, ch: added}).Recv()
 	require.ErrorIs(t, err, context.Canceled)
+	subscribed := make(chan *subscribeReply)
+	close(subscribed)
+	_, err = (&SubscribeStreamC{ctx: ctx, ch: subscribed}).Recv()
+	require.ErrorIs(t, err, context.Canceled)
+	logReplies := make(chan *subscribeLogsReply)
+	close(logReplies)
+	_, err = (&SubscribeLogsStreamC{ctx: ctx, chRecv: logReplies}).Recv()
+	require.ErrorIs(t, err, context.Canceled)
+	receiptReplies := make(chan *subscribeReceiptsReply)
+	close(receiptReplies)
+	_, err = (&SubscribeReceiptsStreamC{ctx: ctx, chRecv: receiptReplies}).Recv()
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 // A send after the cancel reports it and queues nothing, even with room in the buffer.
