@@ -153,39 +153,84 @@ func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
 	return data
 }
 
+type latestPrefetcher interface {
+	PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (coldPages int, err error)
+}
+
 func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 	for it := range p.work {
 		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
 			continue
 		}
+		batch := func([][]byte) {}
+		if b, ok := tx.AggTx().(latestPrefetcher); ok {
+			batch = func(keys [][]byte) { _, _ = b.PrefetchLatest(ctx, kv.CommitmentDomain, keys) } // reads stay correct without it
+		}
 		read := func(key []byte) []byte {
-			if data, _, ok := p.get(key); ok {
-				return data
-			}
 			data, step, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
 			if err != nil {
 				return nil
 			}
 			return p.put(key, data, step)
 		}
-		p.walkChunk(it, read)
+		p.walkChunk(p.chunk(it), batch, read)
 		tx.Rollback()
 	}
 }
 
-func (p *branchPrefetcher) walkChunk(it prefetchItem, read func(key []byte) []byte) {
-	it.touch(read)
-	for range branchPrefetchPerTx - 1 {
+func (p *branchPrefetcher) chunk(it prefetchItem) []prefetchItem {
+	items := []prefetchItem{it}
+	for len(items) < branchPrefetchPerTx {
 		select {
 		case next, ok := <-p.work:
 			if !ok {
-				return
+				return items
 			}
-			next.touch(read)
+			items = append(items, next)
 		default:
+			return items
+		}
+	}
+	return items
+}
+
+// walkChunk walks the paths of items one trie level at a time: batch gets the node keys of a level before read is
+// called on them, so a batched read keeps one read per path in flight instead of one per worker.
+func (p *branchPrefetcher) walkChunk(items []prefetchItem, batch func(keys [][]byte), read func(key []byte) []byte) {
+	done := map[string][]byte{}
+	for len(items) > 0 {
+		var level [][]byte
+		wanted := map[string]bool{}
+		live := items[:0]
+		for _, it := range items {
+			missed := false
+			it.touch(func(key []byte) []byte {
+				if data, _, ok := p.get(key); ok {
+					return data
+				}
+				if data, ok := done[string(key)]; ok {
+					return data
+				}
+				missed = true
+				if !wanted[string(key)] {
+					wanted[string(key)] = true
+					level = append(level, bytes.Clone(key))
+				}
+				return nil
+			})
+			if missed {
+				live = append(live, it)
+			}
+		}
+		if len(level) == 0 {
 			return
 		}
+		batch(level)
+		for _, key := range level {
+			done[string(key)] = read(key)
+		}
+		items = live
 	}
 }
 

@@ -29,8 +29,11 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -262,4 +265,63 @@ func TestBranchPrefetcherKeepsTheFirstRecordOfAKey(t *testing.T) {
 	require.True(t, ok)
 	require.Same(t, &first[0], &got[0])
 	require.Equal(t, size, p.bytes.Load())
+}
+
+func TestBranchPrefetcherWalksAllPathsOneLevelAtATime(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+
+	items := make([]prefetchItem, 512)
+	func() {
+		tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
+		require.NoError(t, err)
+		defer tx.Rollback()
+		doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
+		require.NoError(t, err)
+		defer doms.Close()
+		for i := range items {
+			addr := common.Address{0: byte(i), 1: byte(i >> 8), 19: 1}
+			acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(uint64(i)), CodeHash: accounts.EmptyCodeHash}
+			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&acc), 1, nil))
+			items[i] = prefetchItem{account: keccak.Sum256(addr[:])}
+		}
+		_, err = doms.ComputeCommitment(ctx, tx, true, 0, 1, "", nil)
+		require.NoError(t, err)
+		require.NoError(t, doms.Flush(ctx, tx))
+		require.NoError(t, tx.Commit())
+	}()
+
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	read := func(key []byte) []byte {
+		data, _, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		return data
+	}
+
+	serial, depth := map[string]bool{}, 0
+	for _, it := range items {
+		reads := 0
+		it.touch(func(key []byte) []byte {
+			serial[string(key)] = true
+			reads++
+			return read(key)
+		})
+		depth = max(depth, reads)
+	}
+	require.Greater(t, depth, 2, "precondition: the paths go below the root's children")
+
+	rounds, batched := 0, map[string]bool{}
+	newPrefetchRecords().walkChunk(items, func(keys [][]byte) {
+		rounds++
+		for _, k := range keys {
+			batched[string(k)] = true
+		}
+	}, read)
+	require.Equal(t, serial, batched, "the level walk batches every node the serial walks read")
+	require.Equal(t, depth, rounds, "one batch per trie level, not one read per node")
 }
