@@ -148,7 +148,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, errors.New("contract construction txn not found")
 	}
 
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -166,11 +166,15 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	if err != nil {
 		return nil, err
 	}
-	if transactionIndex >= block.Transactions().Len() || block.Transactions()[transactionIndex].Hash() != creationData.Tx {
+	txns := block.Transactions()
+	if transactionIndex >= len(txns) || txns[transactionIndex].Hash() != creationData.Tx {
 		return nil, fmt.Errorf("could not find txn hash")
 	}
+	if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(transactionIndex)); err != nil {
+		return nil, err
+	}
 
-	creationTx := block.Transactions()[transactionIndex]
+	creationTx := txns[transactionIndex]
 	// Signed frame budgets cannot be clamped like an ordinary message's gas limit.
 	if creationTx.Type() == types.FrameTxType {
 		if err := checkTransactionGasCap(creationTx, api.GasCap); err != nil {
