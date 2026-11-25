@@ -126,7 +126,7 @@ func makeBenchBlock() *Block {
 			panic(err)
 		}
 		txs[i] = signedTx
-		receipts[i] = NewReceipt(false, tx.GetGasLimit())
+		receipts[i] = &Receipt{Type: LegacyTxType, CumulativeGasUsed: tx.GetGasLimit(), Status: ReceiptStatusSuccessful}
 	}
 	for i := range uncles {
 		uncles[i] = &Header{
