@@ -19,6 +19,9 @@ package accounts
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"regexp"
 	"runtime"
 	"sync"
 	"testing"
@@ -528,13 +531,22 @@ func TestCanonTableKeepsIdentityAcrossGenerations(t *testing.T) {
 	}
 	wg.Wait()
 	c.flush()
+	runtime.GC()
 	require.Same(t, held, c.intern(k))
 	runtime.KeepAlive(held)
 }
 
+// The trace list is read once per process, so the test runs itself in a child process with TRACE_ACCOUNTS set.
 func TestTraceAccountMatchesInternedAddress(t *testing.T) {
 	a := common.HexToAddress("0x5b38da6a701c568545dcfcb03fcb875f56beddc4")
-	dbg.TraceAccounts = []string{a.Hex()}
+	if os.Getenv("TRACE_ACCOUNTS") != a.Hex() {
+		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.v", "-test.run=^"+regexp.QuoteMeta(t.Name())+"$")
+		cmd.Env = append(os.Environ(), "TRACE_ACCOUNTS="+a.Hex())
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", out)
+		require.Contains(t, string(out), "--- PASS: "+t.Name())
+		return
+	}
 	require.True(t, dbg.TraceAccount(InternAddress(a).Value()))
 }
 
