@@ -131,7 +131,7 @@ func leafParts(n *node, nib int, includeNib bool, keyDst, compactDst, payloadDst
 	}
 	start := len(leafKey)
 	leafKey = append(leafKey, make([]byte, suffixCount)...)
-	UnpackPath(suffix, suffixCount, leafKey[start:start+suffixCount:start+suffixCount])
+	unpackPath(suffix, suffixCount, leafKey[start:start+suffixCount:start+suffixCount])
 	var compactKey [65]byte
 	copy(compactKey[:], leafKey)
 	compactKey[len(leafKey)] = nibbles.Terminator

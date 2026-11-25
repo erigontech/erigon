@@ -51,7 +51,7 @@ func unfold(ctx brancher, path []byte, plane byte, addrHash []byte) (*node, erro
 	}
 	l := record.layout()
 	if record.isLeafRoot() {
-		fullPath := UnpackPath(data[1:33], 64, nil)
+		fullPath := unpackPath(data[1:33], 64, nil)
 		n.setLeaf(int(fullPath[0]), PackPath(fullPath[1:], nil), data[34:])
 		return n, nil
 	}
@@ -81,5 +81,5 @@ func decodeExtensionInto(encoded, dst []byte) []byte {
 	if len(encoded) == 0 {
 		return nil
 	}
-	return UnpackPath(encoded[1:], int(encoded[0]), dst)
+	return unpackPath(encoded[1:], int(encoded[0]), dst)
 }

@@ -104,7 +104,7 @@ func (h *RecordHasher) Hash(key, value []byte, expect func(key, hash []byte) err
 		var full [64]byte
 		copy(full[:], n.path)
 		full[len(n.path)] = byte(nib)
-		UnpackPath(suffix, 63-len(n.path), full[len(n.path)+1:len(n.path)+1:64])
+		unpackPath(suffix, 63-len(n.path), full[len(n.path)+1:len(n.path)+1:64])
 		h.key = StorageNodeKey(hashAddressPath(full[:]), nil, h.key[:0])
 		if err := expect(h.key, storageRoot); err != nil {
 			return [32]byte{}, err
@@ -138,7 +138,7 @@ func (h *RecordHasher) parseKey(key []byte) (tag byte, addrHash []byte, err erro
 	if count > 63 || len(key)-start-1 != PackedLen(count) {
 		return 0, nil, fmt.Errorf("%w: key %x: path length %d does not match", errVerifyRecords, key, count)
 	}
-	h.path = UnpackPath(key[start:len(key)-1], count, h.path[:0])
+	h.path = unpackPath(key[start:len(key)-1], count, h.path[:0])
 	return tag, addrHash, nil
 }
 

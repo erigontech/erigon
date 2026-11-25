@@ -357,7 +357,7 @@ func encodeLeafRoot(n *node, dst []byte) []byte {
 	var pathScratch [64]byte
 	fullPath := pathScratch[:64]
 	fullPath[0] = byte(nib)
-	UnpackPath(suffix, 63, fullPath[1:64:64])
+	unpackPath(suffix, 63, fullPath[1:64:64])
 	var keyScratch [32]byte
 	key := PackPath(fullPath, keyScratch[:0])
 	out := dst[:0]

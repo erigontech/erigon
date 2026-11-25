@@ -116,7 +116,7 @@ func materializeNode(path []byte, plane byte, spec *commitmenttest.RecordSpec) *
 		} else {
 			ext := spec.Extensions[nib]
 			if len(ext) != 0 {
-				ext = UnpackPath(ext[1:], int(ext[0]), nil)
+				ext = unpackPath(ext[1:], int(ext[0]), nil)
 			}
 			n.setStoredChild(nib, spec.Hashes[nib], ext)
 		}
@@ -263,12 +263,12 @@ func exactLeaves(t *testing.T, ctx commitment.PatriciaContext, plane byte, addr 
 		require.NoError(t, Validate(data, depth), "invalid record at %x", path)
 		r := Record{data: data, depth: depth}
 		if r.isLeafRoot() {
-			out[string(UnpackPath(data[1:33], 64, nil))] = bytes.Clone(data[34:])
+			out[string(unpackPath(data[1:33], 64, nil))] = bytes.Clone(data[34:])
 			return
 		}
 		l := r.layout()
 		if depth == 0 && l.selfExtLen != 0 {
-			visit(UnpackPath(r.SelfExt()[1:], l.selfExtLen, nil))
+			visit(unpackPath(r.SelfExt()[1:], l.selfExtLen, nil))
 			return
 		}
 		for nib := range 16 {
@@ -282,7 +282,7 @@ func exactLeaves(t *testing.T, ctx commitment.PatriciaContext, plane byte, addr 
 				continue
 			}
 			suffix, value := r.leafAt(l, nib)
-			child = append(child, UnpackPath(suffix, 64-depth-1, nil)...)
+			child = append(child, unpackPath(suffix, 64-depth-1, nil)...)
 			require.NotContains(t, out, string(child), "duplicate leaf %x", child)
 			out[string(child)] = bytes.Clone(value)
 		}

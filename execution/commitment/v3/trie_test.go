@@ -329,7 +329,7 @@ func TestTrieMutations(t *testing.T) {
 		require.Equal(t, PackPath(survivor[len(parent.path)+1:], nil), suffix)
 		require.Equal(t, []byte{2}, value)
 		full := append(append([]byte(nil), parent.path...), byte(0))
-		full = append(full, UnpackPath(suffix, 62, nil)...)
+		full = append(full, unpackPath(suffix, 62, nil)...)
 		require.Equal(t, survivor, full)
 	})
 	t.Run("E15/RemoveCollapseKeepsStoredHash", func(t *testing.T) {
@@ -460,7 +460,7 @@ func TestTrieMutations(t *testing.T) {
 			require.Empty(t, n.childExtAt(3))
 			data := encodeRecord(n, 0, nil)
 			require.NoError(t, Validate(data, 0))
-			require.Equal(t, []byte{3, 4, 5}, UnpackPath(Record{data: data, depth: 0}.SelfExt()[1:], 3, nil))
+			require.Equal(t, []byte{3, 4, 5}, unpackPath(Record{data: data, depth: 0}.SelfExt()[1:], 3, nil))
 		})
 	})
 	t.Run("E17/RootTransitionsRejectMalformedShape", func(t *testing.T) {

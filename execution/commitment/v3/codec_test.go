@@ -53,7 +53,7 @@ func TestPathCodec(t *testing.T) {
 			if count&1 == 1 {
 				require.Zero(t, packed[len(packed)-1]&0x0f)
 			}
-			require.Equal(t, path, UnpackPath(packed, count, unpackedBuffer[:]))
+			require.Equal(t, path, unpackPath(packed, count, unpackedBuffer[:]))
 		}
 	})
 	t.Run("E6/PackPathReusesDestinationAndClearsOddPadding", func(t *testing.T) {
@@ -88,7 +88,7 @@ func TestPathCodec(t *testing.T) {
 
 		first, last := -1, -1
 		for i, key := range keys {
-			path := UnpackPath(key[1:len(key)-1], int(key[len(key)-1]), nil)
+			path := unpackPath(key[1:len(key)-1], int(key[len(key)-1]), nil)
 			if path[0] == 0x0a {
 				if first == -1 {
 					first = i
@@ -98,7 +98,7 @@ func TestPathCodec(t *testing.T) {
 		}
 		require.NotEqual(t, -1, first)
 		for _, key := range keys[first : last+1] {
-			path := UnpackPath(key[1:len(key)-1], int(key[len(key)-1]), nil)
+			path := unpackPath(key[1:len(key)-1], int(key[len(key)-1]), nil)
 			require.Equal(t, byte(0x0a), path[0])
 		}
 	})
@@ -150,7 +150,7 @@ func TestNodeKeys(t *testing.T) {
 					require.Equal(t, tc.tag, tc.key[0])
 					require.Equal(t, tc.addr, tc.key[1:1+len(tc.addr)])
 					require.Equal(t, byte(count), tc.key[len(tc.key)-1])
-					require.Equal(t, path, UnpackPath(tc.key[1+len(tc.addr):len(tc.key)-1], count, []byte{}))
+					require.Equal(t, path, unpackPath(tc.key[1+len(tc.addr):len(tc.key)-1], count, []byte{}))
 				})
 			}
 		}

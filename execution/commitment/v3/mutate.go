@@ -124,7 +124,7 @@ func collapsedState(n *node) removalState {
 	if n.leafMask&bit != 0 {
 		suffix, value := n.leafAt(nib)
 		path := append(append([]byte(nil), n.path...), byte(nib))
-		path = append(path, UnpackPath(suffix, 64-len(n.path)-1, nil)...)
+		path = append(path, unpackPath(suffix, 64-len(n.path)-1, nil)...)
 		return removalState{kind: removalLeaf, path: path, value: append([]byte(nil), value...)}
 	}
 	if child := n.child(nib); child != nil {
@@ -178,7 +178,7 @@ func splitLeaf(parent *node, nib int, path, suffix, value []byte) error {
 	oldPath := append(pathScratch[:0], parent.path...)
 	oldPath = append(oldPath, byte(nib))
 	oldPath = oldPath[:len(oldPath)+oldSuffixCount]
-	UnpackPath(oldSuffix, oldSuffixCount, oldPath[depth+1:])
+	unpackPath(oldSuffix, oldSuffixCount, oldPath[depth+1:])
 	common := nibbles.CommonPrefixLen(oldPath, path)
 	if common == len(oldPath) {
 		parent.setLeaf(nib, suffix, value)

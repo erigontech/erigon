@@ -1,3 +1,19 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package convert
 
 import (
@@ -154,12 +170,12 @@ func seedLegacyWorld(t *testing.T, rng *rand.Rand) (*legacyWorld, []legacyAccoun
 	add := func(slots ...[]byte) {
 		accounts = append(accounts, legacyAccount{addr: randBytes(rng, length.Addr), slots: slots})
 	}
-	sharingPrefix := func(nibbles int) {
+	sharingPrefix := func(n int) {
 		first := randBytes(rng, 32)
-		want := v3.UnpackPath(crypto.Keccak256(first), 64, nil)[:nibbles]
+		want := nibbles.KeybytesToHex(crypto.Keccak256(first))[:n]
 		for {
 			next := randBytes(rng, 32)
-			if bytes.Equal(v3.UnpackPath(crypto.Keccak256(next), 64, nil)[:nibbles], want) {
+			if bytes.Equal(nibbles.KeybytesToHex(crypto.Keccak256(next))[:n], want) {
 				add(first, next)
 				return
 			}
@@ -212,7 +228,7 @@ func TestConversion(t *testing.T) {
 			prefix []byte
 			cells  map[int]branch.BranchCell
 		}{
-			{"storage_owner_mismatch", v3.UnpackPath(ownerHash[:], 64, nil), map[int]branch.BranchCell{
+			{"storage_owner_mismatch", nibbles.KeybytesToHex(ownerHash[:])[:64], map[int]branch.BranchCell{
 				slotNib:            {StorageAddr: storageKey},
 				(slotNib + 1) % 16: {Hash: hash},
 			}},

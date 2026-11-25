@@ -173,7 +173,7 @@ func recordCell(n *node, nib int, prefix []byte) collapseCell {
 		return collapseCell{hash: true, hext: slices.Clone(n.childExtAtInto(nib, extScratch[:0]))}
 	}
 	suffix, payload := n.leafAt(nib)
-	rest := UnpackPath(suffix, 64-len(n.path)-1, nil)
+	rest := unpackPath(suffix, 64-len(n.path)-1, nil)
 	if n.plane != PlaneAccount {
 		return collapseCell{stor: true, hext: rest}
 	}
@@ -199,7 +199,7 @@ func (s *collapseSim) resolve(c *collapseCell) error {
 		nib := bits.TrailingZeros16(root.childMask)
 		suffix, _ := root.leafAt(nib)
 		c.stor = true
-		c.hext = append(append(c.hext, byte(nib)), UnpackPath(suffix, 63, nil)...)
+		c.hext = append(append(c.hext, byte(nib)), unpackPath(suffix, 63, nil)...)
 	case len(root.path) != 0:
 		c.hash = true
 		c.hext = append(c.hext, root.path...)

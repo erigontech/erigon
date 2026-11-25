@@ -59,7 +59,7 @@ func PackedMatches(packed []byte, nibbles []byte) bool {
 	return true
 }
 
-func UnpackPath(packed []byte, count int, dst []byte) []byte {
+func unpackPath(packed []byte, count int, dst []byte) []byte {
 	dst = slices.Grow(dst[:0], count)[:count]
 	for i := range dst {
 		if i&1 == 0 {
