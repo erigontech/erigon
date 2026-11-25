@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	v2branch "github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 func TestParallelPatriciaHashedSkeletonConstruction(t *testing.T) {
@@ -666,7 +667,7 @@ func TestParallelDeleteWithSurvivingSiblings_BranchInspection(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, branch, "root branch must exist after phase 2")
 
-	_, afterMap, _, err := decodeBranchCells(commitment.BranchData(branch))
+	_, afterMap, _, err := decodeBranchCells(v2branch.BranchData(branch))
 	require.NoError(t, err)
 
 	for nib := range 8 {

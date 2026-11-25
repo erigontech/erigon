@@ -19,7 +19,6 @@ package commitment
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"slices"
 	"strconv"
 	"sync"
@@ -34,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 type noopPatriciaContext struct{}
@@ -415,45 +415,6 @@ func TestWarmuper_WaitBufferFree_FastPath(t *testing.T) {
 	}
 }
 
-func TestBranchData_IsComplete(t *testing.T) {
-	t.Parallel()
-
-	// Buffers shorter than the 4-byte touchMap+afterMap header are not complete
-	// and must not panic. Empty values are deletion tombstones kept across merges.
-	require.False(t, BranchData(nil).IsComplete())
-	require.False(t, BranchData{}.IsComplete())
-	require.False(t, BranchData{0x00}.IsComplete())
-	require.False(t, BranchData{0xff, 0xff, 0x00}.IsComplete())
-
-	complete := make(BranchData, 4)
-	binary.BigEndian.PutUint16(complete[0:], 0xffff)
-	binary.BigEndian.PutUint16(complete[2:], 0b0000_0000_0000_0111)
-	require.True(t, complete.IsComplete())
-
-	incomplete := make(BranchData, 4)
-	binary.BigEndian.PutUint16(incomplete[0:], 0b0000_0000_0000_0001)
-	binary.BigEndian.PutUint16(incomplete[2:], 0b0000_0000_0000_0011)
-	require.False(t, incomplete.IsComplete())
-}
-
-func TestBranchData_MergeHexBranchesEmptyBranches(t *testing.T) {
-	t.Parallel()
-
-	merger := NewHexBranchMerger(1024)
-
-	branch1 := BranchData{}
-	branch2 := BranchData{0x02, 0x02, 0x03, 0x03, 0x0C, 0x02, 0x04, 0x0C}
-	mergedBranch, err := merger.Merge(branch1, branch2)
-	require.NoError(t, err)
-	require.Equal(t, branch2, mergedBranch)
-
-	branch1 = BranchData{}
-	branch2 = BranchData{}
-	mergedBranch, err = merger.Merge(branch1, branch2)
-	require.NoError(t, err)
-	require.Equal(t, branch1, mergedBranch)
-}
-
 func TestNewUpdates(t *testing.T) {
 	t.Parallel()
 
@@ -803,7 +764,7 @@ func TestApplyDeferred_CallbackSeesInputDerivedCapacity(t *testing.T) {
 	upd := func(prefix, raw byte) *DeferredBranchUpdate {
 		return &DeferredBranchUpdate{
 			Prefix: append(make([]byte, 0, 64), prefix),
-			Raw:    append(make(BranchData, 0, 64), raw),
+			Raw:    append(make(branch.BranchData, 0, 64), raw),
 			Prev:   make([]byte, 0, 64),
 		}
 	}

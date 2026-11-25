@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -115,7 +116,7 @@ func commitmentFileRange(t *testing.T, path string) (from, to uint64) {
 
 func branchCells(value []byte) (string, bool) {
 	var sb strings.Builder
-	err := commitment.BranchData(value).ForEachCell(func(nib int, c commitment.BranchCell) error {
+	err := branch.BranchData(value).ForEachCell(func(nib int, c branch.BranchCell) error {
 		fmt.Fprintf(&sb, "%x:%x/%x/%x/%x;", nib, c.Extension, c.AccountAddr, c.StorageAddr, c.Hash)
 		return nil
 	})

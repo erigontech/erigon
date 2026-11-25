@@ -29,6 +29,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 const deferredWritesPerWorker = 4096
@@ -333,7 +334,7 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *c
 			if wctx == nil {
 				return errors.New("ParallelPatriciaHashed: trieCtxFactory returned nil context for deferred apply")
 			}
-			merger := commitment.WorkerMergerPool.Get().(*commitment.BranchMerger)
+			merger := commitment.WorkerMergerPool.Get().(*branch.BranchMerger)
 			defer commitment.WorkerMergerPool.Put(merger)
 			for {
 				i := int(claimed.Add(1)) - 1

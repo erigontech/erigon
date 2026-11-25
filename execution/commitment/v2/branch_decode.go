@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"math/bits"
 
-	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 type BranchMaps struct {
@@ -57,7 +57,7 @@ func DecodeBranchInto(
 		}
 		fieldBits := branchData[pos]
 		pos++
-		newPos, err := c.fillFromFields(branchData, pos, commitment.CellFields(fieldBits))
+		newPos, err := c.fillFromFields(branchData, pos, branch.CellFields(fieldBits))
 		if err != nil {
 			return BranchMaps{}, fmt.Errorf("fillFromFields nibble %d: %w", nibble, err)
 		}

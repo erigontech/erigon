@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -244,7 +245,7 @@ func TestSelfDestructBranchTombstone_CarriesRealPrev(t *testing.T) {
 
 	tombstones := 0
 	for _, p := range ms.putLog {
-		if commitment.BranchData(p.data).ChildCount() != 0 {
+		if branch.BranchData(p.data).ChildCount() != 0 {
 			continue // a real branch write (the recreate), not a tombstone
 		}
 		orig, ok := original[string(p.prefix)]
@@ -314,7 +315,7 @@ func TestSelfDestructBranchTombstone_ReusedBranchBuffer(t *testing.T) {
 
 	tombstones := 0
 	for _, p := range ms.putLog {
-		if commitment.BranchData(p.data).ChildCount() != 0 {
+		if branch.BranchData(p.data).ChildCount() != 0 {
 			continue // a real branch write (the recreate), not a tombstone
 		}
 		orig, ok := original[string(p.prefix)]

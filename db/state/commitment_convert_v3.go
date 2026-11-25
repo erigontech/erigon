@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	v2branch "github.com/erigontech/erigon/execution/commitment/v2/branch"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
@@ -634,7 +635,7 @@ type legacyReachNode struct {
 }
 
 func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
-	if commitment.BranchData(value).ChildCount() == 0 {
+	if v2branch.BranchData(value).ChildCount() == 0 {
 		return true, nil
 	}
 	path, err := decodeLegacyPrefix(legacyKey, r.keysV2)
@@ -658,7 +659,7 @@ func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
 		}
 		r.chain = append(r.chain, legacyReachNode{0, bytes.Clone(root)})
 		r.rootExt = nil
-		if commitment.BranchData(root).ChildCount() == 0 {
+		if v2branch.BranchData(root).ChildCount() == 0 {
 			state, err := r.read(commitment.KeyCommitmentState)
 			if err != nil || len(state) == 0 {
 				return false, err
@@ -689,7 +690,7 @@ func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
 			return true, nil
 		}
 		child, err := r.read(encodeLegacyPrefix(path[:next], r.keysV2))
-		if err != nil || commitment.BranchData(child).ChildCount() == 0 {
+		if err != nil || v2branch.BranchData(child).ChildCount() == 0 {
 			return false, err
 		}
 		r.chain = append(r.chain, legacyReachNode{next, bytes.Clone(child)})
@@ -701,7 +702,7 @@ func (r *legacyReach) childDepth(branch, path []byte, depth int) (next int, ok b
 		return 0, false, nil
 	}
 	nib := int(path[depth])
-	err = commitment.BranchData(branch).ForEachCell(func(i int, cell commitment.BranchCell) error {
+	err = v2branch.BranchData(branch).ForEachCell(func(i int, cell v2branch.BranchCell) error {
 		if i != nib {
 			return nil
 		}

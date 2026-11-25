@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 type TrieContextFactory func(ctx context.Context) (PatriciaContext, func())
@@ -190,17 +191,17 @@ func (w *Warmuper) WarmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		fieldBits := branchData[pos]
 		pos++
 
-		fields := CellFields(fieldBits)
+		fields := branch.CellFields(fieldBits)
 		extLen := 0
-		if fields&FieldExtension != 0 {
+		if fields&branch.FieldExtension != 0 {
 			if l, n := binary.Uvarint(branchData[pos:]); n > 0 {
 				extLen = int(l)
 			}
 		}
 		switch {
-		case fields&(FieldAccountAddr|FieldStorageAddr|FieldHash) == FieldAccountAddr|FieldHash && depth < 64 && len(hashedKey) > 64:
+		case fields&(branch.FieldAccountAddr|branch.FieldStorageAddr|branch.FieldHash) == branch.FieldAccountAddr|branch.FieldHash && depth < 64 && len(hashedKey) > 64:
 			depth = 64 + extLen
-		case fields&(FieldAccountAddr|FieldStorageAddr) != 0:
+		case fields&(branch.FieldAccountAddr|branch.FieldStorageAddr) != 0:
 			return
 		default:
 			depth += 1 + extLen

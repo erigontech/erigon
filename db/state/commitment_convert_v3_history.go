@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
@@ -117,10 +118,10 @@ type accountStorage struct {
 func (h *historyVersion) reset() { h.buf, h.ents, h.accounts = h.buf[:0], h.ents[:0], h.accounts[:0] }
 
 func (h *historyVersion) parseAccounts(legacyValue []byte) error {
-	if commitment.BranchData(legacyValue).ChildCount() == 0 {
+	if branch.BranchData(legacyValue).ChildCount() == 0 {
 		return nil
 	}
-	return commitment.BranchData(legacyValue).ForEachCell(func(_ int, c commitment.BranchCell) error {
+	return branch.BranchData(legacyValue).ForEachCell(func(_ int, c branch.BranchCell) error {
 		if len(c.AccountAddr) == 0 {
 			return nil
 		}
@@ -306,10 +307,10 @@ type legacyChild struct {
 }
 
 func appendLegacyChildren(dst []legacyChild, prefix, value []byte) ([]legacyChild, error) {
-	if commitment.BranchData(value).ChildCount() == 0 {
+	if branch.BranchData(value).ChildCount() == 0 {
 		return dst, nil
 	}
-	err := commitment.BranchData(value).ForEachCell(func(nib int, c commitment.BranchCell) error {
+	err := branch.BranchData(value).ForEachCell(func(nib int, c branch.BranchCell) error {
 		if len(c.Hash) != length.Hash || len(c.StorageAddr) != 0 {
 			return nil
 		}
@@ -716,7 +717,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 			if err != nil {
 				return err
 			}
-			if commitment.BranchData(value).ChildCount() == 0 {
+			if branch.BranchData(value).ChildCount() == 0 {
 				return fmt.Errorf("legacy %x is referenced at txNum %d but holds no record", childKey, txNum)
 			}
 			if convErr := convert(childKey, value, leavesAsOf(txNum), &childCur); convErr != nil {

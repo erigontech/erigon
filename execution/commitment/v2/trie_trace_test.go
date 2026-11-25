@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 func LoadTrieTraceIntoMockState(t testing.TB, path string) (*MockState, [][]byte, []commitment.Update, []byte) {
@@ -45,7 +46,7 @@ func LoadTrieTraceIntoMockState(t testing.TB, path string) (*MockState, [][]byte
 		require.NoError(t, err)
 		val, err := hex.DecodeString(hexVal)
 		require.NoError(t, err)
-		ms.cm[string(key)] = commitment.BranchData(val)
+		ms.cm[string(key)] = branch.BranchData(val)
 	}
 
 	for hexKey, hexVal := range tt.Accounts {

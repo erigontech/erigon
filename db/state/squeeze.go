@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/db/version"
+	v2branch "github.com/erigontech/erigon/execution/commitment/v2/branch"
 
 	"github.com/c2h5oh/datasize"
 
@@ -336,11 +337,11 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 // BranchData.ReplacePlainKeys keeps the original bytes. A lookup miss returns an error naming
 // the offending shortened key.
 func ExpandShortenedKeysInBranch(
-	branch commitment.BranchData,
+	branch v2branch.BranchData,
 	accounts, storage *DomainRoTx,
 	accountFile, storageFile *FilesItem,
 	startTxNum, endTxNum uint64,
-) (commitment.BranchData, error) {
+) (v2branch.BranchData, error) {
 	storageGetter := storage.dataReader(storageFile.decompressor)
 	accountGetter := accounts.dataReader(accountFile.decompressor)
 	logger := log.Root()

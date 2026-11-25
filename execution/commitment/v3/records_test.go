@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
@@ -634,22 +635,22 @@ func TestConversion(t *testing.T) {
 		for _, tc := range []struct {
 			name   string
 			prefix []byte
-			cells  map[int]commitment.BranchCell
+			cells  map[int]branch.BranchCell
 		}{
-			{"storage_owner_mismatch", unpackPath(ownerHash[:], 64, nil), map[int]commitment.BranchCell{
+			{"storage_owner_mismatch", unpackPath(ownerHash[:], 64, nil), map[int]branch.BranchCell{
 				slotNib:            {StorageAddr: storageKey},
 				(slotNib + 1) % 16: {Hash: hash},
 			}},
-			{"child_beyond_hash", bytes.Repeat([]byte{1}, 62), map[int]commitment.BranchCell{
+			{"child_beyond_hash", bytes.Repeat([]byte{1}, 62), map[int]branch.BranchCell{
 				0: {Hash: hash, Extension: []byte{1}},
 				1: {Hash: hash},
 			}},
-			{"single_child", []byte{1}, map[int]commitment.BranchCell{0: {Hash: hash}}},
-			{"account_storage_owner_mismatch", nil, map[int]commitment.BranchCell{
+			{"single_child", []byte{1}, map[int]branch.BranchCell{0: {Hash: hash}}},
+			{"account_storage_owner_mismatch", nil, map[int]branch.BranchCell{
 				accountNib:            {AccountAddr: owner[:], StorageAddr: storageKey},
 				(accountNib + 1) % 16: {Hash: hash},
 			}},
-			{"leaf_outside_prefix", []byte{ownerHash[0]>>4 ^ 1}, map[int]commitment.BranchCell{
+			{"leaf_outside_prefix", []byte{ownerHash[0]>>4 ^ 1}, map[int]branch.BranchCell{
 				int(ownerHash[0] & 15):          {AccountAddr: owner[:]},
 				(int(ownerHash[0]&15) + 1) % 16: {Hash: hash},
 			}},

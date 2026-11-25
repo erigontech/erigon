@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	v2branch "github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -658,29 +659,29 @@ func (cell *cell) deriveHashedKeys(depth int16, accountKeyLen int16, hashBuf []b
 	return nil
 }
 
-func (cell *cell) fillFromFields(data []byte, pos int, fieldBits commitment.CellFields) (int, error) {
+func (cell *cell) fillFromFields(data []byte, pos int, fieldBits v2branch.CellFields) (int, error) {
 	cell.pendingHashDepth = 0
 	fields := []struct {
-		flag      commitment.CellFields
+		flag      v2branch.CellFields
 		lenField  *int16
 		dataField []byte
 		extraFunc func(int16)
 	}{
-		{commitment.FieldExtension, &cell.hashedExtLen, cell.hashedExtension[:], func(l int16) {
+		{v2branch.FieldExtension, &cell.hashedExtLen, cell.hashedExtension[:], func(l int16) {
 			cell.extLen = l
 			if l > 0 {
 				copy(cell.extension[:], cell.hashedExtension[:l])
 			}
 		}},
-		{commitment.FieldAccountAddr, &cell.accountAddrLen, cell.accountAddr[:], nil},
-		{commitment.FieldStorageAddr, &cell.storageAddrLen, cell.storageAddr[:], nil},
-		{commitment.FieldHash, &cell.hashLen, cell.hash[:], nil},
-		{commitment.FieldStateHash, &cell.stateHashLen, cell.stateHash[:], nil},
+		{v2branch.FieldAccountAddr, &cell.accountAddrLen, cell.accountAddr[:], nil},
+		{v2branch.FieldStorageAddr, &cell.storageAddrLen, cell.storageAddr[:], nil},
+		{v2branch.FieldHash, &cell.hashLen, cell.hash[:], nil},
+		{v2branch.FieldStateHash, &cell.stateHashLen, cell.stateHash[:], nil},
 	}
 
 	for _, f := range fields {
 		if fieldBits&f.flag != 0 {
-			l, n, err := commitment.ReadUvarint(data[pos:])
+			l, n, err := v2branch.ReadUvarint(data[pos:])
 			if err != nil {
 				return 0, err
 			}
@@ -700,13 +701,13 @@ func (cell *cell) fillFromFields(data []byte, pos int, fieldBits commitment.Cell
 			}
 		} else {
 			*f.lenField = 0
-			if f.flag == commitment.FieldExtension {
+			if f.flag == v2branch.FieldExtension {
 				cell.extLen = 0
 			}
 		}
 	}
 
-	if fieldBits&commitment.FieldAccountAddr != 0 {
+	if fieldBits&v2branch.FieldAccountAddr != 0 {
 		cell.CodeHash = empty.CodeHash
 	}
 	return pos, nil
@@ -1426,7 +1427,7 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, chil
 		var c cell
 		fieldBits := branchData[pos]
 		pos++
-		if pos, err = c.fillFromFields(branchData, pos, commitment.CellFields(fieldBits)); err != nil {
+		if pos, err = c.fillFromFields(branchData, pos, v2branch.CellFields(fieldBits)); err != nil {
 			return nil, fmt.Errorf("[witness] fillFromFields at prefix %x: %w", branchPrefix, err)
 		}
 		if childDepth > 64 {
@@ -2275,7 +2276,7 @@ func (hph *HexPatriciaHashed) deleteStorageSubtreeBranches(prefix []byte) error 
 	// records a child's bytes as this branch's previous value.
 	branch = bytes.Clone(branch)
 	// No branch record at this prefix (leaf, absent, or already a tombstone).
-	if len(branch) < 4 || commitment.BranchData(branch).ChildCount() == 0 {
+	if len(branch) < 4 || v2branch.BranchData(branch).ChildCount() == 0 {
 		return nil
 	}
 	var scratch [16]cell

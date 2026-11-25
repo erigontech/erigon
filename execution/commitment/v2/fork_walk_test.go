@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 type cancelOnAccountContext struct {
@@ -351,7 +352,7 @@ func TestForkWalk_CheckinKeepsTheDeferredSliceOnTheTrie(t *testing.T) {
 
 	fw.checkout(wk, nil)
 	w := wk.trie
-	upd := &commitment.DeferredBranchUpdate{Encoded: commitment.BranchData{1}}
+	upd := &commitment.DeferredBranchUpdate{Encoded: branch.BranchData{1}}
 	w.branchEncoder.deferred = append(w.branchEncoder.deferred, upd)
 	collected := w.branchEncoder.deferred
 	fw.checkin(wk)

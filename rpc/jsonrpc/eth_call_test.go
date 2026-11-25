@@ -52,9 +52,9 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -1379,7 +1379,7 @@ func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
 	rootKey := nibbles.HexToCompact(nil)
 	_, snapshotTxNum, err := rawdbv3.TxNums.Last(roTx)
 	require.NoError(t, err)
-	newerRootBranch := make(commitment.BranchData, 4)
+	newerRootBranch := make(branch.BranchData, 4)
 	branchCache.Put(rootKey, newerRootBranch, 0, snapshotTxNum+1)
 	cachedRootBranch, _, ok := branchCache.Get(rootKey)
 	require.True(t, ok)

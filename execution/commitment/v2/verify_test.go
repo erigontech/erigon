@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -38,7 +39,7 @@ func addStorageToCell(c *cell, addr common.Address, loc common.Hash, val []byte)
 	c.loaded |= cellLoadStorage
 }
 
-func encodeCellToBranch(t *testing.T, hph *HexPatriciaHashed, c *cell, depth int16, nibble int) commitment.BranchData {
+func encodeCellToBranch(t *testing.T, hph *HexPatriciaHashed, c *cell, depth int16, nibble int) branch.BranchData {
 	t.Helper()
 
 	_, err := hph.computeCellHash(c, depth, nil)
@@ -51,7 +52,7 @@ func encodeCellToBranch(t *testing.T, hph *HexPatriciaHashed, c *cell, depth int
 	branchData, err := NewBranchEncoder(1024).EncodeBranch(touchMap, touchMap, touchMap, &cellData)
 	require.NoError(t, err)
 	require.NotEmpty(t, branchData)
-	return commitment.BranchData(branchData)
+	return branch.BranchData(branchData)
 }
 
 func TestVerifyBranchHashes_RoundTrip(t *testing.T) {

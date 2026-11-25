@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	v2branch "github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 func TestBranchData_MergeHexBranches2(t *testing.T) {
@@ -41,7 +42,7 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	require.NotEmpty(t, enc)
 	t.Logf("enc [%d] %x\n", len(enc), enc)
 
-	bmg := commitment.NewHexBranchMerger(8192)
+	bmg := v2branch.NewHexBranchMerger(8192)
 	res, err := bmg.Merge(enc, enc)
 	require.NoError(t, err)
 	require.Equal(t, enc, res)
@@ -69,9 +70,9 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 func TestBranchData_ChildCount(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, 0, commitment.BranchData(nil).ChildCount())
-	require.Equal(t, 0, commitment.BranchData{}.ChildCount())
-	require.Equal(t, 0, commitment.BranchData{0xff, 0xff, 0x00}.ChildCount(), "buffer shorter than 4 bytes has no afterMap")
+	require.Equal(t, 0, v2branch.BranchData(nil).ChildCount())
+	require.Equal(t, 0, v2branch.BranchData{}.ChildCount())
+	require.Equal(t, 0, v2branch.BranchData{0xff, 0xff, 0x00}.ChildCount(), "buffer shorter than 4 bytes has no afterMap")
 
 	for _, size := range []int{1, 2, 5, 16} {
 		_, bm, enc := encodeCellRow(t, size)
@@ -79,7 +80,7 @@ func TestBranchData_ChildCount(t *testing.T) {
 		require.Equal(t, size, enc.ChildCount(), "ChildCount must equal the number of afterMap children")
 	}
 
-	var buf commitment.BranchData = make([]byte, 4)
+	var buf v2branch.BranchData = make([]byte, 4)
 	binary.BigEndian.PutUint16(buf[0:], 0xffff)
 	binary.BigEndian.PutUint16(buf[2:], 0b0000_0000_0000_0111)
 	require.Equal(t, 3, buf.ChildCount())
@@ -196,7 +197,7 @@ func TestBranchData_ReplacePlainKeys_PartialChange(t *testing.T) {
 		isStorage bool
 	}
 	var origKeys []keyRecord
-	replaced, err := commitment.BranchData(bytes.Clone(enc)).ReplacePlainKeys(
+	replaced, err := v2branch.BranchData(bytes.Clone(enc)).ReplacePlainKeys(
 		make([]byte, 0, len(enc)),
 		func(key []byte, isStorage bool) ([]byte, error) {
 			origKeys = append(origKeys, keyRecord{bytes.Clone(key), isStorage})
@@ -263,7 +264,7 @@ func TestCollectTombstone_WritesRawAndCarriesPrev(t *testing.T) {
 	ctx := &recordingCtx{}
 	require.NoError(t, be.CollectTombstone(ctx, prefix, bm, prev))
 	require.Len(t, ctx.puts, 1)
-	require.Equal(t, 0, commitment.BranchData(ctx.puts[0].data).ChildCount(), "tombstone is an empty branch")
+	require.Equal(t, 0, v2branch.BranchData(ctx.puts[0].data).ChildCount(), "tombstone is an empty branch")
 	require.Equal(t, []byte(wantTomb), ctx.puts[0].data, "raw tombstone, not a merge of prev")
 	require.Equal(t, prev, ctx.puts[0].prev, "prev is carried for the domain diff / unwind")
 }
@@ -430,12 +431,12 @@ func TestCollectDeferredUpdate_NewBranchCarriesEmptyPrev(t *testing.T) {
 	be.ClearDeferred()
 }
 
-func shardedFlushTestBranch(tb testing.TB, be *BranchEncoder, row []*cell, bm uint16) commitment.BranchData {
+func shardedFlushTestBranch(tb testing.TB, be *BranchEncoder, row []*cell, bm uint16) v2branch.BranchData {
 	tb.Helper()
 	cellData := generateCellEncodeDataRow(tb, row, bm)
 	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(tb, err)
-	return commitment.BranchData(bytes.Clone(enc))
+	return v2branch.BranchData(bytes.Clone(enc))
 }
 
 type countingFlushCtx struct {
@@ -465,7 +466,7 @@ func TestApplyDeferredUpdates_ShardedFlushMergesAndWritesEachPrefixOnce(t *testi
 	prev := shardedFlushTestBranch(t, be, row, bm)
 	same := shardedFlushTestBranch(t, be, row, bm>>8)
 
-	wantMerged, err := commitment.NewHexBranchMerger(1024).Merge(prev, raw)
+	wantMerged, err := v2branch.NewHexBranchMerger(1024).Merge(prev, raw)
 	require.NoError(t, err)
 	wantMerged = bytes.Clone(wantMerged)
 

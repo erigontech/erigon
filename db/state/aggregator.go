@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 
 	"golang.org/x/sync/errgroup"
@@ -57,7 +58,6 @@ import (
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/execution/commitment"
 )
 
 type Aggregator struct {
@@ -2962,7 +2962,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 	if metrics != nil && dbg.KVReadLevelledMetrics {
 		metrics.UpdateFileReadsUnique(domain, k, start)
 	}
-	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
+	v, err = at.replaceShortenedKeysInBranch(k, branch.BranchData(v), fileStartTxNum, fileEndTxNum)
 	step = kv.Step(fileEndTxNum / at.StepSize())
 	if err == nil {
 		at.cacheLatestBranch(cacheBranch, k, v, step, tx)
@@ -2987,7 +2987,7 @@ func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx 
 func (at *AggregatorRoTx) DebugGetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	v, found, fileStartTxNum, fileEndTxNum, err = at.d[domain].debugGetLatestFromFiles(k, maxTxNum)
 	if domain == kv.CommitmentDomain && found {
-		v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
+		v, err = at.replaceShortenedKeysInBranch(k, branch.BranchData(v), fileStartTxNum, fileEndTxNum)
 	}
 	return
 }
@@ -3004,7 +3004,7 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 	defer logEvery.Stop()
 
 	for idx, d := range at.d {
-		var expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error)
+		var expandBranch func([]byte, branch.BranchData, uint64, uint64) (branch.BranchData, error)
 		if kv.Domain(idx) == kv.CommitmentDomain {
 			expandBranch = at.replaceShortenedKeysInBranch
 		}

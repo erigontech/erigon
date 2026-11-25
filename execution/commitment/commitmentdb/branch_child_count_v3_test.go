@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
@@ -87,7 +88,7 @@ func TestBranchChildCountUnderCommitmentV3(t *testing.T) {
 	for _, op := range ops {
 		full := commitment.KeyToHexNibbleHash(op.Key)
 		for cut := 0; cut <= len(full); cut++ {
-			want := commitment.BranchData(hphRecords[string(nibbles.HexToCompact(full[:cut]))]).ChildCount()
+			want := branch.BranchData(hphRecords[string(nibbles.HexToCompact(full[:cut]))]).ChildCount()
 			if want >= 2 {
 				branches++
 			}

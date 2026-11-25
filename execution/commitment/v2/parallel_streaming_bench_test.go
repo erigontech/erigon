@@ -33,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 func runDirectBench(b *testing.B, pk [][]byte, updates []commitment.Update) {
@@ -614,7 +615,7 @@ func Benchmark_Commitment_IncrementalWhale(b *testing.B) {
 
 type collectingTrieCtx struct {
 	*MockState
-	local map[string]commitment.BranchData
+	local map[string]branch.BranchData
 }
 
 func (c *collectingTrieCtx) PutBranch(prefix, data, _ []byte) error {
@@ -626,7 +627,7 @@ func collectingTrieCtxFactory(ms *MockState) (commitment.TrieContextFactory, fun
 	var mu sync.Mutex
 	var made []*collectingTrieCtx
 	f := func(context.Context) (commitment.PatriciaContext, func()) {
-		c := &collectingTrieCtx{MockState: ms, local: make(map[string]commitment.BranchData)}
+		c := &collectingTrieCtx{MockState: ms, local: make(map[string]branch.BranchData)}
 		mu.Lock()
 		made = append(made, c)
 		mu.Unlock()

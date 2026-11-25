@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.FullBlockReader, failFast bool, logger log.Logger) error {
@@ -443,8 +444,8 @@ func checkDerefBranch(
 	fileName string,
 	trace bool,
 	logger log.Logger,
-) (dc derefCounts, newBranchData commitment.BranchData, retErr error) {
-	branchData := commitment.BranchData(branchValue)
+) (dc derefCounts, newBranchData branch.BranchData, retErr error) {
+	branchData := branch.BranchData(branchValue)
 	var integrityErr error
 
 	newBranchData, _ = branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
@@ -598,7 +599,7 @@ func computeCommitmentFileScan(file state.VisibleFile) commitmentFileScan {
 			continue
 		}
 		counts.branchKeys++
-		plainAccounts, plainStorages, shortened, err := commitment.BranchData(v).CountPlainKeys()
+		plainAccounts, plainStorages, shortened, err := branch.BranchData(v).CountPlainKeys()
 		if err != nil || shortened > 0 {
 			return commitmentFileScan{referenced: true}
 		}
@@ -1036,7 +1037,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 			}
 		} else {
-			branchData := commitment.BranchData(v)
+			branchData := branch.BranchData(v)
 			err = v2.ValidateBranchData(branchData, k)
 			if err != nil {
 				err = fmt.Errorf("branch data validation failure for branch key %x in %s: %w", k, fileName, err)
@@ -1426,7 +1427,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, f
 		}
 		branchKeys++
 
-		branchData := commitment.BranchData(branchValue)
+		branchData := branch.BranchData(branchValue)
 
 		if branchData.IsTombstone() {
 			continue // tombstones kept across merges, not corruption
@@ -1640,7 +1641,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		}
 		branchKeys++
 
-		branchData := commitment.BranchData(branchValue)
+		branchData := branch.BranchData(branchValue)
 		if branchData.IsTombstone() {
 			continue
 		}
@@ -2018,7 +2019,7 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 			continue
 		}
 
-		branchData := commitment.BranchData(branchValue)
+		branchData := branch.BranchData(branchValue)
 		if !branchData.IsComplete() {
 			continue
 		}
@@ -2208,7 +2209,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, failFast
 				continue
 			}
 
-			branchData := commitment.BranchData(branchValue)
+			branchData := branch.BranchData(branchValue)
 			if !branchData.IsComplete() {
 				continue
 			}
@@ -2269,7 +2270,7 @@ func verifyHashItem(
 		valMapPool.Put(storageValues)
 	}()
 
-	branchData := commitment.BranchData(item.branchValue)
+	branchData := branch.BranchData(item.branchValue)
 	resolvedBranchData, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			plainKey := key

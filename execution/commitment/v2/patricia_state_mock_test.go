@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 type MockState struct {
@@ -42,7 +43,7 @@ type MockState struct {
 
 	mu     sync.RWMutex
 	sm     map[string][]byte
-	cm     map[string]commitment.BranchData
+	cm     map[string]branch.BranchData
 	numBuf [binary.MaxVarintLen64]byte
 
 	putBranches int
@@ -66,7 +67,7 @@ func NewMockState(t testing.TB) *MockState {
 	return &MockState{
 		t:  t,
 		sm: make(map[string][]byte),
-		cm: make(map[string]commitment.BranchData),
+		cm: make(map[string]branch.BranchData),
 	}
 }
 

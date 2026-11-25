@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -327,7 +328,7 @@ func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
 			}
 			require.NotEmpty(t, v)
 
-			expanded := commitment.BranchData(v)
+			expanded := branch.BranchData(v)
 			require.NoError(t, v2.ValidateBranchData(expanded, k),
 				"expanded BranchData failed Validate for key %x in %s", k, vf.Fullpath())
 

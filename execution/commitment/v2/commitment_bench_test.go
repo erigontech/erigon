@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 func BenchmarkHexPatriciaHashedFold(b *testing.B) {
@@ -109,7 +110,7 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 		copies[i] = bytes.Clone(enc1)
 	}
 
-	bmg := commitment.NewHexBranchMerger(4096)
+	bmg := branch.NewHexBranchMerger(4096)
 	var ci int
 	for b.Loop() {
 		_, err := bmg.Merge(enc, copies[ci])
@@ -123,7 +124,7 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 	}
 }
 
-func benchReplacePlainKeys(b *testing.B, data commitment.BranchData, buf []byte, fn func(key []byte, isStorage bool) ([]byte, error)) {
+func benchReplacePlainKeys(b *testing.B, data branch.BranchData, buf []byte, fn func(key []byte, isStorage bool) ([]byte, error)) {
 	b.Helper()
 	b.ReportAllocs()
 	for b.Loop() {
@@ -134,13 +135,13 @@ func benchReplacePlainKeys(b *testing.B, data commitment.BranchData, buf []byte,
 	}
 }
 
-func encodeSyntheticBranch(b *testing.B, nCells int) (commitment.BranchData, uint16) {
+func encodeSyntheticBranch(b *testing.B, nCells int) (branch.BranchData, uint16) {
 	b.Helper()
 	_, bm, enc := encodeCellRow(b, nCells)
-	return commitment.BranchData(bytes.Clone(enc)), bm
+	return branch.BranchData(bytes.Clone(enc)), bm
 }
 
-func preshortenBranchData(b *testing.B, enc commitment.BranchData) (commitment.BranchData, map[string][]byte) {
+func preshortenBranchData(b *testing.B, enc branch.BranchData) (branch.BranchData, map[string][]byte) {
 	b.Helper()
 	keyMap := make(map[string][]byte)
 	shortened, err := enc.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
@@ -156,7 +157,7 @@ func preshortenBranchData(b *testing.B, enc commitment.BranchData) (commitment.B
 	if err != nil {
 		b.Fatal(err)
 	}
-	return commitment.BranchData(bytes.Clone(shortened)), keyMap
+	return branch.BranchData(bytes.Clone(shortened)), keyMap
 }
 
 func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
@@ -178,7 +179,7 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	realData := commitment.BranchData(realDataBytes)
+	realData := branch.BranchData(realDataBytes)
 
 	b.Run("Shorten/Dense", func(b *testing.B) {
 		buf := make([]byte, 0, len(denseEnc))

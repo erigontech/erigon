@@ -35,6 +35,7 @@ import (
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/mvcc"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 
 	"github.com/erigontech/erigon/common"
@@ -56,7 +57,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
-	"github.com/erigontech/erigon/execution/commitment"
 )
 
 var (
@@ -1557,7 +1557,7 @@ func (dt *DomainRoTx) unwind(
 	rwTx kv.RwTx,
 	txNumUnwindTo uint64,
 	domainDiffs []kv.DomainEntryDiff,
-	expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error),
+	expandBranch func([]byte, branch.BranchData, uint64, uint64) (branch.BranchData, error),
 ) error {
 	d := dt.d
 	step := txNumUnwindTo / dt.stepSize

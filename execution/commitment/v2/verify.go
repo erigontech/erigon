@@ -26,12 +26,13 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func VerifyBranchHashes(
 	branchKey []byte,
-	branchData commitment.BranchData,
+	branchData branch.BranchData,
 	accountValues map[string][]byte,
 	storageValues map[string][]byte,
 ) error {

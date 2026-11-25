@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
@@ -662,7 +663,7 @@ func requireSameChildCounts(t *testing.T, b *witnessBed, pre, batch []commitment
 	read := func(key []byte) ([]byte, error) { return v3Records[string(key)], nil }
 	tr := &Trie{}
 	check := func(prefix []byte) {
-		want := commitment.BranchData(hphRecords[string(nibbles.HexToCompact(prefix))]).ChildCount()
+		want := branch.BranchData(hphRecords[string(nibbles.HexToCompact(prefix))]).ChildCount()
 		got, err := tr.BranchChildCount(read, prefix)
 		require.NoError(t, err)
 		require.Equal(t, want, got, "%s prefix=%x", label, prefix)

@@ -69,6 +69,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -271,7 +272,7 @@ func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize ui
 	fmt.Printf("Branch data length: %d bytes\n", len(val))
 
 	// Parse and display the branch data in human-readable format
-	branchData := commitment.BranchData(val)
+	branchData := branch.BranchData(val)
 	fmt.Printf("\nParsed branch data:\n%s\n", v2.BranchDataString(branchData))
 
 	return nil
@@ -1538,23 +1539,23 @@ func visualizeCommitmentFiles(files []string) error {
 }
 
 type visualizeOverallStat struct {
-	branches   *commitment.BranchStat
-	roots      *commitment.BranchStat
-	prefixes   map[uint64]*commitment.BranchStat
+	branches   *branch.BranchStat
+	roots      *branch.BranchStat
+	prefixes   map[uint64]*branch.BranchStat
 	prefCount  map[uint64]uint64
 	rootsCount uint64
 }
 
 func newVisualizeOverallStat() *visualizeOverallStat {
 	return &visualizeOverallStat{
-		branches:  new(commitment.BranchStat),
-		roots:     new(commitment.BranchStat),
-		prefixes:  make(map[uint64]*commitment.BranchStat),
+		branches:  new(branch.BranchStat),
+		roots:     new(branch.BranchStat),
+		prefixes:  make(map[uint64]*branch.BranchStat),
 		prefCount: make(map[uint64]uint64),
 	}
 }
 
-func extractKVPairFromCompressed(filename string, keysSink chan commitment.BranchStat) error {
+func extractKVPairFromCompressed(filename string, keysSink chan branch.BranchStat) error {
 	defer close(keysSink)
 	dec, err := seg.NewDecompressor(filename)
 	if err != nil {
@@ -1616,7 +1617,7 @@ func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
 	if v, _ := version.ParseVersion(filepath.Base(fpath)); v.Major >= 3 {
 		return nil, fmt.Errorf("%s holds v3 commitment records; visualize decodes legacy branches only", filepath.Base(fpath))
 	}
-	stats := make(chan commitment.BranchStat, 8)
+	stats := make(chan branch.BranchStat, 8)
 	errch := make(chan error, 1)
 	go func() { errch <- extractKVPairFromCompressed(fpath, stats) }()
 
@@ -1632,7 +1633,7 @@ func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
 
 		ps, ok := totals.prefixes[s.KeySize]
 		if !ok {
-			ps = new(commitment.BranchStat)
+			ps = new(branch.BranchStat)
 		}
 		ps.Collect(&s)
 		totals.prefixes[s.KeySize] = ps

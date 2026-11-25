@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 type noopPatriciaContext struct{}
@@ -185,7 +186,7 @@ func generateCellEncodeDataRow(tb testing.TB, row []*cell, bm uint16) [16]cellEn
 	return data
 }
 
-func encodeCellRow(tb testing.TB, size int) (row []*cell, bm uint16, enc commitment.BranchData) {
+func encodeCellRow(tb testing.TB, size int) (row []*cell, bm uint16, enc branch.BranchData) {
 	tb.Helper()
 	row, bm = generateCellRow(tb, size)
 	be := NewBranchEncoder(1024)

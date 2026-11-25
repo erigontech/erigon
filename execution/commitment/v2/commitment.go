@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	v2branch "github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 var (
@@ -102,7 +103,7 @@ func cellEncodeDataFromCell(c *cell) cellEncodeData {
 type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
-	merger    *commitment.BranchMerger
+	merger    *v2branch.BranchMerger
 	metrics   *commitment.Metrics
 
 	deferUpdates       bool
@@ -114,7 +115,7 @@ type BranchEncoder struct {
 func NewBranchEncoder(sz uint64) *BranchEncoder {
 	return &BranchEncoder{
 		buf:    bytes.NewBuffer(make([]byte, sz)),
-		merger: commitment.NewHexBranchMerger(sz / 2),
+		merger: v2branch.NewHexBranchMerger(sz / 2),
 	}
 }
 
@@ -259,7 +260,7 @@ func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
 	return nil
 }
 
-func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *[16]cellEncodeData) (commitment.BranchData, error) {
+func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *[16]cellEncodeData) (v2branch.BranchData, error) {
 	be.buf.Reset()
 
 	var encoded [4]byte
@@ -275,46 +276,46 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *
 		cell := &cells[nibble]
 
 		if bitmap&bit != 0 {
-			var fields commitment.CellFields
+			var fields v2branch.CellFields
 			if cell.extLen > 0 && cell.storageAddrLen == 0 {
-				fields |= commitment.FieldExtension
+				fields |= v2branch.FieldExtension
 			}
 			if cell.accountAddrLen > 0 {
-				fields |= commitment.FieldAccountAddr
+				fields |= v2branch.FieldAccountAddr
 			}
 			if cell.storageAddrLen > 0 {
-				fields |= commitment.FieldStorageAddr
+				fields |= v2branch.FieldStorageAddr
 			}
 			if cell.hashLen > 0 {
-				fields |= commitment.FieldHash
+				fields |= v2branch.FieldHash
 			}
 			if cell.stateHashLen == 32 && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
-				fields |= commitment.FieldStateHash
+				fields |= v2branch.FieldStateHash
 			}
 			if err := be.buf.WriteByte(byte(fields)); err != nil {
 				return nil, err
 			}
-			if fields&commitment.FieldExtension != 0 {
+			if fields&v2branch.FieldExtension != 0 {
 				if err := be.putUvarAndVal(uint64(cell.extLen), cell.extension[:cell.extLen]); err != nil {
 					return nil, err
 				}
 			}
-			if fields&commitment.FieldAccountAddr != 0 {
+			if fields&v2branch.FieldAccountAddr != 0 {
 				if err := be.putUvarAndVal(uint64(cell.accountAddrLen), cell.accountAddr[:cell.accountAddrLen]); err != nil {
 					return nil, err
 				}
 			}
-			if fields&commitment.FieldStorageAddr != 0 {
+			if fields&v2branch.FieldStorageAddr != 0 {
 				if err := be.putUvarAndVal(uint64(cell.storageAddrLen), cell.storageAddr[:cell.storageAddrLen]); err != nil {
 					return nil, err
 				}
 			}
-			if fields&commitment.FieldHash != 0 {
+			if fields&v2branch.FieldHash != 0 {
 				if err := be.putUvarAndVal(uint64(cell.hashLen), cell.hash[:cell.hashLen]); err != nil {
 					return nil, err
 				}
 			}
-			if fields&commitment.FieldStateHash != 0 {
+			if fields&v2branch.FieldStateHash != 0 {
 				if err := be.putUvarAndVal(uint64(cell.stateHashLen), cell.stateHash[:cell.stateHashLen]); err != nil {
 					return nil, err
 				}
@@ -325,7 +326,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *
 	return be.buf.Bytes(), nil
 }
 
-func BranchDataString(branchData commitment.BranchData) string {
+func BranchDataString(branchData v2branch.BranchData) string {
 	if branchData.IsTombstone() {
 		return ""
 	}
@@ -342,7 +343,7 @@ func BranchDataString(branchData commitment.BranchData) string {
 		if afterMap&bit == 0 {
 			sb.WriteString("{DELETED}\n")
 		} else {
-			fields := commitment.CellFields(branchData[pos])
+			fields := v2branch.CellFields(branchData[pos])
 			pos++
 			var err error
 			if pos, err = cell.fillFromFields(branchData, pos, fields); err != nil {
@@ -375,7 +376,7 @@ func BranchDataString(branchData commitment.BranchData) string {
 	return sb.String()
 }
 
-func decodeBranchCells(branchData commitment.BranchData) (touchMap, afterMap uint16, row [16]*cell, err error) {
+func decodeBranchCells(branchData v2branch.BranchData) (touchMap, afterMap uint16, row [16]*cell, err error) {
 	touchMap = binary.BigEndian.Uint16(branchData[0:])
 	afterMap = binary.BigEndian.Uint16(branchData[2:])
 	pos := 4
@@ -383,7 +384,7 @@ func decodeBranchCells(branchData commitment.BranchData) (touchMap, afterMap uin
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		if afterMap&bit != 0 {
-			fields := commitment.CellFields(branchData[pos])
+			fields := v2branch.CellFields(branchData[pos])
 			pos++
 			row[nibble] = new(cell)
 			if pos, err = row[nibble].fillFromFields(branchData, pos, fields); err != nil {
@@ -396,7 +397,7 @@ func decodeBranchCells(branchData commitment.BranchData) (touchMap, afterMap uin
 	return
 }
 
-func ValidateBranchData(branchData commitment.BranchData, branchKey []byte) error {
+func ValidateBranchData(branchData v2branch.BranchData, branchKey []byte) error {
 	if branchData.IsTombstone() {
 		return nil
 	}
@@ -476,8 +477,8 @@ func validatePlainKeys(branchKey []byte, row [16]*cell) error {
 	return nil
 }
 
-func DecodeBranchAndCollectStat(key, branch []byte, tv commitment.TrieVariant) *commitment.BranchStat {
-	stat := &commitment.BranchStat{}
+func DecodeBranchAndCollectStat(key, branch []byte, tv commitment.TrieVariant) *v2branch.BranchStat {
+	stat := &v2branch.BranchStat{}
 	if len(key) == 0 {
 		return nil
 	}
@@ -489,7 +490,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv commitment.TrieVariant) *
 	if !bytes.Equal(key, []byte("state")) {
 		stat.IsRoot = false
 
-		tm, am, cells, err := decodeBranchCells(commitment.BranchData(branch))
+		tm, am, cells, err := decodeBranchCells(v2branch.BranchData(branch))
 		if err != nil {
 			return nil
 		}

@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 type whaleOpts struct {
@@ -269,10 +270,10 @@ func branchDiff(t *testing.T, seq, par *MockState) {
 		}
 		var sa, pa uint16
 		if sok {
-			_, sa, _, _ = decodeBranchCells(commitment.BranchData(sb))
+			_, sa, _, _ = decodeBranchCells(branch.BranchData(sb))
 		}
 		if pok {
-			_, pa, _, _ = decodeBranchCells(commitment.BranchData(pb))
+			_, pa, _, _ = decodeBranchCells(branch.BranchData(pb))
 		}
 		t.Logf("DIVERGENT prefix=%x depth=%d seq[%v %016b] par[%v %016b] dropped=%016b", []byte(k), len(k), sok, sa, pok, pa, sa&^pa)
 		if n++; n > 20 {

@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 type LegacyValues interface {
@@ -102,7 +103,7 @@ func (c *LegacyConverter) Convert(legacyKey, value, prev []byte, emit LegacyEmit
 	plane, path, addrHash := c.setKey(prefix)
 
 	if c.incremental && plane == planeAccount && len(prev) != 0 {
-		if err := commitment.BranchData(prev).ForEachCell(func(_ int, cell commitment.BranchCell) error {
+		if err := branch.BranchData(prev).ForEachCell(func(_ int, cell branch.BranchCell) error {
 			if len(cell.AccountAddr) == 0 || len(cell.StorageAddr) == 0 && len(cell.Extension) == 0 && len(cell.Hash) == 0 {
 				return nil
 			}
@@ -119,7 +120,7 @@ func (c *LegacyConverter) Convert(legacyKey, value, prev []byte, emit LegacyEmit
 	n := &c.branch
 	resetNode(n, path, plane)
 	c.scratch = c.scratch[:0]
-	err = commitment.BranchData(value).ForEachCell(func(nib int, cell commitment.BranchCell) error {
+	err = branch.BranchData(value).ForEachCell(func(nib int, cell branch.BranchCell) error {
 		switch {
 		case len(cell.AccountAddr) != 0:
 			if plane != planeAccount || len(cell.AccountAddr) != length.Addr {
@@ -210,7 +211,7 @@ func (c *LegacyConverter) decodePrefix(key []byte) ([]byte, error) {
 	return nibbles.CompactToHex(key), nil
 }
 
-func (c *LegacyConverter) accountLeaf(cell commitment.BranchCell, addrHash *[32]byte, emit LegacyEmitFunc) ([]byte, error) {
+func (c *LegacyConverter) accountLeaf(cell branch.BranchCell, addrHash *[32]byte, emit LegacyEmitFunc) ([]byte, error) {
 	storageRoot := empty.RootHash[:]
 	var rootHash [32]byte
 	switch {
