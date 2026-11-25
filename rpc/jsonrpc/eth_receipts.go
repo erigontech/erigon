@@ -234,13 +234,22 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 
 	var preconfirmed *rpchelper.Preconfirmed
+	var published kv.TemporalTx
+	rangeTx := tx
 	if crit.BlockHash == nil && crit.ToBlock != nil && crit.ToBlock.Int64() == int64(rpc.PendingBlockNumber) {
-		if pre, ok := rpchelper.PreconfirmedView(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber), api.filters); ok {
+		// `pending` also covers the blocks the fork choice has published ahead of its commit.
+		pub, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+		if err != nil {
+			return nil, err
+		}
+		defer pub.Rollback()
+		published, rangeTx = pub, pub
+		if pre, ok := rpchelper.PreconfirmedView(ctx, published, rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber), api.filters); ok {
 			preconfirmed = pre
 		}
 	}
 
-	begin, end, err := api.resolveLogsRange(ctx, tx, crit, preconfirmed == nil)
+	begin, end, err := api.resolveLogsRange(ctx, rangeTx, crit, preconfirmed == nil)
 	if err != nil {
 		return nil, err
 	}
@@ -273,9 +282,17 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 
 	// A named block that has not executed is refused; a tag is answered with what has executed.
-	latestExecuted, err := rpchelper.GetLatestExecutedBlockNumber(tx)
+	committedExecuted, err := rpchelper.GetLatestExecutedBlockNumber(tx)
 	if err != nil {
 		return nil, err
+	}
+	latestExecuted := committedExecuted
+	if published != nil {
+		publishedExecuted, err := rpchelper.GetLatestExecutedBlockNumber(published)
+		if err != nil {
+			return nil, err
+		}
+		latestExecuted = max(latestExecuted, publishedExecuted)
 	}
 	if end > latestExecuted {
 		if endNamed {
@@ -290,19 +307,51 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("node is still initializing")
 	}
 
-	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, end, crit); err != nil {
-		return nil, err
+	var logs types.Logs
+	if begin <= committedExecuted {
+		committedEnd := min(end, committedExecuted)
+		if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, committedEnd, crit); err != nil {
+			return nil, err
+		}
+		if logs, err = api.getLogsV3(ctx, tx, begin, committedEnd, crit, api.BaseAPI.blockRangeLimit, api.BaseAPI.getLogsMaxResults); err != nil {
+			return nil, err
+		}
 	}
-
-	logs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.blockRangeLimit, api.BaseAPI.getLogsMaxResults)
-	if err != nil || preconfirmed == nil {
-		return logs, err
+	if end > committedExecuted {
+		tail, err := api.publishedLogs(ctx, published, max(begin, committedExecuted+1), end, crit)
+		if err != nil {
+			return nil, err
+		}
+		logs = append(logs, tail...)
+	}
+	if preconfirmed == nil {
+		return logs, nil
 	}
 	preLogs, err := preconfirmedLogs(preconfirmed, crit, begin)
 	if err != nil {
 		return nil, err
 	}
 	return append(logs, preLogs...), nil
+}
+
+// publishedLogs returns the matching logs of the blocks from..to that the fork choice has published but not committed.
+func (api *APIImpl) publishedLogs(ctx context.Context, tx kv.TemporalTx, from, to uint64, crit filters.FilterCriteria) (types.Logs, error) {
+	out := types.Logs{}
+	for n := from; n <= to; n++ {
+		block, err := api.blockByNumberWithSenders(ctx, tx, n)
+		if err != nil {
+			return nil, err
+		}
+		if block == nil {
+			return nil, fmt.Errorf("published block %d not found", n)
+		}
+		receipts, err := api.getReceipts(ctx, tx, block)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, blockLogs(n, block.Hash(), block.Transactions(), receipts, crit)...)
+	}
+	return out, nil
 }
 
 // preconfirmedLogs returns the matching logs of the sealed pre-exec blocks from `begin` and of the block being built, in

@@ -23,9 +23,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -120,5 +125,53 @@ func TestPendingLogsServeTheSealedBlocksBetweenTheHeadAndTheBlockBeingBuilt(t *t
 		require.Equal(t, want, uint64(l.BlockNumber))
 		require.Equal(t, wantHash, l.BlockHash)
 		require.Equal(t, wantTopic, l.Topics[0])
+	}
+}
+
+// A block the fork choice has published but not yet committed is already the head every other read reports, so
+// `pending` serves its logs.
+func TestPendingLogsServeABlockPublishedAheadOfTheCommit(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false
+
+	h := newOverlayAheadHarness(t, true)
+	num := h.overlayHeader.Number.Uint64()
+	overlay := h.doms.BlockOverlay()
+	require.NoError(t, stages.SaveStageProgress(overlay, stages.Execution, num))
+
+	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	minTxNum, err := h.m.BlockReader.TxnumReader().Min(h.m.Ctx, tx, num)
+	require.NoError(t, err)
+	maxTxNum := minTxNum + 1 + uint64(len(h.overlayBody.Transactions))
+	require.NoError(t, rawdbv3.TxNums.Append(overlay, num, maxTxNum))
+	putDel := h.doms.AsPutDel(tx)
+	require.NoError(t, rawdb.WriteReceiptCacheV2(putDel, nil, minTxNum))
+	for i, txn := range h.overlayBody.Transactions {
+		receipt := &types.Receipt{
+			Type:              txn.Type(),
+			Status:            types.ReceiptStatusSuccessful,
+			CumulativeGasUsed: uint64(i+1) * params.TxGas,
+			GasUsed:           params.TxGas,
+			TransactionIndex:  uint(i),
+			Logs:              []*types.Log{{Address: common.Address{0x77}, Topics: []common.Hash{{0x11}}, TxIndex: hexutil.Uint(i)}},
+		}
+		require.NoError(t, rawdb.WriteReceiptCacheV2(putDel, receipt, minTxNum+1+uint64(i)))
+	}
+	require.NoError(t, rawdb.WriteReceiptCacheV2(putDel, nil, maxTxNum))
+
+	api := newEthApiForTest(h.base, h.m.DB, nil, nil)
+	head, err := api.BlockNumber(h.m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, num, uint64(head), "fixture: the published block is the head")
+
+	logs, err := api.GetLogs(h.m.Ctx, filters.FilterCriteria{FromBlock: new(big.Int).SetUint64(num), ToBlock: big.NewInt(int64(rpc.PendingBlockNumber))})
+	require.NoError(t, err)
+	require.Len(t, logs, len(h.overlayBody.Transactions))
+	for i, l := range logs {
+		require.Equal(t, num, uint64(l.BlockNumber))
+		require.Equal(t, h.overlayHeader.Hash(), l.BlockHash)
+		require.Equal(t, h.overlayBody.Transactions[i].Hash(), l.TxHash)
 	}
 }
