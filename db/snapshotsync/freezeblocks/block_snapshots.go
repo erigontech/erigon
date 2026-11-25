@@ -22,7 +22,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -169,10 +168,7 @@ func (br *BlockRetire) snapshots() *blocksnapshots.RoSnapshots {
 
 // canRetire retires blocks up to and including irreversibleBlock.
 func (br *BlockRetire) canRetire(blocksInSnapshots, irreversibleBlock uint64, snapType snaptype.Enum) (blockFrom, blockTo uint64, can bool) {
-	blockTo = irreversibleBlock
-	if blockTo < math.MaxUint64 {
-		blockTo++
-	}
+	blockTo = irreversibleBlock + 1
 	blockFrom = blocksInSnapshots + 1
 	blockFrom, blockTo, can = snapshotsync.CanRetire(blockFrom, blockTo, snapType, br.snCfg, br.config.Snapshot.E2RetireStep)
 	return blockFrom, blockTo, can

@@ -285,9 +285,9 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 	stepSize := db.StepSize()
 	var fromStep, toStep kv.Step
 	var irreversibleTxNum uint64
-	if err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		var err error
-		irreversibleTxNum, err = execfinality.ResolveTxNum(ctx, tx, maxReorgDepth, false, cfg.BlockReader.TxnumReader(), stepSize)
+		irreversibleTxNum, err = execfinality.ResolveTxNum(ctx, tx, maxReorgDepth, false, cfg.BlockReader.TxnumReader())
 		if err != nil {
 			return err
 		}

@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
@@ -89,25 +88,26 @@ func TestResolveWithoutFinalisedBlockUsesMaxReorgDepth(t *testing.T) {
 	require.Equal(t, uint64(3), block)
 }
 
-// The tx that names the irreversible txnum deletes the changesets of the steps ending there, and only those.
-func TestIrreversibleTxNumDeletesTheChangesetsOfItsSteps(t *testing.T) {
+// A block that still has a changeset can be unwound, so the irreversible txnum stops below it; the blocks before it
+// still go into files, also when a time-bounded delete stopped there.
+func TestIrreversibleTxNumStopsBelowABlockWithAChangeset(t *testing.T) {
 	db := newFinalityTestDB(t)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 	for blockNum := uint64(0); blockNum <= 20; blockNum++ {
 		require.NoError(t, rawdbv3.TxNums.Append(tx, blockNum, blockNum))
-		if blockNum >= 5 {
-			require.NoError(t, tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)}), []byte{1}))
-		}
 	}
-	const stepSize = 4
-	txNum, err := IrreversibleTxNum(t.Context(), tx, rawdbv3.TxNums, stepSize, 12)
+	txNum, err := IrreversibleTxNum(t.Context(), tx, rawdbv3.TxNums, 12)
 	require.NoError(t, err)
-	require.Equal(t, uint64(12), txNum)
-	lowest, err := changeset.ReadLowestUnwindableBlock(tx)
+	require.Equal(t, uint64(12), txNum, "no changesets: the irreversible block's last txnum")
+
+	for blockNum := uint64(8); blockNum <= 20; blockNum++ {
+		require.NoError(t, tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)}), []byte{1}))
+	}
+	txNum, err = IrreversibleTxNum(t.Context(), tx, rawdbv3.TxNums, 12)
 	require.NoError(t, err)
-	require.Equal(t, uint64(12), lowest, "steps end at txnum 11, so blocks up to 11 lost their changesets")
+	require.Equal(t, uint64(7), txNum)
 }
 
 // snapshotTxNums resolves a txnum from a full-range table, the way the block-snapshot
@@ -157,13 +157,13 @@ func TestIrreversibleTxNumBelowTheTxNumWindow(t *testing.T) {
 		irreversibleTxNum = uint64(2_400_000_000)
 	)
 	db := txNumWindowDB(t)
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		reader := rawdbv3.TxNums.WithCustomReadTxNumFunc(snapshotTxNums{map[uint64]uint64{irreversibleBlock: irreversibleTxNum}})
-		txNum, err := IrreversibleTxNum(t.Context(), tx, reader, 1, irreversibleBlock)
+		txNum, err := IrreversibleTxNum(t.Context(), tx, reader, irreversibleBlock)
 		require.NoError(t, err)
 		require.Equal(t, irreversibleTxNum, txNum)
 
-		txNum, err = IrreversibleTxNum(t.Context(), tx, rawdbv3.TxNums, 1, irreversibleBlock)
+		txNum, err = IrreversibleTxNum(t.Context(), tx, rawdbv3.TxNums, irreversibleBlock)
 		require.NoError(t, err)
 		require.Zero(t, txNum, "an unknown block collates nothing")
 		return nil

@@ -18,10 +18,6 @@ package execfinality
 
 import (
 	"context"
-	"math"
-	"time"
-
-	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -72,44 +68,25 @@ func Resolve(tx kv.Tx, maxReorgDepth uint64, initialCycle bool, options ...Resol
 	return IrreversibleBlock(headBlockNum, finalisedBlockNum, maxReorgDepth, initialCycle), nil
 }
 
-// collateDeleteTimeout bounds the write tx that deletes the changesets of the steps to collate, which exec waits
-// for at the tip. Steps whose changesets do not all go in one tx wait for the next pass.
-const collateDeleteTimeout = 100 * time.Millisecond
-
-// IrreversibleTxNum is the last txnum state files may hold: the end of irreversibleBlock. In the same tx it deletes
-// the changesets of the blocks in the steps that end there, so a block in files is never unwindable and collation
-// does not wait for the changeset prune.
-func IrreversibleTxNum(ctx context.Context, tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, stepSize, irreversibleBlock uint64) (uint64, error) {
-	if irreversibleBlock == math.MaxUint64 {
-		return math.MaxUint64, nil
+// IrreversibleTxNum is the last txnum state files may hold: the end of irreversibleBlock, lowered below a
+// block that still has a changeset, because that block can still be unwound.
+func IrreversibleTxNum(ctx context.Context, tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, irreversibleBlock uint64) (uint64, error) {
+	lowest, err := changeset.ReadLowestUnwindableBlock(tx)
+	if err != nil || lowest == 0 {
+		return 0, err
 	}
-	txNum, ok, err := txNumsReader.MaxExact(ctx, tx, nil, irreversibleBlock)
+	txNum, ok, err := txNumsReader.MaxExact(ctx, tx, nil, min(irreversibleBlock, lowest-1))
 	if err != nil || !ok {
 		return 0, err
-	}
-	stepsEnd := (txNum + 1) / stepSize * stepSize
-	if stepsEnd == 0 {
-		return 0, nil
-	}
-	lastBlock, found, err := txNumsReader.FindBlockNum(ctx, tx, stepsEnd-1)
-	if err != nil || !found {
-		return 0, err
-	}
-	if err := rawdb.PruneTable(tx, kv.ChangeSets3, lastBlock+1, ctx, math.MaxInt, collateDeleteTimeout, log.Root(), "collate"); err != nil {
-		return 0, err
-	}
-	lowest, err := changeset.ReadLowestUnwindableBlock(tx)
-	if err != nil || lowest <= lastBlock {
-		return 0, err // the rest of the delete waits for the next pass
 	}
 	return txNum, nil
 }
 
 // ResolveTxNum is Resolve followed by IrreversibleTxNum.
-func ResolveTxNum(ctx context.Context, tx kv.RwTx, maxReorgDepth uint64, initialCycle bool, txNumsReader rawdbv3.TxNumsReader, stepSize uint64) (uint64, error) {
+func ResolveTxNum(ctx context.Context, tx kv.Tx, maxReorgDepth uint64, initialCycle bool, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
 	block, err := Resolve(tx, maxReorgDepth, initialCycle)
 	if err != nil {
 		return 0, err
 	}
-	return IrreversibleTxNum(ctx, tx, txNumsReader, stepSize, block)
+	return IrreversibleTxNum(ctx, tx, txNumsReader, block)
 }

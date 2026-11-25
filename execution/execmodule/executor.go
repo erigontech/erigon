@@ -127,7 +127,7 @@ func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCyc
 	if err := pe.sync.RunPrune(ctx, tx, initialCycle, irreversibleBlock, timeout); err != nil {
 		return 0, err
 	}
-	return execfinality.IrreversibleTxNum(ctx, tx, pe.blockReader.TxnumReader(), pe.db.StepSize(), irreversibleBlock)
+	return execfinality.IrreversibleTxNum(ctx, tx, pe.blockReader.TxnumReader(), irreversibleBlock)
 }
 
 // Commits sd and, if another iteration follows, returns a fresh tx+SD to run it on; (nil,nil,nil) leaves the loop unchanged.
