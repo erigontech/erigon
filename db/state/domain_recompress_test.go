@@ -17,6 +17,7 @@
 package state_test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"path/filepath"
 	"testing"
@@ -37,7 +38,7 @@ func TestRecompressDomainFiles(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	key := func(i int) []byte { return binary.BigEndian.AppendUint64(make([]byte, 44), uint64(i)) }
 
-	agg.SetCompressionForTest(kv.StorageDomain, seg.CompressNone)
+	agg.SetCompressionForTest(kv.StorageDomain, seg.CompressNone, seg.CompressNone)
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -62,26 +63,44 @@ func TestRecompressDomainFiles(t *testing.T) {
 		for i := range keys {
 			v, _, getErr := roTx.GetLatest(kv.StorageDomain, key(i), kv.GetLatestOptions{})
 			require.NoError(t, getErr)
-			vals = append(vals, v)
+			vals = append(vals, bytes.Clone(v))
 		}
 		return vals
 	}
-	before := latest()
+	asOf := func() [][]byte {
+		roTx, beginErr := db.BeginTemporalRo(ctx)
+		require.NoError(t, beginErr)
+		defer roTx.Rollback()
+		var vals [][]byte
+		for txNum := uint64(1); txNum < txs; txNum += 3 {
+			v, _, getErr := roTx.GetAsOf(kv.StorageDomain, key(int(txNum)%keys), txNum)
+			require.NoError(t, getErr)
+			vals = append(vals, bytes.Clone(v))
+		}
+		return vals
+	}
+	before, beforeAsOf := latest(), asOf()
 
-	agg.SetCompressionForTest(kv.StorageDomain, seg.CompressKeys)
+	agg.SetCompressionForTest(kv.StorageDomain, seg.CompressKeys, seg.CompressKeys|seg.CompressVals)
 	res, err := agg.RecompressDomainFiles(ctx, kv.StorageDomain, true, log.New())
 	require.NoError(t, err)
-	require.Equal(t, state.RecompressResult{Changed: 1, Same: 2}, res)
+	require.Equal(t, state.RecompressResult{Changed: 4, Same: 2}, res)
 	backups, err := dir.Glob(filepath.Join(agg.Dirs().Snap, "patch-backup", "*"))
 	require.NoError(t, err)
 	require.Empty(t, backups)
 
 	res, err = agg.RecompressDomainFiles(ctx, kv.StorageDomain, false, log.New())
 	require.NoError(t, err)
-	require.Equal(t, state.RecompressResult{Changed: 1, Same: 2}, res)
+	require.Equal(t, state.RecompressResult{Changed: 4, Same: 2}, res)
 	require.Equal(t, before, latest())
+	require.Equal(t, beforeAsOf, asOf())
 
 	res, err = agg.RecompressDomainFiles(ctx, kv.StorageDomain, false, log.New())
+	require.NoError(t, err)
+	require.Equal(t, state.RecompressResult{Same: 6}, res)
+
+	agg.SetCompressionForTest(kv.StorageDomain, seg.CompressKeys, seg.CompressNone)
+	res, err = agg.RecompressDomainFiles(ctx, kv.StorageDomain, true, log.New())
 	require.NoError(t, err)
 	require.Equal(t, state.RecompressResult{Same: 3}, res)
 }

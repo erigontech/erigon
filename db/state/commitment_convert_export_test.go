@@ -75,6 +75,7 @@ func SetLegacyCommitTxNumsForTest(fn func(*DomainRoTx, uint64, uint64) ([]uint64
 	legacyCommitTxNumsFn = fn
 }
 
-func (a *Aggregator) SetCompressionForTest(name kv.Domain, c seg.FileCompression) {
-	a.d[name].Compression = c
+func (a *Aggregator) SetCompressionForTest(name kv.Domain, domain, history seg.FileCompression) {
+	a.d[name].DomainCfg.Compression = domain
+	a.d[name].History.Compression = history
 }

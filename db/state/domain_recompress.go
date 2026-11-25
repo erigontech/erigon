@@ -29,38 +29,90 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 type RecompressResult struct{ Same, Changed int }
 
-// RecompressDomainFiles writes each .kv file of the domain again with the current compressor.
-// A file whose bytes change replaces the original together with its rebuilt accessors, and
-// the original goes to snapshots/patch-backup. Files are done one at a time, so the extra
-// disk space is one file. The caller must not hold readers of the aggregator's files.
+// RecompressDomainFiles writes each .kv and history .v/.ef file of the domain again with the
+// current compressor, and skips the file kinds that the domain does not compress. A file whose
+// bytes change replaces the original together with its rebuilt accessors, and the original
+// goes to snapshots/patch-backup. Files are done one at a time, so the extra disk space is one
+// file. The caller must not hold readers of the aggregator's files.
 func (a *Aggregator) RecompressDomainFiles(ctx context.Context, name kv.Domain, dryRun bool, logger log.Logger) (RecompressResult, error) {
+	var kvRanges, vRanges []txRange
 	at := a.BeginFilesRo()
-	ranges := make([][2]uint64, 0, len(at.d[name].files))
-	for _, f := range at.d[name].files {
-		ranges = append(ranges, [2]uint64{f.startTxNum, f.endTxNum})
+	if d := a.d[name]; d.DomainCfg.Compression != seg.CompressNone {
+		kvRanges = fileRanges(at.d[name].files)
+	}
+	if h := a.d[name].History; h.Compression != seg.CompressNone {
+		vRanges = fileRanges(at.d[name].ht.files)
 	}
 	at.Close()
 
 	var res RecompressResult
-	for _, r := range ranges {
-		changed, err := a.recompressDomainFile(ctx, name, r[0], r[1], dryRun, logger)
-		if err != nil {
-			return res, err
-		}
+	count := func(changed bool, err error) error {
 		if changed {
 			res.Changed++
 		} else {
 			res.Same++
 		}
+		return err
+	}
+	for _, r := range kvRanges {
+		if err := count(a.recompressFile(ctx, name, r, dryRun, logger, recompressKV)); err != nil {
+			return res, err
+		}
+	}
+	for _, r := range vRanges {
+		if err := count(a.recompressFile(ctx, name, r, dryRun, logger, recompressHistory)); err != nil {
+			return res, err
+		}
 	}
 	return res, nil
 }
 
-func (a *Aggregator) recompressDomainFile(ctx context.Context, name kv.Domain, fromTxNum, toTxNum uint64, dryRun bool, logger log.Logger) (bool, error) {
+type txRange struct{ from, to uint64 }
+
+func fileRanges(files visibleFiles) []txRange {
+	ranges := make([]txRange, 0, len(files))
+	for _, f := range files {
+		ranges = append(ranges, txRange{f.startTxNum, f.endTxNum})
+	}
+	return ranges
+}
+
+// recompressor writes the files of range r to stage and returns the original and the new
+// path of each data file.
+type recompressor func(ctx context.Context, dt *DomainRoTx, r txRange, stage string, staged map[string]string, logger log.Logger) (patchedRange, [][2]string, error)
+
+func recompressKV(ctx context.Context, dt *DomainRoTx, r txRange, stage string, staged map[string]string, logger log.Logger) (patchedRange, [][2]string, error) {
+	i := slices.IndexFunc(dt.files, func(f visibleFile) bool { return f.startTxNum == r.from && f.endTxNum == r.to })
+	if i < 0 {
+		return patchedRange{}, nil, fmt.Errorf("%s .kv %d-%d is gone", dt.d.Name, r.from, r.to)
+	}
+	pr, err := rewriteDomainFile(ctx, dt, dt.files[i], nil, stage, staged, logger)
+	return pr, [][2]string{{dt.files[i].Fullpath(), dt.d.kvNewFilePathIn(stage, pr.from, pr.to)}}, err
+}
+
+func recompressHistory(ctx context.Context, dt *DomainRoTx, r txRange, stage string, staged map[string]string, logger log.Logger) (patchedRange, [][2]string, error) {
+	vs, efs, err := historyFilePairs(dt)
+	if err != nil {
+		return patchedRange{}, nil, err
+	}
+	i := slices.IndexFunc(vs, func(f visibleFile) bool { return f.startTxNum == r.from && f.endTxNum == r.to })
+	if i < 0 {
+		return patchedRange{}, nil, fmt.Errorf("%s .v %d-%d is gone", dt.d.Name, r.from, r.to)
+	}
+	pr, err := rewriteHistoryFile(ctx, dt.ht, vs[i], efs[i], nil, stage, staged, logger)
+	h := dt.ht.h
+	return pr, [][2]string{
+		{vs[i].Fullpath(), filepath.Join(stage, filepath.Base(h.vNewFilePath(pr.from, pr.to)))},
+		{efs[i].Fullpath(), filepath.Join(stage, filepath.Base(h.InvertedIndex.efNewFilePath(pr.from, pr.to)))},
+	}, err
+}
+
+func (a *Aggregator) recompressFile(ctx context.Context, name kv.Domain, r txRange, dryRun bool, logger log.Logger, rewrite recompressor) (bool, error) {
 	stage, err := a.newPatchStage()
 	if err != nil {
 		return false, err
@@ -69,28 +121,25 @@ func (a *Aggregator) recompressDomainFile(ctx context.Context, name kv.Domain, f
 
 	staged := map[string]string{}
 	at := a.BeginFilesRo()
-	dt := at.d[name]
-	i := slices.IndexFunc(dt.files, func(f visibleFile) bool { return f.startTxNum == fromTxNum && f.endTxNum == toTxNum })
-	if i < 0 {
-		at.Close()
-		return false, fmt.Errorf("%s file %d-%d is gone", name, fromTxNum, toTxNum)
-	}
-	original := dt.files[i].Fullpath()
-	r, err := rewriteDomainFile(ctx, dt, dt.files[i], nil, stage, staged, logger)
+	pr, files, err := rewrite(ctx, at.d[name], r, stage, staged, logger)
 	at.Close()
 	if err != nil {
-		return false, fmt.Errorf("recompress %s: %w", original, err)
+		return false, fmt.Errorf("recompress %s %d-%d: %w", name, r.from, r.to, err)
 	}
 
-	same, err := sameFileContent(original, a.d[name].kvNewFilePathIn(stage, r.from, r.to))
-	if err != nil {
-		return false, err
+	changed := false
+	for _, f := range files {
+		same, err := sameFileContent(f[0], f[1])
+		if err != nil {
+			return false, err
+		}
+		logger.Info("[recompress]", "file", filepath.Base(f[0]), "changed", !same, "dryRun", dryRun)
+		changed = changed || !same
 	}
-	logger.Info("[recompress]", "file", filepath.Base(original), "changed", !same, "dryRun", dryRun)
-	if same || dryRun {
-		return !same, nil
+	if !changed || dryRun {
+		return changed, nil
 	}
-	return true, a.replaceFiles(name, []patchedRange{r}, staged, logger)
+	return true, a.replaceFiles(name, []patchedRange{pr}, staged, logger)
 }
 
 func sameFileContent(a, b string) (bool, error) {

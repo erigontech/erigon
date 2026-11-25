@@ -484,7 +484,7 @@ var snapshotCommand = cli.Command{
 				}
 				return nil
 			},
-			Description: "temporary tool: write the .kv files of a domain again with the current compressor and replace the files whose bytes change, with rebuilt accessors. Replaced files go to snapshots/patch-backup",
+			Description: "temporary tool: write the .kv and history .v/.ef files of a domain again with the current compressor and replace the files whose bytes change, with rebuilt accessors. Replaced files go to snapshots/patch-backup",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "domain", Value: kv.StorageDomain.String()},
