@@ -42,7 +42,7 @@ func ComputeLeafRefs(key, data []byte) (*commitment.LeafRefs, error) {
 		return nil, nil
 	}
 	plane, depth := key[0], int(key[len(key)-1])
-	if depth == 0 || depth > 63 || plane != planeAccount && plane != planeStorage || Validate(data, depth) != nil {
+	if depth == 0 || depth > 63 || plane != PlaneAccount && plane != PlaneStorage || Validate(data, depth) != nil {
 		return nil, nil
 	}
 	record := Record{data: data, depth: depth}

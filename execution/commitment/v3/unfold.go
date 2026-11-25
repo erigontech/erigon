@@ -26,7 +26,7 @@ func unfold(ctx brancher, path []byte, plane byte, addrHash []byte) (*node, erro
 		return nil, fmt.Errorf("commitment v3: path depth %d", len(path))
 	}
 
-	key := nodeKey(plane, addrHash, path, nil)
+	key := NodeKey(plane, addrHash, path, nil)
 	data, _, err := branchOwned(ctx, key)
 	if err != nil {
 		return nil, err
@@ -51,8 +51,8 @@ func unfold(ctx brancher, path []byte, plane byte, addrHash []byte) (*node, erro
 	}
 	l := record.layout()
 	if record.isLeafRoot() {
-		fullPath := unpackPath(data[1:33], 64, nil)
-		n.setLeaf(int(fullPath[0]), packPath(fullPath[1:], nil), data[34:])
+		fullPath := UnpackPath(data[1:33], 64, nil)
+		n.setLeaf(int(fullPath[0]), PackPath(fullPath[1:], nil), data[34:])
 		return n, nil
 	}
 
@@ -81,5 +81,5 @@ func decodeExtensionInto(encoded, dst []byte) []byte {
 	if len(encoded) == 0 {
 		return nil
 	}
-	return unpackPath(encoded[1:], int(encoded[0]), dst)
+	return UnpackPath(encoded[1:], int(encoded[0]), dst)
 }

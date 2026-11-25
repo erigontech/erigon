@@ -37,7 +37,7 @@ func insertRoot(n *node, path, value []byte) error {
 	if n.childMask == 0 {
 		n.path = nil
 		var packScratch [32]byte
-		n.setLeaf(int(path[0]), packPath(path[1:], packScratch[:0]), value)
+		n.setLeaf(int(path[0]), PackPath(path[1:], packScratch[:0]), value)
 		return nil
 	}
 	if len(n.path) != 0 {
@@ -98,7 +98,7 @@ func removeRoot(n *node, path []byte) error {
 		n.path = nil
 		switch state.kind {
 		case removalLeaf:
-			n.setLeaf(int(state.path[0]), packPath(state.path[1:], nil), state.value)
+			n.setLeaf(int(state.path[0]), PackPath(state.path[1:], nil), state.value)
 		case removalBranch:
 			n.path = append(n.path, state.path...)
 			n.setStoredChild(int(state.path[0]), state.hash, nil)

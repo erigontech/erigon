@@ -48,26 +48,26 @@ func TestPathCodec(t *testing.T) {
 				path[i] = byte((i*7 + count) & 0x0f)
 			}
 
-			packed := packPath(path, packedBuffer[:])
-			require.Len(t, packed, packedLen(count))
+			packed := PackPath(path, packedBuffer[:])
+			require.Len(t, packed, PackedLen(count))
 			if count&1 == 1 {
 				require.Zero(t, packed[len(packed)-1]&0x0f)
 			}
-			require.Equal(t, path, unpackPath(packed, count, unpackedBuffer[:]))
+			require.Equal(t, path, UnpackPath(packed, count, unpackedBuffer[:]))
 		}
 	})
 	t.Run("E6/PackPathReusesDestinationAndClearsOddPadding", func(t *testing.T) {
 		dst := make([]byte, 3)
-		packed := packPath([]byte{1, 2, 3, 4, 5}, dst)
+		packed := PackPath([]byte{1, 2, 3, 4, 5}, dst)
 		require.Equal(t, []byte{0x12, 0x34, 0x50}, packed)
 
-		packed = packPath([]byte{6, 7, 8, 9}, packed)
+		packed = PackPath([]byte{6, 7, 8, 9}, packed)
 		require.Equal(t, []byte{0x67, 0x89}, packed)
 	})
 	t.Run("E7/PackedPathSortOrder", func(t *testing.T) {
 		makeKey := func(path []byte) []byte {
 			key := []byte{0x40}
-			key = append(key, packPath(path, nil)...)
+			key = append(key, PackPath(path, nil)...)
 			return append(key, byte(len(path)))
 		}
 		paths := [][]byte{
@@ -88,7 +88,7 @@ func TestPathCodec(t *testing.T) {
 
 		first, last := -1, -1
 		for i, key := range keys {
-			path := unpackPath(key[1:len(key)-1], int(key[len(key)-1]), nil)
+			path := UnpackPath(key[1:len(key)-1], int(key[len(key)-1]), nil)
 			if path[0] == 0x0a {
 				if first == -1 {
 					first = i
@@ -98,7 +98,7 @@ func TestPathCodec(t *testing.T) {
 		}
 		require.NotEqual(t, -1, first)
 		for _, key := range keys[first : last+1] {
-			path := unpackPath(key[1:len(key)-1], int(key[len(key)-1]), nil)
+			path := UnpackPath(key[1:len(key)-1], int(key[len(key)-1]), nil)
 			require.Equal(t, byte(0x0a), path[0])
 		}
 	})
@@ -108,17 +108,17 @@ func TestPathCodec(t *testing.T) {
 			for i := range nibbles {
 				nibbles[i] = byte((i*7 + 3) & 0x0f)
 			}
-			want := packPath(nibbles, nil)
+			want := PackPath(nibbles, nil)
 
 			var scratch [32]byte
 			for i := range scratch {
 				scratch[i] = 0xff
 			}
-			got := packPath(nibbles, scratch[:0])
+			got := PackPath(nibbles, scratch[:0])
 			require.True(t, bytes.Equal(want, got), "count %d: want %x got %x", count, want, got)
 
-			reused := packPath(bytes.Repeat([]byte{0x0f}, 64), nil)
-			got = packPath(nibbles, reused[:0])
+			reused := PackPath(bytes.Repeat([]byte{0x0f}, 64), nil)
+			got = PackPath(nibbles, reused[:0])
 			require.True(t, bytes.Equal(want, got), "count %d reused: want %x got %x", count, want, got)
 		}
 	})
@@ -150,7 +150,7 @@ func TestNodeKeys(t *testing.T) {
 					require.Equal(t, tc.tag, tc.key[0])
 					require.Equal(t, tc.addr, tc.key[1:1+len(tc.addr)])
 					require.Equal(t, byte(count), tc.key[len(tc.key)-1])
-					require.Equal(t, path, unpackPath(tc.key[1+len(tc.addr):len(tc.key)-1], count, []byte{}))
+					require.Equal(t, path, UnpackPath(tc.key[1+len(tc.addr):len(tc.key)-1], count, []byte{}))
 				})
 			}
 		}
@@ -201,7 +201,7 @@ func TestAccountCodec(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				update := testAccountUpdate(commitmenttest.Account(tt.spec))
 				update.Flags = 0
-				encoded := encodeAccountLeaf(update, tt.root[:], nil)
+				encoded := EncodeAccountLeaf(update, tt.root[:], nil)
 				nonce, balance, gotCode, gotRoot, err := decodeAccountLeaf(encoded)
 				require.NoError(t, err)
 				require.Equal(t, tt.spec.Nonce, nonce)
@@ -241,9 +241,9 @@ func TestAccountCodec(t *testing.T) {
 			{"nonce only", commitment.Update{Nonce: 1, CodeHash: empty.CodeHash}, empty.RootHash[:], []byte{accountHasNonce, 1}},
 			{"balance only", commitment.Update{Balance: *uint256.NewInt(99), CodeHash: empty.CodeHash}, empty.RootHash[:], []byte{0, 99}},
 		} {
-			t.Run(tt.name, func(t *testing.T) { require.Equal(t, tt.want, encodeAccountLeaf(&tt.update, tt.root, nil)) })
+			t.Run(tt.name, func(t *testing.T) { require.Equal(t, tt.want, EncodeAccountLeaf(&tt.update, tt.root, nil)) })
 		}
-		full := encodeAccountLeaf(&commitment.Update{Nonce: 1, Balance: *uint256.NewInt(99), CodeHash: codeHash}, empty.RootHash[:], nil)
+		full := EncodeAccountLeaf(&commitment.Update{Nonce: 1, Balance: *uint256.NewInt(99), CodeHash: codeHash}, empty.RootHash[:], nil)
 		require.Len(t, full, 1+1+length.Hash+1)
 	})
 	t.Run("E3/malformed", func(t *testing.T) {
@@ -274,7 +274,7 @@ func TestAccountCodec(t *testing.T) {
 				rnd := rand.New(rand.NewSource(7))
 				for i := range 2000 {
 					value, root := commitmenttest.SizedAccount(i, i%100 < share, rnd)
-					encoded := encodeAccountLeaf(testAccountUpdate(value), root, nil)
+					encoded := EncodeAccountLeaf(testAccountUpdate(value), root, nil)
 					nonce, balance, code, storage, err := decodeAccountLeaf(encoded)
 					require.NoError(t, err, "account=%d", i)
 					require.Equal(t, value.Nonce, nonce)
@@ -340,7 +340,7 @@ func TestStateCodec(t *testing.T) {
 
 func TestRecordCodec(t *testing.T) {
 	t.Run("E24/RecordDecodeHeaderForms", func(t *testing.T) {
-		suffix := packPath(bytes.Repeat([]byte{1}, 60), nil)
+		suffix := PackPath(bytes.Repeat([]byte{1}, 60), nil)
 		tests := []struct {
 			name  string
 			data  []byte
@@ -415,7 +415,7 @@ func TestRecordCodec(t *testing.T) {
 	})
 	t.Run("E26/RecordDecodeAccessors", func(t *testing.T) {
 		depth := 3
-		suffix := packPath(bytes.Repeat([]byte{1}, 60), nil)
+		suffix := PackPath(bytes.Repeat([]byte{1}, 60), nil)
 		extension := extFixture([]byte{6, 7, 8})
 		second := extFixture([]byte{9})
 		data := commitmenttest.Record(&commitmenttest.RecordSpec{
@@ -467,8 +467,8 @@ func TestRecordCodec(t *testing.T) {
 			Flags: hdrHasChildExt, ChildMask: 0x000f, LeafMask: 0x000a, ExtensionMask: 0x0001,
 			Extensions: [16][]byte{0: extFixture([]byte{6, 7})},
 			Leaves: [16]commitmenttest.Leaf{
-				1: {Suffix: packPath(bytes.Repeat([]byte{1}, 60), nil), Value: []byte{1}},
-				3: {Suffix: packPath(bytes.Repeat([]byte{1}, 60), nil), Value: []byte{3}},
+				1: {Suffix: PackPath(bytes.Repeat([]byte{1}, 60), nil), Value: []byte{1}},
+				3: {Suffix: PackPath(bytes.Repeat([]byte{1}, 60), nil), Value: []byte{3}},
 			},
 		})
 		r := Record{data: data, depth: 3}
@@ -494,7 +494,7 @@ func TestRecordCodec(t *testing.T) {
 			{name: "leaf root and self extension", data: append([]byte{hdrIsLeafRoot | hdrHasSelfExt}, make([]byte, 33)...), depth: 0, want: ErrRecordRoot},
 			{name: "self extension odd padding", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 1, SelfExtension: []byte{3, 0x12, 0x31}}), depth: 0, want: ErrRecordTrailer},
 			{name: "self extension has two children", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 3, SelfExtension: extFixture([]byte{1})}), depth: 0, want: ErrRecordRoot},
-			{name: "self extension over a leaf", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 1, LeafMask: 1, SelfExtension: extFixture([]byte{1}), Leaves: [16]commitmenttest.Leaf{0: {Suffix: packPath(bytes.Repeat([]byte{1}, 63), nil), Value: []byte{1}}}}), depth: 0, want: ErrRecordRoot},
+			{name: "self extension over a leaf", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 1, LeafMask: 1, SelfExtension: extFixture([]byte{1}), Leaves: [16]commitmenttest.Leaf{0: {Suffix: PackPath(bytes.Repeat([]byte{1}, 63), nil), Value: []byte{1}}}}), depth: 0, want: ErrRecordRoot},
 			{name: "self extension and child extension", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt | hdrHasChildExt, ChildMask: 1, ExtensionMask: 1, SelfExtension: extFixture([]byte{1}), Extensions: [16][]byte{0: extFixture([]byte{2})}}), depth: 0, want: ErrRecordRoot},
 			{name: "root branch has one child", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 1, ExtensionMask: 1, Extensions: [16][]byte{0: extFixture([]byte{1})}}), depth: 0, want: ErrRecordMasks},
 			{name: "short extension trailer", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 3, ExtensionMask: 1, Extensions: [16][]byte{0: {3, 0x12}}}), depth: 3, want: ErrRecordTruncated},
@@ -507,7 +507,7 @@ func TestRecordCodec(t *testing.T) {
 		}
 	})
 	t.Run("E26/EncodeRecordRoundTrip", func(t *testing.T) {
-		suffix := packPath(bytes.Repeat([]byte{1}, 60), nil)
+		suffix := PackPath(bytes.Repeat([]byte{1}, 60), nil)
 		hash := bytes.Repeat([]byte{0xab}, 32)
 		tests := []struct {
 			name  string
@@ -543,7 +543,7 @@ func TestRecordCodec(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				n := materializeNode(nil, planeAccount, &tt.spec)
+				n := materializeNode(nil, PlaneAccount, &tt.spec)
 				data := encodeRecord(n, tt.depth, bytes.Repeat([]byte{0xff}, 8))
 				require.NoError(t, Validate(data, tt.depth))
 				tt.check(t, Record{data: data, depth: tt.depth})
@@ -560,12 +560,12 @@ func TestRecordCodec(t *testing.T) {
 		}{
 			{
 				name: "leaf root",
-				spec: commitmenttest.RecordSpec{ChildMask: 1 << 4, LeafMask: 1 << 4, Leaves: [16]commitmenttest.Leaf{4: {Suffix: packPath(bytes.Repeat([]byte{2}, 63), nil), Value: []byte{1, 2}}}},
+				spec: commitmenttest.RecordSpec{ChildMask: 1 << 4, LeafMask: 1 << 4, Leaves: [16]commitmenttest.Leaf{4: {Suffix: PackPath(bytes.Repeat([]byte{2}, 63), nil), Value: []byte{1, 2}}}},
 				check: func(t *testing.T, data []byte) {
 					require.Equal(t, byte(hdrIsLeafRoot), data[0])
 					require.NoError(t, Validate(data, 0))
 					key, value := data[1:33], data[34:]
-					require.Equal(t, packPath(append([]byte{4}, bytes.Repeat([]byte{2}, 63)...), nil), key)
+					require.Equal(t, PackPath(append([]byte{4}, bytes.Repeat([]byte{2}, 63)...), nil), key)
 					require.Equal(t, []byte{1, 2}, value)
 				},
 			},
@@ -593,7 +593,7 @@ func TestRecordCodec(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				tt.check(t, encodeRecord(materializeNode(tt.path, planeAccount, &tt.spec), 0, nil))
+				tt.check(t, encodeRecord(materializeNode(tt.path, PlaneAccount, &tt.spec), 0, nil))
 			})
 		}
 	})
@@ -635,7 +635,7 @@ func TestExtensionHotPathsDoNotAllocate(t *testing.T) {
 		require.Zero(t, testing.AllocsPerRun(100, callExtension))
 	}
 
-	n := newNode(planeAccount, 1)
+	n := newNode(PlaneAccount, 1)
 	n.setStoredChild(3, child[:], []byte{2, 3, 4})
 	data := encodeRecord(n, len(n.path), nil)
 	stored := fork(n.path)
@@ -654,7 +654,7 @@ func TestExtensionHotPathsDoNotAllocate(t *testing.T) {
 }
 
 func extFixture(path []byte) []byte {
-	return append([]byte{byte(len(path))}, packPath(path, nil)...)
+	return append([]byte{byte(len(path))}, PackPath(path, nil)...)
 }
 
 func TestConsensusHash(t *testing.T) {
@@ -754,7 +754,7 @@ func TestConsensusHash(t *testing.T) {
 func TestUnfoldRejectsInvalidRecords(t *testing.T) {
 	branch := func(path []byte) []byte {
 		n := fork(path)
-		n.plane = planeAccount
+		n.plane = PlaneAccount
 		n.setStoredChild(0, bytes.Repeat([]byte{1}, 32), nil)
 		n.setStoredChild(1, bytes.Repeat([]byte{2}, 32), nil)
 		data := encodeRecord(n, len(path), nil)
@@ -774,9 +774,9 @@ func TestUnfoldRejectsInvalidRecords(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := newShardedContext()
-			require.NoError(t, ctx.PutBranch(nodeKey(planeAccount, nil, tc.path, nil), tc.data, nil))
+			require.NoError(t, ctx.PutBranch(NodeKey(PlaneAccount, nil, tc.path, nil), tc.data, nil))
 			var err error
-			require.NotPanics(t, func() { _, err = unfold(ctx, tc.path, planeAccount, nil) })
+			require.NotPanics(t, func() { _, err = unfold(ctx, tc.path, PlaneAccount, nil) })
 			require.Error(t, err)
 		})
 	}
@@ -822,7 +822,7 @@ func TestEnumerateRecordChildrenRejectsUnsafeDepth(t *testing.T) {
 
 func TestComputeLeafRefsSkipsInlineStorageLeaves(t *testing.T) {
 	path := bytes.Repeat([]byte{1}, 63)
-	n := newNode(planeStorage, path...)
+	n := newNode(PlaneStorage, path...)
 	n.addLeaf(0, 0, 1)
 	n.addLeaf(1, 0, bytes.Repeat([]byte{2}, 32)...)
 	data := encodeRecord(n, len(path), nil)
@@ -850,7 +850,7 @@ func TestComputeLeafRefsRejectsOversizedStorageValue(t *testing.T) {
 	var refs *commitment.LeafRefs
 	var err error
 	require.NotPanics(t, func() {
-		refs, err = ComputeLeafRefs([]byte{planeStorage, 1}, data)
+		refs, err = ComputeLeafRefs([]byte{PlaneStorage, 1}, data)
 	})
 	require.Error(t, err)
 	require.Nil(t, refs)

@@ -95,10 +95,10 @@ func traceCollapses(ctx commitment.PatriciaContext, items []feedEntry, tracer co
 
 func splitPrefix(prefix []byte) (plane byte, addrHash, path []byte) {
 	if len(prefix) < 64 {
-		return planeAccount, nil, prefix
+		return PlaneAccount, nil, prefix
 	}
 	addr := hashAddressPath(prefix[:64])
-	return planeStorage, addr[:], prefix[64:]
+	return PlaneStorage, addr[:], prefix[64:]
 }
 
 func liveBranch(load func(plane byte, addrHash, path []byte) (*node, error), prefix []byte) (*node, error) {
@@ -136,7 +136,7 @@ func liveBranch(load func(plane byte, addrHash, path []byte) (*node, error), pre
 }
 
 func (s *collapseSim) load(plane byte, addrHash, path []byte) (*node, error) {
-	s.kbuf = nodeKey(plane, addrHash, path, s.kbuf[:0])
+	s.kbuf = NodeKey(plane, addrHash, path, s.kbuf[:0])
 	if n, ok := s.nodes[string(s.kbuf)]; ok {
 		return n, nil
 	}
@@ -149,7 +149,7 @@ func (s *collapseSim) load(plane byte, addrHash, path []byte) (*node, error) {
 }
 
 func (s *collapseSim) loadRoot() error {
-	root, err := s.load(planeAccount, nil, nil)
+	root, err := s.load(PlaneAccount, nil, nil)
 	if err != nil || root == nil || root.childMask == 0 {
 		return err
 	}
@@ -173,8 +173,8 @@ func recordCell(n *node, nib int, prefix []byte) collapseCell {
 		return collapseCell{hash: true, hext: slices.Clone(n.childExtAtInto(nib, extScratch[:0]))}
 	}
 	suffix, payload := n.leafAt(nib)
-	rest := unpackPath(suffix, 64-len(n.path)-1, nil)
-	if n.plane != planeAccount {
+	rest := UnpackPath(suffix, 64-len(n.path)-1, nil)
+	if n.plane != PlaneAccount {
 		return collapseCell{stor: true, hext: rest}
 	}
 	c := collapseCell{acct: true, hext: rest}
@@ -190,7 +190,7 @@ func (s *collapseSim) resolve(c *collapseCell) error {
 	}
 	addrHash := hashAddressPath(c.acctKey)
 	c.acctKey = nil
-	root, err := s.load(planeStorage, addrHash[:], nil)
+	root, err := s.load(PlaneStorage, addrHash[:], nil)
 	if err != nil || root == nil || root.childMask == 0 {
 		return err
 	}
@@ -199,7 +199,7 @@ func (s *collapseSim) resolve(c *collapseCell) error {
 		nib := bits.TrailingZeros16(root.childMask)
 		suffix, _ := root.leafAt(nib)
 		c.stor = true
-		c.hext = append(append(c.hext, byte(nib)), unpackPath(suffix, 63, nil)...)
+		c.hext = append(append(c.hext, byte(nib)), UnpackPath(suffix, 63, nil)...)
 	case len(root.path) != 0:
 		c.hash = true
 		c.hext = append(c.hext, root.path...)

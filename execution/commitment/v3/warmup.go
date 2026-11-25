@@ -32,7 +32,7 @@ func warmupStepV3(data, hashedKey []byte, depth int) (nextDepth int, stop bool) 
 	if depth == 0 && l.selfExtLen != 0 {
 		selfExt := record.SelfExt()
 		end := depth + l.selfExtLen
-		if end > len(hashedKey) || !packedMatches(selfExt[1:], hashedKey[depth:end]) {
+		if end > len(hashedKey) || !PackedMatches(selfExt[1:], hashedKey[depth:end]) {
 			return 0, true
 		}
 		return end, false
@@ -64,16 +64,16 @@ func PrefetchPath(read func(key []byte) []byte, addrHash, slotHash []byte) {
 		plane, owner, hash = tagStorageNode, addrHash, slotHash
 	}
 	var path [64]byte
-	hashedKey := unpackPath(hash, 64, path[:])
+	hashedKey := UnpackPath(hash, 64, path[:])
 	depth := 0
 	var buf [2 + 32 + 32 + 1]byte
 	for depth < len(hashedKey) {
-		data := read(nodeKey(plane, owner, hashedKey[:depth], buf[:0]))
+		data := read(NodeKey(plane, owner, hashedKey[:depth], buf[:0]))
 		if len(data) == 0 {
 			return
 		}
 		if split := splitDepthV3(data, hashedKey, depth); split != 0 {
-			read(nodeKey(plane, owner, hashedKey[:split], buf[:0]))
+			read(NodeKey(plane, owner, hashedKey[:split], buf[:0]))
 			return
 		}
 		next, stop := warmupStepV3(data, hashedKey, depth)
@@ -111,7 +111,7 @@ func splitDepthV3(data, hashedKey []byte, depth int) int {
 		return 0
 	}
 	var scratch [64]byte
-	common := nibbles.CommonPrefixLen(unpackPath(packed, count, scratch[:count:count]), rest)
+	common := nibbles.CommonPrefixLen(UnpackPath(packed, count, scratch[:count:count]), rest)
 	if common == count {
 		return 0
 	}
@@ -125,10 +125,10 @@ func PathNodeKeys(dst [][]byte, hashedKey []byte, maxDepth int) [][]byte {
 	var owner []byte
 	if len(hashedKey) == 128 {
 		dst = PathNodeKeys(dst, hashedKey[:64], maxDepth)
-		plane, owner, path = tagStorageNode, packPath(hashedKey[:64], nil), hashedKey[64:]
+		plane, owner, path = tagStorageNode, PackPath(hashedKey[:64], nil), hashedKey[64:]
 	}
 	for depth := 0; depth <= min(maxDepth, len(path)); depth++ {
-		dst = append(dst, nodeKey(plane, owner, path[:depth], nil))
+		dst = append(dst, NodeKey(plane, owner, path[:depth], nil))
 	}
 	return dst
 }

@@ -61,11 +61,11 @@ func TestDeltas(t *testing.T) {
 	})
 	t.Run("E40/MaterializeFoldsAndEncodesRecordInOneWalk", func(t *testing.T) {
 		ctx := newMockContext()
-		n := newNode(planeStorage)
+		n := newNode(PlaneStorage)
 		n.addLeaf(3, 4, 9)
 
 		var acc deltaParts
-		hash, err := graph{plane: planeStorage, addrHash: make([]byte, 32)}.materialize(context.Background(), ctx, n, n, &acc)
+		hash, err := graph{plane: PlaneStorage, addrHash: make([]byte, 32)}.materialize(context.Background(), ctx, n, n, &acc)
 		require.NoError(t, err)
 		require.Len(t, hash, 32)
 		require.Len(t, acc, 1)
@@ -81,7 +81,7 @@ func TestDeltas(t *testing.T) {
 			t.Run(strconv.Itoa(count), func(t *testing.T) {
 				ctx := newMockContext()
 				var addr [32]byte
-				root := newNode(planeStorage)
+				root := newNode(PlaneStorage)
 				for i := range count {
 					path := make([]byte, 64)
 					path[0] = byte(i % 16)
@@ -92,7 +92,7 @@ func TestDeltas(t *testing.T) {
 					}
 					require.NoError(t, insert(root, path, []byte{byte(i)}))
 				}
-				g := graph{plane: planeStorage, addrHash: addr[:]}
+				g := graph{plane: PlaneStorage, addrHash: addr[:]}
 				parts, _, err := g.persistGraph(context.Background(), ctx, root, foldPlan{})
 				require.NoError(t, err)
 				require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
@@ -141,7 +141,7 @@ func TestDeltas(t *testing.T) {
 		ctx := newMockContext()
 		var addr [32]byte
 		addr[0] = 0x7e
-		g := graph{plane: planeStorage, addrHash: addr[:]}
+		g := graph{plane: PlaneStorage, addrHash: addr[:]}
 
 		deepPath := []byte{0x0c, 0x06}
 		deepKey := StorageNodeKey(addr, deepPath, nil)
@@ -150,7 +150,7 @@ func TestDeltas(t *testing.T) {
 		siblingKey := StorageNodeKey(addr, []byte{0x02}, nil)
 		ctx.branches[string(siblingKey)] = []byte{0xca, 0xfe}
 
-		root := newNode(planeStorage)
+		root := newNode(PlaneStorage)
 		root.setStoredChild(0x0c, bytes.Repeat([]byte{0x11}, 32), []byte{0x06})
 		root.setStoredChild(0x02, bytes.Repeat([]byte{0x22}, 32), nil)
 
@@ -239,7 +239,7 @@ func TestDeltas(t *testing.T) {
 			replayed := runner.NewMemory(runner.ContextSpec{CheckPrevious: true})
 			require.NoError(t, applyDeltas(deltaParts{ctx.Deltas()}, replayed.PutBranch, nil))
 			require.Equal(t, ctx.Records(), replayed.Records())
-			n, err := unfold(replayed, nil, planeStorage, addr[:])
+			n, err := unfold(replayed, nil, PlaneStorage, addr[:])
 			require.NoError(t, err)
 			require.NotNil(t, n)
 			got, err := fold(n, 0)
@@ -338,7 +338,7 @@ func TestRecordGraph(t *testing.T) {
 		require.ErrorContains(t, matcher.Expect(StorageNodeKey(addr, nil, nil), hash[:]), "expected after the account plane")
 	})
 	t.Run("E66/RecordHasherExpectsEveryExtensionChild", func(t *testing.T) {
-		n := newNode(planeAccount)
+		n := newNode(PlaneAccount)
 		n.setStoredChild(1, bytes.Repeat([]byte{0x11}, 32), []byte{2, 3})
 		n.setStoredChild(4, bytes.Repeat([]byte{0x44}, 32), []byte{5, 6, 7})
 		record := encodeRecord(n, 0, nil)
@@ -414,12 +414,12 @@ func TestRecordGraph(t *testing.T) {
 	})
 	t.Run("E66/EmptyChildRecordIsInvalid", func(t *testing.T) {
 		var addrHash [32]byte
-		parent := newNode(planeStorage)
+		parent := newNode(PlaneStorage)
 		parent.setStoredChild(4, bytes.Repeat([]byte{0x44}, 32), nil)
 		ctx := newMockContext()
 		ctx.branches[string(StorageNodeKey(addrHash, []byte{4}, nil))] = []byte{}
 
-		g := graph{plane: planeStorage, addrHash: addrHash[:]}
+		g := graph{plane: PlaneStorage, addrHash: addrHash[:]}
 		_, err := g.unfoldChild(ctx, parent.childPath(4, nil))
 		require.ErrorIs(t, err, errNodeRecord)
 	})
@@ -429,20 +429,20 @@ func TestRecordGraph(t *testing.T) {
 		ctx.branches[string(AccountNodeKey([]byte{4}, nil))] = data
 		require.ErrorIs(t, Validate(data, 1), ErrRecordMasks)
 
-		root := newNode(planeAccount)
+		root := newNode(PlaneAccount)
 		root.setStoredChild(4, bytes.Repeat([]byte{1}, 32), nil)
 		root.setStoredChild(8, bytes.Repeat([]byte{2}, 32), nil)
-		err := (graph{plane: planeAccount}).ensurePath(ctx, root, commitmenttest.Path([]byte{4, 0}, 1))
+		err := (graph{plane: PlaneAccount}).ensurePath(ctx, root, commitmenttest.Path([]byte{4, 0}, 1))
 		require.ErrorIs(t, err, ErrRecordMasks)
 	})
 	t.Run("E66/ZeroMaskChildRecordIsInvalid", func(t *testing.T) {
 		var addrHash [32]byte
-		parent := newNode(planeStorage)
+		parent := newNode(PlaneStorage)
 		parent.setStoredChild(4, bytes.Repeat([]byte{0x44}, 32), nil)
 		ctx := newMockContext()
 		ctx.branches[string(StorageNodeKey(addrHash, []byte{4}, nil))] = make([]byte, 5)
 
-		g := graph{plane: planeStorage, addrHash: addrHash[:]}
+		g := graph{plane: PlaneStorage, addrHash: addrHash[:]}
 		_, err := g.unfoldChild(ctx, parent.childPath(4, nil))
 		require.ErrorIs(t, err, ErrRecordMasks)
 		for _, depth := range []int{0, 1, 63} {
@@ -581,10 +581,10 @@ func seedLegacyWorld(t *testing.T, rng *rand.Rand) (*legacyWorld, []legacyAccoun
 	}
 	sharingPrefix := func(nibbles int) {
 		first := randBytes(rng, 32)
-		want := unpackPath(crypto.Keccak256(first), 64, nil)[:nibbles]
+		want := UnpackPath(crypto.Keccak256(first), 64, nil)[:nibbles]
 		for {
 			next := randBytes(rng, 32)
-			if bytes.Equal(unpackPath(crypto.Keccak256(next), 64, nil)[:nibbles], want) {
+			if bytes.Equal(UnpackPath(crypto.Keccak256(next), 64, nil)[:nibbles], want) {
 				add(first, next)
 				return
 			}
@@ -637,7 +637,7 @@ func TestConversion(t *testing.T) {
 			prefix []byte
 			cells  map[int]branch.BranchCell
 		}{
-			{"storage_owner_mismatch", unpackPath(ownerHash[:], 64, nil), map[int]branch.BranchCell{
+			{"storage_owner_mismatch", UnpackPath(ownerHash[:], 64, nil), map[int]branch.BranchCell{
 				slotNib:            {StorageAddr: storageKey},
 				(slotNib + 1) % 16: {Hash: hash},
 			}},

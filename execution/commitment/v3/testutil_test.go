@@ -100,7 +100,7 @@ func newNode(plane byte, path ...byte) *node {
 
 func (n *node) addLeaf(nib int, fill byte, value ...byte) []byte {
 	full := append(append(bytes.Clone(n.path), byte(nib)), bytes.Repeat([]byte{fill}, 63-len(n.path))...)
-	n.setLeaf(nib, packPath(full[len(n.path)+1:], nil), value)
+	n.setLeaf(nib, PackPath(full[len(n.path)+1:], nil), value)
 	return full
 }
 
@@ -116,7 +116,7 @@ func materializeNode(path []byte, plane byte, spec *commitmenttest.RecordSpec) *
 		} else {
 			ext := spec.Extensions[nib]
 			if len(ext) != 0 {
-				ext = unpackPath(ext[1:], int(ext[0]), nil)
+				ext = UnpackPath(ext[1:], int(ext[0]), nil)
 			}
 			n.setStoredChild(nib, spec.Hashes[nib], ext)
 		}
@@ -249,7 +249,7 @@ func exactLeaves(t *testing.T, ctx commitment.PatriciaContext, plane byte, addr 
 	var visit func([]byte)
 	visit = func(path []byte) {
 		key := AccountNodeKey(path, nil)
-		if plane == planeStorage {
+		if plane == PlaneStorage {
 			key = StorageNodeKey(addr, path, nil)
 		}
 		data, _, err := ctx.Branch(key)
@@ -263,12 +263,12 @@ func exactLeaves(t *testing.T, ctx commitment.PatriciaContext, plane byte, addr 
 		require.NoError(t, Validate(data, depth), "invalid record at %x", path)
 		r := Record{data: data, depth: depth}
 		if r.isLeafRoot() {
-			out[string(unpackPath(data[1:33], 64, nil))] = bytes.Clone(data[34:])
+			out[string(UnpackPath(data[1:33], 64, nil))] = bytes.Clone(data[34:])
 			return
 		}
 		l := r.layout()
 		if depth == 0 && l.selfExtLen != 0 {
-			visit(unpackPath(r.SelfExt()[1:], l.selfExtLen, nil))
+			visit(UnpackPath(r.SelfExt()[1:], l.selfExtLen, nil))
 			return
 		}
 		for nib := range 16 {
@@ -282,7 +282,7 @@ func exactLeaves(t *testing.T, ctx commitment.PatriciaContext, plane byte, addr 
 				continue
 			}
 			suffix, value := r.leafAt(l, nib)
-			child = append(child, unpackPath(suffix, 64-depth-1, nil)...)
+			child = append(child, UnpackPath(suffix, 64-depth-1, nil)...)
 			require.NotContains(t, out, string(child), "duplicate leaf %x", child)
 			out[string(child)] = bytes.Clone(value)
 		}
@@ -312,7 +312,7 @@ func requireLiveRecords(t *testing.T, want, got map[string][]byte, label string)
 }
 
 func AccountNodeKey(path []byte, dst []byte) []byte {
-	return nodeKey(tagAccountNode, nil, path, dst)
+	return NodeKey(tagAccountNode, nil, path, dst)
 }
 
 func testUpdates(t testing.TB, mode commitment.Mode, ops []commitmenttest.Op) *commitment.Updates {
@@ -331,7 +331,7 @@ func requireStorageState(t *testing.T, ctx commitment.PatriciaContext, addr [32]
 	for _, op := range state.Ops() {
 		want[string(op.Key)] = op.Storage
 	}
-	require.Equal(t, want, exactLeaves(t, ctx, planeStorage, addr))
+	require.Equal(t, want, exactLeaves(t, ctx, PlaneStorage, addr))
 }
 
 func feedOf(ops []commitmenttest.Op) *commitment.Feed {

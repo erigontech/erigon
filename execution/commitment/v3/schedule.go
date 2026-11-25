@@ -119,7 +119,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	storageParts := make([]deltaParts, len(storage))
 	accountFold := foldPlan{ctx: ctx, factory: factory, workers: accountWorkers}
 	storageAsync := factory != nil && storageWorkers > 1
-	g := graph{plane: planeAccount}
+	g := graph{plane: PlaneAccount}
 	var hasAccounts [16]bool
 	for i := range accounts {
 		hasAccounts[accounts[i].hashedKey[0]] = true
@@ -200,7 +200,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			copy(storageRoot[:], existingRoot)
 		}
 		at := i * accountLeafScratch
-		plans[i].value = encodeAccountLeaf(update, storageRoot[:], accountValues[at:at:at+accountLeafScratch])
+		plans[i].value = EncodeAccountLeaf(update, storageRoot[:], accountValues[at:at:at+accountLeafScratch])
 	}
 
 	var pipelined [16]bool

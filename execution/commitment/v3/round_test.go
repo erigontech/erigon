@@ -66,7 +66,7 @@ func TestPartition(t *testing.T) {
 			require.Len(t, storage, 1)
 			require.Len(t, storage[0].entries, tc.slots)
 			require.Equal(t, tc.wipe, storage[0].wipe)
-			require.Equal(t, packPath(tc.accounts[0].hashedKey, nil), storage[0].addrHash[:])
+			require.Equal(t, PackPath(tc.accounts[0].hashedKey, nil), storage[0].addrHash[:])
 		})
 	}
 	t.Run("E35/DeleteThenWriteClearsWipe", func(t *testing.T) {
@@ -566,7 +566,7 @@ func TestScheduling(t *testing.T) {
 		address := parityAddress(3)
 		ctx := newShardedContext()
 		storageRoot := func() []byte {
-			root, err := unfold(ctx, nil, planeAccount, nil)
+			root, err := unfold(ctx, nil, PlaneAccount, nil)
 			require.NoError(t, err)
 			value, ok, _ := accountLeafAt(root, commitment.KeyToHexNibbleHash(address))
 			require.True(t, ok)

@@ -63,7 +63,7 @@ func (h *RecordHasher) Hash(key, value []byte, expect func(key, hash []byte) err
 	if record.isLeafRoot() {
 		hashedKey, leafValue := value[1:33], value[34:]
 		full := (*[32]byte)(hashedKey)
-		n.setLeafShared(int(full[0]>>4), appendHashSuffix(&h.scratch, full, 1), leafValue)
+		n.setLeafShared(int(full[0]>>4), AppendHashSuffix(&h.scratch, full, 1), leafValue)
 	} else {
 		l := record.layout()
 		if value[0]&hdrHasSelfExt != 0 {
@@ -85,12 +85,12 @@ func (h *RecordHasher) Hash(key, value []byte, expect func(key, hash []byte) err
 				h.child = append(h.child, ext...)
 				childPath = h.child
 			}
-			h.key = nodeKey(tag, addrHash, childPath, h.key[:0])
+			h.key = NodeKey(tag, addrHash, childPath, h.key[:0])
 			if err := expect(h.key, n.childHashAt(nib)); err != nil {
 				return [32]byte{}, err
 			}
 		}
-		if tag != planeAccount || n.leafMask&bit == 0 {
+		if tag != PlaneAccount || n.leafMask&bit == 0 {
 			continue
 		}
 		suffix, leafValue := n.leafAt(nib)
@@ -104,7 +104,7 @@ func (h *RecordHasher) Hash(key, value []byte, expect func(key, hash []byte) err
 		var full [64]byte
 		copy(full[:], n.path)
 		full[len(n.path)] = byte(nib)
-		unpackPath(suffix, 63-len(n.path), full[len(n.path)+1:len(n.path)+1:64])
+		UnpackPath(suffix, 63-len(n.path), full[len(n.path)+1:len(n.path)+1:64])
 		h.key = StorageNodeKey(hashAddressPath(full[:]), nil, h.key[:0])
 		if err := expect(h.key, storageRoot); err != nil {
 			return [32]byte{}, err
@@ -135,10 +135,10 @@ func (h *RecordHasher) parseKey(key []byte) (tag byte, addrHash []byte, err erro
 		return 0, nil, fmt.Errorf("%w: key %x has tag %02x", errVerifyRecords, key, tag)
 	}
 	count := int(key[len(key)-1])
-	if count > 63 || len(key)-start-1 != packedLen(count) {
+	if count > 63 || len(key)-start-1 != PackedLen(count) {
 		return 0, nil, fmt.Errorf("%w: key %x: path length %d does not match", errVerifyRecords, key, count)
 	}
-	h.path = unpackPath(key[start:len(key)-1], count, h.path[:0])
+	h.path = UnpackPath(key[start:len(key)-1], count, h.path[:0])
 	return tag, addrHash, nil
 }
 

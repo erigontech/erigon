@@ -327,12 +327,12 @@ var commonWitnessShapes = []witnessShape{
 func TestWitnessRejectsCorruptRecords(t *testing.T) {
 	for _, corruption := range []string{"missing_root", "stale_root", "stale_child"} {
 		t.Run(corruption, func(t *testing.T) {
-			child := newNode(planeAccount, 1)
+			child := newNode(PlaneAccount, 1)
 			child.setStoredChild(2, bytes.Repeat([]byte{2}, 32), nil)
 			child.setStoredChild(3, bytes.Repeat([]byte{3}, 32), nil)
 			childHash, err := fold(child, 1)
 			require.NoError(t, err)
-			root := newNode(planeAccount)
+			root := newNode(PlaneAccount)
 			root.setStoredChild(1, childHash[:], nil)
 			root.setStoredChild(8, bytes.Repeat([]byte{8}, 32), nil)
 			rootHash, err := fold(root, 0)
