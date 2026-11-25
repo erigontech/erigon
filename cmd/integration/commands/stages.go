@@ -876,7 +876,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
 				return 0, err
 			}
-			return execfinality.IrreversibleTxNum(ctx, tx, br.TxnumReader(), irreversibleBlock)
+			return execfinality.IrreversibleTxNum(ctx, tx, br.TxnumReader(), tx.Debug().StepSize(), irreversibleBlock)
 		})
 		return err
 	}

@@ -3569,7 +3569,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 		if lastTxNum, err = txNumsReader.Max(ctx, tx, execProgress); err != nil {
 			return err
 		}
-		irreversibleTxNum, err = execfinality.IrreversibleTxNum(ctx, tx, txNumsReader, irreversibleBlock)
+		irreversibleTxNum, err = execfinality.IrreversibleTxNum(ctx, tx, txNumsReader, temporalDb.StepSize(), irreversibleBlock)
 		return err
 	}); err != nil {
 		return err

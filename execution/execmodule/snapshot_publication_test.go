@@ -18,11 +18,13 @@ package execmodule_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -55,8 +57,8 @@ func newSnapshotBoundaryChain(t *testing.T, opts ...execmoduletester.Option) (*e
 	return m, chainPack, lastFileBlock
 }
 
-// holdStateFilePublication finalizes the block that holds the first step's last transaction and
-// starts a prune. If that prune builds the step, publication waits until the returned func runs.
+// holdStateFilePublication finalizes the block after the first step's last block, so the step is irreversible, and
+// starts a prune. The step is built, and its publication waits until the returned func runs.
 func holdStateFilePublication(t *testing.T) (m *execmoduletester.ExecModuleTester, chainPack *blockgen.ChainPack, lastFileBlock uint64, publish func()) {
 	t.Helper()
 	m, chainPack, lastFileBlock = newSnapshotBoundaryChain(t)
@@ -78,18 +80,18 @@ func holdStateFilePublication(t *testing.T) (m *execmoduletester.ExecModuleTeste
 	})
 	t.Cleanup(allowPublication)
 
-	finalizedHash := chainPack.Blocks[lastFileBlock-1].Hash()
-	fcu, err := m.UpdateForkChoice(ctx, chainPack.TopBlock.Header(),
-		execmoduletester.WithSafeHash(finalizedHash),
-		execmoduletester.WithFinalisedHash(finalizedHash),
-	)
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	finalizedHash := chainPack.Blocks[lastFileBlock].Hash()
+	require.Equal(t, execmodule.ExecutionStatusSuccess, updateForkChoice(t, m, chainPack.TopBlock.Hash(), finalizedHash, finalizedHash).Status)
 	finished, err := m.ExecModule.Prune(ctx)
 	require.NoError(t, err)
 	select {
 	case <-built:
 	case <-finished:
+		select {
+		case <-built:
+		default:
+			t.Fatal("the irreversible step was not built")
+		}
 	}
 	return m, chainPack, lastFileBlock, func() {
 		allowPublication()
@@ -122,11 +124,9 @@ func requireFilesOnCanonicalChain(t *testing.T, m *execmoduletester.ExecModuleTe
 
 func TestSetHeadDuringStateFileBuild(t *testing.T) {
 	m, chainPack, lastFileBlock, publish := holdStateFilePublication(t)
-	err := m.ExecModule.SetHead(t.Context(), lastFileBlock-1)
+	require.ErrorContains(t, m.ExecModule.SetHead(t.Context(), lastFileBlock-1), fmt.Sprintf("minimum unwindable block is %d", lastFileBlock))
 	publish()
-	if err != nil {
-		require.ErrorContains(t, err, "minimum unwindable block")
-	}
+	require.Equal(t, m.DB.StepSize(), m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EndTxNumMinimax())
 	requireFilesOnCanonicalChain(t, m, chainPack)
 }
 
@@ -135,37 +135,35 @@ func TestForkchoiceLoweringFinalityDuringStateFileBuild(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			m, chain, lastFileBlock, publish := holdStateFilePublication(t)
 			ctx := t.Context()
-			finalized := chain.Blocks[lastFileBlock-1]
-			parentHash := finalized.ParentHash()
+			lastInFiles := chain.Blocks[lastFileBlock-1]
+			parentHash := lastInFiles.ParentHash()
 			extension, err := m.GenerateChainFrom(chain.TopBlock, 2, nil)
 			require.NoError(t, err)
 			status, err := m.InsertBlocks(ctx, extension.Blocks)
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			finalizedHash := chain.Blocks[lastFileBlock].Hash()
 			currentHead := extension.Blocks[0].Hash()
-			require.Equal(t, execmodule.ExecutionStatusSuccess, updateForkChoice(t, m, currentHead, finalized.Hash(), finalized.Hash()).Status)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, updateForkChoice(t, m, currentHead, finalizedHash, finalizedHash).Status)
 			head := currentHead
 			switch name {
 			case "advance_head":
 				head = extension.TopBlock.Hash()
 			case "rewind_at_boundary":
-				// Forkchoice first unwinds to this older head's parent.
-				head = finalized.Hash()
+				head = lastInFiles.Hash() // the head moves back to the step's last block, which stays
 			}
-			result := updateForkChoice(t, m, head, parentHash, parentHash)
-			require.Contains(t, []execmodule.ExecutionStatus{execmodule.ExecutionStatusSuccess, execmodule.ExecutionStatusReorgTooDeep}, result.Status)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, updateForkChoice(t, m, head, parentHash, parentHash).Status)
 			publish()
 			requireFilesOnCanonicalChain(t, m, chain)
 
 			// The parent is finalized now; a sibling of its child must not replace a block in the files.
-			header := finalized.Header()
+			header := lastInFiles.Header()
 			header.Extra = []byte("sibling")
-			sibling := finalized.WithSeal(header)
+			sibling := lastInFiles.WithSeal(header)
 			status, err = m.InsertBlocks(ctx, []*types.Block{sibling})
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-			result = updateForkChoice(t, m, sibling.Hash(), parentHash, parentHash)
-			require.Contains(t, []execmodule.ExecutionStatus{execmodule.ExecutionStatusSuccess, execmodule.ExecutionStatusReorgTooDeep}, result.Status)
+			require.Equal(t, execmodule.ExecutionStatusReorgTooDeep, updateForkChoice(t, m, sibling.Hash(), parentHash, parentHash).Status)
 			requireFilesOnCanonicalChain(t, m, chain)
 		})
 	}
@@ -180,15 +178,27 @@ func TestStateFileBuildKeepsRewindsOutOfFiles(t *testing.T) {
 	requireFilesOnCanonicalChain(t, m, chainPack)
 }
 
-// With every changeset kept, collation still deletes the changesets of the blocks it puts in files.
+// Collation deletes the changesets of the blocks it puts in files itself, so it builds the step when no
+// changeset is pruned: with every changeset kept, or with the prune stage off.
 func TestStateFileBuildDeletesTheChangesetsOfCollatedBlocks(t *testing.T) {
-	m, chainPack, lastFileBlock := newSnapshotBoundaryChain(t, execmoduletester.WithAlwaysGenerateChangesets(true))
-	ctx := t.Context()
-	pruneWithFinalized(t, m, chainPack, lastFileBlock+1)
-	require.Equal(t, m.DB.StepSize(), m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EndTxNumMinimax())
-	require.ErrorContains(t, m.ExecModule.SetHead(ctx, lastFileBlock-1), "minimum unwindable block")
-	require.NoError(t, m.ExecModule.SetHead(ctx, lastFileBlock))
-	requireFilesOnCanonicalChain(t, m, chainPack)
+	for _, mode := range []string{"always_generate_changesets", "no_prune"} {
+		t.Run(mode, func(t *testing.T) {
+			var opts []execmoduletester.Option
+			if mode == "no_prune" {
+				dbg.SetNoPrune(true)
+				defer dbg.SetNoPrune(false)
+			} else {
+				opts = append(opts, execmoduletester.WithAlwaysGenerateChangesets(true))
+			}
+			m, chainPack, lastFileBlock := newSnapshotBoundaryChain(t, opts...)
+			ctx := t.Context()
+			pruneWithFinalized(t, m, chainPack, lastFileBlock+1)
+			require.Equal(t, m.DB.StepSize(), m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EndTxNumMinimax())
+			require.ErrorContains(t, m.ExecModule.SetHead(ctx, lastFileBlock-1), "minimum unwindable block")
+			require.NoError(t, m.ExecModule.SetHead(ctx, lastFileBlock))
+			requireFilesOnCanonicalChain(t, m, chainPack)
+		})
+	}
 }
 
 func pruneWithFinalized(t *testing.T, m *execmoduletester.ExecModuleTester, chainPack *blockgen.ChainPack, finalized uint64) {
