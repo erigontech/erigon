@@ -2014,10 +2014,24 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 	// account view). Every FinalizedWrites caller is covered here, so no read path needs
 	// to remember to publish separately.
 	ibs.PublishOrigins()
-	writes := ibs.writes.Finalize()
+	amsterdam := chainRules != nil && chainRules.IsAmsterdam
+	var vanished map[accounts.Address]struct{}
+	if amsterdam {
+		vanished = ibs.vanishedCreateDestructs(chainRules)
+	}
+	writes := ibs.writes.Finalize(vanished)
 	var replaced map[accounts.Address]struct{}
-	if chainRules != nil && chainRules.IsAmsterdam {
+	if amsterdam {
 		replaced = ibs.publishCreateDestructAsBalances(writes)
+		for addr := range vanished {
+			if ibs.versionMap.load(addr) != nil {
+				writes.SetEmptyRemoval(addr, ibs.Version())
+			}
+			if replaced == nil {
+				replaced = map[accounts.Address]struct{}{}
+			}
+			replaced[addr] = struct{}{}
+		}
 	}
 	// Snapshot the accounts the tx really self-destructed (a SELFDESTRUCT opcode)
 	// before the removal encoders synthesize their own SelfDestruct cells, so the
@@ -2078,6 +2092,30 @@ func (ibs *IntraBlockState) publishCreateDestructAsBalances(writes *WriteSet) ma
 		replaced[addr] = struct{}{}
 	}
 	return replaced
+}
+
+// vanishedCreateDestructs returns the contracts the tx created at an absent address and destroyed
+// without a kept balance. publishCreateDestructAsBalances and withholdCreatedEmptyAccounts would
+// reduce each to no writes, or to the EIP-161 removal when the version map holds cells for it.
+func (ibs *IntraBlockState) vanishedCreateDestructs(chainRules *chain.Rules) map[accounts.Address]struct{} {
+	ws := ibs.writes
+	var vanished map[accounts.Address]struct{}
+	for addr, sd := range ws.selfDestruct {
+		if cc, ok := ws.createContract[addr]; !sd.Val || !ok || !cc.Val {
+			continue
+		}
+		if balance, ok := ws.balance[addr]; !ok || balance.Deletes() || !balance.Val.IsZero() {
+			continue
+		}
+		if !ibs.readAbsent(addr) || !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
+			continue
+		}
+		if vanished == nil {
+			vanished = map[accounts.Address]struct{}{}
+		}
+		vanished[addr] = struct{}{}
+	}
+	return vanished
 }
 
 // createdSelfDestructEmpty decides emptiness without an account view for an account this tx created as a contract
