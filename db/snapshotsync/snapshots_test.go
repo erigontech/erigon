@@ -2295,12 +2295,16 @@ func TestVisibleBlockFilesCoverCheckFollowsTheLongestFileAtEachStart(t *testing.
 		bodies []Range
 		want   []Range // the bodies' visible files
 	}{
-		{"nested file at the start of a full tiling",
+		{
+			"nested file at the start of a full tiling",
 			[]Range{NewRange(0, 30_000), NewRange(0, 1_000), NewRange(0, 10_000), NewRange(10_000, 20_000), NewRange(20_000, 30_000)},
-			[]Range{NewRange(0, 10_000), NewRange(10_000, 20_000), NewRange(20_000, 30_000)}},
-		{"a tiling that is not the longest at its start",
+			[]Range{NewRange(0, 10_000), NewRange(10_000, 20_000), NewRange(20_000, 30_000)},
+		},
+		{
+			"a tiling that is not the longest at its start",
 			[]Range{NewRange(0, 30_000), NewRange(0, 20_000), NewRange(10_000, 30_000), NewRange(0, 10_000)},
-			[]Range{NewRange(0, 30_000)}},
+			[]Range{NewRange(0, 30_000)},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logger := log.New()
