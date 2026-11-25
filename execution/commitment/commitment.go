@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state/stateifs"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -1801,13 +1800,6 @@ func (u *Update) String() string {
 	}
 	return sb.String()
 }
-
-// DomainPutter is an interface for putting data into domains.
-// Used by commitment to write branch data.
-type DomainPutter = stateifs.DomainPutter
-
-// CommitmentWrite represents a commitment domain write that needs to be added to changesets.
-type CommitmentWrite = stateifs.CommitmentWrite
 
 // CollapseTracer is invoked when a trie node collapses during a commitment update.
 // hashedKeyPath is the surviving child's nibble path; branchPrefix is the collapsing branch's.
