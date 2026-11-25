@@ -326,8 +326,10 @@ func convertCommitmentFileV3(
 		return send()
 	})
 
+	pin := at.Pin()
+	defer pin.Close()
 	goWorkers(g, workers, func() error {
-		wat := at.a.BeginFilesRo()
+		wat := pin.BeginFilesRo()
 		defer wat.Close()
 		vals := &legacyFileValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], maxStep: stepTo - 1}
 		conv := v3.NewLegacyConverter(vals, st.keysV2, incremental)
@@ -837,6 +839,8 @@ type foldChunk struct {
 func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, progress func(done, total int)) ([]CommitmentV3Check, error) {
 	at := a.BeginFilesRo()
 	ranges := commitmentV3KeyRanges(at.d[kv.CommitmentDomain], commitmentV3FoldRanges)
+	pin := at.Pin()
+	defer pin.Close()
 	at.Close()
 	workers := max(1, runtime.GOMAXPROCS(0))
 	type task struct {
@@ -880,7 +884,7 @@ func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, progres
 	})
 	for range workers {
 		g.Go(func() error {
-			at := a.BeginFilesRo()
+			at := pin.BeginFilesRo()
 			defer at.Close()
 			dt := at.d[kv.CommitmentDomain]
 			hasher := v3.NewRecordHasher()

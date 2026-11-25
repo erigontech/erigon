@@ -474,9 +474,11 @@ func buildLegacyShapeTable(ctx context.Context, at *AggregatorRoTx, efFile visib
 		return id
 	}
 	g, gctx := errgroup.WithContext(ctx)
+	pin := at.Pin()
+	defer pin.Close()
 	for range workers {
 		g.Go(func() error {
-			wat := at.a.BeginFilesRo()
+			wat := pin.BeginFilesRo()
 			defer wat.Close()
 			ht := wat.d[kv.CommitmentDomain].ht
 			fileIdx := slices.IndexFunc(ht.iit.files, func(f visibleFile) bool {
@@ -816,8 +818,10 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		return send()
 	})
 
+	pin := at.Pin()
+	defer pin.Close()
 	goWorkers(g, workers, func() error {
-		wat := at.a.BeginFilesRo()
+		wat := pin.BeginFilesRo()
 		defer wat.Close()
 		wdt := wat.d[kv.CommitmentDomain]
 		expand := func(value []byte, fromTxNum, toTxNum uint64) ([]byte, error) {
