@@ -22,10 +22,6 @@ type NodeBuilder struct {
 	n node
 }
 
-func NewNodeBuilder(children int) NodeBuilder {
-	return NodeBuilder{n: node{slots: make([]childSlot, 0, children)}}
-}
-
 func (b *NodeBuilder) Reset(path []byte, plane byte) { resetNode(&b.n, path, plane) }
 
 func (b *NodeBuilder) SetLeaf(nib int, suffix, value []byte) { b.n.setLeafShared(nib, suffix, value) }

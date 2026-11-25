@@ -87,8 +87,6 @@ func NewLegacyConverter(vals LegacyValues, keysV2, incremental bool) *LegacyConv
 		vals:        vals,
 		keysV2:      keysV2,
 		incremental: incremental,
-		branch:      v3.NewNodeBuilder(16),
-		root:        v3.NewNodeBuilder(1),
 	}
 }
 

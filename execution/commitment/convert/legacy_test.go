@@ -138,7 +138,8 @@ func (w *legacyWorld) convert(t *testing.T, prevs map[string][]byte, incremental
 			records[key] = value
 		}
 	}
-	hasher, matcher := v3.NewRecordHasher(), newTestRecordMatcher(t)
+	hasher, matcher := v3.NewRecordHasher(), v3.NewRecordMatcher(t.TempDir())
+	t.Cleanup(matcher.Close)
 	for _, key := range slices.Sorted(maps.Keys(records)) {
 		if len(records[key]) == 0 || key == string(commitment.KeyCommitmentV3State) {
 			continue
@@ -313,8 +314,10 @@ func TestConversion(t *testing.T) {
 		require.Equal(t, root, stateRoot)
 		require.Equal(t, uint64(11), blockNum)
 		require.Equal(t, uint64(22), txNum)
-		ctx := newMockContext()
-		ctx.branches = records
+		ctx := runner.NewMemory(runner.ContextSpec{Borrowed: true})
+		for key, value := range records {
+			require.NoError(t, ctx.PutBranch([]byte(key), value, nil))
+		}
 		tr := &v3.Trie{}
 		tr.ResetContext(ctx)
 		defer tr.Release()
@@ -327,11 +330,14 @@ func TestConversion(t *testing.T) {
 		require.Equal(t, root, restoredRoot)
 		op := commitmenttest.AccountAt(accounts[0].addr, commitmenttest.AccountSpec{Nonce: 12, Balance: 23, CodeHash: empty.CodeHash})
 		w.apply(op)
-		nextRoot, err := tr.Process(context.Background(), testUpdates(t, commitment.ModeCollect, []commitmenttest.Op{op}), "", nil, commitment.WarmupConfig{})
+		updates := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
+		t.Cleanup(updates.Close)
+		updates.TouchPlainKeyDirect(string(op.Key), runner.Update(op))
+		nextRoot, err := tr.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
 		require.NoError(t, err)
 		require.Equal(t, w.process(t), nextRoot)
-		require.Zero(t, ctx.accountCalls)
-		require.Zero(t, ctx.storageCalls)
+		require.Zero(t, ctx.Counts().AccountReads)
+		require.Zero(t, ctx.Counts().StorageReads)
 	})
 
 	t.Run("incremental_tombstones_dropped_storage_roots", func(t *testing.T) {
