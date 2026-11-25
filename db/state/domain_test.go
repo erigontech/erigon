@@ -1060,9 +1060,7 @@ func TestDomain_CollationSelectsExactStep(t *testing.T) {
 	dt.Close()
 
 	// Collate step 0 — should get k1=v1s0 and k2=v2s0, NOT k1=v1s1.
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(t, err)
-	defer roTx.Rollback()
+	roTx := beginRo(t, db)
 
 	coll, err := d.collate(ctx, 0, 0, 16, roTx)
 	require.NoError(t, err)
@@ -1311,10 +1309,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	require.NoError(t, err)
 	maxFrozenFiles := (txCount / dom.stepSize) / config3.DefaultStepsInFrozenFile
 
-	ctx := t.Context()
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(t, err)
-	defer roTx.Rollback()
+	roTx := beginRo(t, db)
 
 	// Check the history
 	domainRoTx := dom.beginForTests()
@@ -2662,13 +2657,9 @@ func TestDomain_Unwind(t *testing.T) {
 		t.Run("DebugRangeLatest"+suf, func(t *testing.T) {
 			t.Helper()
 
-			etx, err := tmpDb.BeginRo(ctx)
-			require.NoError(t, err)
-			defer etx.Rollback()
+			etx := beginRo(t, tmpDb)
 
-			utx, err := db.BeginRo(ctx)
-			require.NoError(t, err)
-			defer utx.Rollback()
+			utx := beginRo(t, db)
 
 			ectx := expected.beginForTests()
 			defer ectx.Close()
@@ -2685,11 +2676,9 @@ func TestDomain_Unwind(t *testing.T) {
 		t.Run("RangeAsOf"+suf, func(t *testing.T) {
 			t.Helper()
 
-			etx, err := tmpDb.BeginRo(ctx)
-			require.NoError(t, err)
-			defer etx.Rollback()
+			etx := beginRo(t, tmpDb)
 
-			utx, err := db.BeginRo(ctx)
+			utx, err := db.BeginRo(t.Context())
 			require.NoError(t, err)
 			defer utx.Rollback()
 
@@ -2708,13 +2697,9 @@ func TestDomain_Unwind(t *testing.T) {
 		t.Run("RangeAsOf"+suf, func(t *testing.T) {
 			t.Helper()
 
-			etx, err := tmpDb.BeginRo(ctx)
-			require.NoError(t, err)
-			defer etx.Rollback()
+			etx := beginRo(t, tmpDb)
 
-			utx, err := db.BeginRo(ctx)
-			require.NoError(t, err)
-			defer utx.Rollback()
+			utx := beginRo(t, db)
 
 			ectx := expected.beginForTests()
 			defer ectx.Close()
@@ -2732,13 +2717,9 @@ func TestDomain_Unwind(t *testing.T) {
 		t.Run("HistoryRange"+suf, func(t *testing.T) {
 			t.Helper()
 
-			etx, err := tmpDb.BeginRo(ctx)
-			require.NoError(t, err)
-			defer etx.Rollback()
+			etx := beginRo(t, tmpDb)
 
-			utx, err := db.BeginRo(ctx)
-			require.NoError(t, err)
-			defer utx.Rollback()
+			utx := beginRo(t, db)
 
 			ectx := expected.beginForTests()
 			defer ectx.Close()
@@ -3626,7 +3607,6 @@ func TestDomain_KeyPosResetOnCollisionRetry(t *testing.T) {
 
 	db, d, txs := filledDomainWithHashMapAccessor(t)
 
-	ctx := t.Context()
 	tx := beginRw(t, db)
 
 	// Collate and merge with forced collision retry
@@ -3634,9 +3614,7 @@ func TestDomain_KeyPosResetOnCollisionRetry(t *testing.T) {
 	require.NoError(t, tx.Commit())
 
 	// Verify lookups still work correctly after collision retry
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(t, err)
-	defer roTx.Rollback()
+	roTx := beginRo(t, db)
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
@@ -3716,9 +3694,7 @@ func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
 
 			require.NoError(tx.Commit())
 
-			roTx, err := db.BeginRo(ctx)
-			require.NoError(err)
-			defer roTx.Rollback()
+			roTx := beginRo(t, db)
 
 			domainRoTx = d.beginForTests()
 			defer domainRoTx.Close()
@@ -3824,9 +3800,7 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			require.NoError(tx.Commit())
 
 			// Phase 4: Verify GetLatest returns empty (deletion marker restored).
-			roTx, err := db.BeginRo(ctx)
-			require.NoError(err)
-			defer roTx.Rollback()
+			roTx := beginRo(t, db)
 
 			domainRoTx = d.beginForTests()
 			defer domainRoTx.Close()
@@ -4467,6 +4441,14 @@ func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
 func beginRw(t testing.TB, db kv.RwDB) kv.RwTx {
 	t.Helper()
 	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	return tx
+}
+
+func beginRo(t testing.TB, db kv.RoDB) kv.Tx {
+	t.Helper()
+	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 	return tx

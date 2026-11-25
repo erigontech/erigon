@@ -133,23 +133,17 @@ func TestLastTxNumInDBPerSnapshot(t *testing.T) {
 	last := func(tx kv.Tx) uint64 { n, _ := ii.lastTxNumInDB(tx); return n }
 
 	put(10)
-	old, err := db.BeginRo(t.Context())
-	require.NoError(t, err)
-	defer old.Rollback()
+	old := beginRo(t, db)
 	require.Equal(t, uint64(10), last(old))
 
 	put(100)
-	cur, err := db.BeginRo(t.Context())
-	require.NoError(t, err)
-	defer cur.Rollback()
+	cur := beginRo(t, db)
 	require.Equal(t, uint64(100), last(cur))
 	require.Equal(t, uint64(10), last(old))
 	require.Equal(t, uint64(100), last(cur))
 
 	// A second reader of the same snapshot is served from the cached answer.
-	same, err := db.BeginRo(t.Context())
-	require.NoError(t, err)
-	defer same.Rollback()
+	same := beginRo(t, db)
 	require.Equal(t, cur.ViewID(), same.ViewID())
 	n, found := ii.lastTxNumInDB(same)
 	require.Equal(t, uint64(100), n)
@@ -510,9 +504,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(t, err)
-	defer roTx.Rollback()
+	roTx := beginRo(t, db)
 
 	bs, err := ii.collate(ctx, 0, roTx)
 	require.NoError(t, err)
@@ -1181,9 +1173,7 @@ func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
 	require.NoError(tx.Commit())
 
 	// Now query IdxRange spanning both file and DB ranges.
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(err)
-	defer roTx.Rollback()
+	roTx := beginRo(t, db)
 
 	ic = ii.beginForTests()
 	defer ic.Close()
@@ -1274,9 +1264,7 @@ func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 	require.NoError(tx.Put(ii.ValuesTable, key[:], rogueTxNum[:]))
 	require.NoError(tx.Commit())
 
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(err)
-	defer roTx.Rollback()
+	roTx := beginRo(t, db)
 
 	ic := ii.beginForTests()
 	defer ic.Close()
@@ -1348,9 +1336,7 @@ func TestSeekInFilesCacheMissAtTxNumZero(t *testing.T) {
 	db, h, txs := filledHistory(t, false)
 	collateAndMergeHistory(t, db, h, txs, true)
 
-	tx, err := db.BeginRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := beginRo(t, db)
 	hc := h.beginForTests()
 	defer hc.Close()
 
@@ -2052,9 +2038,7 @@ func TestInvertedIndex_IdxRange_Seek(t *testing.T) {
 	db, ii, txs := filledInvIndexOfSize(t, 512, 16, 7)
 	mergeInverted(t, db, ii, txs)
 
-	roTx, err := db.BeginRo(t.Context())
-	require.NoError(t, err)
-	defer roTx.Rollback()
+	roTx := beginRo(t, db)
 	ic := ii.beginForTests()
 	defer ic.Close()
 

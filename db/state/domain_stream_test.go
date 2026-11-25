@@ -301,9 +301,7 @@ func TestDomainLatestIterFile_PrefersFilesOverDB(t *testing.T) {
 
 	// DebugRangeLatest (which uses DomainLatestIterFile) should return V1
 	// (from files), not V0 (from the stale DB entry at step 0).
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(err)
-	defer roTx.Rollback()
+	roTx := beginRo(t, db)
 
 	dt = d.beginForTests()
 	defer dt.Close()
@@ -400,9 +398,7 @@ func TestDomainLatestIterFile_PrefersFilesOverDB_LargeValues(t *testing.T) {
 
 	// DebugRangeLatest (which uses DomainLatestIterFile) should return V1
 	// (from files), not V0 (from the stale DB entry at step 0).
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(err)
-	defer roTx.Rollback()
+	roTx := beginRo(t, db)
 
 	dt = d.beginForTests()
 	defer dt.Close()
