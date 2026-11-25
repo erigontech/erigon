@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/background"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -52,8 +51,7 @@ func TestDomain_MultiStepUnwindMatchesGroundTruth(t *testing.T) {
 		target    = uint64(25) // unwind to this txNum (above the file boundary)
 	)
 
-	logger := log.New()
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, stepSize, logger)
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, stepSize)
 	ctx := t.Context()
 
 	tx, err := db.BeginRw(ctx)
@@ -160,7 +158,7 @@ func TestDomain_RepeatedUnwindKeepsVersionOrder(t *testing.T) {
 	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain} {
 		for _, firstCut := range []uint64{20, 32, 34} {
 			t.Run(fmt.Sprintf("%s/cut_%d", cfg.Name, firstCut), func(t *testing.T) {
-				db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+				db, d := testDbAndDomainOfStep(t, cfg, 16)
 				tx, err := db.BeginRw(t.Context())
 				require.NoError(t, err)
 				defer tx.Rollback()
@@ -192,7 +190,7 @@ func TestDomain_UnwindDoesNotRestoreAbsentBranch(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, oldBranch := range [][]byte{{0, 1, 0, 0}, {0, 1, 0, 1, 0}} {
 		t.Run(fmt.Sprintf("old_%x", oldBranch), func(t *testing.T) {
-			db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, log.New())
+			db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16)
 			tx, err := db.BeginRw(t.Context())
 			require.NoError(t, err)
 			defer tx.Rollback()
@@ -224,7 +222,7 @@ func TestDomain_UnwindDoesNotRestoreAbsentBranch(t *testing.T) {
 }
 
 func TestDomain_UnwindRestoresExistingBranch(t *testing.T) {
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -249,7 +247,7 @@ func TestDomain_UnwindRestoresExistingBranch(t *testing.T) {
 func TestDomain_UnwindRestoresDeletionOverBranchShapedValue(t *testing.T) {
 	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain} {
 		t.Run(cfg.Name.String(), func(t *testing.T) {
-			db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+			db, d := testDbAndDomainOfStep(t, cfg, 16)
 			tx, err := db.BeginRw(t.Context())
 			require.NoError(t, err)
 			defer tx.Rollback()
@@ -278,7 +276,7 @@ func TestDomain_UnwindIgnoresFiledVersions(t *testing.T) {
 	const stepSize = uint64(16)
 	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain} {
 		t.Run(cfg.Name.String(), func(t *testing.T) {
-			db, d := testDbAndDomainOfStep(t, cfg, stepSize, log.New())
+			db, d := testDbAndDomainOfStep(t, cfg, stepSize)
 			tx, err := db.BeginRw(t.Context())
 			require.NoError(t, err)
 			defer tx.Rollback()
@@ -323,7 +321,7 @@ func TestDomain_RepeatedUnwindRemovesRestoredVersions(t *testing.T) {
 	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain} {
 		for _, restored := range [][]byte{nil, {7}} {
 			t.Run(fmt.Sprintf("%s/restore_%x", cfg.Name, restored), func(t *testing.T) {
-				db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+				db, d := testDbAndDomainOfStep(t, cfg, 16)
 				tx, err := db.BeginRw(t.Context())
 				require.NoError(t, err)
 				defer tx.Rollback()
@@ -363,7 +361,7 @@ func TestDomain_RepeatedUnwindRemovesRestoredVersions(t *testing.T) {
 func TestDomain_UnwindRestoresDeletedCommitmentV3Record(t *testing.T) {
 	cfg := statecfg.Schema.CommitmentDomain
 	statecfg.EnableCommitmentV3Records(&cfg)
-	db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+	db, d := testDbAndDomainOfStep(t, cfg, 16)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
