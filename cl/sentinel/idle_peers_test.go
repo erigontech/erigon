@@ -223,7 +223,7 @@ func (n closingNetwork) ConnsToPeer(pid peer.ID) []network.Conn {
 
 type closingHost struct {
 	host.Host
-	net closingNetwork
+	net network.Network
 }
 
 func (h closingHost) Network() network.Network { return h.net }
