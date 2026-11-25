@@ -19,6 +19,7 @@ package state
 import (
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -27,6 +28,9 @@ import (
 )
 
 const notifyWriteSetsPerWorker = 512
+
+// NotifyProbe receives NotifyAccumulator phase durations and counters (probe only).
+var NotifyProbe = func(string, time.Duration) {}
 
 type notifyOpKind uint8
 
@@ -65,6 +69,7 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 	if accumulator == nil {
 		return nil
 	}
+	t0 := time.Now()
 	chunks := make([]notifyChunk, max(1, min(runtime.GOMAXPROCS(0), len(blockWrites)/notifyWriteSetsPerWorker)))
 	step := (len(blockWrites) + len(chunks) - 1) / len(chunks)
 	if len(chunks) == 1 {
@@ -76,16 +81,37 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 		}
 		wg.Wait()
 	}
-	entries := 0
+	t1 := time.Now()
+	entries, misses, ops := 0, 0, 0
 	for k := range chunks {
+		for i := range chunks[k].touched {
+			if !chunks[k].touched[i].resolved {
+				misses++
+			}
+		}
+		ops += len(chunks[k].ops)
 		if err := chunks[k].resolveFromTx(rs.domains, roTx); err != nil {
 			return err
 		}
 		entries += len(chunks[k].touched)
 	}
+	t2 := time.Now()
 	if entries > 0 {
 		accumulator.Reserve(entries)
 	}
+	t3 := time.Now()
+	defer func() {
+		t4 := time.Now()
+		NotifyProbe("npNtfCollect", t1.Sub(t0))
+		NotifyProbe("npNtfResolveTx", t2.Sub(t1))
+		NotifyProbe("npNtfReserve", t3.Sub(t2))
+		NotifyProbe("npNtfReplay", t4.Sub(t3))
+		NotifyProbe("npNtfChunks", time.Duration(len(chunks)))
+		NotifyProbe("npNtfEntries", time.Duration(entries))
+		NotifyProbe("npNtfMisses", time.Duration(misses))
+		NotifyProbe("npNtfOps", time.Duration(ops))
+		NotifyProbe("npNtfWriteSets", time.Duration(len(blockWrites)))
+	}()
 	// A chunk repeats ChangeAccount for an account an earlier chunk changed; the
 	// repeat carries the same final state, so the entry stays as it was.
 	for k := range chunks {

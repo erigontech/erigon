@@ -733,6 +733,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						panic(fmt.Sprintf("prevBlocks tail block %d != committed block %d", tb, applyResult.BlockNum))
 					}
 					pe.prevBlocks.RemoveTail()
+					NpEndMark("npBlkTail")
 					var blockValidatorWaiter *blockValidator
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { // Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
@@ -769,6 +770,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
 							lastHeader, txs, pe.cfg.chainConfig, pe.logger)
 					}
+					NpEndMark("npBlkValSpawn")
 
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
 					var computedBAL types.BlockAccessList
@@ -778,6 +780,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					go func() {
 						defer close(balDone)
 						computedBAL, balErr = bal.Process(blockBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+						NpEndMark("npBlkBalDone")
 					}()
 
 					// StartChange + NotifyAccumulator both run in the apply goroutine to
@@ -785,14 +788,18 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// NotifyAccumulator: it initialises the latestChange entry the notify
 					// writes into.
 					if pe.accumulator != nil && applyResult.Header != nil {
+						NpEndMark("npBlkBalSpawn")
 						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
+						NpEndMark("npBlkMarshal")
 						if marshalErr != nil {
 							<-balDone
 							failInfra(fmt.Errorf("marshal transactions for accumulator, block %d: %w", applyResult.BlockNum, marshalErr))
 							continue
 						}
 						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
+						NpEndMark("npBlkStartChange")
 						notifyErr := pe.rs.NotifyAccumulator(pe.accumulator, rwTx, pendingAccumulatorWrites)
+						NpEndMark("npBlkNotify")
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
 						if notifyErr != nil {
 							<-balDone
@@ -806,6 +813,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						(!initialCycle || pe.cfg.notifications.Events.HasReceiptOrLogSubscribers()) {
 						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, applyResult.Txs, applyResult.Header)
 					}
+					NpEndMark("npBlkRcpt")
 
 					if applyResult.BlockNum > lastBlockResult.BlockNum {
 						uncommittedBlocks++

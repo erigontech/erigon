@@ -7,7 +7,11 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/state"
 )
+
+func init() { state.NotifyProbe, rules.PostValidationProbe = NpEndAdd, NpEndAdd }
 
 var npEnd struct {
 	sync.Mutex

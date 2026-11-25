@@ -22,6 +22,7 @@ package rules
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -203,6 +204,9 @@ type EngineWriter interface {
 
 var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
+// PostValidationProbe receives DefaultBlockPostValidation phase durations (probe only).
+var PostValidationProbe = func(string, time.Duration) {}
+
 func DefaultBlockPostValidation(header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 	receipts types.Receipts, txns types.Transactions, logger log.Logger,
@@ -219,6 +223,8 @@ func DefaultBlockPostValidation(header *types.Header,
 			blobGasUsed, *header.BlobGasUsed, header.Number.Uint64(), header.Hash())
 	}
 
+	t0 := time.Now()
+	defer func() { PostValidationProbe("npValTotal", time.Since(t0)) }()
 	var bloom types.Bloom
 	bloomFromReceipts := checkReceipts && checkBloom && !alwaysSkipReceiptCheck
 	if checkReceipts && !alwaysSkipReceiptCheck {
@@ -228,7 +234,10 @@ func DefaultBlockPostValidation(header *types.Header,
 				bloom.Or(&r.Bloom)
 			}
 		}
+		PostValidationProbe("npValBloom", time.Since(t0))
+		t1 := time.Now()
 		receiptHash := types.DeriveSha(receipts)
+		PostValidationProbe("npValDeriveSha", time.Since(t1))
 		if receiptHash != header.ReceiptHash {
 			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
 				receiptHash, header.ReceiptHash, header.Number.Uint64(), header.Hash())

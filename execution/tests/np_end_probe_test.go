@@ -88,3 +88,60 @@ func TestNpEndProbeMixedDependency(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus, result.ValidationError)
 }
+
+// Validates one Amsterdam block of zero-value transfers from distinct senders to
+// distinct empty accounts. With NEWPAYLOAD_PHASES=true it logs the [np-phase] end
+// timeline of the validation.
+func TestNpEndProbeEtherTransfers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	n := 20000
+	if v, err := strconv.Atoi(os.Getenv("NP_END_PROBE_TXS")); err == nil && v > 0 {
+		n = v
+	}
+	config := chain.TestChainOsakaConfig.Copy()
+	config.AmsterdamTime = common.NewUint64(0)
+	alloc := types.GenesisAlloc{}
+	keys := make([]*ecdsa.PrivateKey, n)
+	for i := range keys {
+		key, err := crypto.ToECDSA(common.LeftPadBytes(binary.BigEndian.AppendUint32(nil, uint32(i+1)), 32))
+		require.NoError(t, err)
+		keys[i] = key
+		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(1_000_000_000_000_000_000)}
+	}
+	gspec := &types.Genesis{Config: config, GasLimit: 2_000_000_000, Alloc: alloc}
+	signer := types.LatestSignerForChainID(config.ChainID)
+
+	gen := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
+	chainPack, err := gen.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+		for i, key := range keys {
+			to := common.BigToAddress(big.NewInt(int64(0x100000 + i)))
+			txn, err := types.SignTx(types.NewTransaction(0, to, uint256.NewInt(0), 50_000, uint256.NewInt(10_000_000_000), nil), *signer, key)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.Len(t, chainPack.TopBlock.Transactions(), n)
+	for _, r := range chainPack.Receipts[0] {
+		require.Equal(t, types.ReceiptStatusSuccessful, r.Status)
+	}
+
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
+	ethconfig.Defaults.Sync.ExecWorkerCount = 8
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]), execmoduletester.WithExperimentalBAL())
+	status, err := m.InsertBlocks(t.Context(), chainPack.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	stagedsync.NpEndStart()
+	result, err := m.ValidateChain(t.Context(), chainPack.TopBlock)
+	logger := log.New()
+	logger.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	stagedsync.NpEndLog(logger, chainPack.TopBlock.NumberU64())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus, result.ValidationError)
+}
