@@ -226,7 +226,7 @@ func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 	return version.V2_2
 }
 
-const DefaultCommitmentV3 = false
+const DefaultCommitmentV3 = true
 
 var ExperimentalCommitmentV3, commitmentV3Pinned = parseCommitmentV3Env(dbg.EnvString("COMMITMENT_V3", ""))
 

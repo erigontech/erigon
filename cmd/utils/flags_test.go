@@ -505,13 +505,13 @@ func TestSetEthConfigWiresCommitmentV3Flag(t *testing.T) {
 	require.True(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records, "SetEthConfig must enable v3 commitment records")
 }
 
-func runSetCommitmentV3(t *testing.T, dirs datadir.Dirs, args ...string) bool {
+func runSetCommitmentV3(t *testing.T, dirs datadir.Dirs, chain string, logger log.Logger, args ...string) bool {
 	t.Helper()
 	flag := ExperimentalCommitmentV3Flag
 	app := &cli.Command{
 		Flags: []cli.Flag{&flag},
 		Action: func(_ context.Context, cmd *cli.Command) error {
-			setCommitmentV3(context.Background(), cmd, dirs, log.Root())
+			setCommitmentV3(context.Background(), cmd, dirs, chain, logger)
 			return nil
 		},
 	}
@@ -522,7 +522,9 @@ func runSetCommitmentV3(t *testing.T, dirs datadir.Dirs, args ...string) bool {
 
 func TestSetCommitmentV3Flag(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
-	run := func(args ...string) bool { return runSetCommitmentV3(t, datadir.New(t.TempDir()), args...) }
+	run := func(args ...string) bool {
+		return runSetCommitmentV3(t, datadir.New(t.TempDir()), "mainnet", log.Root(), args...)
+	}
 
 	require.False(t, run(), "unset flag must leave COMMITMENT_V3 in charge")
 	require.False(t, run("--"+ExperimentalCommitmentV3Flag.Name+"=false"))
@@ -539,7 +541,7 @@ func TestSetCommitmentV3FollowsDatadir(t *testing.T) {
 	legacyDirs, v3Dirs := datadirWith("v2.0-commitment.0-1.kv"), datadirWith("v3.0-commitment.0-1.kv")
 	run := func(dirs datadir.Dirs, args ...string) bool {
 		statecfg.ResetCommitmentV3ForTest()
-		return runSetCommitmentV3(t, dirs, args...)
+		return runSetCommitmentV3(t, dirs, "mainnet", log.Root(), args...)
 	}
 
 	require.Equal(t, statecfg.DefaultCommitmentV3, run(datadir.New(t.TempDir())), "a fresh datadir must take the default")
@@ -547,6 +549,46 @@ func TestSetCommitmentV3FollowsDatadir(t *testing.T) {
 	require.True(t, run(v3Dirs), "a datadir with v3 commitment files must use the v3 trie")
 	require.True(t, run(legacyDirs, "--"+ExperimentalCommitmentV3Flag.Name), "an explicit v3 choice must not be switched by the datadir")
 	require.False(t, run(v3Dirs, "--"+ExperimentalCommitmentV3Flag.Name+"=false"), "an explicit legacy choice must not be switched by the datadir")
+}
+
+func TestSetCommitmentV3WarnsOnLegacyDatadir(t *testing.T) {
+	t.Cleanup(statecfg.ResetCommitmentV3ForTest())
+	datadirWith := func(files ...string) datadir.Dirs {
+		dirs := datadir.New(t.TempDir())
+		for _, file := range files {
+			require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, file), nil, 0o644))
+		}
+		return dirs
+	}
+	legacyDirs := datadirWith("v2.0-commitment.0-1.kv")
+	run := func(dirs datadir.Dirs, chain string, args ...string) (bool, string) {
+		statecfg.ResetCommitmentV3ForTest()
+		var logs strings.Builder
+		logger := log.New()
+		logger.SetHandler(log.StreamHandler(&logs, log.TerminalFormatNoColor()))
+		v3 := runSetCommitmentV3(t, dirs, chain, logger, args...)
+		return v3, logs.String()
+	}
+	const warning = "keeps the legacy commitment trie"
+
+	v3, logs := run(legacyDirs, "sepolia")
+	require.False(t, v3)
+	require.Contains(t, logs, warning)
+	require.Contains(t, logs, "erigon seg reset --datadir="+legacyDirs.DataDir+" --chain=sepolia")
+
+	v3, logs = run(legacyDirs, "dev")
+	require.False(t, v3)
+	require.Contains(t, logs, "--"+ExperimentalCommitmentV3Flag.Name+"=false")
+	require.NotContains(t, logs, "seg reset", "a chain without published snapshots has no seg reset path")
+
+	_, logs = run(legacyDirs, "sepolia", "--"+ExperimentalCommitmentV3Flag.Name+"=false")
+	require.NotContains(t, logs, warning, "an explicit legacy choice must not warn")
+
+	for _, dirs := range []datadir.Dirs{datadirWith(), datadirWith("v3.0-commitment.0-1.kv")} {
+		v3, logs = run(dirs, "sepolia")
+		require.True(t, v3, "a fresh or v3 datadir must use commitment v3")
+		require.NotContains(t, logs, warning, dirs.DataDir)
+	}
 }
 
 func TestDisableBoolFlags_ExplicitFalse(t *testing.T) {
