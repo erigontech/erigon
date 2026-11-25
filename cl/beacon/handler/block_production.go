@@ -34,6 +34,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -608,21 +609,26 @@ func attemptsMade(attempts int) string {
 }
 
 const (
-	defaultAttestationDataImportWait  = time.Second
-	attestationDataImportPollInterval = 5 * time.Millisecond
+	defaultImportWait  = time.Second
+	importPollInterval = 5 * time.Millisecond
 )
 
-func (a *ApiHandler) waitForImportedHead(ctx context.Context, slot uint64) (forkchoice.ForkChoiceNode, bool) {
-	waitedSlot := slot + 1
-	deadline := time.Now().Add(a.attestationDataImportWait)
+func (a *ApiHandler) importInProgress(slot uint64) bool {
+	return a.forkchoiceStore.HighestSeen() < slot && a.forkchoiceStore.PayloadImportInProgress(slot)
+}
+
+// waitForImportedHead returns the fork choice head once the import of the slot's block ends. waitedSlot records the
+// slot whose wait reached the cap, so later callers sharing it do not wait again for that slot.
+func (a *ApiHandler) waitForImportedHead(ctx context.Context, slot uint64, waitedSlot *atomic.Uint64) (forkchoice.ForkChoiceNode, bool) {
+	spentMarker := slot + 1
+	deadline := time.Now().Add(a.importWait)
 	for {
-		waitSpent := a.attestationDataWaitedSlot.Load() == waitedSlot
+		waitSpent := waitedSlot.Load() == spentMarker
 		if !waitSpent && !time.Now().Before(deadline) {
-			a.attestationDataWaitedSlot.Store(waitedSlot)
+			waitedSlot.Store(spentMarker)
 			waitSpent = true
 		}
-		importInProgress := a.forkchoiceStore.HighestSeen() < slot && a.forkchoiceStore.PayloadImportInProgress(slot)
-		if !importInProgress || waitSpent {
+		if !a.importInProgress(slot) || waitSpent {
 			if head, ok := a.forkchoiceStore.TryGetHeadNode(); ok {
 				return head, true
 			}
@@ -633,7 +639,7 @@ func (a *ApiHandler) waitForImportedHead(ctx context.Context, slot uint64) (fork
 		select {
 		case <-ctx.Done():
 			return forkchoice.ForkChoiceNode{}, false
-		case <-time.After(attestationDataImportPollInterval):
+		case <-time.After(importPollInterval):
 		}
 	}
 }
@@ -664,7 +670,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if *slot > a.ethClock.GetCurrentSlot() {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is in the future"))
 	}
-	head, haveHead := a.waitForImportedHead(r.Context(), *slot)
+	head, haveHead := a.waitForImportedHead(r.Context(), *slot, &a.attestationDataWaitedSlot)
 	if err := r.Context().Err(); err != nil {
 		return nil, err
 	}
