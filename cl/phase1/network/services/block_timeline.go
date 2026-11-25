@@ -52,7 +52,8 @@ type blockTimelines struct {
 }
 
 type blockTimeline struct {
-	slot, number                             uint64
+	slot                                     uint64
+	number                                   any // EL block number, or "-" for a block without an execution payload
 	root                                     common.Hash
 	blobs                                    int
 	seen, firstImport, importStart, imported time.Time
@@ -113,7 +114,8 @@ func (t *blockTimelines) seen(block *cltypes.SignedBeaconBlock, now time.Time) {
 	})
 }
 
-// importAttempt records one fork choice import of the block and queues its line once an attempt succeeds.
+// importAttempt records one fork choice import of the block and queues its line once an attempt succeeds, that is,
+// once fork choice holds the block.
 func (t *blockTimelines) importAttempt(block *cltypes.SignedBeaconBlock, root common.Hash, start, end time.Time, err error) {
 	t.update(block, func(line *blockTimeline) {
 		line.attempts++
@@ -127,13 +129,12 @@ func (t *blockTimelines) importAttempt(block *cltypes.SignedBeaconBlock, root co
 			return
 		}
 		line.root, line.importStart, line.imported = root, start, end
-		if body := block.Block.Body; body != nil {
-			if body.ExecutionPayload != nil {
-				line.number = body.ExecutionPayload.BlockNumber
-			}
-			if commitments := body.GetBlobKzgCommitments(); commitments != nil {
-				line.blobs = commitments.Len()
-			}
+		line.number = "-"
+		if payload := block.Block.Body.ExecutionPayload; payload != nil {
+			line.number = payload.BlockNumber
+		}
+		if commitments := block.GetBlobKzgCommitments(); commitments != nil {
+			line.blobs = commitments.Len()
 		}
 		delete(t.pending, blockGossipKey(block))
 		select {

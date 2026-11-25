@@ -305,3 +305,39 @@ func TestGossipBlockQueuedForItsParentKeepsItsArrival(t *testing.T) {
 	require.NotNil(t, line, "a block queued for its parent passed the signature check")
 	require.False(t, line.seen.IsZero())
 }
+
+func TestBlockTimelineOfAGloasBlockHasNoFakeNumber(t *testing.T) {
+	logger, records := timelineLogger(log.LvlDebug)
+	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
+	go timelines.run(t.Context())
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	block.Block.Slot = timelineSlot
+
+	timelines.importAttempt(block, common.Hash{0x11}, at(time.Second), at(2*time.Second), nil)
+
+	require.Equal(t, "-", recordFields(t, <-records)["number"], "a Gloas block carries no execution block number")
+}
+
+// notAcceptedStore returns no error from OnBlock but does not take the block, as fork choice does for a block at the
+// finalized horizon.
+type notAcceptedStore struct {
+	forkchoice.ForkChoiceStorage
+}
+
+func (notAcceptedStore) OnBlock(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+	return nil
+}
+
+func (notAcceptedStore) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) { return nil, false }
+
+func TestBlockNotAcceptedByForkChoiceLogsNoTimeline(t *testing.T) {
+	service, block, processing, _ := newFuluColumnGossipFixture(t)
+	logger, _ := timelineLogger(log.LvlDebug)
+	service.timelines = newBlockTimelines(timelineClock(t, block.Block.Slot), logger)
+	service.forkchoiceStore = notAcceptedStore{ForkChoiceStorage: processing}
+
+	accepted, err := service.processAndStoreBlock(t.Context(), block, false)
+	require.NoError(t, err)
+	require.False(t, accepted)
+	require.Empty(t, service.timelines.lines, "an import is complete only once fork choice holds the block")
+}

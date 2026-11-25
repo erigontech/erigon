@@ -1233,13 +1233,15 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	if !accepted {
 		start := time.Now()
 		err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true)
-		b.timelines.importAttempt(block, common.Hash(blockRoot), start, time.Now(), err)
+		end := time.Now()
 		if err != nil {
+			b.timelines.importAttempt(block, common.Hash(blockRoot), start, end, err)
 			return false, err
 		}
 		if _, accepted = b.forkchoiceStore.GetHeader(blockRoot); !accepted {
 			return false, nil
 		}
+		b.timelines.importAttempt(block, common.Hash(blockRoot), start, end, nil)
 		go b.importBlockOperations(block)
 	}
 	if !persisted {
