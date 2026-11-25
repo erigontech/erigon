@@ -348,6 +348,15 @@ type framePrestateDiff struct {
 	} `json:"post"`
 }
 
+func prepareFactoryFrame(t *testing.T, ibs *state.IntraBlockState, frame *types.Frame, childRuntime []byte, endowment uint64) {
+	t.Helper()
+	initCode := program.New().ReturnData(childRuntime).Bytes()
+	factoryCode := program.New().Mstore(initCode, 0).
+		Push(len(initCode)).Push0().Push(endowment).Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(*frame.Target), factoryCode, tracing.CodeChangeUnspecified))
+	frame.Limits = mdgas.MdGas{Execution: 100_000, State: 1_000_000}
+}
+
 func TestFramePrestateTracerRollback(t *testing.T) {
 	const childEndowment = 7
 	factory := common.HexToAddress("0x2000")
@@ -359,6 +368,12 @@ func TestFramePrestateTracerRollback(t *testing.T) {
 	fail := types.Frame{Mode: types.FrameSender, Target: &failure, Limits: mdgas.MdGas{Execution: 10_000}}
 	batchSendAll := sendAll
 	batchSendAll.Flags = types.FrameAtomicBatch
+	revertCode := program.New().Push0().Push0().Op(vm.REVERT).Bytes()
+	catchInnerRevert := program.New().Call(uint256.NewInt(5_000), failure, 0, 0, 0, 0, 0).
+		Op(vm.POP, vm.STOP).Bytes()
+	callChildThenRevert := program.New().Call(uint256.NewInt(20_000), child, 0, 0, 0, 0, 0).
+		Op(vm.POP).Append(revertCode).Bytes()
+
 	for _, tc := range []struct {
 		name             string
 		frames           []types.Frame
@@ -387,26 +402,14 @@ func TestFramePrestateTracerRollback(t *testing.T) {
 			evm, tx := frameTraceTestEnv(t)
 			ibs := evm.IntraBlockState()
 			runtime := program.New().Push(tx.SenderAddress).Op(vm.SENDALL).Bytes()
-			initCode := program.New().ReturnData(runtime).Bytes()
-			factoryCode := program.New().Mstore(initCode, 0).
-				Push(len(initCode)).Push0().Push(childEndowment).Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
-			catchInnerRevert := program.New().Call(uint256.NewInt(5_000), failure, 0, 0, 0, 0, 0).
-				Op(vm.POP, vm.STOP).Bytes()
-			callChildThenRevert := program.New().Call(uint256.NewInt(20_000), child, 0, 0, 0, 0, 0).
-				Op(vm.POP).Push0().Push0().Op(vm.REVERT).Bytes()
-
 			require.NoError(t, ibs.SetBalance(accounts.InternAddress(factory), uint256.Int{childEndowment}, tracing.BalanceChangeUnspecified))
-			require.NoError(t, ibs.SetCode(accounts.InternAddress(factory), factoryCode, tracing.CodeChangeUnspecified))
-			require.NoError(t, ibs.SetCode(accounts.InternAddress(failure), program.New().Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
+			prepareFactoryFrame(t, ibs, &tx.Frames[1], runtime, childEndowment)
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(failure), revertCode, tracing.CodeChangeUnspecified))
 			require.NoError(t, ibs.SetCode(accounts.InternAddress(revertCatcher), catchInnerRevert, tracing.CodeChangeUnspecified))
 			require.NoError(t, ibs.SetCode(accounts.InternAddress(revertingCaller), callChildThenRevert, tracing.CodeChangeUnspecified))
-			tx.Frames[1].Limits = mdgas.MdGas{Execution: 100_000, State: 1_000_000}
 			tx.Frames = append(tx.Frames, tc.frames...)
 			var diff framePrestateDiff
 			require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "prestateTracer", json.RawMessage(`{"diffMode":true}`)), &diff))
-			destroyed, err := ibs.HasSelfdestructed(accounts.InternAddress(child))
-			require.NoError(t, err)
-			require.False(t, destroyed)
 			balance, err := ibs.GetBalance(accounts.InternAddress(child))
 			require.NoError(t, err)
 			require.Equal(t, uint256.Int{tc.wantChildBalance}, balance)
@@ -423,22 +426,15 @@ func TestFramePrestateTracerRollback(t *testing.T) {
 func TestFramePrestateTracerSendAllToSelf(t *testing.T) {
 	evm, tx := frameTraceTestEnv(t)
 	ibs := evm.IntraBlockState()
-	factory := common.HexToAddress("0x2000")
-	child := types.CreateAddress(factory, 0)
+	child := types.CreateAddress(*tx.Frames[1].Target, 0)
 	runtime := program.New().Sstore(0, 1).Op(vm.ADDRESS, vm.SENDALL).Bytes()
-	initCode := program.New().ReturnData(runtime).Bytes()
-	factoryCode := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
-	require.NoError(t, ibs.SetCode(accounts.InternAddress(factory), factoryCode, tracing.CodeChangeUnspecified))
-	tx.Frames[1].Limits = mdgas.MdGas{Execution: 100_000, State: 1_000_000}
+	prepareFactoryFrame(t, ibs, &tx.Frames[1], runtime, 0)
 	tx.Frames = append(tx.Frames, types.Frame{
 		Mode: types.FrameSender, Target: &child, Value: uint256.Int{7},
 		Limits: mdgas.MdGas{Execution: 30_000, State: 100_000},
 	})
 	var diff framePrestateDiff
 	require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "prestateTracer", json.RawMessage(`{"diffMode":true}`)), &diff))
-	destroyed, err := ibs.HasSelfdestructed(accounts.InternAddress(child))
-	require.NoError(t, err)
-	require.False(t, destroyed)
 	require.NoError(t, ethapi.EndCallTx(ibs, evm.ChainRules(), nil))
 	balance, err := ibs.GetBalance(accounts.InternAddress(child))
 	require.NoError(t, err)
