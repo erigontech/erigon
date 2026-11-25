@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -206,62 +207,104 @@ func TestRunStartsAtFirstStageAfterPruneError(t *testing.T) {
 	require.Equal(t, []stages.SyncStage{stages.Headers, stages.Bodies}, flow)
 }
 
-// A reused Sync (fork validation) must not replay an unwind whose RunUnwind
-// failed on an earlier, rolled-back transaction, whether the stage returned an
-// error or panicked and StateStep recovered it.
+// A reused Sync (fork validation) must not replay an unwind that failed on an earlier,
+// rolled-back transaction, whether UnwindTo before RunUnwind or a forward stage inside
+// RunNoInterrupt asked for it, and whether the stage returned an error or panicked and
+// StateStep recovered it.
 func TestFailedRunUnwindDoesNotLeakIntoNextRun(t *testing.T) {
 	unwindErr := errors.New("unwind failed")
-	for _, panics := range []bool{false, true} {
-		t.Run(fmt.Sprintf("panic=%t", panics), func(t *testing.T) {
-			var flow []stages.SyncStage
-			stage := func(id stages.SyncStage, unwindFails bool) *Stage {
-				return &Stage{
-					ID: id,
-					Forward: func(_ bool, s *StageState, _ Unwinder, _ *execctx.SharedDomains, _ kv.TemporalRwTx, _ log.Logger) error {
-						flow = append(flow, s.ID)
-						return nil
-					},
-					Unwind: func(*UnwindState, *StageState, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error {
-						flow = append(flow, unwindOf(id))
-						if unwindFails && panics {
-							panic(unwindErr)
-						}
-						if unwindFails {
-							return unwindErr
-						}
-						return nil
-					},
-				}
-			}
-			state := New(ethconfig.Defaults.Sync, []*Stage{stage(stages.Headers, false), stage(stages.Bodies, true)},
-				UnwindOrder{stages.Bodies, stages.Headers}, nil, log.New(), stages.ModeForkValidation)
-
-			_, tx := temporaltest.NewTestTx(t)
-			for _, id := range []stages.SyncStage{stages.Headers, stages.Bodies} {
-				require.NoError(t, stages.SaveStageProgress(tx, id, 2000))
-			}
-			require.NoError(t, state.UnwindTo(100, StagedUnwind, nil))
-			runUnwind := func() (err error) {
-				defer func() {
-					if rec := recover(); rec != nil {
-						err = rec.(error)
+	for _, byForwardStage := range []bool{false, true} {
+		for _, panics := range []bool{false, true} {
+			t.Run(fmt.Sprintf("byForwardStage=%t/panic=%t", byForwardStage, panics), func(t *testing.T) {
+				var flow []stages.SyncStage
+				requestUnwind := byForwardStage
+				stage := func(id stages.SyncStage, unwindFails bool) *Stage {
+					return &Stage{
+						ID: id,
+						Forward: func(_ bool, s *StageState, u Unwinder, _ *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
+							flow = append(flow, s.ID)
+							if id == stages.Bodies && requestUnwind {
+								requestUnwind = false
+								return u.UnwindTo(100, StagedUnwind, tx)
+							}
+							return nil
+						},
+						Unwind: func(*UnwindState, *StageState, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error {
+							flow = append(flow, unwindOf(id))
+							if unwindFails && panics {
+								panic(unwindErr)
+							}
+							if unwindFails {
+								return unwindErr
+							}
+							return nil
+						},
 					}
-				}()
-				return state.RunUnwind(nil, tx)
-			}
-			require.ErrorIs(t, runUnwind(), unwindErr)
-			require.False(t, state.HasUnwindPoint())
+				}
+				state := New(ethconfig.Defaults.Sync, []*Stage{stage(stages.Headers, false), stage(stages.Bodies, true)},
+					UnwindOrder{stages.Bodies, stages.Headers}, nil, log.New(), stages.ModeForkValidation)
+				newTx := func() kv.TemporalRwTx {
+					_, tx := temporaltest.NewTestTx(t)
+					for _, id := range []stages.SyncStage{stages.Headers, stages.Bodies} {
+						require.NoError(t, stages.SaveStageProgress(tx, id, 2000))
+					}
+					return tx
+				}
+				panicked := false
+				recovered := func(run func() error) (err error) {
+					defer func() {
+						if rec := recover(); rec != nil {
+							panicked, err = true, rec.(error)
+						}
+					}()
+					return run()
+				}
 
-			flow = nil
-			_, tx2 := temporaltest.NewTestTx(t)
-			for _, id := range []stages.SyncStage{stages.Headers, stages.Bodies} {
-				require.NoError(t, stages.SaveStageProgress(tx2, id, 2000))
-			}
-			_, err := state.RunNoInterrupt(nil, tx2)
-			require.NoError(t, err)
-			require.Equal(t, []stages.SyncStage{stages.Headers, stages.Bodies}, flow)
-		})
+				tx := newTx()
+				if byForwardStage {
+					require.ErrorIs(t, recovered(func() error { _, err := state.RunNoInterrupt(nil, tx); return err }), unwindErr)
+				} else {
+					require.NoError(t, state.UnwindTo(100, StagedUnwind, nil))
+					require.ErrorIs(t, recovered(func() error { return state.RunUnwind(nil, tx) }), unwindErr)
+				}
+				require.Equal(t, panics, panicked)
+				require.False(t, state.HasUnwindPoint())
+
+				flow = nil
+				_, err := state.RunNoInterrupt(nil, newTx())
+				require.NoError(t, err)
+				require.Equal(t, []stages.SyncStage{stages.Headers, stages.Bodies}, flow)
+			})
+		}
 	}
+}
+
+// RunNoInterrupt reports the bad block of an unwind a forward stage asked for, after the unwind succeeded.
+func TestNoInterruptReturnsTheBadBlockOfASucceededUnwind(t *testing.T) {
+	badBlock := errors.New("bad block")
+	requestUnwind := true
+	stage := func(id stages.SyncStage) *Stage {
+		return &Stage{
+			ID: id,
+			Forward: func(_ bool, s *StageState, u Unwinder, _ *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
+				if id == stages.Bodies && requestUnwind {
+					requestUnwind = false
+					return u.UnwindTo(100, BadBlock(common.Hash{1}, badBlock), tx)
+				}
+				return nil
+			},
+			Unwind: func(*UnwindState, *StageState, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error { return nil },
+		}
+	}
+	state := New(ethconfig.Defaults.Sync, []*Stage{stage(stages.Headers), stage(stages.Bodies)},
+		UnwindOrder{stages.Bodies, stages.Headers}, nil, log.New(), stages.ModeForkValidation)
+	_, tx := temporaltest.NewTestTx(t)
+	for _, id := range []stages.SyncStage{stages.Headers, stages.Bodies} {
+		require.NoError(t, stages.SaveStageProgress(tx, id, 2000))
+	}
+	_, err := state.RunNoInterrupt(nil, tx)
+	require.ErrorIs(t, err, badBlock)
+	require.False(t, state.HasUnwindPoint())
 }
 
 func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {

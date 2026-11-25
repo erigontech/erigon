@@ -301,23 +301,14 @@ func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (ha
 	for !s.IsDone() {
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {
-			for j := 0; j < len(s.unwindOrder); j++ {
-				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
-					continue
-				}
-				if err := s.unwindStage(initialCycle, s.unwindOrder[j], sd, tx); err != nil {
-					return false, err
-				}
-			}
-			s.prevUnwindPoint = s.unwindPoint
-			s.unwindPoint = nil
-			if s.unwindReason.IsBadBlock() {
-				badBlockUnwind = true
-				errBadBlock = s.unwindReason.ErrBadBlock
-			}
-			s.unwindReason = UnwindReason{}
-			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
+			// RunUnwind clears the request, so keep its reason first.
+			reason := s.unwindReason
+			if err := s.RunUnwind(sd, tx); err != nil {
 				return false, err
+			}
+			if reason.IsBadBlock() {
+				badBlockUnwind = true
+				errBadBlock = reason.ErrBadBlock
 			}
 			// If there were unwinds at the start, a heavier but invalid chain may be present, so
 			// we relax the rules for Stage1
