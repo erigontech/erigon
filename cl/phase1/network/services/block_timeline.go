@@ -59,6 +59,9 @@ type blockTimeline struct {
 	seen, firstImport, importStart, imported time.Time
 	attempts                                 int
 	waitedForColumns                         bool
+	// logged keeps the entry of a logged block until its slot leaves the window, so a later import of the same
+	// block by another path does not log it again.
+	logged bool
 }
 
 func newBlockTimelines(clock eth_clock.EthereumClock, logger log.Logger) *blockTimelines {
@@ -136,7 +139,7 @@ func (t *blockTimelines) importAttempt(block *cltypes.SignedBeaconBlock, root co
 		if commitments := block.GetBlobKzgCommitments(); commitments != nil {
 			line.blobs = commitments.Len()
 		}
-		delete(t.pending, blockGossipKey(block))
+		line.logged = true
 		select {
 		case t.lines <- *line:
 		default:
@@ -168,7 +171,9 @@ func (t *blockTimelines) update(block *cltypes.SignedBeaconBlock, apply func(*bl
 		line = &blockTimeline{slot: block.Block.Slot}
 		t.pending[key] = line
 	}
-	apply(line)
+	if !line.logged {
+		apply(line)
+	}
 }
 
 func timelineSlotTracked(slot, currentSlot uint64) bool {

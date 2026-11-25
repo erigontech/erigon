@@ -341,3 +341,18 @@ func TestBlockNotAcceptedByForkChoiceLogsNoTimeline(t *testing.T) {
 	require.False(t, accepted)
 	require.Empty(t, service.timelines.lines, "an import is complete only once fork choice holds the block")
 }
+
+func TestBlockTimelineLogsABlockImportedByTwoPathsOnce(t *testing.T) {
+	logger, _ := timelineLogger(log.LvlDebug)
+	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
+	block, root := timelineBlock(timelineSlot, 0), common.Hash{0x10}
+
+	timelines.seen(block, at(time.Second))
+	timelines.importAttempt(block, root, at(time.Second), at(1200*time.Millisecond), nil)
+	timelines.importAttempt(block, root, at(1100*time.Millisecond), at(1300*time.Millisecond), nil)
+
+	require.Len(t, timelines.lines, 1)
+	line := <-timelines.lines
+	require.Equal(t, 1, line.attempts)
+	require.Equal(t, at(time.Second), line.seen)
+}
