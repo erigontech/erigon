@@ -173,7 +173,7 @@ func PeekTransactionType(serialized []byte) (byte, error) {
 // ParseTransaction decodes and validates the transaction at pos, fills slot, and optionally recovers its sender.
 // With wrappedWithBlobs set, transactions carrying blobs must include a network sidecar
 // containing the blobs, commitments, and proofs (see https://eips.ethereum.org/EIPS/eip-4844#networking).
-// validateHash can read the decoded slot.Txn before sender recovery and before a wrapped sidecar is copied.
+// validateHash runs before sender recovery and before a wrapped sidecar is copied.
 //
 // On success, p is the offset just past the transaction in payload. Packet parsing also needs
 // this offset on ErrRejected so it can continue with the next transaction.
@@ -236,7 +236,6 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// Step 3: Decode the transaction using standard types.
 	// Parse type-3 and frame wrappers separately. Only the inner transaction body
 	// goes through the standard decoder.
-	slot.senderVerified = false
 	var txn types.Transaction
 	var innerTxBytes []byte // only set for wrapped blob txns
 	wrapped := !legacy && txBytes[0] == BlobTxnType && wrappedWithBlobs
@@ -280,7 +279,6 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if err != nil {
 			return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
 		}
-		slot.Txn = txn
 		// The hash covers only the inner transaction. The callback can reject a
 		// known hash here and avoid copying the sidecar.
 		slot.IDHash = crypto.Keccak256Hash(innerTxBytes)
@@ -402,7 +400,6 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if err != nil {
 			return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
 		}
-		slot.Txn = txn
 	}
 
 	// Step 4: Validate chain ID for all transaction types.
@@ -417,10 +414,11 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		return 0, fmt.Errorf("%w: %s, %s (expected %s)", ErrParseTxn, "invalid chainID", chainID, &ctx.chainID)
 	}
 
-	// Step 5: Compute the transaction hash.
+	// Step 5: Store the decoded transaction and compute hash.
 	// Compute hash directly from raw RLP bytes (avoids re-encoding the transaction
 	// which txn.Hash() would do via rlpHash/prefixedRlpHash + reflection).
 	// Wrapped transactions were hashed in step 3, over the type byte and inner body.
+	slot.Txn = txn
 	slot.AuthAndNonces = nil
 	if innerTxBytes == nil {
 		slot.IDHash = crypto.Keccak256Hash(txBytes)
@@ -469,7 +467,6 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 		addrBytes := addr.Value()
 		copy(sender, addrBytes[:])
-		slot.senderVerified = signer == ctx.signer
 	}
 
 	return p, nil
@@ -498,10 +495,7 @@ type TxnSlot struct {
 	Nonce    uint64            // Nonce of the transaction (kept as field for btree search sentinel)
 	IDHash   [32]byte          // Transaction hash for the purposes of using it as a transaction Id
 	Traced   bool              // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
-	// RPC can reuse a sender verified with the pool signer. A separately supplied
-	// sender or a legacy signature accepted under pre-EIP-2 rules needs recovery.
-	senderVerified bool
-	Size           uint32 // Cached size of the RLP payload (persists after Rlp is set to nil)
+	Size     uint32            // Cached size of the RLP payload (persists after Rlp is set to nil)
 
 	BlobBundles []PoolBlobBundle // Parsed blob bytes reference the slot's copy of the network wrapper in Rlp.
 

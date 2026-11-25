@@ -830,29 +830,20 @@ func cachedRejectionDependsOnlyOnTxn(reason txpoolcfg.DiscardReason) bool {
 // Otherwise it returns a cached rejection that still applies,
 // or NotSet if admission is needed.
 func (p *TxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
-	reason, _ := p.knownTxn(hash)
-	return reason
-}
-
-func (p *TxPool) knownTxn(hash []byte) (txpoolcfg.DiscardReason, common.Address) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	hashS := string(hash)
-	if mt := p.byHash[hashS]; mt != nil {
-		var sender common.Address
-		if mt.TxnSlot.senderVerified {
-			sender = p.senders.senderID2Addr[mt.TxnSlot.SenderID]
-		}
-		return txpoolcfg.AlreadyKnown, sender
+	if _, ok := p.byHash[hashS]; ok {
+		return txpoolcfg.AlreadyKnown
 	}
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok && cachedRejectionDependsOnlyOnTxn(reason) {
-		return reason, common.Address{}
+		return reason
 	}
 	// Sender-policy rejections still need admission's current nonce and membership checks.
 	if rejection, ok := p.frameRejections.Get(hashS); ok && rejection.appliesToHead(p.stateGeneration) {
-		return rejection.reason, common.Address{}
+		return rejection.reason
 	}
-	return txpoolcfg.NotSet, common.Address{}
+	return txpoolcfg.NotSet
 }
 
 func (p *TxPool) FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error) {

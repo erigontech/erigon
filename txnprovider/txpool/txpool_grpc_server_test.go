@@ -77,13 +77,13 @@ func (m *addMockTxPool) deprecatedForEach(f func(rlp []byte, sender common.Addre
 }
 func (m *addMockTxPool) CountContent() (int, int, int) { return 0, 0, 0 }
 func (m *addMockTxPool) RejectFramePrefix(common.Hash) {}
-func (m *addMockTxPool) knownTxn(hash []byte) (txpoolcfg.DiscardReason, common.Address) {
+func (m *addMockTxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
 	i := m.knownTxnCalls
 	m.knownTxnCalls++
 	if i < len(m.knownByCall) && m.knownByCall[i] {
-		return txpoolcfg.AlreadyKnown, common.Address{}
+		return txpoolcfg.AlreadyKnown
 	}
-	return txpoolcfg.NotSet, common.Address{}
+	return txpoolcfg.NotSet
 }
 
 func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) { return 0, false }
