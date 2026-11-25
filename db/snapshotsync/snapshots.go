@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -786,7 +785,8 @@ func (s *BaseRoSnapshots) hasIndexedDirtyFile(t snaptype.Enum, path string) (fou
 
 // mergedFilesNotInEveryType returns the indexed segments that other types lack and that have smaller segments of
 // their own type inside them, so the type shows those smaller segments instead and a merge range does not cut
-// through a visible file. A type hides nothing when hiding would shorten its visible span: no block is hidden.
+// through a visible file. A segment whose hiding would shorten its type's visible span stays visible: no block
+// is hidden.
 func (s *BaseRoSnapshots) mergedFilesNotInEveryType() map[*DirtySegment]bool {
 	indexed := make(map[snaptype.Enum][]*DirtySegment, len(s.enums))
 	ranges := make(map[snaptype.Enum][]Range, len(s.enums))
@@ -810,21 +810,25 @@ func (s *BaseRoSnapshots) mergedFilesNotInEveryType() map[*DirtySegment]bool {
 	for t, segments := range indexed {
 		rs := ranges[t]
 		slices.SortFunc(rs, func(a, b Range) int { return cmp.Or(cmp.Compare(a.from, b.from), cmp.Compare(b.to, a.to)) })
-		candidates := map[*DirtySegment]bool{}
+		var candidates []*DirtySegment
 		for _, sn := range segments {
 			if types[sn.Range] < len(s.enums) && hasSmallerInside(rs, sn.Range) {
-				candidates[sn] = true
+				candidates = append(candidates, sn)
 			}
 		}
 		if len(candidates) == 0 {
 			continue
 		}
+		// The largest first: a nested candidate that would shorten the span is left visible on its own.
+		slices.SortFunc(candidates, func(a, b *DirtySegment) int { return cmp.Compare(b.to-b.from, a.to-a.from) })
 		before := truncateAtGap(buildVisibleSegments(s.dirty[t], nil))
-		after := truncateAtGap(buildVisibleSegments(s.dirty[t], candidates))
-		if len(after) == 0 || after[0].from > before[0].from || after[len(after)-1].to < before[len(before)-1].to {
-			continue
+		for _, sn := range candidates {
+			hidden[sn] = true
+			after := truncateAtGap(buildVisibleSegments(s.dirty[t], hidden))
+			if len(after) == 0 || after[0].from > before[0].from || after[len(after)-1].to < before[len(before)-1].to {
+				delete(hidden, sn)
+			}
 		}
-		maps.Copy(hidden, candidates)
 	}
 	return hidden
 }

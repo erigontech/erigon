@@ -640,35 +640,42 @@ func TestVisibleBlockFilesKeepAMergedFileItsSmallerFilesDoNotCover(t *testing.T)
 }
 
 func TestMergeRangeWithCoveredBodies(t *testing.T) {
-	logger := log.New()
-	dir := t.TempDir()
-	// Transactions below 90k are pruned; a stopped merge left a bodies file over the smaller bodies files.
-	createTestSegmentFile(t, 0, 100_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
-	for from := uint64(0); from < 90_000; from += 10_000 {
-		for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Bodies} {
-			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
-		}
-	}
-	for from := uint64(90_000); from < 100_000; from += 1_000 {
-		for _, typ := range snaptype2.BlockSnapshotTypes {
-			createTestSegmentFile(t, from, from+1_000, typ.Enum(), dir, version.V1_0, logger)
-		}
-	}
-	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-	defer s.Close()
-	require.NoError(t, s.OpenFolder())
-	// Transactions lack the bodies range, so bodies show their smaller files, like headers.
-	require.Equal(t, visibleRanges(s, snaptype2.Headers), visibleRanges(s, snaptype2.Bodies))
+	for _, nested := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nested=%t", nested), func(t *testing.T) {
+			logger := log.New()
+			dir := t.TempDir()
+			// Transactions below 90k are pruned; a stopped merge left a bodies file over the smaller bodies files.
+			createTestSegmentFile(t, 0, 100_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+			if nested { // a smaller file nested in the first bodies file must not stop the merged file from hiding
+				createTestSegmentFile(t, 0, 1_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+			}
+			for from := uint64(0); from < 90_000; from += 10_000 {
+				for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Bodies} {
+					createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+				}
+			}
+			for from := uint64(90_000); from < 100_000; from += 1_000 {
+				for _, typ := range snaptype2.BlockSnapshotTypes {
+					createTestSegmentFile(t, from, from+1_000, typ.Enum(), dir, version.V1_0, logger)
+				}
+			}
+			s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+			defer s.Close()
+			require.NoError(t, s.OpenFolder())
+			// Transactions lack the bodies range, so bodies show their smaller files, like headers.
+			require.Equal(t, visibleRanges(s, snaptype2.Headers), visibleRanges(s, snaptype2.Bodies))
 
-	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
-	merger.DisableFsync()
-	ranges := merger.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
-	require.Equal(t, []Range{NewRange(90_000, 100_000)}, ranges)
-	require.NoError(t, merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil))
-	for _, typ := range snaptype2.BlockSnapshotTypes {
-		require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(typ.Versions().Current, 90_000, 100_000, typ.Enum())))
+			merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+			merger.DisableFsync()
+			ranges := merger.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
+			require.Equal(t, []Range{NewRange(90_000, 100_000)}, ranges)
+			require.NoError(t, merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil))
+			for _, typ := range snaptype2.BlockSnapshotTypes {
+				require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(typ.Versions().Current, 90_000, 100_000, typ.Enum())))
+			}
+			require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 0, 100_000, snaptype2.Bodies.Enum())))
+		})
 	}
-	require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 0, 100_000, snaptype2.Bodies.Enum())))
 }
 
 func TestMergeSkipsPreClaimedRange(t *testing.T) {
@@ -2291,7 +2298,7 @@ func TestVisibleBlockFilesKeepAMergedFileOverOverlappingSmallerFiles(t *testing.
 // Bodies [10k,50k) is tiled by [10k,40k) and [40k,50k), but the crossing [30k,60k) wins in the visible view, so
 // hiding [10k,50k) would end the bodies' visible files at 40k: it stays visible.
 func TestHidingKeepsAMergedFileUnderACrossingFile(t *testing.T) {
-	requireHidingKeepsSpans(t, map[snaptype.Enum][]Range{
+	requireHidingKeepsSpans(t, t.TempDir(), map[snaptype.Enum][]Range{
 		snaptype2.Enums.Headers:      {NewRange(20_000, 50_000), NewRange(10_000, 50_000), NewRange(30_000, 70_000), NewRange(40_000, 80_000), NewRange(50_000, 90_000)},
 		snaptype2.Enums.Bodies:       {NewRange(30_000, 50_000), NewRange(10_000, 40_000), NewRange(30_000, 60_000), NewRange(40_000, 50_000), NewRange(10_000, 50_000)},
 		snaptype2.Enums.Transactions: {NewRange(30_000, 60_000), NewRange(20_000, 60_000), NewRange(30_000, 40_000), NewRange(50_000, 70_000)},
@@ -2317,6 +2324,7 @@ func TestHidingNeverShortensAVisibleSpanAligned(t *testing.T) {
 
 func requireHidingKeepsVisibleSpans(t *testing.T, rng *rand.Rand, iterations int, newRange func(*rand.Rand) Range) {
 	t.Helper()
+	dir := t.TempDir() // the layouts stay in memory, no file is written
 	for range iterations {
 		layout := map[snaptype.Enum][]Range{}
 		for _, typ := range snaptype2.BlockSnapshotTypes {
@@ -2324,14 +2332,14 @@ func requireHidingKeepsVisibleSpans(t *testing.T, rng *rand.Rand, iterations int
 				layout[typ.Enum()] = append(layout[typ.Enum()], newRange(rng))
 			}
 		}
-		requireHidingKeepsSpans(t, layout)
+		requireHidingKeepsSpans(t, dir, layout)
 	}
 }
 
 // requireHidingKeepsSpans checks that the hidden files of an indexed layout shorten no type's visible span.
-func requireHidingKeepsSpans(t *testing.T, layout map[snaptype.Enum][]Range) {
+func requireHidingKeepsSpans(t *testing.T, dir string, layout map[snaptype.Enum][]Range) {
 	t.Helper()
-	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, t.TempDir(), snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, log.New())
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, log.New())
 	for _, typ := range snaptype2.BlockSnapshotTypes {
 		for _, r := range layout[typ.Enum()] {
 			sn := NewDirtySegment(typ, version.V1_0, r.From(), r.To(), false)
