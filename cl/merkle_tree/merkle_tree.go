@@ -23,6 +23,8 @@ type MerkleTree struct {
 	hashBuf [64]byte // buffer to store the input for hash(hash1, hash2)
 	limit   *uint64  // Optional limit for the number of leaves (this will enable limit-oriented hashing)
 
+	baseLevel int // height of the leaves above the bottom of the full tree
+
 	dirtyLeaves []atomic.Bool
 	mu          sync.RWMutex
 }
@@ -46,6 +48,16 @@ func (m *MerkleTree) Initialize(leavesCount, maxTreeCacheDepth int, computeLeaf 
 		*m.limit = *limitOptional
 	}
 	m.dirtyLeaves = make([]atomic.Bool, leavesCount)
+}
+
+// SetBaseLevel makes the leaves stand for subtrees of height level, so padding
+// uses the zero hash of the matching height. The limit is still counted in leaves.
+// It must be called before the first ComputeRoot; a nonzero level panics without a limit.
+func (m *MerkleTree) SetBaseLevel(level int) {
+	if level != 0 && m.limit == nil {
+		panic("merkle_tree: SetBaseLevel requires a limit")
+	}
+	m.baseLevel = level
 }
 
 func (m *MerkleTree) SetComputeLeafFn(computeLeaf func(idx int, out []byte)) {
@@ -148,7 +160,7 @@ func (m *MerkleTree) ComputeRoot() common.Hash {
 		if m.limit == nil {
 			return ZeroHashes[0]
 		}
-		return ZeroHashes[GetDepth(*m.limit)]
+		return ZeroHashes[int(GetDepth(*m.limit))+m.baseLevel]
 	}
 
 	if m.leavesCount <= 3 {
@@ -158,7 +170,7 @@ func (m *MerkleTree) ComputeRoot() common.Hash {
 			buf = append(buf, m.hashBuf[:length.Hash]...)
 		}
 		if m.limit != nil {
-			if err := MerkleRootFromFlatFromIntermediateLevelWithLimit(buf, root[:], int(*m.limit), 0); err != nil {
+			if err := MerkleRootFromFlatFromIntermediateLevelWithLimit(buf, root[:], int(*m.limit)<<m.baseLevel, m.baseLevel); err != nil {
 				panic(err)
 			}
 			return root
@@ -173,7 +185,7 @@ func (m *MerkleTree) ComputeRoot() common.Hash {
 		var node common.Hash
 		m.computeLeaf(0, node[:])
 		if m.limit != nil {
-			if err := MerkleRootFromFlatFromIntermediateLevelWithLimit(node[:], root[:], int(*m.limit), 0); err != nil {
+			if err := MerkleRootFromFlatFromIntermediateLevelWithLimit(node[:], root[:], int(*m.limit)<<m.baseLevel, m.baseLevel); err != nil {
 				panic(err)
 			}
 			return root
@@ -205,6 +217,7 @@ func (m *MerkleTree) CopyInto(other *MerkleTree) {
 	// Copy primitive fields
 	other.computeLeaf = m.computeLeaf
 	other.leavesCount = m.leavesCount
+	other.baseLevel = m.baseLevel
 	if m.limit != nil {
 		other.limit = new(uint64) // Shallow copy
 		*other.limit = *m.limit
@@ -253,7 +266,7 @@ func (m *MerkleTree) finishHashing(lastLayerIdx int, root []byte) {
 		return
 	}
 
-	if err := MerkleRootFromFlatFromIntermediateLevelWithLimit(m.layers[lastLayerIdx], root, int(*m.limit), lastLayerIdx+1); err != nil {
+	if err := MerkleRootFromFlatFromIntermediateLevelWithLimit(m.layers[lastLayerIdx], root, int(*m.limit)<<m.baseLevel, lastLayerIdx+1+m.baseLevel); err != nil {
 		panic(err)
 	}
 }
@@ -294,7 +307,7 @@ func (m *MerkleTree) computeLayerRange(layerIdx, start, end int, hashBuf *[64]by
 			leafIndexBegin := i * 2
 			m.computeLeaf(leafIndexBegin, hashBuf[:length.Hash])
 			if leafIndexBegin == m.leavesCount-1 {
-				copy(hashBuf[length.Hash:], ZeroHashes[0][:])
+				copy(hashBuf[length.Hash:], ZeroHashes[m.baseLevel][:])
 			} else {
 				m.computeLeaf(leafIndexBegin+1, hashBuf[length.Hash:])
 			}
@@ -307,7 +320,7 @@ func (m *MerkleTree) computeLayerRange(layerIdx, start, end int, hashBuf *[64]by
 		childToOffset := (i*2 + 2) * length.Hash
 		if childToOffset > len(m.layers[layerIdx-1]) {
 			copy(hashBuf[:length.Hash], m.layers[layerIdx-1][childFromOffset:])
-			copy(hashBuf[length.Hash:], ZeroHashes[layerIdx][:])
+			copy(hashBuf[length.Hash:], ZeroHashes[layerIdx+m.baseLevel][:])
 		} else {
 			copy(hashBuf[:], m.layers[layerIdx-1][childFromOffset:childToOffset])
 		}

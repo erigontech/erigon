@@ -17,6 +17,8 @@
 package solid
 
 import (
+	"bytes"
+	"math/bits"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -93,6 +95,7 @@ type cowList struct {
 
 	hashMu     sync.Mutex
 	chunkRoots []byte
+	top        []*merkle_tree.MerkleTree
 	topRoot    [32]byte
 	topValid   atomic.Bool
 }
@@ -226,8 +229,10 @@ func (l *cowList) build(layout cowLayout, n int, read func(dst []byte, from int)
 	}
 	chunks := newSlots(count)
 	owner := l.owner.Load()
+	slab := make([]byte, count*per*size)
 	for ci := range chunks {
-		ch := &cowChunk{owner: owner, data: make([]byte, per*size)}
+		end := (ci + 1) * per * size
+		ch := &cowChunk{owner: owner, data: slab[ci*per*size : end : end]}
 		first := ci*per - layout.shift
 		skip := max(0, -first)
 		if filled := min(per-skip, n-first-skip); read != nil && filled > 0 {
@@ -241,7 +246,7 @@ func (l *cowList) build(layout cowLayout, n int, read func(dst []byte, from int)
 func (l *cowList) reset(n int, read func(dst []byte, from int)) {
 	l.chunks = l.build(l.layout, n, read)
 	l.l = n
-	l.topValid.Store(false)
+	l.dropTop()
 }
 
 func (l *cowList) decode(buf []byte) {
@@ -255,7 +260,7 @@ func (l *cowList) clear() {
 	}
 	l.chunks = l.chunks[:0]
 	l.l = 0
-	l.topValid.Store(false)
+	l.dropTop()
 }
 
 func (l *cowList) setProgressive(enabled bool) {
@@ -270,7 +275,7 @@ func (l *cowList) setProgressive(enabled bool) {
 		l.chunks = l.build(next, l.l, l.readInto)
 	}
 	l.layout = next
-	l.topValid.Store(false)
+	l.dropTop()
 }
 
 func (l *cowList) copyTo(dst *cowList) {
@@ -289,8 +294,7 @@ func (l *cowList) copyTo(dst *cowList) {
 	dst.layout, dst.l, dst.c = l.layout, l.l, l.c
 
 	l.hashMu.Lock()
-	dst.topRoot = l.topRoot
-	dst.topValid.Store(l.topValid.Load())
+	dst.copyTop(l)
 	l.hashMu.Unlock()
 
 	l.owner.Store(new(cowOwner))
@@ -374,69 +378,160 @@ func (l *cowList) fillCold(cold []int) {
 	wg.Wait()
 }
 
-func (l *cowList) refreshChunkRoots() {
-	n := len(l.chunks)
-	l.chunkRoots = slices.Grow(l.chunkRoots[:0], n*32)[:n*32]
+func (l *cowList) dropTop() {
+	l.top = nil
+	l.chunkRoots = l.chunkRoots[:0]
+	l.topValid.Store(false)
+}
+
+func (l *cowList) copyTop(src *cowList) {
+	l.chunkRoots = append(l.chunkRoots[:0], src.chunkRoots...)
+	l.top = slices.Grow(l.top[:0], len(src.top))[:len(src.top)]
+	for i, tree := range src.top {
+		if l.top[i] == nil {
+			l.top[i] = new(merkle_tree.MerkleTree)
+		}
+		tree.CopyInto(l.top[i])
+		first, _ := l.topSpan(i)
+		l.top[i].SetComputeLeafFn(l.topLeafFn(first))
+	}
+	l.topRoot = src.topRoot
+	l.topValid.Store(src.topValid.Load())
+}
+
+func progressiveSegmentStart(k int) int { return (1<<(2*k) - 1) / 3 }
+
+// topSpan returns the first chunk covered by top tree i and its capacity in chunks.
+// A binary list has one tree over all chunks. A progressive list has one tree
+// per segment k >= progressiveHeadSegs; the earlier segments live in chunk 0's head.
+func (l *cowList) topSpan(i int) (first, capacity int) {
+	h := l.layout.h
+	if !l.layout.progressive() {
+		return 0, 1 << (int(merkle_tree.GetDepth(l.layout.limitLeaves)) - h)
+	}
+	k := i + progressiveHeadSegs
+	return (progressiveSegmentStart(k) + l.layout.shift) >> h, (1 << (2 * k)) >> h
+}
+
+func (l *cowList) topCount() int {
+	switch {
+	case l.l == 0:
+		return 0
+	case !l.layout.progressive():
+		return 1
+	}
+	count := 0
+	for k := progressiveHeadSegs; progressiveSegmentStart(k) < l.l; k++ {
+		count++
+	}
+	return count
+}
+
+func (l *cowList) topLeafFn(first int) func(int, []byte) {
+	return func(idx int, out []byte) {
+		copy(out, l.chunkRoots[(first+idx)*32:(first+idx+1)*32])
+	}
+}
+
+func (l *cowList) growTop(n, oldN int) {
+	count := l.topCount()
+	for len(l.top) < count {
+		l.top = append(l.top, nil)
+	}
+	for i := range count {
+		first, capacity := l.topSpan(i)
+		have := min(max(oldN-first, 0), capacity)
+		want := min(n-first, capacity)
+		tree := l.top[i]
+		if tree == nil {
+			limit := uint64(capacity)
+			tree = new(merkle_tree.MerkleTree)
+			tree.Initialize(want, merkle_tree.OptimalMaxTreeCacheDepth, l.topLeafFn(first), &limit)
+			tree.SetBaseLevel(l.layout.h)
+			l.top[i] = tree
+			continue
+		}
+		for j := have; j < want; j++ {
+			tree.AppendLeaf()
+		}
+	}
+}
+
+func (l *cowList) markTopLeaf(ci int) {
+	i := 0
+	if l.layout.progressive() {
+		if ci == 0 {
+			return
+		}
+		first := ci<<l.layout.h - l.layout.shift
+		i = (bits.Len(uint(3*first+1))-1)/2 - progressiveHeadSegs
+	}
+	first, _ := l.topSpan(i)
+	l.top[i].MarkLeafAsDirty(ci - first)
+}
+
+// syncRoot records the chunk's current root and marks its top leaf dirty when
+// the root differs from the cached one. Comparing roots, not validity flags,
+// is what keeps a list correct when a sibling filled a shared chunk's root.
+func (l *cowList) syncRoot(ci, oldN int, root *[32]byte) {
+	cached := l.chunkRoots[ci*32 : (ci+1)*32]
+	if ci < oldN && bytes.Equal(cached, root[:]) {
+		return
+	}
+	copy(cached, root[:])
+	if ci < oldN {
+		l.markTopLeaf(ci)
+	}
+}
+
+func (l *cowList) refreshTop() {
+	n, oldN := len(l.chunks), len(l.chunkRoots)/32
+	l.chunkRoots = slices.Grow(l.chunkRoots, n*32-len(l.chunkRoots))[:n*32]
+	l.growTop(n, oldN)
 	var cold []int
 	for ci := range n {
 		if ch := l.chunks[ci].Load(); ch.rootValid.Load() {
-			copy(l.chunkRoots[ci*32:], ch.root[:])
+			l.syncRoot(ci, oldN, &ch.root)
 		} else {
 			cold = append(cold, ci)
 		}
 	}
 	l.fillCold(cold)
 	for _, ci := range cold {
-		copy(l.chunkRoots[ci*32:], l.chunks[ci].Load().root[:])
+		l.syncRoot(ci, oldN, &l.chunks[ci].Load().root)
 	}
 }
 
-func (l *cowList) coreRoot() ([32]byte, error) {
+func (l *cowList) coreRoot() [32]byte {
 	l.hashMu.Lock()
 	defer l.hashMu.Unlock()
 	if l.topValid.Load() {
-		return l.topRoot, nil
+		return l.topRoot
 	}
-	l.refreshChunkRoots()
+	l.refreshTop()
 	var core [32]byte
-	var err error
-	if l.layout.progressive() {
-		core, err = l.progressiveCore()
-	} else {
-		core, err = l.binaryCore()
-	}
-	if err != nil {
-		return [32]byte{}, err
+	switch {
+	case l.layout.progressive():
+		core = l.progressiveCore()
+	case l.l == 0:
+		core = merkle_tree.ZeroHashes[merkle_tree.GetDepth(l.layout.limitLeaves)]
+	default:
+		core = l.top[0].ComputeRoot()
 	}
 	l.topRoot = core
 	l.topValid.Store(true)
-	return core, nil
+	return core
 }
 
-func (l *cowList) binaryCore() (core [32]byte, err error) {
-	if l.l == 0 {
-		return merkle_tree.ZeroHashes[merkle_tree.GetDepth(l.layout.limitLeaves)], nil
-	}
-	err = merkle_tree.MerkleRootFromFlatFromIntermediateLevelWithLimit(l.chunkRoots, core[:], int(l.layout.limitLeaves), l.layout.h)
-	return core, err
-}
-
-func (l *cowList) progressiveCore() ([32]byte, error) {
+func (l *cowList) progressiveCore() [32]byte {
 	segments := make([][32]byte, 0, 24)
 	start, capacity := 0, 1
 	for k := 0; start < l.l; k++ {
-		var segment [32]byte
 		if k < progressiveHeadSegs {
-			segment = l.chunks[0].Load().head[k]
+			segments = append(segments, l.chunks[0].Load().head[k])
 		} else {
-			end := min(start+capacity, l.l)
-			first := (start + l.layout.shift) >> l.layout.h
-			last := (end - 1 + l.layout.shift) >> l.layout.h
-			if err := merkle_tree.MerkleRootFromFlatFromIntermediateLevelWithLimit(l.chunkRoots[first*32:(last+1)*32], segment[:], capacity, l.layout.h); err != nil {
-				return [32]byte{}, err
-			}
+			segments = append(segments, l.top[k-progressiveHeadSegs].ComputeRoot())
 		}
-		segments = append(segments, segment)
 		start += capacity
 		capacity *= 4
 	}
@@ -444,5 +539,5 @@ func (l *cowList) progressiveCore() ([32]byte, error) {
 	for _, segment := range slices.Backward(segments) {
 		root = crypto.Sha256(segment[:], root[:])
 	}
-	return root, nil
+	return root
 }

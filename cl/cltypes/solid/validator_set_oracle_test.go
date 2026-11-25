@@ -550,3 +550,181 @@ func TestValidatorSetPhase0SixBitCopyDifferential(t *testing.T) {
 		spare.check(t, "destination root")
 	}
 }
+
+func forBothLayouts(t *testing.T, fn func(t *testing.T, progressive bool)) {
+	for _, progressive := range []bool{false, true} {
+		t.Run(fmt.Sprintf("progressive=%v", progressive), func(t *testing.T) { fn(t, progressive) })
+	}
+}
+
+func newHashedLiveSet(t testing.TB, rng *rand.Rand, progressive bool, n int) *liveSet {
+	t.Helper()
+	live := newLiveSet(1<<20, progressive)
+	for range n {
+		live.appendRandom(rng)
+	}
+	_, err := live.hash()
+	require.NoError(t, err)
+	return live
+}
+
+func (l *liveSet) setRandomAt(rng *rand.Rand, i int) {
+	v := randomValidatorBytes(rng)
+	l.set.Set(i, v)
+	l.model.set(i, v)
+}
+
+func scatteredIndexes(n int) []int {
+	return []int{0, 84, 85, 255, 256, n / 2, n - 2, n - 1}
+}
+
+func TestValidatorSetIncrementalTopAfterDecode(t *testing.T) {
+	const n = 3000
+	forBothLayouts(t, func(t *testing.T, progressive bool) {
+		rng := rand.New(rand.NewSource(23))
+		source := newLiveSet(1<<20, progressive)
+		for range n {
+			source.appendRandom(rng)
+		}
+		encoded := source.model.encode()
+
+		fresh := newLiveSet(1<<20, progressive)
+		require.NoError(t, fresh.set.DecodeSSZ(encoded, 0))
+		fresh.model = source.model.clone()
+
+		reused := newHashedLiveSet(t, rng, progressive, n+700)
+		require.NoError(t, reused.set.DecodeSSZ(encoded, 0))
+		reused.model = source.model.clone()
+
+		for name, live := range map[string]*liveSet{"fresh": fresh, "reused": reused} {
+			live.check(t, name+" after decode")
+			for round := range 3 {
+				for _, i := range scatteredIndexes(n) {
+					if rng.Intn(3) != 0 {
+						live.setRandomAt(rng, i)
+					}
+				}
+				live.check(t, fmt.Sprintf("%s round %d", name, round))
+			}
+		}
+	})
+}
+
+func TestValidatorSetIncrementalTopAfterCopy(t *testing.T) {
+	const n = 3000
+	writes := map[string]func(rng *rand.Rand, src, dst *liveSet){
+		"none": func(*rand.Rand, *liveSet, *liveSet) {},
+		"same chunk": func(rng *rand.Rand, src, dst *liveSet) {
+			src.setRandomAt(rng, 10)
+			dst.setRandomAt(rng, 11)
+		},
+		"different chunks": func(rng *rand.Rand, src, dst *liveSet) {
+			src.setRandomAt(rng, 10)
+			dst.setRandomAt(rng, 2000)
+		},
+	}
+	forBothLayouts(t, func(t *testing.T, progressive bool) {
+		for name, write := range writes {
+			for _, unhashedBeforeCopy := range []bool{false, true} {
+				for _, dstWarm := range []bool{false, true} {
+					for _, srcFirst := range []bool{false, true} {
+						t.Run(fmt.Sprintf("%s/unhashedBeforeCopy=%v/dstWarm=%v/srcFirst=%v", name, unhashedBeforeCopy, dstWarm, srcFirst), func(t *testing.T) {
+							rng := rand.New(rand.NewSource(29))
+							src := newHashedLiveSet(t, rng, progressive, n)
+							if unhashedBeforeCopy {
+								src.setRandomAt(rng, 10)
+								src.setRandomAt(rng, 1000)
+							}
+							dst := newLiveSet(1<<20, progressive)
+							if dstWarm {
+								dst = newHashedLiveSet(t, rng, progressive, n+300)
+							}
+							src.copyInto(dst)
+							write(rng, src, dst)
+
+							first, second := src, dst
+							if !srcFirst {
+								first, second = dst, src
+							}
+							first.check(t, "first sibling")
+							second.check(t, "second sibling")
+
+							for round := range 2 {
+								write(rng, src, dst)
+								src.setRandomAt(rng, n-1)
+								dst.setRandomAt(rng, 255)
+								first.check(t, fmt.Sprintf("first sibling round %d", round))
+								second.check(t, fmt.Sprintf("second sibling round %d", round))
+							}
+						})
+					}
+				}
+			}
+		}
+	})
+}
+
+func TestValidatorSetIncrementalTopAfterAppend(t *testing.T) {
+	forBothLayouts(t, func(t *testing.T, progressive bool) {
+		for _, start := range []int{255, 340, 1280, 1363, 2645, 5459} {
+			t.Run(fmt.Sprint(start), func(t *testing.T) {
+				rng := rand.New(rand.NewSource(31))
+				live := newHashedLiveSet(t, rng, progressive, start)
+				live.appendRandom(rng)
+				live.check(t, "append to a clean tree")
+				live.setRandomAt(rng, start-1)
+				live.check(t, "write")
+				for i := range 8 {
+					live.appendRandom(rng)
+					live.check(t, fmt.Sprintf("append %d", i))
+				}
+				live.setRandomAt(rng, 0)
+				for range 700 {
+					live.appendRandom(rng)
+				}
+				live.check(t, "append burst")
+				live.setRandomAt(rng, start)
+				live.appendRandom(rng)
+				live.check(t, "write and append")
+			})
+		}
+	})
+}
+
+func TestValidatorSetIncrementalTopAcrossLayoutSwitch(t *testing.T) {
+	const n = 3000
+	for _, from := range []bool{false, true} {
+		t.Run(fmt.Sprintf("progressive=%v", from), func(t *testing.T) {
+			rng := rand.New(rand.NewSource(37))
+			live := newHashedLiveSet(t, rng, from, n)
+			live.setRandomAt(rng, 1)
+			live.check(t, "incremental rehash")
+			for round := range 3 {
+				live.progressive = !live.progressive
+				live.set.SetProgressiveHashing(live.progressive)
+				for _, i := range scatteredIndexes(n) {
+					live.setRandomAt(rng, i)
+				}
+				live.check(t, fmt.Sprintf("switch %d", round))
+				live.setRandomAt(rng, 2)
+				live.appendRandom(rng)
+				live.check(t, fmt.Sprintf("incremental after switch %d", round))
+			}
+		})
+	}
+}
+
+func TestValidatorSetIncrementalTopAfterClear(t *testing.T) {
+	forBothLayouts(t, func(t *testing.T, progressive bool) {
+		rng := rand.New(rand.NewSource(41))
+		live := newHashedLiveSet(t, rng, progressive, 3000)
+		for _, n := range []int{0, 1, 300, 3500} {
+			live.set.Clear()
+			live.model = newValidatorModel(1 << 20)
+			for range n {
+				live.appendRandom(rng)
+			}
+			live.check(t, fmt.Sprintf("clear and refill to %d", n))
+		}
+	})
+}

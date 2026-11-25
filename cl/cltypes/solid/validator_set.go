@@ -167,10 +167,7 @@ func (v *ValidatorSet) HashSSZProgressive() ([32]byte, error) {
 }
 
 func (v *ValidatorSet) hashWithLength() ([32]byte, error) {
-	core, err := v.list.coreRoot()
-	if err != nil {
-		return [32]byte{}, err
-	}
+	core := v.list.coreRoot()
 	lengthRoot := merkle_tree.Uint64Root(uint64(v.list.l))
 	return crypto.Sha256(core[:], lengthRoot[:]), nil
 }

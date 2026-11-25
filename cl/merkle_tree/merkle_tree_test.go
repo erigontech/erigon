@@ -1,6 +1,7 @@
 package merkle_tree_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -140,4 +141,49 @@ func TestMerkleTreeAppendLeafWithLowMaxDepthAndLimitAndTestWR(t *testing.T) {
 	testBuffer[128] = 5
 	expectedRoot := getExpectedRootWithLimit(t, testBuffer, int(lm))
 	require.Equal(t, expectedRoot, mt.ComputeRoot())
+}
+
+func TestMerkleTreeBaseLevel(t *testing.T) {
+	const base = 5
+	want := func(leaves [][32]byte, limit uint64) common.Hash {
+		var root [32]byte
+		require.NoError(t, merkle_tree.MerkleRootFromFlatFromIntermediateLevelWithLimit(flatChunks(leaves), root[:], int(limit)<<base, base))
+		return root
+	}
+	for _, limit := range []uint64{1, 4, 16, 5000} {
+		for count := 1; count <= min(int(limit), 40); count++ {
+			t.Run(fmt.Sprintf("limit%d_leaves%d", limit, count), func(t *testing.T) {
+				leaves := progressiveTestChunks(count)
+				tree := &merkle_tree.MerkleTree{}
+				tree.Initialize(count, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) { copy(out, leaves[idx][:]) }, &limit)
+				tree.SetBaseLevel(base)
+				require.Equal(t, want(leaves, limit), tree.ComputeRoot())
+
+				leaves[count-1][0] ^= 1
+				tree.MarkLeafAsDirty(count - 1)
+				require.Equal(t, want(leaves, limit), tree.ComputeRoot())
+
+				if uint64(count) < limit {
+					leaves = append(leaves, [32]byte{7})
+					tree.AppendLeaf()
+					tree.MarkLeafAsDirty(count)
+					require.Equal(t, want(leaves, limit), tree.ComputeRoot())
+				}
+
+				var copied merkle_tree.MerkleTree
+				tree.CopyInto(&copied)
+				copied.SetComputeLeafFn(func(idx int, out []byte) { copy(out, leaves[idx][:]) })
+				leaves[0][0] ^= 1
+				copied.MarkLeafAsDirty(0)
+				require.Equal(t, want(leaves, limit), copied.ComputeRoot())
+			})
+		}
+	}
+}
+
+func TestMerkleTreeBaseLevelRequiresLimit(t *testing.T) {
+	tree := &merkle_tree.MerkleTree{}
+	tree.Initialize(1, merkle_tree.OptimalMaxTreeCacheDepth, func(int, []byte) {}, nil)
+	require.Panics(t, func() { tree.SetBaseLevel(5) })
+	require.NotPanics(t, func() { tree.SetBaseLevel(0) })
 }

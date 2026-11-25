@@ -91,5 +91,5 @@ func dropValidatorSetCaches(validators *ValidatorSet) {
 		chunk.tree = nil
 		chunk.rootValid.Store(false)
 	}
-	validators.list.topValid.Store(false)
+	validators.list.dropTop()
 }

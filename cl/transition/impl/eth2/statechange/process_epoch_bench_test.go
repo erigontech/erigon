@@ -29,27 +29,52 @@ import (
 func BenchmarkEpochProcessing(b *testing.B) {
 	for _, validators := range []int{200_000, 2_400_000} {
 		for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
-			b.Run(fmt.Sprintf("%dk/%s", validators/1000, version), func(b *testing.B) {
-				benchmarkEpochProcessing(b, validators, version)
-			})
+			for _, pattern := range effectiveBalanceWritePatterns {
+				b.Run(fmt.Sprintf("%dk/%s/%s", validators/1000, version, pattern.name), func(b *testing.B) {
+					benchmarkEpochProcessing(b, validators, version, pattern.indexes(validators))
+				})
+			}
 		}
 	}
 }
 
-// Every effectiveBalanceWriteStride-th validator drops below the hysteresis band,
-// so each epoch boundary rewrites its effective balance across the whole registry.
-const effectiveBalanceWriteStride = 32
+// Validators at these indexes drop below the hysteresis band, so each epoch
+// boundary rewrites their effective balance.
+var effectiveBalanceWritePatterns = []struct {
+	name    string
+	indexes func(validators int) []int
+}{
+	{"stride32", func(validators int) []int {
+		var indexes []int
+		for i := 0; i < validators; i += 32 {
+			indexes = append(indexes, i)
+		}
+		return indexes
+	}},
+	// Mainnet writes about 29 validator records per epoch boundary, in a few
+	// clusters of consecutive indexes.
+	{"mainnet", func(validators int) []int {
+		var indexes []int
+		for cluster, size := range []int{4, 4, 4, 4, 3, 3, 3, 4} {
+			first := cluster*validators/8/256*256 + 10
+			for i := range size {
+				indexes = append(indexes, first+i)
+			}
+		}
+		return indexes
+	}},
+}
 
-func benchmarkEpochProcessing(b *testing.B, validators int, version clparams.StateVersion) {
+func benchmarkEpochProcessing(b *testing.B, validators int, version clparams.StateVersion, writes []int) {
 	base := newRewardsTestState(b, validators)
 	upgradeTo(b, base, version)
 	cfg := base.BeaconConfig()
-	for i := 0; i < validators; i += effectiveBalanceWriteStride {
+	for _, i := range writes {
 		require.NoError(b, base.SetValidatorBalance(i, cfg.MinActivationBalance-2*cfg.EffectiveBalanceIncrement))
 	}
 	_, err := base.HashSSZ()
 	require.NoError(b, err)
-	requireEffectiveBalanceWrites(b, base, validators)
+	requireEffectiveBalanceWrites(b, base, validators, len(writes))
 	eligible := state.EligibleValidatorsIndicies(base)
 	flags := GetUnslashedIndiciesSet(base.BeaconConfig(), state.PreviousEpoch(base), base.ValidatorSet(), base.PreviousEpochParticipation())
 
@@ -101,7 +126,7 @@ func benchmarkEpochProcessing(b *testing.B, validators int, version clparams.Sta
 	})
 }
 
-func requireEffectiveBalanceWrites(b *testing.B, base *state.CachingBeaconState, validators int) {
+func requireEffectiveBalanceWrites(b *testing.B, base *state.CachingBeaconState, validators, want int) {
 	b.Helper()
 	working, err := base.Copy()
 	require.NoError(b, err)
@@ -116,5 +141,5 @@ func requireEffectiveBalanceWrites(b *testing.B, base *state.CachingBeaconState,
 			written++
 		}
 	}
-	require.Equal(b, (validators+effectiveBalanceWriteStride-1)/effectiveBalanceWriteStride, written)
+	require.Equal(b, want, written)
 }
