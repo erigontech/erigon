@@ -26,8 +26,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1022,4 +1024,95 @@ func TestConvertCommitmentFiles_V3VerifiesStagedFilesBeforeSwap(t *testing.T) {
 	require.ErrorContains(t, err, "v3 verification")
 	require.ErrorContains(t, err, "no commitment file was replaced")
 	requireDomainsNotSwapped(t, dirs)
+}
+
+func TestConvertCommitmentFiles_V3RejectsStagedFileTheVerifyViewCannotRead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 32)
+	dirs := agg.Dirs()
+	removed := false
+	state.SetConvertHistoryAfterFileHookForTest(func(int) error {
+		if removed {
+			return nil
+		}
+		removed = true
+		efi, err := filepath.Glob(filepath.Join(dirs.Snap, "rebuild", "accessor", "*.efi"))
+		require.NoError(t, err)
+		require.Len(t, efi, 1)
+		return dir.RemoveFile(efi[0])
+	})
+	t.Cleanup(func() { state.SetConvertHistoryAfterFileHookForTest(nil) })
+
+	err := convertErr(t, db, state.ConvertOpts{TargetV3: true})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "is not readable by the verify view")
+	requireDomainsNotSwapped(t, dirs)
+}
+
+func TestConvertCommitmentFiles_V3SplitSecondPassIgnoresSubsumedHistoryLeftover(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	legacySchema := statecfg.Schema
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 4)
+	dirs := agg.Dirs()
+	db, agg = reopenForConvert(t, db, agg, &legacySchema)
+	require.NoError(t, convertErr(t, db, state.ConvertOpts{TargetV3: true, NoDomain: true}))
+
+	files, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "v3.*-commitment.*.v"))
+	require.NoError(t, err)
+	re := regexp.MustCompile(`^(v3\.[0-9]+)-commitment\.([0-9]+)-([0-9]+)\.v$`)
+	var widest, prefix string
+	var from, span uint64
+	for _, f := range files {
+		m := re.FindStringSubmatch(filepath.Base(f))
+		require.NotNil(t, m, f)
+		a, aErr := strconv.ParseUint(m[2], 10, 64)
+		require.NoError(t, aErr)
+		b, bErr := strconv.ParseUint(m[3], 10, 64)
+		require.NoError(t, bErr)
+		if b-a > span {
+			widest, prefix, from, span = f, m[1], a, b-a
+		}
+	}
+	require.GreaterOrEqual(t, span, uint64(2), "%v", files)
+	src, err := os.ReadFile(widest)
+	require.NoError(t, err)
+	leftover := filepath.Join(dirs.SnapHistory, fmt.Sprintf("%s-commitment.%d-%d.v", prefix, from, from+1))
+	require.NoError(t, os.WriteFile(leftover, src, 0o644))
+
+	db, _ = reopenForConvert(t, db, agg, &legacySchema)
+	require.NoError(t, convertErr(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true}))
+}
+
+func TestConvertCommitmentFiles_V3NoDomainPassRejectsStagedFileTheVerifyViewCannotRead(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	legacySchema := statecfg.Schema
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 4)
+	dirs := agg.Dirs()
+	db, _ = reopenForConvert(t, db, agg, &legacySchema)
+	removed := false
+	state.SetConvertHistoryAfterFileHookForTest(func(int) error {
+		if removed {
+			return nil
+		}
+		removed = true
+		efi, err := filepath.Glob(filepath.Join(dirs.Snap, "rebuild", "accessor", "*.efi"))
+		require.NoError(t, err)
+		require.NotEmpty(t, efi)
+		return dir.RemoveFile(efi[0])
+	})
+	t.Cleanup(func() { state.SetConvertHistoryAfterFileHookForTest(nil) })
+
+	err := convertErr(t, db, state.ConvertOpts{TargetV3: true, NoDomain: true})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "is not readable by the verify view")
+	require.ErrorContains(t, err, "no commitment file was replaced")
+	files, globErr := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
+	require.NoError(t, globErr)
+	require.NotEmpty(t, files)
+	for _, f := range files {
+		require.Truef(t, strings.HasPrefix(filepath.Base(f), "v2."), "%s was promoted", f)
+	}
 }

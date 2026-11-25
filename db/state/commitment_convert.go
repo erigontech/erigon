@@ -739,6 +739,12 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		}
 	}
 
+	if convertHistory && !convertDomain && len(historyRanges) > 0 {
+		if err := verifyStagedHistoryVisible(ctx, at, historyStage, logger); err != nil {
+			return fmt.Errorf("[commitment_convert] v3 verification: %w; no commitment file was replaced; %s", err, rebuildV3Advice)
+		}
+	}
+
 	var convertedFiles VisibleFiles
 	var processedFiles, priorCompleteCount int
 	if convertDomain {
@@ -1972,25 +1978,62 @@ func sampleViaStride(reader *seg.Reader, fi *FilesItem, samples int) ([]sampledP
 }
 
 func verifyStagedCommitmentV3(ctx context.Context, at *AggregatorRoTx, rebuildDir string, stage commitmentV3HistoryStage, stagedHistory, verifyHistory bool, logger log.Logger) ([]string, error) {
+	view, visible, closeView, err := openStagedCommitmentView(ctx, at, rebuildDir, stage, stagedHistory, verifyHistory, logger)
+	if err != nil {
+		return nil, err
+	}
+	defer closeView()
+	if err := VerifyCommitmentV3(ctx, view, nil, verifyHistory, logger); err != nil {
+		return nil, err
+	}
+	return visible, nil
+}
+
+func verifyStagedHistoryVisible(ctx context.Context, at *AggregatorRoTx, stage commitmentV3HistoryStage, logger log.Logger) error {
+	empty, err := os.MkdirTemp(at.Dirs().Tmp, "commitment-verify-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.RemoveAll(empty) }()
+	_, _, closeView, err := openStagedCommitmentView(ctx, at, empty, stage, true, true, logger)
+	if err != nil {
+		return err
+	}
+	closeView()
+	return nil
+}
+
+func openStagedCommitmentView(ctx context.Context, at *AggregatorRoTx, rebuildDir string, stage commitmentV3HistoryStage, stagedHistory, verifyHistory bool, logger log.Logger) (*Aggregator, []string, func(), error) {
 	live := at.d[kv.CommitmentDomain].d
 	viewDirs := at.Dirs()
 	viewDirs.SnapDomain = rebuildDir
+	cleanup := func() {}
+	ok := false
+	defer func() {
+		if !ok {
+			cleanup()
+		}
+	}()
 	switch {
 	case stagedHistory:
 		viewDirs.SnapHistory, viewDirs.SnapIdx, viewDirs.SnapAccessors = stage.history, stage.idx, stage.accessor
 	case !verifyHistory:
 		empty, err := os.MkdirTemp(viewDirs.Tmp, "commitment-verify-*")
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
-		defer func() { _ = dir.RemoveAll(empty) }()
+		cleanup = func() { _ = dir.RemoveAll(empty) }
 		viewDirs.SnapHistory, viewDirs.SnapIdx, viewDirs.SnapAccessors = empty, empty, empty
 	}
 	view, err := New(viewDirs).StepSize(at.StepSize()).StepsInFrozenFile(at.a.StepsInFrozenFile()).DisableBranchCache().Logger(logger).Open(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	defer view.Close()
+	removeDir := cleanup
+	cleanup = func() {
+		view.Close()
+		removeDir()
+	}
 	vd := view.d[kv.CommitmentDomain]
 	vd.DomainCfg = live.DomainCfg
 	vd.History.FileVersion.DataV = live.History.FileVersion.DataV
@@ -2002,12 +2045,40 @@ func verifyStagedCommitmentV3(ctx context.Context, at *AggregatorRoTx, rebuildDi
 		ii.Enabled = false
 	}
 	if err := view.OpenFolder(nil); err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	if err := VerifyCommitmentV3(ctx, view, nil, verifyHistory, logger); err != nil {
-		return nil, err
+	visible := commitmentVisibleFileNames(view)
+	patterns := []string{filepath.Join(rebuildDir, "*.kv")}
+	var liveNames []string
+	switch {
+	case stagedHistory:
+		patterns = append(patterns, filepath.Join(stage.history, "*.v"), filepath.Join(stage.idx, "*.ef"))
+	case verifyHistory:
+		ct := at.d[kv.CommitmentDomain]
+		for _, files := range []visibleFiles{ct.ht.files, ct.ht.iit.files} {
+			for _, f := range files {
+				liveNames = append(liveNames, filepath.Base(f.Fullpath()))
+			}
+		}
 	}
-	return commitmentVisibleFileNames(view), nil
+	for _, pattern := range patterns {
+		files, err := filepath.Glob(pattern)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		for _, f := range files {
+			if name := filepath.Base(f); !slices.Contains(visible, name) {
+				return nil, nil, nil, fmt.Errorf("%s is not readable by the verify view", name)
+			}
+		}
+	}
+	for _, name := range liveNames {
+		if !slices.Contains(visible, name) {
+			return nil, nil, nil, fmt.Errorf("%s is not readable by the verify view", name)
+		}
+	}
+	ok = true
+	return view, visible, cleanup, nil
 }
 
 func commitmentVisibleFileNames(a *Aggregator) []string {
