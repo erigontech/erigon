@@ -80,6 +80,46 @@ func (c *MockPeerDasBackfillCustodyColumnsCall) DoAndReturn(f func(uint64, uint6
 	return c
 }
 
+// BlobsFromColumns mocks base method.
+func (m *MockPeerDas) BlobsFromColumns(ctx context.Context, slot uint64, blockRoot common.Hash, indices []uint64, withSidecars bool) ([]*cltypes.Blob, []*cltypes.BlobSidecar, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "BlobsFromColumns", ctx, slot, blockRoot, indices, withSidecars)
+	ret0, _ := ret[0].([]*cltypes.Blob)
+	ret1, _ := ret[1].([]*cltypes.BlobSidecar)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// BlobsFromColumns indicates an expected call of BlobsFromColumns.
+func (mr *MockPeerDasMockRecorder) BlobsFromColumns(ctx, slot, blockRoot, indices, withSidecars any) *MockPeerDasBlobsFromColumnsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BlobsFromColumns", reflect.TypeOf((*MockPeerDas)(nil).BlobsFromColumns), ctx, slot, blockRoot, indices, withSidecars)
+	return &MockPeerDasBlobsFromColumnsCall{Call: call}
+}
+
+// MockPeerDasBlobsFromColumnsCall wrap *gomock.Call
+type MockPeerDasBlobsFromColumnsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasBlobsFromColumnsCall) Return(arg0 []*cltypes.Blob, arg1 []*cltypes.BlobSidecar, arg2 error) *MockPeerDasBlobsFromColumnsCall {
+	c.Call = c.Call.Return(arg0, arg1, arg2)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasBlobsFromColumnsCall) Do(f func(context.Context, uint64, common.Hash, []uint64, bool) ([]*cltypes.Blob, []*cltypes.BlobSidecar, error)) *MockPeerDasBlobsFromColumnsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasBlobsFromColumnsCall) DoAndReturn(f func(context.Context, uint64, common.Hash, []uint64, bool) ([]*cltypes.Blob, []*cltypes.BlobSidecar, error)) *MockPeerDasBlobsFromColumnsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // DownloadColumnsAndRecoverBlobs mocks base method.
 func (m *MockPeerDas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error {
 	m.ctrl.T.Helper()

@@ -214,12 +214,16 @@ func getBeaconBlobs(t *testing.T, f blobsTestFixture, query string) beaconBlobsR
 
 func setupBlobsTest(t *testing.T) blobsTestFixture {
 	t.Helper()
+	return setupBlobsTestWithCommitments(t, []cltypes.KZGCommitment{{69}, {1}, {2}})
+}
+
+func setupBlobsTestWithCommitments(t *testing.T, commitments []cltypes.KZGCommitment) blobsTestFixture {
+	t.Helper()
 
 	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	block := blocks[0]
 	slot := block.Block.Slot
 
-	commitments := []cltypes.KZGCommitment{{69}, {1}, {2}}
 	block.Block.Body.BlobKzgCommitments.Clear()
 	versionedHashes := make([]common.Hash, len(commitments))
 	for i := range commitments {
