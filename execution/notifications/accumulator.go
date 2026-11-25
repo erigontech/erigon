@@ -101,6 +101,14 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 	}
 }
 
+// Reserve sizes the latest change for n more account entries.
+func (a *Accumulator) Reserve(n int) {
+	a.latestChange.Changes = slices.Grow(a.latestChange.Changes, n)
+	if len(a.accountChangeIndex) == 0 {
+		a.accountChangeIndex = make(map[common.Address]int, n)
+	}
+}
+
 func (a *Accumulator) StartIncompleteRange(firstBlock uint64, lastHeader *types.Header) {
 	a.StartChange(lastHeader, nil, false)
 	a.latestChange.FirstBlockHeight = firstBlock
