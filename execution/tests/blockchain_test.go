@@ -2621,10 +2621,10 @@ func TestParallelStepEdgeKeepsRevivedStorage(t *testing.T) {
 
 // TestParallelSameBlockDeployCallFuzz builds BAL blocks that deploy contracts and call them later in the same
 // block, in random orders; a call to a self-destruct contract sends its balance back to the caller (EIP-6780).
-// The parallel executor must reproduce the roots and receipts the serial block generator computed.
+// The parallel executor must reproduce the roots and receipts the block generator computed.
 func TestParallelSameBlockDeployCallFuzz(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 
 	counter := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
 	destruct := []byte{byte(vm.CALLER), byte(vm.SELFDESTRUCT)}
@@ -2646,7 +2646,6 @@ func TestParallelSameBlockDeployCallFuzz(t *testing.T) {
 				keys[i] = key
 				alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(common.Ether)}
 			}
-			dbg.Exec3Parallel = false
 			ethconfig.Defaults.Sync.ExecWorkerCount = 4
 			m := execmoduletester.New(t, execmoduletester.WithKey(keys[0]), execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc}), execmoduletester.WithExperimentalBAL())
 			signer := types.LatestSignerForChainID(config.ChainID)
@@ -2681,7 +2680,6 @@ func TestParallelSameBlockDeployCallFuzz(t *testing.T) {
 					require.Equal(t, types.ReceiptStatusSuccessful, r.Status, "every deploy and call succeeds")
 				}
 			}
-			dbg.Exec3Parallel = true
 			require.NoError(t, m.InsertChain(chainPack))
 			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 				head := rawdb.ReadCurrentHeader(tx)
