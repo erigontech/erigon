@@ -2747,7 +2747,7 @@ func (a *Aggregator) beginFilesRoOn(v *aggregatorVisible) *AggregatorRoTx {
 	return ac
 }
 
-// BranchCache attached to the commitment domain (implements commitment.BranchCacheProvider).
+// BranchCache attached to the commitment domain (implements branchcache.BranchCacheProvider).
 func (at *AggregatorRoTx) BranchCache() *branchcache.BranchCache {
 	if at.d[kv.CommitmentDomain] == nil {
 		return nil
@@ -2756,7 +2756,7 @@ func (at *AggregatorRoTx) BranchCache() *branchcache.BranchCache {
 }
 
 // AdaptivePinController attached to the commitment domain (implements
-// commitment.AdaptivePinControllerProvider).
+// branchcache.AdaptivePinControllerProvider).
 func (at *AggregatorRoTx) AdaptivePinController() *branchcache.AdaptivePinController {
 	if at.d[kv.CommitmentDomain] == nil {
 		return nil
