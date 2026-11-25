@@ -307,11 +307,11 @@ func TestCollectDeferredUpdate_CarriesSuppliedPrev(t *testing.T) {
 }
 
 // TestCollectDeferredUpdate_PoolRecycleDoesNotCorruptEarlierApply pins the
-// contract documented on getDeferredUpdate: putDeferredUpdate recycles the
+// contract documented on GetDeferredUpdate: PutDeferredUpdate recycles the
 // prefix/raw backing arrays for a later, unrelated update, so a PutBranch
 // implementation that copies (as recordingCtx and every real implementation
 // do) must see its own copy stay correct across that recycle.
-// Not parallel: it swaps the global deferredUpdatePool for a deterministic one, since
+// Not parallel: it swaps the global DeferredUpdatePool for a deterministic one, since
 // sync.Pool may hand back a fresh object and leave the recycle unexercised.
 func TestCollectDeferredUpdate_PoolRecycleDoesNotCorruptEarlierApply(t *testing.T) {
 	seed := &commitment.DeferredBranchUpdate{}

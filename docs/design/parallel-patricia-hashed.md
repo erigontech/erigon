@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| Component | `execution/commitment` |
+| Component | `execution/commitment/v2` |
 | Stability | Always on |
 | Implements | `commitment.Trie` |
 | Audience | Contributors to commitment / state-root computation |
@@ -54,22 +54,22 @@ reaches every fork row through the engine's own `unfold`, which does exactly tha
 Field lists are normative: the named fields and their stated invariants define the
 contract. Files are given for reference.
 
-### 3.1 `prefixNode`, `prefixTrie`, `plainKeyArena` (`prefix_trie.go`, `parallel_update.go`)
+### 3.1 `PrefixNode`, `prefixTrie`, `plainKeyArena` (`prefix_trie.go`, `parallel_update.go`)
 
 A path-compressed nibble trie of the touched hashed keys, bump-allocated from a
 slab arena. It is the sole carrier of the touched-key set and their plain keys;
 the mount fold DFS-walks it directly.
 
-`prefixNode`:
+`PrefixNode`:
 
 | field | type | meaning / invariant |
 | --- | --- | --- |
-| `ext` | `[]byte` | compressed nibble path from the parent (each byte ∈ 0x00..0x0F) |
-| `children` | `[]*prefixNode` | dense; `len == popcount(bitmap)`; ordered by nibble ascending |
-| `bitmap` | `uint16` | present child nibbles |
-| `subtreeCount` | `uint32` | incremented on every traversal **including** the terminating node; `subtreeCount > Σ children.subtreeCount` ⟺ a key terminates at this node |
-| `plainKey` | `[]byte` | the un-hashed key terminating here; non-nil **iff** a key terminates at this node and was supplied with a plain key; nil otherwise |
-| `update` | `*Update` | the carried per-key value; nil ⟹ the fold re-reads from `ctx` |
+| `Ext` | `[]byte` | compressed nibble path from the parent (each byte ∈ 0x00..0x0F) |
+| `Children` | `[]*PrefixNode` | dense; `len == popcount(Bitmap)`; ordered by nibble ascending |
+| `Bitmap` | `uint16` | present child nibbles |
+| `SubtreeCount` | `uint32` | incremented on every traversal **including** the terminating node; `SubtreeCount > Σ Children.SubtreeCount` ⟺ a key terminates at this node |
+| `PlainKey` | `[]byte` | the un-hashed key terminating here; non-nil **iff** a key terminates at this node and was supplied with a plain key; nil otherwise |
+| `Update` | `*Update` | the carried per-key value; nil ⟹ the fold re-reads from `ctx` |
 
 - `plainKey` bytes are owned by a per-batch `plainKeyArena` (chunked; a full chunk
   is replaced, not grown, so issued sub-slices remain stable for the trie's life).
@@ -80,11 +80,11 @@ the mount fold DFS-walks it directly.
   child (`oldChild`); the split parent retains a `plainKey` only if the incoming
   key terminates exactly at it. (Invariant I3.)
 
-### 3.2 `parallelUpdate` (`parallel_update.go`)
+### 3.2 `ParallelUpdate` (`parallel_update.go`)
 
 Per-batch state: the `prefixTrie`, the `plainKeyArena`, and a mutex-guarded
-`deferredCombined` slice. `Insert` calls MUST be serialized by the caller;
-`deferredCombined` is guarded by `deferredMu` (`appendDeferred`). A fork's per-nibble
+`DeferredCombined` slice. `Insert` calls MUST be serialized by the caller;
+`DeferredCombined` is guarded by `DeferredMu` (`AppendDeferred`). A fork's per-nibble
 cell, touch and presence slots are written by its children at distinct indices and read
 only after the join.
 
@@ -233,8 +233,8 @@ primary enforcement of I1.
 
 ### 6.1 Updates mode
 
-`Process` MUST be called with `updates.mode == ModeParallel` and a populated
-`updates.parallel`; it rejects any other mode. `InitializeTrieAndUpdates` forces
+`Process` MUST be called with `updates.Mode() == ModeParallel` and a populated
+`updates.Parallel`; it rejects any other mode. `commitmentdb.InitializeTrieAndUpdates` forces
 `ModeParallel` for `VariantParallelHexPatricia`.
 
 ### 6.2 Value source
@@ -278,7 +278,7 @@ substitution of the as-of reader is validated at runtime by the block-root check
 | deferred apply failure (inline path) | restore the base from the same snapshot, so `RootHash` returns the pre-round root rather than the staged one. The branch records the partial apply already wrote are not rolled back |
 | worker error mid-fold | cancel the group; return pooled deferred entries |
 | any error after the walk began | restore the base trie's in-memory state from the snapshot taken before it — root cell and its three flags, no open rows, no queued branch updates |
-| branch records the aborted round already wrote | none. `processMounted` runs the base and every clone caller-owned, so branch deletions are queued and the capacity flush is skipped; on the abort path `ClearDeferred` discards the base's queued records and `drainDeferred` discards the records the clones and the root fold already handed to the accumulator |
+| branch records the aborted round already wrote | none. `processMounted` runs the base and every clone caller-owned, so branch deletions are queued and the capacity flush is skipped; on the abort path `ClearDeferred` discards the base's queued records and `DrainDeferred` discards the records the clones and the root fold already handed to the accumulator |
 
 ## 9. Validation
 
@@ -333,13 +333,13 @@ figures are for inspection, not a CI gate.
 
 | file | contents |
 | --- | --- |
-| `execution/commitment/parallel_patricia_hashed.go` | `ParallelPatriciaHashed`, `Process`, deferred apply and hand-off |
-| `execution/commitment/parallel_mount.go` | `processMounted` — drive the fork walk over the whole prefix trie and fold the base to the root; `mountTo` re-basing a clone on the fork row |
-| `execution/commitment/fork_walk.go` | `forkWalk` — the walk, the fork predicate, the grain, the `ctxLeasePool` and the sibling claim loop |
-| `execution/commitment/split_point.go` | depth-agnostic split-point primitives: `unfoldToRow`, `openEmptyRow`/`closeIfEmpty`, `stitchSplitCells`, `foldSplitRow` |
-| `execution/commitment/hex_patricia_hashed.go` | sequential engine; `foldMounted` and the `mountWall` stop at which a clone returns its fork-row cell |
-| `execution/commitment/parallel_update.go` | `parallelUpdate`, `plainKeyArena`, `Insert`/deferred accumulation |
+| `execution/commitment/v2/parallel_patricia_hashed.go` | `ParallelPatriciaHashed`, `Process`, deferred apply and hand-off |
+| `execution/commitment/v2/parallel_mount.go` | `processMounted` — drive the fork walk over the whole prefix trie and fold the base to the root; `mountTo` re-basing a clone on the fork row |
+| `execution/commitment/v2/fork_walk.go` | `forkWalk` — the walk, the fork predicate, the grain, the `ctxLeasePool` and the sibling claim loop |
+| `execution/commitment/v2/split_point.go` | depth-agnostic split-point primitives: `unfoldToRow`, `openEmptyRow`/`closeIfEmpty`, `stitchSplitCells`, `foldSplitRow` |
+| `execution/commitment/v2/hex_patricia_hashed.go` | sequential engine; `foldMounted` and the `mountWall` stop at which a clone returns its fork-row cell |
+| `execution/commitment/parallel_update.go` | `ParallelUpdate`, `plainKeyArena`, `Insert`/deferred accumulation |
 | `execution/commitment/prefix_trie.go` | path-compressed prefix trie + slab arena; `Insert` `plainKey` placement |
-| `execution/commitment/commitment.go` | `Updates` (ModeParallel carries keys in the prefix trie), `InitializeTrieAndUpdates` |
-| `execution/commitment/commitmentdb/commitment_context.go` | wires ModeParallel and caller-deferred updates into `ComputeCommitment` |
+| `execution/commitment/commitment.go` | `Updates` (ModeParallel carries keys in the prefix trie) |
+| `execution/commitment/commitmentdb/commitment_context.go` | `InitializeTrieAndUpdates`; wires ModeParallel and caller-deferred updates into `ComputeCommitment` |
 | `execution/stagedsync/committer.go` | parallel-exec commitment calculator; keeps the ModeParallel buffer, serves values via the as-of reader |

@@ -754,7 +754,7 @@ func TestReuseBytes(t *testing.T) {
 }
 
 // prev is cloned rather than recycled precisely so its nil-ness follows the input; this
-// fails if it is ever switched to a pooled buffer. putDeferredUpdate clears prev, so a
+// fails if it is ever switched to a pooled buffer. PutDeferredUpdate clears prev, so a
 // warm buffer has to be seeded through the pool rather than by a Put/Get round trip.
 func TestGetDeferredUpdate_WarmPoolPreservesNilPrev(t *testing.T) {
 	seed := &DeferredBranchUpdate{Prev: make([]byte, 0, 32)}
@@ -797,7 +797,7 @@ func TestCapLen(t *testing.T) {
 }
 
 // A callback must not see capacity left over from whichever update used the object before.
-// Driven through ApplyDeferredBranchUpdates rather than capLen, so dropping the clip at
+// Driven through ApplyDeferredBranchUpdates rather than CapLen, so dropping the clip at
 // either the serial or the parallel call site fails here.
 func TestApplyDeferred_CallbackSeesInputDerivedCapacity(t *testing.T) {
 	t.Parallel()
@@ -864,7 +864,7 @@ func TestHashSortLeavesNoBatchSlabEntriesBehind(t *testing.T) {
 }
 
 // Reset recycles the updates into the pool, so it must detach the slice the way
-// every other drain of deferredCombined does.
+// every other drain of DeferredCombined does.
 func TestParallelUpdateResetDetachesDeferred(t *testing.T) {
 	t.Parallel()
 
