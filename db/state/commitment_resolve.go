@@ -41,15 +41,10 @@ func ResolveCommitmentV3(ctx context.Context, d datadir.Dirs, chainDB kv.RoDB, l
 	}
 	if legacySource == "" {
 		legacy, err := chaindataHoldsLegacyCommitment(ctx, d, chainDB, logger)
-		if err != nil {
+		if err != nil || !legacy {
 			return "", err
 		}
-		if legacy {
-			legacySource = d.Chaindata
-		}
-	}
-	if legacySource == "" {
-		return "", nil
+		legacySource = d.Chaindata
 	}
 	statecfg.SetCommitmentV3(false)
 	logger.Info("[commitment] the datadir holds legacy commitment, using the legacy commitment trie", "source", legacySource)

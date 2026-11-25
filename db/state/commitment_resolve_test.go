@@ -42,18 +42,17 @@ func TestResolveCommitmentV3(t *testing.T) {
 		pin        *bool
 		files      func(dirs datadir.Dirs)
 		wantLegacy bool
-		wantV3     bool
 	}{
-		{name: "fresh datadir keeps the v3 default", files: func(datadir.Dirs) {}, wantV3: true},
+		{name: "fresh datadir keeps the v3 default", files: func(datadir.Dirs) {}},
 		{name: "legacy domain file switches to legacy", files: func(d datadir.Dirs) { write(t, d.SnapDomain, "v2.0-commitment.0-1.kv") }, wantLegacy: true},
 		{name: "legacy history file switches to legacy", files: func(d datadir.Dirs) { write(t, d.SnapHistory, "v2.0-commitment.0-1.v") }, wantLegacy: true},
-		{name: "v3 domain file keeps v3", files: func(d datadir.Dirs) { write(t, d.SnapDomain, "v3.0-commitment.0-1.kv") }, wantV3: true},
+		{name: "v3 domain file keeps v3", files: func(d datadir.Dirs) { write(t, d.SnapDomain, "v3.0-commitment.0-1.kv") }},
 		{name: "mixed files keep v3 for the mixed-files check", files: func(d datadir.Dirs) {
 			write(t, d.SnapDomain, "v3.0-commitment.0-1.kv")
 			write(t, d.SnapHistory, "v2.0-commitment.0-1.v")
-		}, wantV3: true},
-		{name: "legacy accounts file alone keeps v3", files: func(d datadir.Dirs) { write(t, d.SnapDomain, "v2.0-accounts.0-1.kv") }, wantV3: true},
-		{name: "pinned v3 is not switched by legacy files", pin: new(true), files: func(d datadir.Dirs) { write(t, d.SnapDomain, "v2.0-commitment.0-1.kv") }, wantV3: true},
+		}},
+		{name: "legacy accounts file alone keeps v3", files: func(d datadir.Dirs) { write(t, d.SnapDomain, "v2.0-accounts.0-1.kv") }},
+		{name: "pinned v3 is not switched by legacy files", pin: new(true), files: func(d datadir.Dirs) { write(t, d.SnapDomain, "v2.0-commitment.0-1.kv") }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Cleanup(statecfg.ResetCommitmentV3ForTest())
@@ -66,8 +65,8 @@ func TestResolveCommitmentV3(t *testing.T) {
 			legacyFile, err := ResolveCommitmentV3(context.Background(), dirs, nil, log.New())
 			require.NoError(t, err)
 			require.Equal(t, test.wantLegacy, legacyFile != "", legacyFile)
-			require.Equal(t, test.wantV3, statecfg.ExperimentalCommitmentV3)
-			require.Equal(t, test.wantV3, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
+			require.Equal(t, !test.wantLegacy, statecfg.ExperimentalCommitmentV3)
+			require.Equal(t, !test.wantLegacy, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
 			require.Equal(t, test.pin != nil || test.wantLegacy, statecfg.CommitmentV3Pinned())
 		})
 	}
@@ -89,6 +88,7 @@ func TestResolveCommitmentV3FromChaindata(t *testing.T) {
 		name       string
 		keys       [][]byte
 		passDB     bool
+		v3File     bool
 		wantLegacy bool
 	}{
 		{name: "legacy state key", keys: [][]byte{commitment.KeyCommitmentState}, wantLegacy: true},
@@ -96,6 +96,7 @@ func TestResolveCommitmentV3FromChaindata(t *testing.T) {
 		{name: "v3 state key", keys: [][]byte{commitment.KeyCommitmentV3State}},
 		{name: "both state keys follow the v3 key", keys: [][]byte{commitment.KeyCommitmentState, commitment.KeyCommitmentV3State}},
 		{name: "no state key", keys: nil},
+		{name: "a v3 commitment file wins over a legacy chaindata state", keys: [][]byte{commitment.KeyCommitmentState}, v3File: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Cleanup(statecfg.ResetCommitmentV3ForTest())
@@ -110,6 +111,9 @@ func TestResolveCommitmentV3FromChaindata(t *testing.T) {
 			} else {
 				db.Close()
 			}
+			if test.v3File {
+				require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+			}
 
 			source, err := ResolveCommitmentV3(context.Background(), dirs, chainDB, logger)
 			require.NoError(t, err)
@@ -122,19 +126,4 @@ func TestResolveCommitmentV3FromChaindata(t *testing.T) {
 			require.Equal(t, !test.wantLegacy, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
 		})
 	}
-}
-
-func TestResolveCommitmentV3FilesWinOverChaindata(t *testing.T) {
-	t.Cleanup(statecfg.ResetCommitmentV3ForTest())
-	logger := log.New()
-	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
-	writeCommitmentStateKeys(t, db, commitment.KeyCommitmentState)
-	db.Close()
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
-
-	source, err := ResolveCommitmentV3(context.Background(), dirs, nil, logger)
-	require.NoError(t, err)
-	require.Empty(t, source)
-	require.True(t, statecfg.ExperimentalCommitmentV3)
 }
