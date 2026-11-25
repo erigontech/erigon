@@ -47,7 +47,7 @@ func InitSchemasGen() {
 	Schema.ReceiptDomain.Hist.IiCfg.FileVersion.DataEF = version.Versions{version.Version{3, 0}, version.Version{1, 0}}
 	Schema.ReceiptDomain.Hist.IiCfg.FileVersion.AccessorEFI = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.StorageDomain.FileVersion.AccessorBT = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
-	Schema.StorageDomain.FileVersion.DataKV = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
+	Schema.StorageDomain.FileVersion.DataKV = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.StorageDomain.FileVersion.AccessorKVEI = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
 	Schema.StorageDomain.Hist.FileVersion.DataV = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.StorageDomain.Hist.FileVersion.AccessorVI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
