@@ -765,7 +765,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		if verifiedFiles, err = verifyStagedCommitmentV3(ctx, at, rebuildDir, historyStage, len(historyRanges) > 0, verifyHistory, logger); err != nil {
 			advice := fmt.Sprintf("no commitment file was replaced; %s", rebuildV3Advice)
 			if len(historyRanges) == 0 && verifyHistory {
-				advice = "no domain file was replaced; the history was promoted by an earlier pass, restore it with `integration commitment convert --restore`"
+				advice = fmt.Sprintf("no domain file was replaced; an error as of latest is in the staged domain files (%s); an error as of a txNum is in the history an earlier pass promoted: restore it with `integration commitment convert --restore`", rebuildV3Advice)
 			}
 			if opts.Continue {
 				advice += "; the staged files are reused by --continue, so run without it to convert again"

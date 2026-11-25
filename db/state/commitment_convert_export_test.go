@@ -114,18 +114,10 @@ func BuildCommitmentAccessorsForTest(ctx context.Context, a *Aggregator, kvPath,
 		return err
 	}
 	defer dec.Close()
-	ps := background.NewProgressSet()
-	if d.Accessors.Has(statecfg.AccessorHashMap) {
-		if err := d.buildHashMapAccessorAt(ctx, d.kviAccessorNewFilePathIn(dstDir, from, to), dec, ps); err != nil {
-			return err
-		}
+	bt, err := d.buildBtIndex(d.kvBtAccessorNewFilePathIn(dstDir, from, to), d.kvExistenceIdxNewFilePathIn(dstDir, from, to), d.dataReader(dec), *d.salt.Load(), background.NewProgressSet())
+	if err != nil {
+		return err
 	}
-	if d.Accessors.Has(statecfg.AccessorBTree) {
-		bt, err := d.buildBtIndex(d.kvBtAccessorNewFilePathIn(dstDir, from, to), d.kvExistenceIdxNewFilePathIn(dstDir, from, to), d.dataReader(dec), *d.salt.Load(), ps)
-		if err != nil {
-			return err
-		}
-		bt.Close()
-	}
+	bt.Close()
 	return nil
 }

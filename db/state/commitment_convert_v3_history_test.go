@@ -1002,10 +1002,15 @@ func TestConvertCommitmentFiles_V3VerifiesStagedFilesBeforeSwap(t *testing.T) {
 	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
 	dirs := agg.Dirs()
 	t.Cleanup(func() { state.SetConvertPhase1AfterFileHookForTest(nil) })
+	corrupted := map[string]bool{}
 	state.SetConvertPhase1AfterFileHookForTest(func(int) {
 		staged, err := filepath.Glob(filepath.Join(dirs.Snap, "rebuild", "domain", "*-commitment.*.kv"))
 		require.NoError(t, err)
 		for _, f := range staged {
+			if corrupted[f] {
+				continue
+			}
+			corrupted[f] = true
 			b, err := os.ReadFile(f)
 			require.NoError(t, err)
 			b[len(b)/2] ^= 0xff
