@@ -64,17 +64,30 @@ func validationEpochRange(headState *state.CachingBeaconState, highestSeenSlot, 
 	return state.PreviousEpoch(headState), currEpoch
 }
 
-// inGossipSlotWindow applies the [IGNORE] slot window of beacon_attestation_{subnet_id}. Before Deneb the slot must be
-// within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots. From Deneb (EIP-7045) the slot must not be in the future and
-// its epoch must be the current or the previous one, so it can be more than ATTESTATION_PROPAGATION_SLOT_RANGE old.
-func (s *attestationService) inGossipSlotWindow(version clparams.StateVersion, slot, currentSlot uint64) bool {
-	if currentSlot < slot {
+// inGossipSlotWindow applies the [IGNORE] slot window of beacon_attestation_{subnet_id}, with both ends widened by
+// MAXIMUM_GOSSIP_CLOCK_DISPARITY. Before Deneb the slot must be within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots.
+// From Deneb (EIP-7045) the slot must not be in the future and its epoch must be the current or the previous one. The
+// rule follows the fork of the current epoch, because the spec defines it relative to the current time.
+func (s *attestationService) inGossipSlotWindow(slot, currentSlot uint64) bool {
+	// The disparity is shorter than a slot, so a slot after the next one is always in the future. Checking that first
+	// also keeps the slot arithmetic below from overflowing.
+	if slot > currentSlot+1 {
 		return false
 	}
-	if version >= clparams.DenebVersion {
-		return slot/s.beaconCfg.SlotsPerEpoch+1 >= currentSlot/s.beaconCfg.SlotsPerEpoch
+	endSlot := slot + s.netCfg.AttestationPropagationSlotRange + 1
+	if s.beaconCfg.GetCurrentStateVersion(currentSlot/s.beaconCfg.SlotsPerEpoch) >= clparams.DenebVersion {
+		endSlot = (slot/s.beaconCfg.SlotsPerEpoch + 2) * s.beaconCfg.SlotsPerEpoch
 	}
-	return currentSlot <= slot+s.netCfg.AttestationPropagationSlotRange
+	if slot <= currentSlot && currentSlot < endSlot {
+		return true
+	}
+	if currentSlot > endSlot {
+		return false
+	}
+	disparity := time.Duration(s.netCfg.MaximumGossipClockDisparity)
+	now := s.ethClock.Now()
+	return !now.Add(disparity).Before(s.ethClock.GetSlotTime(slot)) &&
+		!now.Add(-disparity).After(s.ethClock.GetSlotTime(endSlot))
 }
 
 func beaconCommittee(
@@ -318,7 +331,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 
 	currentSlot := s.ethClock.GetCurrentSlot()
-	if !s.inGossipSlotWindow(clVersion, slot, currentSlot) {
+	if !s.inGossipSlotWindow(slot, currentSlot) {
 		return fmt.Errorf("not in propagation range: %w", ErrIgnore)
 	}
 	// [REJECT] The attestation's epoch matches its target -- i.e. attestation.data.target.epoch == compute_epoch_at_slot(attestation.data.slot)
