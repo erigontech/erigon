@@ -3524,3 +3524,69 @@ func TestTraceCallManyZeroesBlobBaseFeePerCall(t *testing.T) {
 	require.Positive(t, readFeeProbe(t, results[1].Output).blobBaseFee.Sign(), "a call without blobs keeps the block's BLOBBASEFEE")
 	require.Positive(t, readFeeProbe(t, results[2].Output).blobBaseFee.Sign(), "priced blobs keep the block's BLOBBASEFEE")
 }
+
+func TestTraceCallStateOverrideForms(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	const target = "0x00000000000000000000000000000000cafe0001"
+	// PUSH1 0x2a PUSH1 0 MSTORE PUSH1 0x20 PUSH1 0 RETURN
+	stateMap := map[string]any{target: map[string]any{"code": "0x602a60005260206000f3"}}
+	const wantOutput = "0x000000000000000000000000000000000000000000000000000000000000002a"
+	call := map[string]any{"from": bankAddr.Hex(), "to": target, "gas": "0x10000"}
+	traceTypes := []string{TraceTypeTrace}
+
+	for _, tc := range []struct {
+		name      string
+		overrides any
+	}{
+		{name: "positional state map", overrides: stateMap},
+		{name: "configuration wrapper", overrides: map[string]any{"stateOverrides": stateMap}},
+	} {
+		t.Run("trace_call "+tc.name, func(t *testing.T) {
+			var result TraceCallResult
+			require.NoError(t, client.CallContext(t.Context(), &result, "trace_call", call, traceTypes, "latest", tc.overrides))
+			require.Equal(t, wantOutput, result.Output.String())
+		})
+		t.Run("trace_callMany "+tc.name, func(t *testing.T) {
+			var results []TraceCallResult
+			calls := []any{[]any{call, traceTypes}}
+			require.NoError(t, client.CallContext(t.Context(), &results, "trace_callMany", calls, "latest", tc.overrides))
+			require.Len(t, results, 1)
+			require.Equal(t, wantOutput, results[0].Output.String())
+		})
+	}
+
+	t.Run("addresses mixed with configuration fields", func(t *testing.T) {
+		mixed := map[string]any{target: stateMap[target], "stateOverrides": stateMap}
+		for _, tc := range []struct {
+			method string
+			params []any
+		}{
+			{"trace_call", []any{call, traceTypes, "latest", mixed}},
+			{"trace_callMany", []any{[]any{[]any{call, traceTypes}}, "latest", mixed}},
+		} {
+			var result any
+			err := client.CallContext(t.Context(), &result, tc.method, tc.params...)
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr, tc.method)
+			require.Equal(t, -32602, rpcErr.ErrorCode(), tc.method)
+		}
+	})
+}
+
+func TestTraceCallConfigRejectsMalformedAddressKey(t *testing.T) {
+	for _, in := range []string{
+		`{"0xcafe":{"code":"0x00"}}`,
+		`{"0x00000000000000000000000000000000cafe000g":{"code":"0x00"}}`,
+		`{"0x00000000000000000000000000000000cafe000100":{"code":"0x00"}}`,
+	} {
+		var so ethapi.StateOverrides
+		require.Error(t, json.Unmarshal([]byte(in), &so), "eth_call rejects %s", in)
+		var c TraceCallConfig
+		require.Error(t, json.Unmarshal([]byte(in), &c), "trace_call accepts %s", in)
+	}
+}

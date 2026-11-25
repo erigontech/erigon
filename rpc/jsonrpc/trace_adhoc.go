@@ -107,7 +107,7 @@ func (c *TraceCallConfig) UnmarshalJSON(data []byte) error {
 	}
 	addresses := 0
 	for key := range members {
-		if common.IsHexAddress(key) {
+		if common.IsHexAddress(key) || hexutil.Has0xPrefix(key) {
 			addresses++
 		}
 	}
