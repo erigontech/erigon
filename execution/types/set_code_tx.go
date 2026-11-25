@@ -35,6 +35,28 @@ import (
 
 const DelegateDesignationCodeSize = 23
 
+var (
+	ErrSetCodePrePrague           = errors.New("SetCode transaction not allowed before Prague fork")
+	ErrSetCodeContractCreation    = errors.New("contract creation not allowed with type4 txs")
+	ErrSetCodeEmptyAuthorizations = errors.New("SetCode transaction must have at least one authorization")
+)
+
+// ValidateSetCodePrerequisites checks that SetCode is active and the transaction
+// has a recipient and at least one authorization. Callers must first identify
+// the transaction as SetCode because a nil authorization list counts as empty.
+func ValidateSetCodePrerequisites(auths []Authorization, contractCreation, isPrague bool) error {
+	if !isPrague {
+		return ErrSetCodePrePrague
+	}
+	if contractCreation {
+		return ErrSetCodeContractCreation
+	}
+	if len(auths) == 0 {
+		return ErrSetCodeEmptyAuthorizations
+	}
+	return nil
+}
+
 type SetCodeTransaction struct {
 	DynamicFeeTransaction
 	Authorizations []Authorization
@@ -73,6 +95,40 @@ func (tx *SetCodeTransaction) GetBlobHashes() []common.Hash {
 
 func (tx *SetCodeTransaction) GetAuthorizations() []Authorization {
 	return tx.Authorizations
+}
+
+// SetCodeAuthorizationCount counts entries in a raw or RLP-wrapped SetCode
+// transaction's authorization list. It returns zero for other types or if it
+// cannot locate the list. It uses RLP item lengths and stops at the first
+// incomplete entry. Complete entries may still contain invalid fields.
+func SetCodeAuthorizationCount(encoded []byte) int {
+	if TypedTransactionMarshalledAsRlpString(encoded) {
+		var err error
+		if encoded, _, err = rlp.SplitString(encoded); err != nil {
+			return 0
+		}
+	}
+	if len(encoded) == 0 || encoded[0] != SetCodeTxType {
+		return 0
+	}
+	payload := encoded[1:]
+	pos, _, err := rlp.ParseList(payload, 0)
+	if err != nil {
+		return 0
+	}
+	// chainID, nonce, tip, feeCap, gas, to, value, data and accessList precede the authorization list.
+	for range 9 {
+		dataPos, dataLen, _, err := rlp.Prefix(payload, pos)
+		if err != nil {
+			return 0
+		}
+		pos = dataPos + dataLen
+	}
+	dataPos, dataLen, err := rlp.ParseList(payload, pos)
+	if err != nil {
+		return 0
+	}
+	return rlp.CountItems(payload[dataPos : dataPos+dataLen])
 }
 
 func (tx *SetCodeTransaction) copy() *SetCodeTransaction {

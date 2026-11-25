@@ -134,6 +134,7 @@ const (
 	DelegatedNonceGap          // Delegated account transaction nonce is not currently executable
 	DelegatedTxnLimit          // Delegated account already has an executable transaction
 	BlobSlotsOverflow
+	BlobReplacementTypeMismatch
 )
 
 func (r DiscardReason) String() string {
@@ -190,6 +191,8 @@ func (r DiscardReason) String() string {
 		return "max number of blobs exceeded"
 	case BlobTxReplace:
 		return "can't replace blob-txn with a non-blob-txn"
+	case BlobReplacementTypeMismatch:
+		return "type-3 blob transactions and blob-carrying frame transactions cannot replace each other"
 	case BlobPoolOverflow:
 		return "blobs limit in txpool is full"
 	case BlobSlotsOverflow:

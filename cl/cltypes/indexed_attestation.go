@@ -19,6 +19,7 @@ package cltypes
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -107,6 +108,9 @@ func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 	indices, err := decodeAttestingIndices(tmp.AttestingIndices, limit, enforceLimit)
 	if err != nil {
 		return err
+	}
+	if tmp.Data == nil {
+		return errors.New("indexed attestation data is null")
 	}
 	i.AttestingIndices = solid.NewRawUint64List(limit, indices)
 	i.Data = tmp.Data

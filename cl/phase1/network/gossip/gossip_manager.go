@@ -327,9 +327,10 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 			return pubsub.ValidationReject
 		}
 
-		// accept
+		// accept: pubsub validates only the first copy of a message, so pid delivered it first
 		monitor.ObserveGossipTopicSeen(name, len(msgData))
 		g.stats.addAccept(name)
+		g.p2p.MarkPeerUseful(pid)
 		return pubsub.ValidationAccept
 	}
 }

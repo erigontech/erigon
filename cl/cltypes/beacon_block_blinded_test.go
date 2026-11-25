@@ -18,11 +18,14 @@ package cltypes
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestBlindedBeaconBlockJSONAttesterSlashingLimits(t *testing.T) {
@@ -155,22 +158,78 @@ func TestBlindedBeaconBodyEncodingSizeTracksEncoding(t *testing.T) {
 	}
 }
 
-func TestBlindedBeaconBodyJSONRejectsNullExecutionRequests(t *testing.T) {
-	for _, version := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion} {
+func TestBlindedBeaconBodyJSONRejectsNullRequiredFields(t *testing.T) {
+	bellatrix := []string{"eth1_data", "proposer_slashings", "attester_slashings", "attestations", "deposits", "voluntary_exits", "sync_aggregate", "execution_payload_header"}
+	capella := slices.Concat(bellatrix, []string{"bls_to_execution_changes"})
+	deneb := slices.Concat(capella, []string{"blob_kzg_commitments"})
+	electra := slices.Concat(deneb, []string{"execution_requests"})
+	for version, fields := range map[clparams.StateVersion][]string{
+		clparams.BellatrixVersion: bellatrix,
+		clparams.CapellaVersion:   capella,
+		clparams.DenebVersion:     deneb,
+		clparams.ElectraVersion:   electra,
+		clparams.FuluVersion:      electra,
+	} {
+		for _, field := range fields {
+			t.Run(version.String()+"/"+field, func(t *testing.T) {
+				body := NewBlindedBeaconBody(&clparams.MainnetBeaconConfig, version)
+				err := json.Unmarshal([]byte(`{"`+field+`":null}`), body)
+				require.ErrorContains(t, err, "beacon body contains null")
+			})
+		}
+	}
+}
+
+func TestBlindedBeaconBodyJSONAcceptsOmittedFields(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.BellatrixVersion, clparams.CapellaVersion, clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			body := NewBlindedBeaconBody(&clparams.MainnetBeaconConfig, version)
-			require.Error(t, json.Unmarshal([]byte(`{"execution_requests":null}`), body))
+			require.NoError(t, json.Unmarshal([]byte(`{}`), body))
+			_, err := body.HashSSZ()
+			require.NoError(t, err)
 		})
 	}
 }
 
-func TestBlindedBeaconBodyJSONRejectsNullOperationLists(t *testing.T) {
-	for _, version := range []clparams.StateVersion{clparams.BellatrixVersion, clparams.CapellaVersion, clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion} {
-		for _, input := range []string{`{"attestations":null}`, `{"attester_slashings":null}`} {
-			t.Run(version.String()+"/"+input, func(t *testing.T) {
+func TestBlindedBeaconBodyJSONRejectsIncompleteOperations(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.DenebVersion, clparams.FuluVersion} {
+		for _, tc := range incompleteOperationsJSON(version) {
+			t.Run(version.String()+"/"+tc.input, func(t *testing.T) {
 				body := NewBlindedBeaconBody(&clparams.MainnetBeaconConfig, version)
-				require.Error(t, json.Unmarshal([]byte(input), body))
+				require.ErrorContains(t, json.Unmarshal([]byte(tc.input), body), tc.wantErr)
 			})
 		}
+	}
+}
+
+func TestBlindedBeaconBodyKzgCommitmentMerkleProofMatchesFullBody(t *testing.T) {
+	const commitments = 3
+	cfg := &clparams.MainnetBeaconConfig
+	for _, version := range []clparams.StateVersion{clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			body := NewBeaconBlock(cfg, version).Body
+			body.ExecutionPayload.BlockHash = common.Hash{1}
+			body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1, 2, 3}, {4}})
+			body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+			body.ExecutionPayload.Withdrawals.Append(&Withdrawal{Index: 7, Amount: 9})
+			for i := range commitments {
+				body.BlobKzgCommitments.Append(&KZGCommitment{byte(i + 1)})
+			}
+			_, err := body.HashSSZ()
+			require.NoError(t, err)
+			blinded, err := body.Blinded()
+			require.NoError(t, err)
+
+			for i := range commitments {
+				want, err := body.KzgCommitmentMerkleProof(i)
+				require.NoError(t, err)
+				got, err := blinded.KzgCommitmentMerkleProof(i)
+				require.NoError(t, err)
+				require.Len(t, got, CommitmentBranchSize)
+				require.Equal(t, want, got, "commitment %d", i)
+			}
+			_, err = blinded.KzgCommitmentMerkleProof(commitments)
+			require.Error(t, err)
+		})
 	}
 }

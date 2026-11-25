@@ -626,6 +626,61 @@ func TestDeferredColumnSyncPrioritiseFirstAttemptHoldsOncePerQueuedRoot(t *testi
 	require.True(t, hold, "a root queued anew")
 }
 
+// holdable tells what prioritiseFirstAttempt would tell for a queued root, and changes nothing.
+func TestDeferredColumnSyncHoldableMatchesPrioritiseFirstAttemptAndChangesNothing(t *testing.T) {
+	now := time.Unix(1000, 0)
+	slot := 12 * time.Second
+	for _, tc := range []struct {
+		name    string
+		blobs   int
+		prepare func(queue *deferredColumnSyncs, root common.Hash)
+		hold    bool
+	}{
+		{"8 blobs", 8, nil, false},
+		{"9 blobs", 9, nil, true},
+		{"10 blobs", 10, nil, true},
+		{"attempt in flight", 9, func(queue *deferredColumnSyncs, root common.Hash) { queue.start([]common.Hash{root}) }, true},
+		{"already prioritised", 9, func(queue *deferredColumnSyncs, root common.Hash) { queue.prioritiseFirstAttempt(root, now) }, false},
+		{"storage error", 9, func(queue *deferredColumnSyncs, root common.Hash) { queue.retryLater(root, now, slot) }, false},
+		{"failed attempt", 9, func(queue *deferredColumnSyncs, root common.Hash) {
+			queue.start([]common.Hash{root})
+			queue.failed(root, now, slot, 32)
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			queue, root := pristineRoot(t, tc.blobs)
+			if tc.prepare != nil {
+				tc.prepare(queue, root)
+			}
+			for len(queue.wake) > 0 {
+				<-queue.wake
+			}
+			entry := *queue.entries[root]
+
+			require.Equal(t, tc.hold, queue.holdable(root))
+
+			require.Equal(t, entry, *queue.entries[root], "holdable changed the entry")
+			require.Empty(t, queue.wake)
+			hold, _, _ := queue.prioritiseFirstAttempt(root, now)
+			require.Equal(t, tc.hold, hold, "prioritiseFirstAttempt")
+		})
+	}
+
+	t.Run("absent root", func(t *testing.T) {
+		queue, _ := pristineRoot(t, 9)
+
+		require.False(t, queue.holdable(common.Hash{0xff}))
+	})
+	t.Run("backfilled root", func(t *testing.T) {
+		cfg := clparams.MainnetBeaconConfig
+		block, root := fuluColumnBlockWithBlobs(t, &cfg, 1, 9)
+		queue := &deferredColumnSyncs{wake: make(chan struct{}, 1)}
+		queue.add(root, &backfillColumnBlock{version: clparams.FuluVersion, slot: 1, root: root, commitments: block.GetBlobKzgCommitments()}, time.Now().Add(time.Hour))
+
+		require.False(t, queue.holdable(root))
+	})
+}
+
 // A prioritised root in flight holds once, whatever the round does.
 func TestDeferredColumnSyncPrioritiseFirstAttemptHoldsOnceWhileInFlight(t *testing.T) {
 	queue, root := pristineRoot(t, 9)

@@ -41,6 +41,8 @@ const (
 
 var errCommitteeBitsTooWide = errors.New("committee bits wider than the mainnet preset")
 
+var errIncompleteAttestationJSON = errors.New("attestation is missing aggregation bits or data")
+
 // Attestation type represents a statement or confirmation of some occurrence or phenomenon.
 type Attestation struct {
 	AggregationBits *BitList         `json:"aggregation_bits"`
@@ -254,35 +256,32 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 	}
 
 	// For Electra, the committee bits are present in the JSON
-	if bytes.Contains(data, []byte("committee_bits")) {
+	withCommitteeBits := bytes.Contains(data, []byte("committee_bits"))
+	var temp tempAttestation
+	if withCommitteeBits {
 		// Electra case — preserve existing limit if SetBeaconConfig was called
 		aggrBitsLimit := aggregationBitsSizeElectra
 		if a.AggregationBits != nil && a.AggregationBits.Cap() > 0 {
 			aggrBitsLimit = a.AggregationBits.Cap()
 		}
-		var temp tempAttestation
 		temp.AggregationBits = NewBitList(0, aggrBitsLimit)
 		temp.CommitteeBits = &BitVector{} // UnmarshalJSON self-sizes from the hex bytes
-		if err := json.Unmarshal(data, &temp); err != nil {
-			return err
-		}
-		a.AggregationBits = temp.AggregationBits
-		a.Data = temp.Data
-		a.Signature = temp.Signature
-		a.CommitteeBits = temp.CommitteeBits
-		return nil
+	} else {
+		// Deneb case
+		temp.AggregationBits = NewBitList(0, aggregationBitsSizeDeneb)
 	}
-
-	// Deneb case
-	var temp tempAttestation
-	temp.AggregationBits = NewBitList(0, aggregationBitsSizeDeneb)
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return err
 	}
-	// Copy the temporary struct into the actual struct
+	if temp.AggregationBits == nil || temp.AggregationBits.Length() == 0 || temp.Data == nil {
+		return errIncompleteAttestationJSON
+	}
 	a.AggregationBits = temp.AggregationBits
 	a.Data = temp.Data
 	a.Signature = temp.Signature
+	if withCommitteeBits {
+		a.CommitteeBits = temp.CommitteeBits
+	}
 	return nil
 }
 

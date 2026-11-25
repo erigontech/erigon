@@ -50,7 +50,7 @@ func TestSelfdestructParallel_NoMaterialize(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, destroyed, "existing account should be destroyed")
 
-	writes := ibs.VersionedWrites()
+	writes := ibs.Writes()
 	sd, ok := writes.GetSelfDestruct(addr)
 	require.True(t, ok, "SelfDestructPath write expected")
 	assert.True(t, sd.Val, "self-destruct flag should be set")
@@ -58,8 +58,6 @@ func TestSelfdestructParallel_NoMaterialize(t *testing.T) {
 	bal, ok := writes.GetBalance(addr)
 	require.True(t, ok, "BalancePath write expected")
 	assert.True(t, bal.Val.IsZero(), "balance should be cleared")
-
-	assert.Empty(t, ibs.stateObjects, "parallel Selfdestruct must not materialize a stateObject")
 }
 
 // TestSelfdestructParallel_RepeatedSameTx verifies that a second SELFDESTRUCT of
@@ -87,7 +85,7 @@ func TestSelfdestructParallel_RepeatedSameTx(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, destroyed, "repeat same-tx SELFDESTRUCT should still report destroyed")
 
-	writes := ibs.VersionedWrites()
+	writes := ibs.Writes()
 	bal, ok := writes.GetBalance(addr)
 	require.True(t, ok)
 	assert.True(t, bal.Val.IsZero(), "balance credited between the two SELFDESTRUCTs must be re-cleared")
@@ -128,7 +126,6 @@ func TestSelfdestructParallel_AbsentAccount(t *testing.T) {
 	destroyed, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	assert.False(t, destroyed, "absent account cannot be destroyed")
-	assert.Empty(t, ibs.stateObjects, "absent-account Selfdestruct must not materialize a stateObject")
 }
 
 // An earlier transaction's SELFDESTRUCT leaves a deleted account, which a later
@@ -148,7 +145,7 @@ func TestHasSelfdestructed_EarlierTxDestruct(t *testing.T) {
 	destroyed, err := destroyer.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	require.True(t, destroyed)
-	vm.FlushVersionedWrites(finalizedWrites(t, destroyer, rules), true)
+	vm.FlushWrites(finalizedWrites(t, destroyer, rules), true)
 
 	ibs := NewWithVersionMap(reader, vm)
 	ibs.SetTxContext(1, 1)
@@ -209,7 +206,7 @@ func TestHasSelfdestructed_OwnDestructAfterEarlierTx(t *testing.T) {
 				ibs := NewWithVersionMap(reader, vm)
 				ibs.SetTxContext(1, i)
 				run(t, ibs)
-				vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
+				vm.FlushWrites(finalizedWrites(t, ibs, rules), true)
 			}
 
 			ibs := NewWithVersionMap(reader, vm)

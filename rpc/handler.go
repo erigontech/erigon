@@ -62,7 +62,6 @@ import (
 //	}
 type handler struct {
 	reg            *serviceRegistry
-	unsubscribeCb  *callback
 	idgen          func() ID                      // subscription ID generator
 	respWait       map[string]*requestOp          // active client requests
 	clientSubs     map[string]*ClientSubscription // active client subscriptions
@@ -70,12 +69,17 @@ type handler struct {
 	rootCtx        context.Context                // canceled by close()
 	cancelRoot     func()                         // cancel function for rootCtx
 	conn           jsonWriter                     // where responses will be sent
-	logger         log.Logger
+	baseLogger     log.Logger                     // without the connection context, read it through log()
 	allowSubscribe bool
 	inlineCalls    bool // the caller waits for every answer, as a single HTTP request does
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
 	forbiddenList ForbiddenList
+
+	unsubscribeCb   *callback
+	unsubscribeOnce sync.Once
+	connLogger      log.Logger
+	connLoggerOnce  sync.Once
 
 	subLock             sync.Mutex
 	serverSubs          map[ID]*Subscription
@@ -138,13 +142,10 @@ func newHandler(
 		reg:            reg,
 		idgen:          idgen,
 		conn:           conn,
-		respWait:       make(map[string]*requestOp),
-		clientSubs:     make(map[string]*ClientSubscription),
 		rootCtx:        rootCtx,
 		cancelRoot:     cancelRoot,
 		allowSubscribe: true,
-		serverSubs:     make(map[ID]*Subscription),
-		logger:         logger,
+		baseLogger:     logger,
 		allowList:      allowList,
 		forbiddenList:  forbiddenList,
 
@@ -156,12 +157,19 @@ func newHandler(
 		slowLogBlacklist: rpccfg.SlowLogBlackList,
 	}
 
-	if conn.remoteAddr() != "" {
-		h.logger = h.logger.New("conn", conn.remoteAddr())
-	}
-	h.unsubscribeCb = newCallback(reflect.Value{}, reflect.ValueOf(h.unsubscribe), "unsubscribe", h.logger)
-
 	return h
+}
+
+// log returns the logger tagged with the remote address. It is built on first use,
+// since most single HTTP calls finish without logging anything.
+func (h *handler) log() log.Logger {
+	h.connLoggerOnce.Do(func() {
+		h.connLogger = h.baseLogger
+		if addr := h.conn.remoteAddr(); addr != "" {
+			h.connLogger = h.baseLogger.New("conn", addr)
+		}
+	})
+	return h.connLogger
 }
 
 func (h *handler) isRpcMethodNeedsCheck(method string) bool {
@@ -233,7 +241,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, done func()) {
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
 			if err := h.conn.WriteJSON(cp.ctx, errorMessage(&invalidRequestError{"empty batch"})); err != nil {
-				h.logger.Debug("Failed to write RPC error response", "err", err)
+				h.log().Debug("Failed to write RPC error response", "err", err)
 			}
 		}, done)
 		return
@@ -276,7 +284,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, done func()) {
 		h.sendBatchAnswers(cp.ctx, answersWithNils)
 		for _, n := range cp.notifiers {
 			if err := n.activate(); err != nil {
-				h.logger.Debug("Failed to activate RPC notifier", "err", err)
+				h.log().Debug("Failed to activate RPC notifier", "err", err)
 			}
 		}
 	}, done)
@@ -289,7 +297,7 @@ func (h *handler) sendBatchAnswers(ctx context.Context, answers [][]byte) {
 		return
 	}
 	if err := h.conn.WriteJSON(ctx, rawBatch(batch)); err != nil {
-		h.logger.Debug("Failed to write RPC batch response", "err", err)
+		h.log().Debug("Failed to write RPC batch response", "err", err)
 	}
 }
 
@@ -305,7 +313,7 @@ func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
 		return
 	}
 	if err := h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer())); err != nil {
-		h.logger.Debug("Failed to write RPC response", "err", err)
+		h.log().Debug("Failed to write RPC response", "err", err)
 	}
 }
 
@@ -332,7 +340,7 @@ func (h *handler) handleBatchTooLarge(tooLarge *batchTooLargeError, done func())
 			resp.ID = tooLarge.id
 		}
 		if err := h.conn.WriteJSON(cp.ctx, []*jsonrpcMessage{resp}); err != nil {
-			h.logger.Debug("Failed to write RPC batch-too-large response", "err", err)
+			h.log().Debug("Failed to write RPC batch-too-large response", "err", err)
 		}
 	}, done)
 }
@@ -358,7 +366,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsonstream.Stream, done
 		}
 		for _, n := range cp.notifiers {
 			if err := n.activate(); err != nil {
-				h.logger.Debug("Failed to activate RPC notifier", "err", err)
+				h.log().Debug("Failed to activate RPC notifier", "err", err)
 			}
 		}
 	}, done)
@@ -370,7 +378,7 @@ func (h *handler) handleResponses(batch []*jsonrpcMessage, handleCall func(*json
 	handleResp := func(msg *jsonrpcMessage) {
 		op := h.respWait[string(msg.ID)]
 		if op == nil {
-			h.logger.Debug("Unsolicited RPC response", "reqid", idForLog(msg.ID))
+			h.log().Debug("Unsolicited RPC response", "reqid", idForLog(msg.ID))
 			return
 		}
 		resolvedOps = append(resolvedOps, op)
@@ -386,7 +394,7 @@ func (h *handler) handleResponses(batch []*jsonrpcMessage, handleCall func(*json
 				op.err = json.Unmarshal(msg.Result, &op.sub.subid)
 				if op.err == nil {
 					go op.sub.start()
-					h.clientSubs[op.sub.subid] = op.sub
+					h.addClientSub(op.sub)
 				}
 			}
 		}
@@ -402,7 +410,7 @@ func (h *handler) handleResponses(batch []*jsonrpcMessage, handleCall func(*json
 		switch {
 		case msg.isResponse():
 			handleResp(msg)
-			h.logger.Trace("Handled RPC response", "reqid", idForLog(msg.ID), "duration", time.Since(start))
+			h.log().Trace("Handled RPC response", "reqid", idForLog(msg.ID), "duration", time.Since(start))
 
 		case msg.isNotification():
 			if strings.HasSuffix(msg.Method, notificationMethodSuffix) {
@@ -432,6 +440,9 @@ func (h *handler) close(err error, inflightReq *requestOp) {
 
 // addRequestOp registers a request operation.
 func (h *handler) addRequestOp(op *requestOp) {
+	if h.respWait == nil {
+		h.respWait = make(map[string]*requestOp)
+	}
 	for _, id := range op.ids {
 		h.respWait[string(id)] = op
 	}
@@ -494,6 +505,9 @@ func (h *handler) addSubscriptions(nn []*RemoteNotifier) {
 	h.pendingSubs -= len(nn)
 	for _, n := range nn {
 		if sub := n.takeSubscription(); sub != nil {
+			if h.serverSubs == nil {
+				h.serverSubs = make(map[ID]*Subscription)
+			}
 			h.serverSubs[sub.ID] = sub
 		}
 	}
@@ -549,7 +563,7 @@ func (h *handler) handleImmediate(msg *jsonrpcMessage) bool {
 func (h *handler) handleSubscriptionResult(msg *jsonrpcMessage) {
 	var result subscriptionResult
 	if err := json.Unmarshal(msg.Params, &result); err != nil {
-		h.logger.Trace("Dropping invalid subscription message")
+		h.log().Trace("Dropping invalid subscription message")
 		return
 	}
 	if h.clientSubs[result.ID] != nil {
@@ -561,7 +575,7 @@ func (h *handler) handleSubscriptionResult(msg *jsonrpcMessage) {
 func (h *handler) handleResponse(msg *jsonrpcMessage) {
 	op := h.respWait[string(msg.ID)]
 	if op == nil {
-		h.logger.Trace("[rpc] unsolicited response", "reqid", idForLog(msg.ID))
+		h.log().Trace("[rpc] unsolicited response", "reqid", idForLog(msg.ID))
 		return
 	}
 	delete(h.respWait, string(msg.ID))
@@ -580,8 +594,15 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 	}
 	if op.err = json.Unmarshal(msg.Result, &op.sub.subid); op.err == nil {
 		go op.sub.start()
-		h.clientSubs[op.sub.subid] = op.sub
+		h.addClientSub(op.sub)
 	}
+}
+
+func (h *handler) addClientSub(sub *ClientSubscription) {
+	if h.clientSubs == nil {
+		h.clientSubs = make(map[string]*ClientSubscription)
+	}
+	h.clientSubs[sub.subid] = sub
 }
 
 // handleCallMsg executes a call message. It returns the error answer, or nil once the
@@ -593,7 +614,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		defer jsonstream.Put(discard)
 		_, _ = h.handleCall(ctx, msg, discard)
 		if h.traceRequests {
-			h.logger.Info("[rpc] served", "method", msg.Method, "params", string(msg.Params))
+			h.log().Info("[rpc] served", "method", msg.Method, "params", string(msg.Params))
 		}
 		return nil
 	case msg.isCall():
@@ -602,7 +623,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 			doSlowLog = h.isRpcMethodNeedsCheck(msg.Method)
 			if doSlowLog {
 				slowTimer := time.AfterFunc(h.slowLogThreshold, func() {
-					h.logger.Info("[rpc.slow] running", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
+					h.log().Info("[rpc.slow] running", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 				})
 				defer slowTimer.Stop()
 			}
@@ -618,24 +639,24 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		if doSlowLog {
 			requestDuration := time.Since(start)
 			if requestDuration > h.slowLogThreshold {
-				h.logger.Info("[rpc.slow] finished", "method", msg.Method, "reqid", idForLog(msg.ID), "duration", requestDuration)
+				h.log().Info("[rpc.slow] finished", "method", msg.Method, "reqid", idForLog(msg.ID), "duration", requestDuration)
 			}
 		}
 
 		if !errors.Is(ctx.ctx.Err(), context.Canceled) {
 			switch {
 			case answered != nil:
-				h.logger.Log(servedLvl(answered), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", answered)
+				h.log().Log(servedLvl(answered), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", answered)
 			case resp != nil && resp.Error != nil && resp.Error.Data != nil:
-				h.logger.Log(servedLvl(resp.Error), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
+				h.log().Log(servedLvl(resp.Error), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
 			case resp != nil && resp.Error != nil:
-				h.logger.Log(servedLvl(resp.Error), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
+				h.log().Log(servedLvl(resp.Error), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message)
 			}
 		}
 		if h.traceRequests {
-			h.logger.Info("Served", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
+			h.log().Info("Served", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 		}
 
 		return resp
@@ -664,7 +685,7 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream *jsonstre
 	}
 	var callb *callback
 	if msg.isUnsubscribe() {
-		callb = h.unsubscribeCb
+		callb = h.unsubscribeCallback()
 	} else if allowed {
 		callb = h.reg.callback(msg.Method)
 	}
@@ -680,7 +701,7 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream *jsonstre
 
 	// Collect the statistics for RPC calls if metrics is enabled.
 	// We only care about pure rpc call. Filter out subscription.
-	if callb != h.unsubscribeCb {
+	if !msg.isUnsubscribe() {
 		rpcRequestGauge.Inc()
 		if answered != nil || (answer != nil && answer.Error != nil) {
 			failedReqeustGauge.Inc()
@@ -790,6 +811,15 @@ func (msg *jsonrpcMessage) writeTo(stream *jsonstream.Stream) {
 	if err == nil {
 		stream.WriteRawBytes(buf)
 	}
+}
+
+// unsubscribeCallback builds the callback on first use, since reflecting over the
+// method is a noticeable share of serving a single HTTP call that never needs it.
+func (h *handler) unsubscribeCallback() *callback {
+	h.unsubscribeOnce.Do(func() {
+		h.unsubscribeCb = newCallback(reflect.Value{}, reflect.ValueOf(h.unsubscribe), "unsubscribe", h.log())
+	})
+	return h.unsubscribeCb
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.

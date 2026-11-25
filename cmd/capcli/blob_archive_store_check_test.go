@@ -42,11 +42,22 @@ import (
 
 type storeCheckReader struct {
 	freezeblocks.BeaconSnapshotReader
-	blocks map[uint64]*cltypes.SignedBeaconBlock
+	blocks     map[uint64]*cltypes.SignedBeaconBlock
+	blindedErr error
 }
 
 func (r *storeCheckReader) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
 	return r.blocks[slot], nil
+}
+
+func (r *storeCheckReader) ReadBlindedBlockBySlot(_ context.Context, _ kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error) {
+	if r.blindedErr != nil {
+		return nil, r.blindedErr
+	}
+	if r.blocks[slot] == nil {
+		return nil, nil
+	}
+	return r.blocks[slot].Blinded()
 }
 
 // storeCheckFixture builds a slot whose sidecars are stored under its canonical root, with the

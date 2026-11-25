@@ -57,7 +57,7 @@ func TestGetLogsIndexFiltersMatchFullScan(t *testing.T) {
 	gasPrice := uint256.NewInt(100 * common.GWei)
 	nonce := uint64(0)
 	pack, err := m.GenerateChain(20, func(i int, b *blockgen.BlockGen) {
-		if i%5 == 4 {
+		if i%5 == 3 {
 			return
 		}
 		for j := range 3 {
@@ -97,10 +97,10 @@ func TestGetLogsIndexFiltersMatchFullScan(t *testing.T) {
 		{{}, {topics[0], missingTopic}},
 		{{topics[0]}, {}, {topics[1]}},
 	}
-	ranges := [][2]int64{{1, 20}, {6, 13}}
+	ranges := [][2]int64{{1, 20}, {6, 13}, {20, 20}}
 
 	for _, r := range ranges {
-		all, err := ethAPI.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(r[0]), ToBlock: big.NewInt(r[1])})
+		all, err := logsOf(ethAPI.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(r[0]), ToBlock: big.NewInt(r[1])}))
 		require.NoError(t, err)
 		require.NotEmpty(t, all)
 		for ai, addrs := range addrSets {
@@ -114,7 +114,7 @@ func TestGetLogsIndexFiltersMatchFullScan(t *testing.T) {
 						}
 					}
 
-					got, err := ethAPI.GetLogs(m.Ctx, crit)
+					got, err := logsOf(ethAPI.GetLogs(m.Ctx, crit))
 					require.NoError(t, err)
 					require.Equal(t, logKeys(want, true), logKeys(got, true))
 

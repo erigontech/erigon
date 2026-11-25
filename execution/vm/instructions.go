@@ -1484,53 +1484,37 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 	if err != nil {
 		return pc, nil, err
 	}
-	newContract, err := ibs.IsNewContract(self)
-	if err != nil {
-		return pc, nil, err
-	}
 	rules := evm.ChainRules()
-	eip8246 := rules.IsAmsterdam
-	switch {
-	case eip8246:
-		// EIP-8246: SELFDESTRUCT no longer burns. The balance moves to the
-		// beneficiary (a no-op when it is self); a same-tx-created contract is
-		// still cleared at finalization but keeps any residual balance.
-		if self != beneficiaryAddr {
-			if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
-				return pc, nil, err
-			}
-			if err := ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct); err != nil {
-				return pc, nil, err
-			}
-		}
-		if newContract {
-			_, err = ibs.Selfdestruct(self, true)
-			if err != nil {
-				return pc, nil, err
-			}
-		}
-	case newContract: // Contract is new and will actually be deleted.
-		if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
-			return pc, nil, err
-		}
-		if self != beneficiaryAddr {
-			if err := ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct); err != nil {
-				return pc, nil, err
-			}
-		}
-		_, err = ibs.Selfdestruct(self, false)
+	var clearContract bool
+	// Bogota's SENDALL preserves code, storage, and nonce even for a contract
+	// created in the current transaction.
+	if !rules.IsBogota {
+		clearContract, err = ibs.IsNewContract(self)
 		if err != nil {
 			return pc, nil, err
 		}
-	case self != beneficiaryAddr: // Contract already exists, only do transfer if beneficiary is not self.
+	}
+	toOtherAccount := self != beneficiaryAddr
+	// Before Amsterdam, a contract created in this transaction burns its balance
+	// when it names itself as the beneficiary.
+	if toOtherAccount || (clearContract && !rules.IsAmsterdam) {
 		if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
 			return pc, nil, err
 		}
+	}
+	if toOtherAccount {
 		if err := ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct); err != nil {
 			return pc, nil, err
 		}
 	}
-	if rules.IsEIPEnabled(7708) && !balance.IsZero() && self != beneficiaryAddr { // EIP-7708
+	if clearContract {
+		// Amsterdam preserves any balance left in the account when the contract
+		// is cleared at transaction end.
+		if _, err := ibs.Selfdestruct(self, rules.IsAmsterdam); err != nil {
+			return pc, nil, err
+		}
+	}
+	if rules.IsEIPEnabled(7708) && !balance.IsZero() && toOtherAccount { // EIP-7708
 		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 	}
 	tracer := evm.Config().Tracer

@@ -18,7 +18,7 @@ package state
 
 import (
 	"cmp"
-	"slices"
+	"sort"
 
 	"github.com/holiman/uint256"
 
@@ -313,15 +313,26 @@ func (vm *VersionMap) HasAmbiguousBaseAccount(eip161Enabled, isAura bool, base S
 	return false, nil
 }
 
+// SeedEmptyRemovals considers only accounts with a balance, nonce, or code write
+// and at least one write after block start. It checks for EIP-161 removal at
+// zero-balance writes and at the account's final write, which may be to storage.
 func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader, addrs []accounts.Address) error {
 	var stamps []*WriteSet
-	var candidates []uint32
+	var removals []balRemoval
 	for i := range vm.bal {
 		ac := &vm.bal[i]
-		var maxIdx uint32
-		balChangeIndexes(ac, func(idx uint32) { maxIdx = max(maxIdx, idx) })
+		maxIdx := max(
+			balLastChangeIndex(ac.BalanceChanges),
+			balLastChangeIndex(ac.NonceChanges),
+			balLastChangeIndex(ac.CodeChanges),
+		)
+		for _, slot := range ac.StorageChanges {
+			if changes := slot.Changes; len(changes) > 0 {
+				maxIdx = max(maxIdx, changes[len(changes)-1].Index)
+			}
+		}
 		if maxIdx == 0 {
-			continue // only reads, no field change — not a removal candidate
+			continue // The account is read-only or all its writes are at block start.
 		}
 		addr := addrs[i]
 		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
@@ -330,50 +341,81 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 		if len(ac.BalanceChanges) == 0 && len(ac.NonceChanges) == 0 && len(ac.CodeChanges) == 0 {
 			continue
 		}
-		candidates = candidates[:0]
-		for _, c := range ac.BalanceChanges {
-			if c.Value.IsZero() && c.Index != maxIdx {
-				candidates = append(candidates, c.Index)
-			}
-		}
-		candidates = append(candidates, maxIdx)
-		for _, idx := range candidates {
-			if b, ok := versionedUpdateBalance(vm, addr, int(idx)); ok && !b.IsZero() {
+		removals = removals[:0]
+		for j, c := range ac.BalanceChanges {
+			if !c.Value.IsZero() || c.Index == maxIdx {
 				continue
 			}
-			if n, ok := versionedUpdateNonce(vm, addr, int(idx)); ok && n != 0 {
-				continue
-			}
-			if ch, ok := versionedUpdateCodeHash(vm, addr, int(idx)); ok && !ch.IsEmpty() {
-				continue
-			}
-			av := VersionedAccountView{addr: addr, txIdx: int(idx), vm: vm, base: base}
-			acc := av.Account()
-			if err := av.Err(); err != nil {
+			stamp, err := vm.deriveEmptyRemoval(addr, int(c.Index), base)
+			if err != nil {
 				return err
 			}
-			if acc == nil || !acc.Balance.IsZero() || acc.Nonce != 0 || !acc.CodeHash.IsEmpty() {
+			if stamp == nil {
 				continue
 			}
-			rm := &WriteSet{}
-			rm.SetEmptyRemoval(addr, Version{TxIndex: int(idx) - 1})
-			stamps = append(stamps, rm)
-			vm.recordDerivedRemoval(addr, int(idx)-1)
-			if idx == maxIdx {
-				continue
+			stamps = append(stamps, stamp)
+			removal := balRemoval{index: c.Index}
+			if j+1 < len(ac.BalanceChanges) {
+				removal.nextWriteIndex = ac.BalanceChanges[j+1].Index
 			}
-			next := balNextChangeIndex(ac, idx)
-			if !slices.ContainsFunc(ac.BalanceChanges, func(c *types.BalanceChange) bool { return c.Index == next }) {
-				live := &WriteSet{}
-				live.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: int(next) - 1}}})
-				stamps = append(stamps, live)
+			removals = append(removals, removal)
+		}
+		if len(removals) > 0 {
+			recordBALRevivals(removals, ac.NonceChanges)
+			recordBALRevivals(removals, ac.CodeChanges)
+			for _, slot := range ac.StorageChanges {
+				recordBALRevivals(removals, slot.Changes)
 			}
+			for _, removal := range removals {
+				if !removal.seedZeroBalance {
+					continue
+				}
+				revival := &WriteSet{}
+				revival.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{
+					Address: addr, Path: BalancePath, Version: Version{TxIndex: int(removal.nextWriteIndex) - 1},
+				}})
+				stamps = append(stamps, revival)
+			}
+		}
+		// Stage the final removal last so it overwrites a revival at the same index.
+		stamp, err := vm.deriveEmptyRemoval(addr, int(maxIdx), base)
+		if err != nil {
+			return err
+		}
+		if stamp != nil {
+			stamps = append(stamps, stamp)
 		}
 	}
 	for _, ws := range stamps {
-		vm.FlushVersionedWrites(ws, true)
+		vm.FlushWrites(ws, true)
 	}
 	return nil
+}
+
+func (vm *VersionMap) deriveEmptyRemoval(addr accounts.Address, balIndex int, base StateReader) (*WriteSet, error) {
+	// One known field can rule out removal and save a base read.
+	if b, ok := versionedUpdateBalance(vm, addr, balIndex); ok && !b.IsZero() {
+		return nil, nil
+	}
+	if n, ok := versionedUpdateNonce(vm, addr, balIndex); ok && n != 0 {
+		return nil, nil
+	}
+	if ch, ok := versionedUpdateCodeHash(vm, addr, balIndex); ok && !ch.IsEmpty() {
+		return nil, nil
+	}
+	view := VersionedAccountView{addr: addr, txIdx: balIndex, vm: vm, base: base}
+	acc := view.Account()
+	if err := view.Err(); err != nil {
+		return nil, err
+	}
+	if acc == nil || !acc.Balance.IsZero() || acc.Nonce != 0 || !acc.CodeHash.IsEmpty() {
+		return nil, nil
+	}
+	txIdx := balIndex - 1
+	stamp := &WriteSet{}
+	stamp.SetEmptyRemoval(addr, Version{TxIndex: txIdx})
+	vm.recordDerivedRemoval(addr, txIdx)
+	return stamp, nil
 }
 
 func (vm *VersionMap) recordDerivedRemoval(addr accounts.Address, txIdx int) {
@@ -442,4 +484,46 @@ func balNextChangeIndex(ac *types.AccountChanges, after uint32) uint32 {
 		}
 	})
 	return m
+}
+
+func balLastChangeIndex[T interface{ GetIndex() uint32 }](changes []T) uint32 {
+	if len(changes) == 0 {
+		return 0
+	}
+	return changes[len(changes)-1].GetIndex()
+}
+
+type balRemoval struct {
+	index           uint32
+	nextWriteIndex  uint32
+	seedZeroBalance bool
+}
+
+// recordBALRevivals checks the sorted writes to nonce, code or one storage slot.
+// A removed account needs a zero balance at the first later write unless the BAL
+// supplies an explicit balance at that same index.
+func recordBALRevivals[T interface{ GetIndex() uint32 }](removals []balRemoval, changes []T) {
+	for len(removals) > 0 && len(changes) > 0 {
+		idx := changes[0].GetIndex()
+		changes = changes[1:]
+		// Each removal here occurs at a balance write. An earlier removal's next
+		// balance write is at or before the following removal's index. Once this
+		// sorted list reaches the last removal's next known write, we can stop.
+		if limit := removals[len(removals)-1].nextWriteIndex; limit != 0 && idx >= limit {
+			return
+		}
+		after := removals[0].index
+		if idx <= after {
+			first := sort.Search(len(changes), func(i int) bool { return changes[i].GetIndex() > after })
+			changes = changes[first:]
+			continue
+		}
+		nBeforeWrite := sort.Search(len(removals), func(i int) bool { return removals[i].index >= idx })
+		removal := &removals[nBeforeWrite-1]
+		if removal.nextWriteIndex == 0 || idx < removal.nextWriteIndex {
+			removal.nextWriteIndex = idx
+			removal.seedZeroBalance = true
+		}
+		removals = removals[nBeforeWrite:]
+	}
 }

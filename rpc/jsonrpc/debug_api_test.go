@@ -2326,6 +2326,9 @@ func TestTraceCallSetupErrors(t *testing.T) {
 				if tc.cause != nil {
 					require.ErrorIs(t, err, tc.cause)
 				}
+				if notExecuted, ok := errors.AsType[*rpchelper.BlockNotExecutedError](err); ok {
+					require.EqualError(t, err, notExecuted.Error())
+				}
 				require.Empty(t, stream.Buffer())
 				require.Empty(t, output.Bytes())
 			})
