@@ -295,6 +295,117 @@ func TestSharedDomain_IteratePrefixAfterUnwindSeesRewrite(t *testing.T) {
 	require.Equal(t, map[string][]byte{string(key): {0x05}}, got)
 }
 
+// A slot deleted in the DB but restored by an in-memory unwind must be seen by
+// IteratePrefix, so DomainDelPrefix clears it.
+func TestSharedDomain_DelPrefixClearsSlotRestoredByUnwind(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDb(t, 100)
+	ctx := t.Context()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	addr, slot := common.HexToAddress("0x01"), common.HexToHash("0x02")
+	key := composite(addr[:], slot[:])
+	val := []byte{0x01}
+
+	committed, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer committed.Close()
+	require.NoError(t, committed.DomainPut(kv.StorageDomain, rwTx, key, val, 10, nil))
+	unwound := &changeset.StateChangeSet{}
+	committed.SetChangesetAccumulator(unwound)
+	require.NoError(t, committed.DomainDel(kv.StorageDomain, rwTx, key, 20, val))
+	require.NoError(t, committed.Flush(ctx, rwTx))
+
+	var diffSet [kv.DomainLen][]kv.DomainEntryDiff
+	for idx, d := range unwound.Diffs {
+		diffSet[idx] = d.GetDiffSet()
+	}
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	domains.Unwind(15, &diffSet)
+
+	v, _, err := domains.GetLatest(kv.StorageDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Equal(t, val, v)
+
+	got := map[string][]byte{}
+	require.NoError(t, domains.IteratePrefix(kv.StorageDomain, addr[:], rwTx, func(k, v []byte) (bool, error) {
+		got[string(k)] = bytes.Clone(v)
+		return true, nil
+	}))
+	require.Equal(t, map[string][]byte{string(key): val}, got)
+
+	require.NoError(t, domains.DomainDelPrefix(kv.StorageDomain, rwTx, addr[:], 16))
+	v, _, err = domains.GetLatest(kv.StorageDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Empty(t, v)
+}
+
+// The root after DomainDelPrefix over a slot restored by an in-memory unwind
+// must equal the root of a state that never had the slot.
+func TestSharedDomain_DelPrefixAfterUnwindCommitmentRoot(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	addr, slot := common.HexToAddress("0x01"), common.HexToHash("0x02")
+	key := composite(addr[:], slot[:])
+	val := []byte{0x01}
+	acc := accounts.SerialiseV3(&accounts.Account{Nonce: 1, Balance: *uint256.NewInt(100)})
+
+	setup := func() (kv.TemporalRwTx, *execctx.SharedDomains) {
+		db := newTestDb(t, 100)
+		rwTx, err := db.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		t.Cleanup(rwTx.Rollback)
+		for bn := uint64(0); bn <= 2; bn++ {
+			require.NoError(t, rawdbv3.TxNums.Append(rwTx, bn, bn))
+		}
+		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		require.NoError(t, err)
+		t.Cleanup(domains.Close)
+		return rwTx, domains
+	}
+
+	rwTx, domains := setup()
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, addr[:], acc, 1, nil))
+	wantRoot, err := domains.ComputeCommitment(ctx, rwTx, true, 1, 1, "", nil)
+	require.NoError(t, err)
+
+	rwTx, domains = setup()
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, addr[:], acc, 1, nil))
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, val, 1, nil))
+	_, err = domains.ComputeCommitment(ctx, rwTx, true, 1, 1, "", nil)
+	require.NoError(t, err)
+	unwound := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(unwound)
+	require.NoError(t, domains.DomainDel(kv.StorageDomain, rwTx, key, 2, val))
+	_, err = domains.ComputeCommitment(ctx, rwTx, true, 2, 2, "", nil)
+	require.NoError(t, err)
+	domains.SetChangesetAccumulator(nil)
+	require.NoError(t, domains.Flush(ctx, rwTx))
+	domains.Close()
+
+	var diffSet [kv.DomainLen][]kv.DomainEntryDiff
+	for idx, d := range unwound.Diffs {
+		diffSet[idx] = d.GetDiffSet()
+	}
+	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	domains.Unwind(2, &diffSet)
+	_, _, err = domains.SeekCommitment(ctx, rwTx)
+	require.NoError(t, err)
+
+	require.NoError(t, domains.DomainDelPrefix(kv.StorageDomain, rwTx, addr[:], 2))
+	gotRoot, err := domains.ComputeCommitment(ctx, rwTx, true, 2, 2, "", nil)
+	require.NoError(t, err)
+	require.Equal(t, wantRoot, gotRoot)
+}
+
 // Unwind(t) prunes overlay writes in [t, ∞) and keeps [0, t); t is the resume
 // block's begin-system txNum, so the boundary write itself must not survive.
 func TestSharedDomain_UnwindPrunesBoundaryTxNum(t *testing.T) {

@@ -357,9 +357,9 @@ func simpleTransferScenario() *testFinalizeScenario {
 
 	// TxOut: writes from execution. No coinbase write (fees deferred).
 	txOut := &state.WriteSet{}
-	txOut.SetBalance(sender, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: sender, Path: state.BalancePath, Reason: tracing.BalanceDecreaseGasBuy}, Val: *newSenderBal})
+	txOut.SetBalance(sender, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: sender, Path: state.BalancePath}, Val: *newSenderBal})
 	txOut.SetNonce(sender, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath}, Val: uint64(1)})
-	txOut.SetBalance(recipient, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: recipient, Path: state.BalancePath, Reason: tracing.BalanceChangeTransfer}, Val: *newRecipientBal})
+	txOut.SetBalance(recipient, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: recipient, Path: state.BalancePath}, Val: *newRecipientBal})
 
 	return &testFinalizeScenario{
 		name: "simple_transfer_pre_london",
@@ -1525,12 +1525,7 @@ func TestFinalizedBlockWritesReturnsStateReadError(t *testing.T) {
 	// A storage-only write carries no balance, nonce or code hash, so emptiness comes from the base read.
 	addr := accounts.InternAddress(common.HexToAddress("0x01"))
 	key := accounts.InternKey(common.HexToHash("0x07"))
-	ws := new(state.WriteSet)
-	ws.SetStorage(addr, key, &state.VersionedWrite[uint256.Int]{
-		WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: key, Version: state.Version{BlockNum: 1}},
-		Val:         *uint256.NewInt(9),
-	})
-	require.NoError(t, ibs.ApplyVersionedWrites(ws))
+	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(9)))
 	require.NoError(t, ibs.StateReadError())
 
 	readErr := errors.New("domain read failed")
@@ -1604,45 +1599,6 @@ func TestValidatedFeeRecipientsStayEstimates(t *testing.T) {
 		require.False(t, revived.Val, "the base fee retracts the removal of the recipient it revives")
 		require.Equal(t, 0, revived.Version.TxIndex)
 	})
-}
-
-// Finalizing a system tx over a lower tx's write that is still an estimate must
-// not panic.
-func TestFinalizeSystemTx_OverEstimateCellDoesNotPanic(t *testing.T) {
-	s := simpleTransferScenario()
-	result := s.buildExecResult()
-	task := result.Task.(*taskVersion)
-	task.version.TxIndex = 2
-	txTask := task.Task.(*exec.TxTask)
-	txTask.TxIndex = 2
-
-	addr := fAddr("syscall-target")
-	result.TxOut = &state.WriteSet{}
-	result.TxOut.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
-		WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: task.version},
-		Val:         *uint256.NewInt(5),
-	})
-
-	lower := &state.WriteSet{}
-	acc := accounts.NewAccount()
-	acc.Balance = *uint256.NewInt(3)
-	lowerVersion := state.Version{TxIndex: 1}
-	lower.SetAddress(addr, &state.VersionedWrite[*accounts.Account]{
-		WriteHeader: state.WriteHeader{Address: addr, Path: state.AddressPath, Version: lowerVersion},
-		Val:         &acc,
-	})
-	lower.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
-		WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: lowerVersion},
-		Val:         *uint256.NewInt(3),
-	})
-	vm := state.NewVersionMap(nil)
-	vm.FlushVersionedWrites(lower, false)
-
-	var err error
-	require.NotPanics(t, func() {
-		_, _, _, err = result.finalizeSystemTx(task, txTask, vm, s.makeReader())
-	})
-	require.NoError(t, err)
 }
 
 // On a BAL block a live coinbase already has its account record, so the fee credit writes only the

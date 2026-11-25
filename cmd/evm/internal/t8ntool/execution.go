@@ -83,7 +83,7 @@ type stEnvMarshaling struct {
 
 func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.SharedDomains, alloc types.GenesisAlloc, txNum uint64) (state.StateReader, state.StateWriter) {
 	stateReader, stateWriter := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	statedb := state.New(stateReader) // ibs
+	statedb := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
 	for address, account := range alloc {
 		addr := accounts.InternAddress(address)
 		if err := statedb.SetCode(addr, account.Code, tracing.CodeChangeGenesis); err != nil {
@@ -116,10 +116,12 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.Share
 	// empty-account clearing still applies during transaction execution.
 	preStateRules := *chainRules
 	preStateRules.DisabledEIPs = append(slices.Clone(chainRules.DisabledEIPs), 161)
-	if err := statedb.FinalizeTx(&preStateRules, stateWriter); err != nil {
+	writes, err := statedb.FinalizedWrites(&preStateRules)
+	if err != nil {
 		panic(err)
 	}
-	if err := statedb.CommitBlock(&preStateRules, stateWriter); err != nil {
+	statedb.FlushWritesToVersionMap(writes)
+	if err := statedb.WriteFlushedTo(writes, stateWriter); err != nil {
 		panic(err)
 	}
 	return stateReader, stateWriter

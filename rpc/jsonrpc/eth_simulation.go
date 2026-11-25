@@ -199,11 +199,8 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	blockNumber, blockHash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockParameter, tx, api._blockReader)
+	blockNumber, blockHash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockParameter, tx, api._blockReader)
 	if err != nil {
-		return nil, err
-	}
-	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return nil, err
 	}
 
@@ -513,8 +510,8 @@ func (s *simulator) sanitizeCall(
 		if args.GasPrice == nil && args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil {
 			args.GasPrice = new(hexutil.U256)
 		}
-	} else {
-		// A base fee is provided, requiring 1559-type execution
+	} else if args.GasPrice == nil {
+		// A call with gasPrice stays legacy; zero dynamic fees would conflict with it.
 		if args.MaxFeePerGas == nil {
 			args.MaxFeePerGas = new(hexutil.U256)
 		}
@@ -685,8 +682,7 @@ func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateR
 			}
 		}
 	}
-	overrides := state.New(base)
-	transactions.VersionedBlockState(overrides)
+	overrides := state.NewVersionedBlock(base)
 	if err := stateOverrides.OverrideTo(overrides, precompiles, rules, stateWriter); err != nil {
 		overrides.Close()
 		return nil, err
@@ -820,9 +816,8 @@ func (s *simulator) simulateBlock(
 		defer overrideReader.Close()
 		stateReader = overrideReader
 	}
-	intraBlockState := state.New(stateReader)
+	intraBlockState := state.NewVersionedBlock(stateReader)
 	defer intraBlockState.Close()
-	intraBlockState.SetVersionMap(state.NewVersionMap(nil))
 	intraBlockState.SetTxContext(blockNumber, -1)
 
 	var balIO *state.VersionedIO
@@ -861,15 +856,15 @@ func (s *simulator) simulateBlock(
 	systemCallCustom := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, s.chainConfig, ibs, header, engine, constCall, vmConfig)
 	}
-	chainReader := consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger)
+	chainReader := &simulatedChainReader{
+		Reader: consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger),
+		parent: parent,
+	}
 	err = engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
 	if err != nil {
 		return nil, nil, err
 	}
-	err = intraBlockState.FinalizeTx(rules, state.NewNoopWriter())
-	if err != nil {
-		return nil, nil, err
-	}
+	intraBlockState.EndTransaction()
 	if err := recordPhase(); err != nil {
 		return nil, nil, err
 	}
@@ -885,10 +880,7 @@ func (s *simulator) simulateBlock(
 		txnList = append(txnList, txn)
 		receiptList = append(receiptList, receipt)
 		callResults = append(callResults, *callResult)
-		err = intraBlockState.FinalizeTx(rules, state.NewNoopWriter())
-		if err != nil {
-			return nil, nil, err
-		}
+		intraBlockState.EndTransaction()
 		if err := recordPhase(); err != nil {
 			return nil, nil, err
 		}
@@ -1183,6 +1175,20 @@ func (s *simulator) simulateCall(
 		txn.SetSender(accounts.InternAddress(*call.From))
 	}
 	return &callResult, txn, receipt, nil
+}
+
+// simulatedChainReader lets block initialization read the timestamp of a parent
+// built earlier in the same simulation, even when it exists only in memory.
+type simulatedChainReader struct {
+	*consensuschain.Reader
+	parent *types.Header
+}
+
+func (s *simulatedChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if s.parent.Number.Uint64() == number && s.parent.Hash() == hash {
+		return s.parent
+	}
+	return s.Reader.GetHeader(hash, number)
 }
 
 type simulatedCanonicalReader struct {

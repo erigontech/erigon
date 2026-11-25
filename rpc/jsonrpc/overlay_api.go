@@ -17,10 +17,12 @@
 package jsonrpc
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"sync"
 	"time"
 
@@ -113,14 +115,6 @@ func (api *OverlayAPIImpl) applyGasBudget(msg *types.Message) {
 }
 
 func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.Address, code hexutil.Bytes) (*CreationCode, error) {
-	var (
-		replayTransactions types.Transactions
-		evm                *vm.EVM
-		blockCtx           evmtypes.BlockContext
-		txCtx              evmtypes.TxContext
-		overrideBlockHash  map[uint64]common.Hash
-	)
-
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
@@ -133,7 +127,11 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	defer func(start time.Time) { log.Trace("CallConstructor finished", "runtime", time.Since(start)) }(time.Now())
 
-	creationData, err := api.OtsAPI.GetContractCreator(ctx, address)
+	var originalCreate2InitCode *vm.Create2InitCode
+	lookupCtx := context.WithValue(ctx, create2InputHookKey{}, func(input []byte) {
+		originalCreate2InitCode = vm.NewCreate2InitCode(input)
+	})
+	creationData, err := api.OtsAPI.GetContractCreator(lookupCtx, address)
 	if err != nil {
 		return nil, err
 	}
@@ -164,8 +162,6 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, fmt.Errorf("block not found: %d", blockNum)
 	}
 
-	// -1 is a default value for transaction index.
-	// If it's -1, we will try to replay every single transaction in that block
 	transactionIndex := -1
 	for idx, transaction := range block.Transactions() {
 		if transaction.Hash() == creationData.Tx {
@@ -186,8 +182,6 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		}
 	}
 
-	replayTransactions = block.Transactions()[:transactionIndex]
-
 	err = rpchelper.CheckBlockExecuted(tx, blockNum)
 	if err != nil {
 		return nil, err
@@ -198,37 +192,30 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	statedb := state.New(stateReader)
+	statedb := state.NewVersionedBlock(stateReader)
 	defer statedb.Close()
-	transactions.VersionedBlockState(statedb)
 
 	header := block.HeaderNoCopy()
-
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, block.Hash())
 	}
 
-	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
-
-	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress, chainConfig)
-
-	// Get a new instance of the EVM
-	evm = vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{})
+	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, nil)
+	blockCtx := protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress, chainConfig)
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
-	rules := evm.ChainRules()
+	rules := blockCtx.Rules(chainConfig)
 
-	// Setup the gas pool (also for unmetered requests)
-	// and apply the message.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
-	for idx, txn := range replayTransactions {
+	// Replay the earlier transactions with their original messages to restore
+	// the state at the start of the deployment transaction.
+	for idx, txn := range block.Transactions()[:transactionIndex] {
 		statedb.SetTxContext(blockNum, idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, err
 		}
-		txCtx = protocol.NewEVMTxContext(msg)
-		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
-		// Execute the transaction message
+		txCtx := protocol.NewEVMTxContext(msg)
+		evm := vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{})
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
 			return nil, err
@@ -240,7 +227,6 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	statedb.SetTxContext(blockNum, transactionIndex)
 
-	// CREATE2: keep original message so we match the existing contract address, code will be replaced later
 	msg, err := creationTx.AsMessage(*signer, block.BaseFee(), rules)
 	if err != nil {
 		return nil, err
@@ -248,60 +234,53 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	contractAddr := types.CreateAddress(msg.From().Value(), msg.Nonce())
 	if creationTx.IsContractDeploy() && contractAddr == address {
-		// CREATE: adapt message with new code so it's replaced instantly
-		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
+		// Intrinsic gas is charged on the message data before the EVM applies the initcode override.
+		msg.SetData(code)
 	}
 	api.applyGasBudget(msg)
-	txCtx = protocol.NewEVMTxContext(msg)
-	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: code, gasCap: msg.Gas()}
-	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
-	ct.evm = evm
+	txCtx := protocol.NewEVMTxContext(msg)
+	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), statedb: statedb}
+	evm := vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{
+		Tracer: ct.TracingHooks(),
+		OverrideInitCode: func(target accounts.Address) ([]byte, bool) {
+			return code, target == ct.contractAddress
+		},
+		OriginalCreate2InitCode: originalCreate2InitCode,
+		OnInitCodeOverrideError: ct.onInitCodeOverrideError,
+	})
 
-	// Later frames may read the payer's balance after payment approval.
-	gasBailout := creationTx.Type() != types.FrameTxType
-	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout, api.engine())
-	if ct.err != nil {
+	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
+	if err != nil {
+		return nil, cmp.Or(ct.err, err)
+	}
+	// A later rollback can undo a successful deployment. Read the surviving code
+	// from state, checking SELFDESTRUCT first because deletion happens at finalization.
+	selfdestructed, err := statedb.HasSelfdestructed(ct.contractAddress)
+	if err != nil {
+		return nil, err
+	}
+	if selfdestructed {
 		return nil, ct.err
 	}
-
-	resultCode := &CreationCode{}
-	if len(ct.resultCode) > 0 {
-		c := hexutil.Bytes(ct.resultCode)
-		resultCode.Code = &c
-		return resultCode, nil
-	} else {
-		// err from core.ApplyMessage()
-		if err != nil {
-			return nil, err
-		}
-		code, err := evm.IntraBlockState().GetCode(accounts.InternAddress(address))
-		if err != nil {
-			return nil, err
-		}
-		if len(code) > 0 {
-			c := hexutil.Bytes(code)
-			resultCode.Code = &c
-			return resultCode, nil
-		}
+	runtimeCode, err := statedb.GetCode(ct.contractAddress)
+	if err != nil {
+		return nil, err
 	}
-
-	_ = ethapi.FinalizeCallTx(statedb, rules)
-
-	return nil, nil
+	if len(runtimeCode) > 0 {
+		c := hexutil.Bytes(runtimeCode)
+		return &CreationCode{Code: &c}, nil
+	}
+	return nil, ct.err
 }
 
 func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, _ *chain.Rules) ([]*types.Log, error) {
 	timeout := api.OverlayGetLogsTimeout
-	// Setup context so it may be cancelled the call has completed
-	// or, in case of unmetered gas, setup a context with a timeout.
 	var cancel context.CancelFunc
 	if timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 	} else {
 		ctx, cancel = context.WithCancel(ctx)
 	}
-	// Make sure the context is cancelled when the call has completed
-	// this makes sure resources are cleaned up.
 	defer cancel()
 
 	tx, err := api.db.BeginTemporalRo(ctx)
@@ -362,8 +341,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 					continue
 				}
-				statedb := state.New(stateReader)
-				transactions.VersionedBlockState(statedb)
+				statedb := state.NewVersionedBlock(stateReader)
 				func() {
 					defer statedb.Close()
 					blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx, stateOverride)
@@ -481,17 +459,6 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	replayTransactions = block.Transactions()
 	log.Debug("[replayBlock] replayTx", "length", len(replayTransactions))
 
-	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
-	// Without overrides, changing gas limits can change the replayed state.
-	// Frame budgets are signed and must stay unchanged even with overrides.
-	for _, txn := range replayTransactions {
-		if !hasStateOverrides || txn.Type() == types.FrameTxType {
-			if err := checkTransactionGasCap(txn, api.GasCap); err != nil {
-				return nil, err
-			}
-		}
-	}
-
 	header := block.HeaderNoCopy()
 
 	if header == nil {
@@ -509,19 +476,26 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := blockCtx.Rules(chainConfig)
 
+	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
 	if hasStateOverrides {
 		if err := stateOverride.Override(statedb, nil, rules); err != nil {
 			return nil, err
 		}
 	}
 
-	// Setup the gas pool (also for unmetered requests)
-	// and apply the message.
+	// Assertions can observe earlier transactions' fee effects, so any frame
+	// transaction requires original gas budgets and normal fee accounting
+	// for the whole block.
+	relaxedReplay := hasStateOverrides && !slices.ContainsFunc(replayTransactions, func(txn types.Transaction) bool {
+		return txn.Type() == types.FrameTxType
+	})
+	// Overrides may increase aggregate gas use, so the block gas pool is unrestricted.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	evm = vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chainConfig, vm.Config{})
 	storeEVM(evm)
 
-	// On the versioned state the overrides took tx index 0; the block's txs follow them.
+	// Overrides use transaction index 0 in versioned state, when present.
+	// Replay starts after them so their writes are visible to the first transaction.
 	firstTxIndex := statedb.TxnIndex()
 	// try to replay all transactions in this block
 	for idx, txn := range replayTransactions {
@@ -532,19 +506,17 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			log.Error(err.Error())
 			return nil, err
 		}
-		if hasStateOverrides {
-			// Gas bailout can charge the full RPC budget, which applies per transaction.
-			gp.Reset(math.MaxUint64, math.MaxUint64)
-			api.applyGasBudget(msg)
-		}
 
+		if relaxedReplay {
+			api.applyGasBudget(msg)
+			// Unlimited per-transaction allowances must not exhaust the block pool.
+			gp.Reset(math.MaxUint64, math.MaxUint64)
+		}
 		statedb.SetTxContext(blockNum, firstTxIndex+idx)
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm.TxContext = txCtx
 
-		// Without overrides, later transactions must observe canonical fee effects,
-		// even when an earlier transaction failed.
-		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, hasStateOverrides /* gasBailout */, api.engine())
+		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, relaxedReplay /* gasBailout */, api.engine())
 		if err != nil {
 			log.Error(err.Error())
 			return nil, err
@@ -561,19 +533,14 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
 
-		// Frame transactions can keep logs even if a frame fails. Rollback has
-		// already removed logs from reverted frames and atomic batches.
-		if res.Failed() && txn.Type() != types.FrameTxType {
-			log.Debug("[replayBlock] res result for transaction", "transactionHash", txn.Hash(), "failed", res.Failed(), "revert", res.Revert(), "error", res.Err)
-			log.Debug("[replayBlock] discarding txLogs because txn has status=failed", "transactionHash", txn.Hash())
-		} else {
-			txLogs := statedb.GetLogs(statedb.TxnIndex(), txn.Hash(), blockNum, header.Hash())
-			for _, l := range txLogs {
-				l.TxIndex = hexutil.Uint(idx)
-			}
-			log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
-			blockLogs = append(blockLogs, txLogs...)
+		// Execution has already removed reverted logs. Collect the surviving logs
+		// independently of transaction status, as receipt construction does.
+		txLogs := statedb.GetLogs(statedb.TxnIndex(), txn.Hash(), blockNum, header.Hash())
+		for _, l := range txLogs {
+			l.TxIndex = hexutil.Uint(idx)
 		}
+		log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
+		blockLogs = append(blockLogs, txLogs...)
 	}
 	return blockLogs, nil
 }

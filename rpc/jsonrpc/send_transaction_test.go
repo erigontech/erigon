@@ -149,6 +149,32 @@ func TestSendRawTransactionReleasesReadBeforeAdmission(t *testing.T) {
 	require.Zero(t, db.readers, "each database reader must be released exactly once")
 }
 
+func TestSendRawTransactionFrameFeeCap(t *testing.T) {
+	m := execmoduletester.New(t)
+	admitted := 0
+	client := submissionPoolClient{onAdd: func() { admitted++ }}
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, client, nil)
+	api.FeeCap = 0.3
+
+	frame := &types.FrameTransaction{
+		ChainID: *m.ChainConfig.ChainID,
+		Frames:  []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
+		Fees:    types.FrameFees{MaxFee: *uint256.NewInt(3 * common.Ether / 10)},
+	}
+	send := func() error {
+		var encoded bytes.Buffer
+		require.NoError(t, frame.MarshalBinary(&encoded))
+		_, err := api.SendRawTransaction(t.Context(), encoded.Bytes())
+		return err
+	}
+	require.NoError(t, send())
+	perGasAtCap := *frame.GetFeeCap()
+	frame.Fees.MaxFee.AddUint64(&frame.Fees.MaxFee, 1_000)
+	require.Equal(t, perGasAtCap, *frame.GetFeeCap(), "the signed budget increased, but the per-gas cap rounded down")
+	require.ErrorContains(t, send(), "exceeds the configured cap")
+	require.Equal(t, 1, admitted)
+}
+
 func TestSendRawTransactionUnprotected(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithTxPool())
 	require := require.New(t)

@@ -10,7 +10,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -685,8 +685,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 		select {
 		case <-logEvery.C:
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
+			alloc, sys := dbg.MemUsage()
 			now := time.Now()
 			blkPerSec := float64(blockNum-lastLogBlock) / now.Sub(lastLogTime).Seconds()
 			lastLogTime = now
@@ -697,7 +696,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				"keys", common.PrettyCounter(totalKeysProcessed),
 				"root", hex.EncodeToString(rh),
 				"memBatch", common.ByteCount(domains.Size()),
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 		default:
 		}
 		return nil
@@ -824,12 +823,11 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	latestRoot = rh
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
+	alloc, sys := dbg.MemUsage()
 	logger.Info("[rebuild_commitment_history] done", "duration", time.Since(start),
 		"blocks", blockTo+1, "totalKeys", common.PrettyCounter(totalKeysProcessed),
 		"root", hex.EncodeToString(latestRoot),
-		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 	if totalKeysProcessed == 0 {
 		return latestRoot, nil
@@ -1041,20 +1039,21 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		roTx.Rollback()
 
 		for shardFrom < lastShard { // recreate this file range 1+ steps
-			nextKey := func() (ok bool, k []byte) {
+			// The stream reads the range's own file, so each value is the key's latest as of the range end.
+			nextKey := func() (ok bool, k, v []byte) {
 				if !keyIter.HasNext() {
-					return false, nil
+					return false, nil, nil
 				}
-				k, _, err := keyIter.Next()
+				k, v, err := keyIter.Next()
 				if err != nil {
 					err = fmt.Errorf("CommitmentRebuild: keyIter.Next() %w", err)
 					panic(err)
 				}
 				processed++
 				if processed%(keysPerStep*uint64(shardStepsSize)) == 0 && shardTo != lastShard {
-					return false, k
+					return false, k, v
 				}
-				return true, k
+				return true, k, v
 			}
 
 			rwTx, err := rwDb.BeginTemporalRw(ctx)
@@ -1071,9 +1070,12 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if rebuildTrieCfg.Variant == commitment.VariantParallelHexPatricia {
+			switch rebuildTrieCfg.Variant {
+			case commitment.VariantParallelHexPatricia, commitment.VariantCommitmentV3:
 				domains.EnableParaTrieDB(rwDb)
 			}
+			// A top-level v3 storage fold worker measured ~0.35 GB of heap; 2 GB each in half the memory leaves room for the rest of the rebuild.
+			domains.SetStorageWorkersMax(estimate.EstimatedRamPerWorker(2 * datasize.GB).WorkersByRAMOnly())
 
 			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
@@ -1126,10 +1128,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			latestRoot = rebuiltCommit.RootHash
 		}
 
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
+		alloc, sys := dbg.MemUsage()
 		logger.Info("[rebuild_commitment] finished range", "stateRoot", rhx, "range", r.String("", a.StepSize()),
-			"block", blockNum, "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			"block", blockNum, "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 		for {
 			smthDone, err := a.mergeLoopStep(ctx, rangeToTxNum)
@@ -1143,9 +1144,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	}
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	logger.Info("[rebuild_commitment] done", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	alloc, sys := dbg.MemUsage()
+	logger.Info("[rebuild_commitment] done", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 	acRo.Close()
 
@@ -1181,7 +1181,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	return latestRoot, nil
 }
 
-func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
+func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (ok bool, k, v []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
 	aggTx := AggTx(tx)
 	sd.DiscardWrites(kv.AccountsDomain)
 	sd.DiscardWrites(kv.StorageDomain)
@@ -1195,9 +1195,9 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 
 	sf := time.Now()
 	var processed uint64
-	for ok, key := next(); ; ok, key = next() {
+	for ok, key, val := next(); ; ok, key, val = next() {
 		if len(key) != 0 {
-			if err := sd.GetCommitmentCtx().TouchKeyFromState(tx, key); err != nil {
+			if err := sd.GetCommitmentCtx().TouchKeyValue(key, val); err != nil {
 				return nil, err
 			}
 			processed++

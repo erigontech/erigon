@@ -79,6 +79,7 @@ type DB struct {
 	// blockFiles: block snapshots, the peer of stateFiles. Nil for state-only
 	// tools; a tx from such a DB pins no view and panics on any block read.
 	blockFiles *blocksnapshots.RoSnapshots
+	closeOnce  sync.Once // a concurrent second Close must wait for the first: MDBX Close returns at once for it
 }
 
 // New wires the temporal DB over a raw kv.RwDB, its state aggregator, and the
@@ -265,10 +266,15 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 }
 
 func (db *DB) Close() {
-	if db.stateFiles != nil {
-		db.stateFiles.Close()
-	}
-	db.RwDB.Close()
+	db.closeOnce.Do(func() {
+		if db.stateFiles != nil {
+			db.stateFiles.StopMaintenance()
+		}
+		db.RwDB.Close() // refuses new txs and waits for open ones, which may read state files
+		if db.stateFiles != nil {
+			db.stateFiles.Close()
+		}
+	})
 }
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {

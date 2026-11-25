@@ -149,7 +149,6 @@ func TestTransientStale_GetDelegatedDesignation(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok, "delegation must be visible via the CodePath cell, not the stale AddressPath codehash")
 	assert.Equal(t, target, got)
-	assert.Empty(t, ibs.stateObjects, "GetDelegatedDesignation must not materialize a stateObject")
 }
 
 // TestCrossTxSelfDestruct_CodeReadsEmpty pins that an account self-destructed by

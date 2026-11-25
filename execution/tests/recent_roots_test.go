@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -52,13 +51,13 @@ func TestFrameValidationRecentRootPendingSlot(t *testing.T) {
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
 	frame := &types.FrameTransaction{
-		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender,
+		NonceKeys: nil, ChainID: *cfg.ChainID, SenderAddress: sender,
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Target: &types.FrameRecentRootVerifier, Data: data, Limits: mdgas.MdGas{Execution: 20_000}},
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 		},
-		Fees: types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
 	}
+	frame.Fees.MaxFee.SetUint64(10 * common.GWei * frame.GetGasLimit())
 	var encoded bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&encoded))
 	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)

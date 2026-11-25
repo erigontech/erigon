@@ -35,13 +35,11 @@ func TestSetStateParallel_NoMaterialize(t *testing.T) {
 	vw, ok := writes.GetStorage(addr, key)
 	require.True(t, ok, "StoragePath write expected")
 	assert.Equal(t, uint256.NewInt(42), &vw.Val)
-	assert.Empty(t, ibs.stateObjects, "parallel SSTORE must not materialize a stateObject")
 
 	// Reading the slot back within the tx returns the written value.
 	got, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	assert.Equal(t, uint256.NewInt(42), &got)
-	assert.Empty(t, ibs.stateObjects)
 }
 
 // TestSetStateParallel_NoOpToCommitted verifies that writing the current
@@ -67,7 +65,6 @@ func TestSetStateParallel_NoOpToCommitted(t *testing.T) {
 	writes := ibs.VersionedWrites()
 	_, ok := writes.GetStorage(addr, key)
 	assert.False(t, ok, "writing the committed value should record no storage write")
-	assert.Empty(t, ibs.stateObjects)
 }
 
 // TestGetCommittedStateParallel_ValidatedFloor verifies that a later tx's

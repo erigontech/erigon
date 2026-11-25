@@ -105,6 +105,11 @@ func saveSignatureGlobals(t testing.TB) {
 	})
 }
 
+func saveCommitteeGlobals(t testing.TB) {
+	origCommitteeCount, origSubnet := computeCommitteeCountPerSlot, computeSubnetForAttestation
+	t.Cleanup(func() { computeCommitteeCountPerSlot, computeSubnetForAttestation = origCommitteeCount, origSubnet })
+}
+
 // withoutDecompressed adapts a (bool, error) verification stub; callbacks then fall back to the compressed signatures.
 func withoutDecompressed(verify func(sigs, msgs, pks [][]byte) (bool, error)) func(sigs, msgs, pks [][]byte) (bool, []bls.Signature, error) {
 	return func(sigs, msgs, pks [][]byte) (bool, []bls.Signature, error) {

@@ -213,21 +213,25 @@ func ValidateIndexedAttestationIndices(cfg *clparams.BeaconChainConfig, version 
 	if cfg == nil {
 		return errors.New("isValidIndexedAttestation: beacon config is nil")
 	}
-	limit := cfg.MaxValidatorsPerCommittee
-	if version >= clparams.ElectraVersion {
-		if cfg.MaxCommitteesPerSlot != 0 && limit > ^uint64(0)/cfg.MaxCommitteesPerSlot {
-			limit = ^uint64(0)
-		} else {
-			limit *= cfg.MaxCommitteesPerSlot
-		}
-	}
-	if uint64(inds.Length()) > limit {
+	if limit := MaxIndexedAttestationIndices(cfg, version); uint64(inds.Length()) > limit {
 		return fmt.Errorf("isValidIndexedAttestation: too many attesting indices: %d > %d", inds.Length(), limit)
 	}
 	if !solid.IsUint64SortedSet(inds) {
 		return errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 	return nil
+}
+
+func MaxIndexedAttestationIndices(cfg *clparams.BeaconChainConfig, version clparams.StateVersion) uint64 {
+	limit := cfg.MaxValidatorsPerCommittee
+	if version < clparams.ElectraVersion {
+		return limit
+	}
+	committees := cfg.MaxCommitteesPerSlot
+	if committees != 0 && limit > ^uint64(0)/committees {
+		return ^uint64(0)
+	}
+	return limit * committees
 }
 
 // IsValidatorEligibleForActivationQueue returns whether the validator is eligible to be placed into the activation queue.

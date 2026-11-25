@@ -357,11 +357,11 @@ func TestLogsFilter_RemoveLogsFilter_IsIdempotent(t *testing.T) {
 	healthySrv := newTestServer(ctx)
 
 	brokenID, brokenFilter := agg.insertLogsFilter(brokenSrv)
-	healthyID, healthyFilter := agg.insertLogsFilter(healthySrv)
+	healthyID, _ := agg.insertLogsFilter(healthySrv)
 
 	req := &remoteproto.LogsFilterRequest{AllAddresses: true, AllTopics: true}
-	agg.updateLogsFilter(brokenFilter, req)
-	agg.updateLogsFilter(healthyFilter, req)
+	agg.updateLogsFilter(brokenID, req)
+	agg.updateLogsFilter(healthyID, req)
 
 	agg.distributeLogs([]*notifications.LogNotification{createLog()})
 
@@ -376,5 +376,26 @@ func TestLogsFilter_RemoveLogsFilter_IsIdempotent(t *testing.T) {
 	}
 	if _, ok := agg.logsFilters[healthyID]; !ok {
 		t.Fatalf("expected healthy filter %d to remain", healthyID)
+	}
+}
+
+func TestLogsFilter_UpdateAfterFailedSendKeepsOtherSubscriber(t *testing.T) {
+	agg := NewLogsFilterAggregator(shards.NewEvents())
+	brokenSrv := newTestServer(t.Context())
+	brokenSrv.sendErr = errors.New("send failed")
+	healthySrv := newTestServer(t.Context())
+	brokenID, brokenFilter := agg.insertLogsFilter(brokenSrv)
+	healthyID, _ := agg.insertLogsFilter(healthySrv)
+	all := &remoteproto.LogsFilterRequest{AllAddresses: true, AllTopics: true}
+	agg.updateLogsFilter(brokenID, all)
+	agg.updateLogsFilter(healthyID, all)
+
+	agg.distributeLogs([]*notifications.LogNotification{createLog()})
+	agg.updateLogsFilter(brokenID, &remoteproto.LogsFilterRequest{AllAddresses: true, Topics: []*typesproto.H256{gointerfaces.ConvertHashToH256(common.Hash{0xbb})}})
+	agg.removeLogsFilter(brokenID, brokenFilter)
+	agg.distributeLogs([]*notifications.LogNotification{createLog()})
+
+	if got := len(healthySrv.sent); got != 2 {
+		t.Fatalf("expected the healthy subscriber to receive both logs, got %d", got)
 	}
 }

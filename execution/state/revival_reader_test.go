@@ -442,7 +442,10 @@ func TestVersionedStateReader_RecordedZeroWithoutDestructStands(t *testing.T) {
 
 // A BAL-preloaded zero balance is a value like any other, not evidence that the
 // account exists. An overlay that leaves the record EIP-161-empty is no record.
-func TestVersionedStateReader_ZeroCellsSynthesizeNoRecord(t *testing.T) {
+// A 0-value write with no self-destruct is a live (if empty) account: the finalized
+// reader composes it present and leaves the EIP-161 empty-account removal to the
+// write side (a ValueDeleted balance), rather than synthesizing the removal here.
+func TestVersionedStateReader_ZeroBalanceCellReadsPresentEmpty(t *testing.T) {
 	vm := NewVersionMap(nil)
 	addr := getAddress(1)
 	vm.WriteBalance(addr, Version{TxIndex: 2}, uint256.Int{}, true)
@@ -450,7 +453,8 @@ func TestVersionedStateReader_ZeroCellsSynthesizeNoRecord(t *testing.T) {
 	vr := NewVersionedStateReader(5, ReadSet{}, vm, nil)
 	acc, err := vr.ReadAccountData(addr)
 	require.NoError(t, err)
-	require.Nil(t, acc)
+	require.NotNil(t, acc)
+	require.True(t, acc.Empty())
 }
 
 // An in-flight write above a committed destruct must not narrow the destruct

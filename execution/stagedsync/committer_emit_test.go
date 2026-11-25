@@ -50,7 +50,9 @@ func TestEmitTouched_ProducesExpectedUpdates(t *testing.T) {
 	del := commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash, DeleteStorageSubtree: true}
 	storDel := commitment.Update{Flags: commitment.DeleteUpdate}
 
-	wiped := full(3, 1, accounts.EmptyCodeHash)
+	// A self-destruct that preserves balance leaves a balance-only EOA: nonce and code
+	// are wiped even though this tx also wrote the nonce at the destruct version.
+	wiped := full(3, 0, accounts.EmptyCodeHash)
 	wiped.DeleteStorageSubtree = true
 	created := full(9, 1, codeHash)
 	created.DeleteStorageSubtree = true

@@ -793,3 +793,23 @@ func TestHTTPGetQueryWithInvalidIDIsAParseError(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 	require.Contains(t, rec.Body.String(), "-32700")
 }
+
+func TestHTTPUnsubscribeReportsUnknownSubscription(t *testing.T) {
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"nftest_unsubscribe","params":["0x1"]}`
+	req, err := http.NewRequestWithContext(t.Context(), "POST", ts.URL, strings.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	var msg jsonrpcMessage
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&msg))
+	require.NotNil(t, msg.Error)
+	require.Equal(t, ErrSubscriptionNotFound.Error(), msg.Error.Message)
+}

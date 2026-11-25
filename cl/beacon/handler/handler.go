@@ -700,7 +700,6 @@ func (a *ApiHandler) init() {
 		})
 		if a.routerCfg.Validator {
 			r.Get("/v3/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock))
-			r.Get("/v4/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock))
 			r.Post("/v4/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.PostEthV4ValidatorBlock))
 		}
 	})

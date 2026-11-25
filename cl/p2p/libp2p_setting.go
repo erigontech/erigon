@@ -75,8 +75,14 @@ func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) ([]
 		pubsub.WithPeerScore(scoreParams, thresholds),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),
 		pubsub.WithSubscriptionFilter(gossipSubscriptionFilter(forkDigests, gossipTopicNames(p.cfg.NetworkConfig, beaconConfig))),
+		pubsub.WithMessagePriority(gossipMessageHasPriority),
 	}
 	return psOpts, nil
+}
+
+func gossipMessageHasPriority(m *pubsub.Message) bool {
+	name := gossip.ExtractTopicName(m.GetTopic())
+	return !gossip.IsTopicDataColumnSidecar(name) && !gossip.IsTopicBlobSidecar(name)
 }
 
 // maxSubscriptionsPerRPC is above what an honest peer sends for all subnets of two fork digests.

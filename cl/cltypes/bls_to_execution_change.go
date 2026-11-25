@@ -17,6 +17,8 @@
 package cltypes
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -61,6 +63,19 @@ func (*BLSToExecutionChange) Static() bool {
 type SignedBLSToExecutionChange struct {
 	Message   *BLSToExecutionChange `json:"message"`
 	Signature common.Bytes96        `json:"signature"`
+}
+
+func (s *SignedBLSToExecutionChange) UnmarshalJSON(buf []byte) error {
+	type signedBLSToExecutionChangeJSON SignedBLSToExecutionChange
+	var decoded signedBLSToExecutionChangeJSON
+	if err := json.Unmarshal(buf, &decoded); err != nil {
+		return err
+	}
+	if decoded.Message == nil {
+		return errors.New("signed BLS to execution change is missing message")
+	}
+	*s = SignedBLSToExecutionChange(decoded)
+	return nil
 }
 
 func (s *SignedBLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {

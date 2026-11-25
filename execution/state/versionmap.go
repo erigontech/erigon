@@ -269,6 +269,10 @@ type VersionMap struct {
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
+	// derivedRemovals holds the account and tx of each removal that SeedEmptyRemovals derives from
+	// bal and the pre-block state, where it seeds a deleted balance. Seeding writes it before
+	// execution, and it is read-only after.
+	derivedRemovals map[derivedRemovalKey]struct{}
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -838,7 +842,11 @@ type accountFloors struct {
 	codeHash                                                      accounts.CodeHash
 	address                                                       *accounts.Account
 	hasBalance, hasNonce, hasIncarnation, hasCodeHash, hasAddress bool
-	balanceDeleted, addressFromBAL, wasDeleted                    bool
+	// wasDeleted: a self-destruct or removal in effect at or below txIdx (Revived or
+	// Absent) — the commitment's signal to drop the storage subtree. absent: destroyed
+	// with no revival (Absent) — the existence verdict keys on it (a self-destructed
+	// account that composes empty is gone).
+	balanceDeleted, addressFromBAL, wasDeleted, absent bool
 }
 
 // accountFloorsAt reads addr's floor cells under one entry lock instead of one lock per field.
@@ -852,59 +860,73 @@ func (vm *VersionMap) accountFloorsAt(addr accounts.Address, txIdx int) (f accou
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	if _, c := floorCell(e.Balance, txIdx); c != nil {
-		f.balance, f.hasBalance, f.balanceDeleted = c.Value, true, c.valStatus == ValueDeleted
-	}
-	if _, c := floorCell(e.Nonce, txIdx); c != nil {
-		f.nonce, f.hasNonce = c.Value, true
+
+	// Resolve the self-destruct/revival lifecycle once: it is the single authority
+	// for how the field cells and the committed base are interpreted below.
+	state, _, destroyedAt, _ := accountLifecycleLocked(e, txIdx, false)
+	destructed := state != LifecycleLive
+	absent := state == LifecycleAbsent
+	f.wasDeleted = destructed
+	f.absent = absent
+
+	if k, c := floorCell(e.Balance, txIdx); c != nil {
+		switch {
+		case !destructed || k > destroyedAt:
+			f.balance, f.hasBalance, f.balanceDeleted = c.Value, true, c.valStatus == ValueDeleted
+		case c.valStatus == ValueDeleted:
+			// A burn at/below the destruct deletes the account only if it was not revived;
+			// a recreate above restarts from a fresh zero balance.
+			f.balance, f.hasBalance, f.balanceDeleted = uint256.Int{}, true, absent
+		default:
+			// A balance-preserving SELFDESTRUCT (EIP-8246) keeps its balance.
+			f.balance, f.hasBalance = c.Value, true
+		}
+	} else if absent {
+		// A self-destruct with no balance cell and no revival is a full wipe: the
+		// account is gone, not preserved at its committed balance.
+		f.balance, f.hasBalance = uint256.Int{}, true
 	}
 	if _, c := floorCell(e.Incarnation, txIdx); c != nil {
 		f.incarnation, f.hasIncarnation = c.Value, true
 	}
-	if _, c := floorCell(e.CodeHash, txIdx); c != nil {
+	// Nonce and code hash follow one rule: the value is the highest write ABOVE the
+	// destruct (a revival overrides). With nothing above it, a destruct that stays gone
+	// (Absent) reads empty — overriding a stale cell below it and the committed base; a
+	// revival that only credited balance (Revived) restores the committed base, so a
+	// stale lower cell and the base both fall through (hasX stays false). No destruct
+	// (Live) is a plain cell-over-base read.
+	if k, c := floorCell(e.Nonce, txIdx); c != nil && (!destructed || k > destroyedAt) {
+		f.nonce, f.hasNonce = c.Value, true
+	} else if absent {
+		f.nonce, f.hasNonce = 0, true
+	}
+	if k, c := floorCell(e.CodeHash, txIdx); c != nil && (!destructed || k > destroyedAt) {
 		f.codeHash, f.hasCodeHash = c.Value, true
+	} else if absent {
+		f.codeHash, f.hasCodeHash = accounts.EmptyCodeHash, true
 	}
 	if _, c := floorCell(e.Address, txIdx); c != nil {
 		f.address, f.hasAddress, f.addressFromBAL = c.Value, true, c.accSource == AccountFromBAL
 	}
-	life, _, _, _ := accountLifecycleLocked(e, txIdx, false)
-	f.wasDeleted = life != LifecycleLive
 	return f
 }
 
-// applySubFieldWrites overlays the Balance/Nonce/Incarnation/CodeHash floor cells for
-// addr onto account under a SINGLE e.mu.RLock. Destruct/lifecycle is resolved centrally
-// by the read core, so these are plain same-txIdx floor reads; coalescing them here avoids
-// the four separate e.mu acquisitions the per-field versionedUpdate* primitives each take.
+// applySubFieldWrites overlays the version-map account fields for addr at txIdx onto
+// account through the single interpreter (accountFloorsAt), so the self-destruct /
+// revival semantics — a destruct wipes nonce and code hash — are decided in one place.
 func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, account *accounts.Account) {
-	if vm == nil {
-		return
+	f := vm.accountFloorsAt(addr, txIdx)
+	if f.hasBalance {
+		account.Balance = f.balance
 	}
-	e := vm.load(addr)
-	if e == nil {
-		return
+	if f.hasNonce {
+		account.Nonce = f.nonce
 	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if _, fv := floorCell(e.Balance, txIdx); fv != nil {
-		account.Balance = fv.Value
+	if f.hasIncarnation {
+		account.Incarnation = f.incarnation
 	}
-	// A destruct erases nonce and code hash without a cell of its own, so a cell
-	// below a later destruct is stale.
-	if k, fv := floorCell(e.Nonce, txIdx); fv != nil {
-		account.Nonce = 0
-		if _, wiped := findDoneSelfDestructLocked(e, k, txIdx, true); !wiped {
-			account.Nonce = fv.Value
-		}
-	}
-	if _, fv := floorCell(e.Incarnation, txIdx); fv != nil {
-		account.Incarnation = fv.Value
-	}
-	if k, fv := floorCell(e.CodeHash, txIdx); fv != nil {
-		account.CodeHash = accounts.EmptyCodeHash
-		if _, wiped := findDoneSelfDestructLocked(e, k, txIdx, true); !wiped {
-			account.CodeHash = fv.Value
-		}
+	if f.hasCodeHash {
+		account.CodeHash = f.codeHash
 	}
 }
 
@@ -1925,8 +1947,9 @@ func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accoun
 }
 
 // DropWrite removes the cell of a write that an earlier run of the tx at v.TxIndex made and its run at v
-// does not make. A value the access list seeds there is put back as Done instead: before the seal, a
-// reader takes a seeded cell as the tx's final write and validation trusts it.
+// does not make. A value the access list seeds there, or the deleted balance of a removal that seeding
+// derives from it, is put back as Done instead: before the seal, a reader takes a seeded cell as the
+// tx's final write and validation trusts it.
 func (vm *VersionMap) DropWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version) {
 	if vm.HasBAL && vm.resetToSeed(addr, path, key, v) {
 		return
@@ -1934,8 +1957,8 @@ func (vm *VersionMap) DropWrite(addr accounts.Address, path AccountPath, key acc
 	vm.Delete(addr, path, key, v.TxIndex, false)
 }
 
-// resetToSeed puts the value the access list seeds for addr's path at v.TxIndex back into the cell
-// there, and reports whether the access list seeds it.
+// resetToSeed puts the value the access list seeds for addr's path at v.TxIndex, or the deleted balance
+// of a removal that seeding derives there, back into the cell there, and reports whether there is one.
 func (vm *VersionMap) resetToSeed(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version) bool {
 	ac := vm.balAccount(addr)
 	e := vm.load(addr)
@@ -1949,11 +1972,15 @@ func (vm *VersionMap) resetToSeed(addr accounts.Address, path AccountPath, key a
 	defer vm.endDeleteStamp(v.TxIndex, &stamped)
 	switch path {
 	case BalancePath:
+		if _, ok := vm.derivedRemovals[derivedRemovalKey{addr, v.TxIndex}]; ok {
+			resetBalance(vm, e.Balance, v, uint256.Int{}, ValueDeleted, &stamped)
+			break
+		}
 		c, ok := balChangeAt(ac.BalanceChanges, func(c *types.BalanceChange) uint32 { return c.Index }, v.TxIndex)
 		if !ok {
 			return false
 		}
-		resetCell(vm, e.Balance, v, c.Value, eqUint256, &stamped)
+		resetBalance(vm, e.Balance, v, c.Value, ValueChanged, &stamped)
 	case NoncePath:
 		c, ok := balChangeAt(ac.NonceChanges, func(c *types.NonceChange) uint32 { return c.Index }, v.TxIndex)
 		if !ok {
@@ -2009,46 +2036,27 @@ func resetCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], v Ve
 	c.setState(inc, FlagDone)
 }
 
-func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
-	vm.assertUnsealed(txIdx, addr, AddressPath, accounts.NilKey)
-	e := vm.load(addr)
-	if e == nil {
+// resetBalance is resetCell for a balance seeded with status. Readers take a deleted balance as a
+// removed account, so the status counts as a change too: a flush of an equal value keeps the cell
+// Done but rewrites its status.
+func resetBalance(vm *VersionMap, cells *btree.Map[int, *WriteCell[uint256.Int]], v Version, seed uint256.Int, status valueStatus, stamped *bool) {
+	if cells == nil {
 		return
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	var stamped bool
-	defer vm.endDeleteStamp(txIdx, &stamped)
-	if e.Address != nil {
-		deleteCell(vm, e.Address, txIdx, &stamped)
+	c, ok := cells.Get(v.TxIndex)
+	if !ok || c.loadFlag() == FlagDone && c.valStatus == status {
+		return
 	}
-	if e.SelfDestruct != nil {
-		deleteCell(vm, e.SelfDestruct, txIdx, &stamped)
+	if !*stamped {
+		vm.mutBegin(v.TxIndex)
+		*stamped = true
 	}
-	if e.Balance != nil {
-		deleteCell(vm, e.Balance, txIdx, &stamped)
+	inc := c.loadInc()
+	if !eqUint256(c.Value, seed) || c.valStatus != status {
+		inc = v.Incarnation
 	}
-	if e.Nonce != nil {
-		deleteCell(vm, e.Nonce, txIdx, &stamped)
-	}
-	if e.Incarnation != nil {
-		deleteCell(vm, e.Incarnation, txIdx, &stamped)
-	}
-	if e.Code != nil {
-		deleteCell(vm, e.Code, txIdx, &stamped)
-	}
-	if e.CodeHash != nil {
-		deleteCell(vm, e.CodeHash, txIdx, &stamped)
-	}
-	if e.CodeSize != nil {
-		deleteCell(vm, e.CodeSize, txIdx, &stamped)
-	}
-	if e.CreateContract != nil {
-		deleteCell(vm, e.CreateContract, txIdx, &stamped)
-	}
-	for _, cells := range e.Storage {
-		deleteCell(vm, cells, txIdx, &stamped)
-	}
+	c.Value, c.valStatus = seed, status
+	c.setState(inc, FlagDone)
 }
 
 type VersionValidity int
@@ -2327,18 +2335,26 @@ func (vm *VersionMap) validateBalanceAtDestruct(addr accounts.Address, tr Versio
 	return VersionValid
 }
 
-// validateAccountAtMarker rejects an account read that matches the version of the BAL existence
-// marker but not the account's existence. A destruct seeded for the marker's tx can have the
-// same version, but the marker records an account that exists: an absent read is valid only
-// while its destruct holds, and a present read from the marker only while no destruct removes
-// the account. Only a sealed write revives the account here: a withdrawn credit does not
-// re-validate a tx that read only the account's existence.
-func (vm *VersionMap) validateAccountAtMarker(addr accounts.Address, tr VersionedRead[AccountView], txIdx int) VersionValidity {
+// validateAccountAtSeed rejects an account read that matches the version of a destruct the BAL
+// seeds but not the account's existence. Two account cells can have that version too:
+//   - The BAL existence marker records an account that exists. An absent read is valid only while
+//     its destruct holds, and a present read from the marker only while no destruct removes the
+//     account. Only a sealed write revives the account here: a withdrawn credit does not
+//     re-validate a tx that read only the account's existence.
+//   - A run of the destruct's tx can write an account cell there. A present read of an account
+//     cell is valid only while the tx that wrote it has an account cell.
+func (vm *VersionMap) validateAccountAtSeed(addr accounts.Address, tr VersionedRead[AccountView], txIdx int) VersionValidity {
 	if tr.Val != nil && !tr.Val.IsNil() {
-		if tr.accSource != AccountFromBAL {
+		if e := vm.load(addr); e == nil || !e.destructed.Load() {
 			return VersionValid
 		}
-		if e := vm.load(addr); e == nil || !e.destructed.Load() {
+		if tr.accSource != AccountFromBAL {
+			if tr.Version.TxIndex < 0 {
+				return VersionValid
+			}
+			if _, res, _ := vm.ReadAddress(addr, tr.Version.TxIndex+1); res.DepIdx() != tr.Version.TxIndex {
+				return VersionInvalid
+			}
 			return VersionValid
 		}
 		if st, _, destroyedAt, _ := vm.ResolvedAccountLifecycleAt(addr, txIdx); st == LifecycleAbsent && !vm.destructKeptBalance(addr, destroyedAt) {
@@ -2384,7 +2400,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		if !ok(validatePath(a, AddressPath, tr.ReadHeader)) {
 			return
 		}
-		if vm.HasBAL && !ok(vm.validateAccountAtMarker(a, tr, txIdx)) {
+		if vm.HasBAL && !ok(vm.validateAccountAtSeed(a, tr, txIdx)) {
 			return
 		}
 	}

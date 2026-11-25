@@ -187,6 +187,7 @@ func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarn
 			cumGas += params.TxGas
 			require.NoError(t, rawtemporaldb.AppendReceiptMetadata(putDel, 0, cumGas, 0, minTxNum+1+uint64(i)))
 		}
+		require.NoError(t, stages.SaveStageProgress(overlay, stages.Execution, overlayNumber))
 	}
 
 	return &overlayAheadHarness{t: t, base: base, m: m, overlayHeader: overlayHeader, overlayBody: overlayBody, events: events, doms: doms}
@@ -953,7 +954,7 @@ func TestReplayTransactionUsesCommittedTxnLookup(t *testing.T) {
 	base._txnReader = rejectOverlayTxnReader{TxnReader: base._txnReader}
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	result, err := api.ReplayTransaction(m.Ctx, common.Hash{1}, []string{TraceTypeTrace}, nil, nil)
+	result, err := api.ReplayTransaction(m.Ctx, common.Hash{1}, []string{TraceTypeTrace}, nil)
 	require.NoError(t, err)
 	require.Nil(t, result)
 }
@@ -1038,7 +1039,7 @@ func TestReplayTransactionHandlesMissingHeader(t *testing.T) {
 
 	var result *TraceCallResult
 	require.NotPanics(t, func() {
-		result, err = api.ReplayTransaction(m.Ctx, common.Hash{1}, []string{TraceTypeTrace}, nil, nil)
+		result, err = api.ReplayTransaction(m.Ctx, common.Hash{1}, []string{TraceTypeTrace}, nil)
 	})
 	require.NoError(t, err)
 	require.Nil(t, result)
@@ -1098,13 +1099,13 @@ func TestTraceTransactionMethodsUseHeaderCacheInCommittedView(t *testing.T) {
 	txHash := block.Transactions()[0].Hash()
 
 	t.Run("trace_transaction", func(t *testing.T) {
-		result, err := api.Transaction(m.Ctx, txHash, nil, nil)
+		result, err := api.Transaction(m.Ctx, txHash, nil)
 		require.NoError(t, err)
 		require.NotNil(t, result)
 	})
 
 	t.Run("trace_replayTransaction", func(t *testing.T) {
-		result, err := api.ReplayTransaction(m.Ctx, txHash, []string{TraceTypeTrace}, nil, nil)
+		result, err := api.ReplayTransaction(m.Ctx, txHash, []string{TraceTypeTrace}, nil)
 		require.NoError(t, err)
 		require.NotNil(t, result)
 	})
@@ -1152,7 +1153,7 @@ func TestGetLogsBlockHashUsesCommittedView(t *testing.T) {
 	api := newEthApiForTest(base, m.DB, nil, nil)
 	hash := overlayHeader.Hash()
 
-	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &hash})
+	logs, err := logsOf(api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &hash}))
 	require.EqualError(t, err, fmt.Sprintf("block not found: %x", hash))
 	require.Nil(t, logs)
 }
@@ -1232,7 +1233,7 @@ func TestTraceFilter_UsesCommittedFromTag(t *testing.T) {
 
 	from := rpc.LatestBlockNumber
 	to := rpc.BlockNumber(overlayRaceChainSize)
-	err := api.Filter(h.m.Ctx, TraceFilterRequest{FromBlock: &from, ToBlock: &to}, new(bool), nil, stream)
+	err := api.Filter(h.m.Ctx, TraceFilterRequest{FromBlock: &from, ToBlock: &to}, nil, stream)
 	require.NoError(t, err)
 }
 
@@ -1284,6 +1285,28 @@ func TestSimulateV1RejectsBlockAheadOfExecution(t *testing.T) {
 
 	_, err := api.SimulateV1(m.Ctx, request, rpc.BlockNumberOrHashWithHash(aheadHash, false))
 	require.ErrorContains(t, err, "not executed")
+}
+
+func TestCallMethodsRejectBlockAheadOfExecution(t *testing.T) {
+	m, aheadHash := newBlockAheadOfExecutionTester(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	args := ethapi.CallArgs{From: &m.Address, To: &m.Address}
+
+	for name, selector := range map[string]rpc.BlockNumberOrHash{
+		"hash":   rpc.BlockNumberOrHashWithHash(aheadHash, false),
+		"latest": rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := api.Call(m.Ctx, args, &selector, nil, nil)
+			require.ErrorContains(t, err, "not executed")
+
+			_, err = api.EstimateGas(m.Ctx, &args, &selector, nil, nil)
+			require.ErrorContains(t, err, "not executed")
+
+			_, err = api.CreateAccessList(m.Ctx, args, &selector, nil, nil)
+			require.ErrorContains(t, err, "not executed")
+		})
+	}
 }
 
 func TestEthWitnessMethodsRejectBlockAheadOfExecution(t *testing.T) {
@@ -1416,7 +1439,7 @@ func TestGetLogsBlockHashRequiresBody(t *testing.T) {
 	m, aheadHash := newHeaderAheadTester(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
-	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &aheadHash})
+	logs, err := logsOf(api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &aheadHash}))
 	require.EqualError(t, err, fmt.Sprintf("block not found: %x", aheadHash))
 	require.Nil(t, logs)
 }
@@ -1490,7 +1513,7 @@ func TestTraceFilter_FutureToBlockErrors(t *testing.T) {
 		"latest": rpc.LatestBlockNumber,
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, jsonstream.New(nil))
+			err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, nil, jsonstream.New(nil))
 			requireBlockRangeIntoFuture(t, err)
 		})
 	}
@@ -1506,7 +1529,7 @@ func TestTraceFilter_FutureFromBlockErrors(t *testing.T) {
 		"latest": rpc.LatestBlockNumber,
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &from}, new(bool), nil, jsonstream.New(nil))
+			err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &from}, nil, jsonstream.New(nil))
 			requireBlockRangeIntoFuture(t, err)
 		})
 	}
@@ -1526,7 +1549,7 @@ func TestTraceFilter_BlockHashUsesCommittedView(t *testing.T) {
 		"overlay reorg": reorgHeader.Hash(),
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &hash}, new(bool), nil, jsonstream.New(nil))
+			err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &hash}, nil, jsonstream.New(nil))
 			requireResourceNotFound(t, err, fmt.Sprintf("block not found: %x", hash))
 		})
 	}
@@ -1542,15 +1565,15 @@ func TestTraceFilter_UnknownBlockErrors(t *testing.T) {
 	unknownNumber := rpc.BlockNumber(overlayHeader.Number.Uint64() + 1)
 
 	t.Run("blockHash", func(t *testing.T) {
-		err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &unknownHash}, new(bool), nil, jsonstream.New(nil))
+		err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &unknownHash}, nil, jsonstream.New(nil))
 		requireResourceNotFound(t, err, fmt.Sprintf("block not found: %x", unknownHash))
 	})
 	t.Run("fromBlock number", func(t *testing.T) {
-		err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &unknownNumber}, new(bool), nil, jsonstream.New(nil))
+		err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &unknownNumber}, nil, jsonstream.New(nil))
 		requireBlockRangeIntoFuture(t, err)
 	})
 	t.Run("toBlock number", func(t *testing.T) {
-		err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &unknownNumber}, new(bool), nil, jsonstream.New(nil))
+		err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &unknownNumber}, nil, jsonstream.New(nil))
 		requireBlockRangeIntoFuture(t, err)
 	})
 }
@@ -1570,7 +1593,7 @@ func TestTraceFilter_OmittedToBlockUsesExecutionProgress(t *testing.T) {
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
 	stream := jsonstream.New(nil)
-	err := api.Filter(m.Ctx, TraceFilterRequest{}, nil, nil, stream)
+	err := api.Filter(m.Ctx, TraceFilterRequest{}, nil, stream)
 
 	require.NoError(t, err)
 }
@@ -1582,7 +1605,7 @@ func TestTraceFilter_OmittedBoundsUseExecutionProgress(t *testing.T) {
 	api := newTraceApiForTest(m)
 
 	stream := jsonstream.New(nil)
-	require.NoError(t, api.Filter(m.Ctx, TraceFilterRequest{}, nil, nil, stream))
+	require.NoError(t, api.Filter(m.Ctx, TraceFilterRequest{}, nil, stream))
 	require.Equal(t, []int{overlayRaceChainSize}, blockNumbersFromTraces(t, stream.Buffer()))
 }
 

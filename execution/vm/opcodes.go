@@ -120,6 +120,8 @@ const (
 	FRAMEPARAM
 	SIGPARAM
 	SIGDATACOPY
+	TXTRACE
+	EVENTDATACOPY
 )
 
 // 0x50 range - 'storage' and execution.
@@ -314,6 +316,8 @@ var opCodeToString = map[OpCode]string{
 	FRAMEPARAM:    "FRAMEPARAM",
 	SIGPARAM:      "SIGPARAM",
 	SIGDATACOPY:   "SIGDATACOPY",
+	TXTRACE:       "TXTRACE",
+	EVENTDATACOPY: "EVENTDATACOPY",
 
 	// 0x50 range - 'storage' and execution.
 	POP: "POP",
@@ -484,6 +488,8 @@ var stringToOp = map[string]OpCode{
 	"FRAMEPARAM":     FRAMEPARAM,
 	"SIGPARAM":       SIGPARAM,
 	"SIGDATACOPY":    SIGDATACOPY,
+	"TXTRACE":        TXTRACE,
+	"EVENTDATACOPY":  EVENTDATACOPY,
 	"DELEGATECALL":   DELEGATECALL,
 	"STATICCALL":     STATICCALL,
 	"CODESIZE":       CODESIZE,
