@@ -101,3 +101,11 @@ func TestMemStore_OverwriteDoesNotGrowArena(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []byte("v2"), got)
 }
+
+func TestMemStore_PutNilValueStaysNil(t *testing.T) {
+	s := newMemStore()
+	require.NoError(t, s.Put("test", []byte("key"), nil))
+	got, err := s.GetOne("test", []byte("key"))
+	require.NoError(t, err)
+	assert.Nil(t, got)
+}

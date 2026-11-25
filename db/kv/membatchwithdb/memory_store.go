@@ -63,20 +63,15 @@ type arena struct {
 // nor any other entry.
 func (a *arena) put(b []byte) []byte {
 	n := len(b)
-	if n == 0 {
-		return []byte{}
-	}
-	if n > arenaSlabSize {
+	if n == 0 || n > arenaSlabSize {
 		return bytes.Clone(b)
 	}
 	if cap(a.cur)-len(a.cur) < n {
 		a.cur = make([]byte, 0, min(max(2*cap(a.cur), arenaMinSlabSize, n), arenaSlabSize))
 	}
 	off := len(a.cur)
-	a.cur = a.cur[:off+n]
-	dst := a.cur[off : off+n : off+n]
-	copy(dst, b)
-	return dst
+	a.cur = append(a.cur, b...)
+	return a.cur[off:len(a.cur):len(a.cur)]
 }
 
 // memTable is a single table backed by a btree.
