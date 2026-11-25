@@ -690,7 +690,7 @@ func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, o
 	if err := CheckSaltFilesExist(dirs); err != nil {
 		return err
 	}
-	if opts.TargetV3 && !opts.NoHistory {
+	if opts.TargetV3 {
 		hasHistory, err := dbstate.HasCommitmentHistoryFiles(dirs)
 		if err != nil {
 			return err

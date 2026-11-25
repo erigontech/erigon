@@ -340,6 +340,20 @@ func TestCommitmentConvertV3NoHistoryRefusesLegacyHistory(t *testing.T) {
 	requireConvertRefusedBeforeWriting(t, dirs, "legacy commitment history", "--v3", "--no-history")
 }
 
+func TestCommitmentConvertV3NoHistoryVerifiesV3History(t *testing.T) {
+	dirs := legacyDatadirWithCommitmentHistory(t)
+	files, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "v2.*-commitment.*.v"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	for _, f := range files {
+		_, suffix, found := strings.Cut(filepath.Base(f), "-")
+		require.True(t, found)
+		require.NoError(t, os.Rename(f, filepath.Join(dirs.SnapHistory, "v3.0-"+suffix)))
+	}
+
+	require.ErrorContains(t, runCommitmentConvert(t, dirs, "--v3", "--no-history"), "has no state entries")
+}
+
 func TestCommitmentConvertV3EmptySideErrors(t *testing.T) {
 	t.Run("no history files", func(t *testing.T) {
 		dirs, _, _, _ := legacyDatadirWithoutChaindata(t)
