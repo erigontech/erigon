@@ -82,7 +82,7 @@ func (t *blockTimelines) run(ctx context.Context) {
 
 func (t *blockTimelines) write(line blockTimeline) {
 	slotStart := t.clock.GetSlotTime(line.slot)
-	t.logger.Debug("[Caplin] Block import timeline",
+	t.logger.Info("[Caplin] Block import timeline",
 		"slot", line.slot,
 		"root", line.root,
 		"number", line.number,
@@ -144,7 +144,7 @@ func (t *blockTimelines) importAttempt(block *cltypes.SignedBeaconBlock, root co
 }
 
 func (t *blockTimelines) update(block *cltypes.SignedBeaconBlock, apply func(*blockTimeline)) {
-	if t == nil || !t.logger.Enabled(context.Background(), log.LvlDebug) {
+	if t == nil || !t.logger.Enabled(context.Background(), log.LvlInfo) {
 		return
 	}
 	currentSlot := t.clock.GetCurrentSlot()

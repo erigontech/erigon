@@ -97,7 +97,7 @@ func TestBlockTimelineLogsTheStagesOfAnImportedBlock(t *testing.T) {
 
 	select {
 	case r := <-records:
-		require.Equal(t, log.LvlDebug, r.Lvl)
+		require.Equal(t, log.LvlInfo, r.Lvl)
 		require.Equal(t, map[string]any{
 			"slot":             uint64(timelineSlot),
 			"root":             root,
@@ -145,7 +145,7 @@ func TestBlockTimelineSkipsBlocksOfOldSlots(t *testing.T) {
 }
 
 func TestBlockTimelineIsOffWithoutDebugLogging(t *testing.T) {
-	logger, records := timelineLogger(log.LvlInfo)
+	logger, records := timelineLogger(log.LvlWarn)
 	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
 	go timelines.run(t.Context())
 	block, root := timelineBlock(timelineSlot, 0), common.Hash{0x0d}
