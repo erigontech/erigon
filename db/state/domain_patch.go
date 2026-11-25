@@ -66,18 +66,29 @@ func (a *Aggregator) PatchDomainFiles(ctx context.Context, name kv.Domain, histo
 	if len(history) == 0 && len(latest) == 0 {
 		return nil
 	}
-	stage := filepath.Join(a.dirs.Snap, "patch")
-	if err := dir.RemoveAll(stage); err != nil {
+	stage, err := a.newPatchStage()
+	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(stage, 0o755); err != nil {
-		return err
-	}
+	defer dir.RemoveAll(stage) //nolint:errcheck
 	ranges, staged, err := a.writePatchedFiles(ctx, name, history, latest, stage, logger)
 	if err != nil {
 		return err
 	}
+	return a.replaceFiles(name, ranges, staged, logger)
+}
 
+func (a *Aggregator) newPatchStage() (string, error) {
+	stage := filepath.Join(a.dirs.Snap, "patch")
+	if err := dir.RemoveAll(stage); err != nil {
+		return "", err
+	}
+	return stage, os.MkdirAll(stage, 0o755)
+}
+
+// replaceFiles moves the files of ranges to snapshots/patch-backup, moves the staged files
+// to their live paths and reloads the files.
+func (a *Aggregator) replaceFiles(name kv.Domain, ranges []patchedRange, staged map[string]string, logger log.Logger) error {
 	a.CloseFilesNoReopen()
 	backup := filepath.Join(a.dirs.Snap, "patch-backup", time.Now().UTC().Format("20060102-150405"))
 	if err := os.MkdirAll(backup, 0o755); err != nil {
@@ -93,9 +104,6 @@ func (a *Aggregator) PatchDomainFiles(ctx context.Context, name kv.Domain, histo
 		if err := os.Rename(src, dst); err != nil {
 			return fmt.Errorf("promote %s: %w", src, err)
 		}
-	}
-	if err := dir.RemoveAll(stage); err != nil {
-		return err
 	}
 	logger.Info("[patch] files replaced", "domain", name, "ranges", len(ranges), "backup", backup)
 	return a.ReloadFiles()

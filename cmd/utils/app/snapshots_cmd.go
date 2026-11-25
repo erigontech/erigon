@@ -471,6 +471,27 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name: "recompress-domain",
+			Action: func(ctx context.Context, cliCtx *cli.Command) error {
+				_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer unlockDatadir(log.Root(), l)
+				if err := doRecompressDomain(ctx, cliCtx, log.Root()); err != nil {
+					log.Error("[recompress]", "err", err)
+					return err
+				}
+				return nil
+			},
+			Description: "temporary tool: write the .kv files of a domain again with the current compressor and replace the files whose bytes change, with rebuilt accessors. Replaced files go to snapshots/patch-backup",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.StringFlag{Name: "domain", Value: kv.StorageDomain.String()},
+				&cli.BoolFlag{Name: "dry-run", Usage: "only report which files change"},
+			}),
+		},
+		{
 			Name: "check-commitment-hist-at-blk",
 			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				logger := log.Root()
@@ -4388,5 +4409,30 @@ func doFixAccountHistory(ctx context.Context, cliCtx *cli.Command, logger log.Lo
 		}
 		logger.Info("[fix] done", "check", check, "keys", fixRes.Keys, "unfixable", fixRes.Unfixable, "dryRun", dryRun)
 	}
+	return nil
+}
+
+func doRecompressDomain(ctx context.Context, cliCtx *cli.Command, logger log.Logger) error {
+	name, err := kv.String2Domain(cliCtx.String("domain"))
+	if err != nil {
+		return err
+	}
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(chainDB).ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	defer res.TemporalDB.Close()
+
+	dryRun := cliCtx.Bool("dry-run")
+	recRes, err := res.TemporalDB.Agg().(*state.Aggregator).RecompressDomainFiles(ctx, name, dryRun, logger)
+	if err != nil {
+		return err
+	}
+	logger.Info("[recompress] done", "domain", name, "changed", recRes.Changed, "same", recRes.Same, "dryRun", dryRun)
 	return nil
 }

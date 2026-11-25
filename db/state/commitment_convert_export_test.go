@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/execctx"
 )
 
@@ -72,4 +73,8 @@ func SetLegacyCommitTxNumsForTest(fn func(*DomainRoTx, uint64, uint64) ([]uint64
 		return
 	}
 	legacyCommitTxNumsFn = fn
+}
+
+func (a *Aggregator) SetCompressionForTest(name kv.Domain, c seg.FileCompression) {
+	a.d[name].Compression = c
 }
