@@ -1252,7 +1252,7 @@ func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDo
 	d := a.d[kv.CommitmentDomain]
 	wal := sd.GetMemBatch().(*TemporalMemBatch).domainWriters[d.Name]
 	defer wal.Close()
-	coll, err := d.collateETL(ctx, step, step+1, wal.valsCollector(), nil, "")
+	coll, err := d.collateETL(ctx, step, step+1, wal.valsCollector(), "")
 	if err != nil {
 		return err
 	}
@@ -1265,10 +1265,9 @@ func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDo
 	if err != nil {
 		return err
 	}
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	retired := d.integrateDirtyFiles(sf, a.FirstTxNumOfStep(step), a.FirstTxNumOfStep(step+1))
-	a.recalcVisibleFiles(retired)
+	static := &AggV3StaticFiles{}
+	static.d[kv.CommitmentDomain] = sf
+	a.IntegrateDirtyFiles(static, a.FirstTxNumOfStep(step), a.FirstTxNumOfStep(step+1))
 	return nil
 }
 

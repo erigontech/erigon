@@ -39,7 +39,6 @@ func TestAggregatorBuildRetiresReplacedFiles(t *testing.T) {
 				require.NoError(t, writer.PutWithPrev([]byte{byte(txNum)}, []byte{7}, txNum, nil))
 			}
 			require.NoError(t, writer.Flush(ctx, tx))
-			writer.Close()
 		}
 		writer := at.searchII(kv.LogAddrIdx).newWriter(db, agg.dirs.Tmp, false)
 		defer writer.close()
@@ -84,15 +83,12 @@ func TestAggregatorBuildRetiresReplacedFiles(t *testing.T) {
 		require.True(t, ok, "missing %s replacement", file.kind)
 		require.NotSame(t, old, replacement, file.kind)
 		require.Equal(t, old.FilePaths(agg.dirs.Snap), replacement.FilePaths(agg.dirs.Snap), file.kind)
-		require.NotNil(t, old.decompressor, "a pinned reader must keep the %s mapping", file.kind)
-		require.True(t, old.decompressor.IsOpen(), file.kind)
+		require.True(t, old.decompressor.IsOpen(), "a pinned reader must keep the %s mapping", file.kind)
 	}
 	reader.Close()
 	for _, file := range files {
 		old := file.original
-		require.Nil(t, old.decompressor, "the last reader must release the old %s mapping", file.kind)
-		require.Nil(t, old.index, file.kind)
-		require.Nil(t, old.vAccessor, file.kind)
+		require.Empty(t, old.FilePaths(agg.dirs.Snap), "the last reader must release the old %s file handles", file.kind)
 		replacement, ok := file.dirty.Get(old)
 		require.True(t, ok, "missing %s replacement", file.kind)
 		require.True(t, replacement.decompressor.IsOpen(), file.kind)

@@ -325,11 +325,16 @@ func TestDomain_CollateETLClosesCompressorOnError(t *testing.T) {
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
-	require.NoError(t, writer.PutWithPrev([]byte("key1"), []byte("value1"), 1, nil))
+	// The compressor checks for cancellation in batches as it writes the keys and values.
+	for i := range uint64(2048) {
+		key := binary.BigEndian.AppendUint64(nil, i)
+		require.NoError(t, writer.PutWithPrev(key, []byte("value"), 1, nil))
+	}
 
-	vt := func([]byte, uint64, uint64) ([]byte, error) { return nil, fmt.Errorf("vt failed") }
-	_, err := d.collateETL(t.Context(), 0, 1, writer.valsCollector(), vt, "")
-	require.Error(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := d.collateETL(ctx, 0, 1, writer.valsCollector(), "")
+	require.ErrorIs(t, err, context.Canceled)
 	leftovers, err := filepath.Glob(filepath.Join(d.dirs.Tmp, "*.idt"))
 	require.NoError(t, err)
 	require.Empty(t, leftovers, "the values compressor is closed when collateETL fails")

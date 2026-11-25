@@ -894,17 +894,16 @@ func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.St
 	}
 
 	defer writer.Close()
-	coll, err := d.collateETL(ctx, stepFrom, stepTo, writer.valsCollector(), nil, dstDir)
+	coll, err := d.collateETL(ctx, stepFrom, stepTo, writer.valsCollector(), dstDir)
 	if err != nil {
 		return StaticFiles{}, err
 	}
 	return d.buildFileRange(ctx, stepFrom, stepTo, coll, background.NewProgressSet(), dstDir)
 }
 
-// [stepFrom; stepTo)
-// In contrast to collate function collateETL puts contents of wal into file.
-// dstDir overrides the output directory; empty means d.dirs.SnapDomain.
-func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *etl.Collector, vt valueTransformer, dstDir string) (coll Collation, err error) {
+// collateETL writes the domain writer's buffered values for [stepFrom, stepTo).
+// An empty dstDir uses the domain snapshot directory.
+func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *etl.Collector, dstDir string) (coll Collation, err error) {
 	if !d.Enabled {
 		return Collation{}, err
 	}
@@ -931,44 +930,19 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 	}
 	comp := seg.NewWriter(coll.valuesComp, compress)
 
-	var fromTxNum, endTxNum uint64 = 0, uint64(stepTo) * d.stepSize
-	if stepFrom > 0 {
-		fromTxNum = uint64(stepFrom-1) * d.stepSize
-	}
-
 	var lastK, lastV []byte
 	var hasLast bool
 	write := func(k, v []byte) error {
 		if d.LargeValues {
-			bareKey := k[:len(k)-8]
-			val := v
-			if vt != nil {
-				val, err = vt(v, fromTxNum, endTxNum)
-				if err != nil {
-					return fmt.Errorf("vt: %w", err)
-				}
-			}
-			if _, err = comp.Write(bareKey); err != nil {
-				return fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, bareKey, err)
-			}
-			if _, err = comp.Write(val); err != nil {
-				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, val, err)
-			}
+			k = k[:len(k)-8]
 		} else {
-			if vt != nil {
-				v, err = vt(v[8:], fromTxNum, endTxNum)
-				if err != nil {
-					return fmt.Errorf("vt: %w", err)
-				}
-			} else {
-				v = v[8:]
-			}
-			if _, err = comp.Write(k); err != nil {
-				return fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, k, err)
-			}
-			if _, err = comp.Write(v); err != nil {
-				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, v, err)
-			}
+			v = v[8:]
+		}
+		if _, err := comp.Write(k); err != nil {
+			return fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, k, err)
+		}
+		if _, err := comp.Write(v); err != nil {
+			return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, v, err)
 		}
 		return nil
 	}

@@ -473,8 +473,7 @@ func convertCommitmentFile(
 
 		// Convert values here, where the key identifies opaque commitment state
 		// records to copy verbatim. Branch offsets refer to the account and storage
-		// files for the exact source range. For stepFrom > 0, collateETL would use
-		// the first transaction of the previous step as the transformer's lower bound.
+		// files for the exact source range.
 		var outVal []byte
 		if !isState && vt != nil {
 			tv, verr := vt(v, startTxNum, endTxNum)
