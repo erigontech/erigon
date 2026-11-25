@@ -94,13 +94,18 @@ func CheckCodeHash(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, failF
 	if err != nil {
 		return err
 	}
-	if err := checkLatestCodeHash(ctx, sc, db, failFast, &probs); err != nil {
+	err = scanLatestCode(ctx, sc, db, func(addr, codeHash, code []byte) error {
+		return reportCodeMismatch(&probs, failFast, addr, codeHash, code, "in the latest state")
+	})
+	if err != nil {
 		return err
 	}
 	return probs.verdict(string(CodeHash))
 }
 
-func checkLatestCodeHash(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, failFast bool, probs *problems) error {
+// scanLatestCode calls visit with the code hash of every sampled account that has code in
+// the latest state.
+func scanLatestCode(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, visit func(addr, codeHash, code []byte) error) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
 	for first := range 256 {
@@ -130,7 +135,7 @@ func checkLatestCodeHash(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB,
 				if err != nil {
 					return err
 				}
-				if err := reportCodeMismatch(probs, failFast, addr, accounts.DeserialiseV3CodeHash(acc), code, "in the latest state"); err != nil {
+				if err := visit(addr, accounts.DeserialiseV3CodeHash(acc), code); err != nil {
 					return err
 				}
 			}
@@ -140,11 +145,15 @@ func checkLatestCodeHash(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB,
 	return g.Wait()
 }
 
-func reportCodeMismatch(probs *problems, failFast bool, addr, codeHash, code []byte, when string) error {
-	if codeHash == nil && len(code) == 0 {
-		return nil
+func codeMatchesHash(codeHash, code []byte) bool {
+	if codeHash == nil {
+		return len(code) == 0
 	}
-	if codeHash != nil && crypto.Keccak256Hash(code) == common.Hash(codeHash) {
+	return crypto.Keccak256Hash(code) == common.Hash(codeHash)
+}
+
+func reportCodeMismatch(probs *problems, failFast bool, addr, codeHash, code []byte, when string) error {
+	if codeMatchesHash(codeHash, code) {
 		return nil
 	}
 	want := "no code"

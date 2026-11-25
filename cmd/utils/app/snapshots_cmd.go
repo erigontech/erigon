@@ -450,6 +450,27 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name: "fix-account-history",
+			Action: func(ctx context.Context, cliCtx *cli.Command) error {
+				_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer unlockDatadir(log.Root(), l)
+				if err := doFixAccountHistory(ctx, cliCtx, log.Root()); err != nil {
+					log.Error("[fix]", "err", err)
+					return err
+				}
+				return nil
+			},
+			Description: "temporary tool: rewrite the code and storage files that the CodeHash and StorageOfAbsentAccount integrity checks find wrong. Replaced files go to snapshots/patch-backup",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.StringFlag{Name: "check", Value: fmt.Sprintf("%s,%s", integrity.CodeHash, integrity.StorageOfAbsentAccount), Usage: fmt.Sprintf("comma separated list from: %s, %s", integrity.CodeHash, integrity.StorageOfAbsentAccount)},
+				&cli.BoolFlag{Name: "dry-run", Usage: "only plan and log the patches"},
+			}),
+		},
+		{
 			Name: "check-commitment-hist-at-blk",
 			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				logger := log.Root()
@@ -4335,5 +4356,37 @@ func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, logger lo
 		return duFormatJSON(os.Stdout, result)
 	}
 	duFormatHuman(os.Stdout, result, verbose)
+	return nil
+}
+
+func doFixAccountHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger) error {
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(chainDB).ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	db := res.TemporalDB
+	defer db.Close()
+
+	dryRun := cliCtx.Bool("dry-run")
+	for check := range strings.SplitSeq(cliCtx.String("check"), ",") {
+		var fixRes integrity.FixResult
+		switch integrity.Check(strings.TrimSpace(check)) {
+		case integrity.CodeHash:
+			fixRes, err = integrity.FixCodeHash(ctx, db, dryRun, logger)
+		case integrity.StorageOfAbsentAccount:
+			fixRes, err = integrity.FixStorageOfAbsentAccount(ctx, db, dryRun, logger)
+		default:
+			return fmt.Errorf("no fix for check %q", check)
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %w", check, err)
+		}
+		logger.Info("[fix] done", "check", check, "keys", fixRes.Keys, "unfixable", fixRes.Unfixable, "dryRun", dryRun)
+	}
 	return nil
 }
