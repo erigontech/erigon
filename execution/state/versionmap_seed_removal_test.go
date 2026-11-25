@@ -74,11 +74,12 @@ func TestSeedEmptyRemovalsSkipsBaseReadForProvenNonEmpty(t *testing.T) {
 	addr := func(s string) accounts.Address { return accounts.InternAddress(common.HexToAddress(s)) }
 	funded, nonced, coded, stored := addr("0xf1"), addr("0xf2"), addr("0xf3"), addr("0xf4")
 	bal := types.BlockAccessList{
-		{Address: funded.Value(), BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}, {Index: 1, Value: *uint256.NewInt(3)}}},
+		{Address: funded.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(3)}, {Index: 2, Value: *uint256.NewInt(7)}}},
 		{Address: nonced.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}}},
 		{Address: coded.Value(), CodeChanges: []*types.CodeChange{{Index: 1, Bytecode: []byte{0x60}}}},
 		{Address: stored.Value(), StorageChanges: []types.SlotChanges{{Slot: accounts.InternKey(common.Hash{31: 1}), Changes: []*types.StorageChange{{Index: 1, Value: *uint256.NewInt(9)}}}}},
 	}
+	require.NoError(t, bal.Validate())
 	reader := &countingAccountReader{}
 
 	vm := NewVersionMap(bal)
@@ -386,9 +387,7 @@ func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 	acc, ok, _ = vm.View(2, reader).GetAccount(recreated)
 	require.True(t, ok, "re-created at index 2: present at block end")
 	require.Equal(t, uint64(1), acc.Nonce)
-	revival := requireDoneCell(t, vm.load(recreated).Balance, 2-1, 0)
-	require.Equal(t, ValueChanged, revival.valStatus)
-	require.True(t, revival.Value.IsZero())
+	requireZeroBalanceSeed(t, vm.load(recreated).Balance, 2-1)
 }
 
 func TestSeedEmptyRemovalsRevivalIndexes(t *testing.T) {
@@ -428,7 +427,7 @@ func TestSeedEmptyRemovalsRevivalIndexes(t *testing.T) {
 	}}
 	require.NoError(t, bal.Validate())
 	vm := NewVersionMap(bal)
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, &countingAccountReader{}))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, &emptyReader{}))
 
 	balances := vm.load(addr).Balance
 	require.Equal(t, 7, balances.Len())
@@ -437,9 +436,7 @@ func TestSeedEmptyRemovalsRevivalIndexes(t *testing.T) {
 		require.Equal(t, ValueDeleted, cell.valStatus)
 	}
 	for _, index := range []int{2, 13} {
-		cell := requireDoneCell(t, balances, index-1, 0)
-		require.Equal(t, ValueChanged, cell.valStatus)
-		require.True(t, cell.Value.IsZero())
+		requireZeroBalanceSeed(t, balances, index-1)
 	}
 	shared := requireDoneCell(t, balances, 9-1, 0)
 	require.Equal(t, *uint256.NewInt(5), shared.Value)
@@ -447,9 +444,7 @@ func TestSeedEmptyRemovalsRevivalIndexes(t *testing.T) {
 	otherBalances := vm.load(other).Balance
 	require.Equal(t, ValueChanged, requireDoneCell(t, otherBalances, 2-1, 0).valStatus, "nonzero nonce keeps the account alive")
 	require.Equal(t, ValueDeleted, requireDoneCell(t, otherBalances, 6-1, 0).valStatus)
-	revival := requireDoneCell(t, otherBalances, 7-1, 0)
-	require.Equal(t, ValueChanged, revival.valStatus)
-	require.True(t, revival.Value.IsZero())
+	requireZeroBalanceSeed(t, otherBalances, 7-1)
 	require.Equal(t, *uint256.NewInt(1), requireDoneCell(t, otherBalances, 8-1, 0).Value)
 }
 
@@ -476,9 +471,7 @@ func TestSeedEmptyRemovalsRevivalByOneField(t *testing.T) {
 			vm, addr := seedRemovalsForFundedAccount(t, changes)
 			balances := vm.load(addr).Balance
 			require.Equal(t, ValueDeleted, requireDoneCell(t, balances, 0, 0).valStatus)
-			revival := requireDoneCell(t, balances, 1, 0)
-			require.Equal(t, ValueChanged, revival.valStatus)
-			require.True(t, revival.Value.IsZero())
+			requireZeroBalanceSeed(t, balances, 1)
 		})
 	}
 }
@@ -1144,6 +1137,13 @@ func requireDoneCell[T any](t *testing.T, cells *btree.Map[int, *WriteCell[T]], 
 	require.Equal(t, FlagDone, c.loadFlag())
 	require.Equal(t, inc, c.loadInc())
 	return c
+}
+
+func requireZeroBalanceSeed(t *testing.T, cells *btree.Map[int, *WriteCell[uint256.Int]], txIdx int) {
+	t.Helper()
+	cell := requireDoneCell(t, cells, txIdx, 0)
+	require.Equal(t, ValueChanged, cell.valStatus)
+	require.True(t, cell.Value.IsZero())
 }
 
 // The access list seeds a removal of x at tx 3. The first run of tx 3 writes a balance of 8 at the
