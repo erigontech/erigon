@@ -18,7 +18,6 @@ package direct
 
 import (
 	"context"
-	"io"
 
 	"google.golang.org/grpc"
 
@@ -106,21 +105,11 @@ type SentinelSubscribeGossipC struct {
 func (c *SentinelSubscribeGossipC) Recv() (*sentinelproto.GossipData, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
-		return nil, io.EOF
+		return nil, endOf(c.ctx)
 	}
 	return m.r, m.err
 }
 func (c *SentinelSubscribeGossipC) Context() context.Context { return c.ctx }
-
-// sendOrDone delivers v to a server stream's reply channel, or returns when the caller's context ends.
-func sendOrDone[T any](ctx context.Context, ch chan<- T, v T) error {
-	select {
-	case ch <- v:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
 
 type SentinelSubscribeGossipS struct {
 	ch  chan *gossipReply

@@ -18,7 +18,6 @@ package direct
 
 import (
 	"context"
-	"io"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -84,7 +83,7 @@ type MiningOnPendingBlockC struct {
 func (c *MiningOnPendingBlockC) Recv() (*txpoolproto.OnPendingBlockReply, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
-		return nil, io.EOF
+		return nil, endOf(c.ctx)
 	}
 	return m.r, m.err
 }
@@ -134,7 +133,7 @@ type MiningOnMinedBlockC struct {
 func (c *MiningOnMinedBlockC) Recv() (*txpoolproto.OnMinedBlockReply, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
-		return nil, io.EOF
+		return nil, endOf(c.ctx)
 	}
 	return m.r, m.err
 }
@@ -183,7 +182,7 @@ type MiningOnPendingLogsC struct {
 func (c *MiningOnPendingLogsC) Recv() (*txpoolproto.OnPendingLogsReply, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
-		return nil, io.EOF
+		return nil, endOf(c.ctx)
 	}
 	return m.r, m.err
 }

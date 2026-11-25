@@ -18,7 +18,6 @@ package direct
 
 import (
 	"context"
-	"io"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -85,15 +84,14 @@ type TxPoolOnAddS struct {
 }
 
 func (s *TxPoolOnAddS) Send(m *txpoolproto.OnAddReply) error {
-	s.ch <- &onAddReply{r: m}
-	return nil
+	return sendOrDone(s.ctx, s.ch, &onAddReply{r: m})
 }
 func (s *TxPoolOnAddS) Context() context.Context { return s.ctx }
 func (s *TxPoolOnAddS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- &onAddReply{err: err}
+	_ = sendOrDone(s.ctx, s.ch, &onAddReply{err: err})
 }
 
 type TxPoolOnAddC struct {
@@ -105,7 +103,7 @@ type TxPoolOnAddC struct {
 func (c *TxPoolOnAddC) Recv() (*txpoolproto.OnAddReply, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
-		return nil, io.EOF
+		return nil, endOf(c.ctx)
 	}
 	return m.r, m.err
 }

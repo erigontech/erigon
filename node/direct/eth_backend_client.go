@@ -63,6 +63,27 @@ func (s *EthBackendClientDirect) ClientVersion(ctx context.Context, in *remotepr
 	return s.server.ClientVersion(ctx, in)
 }
 
+// sendOrDone delivers v to a server stream, or returns ctx.Err() once the caller's context ended.
+func sendOrDone[T any](ctx context.Context, ch chan<- T, v T) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case ch <- v:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// endOf is the error a client stream's Recv returns once the server closed the channel.
+func endOf(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return io.EOF
+}
+
 // -- start Subscribe
 
 func (s *EthBackendClientDirect) Subscribe(ctx context.Context, in *remoteproto.SubscribeRequest, opts ...grpc.CallOption) (remoteproto.ETHBACKEND_SubscribeClient, error) {
@@ -86,22 +107,14 @@ type SubscribeStreamS struct {
 }
 
 func (s *SubscribeStreamS) Send(m *remoteproto.SubscribeReply) error {
-	select {
-	case s.ch <- &subscribeReply{r: m}:
-		return nil
-	case <-s.ctx.Done():
-		return s.ctx.Err()
-	}
+	return sendOrDone(s.ctx, s.ch, &subscribeReply{r: m})
 }
 func (s *SubscribeStreamS) Context() context.Context { return s.ctx }
 func (s *SubscribeStreamS) Err(err error) {
 	if err == nil {
 		return
 	}
-	select {
-	case s.ch <- &subscribeReply{err: err}:
-	case <-s.ctx.Done():
-	}
+	_ = sendOrDone(s.ctx, s.ch, &subscribeReply{err: err})
 }
 
 type SubscribeStreamC struct {
