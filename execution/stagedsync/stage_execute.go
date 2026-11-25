@@ -632,7 +632,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	if dbg.NoPrune() {
 		// The prune is off, but a step goes into files only after its blocks' changesets are gone.
 		if s.FinalityCtx != nil {
-			end, err := collatableStepsEnd(ctx, tx, cfg.blockReader.TxnumReader(), s.FinalityCtx.CollateToBlockNum())
+			end, err := collatableStepsEnd(ctx, tx, cfg.blockReader, s.FinalityCtx.CollateToBlockNum())
 			if err != nil {
 				return err
 			}
@@ -684,14 +684,20 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	}
 
 	blockPruneTo := s.FinalityCtx.PruneToBlockNum()
-	changesetsPruneTo := blockPruneTo
-	// AlwaysGenerateChangesets keeps changesets for unwinds deeper than MaxReorgDepth (debug / integration
-	// tool / explicit --experimental.always-generate-changesets flag). Blocks in state files can not be
-	// unwound, so only the changesets of the steps about to be collated go.
+	// Blocks in state files can not be unwound, so their changesets go in every mode, also those an older build
+	// left behind. AlwaysGenerateChangesets keeps changesets for unwinds deeper than MaxReorgDepth (debug /
+	// integration tool / explicit --experimental.always-generate-changesets flag): only the steps about to be
+	// collated lose theirs.
+	changesetsPruneTo, err := blocksInFilesEnd(ctx, tx, cfg.blockReader)
+	if err != nil {
+		return err
+	}
 	if cfg.syncCfg.AlwaysGenerateChangesets {
-		if changesetsPruneTo, err = collatableStepsEnd(ctx, tx, cfg.blockReader.TxnumReader(), s.FinalityCtx.CollateToBlockNum()); err != nil {
+		if changesetsPruneTo, err = collatableStepsEnd(ctx, tx, cfg.blockReader, s.FinalityCtx.CollateToBlockNum()); err != nil {
 			return err
 		}
+	} else {
+		changesetsPruneTo = max(changesetsPruneTo, blockPruneTo)
 	}
 	// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 	// Some chains produce blocks with 400 chunks of diff = 3mb
@@ -771,11 +777,28 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 // noPruneChangesetsTimeout bounds the changeset delete that collation still needs with the prune off.
 const noPruneChangesetsTimeout = 100 * time.Millisecond
 
-// collatableStepsEnd is the block after the last step not yet in state files whose blocks all reach no
-// higher than collateTo.
-func collatableStepsEnd(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, collateTo uint64) (uint64, error) {
+// blocksInFilesEnd is the block after the last block in the visible state files.
+func blocksInFilesEnd(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader) (uint64, error) {
+	filesEnd := tx.Debug().TxNumsInFiles(kv.StateDomains...)
+	if filesEnd == 0 {
+		return 0, nil
+	}
+	lastBlock, ok, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, filesEnd-1)
+	if err != nil || !ok {
+		return 0, err
+	}
+	return lastBlock + 1, nil
+}
+
+// collatableStepsEnd is the block after the visible state files and after the steps not yet in them whose
+// blocks all reach no higher than collateTo.
+func collatableStepsEnd(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, collateTo uint64) (uint64, error) {
+	end, err := blocksInFilesEnd(ctx, tx, blockReader)
+	if err != nil {
+		return 0, err
+	}
+	txNumsReader := blockReader.TxnumReader()
 	stepSize := tx.Debug().StepSize()
-	var end uint64
 	for step := tx.Debug().TxNumsInFiles(kv.StateDomains...) / stepSize; ; step++ {
 		lastBlock, ok, err := txNumsReader.FindBlockNum(ctx, tx, (step+1)*stepSize-1)
 		if err != nil {

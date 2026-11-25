@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -209,4 +210,30 @@ func pruneWithFinalized(t *testing.T, m *execmoduletester.ExecModuleTester, chai
 	require.NoError(t, err)
 	<-finished
 	m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).WaitForFiles()
+}
+
+// Files that older code built over blocks that still have changesets: one prune pass deletes those changesets, so
+// an unwind into the files is refused.
+func TestPruneDeletesTheChangesetsOfBlocksAlreadyInFiles(t *testing.T) {
+	m, chainPack, lastFileBlock := newSnapshotBoundaryChain(t)
+	ctx := t.Context()
+	pruneWithFinalized(t, m, chainPack, lastFileBlock+1)
+	require.Equal(t, m.DB.StepSize(), m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EndTxNumMinimax())
+
+	// Lower finality below the files and give their last blocks changesets again, as an older build left them.
+	lowered := chainPack.Blocks[lastFileBlock-3].Hash()
+	require.Equal(t, execmodule.ExecutionStatusSuccess, updateForkChoice(t, m, chainPack.TopBlock.Hash(), lowered, lowered).Status)
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		for block := lastFileBlock - 2; block <= lastFileBlock; block++ {
+			if err := tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(block, chainPack.Blocks[block-1].Hash()), []byte{1}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	finished, err := m.ExecModule.Prune(ctx)
+	require.NoError(t, err)
+	<-finished
+	require.ErrorContains(t, m.ExecModule.SetHead(ctx, lastFileBlock-1), fmt.Sprintf("minimum unwindable block is %d", lastFileBlock))
 }
