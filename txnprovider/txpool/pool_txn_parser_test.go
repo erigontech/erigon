@@ -79,6 +79,20 @@ func TestParseTransactionRLP(t *testing.T) {
 	}
 }
 
+func TestParseTransactionRejectsLegacyTxInStringEnvelope(t *testing.T) {
+	ctx := NewTxnParseContext(*uint256.NewInt(1))
+	ctx.WithSender(false)
+	legacy, err := rlp.EncodeToBytes(&types.LegacyTx{})
+	require.NoError(t, err)
+	for _, body := range [][]byte{legacy, append(legacy, rlp.EmptyStringCode)} {
+		envelope, err := rlp.EncodeToBytes(body)
+		require.NoError(t, err)
+		var slot TxnSlot
+		_, err = ctx.ParseTransaction(envelope, 0, &slot, nil, true, false, nil)
+		assert.ErrorIs(t, err, ErrParseTxn, "legacy body with %d trailing bytes", len(body)-len(legacy))
+	}
+}
+
 func TestFrameSerializedSizeLimit(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

@@ -113,11 +113,12 @@ func (ctx *TxnParseContext) WithPoolRules() *TxnParseContext {
 // transaction type's DecodeRLP directly instead of going through
 // UnmarshalTransactionFromBinary (which creates a second bytes.Reader + stream
 // for typed txns).
-func (ctx *TxnParseContext) decodeTxn(txBytes []byte) (types.Transaction, error) {
+func (ctx *TxnParseContext) decodeTxn(txBytes []byte, legacy bool) (types.Transaction, error) {
 	var txn types.Transaction
 
-	// Legacy transactions: full RLP list starting with 0xc0..0xff
-	if txBytes[0] >= 0xc0 {
+	// Only an outer RLP list denotes a legacy transaction. An RLP string must
+	// contain a typed transaction, even if its contents look like a legacy list.
+	if legacy {
 		ctx.bytesReader.Reset(txBytes)
 		s := rlp.NewStreamFromPool(&ctx.bytesReader, uint64(len(txBytes)))
 		defer rlp.PutStream(s)
@@ -275,7 +276,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		copy(innerTxBytes[1:], txBytes[wrapperListPos:innerBodyPos+innerBodyLen])
 
 		// Decode only the inner tx (no blobs/commitments/proofs).
-		txn, err = ctx.decodeTxn(innerTxBytes)
+		txn, err = ctx.decodeTxn(innerTxBytes, false)
 		if err != nil {
 			return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
 		}
@@ -395,7 +396,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: extraneous elements in blobs wrapper", ErrParseTxn)
 		}
 	} else {
-		txn, err = ctx.decodeTxn(txBytes)
+		txn, err = ctx.decodeTxn(txBytes, legacy)
 		if err != nil {
 			return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
 		}
@@ -508,6 +509,14 @@ type TxnSlot struct {
 	// A pooled frame without a validation result is restored and parked. It has
 	// no payer reservation until its first successful validation.
 	frameValidation *protocol.FrameValidation
+}
+
+// Direct callers may supply Rlp without Size. Queue accounting and selection
+// need the wire length even after a flush clears Rlp.
+func (tx *TxnSlot) ensureSize() {
+	if tx.Size == 0 {
+		tx.Size = uint32(len(tx.Rlp))
+	}
 }
 
 // Accessor methods that delegate to the stored Transaction.

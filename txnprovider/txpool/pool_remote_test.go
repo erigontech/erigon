@@ -100,14 +100,16 @@ func TestRemoteTxnQueueByteLimit(t *testing.T) {
 		txn := newTestTxnSlot(nonce, 0, 1, 2, 1_000_000)
 		txn.Txn.(*types.DynamicFeeTransaction).Data = make([]byte, 60_000)
 		encodeRemoteTxn(t, txn)
+		wireSize := uint64(len(txn.Rlp))
+		txn.Size = 0 // Direct callers can supply the wire bytes without a cached size.
 		var arrivals TxnSlots
 		arrivals.Append(txn, sender[:], false)
 		pool.AddRemoteTxns(ctx, arrivals, nil, nil)
-		if expectedBytes+uint64(txn.Size) > remoteTxnQueueByteLimit {
+		if expectedBytes+wireSize > remoteTxnQueueByteLimit {
 			dropped = txn
 			break
 		}
-		expectedBytes += uint64(txn.Size)
+		expectedBytes += wireSize
 	}
 	_, queued := pool.unprocessedRemoteByHash[string(dropped.IDHash[:])]
 	require.False(t, queued)
@@ -119,14 +121,14 @@ func TestRemoteTxnQueueByteLimit(t *testing.T) {
 	pool.AddRemoteTxns(ctx, duplicate, nil, nil)
 	require.Equal(t, expectedBytes, pool.unprocessedRemoteBytes, "duplicates must not consume capacity")
 
-	expectedBytes -= uint64(first.Size) + uint64(pool.unprocessedRemoteTxns.Txns[1].Size)
+	expectedBytes -= uint64(len(first.Rlp) + len(pool.unprocessedRemoteTxns.Txns[1].Rlp))
 	pool.removeProcessedRemoteTxns(2)
 	require.Equal(t, expectedBytes, pool.unprocessedRemoteBytes)
 	var retry TxnSlots
 	retry.Append(dropped, sender[:], false)
 	pool.AddRemoteTxns(ctx, retry, nil, nil)
 	require.Contains(t, pool.unprocessedRemoteByHash, string(dropped.IDHash[:]))
-	require.Equal(t, expectedBytes+uint64(dropped.Size), pool.unprocessedRemoteBytes)
+	require.Equal(t, expectedBytes+uint64(len(dropped.Rlp)), pool.unprocessedRemoteBytes)
 	pool.removeProcessedRemoteTxns(len(pool.unprocessedRemoteTxns.Txns))
 	require.Zero(t, pool.unprocessedRemoteBytes)
 }

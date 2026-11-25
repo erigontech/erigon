@@ -965,7 +965,10 @@ func (p *TxPool) waitForBlock(ctx context.Context, n int, onTopOf uint64, stop <
 	})
 }
 
-// best fills txns with up to n pending transactions in priority order within the gas and RLP space budgets.
+// best fills txns with up to n pending transactions in priority order. The batch fits the
+// blob gas and RLP byte budgets. Its execution gas limits can add up to more than the budget
+// because selection deducts only intrinsic gas, including any applicable gas floor.
+//
 // A true result means selection ran, even if the count is zero. With no error, false means
 // the parent wait stopped or the pool's state view was stale.
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
@@ -1243,6 +1246,7 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		if ok {
 			continue
 		}
+		txn.ensureSize()
 		if uint64(txn.Size) > remoteTxnQueueByteLimit-p.unprocessedRemoteBytes {
 			continue
 		}
@@ -2296,10 +2300,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 		}
 	}
 
-	if mt.TxnSlot.Size == 0 {
-		// Direct callers can supply wire bytes without a cached size. Keep their length across a flush.
-		mt.TxnSlot.Size = uint32(len(mt.TxnSlot.Rlp))
-	}
+	mt.TxnSlot.ensureSize()
 	hashStr := string(mt.TxnSlot.IDHash[:])
 	p.byHash[hashStr] = mt
 	p.reserveFrame(mt.TxnSlot)
