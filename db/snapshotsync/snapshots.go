@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -783,9 +784,9 @@ func (s *BaseRoSnapshots) hasIndexedDirtyFile(t snaptype.Enum, path string) (fou
 	return found
 }
 
-// mergedFilesNotInEveryType returns the indexed segments that other types lack and whose own smaller segments
-// tile their whole range. Showing those smaller segments instead means a merge range never cuts through a
-// visible file, and no block is hidden.
+// mergedFilesNotInEveryType returns the indexed segments that other types lack and that have smaller segments of
+// their own type inside them, so the type shows those smaller segments instead and a merge range does not cut
+// through a visible file. A type hides nothing when hiding would shorten its visible span: no block is hidden.
 func (s *BaseRoSnapshots) mergedFilesNotInEveryType() map[*DirtySegment]bool {
 	indexed := make(map[snaptype.Enum][]*DirtySegment, len(s.enums))
 	ranges := make(map[snaptype.Enum][]Range, len(s.enums))
@@ -809,29 +810,38 @@ func (s *BaseRoSnapshots) mergedFilesNotInEveryType() map[*DirtySegment]bool {
 	for t, segments := range indexed {
 		rs := ranges[t]
 		slices.SortFunc(rs, func(a, b Range) int { return cmp.Or(cmp.Compare(a.from, b.from), cmp.Compare(b.to, a.to)) })
+		candidates := map[*DirtySegment]bool{}
 		for _, sn := range segments {
-			if types[sn.Range] < len(s.enums) && coveredBySmaller(rs, sn.Range) {
-				hidden[sn] = true
+			if types[sn.Range] < len(s.enums) && hasSmallerInside(rs, sn.Range) {
+				candidates[sn] = true
 			}
 		}
+		if len(candidates) == 0 {
+			continue
+		}
+		before := truncateAtGap(buildVisibleSegments(s.dirty[t], nil))
+		after := truncateAtGap(buildVisibleSegments(s.dirty[t], candidates))
+		if len(after) == 0 || after[0].from > before[0].from || after[len(after)-1].to < before[len(before)-1].to {
+			continue
+		}
+		maps.Copy(hidden, candidates)
 	}
 	return hidden
 }
 
-// coveredBySmaller reports whether ranges inside r, other than r, tile r end to end with no hole or overlap.
-// sorted is ordered by start, the longest range first: at each start that is the one the visible files show.
-func coveredBySmaller(sorted []Range, r Range) bool {
-	reach := r.from
+// hasSmallerInside reports whether sorted, ordered by start with the longest range first, holds a range inside r
+// other than r.
+func hasSmallerInside(sorted []Range, r Range) bool {
 	first, _ := slices.BinarySearchFunc(sorted, r.from, func(a Range, from uint64) int { return cmp.Compare(a.from, from) })
 	for _, small := range sorted[first:] {
-		if small.from > reach || reach == r.to {
-			break
+		if small.from >= r.to {
+			return false
 		}
-		if small.from == reach && small != r && small.to <= r.to {
-			reach = small.to
+		if small != r && small.to <= r.to {
+			return true
 		}
 	}
-	return reach == r.to
+	return false
 }
 
 // hiddenFiles reports the files recalcVisibleFiles hides in favour of their smaller files.

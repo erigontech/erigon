@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -2287,44 +2288,69 @@ func TestVisibleBlockFilesKeepAMergedFileOverOverlappingSmallerFiles(t *testing.
 	}
 }
 
-// The cover check follows the files the visible view shows, the longest at each start, so nested smaller files
-// change nothing: a merged file with a full tiling is hidden, and one without stays visible.
-func TestVisibleBlockFilesCoverCheckFollowsTheLongestFileAtEachStart(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		bodies []Range
-		want   []Range // the bodies' visible files
-	}{
-		{
-			"nested file at the start of a full tiling",
-			[]Range{NewRange(0, 30_000), NewRange(0, 1_000), NewRange(0, 10_000), NewRange(10_000, 20_000), NewRange(20_000, 30_000)},
-			[]Range{NewRange(0, 10_000), NewRange(10_000, 20_000), NewRange(20_000, 30_000)},
-		},
-		{
-			"a tiling that is not the longest at its start",
-			[]Range{NewRange(0, 30_000), NewRange(0, 20_000), NewRange(10_000, 30_000), NewRange(0, 10_000)},
-			[]Range{NewRange(0, 30_000)},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			logger := log.New()
-			dir := t.TempDir()
-			for from := uint64(0); from < 30_000; from += 10_000 {
-				for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Transactions} {
-					createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
-				}
+// Bodies [10k,50k) is tiled by [10k,40k) and [40k,50k), but the crossing [30k,60k) wins in the visible view, so
+// hiding [10k,50k) would end the bodies' visible files at 40k: it stays visible.
+func TestHidingKeepsAMergedFileUnderACrossingFile(t *testing.T) {
+	requireHidingKeepsSpans(t, map[snaptype.Enum][]Range{
+		snaptype2.Enums.Headers:      {NewRange(20_000, 50_000), NewRange(10_000, 50_000), NewRange(30_000, 70_000), NewRange(40_000, 80_000), NewRange(50_000, 90_000)},
+		snaptype2.Enums.Bodies:       {NewRange(30_000, 50_000), NewRange(10_000, 40_000), NewRange(30_000, 60_000), NewRange(40_000, 50_000), NewRange(10_000, 50_000)},
+		snaptype2.Enums.Transactions: {NewRange(30_000, 60_000), NewRange(20_000, 60_000), NewRange(30_000, 40_000), NewRange(50_000, 70_000)},
+	})
+}
+
+// Random indexed layouts: hiding never shortens a type's gap-free visible span.
+func TestHidingNeverShortensAVisibleSpan(t *testing.T) {
+	requireHidingKeepsVisibleSpans(t, rand.New(rand.NewPCG(1, 2)), 20_000, func(rng *rand.Rand) Range {
+		from := uint64(rng.IntN(6)) * 10_000
+		return NewRange(from, from+uint64(1+rng.IntN(4))*10_000)
+	})
+}
+
+// The same property for layouts that merges produce: every file is aligned to its power-of-two size.
+func TestHidingNeverShortensAVisibleSpanAligned(t *testing.T) {
+	requireHidingKeepsVisibleSpans(t, rand.New(rand.NewPCG(3, 4)), 50_000, func(rng *rand.Rand) Range {
+		size := uint64(10_000) << rng.IntN(3)
+		from := uint64(rng.IntN(int(80_000/size))) * size
+		return NewRange(from, from+size)
+	})
+}
+
+func requireHidingKeepsVisibleSpans(t *testing.T, rng *rand.Rand, iterations int, newRange func(*rand.Rand) Range) {
+	t.Helper()
+	for range iterations {
+		layout := map[snaptype.Enum][]Range{}
+		for _, typ := range snaptype2.BlockSnapshotTypes {
+			for range 1 + rng.IntN(6) {
+				layout[typ.Enum()] = append(layout[typ.Enum()], newRange(rng))
 			}
-			for _, r := range tc.bodies {
-				createTestSegmentFile(t, r.From(), r.To(), snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+		}
+		requireHidingKeepsSpans(t, layout)
+	}
+}
+
+// requireHidingKeepsSpans checks that the hidden files of an indexed layout shorten no type's visible span.
+func requireHidingKeepsSpans(t *testing.T, layout map[snaptype.Enum][]Range) {
+	t.Helper()
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, t.TempDir(), snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, log.New())
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		for _, r := range layout[typ.Enum()] {
+			sn := NewDirtySegment(typ, version.V1_0, r.From(), r.To(), false)
+			for range typ.Indexes() {
+				sn.indexes = append(sn.indexes, &recsplit.Index{})
 			}
-			s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-			defer s.Close()
-			require.NoError(t, s.OpenFolder())
-			require.Equal(t, tc.want, visibleRanges(s, snaptype2.Bodies))
-			for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Transactions} {
-				require.Equal(t, uint64(30_000), visibleRanges(s, typ)[2].To(), typ.Name())
-			}
-		})
+			s.dirty[typ.Enum()].Set(sn)
+		}
+	}
+	hidden := s.mergedFilesNotInEveryType()
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		before := truncateAtGap(buildVisibleSegments(s.dirty[typ.Enum()], nil))
+		after := truncateAtGap(buildVisibleSegments(s.dirty[typ.Enum()], hidden))
+		if len(before) == 0 {
+			continue
+		}
+		if len(after) == 0 || after[0].from > before[0].from || after[len(after)-1].to < before[len(before)-1].to {
+			t.Fatalf("%s: hiding shortened the visible span; layout %v", typ.Name(), layout)
+		}
 	}
 }
 
