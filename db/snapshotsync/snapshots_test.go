@@ -2181,21 +2181,9 @@ func TestVisibleBlockFilesKeepOneLayoutAfterAnInterruptedMerge(t *testing.T) {
 	after, err := os.Stat(leftover)
 	require.NoError(t, err)
 	require.True(t, os.SameFile(before, after), "the merge reuses the stopped merge's output instead of writing over the open file")
-	createTestSegmentIndex(t, 0, 100_000, snaptype2.Transactions, dir, logger)
+	createTestIdxFile(t, 0, 100_000, snaptype2.Transactions.Enum(), dir, snaptype2.Transactions.Indexes()[0].Version.Current, logger)
 	require.NoError(t, s.OpenFolder())
 	requireOneVisibleLayout(t, s, []Range{NewRange(0, 100_000)})
-}
-
-func createTestSegmentIndex(t *testing.T, from, to uint64, typ snaptype.Type, dir string, logger log.Logger) {
-	t.Helper()
-	for _, name := range typ.IdxFileNames(from, to) {
-		idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{KeyCount: 1, BucketSize: 10, TmpDir: dir, IndexFile: filepath.Join(dir, name), LeafSize: 8}, logger)
-		require.NoError(t, err)
-		idx.DisableFsync()
-		require.NoError(t, idx.AddKey([]byte{1}, 0))
-		require.NoError(t, idx.Build(t.Context()))
-		idx.Close()
-	}
 }
 
 func TestVisibleBlockFilesShowAMergedFileOnlyWhenEveryTypeHasIt(t *testing.T) {
@@ -2274,6 +2262,28 @@ func TestVisibleBlockFilesKeepAMergedFileOverCrossingSmallerFiles(t *testing.T) 
 		ranges := visibleRanges(s, typ)
 		require.NotEmpty(t, ranges, typ.Name())
 		require.Equal(t, uint64(30_000), ranges[len(ranges)-1].To(), typ.Name())
+	}
+}
+
+// A smaller file that overlaps the next one does not tile the merged file: the visible files would cut at the
+// overlap, so the merged file stays visible and no type is cut short.
+func TestVisibleBlockFilesKeepAMergedFileOverOverlappingSmallerFiles(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for _, r := range []Range{NewRange(0, 10_000), NewRange(10_000, 20_000)} {
+		for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Transactions} {
+			createTestSegmentFile(t, r.From(), r.To(), typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	for _, r := range []Range{NewRange(0, 15_000), NewRange(10_000, 20_000), NewRange(0, 20_000)} {
+		createTestSegmentFile(t, r.From(), r.To(), snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	require.Equal(t, []Range{NewRange(0, 20_000)}, visibleRanges(s, snaptype2.Bodies))
+	for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Transactions} {
+		require.Equal(t, []Range{NewRange(0, 10_000), NewRange(10_000, 20_000)}, visibleRanges(s, typ), typ.Name())
 	}
 }
 

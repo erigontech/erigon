@@ -17,6 +17,7 @@
 package snapshotsync
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -783,15 +784,20 @@ func (s *BaseRoSnapshots) hasIndexedDirtyFile(t snaptype.Enum, path string) (fou
 }
 
 // mergedFilesNotInEveryType returns the indexed segments that other types lack and whose own smaller segments
-// cover their whole range. Showing those smaller segments instead keeps one file layout for every type, so a
-// merge range never cuts through a visible file, and hides no block.
+// tile their whole range. Showing those smaller segments instead means a merge range never cuts through a
+// visible file, and no block is hidden.
 func (s *BaseRoSnapshots) mergedFilesNotInEveryType() map[*DirtySegment]bool {
+	indexed := make(map[snaptype.Enum][]*DirtySegment, len(s.enums))
 	ranges := make(map[snaptype.Enum][]Range, len(s.enums))
 	types := map[Range]int{}
 	for _, t := range s.enums {
 		s.dirty[t].Walk(func(segments []*DirtySegment) bool {
-			for _, sn := range segments { // equal ranges are adjacent
-				if rs := ranges[t]; sn.IsIndexed() && (len(rs) == 0 || rs[len(rs)-1] != sn.Range) {
+			for _, sn := range segments {
+				if !sn.IsIndexed() {
+					continue
+				}
+				indexed[t] = append(indexed[t], sn)
+				if rs := ranges[t]; len(rs) == 0 || rs[len(rs)-1] != sn.Range { // equal ranges are adjacent
 					ranges[t] = append(rs, sn.Range)
 					types[sn.Range]++
 				}
@@ -800,30 +806,28 @@ func (s *BaseRoSnapshots) mergedFilesNotInEveryType() map[*DirtySegment]bool {
 		})
 	}
 	hidden := map[*DirtySegment]bool{}
-	for _, t := range s.enums {
-		s.dirty[t].Walk(func(segments []*DirtySegment) bool {
-			for _, sn := range segments {
-				if sn.IsIndexed() && types[sn.Range] < len(s.enums) && coveredBySmaller(ranges[t], sn.Range) {
-					hidden[sn] = true
-				}
+	for t, segments := range indexed {
+		rs := ranges[t]
+		slices.SortFunc(rs, func(a, b Range) int { return cmp.Or(cmp.Compare(a.from, b.from), cmp.Compare(b.to, a.to)) })
+		for _, sn := range segments {
+			if types[sn.Range] < len(s.enums) && coveredBySmaller(rs, sn.Range) {
+				hidden[sn] = true
 			}
-			return true
-		})
+		}
 	}
 	return hidden
 }
 
-// coveredBySmaller reports whether ranges inside r, other than r, tile r end to end with no hole or overlap,
-// which is the layout the visible files then show instead of r.
-func coveredBySmaller(ranges []Range, r Range) bool {
+// coveredBySmaller reports whether ranges inside r, other than r, tile r end to end with no hole or overlap.
+// sorted is ordered by start, the longest range first: at each start that is the one the visible files show.
+func coveredBySmaller(sorted []Range, r Range) bool {
 	reach := r.from
-	for extended := true; extended && reach < r.to; {
-		extended = false
-		for _, small := range ranges {
-			if small != r && small.from == reach && small.to <= r.to {
-				reach, extended = small.to, true
-				break
-			}
+	for _, small := range sorted {
+		if small.from > reach || reach == r.to {
+			break
+		}
+		if small.from == reach && small != r && small.to <= r.to {
+			reach = small.to
 		}
 	}
 	return reach == r.to
