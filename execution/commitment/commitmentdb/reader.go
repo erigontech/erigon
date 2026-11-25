@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -114,6 +115,8 @@ type syncStateReader struct {
 	src   StateReader
 	buf   []byte
 	owned bool
+
+	reads, wait *atomic.Int64
 }
 
 var _ StateReader = (*syncStateReader)(nil)
@@ -126,14 +129,25 @@ func (r *syncStateReader) OwnsBranches() bool { return r.owned }
 
 func (r *syncStateReader) WithHistory() bool { return r.src.WithHistory() }
 
-func (r *syncStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
+func (r *syncStateReader) lock() {
+	if r.wait == nil {
+		r.mu.Lock()
+		return
+	}
+	start := time.Now()
 	r.mu.Lock()
+	r.wait.Add(int64(time.Since(start)))
+	r.reads.Add(1)
+}
+
+func (r *syncStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
+	r.lock()
 	defer r.mu.Unlock()
 	return r.src.CheckDataAvailable(d, step)
 }
 
 func (r *syncStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
-	r.mu.Lock()
+	r.lock()
 	defer r.mu.Unlock()
 	enc, step, err := r.src.Read(d, plainKey, stepSize)
 	if err != nil || enc == nil || (r.owned && d == kv.CommitmentDomain) {
@@ -145,10 +159,16 @@ func (r *syncStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([
 
 // Clone/CloneForWorker keep the source reader and its lock: the point of this
 // wrapper is that every copy resolves against the one pinned snapshot.
-func (r *syncStateReader) Clone(kv.TemporalTx) StateReader { return newSyncStateReader(r.mu, r.src) }
+func (r *syncStateReader) Clone(kv.TemporalTx) StateReader { return r.clone() }
 
 func (r *syncStateReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader {
-	return newSyncStateReader(r.mu, r.src)
+	return r.clone()
+}
+
+func (r *syncStateReader) clone() *syncStateReader {
+	c := newSyncStateReader(r.mu, r.src)
+	c.reads, c.wait = r.reads, r.wait
+	return c
 }
 
 func (r *syncStateReader) BindsWorkerTx() bool { return false }

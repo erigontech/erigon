@@ -87,6 +87,9 @@ type SharedDomainsCommitmentContext struct {
 	pendingVariant commitment.TrieVariant
 	pendingCfg     commitment.TrieConfig
 	warnedUnwired  sync.Once
+
+	probePinnedMu bool
+	pinnedProbe   *pinnedMuProbe
 }
 
 type v3Trie interface {
@@ -260,6 +263,7 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 		tmpDir:        tmpDir,
+		probePinnedMu: pinnedMuProbeEnabled,
 		warmupBase: commitment.WarmupConfig{
 			Enabled:    cfg.EnableTrieWarmup,
 			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
@@ -713,10 +717,15 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		defer trie.SetDeferCommitmentUpdates(false)
 	}
 
+	foldStart := time.Now()
 	if feed != nil {
 		rootHash, err = sdc.patriciaTrie.(v3Trie).ProcessFeed(ctx, feed, onProgress)
 	} else {
 		rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
+	}
+	if p := sdc.pinnedProbe; p != nil {
+		sdc.pinnedProbe = nil
+		p.log(blockNum, sdc.variant, time.Since(foldStart))
 	}
 	if err != nil {
 		if drainCollectors != nil {
@@ -900,6 +909,11 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 	// over the caller's tx, taken in turns. It is built here and not in the
 	// factory because the factory runs inside each worker goroutine, and
 	// building a reader touches tx: AsStateGetter reads the state version off it.
+	var probe *pinnedMuProbe
+	if sdc.probePinnedMu {
+		probe = &pinnedMuProbe{}
+		sdc.pinnedProbe = probe
+	}
 	var pinnedMu sync.Mutex
 	var pinnedMetrics *kvmetrics.DomainMetrics
 	var pinned *syncStateReader
@@ -913,7 +927,14 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 		}
 		pinned = newSyncStateReader(&pinnedMu, src)
 		if main != nil && sdc.patriciaTrie != nil && sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV3 {
-			main.stateReader = newSyncStateReader(&pinnedMu, main.stateReader)
+			mainReader := newSyncStateReader(&pinnedMu, main.stateReader)
+			main.stateReader = mainReader
+			if probe != nil {
+				mainReader.reads, mainReader.wait = &probe.mainReads, &probe.mainWait
+			}
+		}
+		if probe != nil {
+			pinned.reads, pinned.wait = &probe.workerReads, &probe.workerWait
 		}
 	}
 
@@ -951,8 +972,15 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 		if roTx != nil {
 			warmupCtx.putter = sdc.sharedDomains.AsPutDel(roTx)
 		}
+		drifted := pinned != nil && caller.mayDrift(roTx)
+		if probe != nil {
+			probe.workers.Add(1)
+			if drifted {
+				probe.drifted.Add(1)
+			}
+		}
 		switch {
-		case pinned != nil && caller.mayDrift(roTx):
+		case drifted:
 			// A read view opened at fold time sits at the then-current head, which
 			// is the caller's snapshot only while no commit can land between them.
 			// Clones share the reader and its lock; only the scratch buffer is

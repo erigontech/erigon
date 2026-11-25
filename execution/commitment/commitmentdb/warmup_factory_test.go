@@ -652,3 +652,55 @@ func TestConcurrentV3FactoryYieldsAtReadTxLimit(t *testing.T) {
 	require.Nil(t, trieCtx)
 	require.Nil(t, cleanup)
 }
+
+func probeFold(t *testing.T, workerView uint64) *pinnedMuProbe {
+	t.Helper()
+	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
+	db := &snapshotDB{viewID: workerView, val: []byte("worker-view")}
+	sdc, _ := newSnapshotSdc(t)
+	sdc.patriciaTrie = &stateCodecTrie{}
+	sdc.probePinnedMu = true
+	main := &TrieContext{stepSize: 1, stateReader: NewLatestStateReader(caller, sdc.sharedDomains, LatestStateReaderOptions{})}
+
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0, main)
+	done := make(chan struct{})
+	var mainErr error
+	go func() {
+		defer close(done)
+		for range 512 {
+			if _, _, mainErr = main.Branch([]byte("prefix")); mainErr != nil {
+				return
+			}
+		}
+	}()
+	_, errs := foldConcurrently(t, factory)
+	<-done
+	require.NoError(t, mainErr)
+	for _, err := range errs {
+		require.NoError(t, err)
+	}
+	for _, c := range drain() {
+		c.Close()
+	}
+	require.NotNil(t, sdc.pinnedProbe)
+	return sdc.pinnedProbe
+}
+
+func TestPinnedMuProbeCountsDriftedWorkersAndLockWait(t *testing.T) {
+	t.Parallel()
+	p := probeFold(t, 8)
+	require.EqualValues(t, 8, p.workers.Load())
+	require.EqualValues(t, 8, p.drifted.Load())
+	require.EqualValues(t, 512, p.mainReads.Load())
+	require.EqualValues(t, 8*64, p.workerReads.Load())
+	require.Positive(t, p.mainWait.Load()+p.workerWait.Load())
+}
+
+func TestPinnedMuProbeSeesNoWorkerOnTheLockWithoutDrift(t *testing.T) {
+	t.Parallel()
+	p := probeFold(t, 7)
+	require.EqualValues(t, 8, p.workers.Load())
+	require.Zero(t, p.drifted.Load())
+	require.EqualValues(t, 512, p.mainReads.Load())
+	require.Zero(t, p.workerReads.Load())
+}
