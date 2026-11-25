@@ -39,30 +39,6 @@ import (
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
 
-func PartitionWipeCase(t *testing.T, wipe bool, fill func(*commitment.Updates)) {
-	updates := testUpdates(t, commitment.ModeUpdate, nil)
-	fill(updates)
-	p := &partitioner{}
-	require.NoError(t, updates.HashSort(context.Background(), nil, func(hashedKey, _ []byte, update *commitment.Update) error {
-		return p.add(bytes.Clone(hashedKey), update)
-	}))
-	storage, accounts := p.done()
-	require.Len(t, accounts, 1)
-	require.Equal(t, wipe, accounts[0].update.Deleted())
-	if !wipe {
-		require.Empty(t, storage)
-		return
-	}
-	require.Len(t, storage, 1)
-	require.True(t, storage[0].wipe)
-	ctx := newMockContext()
-	storageRound(t, ctx, storage[0].addrHash, []commitmenttest.Op{{Key: commitmenttest.Path([]byte{1}, 2), Storage: []byte{1}}})
-	_, err := runStorageTask(ctx, storage[0])
-	require.NoError(t, err)
-	require.Contains(t, ctx.branches, string(StorageNodeKey(storage[0].addrHash, nil, nil)))
-	require.Empty(t, ctx.branches[string(StorageNodeKey(storage[0].addrHash, nil, nil))])
-}
-
 func TestPartition(t *testing.T) {
 	path := func(n byte) []byte { return commitmenttest.Path(nil, n) }
 	nonce := &commitment.Update{Flags: commitment.NonceUpdate, Nonce: 7}
