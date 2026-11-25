@@ -618,9 +618,12 @@ func TestIntegrateFrozenMergeKeepsSegmentsBelowItsRange(t *testing.T) {
 func TestMergeRangeWithCoveredBodies(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
+	// Transactions below 90k are pruned; a stopped merge left a bodies file over the smaller bodies files.
 	createTestSegmentFile(t, 0, 100_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
 	for from := uint64(0); from < 90_000; from += 10_000 {
-		createTestSegmentFile(t, from, from+10_000, snaptype2.Headers.Enum(), dir, version.V1_0, logger)
+		for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Bodies} {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
 	}
 	for from := uint64(90_000); from < 100_000; from += 1_000 {
 		for _, typ := range snaptype2.BlockSnapshotTypes {
@@ -630,10 +633,8 @@ func TestMergeRangeWithCoveredBodies(t *testing.T) {
 	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(t, s.OpenFolder())
-	// Transactions lack the bodies range, so bodies show their smaller files.
-	for _, typ := range []snaptype.Type{snaptype2.Bodies, snaptype2.Transactions} {
-		require.Equal(t, NewRange(90_000, 91_000), visibleRanges(s, typ)[0], typ.Name())
-	}
+	// Transactions lack the bodies range, so bodies show their smaller files, like headers.
+	require.Equal(t, visibleRanges(s, snaptype2.Headers), visibleRanges(s, snaptype2.Bodies))
 
 	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 	merger.DisableFsync()
@@ -679,11 +680,15 @@ func TestMergeRangeUnderALargerBodiesFile(t *testing.T) {
 			createTestSegmentFile(t, from, from+1_000, typ.Enum(), dir, version.V1_0, logger)
 		}
 	}
+	createTestSegmentFile(t, 0, 10_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
 	createTestSegmentFile(t, 0, 20_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
 	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(t, s.OpenFolder())
-	requireOneVisibleLayout(t, s, small)
+	for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Transactions} {
+		require.Equal(t, small, visibleRanges(s, typ), typ.Name())
+	}
+	require.Equal(t, append([]Range{NewRange(0, 10_000)}, small...), visibleRanges(s, snaptype2.Bodies))
 
 	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 	merger.DisableFsync()
@@ -2221,5 +2226,26 @@ func TestVisibleBlockFilesShowAMergedFileOnlyWhenEveryTypeHasIt(t *testing.T) {
 				requireOneVisibleLayout(t, s, want)
 			})
 		}
+	}
+}
+
+// The download path opens headers and bodies without alignment; the shared layout holds there too, and no block is hidden.
+func TestOpenSegmentsWithoutAlignmentShareOneLayout(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	types := []snaptype.Type{snaptype2.Headers, snaptype2.Bodies}
+	var small []Range
+	for from := uint64(0); from < 100_000; from += 10_000 {
+		small = append(small, NewRange(from, from+10_000))
+		for _, typ := range types {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Headers.Enum(), dir, version.V1_0, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, types, snaptype2.Headers, false, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenSegments(types, false))
+	for _, typ := range types {
+		require.Equal(t, small, visibleRanges(s, typ), typ.Name())
 	}
 }

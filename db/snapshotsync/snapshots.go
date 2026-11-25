@@ -689,16 +689,16 @@ func (s *BaseRoSnapshots) MadvNormal() *BaseRoSnapshots {
 	return s
 }
 
-func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment], keep func(*DirtySegment) bool) VisibleSegments {
-	return truncateAtGap(buildVisibleSegments(dirtySegments, keep))
+func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSegments {
+	return truncateAtGap(buildVisibleSegments(dirtySegments, nil))
 }
 
-// buildVisibleSegments picks the largest indexed segments; keep, when set, also has to accept a segment.
-func buildVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment], keep func(*DirtySegment) bool) VisibleSegments {
+// buildVisibleSegments picks the largest indexed segments that are not hidden.
+func buildVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment], hidden map[*DirtySegment]bool) VisibleSegments {
 	newVisibleSegments := make(VisibleSegments, 0, dirtySegments.Len())
 	dirtySegments.Walk(func(segments []*DirtySegment) bool {
 		for _, sn := range segments {
-			if !sn.IsIndexed() || (keep != nil && !keep(sn)) {
+			if !sn.IsIndexed() || hidden[sn] {
 				continue
 			}
 
@@ -773,10 +773,10 @@ func truncateAtGap(segments VisibleSegments) VisibleSegments {
 	return segments
 }
 
-// mergedFileOfEveryType hides a segment that other types lack when its own smaller segments cover every base-type
-// segment under it. Merge ranges come from the base type, so they then never cut through a visible file, and
-// hiding it shows no less of the base type's range.
-func (s *BaseRoSnapshots) mergedFileOfEveryType() func(*DirtySegment) bool {
+// mergedFilesNotInEveryType returns the indexed segments that other types lack and whose own smaller segments
+// cover their whole range. Showing those smaller segments instead keeps one file layout for every type, so a
+// merge range never cuts through a visible file, and hides no block.
+func (s *BaseRoSnapshots) mergedFilesNotInEveryType() map[*DirtySegment]bool {
 	ranges := make(map[snaptype.Enum][]Range, len(s.enums))
 	types := map[Range]int{}
 	for _, t := range s.enums {
@@ -790,44 +790,32 @@ func (s *BaseRoSnapshots) mergedFileOfEveryType() func(*DirtySegment) bool {
 			return true
 		})
 	}
-	base := ranges[s.baseSegType.Enum()]
-	hidden := map[snaptype.Enum]map[Range]bool{}
-	for t, rs := range ranges {
-		for _, r := range rs {
-			if types[r] < len(s.enums) && smallerCoverBase(rs, base, r) {
-				if hidden[t] == nil {
-					hidden[t] = map[Range]bool{}
+	hidden := map[*DirtySegment]bool{}
+	for _, t := range s.enums {
+		s.dirty[t].Walk(func(segments []*DirtySegment) bool {
+			for _, sn := range segments {
+				if sn.IsIndexed() && types[sn.Range] < len(s.enums) && coveredBySmaller(ranges[t], sn.Range) {
+					hidden[sn] = true
 				}
-				hidden[t][r] = true
 			}
-		}
+			return true
+		})
 	}
-	return func(sn *DirtySegment) bool { return !hidden[sn.segType.Enum()][sn.Range] }
+	return hidden
 }
 
-// smallerCoverBase reports whether some base range lies inside r and the own ranges inside r, other than r, cover
-// each such base range with no hole.
-func smallerCoverBase(own, base []Range, r Range) bool {
-	under := false
-	for _, b := range base {
-		if b == r || b.from < r.from || b.to > r.to {
-			continue
-		}
-		reach := b.from
-		for extended := true; extended && reach < b.to; {
-			extended = false
-			for _, small := range own {
-				if small != r && small.from >= r.from && small.to <= r.to && small.from <= reach && small.to > reach {
-					reach, extended = small.to, true
-				}
+// coveredBySmaller reports whether the ranges inside r, other than r, cover r with no hole.
+func coveredBySmaller(ranges []Range, r Range) bool {
+	reach := r.from
+	for extended := true; extended && reach < r.to; {
+		extended = false
+		for _, small := range ranges {
+			if small != r && small.from >= r.from && small.to <= r.to && small.from <= reach && small.to > reach {
+				reach, extended = small.to, true
 			}
 		}
-		if reach < b.to {
-			return false
-		}
-		under = true
 	}
-	return under
+	return reach >= r.to
 }
 
 // recalcVisibleFiles publishes a fresh visible bundle from dirty and retires `retired`
@@ -850,12 +838,9 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired retiredSegme
 	visible := make([]VisibleSegments, snaptype.MaxEnum) // create new pointer - only new readers will see it. old-alive readers will continue use previous pointer
 	maxVisibleBlocks := make([]uint64, 0, len(s.types))
 
-	var keep func(*DirtySegment) bool
-	if alignMin {
-		keep = s.mergedFileOfEveryType()
-	}
+	hidden := s.mergedFilesNotInEveryType()
 	for _, t := range s.enums {
-		newVisibleSegments := RecalcVisibleSegments(s.dirty[t], keep)
+		newVisibleSegments := truncateAtGap(buildVisibleSegments(s.dirty[t], hidden))
 		if len(newVisibleSegments) > 0 && slices.Contains(s.anchoredAtLowestDirty, t) && !dirtyReachesWithoutHole(s.dirty[t], newVisibleSegments[0].from) {
 			newVisibleSegments = nil
 		}
