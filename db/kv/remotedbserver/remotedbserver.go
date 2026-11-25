@@ -139,13 +139,13 @@ func (s *KvServer) begin(ctx context.Context) (id uint64, err error) {
 	if s.trace {
 		s.logger.Info(fmt.Sprintf("[kv_server] begin %d %s\n", id, dbg.Stack()))
 	}
-	s.txsMapLock.Lock()
-	defer s.txsMapLock.Unlock()
 	tx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic // tx is stored in s.txs and rolled back by rollback(); defer would close it prematurely
 	if errBegin != nil {
 		return 0, errBegin
 	}
 	id = s.txIdGen.Add(1)
+	s.txsMapLock.Lock()
+	defer s.txsMapLock.Unlock()
 	s.txs[id] = &threadSafeTx{TemporalTx: tx}
 	return id, nil
 }
@@ -155,9 +155,7 @@ func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 	if s.trace {
 		s.logger.Info(fmt.Sprintf("[kv_server] renew %d %s\n", id, dbg.Stack()[:2]))
 	}
-	s.txsMapLock.Lock()
-	defer s.txsMapLock.Unlock()
-	tx, ok := s.txs[id]
+	tx, ok := s.lookupTx(id)
 	if ok {
 		tx.Lock()
 		defer tx.Unlock()
@@ -167,6 +165,12 @@ func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 	if errBegin != nil {
 		return fmt.Errorf("kvserver: %w", errBegin)
 	}
+	if ok {
+		tx.TemporalTx = newTx
+		return nil
+	}
+	s.txsMapLock.Lock()
+	defer s.txsMapLock.Unlock()
 	s.txs[id] = &threadSafeTx{TemporalTx: newTx}
 	return nil
 }
@@ -175,15 +179,27 @@ func (s *KvServer) rollback(id uint64) {
 	if s.trace {
 		s.logger.Info(fmt.Sprintf("[kv_server] rollback %d %s\n", id, dbg.Stack()[:2]))
 	}
-	s.txsMapLock.Lock()
-	defer s.txsMapLock.Unlock()
-	tx, ok := s.txs[id]
+	tx, ok := s.takeTx(id)
 	if ok {
 		tx.Lock()
 		defer tx.Unlock()
 		tx.Rollback() //nolint
-		delete(s.txs, id)
 	}
+}
+
+func (s *KvServer) lookupTx(id uint64) (*threadSafeTx, bool) {
+	s.txsMapLock.RLock()
+	defer s.txsMapLock.RUnlock()
+	tx, ok := s.txs[id]
+	return tx, ok
+}
+
+func (s *KvServer) takeTx(id uint64) (*threadSafeTx, bool) {
+	s.txsMapLock.Lock()
+	defer s.txsMapLock.Unlock()
+	tx, ok := s.txs[id]
+	delete(s.txs, id)
+	return tx, ok
 }
 
 // with - provides exclusive access to `tx` object. Use it if you need open Cursor or run another method of `tx` object.
@@ -195,9 +211,7 @@ func (s *KvServer) rollback(id uint64) {
 //	client, portion of data it to client, then read next portion in another `with` call.
 //	It will allow cooperative access to `tx` object
 func (s *KvServer) with(id uint64, f func(kv.TemporalTx) error) error {
-	s.txsMapLock.RLock()
-	tx, ok := s.txs[id]
-	s.txsMapLock.RUnlock()
+	tx, ok := s.lookupTx(id)
 	if !ok {
 		return fmt.Errorf("txn %d already rollback", id)
 	}

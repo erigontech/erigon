@@ -339,13 +339,17 @@ func TestLegacyCommitmentFiles(t *testing.T) {
 				}
 				want := map[string]bool{}
 				var names []string
+				mixedRange := []string{"history/v2.0-commitment.16-32.v", "history/v3.0-commitment.16-32.v", "idx/v2.0-commitment.16-32.ef"}
 				if v3 {
-					names = []string{"domain/v2.2-commitment.0-16.kv", "domain/v2.0-commitment.0-16.kvi", "domain/v2.2-commitment.16-32.kv", "history/v2.0-commitment.0-16.v", "idx/v2.0-commitment.0-16.ef", "accessor/v2.0-commitment.0-16.vi", "history/v2.0-commitment.16-32.v", "idx/v2.0-commitment.48-64.ef", "domain/v2.0-accounts.0-16.kv", "domain/v2.0-accounts.0-16.bt", "domain/v2.0-storage.0-16.kv", "domain/v2.0-storage.0-16.kvei"}
+					names = []string{"domain/v2.2-commitment.0-16.kv", "domain/v2.0-commitment.0-16.kvi", "domain/v2.2-commitment.16-32.kv", "history/v2.0-commitment.0-16.v", "idx/v2.0-commitment.0-16.ef", "accessor/v2.0-commitment.0-16.vi", "idx/v2.0-commitment.48-64.ef", "domain/v2.0-accounts.0-16.kv", "domain/v2.0-accounts.0-16.bt", "domain/v2.0-storage.0-16.kv", "domain/v2.0-storage.0-16.kvei"}
 				} else {
-					names = []string{"domain/v3.0-commitment.16-32.kv", "domain/v3.0-commitment.32-48.kv", "domain/v2.0-commitment.32-48.bt", "history/v3.0-commitment.16-32.v", "history/v3.0-commitment.32-48.v", "idx/v2.0-commitment.32-48.ef"}
+					names = []string{"domain/v3.0-commitment.16-32.kv", "domain/v3.0-commitment.32-48.kv", "domain/v2.0-commitment.32-48.bt", "history/v3.0-commitment.32-48.v", "idx/v2.0-commitment.32-48.ef"}
 				}
 				for _, name := range names {
 					want[name] = false
+				}
+				for _, name := range mixedRange {
+					want[name] = true
 				}
 				if v3 {
 					want["domain/v2.2-commitment.0-16.kv"] = true
@@ -802,6 +806,30 @@ func TestSyncSnapshotsCommitmentRequestList(t *testing.T) {
 				}
 			}
 			require.ElementsMatch(t, want, downloader.names)
+		})
+	}
+}
+
+func TestSyncSnapshotsRefusesMixedCommitmentHistory(t *testing.T) {
+	cfg, ok := snapcfg.KnownCfg(networkname.Mainnet)
+	require.True(t, ok)
+	previous := *cfg
+	t.Cleanup(func() { *cfg = previous })
+	cfg.Local = false
+	cfg.Preverified.Items = nil
+	for _, name := range []string{"domain/v2.2-commitment.0-16.kv", "domain/v2.0-accounts.0-16.kv", "history/v2.0-commitment.0-16.v", "history/v3.0-commitment.0-16.v", "accessor/v2.0-commitment.0-16.vi"} {
+		cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: name, Hash: strings.Repeat("0", 40)})
+	}
+	for _, keep := range []bool{true, false} {
+		t.Run(fmt.Sprintf("commitment history=%t", keep), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(false))
+			err := SyncSnapshots(t.Context(), "test", "test", false, false, false, BlobRetention{}, prune.ArchiveMode, NoCaplin, nil, &requestListBlockReader{}, &chain.Config{ChainName: networkname.Mainnet}, &requestListDownloader{}, ethconfig.Sync{KeepExecutionProofs: keep}, 16, datadir.New(t.TempDir()))
+			if !keep {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, "both v2 and v3 commitment history")
+			require.ErrorContains(t, err, "delete the chaindata folder and restart without `--prune.include-commitment-history`")
 		})
 	}
 }

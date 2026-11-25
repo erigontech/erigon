@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/aggregation"
@@ -92,7 +91,6 @@ func beaconCommittee(
 		}
 		var err error
 		committee, err = headState.GetBeaconCommitee(slot, committeeIndex)
-		committee = slices.Clone(committee)
 		return err
 	})
 	if err != nil {

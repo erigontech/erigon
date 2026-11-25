@@ -981,7 +981,9 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 			return nil
 		}
 
-		rawdb.DeleteHeader(tx, currentHash, currentNumber)
+		if err := rawdb.DeleteBadBlock(tx, currentHash, currentNumber); err != nil {
+			return err
+		}
 		currentHash = currentHeader.ParentHash
 		currentNumber--
 	}

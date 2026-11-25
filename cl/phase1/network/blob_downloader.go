@@ -162,6 +162,7 @@ type BlobHistoryDownloader struct {
 	// highestBackfilledSlot is the highest slot we've successfully backfilled to
 	highestBackfilledSlot  atomic.Uint64
 	nextBackfillTargetSlot uint64
+	nextBackfillWarning    time.Time
 	denebStartSlot         uint64
 	retryRanges            []blobRetryRange
 	retryRangeCursor       uint64
@@ -401,7 +402,11 @@ func (b *BlobHistoryDownloader) fetchFromEndpoint(item incompleteBlock, record f
 		if !b.endpointUsable(i, slot) {
 			continue
 		}
-		err := blobfetch.FetchAndStore(b.ctx, b.blobStorage, endpoint, item.root, item.block, b.endpointCPU)
+		err := blobfetch.FetchAndStore(b.ctx, b.blobStorage, endpoint, item.root, item.block, b.readBlindedBlock(slot), b.endpointCPU)
+		if errors.Is(err, blobfetch.ErrStoredBlock) {
+			b.logger.Debug("[BlobHistoryDownloader] Could not read the stored block", "slot", slot, "endpoint", blobfetch.RedactEndpoint(endpoint), "err", err)
+			continue
+		}
 		b.recordEndpointHealth(i, err)
 		record(endpointResult{endpoint: i, item: item, err: err})
 		if err == nil {
@@ -410,6 +415,17 @@ func (b *BlobHistoryDownloader) fetchFromEndpoint(item incompleteBlock, record f
 		b.logger.Debug("[BlobHistoryDownloader] Endpoint did not fill block", "slot", slot, "endpoint", blobfetch.RedactEndpoint(endpoint), "err", err)
 	}
 	return false
+}
+
+func (b *BlobHistoryDownloader) readBlindedBlock(slot uint64) func(context.Context) (*cltypes.SignedBlindedBeaconBlock, error) {
+	return func(ctx context.Context) (*cltypes.SignedBlindedBeaconBlock, error) {
+		tx, err := b.indiciesDB.BeginRo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		return b.blockReader.ReadBlindedBlockBySlot(ctx, tx, slot)
+	}
 }
 
 // SetHeadSlot sets the head slot to download from (should be currentSlot + 1)
@@ -514,6 +530,7 @@ func (b *BlobHistoryDownloader) Start() {
 func (b *BlobHistoryDownloader) run() {
 	defer b.running.Store(false)
 	publishBackfillCompleted(b.backfillCompleted.Load())
+	b.nextBackfillWarning = time.Now().Add(blobBackfillWarningInterval)
 
 	// Do an initial download immediately
 	if err := b.downloadOnce(true); err != nil {
@@ -523,28 +540,24 @@ func (b *BlobHistoryDownloader) run() {
 	downloadTimer := time.NewTimer(blobDownloaderInterval)
 	defer downloadTimer.Stop()
 
-	warningTimer := time.NewTimer(blobBackfillWarningInterval)
-	defer warningTimer.Stop()
-
 	for {
 		select {
 		case <-b.ctx.Done():
 			return
 		case <-downloadTimer.C:
+			b.warnBackfillIncomplete()
 			if err := b.downloadOnce(false); err != nil {
 				b.logger.Error("[BlobHistoryDownloader] Error downloading blobs", "err", err)
 			}
 			downloadTimer.Reset(blobDownloaderInterval)
-		case <-warningTimer.C:
-			if !b.backfillCompleted.Load() {
-				b.warnBackfillIncomplete()
-			}
-			warningTimer.Reset(blobBackfillWarningInterval)
 		}
 	}
 }
 
 func (b *BlobHistoryDownloader) warnBackfillIncomplete() {
+	if b.backfillCompleted.Load() || time.Now().Before(b.nextBackfillWarning) {
+		return
+	}
 	logCtx := []any{
 		"currentSlot", b.headSlot.Load(), "highestBackfilled", b.highestBackfilledSlot.Load(),
 		"frozenBlobsTo", b.sn.FrozenBlobs(), "frozenBlocksTo", b.sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum()),
@@ -558,6 +571,7 @@ func (b *BlobHistoryDownloader) warnBackfillIncomplete() {
 			"lowestUnresolved", b.retryRanges[0].start, "highestUnresolved", b.retryRanges[len(b.retryRanges)-1].end)
 	}
 	b.logger.Warn("[BlobHistoryDownloader] Blob backfilling is not finished, some blobs might be unavailable", logCtx...)
+	b.nextBackfillWarning = time.Now().Add(blobBackfillWarningInterval)
 }
 
 // downloadOnce performs a single download pass
@@ -602,6 +616,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	}
 
 	for currentSlot >= targetSlot {
+		b.warnBackfillIncomplete()
 		firstUnfrozenSlot := max(targetSlot, b.sn.FrozenBlobs())
 		if currentSlot < firstUnfrozenSlot {
 			break

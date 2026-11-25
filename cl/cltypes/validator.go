@@ -18,6 +18,7 @@ package cltypes
 
 import (
 	"encoding/json"
+	"errors"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -69,13 +70,22 @@ type Deposit struct {
 }
 
 func (d *Deposit) UnmarshalJSON(buf []byte) error {
-	d.Proof = solid.NewHashVector(33)
-	d.Data = new(DepositData)
-
-	return json.Unmarshal(buf, &struct {
+	tmp := struct {
 		Proof solid.HashVectorSSZ `json:"proof"`
 		Data  *DepositData        `json:"data"`
-	}{d.Proof, d.Data})
+	}{
+		Proof: solid.NewHashVector(DepositProofLength),
+		Data:  new(DepositData),
+	}
+	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	if tmp.Proof == nil || tmp.Data == nil {
+		return errors.New("deposit proof or data is null")
+	}
+	d.Proof = tmp.Proof
+	d.Data = tmp.Data
+	return nil
 }
 
 func (d *Deposit) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -129,6 +139,19 @@ func (*VoluntaryExit) EncodingSizeSSZ() int {
 type SignedVoluntaryExit struct {
 	VoluntaryExit *VoluntaryExit `json:"message"`
 	Signature     common.Bytes96 `json:"signature"`
+}
+
+func (e *SignedVoluntaryExit) UnmarshalJSON(buf []byte) error {
+	type signedVoluntaryExitJSON SignedVoluntaryExit
+	var decoded signedVoluntaryExitJSON
+	if err := json.Unmarshal(buf, &decoded); err != nil {
+		return err
+	}
+	if decoded.VoluntaryExit == nil {
+		return errors.New("signed voluntary exit is missing message")
+	}
+	*e = SignedVoluntaryExit(decoded)
+	return nil
 }
 
 func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) ([]byte, error) {

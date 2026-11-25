@@ -112,7 +112,7 @@ var (
 	// See EIP-3607: Reject transactions from senders with deployed code.
 	ErrSenderNoEOA = errors.New("sender not an eoa")
 
-	// ErrGasLimitTooHigh is returned if the gas limit of a transaction exceeds MaxTxnGasLimit.
-	// See EIP-7825: Transaction Gas Limit Cap and EIP-8037.
+	// ErrGasLimitTooHigh is returned when the declared gas limit exceeds the cap
+	// for the active fork (EIP-7825 and EIP-8037).
 	ErrGasLimitTooHigh = errors.New("gas limit too high")
 )

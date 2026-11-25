@@ -112,3 +112,7 @@ func TestBackwardBeaconDownloaderBansInvalidEnvelopeWithOnePeer(t *testing.T) {
 	require.True(t, node.Peers().BanStatus(remote.ID()))
 	require.Equal(t, network.NotConnected, local.Network().Connectedness(remote.ID()))
 }
+
+func (*connectedEnvelopeSentinel) RewardPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}

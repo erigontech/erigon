@@ -952,13 +952,13 @@ func TestBlobSegmentCompleteScansFilesAndResumesAtTheGap(t *testing.T) {
 	for slot := range wants {
 		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, common.Hash{byte(slot)}))
 	}
-	fileLost := true
+	lost := map[uint64]bool{5: true}
 	storage := mock_services.NewMockBlobStorage(gomock.NewController(t))
 	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, root common.Hash) (uint32, error) {
 		return uint32(wants[uint64(root[0])]), nil
 	}).AnyTimes()
 	storage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, slot uint64, _ common.Hash, idx uint64) (bool, error) {
-		return slot != 5 || idx != 1 || !fileLost, nil
+		return idx != 1 || !lost[slot], nil
 	}).AnyTimes()
 	a := &Antiquary{ctx: t.Context(), logger: log.New(), blobStorage: storage, blobBackfilled: &atomic.Bool{}}
 	var asked []uint64
@@ -977,11 +977,17 @@ func TestBlobSegmentCompleteScansFilesAndResumesAtTheGap(t *testing.T) {
 	require.Equal(t, uint64(5), a.blobCheckedTo)
 	require.Equal(t, uint64(5), mxBlobRetirementGapSlot.GetValueUint64())
 
-	fileLost, asked = false, nil
+	lost = map[uint64]bool{3: true}
+	complete, err = a.blobSegmentComplete(tx, 0, 8, blobCount)
+	require.NoError(t, err)
+	require.False(t, complete, "the gap at slot 5 is filled, but the file of slot 3 is lost")
+	require.Equal(t, uint64(3), mxBlobRetirementGapSlot.GetValueUint64())
+
+	lost, asked = nil, nil
 	complete, err = a.blobSegmentComplete(tx, 0, 8, blobCount)
 	require.NoError(t, err)
 	require.True(t, complete)
-	require.Equal(t, uint64(5), asked[0], "the scan resumes at the last known gap")
+	require.Equal(t, uint64(3), asked[0], "the scan resumes at the last known gap")
 	require.Zero(t, mxBlobRetirementGapSlot.GetValueUint64())
 
 	asked = nil
@@ -991,11 +997,11 @@ func TestBlobSegmentCompleteScansFilesAndResumesAtTheGap(t *testing.T) {
 	require.Equal(t, uint64(8), asked[0], "the next segment starts above a gap that has retired")
 
 	a.blobBackfilled.Store(true)
-	fileLost, asked = true, nil
+	lost, asked = map[uint64]bool{5: true}, nil
 	complete, err = a.blobSegmentComplete(tx, 0, 8, blobCount)
 	require.NoError(t, err)
-	require.True(t, complete)
-	require.Empty(t, asked, "a finished backfill skips the scan")
+	require.False(t, complete, "a finished backfill does not make a lost file stored")
+	require.Equal(t, uint64(5), mxBlobRetirementGapSlot.GetValueUint64())
 }
 
 func TestBlobRetirementGapIsReported(t *testing.T) {

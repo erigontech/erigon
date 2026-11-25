@@ -30,9 +30,9 @@ func createdOverStorage(t *testing.T) (accounts.Address, accounts.StorageKey, *s
 	require.NoError(t, ibs.CreateAccount(x, true))
 	require.NoError(t, ibs.SetNonce(x, 1, tracing.NonceChangeUnspecified))
 	require.NoError(t, ibs.SetState(x, k2, *uint256.NewInt(1)))
-	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	ibs.EndTransaction()
 	writes := finalizedWrites(t, ibs, rules)
-	vm.FlushVersionedWrites(writes, false)
+	vm.FlushWrites(writes, false)
 	return x, k5, reader, vm, writes
 }
 
@@ -199,7 +199,7 @@ func slotRead(t *testing.T, reader StateReader, vm *VersionMap, x accounts.Addre
 	ibs.SetTxContext(1, txIdx)
 	_, err := ibs.GetState(x, k)
 	require.NoError(t, err)
-	read, ok := ibs.VersionedReads().storage[x][k]
+	read, ok := ibs.Reads().storage[x][k]
 	require.True(t, ok)
 	return ReadSet{storage: map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]{x: {k: read}}}
 }
@@ -221,10 +221,12 @@ func TestRevertedSelfdestructKeepsCreatedContract(t *testing.T) {
 			ibs := tc.new(reader)
 			defer ibs.Close()
 			ibs.SetTxContext(1, 0)
+			beforeCreate := ibs.PushSnapshot()
 			require.NoError(t, ibs.CreateAccount(x, true))
 			snap := ibs.PushSnapshot()
 			_, err := ibs.Selfdestruct(x, false)
 			require.NoError(t, err)
+			require.True(t, ibs.ContractCreatedInTx(x))
 			_, err = ibs.GetState(x, k5)
 			require.NoError(t, err)
 			ibs.RevertToSnapshot(snap, nil)
@@ -234,6 +236,8 @@ func TestRevertedSelfdestructKeepsCreatedContract(t *testing.T) {
 			original, err := ibs.GetCommittedState(x, k5)
 			require.NoError(t, err)
 			require.True(t, original.IsZero())
+			ibs.RevertToSnapshot(beforeCreate, nil)
+			require.False(t, ibs.ContractCreatedInTx(x))
 		})
 	}
 }
@@ -248,12 +252,16 @@ func TestRevertedSelfdestructKeepsEarlierTxOrigin(t *testing.T) {
 	ibs.SetTxContext(1, 0)
 	require.NoError(t, ibs.CreateAccount(x, true))
 	require.NoError(t, ibs.SetState(x, k5, *uint256.NewInt(7)))
-	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	writes, err := ibs.FinalizedWrites(rules)
+	require.NoError(t, err)
+	ibs.FlushWritesToVersionMap(writes)
+	ibs.ResetIO()
 
 	ibs.SetTxContext(1, 1)
 	snap := ibs.PushSnapshot()
-	_, err := ibs.Selfdestruct(x, false)
+	_, err = ibs.Selfdestruct(x, false)
 	require.NoError(t, err)
+	require.False(t, ibs.ContractCreatedInTx(x))
 	ibs.RevertToSnapshot(snap, nil)
 	original, err := ibs.GetCommittedState(x, k5)
 	require.NoError(t, err)
@@ -277,10 +285,11 @@ func TestRevertedSelfdestructCommitsSlotEqualToPreCreationValue(t *testing.T) {
 	require.NoError(t, err)
 	ibs.RevertToSnapshot(snap, nil)
 	require.NoError(t, ibs.SetState(x, k5, *uint256.NewInt(3)))
-	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
-	w := newFinalStateWriter()
-	require.NoError(t, ibs.CommitBlock(rules, w))
-	require.Equal(t, *uint256.NewInt(3), w.storage[x][k5])
+	writes, err := ibs.FinalizedWrites(rules)
+	require.NoError(t, err)
+	vw, ok := writes.GetStorage(x, k5)
+	require.True(t, ok)
+	require.Equal(t, *uint256.NewInt(3), vw.Val)
 }
 
 // A slot written while the created contract is destructed journals zero as its previous value,
@@ -301,8 +310,9 @@ func TestRevertedSelfdestructUndoesWriteToZero(t *testing.T) {
 	current, err := ibs.GetState(x, k5)
 	require.NoError(t, err)
 	require.True(t, current.IsZero())
-	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
-	w := newFinalStateWriter()
-	require.NoError(t, ibs.CommitBlock(rules, w))
-	require.NotContains(t, w.storage[x], k5)
+	ibs.EndTransaction()
+	writes, err := ibs.FinalizedWrites(rules)
+	require.NoError(t, err)
+	_, ok := writes.GetStorage(x, k5)
+	require.False(t, ok)
 }

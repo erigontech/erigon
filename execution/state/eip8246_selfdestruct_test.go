@@ -43,8 +43,9 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	require.NoError(t, tx0.SetCode(addr, []byte("deployed runtime code"), tracing.CodeChangeUnspecified))
 	_, err := tx0.Selfdestruct(addr, true)
 	require.NoError(t, err)
-	require.NoError(t, tx0.MakeWriteSet(&chain.Rules{IsAmsterdam: true}, NewNoopWriter()))
-	vm.FlushVersionedWrites(tx0.VersionedWrites(), true)
+	writes, err := tx0.FinalizedWrites(&chain.Rules{IsAmsterdam: true})
+	require.NoError(t, err)
+	tx0.FlushWritesToVersionMap(writes)
 	tx1 := New(reader)
 	defer tx1.Close()
 	tx1.SetTxContext(0, 1)
@@ -98,13 +99,16 @@ func TestEIP8246_FinalizeTx_PreservedBalanceCarriesToLaterTxCreate(t *testing.T)
 	reader.accounts[addr].Balance = *uint256.NewInt(100)
 
 	rules := &chain.Rules{IsAmsterdam: true}
-	ibs := New(reader)
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(reader, vm)
 	defer ibs.Close()
 
 	ibs.SetTxContext(1, 0)
 	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
 	require.NoError(t, err)
-	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	ibs.EndTransaction()
+	vm.FlushWrites(finalizedWrites(t, ibs, rules), true)
+	ibs.ResetIO()
 
 	ibs.SetTxContext(1, 1)
 	require.NoError(t, ibs.CreateAccount(addr, true))
@@ -128,9 +132,9 @@ func TestEIP8246_FinalizeTx_PreservesSameTxCredit(t *testing.T) {
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(7), tracing.BalanceChangeTransfer))
 	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
 	require.NoError(t, err)
-	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
-	vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
-	ibs.ResetVersionedIO()
+	ibs.EndTransaction()
+	vm.FlushWrites(finalizedWrites(t, ibs, rules), true)
+	ibs.ResetIO()
 
 	ibs.SetTxContext(1, 1)
 	bal, err := ibs.GetBalance(addr)
@@ -138,7 +142,7 @@ func TestEIP8246_FinalizeTx_PreservesSameTxCredit(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(7), bal)
 }
 
-// getVersionedAccount must not treat a later Balance/Nonce/CodeHash write
+// getAccount must not treat a later Balance/Nonce/CodeHash write
 // as a revival. An in-block-created account that self-destructs (preserving
 // balance) and is then funded by a later tx must still be reconstructed — with
 // the later funding overlaid — so a concurrent reader sees it exist, matching
@@ -214,7 +218,7 @@ func TestEIP8246_VersionedStateReader_BurnReadsAbsent(t *testing.T) {
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeTransfer))
 	_, err := ibs.Selfdestruct(addr, false /* burn */)
 	require.NoError(t, err)
-	vm.FlushVersionedWrites(finalizedWrites(t, ibs, &chain.Rules{IsAmsterdam: true}), true)
+	vm.FlushWrites(finalizedWrites(t, ibs, &chain.Rules{IsAmsterdam: true}), true)
 
 	vsr := NewVersionedStateReader(6, ReadSet{}, vm, nil)
 	acc, err := vsr.ReadAccountData(addr)
@@ -246,8 +250,9 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		require.NoError(t, tx0.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
 		_, err := tx0.Selfdestruct(addr, true)
 		require.NoError(t, err)
-		require.NoError(t, tx0.MakeWriteSet(rules, NewNoopWriter()))
-		vm.FlushVersionedWrites(tx0.VersionedWrites(), true)
+		writes, err := tx0.FinalizedWrites(rules)
+		require.NoError(t, err)
+		tx0.FlushWritesToVersionMap(writes)
 		tx1 := New(reader)
 		defer tx1.Close()
 		tx1.SetTxContext(0, 1)
@@ -267,14 +272,21 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 	t.Run("assembler-shared-ibs", func(t *testing.T) {
 		t.Parallel()
 		reader := newAccountStateReader()
+		vm := NewVersionMap(nil)
 		ibs := New(reader)
 		defer ibs.Close()
 		ibs.SetTxContext(1, 0)
+		ibs.SetVersion(0)
+		ibs.SetVersionMap(vm)
 		require.NoError(t, ibs.CreateAccount(addr, true))
 		require.NoError(t, ibs.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
 		_, err := ibs.Selfdestruct(addr, true)
 		require.NoError(t, err)
-		require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+		writes, err := ibs.FinalizedWrites(rules)
+		require.NoError(t, err)
+		ibs.FlushWritesToVersionMap(writes)
+		ibs.EndTransaction()
+		ibs.ResetIO()
 		ibs.SetTxContext(1, 1)
 		require.NoError(t, ibs.CreateAccount(addr, true))
 		inc, err := ibs.GetIncarnation(addr)
@@ -288,9 +300,8 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 
 // Account-level reconstruction of a preserved account must agree with the
 // field-level reads: a later tx's Nonce/CodeHash map entries overlay the
-// reconstructed account exactly like a later balance write does, so a caller
-// materializing the account through getStateObject sees the same fields a
-// per-path read returns.
+// reconstructed account exactly like a later balance write does, so the
+// account record sees the same fields a per-path read returns.
 func TestEIP8246_PreservedAccount_OverlaysLaterFieldWrites(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x8246F"))
@@ -309,17 +320,20 @@ func TestEIP8246_PreservedAccount_OverlaysLaterFieldWrites(t *testing.T) {
 	ibs.SetTxContext(0, 2)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists, "the preserved account must exist")
 	fieldNonce, err := ibs.GetNonce(addr)
 	require.NoError(t, err)
 	fieldCodeHash, err := ibs.GetCodeHash(addr)
 	require.NoError(t, err)
-	obj, err := ibs.getStateObject(addr, false)
+	require.Equal(t, uint64(7), fieldNonce, "the later-tx nonce write must overlay")
+	require.Equal(t, laterCodeHash, fieldCodeHash, "the later-tx code hash write must overlay")
+	acc, _, _, err := ibs.accountBase(addr, false)
 	require.NoError(t, err)
-	require.NotNil(t, obj, "the preserved account must materialize")
-	require.Equal(t, fieldNonce, obj.data.Nonce, "account-level nonce must agree with the field-level read")
-	require.Equal(t, fieldCodeHash, obj.data.CodeHash, "account-level code hash must agree with the field-level read")
-	require.Equal(t, uint64(7), obj.data.Nonce)
-	require.Equal(t, laterCodeHash, obj.data.CodeHash)
+	require.NotNil(t, acc)
+	require.Equal(t, uint64(7), acc.Nonce, "the account record must carry the later-tx nonce")
+	require.Equal(t, laterCodeHash, acc.CodeHash, "the account record must carry the later-tx code hash")
 }
 
 // Under EIP-8246 a contract created at an absent address and destroyed in one tx leaves only its
@@ -349,7 +363,7 @@ func TestEIP8246_CreateDestructPublishesAPlainBalance(t *testing.T) {
 					reader = &sdAccountReader{addr: addr, account: &acc}
 					removal := &WriteSet{}
 					removal.SetEmptyRemoval(addr, Version{TxIndex: 1})
-					vm.FlushVersionedWrites(removal, true)
+					vm.FlushWrites(removal, true)
 				}
 				ibs := NewWithVersionMap(reader, vm)
 				defer ibs.Close()
@@ -508,7 +522,7 @@ func TestEIP8246_CreateDestructOverAnExistingAccountPublishesACreation(t *testin
 			dead, ok := ws.GetStorage(addr, slot)
 			require.True(t, ok && dead.Val.IsZero(), "the dead slot's zero write stays for readers of the state changes")
 
-			vm.FlushVersionedWrites(ws, true)
+			vm.FlushWrites(ws, true)
 			later := NewWithVersionMap(reader, vm)
 			defer later.Close()
 			later.SetTxContext(1, 3)

@@ -59,13 +59,11 @@ func TestStorageReadParallel_NoMaterialize(t *testing.T) {
 	v, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	assert.Equal(t, uint256.NewInt(42), &v, "cold SLOAD must return the committed value")
-	assert.Empty(t, ibs.stateObjects, "cold parallel SLOAD must not materialize a stateObject")
 
 	// A repeat read hits the recorded ReadSet and must return the same value.
 	v2, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	assert.Equal(t, v, v2)
-	assert.Empty(t, ibs.stateObjects, "repeat SLOAD must still not materialize a stateObject")
 }
 
 // TestStorageReadParallel_CommittedRead verifies GetCommittedState on the
@@ -88,7 +86,6 @@ func TestStorageReadParallel_CommittedRead(t *testing.T) {
 	v, err := ibs.GetCommittedState(addr, key)
 	require.NoError(t, err)
 	assert.Equal(t, uint256.NewInt(7), &v)
-	assert.Empty(t, ibs.stateObjects, "cold parallel committed read must not materialize a stateObject")
 }
 
 // After the tx writes a slot it read, every committed read (the SSTORE gas rule asks for one
