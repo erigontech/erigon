@@ -2335,18 +2335,26 @@ func (vm *VersionMap) validateBalanceAtDestruct(addr accounts.Address, tr Versio
 	return VersionValid
 }
 
-// validateAccountAtMarker rejects an account read that matches the version of the BAL existence
-// marker but not the account's existence. A destruct seeded for the marker's tx can have the
-// same version, but the marker records an account that exists: an absent read is valid only
-// while its destruct holds, and a present read from the marker only while no destruct removes
-// the account. Only a sealed write revives the account here: a withdrawn credit does not
-// re-validate a tx that read only the account's existence.
-func (vm *VersionMap) validateAccountAtMarker(addr accounts.Address, tr VersionedRead[AccountView], txIdx int) VersionValidity {
+// validateAccountAtSeed rejects an account read that matches the version of a destruct the BAL
+// seeds but not the account's existence. Two account cells can have that version too:
+//   - The BAL existence marker records an account that exists. An absent read is valid only while
+//     its destruct holds, and a present read from the marker only while no destruct removes the
+//     account. Only a sealed write revives the account here: a withdrawn credit does not
+//     re-validate a tx that read only the account's existence.
+//   - A run of the destruct's tx can write an account cell there. A present read of an account
+//     cell is valid only while the tx that wrote it has an account cell.
+func (vm *VersionMap) validateAccountAtSeed(addr accounts.Address, tr VersionedRead[AccountView], txIdx int) VersionValidity {
 	if tr.Val != nil && !tr.Val.IsNil() {
-		if tr.accSource != AccountFromBAL {
+		if e := vm.load(addr); e == nil || !e.destructed.Load() {
 			return VersionValid
 		}
-		if e := vm.load(addr); e == nil || !e.destructed.Load() {
+		if tr.accSource != AccountFromBAL {
+			if tr.Version.TxIndex < 0 {
+				return VersionValid
+			}
+			if _, res, _ := vm.ReadAddress(addr, tr.Version.TxIndex+1); res.DepIdx() != tr.Version.TxIndex {
+				return VersionInvalid
+			}
 			return VersionValid
 		}
 		if st, _, destroyedAt, _ := vm.ResolvedAccountLifecycleAt(addr, txIdx); st == LifecycleAbsent && !vm.destructKeptBalance(addr, destroyedAt) {
@@ -2392,7 +2400,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		if !ok(validatePath(a, AddressPath, tr.ReadHeader)) {
 			return
 		}
-		if vm.HasBAL && !ok(vm.validateAccountAtMarker(a, tr, txIdx)) {
+		if vm.HasBAL && !ok(vm.validateAccountAtSeed(a, tr, txIdx)) {
 			return
 		}
 	}

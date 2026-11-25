@@ -1123,6 +1123,7 @@ func (ibs *IntraBlockState) accountBase(addr accounts.Address, readStorage bool)
 	// A repeat read keeps a recorded committed absence: validation rejects it if a
 	// destruct or re-creation was flushed since.
 	repeatedCommittedAbsence := readAccount == nil && source == StorageRead && ibs.readAbsentFromCommitted(addr)
+	var recreation *ReadResult
 	if readAccount == nil && !repeatedCommittedAbsence {
 		if ibs.versionMap.absentAccountHook != nil {
 			ibs.versionMap.absentAccountHook()
@@ -1164,13 +1165,15 @@ func (ibs *IntraBlockState) accountBase(addr accounts.Address, readStorage bool)
 				// estimate again, so the committed record must not revive the account, here or
 				// in a later load of it. Only a re-creation by the destroying tx itself is left to
 				// the committed reader.
-				if _, res, _ := ibs.versionMap.ReadAddress(addr, destructTxIndex+1); res.DepIdx() != destructTxIndex || res.accSource() == AccountFromBAL {
+				_, res, _ := ibs.versionMap.ReadAddress(addr, destructTxIndex+1)
+				if res.DepIdx() != destructTxIndex || res.accSource() == AccountFromBAL {
 					destructVersion := sdRes.Version()
 					if _, ok := ibs.reads.GetAddress(addr); !ok {
 						ibs.reads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: destructVersion}})
 					}
 					return nil, MapRead, destructVersion, nil
 				}
+				recreation = &res
 			}
 		}
 	}
@@ -1203,6 +1206,16 @@ func (ibs *IntraBlockState) accountBase(addr accounts.Address, readStorage bool)
 		// An in-flight destruct below is not net-absent yet, but the committed record predates it.
 		if destructDep != UnknownDep {
 			ibs.dep = max(ibs.dep, destructDep)
+		}
+		// Only the re-creation keeps the account present, so the read must fail validation once it is gone.
+		if recreation != nil {
+			if recreation.Status() == MVReadResultDependency {
+				ibs.dep = max(ibs.dep, recreation.DepIdx())
+			}
+			if _, ok := ibs.versionedReads.GetAddress(addr); !ok {
+				acc := *readAccount
+				ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: recreation.Version()}, Val: NewAccountView(&acc)})
+			}
 		}
 	}
 
