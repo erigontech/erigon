@@ -188,13 +188,12 @@ func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerI
 	}
 	entries, err := decodeBlockAccessListsResponse(payload, len(reqs))
 	if err != nil {
-		f.penalize(ctx, peerId)
+		f.penalize(ctx, peerId, err)
 		return nil, err
 	}
 	out, err := validateBALResponse(reqs, entries)
-	if errors.Is(err, ErrBadBALResponse) {
-		f.logger.Debug("[p2p.bal] penalizing peer for bad BAL response", "peerId", peerId, "err", err)
-		f.penalize(ctx, peerId)
+	if err != nil {
+		f.penalize(ctx, peerId, err)
 	}
 	// Mark a BAL missing only when the peer explicitly reports it as unavailable.
 	// A short reply leaves later blocks unanswered, and a discarded entry may
@@ -304,9 +303,9 @@ func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *P
 	return message.EncodedAccessLists, nil
 }
 
-func (f *balFetcher) penalize(ctx context.Context, peerId *PeerId) {
-	err := f.peerPenalizer.Penalize(ctx, peerId)
-	if err != nil {
+func (f *balFetcher) penalize(ctx context.Context, peerId *PeerId, reason error) {
+	f.logger.Debug("[p2p.bal] penalizing peer for bad BAL response", "peerId", peerId, "err", reason)
+	if err := f.peerPenalizer.Penalize(ctx, peerId); err != nil {
 		f.logger.Debug("[p2p.bal] failed to penalize peer", "peerId", peerId, "err", err)
 	}
 }

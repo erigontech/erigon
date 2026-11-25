@@ -17,6 +17,7 @@
 package p2p
 
 import (
+	"bytes"
 	"context"
 	"runtime"
 	"sync/atomic"
@@ -32,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -66,20 +68,15 @@ func TestBALFetcherMatchesPeerAndRequest(t *testing.T) {
 		{"reply from another peer", PeerIdFromUint64(2), 0, malformed, context.DeadlineExceeded},
 		{"reply to another request", peerId, 1, malformed, context.DeadlineExceeded},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				test := newMessageListenerTest(t)
-				defer test.ctxCancel()
-				fetcher := test.mockBALRequest(t, peerId, req.Hash, func(requestId uint64) {
-					test.sendBlockAccessLists(t, tc.responsePeerId, requestId+tc.requestIdOffset, []rlp.RawValue{tc.entry})
-				})
-				go test.messageListener.listenInboundMessages(test.ctx)
-				out, err := fetcher.fetchFromPeer(test.ctx, []BALRequest{req}, peerId, 100*time.Millisecond)
-				require.ErrorIs(t, err, tc.wantErr)
-				if tc.wantErr == nil {
-					require.Equal(t, want, out[req.Hash].BlockAccessList())
-				}
+		runBALFetcherCase(t, tc.name, func(t *testing.T, test *messageListenerTest) {
+			fetcher := test.mockBALRequest(t, peerId, req.Hash, func(requestId uint64) {
+				test.sendBlockAccessLists(t, tc.responsePeerId, requestId+tc.requestIdOffset, []rlp.RawValue{tc.entry})
 			})
+			out, err := fetcher.fetchFromPeer(test.ctx, []BALRequest{req}, peerId, 100*time.Millisecond)
+			require.ErrorIs(t, err, tc.wantErr)
+			if tc.wantErr == nil {
+				require.Equal(t, want, out[req.Hash].BlockAccessList())
+			}
 		})
 	}
 }
@@ -103,31 +100,46 @@ func TestBALFetcherResponse(t *testing.T) {
 		{"malformed entry", []rlp.RawValue{{0xc1}}, empty.BlockAccessListHash, false, rlp.ErrValueTooLarge},
 		{"excess entry is never read", []rlp.RawValue{{0x80}, {0xc1}}, empty.BlockAccessListHash, false, ErrBadBALResponse},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			test := newMessageListenerTest(t)
+		runBALFetcherCase(t, tc.name, func(t *testing.T, test *messageListenerTest) {
 			peerId := PeerIdFromUint64(1)
+			var logs bytes.Buffer
 			if tc.wantErr != nil {
+				test.logger = log.New()
+				test.logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
 				mockExpectPenalizePeer(t, test.sentryClient, peerId)
 			}
 			req := BALRequest{Hash: common.Hash{1}, Number: 100, GasLimit: 3 * types.BalItemCost, ExpectedHash: tc.expectedHash}
 			fetcher := test.mockBALRequest(t, peerId, req.Hash, func(requestId uint64) {
 				test.sendBlockAccessLists(t, peerId, requestId, tc.response)
 			})
-			test.run(func(ctx context.Context, t *testing.T) {
-				out, err := fetcher.fetchFromPeer(ctx, []BALRequest{req}, peerId, time.Second)
-				require.ErrorIs(t, err, tc.wantErr)
-				require.Empty(t, out)
-				require.Equal(t, !tc.missing, fetcher.peerTracker.PeerMayHaveBALNum(peerId, 100))
-				require.Equal(t, !tc.missing, fetcher.peerTracker.PeerMayHaveBALNum(peerId, 99))
-				require.True(t, fetcher.peerTracker.PeerMayHaveBALNum(peerId, 101))
-			})
+			out, err := fetcher.fetchFromPeer(test.ctx, []BALRequest{req}, peerId, time.Second)
+			require.ErrorIs(t, err, tc.wantErr)
+			if tc.wantErr != nil {
+				require.Contains(t, logs.String(), err.Error())
+			}
+			require.Empty(t, out)
+			require.Equal(t, !tc.missing, fetcher.peerTracker.PeerMayHaveBALNum(peerId, 100))
+			require.Equal(t, !tc.missing, fetcher.peerTracker.PeerMayHaveBALNum(peerId, 99))
+			require.True(t, fetcher.peerTracker.PeerMayHaveBALNum(peerId, 101))
 		})
 	}
 }
 
+func runBALFetcherCase(t *testing.T, name string, run func(*testing.T, *messageListenerTest)) {
+	t.Helper()
+	t.Run(name, func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			test := newMessageListenerTest(t)
+			defer test.ctxCancel()
+			test.mockSentryStreams()
+			go test.messageListener.listenInboundMessages(test.ctx)
+			run(t, test)
+		})
+	})
+}
+
 func (mlt *messageListenerTest) mockBALRequest(t *testing.T, peerId *PeerId, hash common.Hash, reply func(uint64)) *balFetcher {
 	t.Helper()
-	mlt.mockSentryStreams()
 	mlt.sentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, req *sentryproto.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 			require.Equal(t, sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71, req.Data.Id)
