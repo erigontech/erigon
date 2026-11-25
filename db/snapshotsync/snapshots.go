@@ -773,39 +773,67 @@ func truncateAtGap(segments VisibleSegments) VisibleSegments {
 	return segments
 }
 
-// recalcVisibleFiles publishes a fresh visible bundle from dirty and retires `retired`
-// (segments removed from dirty during the outgoing bundle's tenure): they are unlinked
-// only once every reader pinning that generation has drained. Must be called with
-// dirtyLock held, so the caller's dirty mutation and this publish are one atomic step.
-// mergedFileOfEveryType hides a segment that covers smaller segments of its own type unless every type has a
-// segment of the same range: the type then shows the smaller ones, so a merge range never cuts through its file.
+// mergedFileOfEveryType hides a segment that other types lack when its own smaller segments cover every base-type
+// segment under it. Merge ranges come from the base type, so they then never cut through a visible file, and
+// hiding it shows no less of the base type's range.
 func (s *BaseRoSnapshots) mergedFileOfEveryType() func(*DirtySegment) bool {
+	ranges := make(map[snaptype.Enum][]Range, len(s.enums))
 	types := map[Range]int{}
 	for _, t := range s.enums {
-		seen := map[Range]struct{}{}
 		s.dirty[t].Walk(func(segments []*DirtySegment) bool {
 			for _, sn := range segments {
-				if _, ok := seen[sn.Range]; sn.IsIndexed() && !ok {
-					seen[sn.Range] = struct{}{}
+				if rs := ranges[t]; sn.IsIndexed() && !slices.Contains(rs, sn.Range) {
+					ranges[t] = append(rs, sn.Range)
 					types[sn.Range]++
 				}
 			}
 			return true
 		})
 	}
-	return func(sn *DirtySegment) bool {
-		if types[sn.Range] == len(s.enums) {
-			return true
+	base := ranges[s.baseSegType.Enum()]
+	hidden := map[snaptype.Enum]map[Range]bool{}
+	for t, rs := range ranges {
+		for _, r := range rs {
+			if types[r] < len(s.enums) && smallerCoverBase(rs, base, r) {
+				if hidden[t] == nil {
+					hidden[t] = map[Range]bool{}
+				}
+				hidden[t][r] = true
+			}
 		}
-		covers := false
-		s.dirty[sn.segType.Enum()].Walk(func(segments []*DirtySegment) bool {
-			covers = slices.ContainsFunc(segments, func(small *DirtySegment) bool { return small.IsIndexed() && small.isSubSetOf(sn) })
-			return !covers
-		})
-		return !covers
 	}
+	return func(sn *DirtySegment) bool { return !hidden[sn.segType.Enum()][sn.Range] }
 }
 
+// smallerCoverBase reports whether some base range lies inside r and the own ranges inside r, other than r, cover
+// each such base range with no hole.
+func smallerCoverBase(own, base []Range, r Range) bool {
+	under := false
+	for _, b := range base {
+		if b == r || b.from < r.from || b.to > r.to {
+			continue
+		}
+		reach := b.from
+		for extended := true; extended && reach < b.to; {
+			extended = false
+			for _, small := range own {
+				if small != r && small.from >= r.from && small.to <= r.to && small.from <= reach && small.to > reach {
+					reach, extended = small.to, true
+				}
+			}
+		}
+		if reach < b.to {
+			return false
+		}
+		under = true
+	}
+	return under
+}
+
+// recalcVisibleFiles publishes a fresh visible bundle from dirty and retires `retired`
+// (segments removed from dirty during the outgoing bundle's tenure): they are unlinked
+// only once every reader pinning that generation has drained. Must be called with
+// dirtyLock held, so the caller's dirty mutation and this publish are one atomic step.
 func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired retiredSegments) {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())

@@ -646,6 +646,29 @@ func TestMergeRangeWithCoveredBodies(t *testing.T) {
 	require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 0, 100_000, snaptype2.Bodies.Enum())))
 }
 
+// A merged file whose smaller files leave a hole under the transactions files stays visible: hiding it would cut
+// every type at the hole.
+func TestVisibleBlockFilesKeepAMergedFileItsSmallerFilesDoNotCover(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for from := uint64(0); from < 100_000; from += 10_000 {
+		for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Transactions} {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+	createTestSegmentFile(t, 0, 10_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+	createTestSegmentFile(t, 10_000, 20_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		ranges := visibleRanges(s, typ)
+		require.NotEmpty(t, ranges, typ.Name())
+		require.Equal(t, uint64(100_000), ranges[len(ranges)-1].To(), typ.Name())
+	}
+}
+
 func TestMergeRangeUnderALargerBodiesFile(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
