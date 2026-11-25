@@ -18,7 +18,6 @@ package execmodule_test
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"testing"
 
@@ -173,20 +172,31 @@ func TestForkchoiceLoweringFinalityDuringStateFileBuild(t *testing.T) {
 }
 
 func TestStateFileBuildKeepsRewindsOutOfFiles(t *testing.T) {
-	for _, keepChangesets := range []bool{false, true} {
-		t.Run(fmt.Sprintf("keep_changesets=%t", keepChangesets), func(t *testing.T) {
-			m, chainPack, lastFileBlock := newSnapshotBoundaryChain(t, execmoduletester.WithAlwaysGenerateChangesets(keepChangesets))
-			ctx := t.Context()
-			finalizedHash := chainPack.Blocks[lastFileBlock-1].Hash()
-			require.Equal(t, execmodule.ExecutionStatusSuccess, updateForkChoice(t, m, chainPack.TopBlock.Hash(), finalizedHash, finalizedHash).Status)
-			finished, err := m.ExecModule.Prune(ctx)
-			require.NoError(t, err)
-			<-finished
-			m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).WaitForFiles()
+	m, chainPack, lastFileBlock := newSnapshotBoundaryChain(t)
+	ctx := t.Context()
+	pruneWithFinalized(t, m, chainPack, lastFileBlock)
+	require.Zero(t, m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EndTxNumMinimax(), "a block with a changeset must stay out of the files")
+	require.NoError(t, m.ExecModule.SetHead(ctx, lastFileBlock-1))
+	requireFilesOnCanonicalChain(t, m, chainPack)
+}
 
-			require.Zero(t, m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EndTxNumMinimax(), "a block with a changeset must stay out of the files")
-			require.NoError(t, m.ExecModule.SetHead(ctx, lastFileBlock-1))
-			requireFilesOnCanonicalChain(t, m, chainPack)
-		})
-	}
+// With every changeset kept, collation still deletes the changesets of the blocks it puts in files.
+func TestStateFileBuildDeletesTheChangesetsOfCollatedBlocks(t *testing.T) {
+	m, chainPack, lastFileBlock := newSnapshotBoundaryChain(t, execmoduletester.WithAlwaysGenerateChangesets(true))
+	ctx := t.Context()
+	pruneWithFinalized(t, m, chainPack, lastFileBlock)
+	require.Equal(t, m.DB.StepSize(), m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EndTxNumMinimax())
+	require.ErrorContains(t, m.ExecModule.SetHead(ctx, lastFileBlock-1), "minimum unwindable block")
+	require.NoError(t, m.ExecModule.SetHead(ctx, lastFileBlock))
+	requireFilesOnCanonicalChain(t, m, chainPack)
+}
+
+func pruneWithFinalized(t *testing.T, m *execmoduletester.ExecModuleTester, chainPack *blockgen.ChainPack, finalized uint64) {
+	t.Helper()
+	finalizedHash := chainPack.Blocks[finalized-1].Hash()
+	require.Equal(t, execmodule.ExecutionStatusSuccess, updateForkChoice(t, m, chainPack.TopBlock.Hash(), finalizedHash, finalizedHash).Status)
+	finished, err := m.ExecModule.Prune(t.Context())
+	require.NoError(t, err)
+	<-finished
+	m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).WaitForFiles()
 }

@@ -674,36 +674,38 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	}
 
 	blockPruneTo := s.FinalityCtx.PruneToBlockNum()
-	// AlwaysGenerateChangesets disables this prune so the node retains
-	// changesets for unwinds deeper than MaxReorgDepth (debug / integration
-	// tool / explicit --experimental.always-generate-changesets flag).
-	// Without the guard, the flag still controls *generation* but every
-	// generated changeset is pruned 96 blocks later, defeating the point.
-	if !cfg.syncCfg.AlwaysGenerateChangesets {
-		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
-		// Some chains produce blocks with 400 chunks of diff = 3mb
-		if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
-			pruneChangeSetsStartTime := time.Now()
-			if err := rawdb.PruneTable(
-				tx,
-				kv.ChangeSets3,
-				blockPruneTo,
-				ctx,
-				pruneDiffsLimit,
-				pruneChangeSetsTimeout,
-				logger,
-				s.LogPrefix(),
-			); err != nil {
-				return err
-			}
-			if duration := time.Since(pruneChangeSetsStartTime); duration > pruneChangeSetsTimeout {
-				logger.Debug(
-					fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
-					"duration", duration,
-					"timeout", pruneChangeSetsTimeout,
-					"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-				)
-			}
+	changesetsPruneTo := blockPruneTo
+	// AlwaysGenerateChangesets keeps changesets for unwinds deeper than MaxReorgDepth (debug / integration
+	// tool / explicit --experimental.always-generate-changesets flag). Blocks in state files can not be
+	// unwound, so only the changesets of the steps about to be collated go.
+	if cfg.syncCfg.AlwaysGenerateChangesets {
+		if changesetsPruneTo, err = collatableStepsEnd(ctx, tx, cfg.blockReader.TxnumReader(), s.FinalityCtx.CollateToBlockNum()); err != nil {
+			return err
+		}
+	}
+	// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
+	// Some chains produce blocks with 400 chunks of diff = 3mb
+	if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
+		pruneChangeSetsStartTime := time.Now()
+		if err := rawdb.PruneTable(
+			tx,
+			kv.ChangeSets3,
+			changesetsPruneTo,
+			ctx,
+			pruneDiffsLimit,
+			pruneChangeSetsTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
+			return err
+		}
+		if duration := time.Since(pruneChangeSetsStartTime); duration > pruneChangeSetsTimeout {
+			logger.Debug(
+				fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
+				"duration", duration,
+				"timeout", pruneChangeSetsTimeout,
+				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+			)
 		}
 	}
 
@@ -754,6 +756,23 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		return err
 	}
 	return nil
+}
+
+// collatableStepsEnd is the block after the last step not yet in state files whose blocks all reach no
+// higher than collateTo.
+func collatableStepsEnd(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, collateTo uint64) (uint64, error) {
+	stepSize := tx.Debug().StepSize()
+	var end uint64
+	for step := tx.Debug().TxNumsInFiles(kv.StateDomains...) / stepSize; ; step++ {
+		lastBlock, ok, err := txNumsReader.FindBlockNum(ctx, tx, (step+1)*stepSize-1)
+		if err != nil {
+			return 0, err
+		}
+		if !ok || lastBlock > collateTo {
+			return end, nil
+		}
+		end = lastBlock + 1
+	}
 }
 
 // historyRetireCutoffs maps the prune mode to per-domain retirement cutoffs, in

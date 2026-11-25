@@ -89,6 +89,10 @@ func (c FinalityContext) RetireToBlockNum() uint64 {
 	return c.retentionBlockNum
 }
 
+func (c FinalityContext) CollateToBlockNum() uint64 {
+	return c.collateToBlockNum
+}
+
 func (c FinalityContext) MaxReorgDepth() uint64 {
 	return c.maxReorgDepth
 }
