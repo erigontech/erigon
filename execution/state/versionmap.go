@@ -2320,11 +2320,12 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	return vm.ValidateReadSet(txIdx, lastIO.ReadSet(txIdx), checkVersion, traceInvalid, tracePrefix)
 }
 
-// validateBalanceAtDestruct rejects a stale balance read at a destruct's version. A non-zero balance
-// read at a destruct's version came from the balance cell. A re-run can move that cell to a new
-// incarnation while the seeded destruct keeps its version.
+// validateBalanceAtDestruct rejects a stale balance read at a destruct's version. A read that is not
+// the destruct's wipe came from the balance cell, also a zero one: a run at the seed's incarnation
+// can write a live zero there. A re-run can move that cell to a new incarnation while the seeded
+// destruct keeps its version.
 func (vm *VersionMap) validateBalanceAtDestruct(addr accounts.Address, tr VersionedRead[uint256.Int], txIdx int) VersionValidity {
-	if tr.Val.IsZero() {
+	if tr.wiped {
 		return VersionValid
 	}
 	if e := vm.load(addr); e == nil || !e.destructed.Load() {

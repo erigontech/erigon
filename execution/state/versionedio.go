@@ -73,6 +73,7 @@ type ReadHeader struct {
 	Source    ReadSource
 	Version   Version
 	internal  bool // conflict-detection only; excluded from the block access list
+	wiped     bool // a balance read of the zero a destruct left, at the destruct's version
 	accSource AccountSource
 }
 
