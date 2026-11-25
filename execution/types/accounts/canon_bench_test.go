@@ -22,6 +22,7 @@ import (
 	"runtime"
 	"slices"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/erigontech/erigon/common"
@@ -61,6 +62,12 @@ func BenchmarkCanonMigrationOrder(b *testing.B) {
 				o.sort(ptrs)
 				c.addWeak(ptrs)
 				c.prev.Store(nil) // the cleanups capture c, so a set prev would keep this generation alive across iterations
+				b.StopTimer()
+				for c.weak.Size() > 0 { // cleanups run after runtime.GC returns; they must not overlap the next timed migration
+					runtime.GC()
+					time.Sleep(time.Millisecond)
+				}
+				b.StartTimer()
 			}
 		})
 	}

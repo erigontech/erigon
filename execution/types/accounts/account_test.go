@@ -458,6 +458,8 @@ func internAndEvict(t *testing.T, k common.Hash) {
 	t.Helper()
 	requireCanonKey(t, k, InternKey(k))
 	keyCanon.flush()
+	_, ok := keyCanon.weak.Load(k)
+	require.True(t, ok, "flush must move k to the weak table")
 	other := k
 	other[10]++
 	require.Same(t, keySlot(k), keySlot(other))
@@ -515,9 +517,12 @@ func TestCanonTableKeepsIdentityAcrossGenerations(t *testing.T) {
 			for i := range 1000 {
 				var v common.Hash
 				v[0], v[1], v[2] = byte(g+1), byte(i), byte(i>>8)
-				first := c.intern(v)
-				require.Same(t, first, c.intern(v))
-				require.Same(t, held, c.intern(k))
+				if first := c.intern(v); c.intern(v) != first {
+					t.Errorf("%x lost its identity", v)
+				}
+				if c.intern(k) != held {
+					t.Errorf("held key %x lost its identity", k)
+				}
 			}
 		})
 	}
@@ -566,12 +571,8 @@ func TestCanonTableBoundsGenerationsWhileMigrating(t *testing.T) {
 			c.intern(common.Hash{1, byte(i), byte(i >> 8)})
 		}
 	}()
-	maxSize := 0
-	for deadline := time.Now().Add(200 * time.Millisecond); time.Now().Before(deadline); {
-		maxSize = max(maxSize, c.cur.Load().m.Size())
-		runtime.Gosched()
-	}
-	maxSize = max(maxSize, c.cur.Load().m.Size())
+	require.Eventually(t, func() bool { return c.cur.Load().m.Size() >= 2*limit }, 10*time.Second, time.Millisecond)
+	require.Never(t, func() bool { return c.cur.Load().m.Size() > 2*limit }, 100*time.Millisecond, time.Millisecond)
 	c.migrate.Unlock()
 	c.rotate()
 	select {
@@ -579,7 +580,6 @@ func TestCanonTableBoundsGenerationsWhileMigrating(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("intern did not finish after migrate was released")
 	}
-	require.Equal(t, 2*limit, maxSize)
 	require.Eventually(t, func() bool {
 		return c.cur.Load().m.Size() < limit && c.prev.Load() == nil
 	}, 10*time.Second, time.Millisecond)
