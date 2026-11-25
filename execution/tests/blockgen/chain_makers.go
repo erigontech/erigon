@@ -389,9 +389,8 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 	return domains.Commit(ctx, tx)
 }
 
-// GenerateChain creates a chain of n blocks. The first block's
-// parent will be the provided parent. db is used to store
-// intermediate states and should contain the parent's state trie.
+// GenerateChain builds n blocks on top of parent. It reads the parent's state
+// from db and carries changes between generated blocks in a temporary overlay.
 //
 // The generator function is called with a new block generator for
 // every block. Any transactions and uncles added to the generator
@@ -402,20 +401,17 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
 func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
-	return generateChain(config, parent, engine, db, n, nil, gen)
+	return GenerateChainWithTimeOffsets(config, parent, engine, db, make([]int64, n), gen)
 }
 
 // GenerateChainWithTimeOffsets generates one block per offset. Each offset adds
 // signed seconds to the usual ten-second interval from that block's parent.
 // The header and fork transitions use the resulting timestamp before gen runs.
 func GenerateChainWithTimeOffsets(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, timeOffsets []int64, gen func(int, *BlockGen)) (*ChainPack, error) {
-	return generateChain(config, parent, engine, db, len(timeOffsets), timeOffsets, gen)
-}
-
-func generateChain(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, n int, timeOffsets []int64, gen func(int, *BlockGen)) (*ChainPack, error) {
 	if config == nil {
 		config = chain.AllProtocolChanges
 	}
+	n := len(timeOffsets)
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	ctx := context.Background()
@@ -537,10 +533,8 @@ func generateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			b.versionMap.FlushWrites(writes, true)
 			ibs.ResetIO()
 
-			// Write state changes to db
-			// Commit from the versionMap write-set via ApplyWrites, the same domain apply
-			// the executor uses, so generation matches import. Each recorded phase
-			// (init txIdx=-1, txs, finalize) is applied in order.
+			// Apply initialization, transaction, and finalization writes to the overlay
+			// in execution order so the state root matches the one computed at import.
 			blockNum := b.header.Number.Uint64()
 			for _, ws := range b.blockIO.Outputs() {
 				if ws == nil || ws.IsEmpty() {
@@ -575,11 +569,7 @@ func generateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	}
 
 	const defaultBlockInterval = 10
-	for i := range n {
-		var offset int64
-		if timeOffsets != nil {
-			offset = timeOffsets[i]
-		}
+	for i, offset := range timeOffsets {
 		timestamp := parent.Time() + defaultBlockInterval + uint64(offset)
 		if offset <= -defaultBlockInterval || timestamp <= parent.Time() {
 			return nil, fmt.Errorf("block %d time offset %d out of range for parent timestamp %d", parent.NumberU64()+1, offset, parent.Time())
