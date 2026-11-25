@@ -248,7 +248,9 @@ func (e *ExecModule) discardUnexecutedCanonical(ctx context.Context) (head commo
 				return err
 			}
 		}
-		return writeForkChoiceHashes(tx, head, common.Hash{}, common.Hash{})
+		// Startup follows these two heads. The consensus client's forkchoice stays at its last accepted update.
+		rawdb.WriteHeadBlockHash(tx, head)
+		return rawdb.WriteHeadHeaderHash(tx, head)
 	})
 	return head, err
 }
@@ -842,7 +844,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
 		if errors.Is(err, rules.ErrInvalidBlock) {
-			latestValidHash := rawdb.ReadHeadBlockHash(roTx)
+			var latestValidHash common.Hash
 			if catchupCommitted {
 				teardownOverlay()
 				roTx.Rollback()
@@ -851,6 +853,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				if cleanupErr != nil {
 					return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, cleanupErr, stateFlushingInParallel)
 				}
+			} else {
+				// An uncommitted unwind moves only the overlay's head to the common ancestor.
+				latestValidHash = rawdb.ReadHeadBlockHash(tx)
 			}
 			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 				Status:          ExecutionStatusBadBlock,
