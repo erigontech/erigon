@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
@@ -85,6 +86,29 @@ func TestBlockRetireUsesFinalityContext(t *testing.T) {
 	require.Equal(t, uint64(9_000), blockTo)
 	_, _, can = br.canRetire(8_000, blockFinalityContextStub{retireTo: 1_000}, snaptype.Unknown)
 	require.False(t, can)
+}
+
+func TestMergeBlocksReportsNoProgressWhenRangeIsSkipped(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
+	defer snapshots.Close()
+	for i := uint64(10); i < 20; i++ {
+		for _, typ := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, i*1_000, (i+1)*1_000, typ.Enum(), dirs.Snap, version.V1_0, logger)
+		}
+	}
+	// a larger bodies file hides the small bodies files, so bodies cannot cover the headers merge range
+	createTestSegmentFile(t, 0, 20_000, snaptype2.Bodies.Enum(), dirs.Snap, version.V1_0, logger)
+	require.NoError(t, snapshots.OpenFolder())
+
+	br := NewBlockRetire(t.Context(), 1, dirs, NewBlockReader(snapshots), nil, mdbxtest.NewTestDB(t, dbcfg.ChainDB), &chain.Config{ChainName: networkname.Mainnet}, &ethconfig.Defaults, nil, nil, logger)
+	defer br.Close()
+	merged, err := br.MergeBlocks(t.Context(), log.LvlInfo, dbservices.NoopSeederClient{})
+	require.NoError(t, err)
+	require.False(t, merged)
 }
 
 // blockFilesTxStub is a kv.Tx that also exposes a pinned block-files view,

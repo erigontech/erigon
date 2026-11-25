@@ -280,8 +280,8 @@ func (br *BlockRetire) MergeBlocks(
 		//}
 		return false, nil
 	}
-	merged = true
 	onMerge := func(mergedFileNames []string) error {
+		merged = true
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
