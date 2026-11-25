@@ -219,7 +219,7 @@ func TestMergeSnapshots(t *testing.T) {
 		Ranges := merger.FindMergeRanges(s.Ranges(false), snaptype.Unknown)
 		require.Len(Ranges, 3)
 		// NOTE: TestMergeSnapshots calls Merge with doIndex=false.
-		// Since the merged segment is not indexed, RecalcVisibleSegments will not promote it
+		// Since the merged segment is not indexed, recalcVisibleFiles will not promote it
 		// and the subsegments marked canDelete=true will also be skipped, causing visible
 		// segments to drop to 0 until BuildMissedIndices/OpenFolder runs. This is expected
 		// for doIndex=false merges and is only done in this test to skip redundant index rebuilding.
@@ -1535,7 +1535,7 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Bodies], 5)
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Transactions], 5)
 
-		// dirty retains gapped files; visible is still filtered by RecalcVisibleSegments.
+		// dirty retains gapped files; visible is still filtered by recalcVisibleFiles.
 		require.Equal(7, s.dirty[snaptype2.Enums.Headers].Len())
 		require.Equal(6, s.dirty[snaptype2.Enums.Bodies].Len())
 		require.Equal(6, s.dirty[snaptype2.Enums.Transactions].Len())
@@ -1553,7 +1553,7 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Bodies], 5)
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Transactions], 5)
 
-		// dirty retains overlapping files; visible is still filtered by RecalcVisibleSegments.
+		// dirty retains overlapping files; visible is still filtered by recalcVisibleFiles.
 		require.Equal(7, s.dirty[snaptype2.Enums.Headers].Len())
 		require.Equal(6, s.dirty[snaptype2.Enums.Bodies].Len())
 		require.Equal(7, s.dirty[snaptype2.Enums.Transactions].Len())

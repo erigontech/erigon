@@ -345,7 +345,7 @@ func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool, dirEntries []s
 		return nil
 	}
 
-	// An unindexed segment is never visible (RecalcVisibleSegments requires IsIndexed),
+	// An unindexed segment is never visible (recalcVisibleFiles requires IsIndexed),
 	// so it is never pinned by a reader — building its index races nobody.
 	err = s.openIdx(dir, dirEntries)
 	if err != nil {
@@ -687,10 +687,6 @@ func (s *BaseRoSnapshots) MadvNormal() *BaseRoSnapshots {
 	}
 
 	return s
-}
-
-func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSegments {
-	return truncateAtGap(buildVisibleSegments(dirtySegments, nil))
 }
 
 // buildVisibleSegments picks the largest indexed segments that are not hidden.
