@@ -20,6 +20,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -30,7 +31,7 @@ type replacementDecision struct {
 }
 
 // checkReplacement requires the pool lock and leaves pool state unchanged.
-func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDecision {
+func (p *TxPool) checkReplacement(cacheView kvcache.CacheView, replacement, previous *metaTxn) replacementDecision {
 	newTxn, oldTxn := replacement.TxnSlot, previous.TxnSlot
 	if newTxn.TxType() == FrameTxnType || oldTxn.TxType() == FrameTxnType {
 		if reason := validateFrameReplacement(oldTxn, newTxn, p.cfg.PriceBump, p.cfg.BlobPriceBump); reason != txpoolcfg.Success {
@@ -69,10 +70,6 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 	feecapThreshold.Mul(oldTxn.GetFeeCap(), uint256.NewInt(100+priceBump))
 	feecapThreshold.Div(feecapThreshold, &u256.N100)
 
-	if newTxn.GetValue().Cmp(oldTxn.GetValue()) > 0 {
-		// Potential latent overdraft attack
-		tipThreshold.Mul(tipThreshold, uint256.NewInt(uint64(p.all.count(newTxn.SenderID))))
-	}
 	if newTxn.GetTipCap().Cmp(tipThreshold) < 0 || newTxn.GetFeeCap().Cmp(feecapThreshold) < 0 {
 		rebroadcast := replacement.subPool&IsLocal != 0 && (previous.currentSubPool == PendingSubPool || previous.currentSubPool == BaseFeeSubPool)
 		return replacementDecision{
@@ -80,7 +77,68 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 			rebroadcast: rebroadcast,
 		}
 	}
+	funded, err := p.keepsSenderFunded(cacheView, newTxn, previous)
+	if err != nil {
+		p.logger.Warn("[txpool] checkReplacement: sender info", "err", err)
+		return replacementDecision{reason: txpoolcfg.ErrGetSenderInfo}
+	}
+	if !funded {
+		return replacementDecision{reason: txpoolcfg.InsufficientFunds}
+	}
 	return replacementDecision{}
+}
+
+// keepsSenderFunded reports whether the sender's balance still covers every transaction it covers now
+// once replacement takes the place of previous. Covered transactions run from the account nonce up to
+// the first nonce gap or the first transaction the balance cannot pay for.
+func (p *TxPool) keepsSenderFunded(cacheView kvcache.CacheView, replacement *TxnSlot, previous *metaTxn) (bool, error) {
+	var increase uint256.Int
+	if _, underflow := increase.SubOverflow(requiredBalance(replacement), requiredBalance(previous.TxnSlot)); underflow || increase.IsZero() {
+		return true, nil
+	}
+	senderNonce, balance, _, err := p.senders.info(cacheView, replacement.SenderID)
+	if err != nil {
+		return false, err
+	}
+	// As in onSenderStateChange, frame reservations come out of the balance first.
+	// A replaced frame releases its own reservation.
+	sender := p.senders.senderID2Addr[replacement.SenderID]
+	var funds, fundsAfter uint256.Int
+	reserved := p.frameReservations[sender].cost
+	if balance.Gt(&reserved) {
+		funds.Sub(&balance, &reserved)
+	}
+	if old := previous.TxnSlot.frameValidation; old != nil && old.Payer == sender {
+		reserved.Sub(&reserved, frameMaxFee(previous.TxnSlot))
+	}
+	if balance.Gt(&reserved) {
+		fundsAfter.Sub(&balance, &reserved)
+	}
+
+	var spent uint256.Int
+	previousFunded := false
+	nonce := senderNonce
+	p.all.ascend(replacement.SenderID, func(mt *metaTxn) bool {
+		if mt.keyedNonce || mt.TxnSlot.Nonce < senderNonce {
+			return true
+		}
+		if mt.TxnSlot.Nonce != nonce {
+			return false
+		}
+		var next uint256.Int
+		if _, overflow := next.AddOverflow(&spent, requiredBalance(mt.TxnSlot)); overflow || next.Gt(&funds) {
+			return false
+		}
+		spent = next
+		previousFunded = previousFunded || mt == previous
+		nonce++
+		return true
+	})
+	if !previousFunded {
+		return true, nil
+	}
+	_, overflow := spent.AddOverflow(&spent, &increase)
+	return !overflow && !spent.Gt(&fundsAfter), nil
 }
 
 // validateFrameReplacement checks replacements involving at least one frame.

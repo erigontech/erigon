@@ -569,7 +569,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	if err := p.removeMined(p.all, minedTxns.Txns); err != nil {
 		return frames, err
 	}
-	p.restoreFramesLocked(block, unwindFrames)
+	p.restoreFramesLocked(cacheView, block, unwindFrames)
 
 	var announcements Announcements
 	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, unwindTxns, cells)
@@ -2076,7 +2076,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
 
-		if reason := p.addLocked(mt, &announcements, cells); reason != txpoolcfg.NotSet {
+		if reason := p.addLocked(cacheView, mt, &announcements, cells); reason != txpoolcfg.NotSet {
 			discardReasons[i] = reason
 			continue
 		}
@@ -2126,7 +2126,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 			continue
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
-		if reason := p.addLocked(mt, &announcements, cells); reason != txpoolcfg.NotSet {
+		if reason := p.addLocked(cacheView, mt, &announcements, cells); reason != txpoolcfg.NotSet {
 			p.deletedTxns = append(p.deletedTxns, mt)
 			continue
 		}
@@ -2232,7 +2232,7 @@ func (p *TxPool) updateInSubPool(mt *metaTxn) {
 	}
 }
 
-func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blobCells) txpoolcfg.DiscardReason {
+func (p *TxPool) addLocked(cacheView kvcache.CacheView, mt *metaTxn, announcements *Announcements, cells blobCells) txpoolcfg.DiscardReason {
 	// Find a replacement candidate within the sender's nonce domain.
 	// Account nonces and keyed sequences can have equal values without conflicting.
 	found, _ := p.all.tree.Get(mt)
@@ -2242,7 +2242,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 		}
 	}
 	if found != nil {
-		decision := p.checkReplacement(mt, found)
+		decision := p.checkReplacement(cacheView, mt, found)
 		if decision.rebroadcast {
 			// A local replacement attempt can help the existing transaction propagate.
 			announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.Size, found.TxnSlot.IDHash[:])
@@ -3379,7 +3379,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	}
 
 	immediate, frames := p.splitRestoredTxns(restored)
-	*parked = p.restoreFramesLocked(p.lastSeenBlock.Load(), frames)
+	*parked = p.restoreFramesLocked(cacheView, p.lastSeenBlock.Load(), frames)
 	if header != nil {
 		// Expired roots must not occupy a sender's frame slot while validation is unavailable.
 		pendingSlot := protocol.FrameValidationSlot(header.SlotNumber)

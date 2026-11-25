@@ -730,19 +730,19 @@ func TestFramePoolSharedBalanceReplacements(t *testing.T) {
 	require.Equal(t, txpoolcfg.Success, add(frame, sender))
 	frameCost := frame.Txn.(*types.FrameTransaction).Fees.MaxFee.Uint64()
 	for _, tc := range []struct {
-		fee      uint64
-		cost     uint64
-		wantPool SubPoolType
+		fee  uint64
+		cost uint64
+		want txpoolcfg.DiscardReason
 	}{
-		{2, common.Ether - frameCost, PendingSubPool},
-		{4, common.Ether, QueuedSubPool},
-		{8, common.Ether - frameCost, PendingSubPool},
+		{2, common.Ether - frameCost, txpoolcfg.Success},
+		{4, common.Ether, txpoolcfg.InsufficientFunds},
+		{8, common.Ether - frameCost, txpoolcfg.Success},
 	} {
 		ordinary := newTestTxnSlot(0, 0, tc.fee, tc.fee, 21_000)
 		ordinary.IDHash[0] = byte(tc.fee)
 		ordinary.Txn.GetValue().SetUint64(tc.cost - 21_000*tc.fee)
-		require.Equal(t, txpoolcfg.Success, add(ordinary, payer))
-		require.Equal(t, tc.wantPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
+		require.Equal(t, tc.want, add(ordinary, payer))
+		require.Equal(t, PendingSubPool, pool.all.get(ordinary.SenderID, 0).currentSubPool)
 		require.Equal(t, frame.Txn.(*types.FrameTransaction).Fees.MaxFee, pool.frameReservations[payer].cost)
 	}
 
@@ -758,6 +758,42 @@ func TestFramePoolSharedBalanceReplacements(t *testing.T) {
 	require.Equal(t, txpoolcfg.Success, add(replacement, sender))
 	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
 	require.Equal(t, replacement.Txn.(*types.FrameTransaction).Fees.MaxFee, pool.frameReservations[payer].cost)
+	require.Equal(t, 2, pool.pending.Len())
+}
+
+// The sender's next transaction spends all funds the frame reservation leaves, so the
+// replacement is funded only by the reservation it releases.
+func TestFramePoolOrdinaryReplacementUsesReleasedReservation(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+	add := func(slot *TxnSlot) txpoolcfg.DiscardReason {
+		var txns TxnSlots
+		txns.Append(slot, sender[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txns)
+		require.NoError(t, err)
+		return reasons[0]
+	}
+	const feePerGas = common.GWei
+	tx := &types.FrameTransaction{
+		ChainID: *uint256.NewInt(1), SenderAddress: sender,
+		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100_000}}},
+		Fees:   types.FrameFees{TipCap: *uint256.NewInt(1)},
+	}
+	tx.Fees.MaxFee.Mul(uint256.NewInt(tx.GetGasLimit()), uint256.NewInt(feePerGas))
+	frame := framePoolSlotFromTransaction(t, tx)
+	require.Equal(t, txpoolcfg.Success, add(frame))
+	next := newTestTxnSlot(1, 0, 1, 1, 21_000)
+	next.IDHash[0] = 1
+	next.Txn.GetValue().SetUint64(common.Ether - tx.Fees.MaxFee.Uint64() - 21_000)
+	require.Equal(t, txpoolcfg.Success, add(next))
+	require.Equal(t, 2, pool.pending.Len())
+
+	replacement := newTestTxnSlot(0, 0, 2, 2*feePerGas, 21_000)
+	replacement.IDHash[0] = 2
+	require.Less(t, requiredBalance(replacement).Uint64(), tx.Fees.MaxFee.Uint64())
+	require.Equal(t, txpoolcfg.Success, add(replacement))
+	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+	require.Empty(t, pool.frameReservations)
 	require.Equal(t, 2, pool.pending.Len())
 }
 
@@ -2955,7 +2991,7 @@ func TestMixedBlobReplacement(t *testing.T) {
 		{"frame to blob", frame, blob(22, 1_000)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			decision := pool.checkReplacement(newMetaTxn(tc.replacement, true, 0), newMetaTxn(tc.previous, true, 0))
+			decision := pool.checkReplacement(nil, newMetaTxn(tc.replacement, true, 0), newMetaTxn(tc.previous, true, 0))
 			require.Equal(t, txpoolcfg.BlobReplacementTypeMismatch, decision.reason)
 			require.Equal(t, txpoolproto.ImportResult_INVALID, mapDiscardReasonToProto(decision.reason))
 		})

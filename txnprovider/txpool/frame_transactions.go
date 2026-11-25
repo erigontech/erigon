@@ -132,7 +132,7 @@ func (p *TxPool) splitRestoredTxns(txns TxnSlots) (ordinary, frames TxnSlots) {
 // Restored frames have no current validation or payer reservation. Keep them
 // indexed but unselectable until revalidation succeeds; a backend failure must
 // not lose transactions we already held. The caller holds the pool lock.
-func (p *TxPool) restoreFramesLocked(blockNum uint64, txns TxnSlots) (parked []*metaTxn) {
+func (p *TxPool) restoreFramesLocked(cacheView kvcache.CacheView, blockNum uint64, txns TxnSlots) (parked []*metaTxn) {
 	var announcements Announcements
 	cells := make(blobCells)
 	for i, txn := range txns.Txns {
@@ -148,7 +148,7 @@ func (p *TxPool) restoreFramesLocked(blockNum uint64, txns TxnSlots) (parked []*
 		if reason == txpoolcfg.Success {
 			txn.frameValidation = nil
 			mt := newMetaTxn(txn, isLocal, blockNum)
-			if reason = p.addLocked(mt, &announcements, cells); reason == txpoolcfg.NotSet {
+			if reason = p.addLocked(cacheView, mt, &announcements, cells); reason == txpoolcfg.NotSet {
 				p.senderLastActivity[txn.SenderID] = blockNum
 				p.frameAccountsToRefresh[sender] = struct{}{}
 				parked = append(parked, mt)
