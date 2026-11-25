@@ -1396,16 +1396,6 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		return txpoolcfg.GasLimitTooHigh, nil
 	}
 
-	// An unwind can return a transaction when the sender is already above its
-	// per-account slot limit. Rejecting it as spam can evict some higher-nonce
-	// transactions and leave others queued behind the missing nonce.
-	if !unwinding && !isLocal && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
-		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
-		}
-		return txpoolcfg.Spammer, nil
-	}
-
 	// Check nonce and balance
 	senderNonce, senderBalance, senderCodeHash, err := p.senders.info(stateCache, txn.SenderID)
 	if err != nil {
@@ -1426,18 +1416,39 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		}
 		return txpoolcfg.InsufficientFunds, nil
 	}
-	if !senderCodeHash.IsEmpty() {
-		if existing := p.all.get(txn.SenderID, txn.Nonce); existing == nil {
-			if p.all.hasTxns(txn.SenderID) {
-				return txpoolcfg.DelegatedTxnLimit, nil
-			}
-			if txn.Nonce != senderNonce {
-				return txpoolcfg.DelegatedNonceGap, nil
-			}
+	newSlot := p.all.get(txn.SenderID, txn.Nonce) == nil
+	if !senderCodeHash.IsEmpty() && newSlot {
+		if p.all.hasTxns(txn.SenderID) {
+			return txpoolcfg.DelegatedTxnLimit, nil
+		}
+		if txn.Nonce != senderNonce {
+			return txpoolcfg.DelegatedNonceGap, nil
 		}
 	}
 	if txn.HasBlobs() {
-		return p.validateBlobTxn(txn, isLocal), nil
+		if reason := p.validateBlobTxn(txn, isLocal); reason != txpoolcfg.Success {
+			return reason, nil
+		}
+	}
+
+	// Any peer can relay a transaction that its sender signed earlier, so only one that would take
+	// a new slot counts as spam. This check must run after every check that rejects the transaction.
+	//
+	// An unwind can return a transaction when the sender is already above its
+	// per-account slot limit. Rejecting it as spam can evict some higher-nonce
+	// transactions and leave others queued behind the missing nonce.
+	if !unwinding && !isLocal && newSlot && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
+		next := senderNonce
+		for p.all.get(txn.SenderID, next) != nil {
+			next++
+		}
+		if reason, _ := p.nonceGapReason(txn, next); reason != txpoolcfg.NotSet {
+			return reason, nil
+		}
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
+		}
+		return txpoolcfg.Spammer, nil
 	}
 	return txpoolcfg.Success, nil
 }
@@ -2669,6 +2680,18 @@ func (p *TxPool) refreshSender(cacheView kvcache.CacheView, senderID uint64) err
 	return nil
 }
 
+// nonceGapReason returns why txn must leave the pool when next is the first nonce missing from
+// its sender's pooled account nonces, or NotSet if txn can wait for the gap to close.
+func (p *TxPool) nonceGapReason(txn *TxnSlot, next uint64) (txpoolcfg.DiscardReason, string) {
+	switch {
+	case p.cfg.MaxNonceGap > 0 && txn.Nonce > next && txn.Nonce-next > p.cfg.MaxNonceGap:
+		return txpoolcfg.NonceTooDistant, "nonce gap too large"
+	case txn.Nonce != next && txn.HasBlobs():
+		return txpoolcfg.BlobNonceGap, "nonce-gapped blob txn"
+	}
+	return txpoolcfg.NotSet, ""
+}
+
 // onSenderStateChange refreshes pool eligibility and ordering for one sender.
 // Transactions using account nonces depend on earlier nonces and cumulative sender costs.
 // Keyed frames bypass that chain: simulation checks their nonces, and payer
@@ -2711,12 +2734,8 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		case !nonceChainBlocked && senderHasCode && mt.TxnSlot.Nonce != senderNonce:
 			deleteAndContinueReasonLog = "delegated sender nonce gap"
 			discardReason = txpoolcfg.DelegatedNonceGap
-		case !nonceChainBlocked && p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap:
-			deleteAndContinueReasonLog = "nonce gap too large"
-			discardReason = txpoolcfg.NonceTooDistant
-		case !nonceChainBlocked && mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.HasBlobs(): // Discard nonce-gapped blob txns
-			deleteAndContinueReasonLog = "nonce-gapped blob txn"
-			discardReason = txpoolcfg.BlobNonceGap
+		case !nonceChainBlocked:
+			discardReason, deleteAndContinueReasonLog = p.nonceGapReason(mt.TxnSlot, noGapsNonce)
 		}
 		if deleteAndContinueReasonLog != "" {
 			if mt.TxnSlot.Traced {
