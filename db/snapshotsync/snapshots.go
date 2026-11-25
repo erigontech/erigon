@@ -689,15 +689,16 @@ func (s *BaseRoSnapshots) MadvNormal() *BaseRoSnapshots {
 	return s
 }
 
-func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSegments {
-	return truncateAtGap(buildVisibleSegments(dirtySegments))
+func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment], keep func(*DirtySegment) bool) VisibleSegments {
+	return truncateAtGap(buildVisibleSegments(dirtySegments, keep))
 }
 
-func buildVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSegments {
+// buildVisibleSegments picks the largest indexed segments; keep, when set, also has to accept a segment.
+func buildVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment], keep func(*DirtySegment) bool) VisibleSegments {
 	newVisibleSegments := make(VisibleSegments, 0, dirtySegments.Len())
 	dirtySegments.Walk(func(segments []*DirtySegment) bool {
 		for _, sn := range segments {
-			if !sn.IsIndexed() {
+			if !sn.IsIndexed() || (keep != nil && !keep(sn)) {
 				continue
 			}
 
@@ -776,6 +777,35 @@ func truncateAtGap(segments VisibleSegments) VisibleSegments {
 // (segments removed from dirty during the outgoing bundle's tenure): they are unlinked
 // only once every reader pinning that generation has drained. Must be called with
 // dirtyLock held, so the caller's dirty mutation and this publish are one atomic step.
+// mergedFileOfEveryType hides a segment that covers smaller segments of its own type unless every type has a
+// segment of the same range: the type then shows the smaller ones, so a merge range never cuts through its file.
+func (s *BaseRoSnapshots) mergedFileOfEveryType() func(*DirtySegment) bool {
+	types := map[Range]int{}
+	for _, t := range s.enums {
+		seen := map[Range]struct{}{}
+		s.dirty[t].Walk(func(segments []*DirtySegment) bool {
+			for _, sn := range segments {
+				if _, ok := seen[sn.Range]; sn.IsIndexed() && !ok {
+					seen[sn.Range] = struct{}{}
+					types[sn.Range]++
+				}
+			}
+			return true
+		})
+	}
+	return func(sn *DirtySegment) bool {
+		if types[sn.Range] == len(s.enums) {
+			return true
+		}
+		covers := false
+		s.dirty[sn.segType.Enum()].Walk(func(segments []*DirtySegment) bool {
+			covers = slices.ContainsFunc(segments, func(small *DirtySegment) bool { return small.IsIndexed() && small.isSubSetOf(sn) })
+			return !covers
+		})
+		return !covers
+	}
+}
+
 func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired retiredSegments) {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
@@ -792,8 +822,12 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired retiredSegme
 	visible := make([]VisibleSegments, snaptype.MaxEnum) // create new pointer - only new readers will see it. old-alive readers will continue use previous pointer
 	maxVisibleBlocks := make([]uint64, 0, len(s.types))
 
+	var keep func(*DirtySegment) bool
+	if alignMin {
+		keep = s.mergedFileOfEveryType()
+	}
 	for _, t := range s.enums {
-		newVisibleSegments := RecalcVisibleSegments(s.dirty[t])
+		newVisibleSegments := RecalcVisibleSegments(s.dirty[t], keep)
 		if len(newVisibleSegments) > 0 && slices.Contains(s.anchoredAtLowestDirty, t) && !dirtyReachesWithoutHole(s.dirty[t], newVisibleSegments[0].from) {
 			newVisibleSegments = nil
 		}

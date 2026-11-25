@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -612,6 +613,63 @@ func TestIntegrateFrozenMergeKeepsSegmentsBelowItsRange(t *testing.T) {
 
 	_, ok := s.dirty[snaptype2.Headers.Enum()].Get(below)
 	require.True(t, ok, "segment below the frozen output must stay")
+}
+
+func TestMergeRangeWithCoveredBodies(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+	for from := uint64(0); from < 90_000; from += 10_000 {
+		createTestSegmentFile(t, from, from+10_000, snaptype2.Headers.Enum(), dir, version.V1_0, logger)
+	}
+	for from := uint64(90_000); from < 100_000; from += 1_000 {
+		for _, typ := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+1_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	// Transactions lack the bodies range, so bodies show their smaller files.
+	for _, typ := range []snaptype.Type{snaptype2.Bodies, snaptype2.Transactions} {
+		require.Equal(t, NewRange(90_000, 91_000), visibleRanges(s, typ)[0], typ.Name())
+	}
+
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	ranges := merger.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
+	require.Equal(t, []Range{NewRange(90_000, 100_000)}, ranges)
+	require.NoError(t, merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil))
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(typ.Versions().Current, 90_000, 100_000, typ.Enum())))
+	}
+	require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 0, 100_000, snaptype2.Bodies.Enum())))
+}
+
+func TestMergeRangeUnderALargerBodiesFile(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	var small []Range
+	for from := uint64(10_000); from < 20_000; from += 1_000 {
+		small = append(small, NewRange(from, from+1_000))
+		for _, typ := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+1_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 20_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	requireOneVisibleLayout(t, s, small)
+
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	ranges := merger.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
+	require.Equal(t, []Range{NewRange(10_000, 20_000)}, ranges)
+	require.NoError(t, merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil))
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(typ.Versions().Current, 10_000, 20_000, typ.Enum())))
+	}
 }
 
 func TestMergeSkipsPreClaimedRange(t *testing.T) {
@@ -1702,7 +1760,11 @@ func TestOpenFolderPromotesCovering(t *testing.T) {
 
 	// Build the index for the covering segment now to promote it.
 	createTestIdxFile(t, 0, 1_000_000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
+	require.NoError(s.OpenFolder())
+	require.Len(s.visible.Load().segments[snaptype2.Enums.Transactions], 2, "headers and bodies lack the covering range")
 
+	createFile(0, 1_000_000, snaptype2.Headers)
+	createFile(0, 1_000_000, snaptype2.Bodies)
 	require.NoError(s.OpenFolder())
 	visibleTxnAfter := s.visible.Load().segments[snaptype2.Enums.Transactions]
 	require.Len(visibleTxnAfter, 1)
@@ -2041,4 +2103,100 @@ func TestMergeAbortKeepsTheIndexOfASameRangeInput(t *testing.T) {
 	exists, err := dir2.FileExist(headersIdx)
 	require.NoError(err)
 	require.True(exists, "%s: the input's index must stay on disk", filepath.Base(headersIdx))
+}
+
+func visibleRanges(s *BaseRoSnapshots, typ snaptype.Type) []Range {
+	v := s.View()
+	defer v.Close()
+	var ranges []Range
+	for _, sn := range v.Segments(typ) {
+		ranges = append(ranges, sn.Range)
+	}
+	return ranges
+}
+
+func requireOneVisibleLayout(t *testing.T, s *BaseRoSnapshots, want []Range) {
+	t.Helper()
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		require.Equal(t, want, visibleRanges(s, typ), typ.Name())
+	}
+}
+
+func TestVisibleBlockFilesKeepOneLayoutAfterAnInterruptedMerge(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	var small []Range
+	for from := uint64(0); from < 100_000; from += 10_000 {
+		small = append(small, NewRange(from, from+10_000))
+		for _, typ := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	// A merge of [0, 100k) stopped after its headers and bodies outputs were written and indexed.
+	for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Bodies} {
+		createTestSegmentFile(t, 0, 100_000, typ.Enum(), dir, typ.Versions().Current, logger)
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	requireOneVisibleLayout(t, s, small)
+
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	ranges := merger.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
+	require.Equal(t, []Range{NewRange(0, 100_000)}, ranges)
+	require.NoError(t, merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil))
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentIndex(t, 0, 100_000, typ, dir, logger)
+	}
+	require.NoError(t, s.OpenFolder())
+	requireOneVisibleLayout(t, s, []Range{NewRange(0, 100_000)})
+}
+
+func createTestSegmentIndex(t *testing.T, from, to uint64, typ snaptype.Type, dir string, logger log.Logger) {
+	t.Helper()
+	for _, name := range typ.IdxFileNames(from, to) {
+		idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{KeyCount: 1, BucketSize: 10, TmpDir: dir, IndexFile: filepath.Join(dir, name), LeafSize: 8}, logger)
+		require.NoError(t, err)
+		idx.DisableFsync()
+		require.NoError(t, idx.AddKey([]byte{1}, 0))
+		require.NoError(t, idx.Build(t.Context()))
+		idx.Close()
+	}
+}
+
+func TestVisibleBlockFilesShowAMergedFileOnlyWhenEveryTypeHasIt(t *testing.T) {
+	small := []Range{NewRange(0, 10_000), NewRange(10_000, 20_000), NewRange(20_000, 30_000), NewRange(30_000, 40_000)}
+	for _, position := range []struct {
+		name   string
+		merged Range
+		want   []Range
+	}{
+		{"first", NewRange(0, 20_000), []Range{NewRange(0, 20_000), small[2], small[3]}},
+		{"middle", NewRange(10_000, 30_000), []Range{small[0], NewRange(10_000, 30_000), small[3]}},
+		{"last", NewRange(20_000, 40_000), []Range{small[0], small[1], NewRange(20_000, 40_000)}},
+	} {
+		for mask := range 1 << len(snaptype2.BlockSnapshotTypes) {
+			t.Run(fmt.Sprintf("%s/types=%03b", position.name, mask), func(t *testing.T) {
+				logger := log.New()
+				dir := t.TempDir()
+				for i, typ := range snaptype2.BlockSnapshotTypes {
+					for _, r := range small {
+						createTestSegmentFile(t, r.From(), r.To(), typ.Enum(), dir, version.V1_0, logger)
+					}
+					if mask&(1<<i) != 0 {
+						createTestSegmentFile(t, position.merged.From(), position.merged.To(), typ.Enum(), dir, version.V1_0, logger)
+					}
+				}
+				s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+				defer s.Close()
+				require.NoError(t, s.OpenFolder())
+				want := small
+				if mask == 1<<len(snaptype2.BlockSnapshotTypes)-1 {
+					want = position.want
+				}
+				requireOneVisibleLayout(t, s, want)
+			})
+		}
+	}
 }
