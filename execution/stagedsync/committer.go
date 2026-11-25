@@ -337,6 +337,7 @@ func (cc *commitmentCalculator) Stop() {
 func (cc *commitmentCalculator) loop(ctx context.Context) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "calculator")))
 	defer close(cc.out) // Signal apply loop that no more results will come.
+	defer NpEndMark("npCalcExit")
 
 	// Exit ONLY when cc.in is closed (by the exec loop, which owns shutdown
 	// sequencing). Do NOT add ctx.Done/cc.done checks — exiting early leaves
@@ -524,6 +525,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			// so the first window block's compute covers only its own deltas.
 			cc.compute(ctx, targetOf(r), computeMode{checkRoot: true})
 		}
+		NpEndMark("npCommitEnd")
 		if logNpPhases && !r.execStartedAt.IsZero() {
 			commitEnd := time.Now()
 			execActive := r.execEndedAt.Sub(r.execStartedAt)
@@ -552,6 +554,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			// Publish empty result so drainBeforeExit doesn't block forever.
 			cc.publish(ctx, commitmentResult{blockNum: cc.lastComputedBlock})
 		}
+		NpEndMark("npCommitReq")
 	}
 }
 
@@ -699,6 +702,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	if logNpPhases {
 		cc.logger.Info("[np-phase] ahead", "blk", req.blockNum, "window", cc.ownsChangeset(req.blockNum))
 	}
+	NpEndMark("npAheadEnd")
 	if !dbg.BALShadowCompute && !cc.ownsChangeset(req.blockNum) {
 		cc.publish(ctx, commitmentResult{blockNum: req.blockNum, blockHash: req.blockHash, txNum: req.lastTxNum, rootHash: rh})
 	}

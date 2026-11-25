@@ -297,6 +297,11 @@ func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (ha
 		s.currentStage = 0
 	}()
 
+	if logNpPhases {
+		NpEndMark("npRunStart")
+		defer NpEndMark("npRun")
+	}
+
 	var errBadBlock error
 	for !s.IsDone() {
 		var badBlockUnwind bool

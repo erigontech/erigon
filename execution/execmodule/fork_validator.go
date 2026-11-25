@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -188,6 +189,7 @@ type HasDiff interface {
 func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.Body, revalidate bool, ensureReadAheadSuspended func() error, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
+	defer stagedsync.NpEndMark("npValidatePayload")
 	if fv.executor == nil {
 		status = engine_types.AcceptedStatus
 		return
@@ -332,7 +334,9 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 		sd.TakeCommitmentTime() // discard anything left by an earlier block
 		beforeIO = blockmetrics.Take(sd.Metrics(), sd.NonExecMetrics())
 	}
-	if err := fv.executor.ValidateBlock(sd, tx, unwindPoint, headersChain, bodiesChain); err != nil {
+	err := fv.executor.ValidateBlock(sd, tx, unwindPoint, headersChain, bodiesChain)
+	stagedsync.NpEndMark("npValidateBlock")
+	if err != nil {
 		switch {
 		case errors.Is(err, rules.ErrInvalidBlock):
 			validationError = err
@@ -347,6 +351,7 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 	validation := time.Since(start)
 	fv.timingsCache.Add(hash, BlockTimings{validation, 0})
 	fv.recordBlockMetrics(sd, header, body, hash, &beforeIO, len(headersChain), validation, fv.executor.lastValidationExecStageTiming())
+	stagedsync.NpEndMark("npBlockMetrics")
 
 	latestValidHash = hash
 	fv.extendingForkHeadHash = hash
