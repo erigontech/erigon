@@ -703,7 +703,7 @@ func TestParallelDeleteWithSurvivingSiblings_BranchInspection(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, branch, "root branch must exist after phase 2")
 
-	_, afterMap, _, err := BranchData(branch).decodeCells()
+	_, afterMap, _, err := decodeBranchCells(BranchData(branch))
 	require.NoError(t, err)
 
 	for nib := range 8 {

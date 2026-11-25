@@ -34,7 +34,7 @@ func VerifyBranchHashes(
 	accountValues map[string][]byte,
 	storageValues map[string][]byte,
 ) error {
-	_, _, row, err := branchData.decodeCells()
+	_, _, row, err := decodeBranchCells(branchData)
 	if err != nil {
 		return fmt.Errorf("decodeCells: %w", err)
 	}

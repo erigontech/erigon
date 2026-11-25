@@ -105,7 +105,7 @@ func (branchData BranchData) ForEachCell(fn func(nibble int, c BranchCell) error
 			if fields&f.flag == 0 {
 				continue
 			}
-			l, n, err := readUvarint(branchData[pos:])
+			l, n, err := ReadUvarint(branchData[pos:])
 			if err != nil {
 				return fmt.Errorf("cell %v at nibble %d: %w", f.flag, nibble, err)
 			}

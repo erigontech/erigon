@@ -537,7 +537,7 @@ func checkDerefBranch(
 		}
 		return plainKey, nil
 	})
-	if err := newBranchData.Validate(branchKey); err != nil {
+	if err := commitment.ValidateBranchData(newBranchData, branchKey); err != nil {
 		err = fmt.Errorf("branch data validation failure for branch key %x in %s: %w", branchKey, fileName, err)
 		logger.Warn(err.Error())
 		integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
@@ -1036,7 +1036,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 			}
 		} else {
 			branchData := commitment.BranchData(v)
-			err = branchData.Validate(k)
+			err = commitment.ValidateBranchData(branchData, k)
 			if err != nil {
 				err = fmt.Errorf("branch data validation failure for branch key %x in %s: %w", k, fileName, err)
 				if failFast {

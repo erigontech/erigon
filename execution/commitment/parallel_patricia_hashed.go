@@ -226,7 +226,7 @@ func (p *ParallelPatriciaHashed) Process(
 	onProgress func(*CommitProgress),
 	warmup WarmupConfig,
 ) (rootHash []byte, err error) {
-	if updates == nil || updates.mode != ModeParallel || updates.parallel == nil {
+	if updates == nil || updates.Mode() != ModeParallel || updates.parallel == nil {
 		return nil, errors.New("ParallelPatriciaHashed.Process requires Updates in ModeParallel")
 	}
 	if p.trieCtxFactory == nil {

@@ -427,7 +427,7 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, enc, res)
 
-	tm, am, origins, err := res.decodeCells()
+	tm, am, origins, err := decodeBranchCells(res)
 	require.NoError(t, err)
 	require.Equal(t, tm, am)
 	require.Equal(t, bm, am)

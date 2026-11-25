@@ -346,7 +346,7 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 		}
 
 		bd := commitment.BranchData(v)
-		t.Logf("Branch key=%x data=%s", k, bd.String())
+		t.Logf("Branch key=%x data=%s", k, commitment.BranchDataString(bd))
 
 		err = commitment.VerifyBranchHashes(k, bd, accountValues, storageValues)
 		checked++

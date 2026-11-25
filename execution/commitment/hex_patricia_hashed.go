@@ -148,11 +148,11 @@ type HexPatriciaHashed struct {
 	leafKeyBuf    [65]byte               // shared scratch for a leaf's hashed key; the cell's hashedExtension is its path
 	leafRlpBuf    [maxLeafRlpLen]byte    // shared scratch for a leaf's RLP list prefix + compact key
 	rlpPrefixBuf  [8]byte                // shared scratch for RlpSerializable length prefixes
-	compactKeyBuf [maxCompactKeyLen]byte // shared scratch for HexToCompact on the read paths
+	compactKeyBuf [MaxCompactKeyLen]byte // shared scratch for HexToCompact on the read paths
 	// foldKeyBuf must stay separate from compactKeyBuf: fold's update key is still live
 	// when foldDelete runs the collapse tracer, and that callback is caller code free to
 	// re-enter a read path.
-	foldKeyBuf    [maxCompactKeyLen]byte
+	foldKeyBuf    [MaxCompactKeyLen]byte
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
 
@@ -344,14 +344,14 @@ const (
 	cellLoadAccount = cellLoadBalance | cellLoadNonce | cellLoadCode
 )
 
-// maxCompactKeyLen bounds a compact-encoded (hex-prefix) key or branch prefix,
-// derived from the nibble array rather than from the shorter keys today's depth
+// MaxCompactKeyLen bounds a compact-encoded (hex-prefix) key or branch prefix,
+// derived from the 128-nibble key path rather than from the shorter keys today's depth
 // arithmetic yields, so a caller slicing deeper cannot overflow the buffer.
-const maxCompactKeyLen = len(cell{}.hashedExtension)/2 + 1
+const MaxCompactKeyLen = 128/2 + 1
 
 // maxLeafRlpLen bounds a leaf's assembled RLP header: list prefix (tag plus up to
 // 8 length bytes), key prefix byte, then the compact key.
-const maxLeafRlpLen = 9 + 1 + maxCompactKeyLen
+const maxLeafRlpLen = 9 + 1 + MaxCompactKeyLen
 
 func (f loadFlags) String() string {
 	var b strings.Builder
@@ -690,7 +690,7 @@ func (cell *cell) fillFromFields(data []byte, pos int, fieldBits cellFields) (in
 
 	for _, f := range fields {
 		if fieldBits&f.flag != 0 {
-			l, n, err := readUvarint(data[pos:])
+			l, n, err := ReadUvarint(data[pos:])
 			if err != nil {
 				return 0, err
 			}
@@ -722,7 +722,7 @@ func (cell *cell) fillFromFields(data []byte, pos int, fieldBits cellFields) (in
 	return pos, nil
 }
 
-func readUvarint(data []byte) (uint64, int, error) {
+func ReadUvarint(data []byte) (uint64, int, error) {
 	l, n := binary.Uvarint(data)
 	if n == 0 {
 		return 0, 0, errors.New("buffer too small for length")
@@ -1535,7 +1535,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 		log.Warn("got empty branch data during unfold", "key", traceHex(key), "row", row, "depth", depth, "deleted", deleted)
 		if hph.traceW != nil {
 			branchData, _ = hph.branchFromCacheOrDB(key)
-			fmt.Fprintf(hph.traceW, "unfoldBranchNode prefix '%x', nibbles [%x] depth %d row %d '%x' %s\n", key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData, BranchData(branchData).String())
+			fmt.Fprintf(hph.traceW, "unfoldBranchNode prefix '%x', nibbles [%x] depth %d row %d '%x' %s\n", key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData, BranchDataString(branchData))
 		}
 		return fmt.Errorf("empty branch data read during unfold, compact prefix %x nibbles %x", key, hph.currentKey[:hph.currentKeyLen])
 	}

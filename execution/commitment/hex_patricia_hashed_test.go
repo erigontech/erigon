@@ -1169,9 +1169,9 @@ func TestCell_fillFromFields(t *testing.T) {
 	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(t, err)
 
-	fmt.Printf("%s\n", enc.String())
+	fmt.Printf("%s\n", BranchDataString(enc))
 
-	tm, am, decRow, err := enc.decodeCells()
+	tm, am, decRow, err := decodeBranchCells(enc)
 	require.NoError(t, err)
 	require.Equal(t, bm, am)
 	require.Equal(t, bm, tm)

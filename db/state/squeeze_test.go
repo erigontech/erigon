@@ -327,7 +327,7 @@ func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
 			require.NotEmpty(t, v)
 
 			expanded := commitment.BranchData(v)
-			require.NoError(t, expanded.Validate(k),
+			require.NoError(t, commitment.ValidateBranchData(expanded, k),
 				"expanded BranchData failed Validate for key %x in %s", k, vf.Fullpath())
 
 			// Walk embedded plain-key fields and assert each is full-length.

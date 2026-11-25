@@ -268,10 +268,10 @@ func branchDiff(t *testing.T, seq, par *MockState) {
 		}
 		var sa, pa uint16
 		if sok {
-			_, sa, _, _ = BranchData(sb).decodeCells()
+			_, sa, _, _ = decodeBranchCells(BranchData(sb))
 		}
 		if pok {
-			_, pa, _, _ = BranchData(pb).decodeCells()
+			_, pa, _, _ = decodeBranchCells(BranchData(pb))
 		}
 		t.Logf("DIVERGENT prefix=%x depth=%d seq[%v %016b] par[%v %016b] dropped=%016b", []byte(k), len(k), sok, sa, pok, pa, sa&^pa)
 		if n++; n > 20 {

@@ -143,7 +143,7 @@ func (w *Warmuper) Start() {
 
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
-	var compactBuf [maxCompactKeyLen]byte
+	var compactBuf [MaxCompactKeyLen]byte
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
 		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
 

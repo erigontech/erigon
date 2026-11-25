@@ -271,7 +271,7 @@ func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize ui
 
 	// Parse and display the branch data in human-readable format
 	branchData := commitment.BranchData(val)
-	fmt.Printf("\nParsed branch data:\n%s\n", branchData.String())
+	fmt.Printf("\nParsed branch data:\n%s\n", commitment.BranchDataString(branchData))
 
 	return nil
 }

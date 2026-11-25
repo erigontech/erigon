@@ -717,7 +717,7 @@ func (branchData BranchData) ChildCount() int {
 
 func (branchData BranchData) IsTombstone() bool { return len(branchData) == 0 }
 
-func (branchData BranchData) String() string {
+func BranchDataString(branchData BranchData) string {
 	if branchData.IsTombstone() {
 		return ""
 	}
@@ -1028,7 +1028,7 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 	return newData, nil
 }
 
-func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*cell, err error) {
+func decodeBranchCells(branchData BranchData) (touchMap, afterMap uint16, row [16]*cell, err error) {
 	touchMap = binary.BigEndian.Uint16(branchData[0:])
 	afterMap = binary.BigEndian.Uint16(branchData[2:])
 	pos := 4
@@ -1049,11 +1049,11 @@ func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*
 	return
 }
 
-func (branchData BranchData) Validate(branchKey []byte) error {
+func ValidateBranchData(branchData BranchData, branchKey []byte) error {
 	if branchData.IsTombstone() {
 		return nil
 	}
-	_, afterMap, row, err := branchData.decodeCells()
+	_, afterMap, row, err := decodeBranchCells(branchData)
 	if err != nil {
 		return err
 	}
@@ -1319,7 +1319,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 	if !bytes.Equal(key, []byte("state")) {
 		stat.IsRoot = false
 
-		tm, am, cells, err := BranchData(branch).decodeCells()
+		tm, am, cells, err := decodeBranchCells(BranchData(branch))
 		if err != nil {
 			return nil
 		}
