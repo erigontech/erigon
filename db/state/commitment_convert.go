@@ -741,7 +741,11 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 
 	if convertHistory && !convertDomain && len(historyRanges) > 0 {
 		if err := verifyStagedHistoryVisible(ctx, at, historyStage, logger); err != nil {
-			return fmt.Errorf("[commitment_convert] v3 verification: %w; no commitment file was replaced; %s", err, rebuildV3Advice)
+			advice := fmt.Sprintf("no commitment file was replaced; %s", rebuildV3Advice)
+			if opts.Continue {
+				advice += "; the staged files are reused by --continue, so run without it to convert again"
+			}
+			return fmt.Errorf("[commitment_convert] v3 verification: %w; %s", err, advice)
 		}
 	}
 

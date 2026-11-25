@@ -1116,3 +1116,50 @@ func TestConvertCommitmentFiles_V3NoDomainPassRejectsStagedFileTheVerifyViewCann
 		require.Truef(t, strings.HasPrefix(filepath.Base(f), "v2."), "%s was promoted", f)
 	}
 }
+
+func TestConvertCommitmentFiles_V3NoHistoryPassRejectsLiveHistoryFileTheVerifyViewCannotRead(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	legacySchema := statecfg.Schema
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 4)
+	dirs := agg.Dirs()
+	db, agg = reopenForConvert(t, db, agg, &legacySchema)
+	require.NoError(t, convertErr(t, db, state.ConvertOpts{TargetV3: true, NoDomain: true}))
+	db, _ = reopenForConvert(t, db, agg, &legacySchema)
+	removed := false
+	state.SetConvertPhase1AfterFileHookForTest(func(int) {
+		if removed {
+			return
+		}
+		removed = true
+		accessors, err := filepath.Glob(filepath.Join(dirs.SnapAccessors, "*-commitment.*.efi"))
+		require.NoError(t, err)
+		vi, err := filepath.Glob(filepath.Join(dirs.SnapAccessors, "*-commitment.*.vi"))
+		require.NoError(t, err)
+		accessors = append(accessors, vi...)
+		require.NotEmpty(t, accessors)
+		require.NoError(t, dir.RemoveFile(accessors[0]))
+	})
+	t.Cleanup(func() { state.SetConvertPhase1AfterFileHookForTest(nil) })
+
+	err := convertErr(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true})
+	require.ErrorContains(t, err, "is not readable by the verify view")
+	requireDomainsNotSwapped(t, dirs)
+}
+
+func TestConvertCommitmentFiles_V3RejectsStagedDomainFileTheVerifyViewCannotRead(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
+	dirs := agg.Dirs()
+	state.SetConvertPhase1AfterFileHookForTest(func(int) {
+		staged, err := filepath.Glob(filepath.Join(dirs.Snap, "rebuild", "domain", "*.kv"))
+		require.NoError(t, err)
+		for _, f := range staged {
+			require.NoError(t, os.Truncate(f, 4))
+		}
+	})
+	t.Cleanup(func() { state.SetConvertPhase1AfterFileHookForTest(nil) })
+
+	err := convertErr(t, db, state.ConvertOpts{TargetV3: true})
+	require.ErrorContains(t, err, "is not readable by the verify view")
+	requireDomainsNotSwapped(t, dirs)
+}
