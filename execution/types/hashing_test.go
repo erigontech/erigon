@@ -76,6 +76,17 @@ func TestDeriveSha(t *testing.T) {
 	}
 }
 
+func TestDeriveShaGroupBoundaries(t *testing.T) {
+	t.Parallel()
+	for _, n := range []int{
+		parallelDeriveShaMin - 1, parallelDeriveShaMin, parallelDeriveShaMin + 1,
+		5*deriveShaGroup - 1, 5 * deriveShaGroup, 5*deriveShaGroup + 1,
+		1<<16 - 1, 1 << 16, 1<<16 + 1, 1<<16 + 3*deriveShaGroup + 7,
+	} {
+		checkDeriveSha(t, genTransactions(uint64(n)))
+	}
+}
+
 func checkDeriveSha(t *testing.T, list DerivableList) {
 	t.Helper()
 

@@ -49,3 +49,13 @@ func BenchmarkRlpHashHeader(b *testing.B) {
 		RlpHash(benchHeader)
 	}
 }
+
+func BenchmarkDeriveShaTransferReceipts(b *testing.B) {
+	rs := make(Receipts, 20_000)
+	for i := range rs {
+		rs[i] = &Receipt{Type: DynamicFeeTxType, Status: ReceiptStatusSuccessful, CumulativeGasUsed: uint64(i+1) * 15_000}
+	}
+	for b.Loop() {
+		DeriveSha(rs)
+	}
+}

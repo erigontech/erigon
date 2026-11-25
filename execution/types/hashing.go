@@ -23,6 +23,9 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"runtime"
+	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -37,48 +40,107 @@ type DerivableList interface {
 }
 
 func DeriveSha(list DerivableList) common.Hash {
-	if list.Len() < 1 {
+	n := list.Len()
+	if n < 1 {
 		return empty.RootHash
 	}
+	if n >= parallelDeriveShaMin && runtime.GOMAXPROCS(0) > 1 {
+		return deriveShaParallel(list, n)
+	}
+	leafOf := newLeafEncoder(list)
+	return trieRoot(n, func(j int, w *bytes.Buffer) { writeHexKey(lexIndex(j, n), w) }, func(j int) trie.GenStructStepData { return leafOf(lexIndex(j, n)) })
+}
 
-	var curr bytes.Buffer
-	var succ bytes.Buffer
-	var value bytes.Buffer
+// deriveShaGroup indexes from a multiple of it share every key byte but the last,
+// so each full group above the first is one subtrie.
+const deriveShaGroup = 256
 
+const parallelDeriveShaMin = 4 * deriveShaGroup
+
+// deriveShaParallel hashes the full groups concurrently and joins them as hash
+// nodes at their prefixes with the remaining leaves.
+func deriveShaParallel(list DerivableList, n int) common.Hash {
+	groups := n/deriveShaGroup - 1
+	hashes := make([]trie.GenStructStepHashData, groups)
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), groups) {
+		wg.Go(func() {
+			leafOf := newLeafEncoder(list)
+			for g := int(next.Add(1)) - 1; g < groups; g = int(next.Add(1)) - 1 {
+				first := (g + 1) * deriveShaGroup
+				hashes[g].Hash = trieRoot(deriveShaGroup, func(j int, w *bytes.Buffer) {
+					w.Write([]byte{byte(j >> 4), byte(j & 0xf), 16})
+				}, func(j int) trie.GenStructStepData { return leafOf(first + j) })
+			}
+		})
+	}
+	wg.Wait()
+	tail := (groups + 1) * deriveShaGroup
+	// The entry at a group position stands for that whole group.
+	index := func(j int) (int, bool) {
+		switch {
+		case j < deriveShaGroup:
+			return lexIndex(j, n), false
+		case j < deriveShaGroup+groups:
+			return (j - deriveShaGroup + 1) * deriveShaGroup, true
+		default:
+			return tail + j - deriveShaGroup - groups, false
+		}
+	}
+	leafOf := newLeafEncoder(list)
+	return trieRoot(deriveShaGroup+groups+n-tail, func(j int, w *bytes.Buffer) {
+		i, group := index(j)
+		writeHexKey(i, w)
+		if group {
+			w.Truncate(w.Len() - 3)
+		}
+	}, func(j int) trie.GenStructStepData {
+		i, group := index(j)
+		if group {
+			return &hashes[i/deriveShaGroup-1]
+		}
+		return leafOf(i)
+	})
+}
+
+// trieRoot hashes count entries in key order: keyOf writes entry j's hex key, dataOf returns its data.
+func trieRoot(count int, keyOf func(j int, w *bytes.Buffer), dataOf func(j int) trie.GenStructStepData) common.Hash {
+	var curr, succ bytes.Buffer
 	hb := trie.NewHashBuilder(false)
-
-	hb.Reset()
-	curr.Reset()
-	succ.Reset()
-
-	hexWriter := &hexWriter{&succ}
-
 	var groups, branches, hashes []uint16
-	var leafData trie.GenStructStepLeafData
-
-	traverseInLexOrder(list, func(i int, next int) {
+	keyOf(0, &succ)
+	for j := range count {
 		curr.Reset()
 		curr.Write(succ.Bytes())
 		succ.Reset()
-
-		if next >= 0 {
-			encodeUint(uint(next), hexWriter)
-			if err := hexWriter.Commit(); err != nil {
-				panic(fmt.Errorf("fatal in DeriveSha: %w", err))
-			}
+		if j+1 < count {
+			keyOf(j+1, &succ)
 		}
-
-		value.Reset()
-
-		if curr.Len() > 0 {
-			list.EncodeIndex(i, &value)
-			leafData.Value = rlp.RlpEncodedBytes(value.Bytes())
-			groups, branches, hashes, _ = trie.GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &leafData, groups, branches, hashes, false)
-		}
-	})
-
+		groups, branches, hashes, _ = trie.GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, dataOf(j), groups, branches, hashes, false)
+	}
 	hash, _ := hb.RootHash()
 	return hash
+}
+
+// newLeafEncoder returns a func encoding item i as leaf data, valid until its next call.
+func newLeafEncoder(list DerivableList) func(i int) trie.GenStructStepData {
+	var value bytes.Buffer
+	var leaf trie.GenStructStepLeafData
+	return func(i int) trie.GenStructStepData {
+		value.Reset()
+		list.EncodeIndex(i, &value)
+		leaf.Value = rlp.RlpEncodedBytes(value.Bytes())
+		return &leaf
+	}
+}
+
+func writeHexKey(i int, w *bytes.Buffer) {
+	hw := &hexWriter{w}
+	encodeUint(uint(i), hw)
+	if err := hw.Commit(); err != nil {
+		panic(fmt.Errorf("fatal in DeriveSha: %w", err))
+	}
 }
 
 type bytesWriter interface {
@@ -101,30 +163,16 @@ func (w *hexWriter) Commit() error {
 	return w.w.WriteByte(16)
 }
 
-func adjustIndex(i int, l int) int {
-	if i >= 0 && i < 127 && i < l-1 {
-		return i + 1
-	} else if i == 127 || (i < 127 && i >= l-1) {
+// lexIndex returns the index at position j of the n keys in lex order. Keys are RLP
+// encoded indexes: 0 encodes as 0x80, so it sorts after 1..127 and before 128.
+func lexIndex(j, n int) int {
+	switch last := min(127, n-1); {
+	case j < last:
+		return j + 1
+	case j == last:
 		return 0
-	}
-	return i
-}
-
-// traverseInLexOrder traverses the list indices in the order suitable for HashBuilder.
-// HashBuilder requires keys to be in the lexicographical order. Our keys are unit indices in RLP encoding in hex.
-// In RLP encoding 0 is 0080 where 1 is 000110, 2 is 000210, etc up until 128 which is 0801080010.
-// So, knowing that we can order indices in the right order even w/o really sorting them. Only 0 is misplaced, and should take the position after 127.
-// So, in the end we transform [0,...,127,128,...n] to [1,...,127,0,128,...,n] which will be [000110....070f10, 080010, 0801080010....] in hex encoding.
-func traverseInLexOrder(list DerivableList, traverser func(int, int)) {
-	for i := -1; i < list.Len(); i++ {
-		adjustedIndex := adjustIndex(i, list.Len())
-		nextIndex := i + 1
-		if nextIndex >= list.Len() {
-			nextIndex = -1
-		}
-		nextIndex = adjustIndex(nextIndex, list.Len())
-
-		traverser(adjustedIndex, nextIndex)
+	default:
+		return j
 	}
 }
 
