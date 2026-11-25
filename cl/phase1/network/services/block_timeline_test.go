@@ -161,13 +161,14 @@ func TestBlockTimelineIsOffWithoutDebugLogging(t *testing.T) {
 func TestBlockTimelineDropsLinesInsteadOfBlockingAnImport(t *testing.T) {
 	logger, _ := timelineLogger(log.LvlDebug)
 	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
+	for range blockTimelineBuffer {
+		timelines.lines <- blockTimeline{}
+	}
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := range 2 * blockTimelineBuffer {
-			timelines.importAttempt(timelineBlockByProposer(timelineSlot, uint64(i), 0), common.Hash{byte(i), 1}, at(time.Second), at(2*time.Second), nil)
-		}
+		timelines.importAttempt(timelineBlock(timelineSlot, 0), common.Hash{0x11}, at(time.Second), at(2*time.Second), nil)
 	}()
 	select {
 	case <-done:
@@ -175,6 +176,7 @@ func TestBlockTimelineDropsLinesInsteadOfBlockingAnImport(t *testing.T) {
 		t.Fatal("an import waited for the timeline writer")
 	}
 	require.Len(t, timelines.lines, blockTimelineBuffer)
+	require.True(t, timelines.pending[blockGossipKey(timelineBlock(timelineSlot, 0))].logged, "the import reached the send")
 }
 
 func TestBlockTimelineForgetsABlockThatNeverImports(t *testing.T) {
