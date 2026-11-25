@@ -83,21 +83,21 @@ func TestArena_OversizedGetsOwnAllocation(t *testing.T) {
 	assert.Equal(t, byte(0xEE), got[0], "oversized arena slice must not alias the input")
 }
 
-func BenchmarkMemStore_Put(b *testing.B) {
-	s := newMemStore()
-	key := make([]byte, 32)
-	val := make([]byte, 96)
-	b.ReportAllocs()
-	i := 0
-	for b.Loop() {
-		binaryPut(key, uint64(i))
-		_ = s.Put("t", key, val)
-		i++
-	}
+func TestArena_FirstSlabIsSmall(t *testing.T) {
+	var a arena
+	a.put([]byte("x"))
+	assert.Equal(t, arenaMinSlabSize, cap(a.cur))
 }
 
-func binaryPut(dst []byte, v uint64) {
-	for i := 0; i < 8 && i < len(dst); i++ {
-		dst[i] = byte(v >> (8 * i))
-	}
+func TestMemStore_OverwriteDoesNotGrowArena(t *testing.T) {
+	s := newMemStore()
+	require.NoError(t, s.Put("test", []byte("key"), []byte("v1")))
+	used := len(s.tables["test"].arena.cur)
+
+	require.NoError(t, s.Put("test", []byte("key"), []byte("v2")))
+	assert.Equal(t, used, len(s.tables["test"].arena.cur))
+
+	got, err := s.GetOne("test", []byte("key"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("v2"), got)
 }
