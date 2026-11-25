@@ -170,6 +170,15 @@ func (mlt *messageListenerTest) sendBlockAccessLists(t *testing.T, peerId *PeerI
 	}
 }
 
+func TestDecodeEmptyBlockAccessListsResponseWithStalePooledStream(t *testing.T) {
+	// sync.Pool does not always hand back the stream just returned, so repeat.
+	for range 100 {
+		rlp.PutStream(rlp.NewBytesStream([]byte{0x80}))
+		_, err := decodeBlockAccessListsResponse(nil, 1)
+		require.NoError(t, err)
+	}
+}
+
 func TestValidateBALResponseBoundsStorageReadAllocations(t *testing.T) {
 	reads := make([]uint64, 100_000)
 	for i := range reads {

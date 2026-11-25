@@ -250,6 +250,7 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 }
 
 func decodeBlockAccessListsResponse(payload []byte, requested int) ([]rlp.RawValue, error) {
+	// An empty slice gives NewBytesStream no input limit, so Remaining can be stale.
 	if len(payload) == 0 {
 		return nil, nil
 	}
