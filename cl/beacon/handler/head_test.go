@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	mock_services2 "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -299,9 +298,7 @@ func TestHeadRootWaitsForTheImportOfTheCurrentSlotBlock(t *testing.T) {
 	require.NoError(t, err)
 	blockRoot, err := block.HashSSZ()
 	require.NoError(t, err)
-	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
-	clock.EXPECT().GetCurrentSlot().Return(block.Slot).AnyTimes()
-	handler.ethClock = clock
+	mockSlotClock(t, handler, block.Slot)
 	handler.importWait = time.Second
 	fcu.HighestSeenVal = parent.Slot
 	h := &headImport{parent: common.Hash(parentRoot), importedRoot: common.Hash(blockRoot), parentSlot: parent.Slot, slot: block.Slot}
@@ -328,9 +325,7 @@ func TestHeadRootServesAnImportedBlockBeforeItsIndicesAreWritten(t *testing.T) {
 	require.NoError(t, err)
 	importedRoot, importedSlot := common.Hash{0x1d}, parent.Slot+1
 	fcu.Headers[importedRoot] = &cltypes.BeaconBlockHeader{Slot: importedSlot, ParentRoot: parentRoot}
-	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
-	clock.EXPECT().GetCurrentSlot().Return(importedSlot).AnyTimes()
-	handler.ethClock = clock
+	mockSlotClock(t, handler, importedSlot)
 	h := &headImport{parent: common.Hash(parentRoot), importedRoot: importedRoot, parentSlot: parent.Slot, slot: importedSlot}
 	h.imported.Store(true)
 	h.attach(fcu, syncedData)
@@ -384,9 +379,7 @@ func TestHeadRootTriesTheHeadOnceWhenNoImportIsInProgress(t *testing.T) {
 	head := blocks[len(blocks)-1].Block
 	headRoot, err := head.HashSSZ()
 	require.NoError(t, err)
-	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
-	clock.EXPECT().GetCurrentSlot().Return(head.Slot + 1).AnyTimes()
-	handler.ethClock = clock
+	mockSlotClock(t, handler, head.Slot+1)
 	handler.importWait = time.Hour
 	var attempts atomic.Int64
 	fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
@@ -401,10 +394,10 @@ func TestHeadRootTriesTheHeadOnceWhenNoImportIsInProgress(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, common.Hash(headRoot), root)
 	require.Equal(t, int64(1), attempts.Load(), "a busy fork choice lock does not delay the head root")
-	require.Zero(t, handler.attestationDataWaitedSlot.Load())
+	require.Zero(t, handler.headRootWaitedSlot.Load(), "no wait budget is spent without an import")
 }
 
-func TestHeadRootWaitDoesNotSpendTheAttestationDataWait(t *testing.T) {
+func TestHeadRootSpendsItsOwnWaitBudgetOncePerSlot(t *testing.T) {
 	_, blocks, _, _, _, handler, _, sd, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	syncedData := sd.(*synced_data.SyncedDataManager)
 	handler.enableMemoizedHeadState = true
@@ -413,9 +406,7 @@ func TestHeadRootWaitDoesNotSpendTheAttestationDataWait(t *testing.T) {
 	require.NoError(t, err)
 	blockRoot, err := block.HashSSZ()
 	require.NoError(t, err)
-	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
-	clock.EXPECT().GetCurrentSlot().Return(block.Slot).AnyTimes()
-	handler.ethClock = clock
+	mockSlotClock(t, handler, block.Slot)
 	handler.importWait = 200 * time.Millisecond
 	fcu.HighestSeenVal = parent.Slot
 	fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
@@ -426,9 +417,17 @@ func TestHeadRootWaitDoesNotSpendTheAttestationDataWait(t *testing.T) {
 	syncedData.OnSelectedHead(common.Hash(parentRoot), parent.Slot)
 	finishImport := fcu.BeginPayloadImport(block.Slot)
 
+	start := time.Now()
 	status, root := requestHeadRoot(t, handler, t.Context())
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, common.Hash(parentRoot), root, "the head root stops waiting at its cap")
+	require.GreaterOrEqual(t, time.Since(start), handler.importWait)
+
+	start = time.Now()
+	status, root = requestHeadRoot(t, handler, t.Context())
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, common.Hash(parentRoot), root)
+	require.Less(t, time.Since(start), handler.importWait, "the head root waits once per slot")
 
 	time.AfterFunc(20*time.Millisecond, func() {
 		h.imported.Store(true)
