@@ -229,10 +229,12 @@ func (p *TxPool) precheckFrames(txns []txnAdmission) (uint64, common.Hash) {
 			// so the batch can still be installed under one lock.
 			pooled = nil
 		}
-		// A surviving pooled hash decides the local result. An earlier frame from
-		// this sender may replace it. Remote inputs still need their peer's sidecar checks.
+		// A surviving pooled hash decides the local result, but an earlier frame
+		// from this sender can replace it. Remote copies must also honor sidecar
+		// checks and earlier proof failures from the same peer. Neither applies
+		// to a single remote frame without blobs.
 		sameHash := pooled != nil && pooled.TxnSlot.IDHash == a.txn.IDHash
-		if a.local && sameHash && !mayBeReplaced[pooled] {
+		if sameHash && !mayBeReplaced[pooled] && (a.local || (len(txns) == 1 && !a.txn.HasBlobs())) {
 			a.frame = frameValidationResult{reason: txpoolcfg.DuplicateHash, blocker: pooled}
 		} else {
 			a.frame = p.precheckFrame(a.txn, a.local, pooled)

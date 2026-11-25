@@ -907,6 +907,8 @@ func TestFramePoolRejectionCache(t *testing.T) {
 			add(txpoolcfg.Success)
 			require.Len(t, backend.calls, 2)
 			require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+			add(txpoolcfg.DuplicateHash)
+			require.Len(t, backend.calls, 2, "a pooled frame without blobs needs no new simulation")
 		})
 	}
 }
@@ -1693,11 +1695,14 @@ func TestRemoteFrameChecksPooledSidecar(t *testing.T) {
 	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1}).Txn.(*types.FrameTransaction)
 	frame.Fees.MaxFee.SetUint64(2*frame.GetGasLimit() + 2*params.GasPerBlob)
 	slot := framePoolSlotWithBlob(t, frame)
-	var txns TxnSlots
-	txns.Append(slot, sender[:], false)
-	reasons, err := pool.addNewTxns(ctx, txns, nil)
+	other := common.Address{2}
+	plain := framePoolSlot(t, other, 1, 2, uint256.Int{1})
+	var initial TxnSlots
+	initial.Append(slot, sender[:], false)
+	initial.Append(plain, other[:], false)
+	reasons, err := pool.addNewTxns(ctx, initial, nil)
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
 	pool.cfg.TotalBlobPoolLimit = 1
 
 	var replay TxnSlot
@@ -1705,7 +1710,8 @@ func TestRemoteFrameChecksPooledSidecar(t *testing.T) {
 	parser.WithSender(false)
 	_, err = parser.ParseTransaction(slot.Rlp, 0, &replay, nil, false, true, nil)
 	require.NoError(t, err)
-	txns.Txns[0] = &replay
+	var txns TxnSlots
+	txns.Append(&replay, sender[:], false)
 	batch := newAdmissionBatch(txns, nil)
 	pool.prepareFrames(ctx, batch.txns, make(blobCells))
 	require.True(t, batch.txns[0].frame.sidecarVerified, "an exact copy must be checked before taking the admission lock")
@@ -1717,6 +1723,12 @@ func TestRemoteFrameChecksPooledSidecar(t *testing.T) {
 	reasons, err = pool.addNewTxns(ctx, txns, nil)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
+
+	// A failed proof also decides the result of a later pooled frame from the same peer.
+	txns.Append(plain, other[:], false)
+	reasons, err = pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}, reasons)
 }
 
 func TestFramePoolRemoteBlobPriceLimit(t *testing.T) {

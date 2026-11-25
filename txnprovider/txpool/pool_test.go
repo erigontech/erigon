@@ -3739,45 +3739,77 @@ func TestProvideTxnsKeepsSenderNonceOrderForRemoteThenLocal(t *testing.T) {
 	require.Equal(t, []uint64{0, 1}, providedNonces(t, ctx, pool))
 }
 
-func TestRemoteAdmissionAboveAccountSlots(t *testing.T) {
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	pool.cfg.AccountSlots = 2
-	submit := func(txns ...*TxnSlot) []txpoolcfg.DiscardReason {
-		t.Helper()
-		var slots TxnSlots
-		for _, txn := range txns {
-			slots.Append(txn, sender[:], false)
-		}
-		pool.AddRemoteTxns(ctx, slots, nil, nil)
-		reasons, err := pool.processRemoteBatch(ctx)
-		require.NoError(t, err)
-		return reasons
+func submitRemoteTxns(t *testing.T, pool *TxPool, sender common.Address, txns ...*TxnSlot) []txpoolcfg.DiscardReason {
+	t.Helper()
+	var slots TxnSlots
+	for _, txn := range txns {
+		slots.Append(txn, sender[:], false)
 	}
+	pool.AddRemoteTxns(t.Context(), slots, nil, nil)
+	reasons, err := pool.processRemoteBatch(t.Context())
+	require.NoError(t, err)
+	return reasons
+}
 
+func newTestSetCodeWithAuthorization(t *testing.T, chainID uint256.Int, nonce uint64) (*TxnSlot, AuthAndNonce) {
+	t.Helper()
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, 0)
+	auth, err := types.SignAuthorization(key, chainID, common.Address{2}, 0)
 	require.NoError(t, err)
-	pooled := newTestSetCodeTxnSlot(2, 0, 1, 2, 100_000)
-	pooled.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
-	pooled.IDHash = pooled.Txn.Hash()
+	slot := newTestSetCodeTxnSlot(nonce, 0, 1, 2, 100_000)
+	slot.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
+	slot.IDHash = slot.Txn.Hash()
+	return slot, AuthAndNonce{crypto.PubkeyToAddress(key.PublicKey), 0}
+}
+
+func TestRemoteSenderPenaltyFollowsBatchOrder(t *testing.T) {
+	for _, firstType := range []string{"ordinary", "SetCode"} {
+		t.Run(firstType+" first", func(t *testing.T) {
+			_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			pool.cfg.AccountSlots = 2
+			seeded := submitRemoteTxns(t, pool, sender,
+				newTestSenderTxnSlot(sender, 0), newTestSenderTxnSlot(sender, 1), newTestSenderTxnSlot(sender, 2))
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, seeded)
+
+			setCode, auth := newTestSetCodeWithAuthorization(t, pool.chainID, 4)
+			first, second := newTestSenderTxnSlot(sender, 3), setCode
+			if firstType == "SetCode" {
+				first, second = second, first
+			}
+			reasons := submitRemoteTxns(t, pool, sender, first, second)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, reasons)
+			if second == setCode {
+				require.Equal(t, []AuthAndNonce{auth}, setCode.AuthAndNonces)
+			} else {
+				require.Nil(t, setCode.AuthAndNonces, "a penalized input does not need authorization recovery")
+			}
+		})
+	}
+}
+
+func TestRemoteAdmissionAboveAccountSlots(t *testing.T) {
+	_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.cfg.AccountSlots = 2
+
+	pooled, auth := newTestSetCodeWithAuthorization(t, pool.chainID, 2)
 	resubmitted := *pooled
-	reasons := submit(newTestSenderTxnSlot(sender, 0), newTestSenderTxnSlot(sender, 1), pooled)
+	reasons := submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(sender, 0), newTestSenderTxnSlot(sender, 1), pooled)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, submit(newTestSenderTxnSlot(sender, 0)))
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(sender, 0)))
 	require.Len(t, pool.byHash, 3, "a duplicate must not trigger the sender penalty")
 
 	// The first input evicts the highest nonce. The copy now needs its own admission and authorization recovery.
-	reasons = submit(newTestSenderTxnSlot(sender, 3), &resubmitted)
+	reasons = submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(sender, 3), &resubmitted)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, reasons)
 	installed := pool.byHash[string(resubmitted.IDHash[:])]
 	require.NotNil(t, installed)
 	require.Same(t, &resubmitted, installed.TxnSlot)
-	require.Same(t, installed, pool.auths[AuthAndNonce{crypto.PubkeyToAddress(key.PublicKey), 0}])
+	require.Same(t, installed, pool.auths[auth])
 
 	setCode := newTestSetCodeTxnSlot(3, 0, 1, 2, 100_000)
 	setCode.IDHash[0] = 4
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer}, submit(setCode))
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer}, submitRemoteTxns(t, pool, sender, setCode))
 	require.Len(t, pool.byHash, 2, "the submitting transaction keeps its rejection after its penalty frees a slot")
 }
 

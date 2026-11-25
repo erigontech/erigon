@@ -260,6 +260,7 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	pool := seedBlobKZGTestPool(t, ctx)
+	pool.cfg.AccountSlots = 1
 	require.NoError(t, pool.start(ctx))
 	a0, a1, a2 := [20]byte{1}, [20]byte{2}, [20]byte{3}
 
@@ -275,12 +276,20 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	reasons, err := pool.AddLocalTxns(ctx, local)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	extra := newTestTxnSlot(1, 0, 300_000, 300_000, 100_000)
+	extra.IDHash[0] = 0x64
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, submitRemoteTxns(t, pool, a1, extra))
 
 	bad := makeBlobSlot(0x61, true)
 	skippedCopy := *skipped
 	var fromAttacker TxnSlots
 	fromAttacker.Append(&bad, a0[:], false)
 	fromAttacker.Append(&skippedCopy, a1[:], false)
+	// This sender is over the limit, but a skipped input must not charge a penalty.
+	overLimit := makeBlobSlot(0x65, false)
+	fromAttacker.Append(&overLimit, a1[:], false)
+	// The precheck already rejects SetCode before Prague.
+	fromAttacker.Append(newTestSetCodeTxnSlot(1, 0, 300_000, 300_000, 100_000), a1[:], false)
 	pool.AddRemoteTxns(ctx, fromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), nil)
 
 	replacement := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
@@ -292,8 +301,10 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	reasons, err = pool.processRemoteBatch(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{
-		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure, txpoolcfg.NotReplaced,
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure, txpoolcfg.SkippedAfterKZGFailure,
+		txpoolcfg.TypeNotActivated, txpoolcfg.NotReplaced,
 	}, reasons)
+	require.Contains(t, pool.byHash, string(extra.IDHash[:]))
 	require.Same(t, &goodBlob, pool.byHash[string(bad.IDHash[:])].TxnSlot)
 }
 
@@ -366,7 +377,7 @@ func TestBlobKZGVerifiedOutsidePoolLock(t *testing.T) {
 		defer pool.lock.Unlock()
 		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
 		batch := newAdmissionBatch(slots, nil)
-		require.NoError(t, pool.validateTxns(batch.txns, cacheView, nil))
+		require.ErrorIs(t, pool.validateTxns(&batch, cacheView), errPreparationRequired)
 		assert.Equal(t, txpoolcfg.NotSet, batch.txns[0].reason)
 	})
 
@@ -414,7 +425,7 @@ func TestBlobSlotsOverflowDoesNotPunishSender(t *testing.T) {
 }
 
 func TestRemoteBlobReadmissionAfterSenderPenalty(t *testing.T) {
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, testforks.Forks["Cancun"])
+	_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, testforks.Forks["Cancun"])
 	pool.cfg.AccountSlots = 1
 	blob := makeBlobSlot(3, false)
 	blob.Nonce = 1
@@ -423,17 +434,9 @@ func TestRemoteBlobReadmissionAfterSenderPenalty(t *testing.T) {
 	pool.cfg.BlobSlots = uint64(len(blob.GetBlobHashes()))
 	pool.cfg.TotalBlobPoolLimit = pool.cfg.BlobSlots
 	resubmitted := blob
-	submit := func(ordinaryNonce uint64, candidate *TxnSlot) []txpoolcfg.DiscardReason {
-		t.Helper()
-		var batch TxnSlots
-		batch.Append(newTestSenderTxnSlot(sender, ordinaryNonce), sender[:], false)
-		batch.Append(candidate, sender[:], false)
-		pool.AddRemoteTxns(ctx, batch, nil, nil)
-		reasons, err := pool.processRemoteBatch(ctx)
-		require.NoError(t, err)
-		return reasons
-	}
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, submit(0, &blob))
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, submit(2, &resubmitted))
+	reasons := submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(sender, 0), &blob)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	reasons = submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(sender, 2), &resubmitted)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, reasons)
 	require.Contains(t, pool.byHash, string(blob.IDHash[:]))
 }
