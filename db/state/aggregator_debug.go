@@ -127,6 +127,9 @@ func (ac *aggDirtyFilesRoTx) dropCovered(mf *MissedAccessorAggFiles) {
 	defer ac.agg.dirtyFilesLock.Unlock()
 	// a smaller file covers only if it can become visible: its dependents are present
 	drop := func(missed MissedFilesMap, all []*FilesItem, l statecfg.Accessors, dependentsPresent func(startTxNum, endTxNum uint64) bool) {
+		if missed.IsEmpty() {
+			return
+		}
 		if dependentsPresent != nil {
 			all = slices.DeleteFunc(slices.Clone(all), func(f *FilesItem) bool { return !dependentsPresent(f.startTxNum, f.endTxNum) })
 		}
@@ -137,7 +140,12 @@ func (ac *aggDirtyFilesRoTx) dropCovered(mf *MissedAccessorAggFiles) {
 	for _, d := range ac.domain {
 		df := mf.domain[d.d.Name]
 		drop(df.files, d.files, d.d.Accessors, d.d.dependentsPresent())
-		drop(df.history.files, d.history.files, d.history.h.Accessors, nil)
+		// a .v file's accessor is addressed by the key ordinals of the .ef file of the same range
+		drop(df.history.files, d.history.files, d.history.h.Accessors, func(startTxNum, endTxNum uint64) bool {
+			return slices.ContainsFunc(d.history.ii.files, func(ef *FilesItem) bool {
+				return ef.startTxNum == startTxNum && ef.endTxNum == endTxNum && checkForVisibility(ef, d.history.ii.ii.Accessors, false)
+			})
+		})
 		drop(df.history.ii.files, d.history.ii.files, d.history.ii.ii.Accessors, d.history.ii.ii.dependentsPresent())
 	}
 	for _, ii := range ac.ii {

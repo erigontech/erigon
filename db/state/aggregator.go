@@ -1890,8 +1890,8 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 				lowestEnd = min(lowestEnd, contiguousEnd(visible))
 			}
 		}
-		// values files are never retired, so a values list must not start past its first file on disk;
-		// optional domains (receipt, rcache) can start past 0 when they are enabled on a synced node
+		// values files are never retired, so an optional values list (receipt, rcache) must not start
+		// past its first file on disk; it can start past 0 when it is enabled on a synced node
 		lowerToFirstFile := func(dirty *DirtyFiles, visible visibleFiles) {
 			firstStart := uint64(math.MaxUint64)
 			dirty.Scan(func(f *FilesItem) bool {
@@ -1913,10 +1913,14 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 				continue
 			}
 			lower(d.dirtyFiles, next.d[id].files)
-			lowerToFirstFile(d.dirtyFiles, next.d[id].files)
-			// state values always start at 0: a missing first file is not on disk for lowerToFirstFile to see
-			if files := next.d[id].files; len(files) > 0 && files[0].startTxNum > 0 && slices.Contains(kv.StateDomains, kv.Domain(id)) {
-				lowestEnd = 0
+			if slices.Contains(kv.StateDomains, kv.Domain(id)) {
+				// state values always start at 0, and a state domain with history has values files:
+				// a missing first or only values file is not on disk for lowerToFirstFile to see
+				if files := next.d[id].files; (len(files) > 0 && files[0].startTxNum > 0) || (d.dirtyFiles.Len() == 0 && d.History.dirtyFiles.Len() > 0) {
+					lowestEnd = 0
+				}
+			} else {
+				lowerToFirstFile(d.dirtyFiles, next.d[id].files)
 			}
 			if !d.HistCfg.SnapshotsDisabled && !d.HistCfg.HistoryDisabled {
 				lower(d.History.dirtyFiles, next.dh[id])
