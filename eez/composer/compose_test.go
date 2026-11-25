@@ -1514,3 +1514,41 @@ func mustDraft(t *testing.T, f *crossFixture) *Draft {
 	require.NoError(t, err)
 	return d
 }
+
+// TestComposeOutboundBehindInboundWaits: an outbound transaction the drain
+// pops after an inbound one composed waits for the next slot, uncharged: a
+// Sync block's outbound entries precede its inbound ones.
+func TestComposeOutboundBehindInboundWaits(t *testing.T) {
+	f := newCrossFixture(t)
+	f.c.x.MaxTxs = 2
+	trigger := f.hold(t, 0, f.call.Source, f.call.Data)
+	// Waiting on a nonce gap, out of the drain's count, it has the drain pop
+	// the outbound transaction once the trigger composed.
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	f.l1.m.fund(crypto.PubkeyToAddress(key.PublicKey), 1e18)
+	other := *f
+	other.key = key
+	gapped := other.holdOn(t, 1, 1, f.call.Source, f.call.Data)
+	out := f.holdOutbound(t, 0)
+	fx := f.compose(t)
+	require.NotNil(t, fx)
+	require.Equal(t, []*Held{trigger}, fx.held)
+	require.Equal(t, []*Held{gapped, out}, f.pool.PopN(math.MaxInt))
+	require.Zero(t, out.Attempts)
+	require.Zero(t, out.Deferred)
+}
+
+// TestComposeOutboundWaitsOnANonceGap: an outbound transaction whose nonce
+// is ahead of its sender's on the rollup waits, as an inbound one does.
+func TestComposeOutboundWaitsOnANonceGap(t *testing.T) {
+	f := newCrossFixture(t)
+	sender := crypto.PubkeyToAddress(f.l2Key.PublicKey)
+	// Admitted on a pending nonce.
+	f.l2.accounts[sender].Nonce = 1
+	h := f.holdOut(t, 1, outboundProxies[1], 0, nil)
+	f.l2.accounts[sender].Nonce = 0
+	require.Nil(t, f.compose(t))
+	require.Equal(t, uint32(1), h.Deferred)
+	require.Equal(t, []*Held{h}, f.pool.PopN(math.MaxInt), "not evicted")
+}

@@ -1046,6 +1046,28 @@ func TestComposerDisposesOfPartialTransactions(t *testing.T) {
 	}
 }
 
+// TestComposerDisposesOfAPartialBatchLedByOutbound: an outbound entry is
+// immediate, so the outbound transaction leading a partial batch ran with
+// its posting; L1 stopped at the first unspent trigger.
+func TestComposerDisposesOfAPartialBatchLedByOutbound(t *testing.T) {
+	chain := newTestChain(t, 8, 8)
+	h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	out, cut := held(addr(0xa), 0, Outbound, 1), held(addr(0xb), 0, Inbound, 2)
+	out.Hash = chain.blocks[8].Transactions()[0].Hash()
+	for _, tx := range []*Held{out, cut} {
+		require.NoError(t, pool.Push(tx, 0))
+	}
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(math.MaxInt)})
+	h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
+	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	require.Equal(t, []*Held{cut}, pool.PopN(math.MaxInt))
+	require.Equal(t, uint32(1), cut.Attempts, "where L1 stopped")
+	require.Zero(t, out.Attempts)
+}
+
 // TestPartialCulprit: L1 stopped a partial batch at its first trigger when
 // unspent; a later trigger may only be stuck behind one that ran and
 // reverted.
