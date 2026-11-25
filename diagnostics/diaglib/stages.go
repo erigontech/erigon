@@ -50,12 +50,4 @@ func (ti SyncStageList) Type() Type {
 
 type StageState int
 
-const (
-	Queued StageState = iota
-	Running
-	Completed
-)
-
-func (s StageState) String() string {
-	return [...]string{"Queued", "Running", "Completed"}[s]
-}
+const Queued StageState = 0
