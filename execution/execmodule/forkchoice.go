@@ -71,45 +71,87 @@ func sendForkchoiceErrorWithoutWaiting(logger log.Logger, ch chan forkchoiceOutc
 	return err
 }
 
-// verifyForkchoiceHashes verifies the finalized and safe hash of the forkchoice state
-func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, blockHash, finalizedHash, safeHash common.Hash) (bool, error) {
+// forkchoiceRefusal says why a forkchoice state cannot be adopted, since the caller retries a refused state every slot.
+type forkchoiceRefusal struct {
+	ref       string
+	canonical bool
+	headNum   *uint64
+	refNum    *uint64
+}
+
+func (r *forkchoiceRefusal) String() string {
+	head := "unknown"
+	if r.headNum != nil {
+		head = fmt.Sprint(*r.headNum)
+	}
+	switch {
+	case r.refNum == nil:
+		return fmt.Sprintf("%s block is not in our chain (head %s)", r.ref, head)
+	case !r.canonical:
+		return fmt.Sprintf("%s block %d is not on the head's chain (head %s)", r.ref, *r.refNum, head)
+	default:
+		return fmt.Sprintf("head %s is not above %s block %d", head, r.ref, *r.refNum)
+	}
+}
+
+// checkForkchoiceRef reports why head cannot be adopted against this reference block, or nil when it can.
+func checkForkchoiceRef(ref string, headNumber, refNumber *uint64, canonical bool) *forkchoiceRefusal {
+	if canonical && headNumber != nil && refNumber != nil && *headNumber > *refNumber {
+		return nil
+	}
+	return &forkchoiceRefusal{ref: ref, canonical: canonical, headNum: headNumber, refNum: refNumber}
+}
+
+// refuseForkchoice builds an InvalidForkchoice result that carries its reason, and logs it.
+func (e *ExecModule) refuseForkchoice(why string, kvs ...any) *ForkChoiceResult {
+	if e.logger != nil {
+		e.logger.Warn("[forkchoice] refusing state", append([]any{"why", why}, kvs...)...)
+	}
+	return &ForkChoiceResult{
+		LatestValidHash: common.Hash{},
+		Status:          ExecutionStatusInvalidForkchoice,
+		ValidationError: why,
+	}
+}
+
+// verifyForkchoiceHashes reports why the finalized and safe hash of the
+// forkchoice state cannot be adopted, or nil when they can.
+func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, blockHash, finalizedHash, safeHash common.Hash) (*forkchoiceRefusal, error) {
 	// Client software MUST return -38002: Invalid forkchoice state error if the payload referenced by
 	// forkchoiceState.headBlockHash is VALID and a payload referenced by either forkchoiceState.finalizedBlockHash or
 	// forkchoiceState.safeBlockHash does not belong to the chain defined by forkchoiceState.headBlockHash
 	headNumber, err := e.blockReader.HeaderNumber(ctx, tx, blockHash)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	finalizedNumber, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	safeNumber, err := e.blockReader.HeaderNumber(ctx, tx, safeHash)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
 	if finalizedHash != (common.Hash{}) && finalizedHash != blockHash {
 		canonical, err := e.isCanonicalHash(ctx, tx, finalizedHash)
 		if err != nil {
-			return false, err
+			return nil, err
 		}
-		if !canonical || *headNumber <= *finalizedNumber {
-			return false, nil
+		if why := checkForkchoiceRef("finalized", headNumber, finalizedNumber, canonical); why != nil {
+			return why, nil
 		}
-
 	}
 	if safeHash != (common.Hash{}) && safeHash != blockHash {
 		canonical, err := e.isCanonicalHash(ctx, tx, safeHash)
 		if err != nil {
-			return false, err
+			return nil, err
 		}
-
-		if !canonical || *headNumber <= *safeNumber {
-			return false, nil
+		if why := checkForkchoiceRef("safe", headNumber, safeNumber, canonical); why != nil {
+			return why, nil
 		}
 	}
-	return true, nil
+	return nil, nil
 }
 
 func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error) {
@@ -210,15 +252,13 @@ func (e *ExecModule) shortCircuitForkchoice(
 	belowFinality bool,
 	teardownOverlay func(),
 ) (ForkChoiceResult, error) {
-	valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
+	why, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 	if err != nil {
 		return ForkChoiceResult{}, err
 	}
-	if !valid {
-		return ForkChoiceResult{
-			LatestValidHash: common.Hash{},
-			Status:          ExecutionStatusInvalidForkchoice,
-		}, nil
+	if why != nil {
+		return *e.refuseForkchoice(why.String(),
+			"head", blockHash, "safe", safeHash, "finalized", finalizedHash), nil
 	}
 	// Compare committed data so unchanged requests do not take the MDBX writer lock.
 	if !belowFinality && !forkChoiceHashesMatch(roTx, blockHash, safeHash, finalizedHash) {
@@ -287,10 +327,9 @@ func (e *ExecModule) unwindIfNeeded(
 		mergePoint := isCanonicalHash || e.preExec.Live(currentParentHash, currentParentNumber)
 		for !mergePoint {
 			if currentParentNumber < finalisedBlockNum {
-				return &ForkChoiceResult{
-					LatestValidHash: common.Hash{},
-					Status:          ExecutionStatusInvalidForkchoice,
-				}, nil, nil
+				return e.refuseForkchoice(
+					fmt.Sprintf("head %x has no common ancestor above finalized block %d", blockHash, finalisedBlockNum),
+					"reachedBlock", currentParentNumber, "finalized", rawdb.ReadForkchoiceFinalized(tx)), nil, nil
 			}
 			newCanonicals = append(newCanonicals, &canonicalEntry{
 				hash:   currentParentHash,
@@ -321,10 +360,9 @@ func (e *ExecModule) unwindIfNeeded(
 	}
 	unwindTarget := currentParentNumber
 	if canonicalHash != blockHash && unwindTarget < finalisedBlockNum {
-		return &ForkChoiceResult{
-			LatestValidHash: common.Hash{},
-			Status:          ExecutionStatusInvalidForkchoice,
-		}, nil, nil
+		return e.refuseForkchoice(
+			fmt.Sprintf("head %x reconnects to our chain at %d, below finalized block %d", blockHash, unwindTarget, finalisedBlockNum),
+			"finalized", rawdb.ReadForkchoiceFinalized(tx)), nil, nil
 	}
 	// Determine current canonical tip from TxNums. If unwindTarget is at or
 	// above the canonical tip, there's nothing above to roll back — skip the
@@ -594,10 +632,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 	if finalisedBlockNum == nil {
-		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
-			LatestValidHash: common.Hash{},
-			Status:          ExecutionStatusInvalidForkchoice,
-		}, false)
+		storedFinalized := rawdb.ReadForkchoiceFinalized(tx)
+		sendForkchoiceResultWithoutWaiting(outcomeCh, *e.refuseForkchoice(
+			fmt.Sprintf("stored finalized block %x is no longer in our chain", storedFinalized),
+			"head", blockHash), false)
 		return nil
 	}
 	// as per https://github.com/ethereum/execution-apis/pull/786
@@ -699,14 +737,13 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	if mergeExtendingFork {
 		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if stateFlushingInParallel {
-			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
+			why, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 			if err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}
-			if !valid {
-				sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
-					Status: ExecutionStatusInvalidForkchoice,
-				}, false)
+			if why != nil {
+				sendForkchoiceResultWithoutWaiting(outcomeCh, *e.refuseForkchoice(why.String(),
+					"head", blockHash, "safe", safeHash, "finalized", finalizedHash), false)
 				return nil
 			}
 			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
@@ -843,15 +880,13 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 
-		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
+		why, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
-		if !valid {
-			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
-				Status:          ExecutionStatusInvalidForkchoice,
-				LatestValidHash: common.Hash{},
-			}, stateFlushingInParallel)
+		if why != nil {
+			sendForkchoiceResultWithoutWaiting(outcomeCh, *e.refuseForkchoice(why.String(),
+				"head", blockHash, "safe", safeHash, "finalized", finalizedHash), stateFlushingInParallel)
 			return nil
 		}
 		if err := rawdb.TruncateCanonicalChain(tx, *headNumber+1); err != nil {

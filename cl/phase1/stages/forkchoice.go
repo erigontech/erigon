@@ -73,12 +73,19 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 	if engine := cfg.forkChoice.Engine(); engine != nil {
 		finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
 		justifiedCheckpoint := cfg.forkChoice.JustifiedCheckpoint()
-		logger.Debug("Caplin is sending forkchoice")
+		// The execution layer stores the finalized hash durably and will not
+		// reorg below it, so the triple sent here is the only record of what
+		// this node claimed was final.
+		finalizedExecutionHash := cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root)
+		safeExecutionHash := cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root)
+		logger.Debug("Caplin is sending forkchoice",
+			"head", executionHead, "safe", safeExecutionHash, "finalized", finalizedExecutionHash,
+			"headSlot", headSlot, "finalizedEpoch", finalizedCheckpoint.Epoch)
 
 		if _, err := engine.ForkChoiceUpdate(
 			ctx,
-			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
-			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
+			finalizedExecutionHash,
+			safeExecutionHash,
 			executionHead, nil, headVersion,
 		); err != nil {
 			switch {

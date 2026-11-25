@@ -145,16 +145,26 @@ func (cc *ExecutionClientDirect) NewPayload(
 	return PayloadStatusNone, errors.New("unexpected status")
 }
 
+// describeRefusal renders the execution layer's reason for refusing a
+// forkchoice state. The consensus layer retries a refused state every slot, so
+// losing the reason here leaves a wedged node and a healthy-looking log.
+func describeRefusal(validationError string) string {
+	if validationError == "" {
+		return "no reason given by the execution layer"
+	}
+	return validationError
+}
+
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
 	result, err := cc.chainRW.UpdateForkChoiceResult(ctx, head, safe, finalized)
 	if err != nil {
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
 	if result.Status == execmodule.ExecutionStatusInvalidForkchoice {
-		return nil, errors.New("forkchoice was invalid")
+		return nil, fmt.Errorf("forkchoice was invalid: %s", describeRefusal(result.ValidationError))
 	}
 	if result.Status == execmodule.ExecutionStatusBadBlock {
-		return nil, errors.New("bad block as forkchoice")
+		return nil, fmt.Errorf("bad block as forkchoice: %s", describeRefusal(result.ValidationError))
 	}
 	if attr == nil {
 		if result.Status == execmodule.ExecutionStatusBusy && !result.UpdateInProgress {

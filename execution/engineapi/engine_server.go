@@ -1399,7 +1399,14 @@ func (e *EngineServer) HandleForkChoice(
 	}
 	status := result.Status
 	if status == execmodule.ExecutionStatusInvalidForkchoice {
-		return nil, &engine_helpers.InvalidForkchoiceStateErr
+		// Spec fixes the -38002 code, so the reason can only travel in the
+		// message. Without it the consensus layer retries the same state every
+		// slot against a node that will never accept it.
+		refusal := engine_helpers.InvalidForkchoiceStateErr
+		if result.ValidationError != "" {
+			refusal.Message += ": " + result.ValidationError
+		}
+		return nil, &refusal
 	}
 	if status == execmodule.ExecutionStatusReorgTooDeep {
 		return nil, &engine_helpers.ReorgTooDeepErr

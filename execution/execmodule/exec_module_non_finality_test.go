@@ -175,6 +175,9 @@ func TestExecModule_GivenReorgAtFinalisedBlock_WhenFinality_ThenInvalidFCU(t *te
 	result, err := emt.UpdateForkChoice(ctx, fork.TopBlock.Header(), execmoduletester.WithSafeHash(forkHash), execmoduletester.WithFinalisedHash(forkHash))
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, result.Status)
+	require.Contains(t, result.ValidationError, "below finalized block",
+		"refusing this state is correct, but the consensus layer retries it every slot: "+
+			"without a reason the operator cannot tell a reorg that will settle from a wedged node")
 	forkchoice, err := emt.ExecModule.GetForkChoice(ctx)
 	require.NoError(t, err)
 	require.Equal(t, canonicalHash, forkchoice.HeadHash)
