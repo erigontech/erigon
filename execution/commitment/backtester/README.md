@@ -56,7 +56,7 @@ block_1752747
 With the per-block result directories each containing:
 
 - a pprof cpu profile
-- a fgprof profile
+- a fgprof profile (empty for a block that folds faster than one sampling tick)
 
 ```
 cpu.fgprof

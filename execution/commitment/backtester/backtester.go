@@ -125,6 +125,7 @@ func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64
 		return err
 	}
 	ri := runId{
+		v3:         statecfg.Schema.CommitmentDomain.CommitmentV3Records,
 		paraTrie:   bt.paraTrie,
 		trieWarmup: bt.trieWarmup,
 		fromBlock:  fromBlock,
@@ -245,9 +246,10 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 		}
 	}()
 	stopFgprof := fgprof.Start(fgprofProfile, fgprof.FormatPprof)
-	err = pprof.StartCPUProfile(cpuProfile)
-	if err != nil {
-		return fmt.Errorf("failed to start cpu profile: %s: %w", cpuProfilePath, err)
+	// the process may already run a CPU profile (go test -cpuprofile); the block's cpu.prof then stays empty
+	cpuProfiling := pprof.StartCPUProfile(cpuProfile) == nil
+	if !cpuProfiling {
+		bt.logger.Warn("cpu profile not taken: another one is running", "block", block)
 	}
 	commitmentStart := time.Now()
 	root, err := sd.ComputeCommitment(ctx, tx, false /*saveState*/, block, maxTxNum, "commitment-backtester", nil /*progress*/)
@@ -255,7 +257,9 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 		return err
 	}
 	bt.logger.Info("computed commitment", "block", block, "in", time.Since(commitmentStart))
-	pprof.StopCPUProfile()
+	if cpuProfiling {
+		pprof.StopCPUProfile()
+	}
 	err = stopFgprofProfile(stopFgprof)
 	if err != nil {
 		return fmt.Errorf("failed to stop fgprof: %w", err)
@@ -313,6 +317,7 @@ func checkDataAvailable(ctx context.Context, tx kv.TemporalTx, fromBlock uint64,
 }
 
 type runId struct {
+	v3         bool
 	paraTrie   bool
 	trieWarmup bool
 	fromBlock  uint64
@@ -322,9 +327,12 @@ type runId struct {
 
 func (ri runId) String() string {
 	var sb strings.Builder
-	if ri.paraTrie {
+	switch {
+	case ri.v3:
+		sb.WriteString("v3")
+	case ri.paraTrie:
 		sb.WriteString("para")
-	} else {
+	default:
 		sb.WriteString("hph")
 	}
 	if ri.trieWarmup {
