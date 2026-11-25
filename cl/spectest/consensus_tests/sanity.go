@@ -80,8 +80,10 @@ var SanityBlocks = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectes
 	require.NoError(t, err)
 
 	var block *cltypes.SignedBeaconBlock
+	checkPrevious := func() {}
 	for _, block = range blocks {
-		freezeSibling(t, testState)
+		checkPrevious()
+		checkPrevious = freezeSibling(t, testState)
 		err = transitionStateWithPrecomputedCheck(t, c.Machine, testState, block)
 		if err != nil {
 			break

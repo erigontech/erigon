@@ -17,6 +17,7 @@
 package consensus_tests
 
 import (
+	"crypto/sha256"
 	"io/fs"
 	"testing"
 
@@ -31,26 +32,34 @@ import (
 // freezeSibling copies s, so that s shares every registry chunk with the copy and
 // must clone a chunk on its first write. When the test ends it fails if the copy
 // changed in the meantime.
-func freezeSibling(t *testing.T, s *state.CachingBeaconState) {
+// freezeSibling copies s and returns a check that the copy is unchanged; the check also runs at cleanup.
+func freezeSibling(t *testing.T, s *state.CachingBeaconState) (check func()) {
 	t.Helper()
 	sibling, err := s.Copy()
 	require.NoError(t, err)
 	wantRoot, err := sibling.HashSSZ()
 	require.NoError(t, err)
-	wantSSZ, err := sibling.EncodeSSZ(nil)
-	require.NoError(t, err)
-	t.Cleanup(func() {
+	wantDigest := sszDigest(t, sibling)
+	check = func() {
+		if sibling == nil {
+			return
+		}
 		gotRoot, err := sibling.HashSSZ()
-		if !assert.NoError(t, err) {
-			return
+		if assert.NoError(t, err) {
+			assert.Equal(t, wantRoot, gotRoot, "frozen sibling root changed")
+			assert.Equal(t, wantDigest, sszDigest(t, sibling), "frozen sibling SSZ changed")
 		}
-		gotSSZ, err := sibling.EncodeSSZ(nil)
-		if !assert.NoError(t, err) {
-			return
-		}
-		assert.Equal(t, wantRoot, gotRoot, "frozen sibling root changed")
-		assert.Equal(t, wantSSZ, gotSSZ, "frozen sibling SSZ changed")
-	})
+		sibling = nil
+	}
+	t.Cleanup(check)
+	return check
+}
+
+func sszDigest(t *testing.T, s *state.CachingBeaconState) [32]byte {
+	t.Helper()
+	encoded, err := s.EncodeSSZ(nil)
+	require.NoError(t, err)
+	return sha256.Sum256(encoded)
 }
 
 func readFrozenPreState(t *testing.T, root fs.FS, version clparams.StateVersion) *state.CachingBeaconState {
