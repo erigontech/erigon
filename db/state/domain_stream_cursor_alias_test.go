@@ -101,9 +101,7 @@ func TestDomainLatestIterFileKeepsKeyAfterCursorReuse(t *testing.T) {
 func TestDomainLatestIterFileKeepsEmptyFirstKey(t *testing.T) {
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16)
 	ctx := t.Context()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := beginRw(t, db)
 	rw := d.beginForTests()
 	w := rw.NewWriter(db)
 	require.NoError(t, w.PutWithPrev([]byte{}, []byte{0xaa}, 1, nil))

@@ -2496,9 +2496,7 @@ func TestIntegrityHistoryValueAccessor(t *testing.T) {
 func TestHistoryCanPruneUntilMalformedProgress(t *testing.T) {
 	t.Parallel()
 	db, h := testDbAndHistory(t, false)
-	rwTx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer rwTx.Rollback()
+	rwTx := beginRw(t, db)
 	require.NoError(t, rwTx.Put(kv.TblPruningValsProg, append([]byte(h.ValuesTable), "range"...), []byte{1}))
 
 	hc := h.beginForTests()
