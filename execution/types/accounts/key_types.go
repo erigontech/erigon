@@ -26,16 +26,14 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 )
 
-type Address unique.Handle[common.Address]
+type Address struct{ p *common.Address }
 
 var (
 	ZeroAddress = InternAddress(common.Address{})
 	NilAddress  = Address{}
 )
 
-// unique drops a value at the first GC after its last handle dies, so values the next request reads again are
-// allocated and registered again, and unique.Make parks its caller while a GC cycle finishes marking. These
-// direct-mapped tables keep the latest values alive and answer hits without unique.Make; a miss overwrites the slot.
+// Direct-mapped caches in front of the canon tables: a hit skips the canon lookup, a miss overwrites the slot.
 const (
 	addressTableSize = 256 * 1024
 	keyTableSize     = 1024 * 1024
@@ -57,10 +55,12 @@ func InternAddress(a common.Address) Address {
 	if h, ok := slot.Load().(Address); ok && h.Value() == a {
 		return h
 	}
-	h := Address(unique.Make(a))
+	h := Address{addrCanon.intern(a)}
 	slot.Store(h)
 	return h
 }
+
+var addrCanon = newCanonTable[common.Address](1 << 18)
 
 func (a Address) IsNil() bool {
 	return a == NilAddress
@@ -74,11 +74,7 @@ func (a Address) Value() common.Address {
 	if a == NilAddress {
 		return common.Address{}
 	}
-	return unique.Handle[common.Address](a).Value()
-}
-
-func (a Address) Handle() unique.Handle[common.Address] {
-	return unique.Handle[common.Address](a)
+	return *a.p
 }
 
 func (a Address) String() string {
@@ -140,7 +136,7 @@ func (a Address) Cmp(o Address) int {
 	return a.Value().Cmp(o.Value())
 }
 
-type StorageKey unique.Handle[common.Hash]
+type StorageKey struct{ p *common.Hash }
 
 var (
 	ZeroKey = InternKey(common.Hash{})
@@ -152,12 +148,14 @@ func keySlot(k common.Hash) *atomic.Value {
 	return &keyTable[(binary.BigEndian.Uint32(k[:4])^binary.BigEndian.Uint32(k[28:]))&(keyTableSize-1)]
 }
 
+var keyCanon = newCanonTable[common.Hash](1 << 20)
+
 func InternKey(k common.Hash) StorageKey {
 	slot := keySlot(k)
 	if h, ok := slot.Load().(StorageKey); ok && h.Value() == k {
 		return h
 	}
-	h := StorageKey(unique.Make(k))
+	h := StorageKey{keyCanon.intern(k)}
 	slot.Store(h)
 	return h
 }
@@ -170,7 +168,7 @@ func (k StorageKey) Value() common.Hash {
 	if k == NilKey {
 		return common.Hash{}
 	}
-	return unique.Handle[common.Hash](k).Value()
+	return *k.p
 }
 
 func (k StorageKey) String() string {

@@ -19,14 +19,22 @@ package accounts
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"regexp"
+	"runtime"
+	"sync"
 	"testing"
-	"unique"
+	"testing/synctest"
+	"time"
+	"weak"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -412,20 +420,241 @@ func TestInternSlotCollision(t *testing.T) {
 	a1, a2 := common.Address{1}, common.Address{2}
 	require.Same(t, keySlot(k1), keySlot(k2))
 	require.Same(t, addressSlot(a1), addressSlot(a2))
+	canon := map[common.Hash]StorageKey{k1: InternKey(k1), k2: InternKey(k2)}
+	require.NotEqual(t, canon[k1], canon[k2])
+	canonAddr := map[common.Address]Address{a1: InternAddress(a1), a2: InternAddress(a2)}
+	require.NotEqual(t, canonAddr[a1], canonAddr[a2])
 	for range 2 {
 		for _, k := range []common.Hash{k1, k2} {
-			require.Equal(t, StorageKey(unique.Make(k)), InternKey(k))
+			require.True(t, canon[k] == InternKey(k))
 			require.Equal(t, k, InternKey(k).Value())
 		}
 		for _, a := range []common.Address{a1, a2} {
-			require.Equal(t, Address(unique.Make(a)), InternAddress(a))
+			require.True(t, canonAddr[a] == InternAddress(a))
 			require.Equal(t, a, InternAddress(a).Value())
 		}
 	}
+}
+
+func requireCanonKey(t *testing.T, k common.Hash, h StorageKey) {
+	t.Helper()
+	require.Same(t, keyCanon.lookup(k), h.p)
+	require.Equal(t, k, h.Value())
+}
+
+func TestInternKeyConcurrentFirstUse(t *testing.T) {
+	k := common.HexToHash("0x9f3c1b7e5a2d4c6b8e0f1a3c5e7d9b2f4a6c8e0d2b4f6a8c0e2d4b6f8a0c2e4d")
+	got := make([]StorageKey, 16)
+	var wg sync.WaitGroup
+	for i := range got {
+		wg.Go(func() { got[i] = InternKey(k) })
+	}
+	wg.Wait()
+	for _, h := range got {
+		require.True(t, got[0] == h)
+	}
+	requireCanonKey(t, k, got[0])
+}
+
+// internAndEvict leaves no reachable handle of k: a colliding key takes k's intern-table slot.
+func internAndEvict(t *testing.T, k common.Hash) {
+	t.Helper()
+	requireCanonKey(t, k, InternKey(k))
+	keyCanon.flush()
+	_, ok := keyCanon.weak.Load(k)
+	require.True(t, ok, "flush must move k to the weak table")
+	other := k
+	other[10]++
+	require.Same(t, keySlot(k), keySlot(other))
+	InternKey(other)
+}
+
+func requireKeyReleased(t *testing.T, k common.Hash) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		runtime.GC()
+		_, ok := keyCanon.weak.Load(k)
+		return !ok
+	}, 10*time.Second, time.Millisecond)
+}
+
+func TestInternKeyReleasedWhenUnreachable(t *testing.T) {
+	k := common.HexToHash("0x51d2c8a4e6f0b3d5a7c9e1f3b5d7a9c1e3f5a7b9d1c3e5f7a9b1d3f5a7c9e1b3")
+	internAndEvict(t, k)
+	requireKeyReleased(t, k)
+}
+
+func TestInternKeyAfterRelease(t *testing.T) {
+	k := common.HexToHash("0x7a1e3c5b9d2f4a6c8e0b1d3f5a7c9e2b4d6f8a0c1e3b5d7f9a2c4e6b8d0f1a3c")
+	internAndEvict(t, k)
+	requireKeyReleased(t, k)
+	h := InternKey(k)
+	requireCanonKey(t, k, h)
+	require.True(t, h == InternKey(k))
+	internAndEvict(t, k)
+	requireKeyReleased(t, k)
+}
+
+// A late cleanup for a replaced entry must not delete the live one.
+func TestReleaseKeyKeepsReplacedEntry(t *testing.T) {
+	k := common.HexToHash("0x3e8b5d1f7a9c2e4b6d8f0a1c3e5b7d9f2a4c6e8b0d1f3a5c7e9b2d4f6a8c0e1b")
+	h := InternKey(k)
+	keyCanon.flush()
+	keyCanon.release(k, weak.Make(new(common.Hash)))
+	requireCanonKey(t, k, h)
 }
 
 // Precompiles and small scalar storage slots differ only in their last bytes; they must not share a slot.
 func TestInternSlotsSpreadLowValues(t *testing.T) {
 	require.NotSame(t, addressSlot(common.BytesToAddress([]byte{1})), addressSlot(common.BytesToAddress([]byte{2})))
 	require.NotSame(t, keySlot(common.BytesToHash([]byte{1})), keySlot(common.BytesToHash([]byte{2})))
+}
+
+func TestCanonTableKeepsIdentityAcrossGenerations(t *testing.T) {
+	c := newCanonTable[common.Hash](8)
+	k := common.HexToHash("0x01")
+	held := c.intern(k)
+	var wg sync.WaitGroup
+	for g := range 16 {
+		wg.Go(func() {
+			for i := range 1000 {
+				var v common.Hash
+				v[0], v[1], v[2] = byte(g+1), byte(i), byte(i>>8)
+				if first := c.intern(v); c.intern(v) != first {
+					t.Errorf("%x lost its identity", v)
+				}
+				if c.intern(k) != held {
+					t.Errorf("held key %x lost its identity", k)
+				}
+			}
+		})
+	}
+	wg.Wait()
+	c.flush()
+	runtime.GC()
+	require.Same(t, held, c.intern(k))
+	runtime.KeepAlive(held)
+}
+
+// The trace list is read once per process, so the test runs itself in a child process with TRACE_ACCOUNTS set.
+func TestTraceAccountMatchesInternedAddress(t *testing.T) {
+	a := common.HexToAddress("0x5b38da6a701c568545dcfcb03fcb875f56beddc4")
+	if os.Getenv("TRACE_ACCOUNTS") != a.Hex() {
+		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.v", "-test.run=^"+regexp.QuoteMeta(t.Name())+"$")
+		cmd.Env = append(os.Environ(), "TRACE_ACCOUNTS="+a.Hex())
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", out)
+		require.Contains(t, string(out), "--- PASS: "+t.Name())
+		return
+	}
+	require.True(t, dbg.TraceAccount(InternAddress(a).Value()))
+}
+
+func TestCanonTableInsertDoesNotWaitBelowHardCap(t *testing.T) {
+	const limit, inserters = 64, 8
+	c := newCanonTable[common.Hash](limit)
+	c.migrate.Lock()
+	t.Cleanup(func() { c.migrate.Unlock(); c.rotate() })
+	var wg sync.WaitGroup
+	for g := range inserters {
+		wg.Go(func() {
+			for i := range (2*limit - 1) / inserters {
+				c.intern(common.Hash{4, byte(g), byte(i)})
+			}
+		})
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("inserters waited for the migration with cur at %d values, below the hard cap %d", c.cur.Load().m.Size(), 2*limit)
+	}
+}
+
+func TestCanonTableBoundsGenerationsWhileMigrating(t *testing.T) {
+	const limit = 8
+	c := newCanonTable[common.Hash](limit)
+	c.migrate.Lock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range 1000 {
+			c.intern(common.Hash{1, byte(i), byte(i >> 8)})
+		}
+	}()
+	require.Eventually(t, func() bool { return c.cur.Load().m.Size() >= 2*limit }, 10*time.Second, time.Millisecond)
+	require.Never(t, func() bool { return c.cur.Load().m.Size() > 2*limit }, 100*time.Millisecond, time.Millisecond)
+	c.migrate.Unlock()
+	c.rotate()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("intern did not finish after migrate was released")
+	}
+	require.Eventually(t, func() bool {
+		return c.cur.Load().m.Size() < limit && c.prev.Load() == nil
+	}, 10*time.Second, time.Millisecond)
+}
+
+func TestStrongGenerationsStayWithinHardCaps(t *testing.T) {
+	const limit, inserters, total = 1024, 8, 400_000
+	c := newCanonTable[common.Hash](limit)
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	for g := range inserters {
+		wg.Go(func() {
+			for i := range total / inserters {
+				c.intern(common.Hash{3, byte(g), byte(i), byte(i >> 8), byte(i >> 16)})
+			}
+		})
+	}
+	go func() { wg.Wait(); close(done) }()
+	peak := 0
+	for running := true; running; {
+		select {
+		case <-done:
+			running = false
+		default:
+		}
+		c.mu.RLock()
+		strong := c.cur.Load().m.Size()
+		if prev := c.prev.Load(); prev != nil {
+			strong += prev.Size()
+		}
+		c.mu.RUnlock()
+		peak = max(peak, strong)
+	}
+	require.LessOrEqual(t, peak, 2*(2*limit+inserters))
+}
+
+// With limit 1 the first insert of v moves its generation to prev while the other goroutines wait for the read lock.
+func TestCanonTableConcurrentFirstUseAcrossRotation(t *testing.T) {
+	c := newCanonTable[common.Hash](1)
+	for round := range 2000 {
+		v := common.Hash{9, byte(round), byte(round >> 8)}
+		start := make(chan struct{})
+		got := make([]*common.Hash, 16)
+		var wg sync.WaitGroup
+		for i := range got {
+			wg.Go(func() { <-start; got[i] = c.intern(v) })
+		}
+		close(start)
+		wg.Wait()
+		for _, p := range got {
+			require.Same(t, got[0], p, "round %d", round)
+		}
+	}
+}
+
+func TestCanonTableRotationAcrossSynctestBubble(t *testing.T) {
+	c := newCanonTable[common.Hash](4)
+	synctest.Test(t, func(t *testing.T) {
+		for i := range 4 {
+			c.intern(common.Hash{byte(i), 1}) // the 4th insert rotates inside the bubble
+		}
+	})
+	for i := range 4 {
+		c.intern(common.Hash{byte(i), 2})
+	}
 }
