@@ -63,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
@@ -367,6 +368,8 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if req == nil {
 		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
 	}
+	stagedsync.NpEndStart()
+	defer stagedsync.NpEndLog(e.logger, req.BlockNumber.Uint64())
 	if !e.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
@@ -1206,7 +1209,10 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
-	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}); err != nil {
+	stagedsync.NpEndMark("npInsertStart")
+	err := e.chainRW.InsertBlocks(ctx, []*types.Block{block})
+	stagedsync.NpEndMark("npInsert")
+	if err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) || errors.Is(err, types.ErrInvalidBlockAccessList) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,

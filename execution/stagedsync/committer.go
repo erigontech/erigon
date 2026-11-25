@@ -348,6 +348,7 @@ func (cc *commitmentCalculator) Stop() {
 func (cc *commitmentCalculator) loop(ctx context.Context) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "calculator")))
 	defer close(cc.out) // Signal apply loop that no more results will come.
+	defer NpEndMark("npCalcExit")
 
 	// Exit ONLY when cc.in is closed (by the exec loop, which owns shutdown
 	// sequencing). Do NOT add ctx.Done/cc.done checks — exiting early leaves
@@ -535,6 +536,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			// so the first window block's compute covers only its own deltas.
 			cc.compute(ctx, targetOf(r), computeMode{checkRoot: true})
 		}
+		NpEndMark("npCommitEnd")
 		if logNpPhases && !r.execStartedAt.IsZero() {
 			commitEnd := time.Now()
 			execActive := r.execEndedAt.Sub(r.execStartedAt)
@@ -569,6 +571,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			// Publish empty result so drainBeforeExit doesn't block forever.
 			cc.publish(ctx, commitmentResult{blockNum: cc.lastComputedBlock})
 		}
+		NpEndMark("npCommitReq")
 	}
 }
 
@@ -725,6 +728,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		cc.probe.lag, cc.probe.prep, cc.probe.ckpt, cc.probe.final, cc.probe.tail = t0.Sub(pb.reqAt), tPrep.Sub(t0), tCk.Sub(tPrep), tFinal.Sub(tCk), now.Sub(tFinal)
 		cc.logger.Info("[np-phase] ahead", "blk", req.blockNum, "window", cc.ownsChangeset(req.blockNum))
 	}
+	NpEndMark("npAheadEnd")
 	if !dbg.BALShadowCompute && !cc.ownsChangeset(req.blockNum) {
 		cc.publish(ctx, commitmentResult{blockNum: req.blockNum, blockHash: req.blockHash, txNum: req.lastTxNum, rootHash: rh})
 	}
@@ -754,8 +758,9 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 		}
 		if flushOwn != nil {
 			tf := time.Now()
-			defer func() { cc.probe.own += time.Since(tf) }()
-			if err := flushOwn(); err != nil {
+			err := flushOwn()
+			cc.probe.own += time.Since(tf)
+			if err != nil {
 				return after, fmt.Errorf("BAL-driven step-checkpoint flush at txNum %d: %w", edge, err)
 			}
 		}
