@@ -1765,7 +1765,6 @@ type txnAdmission struct {
 type admissionBatch struct {
 	txns          []txnAdmission
 	hasFrames     bool
-	unprepared    int
 	preparedCells blobCells
 }
 
@@ -1784,12 +1783,20 @@ func newAdmissionBatch(txns TxnSlots, sources []remoteSource) admissionBatch {
 		switch txn.TxType() {
 		case SetCodeTxnType, BlobTxnType:
 			a.needsPreparation = true
-			batch.unprepared++
 		case FrameTxnType:
 			batch.hasFrames = true
 		}
 	}
 	return batch
+}
+
+func (batch *admissionBatch) hasUnprepared() bool {
+	for i := range batch.txns {
+		if batch.txns[i].needsPreparation {
+			return true
+		}
+	}
+	return false
 }
 
 // Read the results under the pool lock, after all replacements and evictions.
@@ -1813,7 +1820,7 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 		return admissionBatch{}, err
 	}
 	batch := newAdmissionBatch(txns, sources)
-	if batch.unprepared == 0 {
+	if !batch.hasUnprepared() {
 		return batch, nil
 	}
 	err := p.withLockedState(ctx, &txns, func(_ kv.TemporalTx, view kvcache.CacheView) error {
@@ -1845,7 +1852,6 @@ func (p *TxPool) precheckUnprepared(batch *admissionBatch, view kvcache.CacheVie
 			// This attempt already triggered the sender penalty. Its own evictions
 			// can make the next input eligible, so keep this decision.
 			a.needsPreparation = false
-			batch.unprepared--
 		}
 		if a.reason == txpoolcfg.NotSet && a.txn.TxType() == BlobTxnType && !batch.hasFrames && p.cfg.MaxNonceGap != 0 {
 			reason, err := p.precheckBlobNonceGap(a.txn, view, len(batch.txns))
@@ -1884,7 +1890,6 @@ func (p *TxPool) prepareCandidates(batch *admissionBatch) {
 		a := &batch.txns[i]
 		if a.needsPreparation && a.reason == txpoolcfg.NotSet {
 			a.needsPreparation = false
-			batch.unprepared--
 			switch {
 			case a.txn.TxType() == SetCodeTxnType:
 				p.recoverAuthorizations(a.txn)
@@ -2068,9 +2073,11 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			frameGeneration = p.prepareFrames(simulationCtx, batch.txns, batch.preparedCells)
 			needFrameSimulation = false
 		}
+		// Only this admission request changes the flags, so scan them before taking the pool lock.
+		checkPreparation := batch.hasUnprepared()
 		var reasons []txpoolcfg.DiscardReason
 		err = p.withLockedState(ctx, &newTxns, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
-			if batch.unprepared != 0 {
+			if checkPreparation {
 				ready, err := p.precheckUnprepared(&batch, cacheView)
 				if err != nil {
 					return err
