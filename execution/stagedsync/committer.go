@@ -51,6 +51,15 @@ type pendingBlock struct {
 	// txSeen: the exec loop saves this execution's changeset before the block's
 	// first txResult, replacing one an earlier execution left under the same hash.
 	txSeen bool
+	reqAt  time.Time
+}
+
+type aheadProbe struct {
+	ws, acc, emit, fold, flush, own time.Duration
+	rounds                          int
+	lag, prep, ckpt, final, tail    time.Duration
+	end                             time.Time
+	blk                             uint64
 }
 
 // computedAheadCount counts BAL compute-ahead computations across all calculators;
@@ -80,6 +89,7 @@ func ResetComputedAheadForTest()       { computedAheadCount.Store(0) }
 // every blockResult. It owns its own commitment.Updates buffer and reads
 // block-boundary state from sd.mem (the execLoop flushes before each blockResult).
 type commitmentCalculator struct {
+	probe       aheadProbe
 	doms        *execctx.SharedDomains
 	db          kv.TemporalRoDB
 	chainConfig *chain.Config
@@ -541,6 +551,12 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
 				"overlap", overlap, "gap", gap, "residual", residual)
+			if p := cc.probe; p.blk == r.BlockNum {
+				cc.logger.Info("[np-phase] aheadsplit", "blk", r.BlockNum, "npLag", p.lag, "npStartVsExec", p.end.Add(-p.prep-p.ckpt-p.final-p.tail).Sub(r.execStartedAt),
+					"npPrep", p.prep, "npCkpt", p.ckpt, "npFinal", p.final, "npTail", p.tail, "npRounds", p.rounds,
+					"npWs", p.ws, "npAcc", p.acc, "npEmit", p.emit, "npFold", p.fold, "npFlush", p.flush, "npOwn", p.own,
+					"npEndVsExec", p.end.Sub(r.execEndedAt), "npDrain", commitStart.Sub(p.end))
+			}
 		}
 		cc.forgetBlock(r.BlockNum)
 		cc.maybeComputeAhead(ctx, r.BlockNum+1)
@@ -581,7 +597,7 @@ func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blo
 	if len(req.bal) > 0 && !dbg.IgnoreBAL && dbg.BALDrivenCommitment {
 		mode = calcModeBALDriven
 	}
-	cc.pending[req.blockNum] = &pendingBlock{req: req, mode: mode}
+	cc.pending[req.blockNum] = &pendingBlock{req: req, mode: mode, reqAt: time.Now()}
 	cc.maybeComputeAhead(ctx, req.blockNum)
 }
 
@@ -646,6 +662,8 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		StateRoot: req.stateRoot,
 		lastTxNum: req.lastTxNum,
 	}
+	t0 := time.Now()
+	cc.probe = aheadProbe{blk: req.blockNum}
 	fail := func(err error) {
 		pb.failed = true
 		cc.dropPendingUpdate(req.blockNum)
@@ -670,12 +688,15 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	// A block straddling an unfrozen step edge must checkpoint at that edge, else
 	// the step's commitment .kv lags its account/storage .kv. The per-tx BAL lets
 	// compute-ahead do this mid-block.
+	tPrep := time.Now()
 	after, err := cc.checkpointStepsFromBAL(ctx, req, vm)
 	if err != nil {
 		fail(err)
 		return
 	}
+	tCk := time.Now()
 	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, after, math.MaxUint32, targetOf(br))
+	tFinal := time.Now()
 	if err != nil {
 		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
@@ -697,6 +718,9 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	cc.lastComputedBlock = req.blockNum
 	cc.hasComputed = true
 	if logNpPhases {
+		now := time.Now()
+		cc.probe.end = now
+		cc.probe.lag, cc.probe.prep, cc.probe.ckpt, cc.probe.final, cc.probe.tail = t0.Sub(pb.reqAt), tPrep.Sub(t0), tCk.Sub(tPrep), tFinal.Sub(tCk), now.Sub(tFinal)
 		cc.logger.Info("[np-phase] ahead", "blk", req.blockNum, "window", cc.ownsChangeset(req.blockNum))
 	}
 	if !dbg.BALShadowCompute && !cc.ownsChangeset(req.blockNum) {
@@ -727,6 +751,8 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 			return after, fmt.Errorf("BAL-driven step-checkpoint at txNum %d: %w", edge, err)
 		}
 		if flushOwn != nil {
+			tf := time.Now()
+			defer func() { cc.probe.own += time.Since(tf) }()
 			if err := flushOwn(); err != nil {
 				return after, fmt.Errorf("BAL-driven step-checkpoint flush at txNum %d: %w", edge, err)
 			}
@@ -760,9 +786,18 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 		cc.clearFoldedKeys()
 	}
 	cc.balBlock = true
-	cc.accumulateTouched(bal.ToWriteSetAfter(req.bal, afterTxIndex, maxTxIndex), nil)
+	cc.probe.rounds++
+	ta := time.Now()
+	ws := bal.ToWriteSetAfter(req.bal, afterTxIndex, maxTxIndex)
+	tb := time.Now()
+	cc.accumulateTouched(ws, nil)
+	tc := time.Now()
 	err := cc.emit(cc.foldView(vm, t.lastTxNum, reader.dr.StateReaderAt(reader.txNum)), balUpdates)
 	cc.clearFoldedKeys()
+	td := time.Now()
+	cc.probe.ws += tb.Sub(ta)
+	cc.probe.acc += tc.Sub(tb)
+	cc.probe.emit += td.Sub(tc)
 	if err != nil {
 		return nil, nil, fmt.Errorf("base read: %w", err)
 	}
@@ -1081,9 +1116,13 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 
 	// Flush block N-1's own pending update (hash-routed to N-1's saved changeset,
 	// independent of N's diff below).
+	tf := time.Now()
 	if err := cc.doms.FlushPendingUpdates(cc.roTx); err != nil {
 		return nil, err
 	}
+	cc.probe.flush += time.Since(tf)
+	tf = time.Now()
+	defer func() { cc.probe.fold += time.Since(tf) }()
 
 	// The exec loop saves the accumulator by hash before dispatching the block, so
 	// this identifies the block's changeset whatever the loop rotated to since. A
