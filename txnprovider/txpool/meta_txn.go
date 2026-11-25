@@ -132,6 +132,8 @@ func (mt *metaTxn) better(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	return mt.timestamp < than.timestamp
 }
 
+// worse orders transactions for eviction. Within a sub-pool it ranks fees as better does,
+// so an overflow discards the transactions that selection and promotion value least.
 func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	subPool := mt.subPool
 	thanSubPool := than.subPool
@@ -149,22 +151,27 @@ func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	case 0, PendingSubPool:
 		// Parked frames have no sub-pool. Keep pending fee ordering while their
 		// eligibility markers qualify, even though they cannot be selected yet.
-		if (mt.currentSubPool == PendingSubPool || subPool >= BaseFeePoolBits+EnoughFeeCapBlock) && mt.minFeeCap != than.minFeeCap {
-			return mt.minFeeCap.Cmp(&than.minFeeCap) < 0
+		if mt.currentSubPool == PendingSubPool || subPool >= BaseFeePoolBits+EnoughFeeCapBlock {
+			mtTip := effectiveTip(&mt.minFeeCap, &pendingBaseFee, mt.minTip)
+			thanTip := effectiveTip(&than.minFeeCap, &pendingBaseFee, than.minTip)
+			if cmp := mtTip.Cmp(&thanTip); cmp != 0 {
+				return cmp < 0
+			}
+			// Of equal tips, a base fee rise excludes the lower fee cap first.
+			if cmp := mt.minFeeCap.Cmp(&than.minFeeCap); cmp != 0 {
+				return cmp < 0
+			}
 		}
-		if mt.nonceDistance != than.nonceDistance {
-			return mt.nonceDistance > than.nonceDistance
+	case BaseFeeSubPool:
+		if cmp := mt.minFeeCap.Cmp(&than.minFeeCap); cmp != 0 {
+			return cmp < 0
 		}
-		if mt.cumulativeBalanceDistance != than.cumulativeBalanceDistance {
-			return mt.cumulativeBalanceDistance > than.cumulativeBalanceDistance
-		}
-	case BaseFeeSubPool, QueuedSubPool:
-		if mt.nonceDistance != than.nonceDistance {
-			return mt.nonceDistance > than.nonceDistance
-		}
-		if mt.cumulativeBalanceDistance != than.cumulativeBalanceDistance {
-			return mt.cumulativeBalanceDistance > than.cumulativeBalanceDistance
-		}
+	}
+	if mt.nonceDistance != than.nonceDistance {
+		return mt.nonceDistance > than.nonceDistance
+	}
+	if mt.cumulativeBalanceDistance != than.cumulativeBalanceDistance {
+		return mt.cumulativeBalanceDistance > than.cumulativeBalanceDistance
 	}
 	return mt.timestamp > than.timestamp
 }
