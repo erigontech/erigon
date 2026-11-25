@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
 
 	"github.com/c2h5oh/datasize"
 
@@ -97,14 +98,22 @@ func init() {
 var legacyCommitmentDomain DomainCfg
 
 func SetCommitmentV3(on bool) (restore func()) {
-	schema, v3 := Schema, ExperimentalCommitmentV3
-	ExperimentalCommitmentV3 = on
+	schema, v3, pinned := Schema, ExperimentalCommitmentV3, commitmentV3Pinned
+	ExperimentalCommitmentV3, commitmentV3Pinned = on, true
 	if on {
 		EnableCommitmentV3Records(&Schema.CommitmentDomain)
 	} else {
 		Schema.CommitmentDomain = legacyCommitmentDomain
 	}
-	return func() { Schema, ExperimentalCommitmentV3 = schema, v3 }
+	return func() { Schema, ExperimentalCommitmentV3, commitmentV3Pinned = schema, v3, pinned }
+}
+
+func CommitmentV3Pinned() bool { return commitmentV3Pinned }
+
+func ResetCommitmentV3() (restore func()) {
+	restore = SetCommitmentV3(DefaultCommitmentV3)
+	commitmentV3Pinned = false
+	return restore
 }
 
 type SchemaGen struct {
@@ -221,9 +230,19 @@ func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 	return version.V2_2
 }
 
-const DefaultCommitmentV3 = false
+const DefaultCommitmentV3 = true
 
-var ExperimentalCommitmentV3 = dbg.EnvBool("COMMITMENT_V3", DefaultCommitmentV3)
+var ExperimentalCommitmentV3, commitmentV3Pinned = parseCommitmentV3Env(dbg.EnvString("COMMITMENT_V3", ""))
+
+func parseCommitmentV3Env(v string) (on, pinned bool) {
+	switch {
+	case strings.EqualFold(v, "true"):
+		return true, true
+	case strings.EqualFold(v, "false"):
+		return false, true
+	}
+	return DefaultCommitmentV3, false
+}
 
 const MixedCommitmentAdvice = "roll the conversion back with `integration commitment convert --restore`, " +
 	"or run `erigon seg reset` and restart erigon to download v3 files from the seeders"

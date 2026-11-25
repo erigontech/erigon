@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/migrations"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/logging"
 )
@@ -48,6 +49,16 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if chaindata == "" {
 			chaindata = filepath.Join(datadirCli, "chaindata")
+		}
+		if datadirCli == "" {
+			return
+		}
+		legacyFile, err := dbstate.ResolveCommitmentV3(datadir.Open(datadirCli))
+		if err != nil {
+			utils.Fatalf("resolving the commitment trie of the datadir: %v", err)
+		}
+		if legacyFile != "" {
+			log.Info("[commitment] the datadir holds legacy commitment files, using the legacy commitment trie", "file", legacyFile)
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

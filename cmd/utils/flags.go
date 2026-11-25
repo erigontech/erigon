@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -1191,7 +1192,7 @@ var (
 	}
 	ExperimentalCommitmentV3Flag = cli.BoolFlag{
 		Name:  "experimental.commitment-v3",
-		Usage: "Compute commitment on the v3 trie.",
+		Usage: "Compute commitment on the v3 trie. When the flag is not set, a datadir with legacy commitment files keeps the legacy trie.",
 		Value: statecfg.DefaultCommitmentV3,
 	}
 	GDBMeFlag = cli.BoolFlag{
@@ -2003,14 +2004,29 @@ func warnParallelCommitmentDeprecated(ctx *cli.Command, logger log.Logger) {
 	}
 }
 
-func setCommitmentV3(ctx *cli.Command) {
+func setCommitmentV3(ctx *cli.Command, dirs datadir.Dirs, chain string, logger log.Logger) {
 	if ctx.IsSet(ExperimentalCommitmentV3Flag.Name) {
-		if ctx.Bool(ExperimentalCommitmentV3Flag.Name) {
-			statecfg.SetCommitmentV3(true)
-		} else if statecfg.ExperimentalCommitmentV3 {
+		on := ctx.Bool(ExperimentalCommitmentV3Flag.Name)
+		if !on && statecfg.ExperimentalCommitmentV3 && statecfg.CommitmentV3Pinned() {
 			Fatalf("--%s=false conflicts with ERIGON_COMMITMENT_V3=true", ExperimentalCommitmentV3Flag.Name)
 		}
+		statecfg.SetCommitmentV3(on)
 	}
+	legacyFile, err := dbstate.ResolveCommitmentV3(dirs)
+	if err != nil {
+		Fatalf("resolving the commitment trie of the datadir: %v", err)
+	}
+	if legacyFile != "" {
+		warnLegacyCommitmentDatadir(dirs, chain, legacyFile, logger)
+	}
+}
+
+func warnLegacyCommitmentDatadir(dirs datadir.Dirs, chain, legacyFile string, logger log.Logger) {
+	logger.Warn("[commitment] the datadir holds legacy commitment files, so erigon keeps the legacy commitment trie; new datadirs use the v3 trie", "file", legacyFile)
+	logger.Warn("[commitment] to move this node to the v3 trie: stop erigon, run the command below, then start erigon with the same flags; it downloads the v3 snapshots and executes from them",
+		"command", fmt.Sprintf("erigon seg reset --datadir=%s --chain=%s", dirs.DataDir, chain))
+	logger.Warn("[commitment] `erigon seg reset` removes chaindata and the snapshot files that are not in the published snapshot list, which includes the legacy commitment files; add --dry-run to list them first")
+	logger.Warn(fmt.Sprintf("[commitment] to keep the legacy trie without these warnings, start erigon with --%s=false", ExperimentalCommitmentV3Flag.Name))
 }
 
 // RpcGasCap reads the rpc.gascap flag; the accessor must match its registered UintFlag type.
@@ -2114,7 +2130,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	warnParallelCommitmentDeprecated(ctx, logger)
-	setCommitmentV3(ctx)
+	setCommitmentV3(ctx, nodeConfig.Dirs, chain, logger)
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)

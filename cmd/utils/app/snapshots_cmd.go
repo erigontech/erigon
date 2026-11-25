@@ -3700,6 +3700,11 @@ func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log
 }
 
 func tryOpenAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger, aggOpts ...func(state.AggOpts) state.AggOpts) (*state.Aggregator, error) {
+	if legacyFile, err := state.ResolveCommitmentV3(dirs); err != nil {
+		return nil, err
+	} else if legacyFile != "" {
+		logger.Info("[commitment] the datadir holds legacy commitment files, opening the legacy commitment trie", "file", legacyFile)
+	}
 	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {
 		return nil, err
