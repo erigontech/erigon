@@ -122,8 +122,8 @@ func (api *APIImpl) waitForReceipt(ctx context.Context, hash common.Hash, timeou
 	switch {
 	case err == nil:
 		defer api.filters.UnsubscribeReceipts(id)
-	case errors.Is(err, rpchelper.ErrTooManySubscriptions):
-		// The poll below carries the wait on its own; the nil channel never fires.
+	case errors.Is(err, rpchelper.ErrTooManySubscriptions), errors.Is(err, context.DeadlineExceeded) && timeoutCtx.Err() != nil:
+		// The poll below carries the wait on its own, and reports a spent budget as the sync timeout; the nil channel never fires.
 	default:
 		return nil, err
 	}

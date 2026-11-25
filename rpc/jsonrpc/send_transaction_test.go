@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -412,6 +414,45 @@ func TestWaitForReceiptOfExhaustedTimeout(t *testing.T) {
 	_, err := api.waitForReceipt(t.Context(), common.Hash{1}, time.Nanosecond)
 	var timeoutErr *rpc.TxSyncTimeoutError
 	require.ErrorAs(err, &timeoutErr)
+}
+
+// stalledReceiptsBackend connects a receipts stream whose filter updates are never applied.
+type stalledReceiptsBackend struct {
+	rpchelper.ApiBackend
+	ready chan struct{}
+}
+
+func (stalledReceiptsBackend) Subscribe(ctx context.Context, _ func(*remoteproto.SubscribeReply)) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (stalledReceiptsBackend) SubscribeLogs(ctx context.Context, _ func(*remoteproto.SubscribeLogsReply), _ *atomic.Value) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (b stalledReceiptsBackend) SubscribeReceipts(ctx context.Context, _ func(*remoteproto.SubscribeReceiptsReply), onReady func(func(context.Context, *remoteproto.ReceiptsFilterRequest) error)) error {
+	onReady(func(callCtx context.Context, _ *remoteproto.ReceiptsFilterRequest) error {
+		<-callCtx.Done()
+		return callCtx.Err()
+	})
+	close(b.ready)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// Pins that a budget spent waiting for the receipts filter to be applied is answered with the sync timeout error.
+func TestWaitForReceiptOfTimeoutSpentOnTheFilterUpdate(t *testing.T) {
+	m := execmoduletester.New(t)
+	backend := stalledReceiptsBackend{ready: make(chan struct{})}
+	ff := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, backend, nil, nil, func() {}, m.Log, nil)
+	<-backend.ready
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, m.StateCache, m), m.DB, nil, nil)
+
+	_, err := api.waitForReceipt(t.Context(), common.Hash{1}, 100*time.Millisecond)
+	var timeoutErr *rpc.TxSyncTimeoutError
+	require.ErrorAs(t, err, &timeoutErr)
 }
 
 // Pins that a full subscription budget degrades the wait to polling instead of failing a transaction the
