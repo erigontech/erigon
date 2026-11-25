@@ -764,29 +764,54 @@ func bundled(txs []*Held) []*Held {
 }
 
 // partialCulprit returns the transaction where L1 stopped a partial batch of
-// txs, given those spent: its first one when unspent, as one behind a spent
-// trigger may only be stuck behind it. Nil names none.
+// txs, given those spent: its first unspent outbound transaction, else its
+// first inbound one when unspent, as one behind a spent trigger may only be
+// stuck behind it. Nil names none.
 func partialCulprit(txs []*Held, spent map[common.Hash]bool) *Held {
-	if len(txs) == 0 || spent[txs[0].Hash] {
-		return nil
+	for _, tx := range txs {
+		if tx.Direction == Outbound && !spent[tx.Hash] {
+			return tx
+		}
 	}
-	return txs[0]
+	for _, tx := range txs {
+		if tx.Direction == Inbound {
+			if spent[tx.Hash] {
+				return nil
+			}
+			return tx
+		}
+	}
+	return nil
 }
 
 // disposePartial disposes of p, a batch L1 kept part of, by what ran: the
-// triggers L1 has are spent and let go, kept with p for a later reorg; the
-// rest return to the pool, the one where L1 stopped charged. False leaves p
-// for the next call, a read having failed.
+// outbound transactions in the block derivation rebuilt at its height and
+// the triggers L1 has are spent and let go, kept with p for a later reorg;
+// the rest return to the pool, the one where L1 stopped charged. False
+// leaves p for the next call, a read having failed.
 func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
-	in := bundled(p.Txs)
-	spent, err := c.landed(ctx, in)
+	spent, err := c.landed(ctx, bundled(p.Txs))
 	if err != nil {
 		return false
 	}
+	if slices.ContainsFunc(p.Txs, func(tx *Held) bool { return tx.Direction == Outbound }) {
+		b, err := c.block(ctx, p.Height)
+		if err != nil {
+			return false
+		}
+		rebuilt := make(map[common.Hash]bool, len(b.Transactions()))
+		for _, t := range b.Transactions() {
+			rebuilt[t.Hash()] = true
+		}
+		for _, tx := range p.Txs {
+			if tx.Direction == Outbound {
+				spent[tx.Hash] = rebuilt[tx.Hash]
+			}
+		}
+	}
 	var ran, rest []*Held
 	for _, tx := range p.Txs {
-		// An outbound entry is immediate: the posting that landed ran it.
-		if tx.Direction == Outbound || spent[tx.Hash] {
+		if spent[tx.Hash] {
 			ran = append(ran, tx)
 		} else {
 			rest = append(rest, tx)
@@ -796,7 +821,7 @@ func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
 	if !c.ledger.ClaimPartial(p.Height, p.Post, ran) {
 		return true
 	}
-	culprit, charged := partialCulprit(in, spent), common.Hash{}
+	culprit, charged := partialCulprit(p.Txs, spent), common.Hash{}
 	if culprit != nil {
 		charged = culprit.Hash
 	}
