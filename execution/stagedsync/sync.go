@@ -301,7 +301,7 @@ func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (ha
 	for !s.IsDone() {
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {
-			// RunUnwind consumes the request also on failure: fork validation rolls the tx back.
+			// RunUnwind clears the request, so keep its reason first.
 			reason := s.unwindReason
 			if err := s.RunUnwind(sd, tx); err != nil {
 				return false, err
