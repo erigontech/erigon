@@ -2866,7 +2866,7 @@ func (b *BlockAccessListBuilder) Build() types.BlockAccessList {
 	return bal
 }
 
-const matchesPerWorker = 4096
+const matchesPerWorker = 1024
 
 func (b *BlockAccessListBuilder) Matches(bal types.BlockAccessList) bool {
 	if len(bal) != len(b.ac) {
