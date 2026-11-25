@@ -281,17 +281,22 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		hook.NotifySyncState(tx)
 	}
 
-	var irreversibleTxNum uint64
+	const initialCycle = true
 	tx, doms, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
-		InitialCycle: true,
+		InitialCycle: initialCycle,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
-			var err error
-			irreversibleTxNum, err = pe.RunPrune(ctx, rwtx, initialCycle, 0)
+			_, err := pe.RunPrune(ctx, rwtx, initialCycle, 0)
 			return err
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
+			// The boundary is read after the flush: the batch's own changesets keep their blocks out of the files.
+			var irreversibleTxNum uint64
+			resolve := func(tx kv.RwTx) (err error) {
+				irreversibleTxNum, err = execfinality.ResolveTxNum(ctx, tx, pe.sync.Cfg().MaxReorgDepth, initialCycle, pe.blockReader.TxnumReader())
+				return err
+			}
 			// The spent SD is closed by RunLoop; a fresh one opens for the next cycle.
-			if err := sd.Commit(ctx, tx); err != nil {
+			if err := sd.Commit(ctx, tx, resolve); err != nil {
 				return nil, nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)
 			}
 			restoreStateChanges = hook.CheckpointStateChanges()
