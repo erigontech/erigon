@@ -136,7 +136,7 @@ func EndTx(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.Sta
 			return err
 		}
 	}
-	ibs.ResetVersionedIO()
+	ibs.ResetIO()
 	return nil
 }
 

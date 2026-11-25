@@ -82,7 +82,7 @@ func ExecuteBlockEphemerally(
 	logger log.Logger,
 ) (res *EphemeralExecResult, executeBlockErr error) {
 	defer blockExecutionTimer.ObserveDuration(time.Now())
-	ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+	ibs := state.New(stateReader)
 	defer ibs.Close()
 	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
@@ -103,7 +103,7 @@ func ExecuteBlockEphemerally(
 				return err
 			}
 		}
-		ibs.ResetVersionedIO()
+		ibs.ResetIO()
 		return nil
 	}
 
@@ -159,7 +159,7 @@ func ExecuteBlockEphemerally(
 			if !vmConfig.StatelessExec || errors.Is(err, ErrExecPanic) {
 				return nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)
 			}
-			ibs.ResetVersionedIO()
+			ibs.ResetIO()
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
 		} else {
 			if err := endPhase(); err != nil {
