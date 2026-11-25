@@ -380,6 +380,31 @@ func TestComputeAhead_BaseReadErrorFailsTheBlock(t *testing.T) {
 	require.ErrorContains(t, (<-out).err, "base read")
 }
 
+// A window block reads its base accounts when its request arrives, before its first tx result,
+// so the base reads are not on the path from execution end to the block's root.
+func TestComputeAhead_WindowBlockReadsBaseBeforeFirstTx(t *testing.T) {
+	setAheadFlags(t, true)
+
+	ctx := context.Background()
+	db, tx, doms := setupStepTest(t)
+	cc, out := newAheadCalculator(t, doms, db, 1)
+
+	addr := [20]byte{0xe3}
+	putCorruptAccount(t, doms, tx, addr[:], 0)
+	cc.handleBlockRequest(ctx, &blockRequest{
+		blockNum:   1,
+		blockHash:  common.Hash{0xe4},
+		firstTxNum: 11,
+		lastTxNum:  12,
+		stateRoot:  common.Hash{0xde, 0xad},
+		bal:        types.BlockAccessList{{Address: addr, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(7)}}}},
+	})
+
+	require.True(t, cc.pending[1].failed)
+	require.Len(t, out, 1)
+	require.ErrorContains(t, (<-out).err, "base read")
+}
+
 // requireBranchesConsistentWithAccounts verifies each flushed commitment branch
 // hashes consistently with the account values written through the step edge.
 func requireBranchesConsistentWithAccounts(t *testing.T, doms *execctx.SharedDomains, tx kv.TemporalRwTx, accountValues map[string][]byte) {

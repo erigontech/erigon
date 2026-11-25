@@ -51,6 +51,7 @@ type pendingBlock struct {
 	// txSeen: the exec loop saves this execution's changeset before the block's
 	// first txResult, replacing one an earlier execution left under the same hash.
 	txSeen bool
+	vm     *state.VersionMap
 }
 
 // computedAheadCount counts BAL compute-ahead computations across all calculators;
@@ -623,12 +624,17 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 	if !cc.computeAheadGateOpen(n) {
 		return
 	}
-	if cc.ownsChangeset(n) {
-		if cc.branchPrefetch == nil || !pb.txSeen || cc.doms.GetChangesetByHash(n, pb.req.blockHash) == nil || dbg.BALShadowCompute || commitmentdb.ParentReadsWanted() {
-			return
-		}
+	window := cc.ownsChangeset(n)
+	if window && (cc.branchPrefetch == nil || dbg.BALShadowCompute || commitmentdb.ParentReadsWanted()) {
+		return
 	}
 	if n != cc.firstBlockNum && !(cc.hasComputed && cc.lastComputedBlock == n-1) {
+		return
+	}
+	if pb.vm == nil && !cc.seedBAL(ctx, pb) {
+		return
+	}
+	if window && (!pb.txSeen || cc.doms.GetChangesetByHash(n, pb.req.blockHash) == nil) {
 		return
 	}
 	cc.computeBlockFromBAL(ctx, pb)
@@ -639,34 +645,9 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 // a mismatch fails the block. The touched-key set comes wholly from the BAL, never
 // from the cross-block incremental accumulator.
 func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pendingBlock) {
-	req := pb.req
-	br := &blockResult{
-		BlockNum:  req.blockNum,
-		BlockHash: req.blockHash,
-		StateRoot: req.stateRoot,
-		lastTxNum: req.lastTxNum,
-	}
-	fail := func(err error) {
-		pb.failed = true
-		cc.dropPendingUpdate(req.blockNum)
-		cc.fail(ctx, br, err)
-	}
-	vm := state.NewVersionMap(req.bal)
-	vm.SetBaseTxNum(req.firstTxNum)
-	eip161Enabled := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
-	isAura := cc.chainConfig.Aura != nil
-	base := cc.asOfReader.dr.StateReaderAt(req.firstTxNum)
-	if ambiguous, err := vm.HasAmbiguousBaseAccount(eip161Enabled, isAura, base); err != nil {
-		fail(fmt.Errorf("BAL-driven compute-ahead block %d: base read: %w", req.blockNum, err))
-		return
-	} else if ambiguous {
-		pb.mode = calcModeIncremental
-		return
-	}
-	if err := vm.SeedEmptyRemovals(eip161Enabled, isAura, base); err != nil {
-		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
-		return
-	}
+	req, vm := pb.req, pb.vm
+	br := aheadTarget(req)
+	fail := func(err error) { cc.failAhead(ctx, pb, err) }
 	// A block straddling an unfrozen step edge must checkpoint at that edge, else
 	// the step's commitment .kv lags its account/storage .kv. The per-tx BAL lets
 	// compute-ahead do this mid-block.
@@ -702,6 +683,40 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	if !dbg.BALShadowCompute && !cc.ownsChangeset(req.blockNum) {
 		cc.publish(ctx, commitmentResult{blockNum: req.blockNum, blockHash: req.blockHash, txNum: req.lastTxNum, rootHash: rh})
 	}
+}
+
+func aheadTarget(req *blockRequest) *blockResult {
+	return &blockResult{BlockNum: req.blockNum, BlockHash: req.blockHash, StateRoot: req.stateRoot, lastTxNum: req.lastTxNum}
+}
+
+func (cc *commitmentCalculator) failAhead(ctx context.Context, pb *pendingBlock, err error) {
+	pb.failed = true
+	cc.dropPendingUpdate(pb.req.blockNum)
+	cc.fail(ctx, aheadTarget(pb.req), err)
+}
+
+// seedBAL builds block pb's BAL version map over its block-start base. It needs no changeset,
+// so a window block runs it before its first tx result. It reports whether compute-ahead can go on.
+func (cc *commitmentCalculator) seedBAL(ctx context.Context, pb *pendingBlock) bool {
+	req := pb.req
+	vm := state.NewVersionMap(req.bal)
+	vm.SetBaseTxNum(req.firstTxNum)
+	eip161Enabled := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
+	isAura := cc.chainConfig.Aura != nil
+	base := cc.asOfReader.dr.StateReaderAt(req.firstTxNum)
+	if ambiguous, err := vm.HasAmbiguousBaseAccount(eip161Enabled, isAura, base); err != nil {
+		cc.failAhead(ctx, pb, fmt.Errorf("BAL-driven compute-ahead block %d: base read: %w", req.blockNum, err))
+		return false
+	} else if ambiguous {
+		pb.mode = calcModeIncremental
+		return false
+	}
+	if err := vm.SeedEmptyRemovals(eip161Enabled, isAura, base); err != nil {
+		cc.failAhead(ctx, pb, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
+		return false
+	}
+	pb.vm = vm
+	return true
 }
 
 // checkpointStepsFromBAL emits a commitment checkpoint at each unfrozen step
