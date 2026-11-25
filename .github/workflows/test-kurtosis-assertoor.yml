@@ -62,18 +62,15 @@ permissions:
   contents: read
 
 jobs:
-  # Build the erigon image once for the whole matrix. The matrix below has
-  # grown to many suites — having every entry run its
-  # own buildx with `cache-to: type=gha,mode=max,scope=kurtosis-erigon-build`
-  # means ~a dozen jobs hammering the same GHA cache key concurrently, which
-  # the cache backend answers with 504s ("failed to parse error response 504"
-  # → `failed to build`). One builder, one cache writer; the matrix consumes
-  # the image as a run-scoped artifact.
   build-erigon-image:
     name: build-erigon-image
     if: ${{ !inputs.cl-images-only && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      # Exporting on a PR or merge-group ref delays the suites and only helps runs
+      # on that ref. The base-branch warmer exports layers that other runs can reuse.
+      CACHE_TO: ${{ inputs.cache-warming-only && 'type=gha,mode=max,scope=kurtosis-erigon-build' || '' }}
     steps:
       - name: Fast checkout git repository
         uses: actions/checkout@v7
@@ -158,7 +155,7 @@ jobs:
           build-args: |
             BINARIES=erigon caplin
           cache-from: type=gha,scope=kurtosis-erigon-build
-          cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
+          cache-to: ${{ env.CACHE_TO }}
 
       # docker/build-push-action has no retry input; retry once so a transient
       # Docker Hub / GHA-cache failure doesn't fail an otherwise-good build.
@@ -172,7 +169,7 @@ jobs:
           build-args: |
             BINARIES=erigon caplin
           cache-from: type=gha,scope=kurtosis-erigon-build
-          cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
+          cache-to: ${{ env.CACHE_TO }}
 
       - name: Export erigon image as a run-scoped artifact
         run: docker save test/erigon:current-base -o "${RUNNER_TEMP}/erigon-base-image.tar"

@@ -191,7 +191,7 @@ func TestPrestateTracerDiffModeAfterFinalization(t *testing.T) {
 	_, err = ibs.Selfdestruct(contract, false)
 	require.NoError(t, err)
 	tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
-	require.NoError(t, ibs.FinalizeTx(&chain.Rules{}, executionstate.NewNoopWriter()))
+	ibs.EndTransaction()
 	tracer.EmitTxEnd(&types.Receipt{}, mdgas.TxnGasUsage{}, nil)
 	result, err := tracer.GetResult()
 	require.NoError(t, err)
@@ -208,18 +208,14 @@ func TestPrestateTracerRetainedBalance(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		amsterdam bool
-		finalize  bool
 		prefund   uint64
 	}{
-		{name: "before finalization", amsterdam: true},
-		{name: "after finalization", amsterdam: true, finalize: true},
-		{name: "unchanged balance before finalization", amsterdam: true, prefund: 7},
-		{name: "unchanged balance after finalization", amsterdam: true, finalize: true, prefund: 7},
+		{name: "Amsterdam", amsterdam: true},
+		{name: "unchanged balance", amsterdam: true, prefund: 7},
 		{name: "before Amsterdam"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ibs := executionstate.New(executionstate.NewNoopReader())
-			ibs.SetVersionMap(nil)
 			t.Cleanup(ibs.Close)
 			from := accounts.InternAddress(common.HexToAddress("0x1000"))
 			contract := accounts.InternAddress(common.HexToAddress("0x2000"))
@@ -242,9 +238,6 @@ func TestPrestateTracerRetainedBalance(t *testing.T) {
 			tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
 			// Settlement can credit an account after the root call has returned.
 			require.NoError(t, ibs.SetBalance(contract, uint256.Int{7}, tracing.BalanceChangeUnspecified))
-			if tc.finalize {
-				require.NoError(t, ibs.FinalizeTx(&chain.Rules{IsAmsterdam: tc.amsterdam}, executionstate.NewNoopWriter()))
-			}
 			tracer.EmitTxEnd(&types.Receipt{}, mdgas.TxnGasUsage{}, nil)
 			result, err := tracer.GetResult()
 			require.NoError(t, err)

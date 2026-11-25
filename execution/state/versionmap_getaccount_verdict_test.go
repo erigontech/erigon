@@ -54,7 +54,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		destroyed, err := ibs.Selfdestruct(addr, false)
 		require.NoError(t, err)
 		require.True(t, destroyed)
-		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
+		ibs.EndTransaction()
 		writes := finalizedWrites(t, ibs, sd)
 		vm.FlushVersionedWrites(writes, true)
 
@@ -75,7 +75,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		destroyed, err := ibs.Selfdestruct(addr, false)
 		require.NoError(t, err)
 		require.True(t, destroyed)
-		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
+		ibs.EndTransaction()
 		writes := finalizedWrites(t, ibs, sd)
 		vm.FlushVersionedWrites(writes, true)
 
@@ -96,7 +96,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		destroyed, err := destroyer.Selfdestruct(addr, false)
 		require.NoError(t, err)
 		require.True(t, destroyed)
-		require.NoError(t, destroyer.FinalizeTx(sd, NewNoopWriter()))
+		destroyer.EndTransaction()
 		vm.FlushVersionedWrites(finalizedWrites(t, destroyer, sd), true)
 
 		recreator := newAmsterdamIBS(reader, vm, 1)
@@ -104,7 +104,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.NoError(t, recreator.CreateAccount(addr, true))
 		require.NoError(t, recreator.SetNonce(addr, 1, tracing.NonceChangeNewContract))
 		require.NoError(t, recreator.SetCode(addr, code, tracing.CodeChangeContractCreation))
-		require.NoError(t, recreator.FinalizeTx(sd, NewNoopWriter()))
+		recreator.EndTransaction()
 		vm.FlushVersionedWrites(finalizedWrites(t, recreator, sd), true)
 
 		acc, ok, _ := vm.View(2, reader).GetAccount(addr)
@@ -124,13 +124,13 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		recreator := newAmsterdamIBS(reader, vm, 1)
 		t.Cleanup(recreator.Close)
 		require.NoError(t, recreator.SetNonce(addr, 1, tracing.NonceChangeAuthorization))
-		require.NoError(t, recreator.FinalizeTx(sd, NewNoopWriter()))
+		recreator.EndTransaction()
 		vm.FlushVersionedWrites(finalizedWrites(t, recreator, sd), true)
 
 		toucher := newAmsterdamIBS(reader, vm, 0)
 		t.Cleanup(toucher.Close)
 		require.NoError(t, toucher.AddBalance(addr, uint256.Int{}, tracing.BalanceChangeUnspecified))
-		require.NoError(t, toucher.FinalizeTx(sd, NewNoopWriter()))
+		toucher.EndTransaction()
 		vm.FlushVersionedWrites(finalizedWrites(t, toucher, sd), true)
 
 		acc, ok, _ := vm.View(2, reader).GetAccount(addr)
@@ -147,7 +147,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		t.Cleanup(ibs.Close)
 
 		require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(50), tracing.BalanceChangeUnspecified))
-		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
+		ibs.EndTransaction()
 		writes := finalizedWrites(t, ibs, sd)
 		vm.FlushVersionedWrites(writes, true)
 

@@ -236,7 +236,6 @@ func TestSetCodeParallel_NoMaterialize_DelegateThenRevoke(t *testing.T) {
 	writes := ibs.VersionedWrites()
 	_, hasCodeWrite := writes.GetCode(addr)
 	assert.False(t, hasCodeWrite, "net-zero delegate-then-revoke must fold away the CodePath write")
-	assert.Empty(t, ibs.stateObjects, "noMaterialize SetCode must not cache a stateObject")
 }
 
 // Authorization processing reads an absent authority's code hash before the
@@ -304,7 +303,6 @@ func TestGetDelegatedDesignationParallel_NoMaterialize_OwnWrite(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, ok, "own-tx delegation must be visible to GetDelegatedDesignation")
 	assert.Equal(t, target, got)
-	assert.Empty(t, ibs.stateObjects, "GetDelegatedDesignation must not materialize a stateObject")
 }
 
 // TestGetDelegatedDesignation_TracksSplitCodePublish reproduces a narrow
@@ -357,17 +355,9 @@ func TestResolveCodeTakesTheHashFromTheRead(t *testing.T) {
 	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 	hash := accounts.InternCodeHash([32]byte{0x12, 0x34})
 	r := &codeReader{addr: addr, account: &accounts.Account{CodeHash: hash, Incarnation: 1}, code: code}
-	for _, versioned := range []bool{false, true} {
-		var ibs *IntraBlockState
-		if versioned {
-			ibs = NewWithVersionMap(r, NewVersionMap(nil))
-		} else {
-			ibs = New(r)
-			ibs.SetVersionMap(nil)
-		}
-		got, err := ibs.ResolveCode(addr, true)
-		require.NoError(t, err)
-		require.Equal(t, code, got.Bytes, "versioned=%v", versioned)
-		require.Equal(t, hash, got.Hash, "versioned=%v", versioned)
-	}
+	ibs := NewWithVersionMap(r, NewVersionMap(nil))
+	got, err := ibs.ResolveCode(addr, true)
+	require.NoError(t, err)
+	require.Equal(t, code, got.Bytes)
+	require.Equal(t, hash, got.Hash)
 }

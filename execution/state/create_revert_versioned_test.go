@@ -123,7 +123,7 @@ func TestMaterialized_CreditedCreateRevertKeepsBalance(t *testing.T) {
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
 	finalizeTx := func() {
-		require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+		ibs.EndTransaction()
 		vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
 		ibs.ResetVersionedIO()
 	}
@@ -163,7 +163,7 @@ func TestMaterialized_UncachedCreateRevertKeepsBalance(t *testing.T) {
 	snap := ibs.PushSnapshot()
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	ibs.RevertToSnapshot(snap, nil)
-	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	ibs.EndTransaction()
 	vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
 	ibs.ResetVersionedIO()
 

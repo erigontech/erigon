@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -96,4 +97,15 @@ func TestTxTraceCodeChanges(t *testing.T) {
 			require.Equal(t, test.want, *call.Stack.peek())
 		})
 	}
+}
+
+func TestAssertionReadErrorIsRecorded(t *testing.T) {
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	t.Cleanup(ibs.Close)
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	readErr := errors.New("read failed")
+	err := evm.assertionReadError(readErr)
+	require.ErrorIs(t, err, ErrIntraBlockStateFailed)
+	require.ErrorIs(t, err, readErr)
+	require.Equal(t, err, ibs.StateReadError())
 }

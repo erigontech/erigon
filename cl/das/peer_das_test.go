@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"reflect"
 	"slices"
@@ -420,6 +421,36 @@ func TestColumnsToStore(t *testing.T) {
 			for column := range cfg.NumberOfColumns {
 				require.Equal(t, custody[column], store(column), "column %d", column)
 			}
+		})
+	}
+}
+
+func TestBlobRecoveryEnabled(t *testing.T) {
+	fuluScheduled := clparams.MainnetBeaconConfig
+	fuluNever := fuluScheduled
+	fuluNever.FuluForkEpoch = math.MaxUint64
+	archive := clparams.CaplinConfig{ArchiveBlobs: true}
+	for _, tc := range []struct {
+		name         string
+		cfg          *clparams.BeaconChainConfig
+		caplinConfig clparams.CaplinConfig
+		supernode    bool
+		want         bool
+	}{
+		{"archive, Fulu scheduled", &fuluScheduled, archive, false, true},
+		{"supernode, Fulu scheduled", &fuluScheduled, clparams.CaplinConfig{}, true, true},
+		{"neither, Fulu scheduled", &fuluScheduled, clparams.CaplinConfig{}, false, false},
+		{"archive, Fulu never", &fuluNever, archive, false, false},
+		{"supernode, Fulu never", &fuluNever, clparams.CaplinConfig{}, true, false},
+		{"neither, Fulu never", &fuluNever, clparams.CaplinConfig{}, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newELBlobsTestPeerDas(t, tc.cfg, &tc.caplinConfig)
+			if tc.supernode {
+				d.state.SetCustodyGroupCount(tc.cfg.NumberOfCustodyGroups, func() uint64 { return 0 })
+			}
+
+			require.Equal(t, tc.want, d.blobRecoveryEnabled())
 		})
 	}
 }
@@ -3151,6 +3182,7 @@ func TestBlobRecoveryDropsTheCachedMatrixWhenARetryFollowsAnInvalidReconstructed
 	})
 	require.NoError(t, r.d.enqueueBlobRecovery(recoverBlobsRequest{slot: recoveryTestSlot, blockRoot: r.root}))
 
+	r.d.initBlobRecoveryRetries()
 	require.Eventually(t, func() bool {
 		r.d.recoveryRetryMutex.Lock()
 		defer r.d.recoveryRetryMutex.Unlock()
