@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -55,6 +56,10 @@ func SetConvertPhase1AfterFileHookForTest(fn func(idx int)) {
 
 func SetConvertPhase5HookForTest(fn func() error) {
 	convertPhase5Hook = fn
+}
+
+func SetVerifyViewDirsHookForTest(fn func(*datadir.Dirs)) {
+	verifyViewDirsHook = fn
 }
 
 func SetConvertHistoryAfterFileHookForTest(fn func(idx int) error) {

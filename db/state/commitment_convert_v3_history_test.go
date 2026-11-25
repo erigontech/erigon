@@ -1125,21 +1125,27 @@ func TestConvertCommitmentFiles_V3NoHistoryPassRejectsLiveHistoryFileTheVerifyVi
 	db, agg = reopenForConvert(t, db, agg, &legacySchema)
 	require.NoError(t, convertErr(t, db, state.ConvertOpts{TargetV3: true, NoDomain: true}))
 	db, _ = reopenForConvert(t, db, agg, &legacySchema)
-	removed := false
-	state.SetConvertPhase1AfterFileHookForTest(func(int) {
-		if removed {
-			return
+	state.SetVerifyViewDirsHookForTest(func(d *datadir.Dirs) {
+		entries, err := os.ReadDir(d.SnapAccessors)
+		require.NoError(t, err)
+		hidden := false
+		tmp := t.TempDir()
+		for _, e := range entries {
+			if !e.Type().IsRegular() {
+				continue
+			}
+			if ok, _ := filepath.Match("*-commitment.*.efi", e.Name()); ok && !hidden {
+				hidden = true
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(d.SnapAccessors, e.Name()))
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(filepath.Join(tmp, e.Name()), data, 0o644))
 		}
-		removed = true
-		accessors, err := filepath.Glob(filepath.Join(dirs.SnapAccessors, "*-commitment.*.efi"))
-		require.NoError(t, err)
-		vi, err := filepath.Glob(filepath.Join(dirs.SnapAccessors, "*-commitment.*.vi"))
-		require.NoError(t, err)
-		accessors = append(accessors, vi...)
-		require.NotEmpty(t, accessors)
-		require.NoError(t, dir.RemoveFile(accessors[0]))
+		require.True(t, hidden)
+		d.SnapAccessors = tmp
 	})
-	t.Cleanup(func() { state.SetConvertPhase1AfterFileHookForTest(nil) })
+	t.Cleanup(func() { state.SetVerifyViewDirsHookForTest(nil) })
 
 	err := convertErr(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true})
 	require.ErrorContains(t, err, "is not readable by the verify view")

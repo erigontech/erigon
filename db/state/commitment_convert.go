@@ -1757,6 +1757,8 @@ var convertPhase1AfterFileHook func(idx int)
 
 var convertPhase5Hook func() error
 
+var verifyViewDirsHook func(*datadir.Dirs)
+
 // convertPhase1 runs convertCommitmentFile against every visible commitment
 // file in sequence, writing outputs into rebuildDir. errSkip is caught
 // (counted as skipped, not as error); any other error aborts.
@@ -2023,6 +2025,9 @@ func openStagedCommitmentView(ctx context.Context, at *AggregatorRoTx, domainDir
 		}
 		cleanup = func() { _ = dir.RemoveAll(empty) }
 		viewDirs.SnapHistory, viewDirs.SnapIdx, viewDirs.SnapAccessors = empty, empty, empty
+	}
+	if verifyViewDirsHook != nil {
+		verifyViewDirsHook(&viewDirs)
 	}
 	view, err := New(viewDirs).StepSize(at.StepSize()).StepsInFrozenFile(at.a.StepsInFrozenFile()).DisableBranchCache().Logger(logger).Open(ctx)
 	if err != nil {
