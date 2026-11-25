@@ -427,6 +427,9 @@ func (s *executionPayloadBidService) validateBidContents(bid *cltypes.ExecutionP
 		return errors.New("bid block hash equals parent block hash")
 	}
 	epoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
+	if err := bid.ValidateInclusionListBits(s.beaconCfg.GetCurrentStateVersion(epoch)); err != nil {
+		return err
+	}
 	maxBlobsPerBlock := int(s.beaconCfg.GetBlobParameters(epoch).MaxBlobsPerBlock)
 	if bid.BlobKzgCommitments.Len() > maxBlobsPerBlock {
 		return fmt.Errorf("bid has too many blob_kzg_commitments: %d > %d",
