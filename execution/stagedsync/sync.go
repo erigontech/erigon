@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -296,6 +297,19 @@ func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (ha
 		}
 		s.currentStage = 0
 	}()
+
+	if logNpPhases {
+		runStart := time.Now()
+		defer func() {
+			kv := []any{"npRun", time.Since(runStart)}
+			for _, t := range s.timings {
+				if !t.isUnwind && !t.isPrune {
+					kv = append(kv, "np"+strings.ReplaceAll(string(t.stage), "_", ""), t.took)
+				}
+			}
+			s.logger.Info("[np-phase] stages", kv...)
+		}()
+	}
 
 	var errBadBlock error
 	for !s.IsDone() {
