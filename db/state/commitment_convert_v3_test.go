@@ -310,7 +310,7 @@ func buildRecreatedOwnerFilesWithParallel(t *testing.T, stepSize, steps uint64, 
 	}
 	require.NoError(t, domains.Flush(ctx, rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, allIrreversible))
 	return db, agg, owner
 }
 
@@ -374,7 +374,7 @@ func TestConvertCommitmentFiles_V3StorageRootSurvivesBranchCollapseAcrossSteps(t
 	}
 	require.NoError(t, domains.Flush(ctx, rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles2(ctx, db, 0, steps-1, unboundedFinalityCtx, false))
+	require.NoError(t, agg.BuildFiles2(ctx, db, 0, steps-1, allIrreversible, false))
 	require.Eventually(t, func() bool { return agg.EndTxNumMinimax() >= stepSize*(steps-1) }, 30*time.Second, 50*time.Millisecond)
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
@@ -433,7 +433,7 @@ func buildRandomWriteFiles(t *testing.T, mode string) (kv.TemporalRwDB, *state.A
 	}
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, allIrreversible))
 	convertFixture(t, db, agg, mode)
 	return db, agg
 }
@@ -577,7 +577,7 @@ func buildWipedStorageFiles(t *testing.T, mode string, c wipeCase) (kv.TemporalR
 	}
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, allIrreversible))
 	convertFixture(t, db, agg, mode)
 	return db, agg
 }
@@ -600,7 +600,7 @@ func TestConvertCommitmentFiles_V3ExtensionRoot(t *testing.T) {
 	}
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, allIrreversible))
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
 	c, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
@@ -632,7 +632,7 @@ func TestConvertCommitmentFiles_V3LeafRootFailsBeforeSwap(t *testing.T) {
 	}
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, allIrreversible))
 
 	kvs := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
 	tx, err := db.BeginTemporalRw(t.Context())
@@ -672,7 +672,7 @@ func TestConvertCommitmentFiles_V3ExtensionRootReplacedLater(t *testing.T) {
 			}
 			require.NoError(t, domains.Flush(t.Context(), rwTx))
 			require.NoError(t, rwTx.Commit())
-			require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, steps-1, unboundedFinalityCtx, false))
+			require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, steps-1, allIrreversible, false))
 			require.Eventually(t, func() bool { return agg.EndTxNumMinimax() >= stepSize*(steps-1) }, 30*time.Second, 50*time.Millisecond)
 
 			runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
@@ -708,7 +708,7 @@ func TestConvertCommitmentFiles_V3BranchRootSurvivesStateOnlyFile(t *testing.T) 
 	}
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, steps-1, unboundedFinalityCtx, false))
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, steps-1, allIrreversible, false))
 	require.Eventually(t, func() bool { return agg.EndTxNumMinimax() >= stepSize*(steps-1) }, 30*time.Second, 50*time.Millisecond)
 	kvs := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
 	keys, _ := readKVFile(t, agg, kvs[len(kvs)-1])
@@ -748,7 +748,7 @@ func TestConvertCommitmentFiles_V3RebuiltStepRefusesBeforeSwap(t *testing.T) {
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 	domains.Close()
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, 87, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, 87, allIrreversible))
 
 	agg.CloseFilesNoReopen()
 	clearTx, err := db.BeginRw(t.Context())
@@ -766,7 +766,7 @@ func TestConvertCommitmentFiles_V3RebuiltStepRefusesBeforeSwap(t *testing.T) {
 		}
 	}
 	require.NoError(t, agg.OpenFolder(db))
-	_, err = state.RebuildCommitmentFilesWithHistory(t.Context(), db, roots, unboundedFinalityCtx, log.New(), false)
+	_, err = state.RebuildCommitmentFilesWithHistory(t.Context(), db, roots, allIrreversible, log.New(), false)
 	require.NoError(t, err)
 
 	at := agg.BeginFilesRo()
@@ -895,7 +895,7 @@ func writeBlocks(t *testing.T, write func(txNum uint64, put func(kv.Domain, []by
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 	domains.Close()
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, 87, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, 87, allIrreversible))
 	return db, agg, rootAt
 }
 

@@ -184,7 +184,7 @@ func TestStateFileBuildKeepsRewindsOutOfFiles(t *testing.T) {
 func TestStateFileBuildDeletesTheChangesetsOfCollatedBlocks(t *testing.T) {
 	m, chainPack, lastFileBlock := newSnapshotBoundaryChain(t, execmoduletester.WithAlwaysGenerateChangesets(true))
 	ctx := t.Context()
-	pruneWithFinalized(t, m, chainPack, lastFileBlock)
+	pruneWithFinalized(t, m, chainPack, lastFileBlock+1)
 	require.Equal(t, m.DB.StepSize(), m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EndTxNumMinimax())
 	require.ErrorContains(t, m.ExecModule.SetHead(ctx, lastFileBlock-1), "minimum unwindable block")
 	require.NoError(t, m.ExecModule.SetHead(ctx, lastFileBlock))

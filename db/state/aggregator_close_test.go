@@ -78,7 +78,7 @@ func TestAggregatorCloseWaitsForBackgroundMerge(t *testing.T) {
 		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context())
 		require.NoError(t, agg.OpenFolder(db))
 
-		require.NoError(t, agg.BuildFiles2(t.Context(), asTemporalRoDB(db), 0, 0, unboundedFinalityCtx, true))
+		require.NoError(t, agg.BuildFiles2(t.Context(), asTemporalRoDB(db), 0, 0, allIrreversible, true))
 		agg.background.Wait()
 		agg.Close()
 		db.Close()
@@ -130,7 +130,7 @@ func TestAggregatorCloseVsConcurrentBuildFilesInBackground(t *testing.T) {
 			loops.Go(func() {
 				<-start
 				time.Sleep(time.Duration(i) * 250 * time.Microsecond)
-				fins <- agg.BuildFilesInBackground(asTemporalRoDB(db), 1_000_000, unboundedFinalityCtx)
+				fins <- agg.BuildFilesInBackground(asTemporalRoDB(db), 1_000_000, allIrreversible)
 			})
 		}
 		close(start)
@@ -160,7 +160,7 @@ func TestAggregatorCloseVsConcurrentBuildFiles2(t *testing.T) {
 			loops.Go(func() {
 				<-start
 				time.Sleep(time.Duration(i) * 250 * time.Microsecond)
-				_ = agg.BuildFiles2(context.Background(), asTemporalRoDB(db), 0, 0, unboundedFinalityCtx, true)
+				_ = agg.BuildFiles2(context.Background(), asTemporalRoDB(db), 0, 0, allIrreversible, true)
 			})
 		}
 		close(start)

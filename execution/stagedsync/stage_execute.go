@@ -673,13 +673,16 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		return remaining
 	}
 
-	blockPruneTo := s.FinalityCtx.PruneToBlockNum()
+	blockPruneTo := s.IrreversibleBlock
+	if blockPruneTo < math.MaxUint64 {
+		blockPruneTo++ // the prune is exclusive
+	}
 	changesetsPruneTo := blockPruneTo
 	// AlwaysGenerateChangesets keeps changesets for unwinds deeper than MaxReorgDepth (debug / integration
 	// tool / explicit --experimental.always-generate-changesets flag). Blocks in state files can not be
 	// unwound, so only the changesets of the steps about to be collated go.
 	if cfg.syncCfg.AlwaysGenerateChangesets {
-		if changesetsPruneTo, err = collatableStepsEnd(ctx, tx, cfg.blockReader.TxnumReader(), s.FinalityCtx.CollateToBlockNum()); err != nil {
+		if changesetsPruneTo, err = collatableStepsEnd(ctx, tx, cfg.blockReader.TxnumReader(), s.IrreversibleBlock); err != nil {
 			return err
 		}
 	}
