@@ -53,10 +53,6 @@ const (
 // https://www.jsonrpc.org/historical/json-rpc-over-http.html#id13
 var acceptedContentTypes = []string{contentType, "application/json-rpc", "application/jsonrequest"}
 
-// jsonContentTypeHeader is shared by every response; its length equals its
-// capacity, so a later Header.Add copies it instead of writing into it.
-var jsonContentTypeHeader = []string{contentType}
-
 type httpConn struct {
 	client    *http.Client
 	url       string
@@ -411,7 +407,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header()["Content-Type"] = jsonContentTypeHeader
+	w.Header().Set("Content-Type", contentType)
 	codec := newHTTPServerConn(r, w, body)
 	defer codec.Close()
 	var stream *jsonstream.Stream
