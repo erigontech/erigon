@@ -3423,6 +3423,11 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), false); err != nil {
 		return err
 	}
+	for _, txn := range txns.Txns {
+		if _, ok := p.byHash[string(txn.IDHash[:])]; !ok {
+			p.deletedTxns = append(p.deletedTxns, newMetaTxn(&TxnSlot{IDHash: txn.IDHash, SenderID: txn.SenderID}, false, 0))
+		}
+	}
 
 	// Restore persisted dormancy state. On the first run after this feature was introduced
 	// the table is empty, so persistedActivity will be empty and all senders fall through

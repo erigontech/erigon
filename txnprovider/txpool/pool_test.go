@@ -688,6 +688,15 @@ func TestFromDBSkipsUnderpricedBlobTxns(t *testing.T) {
 
 	require.Contains(t, pool.byHash, string(pricedHash[:]))
 	require.NotContains(t, pool.byHash, string(underpricedHash[:]))
+
+	_, err := pool.flush(ctx)
+	require.NoError(t, err)
+	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+		has, err := tx.Has(kv.PoolTransaction, underpricedHash[:])
+		require.NoError(t, err)
+		require.False(t, has)
+		return nil
+	}))
 }
 
 func TestFromDBSkipsBlobTxnWithBadSidecar(t *testing.T) {
