@@ -1063,12 +1063,12 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 			continue
 		}
 
-		wireSize := int64(slot.Size)
+		wireSize := int(slot.Size)
 		if wireSize == 0 {
 			p.logger.Error("[txpool] pending transaction has no encoded size", "hash", common.Hash(slot.IDHash))
 			continue
 		}
-		if wireSize > int64(availableRlpSpace) {
+		if wireSize > availableRlpSpace {
 			p.logger.Debug("[txpool] skipping txn bigger than available rlp space", "size", wireSize, "available", availableRlpSpace)
 			continue
 		}
@@ -1117,7 +1117,7 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 		}
 		availableGas.Execution -= intrinsicGas
 		availableGas.Blob -= blobCount * params.GasPerBlob
-		availableRlpSpace -= int(wireSize)
+		availableRlpSpace -= wireSize
 		txns.Txns[count] = slot.Rlp
 		txns.ParsedTxn[count] = parsed
 		copy(txns.Senders.At(count), sender[:])
