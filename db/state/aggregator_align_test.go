@@ -55,27 +55,21 @@ func generateStandaloneIIFiles(t *testing.T, dirs datadir.Dirs, ranges []testFil
 
 func requireVisibleEnd(t *testing.T, agg *Aggregator, end uint64) {
 	t.Helper()
-	at := agg.BeginFilesRo()
-	defer at.Close()
-	for _, d := range kv.StateDomains {
-		require.EqualValues(t, end, at.d[d].files.EndTxNum(), "domain %s", d)
-	}
-	for _, ii := range at.standaloneIIs() {
-		require.EqualValues(t, end, ii.files.EndTxNum(), "index %s", ii.name)
-	}
+	requireVisibleEndOrEmpty(t, agg, end, false)
 }
 
-func requireVisibleEndOfListsWithFiles(t *testing.T, agg *Aggregator, end uint64) {
+// requireVisibleEndOrEmpty is requireVisibleEnd that also accepts an empty list when emptyAllowed is set.
+func requireVisibleEndOrEmpty(t *testing.T, agg *Aggregator, end uint64, emptyAllowed bool) {
 	t.Helper()
 	at := agg.BeginFilesRo()
 	defer at.Close()
 	for _, d := range kv.StateDomains {
-		if len(at.d[d].files) > 0 {
+		if !emptyAllowed || len(at.d[d].files) > 0 {
 			require.EqualValues(t, end, at.d[d].files.EndTxNum(), "domain %s", d)
 		}
 	}
 	for _, ii := range at.standaloneIIs() {
-		if len(ii.files) > 0 {
+		if !emptyAllowed || len(ii.files) > 0 {
 			require.EqualValues(t, end, ii.files.EndTxNum(), "index %s", ii.name)
 		}
 	}
@@ -209,11 +203,7 @@ func TestVisibleFilesWithAMissingFile(t *testing.T) {
 				case k.retired && pos.missing.fromStep == 0:
 					wantEnd, wantRefuse = filesEnd, false
 				}
-				if pos.name == "all" && wantEnd == filesEnd {
-					requireVisibleEndOfListsWithFiles(t, agg, wantEnd)
-				} else {
-					requireVisibleEnd(t, agg, wantEnd)
-				}
+				requireVisibleEndOrEmpty(t, agg, wantEnd, pos.name == "all" && wantEnd == filesEnd)
 				err := pruneEverythingTo(t, db, agg, filesEnd, nil, nil)
 				if wantRefuse {
 					require.ErrorContains(t, err, "gap between snapshot files and DB")
@@ -278,11 +268,7 @@ func TestVisibleFilesAfterRecoveryFlows(t *testing.T) {
 			tc.prepare(t, agg.Dirs())
 			require.NoError(t, agg.OpenFolder(db))
 
-			if len(tc.cleared) > 0 {
-				requireVisibleEndOfListsWithFiles(t, agg, tc.wantEnd)
-			} else {
-				requireVisibleEnd(t, agg, tc.wantEnd)
-			}
+			requireVisibleEndOrEmpty(t, agg, tc.wantEnd, len(tc.cleared) > 0)
 			at := agg.BeginFilesRo()
 			for _, id := range tc.extra {
 				require.EqualValues(t, 2*alignStepSize, at.d[id].files.StartTxNum(), "domain %s", id)
@@ -300,46 +286,35 @@ func TestVisibleFilesAfterRecoveryFlows(t *testing.T) {
 	}
 }
 
-// a history index file is covered only by smaller index files that can become visible; without their history files they can not
-func TestBuildMissedAccessorsKeepsAnIndexFileCoveredByHiddenFiles(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
-	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+// A smaller history or index file covers a merged one only if it can become visible: a history file needs the index
+// file of its range and an index file needs its history file. Otherwise the merged file's accessor is rebuilt.
+func TestBuildMissedAccessorsKeepsAHistoryOrIndexFileCoveredByHiddenFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		gone    func(datadir.Dirs) string // the dir whose smaller files are removed
+		version string                    // of the merged file's accessor that the test removes
+		ext     string
+	}{
+		{"index file covered by files without history", func(d datadir.Dirs) string { return d.SnapHistory }, "v1.0", "efi"},
+		{"history file covered by files without index", func(d datadir.Dirs) string { return d.SnapIdx }, "v2.0", "vi"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(false))
+			db, agg := testDbAndAggregatorv3(t, alignStepSize)
+			dirs := agg.Dirs()
+			generateAccountsFile(t, dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+			generateCommitmentFile(t, dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+			removeFiles(t, dirs, tc.gone(dirs), "accounts", testFileRange{0, 1})
+			removeFiles(t, dirs, tc.gone(dirs), "accounts", testFileRange{1, 2})
+			require.NoError(t, dir.RemoveFile(filepath.Join(dirs.SnapAccessors, tc.version+"-accounts.0-2."+tc.ext)))
+			require.NoError(t, agg.OpenFolder(db))
 
-	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
-	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
-	removeFiles(t, agg.Dirs(), agg.Dirs().SnapHistory, "accounts", testFileRange{0, 1})
-	removeFiles(t, agg.Dirs(), agg.Dirs().SnapHistory, "accounts", testFileRange{1, 2})
-	efi, err := filepath.Glob(filepath.Join(agg.Dirs().SnapAccessors, "*-accounts.0-2.efi"))
-	require.NoError(t, err)
-	require.Len(t, efi, 1)
-	require.NoError(t, dir.RemoveFile(efi[0]))
-	require.NoError(t, agg.OpenFolder(db))
-
-	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1, kv.SkipCoveredAccessors))
-	built, err := filepath.Glob(filepath.Join(agg.Dirs().SnapAccessors, "*-accounts.0-2.efi"))
-	require.NoError(t, err)
-	require.Len(t, built, 1)
-}
-
-// a history file is covered only by smaller history files whose index files of the same range can be read
-func TestBuildMissedAccessorsKeepsAHistoryFileCoveredByUnindexedFiles(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
-	db, agg := testDbAndAggregatorv3(t, alignStepSize)
-
-	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
-	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
-	removeFiles(t, agg.Dirs(), agg.Dirs().SnapIdx, "accounts", testFileRange{0, 1})
-	removeFiles(t, agg.Dirs(), agg.Dirs().SnapIdx, "accounts", testFileRange{1, 2})
-	vi, err := filepath.Glob(filepath.Join(agg.Dirs().SnapAccessors, "*-accounts.0-2.vi"))
-	require.NoError(t, err)
-	require.Len(t, vi, 1)
-	require.NoError(t, dir.RemoveFile(vi[0]))
-	require.NoError(t, agg.OpenFolder(db))
-
-	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1, kv.SkipCoveredAccessors))
-	built, err := filepath.Glob(filepath.Join(agg.Dirs().SnapAccessors, "*-accounts.0-2.vi"))
-	require.NoError(t, err)
-	require.Len(t, built, 1)
+			require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1, kv.SkipCoveredAccessors))
+			built, err := filepath.Glob(filepath.Join(dirs.SnapAccessors, "*-accounts.0-2."+tc.ext)) // a rebuild may use a newer version
+			require.NoError(t, err)
+			require.Len(t, built, 1)
+		})
+	}
 }
 
 // The coverage filter reads dependency state, which is guarded by dirtyFilesLock.
