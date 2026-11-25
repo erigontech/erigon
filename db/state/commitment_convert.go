@@ -59,9 +59,11 @@ type ConvertOpts struct {
 	NoHistory       bool
 	// Continue resumes a prior interrupted conversion: input files whose
 	// converted shard already exists in <datadir>/snap/rebuild/domain/ with
-	// every required accessor sibling are skipped. Operator is responsible
-	// for passing the same TargetSqueeze / TargetNibblesV2 values used in
-	// the original run; a mismatch produces mixed-encoding output silently.
+	// every required accessor sibling, and history files whose four
+	// converted outputs exist in snap/rebuild/{history,idx,accessor}/,
+	// are skipped. Operator is responsible for passing the same
+	// TargetSqueeze / TargetNibblesV2 values used in the original run; a
+	// mismatch produces mixed-encoding output silently.
 	Continue bool
 	DB       kv.TemporalRoDB
 	TxNums   rawdbv3.TxNumsReader
@@ -611,10 +613,11 @@ func signedByteSizeHR(n int64) string {
 // reloaded aggregator if it needs to keep working.
 //
 // Pre-flight refuses to run if snapshots/backup/domains/ is non-empty (a
-// prior conversion's backup is still in place). By default it wipes a
-// leftover snapshots/rebuild/domain/ from a prior crashed run; with
-// opts.Continue set, complete shards from a prior interrupted run are
-// preserved and skipped in Phase 1 (see preflightResume).
+// prior conversion's backup is still in place). By default it wipes
+// leftover snapshots/rebuild/{domain,history,idx,accessor}/ from a prior
+// crashed run; with opts.Continue set, complete shards and history files
+// from a prior interrupted run are preserved and skipped in Phase 1 (see
+// preflightResume and convertCommitmentHistoryV3).
 func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts ConvertOpts, logger log.Logger) error {
 	if !opts.TargetV3 {
 		if err := refuseV3CommitmentFiles(at.Dirs()); err != nil {

@@ -583,11 +583,13 @@ removes the converted files. It is mutually exclusive with --squeeze and
 --nibbles.v2.
 
 --continue resumes a prior interrupted run, re-using complete shards left
-in <datadir>/snap/rebuild/domain/ and re-doing the rest. The operator MUST
-pass the same --squeeze and --nibbles.v2 values used in the original run; a
-mismatch silently produces mixed-encoding output. Without --continue, a
-mid-run crash discards any in-progress work in snap/rebuild/domain/ and
-Phase 1 restarts from scratch. --continue is mutually exclusive with
+in <datadir>/snap/rebuild/domain/ and converted commitment history files
+whose .v, .vi, .ef and .efi all exist in snap/rebuild/{history,idx,accessor}/,
+and re-doing the rest. The operator MUST pass the same --squeeze and
+--nibbles.v2 values used in the original run; a mismatch silently produces
+mixed-encoding output. Without --continue, a mid-run crash discards any
+in-progress work in snap/rebuild/domain/ and snap/rebuild/{history,idx,accessor}/
+and Phase 1 restarts from scratch. --continue is mutually exclusive with
 --restore.
 
 For --v3, history is converted when snapshots/history holds commitment .v files; --no-domain skips domain files and --no-history skips history files; a split run converts history (--no-domain) first. --no-domain with no commitment .v files, or --no-history with no commitment .kv files, is an error.

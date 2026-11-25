@@ -258,7 +258,7 @@ func requireCommitmentHistoryRoots(t *testing.T, db kv.TemporalRwDB, agg *state.
 	}
 }
 
-func TestConvertCommitmentFiles_V3HistoryContinueSkipsConvertedFiles(t *testing.T) {
+func testV3HistoryContinue(t *testing.T, damage func(dirs datadir.Dirs)) {
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
@@ -288,12 +288,33 @@ func TestConvertCommitmentFiles_V3HistoryContinueSkipsConvertedFiles(t *testing.
 	tx.Rollback()
 	require.ErrorIs(t, err, errInterrupted)
 
+	if damage != nil {
+		damage(agg.Dirs())
+	}
 	converted = nil
 	db, agg = reopenForConvert(t, db, agg, &legacySchema)
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, Continue: true})
-	require.NotContains(t, converted, 0, "--continue must reuse the history file converted before the interrupt")
-	require.Len(t, converted, len(legacyHistory)-1)
+	if damage != nil {
+		require.Contains(t, converted, 0, "--continue must redo a history file with a missing output")
+		require.Len(t, converted, len(legacyHistory))
+	} else {
+		require.NotContains(t, converted, 0, "--continue must reuse the history file converted before the interrupt")
+		require.Len(t, converted, len(legacyHistory)-1)
+	}
 	requireCommitmentHistoryRoots(t, db, agg, roots)
+}
+
+func TestConvertCommitmentFiles_V3HistoryContinueSkipsConvertedFiles(t *testing.T) {
+	testV3HistoryContinue(t, nil)
+}
+
+func TestConvertCommitmentFiles_V3HistoryContinueRedoesAPartialFile(t *testing.T) {
+	testV3HistoryContinue(t, func(dirs datadir.Dirs) {
+		efi, err := filepath.Glob(filepath.Join(dirs.Snap, "rebuild", "accessor", "*.efi"))
+		require.NoError(t, err)
+		require.Len(t, efi, 1)
+		require.NoError(t, dir.RemoveFile(efi[0]))
+	})
 }
 
 func TestConvertCommitmentFiles_V3SplitPassesReopen(t *testing.T) {
