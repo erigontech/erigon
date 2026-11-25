@@ -480,6 +480,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	}
 
 	out, execErr := ExecV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
+	defer NpEndMark("npStageExec")
 
 	// Stage progress: target the SharedDomains overlay (not replaced during exec)
 	// when present, else the live post-exec applyTx (parallel exec may have rolled

@@ -171,6 +171,8 @@ func ExecV3(ctx context.Context,
 			cfg.readAheader.CancelWarmup()
 		}
 	}()
+	NpEndMark("npExecV3Start")
+	defer NpEndMark("npExecV3")
 	isForkValidation := syncMode == stages.ModeForkValidation
 	isApplyingBlocks := syncMode == stages.ModeApplyingBlocks
 	hooks := cfg.vmConfig.Tracer

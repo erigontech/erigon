@@ -300,6 +300,8 @@ func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (ha
 
 	if logNpPhases {
 		runStart := time.Now()
+		NpEndMark("npRunStart")
+		defer NpEndMark("npRun")
 		defer func() {
 			kv := []any{"npRun", time.Since(runStart)}
 			for _, t := range s.timings {

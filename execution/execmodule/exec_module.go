@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -504,6 +505,7 @@ const nextForkBanner = `
 `
 
 func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (ValidationResult, error) {
+	defer stagedsync.NpEndMark("npModuleDone")
 	defer validateChainDuration.ObserveDuration(time.Now())
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
@@ -559,6 +561,8 @@ func closeWithoutView(view *func() error, close func()) {
 // validateChain with revalidate executes again a non-canonical block that passed validation before, so the fork
 // validator holds its state.
 func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, revalidate bool) (ValidationResult, error) {
+	stagedsync.NpEndMark("npValidateChainStart")
+	defer stagedsync.NpEndMark("npValidateChain")
 	blockHash, blockNumber := block.Hash(), block.NumberU64()
 	if e.readAheader != nil {
 		defer e.readAheader.CancelWarmup()
