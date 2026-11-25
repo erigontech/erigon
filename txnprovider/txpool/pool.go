@@ -134,15 +134,14 @@ type TxPool struct {
 	lock                   sync.Mutex
 	recentlyConnectedPeers *recentlyConnectedPeers // all txns will be propagated to this peers eventually, and clear list
 	senders                *sendersBatch
-	// batch processing of remote transactions
-	// handling is fast enough without batching, but batching allows:
-	//   - fewer _chainDB transactions
-	//   - batch notifications about new txns (reduced P2P spam to other nodes about txns propagation)
-	//   - and as a result reducing lock contention
+	// Batching remote transactions reduces database transactions, peer notifications,
+	// and lock contention. A batch in progress still counts toward the queue limits
+	// until its transactions are removed.
 	unprocessedRemoteTxns   *TxnSlots
 	unprocessedRemotePeers  []remoteSource      // index-aligned with unprocessedRemoteTxns
 	unprocessedRemoteByHash map[string]*TxnSlot // to reject duplicates
 	unprocessedRemoteBytes  uint64
+	unprocessedRemoteAuths  int
 	byHash                  map[string]*metaTxn                             // All pooled transactions by hash, including parked frames
 	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // txn_hash => discard_reason : non-persisted
 	pending                 *PendingPool
@@ -709,10 +708,12 @@ func (p *TxPool) removeProcessedRemoteTxns(n int) {
 	if n == len(p.unprocessedRemoteTxns.Txns) {
 		p.unprocessedRemoteByHash = make(map[string]*TxnSlot)
 		p.unprocessedRemoteBytes = 0
+		p.unprocessedRemoteAuths = 0
 	} else {
 		for _, txn := range p.unprocessedRemoteTxns.Txns[:n] {
 			delete(p.unprocessedRemoteByHash, string(txn.IDHash[:]))
 			p.unprocessedRemoteBytes -= uint64(txn.Size)
+			p.unprocessedRemoteAuths -= len(txn.Txn.GetAuthorizations())
 		}
 	}
 	p.unprocessedRemoteTxns.Txns = slices.Delete(p.unprocessedRemoteTxns.Txns, 0, n)
@@ -750,26 +751,45 @@ func (p *TxPool) kickKZGOffenders(ctx context.Context, txns []txnAdmission) {
 	}()
 }
 
-func (p *TxPool) getRlpLocked(tx kv.Tx, hash []byte) (rlpTxn []byte, sender common.Address, isLocal bool, err error) {
-	txn, ok := p.byHash[string(hash)]
-	if ok && txn.TxnSlot.Rlp != nil {
-		return txn.TxnSlot.Rlp, p.senders.senderID2Addr[txn.TxnSlot.SenderID], txn.subPool&IsLocal > 0, nil
+// GetRlp returns the wire encoding for hash, or nil if it is unavailable.
+// Callers can keep or modify the returned bytes after tx ends.
+func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
+	var slot *TxnSlot
+	var raw []byte
+	p.lock.Lock()
+	if mt := p.byHash[string(hash)]; mt != nil {
+		slot = mt.TxnSlot
+		raw = slot.Rlp
 	}
-	v, err := tx.GetOne(kv.PoolTransaction, hash)
-	if err != nil {
-		return nil, common.Address{}, false, err
-	}
-	if v == nil {
-		return nil, common.Address{}, false, nil
-	}
-	return v[20:], *(*[20]byte)(v[:20]), txn != nil && txn.subPool&IsLocal > 0, nil
+	p.lock.Unlock()
+	return readTxnRlp(tx, hash, slot, raw)
 }
 
-func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	rlpTx, _, _, err := p.getRlpLocked(tx, hash)
-	return bytes.Clone(rlpTx), err
+// readTxnRlp returns caller-owned wire bytes. Capture raw with slot under the pool lock
+// because a flush can clear slot.Rlp as soon as the caller unlocks. The captured bytes
+// stay valid for copying, and the database read and encoding can run outside the lock.
+func readTxnRlp(tx kv.Tx, hash []byte, slot *TxnSlot, raw []byte) ([]byte, error) {
+	if raw != nil {
+		return bytes.Clone(raw), nil
+	}
+	// The snapshot may contain the row before the pool has restored the slot.
+	row, err := tx.GetOne(kv.PoolTransaction, hash)
+	if err != nil {
+		return nil, err
+	}
+	if row != nil {
+		return bytes.Clone(row[length.Addr:]), nil
+	}
+	// The caller's snapshot may predate the flush. The parsed body can reproduce
+	// the full wire encoding only for transactions without blob sidecars.
+	if slot == nil || slot.HasBlobs() {
+		return nil, nil
+	}
+	var buf bytes.Buffer
+	if err := slot.Txn.MarshalBinary(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func (p *TxPool) AppendAllAnnouncements(types []byte, sizes []uint32, hashes []byte) ([]byte, []uint32, []byte) {
@@ -955,43 +975,47 @@ func (p *TxPool) waitForBlock(ctx context.Context, n int, onTopOf uint64, stop <
 	})
 }
 
-var errParentBlockRewound = errors.New("txpool head rewound below the requested parent")
-
-// best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
+// best fills txns with up to n pending transactions in priority order. The batch fits the
+// blob gas and RLP byte budgets. Its execution gas limits can add up to more than the budget
+// because selection deducts only intrinsic gas, including any applicable gas floor.
+//
+// A true result means selection ran, even if the count is zero. With no error, false means
+// the parent wait stopped or the pool's state view was stale.
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	parentBlockWaitStop <-chan struct{},
 	availableGas mdgas.FullMdGas,
 	yielded mapset.Set[[32]byte], availableRlpSpace int,
 ) (bool, int, error) {
-	for p.waitForBlock(ctx, n, onTopOf, parentBlockWaitStop) {
-		onTime, count, err := p.selectBest(ctx, n, txns, onTopOf, availableGas, yielded, availableRlpSpace)
-		if !errors.Is(err, errParentBlockRewound) {
-			return onTime, count, err
+	for {
+		if !p.waitForBlock(ctx, n, onTopOf, parentBlockWaitStop) {
+			p.logger.Debug("[txpool] Parent block wait stopped", "expecting", onTopOf, "lastSeen", p.lastSeenBlock.Load())
+			return false, 0, ctx.Err()
 		}
+		if err := ctx.Err(); err != nil {
+			return false, 0, err
+		}
+		// An unwind can lower the head after the wait returns. Recheck the height under
+		// the lock and keep it through selection so nothing is marked as yielded below
+		// the requested parent height.
+		p.lock.Lock()
+		if p.lastSeenBlock.Load() >= onTopOf {
+			break
+		}
+		p.lock.Unlock()
 	}
-	p.logger.Debug("[txpool] Parent block wait stopped", "expecting", onTopOf, "lastSeen", p.lastSeenBlock.Load())
-	return false, 0, ctx.Err()
-}
-
-func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
-	availableGas mdgas.FullMdGas, yielded mapset.Set[[32]byte], availableRlpSpace int,
-) (bool, int, error) {
-	// Open a fresh snapshot after the wait. The read transaction limiter comes before the pool lock.
-	tx, err := p.poolDB.BeginRo(ctx)
-	if err != nil {
-		return false, 0, err
-	}
-	defer tx.Rollback()
-	p.lock.Lock()
 	defer p.lock.Unlock()
-
-	if p.lastSeenBlock.Load() < onTopOf {
-		return false, 0, errParentBlockRewound
-	}
 	if p.stateViewStale {
 		return false, 0, nil
 	}
+	return true, p.selectBestLocked(n, txns, onTopOf, availableGas, yielded, availableRlpSpace), nil
+}
 
+// selectBestLocked selects from memory while the caller holds the pool lock.
+// A snapshot opened before locking can miss rows written by a concurrent flush.
+// Waiting for a reader slot under the lock can deadlock with readers waiting for that same lock.
+func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
+	availableGas mdgas.FullMdGas, yielded mapset.Set[[32]byte], availableRlpSpace int,
+) int {
 	best := p.pending.best
 
 	isEIP3860 := p.isShanghai()
@@ -1005,10 +1029,6 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 	count := 0
 	i := 0
 
-	defer func() {
-		p.logger.Debug("[txpool] Processing best request", "last", onTopOf, "txRequested", n, "txAvailable", len(best.ms), "txProcessed", i, "txReturned", count)
-	}()
-
 	for ; count < n && i < len(best.ms); i++ {
 		// if we wouldn't have enough gas for a standard transaction then quit out early
 		if availableGas.Execution < minTxGas {
@@ -1019,18 +1039,19 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 		}
 
 		mt := best.ms[i]
+		slot := mt.TxnSlot
 
-		if yielded != nil && yielded.Contains(mt.TxnSlot.IDHash) {
+		if yielded != nil && yielded.Contains(slot.IDHash) {
 			continue
 		}
 		var limits mdgas.MdGas
 		var intrinsicGasResult mdgas.IntrinsicGasCalcResult
 		var err error
-		frame, isFrame := mt.TxnSlot.Txn.(*types.FrameTransaction)
+		frame, isFrame := slot.Txn.(*types.FrameTransaction)
 		if isFrame {
 			intrinsicGasResult.ExecutionGas, intrinsicGasResult.FloorGasCost, limits, err = frame.GasLimits()
 		} else {
-			limits, err = protocol.TransactionGasLimits(mt.TxnSlot.Txn, isAmsterdam)
+			limits, err = protocol.TransactionGasLimits(slot.Txn, isAmsterdam)
 		}
 		if err != nil {
 			continue
@@ -1041,7 +1062,7 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 			toDemote = append(toDemote, mt)
 			continue
 		}
-		if !isFrame && mt.TxnSlot.GetGas() > p.blockGasLimit.Load() {
+		if !isFrame && slot.GetGas() > p.blockGasLimit.Load() {
 			continue
 		}
 		executionGas, stateGas := limits.Execution, limits.State
@@ -1052,26 +1073,31 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 			continue
 		}
 
-		if int64(mt.TxnSlot.Size) > int64(availableRlpSpace) {
-			p.logger.Debug("[txpool] skipping txn bigger than available rlp space", "size", int64(mt.TxnSlot.Size), "available", int64(availableRlpSpace))
+		wireSize := int(slot.Size)
+		if wireSize == 0 {
+			p.logger.Error("[txpool] pending transaction has no encoded size", "hash", common.Hash(slot.IDHash))
+			continue
+		}
+		if wireSize > availableRlpSpace {
+			p.logger.Debug("[txpool] skipping txn bigger than available rlp space", "size", wireSize, "available", availableRlpSpace)
 			continue
 		}
 
-		rlpTxn, sender, isLocal, err := p.getRlpLocked(tx, mt.TxnSlot.IDHash[:])
-		if err != nil {
-			return false, count, err
-		}
-		if len(rlpTxn) == 0 {
-			// The snapshot was taken before the pool lock was retaken; a flush in between moved the RLP to a row it does
-			// not see. The next call reads it.
-			continue
+		parsed := slot.Txn
+		if slot.HasBlobs() {
+			// The parsed body omits the sidecar. Keep a transaction with a missing wrapper
+			// pending until it is available, and return the full wrapper when selecting it.
+			if len(slot.Rlp) == 0 {
+				continue
+			}
+			parsed = nil
 		}
 
 		// Skip transactions that require more blob gas than is available
-		blobCount := uint64(len(mt.TxnSlot.GetBlobHashes()))
+		blobCount := uint64(len(slot.GetBlobHashes()))
 		if blobCount > 0 {
 			if p.isOsaka() {
-				proofs := mt.TxnSlot.Proofs()
+				proofs := slot.Proofs()
 				if len(proofs) != int(blobCount)*int(params.CellsPerExtBlob) { // cell_proofs contains exactly CELLS_PER_EXT_BLOB * len(blobs) cell proofs
 					toDiscard = append(toDiscard, mt)
 					continue
@@ -1082,13 +1108,14 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 			}
 		}
 
+		sender := p.senders.senderID2Addr[slot.SenderID]
 		// The gas limits determine whether a transaction fits. Until it executes,
 		// estimate the execution gas left for later candidates by deducting the
 		// intrinsic execution cost or the applicable gas floor, whichever is higher.
 		if !isFrame {
-			to := mt.TxnSlot.Txn.GetTo()
+			to := slot.Txn.GetTo()
 			isSelfTransfer := to != nil && *to == sender
-			intrinsicGasResult, _ = poolIntrinsicGas(mt.TxnSlot.Txn, isSelfTransfer, isEIP3860, isEIP7623, isAmsterdam)
+			intrinsicGasResult, _ = poolIntrinsicGas(slot.Txn, isSelfTransfer, isEIP3860, isEIP7623, isAmsterdam)
 		}
 		intrinsicGas := intrinsicGasResult.RequiredGas()
 		if intrinsicGas > availableGas.Execution {
@@ -1097,18 +1124,13 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 		}
 		availableGas.Execution -= intrinsicGas
 		availableGas.Blob -= blobCount * params.GasPerBlob
-		availableRlpSpace -= len(rlpTxn)
-		txns.Txns[count] = rlpTxn
-		// For type-3 and frame transactions with blobs, Txn holds only the inner
-		// transaction. Leave ParsedTxn nil so the provider decodes the full wrapper
-		// and preserves its sidecar.
-		if !mt.TxnSlot.HasBlobs() {
-			txns.ParsedTxn[count] = mt.TxnSlot.Txn
-		}
+		availableRlpSpace -= wireSize
+		txns.Txns[count] = slot.Rlp
+		txns.ParsedTxn[count] = parsed
 		copy(txns.Senders.At(count), sender[:])
-		txns.IsLocal[count] = isLocal
+		txns.IsLocal[count] = mt.subPool&IsLocal != 0
 		if yielded != nil {
-			yielded.Add(mt.TxnSlot.IDHash)
+			yielded.Add(slot.IDHash)
 		}
 		count++
 	}
@@ -1126,7 +1148,8 @@ func (p *TxPool) selectBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf u
 		p.pending.EnforceBestInvariants() // Remove swaps the last txn into the removed one's place
 	}
 
-	return true, count, nil
+	p.logger.Debug("[txpool] Processing best request", "last", onTopOf, "txRequested", n, "txAvailable", len(best.ms), "txProcessed", i, "txReturned", count)
+	return count
 }
 
 func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
@@ -1153,7 +1176,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 	txns := make([]types.Transaction, 0, len(txnsRlp.ParsedTxn))
 	for i, txn := range txnsRlp.ParsedTxn {
 		if txn == nil {
-			// Fallback: decode from RLP if parsed txn not available
+			// Type-3 and frame transactions with blobs carry their sidecars in the network wrapper.
 			var err error
 			txn, err = types.DecodeWrappedTransaction(txnsRlp.Txns[i])
 			if err != nil {
@@ -1161,20 +1184,34 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 			}
 		}
 
-		var sender common.Address
-		copy(sender[:], txnsRlp.Senders.At(i))
-		txn.SetSender(accounts.InternAddress(sender))
+		txn.SetSender(accounts.InternAddress(txnsRlp.Senders.AddressAt(i)))
 		txns = append(txns, txn)
 	}
 
 	return txns, nil
 }
 
+// PeekBest fills txns with the selected wire encodings when it returns true and no error.
+// The bytes stay valid after return. Treat them as read-only because some share storage with the pool.
 func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error) {
-	set := mapset.NewThreadUnsafeSet[[32]byte]()
 	onTime, _, err := p.best(ctx, n, txns, onTopOf, nil,
-		mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, math.MaxUint64), set, math.MaxInt)
-	return onTime, err
+		mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, math.MaxUint64), nil, math.MaxInt)
+	if err != nil || !onTime {
+		return onTime, err
+	}
+	// A flush releases the encoding of an ordinary transaction. Only callers requesting
+	// wire bytes need to encode it again, and they can do that outside the pool lock.
+	var buf bytes.Buffer
+	for i, raw := range txns.Txns {
+		if len(raw) == 0 {
+			buf.Reset()
+			if err := txns.ParsedTxn[i].MarshalBinary(&buf); err != nil {
+				return false, err
+			}
+			txns.Txns[i] = bytes.Clone(buf.Bytes())
+		}
+	}
+	return true, nil
 }
 
 func (p *TxPool) CountContent() (int, int, int) {
@@ -1216,7 +1253,12 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		if ok {
 			continue
 		}
+		txn.ensureSize()
 		if uint64(txn.Size) > remoteTxnQueueByteLimit-p.unprocessedRemoteBytes {
+			continue
+		}
+		authorizations := len(txn.Txn.GetAuthorizations())
+		if authorizations > maxRemoteAuthorizations-p.unprocessedRemoteAuths {
 			continue
 		}
 		if txn.TxType() == FrameTxnType && !p.remoteFrames.reserve(txn, src, now) {
@@ -1229,6 +1271,7 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		}
 		p.unprocessedRemoteByHash[hashS] = txn
 		p.unprocessedRemoteBytes += uint64(txn.Size)
+		p.unprocessedRemoteAuths += authorizations
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
 		p.unprocessedRemotePeers = append(p.unprocessedRemotePeers, src)
 	}
@@ -1617,24 +1660,13 @@ func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
 	return p.chainConfig.GetMaxBlobsPerBlock(uint64(now))
 }
 
+const txnMaxSize = 128 * 1024
+
 // ValidateSerializedTxn checks that the serialized transaction does not exceed the size limit for its type.
 func ValidateSerializedTxn(serializedTxn []byte) error {
-	const (
-		// txnSlotSize is used to calculate how many data slots a single transaction
-		// takes up based on its size. The slots are used as DoS protection, ensuring
-		// that validating a new transaction remains a constant operation (in reality
-		// O(maxslots), where max slots are 4 currently).
-		txnSlotSize = 32 * 1024
-
-		// txnMaxSize is the maximum size a single transaction can have. This field has
-		// non-trivial consequences: larger transactions are significantly harder and
-		// more expensive to propagate; larger transactions also take more resources
-		// to validate whether they fit into the pool or not.
-		txnMaxSize = 4 * txnSlotSize // 128KB
-
-		// Should be enough for a transaction with 6 blobs
-		blobTxnMaxSize = 1024 * 1024
-	)
+	// Blob transactions and wrapped frame transactions get extra room for sidecars.
+	// A wrapped frame's inner transaction must still fit within txnMaxSize.
+	const blobTxnMaxSize = 1024 * 1024
 	if len(serializedTxn) <= txnMaxSize {
 		return nil
 	}
@@ -2386,6 +2418,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 		}
 	}
 
+	mt.TxnSlot.ensureSize()
 	hashStr := string(mt.TxnSlot.IDHash[:])
 	p.byHash[hashStr] = mt
 	p.reserveFrame(mt.TxnSlot)
@@ -2482,8 +2515,6 @@ func (p *TxPool) sweepDormantQueued(ctx context.Context, currentBlock uint64, lo
 		dormancyBlocks = 1
 	}
 
-	// snapshot is populated inside the lock and persisted outside it, following the same
-	// pattern as flushLocked: hold the lock only for in-memory operations.
 	var snapshot map[uint64]uint64
 
 	func() {
@@ -2535,7 +2566,7 @@ func (p *TxPool) sweepDormantQueued(ctx context.Context, currentBlock uint64, lo
 
 		queuedLen = p.queued.Len()
 
-		// Snapshot the map for DB persistence while still holding the lock.
+		// Copy the map under the pool lock so later updates cannot change what this sweep writes.
 		snapshot = make(map[uint64]uint64, len(p.senderLastActivity))
 		maps.Copy(snapshot, p.senderLastActivity)
 	}()
@@ -3259,7 +3290,9 @@ func (p *TxPool) Run(ctx context.Context) error {
 func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	// it's important that write db txn is done inside lock, to make last writes visible for all read operations
+	// Hold the pool lock through commit so other pool operations see the cleared encodings
+	// only after the write transaction ends. A snapshot opened before commit still sees
+	// the older database view after its reader takes the pool lock.
 	if err := p.poolDB.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		err = p.flushLocked(tx)
 		if err != nil {
@@ -3575,15 +3608,19 @@ func (p *TxPool) logStats() {
 	p.publishDepthMetrics()
 }
 
-// Deprecated need switch to streaming-like
+// deprecatedForEach gives the callback an owned encoding outside the pool lock.
+//
+// Deprecated: replace the full-pool snapshot with a streaming API.
 func (p *TxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
-	var txns []*metaTxn
-	var senders []common.Address
-	var subPoolTypes []SubPoolType
-	var rlpValues [][]byte
+	type entry struct {
+		slot    *TxnSlot
+		rlp     []byte
+		sender  common.Address
+		subPool SubPoolType
+	}
 
 	p.lock.Lock()
-
+	entries := make([]entry, 0, len(p.byHash))
 	p.all.ascendAll(func(mt *metaTxn) bool {
 		if sender, found := p.senders.senderID2Addr[mt.TxnSlot.SenderID]; found {
 			subPool := mt.currentSubPool
@@ -3592,10 +3629,7 @@ func (p *TxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t S
 				// scheduling sub-pools until validation succeeds.
 				subPool = QueuedSubPool
 			}
-			txns = append(txns, mt)
-			senders = append(senders, sender)
-			subPoolTypes = append(subPoolTypes, subPool)
-			rlpValues = append(rlpValues, mt.TxnSlot.Rlp)
+			entries = append(entries, entry{mt.TxnSlot, mt.TxnSlot.Rlp, sender, subPool})
 		}
 
 		return true
@@ -3603,21 +3637,17 @@ func (p *TxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t S
 
 	p.lock.Unlock()
 
-	for i := range txns {
-		slotRlp := rlpValues[i]
+	for _, e := range entries {
+		slotRlp, err := readTxnRlp(tx, e.slot.IDHash[:], e.slot, e.rlp)
+		if err != nil {
+			p.logger.Warn("[txpool] foreach: read transaction", "hash", common.Hash(e.slot.IDHash), "err", err)
+			continue
+		}
 		if slotRlp == nil {
-			v, err := tx.GetOne(kv.PoolTransaction, txns[i].TxnSlot.IDHash[:])
-			if err != nil {
-				p.logger.Warn("[txpool] foreach: get txn from db", "err", err)
-				continue
-			}
-			if v == nil {
-				p.logger.Warn("[txpool] foreach: txn not found in db")
-				continue
-			}
-			slotRlp = v[20:]
+			p.logger.Warn("[txpool] foreach: transaction encoding unavailable", "hash", common.Hash(e.slot.IDHash))
+			continue
 		}
 
-		f(slotRlp, senders[i], subPoolTypes[i])
+		f(slotRlp, e.sender, e.subPool)
 	}
 }

@@ -19,6 +19,7 @@ package txpool
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,6 +37,13 @@ func encodeRemoteTxn(t *testing.T, txn *TxnSlot) *TxnSlot {
 	txn.Rlp, txn.Size = encoded.Bytes(), uint32(encoded.Len())
 	txn.IDHash = txn.Txn.Hash()
 	return txn
+}
+
+func remoteSetCodeTxn(t *testing.T, nonce uint64, authorizationCount int) *TxnSlot {
+	t.Helper()
+	txn := newTestSetCodeTxnSlot(nonce, 0, 1, 2, 100_000)
+	txn.Txn.(*types.SetCodeTransaction).Authorizations = make([]types.Authorization, authorizationCount)
+	return encodeRemoteTxn(t, txn)
 }
 
 func TestRemoteTxnQueueLimit(t *testing.T) {
@@ -100,14 +108,16 @@ func TestRemoteTxnQueueByteLimit(t *testing.T) {
 		txn := newTestTxnSlot(nonce, 0, 1, 2, 1_000_000)
 		txn.Txn.(*types.DynamicFeeTransaction).Data = make([]byte, 60_000)
 		encodeRemoteTxn(t, txn)
+		wireSize := uint64(len(txn.Rlp))
+		txn.Size = 0 // Direct callers can supply the wire bytes without a cached size.
 		var arrivals TxnSlots
 		arrivals.Append(txn, sender[:], false)
 		pool.AddRemoteTxns(ctx, arrivals, nil, nil)
-		if expectedBytes+uint64(txn.Size) > remoteTxnQueueByteLimit {
+		if expectedBytes+wireSize > remoteTxnQueueByteLimit {
 			dropped = txn
 			break
 		}
-		expectedBytes += uint64(txn.Size)
+		expectedBytes += wireSize
 	}
 	_, queued := pool.unprocessedRemoteByHash[string(dropped.IDHash[:])]
 	require.False(t, queued)
@@ -119,16 +129,45 @@ func TestRemoteTxnQueueByteLimit(t *testing.T) {
 	pool.AddRemoteTxns(ctx, duplicate, nil, nil)
 	require.Equal(t, expectedBytes, pool.unprocessedRemoteBytes, "duplicates must not consume capacity")
 
-	expectedBytes -= uint64(first.Size) + uint64(pool.unprocessedRemoteTxns.Txns[1].Size)
+	expectedBytes -= uint64(len(first.Rlp) + len(pool.unprocessedRemoteTxns.Txns[1].Rlp))
 	pool.removeProcessedRemoteTxns(2)
 	require.Equal(t, expectedBytes, pool.unprocessedRemoteBytes)
 	var retry TxnSlots
 	retry.Append(dropped, sender[:], false)
 	pool.AddRemoteTxns(ctx, retry, nil, nil)
 	require.Contains(t, pool.unprocessedRemoteByHash, string(dropped.IDHash[:]))
-	require.Equal(t, expectedBytes+uint64(dropped.Size), pool.unprocessedRemoteBytes)
+	require.Equal(t, expectedBytes+uint64(len(dropped.Rlp)), pool.unprocessedRemoteBytes)
 	pool.removeProcessedRemoteTxns(len(pool.unprocessedRemoteTxns.Txns))
 	require.Zero(t, pool.unprocessedRemoteBytes)
+}
+
+func TestRemoteTxnQueueAuthorizationLimit(t *testing.T) {
+	ctx, pool, _, _ := newTestPool(t)
+	sender := common.Address{1}
+	add := func(txns ...*TxnSlot) {
+		var slots TxnSlots
+		for _, txn := range txns {
+			slots.Append(txn, sender[:], false)
+		}
+		pool.AddRemoteTxns(ctx, slots, nil, nil)
+	}
+	const half = maxRemoteAuthorizations / 2
+	first := remoteSetCodeTxn(t, 0, half)
+	second := remoteSetCodeTxn(t, 1, maxRemoteAuthorizations-half)
+	extra := remoteSetCodeTxn(t, 2, 1)
+	ordinary := encodeRemoteTxn(t, newTestTxnSlot(3, 0, 1, 2, 21_000))
+
+	add(first)
+	add(first, second, extra, ordinary)
+	require.True(t, slices.Equal(pool.unprocessedRemoteTxns.Txns, []*TxnSlot{first, second, ordinary}), "initial queue")
+
+	pool.removeProcessedRemoteTxns(1)
+	add(first, extra)
+	require.True(t, slices.Equal(pool.unprocessedRemoteTxns.Txns, []*TxnSlot{second, ordinary, first}), "queue after partial drain")
+
+	pool.removeProcessedRemoteTxns(3)
+	add(first, second)
+	require.True(t, slices.Equal(pool.unprocessedRemoteTxns.Txns, []*TxnSlot{first, second}), "queue after full drain")
 }
 
 func TestRemoteTxnQueueOwnsPayload(t *testing.T) {

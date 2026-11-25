@@ -222,6 +222,9 @@ func (d *peerdas) Start(ctx context.Context) {
 				d.state.SetCustodyRaiseSlot(raiseSlot)
 			}
 		}
+		if d.blobRecoveryEnabled() {
+			peerdasutils.WarmUpRecovery()
+		}
 		d.resubscribeGossip()
 		for range numOfBlobRecoveryWorkers {
 			go d.blobsRecoverWorker(ctx)
@@ -437,6 +440,11 @@ func (d *peerdas) IsColumnOverHalf(slot uint64, blockRoot common.Hash) bool {
 
 func (d *peerdas) IsArchivedMode() bool {
 	return d.caplinConfig.ArchiveBlobs || d.caplinConfig.ImmediateBlobsBackfilling
+}
+
+// blobRecoveryEnabled reports whether this node recovers blobs from columns, which needs Fulu on the chain.
+func (d *peerdas) blobRecoveryEnabled() bool {
+	return d.beaconConfig.FuluForkEpoch != math.MaxUint64 && (d.IsArchivedMode() || d.state.IsSupernode())
 }
 
 func (d *peerdas) IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, error) {
@@ -1307,6 +1315,14 @@ func (d *peerdas) buildBlobSidecars(slot uint64, blockRoot common.Hash, result *
 	return true
 }
 
+func hasSignedHeaderOfBlock(sidecar *cltypes.DataColumnSidecar, blockRoot common.Hash) bool {
+	if sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+		return false
+	}
+	root, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+	return err == nil && root == blockRoot
+}
+
 func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 	defer d.clearDelayedBlobRecoveries()
 	recover := func(toRecover recoverBlobsRequest) (retryScheduled bool) {
@@ -1360,6 +1376,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				// Recover the matrix from the column sidecars
 				matrixEntries := []cltypes.MatrixEntry{}
 				var anyColumnSidecar *cltypes.DataColumnSidecar
+				acceptedColumns := make([]uint64, 0, len(existingColumns))
 				for _, columnIndex := range existingColumns {
 					if ctx.Err() != nil {
 						return
@@ -1370,18 +1387,28 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 						if ctx.Err() != nil {
 							return
 						}
-						if errors.Is(err, os.ErrNotExist) {
-							if removeErr := d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex)); removeErr != nil {
-								log.Debug("[blobsRecover] failed to remove column sidecar", "err", removeErr)
-							}
-						} else {
+						if !errors.Is(err, os.ErrNotExist) {
 							retryScheduled = d.delayBlobRecovery(toRecover)
+							return
 						}
-						return
+						if removeErr := d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex)); removeErr != nil {
+							log.Debug("[blobsRecover] failed to remove column sidecar", "err", removeErr)
+						}
+						continue
 					}
-					if sidecar.Column.Len() > int(d.beaconConfig.MaxBlobCommittmentsPerBlock) {
-						log.Warn("[blobsRecover] invalid column sidecar", "slot", slot, "blockRoot", blockRoot, "columnIndex", columnIndex, "columnLen", sidecar.Column.Len())
-						return
+					var wellFormed bool
+					if isGloas {
+						wellFormed = VerifyDataColumnSidecarWithCommitments(sidecar, kzgCommitmentsFromBlock)
+					} else {
+						wellFormed = VerifyDataColumnSidecar(sidecar) && hasSignedHeaderOfBlock(sidecar, blockRoot) && VerifyDataColumnSidecarInclusionProof(sidecar)
+					}
+					if !wellFormed {
+						log.Warn("[blobsRecover] removing malformed column sidecar", "slot", slot, "blockRoot", blockRoot, "columnIndex", columnIndex,
+							"cells", sidecar.Column.Len(), "kzgProofs", sidecar.KzgProofs.Len())
+						if removeErr := d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex)); removeErr != nil {
+							log.Debug("[blobsRecover] failed to remove column sidecar", "err", removeErr)
+						}
+						continue
 					}
 					for i := 0; i < sidecar.Column.Len(); i++ {
 						matrixEntries = append(matrixEntries, cltypes.MatrixEntry{
@@ -1394,6 +1421,11 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 					if anyColumnSidecar == nil {
 						anyColumnSidecar = sidecar
 					}
+					acceptedColumns = append(acceptedColumns, columnIndex)
+				}
+				if len(acceptedColumns) < int(d.beaconConfig.NumberOfColumns+1)/2 {
+					log.Debug("[blobsRecover] not enough well-formed columns to recover", "slot", slot, "blockRoot", blockRoot, "acceptedColumns", len(acceptedColumns), "existingColumns", len(existingColumns))
+					return
 				}
 				// recover matrix
 				beginRecoverMatrix := time.Now()
@@ -1412,7 +1444,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				}
 				log.Trace("[blobsRecover] recovered matrix", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
 
-				return newBlobRecoveryResult(existingColumns, isGloas, kzgCommitmentsFromBlock, signedBlockHeaderFromBlock, anyColumnSidecar, blobMatrix, numberOfBlobs, timeRecoverMatrix)
+				return newBlobRecoveryResult(acceptedColumns, isGloas, kzgCommitmentsFromBlock, signedBlockHeaderFromBlock, anyColumnSidecar, blobMatrix, numberOfBlobs, timeRecoverMatrix)
 			}()
 			if result == nil {
 				return
@@ -1564,7 +1596,7 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 }
 
 func (d *peerdas) tryScheduleRecover(slot uint64, blockRoot common.Hash, metadata *blobRecoveryMetadata) error {
-	if !d.IsArchivedMode() && !d.StateReader().IsSupernode() {
+	if !d.blobRecoveryEnabled() {
 		return nil
 	}
 

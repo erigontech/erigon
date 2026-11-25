@@ -192,9 +192,9 @@ func TestUnwindRestoresTransactionsAboveAccountLimit(t *testing.T) {
 	}
 
 	var first, rest TxnSlots
-	first.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	first.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], false)
 	for nonce := uint64(1); nonce <= pool.cfg.AccountSlots+1; nonce++ {
-		rest.Append(newTestSenderTxnSlot(sender, nonce), sender[:], false)
+		rest.Append(newTestSenderTxnSlot(t, sender, nonce), sender[:], false)
 	}
 	require.NoError(t, pool.OnNewBlock(ctx, block(1, 1, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, first))
 	require.NoError(t, pool.OnNewBlock(ctx, block(2, pool.cfg.AccountSlots+2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, rest))
@@ -208,6 +208,47 @@ func TestUnwindRestoresTransactionsAboveAccountLimit(t *testing.T) {
 	require.NoError(t, pool.OnNewBlock(ctx, block(0, 0, remoteproto.Direction_UNWIND), first, TxnSlots{}, TxnSlots{}))
 	require.EqualValues(t, pool.cfg.AccountSlots+2, pool.pending.Len(), "the missing lowest nonce must make the whole chain pending")
 	require.Zero(t, pool.queued.Len())
+}
+
+func TestReadPooledTransactionAcrossFlush(t *testing.T) {
+	ctx, pool, db, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	slot := newTestSenderTxnSlot(t, sender, 0)
+	want := slot.Rlp
+	var slots TxnSlots
+	slots.Append(slot, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	// The caller opens its snapshot before the flush moves the encoding out of memory.
+	tx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	_, err = pool.flushNoFsync(ctx)
+	require.NoError(t, err)
+	require.Nil(t, slot.Rlp)
+	row, err := tx.GetOne(kv.PoolTransaction, slot.IDHash[:])
+	require.NoError(t, err)
+	require.Nil(t, row)
+
+	t.Run("by hash", func(t *testing.T) {
+		got, err := pool.GetRlp(tx, slot.IDHash[:])
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		var unknown common.Hash
+		got, err = pool.GetRlp(tx, unknown[:])
+		require.NoError(t, err)
+		require.Nil(t, got)
+	})
+	t.Run("all", func(t *testing.T) {
+		var got [][]byte
+		pool.deprecatedForEach(func(raw []byte, from common.Address, subPool SubPoolType) {
+			require.Equal(t, sender, from)
+			require.Equal(t, PendingSubPool, subPool)
+			got = append(got, raw)
+		}, tx)
+		require.Equal(t, [][]byte{want}, got)
+	})
 }
 
 func TestIdHashKnownDiscardReasons(t *testing.T) {
@@ -549,6 +590,12 @@ func TestFromDBRestoresPersistedTxnsAfterInitialReset(t *testing.T) {
 	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded.Bytes()...))
 	}))
+	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+		got, err := pool.GetRlp(tx, hash[:])
+		require.NoError(t, err)
+		require.Equal(t, encoded.Bytes(), got, "hash lookup must also serve rows before pool restoration")
+		return nil
+	}))
 
 	reset := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
 	reset.StateVersionId = 1
@@ -884,6 +931,19 @@ func TestProvideTxnsContinuesAfterGasRejection(t *testing.T) {
 		txnprovider.WithGasTarget(mdgas.NewFullMdGas(100_000, 100_000, 0)))
 	require.NoError(t, err)
 	require.Equal(t, []types.Transaction{first.Txn}, txns)
+}
+
+func TestProvideTxnsReportsMissingWireSize(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000)
+	slot := pool.pending.best.ms[0].TxnSlot
+	slot.Rlp, slot.Size = nil, 0
+	var logs bytes.Buffer
+	pool.logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StreamHandler(&logs, log.LogfmtFormat())))
+
+	txns, err := pool.ProvideTxns(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, txns, "a transaction with unknown size cannot be charged to the byte budget")
+	require.Contains(t, logs.String(), common.Hash(slot.IDHash).Hex())
 }
 
 func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
@@ -3654,12 +3714,11 @@ func TestOnNewBlockKeepsUnwoundLocalTxnLocal(t *testing.T) {
 	}
 }
 
-func newTestSenderTxnSlot(sender common.Address, nonce uint64) *TxnSlot {
-	s := newTestTxnSlot(nonce, 0, 1, 2, 100_000)
-	s.IDHash[0] = byte(nonce + 1)
-	s.Rlp = []byte{byte(nonce + 1)}
-	s.Txn.SetSender(accounts.InternAddress(sender))
-	return s
+func newTestSenderTxnSlot(t *testing.T, sender common.Address, nonce uint64) *TxnSlot {
+	t.Helper()
+	slot := newTestTxnSlot(nonce, 0, 1, 2, 100_000)
+	slot.Txn.SetSender(accounts.InternAddress(sender))
+	return encodeRemoteTxn(t, slot)
 }
 
 func providedNonces(t *testing.T, ctx context.Context, pool *TxPool) []uint64 {
@@ -3698,18 +3757,18 @@ func TestProvideTxnsKeepsSenderNonceOrderAfterUnwind(t *testing.T) {
 	}
 
 	var local TxnSlots
-	local.Append(newTestSenderTxnSlot(sender, 0), sender[:], true)
-	local.Append(newTestSenderTxnSlot(sender, 1), sender[:], true)
+	local.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], true)
+	local.Append(newTestSenderTxnSlot(t, sender, 1), sender[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, local)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
 
 	var mined TxnSlots
-	mined.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	mined.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], false)
 	require.NoError(t, pool.OnNewBlock(ctx, block(1, 1, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, mined))
 
 	var unwound TxnSlots
-	unwound.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	unwound.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], false)
 	require.NoError(t, pool.OnNewBlock(ctx, block(0, 0, remoteproto.Direction_UNWIND), unwound, TxnSlots{}, TxnSlots{}))
 	pending, _, _ := pool.CountContent()
 	require.Equal(t, 2, pending)
@@ -3724,12 +3783,12 @@ func TestProvideTxnsKeepsSenderNonceOrderForRemoteThenLocal(t *testing.T) {
 	pool.started.Store(true)
 
 	var remote TxnSlots
-	remote.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	remote.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], false)
 	pool.AddRemoteTxns(ctx, remote, nil, nil)
 	require.NoError(t, pool.processRemoteTxns(ctx))
 
 	var local TxnSlots
-	local.Append(newTestSenderTxnSlot(sender, 1), sender[:], true)
+	local.Append(newTestSenderTxnSlot(t, sender, 1), sender[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, local)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
@@ -3769,11 +3828,11 @@ func TestRemoteSenderPenaltyFollowsBatchOrder(t *testing.T) {
 			_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 			pool.cfg.AccountSlots = 2
 			seeded := submitRemoteTxns(t, pool, sender,
-				newTestSenderTxnSlot(sender, 0), newTestSenderTxnSlot(sender, 1), newTestSenderTxnSlot(sender, 2))
+				newTestSenderTxnSlot(t, sender, 0), newTestSenderTxnSlot(t, sender, 1), newTestSenderTxnSlot(t, sender, 2))
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, seeded)
 
 			setCode, auth := newTestSetCodeWithAuthorization(t, pool.chainID, 4)
-			first, second := newTestSenderTxnSlot(sender, 3), setCode
+			first, second := newTestSenderTxnSlot(t, sender, 3), setCode
 			if firstType == "SetCode" {
 				first, second = second, first
 			}
@@ -3794,13 +3853,13 @@ func TestRemoteAdmissionAboveAccountSlots(t *testing.T) {
 
 	pooled, auth := newTestSetCodeWithAuthorization(t, pool.chainID, 2)
 	resubmitted := *pooled
-	reasons := submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(sender, 0), newTestSenderTxnSlot(sender, 1), pooled)
+	reasons := submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 0), newTestSenderTxnSlot(t, sender, 1), pooled)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(sender, 0)))
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 0)))
 	require.Len(t, pool.byHash, 3, "a duplicate must not trigger the sender penalty")
 
 	// The first input evicts the highest nonce. The copy now needs its own admission and authorization recovery.
-	reasons = submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(sender, 3), &resubmitted)
+	reasons = submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 3), &resubmitted)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, reasons)
 	installed := pool.byHash[string(resubmitted.IDHash[:])]
 	require.NotNil(t, installed)

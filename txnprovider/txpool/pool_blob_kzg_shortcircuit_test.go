@@ -434,9 +434,9 @@ func TestRemoteBlobReadmissionAfterSenderPenalty(t *testing.T) {
 	pool.cfg.BlobSlots = uint64(len(blob.GetBlobHashes()))
 	pool.cfg.TotalBlobPoolLimit = pool.cfg.BlobSlots
 	resubmitted := blob
-	reasons := submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(sender, 0), &blob)
+	reasons := submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 0), &blob)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
-	reasons = submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(sender, 2), &resubmitted)
+	reasons = submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 2), &resubmitted)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, reasons)
 	require.Contains(t, pool.byHash, string(blob.IDHash[:]))
 }
