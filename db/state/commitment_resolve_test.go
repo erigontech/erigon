@@ -19,8 +19,6 @@ package state
 import (
 	"bytes"
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -35,9 +33,6 @@ import (
 )
 
 func TestResolveCommitmentV3(t *testing.T) {
-	write := func(t *testing.T, dir, name string) {
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0o644))
-	}
 	type variant int
 	const (
 		byDefault variant = iota
@@ -52,21 +47,21 @@ func TestResolveCommitmentV3(t *testing.T) {
 		want  variant
 	}{
 		{name: "fresh datadir keeps the default", files: func(datadir.Dirs) {}},
-		{name: "legacy domain file selects legacy", files: func(d datadir.Dirs) { write(t, d.SnapDomain, "v2.0-commitment.0-1.kv") }, want: legacy},
-		{name: "legacy history file selects legacy", files: func(d datadir.Dirs) { write(t, d.SnapHistory, "v2.0-commitment.0-1.v") }, want: legacy},
-		{name: "v3 domain file selects v3", files: func(d datadir.Dirs) { write(t, d.SnapDomain, "v3.0-commitment.0-1.kv") }, want: v3},
+		{name: "legacy domain file selects legacy", files: func(d datadir.Dirs) { touchFiles(t, d.SnapDomain, "v2.0-commitment.0-1.kv") }, want: legacy},
+		{name: "legacy history file selects legacy", files: func(d datadir.Dirs) { touchFiles(t, d.SnapHistory, "v2.0-commitment.0-1.v") }, want: legacy},
+		{name: "v3 domain file selects v3", files: func(d datadir.Dirs) { touchFiles(t, d.SnapDomain, "v3.0-commitment.0-1.kv") }, want: v3},
 		{name: "mixed files select v3 for the mixed-files check", files: func(d datadir.Dirs) {
-			write(t, d.SnapDomain, "v3.0-commitment.0-1.kv")
-			write(t, d.SnapHistory, "v2.0-commitment.0-1.v")
+			touchFiles(t, d.SnapDomain, "v3.0-commitment.0-1.kv")
+			touchFiles(t, d.SnapHistory, "v2.0-commitment.0-1.v")
 		}, want: v3},
-		{name: "legacy accounts file alone keeps the default", files: func(d datadir.Dirs) { write(t, d.SnapDomain, "v2.0-accounts.0-1.kv") }},
-		{name: "pinned v3 is not switched by legacy files", pin: new(true), files: func(d datadir.Dirs) { write(t, d.SnapDomain, "v2.0-commitment.0-1.kv") }, want: v3},
-		{name: "pinned legacy is not switched by v3 files", pin: new(false), files: func(d datadir.Dirs) { write(t, d.SnapDomain, "v3.0-commitment.0-1.kv") }, want: legacy},
+		{name: "legacy accounts file alone keeps the default", files: func(d datadir.Dirs) { touchFiles(t, d.SnapDomain, "v2.0-accounts.0-1.kv") }},
+		{name: "pinned v3 is not switched by legacy files", pin: new(true), files: func(d datadir.Dirs) { touchFiles(t, d.SnapDomain, "v2.0-commitment.0-1.kv") }, want: v3},
+		{name: "pinned legacy is not switched by v3 files", pin: new(false), files: func(d datadir.Dirs) { touchFiles(t, d.SnapDomain, "v3.0-commitment.0-1.kv") }, want: legacy},
 		{name: "legacy chaindata state selects legacy", files: func(datadir.Dirs) {}, keys: [][]byte{commitment.KeyCommitmentState}, want: legacy},
 		{name: "v3 chaindata state selects v3", files: func(datadir.Dirs) {}, keys: [][]byte{commitment.KeyCommitmentV3State}, want: v3},
 		{name: "both chaindata states follow the v3 key", files: func(datadir.Dirs) {}, keys: [][]byte{commitment.KeyCommitmentState, commitment.KeyCommitmentV3State}, want: v3},
-		{name: "a v3 file wins over a legacy chaindata state", files: func(d datadir.Dirs) { write(t, d.SnapDomain, "v3.0-commitment.0-1.kv") }, keys: [][]byte{commitment.KeyCommitmentState}, want: v3},
-		{name: "a legacy file wins over a v3 chaindata state", files: func(d datadir.Dirs) { write(t, d.SnapDomain, "v2.0-commitment.0-1.kv") }, keys: [][]byte{commitment.KeyCommitmentV3State}, want: legacy},
+		{name: "a v3 file wins over a legacy chaindata state", files: func(d datadir.Dirs) { touchFiles(t, d.SnapDomain, "v3.0-commitment.0-1.kv") }, keys: [][]byte{commitment.KeyCommitmentState}, want: v3},
+		{name: "a legacy file wins over a v3 chaindata state", files: func(d datadir.Dirs) { touchFiles(t, d.SnapDomain, "v2.0-commitment.0-1.kv") }, keys: [][]byte{commitment.KeyCommitmentV3State}, want: legacy},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Cleanup(statecfg.ResetCommitmentV3ForTest())

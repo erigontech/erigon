@@ -505,32 +505,28 @@ func TestSetEthConfigWiresCommitmentV3Flag(t *testing.T) {
 	require.True(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records, "SetEthConfig must enable v3 commitment records")
 }
 
+func runSetCommitmentV3(t *testing.T, dirs datadir.Dirs, args ...string) bool {
+	t.Helper()
+	flag := ExperimentalCommitmentV3Flag
+	app := &cli.Command{
+		Flags: []cli.Flag{&flag},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			setCommitmentV3(context.Background(), cmd, dirs, log.Root())
+			return nil
+		},
+	}
+	require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+	require.Equal(t, statecfg.ExperimentalCommitmentV3, statecfg.Schema.CommitmentDomain.CommitmentV3Records, "the variant must switch the commitment schema too")
+	return statecfg.ExperimentalCommitmentV3
+}
+
 func TestSetCommitmentV3Flag(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
-	run := func(args ...string) bool {
-		flag := ExperimentalCommitmentV3Flag
-		app := &cli.Command{
-			Flags: []cli.Flag{&flag},
-			Action: func(_ context.Context, cmd *cli.Command) error {
-				setCommitmentV3(context.Background(), cmd, datadir.New(t.TempDir()), log.Root())
-				return nil
-			},
-		}
-		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
-		return statecfg.ExperimentalCommitmentV3
-	}
+	run := func(args ...string) bool { return runSetCommitmentV3(t, datadir.New(t.TempDir()), args...) }
 
 	require.False(t, run(), "unset flag must leave COMMITMENT_V3 in charge")
 	require.False(t, run("--"+ExperimentalCommitmentV3Flag.Name+"=false"))
-	require.False(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
 	require.True(t, run("--"+ExperimentalCommitmentV3Flag.Name))
-	require.True(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records, "the flag must switch the commitment schema too")
-
-	statecfg.ResetCommitmentV3ForTest()
-	require.Equal(t, statecfg.DefaultCommitmentV3, run(), "a fresh datadir must take the default")
-	statecfg.ResetCommitmentV3ForTest()
-	require.False(t, run("--"+ExperimentalCommitmentV3Flag.Name+"=false"))
-	require.False(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
 }
 
 func TestSetCommitmentV3FollowsDatadir(t *testing.T) {
@@ -543,19 +539,10 @@ func TestSetCommitmentV3FollowsDatadir(t *testing.T) {
 	legacyDirs, v3Dirs := datadirWith("v2.0-commitment.0-1.kv"), datadirWith("v3.0-commitment.0-1.kv")
 	run := func(dirs datadir.Dirs, args ...string) bool {
 		statecfg.ResetCommitmentV3ForTest()
-		flag := ExperimentalCommitmentV3Flag
-		app := &cli.Command{
-			Flags: []cli.Flag{&flag},
-			Action: func(_ context.Context, cmd *cli.Command) error {
-				setCommitmentV3(context.Background(), cmd, dirs, log.Root())
-				return nil
-			},
-		}
-		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
-		require.Equal(t, statecfg.ExperimentalCommitmentV3, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
-		return statecfg.ExperimentalCommitmentV3
+		return runSetCommitmentV3(t, dirs, args...)
 	}
 
+	require.Equal(t, statecfg.DefaultCommitmentV3, run(datadir.New(t.TempDir())), "a fresh datadir must take the default")
 	require.False(t, run(legacyDirs), "a datadir with legacy commitment files must use the legacy trie")
 	require.True(t, run(v3Dirs), "a datadir with v3 commitment files must use the v3 trie")
 	require.True(t, run(legacyDirs, "--"+ExperimentalCommitmentV3Flag.Name), "an explicit v3 choice must not be switched by the datadir")
