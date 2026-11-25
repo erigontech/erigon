@@ -539,18 +539,22 @@ func (d *Domain) retireFilesNotInList(fNames []string) retiredFiles {
 	return retireFilesNotInList(mvcc.RetireReasonWasDeletedFromDisk, d.dirtyFiles, fNames, d.FilenameBase, d.logger)
 }
 
+// dependentsPresent reports whether a file's range has the dependent files it needs to be visible; nil: no dependency.
+func (d *Domain) dependentsPresent() func(startTxNum, endTxNum uint64) bool {
+	if d.checker == nil {
+		return nil
+	}
+	ue := FromDomain(d.Name)
+	return func(startTxNum, endTxNum uint64) bool {
+		return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
+	}
+}
+
 // calcVisibleFiles is pure — it does not mutate d, d.History, or d.History.InvertedIndex.
 // Aggregator.recalcVisibleFiles uses it to assemble a cross-entity consistent
 // snapshot that is published via a single atomic store.
 func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles, *iiVisible) {
-	var checker func(startTxNum, endTxNum uint64) bool
-	if d.checker != nil {
-		ue := FromDomain(d.Name)
-		checker = func(startTxNum, endTxNum uint64) bool {
-			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
-		}
-	}
-	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
+	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, d.dependentsPresent(), false, toTxNum))
 	hv, hiv := d.History.calcVisibleFiles(toTxNum)
 	return dv, hv, hiv
 }
