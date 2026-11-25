@@ -688,16 +688,15 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	// left behind. AlwaysGenerateChangesets keeps changesets for unwinds deeper than MaxReorgDepth (debug /
 	// integration tool / explicit --experimental.always-generate-changesets flag): only the steps about to be
 	// collated lose theirs.
-	changesetsPruneTo, err := blocksInFilesEnd(ctx, tx, cfg.blockReader)
+	var changesetsPruneTo uint64
+	if cfg.syncCfg.AlwaysGenerateChangesets {
+		changesetsPruneTo, err = collatableStepsEnd(ctx, tx, cfg.blockReader, s.FinalityCtx.CollateToBlockNum())
+	} else {
+		changesetsPruneTo, err = blocksInFilesEnd(ctx, tx, cfg.blockReader)
+		changesetsPruneTo = max(changesetsPruneTo, blockPruneTo)
+	}
 	if err != nil {
 		return err
-	}
-	if cfg.syncCfg.AlwaysGenerateChangesets {
-		if changesetsPruneTo, err = collatableStepsEnd(ctx, tx, cfg.blockReader, s.FinalityCtx.CollateToBlockNum()); err != nil {
-			return err
-		}
-	} else {
-		changesetsPruneTo = max(changesetsPruneTo, blockPruneTo)
 	}
 	// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 	// Some chains produce blocks with 400 chunks of diff = 3mb
