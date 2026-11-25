@@ -331,7 +331,7 @@ func (t *StateTest) RunNoVerify(sd *execctx.SharedDomains, tx kv.TemporalRwTx, s
 	// Read through sd.AsStateGetter so execution sees never-Flushed pre-state held in sd.mem.
 	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	w := rpchelper.NewLatestStateWriter(tx, sd, (*freezeblocks.BlockReader)(nil), writeBlockNr)
-	statedb = state.NewWithVersionMap(r, state.NewVersionMap(nil))
+	statedb = state.New(r)
 	statedb.SetTxContext(0, 0)
 
 	var baseFee *uint256.Int
@@ -466,7 +466,7 @@ func MakePreState(rules *chain.Rules, db kv.TemporalRoDB, tx kv.TemporalRwTx, al
 func MakePreStateInto(rules *chain.Rules, sd *execctx.SharedDomains, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	// Read through sd.AsStateGetter so SetCode/SetBalance see prior pre-state held in sd.mem.
 	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-	statedb := state.NewWithVersionMap(r, state.NewVersionMap(nil))
+	statedb := state.New(r)
 	defer statedb.Close()
 	statedb.SetTxContext(blockNr, 0)
 	for addr, a := range alloc {
@@ -517,7 +517,7 @@ func MakePreStateInto(rules *chain.Rules, sd *execctx.SharedDomains, tx kv.Tempo
 		return nil, err
 	}
 	// The pre-state is in sd now: the caller's run reads it through r on a state of its own.
-	run := state.NewWithVersionMap(r, state.NewVersionMap(nil))
+	run := state.New(r)
 	run.SetNoConflictDetection()
 	run.SetTxContext(blockNr, 0)
 	return run, nil

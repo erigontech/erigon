@@ -1051,7 +1051,7 @@ func runZeroValueSystemCall(t *testing.T, aura bool) (*state.IntraBlockState, ty
 	require.Equal(t, byte(0x42), ret[31])
 
 	var io state.VersionedIO
-	statedb.MergeTxIOInto(&io, statedb.VersionedWrites())
+	statedb.MergeTxIOInto(&io, statedb.Writes())
 	return statedb, io.AsBlockAccessList(), balChanges
 }
 

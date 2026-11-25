@@ -176,7 +176,8 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 			}
 		}
 
-		dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, true)
+		// The fork epoch's PTC is computed at the fork, so it depends on the last pre-fork block.
+		dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, epoch != a.beaconChainCfg.GloasForkEpoch)
 		if dependentRootSlot == headSlot {
 			dependentRoot = headRoot
 			return nil
@@ -1039,6 +1040,13 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
+	gossipMaxSize := gossip.MaxUncompressedSize(gossip.TopicNameExecutionPayload, a.beaconChainCfg, a.netConfig)
+	if size := uint64(signedEnvelope.EncodingSizeSSZ()); size > gossipMaxSize {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf(
+			"execution payload envelope encoding size %d exceeds gossip max %d", size, gossipMaxSize,
+		)).WriteTo(w)
+		return
+	}
 	receivedAt := time.Now()
 	if !blobDataIncluded && contents == nil {
 		contents, err = a.pendingLocalExecutionPayloadEnvelopeContents(signedEnvelope)
@@ -1847,6 +1855,7 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 	ctx := context.WithValue(r.Context(), gloasBlockProductionOptionsKey{}, &gloasBlockProductionOptions{
 		payloadFeeRecipient: &preferences.Message.FeeRecipient,
 		deferPayloadCache:   true,
+		bidRequest:          true,
 	})
 	options := gloasBlockOptionsFromContext(ctx)
 	beaconBody, executionValue, err := a.produceBeaconBody(

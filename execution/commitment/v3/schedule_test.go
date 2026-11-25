@@ -14,17 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package testutil
+package v3
 
 import (
-	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/program"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-// AssertStackWord consumes the top stack word and reverts unless it equals expected.
-func AssertStackWord(p *program.Program, expected uint64) *program.Program {
-	p.Push(expected).Op(vm.EQ)
-	destination := p.Size() + 7
-	return p.Op(vm.PUSH2).Append([]byte{byte(destination >> 8), byte(destination)}).Op(vm.JUMPI).
-		Push0().Push0().Op(vm.REVERT, vm.JUMPDEST)
+func TestStorageWorkerCountHonoursTheCap(t *testing.T) {
+	require.Equal(t, 16*storageOversubscribe, storageWorkerCount(0, 16, 0), "no cap: procs oversubscribed")
+	require.Equal(t, 15, storageWorkerCount(0, 16, 15), "the cap bounds the oversubscribed count")
+	require.Equal(t, 4, storageWorkerCount(4, 16, 15), "explicit workers below the cap")
+	require.Equal(t, 2, storageWorkerCount(4, 16, 2), "the cap bounds explicit workers")
 }

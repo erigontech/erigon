@@ -681,12 +681,12 @@ func TestRebuildCommitmentShardSkipsEmptyKeyOfExhaustedIterator(t *testing.T) {
 
 	const n = 3
 	var served byte
-	next := func() (bool, []byte) {
+	next := func() (bool, []byte, []byte) {
 		if served == n {
-			return false, nil
+			return false, nil, nil
 		}
 		served++
-		return true, bytes.Repeat([]byte{served}, length.Addr)
+		return true, bytes.Repeat([]byte{served}, length.Addr), nil
 	}
 	keys, err := state.RebuildCommitmentShardKeysForTest(ctx, domains, rwTx, next)
 	require.NoError(t, err)

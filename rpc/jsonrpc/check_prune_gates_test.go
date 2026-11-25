@@ -2604,30 +2604,38 @@ func TestCapabilitiesRenderAWindowThatHasNotStarted(t *testing.T) {
 	require.Equal(t, uint64(pruneGatingReceiptsUnstarted), uint64(caps.Receipts.DeleteStrategy.RetentionBlocks))
 }
 
-// TestCheckTxFee pins the fee cap: the fee is gasPrice*gas in wei, compared
-// against a cap expressed in ether, and a zero cap disables the check.
+// TestCheckTxFee checks the maximum fee in wei against the RPC cap in ether.
+// Ordinary transactions use gas limit times fee cap per gas, and frame
+// transactions use their signed MaxFee. A zero cap disables the check.
 func TestCheckTxFee(t *testing.T) {
 	t.Parallel()
 
-	oneEtherGasPrice := new(big.Int).Div(big.NewInt(common.Ether), big.NewInt(21000))
+	// One ether in wei is divisible by 25,000, so the at-cap case tests exact equality.
+	gasPrice := uint256.NewInt(common.Ether / 25_000)
+	oneEther := types.NewTransaction(0, common.Address{}, nil, 25_000, gasPrice, nil)
+	twoEther := types.NewTransaction(0, common.Address{}, nil, 50_000, gasPrice, nil)
+	wrappedFrame := &types.FrameTxWrapper{FrameTransaction: &types.FrameTransaction{
+		Fees: types.FrameFees{MaxFee: *uint256.NewInt(common.Ether + 1)},
+	}}
 	for _, tc := range []struct {
 		name     string
-		gasPrice *big.Int
-		gas      uint64
-		gasCap   float64
-		wantErr  bool
+		txn      types.Transaction
+		capEther float64
+		wantErr  string
 	}{
-		{"no_cap", oneEtherGasPrice, 21000, 0, false},
-		{"under_cap", oneEtherGasPrice, 21000, 2, false},
-		{"at_cap", oneEtherGasPrice, 21000, 1, false},
-		{"over_cap", oneEtherGasPrice, 42000, 1, true},
-		{"zero_fee", big.NewInt(0), 21000, 1, false},
+		{"no_cap", oneEther, 0, ""},
+		{"under_cap", oneEther, 2, ""},
+		{"at_cap", oneEther, 1, ""},
+		{"over_cap", twoEther, 1, "tx fee (2.00 ether) exceeds the configured cap (1.00 ether)"},
+		{"zero_fee", &types.LegacyTx{}, 1, ""},
+		{"wrapped_frame_rounds_to_cap", wrappedFrame, 1, ""},
+		{"wrapped_frame_over_cap", wrappedFrame, 0.5, "tx fee (1.00 ether) exceeds the configured cap (0.50 ether)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := checkTxFee(tc.gasPrice, tc.gas, tc.gasCap)
-			if tc.wantErr {
-				require.ErrorContains(t, err, "exceeds the configured cap")
+			err := checkTxFee(tc.txn, tc.capEther)
+			if tc.wantErr != "" {
+				require.EqualError(t, err, tc.wantErr)
 			} else {
 				require.NoError(t, err)
 			}

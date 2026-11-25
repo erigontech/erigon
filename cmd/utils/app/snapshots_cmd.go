@@ -1442,9 +1442,8 @@ func doBtSearch(ctx context.Context, cliCtx *cli.Command) error {
 	dataFilePath := strings.TrimRight(srcF, ".bt") + ".kv"
 
 	runtime.GC()
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	logger.Info("before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	alloc, sys := dbg.MemUsage()
+	logger.Info("before open", "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 	compress := seg.CompressKeys | seg.CompressVals
 	kv, idx, err := btindex.OpenBtreeIndexAndDataFile(srcF, dataFilePath, compress)
 	if err != nil {
@@ -1454,8 +1453,8 @@ func doBtSearch(ctx context.Context, cliCtx *cli.Command) error {
 	defer kv.Close()
 
 	runtime.GC()
-	dbg.ReadMemStats(&m)
-	logger.Info("after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	alloc, sys = dbg.MemUsage()
+	logger.Info("after open", "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 	seek := common.FromHex(cliCtx.String("key"))
 
@@ -3211,9 +3210,8 @@ func doUncompress(ctx context.Context, cliCtx *cli.Command) error {
 
 func doCompress(ctx context.Context, cliCtx *cli.Command) error {
 	defer func() {
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		log.Info("done", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		alloc, sys := dbg.MemUsage()
+		log.Info("done", "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 	}()
 
 	dirs, lck, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
