@@ -697,10 +697,19 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 
 	commitmentDomain := at.d[kv.CommitmentDomain].d
 	requiredAccessors := requiredAccessorsForCommitment(commitmentDomain.Accessors)
+	filesChanged := false
 	if opts.TargetV3 {
 		legacyDomainCfg := commitmentDomain.DomainCfg
 		legacyAccessors := commitmentDomain.Accessors
 		legacyHistoryVersion := commitmentDomain.History.FileVersion.DataV
+		defer func() {
+			if filesChanged {
+				return
+			}
+			commitmentDomain.DomainCfg = legacyDomainCfg
+			commitmentDomain.Accessors = legacyAccessors
+			commitmentDomain.History.FileVersion.DataV = legacyHistoryVersion
+		}()
 		statecfg.EnableCommitmentV3Records(&commitmentDomain.DomainCfg)
 		commitmentDomain.Accessors = legacyAccessors
 		v3HistoryVersion := commitmentDomain.DomainCfg.Hist.FileVersion.DataV
@@ -760,6 +769,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	// invalidates at; read only cached scalars (stepSize) past this point until
 	// Phase 5's ReloadFiles republishes.
 	stepSize := at.StepSize()
+	filesChanged = true
 	at.a.CloseFilesNoReopen()
 
 	if convertDomain {

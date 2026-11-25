@@ -317,6 +317,22 @@ func TestConvertCommitmentFiles_V3HistoryContinueRedoesAPartialFile(t *testing.T
 	})
 }
 
+func TestConvertCommitmentFiles_V3FailedRunKeepsLegacyConfig(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg, roots := testDbAggregatorWithCommitmentHistory(t, 10, 32)
+	errInterrupted := errors.New("interrupted")
+	state.SetConvertHistoryAfterFileHookForTest(func(int) error { return errInterrupted })
+	t.Cleanup(func() { state.SetConvertHistoryAfterFileHookForTest(nil) })
+	require.ErrorIs(t, convertErr(t, db, state.ConvertOpts{TargetV3: true}), errInterrupted)
+
+	state.SetConvertHistoryAfterFileHookForTest(nil)
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, Continue: true})
+	requireCommitmentHistoryRoots(t, db, agg, roots)
+}
+
 func TestConvertCommitmentFiles_V3SplitPassesReopen(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	legacySchema := statecfg.Schema
