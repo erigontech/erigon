@@ -1328,17 +1328,6 @@ func isBlockColumn(sidecar *cltypes.DataColumnSidecar, blockRoot common.Hash, is
 	return VerifyDataColumnSidecar(sidecar) && hasSignedHeaderOfBlock(sidecar, blockRoot) && VerifyDataColumnSidecarInclusionProof(sidecar)
 }
 
-// finishLazyBlobRecovery ends the recovery once every column is stored, or none is, which means pruning removed the
-// block. Otherwise it retries, which rebuilds every column missing from storage.
-func (d *peerdas) finishLazyBlobRecovery(ctx context.Context, request recoverBlobsRequest) (retryScheduled bool) {
-	stored, err := d.columnStorage.GetSavedColumnIndex(ctx, request.slot, request.blockRoot)
-	d.removeBlobRecoveryResult(request.blockRoot)
-	if err == nil && (len(stored) == int(d.beaconConfig.NumberOfColumns) || len(stored) == 0) || ctx.Err() != nil {
-		return false
-	}
-	return d.delayBlobRecovery(request)
-}
-
 func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 	defer d.clearDelayedBlobRecoveries()
 	recover := func(toRecover recoverBlobsRequest) (retryScheduled bool) {
@@ -1493,7 +1482,8 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			}
 		}
 		if d.lazyBlobSidecars(slot) {
-			return d.finishLazyBlobRecovery(ctx, toRecover)
+			d.removeBlobRecoveryResult(blockRoot)
+			return false
 		}
 		if result.blobSidecars == nil && !d.buildBlobSidecars(slot, blockRoot, result) {
 			return

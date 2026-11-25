@@ -4080,19 +4080,17 @@ func TestLazyImportColumnsFromBlobsSchedulesNoRecovery(t *testing.T) {
 	require.False(t, found)
 }
 
-// failColumnOnceStorage does not store one column of the first batch write, and stores every column later. The batch
-// reports an error and fails the column's single write, or with silent reports success.
-type failColumnOnceStorage struct {
+// dropColumnStorage never stores one column. A batch write stores the other columns and reports errColumnBatchFailed,
+// or success with silent; a single write of the column fails.
+type dropColumnStorage struct {
 	blob_storage.DataColumnStorage
 	column  uint64
 	silent  bool
 	batches atomic.Int32
 }
 
-func (s *failColumnOnceStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
-	if s.batches.Add(1) > 1 {
-		return s.DataColumnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars)
-	}
+func (s *dropColumnStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	s.batches.Add(1)
 	others := slices.DeleteFunc(slices.Clone(sidecars), func(sidecar *cltypes.DataColumnSidecar) bool { return sidecar.Index == s.column })
 	if err := s.DataColumnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, others); err != nil || s.silent {
 		return err
@@ -4100,130 +4098,35 @@ func (s *failColumnOnceStorage) WriteColumnSidecarsBatch(ctx context.Context, bl
 	return errColumnBatchFailed
 }
 
-func (s *failColumnOnceStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
-	if s.batches.Load() == 1 && uint64(columnIndex) == s.column {
+func (s *dropColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
+	if uint64(columnIndex) == s.column {
 		return errColumnSingleFailed
 	}
 	return s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
 }
 
-// TestLazyBlobRecoveryRetriesAColumnThatWasNotStored checks that a column that the write did not store leaves the block
-// with some columns, so the worker writes it on a retry instead of treating the recovery as done, also when the write
-// reported success.
-func TestLazyBlobRecoveryRetriesAColumnThatWasNotStored(t *testing.T) {
+// TestLazyBlobRecoveryEndsAfterOneStoreAttempt checks that a column that the write did not store, also when the write
+// reported success, does not make the worker retry the recovery.
+func TestLazyBlobRecoveryEndsAfterOneStoreAttempt(t *testing.T) {
 	for _, silent := range []bool{false, true} {
 		t.Run(fmt.Sprintf("silent=%t", silent), func(t *testing.T) {
-			var columns *failColumnOnceStorage
+			var columns *dropColumnStorage
 			r := startLazyRecovery(t, func(r *recoveryRun) {
-				columns = &failColumnOnceStorage{DataColumnStorage: r.d.columnStorage, column: r.d.beaconConfig.NumberOfColumns - 1, silent: silent}
+				columns = &dropColumnStorage{DataColumnStorage: r.d.columnStorage, column: r.d.beaconConfig.NumberOfColumns - 1, silent: silent}
 				r.d.columnStorage = columns
 			})
 
 			requireBlobRecoveryReleased(t, r.d, r.root)
 
-			require.Equal(t, int32(2), columns.batches.Load(), "column batch writes by the worker")
-			r.requireAllColumnsStored(t)
+			require.Never(t, func() bool { return columns.batches.Load() != 1 }, 2*blobRecoveryValidationRetryInterval+100*time.Millisecond, 10*time.Millisecond, "column batch writes by the worker")
+			saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
+			require.NoError(t, err)
+			require.Len(t, saved, int(r.d.beaconConfig.NumberOfColumns)-1)
+			require.NotContains(t, saved, columns.column)
 			r.requireNoBlobSidecars(t)
 			r.requireNoCachedRecoveryResult(t)
 		})
 	}
-}
-
-// TestLazyBlobRecoveryRebuildsAnInputColumnRemovedBeforeTheRetry checks that a retry rebuilds the columns that are
-// missing from storage now, also an input column that was removed after the first attempt accepted it.
-func TestLazyBlobRecoveryRebuildsAnInputColumnRemovedBeforeTheRetry(t *testing.T) {
-	var columns *failColumnOnceStorage
-	r := startLazyRecovery(t, func(r *recoveryRun) {
-		columns = &failColumnOnceStorage{DataColumnStorage: r.d.columnStorage, column: r.d.beaconConfig.NumberOfColumns - 1}
-		removeInputColumn := sync.OnceFunc(func() {
-			if err := columns.RemoveColumnSidecars(t.Context(), recoveryTestSlot, r.root, 0); err != nil {
-				t.Error(err)
-			}
-		})
-		r.d.columnStorage = &onColumnBatchWriteStorage{DataColumnStorage: columns, onWrite: removeInputColumn}
-	})
-
-	requireBlobRecoveryReleased(t, r.d, r.root)
-
-	require.Equal(t, int32(2), columns.batches.Load(), "column batch writes by the worker")
-	r.requireAllColumnsStored(t)
-	r.requireNoBlobSidecars(t)
-	r.requireNoCachedRecoveryResult(t)
-}
-
-// TestLazyBlobRecoveryEndsWhenPruningRefusedTheColumnWrite checks that the worker ends the recovery after a write that
-// pruning refused returned without writing, as the block is then outside the retention window. The column storage is
-// pruned before the first batch write while the recovery's own prune floor does not move, as in the moment between the
-// two steps of PruneBelow.
-func TestLazyBlobRecoveryEndsWhenPruningRefusedTheColumnWrite(t *testing.T) {
-	var (
-		pruneErr          error
-		batches           atomic.Int32
-		indexReads        *savedColumnReadCountingStorage
-		indexReadsAtWrite int32
-	)
-	r := startLazyRecovery(t, func(r *recoveryRun) {
-		indexReads = &savedColumnReadCountingStorage{DataColumnStorage: r.d.columnStorage}
-		r.d.columnStorage = &onColumnBatchWriteStorage{DataColumnStorage: indexReads, onWrite: func() {
-			if batches.Add(1) == 1 {
-				indexReadsAtWrite = indexReads.reads.Load()
-				pruneErr = indexReads.PruneBelow(recoveryTestSlot + 1)
-			}
-		}}
-	})
-
-	requireBlobRecoveryReleased(t, r.d, r.root)
-
-	require.NoError(t, pruneErr)
-	require.Equal(t, int32(1), batches.Load(), "column batch writes by the worker")
-	require.Equal(t, int32(1), indexReads.reads.Load()-indexReadsAtWrite, "saved-column index reads after the refused write")
-	saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
-	require.NoError(t, err)
-	require.Empty(t, saved)
-	r.requireNoBlobSidecars(t)
-	r.requireNoCachedRecoveryResult(t)
-}
-
-// failSavedIndexReadAfterWriteStorage fails the first read of the saved column index after a batch write.
-type failSavedIndexReadAfterWriteStorage struct {
-	blob_storage.DataColumnStorage
-	written           atomic.Bool
-	failed            atomic.Bool
-	readsAfterFailure atomic.Int32
-}
-
-func (s *failSavedIndexReadAfterWriteStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
-	err := s.DataColumnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars)
-	s.written.Store(true)
-	return err
-}
-
-func (s *failSavedIndexReadAfterWriteStorage) GetSavedColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash) ([]uint64, error) {
-	if s.written.Load() {
-		if s.failed.CompareAndSwap(false, true) {
-			return nil, errors.New("transient saved-column read failure")
-		}
-		s.readsAfterFailure.Add(1)
-	}
-	return s.DataColumnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
-}
-
-// TestLazyBlobRecoveryRetriesWhenTheStoredColumnsCannotBeRead checks that a failed read of the stored columns after the
-// write neither completes the recovery nor drops the block, so the worker retries.
-func TestLazyBlobRecoveryRetriesWhenTheStoredColumnsCannotBeRead(t *testing.T) {
-	var columns *failSavedIndexReadAfterWriteStorage
-	r := startLazyRecovery(t, func(r *recoveryRun) {
-		columns = &failSavedIndexReadAfterWriteStorage{DataColumnStorage: r.d.columnStorage}
-		r.d.columnStorage = columns
-	})
-
-	requireBlobRecoveryReleased(t, r.d, r.root)
-
-	require.True(t, columns.failed.Load(), "the worker did not read the stored columns after the write")
-	require.Positive(t, columns.readsAfterFailure.Load(), "the worker did not retry")
-	r.requireAllColumnsStored(t)
-	r.requireNoBlobSidecars(t)
-	r.requireNoCachedRecoveryResult(t)
 }
 
 func TestBlobRecoveryWritesBlobSidecarsOutsideLazyMode(t *testing.T) {
