@@ -38,23 +38,36 @@ func regionSlotKey(addr byte, slot int) []byte {
 
 func storageDomainTxWithContracts(t *testing.T, contracts byte, slots int) *DomainRoTx {
 	t.Helper()
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, log.New())
+	perContract := map[byte]int{}
+	for addr := byte(1); addr <= contracts; addr++ {
+		perContract[addr] = slots
+	}
+	return storageDomainTxOfSteps(t, perContract)
+}
+
+func storageDomainTxOfSteps(t *testing.T, slotsPerStep ...map[byte]int) *DomainRoTx {
+	t.Helper()
+	const stepSize = 16
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, stepSize, log.New())
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domainTx := d.beginForTests()
-	writer := domainTx.NewWriter(db)
-	for addr := byte(1); addr <= contracts; addr++ {
-		for slot := range slots {
-			require.NoError(t, writer.PutWithPrev(regionSlotKey(addr, slot), []byte{addr, byte(slot), 7, 7, 7, 7, 7, 7}, 1, nil))
+	for step, contracts := range slotsPerStep {
+		domainTx := d.beginForTests()
+		writer := domainTx.NewWriter(db)
+		for addr, slots := range contracts {
+			for slot := step * 1000; slot < step*1000+slots; slot++ {
+				require.NoError(t, writer.PutWithPrev(regionSlotKey(addr, slot), []byte{addr, byte(slot), 7, 7, 7, 7, 7, 7}, uint64(step*stepSize+1), nil))
+			}
 		}
+		require.NoError(t, writer.Flush(t.Context(), tx))
+		writer.Close()
+		domainTx.Close()
+		require.NoError(t, d.collateBuildIntegrate(t.Context(), kv.Step(step), tx, background.NewProgressSet()))
 	}
-	require.NoError(t, writer.Flush(t.Context(), tx))
-	writer.Close()
-	domainTx.Close()
-	require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, background.NewProgressSet()))
 	dt := d.beginForTests()
 	t.Cleanup(dt.Close)
+	require.Len(t, dt.files, len(slotsPerStep))
 	return dt
 }
 
@@ -104,7 +117,10 @@ func TestRegionAheadAdvisesAContractOnceAfterEnoughFileHits(t *testing.T) {
 	for range regionAheadHits {
 		dt.regionAhead(0, regionSlotKey(3, 0))
 	}
-	require.Len(t, dt.regionHits, 1)
+	require.Equal(t, map[regionKey]uint32{
+		{addr: [length.Addr]byte(regionSlotKey(3, 0)), file: 0}:  regionAheadHits,
+		{addr: [length.Addr]byte(regionSlotKey(3, 0)), file: -1}: 0,
+	}, dt.regionHits)
 	require.Equal(t, [][2]uint64{contractRegion(t, dt, 2), contractRegion(t, dt, 1), contractRegion(t, dt, 3)}, *advised)
 }
 
@@ -183,4 +199,60 @@ func TestRegionAheadIsOffUntilTheReaderResetsHits(t *testing.T) {
 	dt.resetRegionHits()
 	read()
 	require.Equal(t, [][2]uint64{contractRegion(t, dt, 1)}, *advised)
+}
+
+type fileAdvice struct {
+	file     string
+	from, to uint64
+}
+
+func fileRegion(t *testing.T, dt *DomainRoTx, file int, addr byte) fileAdvice {
+	from, to, ok := dt.regionWords(file, regionSlotKey(addr, 0)[:length.Addr])
+	require.True(t, ok)
+	return fileAdvice{dt.files[file].src.decompressor.FileName(), from, to}
+}
+
+func TestRegionAheadAlsoAdvisesTheContractInSmallFilesOncePerTx(t *testing.T) {
+	dt := storageDomainTxOfSteps(t, map[byte]int{1: 200, 2: 200}, map[byte]int{1: 10, 2: 10}, map[byte]int{2: 5})
+	var advised []fileAdvice
+	orig := regionAdvise
+	regionAdvise = func(d *seg.Decompressor, from, to uint64) {
+		advised = append(advised, fileAdvice{d.FileName(), from, to})
+	}
+	t.Cleanup(func() { regionAdvise = orig })
+	hit := func(file int, addr byte) {
+		for range regionAheadHits {
+			dt.regionAhead(file, regionSlotKey(addr, 0))
+		}
+	}
+	dt.resetRegionHits()
+
+	hit(0, 1)
+	require.Equal(t, []fileAdvice{fileRegion(t, dt, 0, 1), fileRegion(t, dt, 1, 1)}, advised)
+	hit(1, 1)
+	require.Equal(t, []fileAdvice{fileRegion(t, dt, 0, 1), fileRegion(t, dt, 1, 1), fileRegion(t, dt, 1, 1)}, advised)
+
+	advised = nil
+	origSmall := regionAheadSmallBytes
+	t.Cleanup(func() { regionAheadSmallBytes = origSmall })
+	small, large := fileRegion(t, dt, 2, 2), fileRegion(t, dt, 1, 2)
+	regionAheadSmallBytes = small.to - small.from
+	require.Greater(t, large.to-large.from, regionAheadSmallBytes)
+	hit(0, 2)
+	require.Equal(t, []fileAdvice{fileRegion(t, dt, 0, 2), small}, advised)
+}
+
+func TestRegionAheadKeepsTheHitTableBoundedAfterASmallFilePass(t *testing.T) {
+	dt := storageDomainTxWithContracts(t, 2, 200)
+	recordRegionAdvise(t)
+	dt.resetRegionHits()
+	for file := 1; len(dt.regionHits) < regionAheadTracked-1; file++ {
+		dt.regionAhead(file, regionSlotKey(2, 0))
+	}
+	for range regionAheadHits {
+		dt.regionAhead(0, regionSlotKey(1, 0))
+	}
+	require.Len(t, dt.regionHits, regionAheadTracked+1)
+	dt.regionAhead(0, regionSlotKey(2, 0))
+	require.Len(t, dt.regionHits, 1)
 }
