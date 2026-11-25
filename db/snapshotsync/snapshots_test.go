@@ -2287,6 +2287,43 @@ func TestVisibleBlockFilesKeepAMergedFileOverOverlappingSmallerFiles(t *testing.
 	}
 }
 
+// The cover check follows the files the visible view shows, the longest at each start, so nested smaller files
+// change nothing: a merged file with a full tiling is hidden, and one without stays visible.
+func TestVisibleBlockFilesCoverCheckFollowsTheLongestFileAtEachStart(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		bodies []Range
+		want   []Range // the bodies' visible files
+	}{
+		{"nested file at the start of a full tiling",
+			[]Range{NewRange(0, 30_000), NewRange(0, 1_000), NewRange(0, 10_000), NewRange(10_000, 20_000), NewRange(20_000, 30_000)},
+			[]Range{NewRange(0, 10_000), NewRange(10_000, 20_000), NewRange(20_000, 30_000)}},
+		{"a tiling that is not the longest at its start",
+			[]Range{NewRange(0, 30_000), NewRange(0, 20_000), NewRange(10_000, 30_000), NewRange(0, 10_000)},
+			[]Range{NewRange(0, 30_000)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := log.New()
+			dir := t.TempDir()
+			for from := uint64(0); from < 30_000; from += 10_000 {
+				for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Transactions} {
+					createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+				}
+			}
+			for _, r := range tc.bodies {
+				createTestSegmentFile(t, r.From(), r.To(), snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+			}
+			s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+			defer s.Close()
+			require.NoError(t, s.OpenFolder())
+			require.Equal(t, tc.want, visibleRanges(s, snaptype2.Bodies))
+			for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Transactions} {
+				require.Equal(t, uint64(30_000), visibleRanges(s, typ)[2].To(), typ.Name())
+			}
+		})
+	}
+}
+
 // The cleanup after a merge keeps the smaller files that stand in for a hidden merged file.
 func TestRemoveOverlapsKeepsTheSmallerFilesOfAHiddenMergedFile(t *testing.T) {
 	logger := log.New()
