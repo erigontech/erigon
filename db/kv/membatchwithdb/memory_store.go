@@ -43,10 +43,12 @@ type memEntry struct {
 }
 
 // Slabs start at arenaMinSlabSize and double up to arenaSlabSize, so small
-// batches stay small. Keys/values larger than arenaSlabSize get their own allocation.
+// batches stay small. Keys/values larger than arenaMaxEntrySize get their own
+// allocation, which bounds the slab tail abandoned on rollover.
 const (
-	arenaMinSlabSize = 4 << 10
-	arenaSlabSize    = 1 << 20
+	arenaMinSlabSize  = 4 << 10
+	arenaSlabSize     = 1 << 20
+	arenaMaxEntrySize = arenaSlabSize / 8
 )
 
 // arena is a bump allocator that packs the per-Put key/value copies into a few
@@ -63,7 +65,7 @@ type arena struct {
 // nor any other entry.
 func (a *arena) put(b []byte) []byte {
 	n := len(b)
-	if n == 0 || n > arenaSlabSize {
+	if n == 0 || n > arenaMaxEntrySize {
 		return bytes.Clone(b)
 	}
 	if cap(a.cur)-len(a.cur) < n {
@@ -239,7 +241,9 @@ func (s *memStore) Put(table string, k, v []byte) error {
 	t := s.getOrCreateTable(table)
 	var hint btree2.PathHint
 	if old, ok := t.tree.GetHint(memEntry{k: k, v: v}, &hint); ok {
-		t.tree.SetHint(memEntry{k: old.k, v: bytes.Clone(v)}, &hint)
+		if !t.dupSort {
+			t.tree.SetHint(memEntry{k: old.k, v: bytes.Clone(v)}, &hint)
+		}
 	} else {
 		t.tree.SetHint(memEntry{k: t.arena.put(k), v: t.arena.put(v)}, &hint)
 	}

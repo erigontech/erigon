@@ -19,9 +19,12 @@ package membatchwithdb
 import (
 	"bytes"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // Put must not retain the caller's buffers: they often alias MDBX mmap pages that
@@ -76,7 +79,7 @@ func TestArena_SlabRolloverPreservesEntries(t *testing.T) {
 
 func TestArena_OversizedGetsOwnAllocation(t *testing.T) {
 	var a arena
-	big := bytes.Repeat([]byte{0xEE}, arenaSlabSize+1)
+	big := bytes.Repeat([]byte{0xEE}, arenaMaxEntrySize+1)
 	got := a.put(big)
 	assert.Equal(t, big, got)
 	big[0] = 0x11
@@ -108,4 +111,22 @@ func TestMemStore_PutNilValueStaysNil(t *testing.T) {
 	got, err := s.GetOne("test", []byte("key"))
 	require.NoError(t, err)
 	assert.Nil(t, got)
+}
+
+func TestArena_LargeValueDoesNotAbandonSlab(t *testing.T) {
+	var a arena
+	a.put([]byte("x"))
+	slab := a.cur
+	a.put(make([]byte, arenaSlabSize/2+1))
+	assert.Equal(t, unsafe.SliceData(slab), unsafe.SliceData(a.cur))
+	assert.Equal(t, 1, len(a.cur))
+}
+
+func TestMemStore_DupSortRePutDoesNotAllocate(t *testing.T) {
+	s := newMemStore()
+	k, v := []byte("key"), []byte("v1")
+	require.NoError(t, s.Put(kv.PlainState, k, v))
+	allocs := testing.AllocsPerRun(100, func() { _ = s.Put(kv.PlainState, k, v) })
+	assert.Zero(t, allocs)
+	assert.Equal(t, 1, s.tables[kv.PlainState].tree.Len())
 }

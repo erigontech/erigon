@@ -26,10 +26,8 @@ func BenchmarkMemStore_Put(b *testing.B) {
 	key := make([]byte, 32)
 	val := make([]byte, 96)
 	b.ReportAllocs()
-	i := 0
-	for b.Loop() {
-		binary.LittleEndian.PutUint64(key, uint64(i))
+	for i := uint64(0); b.Loop(); i++ {
+		binary.LittleEndian.PutUint64(key, i)
 		_ = s.Put("t", key, val)
-		i++
 	}
 }
