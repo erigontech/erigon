@@ -31,16 +31,37 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
+
+func PartitionWipeCase(t *testing.T, wipe bool, fill func(*commitment.Updates)) {
+	updates := testUpdates(t, commitment.ModeUpdate, nil)
+	fill(updates)
+	p := &partitioner{}
+	require.NoError(t, updates.HashSort(context.Background(), nil, func(hashedKey, _ []byte, update *commitment.Update) error {
+		return p.add(bytes.Clone(hashedKey), update)
+	}))
+	storage, accounts := p.done()
+	require.Len(t, accounts, 1)
+	require.Equal(t, wipe, accounts[0].update.Deleted())
+	if !wipe {
+		require.Empty(t, storage)
+		return
+	}
+	require.Len(t, storage, 1)
+	require.True(t, storage[0].wipe)
+	ctx := newMockContext()
+	storageRound(t, ctx, storage[0].addrHash, []commitmenttest.Op{{Key: commitmenttest.Path([]byte{1}, 2), Storage: []byte{1}}})
+	_, err := runStorageTask(ctx, storage[0])
+	require.NoError(t, err)
+	require.Contains(t, ctx.branches, string(StorageNodeKey(storage[0].addrHash, nil, nil)))
+	require.Empty(t, ctx.branches[string(StorageNodeKey(storage[0].addrHash, nil, nil))])
+}
 
 func TestPartition(t *testing.T) {
 	path := func(n byte) []byte { return commitmenttest.Path(nil, n) }
@@ -72,46 +93,14 @@ func TestPartition(t *testing.T) {
 			require.Equal(t, packPath(tc.accounts[0].hashedKey, nil), storage[0].addrHash[:])
 		})
 	}
-	for _, tc := range []struct {
-		name string
-		wipe bool
-	}{
-		{"E35/DeleteThenWriteClearsWipe", false},
-		{"E35/SelfDestructOnlyWriteSetCreatesStorageWipe", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			updates := testUpdates(t, commitment.ModeUpdate, nil)
-			if tc.wipe {
-				ws := &state.WriteSet{}
-				ws.SetSelfDestruct(accounts.InternAddress(common.Address{0xd4}), &state.VersionedWrite[bool]{Val: true})
-				ws.TouchUpdates(updates)
-			} else {
-				addr := string(bytes.Repeat([]byte{0xe5}, 20))
-				for _, op := range []commitmenttest.Op{{Delete: true}, {Account: &commitmenttest.AccountValue{Fields: commitmenttest.BalanceField}}} {
-					updates.TouchPlainKeyDirect(addr, runner.Update(op))
-				}
+	t.Run("E35/DeleteThenWriteClearsWipe", func(t *testing.T) {
+		PartitionWipeCase(t, false, func(updates *commitment.Updates) {
+			addr := string(bytes.Repeat([]byte{0xe5}, 20))
+			for _, op := range []commitmenttest.Op{{Delete: true}, {Account: &commitmenttest.AccountValue{Fields: commitmenttest.BalanceField}}} {
+				updates.TouchPlainKeyDirect(addr, runner.Update(op))
 			}
-			p := &partitioner{}
-			require.NoError(t, updates.HashSort(context.Background(), nil, func(hashedKey, _ []byte, update *commitment.Update) error {
-				return p.add(bytes.Clone(hashedKey), update)
-			}))
-			storage, accounts := p.done()
-			require.Len(t, accounts, 1)
-			require.Equal(t, tc.wipe, accounts[0].update.Deleted())
-			if !tc.wipe {
-				require.Empty(t, storage)
-				return
-			}
-			require.Len(t, storage, 1)
-			require.True(t, storage[0].wipe)
-			ctx := newMockContext()
-			storageRound(t, ctx, storage[0].addrHash, []commitmenttest.Op{{Key: commitmenttest.Path([]byte{1}, 2), Storage: []byte{1}}})
-			_, err := runStorageTask(ctx, storage[0])
-			require.NoError(t, err)
-			require.Contains(t, ctx.branches, string(StorageNodeKey(storage[0].addrHash, nil, nil)))
-			require.Empty(t, ctx.branches[string(StorageNodeKey(storage[0].addrHash, nil, nil))])
 		})
-	}
+	})
 	t.Run("EmptyStorageUpdateIsInvalid", func(t *testing.T) {
 		p := &partitioner{}
 		err := p.add(append(path(1), path(2)...), &commitment.Update{})

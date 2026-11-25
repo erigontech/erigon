@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
 func Test_EncodeCommitmentState(t *testing.T) {
@@ -395,6 +396,7 @@ func TestInitializeTrieAndUpdates_Variants(t *testing.T) {
 	}{
 		{"parallel", commitment.VariantParallelHexPatricia, (*v2.ParallelPatriciaHashed)(nil), commitment.ModeParallel, true},
 		{"hex unchanged", commitment.VariantHexPatriciaTrie, (*v2.HexPatriciaHashed)(nil), commitment.ModeDirect, false},
+		{"v3", commitment.VariantCommitmentV3, (*v3.Trie)(nil), commitment.ModeCollect, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

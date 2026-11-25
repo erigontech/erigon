@@ -49,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
-	_ "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 

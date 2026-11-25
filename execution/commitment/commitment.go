@@ -131,8 +131,6 @@ func IsCommitmentStateKey(key []byte) bool {
 	return slices.ContainsFunc(CommitmentStateKeys, func(k []byte) bool { return bytes.Equal(key, k) })
 }
 
-var NewCommitmentV3Trie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
-
 type DeferredBranchUpdate struct {
 	Prefix  []byte
 	Raw     branch.BranchData

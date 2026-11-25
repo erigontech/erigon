@@ -47,10 +47,6 @@ func NewTrie(tmpdir string, _ commitment.TrieConfig) (commitment.Trie, *commitme
 	return &Trie{}, commitment.NewUpdates(commitment.ModeCollect, tmpdir, commitment.KeyToHexNibbleHash)
 }
 
-func init() {
-	commitment.NewCommitmentV3Trie = NewTrie
-}
-
 func (t *Trie) RootHash() ([]byte, error) {
 	if len(t.root) == 0 {
 		return bytes.Clone(empty.RootHash[:]), nil

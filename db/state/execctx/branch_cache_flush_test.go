@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
-	_ "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
 type commitmentWrite struct {

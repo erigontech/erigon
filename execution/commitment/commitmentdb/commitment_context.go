@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	"github.com/erigontech/erigon/execution/commitment/v2/branch"
+	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -1451,10 +1452,7 @@ func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
 func InitializeTrieAndUpdates(mode commitment.Mode, tmpdir string, cfg commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
 	switch cfg.Variant {
 	case commitment.VariantCommitmentV3:
-		if commitment.NewCommitmentV3Trie == nil {
-			panic("commitment v3 selected without importing execution/commitment/v3")
-		}
-		return commitment.NewCommitmentV3Trie(tmpdir, cfg)
+		return v3.NewTrie(tmpdir, cfg)
 	case commitment.VariantParallelHexPatricia:
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := v2.NewParallelPatriciaHashed(nil, length.Addr, cfg)

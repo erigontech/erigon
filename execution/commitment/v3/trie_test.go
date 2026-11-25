@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	"github.com/erigontech/erigon/internal/commitmenttest"
@@ -141,17 +140,6 @@ func assertNodeSlot(t *testing.T, n *node, child, leaf bool) {
 }
 
 func TestTrieAPI(t *testing.T) {
-	t.Run("E45/InitializeTrieAndUpdatesV3", func(t *testing.T) {
-		cfg := commitment.DefaultTrieConfig()
-		cfg.Variant = commitment.VariantCommitmentV3
-		trie, updates := commitmentdb.InitializeTrieAndUpdates(commitment.ModeCollect, t.TempDir(), cfg)
-		t.Cleanup(trie.Release)
-		t.Cleanup(updates.Close)
-
-		require.IsType(t, &Trie{}, trie)
-		require.Equal(t, commitment.ModeCollect, updates.Mode())
-		require.Equal(t, commitment.VariantCommitmentV3, trie.Variant())
-	})
 	t.Run("E46/TrieDeferredUpdatesWaitForApply", func(t *testing.T) {
 		trie := &Trie{}
 		t.Cleanup(trie.Release)
