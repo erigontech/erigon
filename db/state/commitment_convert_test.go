@@ -499,9 +499,7 @@ func TestConvertResolveLegacyHistoryConflicts(t *testing.T) {
 func TestHistoryConvertTxNumLookups(t *testing.T) {
 	const txs, stepSize, keys = 160, 16, 31
 	db, ii, _ := filledInvIndexOfSize(t, txs, stepSize, keys)
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := beginRw(t, db)
 	for step := range kv.Step(txs/stepSize - 1) {
 		require.NoError(t, ii.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
 	}

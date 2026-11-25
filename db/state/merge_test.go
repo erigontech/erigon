@@ -1632,9 +1632,7 @@ func TestInvIndexMergeFiles_SharedKey(t *testing.T) {
 
 	db, ii, _ := filledInvIndexOfSize(t, txs, aggStep, module)
 
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := beginRw(t, db)
 
 	ps := background.NewProgressSet()
 	for step := range kv.Step(numFiles) {

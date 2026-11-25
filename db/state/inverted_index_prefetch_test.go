@@ -39,9 +39,7 @@ func TestInvertedIndexPrefetchCursor(t *testing.T) {
 		}
 		return nil
 	}))
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := beginRw(t, db)
 	c, err := tx.RwCursorDupSort(kv.TblTracesToIdx)
 	require.NoError(t, err)
 	defer c.Close()
