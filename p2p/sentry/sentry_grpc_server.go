@@ -30,7 +30,6 @@ import (
 	"net"
 	"slices"
 	"sort"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -46,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -671,30 +669,8 @@ func runPeer(
 			return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: unknown message code %d", msg.Code))
 		}
 
-		if diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled() {
-			msgType := eth.ToProto[protocol][msg.Code]
-			trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), true, msgType.String(), cap.String(), int(msg.Size))
-		}
-
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
-	}
-}
-
-func trackPeerStatistics(peerName string, peerID string, inbound bool, msgType string, msgCap string, bytes int) {
-	isDiagEnabled := diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled()
-	if isDiagEnabled {
-		stats := diaglib.PeerStatisticMsgUpdate{
-			PeerName: peerName,
-			PeerID:   peerID,
-			Inbound:  inbound,
-			MsgType:  msgType,
-			MsgCap:   msgCap,
-			Bytes:    bytes,
-			PeerType: "Sentry",
-		}
-
-		diaglib.Send(stats)
 	}
 }
 
@@ -1037,10 +1013,6 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sent
 		case <-peerInfo.removed:
 			return
 		default:
-		}
-
-		if diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled() {
-			trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgID.String(), eth.ProtocolName+"/"+strconv.FormatUint(uint64(peerInfo.EthProtocol()), 10), len(data))
 		}
 
 		err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})

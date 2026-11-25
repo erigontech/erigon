@@ -41,16 +41,15 @@ type Sync struct {
 	prevUnwindPoint *uint64 // used to get value from outside staged sync after cycle (for example to notify RPCDaemon)
 	unwindReason    UnwindReason
 
-	stages        []*Stage
-	unwindOrder   []*Stage
-	pruningOrder  []*Stage
-	currentStage  uint
-	timings       []Timing
-	logPrefixes   []string
-	logger        log.Logger
-	stagesIdsList []string
-	mode          stages.Mode
-	metricsCache  metricsCache
+	stages       []*Stage
+	unwindOrder  []*Stage
+	pruningOrder []*Stage
+	currentStage uint
+	timings      []Timing
+	logPrefixes  []string
+	logger       log.Logger
+	mode         stages.Mode
+	metricsCache metricsCache
 }
 
 type Timing struct {
@@ -183,13 +182,6 @@ func (s *Sync) LogPrefix() string {
 	return s.logPrefixes[s.currentStage]
 }
 
-func (s *Sync) StagesIdsList() []string {
-	if s == nil {
-		return []string{}
-	}
-	return s.stagesIdsList
-}
-
 func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	for i, stage := range s.stages {
 		if stage.ID == id {
@@ -222,23 +214,20 @@ func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, prune
 	}
 
 	logPrefixes := make([]string, len(stagesList))
-	stagesIdsList := make([]string, len(stagesList))
 	for i := range stagesList {
 		logPrefixes[i] = fmt.Sprintf("%d/%d %s", i+1, len(stagesList), stagesList[i].ID)
-		stagesIdsList[i] = string(stagesList[i].ID)
 	}
 
 	return &Sync{
-		cfg:           cfg,
-		stages:        stagesList,
-		currentStage:  0,
-		unwindOrder:   unwindStages,
-		pruningOrder:  pruneStages,
-		logPrefixes:   logPrefixes,
-		logger:        logger,
-		stagesIdsList: stagesIdsList,
-		mode:          mode,
-		metricsCache:  newMetricsCache(),
+		cfg:          cfg,
+		stages:       stagesList,
+		currentStage: 0,
+		unwindOrder:  unwindStages,
+		pruningOrder: pruneStages,
+		logPrefixes:  logPrefixes,
+		logger:       logger,
+		mode:         mode,
+		metricsCache: newMetricsCache(),
 	}
 }
 
