@@ -37,8 +37,7 @@ func (cc *commitmentCalculator) prefetchWrites(writes state.WriteSetView) {
 	account := func(a accounts.Address) []byte {
 		hash, ok := seen[a]
 		if !ok {
-			address := a.Value()
-			hash = cc.touchHash(address[:])
+			hash = cc.accountHash(a)
 			seen[a] = hash
 			cc.queueBranch(hash, nil)
 		}
@@ -49,10 +48,8 @@ func (cc *commitmentCalculator) prefetchWrites(writes state.WriteSetView) {
 	}
 	for a, slots := range writes.StorageChanges() {
 		hash := account(a)
-		address := a.Value()
 		for k := range slots {
-			slot := k.Value()
-			cc.queueBranch(hash, cc.touchHash(slices.Concat(address[:], slot[:])))
+			cc.queueBranch(hash, cc.slotHash(a, k))
 		}
 	}
 }

@@ -90,3 +90,32 @@ func ToWriteSetAfter(blockAccessList types.BlockAccessList, afterTxIndex int64, 
 	}
 	return writes
 }
+
+// VisitChangedAfter visits the keys ToWriteSetAfter keeps without building the write set.
+func VisitChangedAfter(blockAccessList types.BlockAccessList, afterTxIndex int64, maxTxIndex uint32, account func(accounts.Address), slot func(accounts.Address, accounts.StorageKey)) {
+	for i := range blockAccessList {
+		accountChanges := &blockAccessList[i]
+		var addr accounts.Address
+		interned := false
+		if hasChangeIn(accountChanges.BalanceChanges, afterTxIndex, maxTxIndex) ||
+			hasChangeIn(accountChanges.NonceChanges, afterTxIndex, maxTxIndex) ||
+			hasChangeIn(accountChanges.CodeChanges, afterTxIndex, maxTxIndex) {
+			addr, interned = accounts.InternAddress(accountChanges.Address), true
+			account(addr)
+		}
+		for _, slotChanges := range accountChanges.StorageChanges {
+			if !hasChangeIn(slotChanges.Changes, afterTxIndex, maxTxIndex) {
+				continue
+			}
+			if !interned {
+				addr, interned = accounts.InternAddress(accountChanges.Address), true
+			}
+			slot(addr, slotChanges.Slot)
+		}
+	}
+}
+
+func hasChangeIn[T indexedChange](changes []T, afterTxIndex int64, maxTxIndex uint32) bool {
+	_, ok := changedIn(changes, afterTxIndex, maxTxIndex)
+	return ok
+}

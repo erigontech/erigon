@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -107,4 +108,50 @@ func TestToWriteSetAfterKeepsFieldsChangedAfterTheCheckpoint(t *testing.T) {
 	all := ToWriteSetAfter(bl, -1, 4)
 	require.True(t, all.Has(state.WriteHeader{Address: addrA, Path: state.NoncePath}))
 	require.True(t, all.Has(state.WriteHeader{Address: addrB, Path: state.BalancePath}))
+}
+
+func TestVisitChangedAfterMatchesToWriteSetAfter(t *testing.T) {
+	s1, s2 := accounts.InternKey([32]byte{1}), accounts.InternKey([32]byte{2})
+	bl := types.BlockAccessList{
+		{Address: [20]byte{1}, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}, {Index: 4, Value: *uint256.NewInt(4)}}},
+		{Address: [20]byte{2}, StorageChanges: []types.SlotChanges{
+			{Slot: s1, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(2)}}},
+			{Slot: s2, Changes: []*types.StorageChange{{Index: 5, Value: *uint256.NewInt(5)}}},
+		}},
+		{
+			Address:        [20]byte{3},
+			NonceChanges:   []*types.NonceChange{{Index: 3, Value: 1}},
+			CodeChanges:    []*types.CodeChange{{Index: 6, Bytecode: []byte{0x60}}},
+			StorageChanges: []types.SlotChanges{{Slot: s1, Changes: []*types.StorageChange{{Index: 1, Value: *uint256.NewInt(1)}}}},
+		},
+		{Address: [20]byte{4}, StorageReads: []common.Hash{{9}}},
+	}
+	for after := int64(-1); after <= 6; after++ {
+		for _, maxIdx := range []uint32{0, 1, 2, 3, 4, 5, 6, math.MaxUint32} {
+			ws := ToWriteSetAfter(bl, after, maxIdx)
+			wantAccounts := map[accounts.Address]bool{}
+			for a := range ws.AccountChanges() {
+				wantAccounts[a] = true
+			}
+			wantSlots := map[accounts.Address]map[accounts.StorageKey]bool{}
+			for a, slots := range ws.StorageChanges() {
+				wantSlots[a] = map[accounts.StorageKey]bool{}
+				for k := range slots {
+					wantSlots[a][k] = true
+				}
+			}
+			gotAccounts := map[accounts.Address]bool{}
+			gotSlots := map[accounts.Address]map[accounts.StorageKey]bool{}
+			VisitChangedAfter(bl, after, maxIdx,
+				func(a accounts.Address) { gotAccounts[a] = true },
+				func(a accounts.Address, k accounts.StorageKey) {
+					if gotSlots[a] == nil {
+						gotSlots[a] = map[accounts.StorageKey]bool{}
+					}
+					gotSlots[a][k] = true
+				})
+			require.Equal(t, wantAccounts, gotAccounts, "accounts after=%d max=%d", after, maxIdx)
+			require.Equal(t, wantSlots, gotSlots, "slots after=%d max=%d", after, maxIdx)
+		}
+	}
 }

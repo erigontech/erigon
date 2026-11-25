@@ -22,8 +22,10 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -56,12 +58,7 @@ func (cc *commitmentCalculator) clearFoldedKeys() {
 // bare touch that changes nothing — a net-zero balance write to an absent account — folds
 // nothing, exactly as the lifecycle/domain read and the canonical trie treat it.
 func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, base state.StateReader) {
-	if cc.touchedAccounts == nil {
-		cc.touchedAccounts = map[accounts.Address][]byte{}
-		cc.touchedStorage = map[accounts.Address]map[accounts.StorageKey][]byte{}
-		cc.storageReset = map[accounts.Address]struct{}{}
-		cc.wipedAt = map[accounts.Address]int{}
-	}
+	cc.initTouched()
 	for a := range writes.AccountChanges() {
 		cc.addTouchedAccount(a, base)
 	}
@@ -77,27 +74,85 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, bas
 	}
 	for a, slots := range writes.StorageChanges() {
 		cc.addTouchedAccount(a, base)
-		m := cc.touchedStorage[a]
-		if m == nil {
-			m = map[accounts.StorageKey][]byte{}
-			cc.touchedStorage[a] = m
-		}
 		for k := range slots {
-			if _, seen := m[k]; seen {
-				continue
-			}
-			address, slot := a.Value(), k.Value()
-			plainKey := slices.Concat(address[:], slot[:])
-			m[k] = cc.touchHash(plainKey)
-			if cc.branchPrefetch == nil {
-				if cc.prefetchFn != nil {
-					cc.prefetchFn(plainKey)
-				}
-			} else if !cc.balBlock {
-				cc.queueBranch(cc.touchedAccounts[a], m[k])
-			}
+			cc.addTouchedSlot(a, k)
 		}
 	}
+}
+
+// accumulateTouchedBAL is accumulateTouched(bal.ToWriteSetAfter(...), nil) without building the write set.
+func (cc *commitmentCalculator) accumulateTouchedBAL(bl types.BlockAccessList, afterTxIndex int64, maxTxIndex uint32) {
+	cc.initTouched()
+	bal.VisitChangedAfter(bl, afterTxIndex, maxTxIndex,
+		func(a accounts.Address) { cc.addTouchedAccount(a, nil) },
+		func(a accounts.Address, k accounts.StorageKey) {
+			cc.addTouchedAccount(a, nil)
+			cc.addTouchedSlot(a, k)
+		})
+}
+
+func (cc *commitmentCalculator) initTouched() {
+	if cc.touchedAccounts == nil {
+		cc.touchedAccounts = map[accounts.Address][]byte{}
+		cc.touchedStorage = map[accounts.Address]map[accounts.StorageKey][]byte{}
+		cc.storageReset = map[accounts.Address]struct{}{}
+		cc.wipedAt = map[accounts.Address]int{}
+	}
+}
+
+// addTouchedSlot marks slot k of the already touched account a.
+func (cc *commitmentCalculator) addTouchedSlot(a accounts.Address, k accounts.StorageKey) {
+	m := cc.touchedStorage[a]
+	if m == nil {
+		m = map[accounts.StorageKey][]byte{}
+		cc.touchedStorage[a] = m
+	}
+	if _, seen := m[k]; seen {
+		return
+	}
+	m[k] = cc.slotHash(a, k)
+	if cc.branchPrefetch == nil {
+		if cc.prefetchFn != nil {
+			address, slot := a.Value(), k.Value()
+			cc.prefetchFn(slices.Concat(address[:], slot[:]))
+		}
+	} else if !cc.balBlock {
+		cc.queueBranch(cc.touchedAccounts[a], m[k])
+	}
+}
+
+// accountHash is touchHash of a's address, kept until the next block request when the
+// branch prefetcher is on: the block's later step rounds and its prefetch hash the same keys.
+func (cc *commitmentCalculator) accountHash(a accounts.Address) []byte {
+	if h, ok := cc.accountHashes[a]; ok {
+		return h
+	}
+	address := a.Value()
+	h := cc.touchHash(address[:])
+	if cc.branchPrefetch != nil {
+		if cc.accountHashes == nil {
+			cc.accountHashes = map[accounts.Address][]byte{}
+		}
+		cc.accountHashes[a] = h
+	}
+	return h
+}
+
+// slotHash is touchHash of a's slot k, kept like accountHash. With the branch prefetcher a
+// slot's hash does not depend on its account, so the slot alone is the key.
+func (cc *commitmentCalculator) slotHash(a accounts.Address, k accounts.StorageKey) []byte {
+	if h, ok := cc.slotHashes[k]; ok {
+		return h
+	}
+	address, slot := a.Value(), k.Value()
+	h := cc.touchHash(slices.Concat(address[:], slot[:]))
+	if cc.branchPrefetch != nil {
+		if cc.slotHashes == nil {
+			cc.slotHashes = map[accounts.StorageKey][]byte{}
+		}
+		cc.slotHashes[k] = h
+	}
+	return h
 }
 
 func (cc *commitmentCalculator) touchHash(plainKey []byte) []byte {
@@ -118,8 +173,7 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 	if _, seen := cc.touchedAccounts[a]; seen {
 		return
 	}
-	address := a.Value()
-	cc.touchedAccounts[a] = cc.touchHash(address[:])
+	cc.touchedAccounts[a] = cc.accountHash(a)
 	if base != nil {
 		if acc, err := base.ReadAccountData(a); err == nil {
 			cc.baseAccounts[a] = acc
@@ -129,6 +183,7 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 	}
 	if cc.branchPrefetch == nil {
 		if cc.prefetchFn != nil {
+			address := a.Value()
 			cc.prefetchFn(address[:])
 		}
 	} else if !cc.balBlock {

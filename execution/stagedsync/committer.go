@@ -129,6 +129,8 @@ type commitmentCalculator struct {
 	// creation resets.
 	touchedAccounts map[accounts.Address][]byte
 	touchedStorage  map[accounts.Address]map[accounts.StorageKey][]byte
+	accountHashes   map[accounts.Address][]byte
+	slotHashes      map[accounts.StorageKey][]byte
 	storageReset    map[accounts.Address]struct{}
 	// wipedAt holds, per account, the tx index of the destruct whose subtree reset an
 	// earlier fold of this block emitted; a later fold must not wipe the slots written since.
@@ -574,6 +576,8 @@ func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blo
 	if cc.hasSeenBlockResult && req.blockNum <= cc.lastBlockResultSeen {
 		return
 	}
+	clear(cc.accountHashes)
+	clear(cc.slotHashes)
 	if len(req.bal) > 0 && !dbg.IgnoreBAL && cc.branchPrefetch != nil {
 		cc.prefetchWrites(bal.ToWriteSet(req.bal, math.MaxUint32))
 	}
@@ -760,7 +764,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 		cc.clearFoldedKeys()
 	}
 	cc.balBlock = true
-	cc.accumulateTouched(bal.ToWriteSetAfter(req.bal, afterTxIndex, maxTxIndex), nil)
+	cc.accumulateTouchedBAL(req.bal, afterTxIndex, maxTxIndex)
 	err := cc.emit(cc.foldView(vm, t.lastTxNum, reader.dr.StateReaderAt(reader.txNum)), balUpdates)
 	cc.clearFoldedKeys()
 	if err != nil {

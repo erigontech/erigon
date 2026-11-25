@@ -18,12 +18,15 @@ package stagedsync
 
 import (
 	"encoding/binary"
+	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -55,6 +58,44 @@ func BenchmarkEmitTouched(b *testing.B) {
 		u.Reset()
 		if err := cc.emitTouched(vm.View(txs+1, nil), u); err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkAccumulateTouchedBALRounds collects the touched keys of a 10k-tx BAL block in three
+// step rounds and the block end after the block's branch prefetch, each tx changing its sender,
+// the coinbase and one contract slot.
+func BenchmarkAccumulateTouchedBALRounds(b *testing.B) {
+	const txs = 10_000
+	coinbase := types.AccountChanges{Address: [20]byte{0xc0}}
+	contract := types.AccountChanges{Address: [20]byte{0xcc}}
+	bl := make(types.BlockAccessList, 0, txs+2)
+	for tx := 1; tx <= txs; tx++ {
+		var a [20]byte
+		binary.BigEndian.PutUint64(a[12:], uint64(tx))
+		bl = append(bl, types.AccountChanges{
+			Address:        a,
+			BalanceChanges: []*types.BalanceChange{{Index: uint32(tx), Value: *uint256.NewInt(uint64(tx))}},
+			NonceChanges:   []*types.NonceChange{{Index: uint32(tx), Value: 1}},
+		})
+		coinbase.BalanceChanges = append(coinbase.BalanceChanges, &types.BalanceChange{Index: uint32(tx), Value: *uint256.NewInt(uint64(tx))})
+		var slot [32]byte
+		binary.BigEndian.PutUint64(slot[24:], uint64(tx))
+		contract.StorageChanges = append(contract.StorageChanges, types.SlotChanges{
+			Slot:    accounts.InternKey(slot),
+			Changes: []*types.StorageChange{{Index: uint32(tx), Value: *uint256.NewInt(1)}},
+		})
+	}
+	bl = append(bl, coinbase, contract)
+	cc := &commitmentCalculator{branchPrefetch: newPrefetchRecords(), balBlock: true}
+	cc.prefetchWrites(bal.ToWriteSet(bl, math.MaxUint32))
+	b.ReportAllocs()
+	for b.Loop() {
+		after := int64(-1)
+		for _, maxIdx := range []uint32{1000, 4125, 7250, math.MaxUint32} {
+			cc.clearFoldedKeys()
+			cc.accumulateTouchedBAL(bl, after, maxIdx)
+			after = int64(maxIdx)
 		}
 	}
 }
