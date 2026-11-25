@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
@@ -71,6 +72,10 @@ func Resolve(tx kv.Tx, maxReorgDepth uint64, initialCycle bool, options ...Resol
 	return IrreversibleBlock(headBlockNum, finalisedBlockNum, maxReorgDepth, initialCycle), nil
 }
 
+// collateDeleteTimeout bounds the write tx that deletes the changesets of the steps to collate, which exec waits
+// for at the tip. Steps whose changesets do not all go in one tx wait for the next pass.
+const collateDeleteTimeout = 100 * time.Millisecond
+
 // IrreversibleTxNum is the last txnum state files may hold: the end of irreversibleBlock. In the same tx it deletes
 // the changesets of the blocks in the steps that end there, so a block in files is never unwindable and collation
 // does not wait for the changeset prune.
@@ -90,7 +95,14 @@ func IrreversibleTxNum(ctx context.Context, tx kv.RwTx, txNumsReader rawdbv3.TxN
 	if err != nil || !found {
 		return 0, err
 	}
-	return txNum, rawdb.PruneTable(tx, kv.ChangeSets3, lastBlock+1, ctx, math.MaxInt, time.Duration(math.MaxInt64), log.Root(), "collate")
+	if err := rawdb.PruneTable(tx, kv.ChangeSets3, lastBlock+1, ctx, math.MaxInt, collateDeleteTimeout, log.Root(), "collate"); err != nil {
+		return 0, err
+	}
+	lowest, err := changeset.ReadLowestUnwindableBlock(tx)
+	if err != nil || lowest <= lastBlock {
+		return 0, err // the rest of the delete waits for the next pass
+	}
+	return txNum, nil
 }
 
 // ResolveTxNum is Resolve followed by IrreversibleTxNum.
