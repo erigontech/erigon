@@ -223,8 +223,3 @@ func (d *DiagnosticClient) getStageState(stageId string) (StageState, error) {
 
 	return 0, fmt.Errorf("stage %s not found in stages list %s", stageId, stagesIdsList)
 }
-
-// Deprecated - not thread-safe method. Used only in tests. Need introduce more thread-safe method or something special for tests.
-func (d *DiagnosticClient) GetSyncStages() []SyncStage {
-	return d.syncStages
-}
