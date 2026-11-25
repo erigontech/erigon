@@ -1092,7 +1092,7 @@ func TestExistenceReadAtACreateByTheRemovingTx(t *testing.T) {
 						vm.DropWrite(h.Address, h.Path, h.Key, Version{TxIndex: 3, Incarnation: 1})
 					}
 				}
-				vm.FlushVersionedWrites(final, false)
+				vm.FlushWrites(final, false)
 				vm.MarkWritesValidated(final, nil)
 			}
 			vm.MarkWritesComplete(final)
@@ -1122,7 +1122,7 @@ func TestCommittedAccountReadAfterADroppedCreateValidates(t *testing.T) {
 	create.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: v0}})
 	create.SetSelfDestruct(x, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: x, Path: SelfDestructPath, Version: v0}})
 	create.SetNonce(x, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: x, Path: NoncePath, Version: v0}, Val: 1})
-	vm.FlushVersionedWrites(create, false)
+	vm.FlushWrites(create, false)
 	vm.MarkWritesValidated(create, nil)
 
 	v1 := Version{TxIndex: 3, Incarnation: 1}
@@ -1133,7 +1133,7 @@ func TestCommittedAccountReadAfterADroppedCreateValidates(t *testing.T) {
 			vm.DropWrite(h.Address, h.Path, h.Key, v1)
 		}
 	}
-	vm.FlushVersionedWrites(credit, false)
+	vm.FlushWrites(credit, false)
 	vm.MarkWritesValidated(credit, nil)
 
 	exists, reads := existsInTx4(t, base, vm, x)
@@ -1187,7 +1187,7 @@ func TestRepeatLoadsOfAnAccountCreatedByTheRemovingTx(t *testing.T) {
 		require.Equal(t, first, again, l.name)
 	}
 	require.False(t, repeated.HadInvalidRead())
-	require.Equal(t, VersionValid, vm.ValidateReadSet(4, repeated.VersionedReads(), validateEqualVersion, false, ""))
+	require.Equal(t, VersionValid, vm.ValidateReadSet(4, repeated.Reads(), validateEqualVersion, false, ""))
 }
 
 // existsInTx4 runs Exist(x) in tx 4 and returns its result with every read the tx recorded.
@@ -1199,7 +1199,7 @@ func existsInTx4(t *testing.T, reader StateReader, vm *VersionMap, x accounts.Ad
 	exists, err := ibs.Exist(x)
 	require.NoError(t, err)
 	require.False(t, ibs.HadInvalidRead())
-	return exists, ibs.VersionedReads()
+	return exists, ibs.Reads()
 }
 
 // createAtTheSeededRemoval seeds a removal of the prefunded x at tx 3 and flushes and validates
@@ -1238,7 +1238,7 @@ func flushCreateInTx3(t *testing.T, base StateReader, vm *VersionMap, x accounts
 	require.NoError(t, creator.SetBalance(x, uint256.Int{}, tracing.BalanceChangeUnspecified))
 	create, err := creator.FinalizedWrites(&chain.Rules{IsAmsterdam: true})
 	require.NoError(t, err)
-	vm.FlushVersionedWrites(create, false)
+	vm.FlushWrites(create, false)
 	return create
 }
 

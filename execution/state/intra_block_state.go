@@ -1212,9 +1212,9 @@ func (ibs *IntraBlockState) accountBase(addr accounts.Address, readStorage bool)
 			if recreation.Status() == MVReadResultDependency {
 				ibs.dep = max(ibs.dep, recreation.DepIdx())
 			}
-			if _, ok := ibs.versionedReads.GetAddress(addr); !ok {
+			if _, ok := ibs.reads.GetAddress(addr); !ok {
 				acc := *readAccount
-				ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: recreation.Version()}, Val: NewAccountView(&acc)})
+				ibs.reads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: recreation.Version()}, Val: NewAccountView(&acc)})
 			}
 		}
 	}
