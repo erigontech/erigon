@@ -17,15 +17,26 @@
 package backtester
 
 import (
+	"io"
 	"testing"
 
+	"github.com/felixge/fgprof"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
-func TestBacktesterRejectsCommitmentV3(t *testing.T) {
+func TestBacktesterMatchesHeaderRootsOnCommitmentV3(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(true))
+	statecfg.EnableHistoricalCommitment()
+	m, chain, _ := rpcdaemontest.CreateTestExecModule(t)
 
-	require.ErrorContains(t, (Backtester{}).run(t.Context(), nil, 1, 1), "not supported on commitment v3")
+	bt := New(m.Log, m.DB, m.BlockReader, t.TempDir())
+	require.NoError(t, bt.Run(t.Context(), 1, uint64(chain.Length())))
+}
+
+func TestStopFgprofProfileWithoutSamples(t *testing.T) {
+	stop := fgprof.Start(io.Discard, fgprof.FormatPprof)
+	require.NoError(t, stopFgprofProfile(stop))
 }

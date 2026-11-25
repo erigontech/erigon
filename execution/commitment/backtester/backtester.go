@@ -18,11 +18,11 @@ package backtester
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path"
+	"runtime"
 	"runtime/pprof"
 	"strings"
 	"time"
@@ -107,9 +107,6 @@ func (bt Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) 
 }
 
 func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64, toBlock uint64) error {
-	if statecfg.Schema.CommitmentDomain.CommitmentV3Records {
-		return errors.New("not supported on commitment v3")
-	}
 	start := time.Now()
 	bt.logger.Info("starting commitment backtest", "fromBlock", fromBlock, "toBlock", toBlock)
 	if fromBlock > toBlock || fromBlock == 0 {
@@ -128,6 +125,7 @@ func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64
 		return err
 	}
 	ri := runId{
+		v3:         statecfg.Schema.CommitmentDomain.CommitmentV3Records,
 		paraTrie:   bt.paraTrie,
 		trieWarmup: bt.trieWarmup,
 		fromBlock:  fromBlock,
@@ -180,6 +178,9 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	if bt.paraTrie {
 		cfg.Variant = commitment.VariantParallelHexPatricia
 	}
+	if statecfg.Schema.CommitmentDomain.CommitmentV3Records {
+		cfg.Variant = commitment.VariantCommitmentV3
+	}
 	cfg.EnableTrieWarmup = bt.trieWarmup
 	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger, execctx.WithTrieConfig(cfg))
 	if err != nil {
@@ -215,7 +216,9 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 		domainIdx := idx[d]
 		offsets := domainIdx.Offsets(block)
 		for _, off := range offsets {
-			sd.GetCommitmentCtx().TouchKey(d, domainIdx.Key(off), nil)
+			if err := sd.GetCommitmentCtx().TouchKeyFromState(tx, []byte(domainIdx.Key(off))); err != nil {
+				return err
+			}
 		}
 		bt.logger.Info("replayed changes", "domain", d, "changes", len(offsets))
 	}
@@ -243,9 +246,10 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 		}
 	}()
 	stopFgprof := fgprof.Start(fgprofProfile, fgprof.FormatPprof)
-	err = pprof.StartCPUProfile(cpuProfile)
-	if err != nil {
-		return fmt.Errorf("failed to start cpu profile: %s: %w", cpuProfilePath, err)
+	// the process may already run a CPU profile (go test -cpuprofile); the block's cpu.prof then stays empty
+	cpuProfiling := pprof.StartCPUProfile(cpuProfile) == nil
+	if !cpuProfiling {
+		bt.logger.Warn("cpu profile not taken: another one is running", "block", block)
 	}
 	commitmentStart := time.Now()
 	root, err := sd.ComputeCommitment(ctx, tx, false /*saveState*/, block, maxTxNum, "commitment-backtester", nil /*progress*/)
@@ -253,8 +257,10 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 		return err
 	}
 	bt.logger.Info("computed commitment", "block", block, "in", time.Since(commitmentStart))
-	pprof.StopCPUProfile()
-	err = stopFgprof()
+	if cpuProfiling {
+		pprof.StopCPUProfile()
+	}
+	err = stopFgprofProfile(stopFgprof)
 	if err != nil {
 		return fmt.Errorf("failed to stop fgprof: %w", err)
 	}
@@ -311,6 +317,7 @@ func checkDataAvailable(ctx context.Context, tx kv.TemporalTx, fromBlock uint64,
 }
 
 type runId struct {
+	v3         bool
 	paraTrie   bool
 	trieWarmup bool
 	fromBlock  uint64
@@ -320,9 +327,12 @@ type runId struct {
 
 func (ri runId) String() string {
 	var sb strings.Builder
-	if ri.paraTrie {
+	switch {
+	case ri.v3:
+		sb.WriteString("v3")
+	case ri.paraTrie:
 		sb.WriteString("para")
-	} else {
+	default:
 		sb.WriteString("hph")
 	}
 	if ri.trieWarmup {
@@ -335,4 +345,18 @@ func (ri runId) String() string {
 
 func deriveBlockOutputDir(runOutputDir string, block uint64) string {
 	return path.Join(runOutputDir, fmt.Sprintf("block_%d", block))
+}
+
+// stopFgprofProfile works around fgprof v0.9.5, whose stop divides by zero when no sample was taken
+// (a fold shorter than one sampling tick); such a block keeps an empty fgprof file.
+func stopFgprofProfile(stop func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := r.(runtime.Error); !ok || !strings.Contains(e.Error(), "divide by zero") {
+				panic(r)
+			}
+			err = nil
+		}
+	}()
+	return stop()
 }
