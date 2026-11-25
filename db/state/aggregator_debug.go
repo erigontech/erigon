@@ -141,11 +141,18 @@ func (ac *aggDirtyFilesRoTx) dropCovered(mf *MissedAccessorAggFiles) {
 		df := mf.domain[d.d.Name]
 		drop(df.files, d.files, d.d.Accessors, d.d.dependentsPresent())
 		// a .v file's accessor is addressed by the key ordinals of the .ef file of the same range
-		drop(df.history.files, d.history.files, d.history.h.Accessors, func(startTxNum, endTxNum uint64) bool {
-			return slices.ContainsFunc(d.history.ii.files, func(ef *FilesItem) bool {
-				return ef.startTxNum == startTxNum && ef.endTxNum == endTxNum && checkForVisibility(ef, d.history.ii.ii.Accessors, false)
+		if !df.history.files.IsEmpty() {
+			readableEf := make(map[[2]uint64]struct{}, len(d.history.ii.files))
+			for _, ef := range d.history.ii.files {
+				if checkForVisibility(ef, d.history.ii.ii.Accessors, false) {
+					readableEf[[2]uint64{ef.startTxNum, ef.endTxNum}] = struct{}{}
+				}
+			}
+			drop(df.history.files, d.history.files, d.history.h.Accessors, func(startTxNum, endTxNum uint64) bool {
+				_, ok := readableEf[[2]uint64{startTxNum, endTxNum}]
+				return ok
 			})
-		})
+		}
 		drop(df.history.ii.files, d.history.ii.files, d.history.ii.ii.Accessors, d.history.ii.ii.dependentsPresent())
 	}
 	for _, ii := range ac.ii {
