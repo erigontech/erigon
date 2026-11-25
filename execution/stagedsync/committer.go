@@ -52,13 +52,14 @@ type pendingBlock struct {
 	// first txResult, replacing one an earlier execution left under the same hash.
 	txSeen bool
 	reqAt  time.Time
+	recvAt time.Time
 }
 
 type aheadProbe struct {
 	ws, acc, emit, fold, flush, own time.Duration
 	rounds                          int
 	lag, prep, ckpt, final, tail    time.Duration
-	end                             time.Time
+	end, recvAt, reqAt              time.Time
 	blk                             uint64
 }
 
@@ -555,7 +556,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				cc.logger.Info("[np-phase] aheadsplit", "blk", r.BlockNum, "npLag", p.lag, "npStartVsExec", p.end.Add(-p.prep-p.ckpt-p.final-p.tail).Sub(r.execStartedAt),
 					"npPrep", p.prep, "npCkpt", p.ckpt, "npFinal", p.final, "npTail", p.tail, "npRounds", p.rounds,
 					"npWs", p.ws, "npAcc", p.acc, "npEmit", p.emit, "npFold", p.fold, "npFlush", p.flush, "npOwn", p.own,
-					"npEndVsExec", p.end.Sub(r.execEndedAt), "npDrain", commitStart.Sub(p.end))
+					"npEndVsExec", p.end.Sub(r.execEndedAt), "npRecvVsExec", p.recvAt.Sub(r.execStartedAt), "npPw", p.reqAt.Sub(p.recvAt), "npDrain", commitStart.Sub(p.end))
 			}
 		}
 		cc.forgetBlock(r.BlockNum)
@@ -576,6 +577,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 // BALDrivenCommitment is set, else incremental — then tries to compute the
 // block ahead of its result stream (maybeComputeAhead).
 func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blockRequest) {
+	recvAt := time.Now()
 	// Record the batch's first block before the drop-guard: if blockResult(n)
 	// arrives before blockRequest(n), a dropped first request must still set
 	// firstBlockNum to n, else n+1 claims it and computes ahead on a baseline
@@ -597,7 +599,7 @@ func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blo
 	if len(req.bal) > 0 && !dbg.IgnoreBAL && dbg.BALDrivenCommitment {
 		mode = calcModeBALDriven
 	}
-	cc.pending[req.blockNum] = &pendingBlock{req: req, mode: mode, reqAt: time.Now()}
+	cc.pending[req.blockNum] = &pendingBlock{req: req, mode: mode, reqAt: time.Now(), recvAt: recvAt}
 	cc.maybeComputeAhead(ctx, req.blockNum)
 }
 
@@ -719,7 +721,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	cc.hasComputed = true
 	if logNpPhases {
 		now := time.Now()
-		cc.probe.end = now
+		cc.probe.end, cc.probe.recvAt, cc.probe.reqAt = now, pb.recvAt, pb.reqAt
 		cc.probe.lag, cc.probe.prep, cc.probe.ckpt, cc.probe.final, cc.probe.tail = t0.Sub(pb.reqAt), tPrep.Sub(t0), tCk.Sub(tPrep), tFinal.Sub(tCk), now.Sub(tFinal)
 		cc.logger.Info("[np-phase] ahead", "blk", req.blockNum, "window", cc.ownsChangeset(req.blockNum))
 	}
