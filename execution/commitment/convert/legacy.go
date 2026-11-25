@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package v3
+package convert
 
 import (
 	"bytes"
@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	"github.com/erigontech/erigon/execution/commitment/v2/branch"
+	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
 type LegacyValues interface {
@@ -69,8 +70,8 @@ type LegacyConverter struct {
 	keysV2      bool
 	incremental bool
 
-	branch  NodeBuilder
-	root    NodeBuilder
+	branch  v3.NodeBuilder
+	root    v3.NodeBuilder
 	scratch []byte
 	key     []byte
 	rootKey []byte
@@ -86,8 +87,8 @@ func NewLegacyConverter(vals LegacyValues, keysV2, incremental bool) *LegacyConv
 		vals:        vals,
 		keysV2:      keysV2,
 		incremental: incremental,
-		branch:      NewNodeBuilder(16),
-		root:        NewNodeBuilder(1),
+		branch:      v3.NewNodeBuilder(16),
+		root:        v3.NewNodeBuilder(1),
 	}
 }
 
@@ -101,12 +102,12 @@ func (c *LegacyConverter) Convert(legacyKey, value, prev []byte, emit LegacyEmit
 	}
 	plane, path, addrHash := c.setKey(prefix)
 
-	if c.incremental && plane == PlaneAccount && len(prev) != 0 {
+	if c.incremental && plane == v3.PlaneAccount && len(prev) != 0 {
 		if err := branch.BranchData(prev).ForEachCell(func(_ int, cell branch.BranchCell) error {
 			if len(cell.AccountAddr) == 0 || len(cell.StorageAddr) == 0 && len(cell.Extension) == 0 && len(cell.Hash) == 0 {
 				return nil
 			}
-			c.rootKey = StorageNodeKey(keccak.Sum256(cell.AccountAddr), nil, c.rootKey[:0])
+			c.rootKey = v3.StorageNodeKey(keccak.Sum256(cell.AccountAddr), nil, c.rootKey[:0])
 			return emit(c.rootKey, nil, LegacyTombstone)
 		}); err != nil {
 			return fmt.Errorf("previous value of %x: %w", c.key, err)
@@ -122,7 +123,7 @@ func (c *LegacyConverter) Convert(legacyKey, value, prev []byte, emit LegacyEmit
 	err = branch.BranchData(value).ForEachCell(func(nib int, cell branch.BranchCell) error {
 		switch {
 		case len(cell.AccountAddr) != 0:
-			if plane != PlaneAccount || len(cell.AccountAddr) != length.Addr {
+			if plane != v3.PlaneAccount || len(cell.AccountAddr) != length.Addr {
 				return fmt.Errorf("%w: account cell %d of %d bytes on plane %02x", errLegacyBranch, nib, len(cell.AccountAddr), plane)
 			}
 			hashed := keccak.Sum256(cell.AccountAddr)
@@ -136,7 +137,7 @@ func (c *LegacyConverter) Convert(legacyKey, value, prev []byte, emit LegacyEmit
 			}
 			n.SetLeaf(nib, suffix, leaf)
 		case len(cell.StorageAddr) != 0:
-			if plane != PlaneStorage || len(cell.StorageAddr) != length.Addr+length.Hash {
+			if plane != v3.PlaneStorage || len(cell.StorageAddr) != length.Addr+length.Hash {
 				return fmt.Errorf("%w: storage cell %d of %d bytes on plane %02x", errLegacyBranch, nib, len(cell.StorageAddr), plane)
 			}
 			if owner := c.ownerOf(cell.StorageAddr[:length.Addr]); owner != addrHash {
@@ -191,12 +192,12 @@ func (c *LegacyConverter) Tombstone(legacyKey []byte, emit LegacyEmitFunc) error
 }
 
 func (c *LegacyConverter) setKey(prefix []byte) (plane byte, path []byte, addrHash [32]byte) {
-	plane, path = PlaneAccount, prefix
+	plane, path = v3.PlaneAccount, prefix
 	var ownerHash []byte
 	if len(prefix) >= 64 {
-		plane, path, ownerHash = PlaneStorage, prefix[64:], PackPath(prefix[:64], addrHash[:0])
+		plane, path, ownerHash = v3.PlaneStorage, prefix[64:], v3.PackPath(prefix[:64], addrHash[:0])
 	}
-	c.key = NodeKey(plane, ownerHash, path, c.key[:0])
+	c.key = v3.NodeKey(plane, ownerHash, path, c.key[:0])
 	return plane, path, addrHash
 }
 
@@ -223,8 +224,8 @@ func (c *LegacyConverter) accountLeaf(cell branch.BranchCell, addrHash *[32]byte
 			return nil, err
 		}
 		slotHash := keccak.Sum256(cell.StorageAddr[length.Addr:])
-		c.root.Reset(nil, PlaneStorage)
-		c.root.SetLeaf(int(slotHash[0]>>4), AppendHashSuffix(&c.scratch, &slotHash, 1), slot)
+		c.root.Reset(nil, v3.PlaneStorage)
+		c.root.SetLeaf(int(slotHash[0]>>4), v3.AppendHashSuffix(&c.scratch, &slotHash, 1), slot)
 		if rootHash, err = c.emitRoot(addrHash, emit); err != nil {
 			return nil, err
 		}
@@ -236,7 +237,7 @@ func (c *LegacyConverter) accountLeaf(cell branch.BranchCell, addrHash *[32]byte
 		if err := checkNibbles(cell.Extension); err != nil {
 			return nil, err
 		}
-		c.root.Reset(cell.Extension, PlaneStorage)
+		c.root.Reset(cell.Extension, v3.PlaneStorage)
 		c.root.SetStoredChild(int(cell.Extension[0]), cell.Hash, nil)
 		var err error
 		if rootHash, err = c.emitRoot(addrHash, emit); err != nil {
@@ -246,7 +247,7 @@ func (c *LegacyConverter) accountLeaf(cell branch.BranchCell, addrHash *[32]byte
 	case len(cell.Hash) == length.Hash:
 		storageRoot = cell.Hash
 		if c.incremental {
-			c.rootKey = StorageNodeKey(*addrHash, nil, c.rootKey[:0])
+			c.rootKey = v3.StorageNodeKey(*addrHash, nil, c.rootKey[:0])
 			if err := emit(c.rootKey, nil, LegacyKeep); err != nil {
 				return nil, err
 			}
@@ -273,7 +274,7 @@ func (c *LegacyConverter) emitRoot(addrHash *[32]byte, emit LegacyEmitFunc) ([32
 	if err != nil {
 		return hash, err
 	}
-	c.rootKey = StorageNodeKey(*addrHash, nil, c.rootKey[:0])
+	c.rootKey = v3.StorageNodeKey(*addrHash, nil, c.rootKey[:0])
 	c.rootOut = c.root.AppendRecord(0, c.rootOut[:0])
 	return hash, emit(c.rootKey, c.rootOut, LegacySynthesized)
 }
@@ -303,13 +304,13 @@ func (c *LegacyConverter) ownerOf(addr []byte) [32]byte {
 }
 
 func (c *LegacyConverter) suffix(hashed *[32]byte, path []byte, nib int) ([]byte, error) {
-	if !PackedMatches(hashed[:PackedLen(len(path))], path) {
+	if !v3.PackedMatches(hashed[:v3.PackedLen(len(path))], path) {
 		return nil, fmt.Errorf("%w: leaf %x does not sit under %x", errLegacyBranch, *hashed, path)
 	}
 	if int(hashNibble(hashed, len(path))) != nib {
 		return nil, fmt.Errorf("%w: leaf %x does not sit at %x+%x", errLegacyBranch, *hashed, path, nib)
 	}
-	return AppendHashSuffix(&c.scratch, hashed, len(path)+1), nil
+	return v3.AppendHashSuffix(&c.scratch, hashed, len(path)+1), nil
 }
 
 func hashNibble(hashed *[32]byte, i int) byte {
@@ -339,7 +340,7 @@ func appendAccountLeafSerialised(dst, enc, storageRoot []byte) ([]byte, error) {
 	}
 	u.Balance.SetBytes(balance)
 	copy(u.CodeHash[:], codeHash)
-	return EncodeAccountLeaf(&u, storageRoot, dst), nil
+	return v3.EncodeAccountLeaf(&u, storageRoot, dst), nil
 }
 
 func ResolveLegacy(key []byte, entries []LegacyEntry) (value []byte, write bool, err error) {
@@ -400,7 +401,7 @@ func LegacyRootExtension(value []byte) (ext, hash []byte, err error) {
 }
 
 func (c *LegacyConverter) RootExtensionRecord(stateValue []byte) (key, record []byte, err error) {
-	c.rootKey = NodeKey(PlaneAccount, nil, nil, c.rootKey[:0])
+	c.rootKey = v3.NodeKey(v3.PlaneAccount, nil, nil, c.rootKey[:0])
 	if len(stateValue) == 0 {
 		return c.rootKey, nil, nil
 	}
@@ -414,7 +415,7 @@ func (c *LegacyConverter) RootExtensionRecord(stateValue []byte) (key, record []
 	if len(ext) > 63 {
 		return nil, nil, fmt.Errorf("%w: root extension of %d nibbles", errLegacyState, len(ext))
 	}
-	c.root.Reset(ext, PlaneAccount)
+	c.root.Reset(ext, v3.PlaneAccount)
 	c.root.SetStoredChild(int(ext[0]), hash, nil)
 	c.rootOut = c.root.AppendRecord(0, c.rootOut[:0])
 	return c.rootKey, c.rootOut, nil

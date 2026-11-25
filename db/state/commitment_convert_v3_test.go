@@ -50,9 +50,9 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/convert"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/v2/branch"
-	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -69,7 +69,7 @@ func TestConvertCommitmentFiles_V3(t *testing.T) {
 	legacyState, found, _, _, err := state.AggTx(legacyTx).DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentState, math.MaxUint64)
 	require.NoError(t, err)
 	require.True(t, found)
-	legacyConverted, err := v3.ConvertLegacyState(legacyState)
+	legacyConverted, err := convert.ConvertLegacyState(legacyState)
 	legacyTx.Rollback()
 	require.NoError(t, err)
 	wantBlock, wantTxNum, wantRoot, err := commitment.DecodeCommitmentV3State(legacyConverted)
