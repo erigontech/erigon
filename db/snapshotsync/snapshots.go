@@ -790,8 +790,8 @@ func (s *BaseRoSnapshots) mergedFilesNotInEveryType() map[*DirtySegment]bool {
 	types := map[Range]int{}
 	for _, t := range s.enums {
 		s.dirty[t].Walk(func(segments []*DirtySegment) bool {
-			for _, sn := range segments {
-				if rs := ranges[t]; sn.IsIndexed() && !slices.Contains(rs, sn.Range) {
+			for _, sn := range segments { // equal ranges are adjacent
+				if rs := ranges[t]; sn.IsIndexed() && (len(rs) == 0 || rs[len(rs)-1] != sn.Range) {
 					ranges[t] = append(rs, sn.Range)
 					types[sn.Range]++
 				}
@@ -813,18 +813,36 @@ func (s *BaseRoSnapshots) mergedFilesNotInEveryType() map[*DirtySegment]bool {
 	return hidden
 }
 
-// coveredBySmaller reports whether the ranges inside r, other than r, cover r with no hole.
+// coveredBySmaller reports whether ranges inside r, other than r, tile r end to end with no hole or overlap,
+// which is the layout the visible files then show instead of r.
 func coveredBySmaller(ranges []Range, r Range) bool {
 	reach := r.from
 	for extended := true; extended && reach < r.to; {
 		extended = false
 		for _, small := range ranges {
-			if small != r && small.from >= r.from && small.to <= r.to && small.from <= reach && small.to > reach {
+			if small != r && small.from == reach && small.to <= r.to {
 				reach, extended = small.to, true
+				break
 			}
 		}
 	}
-	return reach >= r.to
+	return reach == r.to
+}
+
+// hiddenFiles reports the files recalcVisibleFiles hides in favour of their smaller files.
+func (s *BaseRoSnapshots) hiddenFiles() func(snaptype.FileInfo) bool {
+	type key struct {
+		t snaptype.Enum
+		r Range
+	}
+	s.dirtyLock.RLock()
+	hidden := s.mergedFilesNotInEveryType()
+	s.dirtyLock.RUnlock()
+	keys := make(map[key]bool, len(hidden))
+	for sn := range hidden {
+		keys[key{sn.segType.Enum(), sn.Range}] = true
+	}
+	return func(f snaptype.FileInfo) bool { return keys[key{f.Type.Enum(), NewRange(f.From, f.To)}] }
 }
 
 // recalcVisibleFiles publishes a fresh visible bundle from dirty and retires `retired`
@@ -1505,7 +1523,11 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	}
 	list = slices.DeleteFunc(list, notOwned)
 	list, superseded := supersededEqualRangeVersions(list)
-	keepSegments, segmentsToRemove := findOverlaps(list)
+	// A hidden file covers nothing yet: its smaller files stay until every type has its range.
+	hidden := s.hiddenFiles()
+	keepHidden := slices.DeleteFunc(slices.Clone(list), func(f snaptype.FileInfo) bool { return !hidden(f) })
+	keepSegments, segmentsToRemove := findOverlaps(slices.DeleteFunc(list, hidden))
+	keepSegments = append(keepSegments, keepHidden...)
 	segmentsToRemove = append(segmentsToRemove, superseded...)
 	if s.keepUnindexedlyCovered {
 		keepSegments, segmentsToRemove = keepUnindexedlyCovered(s.dir, keepSegments, segmentsToRemove)
@@ -1522,7 +1544,7 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	}
 	idxList = slices.DeleteFunc(idxList, notOwned)
 	idxList, supersededIdx := supersededEqualRangeVersions(idxList)
-	_, accessorsToRemove := findOverlaps(idxList)
+	_, accessorsToRemove := findOverlaps(slices.DeleteFunc(idxList, hidden))
 	accessorsToRemove = append(accessorsToRemove, supersededIdx...)
 
 	// Notify the seeder before deletion. Includes idx overlaps whose .seg is already gone

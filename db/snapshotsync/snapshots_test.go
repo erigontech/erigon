@@ -2254,3 +2254,50 @@ func TestOpenSegmentsWithoutAlignmentShareOneLayout(t *testing.T) {
 		require.Equal(t, small, visibleRanges(s, typ), typ.Name())
 	}
 }
+
+// Smaller files that overlap each other do not tile the merged file, so it stays visible.
+func TestVisibleBlockFilesKeepAMergedFileOverCrossingSmallerFiles(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for from := uint64(0); from < 30_000; from += 10_000 {
+		for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Transactions} {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	for _, r := range []Range{NewRange(0, 30_000), NewRange(0, 20_000), NewRange(10_000, 30_000)} {
+		createTestSegmentFile(t, r.From(), r.To(), snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		ranges := visibleRanges(s, typ)
+		require.NotEmpty(t, ranges, typ.Name())
+		require.Equal(t, uint64(30_000), ranges[len(ranges)-1].To(), typ.Name())
+	}
+}
+
+// The cleanup after a merge keeps the smaller files that stand in for a hidden merged file.
+func TestRemoveOverlapsKeepsTheSmallerFilesOfAHiddenMergedFile(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	var small []Range
+	for from := uint64(0); from < 100_000; from += 10_000 {
+		small = append(small, NewRange(from, from+10_000))
+		for _, typ := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	requireOneVisibleLayout(t, s, small)
+
+	require.NoError(t, s.RemoveOverlaps(nil))
+	requireOneVisibleLayout(t, s, small)
+	for _, r := range small {
+		require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, r.From(), r.To(), snaptype2.Bodies.Enum())))
+	}
+	require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 0, 100_000, snaptype2.Bodies.Enum())))
+}
