@@ -23,13 +23,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func TestDomainLatestIterFileKeepsKeyAfterCursorReuse(t *testing.T) {
-	logger := log.New()
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16)
 	ctx := t.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -101,8 +99,7 @@ func TestDomainLatestIterFileKeepsKeyAfterCursorReuse(t *testing.T) {
 }
 
 func TestDomainLatestIterFileKeepsEmptyFirstKey(t *testing.T) {
-	logger := log.New()
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16)
 	ctx := t.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
