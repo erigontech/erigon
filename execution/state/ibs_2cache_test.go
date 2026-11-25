@@ -46,10 +46,10 @@ func addrWriteIndex(writes *WriteSet, addr accounts.Address) map[AccountKey]any 
 
 // TestVersionedWritesMatchStateObjects verifies that after a sequence of EVM
 // state operations every field in every stateObject is reflected in
-// VersionedWrites with the same value.
+// Writes with the same value.
 //
 // This is the fundamental invariant that allows Phase 2 to derive StateUpdates
-// directly from VersionedWrites without reconstructing an IBS.
+// directly from Writes without reconstructing an IBS.
 func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	t.Parallel()
 
@@ -84,59 +84,59 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	err = ibs.SetBalance(addr2, *uint256.NewInt(200), tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
 
-	// Capture VersionedWrites BEFORE FinalizeTx (journal.dirties still intact).
-	writes := ibs.VersionedWrites()
+	// Capture Writes BEFORE FinalizeTx (journal.dirties still intact).
+	writes := ibs.Writes()
 
 	// — addr1 checks —
 	idx1 := addrWriteIndex(writes, addr1)
 
 	wbal1, ok := idx1[AccountKey{Path: BalancePath, Key: accounts.NilKey}]
-	require.True(t, ok, "addr1: BalancePath write missing from VersionedWrites")
+	require.True(t, ok, "addr1: BalancePath write missing from Writes")
 	bal1, err := ibs.GetBalance(addr1)
 	require.NoError(t, err)
-	require.Equal(t, bal1, wbal1.(uint256.Int), "addr1: balance mismatch between stateObject and VersionedWrites")
+	require.Equal(t, bal1, wbal1.(uint256.Int), "addr1: balance mismatch between stateObject and Writes")
 
 	wnonce1, ok := idx1[AccountKey{Path: NoncePath, Key: accounts.NilKey}]
-	require.True(t, ok, "addr1: NoncePath write missing from VersionedWrites")
+	require.True(t, ok, "addr1: NoncePath write missing from Writes")
 	nonce1, err := ibs.GetNonce(addr1)
 	require.NoError(t, err)
-	require.Equal(t, nonce1, wnonce1.(uint64), "addr1: nonce mismatch between stateObject and VersionedWrites")
+	require.Equal(t, nonce1, wnonce1.(uint64), "addr1: nonce mismatch between stateObject and Writes")
 
 	wcode1, ok := idx1[AccountKey{Path: CodePath, Key: accounts.NilKey}]
-	require.True(t, ok, "addr1: CodePath write missing from VersionedWrites")
+	require.True(t, ok, "addr1: CodePath write missing from Writes")
 	gotCode1, err := ibs.GetCode(addr1)
 	require.NoError(t, err)
-	require.Equal(t, gotCode1, wcode1.(accounts.Code).Bytes, "addr1: code mismatch between stateObject and VersionedWrites")
+	require.Equal(t, gotCode1, wcode1.(accounts.Code).Bytes, "addr1: code mismatch between stateObject and Writes")
 
 	wstor1, ok := idx1[AccountKey{Path: StoragePath, Key: key1}]
-	require.True(t, ok, "addr1: StoragePath[key1] write missing from VersionedWrites")
+	require.True(t, ok, "addr1: StoragePath[key1] write missing from Writes")
 	stor1, err := ibs.GetState(addr1, key1)
 	require.NoError(t, err)
-	require.Equal(t, stor1, wstor1.(uint256.Int), "addr1: storage[key1] mismatch between stateObject and VersionedWrites")
+	require.Equal(t, stor1, wstor1.(uint256.Int), "addr1: storage[key1] mismatch between stateObject and Writes")
 
 	wstor2, ok := idx1[AccountKey{Path: StoragePath, Key: key2}]
-	require.True(t, ok, "addr1: StoragePath[key2] write missing from VersionedWrites")
+	require.True(t, ok, "addr1: StoragePath[key2] write missing from Writes")
 	stor2, err := ibs.GetState(addr1, key2)
 	require.NoError(t, err)
-	require.Equal(t, stor2, wstor2.(uint256.Int), "addr1: storage[key2] mismatch between stateObject and VersionedWrites")
+	require.Equal(t, stor2, wstor2.(uint256.Int), "addr1: storage[key2] mismatch between stateObject and Writes")
 
 	// — addr2 checks —
 	idx2 := addrWriteIndex(writes, addr2)
 
 	wbal2, ok := idx2[AccountKey{Path: BalancePath, Key: accounts.NilKey}]
-	require.True(t, ok, "addr2: BalancePath write missing from VersionedWrites")
+	require.True(t, ok, "addr2: BalancePath write missing from Writes")
 	bal2, err := ibs.GetBalance(addr2)
 	require.NoError(t, err)
-	require.Equal(t, bal2, wbal2.(uint256.Int), "addr2: balance mismatch between stateObject and VersionedWrites")
+	require.Equal(t, bal2, wbal2.(uint256.Int), "addr2: balance mismatch between stateObject and Writes")
 }
 
 // TestSnapshotRandomWithVersionMap extends the snapshot-revert correctness
 // check to the versionMap path. It verifies that after reverting to a
-// snapshot, both stateObject accessors and VersionedWrites agree on the
+// snapshot, both stateObject accessors and Writes agree on the
 // pre-snapshot values.
 //
 // In Phase 5 (remove stateObject), the stateObject side of this comparison
-// disappears; the VersionedWrites side must still pass.
+// disappears; the Writes side must still pass.
 func TestSnapshotRandomWithVersionMap(t *testing.T) {
 	t.Parallel()
 
@@ -186,21 +186,21 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint256.NewInt(11), &stor, "storage should be reverted to pre-snapshot value")
 
-	// VersionedWrites must reflect the same reverted values.
-	writes := ibs.VersionedWrites()
+	// Writes must reflect the same reverted values.
+	writes := ibs.Writes()
 	idx := addrWriteIndex(writes, addr)
 
 	wbal, ok := idx[AccountKey{Path: BalancePath, Key: accounts.NilKey}]
 	require.True(t, ok, "BalancePath write must still exist after revert")
-	require.Equal(t, *uint256.NewInt(50), wbal.(uint256.Int), "VersionedWrites balance should reflect reverted value")
+	require.Equal(t, *uint256.NewInt(50), wbal.(uint256.Int), "Writes balance should reflect reverted value")
 
 	wnonce, ok := idx[AccountKey{Path: NoncePath, Key: accounts.NilKey}]
 	require.True(t, ok, "NoncePath write must still exist after revert")
-	require.Equal(t, uint64(3), wnonce.(uint64), "VersionedWrites nonce should reflect reverted value")
+	require.Equal(t, uint64(3), wnonce.(uint64), "Writes nonce should reflect reverted value")
 
 	wstor, ok := idx[AccountKey{Path: StoragePath, Key: key}]
 	require.True(t, ok, "StoragePath write must still exist after revert")
-	require.Equal(t, *uint256.NewInt(11), wstor.(uint256.Int), "VersionedWrites storage should reflect reverted value")
+	require.Equal(t, *uint256.NewInt(11), wstor.(uint256.Int), "Writes storage should reflect reverted value")
 }
 
 // TestCommittedStateWithVersionMap verifies that GetCommittedState returns the
@@ -235,8 +235,8 @@ func TestCommittedStateWithVersionMap(t *testing.T) {
 	require.NoError(t, err)
 
 	// Capture and flush before FinalizeTx (journal.dirties still populated).
-	writes0 := ibs0.VersionedWrites()
-	mvhm.FlushVersionedWrites(writes0, true)
+	writes0 := ibs0.Writes()
+	mvhm.FlushWrites(writes0, true)
 
 	// — tx1 (txIndex 1) — reads committed state before modifying —
 	ibs1 := NewWithVersionMap(reader, mvhm)

@@ -484,7 +484,7 @@ type versionedWriteCollector struct {
 }
 
 // NewVersionedWriteCollector creates a versionedWriteCollector that collects
-// StateWriter calls into a VersionedWrites slice and maintains rs.accounts.
+// StateWriter calls into a Writes slice and maintains rs.accounts.
 func NewVersionedWriteCollector(rs *StateV3Buffered) *versionedWriteCollector {
 	return &versionedWriteCollector{rs: rs, writes: &WriteSet{}}
 }

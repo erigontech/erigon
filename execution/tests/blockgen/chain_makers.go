@@ -149,9 +149,9 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	if err != nil {
 		panic(err)
 	}
-	b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
+	b.blockIO.RecordReads(txVersion, b.ibs.Reads())
 	b.blockIO.RecordWrites(txVersion, writes)
-	b.versionMap.FlushVersionedWrites(writes, true)
+	b.versionMap.FlushWrites(writes, true)
 	b.ibs.ResetVersionedIO()
 
 	b.txs = append(b.txs, txn)
@@ -189,9 +189,9 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 		if err != nil {
 			panic(err)
 		}
-		b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
+		b.blockIO.RecordReads(txVersion, b.ibs.Reads())
 		b.blockIO.RecordWrites(txVersion, writes)
-		b.versionMap.FlushVersionedWrites(writes, true)
+		b.versionMap.FlushWrites(writes, true)
 		b.ibs.ResetVersionedIO()
 	}
 	b.txs = append(b.txs, txn)
@@ -500,9 +500,9 @@ func generateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			if err != nil {
 				return nil, nil, err
 			}
-			b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
+			b.blockIO.RecordReads(initVersion, ibs.Reads())
 			b.blockIO.RecordWrites(initVersion, writes)
-			b.versionMap.FlushVersionedWrites(writes, true)
+			b.versionMap.FlushWrites(writes, true)
 			ibs.ResetVersionedIO()
 		}
 		// Execute any user modifications to the block
@@ -532,9 +532,9 @@ func generateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			if err != nil {
 				return nil, nil, err
 			}
-			b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())
+			b.blockIO.RecordReads(finalizeVersion, ibs.Reads())
 			b.blockIO.RecordWrites(finalizeVersion, writes)
-			b.versionMap.FlushVersionedWrites(writes, true)
+			b.versionMap.FlushWrites(writes, true)
 			ibs.ResetVersionedIO()
 
 			// Write state changes to db

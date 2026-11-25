@@ -56,7 +56,7 @@ type Task interface {
 
 	Version() state.Version
 	VersionMap() *state.VersionMap
-	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
+	Reads(ibs *state.IntraBlockState) state.ReadSet
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
 
 	Tx() types.Transaction
@@ -419,8 +419,8 @@ func (t *TxTask) VersionMap() *state.VersionMap {
 	return nil
 }
 
-func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
-	return ibs.VersionedReads()
+func (t *TxTask) Reads(ibs *state.IntraBlockState) state.ReadSet {
+	return ibs.Reads()
 }
 
 func (t *TxTask) IsBlockEnd() bool {
@@ -576,7 +576,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			result.Err = stateErr
 			result.TxOut = nil
 		} else {
-			result.TxIn = t.VersionedReads(ibs)
+			result.TxIn = t.Reads(ibs)
 		}
 	}
 

@@ -295,7 +295,7 @@ func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			reads := statedb.VersionedReads()
+			reads := statedb.Reads()
 			_, read := reads.GetStorage(contract, slot)
 			require.Equal(t, tt.expectRead, read)
 		})
@@ -319,7 +319,7 @@ func TestEIP7928SystemCallReadsAbsentTarget(t *testing.T) {
 		false,
 	)
 	require.NoError(t, err)
-	reads := statedb.VersionedReads()
+	reads := statedb.Reads()
 	_, read := reads.GetCode(target)
 	require.True(t, read)
 	exists, err := statedb.Exist(target)

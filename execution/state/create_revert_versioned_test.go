@@ -25,12 +25,12 @@ func TestNoMaterialize_CreateRevertDropsCells(t *testing.T) {
 
 	snap := ibs.PushSnapshot()
 	require.NoError(t, ibs.CreateAccount(addr, true))
-	_, created := ibs.VersionedWrites().GetAddress(addr)
+	_, created := ibs.Writes().GetAddress(addr)
 	require.True(t, created, "create records an AddressPath write")
 
 	ibs.RevertToSnapshot(snap, nil)
 
-	_, ok := ibs.VersionedWrites().GetAddress(addr)
+	_, ok := ibs.Writes().GetAddress(addr)
 	require.False(t, ok, "reverting the creation must drop the AddressPath write")
 	exist, err := ibs.Exist(addr)
 	require.NoError(t, err)
@@ -96,10 +96,10 @@ func TestNoMaterialize_RevivedCreateRevertReadsCellBalance(t *testing.T) {
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+	vm.FlushWrites(ibs.Writes(), true)
 	ibs = newNoMaterializeTx(vm, 1)
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+	vm.FlushWrites(ibs.Writes(), true)
 
 	ibs = newNoMaterializeTx(vm, 2)
 	snap := ibs.PushSnapshot()
@@ -124,7 +124,7 @@ func TestMaterialized_CreditedCreateRevertKeepsBalance(t *testing.T) {
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
 	finalizeTx := func() {
 		ibs.EndTransaction()
-		vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
+		vm.FlushWrites(finalizedWrites(t, ibs, rules), true)
 		ibs.ResetVersionedIO()
 	}
 
@@ -155,7 +155,7 @@ func TestMaterialized_UncachedCreateRevertKeepsBalance(t *testing.T) {
 	funder := NewWithVersionMap(&emptyReader{}, vm)
 	funder.SetTxContext(1, 0)
 	require.NoError(t, funder.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
-	vm.FlushVersionedWrites(finalizedWrites(t, funder, rules), true)
+	vm.FlushWrites(finalizedWrites(t, funder, rules), true)
 
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
 	ibs.SetTxContext(1, 1)
@@ -164,7 +164,7 @@ func TestMaterialized_UncachedCreateRevertKeepsBalance(t *testing.T) {
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	ibs.RevertToSnapshot(snap, nil)
 	ibs.EndTransaction()
-	vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
+	vm.FlushWrites(finalizedWrites(t, ibs, rules), true)
 	ibs.ResetVersionedIO()
 
 	ibs.SetTxContext(1, 2)
@@ -184,7 +184,7 @@ func TestNoMaterialize_BurnedCreditCreateRevertReadsZeroBalance(t *testing.T) {
 	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(9), tracing.BalanceChangeTransfer))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+	vm.FlushWrites(ibs.Writes(), true)
 
 	ibs = newNoMaterializeTx(vm, 1)
 	snap := ibs.PushSnapshot()
@@ -207,14 +207,14 @@ func TestNoMaterialize_CreateAfterBurnedCreditAndDestructValidates(t *testing.T)
 	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(9), tracing.BalanceChangeTransfer))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+	vm.FlushWrites(ibs.Writes(), true)
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
 
 	ibs = newNoMaterializeTx(vm, 2)
 	require.NoError(t, ibs.CreateAccount(addr, false))
 
 	io := NewVersionedIO(3)
-	io.RecordReads(Version{TxIndex: 2}, ibs.VersionedReads())
+	io.RecordReads(Version{TxIndex: 2}, ibs.Reads())
 	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, ""))
 }
 
@@ -229,13 +229,13 @@ func TestNoMaterialize_CreateAfterBurnedCreditDependsOnDestruct(t *testing.T) {
 	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(9), tracing.BalanceChangeTransfer))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+	vm.FlushWrites(ibs.Writes(), true)
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
 
 	ibs = newNoMaterializeTx(vm, 2)
 	require.NoError(t, ibs.CreateAccount(addr, false))
 	io := NewVersionedIO(3)
-	io.RecordReads(Version{TxIndex: 2}, ibs.VersionedReads())
+	io.RecordReads(Version{TxIndex: 2}, ibs.Reads())
 	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, ""))
 
 	vm.Delete(addr, SelfDestructPath, accounts.NilKey, 1, true)
@@ -291,7 +291,7 @@ func TestNoMaterialize_SetCodeUsesEarlierTxCodeAsSeed(t *testing.T) {
 	ibs0 := newNoMaterializeTx(vm, 0)
 	require.NoError(t, ibs0.CreateAccount(addr, true))
 	require.NoError(t, ibs0.SetCode(addr, codeX, tracing.CodeChangeContractCreation))
-	vm.FlushVersionedWrites(ibs0.VersionedWrites(), true)
+	vm.FlushWrites(ibs0.Writes(), true)
 
 	type change struct{ prev, next []byte }
 	codeHook := func(rec *[]change) *tracing.Hooks {
@@ -337,7 +337,7 @@ func TestNoMaterialize_SetStorageRecordsCurrentIncarnation(t *testing.T) {
 
 	require.NoError(t, ibs.SetStorage(addr, Storage{accounts.InternKey([32]byte{0x02}): *uint256.NewInt(9)}))
 
-	wInc, ok := ibs.VersionedWrites().GetIncarnation(addr)
+	wInc, ok := ibs.Writes().GetIncarnation(addr)
 	require.True(t, ok, "SetStorage records an incarnation write")
 	require.Equal(t, incBefore, wInc.Val, "SetStorage records the current incarnation (1), not the materialized path's 0")
 }
@@ -357,14 +357,14 @@ func TestNoMaterialize_SetCodeTracksEarlierTxCodeRead(t *testing.T) {
 	ibs0 := newNoMaterializeTx(vm, 0)
 	require.NoError(t, ibs0.CreateAccount(addr, true))
 	require.NoError(t, ibs0.SetCode(addr, codeB, tracing.CodeChangeContractCreation))
-	vm.FlushVersionedWrites(ibs0.VersionedWrites(), true)
+	vm.FlushWrites(ibs0.Writes(), true)
 
 	// tx1 re-sets the identical code B (a no-op). Resolving the previous code through
 	// the versioned reader records the read so a later withdrawal of B invalidates tx1.
 	ibs1 := newNoMaterializeTx(vm, 1)
 	require.NoError(t, ibs1.SetCode(addr, codeB, tracing.CodeChangeUnspecified))
 
-	rs := ibs1.VersionedReads()
+	rs := ibs1.Reads()
 	tr, ok := rs.GetCode(addr)
 	require.True(t, ok, "SetCode against an earlier tx's code must record a versioned code read")
 	require.Equal(t, accounts.NewCode(codeB).Hash, tr.Val.Hash, "the recorded read must carry the earlier tx's code")
@@ -395,7 +395,7 @@ func TestNoMaterialize_CreatedAccountSetCode(t *testing.T) {
 	hash, err := ibs.GetCodeHash(addr)
 	require.NoError(t, err)
 	require.Equal(t, accounts.InternCodeHash(crypto.Keccak256Hash(code)), hash)
-	cw, ok := ibs.VersionedWrites().GetCode(addr)
+	cw, ok := ibs.Writes().GetCode(addr)
 	require.True(t, ok, "the code is this tx's write")
 	require.Equal(t, code, cw.Val.Bytes)
 }
@@ -487,14 +487,14 @@ func TestNoMaterialize_RevivedAccountDropsDestroyedNonce(t *testing.T) {
 	ibs := newNoMaterializeTx(vm, 0)
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	require.NoError(t, ibs.SetNonce(addr, 8, tracing.NonceChangeUnspecified))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+	vm.FlushWrites(ibs.Writes(), true)
 	ibs = newNoMaterializeTx(vm, 1)
 	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+	vm.FlushWrites(ibs.Writes(), true)
 	ibs = newNoMaterializeTx(vm, 2)
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+	vm.FlushWrites(ibs.Writes(), true)
 
 	acc, ok, _ := vm.View(3, &emptyReader{}).GetAccount(addr)
 	require.True(t, ok)
@@ -514,7 +514,7 @@ func TestRevertedCreateOfAbsentAddressSkipsQuietBaseReads(t *testing.T) {
 		snap := ibs.PushSnapshot()
 		require.NoError(t, ibs.CreateAccount(addr, true))
 		ibs.RevertToSnapshot(snap, nil)
-		return ibs.VersionedReads()
+		return ibs.Reads()
 	}
 
 	checks := 0

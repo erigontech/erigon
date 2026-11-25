@@ -161,7 +161,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 
 // TestNotifyAccumulatorFromVersionedWrites verifies that NotifyAccumulator
 // correctly drives ChangeAccount, ChangeCode, and ChangeStorage notifications
-// from VersionedWrites — the same data that flows through the apply loop.
+// from Writes — the same data that flows through the apply loop.
 //
 // This is a regression guard: the accumulator must receive state-diff
 // notifications for the txpool regardless of which finalize path produced
