@@ -3823,8 +3823,8 @@ func newTestSetCodeWithAuthorization(t *testing.T, chainID uint256.Int, nonce ui
 }
 
 func TestRemoteSenderPenaltyFollowsBatchOrder(t *testing.T) {
-	for _, firstType := range []string{"ordinary", "SetCode"} {
-		t.Run(firstType+" first", func(t *testing.T) {
+	for _, order := range []string{"ordinary then SetCode", "SetCode then ordinary", "SetCode then SetCode"} {
+		t.Run(order, func(t *testing.T) {
 			_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 			pool.cfg.AccountSlots = 2
 			seeded := submitRemoteTxns(t, pool, sender,
@@ -3833,15 +3833,21 @@ func TestRemoteSenderPenaltyFollowsBatchOrder(t *testing.T) {
 
 			setCode, auth := newTestSetCodeWithAuthorization(t, pool.chainID, 4)
 			first, second := newTestSenderTxnSlot(t, sender, 3), setCode
-			if firstType == "SetCode" {
+			switch order {
+			case "SetCode then ordinary":
 				first, second = second, first
+			case "SetCode then SetCode":
+				first, _ = newTestSetCodeWithAuthorization(t, pool.chainID, 3)
 			}
+
+			// The first input's penalty frees a slot for the second. If the second is
+			// SetCode, admission retries after recovering its authorizations.
 			reasons := submitRemoteTxns(t, pool, sender, first, second)
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, reasons)
+			require.Equal(t, 3, pool.all.count(first.SenderID), "one penalty leaves two seeded transactions plus the admitted input")
+			require.Nil(t, first.AuthAndNonces, "a penalized input does not need authorization recovery")
 			if second == setCode {
 				require.Equal(t, []AuthAndNonce{auth}, setCode.AuthAndNonces)
-			} else {
-				require.Nil(t, setCode.AuthAndNonces, "a penalized input does not need authorization recovery")
 			}
 		})
 	}
