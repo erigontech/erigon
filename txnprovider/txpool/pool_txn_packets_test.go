@@ -433,3 +433,90 @@ func TestTransactionPacketCountLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestTransactionPacketAuthorizationLimit(t *testing.T) {
+	const (
+		limit     = 8_647
+		firstHalf = limit / 2
+		remaining = limit - firstHalf
+	)
+	first := remoteSetCodeTxn(t, 0, firstHalf).Rlp
+	fillsRemainder := remoteSetCodeTxn(t, 1, remaining).Rlp
+	oneAuth := remoteSetCodeTxn(t, 2, 1).Rlp
+	exceedsRemainder := remoteSetCodeTxn(t, 3, remaining+1).Rlp
+	malformed := append(bytes.Clone(oneAuth), 0)
+	ordinary := tpEncodeTests[1].txns[0]
+	outbound := [][]byte{remoteSetCodeTxn(t, 0, 3_700).Rlp, remoteSetCodeTxn(t, 1, 4_800).Rlp}
+	require.Less(t, len(outbound[0]), p2pTxPacketLimit)
+	require.NoError(t, ValidateSerializedTxn(outbound[1]))
+
+	tests := []struct {
+		name string
+		txns [][]byte
+		want [][]byte
+	}{
+		{name: "outbound batch with a large final transaction", txns: outbound, want: outbound},
+		{
+			name: "ordinary transaction after budget is spent",
+			txns: [][]byte{first, fillsRemainder, oneAuth, ordinary},
+			want: [][]byte{first, fillsRemainder, ordinary},
+		},
+		{
+			name: "over-budget transaction is skipped before decoding",
+			txns: [][]byte{first, fillsRemainder, malformed, ordinary},
+			want: [][]byte{first, fillsRemainder, ordinary},
+		},
+		{
+			name: "later transaction fits remaining budget",
+			txns: [][]byte{first, exceedsRemainder, fillsRemainder},
+			want: [][]byte{first, fillsRemainder},
+		},
+	}
+	for _, pooled := range []bool{false, true} {
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("pooled=%t/%s", pooled, tt.name), func(t *testing.T) {
+				ctx := NewTxnParseContext(*uint256.NewInt(1))
+				ctx.WithSender(false)
+				ctx.ValidateRLP(ValidateSerializedTxn)
+				var slots TxnSlots
+				var payload []byte
+				var pos int
+				var err error
+				if pooled {
+					payload = EncodePooledTransactions66(tt.txns, 1, nil)
+					_, pos, err = ParsePooledTransactions66(payload, 0, ctx, &slots, nil)
+				} else {
+					payload = EncodeTransactions(tt.txns, nil)
+					pos, err = ParseTransactions(payload, 0, ctx, &slots, nil)
+				}
+				require.NoError(t, err)
+				require.Equal(t, len(payload), pos)
+				require.NoError(t, slots.Valid())
+				require.Len(t, slots.Txns, len(tt.want))
+				for i, want := range tt.want {
+					require.Equal(t, crypto.Keccak256Hash(want), common.Hash(slots.Txns[i].IDHash))
+				}
+			})
+		}
+	}
+}
+
+func TestTransactionPacketOversizedSetCode(t *testing.T) {
+	over := remoteSetCodeTxn(t, 0, maxRemoteAuthorizations+1).Rlp
+	ordinary := tpEncodeTests[1].txns[0]
+	payload := EncodeTransactions([][]byte{over, ordinary}, nil)
+	ctx := NewTxnParseContext(*uint256.NewInt(1))
+	ctx.WithSender(false)
+	var slots TxnSlots
+
+	ctx.ValidateRLP(ValidateSerializedTxn)
+	_, err := ParseTransactions(payload, 0, ctx, &slots, nil)
+	require.ErrorIs(t, err, ErrRlpTooBig)
+
+	ctx.ValidateRLP(nil)
+	pos, err := ParseTransactions(payload, 0, ctx, &slots, nil)
+	require.NoError(t, err)
+	require.Equal(t, len(payload), pos)
+	require.Len(t, slots.Txns, 1)
+	require.Equal(t, crypto.Keccak256Hash(ordinary), common.Hash(slots.Txns[0].IDHash))
+}
