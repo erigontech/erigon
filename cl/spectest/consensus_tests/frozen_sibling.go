@@ -29,10 +29,8 @@ import (
 	"github.com/erigontech/erigon/cl/spectest/spectest"
 )
 
-// freezeSibling copies s, so that s shares every registry chunk with the copy and
-// must clone a chunk on its first write. When the test ends it fails if the copy
-// changed in the meantime.
-// freezeSibling copies s and returns a check that the copy is unchanged; the check also runs at cleanup.
+// freezeSibling copies s, so that s shares every registry chunk with the copy and must clone a
+// chunk on its first write. The returned check fails if the copy changed; it also runs at cleanup.
 func freezeSibling(t *testing.T, s *state.CachingBeaconState) (check func()) {
 	t.Helper()
 	sibling, err := s.Copy()

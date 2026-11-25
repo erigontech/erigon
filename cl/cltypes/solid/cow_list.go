@@ -414,6 +414,9 @@ func (l *cowList) dropTop() {
 
 func (l *cowList) copyTop(src *cowList) {
 	l.chunkRoots = append(l.chunkRoots[:0], src.chunkRoots...)
+	if n := len(src.top); n < cap(l.top) {
+		clear(l.top[n:cap(l.top)])
+	}
 	l.top = slices.Grow(l.top[:0], len(src.top))[:len(src.top)]
 	for i, tree := range src.top {
 		if l.top[i] == nil {

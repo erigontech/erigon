@@ -57,7 +57,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (*state.C
 	if err != nil {
 		return nil, err
 	}
-	// The head view must not run under stateDumpLock: the forkchoice stage dumps states from inside ViewHeadState.
+	// Take the head view only after releasing stateDumpLock: states are dumped while the head view is held.
 	shared, err := bs.InitBeaconStateSharing(f.viewHeadState)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init beacon state: %w, root: %x", err, blockRoot)

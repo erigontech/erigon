@@ -130,3 +130,28 @@ func TestValidatorSetCloneKeepsCapacityAndLayout(t *testing.T) {
 		require.Equal(t, live.set.list.layout, clone.list.layout)
 	}
 }
+
+func TestValidatorSetCopyClearsTruncatedTopTrees(t *testing.T) {
+	rng := rand.New(rand.NewSource(29))
+	spare := newLiveSet(1<<20, true)
+	for range 2000 {
+		spare.appendRandom(rng)
+	}
+	_, err := spare.hash()
+	require.NoError(t, err)
+	require.Greater(t, len(spare.set.list.top), 1)
+
+	source := newLiveSet(1<<20, false)
+	for range 700 {
+		source.appendRandom(rng)
+	}
+	_, err = source.hash()
+	require.NoError(t, err)
+
+	source.copyInto(spare)
+	spare.check(t, "spare after copy")
+	top := spare.set.list.top
+	for i, tree := range top[len(top):cap(top)] {
+		require.Nil(t, tree, "stale top tree %d", len(top)+i)
+	}
+}
