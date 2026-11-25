@@ -41,6 +41,8 @@ const (
 	ClientCode               = "EG"
 )
 
+const CommitmentV3SnapshotGitBranch = "release/3.10"
+
 // VersionNoMeta holds the textual version string excluding the metadata.
 var VersionNoMeta = func() string {
 	return fmt.Sprintf("%d.%d.%d", Major, Minor, Micro)

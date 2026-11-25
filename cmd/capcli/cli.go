@@ -628,6 +628,9 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 		return fmt.Errorf("opening chaindata for EL payload reads: %w", err)
 	}
 	defer chainDB.Close()
+	if err := dbstate.ResolveCommitmentV3(ctx, dirs, chainDB, log.Root()); err != nil {
+		return err
+	}
 	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(dirs, log.Root(), false)
 	if err != nil {
 		return err

@@ -636,7 +636,7 @@ Examples:
 			return errors.New("--continue is mutually exclusive with --restore")
 		}
 		if statecfg.ExperimentalCommitmentV3 && !convertV3 && !convertRestore { // --v3 opens the files at their on-disk version; --restore opens none
-			return errors.New("commitment convert opens legacy commitment files; run it without ERIGON_COMMITMENT_V3=true")
+			return errors.New("commitment convert opens legacy commitment files, but commitment v3 is active and the datadir holds no legacy commitment files; on a legacy datadir, unset ERIGON_COMMITMENT_V3=true")
 		}
 		if convertRestore {
 			return commitmentRestore(ctx, logger)

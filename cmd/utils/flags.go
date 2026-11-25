@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -1191,7 +1192,7 @@ var (
 	}
 	ExperimentalCommitmentV3Flag = cli.BoolFlag{
 		Name:  "experimental.commitment-v3",
-		Usage: "Compute commitment on the v3 trie.",
+		Usage: "Compute commitment on the v3 trie. When the flag is not set, the commitment files or chaindata of an existing datadir select the trie.",
 		Value: statecfg.DefaultCommitmentV3,
 	}
 	GDBMeFlag = cli.BoolFlag{
@@ -2003,13 +2004,16 @@ func warnParallelCommitmentDeprecated(ctx *cli.Command, logger log.Logger) {
 	}
 }
 
-func setCommitmentV3(ctx *cli.Command) {
+func setCommitmentV3(nodeCtx context.Context, ctx *cli.Command, dirs datadir.Dirs, logger log.Logger) {
 	if ctx.IsSet(ExperimentalCommitmentV3Flag.Name) {
-		if ctx.Bool(ExperimentalCommitmentV3Flag.Name) {
-			statecfg.SetCommitmentV3(true)
-		} else if statecfg.ExperimentalCommitmentV3 {
+		on := ctx.Bool(ExperimentalCommitmentV3Flag.Name)
+		if !on && statecfg.ExperimentalCommitmentV3 && statecfg.CommitmentV3Pinned() {
 			Fatalf("--%s=false conflicts with ERIGON_COMMITMENT_V3=true", ExperimentalCommitmentV3Flag.Name)
 		}
+		statecfg.SetCommitmentV3(on)
+	}
+	if err := dbstate.ResolveCommitmentV3(nodeCtx, dirs, nil, logger); err != nil {
+		Fatalf("resolving the commitment trie of the datadir: %v", err)
 	}
 }
 
@@ -2114,7 +2118,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	warnParallelCommitmentDeprecated(ctx, logger)
-	setCommitmentV3(ctx)
+	setCommitmentV3(nodeCtx, ctx, nodeConfig.Dirs, logger)
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)

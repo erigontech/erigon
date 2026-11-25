@@ -57,6 +57,9 @@ func doSqueeze(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	defer unlockDatadir(log.Root(), l)
 	logger := log.Root()
+	if err := state.ResolveCommitmentV3(ctx, dirs, nil, logger); err != nil {
+		return err
+	}
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
