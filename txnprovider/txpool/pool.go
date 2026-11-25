@@ -3419,12 +3419,14 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	if err != nil {
 		return err
 	}
-	if _, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, txns, cells,
-		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), false); err != nil {
+	_, reasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, txns, cells,
+		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), false)
+	if err != nil {
 		return err
 	}
-	for _, txn := range txns.Txns {
-		if _, ok := p.byHash[string(txn.IDHash[:])]; !ok {
+	for i, reason := range reasons {
+		if reason != txpoolcfg.NotSet && reason != txpoolcfg.DuplicateHash {
+			txn := txns.Txns[i]
 			p.deletedTxns = append(p.deletedTxns, newMetaTxn(&TxnSlot{IDHash: txn.IDHash, SenderID: txn.SenderID}, false, 0))
 		}
 	}
