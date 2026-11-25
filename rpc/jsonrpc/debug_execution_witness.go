@@ -2243,8 +2243,6 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 }
 
 // witnessHeaderReader serves only the verified parent during block initialization.
-// Fork checks look it up by hash and number. AuRa looks it up by hash for its
-// gas-limit contract. The EVM uses the full witness header index for BLOCKHASH.
 type witnessHeaderReader struct {
 	config *chain.Config
 	parent *types.Header
