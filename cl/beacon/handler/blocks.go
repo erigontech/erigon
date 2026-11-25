@@ -232,7 +232,11 @@ func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Requ
 	if blockId.Head() {
 		// Validators sign sync committee messages with this root, so it waits for the current slot's block like
 		// attestation data does. The fork choice head computation publishes the selected head read below.
-		a.waitForImportedHead(ctx, a.ethClock.GetCurrentSlot())
+		if slot := a.ethClock.GetCurrentSlot(); a.importInProgress(slot) {
+			a.waitForImportedHead(ctx, slot, &a.headRootWaitedSlot)
+		} else {
+			a.forkchoiceStore.TryGetHeadNode()
+		}
 	}
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
@@ -249,9 +253,10 @@ func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Requ
 		return nil, err
 	}
 	if slot == nil {
-		// A block that fork choice just imported is indexed shortly after.
+		// A block that fork choice just imported is above finality and is indexed shortly after. Finalized history
+		// without indices stays not found, since its finalized flag cannot be derived.
 		header, ok := a.forkchoiceStore.GetHeader(root)
-		if !ok {
+		if !ok || root == a.forkchoiceStore.FinalizedCheckpoint().Root || header.Slot <= a.forkchoiceStore.FinalizedSlot() {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %x", root))
 		}
 		slot = &header.Slot
