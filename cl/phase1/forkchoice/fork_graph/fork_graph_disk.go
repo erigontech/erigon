@@ -61,6 +61,8 @@ var ErrStateNotFound = errors.New("state not found")
 var (
 	nextEpochStateOutcomes          = metrics.GetOrCreateCounterVec("caplin_next_epoch_state_outcomes_total", []string{"outcome"})
 	replaySyncedHeadFallbackCounter = metrics.GetOrCreateCounter("caplin_forkchoice_replay_synced_head_total")
+	sharedValidatorChunksCounter    = metrics.GetOrCreateCounter("caplin_forkchoice_decoded_state_shared_validator_chunks_total")
+	decodedStateSizeHistogram       = metrics.GetOrCreateHistogram("decode_ssz_beacon_state_size")
 )
 
 type ChainSegmentInsertionResult uint

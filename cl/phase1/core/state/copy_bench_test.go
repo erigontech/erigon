@@ -106,7 +106,7 @@ func benchmarkBeaconState(b *testing.B, version clparams.StateVersion) *CachingB
 	return benchmarkBeaconStateWithSize(b, version, benchmarkValidatorCount)
 }
 
-func benchmarkBeaconStateWithSize(b *testing.B, version clparams.StateVersion, count int) *CachingBeaconState {
+func benchmarkBeaconStateWithSize(b testing.TB, version clparams.StateVersion, count int) *CachingBeaconState {
 	b.Helper()
 	state := New(&clparams.MainnetBeaconConfig)
 	state.SetVersion(version)

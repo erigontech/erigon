@@ -301,6 +301,34 @@ func (l *cowList) copyTo(dst *cowList) {
 	dst.owner.Store(new(cowOwner))
 }
 
+// shareChunks replaces l's full chunks that equal ref's chunk at the same index
+// with ref's chunk, and returns how many chunks are shared.
+func (l *cowList) shareChunks(ref *cowList) int {
+	if l.layout != ref.layout {
+		return 0
+	}
+	shared := 0
+	for ci := range (min(l.l, ref.l) + l.layout.shift) / l.layout.chunkLeaves() {
+		mine, theirs := l.chunks[ci].Load(), ref.chunks[ci].Load()
+		if bytes.Equal(mine.data, theirs.data) {
+			l.chunks[ci].Store(theirs)
+			shared++
+		}
+	}
+	if shared == 0 {
+		return 0
+	}
+	ref.owner.Store(new(cowOwner))
+	owner := l.owner.Load()
+	// Each unshared chunk gets its own bytes: one of them would otherwise keep the whole decode slab alive.
+	for ci := range l.chunks {
+		if ch := l.chunks[ci].Load(); ci >= len(ref.chunks) || ch != ref.chunks[ci].Load() {
+			l.chunks[ci].Store(ch.clone(owner, l.layout.elemSize, l.leafFn))
+		}
+	}
+	return shared
+}
+
 func (l *cowList) fillRoot(ci int, ch *cowChunk) {
 	ch.hashMu.Lock()
 	defer ch.hashMu.Unlock()

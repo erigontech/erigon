@@ -17,6 +17,7 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -170,6 +171,33 @@ func (v *ValidatorSet) hashWithLength() ([32]byte, error) {
 	core := v.list.coreRoot()
 	lengthRoot := merkle_tree.Uint64Root(uint64(v.list.l))
 	return crypto.Sha256(core[:], lengthRoot[:]), nil
+}
+
+// ShareChunks makes v use ref's chunks wherever they hold the same bytes, and returns how many it shares.
+// ref's data is not written; only its owner token changes, as in copyTo.
+func (v *ValidatorSet) ShareChunks(ref *ValidatorSet) int {
+	return v.list.shareChunks(&ref.list)
+}
+
+// SamePubkeys reports whether validators [0, k) have the same public keys in v and ref.
+func (v *ValidatorSet) SamePubkeys(ref *ValidatorSet, k int) bool {
+	if k > v.list.l || k > ref.list.l {
+		return false
+	}
+	sameLayout := v.list.layout == ref.list.layout
+	for i := 0; i < k; {
+		ci, off := v.list.locate(i)
+		count := min(v.list.layout.chunkLeaves()-off, k-i)
+		if !sameLayout || v.list.chunks[ci].Load() != ref.list.chunks[ci].Load() {
+			for j := i; j < i+count; j++ {
+				if !bytes.Equal(v.list.elem(j)[:48], ref.list.elem(j)[:48]) {
+					return false
+				}
+			}
+		}
+		i += count
+	}
+	return true
 }
 
 func (v *ValidatorSet) SetProgressiveHashing(enabled bool) {

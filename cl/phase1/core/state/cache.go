@@ -271,6 +271,32 @@ func (b *CachingBeaconState) InitBeaconState() error {
 	return b.reinitCaches(nil)
 }
 
+// InitBeaconStateSharing is InitBeaconState for a state that was decoded with the raw decode.
+// view calls its callback with a reference state that stays unchanged while the callback runs,
+// or does not call it. The state then shares the reference's registry chunks and pubkey index
+// where they match, and returns the number of shared chunks.
+func (b *CachingBeaconState) InitBeaconStateSharing(view func(func(ref *CachingBeaconState))) (int, error) {
+	var (
+		snapshot = solid.NewValidatorSet(0)
+		refBase  *pubkeyIndexBase
+		refLimit int
+	)
+	// The view may hold a lock the caller's writers wait on, so it only snapshots; copies are immutable.
+	view(func(ref *CachingBeaconState) {
+		ref.ValidatorSet().CopyTo(snapshot)
+		refBase, refLimit = ref.publicKeyIndices.base, ref.publicKeyIndices.limit
+	})
+	validators := b.ValidatorSet()
+	shared := validators.ShareChunks(snapshot)
+	limit := min(validators.Length(), refLimit)
+	if validators.SamePubkeys(snapshot, limit) {
+		b.publicKeyIndices = pubkeyIndexFromBase(pubkeyIndex{base: refBase, limit: limit}, validators)
+	} else {
+		b.rebuildPubkeyIndex()
+	}
+	return shared, b.reinitCaches(nil)
+}
+
 func (b *CachingBeaconState) rebuildPubkeyIndex() {
 	b.publicKeyIndices = newPubkeyIndex(b.ValidatorSet())
 }
