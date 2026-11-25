@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -56,7 +57,7 @@ func dbWithState(t *testing.T, buildFiles bool) (kv.TemporalRwDB, datadir.Dirs, 
 	agg, _ := fillAccountState(t, db, txs, 5)
 	ctx := t.Context()
 	if buildFiles {
-		require.NoError(t, agg.BuildFiles(db, filed, math.MaxUint64))
+		require.NoError(t, agg.BuildFiles(db, filed, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
 	}
 
 	accountTables := db.Debug().DomainTables(kv.AccountsDomain)
@@ -207,7 +208,7 @@ func TestCommitmentRebuildWithoutHistoryAfterPrunedHistoryRefusal(t *testing.T) 
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
 	agg, roots := fillAccountState(t, db, 56, 5)
-	require.NoError(t, agg.BuildFiles(db, 56, math.MaxUint64))
+	require.NoError(t, agg.BuildFiles(db, 56, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
 	agg.CloseFilesNoReopen()
 	for _, d := range []string{dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
 		for _, domain := range []string{"commitment", "accounts", "storage", "code"} {

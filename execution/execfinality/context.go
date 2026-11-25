@@ -18,7 +18,6 @@ package execfinality
 
 import (
 	"context"
-	"math"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -26,6 +25,14 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
+
+type FinalityContext struct {
+	finalisedBlockNum uint64
+	maxReorgDepth     uint64
+	retentionBlockNum uint64
+	collateToBlockNum uint64
+	txNumsReader      rawdbv3.TxNumsReader
+}
 
 type resolveOptions struct {
 	withoutFinalisedBlock bool
@@ -39,24 +46,29 @@ func WithoutFinalisedBlock() ResolveOption {
 	}
 }
 
-// IrreversibleBlock is the highest block no unwind may reach, so its changeset can go and it can go into files:
-// the block below the finalized one, whose changeset stays so that a fork from that block can still be
-// validated, or the block below the reorg window without finality or on the initial cycle.
-func IrreversibleBlock(headBlockNum, finalisedBlockNum, maxReorgDepth uint64, initialCycle bool) uint64 {
+func NewContext(headBlockNum, finalisedBlockNum, maxReorgDepth uint64, initialCycle bool, txNumsReader rawdbv3.TxNumsReader) FinalityContext {
+	ctx := FinalityContext{
+		finalisedBlockNum: finalisedBlockNum,
+		maxReorgDepth:     maxReorgDepth,
+		txNumsReader:      txNumsReader,
+	}
 	if finalisedBlockNum > 0 && !initialCycle {
-		return finalisedBlockNum - 1
+		ctx.retentionBlockNum = finalisedBlockNum
+		ctx.collateToBlockNum = finalisedBlockNum
+		return ctx
 	}
 	if headBlockNum <= maxReorgDepth {
-		return 0
+		return ctx
 	}
-	return headBlockNum - maxReorgDepth - 1
+	ctx.retentionBlockNum = headBlockNum - maxReorgDepth
+	ctx.collateToBlockNum = ctx.retentionBlockNum - 1
+	return ctx
 }
 
-// Resolve reads the execution head and the finalized block from tx and returns the irreversible block.
-func Resolve(tx kv.Tx, maxReorgDepth uint64, initialCycle bool, options ...ResolveOption) (uint64, error) {
+func Resolve(tx kv.Tx, maxReorgDepth uint64, initialCycle bool, txNumsReader rawdbv3.TxNumsReader, options ...ResolveOption) (kv.FinalityContext, error) {
 	headBlockNum, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	var opts resolveOptions
 	for _, option := range options {
@@ -66,32 +78,44 @@ func Resolve(tx kv.Tx, maxReorgDepth uint64, initialCycle bool, options ...Resol
 	if opts.withoutFinalisedBlock {
 		finalisedBlockNum = 0
 	}
-	return IrreversibleBlock(headBlockNum, finalisedBlockNum, maxReorgDepth, initialCycle), nil
+	return NewContext(headBlockNum, finalisedBlockNum, maxReorgDepth, initialCycle, txNumsReader), nil
 }
 
-// IrreversibleTxNum is the last txnum state files may hold: the end of irreversibleBlock, lowered below a
-// block that still has a changeset, because that block can still be unwound.
-func IrreversibleTxNum(ctx context.Context, tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, irreversibleBlock uint64) (uint64, error) {
-	lowest, err := changeset.ReadLowestUnwindableBlock(tx)
-	if err != nil || lowest == 0 {
-		return 0, err
-	}
-	block := min(irreversibleBlock, lowest-1)
-	if block == math.MaxUint64 {
-		return math.MaxUint64, nil
-	}
-	txNum, ok, err := txNumsReader.MaxExact(ctx, tx, nil, block)
-	if err != nil || !ok {
-		return 0, err
-	}
-	return txNum, nil
+func (c FinalityContext) PruneToBlockNum() uint64 {
+	return c.retentionBlockNum
 }
 
-// ResolveTxNum is Resolve followed by IrreversibleTxNum.
-func ResolveTxNum(ctx context.Context, tx kv.Tx, maxReorgDepth uint64, initialCycle bool, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
-	block, err := Resolve(tx, maxReorgDepth, initialCycle)
-	if err != nil {
-		return 0, err
-	}
-	return IrreversibleTxNum(ctx, tx, txNumsReader, block)
+func (c FinalityContext) RetireToBlockNum() uint64 {
+	return c.retentionBlockNum
+}
+
+func (c FinalityContext) CollateToBlockNum() uint64 {
+	return c.collateToBlockNum
+}
+
+func (c FinalityContext) MaxReorgDepth() uint64 {
+	return c.maxReorgDepth
+}
+
+func (c FinalityContext) ReadyForCollation(ctx context.Context, db kv.TemporalRoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
+	finalisedBlockNum = c.finalisedBlockNum
+	var lowestUnwindableBlock uint64
+	err = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastBlockInStep, ok, err = c.txNumsReader.FindBlockNum(ctx, tx, stepLastTxNum)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			lastBlockInStep = 0
+		}
+		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
+		if err != nil {
+			return err
+		}
+		lowestUnwindableBlock, err = changeset.ReadLowestUnwindableBlock(tx)
+		return err
+	})
+	// A block that still has a changeset can be unwound, so it must stay out of the files.
+	ok = err == nil && c.retentionBlockNum > 0 && lastBlockInStep <= c.collateToBlockNum && lastBlockInStep < lowestUnwindableBlock
+	return
 }

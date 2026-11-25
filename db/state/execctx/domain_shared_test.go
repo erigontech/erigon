@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"math/rand/v2"
 	"testing"
 	"time"
@@ -50,11 +49,12 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
-const allIrreversible = uint64(math.MaxUint64)
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
 func NewTest(dirs datadir.Dirs) state.AggOpts { //nolint:gocritic
 	return state.NewTest(dirs)
@@ -1472,7 +1472,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	err = db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(db, maxTx-stepSize, allIrreversible)
+	err = db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(db, maxTx-stepSize, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	{ // prune
@@ -1648,7 +1648,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		domains.Close()
 		err = rwTx.Commit() // otherwise agg.BuildFiles will not see data
 		require.NoError(err)
-		require.NoError(db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(db, stepSize*2, allIrreversible))
+		require.NoError(db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(db, stepSize*2, unboundedFinalityCtx))
 
 		rwTx, err = db.BeginTemporalRw(ctx)
 		require.NoError(err)

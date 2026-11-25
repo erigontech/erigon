@@ -128,7 +128,7 @@ type BlockRetire interface {
 	BuildFilesInBackground(
 		ctx context.Context,
 		minBlockNum uint64,
-		irreversibleBlock uint64,
+		finalityCtx kv.FinalityContext,
 		lvl log.Lvl,
 		seeder SeederClient,
 		onFinishRetire func() error,

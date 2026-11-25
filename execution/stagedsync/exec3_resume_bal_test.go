@@ -19,7 +19,6 @@ package stagedsync
 import (
 	"bytes"
 	"context"
-	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -49,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -393,7 +393,7 @@ func (fx *resumeBALFixture) moveToStateFiles(t *testing.T, db kv.TemporalRwDB, d
 	t.Helper()
 	ctx := context.Background()
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	finality := uint64(math.MaxUint64)
+	finality := execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 	require.NoError(t, agg.BuildFiles2(ctx, db, 0, 1, finality, false))
 	agg.WaitForFiles()
 	if fx.wipeHistory {

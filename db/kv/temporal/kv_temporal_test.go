@@ -3,7 +3,6 @@ package temporal
 import (
 	"context"
 	"errors"
-	"math"
 	"sync"
 	"testing"
 
@@ -16,16 +15,18 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-const allIrreversible = uint64(math.MaxUint64)
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
 type failingHistoryStartTx struct {
 	kv.RwTx
@@ -265,7 +266,7 @@ func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
 			require.NoError(t, rwTtx.Commit())
 		}()
 	}
-	require.NoError(t, temporalDb.BuildFiles(3, allIrreversible))
+	require.NoError(t, temporalDb.BuildFiles(3, unboundedFinalityCtx))
 
 	freshRoTtx, err := temporalDb.BeginTemporalRo(ctx)
 	require.NoError(t, err)

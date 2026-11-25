@@ -19,7 +19,6 @@ package app
 import (
 	"bytes"
 	"encoding/binary"
-	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -36,10 +35,12 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -58,7 +59,7 @@ func TestStepRebaseIncreaseMergesStateFiles(t *testing.T) {
 	db, closeDB := openTestTemporalDB(t, dirs, settings)
 	writeAccountSteps(t, db, steps*stepSize)
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
-	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(steps), math.MaxUint64, true))
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(steps), execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), true))
 	agg.WaitForFiles()
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		return stages.SaveStageProgress(tx, stages.Execution, 7)
@@ -146,7 +147,7 @@ func TestStepRebaseIncreaseMergesReceiptCacheFiles(t *testing.T) {
 	writeAccountSteps(t, db, steps*stepSize)
 	writeReceiptCacheSteps(t, db, steps*stepSize)
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
-	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(steps), math.MaxUint64, true))
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(steps), execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), true))
 	agg.WaitForFiles()
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		return stages.SaveStageProgress(tx, stages.Execution, 7)

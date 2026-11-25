@@ -31,15 +31,17 @@ import (
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-const allIrreversible = uint64(math.MaxUint64)
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
 func checkStateVerifyOnRandomWrites(t *testing.T, v3 bool) {
 	t.Helper()
@@ -109,7 +111,7 @@ func checkStateVerifyOnRandomWrites(t *testing.T, v3 bool) {
 	require.NoError(t, err)
 
 	// Build snapshot files
-	err = agg.BuildFiles(db, txs, allIrreversible)
+	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	endTxNum := agg.EndTxNumMinimax()
@@ -245,7 +247,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build snapshot files for all steps
-	err = agg.BuildFiles(db, 400, allIrreversible)
+	err = agg.BuildFiles(db, 400, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	endTxNum := agg.EndTxNumMinimax()

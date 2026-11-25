@@ -104,7 +104,7 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 					write(tx, filesEnd+1, keys[otherBranchIdx], account(1))
 					return nil
 				}))
-				require.NoError(t, agg.BuildFiles(db, filesEnd+stepSize, allIrreversible))
+				require.NoError(t, agg.BuildFiles(db, filesEnd+stepSize, unboundedFinalityCtx))
 				require.NoError(t, agg.MergeLoop(ctx))
 				if !statecfg.ExperimentalCommitmentV3 {
 					var shortened int
@@ -241,7 +241,7 @@ func TestCommitmentStorageBranchRepeatedUnwind(t *testing.T) {
 					require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, keys[0], account(20), 20, nil))
 				})
 				if files {
-					require.NoError(t, agg.BuildFiles(db, 21, allIrreversible))
+					require.NoError(t, agg.BuildFiles(db, 21, unboundedFinalityCtx))
 					require.NoError(t, db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 						_, err := tx.PruneSmallBatches(ctx, time.Hour)
 						require.NoError(t, err)

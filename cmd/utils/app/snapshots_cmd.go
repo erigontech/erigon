@@ -3518,8 +3518,8 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	blocksInSnapshots := blockReader.FrozenBlocks()
 	logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
-	irreversibleBlock := execfinality.IrreversibleBlock(to, finalisedBlockNum, ethconfig.Defaults.MaxReorgDepth, false)
-	if err := br.BuildFiles(ctx, blocksInSnapshots, irreversibleBlock, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
+	finalityCtx := execfinality.NewContext(to, finalisedBlockNum, ethconfig.Defaults.MaxReorgDepth, false, blockReader.TxnumReader())
+	if err := br.BuildFiles(ctx, blocksInSnapshots, finalityCtx, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
 		return err
 	}
 
@@ -3563,20 +3563,17 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 
 	txNumsReader := blockReader.TxnumReader()
-	var lastTxNum, irreversibleTxNum uint64
+	var lastTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
-		if lastTxNum, err = txNumsReader.Max(ctx, tx, execProgress); err != nil {
-			return err
-		}
-		irreversibleTxNum, err = execfinality.IrreversibleTxNum(ctx, tx, txNumsReader, irreversibleBlock)
+		lastTxNum, err = txNumsReader.Max(ctx, tx, execProgress)
 		return err
 	}); err != nil {
 		return err
 	}
 
 	logger.Info("Build state history snapshots")
-	if err := temporalDb.BuildFiles(lastTxNum, irreversibleTxNum); err != nil {
+	if err := temporalDb.BuildFiles(lastTxNum, finalityCtx); err != nil {
 		return err
 	}
 

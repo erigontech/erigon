@@ -787,20 +787,20 @@ func (db *DB) MaxPrunableStepsBacklog() uint64 {
 	return db.stateFiles.MaxPrunableStepsBacklog()
 }
 
-func (db *DB) BuildFiles(toTxNum, irreversibleTxNum uint64) error {
-	return db.stateFiles.BuildFiles(db, toTxNum, irreversibleTxNum)
+func (db *DB) BuildFiles(toTxNum uint64, finalityCtx kv.FinalityContext) error {
+	return db.stateFiles.BuildFiles(db, toTxNum, finalityCtx)
 }
 
-func (db *DB) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, irreversibleTxNum uint64, doMerge bool) error {
-	return db.stateFiles.BuildFiles2(ctx, db, fromStep, toStep, irreversibleTxNum, doMerge)
+func (db *DB) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
+	return db.stateFiles.BuildFiles2(ctx, db, fromStep, toStep, finalityCtx, doMerge)
 }
 
-func (db *DB) BuildFilesInBackground(irreversibleTxNum uint64) chan struct{} {
+func (db *DB) BuildFilesInBackground(finalityCtx kv.FinalityContext) chan struct{} {
 	toTxNum := db.stateFiles.EndTxNumMinimax() + db.stateFiles.StepSize()
-	return db.stateFiles.BuildFilesInBackground(db, toTxNum, irreversibleTxNum)
+	return db.stateFiles.BuildFilesInBackground(db, toTxNum, finalityCtx)
 }
 
-func (db *DB) CollateAndPrune(ctx context.Context, pruneFn func(tx kv.TemporalRwTx) (uint64, error)) (bool, <-chan struct{}, error) {
+func (db *DB) CollateAndPrune(ctx context.Context, pruneFn func(tx kv.TemporalRwTx) (kv.FinalityContext, error)) (bool, <-chan struct{}, error) {
 	return db.stateFiles.CollateAndPrune(ctx, db, pruneFn)
 }
 

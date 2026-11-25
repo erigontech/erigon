@@ -162,9 +162,9 @@ func TestPruneExecutionStageInitialCycleUsesMaxReorgDepth(t *testing.T) {
 		require.NoError(t, tx.Put(kv.BlockAccessList, key, []byte{0x01}))
 	}
 	state := &PruneState{
-		ID:                stages.Execution,
-		ForwardProgress:   forwardProgress,
-		IrreversibleBlock: execfinality.IrreversibleBlock(forwardProgress, finalisedBlockNum, maxReorgDepth, true),
+		ID:              stages.Execution,
+		ForwardProgress: forwardProgress,
+		FinalityCtx:     execfinality.NewContext(forwardProgress, finalisedBlockNum, maxReorgDepth, true, rawdbv3.TxNums),
 		CurrentSyncCycle: CurrentSyncCycleInfo{
 			IsInitialCycle: true,
 		},

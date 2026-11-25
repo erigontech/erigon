@@ -107,7 +107,7 @@ func testDbAggregatorWithCommitmentHistory(t *testing.T, stepSize uint64, steps 
 	}
 	require.NoError(t, domains.Flush(ctx, rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, txCount, allIrreversible))
+	require.NoError(t, agg.BuildFiles(db, txCount, unboundedFinalityCtx))
 	return db, agg, roots
 }
 
@@ -157,7 +157,7 @@ func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 	}
 	require.NoError(t, domains.Flush(ctx, rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, stepSize*steps, allIrreversible))
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
 
 	ownerPath := commitment.KeyToHexNibbleHash(owner)
 	roTx, err := db.BeginTemporalRo(ctx)
@@ -696,7 +696,7 @@ func TestConvertCommitmentFiles_V3HistoryExtensionRoot(t *testing.T) {
 	}
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, stepSize*steps, allIrreversible))
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
 
@@ -732,7 +732,7 @@ func TestConvertCommitmentFiles_V3HistoryRootWithOnlyDirectLeaves(t *testing.T) 
 	}
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, stepSize*steps, allIrreversible))
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
 	require.Positive(t, dropHistoryLeafOnlyRewrites(t, db, agg))
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
