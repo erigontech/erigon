@@ -142,6 +142,8 @@ func (s *CaplinService) Restart() error {
 		// death. Hand the relaunch to a waiter rather than abandon it: the
 		// caller only logs, and a service left stopped here is a node with
 		// no consensus layer and nothing to say so.
+		s.logger.Warn("[caplin-service] teardown overran the bound; relaunch deferred until the prior goroutine exits",
+			"bound", s.teardownTimeout)
 		go s.relaunchWhenIdle(s.done)
 		return fmt.Errorf("CaplinService.Restart: prior goroutine still running after %s; relaunch deferred until it exits", s.teardownTimeout)
 	}
