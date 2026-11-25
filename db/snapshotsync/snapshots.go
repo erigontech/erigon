@@ -822,7 +822,8 @@ func (s *BaseRoSnapshots) mergedFilesNotInEveryType() map[*DirtySegment]bool {
 // sorted is ordered by start, the longest range first: at each start that is the one the visible files show.
 func coveredBySmaller(sorted []Range, r Range) bool {
 	reach := r.from
-	for _, small := range sorted {
+	first, _ := slices.BinarySearchFunc(sorted, r.from, func(a Range, from uint64) int { return cmp.Compare(a.from, from) })
+	for _, small := range sorted[first:] {
 		if small.from > reach || reach == r.to {
 			break
 		}
