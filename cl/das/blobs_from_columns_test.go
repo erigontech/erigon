@@ -56,7 +56,8 @@ func TestBlobsFromColumnsMatchesTheEagerBlobSidecars(t *testing.T) {
 		{"all", []uint64{0, 1, 2}, []int{0, 1, 2}},
 		{"subset", []uint64{0, 2}, []int{0, 2}},
 		{"indices from the blob count are skipped", []uint64{1, 3, 9}, []int{1}},
-		{"no indices", nil, nil},
+		{"nil indices mean every blob", nil, []int{0, 1, 2}},
+		{"empty indices", []uint64{}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			blobs, sidecars, err := r.blobsFromColumns(tc.indices, true)
@@ -320,7 +321,8 @@ func TestBlobsFromColumnsDoesNotScheduleRecoveryWhenTheRemovalFails(t *testing.T
 	require.NotContains(t, g.d.isRecovering, g.root)
 }
 
-// gatedColumnReads holds every column read until the gate is closed.
+// gatedColumnReads holds every column read except those of column 0 until the gate is closed. A request reads column 0 before it
+// takes a reconstruction permit, so only the later reads show who holds a permit.
 type gatedColumnReads struct {
 	blob_storage.DataColumnStorage
 	gate        chan struct{}
@@ -331,6 +333,9 @@ type gatedColumnReads struct {
 }
 
 func (s *gatedColumnReads) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
+	if columnIndex == 0 {
+		return s.DataColumnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, columnIndex)
+	}
 	inFlight := s.inFlight.Add(1)
 	defer s.inFlight.Add(-1)
 	for {
@@ -433,22 +438,69 @@ func TestBlobsFromColumnsRefusesARequestWhenTheWaitersAreFull(t *testing.T) {
 	}
 }
 
-func TestBlobsFromColumnsReadsNoColumnForARequestCancelledWhileWaiting(t *testing.T) {
+func TestBlobsFromColumnsReadsNoMoreColumnsForARequestCancelledWhileWaiting(t *testing.T) {
 	h := holdReconstructions(t, 1)
 	h.start(t.Context(), h.root)
 	h.awaitAdmission(t, 1, 0)
-	otherRoot := common.Hash{0x42}
 	ctx, cancel := context.WithCancel(t.Context())
-	h.start(ctx, otherRoot)
+	h.start(ctx, h.root)
 	h.awaitAdmission(t, 1, 1)
 
 	cancel()
 
 	require.ErrorIs(t, h.requireResult(t), context.Canceled)
 	require.Equal(t, int32(0), blobReconstructions.waiting.Load())
-	require.Zero(t, h.columns.readsOf(otherRoot))
+	require.Equal(t, 1, h.columns.readsOf(h.root), "held column reads")
 	h.release()
 	require.NoError(t, h.requireResult(t))
+}
+
+func TestBlobsFromColumnsAnswersWithoutAPermitWhenNoBlobIsSelected(t *testing.T) {
+	h := holdReconstructions(t, 1)
+	h.start(t.Context(), h.root)
+	h.awaitAdmission(t, 1, 0)
+	h.start(t.Context(), h.root)
+	h.awaitAdmission(t, 1, 1)
+
+	for _, tc := range []struct {
+		name    string
+		root    common.Hash
+		indices []uint64
+	}{
+		{"a block with no stored column", common.Hash{0x42}, nil},
+		{"an index beyond the blob count", h.root, []uint64{7}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+
+			blobs, sidecars, err := h.d.BlobsFromColumns(ctx, recoveryTestSlot, tc.root, tc.indices, true)
+
+			require.NoError(t, err)
+			require.Empty(t, blobs)
+			require.Empty(t, sidecars)
+		})
+	}
+}
+
+func TestBlobsFromColumnsOfABlockWithNoStoredColumnReadsNoColumnAndSchedulesNoRecovery(t *testing.T) {
+	root := common.Hash{0x42}
+	var reads *firstColumnReadStorage
+	g := startGossipRecovery(t, false, atFuluFromGenesis, func(r *recoveryRun) {
+		reads = &firstColumnReadStorage{DataColumnStorage: r.d.columnStorage, root: root, firstRead: make(chan time.Time, 1)}
+		r.d.columnStorage = reads
+	})
+
+	blobs, sidecars, err := g.d.BlobsFromColumns(t.Context(), recoveryTestSlot, root, nil, true)
+
+	require.NoError(t, err)
+	require.Empty(t, blobs)
+	require.Empty(t, sidecars)
+	require.Zero(t, reads.reads.Load(), "column reads")
+	g.d.recoveringMutex.Lock()
+	defer g.d.recoveringMutex.Unlock()
+	require.NotContains(t, g.d.isRecovering, root)
+	require.Empty(t, g.d.recoverBlobsQueue)
 }
 
 // cancelOnColumnRead cancels a context at its at-th column read.

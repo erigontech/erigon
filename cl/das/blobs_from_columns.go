@@ -78,47 +78,58 @@ func (d *peerdas) BlobsFromColumns(ctx context.Context, slot uint64, blockRoot c
 	if isGloas && withSidecars {
 		return nil, nil, errors.New("blob sidecars are not built from the columns of a Gloas block")
 	}
-	release, err := blobReconstructions.acquire(ctx)
+	saved, err := d.columnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer release()
-
+	if len(saved) == 0 {
+		return nil, nil, nil
+	}
 	var gloasCommitments *solid.ListSSZ[*cltypes.KZGCommitment]
 	if isGloas {
 		if gloasCommitments, err = d.getKzgCommitmentsForGloas(ctx, blockRoot); err != nil {
 			return nil, nil, err
 		}
 	}
-	var (
-		rows           []int
-		blobs          []*cltypes.Blob
-		commitments    *solid.ListSSZ[*cltypes.KZGCommitment]
-		header         *cltypes.SignedBeaconBlockHeader
-		inclusionProof solid.HashVectorSSZ
-	)
+	first, err := d.readBlockColumn(ctx, slot, blockRoot, 0, isGloas, gloasCommitments)
+	if err != nil {
+		return nil, nil, err
+	}
+	blobCount := first.Column.Len()
+	rows := make([]int, 0, blobCount)
+	if indices == nil {
+		for row := range blobCount {
+			rows = append(rows, row)
+		}
+	} else {
+		for _, index := range indices {
+			if index < uint64(blobCount) {
+				rows = append(rows, int(index))
+			}
+		}
+	}
+	if len(rows) == 0 {
+		return nil, nil, nil
+	}
+	release, err := blobReconstructions.acquire(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer release()
+
+	blobs := make([]*cltypes.Blob, len(rows))
+	for i := range blobs {
+		blobs[i] = new(cltypes.Blob)
+	}
+	sidecar := first
 	for column := range d.beaconConfig.NumberOfColumns / 2 {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
-		sidecar, err := d.readBlockColumn(ctx, slot, blockRoot, column, isGloas, gloasCommitments)
-		if err != nil {
-			return nil, nil, err
-		}
-		if column == 0 {
-			for _, index := range indices {
-				if index < uint64(sidecar.Column.Len()) {
-					rows = append(rows, int(index))
-				}
+		if column > 0 {
+			if sidecar, err = d.readBlockColumn(ctx, slot, blockRoot, column, isGloas, gloasCommitments); err != nil {
+				return nil, nil, err
 			}
-			if len(rows) == 0 {
-				return nil, nil, nil
-			}
-			blobs = make([]*cltypes.Blob, len(rows))
-			for i := range blobs {
-				blobs[i] = new(cltypes.Blob)
-			}
-			commitments, header, inclusionProof = sidecar.KzgCommitments, sidecar.SignedBlockHeader, sidecar.KzgCommitmentsInclusionProof
 		}
 		for i, row := range rows {
 			copy(blobs[i][int(column)*cltypes.BytesPerCell:], sidecar.Column.Get(row)[:])
@@ -132,7 +143,7 @@ func (d *peerdas) BlobsFromColumns(ctx context.Context, slot uint64, blockRoot c
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
-		if sidecars[i], err = newBlobSidecar(row, blobs[i], commitments, header, inclusionProof, 1); err != nil {
+		if sidecars[i], err = newBlobSidecar(row, blobs[i], first.KzgCommitments, first.SignedBlockHeader, first.KzgCommitmentsInclusionProof, 1); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -151,7 +162,8 @@ func (d *peerdas) readBlockColumn(ctx context.Context, slot uint64, blockRoot co
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	// Recovery never rebuilds an indexed column, so an unreadable one is removed.
+	// Recovery never rebuilds an indexed column, so an unreadable one is removed. A column that a concurrent recovery
+	// rebuilt after the read is removed too, and the next request schedules its rebuild.
 	if err == nil || indexed {
 		if removeErr := d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(column)); removeErr != nil {
 			log.Warn("[peerdas] failed to remove a column that cannot serve blobs", "slot", slot, "blockRoot", blockRoot, "column", column, "err", removeErr)

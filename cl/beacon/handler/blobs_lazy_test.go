@@ -25,13 +25,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
 	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
@@ -39,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
 type lazyBlobsFixture struct {
@@ -64,7 +61,7 @@ func lazyBlobsOf(t *testing.T, f blobsTestFixture, gloas bool) lazyBlobsFixture 
 	}
 	require.GreaterOrEqual(t, f.slot/cfg.SlotsPerEpoch, uint64(1))
 
-	peerDas := newLazyPeerDas(t, true)
+	peerDas := newLazyPeerDas(t)
 	f.handler.peerDas = peerDas
 
 	var root common.Hash
@@ -75,11 +72,11 @@ func lazyBlobsOf(t *testing.T, f blobsTestFixture, gloas bool) lazyBlobsFixture 
 	return lazyBlobsFixture{blobsTestFixture: f, peerDas: peerDas, root: root}
 }
 
-func newLazyPeerDas(t *testing.T, supernode bool) *das_mock.MockPeerDas {
+func newLazyPeerDas(t *testing.T) *das_mock.MockPeerDas {
 	t.Helper()
 	ctrl := gomock.NewController(t)
 	stateReader := das_state_mock.NewMockPeerDasStateReader(ctrl)
-	stateReader.EXPECT().IsSupernode().Return(supernode).AnyTimes()
+	stateReader.EXPECT().IsSupernode().Return(true).AnyTimes()
 	peerDas := das_mock.NewMockPeerDas(ctrl)
 	peerDas.EXPECT().IsArchivedMode().Return(false).AnyTimes()
 	peerDas.EXPECT().StateReader().Return(stateReader).AnyTimes()
@@ -158,11 +155,12 @@ func TestBlobSidecarsAreBuiltFromColumnsWhenStorageIsEmpty(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		query string
+		asked []uint64
 		want  []uint64
 	}{
-		{name: "every index of the block", want: []uint64{0, 1, 2}},
-		{name: "the selected indices in ascending order", query: "indices=2,0", want: []uint64{0, 2}},
-		{name: "the selected indices below the blob count", query: "indices=7,1,3", want: []uint64{1}},
+		{name: "every index of the block", asked: nil, want: []uint64{0, 1, 2}},
+		{name: "the selected indices in ascending order", query: "indices=2,0", asked: []uint64{0, 2}, want: []uint64{0, 2}},
+		{name: "the selected indices below the blob count", query: "indices=7,1,3", asked: []uint64{1, 3, 7}, want: []uint64{1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := setupLazyBlobsTest(t, false)
@@ -178,7 +176,7 @@ func TestBlobSidecarsAreBuiltFromColumnsWhenStorageIsEmpty(t *testing.T) {
 
 			require.Equal(t, http.StatusOK, out.status)
 			require.True(t, withSidecars)
-			require.Equal(t, tc.want, asked)
+			require.Equal(t, tc.asked, asked)
 			want := make([]string, len(tc.want))
 			for i, index := range tc.want {
 				want[i] = strconv.FormatUint(index, 10)
@@ -244,26 +242,21 @@ func TestBlobEndpointsReportBlobsThatCannotBeBuiltFromColumns(t *testing.T) {
 	}
 }
 
-func TestBlobEndpointsAnswerEmptyWithoutBuildingBlobsWhenNoBlobIsSelected(t *testing.T) {
+func TestBlobsAnswerEmptyWithoutBuildingBlobsWhenNoBlobIsSelected(t *testing.T) {
 	threeBlobs := []cltypes.KZGCommitment{{69}, {1}, {2}}
 	for _, tc := range []struct {
 		name        string
-		endpoint    string
 		commitments []cltypes.KZGCommitment
 		query       string
 	}{
-		{name: "a block without blobs", endpoint: "blob_sidecars"},
-		{name: "a block without blobs and a selected index", endpoint: "blob_sidecars", query: "indices=0"},
-		{name: "an index beyond the blob count", endpoint: "blob_sidecars", commitments: threeBlobs, query: "indices=7"},
-		{name: "indices beyond the blob count", endpoint: "blob_sidecars", commitments: threeBlobs, query: "indices=3,7"},
-		{name: "a block without blobs", endpoint: "blobs"},
-		{name: "a versioned hash that no commitment has", endpoint: "blobs", commitments: threeBlobs, query: "versioned_hashes=" + common.Hash{0x42}.Hex()},
+		{name: "a block without blobs"},
+		{name: "a versioned hash that no commitment has", commitments: threeBlobs, query: "versioned_hashes=" + common.Hash{0x42}.Hex()},
 	} {
-		t.Run(tc.endpoint+"/"+tc.name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			f := lazyBlobsOf(t, setupBlobsTestWithCommitments(t, tc.commitments), false)
 			f.peerDas.EXPECT().BlobsFromColumns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 
-			out := requestLazyBlobEndpoint(t, f, tc.endpoint, tc.query)
+			out := requestLazyBlobEndpoint(t, f, "blobs", tc.query)
 
 			require.Equal(t, http.StatusOK, out.status)
 			require.Empty(t, out.data)
@@ -271,149 +264,15 @@ func TestBlobEndpointsAnswerEmptyWithoutBuildingBlobsWhenNoBlobIsSelected(t *tes
 	}
 }
 
-type countingBlockReader struct {
-	freezeblocks.BeaconSnapshotReader
-	bodyErr     error
-	bodyMissing bool
-	bodyBlock   *cltypes.SignedBeaconBlock
-	byRootErr   error
-	byRootBlock *cltypes.SignedBeaconBlock
-	bodyReads   atomic.Int32
-	byRootReads atomic.Int32
-}
-
-func (r *countingBlockReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
-	r.bodyReads.Add(1)
-	if r.bodyErr != nil || r.bodyMissing {
-		return nil, r.bodyErr
-	}
-	if r.bodyBlock != nil {
-		return r.bodyBlock, nil
-	}
-	return r.BeaconSnapshotReader.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
-}
-
-func (r *countingBlockReader) ReadBlockByRoot(context.Context, kv.Tx, common.Hash) (*cltypes.SignedBeaconBlock, error) {
-	r.byRootReads.Add(1)
-	return r.byRootBlock, r.byRootErr
-}
-
-func useCountingBlockReader(f *lazyBlobsFixture, reader *countingBlockReader) {
-	reader.BeaconSnapshotReader = f.handler.blockReader
-	f.handler.blockReader = reader
-}
-
-func TestBlobSidecarsOfABlockThatCannotBeReadFromColumns(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		supernode bool
-		reader    *countingBlockReader
-		status    int
-		message   string
-		reads     int32
-	}{
-		{name: "not a supernode", supernode: false, reader: &countingBlockReader{bodyErr: errors.New("read failed")}, status: http.StatusOK},
-		{name: "the block body is not stored", supernode: true, reader: &countingBlockReader{bodyMissing: true}, status: http.StatusOK, reads: 1},
-		{name: "the read fails", supernode: true, reader: &countingBlockReader{bodyErr: errors.New("read failed")}, status: http.StatusInternalServerError, message: "read failed", reads: 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := setupLazyBlobsTest(t, false)
-			f.peerDas = newLazyPeerDas(t, tc.supernode)
-			f.handler.peerDas = f.peerDas
-			useCountingBlockReader(&f, tc.reader)
-			f.peerDas.EXPECT().BlobsFromColumns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
-
-			out := requestLazyBlobEndpoint(t, f, "blob_sidecars", "")
-
-			require.Equal(t, tc.status, out.status)
-			require.Empty(t, out.data)
-			require.Contains(t, out.message, tc.message)
-			require.Equal(t, tc.reads, tc.reader.bodyReads.Load(), "block body reads")
-			require.Zero(t, tc.reader.byRootReads.Load(), "full block reads")
-		})
-	}
-}
-
-func TestBlobSidecarsOfACanonicalBlockAreBuiltWithoutTheExecutionBody(t *testing.T) {
+func TestBlobSidecarsAnswerEmptyWhenNoBlobIsBuiltFromColumns(t *testing.T) {
 	f := setupLazyBlobsTest(t, false)
-	reader := &countingBlockReader{byRootErr: errors.New("execution body not found")}
-	useCountingBlockReader(&f, reader)
-	f.peerDas.EXPECT().BlobsFromColumns(gomock.Any(), f.slot, f.root, []uint64{0, 1, 2}, true).Return(nil, columnSidecars(0, 1, 2), nil)
+	f.peerDas.EXPECT().BlobsFromColumns(gomock.Any(), f.slot, f.root, nil, true).Return(nil, nil, nil)
 
 	out := requestLazyBlobEndpoint(t, f, "blob_sidecars", "")
 
 	require.Equal(t, http.StatusOK, out.status)
-	require.Equal(t, []string{"0", "1", "2"}, sidecarIndices(t, out.data))
-	require.Equal(t, int32(1), reader.bodyReads.Load(), "block body reads")
-	require.Zero(t, reader.byRootReads.Load(), "full block reads")
-}
-
-func TestBlobSidecarsOfANonCanonicalBlockReadTheBlockByRoot(t *testing.T) {
-	f := setupLazyBlobsTest(t, false)
-	forkRoot := common.Hash{0x42}
-	require.NoError(t, f.handler.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
-		return beacon_indicies.WriteHeaderSlot(tx, forkRoot, f.slot)
-	}))
-	block, err := f.handler.blockReader.ReadBeaconBlockBodyBySlot(t.Context(), nil, f.slot)
-	require.NoError(t, err)
-	reader := &countingBlockReader{byRootBlock: block}
-	useCountingBlockReader(&f, reader)
-	f.peerDas.EXPECT().BlobsFromColumns(gomock.Any(), f.slot, forkRoot, []uint64{0, 1, 2}, true).Return(nil, columnSidecars(0, 1, 2), nil)
-
-	resp := requestBlobEndpointForBlock(t, f.blobsTestFixture, "blob_sidecars", forkRoot.Hex(), "")
-	defer resp.Body.Close()
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Equal(t, int32(1), reader.byRootReads.Load(), "full block reads")
-	require.Zero(t, reader.bodyReads.Load(), "block body reads")
-}
-
-type reorgOnSecondReadDB struct {
-	kv.RwDB
-	slot    uint64
-	newRoot common.Hash
-	reads   atomic.Int32
-}
-
-func (db *reorgOnSecondReadDB) BeginRo(ctx context.Context) (kv.Tx, error) {
-	if db.reads.Add(1) == 2 {
-		if err := db.RwDB.Update(ctx, func(tx kv.RwTx) error {
-			return beacon_indicies.MarkRootCanonical(tx, db.slot, db.newRoot)
-		}); err != nil {
-			return nil, err
-		}
-	}
-	return db.RwDB.BeginRo(ctx) //nolint:gocritic
-}
-
-func TestBlobSidecarsOfABlockReorgedOutAfterTheRootLookupAreBuiltFromTheRequestedBlock(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		query string
-		want  []uint64
-	}{
-		{name: "every index of the block", want: []uint64{0, 1, 2}},
-		{name: "an index beyond the blob count of the new canonical block", query: "indices=2", want: []uint64{2}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := setupLazyBlobsTest(t, false)
-			requested, err := f.handler.blockReader.ReadBeaconBlockBodyBySlot(t.Context(), nil, f.slot)
-			require.NoError(t, err)
-			reorged := cltypes.NewSignedBeaconBlock(f.handler.beaconChainCfg, clparams.ElectraVersion)
-			reorged.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{7})
-			reader := &countingBlockReader{bodyBlock: reorged, byRootBlock: requested}
-			useCountingBlockReader(&f, reader)
-			f.handler.indiciesDB = &reorgOnSecondReadDB{RwDB: f.handler.indiciesDB, slot: f.slot, newRoot: common.Hash{0x43}}
-			f.peerDas.EXPECT().BlobsFromColumns(gomock.Any(), f.slot, f.root, tc.want, true).Return(nil, columnSidecars(tc.want...), nil)
-
-			out := requestLazyBlobEndpoint(t, f, "blob_sidecars", tc.query)
-
-			require.Equal(t, http.StatusOK, out.status)
-			require.Len(t, out.data, len(tc.want))
-			require.Equal(t, int32(1), reader.byRootReads.Load(), "full block reads")
-			require.Zero(t, reader.bodyReads.Load(), "block body reads")
-		})
-	}
+	require.NotNil(t, out.data)
+	require.Empty(t, out.data)
 }
 
 func TestBlobEndpointsOfAGloasBlockBuildBlobsOnly(t *testing.T) {

@@ -115,7 +115,7 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 
 	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	if !found && version >= clparams.FuluVersion && version < clparams.GloasVersion {
-		if out, err = a.blobSidecarsFromColumns(ctx, *slot, blockRoot, canonicalRoot, selectedIndices); err != nil {
+		if out, err = a.blobSidecarsFromColumns(ctx, *slot, blockRoot, selectedIndices); err != nil {
 			return nil, err
 		}
 		found = len(out) != 0
@@ -153,25 +153,10 @@ func (a *ApiHandler) readBlobSidecars(ctx context.Context, slot uint64, blockRoo
 	return a.blobStoage.ReadBlobSidecars(ctx, slot, blockRoot)
 }
 
-func (a *ApiHandler) blobSidecarsFromColumns(ctx context.Context, slot uint64, blockRoot, canonicalRoot common.Hash, selected map[uint64]struct{}) ([]*cltypes.BlobSidecar, error) {
-	if !a.peerDas.StateReader().IsSupernode() {
-		return nil, nil
-	}
-	count, err := a.blobCommitmentCount(ctx, slot, blockRoot, canonicalRoot)
-	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
-	}
+func (a *ApiHandler) blobSidecarsFromColumns(ctx context.Context, slot uint64, blockRoot common.Hash, selected map[uint64]struct{}) ([]*cltypes.BlobSidecar, error) {
 	var indices []uint64
-	if selected == nil {
-		indices = make([]uint64, count)
-		for i := range indices {
-			indices[i] = uint64(i)
-		}
-	} else {
-		indices = slices.DeleteFunc(slices.Sorted(maps.Keys(selected)), func(index uint64) bool { return index >= uint64(count) })
-	}
-	if len(indices) == 0 {
-		return nil, nil
+	if selected != nil {
+		indices = slices.Sorted(maps.Keys(selected))
 	}
 	_, sidecars, err := a.peerDas.BlobsFromColumns(ctx, slot, blockRoot, indices, true)
 	switch {
@@ -181,39 +166,6 @@ func (a *ApiHandler) blobSidecarsFromColumns(ctx context.Context, slot uint64, b
 		return nil, nil
 	}
 	return nil, blobsFromColumnsError(err)
-}
-
-func (a *ApiHandler) blobCommitmentCount(ctx context.Context, slot uint64, blockRoot, canonicalRoot common.Hash) (int, error) {
-	tx, err := a.indiciesDB.BeginRo(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	canonical := blockRoot == canonicalRoot
-	if canonical {
-		currentRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
-		if err != nil {
-			return 0, err
-		}
-		canonical = currentRoot == blockRoot
-	}
-	var block *cltypes.SignedBeaconBlock
-	if canonical {
-		block, err = a.blockReader.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
-	} else {
-		block, err = a.blockReader.ReadBlockByRoot(ctx, tx, blockRoot)
-	}
-	if err != nil {
-		return 0, err
-	}
-	if block == nil {
-		return 0, nil
-	}
-	commitments := block.Block.Body.GetBlobKzgCommitments()
-	if commitments == nil {
-		return 0, nil
-	}
-	return commitments.Len(), nil
 }
 
 func blobsFromColumnsError(err error) error {
