@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -225,5 +226,27 @@ func TestFilterStreamReadsTheVersionOnEachConnect(t *testing.T) {
 		require.True(t, req.Ack, "a reconnect to an erigon that acks asks for one")
 		srv.release <- struct{}{}
 		require.NoError(t, <-done)
+	})
+}
+
+// A filter update waits for the server's ack at most until the caller's deadline.
+func TestFilterUpdateEndsAtTheCallersDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		srv := newGatedAckServer()
+		back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
+		var requestor atomic.Value
+		go back.SubscribeLogs(ctx, func(*remoteproto.SubscribeLogsReply) {}, &requestor) //nolint:errcheck
+		synctest.Wait()
+		send := requestor.Load().(func(context.Context, *remoteproto.LogsFilterRequest) error)
+
+		deadline := filterAckTimeout / 5
+		callCtx, cancelCall := context.WithTimeout(t.Context(), deadline)
+		defer cancelCall()
+		start := time.Now()
+		require.ErrorIs(t, send(callCtx, &remoteproto.LogsFilterRequest{AllAddresses: true}), context.DeadlineExceeded)
+		require.Equal(t, deadline, time.Since(start))
+		srv.release <- struct{}{} // the server applies the abandoned update
 	})
 }

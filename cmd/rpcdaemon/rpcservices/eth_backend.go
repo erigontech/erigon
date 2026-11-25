@@ -293,9 +293,9 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 	acks := newFilterAcks()
 	defer close(acks.done)
 	if serverAcks {
-		requestor.Store(func(_ context.Context, req *remoteproto.LogsFilterRequest) error {
+		requestor.Store(func(callCtx context.Context, req *remoteproto.LogsFilterRequest) error {
 			req.Ack = true
-			return sendFilterUpdate(ctx, acks, subscription.Send, req)
+			return sendFilterUpdate(callCtx, acks, subscription.Send, req)
 		})
 	} else {
 		requestor.Store(func(_ context.Context, req *remoteproto.LogsFilterRequest) error { return subscription.Send(req) })
@@ -334,9 +334,9 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 	defer close(acks.done)
 	if onReady != nil {
 		if serverAcks {
-			onReady(func(_ context.Context, req *remoteproto.ReceiptsFilterRequest) error {
+			onReady(func(callCtx context.Context, req *remoteproto.ReceiptsFilterRequest) error {
 				req.Ack = true
-				return sendFilterUpdate(ctx, acks, subscription.Send, req)
+				return sendFilterUpdate(callCtx, acks, subscription.Send, req)
 			})
 		} else {
 			onReady(func(_ context.Context, req *remoteproto.ReceiptsFilterRequest) error { return subscription.Send(req) })
@@ -399,7 +399,7 @@ func (a *filterAcks) ack() {
 }
 
 // sendFilterUpdate returns once the server has applied req, so events published after it
-// are filtered by req.
+// are filtered by req. ctx is the caller's: its deadline ends the wait; the stream's end does too.
 func sendFilterUpdate[R any](ctx context.Context, a *filterAcks, send func(R) error, req R) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
