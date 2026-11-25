@@ -1268,11 +1268,11 @@ func (ws *WriteSet) Filter(keep func(WriteHeader) bool) *WriteSet {
 
 // Finalize produces the committable write-set for a tx from the raw recorded
 // writes: it applies the EIP-6780 net-zero storage wipe, then returns the
-// filtered Snapshot. It operates on the write-set alone — no IntraBlockState —
+// filtered Snapshot without the skip accounts. It operates on the write-set alone — no IntraBlockState —
 // so the parallel finalize can be driven straight from the recorded IO.
-func (ws *WriteSet) Finalize() *WriteSet {
+func (ws *WriteSet) Finalize(skip map[accounts.Address]struct{}) *WriteSet {
 	ws.zeroSameTxCreateDestructStorage()
-	return ws.Snapshot()
+	return ws.snapshot(skip)
 }
 
 // zeroSameTxCreateDestructStorage implements EIP-6780 + EIP-7928: when a
@@ -1301,11 +1301,17 @@ func (ws *WriteSet) zeroSameTxCreateDestructStorage() {
 // signal, the calculator the per-slot deletes, and fee finalization the creation
 // marker); the rest drop.
 func (ws *WriteSet) Snapshot() *WriteSet {
+	return ws.snapshot(nil)
+}
+
+func (ws *WriteSet) snapshot(skip map[accounts.Address]struct{}) *WriteSet {
 	out := &WriteSet{}
 
 	addrs := make(map[accounts.Address]struct{})
 	for h := range ws.AllHeaders() {
-		addrs[h.Address] = struct{}{}
+		if _, ok := skip[h.Address]; !ok {
+			addrs[h.Address] = struct{}{}
+		}
 	}
 
 	for addr := range addrs {
