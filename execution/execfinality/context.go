@@ -93,6 +93,10 @@ func (c FinalityContext) MaxReorgDepth() uint64 {
 	return c.maxReorgDepth
 }
 
+// collateDeleteTimeout bounds the write tx that deletes a step's changesets, which exec waits for at the tip. A step
+// whose changesets do not all go in one tx waits for the next pass.
+const collateDeleteTimeout = 100 * time.Millisecond
+
 // ReadyForCollation reports whether every block of the step is below the retention boundary, so no unwind may
 // reach it. On a writable db the same tx deletes the changesets of those blocks, so collation never waits for
 // the changeset prune and a block in files is never unwindable.
@@ -128,7 +132,12 @@ func (c FinalityContext) ReadyForCollation(ctx context.Context, db kv.TemporalRo
 		if err := decide(tx); err != nil || !ok {
 			return err
 		}
-		return rawdb.PruneTable(tx, kv.ChangeSets3, lastBlockInStep+1, ctx, math.MaxInt, time.Duration(math.MaxInt64), log.Root(), "collate")
+		if err := rawdb.PruneTable(tx, kv.ChangeSets3, lastBlockInStep+1, ctx, math.MaxInt, collateDeleteTimeout, log.Root(), "collate"); err != nil {
+			return err
+		}
+		lowestUnwindableBlock, err := changeset.ReadLowestUnwindableBlock(tx)
+		ok = lastBlockInStep < lowestUnwindableBlock
+		return err
 	})
 	ok = ok && err == nil
 	return
