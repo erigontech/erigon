@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package commitment
+package branchcache
 
 import (
 	"bytes"
@@ -270,10 +270,13 @@ func (p *ContractTrunkPreloadParallel) Run(
 	return chunkPinned, queueEmpty, nil
 }
 
-func (p *ContractTrunkPreloadParallel) PinnedTotal() int     { return p.pinned }
-func (p *ContractTrunkPreloadParallel) UsedBytes() int       { return p.usedBytes }
+func (p *ContractTrunkPreloadParallel) PinnedTotal() int { return p.pinned }
+
+func (p *ContractTrunkPreloadParallel) UsedBytes() int { return p.usedBytes }
+
 func (p *ContractTrunkPreloadParallel) MaxDepthReached() int { return p.maxDepthReached }
-func (p *ContractTrunkPreloadParallel) DbHitsPinned() int    { return p.dbHitsPinned }
+
+func (p *ContractTrunkPreloadParallel) DbHitsPinned() int { return p.dbHitsPinned }
 
 func (p *ContractTrunkPreloadParallel) QueueRemaining() int {
 	return len(p.frontier) + len(p.pendingChildren)

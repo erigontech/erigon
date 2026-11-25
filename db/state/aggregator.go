@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -429,10 +430,10 @@ func (a *Aggregator) ConfigureDomains() error {
 	// opt out (e.g. one-shot genesis processing has no cross-block reuse).
 	if dbg.UseStateCache && !a.branchCacheDisabled {
 		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
-			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
+			cd.branchCache = branchcache.NewBranchCache(branchcache.DefaultBranchCacheTailCapacity)
 			if !dbg.DisableAdaptivePin {
-				cd.adaptivePinController = commitment.NewAdaptivePinController(
-					cd.branchCache, commitment.DefaultAdaptivePinControllerConfig(), a.logger,
+				cd.adaptivePinController = branchcache.NewAdaptivePinController(
+					cd.branchCache, branchcache.DefaultAdaptivePinControllerConfig(), a.logger,
 				)
 			}
 		}
@@ -2747,7 +2748,7 @@ func (a *Aggregator) beginFilesRoOn(v *aggregatorVisible) *AggregatorRoTx {
 }
 
 // BranchCache attached to the commitment domain (implements commitment.BranchCacheProvider).
-func (at *AggregatorRoTx) BranchCache() *commitment.BranchCache {
+func (at *AggregatorRoTx) BranchCache() *branchcache.BranchCache {
 	if at.d[kv.CommitmentDomain] == nil {
 		return nil
 	}
@@ -2756,7 +2757,7 @@ func (at *AggregatorRoTx) BranchCache() *commitment.BranchCache {
 
 // AdaptivePinController attached to the commitment domain (implements
 // commitment.AdaptivePinControllerProvider).
-func (at *AggregatorRoTx) AdaptivePinController() *commitment.AdaptivePinController {
+func (at *AggregatorRoTx) AdaptivePinController() *branchcache.AdaptivePinController {
 	if at.d[kv.CommitmentDomain] == nil {
 		return nil
 	}

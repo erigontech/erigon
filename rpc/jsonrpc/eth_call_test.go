@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -1368,7 +1369,7 @@ func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	provider, ok := roTx.AggTx().(commitment.BranchCacheProvider)
+	provider, ok := roTx.AggTx().(branchcache.BranchCacheProvider)
 	require.True(t, ok)
 	branchCache := provider.BranchCache()
 	require.NotNil(t, branchCache)

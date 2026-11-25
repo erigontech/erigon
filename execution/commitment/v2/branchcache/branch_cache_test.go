@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package commitment
+package branchcache
 
 import (
 	"fmt"
@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
@@ -370,14 +371,14 @@ func TestBranchCache_StateKeyNeverCached(t *testing.T) {
 	c := NewBranchCache(100)
 	defer c.Close()
 
-	c.Put(KeyCommitmentState, []byte("checkpoint"), 1, 1)
-	_, _, ok := c.Get(KeyCommitmentState)
+	c.Put(commitment.KeyCommitmentState, []byte("checkpoint"), 1, 1)
+	_, _, ok := c.Get(commitment.KeyCommitmentState)
 	require.False(t, ok, "state key must never be served from the cache")
 	require.Equal(t, 0, c.tailLen(), "state key must not occupy a tail slot")
 
 	deepKey := []byte{0x12, 0x34}
 	c.Put(deepKey, []byte("d"), 0, 0)
-	c.Invalidate(KeyCommitmentState)
+	c.Invalidate(commitment.KeyCommitmentState)
 	got, _, ok := c.Get(deepKey)
 	require.True(t, ok, "invalidating the state key must not evict real entries")
 	require.Equal(t, []byte("d"), got)

@@ -6,9 +6,11 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-package commitment
+package branchcache
 
-import "testing"
+import (
+	"testing"
+)
 
 // frontier size is 16^(leafDepth-64); depth 68 gives 65536, matching production.
 func buildFullTree(hash []byte, leafDepth int) syntheticTree {
@@ -59,6 +61,7 @@ func benchmarkDrain(b *testing.B, leafDepth, stepBudget int) {
 }
 
 func BenchmarkPreloadDrain_d67(b *testing.B) { benchmarkDrain(b, 67, 1_000_000) }
+
 func BenchmarkPreloadDrain_d68(b *testing.B) { benchmarkDrain(b, 68, 2_000_000) }
 
 func randomFrontier(hash []byte, n int) []pathKey {

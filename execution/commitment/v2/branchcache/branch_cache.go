@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package commitment
+package branchcache
 
 import (
 	"encoding/binary"
@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/cache/coherence"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 // k is already a maphash.Hash output, spread uniformly across all 64 bits, so
@@ -506,7 +507,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 
 // PinEntry copies data; safe to mutate the input after the call.
 func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
-	if IsCommitmentStateKey(prefix) {
+	if commitment.IsCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))
@@ -579,7 +580,7 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 // It also rejects read fills, whose write time is unknown, unless txNum is
 // math.MaxUint64 (unbounded).
 func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bool) {
-	if IsCommitmentStateKey(prefix) {
+	if commitment.IsCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
 	coh := c.coh.Snapshot()
@@ -601,7 +602,7 @@ func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bo
 
 // Put copies the input data.
 func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
-	if IsCommitmentStateKey(prefix) {
+	if commitment.IsCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))
@@ -624,7 +625,7 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 // it rechecks the epoch to detect Unwind or Clear since Fill started.
 func (c *BranchCache) Fill(prefix []byte, data []byte, step, viewID uint64) {
 	epoch := c.coh.Epoch()
-	if viewID < c.committedView.Load() || IsCommitmentStateKey(prefix) {
+	if viewID < c.committedView.Load() || commitment.IsCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))
