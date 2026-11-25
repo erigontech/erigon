@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -226,4 +228,48 @@ func TestGenerateChainAttachesBlockAccessList(t *testing.T) {
 	if got, want := bal.Hash(), block.BlockAccessListHash(); want == nil || got != *want {
 		t.Fatalf("block access list hash mismatch: got %s, want %v", got, want)
 	}
+}
+
+func TestGenerateChainTimeOffsetsAcrossBogota(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		forkTime  uint64
+		offset    int64
+		wantTime  uint64
+		wantNonce uint64
+	}{
+		{name: "move onto activation", forkTime: 15, offset: 5, wantTime: 15, wantNonce: 1},
+		{name: "move before activation", forkTime: 10, offset: -1, wantTime: 9, wantNonce: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target := common.HexToAddress("0x8253")
+			cfg := chain.AllProtocolChanges.Copy()
+			cfg.BogotaTime = &tc.forkTime
+			cfg.ZeroNonceStorageAccounts = []common.Address{target}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: cfg,
+				Alloc: types.GenesisAlloc{
+					target: {Balance: big.NewInt(100), Storage: map[common.Hash]common.Hash{{}: common.HexToHash("0x42")}},
+				},
+			}))
+			blocks, err := m.GenerateChainWithTimeOffsets(m.Genesis, []int64{tc.offset}, func(_ int, b *blockgen.BlockGen) {
+				require.Equal(t, tc.wantNonce, b.TxNonce(target))
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.wantTime, blocks.TopBlock.Time())
+			require.NoError(t, m.InsertChain(blocks))
+		})
+	}
+}
+
+func TestGenerateChainWithdrawalsAtShanghai(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config:    testforks.Forks["ParisToShanghaiAtTime15k"].Copy(),
+		Timestamp: 14_985,
+	}))
+	blocks, err := m.GenerateChainWithTimeOffsets(m.Genesis, []int64{0, -5}, nil)
+	require.NoError(t, err)
+	require.Nil(t, blocks.Blocks[0].WithdrawalsHash())
+	require.NotNil(t, blocks.Blocks[1].WithdrawalsHash())
+	require.NoError(t, m.InsertChain(blocks))
 }

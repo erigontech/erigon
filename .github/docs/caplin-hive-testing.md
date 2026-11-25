@@ -25,7 +25,6 @@ Location: `/erigon/mark/hive/`
 |------|--------|-----|
 | `clients/erigon/Dockerfile` | Replaced pre-built image with local build from source (alpine-based) | Build from working tree instead of pulling from Docker Hub |
 | `clients/erigon/Dockerfile.local` | Added `caplin` binary build, `EXTRA_BUILD_TAGS=nosilkworm`, extra ports | Local development builds need caplin + silkworm disabled |
-| `clients/erigon/erigon.sh` | Added `ERIGON_EXEC3_PARALLEL=true` for Amsterdam/BAL blocks | BAL validation only runs in parallel execution path |
 
 ### Key Files
 
@@ -67,18 +66,6 @@ COPY enode.sh /hive-bin/enode.sh
 RUN chmod +x /erigon.sh /hive-bin/enode.sh
 EXPOSE 8545 8546 8551 30303 30303/udp 30304 30304/udp
 ENTRYPOINT ["/erigon.sh"]
-```
-
-### erigon.sh Modifications
-
-Only one addition to upstream — Amsterdam/BAL parallel execution:
-
-```bash
-# Enable parallel execution for Amsterdam (BAL) blocks.
-# BAL validation only runs in the parallel execution path.
-if [ "$HIVE_AMSTERDAM_TIMESTAMP" != "" ]; then
-    export ERIGON_EXEC3_PARALLEL=true
-fi
 ```
 
 ### Running Hive Tests Locally

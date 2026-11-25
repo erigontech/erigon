@@ -8,7 +8,6 @@ import (
 
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -22,7 +21,7 @@ func TestE2SnapSchema(t *testing.T) {
 	t.Parallel()
 	dirs := setup(t)
 	e2version := NewE2SnapSchemaVersion(version.V1_0_standart, version.V1_0_standart)
-	p := NewE2SnapSchema(dirs, "bodies", e2version)
+	p := NewE2SnapSchemaWithStepAndDir(dirs.Snap, "bodies", []string{"bodies"}, 1000, e2version)
 
 	info, ok := p.Parse("v1.0-000100-000500-bodies.seg")
 	require.True(t, ok)
@@ -50,7 +49,7 @@ func TestE2SnapSchema(t *testing.T) {
 	require.False(t, ok)
 
 	// for transactions
-	p = NewE2SnapSchemaWithIndexTag(dirs, "transactions", []string{"transactions", "transactions-to-block"}, e2version)
+	p = NewE2SnapSchemaWithStepAndDir(dirs.Snap, "transactions", []string{"transactions", "transactions-to-block"}, 1000, e2version)
 	_, ok = p.Parse("v1.0-000100-000500-transactions.seg")
 	require.True(t, ok)
 
@@ -112,7 +111,7 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 	ver := version.V1_0_standart
 	stepSize := uint64(config3.DefaultStepSize)
 	p := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
-		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressKeys, ver).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 		BtIndex(ver).
 		Existence(ver).Build()
 
@@ -171,7 +170,7 @@ func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
 	stepSize := uint64(config3.DefaultStepSize)
 	ver := version.V1_0_standart
 	p := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapDomain, "commitments", DataExtensionKv, seg.CompressKeys, ver).
+		Data(dirs.SnapDomain, "commitments", DataExtensionKv, ver).
 		Accessor(dirs.SnapDomain, ver).Build()
 
 	stepFrom := RootNum(stepSize * 288)
@@ -219,7 +218,7 @@ func TestE3SnapSchemaForHistory(t *testing.T) {
 	stepSize := uint64(config3.DefaultStepSize)
 	ver := version.V1_0_standart
 	p := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapHistory, "accounts", DataExtensionV, seg.CompressKeys, ver).
+		Data(dirs.SnapHistory, "accounts", DataExtensionV, ver).
 		Accessor(dirs.SnapAccessors, ver).Build()
 
 	stepFrom, stepTo := RootNum(stepSize*192), RootNum(stepSize*256)
@@ -270,7 +269,7 @@ func TestE3SnapSchemaForII(t *testing.T) {
 	stepSize := uint64(config3.DefaultStepSize)
 	ver := version.V1_0_standart
 	p := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, seg.CompressNone, ver).
+		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, ver).
 		Accessor(dirs.SnapAccessors, ver).Build()
 
 	stepFrom, stepTo := RootNum(stepSize*128), RootNum(stepSize*192)

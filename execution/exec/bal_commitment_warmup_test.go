@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	commitmentv3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -120,23 +121,31 @@ func TestBALCommitmentWarmupKeysUseChangesOnly(t *testing.T) {
 	storageAddress := accounts.InternAddress(common.Address{19: 3})
 	readSlot := accounts.InternKey(common.Hash{31: 4})
 	changedSlot := accounts.InternKey(common.Hash{31: 5})
+	otherSlot := accounts.InternKey(common.Hash{31: 6})
+	slotChange := func(slot accounts.StorageKey) types.SlotChanges {
+		return types.SlotChanges{Slot: slot, Changes: []*types.StorageChange{{Value: *uint256.NewInt(2)}}}
+	}
 	bal := types.BlockAccessList{
 		{Address: readOnlyAddress.Value(), StorageReads: []common.Hash{readSlot.Value()}},
-		{Address: accountAddress.Value(), BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}}},
-		{Address: storageAddress.Value(), StorageChanges: []types.SlotChanges{{
-			Slot: changedSlot, Changes: []*types.StorageChange{{Value: *uint256.NewInt(2)}},
-		}}},
+		{
+			Address:        accountAddress.Value(),
+			BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
+			StorageChanges: []types.SlotChanges{slotChange(changedSlot), slotChange(otherSlot)},
+		},
+		{Address: storageAddress.Value(), StorageChanges: []types.SlotChanges{slotChange(changedSlot), slotChange(otherSlot)}},
 	}
 
+	storageKey := func(address accounts.Address, slot accounts.StorageKey) []byte {
+		addressValue, slotValue := address.Value(), slot.Value()
+		return commitment.KeyToHexNibbleHash(append(addressValue[:], slotValue[:]...))
+	}
 	accountValue := accountAddress.Value()
-	storageValue := storageAddress.Value()
-	slotValue := changedSlot.Value()
-	storageKey := make([]byte, len(storageValue)+len(slotValue))
-	copy(storageKey, storageValue[:])
-	copy(storageKey[len(storageValue):], slotValue[:])
 	want := [][]byte{
 		commitment.KeyToHexNibbleHash(accountValue[:]),
-		commitment.KeyToHexNibbleHash(storageKey),
+		storageKey(accountAddress, changedSlot),
+		storageKey(accountAddress, otherSlot),
+		storageKey(storageAddress, changedSlot),
+		storageKey(storageAddress, otherSlot),
 	}
 	slices.SortFunc(want, bytes.Compare)
 
@@ -374,6 +383,29 @@ func TestBALPrefetchKeysOfAnEmptyBAL(t *testing.T) {
 	require.Empty(t, slots)
 }
 
+// coldStorageTriePrefetcher reports a cold page only for prefixes below the storage root.
+type coldStorageTriePrefetcher struct{}
+
+func (coldStorageTriePrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, error) {
+	cold := 0
+	for _, k := range keys {
+		if len(k) > storageTrieDepth/2 {
+			cold++
+		}
+	}
+	return cold, nil
+}
+
+func TestTrieMostlyResidentSeesAColdStorageTrieOfOneAccount(t *testing.T) {
+	var keys [][]byte
+	for i := range 64 {
+		k := make([]byte, 128)
+		k[64], k[65], k[66] = byte(i>>4)&0xf, byte(i)&0xf, 3
+		keys = append(keys, k)
+	}
+	require.False(t, trieMostlyResident(context.Background(), coldStorageTriePrefetcher{}, keys))
+}
+
 func TestTrieMostlyResidentWithoutKeysSkipsTheWalk(t *testing.T) {
 	require.True(t, trieMostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, nil))
 }
@@ -532,4 +564,59 @@ func TestFirstFailurePrefersAReadFailureOverAnIncompleteBatch(t *testing.T) {
 	require.Equal(t, failed, firstFailure(context.Canceled, failed), "a cancelled chunk does not hide a read failure")
 	require.Equal(t, kv.ErrPrefetchIncomplete, firstFailure(nil, kv.ErrPrefetchIncomplete))
 	require.NoError(t, firstFailure(nil, nil))
+}
+
+func TestV3TrieKeysAreDistinctAndCoverEveryPath(t *testing.T) {
+	addr, storageOnly := make([]byte, 20), make([]byte, 20)
+	addr[19], storageOnly[19] = 1, 2
+	s1, s2 := slices.Concat(addr, make([]byte, 32)), slices.Concat(addr, make([]byte, 32))
+	s2[51] = 2
+	s3 := slices.Concat(storageOnly, make([]byte, 32))
+	hashed := [][]byte{commitment.KeyToHexNibbleHash(addr), commitment.KeyToHexNibbleHash(s1), commitment.KeyToHexNibbleHash(s2), commitment.KeyToHexNibbleHash(s3)}
+
+	keys := v3TrieKeys(hashed)
+	seen := map[string]bool{}
+	for _, k := range keys {
+		require.Falsef(t, seen[string(k)], "duplicate key %x", k)
+		seen[string(k)] = true
+	}
+	for _, hk := range hashed {
+		for _, k := range commitmentv3.PathNodeKeys(nil, hk, prefetchFlatDepth) {
+			require.Truef(t, seen[string(k)], "path key %x missing", k)
+		}
+	}
+	for _, k := range commitmentv3.PathNodeKeys(nil, hashed[3][:64], prefetchFlatDepth) {
+		require.Truef(t, seen[string(k)], "account path key %x of a storage-only account missing", k)
+	}
+}
+
+func TestPrefetchBALCommitmentV3BatchesAllKeysWhenTheSampleIsCold(t *testing.T) {
+	var hashed [][]byte
+	for i := range residencySampleKeys + 50 {
+		addr := make([]byte, 20)
+		addr[18], addr[19] = byte(i>>8), byte(i)
+		hashed = append(hashed, commitment.KeyToHexNibbleHash(addr))
+	}
+	tx := &prefetchRecordingTx{coldPagesPerCall: 1 << 20}
+	prefetchBALCommitmentV3(t.Context(), &singleTxRoDB{tx: tx}, hashed)
+
+	got := map[string]bool{}
+	for _, k := range tx.commitmentKeys {
+		got[string(k)] = true
+	}
+	for _, k := range v3TrieKeys(hashed) {
+		require.Truef(t, got[string(k)], "node key %x of a cold trie was not batch-prefetched", k)
+	}
+}
+
+func TestPrefetchBALCommitmentV3SkipsAWarmTrie(t *testing.T) {
+	var hashed [][]byte
+	for i := range residencySampleKeys + 50 {
+		addr := make([]byte, 20)
+		addr[18], addr[19] = byte(i>>8), byte(i)
+		hashed = append(hashed, commitment.KeyToHexNibbleHash(addr))
+	}
+	tx := &prefetchRecordingTx{}
+	prefetchBALCommitmentV3(t.Context(), &singleTxRoDB{tx: tx}, hashed)
+	require.Less(t, len(tx.commitmentKeys), len(v3TrieKeys(hashed)), "a warm sample stops before the full batch")
 }

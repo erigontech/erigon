@@ -151,16 +151,15 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 	}
 }
 
-// ApplyMessage computes the new state by applying the given message
-// against the old state within the environment.
+// ApplyMessage applies msg to the EVM state and returns its execution result.
+// The result contains return data, gas accounting and any EVM failure of an
+// accepted transaction. A returned error rejects or aborts the transaction.
 //
-// ApplyMessage returns the bytes returned by any EVM execution (if it took place),
-// the gas used (which includes gas refunds) and an error if it failed. An error always
-// indicates a core error meaning that the message would always fail for that particular
-// state and would never be accepted within a block.
-// `refunds` is false when it is not required to apply gas refunds
-// `gasBailout` is true when it is not required to fail transaction if the balance is not enough to pay gas.
-// for trace_call to replicate OE/Parity behaviour
+// refunds enables gas refunds. For ordinary transactions, gasBailout skips
+// sender fee debits and refunds, and allows an underfunded value transfer
+// without debiting the sender; producer tips are still credited.
+// Frame transactions ignore gasBailout and require normal payment approval
+// and value transfers.
 func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
 	return applyMessage(evm, msg, gp, refunds, gasBailout, false, false, engine)
 }
@@ -246,7 +245,7 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 // preCheck validates the transaction and computes the fees for buyGas without
 // mutating state or reserving block gas.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) (upfrontTxnFees, error) {
+func (st *TxnExecutor) preCheck(gasBailout bool, intrinsic mdgas.IntrinsicGasCalcResult) (upfrontTxnFees, error) {
 	rules := st.evm.ChainRules()
 	from := st.msg.From()
 
@@ -338,27 +337,21 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	// EIP-7825.
-	requiredIntrinsicGas := max(intrinsicGasResult.ExecutionGas, intrinsicGasResult.FloorGasCost)
-	if st.msg.CheckGas() && rules.IsOsaka {
-		if rules.IsAmsterdam {
-			if gas > params.MaxTxnTotalGasLimit {
-				return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
-			}
-		} else if gas > params.MaxTxnGasLimit {
-			return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
-		}
+	if st.msg.CheckGas() && rules.IsOsaka && mdgas.ExceedsDeclaredGasCap(gas, rules.IsAmsterdam) {
+		return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
 	}
-	// EIP-8037: TX_MAX_GAS_LIMIT applies to the execution gas dimension only.
-	if rules.IsAmsterdam && !st.msg.SkipExecutionGasCap() && requiredIntrinsicGas > params.MaxTxnGasLimit {
+	if intrinsic.ExceedsExecutionGasCap(rules.IsAmsterdam) && !st.msg.SkipExecutionGasCap() {
 		return upfrontTxnFees{}, fmt.Errorf("%w: execution gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
-			ErrIntrinsicGas, requiredIntrinsicGas, params.MaxTxnGasLimit)
+			ErrIntrinsicGas, intrinsic.RequiredGas(), params.MaxTxnGasLimit)
 	}
 
-	// Match geth's EIP-7702 prerequisite precedence: after fee caps, before
-	// affordability and intrinsic gas.
-	if err := validateSetCodePrerequisites(st.msg.Authorizations(), st.msg.To().IsNil(), rules.IsPrague); err != nil {
-		return upfrontTxnFees{}, err
+	// Fee and gas caps take precedence here. To match geth's EIP-7702 error
+	// order, report SetCode prerequisite errors before checking the sender's
+	// funds or whether the gas limit covers the intrinsic cost.
+	if auths := st.msg.Authorizations(); auths != nil {
+		if err := types.ValidateSetCodePrerequisites(auths, st.msg.To().IsNil(), rules.IsPrague); err != nil {
+			return upfrontTxnFees{}, err
+		}
 	}
 
 	var (
@@ -408,8 +401,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	if gas < requiredIntrinsicGas {
-		return upfrontTxnFees{}, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, gas, requiredIntrinsicGas)
+	if intrinsic.ExceedsGasLimit(gas) {
+		return upfrontTxnFees{}, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, gas, intrinsic.RequiredGas())
 	}
 
 	if st.msg.To().IsNil() {
@@ -436,18 +429,16 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.ExecutionResult, err error) {
-	if st.evm.IntraBlockState().IsVersioned() {
-		defer func() {
-			if r := recover(); r != nil {
-				// An in-flight dependency aborts via result.Dep, it does not panic,
-				// so any panic here is a genuine failure.
-				err = fmt.Errorf("%w: %v at: %s", ErrExecPanic, r, dbg.Stack())
-			}
-		}()
-	}
+	defer func() {
+		if r := recover(); r != nil {
+			// An in-flight dependency aborts via result.Dep, it does not panic,
+			// so any panic here is a genuine failure.
+			err = fmt.Errorf("%w: %v at: %s", ErrExecPanic, r, dbg.Stack())
+		}
+	}()
 
 	if msg, ok := st.msg.(*types.Message); ok && msg.FrameTransaction() != nil {
-		return st.executeFrameTransaction(msg.FrameTransaction(), refunds, gasBailout, nil)
+		return st.executeFrameTransaction(msg.FrameTransaction(), refunds, nil)
 	}
 	coinbase := st.evm.Context.Coinbase
 	msg := st.msg
@@ -456,7 +447,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 	auths := msg.Authorizations()
 
-	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, accessTuples)
+	rules := st.evm.ChainRules()
+	vmConfig := st.evm.Config()
+	intrinsicGasResult, overflow := intrinsicGas(msg, rules, vmConfig.HasEip3860(rules))
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
@@ -470,9 +463,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if err := st.buyGas(fees, gasBailout); err != nil {
 		return nil, err
 	}
-
-	rules := st.evm.ChainRules()
-	vmConfig := st.evm.Config()
 
 	if !contractCreation && !st.chargeSenderAtValidation {
 		// Increment the nonce for the next transaction
@@ -645,42 +635,13 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}
 	}
 
-	effectiveTip := *st.gasPrice
-	if rules.IsLondon {
-		if st.feeCap.Gt(&st.evm.Context.BaseFee) {
-			effectiveTip = u256.Min(*st.tipCap, u256.Sub(*st.feeCap, st.evm.Context.BaseFee))
-		} else {
-			effectiveTip = u256.Num0
-		}
+	tipAmount, err := st.payCoinbase(st.txnGasUsed)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 	}
-
-	tipAmount := u256.Mul(u256.U64(st.txnGasUsed), effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-
-	if !st.noFeeBurnAndTip {
-		if err := st.state.AddBalance(coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-		}
-	}
-
-	var burnAmount uint256.Int
-	var burntContractAddress accounts.Address
-
-	if !st.isFree && rules.IsLondon {
-		burntContractAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
-		if !burntContractAddress.IsNil() {
-			burnAmount = u256.Mul(u256.U64(st.txnGasUsed), st.evm.Context.BaseFee)
-
-			if rules.IsAura && rules.IsPrague {
-				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
-				burnAmount = u256.Add(burnAmount, fees.blobGasVal)
-			}
-
-			if !st.noFeeBurnAndTip {
-				if err := st.state.AddBalance(burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified); err != nil {
-					return nil, err
-				}
-			}
-		}
+	burnAmount, burntContractAddress, err := st.burnFees(st.txnGasUsed, fees.blobGasVal)
+	if err != nil {
+		return nil, err
 	}
 
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
@@ -709,22 +670,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	return result, nil
-}
-
-func validateSetCodePrerequisites(auths []types.Authorization, contractCreation, isPrague bool) error {
-	if auths == nil {
-		return nil
-	}
-	if !isPrague {
-		return errors.New("SetCode transaction not allowed before Prague fork")
-	}
-	if contractCreation {
-		return errors.New("contract creation not allowed with type4 txs")
-	}
-	if len(auths) == 0 {
-		return errors.New("SetCode transaction must have at least one authorization")
-	}
-	return nil
 }
 
 func (st *TxnExecutor) handleRuntimeFailure(typ vm.OpCode, destination accounts.Address, startGas mdgas.MdGas, err error) mdgas.MdGasUsage {
@@ -760,8 +705,9 @@ func RecipientCreditedAtValidation(from, to, coinbase accounts.Address, value ui
 	return err == nil && acc != nil && acc.CodeHash.IsEmpty()
 }
 
-// verifyAuthorities applies the EIP-7702 authorization list, mutating state;
-// callers must first validate the list with validateSetCodePrerequisites.
+// verifyAuthorities applies individual EIP-7702 authorizations after
+// types.ValidateSetCodePrerequisites checks the transaction. It skips invalid
+// tuples and updates the authority's code and nonce for each accepted tuple.
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *uint256.Int, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
 	var gasUsed mdgas.MdGasUsage
 	if auths == nil {
@@ -880,6 +826,41 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	return gasRemaining, gasUsed, nil
 }
 
+func (st *TxnExecutor) payCoinbase(gasUsed uint64) (uint256.Int, error) {
+	effectiveTip := *st.gasPrice
+	if st.evm.ChainRules().IsLondon {
+		effectiveTip = types.CalcEffectiveGasTip(&st.evm.Context.BaseFee, st.msg.TipCap, st.msg.FeeCap)
+	}
+	return st.payCoinbaseAmount(u256.Mul(u256.U64(gasUsed), effectiveTip))
+}
+
+func (st *TxnExecutor) payCoinbaseAmount(tipAmount uint256.Int) (uint256.Int, error) {
+	if st.noFeeBurnAndTip {
+		return tipAmount, nil
+	}
+	return tipAmount, st.state.AddBalance(st.evm.Context.Coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee)
+}
+
+func (st *TxnExecutor) burnFees(gasUsed uint64, blobCost uint256.Int) (uint256.Int, accounts.Address, error) {
+	rules := st.evm.ChainRules()
+	if st.isFree || !rules.IsLondon {
+		return uint256.Int{}, accounts.NilAddress, nil
+	}
+	address := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
+	if address.IsNil() {
+		return uint256.Int{}, address, nil
+	}
+	amount := u256.Mul(u256.U64(gasUsed), st.evm.Context.BaseFee)
+	if rules.IsAura && rules.IsPrague {
+		// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
+		amount = u256.Add(amount, blobCost)
+	}
+	if st.noFeeBurnAndTip {
+		return amount, address, nil
+	}
+	return amount, address, st.state.AddBalance(address, amount, tracing.BalanceChangeUnspecified)
+}
+
 func (st *TxnExecutor) refundGas(gasLeft mdgas.MdGas) error {
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := u256.Mul(u256.U64(gasLeft.Total()), *st.gasPrice)
@@ -895,23 +876,39 @@ func (st *TxnExecutor) refundGas(gasLeft mdgas.MdGas) error {
 	return nil
 }
 
-func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Authorization, accessTuples types.AccessList) (mdgas.IntrinsicGasCalcResult, bool) {
-	rules := st.evm.ChainRules()
-	vmConfig := st.evm.Config()
+func intrinsicGas(msg Message, rules *chain.Rules, isEIP3860 bool) (mdgas.IntrinsicGasCalcResult, bool) {
+	contractCreation := msg.To().IsNil()
+	accessList := msg.AccessList()
 	return mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
-		Data:               st.data,
-		AuthorizationsLen:  uint64(len(auths)),
-		AccessListLen:      uint64(len(accessTuples)),
-		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
+		Data:               msg.Data(),
+		AuthorizationsLen:  uint64(len(msg.Authorizations())),
+		AccessListLen:      uint64(len(accessList)),
+		StorageKeysLen:     uint64(accessList.StorageKeys()),
 		IsContractCreation: contractCreation,
-		IsSelfTransfer:     !contractCreation && st.msg.To() == st.msg.From(),
-		HasValue:           !st.msg.Value().IsZero(),
+		IsSelfTransfer:     !contractCreation && msg.To() == msg.From(),
+		HasValue:           !msg.Value().IsZero(),
 		IsEIP2:             rules.IsHomestead,
 		IsEIP2028:          rules.IsIstanbul,
-		IsEIP3860:          vmConfig.HasEip3860(rules),
+		IsEIP3860:          isEIP3860,
 		IsEIP7623:          rules.IsPrague,
 		IsEIP7976:          rules.IsAmsterdam,
 		IsEIP7981:          rules.IsAmsterdam,
 		IsEIP2780:          rules.IsAmsterdam,
 	})
+}
+
+// PrecompileCallRunsOutOfGas reports whether a value transfer to a precompile cannot pay the precompile
+// gas after the intrinsic charge. Such a frame fails and reverts the transfer, so it writes nothing to
+// the recipient, but it still reads it.
+func PrecompileCallRunsOutOfGas(msg Message, rules *chain.Rules) bool {
+	p, ok := vm.Precompiles(rules)[msg.To()]
+	if !ok || len(msg.Authorizations()) > 0 {
+		return false
+	}
+	intrinsic, overflow := intrinsicGas(msg, rules, false)
+	if overflow || msg.Gas() < intrinsic.ExecutionGas {
+		return false
+	}
+	frameGas := mdgas.SplitTxnGasLimit(msg.Gas(), intrinsic.ExecutionGas, rules, msg.SkipExecutionGasCap())
+	return frameGas.Execution < p.RequiredGas(msg.Data())
 }

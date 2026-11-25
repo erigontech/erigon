@@ -180,6 +180,52 @@ func TestCapEVMTimeout(t *testing.T) {
 	}
 }
 
+func TestCallManyAppliesTheReturnDataLimit(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api, _ := newCallManyApisForTest(m)
+	api.ReturnDataLimit = 16
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
+	returns32 := common.HexToAddress("0x00000000000000000000000000000000000000ab")
+	code := hexutil.Bytes(hexutil.MustDecode("0x60206000f3"))
+	overrides := ethapi.StateOverrides{accounts.InternAddress(returns32): {Code: &code}}
+
+	_, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{{To: &returns32}}}}, stateCtx, &overrides, nil)
+	require.ErrorContains(t, err, "--rpc.returndata.limit")
+}
+
+func TestCallManySharesTheGasCapAcrossTheRequest(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api, _ := newCallManyApisForTest(m)
+	api.GasCap = 100_000
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
+	burner, cheap := common.HexToAddress("0x00000000000000000000000000000000000000ac"), common.HexToAddress("0x00000000000000000000000000000000000000ad")
+	code := hexutil.Bytes(hexutil.MustDecode("0x5b600056"))
+	overrides := ethapi.StateOverrides{accounts.InternAddress(burner): {Code: &code}}
+
+	aboveBudget := hexutil.Uint64(api.GasCap)
+	for name, gas := range map[string]*hexutil.Uint64{"default gas": nil, "gas above the remaining budget": &aboveBudget} {
+		t.Run(name, func(t *testing.T) {
+			_, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{{To: &cheap}, {To: &burner, Gas: gas}, {To: &burner, Gas: gas}}}}, stateCtx, &overrides, nil)
+			require.ErrorContains(t, err, "--rpc.gascap")
+		})
+	}
+}
+
+func TestCallManyWithoutAGasCapRunsTheCalls(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api, _ := newCallManyApisForTest(m)
+	api.GasCap = 0
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
+	to := common.HexToAddress("0x00000000000000000000000000000000000000ae")
+
+	results, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{{To: &to}}}}, stateCtx, nil, nil)
+	require.NoError(t, err)
+	require.NotContains(t, results[0][0], "error")
+}
+
 func TestCallManyEmptyBundles(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api, debugApi := newCallManyApisForTest(m)

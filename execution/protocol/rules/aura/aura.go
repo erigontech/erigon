@@ -577,7 +577,7 @@ func (c *AuRa) VerifyUncles(chain rules.ChainReader, header *types.Header, uncle
 
 // Prepare implements rules.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
-func (c *AuRa) Prepare(chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
+func (c *AuRa) Prepare(chain rules.ChainHeaderReader, header *types.Header) error {
 	return nil
 	/// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	//header.Coinbase = common.Address{}

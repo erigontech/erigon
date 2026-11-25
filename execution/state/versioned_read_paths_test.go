@@ -2,6 +2,7 @@ package state
 
 import (
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -170,18 +171,13 @@ func TestVersionedRead_B_WarmStorageReadReturnsReadSetTuple(t *testing.T) {
 	assert.True(t, clean, "a read-set hit is clean: this tx has no write of the slot, so a revert deletes the write")
 }
 
-func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, versioned bool) *IntraBlockState {
+func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account) *IntraBlockState {
 	_, tx, domains := NewTestRwTx(t)
 	addrValue := addr.Value()
 	domains.SetTxNum(10)
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
 	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-	var ibs *IntraBlockState
-	if versioned {
-		ibs = NewWithVersionMap(reader, NewVersionMap(nil))
-	} else {
-		ibs = New(reader)
-	}
+	ibs := New(reader)
 	t.Cleanup(ibs.Close)
 	ibs.SetTxContext(1, 5)
 	return ibs
@@ -189,36 +185,32 @@ func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, 
 
 func TestVersionedTouch_RepeatedTouchIsNoop(t *testing.T) {
 	t.Parallel()
-	for _, versioned := range []bool{false, true} {
-		addr := accounts.InternAddress([20]byte{0xb6})
-		acc := accounts.NewAccount()
-		acc.Incarnation = 1
-		ibs := newTouchTestIBS(t, addr, acc, versioned)
+	addr := accounts.InternAddress([20]byte{0xb6})
+	acc := accounts.NewAccount()
+	acc.Incarnation = 1
+	ibs := newTouchTestIBS(t, addr, acc)
 
-		require.NoError(t, ibs.TouchAccount(addr))
-		n := ibs.journal.length()
-		require.Positive(t, n)
-		require.NoError(t, ibs.TouchAccount(addr))
-		assert.Equal(t, n, ibs.journal.length(), "versioned=%v", versioned)
-	}
+	require.NoError(t, ibs.TouchAccount(addr))
+	n := ibs.journal.length()
+	require.Positive(t, n)
+	require.NoError(t, ibs.TouchAccount(addr))
+	assert.Equal(t, n, ibs.journal.length())
 }
 
 // The touch result does not depend on the other fields once the tx wrote the balance.
 func TestVersionedTouch_OwnBalanceWriteReadsNoFields(t *testing.T) {
 	t.Parallel()
-	for _, versioned := range []bool{false, true} {
-		addr := accounts.InternAddress([20]byte{0xb7})
-		acc := accounts.NewAccount()
-		acc.Incarnation = 1
-		acc.Nonce = 1
-		acc.Balance = *uint256.NewInt(5)
-		ibs := newTouchTestIBS(t, addr, acc, versioned)
+	addr := accounts.InternAddress([20]byte{0xb7})
+	acc := accounts.NewAccount()
+	acc.Incarnation = 1
+	acc.Nonce = 1
+	acc.Balance = *uint256.NewInt(5)
+	ibs := newTouchTestIBS(t, addr, acc)
 
-		require.NoError(t, ibs.SetBalance(addr, uint256.Int{}, 0))
-		require.NoError(t, ibs.TouchAccount(addr))
-		_, ok := ibs.versionedReads.GetNonce(addr)
-		assert.False(t, ok, "nonce read, versioned=%v", versioned)
-	}
+	require.NoError(t, ibs.SetBalance(addr, uint256.Int{}, 0))
+	require.NoError(t, ibs.TouchAccount(addr))
+	_, ok := ibs.versionedReads.GetNonce(addr)
+	assert.False(t, ok, "nonce read")
 }
 
 // ------------------------------------------------------------------
@@ -885,6 +877,77 @@ func TestVersionedRead_DeletedBalanceKeepsRecordedAbsence(t *testing.T) {
 	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
 }
 
+// A repeat read of a committed absence returns the recorded absence although a lower tx's
+// destruct was flushed in between, and validation still rejects the read.
+func TestVersionedRead_RepeatedCommittedAbsenceKeepsRecordedRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xa1})
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 0}, 1, true)
+
+	exists, err = ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+	empty, err := ibs.Empty(addr)
+	require.NoError(t, err)
+	require.True(t, empty)
+	_, balanceRecorded := ibs.versionedReads.GetBalance(addr)
+	require.False(t, balanceRecorded)
+	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
+}
+
+// Repeat reads of a committed absence record nothing beyond the first read and do not take the
+// address entry's lock, which a higher tx's cell has created.
+func TestVersionedRead_RepeatedCommittedAbsenceSkipsVersionMap(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xa2})
+	vm := NewVersionMap(nil)
+	vm.WriteBalance(addr, Version{TxIndex: 5}, *uint256.NewInt(5), true)
+
+	once := NewWithVersionMap(&emptyReader{}, vm)
+	defer once.Close()
+	once.SetTxContext(1, 2)
+	_, err := once.Empty(addr)
+	require.NoError(t, err)
+
+	repeated := NewWithVersionMap(&emptyReader{}, vm)
+	defer repeated.Close()
+	repeated.SetTxContext(1, 2)
+	_, err = repeated.Empty(addr)
+	require.NoError(t, err)
+
+	entry := vm.load(addr)
+	require.NotNil(t, entry)
+	entry.mu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := repeated.Empty(addr)
+		if err == nil {
+			_, err = repeated.Exist(addr)
+		}
+		done <- err
+	}()
+	select {
+	case err = <-done:
+		entry.mu.Unlock()
+	case <-time.After(5 * time.Second):
+		entry.mu.Unlock()
+		<-done
+		require.Fail(t, "a repeat read took the version-map lock")
+	}
+	require.NoError(t, err)
+	require.Equal(t, once.VersionedReads(), repeated.VersionedReads())
+}
+
 // storage fallback. Empty reader + no prior writes/reads → falls through
 // to the readStorage callback (returns zero from emptyReader) and records
 // defaultV in readSet.
@@ -1418,18 +1481,4 @@ func TestVersionedRead_CodeSizeServedBySharedStore(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(code), size)
 	require.Zero(t, reader.codeReads+reader.codeSizeReads)
-}
-
-// A versioned read that finds a stateObject materialized before the IBS was bound to a
-// version map fails the read instead of panicking.
-func TestVersionedRead_MaterializedObjectFailsTheRead(t *testing.T) {
-	t.Parallel()
-	ibs := New(NewNoopReader())
-	addr := accounts.InternAddress(common.HexToAddress("0xab"))
-	require.NoError(t, ibs.CreateAccount(addr, true))
-	ibs.SetVersionMap(NewVersionMap(nil))
-	require.NotPanics(t, func() {
-		_, err := ibs.GetState(addr, accounts.InternKey(common.Hash{31: 1}))
-		require.Error(t, err)
-	})
 }

@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/bits"
 	"runtime"
 	"slices"
@@ -209,6 +210,9 @@ func (u *ParticipationBitList) EncodeSSZ(dst []byte) ([]byte, error) {
 // DecodeSSZ replaces the underlying byte slice of the BitList with a copy of the input byte slice.
 // It then updates the length of the BitList to match the length of the new byte slice.
 func (u *ParticipationBitList) DecodeSSZ(dst []byte, _ int) error {
+	if len(dst) > u.c {
+		return fmt.Errorf("participation list length exceeds limit: %d > %d", len(dst), u.c)
+	}
 	u.u = make([]byte, len(dst))
 	copy(u.u, dst)
 	u.l = len(dst)
@@ -260,20 +264,15 @@ func (u *ParticipationBitList) UnmarshalJSON(input []byte) error {
 	// Try spec-compliant format first: array of decimal strings.
 	var list []string
 	if err := json.Unmarshal(input, &list); err == nil {
-		u.l = len(list)
-		if cap(u.u) < u.l+32 {
-			u.u = make([]byte, u.l+32)
-		} else {
-			u.u = u.u[:u.l+32]
-		}
+		values := make([]byte, len(list))
 		for i, s := range list {
 			val, err := strconv.ParseUint(s, 10, 8)
 			if err != nil {
 				return err
 			}
-			u.u[i] = byte(val)
+			values[i] = byte(val)
 		}
-		return nil
+		return u.DecodeSSZ(values, 0)
 	}
 	// Fallback: legacy hex-encoded SSZ format.
 	var hex hexutil.Bytes

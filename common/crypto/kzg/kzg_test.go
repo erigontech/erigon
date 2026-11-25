@@ -18,6 +18,8 @@ package kzg
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"fmt"
 	mrand "math/rand"
 	"slices"
 	"testing"
@@ -492,6 +494,63 @@ func TestKZGToVersionedHash(t *testing.T) {
 	vh3 := KZGToVersionedHash(commitment2)
 	if vh == vh3 {
 		t.Fatal("different commitments produced the same versioned hash")
+	}
+}
+
+// TestMainnetTrustedSetupDigest pins the embedded setup bytes to the mainnet setup
+// shipped by go-eth-kzg and go-ethereum.
+func TestMainnetTrustedSetupDigest(t *testing.T) {
+	const want = "f8e44a31ebf0a6d0734dcb301b0716e2c77f3ae18ed0cab0870fbcc2ca55616f"
+	if got := fmt.Sprintf("%x", sha256.Sum256(mainnetTrustedSetup)); got != want {
+		t.Fatalf("embedded trusted setup digest: got %s, want %s", got, want)
+	}
+}
+
+// TestCtxMatchesGoEthKZGMainnetSetup checks that the context built from the embedded setup
+// computes the same commitment and cell proofs as go-eth-kzg's own mainnet context, and verifies its proofs.
+func TestCtxMatchesGoEthKZGMainnetSetup(t *testing.T) {
+	ref, err := goethkzg.NewContext4096Secure()
+	if err != nil {
+		t.Fatalf("failed to create the reference context: %v", err)
+	}
+	got := Ctx()
+	blob := randBlob()
+
+	wantCommitment, err := ref.BlobToKZGCommitment(&blob, 0)
+	if err != nil {
+		t.Fatalf("reference commitment: %v", err)
+	}
+	gotCommitment, err := got.BlobToKZGCommitment(&blob, 0)
+	if err != nil {
+		t.Fatalf("commitment: %v", err)
+	}
+	if gotCommitment != wantCommitment {
+		t.Fatalf("blob commitment differs from the reference: got %x, want %x", gotCommitment, wantCommitment)
+	}
+
+	_, wantCellProofs, err := ref.ComputeCellsAndKZGProofs(&blob, 0)
+	if err != nil {
+		t.Fatalf("reference cells and proofs: %v", err)
+	}
+	_, gotCellProofs, err := got.ComputeCellsAndKZGProofs(&blob, 0)
+	if err != nil {
+		t.Fatalf("cells and proofs: %v", err)
+	}
+	for i := range wantCellProofs {
+		if gotCellProofs[i] != wantCellProofs[i] {
+			t.Fatalf("cell proof %d differs from the reference: got %x, want %x", i, gotCellProofs[i], wantCellProofs[i])
+		}
+	}
+
+	wantProof, err := ref.ComputeBlobKZGProof(&blob, wantCommitment, 0)
+	if err != nil {
+		t.Fatalf("reference blob proof: %v", err)
+	}
+	if err := got.VerifyBlobKZGProof(&blob, wantCommitment, wantProof); err != nil {
+		t.Fatalf("reference blob proof does not verify: %v", err)
+	}
+	if err := VerifyCellProofBatch([][]byte{blob[:]}, []goethkzg.KZGCommitment{wantCommitment}, wantCellProofs[:]); err != nil {
+		t.Fatalf("reference cell proofs do not verify: %v", err)
 	}
 }
 

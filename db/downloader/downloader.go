@@ -37,7 +37,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/klauspost/compress/gzip"
+	"github.com/klauspost/compress/gzhttp"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/errgroup"
@@ -119,6 +119,11 @@ type Downloader struct {
 	// Torrents that were added for download. The first time a torrent is added here, the adder is
 	// responsible for fetching metainfo and executing after-add handlers.
 	downloads map[*torrent.Torrent]struct{}
+
+	// Temporary manifest torrents must be dropped before local seeding can reuse their info hashes.
+	chainTomlTorrentLock sync.Mutex
+	chainTomlSeedPending atomic.Bool
+	chainTomlCache       *cachedChainToml
 
 	// enrUpdater is an optional callback to advertise chain.toml info-hash via discv5 ENR.
 	// Set via SetENRUpdater after P2P is available.
@@ -454,7 +459,7 @@ func (d *Downloader) SetENRUpdater(fn func(enr.ChainToml)) {
 // PublishLocalChainToml generates chain.toml from local torrents + preverified registry,
 // builds its .torrent, and advertises the info-hash via ENR with AuthoritativeBlocks/KnownBlocks
 // derived from the preverified registry's ExpectBlocks.
-// It also adds the chain.toml torrent to the client for seeding so other nodes can download it.
+// It also schedules seeding so other nodes can download the manifest.
 func (d *Downloader) PublishLocalChainToml() error {
 	d.lock.RLock()
 	updater := d.enrUpdater
@@ -464,15 +469,32 @@ func (d *Downloader) PublishLocalChainToml() error {
 		return err
 	}
 
-	// Seed the chain.toml torrent so other nodes can download it by info-hash.
-	if err := d.seedChainTomlTorrent(); err != nil {
-		d.logger.Debug("[chaintoml] could not seed chain.toml torrent", "err", err)
+	if !d.chainTomlSeedPending.CompareAndSwap(false, true) {
+		return nil
+	}
+	if !d.spawn(func() {
+		if err := d.seedChainTomlTorrent(); err != nil {
+			d.logger.Debug("[chaintoml] could not seed chain.toml torrent", "err", err)
+		}
+	}) {
+		d.chainTomlSeedPending.Store(false)
 	}
 	return nil
 }
 
 // seedChainTomlTorrent adds the chain.toml torrent to the client for seeding.
 func (d *Downloader) seedChainTomlTorrent() error {
+	d.chainTomlTorrentLock.Lock()
+	defer d.chainTomlTorrentLock.Unlock()
+	// Clear before loading so later publications can queue another task with updated metadata.
+	d.chainTomlSeedPending.Store(false)
+
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	if err := d.ctx.Err(); err != nil {
+		return err
+	}
+
 	spec, err := d.torrentFS.LoadByName(ChainTomlFileName)
 	if err != nil {
 		return fmt.Errorf("loading chain.toml torrent: %w", err)
@@ -518,13 +540,14 @@ func (d *Downloader) StartChainTomlDiscovery(ctx context.Context, networkName st
 }
 
 // StartTorrentPeerManager launches the background torrent peer manager that
-// synchronizes torrent peers with the DevP2P peer set.
+// synchronizes torrent peers with the DevP2P peer set. It does not run when the
+// client does not dial peers: its reachability check would dial them anyway.
 func (d *Downloader) StartTorrentPeerManager(ctx context.Context) {
 	d.lock.RLock()
 	fn := d.nodeSourceFn
 	d.lock.RUnlock()
 
-	if fn == nil {
+	if fn == nil || !d.cfg.ClientConfig.DialForPeerConns {
 		return
 	}
 
@@ -945,8 +968,8 @@ func (d *Downloader) incDownloadRequests() {
 
 func (d *Downloader) decDownloadRequests() {
 	d.activeDownloadRequestsLock.Lock()
+	defer d.activeDownloadRequestsLock.Unlock()
 	d.activeDownloadRequests--
-	d.activeDownloadRequestsLock.Unlock()
 	if d.activeDownloadRequests == 0 {
 		d.zeroActiveDownloadRequests.Broadcast()
 	}
@@ -997,11 +1020,13 @@ func (d *Downloader) backgroundLogging(ctx context.Context) {
 			return
 		}
 		allActiveSnapshots := d.allActiveSnapshots()
-		stats = d.newStats(stats, allActiveSnapshots)
-		// Flexibility to add seeding and warn on unexpected behaviour in torrent client here. We
-		// should probably change the status message if downloading but nobody is actively waiting
-		// on sync. We can also report seeding if we see upload activity and everything is synced.
-		d.logStatsInner(log.LvlDebug, stats, "Idle", nil, false)
+		if d.logger.Enabled(ctx, log.LvlDebug) {
+			stats = d.newStats(stats, allActiveSnapshots)
+			// Flexibility to add seeding and warn on unexpected behaviour in torrent client here. We
+			// should probably change the status message if downloading but nobody is actively waiting
+			// on sync. We can also report seeding if we see upload activity and everything is synced.
+			d.logStatsInner(log.LvlDebug, stats, "Idle", nil, false)
+		}
 		// There are missing torrent infos but nobody is waiting on a download request to complete.
 		// Let me (anacrolix) know why this should happen.
 		d.logNoMetadata(log.LvlError, allActiveSnapshots)
@@ -1758,15 +1783,14 @@ func (d *Downloader) logStatsInner(
 		)
 	}
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
+	alloc, sys := dbg.MemUsage()
 
 	addCtx(
 		"peers", stats.PeersUnique,
 		"conns", stats.ConnectionsTotal,
 		"upload", fmt.Sprintf("%s/s", common.ByteCount(stats.UploadRate)),
-		"alloc", common.ByteCount(m.Alloc),
-		"sys", common.ByteCount(m.Sys),
+		"alloc", common.ByteCount(alloc),
+		"sys", common.ByteCount(sys),
 	)
 
 	d.log(level, msg, logCtx...)
@@ -1782,28 +1806,7 @@ func calculateTime(amountLeft, rate uint64) string {
 // Expose torrent client status to HTTP on the public/default serve mux used by GOPPROF=http, and
 // the provided "debug" mux if non-nil. Only do this if you have a single instance of a Downloader.
 func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// WriteStatus holds the client lock until it finishes. For large torrent counts, the output
-		// can be very large (90 MB).
-		var buf bytes.Buffer
-		gzW := gzip.NewWriter(&buf)
-		d.torrentClient.WriteStatus(gzW)
-		gzW.Close()
-		h := r.Header.Get("Accept-Encoding")
-		d.log(log.LvlDebug, "compressed torrent client status", "size", buf.Len(), "Accept-Encoding", h)
-		if strings.Contains(h, "gzip") {
-			w.Header().Set("Content-Encoding", "gzip")
-			_, _ = w.Write(buf.Bytes())
-		} else {
-			gzR, err := gzip.NewReader(&buf)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			_, _ = io.Copy(w, gzR)
-			gzR.Close()
-		}
-	})
+	h := torrentClientStatusHandler(d.torrentClient.WriteStatus)
 
 	// This is for gopprof.
 	defaultMux := http.DefaultServeMux
@@ -1811,6 +1814,16 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 	if debugMux != nil && debugMux != defaultMux {
 		debugMux.Handle(TorrentClientStatusPath, h)
 	}
+}
+
+func torrentClientStatusHandler(writeStatus func(io.Writer)) http.Handler {
+	return gzhttp.GzipHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// WriteStatus holds the client read lock. Collect the text before compressing or sending it.
+		var status bytes.Buffer
+		writeStatus(&status)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = status.WriteTo(w)
+	}))
 }
 
 func (d *Downloader) spawn(f func()) bool {

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"slices"
 	"sort"
 	"testing"
 	"unsafe"
@@ -538,8 +539,9 @@ func TestVersionedIO_RemovedDependencyFallsThroughToStorage(t *testing.T) {
 	// The recorded MapRead points at Tx1's now-removed cell, so at commit it
 	// resolves to MVReadResultNone and must be invalidated (which re-executes the
 	// tx so it falls through to storage). Without this the stale read commits.
+	_, live, _, _ := liveStorageValue(ibs.versionMap, addr, key, 2)
 	valid := ibs.versionMap.validateReadImpl(2, addr, StoragePath, key, MapRead,
-		Version{TxIndex: 1, Incarnation: 0}, liveStorage(ibs.versionMap, addr, key, 2),
+		Version{TxIndex: 1, Incarnation: 0}, live,
 		func(rv, wv Version) VersionValidity { return VersionValid }, false, "", false)
 	require.Equal(t, VersionInvalid, valid,
 		"a MapRead whose version-map cell was removed must invalidate at commit")
@@ -677,16 +679,6 @@ func TestStripBalanceWrite_NilAddress(t *testing.T) {
 	require.False(t, increase)
 }
 
-// --- ApplyVersionedWrites reads generation tests ---
-// These verify what reads the IBS produces when applying different write types.
-// The direct finalize path must produce equivalent reads for BAL correctness.
-//
-// Key insight: the per-field account refresh (the source of BalancePath reads) only
-// runs for accounts that ALREADY EXIST in the stateReader or version map.
-// For newly-created accounts, GetOrNewStateObject calls createObject which
-// skips the per-field account refresh. This is the normal case for accounts born
-// in the current block (e.g. contract CREATE).
-
 // accountStateReader returns pre-configured accounts for specific addresses.
 // Used to simulate accounts that exist in the DB before execution.
 type accountStateReader struct {
@@ -711,141 +703,6 @@ func newAccountStateReader(addrs ...accounts.Address) *accountStateReader {
 	return r
 }
 
-// TestApplyVersionedWrites_BalanceWriteGeneratesBalanceRead verifies that a
-// BalancePath write through ApplyVersionedWrites generates a BalancePath read
-// (via the per-field account refresh in GetOrNewStateObject) for an existing account.
-func TestApplyVersionedWrites_BalanceWriteGeneratesBalanceRead(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress(common.HexToAddress("0xE000"))
-	reader := newAccountStateReader(addr)
-	vm := NewVersionMap(nil)
-	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader))
-	ibs.SetTxContext(1, 0)
-	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
-
-	err := ibs.ApplyVersionedWrites(newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Reason: tracing.BalanceChangeUnspecified}, Val: *uint256.NewInt(200)},
-	))
-	require.NoError(t, err)
-
-	reads := ibs.VersionedReads()
-	require.True(t, hasRead(reads, addr, BalancePath), "BalancePath write must generate a BalancePath read for existing accounts")
-}
-
-// TestApplyVersionedWrites_StorageWriteNoBalanceRead verifies the lean
-// footprint: a StoragePath write through ApplyVersionedWrites no longer drags in
-// a whole-account refresh, so it records no BalancePath read.
-func TestApplyVersionedWrites_StorageWriteNoBalanceRead(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress(common.HexToAddress("0xF000"))
-	reader := newAccountStateReader(addr)
-	vm := NewVersionMap(nil)
-	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader))
-	ibs.SetTxContext(1, 0)
-	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
-
-	storageKey := accounts.InternKey(common.HexToHash("0x01"))
-	err := ibs.ApplyVersionedWrites(newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: storageKey}, Val: *uint256.NewInt(42)},
-	))
-	require.NoError(t, err)
-
-	// Lean footprint: a storage write no longer drags in a whole-account
-	// refresh, so it records no BalancePath read. Balance is not a BAL read
-	// field (only StorageReads exist), so this is BAL-neutral.
-	reads := ibs.VersionedReads()
-	require.False(t, hasRead(reads, addr, BalancePath),
-		"StoragePath write must not generate a spurious BalancePath read")
-}
-
-// TestApplyVersionedWrites_NonceWriteNoBalanceRead verifies the lean footprint:
-// a NoncePath write no longer drags in a whole-account refresh, so it records no
-// BalancePath read.
-func TestApplyVersionedWrites_NonceWriteNoBalanceRead(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress(common.HexToAddress("0xF100"))
-	reader := newAccountStateReader(addr)
-	vm := NewVersionMap(nil)
-	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader))
-	ibs.SetTxContext(1, 0)
-	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
-
-	err := ibs.ApplyVersionedWrites(newWriteSet(
-		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: uint64(1)},
-	))
-	require.NoError(t, err)
-
-	// Lean footprint: a nonce write no longer drags in a whole-account refresh.
-	reads := ibs.VersionedReads()
-	require.False(t, hasRead(reads, addr, BalancePath),
-		"NoncePath write must not generate a spurious BalancePath read")
-}
-
-// TestApplyVersionedWrites_MultipleAccountsOnlyBalanceWriteReadsBalance verifies
-// the lean footprint: when multiple existing accounts have writes of different
-// types, only the balance write reads its prior balance (the net-zero baseline);
-// nonce/storage writes record no BalancePath read.
-func TestApplyVersionedWrites_MultipleAccountsOnlyBalanceWriteReadsBalance(t *testing.T) {
-	t.Parallel()
-
-	addrA := accounts.InternAddress(common.HexToAddress("0xF200"))
-	addrB := accounts.InternAddress(common.HexToAddress("0xF300"))
-	addrC := accounts.InternAddress(common.HexToAddress("0xF400"))
-	reader := newAccountStateReader(addrA, addrB, addrC)
-	vm := NewVersionMap(nil)
-	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader))
-	ibs.SetTxContext(1, 0)
-	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
-
-	storageKey := accounts.InternKey(common.HexToHash("0x01"))
-	err := ibs.ApplyVersionedWrites(newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addrA, Path: BalancePath, Reason: tracing.BalanceChangeUnspecified}, Val: *uint256.NewInt(200)},
-		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addrB, Path: NoncePath}, Val: uint64(5)},
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addrC, Path: StoragePath, Key: storageKey}, Val: *uint256.NewInt(99)},
-	))
-	require.NoError(t, err)
-
-	// Lean footprint: only a balance write reads prior balance (the net-zero
-	// baseline). Nonce/storage writes no longer drag in a whole-account refresh,
-	// so they record no spurious BalancePath read.
-	reads := ibs.VersionedReads()
-	require.True(t, hasRead(reads, addrA, BalancePath), "addrA (BalancePath write) reads its prior balance (net-zero baseline)")
-	require.False(t, hasRead(reads, addrB, BalancePath), "addrB (NoncePath write) must not have a spurious BalancePath read")
-	require.False(t, hasRead(reads, addrC, BalancePath), "addrC (StoragePath write) must not have a spurious BalancePath read")
-}
-
-// TestApplyVersionedWrites_NewAccountNoBalanceRead verifies that for accounts
-// that DON'T exist in the DB (newly created in this block), ApplyVersionedWrites
-// does NOT generate a BalancePath read. The per-field account refresh is skipped
-// because createObject is called instead.
-func TestApplyVersionedWrites_NewAccountNoBalanceRead(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress(common.HexToAddress("0xF500"))
-	vm := NewVersionMap(nil)
-	// Use minimalStateReader — returns nil for all accounts.
-	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, &minimalStateReader{}))
-	ibs.SetTxContext(1, 0)
-	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
-
-	err := ibs.ApplyVersionedWrites(newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Reason: tracing.BalanceChangeUnspecified}, Val: *uint256.NewInt(100)},
-	))
-	require.NoError(t, err)
-
-	reads := ibs.VersionedReads()
-	require.False(t, hasRead(reads, addr, BalancePath),
-		"newly-created account (not in DB) should NOT generate a BalancePath read")
-}
-
 // recordTouch records an address-level ephemeral access for txIndex on the
 // read-set (accesses feed the BAL through the read-set now).
 func recordTouch(io *VersionedIO, txIndex int, addr accounts.Address, revertable bool) {
@@ -855,63 +712,6 @@ func recordTouch(io *VersionedIO, txIndex int, addr accounts.Address, revertable
 	}
 	rs.access[addr] = accessOptions{revertable: revertable}
 	io.RecordReads(Version{TxIndex: txIndex}, rs)
-}
-
-// hasRead reports whether the ReadSet has a read for the given address and path.
-func hasRead(reads ReadSet, addr accounts.Address, path AccountPath) bool {
-	_, ok := reads.getHeader(addr, path, accounts.NilKey)
-	return ok
-}
-
-// When a prior tx wrote a sub-field (e.g. BalancePath via AddBalance) without
-// writing AddressPath, the per-field account refresh promotes the sub-field version
-// onto accountRead's AddressPath stamp. The validator's vm.Read(AddressPath)
-// must not invalidate that stamp — otherwise OCC re-execution races
-// identically until the retry budget exhausts.
-func TestAccountRead_BalancePathPromotion_DoesNotInvalidate(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress(common.HexToAddress("0xB19A240E"))
-	reader := newAccountStateReader(addr)
-	reader.accounts[addr].Balance = *uint256.NewInt(50_000_000_000_000_000)
-
-	postWithdrawalBalance := *uint256.NewInt(100_000_000_000_000_000)
-	vm := NewVersionMap(nil)
-	vm.WriteBalance(addr,
-		Version{TxIndex: 0, Incarnation: 0},
-		postWithdrawalBalance, true)
-
-	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader))
-	ibs.SetTxContext(0, 1)
-	ibs.SetVersion(0)
-	ibs.SetVersionMap(vm)
-
-	// Simulate the per-field account refresh's promoted return value:
-	// BalancePath at (0,0) bumped (source, version) above the
-	// account-record's own.
-	acc := accounts.NewAccount()
-	acc.Balance = postWithdrawalBalance
-	acc.CodeHash = accounts.EmptyCodeHash
-	ibs.accountRead(addr, &acc, MapRead, Version{TxIndex: 0, Incarnation: 0})
-
-	// Same call the parallel-exec scheduler makes between worker
-	// completion and apply.
-	io := NewVersionedIO(1)
-	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
-
-	checkVersionEqual := func(rv, wv Version) VersionValidity {
-		if rv == wv {
-			return VersionValid
-		}
-		return VersionInvalid
-	}
-	valid := vm.ValidateVersion(1, io, checkVersionEqual, true, "TestAccountRead_BalancePathPromotion")
-
-	require.Equal(t, VersionValid, valid,
-		"tx 1's account read should validate against a versionMap with only "+
-			"a BalancePath write at TxIdx=0 — promoting the sub-field's "+
-			"version onto an AddressPath cell that does not exist is what "+
-			"makes validation fail and produces the cross-chain OCC livelock")
 }
 
 // When CreateAccount runs on an address whose only versionMap entry is a
@@ -1070,8 +870,9 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 		require.NoError(t, tx3.SetCode(addr, []byte("deployed runtime code"), tracing.CodeChangeUnspecified))
 		_, err := tx3.Selfdestruct(addr, eip8246)
 		require.NoError(t, err)
-		require.NoError(t, tx3.MakeWriteSet(&chain.Rules{IsAmsterdam: eip8246}, NewNoopWriter()))
-		vm.FlushVersionedWrites(tx3.VersionedWrites(), true)
+		writes, err := tx3.FinalizedWrites(&chain.Rules{IsAmsterdam: eip8246})
+		require.NoError(t, err)
+		tx3.FlushWritesToVersionMap(writes)
 
 		ibs := New(reader)
 		ibs.SetTxContext(0, 4)
@@ -1497,41 +1298,6 @@ func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
 		"mergeTx must keep inputs/outputs equal length")
 }
 
-// Restored per review (yperbasis item 2): consensus-guard tests dropped on this
-// branch; adapted VersionedWrites(false)->VersionedWrites().
-func TestApplyVersionedWrites_SelfDestructDominatesCreateContract(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress(common.HexToAddress("0xF600"))
-	vm := NewVersionMap(nil)
-	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, &minimalStateReader{}))
-	ibs.SetTxContext(1, 0)
-	ibs.SetVersionMap(vm)
-
-	writes := &WriteSet{}
-	writes.SetSelfDestruct(addr, &VersionedWrite[bool]{
-		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath},
-		Val:         true,
-	})
-	writes.SetCreateContract(addr, &VersionedWrite[bool]{
-		WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath},
-		Val:         true,
-	})
-
-	require.NoError(t, ibs.ApplyVersionedWrites(writes))
-
-	// Selfdestruct dominates: applying a write-set that carries both a destruct
-	// and a create leaves the account destructed. The cache-free path records this
-	// on the version map (createdContract was a materialized-object flag the
-	// finalize write-set never carried).
-	destructed, err := ibs.HasSelfdestructed(addr)
-	require.NoError(t, err)
-	require.True(t, destructed)
-	sd, ok := ibs.VersionedWrites().GetSelfDestruct(addr)
-	require.True(t, ok)
-	require.True(t, sd.Val)
-}
-
 func TestCreateAccount_FundedThenCreated_SyntheticReadKeepsPreTxBalance(t *testing.T) {
 	t.Parallel()
 
@@ -1618,6 +1384,98 @@ func TestVersionedIO_CreatedAccountEmptyCodeChangeOmitted(t *testing.T) {
 	require.True(t, found, "authority account must appear in BAL")
 }
 
+// The authority was read as absent at the tx start (an earlier tx removed it), and the tx sets and
+// clears its delegation: no code change.
+func TestVersionedIO_AbsentAccountEmptyCodeChangeOmitted(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0f6dca"))
+	io := NewVersionedIO(1)
+	reads := ReadSet{}
+	reads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead}})
+	io.RecordReads(Version{TxIndex: 0}, reads)
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}}, Val: uint64(2)},
+		&VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 0}}, Val: accounts.Code{}},
+	))
+	bal := io.AsBlockAccessList()
+	require.Len(t, bal, 1)
+	require.Empty(t, bal[0].CodeChanges, "\n%s", bal.DebugString())
+}
+
+// The authority existed with a delegation, which the tx clears: a code change to empty code.
+func TestVersionedIO_PresentAccountClearedDelegationKept(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0f6dcb"))
+	delegation := accounts.NewCode([]byte{0xef, 0x01, 0x00, 0x11, 0x22})
+	io := NewVersionedIO(1)
+	reads := ReadSet{}
+	reads.SetAddress(addr, VersionedRead[AccountView]{Val: NewAccountView(&accounts.Account{Nonce: 4, CodeHash: delegation.Hash})})
+	reads.SetSelfDestruct(addr, VersionedRead[bool]{Val: false})
+	io.RecordReads(Version{TxIndex: 0}, reads)
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}}, Val: uint64(5)},
+		&VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 0}}, Val: accounts.Code{}},
+	))
+	bal := io.AsBlockAccessList()
+	require.Len(t, bal, 1)
+	require.Len(t, bal[0].CodeChanges, 1, "\n%s", bal.DebugString())
+}
+
+// Tx 0's removal of the empty authority is flushed during tx 1's first code-hash read, after the
+// read has probed for a destruct. Tx 1 sets and clears the delegation: no code change.
+func TestVersionedIO_RemovalFlushedDuringCodeHashReadEmptyCodeChangeOmitted(t *testing.T) {
+	t.Parallel()
+	authority := accounts.InternAddress(common.HexToAddress("0xc0f6dcc"))
+	delegate := accounts.InternAddress(common.HexToAddress("0xcafe"))
+	empty := accounts.NewAccount()
+	vm := NewVersionMap(types.BlockAccessList{{Address: authority.Value(), NonceChanges: []*types.NonceChange{{Index: 2, Value: 2}}}})
+	ibs := NewWithVersionMap(&emptyAccountReader{addr: authority, acc: &empty}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	removal := &WriteSet{}
+	removal.SetEmptyRemoval(authority, Version{TxIndex: 0})
+	vm.fieldMissHook = func() {
+		vm.fieldMissHook = nil
+		vm.FlushVersionedWrites(removal, true)
+	}
+
+	for i, target := range []accounts.Address{delegate, accounts.ZeroAddress} {
+		codeHash, err := ibs.GetCodeHash(authority)
+		require.NoError(t, err)
+		if i == 0 {
+			require.Nil(t, vm.fieldMissHook, "the flush must land in the first code-hash read")
+		}
+		if !codeHash.IsEmpty() {
+			_, ok, err := ibs.GetDelegatedDesignation(authority)
+			require.NoError(t, err)
+			require.True(t, ok)
+		}
+		nonce, err := ibs.GetNonce(authority)
+		require.NoError(t, err)
+		require.Equal(t, uint64(i), nonce)
+		_, err = ibs.Exist(authority)
+		require.NoError(t, err)
+		var code []byte
+		if target != accounts.ZeroAddress {
+			code = types.AddressToDelegation(target)
+		}
+		require.NoError(t, ibs.SetCode(authority, code, tracing.CodeChangeAuthorization))
+		require.NoError(t, ibs.SetNonce(authority, nonce+1, tracing.NonceChangeAuthorization))
+	}
+	require.Equal(t, VersionValid, validateReads(vm, ibs, 1))
+
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true, IsByzantium: true, IsCancun: true, IsPrague: true, IsAmsterdam: true})
+	require.NoError(t, err)
+	io := NewVersionedIO(2)
+	io.RecordReads(Version{TxIndex: 1}, ibs.VersionedReads())
+	io.RecordWrites(Version{TxIndex: 1}, writes)
+	bal := io.AsBlockAccessList()
+	idx := slices.IndexFunc(bal, func(ac types.AccountChanges) bool { return ac.Address == authority.Value() })
+	require.GreaterOrEqual(t, idx, 0, "\n%s", bal.DebugString())
+	require.Equal(t, []*types.NonceChange{{Index: 2, Value: 2}}, bal[idx].NonceChanges, "\n%s", bal.DebugString())
+	require.Empty(t, bal[idx].CodeChanges, "\n%s", bal.DebugString())
+}
+
 func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T) {
 	t.Parallel()
 
@@ -1694,6 +1552,17 @@ func TestAccountState_IndexCrossoverKeepsSlotsFindable(t *testing.T) {
 		require.NotContains(t, account.storageReads, slot, "a write supersedes the recorded read")
 	}
 	require.Len(t, account.storageReads, 4*slotIndexMin)
+}
+
+// A slot read by many txs must occupy one storageReads entry, otherwise finalize
+// sorts one entry per read instead of one per slot.
+func TestAccountState_RepeatedReadsKeepOneEntry(t *testing.T) {
+	account := newAccountState(accounts.InternAddress(common.HexToAddress("0xbeef")))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	for range 3 {
+		account.updateReadStorage(slot, *uint256.NewInt(7))
+	}
+	require.Equal(t, []accounts.StorageKey{slot}, account.storageReads)
 }
 
 // TestAccountState_MatchesReferenceBuilder fuzzes read/write sequences that
@@ -2179,4 +2048,26 @@ func TestAccountStateBalanceTrackingDoesNotAllocate(t *testing.T) {
 		}
 	})
 	require.Zero(t, allocs, "allocations per run for %d accounts", len(states))
+}
+
+func TestWriteSetMergeFromExtendsTheSetInPlace(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	balance := func(v uint64) *VersionedWrite[uint256.Int] {
+		return &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(v)}
+	}
+	nonce := &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: 7}
+
+	ws := newWriteSet(balance(1), nonce)
+	nextBalance := balance(2)
+	next := newWriteSet(nextBalance)
+
+	ws.MergeFrom(next)
+
+	got, ok := ws.GetBalance(addr)
+	require.True(t, ok)
+	require.Equal(t, *uint256.NewInt(2), got.Val, "next wins on the same path")
+	gotNonce, ok := ws.GetNonce(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(7), gotNonce.Val)
+	require.NotSame(t, nextBalance, got, "the merged cell must not alias next")
 }

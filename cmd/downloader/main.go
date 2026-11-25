@@ -272,7 +272,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
 	webseedsList := common.CliString2Array(cobraFlagValues.webseeds)
-	if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
+	if known, ok := snapcfg.Webseeds(ctx, chain); ok {
 		webseedsList = append(webseedsList, known...)
 	}
 	if seedbox {
@@ -360,13 +360,13 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 
 	d.InitBackgroundLogger()
 	if seedbox {
-		var downloadItems []*downloaderproto.DownloadItem
 		snapCfg := snapcfg.KnownCfgOrDevnet(chain)
-		for _, it := range snapCfg.Preverified.Items {
-			downloadItems = append(downloadItems, &downloaderproto.DownloadItem{
+		downloadItems := make([]*downloaderproto.DownloadItem, len(snapCfg.Preverified.Items))
+		for i, it := range snapCfg.Preverified.Items {
+			downloadItems[i] = &downloaderproto.DownloadItem{
 				Path:        it.Name,
 				TorrentHash: downloadergrpc.String2Proto(it.Hash),
-			})
+			}
 		}
 		if _, err := bittorrentServer.Download(ctx, &downloaderproto.DownloadRequest{Items: downloadItems}); err != nil {
 			return err
@@ -536,7 +536,7 @@ var torrentMagnet = &cobra.Command{
 func manifestVerify(ctx context.Context, logger log.Logger) error {
 	webseedsList := common.CliString2Array(cobraFlagValues.webseeds)
 	if len(webseedsList) == 0 { // fallback to default if exact list not passed
-		if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
+		if known, ok := snapcfg.Webseeds(ctx, chain); ok {
 			for _, s := range known {
 				// TODO: enable validation of this buckets also. skipping to make CI useful.
 				if strings.Contains(s, "erigon2-v2") {

@@ -22,12 +22,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/libp2p/go-libp2p/core/peer"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel"
@@ -90,8 +92,34 @@ func (s *SentinelServer) releaseStream(key peerStream) {
 	}
 }
 
+var maxBulkResponse = int64(httpreqresp.MaxResponseBodySize(communication.BeaconBlocksByRangeProtocolV2, math.MaxUint64))
+
+// These bound the reservations of running requests, not the response memory, which callers hold after the release.
+var (
+	bulkResponseBudget  = semaphore.NewWeighted(2 * maxBulkResponse)
+	smallResponseBudget = semaphore.NewWeighted(maxBulkResponse)
+)
+
+// responseBudget keeps small requests apart from bulk ones, because one queued bulk waiter blocks every later Acquire.
+func responseBudget(weight int64) *semaphore.Weighted {
+	if weight >= maxBulkResponse/2 {
+		return bulkResponseBudget
+	}
+	return smallResponseBudget
+}
+
+// responseBodyWeight is the largest response cap among the topic's comma-separated alternatives, as the peer picks one.
+func responseBodyWeight(topic string, maxBytes uint64) int64 {
+	var weight uint64
+	for alt := range strings.SplitSeq(topic, ",") {
+		weight = max(weight, httpreqresp.MaxResponseBodySize(strings.TrimSpace(alt), maxBytes))
+	}
+	return int64(weight)
+}
+
 type peerRequestBackend interface {
 	GetPeersCount() (active int, connected int, disconnected int)
+	ConsumeDuplicateLoss(pid peer.ID) bool
 	Config() *sentinel.SentinelConfig
 	ReqRespHandler() http.Handler
 }
@@ -146,12 +174,25 @@ func (s *SentinelServer) BanPeerForInvalidData(_ context.Context, p *sentinelpro
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
-func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelproto.GossipData) (*sentinelproto.EmptyMessage, error) {
-	panic("do not call this")
+// dropOnFailure reports whether a request that failed with err drops pid: only at the peer limit,
+// unless the failure is excused by a duplicate loss. It is asked when the request fails, as the
+// duplicate can close while it runs, and uses up the loss only when the peer would otherwise be
+// dropped. A cut stream can neither exceed the response cap nor send an error code, so an over-cap
+// response and a peer-sent error code are never excused.
+func (s *SentinelServer) dropOnFailure(pid peer.ID, err error) bool {
+	activePeers, _, _ := s.peerRequestBackend.GetPeersCount()
+	if activePeers < int(s.peerRequestBackend.Config().MaxPeerCount) {
+		return false
+	}
+	var peerErr *PeerResponseError
+	return errors.Is(err, httpreqresp.ErrResponseTooLarge) || errors.As(err, &peerErr) ||
+		!s.peerRequestBackend.ConsumeDuplicateLoss(pid)
 }
 
-func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, stream sentinelproto.Sentinel_SubscribeGossipServer) error {
-	panic("do not call this")
+func (s *SentinelServer) dropFailedPeer(pid peer.ID, err error) {
+	if s.dropOnFailure(pid, err) {
+		s.dropPeer(pid)
+	}
 }
 
 func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
@@ -160,6 +201,12 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if rest, ok := strings.CutPrefix(requestType, communication.ProtocolPrefix+"/"); ok {
 		requestType, _, _ = strings.Cut(rest, "/")
 	}
+	weight := responseBodyWeight(req.Topic, req.MaxResponseBytes)
+	budget := responseBudget(weight)
+	if err := budget.Acquire(ctx, weight); err != nil {
+		return nil, err
+	}
+	defer budget.Release(weight)
 	stream := peerStream{pid: pid, requestType: requestType}
 	if !s.claimStream(stream) {
 		return nil, ErrPeerBusy
@@ -172,9 +219,6 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		return nil, err
 	}
 
-	activePeers, _, _ := s.peerRequestBackend.GetPeersCount()
-
-	shouldBanOnFail := activePeers >= int(s.peerRequestBackend.Config().MaxPeerCount)
 	// set the peer and topic we are requesting
 	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
 	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
@@ -206,9 +250,7 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		// don't ban the peer.
 		//	return nil, errorMessage
 		//}
-		if shouldBanOnFail {
-			s.dropPeer(pid)
-		}
+		s.dropFailedPeer(pid, errorMessage)
 		return nil, errorMessage
 	}
 	// we should never get an invalid response to this. our responder should always set it on non-error response
@@ -228,18 +270,17 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			if shouldBanOnFail {
-				s.dropPeer(pid)
-			}
+			s.dropFailedPeer(pid, err)
 			return nil, err
 		}
-		if shouldBanOnFail && responseCode != httpreqresp.ResponseCodeResourceUnavailable {
-			s.dropPeer(pid)
-		}
-		return nil, &PeerResponseError{
+		peerErr := &PeerResponseError{
 			Code:    responseCode,
 			Message: errorMessage,
 		}
+		if responseCode != httpreqresp.ResponseCodeResourceUnavailable {
+			s.dropFailedPeer(pid, peerErr)
+		}
+		return nil, peerErr
 	}
 
 	// read the body from the response
@@ -250,8 +291,8 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		}
 		// An over-cap flood surfaces here as ErrResponseTooLarge rather than a non-2xx status, so
 		// drop the peer as the status path above would.
-		if errors.Is(err, httpreqresp.ErrResponseTooLarge) && shouldBanOnFail {
-			s.dropPeer(pid)
+		if errors.Is(err, httpreqresp.ErrResponseTooLarge) {
+			s.dropFailedPeer(pid, err)
 		}
 		return nil, err
 	}
@@ -370,8 +411,4 @@ func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelproto.PeersIn
 		filtered.Peers = append(filtered.Peers, peer)
 	}
 	return filtered, nil
-}
-
-func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelproto.RequestSubscribeExpiry) (*sentinelproto.EmptyMessage, error) {
-	panic("do not call this")
 }

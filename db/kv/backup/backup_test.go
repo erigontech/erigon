@@ -374,3 +374,18 @@ func TestApplyMigrationsRenamesLegacySnapshotsAndDropsTheTwinTorrent(t *testing.
 	require.FileExists(t, renamed)
 	require.NoFileExists(t, renamed+".torrent")
 }
+
+func TestCopyAndCloseReportsAFailedFlush(t *testing.T) {
+	noTables := func(kv.TableCfg) kv.TableCfg { return kv.TableCfg{} }
+	open := func(path string) mdbx.MdbxOpts {
+		return mdbx.New(dbcfg.ChainDB, log.New()).Path(path).WithTableCfg(noTables)
+	}
+	src := open(filepath.Join(t.TempDir(), "src")).MustOpen()
+	defer src.Close()
+	dstDir := filepath.Join(t.TempDir(), "dst")
+	open(dstDir).MustOpen().Close()
+
+	// A read-only env refuses to sync, which stands in for a flush that fails.
+	dst := open(dstDir).Readonly(true).MustOpen()
+	require.Error(t, copyAndClose(t.Context(), src, dst, log.New()))
+}

@@ -23,6 +23,10 @@ import (
 var pubkeyIndexDeltaSize = metrics.GetOrCreateGauge("beacon_state_pubkey_index_delta_size")
 
 func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
+	return b.copyInto(bs, nil)
+}
+
+func (b *CachingBeaconState) copyInto(bs *CachingBeaconState, totalActiveBalance *uint64) (err error) {
 	err = b.BeaconState.CopyInto(bs.BeaconState)
 	if err != nil {
 		return err
@@ -30,7 +34,7 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 
 	bs.publicKeyIndices = pubkeyIndexFromBase(b.publicKeyIndices.base, bs.ValidatorSet())
 	pubkeyIndexDeltaSize.SetInt(len(bs.publicKeyIndices.delta))
-	err = bs.reinitCaches()
+	err = bs.reinitCaches(totalActiveBalance)
 	if err != nil {
 		return err
 	}
@@ -42,11 +46,16 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 	return nil
 }
 
-func (b *CachingBeaconState) Copy() (bs *CachingBeaconState, err error) {
+func (b *CachingBeaconState) Copy() (*CachingBeaconState, error) {
 	copied := New(b.BeaconConfig())
-	err = b.CopyInto(copied)
-	if err != nil {
+	if err := b.copyInto(copied, nil); err != nil {
 		return nil, err
 	}
 	return copied, nil
+}
+
+// CopyIntoWithTotalActiveBalance is CopyInto, but it uses total instead of rescanning the validators.
+// total must equal what a rescan of this state gives; a wrong value changes consensus computations.
+func (b *CachingBeaconState) CopyIntoWithTotalActiveBalance(bs *CachingBeaconState, total uint64) error {
+	return b.copyInto(bs, &total)
 }

@@ -184,7 +184,9 @@ func (g *Gammas) GobEncode() ([]byte, error) {
 func (g *Gammas) GobDecode(data []byte) error {
 	for i := 0; i < len(data); i += blst.BLST_P2_COMPRESS_BYTES {
 		p := new(blst.P2Affine)
-		p.Uncompress(data[i : i+blst.BLST_P2_COMPRESS_BYTES])
+		if p.Uncompress(data[i:i+blst.BLST_P2_COMPRESS_BYTES]) == nil {
+			return errors.New("failed to deserialize gamma")
+		}
 		if !p.InG2() {
 			return errors.New("gamma is not on curve")
 		}

@@ -19,8 +19,10 @@ package network
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -34,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	blobstoragemock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -95,6 +98,38 @@ func TestBlobHistoryDownloaderRefreshesFrozenBoundaryAfterRetry(t *testing.T) {
 	require.True(t, notified)
 }
 
+func TestBlobHistoryDownloaderBoundedArchiveStopsAtFloor(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = 0
+	cfg.MinEpochsForBlobSidecarsRequests = 1
+	const head = uint64(100)
+	serveFloor := cfg.BlobSidecarServeRangeStartSlot(head)
+	require.Equal(t, uint64(64), serveFloor)
+
+	for _, tc := range []struct {
+		name      string
+		fromSlot  uint64
+		wantFloor uint64
+	}{
+		{name: "full archive", fromSlot: 0, wantFloor: 0},
+		{name: "from slot below the serving window", fromSlot: 50, wantFloor: 50},
+		{name: "from slot inside the serving window keeps the window", fromSlot: 90, wantFloor: serveFloor},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := &boundaryBlockReader{}
+			downloader := newBoundaryDownloader(t, head, 0, 0, reader)
+			downloader.beaconCfg = &cfg
+			downloader.archiveFromSlot = tc.fromSlot
+
+			require.NoError(t, downloader.downloadOnce(false))
+			require.NotEmpty(t, reader.slots)
+			require.Equal(t, head, reader.slots[0])
+			require.Equal(t, tc.wantFloor, slices.Min(reader.slots))
+			require.True(t, downloader.backfillCompleted.Load())
+		})
+	}
+}
+
 func TestBlobHistoryDownloaderRunsWithSinglePeer(t *testing.T) {
 	const slot = uint64(100)
 	wantErr := errors.New("single peer admitted")
@@ -130,7 +165,14 @@ func TestBlobHistoryDownloaderStopsWhenPeersDisappear(t *testing.T) {
 	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
-	require.Equal(t, []uint64{20, 19, 18, 17, 16, 15, 14, 13}, reader.slots)
+	wantSlots := make([]uint64, 0, 21)
+	for slot := uint64(20); ; slot-- {
+		wantSlots = append(wantSlots, slot)
+		if slot == 0 {
+			break
+		}
+	}
+	require.Equal(t, wantSlots, reader.slots)
 	require.Zero(t, peers.requests)
 	require.False(t, notified)
 	require.Zero(t, downloader.nextBackfillTargetSlot)
@@ -329,24 +371,26 @@ func TestBlobHistoryDownloaderRetryRechecksPeersBeforeDenebRequest(t *testing.T)
 }
 
 func TestBlobHistoryDownloaderRechecksPeersBeforeFuluRecovery(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
-	peerDas := mock_services.NewMockPeerDas(ctrl)
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
-	block.Block.Slot = 20
-	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
-	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
-	downloader := newBoundaryDownloader(t, block.GetSlot(), 0, block.GetSlot(), &boundaryBlockReader{block: block})
-	peers := &boundarySequencePeerCounter{counts: []uint64{1, 1, 0}}
-	downloader.rpc = peers
-	downloader.blobStorage = blobStorage
-	downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
-	downloader.columnBackfillTimeout = time.Second
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+		blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+		peerDas := mock_services.NewMockPeerDas(ctrl)
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+		block.Block.Slot = 20
+		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+		downloader := newBoundaryDownloader(t, block.GetSlot(), 0, block.GetSlot(), &boundaryBlockReader{block: block})
+		peers := &boundarySequencePeerCounter{counts: []uint64{1, 1, 0}}
+		downloader.rpc = peers
+		downloader.blobStorage = blobStorage
+		downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
+		downloader.columnBackfillTimeout = time.Second
 
-	require.NoError(t, downloader.downloadOnce(false))
-	require.GreaterOrEqual(t, peers.calls, 3)
-	require.Equal(t, []blobRetryRange{{start: block.GetSlot(), end: block.GetSlot(), cursor: block.GetSlot()}}, downloader.retryRanges)
+		require.NoError(t, downloader.downloadOnce(false))
+		require.GreaterOrEqual(t, peers.calls, 3)
+		require.Equal(t, []blobRetryRange{{start: block.GetSlot(), end: block.GetSlot(), cursor: block.GetSlot()}}, downloader.retryRanges)
+	})
 }
 
 func TestBlobHistoryDownloaderLocalOnlyPassChecksPeersOnce(t *testing.T) {
@@ -588,23 +632,23 @@ func TestBlobHistoryDownloaderDropsExpiredFuluRetryButKeepsDenebRetry(t *testing
 
 func TestBlobHistoryDownloaderRetryRangeExtensionPreservesProgress(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	blocks := make(map[uint64]*cltypes.SignedBeaconBlock, blocksBatchSize*2+1)
-	for slot := uint64(1); slot <= blocksBatchSize*2+1; slot++ {
+	blocks := make(map[uint64]*cltypes.SignedBeaconBlock, blobRetryBatchSize*2+1)
+	for slot := uint64(1); slot <= blobRetryBatchSize*2+1; slot++ {
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 		block.Block.Slot = slot
 		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 		blocks[slot] = block
 	}
 	reader := &boundaryBlockReader{blocks: blocks}
-	downloader := newBoundaryDownloader(t, blocksBatchSize*2+1, 0, blocksBatchSize*2+1, reader)
+	downloader := newBoundaryDownloader(t, blobRetryBatchSize*2+1, 0, blobRetryBatchSize*2+1, reader)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), errors.New("temporary read failure")).AnyTimes()
 	downloader.blobStorage = blobStorage
-	downloader.retryRanges = []blobRetryRange{{start: 1, end: blocksBatchSize * 2, cursor: blocksBatchSize * 2}}
+	downloader.retryRanges = []blobRetryRange{{start: 1, end: blobRetryBatchSize * 2, cursor: blobRetryBatchSize * 2}}
 
 	require.NoError(t, downloader.retryFailedRecoveries(0, 0))
 	reader.slots = nil
-	downloader.addRetrySlot(blocksBatchSize*2 + 1)
+	downloader.addRetrySlot(blobRetryBatchSize*2 + 1)
 	require.NoError(t, downloader.retryFailedRecoveries(0, 0))
 
 	require.Contains(t, reader.slots, uint64(1))
@@ -629,9 +673,13 @@ func TestBlobHistoryDownloaderRetriesThirtyThreeSparseFailuresWithoutDenseFallba
 	downloader.blobStorage = blobStorage
 
 	require.Len(t, downloader.retryRanges, 1)
-	require.Equal(t, failureCount, downloader.retryRanges[0].intervalCount())
-	for range (failureCount + int(blocksBatchSize) - 1) / int(blocksBatchSize) {
+	require.Equal(t, failureCount, downloader.retryRanges[0].intervals.Len())
+	passes := (failureCount + int(blobRetryBatchSize) - 1) / int(blobRetryBatchSize)
+	for pass := range passes {
 		require.NoError(t, downloader.retryFailedRecoveries(0, 0))
+		if pass == 0 {
+			require.Len(t, reader.slots, int(blobRetryBatchSize), "one retry cycle must stay within its serial attempt budget")
+		}
 	}
 	for slot := range blocks {
 		require.Contains(t, reader.slots, slot)
@@ -680,7 +728,7 @@ func TestBlobHistoryDownloaderRetryRangeOverflowVisitsOnlySparseFailures(t *test
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), errors.New("temporary read failure")).AnyTimes()
 	downloader.blobStorage = blobStorage
 
-	passes := (failureCount + int(blocksBatchSize) - 1) / int(blocksBatchSize)
+	passes := (failureCount + int(blobRetryBatchSize) - 1) / int(blobRetryBatchSize)
 	for range passes {
 		require.NoError(t, downloader.retryFailedRecoveries(0, 0))
 	}
@@ -717,7 +765,7 @@ func TestBlobHistoryDownloaderRetryVisitsMixedDenseAndSparseFailuresWithinOneCyc
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), errors.New("temporary read failure")).AnyTimes()
 	downloader.blobStorage = blobStorage
 
-	for range (len(blocks) + int(blocksBatchSize) - 1) / int(blocksBatchSize) {
+	for range (len(blocks) + int(blobRetryBatchSize) - 1) / int(blobRetryBatchSize) {
 		require.NoError(t, downloader.retryFailedRecoveries(0, 0))
 	}
 	seen := make(map[uint64]struct{}, len(reader.slots))
@@ -1112,4 +1160,50 @@ func TestBlobHistoryDownloaderDoesNotCompleteWhileASlotIsUnindexed(t *testing.T)
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Contains(t, reader.slots, head, "the slot was not revisited after its index row appeared")
 	require.True(t, downloader.backfillCompleted.Load(), "a fully indexed and stored range must complete")
+}
+
+// A Gloas block's blobs ship with its payload, so a block whose payload the child skipped has none on the network.
+func TestCollectIncompleteBlocksSkipsAGloasBlockWhosePayloadTheChildSkipped(t *testing.T) {
+	const slot = 100
+	parent := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	parent.Block.Slot = slot
+	parent.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = common.Hash{0xaa}
+	parent.Block.Body.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{0xc0})
+	parentRoot, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+	child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	child.Block.Slot, child.Block.ParentRoot = slot+1, parentRoot
+	child.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = common.Hash{0xbb}
+
+	downloader := newBoundaryDownloader(t, slot+1, 0, slot, &boundaryBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: parent, slot + 1: child}})
+	blobStorage := blobstoragemock.NewMockBlobStorage(gomock.NewController(t))
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+	downloader.blobStorage = blobStorage
+
+	batch, _, err := downloader.collectIncompleteBlocks(slot+1, slot, 0)
+	require.NoError(t, err)
+	require.Empty(t, batch)
+}
+
+func TestRetryResolvesAGloasBlockWhosePayloadTheChildSkipped(t *testing.T) {
+	const slot = 100
+	parent := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	parent.Block.Slot = slot
+	parent.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = common.Hash{0xaa}
+	parent.Block.Body.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{0xc0})
+	parentRoot, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+	child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	child.Block.Slot, child.Block.ParentRoot = slot+1, parentRoot
+	child.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = common.Hash{0xbb}
+
+	downloader := newBoundaryDownloader(t, slot+1, 0, slot, &boundaryBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: parent, slot + 1: child}})
+	blobStorage := blobstoragemock.NewMockBlobStorage(gomock.NewController(t))
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+	downloader.blobStorage = blobStorage
+
+	downloader.addRetrySlot(slot)
+
+	require.NoError(t, downloader.retryFailedRecoveries(0, 0))
+	require.Empty(t, downloader.retryRanges)
 }

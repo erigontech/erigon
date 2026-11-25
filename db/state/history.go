@@ -449,6 +449,13 @@ func (w *historyBufferedWriter) close() {
 	}
 }
 
+func (w *historyBufferedWriter) detach() *historyBufferedWriter {
+	detached := *w
+	detached.ii = w.ii.detach()
+	w.historyVals = nil
+	return &detached
+}
+
 func (ht *HistoryRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *historyBufferedWriter {
 	w := &historyBufferedWriter{
 		discard: discard,
@@ -462,6 +469,10 @@ func (ht *HistoryRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *histo
 }
 
 func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
+	return w.flush(ctx, tx, nil)
+}
+
+func (w *historyBufferedWriter) flush(ctx context.Context, tx kv.RwTx, keep *keepRetainedHistory) error {
 	if w.discard {
 		return nil
 	}
@@ -469,12 +480,40 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	if w.historyVals != nil {
-		if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		load := loadFunc
+		if w.largeValues && keep != nil {
+			load = keep.load
+		}
+		if err := w.historyVals.Load(tx, w.historyValsTable, load, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
 	}
 	w.close()
 	return nil
+}
+
+type keepRetainedHistory struct {
+	belowTxNum uint64
+	written    map[string]struct{}
+}
+
+func newKeepRetainedHistory(belowTxNum uint64) *keepRetainedHistory {
+	if belowTxNum == 0 {
+		return nil
+	}
+	return &keepRetainedHistory{belowTxNum: belowTxNum, written: map[string]struct{}{}}
+}
+
+func (r *keepRetainedHistory) load(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if binary.BigEndian.Uint64(k[len(k)-8:]) < r.belowTxNum {
+		if _, ok := r.written[string(k)]; !ok {
+			if existing, err := table.Get(k); err != nil || existing != nil {
+				return err
+			}
+			r.written[string(k)] = struct{}{}
+		}
+	}
+	return next(k, k, v)
 }
 
 func (w *historyBufferedWriter) valsCollector() *etl.Collector {
@@ -1029,6 +1068,32 @@ func (ht *HistoryRoTx) pagedGetter(i, pageSize int) *seg.PagedReader {
 	return ht.pagedGetters[i]
 }
 
+// contiguousEnd is the end of the files before the first gap: history past a gap is not readable.
+func contiguousEnd(files visibleFiles) uint64 {
+	var end uint64
+	for i, f := range files {
+		if i > 0 && f.startTxNum != end {
+			break
+		}
+		end = f.endTxNum
+	}
+	return end
+}
+
+func (ht *HistoryRoTx) checkFilesDBGap(tx kv.Tx) error {
+	if ht.h.HistoryDisabled || ht.h.SnapshotsDisabled {
+		return nil
+	}
+	prg, err := GetPruneValProgress(tx, []byte(ht.h.ValuesTable))
+	if err != nil {
+		return err
+	}
+	if end := min(contiguousEnd(ht.files), contiguousEnd(ht.iit.files)); prg.TxTo > end {
+		return fmt.Errorf("gap between snapshot files and DB for history %s: readable files end at txNum %d but the DB was pruned up to %d; if only accessor files are missing, run `erigon snapshots index --datadir <datadir>` to rebuild them, otherwise run `erigon snapshots reset --datadir <datadir>` to reset and rebuild the datadir", ht.h.FilenameBase, end, prg.TxTo)
+	}
+	return nil
+}
+
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
 	minIdxTx, _ := ht.iit.ii.minTxNumInDB(tx)
 	maxIdxTx := ht.iit.ii.maxTxNumInDB(tx)
@@ -1191,6 +1256,10 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if !ok {
 		return nil, false, nil
 	}
+	return ht.historyValueAt(key, seek, txNum)
+}
+
+func (ht *HistoryRoTx) historyValueAt(key []byte, seek iiSeekResult, txNum uint64) ([]byte, bool, error) {
 	histTxNum := seek.txNum
 	historyItem, ok := ht.pairedFile(ht.iit.files[seek.fileIdx])
 	if !ok {
@@ -1544,14 +1613,19 @@ func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc or
 		var fromTxNum uint64
 		if startTxNum >= 0 {
 			fromTxNum = uint64(startTxNum)
+		} else if !asc {
+			fromTxNum = math.MaxUint64
 		}
 		binary.BigEndian.PutUint64(from[len(key):], fromTxNum)
 		to := bytes.Clone(from)
-		toTxNum := uint64(math.MaxUint64)
-		if endTxNum >= 0 {
-			toTxNum = uint64(endTxNum)
+		switch {
+		case endTxNum >= 0:
+			binary.BigEndian.PutUint64(to[len(key):], uint64(endTxNum))
+		case asc == order.Asc:
+			binary.BigEndian.PutUint64(to[len(key):], math.MaxUint64)
+		default:
+			to = to[:len(key)]
 		}
-		binary.BigEndian.PutUint64(to[len(key):], toTxNum)
 		it, err := roTx.Range(ht.h.ValuesTable, from, to, asc, limit)
 		if err != nil {
 			return nil, err
@@ -1577,12 +1651,18 @@ func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc or
 	if err != nil {
 		return nil, err
 	}
-	return stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+	res := stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
 		if len(v) < 8 {
 			return 0, fmt.Errorf("unexpected small value length %d", len(v))
 		}
 		return binary.BigEndian.Uint64(v), nil
-	}), nil
+	})
+	if !asc && endTxNum >= 0 {
+		// dup values are txNum followed by the previous value, so a non-empty previous value at endTxNum sorts above the
+		// 8-byte bound and leaks through the exclusive desc end; there is at most one such entry, and it is the last one
+		return stream.FilterU64(res, func(n uint64) bool { return n != uint64(endTxNum) }), nil
+	}
+	return res, nil
 }
 
 func (ht *HistoryRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {

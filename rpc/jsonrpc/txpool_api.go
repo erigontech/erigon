@@ -181,8 +181,13 @@ func inspectTxs(txs []types.Transaction) map[string]string {
 	return dump
 }
 
-// inspectTx uses the fee cap as the gas price, as Geth's Transaction.GasPrice does for EIP-1559 transactions.
 func inspectTx(txn types.Transaction) string {
+	if frame, ok := txn.Unwrap().(*types.FrameTransaction); ok {
+		// Each frame has its own target. Treating the nil top-level recipient
+		// as contract creation would mislabel the transaction.
+		return fmt.Sprintf("frame transaction: max fee %s wei", frame.Fees.MaxFee.Dec())
+	}
+	// For EIP-1559 transactions, Geth's Transaction.GasPrice reports the per-gas fee cap.
 	if to := txn.GetTo(); to != nil {
 		return fmt.Sprintf("%s: %s wei + %d gas × %s wei", to.Hex(), txn.GetValue().Dec(), txn.GetGasLimit(), txn.GetFeeCap().Dec())
 	}

@@ -1,9 +1,11 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"maps"
 	"net"
 	"os"
@@ -14,8 +16,11 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/anacrolix/torrent/storage"
+	"github.com/c2h5oh/datasize"
 	"github.com/pelletier/go-toml/v2"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -83,67 +88,168 @@ func CompareChainToml(local, discovered map[string]string) (matching, newEntries
 	return
 }
 
-// DownloadChainTomlByInfoHash downloads chain.toml from the BitTorrent network using its info-hash.
-// The file is downloaded to snapDir, read, and the torrent is dropped afterward.
-//
-// If peer is non-nil, it is used to directly add the peer's torrent endpoint via AddPeers,
-// bypassing the need for DHT or tracker discovery.
-func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, infoHash metainfo.Hash, snapDir string, peer *ChainTomlPeer) ([]byte, error) {
-	t, _ := client.AddTorrentInfoHash(infoHash)
-	defer t.Drop()
+const maxChainTomlSize = int64(16 * datasize.MB)
 
-	// If the peer advertised a BT port in their ENR, add them directly as a torrent peer.
-	if peer != nil {
+type cachedChainToml struct {
+	infoHash metainfo.Hash
+	data     []byte
+}
+
+type chainTomlStorage struct {
+	storage.ClientImplCloser
+	rejected chan error
+}
+
+// The library opens storage before closing GotInfo, so validate before opening any files.
+func (s chainTomlStorage) OpenTorrent(ctx context.Context, info *metainfo.Info, hash metainfo.Hash) (storage.TorrentImpl, error) {
+	if err := validateChainTomlInfo(info); err != nil {
+		// Rejected metadata leaves GotInfo open, so notify the downloader directly.
+		select {
+		case s.rejected <- err:
+		default:
+		}
+		return storage.TorrentImpl{}, err
+	}
+	return s.ClientImplCloser.OpenTorrent(ctx, info, hash)
+}
+
+func validateChainTomlInfo(info *metainfo.Info) error {
+	if info == nil {
+		return fmt.Errorf("chain.toml torrent info missing")
+	}
+	// Manifests use v1; v2 file lengths live in the file tree instead of info.Length.
+	if info.HasV2() {
+		return fmt.Errorf("chain.toml torrent uses v2 metadata, expected v1")
+	}
+	if len(info.Files) != 0 {
+		return fmt.Errorf("chain.toml torrent is multi-file (%d files), expected single file", len(info.Files))
+	}
+	if name := info.BestName(); name != ChainTomlFileName {
+		return fmt.Errorf("chain.toml torrent names %q, expected %q", name, ChainTomlFileName)
+	}
+	if info.Length < 0 {
+		return fmt.Errorf("invalid chain.toml torrent length: %d", info.Length)
+	}
+	if info.Length > maxChainTomlSize {
+		return fmt.Errorf("chain.toml exceeds size limit of %d bytes", maxChainTomlSize)
+	}
+	// GeneratePieces loops indefinitely for a zero or negative piece length.
+	if info.PieceLength <= 0 {
+		return fmt.Errorf("invalid chain.toml torrent piece length: %d", info.PieceLength)
+	}
+	return nil
+}
+
+func (d *Downloader) downloadChainToml(ctx context.Context, peer *ChainTomlPeer) ([]byte, error) {
+	d.chainTomlTorrentLock.Lock()
+	defer d.chainTomlTorrentLock.Unlock()
+	infoHash := peer.ChainToml.InfoHash
+	if cached := d.chainTomlCache; cached != nil && cached.infoHash == infoHash {
+		return cached.data, nil
+	}
+	data, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, infoHash, d.snapDir(), d.cfg.Dirs.Tmp, peer)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := ParseChainToml(data); err != nil {
+		return nil, err
+	}
+	d.chainTomlCache = &cachedChainToml{infoHash: infoHash, data: data}
+	return data, nil
+}
+
+// DownloadChainTomlByInfoHash downloads chain.toml into temporary storage or verifies a completed local copy.
+// It drops only torrents it creates and rejects incomplete existing torrents.
+// The caller must clear tmpDir on startup to remove downloads left by a crash.
+// A non-nil peer is used only for new torrents, if its ENR advertises a BitTorrent endpoint.
+func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, infoHash metainfo.Hash, snapDir, tmpDir string, peer *ChainTomlPeer) ([]byte, error) {
+	downloadDir, err := os.MkdirTemp(tmpDir, ".chaintoml-download-")
+	if err != nil {
+		return nil, fmt.Errorf("creating chain.toml download directory: %w", err)
+	}
+	defer func() {
+		if cleanupErr := dir.RemoveAll(downloadDir); cleanupErr != nil {
+			log.Warn("[chaintoml] failed to remove download directory", "path", downloadDir, "err", cleanupErr)
+		}
+	}()
+	store := chainTomlStorage{
+		ClientImplCloser: storage.NewFileOpts(storage.NewFileClientOpts{ClientBaseDir: downloadDir}),
+		rejected:         make(chan error, 1),
+	}
+	defer store.Close()
+
+	t, added := client.AddTorrentOpt(torrent.AddTorrentOpts{InfoHash: infoHash, Storage: store})
+	if added {
+		defer t.Drop()
+	} else if !t.Complete().Bool() {
+		// AddTorrentOpt keeps the original storage, so we cannot safely resume an existing torrent.
+		return nil, fmt.Errorf("requested torrent already exists and is incomplete")
+	}
+
+	if added && peer != nil {
 		addTorrentPeerFromENR(t, peer)
 	}
 
-	// Use a timeout to avoid blocking the discovery loop indefinitely.
+	// Bound network waits so an unresponsive peer does not stall discovery.
 	dlCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
 	select {
 	case <-t.GotInfo():
+	case metadataErr := <-store.rejected:
+		return nil, metadataErr
 	case <-dlCtx.Done():
 		return nil, fmt.Errorf("waiting for chain.toml torrent info: %w", dlCtx.Err())
 	}
 
-	// Validate the torrent's metainfo — a malicious peer could advertise an
-	// info-hash whose torrent is a multi-file bundle or names a file other
-	// than chain.toml. Reject both: consumers should only download manifests
-	// that match the expected single-file shape.
 	info := t.Info()
-	if info == nil {
-		return nil, fmt.Errorf("chain.toml torrent info missing")
+	if metadataErr := validateChainTomlInfo(info); metadataErr != nil {
+		return nil, metadataErr
 	}
-	if len(info.Files) != 0 {
-		return nil, fmt.Errorf("chain.toml torrent is multi-file (%d files), expected single file", len(info.Files))
-	}
-	if info.Name != ChainTomlFileName {
-		return nil, fmt.Errorf("chain.toml torrent names %q, expected %q", info.Name, ChainTomlFileName)
+	metadata := t.Metainfo()
+	if metadata.HashInfoBytes() != infoHash {
+		return nil, fmt.Errorf("chain.toml metadata does not match advertised info hash")
 	}
 
-	t.DownloadAll()
-
-	select {
-	case <-t.Complete().On():
-	case <-dlCtx.Done():
-		return nil, fmt.Errorf("downloading chain.toml torrent: %w", dlCtx.Err())
-	}
-
-	// Read the downloaded chain.toml file. The validation above guarantees
-	// the torrent wrote to this path.
 	filePath := ChainTomlPath(snapDir)
-	data, err := os.ReadFile(filePath)
+	if added {
+		filePath = ChainTomlPath(downloadDir)
+		t.DownloadAll()
+		select {
+		case <-t.Complete().On():
+		case <-dlCtx.Done():
+			return nil, fmt.Errorf("downloading chain.toml torrent: %w", dlCtx.Err())
+		}
+	}
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("opening downloaded chain.toml: %w", err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, info.Length+1))
 	if err != nil {
 		return nil, fmt.Errorf("reading downloaded chain.toml: %w", err)
+	}
+	if int64(len(data)) != info.Length {
+		return nil, fmt.Errorf("chain.toml does not match torrent length")
+	}
+	if !added {
+		// The local file may have changed since the torrent was marked complete.
+		// Verify the bytes we return, since a separate file read could see different contents.
+		pieces, hashErr := metainfo.GeneratePieces(bytes.NewReader(data), info.PieceLength, nil)
+		if hashErr != nil {
+			return nil, fmt.Errorf("hashing local chain.toml: %w", hashErr)
+		}
+		if !bytes.Equal(pieces, info.Pieces) {
+			return nil, fmt.Errorf("chain.toml does not match torrent pieces")
+		}
 	}
 
 	return data, nil
 }
 
-// addTorrentPeerFromENR extracts the BT port and IP from a peer's ENR record
-// and adds them as a direct torrent peer. The IP defaults to the node's
-// advertised IP if not separately specified.
+// addTorrentPeerFromENR adds the peer using the IP and BitTorrent port advertised in its ENR.
 func addTorrentPeerFromENR(t *torrent.Torrent, peer *ChainTomlPeer) {
 	var bt enr.BT
 	if err := peer.Node.Record().Load(&bt); err != nil {
@@ -291,7 +397,7 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 		"knownTx", best.ChainToml.KnownBlocks,
 		"infoHash", hex.EncodeToString(best.ChainToml.InfoHash[:]))
 
-	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.ChainToml.InfoHash, d.snapDir(), best)
+	tomlBytes, err := d.downloadChainToml(ctx, best)
 	if err != nil {
 		d.logger.Warn("[chaintoml] failed to download chain.toml", "err", err)
 		return
@@ -333,7 +439,7 @@ func (d *Downloader) verifyChainToml(ctx context.Context, networkName string, ns
 		return
 	}
 
-	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.ChainToml.InfoHash, d.snapDir(), best)
+	tomlBytes, err := d.downloadChainToml(ctx, best)
 	if err != nil {
 		d.logger.Warn("[chaintoml] verify: failed to download chain.toml", "err", err)
 		return

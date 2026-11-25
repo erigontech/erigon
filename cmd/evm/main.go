@@ -22,16 +22,15 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"math/big"
 	"os"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
+	_ "github.com/erigontech/erigon/cmd/evm/internal/stderrlog" // before any package logs
 	"github.com/erigontech/erigon/cmd/evm/internal/t8ntool"
 	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/common/log/v3"
 	cli2 "github.com/erigontech/erigon/node/cli"
 )
 
@@ -151,6 +150,23 @@ var (
 		Value: 1,
 		Usage: "Number of workers to execute tests in parallel (must be >= 1)",
 	}
+	BALReportFlag = cli.BoolFlag{
+		Name:  "bal-report",
+		Usage: "Print how each block was executed (parallel or sequential, and why) as one JSON line per block on stderr",
+	}
+	BALSequentialFlag = cli.BoolFlag{
+		Name:  "bal-sequential",
+		Usage: "Execute every block on a single exec worker instead of the parallel executor",
+	}
+	BALWithholdFlag = cli.BoolFlag{
+		Name:  "bal-withhold",
+		Usage: "Execute every block without its access list, as IGNORE_BAL does",
+	}
+	SyncingTimeoutFlag = cli.DurationFlag{
+		Name:  "syncing-timeout",
+		Value: time.Minute,
+		Usage: "Fail an engine test whose newPayload or forkchoiceUpdated still answers SYNCING after this long",
+	}
 	JSONOutputFlag = cli.BoolFlag{
 		Name:  "jsonout",
 		Usage: "Output results as JSON array instead of human-readable format",
@@ -211,6 +227,7 @@ func init() {
 		&disasmCommand,
 		&runCommand,
 		&blockTestCommand,
+		&engineTestCommand,
 		&engineXTestCommand,
 		&zkevmTestCommand,
 		&stateTestCommand,
@@ -224,14 +241,6 @@ func init() {
 
 func main() {
 	if err := app.Run(context.Background(), os.Args); err != nil {
-		code := 1
-		if ec, ok := errors.AsType[*t8ntool.NumberedError](err); ok {
-			code = ec.ExitCode()
-		}
-		_, printErr := fmt.Fprintln(os.Stderr, err)
-		if printErr != nil {
-			log.Warn("print error", "err", printErr)
-		}
-		os.Exit(code)
+		os.Exit(1) // fallback: NewApp's ExitErrHandler normally prints and exits first
 	}
 }

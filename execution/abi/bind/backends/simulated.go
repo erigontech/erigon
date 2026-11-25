@@ -31,7 +31,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -206,13 +205,10 @@ func (b *SimulatedBackend) stateByBlockNumber(db kv.TemporalTx, blockNumber *uin
 	return newCallState(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
 }
 
-// newCallState puts a one-shot read or call on the versioned state, like the RPC call sites, unless CALL_NO_MATERIALIZE is off.
+// newCallState puts a one-shot read or call on the versioned state, like the RPC call sites.
 func newCallState(r state.StateReader) *state.IntraBlockState {
-	s := state.New(r)
-	if dbg.CallNoMaterialize {
-		s.SetVersionMap(state.NewVersionMap(nil))
-		s.SetNoConflictDetection()
-	}
+	s := state.NewWithVersionMap(r, state.NewVersionMap(nil))
+	s.SetNoConflictDetection()
 	return s
 }
 
@@ -819,7 +815,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 	if _, err := protocol.ApplyTransaction(
 		b.m.ChainConfig, protocol.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
 		accounts.InternAddress(b.pendingHeader.Coinbase), b.gasPool,
-		b.pendingState, state.NewNoopWriter(),
+		b.pendingState,
 		b.pendingHeader, txn,
 		b.pendingGasUsed,
 		vm.Config{},
@@ -881,12 +877,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 		return errors.New("could not adjust time on non-empty block")
 	}
 
-	chain, err := b.m.GenerateChainFrom(b.prependBlock, 1, func(number int, block *blockgen.BlockGen) {
-		for _, txn := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
-		}
-		block.OffsetTime(int64(adjustment.Seconds()))
-	})
+	chain, err := b.m.GenerateChainWithTimeOffsets(b.prependBlock, []int64{int64(adjustment / time.Second)}, nil)
 	if err != nil {
 		return err
 	}

@@ -17,32 +17,33 @@
 package txpool
 
 import (
-	"bytes"
 	"context"
-	"strings"
-	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
-	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	mdgas "github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider"
 )
 
 func TestBestReleasesTheLockWhenTheCallerGivesUpWaitingForABlock(t *testing.T) {
-	lock := &sync.Mutex{}
-	p := &TxPool{lock: lock, lastSeenCond: sync.NewCond(lock)}
+	p := &TxPool{logger: log.New()}
 
 	// The requested block has not been seen, so the wait loop is entered, and the caller is already
 	// gone by the time it checks.
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, _, err := p.best(ctx, 1, &TxnsRlp{}, 1, nil, mdgas.FullMdGas{}, mapset.NewSet[[32]byte](), 0)
+	_, err := p.PeekBest(ctx, 1, &TxnsRlp{}, 1)
 	require.ErrorIs(t, err, context.Canceled)
 
 	// Returning with the lock still held blocks every later pool operation, including the block
@@ -51,96 +52,167 @@ func TestBestReleasesTheLockWhenTheCallerGivesUpWaitingForABlock(t *testing.T) {
 	p.lock.Unlock()
 }
 
-// waitingBuffer records what the pool logged, so a test can tell when a caller has reached the
-// "Waiting for block" trace and is therefore about to park in the condition.
-type waitingBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
+type provideTxnsResult struct {
+	txns []types.Transaction
+	err  error
 }
 
-func (w *waitingBuffer) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.buf.Write(p)
-}
-
-func (w *waitingBuffer) contains(s string) bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return strings.Contains(w.buf.String(), s)
-}
-
-// newLoggingPool returns a pool that has seen no block, with its log kept for waitingBuffer checks.
-func newLoggingPool() (*TxPool, *waitingBuffer) {
-	logs := &waitingBuffer{}
-	logger := log.New()
-	logger.SetHandler(log.StreamHandler(logs, log.LogfmtFormat()))
-
-	lock := &sync.Mutex{}
-	return &TxPool{
-		lock:         lock,
-		lastSeenCond: sync.NewCond(lock),
-		logger:       logger,
-		pending:      NewPendingSubPool(PendingSubPool, 1),
-		baseFee:      NewSubPool(BaseFeeSubPool, 1),
-		queued:       NewSubPool(QueuedSubPool, 1),
-	}, logs
-}
-
-func TestBestReturnsWhenItsCallerGoesAwayWhileWaitingForABlock(t *testing.T) {
-	p, logs := newLoggingPool()
-	ctx, cancel := context.WithCancel(t.Context())
-
-	returned := make(chan error, 1)
+func provideTxnsAsync(ctx context.Context, pool *TxPool, opts ...txnprovider.ProvideOption) <-chan provideTxnsResult {
+	done := make(chan provideTxnsResult, 1)
 	go func() {
-		_, _, err := p.best(ctx, 1, &TxnsRlp{}, 1, nil, mdgas.FullMdGas{}, mapset.NewSet[[32]byte](), 0)
-		returned <- err
+		txns, err := pool.ProvideTxns(ctx, opts...)
+		done <- provideTxnsResult{txns, err}
 	}()
+	return done
+}
 
-	// Cancel only once it is parked, so this exercises the wait rather than the check before it.
-	require.Eventually(t, func() bool { return logs.contains("Waiting for block") }, 5*time.Second, time.Millisecond)
-	cancel()
-
-	// Nothing else wakes it: no block arrives and the pool is not shutting down. A wait that cannot
-	// observe its caller leaves the builder that made this request holding a read view until one of
-	// those happens, which on a stalled chain is never.
-	select {
-	case err := <-returned:
-		require.ErrorIs(t, err, context.Canceled)
-	case <-time.After(5 * time.Second):
-		t.Fatal("best never returned; only a new block would have woken it")
+func TestProvideTxnsInterruptsParentBlockWaitWhilePoolIsLocked(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		wantErr error
+	}{
+		{"cancel caller", context.Canceled},
+		{"stop parent wait", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A waiter stuck on a mutex cannot advance synctest's clock.
+			timeout := time.After(5 * time.Second)
+			synctest.Test(t, func(t *testing.T) {
+				_, p, _, _ := newTestPool(t)
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				stop := make(chan struct{})
+				done := provideTxnsAsync(ctx, p, txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockWaitStop(stop))
+				synctest.Wait()
+				p.lock.Lock()
+				defer p.lock.Unlock()
+				if tc.wantErr != nil {
+					cancel()
+				} else {
+					close(stop)
+				}
+				select {
+				case got := <-done:
+					require.Empty(t, got.txns)
+					require.ErrorIs(t, got.err, tc.wantErr)
+				case <-timeout:
+					t.Fatal("interrupted parent block wait needed the pool lock to return")
+				}
+			})
+		})
 	}
 }
 
-func TestProvideTxnsReturnsNothingOnceTheParentBlockWaitIsStopped(t *testing.T) {
-	p, logs := newLoggingPool()
-	stop := make(chan struct{})
+func TestPeekBestWakesAtRequestedBlock(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, pool, _, _ := newTestPool(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		type result struct {
+			height uint64
+			onTime bool
+			err    error
+		}
+		done := make(chan result, 2)
+		for _, height := range []uint64{1, 2} {
+			go func() {
+				onTime, err := pool.PeekBest(ctx, 0, &TxnsRlp{}, height)
+				done <- result{height, onTime, err}
+			}()
+		}
+		synctest.Wait()
+		for _, height := range []uint64{1, 2} {
+			change := newBlockChangeForAccounts(common.Hash{}, 0)
+			change.ChangeBatch[0].BlockHeight = height
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			synctest.Wait()
+			require.Len(t, done, 1)
+			require.Equal(t, result{height: height, onTime: true}, <-done)
+		}
+	})
+}
 
-	type provided struct {
-		txns []types.Transaction
-		err  error
-	}
-	returned := make(chan provided, 1)
-	go func() {
-		txns, err := p.ProvideTxns(t.Context(), txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockWaitStop(stop))
-		returned <- provided{txns, err}
-	}()
+func TestProvideTxnsRechecksParentAfterUnwind(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, pool, _, _ := newTestPool(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		readers := semaphore.NewWeighted(1)
+		opts := mdbx.New(dbcfg.TxPoolDB, log.New()).RoTxsLimiter(readers)
+		pool.poolDB = mdbxtest.InMem(t, opts, t.TempDir()).MustOpen()
+		t.Cleanup(pool.poolDB.Close)
 
-	require.Eventually(t, func() bool { return logs.contains("Waiting for block") }, 5*time.Second, time.Millisecond)
-	close(stop)
+		sender := common.Address{1}
+		update := func(height uint64, direction remoteproto.Direction) error {
+			change := newBlockChangeForAccounts(common.Hash{byte(height)}, 0, sender)
+			change.ChangeBatch[0].BlockHeight = height
+			change.ChangeBatch[0].Direction = direction
+			return pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+		}
+		require.NoError(t, update(1, remoteproto.Direction_FORWARD))
+		var slots TxnSlots
+		slots.Append(newTestSenderTxnSlot(sender, 0), sender[:], true)
+		_, err := pool.AddLocalTxns(ctx, slots)
+		require.NoError(t, err)
 
-	// A payload being collected cannot wait for a parent the pool may never see again.
+		// Queue the unwind first so it takes effect after both callers see the parent
+		// and before either caller can open its database snapshot.
+		require.NoError(t, readers.Acquire(ctx, 1))
+		unwound := make(chan error, 1)
+		go func() { unwound <- update(0, remoteproto.Direction_UNWIND) }()
+		synctest.Wait()
+		stop := make(chan struct{})
+		stopped := provideTxnsAsync(ctx, pool, txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockWaitStop(stop))
+		waiting := provideTxnsAsync(ctx, pool, txnprovider.WithParentBlockNum(1))
+		synctest.Wait()
+		readers.Release(1)
+		require.NoError(t, <-unwound)
+		synctest.Wait()
+		close(stop)
+		got := <-stopped
+		require.NoError(t, got.err)
+		require.Empty(t, got.txns, "stopped builder selected transactions below its requested parent")
+		require.Empty(t, waiting, "selection returned before the pool reached the parent again")
+		require.True(t, readers.TryAcquire(1), "waiting for the parent held a database reader")
+		readers.Release(1)
+
+		require.NoError(t, update(1, remoteproto.Direction_FORWARD))
+		got = <-waiting
+		require.NoError(t, got.err)
+		require.Len(t, got.txns, 1)
+	})
+}
+
+func TestProvideTxnsReturnsWhileTheStartupReloadHoldsTheLock(t *testing.T) {
+	p := new(TxPool)
+	require.False(t, p.Started())
+
+	p.lock.Lock()
+	t.Cleanup(p.lock.Unlock)
+
+	returned := provideTxnsAsync(t.Context(), p, txnprovider.WithParentBlockNum(1))
+
 	select {
 	case got := <-returned:
 		require.NoError(t, got.err)
 		require.Empty(t, got.txns)
 	case <-time.After(5 * time.Second):
-		t.Fatal("ProvideTxns kept waiting for the parent block after the wait was stopped")
+		t.Fatal("ProvideTxns waited for the lock that the startup reload holds")
 	}
 }
 
+func TestProvideTxnsReportsACancelledCallerBeforeStartup(t *testing.T) {
+	p := new(TxPool)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := p.ProvideTxns(ctx, txnprovider.WithParentBlockNum(1))
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 func TestProvideTxnsReportsCancellationWhenTheParentBlockWaitIsAlsoStopped(t *testing.T) {
-	p, _ := newLoggingPool()
+	p := &TxPool{logger: log.New()}
+	p.started.Store(true)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	stop := make(chan struct{})

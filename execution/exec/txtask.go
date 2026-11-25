@@ -49,7 +49,6 @@ type Task interface {
 		engine rules.Engine,
 		genesis *types.Genesis,
 		ibs *state.IntraBlockState,
-		stateWriter state.StateWriter,
 		chainConfig *chain.Config,
 		chainReader rules.ChainReader,
 		dirs datadir.Dirs,
@@ -58,9 +57,7 @@ type Task interface {
 	Version() state.Version
 	VersionMap() *state.VersionMap
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
-	VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
-	ResetGasPool(*protocol.GasPool)
 
 	Tx() types.Transaction
 	TxType() uint8
@@ -163,6 +160,7 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		TransactionIndex:         uint(txIndex),
 		Type:                     r.TxType(),
 		GasUsed:                  r.ExecutionResult.ReceiptGasUsed,
+		BlobGasUsed:              r.Tx().GetBlobGas(),
 		CumulativeGasUsed:        cumulativeGasUsed,
 		TxHash:                   r.TxHash(),
 		Payer:                    r.ExecutionResult.Payer,
@@ -206,19 +204,16 @@ type BlockResult struct {
 
 type ApplyMessage func(evm *vm.EVM, msg protocol.Message, gp *protocol.GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error)
 
-// ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
-// which is processed by a single thread that writes into the ReconState1 and
-// flushes to the database
+// TxTask is one transaction, or the init or end of a block, run by an execution worker.
 type TxTask struct {
-	TxNum              uint64
-	TxIndex            int // -1 for block initialisation
-	Header             *types.Header
-	Txs                types.Transactions
-	Uncles             []*types.Header
-	Withdrawals        types.Withdrawals
-	EvmBlockContext    evmtypes.BlockContext
-	HistoryExecution   bool // use history reader for that txn instead of state reader
-	BalanceIncreaseSet map[accounts.Address]uint256.Int
+	TxNum            uint64
+	TxIndex          int // -1 for block initialisation
+	Header           *types.Header
+	Txs              types.Transactions
+	Uncles           []*types.Header
+	Withdrawals      types.Withdrawals
+	EvmBlockContext  evmtypes.BlockContext
+	HistoryExecution bool // use history reader for that txn instead of state reader
 
 	Tracer *calltracer.CallTracer
 	Hooks  *tracing.Hooks
@@ -227,8 +222,6 @@ type TxTask struct {
 	Logger log.Logger
 	Trace  bool
 
-	gasPool      *protocol.GasPool
-	sender       accounts.Address
 	message      *types.Message
 	signer       *types.Signer
 	dependencies []int
@@ -269,15 +262,11 @@ func (t *TxTask) TxHash() common.Hash {
 }
 
 func (t *TxTask) TxSender() (accounts.Address, error) {
-	if !t.sender.IsNil() {
-		return t.sender, nil
-	}
 	if t.TxIndex < 0 || t.TxIndex >= len(t.Txs) {
 		return accounts.NilAddress, nil
 	}
 	if sender, ok := t.Tx().GetSender(); ok {
-		t.sender = sender
-		return t.sender, nil
+		return sender, nil
 	}
 	if t.signer == nil {
 		t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
@@ -286,12 +275,8 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	if err != nil {
 		return accounts.NilAddress, fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, t.TxHash(), err)
 	}
-	t.sender = sender
-	if RecoversSenders(t.Header) {
-		return t.sender, nil
-	}
 	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNumber(), "txIdx", t.TxIndex)
-	return t.sender, nil
+	return sender, nil
 }
 
 // ChargesSenderAtValidation reports whether this run skips the sender charge (nonce, gas, value) and validation applies it.
@@ -392,30 +377,22 @@ func (t *TxTask) Rules() *chain.Rules {
 func (t *TxTask) ResetTx(txNum uint64, txIndex int) {
 	t.TxNum = txNum
 	t.TxIndex = txIndex
-	t.sender = accounts.NilAddress
 	t.message = nil
 	t.signer = nil
 	t.dependencies = nil
 }
 
 func (t *TxTask) GasPool() *protocol.GasPool {
-	if t.gasPool != nil {
-		return t.gasPool
-	}
 	// Workers can't share the block gas pool (SubGas races on speculative
 	// depletion), so hand out a fresh per-invocation pool sized to the block
 	// limit. Returning nil would make preCheck's CheckBlockGasInclusion no-op,
 	// letting a tx that alone exceeds the block limit slip past and fail later
-	// with the wrong error variant (serial returns ErrGasLimitReached). Cross-tx
+	// with the wrong error variant. Cross-tx
 	// depletion is still caught post-execution against the shared pool.
 	if t.Header == nil || t.Config == nil {
 		return nil
 	}
 	return protocol.NewGasPool(t.Header.GasLimit, t.Config.GetMaxBlobGasPerBlock(t.Header.Time))
-}
-
-func (t *TxTask) ResetGasPool(gasPool *protocol.GasPool) {
-	t.gasPool = gasPool
 }
 
 func (t *TxTask) Version() state.Version {
@@ -446,10 +423,6 @@ func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
 	return ibs.VersionedReads()
 }
 
-func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet {
-	return ibs.VersionedWrites()
-}
-
 func (t *TxTask) IsBlockEnd() bool {
 	return t.TxIndex == len(t.Txs)
 }
@@ -459,7 +432,6 @@ func (t *TxTask) IsHistoric() bool {
 }
 
 func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
-	t.BalanceIncreaseSet = nil
 	ibs.Reset()
 	ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
 
@@ -487,7 +459,6 @@ func (t *TxTask) Execute(evm *vm.EVM,
 	engine rules.Engine,
 	genesis *types.Genesis,
 	ibs *state.IntraBlockState,
-	stateWriter state.StateWriter,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
@@ -510,7 +481,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", t.TxNum, t.BlockNum)
 			if genesis != nil {
 				var genesisIbs *state.IntraBlockState
-				_, genesisIbs, err = genesiswrite.GenesisToBlock(genesis, dirs, t.Logger)
+				_, genesisIbs, err = genesiswrite.GenesisToBlock(genesis)
 				if err != nil {
 					panic(err)
 				}
@@ -533,11 +504,6 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			return ret, err
 		}
 		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, t.Logger, nil)
-		if result.Err == nil && !ibs.IsVersioned() {
-			// The versionMap path finalizes from the write-set after the switch;
-			// the serial path commits the init writes here.
-			result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
-		}
 	case t.IsBlockEnd():
 		if t.BlockNumber() == 0 {
 			break
@@ -584,11 +550,6 @@ func (t *TxTask) Execute(evm *vm.EVM,
 		}()
 
 		if result.Err == nil {
-			// The versionMap path produces its write-set from the recorded IO
-			// after the switch; only the serial path clears pending changes here.
-			if !ibs.IsVersioned() {
-				ibs.SoftFinalise()
-			}
 			result.Logs = ibs.GetLogs(t.TxIndex, t.TxHash(), t.BlockNumber(), t.BlockHash())
 		}
 
@@ -599,31 +560,18 @@ func (t *TxTask) Execute(evm *vm.EVM,
 	if result.Err != nil && errors.Is(result.Err, protocol.ErrExecPanic) && t.TxIndex >= 0 && !t.IsBlockEnd() {
 		result.Operational = true
 	}
-	if stateErr := ibs.StateReadError(); stateErr != nil && t.TxIndex >= 0 && !t.IsBlockEnd() {
+	if stateErr := ibs.StateReadError(); stateErr != nil && !t.IsBlockEnd() {
 		result.Operational = true
 		result.Err = stateErr
 	}
-	// Prepare read set, write set and balanceIncrease set and send for serialisation
+	// Prepare the read and write sets.
 	if result.Err == nil {
-		t.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		// Genesis (block 0, txIndex -1) resolves `ibs` to the throwaway versioned
-		// IBS that GenesisToBlock builds, whatever the executor. Its writes reach
-		// the executor only through MakeWriteSet(stateWriter); the FinalizedWrites
-		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
-		isGenesis := t.TxIndex == -1 && t.BlockNumber() == 0
-		if ibs.IsVersioned() && !isGenesis {
-			result.TxOut, _ = ibs.FinalizedWrites(rules) // the read error is checked below for both branches
-		} else {
-			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
-				panic(err)
-			}
-			result.TxOut = t.VersionedWrites(ibs)
-		}
-
 		// FinalizedWrites composes pre-tx state to decide EIP-161 removals and can
 		// hit a read failure of its own; surface it operationally and drop the
 		// write-set built from it rather than committing a wrong deletion.
-		if stateErr := ibs.StateReadError(); stateErr != nil && t.TxIndex >= 0 && !t.IsBlockEnd() {
+		var stateErr error
+		result.TxOut, stateErr = ibs.FinalizedWrites(rules)
+		if stateErr != nil && !t.IsBlockEnd() {
 			result.Operational = true
 			result.Err = stateErr
 			result.TxOut = nil
@@ -676,29 +624,12 @@ func (h *Queue[T]) Pop() any {
 type QueueWithRetry struct {
 	closed   bool
 	newTasks chan Task
-	parked   chan Task
 	retires  Queue[Task]
 	lock     sync.Mutex
-	capacity int
 }
-
-var queuePool sync.Pool
 
 func NewQueueWithRetry(capacity int) *QueueWithRetry {
-	return &QueueWithRetry{newTasks: make(chan Task, capacity), capacity: capacity}
-}
-
-func GetQueueWithRetryFromPool(capacity int) *QueueWithRetry {
-	if v := queuePool.Get(); v != nil {
-		q := v.(*QueueWithRetry)
-		if q.capacity == capacity && q.parked != nil {
-			q.closed = false
-			q.newTasks = q.parked
-			q.parked = nil
-			return q
-		}
-	}
-	return NewQueueWithRetry(capacity)
+	return &QueueWithRetry{newTasks: make(chan Task, capacity)}
 }
 
 func (q *QueueWithRetry) NewTasksLen() int {
@@ -706,7 +637,7 @@ func (q *QueueWithRetry) NewTasksLen() int {
 	defer q.lock.Unlock()
 	return len(q.newTasks)
 }
-func (q *QueueWithRetry) Capacity() int { return q.capacity }
+
 func (q *QueueWithRetry) RetriesLen() (l int) {
 	q.lock.Lock()
 	l = q.retires.Len()
@@ -714,14 +645,6 @@ func (q *QueueWithRetry) RetriesLen() (l int) {
 	return l
 }
 
-func (q *QueueWithRetry) RetryTxNumsList() (out []uint64) {
-	q.lock.Lock()
-	for _, t := range q.retires {
-		out = append(out, t.Version().TxNum)
-	}
-	q.lock.Unlock()
-	return out
-}
 func (q *QueueWithRetry) Len() (l int) { return q.RetriesLen() + q.NewTasksLen() }
 
 // Add "new task" (which was never executed yet). May block if internal channel is full.
@@ -738,26 +661,6 @@ func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
 			return
 		case newTasks <- t:
 		}
-	}
-}
-
-// TryAdd attempts to add a task without blocking. Returns true if the task was
-// enqueued, false if the channel is full or the queue is closed.
-func (q *QueueWithRetry) TryAdd(t Task) bool {
-	q.lock.Lock()
-	closed := q.closed
-	newTasks := q.newTasks
-	q.lock.Unlock()
-
-	if closed {
-		return false
-	}
-
-	select {
-	case newTasks <- t:
-		return true
-	default:
-		return false
 	}
 }
 
@@ -789,24 +692,9 @@ func (q *QueueWithRetry) Next(ctx context.Context) (Task, bool) {
 }
 
 func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
-	q.lock.Lock()
-	newTasks := q.newTasks
-	q.lock.Unlock()
-
-	if newTasks == nil {
-		return q.popNoWait()
-	}
-
 	for {
-		q.lock.Lock()
-		newTasks := q.newTasks
-		q.lock.Unlock()
-		if newTasks == nil {
-			return q.popNoWait()
-		}
-
 		select {
-		case inTask, ok := <-newTasks:
+		case inTask, ok := <-q.newTasks:
 			if !ok {
 				return q.popNoWait()
 			}
@@ -864,31 +752,7 @@ func (q *QueueWithRetry) Close() {
 		return
 	}
 	q.closed = true
-	if q.newTasks != nil {
-		newTasks := q.newTasks
-		close(newTasks)
-	}
-}
-
-// Release puts the queue back into the pool
-func (q *QueueWithRetry) Release() {
-	q.lock.Lock()
-	if q.newTasks == nil || q.closed {
-		q.lock.Unlock()
-		return
-	}
-	q.closed = true
-	// Drain channel.
-	for len(q.newTasks) > 0 {
-		<-q.newTasks
-	}
-	// Clear retry heap, keep backing array.
-	clear(q.retires)
-	q.retires = q.retires[:0]
-	q.parked = q.newTasks
-	q.newTasks = nil
-	q.lock.Unlock()
-	queuePool.Put(q)
+	close(q.newTasks)
 }
 
 // ResultsQueue thread-safe priority-queue of execution results
