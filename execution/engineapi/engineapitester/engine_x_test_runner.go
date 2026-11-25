@@ -135,7 +135,7 @@ type testerEntry struct {
 	dataDir string
 }
 
-func (entry *testerEntry) close() error {
+func (entry testerEntry) close() error {
 	return errors.Join(entry.tester.Close(), dir.RemoveAll(entry.dataDir))
 }
 
@@ -145,12 +145,12 @@ type testerGroupKey struct {
 }
 
 // Each account list needs its own node within a fixture group.
-type testerGroup map[string]*testerEntry
+type testerGroup map[string]testerEntry
 
 func (group testerGroup) close() error {
 	errs := make([]error, 0, len(group))
-	for _, entry := range group {
-		errs = append(errs, entry.close())
+	for key := range group {
+		errs = append(errs, group[key].close())
 	}
 	return errors.Join(errs...)
 }
@@ -386,15 +386,15 @@ func (extr *EngineXTestRunner) getOrCreateTester(test EngineXTestDefinition) (En
 
 // createTester starts a tester in its own temporary directory. The caller
 // must either cache the returned entry or close it.
-func (extr *EngineXTestRunner) createTester(test EngineXTestDefinition) (*testerEntry, error) {
+func (extr *EngineXTestRunner) createTester(test EngineXTestDefinition) (testerEntry, error) {
 	fork, preAllocHash := test.Fork, test.PreAllocHash
 	forkConfig, err := test.Config.ChainConfig(fork.String())
 	if err != nil {
-		return nil, err
+		return testerEntry{}, err
 	}
 	alloc, ok := extr.preAllocs[preAllocHash]
 	if !ok {
-		return nil, fmt.Errorf("pre_alloc %s not found", preAllocHash)
+		return testerEntry{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
 	}
 	var genesis types.Genesis
 	if alloc.Environment.GasLimit != 0 {
@@ -432,7 +432,7 @@ func (extr *EngineXTestRunner) createTester(test EngineXTestDefinition) (*tester
 	}
 	dataDir, err := os.MkdirTemp("", "enginex-tester-*")
 	if err != nil {
-		return nil, fmt.Errorf("create temp data dir: %w", err)
+		return testerEntry{}, fmt.Errorf("create temp data dir: %w", err)
 	}
 	engineApiClientTimeout := 10 * time.Minute
 	tester, err := InitialiseEngineApiTester(extr.ctx, EngineApiTesterInitArgs{
@@ -455,9 +455,9 @@ func (extr *EngineXTestRunner) createTester(test EngineXTestDefinition) (*tester
 		// returned, so its own cleanups have already run inside
 		// InitialiseEngineApiTester's rollback path.
 		_ = dir.RemoveAll(dataDir)
-		return nil, fmt.Errorf("initialise tester for fork=%s preAlloc=%s: %w", fork, preAllocHash, err)
+		return testerEntry{}, fmt.Errorf("initialise tester for fork=%s preAlloc=%s: %w", fork, preAllocHash, err)
 	}
-	return &testerEntry{tester: tester, dataDir: dataDir}, nil
+	return testerEntry{tester: tester, dataDir: dataDir}, nil
 }
 
 func processNewPayload(ctx context.Context, tester EngineApiTester, payload EngineXTestNewPayload, testName string, hook RequestProfileHook) error {

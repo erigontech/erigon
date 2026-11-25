@@ -36,29 +36,29 @@ import (
 )
 
 func TestEngineXTestRunnerClosesCachedTesters(t *testing.T) {
-	newEntry := func(closeErr error) *testerEntry {
+	closeErrs := []error{
+		errors.New("Amsterdam tester"),
+		errors.New("Bogota tester"),
+		errors.New("Bogota tester with custom account list"),
+	}
+	entries := make([]testerEntry, len(closeErrs))
+	for i, closeErr := range closeErrs {
 		closeTester := func() error { return closeErr }
-		return &testerEntry{
+		entries[i] = testerEntry{
 			tester:  EngineApiTester{cleanup: &cleanupHandle{cleanups: []func() error{closeTester}}},
 			dataDir: t.TempDir(),
 		}
 	}
-	firstErr := errors.New("first tester")
-	secondErr := errors.New("second tester")
-	thirdErr := errors.New("third tester")
-	first, second, third := newEntry(firstErr), newEntry(secondErr), newEntry(thirdErr)
 	runner := EngineXTestRunner{testers: map[testerGroupKey]testerGroup{
-		{fork: "Amsterdam"}: {"": first},
-		{fork: "Bogota"}:    {"": second, "custom list": third},
+		{fork: "Amsterdam"}: {"": entries[0]},
+		{fork: "Bogota"}:    {"": entries[1], "custom list": entries[2]},
 	}}
 
 	err := runner.Close()
-	require.ErrorIs(t, err, firstErr)
-	require.ErrorIs(t, err, secondErr)
-	require.ErrorIs(t, err, thirdErr)
-	require.NoDirExists(t, first.dataDir)
-	require.NoDirExists(t, second.dataDir)
-	require.NoDirExists(t, third.dataDir)
+	for i, closeErr := range closeErrs {
+		require.ErrorIs(t, err, closeErr)
+		require.NoDirExists(t, entries[i].dataDir)
+	}
 }
 
 func TestEngineXTestDefinitionV_20_02(t *testing.T) {
