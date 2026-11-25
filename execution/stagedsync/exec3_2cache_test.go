@@ -21,6 +21,7 @@ import (
 	"context"
 	"math/big"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -388,5 +390,117 @@ func BenchmarkNotifyAccumulator(b *testing.B) {
 				require.NoError(b, rs.NotifyAccumulator(accumulator, tx, writes))
 			}
 		})
+	}
+}
+
+// A block large enough for parallel collection: entries follow the first touch
+// across write sets (code, storage, balance, nonce), carry the final account and
+// incarnation, and storage-only contracts resolve from the db, not the mem batch.
+func TestNotifyAccumulatorLargeBlockKeepsOrderAndFinalValues(t *testing.T) {
+	const senders, contracts = 3000, 5
+	tx, seedDomains := setup2CacheTest(t)
+	sender := func(i int) accounts.Address {
+		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(0x10000 + i))))
+	}
+	contract := func(j int) accounts.Address {
+		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(0xc0000 + j))))
+	}
+	coinbase := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
+	put := func(domains *execctx.SharedDomains, addr accounts.Address, acc accounts.Account) {
+		v := addr.Value()
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, v[:], accounts.SerialiseV3(&acc), 0, nil))
+	}
+	for j := range contracts {
+		put(seedDomains, contract(j), accounts.Account{Balance: *uint256.NewInt(7), Incarnation: 2})
+	}
+	require.NoError(t, seedDomains.Flush(context.Background(), tx))
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(domains.Close)
+	for i := range senders {
+		put(domains, sender(i), accounts.Account{Nonce: uint64(i), Balance: *uint256.NewInt(100), Incarnation: uint64(i % 2)})
+	}
+
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, log.New()))
+	var order []common.Address
+	seen := map[common.Address]bool{}
+	touch := func(addr accounts.Address) {
+		if !seen[addr.Value()] {
+			seen[addr.Value()] = true
+			order = append(order, addr.Value())
+		}
+	}
+	type slot struct {
+		key  common.Hash
+		data []byte
+	}
+	slots := map[common.Address][]slot{}
+	codes := map[common.Address][]byte{}
+	writes := make([]state.WriteSetView, senders)
+	for i := range writes {
+		ver := state.Version{TxIndex: i}
+		ws := newWS()
+		if i%100 == 0 {
+			code := []byte{0x60, byte(i / 100)}
+			ws.code(sender(i), ver, accounts.NewCode(code))
+			codes[sender(i).Value()] = code
+			touch(sender(i))
+		}
+		c, key, val := contract(i%contracts), accounts.InternKey(common.BigToHash(big.NewInt(int64(i/10)))), *uint256.NewInt(uint64(i + 1))
+		ws.stor(c, key, ver, val)
+		touch(c)
+		at := slices.IndexFunc(slots[c.Value()], func(s slot) bool { return s.key == key.Value() })
+		if at < 0 {
+			slots[c.Value()] = append(slots[c.Value()], slot{key: key.Value()})
+			at = len(slots[c.Value()]) - 1
+		}
+		slots[c.Value()][at].data = val.Bytes()
+		ws.bal(sender(i), ver, *uint256.NewInt(uint64(500 + i)))
+		if i > 0 {
+			ws.bal(sender(i-1), ver, *uint256.NewInt(uint64(1000 + i)))
+		}
+		ws.nonce(sender(i), ver, uint64(i+1))
+		touch(sender(i))
+		ws.nonce(coinbase, ver, uint64(i+1))
+		touch(coinbase)
+		writes[i] = ws.build()
+		require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, uint64(i+1), writes[i]))
+	}
+
+	accumulator := shards.NewAccumulator()
+	var hdr types.Header
+	hdr.Number.SetUint64(1)
+	accumulator.StartChange(&hdr, nil, false)
+	require.NoError(t, rs.NotifyAccumulator(accumulator, tx, writes))
+
+	changes := accumulator.Changes()
+	require.Len(t, changes, 1)
+	got := changes[0].Changes
+	require.Len(t, got, len(order))
+	for n, change := range got {
+		require.Equal(t, order[n], change.Address, "entry %d", n)
+		require.Equal(t, codes[change.Address], change.Code, "entry %d", n)
+		addr := change.Address
+		enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, addr[:])
+		require.NoError(t, err)
+		var final accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&final, enc))
+		require.Equal(t, final.Incarnation, change.Incarnation, "entry %d", n)
+		if want := slots[addr]; want != nil {
+			require.Equal(t, notifications.ActionStorage, change.Action, "entry %d", n)
+			require.Nil(t, change.Data, "entry %d", n)
+			require.Len(t, change.StorageChanges, len(want), "entry %d", n)
+			for k, s := range want {
+				require.Equal(t, s.key, change.StorageChanges[k].Location, "entry %d slot %d", n, k)
+				require.Equal(t, s.data, change.StorageChanges[k].Data, "entry %d slot %d", n, k)
+			}
+			continue
+		}
+		wantAction := notifications.ActionUpsert
+		if codes[addr] != nil {
+			wantAction = notifications.ActionUpsertCode
+		}
+		require.Equal(t, wantAction, change.Action, "entry %d", n)
+		require.Equal(t, enc, change.Data, "entry %d", n)
 	}
 }
