@@ -27,6 +27,7 @@ import (
 	"github.com/cenkalti/backoff/v4"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -269,17 +270,7 @@ func (f *FetcherBase) fetchHeaders(
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	messages := make(chan *DecodedInboundMessage[*eth.BlockHeadersPacket66])
-	observer := func(message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) {
-		select {
-		case <-ctx.Done():
-			return
-		case messages <- message:
-			// no-op
-		}
-	}
-
-	unregister := f.messageListener.RegisterBlockHeadersObserver(observer)
+	messages, unregister := subscribeResponses(ctx, f.messageListener.RegisterBlockHeadersObserver)
 	defer unregister()
 
 	requestId := f.config.requestIdGenerator()
@@ -291,7 +282,7 @@ func (f *FetcherBase) fetchHeaders(
 		return FetcherResponse[[]*types.Header]{}, err
 	}
 
-	message, messageSize, err := awaitResponse(ctx, responseTimeout, messages, filterBlockHeaders(peerId, requestId))
+	message, messageSize, err := awaitResponse(ctx, responseTimeout, messages, matchBlockHeaders(peerId, requestId))
 	if err != nil {
 		return FetcherResponse[[]*types.Header]{}, err
 	}
@@ -372,21 +363,10 @@ func (f *FetcherBase) fetchBodies(
 	peerId *PeerId,
 	responseTimeout time.Duration,
 ) (*FetcherResponse[[]*types.Body], error) {
-	// cleanup for the chan message observer
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	messages := make(chan *DecodedInboundMessage[BlockBodiesEnvelope])
-	observer := func(message *DecodedInboundMessage[BlockBodiesEnvelope]) {
-		select {
-		case <-ctx.Done():
-			return
-		case messages <- message:
-			// no-op
-		}
-	}
-
-	unregister := f.messageListener.RegisterBlockBodiesObserver(observer)
+	messages, unregister := subscribeResponses(ctx, f.messageListener.RegisterBlockBodiesObserver)
 	defer unregister()
 
 	requestId := f.config.requestIdGenerator()
@@ -403,7 +383,7 @@ func (f *FetcherBase) fetchBodies(
 		return nil, err
 	}
 
-	message, messageSize, err := awaitResponse(ctx, responseTimeout, messages, filterBlockBodies(peerId, requestId))
+	message, messageSize, err := awaitResponse(ctx, responseTimeout, messages, matchBlockBodies(peerId, requestId))
 	if err != nil {
 		return nil, err
 	}
@@ -482,11 +462,25 @@ func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([
 	return bodies, nil
 }
 
+// subscribeResponses registers a reply observer for one request. Unregistering
+// prevents future notifications from selecting it. The caller must also cancel
+// ctx when it stops reading so callbacks already waiting to send can return.
+func subscribeResponses[T any](ctx context.Context, register func(event.Observer[T]) UnregisterFunc) (<-chan T, UnregisterFunc) {
+	messages := make(chan T)
+	unregister := register(func(message T) {
+		select {
+		case <-ctx.Done():
+		case messages <- message:
+		}
+	})
+	return messages, unregister
+}
+
 func awaitResponse[TPacket any](
 	ctx context.Context,
 	timeout time.Duration,
-	messages chan *DecodedInboundMessage[TPacket],
-	filter func(*DecodedInboundMessage[TPacket]) bool,
+	messages <-chan *DecodedInboundMessage[TPacket],
+	matches func(*DecodedInboundMessage[TPacket]) bool,
 ) (TPacket, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -497,27 +491,25 @@ func awaitResponse[TPacket any](
 			packet := generics.Zero[TPacket]()
 			return packet, 0, fmt.Errorf("await %v response interrupted: %w", reflect.TypeOf(packet), ctx.Err())
 		case message := <-messages:
-			if filter(message) {
-				continue
+			if matches(message) {
+				return message.Decoded, len(message.Data), nil
 			}
-
-			return message.Decoded, len(message.Data), nil
 		}
 	}
 }
 
-func filterBlockHeaders(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[*eth.BlockHeadersPacket66]) bool {
+func matchBlockHeaders(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[*eth.BlockHeadersPacket66]) bool {
 	return func(message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) bool {
-		return filter(peerId, message.PeerId, requestId, message.Decoded.RequestId)
+		return matchesRequest(peerId, message.PeerId, requestId, message.Decoded.RequestId)
 	}
 }
 
-func filterBlockBodies(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[BlockBodiesEnvelope]) bool {
+func matchBlockBodies(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[BlockBodiesEnvelope]) bool {
 	return func(message *DecodedInboundMessage[BlockBodiesEnvelope]) bool {
-		return filter(peerId, message.PeerId, requestId, message.Decoded.RequestId)
+		return matchesRequest(peerId, message.PeerId, requestId, message.Decoded.RequestId)
 	}
 }
 
-func filter(requestPeerId, responsePeerId *PeerId, requestId, responseId uint64) bool {
-	return !requestPeerId.Equal(responsePeerId) || requestId != responseId
+func matchesRequest(requestPeerId, responsePeerId *PeerId, requestId, responseId uint64) bool {
+	return requestPeerId.Equal(responsePeerId) && requestId == responseId
 }

@@ -275,14 +275,7 @@ func decodeBlockAccessListsResponse(payload []byte, requested int) ([]rlp.RawVal
 func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) ([]byte, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	messages := make(chan *DecodedInboundMessage[BlockAccessListsEnvelope])
-	observer := func(message *DecodedInboundMessage[BlockAccessListsEnvelope]) {
-		select {
-		case <-ctx.Done():
-		case messages <- message:
-		}
-	}
-	unregister := f.messageListener.RegisterBlockAccessListsObserver(observer)
+	messages, unregister := subscribeResponses(ctx, f.messageListener.RegisterBlockAccessListsObserver)
 	defer unregister()
 	requestId := rand.Uint64() //nolint:gosec // request id does not need crypto-grade randomness
 	hashes := make([]common.Hash, len(reqs))
@@ -296,7 +289,7 @@ func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *P
 	if err != nil {
 		return nil, err
 	}
-	message, _, err := awaitResponse(ctx, timeout, messages, filterBlockAccessLists(peerId, requestId))
+	message, _, err := awaitResponse(ctx, timeout, messages, matchBlockAccessLists(peerId, requestId))
 	if err != nil {
 		return nil, err
 	}
@@ -310,8 +303,8 @@ func (f *balFetcher) penalize(ctx context.Context, peerId *PeerId, reason error)
 	}
 }
 
-func filterBlockAccessLists(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[BlockAccessListsEnvelope]) bool {
+func matchBlockAccessLists(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[BlockAccessListsEnvelope]) bool {
 	return func(message *DecodedInboundMessage[BlockAccessListsEnvelope]) bool {
-		return filter(peerId, message.PeerId, requestId, message.Decoded.RequestId)
+		return matchesRequest(peerId, message.PeerId, requestId, message.Decoded.RequestId)
 	}
 }
