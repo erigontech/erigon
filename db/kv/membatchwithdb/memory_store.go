@@ -241,7 +241,8 @@ func (s *memStore) Put(table string, k, v []byte) error {
 	t := s.getOrCreateTable(table)
 	var hint btree2.PathHint
 	if old, ok := t.tree.GetHint(memEntry{k: k, v: v}, &hint); ok {
-		if !t.dupSort {
+		// a dupsort match has an equal value, but the comparator treats nil and empty as equal
+		if !t.dupSort || (old.v == nil) != (v == nil) {
 			t.tree.SetHint(memEntry{k: old.k, v: bytes.Clone(v)}, &hint)
 		}
 	} else {

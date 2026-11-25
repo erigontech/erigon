@@ -130,3 +130,18 @@ func TestMemStore_DupSortRePutDoesNotAllocate(t *testing.T) {
 	assert.Zero(t, allocs)
 	assert.Equal(t, 1, s.tables[kv.PlainState].tree.Len())
 }
+
+func TestMemStore_DupSortRePutKeepsNilStatus(t *testing.T) {
+	s := newMemStore()
+	k := []byte("key")
+	require.NoError(t, s.Put(kv.PlainState, k, nil))
+	require.NoError(t, s.Put(kv.PlainState, k, []byte{}))
+	got, err := s.GetOne(kv.PlainState, k)
+	require.NoError(t, err)
+	assert.NotNil(t, got)
+
+	require.NoError(t, s.Put(kv.PlainState, k, nil))
+	got, err = s.GetOne(kv.PlainState, k)
+	require.NoError(t, err)
+	assert.Nil(t, got)
+}
