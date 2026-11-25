@@ -71,9 +71,6 @@ func (m *Merger) filesByRange(v *View, snapTypes []snaptype.Type, from, to uint6
 	toMerge := map[snaptype.Enum][]*DirtySegment{}
 	for _, t := range snapTypes {
 		toMerge[t.Enum()] = m.filesByRangeOfType(v, from, to, t)
-		if len(toMerge[t.Enum()]) == 0 {
-			return nil, fmt.Errorf("no %s segments to merge in range [%d, %d)", t.Name(), from, to)
-		}
 	}
 
 	return toMerge, nil
@@ -91,11 +88,6 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 		out = append(out, sn.src)
 	}
 	return
-}
-
-// coversRange relies on visible segments being contiguous, so only the ends need checking.
-func coversRange(segs []*DirtySegment, from, to uint64) bool {
-	return len(segs) > 0 && segs[0].from == from && segs[len(segs)-1].to == to
 }
 
 // removeMergedFiles removes a merge output's files. A same-range input with an older segment version resolves to the
@@ -237,12 +229,6 @@ func (m *Merger) Merge(
 		toMerge, err := m.filesByRange(v, snapTypes, r.From(), r.To())
 		if err != nil {
 			return err
-		}
-		if uncovered := slices.IndexFunc(snapTypes, func(t snaptype.Type) bool {
-			return !coversRange(toMerge[t.Enum()], r.From(), r.To())
-		}); uncovered >= 0 {
-			m.logger.Warn("[snapshots] skip merge: files of a type do not cover the range", "type", snapTypes[uncovered].Name(), "from", r.From(), "to", r.To())
-			continue
 		}
 		for snapType, t := range toMerge {
 			if out[snapType] == nil {
