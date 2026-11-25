@@ -6,9 +6,10 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/stretchr/testify/require"
 )
 
 type preparedSplits struct {

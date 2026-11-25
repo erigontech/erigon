@@ -20,9 +20,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/stretchr/testify/require"
 )
 
 func BenchmarkWitnesses(b *testing.B) {

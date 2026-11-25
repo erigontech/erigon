@@ -20,10 +20,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func additiveCorpus() (keys [][]byte, partials [][2]*commitment.Update, merged []commitment.Update) {

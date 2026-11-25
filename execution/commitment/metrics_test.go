@@ -24,8 +24,8 @@ import (
 
 func TestMetricsResetClearsEveryCounter(t *testing.T) {
 	m := &Metrics{}
-	m.Folds.Add(6)
-	m.Unfolds.Add(7)
+	m.folds.Add(6)
+	m.unfolds.Add(7)
 
 	m.Reset()
 

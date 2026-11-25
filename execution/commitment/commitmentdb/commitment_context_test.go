@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	v2 "github.com/erigontech/erigon/execution/commitment/v2"
-
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/stretchr/testify/require"
+
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 )
 
 func Test_EncodeCommitmentState(t *testing.T) {

@@ -12,8 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	v2 "github.com/erigontech/erigon/execution/commitment/v2"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
@@ -29,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )

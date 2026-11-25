@@ -23,11 +23,11 @@ import (
 	"slices"
 	"testing"
 
-	v2 "github.com/erigontech/erigon/execution/commitment/v2"
-
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/stretchr/testify/require"
+
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 )
 
 type openFunc func(context.Context, RunSpec) (commitment.Trie, error)

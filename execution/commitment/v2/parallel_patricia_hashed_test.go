@@ -25,12 +25,13 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestParallelPatriciaHashedSkeletonConstruction(t *testing.T) {
@@ -835,14 +836,14 @@ func requireIncrementalEquiv(t *testing.T, k1 [][]byte, u1 []commitment.Update, 
 	requireAllEnginesParity(t, k1, u1, k2, u2, workers)
 }
 
-func reusedInstanceIncrementalRoot(t *testing.T, variant commitment.TrieVariant, workers int, k1 [][]byte, u1 []commitment.Update, k2 [][]byte, u2 []commitment.Update) []byte {
+func reusedInstanceIncrementalRoot(t *testing.T, workers int, k1 [][]byte, u1 []commitment.Update, k2 [][]byte, u2 []commitment.Update) []byte {
 	t.Helper()
 	ctx := context.Background()
 	ms := NewMockState(t)
 	ms.SetConcurrentCommitment(true)
 
 	cfg := commitment.DefaultTrieConfig()
-	cfg.Variant = variant
+	cfg.Variant = commitment.VariantParallelHexPatricia
 	pt := NewParallelPatriciaHashed(nil, length.Addr, cfg)
 	ut := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), commitment.KeyToHexNibbleHash)
 	defer ut.Close()
@@ -874,10 +875,8 @@ func TestParallelReuseAcrossResetParity(t *testing.T) {
 	k2, u2 := sparseBatch2(k1, 3, false)
 	seqRoot, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
 
-	for _, variant := range []commitment.TrieVariant{commitment.VariantParallelHexPatricia} {
-		root := reusedInstanceIncrementalRoot(t, variant, 8, k1, u1, k2, u2)
-		require.Equalf(t, seqRoot, root, "reused-instance %s incremental root vs sequential", variant)
-	}
+	root := reusedInstanceIncrementalRoot(t, 8, k1, u1, k2, u2)
+	require.Equal(t, seqRoot, root, "reused-instance incremental root vs sequential")
 }
 
 func TestVerifyParallel_WideNested(t *testing.T) {

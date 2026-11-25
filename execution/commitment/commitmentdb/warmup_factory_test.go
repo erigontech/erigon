@@ -24,8 +24,6 @@ import (
 	"testing"
 	"time"
 
-	v2 "github.com/erigontech/erigon/execution/commitment/v2"
-
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
@@ -33,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/commitment"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 )
 
 type stubSharedDomains struct{ sd }

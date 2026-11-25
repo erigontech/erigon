@@ -37,7 +37,7 @@ func VerifyBranchHashes(
 ) error {
 	_, _, row, err := decodeBranchCells(branchData)
 	if err != nil {
-		return fmt.Errorf("decodeCells: %w", err)
+		return fmt.Errorf("decodeBranchCells: %w", err)
 	}
 
 	nib := nibbles.CompactToHex(branchKey)

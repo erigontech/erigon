@@ -22,9 +22,10 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/stretchr/testify/require"
 )
 
 func Benchmark_HexPatriciaHashed_Process(b *testing.B) {

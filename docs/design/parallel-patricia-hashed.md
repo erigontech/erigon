@@ -29,8 +29,8 @@ nibble, waits, and stitches the folded cells back into the row it holds — a
 *fork/stitch* model driven from the prefix trie, at any depth and in either plane.
 
 The prefix trie is already the task tree: a node with two or more touched child
-nibbles is a split point, its `ext` is the bridge to the next split point below,
-`subtreeCount` is the grain, and the depth-64 node is the account/storage seam. The
+nibbles is a split point, its `Ext` is the bridge to the next split point below,
+`SubtreeCount` is the grain, and the depth-64 node is the account/storage seam. The
 work concentrating inside one subtree — a hot contract's storage — needs no separate
 mechanism: that storage node is a split point like any other.
 
@@ -54,7 +54,7 @@ reaches every fork row through the engine's own `unfold`, which does exactly tha
 Field lists are normative: the named fields and their stated invariants define the
 contract. Files are given for reference.
 
-### 3.1 `PrefixNode`, `prefixTrie`, `plainKeyArena` (`prefix_trie.go`, `parallel_update.go`)
+### 3.1 `PrefixNode`, `prefixTrie`, `plainKeyArena` (`execution/commitment/prefix_trie.go`, `execution/commitment/parallel_update.go`)
 
 A path-compressed nibble trie of the touched hashed keys, bump-allocated from a
 slab arena. It is the sole carrier of the touched-key set and their plain keys;
@@ -71,16 +71,16 @@ the mount fold DFS-walks it directly.
 | `PlainKey` | `[]byte` | the un-hashed key terminating here; non-nil **iff** a key terminates at this node and was supplied with a plain key; nil otherwise |
 | `Update` | `*Update` | the carried per-key value; nil ⟹ the fold re-reads from `ctx` |
 
-- `plainKey` bytes are owned by a per-batch `plainKeyArena` (chunked; a full chunk
+- `PlainKey` bytes are owned by a per-batch `plainKeyArena` (chunked; a full chunk
   is replaced, not grown, so issued sub-slices remain stable for the trie's life).
 - **`Insert(hashedKey, plainKey)`** MUST place `plainKey` on the node where
   `hashedKey` terminates, including across the two path-compression *split* cases:
-  when a node is split, a `plainKey` already present on it belongs to a key that
+  when a node is split, a `PlainKey` already present on it belongs to a key that
   now terminates strictly below the split point and MUST be moved to the retained
-  child (`oldChild`); the split parent retains a `plainKey` only if the incoming
+  child (`oldChild`); the split parent retains a `PlainKey` only if the incoming
   key terminates exactly at it. (Invariant I3.)
 
-### 3.2 `ParallelUpdate` (`parallel_update.go`)
+### 3.2 `ParallelUpdate` (`execution/commitment/parallel_update.go`)
 
 Per-batch state: the `prefixTrie`, the `plainKeyArena`, and a mutex-guarded
 `DeferredCombined` slice. `Insert` calls MUST be serialized by the caller;
@@ -104,19 +104,19 @@ configuration only.)
 
 | phase | site | action |
 | --- | --- | --- |
-| 1. Touch | `Updates.TouchPlainKey` (ModeParallel) | insert each hashed key into the prefix trie, carrying its `plainKey`/`update` on the terminating node; no ETL collectors are used |
+| 1. Touch | `Updates.TouchPlainKey` (ModeParallel) | insert each hashed key into the prefix trie, carrying its `PlainKey`/`Update` on the terminating node; no ETL collectors are used |
 | 2. Walk + fork | `processMounted`, `forkWalk` | walk the prefix trie from the base trie; at every split point whose offload reaches the round's grain, position the walking trie on the row below the split prefix, mount one clone per child nibble, stitch the folded cells back into that row and carry on; fold the base to the root at the end |
 | 3. Commit | `Process` end | apply (or hand off) the merged deferred branch updates; publish the root |
 
 ### 4.1 Phase 2 — Fork the walk at every split point (`processMounted`, `fork_walk.go`)
 
 `forkWalk.walk` traverses the prefix trie on the walking trie — the base (`template`) at
-the top, a clone below a fork — in nibble-ascending order, applying each terminating node's `plainKey`/`update` through `followAndUpdate`
+the top, a clone below a fork — in nibble-ascending order, applying each terminating node's `PlainKey`/`Update` through `followAndUpdate`
 before descending, so an account at depth 64 precedes its storage keys (I4). A
-terminating node with a nil `plainKey` and no children is an error.
+terminating node with a nil `PlainKey` and no children is an error.
 
 A node is a **fork point** when it has two or more children and the work below its
-non-largest children — `Σ child.subtreeCount − max(child.subtreeCount)` — reaches the
+non-largest children — `Σ child.SubtreeCount − max(child.SubtreeCount)` — reaches the
 round's grain (§4.1.1). A key that terminates at the node is applied before the fork and
 does not count. At a fork point with prefix `P` the walker:
 
@@ -211,8 +211,8 @@ primary enforcement of I1.
   with all its present nibbles and materialises every stored branch between the walker's
   row and the fork prefix. Positioning a fork row from a synthesized bridge instead
   drops untouched siblings and diverges the root.
-- **I3 — `plainKey` follows the split.** `prefixTrie.Insert` MUST route a
-  terminator's `plainKey` to the correct node across path-compression splits (§3.1).
+- **I3 — `PlainKey` follows the split.** `prefixTrie.Insert` MUST route a
+  terminator's `PlainKey` to the correct node across path-compression splits (§3.1).
   A misroute is a wrong DB read and a diverged root.
 - **I4 — Sorted emission.** Within a mount, keys MUST be presented to
   `followAndUpdate` in ascending hashed-key order, a terminating node before its
@@ -223,7 +223,7 @@ primary enforcement of I1.
 - **I6 — Read safety.** Clones walk disjoint subtrees of the frozen prefix trie. A
   clone reads its parent only in `mountTo`, which copies the fork row; the parent writes
   that row again only after `errgroup.Wait`, so the copy, the concurrent structure and
-  `plainKey` reads, and the stitch are race-free.
+  `PlainKey` reads, and the stitch are race-free.
 - **I7 — Fork equals inline walk.** The cells a fork stitches back into its row MUST
   equal what the walker would have produced walking the subtree itself, at any depth and
   in either plane. `G = 1` (fork at every split point) and `G = ForkGrainNever` (never
@@ -239,8 +239,8 @@ primary enforcement of I1.
 
 ### 6.2 Value source
 
-ModeParallel carries keys (and, when supplied, their `update`) in the prefix trie;
-where a node's `update` is nil the value is read from the `PatriciaContext` during
+ModeParallel carries keys (and, when supplied, their `Update`) in the prefix trie;
+where a node's `Update` is nil the value is read from the `PatriciaContext` during
 `followAndUpdate`, not from a separate `Updates` value buffer. Each worker takes
 its own context from the `TrieContextFactory`, so DB reads run concurrently.
 
@@ -274,7 +274,7 @@ substitution of the as-of reader is validated at runtime by the block-root check
 | condition | behaviour |
 | --- | --- |
 | empty update set | return the template's existing root (matches the sequential no-op) |
-| terminating node with nil `plainKey` and no children | return an error (only reachable via a hashed-only `TouchHashedKey`; that path is not wired for the parallel trie) |
+| terminating node with nil `PlainKey` and no children | return an error (only reachable via a hashed-only `TouchHashedKey`; that path is not wired for the parallel trie) |
 | deferred apply failure (inline path) | restore the base from the same snapshot, so `RootHash` returns the pre-round root rather than the staged one. The branch records the partial apply already wrote are not rolled back |
 | worker error mid-fold | cancel the group; return pooled deferred entries |
 | any error after the walk began | restore the base trie's in-memory state from the snapshot taken before it — root cell and its three flags, no open rows, no queued branch updates |
@@ -307,7 +307,7 @@ in scheduling.
 | split granularity | none | every prefix-trie split point whose non-largest children together reach the grain, at any depth and in either plane |
 | merge | single bottom-up fold | folded cells stitched into the fork row, the walk continuing on the same trie |
 | branch writes | inline | deferred, applied once or handed to the caller |
-| key delivery | one sorted stream | prefix trie carrying `plainKey`/`update` |
+| key delivery | one sorted stream | prefix trie carrying `PlainKey`/`Update` |
 | applicability | always | any shape |
 
 ## 11. Performance characteristics *(informative)*
@@ -339,7 +339,7 @@ figures are for inspection, not a CI gate.
 | `execution/commitment/v2/split_point.go` | depth-agnostic split-point primitives: `unfoldToRow`, `openEmptyRow`/`closeIfEmpty`, `stitchSplitCells`, `foldSplitRow` |
 | `execution/commitment/v2/hex_patricia_hashed.go` | sequential engine; `foldMounted` and the `mountWall` stop at which a clone returns its fork-row cell |
 | `execution/commitment/parallel_update.go` | `ParallelUpdate`, `plainKeyArena`, `Insert`/deferred accumulation |
-| `execution/commitment/prefix_trie.go` | path-compressed prefix trie + slab arena; `Insert` `plainKey` placement |
+| `execution/commitment/prefix_trie.go` | path-compressed prefix trie + slab arena; `Insert` `PlainKey` placement |
 | `execution/commitment/commitment.go` | `Updates` (ModeParallel carries keys in the prefix trie) |
 | `execution/commitment/commitmentdb/commitment_context.go` | `InitializeTrieAndUpdates`; wires ModeParallel and caller-deferred updates into `ComputeCommitment` |
 | `execution/stagedsync/committer.go` | parallel-exec commitment calculator; keeps the ModeParallel buffer, serves values via the as-of reader |

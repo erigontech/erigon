@@ -24,13 +24,12 @@ import (
 	"slices"
 	"testing"
 
-	v2 "github.com/erigontech/erigon/execution/commitment/v2"
-
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )

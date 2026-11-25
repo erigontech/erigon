@@ -21,11 +21,13 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/commitment"
+
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // These tests pin the self-destruct "empty storage base" invariant: instead of

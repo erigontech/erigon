@@ -28,10 +28,11 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/stretchr/testify/require"
 )
 
 func TestBranchData_MergeHexBranches2(t *testing.T) {

@@ -29,13 +29,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
 )
 
 func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {

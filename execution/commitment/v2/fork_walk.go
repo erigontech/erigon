@@ -25,8 +25,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon/execution/commitment"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 const (

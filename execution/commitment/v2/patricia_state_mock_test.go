@@ -27,12 +27,13 @@ import (
 	"sync/atomic"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
-	keccak "github.com/erigontech/fastkeccak"
-	"github.com/holiman/uint256"
 )
 
 type MockState struct {

@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
@@ -29,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/stretchr/testify/require"
 )
 
 func nodeSet(nodes [][]byte) map[string]struct{} {

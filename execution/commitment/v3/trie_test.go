@@ -24,9 +24,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	v2 "github.com/erigontech/erigon/execution/commitment/v2"
-
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -34,7 +31,9 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )

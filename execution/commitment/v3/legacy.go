@@ -23,8 +23,6 @@ import (
 	"fmt"
 	"math/bits"
 
-	v2 "github.com/erigontech/erigon/execution/commitment/v2"
-
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common/empty"
@@ -32,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 )
 
 type LegacyValues interface {

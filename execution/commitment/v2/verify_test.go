@@ -4,14 +4,16 @@ import (
 	"math/rand"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
+
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	keccak "github.com/erigontech/fastkeccak"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
 )
 
 func newAccountCell(addr common.Address, acc *accounts.Account) *cell {

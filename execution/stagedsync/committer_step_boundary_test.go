@@ -26,8 +26,6 @@ import (
 	"strings"
 	"testing"
 
-	v2 "github.com/erigontech/erigon/execution/commitment/v2"
-
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -51,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"

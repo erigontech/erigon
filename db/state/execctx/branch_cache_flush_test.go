@@ -20,8 +20,6 @@ import (
 	"encoding/binary"
 	"testing"
 
-	v2 "github.com/erigontech/erigon/execution/commitment/v2"
-
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/empty"
@@ -33,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	_ "github.com/erigontech/erigon/execution/commitment/v3"
 )
 

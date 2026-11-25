@@ -19,10 +19,9 @@ package commitmenttest
 import (
 	"bytes"
 
-	v2 "github.com/erigontech/erigon/execution/commitment/v2"
-
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 )
 
 type Leaf struct {

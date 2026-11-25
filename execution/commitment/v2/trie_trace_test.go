@@ -26,9 +26,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/stretchr/testify/require"
 )
 
 func LoadTrieTraceIntoMockState(t testing.TB, path string) (*MockState, [][]byte, []commitment.Update, []byte) {

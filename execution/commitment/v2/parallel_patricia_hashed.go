@@ -26,8 +26,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/execution/commitment"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 const deferredWritesPerWorker = 4096

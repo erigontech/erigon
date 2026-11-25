@@ -20,11 +20,12 @@ import (
 	"io"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/stretchr/testify/require"
 )
 
 func writeLeafHeaderPerByte(w io.Writer, totalLen, compactLen int, key []byte, compact0 byte, ni int) error {

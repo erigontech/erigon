@@ -28,10 +28,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func runDirectBench(b *testing.B, pk [][]byte, updates []commitment.Update) {

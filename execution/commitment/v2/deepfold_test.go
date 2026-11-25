@@ -24,13 +24,14 @@ import (
 	"math/rand"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
-	keccak "github.com/erigontech/fastkeccak"
-	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 )
 
 // keepWholeNibble: multi-slot branch survivor vs single leaf survivor.

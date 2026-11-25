@@ -31,8 +31,6 @@ import (
 	"sync"
 	"time"
 
-	v2 "github.com/erigontech/erigon/execution/commitment/v2"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/gofrs/flock"
 	"golang.org/x/sync/semaphore"
@@ -49,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diskutils"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	"github.com/erigontech/erigon/node/nodecfg"
 )
 

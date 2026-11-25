@@ -25,10 +25,11 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/stretchr/testify/require"
 )
 
 func lifecycleCorpus() (k1 [][]byte, u1 []commitment.Update, k2 [][]byte, u2 []commitment.Update, kc [][]byte, uc []commitment.Update) {

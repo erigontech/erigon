@@ -31,8 +31,6 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/erigontech/erigon/db/state/stateifs"
-
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 
@@ -44,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/stateifs"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -170,11 +169,11 @@ type DeferredBranchUpdate struct {
 	Raw     BranchData
 	Prev    []byte
 	Encoded BranchData
-	// Backing store for a merged encoded value. encoded either aliases raw or points
+	// Backing store for a merged encoded value. Encoded either aliases Raw or points
 	// here, so it is never itself reused — this is the buffer that survives pooling.
 	encodedBuf []byte
-	// RawWrite writes raw as-is without merging it against prev, for a tombstone whose
-	// prev is carried only for the domain diff (see CollectTombstone).
+	// RawWrite writes Raw as-is without merging it against Prev, for a tombstone whose
+	// Prev is carried only for the domain diff (see v2 BranchEncoder.CollectTombstone).
 	RawWrite bool
 }
 

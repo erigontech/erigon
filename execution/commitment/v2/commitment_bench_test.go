@@ -22,8 +22,9 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func BenchmarkHexPatriciaHashedFold(b *testing.B) {

@@ -20,10 +20,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/trie"
-	"github.com/stretchr/testify/require"
 )
 
 func benchCapturedSuperset(b *testing.B, accts, slots, touch int) (full, provedKeys [][]byte, root []byte) {

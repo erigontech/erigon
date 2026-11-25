@@ -20,9 +20,10 @@ import (
 	"encoding/hex"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/stretchr/testify/require"
 )
 
 func requireRestartParity(t *testing.T, batches []engineBatch, combinedK [][]byte, combinedU []commitment.Update) {

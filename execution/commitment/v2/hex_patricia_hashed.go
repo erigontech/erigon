@@ -33,6 +33,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	keccak "github.com/erigontech/fastkeccak"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
@@ -42,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/rlp"
-	keccak "github.com/erigontech/fastkeccak"
 )
 
 // witnessTracer receives canonical trie nodes as they are hashed during a
@@ -336,6 +337,11 @@ const (
 // maxLeafRlpLen bounds a leaf's assembled RLP header: list prefix (tag plus up to
 // 8 length bytes), key prefix byte, then the compact key.
 const maxLeafRlpLen = 9 + 1 + commitment.MaxCompactKeyLen
+
+var (
+	_ [len(cell{}.hashedExtension)/2 + 1 - commitment.MaxCompactKeyLen]struct{}
+	_ [commitment.MaxCompactKeyLen - len(cell{}.hashedExtension)/2 - 1]struct{}
+)
 
 func (f loadFlags) String() string {
 	var b strings.Builder
@@ -1008,7 +1014,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			}
 		} else {
 			if !cell.loaded.storage() {
-				hph.metrics.LoadStorage.Add(1)
+				hph.metrics.AddStorageLoad(1)
 				update, err := hph.storageFromCacheOrDB(cell.storageAddr[:cell.storageAddrLen])
 				if err != nil {
 					return nil, storageRootHashIsSet, nil, err
@@ -1092,7 +1098,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				return res, storageRootHashIsSet, storageRootHash[:], nil
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
-			hph.metrics.LoadAccount.Add(1)
+			hph.metrics.AddAccountLoad(1)
 			update, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return nil, storageRootHashIsSet, storageRootHash[:], err
@@ -1240,7 +1246,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 				return append(append(buf[:0], byte(160)), cell.stateHash[:cell.stateHashLen]...), nil
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
-			hph.metrics.LoadAccount.Add(1)
+			hph.metrics.AddAccountLoad(1)
 			update, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return nil, err
@@ -2121,7 +2127,7 @@ func (hph *HexPatriciaHashed) fold() error {
 func (hph *HexPatriciaHashed) loadStateIfNeeded(cell *cell, counters skipStat) (skipStat, error) {
 	if cell.stateHashLen == 0 {
 		if !cell.loaded.account() && cell.accountAddrLen > 0 {
-			hph.metrics.LoadAccount.Add(1)
+			hph.metrics.AddAccountLoad(1)
 			upd, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return counters, err
@@ -2130,7 +2136,7 @@ func (hph *HexPatriciaHashed) loadStateIfNeeded(cell *cell, counters skipStat) (
 			counters.accLoaded++
 		}
 		if !cell.loaded.storage() && cell.storageAddrLen > 0 {
-			hph.metrics.LoadStorage.Add(1)
+			hph.metrics.AddStorageLoad(1)
 			upd, err := hph.storageFromCacheOrDB(cell.storageAddr[:cell.storageAddrLen])
 			if err != nil {
 				return counters, err
@@ -2420,7 +2426,7 @@ func (hph *HexPatriciaHashed) RootExtension() (ext, hash []byte) {
 func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey []byte) error {
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.traceW != nil
-		hph.metrics.Unfolds.Add(1)
+		hph.metrics.AddUnfolds(1)
 		if err := hph.unfold(hashedKey, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
@@ -2437,7 +2443,7 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	//}
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
-		hph.metrics.Folds.Add(1)
+		hph.metrics.AddFolds(1)
 		if err := hph.fold(); err != nil {
 			return fmt.Errorf("fold: %w", err)
 		}
@@ -2450,13 +2456,13 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	if stateUpdate == nil {
 		// Update the cell
 		if int16(len(plainKey)) == hph.accountKeyLen {
-			hph.metrics.LoadAccount.Add(1)
+			hph.metrics.AddAccountLoad(1)
 			stateUpdate, err = hph.accountFromCacheOrDB(plainKey)
 			if err != nil {
 				return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 			}
 		} else {
-			hph.metrics.LoadStorage.Add(1)
+			hph.metrics.AddStorageLoad(1)
 			stateUpdate, err = hph.storageFromCacheOrDB(plainKey)
 			if err != nil {
 				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
@@ -2506,7 +2512,7 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 			// fmt.Printf("===[%x] stop folding at %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen])
 			return *hph.gridCell(0, int(hph.mountedNib)), nil
 		}
-		hph.metrics.Folds.Add(1)
+		hph.metrics.AddFolds(1)
 		if err := hph.fold(); err != nil {
 			return cell{}, fmt.Errorf("final fold: %w", err)
 		}
@@ -2778,7 +2784,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *commitment.U
 
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
-		hph.metrics.Folds.Add(1)
+		hph.metrics.AddFolds(1)
 		if err = hph.fold(); err != nil {
 			return nil, fmt.Errorf("final fold: %w", err)
 		}
