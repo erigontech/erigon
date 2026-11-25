@@ -118,14 +118,16 @@ func (pe *PipelineExecutor) UnwindForValidation(sd *execctx.SharedDomains, tx kv
 	return pe.validationSync.RunUnwind(sd, tx)
 }
 
-// RunPrune executes pruning on the main pipeline.
-func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (kv.FinalityContext, error) {
-	finalityCtx, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle, pe.blockReader.TxnumReader())
+// RunPrune executes pruning on the main pipeline and returns the last txnum state files may now hold.
+func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (uint64, error) {
+	irreversibleBlock, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	err = pe.sync.RunPrune(ctx, tx, initialCycle, finalityCtx, timeout)
-	return finalityCtx, err
+	if err := pe.sync.RunPrune(ctx, tx, initialCycle, irreversibleBlock, timeout); err != nil {
+		return 0, err
+	}
+	return execfinality.IrreversibleTxNum(ctx, tx, pe.blockReader.TxnumReader(), irreversibleBlock)
 }
 
 // Commits sd and, if another iteration follows, returns a fresh tx+SD to run it on; (nil,nil,nil) leaves the loop unchanged.
@@ -279,12 +281,12 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		hook.NotifySyncState(tx)
 	}
 
-	var finalityCtx kv.FinalityContext
+	var irreversibleTxNum uint64
 	tx, doms, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: true,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
 			var err error
-			finalityCtx, err = pe.RunPrune(ctx, rwtx, initialCycle, 0)
+			irreversibleTxNum, err = pe.RunPrune(ctx, rwtx, initialCycle, 0)
 			return err
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
@@ -295,7 +297,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			restoreStateChanges = hook.CheckpointStateChanges()
 			// Prune runs via PruneFn (sync.RunPrune); kick file building so
 			// snapshot files advance as PFB processes frozen blocks.
-			pe.db.BuildFilesInBackground(finalityCtx)
+			pe.db.BuildFilesInBackground(irreversibleTxNum)
 			// Last iter: skip BeginTemporalRw — no next iter will use it.
 			if !hasMore {
 				return nil, nil, nil
