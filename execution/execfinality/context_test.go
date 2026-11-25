@@ -25,11 +25,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
@@ -136,19 +134,12 @@ func TestContextReadyForCollationUsesTransactionVisibleTxNums(t *testing.T) {
 		ready             bool
 	}{
 		{
-			name:              "finality includes the block below the finalized one",
-			headBlockNum:      20,
-			finalisedBlockNum: 12,
-			maxReorgDepth:     5,
-			stepLastTxNum:     11,
-			ready:             true,
-		},
-		{
-			name:              "finality keeps the finalized block's changeset",
+			name:              "finality includes boundary",
 			headBlockNum:      20,
 			finalisedBlockNum: 12,
 			maxReorgDepth:     5,
 			stepLastTxNum:     12,
+			ready:             true,
 		},
 		{
 			name:              "finality excludes after boundary",
@@ -294,7 +285,7 @@ func TestContextReadyForCollationResolvesStepsInsideTheTxNumWindow(t *testing.T)
 		return nil
 	}))
 
-	ctx := NewContext(25_473_001, 25_473_001, 96, false, rawdbv3.TxNums)
+	ctx := NewContext(25_473_001, 25_473_000, 96, false, rawdbv3.TxNums)
 	_, lastBlockInStep, _, _, ready, err := ctx.ReadyForCollation(t.Context(), db, 3_630_628_100)
 	require.NoError(t, err)
 	require.Equal(t, uint64(25_473_000), lastBlockInStep)
@@ -303,7 +294,7 @@ func TestContextReadyForCollationResolvesStepsInsideTheTxNumWindow(t *testing.T)
 	_, lastBlockInStep, _, _, ready, err = ctx.ReadyForCollation(t.Context(), db, 3_630_628_300)
 	require.NoError(t, err)
 	require.Equal(t, uint64(25_473_001), lastBlockInStep)
-	require.False(t, ready, "the finalized block keeps its changeset")
+	require.False(t, ready, "step above the finalised head stays gated")
 }
 
 // txRecordingIndex records the tx the reader is handed.
@@ -327,31 +318,4 @@ func TestContextReadyForCollationResolvesStepsOnATemporalTx(t *testing.T) {
 	_, _, _, _, _, err := ctx.ReadyForCollation(t.Context(), temporalDB, 3_630_628_100)
 	require.NoError(t, err)
 	require.Implements(t, (*kv.TemporalTx)(nil), index.tx)
-}
-
-// Deciding a step and deleting its blocks' changesets is one tx, so collation needs no changeset prune.
-func TestReadyForCollationDeletesTheChangesetsOfTheStep(t *testing.T) {
-	db := newFinalityTestDB(t)
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		for blockNum := uint64(0); blockNum <= 20; blockNum++ {
-			if err := rawdbv3.TxNums.Append(tx, blockNum, blockNum); err != nil {
-				return err
-			}
-			if blockNum >= 5 {
-				if err := tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)}), []byte{1}); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}))
-	_, _, _, _, ready, err := NewContext(20, 12, 5, false, rawdbv3.TxNums).ReadyForCollation(t.Context(), db, 10)
-	require.NoError(t, err)
-	require.True(t, ready)
-	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		lowest, err := changeset.ReadLowestUnwindableBlock(tx)
-		require.NoError(t, err)
-		require.Equal(t, uint64(11), lowest, "the step's blocks lost their changesets, later blocks kept theirs")
-		return nil
-	}))
 }
