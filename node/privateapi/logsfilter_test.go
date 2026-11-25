@@ -97,10 +97,7 @@ func (ts *testServer) Send(m *remoteproto.SubscribeLogsReply) error {
 	return nil
 }
 
-func (ts *failingTestServer) Send(m *remoteproto.SubscribeLogsReply) error {
-	if m.FilterApplied {
-		return nil
-	}
+func (ts *failingTestServer) Send(*remoteproto.SubscribeLogsReply) error {
 	return errors.New("send failed")
 }
 

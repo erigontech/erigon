@@ -508,10 +508,7 @@ func TestFrameReceiptSubscription(t *testing.T) {
 
 type failingReceiptsServer struct{ *testReceiptsServer }
 
-func (failingReceiptsServer) Send(m *remoteproto.SubscribeReceiptsReply) error {
-	if m.FilterApplied {
-		return nil
-	}
+func (failingReceiptsServer) Send(*remoteproto.SubscribeReceiptsReply) error {
 	return errors.New("stream closed")
 }
 
