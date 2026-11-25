@@ -72,7 +72,7 @@ func TestBranchChildCountUnderCommitmentV3(t *testing.T) {
 	hphRecords := process(func(pc commitment.PatriciaContext) commitment.Trie {
 		return v2.NewHexPatriciaHashed(length.Addr, pc, commitment.DefaultTrieConfig())
 	}, commitment.ModeUpdate)
-	v3Trie, v3Updates := v3.NewTrie(t.TempDir(), commitment.DefaultTrieConfig())
+	v3Trie, v3Updates := v3.NewTrie(t.TempDir())
 	v3Updates.Close()
 	v3Records := process(func(pc commitment.PatriciaContext) commitment.Trie {
 		v3Trie.ResetContext(pc)

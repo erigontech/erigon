@@ -43,7 +43,7 @@ type Trie struct {
 	preRoot           []byte
 }
 
-func NewTrie(tmpdir string, _ commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
+func NewTrie(tmpdir string) (commitment.Trie, *commitment.Updates) {
 	return &Trie{}, commitment.NewUpdates(commitment.ModeCollect, tmpdir, commitment.KeyToHexNibbleHash)
 }
 

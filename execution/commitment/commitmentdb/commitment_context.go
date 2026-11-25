@@ -1452,7 +1452,7 @@ func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
 func InitializeTrieAndUpdates(mode commitment.Mode, tmpdir string, cfg commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
 	switch cfg.Variant {
 	case commitment.VariantCommitmentV3:
-		return v3.NewTrie(tmpdir, cfg)
+		return v3.NewTrie(tmpdir)
 	case commitment.VariantParallelHexPatricia:
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := v2.NewParallelPatriciaHashed(nil, length.Addr, cfg)

@@ -192,7 +192,7 @@ func TestTrieAPI(t *testing.T) {
 		require.EqualError(t, err, "commitment v3: deferred updates were not taken")
 	})
 	t.Run("E45/TrieProcessRejectsWrongUpdateMode", func(t *testing.T) {
-		trie, unused := NewTrie(t.TempDir(), commitment.TrieConfig{})
+		trie, unused := NewTrie(t.TempDir())
 		t.Cleanup(trie.Release)
 		t.Cleanup(unused.Close)
 		trie.ResetContext(newMockContext())
@@ -218,7 +218,7 @@ func TestTrieAPI(t *testing.T) {
 		require.EqualError(t, err, "commitment v3: TraceCollapses requires ModeCollect updates")
 	})
 	t.Run("E45/EmptyCodeTouchLeavesEmptyTrieEmpty", func(t *testing.T) {
-		trie, updates := NewTrie(t.TempDir(), commitment.TrieConfig{})
+		trie, updates := NewTrie(t.TempDir())
 		t.Cleanup(trie.Release)
 		t.Cleanup(updates.Close)
 		trie.ResetContext(newMockContext())
