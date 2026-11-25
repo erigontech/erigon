@@ -1276,7 +1276,9 @@ func TestComposerAuditsFinality(t *testing.T) {
 type triggers struct {
 	landed map[common.Hash]bool
 	failed error
-	asked  []common.Hash
+	// mu guards asked: recovery reads receipts concurrently.
+	mu    sync.Mutex
+	asked []common.Hash
 }
 
 func (l *triggers) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
@@ -1286,7 +1288,9 @@ func (l *triggers) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, erro
 func (l *triggers) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1}, nil }
 
 func (l *triggers) Receipt(_ context.Context, h common.Hash) (*l1.Receipt, error) {
+	l.mu.Lock()
 	l.asked = append(l.asked, h)
+	l.mu.Unlock()
 	if l.failed != nil {
 		return nil, l.failed
 	}
