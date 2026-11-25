@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/http/httptrace"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -42,12 +43,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
-// prooflessBlock returns a Deneb block with blobs blobs and its sidecars carrying proof, a placeholder some endpoints
-// serve instead of a real proof, so the fetch has to compute every proof.
-func prooflessBlock(t *testing.T, blobs int, proof common.Bytes48) (*cltypes.SignedBeaconBlock, common.Hash, []*cltypes.BlobSidecar) {
+// appendBlobs gives block blobs blobs and appends their commitments to its body.
+func appendBlobs(t *testing.T, block *cltypes.SignedBeaconBlock, blobs int) ([]goethkzg.Blob, []goethkzg.KZGCommitment) {
 	t.Helper()
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
-	block.Block.Slot = 100
 	data := make([]goethkzg.Blob, blobs)
 	commitments := make([]goethkzg.KZGCommitment, blobs)
 	for i := range data {
@@ -57,9 +55,14 @@ func prooflessBlock(t *testing.T, blobs int, proof common.Bytes48) (*cltypes.Sig
 		require.NoError(t, err)
 		block.Block.Body.GetBlobKzgCommitments().Append((*cltypes.KZGCommitment)(&commitments[i]))
 	}
-	root, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	sidecars := make([]*cltypes.BlobSidecar, blobs)
+	return data, commitments
+}
+
+// newSidecars builds the sidecars of a complete block: their header and inclusion proofs cover its whole body.
+func newSidecars(t *testing.T, block *cltypes.SignedBeaconBlock, data []goethkzg.Blob, commitments []goethkzg.KZGCommitment, proofs []goethkzg.KZGProof) []*cltypes.BlobSidecar {
+	t.Helper()
+	header := block.SignedBeaconBlockHeader()
+	sidecars := make([]*cltypes.BlobSidecar, len(data))
 	for i := range data {
 		branch, err := block.Block.Body.KzgCommitmentMerkleProof(i)
 		require.NoError(t, err)
@@ -68,18 +71,27 @@ func prooflessBlock(t *testing.T, blobs int, proof common.Bytes48) (*cltypes.Sig
 			inclusion.Set(j, common.Hash(branch[j]))
 		}
 		sidecars[i] = cltypes.NewBlobSidecar(uint64(i), (*cltypes.Blob)(&data[i]), common.Bytes48(commitments[i]),
-			proof, block.SignedBeaconBlockHeader(), inclusion)
+			common.Bytes48(proofs[i]), header, inclusion)
 	}
-	return block, root, sidecars
+	return sidecars
+}
+
+// prooflessBlock returns a Deneb block with blobs blobs and its sidecars carrying proof, a placeholder some endpoints
+// serve instead of a real proof, so the fetch has to compute every proof.
+func prooflessBlock(t *testing.T, blobs int, proof common.Bytes48) (*cltypes.SignedBeaconBlock, common.Hash, []*cltypes.BlobSidecar) {
+	t.Helper()
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = 100
+	data, commitments := appendBlobs(t, block, blobs)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	proofs := slices.Repeat([]goethkzg.KZGProof{goethkzg.KZGProof(proof)}, blobs)
+	return block, root, newSidecars(t, block, data, commitments, proofs)
 }
 
 func serveSidecars(t *testing.T, sidecars []*cltypes.BlobSidecar) string {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if err := json.NewEncoder(w).Encode(map[string]any{"data": sidecars}); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-	}))
+	srv := httptest.NewServer(respondData(sidecars))
 	t.Cleanup(srv.Close)
 	return srv.URL
 }
@@ -214,36 +226,20 @@ func newBlockFixture(t *testing.T, version clparams.StateVersion, blobs int) blo
 	payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1, 2, 3}, {4}})
 	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
 	payload.Withdrawals.Append(&cltypes.Withdrawal{Index: 7, Amount: 9})
-	data := make([]goethkzg.Blob, blobs)
-	commitments := make([]goethkzg.KZGCommitment, blobs)
+	data, commitments := appendBlobs(t, block, blobs)
 	proofs := make([]goethkzg.KZGProof, blobs)
 	for i := range data {
-		data[i][1] = byte(i + 1)
 		var err error
-		commitments[i], err = kzg.Ctx().BlobToKZGCommitment(&data[i], 0)
-		require.NoError(t, err)
 		proofs[i], err = kzg.Ctx().ComputeBlobKZGProof(&data[i], commitments[i], 0)
 		require.NoError(t, err)
-		block.Block.Body.BlobKzgCommitments.Append((*cltypes.KZGCommitment)(&commitments[i]))
 	}
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	header := block.SignedBeaconBlockHeader()
-	sidecars := make([]*cltypes.BlobSidecar, blobs)
-	for i := range data {
-		branch, err := block.Block.Body.KzgCommitmentMerkleProof(i)
-		require.NoError(t, err)
-		inclusion := solid.NewHashVector(cltypes.CommitmentBranchSize)
-		for j := range branch {
-			inclusion.Set(j, common.Hash(branch[j]))
-		}
-		sidecars[i] = cltypes.NewBlobSidecar(uint64(i), (*cltypes.Blob)(&data[i]), common.Bytes48(commitments[i]),
-			common.Bytes48(proofs[i]), header, inclusion)
-	}
+	sidecars := newSidecars(t, block, data, commitments, proofs)
 	blinded, err := block.Blinded()
 	require.NoError(t, err)
 	promoted := blinded.Full(&solid.TransactionsSSZ{}, solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44))
-	require.NotEqual(t, header.Header.BodyRoot, promoted.SignedBeaconBlockHeader().Header.BodyRoot)
+	require.NotEqual(t, block.SignedBeaconBlockHeader().Header.BodyRoot, promoted.SignedBeaconBlockHeader().Header.BodyRoot)
 	return blockFixture{root: root, promoted: promoted, blinded: blinded, sidecars: sidecars}
 }
 
