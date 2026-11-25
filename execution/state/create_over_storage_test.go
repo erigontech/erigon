@@ -1,11 +1,13 @@
 package state
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -114,6 +116,159 @@ func TestCreatingTxReadsOldSlotAsZero(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, original.IsZero())
 	require.Equal(t, VersionValid, validateReads(vm, ibs, 0))
+}
+
+// The creating tx reads an old slot as zero, which is not the slot's pre-block value, so the
+// read publishes no origin, also when the create frame is reverted. A read before the create
+// publishes the pre-block value. An earlier tx reads the pre-block value, and the creating tx's
+// reads stay valid once that tx publishes the origin.
+func TestCreatingTxPublishesNoOriginForAnOldSlot(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name                string
+		readFirst, reverted bool
+	}{
+		{"the create stays", false, false},
+		{"the create frame is reverted", false, true},
+		{"the slot is read before the create", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			x := accounts.InternAddress([20]byte{0x51})
+			k5 := accounts.InternKey([32]byte{31: 5})
+			preBlock := *uint256.NewInt(3)
+			acc := accounts.NewAccount()
+			acc.Balance = *uint256.NewInt(1)
+			acc.Incarnation = FirstContractIncarnation
+			reader := &storageReader{addr: x, account: &acc, storage: map[accounts.StorageKey]uint256.Int{k5: preBlock}}
+			vm := NewVersionMap(nil)
+
+			creating := NewWithVersionMap(reader, vm)
+			defer creating.Close()
+			creating.SetTxContext(1, 1)
+			if tc.readFirst {
+				v, err := creating.GetState(x, k5)
+				require.NoError(t, err)
+				require.Equal(t, preBlock, v)
+			}
+			snapshot := creating.PushSnapshot()
+			require.NoError(t, creating.CreateAccount(x, true))
+			current, err := creating.GetState(x, k5)
+			require.NoError(t, err)
+			original, err := creating.GetCommittedState(x, k5)
+			require.NoError(t, err)
+			if !tc.readFirst {
+				require.True(t, current.IsZero())
+				require.True(t, original.IsZero())
+			}
+			if tc.reverted {
+				creating.RevertToSnapshot(snapshot, nil)
+			}
+			vm.FlushWrites(finalizedWrites(t, creating, &chain.Rules{IsSpuriousDragon: true}), true)
+			origin, published := vm.LoadOriginStorage(x, k5)
+			require.Equal(t, tc.readFirst, published)
+			if published {
+				require.Equal(t, preBlock, origin)
+			}
+			require.Equal(t, VersionValid, validateReads(vm, creating, 1))
+
+			earlier := NewWithVersionMap(reader, vm)
+			defer earlier.Close()
+			earlier.SetTxContext(1, 0)
+			v, err := earlier.GetState(x, k5)
+			require.NoError(t, err)
+			require.Equal(t, preBlock, v)
+			earlier.PublishOrigins()
+			require.Equal(t, VersionValid, validateReads(vm, creating, 1))
+		})
+	}
+}
+
+// Pre-Cancun, tx 1 destroys a contract with a committed slot, tx 2 credits the address, and
+// tx 1 runs again while tx 2 is not validated. An attempt of tx 3 then creates a contract at the
+// address and stores to the slot; it depends on tx 2, so the scheduler discards it. Tx 1 still
+// reads the pre-block value of the slot, and so does tx 4 once the final runs leave the contract
+// alone: tx 1 does not destroy it and tx 2 only credits it.
+func TestDiscardedCreateKeepsTheSlotOrigin(t *testing.T) {
+	t.Parallel()
+	for _, keptAlive := range []bool{false, true} {
+		t.Run(fmt.Sprintf("the final runs leave the contract alone=%v", keptAlive), func(t *testing.T) {
+			t.Parallel()
+			rules := &chain.Rules{IsSpuriousDragon: true, IsByzantium: true, IsBerlin: true, IsLondon: true, IsShanghai: true}
+			x := accounts.InternAddress([20]byte{0xc0, 0x01})
+			beneficiary := accounts.InternAddress([20]byte{0xbe})
+			slot := accounts.InternKey([32]byte{0x11})
+			preBlock := *uint256.NewInt(22)
+			acc := accounts.NewAccount()
+			acc.Nonce = 1
+			acc.Incarnation = FirstContractIncarnation
+			acc.Balance = *uint256.NewInt(7)
+			acc.CodeHash = accounts.InternCodeHash(common.Hash{0xc0})
+			reader := &storageReader{addr: x, account: &acc, storage: map[accounts.StorageKey]uint256.Int{slot: preBlock}}
+			vm := NewVersionMap(nil)
+			newTx := func(txIndex int, inc Incarnation) *IntraBlockState {
+				ibs := NewWithVersionMap(reader, vm)
+				t.Cleanup(ibs.Close)
+				ibs.SetTxContext(1, txIndex)
+				ibs.SetVersion(inc)
+				return ibs
+			}
+			rerun := func(prev, cur *WriteSet, v Version) {
+				for h := range prev.AllHeaders() {
+					if !cur.Has(h) {
+						vm.DropWrite(h.Address, h.Path, h.Key, v)
+					}
+				}
+				vm.FlushWrites(cur, false)
+			}
+			destroy := func(inc Incarnation) *WriteSet {
+				ibs := newTx(1, inc)
+				balance, err := ibs.GetBalance(x)
+				require.NoError(t, err)
+				require.NoError(t, ibs.AddBalance(beneficiary, balance, tracing.BalanceIncreaseSelfdestruct))
+				_, err = ibs.Selfdestruct(x, false)
+				require.NoError(t, err)
+				return finalizedWrites(t, ibs, rules)
+			}
+
+			destroyed := destroy(0)
+			vm.FlushWrites(destroyed, false)
+			vm.MarkWritesValidated(destroyed, nil)
+
+			credit := newTx(2, 0)
+			exists, err := credit.Exist(x)
+			require.NoError(t, err)
+			require.False(t, exists)
+			require.NoError(t, credit.CreateAccount(x, false))
+			require.NoError(t, credit.AddBalance(x, *uint256.NewInt(20), tracing.BalanceChangeTransfer))
+			credited := finalizedWrites(t, credit, rules)
+			vm.FlushWrites(credited, false)
+
+			destroyedAgain := destroy(1)
+			rerun(destroyed, destroyedAgain, Version{TxIndex: 1, Incarnation: 1})
+
+			create := newTx(3, 0)
+			require.NoError(t, create.CreateAccount(x, true))
+			require.NoError(t, create.SetNonce(x, 1, tracing.NonceChangeNewContract))
+			require.NoError(t, create.SetState(x, slot, *uint256.NewInt(5)))
+			finalizedWrites(t, create, rules)
+			require.Equal(t, 2, create.DepTxIndex())
+
+			readerTx := 1
+			if keptAlive {
+				rerun(destroyedAgain, &WriteSet{}, Version{TxIndex: 1, Incarnation: 2})
+				onlyCredit := newTx(2, 1)
+				require.NoError(t, onlyCredit.AddBalance(x, *uint256.NewInt(20), tracing.BalanceChangeTransfer))
+				credits := finalizedWrites(t, onlyCredit, rules)
+				rerun(credited, credits, Version{TxIndex: 2, Incarnation: 1})
+				vm.MarkWritesValidated(credits, nil)
+				readerTx = 4
+			}
+			v, err := newTx(readerTx, 0).GetState(x, slot)
+			require.NoError(t, err)
+			require.Equal(t, preBlock, v)
+		})
+	}
 }
 
 // A slot written between a destruct and a creation reads zero, as the read path, the

@@ -27,9 +27,10 @@ const originIndex = -2
 // originStorageDirect reads a storage slot's pre-block origin value straight from the
 // state reader, no stateObject. A contract this tx created (own CreateContract cell)
 // has fresh storage, so a cold slot reads zero rather than a prior incarnation's value.
-func (ibs *IntraBlockState) originStorageDirect(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
+// committed reports whether the value came from the state reader.
+func (ibs *IntraBlockState) originStorageDirect(addr accounts.Address, key accounts.StorageKey) (val uint256.Int, committed bool, err error) {
 	if cc, ok := ibs.ownCreateContract(addr); ok && cc {
-		return uint256.Int{}, nil
+		return uint256.Int{}, false, nil
 	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
@@ -46,12 +47,12 @@ func (ibs *IntraBlockState) originStorageDirect(addr accounts.Address, key accou
 	ibs.stateReader.SetTrace(false, "")
 	ibs.RecordStateReadError(err)
 	if err != nil {
-		return uint256.Int{}, err
+		return uint256.Int{}, false, err
 	}
 	if !ok {
 		res.Clear()
 	}
-	return res, nil
+	return res, true, nil
 }
 
 // originCodeDirect reads an account's pre-block origin code bytes straight from the
@@ -210,6 +211,7 @@ type readPathResult struct {
 	mapCodeHashVal       accounts.CodeHash
 	mapCodeSizeVal       int
 	mapStorageVal        uint256.Int
+	storageCommitted     bool // mapStorageVal came from the state reader
 
 	// hdr is the skeleton header the wrapper records (with its typed value) when recordVR is true.
 	hdr      ReadHeader
@@ -662,7 +664,7 @@ func readCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key a
 		var err error
 		switch path {
 		case StoragePath:
-			r.mapStorageVal, err = s.originStorageDirect(addr, key)
+			r.mapStorageVal, r.storageCommitted, err = s.originStorageDirect(addr, key)
 		case CodePath:
 			r.mapCodeVal, err = s.originCodeDirect(addr)
 		case CodeSizePath:
@@ -797,12 +799,17 @@ func SeedOrigin(vm *VersionMap, addr accounts.Address, acc *accounts.Account) {
 // this one shared cell instead of each re-resolving it from the execution store, which
 // left bases inconsistent across readers and unvalidatable (a bare UnknownVersion
 // StorageRead is version-only-validated). Only a genuine cold committed read seeds; a
-// versionMap or write-set hit is untouched. Mutates r so the seeded cell and read agree.
+// versionMap or write-set hit is untouched, and so is the fresh storage of a contract
+// this tx created, which is not the committed value. Mutates r to record the read at the
+// origin version, also for fresh storage, so an origin another tx publishes does not
+// invalidate it.
 func seedStorageOrigin(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, val uint256.Int, r *readPathResult) {
 	if r.source != StorageRead || r.version != UnknownVersion {
 		return
 	}
-	s.recordStorageOrigin(addr, key, val) // origin write-set, published at flush (not a mid-read versionMap write)
+	if r.storageCommitted {
+		s.recordStorageOrigin(addr, key, val) // origin write-set, published at flush (not a mid-read versionMap write)
+	}
 	r.hdr.Version = Version{TxIndex: originIndex}
 	r.version = Version{TxIndex: originIndex}
 }
