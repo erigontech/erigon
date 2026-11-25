@@ -254,7 +254,6 @@ func TestCommittedFallbackDependsOnInFlightDestruct(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, flushing.onRead, "the flush must land inside the committed read")
 	require.Equal(t, 0, ibs.DepTxIndex())
-	require.False(t, ibs.FirstDepReadAt().IsZero())
 }
 
 // flushOnReadReader runs onRead once, inside the committed account read.
@@ -291,7 +290,6 @@ func TestWipedFieldOutcomeDependsOnInFlightDestruct(t *testing.T) {
 		defer ibs.Close()
 		require.Equal(t, outcomeReturnZero, wipedFieldOutcome(ibs, addr))
 		require.Equal(t, 0, ibs.DepTxIndex())
-		require.False(t, ibs.FirstDepReadAt().IsZero())
 	})
 	t.Run("revived", func(t *testing.T) {
 		vm := NewVersionMap(nil)
@@ -305,6 +303,5 @@ func TestWipedFieldOutcomeDependsOnInFlightDestruct(t *testing.T) {
 		defer ibs.Close()
 		require.Equal(t, outcomeReturnEmpty, wipedFieldOutcome(ibs, addr))
 		require.Equal(t, 2, ibs.DepTxIndex())
-		require.False(t, ibs.FirstDepReadAt().IsZero())
 	})
 }

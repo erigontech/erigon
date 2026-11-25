@@ -2413,8 +2413,6 @@ type taskVersion struct {
 	stats        map[int]ExecutionStat
 	statsMutex   *sync.Mutex
 	execCpuNanos *atomic.Int64
-
-	firstDepReadAt time.Time
 }
 
 func (ev *taskVersion) Trace() bool {
@@ -2453,9 +2451,6 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	// mid-execution-changed value and must re-execute once that predecessor commits
 	// — a scheduler verdict, not an execution error.
 	result.Dep = ibs.DepTxIndex()
-	if result.Dep >= 0 {
-		ev.firstDepReadAt = ibs.FirstDepReadAt()
-	}
 
 	if result.Err != nil {
 		return result

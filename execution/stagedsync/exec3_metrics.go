@@ -55,8 +55,6 @@ var (
 		"parallel-exec tasks thrown away, by sync mode and reason")
 	mxDiscardSecondsTotal = metrics.GetOrCreateCounterVec("exec_discard_seconds_total", []string{"mode", "reason"},
 		"parallel-exec run time thrown away, by sync mode and reason")
-	mxVoidTailSecondsTotal = metrics.GetOrCreateCounterVec("exec_void_tail_seconds_total", []string{"mode"},
-		"parallel-exec run time from the first dependency read to the end of the run, by sync mode")
 
 	mxExecDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="all"}`)
 	mxExecDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="all"}`)
@@ -461,7 +459,6 @@ type Progress struct {
 	prevBlockDuration       time.Duration
 	prevReruns              [rerunCauses]int64
 	prevWastedNs            [rerunCauses]int64
-	prevVoidTailNs          int64
 	prevReadCount           int64
 	prevAccountReadCount    int64
 	prevStorageReadCount    int64
@@ -487,8 +484,8 @@ func execModeOf(te *txExecutor) string {
 	return "other"
 }
 
-// publishReruns adds the runs, re-runs, wasted time and void tail accumulated since its last call to the counters.
-func (p *Progress) publishReruns(te *txExecutor, execMode string) (execs uint64, curReruns [rerunCauses]int, repeats int, curWasted [rerunCauses]time.Duration, curVoidTail time.Duration) {
+// publishReruns adds the runs, re-runs and wasted time accumulated since its last call to the counters.
+func (p *Progress) publishReruns(te *txExecutor, execMode string) (execs uint64, curReruns [rerunCauses]int, repeats int, curWasted [rerunCauses]time.Duration) {
 	execCount := uint64(te.execCount.Load())
 	execs, p.prevExecCount = execCount-p.prevExecCount, execCount
 	mxExecsTotal.WithLabelValues(execMode).AddUint64(execs)
@@ -501,12 +498,8 @@ func (p *Progress) publishReruns(te *txExecutor, execMode string) (execs uint64,
 		mxDiscardsTotal.WithLabelValues(execMode, reason).AddInt(curReruns[cause])
 		mxDiscardSecondsTotal.WithLabelValues(execMode, reason).Add(curWasted[cause].Seconds())
 	}
-	voidTailNs := te.voidTailNs.Load()
-	curVoidTail = time.Duration(voidTailNs - p.prevVoidTailNs)
-	p.prevVoidTailNs = voidTailNs
-	mxVoidTailSecondsTotal.WithLabelValues(execMode).Add(curVoidTail.Seconds())
 	mxRepeatsTotal.WithLabelValues(execMode).AddInt(repeats)
-	return execs, curReruns, repeats, curWasted, curVoidTail
+	return execs, curReruns, repeats, curWasted
 }
 
 // FlushReruns publishes the re-run totals that accumulated after the last LogExecution.
@@ -609,7 +602,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, pe *parallelExecutor) {
 
 	execMode := execModeOf(te)
 
-	execDiff, curReruns, repeats, curWasted, curVoidTail := p.publishReruns(te, execMode)
+	execDiff, curReruns, repeats, curWasted := p.publishReruns(te, execMode)
 	var wasted time.Duration
 	wastedByReason := make([]string, 0, rerunCauses)
 	for cause, reason := range rerunReasons {
@@ -639,14 +632,13 @@ func (p *Progress) LogExecution(rs *state.StateV3, pe *parallelExecutor) {
 	mxTaskMgasSec.Set(float64(curTaskGasPerSec / 1e6))
 	mxExecCPUs.Set(float64(curTaskDur) / float64(interval))
 
-	execVals := make([]any, 0, 34)
+	execVals := make([]any, 0, 32)
 	execVals = append(execVals,
 		"exec", common.PrettyCounter(execDiff),
 		"repeat%", fmt.Sprintf("%.2f", repeatRatio),
 		"abort", common.PrettyCounter(curReruns[rerunAbort]),
 		"invalid", common.PrettyCounter(curReruns[rerunInvalid]+curReruns[rerunPoolInvalid]),
 		"wasted", fmt.Sprintf("%v(%s)", common.Round(wasted, 0), strings.Join(wastedByReason, ",")),
-		"voidtail", common.Round(curVoidTail, 0).String(),
 		"tgas/s", common.PrettyCounter(curTaskGasPerSec),
 		"tcpus", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 		"tdur", common.Round(avgTaskDur, 0).String(),

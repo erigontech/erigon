@@ -38,7 +38,6 @@ type poolTask struct {
 	result     *exec.TxResult
 	reruns     int
 	lastRunNs  int64
-	lastVoidNs int64 // the part of the last run after its first read of an unfinished write
 	rerunCause int
 
 	mu      sync.Mutex
@@ -234,11 +233,10 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 	}
 }
 
-// countRerun adds a re-run, the time of the run it replaces and that run's void tail to the totals.
+// countRerun adds a re-run and the time of the run it replaces to the totals.
 func (pt *poolTask) countRerun(pe *parallelExecutor) {
 	pe.reruns[pt.rerunCause].Add(1)
 	pe.wastedNs[pt.rerunCause].Add(pt.lastRunNs)
-	pe.voidTailNs.Add(pt.lastVoidNs)
 }
 
 func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
@@ -266,16 +264,12 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	}
 	be.cntExec.Add(1)
 	p.pe.execCount.Add(1)
-	tv.firstDepReadAt = time.Time{}
 	runStart := time.Now()
 	result := wk.w.RunTxTask(tv)
-	runEnd := time.Now()
-	pt.lastRunNs = runEnd.Sub(runStart).Nanoseconds()
+	pt.lastRunNs = time.Since(runStart).Nanoseconds()
 	errCause := rerunError
-	pt.lastVoidNs = 0
-	if !tv.firstDepReadAt.IsZero() {
+	if result.Dep >= 0 {
 		errCause = rerunAbort
-		pt.lastVoidNs = runEnd.Sub(tv.firstDepReadAt).Nanoseconds()
 	}
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
 		(result.Err != nil || touchedSenderAccount(txTask, result)) {

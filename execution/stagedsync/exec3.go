@@ -366,7 +366,6 @@ type txExecutor struct {
 	execCount    atomic.Int64
 	reruns       [rerunCauses]atomic.Int64
 	wastedNs     [rerunCauses]atomic.Int64
-	voidTailNs   atomic.Int64
 	readCount    atomic.Int64
 	writeCount   atomic.Int64
 

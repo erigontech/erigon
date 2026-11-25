@@ -184,7 +184,6 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             Incarnation
 	dep                 int
-	firstDepReadAt      time.Time
 	stateReadErr        error
 
 	// Per-attempt memo of the shared-versionMap SelfDestruct probe: it reads only
@@ -350,7 +349,6 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.codeReadDuration = 0
 	ibs.codeReadCount = 0
 	ibs.dep = UnknownDep
-	ibs.firstDepReadAt = time.Time{}
 	ibs.stateReadErr = nil
 }
 
@@ -1213,7 +1211,7 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		}
 		// An in-flight destruct below is not net-absent yet, but the committed record predates it.
 		if destructDep != UnknownDep {
-			ibs.noteDep(destructDep)
+			ibs.dep = max(ibs.dep, destructDep)
 		}
 		// Only the re-creation keeps the account present, so the read must fail validation once it is gone.
 		if recreation != nil {
@@ -2805,21 +2803,6 @@ func (ibs *IntraBlockState) HadInvalidRead() bool {
 	return ibs.dep >= 0
 }
 
-// noteDep is not inlined so the clock read stays out of the read path's code.
-//
-//go:noinline
-func (ibs *IntraBlockState) noteDep(idx int) {
-	if ibs.dep < 0 && idx >= 0 {
-		ibs.firstDepReadAt = time.Now()
-	}
-	ibs.dep = max(ibs.dep, idx)
-}
-
-// FirstDepReadAt is the time of the run's first dependency read; valid only when DepTxIndex() >= 0.
-func (ibs *IntraBlockState) FirstDepReadAt() time.Time {
-	return ibs.firstDepReadAt
-}
-
 func (ibs *IntraBlockState) DepTxIndex() int {
 	return ibs.dep
 }
@@ -2858,7 +2841,6 @@ func (ibs *IntraBlockState) ResetVersionedIO() {
 	ibs.versionedReads = ReadSet{}
 	ibs.versionedWrites.recycle()
 	ibs.dep = UnknownDep
-	ibs.firstDepReadAt = time.Time{}
 	ibs.recordAccess = false
 	ibs.stateReadErr = nil
 }
