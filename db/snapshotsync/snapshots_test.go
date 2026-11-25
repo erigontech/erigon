@@ -2305,7 +2305,29 @@ func TestHidingKeepsAMergedFileUnderACrossingFile(t *testing.T) {
 	})
 }
 
-// Random indexed layouts: hiding never shortens a type's gap-free visible span.
+// Hiding bodies [0,20k) would show [0,10k) and the crossing [10k,30k); aligning to the 20k of the other types then
+// drops [10k,30k) and ends the bodies at 10k, so [0,20k) stays visible.
+func TestHidingKeepsAMergedFileWhoseReplacementCrossesTheAlignedHeight(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for _, r := range []Range{NewRange(0, 10_000), NewRange(10_000, 20_000)} {
+		for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Transactions} {
+			createTestSegmentFile(t, r.From(), r.To(), typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	for _, r := range []Range{NewRange(0, 10_000), NewRange(0, 20_000), NewRange(10_000, 30_000)} {
+		createTestSegmentFile(t, r.From(), r.To(), snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	require.Equal(t, []Range{NewRange(0, 20_000)}, visibleRanges(s, snaptype2.Bodies))
+	for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Transactions} {
+		require.Equal(t, []Range{NewRange(0, 10_000), NewRange(10_000, 20_000)}, visibleRanges(s, typ), typ.Name())
+	}
+}
+
+// Random indexed layouts: hiding never loses a block of a type's gap-free visible span, at any aligned height.
 func TestHidingNeverShortensAVisibleSpan(t *testing.T) {
 	requireHidingKeepsVisibleSpans(t, rand.New(rand.NewPCG(1, 2)), 20_000, func(rng *rand.Rand) Range {
 		from := uint64(rng.IntN(6)) * 10_000
@@ -2336,7 +2358,7 @@ func requireHidingKeepsVisibleSpans(t *testing.T, rng *rand.Rand, iterations int
 	}
 }
 
-// requireHidingKeepsSpans checks that the hidden files of an indexed layout shorten no type's visible span.
+// requireHidingKeepsSpans checks that the hidden files of an indexed layout lose no type's block at any aligned height.
 func requireHidingKeepsSpans(t *testing.T, dir string, layout map[snaptype.Enum][]Range) {
 	t.Helper()
 	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, log.New())
@@ -2356,10 +2378,26 @@ func requireHidingKeepsSpans(t *testing.T, dir string, layout map[snaptype.Enum]
 		if len(before) == 0 {
 			continue
 		}
-		if len(after) == 0 || after[0].from > before[0].from || after[len(after)-1].to < before[len(before)-1].to {
-			t.Fatalf("%s: hiding shortened the visible span; layout %v", typ.Name(), layout)
+		if len(after) == 0 || after[0].from > before[0].from {
+			t.Fatalf("%s: hiding moved the visible start; layout %v", typ.Name(), layout)
+		}
+		for _, b := range before {
+			if visibleHeightAt(after, b.to) < b.to {
+				t.Fatalf("%s: hiding loses blocks when aligned to %d; layout %v", typ.Name(), b.to, layout)
+			}
 		}
 	}
+}
+
+// visibleHeightAt is where segments end after the alignment cuts them at height.
+func visibleHeightAt(segments VisibleSegments, height uint64) (end uint64) {
+	for _, sn := range segments {
+		if sn.to > height {
+			break
+		}
+		end = sn.to
+	}
+	return end
 }
 
 // The cleanup after a merge keeps the smaller files that stand in for a hidden merged file.

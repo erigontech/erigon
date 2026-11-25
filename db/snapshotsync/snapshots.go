@@ -785,8 +785,7 @@ func (s *BaseRoSnapshots) hasIndexedDirtyFile(t snaptype.Enum, path string) (fou
 
 // mergedFilesNotInEveryType returns the indexed segments that other types lack and that have smaller segments of
 // their own type inside them, so the type shows those smaller segments instead and a merge range does not cut
-// through a visible file. A segment whose hiding would shorten its type's visible span stays visible: no block
-// is hidden.
+// through a visible file. A segment whose hiding would lose a block at some aligned height stays visible.
 func (s *BaseRoSnapshots) mergedFilesNotInEveryType() map[*DirtySegment]bool {
 	indexed := make(map[snaptype.Enum][]*DirtySegment, len(s.enums))
 	ranges := make(map[snaptype.Enum][]Range, len(s.enums))
@@ -825,12 +824,30 @@ func (s *BaseRoSnapshots) mergedFilesNotInEveryType() map[*DirtySegment]bool {
 		for _, sn := range candidates {
 			hidden[sn] = true
 			after := truncateAtGap(buildVisibleSegments(s.dirty[t], hidden))
-			if len(after) == 0 || after[0].from > before[0].from || after[len(after)-1].to < before[len(before)-1].to {
+			if !keepsEveryEnd(before, after) {
 				delete(hidden, sn)
 			}
 		}
 	}
 	return hidden
+}
+
+// keepsEveryEnd reports whether after starts where before starts and ends a segment wherever before does, so
+// cutting both at any aligned height leaves after with at least as many blocks.
+func keepsEveryEnd(before, after VisibleSegments) bool {
+	if len(after) == 0 || after[0].from != before[0].from {
+		return false
+	}
+	i := 0
+	for _, b := range before {
+		for i < len(after) && after[i].to < b.to {
+			i++
+		}
+		if i == len(after) || after[i].to != b.to {
+			return false
+		}
+	}
+	return true
 }
 
 // hasSmallerInside reports whether sorted, ordered by start with the longest range first, holds a range inside r
