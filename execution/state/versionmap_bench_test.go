@@ -64,7 +64,7 @@ func BenchmarkMarkWritesValidated(b *testing.B) {
 		ws.SetBalance(sender, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: sender, Path: BalancePath, Key: accounts.NilKey, Version: v}, Val: *uint256.NewInt(uint64(i))})
 		ws.SetNonce(sender, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: sender, Path: NoncePath, Key: accounts.NilKey, Version: v}, Val: uint64(i)})
 		ws.SetBalance(recipient, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: recipient, Path: BalancePath, Key: accounts.NilKey, Version: v}, Val: *uint256.NewInt(uint64(i))})
-		vm.FlushVersionedWrites(ws, false)
+		vm.FlushWrites(ws, false)
 		writes[i] = ws
 		addrs = append(addrs, sender, recipient)
 	}
@@ -137,7 +137,7 @@ func BenchmarkValidateAccountReads(b *testing.B) {
 				_, err := ibs.Exist(addr)
 				require.NoError(b, err)
 			}
-			rs := ReadSet{address: ibs.VersionedReads().address}
+			rs := ReadSet{address: ibs.Reads().address}
 			require.Len(b, rs.address, n)
 			b.ReportAllocs()
 			for b.Loop() {
