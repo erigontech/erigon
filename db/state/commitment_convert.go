@@ -1982,7 +1982,7 @@ func sampleViaStride(reader *seg.Reader, fi *FilesItem, samples int) ([]sampledP
 }
 
 func verifyStagedCommitmentV3(ctx context.Context, at *AggregatorRoTx, rebuildDir string, stage commitmentV3HistoryStage, stagedHistory, verifyHistory bool, logger log.Logger) ([]string, error) {
-	view, visible, closeView, err := openStagedCommitmentView(ctx, at, rebuildDir, stage, stagedHistory, verifyHistory, logger)
+	view, visible, closeView, err := openStagedCommitmentView(ctx, at, rebuildDir, true, stage, stagedHistory, verifyHistory, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -1994,12 +1994,7 @@ func verifyStagedCommitmentV3(ctx context.Context, at *AggregatorRoTx, rebuildDi
 }
 
 func verifyStagedHistoryVisible(ctx context.Context, at *AggregatorRoTx, stage commitmentV3HistoryStage, logger log.Logger) error {
-	empty, err := os.MkdirTemp(at.Dirs().Tmp, "commitment-verify-*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = dir.RemoveAll(empty) }()
-	_, _, closeView, err := openStagedCommitmentView(ctx, at, empty, stage, true, true, logger)
+	_, _, closeView, err := openStagedCommitmentView(ctx, at, at.Dirs().SnapDomain, false, stage, true, true, logger)
 	if err != nil {
 		return err
 	}
@@ -2007,10 +2002,10 @@ func verifyStagedHistoryVisible(ctx context.Context, at *AggregatorRoTx, stage c
 	return nil
 }
 
-func openStagedCommitmentView(ctx context.Context, at *AggregatorRoTx, rebuildDir string, stage commitmentV3HistoryStage, stagedHistory, verifyHistory bool, logger log.Logger) (*Aggregator, []string, func(), error) {
+func openStagedCommitmentView(ctx context.Context, at *AggregatorRoTx, domainDir string, stagedDomain bool, stage commitmentV3HistoryStage, stagedHistory, verifyHistory bool, logger log.Logger) (*Aggregator, []string, func(), error) {
 	live := at.d[kv.CommitmentDomain].d
 	viewDirs := at.Dirs()
-	viewDirs.SnapDomain = rebuildDir
+	viewDirs.SnapDomain = domainDir
 	cleanup := func() {}
 	ok := false
 	defer func() {
@@ -2052,7 +2047,10 @@ func openStagedCommitmentView(ctx context.Context, at *AggregatorRoTx, rebuildDi
 		return nil, nil, nil, err
 	}
 	visible := commitmentVisibleFileNames(view)
-	patterns := []string{filepath.Join(rebuildDir, "*.kv")}
+	var patterns []string
+	if stagedDomain {
+		patterns = append(patterns, filepath.Join(domainDir, "*.kv"))
+	}
 	var liveNames []string
 	switch {
 	case stagedHistory:
