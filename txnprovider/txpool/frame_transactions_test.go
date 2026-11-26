@@ -764,15 +764,8 @@ func TestFramePoolSharedBalanceReplacements(t *testing.T) {
 // The sender's next transaction spends all funds the frame reservation leaves, so the
 // replacement is funded only by the reservation it releases.
 func TestFramePoolOrdinaryReplacementUsesReleasedReservation(t *testing.T) {
-	ctx, pool, sender := keyedFramePoolEnv(t)
+	_, pool, sender := keyedFramePoolEnv(t)
 	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
-	add := func(slot *TxnSlot) txpoolcfg.DiscardReason {
-		var txns TxnSlots
-		txns.Append(slot, sender[:], true)
-		reasons, err := pool.AddLocalTxns(ctx, txns)
-		require.NoError(t, err)
-		return reasons[0]
-	}
 	const feePerGas = common.GWei
 	tx := &types.FrameTransaction{
 		ChainID: *uint256.NewInt(1), SenderAddress: sender,
@@ -781,17 +774,17 @@ func TestFramePoolOrdinaryReplacementUsesReleasedReservation(t *testing.T) {
 	}
 	tx.Fees.MaxFee.Mul(uint256.NewInt(tx.GetGasLimit()), uint256.NewInt(feePerGas))
 	frame := framePoolSlotFromTransaction(t, tx)
-	require.Equal(t, txpoolcfg.Success, add(frame))
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, sender, true, frame)[0])
 	next := newTestTxnSlot(1, 0, 1, 1, 21_000)
 	next.IDHash[0] = 1
 	next.Txn.GetValue().SetUint64(common.Ether - tx.Fees.MaxFee.Uint64() - 21_000)
-	require.Equal(t, txpoolcfg.Success, add(next))
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, sender, true, next)[0])
 	require.Equal(t, 2, pool.pending.Len())
 
 	replacement := newTestTxnSlot(0, 0, 2, 2*feePerGas, 21_000)
 	replacement.IDHash[0] = 2
 	require.Less(t, requiredBalance(replacement).Uint64(), tx.Fees.MaxFee.Uint64())
-	require.Equal(t, txpoolcfg.Success, add(replacement))
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, sender, true, replacement)[0])
 	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
 	require.Empty(t, pool.frameReservations)
 	require.Equal(t, 2, pool.pending.Len())
@@ -800,18 +793,11 @@ func TestFramePoolOrdinaryReplacementUsesReleasedReservation(t *testing.T) {
 // Nonce 2 is unfunded only because of the frame reservation, so it does not use up funds that
 // a replacement of nonce 0 needs.
 func TestFramePoolReplacementIgnoresTxnUnfundedByReservation(t *testing.T) {
-	ctx, pool, payer := keyedFramePoolEnv(t)
+	_, pool, payer := keyedFramePoolEnv(t)
 	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
-	add := func(slot *TxnSlot, sender common.Address) txpoolcfg.DiscardReason {
-		var txns TxnSlots
-		txns.Append(slot, sender[:], true)
-		reasons, err := pool.AddLocalTxns(ctx, txns)
-		require.NoError(t, err)
-		return reasons[0]
-	}
 	sender := common.Address{2}
 	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
-	require.Equal(t, txpoolcfg.Success, add(frame, sender))
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, sender, true, frame)[0])
 	frameCost := frame.Txn.(*types.FrameTransaction).Fees.MaxFee.Uint64()
 	var txns []*TxnSlot
 	for nonce := range uint64(3) {
@@ -822,13 +808,13 @@ func TestFramePoolReplacementIgnoresTxnUnfundedByReservation(t *testing.T) {
 	// Together they cost what the balance leaves after half of the reservation.
 	txns[2].Txn.GetValue().SetUint64(common.Ether - frameCost/2 - 3*42_000)
 	for _, txn := range txns {
-		require.Equal(t, txpoolcfg.Success, add(txn, payer))
+		require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, payer, true, txn)[0])
 	}
 	require.Equal(t, QueuedSubPool, pool.byHash[string(txns[2].IDHash[:])].currentSubPool)
 
 	replacement := newTestTxnSlot(0, 0, 2, 3, 21_000)
 	replacement.IDHash[0] = 4
-	require.Equal(t, txpoolcfg.Success, add(replacement, payer))
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, payer, true, replacement)[0])
 	require.Equal(t, PendingSubPool, pool.byHash[string(replacement.IDHash[:])].currentSubPool)
 }
 
@@ -2580,11 +2566,7 @@ func TestFramePoolParkedFeeEvictionPriority(t *testing.T) {
 				sender := common.Address{100, byte(i)}
 				frame := framePoolSlot(t, sender, f.tip, f.feePerGas, uint256.Int{1})
 				frames = append(frames, frame)
-				var txns TxnSlots
-				txns.Append(frame, sender[:], false)
-				reasons, err := pool.addNewTxns(ctx, txns, nil)
-				require.NoError(t, err)
-				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, addTestTxns(t, pool, sender, false, frame))
 				backend.err = context.DeadlineExceeded
 				newBlock(uint64(i) + 2)
 				require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
@@ -2592,11 +2574,7 @@ func TestFramePoolParkedFeeEvictionPriority(t *testing.T) {
 
 			ordinary := newTestTxnSlot(0, 0, tc.ordinary.tip, tc.ordinary.feePerGas, 21_000)
 			ordinary.IDHash[0] = 1
-			var txns TxnSlots
-			txns.Append(ordinary, ordinarySender[:], false)
-			reasons, err := pool.addNewTxns(ctx, txns, nil)
-			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, addTestTxns(t, pool, ordinarySender, false, ordinary))
 			require.Equal(t, tc.subPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
 			requireEvicted(t, pool, frames[0], frames[1])
 		})

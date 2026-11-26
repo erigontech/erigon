@@ -35,16 +35,15 @@ func BenchmarkReplacementBatch(b *testing.B) {
 			sender := common.Address{1}
 			require.NoError(b, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			add := func(value uint64) {
-				var txns TxnSlots
+				txns := make([]*TxnSlot, 0, n)
 				for nonce := range n {
 					txn := newTestTxnSlot(nonce, 0, 0, 1, 21_000)
 					txn.Txn.GetValue().SetUint64(value)
 					binary.BigEndian.PutUint64(txn.IDHash[:], value)
 					binary.BigEndian.PutUint64(txn.IDHash[8:], nonce)
-					txns.Append(txn, sender[:], true)
+					txns = append(txns, txn)
 				}
-				_, err := pool.AddLocalTxns(ctx, txns)
-				require.NoError(b, err)
+				addTestTxns(b, pool, sender, true, txns...)
 			}
 			add(0)
 			for value := uint64(1); b.Loop(); value++ {

@@ -25,15 +25,23 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
+// addTestTxns adds the sender's slots in one batch.
+func addTestTxns(t testing.TB, pool *TxPool, sender common.Address, isLocal bool, slots ...*TxnSlot) []txpoolcfg.DiscardReason {
+	t.Helper()
+	var txns TxnSlots
+	for _, slot := range slots {
+		txns.Append(slot, sender[:], isLocal)
+	}
+	reasons, err := pool.addNewTxns(t.Context(), txns, nil)
+	require.NoError(t, err)
+	return reasons
+}
+
 func addRemoteTestTxn(t *testing.T, pool *TxPool, sender common.Address, nonce, tip, feeCap uint64, id byte) (*TxnSlot, txpoolcfg.DiscardReason) {
 	t.Helper()
 	txn := newTestTxnSlot(nonce, 0, tip, feeCap, 21_000)
 	txn.IDHash[0] = id
-	var txns TxnSlots
-	txns.Append(txn, sender[:], false)
-	reasons, err := pool.addNewTxns(t.Context(), txns, nil)
-	require.NoError(t, err)
-	return txn, reasons[0]
+	return txn, addTestTxns(t, pool, sender, false, txn)[0]
 }
 
 func requireEvicted(t *testing.T, pool *TxPool, evicted, kept *TxnSlot) {
@@ -141,11 +149,7 @@ func TestOverflowQueuesSuccessorOfEvictedTxn(t *testing.T) {
 			require.Equal(t, tc.evictedSubPool, pool.byHash[string(first.IDHash[:])].currentSubPool)
 			next := newTestTxnSlot(1, 0, 0, 5, 21_000)
 			next.IDHash[0] = 2
-			var txns TxnSlots
-			txns.Append(next, senders[0][:], tc.localNext)
-			reasons, err := pool.addNewTxns(ctx, txns, nil)
-			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, addTestTxns(t, pool, senders[0], tc.localNext, next))
 			require.Equal(t, tc.nextSubPool, pool.byHash[string(next.IDHash[:])].currentSubPool)
 			other, reason := addRemoteTestTxn(t, pool, senders[1], 0, 1, tc.otherFeeCap, 3)
 			require.Equal(t, txpoolcfg.Success, reason)

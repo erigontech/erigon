@@ -17,7 +17,6 @@
 package txpool
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"slices"
@@ -81,29 +80,16 @@ const (
 	spareFunds uint64 = common.Ether - 4*fundedTxnCost
 )
 
-func addFundedTxns(t *testing.T, ctx context.Context, pool *TxPool, sender common.Address, tip uint64) []*TxnSlot {
+func addFundedTxns(t *testing.T, pool *TxPool, sender common.Address, tip uint64) []*TxnSlot {
 	t.Helper()
-	var txns TxnSlots
+	var txns []*TxnSlot
 	for nonce := range uint64(4) {
 		txn := newTestTxnSlot(nonce, 0, tip, fundedTxnFeeCap, fundedTxnGas)
 		txn.IDHash[0] = byte(nonce + 1)
-		txns.Append(txn, sender[:], true)
+		txns = append(txns, txn)
 	}
-	reasons, err := pool.AddLocalTxns(ctx, txns)
-	require.NoError(t, err)
-	require.Equal(t, slices.Repeat([]txpoolcfg.DiscardReason{txpoolcfg.Success}, 4), reasons)
-	return txns.Txns
-}
-
-func replaceFundedTxns(t *testing.T, ctx context.Context, pool *TxPool, sender common.Address, replacements ...*TxnSlot) []txpoolcfg.DiscardReason {
-	t.Helper()
-	var txns TxnSlots
-	for _, txn := range replacements {
-		txns.Append(txn, sender[:], true)
-	}
-	reasons, err := pool.AddLocalTxns(ctx, txns)
-	require.NoError(t, err)
-	return reasons
+	require.Equal(t, slices.Repeat([]txpoolcfg.DiscardReason{txpoolcfg.Success}, 4), addTestTxns(t, pool, sender, true, txns...))
+	return txns
 }
 
 func TestReplacementKeepsSenderTxnsFunded(t *testing.T) {
@@ -118,13 +104,13 @@ func TestReplacementKeepsSenderTxnsFunded(t *testing.T) {
 			{"fee cap overdraws", fundedTxnFeeCap + spareFunds/fundedTxnGas + 1, 0, txpoolcfg.InsufficientFunds},
 		} {
 			t.Run(fmt.Sprintf("tip %d/%s", tip, tc.name), func(t *testing.T) {
-				ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-				original := addFundedTxns(t, ctx, pool, sender, tip)[0]
+				_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+				original := addFundedTxns(t, pool, sender, tip)[0]
 
 				replacement := newTestTxnSlot(0, 0, tip*11/10, tc.feeCap, fundedTxnGas)
 				replacement.Txn.GetValue().SetUint64(tc.value)
 				replacement.IDHash[0] = 9
-				require.Equal(t, []txpoolcfg.DiscardReason{tc.want}, replaceFundedTxns(t, ctx, pool, sender, replacement))
+				require.Equal(t, []txpoolcfg.DiscardReason{tc.want}, addTestTxns(t, pool, sender, true, replacement))
 
 				kept := original
 				if tc.want == txpoolcfg.Success {
@@ -140,8 +126,8 @@ func TestReplacementKeepsSenderTxnsFunded(t *testing.T) {
 
 // Each replacement fits the spare funds alone; together they would unfund nonce 3.
 func TestReplacementBatchSharesSpareFunds(t *testing.T) {
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	addFundedTxns(t, ctx, pool, sender, 0)
+	_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	addFundedTxns(t, pool, sender, 0)
 
 	var replacements []*TxnSlot
 	for nonce := range uint64(2) {
@@ -151,27 +137,25 @@ func TestReplacementBatchSharesSpareFunds(t *testing.T) {
 		replacements = append(replacements, replacement)
 	}
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.InsufficientFunds},
-		replaceFundedTxns(t, ctx, pool, sender, replacements...))
+		addTestTxns(t, pool, sender, true, replacements...))
 	pending, baseFee, queued := pool.CountContent()
 	require.Equal(t, []int{4, 0, 0}, []int{pending, baseFee, queued})
 }
 
 // A replacement that costs less frees funds for a later replacement in the same batch.
 func TestReplacementBatchReusesFreedFunds(t *testing.T) {
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	// Nonce 1 spends all spare funds except what one fee bump needs.
-	var txns TxnSlots
+	var txns []*TxnSlot
 	for nonce := range uint64(4) {
 		txn := newTestTxnSlot(nonce, 0, 0, fundedTxnFeeCap, fundedTxnGas)
 		if nonce == 1 {
 			txn.Txn.GetValue().SetUint64(spareFunds - bumpCost)
 		}
 		txn.IDHash[0] = byte(nonce + 1)
-		txns.Append(txn, sender[:], true)
+		txns = append(txns, txn)
 	}
-	reasons, err := pool.AddLocalTxns(ctx, txns)
-	require.NoError(t, err)
-	require.Equal(t, slices.Repeat([]txpoolcfg.DiscardReason{txpoolcfg.Success}, 4), reasons)
+	require.Equal(t, slices.Repeat([]txpoolcfg.DiscardReason{txpoolcfg.Success}, 4), addTestTxns(t, pool, sender, true, txns...))
 
 	var replacements []*TxnSlot
 	for nonce, value := range []uint64{0, 0, spareFunds - 3*bumpCost} {
@@ -181,7 +165,7 @@ func TestReplacementBatchReusesFreedFunds(t *testing.T) {
 		replacements = append(replacements, replacement)
 	}
 	require.Equal(t, slices.Repeat([]txpoolcfg.DiscardReason{txpoolcfg.Success}, 3),
-		replaceFundedTxns(t, ctx, pool, sender, replacements...))
+		addTestTxns(t, pool, sender, true, replacements...))
 	pending, baseFee, queued := pool.CountContent()
 	require.Equal(t, []int{4, 0, 0}, []int{pending, baseFee, queued})
 }
@@ -201,26 +185,24 @@ func TestReplacementIgnoresUnfundedTxns(t *testing.T) {
 		{"after nonce gap", []uint64{0, 1, 3}, []uint64{0, 0, common.Ether / 2}, 0, common.Ether / 2, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-			var txns TxnSlots
+			_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			var txns []*TxnSlot
 			for i, nonce := range tc.nonces {
 				txn := newTestTxnSlot(nonce, 0, 0, fundedTxnFeeCap, fundedTxnGas)
 				txn.Txn.GetValue().SetUint64(tc.values[i])
 				txn.IDHash[0] = byte(i + 1)
-				txns.Append(txn, sender[:], true)
+				txns = append(txns, txn)
 			}
-			reasons, err := pool.AddLocalTxns(ctx, txns)
-			require.NoError(t, err)
-			require.Equal(t, slices.Repeat([]txpoolcfg.DiscardReason{txpoolcfg.Success}, len(tc.nonces)), reasons)
+			require.Equal(t, slices.Repeat([]txpoolcfg.DiscardReason{txpoolcfg.Success}, len(tc.nonces)), addTestTxns(t, pool, sender, true, txns...))
 			pending, _, _ := pool.CountContent()
 			require.Equal(t, tc.wantPending, pending)
 
 			replacement := newTestTxnSlot(tc.replaced, 0, 0, bumpedFeeCap, fundedTxnGas)
 			replacement.Txn.GetValue().SetUint64(tc.replaceValue)
 			replacement.IDHash[0] = 9
-			replaced := txns.Txns[slices.Index(tc.nonces, tc.replaced)]
+			replaced := txns[slices.Index(tc.nonces, tc.replaced)]
 			require.True(t, requiredBalance(replacement).Gt(requiredBalance(replaced)))
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, replaceFundedTxns(t, ctx, pool, sender, replacement))
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, addTestTxns(t, pool, sender, true, replacement))
 			pending, _, _ = pool.CountContent()
 			require.Equal(t, tc.wantPending, pending)
 		})
