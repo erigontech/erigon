@@ -713,6 +713,10 @@ func seedGloasHistoricalState(t *testing.T, cfg *clparams.BeaconChainConfig, slo
 	require.NoError(t, tx.Commit())
 
 	vt := state_accessors.NewStaticValidatorTable()
+	genesisState.ForEachValidator(func(validator solid.Validator, index, _ int) bool {
+		require.NoError(t, vt.AddValidator(validator, uint64(index), genesisState.Slot()))
+		return true
+	})
 	vt.SetSlot(slot)
 
 	sn := synced_data.NewSyncedDataManager(cfg, true)

@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
 )
 
 const maxEpochsLookaheadForDuties = 32
@@ -232,14 +233,13 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	}
 	defer tx.Rollback()
 
-	if err := a.requireHistoricalDutiesState(tx, epoch*a.beaconChainCfg.SlotsPerEpoch); err != nil {
+	slot := epoch * a.beaconChainCfg.SlotsPerEpoch
+	view := a.caplinStateSnapshots.View()
+	defer view.Close()
+	stateGetter, err := historicalDutiesStateGetter(tx, view, slot, kv.ActiveValidatorIndicies)
+	if err != nil {
 		return nil, err
 	}
-
-	snRoTx := a.caplinStateSnapshots.View()
-	defer snRoTx.Close()
-
-	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 
 	dependentRoot, err := a.getHistoricalAttesterDependentRoot(tx, stateGetter, epoch)
 	if err != nil {
@@ -250,23 +250,23 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	}
 
 	// finality case
-	activeIdxs, err := state_accessors.ReadActiveIndicies(
-		stateGetter,
-		epoch*a.beaconChainCfg.SlotsPerEpoch,
-	)
+	activeIdxs, err := state_accessors.ReadActiveIndicies(stateGetter, slot)
 	if err != nil {
 		return nil, err
+	}
+	if activeIdxs == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("active validator indices not found for slot %d", slot))
 	}
 
 	committeesPerSlot := max(min(a.beaconChainCfg.MaxCommitteesPerSlot, uint64(len(activeIdxs))/a.beaconChainCfg.SlotsPerEpoch/a.beaconChainCfg.TargetCommitteeSize), 1)
 
 	mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) % a.beaconChainCfg.EpochsPerHistoricalVector
-	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch, mixPosition)
+	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, slot, mixPosition)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("could not read randao mix: %w", err))
+		return nil, fmt.Errorf("could not read randao mix: %w", err)
 	}
 
-	for currSlot := epoch * a.beaconChainCfg.SlotsPerEpoch; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
+	for currSlot := slot; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
 		for committeeIndex := range committeesPerSlot {
 			index := (currSlot%a.beaconChainCfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
 			committeeCount := committeesPerSlot * a.beaconChainCfg.SlotsPerEpoch
@@ -299,17 +299,39 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	return newBeaconResponse(resp).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
 }
 
-func (a *ApiHandler) requireHistoricalDutiesState(tx kv.Tx, slot uint64) error {
-	minProgressSlot := max(slot, 1)
-	reconstructed, err := a.isStateReconstructed(tx, minProgressSlot)
-	if err == nil && !reconstructed && slot == 0 {
-		reconstructed, err = tx.Has(kv.StatesProcessingProgress, kv.StatesProcessingKey)
-	}
+func historicalDutiesStateGetter(tx kv.Tx, view *snapshotsync.CaplinStateView, slot uint64, table string) (state_accessors.GetValFn, error) {
+	progress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	reconstructed := progress != 0
 	if !reconstructed {
+		reconstructed, err = tx.Has(kv.StatesProcessingProgress, kv.StatesProcessingKey)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	requireCoverage := func(slot uint64, table string) error {
+		if reconstructed && slot <= progress {
+			return nil
+		}
+		if view != nil {
+			if _, ok := view.VisibleSegment(slot, table); ok {
+				return nil
+			}
+		}
 		return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("historical state for slot %d is not yet reconstructed", slot))
 	}
-	return nil
+	if err := requireCoverage(slot, table); err != nil {
+		return nil, err
+	}
+
+	get := state_accessors.GetValFnTxAndSnapshot(tx, view)
+	return func(table string, key []byte) ([]byte, error) {
+		if err := requireCoverage(base_encoding.Decode64FromBytes4(key), table); err != nil {
+			return nil, err
+		}
+		return get(table, key)
+	}, nil
 }

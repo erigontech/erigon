@@ -189,5 +189,5 @@ func ReadActiveIndicies(getFn GetValFn, slot uint64) ([]uint64, error) {
 		return nil, nil
 	}
 	buf := bytes.NewBuffer(v)
-	return base_encoding.ReadRabbits(nil, buf)
+	return base_encoding.ReadRabbits([]uint64{}, buf)
 }

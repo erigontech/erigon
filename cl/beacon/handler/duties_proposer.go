@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	log "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/snapshotsync"
 )
 
 type proposerDuties struct {
@@ -83,15 +82,19 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			return nil, err
 		}
 		defer tx.Rollback()
-		if err := a.requireHistoricalDutiesState(tx, expectedSlot); err != nil {
+		view := a.caplinStateSnapshots.View()
+		defer view.Close()
+		table := kv.SlotData
+		if expectedSlot == a.beaconChainCfg.GenesisSlot {
+			table = kv.BlockRoot
+		}
+		stateGetter, err := historicalDutiesStateGetter(tx, view, expectedSlot, table)
+		if err != nil {
 			return nil, err
 		}
-		var view *snapshotsync.CaplinStateView
-		if a.caplinStateSnapshots != nil {
-			view = a.caplinStateSnapshots.View()
-			defer view.Close()
+		if expectedSlot != a.beaconChainCfg.GenesisSlot && !a.stateReader.ValidatorTableCovers(expectedSlot) {
+			return nil, validatorReplayPending(expectedSlot)
 		}
-		stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, view)
 
 		dependentRoot, err := a.getHistoricalProposerDependentRoot(tx, stateGetter, epoch, v2)
 		if err != nil {
@@ -291,6 +294,10 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 	return common.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("dependent root not found for epoch %d", epoch))
 }
 
+func validatorReplayPending(slot uint64) error {
+	return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("static validator table does not yet cover slot %d", slot))
+}
+
 func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, stateGetter state_accessors.GetValFn, epoch, expectedSlot uint64) ([]proposerDuties, error) {
 	if expectedSlot == a.beaconChainCfg.GenesisSlot {
 		genesisState, err := a.stateReader.ReadHistoricalState(ctx, tx, expectedSlot)
@@ -307,10 +314,10 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		return duties, nil
 	}
 
-	if !a.stateReader.ValidatorTableCovers(expectedSlot) {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("static validator table does not yet cover slot %d", expectedSlot))
-	}
 	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, stateGetter, expectedSlot)
+	if errors.Is(err, state_accessors.ErrValidatorTableBehind) {
+		return nil, validatorReplayPending(expectedSlot)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +339,7 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		a.beaconChainCfg.EpochsPerHistoricalVector
 	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, expectedSlot, mixPosition)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("could not read randao mix: %w", err))
+		return nil, fmt.Errorf("could not read randao mix: %w", err)
 	}
 	historicalState := raw.New(a.beaconChainCfg)
 	historicalState.SetVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch))

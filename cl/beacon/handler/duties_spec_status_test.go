@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -55,10 +56,8 @@ func TestDutiesEndpointsAnswerSpecListedStatuses(t *testing.T) {
 			return state_accessors.SetStateProcessingProgress(tx, slot)
 		}))
 	}
-	setupMissingProposerRoot := func(t *testing.T) *ApiHandler {
+	removeProposerRoots := func(t *testing.T, db kv.RwDB) {
 		t.Helper()
-		db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-		fcu.FinalizedSlotVal = 127
 		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 			for slot := uint64(0); slot <= 95; slot++ {
 				if err := tx.Delete(kv.BlockRoot, base_encoding.Encode64ToBytes4(slot)); err != nil {
@@ -70,6 +69,12 @@ func TestDutiesEndpointsAnswerSpecListedStatuses(t *testing.T) {
 			}
 			return nil
 		}))
+	}
+	setupMissingProposerRoot := func(t *testing.T) *ApiHandler {
+		t.Helper()
+		db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+		fcu.FinalizedSlotVal = 127
+		removeProposerRoots(t, db)
 		return handler
 	}
 	setupProposerValidatorTable := func(t *testing.T, tableSlot uint64, partial bool) *ApiHandler {
@@ -217,14 +222,34 @@ func TestDutiesEndpointsAnswerSpecListedStatuses(t *testing.T) {
 			wantMessage: "static validator table does not yet cover slot 96",
 		},
 		{
-			name: "proposer active validators not found",
+			name: "proposer validator replay pending with missing root",
 			setup: func(t *testing.T) *ApiHandler {
-				return setupProposerValidatorTable(t, 96, false)
+				handler := setupProposerValidatorTable(t, 0, true)
+				removeProposerRoots(t, handler.indiciesDB)
+				return handler
 			},
 			method:      http.MethodGet,
 			path:        "/eth/v1/validator/duties/proposer/3",
-			wantStatus:  http.StatusInternalServerError,
-			wantMessage: "active validators not found for slot 96",
+			wantStatus:  http.StatusServiceUnavailable,
+			wantMessage: "static validator table does not yet cover slot 96",
+		},
+		{
+			name: "proposer validator table truncated after replay",
+			setup: func(t *testing.T) *ApiHandler {
+				return setupProposerValidatorTable(t, 96, true)
+			},
+			method:     http.MethodGet,
+			path:       "/eth/v1/validator/duties/proposer/3",
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "proposer validator table empty after replay",
+			setup: func(t *testing.T) *ApiHandler {
+				return setupProposerValidatorTable(t, 96, false)
+			},
+			method:     http.MethodGet,
+			path:       "/eth/v1/validator/duties/proposer/3",
+			wantStatus: http.StatusInternalServerError,
 		},
 		{
 			name: "proposer duties with all-zero randao mix",
@@ -359,6 +384,35 @@ func TestDutiesEndpointsAnswerSpecListedStatuses(t *testing.T) {
 			wantStatus:  http.StatusInternalServerError,
 			wantMessage: "dependent root not found for epoch 2",
 		},
+		{
+			name: "attester active indices missing after reconstruction",
+			setup: func(t *testing.T) *ApiHandler {
+				db, _, _, preState, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				lowest := uint64(97)
+				fcu.LowestAvailableSlotVal = &lowest
+				setProgress(t, db, 64)
+				genesisRoot, err := preState.GetBlockRootAtSlot(0)
+				require.NoError(t, err)
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					if err := beacon_indicies.MarkRootCanonical(tx, 0, genesisRoot); err != nil {
+						return err
+					}
+					getter := state_accessors.GetValFnTxAndSnapshot(tx, nil)
+					_, err := handler.stateReader.ReadRandaoMixBySlotAndIndex(getter, 64, 0)
+					require.NoError(t, err)
+					indices, err := state_accessors.ReadActiveIndicies(getter, 64)
+					require.NoError(t, err)
+					require.Contains(t, indices, uint64(0))
+					return tx.Delete(kv.ActiveValidatorIndicies, base_encoding.Encode64ToBytes4(64))
+				}))
+				return handler
+			},
+			method:      http.MethodPost,
+			path:        "/eth/v1/validator/duties/attester/2",
+			body:        `["0"]`,
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "active validator indices not found for slot 64",
+		},
 	}
 
 	for _, tc := range cases {
@@ -393,13 +447,21 @@ func TestHistoricalDutiesUseSnapshotCoverage(t *testing.T) {
 
 	dirs := datadir.New(t.TempDir())
 	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, handler.beaconChainCfg)
-	types.KeyValueGetters = map[string]snapshotsync.KeyValueGetter{kv.StateEvents: types.KeyValueGetters[kv.StateEvents]}
+	types.KeyValueGetters = map[string]snapshotsync.KeyValueGetter{
+		kv.StateEvents:               types.KeyValueGetters[kv.StateEvents],
+		kv.ActiveValidatorIndicies:   types.KeyValueGetters[kv.ActiveValidatorIndicies],
+		kv.SlotData:                  types.KeyValueGetters[kv.SlotData],
+		kv.ValidatorEffectiveBalance: types.KeyValueGetters[kv.ValidatorEffectiveBalance],
+	}
 	snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
 	t.Cleanup(snapshots.Close)
 	require.NoError(t, snapshots.DumpCaplinState(t.Context(), 1000, 1000, 0, dirs, 1, log.LvlDebug, logger))
 	require.NoError(t, snapshots.OpenFolder())
 	require.Equal(t, uint64(999), snapshots.BlocksAvailable())
 	handler.caplinStateSnapshots = snapshots
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.ActiveValidatorIndicies, base_encoding.Encode64ToBytes4(64))
+	}))
 
 	t.Run("attester state from snapshots", func(t *testing.T) {
 		status, body := dutiesSpecStatusRequest(t, handler, http.MethodPost, "/eth/v1/validator/duties/attester/2", `["0"]`)
@@ -414,6 +476,12 @@ func TestHistoricalDutiesUseSnapshotCoverage(t *testing.T) {
 	})
 
 	t.Run("proposer validator coverage after replay", func(t *testing.T) {
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			if err := tx.Delete(kv.SlotData, base_encoding.Encode64ToBytes4(96)); err != nil {
+				return err
+			}
+			return state_accessors.SetStateProcessingProgress(tx, 95)
+		}))
 		validatorTable := state_accessors.NewStaticValidatorTable()
 		refilled, err := antiquary.FillStaticValidatorsTableIfNeeded(logger, snapshots, validatorTable)
 		require.NoError(t, err)
@@ -423,4 +491,55 @@ func TestHistoricalDutiesUseSnapshotCoverage(t *testing.T) {
 		status, body := dutiesSpecStatusRequest(t, handler, http.MethodGet, "/eth/v1/validator/duties/proposer/3", "")
 		require.Equal(t, http.StatusOK, status, body)
 	})
+}
+
+func TestHistoricalAttesterDutiesSnapshotStartsAfterRequestedSlot(t *testing.T) {
+	logger := log.New()
+	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+	lowest := uint64(33)
+	fcu.LowestAvailableSlotVal = &lowest
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return state_accessors.SetStateProcessingProgress(tx, 31)
+	}))
+
+	dirs := datadir.New(t.TempDir())
+	types := snapshotsync.SnapshotTypes{
+		KeyValueGetters: map[string]snapshotsync.KeyValueGetter{
+			kv.ActiveValidatorIndicies: func(uint64) ([]byte, []byte, error) { return nil, nil, nil },
+		},
+	}
+	snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.DumpCaplinState(t.Context(), 100_000, 50_000, 0, dirs, 1, log.LvlDebug, logger))
+	require.NoError(t, snapshots.OpenFolder())
+	files := snapshots.SegFileNames(50_000, 100_000)
+	require.Len(t, files, 1)
+	require.NoError(t, snapshots.OpenList([]string{filepath.Base(files[0])}, false))
+	require.Equal(t, uint64(99_999), snapshots.BlocksAvailable())
+	handler.caplinStateSnapshots = snapshots
+
+	status, body := dutiesSpecStatusRequest(t, handler, http.MethodPost, "/eth/v1/validator/duties/attester/1", `["0"]`)
+	require.Equal(t, http.StatusServiceUnavailable, status, body)
+}
+
+func TestHistoricalProposerDutiesValidatorTableRewind(t *testing.T) {
+	db, _, _, preState, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	validatorTable := state_accessors.NewStaticValidatorTable()
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, state_accessors.ReadValidatorsTable(tx, validatorTable))
+	require.GreaterOrEqual(t, validatorTable.Slot(), uint64(96))
+	handler.stateReader = historical_states_reader.NewHistoricalStatesReader(handler.beaconChainCfg, nil, validatorTable, preState, nil, handler.syncedData)
+
+	getter := func(table string, key []byte) ([]byte, error) {
+		if table == kv.SlotData {
+			validatorTable.SetSlot(95)
+		}
+		return tx.GetOne(table, key)
+	}
+	duties, err := handler.getHistoricalProposerDuties(t.Context(), tx, getter, 3, 96)
+	require.Equal(t, uint64(95), validatorTable.Slot())
+	require.Error(t, err, "returned %d proposer duties after rewind", len(duties))
+	require.Equal(t, http.StatusServiceUnavailable, beaconhttp.WrapEndpointError(err).Code)
 }

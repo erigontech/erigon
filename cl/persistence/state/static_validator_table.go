@@ -379,6 +379,24 @@ func (s *StaticValidatorTable) AddWithdrawableEpoch(validatorIndex, slot uint64,
 	return nil
 }
 
+var ErrValidatorTableBehind = errors.New("static validator table is still replaying")
+
+func (s *StaticValidatorTable) CopyValidatorsAtSlot(slot, length uint64, limit int) (*solid.ValidatorSet, error) {
+	s.sync.RLock()
+	defer s.sync.RUnlock()
+	if slot > s.slot {
+		return nil, ErrValidatorTableBehind
+	}
+	if uint64(len(s.validatorTable)) < length {
+		return nil, fmt.Errorf("static validator table is truncated at slot %d: have %d validators, want %d", slot, len(s.validatorTable), length)
+	}
+	out := solid.NewValidatorSetWithLength(limit, int(length))
+	for i, validator := range s.validatorTable[:length] {
+		validator.ToValidator(out.Get(i), slot)
+	}
+	return out, nil
+}
+
 func (s *StaticValidatorTable) ForEach(fn func(validatorIndex uint64, validator *StaticValidator) bool) {
 	s.sync.RLock()
 	defer s.sync.RUnlock()

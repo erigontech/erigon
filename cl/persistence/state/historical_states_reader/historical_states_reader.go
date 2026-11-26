@@ -595,24 +595,14 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 		return nil, err
 	}
 
-	highestSlotAvailable, err := r.highestSlotInSnapshotsAndDB(tx, diffBucket)
-	if err != nil {
-		return nil, err
-	}
 	if forward {
-		for currSlot := freshDumpSlot; currSlot <= slot && currSlot <= highestSlotAvailable; currSlot++ {
+		for currSlot := freshDumpSlot + 1; currSlot <= slot; currSlot++ {
 			key := base_encoding.Encode64ToBytes4(currSlot)
 			v, err := kvGetter(diffBucket, key)
 			if err != nil {
 				return nil, err
 			}
 			if len(v) == 0 {
-				continue
-			}
-			if len(key) != 4 {
-				return nil, fmt.Errorf("invalid key %x", key)
-			}
-			if currSlot == freshDumpSlot {
 				continue
 			}
 			currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, false)
@@ -640,7 +630,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 		}
 	}
 	currentList = currentList[:validatorSetLength*8]
-	return currentList, err
+	return currentList, nil
 }
 
 func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, kvGetter state_accessors.GetValFn, validatorSetLength, slot uint64, diffBucket, dumpBucket string) ([]byte, error) {
@@ -785,15 +775,11 @@ func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, kvGe
 	}
 	validatorSetLength := sd.ValidatorLength
 
-	out := solid.NewValidatorSetWithLength(int(r.cfg.ValidatorRegistryLimit), int(validatorSetLength))
 	// Read the static validator field which are hot in memory (this is > 70% of the whole beacon state)
-	r.validatorTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
-		if validatorIndex >= validatorSetLength {
-			return false
-		}
-		validator.ToValidator(out.Get(int(validatorIndex)), slot)
-		return true
-	})
+	out, err := r.validatorTable.CopyValidatorsAtSlot(slot, validatorSetLength, int(r.cfg.ValidatorRegistryLimit))
+	if err != nil {
+		return nil, err
+	}
 	// Read the balances
 
 	bytesEffectiveBalances, err := r.reconstructDiffedUint64List(tx, kvGetter, validatorSetLength, slot, kv.ValidatorEffectiveBalance, kv.EffectiveBalancesDump)
