@@ -292,10 +292,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
 			// The spent SD is closed by RunLoop; a fresh one opens for the next cycle.
-			if err := sd.Commit(ctx, tx, func(kv.RwTx) error {
-				pe.observeStateTransition(ctx, StateTransitionStartupCommitReady)
-				return nil
-			}); err != nil {
+			if err := sd.Commit(ctx, tx); err != nil {
 				return nil, nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)
 			}
 			restoreNotifications = hook.CheckpointNotifications()

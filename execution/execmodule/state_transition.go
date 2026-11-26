@@ -47,10 +47,7 @@ const (
 	// StateTransitionFCUCatchupCommitComplete means that cycle is durable, before
 	// opening the next read view. Final forkchoice markers may still be pending.
 	StateTransitionFCUCatchupCommitComplete
-	// StateTransitionStartupCommitReady follows flushing a startup execution cycle,
-	// before its MDBX transaction commits.
-	StateTransitionStartupCommitReady
-	// StateTransitionStartupCommitComplete means that startup cycle is durable,
+	// StateTransitionStartupCommitComplete means a startup execution cycle is durable,
 	// before file building or the next execution cycle starts.
 	StateTransitionStartupCommitComplete
 )
