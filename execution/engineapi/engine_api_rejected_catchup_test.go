@@ -100,19 +100,16 @@ func TestEngineApiRejectedCatchupRestarts(t *testing.T) {
 		t.Helper()
 		var committed uint64
 		require.NoError(t, node.ChainDB.View(ctx, func(tx kv.Tx) error {
-			var err error
-			committed, err = stages.GetStageProgress(tx, stages.Finish)
+			progress, aligned, err := stages.GetStageProgressIfAllEqual(tx, stages.Finish, stages.Execution,
+				stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 			require.NoError(t, err)
+			require.True(t, aligned, "execution and download stages must agree with Finish")
+			committed = progress
 			require.Greater(t, committed, uint64(2), "catch-up must commit before reaching the invalid block")
 			require.Less(t, committed, badTip.NumberU64())
 			checkpoint := blocks[committed-1].Hash()
 			require.Equal(t, checkpoint, rawdb.ReadHeadBlockHash(tx))
 			require.Equal(t, checkpoint, rawdb.ReadHeadHeaderHash(tx))
-			for _, stage := range []stages.SyncStage{stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders} {
-				progress, err := stages.GetStageProgress(tx, stage)
-				require.NoError(t, err)
-				require.Equal(t, committed, progress, "%s", stage)
-			}
 			canonical, err := rawdb.ReadCanonicalHash(tx, badTip.NumberU64())
 			require.NoError(t, err)
 			require.Zero(t, canonical, "rejected blocks must not be replayed at startup")

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand/v2"
+	"slices"
 	"testing"
 	"time"
 
@@ -863,6 +864,26 @@ func TestSuccessiveSetHeadAnnouncesDeepUnwindTarget(t *testing.T) {
 	require.Equal(t, target.SlotNumber, last.SlotNumber)
 }
 
+func rejectCatchupTip(t *testing.T, m *ExecModuleTester, branch []*types.Block) *types.Block {
+	t.Helper()
+	blocks := slices.Clone(branch)
+	tip := blocks[len(blocks)-1]
+	header := tip.Header()
+	header.Root[0] ^= 1
+	badTip := tip.WithSeal(header)
+	blocks[len(blocks)-1] = badTip
+
+	ctx := t.Context()
+	status, err := m.InsertBlocks(ctx, blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	fcu, err := m.UpdateForkChoice(ctx, badTip.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
+	m.ExecModule.WaitIdle(ctx)
+	return badTip
+}
+
 func TestBelowFinalityForkchoiceKeepsPendingNotifications(t *testing.T) {
 	m := New(t, WithStepSize(16), WithLoopBlockLimit(8))
 	chain, err := m.GenerateChain(27, nil)
@@ -876,18 +897,7 @@ func TestBelowFinalityForkchoiceKeepsPendingNotifications(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
 	m.ExecModule.WaitIdle(t.Context())
 
-	header := types.CopyHeader(chain.TopBlock.HeaderNoCopy())
-	header.Root[0] ^= 1
-	badTip := types.NewBlockFromNetwork(header, chain.TopBlock.Body(), chain.TopBlock.BlockAccessListSidecar())
-	blocks := append([]*types.Block(nil), chain.Blocks[2:]...)
-	blocks[len(blocks)-1] = badTip
-	status, err := m.InsertBlocks(t.Context(), blocks)
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	fcu, err = m.UpdateForkChoice(t.Context(), badTip.Header())
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
-	m.ExecModule.WaitIdle(t.Context())
+	badTip := rejectCatchupTip(t, m, chain.Blocks[2:])
 
 	retained := append([]notifications.StateChange(nil), m.Notifications.Accumulator.Changes()...)
 	require.NotEmpty(t, retained)
@@ -930,18 +940,7 @@ func TestRejectedHeadOnlyCatchupRetainsHeaderRange(t *testing.T) {
 	m.ExecModule.WaitIdle(t.Context())
 	waitForBatchWithHead(chain.Blocks[1].Hash())
 
-	header := types.CopyHeader(chain.TopBlock.HeaderNoCopy())
-	header.Root[0] ^= 1
-	badTip := types.NewBlockFromNetwork(header, chain.TopBlock.Body(), chain.TopBlock.BlockAccessListSidecar())
-	blocks := append([]*types.Block(nil), chain.Blocks[2:]...)
-	blocks[len(blocks)-1] = badTip
-	status, err := m.InsertBlocks(t.Context(), blocks)
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	fcu, err := m.UpdateForkChoice(t.Context(), badTip.Header())
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
-	m.ExecModule.WaitIdle(t.Context())
+	rejectCatchupTip(t, m, chain.Blocks[2:])
 
 	var committed uint64
 	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
@@ -954,7 +953,7 @@ func TestRejectedHeadOnlyCatchupRetainsHeaderRange(t *testing.T) {
 	headers, unsubscribe := m.Notifications.Events.AddHeaderSubscription()
 	t.Cleanup(unsubscribe)
 	accepted := chain.Blocks[committed-1]
-	fcu, err = m.UpdateForkChoice(t.Context(), accepted.Header())
+	fcu, err := m.UpdateForkChoice(t.Context(), accepted.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
 	m.ExecModule.WaitIdle(t.Context())
@@ -983,18 +982,7 @@ func TestRejectedCatchupForkchoiceKeepsCommittedNotifications(t *testing.T) {
 			t.Cleanup(unsubscribeReceipts)
 			m.Notifications.Events.EmptyReceiptSubscription(false)
 
-			header := types.CopyHeader(side.TopBlock.HeaderNoCopy())
-			header.Root[0] ^= 1
-			badTip := types.NewBlockFromNetwork(header, side.TopBlock.Body(), side.TopBlock.BlockAccessListSidecar())
-			blocks := append([]*types.Block(nil), side.Blocks[1:]...)
-			blocks[len(blocks)-1] = badTip
-			status, err := m.InsertBlocks(t.Context(), blocks)
-			require.NoError(t, err)
-			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-			fcu, err := m.UpdateForkChoice(t.Context(), badTip.Header())
-			require.NoError(t, err)
-			require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
-			m.ExecModule.WaitIdle(t.Context())
+			badTip := rejectCatchupTip(t, m, side.Blocks[1:])
 
 			var committed uint64
 			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
@@ -1003,7 +991,7 @@ func TestRejectedCatchupForkchoiceKeepsCommittedNotifications(t *testing.T) {
 				return err
 			}))
 			require.Greater(t, committed, canonical.TopBlock.NumberU64(), "catch-up must commit before the rejected cycle")
-			require.Less(t, committed, side.TopBlock.NumberU64()-1, "the failed cycle must also contain a valid, uncommitted block")
+			require.Less(t, committed, badTip.NumberU64()-1, "the failed cycle must also contain a valid, uncommitted block")
 			changes := m.Notifications.Accumulator.Changes()
 			require.Equal(t, int(committed), len(changes), "retain the canonical unwind and committed blocks, without the failed cycle")
 			require.Equal(t, notifications.DirectionUnwind, changes[0].Direction)
@@ -1019,11 +1007,11 @@ func TestRejectedCatchupForkchoiceKeepsCommittedNotifications(t *testing.T) {
 			if sameHead {
 				newHead = side.Blocks[committed-1]
 			} else {
-				status, err = m.InsertBlocks(t.Context(), []*types.Block{newHead})
+				status, err := m.InsertBlocks(t.Context(), []*types.Block{newHead})
 				require.NoError(t, err)
 				require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 			}
-			fcu, err = m.UpdateForkChoice(t.Context(), newHead.Header())
+			fcu, err := m.UpdateForkChoice(t.Context(), newHead.Header())
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
 			m.ExecModule.WaitIdle(t.Context())

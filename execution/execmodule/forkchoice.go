@@ -221,6 +221,14 @@ func forkChoiceHashesMatch(tx kv.Getter, blockHash, safeHash, finalizedHash comm
 		(finalizedHash == (common.Hash{}) || rawdb.ReadForkchoiceFinalized(tx) == finalizedHash)
 }
 
+func truncateCanonicalAfter(tx kv.RwTx, head uint64) error {
+	from := head + 1
+	if err := rawdb.TruncateCanonicalChain(tx, from); err != nil {
+		return err
+	}
+	return rawdbv3.TxNums.Truncate(tx, from)
+}
+
 // Keep downloaded blocks by hash so a later forkchoice can select their valid prefix.
 func (pe *PipelineExecutor) resetCanonicalToCheckpoint(ctx context.Context, tx kv.RwTx, finish uint64) (common.Hash, error) {
 	head, ok, err := pe.blockReader.CanonicalHash(ctx, tx, finish)
@@ -230,10 +238,7 @@ func (pe *PipelineExecutor) resetCanonicalToCheckpoint(ctx context.Context, tx k
 	if !ok {
 		return common.Hash{}, fmt.Errorf("missing canonical hash at committed block %d", finish)
 	}
-	if err := rawdb.TruncateCanonicalChain(tx, finish+1); err != nil {
-		return common.Hash{}, err
-	}
-	if err := rawdbv3.TxNums.Truncate(tx, finish+1); err != nil {
+	if err := truncateCanonicalAfter(tx, finish); err != nil {
 		return common.Hash{}, err
 	}
 	for _, stage := range []stages.SyncStage{stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders} {
@@ -917,11 +922,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}, stateFlushingInParallel)
 			return nil
 		}
-		if err := rawdb.TruncateCanonicalChain(tx, *headNumber+1); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-		}
-
-		if err := rawdbv3.TxNums.Truncate(tx, *headNumber+1); err != nil {
+		if err := truncateCanonicalAfter(tx, *headNumber); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 
