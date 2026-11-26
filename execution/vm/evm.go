@@ -81,26 +81,26 @@ func (evm *EVM) runEcrecover(p PrecompiledContract, input []byte, gas mdgas.MdGa
 	if err != nil || len(output) == 0 {
 		return output, gas, err
 	}
-	address := accounts.InternAddress(common.BytesToAddress(output))
+	signer := accounts.InternAddress(common.BytesToAddress(output))
 	if tracer != nil && tracer.OnAccountAccess != nil {
-		tracer.OnAccountAccess(address)
+		tracer.OnAccountAccess(signer)
 	}
-	gasCost := params.ExtCodeWarmAccessGasEIP8038
-	if !evm.intraBlockState.AddressInAccessList(address) {
-		gasCost += params.ColdAccountAccessCostEIP8038 - params.WarmStorageReadCostEIP2929
+	accessGas := params.ExtCodeWarmAccessGasEIP8038
+	if !evm.intraBlockState.AddressInAccessList(signer) {
+		accessGas += params.ColdAccountAccessCostEIP8038 - params.WarmStorageReadCostEIP2929
 	}
-	remaining, _, ok := useMdGas(gas, gasCost, mdgas.ExecutionGas, tracer, tracing.GasChangeCallPrecompiledContract)
+	remaining, _, ok := useMdGas(gas, accessGas, mdgas.ExecutionGas, tracer, tracing.GasChangeCallPrecompiledContract)
 	if !ok {
 		return nil, gas, ErrOutOfGas
 	}
-	evm.intraBlockState.AddAddressToAccessList(address)
+	evm.intraBlockState.AddAddressToAccessList(signer)
 	// Paid reads remain in the block access list when execution reverts.
 	// Account warmth rolls back separately.
-	evm.intraBlockState.MarkAddressAccess(address, false)
+	evm.intraBlockState.MarkAddressAccess(signer, false)
 	if tracer != nil && tracer.OnAccountRead != nil {
-		tracer.OnAccountRead(address)
+		tracer.OnAccountRead(signer)
 	}
-	code, err := evm.intraBlockState.GetCode(address)
+	code, err := evm.intraBlockState.GetCode(signer)
 	if err != nil {
 		return nil, remaining, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}

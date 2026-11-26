@@ -154,7 +154,7 @@ func TestFrameValidationEcrecoverDependency(t *testing.T) {
 	target := accounts.InternAddress(common.HexToAddress("0x2000"))
 	code := program.New().Mstore(input, 0).
 		StaticCall(uint256.NewInt(6_100), precompile, 0, 128, 0, 32).Op(vm.POP).
-		Push0().Op(vm.MLOAD).Push(owner).Op(vm.EQ).Push(3).Op(vm.MUL).
+		Push0().Op(vm.MLOAD).Push(owner).Op(vm.EQ).Push(types.FrameApproveBoth).Op(vm.MUL).
 		Push0().Push0().Op(vm.APPROVE).Bytes()
 	for name, ownerCode := range map[string][]byte{
 		"empty code": nil,

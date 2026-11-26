@@ -128,7 +128,7 @@ func TestEcrecoverAccountAccess(t *testing.T) {
 
 			require.Equal(t, tc.wantRead, reader.accountReads[signer] > 0, "signer account read")
 			require.Equal(t, tc.wantRead && len(tc.code) > 0, reader.codeReads[signer] > 0, "signer code read")
-			require.Equal(t, tc.warm || tc.wantRead && !tc.revert, ibs.AddressInAccessList(signer))
+			require.Equal(t, tc.warm || (tc.wantRead && !tc.revert), ibs.AddressInAccessList(signer))
 			require.Zero(t, reader.accountReads[target])
 			require.Zero(t, reader.codeReads[target])
 			require.False(t, ibs.AddressInAccessList(target))
