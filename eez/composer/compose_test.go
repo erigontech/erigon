@@ -290,12 +290,19 @@ func (f *crossFixture) holdOutOf(t *testing.T, key *ecdsa.PrivateKey, nonce uint
 	tx.TipCap.SetUint64(1)
 	signed, err := types.SignTx(tx, *types.LatestSignerForChainID(&tx.ChainID), key)
 	require.NoError(t, err)
+	return f.pushHeld(t, signed, sender, Outbound, f.l2.accounts[sender].Nonce)
+}
+
+// pushHeld holds tx, sender's, crossing direction, admitted on sender's
+// nonce onChain.
+func (f *crossFixture) pushHeld(t *testing.T, tx types.Transaction, sender common.Address, direction Direction, onChain uint64) *Held {
+	t.Helper()
 	var buf bytes.Buffer
-	require.NoError(t, signed.MarshalBinary(&buf))
-	h := &Held{Raw: buf.Bytes(), Hash: signed.Hash(), Sender: sender, Nonce: nonce, Direction: Outbound}
-	h.MaxFee.Set(&tx.FeeCap)
-	h.Tip.Set(&tx.TipCap)
-	require.NoError(t, f.pool.Push(h, f.l2.accounts[sender].Nonce))
+	require.NoError(t, tx.MarshalBinary(&buf))
+	h := &Held{Raw: buf.Bytes(), Hash: tx.Hash(), Sender: sender, Nonce: tx.GetNonce(), Direction: direction}
+	h.MaxFee.Set(tx.GetFeeCap())
+	h.Tip.Set(tx.GetTipCap())
+	require.NoError(t, f.pool.Push(h, onChain))
 	return h
 }
 
@@ -318,13 +325,7 @@ func (f *crossFixture) holdOn(t *testing.T, nonce, onChain uint64, to common.Add
 	tx.TipCap.SetUint64(1)
 	signed, err := types.SignTx(tx, *types.LatestSignerForChainID(&tx.ChainID), f.key)
 	require.NoError(t, err)
-	var buf bytes.Buffer
-	require.NoError(t, signed.MarshalBinary(&buf))
-	h := &Held{Raw: buf.Bytes(), Hash: signed.Hash(), Sender: crypto.PubkeyToAddress(f.key.PublicKey), Nonce: nonce, Direction: Inbound}
-	h.MaxFee.SetUint64(10)
-	h.Tip.SetUint64(1)
-	require.NoError(t, f.pool.Push(h, onChain))
-	return h
+	return f.pushHeld(t, signed, crypto.PubkeyToAddress(f.key.PublicKey), Inbound, onChain)
 }
 
 func TestComposeDeliversAHeldCall(t *testing.T) {
@@ -942,14 +943,7 @@ func TestComposedSyncBlockFailureCharges(t *testing.T) {
 // holdOutbound holds the window's recorded outbound transaction i.
 func (f *crossFixture) holdOutbound(t *testing.T, i int) *Held {
 	t.Helper()
-	tx := f.w.sync.Transactions()[1+2*i]
-	var buf bytes.Buffer
-	require.NoError(t, tx.MarshalBinary(&buf))
-	h := &Held{Raw: buf.Bytes(), Hash: tx.Hash(), Sender: l2Sender, Nonce: tx.GetNonce(), Direction: Outbound}
-	h.MaxFee.Set(tx.GetFeeCap())
-	h.Tip.Set(tx.GetTipCap())
-	require.NoError(t, f.pool.Push(h, 8))
-	return h
+	return f.pushHeld(t, f.w.sync.Transactions()[1+2*i], l2Sender, Outbound, 8)
 }
 
 // TestComposeTheWindow: the window's held transactions, inbound first in

@@ -18,6 +18,7 @@ package composer
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"slices"
@@ -507,63 +508,60 @@ func TestHeldPoolHolds(t *testing.T) {
 	require.NoError(t, p.Push(in, 0))
 	p.Evict(in.Sender, in.Direction, in.Nonce)
 	require.False(t, p.Holds(in.Hash))
-	// No Sync block returned it to the rollup's pool.
-	p.Evict(b.Sender, b.Direction, b.Nonce)
-	require.False(t, p.Holds(b.Hash))
-	// Composed, it stays the composer's, in flight or queued when evicted.
-	c, d := held(addr(0xc), 0, Outbound, 4), held(addr(0xc), 1, Outbound, 5)
-	require.NoError(t, p.Push(c, 0))
-	require.NoError(t, p.Push(d, 0))
-	composed := p.PopN(2)
-	p.Composed(composed, 1)
-	p.PushFront(composed[1:])
-	p.Evict(c.Sender, c.Direction, c.Nonce)
-	require.True(t, p.Holds(c.Hash))
-	require.True(t, p.Holds(d.Hash))
 }
 
 // TestHeldPoolKeepsDiscardedComposed: an outbound transaction a committed
-// Sync block held stays the composer's when a replacement discards it,
-// queued, recovered or reserved again.
+// Sync block held stays the composer's on every path that discards it; one
+// never composed leaves nothing behind.
 func TestHeldPoolKeepsDiscardedComposed(t *testing.T) {
 	sender := addr(0xa)
-	// compose returns a's pool with a composed, released when settled.
-	compose := func(t *testing.T, settled bool) (*HeldPool, []*Held) {
-		p := NewHeldPool()
-		push(t, p, held(sender, 0, Outbound, 1), 0)
-		drained := p.PopN(1)
-		p.Composed(drained, 1)
-		if settled {
-			p.Release(drained)
+	replace := func(t *testing.T, p *HeldPool) { push(t, p, held(sender, 0, Outbound, 9), 0) }
+	for name, c := range map[string]struct {
+		// settled: a batch carried it, so a Sync block held it.
+		settled bool
+		discard func(t *testing.T, p *HeldPool, drained []*Held)
+	}{
+		"evicted while queued": {discard: func(t *testing.T, p *HeldPool, drained []*Held) {
+			p.PushFront(drained)
+			p.Evict(sender, Outbound, 0)
+		}},
+		"evicted in flight": {discard: func(t *testing.T, p *HeldPool, _ []*Held) {
+			p.Evict(sender, Outbound, 0)
+		}},
+		"replaced while queued": {discard: func(t *testing.T, p *HeldPool, drained []*Held) {
+			p.PushFront(drained)
+			replace(t, p)
+		}},
+		"recovered behind a replacement": {settled: true, discard: func(t *testing.T, p *HeldPool, drained []*Held) {
+			replace(t, p)
+			p.PushFront(drained)
+			require.Equal(t, []common.Hash{{9}}, hashes(p.PopN(math.MaxInt)))
+		}},
+		"reserved behind a replacement": {settled: true, discard: func(t *testing.T, p *HeldPool, drained []*Held) {
+			replace(t, p)
+			p.Reserve(drained)
+			require.NotContains(t, p.inFlight, common.Hash{1})
+		}},
+	} {
+		for _, composed := range []bool{true, false} {
+			if c.settled && !composed {
+				continue
+			}
+			t.Run(fmt.Sprintf("%s/composed=%t", name, composed), func(t *testing.T) {
+				p := NewHeldPool()
+				push(t, p, held(sender, 0, Outbound, 1), 0)
+				drained := p.PopN(1)
+				if composed {
+					p.Composed(drained, 1)
+				}
+				if c.settled {
+					p.Release(drained)
+				}
+				c.discard(t, p, drained)
+				require.Equal(t, composed, p.Holds(common.Hash{1}))
+			})
 		}
-		return p, drained
 	}
-	t.Run("replaced while queued", func(t *testing.T) {
-		p, drained := compose(t, false)
-		p.PushFront(drained)
-		push(t, p, held(sender, 0, Outbound, 9), 0)
-		require.True(t, p.Holds(common.Hash{1}))
-	})
-	t.Run("recovered behind a replacement", func(t *testing.T) {
-		p, drained := compose(t, true)
-		push(t, p, held(sender, 0, Outbound, 9), 0)
-		p.PushFront(drained)
-		require.Equal(t, []common.Hash{{9}}, hashes(p.PopN(math.MaxInt)))
-		require.True(t, p.Holds(common.Hash{1}))
-	})
-	t.Run("reserved behind a replacement", func(t *testing.T) {
-		p, drained := compose(t, true)
-		push(t, p, held(sender, 0, Outbound, 9), 0)
-		p.Reserve(drained)
-		require.NotContains(t, p.inFlight, common.Hash{1})
-		require.True(t, p.Holds(common.Hash{1}))
-	})
-	t.Run("never composed", func(t *testing.T) {
-		p := NewHeldPool()
-		push(t, p, held(sender, 0, Outbound, 1), 0)
-		push(t, p, held(sender, 0, Outbound, 9), 0)
-		require.False(t, p.Holds(common.Hash{1}))
-	})
 }
 
 // TestHeldPoolPrune: a discarded outbound transaction is let go once the
