@@ -120,14 +120,18 @@ func (pe *PipelineExecutor) UnwindForValidation(sd *execctx.SharedDomains, tx kv
 
 // RunPrune executes pruning on the main pipeline and returns the last txnum state files may now hold.
 func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (uint64, error) {
-	irreversibleBlock, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle)
+	irreversibleBlock, err := pe.pruneStages(ctx, tx, initialCycle, timeout)
 	if err != nil {
 		return 0, err
 	}
-	if err := pe.sync.RunPrune(ctx, tx, initialCycle, irreversibleBlock, timeout); err != nil {
+	return execfinality.IrreversibleTxNum(ctx, tx, pe.blockReader.TxnumReader(), irreversibleBlock)
+}
+
+func (pe *PipelineExecutor) pruneStages(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (irreversibleBlock uint64, err error) {
+	if irreversibleBlock, err = execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle); err != nil {
 		return 0, err
 	}
-	return execfinality.IrreversibleTxNum(ctx, tx, pe.blockReader.TxnumReader(), irreversibleBlock)
+	return irreversibleBlock, pe.sync.RunPrune(ctx, tx, initialCycle, irreversibleBlock, timeout)
 }
 
 // Commits sd and, if another iteration follows, returns a fresh tx+SD to run it on; (nil,nil,nil) leaves the loop unchanged.
@@ -285,7 +289,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	tx, doms, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: initialCycle,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
-			_, err := pe.RunPrune(ctx, rwtx, initialCycle, 0)
+			_, err := pe.pruneStages(ctx, rwtx, initialCycle, 0)
 			return err
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error) {

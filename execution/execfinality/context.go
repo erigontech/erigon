@@ -38,9 +38,10 @@ func WithoutFinalisedBlock() ResolveOption {
 	}
 }
 
-// IrreversibleBlock is the highest block no unwind may reach, so its changeset can go and it can go into files:
-// the block below the finalized one, whose changeset stays so that a fork from that block can still be
-// validated, or the block below the reorg window without finality or on the initial cycle.
+// IrreversibleBlock is the highest block the chain treats as final: the block below the finalized one, whose
+// changeset stays so that a fork from that block can still be validated, or the block below the reorg window
+// without finality or on the initial cycle. Changesets kept for deep unwinds still allow an unwind below it;
+// IrreversibleTxNum accounts for them.
 func IrreversibleBlock(headBlockNum, finalisedBlockNum, maxReorgDepth uint64, initialCycle bool) uint64 {
 	if finalisedBlockNum > 0 && !initialCycle {
 		return finalisedBlockNum - 1

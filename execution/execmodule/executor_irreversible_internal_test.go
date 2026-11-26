@@ -93,11 +93,9 @@ func TestProcessFrozenBlocksBuildsNoFilesOverBatchChangesets(t *testing.T) {
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		lowest, err := changeset.ReadLowestUnwindableBlock(tx)
 		require.NoError(t, err)
+		require.Equal(t, uint64(1), lowest, "the batch flushed the changesets of blocks 1-10")
 		for _, txNum := range db.irreversibleTxNums {
-			block, ok, err := rawdbv3.TxNums.FindBlockNum(t.Context(), tx, txNum)
-			require.NoError(t, err)
-			require.True(t, ok)
-			require.Less(t, block, lowest, "files may hold txnum %d, a block that still has a changeset", txNum)
+			require.Equal(t, uint64(9), txNum, "files may hold only block 0, which ends at txnum 9")
 		}
 		return nil
 	}))

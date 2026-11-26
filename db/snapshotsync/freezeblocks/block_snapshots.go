@@ -166,7 +166,7 @@ func (br *BlockRetire) snapshots() *blocksnapshots.RoSnapshots {
 	return br.blockReader.Snapshots().(*blocksnapshots.RoSnapshots)
 }
 
-// canRetire retires blocks up to and including irreversibleBlock.
+// canRetire computes the block range to retire, up to and including irreversibleBlock.
 func (br *BlockRetire) canRetire(blocksInSnapshots, irreversibleBlock uint64, snapType snaptype.Enum) (blockFrom, blockTo uint64, can bool) {
 	blockTo = irreversibleBlock + 1
 	blockFrom = blocksInSnapshots + 1

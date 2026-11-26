@@ -1047,7 +1047,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 
 var errStepNotReady = errors.New("step not ready")
 
-func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, irreversibleTxNum uint64, filesDone <-chan struct{}) error {
+func (a *Aggregator) buildFiles(ctx context.Context, db kv.RoDB, step kv.Step, irreversibleTxNum uint64, filesDone <-chan struct{}) error {
 	// Pin worker counts while collation and building read compressor settings.
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
@@ -1151,7 +1151,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	return nil
 }
 
-func (a *Aggregator) BuildFiles(db kv.TemporalRoDB, toTxNum, irreversibleTxNum uint64) error {
+func (a *Aggregator) BuildFiles(db kv.RoDB, toTxNum, irreversibleTxNum uint64) error {
 	finished, _ := a.buildFilesInBackground(db, toTxNum, true, irreversibleTxNum)
 	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 		return nil
@@ -1180,7 +1180,7 @@ Loop:
 }
 
 // [from, to)
-func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromStep, toStep kv.Step, irreversibleTxNum uint64, doMerge bool) error {
+func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.RoDB, fromStep, toStep kv.Step, irreversibleTxNum uint64, doMerge bool) error {
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
@@ -2237,13 +2237,13 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
-func (a *Aggregator) BuildFilesInBackground(db kv.TemporalRoDB, txNum, irreversibleTxNum uint64) chan struct{} {
+func (a *Aggregator) BuildFilesInBackground(db kv.RoDB, txNum, irreversibleTxNum uint64) chan struct{} {
 	finished, _ := a.buildFilesInBackground(db, txNum, true, irreversibleTxNum)
 	return finished
 }
 
 // Returns a channel which is closed when aggregation is done and whether it started.
-func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, doMerge bool, irreversibleTxNum uint64) (chan struct{}, bool) {
+func (a *Aggregator) buildFilesInBackground(db kv.RoDB, txNum uint64, doMerge bool, irreversibleTxNum uint64) (chan struct{}, bool) {
 	fin := make(chan struct{})
 
 	if dbg.NoBackgroundMaintenance() {

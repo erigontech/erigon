@@ -779,7 +779,11 @@ func testAggregatorV3BuildFilesWithFinalityContext(t *testing.T, buildFiles2 boo
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
-	irreversibleTxNum := execfinality.IrreversibleBlock(blocks, 0, 5, true) // block n ends at txnum n
+	var irreversibleTxNum uint64
+	require.NoError(t, tdb.View(ctx, func(tx kv.Tx) (err error) {
+		irreversibleTxNum, err = execfinality.IrreversibleTxNum(ctx, tx, rawdbv3.TxNums, execfinality.IrreversibleBlock(blocks, 0, 5, true))
+		return err
+	}))
 	if buildFiles2 {
 		err = agg.BuildFiles2(ctx, tdb, 0, kv.Step(txnNums/agg.StepSize()), irreversibleTxNum, true)
 		agg.WaitForFiles()

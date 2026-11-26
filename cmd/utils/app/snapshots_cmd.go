@@ -3565,7 +3565,10 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	txNumsReader := blockReader.TxnumReader()
 	var lastTxNum, irreversibleTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
+		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
 		if lastTxNum, err = txNumsReader.Max(ctx, tx, execProgress); err != nil {
 			return err
 		}

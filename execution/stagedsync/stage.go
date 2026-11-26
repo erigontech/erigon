@@ -182,7 +182,7 @@ type PruneState struct {
 	ForwardProgress   uint64 // progress of stage forward move
 	PruneProgress     uint64 // progress of stage prune move. after sync cycle it become equal to ForwardProgress by Done() method
 	state             *Sync
-	IrreversibleBlock uint64 // no unwind reaches it or the blocks below
+	IrreversibleBlock uint64 // the highest block the chain treats as final; see execfinality.IrreversibleBlock
 
 	CurrentSyncCycle CurrentSyncCycleInfo
 }

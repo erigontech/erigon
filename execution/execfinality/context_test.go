@@ -58,10 +58,7 @@ func TestIrreversibleBlock(t *testing.T) {
 }
 
 func TestResolveUsesTransactionVisibleExecutionProgress(t *testing.T) {
-	db := newFinalityTestDB(t)
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := temporaltest.NewTestTx(t)
 	finalisedHash := common.Hash{0x01}
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 1_000))
 	require.NoError(t, rawdb.WriteHeaderNumber(tx, finalisedHash, 100))
@@ -75,10 +72,7 @@ func TestResolveUsesTransactionVisibleExecutionProgress(t *testing.T) {
 }
 
 func TestResolveWithoutFinalisedBlockUsesMaxReorgDepth(t *testing.T) {
-	db := newFinalityTestDB(t)
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := temporaltest.NewTestTx(t)
 	finalisedHash := common.Hash{0x01}
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 100))
 	require.NoError(t, rawdb.WriteHeaderNumber(tx, finalisedHash, 1_000))
@@ -91,10 +85,7 @@ func TestResolveWithoutFinalisedBlockUsesMaxReorgDepth(t *testing.T) {
 // A block that still has a changeset can be unwound, so the irreversible txnum stops below it; the blocks before it
 // still go into files, also when a time-bounded delete stopped there.
 func TestIrreversibleTxNumStopsBelowABlockWithAChangeset(t *testing.T) {
-	db := newFinalityTestDB(t)
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := temporaltest.NewTestTx(t)
 	for blockNum := uint64(0); blockNum <= 20; blockNum++ {
 		require.NoError(t, rawdbv3.TxNums.Append(tx, blockNum, blockNum))
 	}

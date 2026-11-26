@@ -16,42 +16,6 @@
 
 package state
 
-import (
-	"context"
-	"math"
-
-	"github.com/erigontech/erigon/db/kv"
-)
+import "math"
 
 const allIrreversible = uint64(math.MaxUint64)
-
-type temporalRoDBStub struct {
-	kv.RoDB
-}
-
-func (temporalRoDBStub) OnFilesChange(kv.OnFilesChange, kv.OnFilesChange) {
-}
-
-func (temporalRoDBStub) MaxPrunableStepsBacklog() uint64 {
-	return 0
-}
-
-func (temporalRoDBStub) StepSize() uint64 {
-	return 0
-}
-
-func (temporalRoDBStub) ViewTemporal(context.Context, func(kv.TemporalTx) error) error {
-	panic("not implemented")
-}
-
-func (temporalRoDBStub) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
-	panic("not implemented")
-}
-
-func (temporalRoDBStub) Debug() kv.TemporalDebugDB {
-	panic("not implemented")
-}
-
-func asTemporalRoDB(db kv.RoDB) kv.TemporalRoDB {
-	return temporalRoDBStub{RoDB: db}
-}

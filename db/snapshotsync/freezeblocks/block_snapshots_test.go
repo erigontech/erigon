@@ -61,11 +61,11 @@ func TestBlockRetireUsesTheIrreversibleBlock(t *testing.T) {
 		log.New(),
 	)
 	defer br.Close()
-	blockFrom, blockTo, can := br.canRetire(8_000, 9_903, snaptype.Unknown)
-	require.True(t, can)
+	blockFrom, blockTo, can := br.canRetire(8_000, 8_999, snaptype.Unknown)
+	require.True(t, can, "the irreversible block itself is retired")
 	require.Equal(t, uint64(8_000), blockFrom)
 	require.Equal(t, uint64(9_000), blockTo)
-	_, _, can = br.canRetire(8_000, 999, snaptype.Unknown)
+	_, _, can = br.canRetire(8_000, 8_998, snaptype.Unknown)
 	require.False(t, can)
 }
 
