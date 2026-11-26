@@ -45,6 +45,14 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
+func TestShouldBackoffTruncatedValidatorTable(t *testing.T) {
+	table := state_accessors.NewStaticValidatorTable()
+	table.SetSlot(96)
+	_, err := table.CopyValidatorsAtSlot(96, 1, 10)
+	require.Error(t, err)
+	require.True(t, shouldBackoffHistoricalStateRead(err))
+}
+
 func TestShouldBackoffHistoricalStateRead(t *testing.T) {
 	tests := []struct {
 		name string

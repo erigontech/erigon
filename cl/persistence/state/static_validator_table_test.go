@@ -20,6 +20,11 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
@@ -80,4 +85,25 @@ func TestStaticValidatorTable(t *testing.T) {
 		require.Equal(t, validator, tmp)
 		return true
 	})
+}
+
+func TestReadValidatorsTableGap(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	src := NewStaticValidatorTable()
+	require.NoError(t, src.AddValidator(solid.NewValidator(), 0, 0))
+	var b bytes.Buffer
+	require.NoError(t, src.validatorTable[0].Serialize(&b))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, index := range []uint64{0, 2} {
+			if err := tx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(index), b.Bytes()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		table := NewStaticValidatorTable()
+		require.Error(t, ReadValidatorsTable(tx, table))
+		return nil
+	}))
 }

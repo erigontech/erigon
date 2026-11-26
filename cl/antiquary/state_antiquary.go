@@ -857,7 +857,8 @@ func ptcWindowEpochReconstructionStart(tx kv.Tx, cfg *clparams.BeaconChainConfig
 }
 
 func shouldBackoffHistoricalStateRead(err error) bool {
-	return errors.Is(err, historical_states_reader.ErrMissingGloasData) ||
+	return errors.Is(err, state_accessors.ErrValidatorTableTruncated) ||
+		errors.Is(err, historical_states_reader.ErrMissingGloasData) ||
 		errors.Is(err, historical_states_reader.ErrMissingHistoryVectorData) ||
 		errors.Is(err, base_encoding.ErrCorruptQueueDiff) ||
 		errors.Is(err, state_accessors.ErrHistoryRebuildRequired)

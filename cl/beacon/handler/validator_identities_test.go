@@ -30,10 +30,13 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 type overwriteAfterViewSyncedData struct {
@@ -180,4 +183,26 @@ func TestPostStateValidatorIdentitiesMatchPubkeysInServedState(t *testing.T) {
 	code, got := postValidatorIdentities(t, server, "head", `["`+oldKey.Hex()+`"]`)
 	require.Equal(t, http.StatusOK, code)
 	require.Empty(t, got)
+}
+
+func TestHistoricalValidatorEndpointsReplayPending(t *testing.T) {
+	db, blocks, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	slot := blocks[len(blocks)-1].Block.Slot
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = slot
+	fcu.FinalizedSlotVal = slot + 1
+	lowest := slot + 1
+	fcu.LowestAvailableSlotVal = &lowest
+	table := state_accessors.NewStaticValidatorTable()
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error { return state_accessors.ReadValidatorsTable(tx, table) }))
+	table.SetSlot(slot - 1)
+	h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
+	for _, path := range []string{"validator_identities", "validators/0"} {
+		t.Run(path, func(t *testing.T) {
+			status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/v1/beacon/states/"+strconv.FormatUint(slot, 10)+"/"+path, "")
+			require.Equal(t, http.StatusServiceUnavailable, status, body)
+		})
+	}
 }
