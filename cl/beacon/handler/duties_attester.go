@@ -236,7 +236,11 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	slot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	view := a.caplinStateSnapshots.View()
 	defer view.Close()
-	stateGetter, err := historicalDutiesStateGetter(tx, view, slot, kv.ActiveValidatorIndicies, a.beaconChainCfg.SlotsPerEpoch)
+	readiness, err := newHistoricalReadiness(tx, view)
+	if err != nil {
+		return nil, err
+	}
+	stateGetter, err := historicalDutiesStateGetter(tx, readiness, slot, kv.ActiveValidatorIndicies, a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +268,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	randaoGetter := func(table string, key []byte) ([]byte, error) {
 		if table == kv.RandaoMixes {
 			rowSlot := base_encoding.Decode64FromBytes4(key)
-			if err := historicalInputsReady(tx, view, rowSlot, rowSlot+a.beaconChainCfg.SlotsPerEpoch, table); err != nil {
+			if err := readiness.check(rowSlot, rowSlot+a.beaconChainCfg.SlotsPerEpoch, table); err != nil {
 				return nil, err
 			}
 		}
@@ -308,37 +312,47 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	return newBeaconResponse(resp).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
 }
 
-func historicalInputsReady(tx kv.Tx, view *snapshotsync.CaplinStateView, rowSlot, writeSlot uint64, table string) error {
+type historicalReadiness struct {
+	progress      uint64
+	reconstructed bool
+	view          *snapshotsync.CaplinStateView
+}
+
+func newHistoricalReadiness(tx kv.Tx, view *snapshotsync.CaplinStateView) (historicalReadiness, error) {
 	progress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
-		return err
+		return historicalReadiness{}, err
 	}
 	reconstructed := progress != 0
 	if !reconstructed {
 		reconstructed, err = tx.Has(kv.StatesProcessingProgress, kv.StatesProcessingKey)
 		if err != nil {
-			return err
+			return historicalReadiness{}, err
 		}
 	}
-	if reconstructed && writeSlot <= progress {
+	return historicalReadiness{progress: progress, reconstructed: reconstructed, view: view}, nil
+}
+
+func (r historicalReadiness) check(rowSlot, writeSlot uint64, table string) error {
+	if r.reconstructed && writeSlot <= r.progress {
 		return nil
 	}
-	if view != nil {
-		if _, ok := view.VisibleSegment(rowSlot, table); ok {
+	if r.view != nil {
+		if _, ok := r.view.VisibleSegment(rowSlot, table); ok {
 			return nil
 		}
 	}
 	return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("historical state for slot %d is not yet reconstructed", writeSlot))
 }
 
-func historicalDutiesStateGetter(tx kv.Tx, view *snapshotsync.CaplinStateView, slot uint64, table string, slotsPerEpoch uint64) (state_accessors.GetValFn, error) {
-	if err := historicalInputsReady(tx, view, slot, slot, table); err != nil && (table != kv.BlockRoot || beaconhttp.WrapEndpointError(err).Code != http.StatusServiceUnavailable) {
+func historicalDutiesStateGetter(tx kv.Tx, readiness historicalReadiness, slot uint64, table string, slotsPerEpoch uint64) (state_accessors.GetValFn, error) {
+	if err := readiness.check(slot, slot, table); err != nil && (table != kv.BlockRoot || beaconhttp.WrapEndpointError(err).Code != http.StatusServiceUnavailable) {
 		return nil, err
 	}
-	get := state_accessors.GetValFnTxAndSnapshot(tx, view)
+	get := state_accessors.GetValFnTxAndSnapshot(tx, readiness.view)
 	return func(table string, key []byte) ([]byte, error) {
 		rowSlot := base_encoding.Decode64FromBytes4(key)
-		if err := historicalInputsReady(tx, view, rowSlot, rowSlot, table); err != nil {
+		if err := readiness.check(rowSlot, rowSlot, table); err != nil {
 			if table == kv.BlockRoot && beaconhttp.WrapEndpointError(err).Code == http.StatusServiceUnavailable {
 				for range maxEpochsLookaheadForDuties * 2 * slotsPerEpoch {
 					root, rootErr := beacon_indicies.ReadCanonicalBlockRoot(tx, rowSlot)

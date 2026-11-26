@@ -88,7 +88,11 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		if expectedSlot == a.beaconChainCfg.GenesisSlot {
 			table = kv.BlockRoot
 		}
-		stateGetter, err := historicalDutiesStateGetter(tx, view, expectedSlot, table, a.beaconChainCfg.SlotsPerEpoch)
+		readiness, err := newHistoricalReadiness(tx, view)
+		if err != nil {
+			return nil, err
+		}
+		stateGetter, err := historicalDutiesStateGetter(tx, readiness, expectedSlot, table, a.beaconChainCfg.SlotsPerEpoch)
 		if err != nil {
 			return nil, err
 		}
@@ -96,7 +100,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			if !a.stateReader.ValidatorTableCovers(expectedSlot) {
 				return nil, validatorReplayPending(expectedSlot)
 			}
-			if err := historicalInputsReady(tx, view, expectedSlot, expectedSlot, kv.ValidatorEffectiveBalance); err != nil {
+			if err := readiness.check(expectedSlot, expectedSlot, kv.ValidatorEffectiveBalance); err != nil {
 				return nil, err
 			}
 		}
