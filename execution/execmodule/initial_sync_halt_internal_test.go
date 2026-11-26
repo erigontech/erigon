@@ -76,13 +76,15 @@ type startupBlockReader struct {
 	frozen uint64
 }
 
+func (r startupBlockReader) FrozenBlocks() uint64                { return r.frozen }
 func (r startupBlockReader) FrozenBlocksInView(kv.Getter) uint64 { return r.frozen }
 
 func TestStartupRecoveryDiscardsOnlyUnacceptedMutableBlocks(t *testing.T) {
 	child := func(parent *types.Header, timestamp uint64) *types.Header {
 		return &types.Header{Number: *uint256.NewInt(parent.Number.Uint64() + 1), ParentHash: parent.Hash(), Time: timestamp}
 	}
-	checkpoint := &types.Header{Number: *uint256.NewInt(1)}
+	genesis := &types.Header{}
+	checkpoint := child(genesis, 1)
 	next := child(checkpoint, 2)
 	tip := child(next, 3)
 	side := child(checkpoint, 4)
@@ -117,7 +119,7 @@ func TestStartupRecoveryDiscardsOnlyUnacceptedMutableBlocks(t *testing.T) {
 			frozenThrough: 0, executedThrough: 1, wantDiscard: false,
 		},
 		{
-			name: "execution_ahead_of_finish", accepted: checkpoint.Hash(), rejected: tip,
+			name: "execution_ahead_of_finish", accepted: genesis.Hash(), rejected: tip,
 			frozenThrough: 0, executedThrough: 2, wantDiscard: false,
 		},
 		{
@@ -129,10 +131,10 @@ func TestStartupRecoveryDiscardsOnlyUnacceptedMutableBlocks(t *testing.T) {
 			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 			pe := PipelineExecutor{db: db, blockReader: startupBlockReader{freezeblocks.NewBlockReader(nil), tc.frozenThrough}}
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-				for _, header := range []*types.Header{checkpoint, next, tip, side, sideTip, overlappingTip} {
+				for _, header := range []*types.Header{genesis, checkpoint, next, tip, side, sideTip, overlappingTip} {
 					require.NoError(t, rawdb.WriteHeader(tx, header))
 				}
-				for _, header := range []*types.Header{checkpoint, next, tip} {
+				for _, header := range []*types.Header{genesis, checkpoint, next, tip} {
 					require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()))
 				}
 				rawdb.WriteForkchoiceHead(tx, tc.accepted)

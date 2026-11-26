@@ -837,7 +837,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			roTx.Rollback()
 			latestValidHash, cleanupErr = e.pipelineExecutor.discardRejectedCanonicalTail(ctx, bad, blockHash)
 		} else {
-			// A private reorg may have unwound to a common ancestor. Its head
+			// An uncommitted reorg may have unwound to a common ancestor. Its head
 			// marker can also point to an unexecuted proposal from an earlier call.
 			var finish uint64
 			finish, cleanupErr = stages.GetStageProgress(tx, stages.Finish)

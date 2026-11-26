@@ -26,8 +26,11 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -129,4 +132,48 @@ func TestProcessFrozenBlocksDoesNotRestorePublishedNotifications(t *testing.T) {
 	require.Equal(t, uint64(1), capture.batch.ChangeBatch[0].BlockHeight)
 	require.Equal(t, [][]byte{{1}}, capture.batch.ChangeBatch[0].Txs)
 	require.False(t, notifications.Accumulator.HasPendingChanges(), "published changes must stay cleared")
+}
+
+func TestProcessFrozenBlocksPublishesOnlyCommittedChangesAfterRejection(t *testing.T) {
+	committed := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000}
+	rejected := &types.Header{Number: *uint256.NewInt(2), ParentHash: committed.Hash(), GasLimit: committed.GasLimit}
+	var notifications *shards.Notifications
+	pe, hook, n := newPinTestExecutor(t, func(_ bool, _ *stagedsync.StageState, _ stagedsync.Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
+		if sd == nil {
+			// Both headers are known before execution reaches the rejected block.
+			for _, h := range []*types.Header{committed, rejected} {
+				require.NoError(t, rawdb.WriteHeader(tx, h))
+				require.NoError(t, rawdb.WriteCanonicalHash(tx, h.Hash(), h.Number.Uint64()))
+				require.NoError(t, rawdbv3.TxNums.Append(tx, h.Number.Uint64(), 2*h.Number.Uint64()+1))
+			}
+			rawdb.WriteForkchoiceHead(tx, committed.Hash())
+			return nil
+		}
+		finish, err := stages.GetStageProgress(tx, stages.Finish)
+		require.NoError(t, err)
+		if finish == 0 {
+			notifications.Accumulator.StartChange(committed, [][]byte{{1}}, false)
+			notifications.RecentReceipts.Add(types.Receipts{{BlockNumber: &committed.Number}}, nil, committed)
+			require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 1))
+			require.NoError(t, stages.SaveStageProgress(tx, stages.Finish, 1))
+			return &stagedsync.ErrLoopExhausted{From: 1, To: 1}
+		}
+		notifications.Accumulator.StartChange(rejected, [][]byte{{2}}, false)
+		notifications.Accumulator.MarkIncomplete()
+		notifications.RecentReceipts.Add(types.Receipts{{BlockNumber: &rejected.Number}}, nil, rejected)
+		return &stagedsync.RejectedBlockError{Number: 2, Hash: rejected.Hash(), Err: rules.ErrInvalidBlock}
+	})
+	notifications = n
+	pe.blockReader = startupBlockReader{BlockReader: freezeblocks.NewBlockReader(nil)}
+	capture := new(stateChangesCapture)
+	pe.dispatcher.stateChangeConsumer = capture
+
+	require.NoError(t, pe.ProcessFrozenBlocks(t.Context(), hook, false))
+	require.Equal(t, 1, capture.calls)
+	require.Len(t, capture.batch.ChangeBatch, 1)
+	require.Equal(t, uint64(1), capture.batch.ChangeBatch[0].BlockHeight)
+	require.Equal(t, [][]byte{{1}}, capture.batch.ChangeBatch[0].Txs)
+	require.False(t, capture.batch.StateChangesIncomplete)
+	require.Equal(t, []uint64{2}, notifications.RecentReceipts.Missing(1, 3))
+	require.False(t, notifications.Accumulator.HasPendingChanges())
 }
