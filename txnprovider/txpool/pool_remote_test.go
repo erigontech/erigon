@@ -19,7 +19,6 @@ package txpool
 import (
 	"bytes"
 	"fmt"
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -151,6 +150,9 @@ func TestRemoteTxnQueueAuthorizationLimit(t *testing.T) {
 		}
 		pool.AddRemoteTxns(ctx, slots, nil, nil)
 	}
+	queuedHashes := func() []common.Hash {
+		return common.SliceMap(pool.unprocessedRemoteTxns.Txns, func(txn *TxnSlot) common.Hash { return txn.IDHash })
+	}
 	const half = maxRemoteAuthorizations / 2
 	first := remoteSetCodeTxn(t, 0, half)
 	second := remoteSetCodeTxn(t, 1, maxRemoteAuthorizations-half)
@@ -159,15 +161,15 @@ func TestRemoteTxnQueueAuthorizationLimit(t *testing.T) {
 
 	add(first)
 	add(first, second, extra, ordinary)
-	require.True(t, slices.Equal(pool.unprocessedRemoteTxns.Txns, []*TxnSlot{first, second, ordinary}), "initial queue")
+	require.Equal(t, []common.Hash{first.IDHash, second.IDHash, ordinary.IDHash}, queuedHashes(), "initial queue")
 
 	pool.removeProcessedRemoteTxns(1)
 	add(first, extra)
-	require.True(t, slices.Equal(pool.unprocessedRemoteTxns.Txns, []*TxnSlot{second, ordinary, first}), "queue after partial drain")
+	require.Equal(t, []common.Hash{second.IDHash, ordinary.IDHash, first.IDHash}, queuedHashes(), "queue after partial drain")
 
 	pool.removeProcessedRemoteTxns(3)
 	add(first, second)
-	require.True(t, slices.Equal(pool.unprocessedRemoteTxns.Txns, []*TxnSlot{first, second}), "queue after full drain")
+	require.Equal(t, []common.Hash{first.IDHash, second.IDHash}, queuedHashes(), "queue after full drain")
 }
 
 func TestRemoteTxnQueueOwnsPayload(t *testing.T) {
