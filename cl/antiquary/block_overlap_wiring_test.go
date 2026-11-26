@@ -410,6 +410,12 @@ func TestAntiquateKeepsTheSafetyMarginOnAYoungChain(t *testing.T) {
 	require.Zero(t, sn.BlocksAvailable(), "a range closer than the safety margin to the finalized slot must not freeze")
 
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteHighestFinalized(tx, limit+safetyMargin-1)
+	}))
+	require.NoError(t, a.antiquate())
+	require.Zero(t, sn.BlocksAvailable(), "the range freezes only once its end is a full safety margin below the finalized slot")
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		return beacon_indicies.WriteHighestFinalized(tx, limit+safetyMargin)
 	}))
 	require.NoError(t, a.antiquate())
