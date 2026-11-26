@@ -335,8 +335,9 @@ func TestExecuteRunsInThePosting(t *testing.T) {
 	require.Equal(t, slices.Concat(word(poster), num(3)), out)
 }
 
-// TestExecuteBuysThePostingsGas: the posting buys its gas limit at its price
-// from its sender as it opens, once; a sender that cannot pay stops it.
+// TestExecuteBuysThePostingsGas: as it opens, once, the posting moves its
+// sender's nonce on and buys its gas limit at its price from it; a sender
+// that cannot pay stops it.
 func TestExecuteBuysThePostingsGas(t *testing.T) {
 	f := newTargetFixture(t)
 	poster := common.Address{0xee, 0x01}
@@ -348,12 +349,18 @@ func TestExecuteBuysThePostingsGas(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, num(1e9-3_000_000), out)
 	}
+	n, err := f.src.ibs.GetNonce(accounts.InternAddress(poster))
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), n)
 
 	f = newTargetFixture(t)
 	f.m.fund(poster, 2_999_999)
 	f.src.PostedBy(poster, uint256.NewInt(2), 1_000_000)
-	_, err := f.execute(&Call{Target: originBalance, Source: l2Sender, SourceRollup: l2Rollup})
+	_, err = f.execute(&Call{Target: originBalance, Source: l2Sender, SourceRollup: l2Rollup})
 	require.ErrorContains(t, err, "does not buy the posting's gas")
+	n, err = f.src.ibs.GetNonce(accounts.InternAddress(poster))
+	require.NoError(t, err)
+	require.Zero(t, n, "a posting that does not open leaves its sender")
 	require.False(t, IsPoison(err))
 }
 

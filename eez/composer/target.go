@@ -89,7 +89,7 @@ func (s *Source) Atomic(f func() error) error {
 		return errPostingClosed
 	case postingIdle:
 		s.ibs.Prepare(s.rules, s.origin, accounts.InternAddress(s.header.Coinbase), s.manager, vm.ActivePrecompiles(s.rules), nil)
-		if err := s.buyGas(); err != nil {
+		if err := s.startPosting(); err != nil {
 			return err
 		}
 		s.posting = postingOpen
@@ -97,23 +97,32 @@ func (s *Source) Atomic(f func() error) error {
 	return s.entry(f)
 }
 
-// buyGas debits the posting's gas limit at its price from its sender, as L1
-// does before the posting runs. The refund of the gas it leaves is not
-// modelled: the posting's gas is known only once its batch is.
-func (s *Source) buyGas() error {
-	var fee uint256.Int
-	if fee.Mul(uint256.NewInt(s.gasLimit), &s.gasPrice); fee.IsZero() {
+// startPosting applies to the posting's sender what L1 does before the
+// posting runs: its nonce moves on, and its gas limit at its price leaves
+// its balance. The refund of the gas it leaves is not modelled: the
+// posting's gas is known only once its batch is.
+func (s *Source) startPosting() error {
+	if s.gasLimit == 0 {
 		return nil
 	}
-	balance, err := s.ibs.GetBalance(s.origin)
+	nonce, err := s.ibs.GetNonce(s.origin)
+	var balance uint256.Int
+	if err == nil {
+		balance, err = s.ibs.GetBalance(s.origin)
+	}
 	if failed := s.reads.failed(); failed != nil {
 		return failed
 	}
 	if err != nil {
 		return err
 	}
+	var fee uint256.Int
+	fee.Mul(uint256.NewInt(s.gasLimit), &s.gasPrice)
 	if balance.Lt(&fee) {
 		return fmt.Errorf("the poster's balance %s does not buy the posting's gas, %s", &balance, &fee)
+	}
+	if err := s.ibs.SetNonce(s.origin, nonce+1, tracing.NonceChangeEoACall); err != nil {
+		return err
 	}
 	return s.ibs.SubBalance(s.origin, fee, tracing.BalanceDecreaseGasBuy)
 }
