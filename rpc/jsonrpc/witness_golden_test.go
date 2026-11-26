@@ -25,7 +25,6 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -313,6 +312,47 @@ func TestWitnessGoldenContractSStore(t *testing.T) {
 	require.Equal(t, witnessBenchValue(9), gotTwo)
 }
 
+func TestWitnessReplayReadsOlderHeaders(t *testing.T) {
+	for _, commitmentV3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%t", commitmentV3), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(commitmentV3))
+			statecfg.EnableHistoricalCommitment()
+			key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+			require.NoError(t, err)
+			contract := witnessBenchAddress(0x2002)
+			spec := &types.Genesis{
+				Config: chain.TestChainBerlinConfig,
+				Alloc: types.GenesisAlloc{
+					crypto.PubkeyToAddress(key.PublicKey): {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
+					contract:                              {Balance: new(big.Int), Nonce: 1, Code: []byte{0x60, 0x02, 0x43, 0x03, 0x40, 0x60, 0x00, 0x55, 0x00}},
+				},
+				GasLimit: 10_000_000,
+			}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(spec), execmoduletester.WithKey(key))
+			witnessBenchEnableHistory(t, m)
+			generated, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
+				if i == 2 {
+					getHeader := func(_ common.Hash, number uint64) (*types.Header, error) {
+						return block.PrevBlock(int(number) - 1).Header(), nil
+					}
+					block.AddTxWithChain(getHeader, nil, witnessBenchSignedCall(t, block, key, contract, nil))
+				}
+			})
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(generated))
+			requireCommitmentVariant(t, m, commitmentV3)
+			block := generated.Blocks[2]
+			mode := "legacy"
+			result, err := newDebugApiForTest(m).ExecutionWitness(context.Background(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64())), &mode)
+			require.NoError(t, err)
+			require.Len(t, result.Headers, 2)
+			root, err := ReplayExecutionWitness(result, block, m.ChainConfig, m.Engine)
+			require.NoError(t, err)
+			require.Equal(t, block.Root(), root, "post-state root after BLOCKHASH(NUMBER-2)")
+		})
+	}
+}
+
 func TestWitnessGoldenChainMatchesHPH(t *testing.T) {
 	var hph, v3 chainWitnesses
 	var v3Chain *blockgen.ChainPack
@@ -369,20 +409,11 @@ func requireWitnessGoldenFixtureSuperset(t *testing.T, hph, v3 witnessGoldenFixt
 func requireGoldenChainStateless(t *testing.T, run witnessGoldenRun) {
 	t.Helper()
 	debugAPI := newDebugApiForTest(run.m)
-	for i := 1; i < len(run.chain.Blocks); i++ {
-		block := run.chain.Blocks[i]
-		parentRoot := run.chain.Blocks[i-1].Root()
+	for _, block := range run.chain.Blocks {
 		for _, mode := range []string{"legacy", "canonical"} {
 			result, err := debugAPI.ExecutionWitness(context.Background(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64())), &mode)
 			require.NoError(t, err, "block %d mode %s", block.NumberU64(), mode)
-			replay := *result
-			replay.State = slices.Clone(result.State)
-			rootIndex := slices.IndexFunc(replay.State, func(node hexutil.Bytes) bool {
-				return crypto.Keccak256Hash(node) == parentRoot
-			})
-			require.NotEqual(t, -1, rootIndex, "block %d mode %s state root node", block.NumberU64(), mode)
-			replay.State[0], replay.State[rootIndex] = replay.State[rootIndex], replay.State[0]
-			root, _, err := execBlockStatelessly(&replay, block, run.m.ChainConfig, run.m.Engine)
+			root, err := ReplayExecutionWitness(result, block, run.m.ChainConfig, run.m.Engine)
 			require.NoError(t, err, "block %d mode %s stateless replay", block.NumberU64(), mode)
 			require.Equal(t, block.Root(), root, "block %d mode %s post-state root", block.NumberU64(), mode)
 		}

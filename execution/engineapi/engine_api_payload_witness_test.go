@@ -137,7 +137,7 @@ func requirePayloadWitnessParentRoot(ctx context.Context, t *testing.T, eat engi
 	transactions, err := types.DecodeTransactions(txns)
 	require.NoError(t, err)
 	block := types.NewBlockFromNetwork(engineapitester.MockClPayloadToHeader(p), &types.Body{Transactions: transactions, Withdrawals: p.ExecutionPayload.Withdrawals}, nil)
-	root, err := jsonrpc.ReplayExecutionWitness(witness, block, eat.ChainConfig, merge.New(ethash.NewFaker()), parent)
+	root, err := jsonrpc.ReplayExecutionWitness(witness, block, eat.ChainConfig, merge.New(ethash.NewFaker()))
 	require.NoError(t, err)
 	require.Equal(t, p.ExecutionPayload.StateRoot, root, "witness post-state root")
 }

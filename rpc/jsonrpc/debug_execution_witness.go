@@ -1715,9 +1715,30 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 	return nil
 }
 
-func ReplayExecutionWitness(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine, parent *types.Header) (common.Hash, error) {
+func ReplayExecutionWitness(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine) (common.Hash, error) {
 	replay := *result
-	replay.headerByNumber = map[uint64]*types.Header{parent.Number.Uint64(): parent}
+	replay.headerByNumber = make(map[uint64]*types.Header, len(result.Headers))
+	var parent *types.Header
+	for _, encoded := range result.Headers {
+		header := new(types.Header)
+		if err := rlp.DecodeBytes(encoded, header); err != nil {
+			return common.Hash{}, fmt.Errorf("decode witness header: %w", err)
+		}
+		if parent != nil && header.ParentHash != parent.Hash() {
+			return common.Hash{}, fmt.Errorf("witness header %d does not follow header %d", header.Number.Uint64(), parent.Number.Uint64())
+		}
+		replay.headerByNumber[header.Number.Uint64()] = header
+		parent = header
+	}
+	if parent == nil || parent.Hash() != block.ParentHash() {
+		return common.Hash{}, fmt.Errorf("witness headers do not end at the parent of block %d", block.NumberU64())
+	}
+	replay.State = slices.Clone(result.State)
+	rootIndex := slices.IndexFunc(replay.State, func(node hexutil.Bytes) bool { return crypto.Keccak256Hash(node) == parent.Root })
+	if rootIndex < 0 {
+		return common.Hash{}, fmt.Errorf("witness state has no node for parent root %x", parent.Root)
+	}
+	replay.State[0], replay.State[rootIndex] = replay.State[rootIndex], replay.State[0]
 	root, _, err := execBlockStatelessly(&replay, block, chainConfig, engine)
 	return root, err
 }
